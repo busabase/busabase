@@ -17,6 +17,9 @@ on:
       - "packages/**"
       - "pnpm-lock.yaml"
       - ".github/workflows/docker.yml"
+      # docs don't affect the image — don't rebuild on README/docs edits
+      - "!apps/busabase/README.md"
+      - "!apps/busabase/docs/**"
   workflow_dispatch:
 
 concurrency:
