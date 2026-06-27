@@ -50,7 +50,45 @@ AI agent or human proposes data -> review -> approve -> merge -> trusted record/
 
 ## Quick Start
 
-Run Busabase locally:
+Pick whichever way you like — all of them give you the same review-first database.
+
+### ⚡ Run it now — one command, zero setup
+
+```bash
+npx busabase server
+```
+
+Open **http://localhost:3061/dashboard/inbox**. That's the whole setup: a full local
+instance with **embedded PGlite and local file storage — no database to run, nothing to
+configure.** Busabase seeds example Bases, records, and Change Requests on first request,
+so you can inspect the review workflow immediately.
+
+```bash
+npm i -g busabase     # install once, then just: busabase server
+npx busabase-cli --help   # the API client on its own (talks to any busabase server)
+```
+
+### 🐳 Docker
+
+```bash
+docker run --rm -p 3000:3000 busabase/busabase
+```
+
+Open **http://localhost:3000/dashboard/inbox**. Defaults to local PGlite persistence — no
+external services. Images are published to Docker Hub (`busabase/busabase`) and GHCR
+(`ghcr.io/busabase/busabase`).
+
+### 🖥️ Desktop app
+
+Prefer a native app? Download Busabase for **macOS, Windows, and Linux** at
+**[busabase.com/download](https://busabase.com/download)**.
+
+### ☁️ Busabase Cloud
+
+Don't want to host anything? **Busabase Cloud is coming soon** — hosted Busabase with teams,
+sharing, and sync. Follow along at **[busabase.com](https://busabase.com)**.
+
+### 🔧 From source
 
 ```bash
 pnpm install
@@ -58,39 +96,20 @@ cp apps/busabase/.env.example apps/busabase/.env
 pnpm --filter busabase dev
 ```
 
-Open the dashboard:
+Open **http://localhost:3061/dashboard/inbox**. A local-start check runs first: if
+dependencies, `PG_DATABASE_URL`, or `STORAGE_URL` are missing, it fails with a setup message
+instead of a blank dashboard. The default `.env.example` uses PGlite under `.data/busabase`
+and local file storage under `.data/busabase-storage`.
 
-```txt
-http://localhost:3061/dashboard/inbox
-```
+---
 
-Busabase runs a local-start check before the dev server starts. If dependencies, `PG_DATABASE_URL`,
-or `STORAGE_URL` are missing, the command fails with a setup message instead of opening a blank
-dashboard. The default `.env.example` uses PGlite under `.data/busabase` and local file storage
-under `.data/busabase-storage`.
-
-Busabase seeds example Bases, records, and Change Requests on first request, so you can immediately inspect the review workflow.
-
-What you get after launch:
+**What you get after launch:**
 
 - an Inbox for reviewing Change Requests
 - example Bases and records
 - record-level history and audit trails
 - local PGlite persistence under `.data/busabase`
 - REST API endpoints for apps, workflows, and AI Agents
-
-Docker:
-
-```bash
-docker build -f apps/busabase/Dockerfile -t busabase:local .
-docker run --rm -p 3000:3000 busabase:local
-```
-
-Open the container:
-
-```txt
-http://localhost:3000/dashboard/inbox
-```
 
 ## Screenshots
 
