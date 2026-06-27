@@ -1,8 +1,40 @@
-[中文](./docs/README_zh-CN.md) · [日本語](./docs/README_ja.md) · [한국어](./docs/README_ko.md)
+<div align="center">
 
-# Busabase
+<img src="./public/icon.svg" alt="Busabase" width="88" height="88" />
 
-> Local-first review database for AI-generated content, business data, datasets, and multimodal knowledge.
+<h1>Busabase</h1>
+
+<p><b>Local-first review database for AI-generated content, business data, datasets &amp; multimodal knowledge.</b><br/>
+AI can generate endless data — Busabase is where you <b>review, approve, and merge</b> what's good enough to trust.</p>
+
+<p>
+<a href="./docs/README_zh-CN.md">中文</a> &nbsp;·&nbsp;
+<a href="./docs/README_ja.md">日本語</a> &nbsp;·&nbsp;
+<a href="./docs/README_ko.md">한국어</a>
+</p>
+
+<p>
+<a href="https://www.npmjs.com/package/busabase"><img src="https://img.shields.io/npm/v/busabase?logo=npm&label=busabase&color=3fb950" alt="npm busabase" /></a>
+<a href="https://www.npmjs.com/package/busabase-cli"><img src="https://img.shields.io/npm/v/busabase-cli?logo=npm&label=busabase-cli&color=3fb950" alt="npm busabase-cli" /></a>
+<a href="https://hub.docker.com/r/busabase/busabase"><img src="https://img.shields.io/docker/image-size/busabase/busabase/latest?logo=docker&label=docker" alt="Docker image" /></a>
+<a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License MIT" /></a>
+<a href="https://github.com/busabase/busabase/stargazers"><img src="https://img.shields.io/github/stars/busabase/busabase?style=social" alt="GitHub stars" /></a>
+</p>
+
+<p>
+<a href="#quick-start"><b>Quick Start</b></a> &nbsp;·&nbsp;
+<a href="#screenshots">Screenshots</a> &nbsp;·&nbsp;
+<a href="#what-you-can-build-with-busabase">Use Cases</a> &nbsp;·&nbsp;
+<a href="#api-surface">API</a> &nbsp;·&nbsp;
+<a href="#busabase-vs-airtable-notion-and-postgresql">Compare</a> &nbsp;·&nbsp;
+<a href="#roadmap">Roadmap</a>
+</p>
+
+<br/>
+
+<a href="#screenshots"><img src="./public/assets/readme/busabase-graph-view.png" alt="Busabase — a review-first database for AI and human data" width="100%" /></a>
+
+</div>
 
 Busabase is an open-source app for one simple problem:
 
