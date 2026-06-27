@@ -14,7 +14,7 @@
  * resolution that the record_insert CR workflow doesn't support inline.
  *
  * Usage:
- *   BUSABASE_URL=http://localhost:3061 pnpm demo:zh-CN
+ *   BUSABASE_URL=http://localhost:15419 pnpm demo:zh-CN
  */
 
 import { zhCnScenario } from "busabase-core/demo/scenarios/zh-cn";

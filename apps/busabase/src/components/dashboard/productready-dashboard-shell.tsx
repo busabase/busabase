@@ -71,7 +71,7 @@ export function ProductReadyDashboardShell({
             </SidebarMenuButton>
           </SidebarMenuItem>
         </SidebarMenu>
-        <BusabaseAgentSkillButton defaultOrigin="http://localhost:3061" />
+        <BusabaseAgentSkillButton defaultOrigin="http://localhost:15419" />
         <div className="px-2 group-data-[collapsible=icon]:hidden">
           <LanguageSwitcher
             className="w-full justify-start"

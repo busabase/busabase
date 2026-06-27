@@ -50,7 +50,7 @@ function findServerEntry() {
 }
 
 async function startServer(argv) {
-  const port = flag(argv, "port") ?? process.env.PORT ?? "3061";
+  const port = flag(argv, "port") ?? process.env.PORT ?? "15419";
   const host = flag(argv, "host") ?? process.env.HOSTNAME ?? "127.0.0.1";
   const dataDir = resolve(
     flag(argv, "db") ?? process.env.BUSABASE_DATA_DIR ?? resolve(homedir(), ".busabase/data"),

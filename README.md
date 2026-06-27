@@ -33,21 +33,22 @@ AI can generate endless data — Busabase is where you <b>review, approve, and m
 
 <br/>
 
-<a href="#screenshots"><img src="./apps/busabase/public/assets/readme/busabase-graph-view.png" alt="Busabase — a review-first database for AI and human data" width="100%" /></a>
+<a href="#screenshots"><img src="./apps/busabase/public/assets/readme/busabase-hero.gif" alt="Busabase — review AI-proposed changes before they become trusted data" width="100%" /></a>
 
 </div>
 
-Busabase is an open-source app for one simple problem:
+Busabase is a **free and open-source** ([MIT](https://opensource.org/licenses/MIT)) app for one simple problem:
 
 **AI can generate endless content and data, but someone still needs to decide what is good enough to trust.**
 
-Busabase gives that approval process a home. It is a private CMS, knowledge base, project database, and structured source of truth with built-in Change Requests, Operations, comments, audit trails, and a simple API for apps and AI agents.
+Busabase gives that approval process a home — an approval-first database and knowledge base for AI agents. It is a private CMS, project database, and structured source of truth with built-in Change Requests, Operations, comments, audit trails, and a simple API for apps and AI agents.
 
 ```txt
 AI agent or human proposes data -> review -> approve -> merge -> trusted record/API
 ```
 
-**Local-first. Review-first. Agent-ready.**
+**Free & open source. Local-first. Review-first. Agent-ready.**
+Run it yourself — no SaaS, no account, no vendor. Your data never has to leave your machine.
 
 ## Quick Start
 
@@ -59,7 +60,7 @@ Pick whichever way you like — all of them give you the same review-first datab
 npx busabase server
 ```
 
-Open **http://localhost:3061/dashboard/inbox**. That's the whole setup: a full local
+Open **http://localhost:15419/dashboard/inbox**. That's the whole setup: a full local
 instance with **embedded PGlite and local file storage — no database to run, nothing to
 configure.** Busabase seeds example Bases, records, and Change Requests on first request,
 so you can inspect the review workflow immediately.
@@ -82,12 +83,8 @@ external services. Images are published to Docker Hub (`busabase/busabase`) and 
 ### 🖥️ Desktop app
 
 Prefer a native app? Download Busabase for **macOS, Windows, and Linux** at
-**[busabase.com/download](https://busabase.com/download)**.
-
-### ☁️ Busabase Cloud
-
-Don't want to host anything? **Busabase Cloud is coming soon** — hosted Busabase with teams,
-sharing, and sync. Follow along at **[busabase.com](https://busabase.com)**.
+**[busabase.com/download](https://busabase.com/download)**. Fully native and fully offline —
+**all your data stays on your computer, never online.**
 
 ### 🔧 From source
 
@@ -97,7 +94,7 @@ cp apps/busabase/.env.example apps/busabase/.env
 pnpm --filter busabase dev
 ```
 
-Open **http://localhost:3061/dashboard/inbox**. A local-start check runs first: if
+Open **http://localhost:15419/dashboard/inbox**. A local-start check runs first: if
 dependencies, `PG_DATABASE_URL`, or `STORAGE_URL` are missing, it fails with a setup message
 instead of a blank dashboard. The default `.env.example` uses PGlite under `.data/busabase`
 and local file storage under `.data/busabase-storage`.
@@ -838,12 +835,12 @@ canonical record after merge.
 
 ```bash
 # 1. Find the Blog Posts base.
-BLOG_BASE_ID=$(curl -s http://localhost:3061/api/v1/bases \
+BLOG_BASE_ID=$(curl -s http://localhost:15419/api/v1/bases \
   | jq -r '.[] | select(.slug == "blog") | .id')
 
 # 2. Let an agent propose a new record. This creates a Change Request, not canonical data.
 CHANGE_REQUEST_ID=$(curl -s -X POST \
-  "http://localhost:3061/api/v1/bases/$BLOG_BASE_ID/change-requests" \
+  "http://localhost:15419/api/v1/bases/$BLOG_BASE_ID/change-requests" \
   -H 'content-type: application/json' \
   -d '{
     "fields": {
@@ -856,19 +853,19 @@ CHANGE_REQUEST_ID=$(curl -s -X POST \
   }' | jq -r '.id')
 
 # 3. Review it in the dashboard.
-echo "Review: http://localhost:3061/dashboard/inbox/$CHANGE_REQUEST_ID"
+echo "Review: http://localhost:15419/dashboard/inbox/$CHANGE_REQUEST_ID"
 
 # 4. Optional automation after a human approves: merge and read canonical records.
-curl -s -X POST "http://localhost:3061/api/v1/change-requests/$CHANGE_REQUEST_ID/merge" \
+curl -s -X POST "http://localhost:15419/api/v1/change-requests/$CHANGE_REQUEST_ID/merge" \
   | jq '.record.id, .record.headCommit.fields.title'
-curl -s "http://localhost:3061/api/v1/records?baseId=$BLOG_BASE_ID" \
+curl -s "http://localhost:15419/api/v1/records?baseId=$BLOG_BASE_ID" \
   | jq '.[].headCommit.fields.title'
 ```
 
 For machine-readable endpoint docs, open:
 
 ```txt
-http://localhost:3061/api/v1/doc
+http://localhost:15419/api/v1/doc
 ```
 
 ## When To Use Busabase
@@ -906,17 +903,6 @@ Use it when:
 - AI Agents need a private API to approved knowledge
 - personal or team workflows need review and audit trails
 - you want a database that can work without a hosted cloud account
-
-### Busabase Cloud
-
-A future cloud-hosted version can provide managed collaboration, hosted storage, team access controls, and easier deployment for teams that want cloud operations.
-
-Use it when:
-
-- your team wants shared hosted infrastructure
-- multiple reviewers need the same workspace
-- you want managed backups and cloud availability
-- cloud deployment is acceptable for the data involved
 
 ### Busabase Tunnel
 

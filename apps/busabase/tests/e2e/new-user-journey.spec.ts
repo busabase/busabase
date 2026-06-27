@@ -16,7 +16,7 @@ import { expect, test } from "@playwright/test";
 // Recorded clip lands at apps/busabase/test-results/<slug>/video.webm.
 // Run it (proxies off so Chromium can reach localhost):
 //   cp .env.example .env && pnpm db:migrate && pnpm db:seed:all
-//   PORT=3061 pnpm dev
+//   PORT=15419 pnpm dev
 //   env -u http_proxy -u https_proxy -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY \
 //     NO_PROXY=localhost,127.0.0.1,::1 \
 //     pnpm exec playwright test tests/e2e/new-user-journey.spec.ts

@@ -14,10 +14,10 @@
  *   10 Audit      — GET /audit-events, POST audit event
  *
  * Usage:
- *   BUSABASE_URL=http://localhost:3061 pnpm exec tsx scripts/demo/run-all.ts
+ *   BUSABASE_URL=http://localhost:15419 pnpm exec tsx scripts/demo/run-all.ts
  *
  * Run individual suites:
- *   BUSABASE_URL=http://localhost:3061 pnpm exec tsx scripts/demo/03-records.ts
+ *   BUSABASE_URL=http://localhost:15419 pnpm exec tsx scripts/demo/03-records.ts
  */
 
 import { BASE } from "./_client";

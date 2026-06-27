@@ -1,5 +1,5 @@
 // Capture README screenshots from the live demo dashboard.
-// Usage: pnpm --filter busabase dev (port 3061) running, then `node scripts/capture-readme-screenshots.mjs`
+// Usage: pnpm --filter busabase dev (port 15419) running, then `node scripts/capture-readme-screenshots.mjs`
 
 import fs from "node:fs";
 import path from "node:path";
@@ -8,7 +8,7 @@ import { chromium } from "playwright";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const OUT = path.join(__dirname, "..", "public", "assets", "readme");
-const BASE = process.env.BUSABASE_URL || "http://localhost:3061";
+const BASE = process.env.BUSABASE_URL || "http://localhost:15419";
 
 // Locale to capture. "en" (default) writes to scenarios/; any other locale
 // appends &lang=<LANG> to the demo URLs and writes to scenarios/<LANG>/.

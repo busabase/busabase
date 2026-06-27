@@ -87,7 +87,7 @@
     "vitest": "^2.1.8"
   },
   "appStatus": {
-    "port": 3061,
+    "port": 15419,
     "description": "Busabase open-source local review engine",
     "status": "in development",
     "openCore": true
