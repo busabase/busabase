@@ -1,0 +1,39 @@
+{
+  "name": "open-domains",
+  "description": "Auth-agnostic, open-source-reusable domains (parallel to share-domains). Consumed by OSS app kernels such as busabase-core (and future buda-core).",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./attachments/schema": {
+      "types": "./attachments/schema/attachments.ts",
+      "default": "./attachments/schema/attachments.ts"
+    },
+    "./attachments/logic": {
+      "types": "./attachments/logic/upload-logic.ts",
+      "default": "./attachments/logic/upload-logic.ts"
+    },
+    "./attachments/types": {
+      "types": "./attachments/types/attachments.ts",
+      "default": "./attachments/types/attachments.ts"
+    },
+    "./attachments/contract": {
+      "types": "./attachments/contract.ts",
+      "default": "./attachments/contract.ts"
+    },
+    "./attachments/hooks": {
+      "types": "./attachments/hooks/use-s3-uploader.ts",
+      "default": "./attachments/hooks/use-s3-uploader.ts"
+    }
+  },
+  "dependencies": {
+    "@orpc/contract": "^1.14.6",
+    "@orpc/server": "^1.14.6",
+    "drizzle-orm": "^0.45.1",
+    "openlib": "workspace:*",
+    "zod": "^4.3.6"
+  },
+  "peerDependencies": {
+    "react": "*"
+  }
+}

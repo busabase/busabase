@@ -1,0 +1,1784 @@
+import type { SeedScenario } from "../seed-types";
+import { README_SCENARIO_IDS as ids } from "./readme-scenarios";
+
+export const readmeScenariosZhCnScenario: SeedScenario = {
+  folders: [
+    {
+      nodeId: ids.knowledgeFolder,
+      slug: "personal-knowledge",
+      name: "知识管理",
+      description: "私人笔记、来源文件及可供私有 Agent 读取的工作记忆。",
+      position: 3,
+    },
+    {
+      nodeId: ids.operationsFolder,
+      slug: "operations",
+      name: "运营管理",
+      description: "项目任务、供应商、运营状态和审批流程。",
+      position: 4,
+    },
+    {
+      nodeId: ids.routineFolder,
+      slug: "routine-work",
+      name: "日常任务",
+      description: "需要人工审核和审计历史记录的周期性工作日志。",
+      position: 5,
+    },
+    {
+      nodeId: ids.complianceFolder,
+      slug: "compliance",
+      name: "合规审查",
+      description: "访问权限审查、供应商核查、证明材料和审计清单。",
+      position: 6,
+    },
+    {
+      nodeId: ids.researchFolder,
+      slug: "research",
+      name: "市场研究",
+      description: "市场信号监控、引文整理、置信度评估和分析师审批。",
+      position: 7,
+    },
+    {
+      nodeId: ids.contentFolder,
+      slug: "content-factory",
+      name: "内容工厂",
+      description: "创意策划、内容简报、SEO元数据和发布就绪审核。",
+      position: 8,
+    },
+    {
+      nodeId: ids.datasetFolder,
+      slug: "datasets",
+      name: "数据集库",
+      description: "训练样本、评估数据、标注队列和质量审核。",
+      position: 9,
+    },
+    {
+      nodeId: ids.seoFolder,
+      slug: "seo",
+      name: "落地页",
+      description: "AI 生成的 HTML 落地页，上线前经人工审核。",
+      position: 10,
+    },
+  ],
+
+  bases: [
+    {
+      id: ids.knowledgeBase,
+      nodeId: ids.knowledgeBaseNode,
+      slug: "private-knowledge",
+      name: "私有知识库",
+      description: "私人笔记、来源文件及可供私有 Agent 读取的工作记忆。",
+      folderNodeId: ids.knowledgeFolder,
+      useCases: ["knowledge"],
+      fields: [
+        {
+          id: "bsf_knowledge_title",
+          slug: "title",
+          name: "标题",
+          type: "text",
+          required: true,
+          options: {},
+        },
+        {
+          id: "bsf_knowledge_body",
+          slug: "body",
+          name: "内容",
+          type: "markdown",
+          required: false,
+          options: {},
+        },
+        {
+          id: "bsf_knowledge_source",
+          slug: "source_url",
+          name: "来源链接",
+          type: "url",
+          required: false,
+          options: {},
+        },
+        {
+          id: "bsf_knowledge_files",
+          slug: "attachments",
+          name: "附件",
+          type: "attachment",
+          required: false,
+          options: {
+            attachment: {
+              allowedMimeTypes: ["image/png", "text/markdown", "application/pdf"],
+              maxFileSize: 10 * 1024 * 1024,
+              maxFiles: 4,
+            },
+          },
+        },
+        {
+          id: "bsf_knowledge_sensitivity",
+          slug: "sensitivity",
+          name: "机密级别",
+          type: "select",
+          required: false,
+          options: {
+            choices: [
+              { id: "private", name: "私密", color: "rose" },
+              { id: "team", name: "团队可见", color: "amber" },
+              { id: "public", name: "公开", color: "emerald" },
+            ],
+          },
+        },
+        {
+          id: "bsf_knowledge_tags",
+          slug: "tags",
+          name: "标签",
+          type: "multiselect",
+          required: false,
+          options: {
+            choices: [
+              { id: "agent-memory", name: "Agent记忆", color: "violet" },
+              { id: "source", name: "来源资料", color: "slate" },
+              { id: "decision", name: "决策依据", color: "emerald" },
+            ],
+          },
+        },
+      ],
+    },
+    {
+      id: ids.operationsBase,
+      nodeId: ids.operationsBaseNode,
+      slug: "ops-tasks",
+      name: "运营任务",
+      description: "含负责人、截止日期、供应商和状态审核的运营任务管理。",
+      folderNodeId: ids.operationsFolder,
+      useCases: ["operations"],
+      fields: [
+        {
+          id: "bsf_ops_task",
+          slug: "task",
+          name: "任务名称",
+          type: "text",
+          required: true,
+          options: {},
+        },
+        {
+          id: "bsf_ops_owner",
+          slug: "owner",
+          name: "负责人",
+          type: "email",
+          required: false,
+          options: {},
+        },
+        {
+          id: "bsf_ops_vendor",
+          slug: "vendor",
+          name: "供应商",
+          type: "text",
+          required: false,
+          options: {},
+        },
+        {
+          id: "bsf_ops_due",
+          slug: "due_date",
+          name: "截止日期",
+          type: "date",
+          required: false,
+          options: {},
+        },
+        {
+          id: "bsf_ops_status",
+          slug: "status",
+          name: "状态",
+          type: "select",
+          required: false,
+          options: {
+            choices: [
+              { id: "blocked", name: "已阻塞", color: "rose" },
+              { id: "in-progress", name: "进行中", color: "amber" },
+              { id: "ready", name: "已就绪", color: "emerald" },
+            ],
+          },
+        },
+        {
+          id: "bsf_ops_risk",
+          slug: "risk_flags",
+          name: "风险标记",
+          type: "multiselect",
+          required: false,
+          options: {
+            choices: [
+              { id: "contract", name: "合同风险", color: "rose" },
+              { id: "security", name: "安全风险", color: "amber" },
+              { id: "data", name: "数据风险", color: "violet" },
+            ],
+          },
+        },
+      ],
+    },
+    {
+      id: ids.routineBase,
+      nodeId: ids.routineBaseNode,
+      slug: "routine-work-log",
+      name: "日常工作日志",
+      description: "含 Agent 输出、审核意见和审批记录的日常或周期工作日志。",
+      folderNodeId: ids.routineFolder,
+      useCases: ["routine"],
+      fields: [
+        {
+          id: "bsf_routine_run",
+          slug: "run",
+          name: "执行名称",
+          type: "text",
+          required: true,
+          options: {},
+        },
+        {
+          id: "bsf_routine_team",
+          slug: "team",
+          name: "团队",
+          type: "text",
+          required: false,
+          options: {},
+        },
+        {
+          id: "bsf_routine_due",
+          slug: "run_date",
+          name: "执行日期",
+          type: "date",
+          required: false,
+          options: {},
+        },
+        {
+          id: "bsf_routine_findings",
+          slug: "findings",
+          name: "发现结果",
+          type: "longtext",
+          required: false,
+          options: {},
+        },
+        {
+          id: "bsf_routine_status",
+          slug: "status",
+          name: "状态",
+          type: "select",
+          required: false,
+          options: {
+            choices: [
+              { id: "queued", name: "排队中", color: "slate" },
+              { id: "needs-review", name: "待审核", color: "amber" },
+              { id: "approved", name: "已审批", color: "emerald" },
+            ],
+          },
+        },
+        {
+          id: "bsf_routine_ready",
+          slug: "ready_to_notify",
+          name: "可通知",
+          type: "checkbox",
+          required: false,
+          options: {},
+        },
+      ],
+    },
+    {
+      id: ids.complianceBase,
+      nodeId: ids.complianceBaseNode,
+      slug: "compliance-checklists",
+      name: "合规清单",
+      description: "含证明材料的周期性合规检查，包含负责人、状态和审计记录。",
+      folderNodeId: ids.complianceFolder,
+      useCases: ["compliance"],
+      fields: [
+        {
+          id: "bsf_compliance_item",
+          slug: "item",
+          name: "检查项目",
+          type: "text",
+          required: true,
+          options: {},
+        },
+        {
+          id: "bsf_compliance_owner",
+          slug: "owner",
+          name: "负责人",
+          type: "email",
+          required: false,
+          options: {},
+        },
+        {
+          id: "bsf_compliance_due",
+          slug: "due_date",
+          name: "截止日期",
+          type: "date",
+          required: false,
+          options: {},
+        },
+        {
+          id: "bsf_compliance_evidence",
+          slug: "evidence",
+          name: "证明材料",
+          type: "attachment",
+          required: false,
+          options: {
+            attachment: {
+              allowedMimeTypes: ["image/png", "application/pdf", "text/markdown"],
+              maxFileSize: 10 * 1024 * 1024,
+              maxFiles: 5,
+            },
+          },
+        },
+        {
+          id: "bsf_compliance_status",
+          slug: "status",
+          name: "状态",
+          type: "select",
+          required: false,
+          options: {
+            choices: [
+              { id: "missing", name: "缺失", color: "rose" },
+              { id: "review", name: "审核中", color: "amber" },
+              { id: "complete", name: "已完成", color: "emerald" },
+            ],
+          },
+        },
+        {
+          id: "bsf_compliance_notes",
+          slug: "notes",
+          name: "备注",
+          type: "longtext",
+          required: false,
+          options: {},
+        },
+      ],
+    },
+    {
+      id: ids.researchBase,
+      nodeId: ids.researchBaseNode,
+      slug: "market-research",
+      name: "市场调研",
+      description: "监控中的市场信号、引文整理、置信度评估和分析师审批。",
+      folderNodeId: ids.researchFolder,
+      useCases: ["research"],
+      fields: [
+        {
+          id: "bsf_research_signal",
+          slug: "signal",
+          name: "市场信号",
+          type: "text",
+          required: true,
+          options: {},
+        },
+        {
+          id: "bsf_research_source",
+          slug: "source_url",
+          name: "来源链接",
+          type: "url",
+          required: false,
+          options: {},
+        },
+        {
+          id: "bsf_research_summary",
+          slug: "summary",
+          name: "摘要",
+          type: "markdown",
+          required: false,
+          options: {},
+        },
+        {
+          id: "bsf_research_competitor",
+          slug: "competitor",
+          name: "竞争对手",
+          type: "text",
+          required: false,
+          options: {},
+        },
+        {
+          id: "bsf_research_importance",
+          slug: "importance",
+          name: "重要程度",
+          type: "select",
+          required: false,
+          options: {
+            choices: [
+              { id: "low", name: "低", color: "slate" },
+              { id: "medium", name: "中", color: "amber" },
+              { id: "high", name: "高", color: "rose" },
+            ],
+          },
+        },
+        {
+          id: "bsf_research_confidence",
+          slug: "confidence",
+          name: "置信度",
+          type: "number",
+          required: false,
+          options: {},
+        },
+      ],
+    },
+    {
+      id: ids.contentBase,
+      nodeId: ids.contentBaseNode,
+      slug: "content-pipeline",
+      name: "内容流程",
+      description: "营销创意策划、内容简报、SEO元数据和发布就绪审核。",
+      folderNodeId: ids.contentFolder,
+      useCases: ["content"],
+      fields: [
+        {
+          id: "bsf_content_title",
+          slug: "title",
+          name: "标题",
+          type: "text",
+          required: true,
+          options: {},
+        },
+        {
+          id: "bsf_content_brief",
+          slug: "brief",
+          name: "内容简报",
+          type: "markdown",
+          required: false,
+          options: {},
+        },
+        {
+          id: "bsf_content_channel",
+          slug: "channel",
+          name: "发布渠道",
+          type: "select",
+          required: false,
+          options: {
+            choices: [
+              { id: "blog", name: "博客", color: "slate" },
+              { id: "youtube", name: "视频", color: "rose" },
+              { id: "social", name: "社交媒体", color: "violet" },
+            ],
+          },
+        },
+        {
+          id: "bsf_content_status",
+          slug: "status",
+          name: "状态",
+          type: "select",
+          required: false,
+          options: {
+            choices: [
+              { id: "idea", name: "创意阶段", color: "slate" },
+              { id: "draft", name: "草稿阶段", color: "amber" },
+              { id: "ready", name: "发布就绪", color: "emerald" },
+            ],
+          },
+        },
+        {
+          id: "bsf_content_seo",
+          slug: "seo_title",
+          name: "SEO标题",
+          type: "text",
+          required: false,
+          options: {},
+        },
+        {
+          id: "bsf_content_asset",
+          slug: "asset",
+          name: "素材",
+          type: "attachment",
+          required: false,
+          options: {
+            attachment: {
+              allowedMimeTypes: ["image/png", "video/mp4", "text/markdown"],
+              maxFileSize: 25 * 1024 * 1024,
+              maxFiles: 4,
+            },
+          },
+        },
+      ],
+    },
+    {
+      id: ids.trainingBase,
+      nodeId: ids.trainingBaseNode,
+      slug: "qa-training-dataset",
+      name: "QA训练数据集",
+      description: "含审核评分的高质量训练与评估样本。",
+      folderNodeId: ids.datasetFolder,
+      useCases: ["dataset"],
+      fields: [
+        {
+          id: "bsf_training_question",
+          slug: "question",
+          name: "问题",
+          type: "longtext",
+          required: true,
+          options: {},
+        },
+        {
+          id: "bsf_training_answer",
+          slug: "expected_answer",
+          name: "预期答案",
+          type: "markdown",
+          required: false,
+          options: {},
+        },
+        {
+          id: "bsf_training_domain",
+          slug: "domain",
+          name: "领域",
+          type: "select",
+          required: false,
+          options: {
+            choices: [
+              { id: "safety", name: "安全合规", color: "rose" },
+              { id: "product", name: "产品功能", color: "violet" },
+              { id: "support", name: "客户支持", color: "emerald" },
+            ],
+          },
+        },
+        {
+          id: "bsf_training_difficulty",
+          slug: "difficulty",
+          name: "难度",
+          type: "select",
+          required: false,
+          options: {
+            choices: [
+              { id: "easy", name: "简单", color: "emerald" },
+              { id: "medium", name: "中等", color: "amber" },
+              { id: "hard", name: "困难", color: "rose" },
+            ],
+          },
+        },
+        {
+          id: "bsf_training_score",
+          slug: "quality_score",
+          name: "质量评分",
+          type: "number",
+          required: false,
+          options: {},
+        },
+        {
+          id: "bsf_training_source",
+          slug: "source_url",
+          name: "来源链接",
+          type: "url",
+          required: false,
+          options: {},
+        },
+      ],
+    },
+    {
+      id: ids.labelingBase,
+      nodeId: ids.labelingBaseNode,
+      slug: "labeling-queue",
+      name: "标注队列",
+      description: "等待人工审核 Agent 生成标注和说明的任务列表。",
+      folderNodeId: ids.datasetFolder,
+      useCases: ["labeling"],
+      fields: [
+        {
+          id: "bsf_label_item",
+          slug: "item",
+          name: "标注项目",
+          type: "text",
+          required: true,
+          options: {},
+        },
+        {
+          id: "bsf_label_asset",
+          slug: "asset",
+          name: "素材",
+          type: "attachment",
+          required: false,
+          options: {
+            attachment: {
+              allowedMimeTypes: ["image/png", "video/mp4"],
+              maxFileSize: 25 * 1024 * 1024,
+              maxFiles: 2,
+            },
+          },
+        },
+        {
+          id: "bsf_label_caption",
+          slug: "caption",
+          name: "说明文字",
+          type: "longtext",
+          required: false,
+          options: {},
+        },
+        {
+          id: "bsf_label_labels",
+          slug: "labels",
+          name: "标注标签",
+          type: "multiselect",
+          required: false,
+          options: {
+            choices: [
+              { id: "dashboard", name: "仪表板", color: "slate" },
+              { id: "review", name: "审核", color: "emerald" },
+              { id: "risk", name: "风险", color: "rose" },
+            ],
+          },
+        },
+        {
+          id: "bsf_label_status",
+          slug: "status",
+          name: "状态",
+          type: "select",
+          required: false,
+          options: {
+            choices: [
+              { id: "queued", name: "待处理", color: "slate" },
+              { id: "needs-correction", name: "需修正", color: "rose" },
+              { id: "approved", name: "已通过", color: "emerald" },
+            ],
+          },
+        },
+        {
+          id: "bsf_label_confidence",
+          slug: "confidence",
+          name: "置信度",
+          type: "number",
+          required: false,
+          options: {},
+        },
+      ],
+    },
+    {
+      id: ids.seoBase,
+      nodeId: ids.seoBaseNode,
+      slug: "pages",
+      name: "落地页库",
+      description: "AI 生成的 HTML 落地页，由 Next.js 渲染上线，上线前经人工审核。",
+      folderNodeId: ids.seoFolder,
+      useCases: ["seo-pages"],
+      fields: [
+        {
+          id: "bsf_seo_slug",
+          slug: "slug",
+          name: "页面路径",
+          type: "text",
+          required: true,
+          options: {},
+        },
+        {
+          id: "bsf_seo_title",
+          slug: "title",
+          name: "页面标题",
+          type: "text",
+          required: true,
+          options: {},
+        },
+        {
+          id: "bsf_seo_meta_description",
+          slug: "meta_description",
+          name: "元描述",
+          type: "text",
+          required: false,
+          options: {},
+        },
+        {
+          id: "bsf_seo_keywords",
+          slug: "target_keywords",
+          name: "目标关键词",
+          type: "text",
+          required: false,
+          options: {},
+        },
+        {
+          id: "bsf_seo_html_body",
+          slug: "html_body",
+          name: "HTML 正文",
+          type: "html",
+          required: true,
+          options: {},
+        },
+        {
+          id: "bsf_seo_status",
+          slug: "status",
+          name: "状态",
+          type: "select",
+          required: false,
+          options: {
+            choices: [
+              { id: "draft", name: "草稿", color: "slate" },
+              { id: "in-review", name: "审核中", color: "amber" },
+              { id: "live", name: "已上线", color: "emerald" },
+              { id: "archived", name: "已归档", color: "zinc" },
+            ],
+          },
+        },
+        {
+          id: "bsf_seo_page_score",
+          slug: "page_score",
+          name: "页面评分",
+          type: "number",
+          required: false,
+          options: {},
+        },
+        {
+          id: "bsf_seo_notes",
+          slug: "notes",
+          name: "备注",
+          type: "longtext",
+          required: false,
+          options: {},
+        },
+      ],
+    },
+  ],
+
+  records: [
+    {
+      id: ids.knowledgeRecord,
+      baseId: ids.knowledgeBase,
+      commitId: ids.knowledgeCommit,
+      fields: {
+        title: "Agent 审核工作流最佳实践笔记",
+        body: "## 核心原则\n\n当 Agent 提议修改记录时，变更请求必须包含：来源链接、受影响字段和人工可读的变更理由。\n\n审核前不得合并任何变更。",
+        source_url: "https://busabase.local/docs/agent-review",
+        sensitivity: "team",
+        tags: ["agent-memory", "decision"],
+      },
+      message: "种子数据：私有知识库笔记",
+      author: "seed-knowledge",
+      minutesAgo: 200,
+      useCases: ["knowledge"],
+    },
+    {
+      id: "rec_seed_know_arch",
+      baseId: ids.knowledgeBase,
+      commitId: "cmt_seed_know_arch",
+      fields: {
+        title: "架构决策：本地优先 SQLite 存储",
+        body: "## 决策\n\n所有用户数据通过 Drizzle ORM 存储在用户设备本地的 SQLite 中，云端同步为可选功能。\n\n## 理由\n- 零外发成本\n- 支持离线使用\n- 企业客户数据主权保障",
+        sensitivity: "team",
+        source_url: "https://busabase.local/decisions/local-first",
+        tags: ["decision"],
+        attachments: [],
+      },
+      message: "种子数据：架构决策笔记",
+      author: "seed-knowledge",
+      minutesAgo: 198,
+      useCases: ["knowledge"],
+    },
+    {
+      id: "rec_seed_know_api_key",
+      baseId: ids.knowledgeBase,
+      commitId: "cmt_seed_know_api_key",
+      fields: {
+        title: "如何轮换 Busabase API 密钥",
+        body: "## 步骤\n\n1. 在「设置 → API」中生成新密钥\n2. 更新所有服务的 `.env` 文件\n3. 24 小时后吊销旧密钥\n\n始终将密钥存储在 `~/.config/busabase/config.json`，绝不写入源码。",
+        sensitivity: "private",
+        source_url: null,
+        tags: ["agent-memory"],
+        attachments: [],
+      },
+      message: "种子数据：API 密钥轮换手册",
+      author: "seed-knowledge",
+      minutesAgo: 196,
+      useCases: ["knowledge"],
+    },
+    {
+      id: "rec_seed_know_onboarding",
+      baseId: ids.knowledgeBase,
+      commitId: "cmt_seed_know_onboarding",
+      fields: {
+        title: "新成员入职清单",
+        body: "## 第一天\n- 安装 Busabase Desktop\n- 克隆 kapps 仓库\n- 运行 `make db && make db-migrate && make db-seed`\n\n## 第一周\n- 阅读 SKILL.md\n- 查阅收件箱中的待审批变更请求",
+        sensitivity: "public",
+        source_url: "https://busabase.local/docs/onboarding",
+        tags: ["source"],
+        attachments: [],
+      },
+      message: "种子数据：入职清单",
+      author: "seed-knowledge",
+      minutesAgo: 194,
+      useCases: ["knowledge"],
+    },
+    {
+      id: ids.operationsRecord,
+      baseId: ids.operationsBase,
+      commitId: ids.operationsCommit,
+      fields: {
+        task: "新供应商入驻合规核查",
+        owner: "ops.lead@busabase.local",
+        vendor: "北风电商集团",
+        due_date: "2026-07-01",
+        status: "in-progress",
+        risk_flags: ["contract", "data"],
+      },
+      message: "种子数据：供应商入驻任务",
+      author: "seed-ops",
+      minutesAgo: 190,
+      useCases: ["operations"],
+    },
+    {
+      id: "rec_seed_ops_contract",
+      baseId: ids.operationsBase,
+      commitId: "cmt_seed_ops_contract",
+      fields: {
+        task: "年度 SaaS 合同续签 — Typesense 搜索服务",
+        owner: "finance@busabase.local",
+        vendor: "Typesense Inc.",
+        due_date: "2026-07-15",
+        status: "in-progress",
+        risk_flags: ["contract"],
+      },
+      message: "种子数据：合同续签任务",
+      author: "seed-ops",
+      minutesAgo: 188,
+      useCases: ["operations"],
+    },
+    {
+      id: "rec_seed_ops_migration",
+      baseId: ids.operationsBase,
+      commitId: "cmt_seed_ops_migration",
+      fields: {
+        task: "生产数据库迁移至 pgvector 0.8",
+        owner: "infra@busabase.local",
+        vendor: null,
+        due_date: "2026-07-01",
+        status: "blocked",
+        risk_flags: ["data", "security"],
+      },
+      message: "种子数据：数据库迁移任务",
+      author: "seed-ops",
+      minutesAgo: 185,
+      useCases: ["operations"],
+    },
+    {
+      id: "rec_seed_ops_audit",
+      baseId: ids.operationsBase,
+      commitId: "cmt_seed_ops_audit",
+      fields: {
+        task: "Q2 SOC 2 证明材料收集",
+        owner: "security@busabase.local",
+        vendor: null,
+        due_date: "2026-06-30",
+        status: "ready",
+        risk_flags: [],
+      },
+      message: "种子数据：SOC 2 审计准备任务",
+      author: "seed-ops",
+      minutesAgo: 182,
+      useCases: ["operations"],
+    },
+    {
+      id: ids.routineRecord,
+      baseId: ids.routineBase,
+      commitId: ids.routineCommit,
+      fields: {
+        run: "2026-06-22 客服质检周报",
+        team: "客户支持",
+        run_date: "2026-06-22",
+        findings:
+          "本周共处理工单 412 条，AI一次解决率 78%，升级率 11%。3 个案例因政策模糊需人工复核。",
+        status: "needs-review",
+        ready_to_notify: false,
+      },
+      message: "种子数据：客服质检日常任务记录",
+      author: "seed-routine",
+      minutesAgo: 180,
+      useCases: ["routine"],
+    },
+    {
+      id: "rec_seed_routine_weekly",
+      baseId: ids.routineBase,
+      commitId: "cmt_seed_routine_weekly",
+      fields: {
+        run: "基础设施周健康报告 - 6月16日",
+        team: "基础设施",
+        run_date: "2026-06-16",
+        findings:
+          "全部 12 个服务运行正常。数据库 db-01 磁盘使用率达 78%，处于阈值内但持续上升，建议下周前扩容。",
+        status: "approved",
+        ready_to_notify: true,
+      },
+      message: "种子数据：基础设施周报",
+      author: "seed-routine",
+      minutesAgo: 178,
+      useCases: ["routine"],
+    },
+    {
+      id: "rec_seed_routine_system",
+      baseId: ids.routineBase,
+      commitId: "cmt_seed_routine_system",
+      fields: {
+        run: "系统日志每日扫描 - 6月23日",
+        team: "安全",
+        run_date: "2026-06-23",
+        findings:
+          "检测到来自未知 IP 203.x.x.x 的 3 次登录失败尝试，限速机制已自动触发，未发现入侵迹象。",
+        status: "needs-review",
+        ready_to_notify: false,
+      },
+      message: "种子数据：安全日志扫描记录",
+      author: "seed-routine",
+      minutesAgo: 30,
+      useCases: ["routine"],
+    },
+    {
+      id: "rec_seed_routine_deploy",
+      baseId: ids.routineBase,
+      commitId: "cmt_seed_routine_deploy",
+      fields: {
+        run: "发布冒烟测试 - v0.9.4",
+        team: "平台",
+        run_date: "2026-06-22",
+        findings:
+          "全部 24 项冒烟测试通过。/api/rpc P95 延迟 42ms（较 v0.9.3 的 61ms 下降 31%），回滚流程已验证。",
+        status: "approved",
+        ready_to_notify: true,
+      },
+      message: "种子数据：发布冒烟测试记录",
+      author: "seed-routine",
+      minutesAgo: 80,
+      useCases: ["routine"],
+    },
+    {
+      id: ids.complianceRecord,
+      baseId: ids.complianceBase,
+      commitId: ids.complianceCommit,
+      fields: {
+        item: "Q2 数据访问权限季度审查",
+        owner: "security@busabase.local",
+        due_date: "2026-06-30",
+        status: "review",
+        notes: "已审查 23 个账户，其中 4 个存在权限过度授权情况，需在截止日期前降权处理。",
+      },
+      message: "种子数据：数据访问权限审查合规记录",
+      author: "seed-compliance",
+      minutesAgo: 170,
+      useCases: ["compliance"],
+    },
+    {
+      id: "rec_seed_comp_gdpr",
+      baseId: ids.complianceBase,
+      commitId: "cmt_seed_comp_gdpr",
+      fields: {
+        item: "GDPR 数据处理商审计 — Resend 邮件服务",
+        owner: "legal@busabase.local",
+        due_date: "2026-07-31",
+        status: "review",
+        notes: "Resend DPA 已签署。正在核查数据驻留条款——企业合同要求仅限欧盟地区。",
+        evidence: [],
+      },
+      message: "种子数据：GDPR 供应商审计",
+      author: "seed-compliance",
+      minutesAgo: 168,
+      useCases: ["compliance"],
+    },
+    {
+      id: "rec_seed_comp_retention",
+      baseId: ids.complianceBase,
+      commitId: "cmt_seed_comp_retention",
+      fields: {
+        item: "数据留存策略审查 — 审计日志",
+        owner: "security@busabase.local",
+        due_date: "2026-08-01",
+        status: "open",
+        notes: "当前留存期：90 天。法务要求企业版升至 1 年。需 CTO 签字确认。",
+        evidence: [],
+      },
+      message: "种子数据：数据留存策略审查",
+      author: "seed-compliance",
+      minutesAgo: 165,
+      useCases: ["compliance"],
+    },
+    {
+      id: "rec_seed_comp_approved",
+      baseId: ids.complianceBase,
+      commitId: "cmt_seed_comp_approved",
+      fields: {
+        item: "年度渗透测试范围确认",
+        owner: "security@busabase.local",
+        due_date: "2026-06-15",
+        status: "approved",
+        notes: "测试范围已确认：/api/* 端点、认证流程、文件上传。测试窗口：7月14-18日。",
+        evidence: [],
+      },
+      message: "种子数据：渗透测试范围审批",
+      author: "seed-compliance",
+      minutesAgo: 200,
+      useCases: ["compliance"],
+    },
+    {
+      id: ids.researchRecord,
+      baseId: ids.researchBase,
+      commitId: ids.researchCommit,
+      fields: {
+        signal: "AI数据库产品正在将审批工作流作为核心功能推出",
+        source_url: "https://example.com/ai-db-review-queues",
+        summary:
+          "监控到两个独立来源表明，AI写入的数据库行需要人工审核队列，已成为企业采购的标准要求。",
+        competitor: "传统数据库厂商",
+        importance: "high",
+        confidence: 0.82,
+      },
+      message: "种子数据：市场研究信号记录",
+      author: "seed-research",
+      minutesAgo: 160,
+      useCases: ["research"],
+    },
+    {
+      id: "rec_seed_research_nocodb",
+      baseId: ids.researchBase,
+      commitId: "cmt_seed_research_nocodb",
+      fields: {
+        competitor: "NocoDB",
+        confidence: 0.85,
+        importance: "high",
+        signal: "NocoDB 发布 AI 字段类型，含人工确认步骤——与变更请求功能直接竞争",
+        source_url: "https://example.com/nocodb-ai-fields-announcement",
+        summary:
+          "NocoDB v0.9 版本新增 AI 字段，写入前需人工确认，功能上与 Busabase 的变更请求高度重叠。差异点：Busabase 在记录层面进行操作并留有完整审计追踪。",
+      },
+      message: "种子数据：NocoDB 竞争情报",
+      author: "seed-research",
+      minutesAgo: 158,
+      useCases: ["research"],
+    },
+    {
+      id: "rec_seed_research_trend",
+      baseId: ids.researchBase,
+      commitId: "cmt_seed_research_trend",
+      fields: {
+        competitor: null,
+        confidence: 0.91,
+        importance: "high",
+        signal: "「人机协同」数据库模式在 AI 基础设施讨论中持续升温",
+        source_url: "https://example.com/hitl-db-trend",
+        summary:
+          "过去 30 天内，多个技术社区和 AI 工程通讯反复提及对 AI Agent 输出内置人工审批步骤的需求。Busabase 是该模式中唯一的开源实现，定位独特。",
+      },
+      message: "种子数据：HITL 数据库趋势信号",
+      author: "seed-research",
+      minutesAgo: 150,
+      useCases: ["research"],
+    },
+    {
+      id: "rec_seed_research_funding",
+      baseId: ids.researchBase,
+      commitId: "cmt_seed_research_funding",
+      fields: {
+        competitor: "SnapDB",
+        confidence: 0.61,
+        importance: "medium",
+        signal: "SnapDB 完成 400 万美元种子轮，主打「Agent 原生」审批工作流数据库",
+        source_url: "https://example.com/snapdb-funding",
+        summary:
+          "早期竞争者入场，产品尚未发布。其定位面向企业市场，Busabase 开源路线在成本和数据主权方面优势明显。",
+      },
+      message: "种子数据：融资竞争情报",
+      author: "seed-research",
+      minutesAgo: 142,
+      useCases: ["research"],
+    },
+    {
+      id: ids.contentRecord,
+      baseId: ids.contentBase,
+      commitId: ids.contentCommit,
+      fields: {
+        title: "Busabase 本地优先审批数据库功能介绍",
+        brief:
+          "针对 AI Agent 工作流的本地优先审批数据库产品介绍文章，对比方案，包含截图计划和 SEO 元数据。",
+        channel: "blog",
+        status: "draft",
+        seo_title: "Busabase：面向AI Agent的审批优先数据库",
+      },
+      message: "种子数据：内容流程发布简报",
+      author: "seed-content",
+      minutesAgo: 150,
+      useCases: ["content"],
+    },
+    {
+      id: "rec_seed_content_social",
+      baseId: ids.contentBase,
+      commitId: "cmt_seed_content_social",
+      fields: {
+        title: "微博/微信号科普：什么是变更请求",
+        channel: "social",
+        brief:
+          "3条图文，通俗解释变更请求的概念和应用场景。目标受众：非技术产品经理。语气：轻松易懂，不打口号。",
+        seo_title: null,
+        status: "ready",
+        asset: [],
+      },
+      message: "种子数据：社媒科普内容简报",
+      author: "seed-content",
+      minutesAgo: 148,
+      useCases: ["content"],
+    },
+    {
+      id: "rec_seed_content_newsletter",
+      baseId: ids.contentBase,
+      commitId: "cmt_seed_content_newsletter",
+      fields: {
+        title: "月度通讯：为什么 AI Agent 需要审批层",
+        channel: "newsletter",
+        brief:
+          "面向技术团队的 600 字月度通讯。从 Agent 覆写生产记录的真实事故切入，转向变更请求解决方案，CTA：试用 Busabase。",
+        seo_title: "AI Agent 写入数据库前为什么需要人工审批",
+        status: "in-review",
+        asset: [],
+      },
+      message: "种子数据：月度通讯简报",
+      author: "seed-content",
+      minutesAgo: 140,
+      useCases: ["content"],
+    },
+    {
+      id: "rec_seed_content_video",
+      baseId: ids.contentBase,
+      commitId: "cmt_seed_content_video",
+      fields: {
+        title: "产品演示视频：90 秒 Busabase 功能展示",
+        channel: "video",
+        brief:
+          "录屏演示：打开 Busabase Desktop → 查看收件箱 → 审批一条变更请求 → 查看记录更新。无需配音，添加中文字幕。上传至 Bilibili 并嵌入 README。",
+        seo_title: null,
+        status: "draft",
+        asset: [],
+      },
+      message: "种子数据：演示视频简报",
+      author: "seed-content",
+      minutesAgo: 135,
+      useCases: ["content"],
+    },
+    {
+      id: ids.trainingRecord,
+      baseId: ids.trainingBase,
+      commitId: ids.trainingCommit,
+      fields: {
+        question: "用户要求 Agent 将私人客户记录导入提示词中。Agent 应如何处理？",
+        expected_answer:
+          "Agent 应拒绝该请求，说明私人客户数据不能未经授权导入提示词，并建议通过正规渠道申请访问权限。",
+        domain: "safety",
+        difficulty: "easy",
+        quality_score: 4.5,
+        source_url: "https://busabase.local/docs/agent-safety",
+      },
+      message: "种子数据：AI安全拒绝类训练样本",
+      author: "seed-dataset",
+      minutesAgo: 140,
+      useCases: ["dataset"],
+    },
+    {
+      id: "rec_seed_train_easy",
+      baseId: ids.trainingBase,
+      commitId: "cmt_seed_train_easy",
+      fields: {
+        question: "Busabase 中的「变更请求」是什么？",
+        expected_answer:
+          "变更请求是一组待人工审核的记录操作提案，在提交至数据库之前需经过授权审核员批准或拒绝。每条变更请求可包含一个或多个操作（创建、更新、删除）。",
+        difficulty: "easy",
+        domain: "product",
+        quality_score: 4.8,
+        source_url: "https://busabase.local/docs/change-requests",
+      },
+      message: "种子数据：产品知识基础题训练样本",
+      author: "seed-dataset",
+      minutesAgo: 138,
+      useCases: ["dataset"],
+    },
+    {
+      id: "rec_seed_train_medium",
+      baseId: ids.trainingBase,
+      commitId: "cmt_seed_train_medium",
+      fields: {
+        question:
+          "Agent 需要批量更新一个 Base 中的 500 条记录，应提交一条包含 500 个操作的变更请求，还是 500 条单独的变更请求？",
+        expected_answer:
+          "应提交一条包含 500 个操作的变更请求（批量）。变更请求设计上支持多操作，方便审核员整体评估变更范围。拆成 500 条请求会淹没收件箱，且无法对批次整体进行审核。",
+        difficulty: "medium",
+        domain: "reasoning",
+        quality_score: 4.5,
+        source_url: "https://busabase.local/docs/batch-operations",
+      },
+      message: "种子数据：批量操作推理题训练样本",
+      author: "seed-dataset",
+      minutesAgo: 136,
+      useCases: ["dataset"],
+    },
+    {
+      id: "rec_seed_train_coding",
+      baseId: ids.trainingBase,
+      commitId: "cmt_seed_train_coding",
+      fields: {
+        question:
+          "用 TypeScript 编写一段代码，通过 REST API 向 Busabase Base 提交一条「新建记录」变更请求。",
+        expected_answer:
+          "```typescript\nconst response = await fetch(`${BUSABASE_URL}/api/v1/bases/${baseId}/change-requests`, {\n  method: 'POST',\n  headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },\n  body: JSON.stringify({\n    message: 'Agent：新建产品条目',\n    operations: [{ operation: 'record_create', fields: { name: '产品A', status: 'draft' } }]\n  })\n});\nconst cr = await response.json();\n```",
+        difficulty: "medium",
+        domain: "coding",
+        quality_score: 4.6,
+        source_url: "https://busabase.local/docs/api",
+      },
+      message: "种子数据：API 调用编程题训练样本",
+      author: "seed-dataset",
+      minutesAgo: 134,
+      useCases: ["dataset"],
+    },
+    {
+      id: ids.labelingRecord,
+      baseId: ids.labelingBase,
+      commitId: ids.labelingCommit,
+      fields: {
+        item: "仪表板截图标注",
+        asset: [
+          {
+            id: "att_seed_labeling_clip",
+            attachmentId: "att_seed_labeling_clip",
+            fileName: "dashboard-review-scene.png",
+            mimeType: "image/png",
+            size: 312_000,
+            url: "/assets/readme/scenarios/multimodal-review-base.png",
+          },
+        ],
+        caption: "用户正在审查 Agent 提议的 Busabase 元数据差异，决定是否在合并前审批。",
+        labels: ["dashboard", "review"],
+        status: "needs-correction",
+        confidence: 0.75,
+      },
+      message: "种子数据：仪表板场景标注任务",
+      author: "seed-labeling",
+      minutesAgo: 130,
+      useCases: ["labeling"],
+    },
+    {
+      id: "rec_seed_label_approved",
+      baseId: ids.labelingBase,
+      commitId: "cmt_seed_label_approved",
+      fields: {
+        item: "收件箱审批流程截图",
+        asset: [
+          {
+            id: "att_label_inbox_zh",
+            attachmentId: "att_label_inbox_zh",
+            fileName: "inbox-approval-flow.png",
+            mimeType: "image/png",
+            size: 142336,
+            url: "/assets/readme/scenarios/inbox-record.png",
+          },
+        ],
+        caption: "用户打开收件箱，查看待审批的变更请求，点击「批准」按钮。",
+        confidence: 0.94,
+        labels: ["inbox", "approval", "ui"],
+        status: "approved",
+      },
+      message: "种子数据：已审批标注任务",
+      author: "seed-labeling",
+      minutesAgo: 128,
+      useCases: ["labeling"],
+    },
+    {
+      id: "rec_seed_label_cr_detail",
+      baseId: ids.labelingBase,
+      commitId: "cmt_seed_label_cr_detail",
+      fields: {
+        item: "变更请求详情页截图",
+        asset: [
+          {
+            id: "att_label_cr_detail_zh",
+            attachmentId: "att_label_cr_detail_zh",
+            fileName: "change-request-detail.png",
+            mimeType: "image/png",
+            size: 196608,
+            url: "/assets/readme/scenarios/canonical-base.png",
+          },
+        ],
+        caption: "变更请求详情页，展示当前值与提案值的字段差异对比。",
+        confidence: 0.88,
+        labels: ["change-request", "diff", "ui"],
+        status: "needs-correction",
+      },
+      message: "种子数据：变更请求详情标注任务",
+      author: "seed-labeling",
+      minutesAgo: 125,
+      useCases: ["labeling"],
+    },
+    {
+      id: "rec_seed_label_field_types",
+      baseId: ids.labelingBase,
+      commitId: "cmt_seed_label_field_types",
+      fields: {
+        item: "22 种字段类型展示截图",
+        asset: [
+          {
+            id: "att_label_field_types_zh",
+            attachmentId: "att_label_field_types_zh",
+            fileName: "field-types-gallery.png",
+            mimeType: "image/png",
+            size: 214016,
+            url: "/assets/readme/scenarios/multimodal-review-base.png",
+          },
+        ],
+        caption: "展示 Busabase 全部 22 种字段类型及示例值的功能图集。",
+        confidence: 0.97,
+        labels: ["field-types", "documentation", "ui"],
+        status: "approved",
+      },
+      message: "种子数据：字段类型图集标注任务",
+      author: "seed-labeling",
+      minutesAgo: 122,
+      useCases: ["labeling"],
+    },
+    {
+      id: ids.seoRecord,
+      baseId: ids.seoBase,
+      commitId: ids.seoCommit,
+      fields: {
+        slug: "/busabase-vs-feishu-duoweibiaoge",
+        category: "comparison",
+        locale: "zh-CN",
+        title: "Busabase vs 飞书多维表格 — 本地优先的 AI Agent 数据库",
+        meta_description:
+          "飞书多维表格是出色的协作工具，Busabase 是专为 AI Agent 打造的本地优先数据库——变更请求机制让 Agent 写入在人工审批前无法生效。",
+        target_keywords: "busabase 对比 飞书多维表格, ai agent 数据库, 本地优先数据库",
+        html_body: `<section style="padding: 3.5rem 1.5rem; text-align: center; background: var(--background);">
+<p style="display: inline-block; background: var(--muted); color: var(--foreground); border: 1px solid var(--border); border-radius: 9999px; padding: 0.2rem 0.9rem; font-size: 0.75rem; font-weight: 700; margin-bottom: 1.25rem; letter-spacing: 0.06em;">开源 · 本地优先 · 免费</p>
+<h1 style="font-size: 2.4rem; font-weight: 600; line-height: 1.15; margin: 0 auto 1rem; max-width: 640px; color: var(--foreground);">Busabase vs 飞书多维表格<br><span style="color: var(--foreground);">哪个更适合 AI Agent？</span></h1>
+<p style="max-width: 520px; margin: 0 auto 2rem; color: var(--primary-foreground); font-size: 1.05rem; line-height: 1.65;">飞书多维表格是优秀的协作工具。Busabase 是带有<strong>变更请求</strong>的结构化数据库——AI Agent 提交变更，人工审批后才写入正式记录。</p>
+<div style="display: flex; gap: 0.75rem; justify-content: center; flex-wrap: wrap; margin-bottom: 0.75rem;">
+<a href="/dashboard" style="background: var(--primary); color: var(--primary-foreground); padding: 0.65rem 1.6rem; border-radius: 0.5rem; font-weight: 700; font-size: 0.9rem; text-decoration: none; display: inline-block;">免费试用 Busabase →</a>
+<a href="#comparison" style="background: var(--card); color: var(--foreground); padding: 0.65rem 1.6rem; border-radius: 0.5rem; font-weight: 700; font-size: 0.9rem; text-decoration: none; display: inline-block; border: 1.5px solid var(--border);">查看对比</a>
+</div>
+<p style="color: var(--primary-foreground); font-size: 0.8rem; margin: 0;">无需信用卡 · 可自托管 · MIT 开源</p>
+</section>
+<hr style="border: none; border-top: 1px solid var(--border); margin: 0;">
+<section id="comparison" style="padding: 2.5rem 1.5rem;">
+<h2 style="text-align: center; font-size: 1.4rem; font-weight: 700; margin-bottom: 1.75rem; color: var(--foreground);">功能对比</h2>
+<table style="width: 100%; border-collapse: collapse; font-size: 0.88rem; border-radius: 0.5rem; overflow: hidden; border: 1px solid var(--border);">
+<thead><tr style="background: var(--muted);"><th style="text-align: left; padding: 0.75rem 1rem; color: var(--muted-foreground); font-weight: 600; border-bottom: 1px solid var(--border);">功能</th><th style="text-align: center; padding: 0.75rem 1rem; color: var(--muted-foreground); font-weight: 600; border-bottom: 1px solid var(--border);">飞书多维表格</th><th style="text-align: center; padding: 0.75rem 1rem; color: var(--foreground); font-weight: 700; border-bottom: 2px solid var(--foreground);">Busabase</th></tr></thead>
+<tbody>
+<tr><td style="padding: 0.6rem 1rem; border-bottom: 1px solid var(--border); color: var(--foreground);">AI Agent 写入安全</td><td style="text-align:center; padding: 0.6rem 1rem; border-bottom: 1px solid var(--border); color: var(--muted-foreground);">✗ 无审批门控</td><td style="text-align:center; padding: 0.6rem 1rem; border-bottom: 1px solid var(--border); color: var(--foreground); font-weight: 600;">✓ 变更请求</td></tr>
+<tr style="background: var(--muted);"><td style="padding: 0.6rem 1rem; border-bottom: 1px solid var(--border); color: var(--foreground);">人工审批收件箱</td><td style="text-align:center; padding: 0.6rem 1rem; border-bottom: 1px solid var(--border); color: var(--muted-foreground);">✗</td><td style="text-align:center; padding: 0.6rem 1rem; border-bottom: 1px solid var(--border); color: var(--foreground); font-weight: 600;">✓ 内置收件箱</td></tr>
+<tr><td style="padding: 0.6rem 1rem; border-bottom: 1px solid var(--border); color: var(--foreground);">结构化字段类型</td><td style="text-align:center; padding: 0.6rem 1rem; border-bottom: 1px solid var(--border); color: var(--muted-foreground);">~ 仅部分支持</td><td style="text-align:center; padding: 0.6rem 1rem; border-bottom: 1px solid var(--border); color: var(--foreground); font-weight: 600;">✓ 22 种字段类型</td></tr>
+<tr style="background: var(--muted);"><td style="padding: 0.6rem 1rem; border-bottom: 1px solid var(--border); color: var(--foreground);">本地优先 / 离线</td><td style="text-align:center; padding: 0.6rem 1rem; border-bottom: 1px solid var(--border); color: var(--muted-foreground);">✗ 仅云端</td><td style="text-align:center; padding: 0.6rem 1rem; border-bottom: 1px solid var(--border); color: var(--foreground); font-weight: 600;">✓ 本地 SQLite</td></tr>
+<tr><td style="padding: 0.6rem 1rem; border-bottom: 1px solid var(--border); color: var(--foreground);">逐记录提交历史</td><td style="text-align:center; padding: 0.6rem 1rem; border-bottom: 1px solid var(--border); color: var(--muted-foreground);">~ 版本历史</td><td style="text-align:center; padding: 0.6rem 1rem; border-bottom: 1px solid var(--border); color: var(--foreground); font-weight: 600;">✓ 每次写入均记录</td></tr>
+<tr style="background: var(--muted);"><td style="padding: 0.6rem 1rem; border-bottom: 1px solid var(--border); color: var(--foreground);">REST + oRPC API</td><td style="text-align:center; padding: 0.6rem 1rem; border-bottom: 1px solid var(--border); color: var(--muted-foreground);">~ 受限</td><td style="text-align:center; padding: 0.6rem 1rem; border-bottom: 1px solid var(--border); color: var(--foreground); font-weight: 600;">✓ 完整 API</td></tr>
+<tr><td style="padding: 0.6rem 1rem; color: var(--foreground);">定价</td><td style="text-align:center; padding: 0.6rem 1rem; color: var(--muted-foreground);">按席位计费</td><td style="text-align:center; padding: 0.6rem 1rem; color: var(--foreground); font-weight: 600;">✓ 免费开源</td></tr>
+</tbody>
+</table>
+</section>
+<section style="padding: 2rem 1.5rem; background: var(--muted); border-radius: 0.75rem; margin: 0 0 1.5rem;">
+<h2 style="font-size: 1.2rem; font-weight: 700; margin: 0 0 1.25rem; color: var(--foreground);">为什么选择 Busabase 而非飞书多维表格</h2>
+<ul style="list-style: none; padding: 0; margin: 0; display: grid; gap: 1rem;">
+<li style="display: flex; gap: 0.875rem; align-items: flex-start;"><span style="background: var(--muted); color: var(--foreground); border-radius: 50%; width: 1.5rem; height: 1.5rem; display: flex; align-items: center; justify-content: center; font-size: 0.75rem; font-weight: 700; flex-shrink: 0; margin-top: 0.1rem;">1</span><div><strong style="color: var(--foreground);">Agent 写入，人工审批。</strong><br><span style="color: var(--muted-foreground); font-size: 0.9rem;">每一条 AI 生成的更新都进入变更请求——可查看、可撤销、可审计，正式写入前必须人工确认。</span></div></li>
+<li style="display: flex; gap: 0.875rem; align-items: flex-start;"><span style="background: var(--muted); color: var(--foreground); border-radius: 50%; width: 1.5rem; height: 1.5rem; display: flex; align-items: center; justify-content: center; font-size: 0.75rem; font-weight: 700; flex-shrink: 0; margin-top: 0.1rem;">2</span><div><strong style="color: var(--foreground);">22 种强类型字段。</strong><br><span style="color: var(--muted-foreground); font-size: 0.9rem;">文本、Markdown、HTML、代码、日期、关联、附件、AI 摘要——每种字段均在 Schema 层完成校验。</span></div></li>
+<li style="display: flex; gap: 0.875rem; align-items: flex-start;"><span style="background: var(--muted); color: var(--foreground); border-radius: 50%; width: 1.5rem; height: 1.5rem; display: flex; align-items: center; justify-content: center; font-size: 0.75rem; font-weight: 700; flex-shrink: 0; margin-top: 0.1rem;">3</span><div><strong style="color: var(--foreground);">数据本地存储。</strong><br><span style="color: var(--muted-foreground); font-size: 0.9rem;">SQLite + Drizzle 运行在您自己的机器上。无云端依赖，无按席位计费，无数据锁定。</span></div></li>
+</ul>
+</section>
+<section style="padding: 2.25rem 2rem; text-align: center; background: var(--primary); border-radius: 0.75rem; color: var(--primary-foreground);">
+<h2 style="font-size: 1.35rem; font-weight: 700; margin: 0 0 0.5rem; color: var(--primary-foreground);">准备好为您的 Agent 提供安全写入层了吗？</h2>
+<p style="color: var(--primary-foreground); margin: 0 0 1.5rem; font-size: 0.9rem;">开源 · 可自托管 · 无按席位计费 · MIT 协议</p>
+<a href="/dashboard" style="background: var(--muted); color: var(--foreground); padding: 0.7rem 2rem; border-radius: 0.5rem; font-weight: 700; font-size: 0.95rem; display: inline-block; text-decoration: none;">免费开始使用 →</a>
+</section>`,
+        status: "live",
+        page_score: 91,
+        notes: "英雄区 + 对比表格 + 三大优势 + CTA。关键词匹配良好，已审批上线。",
+      },
+      message: "种子数据：SEO 落地页 vs-feishu",
+      author: "seed-seo",
+      minutesAgo: 105,
+      useCases: ["seo-pages"],
+    },
+    {
+      id: "rec_seed_seo_vs_vika",
+      baseId: ids.seoBase,
+      commitId: "cmt_seed_seo_vs_vika",
+      fields: {
+        slug: "/busabase-vs-vika-duoweibiaoge",
+        category: "comparison",
+        locale: "zh-CN",
+        title: "Busabase vs 维格表（vika.cn）— 给 AI Agent 的审批型数据库",
+        meta_description:
+          "维格表是 API 优先的多维表格，Busabase 是带变更请求的本地优先数据库——AI Agent 写入先进收件箱，人工审批后才合并为正式记录。",
+        target_keywords: "busabase 对比 维格表, vika 替代, ai agent 数据库, 本地优先数据库",
+        html_body: `<section style="padding: 3.5rem 1.5rem; text-align: center; background: var(--background);">
+<p style="display: inline-block; background: var(--muted); color: var(--foreground); border: 1px solid var(--border); border-radius: 9999px; padding: 0.2rem 0.9rem; font-size: 0.75rem; font-weight: 700; margin-bottom: 1.25rem; letter-spacing: 0.06em;">开源 · 本地优先 · 免费</p>
+<h1 style="font-size: 2.4rem; font-weight: 600; line-height: 1.15; margin: 0 auto 1rem; max-width: 640px; color: var(--foreground);">Busabase vs 维格表 vika.cn<br><span style="color: var(--foreground);">哪个更适合 AI Agent？</span></h1>
+<p style="max-width: 520px; margin: 0 auto 2rem; color: var(--primary-foreground); font-size: 1.05rem; line-height: 1.65;">维格表把表格变成 API，擅长数据服务与可视化。Busabase 解决的是上游问题——AI Agent 的写入先进<strong>变更请求</strong>收件箱，人工审批后才合并为正式记录。</p>
+<div style="display: flex; gap: 0.75rem; justify-content: center; flex-wrap: wrap; margin-bottom: 0.75rem;">
+<a href="/dashboard" style="background: var(--primary); color: var(--primary-foreground); padding: 0.65rem 1.6rem; border-radius: 0.5rem; font-weight: 700; font-size: 0.9rem; text-decoration: none; display: inline-block;">免费试用 Busabase →</a>
+<a href="#comparison" style="background: var(--card); color: var(--foreground); padding: 0.65rem 1.6rem; border-radius: 0.5rem; font-weight: 700; font-size: 0.9rem; text-decoration: none; display: inline-block; border: 1.5px solid var(--border);">查看对比</a>
+</div>
+<p style="color: var(--primary-foreground); font-size: 0.8rem; margin: 0;">无需信用卡 · 可自托管 · MIT 开源</p>
+</section>
+<hr style="border: none; border-top: 1px solid var(--border); margin: 0;">
+<section id="comparison" style="padding: 2.5rem 1.5rem;">
+<h2 style="text-align: center; font-size: 1.4rem; font-weight: 700; margin-bottom: 1.75rem; color: var(--foreground);">功能对比</h2>
+<table style="width: 100%; border-collapse: collapse; font-size: 0.88rem; border-radius: 0.5rem; overflow: hidden; border: 1px solid var(--border);">
+<thead><tr style="background: var(--muted);"><th style="text-align: left; padding: 0.75rem 1rem; color: var(--muted-foreground); font-weight: 600; border-bottom: 1px solid var(--border);">功能</th><th style="text-align: center; padding: 0.75rem 1rem; color: var(--muted-foreground); font-weight: 600; border-bottom: 1px solid var(--border);">维格表 vika</th><th style="text-align: center; padding: 0.75rem 1rem; color: var(--foreground); font-weight: 700; border-bottom: 2px solid var(--foreground);">Busabase</th></tr></thead>
+<tbody>
+<tr><td style="padding: 0.6rem 1rem; border-bottom: 1px solid var(--border); color: var(--foreground);">AI Agent 写入安全</td><td style="text-align:center; padding: 0.6rem 1rem; border-bottom: 1px solid var(--border); color: var(--muted-foreground);">✗ 无审批门控</td><td style="text-align:center; padding: 0.6rem 1rem; border-bottom: 1px solid var(--border); color: var(--foreground); font-weight: 600;">✓ 变更请求</td></tr>
+<tr style="background: var(--muted);"><td style="padding: 0.6rem 1rem; border-bottom: 1px solid var(--border); color: var(--foreground);">人工审批收件箱</td><td style="text-align:center; padding: 0.6rem 1rem; border-bottom: 1px solid var(--border); color: var(--muted-foreground);">✗</td><td style="text-align:center; padding: 0.6rem 1rem; border-bottom: 1px solid var(--border); color: var(--foreground); font-weight: 600;">✓ 内置收件箱</td></tr>
+<tr><td style="padding: 0.6rem 1rem; border-bottom: 1px solid var(--border); color: var(--foreground);">开源 / 自托管</td><td style="text-align:center; padding: 0.6rem 1rem; border-bottom: 1px solid var(--border); color: var(--foreground); font-weight: 600;">✓ APITable（AGPL）</td><td style="text-align:center; padding: 0.6rem 1rem; border-bottom: 1px solid var(--border); color: var(--foreground); font-weight: 600;">✓ MIT 协议</td></tr>
+<tr style="background: var(--muted);"><td style="padding: 0.6rem 1rem; border-bottom: 1px solid var(--border); color: var(--foreground);">本地优先 / 离线</td><td style="text-align:center; padding: 0.6rem 1rem; border-bottom: 1px solid var(--border); color: var(--muted-foreground);">✗ 服务端部署</td><td style="text-align:center; padding: 0.6rem 1rem; border-bottom: 1px solid var(--border); color: var(--foreground); font-weight: 600;">✓ 本地 SQLite</td></tr>
+<tr><td style="padding: 0.6rem 1rem; border-bottom: 1px solid var(--border); color: var(--foreground);">逐记录提交历史</td><td style="text-align:center; padding: 0.6rem 1rem; border-bottom: 1px solid var(--border); color: var(--muted-foreground);">~ 修订记录</td><td style="text-align:center; padding: 0.6rem 1rem; border-bottom: 1px solid var(--border); color: var(--foreground); font-weight: 600;">✓ 每次写入均记录</td></tr>
+<tr style="background: var(--muted);"><td style="padding: 0.6rem 1rem; border-bottom: 1px solid var(--border); color: var(--foreground);">数据即 API</td><td style="text-align:center; padding: 0.6rem 1rem; border-bottom: 1px solid var(--border); color: var(--foreground); font-weight: 600;">✓ 强项</td><td style="text-align:center; padding: 0.6rem 1rem; border-bottom: 1px solid var(--border); color: var(--foreground); font-weight: 600;">✓ REST + oRPC + MCP</td></tr>
+<tr><td style="padding: 0.6rem 1rem; color: var(--foreground);">定价</td><td style="text-align:center; padding: 0.6rem 1rem; color: var(--muted-foreground);">按席位 / 版本计费</td><td style="text-align:center; padding: 0.6rem 1rem; color: var(--foreground); font-weight: 600;">✓ 免费开源</td></tr>
+</tbody>
+</table>
+<p style="text-align: center; color: var(--muted-foreground); font-size: 0.8rem; margin: 1rem 0 0;">两者都开源，区别在定位：维格表偏「数据变 API」，Busabase 偏「AI 产出的人工审核与合并」。</p>
+</section>
+<section style="padding: 2rem 1.5rem; background: var(--muted); border-radius: 0.75rem; margin: 0 0 1.5rem;">
+<h2 style="font-size: 1.2rem; font-weight: 700; margin: 0 0 1.25rem; color: var(--foreground);">为什么选择 Busabase 而非维格表</h2>
+<ul style="list-style: none; padding: 0; margin: 0; display: grid; gap: 1rem;">
+<li style="display: flex; gap: 0.875rem; align-items: flex-start;"><span style="background: var(--muted); color: var(--foreground); border-radius: 50%; width: 1.5rem; height: 1.5rem; display: flex; align-items: center; justify-content: center; font-size: 0.75rem; font-weight: 700; flex-shrink: 0; margin-top: 0.1rem;">1</span><div><strong style="color: var(--foreground);">Agent 写入，人工审批。</strong><br><span style="color: var(--muted-foreground); font-size: 0.9rem;">维格表把数据对外变成 API；Busabase 在数据进库前加一道审核关卡，每条 AI 变更都进收件箱，审批后才合并。</span></div></li>
+<li style="display: flex; gap: 0.875rem; align-items: flex-start;"><span style="background: var(--muted); color: var(--foreground); border-radius: 50%; width: 1.5rem; height: 1.5rem; display: flex; align-items: center; justify-content: center; font-size: 0.75rem; font-weight: 700; flex-shrink: 0; margin-top: 0.1rem;">2</span><div><strong style="color: var(--foreground);">逐记录提交历史。</strong><br><span style="color: var(--muted-foreground); font-size: 0.9rem;">每次写入都是一次可对比、可回溯的提交，谁改的、改了什么、何时合并，一目了然。</span></div></li>
+<li style="display: flex; gap: 0.875rem; align-items: flex-start;"><span style="background: var(--muted); color: var(--foreground); border-radius: 50%; width: 1.5rem; height: 1.5rem; display: flex; align-items: center; justify-content: center; font-size: 0.75rem; font-weight: 700; flex-shrink: 0; margin-top: 0.1rem;">3</span><div><strong style="color: var(--foreground);">本地优先，数据自持。</strong><br><span style="color: var(--muted-foreground); font-size: 0.9rem;">SQLite + Drizzle 运行在您自己的机器上，可离线使用，数据完全留在自己手里。</span></div></li>
+</ul>
+</section>
+<section style="padding: 2.25rem 2rem; text-align: center; background: var(--primary); border-radius: 0.75rem; color: var(--primary-foreground);">
+<h2 style="font-size: 1.35rem; font-weight: 700; margin: 0 0 0.5rem; color: var(--primary-foreground);">准备好为您的 Agent 提供安全写入层了吗？</h2>
+<p style="color: var(--primary-foreground); margin: 0 0 1.5rem; font-size: 0.9rem;">开源 · 可自托管 · 无按席位计费 · MIT 协议</p>
+<a href="/dashboard" style="background: var(--muted); color: var(--foreground); padding: 0.7rem 2rem; border-radius: 0.5rem; font-weight: 700; font-size: 0.95rem; display: inline-block; text-decoration: none;">免费开始使用 →</a>
+</section>`,
+        status: "live",
+        page_score: 90,
+        notes:
+          "英雄区 + 对比表格 + 三大优势 + CTA。强调 Busabase 与维格表互补但定位不同，已审批上线。",
+      },
+      message: "种子数据：SEO 落地页 vs-vika",
+      author: "seed-seo",
+      minutesAgo: 106,
+      useCases: ["seo-pages"],
+    },
+  ],
+
+  views: [
+    {
+      id: "viw_seed_knowledge_all",
+      baseId: ids.knowledgeBase,
+      slug: "all-notes",
+      name: "全部笔记",
+      description: "所有已审批的知识库条目。",
+      config: {
+        filters: [],
+        sorts: [],
+        visibleFieldSlugs: ["title", "sensitivity", "tags", "source_url"],
+      },
+      minutesAgo: 100,
+      useCases: ["knowledge"],
+    },
+    {
+      id: "viw_seed_ops_blocked",
+      baseId: ids.operationsBase,
+      slug: "blocked-tasks",
+      name: "阻塞任务",
+      description: "所有被阻塞的运营任务，需要立即关注。",
+      config: {
+        filters: [{ fieldSlug: "status", operator: "equals", value: "blocked" }],
+        sorts: [{ direction: "asc", fieldSlug: "due_date" }],
+        visibleFieldSlugs: ["task", "owner", "vendor", "due_date", "risk_flags"],
+      },
+      minutesAgo: 95,
+      useCases: ["operations"],
+    },
+    {
+      id: "viw_seed_compliance_pending",
+      baseId: ids.complianceBase,
+      slug: "pending-reviews",
+      name: "待审核清单",
+      description: "所有审核中的合规检查项。",
+      config: {
+        filters: [{ fieldSlug: "status", operator: "equals", value: "review" }],
+        sorts: [{ direction: "asc", fieldSlug: "due_date" }],
+        visibleFieldSlugs: ["item", "owner", "due_date", "status", "evidence"],
+      },
+      minutesAgo: 90,
+      useCases: ["compliance"],
+    },
+    {
+      id: "viw_seed_research_high",
+      baseId: ids.researchBase,
+      slug: "high-importance",
+      name: "高优信号",
+      description: "重要程度为「高」的市场信号，优先分析师审批。",
+      config: {
+        filters: [{ fieldSlug: "importance", operator: "equals", value: "high" }],
+        sorts: [{ direction: "desc", fieldSlug: "confidence" }],
+        visibleFieldSlugs: ["signal", "competitor", "confidence", "source_url", "summary"],
+      },
+      minutesAgo: 85,
+      useCases: ["research"],
+    },
+    {
+      id: "viw_seed_content_ready",
+      baseId: ids.contentBase,
+      slug: "ready-to-publish",
+      name: "发布就绪",
+      description: "接近发布状态的内容记录。",
+      config: {
+        filters: [{ fieldSlug: "status", operator: "equals", value: "ready" }],
+        sorts: [],
+        visibleFieldSlugs: ["title", "channel", "seo_title", "asset"],
+      },
+      minutesAgo: 80,
+      useCases: ["content"],
+    },
+    {
+      id: "viw_seed_labeling_queued",
+      baseId: ids.labelingBase,
+      slug: "queued-items",
+      name: "待处理标注",
+      description: "等待人工处理的标注任务。",
+      config: {
+        filters: [{ fieldSlug: "status", operator: "equals", value: "needs-correction" }],
+        sorts: [{ direction: "desc", fieldSlug: "confidence" }],
+        visibleFieldSlugs: ["item", "caption", "labels", "confidence", "status"],
+      },
+      minutesAgo: 75,
+      useCases: ["labeling"],
+    },
+    {
+      id: "viw_seed_seo_all_zh",
+      baseId: ids.seoBase,
+      slug: "all-pages",
+      name: "全部落地页",
+      description: "按评分排序的全部 AI 落地页。",
+      config: {
+        filters: [],
+        sorts: [{ direction: "desc", fieldSlug: "page_score" }],
+        visibleFieldSlugs: ["slug", "title", "target_keywords", "page_score", "status"],
+      },
+      minutesAgo: 90,
+      useCases: ["seo-pages"],
+    },
+  ],
+
+  changeRequests: [
+    {
+      id: ids.knowledgeCr,
+      baseId: ids.knowledgeBase,
+      status: "in_review",
+      submittedBy: "knowledge-agent",
+      sourceMeta: { seed: true, scenario: "knowledge-enrich", workflow: "knowledge-management" },
+      minutesAgo: 12,
+      useCases: ["knowledge"],
+      operations: [
+        {
+          id: "opr_seed_knowledge_enrich",
+          commitId: "cmt_seed_knowledge_enrich",
+          operation: "record_update",
+          targetRecordId: ids.knowledgeRecord,
+          baseCommitId: ids.knowledgeCommit,
+          fields: {
+            title: "Agent 审核工作流最佳实践笔记",
+            body: "## 核心原则\n\n当 Agent 提议修改记录时，变更请求必须包含：来源链接、受影响字段和人工可读的变更理由。\n\n审核前不得合并任何变更。\n\n## 审核清单\n\n- 所有声明均有来源支撑\n- 变更范围与说明匹配\n- 无未经声明的副作用",
+            sensitivity: "team",
+            tags: ["agent-memory", "decision", "source"],
+          },
+          message: "为知识库笔记添加审核清单",
+          author: "knowledge-agent",
+        },
+      ],
+    },
+    {
+      id: ids.operationsCr,
+      baseId: ids.operationsBase,
+      status: "in_review",
+      submittedBy: "ops-agent",
+      sourceMeta: {
+        seed: true,
+        scenario: "ops-status-reconcile",
+        workflow: "operations-management",
+      },
+      minutesAgo: 10,
+      useCases: ["operations"],
+      operations: [
+        {
+          id: "opr_seed_ops_reconcile",
+          commitId: "cmt_seed_ops_reconcile",
+          operation: "record_update",
+          targetRecordId: ids.operationsRecord,
+          baseCommitId: ids.operationsCommit,
+          fields: { task: "新供应商入驻合规核查", status: "ready", risk_flags: ["data"] },
+          message: "合同风险已解除，更新状态为已就绪",
+          author: "ops-agent",
+        },
+      ],
+    },
+    {
+      id: ids.routineCr,
+      baseId: ids.routineBase,
+      status: "in_review",
+      submittedBy: "routine-agent",
+      sourceMeta: { seed: true, scenario: "routine-support-qa", workflow: "routine-work" },
+      minutesAgo: 8,
+      useCases: ["routine"],
+      operations: [
+        {
+          id: "opr_seed_routine_support_qa",
+          commitId: "cmt_seed_routine_support_qa_update",
+          operation: "record_update",
+          targetRecordId: ids.routineRecord,
+          baseCommitId: ids.routineCommit,
+          fields: {
+            run: "2026-06-22 客服质检周报",
+            team: "客户支持",
+            findings:
+              "本周共处理工单 412 条，AI一次解决率 78%，升级率 11%。3 个案例因政策模糊需人工复核。已联系政策团队，预计本周内更新文档。",
+            status: "approved",
+            ready_to_notify: true,
+          },
+          message: "质检报告审批通过，标记为可通知",
+          author: "routine-agent",
+        },
+      ],
+    },
+    {
+      id: ids.complianceCr,
+      baseId: ids.complianceBase,
+      status: "in_review",
+      submittedBy: "compliance-agent",
+      sourceMeta: {
+        seed: true,
+        scenario: "compliance-evidence",
+        workflow: "compliance-management",
+      },
+      minutesAgo: 8,
+      useCases: ["compliance"],
+      operations: [
+        {
+          id: "opr_seed_compliance_evidence",
+          commitId: "cmt_seed_compliance_evidence",
+          operation: "record_update",
+          targetRecordId: ids.complianceRecord,
+          baseCommitId: ids.complianceCommit,
+          fields: {
+            item: "Q2 数据访问权限季度审查",
+            status: "review",
+            notes:
+              "已审查 23 个账户，其中 4 个存在权限过度授权情况，需在截止日期前降权处理。降权工单已提交，等待IT确认。",
+          },
+          message: "添加降权工单跟踪信息",
+          author: "compliance-agent",
+        },
+      ],
+    },
+    {
+      id: ids.researchCr,
+      baseId: ids.researchBase,
+      status: "in_review",
+      submittedBy: "market-intel-agent",
+      sourceMeta: { seed: true, scenario: "research-signal-upgrade", workflow: "market-research" },
+      minutesAgo: 9,
+      useCases: ["research"],
+      operations: [
+        {
+          id: "opr_seed_research_upgrade",
+          commitId: "cmt_seed_research_upgrade",
+          operation: "record_update",
+          targetRecordId: ids.researchRecord,
+          baseCommitId: ids.researchCommit,
+          fields: {
+            signal: "AI数据库产品正在将审批工作流作为核心功能推出",
+            confidence: 0.91,
+            importance: "high",
+            summary: "第二个独立来源已确认：AI写入的数据库行需要审核队列，正在成为行业标准功能。",
+          },
+          message: "第二个来源确认趋势后，提升置信度",
+          author: "market-intel-agent",
+        },
+      ],
+    },
+    {
+      id: ids.contentCr,
+      baseId: ids.contentBase,
+      status: "in_review",
+      submittedBy: "content-ops-agent",
+      sourceMeta: { seed: true, scenario: "content-brief-update", workflow: "content-factory" },
+      minutesAgo: 7,
+      useCases: ["content"],
+      operations: [
+        {
+          id: "opr_seed_content_brief_update",
+          commitId: "cmt_seed_content_brief_update",
+          operation: "record_update",
+          targetRecordId: ids.contentRecord,
+          baseCommitId: ids.contentCommit,
+          fields: {
+            brief:
+              "本地优先审批数据库介绍文章、对比章节、截图计划和 SEO 元数据，涵盖 AI Agent 工作流场景。",
+            seo_title: "Busabase：面向AI Agent的审批优先数据库",
+            status: "ready",
+          },
+          message: "发布简报进入就绪状态",
+          author: "content-ops-agent",
+        },
+      ],
+    },
+    {
+      id: ids.trainingCr,
+      baseId: ids.trainingBase,
+      status: "in_review",
+      submittedBy: "eval-curation-agent",
+      sourceMeta: { seed: true, scenario: "training-quality-score", workflow: "dataset-curation" },
+      minutesAgo: 5,
+      useCases: ["dataset"],
+      operations: [
+        {
+          id: "opr_seed_training_quality_score",
+          commitId: "cmt_seed_training_quality_score",
+          operation: "record_update",
+          targetRecordId: ids.trainingRecord,
+          baseCommitId: ids.trainingCommit,
+          fields: { difficulty: "medium", quality_score: 4.8 },
+          message: "审核员修改后提升质量评分",
+          author: "eval-curation-agent",
+        },
+      ],
+    },
+    {
+      id: ids.labelingCr,
+      baseId: ids.labelingBase,
+      status: "in_review",
+      submittedBy: "labeling-agent",
+      sourceMeta: { seed: true, scenario: "label-correction", workflow: "dataset-labeling" },
+      minutesAgo: 4,
+      useCases: ["labeling"],
+      operations: [
+        {
+          id: "opr_seed_labeling_correction",
+          commitId: "cmt_seed_labeling_correction",
+          operation: "record_update",
+          targetRecordId: ids.labelingRecord,
+          baseCommitId: ids.labelingCommit,
+          fields: {
+            caption: "审核员正在检查 Agent 提议的 Busabase 元数据差异，在批准前核实数据准确性。",
+            confidence: 0.92,
+            labels: ["dashboard", "review"],
+            status: "approved",
+          },
+          message: "修正场景说明并审批标注",
+          author: "labeling-agent",
+        },
+      ],
+    },
+    {
+      id: ids.seoCr,
+      baseId: ids.seoBase,
+      status: "in_review",
+      submittedBy: "seo-agent",
+      sourceMeta: { seed: true, scenario: "seo-page-draft-zh", workflow: "seo-pages" },
+      minutesAgo: 2,
+      useCases: ["seo-pages"],
+      operations: [
+        {
+          id: "opr_seed_seo_page_draft_zh",
+          commitId: "cmt_seed_seo_page_draft_zh",
+          operation: "record_create",
+          fields: {
+            slug: "/local-first-database",
+            title: "本地优先数据库：让 AI Agent 安全写入数据 — Busabase",
+            meta_description:
+              "Busabase 是开源的本地优先数据库，通过变更请求机制为 AI Agent 提供安全写入通道，所有数据变更需人工审批方可生效。",
+            target_keywords: "本地优先数据库, ai agent 数据库, 变更请求数据库, 开源数据库",
+            html_body:
+              '<section class="hero"><h1>本地优先数据库，专为 AI Agent 设计</h1><p>Busabase 为 AI Agent 提供安全写入通道——每次 Agent 写入都是待审批的变更请求，正式入库前必须人工确认。数据存储在您的设备上，无需云端依赖。</p></section><section class="features"><h2>核心能力</h2><ul><li>变更请求：Agent 提议，人工审批，方可写入</li><li>本地优先：SQLite 存储在您自己的机器上</li><li>22 种字段类型：结构化存储，Schema 层校验</li><li>完整 REST + oRPC API，支持自定义 Agent 接入</li></ul></section>',
+            status: "draft",
+            page_score: null,
+            notes: null,
+          },
+          message: "草稿：本地优先数据库中文落地页",
+          author: "seo-agent",
+        },
+      ],
+    },
+  ],
+};

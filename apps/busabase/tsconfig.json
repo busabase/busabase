@@ -1,0 +1,57 @@
+{
+  "compilerOptions": {
+    "baseUrl": ".",
+    "target": "ESNext",
+    "lib": ["dom", "dom.iterable", "esnext"],
+    "allowJs": true,
+    "skipLibCheck": true,
+    "strict": true,
+    "forceConsistentCasingInFileNames": true,
+    "noEmit": true,
+    "esModuleInterop": true,
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "jsx": "react-jsx",
+    "incremental": true,
+    "paths": {
+      "@/*": ["./src/*"],
+      "~/*": ["./src/*"],
+      "kui/ai-elements/*": ["../../packages/kui/src/components/ai-elements/*"],
+      "kui/hooks/*": ["../../packages/kui/src/hooks/*"],
+      "kui/tour": ["../../packages/kui/src/components/tour.tsx"],
+      "kui/utils": ["../../packages/kui/src/lib/utils.ts"],
+      "kui/*": ["../../packages/kui/src/components/ui/*"],
+      "busabase-core": ["../../packages/busabase-core/src/index.ts"],
+      "busabase-core/openapi": ["../../packages/busabase-core/src/openapi/spec.ts"],
+      "busabase-core/*": ["../../packages/busabase-core/src/*"],
+      "share-domains/*": ["../../packages/share-domains/*"],
+      "billing": ["../../packages/billing/index.ts"],
+      "billing/*": ["../../packages/billing/*"],
+      "emaillib": ["../../packages/emaillib/index.ts"],
+      "emaillib/types": ["../../packages/emaillib/types/index.ts"],
+      "transactional/components": ["../../packages/transactional/emails/_components/index.ts"],
+      "transactional/emails/*": ["../../packages/transactional/emails/*.tsx"],
+      "transactional/*": ["../../packages/transactional/emails/*.tsx"],
+      "@mcpsdk/sdk-ts": ["../../packages/@mcpsdk/sdk-ts/src/index.ts"],
+      "@mcpsdk/sdk-ts/*": ["../../packages/@mcpsdk/sdk-ts/src/*"],
+      "@mcpsdk/plugin-core": ["../../packages/@mcpsdk/plugin-core/src/index.ts"],
+      "@mcpsdk/plugin-core/*": ["../../packages/@mcpsdk/plugin-core/src/*"],
+      "@mcpsdk/mcp-server": ["../../packages/@mcpsdk/mcp-server/index.js"]
+    },
+    "plugins": [
+      {
+        "name": "next"
+      }
+    ]
+  },
+  "include": [
+    "next-env.d.ts",
+    "**/*.ts",
+    "**/*.tsx",
+    ".next/types/**/*.ts",
+    ".next/dev/types/**/*.ts"
+  ],
+  "exclude": ["node_modules"]
+}

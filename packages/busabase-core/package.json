@@ -1,0 +1,169 @@
+{
+  "name": "busabase-core",
+  "description": "Shared Busabase open-core protocol, local store, API helpers, and dashboard components.",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    },
+    "./context": {
+      "types": "./src/context.ts",
+      "default": "./src/context.ts"
+    },
+    "./db": {
+      "types": "./src/db/index.ts",
+      "default": "./src/db/index.ts"
+    },
+    "./db/schema": {
+      "types": "./src/db/schema.ts",
+      "default": "./src/db/schema.ts"
+    },
+    "./logic/store": {
+      "types": "./src/logic/store.ts",
+      "default": "./src/logic/store.ts"
+    },
+    "./logic/demo-store": {
+      "types": "./src/logic/demo-store.ts",
+      "default": "./src/logic/demo-store.ts"
+    },
+    "./demo/dataset": {
+      "types": "./src/demo/dataset.ts",
+      "default": "./src/demo/dataset.ts"
+    },
+    "./demo/use-case": {
+      "types": "./src/demo/use-case.ts",
+      "default": "./src/demo/use-case.ts"
+    },
+    "./demo/scenarios/en": {
+      "types": "./src/demo/scenarios/en.ts",
+      "default": "./src/demo/scenarios/en.ts"
+    },
+    "./demo/scenarios/zh-cn": {
+      "types": "./src/demo/scenarios/zh-cn.ts",
+      "default": "./src/demo/scenarios/zh-cn.ts"
+    },
+    "./types": {
+      "types": "./src/types/index.ts",
+      "default": "./src/types/index.ts"
+    },
+    "./domains": {
+      "types": "./src/domains/registry.ts",
+      "default": "./src/domains/registry.ts"
+    },
+    "./domains/skill/handlers": {
+      "types": "./src/domains/skill/handlers.ts",
+      "default": "./src/domains/skill/handlers.ts"
+    },
+    "./domains/base/handlers": {
+      "types": "./src/domains/base/handlers.ts",
+      "default": "./src/domains/base/handlers.ts"
+    },
+    "./domains/doc/handlers": {
+      "types": "./src/domains/doc/handlers.ts",
+      "default": "./src/domains/doc/handlers.ts"
+    },
+    "./domains/folder/handlers": {
+      "types": "./src/domains/folder/handlers.ts",
+      "default": "./src/domains/folder/handlers.ts"
+    },
+    "./dashboard": {
+      "types": "./src/domains/dashboard/index.tsx",
+      "default": "./src/domains/dashboard/index.tsx"
+    },
+    "./dashboard/create-node-modal": {
+      "types": "./src/domains/dashboard/components/create-node-modal.tsx",
+      "default": "./src/domains/dashboard/components/create-node-modal.tsx"
+    },
+    "./dashboard/dashboard-shell": {
+      "types": "./src/domains/dashboard/components/dashboard-shell.tsx",
+      "default": "./src/domains/dashboard/components/dashboard-shell.tsx"
+    },
+    "./dashboard/empty-agent-guide": {
+      "types": "./src/domains/dashboard/components/empty-agent-guide.tsx",
+      "default": "./src/domains/dashboard/components/empty-agent-guide.tsx"
+    },
+    "./dashboard/agent-skill-button": {
+      "types": "./src/domains/dashboard/components/agent-skill-button.tsx",
+      "default": "./src/domains/dashboard/components/agent-skill-button.tsx"
+    },
+    "./dashboard/node-icons": {
+      "types": "./src/domains/dashboard/helpers/node-icons.ts",
+      "default": "./src/domains/dashboard/helpers/node-icons.ts"
+    },
+    "./dashboard/routes": {
+      "types": "./src/domains/dashboard/routes.tsx",
+      "default": "./src/domains/dashboard/routes.tsx"
+    },
+    "./api-client": {
+      "types": "./src/api-client/index.ts",
+      "default": "./src/api-client/index.ts"
+    },
+    "./api-client/react-query": {
+      "types": "./src/api-client/react-query.ts",
+      "default": "./src/api-client/react-query.ts"
+    },
+    "./contract/busabase": {
+      "types": "./src/contract/busabase.ts",
+      "default": "./src/contract/busabase.ts"
+    },
+    "./openapi": {
+      "types": "./src/openapi/spec.ts",
+      "default": "./src/openapi/spec.ts"
+    },
+    "./router": {
+      "types": "./src/router.ts",
+      "default": "./src/router.ts"
+    },
+    "./router-demo": {
+      "types": "./src/router-demo.ts",
+      "default": "./src/router-demo.ts"
+    },
+    "./skill-doc": {
+      "types": "./src/skill-doc.ts",
+      "default": "./src/skill-doc.ts"
+    },
+    "./i18n": {
+      "types": "./src/i18n/index.tsx",
+      "default": "./src/i18n/index.tsx"
+    }
+  },
+  "dependencies": {
+    "@electric-sql/pglite": "^0.3.15",
+    "@orpc/client": "^1.14.6",
+    "@orpc/contract": "^1.14.6",
+    "@orpc/openapi": "^1.14.6",
+    "@orpc/openapi-client": "^1.14.6",
+    "@orpc/server": "^1.14.6",
+    "@orpc/tanstack-query": "1.14.6",
+    "@orpc/zod": "^1.14.6",
+    "@tanstack/react-query": "^5.101.0",
+    "@xyflow/react": "^12.10.0",
+    "drizzle-orm": "^0.45.1",
+    "elkjs": "^0.9.3",
+    "kui": "workspace:*",
+    "lucide-react": "^0.556.0",
+    "open-domains": "workspace:*",
+    "postgres": "^3.4.6",
+    "react": "^19.2.7",
+    "server-only": "^0.0.1",
+    "openlib": "workspace:*",
+    "streamdown": "^2.3.0",
+    "wouter": "^3.9.0",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@types/node": "^24.10.0",
+    "@types/react": "19.2.17",
+    "@vitest/coverage-v8": "^2.1.8",
+    "typescript": "^5.9.3",
+    "vitest": "^2.1.8"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
+    "typecheck": "tsc --noEmit"
+  }
+}

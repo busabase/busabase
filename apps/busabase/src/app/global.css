@@ -1,0 +1,131 @@
+@import "tailwindcss";
+@import "kui/styles.css";
+@import "../../../../packages/openlib/shared.css";
+
+@source "../../src";
+@source "../../../../packages/kui";
+@source "../../../../packages/busabase-core";
+@source "../../../../packages/openlib";
+
+/* ── Typography ──────────────────────────────────────────────────────────────
+   Busabase's one divergence from the inherited KUI neutral system: headings use
+   a serif DISPLAY family (Fraunces for Latin, Noto Serif SC for CJK), while body
+   and UI text use Inter. The --font-inter / --font-fraunces / --font-noto-serif-sc
+   variables are provided by next/font (layout.tsx). We compose the serif stack and
+   redirect the shared design-system tokens (sharelib: --font-sans = --font-geist-sans,
+   --font-display = --font-sora) rather than editing the shared package, so Tailwind's
+   `font-sans` resolves to Inter and `font-display` to the serif stack. */
+:root {
+  --font-serif: var(--font-fraunces), var(--font-noto-serif-sc), ui-serif, Georgia, serif;
+  --font-geist-sans:
+    var(--font-inter), ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-sora: var(--font-serif);
+}
+
+@layer base {
+  body {
+    font-family: var(--font-geist-sans);
+  }
+  /* Titles/headings render in the serif display family. */
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    font-family: var(--font-serif);
+  }
+}
+
+.busabase-html-field {
+  color: hsl(var(--foreground));
+}
+
+.busabase-html-field > * + * {
+  margin-top: 0.75rem;
+}
+
+.busabase-html-field h1,
+.busabase-html-field h2,
+.busabase-html-field h3,
+.busabase-html-field h4 {
+  font-weight: 650;
+  line-height: 1.25;
+}
+
+.busabase-html-field h1 {
+  font-size: 1.35rem;
+}
+
+.busabase-html-field h2 {
+  font-size: 1.18rem;
+}
+
+.busabase-html-field h3,
+.busabase-html-field h4 {
+  font-size: 1rem;
+}
+
+.busabase-html-field p,
+.busabase-html-field li {
+  line-height: 1.65;
+}
+
+.busabase-html-field ul,
+.busabase-html-field ol {
+  padding-left: 1.25rem;
+}
+
+.busabase-html-field ul {
+  list-style: disc;
+}
+
+.busabase-html-field ol {
+  list-style: decimal;
+}
+
+.busabase-html-field a {
+  color: hsl(var(--primary));
+  text-decoration: underline;
+  text-underline-offset: 0.18em;
+}
+
+.busabase-html-field blockquote {
+  border-left: 3px solid hsl(var(--border));
+  color: hsl(var(--muted-foreground));
+  padding-left: 0.9rem;
+}
+
+.busabase-html-field code {
+  background: hsl(var(--muted));
+  border-radius: 0.25rem;
+  font-size: 0.9em;
+  padding: 0.1rem 0.25rem;
+}
+
+.busabase-html-field pre {
+  background: hsl(var(--muted));
+  border-radius: 0.5rem;
+  overflow-x: auto;
+  padding: 0.75rem;
+}
+
+.busabase-html-field table {
+  border-collapse: collapse;
+  display: block;
+  overflow-x: auto;
+  width: 100%;
+}
+
+.busabase-html-field th,
+.busabase-html-field td {
+  border: 1px solid hsl(var(--border));
+  padding: 0.45rem 0.55rem;
+  text-align: left;
+  vertical-align: top;
+}
+
+.busabase-html-field th {
+  background: hsl(var(--muted));
+  font-weight: 600;
+}

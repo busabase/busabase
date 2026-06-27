@@ -1,0 +1,432 @@
+/**
+ * Shared styles for all apps in the monorepo
+ * Common theme variables, base styles, and component utilities
+ * Import this in your app's global.css after tailwindcss and kui imports
+ */
+
+/* ==========================================
+   Common Dark Mode Variant
+   ========================================== */
+@custom-variant dark (&:is(.dark *));
+
+/* ==========================================
+   Tailwind Theme Configuration
+   ========================================== */
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+  --font-display: var(--font-sora);
+  --color-sidebar-ring: hsl(var(--sidebar-ring));
+  --color-sidebar-border: hsl(var(--sidebar-border));
+  --color-sidebar-accent-foreground: hsl(var(--sidebar-accent-foreground));
+  --color-sidebar-accent: hsl(var(--sidebar-accent));
+  --color-sidebar-primary-foreground: hsl(var(--sidebar-primary-foreground));
+  --color-sidebar-primary: hsl(var(--sidebar-primary));
+  --color-sidebar-foreground: hsl(var(--sidebar-foreground));
+  --color-sidebar: hsl(var(--sidebar));
+  --color-chart-5: var(--chart-5);
+  --color-chart-4: var(--chart-4);
+  --color-chart-3: var(--chart-3);
+  --color-chart-2: var(--chart-2);
+  --color-chart-1: var(--chart-1);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+}
+
+/* ==========================================
+   Root CSS Variables (Light Mode)
+   ========================================== */
+:root {
+  --radius: 0.625rem;
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.145 0 0);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.145 0 0);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.145 0 0);
+  --primary: oklch(0.205 0 0);
+  --primary-foreground: oklch(0.985 0 0);
+  --secondary: oklch(0.97 0 0);
+  --secondary-foreground: oklch(0.205 0 0);
+  --muted: oklch(0.97 0 0);
+  --muted-foreground: oklch(0.556 0 0);
+  --accent: oklch(0.97 0 0);
+  --accent-foreground: oklch(0.205 0 0);
+  --destructive: oklch(0.577 0.245 27.325);
+  --border: oklch(0.922 0 0);
+  --input: oklch(0.922 0 0);
+  --ring: oklch(0.708 0 0);
+  --chart-1: oklch(0.646 0.222 41.116);
+  --chart-2: oklch(0.6 0.118 184.704);
+  --chart-3: oklch(0.398 0.07 227.392);
+  --chart-4: oklch(0.828 0.189 84.429);
+  --chart-5: oklch(0.769 0.188 70.08);
+  --sidebar: 0 0% 98%;
+  --sidebar-foreground: 240 5.3% 26.1%;
+  --sidebar-primary: 240 5.9% 10%;
+  --sidebar-primary-foreground: 0 0% 98%;
+  --sidebar-accent: 240 4.8% 95.9%;
+  --sidebar-accent-foreground: 240 5.9% 10%;
+  --sidebar-border: 220 13% 91%;
+  --sidebar-ring: 217.2 91.2% 59.8%;
+}
+
+/* ==========================================
+   Dark Mode CSS Variables
+   ========================================== */
+.dark {
+  --background: oklch(0.145 0 0);
+  --foreground: oklch(0.985 0 0);
+  --card: oklch(0.205 0 0);
+  --card-foreground: oklch(0.985 0 0);
+  --popover: oklch(0.205 0 0);
+  --popover-foreground: oklch(0.985 0 0);
+  --primary: oklch(0.922 0 0);
+  --primary-foreground: oklch(0.205 0 0);
+  --secondary: oklch(0.269 0 0);
+  --secondary-foreground: oklch(0.985 0 0);
+  --muted: oklch(0.269 0 0);
+  --muted-foreground: oklch(0.708 0 0);
+  --accent: oklch(0.269 0 0);
+  --accent-foreground: oklch(0.985 0 0);
+  --destructive: oklch(0.704 0.191 22.216);
+  --border: oklch(1 0 0 / 10%);
+  --input: oklch(1 0 0 / 15%);
+  --ring: oklch(0.556 0 0);
+  --chart-1: oklch(0.488 0.243 264.376);
+  --chart-2: oklch(0.696 0.17 162.48);
+  --chart-3: oklch(0.769 0.188 70.08);
+  --chart-4: oklch(0.627 0.265 303.9);
+  --chart-5: oklch(0.645 0.246 16.439);
+  --sidebar: 240 5.9% 10%;
+  --sidebar-foreground: 240 4.8% 95.9%;
+  --sidebar-primary: 224.3 76.3% 48%;
+  --sidebar-primary-foreground: 0 0% 100%;
+  --sidebar-accent: 240 3.7% 15.9%;
+  --sidebar-accent-foreground: 240 4.8% 95.9%;
+  --sidebar-border: 240 3.7% 15.9%;
+  --sidebar-ring: 217.2 91.2% 59.8%;
+}
+
+/* ==========================================
+   Base Layer Styles
+   ========================================== */
+@layer base {
+  * {
+    border-color: var(--border);
+    outline-color: color-mix(in oklab, var(--ring), transparent 50%);
+  }
+
+  body {
+    background-color: var(--background);
+    color: var(--foreground);
+  }
+
+  code {
+    @apply relative rounded bg-muted px-[0.3rem] py-[0.2rem] font-mono text-sm;
+  }
+
+  pre {
+    @apply overflow-x-auto rounded-lg border bg-muted p-4;
+  }
+}
+
+/* ==========================================
+   Component Layer Styles
+   ========================================== */
+@layer components {
+  /* Container utility */
+  .container {
+    @apply mx-auto px-4 sm:px-6 lg:px-8;
+    max-width: 1280px;
+  }
+
+  /* Fix sidebar width classes not being recognized by Tailwind */
+  .w-\[var\(--sidebar-width\)\] {
+    width: var(--sidebar-width) !important;
+  }
+
+  .w-\[var\(--sidebar-width-icon\)\] {
+    width: var(--sidebar-width-icon) !important;
+  }
+
+  /* Sticky sidebar - use 100% height to respect parent container */
+  div[data-sidebar="sidebar"]:not([data-mobile="true"]) {
+    position: sticky !important;
+    top: 0 !important;
+    height: 100% !important;
+    overflow-y: auto !important;
+  }
+
+  /* Fix sidebar wrapper to use full height instead of viewport height */
+  .group\/sidebar-wrapper {
+    min-height: 0 !important;
+    height: 100% !important;
+  }
+
+  /* Fix the sticky sidebar container that uses h-svh */
+  .group.peer[data-state] > div:last-child {
+    height: 100% !important;
+  }
+
+  /* Sidebar hover enhancement for all dashboard modes */
+  [data-slot="sidebar-menu-button"] {
+    transition: all 0.2s ease;
+  }
+
+  [data-slot="sidebar-menu-button"]:hover {
+    transform: translateX(2px);
+  }
+
+  /* Remove navigation bar dividing line */
+  nav,
+  header,
+  [data-nav],
+  [data-navbar],
+  .fumadocs-nav {
+    border-bottom: none !important;
+  }
+
+  /* Make homepage navbar background transparent so hero glow can transition to navbar */
+  [data-home-layout] nav,
+  [data-home-layout] header,
+  [data-home-layout] nav[class*="sticky"],
+  [data-home-layout] header[class*="sticky"],
+  [data-home-layout] nav[class*="fixed"],
+  [data-home-layout] header[class*="fixed"] {
+    background: transparent !important;
+  }
+
+  /* Light mode: add slight background blur for smoother transition */
+  :not(.dark) [data-home-layout] nav,
+  :not(.dark) [data-home-layout] header {
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+  }
+
+  /* Card hover gradient effect */
+  .card-gradient-hover {
+    position: relative;
+  }
+
+  .card-gradient-hover::before,
+  .card-gradient-hover::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: 0.75rem;
+    opacity: 0;
+    transition-property: opacity;
+    transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+    transition-duration: 200ms;
+    pointer-events: none;
+  }
+
+  .card-gradient-hover::before {
+    background: linear-gradient(
+      to bottom right,
+      rgba(99, 102, 241, 0.045),
+      rgba(99, 102, 241, 0.02),
+      transparent
+    );
+  }
+
+  .card-gradient-hover::after {
+    background: linear-gradient(
+      to bottom right,
+      rgba(139, 92, 246, 0.03),
+      rgba(139, 92, 246, 0.015),
+      transparent
+    );
+  }
+
+  .card-gradient-hover:hover::before,
+  .card-gradient-hover:hover::after {
+    opacity: 1;
+  }
+
+  /* Global minimal scrollbar styling - Studio-Grade aesthetic */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: transparent transparent;
+  }
+
+  *:hover {
+    scrollbar-color: rgb(209 213 219 / 0.3) transparent;
+  }
+
+  .dark *:hover {
+    scrollbar-color: rgb(75 85 99 / 0.3) transparent;
+  }
+
+  /* Webkit scrollbar (Chrome, Safari, Edge) */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: transparent;
+    border-radius: 3px;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: rgb(209 213 219 / 0.4);
+  }
+
+  .dark ::-webkit-scrollbar-thumb:hover {
+    background: rgb(75 85 99 / 0.4);
+  }
+
+  /* Show scrollbar on hover for containers */
+  *:hover::-webkit-scrollbar-thumb {
+    background: rgb(209 213 219 / 0.3);
+  }
+
+  .dark *:hover::-webkit-scrollbar-thumb {
+    background: rgb(75 85 99 / 0.3);
+  }
+
+  /* Custom scrollbar styling for agent tasks list */
+  .agent-tasks-scrollbar::-webkit-scrollbar {
+    width: 6px;
+  }
+
+  .agent-tasks-scrollbar::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .agent-tasks-scrollbar::-webkit-scrollbar-thumb {
+    background: rgb(209 213 219 / 0.3);
+    border-radius: 3px;
+  }
+
+  .agent-tasks-scrollbar::-webkit-scrollbar-thumb:hover {
+    background: rgb(209 213 219 / 0.5);
+  }
+
+  .dark .agent-tasks-scrollbar::-webkit-scrollbar-thumb {
+    background: rgb(75 85 99 / 0.3);
+  }
+
+  .dark .agent-tasks-scrollbar::-webkit-scrollbar-thumb:hover {
+    background: rgb(75 85 99 / 0.5);
+  }
+
+  /* NProgress custom styling */
+  #nprogress {
+    pointer-events: none;
+  }
+
+  #nprogress .bar {
+    background: oklch(0.646 0.222 41.116);
+    position: fixed;
+    z-index: 9999;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 3px;
+  }
+
+  #nprogress .peg {
+    display: block;
+    position: absolute;
+    right: 0;
+    width: 100px;
+    height: 100%;
+    box-shadow:
+      0 0 10px oklch(0.646 0.222 41.116),
+      0 0 5px oklch(0.646 0.222 41.116);
+    opacity: 1;
+    transform: rotate(3deg) translate(0px, -4px);
+  }
+
+  #nprogress .spinner {
+    display: block;
+    position: fixed;
+    z-index: 9999;
+    top: 15px;
+    right: 15px;
+  }
+
+  #nprogress .spinner-icon {
+    width: 18px;
+    height: 18px;
+    box-sizing: border-box;
+    border: solid 2px transparent;
+    border-top-color: oklch(0.646 0.222 41.116);
+    border-left-color: oklch(0.646 0.222 41.116);
+    border-radius: 50%;
+    animation: nprogress-spinner 400ms linear infinite;
+  }
+
+  .dark #nprogress .bar {
+    background: oklch(0.769 0.188 70.08);
+  }
+
+  .dark #nprogress .peg {
+    box-shadow:
+      0 0 10px oklch(0.769 0.188 70.08),
+      0 0 5px oklch(0.769 0.188 70.08);
+  }
+
+  .dark #nprogress .spinner-icon {
+    border-top-color: oklch(0.769 0.188 70.08);
+    border-left-color: oklch(0.769 0.188 70.08);
+  }
+
+  @keyframes nprogress-spinner {
+    0% {
+      transform: rotate(0deg);
+    }
+    100% {
+      transform: rotate(360deg);
+    }
+  }
+}
+
+/* Fix: Remove inner textarea focus ring inside InputGroup (InputGroup handles focus externally) */
+[data-slot="input-group"] textarea:focus-visible {
+  --tw-ring-shadow: none;
+  --tw-ring-offset-shadow: none;
+  box-shadow: none;
+  outline: none;
+  border-color: transparent;
+}
+
+/* ==========================================
+   KUI Component Fixes (Tailwind v4 compat)
+   ========================================== */
+
+/* Fix: InputGroupTextarea focus ring not properly overridden in Tailwind v4 */
+[data-slot="input-group"] textarea:focus-visible {
+  --tw-ring-shadow: none;
+  --tw-ring-offset-shadow: none;
+  box-shadow: none;
+  outline: none;
+  border-color: transparent;
+}

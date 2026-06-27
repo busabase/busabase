@@ -1,0 +1,73 @@
+# Managed by kapps scripts/publish-busabase-repo.ts — edit the template there,
+# not in this repo (the open-source sync overwrites it).
+#
+# Builds the Busabase image from apps/busabase/Dockerfile and pushes multi-arch
+# (amd64 + arm64) to GHCR and Docker Hub, on GitHub's official ubuntu-latest
+# runner. No internal deploy — that stays in the private infra repo.
+#
+# Required secrets: DOCKERHUB_TOKEN (a Docker Hub access token for the `busabase`
+# org with push rights). GHCR uses the built-in GITHUB_TOKEN.
+name: Docker
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "apps/busabase/**"
+      - "packages/**"
+      - "pnpm-lock.yaml"
+      - ".github/workflows/docker.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: docker-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-qemu-action@v3
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: busabase
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: |
+            ghcr.io/${{ github.repository_owner }}/busabase
+            docker.io/busabase/busabase
+          tags: |
+            type=raw,value=latest
+            type=sha,format=short
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./apps/busabase/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

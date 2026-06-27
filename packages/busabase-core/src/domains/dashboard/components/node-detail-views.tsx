@@ -1,0 +1,473 @@
+import { useMutation, useQuery } from "@tanstack/react-query";
+import { CodeBlock } from "kui/ai-elements/code-block";
+import { FileTree, FileTreeFile, FileTreeFolder } from "kui/ai-elements/file-tree";
+import { FileText, Folder, Sparkles, Table2 } from "lucide-react";
+import { SPALink as Link } from "openlib/ui/dashboard";
+import {
+  type ComponentProps,
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
+import { useLocation } from "wouter";
+import type { BusabaseQueryUtils } from "../../../api-client/react-query";
+import type { SkillVO } from "../../../types";
+import { registerNodeDetail } from "../node-detail-registry";
+import type { SkillCodeLanguage } from "./field-preview";
+import { EmptyState } from "./primitives";
+
+export interface SkillTreeNode {
+  name: string;
+  path: string;
+  type: "file" | "folder";
+  children: SkillTreeNode[];
+}
+
+// Build a nested tree from the skill's flat file list, synthesizing any parent
+// folders that have no explicit entry. Folders sort before files, then by name.
+export function buildSkillTree(files: SkillVO["files"]): SkillTreeNode[] {
+  const roots: SkillTreeNode[] = [];
+  const byPath = new Map<string, SkillTreeNode>();
+  const ensureDir = (dirPath: string): SkillTreeNode[] => {
+    if (!dirPath) {
+      return roots;
+    }
+    const existing = byPath.get(dirPath);
+    if (existing) {
+      return existing.children;
+    }
+    const segments = dirPath.split("/");
+    const node: SkillTreeNode = {
+      name: segments[segments.length - 1] ?? dirPath,
+      path: dirPath,
+      type: "folder",
+      children: [],
+    };
+    byPath.set(dirPath, node);
+    ensureDir(segments.slice(0, -1).join("/")).push(node);
+    return node.children;
+  };
+  for (const file of files) {
+    const segments = file.path.split("/");
+    const name = segments[segments.length - 1] ?? file.path;
+    const parentPath = segments.slice(0, -1).join("/");
+    if (file.type === "folder") {
+      if (!byPath.has(file.path)) {
+        const node: SkillTreeNode = { name, path: file.path, type: "folder", children: [] };
+        byPath.set(file.path, node);
+        ensureDir(parentPath).push(node);
+      }
+    } else {
+      ensureDir(parentPath).push({ name, path: file.path, type: "file", children: [] });
+    }
+  }
+  const sortNodes = (nodes: SkillTreeNode[]) => {
+    nodes.sort((a, b) =>
+      a.type === b.type ? a.name.localeCompare(b.name) : a.type === "folder" ? -1 : 1,
+    );
+    for (const node of nodes) {
+      sortNodes(node.children);
+    }
+  };
+  sortNodes(roots);
+  return roots;
+}
+
+export const collectFolderPaths = (nodes: SkillTreeNode[]): string[] =>
+  nodes.flatMap((node) =>
+    node.type === "folder" ? [node.path, ...collectFolderPaths(node.children)] : [],
+  );
+
+export const SKILL_LANGUAGE_BY_EXTENSION: Record<string, string> = {
+  ts: "typescript",
+  tsx: "tsx",
+  js: "javascript",
+  jsx: "jsx",
+  json: "json",
+  md: "markdown",
+  mdx: "markdown",
+  py: "python",
+  sh: "bash",
+  bash: "bash",
+  yml: "yaml",
+  yaml: "yaml",
+  css: "css",
+  html: "html",
+  sql: "sql",
+  toml: "toml",
+};
+
+export const guessSkillLanguage = (path: string): SkillCodeLanguage => {
+  const ext = path.split(".").pop()?.toLowerCase() ?? "";
+  return (SKILL_LANGUAGE_BY_EXTENSION[ext] ?? "text") as SkillCodeLanguage;
+};
+
+export function renderSkillTree(nodes: SkillTreeNode[]): ReactNode {
+  return nodes.map((node) =>
+    node.type === "folder" ? (
+      <FileTreeFolder key={node.path} name={node.name} path={node.path}>
+        {renderSkillTree(node.children)}
+      </FileTreeFolder>
+    ) : (
+      <FileTreeFile key={node.path} name={node.name} path={node.path} />
+    ),
+  );
+}
+
+export function SkillDetailView({ orpc, slug }: { orpc: BusabaseQueryUtils; slug: string | null }) {
+  const [openPath, setOpenPath] = useState<string | null>(null);
+
+  const skillQuery = useQuery({
+    ...orpc.skills.get.queryOptions({ input: { nodeId: slug ?? "" } }),
+    enabled: Boolean(slug),
+  });
+  const skill = skillQuery.data ?? null;
+
+  // Reset the open file when switching skills.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: reset only on slug change
+  useEffect(() => {
+    setOpenPath(null);
+  }, [slug]);
+
+  const fileQuery = useQuery({
+    ...orpc.skills.readFile.queryOptions({
+      input: { nodeId: skill?.node.id ?? "", filePath: openPath ?? "" },
+    }),
+    enabled: Boolean(skill && openPath),
+  });
+
+  const tree = useMemo(() => buildSkillTree(skill?.files ?? []), [skill?.files]);
+  const expandedFolders = useMemo(() => new Set(collectFolderPaths(tree)), [tree]);
+  const filePaths = useMemo(
+    () =>
+      new Set((skill?.files ?? []).filter((file) => file.type === "file").map((file) => file.path)),
+    [skill?.files],
+  );
+
+  const selectFile = useCallback(
+    (path: string) => {
+      // FileTreeFolder also fires onSelect; only react to real files.
+      if (filePaths.has(path)) {
+        setOpenPath(path);
+      }
+    },
+    [filePaths],
+  );
+
+  if (!skill) {
+    return skillQuery.isLoading ? (
+      <div className="grid min-h-[320px] place-items-center text-muted-foreground text-sm">
+        Loading skill…
+      </div>
+    ) : (
+      <EmptyState
+        title="Skill not found"
+        body={slug ? `No skill matches "${slug}".` : "Select a skill from the sidebar."}
+      />
+    );
+  }
+
+  const metaChips = [
+    skill.visibility,
+    skill.version ? `v${skill.version}` : null,
+    skill.entryFile ? `entry: ${skill.entryFile}` : null,
+  ].filter((value): value is string => Boolean(value));
+
+  return (
+    <div className="mx-auto w-full max-w-6xl p-4 md:p-6">
+      <div className="rounded-xl border bg-background p-5">
+        <h1 className="font-semibold text-xl">{skill.node.name}</h1>
+        {skill.node.description ? (
+          <p className="mt-1 text-muted-foreground text-sm">{skill.node.description}</p>
+        ) : null}
+        {metaChips.length > 0 ? (
+          <div className="mt-3 flex flex-wrap gap-1.5">
+            {metaChips.map((chip) => (
+              <span
+                className="rounded-full border bg-muted px-2.5 py-1 text-muted-foreground text-xs"
+                key={chip}
+              >
+                {chip}
+              </span>
+            ))}
+          </div>
+        ) : null}
+      </div>
+
+      <div className="mt-4 grid gap-4 md:grid-cols-[280px_minmax(0,1fr)]">
+        {skill.files.length === 0 ? (
+          <div className="rounded-lg border bg-background p-4 text-muted-foreground text-sm">
+            No files yet.
+          </div>
+        ) : (
+          <FileTree
+            className="max-h-[70vh] overflow-auto"
+            defaultExpanded={expandedFolders}
+            key={skill.node.id}
+            // FileTreeProps.onSelect collides with HTMLAttributes.onSelect; it is
+            // invoked with the node path string at runtime.
+            onSelect={selectFile as unknown as ComponentProps<typeof FileTree>["onSelect"]}
+            selectedPath={openPath ?? undefined}
+          >
+            {renderSkillTree(tree)}
+          </FileTree>
+        )}
+
+        <div className="min-h-[320px]">
+          {!openPath ? (
+            <div className="grid h-full min-h-[320px] place-items-center rounded-md border bg-background p-8 text-center text-muted-foreground text-sm">
+              Select a file to view its content.
+            </div>
+          ) : fileQuery.isLoading ? (
+            <div className="rounded-md border bg-background p-4 text-muted-foreground text-sm">
+              Reading {openPath}…
+            </div>
+          ) : fileQuery.isError ? (
+            <div className="rounded-md border bg-background p-4 text-destructive text-sm">
+              {fileQuery.error instanceof Error ? fileQuery.error.message : "Could not read file"}
+            </div>
+          ) : (
+            <CodeBlock
+              code={fileQuery.data?.content ?? ""}
+              language={guessSkillLanguage(openPath)}
+              showLineNumbers
+            />
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+registerNodeDetail("skill", SkillDetailView);
+
+export function DocDetailView({ orpc, slug }: { orpc: BusabaseQueryUtils; slug: string | null }) {
+  const [, setLocation] = useLocation();
+  const docQuery = useQuery({
+    ...orpc.docs.get.queryOptions({ input: { nodeId: slug ?? "" } }),
+    enabled: Boolean(slug),
+  });
+  const doc = docQuery.data ?? null;
+  const [isEditing, setIsEditing] = useState(false);
+  const [draft, setDraft] = useState("");
+  const [busy, setBusy] = useState<null | "save" | "changeRequest">(null);
+  const [error, setError] = useState<string | null>(null);
+
+  // Default to read-only; reset to view mode when switching docs.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: reset only on slug change
+  useEffect(() => {
+    setIsEditing(false);
+    setDraft("");
+    setError(null);
+  }, [slug]);
+
+  const createCr = useMutation(orpc.docs.createChangeRequest.mutationOptions());
+  const reviewCr = useMutation(orpc.changeRequests.review.mutationOptions());
+  const mergeCr = useMutation(orpc.changeRequests.merge.mutationOptions());
+
+  if (!doc) {
+    return docQuery.isLoading ? (
+      <div className="grid min-h-[320px] place-items-center text-muted-foreground text-sm">
+        Loading doc…
+      </div>
+    ) : (
+      <EmptyState
+        title="Doc not found"
+        body={slug ? `No doc matches "${slug}".` : "Select a doc from the sidebar."}
+      />
+    );
+  }
+
+  const startEditing = () => {
+    setDraft(doc.body);
+    setError(null);
+    setIsEditing(true);
+  };
+
+  // Direct Save: propose + approve + merge in one go (mirrors a Base "Save & Merge").
+  const save = async () => {
+    setBusy("save");
+    setError(null);
+    try {
+      const changeRequest = await createCr.mutateAsync({
+        nodeId: doc.node.id,
+        body: draft,
+      });
+      await reviewCr.mutateAsync({
+        changeRequestId: changeRequest.id,
+        verdict: "approved",
+      });
+      await mergeCr.mutateAsync({ changeRequestId: changeRequest.id });
+      await docQuery.refetch();
+      setIsEditing(false);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not save");
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  // Save as Change Request: propose only, then open it for review.
+  const saveAsChangeRequest = async () => {
+    setBusy("changeRequest");
+    setError(null);
+    try {
+      const changeRequest = await createCr.mutateAsync({
+        nodeId: doc.node.id,
+        body: draft,
+      });
+      setLocation(`/inbox/${changeRequest.id}`);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not create change request");
+      setBusy(null);
+    }
+  };
+
+  return (
+    <div className="mx-auto flex h-full w-full max-w-3xl flex-col px-6 py-10">
+      <div className="mb-5 flex items-start justify-between gap-4">
+        <div className="min-w-0">
+          <h1 className="truncate font-semibold text-3xl text-foreground tracking-tight">
+            {doc.node.name}
+          </h1>
+          {doc.node.description ? (
+            <p className="mt-1 text-muted-foreground text-sm">{doc.node.description}</p>
+          ) : null}
+        </div>
+        {isEditing ? (
+          <div className="flex shrink-0 items-center gap-2">
+            <button
+              className="rounded-button px-3 py-1.5 text-muted-foreground text-sm hover:text-foreground disabled:opacity-40"
+              disabled={busy !== null}
+              onClick={() => {
+                setIsEditing(false);
+                setError(null);
+              }}
+              type="button"
+            >
+              Cancel
+            </button>
+            <button
+              className="rounded-button border px-3 py-1.5 text-sm hover:bg-muted disabled:opacity-40"
+              disabled={busy !== null}
+              onClick={saveAsChangeRequest}
+              type="button"
+            >
+              {busy === "changeRequest" ? "Saving…" : "Save as Change Request"}
+            </button>
+            <button
+              className="rounded-button bg-primary px-3 py-1.5 text-primary-foreground text-sm disabled:opacity-40"
+              disabled={busy !== null}
+              onClick={save}
+              type="button"
+            >
+              {busy === "save" ? "Saving…" : "Save"}
+            </button>
+          </div>
+        ) : (
+          <button
+            className="shrink-0 rounded-button border px-3 py-1.5 text-sm hover:bg-muted"
+            onClick={startEditing}
+            type="button"
+          >
+            Edit
+          </button>
+        )}
+      </div>
+      {error ? <p className="mb-3 text-destructive text-sm">{error}</p> : null}
+      {isEditing ? (
+        <textarea
+          aria-label="Doc body"
+          className="min-h-[60vh] flex-1 resize-none border-0 bg-transparent p-0 text-[15px] text-foreground leading-7 outline-none placeholder:text-muted-foreground"
+          onChange={(event) => setDraft(event.target.value)}
+          placeholder="Write…"
+          value={draft}
+        />
+      ) : doc.body.trim() ? (
+        <div className="flex-1 whitespace-pre-wrap text-[15px] text-foreground leading-7">
+          {doc.body}
+        </div>
+      ) : (
+        <div className="flex-1 text-muted-foreground text-sm">
+          This document is empty. Click Edit to start writing.
+        </div>
+      )}
+    </div>
+  );
+}
+
+registerNodeDetail("doc", DocDetailView);
+
+export function FolderDetailView({
+  orpc,
+  slug,
+}: {
+  orpc: BusabaseQueryUtils;
+  slug: string | null;
+}) {
+  const folderQuery = useQuery({
+    ...orpc.folders.get.queryOptions({ input: { nodeId: slug ?? "" } }),
+    enabled: Boolean(slug),
+  });
+  const folder = folderQuery.data ?? null;
+
+  if (!folder) {
+    return folderQuery.isLoading ? (
+      <div className="grid min-h-[320px] place-items-center text-muted-foreground text-sm">
+        Loading folder…
+      </div>
+    ) : (
+      <EmptyState
+        title="Folder not found"
+        body={slug ? `No folder matches "${slug}".` : "Select a folder from the sidebar."}
+      />
+    );
+  }
+
+  return (
+    <div className="mx-auto w-full max-w-3xl px-6 py-8">
+      <div className="mb-8">
+        <h1 className="text-2xl font-semibold tracking-tight">{folder.node.name}</h1>
+        {folder.node.description ? (
+          <p className="mt-2 text-muted-foreground text-sm">{folder.node.description}</p>
+        ) : null}
+      </div>
+      {folder.children.length === 0 ? (
+        <EmptyState title="Empty folder" body="This folder has no items yet." />
+      ) : (
+        <>
+          <p className="mb-2 font-semibold text-[11px] uppercase tracking-widest text-muted-foreground/60">
+            {folder.children.length} {folder.children.length === 1 ? "item" : "items"}
+          </p>
+          <div className="-mx-2 flex flex-col">
+            {folder.children.map((child) => {
+              const Icon = FOLDER_CHILD_ICONS[child.type] ?? FileText;
+              return (
+                <Link
+                  key={child.id}
+                  className="group flex items-center gap-3 rounded-md px-2 py-2 transition-colors hover:bg-muted/50"
+                  href={`/${child.type}/${child.slug}`}
+                >
+                  <Icon className="size-4 shrink-0 text-muted-foreground" />
+                  <span className="flex-1 truncate text-sm">{child.name}</span>
+                  <span className="text-[11px] text-muted-foreground/50">{child.type}</span>
+                </Link>
+              );
+            })}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+const FOLDER_CHILD_ICONS: Record<string, typeof Folder> = {
+  folder: Folder,
+  base: Table2,
+  doc: FileText,
+  skill: Sparkles,
+};
+
+registerNodeDetail("folder", FolderDetailView);

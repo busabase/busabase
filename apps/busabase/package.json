@@ -1,0 +1,95 @@
+{
+  "name": "busabase",
+  "description": "Open-source Busabase review app + CLI. `busabase server` boots a zero-setup local instance (pglite); other subcommands act as an OpenAPI client.",
+  "version": "0.0.1",
+  "private": false,
+  "license": "MIT",
+  "homepage": "https://github.com/busabase/busabase/tree/main/apps/busabase",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/busabase/busabase.git",
+    "directory": "apps/busabase"
+  },
+  "bugs": "https://github.com/busabase/busabase/issues",
+  "publishConfig": {
+    "access": "public"
+  },
+  "bin": {
+    "busabase": "./bin/busabase.mjs"
+  },
+  "files": [
+    "bin",
+    ".next/standalone",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "next build",
+    "pack:standalone": "node scripts/pack-standalone.mjs",
+    "dev": "tsx scripts/verify-local-start.ts && next dev",
+    "start": "next start",
+    "test": "vitest run",
+    "test:e2e": "playwright test tests/e2e",
+    "typecheck": "next typegen && tsc --noEmit",
+    "lint": "biome format . --write && biome check . --write",
+    "lint:err": "biome format . --write && biome check . --write --diagnostic-level=error",
+    "db:generate": "drizzle-kit generate",
+    "verify:domains": "PG_DATABASE_URL=pglite://memory:// NODE_OPTIONS=--conditions=react-server tsx scripts/verify-busabase-domains.ts",
+    "demo": "tsx scripts/demo/run-all.ts",
+    "demo:folders": "tsx scripts/demo/01-folders.ts",
+    "demo:bases": "tsx scripts/demo/02-bases.ts",
+    "demo:records": "tsx scripts/demo/03-records.ts",
+    "demo:views": "tsx scripts/demo/04-views.ts",
+    "demo:docs": "tsx scripts/demo/05-docs.ts",
+    "demo:skills": "tsx scripts/demo/06-skills.ts",
+    "demo:change-requests": "tsx scripts/demo/07-change-requests.ts",
+    "demo:nodes": "tsx scripts/demo/08-nodes.ts",
+    "demo:search": "tsx scripts/demo/09-search.ts",
+    "demo:audit": "tsx scripts/demo/10-audit.ts",
+    "demo:zh-CN": "tsx scripts/demo/zh-CN.ts",
+    "db:migrate": "drizzle-kit migrate",
+    "db:migrate:deploy": "drizzle-kit migrate",
+    "db:seed": "NODE_OPTIONS='--conditions react-server' tsx src/db/seed/main.ts",
+    "db:seed:all": "NODE_OPTIONS='--conditions react-server' tsx src/db/seed/seed-all.ts",
+    "db:seed:all:zh-CN": "NODE_OPTIONS='--conditions react-server' tsx src/db/seed/seed-zh-cn.ts"
+  },
+  "dependencies": {
+    "@electric-sql/pglite": "^0.3.15",
+    "@orpc/client": "^1.14.6",
+    "@orpc/contract": "^1.14.6",
+    "@orpc/openapi": "^1.14.6",
+    "@orpc/server": "^1.14.6",
+    "busabase-cli": "workspace:*",
+    "@tanstack/react-query": "^5.101.0",
+    "drizzle-orm": "^0.45.1",
+    "kui": "workspace:*",
+    "lucide-react": "^0.556.0",
+    "next": "16.2.6",
+    "next-themes": "^0.4.6",
+    "postgres": "^3.4.6",
+    "busabase-core": "workspace:*",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7",
+    "server-only": "^0.0.1",
+    "openlib": "workspace:*",
+    "wouter": "^3.9.0",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.56.1",
+    "@tailwindcss/postcss": "^4.1.17",
+    "@types/node": "^24.10.0",
+    "@types/react": "19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "drizzle-kit": "^0.31.7",
+    "postcss": "^8.5.6",
+    "tailwindcss": "^4.1.17",
+    "typescript": "^5.9.3",
+    "vitest": "^2.1.8"
+  },
+  "appStatus": {
+    "port": 3061,
+    "description": "Busabase open-source local review engine",
+    "status": "in development",
+    "openCore": true
+  }
+}

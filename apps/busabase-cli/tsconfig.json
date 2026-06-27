@@ -1,0 +1,22 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "noEmit": true,
+    "isolatedModules": true,
+    "resolveJsonModule": true,
+    "types": ["node"],
+    "paths": {
+      "busabase-core": ["../../packages/busabase-core/src/index.ts"],
+      "busabase-core/*": ["../../packages/busabase-core/src/*"],
+      "open-domains/*": ["../../packages/open-domains/*"]
+    }
+  },
+  "include": ["src/**/*.ts", "tsup.config.ts"]
+}

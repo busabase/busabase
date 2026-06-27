@@ -1,0 +1,1 @@
+ALTER TYPE "public"."busabase_operation_kind" ADD VALUE 'doc_update';

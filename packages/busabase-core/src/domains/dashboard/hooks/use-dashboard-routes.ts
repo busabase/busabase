@@ -1,0 +1,65 @@
+import { useRoute } from "wouter";
+
+/**
+ * Parse the wouter route table for the dashboard SPA into a flat set of route
+ * flags + params, plus the route-only derived slugs/ids. Selections that also
+ * depend on loaded data (active base/record, selected view/change request) stay
+ * in the orchestrator — this hook is pure routing.
+ */
+export function useDashboardRoutes() {
+  const [isGraphRoute] = useRoute("/graph");
+  const [isAssetDetailRoute] = useRoute("/assets/:assetId");
+  const [isOperationRoute, operationParams] = useRoute("/inbox/:changeRequestId/:operationId");
+  const [isChangeRequestRoute, changeRequestParams] = useRoute("/inbox/:changeRequestId");
+  const [isBaseDesignRoute, baseDesignParams] = useRoute("/base/:slug/design");
+  const [isLegacyBaseSetupRoute, legacyBaseSetupParams] = useRoute("/base/:slug/setup");
+  const [isNewRecordRoute, newRecordParams] = useRoute("/base/:slug/new");
+  const [isEditRecordRoute, editRecordParams] = useRoute("/base/:slug/:recordId/edit");
+  const [, baseParams] = useRoute("/base/:slug");
+  const [isBaseChildRoute, baseChildParams] = useRoute("/base/:slug/:childId");
+  const [isSkillRoute, skillParams] = useRoute("/skill/:slug");
+  const [isDocRoute, docParams] = useRoute("/doc/:slug");
+  const [isFolderRoute, folderParams] = useRoute("/folder/:slug");
+
+  const isBaseSetupRoute = isBaseDesignRoute || isLegacyBaseSetupRoute;
+  const selectedBaseSlug =
+    baseDesignParams?.slug ??
+    legacyBaseSetupParams?.slug ??
+    newRecordParams?.slug ??
+    editRecordParams?.slug ??
+    baseParams?.slug ??
+    baseChildParams?.slug ??
+    null;
+  const selectedSkillSlug = isSkillRoute ? (skillParams?.slug ?? null) : null;
+  const selectedDocSlug = isDocRoute ? (docParams?.slug ?? null) : null;
+  const selectedFolderSlug = isFolderRoute ? (folderParams?.slug ?? null) : null;
+  const selectedChangeRequestId =
+    operationParams?.changeRequestId ?? changeRequestParams?.changeRequestId ?? null;
+
+  return {
+    isGraphRoute,
+    isAssetDetailRoute,
+    isOperationRoute,
+    operationParams,
+    isChangeRequestRoute,
+    changeRequestParams,
+    isBaseDesignRoute,
+    isLegacyBaseSetupRoute,
+    isNewRecordRoute,
+    newRecordParams,
+    isEditRecordRoute,
+    editRecordParams,
+    baseParams,
+    isBaseChildRoute,
+    baseChildParams,
+    isSkillRoute,
+    isDocRoute,
+    isFolderRoute,
+    isBaseSetupRoute,
+    selectedBaseSlug,
+    selectedSkillSlug,
+    selectedDocSlug,
+    selectedFolderSlug,
+    selectedChangeRequestId,
+  };
+}

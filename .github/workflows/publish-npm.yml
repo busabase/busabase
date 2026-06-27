@@ -1,0 +1,96 @@
+# Managed by kapps scripts/publish-busabase-repo.ts — edit the template there,
+# not in this repo (the open-source sync overwrites it).
+#
+# Publishes busabase-cli + busabase to npm with provenance, from the public repo,
+# on GitHub's official ubuntu-latest runner. busabase depends on busabase-cli via
+# workspace:*, so both publish with `pnpm publish` (rewrites the protocol), cli
+# first. Idempotent: versions already on npm are skipped.
+name: Publish npm
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "apps/busabase-cli/**"
+      - "apps/busabase/bin/**"
+      - "apps/busabase/scripts/pack-standalone.mjs"
+      - "apps/busabase/package.json"
+      - ".github/workflows/publish-npm.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: publish-npm-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # npm provenance
+    env:
+      NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      NPM_CONFIG_PROVENANCE: "true"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: "https://registry.npmjs.org"
+
+      # pnpm publish does not reliably read the token from the setup-node .npmrc;
+      # write the expanded token into a workspace-root .npmrc pnpm always reads.
+      - name: Configure npm auth for pnpm
+        run: |
+          echo "//registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN}" >> .npmrc
+          echo "registry=https://registry.npmjs.org/" >> .npmrc
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Get versions
+        id: v
+        run: |
+          echo "cli=$(node -p "require('./apps/busabase-cli/package.json').version")" >> "$GITHUB_OUTPUT"
+          echo "app=$(node -p "require('./apps/busabase/package.json').version")" >> "$GITHUB_OUTPUT"
+
+      - name: Build busabase-cli
+        working-directory: apps/busabase-cli
+        run: |
+          pnpm typecheck
+          pnpm build
+          test -f dist/cli.js
+          node dist/cli.js --help
+
+      - name: Build + assemble busabase
+        working-directory: apps/busabase
+        run: |
+          NODE_OPTIONS=--max-old-space-size=4096 pnpm build
+          pnpm pack:standalone
+          test -n "$(find .next/standalone -path '*/apps/busabase/server.js' | head -1)"
+
+      - name: Check published versions
+        id: pub
+        run: |
+          npm view busabase-cli@${{ steps.v.outputs.cli }} version >/dev/null 2>&1 && echo "cli=true" >> "$GITHUB_OUTPUT" || echo "cli=false" >> "$GITHUB_OUTPUT"
+          npm view busabase@${{ steps.v.outputs.app }} version >/dev/null 2>&1 && echo "app=true" >> "$GITHUB_OUTPUT" || echo "app=false" >> "$GITHUB_OUTPUT"
+
+      - name: Publish busabase-cli
+        if: steps.pub.outputs.cli != 'true'
+        working-directory: apps/busabase-cli
+        run: pnpm publish --access public --no-git-checks
+
+      - name: Publish busabase
+        if: steps.pub.outputs.app != 'true'
+        working-directory: apps/busabase
+        run: pnpm publish --access public --no-git-checks
+
+      - name: Summary
+        run: |
+          {
+            echo "## npm publish"
+            echo "- busabase-cli@${{ steps.v.outputs.cli }} — already published: ${{ steps.pub.outputs.cli }}"
+            echo "- busabase@${{ steps.v.outputs.app }} — already published: ${{ steps.pub.outputs.app }}"
+          } >> "$GITHUB_STEP_SUMMARY"

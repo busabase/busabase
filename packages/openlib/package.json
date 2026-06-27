@@ -1,0 +1,99 @@
+{
+  "name": "openlib",
+  "private": false,
+  "version": "0.1.0",
+  "description": "Open-source utility library for busabase and openbuda apps",
+  "type": "module",
+  "exports": {
+    "./cors": {
+      "types": "./cors/index.ts",
+      "default": "./cors/index.ts"
+    },
+    "./db": {
+      "types": "./db/index.ts",
+      "default": "./db/index.ts"
+    },
+    "./i18n": {
+      "types": "./i18n/index.ts",
+      "default": "./i18n/index.ts"
+    },
+    "./nanoid": {
+      "types": "./nanoid/index.ts",
+      "default": "./nanoid/index.ts"
+    },
+    "./storage": {
+      "types": "./storage/index.ts",
+      "default": "./storage/index.ts"
+    },
+    "./mcp": {
+      "types": "./mcp/index.ts",
+      "default": "./mcp/index.ts"
+    },
+    "./ui/dashboard": {
+      "types": "./ui/dashboard/index.ts",
+      "default": "./ui/dashboard/index.ts"
+    },
+    "./ui/dashboard/types": {
+      "types": "./ui/dashboard/types.ts",
+      "default": "./ui/dashboard/types.ts"
+    },
+    "./ui/dashboard/demo": {
+      "types": "./ui/dashboard/demo.ts",
+      "default": "./ui/dashboard/demo.ts"
+    },
+    "./ui/LanguageSwitcher": {
+      "types": "./ui/LanguageSwitcher.tsx",
+      "default": "./ui/LanguageSwitcher.tsx"
+    },
+    "./ui/avatar-logo": {
+      "types": "./ui/avatar-logo.tsx",
+      "default": "./ui/avatar-logo.tsx"
+    },
+    "./utils/time": {
+      "types": "./utils/time.ts",
+      "default": "./utils/time.ts"
+    },
+    "./storage/types": {
+      "types": "./storage/types.ts",
+      "default": "./storage/types.ts"
+    },
+    "./storage/dev-routes": {
+      "types": "./storage/dev-routes.ts",
+      "default": "./storage/dev-routes.ts"
+    }
+  },
+  "sideEffects": [
+    "**/*.css"
+  ],
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "keywords": [],
+  "license": "MIT",
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.709.0",
+    "@aws-sdk/s3-request-presigner": "^3.709.0",
+    "@formatjs/intl-localematcher": "0.6.2",
+    "@modelcontextprotocol/sdk": "1.26.0",
+    "@next/third-parties": "^16.2.6",
+    "dayjs": "1.11.10",
+    "drizzle-orm": "^0.45.1",
+    "kui": "workspace:*",
+    "mime-types": "^2.1.35",
+    "nanoid": "^5.1.5",
+    "negotiator": "^0.6.3",
+    "nprogress": "^0.2.0",
+    "zod": "^4.3.6"
+  },
+  "peerDependencies": {
+    "lucide-react": ">=0.556.0",
+    "next": ">=14.0.0",
+    "next-themes": ">=0.4.0",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4",
+    "wouter": "^3.9.0"
+  },
+  "devDependencies": {
+    "@types/negotiator": "^0.6.4"
+  }
+}

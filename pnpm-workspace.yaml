@@ -1,0 +1,16 @@
+packages:
+  - apps/*
+  - packages/*
+
+nodeLinker: hoisted
+
+onlyBuiltDependencies:
+  - '@prisma/client'
+  - '@prisma/engines'
+  - better-sqlite3
+  - core-js
+  - esbuild
+  - lefthook
+  - prisma
+  - sharp
+  - unrs-resolver

@@ -1,0 +1,28 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "allowJs": true,
+    "skipLibCheck": true,
+    "strict": true,
+    "forceConsistentCasingInFileNames": true,
+    "noEmit": true,
+    "esModuleInterop": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "jsx": "react-jsx",
+    "declaration": true,
+    "declarationMap": true,
+    "paths": {
+      "kui/ai-elements/*": ["../kui/src/components/ai-elements/*"],
+      "kui/hooks/*": ["../kui/src/hooks/*"],
+      "kui/tour": ["../kui/src/components/tour.tsx"],
+      "kui/utils": ["../kui/src/lib/utils.ts"],
+      "kui/*": ["../kui/src/components/ui/*"]
+    }
+  },
+  "include": ["./**/*.ts", "./**/*.tsx"],
+  "exclude": ["node_modules", "dist", ".turbo"]
+}
