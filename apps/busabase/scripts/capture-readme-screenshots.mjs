@@ -23,8 +23,8 @@ const scenarioShots = [
     key: "field-types",
     demo: "field-types",
     base: "field-type-lab",
-    cr: "qdf_seed_field_type_lab_update",
-    record: "qrc_seed_field_type_lab",
+    cr: "crq_seed_field_type_lab_update",
+    record: "rec_seed_field_type_lab",
     cells: [
       {
         kind: "base",
@@ -52,8 +52,8 @@ const scenarioShots = [
     key: "canonical",
     demo: "canonical",
     base: "blog",
-    cr: "qdf_seed_blog_update",
-    record: "qrc_seed_blog_approval",
+    cr: "crq_seed_blog_update",
+    record: "rec_seed_blog_approval",
     cells: [
       {
         kind: "base",
@@ -110,8 +110,8 @@ const scenarioShots = [
     key: "training-datasets",
     demo: "dataset",
     base: "qa-training-dataset",
-    cr: "qdf_seed_training_quality_score",
-    record: "qrc_seed_training_refusal_eval",
+    cr: "crq_seed_training_quality_score",
+    record: "rec_seed_training_refusal_eval",
     cells: [
       {
         kind: "base",
@@ -139,8 +139,8 @@ const scenarioShots = [
     key: "multimodal-review",
     demo: "media",
     base: "media-assets",
-    cr: "qdf_seed_media_metadata",
-    record: "qrc_seed_media_clip_review",
+    cr: "crq_seed_media_metadata",
+    record: "rec_seed_media_clip_review",
     cells: [
       {
         kind: "base",
@@ -168,8 +168,8 @@ const scenarioShots = [
     key: "personal-knowledge",
     demo: "knowledge",
     base: "private-knowledge",
-    cr: "qdf_seed_private_knowledge_enrich",
-    record: "qrc_seed_private_knowledge_note",
+    cr: "crq_seed_private_knowledge_enrich",
+    record: "rec_seed_private_knowledge_note",
     cells: [
       {
         kind: "base",
@@ -197,8 +197,8 @@ const scenarioShots = [
     key: "operations-erp",
     demo: "operations",
     base: "ops-tasks",
-    cr: "qdf_seed_ops_status_reconcile",
-    record: "qrc_seed_ops_vendor_onboarding",
+    cr: "crq_seed_ops_status_reconcile",
+    record: "rec_seed_ops_vendor_onboarding",
     cells: [
       {
         kind: "base",
@@ -226,8 +226,8 @@ const scenarioShots = [
     key: "routine-work",
     demo: "routine",
     base: "routine-work-log",
-    cr: "qdf_seed_routine_support_qa",
-    record: "qrc_seed_routine_support_qa",
+    cr: "crq_seed_routine_support_qa",
+    record: "rec_seed_routine_support_qa",
     cells: [
       {
         kind: "base",
@@ -255,8 +255,8 @@ const scenarioShots = [
     key: "crm-hygiene",
     demo: "crm",
     base: "companies",
-    cr: "qdf_seed_crm_company_enrich",
-    record: "qrc_seed_crm_company_acme",
+    cr: "crq_seed_crm_company_enrich",
+    record: "rec_seed_crm_company_acme",
     cells: [
       {
         kind: "base",
@@ -284,8 +284,8 @@ const scenarioShots = [
     key: "finance-review",
     demo: "finance",
     base: "invoices",
-    cr: "qdf_seed_invoice_three_way_match",
-    record: "qrc_seed_invoice_globex_cloud",
+    cr: "crq_seed_invoice_three_way_match",
+    record: "rec_seed_invoice_globex_cloud",
     cells: [
       {
         kind: "base",
@@ -313,8 +313,8 @@ const scenarioShots = [
     key: "compliance-checklists",
     demo: "compliance",
     base: "compliance-checklists",
-    cr: "qdf_seed_compliance_evidence",
-    record: "qrc_seed_compliance_access_review",
+    cr: "crq_seed_compliance_evidence",
+    record: "rec_seed_compliance_access_review",
     cells: [
       {
         kind: "base",
@@ -342,8 +342,8 @@ const scenarioShots = [
     key: "market-research",
     demo: "research",
     base: "market-research",
-    cr: "qdf_seed_research_signal",
-    record: "qrc_seed_research_competitor_pricing",
+    cr: "crq_seed_research_signal",
+    record: "rec_seed_research_competitor_pricing",
     cells: [
       {
         kind: "base",
@@ -371,8 +371,8 @@ const scenarioShots = [
     key: "content-factory",
     demo: "content",
     base: "content-pipeline",
-    cr: "qdf_seed_content_brief_update",
-    record: "qrc_seed_content_launch_brief",
+    cr: "crq_seed_content_brief_update",
+    record: "rec_seed_content_launch_brief",
     cells: [
       {
         kind: "base",
@@ -400,8 +400,8 @@ const scenarioShots = [
     key: "dataset-labeling",
     demo: "labeling",
     base: "labeling-queue",
-    cr: "qdf_seed_labeling_correction",
-    record: "qrc_seed_labeling_clip_scene",
+    cr: "crq_seed_labeling_correction",
+    record: "rec_seed_labeling_clip_scene",
     cells: [
       {
         kind: "base",
@@ -510,12 +510,12 @@ const shots = [
   },
   {
     file: "busabase-agent-output-preview.png",
-    url: `${BASE}/dashboard/inbox/qdf_seed_blog_update?demo=1`,
-    waitFor: "text=analysis-agent",
+    url: `${BASE}/dashboard/inbox/crq_seed_blog_update?demo=1`,
+    waitFor: "text=What will change",
   },
   {
     file: "busabase-record-detail-audit.png",
-    url: `${BASE}/dashboard/base/blog/qrc_seed_blog_approval?demo=1`,
+    url: `${BASE}/dashboard/base/blog/rec_seed_blog_approval?demo=1`,
     waitFor: "text=AI agents are moving from demos into operator workflows",
   },
   {
@@ -552,10 +552,13 @@ for (const scenario of scenarioShots) {
     const file = `${scenario.key}-${cell.kind}.png`;
     const url = routeForScenarioShot(scenario, cell.kind);
     await page.goto(url, { waitUntil: "networkidle" });
+    // review pages show the CR author as a title-cased display name, not the
+    // raw "<x>-agent" handle — wait on the stable "What will change" heading.
+    const waitFor = cell.kind === "review" ? "text=What will change" : cell.waitFor;
     try {
-      await page.waitForSelector(cell.waitFor, { timeout: 5000 });
+      await page.waitForSelector(waitFor, { timeout: 5000 });
     } catch {
-      console.warn(`! waitFor missed for ${file}: ${cell.waitFor}`);
+      console.warn(`! waitFor missed for ${file}: ${waitFor}`);
     }
     await page.waitForTimeout(1000);
     await page.screenshot({ path: path.join(SCENARIO_OUT, file) });
