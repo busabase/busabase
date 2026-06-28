@@ -46,9 +46,7 @@ Busabase is a **free and open-source** ([MIT](https://opensource.org/licenses/MI
 
 Busabase gives that approval process a home — an approval-first database and knowledge base for AI agents. It is a private CMS, project database, and structured source of truth with built-in Change Requests, Operations, comments, audit trails, and a simple API for apps and AI agents.
 
-```txt
-AI agent or human proposes data -> review -> approve -> merge -> trusted record/API
-```
+![How Busabase works: propose → change request → review → merge → trusted database & knowledge base, with a revise loop and reject path](./apps/busabase/public/assets/readme/how-it-works.png)
 
 **Free & open source. Local-first. Review-first. Agent-ready.**
 Run it yourself — no SaaS, no account, no vendor. Your data never has to leave your machine.
@@ -141,9 +139,7 @@ Busabase is for the middle layer that AI-heavy teams now need:
 
 It is approval-first by default, agent-friendly by design, and still small enough to run locally.
 
-## How It Works
-
-![How Busabase works: propose → change request → review → merge → trusted record, with a revise loop and reject path](./apps/busabase/public/assets/readme/how-it-works.png)
+## Concepts
 
 Core concepts:
 
@@ -924,3 +920,29 @@ The goal is to make a private, reviewable data workspace that anyone can run.
 Busabase is designed for trusted local or private-network deployment.
 
 Do not expose write endpoints to the public internet without a reverse proxy, token layer, or another access-control layer.
+
+## Contributing
+
+Busabase is built in the open — bug reports, feature ideas, docs, and PRs are all welcome.
+
+```bash
+pnpm install
+pnpm --filter busabase dev   # http://localhost:15419/dashboard/inbox
+```
+
+Before sending a PR, run `pnpm --filter busabase typecheck && pnpm --filter busabase lint`. Found a bug or have an idea? [Open an issue](https://github.com/busabase/busabase/issues) or start a [discussion](https://github.com/busabase/busabase/discussions).
+
+## Community
+
+- ⭐ **Star the repo** if Busabase is useful to you — it genuinely helps others find it.
+- 🐛 [Issues](https://github.com/busabase/busabase/issues) &nbsp;·&nbsp; 💬 [Discussions](https://github.com/busabase/busabase/discussions) &nbsp;·&nbsp; 🌐 [busabase.com](https://busabase.com)
+
+## Star History
+
+<a href="https://star-history.com/#busabase/busabase&Date">
+  <img src="https://api.star-history.com/svg?repos=busabase/busabase&type=Date" alt="Busabase star history" width="600" />
+</a>
+
+## License
+
+[MIT](./LICENSE) © Busabase
