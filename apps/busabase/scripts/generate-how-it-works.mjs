@@ -40,14 +40,24 @@ const esc = (s) => s.replace(/&/g, "&amp;");
 
 function node(x, y, w, h, title, sub, variant = "default") {
   const v = V[variant];
-  const ty = sub ? y + h / 2 - 7 : y + h / 2 + 6;
+  const cx = x + w / 2;
+  const lines = Array.isArray(title) ? title : [title];
+  const lineH = 23;
+  const titleH = (lines.length - 1) * lineH;
+  const subGap = 18;
+  const top = y + h / 2 - (titleH + (sub ? subGap : 0)) / 2;
+  const titleEls = lines
+    .map(
+      (ln, i) =>
+        `<text x="${cx}" y="${top + i * lineH + 6}" text-anchor="middle" font-size="19" font-weight="700" fill="${v.ink}">${esc(ln)}</text>`,
+    )
+    .join("\n  ");
+  const subEl = sub
+    ? `\n  <text x="${cx}" y="${top + titleH + subGap + 6}" text-anchor="middle" font-size="13.5" fill="${C.sub}">${esc(sub)}</text>`
+    : "";
   return `<g>
   <rect x="${x}" y="${y}" width="${w}" height="${h}" rx="13" fill="${v.fill}" stroke="${v.stroke}" stroke-width="1.6"/>
-  <text x="${x + w / 2}" y="${ty}" text-anchor="middle" font-family="Helvetica,Arial,sans-serif" font-size="19" font-weight="700" fill="${v.ink}">${esc(title)}</text>${
-    sub
-      ? `\n  <text x="${x + w / 2}" y="${y + h / 2 + 15}" text-anchor="middle" font-family="Helvetica,Arial,sans-serif" font-size="13.5" fill="${C.sub}">${esc(sub)}</text>`
-      : ""
-  }
+  ${titleEls}${subEl}
 </g>`;
 }
 
@@ -72,7 +82,7 @@ ${node(40, 178, 168, 76, "Propose", "human or AI agent")}
 ${node(252, 178, 198, 76, "Change Request", "operations + commits")}
 ${node(492, 162, 140, 108, "Review", "human decides", "review")}
 ${node(674, 178, 120, 76, "Merge", "approved", "approve")}
-${node(836, 162, 188, 108, "Trusted Record", "canonical · audited", "approve")}
+${node(828, 152, 208, 124, ["Database &", "Knowledge Base"], "trusted · canonical · audited", "approve")}
 ${node(492, 56, 140, 56, "Rejected", "terminal", "reject")}
 ${node(452, 338, 210, 60, "ACP agent revises", "improves the proposal", "teal")}
 ${node(1064, 158, 158, 58, "Apps & agents", "Dashboard · API · MCP", "output")}
@@ -83,7 +93,7 @@ ${arrow("M208,216 L249,216", C.ink, "ink")}
 ${arrow("M450,216 L489,216", C.ink, "ink")}
 ${arrow("M632,216 L671,216", C.greenStroke, "green")}
 ${label(653, 205, "approve", C.greenInk)}
-${arrow("M794,216 L833,216", C.greenStroke, "green")}
+${arrow("M794,216 L827,216", C.greenStroke, "green")}
 
 <!-- reject up -->
 ${arrow("M562,162 L562,115", C.redStroke, "red")}
@@ -94,9 +104,9 @@ ${arrow("M548,270 L548,335", C.teal, "teal")}
 ${label(577, 305, "revise", C.teal)}
 ${arrow("M452,368 L351,368 L351,257", C.teal, "teal")}
 
-<!-- trusted record -> outputs -->
-${arrow("M1024,200 L1063,187", C.ink, "ink")}
-${arrow("M1024,232 L1063,255", C.ink, "ink")}
+<!-- database & knowledge base -> outputs -->
+${arrow("M1036,196 L1063,187", C.ink, "ink")}
+${arrow("M1036,240 L1063,257", C.ink, "ink")}
 </svg>`;
 
 // Keep the SVG as the editable source; embed the 2x PNG in the README (GitHub
