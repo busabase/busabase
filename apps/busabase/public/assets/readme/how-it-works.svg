@@ -1,0 +1,74 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1240" height="452" viewBox="0 0 1240 452" font-family="Helvetica,Arial,sans-serif">
+<defs>
+  <linearGradient id="card" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#FCFBF8"/><stop offset="1" stop-color="#F4F1EA"/></linearGradient>
+  <marker id="ink" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,0 L7,3 L0,6 Z" fill="#1a1714"/></marker><marker id="green" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,0 L7,3 L0,6 Z" fill="#4e9c6b"/></marker><marker id="red" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,0 L7,3 L0,6 Z" fill="#c08a82"/></marker><marker id="teal" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,0 L7,3 L0,6 Z" fill="#2f7a66"/></marker>
+</defs>
+<rect x="2" y="2" width="1236" height="448" rx="20" fill="url(#card)" stroke="#e7e1d5" stroke-width="1.5"/>
+
+<!-- nodes -->
+<g>
+  <rect x="40" y="178" width="168" height="76" rx="13" fill="#ffffff" stroke="#d9d3c6" stroke-width="1.6"/>
+  <text x="124" y="209" text-anchor="middle" font-family="Helvetica,Arial,sans-serif" font-size="19" font-weight="700" fill="#1a1714">Propose</text>
+  <text x="124" y="231" text-anchor="middle" font-family="Helvetica,Arial,sans-serif" font-size="13.5" fill="#6b6358">human or AI agent</text>
+</g>
+<g>
+  <rect x="252" y="178" width="198" height="76" rx="13" fill="#ffffff" stroke="#d9d3c6" stroke-width="1.6"/>
+  <text x="351" y="209" text-anchor="middle" font-family="Helvetica,Arial,sans-serif" font-size="19" font-weight="700" fill="#1a1714">Change Request</text>
+  <text x="351" y="231" text-anchor="middle" font-family="Helvetica,Arial,sans-serif" font-size="13.5" fill="#6b6358">operations + commits</text>
+</g>
+<g>
+  <rect x="492" y="162" width="140" height="108" rx="13" fill="#fdf5e8" stroke="#cf9f52" stroke-width="1.6"/>
+  <text x="562" y="209" text-anchor="middle" font-family="Helvetica,Arial,sans-serif" font-size="19" font-weight="700" fill="#8a5a13">Review</text>
+  <text x="562" y="231" text-anchor="middle" font-family="Helvetica,Arial,sans-serif" font-size="13.5" fill="#6b6358">human decides</text>
+</g>
+<g>
+  <rect x="674" y="178" width="120" height="76" rx="13" fill="#ecf6ef" stroke="#4e9c6b" stroke-width="1.6"/>
+  <text x="734" y="209" text-anchor="middle" font-family="Helvetica,Arial,sans-serif" font-size="19" font-weight="700" fill="#1f6b3d">Merge</text>
+  <text x="734" y="231" text-anchor="middle" font-family="Helvetica,Arial,sans-serif" font-size="13.5" fill="#6b6358">approved</text>
+</g>
+<g>
+  <rect x="836" y="162" width="188" height="108" rx="13" fill="#ecf6ef" stroke="#4e9c6b" stroke-width="1.6"/>
+  <text x="930" y="209" text-anchor="middle" font-family="Helvetica,Arial,sans-serif" font-size="19" font-weight="700" fill="#1f6b3d">Trusted Record</text>
+  <text x="930" y="231" text-anchor="middle" font-family="Helvetica,Arial,sans-serif" font-size="13.5" fill="#6b6358">canonical · audited</text>
+</g>
+<g>
+  <rect x="492" y="56" width="140" height="56" rx="13" fill="#f8efed" stroke="#c08a82" stroke-width="1.6"/>
+  <text x="562" y="77" text-anchor="middle" font-family="Helvetica,Arial,sans-serif" font-size="19" font-weight="700" fill="#9a4034">Rejected</text>
+  <text x="562" y="99" text-anchor="middle" font-family="Helvetica,Arial,sans-serif" font-size="13.5" fill="#6b6358">terminal</text>
+</g>
+<g>
+  <rect x="452" y="338" width="210" height="60" rx="13" fill="#eaf4f0" stroke="#2f7a66" stroke-width="1.6"/>
+  <text x="557" y="361" text-anchor="middle" font-family="Helvetica,Arial,sans-serif" font-size="19" font-weight="700" fill="#205a4c">ACP agent revises</text>
+  <text x="557" y="383" text-anchor="middle" font-family="Helvetica,Arial,sans-serif" font-size="13.5" fill="#6b6358">improves the proposal</text>
+</g>
+<g>
+  <rect x="1064" y="158" width="158" height="58" rx="13" fill="#f4f1ea" stroke="#cfc7b6" stroke-width="1.6"/>
+  <text x="1143" y="180" text-anchor="middle" font-family="Helvetica,Arial,sans-serif" font-size="19" font-weight="700" fill="#1a1714">Apps &amp; agents</text>
+  <text x="1143" y="202" text-anchor="middle" font-family="Helvetica,Arial,sans-serif" font-size="13.5" fill="#6b6358">Dashboard · API · MCP</text>
+</g>
+<g>
+  <rect x="1064" y="232" width="158" height="58" rx="13" fill="#f4f1ea" stroke="#cfc7b6" stroke-width="1.6"/>
+  <text x="1143" y="254" text-anchor="middle" font-family="Helvetica,Arial,sans-serif" font-size="19" font-weight="700" fill="#1a1714">Automations</text>
+  <text x="1143" y="276" text-anchor="middle" font-family="Helvetica,Arial,sans-serif" font-size="13.5" fill="#6b6358">webhooks · workflows</text>
+</g>
+
+<!-- main flow -->
+<path d="M208,216 L249,216" fill="none" stroke="#1a1714" stroke-width="2" marker-end="url(#ink)"/>
+<path d="M450,216 L489,216" fill="none" stroke="#1a1714" stroke-width="2" marker-end="url(#ink)"/>
+<path d="M632,216 L671,216" fill="none" stroke="#4e9c6b" stroke-width="2" marker-end="url(#green)"/>
+<text x="653" y="205" text-anchor="middle" font-family="Helvetica,Arial,sans-serif" font-size="13" font-weight="600" fill="#1f6b3d">approve</text>
+<path d="M794,216 L833,216" fill="none" stroke="#4e9c6b" stroke-width="2" marker-end="url(#green)"/>
+
+<!-- reject up -->
+<path d="M562,162 L562,115" fill="none" stroke="#c08a82" stroke-width="2" marker-end="url(#red)"/>
+<text x="589" y="140" text-anchor="middle" font-family="Helvetica,Arial,sans-serif" font-size="13" font-weight="600" fill="#9a4034">reject</text>
+
+<!-- revise loop: review -> ACP -> back to change request -->
+<path d="M548,270 L548,335" fill="none" stroke="#2f7a66" stroke-width="2" marker-end="url(#teal)"/>
+<text x="577" y="305" text-anchor="middle" font-family="Helvetica,Arial,sans-serif" font-size="13" font-weight="600" fill="#2f7a66">revise</text>
+<path d="M452,368 L351,368 L351,257" fill="none" stroke="#2f7a66" stroke-width="2" marker-end="url(#teal)"/>
+
+<!-- trusted record -> outputs -->
+<path d="M1024,200 L1063,187" fill="none" stroke="#1a1714" stroke-width="2" marker-end="url(#ink)"/>
+<path d="M1024,232 L1063,255" fill="none" stroke="#1a1714" stroke-width="2" marker-end="url(#ink)"/>
+</svg>

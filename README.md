@@ -140,21 +140,7 @@ It is approval-first by default, agent-friendly by design, and still small enoug
 
 ## How It Works
 
-```mermaid
-flowchart LR
-  A["Human or AI agent proposes content/data"] --> B["Change Request"]
-  B --> C["Operations: create, update, delete, or variant"]
-  C --> D["Commit snapshots"]
-  D --> E["Review"]
-  E -->|Ask agent to revise| J["ACP Agent improves the proposal"]
-  J --> C
-  E -->|Approve| F["Merge"]
-  E -->|Reject| G["Rejected request"]
-  F --> H["Trusted Record"]
-  H --> I["Dashboard, API, Next.js, ERP flows, AI tools"]
-  H --> K["Automation trigger"]
-  K --> L["Webhook, workflow, or external ACP Agent"]
-```
+![How Busabase works: propose → change request → review → merge → trusted record, with a revise loop and reject path](./apps/busabase/public/assets/readme/how-it-works.png)
 
 Core concepts:
 
