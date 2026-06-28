@@ -1,5 +1,6 @@
+import Constants from "expo-constants";
 import { useRouter } from "expo-router";
-import { Bell, ExternalLink, LogOut, Server, Sparkles, Trash2 } from "lucide-react-native";
+import { Bell, ExternalLink, LogOut, Server, Shield, Sparkles, Trash2 } from "lucide-react-native";
 import { useState } from "react";
 import { Linking, Pressable, StyleSheet, Switch, Text, View } from "react-native";
 import { ConnectionGuard } from "~/components/busabase/ConnectionGuard";
@@ -183,6 +184,28 @@ function SettingsContent() {
           </View>
         ) : null}
 
+        <View style={[styles.card, { backgroundColor: tokens.card, borderColor: tokens.border }]}>
+          <View style={styles.notificationTitle}>
+            <Shield size={18} color={tokens.foreground} />
+            <Text style={[typography.h2, { color: tokens.foreground }]}>About</Text>
+          </View>
+          <View style={styles.aboutRow}>
+            <Text style={[typography.body, { color: tokens.foreground }]}>Busabase</Text>
+            <Text style={[typography.small, { color: tokens.mutedForeground }]}>
+              {`v${Constants.expoConfig?.version ?? "—"}`}
+            </Text>
+          </View>
+          <Pressable
+            accessibilityRole="link"
+            accessibilityLabel="Open Privacy Policy"
+            style={styles.linkRow}
+            onPress={() => void Linking.openURL("https://busabase.com/privacy-policy")}
+          >
+            <ExternalLink size={16} color={tokens.primary} />
+            <Text style={[typography.small, { color: tokens.primary }]}>Privacy Policy</Text>
+          </Pressable>
+        </View>
+
         <View style={styles.actions}>
           <View style={styles.row}>
             <LogOut size={18} color={tokens.destructive} />
@@ -251,5 +274,6 @@ const styles = StyleSheet.create({
   },
   actions: { gap: 12 },
   row: { flexDirection: "row", alignItems: "flex-start", gap: 10 },
+  aboutRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   linkRow: { flexDirection: "row", alignItems: "center", gap: 8 },
 });

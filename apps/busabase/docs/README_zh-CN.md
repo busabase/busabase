@@ -1,8 +1,33 @@
-[English](../README.md) · **中文** · [日本語](./README_ja.md) · [한국어](./README_ko.md)
+<div align="center">
 
-# Busabase
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../public/icon-dark.svg" />
+  <img src="../public/icon.svg" alt="Busabase" width="96" height="96" />
+</picture>
 
-> 面向 AI 生成内容、业务数据、数据集与多模态知识的本地优先审核数据库。
+<h1>Busabase</h1>
+
+<p><b>面向 AI 生成内容、业务数据、数据集与多模态知识的本地优先审核数据库。</b><br/>
+AI 可以源源不断地生成数据 —— Busabase 让你在数据成为可信记录前先 <b>审核、批准、合并</b>。</p>
+
+<p>
+<a href="../README.md">English</a> &nbsp;·&nbsp; <b>中文</b> &nbsp;·&nbsp; <a href="./README_ja.md">日本語</a> &nbsp;·&nbsp; <a href="./README_ko.md">한국어</a>
+</p>
+
+<p>
+<a href="https://www.npmjs.com/package/busabase"><img src="https://img.shields.io/npm/v/busabase?logo=npm&label=busabase&color=3fb950" alt="npm busabase" /></a>
+<a href="https://www.npmjs.com/package/busabase-cli"><img src="https://img.shields.io/npm/v/busabase-cli?logo=npm&label=busabase-cli&color=3fb950" alt="npm busabase-cli" /></a>
+<a href="https://hub.docker.com/r/busabase/busabase"><img src="https://img.shields.io/docker/image-size/busabase/busabase/latest?logo=docker&label=docker" alt="Docker image" /></a>
+<a href="https://busabase.com/download"><img src="https://img.shields.io/badge/Desktop-Download-1f6feb?logo=tauri&logoColor=white" alt="Download Busabase Desktop" /></a>
+<a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License MIT" /></a>
+<a href="https://github.com/busabase/busabase/stargazers"><img src="https://img.shields.io/github/stars/busabase/busabase?style=social" alt="GitHub stars" /></a>
+</p>
+
+<br/>
+
+<img src="../public/assets/readme/busabase-hero.gif" alt="Busabase" width="100%" />
+
+</div>
 
 Busabase 是一款开源应用，专为解决一个简单的问题而生：
 
@@ -88,21 +113,7 @@ Busabase 面向的是重度使用 AI 的团队如今所需的中间层：
 
 ## 工作原理
 
-```mermaid
-flowchart LR
-  A["人工或 AI 智能体提交内容 / 数据"] --> B["变更请求"]
-  B --> C["操作：创建、更新、删除或变体"]
-  C --> D["提交快照"]
-  D --> E["审核"]
-  E -->|要求智能体修改| J["ACP 智能体改进提案"]
-  J --> C
-  E -->|批准| F["合并"]
-  E -->|拒绝| G["已拒绝请求"]
-  F --> H["可信记录"]
-  H --> I["控制台、API、Next.js、ERP 流程、AI 工具"]
-  H --> K["自动化触发"]
-  K --> L["Webhook、工作流或外部 ACP 智能体"]
-```
+![Busabase 工作流程：提交 → 变更请求 → 审核 → 合并 → 数据库与知识库](../public/assets/readme/how-it-works.png)
 
 核心概念：
 
