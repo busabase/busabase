@@ -1,6 +1,24 @@
 import type { DemoUseCase } from "../../context";
 import type { SeedChangeRequestDef, SeedRecordDef, SeedScenario, SeedViewDef } from "../seed-types";
 
+// Image evidence (audit/review screenshots) so the Compliance "Evidence"
+// attachment column shows thumbnails instead of an empty "-".
+const EVIDENCE_URLS = [
+  "/assets/readme/busabase-record-detail-audit.png",
+  "/assets/readme/busabase-inbox-review.png",
+  "/assets/readme/scenarios/canonical-base.png",
+];
+const evidenceShot = (slug: string, i = 0) => [
+  {
+    id: `att_${slug}`,
+    attachmentId: `att_${slug}`,
+    fileName: `${slug}.png`,
+    mimeType: "image/png",
+    size: 150000 + i * 1300,
+    url: EVIDENCE_URLS[i % EVIDENCE_URLS.length],
+  },
+];
+
 const ids = {
   knowledgeFolder: "nod_knowledge",
   knowledgeBase: "bse_local_private_knowledge",
@@ -1131,7 +1149,7 @@ const records: SeedRecordDef[] = [
     commitId: ids.complianceCommit,
     fields: {
       due_date: "2026-06-24",
-      evidence: [],
+      evidence: evidenceShot("comp-admin-access-export", 0),
       item: "Quarterly admin access review",
       notes: "Waiting on exported admin list and reviewer sign-off.",
       owner: "security@busabase.local",
@@ -1153,7 +1171,7 @@ const records: SeedRecordDef[] = [
       status: "review",
       notes:
         "Resend DPA signed. Checking data residency clause — EU region only required per enterprise contract.",
-      evidence: [],
+      evidence: evidenceShot("comp-resend-dpa", 1),
     },
     message: "Seed GDPR vendor audit",
     author: "seed-compliance",
@@ -1171,7 +1189,7 @@ const records: SeedRecordDef[] = [
       status: "open",
       notes:
         "Current retention: 90 days. Legal wants 1 year for enterprise tier. Needs sign-off from CTO.",
-      evidence: [],
+      evidence: evidenceShot("comp-retention-audit-log", 2),
     },
     message: "Seed data retention policy review",
     author: "seed-compliance",
@@ -1188,7 +1206,7 @@ const records: SeedRecordDef[] = [
       due_date: "2026-06-15",
       status: "approved",
       notes: "Scope confirmed: /api/* endpoints, auth flow, file upload. Test window: July 14-18.",
-      evidence: [],
+      evidence: evidenceShot("comp-pentest-scope", 0),
     },
     message: "Seed pentest scope approval",
     author: "seed-compliance",
@@ -2806,6 +2824,14 @@ const ROUTINE_RUNS = [
 ];
 const ROUTINE_TEAMS = ["Support", "Data", "Security", "Growth"];
 const ROUTINE_STATUS = ["queued", "needs-review", "approved"] as const;
+const ROUTINE_FINDINGS = [
+  (n: number, f: number) =>
+    `Agent processed ${n} items; ${f} flagged for human review before notification.`,
+  (n: number, f: number) =>
+    `Run covered ${n} checks — ${f} need a reviewer's confirmation; the rest passed cleanly.`,
+  (n: number, f: number) =>
+    `${n} items summarized by the agent; ${f} escalated for human sign-off, others auto-cleared.`,
+];
 const bulkRoutine = bulkRows(
   ids.routineBase,
   "routine",
@@ -2817,7 +2843,7 @@ const bulkRoutine = bulkRows(
       run: `${run} — ${dueDate(i)}`,
       team: pick(ROUTINE_TEAMS, i),
       run_date: dueDate(i),
-      findings: `Agent processed ${10 + i} items; ${i % 4} flagged for human review before notification.`,
+      findings: ROUTINE_FINDINGS[i % ROUTINE_FINDINGS.length](10 + i, i % 4),
       status: pick(ROUTINE_STATUS, i),
       ready_to_notify: i % 3 === 2,
     },
@@ -2845,6 +2871,14 @@ const COMPLIANCE_ITEMS = [
 ];
 const COMPLIANCE_OWNERS = ["compliance@busabase.local", "security@busabase.local"];
 const COMPLIANCE_STATUS = ["missing", "review", "complete"] as const;
+const COMPLIANCE_NOTES = [
+  (item: string) =>
+    `${item}: evidence exported and attached; reviewer confirmed against the quarterly audit plan.`,
+  (item: string) =>
+    `${item}: control re-tested this period — screenshot attached, awaiting a second sign-off.`,
+  (item: string) =>
+    `${item}: prior finding remediated; the attached export shows the control now passing.`,
+];
 const bulkCompliance = bulkRows(
   ids.complianceBase,
   "compliance",
@@ -2857,7 +2891,8 @@ const bulkCompliance = bulkRows(
       owner: pick(COMPLIANCE_OWNERS, i),
       due_date: dueDate(i),
       status: pick(COMPLIANCE_STATUS, i),
-      notes: `Evidence attached and reviewed. Control checked against the quarterly audit plan.`,
+      notes: COMPLIANCE_NOTES[i % COMPLIANCE_NOTES.length](item),
+      evidence: evidenceShot(`comp-bulk-${i}`, i),
     },
     message: `Seed compliance item: ${item}`,
   })),
@@ -2933,6 +2968,14 @@ const CONTENT_TITLES = [
 ];
 const CONTENT_CHANNEL = ["blog", "youtube", "social"] as const;
 const CONTENT_STATUS = ["idea", "draft", "ready"] as const;
+const CONTENT_BRIEFS = [
+  (t: string) =>
+    `## ${t}\n\nDraft covers the angle, target reader, and CTA; routed through review before it ships.`,
+  (t: string) =>
+    `## ${t}\n\nAgent drafted the outline and key points — a human edits and approves before publishing.`,
+  (t: string) =>
+    `## ${t}\n\nSource-cited draft ready for review; positioning checked against the messaging guide.`,
+];
 const bulkContent = bulkRows(
   ids.contentBase,
   "content",
@@ -2942,7 +2985,7 @@ const bulkContent = bulkRows(
   CONTENT_TITLES.map((title, i) => ({
     fields: {
       title,
-      brief: `## ${title}\n\nAngle, audience, and CTA defined. Draft routed through review before publishing.`,
+      brief: CONTENT_BRIEFS[i % CONTENT_BRIEFS.length](title),
       channel: pick(CONTENT_CHANNEL, i),
       status: pick(CONTENT_STATUS, i),
       seo_title: `${title} | Busabase`,
@@ -3076,6 +3119,21 @@ const CONFIG_SERVICES = [
 ];
 const CONFIG_ENV = ["development", "staging", "production"] as const;
 const CONFIG_STATUS = ["active", "degraded", "maintenance"] as const;
+const CONFIG_YAML = [
+  (n: string, i: number) =>
+    `service: ${n}\nreplicas: ${2 + (i % 4)}\nport: ${8000 + i}\nresources:\n  cpu: "${250 + (i % 3) * 250}m"\n  memory: "${256 + (i % 3) * 256}Mi"\nhealthcheck: /healthz`,
+  (n: string, i: number) =>
+    `service: ${n}\nrate_limit:\n  rps: ${100 + i * 25}\n  burst: ${200 + i * 25}\ntimeout_ms: ${500 + i * 50}\nretry:\n  attempts: 3\n  backoff_ms: 200`,
+  (n: string, i: number) =>
+    `service: ${n}\nreplicas: ${2 + (i % 3)}\nautoscale:\n  min: ${2 + (i % 3)}\n  max: ${6 + (i % 4)}\n  target_cpu: 70\nlog_level: info`,
+];
+const CONFIG_NOTES = [
+  (n: string) => `Agent proposed a ${n} config change — pending team approval before deploy.`,
+  (n: string) =>
+    `Routine reconcile of ${n}: drift detected vs the approved baseline, awaiting sign-off.`,
+  (n: string) =>
+    `${n}: scaling/limit tuning suggested by the agent; review the diff before it ships.`,
+];
 const bulkConfig = bulkRows(
   ids.configBase,
   "config",
@@ -3086,11 +3144,11 @@ const bulkConfig = bulkRows(
     fields: {
       name,
       environment: pick(CONFIG_ENV, i),
-      config: `service: ${name}\nreplicas: ${2 + (i % 4)}\ntimeout_ms: ${500 + i * 50}\nretry:\n  attempts: 3\n  backoff_ms: 200`,
+      config: CONFIG_YAML[i % CONFIG_YAML.length](name, i),
       overrides: `{\n  "log_level": "info",\n  "canary": ${i % 2 === 0}\n}`,
       status: pick(CONFIG_STATUS, i),
       deployed_at: dueDate(i),
-      notes: `Agent-proposed config change; pending team approval before deploy.`,
+      notes: CONFIG_NOTES[i % CONFIG_NOTES.length](name),
     },
     message: `Seed service config: ${name}`,
   })),

@@ -523,6 +523,17 @@ const shots = [
     url: `${BASE}/dashboard/base/blog?demo=1`,
     waitFor: "text=Blog Posts",
   },
+  {
+    // Rich base with image thumbnails — labeling queue shows asset column
+    file: "busabase-base-records.png",
+    url: `${BASE}/dashboard/base/labeling-queue?demo=labeling`,
+    waitFor: "text=Labeling Queue",
+  },
+  {
+    file: "busabase-graph-view.png",
+    url: `${BASE}/dashboard/graph?demo=1`,
+    waitFor: "text=Graph View",
+  },
 ];
 
 await fs.promises.mkdir(SCENARIO_OUT, { recursive: true });

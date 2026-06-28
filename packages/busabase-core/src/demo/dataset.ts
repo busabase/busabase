@@ -1434,20 +1434,16 @@ const BULK_BLOGS: SeedRecordDef[] = BULK_BLOG_SOURCE.map((b, i) => {
     commitId: `cmt_seed_blog_bulk_${pad3(i)}`,
     fields: {
       title: b.title,
-      ...(b.cover
-        ? {
-            cover_image: [
-              {
-                id: `att_blog_bulk_cover_${pad3(i)}`,
-                attachmentId: `att_blog_bulk_cover_${pad3(i)}`,
-                fileName: `${b.title.toLowerCase().replace(/[^a-z0-9]+/g, "-")}.png`,
-                mimeType: "image/png",
-                size: 180000 + i * 1200,
-                url: BLOG_COVERS[i % BLOG_COVERS.length],
-              },
-            ],
-          }
-        : {}),
+      cover_image: [
+        {
+          id: `att_blog_bulk_cover_${pad3(i)}`,
+          attachmentId: `att_blog_bulk_cover_${pad3(i)}`,
+          fileName: `${b.title.toLowerCase().replace(/[^a-z0-9]+/g, "-")}.png`,
+          mimeType: "image/png",
+          size: 180000 + i * 1200,
+          url: BLOG_COVERS[i % BLOG_COVERS.length],
+        },
+      ],
       body: b.body,
       ai_summary: b.summary,
       ai_tags: b.tags,
@@ -1465,7 +1461,9 @@ const BULK_BLOGS: SeedRecordDef[] = BULK_BLOG_SOURCE.map((b, i) => {
     author: "seed-editor",
     minutesAgo: 300 + i * 9,
     createdTimeSlug: "created_time",
-    useCases: ["blog"],
+    // also surface in the "canonical records" scenario so its Blog Posts base
+    // isn't down to a single approved record
+    useCases: ["blog", "canonical"],
   };
 });
 
