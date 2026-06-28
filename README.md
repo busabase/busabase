@@ -1,6 +1,9 @@
 <div align="center">
 
-<img src="./apps/busabase/public/icon.svg" alt="Busabase" width="88" height="88" />
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="./apps/busabase/public/icon-dark.svg" />
+  <img src="./apps/busabase/public/icon.svg" alt="Busabase" width="88" height="88" />
+</picture>
 
 <h1>Busabase</h1>
 
