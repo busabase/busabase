@@ -1,8 +1,8 @@
 <div align="center">
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="./public/icon-dark.svg" />
-  <img src="./public/icon.svg" alt="Busabase" width="88" height="88" />
+  <source media="(prefers-color-scheme: dark)" srcset="./public/logomark-dark.svg" />
+  <img src="./public/logomark.svg" alt="Busabase" width="96" height="96" />
 </picture>
 
 <h1>Busabase</h1>
