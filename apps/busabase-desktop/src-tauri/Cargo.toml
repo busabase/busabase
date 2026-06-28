@@ -1,0 +1,22 @@
+[package]
+name = "busabase_desktop"
+version = "0.1.0"
+description = "Busabase Desktop - private local-first Busabase knowledge base shell"
+authors = ["Busabase Team"]
+edition = "2021"
+default-run = "busabase_desktop"
+
+[lib]
+name = "busabase_desktop_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.0", features = [] }
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+semver = "1"
+tauri = { version = "2.0", features = [] }
+tauri-plugin-opener = "2.0"
+tauri-plugin-updater = "2.0"

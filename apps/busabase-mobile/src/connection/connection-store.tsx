@@ -1,0 +1,173 @@
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import Constants from "expo-constants";
+import {
+  createContext,
+  type ReactNode,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
+import { normalizeServerUrl } from "./server-url";
+import type { BusabaseConnection, ConnectionState } from "./types";
+
+const STORAGE_KEY = "busabase-mobile.connection.v1";
+const RECENT_SERVER_KEY = "busabase-mobile.recent-server-url.v1";
+const SERVER_HISTORY_KEY = "busabase-mobile.server-history.v1";
+const MAX_HISTORY = 5;
+
+// Preset hosted demo server (app.json → expo.extra.busabase.demoServerUrl). Enables a
+// one-tap "Try the demo" so App Review and new users can use the app without
+// self-hosting. null when not configured (the demo entry is then hidden).
+const DEMO_SERVER_URL: string | null =
+  (Constants.expoConfig?.extra as { busabase?: { demoServerUrl?: string } } | undefined)?.busabase
+    ?.demoServerUrl ?? null;
+
+interface ConnectionContextValue {
+  state: ConnectionState;
+  connectSelfHosted: (serverUrl: string) => Promise<void>;
+  /** One-tap connect to the preset hosted demo server. */
+  connectDemo: () => Promise<void>;
+  /** Preset demo server URL, or null when not configured. */
+  demoServerUrl: string | null;
+  disconnect: () => Promise<void>;
+  removeServerFromHistory: (serverUrl: string) => Promise<void>;
+}
+
+const ConnectionContext = createContext<ConnectionContextValue | null>(null);
+
+function parseHistory(raw: string | null): string[] {
+  try {
+    const parsed = raw ? (JSON.parse(raw) as unknown) : [];
+    return Array.isArray(parsed)
+      ? parsed.filter((item): item is string => typeof item === "string")
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+export function ConnectionProvider({ children }: { children: ReactNode }) {
+  const [state, setState] = useState<ConnectionState>({
+    status: "loading",
+    connection: null,
+    recentServerUrl: null,
+    serverHistory: [],
+  });
+
+  useEffect(() => {
+    void Promise.all([
+      AsyncStorage.getItem(STORAGE_KEY),
+      AsyncStorage.getItem(RECENT_SERVER_KEY),
+      AsyncStorage.getItem(SERVER_HISTORY_KEY),
+    ])
+      .then(([raw, recentServerUrl, historyRaw]) => {
+        const serverHistory = parseHistory(historyRaw);
+        if (!raw) {
+          setState({ status: "disconnected", connection: null, recentServerUrl, serverHistory });
+          return;
+        }
+        const connection = JSON.parse(raw) as BusabaseConnection;
+        setState({
+          status: "connected",
+          connection,
+          recentServerUrl: recentServerUrl ?? connection.serverUrl,
+          serverHistory,
+        });
+      })
+      .catch(() =>
+        setState({
+          status: "disconnected",
+          connection: null,
+          recentServerUrl: null,
+          serverHistory: [],
+        }),
+      );
+  }, []);
+
+  const connectWithMode = useCallback(async (input: string, mode: BusabaseConnection["mode"]) => {
+    const serverUrl = normalizeServerUrl(input);
+    const connection: BusabaseConnection = {
+      mode,
+      serverUrl,
+      connectedAt: new Date().toISOString(),
+    };
+    let nextHistory: string[] = [];
+    setState((current) => {
+      // Don't pollute the self-hosted history list with the demo server.
+      nextHistory =
+        mode === "demo"
+          ? current.serverHistory
+          : [serverUrl, ...current.serverHistory.filter((url) => url !== serverUrl)].slice(
+              0,
+              MAX_HISTORY,
+            );
+      return {
+        status: "connected",
+        connection,
+        recentServerUrl: serverUrl,
+        serverHistory: nextHistory,
+      };
+    });
+    await Promise.all([
+      AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(connection)),
+      AsyncStorage.setItem(RECENT_SERVER_KEY, serverUrl),
+      AsyncStorage.setItem(SERVER_HISTORY_KEY, JSON.stringify(nextHistory)),
+    ]);
+  }, []);
+
+  const connectSelfHosted = useCallback(
+    (input: string) => connectWithMode(input, "self-hosted"),
+    [connectWithMode],
+  );
+
+  const connectDemo = useCallback(async () => {
+    if (!DEMO_SERVER_URL) {
+      throw new Error("No demo server is configured");
+    }
+    await connectWithMode(DEMO_SERVER_URL, "demo");
+  }, [connectWithMode]);
+
+  const disconnect = useCallback(async () => {
+    await AsyncStorage.removeItem(STORAGE_KEY);
+    setState((current) => ({
+      status: "disconnected",
+      connection: null,
+      recentServerUrl:
+        current.status === "connected" ? current.connection.serverUrl : current.recentServerUrl,
+      serverHistory: current.serverHistory,
+    }));
+  }, []);
+
+  const removeServerFromHistory = useCallback(async (serverUrl: string) => {
+    let nextHistory: string[] = [];
+    setState((current) => {
+      nextHistory = current.serverHistory.filter((url) => url !== serverUrl);
+      return { ...current, serverHistory: nextHistory };
+    });
+    await AsyncStorage.setItem(SERVER_HISTORY_KEY, JSON.stringify(nextHistory));
+  }, []);
+
+  const value = useMemo(
+    () => ({
+      state,
+      connectSelfHosted,
+      connectDemo,
+      demoServerUrl: DEMO_SERVER_URL,
+      disconnect,
+      removeServerFromHistory,
+    }),
+    [state, connectSelfHosted, connectDemo, disconnect, removeServerFromHistory],
+  );
+
+  return <ConnectionContext.Provider value={value}>{children}</ConnectionContext.Provider>;
+}
+
+export function useConnection() {
+  const context = useContext(ConnectionContext);
+  if (!context) {
+    throw new Error("useConnection must be used inside ConnectionProvider");
+  }
+  return context;
+}

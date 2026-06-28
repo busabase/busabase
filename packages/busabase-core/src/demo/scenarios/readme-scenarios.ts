@@ -1452,7 +1452,7 @@ const records: SeedRecordDef[] = [
           fileName: "inbox-approval-flow.png",
           mimeType: "image/png",
           size: 142336,
-          url: "/assets/readme/scenarios/inbox-record.png",
+          url: "/assets/readme/busabase-inbox-review.png",
         },
       ],
       caption: "User opens the Inbox, sees a pending Change Request, and clicks Approve.",
@@ -2883,6 +2883,14 @@ const RESEARCH_SIGNALS = [
 ];
 const RESEARCH_COMPETITORS = ["Notion", "Airtable", "Coda", "Retool"];
 const RESEARCH_IMPORTANCE = ["low", "medium", "high"] as const;
+const RESEARCH_SUMMARIES = [
+  (s: string, c: string) =>
+    `**${s}.** Corroborated across two outlets; overlaps ${c}'s roadmap, so the analyst flagged it for review.`,
+  (s: string, c: string) =>
+    `**${s}.** Single-source signal pending a second citation; watching whether ${c} responds.`,
+  (s: string, c: string) =>
+    `**${s}.** Strong signal — multiple threads plus a ${c} changelog entry; recommend a positioning note.`,
+];
 const bulkResearch = bulkRows(
   ids.researchBase,
   "research",
@@ -2892,8 +2900,11 @@ const bulkResearch = bulkRows(
   RESEARCH_SIGNALS.map((signal, i) => ({
     fields: {
       signal,
-      source_url: `https://signals.busabase.local/${i}`,
-      summary: `**${signal}.** Cited from a tracked source; confidence reflects corroboration across outlets.`,
+      source_url: `https://news.busabase.local/${signal.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`,
+      summary: RESEARCH_SUMMARIES[i % RESEARCH_SUMMARIES.length](
+        signal,
+        pick(RESEARCH_COMPETITORS, i),
+      ),
       competitor: pick(RESEARCH_COMPETITORS, i),
       importance: pick(RESEARCH_IMPORTANCE, i),
       confidence: 60 + ((i * 7) % 40),
@@ -2999,6 +3010,24 @@ const LABELING_ITEMS = [
 ];
 const LABELING_LABELS: string[][] = [["dashboard"], ["review"], ["risk"], ["dashboard", "review"]];
 const LABELING_STATUS = ["queued", "needs-correction", "approved"] as const;
+// Real product screenshots used as the labeled media so the queue shows
+// thumbnails (every clip/frame is a captured frame of the Busabase UI).
+const LABELING_ASSET_URLS = [
+  "/assets/readme/scenarios/multimodal-review-base.png",
+  "/assets/readme/busabase-inbox-review.png",
+  "/assets/readme/scenarios/canonical-base.png",
+  "/assets/readme/busabase-record-detail-audit.png",
+  "/assets/readme/scenarios/field-types-record.png",
+  "/assets/readme/busabase-base-table.png",
+];
+const LABELING_CAPTIONS = [
+  (item: string) =>
+    `${item}: the model proposed scene labels from this frame — a reviewer confirms before it becomes a trusted record.`,
+  (item: string) =>
+    `Auto-generated description of ${item.toLowerCase()}, flagged for human review of accuracy and tags.`,
+  (item: string) =>
+    `Agent caption for ${item.toLowerCase()}, pending a reviewer's correction of any mislabeled objects.`,
+];
 const bulkLabeling = bulkRows(
   ids.labelingBase,
   "labeling",
@@ -3008,10 +3037,20 @@ const bulkLabeling = bulkRows(
   LABELING_ITEMS.map((item, i) => ({
     fields: {
       item,
-      caption: `Agent-generated caption for ${item.toLowerCase()}; awaiting human confirmation.`,
+      caption: LABELING_CAPTIONS[i % LABELING_CAPTIONS.length](item),
       labels: pick(LABELING_LABELS, i),
       status: pick(LABELING_STATUS, i),
       confidence: 50 + ((i * 11) % 50),
+      asset: [
+        {
+          id: `att_seed_label_bulk_${i}`,
+          attachmentId: `att_seed_label_bulk_${i}`,
+          fileName: `${item.toLowerCase().replace(/[^a-z0-9]+/g, "-")}.png`,
+          mimeType: "image/png",
+          size: 90000 + i * 1200,
+          url: LABELING_ASSET_URLS[i % LABELING_ASSET_URLS.length],
+        },
+      ],
     },
     message: `Seed labeling item: ${item}`,
   })),

@@ -1,0 +1,13 @@
+{
+  "extends": "expo/tsconfig.base",
+  "compilerOptions": {
+    "strict": true,
+    "paths": {
+      "busabase-core": ["../../packages/busabase-core/src/index.ts"],
+      "busabase-core/*": ["../../packages/busabase-core/src/*"],
+      "~/*": ["./src/*"],
+      "@/*": ["./*"]
+    }
+  },
+  "include": ["**/*.ts", "**/*.tsx", ".expo/types/**/*.ts", "expo-env.d.ts"]
+}

@@ -48,7 +48,10 @@ jobs:
           echo "//registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN}" >> .npmrc
           echo "registry=https://registry.npmjs.org/" >> .npmrc
 
-      - run: pnpm install --frozen-lockfile
+      # Only install the server-side subtrees. The repo also holds busabase-desktop
+      # and busabase-mobile (Expo/RN); installing those here would pull React Native
+      # and run their native postinstall scripts for no reason on an npm publish.
+      - run: pnpm install --frozen-lockfile --filter "busabase..." --filter "busabase-cli..."
 
       - name: Get versions
         id: v

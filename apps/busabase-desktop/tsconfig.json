@@ -1,0 +1,48 @@
+{
+  "compilerOptions": {
+    "target": "ESNext",
+    "useDefineForClassFields": true,
+    "lib": ["ESNext", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "skipLibCheck": true,
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "noEmit": true,
+    "jsx": "react-jsx",
+    "strict": true,
+    "noFallthroughCasesInSwitch": true,
+    "baseUrl": ".",
+    "allowJs": true,
+    "incremental": true,
+    "esModuleInterop": true,
+    "paths": {
+      "kui/styles.css": ["../../packages/kui/src/styles.css"],
+      "kui/ai-elements/*": ["../../packages/kui/src/components/ai-elements/*"],
+      "kui/hooks/*": ["../../packages/kui/src/hooks/*"],
+      "kui/tour": ["../../packages/kui/src/components/tour.tsx"],
+      "kui/utils": ["../../packages/kui/src/lib/utils.ts"],
+      "kui/*": ["../../packages/kui/src/components/ui/*"],
+      "busabase-core": ["../../packages/busabase-core/src/index.ts"],
+      "busabase-core/api-client": ["../../packages/busabase-core/src/api-client/index.ts"],
+      "busabase-core/dashboard": ["../../packages/busabase-core/src/dashboard/index.tsx"],
+      "busabase-core/types": ["../../packages/busabase-core/src/types/index.ts"],
+      "busabase-core/*": ["../../packages/busabase-core/src/*"],
+      "sharelib/*": ["../../packages/sharelib/*"]
+    },
+    "plugins": [
+      {
+        "name": "next"
+      }
+    ]
+  },
+  "include": [
+    "next-env.d.ts",
+    "src/**/*.ts",
+    "src/**/*.tsx",
+    ".next/types/**/*.ts",
+    ".next/dev/types/**/*.ts"
+  ],
+  "exclude": ["node_modules", ".next/types/validator.ts", ".next/dev/types/validator.ts"]
+}

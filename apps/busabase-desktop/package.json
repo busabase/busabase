@@ -1,0 +1,45 @@
+{
+  "name": "@busabase/desktop",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "next dev --port 3064",
+    "build": "next build",
+    "prepare:tauri": "node scripts/prepare-tauri-build.mjs",
+    "preview": "npx serve out",
+    "typecheck": "next typegen && tsc --noEmit",
+    "tauri": "tauri"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2.11.0",
+    "@tauri-apps/plugin-opener": "^2",
+    "@tauri-apps/plugin-updater": "^2.10.1",
+    "kui": "workspace:*",
+    "lucide-react": "^0.556.0",
+    "next": "16.2.6",
+    "busabase-core": "workspace:*",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7",
+    "wouter": "^3.9.0"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.11.0",
+    "@types/node": "^25.0.10",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "typescript": "^5.9.3"
+  },
+  "appStatus": {
+    "port": 3064,
+    "description": "Busabase private local-first desktop shell with an OSS sidecar",
+    "status": "in development",
+    "openCore": true,
+    "features": {
+      "desktop": true,
+      "sidecar": true,
+      "localKnowledgeBase": true,
+      "cloudRelay": false
+    }
+  }
+}

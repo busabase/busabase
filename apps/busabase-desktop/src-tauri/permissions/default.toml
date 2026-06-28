@@ -1,0 +1,9 @@
+[[permission]]
+identifier = "allow-busabase-sidecar-control"
+description = "Allows Busabase Desktop to inspect and control the local Busabase OSS sidecar."
+commands.allow = ["busabase_sidecar_status", "start_busabase_sidecar", "stop_busabase_sidecar"]
+
+[[permission]]
+identifier = "allow-request-desktop-restart"
+description = "Allows the frontend to restart Busabase Desktop after an update is installed."
+commands.allow = ["request_desktop_restart"]
