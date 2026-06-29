@@ -1,3 +1,4 @@
+import { skipToken, useQuery } from "@tanstack/react-query";
 import { getNodeType, hasCapability } from "busabase-core/domains";
 import type { NodeVO } from "busabase-core/types";
 import { usePathname, useRouter } from "expo-router";
@@ -16,12 +17,11 @@ import {
   Table2,
   X,
 } from "lucide-react-native";
-import { type ReactNode, useCallback, useState } from "react";
+import { type ReactNode, useState } from "react";
 import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
-import { useBusabaseClient } from "~/api/use-busabase-client";
+import { useBusabaseOrpc } from "~/api/use-busabase-orpc";
 import { NativeScreen } from "~/components/native-screen";
 import { useConnection } from "~/connection/connection-store";
-import { useNativeQuery } from "~/hooks/use-native-query";
 import { mobile, radius, typography } from "~/theme/tokens";
 import { useTokens } from "~/theme/use-tokens";
 import { CreateBaseModal } from "./CreateBaseModal";
@@ -55,11 +55,17 @@ export function DrawerScaffold({
   const pathname = usePathname();
   const tokens = useTokens();
   const { state } = useConnection();
-  const client = useBusabaseClient();
+  const buda = useBusabaseOrpc();
   const [open, setOpen] = useState(false);
   const [createBaseOpen, setCreateBaseOpen] = useState(false);
-  const loadNodes = useCallback(() => client?.nodes.list() ?? Promise.resolve([]), [client]);
-  const nodesQuery = useNativeQuery<NodeVO[]>(open && !!client, loadNodes);
+
+  const nodesQuery = useQuery({
+    ...(buda
+      ? buda.orpc.nodes.list.queryOptions()
+      : { queryKey: ["no-connection", "nodes"], queryFn: skipToken }),
+    enabled: open && !!buda,
+  });
+
   // Unwrap the single root workspace folder so its contents show directly,
   // instead of a redundant "Local workspace" row (matches the web sidebar).
   const treeNodes =
@@ -203,7 +209,7 @@ export function DrawerScaffold({
                   </Pressable>
                 </View>
                 <View style={styles.nav}>
-                  {nodesQuery.loading ? (
+                  {nodesQuery.isLoading ? (
                     <Text
                       style={[
                         typography.small,
@@ -221,7 +227,7 @@ export function DrawerScaffold({
                       Could not load bases
                     </Text>
                   ) : null}
-                  {!nodesQuery.loading && !nodesQuery.error && treeNodes.length === 0 ? (
+                  {!nodesQuery.isLoading && !nodesQuery.error && treeNodes.length === 0 ? (
                     <Text
                       style={[
                         typography.small,

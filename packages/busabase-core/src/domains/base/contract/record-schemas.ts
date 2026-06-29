@@ -19,6 +19,21 @@ export const recordSchema = z.object({
   headCommit: commitSchema,
 });
 
+export const listRecordsInputSchema = z
+  .object({
+    limit: z.coerce.number().int().min(1).max(100).optional().default(50),
+    baseId: z.string().optional(),
+    /** Opaque base64 cursor (`createdAt:id`) for keyset pagination. */
+    cursor: z.string().optional(),
+  })
+  .optional()
+  .default({ limit: 50 });
+
+export const listRecordsResponseSchema = z.object({
+  records: z.array(recordSchema),
+  nextCursor: z.string().nullable(),
+});
+
 export const createChangeRequestInputSchema = z.object({
   fields: z.record(z.string(), z.unknown()),
   message: z.string().optional().default("Initial change request"),
@@ -30,4 +45,23 @@ export const recordFieldFilterInputSchema = z.object({
   fieldSlug: z.string().min(1),
   valueText: z.string().min(1),
   limit: z.coerce.number().int().min(1).max(100).optional().default(50),
+});
+
+export const restoreRecordInputSchema = z.object({
+  message: z.string().optional(),
+  submittedBy: z.string().optional().default("local-editor"),
+});
+
+export const recordLinkSchema = z.object({
+  id: z.string(),
+  baseId: z.string(),
+  fieldId: z.string(),
+  fieldSlug: z.string(),
+  sourceRecordId: z.string(),
+  targetBaseId: z.string(),
+  targetRecordId: z.string(),
+  commitId: z.string(),
+  position: z.number(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
 });

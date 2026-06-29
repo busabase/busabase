@@ -53,12 +53,14 @@
     "db:seed:all:zh-CN": "NODE_OPTIONS='--conditions react-server' tsx src/db/seed/seed-zh-cn.ts"
   },
   "dependencies": {
+    "busabase-cli": "workspace:*"
+  },
+  "devDependencies": {
     "@electric-sql/pglite": "^0.3.15",
     "@orpc/client": "^1.14.6",
     "@orpc/contract": "^1.14.6",
     "@orpc/openapi": "^1.14.6",
     "@orpc/server": "^1.14.6",
-    "busabase-cli": "workspace:*",
     "@tanstack/react-query": "^5.101.0",
     "drizzle-orm": "^0.45.1",
     "kui": "workspace:*",
@@ -72,9 +74,7 @@
     "server-only": "^0.0.1",
     "openlib": "workspace:*",
     "wouter": "^3.9.0",
-    "zod": "^4.3.6"
-  },
-  "devDependencies": {
+    "zod": "^4.3.6",
     "@playwright/test": "^1.56.1",
     "@tailwindcss/postcss": "^4.1.17",
     "@types/node": "^24.10.0",

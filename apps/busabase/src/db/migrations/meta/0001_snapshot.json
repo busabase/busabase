@@ -1,304 +1,9 @@
 {
-  "id": "6098ed6f-4769-469a-8b66-c66eed8b6acf",
-  "prevId": "ae66bfc0-fda3-4f27-bdb5-c3ee2750f576",
+  "id": "52bb83e0-c4d4-4095-8135-714f15317d89",
+  "prevId": "24bdcec6-1eea-4bd7-a8cd-fa100655fd0f",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
-    "public.busabase_change_requests": {
-      "name": "busabase_change_requests",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "base_id": {
-          "name": "base_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "status": {
-          "name": "status",
-          "type": "busabase_change_request_status",
-          "typeSchema": "public",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'in_review'"
-        },
-        "submitted_by": {
-          "name": "submitted_by",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "source_meta": {
-          "name": "source_meta",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'{}'::jsonb"
-        },
-        "review_policy_snapshot": {
-          "name": "review_policy_snapshot",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'{}'::jsonb"
-        },
-        "merge_summary": {
-          "name": "merge_summary",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'{}'::jsonb"
-        },
-        "rejected_reason": {
-          "name": "rejected_reason",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "reviewed_at": {
-          "name": "reviewed_at",
-          "type": "timestamp",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "merged_at": {
-          "name": "merged_at",
-          "type": "timestamp",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "busabase_change_requests_base_created_idx": {
-          "name": "busabase_change_requests_base_created_idx",
-          "columns": [
-            {
-              "expression": "base_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "created_at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "busabase_change_requests_status_created_idx": {
-          "name": "busabase_change_requests_status_created_idx",
-          "columns": [
-            {
-              "expression": "status",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "created_at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "busabase_change_requests_base_id_busabase_bases_id_fk": {
-          "name": "busabase_change_requests_base_id_busabase_bases_id_fk",
-          "tableFrom": "busabase_change_requests",
-          "tableTo": "busabase_bases",
-          "columnsFrom": ["base_id"],
-          "columnsTo": ["id"],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "public.busabase_views": {
-      "name": "busabase_views",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "base_id": {
-          "name": "base_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "slug": {
-          "name": "slug",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "name": {
-          "name": "name",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "description": {
-          "name": "description",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "''"
-        },
-        "type": {
-          "name": "type",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'table'"
-        },
-        "config": {
-          "name": "config",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'{}'::jsonb"
-        },
-        "status": {
-          "name": "status",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'active'"
-        },
-        "created_by": {
-          "name": "created_by",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "archived_at": {
-          "name": "archived_at",
-          "type": "timestamp",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "busabase_views_base_slug_uniq": {
-          "name": "busabase_views_base_slug_uniq",
-          "columns": [
-            {
-              "expression": "base_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "slug",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "busabase_views_base_status_position_idx": {
-          "name": "busabase_views_base_status_position_idx",
-          "columns": [
-            {
-              "expression": "base_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "status",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "created_at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "busabase_views_base_id_busabase_bases_id_fk": {
-          "name": "busabase_views_base_id_busabase_bases_id_fk",
-          "tableFrom": "busabase_views",
-          "tableTo": "busabase_bases",
-          "columnsFrom": ["base_id"],
-          "columnsTo": ["id"],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
     "public.busabase_audit_events": {
       "name": "busabase_audit_events",
       "schema": "",
@@ -307,6 +12,12 @@
           "name": "id",
           "type": "text",
           "primaryKey": true,
+          "notNull": true
+        },
+        "space_id": {
+          "name": "space_id",
+          "type": "text",
+          "primaryKey": false,
           "notNull": true
         },
         "action": {
@@ -484,8 +195,8 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public.busabase_base_fields": {
-      "name": "busabase_base_fields",
+    "public.busabase_change_requests": {
+      "name": "busabase_change_requests",
       "schema": "",
       "columns": {
         "id": {
@@ -494,56 +205,102 @@
           "primaryKey": true,
           "notNull": true
         },
+        "space_id": {
+          "name": "space_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
         "base_id": {
           "name": "base_id",
           "type": "text",
           "primaryKey": false,
-          "notNull": true
+          "notNull": false
         },
-        "slug": {
-          "name": "slug",
+        "target_type": {
+          "name": "target_type",
           "type": "text",
           "primaryKey": false,
-          "notNull": true
+          "notNull": true,
+          "default": "'base'"
         },
-        "name": {
-          "name": "name",
+        "node_id": {
+          "name": "node_id",
           "type": "text",
           "primaryKey": false,
-          "notNull": true
+          "notNull": false
         },
-        "type": {
-          "name": "type",
-          "type": "busabase_field_type",
+        "status": {
+          "name": "status",
+          "type": "busabase_change_request_status",
           "typeSchema": "public",
           "primaryKey": false,
+          "notNull": true,
+          "default": "'in_review'"
+        },
+        "submitted_by": {
+          "name": "submitted_by",
+          "type": "text",
+          "primaryKey": false,
           "notNull": true
         },
-        "required": {
-          "name": "required",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": false
-        },
-        "position": {
-          "name": "position",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
-        },
-        "options": {
-          "name": "options",
+        "source_meta": {
+          "name": "source_meta",
           "type": "jsonb",
           "primaryKey": false,
           "notNull": true,
           "default": "'{}'::jsonb"
+        },
+        "review_policy_snapshot": {
+          "name": "review_policy_snapshot",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'{}'::jsonb"
+        },
+        "merge_summary": {
+          "name": "merge_summary",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'{}'::jsonb"
+        },
+        "rejected_reason": {
+          "name": "rejected_reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "reviewed_at": {
+          "name": "reviewed_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "merged_at": {
+          "name": "merged_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
         }
       },
       "indexes": {
-        "busabase_fields_base_slug_uniq": {
-          "name": "busabase_fields_base_slug_uniq",
+        "busabase_change_requests_base_created_idx": {
+          "name": "busabase_change_requests_base_created_idx",
           "columns": [
             {
               "expression": "base_id",
@@ -552,121 +309,73 @@
               "nulls": "last"
             },
             {
-              "expression": "slug",
+              "expression": "created_at",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
             }
           ],
-          "isUnique": true,
+          "isUnique": false,
           "concurrently": false,
           "method": "btree",
           "with": {}
-        }
-      },
-      "foreignKeys": {
-        "busabase_base_fields_base_id_busabase_bases_id_fk": {
-          "name": "busabase_base_fields_base_id_busabase_bases_id_fk",
-          "tableFrom": "busabase_base_fields",
-          "tableTo": "busabase_bases",
-          "columnsFrom": ["base_id"],
-          "columnsTo": ["id"],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "public.busabase_bases": {
-      "name": "busabase_bases",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true
         },
-        "node_id": {
-          "name": "node_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "slug": {
-          "name": "slug",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "name": {
-          "name": "name",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "description": {
-          "name": "description",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "''"
-        },
-        "review_policy": {
-          "name": "review_policy",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'{\"kind\":\"single\",\"requiredApprovals\":1}'::jsonb"
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "busabase_bases_node_uniq": {
-          "name": "busabase_bases_node_uniq",
+        "busabase_change_requests_node_created_idx": {
+          "name": "busabase_change_requests_node_created_idx",
           "columns": [
             {
               "expression": "node_id",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "busabase_bases_slug_uniq": {
-          "name": "busabase_bases_slug_uniq",
-          "columns": [
+            },
             {
-              "expression": "slug",
+              "expression": "created_at",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
             }
           ],
-          "isUnique": true,
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "busabase_change_requests_status_created_idx": {
+          "name": "busabase_change_requests_status_created_idx",
+          "columns": [
+            {
+              "expression": "status",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
           "concurrently": false,
           "method": "btree",
           "with": {}
         }
       },
       "foreignKeys": {
-        "busabase_bases_node_id_busabase_nodes_id_fk": {
-          "name": "busabase_bases_node_id_busabase_nodes_id_fk",
-          "tableFrom": "busabase_bases",
+        "busabase_change_requests_base_id_busabase_bases_id_fk": {
+          "name": "busabase_change_requests_base_id_busabase_bases_id_fk",
+          "tableFrom": "busabase_change_requests",
+          "tableTo": "busabase_bases",
+          "columnsFrom": ["base_id"],
+          "columnsTo": ["id"],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "busabase_change_requests_node_id_busabase_nodes_id_fk": {
+          "name": "busabase_change_requests_node_id_busabase_nodes_id_fk",
+          "tableFrom": "busabase_change_requests",
           "tableTo": "busabase_nodes",
           "columnsFrom": ["node_id"],
           "columnsTo": ["id"],
@@ -688,6 +397,12 @@
           "name": "id",
           "type": "text",
           "primaryKey": true,
+          "notNull": true
+        },
+        "space_id": {
+          "name": "space_id",
+          "type": "text",
+          "primaryKey": false,
           "notNull": true
         },
         "subject_type": {
@@ -928,11 +643,30 @@
           "primaryKey": true,
           "notNull": true
         },
+        "space_id": {
+          "name": "space_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
         "base_id": {
           "name": "base_id",
           "type": "text",
           "primaryKey": false,
-          "notNull": true
+          "notNull": false
+        },
+        "target_type": {
+          "name": "target_type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'base'"
+        },
+        "node_id": {
+          "name": "node_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
         },
         "operation_id": {
           "name": "operation_id",
@@ -958,7 +692,7 @@
           "typeSchema": "public",
           "primaryKey": false,
           "notNull": true,
-          "default": "'create'"
+          "default": "'record_create'"
         },
         "message": {
           "name": "message",
@@ -987,6 +721,27 @@
           "columns": [
             {
               "expression": "base_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "busabase_commits_node_created_idx": {
+          "name": "busabase_commits_node_created_idx",
+          "columns": [
+            {
+              "expression": "node_id",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
@@ -1043,6 +798,1208 @@
           "columnsTo": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
+        },
+        "busabase_commits_node_id_busabase_nodes_id_fk": {
+          "name": "busabase_commits_node_id_busabase_nodes_id_fk",
+          "tableFrom": "busabase_commits",
+          "tableTo": "busabase_nodes",
+          "columnsFrom": ["node_id"],
+          "columnsTo": ["id"],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.busabase_nodes": {
+      "name": "busabase_nodes",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "space_id": {
+          "name": "space_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "parent_id": {
+          "name": "parent_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "type": {
+          "name": "type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "slug": {
+          "name": "slug",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "description": {
+          "name": "description",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "''"
+        },
+        "metadata": {
+          "name": "metadata",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'{}'::jsonb"
+        },
+        "position": {
+          "name": "position",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "archived_at": {
+          "name": "archived_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "busabase_nodes_parent_slug_uniq": {
+          "name": "busabase_nodes_parent_slug_uniq",
+          "columns": [
+            {
+              "expression": "parent_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "slug",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"busabase_nodes\".\"archived_at\" IS NULL",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "busabase_nodes_parent_position_idx": {
+          "name": "busabase_nodes_parent_position_idx",
+          "columns": [
+            {
+              "expression": "parent_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "position",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "busabase_nodes_parent_id_busabase_nodes_id_fk": {
+          "name": "busabase_nodes_parent_id_busabase_nodes_id_fk",
+          "tableFrom": "busabase_nodes",
+          "tableTo": "busabase_nodes",
+          "columnsFrom": ["parent_id"],
+          "columnsTo": ["id"],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.busabase_operations": {
+      "name": "busabase_operations",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "space_id": {
+          "name": "space_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "change_request_id": {
+          "name": "change_request_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "base_id": {
+          "name": "base_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "target_type": {
+          "name": "target_type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'base'"
+        },
+        "node_id": {
+          "name": "node_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "operation": {
+          "name": "operation",
+          "type": "busabase_operation_kind",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'pending'"
+        },
+        "target_record_id": {
+          "name": "target_record_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "target_view_id": {
+          "name": "target_view_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "file_path": {
+          "name": "file_path",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "source_record_id": {
+          "name": "source_record_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "source_commit_id": {
+          "name": "source_commit_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "base_commit_id": {
+          "name": "base_commit_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "head_commit_id": {
+          "name": "head_commit_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "delete_mode": {
+          "name": "delete_mode",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'archive'"
+        },
+        "merged_record_id": {
+          "name": "merged_record_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "merged_view_id": {
+          "name": "merged_view_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "position": {
+          "name": "position",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "busabase_operations_change_request_position_idx": {
+          "name": "busabase_operations_change_request_position_idx",
+          "columns": [
+            {
+              "expression": "change_request_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "position",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "busabase_operations_node_file_idx": {
+          "name": "busabase_operations_node_file_idx",
+          "columns": [
+            {
+              "expression": "node_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "file_path",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "busabase_operations_target_record_idx": {
+          "name": "busabase_operations_target_record_idx",
+          "columns": [
+            {
+              "expression": "target_record_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "busabase_operations_target_view_idx": {
+          "name": "busabase_operations_target_view_idx",
+          "columns": [
+            {
+              "expression": "target_view_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "busabase_operations_head_commit_idx": {
+          "name": "busabase_operations_head_commit_idx",
+          "columns": [
+            {
+              "expression": "head_commit_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "busabase_operations_change_request_id_busabase_change_requests_id_fk": {
+          "name": "busabase_operations_change_request_id_busabase_change_requests_id_fk",
+          "tableFrom": "busabase_operations",
+          "tableTo": "busabase_change_requests",
+          "columnsFrom": ["change_request_id"],
+          "columnsTo": ["id"],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "busabase_operations_base_id_busabase_bases_id_fk": {
+          "name": "busabase_operations_base_id_busabase_bases_id_fk",
+          "tableFrom": "busabase_operations",
+          "tableTo": "busabase_bases",
+          "columnsFrom": ["base_id"],
+          "columnsTo": ["id"],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "busabase_operations_node_id_busabase_nodes_id_fk": {
+          "name": "busabase_operations_node_id_busabase_nodes_id_fk",
+          "tableFrom": "busabase_operations",
+          "tableTo": "busabase_nodes",
+          "columnsFrom": ["node_id"],
+          "columnsTo": ["id"],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "busabase_operations_target_view_id_busabase_views_id_fk": {
+          "name": "busabase_operations_target_view_id_busabase_views_id_fk",
+          "tableFrom": "busabase_operations",
+          "tableTo": "busabase_views",
+          "columnsFrom": ["target_view_id"],
+          "columnsTo": ["id"],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        },
+        "busabase_operations_head_commit_id_busabase_commits_id_fk": {
+          "name": "busabase_operations_head_commit_id_busabase_commits_id_fk",
+          "tableFrom": "busabase_operations",
+          "tableTo": "busabase_commits",
+          "columnsFrom": ["head_commit_id"],
+          "columnsTo": ["id"],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "busabase_operations_merged_view_id_busabase_views_id_fk": {
+          "name": "busabase_operations_merged_view_id_busabase_views_id_fk",
+          "tableFrom": "busabase_operations",
+          "tableTo": "busabase_views",
+          "columnsFrom": ["merged_view_id"],
+          "columnsTo": ["id"],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.busabase_reviews": {
+      "name": "busabase_reviews",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "space_id": {
+          "name": "space_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "change_request_id": {
+          "name": "change_request_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "reviewer_id": {
+          "name": "reviewer_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "verdict": {
+          "name": "verdict",
+          "type": "busabase_review_verdict",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "reason": {
+          "name": "reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "visible_operation_heads": {
+          "name": "visible_operation_heads",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'{}'::jsonb"
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "busabase_reviews_one_vote_per_change_request": {
+          "name": "busabase_reviews_one_vote_per_change_request",
+          "columns": [
+            {
+              "expression": "change_request_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "reviewer_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "busabase_reviews_change_request_created_idx": {
+          "name": "busabase_reviews_change_request_created_idx",
+          "columns": [
+            {
+              "expression": "change_request_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "busabase_reviews_change_request_id_busabase_change_requests_id_fk": {
+          "name": "busabase_reviews_change_request_id_busabase_change_requests_id_fk",
+          "tableFrom": "busabase_reviews",
+          "tableTo": "busabase_change_requests",
+          "columnsFrom": ["change_request_id"],
+          "columnsTo": ["id"],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.attachments": {
+      "name": "attachments",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "storage_key": {
+          "name": "storage_key",
+          "type": "varchar(512)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "file_name": {
+          "name": "file_name",
+          "type": "varchar(255)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "mime_type": {
+          "name": "mime_type",
+          "type": "varchar(100)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "size_bytes": {
+          "name": "size_bytes",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "content_hash": {
+          "name": "content_hash",
+          "type": "varchar(80)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "context": {
+          "name": "context",
+          "type": "varchar(50)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'general'"
+        },
+        "user_id": {
+          "name": "user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "space_id": {
+          "name": "space_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "metadata": {
+          "name": "metadata",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "attachments_user_id_idx": {
+          "name": "attachments_user_id_idx",
+          "columns": [
+            {
+              "expression": "user_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "attachments_space_id_idx": {
+          "name": "attachments_space_id_idx",
+          "columns": [
+            {
+              "expression": "space_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "attachments_context_idx": {
+          "name": "attachments_context_idx",
+          "columns": [
+            {
+              "expression": "context",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "attachments_created_at_idx": {
+          "name": "attachments_created_at_idx",
+          "columns": [
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "attachments_storage_key_idx": {
+          "name": "attachments_storage_key_idx",
+          "columns": [
+            {
+              "expression": "storage_key",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "attachments_content_hash_idx": {
+          "name": "attachments_content_hash_idx",
+          "columns": [
+            {
+              "expression": "content_hash",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.busabase_asset_usages": {
+      "name": "busabase_asset_usages",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "space_id": {
+          "name": "space_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "asset_id": {
+          "name": "asset_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "node_id": {
+          "name": "node_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "record_id": {
+          "name": "record_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "''"
+        },
+        "field_slug": {
+          "name": "field_slug",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "''"
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "busabase_asset_usages_asset_idx": {
+          "name": "busabase_asset_usages_asset_idx",
+          "columns": [
+            {
+              "expression": "asset_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "busabase_asset_usages_node_idx": {
+          "name": "busabase_asset_usages_node_idx",
+          "columns": [
+            {
+              "expression": "node_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "busabase_asset_usages_uniq": {
+          "name": "busabase_asset_usages_uniq",
+          "columns": [
+            {
+              "expression": "asset_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "node_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "record_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "field_slug",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "busabase_asset_usages_asset_id_busabase_assets_id_fk": {
+          "name": "busabase_asset_usages_asset_id_busabase_assets_id_fk",
+          "tableFrom": "busabase_asset_usages",
+          "tableTo": "busabase_assets",
+          "columnsFrom": ["asset_id"],
+          "columnsTo": ["id"],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "busabase_asset_usages_node_id_busabase_nodes_id_fk": {
+          "name": "busabase_asset_usages_node_id_busabase_nodes_id_fk",
+          "tableFrom": "busabase_asset_usages",
+          "tableTo": "busabase_nodes",
+          "columnsFrom": ["node_id"],
+          "columnsTo": ["id"],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.busabase_assets": {
+      "name": "busabase_assets",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "space_id": {
+          "name": "space_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "attachment_id": {
+          "name": "attachment_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_by": {
+          "name": "created_by",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'local-producer'"
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "busabase_assets_space_idx": {
+          "name": "busabase_assets_space_idx",
+          "columns": [
+            {
+              "expression": "space_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "busabase_assets_space_attachment_uniq": {
+          "name": "busabase_assets_space_attachment_uniq",
+          "columns": [
+            {
+              "expression": "space_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "attachment_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.busabase_base_fields": {
+      "name": "busabase_base_fields",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "space_id": {
+          "name": "space_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "base_id": {
+          "name": "base_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "slug": {
+          "name": "slug",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "type": {
+          "name": "type",
+          "type": "busabase_field_type",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "required": {
+          "name": "required",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "position": {
+          "name": "position",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "options": {
+          "name": "options",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'{}'::jsonb"
+        },
+        "deleted_at": {
+          "name": "deleted_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "busabase_fields_base_slug_uniq": {
+          "name": "busabase_fields_base_slug_uniq",
+          "columns": [
+            {
+              "expression": "base_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "slug",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"busabase_base_fields\".\"deleted_at\" IS NULL",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "busabase_base_fields_base_id_busabase_bases_id_fk": {
+          "name": "busabase_base_fields_base_id_busabase_bases_id_fk",
+          "tableFrom": "busabase_base_fields",
+          "tableTo": "busabase_bases",
+          "columnsFrom": ["base_id"],
+          "columnsTo": ["id"],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.busabase_bases": {
+      "name": "busabase_bases",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "space_id": {
+          "name": "space_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "node_id": {
+          "name": "node_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "slug": {
+          "name": "slug",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "description": {
+          "name": "description",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "''"
+        },
+        "review_policy": {
+          "name": "review_policy",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'{\"kind\":\"single\",\"requiredApprovals\":1}'::jsonb"
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "archived_at": {
+          "name": "archived_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "busabase_bases_node_uniq": {
+          "name": "busabase_bases_node_uniq",
+          "columns": [
+            {
+              "expression": "node_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "busabase_bases_space_slug_uniq": {
+          "name": "busabase_bases_space_slug_uniq",
+          "columns": [
+            {
+              "expression": "space_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "slug",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"busabase_bases\".\"archived_at\" IS NULL",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "busabase_bases_node_id_busabase_nodes_id_fk": {
+          "name": "busabase_bases_node_id_busabase_nodes_id_fk",
+          "tableFrom": "busabase_bases",
+          "tableTo": "busabase_nodes",
+          "columnsFrom": ["node_id"],
+          "columnsTo": ["id"],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -1059,6 +2016,12 @@
           "name": "id",
           "type": "text",
           "primaryKey": true,
+          "notNull": true
+        },
+        "space_id": {
+          "name": "space_id",
+          "type": "text",
+          "primaryKey": false,
           "notNull": true
         },
         "base_id": {
@@ -1143,6 +2106,12 @@
         "value_hash": {
           "name": "value_hash",
           "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "deleted_at": {
+          "name": "deleted_at",
+          "type": "timestamp",
           "primaryKey": false,
           "notNull": false
         },
@@ -1372,364 +2341,6 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public.busabase_nodes": {
-      "name": "busabase_nodes",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "parent_id": {
-          "name": "parent_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "type": {
-          "name": "type",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "slug": {
-          "name": "slug",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "name": {
-          "name": "name",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "description": {
-          "name": "description",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "''"
-        },
-        "position": {
-          "name": "position",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "busabase_nodes_parent_slug_uniq": {
-          "name": "busabase_nodes_parent_slug_uniq",
-          "columns": [
-            {
-              "expression": "parent_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "slug",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "busabase_nodes_parent_position_idx": {
-          "name": "busabase_nodes_parent_position_idx",
-          "columns": [
-            {
-              "expression": "parent_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "position",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "busabase_nodes_parent_id_busabase_nodes_id_fk": {
-          "name": "busabase_nodes_parent_id_busabase_nodes_id_fk",
-          "tableFrom": "busabase_nodes",
-          "tableTo": "busabase_nodes",
-          "columnsFrom": ["parent_id"],
-          "columnsTo": ["id"],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "public.busabase_operations": {
-      "name": "busabase_operations",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "change_request_id": {
-          "name": "change_request_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "base_id": {
-          "name": "base_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "operation": {
-          "name": "operation",
-          "type": "busabase_operation_kind",
-          "typeSchema": "public",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "status": {
-          "name": "status",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'pending'"
-        },
-        "target_record_id": {
-          "name": "target_record_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "target_view_id": {
-          "name": "target_view_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "source_record_id": {
-          "name": "source_record_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "source_commit_id": {
-          "name": "source_commit_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "base_commit_id": {
-          "name": "base_commit_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "head_commit_id": {
-          "name": "head_commit_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "delete_mode": {
-          "name": "delete_mode",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'archive'"
-        },
-        "merged_record_id": {
-          "name": "merged_record_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "merged_view_id": {
-          "name": "merged_view_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "position": {
-          "name": "position",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "busabase_operations_change_request_position_idx": {
-          "name": "busabase_operations_change_request_position_idx",
-          "columns": [
-            {
-              "expression": "change_request_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "position",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "busabase_operations_target_record_idx": {
-          "name": "busabase_operations_target_record_idx",
-          "columns": [
-            {
-              "expression": "target_record_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "busabase_operations_target_view_idx": {
-          "name": "busabase_operations_target_view_idx",
-          "columns": [
-            {
-              "expression": "target_view_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "busabase_operations_head_commit_idx": {
-          "name": "busabase_operations_head_commit_idx",
-          "columns": [
-            {
-              "expression": "head_commit_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "busabase_operations_change_request_id_busabase_change_requests_id_fk": {
-          "name": "busabase_operations_change_request_id_busabase_change_requests_id_fk",
-          "tableFrom": "busabase_operations",
-          "tableTo": "busabase_change_requests",
-          "columnsFrom": ["change_request_id"],
-          "columnsTo": ["id"],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "busabase_operations_base_id_busabase_bases_id_fk": {
-          "name": "busabase_operations_base_id_busabase_bases_id_fk",
-          "tableFrom": "busabase_operations",
-          "tableTo": "busabase_bases",
-          "columnsFrom": ["base_id"],
-          "columnsTo": ["id"],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "busabase_operations_target_view_id_busabase_views_id_fk": {
-          "name": "busabase_operations_target_view_id_busabase_views_id_fk",
-          "tableFrom": "busabase_operations",
-          "tableTo": "busabase_views",
-          "columnsFrom": ["target_view_id"],
-          "columnsTo": ["id"],
-          "onDelete": "set null",
-          "onUpdate": "no action"
-        },
-        "busabase_operations_head_commit_id_busabase_commits_id_fk": {
-          "name": "busabase_operations_head_commit_id_busabase_commits_id_fk",
-          "tableFrom": "busabase_operations",
-          "tableTo": "busabase_commits",
-          "columnsFrom": ["head_commit_id"],
-          "columnsTo": ["id"],
-          "onDelete": "restrict",
-          "onUpdate": "no action"
-        },
-        "busabase_operations_merged_view_id_busabase_views_id_fk": {
-          "name": "busabase_operations_merged_view_id_busabase_views_id_fk",
-          "tableFrom": "busabase_operations",
-          "tableTo": "busabase_views",
-          "columnsFrom": ["merged_view_id"],
-          "columnsTo": ["id"],
-          "onDelete": "set null",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
     "public.busabase_record_links": {
       "name": "busabase_record_links",
       "schema": "",
@@ -1738,6 +2349,12 @@
           "name": "id",
           "type": "text",
           "primaryKey": true,
+          "notNull": true
+        },
+        "space_id": {
+          "name": "space_id",
+          "type": "text",
+          "primaryKey": false,
           "notNull": true
         },
         "base_id": {
@@ -1788,6 +2405,12 @@
           "primaryKey": false,
           "notNull": true,
           "default": 0
+        },
+        "deleted_at": {
+          "name": "deleted_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": false
         },
         "created_at": {
           "name": "created_at",
@@ -1962,6 +2585,12 @@
           "primaryKey": true,
           "notNull": true
         },
+        "space_id": {
+          "name": "space_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
         "base_id": {
           "name": "base_id",
           "type": "text",
@@ -2105,8 +2734,8 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public.busabase_reviews": {
-      "name": "busabase_reviews",
+    "public.busabase_views": {
+      "name": "busabase_views",
       "schema": "",
       "columns": {
         "id": {
@@ -2115,37 +2744,69 @@
           "primaryKey": true,
           "notNull": true
         },
-        "change_request_id": {
-          "name": "change_request_id",
+        "space_id": {
+          "name": "space_id",
           "type": "text",
           "primaryKey": false,
           "notNull": true
         },
-        "reviewer_id": {
-          "name": "reviewer_id",
+        "base_id": {
+          "name": "base_id",
           "type": "text",
           "primaryKey": false,
           "notNull": true
         },
-        "verdict": {
-          "name": "verdict",
-          "type": "busabase_review_verdict",
-          "typeSchema": "public",
+        "slug": {
+          "name": "slug",
+          "type": "text",
           "primaryKey": false,
           "notNull": true
         },
-        "reason": {
-          "name": "reason",
+        "name": {
+          "name": "name",
           "type": "text",
           "primaryKey": false,
-          "notNull": false
+          "notNull": true
         },
-        "visible_operation_heads": {
-          "name": "visible_operation_heads",
+        "description": {
+          "name": "description",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "''"
+        },
+        "type": {
+          "name": "type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'table'"
+        },
+        "config": {
+          "name": "config",
           "type": "jsonb",
           "primaryKey": false,
           "notNull": true,
           "default": "'{}'::jsonb"
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'active'"
+        },
+        "created_by": {
+          "name": "created_by",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "archived_at": {
+          "name": "archived_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": false
         },
         "created_at": {
           "name": "created_at",
@@ -2153,35 +2814,49 @@
           "primaryKey": false,
           "notNull": true,
           "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
         }
       },
       "indexes": {
-        "busabase_reviews_one_vote_per_change_request": {
-          "name": "busabase_reviews_one_vote_per_change_request",
+        "busabase_views_base_slug_uniq": {
+          "name": "busabase_views_base_slug_uniq",
           "columns": [
             {
-              "expression": "change_request_id",
+              "expression": "base_id",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
             },
             {
-              "expression": "reviewer_id",
+              "expression": "slug",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
             }
           ],
           "isUnique": true,
+          "where": "\"busabase_views\".\"archived_at\" IS NULL",
           "concurrently": false,
           "method": "btree",
           "with": {}
         },
-        "busabase_reviews_change_request_created_idx": {
-          "name": "busabase_reviews_change_request_created_idx",
+        "busabase_views_base_status_position_idx": {
+          "name": "busabase_views_base_status_position_idx",
           "columns": [
             {
-              "expression": "change_request_id",
+              "expression": "base_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "status",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
@@ -2200,11 +2875,11 @@
         }
       },
       "foreignKeys": {
-        "busabase_reviews_change_request_id_busabase_change_requests_id_fk": {
-          "name": "busabase_reviews_change_request_id_busabase_change_requests_id_fk",
-          "tableFrom": "busabase_reviews",
-          "tableTo": "busabase_change_requests",
-          "columnsFrom": ["change_request_id"],
+        "busabase_views_base_id_busabase_bases_id_fk": {
+          "name": "busabase_views_base_id_busabase_bases_id_fk",
+          "tableFrom": "busabase_views",
+          "tableTo": "busabase_bases",
+          "columnsFrom": ["base_id"],
           "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
@@ -2221,12 +2896,57 @@
     "public.busabase_change_request_status": {
       "name": "busabase_change_request_status",
       "schema": "public",
-      "values": ["in_review", "approved", "rejected", "merged", "abandoned"]
+      "values": [
+        "in_review",
+        "changes_requested",
+        "approved",
+        "rejected",
+        "merged",
+        "abandoned",
+        "conflict"
+      ]
     },
     "public.busabase_comment_subject": {
       "name": "busabase_comment_subject",
       "schema": "public",
       "values": ["record", "change_request", "operation", "commit"]
+    },
+    "public.busabase_operation_kind": {
+      "name": "busabase_operation_kind",
+      "schema": "public",
+      "values": [
+        "record_create",
+        "record_update",
+        "record_delete",
+        "record_variant",
+        "view_create",
+        "view_update",
+        "view_delete",
+        "view_restore",
+        "node_create",
+        "node_rename",
+        "node_delete",
+        "node_move",
+        "skill_file_create",
+        "skill_file_update",
+        "skill_file_delete",
+        "skill_metadata_update",
+        "doc_update",
+        "base_add_field",
+        "base_delete_field",
+        "base_update_field",
+        "base_convert_field",
+        "base_reorder_fields",
+        "base_restore_field",
+        "base_archive",
+        "base_restore",
+        "record_restore"
+      ]
+    },
+    "public.busabase_review_verdict": {
+      "name": "busabase_review_verdict",
+      "schema": "public",
+      "values": ["approved", "rejected"]
     },
     "public.busabase_field_type": {
       "name": "busabase_field_type",
@@ -2252,26 +2972,9 @@
         "updated_by",
         "auto_number",
         "ai_summary",
-        "ai_tags"
+        "ai_tags",
+        "code"
       ]
-    },
-    "public.busabase_operation_kind": {
-      "name": "busabase_operation_kind",
-      "schema": "public",
-      "values": [
-        "create",
-        "update",
-        "delete",
-        "variant",
-        "view_create",
-        "view_update",
-        "view_delete"
-      ]
-    },
-    "public.busabase_review_verdict": {
-      "name": "busabase_review_verdict",
-      "schema": "public",
-      "values": ["approved", "rejected"]
     }
   },
   "schemas": {},

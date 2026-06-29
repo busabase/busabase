@@ -81,7 +81,7 @@ const operationSchema = z.object({
   sourceCommitId: z.string().nullable(),
   baseCommitId: z.string().nullable(),
   headCommitId: z.string(),
-  deleteMode: z.enum(["archive", "hard_delete_after_retention"]),
+  deleteMode: z.enum(["archive"]),
   mergedRecordId: z.string().nullable(),
   mergedViewId: z.string().nullable(),
   position: z.number(),
@@ -128,7 +128,15 @@ const changeRequestSchema = z.object({
   baseId: z.string().nullable(),
   targetType: z.enum(["base", "node"]),
   nodeId: z.string().nullable(),
-  status: z.enum(["in_review", "changes_requested", "approved", "rejected", "merged", "abandoned"]),
+  status: z.enum([
+    "in_review",
+    "changes_requested",
+    "approved",
+    "rejected",
+    "merged",
+    "abandoned",
+    "conflict",
+  ]),
   submittedBy: z.string(),
   sourceMeta: z.record(z.string(), z.unknown()),
   reviewPolicySnapshot: z.record(z.string(), z.unknown()),
@@ -251,6 +259,10 @@ const nodeOperationInputSchema = z.discriminatedUnion("kind", [
     nodeId: z.string(),
   }),
   z.object({
+    kind: z.literal("restore"),
+    nodeId: z.string(),
+  }),
+  z.object({
     kind: z.literal("move"),
     nodeId: z.string(),
     parentNodeId: z.string(),
@@ -267,13 +279,16 @@ const createNodeChangeRequestInputSchema = z.object({
 const createDeleteChangeRequestInputSchema = z.object({
   message: z.string().optional().default("Delete record"),
   submittedBy: z.string().optional().default("local-producer"),
-  deleteMode: z.enum(["archive", "hard_delete_after_retention"]).optional().default("archive"),
+  // Only "archive" is supported — hard delete after retention was never
+  // implemented, so the API no longer accepts it (breaking change).
+  deleteMode: z.enum(["archive"]).optional().default("archive"),
 });
 
 const reviseOperationInputSchema = z.object({
   fields: z.record(z.string(), z.unknown()),
   message: z.string().optional().default("Revise operation"),
   author: z.string().optional().default("local-producer"),
+  baseCommitId: z.string().optional(),
 });
 
 const reviewChangeRequestInputSchema = z.object({

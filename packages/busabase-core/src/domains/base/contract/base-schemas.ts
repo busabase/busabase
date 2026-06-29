@@ -119,7 +119,7 @@ export const createBaseInputSchema = z.object({
         options: fieldOptionsSchema.optional().default({}),
       }),
     )
-    .min(1),
+    .default([]),
 });
 
 export const createBaseFieldInputSchema = z.object({
@@ -135,5 +135,64 @@ export const createBaseFieldInputSchema = z.object({
 
 export const createFieldChangeRequestInputSchema = createBaseFieldInputSchema.extend({
   message: z.string().optional().default("Add field"),
+  submittedBy: z.string().optional().default("local-editor"),
+});
+
+export const deleteFieldChangeRequestInputSchema = z.object({
+  fieldId: z.string().min(1),
+  message: z.string().optional(),
+  submittedBy: z.string().optional().default("local-editor"),
+});
+
+export const updateFieldChangeRequestInputSchema = z.object({
+  fieldId: z.string().min(1),
+  patch: z.object({
+    name: z.string().min(1).optional(),
+    required: z.boolean().optional(),
+    options: fieldOptionsSchema.optional(),
+  }),
+  message: z.string().optional(),
+  submittedBy: z.string().optional().default("local-editor"),
+});
+
+export const previewFieldConversionInputSchema = z.object({
+  fieldId: z.string().min(1),
+  newType: fieldTypeSchema,
+});
+
+export const previewFieldConversionOutputSchema = z.object({
+  totalCount: z.number(),
+  convertibleCount: z.number(),
+  nullCount: z.number(),
+  conflicts: z.array(z.object({ recordId: z.string(), currentValue: z.unknown() })),
+});
+
+export const convertFieldChangeRequestInputSchema = z.object({
+  fieldId: z.string().min(1),
+  newType: fieldTypeSchema,
+  selectChoiceMode: z.enum(["auto_create", "null_on_missing"]).default("null_on_missing"),
+  message: z.string().optional(),
+  submittedBy: z.string().optional().default("local-editor"),
+});
+
+export const reorderFieldsChangeRequestInputSchema = z.object({
+  fieldIds: z.array(z.string()).min(1),
+  message: z.string().optional(),
+  submittedBy: z.string().optional().default("local-editor"),
+});
+
+export const archiveBaseInputSchema = z.object({
+  message: z.string().optional(),
+  submittedBy: z.string().optional().default("local-editor"),
+});
+
+export const restoreBaseInputSchema = z.object({
+  message: z.string().optional(),
+  submittedBy: z.string().optional().default("local-editor"),
+});
+
+export const restoreFieldChangeRequestInputSchema = z.object({
+  fieldId: z.string().min(1),
+  message: z.string().optional(),
   submittedBy: z.string().optional().default("local-editor"),
 });

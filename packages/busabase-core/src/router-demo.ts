@@ -48,8 +48,12 @@ export const busabaseDemoRouter = os.router({
   search: os.search.handler(({ input }) => demoSearch(input)),
   nodes: {
     list: os.nodes.list.handler(() => demoListNodes()),
+    listArchived: os.nodes.listArchived.handler(() => []),
     createChangeRequest: os.nodes.createChangeRequest.handler(() => {
       throw demoUnsupported("Node tree change request");
+    }),
+    purge: os.nodes.purge.handler(() => {
+      throw demoUnsupported("Permanently delete node");
     }),
   },
   auditEvents: {
@@ -65,6 +69,8 @@ export const busabaseDemoRouter = os.router({
   },
   bases: {
     list: os.bases.list.handler(() => demoListBases()),
+    listArchived: os.bases.listArchived.handler(() => []),
+    get: os.bases.get.handler(() => null),
     create: os.bases.create.handler(() => {
       throw demoUnsupported("Create Base");
     }),
@@ -82,6 +88,33 @@ export const busabaseDemoRouter = os.router({
     createViewChangeRequest: os.bases.createViewChangeRequest.handler(() => {
       throw demoUnsupported("Create View change request");
     }),
+    deleteFieldChangeRequest: os.bases.deleteFieldChangeRequest.handler(() => {
+      throw demoUnsupported("Delete Field change request");
+    }),
+    updateFieldChangeRequest: os.bases.updateFieldChangeRequest.handler(() => {
+      throw demoUnsupported("Update Field change request");
+    }),
+    previewFieldConversion: os.bases.previewFieldConversion.handler(() => {
+      throw demoUnsupported("Preview Field conversion");
+    }),
+    convertFieldChangeRequest: os.bases.convertFieldChangeRequest.handler(() => {
+      throw demoUnsupported("Convert Field change request");
+    }),
+    reorderFieldsChangeRequest: os.bases.reorderFieldsChangeRequest.handler(() => {
+      throw demoUnsupported("Reorder Fields change request");
+    }),
+    archiveChangeRequest: os.bases.archiveChangeRequest.handler(() => {
+      throw demoUnsupported("Archive Base change request");
+    }),
+    restoreChangeRequest: os.bases.restoreChangeRequest.handler(() => {
+      throw demoUnsupported("Restore Base change request");
+    }),
+    restoreFieldChangeRequest: os.bases.restoreFieldChangeRequest.handler(() => {
+      throw demoUnsupported("Restore Field change request");
+    }),
+    listDeletedFields: os.bases.listDeletedFields.handler(() => []),
+    listArchivedViews: os.bases.listArchivedViews.handler(() => []),
+    listArchivedRecords: os.bases.listArchivedRecords.handler(() => []),
   },
   skills: {
     list: os.skills.list.handler(() => []),
@@ -152,6 +185,10 @@ export const busabaseDemoRouter = os.router({
   },
   records: {
     list: os.records.list.handler(() => demoListRecords()),
+    listPaged: os.records.listPaged.handler(async () => ({
+      records: await demoListRecords(),
+      nextCursor: null,
+    })),
     get: os.records.get.handler(({ input }) => demoGetRecord(input.recordId)),
     search: os.records.search.handler(({ input }) => demoListRecordsByFieldText(input)),
     updateChangeRequest: os.records.updateChangeRequest.handler(({ input }) => {
@@ -164,6 +201,10 @@ export const busabaseDemoRouter = os.router({
     listChangeRequests: os.records.listChangeRequests.handler(({ input }) =>
       demoListRecordChangeRequests(input.recordId),
     ),
+    restoreChangeRequest: os.records.restoreChangeRequest.handler(() => {
+      throw demoUnsupported("Restore Record change request");
+    }),
+    listLinks: os.records.listLinks.handler(() => []),
   },
   views: {
     updateChangeRequest: os.views.updateChangeRequest.handler(() => {
@@ -171,6 +212,9 @@ export const busabaseDemoRouter = os.router({
     }),
     deleteChangeRequest: os.views.deleteChangeRequest.handler(() => {
       throw demoUnsupported("Delete View change request");
+    }),
+    restoreChangeRequest: os.views.restoreChangeRequest.handler(() => {
+      throw demoUnsupported("Restore View change request");
     }),
   },
 });

@@ -13,6 +13,8 @@ export const viewFilterOperatorSchema = z.enum([
 
 export const viewFilterSchema = z.object({
   fieldSlug: z.string(),
+  // Stable field identity — survives slug reuse; populated on merge.
+  fieldId: z.string().optional(),
   operator: viewFilterOperatorSchema,
   value: z.unknown().optional(),
 });
@@ -20,6 +22,7 @@ export const viewFilterSchema = z.object({
 export const viewSortSchema = z.object({
   direction: z.enum(["asc", "desc"]),
   fieldSlug: z.string(),
+  fieldId: z.string().optional(),
 });
 
 export const viewConfigSchema = z.object({
@@ -51,7 +54,8 @@ export const createViewInputSchema = z.object({
   slug: z
     .string()
     .min(1)
-    .regex(/^[a-z0-9-]+$/),
+    .regex(/^[a-z0-9-]+$/)
+    .optional(),
   submittedBy: z.string().optional().default("local-producer"),
 });
 
@@ -65,5 +69,10 @@ export const updateViewInputSchema = z.object({
 
 export const deleteViewInputSchema = z.object({
   message: z.string().optional().default("Delete view"),
+  submittedBy: z.string().optional().default("local-producer"),
+});
+
+export const restoreViewInputSchema = z.object({
+  message: z.string().optional().default("Restore view"),
   submittedBy: z.string().optional().default("local-producer"),
 });

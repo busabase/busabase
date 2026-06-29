@@ -1,9 +1,10 @@
+import { skipToken, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { BaseVO, FieldType, ViewVO } from "busabase-core/types";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { ArrowLeft, Trash2 } from "lucide-react-native";
-import { useCallback, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { Alert, Pressable, StyleSheet, Switch, Text, View } from "react-native";
-import { useBusabaseClient } from "~/api/use-busabase-client";
+import { useBusabaseOrpc } from "~/api/use-busabase-orpc";
 import { ConnectionGuard } from "~/components/busabase/ConnectionGuard";
 import {
   NativeEmptyState,
@@ -13,7 +14,6 @@ import {
 } from "~/components/native-screen";
 import { Button } from "~/components/ui/Button";
 import { TextInput } from "~/components/ui/TextInput";
-import { useNativeQuery } from "~/hooks/use-native-query";
 import { mobile, radius, typography } from "~/theme/tokens";
 import { useTokens } from "~/theme/use-tokens";
 
@@ -40,110 +40,97 @@ function BaseDesignContent() {
   const slug = typeof params.slug === "string" ? params.slug : "";
   const router = useRouter();
   const tokens = useTokens();
-  const client = useBusabaseClient();
+  const buda = useBusabaseOrpc();
+  const queryClient = useQueryClient();
 
-  const loadBases = useCallback(() => client?.bases.list() ?? Promise.resolve([]), [client]);
-  const basesQuery = useNativeQuery(!!client, loadBases);
+  const basesQuery = useQuery(
+    buda
+      ? buda.orpc.bases.list.queryOptions({})
+      : { queryKey: ["no-connection", "bases", "list"], queryFn: skipToken },
+  );
   const base: BaseVO | null = useMemo(
     () => basesQuery.data?.find((item) => item.slug === slug) ?? null,
     [basesQuery.data, slug],
   );
-  const loadViews = useCallback(
-    () => (client && base ? client.bases.listViews({ baseId: base.id }) : Promise.resolve([])),
-    [client, base],
+
+  const viewsQuery = useQuery(
+    buda && base
+      ? buda.orpc.bases.listViews.queryOptions({ input: { baseId: base.id } })
+      : { queryKey: ["no-connection", "views", slug], queryFn: skipToken },
   );
-  const viewsQuery = useNativeQuery(!!client && !!base, loadViews);
 
   const [fieldName, setFieldName] = useState("");
   const [fieldSlug, setFieldSlug] = useState("");
   const [fieldType, setFieldType] = useState<FieldType>("text");
   const [required, setRequired] = useState(false);
-  const [savingField, setSavingField] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
   const [viewName, setViewName] = useState("");
-  const [savingView, setSavingView] = useState(false);
 
-  const addField = async () => {
-    if (!client || !base) {
-      return;
-    }
-    const name = fieldName.trim();
-    const fieldSlugValue = (fieldSlug.trim() || toSlug(name)).trim();
-    if (!name || !fieldSlugValue) {
-      setError("Field name is required.");
-      return;
-    }
-    setSavingField(true);
-    setError(null);
-    try {
-      await client.bases.createField({
+  const addFieldMutation = useMutation({
+    mutationFn: async () => {
+      if (!buda || !base) throw new Error("Not ready");
+      const name = fieldName.trim();
+      const fieldSlugValue = (fieldSlug.trim() || toSlug(name)).trim();
+      if (!name || !fieldSlugValue) throw new Error("Field name is required.");
+      return buda.client.bases.createField({
         baseId: base.id,
         name,
         slug: fieldSlugValue,
         type: fieldType,
         required,
       });
+    },
+    onSuccess: () => {
       setFieldName("");
       setFieldSlug("");
       setFieldType("text");
       setRequired(false);
-      basesQuery.refetch();
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Could not add field");
-    } finally {
-      setSavingField(false);
-    }
-  };
+      void queryClient.invalidateQueries({ queryKey: buda?.orpc.bases.list.key({}) });
+    },
+  });
 
-  const createView = async () => {
-    if (!client || !base) {
-      return;
-    }
-    const name = viewName.trim();
-    if (!name) {
-      return;
-    }
-    setSavingView(true);
-    setError(null);
-    try {
-      const changeRequest = await client.bases.createViewChangeRequest({
+  const createViewMutation = useMutation({
+    mutationFn: async () => {
+      if (!buda || !base) throw new Error("Not ready");
+      const name = viewName.trim();
+      if (!name) throw new Error("View name is required.");
+      return buda.client.bases.createViewChangeRequest({
         baseId: base.id,
         name,
         slug: toSlug(name),
         submittedBy: "mobile-editor",
       });
+    },
+    onSuccess: (changeRequest) => {
       setViewName("");
       router.push({ pathname: "/change-requests/[id]", params: { id: changeRequest.id } });
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Could not create view");
-    } finally {
-      setSavingView(false);
-    }
-  };
+    },
+  });
+
+  const deleteViewMutation = useMutation({
+    mutationFn: async (view: ViewVO) => {
+      if (!buda) throw new Error("Not connected");
+      return buda.client.views.deleteChangeRequest({
+        viewId: view.id,
+        submittedBy: "mobile-editor",
+      });
+    },
+    onSuccess: (changeRequest) => {
+      router.push({ pathname: "/change-requests/[id]", params: { id: changeRequest.id } });
+    },
+  });
 
   const deleteView = (view: ViewVO) => {
     Alert.alert("Delete view", `Create a delete change request for "${view.name}"?`, [
       { text: "Cancel", style: "cancel" },
-      {
-        text: "Delete",
-        style: "destructive",
-        onPress: () => {
-          if (!client) {
-            return;
-          }
-          void client.views
-            .deleteChangeRequest({ viewId: view.id, submittedBy: "mobile-editor" })
-            .then((changeRequest) =>
-              router.push({ pathname: "/change-requests/[id]", params: { id: changeRequest.id } }),
-            )
-            .catch((caught: unknown) =>
-              setError(caught instanceof Error ? caught.message : "Could not delete view"),
-            );
-        },
-      },
+      { text: "Delete", style: "destructive", onPress: () => deleteViewMutation.mutate(view) },
     ]);
   };
+
+  const mutationError =
+    addFieldMutation.error?.message ??
+    createViewMutation.error?.message ??
+    deleteViewMutation.error?.message ??
+    null;
 
   const headerLeading = (
     <Pressable
@@ -157,7 +144,7 @@ function BaseDesignContent() {
     </Pressable>
   );
 
-  if (basesQuery.loading) {
+  if (basesQuery.isLoading) {
     return (
       <NativeScreen title="Base design" subtitle={slug} headerLeading={headerLeading}>
         <NativeLoadingState label="Loading base" />
@@ -246,7 +233,12 @@ function BaseDesignContent() {
               onValueChange={setRequired}
             />
           </View>
-          <Button label="Add field" loading={savingField} fullWidth onPress={addField} />
+          <Button
+            label="Add field"
+            loading={addFieldMutation.isPending}
+            fullWidth
+            onPress={() => addFieldMutation.mutate()}
+          />
         </View>
 
         <View style={[styles.card, { backgroundColor: tokens.card, borderColor: tokens.border }]}>
@@ -270,14 +262,23 @@ function BaseDesignContent() {
           <TextInput label="New view name" value={viewName} onChangeText={setViewName} />
           <Button
             label="Create view change request"
-            loading={savingView}
+            loading={createViewMutation.isPending}
             disabled={viewName.trim().length === 0}
             fullWidth
-            onPress={createView}
+            onPress={() => createViewMutation.mutate()}
           />
         </View>
 
-        {error ? <NativeErrorState message={error} onRetry={() => setError(null)} /> : null}
+        {mutationError ? (
+          <NativeErrorState
+            message={mutationError}
+            onRetry={() => {
+              addFieldMutation.reset();
+              createViewMutation.reset();
+              deleteViewMutation.reset();
+            }}
+          />
+        ) : null}
       </View>
     </NativeScreen>
   );

@@ -1,9 +1,10 @@
+import { skipToken, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { ChangeRequestVO, OperationVO } from "busabase-core/types";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { ArrowLeft, Check, CheckCheck, GitMerge, XCircle } from "lucide-react-native";
-import { useCallback, useEffect, useState } from "react";
+import { useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
-import { useBusabaseClient } from "~/api/use-busabase-client";
+import { useBusabaseOrpc } from "~/api/use-busabase-orpc";
 import { CommentsSection } from "~/components/busabase/CommentsSection";
 import { ConnectionGuard } from "~/components/busabase/ConnectionGuard";
 import { FieldList } from "~/components/busabase/FieldList";
@@ -25,7 +26,7 @@ import { formatDate, shortId } from "~/lib/format";
 import { mobile, radius, typography } from "~/theme/tokens";
 import { useTokens } from "~/theme/use-tokens";
 
-type ActionState = "idle" | "approving" | "rejecting" | "merging" | "approving-merging";
+type ReviewVerdict = "approved" | "rejected";
 
 function OperationCard({
   operation,
@@ -85,91 +86,56 @@ function ChangeRequestDetailContent() {
   const params = useLocalSearchParams<{ id?: string }>();
   const router = useRouter();
   const tokens = useTokens();
-  const client = useBusabaseClient();
+  const buda = useBusabaseOrpc();
+  const queryClient = useQueryClient();
   const changeRequestId = typeof params.id === "string" ? params.id : "";
-  const [changeRequest, setChangeRequest] = useState<ChangeRequestVO | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [actionError, setActionError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [actionState, setActionState] = useState<ActionState>("idle");
   const [rejectMode, setRejectMode] = useState(false);
   const [rejectReason, setRejectReason] = useState("");
 
-  const loadChangeRequest = useCallback(async () => {
-    if (!client || !changeRequestId) {
-      setLoading(false);
-      return;
-    }
-    setLoading(true);
-    setError(null);
-    try {
-      setChangeRequest(await client.changeRequests.get({ changeRequestId }));
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Could not load change request");
-    } finally {
-      setLoading(false);
-    }
-  }, [client, changeRequestId]);
+  const crQuery = useQuery(
+    buda && changeRequestId
+      ? buda.orpc.changeRequests.get.queryOptions({ input: { changeRequestId } })
+      : { queryKey: ["no-connection", "change-request", changeRequestId], queryFn: skipToken },
+  );
+  const changeRequest = (crQuery.data as ChangeRequestVO | undefined) ?? null;
 
-  useEffect(() => {
-    void loadChangeRequest();
-  }, [loadChangeRequest]);
+  const invalidateCR = () =>
+    queryClient.invalidateQueries({
+      queryKey: buda?.orpc.changeRequests.get.key({ input: { changeRequestId } }),
+    });
 
-  const runAction = async (nextAction: Exclude<ActionState, "idle">) => {
-    if (!client || !changeRequestId || !changeRequest) {
-      return;
-    }
+  const reviewMutation = useMutation({
+    mutationFn: async ({ verdict, reason }: { verdict: ReviewVerdict; reason?: string }) => {
+      if (!buda) throw new Error("Not connected");
+      return buda.client.changeRequests.review({ changeRequestId, verdict, reason });
+    },
+    onSuccess: () => void invalidateCR(),
+  });
 
-    const previous = changeRequest;
-    const optimisticStatus =
-      nextAction === "approving" ? "approved" : nextAction === "rejecting" ? "rejected" : "merged";
+  const mergeMutation = useMutation({
+    mutationFn: async () => {
+      if (!buda) throw new Error("Not connected");
+      return buda.client.changeRequests.merge({ changeRequestId });
+    },
+    onSuccess: () => void invalidateCR(),
+  });
 
-    setActionState(nextAction);
-    setActionError(null);
-    // Optimistic status flip; rolled back below if the server rejects the action.
-    setChangeRequest({ ...changeRequest, status: optimisticStatus });
+  const approveMergeMutation = useMutation({
+    mutationFn: async () => {
+      if (!buda) throw new Error("Not connected");
+      await buda.client.changeRequests.review({ changeRequestId, verdict: "approved" });
+      return buda.client.changeRequests.merge({ changeRequestId });
+    },
+    onSuccess: () => void invalidateCR(),
+  });
 
-    try {
-      if (nextAction === "approving") {
-        setChangeRequest(
-          await client.changeRequests.review({
-            changeRequestId,
-            verdict: "approved",
-          }),
-        );
-      }
-      if (nextAction === "rejecting") {
-        setChangeRequest(
-          await client.changeRequests.review({
-            changeRequestId,
-            verdict: "rejected",
-            reason: rejectReason.trim() || undefined,
-          }),
-        );
-        setRejectReason("");
-      }
-      if (nextAction === "merging") {
-        const result = await client.changeRequests.merge({ changeRequestId });
-        setChangeRequest(result.changeRequest);
-      }
-      if (nextAction === "approving-merging") {
-        await client.changeRequests.review({
-          changeRequestId,
-          verdict: "approved",
-        });
-        const result = await client.changeRequests.merge({ changeRequestId });
-        setChangeRequest(result.changeRequest);
-      }
-      setRejectMode(false);
-    } catch (caught) {
-      setChangeRequest(previous);
-      setActionError(
-        caught instanceof Error ? caught.message : "Change Request action failed. State restored.",
-      );
-    } finally {
-      setActionState("idle");
-    }
-  };
+  const actionError =
+    reviewMutation.error?.message ??
+    mergeMutation.error?.message ??
+    approveMergeMutation.error?.message ??
+    null;
+  const anyPending =
+    reviewMutation.isPending || mergeMutation.isPending || approveMergeMutation.isPending;
 
   const headerLeading = (
     <Pressable
@@ -183,7 +149,7 @@ function ChangeRequestDetailContent() {
     </Pressable>
   );
 
-  if (loading) {
+  if (crQuery.isLoading) {
     return (
       <NativeScreen
         title="Change Request"
@@ -195,14 +161,14 @@ function ChangeRequestDetailContent() {
     );
   }
 
-  if (error && !changeRequest) {
+  if (crQuery.error && !changeRequest) {
     return (
       <NativeScreen
         title="Change Request"
         subtitle={shortId(changeRequestId)}
         headerLeading={headerLeading}
       >
-        <NativeErrorState message={error} onRetry={loadChangeRequest} />
+        <NativeErrorState message={crQuery.error.message} onRetry={() => void crQuery.refetch()} />
       </NativeScreen>
     );
   }
@@ -296,7 +262,14 @@ function ChangeRequestDetailContent() {
         <CommentsSection subjectType="change_request" subjectId={changeRequest.id} />
 
         {actionError ? (
-          <NativeErrorState message={actionError} onRetry={() => setActionError(null)} />
+          <NativeErrorState
+            message={actionError}
+            onRetry={() => {
+              reviewMutation.reset();
+              mergeMutation.reset();
+              approveMergeMutation.reset();
+            }}
+          />
         ) : null}
 
         {rejectMode ? (
@@ -314,9 +287,14 @@ function ChangeRequestDetailContent() {
             <Button
               label="Send back for changes"
               variant="destructive"
-              loading={actionState === "rejecting"}
+              loading={reviewMutation.isPending}
               fullWidth
-              onPress={() => runAction("rejecting")}
+              onPress={() =>
+                reviewMutation.mutate(
+                  { verdict: "rejected", reason: rejectReason.trim() || undefined },
+                  { onSuccess: () => setRejectMode(false) },
+                )
+              }
             />
             <Button label="Cancel" variant="ghost" fullWidth onPress={() => setRejectMode(false)} />
           </View>
@@ -327,24 +305,24 @@ function ChangeRequestDetailContent() {
                 <Button
                   label="Approve"
                   leadingIcon={<Check size={18} color={tokens.primaryForeground} />}
-                  loading={actionState === "approving"}
-                  disabled={actionState !== "idle"}
+                  loading={reviewMutation.isPending && !rejectMode}
+                  disabled={anyPending}
                   fullWidth
-                  onPress={() => runAction("approving")}
+                  onPress={() => reviewMutation.mutate({ verdict: "approved" })}
                 />
                 <Button
                   label="Approve & Merge"
                   leadingIcon={<CheckCheck size={18} color={tokens.primaryForeground} />}
-                  loading={actionState === "approving-merging"}
-                  disabled={actionState !== "idle"}
+                  loading={approveMergeMutation.isPending}
+                  disabled={anyPending}
                   fullWidth
-                  onPress={() => runAction("approving-merging")}
+                  onPress={() => approveMergeMutation.mutate()}
                 />
                 <Button
                   label="Request changes"
                   variant="destructive"
                   leadingIcon={<XCircle size={18} color={tokens.destructiveForeground} />}
-                  disabled={actionState !== "idle"}
+                  disabled={anyPending}
                   fullWidth
                   onPress={() => setRejectMode(true)}
                 />
@@ -354,10 +332,10 @@ function ChangeRequestDetailContent() {
               <Button
                 label="Merge into Base"
                 leadingIcon={<GitMerge size={18} color={tokens.primaryForeground} />}
-                loading={actionState === "merging"}
-                disabled={actionState !== "idle"}
+                loading={mergeMutation.isPending}
+                disabled={anyPending}
                 fullWidth
-                onPress={() => runAction("merging")}
+                onPress={() => mergeMutation.mutate()}
               />
             ) : null}
           </View>

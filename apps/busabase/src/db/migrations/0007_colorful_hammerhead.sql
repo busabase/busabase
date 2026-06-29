@@ -1,1 +1,0 @@
-ALTER TYPE "public"."busabase_change_request_status" ADD VALUE 'changes_requested' BEFORE 'approved';

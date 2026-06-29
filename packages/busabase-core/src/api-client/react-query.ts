@@ -7,13 +7,38 @@ import { resolveApiUrl } from "./index";
 
 export type BusabaseORPCClient = ContractRouterClient<BusabaseContract>;
 
+export interface BusabaseClientOptions {
+  /**
+   * Connect in demo mode: append `?demo=1` to every request so the server serves
+   * the seeded demo dataset. The `?demo` query param is the reliable signal — a
+   * hosted demo's CDN may strip custom request headers like `x-demo-mode`.
+   */
+  demo?: boolean;
+}
+
+// RPCLink fetch interceptor that appends `?demo=1` to each outgoing request URL.
+const demoFetch: NonNullable<ConstructorParameters<typeof RPCLink>[0]["fetch"]> = (
+  request,
+  init,
+) => {
+  const url = new URL(request.url);
+  url.searchParams.set("demo", "1");
+  return globalThis.fetch(new Request(url.toString(), request), init);
+};
+
 /**
  * Standard oRPC RPC client (POST transport). Unlike `createBusabaseORPCClient`, this
  * does NOT use `inferRPCMethodFromContractRouter`, so reads stay POST and never
  * collide with the server's GET REST matchers (e.g. /skills/:id, /search).
  */
-export const createBusabaseORPCClient = (apiBasePath = "/api/rpc"): BusabaseORPCClient => {
-  const link = new RPCLink({ url: resolveApiUrl(apiBasePath) });
+export const createBusabaseORPCClient = (
+  apiBasePath = "/api/rpc",
+  opts: BusabaseClientOptions = {},
+): BusabaseORPCClient => {
+  const link = new RPCLink({
+    url: resolveApiUrl(apiBasePath),
+    ...(opts.demo ? { fetch: demoFetch } : {}),
+  });
   return createORPCClient<BusabaseORPCClient>(link);
 };
 
@@ -21,8 +46,10 @@ export const createBusabaseORPCClient = (apiBasePath = "/api/rpc"): BusabaseORPC
  * TanStack Query utils for the Busabase contract: `orpc.records.list.queryOptions(...)`,
  * `orpc.records.updateChangeRequest.mutationOptions(...)`, `orpc.<proc>.key(...)`, etc.
  */
-export const createBusabaseQueryUtils = (apiBasePath = "/api/rpc") =>
-  createTanstackQueryUtils(createBusabaseORPCClient(apiBasePath));
+export const createBusabaseQueryUtils = (
+  apiBasePath = "/api/rpc",
+  opts: BusabaseClientOptions = {},
+) => createTanstackQueryUtils(createBusabaseORPCClient(apiBasePath, opts));
 
 export type BusabaseQueryUtils = ReturnType<typeof createBusabaseQueryUtils>;
 

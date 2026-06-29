@@ -31,7 +31,8 @@ export type ChangeRequestStatus =
   | "approved"
   | "rejected"
   | "merged"
-  | "abandoned";
+  | "abandoned"
+  | "conflict";
 export type OperationStatus = "pending" | "merged" | "archived" | "failed";
 export type ChangeRequestTargetType = "base" | "node";
 export type ReviewVerdict = "approved" | "rejected";
@@ -109,7 +110,7 @@ export interface OperationVO {
   sourceCommitId: string | null;
   baseCommitId: string | null;
   headCommitId: string;
-  deleteMode: "archive" | "hard_delete_after_retention";
+  deleteMode: "archive";
   mergedRecordId: string | null;
   mergedViewId: string | null;
   position: number;

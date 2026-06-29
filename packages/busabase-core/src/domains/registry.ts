@@ -43,6 +43,11 @@ const GENERIC_NODE_OPERATIONS = [
   },
   { kind: "node_rename", label: "Rename node", tone: "border-sky-200 bg-sky-50 text-sky-800" },
   { kind: "node_delete", label: "Delete node", tone: "border-red-200 bg-red-50 text-red-800" },
+  {
+    kind: "node_restore",
+    label: "Restore node",
+    tone: "border-emerald-200 bg-emerald-50 text-emerald-800",
+  },
   { kind: "node_move", label: "Move node", tone: "border-indigo-200 bg-indigo-50 text-indigo-800" },
 ] as const;
 

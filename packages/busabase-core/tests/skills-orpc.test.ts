@@ -67,16 +67,22 @@ describe("Agent Skills API — oRPC integration", () => {
     return client.changeRequests.merge({ changeRequestId });
   };
 
-  it("lists seeded skills with their storage-backed file trees", async () => {
+  it("lists created skills with their storage-backed file trees", async () => {
+    await client.skills.create({
+      slug: "ai-research-editor",
+      name: "AI Research Editor",
+      description: "Reviews agent research drafts for source quality before publishing.",
+    });
+
     const skills = await client.skills.list();
-    const seeded = skills.find((skill) => skill.node.slug === "ai-research-editor");
-    expect(seeded).toBeDefined();
-    expect(seeded?.files.map((file) => file.path)).toEqual(
+    const listed = skills.find((skill) => skill.node.slug === "ai-research-editor");
+    expect(listed).toBeDefined();
+    expect(listed?.files.map((file) => file.path)).toEqual(
       expect.arrayContaining(["SKILL.md", "skill.json"]),
     );
-    expect(seeded?.entryFile).toBe("SKILL.md");
-    expect(seeded?.visibility).toBeDefined();
-    expect(seeded?.version).toBeDefined();
+    expect(listed?.entryFile).toBe("SKILL.md");
+    expect(listed?.visibility).toBeDefined();
+    expect(listed?.version).toBeDefined();
   });
 
   it("creates a skill, seeding default SKILL.md + skill.json when none are supplied", async () => {

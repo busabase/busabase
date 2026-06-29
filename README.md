@@ -110,6 +110,30 @@ and local file storage under `.data/busabase-storage`.
 - local PGlite persistence under `.data/busabase`
 - REST API endpoints for apps, workflows, and AI Agents
 
+### Where your data lives
+
+`npx busabase server` and the desktop app share **one** local data root so you see the
+same database whichever way you launch:
+
+```
+~/.busabase/data/
+├── pgdata/    # embedded PGlite database
+└── storage/   # uploaded attachments
+```
+
+Point them somewhere else with `BUSABASE_DATA_DIR` (or `busabase server --db <dir>`), or
+set `PG_DATABASE_URL` / `STORAGE_URL` directly to use external Postgres / S3.
+
+Docker writes to `/data` inside the container — bind-mount the same host folder to share
+that one database with the CLI and desktop app:
+
+```bash
+docker run --rm -p 3000:3000 -v ~/.busabase/data:/data busabase/busabase
+```
+
+(Running from source with `pnpm dev` instead uses the repo's `.env`, i.e. `.data/busabase`.)
+Only one process can hold the PGlite database at a time, so run one launcher at a time.
+
 ## Screenshots
 
 |  |  |
@@ -120,6 +144,18 @@ and local file storage under `.data/busabase-storage`.
 | Record detail page with fields, comments, review history, and lineage | Base table showing structured records and rich fields |
 | ![Base records table](./apps/busabase/public/assets/readme/busabase-base-records.png) | ![Graph view with seed data](./apps/busabase/public/assets/readme/busabase-graph-view.png) |
 | Records inside a Base — typed fields, rich values, and approval status at a glance | Graph view showing relationships between seeded records across Bases |
+
+### On mobile
+
+Review and approve agent Change Requests from your phone — the same inbox, proposal preview, and trusted records, in the [Busabase mobile app](https://github.com/busabase/busabase/tree/main/apps/busabase-mobile).
+
+<p align="center">
+  <img src="./apps/busabase/public/assets/readme/mobile-inbox-framed.png" alt="Mobile inbox — pending Change Requests from agents" width="30%" />
+  &nbsp;&nbsp;
+  <img src="./apps/busabase/public/assets/readme/mobile-change-request-framed.png" alt="Mobile Change Request — agent-proposed operations and fields under review" width="30%" />
+  &nbsp;&nbsp;
+  <img src="./apps/busabase/public/assets/readme/mobile-record-framed.png" alt="Mobile record detail — trusted fields after approval" width="30%" />
+</p>
 
 ## Why This Exists
 

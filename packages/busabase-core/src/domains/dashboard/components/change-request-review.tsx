@@ -44,6 +44,66 @@ export function ReviewConflictPanel({ message }: { message: string }) {
   );
 }
 
+/** Conflict detail persisted to `mergeSummary.conflict` when a merge hits a 3-way conflict. */
+export interface ChangeRequestConflict {
+  recordId: string | null;
+  fields: string[];
+  detectedAt?: string;
+}
+
+export const getChangeRequestConflict = (
+  changeRequest: ChangeRequestVO,
+): ChangeRequestConflict | null => {
+  const summary = changeRequest.mergeSummary as
+    | { conflict?: { recordId?: string | null; fields?: unknown; detectedAt?: string } }
+    | undefined;
+  const conflict = summary?.conflict;
+  if (!conflict) {
+    return null;
+  }
+  const fields = Array.isArray(conflict.fields)
+    ? conflict.fields.filter((field): field is string => typeof field === "string")
+    : [];
+  return { recordId: conflict.recordId ?? null, fields, detectedAt: conflict.detectedAt };
+};
+
+/**
+ * Conflict diff banner shown on a `conflict` CR. Names the colliding fields
+ * (from `mergeSummary.conflict`) and points to the two exits: revise the
+ * operation to re-baseline + resolve, or close to abandon.
+ */
+export function ConflictDiffPanel({ changeRequest }: { changeRequest: ChangeRequestVO }) {
+  const conflict = getChangeRequestConflict(changeRequest);
+  if (changeRequest.status !== "conflict") {
+    return null;
+  }
+  return (
+    <section className="mt-5 max-w-4xl rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-amber-900 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200">
+      <div className="flex items-center gap-2 font-semibold text-sm">
+        <X size={15} />
+        Merge conflict — the record changed since this change request was created
+      </div>
+      {conflict && conflict.fields.length > 0 ? (
+        <div className="mt-2 flex flex-wrap items-center gap-1.5 text-xs">
+          <span className="text-amber-800/80 dark:text-amber-300/80">Conflicting fields:</span>
+          {conflict.fields.map((field) => (
+            <span
+              className="rounded-full border border-amber-300 bg-amber-100 px-2 py-0.5 font-medium dark:border-amber-800 dark:bg-amber-900/50"
+              key={field}
+            >
+              {field}
+            </span>
+          ))}
+        </div>
+      ) : null}
+      <p className="mt-2 text-xs leading-5">
+        Re-open the proposed change below and revise it to merge against the latest values, or close
+        the change request to abandon it.
+      </p>
+    </section>
+  );
+}
+
 export const getLatestReview = (changeRequest: ChangeRequestVO): ReviewVO | null =>
   changeRequest.reviews.length > 0
     ? changeRequest.reviews.reduce((latest, review) =>
@@ -329,6 +389,28 @@ export function FinishReviewComposer({
     );
   }
 
+  // Conflict: no approve/merge path until revised. Offer the abandon (close) exit
+  // here; resolving is done by revising the proposed change (the operation editor).
+  if (changeRequest.status === "conflict") {
+    return (
+      <div className="flex flex-col gap-2">
+        <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-amber-900 text-xs leading-5 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-300">
+          This change request conflicts with the latest record. Revise the proposed change to merge
+          against the current values, or close it to abandon.
+        </div>
+        <button
+          className="flex w-full items-center justify-center gap-2 rounded-lg border border-border px-3 py-2.5 font-semibold text-sm transition-colors hover:bg-muted disabled:opacity-60"
+          disabled={isPending}
+          onClick={() => onClose(changeRequest.id)}
+          type="button"
+        >
+          <X size={16} />
+          Close change request
+        </button>
+      </div>
+    );
+  }
+
   // Reviewable: open (in_review) or awaiting-re-review (changes_requested).
   if (changeRequest.status !== "in_review" && changeRequest.status !== "changes_requested") {
     return (
@@ -560,6 +642,8 @@ export function ChangeRequestReviewLayout({
             </div>
             <p className="mt-2 text-sm leading-6">{getChangeRequestBrief(changeRequest)}</p>
           </div>
+
+          <ConflictDiffPanel changeRequest={changeRequest} />
 
           <section className="mt-6 max-w-4xl">
             <div className="font-semibold text-base">What will change</div>

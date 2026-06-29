@@ -1,12 +1,10 @@
+import { skipToken, useQuery } from "@tanstack/react-query";
 import { useLocalSearchParams } from "expo-router";
-import { useCallback } from "react";
 import { Platform, ScrollView, StyleSheet, Text } from "react-native";
-import { type DocVO, getDocRest } from "~/api/docs-rest";
+import { useBusabaseOrpc } from "~/api/use-busabase-orpc";
 import { ConnectionGuard } from "~/components/busabase/ConnectionGuard";
 import { DrawerScaffold } from "~/components/busabase/DrawerScaffold";
 import { NativeEmptyState, NativeErrorState, NativeLoadingState } from "~/components/native-screen";
-import { useConnection } from "~/connection/connection-store";
-import { useNativeQuery } from "~/hooks/use-native-query";
 import { typography } from "~/theme/tokens";
 import { useTokens } from "~/theme/use-tokens";
 
@@ -14,26 +12,25 @@ function DocDetailContent() {
   const params = useLocalSearchParams<{ nodeId?: string }>();
   const nodeId = typeof params.nodeId === "string" ? params.nodeId : "";
   const tokens = useTokens();
-  const { state } = useConnection();
-  const serverUrl = state.status === "connected" ? state.connection.serverUrl : null;
+  const buda = useBusabaseOrpc();
 
-  const loadDoc = useCallback(
-    () =>
-      serverUrl && nodeId
-        ? getDocRest(serverUrl, nodeId)
-        : (Promise.resolve(null) as Promise<null>),
-    [serverUrl, nodeId],
+  const docQuery = useQuery(
+    buda && nodeId
+      ? buda.orpc.docs.get.queryOptions({ input: { nodeId } })
+      : { queryKey: ["no-connection", "doc", nodeId], queryFn: skipToken },
   );
-  const docQuery = useNativeQuery<DocVO | null>(!!serverUrl && !!nodeId, loadDoc);
   const doc = docQuery.data ?? null;
 
   return (
     <DrawerScaffold subtitle="Doc" title={doc?.node.name ?? "Doc"}>
-      {docQuery.loading ? <NativeLoadingState label="Loading doc" /> : null}
+      {docQuery.isLoading ? <NativeLoadingState label="Loading doc" /> : null}
       {docQuery.error ? (
-        <NativeErrorState message={docQuery.error} onRetry={docQuery.refetch} />
+        <NativeErrorState
+          message={docQuery.error.message}
+          onRetry={() => void docQuery.refetch()}
+        />
       ) : null}
-      {!docQuery.loading && !docQuery.error && !doc ? (
+      {!docQuery.isLoading && !docQuery.error && !doc ? (
         <NativeEmptyState description="This doc is not available." title="Doc not found" />
       ) : null}
 

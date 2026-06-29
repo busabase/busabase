@@ -1,9 +1,10 @@
+import { skipToken, useMutation, useQuery } from "@tanstack/react-query";
 import type { BaseVO } from "busabase-core/types";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { ArrowLeft } from "lucide-react-native";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Pressable, StyleSheet, View } from "react-native";
-import { useBusabaseClient } from "~/api/use-busabase-client";
+import { useBusabaseOrpc } from "~/api/use-busabase-orpc";
 import { ConnectionGuard } from "~/components/busabase/ConnectionGuard";
 import { RecordForm } from "~/components/busabase/RecordForm";
 import {
@@ -13,7 +14,6 @@ import {
   NativeScreen,
 } from "~/components/native-screen";
 import { Button } from "~/components/ui/Button";
-import { useNativeQuery } from "~/hooks/use-native-query";
 import {
   buildInitialFormValues,
   normalizeFormValues,
@@ -27,45 +27,38 @@ function NewRecordContent() {
   const slug = typeof params.slug === "string" ? params.slug : "";
   const router = useRouter();
   const tokens = useTokens();
-  const client = useBusabaseClient();
+  const buda = useBusabaseOrpc();
 
-  const loadBases = useCallback(() => client?.bases.list() ?? Promise.resolve([]), [client]);
-  const basesQuery = useNativeQuery(!!client, loadBases);
+  const basesQuery = useQuery(
+    buda
+      ? buda.orpc.bases.list.queryOptions({})
+      : { queryKey: ["no-connection", "bases", "list"], queryFn: skipToken },
+  );
   const base: BaseVO | null = useMemo(
     () => basesQuery.data?.find((item) => item.slug === slug) ?? null,
     [basesQuery.data, slug],
   );
 
   const [values, setValues] = useState<Record<string, RecordFormValue>>({});
-  const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (base) {
-      setValues(buildInitialFormValues(base.fields));
-    }
+    if (base) setValues(buildInitialFormValues(base.fields));
   }, [base]);
 
-  const submit = async () => {
-    if (!client || !base) {
-      return;
-    }
-    setSubmitting(true);
-    setError(null);
-    try {
-      const changeRequest = await client.bases.createChangeRequest({
+  const submitMutation = useMutation({
+    mutationFn: async () => {
+      if (!buda || !base) throw new Error("Not ready");
+      return buda.client.bases.createChangeRequest({
         baseId: base.id,
         fields: normalizeFormValues(base.fields, values),
         message: `Create ${base.name} record`,
         submittedBy: "mobile-editor",
       });
+    },
+    onSuccess: (changeRequest) => {
       router.replace({ pathname: "/change-requests/[id]", params: { id: changeRequest.id } });
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Could not create change request");
-    } finally {
-      setSubmitting(false);
-    }
-  };
+    },
+  });
 
   const headerLeading = (
     <Pressable
@@ -79,7 +72,7 @@ function NewRecordContent() {
     </Pressable>
   );
 
-  if (basesQuery.loading) {
+  if (basesQuery.isLoading) {
     return (
       <NativeScreen title="New record" subtitle={slug} headerLeading={headerLeading}>
         <NativeLoadingState label="Loading base" />
@@ -109,8 +102,18 @@ function NewRecordContent() {
             setValues((current) => ({ ...current, [fieldSlug]: value }))
           }
         />
-        {error ? <NativeErrorState message={error} onRetry={() => setError(null)} /> : null}
-        <Button label="Create change request" loading={submitting} fullWidth onPress={submit} />
+        {submitMutation.error ? (
+          <NativeErrorState
+            message={submitMutation.error.message}
+            onRetry={() => submitMutation.reset()}
+          />
+        ) : null}
+        <Button
+          label="Create change request"
+          loading={submitMutation.isPending}
+          fullWidth
+          onPress={() => submitMutation.mutate()}
+        />
       </View>
     </NativeScreen>
   );

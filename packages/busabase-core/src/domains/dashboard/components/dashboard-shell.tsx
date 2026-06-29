@@ -1,7 +1,7 @@
 "use client";
 
 import { Toaster } from "kui/sonner";
-import { Activity, Images, Inbox, type LucideIcon, Plus, Search } from "lucide-react";
+import { Activity, Archive, Images, Inbox, type LucideIcon, Plus, Search } from "lucide-react";
 import { DashboardLayout, type NavGroup, type NavItem, NavMain } from "openlib/ui/dashboard";
 import type { ComponentProps, ReactNode } from "react";
 import { coreMessagesByLocale } from "../../../i18n";
@@ -106,6 +106,7 @@ export function BusabaseDashboardShell({
       items: [
         { title: nav.activity, url: "/activity", icon: Activity },
         { title: assetsLabel, url: "/assets", icon: Images },
+        { title: "Archived", url: "/archived", icon: Archive },
       ],
     },
     {

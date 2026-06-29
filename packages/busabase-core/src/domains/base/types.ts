@@ -64,6 +64,7 @@ export type ViewFilterOperator =
 
 export interface ViewFilterVO {
   fieldSlug: string;
+  fieldId?: string;
   operator: ViewFilterOperator;
   value?: unknown;
 }
@@ -71,6 +72,7 @@ export interface ViewFilterVO {
 export interface ViewSortVO {
   direction: "asc" | "desc";
   fieldSlug: string;
+  fieldId?: string;
 }
 
 export interface ViewConfigVO {

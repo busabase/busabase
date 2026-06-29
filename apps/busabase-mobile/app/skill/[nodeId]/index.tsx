@@ -1,14 +1,13 @@
+import { skipToken, useQuery } from "@tanstack/react-query";
 import type { SkillVO } from "busabase-core/types";
 import { useLocalSearchParams } from "expo-router";
 import { FileText, Folder, X } from "lucide-react-native";
-import { useCallback, useState } from "react";
+import { useState } from "react";
 import { Modal, Platform, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
-import { getSkillRest, readSkillFileRest } from "~/api/skills-rest";
+import { useBusabaseOrpc } from "~/api/use-busabase-orpc";
 import { ConnectionGuard } from "~/components/busabase/ConnectionGuard";
 import { DrawerScaffold } from "~/components/busabase/DrawerScaffold";
 import { NativeEmptyState, NativeErrorState, NativeLoadingState } from "~/components/native-screen";
-import { useConnection } from "~/connection/connection-store";
-import { useNativeQuery } from "~/hooks/use-native-query";
 import { mobile, radius, typography } from "~/theme/tokens";
 import { useTokens } from "~/theme/use-tokens";
 
@@ -35,27 +34,23 @@ function SkillDetailContent() {
   const params = useLocalSearchParams<{ nodeId?: string }>();
   const nodeId = typeof params.nodeId === "string" ? params.nodeId : "";
   const tokens = useTokens();
-  const { state } = useConnection();
-  const serverUrl = state.status === "connected" ? state.connection.serverUrl : null;
+  const buda = useBusabaseOrpc();
   const [openFile, setOpenFile] = useState<OpenFile | null>(null);
 
-  const loadSkill = useCallback(
-    () =>
-      serverUrl && nodeId
-        ? getSkillRest(serverUrl, nodeId)
-        : (Promise.resolve(null) as Promise<null>),
-    [serverUrl, nodeId],
+  const skillQuery = useQuery(
+    buda && nodeId
+      ? buda.orpc.skills.get.queryOptions({ input: { nodeId } })
+      : { queryKey: ["no-connection", "skill", nodeId], queryFn: skipToken },
   );
-  const skillQuery = useNativeQuery<SkillVO | null>(!!serverUrl && !!nodeId, loadSkill);
   const skill = skillQuery.data ?? null;
 
   const openSkillFile = async (file: SkillFile) => {
-    if (file.type !== "file" || !serverUrl) {
+    if (file.type !== "file" || !buda) {
       return;
     }
     setOpenFile({ path: file.path, content: "", loading: true, error: null });
     try {
-      const result = await readSkillFileRest(serverUrl, nodeId, file.path);
+      const result = await buda.client.skills.readFile({ nodeId, filePath: file.path });
       setOpenFile({ path: file.path, content: result.content, loading: false, error: null });
     } catch (error) {
       setOpenFile({
@@ -79,14 +74,17 @@ function SkillDetailContent() {
     <DrawerScaffold
       title={skill?.node.name ?? "Skill"}
       subtitle={skill ? `${skill.files.length} files` : "Skill"}
-      refreshing={skillQuery.refreshing}
-      onRefresh={skillQuery.refetch}
+      refreshing={skillQuery.isRefetching}
+      onRefresh={() => void skillQuery.refetch()}
     >
-      {skillQuery.loading ? <NativeLoadingState label="Loading skill" /> : null}
+      {skillQuery.isLoading ? <NativeLoadingState label="Loading skill" /> : null}
       {skillQuery.error ? (
-        <NativeErrorState message={skillQuery.error} onRetry={skillQuery.refetch} />
+        <NativeErrorState
+          message={skillQuery.error.message}
+          onRetry={() => void skillQuery.refetch()}
+        />
       ) : null}
-      {!skillQuery.loading && !skillQuery.error && !skill ? (
+      {!skillQuery.isLoading && !skillQuery.error && !skill ? (
         <NativeEmptyState title="Skill not found" description="This skill is not available." />
       ) : null}
 

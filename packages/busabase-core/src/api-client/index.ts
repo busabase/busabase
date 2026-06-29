@@ -121,8 +121,11 @@ export interface BusabaseDashboardApiClient {
           description?: string;
         }
       | { kind: "delete"; nodeId: string }
+      | { kind: "restore"; nodeId: string }
     >;
   }) => Promise<ChangeRequestVO>;
+  listArchivedNodes: () => Promise<NodeVO[]>;
+  purgeNode: (nodeId: string) => Promise<{ purged: boolean }>;
   listViews: (baseId: string) => Promise<ViewVO[]>;
   createBaseField: (
     baseId: string,
@@ -215,6 +218,24 @@ export interface BusabaseDashboardApiClient {
   ) => Promise<{ changeRequest: ChangeRequestVO; record: RecordVO | null; view: ViewVO | null }>;
   createAttachmentUploadUrl: (input: RequestUploadUrlDTO) => Promise<RequestUploadUrlVO>;
   confirmAttachment: (input: ConfirmUploadDTO) => Promise<ConfirmUploadVO>;
+  createRestoreBaseChangeRequest: (
+    baseId: string,
+    payload: { submittedBy?: string; message?: string },
+  ) => Promise<ChangeRequestVO>;
+  createRestoreFieldChangeRequest: (
+    baseId: string,
+    payload: { fieldId: string; submittedBy?: string; message?: string },
+  ) => Promise<ChangeRequestVO>;
+  listArchivedViews: (baseId: string) => Promise<ViewVO[]>;
+  listArchivedRecords: (baseId: string) => Promise<RecordVO[]>;
+  createRestoreViewChangeRequest: (
+    viewId: string,
+    payload: { submittedBy?: string; message?: string },
+  ) => Promise<ChangeRequestVO>;
+  createRestoreRecordChangeRequest: (
+    recordId: string,
+    payload: { submittedBy?: string; message?: string },
+  ) => Promise<ChangeRequestVO>;
 }
 
 function getBaseUrl() {
@@ -279,6 +300,8 @@ export const createBusabaseRestApiClient = (
     listAgentTasks: () => client.agent.listTasks({}),
     createComment: (payload) => client.comments.create(payload),
     listNodes: () => client.nodes.list(),
+    listArchivedNodes: () => client.nodes.listArchived(),
+    purgeNode: (nodeId) => client.nodes.purge({ nodeId }),
     // Skills go over plain REST, not oRPC: the RPC path /skills/get collides with
     // the server's REST matcher /skills/:id (same "skills" word). Same approach as search.
     getSkill: (nodeIdOrSlug) => fetchBusabaseSkill(apiBasePath, nodeIdOrSlug),
@@ -326,6 +349,16 @@ export const createBusabaseRestApiClient = (
     mergeChangeRequest: (changeRequestId) => client.changeRequests.merge({ changeRequestId }),
     createAttachmentUploadUrl: (input) => client.attachments.createUploadUrl(input),
     confirmAttachment: (input) => client.attachments.confirm(input),
+    createRestoreBaseChangeRequest: (baseId, payload) =>
+      client.bases.restoreChangeRequest({ baseId, ...payload }),
+    createRestoreFieldChangeRequest: (baseId, payload) =>
+      client.bases.restoreFieldChangeRequest({ baseId, ...payload }),
+    listArchivedViews: (baseId) => client.bases.listArchivedViews({ baseId }),
+    listArchivedRecords: (baseId) => client.bases.listArchivedRecords({ baseId }),
+    createRestoreViewChangeRequest: (viewId, payload) =>
+      client.views.restoreChangeRequest({ viewId, ...payload }),
+    createRestoreRecordChangeRequest: (recordId, payload) =>
+      client.records.restoreChangeRequest({ recordId, ...payload }),
   };
 };
 

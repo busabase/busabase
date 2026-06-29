@@ -10,6 +10,9 @@ export const statusTone = (status: string) => {
   if (status === "approved") {
     return "border-teal-200 bg-teal-50 text-teal-800";
   }
+  if (status === "conflict") {
+    return "border-red-200 bg-red-50 text-red-800";
+  }
   if (status === "rejected" || status === "abandoned") {
     return "border-gray-200 bg-gray-50 text-gray-700";
   }
@@ -22,6 +25,9 @@ export const changeRequestStatusLabel = (status: string) => {
   }
   if (status === "changes_requested") {
     return "Changes requested";
+  }
+  if (status === "conflict") {
+    return "Conflict";
   }
   if (status === "rejected" || status === "abandoned") {
     return "Closed";

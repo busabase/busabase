@@ -254,7 +254,14 @@ export const syncRecordAssetUsages = async (
   }
 
   // Replace usages for this record (idempotent re-merge; dropped files vanish).
-  await db.delete(busabaseAssetUsages).where(eq(busabaseAssetUsages.recordId, recordId));
+  await db
+    .delete(busabaseAssetUsages)
+    .where(
+      and(
+        eq(busabaseAssetUsages.recordId, recordId),
+        eq(busabaseAssetUsages.spaceId, getContextSpaceId()),
+      ),
+    );
   if (rows.length > 0) {
     await db.insert(busabaseAssetUsages).values(rows).onConflictDoNothing();
   }
@@ -263,7 +270,14 @@ export const syncRecordAssetUsages = async (
 /** Drop every where-used row for a record (called when the record is deleted). */
 export const removeRecordAssetUsages = async (recordId: string): Promise<void> => {
   const db = await getDb();
-  await db.delete(busabaseAssetUsages).where(eq(busabaseAssetUsages.recordId, recordId));
+  await db
+    .delete(busabaseAssetUsages)
+    .where(
+      and(
+        eq(busabaseAssetUsages.recordId, recordId),
+        eq(busabaseAssetUsages.spaceId, getContextSpaceId()),
+      ),
+    );
 };
 
 /**

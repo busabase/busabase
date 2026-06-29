@@ -1,3 +1,4 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Stack } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import { StatusBar } from "expo-status-bar";
@@ -10,6 +11,8 @@ import "~/notifications/background-task";
 import { NotificationProvider } from "~/notifications/notification-provider";
 
 void SplashScreen.preventAutoHideAsync();
+
+const queryClient = new QueryClient();
 
 function AppStatusBar() {
   // SDK 54+ runs edge-to-edge by default; expo-status-bar dropped the
@@ -25,14 +28,16 @@ export default function RootLayout() {
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>
-        <ConnectionProvider>
-          <NotificationProvider>
-            <AppStatusBar />
-            {/* Routes are auto-discovered from the app/ tree; every screen hides
-                the native header and renders its own NativeScreen chrome. */}
-            <Stack screenOptions={{ headerShown: false }} />
-          </NotificationProvider>
-        </ConnectionProvider>
+        <QueryClientProvider client={queryClient}>
+          <ConnectionProvider>
+            <NotificationProvider>
+              <AppStatusBar />
+              {/* Routes are auto-discovered from the app/ tree; every screen hides
+                  the native header and renders its own NativeScreen chrome. */}
+              <Stack screenOptions={{ headerShown: false }} />
+            </NotificationProvider>
+          </ConnectionProvider>
+        </QueryClientProvider>
       </SafeAreaProvider>
     </GestureHandlerRootView>
   );

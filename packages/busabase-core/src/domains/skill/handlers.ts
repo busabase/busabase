@@ -1,6 +1,6 @@
 import "server-only";
 
-import { asc, eq } from "drizzle-orm";
+import { and, asc, eq, isNull } from "drizzle-orm";
 import type { z } from "zod";
 import { getContextSpaceId } from "../../context";
 import { getDb } from "../../db";
@@ -137,7 +137,7 @@ export const listSkills = async () => {
   const nodes = await db
     .select()
     .from(busabaseNodes)
-    .where(eq(busabaseNodes.type, "skill"))
+    .where(and(eq(busabaseNodes.type, "skill"), isNull(busabaseNodes.archivedAt)))
     .orderBy(asc(busabaseNodes.position), asc(busabaseNodes.createdAt));
   return Promise.all(nodes.map((node) => getSkill(node.id)));
 };

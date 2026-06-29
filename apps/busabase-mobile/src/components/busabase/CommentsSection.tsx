@@ -1,7 +1,8 @@
-import type { CommentSubjectType, CommentVO } from "busabase-core/types";
-import { useCallback, useEffect, useState } from "react";
+import { skipToken, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import type { CommentSubjectType } from "busabase-core/types";
+import { useState } from "react";
 import { StyleSheet, Text, View } from "react-native";
-import { useBusabaseClient } from "~/api/use-busabase-client";
+import { useBusabaseOrpc } from "~/api/use-busabase-orpc";
 import { formatDate } from "~/lib/format";
 import { radius, typography } from "~/theme/tokens";
 import { useTokens } from "~/theme/use-tokens";
@@ -15,55 +16,39 @@ interface CommentsSectionProps {
 
 export function CommentsSection({ subjectType, subjectId }: CommentsSectionProps) {
   const tokens = useTokens();
-  const client = useBusabaseClient();
-  const [comments, setComments] = useState<CommentVO[]>([]);
-  const [loading, setLoading] = useState(true);
+  const buda = useBusabaseOrpc();
+  const queryClient = useQueryClient();
   const [body, setBody] = useState("");
-  const [posting, setPosting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
 
-  const load = useCallback(async () => {
-    if (!client) {
-      setLoading(false);
-      return;
-    }
-    setLoading(true);
-    try {
-      setComments(await client.comments.list({ subjectType, subjectId }));
-      setError(null);
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Could not load comments");
-    } finally {
-      setLoading(false);
-    }
-  }, [client, subjectType, subjectId]);
+  const commentsQuery = useQuery(
+    buda
+      ? buda.orpc.comments.list.queryOptions({ input: { subjectType, subjectId } })
+      : { queryKey: ["no-connection", "comments", subjectType, subjectId], queryFn: skipToken },
+  );
+  const comments = commentsQuery.data ?? [];
 
-  useEffect(() => {
-    void load();
-  }, [load]);
-
-  const submit = async () => {
-    const trimmed = body.trim();
-    if (!client || !trimmed) {
-      return;
-    }
-    setPosting(true);
-    setError(null);
-    try {
-      const comment = await client.comments.create({
+  const postMutation = useMutation({
+    mutationFn: async (trimmed: string) => {
+      if (!buda) throw new Error("Not connected");
+      return buda.client.comments.create({
         subjectType,
         subjectId,
         body: trimmed,
         authorId: "mobile-reviewer",
         mentionsAi: /(^|\s)@ai(\s|$)/i.test(trimmed),
       });
-      setComments((current) => [...current, comment]);
+    },
+    onSuccess: () => {
       setBody("");
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Could not post comment");
-    } finally {
-      setPosting(false);
-    }
+      void queryClient.invalidateQueries({
+        queryKey: buda?.orpc.comments.list.key({ input: { subjectType, subjectId } }),
+      });
+    },
+  });
+
+  const submit = () => {
+    const trimmed = body.trim();
+    if (trimmed) postMutation.mutate(trimmed);
   };
 
   return (
@@ -71,7 +56,7 @@ export function CommentsSection({ subjectType, subjectId }: CommentsSectionProps
       <Text style={[typography.h2, { color: tokens.foreground }]}>
         Comments ({comments.length})
       </Text>
-      {loading ? (
+      {commentsQuery.isLoading ? (
         <Text style={[typography.body, { color: tokens.mutedForeground }]}>
           Loading comments...
         </Text>
@@ -92,8 +77,10 @@ export function CommentsSection({ subjectType, subjectId }: CommentsSectionProps
           </View>
         ))
       )}
-      {error ? (
-        <Text style={[typography.small, { color: tokens.destructive }]}>{error}</Text>
+      {postMutation.error ? (
+        <Text style={[typography.small, { color: tokens.destructive }]}>
+          {postMutation.error.message}
+        </Text>
       ) : null}
       <TextInput
         label="Add comment"
@@ -106,7 +93,7 @@ export function CommentsSection({ subjectType, subjectId }: CommentsSectionProps
       />
       <Button
         label="Post comment"
-        loading={posting}
+        loading={postMutation.isPending}
         disabled={body.trim().length === 0}
         fullWidth
         onPress={submit}

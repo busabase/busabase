@@ -4,6 +4,25 @@
 
 Concrete things people build on Busabase — the same review-first workflow applied to different kinds of data and content.
 
+**Contents**
+
+- [Blog CMS for Next.js](#blog-cms-for-nextjs)
+- [SEO Landing Pages](#seo-landing-pages)
+- [Configuration Management](#configuration-management)
+- [Finance and Invoice Review](#finance-and-invoice-review)
+- [Data Stewardship and CRM Hygiene](#data-stewardship-and-crm-hygiene)
+- [Compliance and Audit Checklists](#compliance-and-audit-checklists)
+- [High-Quality QA and Training Datasets](#high-quality-qa-and-training-datasets)
+- [Multimodal Content Review](#multimodal-content-review)
+- [Market Intelligence and Research Monitoring](#market-intelligence-and-research-monitoring)
+- [Content Factory Pipeline](#content-factory-pipeline)
+- [Dataset Labeling Pipeline](#dataset-labeling-pipeline)
+- [Approval-Based Project Management and ERP](#approval-based-project-management-and-erp)
+- [Canonical System of Record](#canonical-system-of-record)
+- [Local Personal Knowledge Base](#local-personal-knowledge-base)
+- [Verified Routine Work](#verified-routine-work)
+- [Field Type Lab](#field-type-lab)
+
 ### Blog CMS for Next.js
 
 Use Busabase as a local CMS for a blog or editorial workflow.

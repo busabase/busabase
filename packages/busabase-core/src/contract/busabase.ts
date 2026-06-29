@@ -63,6 +63,15 @@ export const busabaseContract = oc.prefix("/api/v1").router({
         successDescription: "Workspace node tree including folders, Bases, files, and agents.",
       })
       .output(z.array(nodeSchema)),
+    listArchived: oc
+      .route({
+        method: "GET",
+        path: "/nodes/archived",
+        tags: ["Nodes"],
+        summary: "List archived nodes",
+        successDescription: "Soft-archived folders, docs, and skills (for the Trash view).",
+      })
+      .output(z.array(nodeSchema)),
     createChangeRequest: oc
       .route({
         method: "POST",
@@ -73,6 +82,17 @@ export const busabaseContract = oc.prefix("/api/v1").router({
       })
       .input(createNodeChangeRequestInputSchema)
       .output(changeRequestSchema),
+    purge: oc
+      .route({
+        method: "DELETE",
+        path: "/nodes/{nodeId}",
+        tags: ["Nodes"],
+        summary: "Permanently delete an archived node",
+        successDescription:
+          "Irreversibly removed an archived folder/doc/skill (and its subtree). Refused unless archived and refused if the subtree contains a Base.",
+      })
+      .input(z.object({ nodeId: z.string() }))
+      .output(z.object({ purged: z.boolean() })),
   },
   auditEvents: {
     list: oc

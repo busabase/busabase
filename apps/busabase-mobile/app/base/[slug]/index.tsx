@@ -1,13 +1,13 @@
+import { skipToken, useQuery } from "@tanstack/react-query";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { useCallback, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
-import { useBusabaseClient } from "~/api/use-busabase-client";
+import { useBusabaseOrpc } from "~/api/use-busabase-orpc";
 import { ConnectionGuard } from "~/components/busabase/ConnectionGuard";
 import { DrawerScaffold } from "~/components/busabase/DrawerScaffold";
 import { FieldValue } from "~/components/busabase/FieldValue";
 import { NativeEmptyState, NativeErrorState, NativeLoadingState } from "~/components/native-screen";
 import { Button } from "~/components/ui/Button";
-import { useNativeQuery } from "~/hooks/use-native-query";
 import { getRecordTitle } from "~/lib/busabase-display";
 import { applyViewConfig } from "~/lib/view-config";
 import { radius, typography } from "~/theme/tokens";
@@ -21,26 +21,30 @@ function BaseDetailContent() {
   const slug = typeof params.slug === "string" ? params.slug : "";
   const router = useRouter();
   const tokens = useTokens();
-  const client = useBusabaseClient();
+  const buda = useBusabaseOrpc();
   const [activeViewId, setActiveViewId] = useState<string | null>(null);
 
-  const loadBases = useCallback(() => client?.bases.list() ?? Promise.resolve([]), [client]);
-  const loadRecords = useCallback(
-    () => client?.records.list({ limit: 100 }) ?? Promise.resolve([]),
-    [client],
+  const basesQuery = useQuery(
+    buda
+      ? buda.orpc.bases.list.queryOptions({})
+      : { queryKey: ["no-connection", "bases", "list"], queryFn: skipToken },
   );
-  const basesQuery = useNativeQuery(!!client, loadBases);
-  const recordsQuery = useNativeQuery(!!client, loadRecords);
+  const recordsQuery = useQuery(
+    buda
+      ? buda.orpc.records.list.queryOptions({ input: { limit: 100 } })
+      : { queryKey: ["no-connection", "records", "list"], queryFn: skipToken },
+  );
+
   const base = useMemo(
     () => basesQuery.data?.find((item) => item.slug === slug) ?? null,
     [basesQuery.data, slug],
   );
 
-  const loadViews = useCallback(
-    () => (client && base ? client.bases.listViews({ baseId: base.id }) : Promise.resolve([])),
-    [client, base],
+  const viewsQuery = useQuery(
+    buda && base
+      ? buda.orpc.bases.listViews.queryOptions({ input: { baseId: base.id } })
+      : { queryKey: ["no-connection", "views", slug], queryFn: skipToken },
   );
-  const viewsQuery = useNativeQuery(!!client && !!base, loadViews);
   const views = viewsQuery.data ?? [];
   const activeView = views.find((view) => view.id === activeViewId) ?? null;
 
@@ -61,23 +65,23 @@ function BaseDetailContent() {
   }, [base?.fields, activeView]);
 
   const refresh = () => {
-    basesQuery.refetch();
-    recordsQuery.refetch();
-    viewsQuery.refetch();
+    void basesQuery.refetch();
+    void recordsQuery.refetch();
+    void viewsQuery.refetch();
   };
 
-  const loading = basesQuery.loading || recordsQuery.loading;
+  const loading = basesQuery.isLoading || recordsQuery.isLoading;
   const error = basesQuery.error ?? recordsQuery.error;
 
   return (
     <DrawerScaffold
       title={base?.name ?? "Base"}
       subtitle={base ? `${records.length} records · ${base.fields.length} fields` : slug}
-      refreshing={basesQuery.refreshing || recordsQuery.refreshing}
+      refreshing={basesQuery.isRefetching || recordsQuery.isRefetching}
       onRefresh={refresh}
     >
       {loading ? <NativeLoadingState label="Loading base" /> : null}
-      {error ? <NativeErrorState message={error} onRetry={refresh} /> : null}
+      {error ? <NativeErrorState message={error.message} onRetry={refresh} /> : null}
       {!loading && !error && !base ? (
         <NativeEmptyState title="Base not found" description="This base is not available." />
       ) : null}

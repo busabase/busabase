@@ -10,7 +10,7 @@
 //   - entry.json describing where server.js and node live (relative paths)
 //
 // At runtime the Rust layer reads entry.json, then launches
-// `node <server.js>` on port 3061 as the Busabase sidecar. The desktop SPA
+// `node <server.js>` on port 15419 as the Busabase sidecar. The desktop SPA
 // renders that sidecar's /dashboard.
 
 import { execFile } from "node:child_process";

@@ -1,6 +1,6 @@
 import "server-only";
 
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, isNull } from "drizzle-orm";
 import { storage } from "openlib/storage";
 import type { z } from "zod";
 import { getContextSpaceId } from "../../context";
@@ -56,10 +56,17 @@ const readDocBody = async (nodeId: string) =>
 
 const getDocNode = async (nodeIdOrSlug: string) => {
   const db = await getDb();
+  const spaceId = getContextSpaceId();
   const [byId] = await db
     .select()
     .from(busabaseNodes)
-    .where(eq(busabaseNodes.id, nodeIdOrSlug))
+    .where(
+      and(
+        eq(busabaseNodes.id, nodeIdOrSlug),
+        eq(busabaseNodes.spaceId, spaceId),
+        isNull(busabaseNodes.archivedAt),
+      ),
+    )
     .limit(1);
   const [node] =
     byId && byId.type === "doc"
@@ -67,7 +74,14 @@ const getDocNode = async (nodeIdOrSlug: string) => {
       : await db
           .select()
           .from(busabaseNodes)
-          .where(and(eq(busabaseNodes.slug, nodeIdOrSlug), eq(busabaseNodes.type, "doc")))
+          .where(
+            and(
+              eq(busabaseNodes.slug, nodeIdOrSlug),
+              eq(busabaseNodes.spaceId, spaceId),
+              eq(busabaseNodes.type, "doc"),
+              isNull(busabaseNodes.archivedAt),
+            ),
+          )
           .limit(1);
   return node ?? null;
 };
@@ -138,7 +152,7 @@ export const listDocs = async (): Promise<DocVO[]> => {
   const nodes = await db
     .select()
     .from(busabaseNodes)
-    .where(eq(busabaseNodes.type, "doc"))
+    .where(and(eq(busabaseNodes.type, "doc"), isNull(busabaseNodes.archivedAt)))
     .orderBy(asc(busabaseNodes.position), asc(busabaseNodes.createdAt));
   return Promise.all(nodes.map(toDocVO));
 };

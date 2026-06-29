@@ -10,7 +10,7 @@ import { useConnection } from "~/connection/connection-store";
 import { mobile, radius, typography } from "~/theme/tokens";
 import { useTokens } from "~/theme/use-tokens";
 
-const urlExamples = ["http://localhost:3061", "http://10.0.2.2:3061"];
+const urlExamples = ["http://localhost:15419", "http://10.0.2.2:15419"];
 
 export default function SelfHostedConnectionScreen() {
   const router = useRouter();

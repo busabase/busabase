@@ -1,32 +1,33 @@
+import { skipToken, useQuery } from "@tanstack/react-query";
 import { useRouter } from "expo-router";
-import { useCallback } from "react";
 import { StyleSheet, View } from "react-native";
-import { useBusabaseClient } from "~/api/use-busabase-client";
+import { useBusabaseOrpc } from "~/api/use-busabase-orpc";
 import { ConnectionGuard } from "~/components/busabase/ConnectionGuard";
 import { DrawerScaffold } from "~/components/busabase/DrawerScaffold";
 import { RecordCard } from "~/components/busabase/RecordCard";
 import { NativeEmptyState, NativeErrorState, NativeLoadingState } from "~/components/native-screen";
-import { useNativeQuery } from "~/hooks/use-native-query";
 
 function RecordsContent() {
   const router = useRouter();
-  const client = useBusabaseClient();
-  const loadRecords = useCallback(
-    () => client?.records.list({ limit: 50 }) ?? Promise.resolve([]),
-    [client],
+  const buda = useBusabaseOrpc();
+  const query = useQuery(
+    buda
+      ? buda.orpc.records.list.queryOptions({ input: { limit: 50 } })
+      : { queryKey: ["no-connection", "records", "list"], queryFn: skipToken },
   );
-  const query = useNativeQuery(!!client, loadRecords);
 
   return (
     <DrawerScaffold
       title="Records"
       subtitle="Read-only merged records"
-      refreshing={query.refreshing}
-      onRefresh={query.refetch}
+      refreshing={query.isRefetching}
+      onRefresh={() => void query.refetch()}
     >
-      {query.loading ? <NativeLoadingState label="Loading records" /> : null}
-      {query.error ? <NativeErrorState message={query.error} onRetry={query.refetch} /> : null}
-      {!query.loading && !query.error && query.data?.length === 0 ? (
+      {query.isLoading ? <NativeLoadingState label="Loading records" /> : null}
+      {query.error ? (
+        <NativeErrorState message={query.error.message} onRetry={() => void query.refetch()} />
+      ) : null}
+      {!query.isLoading && !query.error && query.data?.length === 0 ? (
         <NativeEmptyState
           title="No records yet"
           description="Approved and merged Busabase records will appear here."

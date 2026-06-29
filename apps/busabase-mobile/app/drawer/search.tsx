@@ -2,12 +2,11 @@ import type { SearchResultVO } from "busabase-core/types";
 import { useRouter } from "expo-router";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-native";
-import { searchBusabaseRest } from "~/api/search-rest";
+import { useBusabaseOrpc } from "~/api/use-busabase-orpc";
 import { ConnectionGuard } from "~/components/busabase/ConnectionGuard";
 import { DrawerScaffold } from "~/components/busabase/DrawerScaffold";
 import { NativeEmptyState } from "~/components/native-screen";
 import { TextInput } from "~/components/ui/TextInput";
-import { useConnection } from "~/connection/connection-store";
 import { radius, typography } from "~/theme/tokens";
 import { useTokens } from "~/theme/use-tokens";
 
@@ -22,8 +21,7 @@ const DEBOUNCE_MS = 220;
 function SearchContent() {
   const router = useRouter();
   const tokens = useTokens();
-  const { state } = useConnection();
-  const serverUrl = state.status === "connected" ? state.connection.serverUrl : null;
+  const buda = useBusabaseOrpc();
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<SearchResultVO[]>([]);
   const [searching, setSearching] = useState(false);
@@ -32,7 +30,7 @@ function SearchContent() {
 
   useEffect(() => {
     const trimmed = query.trim();
-    if (!serverUrl || !trimmed) {
+    if (!buda || !trimmed) {
       setResults([]);
       setSearching(false);
       setError(null);
@@ -41,7 +39,8 @@ function SearchContent() {
     setSearching(true);
     const current = ++requestId.current;
     const timer = setTimeout(() => {
-      searchBusabaseRest(serverUrl, { query: trimmed, limit: 20, offset: 0 })
+      buda.client
+        .search({ query: trimmed, limit: 20, offset: 0 })
         .then((response) => {
           if (current === requestId.current) {
             setResults(response.results);
@@ -60,7 +59,7 @@ function SearchContent() {
         });
     }, DEBOUNCE_MS);
     return () => clearTimeout(timer);
-  }, [serverUrl, query]);
+  }, [buda, query]);
 
   const openResult = useCallback(
     (result: SearchResultVO) => {

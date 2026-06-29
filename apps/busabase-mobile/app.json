@@ -68,7 +68,7 @@
       "router": {},
       "eas": {},
       "busabase": {
-        "demoServerUrl": "https://busabase.com"
+        "demoServerUrl": "https://demo.busabase.com"
       }
     }
   }

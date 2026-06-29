@@ -1,9 +1,10 @@
-import type { ChangeRequestVO, CommentVO, RecordVO } from "busabase-core/types";
+import { skipToken, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import type { ChangeRequestVO } from "busabase-core/types";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { ArrowLeft } from "lucide-react-native";
-import { useCallback, useEffect, useState } from "react";
+import { useState } from "react";
 import { Alert, Pressable, StyleSheet, Text, View } from "react-native";
-import { useBusabaseClient } from "~/api/use-busabase-client";
+import { useBusabaseOrpc } from "~/api/use-busabase-orpc";
 import { ConnectionGuard } from "~/components/busabase/ConnectionGuard";
 import { FieldList } from "~/components/busabase/FieldList";
 import {
@@ -24,88 +25,67 @@ function RecordDetailContent() {
   const params = useLocalSearchParams<{ id?: string }>();
   const router = useRouter();
   const tokens = useTokens();
-  const client = useBusabaseClient();
+  const buda = useBusabaseOrpc();
+  const queryClient = useQueryClient();
   const recordId = typeof params.id === "string" ? params.id : "";
-  const [record, setRecord] = useState<RecordVO | null>(null);
-  const [history, setHistory] = useState<ChangeRequestVO[]>([]);
-  const [comments, setComments] = useState<CommentVO[]>([]);
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
   const [commentBody, setCommentBody] = useState("");
-  const [commentError, setCommentError] = useState<string | null>(null);
-  const [postingComment, setPostingComment] = useState(false);
-  const [deleting, setDeleting] = useState(false);
 
-  const load = useCallback(async () => {
-    if (!client || !recordId) {
-      setLoading(false);
-      return;
-    }
-    setLoading(true);
-    setError(null);
-    try {
-      const [nextRecord, nextHistory, nextComments] = await Promise.all([
-        client.records.get({ recordId }),
-        client.records.listChangeRequests({ recordId }).catch(() => []),
-        client.comments.list({ subjectType: "record", subjectId: recordId }).catch(() => []),
-      ]);
-      setRecord(nextRecord);
-      setHistory(nextHistory);
-      setComments(nextComments);
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Could not load record");
-    } finally {
-      setLoading(false);
-    }
-  }, [client, recordId]);
+  const recordQuery = useQuery(
+    buda && recordId
+      ? buda.orpc.records.get.queryOptions({ input: { recordId } })
+      : { queryKey: ["no-connection", "record", recordId], queryFn: skipToken },
+  );
+  const historyQuery = useQuery(
+    buda && recordId
+      ? buda.orpc.records.listChangeRequests.queryOptions({ input: { recordId } })
+      : { queryKey: ["no-connection", "record-history", recordId], queryFn: skipToken },
+  );
+  const commentsQuery = useQuery(
+    buda && recordId
+      ? buda.orpc.comments.list.queryOptions({
+          input: { subjectType: "record", subjectId: recordId },
+        })
+      : { queryKey: ["no-connection", "comments", "record", recordId], queryFn: skipToken },
+  );
 
-  useEffect(() => {
-    void load();
-  }, [load]);
+  const record = recordQuery.data ?? null;
+  const history = (historyQuery.data as ChangeRequestVO[] | undefined) ?? [];
+  const comments = commentsQuery.data ?? [];
 
-  const submitComment = async () => {
-    const body = commentBody.trim();
-    if (!client || !recordId || !body) {
-      return;
-    }
-    setPostingComment(true);
-    setCommentError(null);
-    try {
-      const comment = await client.comments.create({
+  const deleteMutation = useMutation({
+    mutationFn: async () => {
+      if (!buda || !recordId) throw new Error("Not connected");
+      return buda.client.records.deleteChangeRequest({
+        recordId,
+        message: "Delete record",
+        submittedBy: "mobile-editor",
+      });
+    },
+    onSuccess: (changeRequest) => {
+      router.replace({ pathname: "/change-requests/[id]", params: { id: changeRequest.id } });
+    },
+  });
+
+  const commentMutation = useMutation({
+    mutationFn: async (body: string) => {
+      if (!buda || !recordId) throw new Error("Not connected");
+      return buda.client.comments.create({
         subjectType: "record",
         subjectId: recordId,
         body,
         authorId: "mobile-reviewer",
         mentionsAi: /(^|\s)@ai(\s|$)/i.test(body),
       });
-      setComments((current) => [...current, comment]);
+    },
+    onSuccess: () => {
       setCommentBody("");
-    } catch (caught) {
-      setCommentError(caught instanceof Error ? caught.message : "Could not post comment");
-    } finally {
-      setPostingComment(false);
-    }
-  };
-
-  const deleteRecord = async () => {
-    if (!client || !recordId) {
-      return;
-    }
-    setDeleting(true);
-    setError(null);
-    try {
-      const changeRequest = await client.records.deleteChangeRequest({
-        recordId,
-        message: "Delete record",
-        submittedBy: "mobile-editor",
+      void queryClient.invalidateQueries({
+        queryKey: buda?.orpc.comments.list.key({
+          input: { subjectType: "record", subjectId: recordId },
+        }),
       });
-      router.replace({ pathname: "/change-requests/[id]", params: { id: changeRequest.id } });
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Could not create delete change request");
-    } finally {
-      setDeleting(false);
-    }
-  };
+    },
+  });
 
   const headerLeading = (
     <Pressable
@@ -119,7 +99,7 @@ function RecordDetailContent() {
     </Pressable>
   );
 
-  if (loading) {
+  if (recordQuery.isLoading) {
     return (
       <NativeScreen title="Record" subtitle="Loading record" headerLeading={headerLeading}>
         <NativeLoadingState label="Loading record" />
@@ -127,10 +107,13 @@ function RecordDetailContent() {
     );
   }
 
-  if (error && !record) {
+  if (recordQuery.error && !record) {
     return (
       <NativeScreen title="Record" subtitle={shortId(recordId)} headerLeading={headerLeading}>
-        <NativeErrorState message={error} onRetry={load} />
+        <NativeErrorState
+          message={recordQuery.error.message}
+          onRetry={() => void recordQuery.refetch()}
+        />
       </NativeScreen>
     );
   }
@@ -173,19 +156,28 @@ function RecordDetailContent() {
             </View>
             <View style={styles.recordActionItem}>
               <Button
-                label={deleting ? "Submitting..." : "Delete"}
+                label="Delete"
                 variant="destructive"
-                loading={deleting}
+                loading={deleteMutation.isPending}
                 fullWidth
                 onPress={() =>
                   Alert.alert("Delete record", "Create a delete change request for this record?", [
                     { text: "Cancel", style: "cancel" },
-                    { text: "Delete", style: "destructive", onPress: () => void deleteRecord() },
+                    {
+                      text: "Delete",
+                      style: "destructive",
+                      onPress: () => deleteMutation.mutate(),
+                    },
                   ])
                 }
               />
             </View>
           </View>
+          {deleteMutation.error ? (
+            <Text style={[typography.small, { color: tokens.destructive }]}>
+              {deleteMutation.error.message}
+            </Text>
+          ) : null}
         </View>
 
         <View style={[styles.card, { backgroundColor: tokens.card, borderColor: tokens.border }]}>
@@ -229,7 +221,11 @@ function RecordDetailContent() {
           <Text style={[typography.h2, { color: tokens.foreground }]}>
             Comments ({comments.length})
           </Text>
-          {comments.length === 0 ? (
+          {commentsQuery.isLoading ? (
+            <Text style={[typography.body, { color: tokens.mutedForeground }]}>
+              Loading comments...
+            </Text>
+          ) : comments.length === 0 ? (
             <Text style={[typography.body, { color: tokens.mutedForeground }]}>
               No comments yet.
             </Text>
@@ -248,8 +244,10 @@ function RecordDetailContent() {
               </View>
             ))
           )}
-          {commentError ? (
-            <Text style={[typography.small, { color: tokens.destructive }]}>{commentError}</Text>
+          {commentMutation.error ? (
+            <Text style={[typography.small, { color: tokens.destructive }]}>
+              {commentMutation.error.message}
+            </Text>
           ) : null}
           <TextInput
             label="Add comment"
@@ -262,10 +260,13 @@ function RecordDetailContent() {
           />
           <Button
             label="Post comment"
-            loading={postingComment}
+            loading={commentMutation.isPending}
             disabled={commentBody.trim().length === 0}
             fullWidth
-            onPress={submitComment}
+            onPress={() => {
+              const body = commentBody.trim();
+              if (body) commentMutation.mutate(body);
+            }}
           />
         </View>
       </View>

@@ -1,1 +1,0 @@
-ALTER TABLE "attachments" DROP CONSTRAINT "attachments_storage_key_unique";

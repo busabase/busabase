@@ -20,10 +20,10 @@ interface BusabaseSidecarStatus {
 const fallbackStatus: BusabaseSidecarStatus = {
   running: false,
   healthy: false,
-  port: 3061,
+  port: 15419,
   pid: null,
-  localUrl: "http://localhost:3061",
-  apiUrl: "http://localhost:3061/api/v1",
+  localUrl: "http://localhost:15419",
+  apiUrl: "http://localhost:15419/api/v1",
   dataDir: "",
   launchMode: "stopped",
   error: null,

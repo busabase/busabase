@@ -1,11 +1,11 @@
+import { skipToken, useQuery } from "@tanstack/react-query";
 import { useRouter } from "expo-router";
-import { useCallback, useMemo } from "react";
+import { useMemo } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
-import { useBusabaseClient } from "~/api/use-busabase-client";
+import { useBusabaseOrpc } from "~/api/use-busabase-orpc";
 import { ConnectionGuard } from "~/components/busabase/ConnectionGuard";
 import { DrawerScaffold } from "~/components/busabase/DrawerScaffold";
 import { NativeEmptyState, NativeErrorState, NativeLoadingState } from "~/components/native-screen";
-import { useNativeQuery } from "~/hooks/use-native-query";
 import { type ActivityEvent, type ActivityTone, buildActivityEvents } from "~/lib/activity-events";
 import { formatDate } from "~/lib/format";
 import { radius, typography } from "~/theme/tokens";
@@ -22,21 +22,24 @@ const toneLabel: Record<ActivityTone, string> = {
 function ActivityContent() {
   const router = useRouter();
   const tokens = useTokens();
-  const client = useBusabaseClient();
+  const buda = useBusabaseOrpc();
 
-  const load = useCallback(async (): Promise<ActivityEvent[]> => {
-    if (!client) {
-      return [];
-    }
-    const [changeRequests, records, auditEvents] = await Promise.all([
-      client.changeRequests.list({ limit: 100 }),
-      client.records.list({ limit: 100 }),
-      client.auditEvents.list({ limit: 100 }).catch(() => []),
-    ]);
-    return buildActivityEvents(changeRequests, records, auditEvents);
-  }, [client]);
-
-  const query = useNativeQuery(!!client, load);
+  const query = useQuery({
+    queryKey: buda
+      ? ["activity", buda.orpc.changeRequests.list.key({})]
+      : ["no-connection", "activity"],
+    queryFn: buda
+      ? async () => {
+          const client = buda.client;
+          const [changeRequests, records, auditEvents] = await Promise.all([
+            client.changeRequests.list({ limit: 100 }),
+            client.records.list({ limit: 100 }),
+            client.auditEvents.list({ limit: 100 }).catch(() => []),
+          ]);
+          return buildActivityEvents(changeRequests, records, auditEvents);
+        }
+      : skipToken,
+  });
 
   const { today, earlier } = useMemo(() => {
     const startOfDay = new Date();
@@ -86,12 +89,14 @@ function ActivityContent() {
     <DrawerScaffold
       title="Activity"
       subtitle="Review, merge, and audit events"
-      refreshing={query.refreshing}
-      onRefresh={query.refetch}
+      refreshing={query.isRefetching}
+      onRefresh={() => void query.refetch()}
     >
-      {query.loading ? <NativeLoadingState label="Loading activity" /> : null}
-      {query.error ? <NativeErrorState message={query.error} onRetry={query.refetch} /> : null}
-      {!query.loading && !query.error && (query.data?.length ?? 0) === 0 ? (
+      {query.isLoading ? <NativeLoadingState label="Loading activity" /> : null}
+      {query.error ? (
+        <NativeErrorState message={query.error.message} onRetry={() => void query.refetch()} />
+      ) : null}
+      {!query.isLoading && !query.error && (query.data?.length ?? 0) === 0 ? (
         <NativeEmptyState
           title="No activity yet"
           description="Change requests, merges, records, and audit events will appear here."

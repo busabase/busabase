@@ -53,7 +53,7 @@ export interface SeedOperationDef {
   sourceRecordId?: string | null;
   sourceCommitId?: string | null;
   baseCommitId?: string | null;
-  deleteMode?: "archive" | "hard_delete_after_retention";
+  deleteMode?: "archive";
   /** Resolved "before" values shown in the diff (record_update/delete). */
   baseFields?: Record<string, unknown> | null;
 }

@@ -5,6 +5,7 @@ import {
   Paperclip,
   PenLine,
   Plus,
+  RotateCcw,
   Trash2,
   X,
 } from "lucide-react";
@@ -110,15 +111,21 @@ const toSlug = (value: string) =>
 
 export function BusaBaseTable({
   activeView,
+  archivedViews = [],
+  archivedRecords = [],
   base,
   onCreateView,
   onDeleteView,
+  onRestoreView,
+  onRestoreRecord,
   onUpdateView,
   records,
   relationRecords = records,
   views,
 }: {
   activeView: ViewVO | null;
+  archivedViews?: ViewVO[];
+  archivedRecords?: RecordVO[];
   base: BaseVO | null;
   onCreateView: (
     base: BaseVO,
@@ -126,6 +133,8 @@ export function BusaBaseTable({
     options?: ViewSubmitOptions,
   ) => Promise<void>;
   onDeleteView: (view: ViewVO) => Promise<void>;
+  onRestoreView?: (view: ViewVO) => Promise<void>;
+  onRestoreRecord?: (record: RecordVO) => Promise<void>;
   onUpdateView: (
     view: ViewVO,
     payload: ViewFormPayload,
@@ -139,6 +148,9 @@ export function BusaBaseTable({
   const [isDeletingView, setIsDeletingView] = useState(false);
   const [confirmDeleteView, setConfirmDeleteView] = useState<ViewVO | null>(null);
   const [viewActionError, setViewActionError] = useState<string | null>(null);
+  const [showArchivedRecords, setShowArchivedRecords] = useState(false);
+  const [restoringViewId, setRestoringViewId] = useState<string | null>(null);
+  const [restoringRecordId, setRestoringRecordId] = useState<string | null>(null);
   const allFields = base?.fields ?? records[0]?.base.fields ?? [];
   const visibleFieldSlugs = activeView?.config.visibleFieldSlugs;
   const fields =
@@ -202,6 +214,15 @@ export function BusaBaseTable({
                   activeView.config.filters.length === 1 ? "" : "s"
                 }`
               : ""}
+            {archivedRecords.length > 0 ? (
+              <button
+                className="ml-2 underline-offset-2 hover:underline"
+                onClick={() => setShowArchivedRecords((v) => !v)}
+                type="button"
+              >
+                {showArchivedRecords ? "Hide archived" : `${archivedRecords.length} archived`}
+              </button>
+            ) : null}
           </span>
           {activeView ? (
             <details className="relative">
@@ -283,6 +304,35 @@ export function BusaBaseTable({
         pending={isDeletingView}
         title="Create delete request?"
       />
+      {archivedViews.length > 0 ? (
+        <details className="mb-3 rounded-md border border-border/50 text-xs">
+          <summary className="flex cursor-pointer list-none items-center gap-1.5 px-3 py-2 font-medium text-muted-foreground hover:text-foreground [&::-webkit-details-marker]:hidden">
+            <ChevronRight className="size-3 transition-transform details-open:rotate-90" />
+            {archivedViews.length} archived view{archivedViews.length === 1 ? "" : "s"}
+          </summary>
+          <div className="divide-y divide-border/40 border-border/40 border-t">
+            {archivedViews.map((view) => (
+              <div className="flex items-center justify-between px-3 py-2" key={view.id}>
+                <span className="text-muted-foreground">{view.name}</span>
+                {onRestoreView ? (
+                  <button
+                    className="inline-flex items-center gap-1 rounded border border-border/60 bg-background px-2 py-1 text-xs transition-colors hover:bg-accent disabled:opacity-50"
+                    disabled={restoringViewId === view.id}
+                    onClick={() => {
+                      setRestoringViewId(view.id);
+                      onRestoreView(view).finally(() => setRestoringViewId(null));
+                    }}
+                    type="button"
+                  >
+                    <RotateCcw className="size-3" />
+                    {restoringViewId === view.id ? "Restoring…" : "Restore"}
+                  </button>
+                ) : null}
+              </div>
+            ))}
+          </div>
+        </details>
+      ) : null}
       <div className="overflow-x-auto pb-5">
         <div className="w-max min-w-full">
           <div
@@ -334,6 +384,48 @@ export function BusaBaseTable({
               Approved change requests appear here after merge.
             </div>
           )}
+          {showArchivedRecords && archivedRecords.length > 0
+            ? archivedRecords.map((record) => (
+                <div
+                  className="group grid min-h-12 items-center gap-3 rounded-md border-border/40 border-b bg-muted/10 px-2 py-1.5 text-sm opacity-60 transition-colors hover:opacity-100"
+                  key={record.id}
+                  style={{ gridTemplateColumns: columnTemplate }}
+                >
+                  {fields.map((field, index) => (
+                    <RecordTableCell
+                      currentRecordHref={`/base/${base?.slug ?? record.base.slug}/${record.id}`}
+                      field={field}
+                      index={index}
+                      key={field.id}
+                      record={record}
+                      records={relationRecords}
+                    />
+                  ))}
+                  <div className="min-w-0">
+                    <span className="inline-flex max-w-full items-center gap-1.5 truncate rounded-full bg-muted/55 px-2 py-0.5 text-muted-foreground text-xs">
+                      <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-current opacity-55" />
+                      archived
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    {onRestoreRecord ? (
+                      <button
+                        className="inline-flex items-center gap-1 rounded border border-border/60 bg-background px-2 py-0.5 text-xs transition-colors hover:bg-accent disabled:opacity-50"
+                        disabled={restoringRecordId === record.id}
+                        onClick={() => {
+                          setRestoringRecordId(record.id);
+                          onRestoreRecord(record).finally(() => setRestoringRecordId(null));
+                        }}
+                        type="button"
+                      >
+                        <RotateCcw className="size-3" />
+                        {restoringRecordId === record.id ? "Restoring…" : "Restore"}
+                      </button>
+                    ) : null}
+                  </div>
+                </div>
+              ))
+            : null}
         </div>
       </div>
     </div>

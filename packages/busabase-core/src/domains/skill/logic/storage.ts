@@ -1,7 +1,8 @@
 import "server-only";
 
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { storage } from "openlib/storage";
+import { getContextSpaceId } from "../../../context";
 import { getDb } from "../../../db";
 import { busabaseNodes, type NodePO } from "../../../db/schema";
 import type { SkillFileVO } from "../../../types";
@@ -29,10 +30,17 @@ export const resolveSkillStoragePrefix = (node: NodePO) => {
 
 export const getSkillNode = async (nodeIdOrSlug: string) => {
   const db = await getDb();
+  const spaceId = getContextSpaceId();
   const [byId] = await db
     .select()
     .from(busabaseNodes)
-    .where(eq(busabaseNodes.id, nodeIdOrSlug))
+    .where(
+      and(
+        eq(busabaseNodes.id, nodeIdOrSlug),
+        eq(busabaseNodes.spaceId, spaceId),
+        isNull(busabaseNodes.archivedAt),
+      ),
+    )
     .limit(1);
   const [node] =
     byId && byId.type === "skill"
@@ -40,7 +48,14 @@ export const getSkillNode = async (nodeIdOrSlug: string) => {
       : await db
           .select()
           .from(busabaseNodes)
-          .where(and(eq(busabaseNodes.slug, nodeIdOrSlug), eq(busabaseNodes.type, "skill")))
+          .where(
+            and(
+              eq(busabaseNodes.slug, nodeIdOrSlug),
+              eq(busabaseNodes.spaceId, spaceId),
+              eq(busabaseNodes.type, "skill"),
+              isNull(busabaseNodes.archivedAt),
+            ),
+          )
           .limit(1);
   return node ?? null;
 };

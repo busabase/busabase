@@ -8,6 +8,10 @@ import { chromium } from "playwright";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const OUT = path.join(__dirname, "..", "public", "assets", "readme");
+// Main grid shots are captured raw here, then wrapped in macOS-window chrome by
+// generate-window-frames.mjs (which writes the framed PNGs back into OUT under
+// the same filename). Run that script after capturing.
+const RAW_OUT = path.join(OUT, "desktop-raw");
 const BASE = process.env.BUSABASE_URL || "http://localhost:15419";
 
 // Locale to capture. "en" (default) writes to scenarios/; any other locale
@@ -15,8 +19,10 @@ const BASE = process.env.BUSABASE_URL || "http://localhost:15419";
 const LANG = process.env.CAPTURE_LANG || "en";
 const langParam = LANG === "en" ? "" : `&lang=${LANG}`;
 
+// English scenario shots capture raw into scenarios-raw/, then get wrapped in
+// macOS-window chrome by generate-window-frames.mjs (written back to scenarios/).
 const SCENARIO_OUT =
-  LANG === "en" ? path.join(OUT, "scenarios") : path.join(OUT, "scenarios", LANG);
+  LANG === "en" ? path.join(OUT, "scenarios-raw") : path.join(OUT, "scenarios", LANG);
 
 const scenarioShots = [
   {
@@ -534,9 +540,31 @@ const shots = [
     url: `${BASE}/dashboard/graph?demo=1`,
     waitFor: "text=Graph View",
   },
+  {
+    // Deduped global asset library (DAM) — illustrates Attachments & Assets
+    file: "busabase-assets.png",
+    url: `${BASE}/dashboard/assets?demo=1`,
+    waitFor: "text=Assets",
+  },
+  {
+    // Workspace activity feed — illustrates Events / audit history
+    file: "busabase-activity.png",
+    url: `${BASE}/dashboard/activity?demo=1`,
+    waitFor: "text=Workspace activity",
+  },
+];
+
+// The "Agent Integration" dialog (sidebar footer → "Agent Skills") is a modal,
+// not a route. It carries three tabs we screenshot for the Developers / AI docs:
+// Agent Skills (SKILL.md prompt), MCP (HTTP/SSE endpoints), OpenAPI (spec + docs).
+const dialogShots = [
+  { tab: "Agent Skills", file: "busabase-agent-skills.png" },
+  { tab: "MCP", file: "busabase-mcp.png" },
+  { tab: "OpenAPI", file: "busabase-openapi.png" },
 ];
 
 await fs.promises.mkdir(SCENARIO_OUT, { recursive: true });
+await fs.promises.mkdir(RAW_OUT, { recursive: true });
 
 const browser = await chromium.launch();
 const ctx = await browser.newContext({
@@ -553,9 +581,29 @@ for (const shot of LANG === "en" ? shots : []) {
     console.warn(`! waitFor missed for ${shot.file}: ${shot.waitFor}`);
   }
   await page.waitForTimeout(1000);
-  const out = path.join(OUT, shot.file);
+  const out = path.join(RAW_OUT, shot.file);
   await page.screenshot({ path: out });
-  console.log(`✓ ${shot.file}`);
+  console.log(`✓ desktop-raw/${shot.file}`);
+}
+
+// Agent Integration dialog tabs (English-only; the demo dialog is not localized).
+if (LANG === "en") {
+  await page.goto(`${BASE}/dashboard/inbox?demo=1`, { waitUntil: "networkidle" });
+  await page.waitForTimeout(800);
+  // Open the dialog from the sidebar footer button (before it opens, the only
+  // "Agent Skills" text is the sidebar button — not yet the in-dialog tab).
+  await page.getByText("Agent Skills", { exact: true }).first().click();
+  try {
+    await page.waitForSelector("text=Agent Integration", { timeout: 5000 });
+  } catch {
+    console.warn("! Agent Integration dialog did not open");
+  }
+  for (const { tab, file } of dialogShots) {
+    await page.getByRole("tab", { name: new RegExp(`^${tab}$`, "i") }).click();
+    await page.waitForTimeout(600);
+    await page.screenshot({ path: path.join(OUT, file) });
+    console.log(`✓ ${file}`);
+  }
 }
 
 for (const scenario of scenarioShots) {

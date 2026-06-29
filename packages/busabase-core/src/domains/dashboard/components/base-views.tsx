@@ -1,6 +1,7 @@
+import { RotateCcw } from "lucide-react";
 import { SPALink as Link } from "openlib/ui/dashboard";
 import { useState } from "react";
-import type { BaseVO, FieldType, RecordVO, ViewVO } from "../../../types";
+import type { BaseFieldVO, BaseVO, FieldType, RecordVO, ViewVO } from "../../../types";
 import { isDerivedFieldSlug } from "../helpers/change-request";
 import { createDefaultFieldOptions, fieldTypeOptions } from "../helpers/field";
 import type {
@@ -14,14 +15,20 @@ import { SplitSubmitButton } from "./split-submit-button";
 
 export function BaseDetailView({
   activeView,
+  archivedViews = [],
+  archivedRecords = [],
   records,
   base,
   onCreateView,
   onDeleteView,
+  onRestoreView,
+  onRestoreRecord,
   onUpdateView,
   views,
 }: {
   activeView: ViewVO | null;
+  archivedViews?: ViewVO[];
+  archivedRecords?: RecordVO[];
   records: RecordVO[];
   base: BaseVO | null;
   onCreateView: (
@@ -30,6 +37,8 @@ export function BaseDetailView({
     options?: ViewSubmitOptions,
   ) => Promise<void>;
   onDeleteView: (view: ViewVO) => Promise<void>;
+  onRestoreView?: (view: ViewVO) => Promise<void>;
+  onRestoreRecord?: (record: RecordVO) => Promise<void>;
   onUpdateView: (
     view: ViewVO,
     payload: ViewFormPayload,
@@ -38,6 +47,8 @@ export function BaseDetailView({
   views: ViewVO[];
 }) {
   const baseViews = views.filter((view) => view.baseId === base?.id);
+  const baseArchivedViews = archivedViews.filter((view) => view.baseId === base?.id);
+  const baseArchivedRecords = archivedRecords.filter((record) => record.baseId === base?.id);
   const filteredRecords = applyViewConfigToRecords(
     records.filter((record) => record.baseId === base?.id),
     activeView?.config,
@@ -49,9 +60,13 @@ export function BaseDetailView({
         <div className="px-6 py-5">
           <BusaBaseTable
             activeView={activeView}
+            archivedViews={baseArchivedViews}
+            archivedRecords={baseArchivedRecords}
             base={base}
             onCreateView={onCreateView}
             onDeleteView={onDeleteView}
+            onRestoreView={onRestoreView}
+            onRestoreRecord={onRestoreRecord}
             onUpdateView={onUpdateView}
             records={filteredRecords}
             relationRecords={records}
@@ -66,11 +81,14 @@ export function BaseDetailView({
 export function BaseSetupView({
   base,
   bases,
+  deletedFields = [],
   onCreateField,
   onRenameBase,
+  onRestoreField,
 }: {
   base: BaseVO | null;
   bases: BaseVO[];
+  deletedFields?: BaseFieldVO[];
   onCreateField: (
     base: BaseVO,
     payload: CreateBaseFieldPayload,
@@ -81,6 +99,7 @@ export function BaseSetupView({
     payload: { name: string; description: string },
     options?: { mergeImmediately?: boolean },
   ) => Promise<void>;
+  onRestoreField?: (base: BaseVO, fieldId: string) => Promise<void>;
 }) {
   const [baseName, setBaseName] = useState(base?.name ?? "");
   const [baseDescription, setBaseDescription] = useState(base?.description ?? "");
@@ -97,6 +116,12 @@ export function BaseSetupView({
   const [isMultiple, setIsMultiple] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
+  const [formErrorDetail, setFormErrorDetail] = useState<{
+    recordIds?: string[];
+    removedChoiceIds?: string[];
+    affectedRecordIds?: string[];
+  } | null>(null);
+  const [restoringFieldId, setRestoringFieldId] = useState<string | null>(null);
 
   if (!base) {
     return (
@@ -139,6 +164,7 @@ export function BaseSetupView({
 
     setIsSaving(true);
     setFormError(null);
+    setFormErrorDetail(null);
     try {
       await onCreateField(
         base,
@@ -166,9 +192,27 @@ export function BaseSetupView({
       setIsRequired(false);
       setIsMultiple(true);
     } catch (error) {
-      setFormError(error instanceof Error ? error.message : "Failed to add field");
+      const msg = error instanceof Error ? error.message : "Failed to add field";
+      setFormError(msg);
+      // Surface structured error detail if the server returned record/choice ids.
+      if (error && typeof error === "object" && "data" in error) {
+        const data = (error as { data?: unknown }).data;
+        if (data && typeof data === "object") {
+          setFormErrorDetail(data as typeof formErrorDetail);
+        }
+      }
     } finally {
       setIsSaving(false);
+    }
+  };
+
+  const handleRestoreField = async (fieldId: string) => {
+    if (!base || !onRestoreField) return;
+    setRestoringFieldId(fieldId);
+    try {
+      await onRestoreField(base, fieldId);
+    } finally {
+      setRestoringFieldId(null);
     }
   };
 
@@ -414,8 +458,97 @@ export function BaseSetupView({
                   hint="Request goes to your inbox for review. Now writes directly."
                 />
               </div>
-              {formError ? <div className="mt-2 text-red-700 text-sm">{formError}</div> : null}
+              {formError ? (
+                <div className="mt-2 rounded-md border border-red-200 bg-red-50 p-3">
+                  <div className="text-red-700 text-sm">{formError}</div>
+                  {formErrorDetail?.recordIds && formErrorDetail.recordIds.length > 0 ? (
+                    <div className="mt-2">
+                      <div className="mb-1 text-red-600 text-xs font-medium">
+                        Records missing a value ({formErrorDetail.recordIds.length}):
+                      </div>
+                      <div className="space-y-0.5">
+                        {formErrorDetail.recordIds.slice(0, 8).map((rid) => (
+                          <div key={rid} className="font-mono text-red-600 text-xs">
+                            {rid}
+                          </div>
+                        ))}
+                        {formErrorDetail.recordIds.length > 8 ? (
+                          <div className="text-red-500 text-xs">
+                            …and {formErrorDetail.recordIds.length - 8} more
+                          </div>
+                        ) : null}
+                      </div>
+                    </div>
+                  ) : null}
+                  {formErrorDetail?.affectedRecordIds &&
+                  formErrorDetail.affectedRecordIds.length > 0 ? (
+                    <div className="mt-2">
+                      <div className="mb-1 text-red-600 text-xs font-medium">
+                        Records referencing removed choices (
+                        {formErrorDetail.affectedRecordIds.length}):
+                      </div>
+                      <div className="space-y-0.5">
+                        {formErrorDetail.affectedRecordIds.slice(0, 8).map((rid) => (
+                          <div key={rid} className="font-mono text-red-600 text-xs">
+                            {rid}
+                          </div>
+                        ))}
+                        {formErrorDetail.affectedRecordIds.length > 8 ? (
+                          <div className="text-red-500 text-xs">
+                            …and {formErrorDetail.affectedRecordIds.length - 8} more
+                          </div>
+                        ) : null}
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
             </div>
+
+            {deletedFields.length > 0 ? (
+              <div>
+                <div className="mb-2 flex flex-wrap items-end justify-between gap-3">
+                  <div className="font-semibold text-sm">Deleted Fields</div>
+                  <span className="rounded-full bg-muted/55 px-2.5 py-1 text-muted-foreground text-xs">
+                    {deletedFields.length} deleted
+                  </span>
+                </div>
+                <div className="grid grid-cols-[minmax(0,1fr)_120px_80px] gap-3 border-border/50 border-b px-2 py-2 text-muted-foreground text-xs">
+                  <div>Name</div>
+                  <div>Type</div>
+                  <div />
+                </div>
+                {deletedFields.map((field) => (
+                  <div
+                    className="grid min-h-12 grid-cols-[minmax(0,1fr)_120px_80px] items-center gap-3 rounded-md border-border/40 border-b px-2 py-2 text-sm"
+                    key={field.id}
+                  >
+                    <div className="min-w-0">
+                      <div className="truncate font-medium text-muted-foreground">{field.name}</div>
+                      <div className="mt-0.5 truncate font-mono text-muted-foreground text-xs">
+                        {field.slug}
+                      </div>
+                    </div>
+                    <div>
+                      <span className="inline-flex max-w-full truncate rounded-full bg-muted/65 px-2 py-0.5 text-muted-foreground text-xs">
+                        {field.type}
+                      </span>
+                    </div>
+                    <div className="flex justify-end">
+                      <button
+                        className="inline-flex items-center gap-1 rounded border border-border/60 bg-background px-2 py-1 text-xs transition-colors hover:bg-accent disabled:opacity-50"
+                        disabled={restoringFieldId === field.id || !onRestoreField}
+                        onClick={() => handleRestoreField(field.id)}
+                        type="button"
+                      >
+                        <RotateCcw className="size-3" />
+                        {restoringFieldId === field.id ? "…" : "Restore"}
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : null}
           </div>
 
           <aside className="space-y-3">

@@ -1,9 +1,10 @@
+import { skipToken, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { ChangeRequestVO, OperationVO } from "busabase-core/types";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { ArrowLeft } from "lucide-react-native";
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
-import { useBusabaseClient } from "~/api/use-busabase-client";
+import { useBusabaseOrpc } from "~/api/use-busabase-orpc";
 import { CommentsSection } from "~/components/busabase/CommentsSection";
 import { ConnectionGuard } from "~/components/busabase/ConnectionGuard";
 import { FieldList } from "~/components/busabase/FieldList";
@@ -32,64 +33,47 @@ function OperationDetailContent() {
   const operationId = typeof params.operationId === "string" ? params.operationId : "";
   const router = useRouter();
   const tokens = useTokens();
-  const client = useBusabaseClient();
-
-  const [changeRequest, setChangeRequest] = useState<ChangeRequestVO | null>(null);
-  const [operation, setOperation] = useState<OperationVO | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const buda = useBusabaseOrpc();
+  const queryClient = useQueryClient();
   const [reviseMode, setReviseMode] = useState(false);
   const [values, setValues] = useState<Record<string, RecordFormValue>>({});
-  const [revising, setRevising] = useState(false);
 
-  const load = useCallback(async () => {
-    if (!client || !changeRequestId) {
-      setLoading(false);
-      return;
-    }
-    setLoading(true);
-    setError(null);
-    try {
-      const cr = await client.changeRequests.get({ changeRequestId });
-      const op = cr.operations.find((item) => item.id === operationId) ?? null;
-      setChangeRequest(cr);
-      setOperation(op);
-      if (op) {
-        setValues(buildInitialFormValues(cr.base?.fields ?? [], op.headCommit.fields));
-      }
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Could not load operation");
-    } finally {
-      setLoading(false);
-    }
-  }, [client, changeRequestId, operationId]);
+  const crQuery = useQuery(
+    buda && changeRequestId
+      ? buda.orpc.changeRequests.get.queryOptions({ input: { changeRequestId } })
+      : { queryKey: ["no-connection", "change-request", changeRequestId], queryFn: skipToken },
+  );
+  const changeRequest = (crQuery.data as ChangeRequestVO | undefined) ?? null;
+  const operation =
+    (changeRequest?.operations.find((item) => item.id === operationId) as
+      | OperationVO
+      | undefined) ?? null;
 
   useEffect(() => {
-    void load();
-  }, [load]);
-
-  const submitRevision = async () => {
-    if (!client || !changeRequest || !operation) {
-      return;
+    if (operation && changeRequest) {
+      setValues(
+        buildInitialFormValues(changeRequest.base?.fields ?? [], operation.headCommit.fields),
+      );
     }
-    setRevising(true);
-    setError(null);
-    try {
-      const updated = await client.operations.revise({
+  }, [operation, changeRequest]);
+
+  const reviseMutation = useMutation({
+    mutationFn: async () => {
+      if (!buda || !changeRequest || !operation) throw new Error("Not ready");
+      return buda.client.operations.revise({
         operationId: operation.id,
         fields: normalizeFormValues(changeRequest.base?.fields ?? [], values),
         message: "Revise operation",
         author: "mobile-editor",
       });
-      setChangeRequest(updated);
-      setOperation(updated.operations.find((item) => item.id === operationId) ?? null);
+    },
+    onSuccess: () => {
       setReviseMode(false);
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Could not revise operation");
-    } finally {
-      setRevising(false);
-    }
-  };
+      void queryClient.invalidateQueries({
+        queryKey: buda?.orpc.changeRequests.get.key({ input: { changeRequestId } }),
+      });
+    },
+  });
 
   const headerLeading = (
     <Pressable
@@ -103,7 +87,7 @@ function OperationDetailContent() {
     </Pressable>
   );
 
-  if (loading) {
+  if (crQuery.isLoading) {
     return (
       <NativeScreen title="Operation" subtitle={shortId(operationId)} headerLeading={headerLeading}>
         <NativeLoadingState label="Loading operation" />
@@ -157,7 +141,18 @@ function OperationDetailContent() {
               values={values}
               onChange={(slug, value) => setValues((current) => ({ ...current, [slug]: value }))}
             />
-            <Button label="Submit revision" loading={revising} fullWidth onPress={submitRevision} />
+            {reviseMutation.error ? (
+              <NativeErrorState
+                message={reviseMutation.error.message}
+                onRetry={() => reviseMutation.reset()}
+              />
+            ) : null}
+            <Button
+              label="Submit revision"
+              loading={reviseMutation.isPending}
+              fullWidth
+              onPress={() => reviseMutation.mutate()}
+            />
             <Button label="Cancel" variant="ghost" fullWidth onPress={() => setReviseMode(false)} />
           </View>
         ) : changeRequest.status === "in_review" ? (
@@ -168,8 +163,6 @@ function OperationDetailContent() {
             onPress={() => setReviseMode(true)}
           />
         ) : null}
-
-        {error ? <NativeErrorState message={error} onRetry={() => setError(null)} /> : null}
 
         <CommentsSection subjectType="operation" subjectId={operation.id} />
       </View>

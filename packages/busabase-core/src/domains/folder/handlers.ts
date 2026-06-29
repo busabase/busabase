@@ -1,6 +1,7 @@
 import "server-only";
 
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, isNull } from "drizzle-orm";
+import { getContextSpaceId } from "../../context";
 import { getDb } from "../../db";
 import { busabaseNodes, type NodePO } from "../../db/schema";
 import { id } from "../../logic/kernel";
@@ -10,10 +11,17 @@ import type { FolderVO } from "./types";
 
 const getFolderNode = async (nodeIdOrSlug: string) => {
   const db = await getDb();
+  const spaceId = getContextSpaceId();
   const [byId] = await db
     .select()
     .from(busabaseNodes)
-    .where(eq(busabaseNodes.id, nodeIdOrSlug))
+    .where(
+      and(
+        eq(busabaseNodes.id, nodeIdOrSlug),
+        eq(busabaseNodes.spaceId, spaceId),
+        isNull(busabaseNodes.archivedAt),
+      ),
+    )
     .limit(1);
   const [node] =
     byId && byId.type === "folder"
@@ -21,7 +29,14 @@ const getFolderNode = async (nodeIdOrSlug: string) => {
       : await db
           .select()
           .from(busabaseNodes)
-          .where(and(eq(busabaseNodes.slug, nodeIdOrSlug), eq(busabaseNodes.type, "folder")))
+          .where(
+            and(
+              eq(busabaseNodes.slug, nodeIdOrSlug),
+              eq(busabaseNodes.spaceId, spaceId),
+              eq(busabaseNodes.type, "folder"),
+              isNull(busabaseNodes.archivedAt),
+            ),
+          )
           .limit(1);
   return node ?? null;
 };
@@ -31,7 +46,7 @@ const toFolderVO = async (folderNode: NodePO): Promise<FolderVO> => {
   const childRows = await db
     .select()
     .from(busabaseNodes)
-    .where(eq(busabaseNodes.parentId, folderNode.id))
+    .where(and(eq(busabaseNodes.parentId, folderNode.id), isNull(busabaseNodes.archivedAt)))
     .orderBy(asc(busabaseNodes.position), asc(busabaseNodes.createdAt));
   // Hydrate the folder + children together so base children resolve their baseId.
   const nodeMap = await loadNodesByIds([folderNode.id, ...childRows.map((row) => row.id)]);
@@ -55,7 +70,7 @@ export const listFolders = async (): Promise<FolderVO[]> => {
   const folders = await db
     .select()
     .from(busabaseNodes)
-    .where(eq(busabaseNodes.type, "folder"))
+    .where(and(eq(busabaseNodes.type, "folder"), isNull(busabaseNodes.archivedAt)))
     .orderBy(asc(busabaseNodes.position), asc(busabaseNodes.createdAt));
   return Promise.all(folders.map(toFolderVO));
 };

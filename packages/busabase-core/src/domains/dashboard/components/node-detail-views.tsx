@@ -1,7 +1,7 @@
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { CodeBlock } from "kui/ai-elements/code-block";
 import { FileTree, FileTreeFile, FileTreeFolder } from "kui/ai-elements/file-tree";
-import { FileText, Folder, Sparkles, Table2 } from "lucide-react";
+import { FileText, Folder, Sparkles, Table2, Trash2 } from "lucide-react";
 import { SPALink as Link } from "openlib/ui/dashboard";
 import {
   type ComponentProps,
@@ -11,12 +11,87 @@ import {
   useMemo,
   useState,
 } from "react";
+import { toast } from "sonner";
 import { useLocation } from "wouter";
 import type { BusabaseQueryUtils } from "../../../api-client/react-query";
 import type { SkillVO } from "../../../types";
 import { registerNodeDetail } from "../node-detail-registry";
 import type { SkillCodeLanguage } from "./field-preview";
-import { EmptyState } from "./primitives";
+import { ConfirmActionDialog, EmptyState } from "./primitives";
+
+/**
+ * Delete action for a folder/doc/skill node. Creates a `node_delete` change
+ * request and approve-merges it (soft-archive → recoverable from Trash). Folders
+ * warn about the cascade (their subtree is archived in one batch).
+ */
+function NodeDeleteButton({
+  orpc,
+  nodeId,
+  nodeType,
+  nodeName,
+  childCount = 0,
+}: {
+  orpc: BusabaseQueryUtils;
+  nodeId: string;
+  nodeType: string;
+  nodeName: string;
+  childCount?: number;
+}) {
+  const [, setLocation] = useLocation();
+  const queryClient = useQueryClient();
+  const [confirming, setConfirming] = useState(false);
+  const createCr = useMutation(orpc.nodes.createChangeRequest.mutationOptions());
+  const reviewCr = useMutation(orpc.changeRequests.review.mutationOptions());
+  const mergeCr = useMutation(orpc.changeRequests.merge.mutationOptions());
+  const pending = createCr.isPending || reviewCr.isPending || mergeCr.isPending;
+  const label = `${nodeType[0]?.toUpperCase()}${nodeType.slice(1)}`;
+  const body =
+    nodeType === "folder" && childCount > 0
+      ? `This moves "${nodeName}" and its ${childCount} item${childCount === 1 ? "" : "s"} to Trash. You can restore them later.`
+      : `This moves "${nodeName}" to Trash. You can restore it later.`;
+
+  const handleConfirm = async () => {
+    try {
+      const cr = await createCr.mutateAsync({ operations: [{ kind: "delete", nodeId }] });
+      await reviewCr.mutateAsync({ changeRequestId: cr.id, verdict: "approved" });
+      await mergeCr.mutateAsync({ changeRequestId: cr.id });
+      await queryClient.invalidateQueries({
+        queryKey: orpc.nodes.list.queryOptions({}).queryKey,
+      });
+      await queryClient.invalidateQueries({
+        queryKey: orpc.nodes.listArchived.queryOptions({}).queryKey,
+      });
+      toast.success(`${label} moved to Trash`);
+      setConfirming(false);
+      setLocation("/");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : `Failed to delete ${nodeType}`);
+      setConfirming(false);
+    }
+  };
+
+  return (
+    <>
+      <button
+        className="inline-flex shrink-0 items-center gap-1.5 rounded-md border border-border/60 bg-background px-2.5 py-1.5 text-muted-foreground text-xs transition-colors hover:bg-red-50 hover:text-red-700"
+        onClick={() => setConfirming(true)}
+        type="button"
+      >
+        <Trash2 className="size-3.5" />
+        Delete
+      </button>
+      <ConfirmActionDialog
+        body={body}
+        confirmLabel="Move to Trash"
+        onCancel={() => setConfirming(false)}
+        onConfirm={handleConfirm}
+        open={confirming}
+        pending={pending}
+        title={`Delete ${nodeType}?`}
+      />
+    </>
+  );
+}
 
 export interface SkillTreeNode {
   name: string;
@@ -178,7 +253,15 @@ export function SkillDetailView({ orpc, slug }: { orpc: BusabaseQueryUtils; slug
   return (
     <div className="mx-auto w-full max-w-6xl p-4 md:p-6">
       <div className="rounded-xl border bg-background p-5">
-        <h1 className="font-semibold text-xl">{skill.node.name}</h1>
+        <div className="flex items-start justify-between gap-4">
+          <h1 className="min-w-0 font-semibold text-xl">{skill.node.name}</h1>
+          <NodeDeleteButton
+            nodeId={skill.node.id}
+            nodeName={skill.node.name}
+            nodeType="skill"
+            orpc={orpc}
+          />
+        </div>
         {skill.node.description ? (
           <p className="mt-1 text-muted-foreground text-sm">{skill.node.description}</p>
         ) : null}
@@ -367,13 +450,21 @@ export function DocDetailView({ orpc, slug }: { orpc: BusabaseQueryUtils; slug: 
             </button>
           </div>
         ) : (
-          <button
-            className="shrink-0 rounded-button border px-3 py-1.5 text-sm hover:bg-muted"
-            onClick={startEditing}
-            type="button"
-          >
-            Edit
-          </button>
+          <div className="flex shrink-0 items-center gap-2">
+            <button
+              className="rounded-button border px-3 py-1.5 text-sm hover:bg-muted"
+              onClick={startEditing}
+              type="button"
+            >
+              Edit
+            </button>
+            <NodeDeleteButton
+              nodeId={doc.node.id}
+              nodeName={doc.node.name}
+              nodeType="doc"
+              orpc={orpc}
+            />
+          </div>
         )}
       </div>
       {error ? <p className="mb-3 text-destructive text-sm">{error}</p> : null}
@@ -428,11 +519,20 @@ export function FolderDetailView({
 
   return (
     <div className="mx-auto w-full max-w-3xl px-6 py-8">
-      <div className="mb-8">
-        <h1 className="text-2xl font-semibold tracking-tight">{folder.node.name}</h1>
-        {folder.node.description ? (
-          <p className="mt-2 text-muted-foreground text-sm">{folder.node.description}</p>
-        ) : null}
+      <div className="mb-8 flex items-start justify-between gap-4">
+        <div className="min-w-0">
+          <h1 className="font-semibold text-2xl tracking-tight">{folder.node.name}</h1>
+          {folder.node.description ? (
+            <p className="mt-2 text-muted-foreground text-sm">{folder.node.description}</p>
+          ) : null}
+        </div>
+        <NodeDeleteButton
+          childCount={folder.children.length}
+          nodeId={folder.node.id}
+          nodeName={folder.node.name}
+          nodeType="folder"
+          orpc={orpc}
+        />
       </div>
       {folder.children.length === 0 ? (
         <EmptyState title="Empty folder" body="This folder has no items yet." />

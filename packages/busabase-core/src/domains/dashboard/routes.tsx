@@ -44,6 +44,7 @@ export const getBusabaseDashboardRoutes = (dashboard: ReactNode): BusabaseRouteC
       title: "Change Request",
     },
     { path: "/activity", component: dashboard, breadcrumb: "Activity", title: "Activity" },
+    { path: "/archived", component: dashboard, breadcrumb: "Archived", title: "Archived Bases" },
     { path: "/graph", component: dashboard, breadcrumb: "Graph", title: "Graph" },
     { path: "/assets", component: dashboard, breadcrumb: "Assets", title: "Assets" },
     {

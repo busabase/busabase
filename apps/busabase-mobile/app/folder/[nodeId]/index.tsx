@@ -1,33 +1,28 @@
+import { skipToken, useQuery } from "@tanstack/react-query";
+import type { NodeVO } from "busabase-core/types";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { useCallback } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
-import { type FolderVO, getFolderRest } from "~/api/folders-rest";
+import { useBusabaseOrpc } from "~/api/use-busabase-orpc";
 import { ConnectionGuard } from "~/components/busabase/ConnectionGuard";
 import { DrawerScaffold } from "~/components/busabase/DrawerScaffold";
 import { NativeEmptyState, NativeErrorState, NativeLoadingState } from "~/components/native-screen";
-import { useConnection } from "~/connection/connection-store";
-import { useNativeQuery } from "~/hooks/use-native-query";
 import { radius, typography } from "~/theme/tokens";
 import { useTokens } from "~/theme/use-tokens";
 
-type FolderChild = FolderVO["children"][number];
+type FolderChild = NodeVO;
 
 function FolderDetailContent() {
   const params = useLocalSearchParams<{ nodeId?: string }>();
   const nodeId = typeof params.nodeId === "string" ? params.nodeId : "";
   const tokens = useTokens();
   const router = useRouter();
-  const { state } = useConnection();
-  const serverUrl = state.status === "connected" ? state.connection.serverUrl : null;
+  const buda = useBusabaseOrpc();
 
-  const loadFolder = useCallback(
-    () =>
-      serverUrl && nodeId
-        ? getFolderRest(serverUrl, nodeId)
-        : (Promise.resolve(null) as Promise<null>),
-    [serverUrl, nodeId],
+  const folderQuery = useQuery(
+    buda && nodeId
+      ? buda.orpc.folders.get.queryOptions({ input: { nodeId } })
+      : { queryKey: ["no-connection", "folder", nodeId], queryFn: skipToken },
   );
-  const folderQuery = useNativeQuery<FolderVO | null>(!!serverUrl && !!nodeId, loadFolder);
   const folder = folderQuery.data ?? null;
 
   const openChild = (child: FolderChild) => {
@@ -47,11 +42,14 @@ function FolderDetailContent() {
       subtitle={folder ? `${folder.children.length} items` : "Folder"}
       title={folder?.node.name ?? "Folder"}
     >
-      {folderQuery.loading ? <NativeLoadingState label="Loading folder" /> : null}
+      {folderQuery.isLoading ? <NativeLoadingState label="Loading folder" /> : null}
       {folderQuery.error ? (
-        <NativeErrorState message={folderQuery.error} onRetry={folderQuery.refetch} />
+        <NativeErrorState
+          message={folderQuery.error.message}
+          onRetry={() => void folderQuery.refetch()}
+        />
       ) : null}
-      {!folderQuery.loading && !folderQuery.error && !folder ? (
+      {!folderQuery.isLoading && !folderQuery.error && !folder ? (
         <NativeEmptyState description="This folder is not available." title="Folder not found" />
       ) : null}
 

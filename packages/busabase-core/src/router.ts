@@ -14,11 +14,13 @@ import {
   getAuthInfo,
   getChangeRequest,
   listAgentTasks,
+  listArchivedNodes,
   listAuditEvents,
   listChangeRequests,
   listComments,
   listNodes,
   mergeChangeRequest,
+  purgeNode,
   reviewChangeRequest,
   reviseOperation,
   searchBusabase,
@@ -35,9 +37,11 @@ export const busabaseRouter = busabase.router({
   search: busabase.search.handler(async ({ input }) => searchBusabase(input)),
   nodes: {
     list: busabase.nodes.list.handler(async () => listNodes()),
+    listArchived: busabase.nodes.listArchived.handler(async () => listArchivedNodes()),
     createChangeRequest: busabase.nodes.createChangeRequest.handler(async ({ input }) =>
       createNodeChangeRequest(input),
     ),
+    purge: busabase.nodes.purge.handler(async ({ input }) => purgeNode(input.nodeId)),
   },
   auditEvents: {
     list: busabase.auditEvents.list.handler(async ({ input }) => listAuditEvents(input)),

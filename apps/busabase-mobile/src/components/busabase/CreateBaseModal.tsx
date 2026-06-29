@@ -1,7 +1,8 @@
+import { useMutation } from "@tanstack/react-query";
 import { X } from "lucide-react-native";
 import { useState } from "react";
 import { Modal, Pressable, StyleSheet, Text, View } from "react-native";
-import { useBusabaseClient } from "~/api/use-busabase-client";
+import { useBusabaseOrpc } from "~/api/use-busabase-orpc";
 import { mobile, radius, typography } from "~/theme/tokens";
 import { useTokens } from "~/theme/use-tokens";
 import { Button } from "../ui/Button";
@@ -22,20 +23,17 @@ interface CreateBaseModalProps {
 
 export function CreateBaseModal({ visible, onClose, onCreated }: CreateBaseModalProps) {
   const tokens = useTokens();
-  const client = useBusabaseClient();
+  const buda = useBusabaseOrpc();
   const [name, setName] = useState("");
   const [slug, setSlug] = useState("");
   const [slugEdited, setSlugEdited] = useState(false);
   const [description, setDescription] = useState("");
-  const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
 
   const reset = () => {
     setName("");
     setSlug("");
     setSlugEdited(false);
     setDescription("");
-    setError(null);
   };
 
   const close = () => {
@@ -43,19 +41,14 @@ export function CreateBaseModal({ visible, onClose, onCreated }: CreateBaseModal
     onClose();
   };
 
-  const submit = async () => {
-    const trimmedName = name.trim();
-    const finalSlug = (slugEdited ? slug : toSlug(trimmedName)).trim();
-    if (!client || !trimmedName || !finalSlug) {
-      setError("Name is required.");
-      return;
-    }
-    setSubmitting(true);
-    setError(null);
-    try {
+  const createMutation = useMutation({
+    mutationFn: async () => {
+      const trimmedName = name.trim();
+      const finalSlug = (slugEdited ? slug : toSlug(trimmedName)).trim();
+      if (!buda || !trimmedName || !finalSlug) throw new Error("Name is required.");
       // Base creation goes through review: a node change request that
       // materializes the Base on merge.
-      const changeRequest = await client.nodes.createChangeRequest({
+      return buda.client.nodes.createChangeRequest({
         message: `Create Base ${trimmedName}`,
         operations: [
           {
@@ -69,14 +62,12 @@ export function CreateBaseModal({ visible, onClose, onCreated }: CreateBaseModal
           },
         ],
       });
+    },
+    onSuccess: (changeRequest) => {
       reset();
       onCreated(changeRequest.id);
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Could not create Base");
-    } finally {
-      setSubmitting(false);
-    }
-  };
+    },
+  });
 
   return (
     <Modal animationType="fade" transparent visible={visible} onRequestClose={close}>
@@ -122,16 +113,18 @@ export function CreateBaseModal({ visible, onClose, onCreated }: CreateBaseModal
             placeholder="What this Base collects"
             onChangeText={setDescription}
           />
-          {error ? (
-            <Text style={[typography.small, { color: tokens.destructive }]}>{error}</Text>
+          {createMutation.error ? (
+            <Text style={[typography.small, { color: tokens.destructive }]}>
+              {createMutation.error.message}
+            </Text>
           ) : null}
 
           <Button
             label="Create Base"
-            loading={submitting}
+            loading={createMutation.isPending}
             disabled={name.trim().length === 0}
             fullWidth
-            onPress={submit}
+            onPress={() => createMutation.mutate()}
           />
           <Button label="Cancel" variant="ghost" fullWidth onPress={close} />
         </View>

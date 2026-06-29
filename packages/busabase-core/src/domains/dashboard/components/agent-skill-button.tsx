@@ -22,7 +22,7 @@ interface BusabaseAgentSkillButtonProps {
   /**
    * SSR fallback origin used before the component mounts and reads
    * `window.location.origin`. Pass each host's dev port so the very first paint
-   * matches (open-source defaults to 3061, cloud to 3060).
+   * matches (open-source defaults to 15419, cloud to 3060).
    */
   defaultOrigin?: string;
 }
@@ -46,7 +46,7 @@ interface AgentIntegrationDialogProps {
 export function AgentIntegrationDialog({
   open,
   onOpenChange,
-  defaultOrigin = "http://localhost:3061",
+  defaultOrigin = "http://localhost:15419",
   edition,
 }: AgentIntegrationDialogProps) {
   const [origin, setOrigin] = useState(defaultOrigin);
@@ -242,7 +242,7 @@ export function AgentIntegrationDialog({
  * Opens a dialog with three tabs: Agent Skills, MCP, OpenAPI.
  */
 export function BusabaseAgentSkillButton({
-  defaultOrigin = "http://localhost:3061",
+  defaultOrigin = "http://localhost:15419",
 }: BusabaseAgentSkillButtonProps = {}) {
   const [open, setOpen] = useState(false);
 

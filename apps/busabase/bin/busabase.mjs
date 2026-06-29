@@ -52,15 +52,24 @@ function findServerEntry() {
 async function startServer(argv) {
   const port = flag(argv, "port") ?? process.env.PORT ?? "15419";
   const host = flag(argv, "host") ?? process.env.HOSTNAME ?? "127.0.0.1";
+  // Canonical data root, shared verbatim with busabase-desktop and the Docker
+  // image: <root>/pgdata holds the pglite database, <root>/storage holds
+  // attachments. Same default location (~/.busabase/data) → same data whichever
+  // way Busabase is launched. Override the root with --db / BUSABASE_DATA_DIR,
+  // or set PG_DATABASE_URL / STORAGE_URL directly to point elsewhere.
   const dataDir = resolve(
     flag(argv, "db") ?? process.env.BUSABASE_DATA_DIR ?? resolve(homedir(), ".busabase/data"),
   );
+  const pgDir = resolve(dataDir, "pgdata");
+  const storageDir = resolve(dataDir, "storage");
 
-  await mkdir(dataDir, { recursive: true });
+  await mkdir(pgDir, { recursive: true });
+  await mkdir(storageDir, { recursive: true });
   process.env.PORT = String(port);
   process.env.HOSTNAME = host;
-  // pglite persists here so data survives restarts regardless of cwd.
-  process.env.PG_DATABASE_URL ??= `pglite://${dataDir}`;
+  // pglite + local storage persist here so data survives restarts regardless of cwd.
+  process.env.PG_DATABASE_URL ??= `pglite://${pgDir}`;
+  process.env.STORAGE_URL ??= `local:${storageDir}?base_url=/api/dev/attachment`;
   process.env.NODE_ENV ??= "production";
 
   const entry = findServerEntry();

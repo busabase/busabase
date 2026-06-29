@@ -20,7 +20,7 @@ npx busabase-cli health
 
 | Flag           | Env                       | Default                  |
 | -------------- | ------------------------- | ------------------------ |
-| `--base-url`   | `BUSABASE_API_BASE_URL`   | `http://localhost:3061`  |
+| `--base-url`   | `BUSABASE_API_BASE_URL`   | `http://localhost:15419`  |
 | `--api-key`    | `BUSABASE_API_KEY`        | _(none — local is open)_ |
 | `--output`     | —                         | `table` (`json` for raw) |
 
@@ -49,6 +49,6 @@ Run `busabase-cli --help` for the full command list.
 ```ts
 import { createBusabaseClient } from "busabase-cli";
 
-const client = createBusabaseClient({ baseUrl: "http://localhost:3061", output: "json" });
+const client = createBusabaseClient({ baseUrl: "http://localhost:15419", output: "json" });
 const bases = await client.bases.list();
 ```

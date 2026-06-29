@@ -1,9 +1,10 @@
+import { skipToken, useMutation, useQuery } from "@tanstack/react-query";
 import type { RecordVO } from "busabase-core/types";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { ArrowLeft } from "lucide-react-native";
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { Pressable, StyleSheet, View } from "react-native";
-import { useBusabaseClient } from "~/api/use-busabase-client";
+import { useBusabaseOrpc } from "~/api/use-busabase-orpc";
 import { ConnectionGuard } from "~/components/busabase/ConnectionGuard";
 import { RecordForm } from "~/components/busabase/RecordForm";
 import {
@@ -28,56 +29,34 @@ function EditRecordContent() {
   const recordId = typeof params.id === "string" ? params.id : "";
   const router = useRouter();
   const tokens = useTokens();
-  const client = useBusabaseClient();
-
-  const [record, setRecord] = useState<RecordVO | null>(null);
+  const buda = useBusabaseOrpc();
   const [values, setValues] = useState<Record<string, RecordFormValue>>({});
-  const [loading, setLoading] = useState(true);
-  const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
 
-  const load = useCallback(async () => {
-    if (!client || !recordId) {
-      setLoading(false);
-      return;
-    }
-    setLoading(true);
-    setError(null);
-    try {
-      const next = await client.records.get({ recordId });
-      setRecord(next);
-      setValues(buildInitialFormValues(next.base.fields, next.headCommit.fields));
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Could not load record");
-    } finally {
-      setLoading(false);
-    }
-  }, [client, recordId]);
+  const recordQuery = useQuery(
+    buda && recordId
+      ? buda.orpc.records.get.queryOptions({ input: { recordId } })
+      : { queryKey: ["no-connection", "record", recordId], queryFn: skipToken },
+  );
+  const record = (recordQuery.data as RecordVO | undefined) ?? null;
 
   useEffect(() => {
-    void load();
-  }, [load]);
+    if (record) setValues(buildInitialFormValues(record.base.fields, record.headCommit.fields));
+  }, [record]);
 
-  const submit = async () => {
-    if (!client || !record) {
-      return;
-    }
-    setSubmitting(true);
-    setError(null);
-    try {
-      const changeRequest = await client.records.updateChangeRequest({
+  const submitMutation = useMutation({
+    mutationFn: async () => {
+      if (!buda || !record) throw new Error("Not ready");
+      return buda.client.records.updateChangeRequest({
         recordId: record.id,
         fields: normalizeFormValues(record.base.fields, values),
         message: `Update ${getRecordTitle(record)}`,
         author: "mobile-editor",
       });
+    },
+    onSuccess: (changeRequest) => {
       router.replace({ pathname: "/change-requests/[id]", params: { id: changeRequest.id } });
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Could not create change request");
-    } finally {
-      setSubmitting(false);
-    }
-  };
+    },
+  });
 
   const headerLeading = (
     <Pressable
@@ -91,7 +70,7 @@ function EditRecordContent() {
     </Pressable>
   );
 
-  if (loading) {
+  if (recordQuery.isLoading) {
     return (
       <NativeScreen title="Edit record" subtitle={shortId(recordId)} headerLeading={headerLeading}>
         <NativeLoadingState label="Loading record" />
@@ -121,8 +100,18 @@ function EditRecordContent() {
             setValues((current) => ({ ...current, [fieldSlug]: value }))
           }
         />
-        {error ? <NativeErrorState message={error} onRetry={() => setError(null)} /> : null}
-        <Button label="Save change request" loading={submitting} fullWidth onPress={submit} />
+        {submitMutation.error ? (
+          <NativeErrorState
+            message={submitMutation.error.message}
+            onRetry={() => submitMutation.reset()}
+          />
+        ) : null}
+        <Button
+          label="Save change request"
+          loading={submitMutation.isPending}
+          fullWidth
+          onPress={() => submitMutation.mutate()}
+        />
       </View>
     </NativeScreen>
   );

@@ -64,11 +64,16 @@ export const busabaseBases = pgTable(
       .notNull()
       .default({ kind: "single", requiredApprovals: 1 }),
     createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
+    archivedAt: timestamp("archived_at", { mode: "date" }),
   },
   (base) => [
     uniqueIndex("busabase_bases_node_uniq").on(base.nodeId),
     // Slug uniqueness is per-space (two spaces may each have a "tasks" base).
-    uniqueIndex("busabase_bases_space_slug_uniq").on(base.spaceId, base.slug),
+    // Partial so an archived base frees its slug for reuse — the companion
+    // busabase_nodes partial slug index frees the node slug in tandem.
+    uniqueIndex("busabase_bases_space_slug_uniq")
+      .on(base.spaceId, base.slug)
+      .where(sql`${base.archivedAt} IS NULL`),
   ],
 );
 
@@ -100,8 +105,13 @@ export const busabaseBaseFields = pgTable(
       }>()
       .notNull()
       .default({}),
+    deletedAt: timestamp("deleted_at", { mode: "date" }),
   },
-  (base) => [uniqueIndex("busabase_fields_base_slug_uniq").on(base.baseId, base.slug)],
+  (base) => [
+    uniqueIndex("busabase_fields_base_slug_uniq")
+      .on(base.baseId, base.slug)
+      .where(sql`${base.deletedAt} IS NULL`),
+  ],
 );
 
 export const busabaseViews = pgTable(
@@ -120,10 +130,11 @@ export const busabaseViews = pgTable(
       .$type<{
         filters?: Array<{
           fieldSlug: string;
+          fieldId?: string;
           operator: "contains" | "equals" | "not_empty" | "is_empty" | "is_true" | "is_false";
           value?: unknown;
         }>;
-        sorts?: Array<{ direction: "asc" | "desc"; fieldSlug: string }>;
+        sorts?: Array<{ direction: "asc" | "desc"; fieldSlug: string; fieldId?: string }>;
         visibleFieldSlugs?: string[] | null;
       }>()
       .notNull()
@@ -135,7 +146,9 @@ export const busabaseViews = pgTable(
     updatedAt: timestamp("updated_at", { mode: "date" }).defaultNow().notNull(),
   },
   (base) => [
-    uniqueIndex("busabase_views_base_slug_uniq").on(base.baseId, base.slug),
+    uniqueIndex("busabase_views_base_slug_uniq")
+      .on(base.baseId, base.slug)
+      .where(sql`${base.archivedAt} IS NULL`),
     index("busabase_views_base_status_position_idx").on(base.baseId, base.status, base.createdAt),
   ],
 );
@@ -193,6 +206,7 @@ export const busabaseFieldValues = pgTable(
     valueDate: timestamp("value_date", { mode: "date" }),
     valueJson: jsonb("value_json").$type<unknown>(),
     valueHash: text("value_hash"),
+    deletedAt: timestamp("deleted_at", { mode: "date" }),
     createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { mode: "date" }).defaultNow().notNull(),
   },
@@ -248,6 +262,7 @@ export const busabaseRecordLinks = pgTable(
       .notNull()
       .references(() => busabaseCommits.id, { onDelete: "cascade" }),
     position: integer("position").notNull().default(0),
+    deletedAt: timestamp("deleted_at", { mode: "date" }),
     createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { mode: "date" }).defaultNow().notNull(),
   },

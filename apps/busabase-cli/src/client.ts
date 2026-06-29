@@ -6,7 +6,7 @@ import { type BusabaseContract, busabaseContract } from "busabase-core/contract/
 export type BusabaseClient = ContractRouterClient<BusabaseContract>;
 
 export interface ResolvedConfig {
-  /** Server root, e.g. `http://localhost:3061` (no trailing `/api/v1`). */
+  /** Server root, e.g. `http://localhost:15419` (no trailing `/api/v1`). */
   baseUrl: string;
   /** Optional bearer token — only the cloud requires it; local OSS is open. */
   apiKey?: string;
@@ -14,7 +14,7 @@ export interface ResolvedConfig {
   output: "table" | "json";
 }
 
-export const DEFAULT_BASE_URL = "http://localhost:3061";
+export const DEFAULT_BASE_URL = "http://localhost:15419";
 
 /**
  * Normalise a user-supplied base URL to the server root. The contract already

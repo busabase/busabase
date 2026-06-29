@@ -12,7 +12,7 @@ See `content/spec/product-design.md` for the product plan and architecture decis
 
 ```bash
 # Start the Busabase server (seeds example data on first request)
-make dev-busabase            # runs on http://localhost:3061
+make dev-busabase            # runs on http://localhost:15419
 
 # Start the app
 pnpm --filter busabase-mobile start
@@ -20,9 +20,9 @@ pnpm --filter busabase-mobile start
 
 Server URL to use inside the app:
 
-- iOS simulator: `http://localhost:3061`
-- Android emulator: `http://10.0.2.2:3061`
-- Real device: `http://<your-lan-ip>:3061`
+- iOS simulator: `http://localhost:15419`
+- Android emulator: `http://10.0.2.2:15419`
+- Real device: `http://<your-lan-ip>:15419`
 
 ## Notifications
 
@@ -53,7 +53,7 @@ The server has no push infrastructure, so the app uses client polling + local no
 2. Create a change request from another terminal:
 
 ```bash
-curl -s -X POST 'http://localhost:3061/api/v1/bases/qbs_local_blog/change-requests' \
+curl -s -X POST 'http://localhost:15419/api/v1/bases/qbs_local_blog/change-requests' \
   -H 'Content-Type: application/json' \
   -d '{"fields":{"title":"Hello from curl","body":"Notification test"},"submittedBy":"agent:curl"}'
 ```

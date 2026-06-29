@@ -1,3 +1,4 @@
+import { sql } from "drizzle-orm";
 import {
   type AnyPgColumn,
   boolean,
@@ -29,9 +30,11 @@ export const busabaseOperationKindEnum = pgEnum("busabase_operation_kind", [
   "view_create",
   "view_update",
   "view_delete",
+  "view_restore",
   "node_create",
   "node_rename",
   "node_delete",
+  "node_restore",
   "node_move",
   "skill_file_create",
   "skill_file_update",
@@ -39,6 +42,14 @@ export const busabaseOperationKindEnum = pgEnum("busabase_operation_kind", [
   "skill_metadata_update",
   "doc_update",
   "base_add_field",
+  "base_delete_field",
+  "base_update_field",
+  "base_convert_field",
+  "base_reorder_fields",
+  "base_restore_field",
+  "base_archive",
+  "base_restore",
+  "record_restore",
 ]);
 export const busabaseChangeRequestStatusEnum = pgEnum("busabase_change_request_status", [
   "in_review",
@@ -47,6 +58,7 @@ export const busabaseChangeRequestStatusEnum = pgEnum("busabase_change_request_s
   "rejected",
   "merged",
   "abandoned",
+  "conflict",
 ]);
 export const busabaseReviewVerdictEnum = pgEnum("busabase_review_verdict", [
   "approved",
@@ -81,11 +93,17 @@ export const busabaseNodes = pgTable(
       .notNull()
       .default({}),
     position: integer("position").notNull().default(0),
+    // Soft-archive marker. Set when the owning base is archived (base nodes are
+    // kept, not deleted, since commits FK-restrict the base). Partial slug index
+    // below frees the slug for reuse while archived.
+    archivedAt: timestamp("archived_at", { mode: "date" }),
     createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { mode: "date" }).defaultNow().notNull(),
   },
   (base) => [
-    uniqueIndex("busabase_nodes_parent_slug_uniq").on(base.parentId, base.slug),
+    uniqueIndex("busabase_nodes_parent_slug_uniq")
+      .on(base.parentId, base.slug)
+      .where(sql`${base.archivedAt} IS NULL`),
     index("busabase_nodes_parent_position_idx").on(base.parentId, base.position),
   ],
 );

@@ -1,1 +1,0 @@
-ALTER TYPE "public"."busabase_operation_kind" ADD VALUE 'base_add_field';

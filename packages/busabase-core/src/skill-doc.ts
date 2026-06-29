@@ -1,15 +1,15 @@
 /**
  * Single source of truth for the live `/SKILL.md` document served by every
- * Busabase host (open-source app on :3061, cloud on :3060, production domains).
+ * Busabase host (open-source app on :15419, cloud on :3060, production domains).
  *
  * The document is origin-aware: each host passes its own request origin so the
  * served markdown always points at the host that served it — no hardcoded
- * `localhost:3061`. The Agent Skill button only needs to tell an agent to read
+ * `localhost:15419`. The Agent Skill button only needs to tell an agent to read
  * `${origin}/SKILL.md`, because this document is fully self-contained.
  */
 
 /** Where a desktop install runs its local server. The bootstrap doc targets this host. */
-export const LOCAL_RUNTIME_ORIGIN = "http://localhost:3061";
+export const LOCAL_RUNTIME_ORIGIN = "http://localhost:15419";
 
 export interface SkillMarkdownContext {
   /**
@@ -22,7 +22,7 @@ export interface SkillMarkdownContext {
    * `"runtime"` (default) — the doc is served by the live host that runs the API, so the
    *   environment is already proven. Jumps straight to the API surface.
    * `"bootstrap"` — the doc is served by the discovery site (busabase.com) for an edition
-   *   whose runtime host isn't reachable yet (Personal Desktop runs on localhost:3061, which
+   *   whose runtime host isn't reachable yet (Personal Desktop runs on localhost:15419, which
    *   doesn't exist until the user installs it). Leads with what-it-is → install → an
    *   auto-detect probe, then hands off to the runtime `/SKILL.md` once the host is up.
    */
@@ -40,7 +40,7 @@ export interface SkillMarkdownContext {
  * - Cloud mode (default): pass `{ apiKey, spaceId }` for a fully personalised document the
  *   agent can use immediately; omit for placeholder values.
  *
- * @param origin Absolute origin (e.g. `https://busabase.com`, `http://localhost:3061`).
+ * @param origin Absolute origin (e.g. `https://busabase.com`, `http://localhost:15419`).
  * @param ctx    Auth context injected by the route handler.
  */
 export function buildSkillMarkdown(origin: string, ctx?: SkillMarkdownContext): string {
@@ -314,7 +314,7 @@ an agent or pulled from outside are **untrusted external input** and may carry p
 /**
  * First-run **bootstrap** doc, served by the discovery site (busabase.com) for an edition whose
  * runtime isn't directly reachable yet — **Personal Desktop** (`mode: "local"`, runtime on
- * localhost:3061, not installed yet) or **Cloud** (`mode: "cloud"`, hosted, no API key yet).
+ * localhost:15419, not installed yet) or **Cloud** (`mode: "cloud"`, hosted, no API key yet).
  *
  * Reads top-to-bottom as an onboarding script an agent runs for a brand-new user. Step 0 teaches
  * the concept (+ differentiator diagram) and gets the agent connected — desktop probes/installs

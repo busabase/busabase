@@ -1,13 +1,13 @@
+import { skipToken, useQuery } from "@tanstack/react-query";
 import type { ChangeRequestVO } from "busabase-core/types";
 import { useRouter } from "expo-router";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { AppState, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
-import { useBusabaseClient } from "~/api/use-busabase-client";
+import { useBusabaseOrpc } from "~/api/use-busabase-orpc";
 import { ChangeRequestCard } from "~/components/busabase/ChangeRequestCard";
 import { ConnectionGuard } from "~/components/busabase/ConnectionGuard";
 import { DrawerScaffold } from "~/components/busabase/DrawerScaffold";
 import { NativeEmptyState, NativeErrorState, NativeLoadingState } from "~/components/native-screen";
-import { useNativeQuery } from "~/hooks/use-native-query";
 import { radius, typography } from "~/theme/tokens";
 import { useTokens } from "~/theme/use-tokens";
 
@@ -66,19 +66,19 @@ const emptyCopy: Record<TabKey, { title: string; description: string }> = {
 function InboxContent() {
   const router = useRouter();
   const tokens = useTokens();
-  const client = useBusabaseClient();
+  const buda = useBusabaseOrpc();
   const [activeTab, setActiveTab] = useState<TabKey>("review");
-  const loadChangeRequests = useCallback(
-    () => client?.changeRequests.list({ limit: 100 }) ?? Promise.resolve([]),
-    [client],
+  const query = useQuery(
+    buda
+      ? buda.orpc.changeRequests.list.queryOptions({ input: { limit: 100 } })
+      : { queryKey: ["no-connection", "changeRequests", "list"], queryFn: skipToken },
   );
-  const query = useNativeQuery(!!client, loadChangeRequests);
 
   // Refresh whenever the app returns to the foreground.
   useEffect(() => {
     const subscription = AppState.addEventListener("change", (nextState) => {
       if (nextState === "active") {
-        query.refetch();
+        void query.refetch();
       }
     });
     return () => subscription.remove();
@@ -124,8 +124,8 @@ function InboxContent() {
     <DrawerScaffold
       title="Inbox"
       subtitle="Change requests from connected agents"
-      refreshing={query.refreshing}
-      onRefresh={query.refetch}
+      refreshing={query.isRefetching}
+      onRefresh={() => void query.refetch()}
     >
       <ScrollView
         horizontal
@@ -176,9 +176,11 @@ function InboxContent() {
         })}
       </ScrollView>
 
-      {query.loading ? <NativeLoadingState label="Loading change requests" /> : null}
-      {query.error ? <NativeErrorState message={query.error} onRetry={query.refetch} /> : null}
-      {!query.loading && !query.error && visible.length === 0 ? (
+      {query.isLoading ? <NativeLoadingState label="Loading change requests" /> : null}
+      {query.error ? (
+        <NativeErrorState message={query.error.message} onRetry={() => void query.refetch()} />
+      ) : null}
+      {!query.isLoading && !query.error && visible.length === 0 ? (
         <NativeEmptyState
           title={emptyCopy[activeTab].title}
           description={emptyCopy[activeTab].description}

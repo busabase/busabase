@@ -26,3 +26,12 @@ export const requireBaseId = (baseId: string | null, context: string) => {
 
 export const hashText = (content: string) =>
   `sha256:${createHash("sha256").update(content).digest("hex")}`;
+
+import { z } from "zod";
+
+export const listInputSchema = z
+  .object({
+    limit: z.number().int().min(1).max(100).optional().default(50),
+  })
+  .optional()
+  .default({ limit: 50 });

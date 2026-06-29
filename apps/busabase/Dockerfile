@@ -50,7 +50,16 @@ FROM node:22-bookworm-slim AS runner
 ENV NODE_ENV=production \
     PORT=3000 \
     HOSTNAME=0.0.0.0 \
-    NEXT_TELEMETRY_DISABLED=1
+    NEXT_TELEMETRY_DISABLED=1 \
+    # Canonical data root, identical in layout to `npx busabase server` and
+    # busabase-desktop: <root>/pgdata = pglite database, <root>/storage =
+    # attachments. Bind-mount the host's ~/.busabase/data here to share one
+    # database across all three launchers:
+    #   docker run -v ~/.busabase/data:/data busabase/busabase
+    # Override either URL (e.g. point at external Postgres / S3) at run time.
+    BUSABASE_DATA_DIR=/data \
+    PG_DATABASE_URL=pglite:///data/pgdata \
+    STORAGE_URL=local:/data/storage?base_url=/api/dev/attachment
 WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates && rm -rf /var/lib/apt/lists/*
 
@@ -68,8 +77,12 @@ COPY --from=drizzle /drizzle-only/node_modules ./apps/busabase/node_modules
 COPY --from=build /app/packages/openlib ./packages/openlib
 RUN ln -s ../../../packages/openlib apps/busabase/node_modules/openlib
 
-RUN mkdir -p /app/apps/busabase/.data/busabase && useradd -r -u 1001 nextjs && chown -R nextjs:nextjs /app
+RUN mkdir -p /data/pgdata /data/storage && useradd -r -u 1001 nextjs && chown -R nextjs:nextjs /app /data
 USER nextjs
+
+# Persist the database + attachments. Mount the host's ~/.busabase/data here to
+# share one local database with `npx busabase server` / busabase-desktop.
+VOLUME /data
 
 EXPOSE 3000
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 CMD curl -f http://localhost:3000/api/health || exit 1

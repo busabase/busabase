@@ -7,6 +7,7 @@ import { useRoute } from "wouter";
  * in the orchestrator — this hook is pure routing.
  */
 export function useDashboardRoutes() {
+  const [isArchivedRoute] = useRoute("/archived");
   const [isGraphRoute] = useRoute("/graph");
   const [isAssetDetailRoute] = useRoute("/assets/:assetId");
   const [isOperationRoute, operationParams] = useRoute("/inbox/:changeRequestId/:operationId");
@@ -37,6 +38,7 @@ export function useDashboardRoutes() {
     operationParams?.changeRequestId ?? changeRequestParams?.changeRequestId ?? null;
 
   return {
+    isArchivedRoute,
     isGraphRoute,
     isAssetDetailRoute,
     isOperationRoute,

@@ -15,7 +15,7 @@ use tauri_plugin_updater::RemoteRelease;
 
 use semver::Version;
 
-const BUSABASE_PORT: u16 = 3061;
+const BUSABASE_PORT: u16 = 15419;
 
 static BUSABASE_SIDECAR_PROCESS: OnceLock<Mutex<Option<Child>>> = OnceLock::new();
 
@@ -205,10 +205,21 @@ fn api_url() -> String {
     format!("{}/api/v1", local_url())
 }
 
+/// Canonical Busabase data root, shared verbatim with `npx busabase server` and
+/// the Docker image: `<root>/pgdata` holds the pglite database and
+/// `<root>/storage` holds attachments. Defaulting to `~/.busabase/data` (instead
+/// of the OS app-data dir) means the desktop app, the CLI, and a bind-mounted
+/// container all read and write the same local database. Override the root with
+/// the `BUSABASE_DATA_DIR` env var.
 fn busabase_data_dir(app: &AppHandle) -> Result<PathBuf, String> {
+    if let Ok(dir) = std::env::var("BUSABASE_DATA_DIR") {
+        if !dir.trim().is_empty() {
+            return Ok(PathBuf::from(dir));
+        }
+    }
     app.path()
-        .app_data_dir()
-        .map(|dir| dir.join("busabase-data"))
+        .home_dir()
+        .map(|dir| dir.join(".busabase").join("data"))
         .map_err(|error| error.to_string())
 }
 

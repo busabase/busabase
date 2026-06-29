@@ -22,6 +22,7 @@ import { type BusabaseDashboardApiClient, createBusabaseRestApiClient } from "..
 import { createBusabaseQueryUtils } from "../../api-client/react-query";
 import { CoreI18nProvider } from "../../i18n";
 import type { AuditEventVO, BaseVO, ChangeRequestVO, NodeVO, RecordVO, ViewVO } from "../../types";
+import { ArchivedBasesView } from "./components/archived-bases";
 import { AssetsView } from "./components/assets";
 import { BaseDetailView, BaseSetupView, BaseTopbarActions } from "./components/base-views";
 import { ChangeRequestDetailPage, ReviewConflictPanel } from "./components/change-request-review";
@@ -117,6 +118,8 @@ function BusabaseDashboardContent({
   const changeRequestsList = orpc.changeRequests.list.queryOptions({ input: {} });
   const recordsList = orpc.records.list.queryOptions({ input: {} });
   const basesList = orpc.bases.list.queryOptions({});
+  const archivedBasesList = orpc.bases.listArchived.queryOptions({});
+  const archivedNodesList = orpc.nodes.listArchived.queryOptions({});
   const auditEventsList = orpc.auditEvents.list.queryOptions({ input: {} });
   const changeRequestsQuery = useQuery({
     ...changeRequestsList,
@@ -124,10 +127,14 @@ function BusabaseDashboardContent({
   });
   const recordsQuery = useQuery({ ...recordsList, initialData: initialRecords });
   const basesQuery = useQuery({ ...basesList, initialData: initialBases });
+  const archivedBasesQuery = useQuery(archivedBasesList);
+  const archivedNodesQuery = useQuery(archivedNodesList);
   const auditEventsQuery = useQuery({ ...auditEventsList, initialData: initialAuditEvents });
   const allChangeRequests = changeRequestsQuery.data ?? [];
   const baseRecords = recordsQuery.data ?? [];
   const bases = basesQuery.data ?? [];
+  const archivedBases = archivedBasesQuery.data ?? [];
+  const archivedNodes = archivedNodesQuery.data ?? [];
   const auditEvents = auditEventsQuery.data ?? [];
   // Stable query keys for cache writes/invalidation (orpc is memoized on apiBasePath).
   const listKeys = useMemo(
@@ -166,6 +173,7 @@ function BusabaseDashboardContent({
   );
 
   const {
+    isArchivedRoute,
     isGraphRoute,
     isAssetDetailRoute,
     isOperationRoute,
@@ -196,6 +204,26 @@ function BusabaseDashboardContent({
         : (bases[0] ?? null),
     [selectedBaseSlug, bases],
   );
+  // Deleted fields scoped to the active base (for the Design tab).
+  const deletedFieldsQuery = useQuery({
+    ...orpc.bases.listDeletedFields.queryOptions({ input: { baseId: activeBase?.id ?? "" } }),
+    enabled: Boolean(activeBase?.id && isBaseSetupRoute),
+  });
+  const deletedFields = deletedFieldsQuery.data ?? [];
+  // Archived views/records for the active base (for restore UI in the table).
+  const isBaseDetailRoute = Boolean(
+    activeBase?.id && locationPath.startsWith("/base/") && !isBaseSetupRoute,
+  );
+  const archivedViewsQuery = useQuery({
+    ...orpc.bases.listArchivedViews.queryOptions({ input: { baseId: activeBase?.id ?? "" } }),
+    enabled: Boolean(activeBase?.id && isBaseDetailRoute),
+  });
+  const archivedViewsForBase = archivedViewsQuery.data ?? [];
+  const archivedRecordsQuery = useQuery({
+    ...orpc.bases.listArchivedRecords.queryOptions({ input: { baseId: activeBase?.id ?? "" } }),
+    enabled: Boolean(activeBase?.id && isBaseDetailRoute),
+  });
+  const archivedRecordsForBase = archivedRecordsQuery.data ?? [];
   // Views are scoped to the active base (the oRPC endpoint is per-base).
   const viewsList = orpc.bases.listViews.queryOptions({
     input: { baseId: activeBase?.id ?? "" },
@@ -702,6 +730,71 @@ function BusabaseDashboardContent({
     [approveAndMergeChangeRequest, client, refresh, setLocation],
   );
 
+  const submitRestoreBase = useCallback(
+    async (base: BaseVO) => {
+      setError(null);
+      const changeRequest = await client.createRestoreBaseChangeRequest(base.id, {
+        submittedBy: "local-editor",
+        message: `Restore base ${base.name}`,
+      });
+      await approveAndMergeChangeRequest(changeRequest.id);
+      await queryClient.invalidateQueries({ queryKey: listKeys.bases });
+      await queryClient.invalidateQueries({
+        queryKey: orpc.bases.listArchived.queryOptions({}).queryKey,
+      });
+      toast.success("Base restored");
+      setLocation(`/base/${base.slug}`);
+    },
+    [approveAndMergeChangeRequest, client, listKeys.bases, orpc, queryClient, setLocation],
+  );
+
+  const submitRestoreNode = useCallback(
+    async (node: NodeVO) => {
+      setError(null);
+      const changeRequest = await client.createNodeChangeRequest({
+        submittedBy: "local-editor",
+        message: `Restore ${node.type} ${node.name}`,
+        operations: [{ kind: "restore", nodeId: node.id }],
+      });
+      await approveAndMergeChangeRequest(changeRequest.id);
+      await queryClient.invalidateQueries({
+        queryKey: orpc.nodes.listArchived.queryOptions({}).queryKey,
+      });
+      await queryClient.invalidateQueries({
+        queryKey: orpc.nodes.list.queryOptions({}).queryKey,
+      });
+      toast.success(`${node.type[0].toUpperCase()}${node.type.slice(1)} restored`);
+    },
+    [approveAndMergeChangeRequest, client, orpc, queryClient],
+  );
+
+  const submitPurgeNode = useCallback(
+    async (node: NodeVO) => {
+      setError(null);
+      await client.purgeNode(node.id);
+      await queryClient.invalidateQueries({
+        queryKey: orpc.nodes.listArchived.queryOptions({}).queryKey,
+      });
+      toast.success(`${node.type[0].toUpperCase()}${node.type.slice(1)} permanently deleted`);
+    },
+    [client, orpc, queryClient],
+  );
+
+  const submitRestoreField = useCallback(
+    async (base: BaseVO, fieldId: string) => {
+      setError(null);
+      const changeRequest = await client.createRestoreFieldChangeRequest(base.id, {
+        fieldId,
+        submittedBy: "local-editor",
+        message: "Restore deleted field",
+      });
+      await approveAndMergeChangeRequest(changeRequest.id);
+      await refresh();
+      toast.success("Field restored");
+    },
+    [approveAndMergeChangeRequest, client, refresh],
+  );
+
   const submitCreateView = useCallback(
     async (base: BaseVO, payload: ViewFormPayload, options?: ViewSubmitOptions) => {
       setError(null);
@@ -761,6 +854,42 @@ function BusabaseDashboardContent({
       setLocation(`/inbox/${changeRequest.id}`);
     },
     [client, refresh, setLocation],
+  );
+
+  const submitRestoreView = useCallback(
+    async (view: ViewVO) => {
+      setError(null);
+      const changeRequest = await client.createRestoreViewChangeRequest(view.id, {
+        submittedBy: "local-editor",
+        message: `Restore view ${view.name}`,
+      });
+      await approveAndMergeChangeRequest(changeRequest.id);
+      await queryClient.invalidateQueries({
+        queryKey: orpc.bases.listArchivedViews.queryOptions({ input: { baseId: view.baseId } })
+          .queryKey,
+      });
+      await refresh();
+      toast.success("View restored");
+    },
+    [approveAndMergeChangeRequest, client, orpc, queryClient, refresh],
+  );
+
+  const submitRestoreRecord = useCallback(
+    async (record: RecordVO) => {
+      setError(null);
+      const changeRequest = await client.createRestoreRecordChangeRequest(record.id, {
+        submittedBy: "local-editor",
+        message: `Restore record`,
+      });
+      await approveAndMergeChangeRequest(changeRequest.id);
+      await queryClient.invalidateQueries({
+        queryKey: orpc.bases.listArchivedRecords.queryOptions({ input: { baseId: record.baseId } })
+          .queryKey,
+      });
+      await refresh();
+      toast.success("Record restored");
+    },
+    [approveAndMergeChangeRequest, client, orpc, queryClient, refresh],
   );
 
   const viewedRecordIds = useRef(new Set<string>());
@@ -903,6 +1032,18 @@ function BusabaseDashboardContent({
       );
     }
 
+    if (isArchivedRoute) {
+      return (
+        <ArchivedBasesView
+          archivedBases={archivedBases}
+          archivedNodes={archivedNodes}
+          onPurgeNode={submitPurgeNode}
+          onRestoreBase={submitRestoreBase}
+          onRestoreNode={submitRestoreNode}
+        />
+      );
+    }
+
     if (isGraphRoute) {
       return <BaseGraphView bases={bases} nodes={nodeTree} />;
     }
@@ -912,8 +1053,10 @@ function BusabaseDashboardContent({
         <BaseSetupView
           base={activeBase}
           bases={bases}
+          deletedFields={deletedFields}
           onCreateField={submitCreateBaseField}
           onRenameBase={submitRenameBase}
+          onRestoreField={submitRestoreField}
         />
       );
     }
@@ -958,13 +1101,25 @@ function BusabaseDashboardContent({
     }
 
     if (locationPath.startsWith("/base/")) {
+      const archivedMatch = selectedBaseSlug
+        ? archivedBases.find((b) => b.slug === selectedBaseSlug)
+        : null;
+      if (archivedMatch) {
+        return (
+          <ArchivedBasesView archivedBases={[archivedMatch]} onRestoreBase={submitRestoreBase} />
+        );
+      }
       return (
         <BaseDetailView
           activeView={selectedBaseView}
+          archivedViews={archivedViewsForBase}
+          archivedRecords={archivedRecordsForBase}
           records={records}
           base={activeBase}
           onCreateView={submitCreateView}
           onDeleteView={submitDeleteView}
+          onRestoreView={submitRestoreView}
+          onRestoreRecord={submitRestoreRecord}
           onUpdateView={submitUpdateView}
           views={views}
         />
@@ -1034,10 +1189,23 @@ function BusabaseDashboardContent({
     submitCreateView,
     submitDeleteRecord,
     submitDeleteView,
+    submitRestoreBase,
+    submitRestoreNode,
+    submitPurgeNode,
+    submitRestoreField,
+    submitRestoreView,
+    submitRestoreRecord,
     submitUpdateRecord,
     submitUpdateView,
     uploadAttachment,
     views,
+    archivedBases,
+    archivedNodes,
+    archivedViewsForBase,
+    archivedRecordsForBase,
+    deletedFields,
+    isArchivedRoute,
+    selectedBaseSlug,
     setLocation,
   ]);
 
