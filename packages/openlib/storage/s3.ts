@@ -1,21 +1,23 @@
-import {
-  AbortMultipartUploadCommand,
-  CompleteMultipartUploadCommand,
-  CopyObjectCommand,
-  CreateBucketCommand,
-  CreateMultipartUploadCommand,
-  DeleteObjectCommand,
-  GetObjectCommand,
-  HeadBucketCommand,
-  ListObjectsV2Command,
-  type ListObjectsV2CommandOutput,
-  PutBucketCorsCommand,
-  PutObjectCommand,
-  S3Client,
-  UploadPartCommand,
-} from "@aws-sdk/client-s3";
-import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
+import type { ListObjectsV2CommandOutput, S3Client as S3ClientType } from "@aws-sdk/client-s3";
 import type { IStorage, MultipartPart, StorageConfig } from "./types";
+
+// Lazy-load the AWS SDK. The storage factory STATICALLY imports this module (for
+// parseStorageUrl + the S3Storage class), so a top-level `import "@aws-sdk/*"`
+// would pull the SDK into the server module graph even for the default LOCAL
+// (pglite) storage. Under Next `output: "standalone"` that import is rewritten
+// to an unresolvable hashed external (`@aws-sdk/client-s3-<hash>`), which 500s
+// every DB/storage request in the npm distribution. Loading it on first S3 use
+// instead means local storage never touches @aws-sdk at all.
+let _s3SdkPromise: Promise<typeof import("@aws-sdk/client-s3")> | null = null;
+const loadS3Sdk = () => {
+  _s3SdkPromise ??= import("@aws-sdk/client-s3");
+  return _s3SdkPromise;
+};
+let _presignerPromise: Promise<typeof import("@aws-sdk/s3-request-presigner")> | null = null;
+const loadGetSignedUrl = async () => {
+  _presignerPromise ??= import("@aws-sdk/s3-request-presigner");
+  return (await _presignerPromise).getSignedUrl;
+};
 
 /**
  * 解析 STORAGE_URL 环境变量
@@ -191,7 +193,7 @@ export const getStorageConfigFromEnv = (): StorageConfig => {
  * S3 客户端封装类
  */
 export class S3Storage implements IStorage {
-  private client: S3Client;
+  private clientPromise: Promise<S3ClientType> | null = null;
   private config: StorageConfig;
   private corsConfigured = false;
 
@@ -212,16 +214,23 @@ export class S3Storage implements IStorage {
     if (!this.config.accessKeyId || !this.config.secretAccessKey) {
       throw new Error("S3 credentials (accessKeyId, secretAccessKey) are required for S3Storage");
     }
+  }
 
-    this.client = new S3Client({
-      region: this.config.region,
-      endpoint: this.config.endpoint,
-      credentials: {
-        accessKeyId: this.config.accessKeyId,
-        secretAccessKey: this.config.secretAccessKey,
-      },
-      forcePathStyle: this.config.forcePathStyle,
-    });
+  /** Lazily create (and cache) the S3 client — defers the @aws-sdk load to first use. */
+  private getClient(): Promise<S3ClientType> {
+    this.clientPromise ??= (async () => {
+      const { S3Client } = await loadS3Sdk();
+      return new S3Client({
+        region: this.config.region,
+        endpoint: this.config.endpoint,
+        credentials: {
+          accessKeyId: this.config.accessKeyId as string,
+          secretAccessKey: this.config.secretAccessKey as string,
+        },
+        forcePathStyle: this.config.forcePathStyle,
+      });
+    })();
+    return this.clientPromise;
   }
 
   /**
@@ -230,7 +239,9 @@ export class S3Storage implements IStorage {
   private async ensureCorsConfigured(): Promise<void> {
     if (this.corsConfigured) return;
     try {
-      await this.client.send(
+      const { PutBucketCorsCommand } = await loadS3Sdk();
+      const client = await this.getClient();
+      await client.send(
         new PutBucketCorsCommand({
           Bucket: this.config.bucketName,
           CORSConfiguration: {
@@ -262,14 +273,16 @@ export class S3Storage implements IStorage {
       return;
     }
 
+    const { HeadBucketCommand, CreateBucketCommand } = await loadS3Sdk();
+    const client = await this.getClient();
     try {
-      await this.client.send(new HeadBucketCommand({ Bucket: this.config.bucketName }));
+      await client.send(new HeadBucketCommand({ Bucket: this.config.bucketName }));
     } catch (error: unknown) {
       const err = error as { name?: string };
       if (err.name === "NotFound" || err.name === "NoSuchBucket") {
         console.log(`Bucket ${this.config.bucketName} does not exist, creating...`);
         try {
-          await this.client.send(new CreateBucketCommand({ Bucket: this.config.bucketName }));
+          await client.send(new CreateBucketCommand({ Bucket: this.config.bucketName }));
           console.log(`Bucket ${this.config.bucketName} created successfully`);
         } catch (createError: unknown) {
           console.error(`Failed to create bucket ${this.config.bucketName}:`, createError);
@@ -291,6 +304,8 @@ export class S3Storage implements IStorage {
   ): Promise<{ key: string; uri: string; publicUrl: string }> {
     await this.ensureBucketExists();
 
+    const { PutObjectCommand } = await loadS3Sdk();
+    const client = await this.getClient();
     const command = new PutObjectCommand({
       Bucket: this.config.bucketName,
       Key: key,
@@ -299,7 +314,7 @@ export class S3Storage implements IStorage {
       ACL: undefined, // MinIO 可能不支持 ACL
     });
 
-    await this.client.send(command);
+    await client.send(command);
 
     // 生成公开访问 URL
     const publicUrl = this.getPublicUrl(key);
@@ -352,6 +367,9 @@ export class S3Storage implements IStorage {
       responseContentType?: string;
     },
   ): Promise<string> {
+    const { GetObjectCommand } = await loadS3Sdk();
+    const getSignedUrl = await loadGetSignedUrl();
+    const client = await this.getClient();
     const command = new GetObjectCommand({
       Bucket: this.config.bucketName,
       Key: key,
@@ -363,7 +381,7 @@ export class S3Storage implements IStorage {
       }),
     });
 
-    return await getSignedUrl(this.client, command, { expiresIn });
+    return await getSignedUrl(client, command, { expiresIn });
   }
 
   /**
@@ -377,13 +395,16 @@ export class S3Storage implements IStorage {
     await this.ensureBucketExists();
     await this.ensureCorsConfigured();
 
+    const { PutObjectCommand } = await loadS3Sdk();
+    const getSignedUrl = await loadGetSignedUrl();
+    const client = await this.getClient();
     const command = new PutObjectCommand({
       Bucket: this.config.bucketName,
       Key: key,
       ContentType: mimeType,
     });
 
-    return await getSignedUrl(this.client, command, { expiresIn });
+    return await getSignedUrl(client, command, { expiresIn });
   }
 
   /**
@@ -392,13 +413,15 @@ export class S3Storage implements IStorage {
   async createMultipartUpload(key: string, mimeType: string): Promise<string> {
     await this.ensureBucketExists();
 
+    const { CreateMultipartUploadCommand } = await loadS3Sdk();
+    const client = await this.getClient();
     const command = new CreateMultipartUploadCommand({
       Bucket: this.config.bucketName,
       Key: key,
       ContentType: mimeType,
     });
 
-    const response = await this.client.send(command);
+    const response = await client.send(command);
 
     if (!response.UploadId) {
       throw new Error("Failed to initiate multipart upload: no UploadId returned");
@@ -416,6 +439,9 @@ export class S3Storage implements IStorage {
     partNumber: number,
     expiresIn: number = 3600,
   ): Promise<string> {
+    const { UploadPartCommand } = await loadS3Sdk();
+    const getSignedUrl = await loadGetSignedUrl();
+    const client = await this.getClient();
     const command = new UploadPartCommand({
       Bucket: this.config.bucketName,
       Key: key,
@@ -423,7 +449,7 @@ export class S3Storage implements IStorage {
       PartNumber: partNumber,
     });
 
-    return await getSignedUrl(this.client, command, { expiresIn });
+    return await getSignedUrl(client, command, { expiresIn });
   }
 
   /**
@@ -437,6 +463,8 @@ export class S3Storage implements IStorage {
     // Sort parts by partNumber as required by S3
     const sortedParts = [...parts].sort((a, b) => a.partNumber - b.partNumber);
 
+    const { CompleteMultipartUploadCommand } = await loadS3Sdk();
+    const client = await this.getClient();
     const command = new CompleteMultipartUploadCommand({
       Bucket: this.config.bucketName,
       Key: key,
@@ -449,20 +477,22 @@ export class S3Storage implements IStorage {
       },
     });
 
-    await this.client.send(command);
+    await client.send(command);
   }
 
   /**
    * Abort a multipart upload (cleanup)
    */
   async abortMultipartUpload(key: string, uploadId: string): Promise<void> {
+    const { AbortMultipartUploadCommand } = await loadS3Sdk();
+    const client = await this.getClient();
     const command = new AbortMultipartUploadCommand({
       Bucket: this.config.bucketName,
       Key: key,
       UploadId: uploadId,
     });
 
-    await this.client.send(command);
+    await client.send(command);
   }
 
   /**
@@ -496,24 +526,28 @@ export class S3Storage implements IStorage {
     const cleanSourceKey = sourceKey.startsWith("/") ? sourceKey.substring(1) : sourceKey;
     const copySource = `${this.config.bucketName}/${cleanSourceKey}`;
 
+    const { CopyObjectCommand } = await loadS3Sdk();
+    const client = await this.getClient();
     const command = new CopyObjectCommand({
       Bucket: this.config.bucketName,
       CopySource: encodeURI(copySource),
       Key: destinationKey,
     });
 
-    await this.client.send(command);
+    await client.send(command);
   }
 
   /**
    * Get object content as Buffer
    */
   async getObject(key: string): Promise<Buffer> {
+    const { GetObjectCommand } = await loadS3Sdk();
+    const client = await this.getClient();
     const command = new GetObjectCommand({
       Bucket: this.config.bucketName,
       Key: key,
     });
-    const response = await this.client.send(command);
+    const response = await client.send(command);
     if (!response.Body) throw new Error(`Object not found: ${key}`);
     const chunks: Uint8Array[] = [];
     for await (const chunk of response.Body as AsyncIterable<Uint8Array>) {
@@ -526,12 +560,14 @@ export class S3Storage implements IStorage {
    * 删除对象
    */
   async deleteObject(key: string): Promise<void> {
+    const { DeleteObjectCommand } = await loadS3Sdk();
+    const client = await this.getClient();
     const command = new DeleteObjectCommand({
       Bucket: this.config.bucketName,
       Key: key,
     });
 
-    await this.client.send(command);
+    await client.send(command);
   }
 
   /**
@@ -546,6 +582,8 @@ export class S3Storage implements IStorage {
     isTruncated: boolean;
     nextContinuationToken?: string;
   }> {
+    const { ListObjectsV2Command } = await loadS3Sdk();
+    const client = await this.getClient();
     const command = new ListObjectsV2Command({
       Bucket: this.config.bucketName,
       Prefix: prefix,
@@ -553,7 +591,7 @@ export class S3Storage implements IStorage {
       ContinuationToken: continuationToken,
     });
 
-    const response: ListObjectsV2CommandOutput = await this.client.send(command);
+    const response: ListObjectsV2CommandOutput = await client.send(command);
 
     const objects =
       response.Contents?.map((obj) => ({
@@ -574,11 +612,13 @@ export class S3Storage implements IStorage {
    */
   async objectExists(key: string): Promise<boolean> {
     try {
+      const { GetObjectCommand } = await loadS3Sdk();
+      const client = await this.getClient();
       const command = new GetObjectCommand({
         Bucket: this.config.bucketName,
         Key: key,
       });
-      await this.client.send(command);
+      await client.send(command);
       return true;
     } catch {
       return false;
