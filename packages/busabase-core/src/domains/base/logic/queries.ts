@@ -1,5 +1,6 @@
 import "server-only";
 
+import { listRecordsInputSchema } from "busabase-contract/domains/base/contract/record-schemas";
 import { and, asc, desc, eq, inArray, isNotNull, isNull, lt, or, type SQL } from "drizzle-orm";
 import type { z } from "zod";
 import { getContextSpaceId } from "../../../context";
@@ -17,7 +18,6 @@ import { hydrateRecord } from "../../../logic/cr-lifecycle";
 import { ensureReady } from "../../../logic/seed";
 import { listInputSchema, recordFieldFilterInputSchema } from "../../../logic/store";
 import { toBaseVO, toFieldVO, toRecordLinkVO, toViewVO } from "../../../logic/vo";
-import { listRecordsInputSchema } from "../contract/record-schemas";
 
 export { listInputSchema, recordFieldFilterInputSchema };
 

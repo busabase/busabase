@@ -1,18 +1,18 @@
 import { useQuery } from "@tanstack/react-query";
-import { Kbd } from "kui/kbd";
-import { Tabs, TabsList, TabsTrigger } from "kui/tabs";
-import { cn } from "kui/utils";
-import { CornerDownLeft, Search, X } from "lucide-react";
-import { SPALink as Link } from "openlib/ui/dashboard";
-import { type KeyboardEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { BusabaseQueryUtils } from "../../../api-client/react-query";
+import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";
 import type {
   BaseVO,
   ChangeRequestVO,
   RecordVO,
   SearchResultKind,
   SearchResultVO,
-} from "../../../types";
+} from "busabase-contract/types";
+import { Kbd } from "kui/kbd";
+import { Tabs, TabsList, TabsTrigger } from "kui/tabs";
+import { cn } from "kui/utils";
+import { CornerDownLeft, Search, X } from "lucide-react";
+import { SPALink as Link } from "openlib/ui/dashboard";
+import { type KeyboardEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { normalizeSearchText, searchKindIcon } from "../helpers/search";
 import { EmptyState } from "./primitives";
 

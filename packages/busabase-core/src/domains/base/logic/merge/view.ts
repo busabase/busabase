@@ -1,6 +1,7 @@
 import "server-only";
 
 import { ORPCError } from "@orpc/server";
+import type { ViewConfigVO } from "busabase-contract/types";
 import { and, eq, isNull } from "drizzle-orm";
 import { getContextSpaceId, resolveActorId } from "../../../../context";
 import type { CommitPO, OperationPO } from "../../../../db/schema";
@@ -8,7 +9,6 @@ import { busabaseBaseFields, busabaseOperations, busabaseViews } from "../../../
 import type { MergeCtx } from "../../../../logic/cr-lifecycle";
 import { CURRENT_USER_ID, id, requireBaseId } from "../../../../logic/kernel";
 import { normalizeViewConfig } from "../../../../logic/vo";
-import type { ViewConfigVO } from "../../../../types";
 
 /**
  * Stamp the stable `fieldId` onto every filter/sort entry by resolving each

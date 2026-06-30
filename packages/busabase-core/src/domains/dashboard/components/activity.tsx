@@ -1,6 +1,6 @@
+import type { AuditEventVO, ChangeRequestVO, RecordVO } from "busabase-contract/types";
 import { ChevronRight } from "lucide-react";
 import { SPALink as Link } from "openlib/ui/dashboard";
-import type { AuditEventVO, ChangeRequestVO, RecordVO } from "../../../types";
 import {
   getChangeRequestScopeName,
   getChangeRequestSummary,

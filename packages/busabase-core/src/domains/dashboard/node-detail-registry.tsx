@@ -1,5 +1,5 @@
+import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";
 import type { ReactNode } from "react";
-import type { BusabaseQueryUtils } from "../../api-client/react-query";
 
 /**
  * Per-platform (web) node-detail renderer registry. Each domain registers its

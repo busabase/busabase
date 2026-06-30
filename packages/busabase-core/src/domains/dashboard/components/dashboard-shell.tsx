@@ -1,12 +1,12 @@
 "use client";
 
+import { hasCapability } from "busabase-contract/domains";
+import type { NodeVO } from "busabase-contract/types";
 import { Toaster } from "kui/sonner";
 import { Activity, Archive, Images, Inbox, type LucideIcon, Plus, Search } from "lucide-react";
 import { DashboardLayout, type NavGroup, type NavItem, NavMain } from "openlib/ui/dashboard";
 import type { ComponentProps, ReactNode } from "react";
 import { coreMessagesByLocale } from "../../../i18n";
-import type { NodeVO } from "../../../types";
-import { hasCapability } from "../../registry";
 import { nodeIconForType } from "../helpers/node-icons";
 
 const isCoreLocale = (locale: string | undefined): locale is keyof typeof coreMessagesByLocale =>

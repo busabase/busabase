@@ -74,10 +74,10 @@ npx busabase-cli --help   # the API client on its own (talks to any busabase ser
 ### 🐳 Docker
 
 ```bash
-docker run --rm -p 3000:3000 busabase/busabase
+docker run --rm -p 15419:15419 busabase/busabase
 ```
 
-Open **http://localhost:3000/dashboard/inbox**. Defaults to local PGlite persistence — no
+Open **http://localhost:15419/dashboard/inbox**. Defaults to local PGlite persistence — no
 external services. Images are published to Docker Hub (`busabase/busabase`) and GHCR
 (`ghcr.io/busabase/busabase`).
 
@@ -128,7 +128,7 @@ Docker writes to `/data` inside the container — bind-mount the same host folde
 that one database with the CLI and desktop app:
 
 ```bash
-docker run --rm -p 3000:3000 -v ~/.busabase/data:/data busabase/busabase
+docker run --rm -p 15419:15419 -v ~/.busabase/data:/data busabase/busabase
 ```
 
 (Running from source with `pnpm dev` instead uses the repo's `.env`, i.e. `.data/busabase`.)
@@ -263,6 +263,8 @@ approve -> merged into your local source of truth
 ```
 
 This keeps the loop entirely on your hardware. The agent gets a real, structured memory to work against, and you keep authority over what becomes trusted — no private data has to leave your computer for any of it to work.
+
+**→ Step-by-step:** [Bring Your Own Agent](./docs/bring-your-agent.md) — paste one prompt to onboard, then `npx skills add busabase/skills` to install a permanent skill your agent uses every session.
 
 > If OpenClaw is the revolution for **agents** on your local computer, then BusaBase is the revolution for the **database and knowledge base** on your local computer.
 

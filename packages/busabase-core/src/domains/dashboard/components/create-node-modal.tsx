@@ -1,5 +1,7 @@
 "use client";
 
+import type { BusabaseDashboardApiClient } from "busabase-contract/api-client";
+import { type CreatableNodeType, listNodeTypes } from "busabase-contract/domains";
 import { Button } from "kui/button";
 import {
   Dialog,
@@ -11,8 +13,6 @@ import {
 } from "kui/dialog";
 import { Input } from "kui/input";
 import { useState } from "react";
-import type { BusabaseDashboardApiClient } from "../../../api-client";
-import { type CreatableNodeType, listNodeTypes } from "../../registry";
 import { nodeIconForId } from "../helpers/node-icons";
 import { SplitSubmitButton } from "./split-submit-button";
 

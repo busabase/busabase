@@ -3,8 +3,7 @@
 
 // Colorize only on a real terminal that hasn't opted out (NO_COLOR).
 const useColor = Boolean(process.stdout.isTTY) && !process.env.NO_COLOR;
-const paint = (code: string, s: string): string =>
-  useColor ? `\x1b[${code}m${s}\x1b[0m` : s;
+const paint = (code: string, s: string): string => (useColor ? `\x1b[${code}m${s}\x1b[0m` : s);
 
 const c = {
   brand: (s: string) => paint("38;5;43", s), // teal — Busabase accent
@@ -25,9 +24,7 @@ const LOGO = [
 export function banner(baseUrl: string): string {
   const out: string[] = [""];
   for (const line of LOGO) out.push(c.brand(line));
-  out.push(
-    `${c.dim("   OpenAPI client for Busabase")} ${c.dim("·")} ${c.dim("talks to /api/v1")}`,
-  );
+  out.push(`${c.dim("   OpenAPI client for Busabase")} ${c.dim("·")} ${c.dim("talks to /api/v1")}`);
   out.push(`   ${c.bold("Server")}  ${c.cyan(baseUrl)}`);
   out.push("");
   return out.join("\n");

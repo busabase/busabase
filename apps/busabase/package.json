@@ -68,6 +68,7 @@
     "next": "16.2.6",
     "next-themes": "^0.4.6",
     "postgres": "^3.4.6",
+    "busabase-contract": "workspace:*",
     "busabase-core": "workspace:*",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",

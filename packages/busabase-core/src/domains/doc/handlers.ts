@@ -1,5 +1,11 @@
 import "server-only";
 
+import {
+  createDocChangeRequestInputSchema,
+  createDocInputSchema,
+  updateDocInputSchema,
+} from "busabase-contract/domains/doc/contract";
+import type { NodeVO } from "busabase-contract/types";
 import { and, asc, eq, isNull } from "drizzle-orm";
 import { storage } from "openlib/storage";
 import type { z } from "zod";
@@ -26,13 +32,7 @@ import {
   type MergeCtx,
   toNodeVO,
 } from "../../logic/store";
-import type { NodeVO } from "../../types";
 import { syncDocAssetUsages } from "../assets/handlers";
-import {
-  createDocChangeRequestInputSchema,
-  createDocInputSchema,
-  updateDocInputSchema,
-} from "./contract";
 
 interface DocVO {
   node: NodeVO;

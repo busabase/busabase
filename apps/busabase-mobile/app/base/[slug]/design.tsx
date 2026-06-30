@@ -1,5 +1,5 @@
 import { skipToken, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { BaseVO, FieldType, ViewVO } from "busabase-core/types";
+import type { BaseVO, FieldType, ViewVO } from "busabase-contract/types";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { ArrowLeft, Trash2 } from "lucide-react-native";
 import { useMemo, useState } from "react";

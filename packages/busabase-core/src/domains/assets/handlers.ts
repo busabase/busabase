@@ -1,5 +1,6 @@
 import "server-only";
 
+import type { AssetDetailVO, AssetUsageVO, AssetVO } from "busabase-contract/domains/assets/types";
 import { and, desc, eq, sql } from "drizzle-orm";
 import { deleteAttachmentSafely } from "open-domains/attachments/logic";
 import { storage } from "openlib/storage";
@@ -9,7 +10,6 @@ import { attachments, busabaseBaseFields, busabaseBases, busabaseNodes } from ".
 import { id } from "../../logic/kernel";
 import { ensureReady } from "../../logic/store";
 import { busabaseAssets, busabaseAssetUsages } from "./schema/assets";
-import type { AssetDetailVO, AssetUsageVO, AssetVO } from "./types";
 
 interface AssetRow {
   id: string;

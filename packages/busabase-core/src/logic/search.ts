@@ -1,5 +1,11 @@
 import "server-only";
 
+import type {
+  ChangeRequestVO,
+  RecordVO,
+  SearchResponseVO,
+  SearchResultVO,
+} from "busabase-contract/types";
 import { and, desc, eq, ilike, inArray, isNotNull, isNull, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import { getContextSpaceId } from "../context";
@@ -11,7 +17,6 @@ import {
   busabaseFieldValues,
   busabaseRecords,
 } from "../db/schema";
-import type { ChangeRequestVO, RecordVO, SearchResponseVO, SearchResultVO } from "../types";
 import { hydrateChangeRequest, hydrateRecord } from "./cr-lifecycle";
 import { ensureReady } from "./seed";
 import { toBaseVO } from "./vo";

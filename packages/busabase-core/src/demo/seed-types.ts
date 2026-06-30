@@ -1,5 +1,10 @@
+import type {
+  BaseFieldVO,
+  ChangeRequestStatus,
+  OperationKind,
+  ViewConfigVO,
+} from "busabase-contract/types";
 import type { DemoUseCase } from "../context";
-import type { BaseFieldVO, ChangeRequestStatus, OperationKind, ViewConfigVO } from "../types";
 
 export type SeedFieldDef = Omit<BaseFieldVO, "baseId" | "position">;
 

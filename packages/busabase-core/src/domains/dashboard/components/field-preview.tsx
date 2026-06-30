@@ -1,10 +1,10 @@
+import type { BaseFieldVO, RecordVO } from "busabase-contract/types";
 import { CodeBlock } from "kui/ai-elements/code-block";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "kui/dialog";
 import { FileText, Film, Maximize2, Music } from "lucide-react";
 import { SPALink as Link } from "openlib/ui/dashboard";
 import { type ComponentProps, type ReactNode, useState } from "react";
 import { Streamdown, type Components as StreamdownComponents } from "streamdown";
-import type { BaseFieldVO, RecordVO } from "../../../types";
 import { fieldDisplayKind, fieldLinkPrefix } from "../../base/field-types";
 import { getRecordTitle } from "../helpers/change-request";
 import {

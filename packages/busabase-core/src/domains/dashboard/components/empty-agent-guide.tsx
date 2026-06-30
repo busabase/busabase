@@ -19,7 +19,12 @@ const guideItems = [
   },
 ];
 
-export function EmptyAgentGuide() {
+interface EmptyAgentGuideProps {
+  /** Current UI language — localizes the pasted prompt in the Agent Integration dialog. */
+  lang?: string;
+}
+
+export function EmptyAgentGuide({ lang }: EmptyAgentGuideProps = {}) {
   const [open, setOpen] = useState(false);
 
   return (
@@ -70,6 +75,7 @@ export function EmptyAgentGuide() {
         open={open}
         onOpenChange={setOpen}
         defaultOrigin="https://busabase.com"
+        lang={lang}
       />
     </>
   );

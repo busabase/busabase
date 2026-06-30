@@ -1,8 +1,8 @@
+import type { BusabaseDashboardApiClient } from "busabase-contract/api-client";
+import type { AuditEventVO, ChangeRequestVO, OperationVO, ReviewVO } from "busabase-contract/types";
 import { Check, ChevronRight, GitMerge, Sparkles, X } from "lucide-react";
 import { SPALink as Link } from "openlib/ui/dashboard";
 import { Fragment, useEffect, useMemo, useState } from "react";
-import type { BusabaseDashboardApiClient } from "../../../api-client";
-import type { AuditEventVO, ChangeRequestVO, OperationVO, ReviewVO } from "../../../types";
 import {
   changeRequestStatusLabel,
   getChangeRequestBrief,

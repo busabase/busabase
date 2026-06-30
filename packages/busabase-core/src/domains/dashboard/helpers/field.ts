@@ -1,5 +1,5 @@
+import type { BaseFieldVO, ChangeRequestVO, FieldType, RecordVO } from "busabase-contract/types";
 import type { AttachmentRef } from "open-domains/attachments/types";
-import type { BaseFieldVO, ChangeRequestVO, FieldType, RecordVO } from "../../../types";
 import { FIELD_TYPE_ORDER } from "../../base/field-types";
 import { fieldValueToString, formatActorLabel, formatNumberField } from "./format";
 import { stripHtmlTags } from "./html";

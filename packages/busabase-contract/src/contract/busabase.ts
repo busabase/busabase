@@ -30,7 +30,7 @@ import {
   searchResponseSchema,
 } from "./schemas";
 
-export const busabaseContract = oc.prefix("/api/v1").router({
+export const busabaseContractRoutes = {
   auth: {
     verify: oc
       .route({
@@ -228,7 +228,9 @@ export const busabaseContract = oc.prefix("/api/v1").router({
   },
   records: recordContract,
   views: viewContract,
-});
+};
+
+export const busabaseContract = oc.prefix("/api/v1").router(busabaseContractRoutes);
 
 export type { AuthInfo, NodeOutput } from "./schemas";
 export type BusabaseContract = typeof busabaseContract;

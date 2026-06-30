@@ -8,10 +8,10 @@
  */
 
 import { implement } from "@orpc/server";
+import { busabaseContract } from "busabase-contract/contract/busabase";
 import { confirmUpload, requestUploadUrl } from "open-domains/attachments/logic";
 import { attachments } from "open-domains/attachments/schema";
 import { getContextSpaceId, resolveActorId } from "../../context";
-import { busabaseContract } from "../../contract/busabase";
 import { db } from "../../db";
 import { ensureAsset } from "../assets/handlers";
 

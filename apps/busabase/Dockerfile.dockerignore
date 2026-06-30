@@ -17,6 +17,8 @@
 !packages/
 !packages/kui/
 !packages/kui/**
+!packages/busabase-contract/
+!packages/busabase-contract/**
 !packages/busabase-core/
 !packages/busabase-core/**
 !packages/open-domains/

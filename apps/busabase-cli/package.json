@@ -44,7 +44,7 @@
   },
   "devDependencies": {
     "@types/node": "^24.10.0",
-    "busabase-core": "workspace:*",
+    "busabase-contract": "workspace:*",
     "open-domains": "workspace:*",
     "tsup": "^8.5.0",
     "tsx": "^4.20.5",

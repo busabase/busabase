@@ -1,7 +1,7 @@
 import {
   createBusabaseORPCClient,
   createBusabaseQueryUtils,
-} from "busabase-core/api-client/react-query";
+} from "busabase-contract/api-client/react-query";
 import { useMemo } from "react";
 import { useConnection } from "~/connection/connection-store";
 

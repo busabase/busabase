@@ -403,7 +403,7 @@ describe("busabase pglite integration flow", () => {
   });
 
   it("builds a typed orpc client against the shared contract", async () => {
-    const { createBusabaseORPCClient } = await import("busabase-core/api-client");
+    const { createBusabaseORPCClient } = await import("busabase-contract/api-client");
     expect(typeof createBusabaseORPCClient).toBe("function");
   });
 });

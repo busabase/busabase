@@ -1,6 +1,13 @@
 import "server-only";
 
 import { ORPCError } from "@orpc/server";
+import type {
+  ChangeRequestVO,
+  CommentVO,
+  OperationVO,
+  RecordVO,
+  ReviewVO,
+} from "busabase-contract/types";
 import { and, asc, desc, eq, inArray, isNull, or } from "drizzle-orm";
 import { z } from "zod";
 import { getContextSpaceId, resolveActorId } from "../context";
@@ -45,7 +52,6 @@ import {
 } from "../domains/base/handlers";
 import { mergeDocUpdate } from "../domains/doc/handlers";
 import { mergeSkillFile, mergeSkillMetadata } from "../domains/skill/handlers";
-import type { ChangeRequestVO, CommentVO, OperationVO, RecordVO, ReviewVO } from "../types";
 import { insertAuditEvent } from "./audit";
 import { projectCommitFields } from "./field-values";
 import {

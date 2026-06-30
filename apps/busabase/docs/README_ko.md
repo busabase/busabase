@@ -71,13 +71,13 @@ Docker:
 
 ```bash
 docker build -f apps/busabase/Dockerfile -t busabase:local .
-docker run --rm -p 3000:3000 busabase:local
+docker run --rm -p 15419:15419 busabase:local
 ```
 
 컨테이너 접속:
 
 ```txt
-http://localhost:3000/dashboard/inbox
+http://localhost:15419/dashboard/inbox
 ```
 
 ## 스크린샷

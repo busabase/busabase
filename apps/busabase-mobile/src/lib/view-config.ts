@@ -1,4 +1,4 @@
-import type { RecordVO, ViewConfigVO, ViewFilterVO } from "busabase-core/types";
+import type { RecordVO, ViewConfigVO, ViewFilterVO } from "busabase-contract/types";
 import { stringifyFieldValue } from "./busabase-display";
 
 function recordMatchesFilter(record: RecordVO, filter: ViewFilterVO): boolean {

@@ -1,4 +1,4 @@
-import type { BaseFieldVO } from "busabase-core/types";
+import type { BaseFieldVO } from "busabase-contract/types";
 import { StyleSheet, Text, View } from "react-native";
 import { radius, typography } from "~/theme/tokens";
 import { useTokens } from "~/theme/use-tokens";

@@ -1,3 +1,7 @@
+import { readFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
+import { banner } from "./banner.js";
 import {
   type BusabaseClient,
   createBusabaseClient,
@@ -5,8 +9,35 @@ import {
   normalizeBaseUrl,
   type ResolvedConfig,
 } from "./client.js";
-import { banner } from "./banner.js";
 import { render } from "./format.js";
+
+/**
+ * Read `~/.busabase/.env` (written by the setup skill) into a record, so the CLI works without the
+ * user first `source`-ing it. Returns `{}` if the file is absent or unreadable. Parses simple
+ * `KEY=value` lines, ignoring blanks and `#` comments, and stripping surrounding quotes.
+ */
+function loadDotEnvFile(): Record<string, string> {
+  let text: string;
+  try {
+    text = readFileSync(join(homedir(), ".busabase", ".env"), "utf8");
+  } catch {
+    return {};
+  }
+  const out: Record<string, string> = {};
+  for (const line of text.split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) continue;
+    const eq = trimmed.indexOf("=");
+    if (eq === -1) continue;
+    const key = trimmed.slice(0, eq).trim();
+    const value = trimmed
+      .slice(eq + 1)
+      .trim()
+      .replace(/^["']|["']$/g, "");
+    if (key) out[key] = value;
+  }
+  return out;
+}
 
 export const HELP = `busabase-cli — client for the Busabase OpenAPI REST API
 
@@ -14,10 +45,13 @@ Usage:
   busabase-cli [global flags] <command> [flags]
 
 Global flags:
-  --base-url <url>     Server base URL (env BUSABASE_API_BASE_URL, default ${DEFAULT_BASE_URL})
+  --base-url <url>     Server base URL (env BUSABASE_BASE_URL, default ${DEFAULT_BASE_URL})
   --api-key <token>    Bearer token for cloud hosts (env BUSABASE_API_KEY)
   --output <fmt>       table | json (default table)
   -h, --help           Show this help
+
+Config is read from flags, then env vars, then ~/.busabase/.env (auto-loaded — no
+need to source it). An exported env var overrides the file.
 
 Commands:
   health                                   Server health check (GET /api/health)
@@ -46,6 +80,8 @@ Commands:
   search --query <q> [--limit <n>] [--offset <n>]
 
   api --method <get|post|put|delete> --path <p> [--query k=v ...] [--body-json <json>]
+
+Docs: https://busabase.com/docs · Troubleshooting: https://busabase.com/docs/troubleshooting
 `;
 
 // The field `type` arrives as a free-form CLI string; the typed contract narrows it
@@ -100,9 +136,17 @@ function resolveConfig(flags: Flags): ResolvedConfig {
   if (outputRaw !== "table" && outputRaw !== "json") {
     throw new Error(`--output must be "table" or "json", got "${outputRaw}"`);
   }
+  // Precedence: explicit flag > exported env var > ~/.busabase/.env file > default. Reading the
+  // file directly means `busabase-cli` works straight after onboarding without a manual `source`,
+  // while an exported env var still overrides the file.
+  const file = loadDotEnvFile();
   return {
-    baseUrl: flags.get("base-url") ?? process.env.BUSABASE_API_BASE_URL ?? DEFAULT_BASE_URL,
-    apiKey: flags.get("api-key") ?? process.env.BUSABASE_API_KEY,
+    baseUrl:
+      flags.get("base-url") ??
+      process.env.BUSABASE_BASE_URL ??
+      file.BUSABASE_BASE_URL ??
+      DEFAULT_BASE_URL,
+    apiKey: flags.get("api-key") ?? process.env.BUSABASE_API_KEY ?? file.BUSABASE_API_KEY,
     output: outputRaw,
   };
 }
@@ -268,20 +312,67 @@ async function dispatch(
 export async function runCli(argv: string[]): Promise<number> {
   const flags = parse(argv);
   if (flags.has("help") || flags.positionals.length === 0) {
-    const baseUrl =
-      flags.get("base-url") ?? process.env.BUSABASE_API_BASE_URL ?? DEFAULT_BASE_URL;
+    const baseUrl = flags.get("base-url") ?? process.env.BUSABASE_API_BASE_URL ?? DEFAULT_BASE_URL;
     console.log(`${banner(baseUrl)}\n${HELP}`);
     return 0;
   }
+  let config: ResolvedConfig;
   try {
-    const config = resolveConfig(flags);
+    config = resolveConfig(flags);
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : String(error));
+    return 1;
+  }
+  try {
     const [command, sub] = flags.positionals;
     const client = createBusabaseClient(config);
     const result = await dispatch(command, sub, flags, config, client);
     console.log(render(result, config.output));
     return 0;
   } catch (error) {
-    console.error(error instanceof Error ? error.message : String(error));
+    console.error(explainError(error, config));
     return 1;
   }
+}
+
+/** Public docs page covering every error below, for both Cloud and local. Linked from each error. */
+const DOCS_TROUBLESHOOTING = "https://busabase.com/docs/troubleshooting";
+
+/**
+ * Turn a low-level transport/HTTP error into an actionable message: which host was tried, the
+ * concrete next step (set a key for Cloud, point at a local server, or check connectivity), and a
+ * link to the troubleshooting docs.
+ */
+function explainError(error: unknown, config: ResolvedConfig): string {
+  const base = config.baseUrl;
+  const msg = error instanceof Error ? error.message : String(error);
+  const status = (error as { status?: number }).status;
+  const lower = msg.toLowerCase();
+
+  let body: string;
+  if (status === 401 || lower.includes("401") || lower.includes("unauthorized")) {
+    body = [
+      `Unauthorized (401) from ${base}.`,
+      config.apiKey
+        ? "  The API key was rejected — check it is current (Dashboard → Settings → API Keys)."
+        : "  This host needs an API key. Pass --api-key <token> or export BUSABASE_API_KEY=… (Dashboard → Settings → API Keys).",
+      "  Meant to hit a local server? Add --base-url http://localhost:15419 (or export BUSABASE_BASE_URL=…).",
+    ].join("\n");
+  } else if (
+    lower.includes("fetch failed") ||
+    lower.includes("econnrefused") ||
+    lower.includes("enotfound") ||
+    lower.includes("getaddrinfo") ||
+    lower.includes("network")
+  ) {
+    body = [
+      `Could not reach ${base}.`,
+      "  • Cloud: check your internet connection and that the URL is correct.",
+      "  • Local: start it with `npx busabase server` (http://localhost:15419), then add --base-url http://localhost:15419 (or export BUSABASE_BASE_URL=…).",
+      `  (underlying error: ${msg})`,
+    ].join("\n");
+  } else {
+    body = `${msg}\n  (base URL: ${base}${config.apiKey ? ", with API key" : ", no API key"})`;
+  }
+  return `${body}\n  → Docs: ${DOCS_TROUBLESHOOTING}`;
 }

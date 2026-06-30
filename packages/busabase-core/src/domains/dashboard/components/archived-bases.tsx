@@ -1,8 +1,8 @@
 "use client";
 
+import type { BaseVO, NodeVO } from "busabase-contract/types";
 import { Archive, RotateCcw, Trash2 } from "lucide-react";
 import { useState } from "react";
-import type { BaseVO, NodeVO } from "../../../types";
 import { ConfirmActionDialog, EmptyState } from "./primitives";
 
 /** A row in the Trash: an archived base or an archived folder/doc/skill node. */

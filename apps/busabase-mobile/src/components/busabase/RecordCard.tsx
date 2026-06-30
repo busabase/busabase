@@ -1,4 +1,4 @@
-import type { RecordVO } from "busabase-core/types";
+import type { RecordVO } from "busabase-contract/types";
 import { Pressable, StyleSheet, Text } from "react-native";
 import { getPreview, getRecordTitle } from "~/lib/busabase-display";
 import { formatDate } from "~/lib/format";

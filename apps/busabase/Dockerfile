@@ -10,6 +10,7 @@ COPY pnpm-lock.yaml pnpm-workspace.yaml package.json ./
 RUN pnpm fetch
 
 COPY apps/busabase/package.json apps/busabase/
+COPY packages/busabase-contract/package.json packages/busabase-contract/
 COPY packages/busabase-core/package.json packages/busabase-core/
 COPY packages/open-domains/package.json packages/open-domains/
 COPY packages/openlib/package.json packages/openlib/
@@ -17,6 +18,7 @@ COPY packages/kui/package.json packages/kui/
 RUN pnpm install --offline --frozen-lockfile --ignore-scripts
 
 COPY apps/busabase apps/busabase
+COPY packages/busabase-contract packages/busabase-contract
 COPY packages/busabase-core packages/busabase-core
 COPY packages/open-domains packages/open-domains
 COPY packages/openlib packages/openlib
@@ -48,7 +50,7 @@ RUN set -e; \
 
 FROM node:22-bookworm-slim AS runner
 ENV NODE_ENV=production \
-    PORT=3000 \
+    PORT=15419 \
     HOSTNAME=0.0.0.0 \
     NEXT_TELEMETRY_DISABLED=1 \
     # Canonical data root, identical in layout to `npx busabase server` and
@@ -84,7 +86,7 @@ USER nextjs
 # share one local database with `npx busabase server` / busabase-desktop.
 VOLUME /data
 
-EXPOSE 3000
-HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 CMD curl -f http://localhost:3000/api/health || exit 1
+EXPOSE 15419
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 CMD curl -f http://localhost:15419/api/health || exit 1
 
 CMD ["node", "apps/busabase/server.js"]

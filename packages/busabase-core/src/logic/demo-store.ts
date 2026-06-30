@@ -1,17 +1,9 @@
 import "server-only";
 
 import { ORPCError } from "@orpc/server";
-import { getContextDemoLocale, getContextDemoUseCase } from "../context";
-import type { AuthInfo } from "../contract/schemas";
-import {
-  buildDemoDataset,
-  DEMO_ACTOR_ID,
-  type DemoDataset,
-  englishScenario,
-} from "../demo/dataset";
-import { zhCnScenario } from "../demo/scenarios/zh-cn";
-import type { AssetDetailVO, AssetUsageVO, AssetVO } from "../domains/assets/types";
-import type { FolderVO } from "../domains/folder/types";
+import type { AuthInfo } from "busabase-contract/contract/schemas";
+import type { AssetDetailVO, AssetUsageVO, AssetVO } from "busabase-contract/domains/assets/types";
+import type { FolderVO } from "busabase-contract/domains/folder/types";
 import type {
   AgentTaskVO,
   AuditEventVO,
@@ -26,7 +18,15 @@ import type {
   SearchResponseVO,
   SearchResultVO,
   ViewVO,
-} from "../types";
+} from "busabase-contract/types";
+import { getContextDemoLocale, getContextDemoUseCase } from "../context";
+import {
+  buildDemoDataset,
+  DEMO_ACTOR_ID,
+  type DemoDataset,
+  englishScenario,
+} from "../demo/dataset";
+import { zhCnScenario } from "../demo/scenarios/zh-cn";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Stateless demo read/write layer. Every function reads the shared seed

@@ -17,9 +17,9 @@ import { busabaseBases, busabaseRecords, busabaseViews } from "../domains/base/s
 import { spaceIdColumn } from "./space-column";
 
 // Node type union is owned by the node-type registry (single source of truth).
-export type { NodeType as BusabaseNodeType } from "../domains/registry";
+export type { NodeType as BusabaseNodeType } from "busabase-contract/domains";
 
-import type { NodeType as BusabaseNodeType } from "../domains/registry";
+import type { NodeType as BusabaseNodeType } from "busabase-contract/domains";
 export type BusabaseChangeRequestTargetType = "base" | "node";
 
 export const busabaseOperationKindEnum = pgEnum("busabase_operation_kind", [

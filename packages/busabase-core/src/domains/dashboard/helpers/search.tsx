@@ -1,6 +1,6 @@
+import type { SearchResultKind } from "busabase-contract/types";
 import { FileText, Folder, GitMerge } from "lucide-react";
 import type { ReactNode } from "react";
-import type { SearchResultKind } from "../../../types";
 
 export const normalizeSearchText = (value: string) => value.trim().toLowerCase();
 

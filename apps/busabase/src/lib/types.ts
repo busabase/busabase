@@ -1,1 +1,1 @@
-export * from "busabase-core/types";
+export * from "busabase-contract/types";

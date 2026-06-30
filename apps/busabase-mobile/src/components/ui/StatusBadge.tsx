@@ -1,4 +1,4 @@
-import type { ChangeRequestStatus } from "busabase-core/types";
+import type { ChangeRequestStatus } from "busabase-contract/types";
 import { StyleSheet, Text, View } from "react-native";
 import { radius, typography } from "~/theme/tokens";
 import { useTokens } from "~/theme/use-tokens";
@@ -12,6 +12,7 @@ const labelByStatus: Record<BadgeStatus, string> = {
   rejected: "Rejected",
   merged: "Merged",
   abandoned: "Abandoned",
+  conflict: "Conflict",
   active: "Active",
   archived: "Archived",
 };

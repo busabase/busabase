@@ -18,14 +18,18 @@ npx busabase-cli health
 
 ## Configure
 
-| Flag           | Env                       | Default                  |
-| -------------- | ------------------------- | ------------------------ |
-| `--base-url`   | `BUSABASE_API_BASE_URL`   | `http://localhost:15419`  |
-| `--api-key`    | `BUSABASE_API_KEY`        | _(none — local is open)_ |
-| `--output`     | —                         | `table` (`json` for raw) |
+| Flag           | Env                  | Default                  |
+| -------------- | -------------------- | ------------------------ |
+| `--base-url`   | `BUSABASE_BASE_URL`  | `https://busabase.com`   |
+| `--api-key`    | `BUSABASE_API_KEY`   | _(none — local is open)_ |
+| `--output`     | —                    | `table` (`json` for raw) |
 
-The local open-source server needs no auth. `--api-key` is only for hosted
-deployments that verify a bearer token.
+Config is read from flags, then env vars, then `~/.busabase/.env` (auto-loaded —
+no need to `source` it), then the default. An exported env var overrides the file.
+
+The default host is the always-on Cloud, which needs an `--api-key`. For a local
+server, pass `--base-url http://localhost:15419` (or set `BUSABASE_BASE_URL`); the
+open-source server needs no auth.
 
 ## Examples
 

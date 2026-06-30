@@ -1,4 +1,4 @@
-import type { BaseFieldVO, FieldType } from "busabase-core/types";
+import type { BaseFieldVO, FieldType } from "busabase-contract/types";
 import { stringifyFieldValue } from "./busabase-display";
 
 /** Field types the mobile form renders an editable control for. */

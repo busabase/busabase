@@ -8,7 +8,6 @@
 // directly as View Objects (VO): there is no PO→VO hydration to mirror, and the
 // shapes here match exactly what `hydrateChangeRequest` / `hydrateRecord` return.
 
-import type { DemoUseCase } from "../context";
 import type {
   AuditEventVO,
   BaseFieldVO,
@@ -20,7 +19,8 @@ import type {
   RecordVO,
   ReviewVO,
   ViewVO,
-} from "../types";
+} from "busabase-contract/types";
+import type { DemoUseCase } from "../context";
 import { CROSS_FUNCTIONAL_BASES, CROSS_FUNCTIONAL_RECORDS } from "./scenarios/cross-functional";
 import {
   DIRECTORY_LISTINGS_BASES,

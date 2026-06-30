@@ -1,3 +1,11 @@
+import type {
+  BaseFieldVO,
+  BaseVO,
+  RecordVO,
+  ViewConfigVO,
+  ViewFilterVO,
+  ViewVO,
+} from "busabase-contract/types";
 import {
   Check,
   ChevronRight,
@@ -11,14 +19,6 @@ import {
 } from "lucide-react";
 import { SPALink as Link } from "openlib/ui/dashboard";
 import { useState } from "react";
-import type {
-  BaseFieldVO,
-  BaseVO,
-  RecordVO,
-  ViewConfigVO,
-  ViewFilterVO,
-  ViewVO,
-} from "../../../types";
 import { fieldColumnWidth, fieldDisplayKind } from "../../base/field-types";
 import { getRecordTitle } from "../helpers/change-request";
 import {

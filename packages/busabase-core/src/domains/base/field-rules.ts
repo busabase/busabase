@@ -2,7 +2,7 @@
 // over a record's field definitions and delegates the per-type decision to each
 // type's `validate` / `compute` spec. No per-type switch lives here — add a type
 // to the registry and both functions pick it up. Pure (no DB / server-only).
-import type { FieldType } from "../../types";
+import type { FieldType } from "busabase-contract/types";
 import { FIELD_TYPES, type FieldDef, isEmptyFieldValue, isSystemFieldType } from "./field-types";
 
 export interface FieldValidationError {

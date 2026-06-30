@@ -1,4 +1,4 @@
-import type { AuditEventVO, ChangeRequestVO, RecordVO } from "busabase-core/types";
+import type { AuditEventVO, ChangeRequestVO, RecordVO } from "busabase-contract/types";
 import {
   getChangeRequestScopeName,
   getChangeRequestTitle,

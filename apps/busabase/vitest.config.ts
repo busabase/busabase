@@ -4,9 +4,9 @@ import { defineConfig } from "vitest/config";
 export default defineConfig({
   resolve: {
     alias: {
-      "busabase-core/api-client": path.resolve(
+      "busabase-contract/api-client": path.resolve(
         __dirname,
-        "../../packages/busabase-core/src/api-client/index.ts",
+        "../../packages/busabase-contract/src/api-client/index.ts",
       ),
       "busabase-core/logic/store": path.resolve(
         __dirname,

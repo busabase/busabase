@@ -1,11 +1,11 @@
 import "server-only";
 
+import type { SkillFileVO } from "busabase-contract/types";
 import { and, eq, isNull } from "drizzle-orm";
 import { storage } from "openlib/storage";
 import { getContextSpaceId } from "../../../context";
 import { getDb } from "../../../db";
 import { busabaseNodes, type NodePO } from "../../../db/schema";
-import type { SkillFileVO } from "../../../types";
 
 export const normalizeSkillFilePath = (filePath: string) => {
   const normalized = filePath.replace(/\\/g, "/").replace(/^\/+/, "");

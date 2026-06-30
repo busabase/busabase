@@ -1,4 +1,4 @@
-import type { BaseFieldVO } from "busabase-core/types";
+import type { BaseFieldVO } from "busabase-contract/types";
 import { useState } from "react";
 import { Linking, Pressable, StyleSheet, Text, View } from "react-native";
 import { stringifyFieldValue } from "~/lib/busabase-display";

@@ -1,5 +1,5 @@
 import { implement, ORPCError } from "@orpc/server";
-import { busabaseContract } from "./contract/busabase";
+import { busabaseContract } from "busabase-contract/contract/busabase";
 import {
   demoCloseChangeRequest,
   demoCreateAuditEvent,

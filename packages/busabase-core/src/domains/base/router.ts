@@ -1,5 +1,5 @@
 import { implement } from "@orpc/server";
-import { busabaseContract } from "../../contract/busabase";
+import { busabaseContract } from "busabase-contract/contract/busabase";
 // Record CR history is a kernel CR-lifecycle read, not a base handler.
 import { listRecordChangeRequests } from "../../logic/store";
 import {

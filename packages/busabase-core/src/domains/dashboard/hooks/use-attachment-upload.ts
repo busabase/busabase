@@ -1,6 +1,6 @@
+import type { BusabaseDashboardApiClient } from "busabase-contract/api-client";
 import type { AttachmentRef } from "open-domains/attachments/types";
 import { useCallback } from "react";
-import type { BusabaseDashboardApiClient } from "../../../api-client";
 
 /**
  * Upload a file for an `attachment` field: request URL → push bytes (dev route

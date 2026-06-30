@@ -6,7 +6,7 @@
 // Server orchestration lives in field-rules.ts (loops over defs, calls spec.validate
 // / spec.compute). The client maps spec.input → a component. Add a field type here
 // once and every layer picks it up.
-import type { FieldType } from "../../types";
+import type { FieldType } from "busabase-contract/types";
 
 /** Minimal field-definition shape both the VO and the persisted row satisfy. */
 export interface FieldDef {

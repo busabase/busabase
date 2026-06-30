@@ -1,5 +1,12 @@
 import "server-only";
 
+import type {
+  BaseVO,
+  ChangeRequestStatus,
+  NodeVO,
+  OperationKind,
+  ViewConfigVO,
+} from "busabase-contract/types";
 import { and, eq, inArray } from "drizzle-orm";
 import { getContextSpaceId, LOCAL_SPACE_ID } from "../context";
 import { getDb } from "../db";
@@ -18,7 +25,6 @@ import {
 import { buildRecordSeedFields } from "../demo/dataset";
 import type { SeedScenario } from "../demo/seed-types";
 import { skillStoragePrefix, writeSkillTextFile } from "../domains/skill/logic/storage";
-import type { BaseVO, ChangeRequestStatus, NodeVO, OperationKind, ViewConfigVO } from "../types";
 import { ensureProjectionBackfill, projectCommitFields } from "./field-values";
 import { CURRENT_USER_ID, hashText, id, now, ROOT_NODE_ID, rootNodeIdForSpace } from "./kernel";
 import { toBaseVO, toNodeVO } from "./vo";

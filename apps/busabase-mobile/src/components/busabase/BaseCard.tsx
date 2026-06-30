@@ -1,4 +1,4 @@
-import type { BaseVO } from "busabase-core/types";
+import type { BaseVO } from "busabase-contract/types";
 import { StyleSheet, Text, View } from "react-native";
 import { formatDate } from "~/lib/format";
 import { radius, typography } from "~/theme/tokens";

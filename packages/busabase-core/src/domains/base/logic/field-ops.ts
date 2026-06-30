@@ -1,6 +1,16 @@
 import "server-only";
 
 import { ORPCError } from "@orpc/server";
+import {
+  convertFieldChangeRequestInputSchema,
+  createFieldChangeRequestInputSchema,
+  deleteFieldChangeRequestInputSchema,
+  previewFieldConversionInputSchema,
+  reorderFieldsChangeRequestInputSchema,
+  restoreFieldChangeRequestInputSchema,
+  updateFieldChangeRequestInputSchema,
+} from "busabase-contract/domains/base/contract/base-schemas";
+import type { FieldType } from "busabase-contract/types";
 import { and, eq, isNull } from "drizzle-orm";
 import type { z } from "zod";
 import { resolveActorId } from "../../../context";
@@ -16,16 +26,6 @@ import { closeChangeRequest, getChangeRequest } from "../../../logic/cr-lifecycl
 import { id, now } from "../../../logic/kernel";
 import { ensureReady } from "../../../logic/seed";
 import { fieldSchema } from "../../../logic/store";
-import type { FieldType } from "../../../types";
-import {
-  convertFieldChangeRequestInputSchema,
-  createFieldChangeRequestInputSchema,
-  deleteFieldChangeRequestInputSchema,
-  previewFieldConversionInputSchema,
-  reorderFieldsChangeRequestInputSchema,
-  restoreFieldChangeRequestInputSchema,
-  updateFieldChangeRequestInputSchema,
-} from "../contract/base-schemas";
 import { isSystemFieldType } from "../field-types";
 import { busabaseFieldValues } from "../schema";
 import { ConversionNotSupportedError, convertFieldValue } from "../utils/field-conversion";

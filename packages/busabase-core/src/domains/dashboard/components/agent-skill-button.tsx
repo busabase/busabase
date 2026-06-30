@@ -25,6 +25,8 @@ interface BusabaseAgentSkillButtonProps {
    * matches (open-source defaults to 15419, cloud to 3060).
    */
   defaultOrigin?: string;
+  /** Current UI language — localizes the pasted prompt. Unknown values fall back to English. */
+  lang?: string;
 }
 
 interface AgentIntegrationDialogProps {
@@ -33,10 +35,15 @@ interface AgentIntegrationDialogProps {
   defaultOrigin?: string;
   /**
    * Which edition's onboarding skill to point at. "desktop" adds ?edition=desktop
-   * (install + auto-detect localhost); "cloud" / omitted uses the bare /SKILL.md
+   * (install + auto-detect localhost); "cloud" / omitted uses the bare /SETUP_SKILL.md
    * (API-key onboarding). Lets the host pass its selected edition through.
    */
   edition?: "desktop" | "cloud";
+  /**
+   * Current UI language — localizes the pasted prompt (and its framing copy) and tells
+   * the agent which language to reply in. Unknown values fall back to English.
+   */
+  lang?: string;
 }
 
 /**
@@ -48,6 +55,7 @@ export function AgentIntegrationDialog({
   onOpenChange,
   defaultOrigin = "http://localhost:15419",
   edition,
+  lang,
 }: AgentIntegrationDialogProps) {
   const [origin, setOrigin] = useState(defaultOrigin);
   const [copied, setCopied] = useState<string | null>(null);
@@ -56,13 +64,14 @@ export function AgentIntegrationDialog({
     setOrigin(window.location.origin);
   }, []);
 
+  const tabCopy = SKILLS_TAB_COPY[resolvePromptLang(lang)];
   const skillUrl =
-    edition === "desktop" ? `${origin}/SKILL.md?edition=desktop` : `${origin}/SKILL.md`;
+    edition === "desktop" ? `${origin}/SETUP_SKILL.md?edition=desktop` : `${origin}/SETUP_SKILL.md`;
   const mcpUrl = `${origin}/api/mcp`;
   const openApiJsonUrl = `${origin}/api/v1/openapi.json`;
   const openApiDocUrl = `${origin}/api/v1/doc`;
 
-  const agentSkillPrompt = useMemo(() => createAgentSkillPrompt(skillUrl), [skillUrl]);
+  const agentSkillPrompt = useMemo(() => createAgentSkillPrompt(skillUrl, lang), [skillUrl, lang]);
 
   const copy = async (text: string, key: string) => {
     await navigator.clipboard.writeText(text);
@@ -91,10 +100,7 @@ export function AgentIntegrationDialog({
 
           {/* ── Agent Skills tab ──────────────────────────────────────── */}
           <TabsContent value="skills" className="grid gap-3">
-            <p className="text-sm text-muted-foreground">
-              Copy this prompt into your agent. It points the agent at this workspace's live
-              SKILL.md, which carries the full API surface and approval-first workflow.
-            </p>
+            <p className="text-sm text-muted-foreground">{tabCopy.intro}</p>
             <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
               <span className="text-foreground/70">Works with</span>
               {AGENTS.map((agent) => (
@@ -132,7 +138,7 @@ export function AgentIntegrationDialog({
                 type="button"
               >
                 {copied === "prompt" ? <Check size={16} /> : <Copy size={16} />}
-                {copied === "prompt" ? "Copied" : "Copy prompt"}
+                {copied === "prompt" ? tabCopy.copied : tabCopy.copy}
               </button>
             </div>
           </TabsContent>
@@ -243,6 +249,7 @@ export function AgentIntegrationDialog({
  */
 export function BusabaseAgentSkillButton({
   defaultOrigin = "http://localhost:15419",
+  lang,
 }: BusabaseAgentSkillButtonProps = {}) {
   const [open, setOpen] = useState(false);
 
@@ -260,17 +267,67 @@ export function BusabaseAgentSkillButton({
           </SidebarMenuButton>
         </SidebarMenuItem>
       </SidebarMenu>
-      <AgentIntegrationDialog open={open} onOpenChange={setOpen} defaultOrigin={defaultOrigin} />
+      <AgentIntegrationDialog
+        open={open}
+        onOpenChange={setOpen}
+        defaultOrigin={defaultOrigin}
+        lang={lang}
+      />
     </>
   );
 }
 
-function createAgentSkillPrompt(skillUrl: string) {
-  return `Read the Busabase Agent Skill and follow it:
+/** UI languages the copy-paste prompt is localized into (mirrors busabase-cloud's locales). */
+type PromptLang = "en" | "zh-CN" | "ja";
+
+function resolvePromptLang(lang?: string): PromptLang {
+  return lang === "zh-CN" || lang === "ja" ? lang : "en";
+}
+
+/** Skills-tab framing copy (everything around the prompt), per language. */
+const SKILLS_TAB_COPY: Record<PromptLang, { intro: string; copy: string; copied: string }> = {
+  en: {
+    intro:
+      "Copy this prompt into your agent. It points the agent at this workspace's onboarding skill (SETUP_SKILL.md), which walks it through connecting and then installs the permanent busabase skill.",
+    copy: "Copy prompt",
+    copied: "Copied",
+  },
+  "zh-CN": {
+    intro:
+      "把这段提示词复制到你的 agent。它会让 agent 指向本工作区的引导 skill(SETUP_SKILL.md)—— 带它连上,并安装常驻的 busabase skill。",
+    copy: "复制提示词",
+    copied: "已复制",
+  },
+  ja: {
+    intro:
+      "このプロンプトをエージェントにコピーしてください。ワークスペースのオンボーディング skill(SETUP_SKILL.md)に案内し、接続を導いたうえで常設の busabase skill をインストールします。",
+    copy: "プロンプトをコピー",
+    copied: "コピーしました",
+  },
+};
+
+/**
+ * The short, human-readable prompt the user pastes into their agent. Deliberately thin:
+ * it points at SKILL.md (the single source of truth for ALL behavior), keeps the one
+ * safety rule visible, and sets the agent's reply language. Everything about HOW to
+ * onboard — the welcome, what-it-is, and "ask what to manage first" — lives in SKILL.md.
+ */
+function createAgentSkillPrompt(skillUrl: string, lang?: string): string {
+  switch (resolvePromptLang(lang)) {
+    case "zh-CN":
+      return `阅读并遵循 Busabase Agent Skill——它是唯一事实来源：
 ${skillUrl}
 
-That document is the single source of truth — it has this workspace's base URL,
-the full REST API surface, and the approval-first workflow. Fetch it, then drive
-Busabase by opening ChangeRequests and waiting for review before merging. Never
-bypass review unless I explicitly ask for a direct merge.`;
+按它的引导帮我把工作区设置好；未经我批准，绝不要合并 ChangeRequest。请用简体中文回复我。`;
+    case "ja":
+      return `Busabase Agent Skill を読んで従ってください——これが唯一の信頼できる情報源です：
+${skillUrl}
+
+オンボーディングに従って私をセットアップし、私の承認なしに ChangeRequest をマージしないでください。日本語で返信してください。`;
+    default:
+      return `Read and follow the Busabase Agent Skill — it is the single source of truth:
+${skillUrl}
+
+Follow its onboarding to set me up, and never merge a ChangeRequest without my approval. Reply to me in English.`;
+  }
 }

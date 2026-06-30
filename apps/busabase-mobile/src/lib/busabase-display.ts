@@ -1,5 +1,5 @@
-import { OPERATION_META } from "busabase-core/domains";
-import type { BaseFieldVO, ChangeRequestVO, RecordVO } from "busabase-core/types";
+import { OPERATION_META } from "busabase-contract/domains";
+import type { BaseFieldVO, ChangeRequestVO, RecordVO } from "busabase-contract/types";
 
 export interface FieldDisplayItem {
   slug: string;

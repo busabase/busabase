@@ -1,5 +1,5 @@
+import { CREATABLE_NODE_TYPES } from "busabase-contract/domains";
 import { z } from "zod";
-import { CREATABLE_NODE_TYPES } from "../domains/registry";
 
 const fieldTypeSchema = z.enum([
   "text",

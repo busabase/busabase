@@ -1,5 +1,5 @@
+import { getNodeType } from "busabase-contract/domains";
 import { FileText, Folder, type LucideIcon, Sparkles, Table2 } from "lucide-react";
-import { getNodeType } from "../../registry";
 
 /**
  * Maps a node-type definition's platform-neutral `icon` id (declared in each

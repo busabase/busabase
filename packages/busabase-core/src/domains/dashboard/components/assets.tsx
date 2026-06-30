@@ -1,8 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";
 import { ArrowLeft, FileText, Film, Image as ImageIcon, Music, Trash2 } from "lucide-react";
 import type { ReactNode } from "react";
 import { toast } from "sonner";
-import type { BusabaseQueryUtils } from "../../../api-client/react-query";
 import { EmptyState } from "./primitives";
 
 export const assetSizeUnits = ["B", "KB", "MB", "GB"];

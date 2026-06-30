@@ -1,11 +1,13 @@
 /**
- * Single source of truth for the live `/SKILL.md` document served by every
+ * Single source of truth for the live `/SETUP_SKILL.md` onboarding document served by every
  * Busabase host (open-source app on :15419, cloud on :3060, production domains).
  *
  * The document is origin-aware: each host passes its own request origin so the
  * served markdown always points at the host that served it — no hardcoded
  * `localhost:15419`. The Agent Skill button only needs to tell an agent to read
- * `${origin}/SKILL.md`, because this document is fully self-contained.
+ * `${origin}/SETUP_SKILL.md`, because this document is fully self-contained. It walks the agent
+ * through connecting + seeding a first Base, then installs the permanent `busabase` skill
+ * (`npx skills add busabase/skills`) for everyday use.
  */
 
 /** Where a desktop install runs its local server. The bootstrap doc targets this host. */
@@ -24,7 +26,8 @@ export interface SkillMarkdownContext {
    * `"bootstrap"` — the doc is served by the discovery site (busabase.com) for an edition
    *   whose runtime host isn't reachable yet (Personal Desktop runs on localhost:15419, which
    *   doesn't exist until the user installs it). Leads with what-it-is → install → an
-   *   auto-detect probe, then hands off to the runtime `/SKILL.md` once the host is up.
+   *   auto-detect probe, then ends by installing the permanent `busabase` skill (`npx skills add
+   *   busabase/skills`) for everyday use.
    */
   stage?: "runtime" | "bootstrap";
   /** Cloud only: user API key for `Authorization: Bearer <key>`. */
@@ -346,12 +349,45 @@ function buildBootstrapMarkdown(origin: string, ctx?: SkillMarkdownContext): str
 
   const ownMachine = isCloud ? "" : " Everything runs and stays on the user's own machine.";
 
-  const step0 = isCloud
-    ? `## Step 0 — What this is, and connecting
+  // Step 0 leads with a warm, language-matched welcome and ONE question — "what do you want to
+  // manage?" — before any install/probe. The technical connect (find key / install probe) is a
+  // subsection the agent only reaches after the user has answered, so the user's very first
+  // experience is being greeted and asked about their work, not a wall of curl.
+  const welcomeOpening = `## Step 0 — Welcome the user first (no setup yet)
 
-You just read what Busabase is — share that and the diagram above with the user so they understand
-what they're connecting to. Busabase Cloud is hosted, so there is nothing to install; every call
-just needs an **API key** (a Bearer token). Find one before anything else:
+Your **first message** to the user must be a warm welcome **in the user's language** — not a wall
+of commands. Do **not** run any curl, install, or probe yet. Follow this five-beat shape, keep it
+to a few short lines, and adapt the wording naturally:
+
+1. **Welcome** — greet them; they just connected you to Busabase.
+2. **This is** — Busabase is *approval-first*: you propose changes, they review and approve, and
+   only then does anything become real.
+3. **Why it matters** — unlike a normal table, wiki, or Notion where an AI edit is instantly live,
+   here a wrong move stays a harmless proposal until they say yes. They keep control.
+4. **Together we can** — stand up a real workspace in minutes, seeded with starter records they
+   approve one by one.
+5. **Ask** — the one question that drives everything: **"What do you want to manage?"** Invite a
+   one-sentence answer (or "show me options").
+
+Model opening — translate into their language, keep this voice, keep it this short (~4 lines):
+
+> 👋 Welcome — you've connected me to **Busabase**, and I'll work inside it. It's
+> *approval-first*: I propose every change, **you approve**, and only then is it real — so a
+> wrong move stays a harmless draft until you say yes. In a few minutes we can stand up a real
+> workspace and seed it with records you approve one by one.
+> **To make it yours — what do you want to manage?** A sentence is enough, or say "show me options."
+
+Conduct **everything** below in the user's language. Only once they've answered (or asked you to
+go ahead) do you get technically connected, just below — then design their workspace around what
+they said (Step 2).`;
+
+  const step0 = isCloud
+    ? `${welcomeOpening}
+
+### Then get connected
+
+Busabase Cloud is hosted — nothing to install; every call just needs an **API key** (a Bearer
+token). Find one before any API call:
 
 1. **Did the user paste a key in this chat?** A Busabase key starts with \`sk_\`. If so, use it.
 2. **Otherwise look for a saved local config:**
@@ -372,12 +408,22 @@ curl -fsS "$BUSABASE_BASE_URL/api/v1/bases"    -H "Authorization: Bearer $BUSABA
 
 - **401 on \`users/me\`** → the key is wrong or expired. Go to **Step 1**.
 - **\`users/me\` returns the user and \`bases\` is \`[]\`** → connected, empty. Go to **Step 2**.
-- **\`bases\` already has entries** → connected and in use. Jump to **Step 4 (ongoing use)**.`
-    : `## Step 0 — What this is, and a first look
+- **\`bases\` already has entries** → connected and in use. Jump to **Step 4 (ongoing use)**.
 
-You just read what Busabase is — share that and the diagram above with the user, in your own
-words, so they understand what they're setting up. Then, right away, take a first look: is a local
-Busabase already running on this machine? (No authentication is needed locally.)
+Once it verifies, **persist this connection to \`~/.busabase/.env\`** — the installed \`busabase\`
+skill and every future session read it from there, so write it now (Cloud needs both the base URL
+and the key):
+
+\`\`\`bash
+mkdir -p ~/.busabase && umask 177
+printf 'BUSABASE_BASE_URL=%s\\nBUSABASE_API_KEY=%s\\n' "$BUSABASE_BASE_URL" "$BUSABASE_API_KEY" > ~/.busabase/.env
+\`\`\``
+    : `${welcomeOpening}
+
+### Then get connected
+
+Everything runs locally — no account, no API key. Once the user has answered, check whether the
+local app is already running (no authentication is needed locally):
 
 \`\`\`bash
 curl -fsS ${local}/api/v1/bases    # the tables in the workspace
@@ -387,7 +433,15 @@ That one call tells you where things stand:
 
 - **Connection refused** → not installed yet. Go to **Step 1** to install it.
 - **Responds with \`[]\`** → installed but empty. Skip to **Step 2** to set it up.
-- **Responds with Bases already** → installed and in use. Jump to **Step 4 (ongoing use)**.`;
+- **Responds with Bases already** → installed and in use. Jump to **Step 4 (ongoing use)**.
+
+Once it answers, **persist this connection to \`~/.busabase/.env\`** — the installed \`busabase\`
+skill and every future session read it from there. Local needs only the base URL (no key):
+
+\`\`\`bash
+mkdir -p ~/.busabase
+printf 'BUSABASE_BASE_URL=%s\\n' "${local}" > ~/.busabase/.env
+\`\`\``;
 
   const step1 = isCloud
     ? `## Step 1 — Create an API key (only if you don't have one)
@@ -423,64 +477,40 @@ until curl -fsS ${local}/api/v1/bases >/dev/null 2>&1; do sleep 2; done && echo 
     ? "(Writes target the key's default space automatically; add an `x-busabase-space: <id>` header to target a different space.)"
     : "(No `spaceId` in local mode.)";
 
-  const step4 = isCloud
-    ? `## Step 4 — You're set: ongoing use
+  const step4 = `## Step 4 — Install the skill, and you're set for good
 
-You're connected. The complete REST surface — records, revisions, the agent work queue, Skill
-files — is at \`${site}/api/v1/doc\` (machine-readable spec at \`${site}/api/v1/openapi.json\`;
-it's large, so fetch just the path you need rather than loading it whole). MCP-capable agents
-can instead connect to \`${site}/api/mcp\`. Every call carries your
-\`Authorization: Bearer $BUSABASE_API_KEY\` header.
-
-The everyday loop never changes: **list → propose a ChangeRequest → human reviews → merge → read
-back**. Never bypass review unless the user explicitly asks for a direct merge.`
-    : `## Step 4 — You're set: ongoing use
-
-From here, the workspace's own live skill is your complete, self-describing reference (full API:
-records, revisions, the agent work queue, Skill files):
+The workspace is ready. Now install the permanent **busabase** skill so any agent on this machine
+just knows how to drive this workspace every session — no re-pasting this onboarding doc:
 
 \`\`\`bash
-curl ${local}/SKILL.md
+npx skills add busabase/skills
 \`\`\`
 
-The everyday loop never changes: **list → propose a ChangeRequest → human reviews → merge → read
-back**. Never bypass review unless the user explicitly asks for a direct merge.`;
+It reads \`~/.busabase/.env\` (set up above) and is self-describing — from here **it** is your
+reference for the everyday loop and the full API, so this onboarding doc is done its job. Never
+bypass review unless the user explicitly asks for a direct merge.`;
 
   return `---
 name: busabase
 description: ${description}
 ---
 
-# Welcome to Busabase
+# Busabase — first-run setup
 
-Busabase is a **browser-based, approval-first data assistant** — a local knowledge base and set
-of tables where **AI never changes canonical data directly**. Agents *propose* changes as
-**ChangeRequests**; a human reviews them; only approved changes get **merged** into the source of
-truth.${ownMachine}
-
-**What makes it different from a normal table, wiki, or Notion** — the review gate:
-
-\`\`\`txt
-Ordinary table / wiki / Notion
-   AI agent ──writes directly──►  live data         X  no gate: a wrong edit is already canonical
-
-Busabase (approval-first)
-   AI agent ──proposes──► ChangeRequest ──review──► human approves ──merge──► canonical data   OK
-                               |                         |
-                               └──── changes requested ◄─┘   (revise; it auto re-enters review)
-\`\`\`
-
-You are the agent in that picture. This document walks you — and through you, the user — from
-nothing to a working, populated workspace. Work top to bottom; here is the first move.
+This document walks you (the agent) — and through you, the user — from nothing to a working,
+populated workspace, then installs the permanent \`busabase\` skill for everyday use.${ownMachine}
+Work top to bottom, **in the user's language**. (You'll explain what Busabase is in Step 0's
+welcome — no need to recite it here.) Here is the first move.
 
 ${step0}
 
 ${step1}
 
-## Step 2 — Pick what to manage
+## Step 2 — Turn their answer into a blueprint
 
-Ask the user one question: **"What do you want to manage in Busabase?"** Offer these starter
-blueprints, or let them describe their own:
+You already asked **"what do you want to manage?"** back in Step 0 — build on that answer here,
+don't ask again. Map what they said to one of these starter blueprints, or design a custom one
+(see *Custom blueprint*). Only if they said "show me options" or seemed unsure, offer this menu:
 
 | # | Blueprint | Good for |
 | - | --------- | -------- |
@@ -515,8 +545,19 @@ types (\`auto_number\`, \`created_time\`, \`ai_summary\`, \`ai_tags\`, …).
 
 ## Step 3 — Initialize: structure first, then data through the loop
 
-**3a. Create the Base directly** (structure setup doesn't need review). Worked example for
-blueprint #1:
+**3a. Show the planned structure first, get a yes, then create.** Structure changes don't need a
+ChangeRequest — but don't create silently. First **sketch the plan for the user as a visual**: the
+folder, the Base(s), their fields, and any relations, drawn as a quick tree / graph (this mirrors
+what Busabase's **Graph View** will render). Ask *"shall I build this?"*, fold in any edits, and
+only create on their go-ahead. A sketch worth showing:
+
+\`\`\`txt
+📁 CRM
+└── 📊 Contacts   name· company· email· stage(lead→customer)· notes· last_touch
+        └─ relates to ─► 📊 Companies   name· domain· tier· owner
+\`\`\`
+
+Once they approve, create it (worked example for blueprint #1):
 
 \`\`\`bash
 curl -X POST "${api}/api/v1/bases" \\
@@ -545,6 +586,16 @@ ${authLine}  -H 'content-type: application/json' \\
 
 The response carries the new Base's \`id\` (e.g. \`bse_...\`) — use it below. For an HTML CMS,
 create a **Pages** base the same way with an \`html_body\` field of \`"type": "html"\`.
+
+> **Always leave the workspace with more than one node.** A brand-new space holding a single empty
+> Base renders as an empty screen — there's nothing for the user to see. So before seeding, give it
+> structure: create a containing **folder** node and put the Base inside it (a node ChangeRequest —
+> \`POST /api/v1/nodes/change-requests\`, then approve + merge it), or create a second related Base
+> (e.g. CRM Contacts **+** Companies, or Content Pipeline **+** Pages). Combined with the seeded +
+> merged record in 3c, the user opens a populated tree, never a blank one.
+
+Once created, point the user to the live **Graph View** (open \`${api}/dashboard\` → *Graph View*
+in the sidebar) so they can see the real structure they just approved — the sketch made concrete.
 
 **3b. Seed 3–5 sample records as ChangeRequests** — this is the part the user reviews, so never
 write records directly. One call per record (there is no bulk endpoint):

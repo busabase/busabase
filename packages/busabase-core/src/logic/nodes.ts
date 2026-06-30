@@ -1,6 +1,8 @@
 import "server-only";
 
 import { ORPCError } from "@orpc/server";
+import { CREATABLE_NODE_TYPES } from "busabase-contract/domains";
+import type { NodeVO } from "busabase-contract/types";
 import { and, asc, desc, eq, inArray, isNotNull, isNull, ne } from "drizzle-orm";
 import { z } from "zod";
 import { getContextSpaceId, resolveActorId } from "../context";
@@ -12,8 +14,6 @@ import {
   busabaseNodes,
   busabaseOperations,
 } from "../db/schema";
-import { CREATABLE_NODE_TYPES } from "../domains/registry";
-import type { NodeVO } from "../types";
 import { insertAuditEvent } from "./audit";
 import { id, now } from "./kernel";
 import { buildNodeTree, ensureReady } from "./seed";

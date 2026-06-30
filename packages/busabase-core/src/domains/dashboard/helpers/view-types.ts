@@ -1,5 +1,5 @@
+import type { FieldType, ViewConfigVO } from "busabase-contract/types";
 import type { ReactNode } from "react";
-import type { FieldType, ViewConfigVO } from "../../../types";
 
 export interface BusabaseBreadcrumbItem {
   href?: string;

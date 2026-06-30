@@ -1,4 +1,4 @@
-import type { BaseVO } from "busabase-core/types";
+import type { BaseVO } from "busabase-contract/types";
 import { forceCenter, forceCollide, forceLink, forceManyBody, forceSimulation } from "d3-force";
 import { useMemo } from "react";
 import { StyleSheet, Text, View } from "react-native";

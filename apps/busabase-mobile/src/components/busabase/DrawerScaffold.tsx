@@ -1,6 +1,6 @@
 import { skipToken, useQuery } from "@tanstack/react-query";
-import { getNodeType, hasCapability } from "busabase-core/domains";
-import type { NodeVO } from "busabase-core/types";
+import { getNodeType, hasCapability } from "busabase-contract/domains";
+import type { NodeVO } from "busabase-contract/types";
 import { usePathname, useRouter } from "expo-router";
 import {
   Activity,

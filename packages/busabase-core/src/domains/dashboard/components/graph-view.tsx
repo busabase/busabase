@@ -19,13 +19,13 @@ import {
   useReactFlow,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
+import type { BaseVO } from "busabase-contract/domains/base/types";
+import type { NodeVO } from "busabase-contract/types";
 import ELK, { type ElkNode } from "elkjs/lib/elk.bundled.js";
 import { Folder, Network } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import { useLocation } from "wouter";
-import type { NodeVO } from "../../../types";
 import { fieldLabel } from "../../base/field-types";
-import type { BaseVO } from "../../base/types";
 
 // Card geometry (px). Node height is exactly HEADER_H + rows * ROW_H.
 const HEADER_H = 36;

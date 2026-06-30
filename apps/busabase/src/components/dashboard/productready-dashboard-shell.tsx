@@ -1,12 +1,12 @@
 "use client";
 
+import type { NodeVO } from "busabase-contract/types";
 import { BusabaseAgentSkillButton } from "busabase-core/dashboard/agent-skill-button";
 import {
   type BusabaseDashboardChrome,
   BusabaseDashboardShell as CoreDashboardShell,
 } from "busabase-core/dashboard/dashboard-shell";
 import { coreLocaleOptions } from "busabase-core/i18n";
-import type { NodeVO } from "busabase-core/types";
 import { SidebarMenu, SidebarMenuButton, SidebarMenuItem } from "kui/sidebar";
 import { Network } from "lucide-react";
 import Image from "next/image";
@@ -71,7 +71,7 @@ export function ProductReadyDashboardShell({
             </SidebarMenuButton>
           </SidebarMenuItem>
         </SidebarMenu>
-        <BusabaseAgentSkillButton defaultOrigin="http://localhost:15419" />
+        <BusabaseAgentSkillButton defaultOrigin="http://localhost:15419" lang={locale} />
         <div className="px-2 group-data-[collapsible=icon]:hidden">
           <LanguageSwitcher
             className="w-full justify-start"

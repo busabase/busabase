@@ -1,4 +1,4 @@
-import type { ChangeRequestVO } from "busabase-core/types";
+import type { ChangeRequestVO } from "busabase-contract/types";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { getChangeRequestTitle, getPreview } from "~/lib/busabase-display";
 import { formatDate } from "~/lib/format";

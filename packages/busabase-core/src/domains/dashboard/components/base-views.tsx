@@ -1,7 +1,7 @@
+import type { BaseFieldVO, BaseVO, FieldType, RecordVO, ViewVO } from "busabase-contract/types";
 import { RotateCcw } from "lucide-react";
 import { SPALink as Link } from "openlib/ui/dashboard";
 import { useState } from "react";
-import type { BaseFieldVO, BaseVO, FieldType, RecordVO, ViewVO } from "../../../types";
 import { isDerivedFieldSlug } from "../helpers/change-request";
 import { createDefaultFieldOptions, fieldTypeOptions } from "../helpers/field";
 import type {

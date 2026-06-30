@@ -1,8 +1,8 @@
 "use client";
 
 import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
-import { createBusabaseRestApiClient } from "busabase-core/api-client";
-import { createBusabaseQueryUtils } from "busabase-core/api-client/react-query";
+import { createBusabaseRestApiClient } from "busabase-contract/api-client";
+import { createBusabaseQueryUtils } from "busabase-contract/api-client/react-query";
 import { BusabaseDashboard } from "busabase-core/dashboard";
 import { CreateNodeModal } from "busabase-core/dashboard/create-node-modal";
 import { EmptyAgentGuide } from "busabase-core/dashboard/empty-agent-guide";
@@ -96,7 +96,7 @@ function DashboardClientContent({ initialPath = "/inbox" }: DashboardClientProps
         auditEvents={auditEvents}
         changeRequests={changeRequests}
         embedded
-        emptyGuide={<EmptyAgentGuide />}
+        emptyGuide={<EmptyAgentGuide lang={locale} />}
         locale={locale}
         nodes={nodes}
         provideQueryClient={false}

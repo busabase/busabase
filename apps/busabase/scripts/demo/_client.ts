@@ -3,7 +3,7 @@
  * Each script imports these helpers and uses makeRunner() for isolated state.
  */
 
-export const BASE = process.env.BUSABASE_URL ?? "http://localhost:3000";
+export const BASE = process.env.BUSABASE_URL ?? "http://localhost:15419";
 
 export interface StepResult {
   label: string;

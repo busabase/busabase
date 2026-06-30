@@ -1,5 +1,5 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import type { ChangeRequestVO } from "busabase-core/types";
+import type { ChangeRequestVO } from "busabase-contract/types";
 import * as Notifications from "expo-notifications";
 import { Platform } from "react-native";
 import {

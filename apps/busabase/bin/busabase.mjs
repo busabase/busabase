@@ -69,18 +69,12 @@ function printSplash({ host, port, dataDir }) {
   );
   out.push("");
   out.push(`   ${c.dim("Tips")}`);
-  out.push(
-    `     ${c.dim("custom port")}      ${c.cyan("busabase server --port 8080")}`,
-  );
-  out.push(
-    `     ${c.dim("expose on LAN")}    ${c.cyan("busabase server --host 0.0.0.0")}`,
-  );
+  out.push(`     ${c.dim("custom port")}      ${c.cyan("busabase server --port 8080")}`);
+  out.push(`     ${c.dim("expose on LAN")}    ${c.cyan("busabase server --host 0.0.0.0")}`);
 
   if (exposed) {
     out.push("");
-    out.push(
-      `   ${c.yellow("⚠  Busabase is exposed on all network interfaces.")}`,
-    );
+    out.push(`   ${c.yellow("⚠  Busabase is exposed on all network interfaces.")}`);
     out.push(
       `   ${c.dim("   It has no auth by default — only do this on a trusted network or behind a firewall.")}`,
     );

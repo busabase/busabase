@@ -1,18 +1,6 @@
 import "server-only";
 
 import type {
-  AuditEventPO,
-  BaseFieldPO,
-  BasePO,
-  CommentPO,
-  CommitPO,
-  NodePO,
-  OperationPO,
-  RecordLinkPO,
-  ReviewPO,
-  ViewPO,
-} from "../db/schema";
-import type {
   AuditAction,
   AuditEventVO,
   BaseFieldVO,
@@ -31,7 +19,19 @@ import type {
   ViewFilterVO,
   ViewSortVO,
   ViewVO,
-} from "../types";
+} from "busabase-contract/types";
+import type {
+  AuditEventPO,
+  BaseFieldPO,
+  BasePO,
+  CommentPO,
+  CommitPO,
+  NodePO,
+  OperationPO,
+  RecordLinkPO,
+  ReviewPO,
+  ViewPO,
+} from "../db/schema";
 
 export const toIso = (date: Date | null) => (date ? date.toISOString() : null);
 

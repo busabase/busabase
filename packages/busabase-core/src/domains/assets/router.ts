@@ -1,5 +1,5 @@
 import { implement } from "@orpc/server";
-import { busabaseContract } from "../../contract/busabase";
+import { busabaseContract } from "busabase-contract/contract/busabase";
 import { deleteAsset, getAsset, listAssets } from "./handlers";
 
 // Assets domain oRPC handler slice; aggregated into the kernel router (router.ts).

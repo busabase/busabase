@@ -54,7 +54,7 @@ export const materializeBaseNode = async (
       baseFields as Array<{
         slug: string;
         name: string;
-        type?: import("../../../../types").FieldType;
+        type?: import("busabase-contract/types").FieldType;
         required?: boolean;
         options?: Record<string, unknown>;
       }>

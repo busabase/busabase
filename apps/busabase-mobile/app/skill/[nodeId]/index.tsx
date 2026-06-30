@@ -1,5 +1,5 @@
 import { skipToken, useQuery } from "@tanstack/react-query";
-import type { SkillVO } from "busabase-core/types";
+import type { SkillVO } from "busabase-contract/types";
 import { useLocalSearchParams } from "expo-router";
 import { FileText, Folder, X } from "lucide-react-native";
 import { useState } from "react";

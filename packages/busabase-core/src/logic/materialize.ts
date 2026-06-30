@@ -1,5 +1,5 @@
+import type { FieldType } from "busabase-contract/types";
 import type { NodePO } from "../db/schema";
-import type { FieldType } from "../types";
 import type { MergeCtx } from "./store";
 
 /**

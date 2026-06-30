@@ -5,8 +5,13 @@
 // view config → readable rule diff, long text → stacked blocks, scalars → inline.
 // ============================================================================
 
+import type {
+  BaseFieldVO,
+  ChangeRequestVO,
+  OperationVO,
+  ViewConfigVO,
+} from "busabase-contract/types";
 import { ArrowRight, Minus, Plus } from "lucide-react";
-import type { BaseFieldVO, ChangeRequestVO, OperationVO, ViewConfigVO } from "../../../types";
 import { getFieldName } from "../helpers/field";
 import { fieldValueToString } from "../helpers/format";
 import { FieldValuePreview } from "./field-preview";

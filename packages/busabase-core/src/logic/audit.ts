@@ -1,5 +1,6 @@
 import "server-only";
 
+import type { CommentSubjectType } from "busabase-contract/types";
 import { and, asc, desc, eq } from "drizzle-orm";
 import { z } from "zod";
 import { getContextSpaceId, resolveActorId } from "../context";
@@ -12,7 +13,6 @@ import {
   busabaseOperations,
   busabaseRecords,
 } from "../db/schema";
-import type { CommentSubjectType } from "../types";
 import { CURRENT_USER_ID, id, listInputSchema, now } from "./kernel";
 import { toAuditEventVO, toCommentVO } from "./vo";
 

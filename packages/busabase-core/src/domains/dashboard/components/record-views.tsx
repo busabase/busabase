@@ -1,10 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import type { BusabaseDashboardApiClient } from "busabase-contract/api-client";
+import type { BaseFieldVO, BaseVO, ChangeRequestVO, RecordVO } from "busabase-contract/types";
 import { Box, Check, GitMerge, MoreHorizontal, Paperclip, Trash2, X } from "lucide-react";
 import type { AttachmentRef } from "open-domains/attachments/types";
 import { SPALink as Link } from "openlib/ui/dashboard";
 import { useEffect, useState } from "react";
-import type { BusabaseDashboardApiClient } from "../../../api-client";
-import type { BaseFieldVO, BaseVO, ChangeRequestVO, RecordVO } from "../../../types";
 import {
   fieldDisplayKind,
   fieldInputKind,

@@ -1,7 +1,7 @@
 import "server-only";
 
+import type { AuthInfo } from "busabase-contract/contract/schemas";
 import { getContextSpaceId, LOCAL_SPACE_ID, resolveActorId } from "../context";
-import type { AuthInfo } from "../contract/schemas";
 
 /**
  * Auth verification info for the current request. In the open-source app there

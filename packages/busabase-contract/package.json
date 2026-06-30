@@ -1,0 +1,77 @@
+{
+  "name": "busabase-contract",
+  "description": "Client-safe Busabase surface: oRPC contracts (OSS + cloud), node-type kernel, VO types, and the oRPC client factories. Pure leaf — no db/logic/server deps. Consumed by busabase-cli, busabase-mobile, busabase-core, busabase, and busabase-cloud.",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    },
+    "./contract/busabase": {
+      "types": "./src/contract/busabase.ts",
+      "default": "./src/contract/busabase.ts"
+    },
+    "./contract/cloud": {
+      "types": "./src/contract/cloud.ts",
+      "default": "./src/contract/cloud.ts"
+    },
+    "./contract/schemas": {
+      "types": "./src/contract/schemas.ts",
+      "default": "./src/contract/schemas.ts"
+    },
+    "./types": {
+      "types": "./src/types/index.ts",
+      "default": "./src/types/index.ts"
+    },
+    "./domains": {
+      "types": "./src/domains/registry.ts",
+      "default": "./src/domains/registry.ts"
+    },
+    "./domains/base/types": {
+      "types": "./src/domains/base/types.ts",
+      "default": "./src/domains/base/types.ts"
+    },
+    "./domains/folder/types": {
+      "types": "./src/domains/folder/types.ts",
+      "default": "./src/domains/folder/types.ts"
+    },
+    "./domains/assets/types": {
+      "types": "./src/domains/assets/types.ts",
+      "default": "./src/domains/assets/types.ts"
+    },
+    "./domains/doc/contract": {
+      "types": "./src/domains/doc/contract.ts",
+      "default": "./src/domains/doc/contract.ts"
+    },
+    "./domains/skill/contract": {
+      "types": "./src/domains/skill/contract.ts",
+      "default": "./src/domains/skill/contract.ts"
+    },
+    "./domains/base/contract/base-schemas": {
+      "types": "./src/domains/base/contract/base-schemas.ts",
+      "default": "./src/domains/base/contract/base-schemas.ts"
+    },
+    "./domains/base/contract/record-schemas": {
+      "types": "./src/domains/base/contract/record-schemas.ts",
+      "default": "./src/domains/base/contract/record-schemas.ts"
+    },
+    "./api-client": {
+      "types": "./src/api-client/index.ts",
+      "default": "./src/api-client/index.ts"
+    },
+    "./api-client/react-query": {
+      "types": "./src/api-client/react-query.ts",
+      "default": "./src/api-client/react-query.ts"
+    }
+  },
+  "dependencies": {
+    "@orpc/client": "^1.14.6",
+    "@orpc/contract": "^1.14.6",
+    "@orpc/openapi-client": "^1.14.6",
+    "@orpc/tanstack-query": "1.14.6",
+    "open-domains": "workspace:*",
+    "zod": "^4.3.6"
+  }
+}

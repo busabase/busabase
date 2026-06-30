@@ -1,4 +1,4 @@
-import type { BaseFieldVO } from "busabase-core/types";
+import type { BaseFieldVO } from "busabase-contract/types";
 import { Pressable, StyleSheet, Switch, Text, View } from "react-native";
 import { isEditableField, type RecordFormValue } from "~/lib/record-form";
 import { radius, typography } from "~/theme/tokens";

@@ -13,7 +13,7 @@ export const mergeBaseAddField = async (ctx: MergeCtx, item: OperationPO, headCo
   const fieldData = headCommit.fields as {
     name?: string;
     slug?: string;
-    type?: import("../../../../types").FieldType;
+    type?: import("busabase-contract/types").FieldType;
     required?: boolean;
     options?: Record<string, unknown>;
   };
@@ -279,8 +279,8 @@ export const mergeBaseConvertField = async (
   const fieldData = headCommit.fields as {
     fieldId?: string;
     slug?: string;
-    fromType?: import("../../../../types").FieldType;
-    newType?: import("../../../../types").FieldType;
+    fromType?: import("busabase-contract/types").FieldType;
+    newType?: import("busabase-contract/types").FieldType;
     selectChoiceMode?: "auto_create" | "null_on_missing";
     choices?: Array<{ id: string; name: string; color?: string }>;
   };

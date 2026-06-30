@@ -1,5 +1,5 @@
-import { createBusabaseOpenApiClient } from "busabase-core/api-client";
-import { busabaseContract } from "busabase-core/contract/busabase";
+import { createBusabaseOpenApiClient } from "busabase-contract/api-client";
+import { busabaseContract } from "busabase-contract/contract/busabase";
 import { createOpenApiMcpHandler } from "openlib/mcp";
 
 export const mcpHandler = createOpenApiMcpHandler({

@@ -1,4 +1,4 @@
-import type { SearchResultVO } from "busabase-core/types";
+import type { SearchResultVO } from "busabase-contract/types";
 import { useRouter } from "expo-router";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-native";

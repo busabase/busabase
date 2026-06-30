@@ -1,5 +1,5 @@
 import { skipToken, useQuery } from "@tanstack/react-query";
-import type { ChangeRequestVO } from "busabase-core/types";
+import type { ChangeRequestVO } from "busabase-contract/types";
 import { useRouter } from "expo-router";
 import { useEffect, useMemo, useState } from "react";
 import { AppState, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";

@@ -1,5 +1,5 @@
+import { listNodeTypes } from "busabase-contract/domains";
 import type { ReactNode } from "react";
-import { listNodeTypes } from "../registry";
 
 /** A wouter route for the workbench SPA (path → element, with breadcrumb/title). */
 export interface BusabaseRouteConfig {

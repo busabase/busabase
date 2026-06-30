@@ -1,4 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";
+import type { SkillVO } from "busabase-contract/types";
 import { CodeBlock } from "kui/ai-elements/code-block";
 import { FileTree, FileTreeFile, FileTreeFolder } from "kui/ai-elements/file-tree";
 import { FileText, Folder, Sparkles, Table2, Trash2 } from "lucide-react";
@@ -13,8 +15,6 @@ import {
 } from "react";
 import { toast } from "sonner";
 import { useLocation } from "wouter";
-import type { BusabaseQueryUtils } from "../../../api-client/react-query";
-import type { SkillVO } from "../../../types";
 import { registerNodeDetail } from "../node-detail-registry";
 import type { SkillCodeLanguage } from "./field-preview";
 import { ConfirmActionDialog, EmptyState } from "./primitives";

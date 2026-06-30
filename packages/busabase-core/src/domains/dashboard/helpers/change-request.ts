@@ -1,5 +1,11 @@
-import type { ChangeRequestVO, NodeVO, OperationKind, OperationVO, RecordVO } from "../../../types";
-import { OPERATION_KINDS, OPERATION_META } from "../../registry";
+import { OPERATION_KINDS, OPERATION_META } from "busabase-contract/domains";
+import type {
+  ChangeRequestVO,
+  NodeVO,
+  OperationKind,
+  OperationVO,
+  RecordVO,
+} from "busabase-contract/types";
 import { fieldPreviewText } from "./field";
 import { fieldValueToString, shortIdentifier } from "./format";
 

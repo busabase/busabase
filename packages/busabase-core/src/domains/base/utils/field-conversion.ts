@@ -1,6 +1,6 @@
 // Pure, isomorphic field-type conversion via text as intermediate form.
 // No DB, no React, no server-only imports — safe to use on both client and server.
-import type { FieldType } from "../../../types";
+import type { FieldType } from "busabase-contract/types";
 import { isSystemFieldType } from "../field-types";
 
 export interface FieldConversionOptions {

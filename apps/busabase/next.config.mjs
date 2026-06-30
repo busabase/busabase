@@ -15,7 +15,7 @@ const config = {
     "@aws-sdk/s3-request-presigner",
   ],
   allowedDevOrigins: ["hkt1.bika.ltd"],
-  transpilePackages: ["busabase-core"],
+  transpilePackages: ["busabase-contract", "busabase-core"],
 };
 
 export default config;

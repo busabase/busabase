@@ -1,7 +1,7 @@
+import type { AuditEventVO, ChangeRequestVO, RecordVO } from "busabase-contract/types";
 import { SPALink as Link } from "openlib/ui/dashboard";
 import { type ReactNode, useMemo } from "react";
 import { fmt, useCoreI18n } from "../../../i18n";
-import type { AuditEventVO, ChangeRequestVO, RecordVO } from "../../../types";
 import {
   changeRequestStatusLabel,
   getChangeRequestOperationLabel,

@@ -1,5 +1,6 @@
 import "server-only";
 
+import type { FolderVO } from "busabase-contract/domains/folder/types";
 import { and, asc, eq, isNull } from "drizzle-orm";
 import { getContextSpaceId } from "../../context";
 import { getDb } from "../../db";
@@ -7,7 +8,6 @@ import { busabaseNodes, type NodePO } from "../../db/schema";
 import { id } from "../../logic/kernel";
 import { type MaterializeArgs, registerMaterializer } from "../../logic/materialize";
 import { ensureReady, loadNodesByIds, type MergeCtx, toNodeVO } from "../../logic/store";
-import type { FolderVO } from "./types";
 
 const getFolderNode = async (nodeIdOrSlug: string) => {
   const db = await getDb();

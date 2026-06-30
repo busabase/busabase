@@ -45,14 +45,6 @@
       "types": "./src/demo/scenarios/zh-cn.ts",
       "default": "./src/demo/scenarios/zh-cn.ts"
     },
-    "./types": {
-      "types": "./src/types/index.ts",
-      "default": "./src/types/index.ts"
-    },
-    "./domains": {
-      "types": "./src/domains/registry.ts",
-      "default": "./src/domains/registry.ts"
-    },
     "./domains/skill/handlers": {
       "types": "./src/domains/skill/handlers.ts",
       "default": "./src/domains/skill/handlers.ts"
@@ -97,18 +89,6 @@
       "types": "./src/domains/dashboard/routes.tsx",
       "default": "./src/domains/dashboard/routes.tsx"
     },
-    "./api-client": {
-      "types": "./src/api-client/index.ts",
-      "default": "./src/api-client/index.ts"
-    },
-    "./api-client/react-query": {
-      "types": "./src/api-client/react-query.ts",
-      "default": "./src/api-client/react-query.ts"
-    },
-    "./contract/busabase": {
-      "types": "./src/contract/busabase.ts",
-      "default": "./src/contract/busabase.ts"
-    },
     "./openapi": {
       "types": "./src/openapi/spec.ts",
       "default": "./src/openapi/spec.ts"
@@ -141,6 +121,7 @@
     "@orpc/zod": "^1.14.6",
     "@tanstack/react-query": "^5.101.0",
     "@xyflow/react": "^12.10.0",
+    "busabase-contract": "workspace:*",
     "drizzle-orm": "^0.45.1",
     "elkjs": "^0.9.3",
     "kui": "workspace:*",

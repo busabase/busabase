@@ -1,8 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import type { BusabaseDashboardApiClient } from "busabase-contract/api-client";
+import type { CommentSubjectType, CommentVO } from "busabase-contract/types";
 import { Reply, Sparkles } from "lucide-react";
 import { Fragment, useRef, useState } from "react";
-import type { BusabaseDashboardApiClient } from "../../../api-client";
-import type { CommentSubjectType, CommentVO } from "../../../types";
 
 export const parseMentionsAi = (text: string) => /(^|\s)@ai\b/i.test(text);
 

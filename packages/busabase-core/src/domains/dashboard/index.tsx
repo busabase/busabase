@@ -9,6 +9,19 @@ import {
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
+import {
+  type BusabaseDashboardApiClient,
+  createBusabaseRestApiClient,
+} from "busabase-contract/api-client";
+import { createBusabaseQueryUtils } from "busabase-contract/api-client/react-query";
+import type {
+  AuditEventVO,
+  BaseVO,
+  ChangeRequestVO,
+  NodeVO,
+  RecordVO,
+  ViewVO,
+} from "busabase-contract/types";
 import { SidebarTrigger } from "kui/sidebar";
 // Demo-aware navigation (same helpers as apps/productready & apps/buda):
 // `SPALink` appends `?demo=1` on <Link> clicks; `useAddDemoParam` wraps
@@ -18,10 +31,7 @@ import { useAddDemoParam } from "openlib/ui/dashboard";
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { useLocation, useSearch } from "wouter";
-import { type BusabaseDashboardApiClient, createBusabaseRestApiClient } from "../../api-client";
-import { createBusabaseQueryUtils } from "../../api-client/react-query";
 import { CoreI18nProvider } from "../../i18n";
-import type { AuditEventVO, BaseVO, ChangeRequestVO, NodeVO, RecordVO, ViewVO } from "../../types";
 import { ArchivedBasesView } from "./components/archived-bases";
 import { AssetsView } from "./components/assets";
 import { BaseDetailView, BaseSetupView, BaseTopbarActions } from "./components/base-views";

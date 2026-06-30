@@ -1,5 +1,10 @@
 import "server-only";
 
+import {
+  createSkillChangeRequestInputSchema,
+  createSkillInputSchema,
+} from "busabase-contract/domains/skill/contract";
+import type { SkillVO } from "busabase-contract/types";
 import { and, asc, eq, isNull } from "drizzle-orm";
 import type { z } from "zod";
 import { getContextSpaceId } from "../../context";
@@ -27,8 +32,6 @@ import {
   type MergeCtx,
   toNodeVO,
 } from "../../logic/store";
-import type { SkillVO } from "../../types";
-import { createSkillChangeRequestInputSchema, createSkillInputSchema } from "./contract";
 import {
   deleteSkillFile,
   getSkillNode,

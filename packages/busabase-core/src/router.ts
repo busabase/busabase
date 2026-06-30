@@ -1,5 +1,5 @@
 import { implement } from "@orpc/server";
-import { busabaseContract } from "./contract/busabase";
+import { busabaseContract } from "busabase-contract/contract/busabase";
 import { assetsRouter } from "./domains/assets/router";
 import { attachmentsRouter } from "./domains/attachments/router";
 import { baseRouter, recordRouter, viewRouter } from "./domains/base/router";
