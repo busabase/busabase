@@ -47,13 +47,19 @@ export async function run() {
   // ── Create docs ───────────────────────────────────────────────────────────
 
   for (const def of DEMO_DOCS) {
-    await step(`POST /docs — create "${def.name}"`, async () => {
-      const doc = await api<DocVO>("POST", "/docs", {
-        slug: def.slug,
-        name: def.name,
-        description: def.description,
-        body: def.body,
-      });
+    await step(`POST /docs — create "${def.name}" (idempotent)`, async () => {
+      // Re-runnable: a prior run may have already created this doc.
+      let doc: DocVO;
+      try {
+        doc = await api<DocVO>("POST", "/docs", {
+          slug: def.slug,
+          name: def.name,
+          description: def.description,
+          body: def.body,
+        });
+      } catch {
+        doc = await api<DocVO>("GET", `/docs/${def.slug}`);
+      }
       assert(doc.node.slug === def.slug, `slug mismatch: ${doc.node.slug}`);
       assert(doc.node.type === "doc", `expected type=doc, got ${doc.node.type}`);
       if (def === DEMO_DOCS[0]) docId = doc.node.id;
@@ -83,13 +89,13 @@ export async function run() {
 
   // ── Direct body update ────────────────────────────────────────────────────
 
-  await step("POST /docs/{id}/body — direct update (no CR needed)", async () => {
+  await step("PUT /docs/{id}/body — direct update (no CR needed)", async () => {
     if (!docId) return;
     const updatedBody =
       "# Engineering Notes\n\nUpdated directly (no CR) by demo-05-docs at " +
       new Date().toISOString() +
       ".\n";
-    const doc = await api<DocVO>("POST", `/docs/${docId}/body`, { body: updatedBody });
+    const doc = await api<DocVO>("PUT", `/docs/${docId}/body`, { body: updatedBody });
     assert(doc.body.includes("Updated directly"), "body not updated");
   });
 

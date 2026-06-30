@@ -81,6 +81,119 @@ export const DEMO_COMPANY_RECORDS = DEMO_RECORDS.filter(
   author: r.author,
 }));
 
+/** System fields the server computes itself (`computeSystemFieldValues`) — they have a
+ *  read-only "computed" input and can't be set on create. Everything else (incl.
+ *  attachment, relation, ai_summary, ai_tags) is real user data we DO send. */
+const COMPUTED_FIELD_TYPES = [
+  "created_time",
+  "updated_time",
+  "created_by",
+  "updated_by",
+  "auto_number",
+];
+
+/** Bases we populate with persistent, clean-named demo records — ordered so a base's
+ *  relation TARGETS (contacts, social posts) are created before the bases that link to
+ *  them (companies → contacts, blog → social), enabling seed-id → real-id remapping. */
+export const DEMO_PERSISTENT_RECORD_BASES = [
+  // ── No relation dependencies — create first (targets for the rest) ──
+  "companies",
+  "purchase-orders",
+  "media-assets",
+  "private-knowledge",
+  "ops-tasks",
+  "routine-work-log",
+  "compliance-checklists",
+  "market-research",
+  "content-pipeline",
+  "qa-training-dataset",
+  "labeling-queue",
+  "pages",
+  "services",
+  // ── Depend on the bases above (created after their relation targets) ──
+  "contacts", // → companies
+  "deals", // → companies, contacts
+  "invoices", // → purchase-orders
+  "social-content", // → blog (back-edge stays empty; blog comes after)
+  "blog", // → social-content
+  "newsletter", // → blog
+  "field-type-lab", // → blog; exercises EVERY field type (code, html, longtext, …)
+] as const;
+
+/** Seed records for a base, adapted for the REST record API. Drops only computed system
+ *  fields; keeps attachment/relation/ai values. Surfaces the seed record id (for relation
+ *  remapping), the relation field slugs, and the identity value (for idempotency). */
+export function recordsForBase(slug: string): Array<{
+  seedId: string;
+  identity: string;
+  identityValue: string;
+  fields: Record<string, unknown>;
+  relationSlugs: string[];
+  message?: string;
+}> {
+  const base = DEMO_BASES.find((b) => b.slug === slug);
+  if (!base) return [];
+  const computed = new Set(
+    base.fields.filter((f) => COMPUTED_FIELD_TYPES.includes(f.type)).map((f) => f.slug),
+  );
+  const relationSlugs = base.fields.filter((f) => f.type === "relation").map((f) => f.slug);
+  // Valid values per select/multiselect field. Some seed records carry values that aren't
+  // in the field's options (the direct DB seed never validates; the REST API does), so we
+  // drop a bad select value / filter a multiselect to its valid subset. The server accepts
+  // either a choice id OR its name (field-types.ts: `choice.id === v || choice.name === v`),
+  // and a field with no choices is unconstrained — so we only constrain when choices exist.
+  const choices = new Map<string, { multi: boolean; valid: Set<string> }>();
+  for (const f of base.fields) {
+    if (f.type !== "select" && f.type !== "multiselect") continue;
+    const list = (f.options as { choices?: Array<{ id: string; name?: string }> }).choices ?? [];
+    if (list.length === 0) continue; // unconstrained — accept any value
+    const valid = new Set<string>();
+    for (const c of list) {
+      valid.add(c.id);
+      if (c.name) valid.add(c.name);
+    }
+    choices.set(f.slug, { multi: f.type === "multiselect", valid });
+  }
+  // Identity = the field we search on for idempotency: prefer title / name, else the first
+  // non-relation/attachment value field (some bases have neither title nor a plain text field).
+  const idField =
+    base.fields.find((f) => f.slug === "title") ??
+    base.fields.find((f) => f.slug === "name") ??
+    base.fields.find((f) => f.type === "text") ??
+    base.fields.find((f) => ["longtext", "markdown"].includes(f.type)) ??
+    base.fields.find(
+      (f) => !["relation", "attachment"].includes(f.type) && !computed.has(f.slug),
+    ) ??
+    base.fields[0];
+  const identity = idField?.slug ?? "title";
+  return DEMO_RECORDS.filter((r) => r.baseId === base.id)
+    .map((r) => {
+      const fields: Record<string, unknown> = {};
+      for (const [k, v] of Object.entries(r.fields as Record<string, unknown>)) {
+        if (computed.has(k)) continue;
+        const ch = choices.get(k);
+        // Drop a select value not in the field's options.
+        if (ch && !ch.multi && typeof v === "string" && !ch.valid.has(v)) continue;
+        // Filter a multiselect to its valid subset; pass everything else through unchanged.
+        fields[k] =
+          ch?.multi && Array.isArray(v)
+            ? v.filter((x) => typeof x === "string" && ch.valid.has(x))
+            : v;
+      }
+      return {
+        seedId: r.id,
+        identity,
+        identityValue: String(
+          fields[identity] ?? (r.fields as Record<string, unknown>)[identity] ?? "",
+        ),
+        fields,
+        relationSlugs,
+        message: r.message,
+      };
+    })
+    .filter((r) => r.identityValue);
+}
+
 /** Skills to seed via the Skills OpenAPI — matches what demo-skills.ts had inline. */
 export const DEMO_SKILLS = [
   {

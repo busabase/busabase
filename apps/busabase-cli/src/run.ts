@@ -5,6 +5,7 @@ import {
   normalizeBaseUrl,
   type ResolvedConfig,
 } from "./client.js";
+import { banner } from "./banner.js";
 import { render } from "./format.js";
 
 export const HELP = `busabase-cli — client for the Busabase OpenAPI REST API
@@ -267,7 +268,9 @@ async function dispatch(
 export async function runCli(argv: string[]): Promise<number> {
   const flags = parse(argv);
   if (flags.has("help") || flags.positionals.length === 0) {
-    console.log(HELP);
+    const baseUrl =
+      flags.get("base-url") ?? process.env.BUSABASE_API_BASE_URL ?? DEFAULT_BASE_URL;
+    console.log(`${banner(baseUrl)}\n${HELP}`);
     return 0;
   }
   try {

@@ -63,6 +63,11 @@ function NavMainComponent({
   onTaskListExpandToggle,
 }: NavMainProps) {
   const [location] = useLocation();
+  // A nav url is "active" for the current location on an exact match OR when the
+  // location is a descendant route (e.g. a record under a base folder). This keeps
+  // the parent folder highlighted and expanded while browsing its child pages.
+  const isPathActive = (url?: string) =>
+    !!url && (location === url || (url !== "/" && location.startsWith(`${url}/`)));
   const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
   // Per-folder manual expand/collapse override (by nav-item key). A folder on the
   // active route is always expanded; this only adds extra opens for other folders.
@@ -161,8 +166,8 @@ function NavMainComponent({
                   // expands it, and navigating away collapses it again.
                   const isActiveTree =
                     Boolean(item.isActive) ||
-                    location === item.url ||
-                    (item.items?.some((subItem) => location === subItem.url) ?? false);
+                    isPathActive(item.url) ||
+                    (item.items?.some((subItem) => isPathActive(subItem.url)) ?? false);
                   const isOpen = isActiveTree || (openOverrides[itemKey] ?? false);
 
                   // If item has sub-items, render as Collapsible
@@ -183,7 +188,7 @@ function NavMainComponent({
                             // the label links to its page; a separate chevron toggles.
                             <div
                               className={`flex min-w-0 items-center rounded-md transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground ${
-                                location === item.url
+                                isPathActive(item.url)
                                   ? "bg-sidebar-accent text-sidebar-accent-foreground"
                                   : ""
                               }`}
@@ -191,7 +196,7 @@ function NavMainComponent({
                               <SidebarMenuButton
                                 asChild
                                 className="min-w-0 flex-1 bg-transparent pr-1 hover:bg-transparent data-[active=true]:bg-transparent data-[active=true]:text-inherit"
-                                isActive={location === item.url}
+                                isActive={isPathActive(item.url)}
                                 tooltip={item.title}
                               >
                                 <SPALink className="min-w-0" href={item.url}>

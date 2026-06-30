@@ -66,25 +66,28 @@ export async function run() {
 
   // ── POST /audit-events ────────────────────────────────────────────────────
 
-  await step("POST /audit-events — create a custom audit event", async () => {
+  // The audit action is a fixed enum (record.viewed + change_request.*); "record.viewed"
+  // is the one client-emittable event. We tag it via metadata to find it again below.
+  const marker = `demo-script-${Date.now()}`;
+  await step("POST /audit-events — create an audit event", async () => {
     const event = await api<AuditEventVO>("POST", "/audit-events", {
-      action: "custom.demo_script_run",
+      action: "record.viewed",
       actorId: "demo-script",
       metadata: {
+        marker,
         script: "10-audit.ts",
-        timestamp: new Date().toISOString(),
         description: "Demo suite audit event — verifies POST /audit-events endpoint.",
       },
     });
     assert(event.id.length > 0, "expected event id");
-    assert(event.action === "custom.demo_script_run", `action mismatch: ${event.action}`);
+    assert(event.action === "record.viewed", `action mismatch: ${event.action}`);
     assert(event.actorId === "demo-script", `actorId mismatch: ${event.actorId}`);
   });
 
-  await step("GET /audit-events — custom event appears", async () => {
+  await step("GET /audit-events — posted event appears", async () => {
     const freshEvents = await api<AuditEventVO[]>("GET", "/audit-events");
-    const found = freshEvents.some((e) => e.action === "custom.demo_script_run");
-    assert(found, "custom audit event not found after POST");
+    const found = freshEvents.some((e) => e.metadata?.marker === marker);
+    assert(found, "posted audit event not found after POST");
     process.stdout.write(`     info: ${freshEvents.length} total audit events after demo run\n`);
   });
 

@@ -1,6 +1,7 @@
 import {
   DEMO_BLOG_BASE_ID,
   DEMO_BLOG_BASE_NODE_ID,
+  DEMO_CMS_FOLDER_NODE_ID,
   DEMO_CONTENT_FOLDER_NODE_ID,
   DEMO_CRM_COMPANIES_BASE_ID,
   DEMO_CRM_COMPANIES_BASE_NODE_ID,
@@ -11,6 +12,7 @@ import {
   DEMO_CRM_FOLDER_NODE_ID,
   DEMO_FIELD_TYPE_LAB_BASE_ID,
   DEMO_FIELD_TYPE_LAB_BASE_NODE_ID,
+  DEMO_LAB_FOLDER_NODE_ID,
   DEMO_MEDIA_ASSETS_BASE_ID,
   DEMO_MEDIA_ASSETS_BASE_NODE_ID,
   DEMO_NEWSLETTER_BASE_ID,
@@ -54,18 +56,32 @@ const DEMO_ACTOR_ID = "local-admin";
 export const datasetZhCnScenario: SeedScenario = {
   folders: [
     {
-      nodeId: DEMO_CONTENT_FOLDER_NODE_ID,
-      slug: "content",
-      name: "内容管理",
-      description: "博客文章、社交媒体内容、电子邮报和媒体素材的审核与管理。",
+      nodeId: DEMO_CMS_FOLDER_NODE_ID,
+      slug: "cms",
+      name: "内容管理（CMS）",
+      description: "博客文章与已审核的落地页。",
       position: 0,
+    },
+    {
+      nodeId: DEMO_CONTENT_FOLDER_NODE_ID,
+      slug: "marketing",
+      name: "营销",
+      description: "社交媒体内容、电子邮报、媒体素材与渠道投放。",
+      position: 1,
     },
     {
       nodeId: DEMO_CRM_FOLDER_NODE_ID,
       slug: "crm",
       name: "客户关系管理",
       description: "企业客户、联系人和商机管理。",
-      position: 1,
+      position: 2,
+    },
+    {
+      nodeId: DEMO_LAB_FOLDER_NODE_ID,
+      slug: "lab",
+      name: "字段实验台",
+      description: "字段类型覆盖与 QA 数据表。",
+      position: 8,
     },
   ],
 
@@ -76,7 +92,7 @@ export const datasetZhCnScenario: SeedScenario = {
       slug: "blog",
       name: "博客文章",
       description: "AI行业深度分析与每周洞察内容的审核管理。",
-      folderNodeId: DEMO_CONTENT_FOLDER_NODE_ID,
+      folderNodeId: DEMO_CMS_FOLDER_NODE_ID,
       useCases: ["blog", "review-loop", "conflict", "canonical"],
       fields: [
         {
@@ -400,7 +416,7 @@ export const datasetZhCnScenario: SeedScenario = {
       slug: "field-type-lab",
       name: "字段类型实验台",
       description: "覆盖所有 Busabase 字段类型的种子与演示数据。",
-      folderNodeId: DEMO_CONTENT_FOLDER_NODE_ID,
+      folderNodeId: DEMO_LAB_FOLDER_NODE_ID,
       useCases: ["field-types"],
       fields: [
         {
@@ -436,6 +452,30 @@ export const datasetZhCnScenario: SeedScenario = {
           options: {},
         },
         {
+          id: "bsf_lab_code_json",
+          slug: "code_json",
+          name: "JSON",
+          type: "code",
+          required: false,
+          options: { code: { language: "json" } },
+        },
+        {
+          id: "bsf_lab_code_yaml",
+          slug: "code_yaml",
+          name: "YAML",
+          type: "code",
+          required: false,
+          options: { code: { language: "yaml" } },
+        },
+        {
+          id: "bsf_lab_code",
+          slug: "code",
+          name: "代码",
+          type: "code",
+          required: false,
+          options: { code: { language: "typescript" } },
+        },
+        {
           id: "bsf_lab_attachment",
           slug: "attachment",
           name: "附件",
@@ -452,10 +492,42 @@ export const datasetZhCnScenario: SeedScenario = {
         {
           id: "bsf_lab_relation",
           slug: "relation",
-          name: "关联",
+          name: "关联（多选 · 单向）",
           type: "relation",
           required: false,
           options: { multiple: true, targetBaseId: DEMO_BLOG_BASE_ID },
+        },
+        {
+          id: "bsf_lab_relation_one",
+          slug: "relation_one",
+          name: "关联（单选 · 单向）",
+          type: "relation",
+          required: false,
+          options: { multiple: false, targetBaseId: DEMO_CRM_COMPANIES_BASE_ID },
+        },
+        {
+          id: "bsf_lab_relation_self",
+          slug: "relation_self",
+          name: "关联（双向）",
+          type: "relation",
+          required: false,
+          options: {
+            multiple: true,
+            targetBaseId: DEMO_FIELD_TYPE_LAB_BASE_ID,
+            inverseFieldId: "bsf_lab_relation_self_inverse",
+          },
+        },
+        {
+          id: "bsf_lab_relation_self_inverse",
+          slug: "relation_self_inverse",
+          name: "关联（双向 · 反向）",
+          type: "relation",
+          required: false,
+          options: {
+            multiple: true,
+            targetBaseId: DEMO_FIELD_TYPE_LAB_BASE_ID,
+            inverseFieldId: "bsf_lab_relation_self",
+          },
         },
         {
           id: "bsf_lab_number",

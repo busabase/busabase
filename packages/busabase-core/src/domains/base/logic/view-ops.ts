@@ -1,5 +1,6 @@
 import "server-only";
 
+import { ORPCError } from "@orpc/server";
 import { and, eq } from "drizzle-orm";
 import type { z } from "zod";
 import { getContextSpaceId, resolveActorId } from "../../../context";
@@ -52,7 +53,7 @@ export const createViewChangeRequest = async (
   const parsed = { ...rawParsed, slug: autoSlug };
   const existingViews = await listViews(base.id);
   if (existingViews.some((view) => view.slug === parsed.slug)) {
-    throw new Error(`View slug already exists: ${parsed.slug}`);
+    throw new ORPCError("CONFLICT", { message: `View slug already exists: ${parsed.slug}` });
   }
 
   const changeRequestId = id("crq");

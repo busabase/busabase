@@ -21,6 +21,12 @@ import type {
   ReviewVO,
   ViewVO,
 } from "../types";
+import { CROSS_FUNCTIONAL_BASES, CROSS_FUNCTIONAL_RECORDS } from "./scenarios/cross-functional";
+import {
+  DIRECTORY_LISTINGS_BASES,
+  DIRECTORY_LISTINGS_RECORDS,
+  DIRECTORY_LISTINGS_VIEWS,
+} from "./scenarios/directory-listing";
 import {
   FINANCE_BASES,
   FINANCE_CHANGE_REQUESTS,
@@ -493,10 +499,42 @@ const fieldTypeLabFields: SeedFieldDef[] = [
   {
     id: "bsf_lab_relation",
     slug: "relation",
-    name: "Relation",
+    name: "Relation (multi · one-way)",
     type: "relation",
     required: false,
     options: { multiple: true, targetBaseId: DEMO_BLOG_BASE_ID },
+  },
+  {
+    id: "bsf_lab_relation_one",
+    slug: "relation_one",
+    name: "Relation (single · one-way)",
+    type: "relation",
+    required: false,
+    options: { multiple: false, targetBaseId: DEMO_CRM_COMPANIES_BASE_ID },
+  },
+  {
+    id: "bsf_lab_relation_self",
+    slug: "relation_self",
+    name: "Relation (bidirectional)",
+    type: "relation",
+    required: false,
+    options: {
+      multiple: true,
+      targetBaseId: DEMO_FIELD_TYPE_LAB_BASE_ID,
+      inverseFieldId: "bsf_lab_relation_self_inverse",
+    },
+  },
+  {
+    id: "bsf_lab_relation_self_inverse",
+    slug: "relation_self_inverse",
+    name: "Relation (bidirectional · inverse)",
+    type: "relation",
+    required: false,
+    options: {
+      multiple: true,
+      targetBaseId: DEMO_FIELD_TYPE_LAB_BASE_ID,
+      inverseFieldId: "bsf_lab_relation_self",
+    },
   },
   {
     id: "bsf_lab_number",
@@ -881,6 +919,8 @@ export const DEMO_BASES: SeedBaseDef[] = [
     fields: dealFields,
   },
   ...FINANCE_BASES,
+  ...DIRECTORY_LISTINGS_BASES,
+  ...CROSS_FUNCTIONAL_BASES,
   ...(readmeScenario.bases ?? []),
 ];
 
@@ -2167,6 +2207,8 @@ export const DEMO_RECORDS: SeedRecordDef[] = [
   ...BULK_NEWSLETTERS,
   ...BULK_MEDIA,
   ...FINANCE_RECORDS,
+  ...DIRECTORY_LISTINGS_RECORDS,
+  ...CROSS_FUNCTIONAL_RECORDS,
   ...(readmeScenario.records ?? []),
 ];
 
@@ -2262,6 +2304,7 @@ export const DEMO_VIEWS: SeedViewDef[] = [
     useCases: ["field-types"],
   },
   ...FINANCE_VIEWS,
+  ...DIRECTORY_LISTINGS_VIEWS,
   ...(readmeScenario.views ?? []),
 ];
 

@@ -1,4 +1,5 @@
 import {
+  Apple,
   ArrowUpRight,
   CheckCircle2,
   DatabaseZap,
@@ -6,6 +7,7 @@ import {
   Laptop,
   MonitorDown,
   ShieldAlert,
+  Smartphone,
   Sparkles,
 } from "lucide-react";
 import type { Metadata } from "next";
@@ -69,6 +71,29 @@ const downloadOptions = [
     title: "Linux",
     description: "Choose the .deb bundle from the latest release.",
     icon: HardDrive,
+  },
+] as const;
+
+/** Public store listings — direct hand-off to Apple App Store / Google Play, no download tracking. */
+const APP_STORE_URL = "https://apps.apple.com/app/id6783588467";
+const GOOGLE_PLAY_URL = "https://play.google.com/store/apps/details?id=com.busabase.app";
+
+const mobileOptions = [
+  {
+    key: "ios",
+    os: "iOS",
+    title: "iPhone & iPad",
+    icon: Apple,
+    href: APP_STORE_URL,
+    action: "Download on the App Store",
+  },
+  {
+    key: "android",
+    os: "Android",
+    title: "Phone & Tablet",
+    icon: Smartphone,
+    href: GOOGLE_PLAY_URL,
+    action: "Get it on Google Play",
   },
 ] as const;
 
@@ -206,6 +231,48 @@ export default async function DownloadPage() {
       </section>
 
       <section className="border-t border-border bg-muted/40">
+        <div className="mx-auto w-full max-w-6xl px-5 py-12 sm:px-6 lg:px-8">
+          <div className="mb-6 space-y-2">
+            <h2 className="text-2xl font-medium text-foreground">Mobile</h2>
+            <p className="max-w-2xl text-sm leading-6 text-muted-foreground">
+              Review queues and approvals on the go — get the Busabase app for iPhone, iPad, and
+              Android.
+            </p>
+          </div>
+          <div className="grid gap-4 sm:grid-cols-2">
+            {mobileOptions.map((option) => {
+              const Icon = option.icon;
+              return (
+                <a
+                  key={option.key}
+                  href={option.href}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="group flex items-center gap-4 rounded-lg border border-border bg-card p-5 transition-colors hover:border-primary/40 hover:bg-accent/60"
+                >
+                  <span className="flex size-10 shrink-0 items-center justify-center rounded-md bg-muted text-foreground">
+                    <Icon className="size-5" aria-hidden="true" />
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-sm font-medium text-foreground">
+                      {option.os} · {option.title}
+                    </span>
+                    <span className="mt-1 block text-sm leading-5 text-muted-foreground">
+                      {option.action}
+                    </span>
+                  </span>
+                  <ArrowUpRight
+                    className="size-4 shrink-0 text-muted-foreground transition-colors group-hover:text-primary"
+                    aria-hidden="true"
+                  />
+                </a>
+              );
+            })}
+          </div>
+        </div>
+      </section>
+
+      <section className="border-t border-border">
         <div className="mx-auto grid w-full max-w-6xl gap-6 px-5 py-12 sm:px-6 lg:grid-cols-2 lg:px-8">
           <div className="rounded-lg border border-border bg-card p-6">
             <ShieldAlert className="mb-4 size-5 text-primary" aria-hidden="true" />

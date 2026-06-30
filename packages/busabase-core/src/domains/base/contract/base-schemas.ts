@@ -124,10 +124,13 @@ export const createBaseInputSchema = z.object({
 
 export const createBaseFieldInputSchema = z.object({
   name: z.string().min(1),
+  // Field slugs are snake_case identifiers (e.g. `cover_image`, `publish_date`) — the
+  // seed and the inline-fields path on `POST /bases` already allow underscores, so the
+  // add-field endpoint must too. (Base/folder/view slugs stay kebab-case: they go in URLs.)
   slug: z
     .string()
     .min(1)
-    .regex(/^[a-z0-9-]+$/),
+    .regex(/^[a-z0-9_-]+$/),
   type: fieldTypeSchema.default("text"),
   required: z.boolean().optional().default(false),
   options: fieldOptionsSchema.optional().default({}),

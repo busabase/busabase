@@ -38,6 +38,7 @@ export const DEMO_USE_CASES = [
   "field-types",
   "seo-pages",
   "config-mgmt",
+  "directories",
 ] as const;
 
 export type DemoUseCase = (typeof DEMO_USE_CASES)[number];

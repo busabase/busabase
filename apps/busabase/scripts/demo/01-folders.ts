@@ -3,7 +3,7 @@
  * Verifies the seeded folder tree is visible via the API.
  */
 
-import { api, assert, BASE, makeRunner } from "./_client";
+import { api, approveMerge, assert, BASE, makeRunner } from "./_client";
 import { DEMO_FOLDERS } from "./_data";
 
 interface NodeVO {
@@ -41,6 +41,37 @@ export async function run() {
     folders = await api<FolderVO[]>("GET", "/folders");
     assert(Array.isArray(folders), "expected array");
     assert(folders.length > 0, `expected folders, got ${folders.length}`);
+  });
+
+  // Self-seed: ensure each demo category folder exists. Older demo instances were
+  // seeded before these folders were added to the dataset (`db:seed:all` is additive
+  // but may not have been re-run since), so create any missing folder over the API.
+  await step("ensure demo category folders exist (idempotent self-seed)", async () => {
+    const root = nodes.find((n) => n.type === "folder" && n.slug === "root");
+    if (!root) return;
+    let created = 0;
+    for (const def of DEMO_FOLDERS) {
+      if (folders.some((f) => f.node.slug === def.slug)) continue;
+      const cr = await api<{ id: string }>("POST", "/nodes/change-requests", {
+        message: `demo: ensure folder ${def.slug}`,
+        submittedBy: "demo-script",
+        operations: [
+          {
+            kind: "create",
+            nodeType: "folder",
+            slug: def.slug,
+            name: def.name,
+            description: def.description,
+            parentNodeId: root.id,
+          },
+        ],
+      });
+      await approveMerge(cr.id);
+      created++;
+    }
+    // Refresh so the assertions below see any newly-created folders.
+    folders = await api<FolderVO[]>("GET", "/folders");
+    process.stdout.write(`     info: created ${created} missing folder(s)\n`);
   });
 
   // Verify each DEMO_FOLDER slug appears (seeded by store.ts — same data source)

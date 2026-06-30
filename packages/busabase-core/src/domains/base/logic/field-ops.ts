@@ -1,5 +1,6 @@
 import "server-only";
 
+import { ORPCError } from "@orpc/server";
 import { and, eq, isNull } from "drizzle-orm";
 import type { z } from "zod";
 import { resolveActorId } from "../../../context";
@@ -64,7 +65,7 @@ export const createBaseField = async (baseId: string, input: z.infer<typeof fiel
     )
     .limit(1);
   if (existing) {
-    throw new Error(`Field already exists: ${parsed.slug}`);
+    throw new ORPCError("CONFLICT", { message: `Field already exists: ${parsed.slug}` });
   }
   const fieldCount = base.fields.length;
   await db.insert(busabaseBaseFields).values({
@@ -111,7 +112,7 @@ export const createFieldChangeRequest = async (
     )
     .limit(1);
   if (existing) {
-    throw new Error(`Field already exists: ${parsed.slug}`);
+    throw new ORPCError("CONFLICT", { message: `Field already exists: ${parsed.slug}` });
   }
 
   const changeRequestId = id("crq");

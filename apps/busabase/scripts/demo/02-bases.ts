@@ -45,45 +45,50 @@ export async function run() {
   });
 
   // Add a new field to the blog base to test POST /bases/{id}/fields
-  await step("POST /bases/{id}/fields — add demo_notes field to blog", async () => {
+  await step("POST /bases/{id}/fields — add demo-notes field to blog (idempotent)", async () => {
     const blogBase = allBases.find((b) => b.slug === "blog") ?? createdBases.get("blog");
     if (!blogBase) return; // skip if blog not seeded
+    if (blogBase.fields.some((f) => f.slug === "demo-notes")) return; // added by a prior run
     const updated = await api<BaseVO>("POST", `/bases/${blogBase.id}/fields`, {
-      slug: "demo_notes",
+      slug: "demo-notes",
       name: "Demo Notes",
       type: "text",
       required: false,
       options: {},
     });
     assert(
-      updated.fields.some((f) => f.slug === "demo_notes"),
-      "demo_notes field not found after createField",
+      updated.fields.some((f) => f.slug === "demo-notes"),
+      "demo-notes field not found after createField",
     );
   });
 
   // Add a select field to companies base
-  await step("POST /bases/{id}/fields — add priority select to companies", async () => {
-    const companiesBase =
-      allBases.find((b) => b.slug === "companies") ?? createdBases.get("companies");
-    if (!companiesBase) return;
-    const updated = await api<BaseVO>("POST", `/bases/${companiesBase.id}/fields`, {
-      slug: "demo_priority",
-      name: "Demo Priority",
-      type: "select",
-      required: false,
-      options: {
-        choices: [
-          { id: "high", name: "High", color: "rose" },
-          { id: "medium", name: "Medium", color: "amber" },
-          { id: "low", name: "Low", color: "slate" },
-        ],
-      },
-    });
-    assert(
-      updated.fields.some((f) => f.slug === "demo_priority"),
-      "demo_priority field not found after createField",
-    );
-  });
+  await step(
+    "POST /bases/{id}/fields — add priority select to companies (idempotent)",
+    async () => {
+      const companiesBase =
+        allBases.find((b) => b.slug === "companies") ?? createdBases.get("companies");
+      if (!companiesBase) return;
+      if (companiesBase.fields.some((f) => f.slug === "demo-priority")) return; // prior run
+      const updated = await api<BaseVO>("POST", `/bases/${companiesBase.id}/fields`, {
+        slug: "demo-priority",
+        name: "Demo Priority",
+        type: "select",
+        required: false,
+        options: {
+          choices: [
+            { id: "high", name: "High", color: "rose" },
+            { id: "medium", name: "Medium", color: "amber" },
+            { id: "low", name: "Low", color: "slate" },
+          ],
+        },
+      });
+      assert(
+        updated.fields.some((f) => f.slug === "demo-priority"),
+        "demo-priority field not found after createField",
+      );
+    },
+  );
 
   return summary();
 }

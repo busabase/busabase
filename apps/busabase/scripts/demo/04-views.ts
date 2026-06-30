@@ -52,8 +52,12 @@ export async function run() {
   await step(
     "POST /bases/{id}/views/change-requests — create 'Demo High Priority' view",
     async () => {
+      // Unique per run: an archived view keeps holding its (baseId, slug) slot until
+      // the partial-index migration is applied, so re-using a fixed slug would collide.
+      // A fresh throwaway slug each run tests the full create→update→delete lifecycle.
+      viewSlug = `demo-high-priority-${Date.now()}`;
       const cr = await api<ChangeRequestVO>("POST", `/bases/${blogBase.id}/views/change-requests`, {
-        slug: "demo-high-priority",
+        slug: viewSlug,
         name: "Demo High Priority",
         description: "Demo-script view filtering high-priority drafts.",
         config: {
@@ -67,7 +71,6 @@ export async function run() {
         submittedBy: "demo-script",
       });
       assert(cr.status === "in_review", `expected in_review, got ${cr.status}`);
-      viewSlug = "demo-high-priority";
 
       const result = await approveMerge(cr.id);
       assert(result.changeRequest.status === "merged", "expected merged");
@@ -84,9 +87,9 @@ export async function run() {
 
   // ── Update the view ────────────────────────────────────────────────────────
 
-  await step("POST /views/{id}/update-change-request — update view config", async () => {
+  await step("PUT /views/{id}/change-requests — update view config", async () => {
     if (!viewId) return;
-    const cr = await api<ChangeRequestVO>("POST", `/views/${viewId}/update-change-request`, {
+    const cr = await api<ChangeRequestVO>("PUT", `/views/${viewId}/change-requests`, {
       name: "Demo High Priority (updated)",
       config: {
         filters: [
@@ -124,9 +127,9 @@ export async function run() {
 
   // ── Delete the demo view ──────────────────────────────────────────────────
 
-  await step("POST /views/{id}/delete-change-request — delete demo view", async () => {
+  await step("DELETE /views/{id}/change-requests — delete demo view", async () => {
     if (!viewId) return;
-    const cr = await api<ChangeRequestVO>("POST", `/views/${viewId}/delete-change-request`, {
+    const cr = await api<ChangeRequestVO>("DELETE", `/views/${viewId}/change-requests`, {
       message: "demo: clean up demo view",
     });
     assert(cr.status === "in_review", `expected in_review, got ${cr.status}`);

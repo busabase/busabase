@@ -16,6 +16,84 @@ function flag(argv, name) {
   return i >= 0 ? argv[i + 1] : undefined;
 }
 
+// Colorize only on a real terminal that hasn't opted out (NO_COLOR).
+const useColor = Boolean(process.stderr.isTTY) && !process.env.NO_COLOR;
+const paint = (code, s) => (useColor ? `\x1b[${code}m${s}\x1b[0m` : s);
+const c = {
+  brand: (s) => paint("38;5;43", s), // teal — Busabase accent
+  bold: (s) => paint("1", s),
+  dim: (s) => paint("2", s),
+  cyan: (s) => paint("36", s),
+  yellow: (s) => paint("33", s),
+  green: (s) => paint("32", s),
+};
+
+function printSplash({ host, port, dataDir }) {
+  const exposed = host === "0.0.0.0" || host === "::";
+  // URL you'd actually open: 0.0.0.0/:: aren't browsable, point at localhost.
+  const url = `http://${exposed ? "localhost" : host}:${port}`;
+  const logo = [
+    "  ____                  _                     ",
+    " | __ ) _   _ ___  __ _| |__   __ _ ___  ___  ",
+    " |  _ \\| | | / __|/ _` | '_ \\ / _` / __|/ _ \\ ",
+    " | |_) | |_| \\__ \\ (_| | |_) | (_| \\__ \\  __/ ",
+    " |____/ \\__,_|___/\\__,_|_.__/ \\__,_|___/\\___| ",
+  ];
+
+  const out = [];
+  out.push("");
+  for (const line of logo) out.push(c.brand(line));
+  out.push(
+    `${c.dim("   open-source review app")} ${c.dim("·")} ${c.dim("self-hosted, zero-setup")}`,
+  );
+  out.push("");
+  out.push(`   ${c.green("➜")}  ${c.bold("Server")}   ${c.cyan(url)}`);
+  out.push(`   ${c.green("➜")}  ${c.bold("Data")}     ${c.dim(dataDir)}`);
+  out.push(
+    `   ${c.green("➜")}  ${c.bold("Access")}   ${
+      exposed
+        ? c.yellow(`bound to ${host} — reachable from your network`)
+        : c.dim(`bound to ${host} — this machine only`)
+    }`,
+  );
+  out.push("");
+  out.push(`   ${c.dim("Options")}`);
+  out.push(
+    `     ${c.cyan("--port")} ${c.dim("<n>")}      port to listen on        ${c.dim("(default 15419)")}`,
+  );
+  out.push(
+    `     ${c.cyan("--host")} ${c.dim("<addr>")}   bind address             ${c.dim("(default 127.0.0.1)")}`,
+  );
+  out.push(
+    `     ${c.cyan("--data")} ${c.dim("<dir>")}    data dir (db + uploads)  ${c.dim("(default ~/.busabase/data)")}`,
+  );
+  out.push("");
+  out.push(`   ${c.dim("Tips")}`);
+  out.push(
+    `     ${c.dim("custom port")}      ${c.cyan("busabase server --port 8080")}`,
+  );
+  out.push(
+    `     ${c.dim("expose on LAN")}    ${c.cyan("busabase server --host 0.0.0.0")}`,
+  );
+
+  if (exposed) {
+    out.push("");
+    out.push(
+      `   ${c.yellow("⚠  Busabase is exposed on all network interfaces.")}`,
+    );
+    out.push(
+      `   ${c.dim("   It has no auth by default — only do this on a trusted network or behind a firewall.")}`,
+    );
+  } else {
+    out.push(
+      `     ${c.dim("⚠ exposing makes Busabase reachable by others — use only on a trusted network")}`,
+    );
+  }
+  out.push("");
+
+  console.error(out.join("\n"));
+}
+
 // The Next `output: "standalone"` build emits `server.js` under a path ending in
 // `apps/busabase/` — but the prefix depends on Next's detected workspace root, so
 // it can be nested (e.g. inside a git worktree). Fast-path the common layout,
@@ -55,10 +133,14 @@ async function startServer(argv) {
   // Canonical data root, shared verbatim with busabase-desktop and the Docker
   // image: <root>/pgdata holds the pglite database, <root>/storage holds
   // attachments. Same default location (~/.busabase/data) → same data whichever
-  // way Busabase is launched. Override the root with --db / BUSABASE_DATA_DIR,
-  // or set PG_DATABASE_URL / STORAGE_URL directly to point elsewhere.
+  // way Busabase is launched. Override the root with --data / BUSABASE_DATA_DIR
+  // (--db kept as a back-compat alias), or set PG_DATABASE_URL / STORAGE_URL
+  // directly to point elsewhere.
   const dataDir = resolve(
-    flag(argv, "db") ?? process.env.BUSABASE_DATA_DIR ?? resolve(homedir(), ".busabase/data"),
+    flag(argv, "data") ??
+      flag(argv, "db") ??
+      process.env.BUSABASE_DATA_DIR ??
+      resolve(homedir(), ".busabase/data"),
   );
   const pgDir = resolve(dataDir, "pgdata");
   const storageDir = resolve(dataDir, "storage");
@@ -83,7 +165,7 @@ async function startServer(argv) {
   }
   // Standalone server.js resolves static/public relative to its own directory.
   process.chdir(dirname(entry));
-  console.error(`busabase server → http://${host}:${port}  (data: ${dataDir})`);
+  printSplash({ host, port, dataDir });
   await import(entry);
 }
 

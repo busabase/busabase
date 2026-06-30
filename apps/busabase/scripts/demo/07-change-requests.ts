@@ -72,13 +72,14 @@ export async function run() {
       const cr = await api<ChangeRequestVO>("POST", `/change-requests/${closeCrId}/close`, {
         reason: "demo: testing close endpoint",
       });
-      assert(cr.status === "closed", `expected closed, got ${cr.status}`);
+      // close maps to the terminal "rejected" status (there is no separate "closed" state)
+      assert(cr.status === "rejected", `expected rejected, got ${cr.status}`);
     });
 
-    await step("GET /change-requests/{id} — closed CR has status=closed", async () => {
+    await step("GET /change-requests/{id} — closed CR has status=rejected", async () => {
       if (!closeCrId) return;
       const cr = await api<ChangeRequestVO>("GET", `/change-requests/${closeCrId}`);
-      assert(cr.status === "closed", `expected closed, got ${cr.status}`);
+      assert(cr.status === "rejected", `expected rejected, got ${cr.status}`);
     });
   }
 

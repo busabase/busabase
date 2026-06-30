@@ -34,7 +34,7 @@
       }
     },
     "android": {
-      "package": "so.busabase.app",
+      "package": "com.busabase.app",
       "edgeToEdgeEnabled": true,
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",

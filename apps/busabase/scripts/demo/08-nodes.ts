@@ -10,11 +10,25 @@ interface NodeVO {
   slug: string;
   name: string;
   type: string;
+  children?: NodeVO[];
 }
 
 interface FolderVO {
   node: NodeVO;
   children: NodeVO[];
+}
+
+/** GET /nodes returns a tree (roots with nested children); flatten it for lookups. */
+function flattenNodes(tree: NodeVO[]): NodeVO[] {
+  const out: NodeVO[] = [];
+  const walk = (ns: NodeVO[]) => {
+    for (const n of ns) {
+      out.push(n);
+      if (n.children?.length) walk(n.children);
+    }
+  };
+  walk(tree);
+  return out;
 }
 
 interface ChangeRequestVO {
@@ -40,8 +54,9 @@ export async function run() {
   });
 
   await step("GET /nodes — has folders and bases", async () => {
-    const folders = nodes.filter((n) => n.type === "folder");
-    const bases = nodes.filter((n) => n.type === "base");
+    const all = flattenNodes(nodes);
+    const folders = all.filter((n) => n.type === "folder");
+    const bases = all.filter((n) => n.type === "base");
     assert(folders.length > 0, "expected at least one folder");
     assert(bases.length > 0, "expected at least one base");
   });
@@ -159,7 +174,7 @@ export async function run() {
 
   await step("GET /nodes — demo folder gone after delete+merge", async () => {
     if (!demoFolderNodeId) return;
-    const all = await api<NodeVO[]>("GET", "/nodes");
+    const all = flattenNodes(await api<NodeVO[]>("GET", "/nodes"));
     const found = all.find((n) => n.id === demoFolderNodeId);
     assert(!found, `demo folder still present after delete: ${demoFolderNodeId}`);
   });
@@ -169,8 +184,11 @@ export async function run() {
   let demoBaseNodeId = "";
 
   await step(
-    "POST /nodes/change-requests — create base node (kind: create, nodeType: base)",
+    "POST /nodes/change-requests — create base node (kind: create, nodeType: base, idempotent)",
     async () => {
+      // Re-runnable: skip if a prior run already created this base node.
+      const existing = flattenNodes(await api<NodeVO[]>("GET", "/nodes"));
+      if (existing.some((n) => n.slug === "demo-node-base")) return;
       const cr = await api<ChangeRequestVO>("POST", "/nodes/change-requests", {
         message: "demo: create a base via node CR",
         submittedBy: "demo-script",
@@ -196,7 +214,7 @@ export async function run() {
   );
 
   await step("GET /nodes — demo base node present", async () => {
-    const all = await api<NodeVO[]>("GET", "/nodes");
+    const all = flattenNodes(await api<NodeVO[]>("GET", "/nodes"));
     const n = all.find((n) => n.slug === "demo-node-base");
     assert(!!n, "demo-node-base not found after node CR create");
     demoBaseNodeId = n?.id ?? "";
