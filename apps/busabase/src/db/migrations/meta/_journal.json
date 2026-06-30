@@ -5,22 +5,8 @@
     {
       "idx": 0,
       "version": "7",
-      "when": 1782704984134,
-      "tag": "0000_clumsy_anthem",
-      "breakpoints": true
-    },
-    {
-      "idx": 1,
-      "version": "7",
-      "when": 1782719897586,
-      "tag": "0001_icy_black_bolt",
-      "breakpoints": true
-    },
-    {
-      "idx": 2,
-      "version": "7",
-      "when": 1782725182928,
-      "tag": "0002_plain_captain_cross",
+      "when": 1782823090538,
+      "tag": "0000_spicy_stryfe",
       "breakpoints": true
     }
   ]

@@ -62,9 +62,9 @@ npx busabase server
 ```
 
 Open **http://localhost:15419/dashboard/inbox**. That's the whole setup: a full local
-instance with **embedded PGlite and local file storage — no database to run, nothing to
-configure.** Busabase seeds example Bases, records, and Change Requests on first request,
-so you can inspect the review workflow immediately.
+instance with **no database to run and nothing to configure.** Busabase seeds example
+Bases, records, and Change Requests on first request, so you can inspect the review
+workflow immediately.
 
 ```bash
 npm i -g busabase     # install once, then just: busabase server
@@ -77,7 +77,7 @@ npx busabase-cli --help   # the API client on its own (talks to any busabase ser
 docker run --rm -p 15419:15419 busabase/busabase
 ```
 
-Open **http://localhost:15419/dashboard/inbox**. Defaults to local PGlite persistence — no
+Open **http://localhost:15419/dashboard/inbox**. Stores everything locally — no
 external services. Images are published to Docker Hub (`busabase/busabase`) and GHCR
 (`ghcr.io/busabase/busabase`).
 
@@ -109,6 +109,27 @@ and local file storage under `.data/busabase-storage`.
 - record-level history and audit trails
 - local PGlite persistence under `.data/busabase`
 - REST API endpoints for apps, workflows, and AI Agents
+
+### Connect your AI agent
+
+Busabase has **no built-in model** — you point your own agent (Claude Code, Cursor, Codex,
+Gemini CLI, OpenClaw, Hermes…) at it. Paste one prompt and it onboards itself, then proposes
+changes as Change Requests you approve.
+
+<details>
+<summary><b>Copy the onboarding prompt</b></summary>
+
+```text
+Read and follow the Busabase Agent Skill — it is the single source of truth:
+http://localhost:15419/SETUP_SKILL.md
+
+Follow its onboarding to set me up, and never merge a ChangeRequest without my approval. Reply to me in English.
+```
+
+</details>
+
+**→** [Bring Your Own Agent](./docs/bring-your-agent.md) — the full flow, then
+`npx skills add busabase/skills` installs a permanent skill so you never re-paste it.
 
 ### Where your data lives
 

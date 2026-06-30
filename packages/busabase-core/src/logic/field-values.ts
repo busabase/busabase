@@ -1,6 +1,6 @@
 import "server-only";
 
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, isNull } from "drizzle-orm";
 import { getContextSpaceId } from "../context";
 import { getDb } from "../db";
 import {
@@ -39,7 +39,7 @@ export const projectCommitFields = async (input: {
   const fieldRows = await db
     .select()
     .from(busabaseBaseFields)
-    .where(eq(busabaseBaseFields.baseId, input.baseId));
+    .where(and(eq(busabaseBaseFields.baseId, input.baseId), isNull(busabaseBaseFields.deletedAt)));
   const fieldsBySlug = new Map(fieldRows.map((field) => [field.slug, field]));
   const sourceRecordId = input.recordId ?? null;
   const relationEntries = sourceRecordId
@@ -106,6 +106,24 @@ export const projectCommitFields = async (input: {
       },
     ];
   });
+
+  // A record-level projection is a full REPLACE of the record's current values.
+  // Without this, every update appends a new row-set and leaves the previous
+  // version's values behind (no unique index dedups them), corrupting record
+  // search (listRecordsByFieldText) and the "make field required" / "remove
+  // choice" schema-change guards — all of which read recordId rows expecting the
+  // single CURRENT value. Tombstoned rows (deletedAt set by a field delete) are
+  // preserved so a later field restore can bring those values back.
+  if (input.recordId) {
+    await db
+      .delete(busabaseFieldValues)
+      .where(
+        and(
+          eq(busabaseFieldValues.recordId, input.recordId),
+          isNull(busabaseFieldValues.deletedAt),
+        ),
+      );
+  }
 
   if (projectedValues.length === 0) {
     if (relationLinks.length === 0) {

@@ -1,5 +1,5 @@
 {
-  "id": "24bdcec6-1eea-4bd7-a8cd-fa100655fd0f",
+  "id": "4f7fa002-680c-4c4f-8d45-8d9fad4c3aab",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "version": "7",
   "dialect": "postgresql",
@@ -876,6 +876,12 @@
           "notNull": true,
           "default": 0
         },
+        "archived_at": {
+          "name": "archived_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": false
+        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp",
@@ -909,6 +915,7 @@
             }
           ],
           "isUnique": true,
+          "where": "\"busabase_nodes\".\"archived_at\" IS NULL",
           "concurrently": false,
           "method": "btree",
           "with": {}
@@ -1978,6 +1985,7 @@
             }
           ],
           "isUnique": true,
+          "where": "\"busabase_bases\".\"archived_at\" IS NULL",
           "concurrently": false,
           "method": "btree",
           "with": {}
@@ -2918,6 +2926,7 @@
         "node_create",
         "node_rename",
         "node_delete",
+        "node_restore",
         "node_move",
         "skill_file_create",
         "skill_file_update",

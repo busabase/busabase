@@ -288,9 +288,20 @@ export const mergeBaseConvertField = async (
     throw new Error(`base_convert_field commit missing required fields: ${item.id}`);
   }
 
-  const { busabaseFieldValues } = await import("../../../../db/schema");
+  const { busabaseFieldValues, busabaseCommits, busabaseRecords } = await import(
+    "../../../../db/schema"
+  );
   const { convertFieldValue } = await import("../../utils/field-conversion");
   const { normalizeFieldValue } = await import("../../../../logic/vo");
+
+  // Resolve the field's slug — the authoritative record data is keyed by slug in
+  // each record's head-commit `fields` JSON, and we rewrite that below.
+  const [fieldRow] = await db
+    .select({ slug: busabaseBaseFields.slug, baseId: busabaseBaseFields.baseId })
+    .from(busabaseBaseFields)
+    .where(eq(busabaseBaseFields.id, fieldData.fieldId))
+    .limit(1);
+  const fieldSlug = fieldRow?.slug ?? fieldData.slug ?? null;
 
   // Load record-level values for this field
   const valueRows = await db
@@ -333,7 +344,10 @@ export const mergeBaseConvertField = async (
     .set({ type: fieldData.newType, options: newOptions })
     .where(eq(busabaseBaseFields.id, fieldData.fieldId));
 
-  // Migrate field values: convert each row's stored value to the new type
+  // Migrate field values: convert each row's stored value to the new type, and
+  // remember the converted value per record so we can rewrite the authoritative
+  // record data (commit.fields) below.
+  const convertedByRecord = new Map<string, unknown>();
   for (const row of valueRows) {
     const raw = row.valueJson ?? row.valueText ?? row.valueNumber ?? row.valueBool ?? null;
     let converted: unknown = null;
@@ -346,6 +360,7 @@ export const mergeBaseConvertField = async (
         converted = null;
       }
     }
+    if (row.recordId) convertedByRecord.set(row.recordId, converted);
     const norm = normalizeFieldValue(converted);
     await db
       .update(busabaseFieldValues)
@@ -359,6 +374,32 @@ export const mergeBaseConvertField = async (
         updatedAt: timestamp,
       })
       .where(eq(busabaseFieldValues.id, row.id));
+  }
+
+  // Rewrite the authoritative record data. Records are hydrated from their head
+  // commit's `fields` JSON (NOT from busabase_field_values), so without this the
+  // displayed/edited value would keep the pre-conversion representation while the
+  // index held the converted one — e.g. a select cell holding a raw label instead
+  // of a choice id. Update each affected record's head commit in lockstep.
+  if (fieldSlug && convertedByRecord.size > 0) {
+    for (const [recordId, converted] of convertedByRecord) {
+      const [record] = await db
+        .select({ headCommitId: busabaseRecords.headCommitId })
+        .from(busabaseRecords)
+        .where(eq(busabaseRecords.id, recordId))
+        .limit(1);
+      if (!record) continue;
+      const [commit] = await db
+        .select({ fields: busabaseCommits.fields })
+        .from(busabaseCommits)
+        .where(eq(busabaseCommits.id, record.headCommitId))
+        .limit(1);
+      if (!commit) continue;
+      await db
+        .update(busabaseCommits)
+        .set({ fields: { ...commit.fields, [fieldSlug]: converted } })
+        .where(eq(busabaseCommits.id, record.headCommitId));
+    }
   }
 
   await db

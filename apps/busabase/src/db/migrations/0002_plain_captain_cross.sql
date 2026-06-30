@@ -1,1 +1,0 @@
-ALTER TYPE "public"."busabase_operation_kind" ADD VALUE 'node_restore' BEFORE 'node_move';

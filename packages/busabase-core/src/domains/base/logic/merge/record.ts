@@ -243,13 +243,23 @@ export const mergeRecordRestore = async (
     .update(busabaseRecords)
     .set({ status: "active", archivedAt: null, updatedAt: timestamp })
     .where(eq(busabaseRecords.id, targetRecord.id));
-  // Un-delete the inbound links that were soft-deleted when this record was
-  // archived (mirror of mergeRecordDelete). Auto-number values are untouched —
-  // restore intentionally preserves the original assigned number.
-  await db
-    .update(busabaseRecordLinks)
-    .set({ deletedAt: null, updatedAt: timestamp })
-    .where(eq(busabaseRecordLinks.targetRecordId, targetRecord.id));
+  // Un-delete ONLY the inbound links that were soft-deleted by this record's
+  // archive — matched by the archive timestamp (mergeRecordDelete stamps both the
+  // record's archivedAt and the links' deletedAt with the same merge timestamp).
+  // A blanket un-delete would resurrect links removed for other reasons (e.g. a
+  // source-side unlink before the archive). Mirrors mergeBaseRestore's technique.
+  // Auto-number values are untouched — restore preserves the original number.
+  if (targetRecord.archivedAt) {
+    await db
+      .update(busabaseRecordLinks)
+      .set({ deletedAt: null, updatedAt: timestamp })
+      .where(
+        and(
+          eq(busabaseRecordLinks.targetRecordId, targetRecord.id),
+          eq(busabaseRecordLinks.deletedAt, targetRecord.archivedAt),
+        ),
+      );
+  }
   await db
     .update(busabaseOperations)
     .set({ status: "merged", mergedRecordId: targetRecord.id, updatedAt: timestamp })
