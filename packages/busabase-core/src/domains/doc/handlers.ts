@@ -134,6 +134,11 @@ export const createDoc = async (input: z.input<typeof createDocInputSchema>): Pr
   if (!node) {
     throw new Error("Failed to create doc node");
   }
+  // Direct create (no change request) — record it so the audit trail is complete.
+  await insertAuditEvent(db, {
+    action: "doc.created",
+    metadata: { nodeId, slug: node.slug, name: node.name },
+  });
   return toDocVO(node);
 };
 
@@ -168,6 +173,9 @@ export const updateDocBody = async (
   }
   const parsed = updateDocInputSchema.parse(input);
   await writeDocBody(node.id, parsed.body);
+  // Direct edit (no change request) — record it so the audit trail is complete.
+  const db = await getDb();
+  await insertAuditEvent(db, { action: "doc.updated", metadata: { nodeId: node.id } });
   return toDocVO(node);
 };
 
@@ -281,7 +289,7 @@ export const createDocChangeRequest = async (
 
 // node-targeted merge handler for doc_update: write the proposed body to storage.
 export const mergeDocUpdate = async (
-  _ctx: MergeCtx,
+  ctx: MergeCtx,
   item: OperationPO,
   node: NodePO,
   headCommit: CommitPO,
@@ -292,5 +300,7 @@ export const mergeDocUpdate = async (
   const fields = headCommit.fields as { body?: string };
   const body = fields.body ?? "";
   await writeDocBody(node.id, body);
-  await syncDocAssetUsages(node.id, body);
+  // Pass the merge executor so the asset-usage sync runs on the SAME transaction
+  // (re-acquiring getDb() inside a tx would deadlock the single pglite connection).
+  await syncDocAssetUsages(node.id, body, ctx.db);
 };

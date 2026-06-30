@@ -1,4 +1,5 @@
-import type { BaseFieldVO, FieldType } from "busabase-contract/types";
+import type { AttachmentRef, BaseFieldVO, FieldType } from "busabase-contract/types";
+import { getAttachmentRefs } from "./attachment";
 import { stringifyFieldValue } from "./busabase-display";
 
 /** Field types the mobile form renders an editable control for. */
@@ -15,6 +16,7 @@ const EDITABLE_TYPES: ReadonlySet<FieldType> = new Set<FieldType>([
   "url",
   "email",
   "phone",
+  "attachment",
 ]);
 
 /** System / computed field types the form shows read-only (server fills them). */
@@ -22,7 +24,7 @@ export function isEditableField(field: BaseFieldVO): boolean {
   return EDITABLE_TYPES.has(field.type);
 }
 
-export type RecordFormValue = string | boolean | string[];
+export type RecordFormValue = string | boolean | string[] | AttachmentRef[];
 
 export function initialFieldValue(field: BaseFieldVO, value?: unknown): RecordFormValue {
   if (field.type === "checkbox") {
@@ -32,6 +34,9 @@ export function initialFieldValue(field: BaseFieldVO, value?: unknown): RecordFo
     return Array.isArray(value)
       ? value.filter((item): item is string => typeof item === "string")
       : [];
+  }
+  if (field.type === "attachment") {
+    return getAttachmentRefs(value);
   }
   return stringifyFieldValue(value);
 }
@@ -66,6 +71,9 @@ export function normalizeFormValues(
         return [field.slug, value === true];
       }
       if (field.type === "multiselect") {
+        return [field.slug, Array.isArray(value) ? value : []];
+      }
+      if (field.type === "attachment") {
         return [field.slug, Array.isArray(value) ? value : []];
       }
       return [field.slug, typeof value === "string" ? value : ""];

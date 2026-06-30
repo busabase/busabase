@@ -145,6 +145,7 @@
   "scripts": {
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
+    "coverage:badge": "vitest run --coverage --coverage.include='src/logic/**' --coverage.include='src/domains/**' --coverage.exclude='src/domains/dashboard/**' --coverage.exclude='**/*.test.ts' --coverage.exclude='**/types/**' --coverage.reporter=json-summary --coverage.reporter=text-summary && node scripts/coverage-badge.mjs",
     "typecheck": "tsc --noEmit"
   }
 }

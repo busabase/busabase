@@ -221,6 +221,17 @@ export const purgeNode = async (nodeId: string): Promise<{ purged: boolean }> =>
     await db.delete(busabaseChangeRequests).where(inArray(busabaseChangeRequests.id, crIds));
   }
   await db.delete(busabaseNodes).where(inArray(busabaseNodes.id, subtreeIds));
+  // Permanent destructive delete (no change request) — record it so the audit
+  // trail is complete (this is the one mutation that cannot be undone).
+  await insertAuditEvent(db, {
+    action: "node.purged",
+    metadata: {
+      nodeId,
+      slug: node.slug,
+      type: node.type,
+      purgedNodeCount: subtreeIds.length,
+    },
+  });
   return { purged: true };
 };
 

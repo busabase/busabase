@@ -169,6 +169,12 @@ export const createBase = async (input: z.infer<typeof createBaseInputSchema>) =
   if (!base) {
     throw new Error("Failed to create base");
   }
+  // Direct create (no change request) — record it so the audit trail is complete.
+  await insertAuditEvent(db, {
+    action: "base.created",
+    baseId,
+    metadata: { slug: parsed.slug, name: parsed.name, nodeId },
+  });
   return base;
 };
 

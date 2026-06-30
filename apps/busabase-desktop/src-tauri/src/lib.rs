@@ -366,6 +366,13 @@ fn is_busabase_healthy() -> bool {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        // Launch-at-login support (opt-in via the in-app toggle). On macOS this
+        // registers a per-user LaunchAgent; Windows uses the registry Run key and
+        // Linux a `.desktop` autostart entry.
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            None,
+        ))
         .plugin(
             tauri_plugin_updater::Builder::new()
                 .default_version_comparator(should_update_busabase_desktop)

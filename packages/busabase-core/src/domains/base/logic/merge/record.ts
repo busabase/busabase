@@ -120,8 +120,9 @@ export const mergeRecordCreate = async (ctx: MergeCtx, item: OperationPO, headCo
     commitId: item.headCommitId,
     recordId,
     fields,
+    tx: db,
   });
-  await syncRecordAssetUsages(baseId, recordId, headCommit.fields);
+  await syncRecordAssetUsages(baseId, recordId, headCommit.fields, db);
   await db
     .update(busabaseOperations)
     .set({ status: "merged", mergedRecordId: recordId, updatedAt: timestamp })
@@ -183,8 +184,9 @@ export const mergeRecordUpdate = async (ctx: MergeCtx, item: OperationPO, headCo
     commitId: headCommitId,
     recordId: targetRecord.id,
     fields,
+    tx: db,
   });
-  await syncRecordAssetUsages(baseId, targetRecord.id, fields);
+  await syncRecordAssetUsages(baseId, targetRecord.id, fields, db);
   await db
     .update(busabaseOperations)
     .set({ status: "merged", mergedRecordId: targetRecord.id, updatedAt: timestamp })
@@ -219,7 +221,7 @@ export const mergeRecordDelete = async (
         isNull(busabaseRecordLinks.deletedAt),
       ),
     );
-  await removeRecordAssetUsages(targetRecord.id);
+  await removeRecordAssetUsages(targetRecord.id, db);
   await db
     .update(busabaseOperations)
     .set({ status: "archived", mergedRecordId: targetRecord.id, updatedAt: timestamp })

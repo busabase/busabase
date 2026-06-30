@@ -33,8 +33,11 @@ export const projectCommitFields = async (input: {
   operationId?: string | null;
   recordId?: string | null;
   fields: Record<string, unknown>;
+  /** When merging inside a transaction, the tx executor — avoids deadlocking the
+   *  single pglite connection by NOT re-acquiring the getDb() singleton. */
+  tx?: Awaited<ReturnType<typeof getDb>>;
 }) => {
-  const db = await getDb();
+  const db = input.tx ?? (await getDb());
   const timestamp = now();
   const fieldRows = await db
     .select()

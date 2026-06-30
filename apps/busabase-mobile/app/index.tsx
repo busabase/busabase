@@ -19,7 +19,7 @@ export default function ConnectionScreen() {
 
   if (state.status === "loading") {
     return (
-      <NativeScreen title="Busabase Mobile" subtitle="Preparing connection state">
+      <NativeScreen title="Busabase" subtitle="Preparing connection state">
         <NativeLoadingState label="Checking saved connection" />
       </NativeScreen>
     );
@@ -30,7 +30,7 @@ export default function ConnectionScreen() {
   }
 
   return (
-    <NativeScreen title="Busabase Mobile" subtitle="Connect to a Busabase workspace">
+    <NativeScreen title="Busabase" subtitle="Connect to a Busabase workspace">
       <View style={[styles.hero, { backgroundColor: tokens.card, borderColor: tokens.border }]}>
         <Image accessibilityLabel="Busabase logo" source={logoSource} style={styles.logo} />
         <Text style={[typography.display, { color: tokens.foreground }]}>

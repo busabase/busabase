@@ -29,6 +29,15 @@ export const auditEventInputSchema = z.object({
     "change_request.deleted",
     "change_request.reviewed",
     "change_request.merged",
+    // Direct (non-change-request) mutations — kept in sync with the contract's
+    // auditActionSchema so bypass operations still leave an audit trail.
+    "base.created",
+    "field.created",
+    "doc.created",
+    "doc.updated",
+    "skill.created",
+    "asset.deleted",
+    "node.purged",
   ]),
   actorId: z.string().optional().default("local-viewer"),
   baseId: z.string().optional().nullable(),
@@ -56,7 +65,7 @@ export { listInputSchema };
 
 export const insertAuditEvent = async (
   db: Awaited<ReturnType<typeof getDb>>,
-  input: z.infer<typeof auditEventInputSchema>,
+  input: z.input<typeof auditEventInputSchema>,
 ) => {
   const parsed = auditEventInputSchema.parse(input);
   const [event] = await db

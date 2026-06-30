@@ -1,12 +1,22 @@
 import Constants from "expo-constants";
 import { useRouter } from "expo-router";
-import { Bell, ExternalLink, LogOut, Server, Shield, Sparkles, Trash2 } from "lucide-react-native";
+import {
+  Bell,
+  ExternalLink,
+  Languages,
+  LogOut,
+  Server,
+  Shield,
+  Sparkles,
+  Trash2,
+} from "lucide-react-native";
 import { useState } from "react";
 import { Linking, Pressable, StyleSheet, Switch, Text, View } from "react-native";
 import { ConnectionGuard } from "~/components/busabase/ConnectionGuard";
 import { DrawerScaffold } from "~/components/busabase/DrawerScaffold";
 import { Button } from "~/components/ui/Button";
 import { useConnection } from "~/connection/connection-store";
+import { type LocalePreference, useI18n } from "~/i18n";
 import { formatDate } from "~/lib/format";
 import { useNotifications } from "~/notifications/notification-provider";
 import type { NotificationSettings } from "~/notifications/notification-settings";
@@ -22,6 +32,7 @@ const intervalOptions: Array<{ label: string; value: NotificationSettings["pollI
 function SettingsContent() {
   const router = useRouter();
   const tokens = useTokens();
+  const { t, preference, setPreference, options } = useI18n();
   const { state, disconnect, connectSelfHosted, removeServerFromHistory } = useConnection();
   const { supported, settings, permissionDenied, setEnabled, setPollInterval, openSystemSettings } =
     useNotifications();
@@ -91,6 +102,51 @@ function SettingsContent() {
             ))}
           </View>
         ) : null}
+
+        <View style={[styles.card, { backgroundColor: tokens.card, borderColor: tokens.border }]}>
+          <View style={styles.notificationTitle}>
+            <Languages size={18} color={tokens.foreground} />
+            <Text style={[typography.h2, { color: tokens.foreground }]}>{t.settings.language}</Text>
+          </View>
+          <Text style={[typography.small, { color: tokens.mutedForeground }]}>
+            {t.settings.languageHint}
+          </Text>
+          <View style={styles.languageRow}>
+            {[
+              { value: "auto" as LocalePreference, label: t.settings.auto },
+              ...options.map((option) => ({
+                value: option.code as LocalePreference,
+                label: option.label,
+              })),
+            ].map((option) => {
+              const active = preference === option.value;
+              return (
+                <Pressable
+                  key={option.value}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: active }}
+                  style={[
+                    styles.intervalChip,
+                    {
+                      backgroundColor: active ? tokens.primaryMuted : "transparent",
+                      borderColor: active ? tokens.primary : tokens.border,
+                    },
+                  ]}
+                  onPress={() => setPreference(option.value)}
+                >
+                  <Text
+                    style={[
+                      typography.small,
+                      { color: active ? tokens.foreground : tokens.mutedForeground },
+                    ]}
+                  >
+                    {option.label}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+        </View>
 
         <View style={[styles.card, { backgroundColor: tokens.card, borderColor: tokens.border }]}>
           <View style={styles.notificationHeader}>
@@ -265,6 +321,7 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   intervalRow: { flexDirection: "row", alignItems: "center", gap: 8, flexWrap: "wrap" },
+  languageRow: { flexDirection: "row", alignItems: "center", gap: 8, flexWrap: "wrap" },
   intervalChip: {
     minHeight: 32,
     justifyContent: "center",

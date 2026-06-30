@@ -1,6 +1,6 @@
 import "server-only";
 
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, isNull, ne } from "drizzle-orm";
 import { getContextSpaceId } from "../../../../context";
 import type { BaseFieldPO, CommitPO, OperationPO } from "../../../../db/schema";
 import { busabaseBaseFields, busabaseBases, busabaseOperations } from "../../../../db/schema";
@@ -455,6 +455,38 @@ export const mergeBaseRestoreField = async (
   if (!fieldData.fieldId) {
     throw new Error(`base_restore_field commit missing fieldId: ${item.id}`);
   }
+
+  // Guard slug reuse: a field's slug is freed once it is deleted, so a new active
+  // field can take it. Restoring the old field would then leave two active fields
+  // with the same slug — fail with a clear message instead (mirrors the base/node
+  // restore slug-collision guards).
+  const [restoring] = await db
+    .select({ baseId: busabaseBaseFields.baseId, slug: busabaseBaseFields.slug })
+    .from(busabaseBaseFields)
+    .where(eq(busabaseBaseFields.id, fieldData.fieldId))
+    .limit(1);
+  if (restoring) {
+    const [slugTaken] = await db
+      .select({ id: busabaseBaseFields.id })
+      .from(busabaseBaseFields)
+      .where(
+        and(
+          eq(busabaseBaseFields.baseId, restoring.baseId),
+          eq(busabaseBaseFields.slug, restoring.slug),
+          isNull(busabaseBaseFields.deletedAt),
+          ne(busabaseBaseFields.id, fieldData.fieldId),
+        ),
+      )
+      .limit(1);
+    if (slugTaken) {
+      const { ORPCError } = await import("@orpc/server");
+      throw new ORPCError("CONFLICT", {
+        message: `Cannot restore: the field slug "${restoring.slug}" is now used by another field. Rename it first.`,
+        data: { fieldId: fieldData.fieldId, slug: restoring.slug },
+      });
+    }
+  }
+
   await db
     .update(busabaseBaseFields)
     .set({ deletedAt: null })

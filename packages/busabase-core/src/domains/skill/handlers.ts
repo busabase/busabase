@@ -112,6 +112,11 @@ export const createSkill = async (input: z.input<typeof createSkillInputSchema>)
     await writeSkillTextFile(node, file.path, file.content);
   }
 
+  // Direct create (no change request) — record it so the audit trail is complete.
+  await insertAuditEvent(db, {
+    action: "skill.created",
+    metadata: { nodeId, slug: parsed.slug, name: parsed.name },
+  });
   return getSkill(nodeId);
 };
 

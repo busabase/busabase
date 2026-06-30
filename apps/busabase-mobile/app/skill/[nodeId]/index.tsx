@@ -1,6 +1,6 @@
-import { skipToken, useQuery } from "@tanstack/react-query";
+import { skipToken, useMutation, useQuery } from "@tanstack/react-query";
 import type { SkillVO } from "busabase-contract/types";
-import { useLocalSearchParams } from "expo-router";
+import { useLocalSearchParams, useRouter } from "expo-router";
 import { FileText, Folder, X } from "lucide-react-native";
 import { useState } from "react";
 import { Modal, Platform, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
@@ -8,14 +8,21 @@ import { useBusabaseOrpc } from "~/api/use-busabase-orpc";
 import { ConnectionGuard } from "~/components/busabase/ConnectionGuard";
 import { DrawerScaffold } from "~/components/busabase/DrawerScaffold";
 import { NativeEmptyState, NativeErrorState, NativeLoadingState } from "~/components/native-screen";
+import { Button } from "~/components/ui/Button";
+import { TextInput } from "~/components/ui/TextInput";
+import { useI18n } from "~/i18n";
 import { mobile, radius, typography } from "~/theme/tokens";
 import { useTokens } from "~/theme/use-tokens";
+
+const SUBMITTED_BY = "mobile-editor";
 
 type SkillFile = SkillVO["files"][number];
 
 interface OpenFile {
   path: string;
   content: string;
+  /** The original content, to detect edits before submitting a change request. */
+  original: string;
   loading: boolean;
   error: string | null;
 }
@@ -34,8 +41,27 @@ function SkillDetailContent() {
   const params = useLocalSearchParams<{ nodeId?: string }>();
   const nodeId = typeof params.nodeId === "string" ? params.nodeId : "";
   const tokens = useTokens();
+  const router = useRouter();
+  const { t } = useI18n();
   const buda = useBusabaseOrpc();
   const [openFile, setOpenFile] = useState<OpenFile | null>(null);
+
+  const saveFileMutation = useMutation({
+    mutationFn: async () => {
+      if (!buda || !openFile) throw new Error("Not connected");
+      // Skill file edits go through review: a change request with an update op.
+      return buda.client.skills.createChangeRequest({
+        nodeId,
+        message: `Update ${openFile.path}`,
+        submittedBy: SUBMITTED_BY,
+        operations: [{ kind: "update", path: openFile.path, content: openFile.content }],
+      });
+    },
+    onSuccess: (changeRequest) => {
+      setOpenFile(null);
+      router.push({ pathname: "/change-requests/[id]", params: { id: changeRequest.id } });
+    },
+  });
 
   const skillQuery = useQuery(
     buda && nodeId
@@ -48,14 +74,22 @@ function SkillDetailContent() {
     if (file.type !== "file" || !buda) {
       return;
     }
-    setOpenFile({ path: file.path, content: "", loading: true, error: null });
+    setOpenFile({ path: file.path, content: "", original: "", loading: true, error: null });
+    saveFileMutation.reset();
     try {
       const result = await buda.client.skills.readFile({ nodeId, filePath: file.path });
-      setOpenFile({ path: file.path, content: result.content, loading: false, error: null });
+      setOpenFile({
+        path: file.path,
+        content: result.content,
+        original: result.content,
+        loading: false,
+        error: null,
+      });
     } catch (error) {
       setOpenFile({
         path: file.path,
         content: "",
+        original: "",
         loading: false,
         error: error instanceof Error ? error.message : "Could not read file",
       });
@@ -185,9 +219,36 @@ function SkillDetailContent() {
             ) : openFile?.error ? (
               <NativeErrorState message={openFile.error} />
             ) : (
-              <ScrollView style={styles.modalBody} contentContainerStyle={styles.modalBodyContent}>
-                <Text style={[styles.code, { color: tokens.foreground }]}>{openFile?.content}</Text>
-              </ScrollView>
+              <>
+                <ScrollView
+                  style={styles.modalBody}
+                  contentContainerStyle={styles.modalBodyContent}
+                >
+                  <TextInput
+                    value={openFile?.content ?? ""}
+                    multiline
+                    textAlignVertical="top"
+                    style={[styles.code, styles.editor]}
+                    onChangeText={(content) =>
+                      setOpenFile((current) => (current ? { ...current, content } : current))
+                    }
+                  />
+                </ScrollView>
+                <View style={[styles.modalFooter, { borderColor: tokens.border }]}>
+                  {saveFileMutation.error ? (
+                    <Text style={[typography.small, { color: tokens.destructive }]}>
+                      {saveFileMutation.error.message}
+                    </Text>
+                  ) : null}
+                  <Button
+                    label={t.common.save}
+                    loading={saveFileMutation.isPending}
+                    disabled={!openFile || openFile.content === openFile.original}
+                    fullWidth
+                    onPress={() => saveFileMutation.mutate()}
+                  />
+                </View>
+              </>
             )}
           </View>
         </View>
@@ -238,9 +299,15 @@ const styles = StyleSheet.create({
   modalTitle: { flex: 1, minWidth: 0 },
   modalBody: { paddingHorizontal: 18 },
   modalBodyContent: { paddingVertical: 16 },
+  modalFooter: {
+    padding: 18,
+    gap: 10,
+    borderTopWidth: StyleSheet.hairlineWidth,
+  },
   code: {
     fontFamily: Platform.select({ ios: "Menlo", android: "monospace", default: "monospace" }),
     fontSize: 13,
     lineHeight: 19,
   },
+  editor: { minHeight: 240, paddingTop: 12 },
 });

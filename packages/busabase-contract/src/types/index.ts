@@ -44,7 +44,16 @@ export type AuditAction =
   | "change_request.updated"
   | "change_request.deleted"
   | "change_request.reviewed"
-  | "change_request.merged";
+  | "change_request.merged"
+  // Direct (non-change-request) mutations — keep in sync with the contract's
+  // auditActionSchema (contract/schemas.ts) and the core auditEventInputSchema.
+  | "base.created"
+  | "field.created"
+  | "doc.created"
+  | "doc.updated"
+  | "skill.created"
+  | "asset.deleted"
+  | "node.purged";
 
 export interface NodeVO {
   id: string;
@@ -65,6 +74,10 @@ export interface NodeVO {
   baseId: string | null;
   children: NodeVO[];
 }
+
+// Attachment field values are stored as AttachmentRef[]; re-exported for the public barrel
+// so clients can type a record's attachment-field value without importing open-domains.
+export type { AttachmentRef } from "open-domains/attachments/types";
 
 // Base-domain VOs live in the base domain; re-exported here for the public barrel.
 import type { BaseVO } from "../domains/base/types";

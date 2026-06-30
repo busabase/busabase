@@ -289,7 +289,10 @@ const mergeNodeDelete = async (ctx: MergeCtx, _item: OperationPO, node: NodePO) 
       await ctx.db
         .update(busabaseRecords)
         .set({ status: "archived", archivedAt: ctx.timestamp, updatedAt: ctx.timestamp })
-        .where(eq(busabaseRecords.baseId, base.id));
+        // Only active records — preserve the archive time of records the user
+        // already deleted individually, so a later restore can leave them deleted
+        // (mirrors mergeBaseArchive). Restore matches on this batch timestamp.
+        .where(and(eq(busabaseRecords.baseId, base.id), eq(busabaseRecords.status, "active")));
       // The base node row is kept (deleting it would cascade-delete the base,
       // which is FK-restricted by commits). Soft-archive it so it leaves the
       // node tree and frees its slug (partial unique index), matching the
@@ -311,7 +314,7 @@ const mergeNodeDelete = async (ctx: MergeCtx, _item: OperationPO, node: NodePO) 
     .where(inArray(busabaseNodes.id, subtreeIds));
   // A folder subtree can contain Base nodes — archive their base row + records in
   // lockstep, otherwise the base lingers in bases.list with no node in the tree.
-  await setBasesArchivedForNodes(ctx, subtreeIds, ctx.timestamp);
+  await setBasesArchivedForNodes(ctx, subtreeIds, ctx.timestamp, ctx.timestamp);
 };
 
 /**
@@ -323,6 +326,7 @@ const setBasesArchivedForNodes = async (
   ctx: MergeCtx,
   nodeIds: string[],
   archivedAt: Date | null,
+  batchArchivedAt: Date,
 ): Promise<void> => {
   if (nodeIds.length === 0) {
     return;
@@ -336,14 +340,26 @@ const setBasesArchivedForNodes = async (
   }
   const baseIds = baseRows.map((b) => b.id);
   await ctx.db.update(busabaseBases).set({ archivedAt }).where(inArray(busabaseBases.id, baseIds));
-  await ctx.db
-    .update(busabaseRecords)
-    .set({
-      status: archivedAt ? "archived" : "active",
-      archivedAt,
-      updatedAt: ctx.timestamp,
-    })
-    .where(inArray(busabaseRecords.baseId, baseIds));
+  if (archivedAt) {
+    // Archive: only ACTIVE records, preserving the archive time of records the
+    // user already deleted individually (mirrors mergeBaseArchive).
+    await ctx.db
+      .update(busabaseRecords)
+      .set({ status: "archived", archivedAt, updatedAt: ctx.timestamp })
+      .where(and(inArray(busabaseRecords.baseId, baseIds), eq(busabaseRecords.status, "active")));
+  } else {
+    // Restore: only the records THIS batch archived (matched by timestamp), so
+    // individually-deleted records stay deleted (mirrors mergeBaseRestore).
+    await ctx.db
+      .update(busabaseRecords)
+      .set({ status: "active", archivedAt: null, updatedAt: ctx.timestamp })
+      .where(
+        and(
+          inArray(busabaseRecords.baseId, baseIds),
+          eq(busabaseRecords.archivedAt, batchArchivedAt),
+        ),
+      );
+  }
 };
 
 /**
@@ -358,6 +374,33 @@ const collectActiveSubtreeIds = async (db: MergeCtx["db"], rootId: string): Prom
       .select({ id: busabaseNodes.id })
       .from(busabaseNodes)
       .where(and(inArray(busabaseNodes.parentId, frontier), isNull(busabaseNodes.archivedAt)));
+    frontier = children.map((c) => c.id);
+    collected.push(...frontier);
+  }
+  return collected;
+};
+
+/**
+ * BFS the ARCHIVED subtree rooted at `rootId`, restricted to nodes archived in the
+ * same batch (`archivedAt` equal to the root's). This is what a restore walks so it
+ * brings back exactly the subtree a single delete removed — NOT unrelated nodes that
+ * happen to share the timestamp because they were deleted by other operations in the
+ * same change request (every op in a CR shares one merge timestamp).
+ */
+const collectArchivedSubtreeIds = async (
+  db: MergeCtx["db"],
+  rootId: string,
+  archivedAt: Date,
+): Promise<string[]> => {
+  const collected = [rootId];
+  let frontier = [rootId];
+  while (frontier.length > 0) {
+    const children = await db
+      .select({ id: busabaseNodes.id })
+      .from(busabaseNodes)
+      .where(
+        and(inArray(busabaseNodes.parentId, frontier), eq(busabaseNodes.archivedAt, archivedAt)),
+      );
     frontier = children.map((c) => c.id);
     collected.push(...frontier);
   }
@@ -387,24 +430,22 @@ const mergeNodeRestore = async (ctx: MergeCtx, _item: OperationPO, node: NodePO)
       message: `Cannot restore: the slug "${node.slug}" is now used by a sibling. Rename it first.`,
     });
   }
-  // Restore the same batch that was archived together (shared archivedAt), so a
-  // folder brings back exactly the subtree its delete removed — not items that
-  // were independently archived earlier.
-  const batch = await db
-    .select({ id: busabaseNodes.id })
-    .from(busabaseNodes)
-    .where(
-      and(eq(busabaseNodes.spaceId, node.spaceId), eq(busabaseNodes.archivedAt, node.archivedAt)),
-    );
-  const batchIds = batch.map((b) => b.id);
+  // Restore exactly the subtree this node's delete removed — its archived
+  // descendants sharing the same archive timestamp. Scoping to the subtree (not
+  // the space-wide `archivedAt` batch) means a change request that deleted several
+  // unrelated nodes — which all share one merge timestamp — restores only the one
+  // being un-deleted, instead of resurrecting the others too.
+  const batchIds = await collectArchivedSubtreeIds(db, node.id, node.archivedAt);
   await db
     .update(busabaseNodes)
     .set({ archivedAt: null, updatedAt: timestamp })
     .where(inArray(busabaseNodes.id, batchIds));
   // Un-archive any Base nodes in the restored batch (their base row + records),
   // mirroring the archive in mergeNodeDelete. Covers both a base restored
-  // directly and a base brought back as part of a folder subtree.
-  await setBasesArchivedForNodes(ctx, batchIds, null);
+  // directly and a base brought back as part of a folder subtree. Records are
+  // restored only if they were archived by THIS batch (node.archivedAt), so
+  // records the user deleted individually beforehand stay deleted.
+  await setBasesArchivedForNodes(ctx, batchIds, null, node.archivedAt);
 };
 
 // ── Agent trigger ─────────────────────────────────────────────────────────────
@@ -1009,85 +1050,99 @@ const _mergeChangeRequest = async (changeRequestId: string) => {
 
   // --- node-targeted change requests ----------------------------------------
   if (changeRequest.targetType === "node") {
-    const ctx: MergeCtx = {
-      db,
-      timestamp,
-      actorId: changeRequest.submittedBy,
-      headCommitsById,
-      targetRecordsById: new Map(),
-      targetViewsById: new Map(),
-      mergedNodeIds: [],
-      mergedRecordIds: [],
-      mergedViewIds: [],
-      resolvedRecordFields: new Map(),
-    };
-    for (const item of operationKinds) {
-      const headCommit = headCommitsById.get(item.headCommitId);
-      if (!headCommit) {
-        throw new Error(`Operation head commit not found: ${item.headCommitId}`);
+    // A node change request can carry MANY operations (nodes.createChangeRequest),
+    // and operations can depend on each other ([create folder, create base under
+    // it] or [restore node, rename node]). Run the whole batch in one transaction
+    // so it is all-or-nothing: a later operation failing rolls back every earlier
+    // one instead of leaving the CR half-merged with the rest stuck "approved".
+    // Every db touch inside MUST go through `tx` — re-acquiring the getDb()
+    // singleton mid-transaction deadlocks the single pglite connection. (Storage
+    // file writes are not transactional but are idempotently re-synced on retry.)
+    const mergedNodeIds: string[] = [];
+    await db.transaction(async (tx) => {
+      const ctx: MergeCtx = {
+        db: tx as unknown as MergeCtx["db"],
+        timestamp,
+        actorId: changeRequest.submittedBy,
+        headCommitsById,
+        targetRecordsById: new Map(),
+        targetViewsById: new Map(),
+        mergedNodeIds: [],
+        mergedRecordIds: [],
+        mergedViewIds: [],
+        resolvedRecordFields: new Map(),
+      };
+      for (const item of operationKinds) {
+        const headCommit = headCommitsById.get(item.headCommitId);
+        if (!headCommit) {
+          throw new Error(`Operation head commit not found: ${item.headCommitId}`);
+        }
+
+        if (item.operation === "node_create") {
+          await mergeNodeCreate(ctx, item, headCommit);
+          continue;
+        }
+
+        if (!item.nodeId) {
+          throw new Error(`${item.operation} operation has no nodeId: ${item.id}`);
+        }
+        // Read through the transaction so dependent ops see prior ops' effects.
+        const [node] = await tx
+          .select()
+          .from(busabaseNodes)
+          .where(eq(busabaseNodes.id, item.nodeId))
+          .limit(1);
+        if (!node) {
+          throw new Error(`Node not found: ${item.nodeId}`);
+        }
+
+        if (item.operation === "node_rename") {
+          await mergeNodeRename(ctx, item, node, headCommit);
+        } else if (item.operation === "node_move") {
+          await mergeNodeMove(ctx, item, node, headCommit);
+        } else if (item.operation === "node_delete") {
+          await mergeNodeDelete(ctx, item, node);
+        } else if (item.operation === "node_restore") {
+          await mergeNodeRestore(ctx, item, node);
+        } else if (
+          item.operation === "skill_file_create" ||
+          item.operation === "skill_file_update" ||
+          item.operation === "skill_file_delete"
+        ) {
+          await mergeSkillFile(ctx, item, node, headCommit);
+        } else if (item.operation === "skill_metadata_update") {
+          await mergeSkillMetadata(ctx, item, node, headCommit);
+        } else if (item.operation === "doc_update") {
+          await mergeDocUpdate(ctx, item, node, headCommit);
+        } else {
+          throw new Error(`Unsupported node operation: ${item.operation}`);
+        }
+
+        await tx
+          .update(busabaseOperations)
+          .set({ status: "merged", updatedAt: timestamp })
+          .where(eq(busabaseOperations.id, item.id));
+        ctx.mergedNodeIds.push(item.nodeId);
       }
 
-      if (item.operation === "node_create") {
-        await mergeNodeCreate(ctx, item, headCommit);
-        continue;
-      }
+      await tx
+        .update(busabaseChangeRequests)
+        .set({
+          status: "merged",
+          mergeSummary: { mergedNodeIds: [...new Set(ctx.mergedNodeIds)] },
+          mergedAt: timestamp,
+          updatedAt: timestamp,
+        })
+        .where(eq(busabaseChangeRequests.id, changeRequest.id));
+      mergedNodeIds.push(...ctx.mergedNodeIds);
+    });
 
-      if (!item.nodeId) {
-        throw new Error(`${item.operation} operation has no nodeId: ${item.id}`);
-      }
-      const [node] = await db
-        .select()
-        .from(busabaseNodes)
-        .where(eq(busabaseNodes.id, item.nodeId))
-        .limit(1);
-      if (!node) {
-        throw new Error(`Node not found: ${item.nodeId}`);
-      }
-
-      if (item.operation === "node_rename") {
-        await mergeNodeRename(ctx, item, node, headCommit);
-      } else if (item.operation === "node_move") {
-        await mergeNodeMove(ctx, item, node, headCommit);
-      } else if (item.operation === "node_delete") {
-        await mergeNodeDelete(ctx, item, node);
-      } else if (item.operation === "node_restore") {
-        await mergeNodeRestore(ctx, item, node);
-      } else if (
-        item.operation === "skill_file_create" ||
-        item.operation === "skill_file_update" ||
-        item.operation === "skill_file_delete"
-      ) {
-        await mergeSkillFile(ctx, item, node, headCommit);
-      } else if (item.operation === "skill_metadata_update") {
-        await mergeSkillMetadata(ctx, item, node, headCommit);
-      } else if (item.operation === "doc_update") {
-        await mergeDocUpdate(ctx, item, node, headCommit);
-      } else {
-        throw new Error(`Unsupported node operation: ${item.operation}`);
-      }
-
-      await db
-        .update(busabaseOperations)
-        .set({ status: "merged", updatedAt: timestamp })
-        .where(eq(busabaseOperations.id, item.id));
-      ctx.mergedNodeIds.push(item.nodeId);
-    }
-
-    await db
-      .update(busabaseChangeRequests)
-      .set({
-        status: "merged",
-        mergeSummary: { mergedNodeIds: [...new Set(ctx.mergedNodeIds)] },
-        mergedAt: timestamp,
-        updatedAt: timestamp,
-      })
-      .where(eq(busabaseChangeRequests.id, changeRequest.id));
     await insertAuditEvent(db, {
       action: "change_request.merged",
       actorId: CURRENT_USER_ID,
       baseId: null,
       changeRequestId: changeRequest.id,
-      metadata: { mergedNodeIds: [...new Set(ctx.mergedNodeIds)] },
+      metadata: { mergedNodeIds: [...new Set(mergedNodeIds)] },
     });
     const updated = await getChangeRequest(changeRequest.id);
     if (!updated) {
@@ -1244,94 +1299,105 @@ const _mergeChangeRequest = async (changeRequestId: string) => {
     }
   }
 
-  const ctx: MergeCtx = {
-    db,
-    timestamp,
-    actorId: changeRequest.submittedBy,
-    headCommitsById,
-    targetRecordsById,
-    targetViewsById,
-    mergedNodeIds: [],
-    mergedRecordIds: [],
-    mergedViewIds: [],
-    resolvedRecordFields,
-  };
-  for (const item of operationKinds) {
-    const headCommit = headCommitsById.get(item.headCommitId);
-    if (!headCommit) {
-      throw new Error(`Operation head commit not found: ${item.headCommitId}`);
+  // Apply every operation + finalize the CR in one transaction so the merge is
+  // all-or-nothing — a guard throwing mid-batch (assertMergedFieldsValid, the
+  // required-promotion / remove-choice / convert checks, …) rolls back the
+  // operations already applied instead of half-merging. All db touches inside go
+  // through `tx`; re-acquiring getDb() mid-transaction would deadlock pglite's
+  // single connection (projectCommitFields / asset-usage helpers take the tx).
+  const mergedRecordIds: string[] = [];
+  const mergedViewIds: string[] = [];
+  await db.transaction(async (tx) => {
+    const ctx: MergeCtx = {
+      db: tx as unknown as MergeCtx["db"],
+      timestamp,
+      actorId: changeRequest.submittedBy,
+      headCommitsById,
+      targetRecordsById,
+      targetViewsById,
+      mergedNodeIds: [],
+      mergedRecordIds: [],
+      mergedViewIds: [],
+      resolvedRecordFields,
+    };
+    for (const item of operationKinds) {
+      const headCommit = headCommitsById.get(item.headCommitId);
+      if (!headCommit) {
+        throw new Error(`Operation head commit not found: ${item.headCommitId}`);
+      }
+
+      switch (item.operation) {
+        case "record_create":
+        case "record_variant":
+          await mergeRecordCreateBase(ctx, item, headCommit);
+          break;
+        case "view_create":
+          await mergeViewCreateBase(ctx, item, headCommit);
+          break;
+        case "view_update":
+          await mergeViewUpdateBase(ctx, item, headCommit);
+          break;
+        case "view_delete":
+          await mergeViewDeleteBase(ctx, item, headCommit);
+          break;
+        case "view_restore":
+          await mergeViewRestoreBase(ctx, item, headCommit);
+          break;
+        case "record_update":
+          await mergeRecordUpdateBase(ctx, item, headCommit);
+          break;
+        case "record_delete":
+          await mergeRecordDeleteBase(ctx, item, headCommit);
+          break;
+        case "base_add_field":
+          await mergeBaseAddField(ctx, item, headCommit);
+          break;
+        case "base_delete_field":
+          await mergeBaseDeleteField(ctx, item, headCommit);
+          break;
+        case "base_update_field":
+          await mergeBaseUpdateField(ctx, item, headCommit);
+          break;
+        case "base_convert_field":
+          await mergeBaseConvertField(ctx, item, headCommit);
+          break;
+        case "base_reorder_fields":
+          await mergeBaseReorderFields(ctx, item, headCommit);
+          break;
+        case "base_restore_field":
+          await mergeBaseRestoreField(ctx, item, headCommit);
+          break;
+        case "base_archive":
+          await mergeBaseArchive(ctx, item, headCommit);
+          break;
+        case "base_restore":
+          await mergeBaseRestore(ctx, item, headCommit);
+          break;
+        case "record_restore":
+          await mergeRecordRestore(ctx, item, headCommit);
+          break;
+        default:
+          break;
+      }
     }
 
-    switch (item.operation) {
-      case "record_create":
-      case "record_variant":
-        await mergeRecordCreateBase(ctx, item, headCommit);
-        break;
-      case "view_create":
-        await mergeViewCreateBase(ctx, item, headCommit);
-        break;
-      case "view_update":
-        await mergeViewUpdateBase(ctx, item, headCommit);
-        break;
-      case "view_delete":
-        await mergeViewDeleteBase(ctx, item, headCommit);
-        break;
-      case "view_restore":
-        await mergeViewRestoreBase(ctx, item, headCommit);
-        break;
-      case "record_update":
-        await mergeRecordUpdateBase(ctx, item, headCommit);
-        break;
-      case "record_delete":
-        await mergeRecordDeleteBase(ctx, item, headCommit);
-        break;
-      case "base_add_field":
-        await mergeBaseAddField(ctx, item, headCommit);
-        break;
-      case "base_delete_field":
-        await mergeBaseDeleteField(ctx, item, headCommit);
-        break;
-      case "base_update_field":
-        await mergeBaseUpdateField(ctx, item, headCommit);
-        break;
-      case "base_convert_field":
-        await mergeBaseConvertField(ctx, item, headCommit);
-        break;
-      case "base_reorder_fields":
-        await mergeBaseReorderFields(ctx, item, headCommit);
-        break;
-      case "base_restore_field":
-        await mergeBaseRestoreField(ctx, item, headCommit);
-        break;
-      case "base_archive":
-        await mergeBaseArchive(ctx, item, headCommit);
-        break;
-      case "base_restore":
-        await mergeBaseRestore(ctx, item, headCommit);
-        break;
-      case "record_restore":
-        await mergeRecordRestore(ctx, item, headCommit);
-        break;
-      default:
-        break;
-    }
-  }
-  const mergedRecordIds = ctx.mergedRecordIds;
-  const mergedViewIds = ctx.mergedViewIds;
+    await tx
+      .update(busabaseChangeRequests)
+      .set({
+        status: "merged",
+        mergedAt: timestamp,
+        mergeSummary: {
+          operationCount: operationKinds.length,
+          recordIds: ctx.mergedRecordIds,
+          viewIds: ctx.mergedViewIds,
+        },
+        updatedAt: timestamp,
+      })
+      .where(eq(busabaseChangeRequests.id, changeRequest.id));
+    mergedRecordIds.push(...ctx.mergedRecordIds);
+    mergedViewIds.push(...ctx.mergedViewIds);
+  });
 
-  await db
-    .update(busabaseChangeRequests)
-    .set({
-      status: "merged",
-      mergedAt: timestamp,
-      mergeSummary: {
-        operationCount: operationKinds.length,
-        recordIds: mergedRecordIds,
-        viewIds: mergedViewIds,
-      },
-      updatedAt: timestamp,
-    })
-    .where(eq(busabaseChangeRequests.id, changeRequest.id));
   await insertAuditEvent(db, {
     action: "change_request.merged",
     actorId: CURRENT_USER_ID,

@@ -4,9 +4,11 @@ import type { NodeVO } from "busabase-contract/types";
 import { usePathname, useRouter } from "expo-router";
 import {
   Activity,
+  Archive,
   Bot,
   FileText,
   Folder,
+  Images,
   Inbox,
   Menu,
   Network,
@@ -22,9 +24,11 @@ import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-nati
 import { useBusabaseOrpc } from "~/api/use-busabase-orpc";
 import { NativeScreen } from "~/components/native-screen";
 import { useConnection } from "~/connection/connection-store";
+import { useI18n } from "~/i18n";
+import type { CoreMessages } from "~/i18n/messages";
 import { mobile, radius, typography } from "~/theme/tokens";
 import { useTokens } from "~/theme/use-tokens";
-import { CreateBaseModal } from "./CreateBaseModal";
+import { CreateNodeModal } from "./CreateNodeModal";
 
 interface DrawerScaffoldProps {
   title: string;
@@ -34,15 +38,23 @@ interface DrawerScaffoldProps {
   onRefresh?: () => void;
 }
 
+type NavKey = keyof CoreMessages["nav"];
+
 // Mirrors the web dashboard's primary nav (Inbox · Search · Activity · Graph View).
 const reviewItems = [
-  { label: "Inbox", href: "/drawer/inbox", icon: Inbox },
-  { label: "Search", href: "/drawer/search", icon: Search },
-  { label: "Activity", href: "/drawer/activity", icon: Activity },
-  { label: "Graph View", href: "/drawer/graph", icon: Network },
-] as const;
+  { key: "inbox", href: "/drawer/inbox", icon: Inbox },
+  { key: "search", href: "/drawer/search", icon: Search },
+  { key: "activity", href: "/drawer/activity", icon: Activity },
+  { key: "graph", href: "/drawer/graph", icon: Network },
+] as const satisfies ReadonlyArray<{ key: NavKey; href: string; icon: typeof Inbox }>;
 
-const settingsItem = { label: "Settings", href: "/drawer/settings", icon: Settings } as const;
+// Shared media library + trash, mirroring the web dashboard's Assets + Archived views.
+const libraryItems = [
+  { key: "assets", href: "/drawer/assets", icon: Images },
+  { key: "archived", href: "/drawer/archived", icon: Archive },
+] as const satisfies ReadonlyArray<{ key: NavKey; href: string; icon: typeof Inbox }>;
+
+const settingsItem = { key: "settings", href: "/drawer/settings", icon: Settings } as const;
 
 export function DrawerScaffold({
   title,
@@ -54,10 +66,11 @@ export function DrawerScaffold({
   const router = useRouter();
   const pathname = usePathname();
   const tokens = useTokens();
+  const { t } = useI18n();
   const { state } = useConnection();
   const buda = useBusabaseOrpc();
   const [open, setOpen] = useState(false);
-  const [createBaseOpen, setCreateBaseOpen] = useState(false);
+  const [createOpen, setCreateOpen] = useState(false);
 
   const nodesQuery = useQuery({
     ...(buda
@@ -132,9 +145,11 @@ export function DrawerScaffold({
           <View style={[styles.drawer, { backgroundColor: tokens.surface }]}>
             <View style={styles.drawerHeader}>
               <View style={styles.drawerTitle}>
-                <Text style={[typography.h2, { color: tokens.foreground }]}>Busabase Mobile</Text>
+                <Text style={[typography.h2, { color: tokens.foreground }]}>Busabase</Text>
                 <Text style={[typography.small, { color: tokens.mutedForeground }]}>
-                  {state.status === "connected" ? state.connection.serverUrl : "Not connected"}
+                  {state.status === "connected"
+                    ? state.connection.serverUrl
+                    : t.common.notConnected}
                 </Text>
               </View>
               <Pressable hitSlop={mobile.hitSlop} onPress={() => setOpen(false)}>
@@ -155,7 +170,7 @@ export function DrawerScaffold({
                     { color: tokens.mutedForeground },
                   ]}
                 >
-                  Review
+                  {t.nav.review}
                 </Text>
                 <View style={styles.nav}>
                   {reviewItems.map((item) => {
@@ -177,7 +192,45 @@ export function DrawerScaffold({
                             { color: active ? tokens.foreground : tokens.mutedForeground },
                           ]}
                         >
-                          {item.label}
+                          {t.nav[item.key]}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+              </View>
+
+              <View style={styles.section}>
+                <Text
+                  style={[
+                    typography.caption,
+                    styles.sectionLabel,
+                    { color: tokens.mutedForeground },
+                  ]}
+                >
+                  {t.nav.library}
+                </Text>
+                <View style={styles.nav}>
+                  {libraryItems.map((item) => {
+                    const Icon = item.icon;
+                    const active = pathname === item.href;
+                    return (
+                      <Pressable
+                        key={item.href}
+                        style={[
+                          styles.navItem,
+                          { backgroundColor: active ? tokens.primaryMuted : "transparent" },
+                        ]}
+                        onPress={() => navigate(item.href)}
+                      >
+                        <Icon size={20} color={active ? tokens.primary : tokens.mutedForeground} />
+                        <Text
+                          style={[
+                            typography.bodyEm,
+                            { color: active ? tokens.foreground : tokens.mutedForeground },
+                          ]}
+                        >
+                          {t.nav[item.key]}
                         </Text>
                       </Pressable>
                     );
@@ -194,15 +247,15 @@ export function DrawerScaffold({
                       { color: tokens.mutedForeground },
                     ]}
                   >
-                    Bases
+                    {t.nav.bases}
                   </Text>
                   <Pressable
                     accessibilityRole="button"
-                    accessibilityLabel="New Base"
+                    accessibilityLabel={t.nav.create}
                     hitSlop={mobile.hitSlop}
                     onPress={() => {
                       setOpen(false);
-                      setCreateBaseOpen(true);
+                      setCreateOpen(true);
                     }}
                   >
                     <Plus size={18} color={tokens.mutedForeground} />
@@ -276,7 +329,7 @@ export function DrawerScaffold({
                       },
                     ]}
                   >
-                    {settingsItem.label}
+                    {t.nav.settings}
                   </Text>
                 </Pressable>
               </View>
@@ -286,12 +339,12 @@ export function DrawerScaffold({
         </View>
       </Modal>
 
-      <CreateBaseModal
-        visible={createBaseOpen}
-        onClose={() => setCreateBaseOpen(false)}
+      <CreateNodeModal
+        visible={createOpen}
+        onClose={() => setCreateOpen(false)}
         onCreated={(changeRequestId) => {
-          setCreateBaseOpen(false);
-          // Base creation is a change request; open it for review (Base appears after merge).
+          setCreateOpen(false);
+          // Node creation is a change request; open it for review (the node appears after merge).
           router.push({ pathname: "/change-requests/[id]", params: { id: changeRequestId } });
         }}
       />

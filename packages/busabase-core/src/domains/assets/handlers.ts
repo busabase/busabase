@@ -7,6 +7,7 @@ import { storage } from "openlib/storage";
 import { getContextSpaceId, resolveActorId } from "../../context";
 import { getDb } from "../../db";
 import { attachments, busabaseBaseFields, busabaseBases, busabaseNodes } from "../../db/schema";
+import { insertAuditEvent } from "../../logic/audit";
 import { id } from "../../logic/kernel";
 import { ensureReady } from "../../logic/store";
 import { busabaseAssets, busabaseAssetUsages } from "./schema/assets";
@@ -53,8 +54,12 @@ const assetRowColumns = {
  * space. Idempotent: a deduped re-upload resolves to the same `attachmentId`
  * and therefore the same asset. Called after an attachment upload is confirmed.
  */
-export const ensureAsset = async (attachmentId: string, name: string): Promise<string> => {
-  const db = await getDb();
+export const ensureAsset = async (
+  attachmentId: string,
+  name: string,
+  tx?: Awaited<ReturnType<typeof getDb>>,
+): Promise<string> => {
+  const db = tx ?? (await getDb());
   const spaceId = getContextSpaceId();
   // Insert-first: the common "new asset" path is a single query. `returning` is
   // empty only when the (space, attachment) unique index conflicts — i.e. the asset
@@ -175,6 +180,11 @@ export const deleteAsset = async (assetId: string): Promise<{ deleted: boolean }
 
   await db.delete(busabaseAssets).where(eq(busabaseAssets.id, assetId));
   await deleteAttachmentSafely(asset.attachmentId, db, attachments);
+  // Direct delete (no change request) — record it so the audit trail is complete.
+  await insertAuditEvent(db, {
+    action: "asset.deleted",
+    metadata: { assetId, attachmentId: asset.attachmentId },
+  });
   return { deleted: true };
 };
 
@@ -216,8 +226,9 @@ export const syncRecordAssetUsages = async (
   baseId: string,
   recordId: string,
   fields: Record<string, unknown>,
+  tx?: Awaited<ReturnType<typeof getDb>>,
 ): Promise<void> => {
-  const db = await getDb();
+  const db = tx ?? (await getDb());
 
   const [base] = await db
     .select({ nodeId: busabaseBases.nodeId })
@@ -248,7 +259,7 @@ export const syncRecordAssetUsages = async (
       continue;
     }
     for (const ref of extractAttachmentRefs(value)) {
-      const assetId = await ensureAsset(ref.attachmentId, ref.fileName);
+      const assetId = await ensureAsset(ref.attachmentId, ref.fileName, tx);
       rows.push({ id: id("aus"), assetId, nodeId: base.nodeId, recordId, fieldSlug });
     }
   }
@@ -268,8 +279,11 @@ export const syncRecordAssetUsages = async (
 };
 
 /** Drop every where-used row for a record (called when the record is deleted). */
-export const removeRecordAssetUsages = async (recordId: string): Promise<void> => {
-  const db = await getDb();
+export const removeRecordAssetUsages = async (
+  recordId: string,
+  tx?: Awaited<ReturnType<typeof getDb>>,
+): Promise<void> => {
+  const db = tx ?? (await getDb());
   await db
     .delete(busabaseAssetUsages)
     .where(
@@ -287,8 +301,12 @@ export const removeRecordAssetUsages = async (recordId: string): Promise<void> =
  * `recordId`/`fieldSlug` are "". Replace semantics — re-merging the Doc refreshes
  * its usages, and removing an embed drops the usage. Called from the Doc merge.
  */
-export const syncDocAssetUsages = async (nodeId: string, body: string): Promise<void> => {
-  const db = await getDb();
+export const syncDocAssetUsages = async (
+  nodeId: string,
+  body: string,
+  tx?: Awaited<ReturnType<typeof getDb>>,
+): Promise<void> => {
+  const db = tx ?? (await getDb());
   const spaceId = getContextSpaceId();
 
   // Robust-but-O(space attachments): scan every attachment and test body.includes.
@@ -313,7 +331,7 @@ export const syncDocAssetUsages = async (nodeId: string, body: string): Promise<
   }[] = [];
   for (const att of candidates) {
     if (att.storageKey && body.includes(att.storageKey)) {
-      const assetId = await ensureAsset(att.id, att.fileName);
+      const assetId = await ensureAsset(att.id, att.fileName, tx);
       rows.push({ id: id("aus"), assetId, nodeId, recordId: "", fieldSlug: "" });
     }
   }

@@ -189,6 +189,16 @@ const auditActionSchema = z.enum([
   "change_request.deleted",
   "change_request.reviewed",
   "change_request.merged",
+  // Direct (non-change-request) mutations — recorded so the audit trail stays
+  // complete even for operations that bypass the propose → review → merge flow
+  // (container bootstrap, direct edits, library/asset deletes, trash purge).
+  "base.created",
+  "field.created",
+  "doc.created",
+  "doc.updated",
+  "skill.created",
+  "asset.deleted",
+  "node.purged",
 ]);
 
 const auditEventSchema = z.object({

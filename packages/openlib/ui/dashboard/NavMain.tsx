@@ -247,37 +247,52 @@ function NavMainComponent({
                           )}
                           <CollapsibleContent>
                             <SidebarMenuSub>
-                              {item.items.map((subItem, subItemIndex) => {
-                                const isSubItemActive = location === subItem.url;
-                                const SubIcon = subItem.icon;
-                                return (
-                                  <SidebarMenuSubItem
-                                    key={getNavItemKey(subItem, subItemIndex, `${itemKey}:sub`)}
-                                  >
-                                    <SidebarMenuSubButton asChild isActive={isSubItemActive}>
-                                      {subItem.url.startsWith("http://") ||
-                                      subItem.url.startsWith("https://") ? (
-                                        // External link - use regular anchor tag
-                                        <a
-                                          href={subItem.url}
-                                          target="_blank"
-                                          rel="noopener noreferrer"
-                                        >
-                                          {SubIcon && <SubIcon />}
-                                          <span>{subItem.title}</span>
-                                          <ExternalLink className="ml-auto h-4 w-4" />
-                                        </a>
-                                      ) : (
-                                        // Internal link - use SPA Link
-                                        <SPALink href={subItem.url}>
-                                          {SubIcon && <SubIcon />}
-                                          <span>{subItem.title}</span>
-                                        </SPALink>
-                                      )}
-                                    </SidebarMenuSubButton>
-                                  </SidebarMenuSubItem>
+                              {(() => {
+                                // The active sub-item is the longest url that the
+                                // location matches exactly or as a descendant route
+                                // (e.g. a record/view under a base: /base/foo/rec_...).
+                                // Longest-match keeps a single highlight when sub-items
+                                // are nested (a base and an item beneath it).
+                                const activeSubUrl = item.items.reduce<string | null>(
+                                  (best, s) =>
+                                    isPathActive(s.url) && (!best || s.url.length > best.length)
+                                      ? s.url
+                                      : best,
+                                  null,
                                 );
-                              })}
+                                return item.items.map((subItem, subItemIndex) => {
+                                  const isSubItemActive =
+                                    !!subItem.url && subItem.url === activeSubUrl;
+                                  const SubIcon = subItem.icon;
+                                  return (
+                                    <SidebarMenuSubItem
+                                      key={getNavItemKey(subItem, subItemIndex, `${itemKey}:sub`)}
+                                    >
+                                      <SidebarMenuSubButton asChild isActive={isSubItemActive}>
+                                        {subItem.url.startsWith("http://") ||
+                                        subItem.url.startsWith("https://") ? (
+                                          // External link - use regular anchor tag
+                                          <a
+                                            href={subItem.url}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                          >
+                                            {SubIcon && <SubIcon />}
+                                            <span>{subItem.title}</span>
+                                            <ExternalLink className="ml-auto h-4 w-4" />
+                                          </a>
+                                        ) : (
+                                          // Internal link - use SPA Link
+                                          <SPALink href={subItem.url}>
+                                            {SubIcon && <SubIcon />}
+                                            <span>{subItem.title}</span>
+                                          </SPALink>
+                                        )}
+                                      </SidebarMenuSubButton>
+                                    </SidebarMenuSubItem>
+                                  );
+                                });
+                              })()}
                             </SidebarMenuSub>
                           </CollapsibleContent>
                         </SidebarMenuItem>

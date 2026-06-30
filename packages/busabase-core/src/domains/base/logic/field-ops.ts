@@ -82,6 +82,12 @@ export const createBaseField = async (baseId: string, input: z.infer<typeof fiel
   if (!updatedBase) {
     throw new Error("Failed to create field");
   }
+  // Direct create (no change request) — record it so the audit trail is complete.
+  await insertAuditEvent(db, {
+    action: "field.created",
+    baseId: base.id,
+    metadata: { slug: parsed.slug, name: parsed.name, type: parsed.type },
+  });
   return updatedBase;
 };
 

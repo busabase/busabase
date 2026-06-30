@@ -3,7 +3,7 @@
 import { hasCapability } from "busabase-contract/domains";
 import type { NodeVO } from "busabase-contract/types";
 import { Toaster } from "kui/sonner";
-import { Activity, Archive, Images, Inbox, type LucideIcon, Plus, Search } from "lucide-react";
+import { Activity, Images, Inbox, type LucideIcon, Plus, Search } from "lucide-react";
 import { DashboardLayout, type NavGroup, type NavItem, NavMain } from "openlib/ui/dashboard";
 import type { ComponentProps, ReactNode } from "react";
 import { coreMessagesByLocale } from "../../../i18n";
@@ -106,7 +106,10 @@ export function BusabaseDashboardShell({
       items: [
         { title: nav.activity, url: "/activity", icon: Activity },
         { title: assetsLabel, url: "/assets", icon: Images },
-        { title: "Archived", url: "/archived", icon: Archive },
+        // Hidden for now — the Archived/Trash view is reachable via its route
+        // (/archived) but no longer shown in the sidebar. To restore, re-add the
+        // `Archive` icon import from lucide-react.
+        // { title: "Archived", url: "/archived", icon: Archive },
       ],
     },
     {

@@ -1,12 +1,16 @@
 import { useMutation } from "@tanstack/react-query";
-import { X } from "lucide-react-native";
-import { useState } from "react";
+import type { NodeType } from "busabase-contract/types";
+import { Bot, FileText, Folder, Table2, X } from "lucide-react-native";
+import { type ComponentType, useState } from "react";
 import { Modal, Pressable, StyleSheet, Text, View } from "react-native";
 import { useBusabaseOrpc } from "~/api/use-busabase-orpc";
+import { fmt, useI18n } from "~/i18n";
 import { mobile, radius, typography } from "~/theme/tokens";
 import { useTokens } from "~/theme/use-tokens";
 import { Button } from "../ui/Button";
 import { TextInput } from "../ui/TextInput";
+
+type CreatableNodeType = Extract<NodeType, "base" | "folder" | "doc" | "skill">;
 
 const toSlug = (value: string) =>
   value
@@ -15,21 +19,41 @@ const toSlug = (value: string) =>
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-|-$/g, "");
 
-interface CreateBaseModalProps {
+const NODE_TYPES: Array<{
+  type: CreatableNodeType;
+  icon: ComponentType<{ size?: number; color?: string }>;
+}> = [
+  { type: "base", icon: Table2 },
+  { type: "folder", icon: Folder },
+  { type: "doc", icon: FileText },
+  { type: "skill", icon: Bot },
+];
+
+interface CreateNodeModalProps {
   visible: boolean;
   onClose: () => void;
   onCreated: (changeRequestId: string) => void;
 }
 
-export function CreateBaseModal({ visible, onClose, onCreated }: CreateBaseModalProps) {
+export function CreateNodeModal({ visible, onClose, onCreated }: CreateNodeModalProps) {
   const tokens = useTokens();
+  const { t } = useI18n();
   const buda = useBusabaseOrpc();
+  const [nodeType, setNodeType] = useState<CreatableNodeType>("base");
   const [name, setName] = useState("");
   const [slug, setSlug] = useState("");
   const [slugEdited, setSlugEdited] = useState(false);
   const [description, setDescription] = useState("");
 
+  const typeLabel: Record<CreatableNodeType, string> = {
+    base: t.createNode.base,
+    folder: t.createNode.folder,
+    doc: t.createNode.doc,
+    skill: t.createNode.skill,
+  };
+
   const reset = () => {
+    setNodeType("base");
     setName("");
     setSlug("");
     setSlugEdited(false);
@@ -45,20 +69,22 @@ export function CreateBaseModal({ visible, onClose, onCreated }: CreateBaseModal
     mutationFn: async () => {
       const trimmedName = name.trim();
       const finalSlug = (slugEdited ? slug : toSlug(trimmedName)).trim();
-      if (!buda || !trimmedName || !finalSlug) throw new Error("Name is required.");
-      // Base creation goes through review: a node change request that
-      // materializes the Base on merge.
+      if (!buda || !trimmedName || !finalSlug) throw new Error(t.createNode.nameRequired);
       return buda.client.nodes.createChangeRequest({
-        message: `Create Base ${trimmedName}`,
+        message: `Create ${typeLabel[nodeType]} ${trimmedName}`,
         operations: [
           {
             kind: "create",
-            nodeType: "base",
+            nodeType,
             slug: finalSlug,
             name: trimmedName,
             description: description.trim(),
             // A base needs at least one field; start with a Title the user can build on.
-            fields: [{ slug: "title", name: "Title", type: "text", required: true }],
+            ...(nodeType === "base"
+              ? {
+                  fields: [{ slug: "title", name: "Title", type: "text" as const, required: true }],
+                }
+              : {}),
           },
         ],
       });
@@ -76,21 +102,53 @@ export function CreateBaseModal({ visible, onClose, onCreated }: CreateBaseModal
           style={[styles.sheet, { backgroundColor: tokens.surface, borderColor: tokens.border }]}
         >
           <View style={styles.header}>
-            <Text style={[typography.h2, { color: tokens.foreground }]}>New Base</Text>
+            <Text style={[typography.h2, { color: tokens.foreground }]}>{t.createNode.title}</Text>
             <Pressable hitSlop={mobile.hitSlop} onPress={close}>
               <X size={22} color={tokens.foreground} />
             </Pressable>
           </View>
           <Text style={[typography.small, { color: tokens.mutedForeground }]}>
-            Creates a change request for review. The Base appears after it's merged, starting with a
-            Title field.
+            {t.createNode.reviewNote}
           </Text>
 
+          <Text style={[typography.small, { color: tokens.mutedForeground }]}>
+            {t.createNode.typeLabel}
+          </Text>
+          <View style={styles.types}>
+            {NODE_TYPES.map(({ type, icon: Icon }) => {
+              const active = type === nodeType;
+              return (
+                <Pressable
+                  key={type}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: active }}
+                  style={[
+                    styles.typeChip,
+                    {
+                      backgroundColor: active ? tokens.primaryMuted : tokens.surface,
+                      borderColor: active ? tokens.primary : tokens.border,
+                    },
+                  ]}
+                  onPress={() => setNodeType(type)}
+                >
+                  <Icon size={16} color={active ? tokens.primary : tokens.mutedForeground} />
+                  <Text
+                    style={[
+                      typography.small,
+                      { color: active ? tokens.foreground : tokens.mutedForeground },
+                    ]}
+                  >
+                    {typeLabel[type]}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+
           <TextInput
-            label="Name"
+            label={t.createNode.name}
             value={name}
             autoFocus
-            placeholder="Blog Posts"
             onChangeText={(value) => {
               setName(value);
               if (!slugEdited) {
@@ -99,18 +157,16 @@ export function CreateBaseModal({ visible, onClose, onCreated }: CreateBaseModal
             }}
           />
           <TextInput
-            label="Slug"
+            label={t.createNode.slug}
             value={slug}
-            placeholder="blog-posts"
             onChangeText={(value) => {
               setSlugEdited(true);
               setSlug(toSlug(value));
             }}
           />
           <TextInput
-            label="Description (optional)"
+            label={t.createNode.description}
             value={description}
-            placeholder="What this Base collects"
             onChangeText={setDescription}
           />
           {createMutation.error ? (
@@ -120,13 +176,13 @@ export function CreateBaseModal({ visible, onClose, onCreated }: CreateBaseModal
           ) : null}
 
           <Button
-            label="Create Base"
+            label={fmt(t.createNode.submit, { type: typeLabel[nodeType] })}
             loading={createMutation.isPending}
             disabled={name.trim().length === 0}
             fullWidth
             onPress={() => createMutation.mutate()}
           />
-          <Button label="Cancel" variant="ghost" fullWidth onPress={close} />
+          <Button label={t.common.cancel} variant="ghost" fullWidth onPress={close} />
         </View>
       </View>
     </Modal>
@@ -146,9 +202,15 @@ const styles = StyleSheet.create({
     padding: 20,
     gap: 12,
   },
-  header: {
+  header: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  types: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  typeChip: {
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "space-between",
+    gap: 6,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: radius.full,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
   },
 });

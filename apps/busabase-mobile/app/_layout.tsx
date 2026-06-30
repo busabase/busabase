@@ -6,6 +6,7 @@ import { useEffect } from "react";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { ConnectionProvider } from "~/connection/connection-store";
+import { I18nProvider } from "~/i18n";
 // Imported for its side effect: defines the background change-request watch task.
 import "~/notifications/background-task";
 import { NotificationProvider } from "~/notifications/notification-provider";
@@ -29,14 +30,16 @@ export default function RootLayout() {
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>
         <QueryClientProvider client={queryClient}>
-          <ConnectionProvider>
-            <NotificationProvider>
-              <AppStatusBar />
-              {/* Routes are auto-discovered from the app/ tree; every screen hides
-                  the native header and renders its own NativeScreen chrome. */}
-              <Stack screenOptions={{ headerShown: false }} />
-            </NotificationProvider>
-          </ConnectionProvider>
+          <I18nProvider>
+            <ConnectionProvider>
+              <NotificationProvider>
+                <AppStatusBar />
+                {/* Routes are auto-discovered from the app/ tree; every screen hides
+                    the native header and renders its own NativeScreen chrome. */}
+                <Stack screenOptions={{ headerShown: false }} />
+              </NotificationProvider>
+            </ConnectionProvider>
+          </I18nProvider>
         </QueryClientProvider>
       </SafeAreaProvider>
     </GestureHandlerRootView>

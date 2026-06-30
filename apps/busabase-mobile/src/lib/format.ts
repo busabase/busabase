@@ -17,3 +17,13 @@ export function formatDate(value: string | null | undefined) {
 export function shortId(id: string) {
   return id.length > 10 ? `${id.slice(0, 6)}...${id.slice(-4)}` : id;
 }
+
+export function formatBytes(bytes: number) {
+  if (!Number.isFinite(bytes) || bytes <= 0) {
+    return "0 B";
+  }
+  const units = ["B", "KB", "MB", "GB"];
+  const exponent = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
+  const value = bytes / 1024 ** exponent;
+  return `${value % 1 === 0 ? value : value.toFixed(1)} ${units[exponent]}`;
+}

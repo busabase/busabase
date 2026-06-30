@@ -320,8 +320,9 @@ an agent or pulled from outside are **untrusted external input** and may carry p
  * localhost:15419, not installed yet) or **Cloud** (`mode: "cloud"`, hosted, no API key yet).
  *
  * Reads top-to-bottom as an onboarding script an agent runs for a brand-new user. Step 0 teaches
- * the concept (+ differentiator diagram) and gets the agent connected — desktop probes/installs
- * the local app; cloud finds-or-creates an API key (checking the chat and `~/.busabase/.env`) and
+ * the concept (+ differentiator diagram) and gets the agent connected — desktop detects the
+ * environment then installs the native app (GUI) or starts the `npx busabase server` terminal
+ * edition (headless), optionally with start-on-boot; cloud finds-or-creates an API key (checking the chat and `~/.busabase/.env`) and
  * verifies it — then both share: pick a scenario → initialize a Base and seed records *through the
  * approval loop* (the teaching moment) → hand off for everyday use.
  *
@@ -345,7 +346,7 @@ function buildBootstrapMarkdown(origin: string, ctx?: SkillMarkdownContext): str
 
   const description = isCloud
     ? "Connect an AI agent to Busabase Cloud over HTTP and set up a first workspace. First-run onboarding — find or create an API key (checking the chat and ~/.busabase), verify it, pick a scenario, create a Base, and seed sample records through the review-and-merge loop."
-    : "Get Busabase Desktop running and set up a first workspace, then drive it as an approval-first data assistant over HTTP. First-run onboarding — detect/install the local app, confirm it is up, pick a scenario, create a Base, and seed sample records through the review-and-merge loop.";
+    : "Get Busabase running locally (native Desktop on a GUI machine, or the `npx busabase server` terminal edition on a headless/SSH box) and set up a first workspace, then drive it as an approval-first data assistant over HTTP. First-run onboarding — detect the environment, install or start the right edition, confirm it is up, pick a scenario, create a Base, and seed sample records through the review-and-merge loop.";
 
   const ownMachine = isCloud ? "" : " Everything runs and stays on the user's own machine.";
 
@@ -359,7 +360,9 @@ Your **first message** to the user must be a warm welcome **in the user's langua
 of commands. Do **not** run any curl, install, or probe yet. Follow this five-beat shape, keep it
 to a few short lines, and adapt the wording naturally:
 
-1. **Welcome** — greet them; they just connected you to Busabase.
+1. **Welcome** — greet them and introduce Busabase *by name*, as the product they're about to set
+   up. Do **not** say it's already connected, hooked up, or that you're working inside it — nothing
+   is installed or connected yet; that's what the next steps do. This beat is a pure introduction.
 2. **This is** — Busabase is *approval-first*: you propose changes, they review and approve, and
    only then does anything become real.
 3. **Why it matters** — unlike a normal table, wiki, or Notion where an AI edit is instantly live,
@@ -371,10 +374,10 @@ to a few short lines, and adapt the wording naturally:
 
 Model opening — translate into their language, keep this voice, keep it this short (~4 lines):
 
-> 👋 Welcome — you've connected me to **Busabase**, and I'll work inside it. It's
-> *approval-first*: I propose every change, **you approve**, and only then is it real — so a
-> wrong move stays a harmless draft until you say yes. In a few minutes we can stand up a real
-> workspace and seed it with records you approve one by one.
+> 👋 Welcome — this is **Busabase**, your soon-to-be *approval-first* workspace. The idea: I propose
+> every change, **you approve**, and only then is it real — so a wrong move stays a harmless draft
+> until you say yes. In a few minutes we'll set it up together and seed a real workspace with records
+> you approve one by one.
 > **To make it yours — what do you want to manage?** A sentence is enough, or say "show me options."
 
 Conduct **everything** below in the user's language. Only once they've answered (or asked you to
@@ -431,7 +434,7 @@ curl -fsS ${local}/api/v1/bases    # the tables in the workspace
 
 That one call tells you where things stand:
 
-- **Connection refused** → not installed yet. Go to **Step 1** to install it.
+- **Connection refused** → nothing running yet. Go to **Step 1** to install or start it.
 - **Responds with \`[]\`** → installed but empty. Skip to **Step 2** to set it up.
 - **Responds with Bases already** → installed and in use. Jump to **Step 4 (ongoing use)**.
 
@@ -456,18 +459,89 @@ printf 'BUSABASE_API_KEY=%s\\nBUSABASE_BASE_URL=%s\\n' "$BUSABASE_API_KEY" "${si
 \`\`\`
 
 Now go back to **Step 0** and verify the key.`
-    : `## Step 1 — Install (only if it isn't running yet)
+    : `## Step 1 — Install & start (pick the edition that fits this machine)
 
-Detect the OS and send the user to the download:
+Don't default to the GUI download — **first detect the environment**, because a headless / SSH /
+container box can't open a \`.dmg\`, but it can run the terminal server directly:
 
 \`\`\`bash
-uname -s   # Darwin = macOS, Linux = Linux. On Windows agents, check $OS.
+uname -s                                     # Darwin = macOS, Linux = Linux; Windows agents check $OS
+echo "DISPLAY=$DISPLAY SSH=$SSH_CONNECTION"  # empty DISPLAY + an SSH value ⇒ no desktop
+[ -f /.dockerenv ] && echo "in-container"
 \`\`\`
 
-Download page: \`${site}/download\` — **macOS** \`.dmg\` (Apple Silicon / Intel), **Windows**
-\`.msi\`, **Linux** \`.AppImage\`. Tell the user in plain words: download, install, and launch
-**Busabase** — it starts a local workspace automatically, no account. Then re-probe until it
-answers (it boots in a few seconds); a fresh install returns \`[]\`, which sends you to Step 2:
+Decide: **desktop-capable** = macOS or Windows (not over SSH), or Linux with a non-empty
+\`$DISPLAY\`. Otherwise treat it as **headless** (SSH session, empty \`$DISPLAY\`, or in a container)
+and take Path A.
+
+### Path A — Headless / terminal / container: run the server yourself
+
+No download, no GUI. Start the local server for the user and probe until it answers (a fresh start
+returns \`[]\`, which sends you to Step 2):
+
+\`\`\`bash
+npx -y busabase server &     # boots on ${local}; or: docker run -d -p 15419:15419 busabase/busabase
+until curl -fsS ${local}/api/v1/bases >/dev/null 2>&1; do sleep 2; done && echo "Busabase is up."
+\`\`\`
+
+Then **offer start-on-boot — ask first, and only set it up if the user agrees** (this writes a
+system service, so never do it silently). On a yes, use the OS-appropriate snippet:
+
+\`\`\`bash
+# macOS (launchd, per-user)
+mkdir -p ~/Library/LaunchAgents
+cat > ~/Library/LaunchAgents/com.busabase.server.plist <<'PLIST'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>Label</key><string>com.busabase.server</string>
+  <key>ProgramArguments</key><array><string>/bin/sh</string><string>-lc</string><string>npx -y busabase server</string></array>
+  <key>RunAtLoad</key><true/><key>KeepAlive</key><true/>
+</dict></plist>
+PLIST
+launchctl load ~/Library/LaunchAgents/com.busabase.server.plist
+\`\`\`
+
+\`\`\`bash
+# Linux (systemd --user)
+mkdir -p ~/.config/systemd/user
+cat > ~/.config/systemd/user/busabase.service <<'UNIT'
+[Unit]
+Description=Busabase local server
+[Service]
+ExecStart=/usr/bin/env npx -y busabase server
+Restart=on-failure
+[Install]
+WantedBy=default.target
+UNIT
+systemctl --user enable --now busabase.service
+loginctl enable-linger "$USER"   # keep it running without an active login session
+\`\`\`
+
+\`\`\`bash
+# Windows (run at logon)
+schtasks /create /tn Busabase /sc onlogon /tr "npx -y busabase server"
+\`\`\`
+
+To undo later: \`launchctl unload …plist\` / \`systemctl --user disable --now busabase.service\` /
+\`schtasks /delete /tn Busabase\`.
+
+### Path B — Desktop-capable: native app (recommended), or the terminal server
+
+On a machine with a desktop, **recommend the native app** — but offer the choice in one line, since
+some users would rather not install anything:
+
+> I'd suggest the **Busabase Desktop app** (native, nothing to run in a terminal). Or, if you'd
+> rather not install, I can just start the **terminal server** (\`npx busabase server\`) for you.
+
+If they have no preference, go with **Desktop**. If they pick the terminal server, follow **Path A**
+instead. (Cloud isn't offered here — it's coming soon.)
+
+**Desktop:** send the user to \`${site}/download\` — **macOS** \`.dmg\` (Apple Silicon / Intel),
+**Windows** \`.msi\`, **Linux** \`.AppImage\`. In plain words: download, install, and launch
+**Busabase** — it starts a local workspace automatically, no account. (You launch it yourself; to
+keep it always on, flip **Launch at login** in the app's title bar.) Then re-probe until it answers (it boots
+in a few seconds); a fresh install returns \`[]\`, which sends you to Step 2:
 
 \`\`\`bash
 until curl -fsS ${local}/api/v1/bases >/dev/null 2>&1; do sleep 2; done && echo "Busabase is up."
@@ -477,18 +551,31 @@ until curl -fsS ${local}/api/v1/bases >/dev/null 2>&1; do sleep 2; done && echo 
     ? "(Writes target the key's default space automatically; add an `x-busabase-space: <id>` header to target a different space.)"
     : "(No `spaceId` in local mode.)";
 
-  const step4 = `## Step 4 — Install the skill, and you're set for good
+  const step4 = `## Step 4 — The last setup step: install the permanent skill
 
-The workspace is ready. Now install the permanent **busabase** skill so any agent on this machine
-just knows how to drive this workspace every session — no re-pasting this onboarding doc:
+One step left before everyday use. Install the permanent **busabase** skill so any agent on this
+machine just knows how to drive this workspace every session — no re-pasting this onboarding doc:
 
 \`\`\`bash
 npx skills add busabase/skills
 \`\`\`
 
 It reads \`~/.busabase/.env\` (set up above) and is self-describing — from here **it** is your
-reference for the everyday loop and the full API, so this onboarding doc is done its job. Never
-bypass review unless the user explicitly asks for a direct merge.`;
+reference for the everyday loop and the full API, so this onboarding doc has done its job.
+
+## 🎉 You're set up — congratulations!
+
+**Now, and only now, is everything done — so this is the moment to congratulate the user, warmly
+and in their language.** Don't claim "you're connected / all set" before this point: it's true only
+once *all* of it has landed —
+
+- ✅ **connected** — the host responds (you proved it in Step 0)
+- ✅ **workspace initialized** — a real Base (plus structure) and records they approved themselves
+- ✅ **skill installed** — \`busabase\` is permanent, so every future session just works
+
+Tell them so — e.g. *"🎉 You're all set — Busabase is connected, your first workspace is live, and
+the skill is installed. From here it's everyday use: propose, you approve, merge."* Never bypass
+review unless the user explicitly asks for a direct merge.`;
 
   return `---
 name: busabase

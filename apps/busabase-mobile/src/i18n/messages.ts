@@ -1,0 +1,194 @@
+// Message catalog for the mobile app. English is the source of truth; every other
+// locale must provide the same key shape (enforced by the `CoreMessages` type).
+// Mirrors the lightweight approach in busabase-core/i18n — no external i18n library.
+
+export const en = {
+  common: {
+    cancel: "Cancel",
+    save: "Save",
+    delete: "Delete",
+    create: "Create",
+    restore: "Restore",
+    deleteForever: "Delete forever",
+    retry: "Retry",
+    loading: "Loading",
+    close: "Close",
+    edit: "Edit",
+    yes: "Yes",
+    no: "No",
+    notConnected: "Not connected",
+  },
+  nav: {
+    review: "Review",
+    inbox: "Inbox",
+    search: "Search",
+    activity: "Activity",
+    graph: "Graph View",
+    assets: "Assets",
+    archived: "Archived",
+    library: "Library",
+    settings: "Settings",
+    bases: "Bases",
+    newBase: "New Base",
+    create: "Create",
+  },
+  assets: {
+    title: "Assets",
+    subtitle: "Shared media library",
+    empty: "No assets yet",
+    emptyHint: "Files attached to records show up here.",
+    usedTimes: "Used {count}×",
+    unused: "Unused",
+    size: "Size",
+    type: "Type",
+    contentHash: "Content hash",
+    whereUsed: "Where used",
+    notUsed: "Not referenced anywhere yet.",
+    deleteTitle: "Delete asset",
+    deleteBlocked: "Still referenced — remove all usages first.",
+    deleteConfirm: "Permanently delete this asset? This cannot be undone.",
+    notFound: "Asset not found",
+  },
+  archived: {
+    title: "Archived",
+    subtitle: "Restore or permanently delete",
+    empty: "Trash is empty",
+    emptyHint: "Deleted bases, folders, docs, and skills land here.",
+    basesSection: "Bases",
+    nodesSection: "Folders · Docs · Skills",
+    restoreConfirm: 'Create a restore change request for "{name}"?',
+    purgeTitle: "Delete forever",
+    purgeConfirm: 'Permanently delete "{name}"? This cannot be undone.',
+  },
+  createNode: {
+    title: "Create",
+    typeLabel: "Type",
+    name: "Name",
+    slug: "Slug",
+    description: "Description (optional)",
+    reviewNote: "Creates a change request for review. It appears after the request is merged.",
+    submit: "Create {type}",
+    nameRequired: "Name is required.",
+    base: "Base",
+    folder: "Folder",
+    doc: "Doc",
+    skill: "Skill",
+  },
+  attachment: {
+    add: "Add file",
+    addImage: "Add image",
+    uploading: "Uploading…",
+    remove: "Remove",
+    empty: "No files",
+  },
+  settings: {
+    language: "Language",
+    languageHint: "Changes the app interface language.",
+    auto: "System default",
+  },
+} as const;
+
+// Widen the `as const` leaf literals to `string` so other locales can supply their
+// own translations while keeping the exact key shape.
+export type CoreMessages = {
+  [Section in keyof typeof en]: { [Key in keyof (typeof en)[Section]]: string };
+};
+
+// Simplified Chinese. Keep the key shape identical to `en`.
+export const zhCN: CoreMessages = {
+  common: {
+    cancel: "取消",
+    save: "保存",
+    delete: "删除",
+    create: "创建",
+    restore: "恢复",
+    deleteForever: "永久删除",
+    retry: "重试",
+    loading: "加载中",
+    close: "关闭",
+    edit: "编辑",
+    yes: "是",
+    no: "否",
+    notConnected: "未连接",
+  },
+  nav: {
+    review: "审阅",
+    inbox: "收件箱",
+    search: "搜索",
+    activity: "动态",
+    graph: "关系图",
+    assets: "素材",
+    archived: "归档",
+    library: "资料库",
+    settings: "设置",
+    bases: "数据表",
+    newBase: "新建数据表",
+    create: "创建",
+  },
+  assets: {
+    title: "素材",
+    subtitle: "共享媒体库",
+    empty: "暂无素材",
+    emptyHint: "记录中的附件会显示在这里。",
+    usedTimes: "引用 {count} 次",
+    unused: "未使用",
+    size: "大小",
+    type: "类型",
+    contentHash: "内容哈希",
+    whereUsed: "引用位置",
+    notUsed: "尚未被任何地方引用。",
+    deleteTitle: "删除素材",
+    deleteBlocked: "仍被引用 — 请先移除所有引用。",
+    deleteConfirm: "确定永久删除此素材？此操作无法撤销。",
+    notFound: "未找到素材",
+  },
+  archived: {
+    title: "归档",
+    subtitle: "恢复或永久删除",
+    empty: "回收站为空",
+    emptyHint: "已删除的数据表、文件夹、文档和技能会出现在这里。",
+    basesSection: "数据表",
+    nodesSection: "文件夹 · 文档 · 技能",
+    restoreConfirm: "为“{name}”创建恢复变更请求？",
+    purgeTitle: "永久删除",
+    purgeConfirm: "确定永久删除“{name}”？此操作无法撤销。",
+  },
+  createNode: {
+    title: "创建",
+    typeLabel: "类型",
+    name: "名称",
+    slug: "标识",
+    description: "描述（可选）",
+    reviewNote: "将创建一个待审阅的变更请求，合并后生效。",
+    submit: "创建{type}",
+    nameRequired: "名称不能为空。",
+    base: "数据表",
+    folder: "文件夹",
+    doc: "文档",
+    skill: "技能",
+  },
+  attachment: {
+    add: "添加文件",
+    addImage: "添加图片",
+    uploading: "上传中…",
+    remove: "移除",
+    empty: "暂无文件",
+  },
+  settings: {
+    language: "语言",
+    languageHint: "更改应用界面语言。",
+    auto: "跟随系统",
+  },
+};
+
+export const messagesByLocale = {
+  en,
+  "zh-CN": zhCN,
+} as const;
+
+export type Locale = keyof typeof messagesByLocale;
+
+export const localeOptions: Array<{ code: Locale; label: string }> = [
+  { code: "en", label: "English" },
+  { code: "zh-CN", label: "简体中文" },
+];

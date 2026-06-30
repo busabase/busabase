@@ -3,6 +3,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { AlertTriangle, Download, Loader2, RefreshCw, RotateCcw } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { AutostartToggle } from "../components/autostart-toggle";
 import { DesktopTitlebar } from "../components/desktop-titlebar";
 
 interface BusabaseSidecarStatus {
@@ -227,9 +228,16 @@ export default function Page() {
     </div>
   ) : null;
 
+  const titlebarActions = (
+    <>
+      <AutostartToggle />
+      {updateControl}
+    </>
+  );
+
   return (
     <div className="desktop-window-frame">
-      <DesktopTitlebar actions={updateControl} />
+      <DesktopTitlebar actions={titlebarActions} />
       <div className="desktop-window-body">
         {appUrl ? (
           <iframe

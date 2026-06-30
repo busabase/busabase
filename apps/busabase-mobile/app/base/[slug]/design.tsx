@@ -17,16 +17,28 @@ import { TextInput } from "~/components/ui/TextInput";
 import { mobile, radius, typography } from "~/theme/tokens";
 import { useTokens } from "~/theme/use-tokens";
 
+// Creatable field types, mirroring the web Base setup view. System/computed types
+// (created_time, updated_by, …) are server-managed and not offered here.
 const FIELD_TYPES: FieldType[] = [
   "text",
   "longtext",
   "markdown",
+  "html",
+  "code",
   "number",
   "date",
   "checkbox",
+  "select",
+  "multiselect",
   "url",
   "email",
+  "phone",
+  "attachment",
+  "auto_number",
 ];
+
+// Field types that carry a user-defined choice list.
+const CHOICE_TYPES = new Set<FieldType>(["select", "multiselect"]);
 
 const toSlug = (value: string) =>
   value
@@ -63,7 +75,17 @@ function BaseDesignContent() {
   const [fieldSlug, setFieldSlug] = useState("");
   const [fieldType, setFieldType] = useState<FieldType>("text");
   const [required, setRequired] = useState(false);
+  const [choices, setChoices] = useState<string[]>([]);
+  const [choiceDraft, setChoiceDraft] = useState("");
   const [viewName, setViewName] = useState("");
+
+  const addChoice = () => {
+    const value = choiceDraft.trim();
+    if (value && !choices.includes(value)) {
+      setChoices((current) => [...current, value]);
+    }
+    setChoiceDraft("");
+  };
 
   const addFieldMutation = useMutation({
     mutationFn: async () => {
@@ -71,12 +93,17 @@ function BaseDesignContent() {
       const name = fieldName.trim();
       const fieldSlugValue = (fieldSlug.trim() || toSlug(name)).trim();
       if (!name || !fieldSlugValue) throw new Error("Field name is required.");
+      // Choice fields carry their option list; ids are derived from the label.
+      const options = CHOICE_TYPES.has(fieldType)
+        ? { choices: choices.map((label) => ({ id: toSlug(label) || label, name: label })) }
+        : undefined;
       return buda.client.bases.createField({
         baseId: base.id,
         name,
         slug: fieldSlugValue,
         type: fieldType,
         required,
+        ...(options ? { options } : {}),
       });
     },
     onSuccess: () => {
@@ -84,6 +111,8 @@ function BaseDesignContent() {
       setFieldSlug("");
       setFieldType("text");
       setRequired(false);
+      setChoices([]);
+      setChoiceDraft("");
       void queryClient.invalidateQueries({ queryKey: buda?.orpc.bases.list.key({}) });
     },
   });
@@ -225,6 +254,43 @@ function BaseDesignContent() {
               );
             })}
           </View>
+          {CHOICE_TYPES.has(fieldType) ? (
+            <View style={styles.choices}>
+              <Text style={[typography.small, { color: tokens.mutedForeground }]}>Choices</Text>
+              <View style={styles.chips}>
+                {choices.map((choice) => (
+                  <Pressable
+                    key={choice}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Remove ${choice}`}
+                    style={[
+                      styles.chip,
+                      styles.choiceChip,
+                      { backgroundColor: tokens.primaryMuted, borderColor: tokens.primary },
+                    ]}
+                    onPress={() =>
+                      setChoices((current) => current.filter((item) => item !== choice))
+                    }
+                  >
+                    <Text style={[typography.small, { color: tokens.foreground }]}>{choice}</Text>
+                    <Trash2 size={13} color={tokens.destructive} />
+                  </Pressable>
+                ))}
+              </View>
+              <View style={styles.choiceRow}>
+                <View style={styles.choiceInput}>
+                  <TextInput
+                    value={choiceDraft}
+                    placeholder="Add a choice"
+                    returnKeyType="done"
+                    onChangeText={setChoiceDraft}
+                    onSubmitEditing={addChoice}
+                  />
+                </View>
+                <Button label="Add" variant="secondary" onPress={addChoice} />
+              </View>
+            </View>
+          ) : null}
           <View style={styles.requiredRow}>
             <Text style={[typography.body, { color: tokens.foreground }]}>Required</Text>
             <Switch
@@ -326,6 +392,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 6,
   },
+  choices: { gap: 8 },
+  choiceChip: { flexDirection: "row", alignItems: "center", gap: 6 },
+  choiceRow: { flexDirection: "row", alignItems: "flex-start", gap: 8 },
+  choiceInput: { flex: 1 },
   requiredRow: {
     flexDirection: "row",
     alignItems: "center",

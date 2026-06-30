@@ -51,7 +51,7 @@ export function ConnectionGuard({ children }: { children: ReactNode }) {
 
   if (state.status === "loading") {
     return (
-      <NativeScreen title="Busabase Mobile" subtitle="Loading connection">
+      <NativeScreen title="Busabase" subtitle="Loading connection">
         <NativeLoadingState label="Checking saved connection" />
       </NativeScreen>
     );
@@ -63,7 +63,7 @@ export function ConnectionGuard({ children }: { children: ReactNode }) {
 
   if (unreachable) {
     return (
-      <NativeScreen title="Busabase Mobile" subtitle={state.connection.serverUrl}>
+      <NativeScreen title="Busabase" subtitle={state.connection.serverUrl}>
         <NativeEmptyState
           title="Server unreachable"
           description="The connected Busabase server is not responding. Check that it is running and reachable from this device."
