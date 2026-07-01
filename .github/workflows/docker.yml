@@ -1,12 +1,15 @@
-# Managed by kapps scripts/publish-busabase-repo.ts — edit the template there,
-# not in this repo (the open-source sync overwrites it).
+# Public Busabase Docker workflow. The kapps open-source sync preserves `.github`,
+# so edits to this workflow live in this repository.
 #
 # Builds the Busabase image from apps/busabase/Dockerfile and pushes multi-arch
 # (amd64 + arm64) to GHCR and Docker Hub, on GitHub's official ubuntu-latest
-# runner. No internal deploy — that stays in the private infra repo.
+# runner. After a successful image push, it can notify the private ops-manager
+# deploy workflow when OPS_MANAGER_DISPATCH_TOKEN or CR_PAT is configured.
 #
 # Required secrets: DOCKERHUB_TOKEN (a Docker Hub access token for the `busabase`
 # org with push rights). GHCR uses the built-in GITHUB_TOKEN.
+# Optional secrets: OPS_MANAGER_DISPATCH_TOKEN or CR_PAT with access to dispatch
+# vikadata/ops-manager.
 name: Docker
 
 on:
@@ -75,3 +78,32 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - name: Dispatch internal deploy
+        env:
+          OPS_MANAGER_DISPATCH_TOKEN: ${{ secrets.OPS_MANAGER_DISPATCH_TOKEN }}
+          CR_PAT: ${{ secrets.CR_PAT }}
+        run: |
+          set -euo pipefail
+          token="${OPS_MANAGER_DISPATCH_TOKEN:-$CR_PAT}"
+          if [ -z "$token" ]; then
+            echo "No OPS_MANAGER_DISPATCH_TOKEN or CR_PAT configured; skipping internal deploy dispatch."
+            exit 0
+          fi
+
+          short_sha="${GITHUB_SHA::7}"
+          semver="busabase-public-${GITHUB_RUN_NUMBER}-${short_sha}"
+          image="docker.io/busabase/busabase:sha-${short_sha}"
+
+          echo "Dispatching internal deploy for $image @ $semver"
+          jq -nc \
+            --arg semver "$semver" \
+            --arg image "$image" \
+            --arg arch "$(uname -m)" \
+            '{event_type:"deploy-bika",client_payload:{SEMVER_FULL:$semver,edition:"busabase",app:"busabase",containerName:"busabase",image:$image,arch:$arch}}' \
+            | curl --fail-with-body -sS -X POST "https://api.github.com/repos/vikadata/ops-manager/dispatches" \
+                -H "Authorization: token ${token}" \
+                -H "Accept: application/vnd.github.everest-preview+json" \
+                -H "Content-Type: application/json" \
+                --data @-
+          echo "Deploy dispatch sent."
