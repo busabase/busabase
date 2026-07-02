@@ -350,7 +350,9 @@ function BusabaseDashboardContent({
               : "Operation"}
           </span>
         ) : null,
-        title: selectedOperation ? getOperationTitle(selectedOperation) : "Operation",
+        title: selectedOperation
+          ? getOperationTitle(selectedOperation, selectedChangeRequest?.base)
+          : "Operation",
       };
     }
 
@@ -430,7 +432,11 @@ function BusabaseDashboardContent({
             ? getChangeRequestTitle(selectedChangeRequest)
             : "Change Request",
         },
-        { label: selectedOperation ? getOperationTitle(selectedOperation) : "Operation" },
+        {
+          label: selectedOperation
+            ? getOperationTitle(selectedOperation, selectedChangeRequest?.base)
+            : "Operation",
+        },
       ];
     }
 

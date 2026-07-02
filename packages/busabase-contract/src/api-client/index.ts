@@ -1,6 +1,6 @@
 import { createORPCClient } from "@orpc/client";
 import { RPCLink } from "@orpc/client/fetch";
-import { type ContractRouterClient, inferRPCMethodFromContractRouter } from "@orpc/contract";
+import type { ContractRouterClient } from "@orpc/contract";
 import { OpenAPILink } from "@orpc/openapi-client/fetch";
 import type {
   ConfirmUploadDTO,
@@ -258,11 +258,14 @@ export const resolveApiUrl = (apiBasePath: string) => {
   return `${getBaseUrl()}${apiBasePath}`;
 };
 
+// Uses plain POST for every call (not `inferRPCMethodFromContractRouter`): the
+// server's /api/rpc handler is oRPC's `RPCHandler`, which is POST-only and does
+// not honor the contract's `.route({ method })` metadata, so sending the
+// contract-declared verb (e.g. PUT for records.updateChangeRequest) 405s.
 export const createBusabaseORPCClient = (
   apiBasePath = "/api/rpc",
 ): ContractRouterClient<BusabaseContract> => {
   const link = new RPCLink({
-    method: inferRPCMethodFromContractRouter(busabaseContract),
     url: resolveApiUrl(apiBasePath),
   });
 

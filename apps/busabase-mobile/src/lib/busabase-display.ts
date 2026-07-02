@@ -83,11 +83,34 @@ export function getChangeRequestScopeName(changeRequest: ChangeRequestVO) {
   return changeRequest.base?.name ?? changeRequest.node?.name ?? "Node tree";
 }
 
+// Conventional-commit-style title, mirroring the web dashboard helper:
+// "<operation verb> <subject>" where the subject is the base's PRIMARY field
+// (first by position) value, falling back to title-ish slug guesses.
 export function getChangeRequestTitle(changeRequest: ChangeRequestVO) {
-  return getPrimaryTitle(
-    changeRequest.primaryOperation?.headCommit.fields ?? {},
-    `Change Request ${changeRequest.id.slice(0, 8)}`,
-  );
+  const operation = changeRequest.primaryOperation;
+  const fallback = `Change Request ${changeRequest.id.slice(0, 8)}`;
+  if (!operation) {
+    return fallback;
+  }
+  if (changeRequest.operationCount > 1) {
+    return `${changeRequest.operationCount} operation change request`;
+  }
+
+  const primaryField = changeRequest.base?.fields[0];
+  const primaryValue =
+    primaryField && operation.operation.startsWith("record_")
+      ? stringifyFieldValue(
+          operation.headCommit.fields[primaryField.slug] ??
+            operation.baseFields?.[primaryField.slug],
+        ).trim()
+      : "";
+  const subject = primaryValue || getPrimaryTitle(operation.headCommit.fields, "").trim();
+  if (!subject) {
+    return fallback;
+  }
+
+  const label = operationLabels[operation.operation];
+  return label ? `${label} ${subject}` : subject;
 }
 
 export function getRecordTitle(record: RecordVO) {

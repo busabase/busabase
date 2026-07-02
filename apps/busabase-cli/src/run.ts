@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import type { CreatableNodeType } from "busabase-contract/domains";
 import { banner } from "./banner.js";
 import {
   type BusabaseClient,
@@ -59,6 +60,9 @@ Commands:
   whoami                                   Active space, user, and membership
 
   nodes list                               Workspace node tree
+  nodes create-draft --type <folder|base|skill|doc> --slug <s> --name <n>
+               [--description <d>] [--parent-node-id <id>] [--message <m>] [--submitted-by <a>]
+               [--field <slug:name:type> ...]  (fields are for --type base)
 
   bases list                               List Bases
   bases get --slug <slug>                  Get one Base by slug
@@ -75,6 +79,8 @@ Commands:
   drafts list [--limit <n>]                List change requests
   drafts get --draft-id <id>               Get a change request
   drafts review --draft-id <id> --verdict <approved|rejected> [--reason <r>]
+                                            rejected = request changes, not terminal
+  drafts close --draft-id <id> [--reason <r>]  Terminally abandon/reject a draft
   drafts merge --draft-id <id>             Merge a change request into its Base
 
   search --query <q> [--limit <n>] [--offset <n>]
@@ -220,6 +226,36 @@ async function dispatch(
     }
     case "nodes":
       if (sub === "list") return client.nodes.list();
+      if (sub === "create-draft") {
+        const nodeType = required(flags, "type") as CreatableNodeType;
+        const name = required(flags, "name");
+        return client.nodes.createChangeRequest({
+          message: flags.get("message") ?? `Create ${nodeType} ${name}`,
+          submittedBy: flags.get("submitted-by"),
+          operations: [
+            {
+              kind: "create",
+              nodeType,
+              slug: required(flags, "slug"),
+              name,
+              description: flags.get("description"),
+              parentNodeId: flags.get("parent-node-id"),
+              ...(nodeType === "base"
+                ? {
+                    fields: flags.getAll("field").map((spec) => {
+                      const [fieldSlug, name, type] = spec.split(":");
+                      return {
+                        slug: fieldSlug,
+                        name: name ?? fieldSlug,
+                        ...(type ? { type: type as FieldType } : {}),
+                      };
+                    }),
+                  }
+                : {}),
+            },
+          ],
+        });
+      }
       break;
     case "bases":
       switch (sub) {
@@ -299,6 +335,11 @@ async function dispatch(
         }
         case "merge":
           return client.changeRequests.merge({ changeRequestId: required(flags, "draft-id") });
+        case "close":
+          return client.changeRequests.close({
+            changeRequestId: required(flags, "draft-id"),
+            reason: flags.get("reason"),
+          });
       }
       break;
   }

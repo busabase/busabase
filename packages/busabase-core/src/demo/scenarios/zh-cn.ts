@@ -1,4 +1,5 @@
 import type { SeedScenario } from "../seed-types";
+import { agentIntegrationsZhCnScenario } from "./agent-integrations.zh-cn";
 import { datasetZhCnScenario } from "./dataset.zh-cn";
 import { directoryListingZhCnScenario } from "./directory-listing.zh-cn";
 import { expandZhCnScenario } from "./expand.zh-cn";
@@ -19,4 +20,5 @@ export const zhCnScenario: SeedScenario = mergeScenarios(
   readmeScenariosZhCnScenario,
   expandZhCnScenario,
   directoryListingZhCnScenario,
+  agentIntegrationsZhCnScenario,
 );

@@ -67,7 +67,13 @@ export const skillFileOperationInputSchema = z.discriminatedUnion("kind", [
 ]);
 
 export const createSkillChangeRequestInputSchema = z.object({
-  message: z.string().optional().default("Update skill"),
+  message: z
+    .string()
+    .optional()
+    .default("Update skill")
+    .describe(
+      'Explanation shown to the human reviewer. Write a conventional-commit style subject — imperative verb + what + why, e.g. "Rewrite SKILL.md quickstart for the new auth flow".',
+    ),
   submittedBy: z.string().optional().default("local-producer"),
   operations: z.array(skillFileOperationInputSchema).min(1),
 });

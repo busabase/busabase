@@ -281,13 +281,25 @@ const nodeOperationInputSchema = z.discriminatedUnion("kind", [
 ]);
 
 const createNodeChangeRequestInputSchema = z.object({
-  message: z.string().optional().default("Update node tree"),
+  message: z
+    .string()
+    .optional()
+    .default("Update node tree")
+    .describe(
+      'Explanation shown to the human reviewer. Write a conventional-commit style subject — imperative verb + what + why, e.g. "Reorganize marketing docs under a Campaigns folder".',
+    ),
   submittedBy: z.string().optional().default("local-producer"),
   operations: z.array(nodeOperationInputSchema).min(1),
 });
 
 const createDeleteChangeRequestInputSchema = z.object({
-  message: z.string().optional().default("Delete record"),
+  message: z
+    .string()
+    .optional()
+    .default("Delete record")
+    .describe(
+      'Explanation shown to the human reviewer. Say what is being removed and why, e.g. "Archive duplicate contact — merged into Acme Corp".',
+    ),
   submittedBy: z.string().optional().default("local-producer"),
   // Only "archive" is supported — hard delete after retention was never
   // implemented, so the API no longer accepts it (breaking change).
@@ -295,8 +307,18 @@ const createDeleteChangeRequestInputSchema = z.object({
 });
 
 const reviseOperationInputSchema = z.object({
-  fields: z.record(z.string(), z.unknown()),
-  message: z.string().optional().default("Revise operation"),
+  fields: z
+    .record(z.string(), z.unknown())
+    .describe(
+      "Updated field values keyed by field slug. If you set the base's PRIMARY field (its first field), keep it a short human-readable name — it is the record's display title everywhere.",
+    ),
+  message: z
+    .string()
+    .optional()
+    .default("Revise operation")
+    .describe(
+      'Explanation shown to the human reviewer. Write a conventional-commit style subject — imperative verb + what + why, e.g. "Update deal stage to qualified — demo booked for July 8".',
+    ),
   author: z.string().optional().default("local-producer"),
   baseCommitId: z.string().optional(),
 });

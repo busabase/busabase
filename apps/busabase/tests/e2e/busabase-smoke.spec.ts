@@ -1,5 +1,19 @@
 import { expect, test } from "@playwright/test";
 
+test("REST OPTIONS advertises node change-request methods", async ({ request }, testInfo) => {
+  const baseURL = String(testInfo.project.use.baseURL ?? "http://localhost:15419");
+  const response = await request.fetch(
+    new URL("/api/v1/nodes/change-requests", baseURL).toString(),
+    {
+      method: "OPTIONS",
+    },
+  );
+
+  expect(response.status()).toBe(204);
+  expect(response.headers()["access-control-allow-methods"]).toContain("POST");
+  expect(response.headers()["access-control-allow-methods"]).toContain("OPTIONS");
+});
+
 test("dashboard routes render the review-first seeded experience", async ({ page }) => {
   await page.goto("/dashboard");
   await expect(page.getByRole("link", { name: /Busabase.*Approval-first KB/ })).toBeVisible();

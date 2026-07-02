@@ -6,12 +6,15 @@ import { Fragment, useEffect, useMemo, useState } from "react";
 import {
   changeRequestStatusLabel,
   getChangeRequestBrief,
+  getChangeRequestMessage,
   getChangeRequestReviewMessage,
   getChangeRequestRiskHints,
   getChangeRequestScopeHref,
   getChangeRequestScopeName,
   getChangeRequestTitle,
   getOperationImpact,
+  getOperationLabel,
+  getOperationMessage,
   getOperationTargetHref,
   getOperationTargetLabel,
   getOperationTitle,
@@ -152,10 +155,10 @@ export function OperationReviewSection({
             size={16}
           />
           <span className={`shrink-0 rounded-full border px-2 py-0.5 text-xs ${meta.tone}`}>
-            {operation.position + 1}. {meta.label}
+            {operation.position + 1}. {getOperationLabel(operation)}
           </span>
           <span className="min-w-0 truncate font-medium text-sm">
-            {getOperationTitle(operation)}
+            {getOperationTitle(operation, changeRequest.base)}
           </span>
         </button>
         {changedSinceReview ? (
@@ -179,6 +182,11 @@ export function OperationReviewSection({
       </div>
       {open ? (
         <div className="px-4 pb-4">
+          {changeRequest.operationCount > 1 && getOperationMessage(operation) ? (
+            <p className="mb-3 border-primary/30 border-l-2 pl-3 text-sm leading-6">
+              {getOperationMessage(operation)}
+            </p>
+          ) : null}
           <OperationFieldChanges changeRequest={changeRequest} operation={operation} />
           <div className="mt-4">
             <div className="font-medium text-muted-foreground text-xs">Comments on this change</div>
@@ -640,7 +648,14 @@ export function ChangeRequestReviewLayout({
                 </span>
               ))}
             </div>
-            <p className="mt-2 text-sm leading-6">{getChangeRequestBrief(changeRequest)}</p>
+            {getChangeRequestMessage(changeRequest) ? (
+              <p className="mt-2 border-primary/30 border-l-2 pl-3 text-sm leading-6">
+                {getChangeRequestMessage(changeRequest)}
+              </p>
+            ) : null}
+            <p className="mt-2 text-muted-foreground text-sm leading-6">
+              {getChangeRequestBrief(changeRequest)}
+            </p>
           </div>
 
           <ConflictDiffPanel changeRequest={changeRequest} />

@@ -35,8 +35,18 @@ export const listRecordsResponseSchema = z.object({
 });
 
 export const createChangeRequestInputSchema = z.object({
-  fields: z.record(z.string(), z.unknown()),
-  message: z.string().optional().default("Initial change request"),
+  fields: z
+    .record(z.string(), z.unknown())
+    .describe(
+      "Record field values keyed by field slug. The base's PRIMARY field (its first field) becomes the record's display name and the change request title everywhere — always give it a short, human-readable value, never an id or placeholder.",
+    ),
+  message: z
+    .string()
+    .optional()
+    .default("Initial change request")
+    .describe(
+      'Explanation shown to the human reviewer. Write a conventional-commit style subject — imperative verb + what + why, e.g. "Add Acme Corp — qualified lead from the June webinar".',
+    ),
   submittedBy: z.string().optional().default("local-producer"),
 });
 

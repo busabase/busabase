@@ -21,6 +21,11 @@ import type {
   ViewVO,
 } from "busabase-contract/types";
 import type { DemoUseCase } from "../context";
+import {
+  AGENT_INTEGRATIONS_BASES,
+  AGENT_INTEGRATIONS_RECORDS,
+  AGENT_INTEGRATIONS_VIEWS,
+} from "./scenarios/agent-integrations";
 import { CROSS_FUNCTIONAL_BASES, CROSS_FUNCTIONAL_RECORDS } from "./scenarios/cross-functional";
 import {
   DIRECTORY_LISTINGS_BASES,
@@ -920,6 +925,7 @@ export const DEMO_BASES: SeedBaseDef[] = [
   },
   ...FINANCE_BASES,
   ...DIRECTORY_LISTINGS_BASES,
+  ...AGENT_INTEGRATIONS_BASES,
   ...CROSS_FUNCTIONAL_BASES,
   ...(readmeScenario.bases ?? []),
 ];
@@ -2208,6 +2214,7 @@ export const DEMO_RECORDS: SeedRecordDef[] = [
   ...BULK_MEDIA,
   ...FINANCE_RECORDS,
   ...DIRECTORY_LISTINGS_RECORDS,
+  ...AGENT_INTEGRATIONS_RECORDS,
   ...CROSS_FUNCTIONAL_RECORDS,
   ...(readmeScenario.records ?? []),
 ];
@@ -2305,6 +2312,7 @@ export const DEMO_VIEWS: SeedViewDef[] = [
   },
   ...FINANCE_VIEWS,
   ...DIRECTORY_LISTINGS_VIEWS,
+  ...AGENT_INTEGRATIONS_VIEWS,
   ...(readmeScenario.views ?? []),
 ];
 

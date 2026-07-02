@@ -78,7 +78,7 @@ export const buildActivityEvents = (
         href: `/inbox/${changeRequest.id}/${operation.id}`,
         id: `operation:${operation.id}`,
         timestamp: operation.updatedAt,
-        title: getOperationTitle(operation),
+        title: getOperationTitle(operation, changeRequest.base),
         tone: operation.status === "pending" ? "operation" : "commit",
       }),
     );

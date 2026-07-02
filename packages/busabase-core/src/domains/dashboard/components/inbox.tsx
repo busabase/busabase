@@ -4,6 +4,7 @@ import { type ReactNode, useMemo } from "react";
 import { fmt, useCoreI18n } from "../../../i18n";
 import {
   changeRequestStatusLabel,
+  getChangeRequestMessage,
   getChangeRequestOperationLabel,
   getChangeRequestRiskHints,
   getChangeRequestScopeName,
@@ -214,6 +215,7 @@ function ReviewChangeRequestRow({ changeRequest }: { changeRequest: ChangeReques
   const updatedAt = formatListTime(changeRequest.updatedAt);
   const riskHints = getChangeRequestRiskHints(changeRequest);
   const statusLabel = changeRequestStatusLabel(changeRequest.status);
+  const message = getChangeRequestMessage(changeRequest);
 
   return (
     <Link
@@ -235,6 +237,9 @@ function ReviewChangeRequestRow({ changeRequest }: { changeRequest: ChangeReques
             </span>
           ) : null}
         </div>
+        {message ? (
+          <div className="mt-0.5 truncate text-muted-foreground text-xs">{message}</div>
+        ) : null}
         <div className="mt-1 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-muted-foreground text-xs">
           <span className="truncate">{getChangeRequestScopeName(changeRequest)}</span>
           <span>·</span>

@@ -37,10 +37,14 @@ open-source server needs no auth.
 busabase-cli whoami                       # active space / user / membership
 busabase-cli bases list
 busabase-cli bases get --slug tasks
+busabase-cli nodes create-draft --type folder --slug crm --name "CRM"
+busabase-cli nodes create-draft --type base --slug contacts --name "Contacts" --parent-node-id nod_123 --field name:Name:text
 busabase-cli records list --limit 20 --output json
 busabase-cli records by-field-text --field-slug status --value-text open
 busabase-cli drafts list
 busabase-cli drafts review --draft-id cr_123 --verdict approved --reason "LGTM"
+busabase-cli drafts review --draft-id cr_124 --verdict rejected --reason "Needs revision" # request changes
+busabase-cli drafts close --draft-id cr_125 --reason "Wrong proposal"                  # terminal close
 busabase-cli drafts merge --draft-id cr_123
 busabase-cli search --query invoice
 busabase-cli api --method get --path /nodes        # raw OpenAPI passthrough
