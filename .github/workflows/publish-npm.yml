@@ -11,10 +11,14 @@ on:
   push:
     branches: [main]
     paths:
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - "pnpm-workspace.yaml"
       - "apps/busabase-cli/**"
       - "apps/busabase/bin/**"
       - "apps/busabase/scripts/pack-standalone.mjs"
       - "apps/busabase/package.json"
+      - "packages/**"
       - ".github/workflows/publish-npm.yml"
   workflow_dispatch:
 
