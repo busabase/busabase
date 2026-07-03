@@ -40,10 +40,13 @@ busabase-cli bases list
 busabase-cli bases get --slug tasks
 busabase-cli nodes create-change-request --type folder --slug crm --name "CRM"
 busabase-cli nodes create-change-request --type base --slug contacts --name "Contacts" --parent-node-id nod_123 --field name:Name:text
+busabase-cli bases create-field --base-id bse_123 --slug cover_image --name "Cover image" --field-type attachment --max-files 1 --allowed-mime image/png --allowed-mime image/svg+xml
+busabase-cli bases update-field-change-request --base-id bse_123 --field-id bsf_123 --max-files 1 --allowed-mime image/png
 busabase-cli bases create-change-request --base-id bse_123 --fields-json '{"title":"Hello"}'
 busabase-cli bases create-change-request --base-id bse_123 --fields-json @record.json
-busabase-cli records list --limit 20 --output json
+busabase-cli records list --base-id bse_123 --limit 20 --output json
 busabase-cli records by-field-text --field-slug status --value-text open
+busabase-cli attachments upload --file ./cover.png --context record-field --output json
 busabase-cli change-requests list
 busabase-cli change-requests review --change-request-id cr_123 --verdict approved --reason "LGTM"
 busabase-cli change-requests review --change-request-id cr_124 --verdict rejected --reason "Needs revision" # request changes

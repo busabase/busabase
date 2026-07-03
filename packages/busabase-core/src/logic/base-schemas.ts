@@ -37,6 +37,16 @@ const fieldOptionsSchema = z
         sourceFieldIds: z.array(z.string()).optional(),
       })
       .optional(),
+    // Per-field limits for `attachment` columns — must mirror the contract's
+    // fieldOptionsSchema; without this the options are silently stripped on write
+    // and the attachment validator's maxFiles/mime/size limits never apply.
+    attachment: z
+      .object({
+        maxFiles: z.number().int().positive().optional(),
+        allowedMimeTypes: z.array(z.string()).optional(),
+        maxFileSize: z.number().int().positive().optional(),
+      })
+      .optional(),
     choices: z
       .array(
         z.object({

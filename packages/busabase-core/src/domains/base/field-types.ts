@@ -20,6 +20,12 @@ export interface FieldDef {
     choices?: ReadonlyArray<{ id: string; name: string; color?: string }>;
     multiple?: boolean;
     targetBaseId?: string;
+    /** Per-field limits for `attachment` columns (all optional; see attachmentValidator). */
+    attachment?: {
+      maxFiles?: number;
+      allowedMimeTypes?: ReadonlyArray<string>;
+      maxFileSize?: number;
+    };
   } | null;
 }
 
@@ -114,12 +120,66 @@ const choiceMatches = (value: unknown, def: FieldDef): boolean => {
 const isStringArray = (value: unknown): value is string[] =>
   Array.isArray(value) && value.every((item) => typeof item === "string");
 
+/**
+ * Absolute per-file ceiling for attachment values, mirroring the upload guard
+ * (open-domains/attachments `MAX_FILE_SIZE` = 25MB). Duplicated as a local constant
+ * so this registry stays isomorphic — importing the server-only upload logic would
+ * leak it into the client bundle.
+ */
+const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024;
+
+/** An inline attachment cell entry: `{ id, url, fileName, mimeType, size }` (extra keys allowed). */
+const isAttachmentRef = (
+  value: unknown,
+): value is { id: string; url: string; fileName: string; mimeType: string; size: number } => {
+  if (typeof value !== "object" || value === null) return false;
+  const ref = value as Record<string, unknown>;
+  return (
+    typeof ref.id === "string" &&
+    typeof ref.url === "string" &&
+    typeof ref.fileName === "string" &&
+    typeof ref.mimeType === "string" &&
+    typeof ref.size === "number" &&
+    Number.isFinite(ref.size) &&
+    ref.size >= 0
+  );
+};
+
 // ── reusable validators ──────────────────────────────────────────────────────
 const textValidator = (value: unknown, def: FieldDef) =>
   typeof value === "string" ? null : `${fieldDisplayName(def)} must be text`;
 
 const numberValidator = (value: unknown, def: FieldDef) =>
   isNumeric(value) ? null : `${fieldDisplayName(def)} must be a number`;
+
+/**
+ * Validate an `attachment` cell — an Airtable-style ARRAY of attachment refs
+ * (empty array = no files). Enforces the field's `options.attachment` limits
+ * (maxFiles / allowedMimeTypes / maxFileSize) plus the absolute 25MB ceiling.
+ */
+const attachmentValidator = (value: unknown, def: FieldDef): string | null => {
+  const name = fieldDisplayName(def);
+  if (!Array.isArray(value)) return `${name} must be a list of attachments`;
+  if (!value.every(isAttachmentRef)) return `${name} has an invalid attachment`;
+
+  const opts = def.options?.attachment;
+  if (opts?.maxFiles !== undefined && value.length > opts.maxFiles) {
+    return `${name} allows at most ${opts.maxFiles} file${opts.maxFiles === 1 ? "" : "s"}`;
+  }
+
+  const allowed = opts?.allowedMimeTypes;
+  if (allowed && allowed.length > 0) {
+    const bad = value.find((ref) => !allowed.includes(ref.mimeType));
+    if (bad) return `${name} does not allow files of type ${bad.mimeType}`;
+  }
+
+  const limit = Math.min(opts?.maxFileSize ?? MAX_ATTACHMENT_BYTES, MAX_ATTACHMENT_BYTES);
+  if (value.some((ref) => ref.size > limit)) {
+    return `${name} has a file larger than the ${Math.round(limit / (1024 * 1024))}MB limit`;
+  }
+
+  return null;
+};
 
 // ── computed-value helpers (system fields) ───────────────────────────────────
 const computeCreatedTime = (c: SystemComputeCtx) =>
@@ -255,6 +315,7 @@ export const FIELD_TYPES: Record<FieldType, FieldTypeSpec> = {
     label: "file",
     input: "attachment",
     columnWidth: "minmax(128px,180px)",
+    validate: attachmentValidator,
   },
   ai_summary: {
     type: "ai_summary",

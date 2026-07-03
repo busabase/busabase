@@ -1,6 +1,8 @@
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { basename, extname, join } from "node:path";
+import { cloudContract } from "busabase-contract/contract/cloud";
 import type { CreatableNodeType } from "busabase-contract/domains";
 import {
   Command,
@@ -106,6 +108,68 @@ const parseNum = (value: string): number => {
   return parsed;
 };
 
+const parseLimit = (value: string): number => {
+  const parsed = parseNum(value);
+  if (!Number.isInteger(parsed) || parsed < 1 || parsed > 100) {
+    throw new InvalidArgumentError("expected an integer from 1 to 100");
+  }
+  return parsed;
+};
+
+const parsePositiveInt = (value: string): number => {
+  const parsed = parseNum(value);
+  if (!Number.isInteger(parsed) || parsed < 1) {
+    throw new InvalidArgumentError("expected a positive integer");
+  }
+  return parsed;
+};
+
+const parseBoolean = (value: string): boolean => {
+  if (value === "true") return true;
+  if (value === "false") return false;
+  throw new InvalidArgumentError("expected true or false");
+};
+
+const collectValues = (value: string, previous: string[] = []): string[] => [...previous, value];
+
+const MIME_BY_EXT: Record<string, string> = {
+  ".gif": "image/gif",
+  ".jpeg": "image/jpeg",
+  ".jpg": "image/jpeg",
+  ".md": "text/markdown",
+  ".pdf": "application/pdf",
+  ".png": "image/png",
+  ".svg": "image/svg+xml",
+  ".txt": "text/plain",
+  ".webp": "image/webp",
+};
+
+const guessMimeType = (filePath: string) =>
+  MIME_BY_EXT[extname(filePath).toLowerCase()] ?? "application/octet-stream";
+
+function createAttachmentOptions(opts: OptionValues) {
+  const maxFiles = opts.maxFiles as number | undefined;
+  const maxFileSize = opts.maxFileSize as number | undefined;
+  const allowedMimeTypes = opts.allowedMime as string[] | undefined;
+  if (!maxFiles && !maxFileSize && (!allowedMimeTypes || allowedMimeTypes.length === 0)) {
+    return undefined;
+  }
+  return {
+    attachment: {
+      ...(maxFiles ? { maxFiles } : {}),
+      ...(maxFileSize ? { maxFileSize } : {}),
+      ...(allowedMimeTypes && allowedMimeTypes.length > 0 ? { allowedMimeTypes } : {}),
+    },
+  };
+}
+
+function mergeFieldOptions(existing: unknown, attachmentOptions: unknown) {
+  if (!attachmentOptions) return existing;
+  if (!existing || typeof existing !== "object" || Array.isArray(existing))
+    return attachmentOptions;
+  return { ...existing, ...(attachmentOptions as Record<string, unknown>) };
+}
+
 /** `slug:name:type` specs (from repeatable `--field`) → contract field objects. */
 function parseFieldSpecs(specs: string[]) {
   return specs.map((spec) => {
@@ -149,11 +213,91 @@ async function rawFetch(
     body: body !== undefined ? JSON.stringify(body) : undefined,
   });
   const text = await res.text();
-  const parsed = text ? JSON.parse(text) : null;
   if (!res.ok) {
     throw new Error(`HTTP ${res.status} ${res.statusText}: ${text}`);
   }
-  return parsed;
+  if (!text) return null;
+  try {
+    return JSON.parse(text);
+  } catch {
+    return text;
+  }
+}
+
+async function rawRequest(
+  config: ResolvedConfig,
+  method: string,
+  path: string,
+  body?: unknown,
+): Promise<unknown> {
+  return rawFetch(config, method, path, body);
+}
+
+async function uploadAttachment(config: ResolvedConfig, opts: OptionValues) {
+  const filePath = opts.file as string;
+  const file = readFileSync(filePath);
+  const fileName = (opts.fileName as string | undefined) ?? basename(filePath);
+  const mimeType = (opts.mimeType as string | undefined) ?? guessMimeType(filePath);
+  const context = (opts.context as string | undefined) ?? "record-field";
+  const contentHash = `sha256:${createHash("sha256").update(file).digest("hex")}`;
+  const requested = (await rawRequest(config, "POST", "/api/v1/attachments/upload-urls", {
+    fileName,
+    mimeType,
+    sizeBytes: file.byteLength,
+    context,
+    contentHash,
+  })) as {
+    attachmentId?: string;
+    duplicate?: boolean;
+    publicUrl: string;
+    storageKey: string;
+    uploadUrl: string;
+  };
+
+  if (requested.duplicate) {
+    return {
+      id: requested.attachmentId,
+      url: requested.publicUrl,
+      fileName,
+      mimeType,
+      size: file.byteLength,
+    };
+  }
+
+  if (requested.uploadUrl.startsWith("/")) {
+    throw new Error(
+      `Server returned a browser-relative upload URL (${requested.uploadUrl}). Use the Busabase UI for local/dev uploads or a cloud host with a presigned absolute upload URL.`,
+    );
+  }
+
+  const uploadResponse = await fetch(requested.uploadUrl, {
+    body: new Uint8Array(file),
+    headers: { "content-type": mimeType },
+    method: "PUT",
+  });
+  if (!uploadResponse.ok) {
+    const text = await uploadResponse.text();
+    throw new Error(
+      `Attachment byte upload failed (${uploadResponse.status} ${uploadResponse.statusText})${text ? `: ${text}` : ""}`,
+    );
+  }
+
+  const confirmed = (await rawRequest(config, "POST", "/api/v1/attachments/confirmations", {
+    storageKey: requested.storageKey,
+    fileName,
+    mimeType,
+    sizeBytes: file.byteLength,
+    context,
+    contentHash,
+  })) as { attachmentId: string; publicUrl: string };
+
+  return {
+    id: confirmed.attachmentId,
+    url: confirmed.publicUrl,
+    fileName,
+    mimeType,
+    size: file.byteLength,
+  };
 }
 
 interface CliState {
@@ -188,6 +332,188 @@ function pkgVersion(): string {
   } catch {
     return "0.0.0";
   }
+}
+
+// ── OpenAPI-contract-driven command generation ───────────────────────────────
+// The typed client already covers EVERY contract procedure; this walks the same
+// `cloudContract` the client is built from and emits one commander leaf per
+// procedure (`<group> <proc>`), deriving flags from each procedure's input Zod
+// schema. So the CLI stays aligned with the full `/api/v1` surface with ZERO
+// drift — a new contract endpoint becomes a CLI command for free. The curated
+// hand-written commands above always win: a generated command is skipped when
+// its group already has a same-named command, or when it is a nicer-named alias
+// of a curated one (GENERATED_SKIP).
+
+/** camelCase → kebab-case for flag and command names (createChangeRequest → create-change-request). */
+const kebab = (value: string): string => value.replace(/([a-z0-9])([A-Z])/g, "$1-$2").toLowerCase();
+
+type ContractProcedure = {
+  "~orpc": {
+    route: { method: string; path: string; summary?: string; tags?: string[] };
+    inputSchema?: unknown;
+  };
+};
+
+const isProcedure = (node: unknown): node is ContractProcedure =>
+  typeof node === "object" &&
+  node !== null &&
+  typeof (node as { "~orpc"?: { route?: { method?: unknown } } })["~orpc"]?.route?.method ===
+    "string";
+
+type GenFlagKind = "string" | "number" | "boolean" | "enum" | "json";
+interface GenField {
+  key: string;
+  kind: GenFlagKind;
+  required: boolean;
+  choices?: string[];
+}
+
+/** Peel ZodOptional/ZodDefault/ZodNullable wrappers; a default or optional wrapper means not-required. */
+// Zod v4's internal `.def` shape has no public types, so these introspection helpers use `any`.
+function unwrapSchema(schema: any): { inner: any; optional: boolean } {
+  let inner = schema;
+  let optional = false;
+  for (let i = 0; i < 6 && inner?.def; i++) {
+    const type = inner.def.type;
+    if (type === "optional" || type === "default") {
+      optional = true;
+      inner = inner.def.innerType;
+    } else if (type === "nullable") {
+      inner = inner.def.innerType;
+    } else break;
+  }
+  return { inner, optional };
+}
+
+/** Map an (unwrapped) Zod type to a CLI flag kind. Complex types (object/array/record/union) → JSON flag. */
+function classifyKind(inner: any): { kind: GenFlagKind; choices?: string[] } {
+  const type = inner?.def?.type;
+  if (type === "string") return { kind: "string" };
+  if (type === "number") return { kind: "number" };
+  if (type === "boolean") return { kind: "boolean" };
+  if (type === "literal") return { kind: "string" };
+  if (type === "enum") {
+    const choices = Array.isArray(inner.options)
+      ? inner.options
+      : Object.values(inner.def?.entries ?? {});
+    // Fall back to a free-form string when the enum members can't be read.
+    return choices.length ? { kind: "enum", choices: choices as string[] } : { kind: "string" };
+  }
+  return { kind: "json" };
+}
+
+/** Derive the flag set for a procedure from its input object schema (empty when it takes no input). */
+function inputFields(inputSchema: unknown): GenField[] {
+  const { inner } = unwrapSchema(inputSchema);
+  const shape = inner?.shape ?? (inner?.def?.type === "object" ? inner.def.shape : undefined);
+  if (!shape || typeof shape !== "object") return [];
+  const fields: GenField[] = [];
+  for (const [key, sub] of Object.entries(shape as Record<string, any>)) {
+    const { inner: unwrapped, optional } = unwrapSchema(sub);
+    const { kind, choices } = classifyKind(unwrapped);
+    fields.push({ key, kind, required: !optional, choices });
+  }
+  return fields;
+}
+
+/**
+ * Procedures a curated command already exposes under a DIFFERENT name (so the
+ * name-collision guard wouldn't catch them). Keyed `group.procKey`.
+ */
+const GENERATED_SKIP = new Set<string>([
+  "search", // top-level `search`
+  "auth.verify", // `whoami`
+  "records.search", // `records by-field-text`
+  "records.listChangeRequests", // `records change-requests`
+]);
+
+/** Walk `cloudContract` and register a leaf command per procedure not already covered by hand. */
+function registerGeneratedCommands(program: Command, state: CliState): void {
+  const getGroup = (displayName: string, tag?: string): Command =>
+    program.commands.find((c) => c.name() === displayName) ??
+    program.command(displayName).description(tag ?? `${displayName} endpoints`);
+
+  const addLeaf = (
+    parent: Command,
+    navPath: string[],
+    procKey: string,
+    proc: ContractProcedure,
+  ) => {
+    const { route, inputSchema } = proc["~orpc"];
+    const name = kebab(procKey);
+    if (parent.commands.some((c) => c.name() === name)) return; // curated command (or dup) wins
+    const fields = inputFields(inputSchema);
+    const leaf = parent.command(name).description(route.summary ?? `${route.method} ${route.path}`);
+    for (const f of fields) {
+      const flag = `--${kebab(f.key)}`;
+      // A body field named like a global flag (e.g. spaceId) is served by the global flag/header.
+      if (GLOBAL_LONG_FLAGS.has(flag)) continue;
+      if (f.kind === "boolean") {
+        leaf.option(flag, `${f.key} (boolean)`);
+      } else if (f.kind === "json") {
+        const jsonFlag = `${flag}-json <json|@file>`;
+        const desc = `${f.key} as JSON${f.required ? "" : " (optional)"}`;
+        if (f.required) leaf.requiredOption(jsonFlag, desc);
+        else leaf.option(jsonFlag, desc);
+      } else if (f.kind === "enum") {
+        const opt = new Option(`${flag} <value>`, f.key).choices(f.choices ?? []);
+        if (f.required) opt.makeOptionMandatory();
+        leaf.addOption(opt);
+      } else if (f.kind === "number") {
+        const label = `${flag} <value>`;
+        const desc = `${f.key}${f.required ? "" : " (optional)"}`;
+        if (f.required) leaf.requiredOption(label, desc, parseNum);
+        else leaf.option(label, desc, parseNum);
+      } else {
+        const label = `${flag} <value>`;
+        const desc = `${f.key}${f.required ? "" : " (optional)"}`;
+        if (f.required) leaf.requiredOption(label, desc);
+        else leaf.option(label, desc);
+      }
+    }
+    addGlobalFlags(leaf);
+    leaf.addHelpText("after", `\nOpenAPI: ${route.method} ${route.path}`);
+    leaf.action(
+      runAction(state, (client, opts) => {
+        const input: Record<string, unknown> = {};
+        for (const f of fields) {
+          if (GLOBAL_LONG_FLAGS.has(`--${kebab(f.key)}`)) continue;
+          const optKey = f.kind === "json" ? `${f.key}Json` : f.key;
+          const value = (opts as Record<string, unknown>)[optKey];
+          if (value === undefined) continue;
+          input[f.key] =
+            f.kind === "json" ? parseJsonValue(value as string, `${kebab(f.key)}-json`) : value;
+        }
+        // The oRPC client is a Proxy: `.call`/`.bind` are intercepted as route
+        // segments, so the method must be invoked directly (target[procKey](input)).
+        // Dynamic navigation of the typed client requires `any`.
+        let target: any = client;
+        for (const segment of navPath) target = target[segment];
+        return fields.length > 0 ? target[procKey](input) : target[procKey]();
+      }),
+    );
+  };
+
+  const walk = (node: Record<string, unknown>, navPath: string[]): void => {
+    for (const key of Object.keys(node)) {
+      if (key === "~orpc") continue;
+      const child = node[key];
+      const id = [...navPath, key].join(".");
+      if (isProcedure(child)) {
+        if (GENERATED_SKIP.has(id)) continue;
+        // Only single-level groups exist in the contract; guard against deeper nesting.
+        if (navPath.length > 1) continue;
+        const parent = navPath.length
+          ? getGroup(kebab(navPath[0]), child["~orpc"].route.tags?.[0])
+          : program;
+        addLeaf(parent, navPath, key, child);
+      } else if (child && typeof child === "object") {
+        walk(child as Record<string, unknown>, [...navPath, key]);
+      }
+    }
+  };
+
+  walk(cloudContract as unknown as Record<string, unknown>, []);
 }
 
 /**
@@ -351,6 +677,13 @@ Examples:
     .requiredOption("--name <name>", "field name")
     .option("--field-type <type>", "field type (default text)")
     .option("--required", "mark the field as required")
+    .option("--max-files <n>", "attachment option: max files", parsePositiveInt)
+    .option("--max-file-size <bytes>", "attachment option: max size in bytes", parsePositiveInt)
+    .option(
+      "--allowed-mime <mime>",
+      "attachment option: allowed MIME type, repeatable",
+      collectValues,
+    )
     .action(
       runAction(state, (client, opts) =>
         client.bases.createField({
@@ -359,8 +692,58 @@ Examples:
           name: opts.name as string,
           ...(opts.fieldType ? { type: opts.fieldType as FieldType } : {}),
           required: Boolean(opts.required),
+          ...(createAttachmentOptions(opts) ? { options: createAttachmentOptions(opts) } : {}),
         }),
       ),
+    );
+  addGlobalFlags(bases.command("update-field-change-request"))
+    .description("Propose updating field metadata/options via a Change Request")
+    .requiredOption("--base-id <id>", "Base id")
+    .requiredOption("--field-id <id>", "field id")
+    .option("--name <name>", "new field name")
+    .option("--required <true|false>", "set required flag", parseBoolean)
+    .option("--options-json <json|@file>", "full field options JSON, or @file.json")
+    .option("--max-files <n>", "attachment option: max files", parsePositiveInt)
+    .option("--max-file-size <bytes>", "attachment option: max size in bytes", parsePositiveInt)
+    .option(
+      "--allowed-mime <mime>",
+      "attachment option: allowed MIME type, repeatable",
+      collectValues,
+    )
+    .option("--message <text>", "reviewer-facing Change Request message")
+    .option("--submitted-by <name>", "producer label")
+    .addHelpText(
+      "after",
+      `
+Examples:
+  busabase-cli bases update-field-change-request --base-id bse_123 --field-id bsf_123 --name "封面 Cover Image" --max-files 1 --allowed-mime image/png --allowed-mime image/svg+xml
+  busabase-cli bases update-field-change-request --base-id bse_123 --field-id bsf_123 --options-json @field-options.json`,
+    )
+    .action(
+      runAction(state, (client, opts) => {
+        const patch: Record<string, unknown> = {};
+        if (opts.name) patch.name = opts.name;
+        if (opts.required !== undefined) patch.required = opts.required;
+        if (opts.optionsJson) {
+          patch.options = parseJsonValue(opts.optionsJson as string, "options-json");
+        }
+        const attachmentOptions = createAttachmentOptions(opts);
+        patch.options = mergeFieldOptions(patch.options, attachmentOptions);
+        if (Object.keys(patch).length === 0) {
+          throw new Error(
+            "No field patch supplied. Pass --name, --required, --options-json, or attachment option flags.",
+          );
+        }
+        return client.bases.updateFieldChangeRequest({
+          baseId: opts.baseId as string,
+          fieldId: opts.fieldId as string,
+          patch: patch as Parameters<
+            BusabaseClient["bases"]["updateFieldChangeRequest"]
+          >[0]["patch"],
+          message: opts.message as string | undefined,
+          submittedBy: opts.submittedBy as string | undefined,
+        });
+      }),
     );
   addGlobalFlags(bases.command("create-change-request"))
     .description("Propose a new record via a Change Request")
@@ -392,11 +775,18 @@ Examples:
   const records = program.command("records").description("Records");
   addGlobalFlags(records.command("list"))
     .description("List records")
-    .option("--limit <n>", "max results", parseNum)
+    .option("--limit <n>", "max results (1-100)", parseLimit)
+    .option("--base-id <id>", "restrict to one Base")
+    .option("--cursor <cursor>", "opaque nextCursor from a previous page")
     .action(
-      runAction(state, (client, opts) =>
-        client.records.list({ limit: opts.limit as number | undefined }),
-      ),
+      runAction(state, (_client, opts, config) => {
+        const query = new URLSearchParams();
+        if (opts.limit !== undefined) query.set("limit", String(opts.limit));
+        if (opts.baseId) query.set("baseId", opts.baseId as string);
+        if (opts.cursor) query.set("cursor", opts.cursor as string);
+        const qs = query.toString();
+        return rawRequest(config, "GET", `/api/v1/records/paged${qs ? `?${qs}` : ""}`);
+      }),
     );
   addGlobalFlags(records.command("get"))
     .description("Get one record")
@@ -500,6 +890,23 @@ Examples:
       ),
     );
 
+  const attachments = program.command("attachments").description("Attachments");
+  addGlobalFlags(attachments.command("upload"))
+    .description("Upload a file and print an attachment ref for record fields")
+    .requiredOption("--file <path>", "local file to upload")
+    .option("--file-name <name>", "stored file name (default: basename of --file)")
+    .option("--mime-type <mime>", "MIME type (default: inferred from extension)")
+    .option("--context <value>", "upload context (default record-field)")
+    .addHelpText(
+      "after",
+      `
+Example:
+  busabase-cli attachments upload --file ./cover.png --output json
+
+Use the JSON output directly in an attachment field value, e.g. {"cover_image":[<output>]}.`,
+    )
+    .action(runAction(state, (_client, opts, config) => uploadAttachment(config, opts)));
+
   addGlobalFlags(program.command("api"))
     .description("Raw request to any /api/v1 endpoint")
     .addOption(
@@ -528,6 +935,11 @@ Examples:
         );
       }),
     );
+
+  // Fill in every remaining contract procedure as a generated command, so the CLI
+  // covers the full OpenAPI surface. Runs AFTER the curated commands above so those
+  // win on name collisions.
+  registerGeneratedCommands(program, state);
 
   // Derived help — every leaf's usage line comes from its own option definitions,
   // and the root "Commands:" tree replaces commander's flat group list. Set AFTER

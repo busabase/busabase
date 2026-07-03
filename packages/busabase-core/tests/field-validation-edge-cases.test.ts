@@ -218,14 +218,22 @@ describe("ai_tags", () => {
 });
 
 describe("attachment", () => {
-  it("has no shape validator — any non-empty value is accepted by design", () => {
-    expect(FIELD_TYPES.attachment.validate).toBeUndefined();
-    expect(checkOne("attachment", { url: "x" })).toBeNull();
-    expect(checkOne("attachment", [{ url: "x" }])).toBeNull();
-    expect(checkOne("attachment", "anything")).toBeNull();
-    expect(checkOne("attachment", 123)).toBeNull();
+  const ref = {
+    id: "att_1",
+    url: "https://cdn/x.png",
+    fileName: "x.png",
+    mimeType: "image/png",
+    size: 1_000,
+  };
+  it("requires an array of well-formed attachment refs", () => {
+    expect(FIELD_TYPES.attachment.validate).toBeDefined();
+    expect(checkOne("attachment", [ref])).toBeNull();
+    expect(checkOne("attachment", [])).toBeNull(); // empty cell is valid
+    expect(checkOne("attachment", { url: "x" })).toMatch(/list of attachments/); // not an array
+    expect(checkOne("attachment", "anything")).toMatch(/list of attachments/);
+    expect(checkOne("attachment", [{ url: "x" }])).toMatch(/invalid attachment/); // missing fields
   });
-  it("still honors required (empty value flagged before the missing validator)", () => {
+  it("honors required (empty value flagged before the shape validator)", () => {
     expect(checkOne("attachment", undefined, { required: true })).toMatch(/is required/);
   });
 });
