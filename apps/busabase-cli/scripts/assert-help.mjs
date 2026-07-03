@@ -15,6 +15,14 @@ const help = execFileSync(process.execPath, [cliPath, "--help"], {
   cwd: root,
   encoding: "utf8",
 });
+const createChangeRequestHelp = execFileSync(
+  process.execPath,
+  [cliPath, "bases", "create-change-request", "--help"],
+  {
+    cwd: root,
+    encoding: "utf8",
+  },
+);
 
 const required = [
   "nodes create-change-request --type <folder|base|skill|doc>",
@@ -45,6 +53,29 @@ if (missing.length || stale.length) {
       "busabase-cli help does not match the current Change Request command surface.",
       missing.length ? `Missing:\n${missing.map((text) => `  - ${text}`).join("\n")}` : "",
       stale.length ? `Stale:\n${stale.map((text) => `  - ${text}`).join("\n")}` : "",
+    ]
+      .filter(Boolean)
+      .join("\n\n"),
+  );
+}
+
+const nestedRequired = [
+  "Usage:",
+  "busabase-cli bases create-change-request --base-id <id> --fields-json <json|@file>",
+  "--submitted-by <name>",
+];
+const nestedForbidden = ["Commands:", "drafts", "--draft-id"];
+const nestedMissing = nestedRequired.filter((text) => !createChangeRequestHelp.includes(text));
+const nestedStale = nestedForbidden.filter((text) => createChangeRequestHelp.includes(text));
+
+if (nestedMissing.length || nestedStale.length) {
+  throw new Error(
+    [
+      "busabase-cli nested help for bases create-change-request is not focused.",
+      nestedMissing.length
+        ? `Missing:\n${nestedMissing.map((text) => `  - ${text}`).join("\n")}`
+        : "",
+      nestedStale.length ? `Stale:\n${nestedStale.map((text) => `  - ${text}`).join("\n")}` : "",
     ]
       .filter(Boolean)
       .join("\n\n"),

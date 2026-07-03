@@ -15,7 +15,8 @@
     "paths": {
       "busabase-core": ["../../packages/busabase-core/src/index.ts"],
       "busabase-core/*": ["../../packages/busabase-core/src/*"],
-      "open-domains/*": ["../../packages/open-domains/*"]
+      "open-domains/*": ["../../packages/open-domains/*"],
+      "openlib/*": ["../../packages/openlib/*"]
     }
   },
   "include": ["src/**/*.ts", "tsup.config.ts"]

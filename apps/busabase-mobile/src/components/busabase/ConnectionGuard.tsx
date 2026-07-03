@@ -11,7 +11,8 @@ const HEALTH_CHECK_MIN_GAP_MS = 30_000;
 export function ConnectionGuard({ children }: { children: ReactNode }) {
   const router = useRouter();
   const { state, disconnect } = useConnection();
-  const serverUrl = state.status === "connected" ? state.connection.serverUrl : null;
+  const connection = state.status === "connected" ? state.connection : null;
+  const serverUrl = connection?.serverUrl ?? null;
   const [unreachable, setUnreachable] = useState(false);
   const [checking, setChecking] = useState(false);
   const lastCheckAt = useRef(0);
@@ -19,6 +20,10 @@ export function ConnectionGuard({ children }: { children: ReactNode }) {
   const checkHealth = useCallback(
     async (force = false) => {
       if (!serverUrl) {
+        return;
+      }
+      if (connection?.mode === "cloud") {
+        setUnreachable(false);
         return;
       }
       const now = Date.now();
@@ -36,7 +41,7 @@ export function ConnectionGuard({ children }: { children: ReactNode }) {
         setChecking(false);
       }
     },
-    [serverUrl],
+    [serverUrl, connection?.mode],
   );
 
   useEffect(() => {

@@ -22,6 +22,7 @@ npx busabase-cli health
 | -------------- | -------------------- | ------------------------ |
 | `--base-url`   | `BUSABASE_BASE_URL`  | `https://busabase.com`   |
 | `--api-key`    | `BUSABASE_API_KEY`   | _(none — local is open)_ |
+| `--space-id`   | `BUSABASE_SPACE_ID`  | _(cloud default space)_  |
 | `--output`     | —                    | `table` (`json` for raw) |
 
 Config is read from flags, then env vars, then `~/.busabase/.env` (auto-loaded —
@@ -39,6 +40,8 @@ busabase-cli bases list
 busabase-cli bases get --slug tasks
 busabase-cli nodes create-change-request --type folder --slug crm --name "CRM"
 busabase-cli nodes create-change-request --type base --slug contacts --name "Contacts" --parent-node-id nod_123 --field name:Name:text
+busabase-cli bases create-change-request --base-id bse_123 --fields-json '{"title":"Hello"}'
+busabase-cli bases create-change-request --base-id bse_123 --fields-json @record.json
 busabase-cli records list --limit 20 --output json
 busabase-cli records by-field-text --field-slug status --value-text open
 busabase-cli change-requests list

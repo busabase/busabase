@@ -29,6 +29,9 @@ const intervalOptions: Array<{ label: string; value: NotificationSettings["pollI
   { label: "2m", value: 120 },
 ];
 
+const AGENT_SKILL_URL = "https://busabase.com/SETUP_SKILL.md";
+const SUPPORT_URL = "https://busabase.com/support";
+
 function SettingsContent() {
   const router = useRouter();
   const tokens = useTokens();
@@ -63,6 +66,11 @@ function SettingsContent() {
           <Text style={[typography.body, { color: tokens.mutedForeground }]}>
             {connection?.serverUrl ?? "No server connected"}
           </Text>
+          {connection?.mode === "cloud" ? (
+            <Text style={[typography.small, { color: tokens.mutedForeground }]}>
+              Signed in{connection.cloudUser?.email ? ` as ${connection.cloudUser.email}` : ""}
+            </Text>
+          ) : null}
           <Text style={[typography.small, { color: tokens.mutedForeground }]}>
             Connected {formatDate(connection?.connectedAt)}
           </Text>
@@ -224,17 +232,17 @@ function SettingsContent() {
               change requests on your behalf.
             </Text>
             <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Open Agent Skill manifest"
+              accessibilityRole="link"
+              accessibilityLabel="Open Agent Skill setup guide"
               style={styles.linkRow}
-              onPress={() => void Linking.openURL(`${connection.serverUrl}/SKILL.md`)}
+              onPress={() => void Linking.openURL(AGENT_SKILL_URL)}
             >
               <ExternalLink size={16} color={tokens.primary} />
               <Text
                 numberOfLines={1}
                 style={[typography.small, styles.serverUrl, { color: tokens.primary }]}
               >
-                {connection.serverUrl}/SKILL.md
+                {AGENT_SKILL_URL}
               </Text>
             </Pressable>
           </View>
@@ -260,13 +268,24 @@ function SettingsContent() {
             <ExternalLink size={16} color={tokens.primary} />
             <Text style={[typography.small, { color: tokens.primary }]}>Privacy Policy</Text>
           </Pressable>
+          <Pressable
+            accessibilityRole="link"
+            accessibilityLabel="Contact Busabase Support"
+            style={styles.linkRow}
+            onPress={() => void Linking.openURL(SUPPORT_URL)}
+          >
+            <ExternalLink size={16} color={tokens.primary} />
+            <Text style={[typography.small, { color: tokens.primary }]}>Support</Text>
+          </Pressable>
         </View>
 
         <View style={styles.actions}>
           <View style={styles.row}>
             <LogOut size={18} color={tokens.destructive} />
             <Text style={[typography.small, { color: tokens.mutedForeground }]}>
-              Disconnecting clears the saved URL on this device. Saved servers stay available.
+              {connection?.mode === "cloud"
+                ? "Disconnecting signs this device out of Busabase Cloud and clears the secure session."
+                : "Disconnecting clears the saved URL on this device. Saved servers stay available."}
             </Text>
           </View>
           <Button label="Disconnect" variant="destructive" fullWidth onPress={handleDisconnect} />

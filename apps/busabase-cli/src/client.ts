@@ -14,6 +14,8 @@ export interface ResolvedConfig {
   baseUrl: string;
   /** Optional bearer token — only the cloud requires it; local OSS is open. */
   apiKey?: string;
+  /** Optional Busabase Cloud space id. Sent as `x-busabase-space` when present. */
+  spaceId?: string;
   /** `table` (human) or `json` (machine). */
   output: "table" | "json";
 }
@@ -39,7 +41,10 @@ export function normalizeBaseUrl(raw: string): string {
 export function createBusabaseClient(config: ResolvedConfig): BusabaseClient {
   const link = new OpenAPILink(cloudContract, {
     url: normalizeBaseUrl(config.baseUrl),
-    headers: async () => (config.apiKey ? { authorization: `Bearer ${config.apiKey}` } : {}),
+    headers: async () => ({
+      ...(config.apiKey ? { authorization: `Bearer ${config.apiKey}` } : {}),
+      ...(config.spaceId ? { "x-busabase-space": config.spaceId } : {}),
+    }),
   });
   return createORPCClient(link);
 }

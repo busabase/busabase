@@ -17,13 +17,11 @@ import {
   Settings,
   Sparkles,
   Table2,
-  X,
 } from "lucide-react-native";
 import { type ReactNode, useState } from "react";
 import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useBusabaseOrpc } from "~/api/use-busabase-orpc";
 import { NativeScreen } from "~/components/native-screen";
-import { useConnection } from "~/connection/connection-store";
 import { useI18n } from "~/i18n";
 import type { CoreMessages } from "~/i18n/messages";
 import { mobile, radius, typography } from "~/theme/tokens";
@@ -67,7 +65,6 @@ export function DrawerScaffold({
   const pathname = usePathname();
   const tokens = useTokens();
   const { t } = useI18n();
-  const { state } = useConnection();
   const buda = useBusabaseOrpc();
   const [open, setOpen] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
@@ -102,7 +99,7 @@ export function DrawerScaffold({
 
   const navigate = (href: string) => {
     setOpen(false);
-    router.push(href as never);
+    router.replace(href as never);
   };
 
   const navigateNode = (node: NodeVO) => {
@@ -146,15 +143,7 @@ export function DrawerScaffold({
             <View style={styles.drawerHeader}>
               <View style={styles.drawerTitle}>
                 <Text style={[typography.h2, { color: tokens.foreground }]}>Busabase</Text>
-                <Text style={[typography.small, { color: tokens.mutedForeground }]}>
-                  {state.status === "connected"
-                    ? state.connection.serverUrl
-                    : t.common.notConnected}
-                </Text>
               </View>
-              <Pressable hitSlop={mobile.hitSlop} onPress={() => setOpen(false)}>
-                <X size={22} color={tokens.foreground} />
-              </Pressable>
             </View>
 
             <ScrollView
@@ -335,7 +324,12 @@ export function DrawerScaffold({
               </View>
             </ScrollView>
           </View>
-          <Pressable style={styles.scrim} onPress={() => setOpen(false)} />
+          <Pressable
+            accessibilityLabel="Close navigation drawer"
+            accessibilityRole="button"
+            style={styles.edgeDismiss}
+            onPress={() => setOpen(false)}
+          />
         </View>
       </Modal>
 
@@ -361,7 +355,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   modal: { flex: 1, flexDirection: "row" },
-  scrim: { flex: 1, backgroundColor: "rgba(0, 0, 0, 0.38)" },
+  edgeDismiss: { flex: 1, backgroundColor: "transparent" },
   drawer: {
     width: mobile.drawerWidth,
     maxWidth: "82%",

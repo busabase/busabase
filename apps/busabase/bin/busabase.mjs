@@ -121,7 +121,29 @@ function findServerEntry() {
   return undefined;
 }
 
+function printServerHelp() {
+  const out = [];
+  out.push("Usage:");
+  out.push(`  busabase server [flags]`);
+  out.push("");
+  out.push("Flags:");
+  out.push(
+    `  ${c.cyan("--port")} ${c.dim("<n>")}      port to listen on        ${c.dim("(default 15419)")}`,
+  );
+  out.push(
+    `  ${c.cyan("--host")} ${c.dim("<addr>")}   bind address             ${c.dim("(default 127.0.0.1)")}`,
+  );
+  out.push(
+    `  ${c.cyan("--data")} ${c.dim("<dir>")}    data dir (db + uploads)  ${c.dim("(default ~/.busabase/data)")}`,
+  );
+  console.log(out.join("\n"));
+}
+
 async function startServer(argv) {
+  if (argv.includes("--help") || argv.includes("-h")) {
+    printServerHelp();
+    return;
+  }
   const port = flag(argv, "port") ?? process.env.PORT ?? "15419";
   const host = flag(argv, "host") ?? process.env.HOSTNAME ?? "127.0.0.1";
   // Canonical data root, shared verbatim with busabase-desktop and the Docker
@@ -170,7 +192,15 @@ async function main() {
     return;
   }
   const { runCli } = await import("busabase-cli");
-  process.exit(await runCli(argv));
+  const code = await runCli(argv);
+  // The delegated client help doesn't know about the server role — append it.
+  const wantsHelp = argv.length === 0 || ["-h", "--help", "help"].includes(argv[0]);
+  if (wantsHelp && code === 0) {
+    console.log(
+      `\nServer:\n  busabase server [--port <n>] [--host <addr>] [--data <dir>]\n${c.dim("  boots the bundled Busabase server (zero setup, pglite) — see `busabase server --help`")}`,
+    );
+  }
+  process.exit(code);
 }
 
 await main();

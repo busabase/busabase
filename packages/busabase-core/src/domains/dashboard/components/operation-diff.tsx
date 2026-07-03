@@ -12,6 +12,7 @@ import type {
   ViewConfigVO,
 } from "busabase-contract/types";
 import { ArrowRight, Minus, Plus } from "lucide-react";
+import { iStringParse } from "openlib/i18n/i-string";
 import { getFieldName } from "../helpers/field";
 import { fieldValueToString } from "../helpers/format";
 import { FieldValuePreview } from "./field-preview";
@@ -47,6 +48,40 @@ export interface OperationFieldChange {
 }
 
 export const isViewOperation = (operation: OperationVO) => operation.operation.startsWith("view_");
+
+export interface FieldOrderDiffModel {
+  afterIds: string[];
+  beforeIds: string[];
+  fieldsById: Map<string, BaseFieldVO>;
+  movedIds: Set<string>;
+}
+
+export const fieldOrderIds = (operation: OperationVO): string[] =>
+  Array.isArray(operation.headCommit.fields.fieldIds)
+    ? operation.headCommit.fields.fieldIds.filter(
+        (value): value is string => typeof value === "string",
+      )
+    : [];
+
+export const sortedBaseFields = (changeRequest: ChangeRequestVO) =>
+  (changeRequest.base?.fields ?? []).slice().sort((left, right) => left.position - right.position);
+
+export const isFieldReorderOperation = (operation: OperationVO) =>
+  operation.operation === "base_reorder_fields";
+
+export const getFieldOrderDiffModel = (
+  changeRequest: ChangeRequestVO,
+  operation: OperationVO,
+): FieldOrderDiffModel => {
+  const beforeFields = sortedBaseFields(changeRequest);
+  const beforeIds = beforeFields.map((field) => field.id);
+  const afterIds = fieldOrderIds(operation);
+  const fieldsById = new Map(beforeFields.map((field) => [field.id, field]));
+  const beforePositionById = new Map(beforeIds.map((id, index) => [id, index]));
+  const movedIds = new Set(afterIds.filter((id, index) => beforePositionById.get(id) !== index));
+
+  return { afterIds, beforeIds, fieldsById, movedIds };
+};
 
 export const getOperationFieldLabel = (
   changeRequest: ChangeRequestVO,
@@ -312,6 +347,111 @@ export function OperationFieldChangeRow({
   );
 }
 
+const getFieldOrderName = (field: BaseFieldVO | undefined) =>
+  field ? iStringParse(field.name) : "Unknown field";
+
+function FieldOrderRow({
+  field,
+  id,
+  index,
+  moved,
+}: {
+  field?: BaseFieldVO;
+  id: string;
+  index: number;
+  moved: boolean;
+}) {
+  return (
+    <li
+      className={`grid grid-cols-[2rem_minmax(0,1fr)] gap-2 rounded-md border px-2.5 py-2 text-sm ${
+        moved
+          ? "border-amber-200 bg-amber-50/60 dark:border-amber-900/60 dark:bg-amber-950/20"
+          : "border-transparent bg-muted/25"
+      }`}
+    >
+      <span className="text-right font-mono text-muted-foreground tabular-nums">{index + 1}</span>
+      <span className="min-w-0">
+        <span className="block truncate font-medium">{getFieldOrderName(field)}</span>
+        <span className="block truncate font-mono text-muted-foreground text-xs">
+          {field ? field.slug : id}
+        </span>
+      </span>
+    </li>
+  );
+}
+
+function FieldOrderList({
+  fieldsById,
+  ids,
+  movedIds,
+  title,
+}: {
+  fieldsById: Map<string, BaseFieldVO>;
+  ids: string[];
+  movedIds: Set<string>;
+  title: string;
+}) {
+  return (
+    <div className="min-w-0">
+      <div className="mb-2 font-medium text-muted-foreground text-xs uppercase tracking-wide">
+        {title}
+      </div>
+      <ol className="flex flex-col gap-1.5">
+        {ids.map((id, index) => (
+          <FieldOrderRow
+            field={fieldsById.get(id)}
+            id={id}
+            index={index}
+            key={`${title}:${id}`}
+            moved={movedIds.has(id)}
+          />
+        ))}
+      </ol>
+    </div>
+  );
+}
+
+export function FieldOrderDiff({
+  changeRequest,
+  operation,
+}: {
+  changeRequest: ChangeRequestVO;
+  operation: OperationVO;
+}) {
+  const { afterIds, beforeIds, fieldsById, movedIds } = getFieldOrderDiffModel(
+    changeRequest,
+    operation,
+  );
+
+  if (beforeIds.length === 0 || afterIds.length === 0) {
+    return (
+      <div className="mt-3 rounded-lg border bg-background/40 px-4 py-5 text-muted-foreground text-sm">
+        Field order data is unavailable for this operation.
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-3 rounded-lg border bg-background/40 p-3">
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <div className="font-medium text-sm">Field order</div>
+        <span className="shrink-0 rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 font-medium text-[11px] text-amber-700 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-300">
+          {movedIds.size} moved
+        </span>
+      </div>
+      <div className="grid gap-3 md:grid-cols-2">
+        <FieldOrderList
+          fieldsById={fieldsById}
+          ids={beforeIds}
+          movedIds={movedIds}
+          title="Before"
+        />
+        <FieldOrderList fieldsById={fieldsById} ids={afterIds} movedIds={movedIds} title="After" />
+      </div>
+    </div>
+  );
+}
+
 export function OperationFieldChanges({
   changeRequest,
   operation,
@@ -319,6 +459,10 @@ export function OperationFieldChanges({
   changeRequest: ChangeRequestVO;
   operation: OperationVO;
 }) {
+  if (isFieldReorderOperation(operation)) {
+    return <FieldOrderDiff changeRequest={changeRequest} operation={operation} />;
+  }
+
   const changes = getOperationFieldChanges(changeRequest, operation);
   if (changes.length === 0) {
     return (

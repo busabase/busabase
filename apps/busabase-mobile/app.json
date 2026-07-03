@@ -59,7 +59,8 @@
         }
       ],
       "expo-background-task",
-      "expo-status-bar"
+      "expo-status-bar",
+      "./plugins/with-android-cookies-gradle-repositories.cjs"
     ],
     "experiments": {
       "typedRoutes": true
@@ -68,6 +69,7 @@
       "router": {},
       "eas": {},
       "busabase": {
+        "cloudUrl": "https://busabase.com",
         "demoServerUrl": "https://demo.busabase.com"
       }
     }

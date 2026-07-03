@@ -2,6 +2,13 @@ import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { CreatableNodeType } from "busabase-contract/domains";
+import {
+  Command,
+  CommanderError,
+  InvalidArgumentError,
+  Option,
+  type OptionValues,
+} from "commander";
 import { banner } from "./banner.js";
 import {
   type BusabaseClient,
@@ -11,6 +18,9 @@ import {
   type ResolvedConfig,
 } from "./client.js";
 import { render } from "./format.js";
+
+/** Public docs page covering every error below, for both Cloud and local. Linked from each error. */
+const DOCS_TROUBLESHOOTING = "https://busabase.com/docs/troubleshooting";
 
 /**
  * Read `~/.busabase/.env` (written by the setup skill) into a record, so the CLI works without the
@@ -40,130 +50,85 @@ function loadDotEnvFile(): Record<string, string> {
   return out;
 }
 
-export const HELP = `busabase-cli — client for the Busabase OpenAPI REST API
-
-Usage:
-  busabase-cli [global flags] <command> [flags]
-
-Global flags:
-  --base-url <url>     Server base URL (env BUSABASE_BASE_URL, default ${DEFAULT_BASE_URL})
-  --api-key <token>    Bearer token for cloud hosts (env BUSABASE_API_KEY)
-  --output <fmt>       table | json (default table)
-  -h, --help           Show this help
-
-Config is read from flags, then env vars, then ~/.busabase/.env (auto-loaded — no
-need to source it). An exported env var overrides the file.
-
-Commands:
-  health                                   Server health check (GET /api/health)
-  openapi                                  Fetch the OpenAPI document
-  whoami                                   Active space, user, and membership
-
-  nodes list                               Workspace node tree
-  nodes create-change-request --type <folder|base|skill|doc> --slug <s> --name <n>
-               [--description <d>] [--parent-node-id <id>] [--message <m>] [--submitted-by <a>]
-               [--field <slug:name:type> ...]  (fields are for --type base)
-
-  bases list                               List Bases
-  bases get --slug <slug>                  Get one Base by slug
-  bases create --slug <s> --name <n> [--description <d>] [--parent-node-id <id>]
-               --field <slug:name:type> [--field ...]
-  bases create-field --base-id <id> --slug <s> --name <n> [--field-type <t>] [--required]
-  bases create-change-request --base-id <id> --fields-json <json> [--message <m>] [--submitted-by <a>]
-
-  records list [--limit <n>]               List records
-  records get --record-id <id>             Get one record
-  records by-field-text --field-slug <s> --value-text <t> [--base-id <id>] [--limit <n>]
-  records change-requests --record-id <id> Change Requests for a record
-
-  change-requests list [--limit <n>]       List Change Requests
-  change-requests get --change-request-id <id>
-                                            Get a Change Request
-  change-requests review --change-request-id <id> --verdict <approved|rejected> [--reason <r>]
-                                            rejected = request changes, not terminal
-  change-requests close --change-request-id <id> [--reason <r>]
-                                            Terminally abandon/reject a Change Request
-  change-requests merge --change-request-id <id>
-                                            Merge a Change Request into its Base
-
-  search --query <q> [--limit <n>] [--offset <n>]
-
-  api --method <get|post|put|delete> --path <p> [--query k=v ...] [--body-json <json>]
-
-Docs: https://busabase.com/docs · Troubleshooting: https://busabase.com/docs/troubleshooting
-`;
-
 // The field `type` arrives as a free-form CLI string; the typed contract narrows it
 // to the field-type union. Server-side zod re-validates, so narrow with a cast here.
 type FieldType = NonNullable<
   Parameters<BusabaseClient["bases"]["create"]>[0]["fields"]
 >[number]["type"];
 
-interface Flags {
-  positionals: string[];
-  get(name: string): string | undefined;
-  getAll(name: string): string[];
-  has(name: string): boolean;
-  num(name: string): number | undefined;
-}
-
-function parse(argv: string[]): Flags {
-  const positionals: string[] = [];
-  const values = new Map<string, string[]>();
-  const bools = new Set<string>();
-  for (let i = 0; i < argv.length; i++) {
-    const token = argv[i];
-    if (token.startsWith("--")) {
-      const name = token.slice(2);
-      const next = argv[i + 1];
-      if (next !== undefined && !next.startsWith("--")) {
-        values.set(name, [...(values.get(name) ?? []), next]);
-        i++;
-      } else {
-        bools.add(name);
-      }
-    } else if (token === "-h") {
-      bools.add("help");
-    } else {
-      positionals.push(token);
-    }
-  }
-  return {
-    positionals,
-    get: (name) => values.get(name)?.at(-1),
-    getAll: (name) => values.get(name) ?? [],
-    has: (name) => bools.has(name) || values.has(name),
-    num: (name) => {
-      const raw = values.get(name)?.at(-1);
-      return raw === undefined ? undefined : Number(raw);
-    },
-  };
-}
-
-function resolveConfig(flags: Flags): ResolvedConfig {
-  const outputRaw = flags.get("output") ?? "table";
-  if (outputRaw !== "table" && outputRaw !== "json") {
-    throw new Error(`--output must be "table" or "json", got "${outputRaw}"`);
-  }
-  // Precedence: explicit flag > exported env var > ~/.busabase/.env file > default. Reading the
-  // file directly means `busabase-cli` works straight after onboarding without a manual `source`,
-  // while an exported env var still overrides the file.
+/**
+ * Precedence: explicit flag > exported env var > ~/.busabase/.env file > default. Reading the
+ * file directly means `busabase-cli` works straight after onboarding without a manual `source`,
+ * while an exported env var still overrides the file.
+ */
+function resolveConfig(opts: OptionValues): ResolvedConfig {
   const file = loadDotEnvFile();
   return {
     baseUrl:
-      flags.get("base-url") ??
+      (opts.baseUrl as string | undefined) ??
       process.env.BUSABASE_BASE_URL ??
       file.BUSABASE_BASE_URL ??
       DEFAULT_BASE_URL,
-    apiKey: flags.get("api-key") ?? process.env.BUSABASE_API_KEY ?? file.BUSABASE_API_KEY,
-    output: outputRaw,
+    apiKey:
+      (opts.apiKey as string | undefined) ?? process.env.BUSABASE_API_KEY ?? file.BUSABASE_API_KEY,
+    spaceId:
+      (opts.spaceId as string | undefined) ??
+      process.env.BUSABASE_SPACE_ID ??
+      file.BUSABASE_SPACE_ID,
+    output: (opts.output as "table" | "json" | undefined) ?? "table",
   };
 }
 
-function required(flags: Flags, name: string): string {
-  const value = flags.get(name);
-  if (value === undefined) throw new Error(`missing required flag --${name}`);
-  return value;
+/**
+ * Config flags accepted anywhere on the line (`busabase-cli --output json bases list` and
+ * `busabase-cli bases list --output json` both work): declared on the root program AND on every
+ * leaf command, merged via `optsWithGlobals()` (leaf wins). No commander defaults here — a leaf
+ * default would shadow a root-provided value, so defaults live in `resolveConfig` instead.
+ */
+const GLOBAL_LONG_FLAGS = new Set(["--base-url", "--api-key", "--space-id", "--output"]);
+
+function addGlobalFlags(cmd: Command): Command {
+  return cmd
+    .option(
+      "--base-url <url>",
+      `server base URL (env BUSABASE_BASE_URL, default ${DEFAULT_BASE_URL})`,
+    )
+    .option("--api-key <token>", "bearer token for cloud hosts (env BUSABASE_API_KEY)")
+    .option("--space-id <id>", "target Busabase space (env BUSABASE_SPACE_ID)")
+    .addOption(
+      new Option("--output <fmt>", "table | json (default table)").choices(["table", "json"]),
+    );
+}
+
+const parseNum = (value: string): number => {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) throw new InvalidArgumentError("expected a number");
+  return parsed;
+};
+
+/** `slug:name:type` specs (from repeatable `--field`) → contract field objects. */
+function parseFieldSpecs(specs: string[]) {
+  return specs.map((spec) => {
+    const [slug, name, type] = spec.split(":");
+    return {
+      slug,
+      name: name ?? slug,
+      ...(type ? { type: type as FieldType } : {}),
+    };
+  });
+}
+
+function parseJsonValue(raw: string, flagName: string): unknown {
+  const text = raw.startsWith("@") ? readFileSync(raw.slice(1), "utf8") : raw;
+  try {
+    return JSON.parse(text);
+  } catch (error) {
+    const hint = raw.startsWith("@")
+      ? `File ${raw.slice(1)} is not valid JSON.`
+      : `Flag --${flagName} must be valid JSON. For complex values, write a file and pass --${flagName} @record.json.`;
+    const reason = error instanceof Error ? error.message : String(error);
+    throw new Error(`${hint}\n  JSON parse error: ${reason}`);
+  }
 }
 
 /** Raw fetch for endpoints outside the typed contract (health / openapi / api passthrough). */
@@ -179,6 +144,7 @@ async function rawFetch(
     headers: {
       ...(body !== undefined ? { "content-type": "application/json" } : {}),
       ...(config.apiKey ? { authorization: `Bearer ${config.apiKey}` } : {}),
+      ...(config.spaceId ? { "x-busabase-space": config.spaceId } : {}),
     },
     body: body !== undefined ? JSON.stringify(body) : undefined,
   });
@@ -190,167 +156,392 @@ async function rawFetch(
   return parsed;
 }
 
-// Flat command dispatch table — clearer than nested per-group handlers.
-async function dispatch(
-  command: string,
-  sub: string | undefined,
-  flags: Flags,
-  config: ResolvedConfig,
+interface CliState {
+  /** Last config a command resolved — lets `runCli` explain transport errors with the real target. */
+  config?: ResolvedConfig;
+}
+
+type Handler = (
   client: BusabaseClient,
-): Promise<unknown> {
-  switch (command) {
-    case "health":
-      return rawFetch(config, "GET", "/api/health");
-    case "openapi":
-      return rawFetch(config, "GET", "/api/v1/openapi.json");
-    case "whoami":
-      return client.auth.verify();
-    case "search":
-      return client.search({
-        query: required(flags, "query"),
-        limit: flags.num("limit"),
-        offset: flags.num("offset"),
-      });
-    case "api": {
-      const query = new URLSearchParams();
-      for (const pair of flags.getAll("query")) {
-        const [key, ...rest] = pair.split("=");
-        query.set(key, rest.join("="));
-      }
-      const qs = query.toString();
-      const path = `/api/v1${required(flags, "path")}${qs ? `?${qs}` : ""}`;
-      const bodyJson = flags.get("body-json");
-      return rawFetch(
-        config,
-        required(flags, "method"),
-        path,
-        bodyJson ? JSON.parse(bodyJson) : undefined,
-      );
+  opts: OptionValues,
+  config: ResolvedConfig,
+) => Promise<unknown>;
+
+/** Wrap a leaf-command handler: resolve config, build the client, render the result. */
+function runAction(state: CliState, handler: Handler) {
+  return async (_opts: OptionValues, cmd: Command): Promise<void> => {
+    const opts = cmd.optsWithGlobals();
+    const config = resolveConfig(opts);
+    state.config = config;
+    const client = createBusabaseClient(config);
+    const result = await handler(client, opts, config);
+    console.log(render(result, config.output));
+  };
+}
+
+function pkgVersion(): string {
+  try {
+    const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as {
+      version?: string;
+    };
+    return pkg.version ?? "0.0.0";
+  } catch {
+    return "0.0.0";
+  }
+}
+
+/**
+ * Per-command flag signature derived from the actual option definitions, e.g.
+ * `--slug <slug> --name <name> [--description <text>]`. Used for both the root command
+ * tree and each leaf's usage line, so help can never drift from the real surface.
+ */
+function flagSignature(cmd: Command): string {
+  const parts: string[] = [];
+  for (const option of cmd.options) {
+    if (option.name() === "help" || GLOBAL_LONG_FLAGS.has(option.long ?? "")) continue;
+    parts.push(option.mandatory ? option.flags : `[${option.flags}]`);
+  }
+  return parts.join(" ");
+}
+
+/**
+ * Root help "Commands:" section: every leaf with its full flag signature (the flat
+ * commander listing would only show group names). Generated from the command tree,
+ * never hand-written.
+ */
+function commandsSection(program: Command): string {
+  const lines: string[] = ["Commands:"];
+  const entry = (prefix: string, cmd: Command) => {
+    const sig = [prefix, flagSignature(cmd)].filter(Boolean).join(" ");
+    const desc = cmd.description();
+    if (!desc) return `  ${sig}`;
+    if (sig.length <= 40) return `  ${sig.padEnd(42)}${desc}`;
+    return `  ${sig}\n${" ".repeat(44)}${desc}`;
+  };
+  for (const cmd of program.commands) {
+    if (cmd.name() === "help") continue;
+    const leaves = cmd.commands.filter((leaf) => leaf.name() !== "help");
+    if (leaves.length > 0) {
+      lines.push("");
+      for (const leaf of leaves) lines.push(entry(`${cmd.name()} ${leaf.name()}`, leaf));
+    } else {
+      lines.push(entry(cmd.name(), cmd));
     }
-    case "nodes":
-      if (sub === "list") return client.nodes.list();
-      if (sub === "create-change-request") {
-        const nodeType = required(flags, "type") as CreatableNodeType;
-        const name = required(flags, "name");
+  }
+  return lines.join("\n");
+}
+
+const HELP_FOOTER = `
+Config is read from flags, then env vars, then ~/.busabase/.env (auto-loaded — no
+need to source it). An exported env var overrides the file.
+
+Docs: https://busabase.com/docs · Troubleshooting: ${DOCS_TROUBLESHOOTING}`;
+
+function buildProgram(state: CliState = {}): Command {
+  const program = new Command("busabase-cli");
+  program
+    .description("Client for the Busabase OpenAPI REST API — talks to `busabase server` or Cloud.")
+    .usage("[global flags] <command> [flags]")
+    .version(pkgVersion(), "-v, --version", "print busabase-cli version")
+    .exitOverride()
+    .showHelpAfterError("(run `busabase-cli --help` for the full command list)")
+    .addHelpText("beforeAll", () => banner(resolveConfig(program.opts()).baseUrl));
+  addGlobalFlags(program);
+
+  addGlobalFlags(program.command("health"))
+    .description("Server health check (GET /api/health)")
+    .action(runAction(state, (_client, _opts, config) => rawFetch(config, "GET", "/api/health")));
+
+  addGlobalFlags(program.command("openapi"))
+    .description("Fetch the OpenAPI document")
+    .action(
+      runAction(state, (_client, _opts, config) => rawFetch(config, "GET", "/api/v1/openapi.json")),
+    );
+
+  addGlobalFlags(program.command("whoami"))
+    .description("Active space, user, and membership")
+    .action(runAction(state, (client) => client.auth.verify()));
+
+  const nodes = program.command("nodes").description("Workspace node tree");
+  addGlobalFlags(nodes.command("list"))
+    .description("Workspace node tree")
+    .action(runAction(state, (client) => client.nodes.list()));
+  addGlobalFlags(nodes.command("create-change-request"))
+    .description("Propose a new node via a Change Request")
+    .addOption(
+      new Option("--type <folder|base|skill|doc>", "node type")
+        .choices(["folder", "base", "skill", "doc"])
+        .makeOptionMandatory(),
+    )
+    .requiredOption("--slug <slug>", "node slug")
+    .requiredOption("--name <name>", "node name")
+    .option("--description <text>", "optional node description")
+    .option("--parent-node-id <id>", "parent folder node id; omit for root")
+    .option("--message <text>", "reviewer-facing Change Request message")
+    .option("--submitted-by <name>", "producer label")
+    .option("--field <slug:name:type...>", "base field, repeatable (for --type base)")
+    .addHelpText(
+      "after",
+      `
+Examples:
+  busabase-cli nodes create-change-request --type folder --slug cms --name "内容管理 CMS"
+  busabase-cli nodes create-change-request --type base --slug blog --name "博客文章 Blog Posts" --field title:Title:text --field body:Body:markdown`,
+    )
+    .action(
+      runAction(state, (client, opts) => {
+        const nodeType = opts.type as CreatableNodeType;
+        const name = opts.name as string;
         return client.nodes.createChangeRequest({
-          message: flags.get("message") ?? `Create ${nodeType} ${name}`,
-          submittedBy: flags.get("submitted-by"),
+          message: (opts.message as string | undefined) ?? `Create ${nodeType} ${name}`,
+          submittedBy: opts.submittedBy as string | undefined,
           operations: [
             {
               kind: "create",
               nodeType,
-              slug: required(flags, "slug"),
+              slug: opts.slug as string,
               name,
-              description: flags.get("description"),
-              parentNodeId: flags.get("parent-node-id"),
+              description: opts.description as string | undefined,
+              parentNodeId: opts.parentNodeId as string | undefined,
               ...(nodeType === "base"
-                ? {
-                    fields: flags.getAll("field").map((spec) => {
-                      const [fieldSlug, name, type] = spec.split(":");
-                      return {
-                        slug: fieldSlug,
-                        name: name ?? fieldSlug,
-                        ...(type ? { type: type as FieldType } : {}),
-                      };
-                    }),
-                  }
+                ? { fields: parseFieldSpecs((opts.field as string[] | undefined) ?? []) }
                 : {}),
             },
           ],
         });
-      }
-      break;
-    case "bases":
-      switch (sub) {
-        case "list":
-          return client.bases.list();
-        case "get": {
-          const slug = required(flags, "slug");
-          const found = (await client.bases.list()).find((b) => b.slug === slug);
-          if (!found) throw new Error(`no Base with slug "${slug}"`);
-          return found;
+      }),
+    );
+
+  const bases = program.command("bases").description("Bases (structured tables)");
+  addGlobalFlags(bases.command("list"))
+    .description("List Bases in the active space")
+    .action(runAction(state, (client) => client.bases.list()));
+  addGlobalFlags(bases.command("get"))
+    .description("Get one Base by slug")
+    .requiredOption("--slug <slug>", "Base slug")
+    .action(
+      runAction(state, async (client, opts) => {
+        const slug = opts.slug as string;
+        const found = (await client.bases.list()).find((base) => base.slug === slug);
+        if (!found) throw new Error(`no Base with slug "${slug}"`);
+        return found;
+      }),
+    );
+  addGlobalFlags(bases.command("create"))
+    .description("Create a Base")
+    .requiredOption("--slug <slug>", "Base slug")
+    .requiredOption("--name <name>", "Base name")
+    .requiredOption("--field <slug:name:type...>", "field definition, repeatable")
+    .option("--description <text>", "optional description")
+    .option("--parent-node-id <id>", "parent folder node id; omit for root")
+    .action(
+      runAction(state, (client, opts) =>
+        client.bases.create({
+          slug: opts.slug as string,
+          name: opts.name as string,
+          description: opts.description as string | undefined,
+          parentNodeId: opts.parentNodeId as string | undefined,
+          fields: parseFieldSpecs(opts.field as string[]),
+        }),
+      ),
+    );
+  addGlobalFlags(bases.command("create-field"))
+    .description("Add a field to a Base")
+    .requiredOption("--base-id <id>", "Base id")
+    .requiredOption("--slug <slug>", "field slug")
+    .requiredOption("--name <name>", "field name")
+    .option("--field-type <type>", "field type (default text)")
+    .option("--required", "mark the field as required")
+    .action(
+      runAction(state, (client, opts) =>
+        client.bases.createField({
+          baseId: opts.baseId as string,
+          slug: opts.slug as string,
+          name: opts.name as string,
+          ...(opts.fieldType ? { type: opts.fieldType as FieldType } : {}),
+          required: Boolean(opts.required),
+        }),
+      ),
+    );
+  addGlobalFlags(bases.command("create-change-request"))
+    .description("Propose a new record via a Change Request")
+    .requiredOption("--base-id <id>", "target Base id")
+    .requiredOption("--fields-json <json|@file>", "record fields as JSON, or @file.json")
+    .option("--message <text>", "reviewer-facing Change Request message")
+    .option("--submitted-by <name>", "producer label")
+    .addHelpText(
+      "after",
+      `
+Examples:
+  busabase-cli bases create-change-request --base-id bse_123 --fields-json '{"title":"Hello","status":"draft"}'
+  busabase-cli bases create-change-request --base-id bse_123 --fields-json @record.json`,
+    )
+    .action(
+      runAction(state, (client, opts) =>
+        client.bases.createChangeRequest({
+          baseId: opts.baseId as string,
+          fields: parseJsonValue(opts.fieldsJson as string, "fields-json") as Record<
+            string,
+            unknown
+          >,
+          message: opts.message as string | undefined,
+          submittedBy: opts.submittedBy as string | undefined,
+        }),
+      ),
+    );
+
+  const records = program.command("records").description("Records");
+  addGlobalFlags(records.command("list"))
+    .description("List records")
+    .option("--limit <n>", "max results", parseNum)
+    .action(
+      runAction(state, (client, opts) =>
+        client.records.list({ limit: opts.limit as number | undefined }),
+      ),
+    );
+  addGlobalFlags(records.command("get"))
+    .description("Get one record")
+    .requiredOption("--record-id <id>", "record id")
+    .action(
+      runAction(state, (client, opts) => client.records.get({ recordId: opts.recordId as string })),
+    );
+  addGlobalFlags(records.command("by-field-text"))
+    .description("Find records by text field value")
+    .requiredOption("--field-slug <slug>", "field slug to match")
+    .requiredOption("--value-text <text>", "text value to match")
+    .option("--base-id <id>", "restrict to one Base")
+    .option("--limit <n>", "max results", parseNum)
+    .action(
+      runAction(state, (client, opts) =>
+        client.records.search({
+          fieldSlug: opts.fieldSlug as string,
+          valueText: opts.valueText as string,
+          baseId: opts.baseId as string | undefined,
+          limit: opts.limit as number | undefined,
+        }),
+      ),
+    );
+  addGlobalFlags(records.command("change-requests"))
+    .description("Change Requests for a record")
+    .requiredOption("--record-id <id>", "record id")
+    .action(
+      runAction(state, (client, opts) =>
+        client.records.listChangeRequests({ recordId: opts.recordId as string }),
+      ),
+    );
+
+  const changeRequests = program.command("change-requests").description("Change Requests");
+  addGlobalFlags(changeRequests.command("list"))
+    .description("List Change Requests")
+    .option("--limit <n>", "max results", parseNum)
+    .action(
+      runAction(state, (client, opts) =>
+        client.changeRequests.list({ limit: opts.limit as number | undefined }),
+      ),
+    );
+  addGlobalFlags(changeRequests.command("get"))
+    .description("Get a Change Request")
+    .requiredOption("--change-request-id <id>", "Change Request id")
+    .action(
+      runAction(state, (client, opts) =>
+        client.changeRequests.get({ changeRequestId: opts.changeRequestId as string }),
+      ),
+    );
+  addGlobalFlags(changeRequests.command("review"))
+    .description("Review a Change Request (rejected = request changes, not terminal)")
+    .requiredOption("--change-request-id <id>", "Change Request id")
+    .addOption(
+      new Option("--verdict <approved|rejected>", "review verdict")
+        .choices(["approved", "rejected"])
+        .makeOptionMandatory(),
+    )
+    .option("--reason <text>", "review reason")
+    .action(
+      runAction(state, (client, opts) =>
+        client.changeRequests.review({
+          changeRequestId: opts.changeRequestId as string,
+          verdict: opts.verdict as "approved" | "rejected",
+          reason: opts.reason as string | undefined,
+        }),
+      ),
+    );
+  addGlobalFlags(changeRequests.command("close"))
+    .description("Terminally abandon/reject a Change Request")
+    .requiredOption("--change-request-id <id>", "Change Request id")
+    .option("--reason <text>", "close reason")
+    .action(
+      runAction(state, (client, opts) =>
+        client.changeRequests.close({
+          changeRequestId: opts.changeRequestId as string,
+          reason: opts.reason as string | undefined,
+        }),
+      ),
+    );
+  addGlobalFlags(changeRequests.command("merge"))
+    .description("Merge a Change Request into its Base")
+    .requiredOption("--change-request-id <id>", "Change Request id")
+    .action(
+      runAction(state, (client, opts) =>
+        client.changeRequests.merge({ changeRequestId: opts.changeRequestId as string }),
+      ),
+    );
+
+  addGlobalFlags(program.command("search"))
+    .description("Full-text search")
+    .requiredOption("--query <q>", "search query")
+    .option("--limit <n>", "max results", parseNum)
+    .option("--offset <n>", "results offset", parseNum)
+    .action(
+      runAction(state, (client, opts) =>
+        client.search({
+          query: opts.query as string,
+          limit: opts.limit as number | undefined,
+          offset: opts.offset as number | undefined,
+        }),
+      ),
+    );
+
+  addGlobalFlags(program.command("api"))
+    .description("Raw request to any /api/v1 endpoint")
+    .addOption(
+      new Option("--method <get|post|put|delete>", "HTTP method")
+        .choices(["get", "post", "put", "delete"])
+        .makeOptionMandatory(),
+    )
+    .requiredOption("--path <p>", "path under /api/v1, e.g. /bases")
+    .option("--query <k=v...>", "query-string param, repeatable")
+    .option("--body-json <json>", "JSON request body")
+    .action(
+      runAction(state, (_client, opts, config) => {
+        const query = new URLSearchParams();
+        for (const pair of (opts.query as string[] | undefined) ?? []) {
+          const [key, ...rest] = pair.split("=");
+          query.set(key, rest.join("="));
         }
-        case "create":
-          return client.bases.create({
-            slug: required(flags, "slug"),
-            name: required(flags, "name"),
-            description: flags.get("description"),
-            parentNodeId: flags.get("parent-node-id"),
-            fields: flags.getAll("field").map((spec) => {
-              const [fieldSlug, name, type] = spec.split(":");
-              return {
-                slug: fieldSlug,
-                name: name ?? fieldSlug,
-                ...(type ? { type: type as FieldType } : {}),
-              };
-            }),
-          });
-        case "create-field":
-          return client.bases.createField({
-            baseId: required(flags, "base-id"),
-            slug: required(flags, "slug"),
-            name: required(flags, "name"),
-            ...(flags.get("field-type") ? { type: flags.get("field-type") as FieldType } : {}),
-            required: flags.has("required"),
-          });
-        case "create-change-request":
-          return client.bases.createChangeRequest({
-            baseId: required(flags, "base-id"),
-            fields: JSON.parse(required(flags, "fields-json")),
-            message: flags.get("message"),
-            submittedBy: flags.get("submitted-by"),
-          });
-      }
-      break;
-    case "records":
-      switch (sub) {
-        case "list":
-          return client.records.list({ limit: flags.num("limit") });
-        case "get":
-          return client.records.get({ recordId: required(flags, "record-id") });
-        case "by-field-text":
-          return client.records.search({
-            fieldSlug: required(flags, "field-slug"),
-            valueText: required(flags, "value-text"),
-            baseId: flags.get("base-id"),
-            limit: flags.num("limit"),
-          });
-        case "change-requests":
-          return client.records.listChangeRequests({ recordId: required(flags, "record-id") });
-      }
-      break;
-    case "change-requests":
-      switch (sub) {
-        case "list":
-          return client.changeRequests.list({ limit: flags.num("limit") });
-        case "get":
-          return client.changeRequests.get({
-            changeRequestId: required(flags, "change-request-id"),
-          });
-        case "review": {
-          const verdict = required(flags, "verdict");
-          if (verdict !== "approved" && verdict !== "rejected") {
-            throw new Error(`--verdict must be "approved" or "rejected"`);
-          }
-          return client.changeRequests.review({
-            changeRequestId: required(flags, "change-request-id"),
-            verdict,
-            reason: flags.get("reason"),
-          });
-        }
-        case "merge":
-          return client.changeRequests.merge({
-            changeRequestId: required(flags, "change-request-id"),
-          });
-        case "close":
-          return client.changeRequests.close({
-            changeRequestId: required(flags, "change-request-id"),
-            reason: flags.get("reason"),
-          });
-      }
-      break;
+        const qs = query.toString();
+        const path = `/api/v1${opts.path as string}${qs ? `?${qs}` : ""}`;
+        const bodyJson = opts.bodyJson as string | undefined;
+        return rawFetch(
+          config,
+          opts.method as string,
+          path,
+          bodyJson ? parseJsonValue(bodyJson, "body-json") : undefined,
+        );
+      }),
+    );
+
+  // Derived help — every leaf's usage line comes from its own option definitions,
+  // and the root "Commands:" tree replaces commander's flat group list. Set AFTER
+  // the tree is built so subcommands keep the default (per-leaf) help layout.
+  for (const group of program.commands) {
+    const leaves = group.commands.length > 0 ? group.commands : [group];
+    for (const leaf of leaves) {
+      const sig = flagSignature(leaf);
+      leaf.usage(`${sig ? `${sig} ` : ""}[global flags]`);
+    }
   }
-  throw new Error(`unknown command: ${[command, sub].filter(Boolean).join(" ")}\n\n${HELP}`);
+  program.addHelpText("after", () => `\n${commandsSection(program)}\n${HELP_FOOTER}`);
+  program.configureHelp({ visibleCommands: () => [] });
+  return program;
 }
 
 /**
@@ -358,33 +549,40 @@ async function dispatch(
  * `busabase` bin, which delegates every non-`server` command here.
  */
 export async function runCli(argv: string[]): Promise<number> {
-  const flags = parse(argv);
-  if (flags.has("help") || flags.positionals.length === 0) {
-    const baseUrl = flags.get("base-url") ?? process.env.BUSABASE_API_BASE_URL ?? DEFAULT_BASE_URL;
-    console.log(`${banner(baseUrl)}\n${HELP}`);
+  const state: CliState = {};
+  const program = buildProgram(state);
+  if (argv.length === 0) {
+    program.outputHelp();
     return 0;
   }
-  let config: ResolvedConfig;
   try {
-    config = resolveConfig(flags);
-  } catch (error) {
-    console.error(error instanceof Error ? error.message : String(error));
-    return 1;
-  }
-  try {
-    const [command, sub] = flags.positionals;
-    const client = createBusabaseClient(config);
-    const result = await dispatch(command, sub, flags, config, client);
-    console.log(render(result, config.output));
+    await program.parseAsync(argv, { from: "user" });
     return 0;
   } catch (error) {
-    console.error(explainError(error, config));
+    if (error instanceof CommanderError) {
+      // commander already wrote the help text or usage error to the right stream.
+      return error.exitCode === 0 ? 0 : 1;
+    }
+    console.error(explainError(error, state.config ?? resolveConfig({})));
     return 1;
   }
 }
 
-/** Public docs page covering every error below, for both Cloud and local. Linked from each error. */
-const DOCS_TROUBLESHOOTING = "https://busabase.com/docs/troubleshooting";
+function renderedHelp(): string {
+  let out = "";
+  const program = buildProgram();
+  program.configureOutput({
+    writeOut: (str) => {
+      out += str;
+    },
+    writeErr: () => {},
+  });
+  program.outputHelp();
+  return out;
+}
+
+/** Full root help text (what `busabase-cli --help` prints). Generated from the command tree. */
+export const HELP = renderedHelp();
 
 /**
  * Turn a low-level transport/HTTP error into an actionable message: which host was tried, the

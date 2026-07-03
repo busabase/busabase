@@ -1,7 +1,7 @@
 {
   "name": "busabase",
   "description": "Open-source Busabase review app + CLI. `busabase server` boots a zero-setup local instance (pglite); other subcommands act as an OpenAPI client.",
-  "version": "0.0.7",
+  "version": "0.0.8",
   "private": false,
   "license": "MIT",
   "homepage": "https://github.com/busabase/busabase/tree/main/apps/busabase",

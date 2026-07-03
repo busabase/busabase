@@ -194,8 +194,9 @@ function AttachmentFieldEditor({
   const tokens = useTokens();
   const { t } = useI18n();
   const buda = useBusabaseOrpc();
-  const { state } = useConnection();
+  const { getCloudAuthorizationHeaders, state } = useConnection();
   const serverUrl = state.status === "connected" ? state.connection.serverUrl : null;
+  const connectionMode = state.status === "connected" ? state.connection.mode : null;
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -210,7 +211,8 @@ function AttachmentFieldEditor({
     setUploading(true);
     setError(null);
     try {
-      const ref = await uploadAttachment(buda.client, serverUrl, file);
+      const headers = connectionMode === "cloud" ? await getCloudAuthorizationHeaders() : {};
+      const ref = await uploadAttachment(buda.client, serverUrl, file, headers);
       // Single-file fields replace; multi-file fields append.
       onChange(maxFiles === 1 ? [ref] : [...refs, ref]);
     } catch (uploadError) {

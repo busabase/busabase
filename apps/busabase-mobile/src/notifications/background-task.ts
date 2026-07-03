@@ -1,6 +1,7 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as BackgroundTask from "expo-background-task";
 import * as TaskManager from "expo-task-manager";
+import { getCloudSession, getCloudSessionToken } from "~/auth/session-store";
 import { checkForNewChangeRequests, NOTIFICATIONS_SUPPORTED } from "./change-request-watcher";
 import { loadNotificationSettings } from "./notification-settings";
 
@@ -8,17 +9,30 @@ export const CHANGE_REQUEST_TASK = "busabase-change-request-watch";
 
 const CONNECTION_KEY = "busabase-mobile.connection.v1";
 
-async function getActiveServerUrl(): Promise<string | null> {
+async function getActiveConnection(): Promise<{ serverUrl: string; mode?: string } | null> {
   try {
     const raw = await AsyncStorage.getItem(CONNECTION_KEY);
     if (!raw) {
       return null;
     }
-    const connection = JSON.parse(raw) as { serverUrl?: string };
-    return connection.serverUrl ?? null;
+    const connection = JSON.parse(raw) as { serverUrl?: string; mode?: string };
+    return connection.serverUrl ? { serverUrl: connection.serverUrl, mode: connection.mode } : null;
   } catch {
     return null;
   }
+}
+
+async function getAuthorizationHeaders(mode?: string): Promise<Record<string, string>> {
+  if (mode !== "cloud") return {};
+  const session = await getCloudSession();
+  const token = getCloudSessionToken(session);
+  return token
+    ? {
+        authorization: `Bearer ${token}`,
+        "x-busabase-client": "native",
+        "x-busabase-client-platform": "mobile",
+      }
+    : {};
 }
 
 // Module scope so the task is defined when the app launches in the background.
@@ -26,14 +40,15 @@ async function getActiveServerUrl(): Promise<string | null> {
 if (NOTIFICATIONS_SUPPORTED) {
   TaskManager.defineTask(CHANGE_REQUEST_TASK, async () => {
     try {
-      const [settings, serverUrl] = await Promise.all([
+      const [settings, connection] = await Promise.all([
         loadNotificationSettings(),
-        getActiveServerUrl(),
+        getActiveConnection(),
       ]);
-      if (!settings.enabled || !serverUrl) {
+      if (!settings.enabled || !connection?.serverUrl) {
         return BackgroundTask.BackgroundTaskResult.Success;
       }
-      await checkForNewChangeRequests(serverUrl);
+      const headers = await getAuthorizationHeaders(connection.mode);
+      await checkForNewChangeRequests(connection.serverUrl, headers);
       return BackgroundTask.BackgroundTaskResult.Success;
     } catch {
       return BackgroundTask.BackgroundTaskResult.Failed;

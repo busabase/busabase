@@ -6,19 +6,21 @@ import { useMemo } from "react";
 import { useConnection } from "~/connection/connection-store";
 
 export function useBusabaseOrpc() {
-  const { state } = useConnection();
+  const { getCloudAuthorizationHeaders, state } = useConnection();
   const connection = state.status === "connected" ? state.connection : null;
   const serverUrl = connection?.serverUrl ?? null;
   // Demo connections hit the hosted demo server, which only serves data in demo
   // mode (?demo=1) — its regular dataset is empty.
   const demo = connection?.mode === "demo";
+  const headers = connection?.mode === "cloud" ? getCloudAuthorizationHeaders : undefined;
 
   return useMemo(() => {
     if (!serverUrl) return null;
-    const rpcUrl = `${serverUrl.replace(/\/+$/, "")}/api/rpc`;
+    const rpcPath = connection?.mode === "cloud" ? "/api/rpc/core" : "/api/rpc";
+    const rpcUrl = `${serverUrl.replace(/\/+$/, "")}${rpcPath}`;
     return {
-      client: createBusabaseORPCClient(rpcUrl, { demo }),
-      orpc: createBusabaseQueryUtils(rpcUrl, { demo }),
+      client: createBusabaseORPCClient(rpcUrl, { demo, headers }),
+      orpc: createBusabaseQueryUtils(rpcUrl, { demo, headers }),
     };
-  }, [serverUrl, demo]);
+  }, [serverUrl, connection?.mode, demo, headers]);
 }
