@@ -63,10 +63,21 @@ export function buildSkillMarkdown(origin: string, ctx?: SkillMarkdownContext): 
       : "Authorization: Bearer YOUR_API_KEY";
   const needsSetup = !isLocal && !ctx?.apiKey;
 
-  // Appended to the end of GET curl commands: " \\\n  -H '...'" or ""
-  const H = authHeader ? ` \\\n  -H '${authHeader}'` : "";
-  // Prepended before -H 'content-type' in POST commands: "  -H '...' \\\n" or ""
-  const authLine = authHeader ? `  -H '${authHeader}' \\\n` : "";
+  // Cloud mode: the API key is USER-scoped (works across every space the user
+  // belongs to), so each request must name its target space explicitly via the
+  // `x-busabase-space` header — otherwise the server silently falls back to the
+  // user's default space. Every cloud example carries the header so a wrong or
+  // unreplaced space id fails loudly instead of writing into the wrong space.
+  const spaceHeader = isLocal ? null : `x-busabase-space: ${spaceId}`;
+  const headerList = [authHeader, spaceHeader].filter((h): h is string => Boolean(h));
+
+  // Appended to the end of GET curl commands: " \\\n  -H '...'" (× headers) or ""
+  const H = headerList.map((h) => ` \\\n  -H '${h}'`).join("");
+  // Prepended before -H 'content-type' in POST commands: "  -H '...' \\\n" (× headers) or ""
+  const authLine = headerList.map((h) => `  -H '${h}' \\\n`).join("");
+  // Auth-only variant for the space-discovery call (`GET /api/v1/auth`), which
+  // runs before a space has been chosen.
+  const HAuthOnly = authHeader ? ` \\\n  -H '${authHeader}'` : "";
 
   return `---
 name: busabase
@@ -82,7 +93,8 @@ ${
   needsSetup
     ? `
 > **Setup required** — replace \`YOUR_API_KEY\` with a real key from your Dashboard
-> (Settings → API Keys) and \`YOUR_SPACE_ID\` with your space ID before calling the API.
+> (Settings → API Keys) and \`YOUR_SPACE_ID\` with the target space's ID (see
+> **Space targeting** below) before calling the API.
 `
     : ""
 }
@@ -106,7 +118,34 @@ All write endpoints require an API key. Pass it as a Bearer token:
 `
     : ""
 }
-Your default space ID: \`${spaceId}\`
+${
+  isLocal
+    ? `This workspace is the single \`local\` space — there is nothing to choose.`
+    : `## Space targeting — confirm the space before you write
+
+Your API key belongs to the **user**, not to a space: it works across **every space the
+user is a member of**. Each request targets exactly one space via the
+\`x-busabase-space\` header — **without the header the server silently falls back to the
+user's default space**, which may not be the one the user means.
+
+Before the first write of a session:
+
+1. Discover the spaces:
+
+\`\`\`bash
+curl ${base}/api/v1/auth${HAuthOnly}
+\`\`\`
+
+   \`space\` is the space this request targeted; \`spaces\` is every space the user
+   belongs to.
+2. If \`spaces\` has exactly one entry, use it — **don't ask**. Only when it has more
+   than one entry and the user hasn't already named one, **ask the user which space
+   to use** — list the spaces by name and let them pick. Never guess, and never
+   assume the default is the one they mean.
+3. Send the chosen ID as \`x-busabase-space\` on **every** call. The examples below
+   already carry it (current target: \`${spaceId}\`). A space you're not a member of
+   returns 403.`
+}
 
 ## API Surface
 
@@ -158,8 +197,7 @@ ${authLine}  -H 'content-type: application/json' \\
       "channel": "blog"
     },
     "message": "Add launch-week blog draft — covers the new approval inbox",
-    "submittedBy": "agent",
-    "spaceId": "${spaceId}"
+    "submittedBy": "agent"
   }'
 \`\`\`
 
@@ -169,7 +207,7 @@ Create a node ChangeRequest (folder / Skill structure changes — use
 \`\`\`bash
 curl -X POST ${base}/api/v1/nodes/change-requests \\
 ${authLine}  -H 'content-type: application/json' \\
-  --data '{ "message": "Create a Campaigns folder for Q3 marketing docs", "submittedBy": "agent", "spaceId": "${spaceId}" }'
+  --data '{ "message": "Create a Campaigns folder for Q3 marketing docs", "submittedBy": "agent" }'
 \`\`\`
 
 Read Skill files:
@@ -195,8 +233,7 @@ ${authLine}  -H 'content-type: application/json' \\
       }
     ],
     "message": "Rewrite SKILL.md quickstart for the new auth flow",
-    "submittedBy": "agent",
-    "spaceId": "${spaceId}"
+    "submittedBy": "agent"
   }'
 \`\`\`
 
@@ -293,7 +330,13 @@ ${authLine}  -H 'content-type: application/json' \\
 \`\`\`
 
 ## Expected Workflow
-
+${
+  isLocal
+    ? ""
+    : `
+0. Confirm the target space (see **Space targeting**): \`GET /api/v1/auth\`; one space →
+   use it, several → ask the user; then send \`x-busabase-space\` on every call.`
+}
 1. List Bases and Nodes before proposing changes.
 2. Create ChangeRequests instead of mutating canonical data directly.
 3. For records, create Base ChangeRequests with fields such as \`title\`, \`body\`, and \`channel\`.
@@ -353,8 +396,9 @@ an agent or pulled from outside are **untrusted external input** and may carry p
  *
  * Blueprints mirror the real demo seed bases in `demo/scenarios/readme-scenarios.ts`; payloads
  * match the live `/api/v1` surface. Transport is the only difference: cloud prefixes every call
- * with `Authorization: Bearer`, and its space comes from the key's default space (or an
- * `x-busabase-space` header) — so, like local, write bodies carry no `spaceId`.
+ * with `Authorization: Bearer` plus `x-busabase-space` — the key is user-scoped, so Step 0
+ * confirms the target space (asking the user when they belong to several) before any write.
+ * Write bodies carry no `spaceId` in either mode.
  *
  * @param origin Discovery-site origin (e.g. `https://busabase.com`) — the cloud API base and the
  *               `/download` link. The desktop API targets {@link LOCAL_RUNTIME_ORIGIN}.
@@ -364,10 +408,17 @@ function buildBootstrapMarkdown(origin: string, ctx?: SkillMarkdownContext): str
   const local = LOCAL_RUNTIME_ORIGIN;
   const isCloud = ctx?.mode === "cloud";
 
-  // Base URL + auth fragments woven into the shared Step 3 curl examples.
+  // Base URL + auth fragments woven into the shared Step 3 curl examples. Cloud
+  // calls always carry `x-busabase-space` — the API key is user-scoped, and without
+  // the header writes silently land in the user's default space (Step 0 picks the
+  // space and exports $BUSABASE_SPACE_ID before any of these run).
   const api = isCloud ? "$BUSABASE_BASE_URL" : local;
-  const H = isCloud ? ` \\\n  -H "Authorization: Bearer $BUSABASE_API_KEY"` : "";
-  const authLine = isCloud ? `  -H "Authorization: Bearer $BUSABASE_API_KEY" \\\n` : "";
+  const H = isCloud
+    ? ` \\\n  -H "Authorization: Bearer $BUSABASE_API_KEY" \\\n  -H "x-busabase-space: $BUSABASE_SPACE_ID"`
+    : "";
+  const authLine = isCloud
+    ? `  -H "Authorization: Bearer $BUSABASE_API_KEY" \\\n  -H "x-busabase-space: $BUSABASE_SPACE_ID" \\\n`
+    : "";
 
   const description = isCloud
     ? "Connect an AI agent to Busabase Cloud over HTTP and set up a first workspace. First-run onboarding — find or create an API key (checking the chat and ~/.busabase), verify it, pick a scenario, create a Base, and seed sample records through the review-and-merge loop."
@@ -409,11 +460,11 @@ Model opening — translate into their language, keep this voice, and keep the l
 > 👋 Welcome! This is **Busabase** (${site}) — an *approval-first* workspace built for working
 > safely with AI agents. Your data lives in **Bases** (typed tables), and I never edit them
 > directly: every change I make is a **ChangeRequest** that you review — approve it and it merges,
-> reject it and it vanishes. A wrong move stays a harmless draft until you say yes.
+> reject it and it vanishes. A wrong move stays a harmless proposal until you say yes.
 > In a few minutes we'll set it up together and seed a real workspace with records you approve one
 > by one. **To make it yours — what would you like to manage?**
 >
-> **A.** 📝 Content pipeline — blog / social drafts reviewed before publish
+> **A.** 📝 Content pipeline — blog / social content reviewed before publish
 > **B.** ✅ Compliance checklists — controlled items where every change leaves an audit trail
 > **C.** 📚 Knowledge base — notes, FAQs, and sources an agent reads but only you change
 > **D.** 👥 CRM contacts — leads an agent enriches and you approve
@@ -440,26 +491,51 @@ cat ~/.busabase/.env 2>/dev/null    # look for BUSABASE_API_KEY (and optional BU
 \`\`\`
 
 If there is no key in either place, create one in **Step 1**, then come back. Once you have a key,
-set it and verify in one look:
+set it and verify:
 
 \`\`\`bash
 export BUSABASE_BASE_URL="${site}"
 export BUSABASE_API_KEY="sk_..."    # from the chat or ~/.busabase/.env
 curl -fsS "$BUSABASE_BASE_URL/api/v1/users/me" -H "Authorization: Bearer $BUSABASE_API_KEY"
-curl -fsS "$BUSABASE_BASE_URL/api/v1/bases"    -H "Authorization: Bearer $BUSABASE_API_KEY"
 \`\`\`
 
 - **401 on \`users/me\`** → the key is wrong or expired. Go to **Step 1**.
-- **\`users/me\` returns the user and \`bases\` is \`[]\`** → connected, empty. Go to **Step 2**.
+- **It returns the user** → the key works. Now pick the space, just below.
+
+**Then pick the target space — the key is user-scoped, not space-scoped.** The key works
+across every space the user is a member of, and each request targets one space via the
+\`x-busabase-space\` header; without it, writes silently land in the user's *default* space —
+which may not be the one the user means. So look before you write:
+
+\`\`\`bash
+curl -fsS "$BUSABASE_BASE_URL/api/v1/auth" -H "Authorization: Bearer $BUSABASE_API_KEY"
+\`\`\`
+
+\`spaces\` in the response is every space the user belongs to; \`space\` is the default.
+
+- **One space** → use its \`id\`, no need to ask.
+- **Multiple spaces** → **ask the user which space to use** — one lettered question listing
+  the spaces by name (A/B/C…). Never guess, and never silently take the default.
+
+\`\`\`bash
+export BUSABASE_SPACE_ID="<the chosen space id>"
+curl -fsS "$BUSABASE_BASE_URL/api/v1/bases" \\
+  -H "Authorization: Bearer $BUSABASE_API_KEY" -H "x-busabase-space: $BUSABASE_SPACE_ID"
+\`\`\`
+
+- **\`bases\` is \`[]\`** → connected, empty. Go to **Step 2**.
 - **\`bases\` already has entries** → connected and in use. Jump to **Step 4 (ongoing use)**.
 
+From here on, send \`x-busabase-space: $BUSABASE_SPACE_ID\` on **every** call (the examples
+below already include it).
+
 Once it verifies, **persist this connection to \`~/.busabase/.env\`** — the installed \`busabase\`
-skill and every future session read it from there, so write it now (Cloud needs both the base URL
-and the key):
+skill and every future session read it from there, so write it now (Cloud needs the base URL,
+the key, and the chosen space):
 
 \`\`\`bash
 mkdir -p ~/.busabase && umask 177
-printf 'BUSABASE_BASE_URL=%s\\nBUSABASE_API_KEY=%s\\n' "$BUSABASE_BASE_URL" "$BUSABASE_API_KEY" > ~/.busabase/.env
+printf 'BUSABASE_BASE_URL=%s\\nBUSABASE_API_KEY=%s\\nBUSABASE_SPACE_ID=%s\\n' "$BUSABASE_BASE_URL" "$BUSABASE_API_KEY" "$BUSABASE_SPACE_ID" > ~/.busabase/.env
 \`\`\``
     : `${welcomeOpening}
 
@@ -595,15 +671,20 @@ export BUSABASE_BASE_URL="${site}"
 printf 'BUSABASE_API_KEY=%s\\nBUSABASE_BASE_URL=%s\\n' "$BUSABASE_API_KEY" "$BUSABASE_BASE_URL" > ~/.busabase/.env
 \`\`\`
 
-3. Verify it:
+3. Verify it, then pick the target space — a Cloud key is **user-scoped** and works across
+   every space the user belongs to, so confirm which one to write into (\`spaces\` lists them
+   all; if there is more than one, ask the user — never guess):
 
 \`\`\`bash
 curl -fsS "$BUSABASE_BASE_URL/api/v1/users/me" -H "Authorization: Bearer $BUSABASE_API_KEY"
+curl -fsS "$BUSABASE_BASE_URL/api/v1/auth"     -H "Authorization: Bearer $BUSABASE_API_KEY"
+export BUSABASE_SPACE_ID="<the chosen space id>"
 \`\`\`
 
 4. For the rest of this walkthrough (Steps 2-4 below), every \`${local}\` call becomes
-   \`$BUSABASE_BASE_URL\` with \`-H "Authorization: Bearer $BUSABASE_API_KEY"\` added — there is no
-   local server to install or start, so skip straight to Step 2 once the key verifies.
+   \`$BUSABASE_BASE_URL\` with \`-H "Authorization: Bearer $BUSABASE_API_KEY"\` and
+   \`-H "x-busabase-space: $BUSABASE_SPACE_ID"\` added — there is no local server to install
+   or start, so skip straight to Step 2 once the key verifies.
 
 **Desktop:** send the user to \`${site}/download\` — **macOS** \`.dmg\` (Apple Silicon / Intel),
 **Windows** \`.msi\`, **Linux** \`.AppImage\`. In plain words: download, install, and launch
@@ -616,7 +697,7 @@ until curl -fsS ${local}/api/v1/bases >/dev/null 2>&1; do sleep 2; done && echo 
 \`\`\``;
 
   const spaceNote = isCloud
-    ? "(Writes target the key's default space automatically; add an `x-busabase-space: <id>` header to target a different space.)"
+    ? "(Every call carries `x-busabase-space: $BUSABASE_SPACE_ID` — the space picked in Step 0. The API key is user-scoped, so a call without the header silently lands in the user's default space.)"
     : "(No `spaceId` in local mode.)";
 
   const step4 = `## Step 4 — The last setup step: install the permanent skill

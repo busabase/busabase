@@ -3,6 +3,7 @@ import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-quer
 import { ArrowLeft, FileText, Film, Image as ImageIcon, Music, Trash2 } from "lucide-react";
 import type { ReactNode } from "react";
 import { toast } from "sonner";
+import { fmt, useCoreI18n } from "../../../i18n";
 import { EmptyState } from "./primitives";
 
 export const assetSizeUnits = ["B", "KB", "MB", "GB"];
@@ -21,10 +22,12 @@ export function assetKindIcon(mimeType: string) {
 }
 
 export function AssetsHeader({ count }: { count: number }) {
+  const messages = useCoreI18n();
+
   return (
     <div className="flex items-center gap-2">
       <ImageIcon className="size-5 text-muted-foreground" />
-      <h1 className="font-semibold text-xl">Assets</h1>
+      <h1 className="font-semibold text-xl">{messages.assets.title}</h1>
       {count > 0 ? (
         <span className="rounded-full border bg-muted px-2 py-0.5 text-muted-foreground text-xs">
           {count}
@@ -67,13 +70,14 @@ export function AssetLibraryView({
   onOpenAsset: (id: string) => void;
   emptyGuide?: ReactNode;
 }) {
+  const messages = useCoreI18n();
   const listQuery = useQuery(orpc.assets.list.queryOptions({}));
   const assets = listQuery.data ?? [];
 
   if (listQuery.isLoading) {
     return (
       <div className="grid min-h-[320px] place-items-center text-muted-foreground text-sm">
-        Loading assets…
+        {messages.assets.loading}
       </div>
     );
   }
@@ -83,9 +87,9 @@ export function AssetLibraryView({
         <AssetsHeader count={0} />
         <EmptyState
           body={
-            listQuery.error instanceof Error ? listQuery.error.message : "Could not load assets."
+            listQuery.error instanceof Error ? listQuery.error.message : messages.assets.failedBody
           }
-          title="Failed to load assets"
+          title={messages.assets.failedTitle}
         />
       </div>
     );
@@ -95,8 +99,8 @@ export function AssetLibraryView({
       <div className="mx-auto w-full max-w-6xl p-4 md:p-6">
         <AssetsHeader count={0} />
         <EmptyState
-          body="Files you upload to records show up here as a deduplicated library."
-          title="No assets yet"
+          body={messages.assets.emptyBody}
+          title={messages.assets.emptyTitle}
           action={emptyGuide}
         />
       </div>
@@ -158,17 +162,18 @@ export function AssetDetailView({
   onBack: () => void;
   onOpenNode: (nodeType: string, nodeSlug: string) => void;
 }) {
+  const messages = useCoreI18n();
   const detailQuery = useQuery(orpc.assets.get.queryOptions({ input: { assetId } }));
   const queryClient = useQueryClient();
   const deleteMutation = useMutation({
     ...orpc.assets.delete.mutationOptions(),
     onSuccess: () => {
-      toast.success("Asset deleted");
+      toast.success(messages.assets.deleted);
       queryClient.invalidateQueries({ queryKey: orpc.assets.list.queryOptions({}).queryKey });
       onBack();
     },
     onError: (error) => {
-      toast.error(error instanceof Error ? error.message : "Could not delete asset");
+      toast.error(error instanceof Error ? error.message : messages.assets.deleteFailed);
     },
   });
   const detail = detailQuery.data ?? null;
@@ -176,10 +181,10 @@ export function AssetDetailView({
   if (!detail) {
     return detailQuery.isLoading ? (
       <div className="grid min-h-[320px] place-items-center text-muted-foreground text-sm">
-        Loading asset…
+        {messages.assets.loadingOne}
       </div>
     ) : (
-      <EmptyState body="This asset no longer exists." title="Asset not found" />
+      <EmptyState body={messages.assets.notFoundBody} title={messages.assets.notFoundTitle} />
     );
   }
 
@@ -188,7 +193,7 @@ export function AssetDetailView({
   const metaChips = [
     asset.mimeType,
     formatAssetSize(asset.size),
-    `${usages.length} use${usages.length === 1 ? "" : "s"}`,
+    fmt(messages.assets.uses, { count: usages.length, plural: usages.length === 1 ? "" : "s" }),
   ];
 
   return (
@@ -198,7 +203,7 @@ export function AssetDetailView({
         onClick={onBack}
         type="button"
       >
-        <ArrowLeft className="size-4" /> Assets
+        <ArrowLeft className="size-4" /> {messages.assets.title}
       </button>
 
       <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_320px]">
@@ -213,7 +218,7 @@ export function AssetDetailView({
               target="_blank"
             >
               <FileText className="size-12" />
-              Open file
+              {messages.assets.openFile}
             </a>
           )}
         </div>
@@ -246,26 +251,29 @@ export function AssetDetailView({
                 onClick={() => deleteMutation.mutate({ assetId: asset.id })}
                 title={
                   usages.length > 0
-                    ? "Remove every reference before deleting this asset"
-                    : "Delete this asset and its stored file"
+                    ? messages.assets.deleteBlockedTitle
+                    : messages.assets.deleteTitle
                 }
                 type="button"
               >
                 <Trash2 className="size-3.5" />
-                {deleteMutation.isPending ? "Deleting…" : "Delete asset"}
+                {deleteMutation.isPending ? messages.common.deleting : messages.assets.deleteAsset}
               </button>
               {usages.length > 0 ? (
                 <p className="mt-1.5 text-muted-foreground text-xs">
-                  Still used in {usages.length} place{usages.length === 1 ? "" : "s"}.
+                  {fmt(messages.assets.stillUsed, {
+                    count: usages.length,
+                    plural: usages.length === 1 ? "" : "s",
+                  })}
                 </p>
               ) : null}
             </div>
           </div>
 
           <div className="rounded-xl border bg-background p-4">
-            <h2 className="mb-2 font-medium text-sm">Where used</h2>
+            <h2 className="mb-2 font-medium text-sm">{messages.assets.whereUsed}</h2>
             {usages.length === 0 ? (
-              <p className="text-muted-foreground text-sm">Not referenced by any record yet.</p>
+              <p className="text-muted-foreground text-sm">{messages.assets.notReferenced}</p>
             ) : (
               <ul className="flex flex-col gap-1">
                 {usages.map((usage) => (

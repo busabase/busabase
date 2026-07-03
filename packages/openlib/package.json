@@ -17,6 +17,10 @@
       "types": "./i18n/index.ts",
       "default": "./i18n/index.ts"
     },
+    "./i18n/i-string": {
+      "types": "./i18n/i-string.ts",
+      "default": "./i18n/i-string.ts"
+    },
     "./nanoid": {
       "types": "./nanoid/index.ts",
       "default": "./nanoid/index.ts"

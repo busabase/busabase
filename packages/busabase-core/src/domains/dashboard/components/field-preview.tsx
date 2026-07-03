@@ -5,6 +5,7 @@ import { FileText, Film, Maximize2, Music } from "lucide-react";
 import { SPALink as Link } from "openlib/ui/dashboard";
 import { type ComponentProps, type ReactNode, useState } from "react";
 import { Streamdown, type Components as StreamdownComponents } from "streamdown";
+import { useCoreI18n, useIString } from "../../../i18n";
 import { fieldDisplayKind, fieldLinkPrefix } from "../../base/field-types";
 import { getRecordTitle } from "../helpers/change-request";
 import {
@@ -178,6 +179,8 @@ export function FieldValuePreview({
   records?: RecordVO[];
   value: unknown;
 }) {
+  const resolveIString = useIString();
+  const fieldName = field ? resolveIString(field.name) : undefined;
   const kind = field ? fieldDisplayKind(field.type) : "plain";
 
   if (kind === "checkbox") {
@@ -285,7 +288,7 @@ export function FieldValuePreview({
   if (kind === "markdown") {
     const md = fieldValueToString(value);
     return (
-      <MultilineFieldPreview collapsible={shouldCollapse} title={field?.name}>
+      <MultilineFieldPreview collapsible={shouldCollapse} title={fieldName}>
         <MarkdownFieldPreview className={className} value={md} />
       </MultilineFieldPreview>
     );
@@ -294,7 +297,7 @@ export function FieldValuePreview({
   if (kind === "html") {
     const html = fieldValueToString(value);
     return (
-      <MultilineFieldPreview collapsible={shouldCollapse} title={field?.name}>
+      <MultilineFieldPreview collapsible={shouldCollapse} title={fieldName}>
         <div
           className={`busabase-html-field min-w-0 break-words leading-6 ${className}`}
           // biome-ignore lint/security/noDangerouslySetInnerHtml: HTML fields are sanitized through a tag and href allowlist before rendering.
@@ -308,7 +311,7 @@ export function FieldValuePreview({
     const code = fieldValueToString(value);
     const language = (field.options.code?.language ?? "text") as SkillCodeLanguage;
     return (
-      <MultilineFieldPreview collapsible={shouldCollapse} title={field.name}>
+      <MultilineFieldPreview collapsible={shouldCollapse} title={fieldName}>
         <CodeBlock
           className={`min-w-0 ${className}`}
           code={code}
@@ -341,7 +344,7 @@ export function FieldValuePreview({
   // Multi-line text (longtext / ai_summary) gets the same collapse + fullscreen chrome.
   const isMultiline = Boolean(field && ["longtext", "ai_summary"].includes(field.type));
   return isMultiline ? (
-    <MultilineFieldPreview collapsible={shouldCollapse} title={field?.name}>
+    <MultilineFieldPreview collapsible={shouldCollapse} title={fieldName}>
       {rendered}
     </MultilineFieldPreview>
   ) : (
@@ -363,15 +366,16 @@ export function MultilineFieldPreview({
   collapsible: boolean;
   title?: string;
 }) {
+  const messages = useCoreI18n();
   const [expanded, setExpanded] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
   return (
     <div className="group/field relative min-w-0">
       <button
-        aria-label="Expand to fullscreen"
+        aria-label={messages.recordView.expandFullscreen}
         className="absolute right-0 top-0 z-10 inline-flex items-center justify-center rounded-md border bg-background/90 p-1 text-muted-foreground opacity-0 shadow-sm backdrop-blur transition hover:text-foreground focus-visible:opacity-100 group-hover/field:opacity-100"
         onClick={() => setFullscreen(true)}
-        title="Expand to fullscreen"
+        title={messages.recordView.expandFullscreen}
         type="button"
       >
         <Maximize2 className="size-3.5" />

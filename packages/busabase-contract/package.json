@@ -72,6 +72,7 @@
     "@orpc/openapi-client": "^1.14.6",
     "@orpc/tanstack-query": "1.14.6",
     "open-domains": "workspace:*",
+    "openlib": "workspace:*",
     "zod": "^4.3.6"
   }
 }

@@ -20,6 +20,7 @@ import type {
   ViewSortVO,
   ViewVO,
 } from "busabase-contract/types";
+import { iStringFromText } from "openlib/i18n/i-string";
 import type {
   AuditEventPO,
   BaseFieldPO,
@@ -71,7 +72,9 @@ export const toFieldVO = (field: BaseFieldPO): BaseFieldVO => ({
   id: field.id,
   baseId: field.baseId,
   slug: field.slug,
-  name: field.name,
+  // The text column stores locale-record names JSON-encoded (see iStringToText
+  // at the write sites); plain-string names pass through untouched.
+  name: iStringFromText(field.name),
   type: field.type as FieldType,
   required: field.required,
   position: field.position,

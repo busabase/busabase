@@ -37,7 +37,7 @@ Once connected, pick whichever fits the task — all three read the same `~/.bus
 
 | Method | Best for |
 | --- | --- |
-| **`busabase-cli`** | The ergonomic everyday loop: `npx busabase-cli bases list`, `drafts review --verdict approved`, `drafts merge`. |
+| **`busabase-cli`** | The ergonomic everyday loop: `npx busabase-cli bases list`, `change-requests review --change-request-id crq_123 --verdict approved`, `change-requests merge --change-request-id crq_123`. |
 | **`curl`** | Quick, zero-install calls against `http://localhost:15419/api/v1`. |
 | **MCP / OpenAPI** | The complete, current surface — connect over MCP at `/api/mcp`, or read `/api/v1/openapi.json`. |
 

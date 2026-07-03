@@ -27,11 +27,12 @@ import { SidebarTrigger } from "kui/sidebar";
 // `SPALink` appends `?demo=1` on <Link> clicks; `useAddDemoParam` wraps
 // programmatic `setLocation` targets — together they keep the demo across all
 // navigation (the proxy reads `?demo` via Referer and keeps serving the demo router).
+import { type iString, iStringParse } from "openlib/i18n/i-string";
 import { useAddDemoParam } from "openlib/ui/dashboard";
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { useLocation, useSearch } from "wouter";
-import { CoreI18nProvider } from "../../i18n";
+import { CoreI18nProvider, fmt, useCoreI18n } from "../../i18n";
 import { ArchivedBasesView } from "./components/archived-bases";
 import { AssetsView } from "./components/assets";
 import { BaseDetailView, BaseSetupView, BaseTopbarActions } from "./components/base-views";
@@ -117,6 +118,7 @@ function BusabaseDashboardContent({
   onSearchOpenChange,
   searchOpen,
 }: BusabaseDashboardProps) {
+  const messages = useCoreI18n();
   const orpc = useMemo(() => createBusabaseQueryUtils(apiBasePath), [apiBasePath]);
   const queryClient = useQueryClient();
   const client = useMemo(
@@ -347,12 +349,12 @@ function BusabaseDashboardContent({
           <span className="rounded-full border bg-muted/30 px-2.5 py-1 text-muted-foreground text-xs">
             {selectedOperation
               ? `${selectedOperation.position + 1} / ${selectedChangeRequest.operationCount}`
-              : "Operation"}
+              : messages.activity.operation}
           </span>
         ) : null,
         title: selectedOperation
           ? getOperationTitle(selectedOperation, selectedChangeRequest?.base)
-          : "Operation",
+          : messages.activity.operation,
       };
     }
 
@@ -360,21 +362,29 @@ function BusabaseDashboardContent({
       return {
         badge: null,
         title: selectedChangeRequest
-          ? getChangeRequestTitle(selectedChangeRequest)
-          : "Change Request",
+          ? getChangeRequestTitle(selectedChangeRequest, messages)
+          : messages.activity.changeRequest,
       };
     }
 
     if (isBaseSetupRoute) {
-      return { badge: null, title: `${activeBase?.name ?? "Base"} design` };
+      return {
+        badge: null,
+        title: `${activeBase?.name ?? messages.nav.base} ${messages.base.designTab}`,
+      };
     }
 
     if (isNewRecordRoute) {
-      return { badge: null, title: `New ${activeBase?.name ?? "Record"}` };
+      return {
+        badge: null,
+        title: fmt(messages.recordView.newRecordTitle, {
+          base: activeBase?.name ?? messages.common.record,
+        }),
+      };
     }
 
     if (isEditRecordRoute) {
-      return { badge: null, title: `Edit ${getRecordTitle(activeRecord)}` };
+      return { badge: null, title: `${messages.common.edit} ${getRecordTitle(activeRecord)}` };
     }
 
     if (isRecordRoute) {
@@ -382,28 +392,28 @@ function BusabaseDashboardContent({
     }
 
     if (isBaseViewRoute) {
-      return { badge: null, title: selectedBaseView?.name ?? "View" };
+      return { badge: null, title: selectedBaseView?.name ?? messages.recordView.view };
     }
 
     if (locationPath.startsWith("/base/")) {
-      return { badge: null, title: activeBase?.name ?? "Base" };
+      return { badge: null, title: activeBase?.name ?? messages.nav.base };
     }
 
     if (locationPath === "/activity") {
-      return { badge: null, title: "Activity" };
+      return { badge: null, title: messages.nav.activity };
     }
 
     if (locationPath === "/assets") {
-      return { badge: null, title: "Assets" };
+      return { badge: null, title: messages.nav.assets };
     }
 
     if (isAssetDetailRoute) {
-      return { badge: null, title: "Asset" };
+      return { badge: null, title: messages.nav.assets };
     }
 
     return {
       badge: null,
-      title: "Reviews",
+      title: messages.inbox.title,
     };
   }, [
     activeBase,
@@ -420,121 +430,122 @@ function BusabaseDashboardContent({
     selectedBaseView,
     selectedChangeRequest,
     selectedOperation,
+    messages,
   ]);
 
   const breadcrumbItems = useMemo<BusabaseBreadcrumbItem[]>(() => {
     if (isOperationRoute) {
       return [
-        { href: "/inbox", label: "Reviews" },
+        { href: "/inbox", label: messages.inbox.title },
         {
           href: selectedChangeRequest ? `/inbox/${selectedChangeRequest.id}` : undefined,
           label: selectedChangeRequest
-            ? getChangeRequestTitle(selectedChangeRequest)
-            : "Change Request",
+            ? getChangeRequestTitle(selectedChangeRequest, messages)
+            : messages.activity.changeRequest,
         },
         {
           label: selectedOperation
             ? getOperationTitle(selectedOperation, selectedChangeRequest?.base)
-            : "Operation",
+            : messages.activity.operation,
         },
       ];
     }
 
     if (isChangeRequestRoute) {
       return [
-        { href: "/inbox", label: "Reviews" },
+        { href: "/inbox", label: messages.inbox.title },
         {
           label: selectedChangeRequest
-            ? getChangeRequestTitle(selectedChangeRequest)
-            : "Change Request",
+            ? getChangeRequestTitle(selectedChangeRequest, messages)
+            : messages.activity.changeRequest,
         },
       ];
     }
 
     if (locationPath === "/activity") {
-      return [{ label: "Activity" }];
+      return [{ label: messages.nav.activity }];
     }
 
     if (locationPath === "/assets") {
-      return [{ label: "Assets" }];
+      return [{ label: messages.nav.assets }];
     }
 
     if (isAssetDetailRoute) {
-      return [{ href: "/assets", label: "Assets" }, { label: "Asset" }];
+      return [{ href: "/assets", label: messages.nav.assets }, { label: messages.nav.assets }];
     }
 
     if (isBaseSetupRoute) {
       return [
-        { label: "Bases" },
+        { label: messages.nav.bases },
         {
           href: activeBase ? `/base/${activeBase.slug}` : undefined,
-          label: activeBase?.name ?? "Base",
+          label: activeBase?.name ?? messages.nav.base,
         },
-        { label: "Design" },
+        { label: messages.base.designTab },
       ];
     }
 
     if (isNewRecordRoute) {
       return [
-        { label: "Bases" },
+        { label: messages.nav.bases },
         {
           href: activeBase ? `/base/${activeBase.slug}` : undefined,
-          label: activeBase?.name ?? "Base",
+          label: activeBase?.name ?? messages.nav.base,
         },
-        { label: "New Record" },
+        { label: messages.base.newRecord },
       ];
     }
 
     if (isEditRecordRoute) {
       return [
-        { label: "Bases" },
+        { label: messages.nav.bases },
         {
           href: activeRecord
             ? `/base/${activeRecord.base.slug}`
             : activeBase
               ? `/base/${activeBase.slug}`
               : undefined,
-          label: activeBase?.name ?? activeRecord?.base.name ?? "Base",
+          label: activeBase?.name ?? activeRecord?.base.name ?? messages.nav.base,
         },
         {
           href: activeRecord ? `/base/${activeRecord.base.slug}/${activeRecord.id}` : undefined,
-          label: activeRecord ? getRecordTitle(activeRecord) : "Record",
+          label: activeRecord ? getRecordTitle(activeRecord) : messages.common.record,
         },
-        { label: "Edit" },
+        { label: messages.common.edit },
       ];
     }
 
     if (isRecordRoute) {
       return [
-        { label: "Bases" },
+        { label: messages.nav.bases },
         {
           href: activeRecord
             ? `/base/${activeRecord.base.slug}`
             : activeBase
               ? `/base/${activeBase.slug}`
               : undefined,
-          label: activeBase?.name ?? activeRecord?.base.name ?? "Base",
+          label: activeBase?.name ?? activeRecord?.base.name ?? messages.nav.base,
         },
-        { label: activeRecord ? getRecordTitle(activeRecord) : "Record" },
+        { label: activeRecord ? getRecordTitle(activeRecord) : messages.common.record },
       ];
     }
 
     if (isBaseViewRoute) {
       return [
-        { label: "Bases" },
+        { label: messages.nav.bases },
         {
           href: activeBase ? `/base/${activeBase.slug}` : undefined,
-          label: activeBase?.name ?? "Base",
+          label: activeBase?.name ?? messages.nav.base,
         },
-        { label: selectedBaseView?.name ?? "View" },
+        { label: selectedBaseView?.name ?? messages.recordView.view },
       ];
     }
 
     if (locationPath.startsWith("/base/")) {
-      return [{ label: "Bases" }, { label: activeBase?.name ?? "Base" }];
+      return [{ label: messages.nav.bases }, { label: activeBase?.name ?? messages.nav.base }];
     }
 
-    return [{ label: "Reviews" }];
+    return [{ label: messages.inbox.title }];
   }, [
     activeBase,
     activeRecord,
@@ -550,6 +561,7 @@ function BusabaseDashboardContent({
     selectedBaseView,
     selectedChangeRequest,
     selectedOperation,
+    messages,
   ]);
 
   const refresh = useCallback(async () => {
@@ -706,13 +718,39 @@ function BusabaseDashboardContent({
       }
       const changeRequest = await client.createFieldChangeRequest(base.id, {
         ...payload,
-        message: `Add field ${payload.name}`,
+        message: `Add field ${iStringParse(payload.name)}`,
         submittedBy: "local-editor",
       });
       await refresh();
       setLocation(`/inbox/${changeRequest.id}`);
     },
     [client, refresh, setLocation],
+  );
+
+  const submitUpdateFieldName = useCallback(
+    async (
+      base: BaseVO,
+      fieldId: string,
+      name: iString,
+      options?: { mergeImmediately?: boolean },
+    ) => {
+      setError(null);
+      const changeRequest = await client.createUpdateFieldChangeRequest(base.id, {
+        fieldId,
+        patch: { name },
+        message: `Rename field ${iStringParse(name)}`,
+      });
+      if (options?.mergeImmediately) {
+        await approveAndMergeChangeRequest(changeRequest.id);
+        await refresh();
+        toast.success("Field renamed");
+        return;
+      }
+      await refresh();
+      toast.success("Rename request submitted");
+      setLocation(`/inbox/${changeRequest.id}`);
+    },
+    [approveAndMergeChangeRequest, client, refresh, setLocation],
   );
 
   const submitRenameBase = useCallback(
@@ -1073,6 +1111,7 @@ function BusabaseDashboardContent({
           onCreateField={submitCreateBaseField}
           onRenameBase={submitRenameBase}
           onRestoreField={submitRestoreField}
+          onUpdateFieldName={submitUpdateFieldName}
         />
       );
     }
@@ -1211,6 +1250,7 @@ function BusabaseDashboardContent({
     submitRestoreField,
     submitRestoreView,
     submitRestoreRecord,
+    submitUpdateFieldName,
     submitUpdateRecord,
     submitUpdateView,
     uploadAttachment,

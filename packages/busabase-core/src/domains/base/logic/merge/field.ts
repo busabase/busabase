@@ -1,6 +1,7 @@
 import "server-only";
 
 import { and, eq, isNull, ne } from "drizzle-orm";
+import { type iString, iStringToText } from "openlib/i18n/i-string";
 import { getContextSpaceId } from "../../../../context";
 import type { BaseFieldPO, CommitPO, OperationPO } from "../../../../db/schema";
 import { busabaseBaseFields, busabaseBases, busabaseOperations } from "../../../../db/schema";
@@ -11,7 +12,7 @@ export const mergeBaseAddField = async (ctx: MergeCtx, item: OperationPO, headCo
   const { db, timestamp } = ctx;
   const baseId = requireBaseId(item.baseId, item.operation);
   const fieldData = headCommit.fields as {
-    name?: string;
+    name?: iString;
     slug?: string;
     type?: import("busabase-contract/types").FieldType;
     required?: boolean;
@@ -37,7 +38,7 @@ export const mergeBaseAddField = async (ctx: MergeCtx, item: OperationPO, headCo
     baseId,
     spaceId,
     slug: fieldData.slug,
-    name: fieldData.name,
+    name: iStringToText(fieldData.name),
     type: fieldData.type ?? "text",
     required: fieldData.required ?? false,
     position: fieldCount,
@@ -126,7 +127,7 @@ export const mergeBaseUpdateField = async (
   const { db, timestamp } = ctx;
   const fieldData = headCommit.fields as {
     fieldId?: string;
-    name?: string;
+    name?: iString;
     required?: boolean;
     options?: Record<string, unknown>;
   };
@@ -254,7 +255,7 @@ export const mergeBaseUpdateField = async (
   }
 
   const updateSet: Record<string, unknown> = {};
-  if (fieldData.name !== undefined) updateSet.name = fieldData.name;
+  if (fieldData.name !== undefined) updateSet.name = iStringToText(fieldData.name);
   if (fieldData.required !== undefined) updateSet.required = fieldData.required;
   if (fieldData.options !== undefined) updateSet.options = fieldData.options;
 

@@ -1,7 +1,7 @@
 {
   "name": "busabase",
   "description": "Open-source Busabase review app + CLI. `busabase server` boots a zero-setup local instance (pglite); other subcommands act as an OpenAPI client.",
-  "version": "0.0.6",
+  "version": "0.0.7",
   "private": false,
   "license": "MIT",
   "homepage": "https://github.com/busabase/busabase/tree/main/apps/busabase",
@@ -29,6 +29,7 @@
     "start": "next start",
     "test": "vitest run",
     "test:e2e": "playwright test tests/e2e",
+    "typesafe-i18n": "typesafe-i18n --no-watch",
     "typecheck": "next typegen && tsc --noEmit",
     "lint": "biome format . --write && biome check . --write",
     "lint:err": "biome format . --write && biome check . --write --diagnostic-level=error",
@@ -84,6 +85,7 @@
     "drizzle-kit": "^0.31.7",
     "postcss": "^8.5.6",
     "tailwindcss": "^4.1.17",
+    "typesafe-i18n": "^5.26.2",
     "typescript": "^5.9.3",
     "vitest": "^2.1.8"
   },

@@ -2,6 +2,7 @@ import "server-only";
 
 import { ORPCError } from "@orpc/server";
 import { and, eq, inArray, isNull } from "drizzle-orm";
+import { iStringToText } from "openlib/i18n/i-string";
 import type { z } from "zod";
 import { getContextSpaceId, resolveActorId } from "../../../context";
 import { getDb } from "../../../db";
@@ -156,7 +157,7 @@ export const createBase = async (input: z.infer<typeof createBaseInputSchema>) =
         spaceId,
         baseId,
         slug: field.slug,
-        name: field.name,
+        name: iStringToText(field.name),
         type: field.type,
         required: field.required,
         position: index,

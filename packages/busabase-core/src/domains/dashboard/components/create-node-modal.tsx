@@ -13,6 +13,7 @@ import {
 } from "kui/dialog";
 import { Input } from "kui/input";
 import { useState } from "react";
+import { fmt, useCoreI18n } from "../../../i18n";
 import { nodeIconForId } from "../helpers/node-icons";
 import { SplitSubmitButton } from "./split-submit-button";
 
@@ -52,6 +53,7 @@ export function CreateNodeModal({
   onCreated,
   parent,
 }: CreateNodeModalProps) {
+  const messages = useCoreI18n();
   const [selectedType, setSelectedType] = useState(CREATABLE_TYPES[0]?.type ?? "base");
   const [name, setName] = useState("");
   const [slug, setSlug] = useState("");
@@ -92,21 +94,24 @@ export function CreateNodeModal({
     const trimmedName = name.trim();
     const finalSlug = (slugEdited ? slug : toSlug(trimmedName)).trim();
     if (!trimmedName || !finalSlug) {
-      setError("Name is required.");
+      setError(messages.createNode.nameRequired);
       return;
     }
     setSubmitting(true);
     setError(null);
     try {
       const changeRequest = await apiClient.createNodeChangeRequest({
-        message: `Create ${activeType?.label ?? "item"} ${trimmedName}`,
+        message: fmt(messages.createNode.message, {
+          name: trimmedName,
+          type: activeType?.label ?? "item",
+        }),
         operations: buildOperations(trimmedName, finalSlug),
       });
       reset();
       onOpenChange(false);
       onCreated(changeRequest.id, "change-request");
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Could not create");
+      setError(caught instanceof Error ? caught.message : messages.createNode.couldNotCreate);
     } finally {
       setSubmitting(false);
     }
@@ -116,23 +121,26 @@ export function CreateNodeModal({
     const trimmedName = name.trim();
     const finalSlug = (slugEdited ? slug : toSlug(trimmedName)).trim();
     if (!trimmedName || !finalSlug) {
-      setError("Name is required.");
+      setError(messages.createNode.nameRequired);
       return;
     }
     setSubmitting(true);
     setError(null);
     try {
       const changeRequest = await apiClient.createNodeChangeRequest({
-        message: `Create ${activeType?.label ?? "item"} ${trimmedName}`,
+        message: fmt(messages.createNode.message, {
+          name: trimmedName,
+          type: activeType?.label ?? "item",
+        }),
         operations: buildOperations(trimmedName, finalSlug),
       });
-      await apiClient.approveChangeRequest(changeRequest.id, "Auto-approved on create & merge");
+      await apiClient.approveChangeRequest(changeRequest.id, messages.createNode.autoApproved);
       await apiClient.mergeChangeRequest(changeRequest.id);
       reset();
       onOpenChange(false);
       onCreated(changeRequest.id, "merged");
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Could not create");
+      setError(caught instanceof Error ? caught.message : messages.createNode.couldNotCreate);
     } finally {
       setSubmitting(false);
     }
@@ -152,12 +160,15 @@ export function CreateNodeModal({
     >
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>New{parent ? ` in ${parent.name}` : ""}</DialogTitle>
+          <DialogTitle>
+            {fmt(messages.createNode.title, {
+              suffix: parent ? fmt(messages.createNode.parentSuffix, { name: parent.name }) : "",
+            })}
+          </DialogTitle>
           <DialogDescription>
             {parent
-              ? `Pick a type and name it — it's created inside "${parent.name}". `
-              : "Pick a type and name it. "}
-            Choose whether to merge immediately or keep it as a change request for review.
+              ? fmt(messages.createNode.descriptionInParent, { name: parent.name })
+              : messages.createNode.description}
           </DialogDescription>
         </DialogHeader>
 
@@ -185,7 +196,7 @@ export function CreateNodeModal({
           </div>
 
           <div className="flex flex-col gap-1.5 text-sm">
-            <span className="text-muted-foreground">Name</span>
+            <span className="text-muted-foreground">{messages.common.name}</span>
             <Input
               autoFocus
               onChange={(event) => {
@@ -194,12 +205,14 @@ export function CreateNodeModal({
                   setSlug(toSlug(event.target.value));
                 }
               }}
-              placeholder={`${activeType?.label ?? "Item"} name`}
+              placeholder={fmt(messages.createNode.itemNamePlaceholder, {
+                type: activeType?.label ?? "Item",
+              })}
               value={name}
             />
           </div>
           <div className="flex flex-col gap-1.5 text-sm">
-            <span className="text-muted-foreground">Slug</span>
+            <span className="text-muted-foreground">{messages.common.slug}</span>
             <Input
               onChange={(event) => {
                 setSlugEdited(true);
@@ -210,10 +223,10 @@ export function CreateNodeModal({
             />
           </div>
           <div className="flex flex-col gap-1.5 text-sm">
-            <span className="text-muted-foreground">Description (optional)</span>
+            <span className="text-muted-foreground">{messages.createNode.descriptionOptional}</span>
             <Input
               onChange={(event) => setDescription(event.target.value)}
-              placeholder="What this is for"
+              placeholder={messages.createNode.descriptionPlaceholder}
               value={description}
             />
           </div>
@@ -222,18 +235,20 @@ export function CreateNodeModal({
 
         <DialogFooter className="flex-col sm:flex-row gap-2">
           <Button disabled={submitting} onClick={() => onOpenChange(false)} variant="outline">
-            Cancel
+            {messages.common.cancel}
           </Button>
           <SplitSubmitButton
             disabled={isDisabled}
             isPrimaryLoading={submitting}
-            primaryLabel={`Create ${activeType?.label ?? ""} Request`}
-            primaryLoadingLabel="Creating..."
-            secondaryLabel="Create Now"
-            secondaryLoadingLabel="Creating..."
+            primaryLabel={fmt(messages.createNode.createRequest, {
+              type: activeType?.label ?? "",
+            })}
+            primaryLoadingLabel={messages.createNode.creating}
+            secondaryLabel={messages.createNode.createNow}
+            secondaryLoadingLabel={messages.createNode.creating}
             onPrimary={submitAsChangeRequest}
             onSecondary={submitAndMerge}
-            hint="Request goes to your inbox for review. Create Now merges immediately."
+            hint={messages.createNode.hint}
           />
         </DialogFooter>
       </DialogContent>

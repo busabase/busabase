@@ -1,4 +1,5 @@
 import type { FieldType, ViewConfigVO } from "busabase-contract/types";
+import type { iString } from "openlib/i18n/i-string";
 import type { ReactNode } from "react";
 
 export interface BusabaseBreadcrumbItem {
@@ -21,7 +22,7 @@ export interface ViewSubmitOptions {
 }
 
 export interface CreateBaseFieldPayload {
-  name: string;
+  name: iString;
   options?: {
     ai?: {
       model?: string;

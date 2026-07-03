@@ -1,5 +1,6 @@
 import { OPERATION_META } from "busabase-contract/domains";
 import type { BaseFieldVO, ChangeRequestVO, RecordVO } from "busabase-contract/types";
+import { iStringParse } from "openlib/i18n/i-string";
 
 export interface FieldDisplayItem {
   slug: string;
@@ -42,7 +43,7 @@ export function getFieldItems(
   return orderedSlugs
     .map((slug) => ({
       slug,
-      label: definitionBySlug.get(slug)?.name ?? slug,
+      label: iStringParse(definitionBySlug.get(slug)?.name ?? slug),
       value: stringifyFieldValue(fields[slug]),
     }))
     .filter((item) => item.value.length > 0);

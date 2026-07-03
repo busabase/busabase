@@ -2,6 +2,7 @@ import type { AttachmentRef, BaseFieldVO } from "busabase-contract/types";
 import * as DocumentPicker from "expo-document-picker";
 import * as ImagePicker from "expo-image-picker";
 import { FileText, ImagePlus, Paperclip, X } from "lucide-react-native";
+import { iStringParse } from "openlib/i18n/i-string";
 import { useState } from "react";
 import { ActivityIndicator, Image, Pressable, StyleSheet, Switch, Text, View } from "react-native";
 import { useBusabaseOrpc } from "~/api/use-busabase-orpc";
@@ -80,7 +81,7 @@ function FieldRow({
   const meta = (
     <View style={styles.meta}>
       <Text style={[typography.bodyEm, { color: tokens.foreground }]}>
-        {field.name}
+        {iStringParse(field.name)}
         {field.required ? <Text style={{ color: tokens.destructive }}> *</Text> : null}
       </Text>
       <Text style={[typography.caption, { color: tokens.mutedForeground }]}>{field.type}</Text>

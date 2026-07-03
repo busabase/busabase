@@ -3,7 +3,13 @@
 // type's `validate` / `compute` spec. No per-type switch lives here — add a type
 // to the registry and both functions pick it up. Pure (no DB / server-only).
 import type { FieldType } from "busabase-contract/types";
-import { FIELD_TYPES, type FieldDef, isEmptyFieldValue, isSystemFieldType } from "./field-types";
+import {
+  FIELD_TYPES,
+  type FieldDef,
+  fieldDisplayName,
+  isEmptyFieldValue,
+  isSystemFieldType,
+} from "./field-types";
 
 export interface FieldValidationError {
   slug: string;
@@ -33,7 +39,11 @@ export const validateRecordFields = (
 
     if (isEmptyFieldValue(value)) {
       if (def.required) {
-        errors.push({ slug: def.slug, type: def.type, message: `${def.name} is required` });
+        errors.push({
+          slug: def.slug,
+          type: def.type,
+          message: `${fieldDisplayName(def)} is required`,
+        });
       }
       continue;
     }

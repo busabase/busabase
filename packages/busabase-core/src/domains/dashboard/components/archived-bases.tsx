@@ -3,6 +3,7 @@
 import type { BaseVO, NodeVO } from "busabase-contract/types";
 import { Archive, RotateCcw, Trash2 } from "lucide-react";
 import { useState } from "react";
+import { fmt, useCoreI18n } from "../../../i18n";
 import { ConfirmActionDialog, EmptyState } from "./primitives";
 
 /** A row in the Trash: an archived base or an archived folder/doc/skill node. */
@@ -23,6 +24,8 @@ function TrashRow({
   onRestore: () => void;
   onPurge?: () => void;
 }) {
+  const messages = useCoreI18n();
+
   return (
     <div className="flex items-center justify-between rounded-lg border border-border/50 bg-muted/20 px-4 py-3">
       <div className="min-w-0">
@@ -42,7 +45,7 @@ function TrashRow({
             type="button"
           >
             <Trash2 className="size-3" />
-            Delete forever
+            {messages.trash.deleteForever}
           </button>
         ) : null}
         <button
@@ -52,7 +55,7 @@ function TrashRow({
           type="button"
         >
           <RotateCcw className="size-3" />
-          {restoring ? "Restoring…" : "Restore"}
+          {restoring ? messages.common.restoring : messages.common.restore}
         </button>
       </div>
     </div>
@@ -77,6 +80,7 @@ export function ArchivedBasesView({
   onRestoreNode?: (node: NodeVO) => Promise<void>;
   onPurgeNode?: (node: NodeVO) => Promise<void>;
 }) {
+  const messages = useCoreI18n();
   const [restoringId, setRestoringId] = useState<string | null>(null);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [confirmPurge, setConfirmPurge] = useState<NodeVO | null>(null);
@@ -107,7 +111,7 @@ export function ArchivedBasesView({
     } catch (err) {
       setErrors((prev) => ({
         ...prev,
-        [node.id]: err instanceof Error ? err.message : "Failed to delete permanently",
+        [node.id]: err instanceof Error ? err.message : messages.trash.failedDeletePermanently,
       }));
       setConfirmPurge(null);
     } finally {
@@ -120,19 +124,20 @@ export function ArchivedBasesView({
       <div className="px-6 pt-5 pb-2">
         <div className="flex items-center gap-2">
           <Archive className="size-4 text-muted-foreground" />
-          <h1 className="font-semibold text-base">Trash</h1>
+          <h1 className="font-semibold text-base">{messages.trash.title}</h1>
         </div>
-        <p className="mt-1 text-muted-foreground text-xs">
-          Archived items are hidden from the sidebar. Restore to make them active again.
-        </p>
+        <p className="mt-1 text-muted-foreground text-xs">{messages.trash.body}</p>
       </div>
 
       <section className="px-6 py-4">
         <h2 className="mb-2 font-medium text-muted-foreground text-xs uppercase tracking-wide">
-          Bases
+          {messages.trash.bases}
         </h2>
         {archivedBases.length === 0 ? (
-          <EmptyState title="No archived bases" body="Bases you archive will appear here." />
+          <EmptyState
+            title={messages.trash.noArchivedBasesTitle}
+            body={messages.trash.noArchivedBasesBody}
+          />
         ) : (
           <div className="space-y-2">
             {archivedBases.map((base) => (
@@ -142,7 +147,7 @@ export function ArchivedBasesView({
                 key={base.id}
                 meta={base.slug}
                 onRestore={() =>
-                  runRestore(base.id, () => onRestoreBase(base), "Failed to restore base")
+                  runRestore(base.id, () => onRestoreBase(base), messages.trash.failedRestoreBase)
                 }
                 restoring={restoringId === base.id}
                 title={base.name}
@@ -155,12 +160,12 @@ export function ArchivedBasesView({
       {onRestoreNode ? (
         <section className="px-6 pb-6">
           <h2 className="mb-2 font-medium text-muted-foreground text-xs uppercase tracking-wide">
-            Folders, docs &amp; skills
+            {messages.trash.foldersDocsSkills}
           </h2>
           {archivedNodes.length === 0 ? (
             <EmptyState
-              title="No archived items"
-              body="Folders, docs, and skills you delete will appear here."
+              title={messages.trash.noArchivedItemsTitle}
+              body={messages.trash.noArchivedItemsBody}
             />
           ) : (
             <div className="space-y-2">
@@ -172,7 +177,7 @@ export function ArchivedBasesView({
                   meta={`${node.type} · ${node.slug}`}
                   onPurge={onPurgeNode ? () => setConfirmPurge(node) : undefined}
                   onRestore={() =>
-                    runRestore(node.id, () => onRestoreNode(node), "Failed to restore item")
+                    runRestore(node.id, () => onRestoreNode(node), messages.trash.failedRestoreItem)
                   }
                   restoring={restoringId === node.id}
                   title={node.name}
@@ -185,14 +190,14 @@ export function ArchivedBasesView({
 
       <ConfirmActionDialog
         body={
-          confirmPurge ? `Permanently delete "${confirmPurge.name}"? This cannot be undone.` : ""
+          confirmPurge ? fmt(messages.trash.deletePermanentlyBody, { name: confirmPurge.name }) : ""
         }
-        confirmLabel="Delete forever"
+        confirmLabel={messages.trash.deleteForever}
         onCancel={() => setConfirmPurge(null)}
         onConfirm={runPurge}
         open={confirmPurge !== null}
         pending={purging}
-        title="Delete permanently?"
+        title={messages.trash.deletePermanentlyTitle}
       />
     </div>
   );

@@ -54,6 +54,8 @@
 import { z } from "zod";
 import { LocaleSchema, type LocaleType } from "./i18n";
 
+export type { LocaleType } from "./i18n";
+
 export const iStringRecordSchema = z.partialRecord(LocaleSchema, z.string());
 export const iStringSchema = z.union([z.string(), iStringRecordSchema]).describe("i18n string");
 
@@ -133,6 +135,39 @@ export const iStringParse = (str: iString | undefined | null, lang: LocaleType =
 export const iStringify = (str: string, lang: LocaleType = "en"): iString => ({
   [lang]: str,
 });
+
+/**
+ * Trim every value; locale entries that become empty are dropped. A record with
+ * no remaining entries collapses to "".
+ */
+export const iStringTrim = (str: iString): iString => {
+  if (typeof str === "string") return str.trim();
+  const entries = Object.entries(str)
+    .map(([locale, value]) => [locale, value?.trim() ?? ""] as const)
+    .filter(([, value]) => value.length > 0);
+  if (entries.length === 0) return "";
+  return Object.fromEntries(entries) as iStringRecord;
+};
+
+/** True when the iString holds no non-blank text in any locale. */
+export const iStringIsEmpty = (str: iString | null | undefined): boolean => {
+  if (!str) return true;
+  if (typeof str === "string") return str.trim().length === 0;
+  return !Object.values(str).some((value) => value && value.trim().length > 0);
+};
+
+/**
+ * Encode an iString for storage in a plain text column: strings pass through,
+ * locale records are JSON-encoded. Reverse with iStringFromText.
+ */
+export const iStringToText = (str: iString): string =>
+  typeof str === "string" ? str : JSON.stringify(str);
+
+/**
+ * Decode a text-column value written by iStringToText. Non-JSON (or non-record
+ * JSON) text is returned as a plain string.
+ */
+export const iStringFromText = (raw: string): iString => isIString(raw) || raw;
 
 /**
  * Concatenates iString values. For example, {en: 'hello', zh: '你好'} => 'hello 你好'

@@ -1,5 +1,6 @@
 import type { LucideIcon } from "lucide-react";
 import { Activity, Inbox, Table2 } from "lucide-react";
+import { getBusabaseAppLL } from "~/lib/i18n";
 
 export interface SecondaryNavItem {
   title: string;
@@ -14,18 +15,22 @@ export interface SecondaryNavConfig {
   showHeaderAction?: boolean;
 }
 
-export const getSecondarySidebarNav = (): Record<string, SecondaryNavConfig> => ({
-  Review: {
-    type: "menu",
-    label: "Review",
-    items: [
-      { title: "Inbox", url: "/inbox", icon: Inbox },
-      { title: "Activity", url: "/activity", icon: Activity },
-    ],
-  },
-  Base: {
-    type: "menu",
-    label: "Base",
-    items: [{ title: "Blog Posts", url: "/base/blog", icon: Table2 }],
-  },
-});
+export const getSecondarySidebarNav = (locale?: string): Record<string, SecondaryNavConfig> => {
+  const LL = getBusabaseAppLL(locale);
+
+  return {
+    Review: {
+      type: "menu",
+      label: LL.navigation.review(),
+      items: [
+        { title: LL.navigation.inbox(), url: "/inbox", icon: Inbox },
+        { title: LL.navigation.activity(), url: "/activity", icon: Activity },
+      ],
+    },
+    Base: {
+      type: "menu",
+      label: LL.navigation.base(),
+      items: [{ title: LL.navigation.blogPosts(), url: "/base/blog", icon: Table2 }],
+    },
+  };
+};

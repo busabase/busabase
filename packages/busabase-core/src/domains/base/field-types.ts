@@ -7,11 +7,13 @@
 // / spec.compute). The client maps spec.input → a component. Add a field type here
 // once and every layer picks it up.
 import type { FieldType } from "busabase-contract/types";
+import { type iString, iStringParse, type LocaleType } from "openlib/i18n/i-string";
 
 /** Minimal field-definition shape both the VO and the persisted row satisfy. */
 export interface FieldDef {
   slug: string;
-  name: string;
+  /** Display name — plain string or locale-keyed record; render via fieldDisplayName. */
+  name: iString;
   type: FieldType;
   required?: boolean;
   options?: {
@@ -68,6 +70,13 @@ export interface FieldTypeSpec {
   compute?: (ctx: SystemComputeCtx) => unknown;
 }
 
+/**
+ * Resolve a field's display name to a string. Server-side messages have no user
+ * locale, so this uses iStringParse's default fallback (requested → any → en).
+ */
+export const fieldDisplayName = (def: Pick<FieldDef, "name">, locale?: LocaleType): string =>
+  iStringParse(def.name, locale);
+
 // ── value predicates (shared by the per-type validators) ─────────────────────
 const isEmpty = (value: unknown): boolean => value === undefined || value === null || value === "";
 
@@ -107,10 +116,10 @@ const isStringArray = (value: unknown): value is string[] =>
 
 // ── reusable validators ──────────────────────────────────────────────────────
 const textValidator = (value: unknown, def: FieldDef) =>
-  typeof value === "string" ? null : `${def.name} must be text`;
+  typeof value === "string" ? null : `${fieldDisplayName(def)} must be text`;
 
 const numberValidator = (value: unknown, def: FieldDef) =>
-  isNumeric(value) ? null : `${def.name} must be a number`;
+  isNumeric(value) ? null : `${fieldDisplayName(def)} must be a number`;
 
 // ── computed-value helpers (system fields) ───────────────────────────────────
 const computeCreatedTime = (c: SystemComputeCtx) =>
@@ -173,14 +182,15 @@ export const FIELD_TYPES: Record<FieldType, FieldTypeSpec> = {
     input: "checkbox",
     columnWidth: "minmax(92px,112px)",
     validate: (value, def) =>
-      typeof value === "boolean" ? null : `${def.name} must be true or false`,
+      typeof value === "boolean" ? null : `${fieldDisplayName(def)} must be true or false`,
   },
   date: {
     type: "date",
     label: "date",
     input: "date",
     columnWidth: "minmax(116px,150px)",
-    validate: (value, def) => (isValidDate(value) ? null : `${def.name} must be a valid date`),
+    validate: (value, def) =>
+      isValidDate(value) ? null : `${fieldDisplayName(def)} must be a valid date`,
   },
   email: {
     type: "email",
@@ -190,14 +200,15 @@ export const FIELD_TYPES: Record<FieldType, FieldTypeSpec> = {
     validate: (value, def) =>
       typeof value === "string" && EMAIL_RE.test(value)
         ? null
-        : `${def.name} must be a valid email`,
+        : `${fieldDisplayName(def)} must be a valid email`,
   },
   url: {
     type: "url",
     label: "url",
     input: "url",
     columnWidth: "minmax(180px,260px)",
-    validate: (value, def) => (isValidUrl(value) ? null : `${def.name} must be a valid URL`),
+    validate: (value, def) =>
+      isValidUrl(value) ? null : `${fieldDisplayName(def)} must be a valid URL`,
   },
   phone: {
     type: "phone",
@@ -207,7 +218,7 @@ export const FIELD_TYPES: Record<FieldType, FieldTypeSpec> = {
     validate: (value, def) =>
       typeof value === "string" && PHONE_RE.test(value)
         ? null
-        : `${def.name} must be a valid phone number`,
+        : `${fieldDisplayName(def)} must be a valid phone number`,
   },
   select: {
     type: "select",
@@ -217,7 +228,7 @@ export const FIELD_TYPES: Record<FieldType, FieldTypeSpec> = {
     validate: (value, def) =>
       typeof value === "string" && choiceMatches(value, def)
         ? null
-        : `${def.name} must be one of its options`,
+        : `${fieldDisplayName(def)} must be one of its options`,
   },
   multiselect: {
     type: "multiselect",
@@ -227,7 +238,7 @@ export const FIELD_TYPES: Record<FieldType, FieldTypeSpec> = {
     validate: (value, def) =>
       Array.isArray(value) && value.every((v) => typeof v === "string" && choiceMatches(v, def))
         ? null
-        : `${def.name} must be a list of its options`,
+        : `${fieldDisplayName(def)} must be a list of its options`,
   },
   relation: {
     type: "relation",
@@ -237,7 +248,7 @@ export const FIELD_TYPES: Record<FieldType, FieldTypeSpec> = {
     validate: (value, def) =>
       typeof value === "string" || isStringArray(value)
         ? null
-        : `${def.name} must be a record id or a list of record ids`,
+        : `${fieldDisplayName(def)} must be a record id or a list of record ids`,
   },
   attachment: {
     type: "attachment",
@@ -258,7 +269,8 @@ export const FIELD_TYPES: Record<FieldType, FieldTypeSpec> = {
     label: "AI tags",
     input: "tags",
     columnWidth: "minmax(140px,220px)",
-    validate: (value, def) => (isStringArray(value) ? null : `${def.name} must be a list of tags`),
+    validate: (value, def) =>
+      isStringArray(value) ? null : `${fieldDisplayName(def)} must be a list of tags`,
   },
   created_time: {
     type: "created_time",

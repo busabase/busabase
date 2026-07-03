@@ -8,10 +8,12 @@ import {
 } from "kui/breadcrumb";
 import { SPALink as Link } from "openlib/ui/dashboard";
 import { Fragment } from "react";
+import { useCoreI18n } from "../../../i18n";
 import type { BusabaseBreadcrumbItem } from "../helpers/view-types";
 
 export function BusabaseTopbarBreadcrumb({ items }: { items: BusabaseBreadcrumbItem[] }) {
-  const visibleItems = items.length > 0 ? items : [{ label: "Reviews" }];
+  const messages = useCoreI18n();
+  const visibleItems = items.length > 0 ? items : [{ label: messages.inbox.title }];
 
   return (
     <Breadcrumb className="min-w-0 flex-1">

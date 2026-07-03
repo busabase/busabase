@@ -37,9 +37,9 @@ export const busabaseContractRoutes = {
         method: "GET",
         path: "/auth",
         tags: ["Auth"],
-        summary: "Verify auth and get active space, user, and membership",
+        summary: "Verify auth and get the targeted space, user, membership, and all spaces",
         successDescription:
-          "The active space, acting user, and the user's membership. Open source returns the local space/user; the cloud resolves the real ones from the user API key.",
+          "The space this request targets, the acting user, their membership, and every space the user belongs to (`spaces`). Open source returns the local space/user; the cloud resolves the real ones from the user API key — when `spaces` has more than one entry, target a specific space with the `x-busabase-space` header instead of relying on the default.",
       })
       .output(authInfoSchema),
   },

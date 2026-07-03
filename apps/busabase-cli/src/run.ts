@@ -60,7 +60,7 @@ Commands:
   whoami                                   Active space, user, and membership
 
   nodes list                               Workspace node tree
-  nodes create-draft --type <folder|base|skill|doc> --slug <s> --name <n>
+  nodes create-change-request --type <folder|base|skill|doc> --slug <s> --name <n>
                [--description <d>] [--parent-node-id <id>] [--message <m>] [--submitted-by <a>]
                [--field <slug:name:type> ...]  (fields are for --type base)
 
@@ -69,19 +69,22 @@ Commands:
   bases create --slug <s> --name <n> [--description <d>] [--parent-node-id <id>]
                --field <slug:name:type> [--field ...]
   bases create-field --base-id <id> --slug <s> --name <n> [--field-type <t>] [--required]
-  bases create-draft --base-id <id> --fields-json <json> [--message <m>] [--submitted-by <a>]
+  bases create-change-request --base-id <id> --fields-json <json> [--message <m>] [--submitted-by <a>]
 
   records list [--limit <n>]               List records
   records get --record-id <id>             Get one record
   records by-field-text --field-slug <s> --value-text <t> [--base-id <id>] [--limit <n>]
-  records drafts --record-id <id>          Change requests for a record
+  records change-requests --record-id <id> Change Requests for a record
 
-  drafts list [--limit <n>]                List change requests
-  drafts get --draft-id <id>               Get a change request
-  drafts review --draft-id <id> --verdict <approved|rejected> [--reason <r>]
+  change-requests list [--limit <n>]       List Change Requests
+  change-requests get --change-request-id <id>
+                                            Get a Change Request
+  change-requests review --change-request-id <id> --verdict <approved|rejected> [--reason <r>]
                                             rejected = request changes, not terminal
-  drafts close --draft-id <id> [--reason <r>]  Terminally abandon/reject a draft
-  drafts merge --draft-id <id>             Merge a change request into its Base
+  change-requests close --change-request-id <id> [--reason <r>]
+                                            Terminally abandon/reject a Change Request
+  change-requests merge --change-request-id <id>
+                                            Merge a Change Request into its Base
 
   search --query <q> [--limit <n>] [--offset <n>]
 
@@ -226,7 +229,7 @@ async function dispatch(
     }
     case "nodes":
       if (sub === "list") return client.nodes.list();
-      if (sub === "create-draft") {
+      if (sub === "create-change-request") {
         const nodeType = required(flags, "type") as CreatableNodeType;
         const name = required(flags, "name");
         return client.nodes.createChangeRequest({
@@ -290,7 +293,7 @@ async function dispatch(
             ...(flags.get("field-type") ? { type: flags.get("field-type") as FieldType } : {}),
             required: flags.has("required"),
           });
-        case "create-draft":
+        case "create-change-request":
           return client.bases.createChangeRequest({
             baseId: required(flags, "base-id"),
             fields: JSON.parse(required(flags, "fields-json")),
@@ -312,32 +315,36 @@ async function dispatch(
             baseId: flags.get("base-id"),
             limit: flags.num("limit"),
           });
-        case "drafts":
+        case "change-requests":
           return client.records.listChangeRequests({ recordId: required(flags, "record-id") });
       }
       break;
-    case "drafts":
+    case "change-requests":
       switch (sub) {
         case "list":
           return client.changeRequests.list({ limit: flags.num("limit") });
         case "get":
-          return client.changeRequests.get({ changeRequestId: required(flags, "draft-id") });
+          return client.changeRequests.get({
+            changeRequestId: required(flags, "change-request-id"),
+          });
         case "review": {
           const verdict = required(flags, "verdict");
           if (verdict !== "approved" && verdict !== "rejected") {
             throw new Error(`--verdict must be "approved" or "rejected"`);
           }
           return client.changeRequests.review({
-            changeRequestId: required(flags, "draft-id"),
+            changeRequestId: required(flags, "change-request-id"),
             verdict,
             reason: flags.get("reason"),
           });
         }
         case "merge":
-          return client.changeRequests.merge({ changeRequestId: required(flags, "draft-id") });
+          return client.changeRequests.merge({
+            changeRequestId: required(flags, "change-request-id"),
+          });
         case "close":
           return client.changeRequests.close({
-            changeRequestId: required(flags, "draft-id"),
+            changeRequestId: required(flags, "change-request-id"),
             reason: flags.get("reason"),
           });
       }

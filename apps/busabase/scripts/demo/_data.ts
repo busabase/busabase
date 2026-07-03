@@ -20,11 +20,12 @@ export {
 } from "busabase-core/demo/dataset";
 
 import { DEMO_BASES, DEMO_RECORDS } from "busabase-core/demo/dataset";
+import type { iString } from "openlib/i18n/i-string";
 
 type SeedFieldDef = {
   id: string;
   slug: string;
-  name: string;
+  name: iString;
   type: string;
   required: boolean;
   options: Record<string, unknown>;

@@ -3,6 +3,7 @@ import { z } from "zod";
 // (no kernel imports), so the kernel embeds them eagerly with no import cycle.
 import {
   baseSchema,
+  fieldNameSchema,
   fieldOptionsSchema,
   fieldTypeSchema,
 } from "../domains/base/contract/base-schemas";
@@ -245,7 +246,7 @@ const nodeOperationInputSchema = z.discriminatedUnion("kind", [
             .string()
             .min(1)
             .regex(/^[a-z0-9-]+$/),
-          name: z.string().min(1),
+          name: fieldNameSchema,
           type: fieldTypeSchema.default("text"),
           required: z.boolean().optional().default(false),
           options: fieldOptionsSchema.optional().default({}),
@@ -378,9 +379,16 @@ const authMemberSchema = z.object({
 });
 
 const authInfoSchema = z.object({
+  /** The space this request is scoped to (explicit `x-busabase-space` header, else the default). */
   space: authSpaceSchema,
   user: authUserSchema,
   member: authMemberSchema,
+  /**
+   * Every space the authenticated user belongs to. An API key is user-scoped, not
+   * space-scoped — when this has more than one entry, callers should confirm the
+   * intended space and target it explicitly via the `x-busabase-space` header.
+   */
+  spaces: z.array(authSpaceSchema),
 });
 
 export type AuthInfo = z.infer<typeof authInfoSchema>;

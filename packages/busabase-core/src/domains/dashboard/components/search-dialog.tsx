@@ -13,17 +13,12 @@ import { cn } from "kui/utils";
 import { CornerDownLeft, Search, X } from "lucide-react";
 import { SPALink as Link } from "openlib/ui/dashboard";
 import { type KeyboardEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCoreI18n } from "../../../i18n";
 import { normalizeSearchText, searchKindIcon } from "../helpers/search";
 import { EmptyState } from "./primitives";
 
 type SearchTab = "all" | "records" | "bases" | "change_requests";
 const SEARCH_TABS: SearchTab[] = ["all", "records", "bases", "change_requests"];
-const TAB_LABEL: Record<SearchTab, string> = {
-  all: "All",
-  records: "Records",
-  bases: "Bases",
-  change_requests: "Change Requests",
-};
 const TAB_KIND: Record<SearchTab, SearchResultKind | null> = {
   all: null,
   records: "record",
@@ -46,6 +41,7 @@ export function SearchDialog({
   open: boolean;
   records: RecordVO[];
 }) {
+  const messages = useCoreI18n();
   const inputRef = useRef<HTMLInputElement | null>(null);
   const [query, setQuery] = useState("");
   const [debouncedQuery, setDebouncedQuery] = useState("");
@@ -92,8 +88,14 @@ export function SearchDialog({
   const searchError = searchQuery.isError
     ? searchQuery.error instanceof Error
       ? searchQuery.error.message
-      : "Search failed"
+      : messages.search.failed
     : null;
+  const tabLabel: Record<SearchTab, string> = {
+    all: messages.search.all,
+    bases: messages.search.bases,
+    change_requests: messages.search.changeRequests,
+    records: messages.search.records,
+  };
 
   // "All" tab excludes change_request; other tabs filter by kind.
   const visibleResults = useMemo(() => {
@@ -193,7 +195,7 @@ export function SearchDialog({
       onKeyDown={handleKeyDown}
     >
       <button
-        aria-label="Close search"
+        aria-label={messages.search.closeSearch}
         className="absolute inset-0 cursor-default"
         onClick={onClose}
         type="button"
@@ -207,13 +209,13 @@ export function SearchDialog({
             className="h-14 min-w-0 flex-1 bg-transparent font-light text-base text-foreground outline-none placeholder:text-muted-foreground"
             id="busabase-dashboard-search"
             onChange={(event) => setQuery(event.target.value)}
-            placeholder="Search records, bases, change requests…"
+            placeholder={messages.search.placeholder}
             ref={inputRef}
             type="search"
             value={query}
           />
           <button
-            aria-label="Close search"
+            aria-label={messages.search.closeSearch}
             className="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
             onClick={onClose}
             type="button"
@@ -239,7 +241,7 @@ export function SearchDialog({
                   value={t}
                   className="group h-7 gap-1.5 rounded-lg px-2.5 text-[13px] font-medium text-muted-foreground shadow-none transition-colors data-[state=active]:bg-muted data-[state=active]:text-foreground data-[state=active]:shadow-none"
                 >
-                  {TAB_LABEL[t]}
+                  {tabLabel[t]}
                   {count !== null && count > 0 && (
                     <span
                       aria-hidden
@@ -265,7 +267,7 @@ export function SearchDialog({
               ) : null}
               {isSearching && visibleResults.length === 0 ? (
                 <div className="px-1 py-10 text-center text-muted-foreground text-sm">
-                  Searching indexed fields…
+                  {messages.search.searching}
                 </div>
               ) : visibleResults.length > 0 ? (
                 <>
@@ -287,12 +289,15 @@ export function SearchDialog({
                       onClick={loadMore}
                       type="button"
                     >
-                      {isSearching ? "Loading" : "Load more"}
+                      {isSearching ? messages.common.loadingPlain : messages.search.loadMore}
                     </button>
                   ) : null}
                 </>
               ) : (
-                <EmptyState title="No matches" body="Try a title, field name, channel, or Base." />
+                <EmptyState
+                  title={messages.search.noMatchesTitle}
+                  body={messages.search.noMatchesBody}
+                />
               )}
             </div>
           ) : (
@@ -328,11 +333,13 @@ function SearchLanding({
   changeRequests: ChangeRequestVO[];
   records: RecordVO[];
 }) {
+  const messages = useCoreI18n();
+
   return (
     <div className="grid max-w-4xl gap-3 md:grid-cols-3">
-      <SearchMetric label="Records" value={records.length} />
-      <SearchMetric label="Change Requests" value={changeRequests.length} />
-      <SearchMetric label="Bases" value={bases.length} />
+      <SearchMetric label={messages.search.records} value={records.length} />
+      <SearchMetric label={messages.search.changeRequests} value={changeRequests.length} />
+      <SearchMetric label={messages.search.bases} value={bases.length} />
     </div>
   );
 }

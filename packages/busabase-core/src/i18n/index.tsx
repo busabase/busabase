@@ -9,7 +9,8 @@
 // Hosts can also import `coreMessagesEn` / `coreMessagesByLocale`
 // into their own typesafe-i18n catalogs to manage these strings.
 
-import { createContext, type ReactNode, useContext } from "react";
+import { type iString, iStringParse } from "openlib/i18n/i-string";
+import { createContext, type ReactNode, useCallback, useContext } from "react";
 import { dashboardJa } from "./ja";
 import { type CoreI18nMessages, coreMessagesEn } from "./messages";
 import { dashboardZhCN } from "./zh-CN";
@@ -39,6 +40,7 @@ const isSupportedLocale = (locale: string | undefined): locale is CoreLocale =>
   locale !== undefined && locale in coreMessagesByLocale;
 
 const CoreI18nContext = createContext<CoreI18nMessages>(coreMessagesEn);
+const CoreLocaleContext = createContext<CoreLocale>("en");
 
 export function CoreI18nProvider({
   children,
@@ -48,13 +50,33 @@ export function CoreI18nProvider({
   /** Active locale from the host (e.g. cloud's `[lang]`, or busabase's cookie). */
   locale?: string;
 }) {
-  const messages = isSupportedLocale(locale) ? coreMessagesByLocale[locale] : coreMessagesEn;
-  return <CoreI18nContext.Provider value={messages}>{children}</CoreI18nContext.Provider>;
+  const resolved = isSupportedLocale(locale) ? locale : "en";
+  return (
+    <CoreLocaleContext.Provider value={resolved}>
+      <CoreI18nContext.Provider value={coreMessagesByLocale[resolved]}>
+        {children}
+      </CoreI18nContext.Provider>
+    </CoreLocaleContext.Provider>
+  );
 }
 
 /** The active locale's busabase-core dashboard strings (typed against `en`). */
 export function useCoreI18n(): CoreI18nMessages {
   return useContext(CoreI18nContext);
+}
+
+/** The active dashboard locale (falls back to "en" for unsupported hosts). */
+export function useCoreLocale(): CoreLocale {
+  return useContext(CoreLocaleContext);
+}
+
+/**
+ * Resolve an iString (e.g. a field's multilingual name) to the active locale,
+ * falling back through iStringParse's chain (requested → any → en).
+ */
+export function useIString(): (value: iString) => string {
+  const locale = useCoreLocale();
+  return useCallback((value: iString) => iStringParse(value, locale), [locale]);
 }
 
 /** Interpolate `{token}` placeholders in a catalog string. */

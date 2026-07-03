@@ -1,4 +1,5 @@
 import type { BaseFieldVO } from "busabase-contract/types";
+import { iStringParse } from "openlib/i18n/i-string";
 import { StyleSheet, Text, View } from "react-native";
 import { radius, typography } from "~/theme/tokens";
 import { useTokens } from "~/theme/use-tokens";
@@ -33,7 +34,7 @@ export function FieldList({ fields, definitions = [], highlight }: FieldListProp
       {items.map((slug) => (
         <View key={slug} style={[styles.row, { borderColor: tokens.border }]}>
           <Text style={[typography.small, { color: tokens.mutedForeground }]}>
-            {definitionBySlug.get(slug)?.name ?? slug}
+            {iStringParse(definitionBySlug.get(slug)?.name ?? slug)}
           </Text>
           <FieldValue
             field={definitionBySlug.get(slug)}

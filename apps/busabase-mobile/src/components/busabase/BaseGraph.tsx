@@ -1,5 +1,6 @@
 import type { BaseVO } from "busabase-contract/types";
 import { forceCenter, forceCollide, forceLink, forceManyBody, forceSimulation } from "d3-force";
+import { iStringParse } from "openlib/i18n/i-string";
 import { useMemo } from "react";
 import { StyleSheet, Text, View } from "react-native";
 import Svg, { Circle, Defs, G, Line, Marker, Path, Text as SvgText } from "react-native-svg";
@@ -61,7 +62,7 @@ function buildLayout(
         rawLinks.push({
           source: base.id,
           target: field.options.targetBaseId,
-          fieldName: field.name,
+          fieldName: iStringParse(field.name),
         });
       }
     }

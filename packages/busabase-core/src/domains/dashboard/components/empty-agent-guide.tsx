@@ -2,22 +2,8 @@
 
 import { Bot, Database, GitPullRequest, Sparkles } from "lucide-react";
 import { useState } from "react";
+import { useCoreI18n } from "../../../i18n";
 import { AgentIntegrationDialog } from "./agent-skill-button";
-
-const guideItems = [
-  {
-    icon: Database,
-    text: "Create structured data and seed useful examples",
-  },
-  {
-    icon: GitPullRequest,
-    text: "Open Change Requests for review instead of writing directly",
-  },
-  {
-    icon: Bot,
-    text: "Add records, update fields, and evolve a Database with an AI agent",
-  },
-];
 
 interface EmptyAgentGuideProps {
   /** Current UI language — localizes the pasted prompt in the Agent Integration dialog. */
@@ -25,7 +11,22 @@ interface EmptyAgentGuideProps {
 }
 
 export function EmptyAgentGuide({ lang }: EmptyAgentGuideProps = {}) {
+  const messages = useCoreI18n();
   const [open, setOpen] = useState(false);
+  const guideItems = [
+    {
+      icon: Database,
+      text: messages.emptyGuide.itemStructuredData,
+    },
+    {
+      icon: GitPullRequest,
+      text: messages.emptyGuide.itemChangeRequests,
+    },
+    {
+      icon: Bot,
+      text: messages.emptyGuide.itemAgentDatabase,
+    },
+  ];
 
   return (
     <>
@@ -35,10 +36,9 @@ export function EmptyAgentGuide({ lang }: EmptyAgentGuideProps = {}) {
             <Sparkles size={18} />
           </div>
           <div className="min-w-0">
-            <h3 className="font-medium text-sm">Let an agent help fill this workspace</h3>
+            <h3 className="font-medium text-sm">{messages.emptyGuide.title}</h3>
             <p className="mt-1 text-muted-foreground text-sm leading-6">
-              Busabase can stay manual, but it is designed so agents create drafts and humans
-              approve what becomes canonical.
+              {messages.emptyGuide.body}
             </p>
           </div>
         </div>
@@ -63,11 +63,9 @@ export function EmptyAgentGuide({ lang }: EmptyAgentGuideProps = {}) {
             type="button"
           >
             <Sparkles size={15} />
-            Open Agent Skills
+            {messages.emptyGuide.openAgentSkills}
           </button>
-          <span className="text-muted-foreground text-xs">
-            Or use the UI buttons to create manually.
-          </span>
+          <span className="text-muted-foreground text-xs">{messages.emptyGuide.manualHint}</span>
         </div>
       </div>
 

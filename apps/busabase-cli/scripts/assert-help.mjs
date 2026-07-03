@@ -1,0 +1,54 @@
+#!/usr/bin/env node
+import { execFileSync } from "node:child_process";
+import { existsSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const cliPath = path.join(root, "dist", "cli.js");
+
+if (!existsSync(cliPath)) {
+  throw new Error("dist/cli.js is missing. Run `pnpm run build` before publishing.");
+}
+
+const help = execFileSync(process.execPath, [cliPath, "--help"], {
+  cwd: root,
+  encoding: "utf8",
+});
+
+const required = [
+  "nodes create-change-request --type <folder|base|skill|doc>",
+  "bases create-change-request --base-id <id>",
+  "records change-requests --record-id <id>",
+  "change-requests list [--limit <n>]",
+  "change-requests close --change-request-id <id>",
+];
+
+const forbidden = [
+  "nodes create-draft",
+  "bases create-draft",
+  "records drafts",
+  "drafts list",
+  "drafts get",
+  "drafts review",
+  "drafts close",
+  "drafts merge",
+  "--draft-id",
+];
+
+const missing = required.filter((text) => !help.includes(text));
+const stale = forbidden.filter((text) => help.includes(text));
+
+if (missing.length || stale.length) {
+  throw new Error(
+    [
+      "busabase-cli help does not match the current Change Request command surface.",
+      missing.length ? `Missing:\n${missing.map((text) => `  - ${text}`).join("\n")}` : "",
+      stale.length ? `Stale:\n${stale.map((text) => `  - ${text}`).join("\n")}` : "",
+    ]
+      .filter(Boolean)
+      .join("\n\n"),
+  );
+}
+
+console.log("busabase-cli help matches the Change Request command surface.");

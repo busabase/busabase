@@ -1,4 +1,5 @@
 import { CREATABLE_NODE_TYPES } from "busabase-contract/domains";
+import { fieldNameSchema } from "busabase-contract/domains/base/contract/base-schemas";
 import { z } from "zod";
 
 const fieldTypeSchema = z.enum([
@@ -65,7 +66,7 @@ const fieldOptionsSchema = z
 
 export const fieldSchema = z.object({
   slug: z.string().min(1),
-  name: z.string().min(1),
+  name: fieldNameSchema,
   type: fieldTypeSchema.default("text"),
   required: z.boolean().default(false),
   options: fieldOptionsSchema.optional().default({}),
@@ -101,7 +102,7 @@ const nodeOperationInputSchema = z.discriminatedUnion("kind", [
             .string()
             .min(1)
             .regex(/^[a-z0-9-]+$/),
-          name: z.string().min(1),
+          name: fieldNameSchema,
           type: fieldTypeSchema.default("text"),
           required: z.boolean().optional().default(false),
           options: fieldOptionsSchema.optional().default({}),

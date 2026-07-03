@@ -12,6 +12,7 @@ import {
 } from "busabase-contract/domains/base/contract/base-schemas";
 import type { FieldType } from "busabase-contract/types";
 import { and, eq, isNull } from "drizzle-orm";
+import { type iString, iStringFromText, iStringToText } from "openlib/i18n/i-string";
 import type { z } from "zod";
 import { resolveActorId } from "../../../context";
 import { getDb } from "../../../db";
@@ -72,7 +73,7 @@ export const createBaseField = async (baseId: string, input: z.infer<typeof fiel
     id: id("bsf"),
     baseId: base.id,
     slug: parsed.slug,
-    name: parsed.name,
+    name: iStringToText(parsed.name),
     type: parsed.type,
     required: parsed.required,
     position: fieldCount,
@@ -229,7 +230,7 @@ export const createDeleteFieldChangeRequest = async (
   const fields = {
     fieldId: field.id,
     slug: field.slug,
-    name: field.name,
+    name: iStringFromText(field.name),
     type: field.type,
     required: field.required,
     options: field.options,
@@ -300,7 +301,7 @@ export const createDeleteFieldChangeRequest = async (
 export const createUpdateFieldChangeRequest = async (
   baseId: string,
   fieldId: string,
-  patch: { name?: string; required?: boolean; options?: Record<string, unknown> },
+  patch: { name?: iString; required?: boolean; options?: Record<string, unknown> },
   submittedBy = "local-editor",
   message?: string,
 ) => {
@@ -326,7 +327,7 @@ export const createUpdateFieldChangeRequest = async (
   const fields = {
     fieldId: field.id,
     slug: field.slug,
-    name: patch.name ?? field.name,
+    name: patch.name ?? iStringFromText(field.name),
     type: field.type,
     required: patch.required ?? field.required,
     options: patch.options !== undefined ? patch.options : field.options,
@@ -721,7 +722,7 @@ export const createRestoreFieldChangeRequest = async (
   const fields = {
     fieldId: field.id,
     slug: field.slug,
-    name: field.name,
+    name: iStringFromText(field.name),
     type: field.type,
     required: field.required,
     options: field.options,

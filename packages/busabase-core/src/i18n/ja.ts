@@ -1,9 +1,14 @@
 import type { CoreI18nMessages } from "./messages";
+import { dashboardZhCN } from "./zh-CN";
 
-// Japanese translations for the shared dashboard catalog. Must mirror the shape
-// of `coreMessagesEn`; the `CoreI18nMessages` type enforces it.
+// Japanese translations for the shared dashboard catalog. The full UI catalog is
+// routed through i18n; newly added workbench strings currently fall back to the
+// complete Simplified Chinese catalog until a native Japanese copy pass updates
+// each key without risking untranslated component literals.
 export const dashboardJa: CoreI18nMessages = {
+  ...dashboardZhCN,
   common: {
+    ...dashboardZhCN.common,
     open: "開く",
     loading: "読み込み中…",
     noFields: "フィールドなし",
@@ -11,6 +16,7 @@ export const dashboardJa: CoreI18nMessages = {
     no: "いいえ",
   },
   nav: {
+    ...dashboardZhCN.nav,
     inbox: "受信トレイ",
     search: "検索",
     activity: "アクティビティ",
@@ -18,6 +24,7 @@ export const dashboardJa: CoreI18nMessages = {
     new: "新規",
   },
   inbox: {
+    ...dashboardZhCN.inbox,
     title: "レビュー",
     forReview: "レビュー待ち",
     changesRequested: "修正依頼済み",
@@ -31,6 +38,7 @@ export const dashboardJa: CoreI18nMessages = {
     closedChangeRequests: "クローズした変更リクエスト",
   },
   review: {
+    ...dashboardZhCN.review,
     whatWillChange: "変更される内容",
     noFieldChanges: "この操作にフィールドの変更はありません。",
     commentsOnThisChange: "この変更へのコメント",
@@ -60,11 +68,13 @@ export const dashboardJa: CoreI18nMessages = {
     statusClosed: "クローズ済み",
   },
   status: {
+    ...dashboardZhCN.status,
     inReview: "レビュー中",
     changesRequested: "修正依頼済み",
     closed: "クローズ済み",
   },
   comments: {
+    ...dashboardZhCN.comments,
     placeholder: "コメントを追加… @ai でエージェントに修正を依頼",
     placeholderOperation: "この変更にコメント… @ai で修正を依頼",
     placeholderDiscussion: "作者へのコメントを残す… @ai で修正を依頼",

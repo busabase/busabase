@@ -2,6 +2,7 @@ import "server-only";
 
 import { ORPCError } from "@orpc/server";
 import { CREATABLE_NODE_TYPES } from "busabase-contract/domains";
+import { fieldNameSchema } from "busabase-contract/domains/base/contract/base-schemas";
 import type { NodeVO } from "busabase-contract/types";
 import { and, asc, desc, eq, inArray, isNotNull, isNull, ne } from "drizzle-orm";
 import { z } from "zod";
@@ -41,7 +42,7 @@ const nodeOperationInputSchema = z.discriminatedUnion("kind", [
             .string()
             .min(1)
             .regex(/^[a-z0-9-]+$/),
-          name: z.string().min(1),
+          name: fieldNameSchema,
           type: z.string().optional().default("text"),
           required: z.boolean().optional().default(false),
           options: z.record(z.string(), z.unknown()).optional().default({}),

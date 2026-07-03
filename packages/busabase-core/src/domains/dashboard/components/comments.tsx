@@ -3,6 +3,7 @@ import type { BusabaseDashboardApiClient } from "busabase-contract/api-client";
 import type { CommentSubjectType, CommentVO } from "busabase-contract/types";
 import { Reply, Sparkles } from "lucide-react";
 import { Fragment, useRef, useState } from "react";
+import { fmt, useCoreI18n } from "../../../i18n";
 
 export const parseMentionsAi = (text: string) => /(^|\s)@ai\b/i.test(text);
 
@@ -101,6 +102,8 @@ export function CommentItem({
   comment: CommentVO;
   onQuoteReply: (comment: CommentVO) => void;
 }) {
+  const messages = useCoreI18n();
+
   return (
     <div className="group flex gap-2.5 border-border/40 border-b py-3 last:border-b-0">
       <CommentAvatar ai={comment.mentionsAi} authorId={comment.authorId} />
@@ -117,7 +120,7 @@ export function CommentItem({
             type="button"
           >
             <Reply size={12} />
-            Quote reply
+            {messages.comments.quoteReply}
           </button>
         </div>
         <CommentBody body={comment.body} />
@@ -128,8 +131,8 @@ export function CommentItem({
 
 export function SubjectCommentThread({
   client,
-  emptyLabel = "No comments yet.",
-  placeholder = "Add a comment… mention @ai to request an agent revision",
+  emptyLabel,
+  placeholder,
   subjectId,
   subjectType,
 }: {
@@ -139,6 +142,7 @@ export function SubjectCommentThread({
   subjectId: string;
   subjectType: CommentSubjectType;
 }) {
+  const messages = useCoreI18n();
   const queryClient = useQueryClient();
   const queryKey = ["busabase", "comments", subjectType, subjectId];
   const commentsQuery = useQuery({
@@ -157,7 +161,7 @@ export function SubjectCommentThread({
         subjectType,
       }),
     onError: (mutationError) =>
-      setError(mutationError instanceof Error ? mutationError.message : "Failed to add comment"),
+      setError(mutationError instanceof Error ? mutationError.message : messages.comments.failed),
     onSuccess: () => {
       setBody("");
       setError(null);
@@ -177,7 +181,7 @@ export function SubjectCommentThread({
       .join("\n");
     setBody((current) => {
       const prefix = current.trim().length > 0 ? `${current.replace(/\s+$/, "")}\n\n` : "";
-      return `${prefix}> @${comment.authorId} wrote:\n${quoted}\n\n`;
+      return `${prefix}> ${fmt(messages.comments.quotedAttribution, { author: comment.authorId })}\n${quoted}\n\n`;
     });
     requestAnimationFrame(() => {
       const element = composerRef.current;
@@ -198,7 +202,9 @@ export function SubjectCommentThread({
         </div>
       ) : (
         <div className="border-border/50 border-t px-1 py-4 text-muted-foreground text-sm">
-          {commentsQuery.isLoading ? "Loading comments…" : emptyLabel}
+          {commentsQuery.isLoading
+            ? messages.comments.loading
+            : (emptyLabel ?? messages.comments.noComments)}
         </div>
       )}
 
@@ -210,10 +216,10 @@ export function SubjectCommentThread({
 
       <div className="mt-2 rounded-md border border-border/70 bg-background/55 p-2.5">
         <textarea
-          aria-label="Add comment"
+          aria-label={messages.comments.addComment}
           className="min-h-16 w-full resize-y rounded-md border border-border/70 bg-background px-2.5 py-2 text-sm leading-6 outline-none transition-colors focus:border-primary"
           onChange={(event) => setBody(event.target.value)}
-          placeholder={placeholder}
+          placeholder={placeholder ?? messages.comments.placeholder}
           ref={composerRef}
           value={body}
         />
@@ -221,11 +227,11 @@ export function SubjectCommentThread({
           {mentionsAi ? (
             <span className="inline-flex items-center gap-1 text-[11px] text-violet-700 dark:text-violet-300">
               <Sparkles size={11} />
-              The agent will be asked to revise.
+              {messages.comments.agentWillRevise}
             </span>
           ) : (
             <span className="text-[11px] text-muted-foreground">
-              Mention @ai to request a revision.
+              {messages.comments.mentionHint}
             </span>
           )}
           <button
@@ -234,7 +240,7 @@ export function SubjectCommentThread({
             onClick={() => createMutation.mutate(body.trim())}
             type="button"
           >
-            {createMutation.isPending ? "Posting…" : "Comment"}
+            {createMutation.isPending ? messages.comments.posting : messages.comments.comment}
           </button>
         </div>
       </div>

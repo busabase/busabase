@@ -143,14 +143,14 @@ function InboxList({
             items: openCreatedChangeRequests.map((changeRequest) => (
               <ReviewChangeRequestRow changeRequest={changeRequest} key={changeRequest.id} />
             )),
-            title: "Open change requests",
+            title: messages.inbox.openChangeRequests,
           },
           {
             count: closedCreatedChangeRequests.length,
             items: closedCreatedChangeRequests.map((changeRequest) => (
               <ReviewChangeRequestRow changeRequest={changeRequest} key={changeRequest.id} />
             )),
-            title: "Closed change requests",
+            title: messages.inbox.closedChangeRequests,
           },
         ]
       : [
@@ -212,9 +212,10 @@ function BusabaseListToolbar({
 }
 
 function ReviewChangeRequestRow({ changeRequest }: { changeRequest: ChangeRequestVO }) {
+  const messages = useCoreI18n();
   const updatedAt = formatListTime(changeRequest.updatedAt);
   const riskHints = getChangeRequestRiskHints(changeRequest);
-  const statusLabel = changeRequestStatusLabel(changeRequest.status);
+  const statusLabel = changeRequestStatusLabel(changeRequest.status, messages);
   const message = getChangeRequestMessage(changeRequest);
 
   return (
@@ -229,7 +230,7 @@ function ReviewChangeRequestRow({ changeRequest }: { changeRequest: ChangeReques
             title={statusLabel}
           />
           <div className="truncate font-semibold text-sm leading-5">
-            {getChangeRequestTitle(changeRequest)}
+            {getChangeRequestTitle(changeRequest, messages)}
           </div>
           {riskHints.length > 0 ? (
             <span className="hidden shrink-0 rounded-full border border-amber-200 bg-amber-50 px-1.5 py-0.5 font-medium text-[11px] text-amber-800 sm:inline-flex">
@@ -243,14 +244,14 @@ function ReviewChangeRequestRow({ changeRequest }: { changeRequest: ChangeReques
         <div className="mt-1 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-muted-foreground text-xs">
           <span className="truncate">{getChangeRequestScopeName(changeRequest)}</span>
           <span>·</span>
-          <span>{getChangeRequestOperationLabel(changeRequest)}</span>
+          <span>{getChangeRequestOperationLabel(changeRequest, messages)}</span>
           <span>·</span>
           <span>{statusLabel}</span>
         </div>
       </div>
       <div className="flex min-w-0 items-center justify-between gap-3 text-muted-foreground text-xs md:justify-end">
         <span className="hidden min-w-0 truncate md:block">
-          {getChangeRequestSummary(changeRequest)}
+          {getChangeRequestSummary(changeRequest, messages)}
         </span>
         <span className="shrink-0 font-mono text-[11px] transition-colors group-hover:text-foreground">
           {updatedAt}
@@ -271,9 +272,10 @@ export function ActivityView({
   emptyGuide?: ReactNode;
   records: RecordVO[];
 }) {
+  const messages = useCoreI18n();
   const events = useMemo(
-    () => buildActivityEvents(changeRequests, records, auditEvents),
-    [auditEvents, changeRequests, records],
+    () => buildActivityEvents(changeRequests, records, auditEvents, messages),
+    [auditEvents, changeRequests, records, messages],
   );
   const changeRequestCount = changeRequests.length;
   const operationCount = changeRequests.reduce(
@@ -289,8 +291,8 @@ export function ActivityView({
     <BusabaseList
       empty={
         <EmptyState
-          title="No activity yet"
-          body="Change requests, operations, commits, and record views will appear here."
+          title={messages.activity.noActivityTitle}
+          body={messages.activity.noActivityBody}
           action={emptyGuide}
         />
       }
@@ -298,20 +300,24 @@ export function ActivityView({
         {
           count: recentEvents.length,
           items: recentEvents.map((event) => <ActivityRow event={event} key={event.id} />),
-          title: "Today",
+          title: messages.activity.today,
         },
         {
           count: earlierEvents.length,
           items: earlierEvents.map((event) => <ActivityRow event={event} key={event.id} />),
-          title: "Earlier",
+          title: messages.activity.earlier,
         },
       ].filter((group) => group.count > 0)}
       toolbar={
         <>
-          <div className="font-medium text-sm">Workspace activity</div>
+          <div className="font-medium text-sm">{messages.activity.workspaceActivity}</div>
           <div className="text-muted-foreground text-xs">
-            {changeRequestCount} change requests · {operationCount} operations · {records.length}{" "}
-            records · {auditEvents.length} audit events
+            {fmt(messages.activity.activityStats, {
+              auditEvents: auditEvents.length,
+              changeRequests: changeRequestCount,
+              operations: operationCount,
+              records: records.length,
+            })}
           </div>
         </>
       }

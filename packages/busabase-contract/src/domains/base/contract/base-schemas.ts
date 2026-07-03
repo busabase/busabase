@@ -1,7 +1,20 @@
+import { iStringRecordSchema } from "openlib/i18n/i-string";
 import { z } from "zod";
 
 // Base-owned field + base Zod schemas. Pure leaf: imports nothing from the kernel
 // contract, so the kernel can embed `baseSchema` eagerly with no import cycle.
+// (openlib/i18n/i-string is zod-only — safe for the client bundle.)
+
+// Field display names are iStrings: a plain string or a locale-keyed record like
+// { en: "Company", "zh-CN": "公司" }. Slugs stay the stable identifier; the name is
+// display-only. A record must carry at least one non-empty value.
+export const fieldNameSchema = z.union([
+  z.string().min(1),
+  iStringRecordSchema.refine(
+    (record) => Object.values(record).some((value) => value && value.trim().length > 0),
+    "field name must have at least one non-empty locale value",
+  ),
+]);
 
 export const fieldTypeSchema = z.enum([
   "text",
@@ -80,7 +93,7 @@ export const baseFieldSchema = z.object({
   id: z.string(),
   baseId: z.string(),
   slug: z.string(),
-  name: z.string(),
+  name: fieldNameSchema,
   type: fieldTypeSchema,
   required: z.boolean(),
   position: z.number(),
@@ -113,7 +126,7 @@ export const createBaseInputSchema = z.object({
     .array(
       z.object({
         slug: z.string().min(1),
-        name: z.string().min(1),
+        name: fieldNameSchema,
         type: fieldTypeSchema.default("text"),
         required: z.boolean().default(false),
         options: fieldOptionsSchema.optional().default({}),
@@ -123,7 +136,7 @@ export const createBaseInputSchema = z.object({
 });
 
 export const createBaseFieldInputSchema = z.object({
-  name: z.string().min(1),
+  name: fieldNameSchema,
   // Field slugs are snake_case identifiers (e.g. `cover_image`, `publish_date`) — the
   // seed and the inline-fields path on `POST /bases` already allow underscores, so the
   // add-field endpoint must too. (Base/folder/view slugs stay kebab-case: they go in URLs.)
@@ -150,7 +163,7 @@ export const deleteFieldChangeRequestInputSchema = z.object({
 export const updateFieldChangeRequestInputSchema = z.object({
   fieldId: z.string().min(1),
   patch: z.object({
-    name: z.string().min(1).optional(),
+    name: fieldNameSchema.optional(),
     required: z.boolean().optional(),
     options: fieldOptionsSchema.optional(),
   }),

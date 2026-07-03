@@ -2,6 +2,7 @@ import "server-only";
 
 import { ORPCError } from "@orpc/server";
 import { and, eq, isNull, ne } from "drizzle-orm";
+import { iStringToText } from "openlib/i18n/i-string";
 import { getContextSpaceId } from "../../../../context";
 import type { CommitPO, OperationPO } from "../../../../db/schema";
 import {
@@ -53,7 +54,7 @@ export const materializeBaseNode = async (
     (
       baseFields as Array<{
         slug: string;
-        name: string;
+        name: import("openlib/i18n/i-string").iString;
         type?: import("busabase-contract/types").FieldType;
         required?: boolean;
         options?: Record<string, unknown>;
@@ -63,7 +64,7 @@ export const materializeBaseNode = async (
       spaceId: getContextSpaceId(),
       baseId,
       slug: field.slug,
-      name: field.name,
+      name: iStringToText(field.name),
       type: field.type ?? "text",
       required: field.required ?? false,
       position: index,

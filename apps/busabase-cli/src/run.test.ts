@@ -15,13 +15,16 @@ describe("busabase-cli commands", () => {
     vi.restoreAllMocks();
   });
 
-  it("documents node drafts and terminal draft close in help", () => {
-    expect(HELP).toContain("nodes create-draft --type <folder|base|skill|doc>");
-    expect(HELP).toContain("drafts close --draft-id <id>");
+  it("documents node and terminal Change Request commands in help", () => {
+    expect(HELP).toContain("nodes create-change-request --type <folder|base|skill|doc>");
+    expect(HELP).toContain("change-requests close --change-request-id <id>");
     expect(HELP).toContain("rejected = request changes, not terminal");
+    expect(HELP).not.toContain(["create", "dra", "ft"].join("-"));
+    expect(HELP).not.toContain(["dra", "fts "].join(""));
+    expect(HELP).not.toContain(["--dra", "ft-id"].join(""));
   });
 
-  it("creates a folder node draft through the node ChangeRequest endpoint", async () => {
+  it("creates a folder node Change Request through the node endpoint", async () => {
     const calls: Array<{ body: unknown; method: string; url: string }> = [];
     global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const request = input instanceof Request ? input : new Request(input, init);
@@ -39,7 +42,7 @@ describe("busabase-cli commands", () => {
       "--output",
       "json",
       "nodes",
-      "create-draft",
+      "create-change-request",
       "--type",
       "folder",
       "--slug",
@@ -61,7 +64,7 @@ describe("busabase-cli commands", () => {
     ]);
   });
 
-  it("terminally closes a draft through the close endpoint", async () => {
+  it("terminally closes a Change Request through the close endpoint", async () => {
     const calls: Array<{ body: unknown; method: string; url: string }> = [];
     global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const request = input instanceof Request ? input : new Request(input, init);
@@ -78,9 +81,9 @@ describe("busabase-cli commands", () => {
       "http://localhost:15419",
       "--output",
       "json",
-      "drafts",
+      "change-requests",
       "close",
-      "--draft-id",
+      "--change-request-id",
       "crq_1",
       "--reason",
       "Wrong proposal",

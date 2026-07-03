@@ -7,8 +7,17 @@ import type {
   OperationVO,
   RecordVO,
 } from "busabase-contract/types";
+import { iStringParse, iStringSchema } from "openlib/i18n/i-string";
+import { type CoreI18nMessages, fmt } from "../../../i18n";
 import { fieldPreviewText } from "./field";
 import { fieldValueToString, shortIdentifier } from "./format";
+
+// A commit's `name` may be a multilingual field name (iString record) — resolve
+// it to a display string instead of JSON-stringifying it into the title.
+const nameToString = (value: unknown): string => {
+  const parsed = iStringSchema.safeParse(value);
+  return parsed.success ? iStringParse(parsed.data) : fieldValueToString(value);
+};
 
 export const statusTone = (status: string) => {
   if (status === "merged") {
@@ -26,18 +35,18 @@ export const statusTone = (status: string) => {
   return "border-amber-200 bg-amber-50 text-amber-900";
 };
 
-export const changeRequestStatusLabel = (status: string) => {
+export const changeRequestStatusLabel = (status: string, messages?: CoreI18nMessages) => {
   if (status === "in_review") {
-    return "In review";
+    return messages?.status.inReview ?? "In review";
   }
   if (status === "changes_requested") {
-    return "Changes requested";
+    return messages?.status.changesRequested ?? "Changes requested";
   }
   if (status === "conflict") {
-    return "Conflict";
+    return messages?.status.conflict ?? "Conflict";
   }
   if (status === "rejected" || status === "abandoned") {
-    return "Closed";
+    return messages?.status.closed ?? "Closed";
   }
   return status.charAt(0).toUpperCase() + status.slice(1);
 };
@@ -131,14 +140,16 @@ export const getOperationTargetHref = (changeRequest: ChangeRequestVO, operation
   return getNodeHref(changeRequest.node);
 };
 
-export const getOperationTargetLabel = (operation: OperationVO) => {
+export const getOperationTargetLabel = (operation: OperationVO, messages?: CoreI18nMessages) => {
   if (operation.operation.startsWith("view_")) {
-    return "Open view";
+    return messages?.common.open ? `${messages.common.open} view` : "Open view";
   }
   if (operation.targetType === "node") {
-    return "Open node";
+    return messages?.common.open ? `${messages.common.open} node` : "Open node";
   }
-  return "Open record";
+  return messages?.common.open
+    ? `${messages.common.open} ${messages.common.record}`
+    : "Open record";
 };
 
 // Human-readable subject of an operation. For record operations the subject is
@@ -164,7 +175,7 @@ export const getOperationSubject = (operation: OperationVO, base?: BaseVO | null
 
   const guessed =
     fieldValueToString(operation.headCommit.fields.title) ||
-    fieldValueToString(operation.headCommit.fields.name) ||
+    nameToString(operation.headCommit.fields.name) ||
     fieldValueToString(operation.headCommit.fields.subject);
   if (guessed) {
     return guessed;
@@ -254,14 +265,17 @@ export const getOperationCounts = (operations: OperationVO[]) =>
 
 // Conventional-commit-style title: "<operation verb> <subject>", e.g.
 // "Create Alice Johnson" or "Update view Weekly board" — never a bare commit id.
-export const getChangeRequestTitle = (changeRequest: ChangeRequestVO) => {
+export const getChangeRequestTitle = (
+  changeRequest: ChangeRequestVO,
+  messages?: CoreI18nMessages,
+) => {
   if (changeRequest.operationCount > 1) {
-    return `${changeRequest.operationCount} operation change request`;
+    return `${changeRequest.operationCount} ${messages?.activity.operation ?? "operation"} ${messages?.activity.changeRequest ?? "change request"}`;
   }
 
   const operation = changeRequest.primaryOperation;
   if (!operation) {
-    return "Untitled change request";
+    return `Untitled ${messages?.activity.changeRequest ?? "change request"}`;
   }
 
   const subject = getOperationSubject(operation, changeRequest.base);
@@ -272,7 +286,10 @@ export const getChangeRequestTitle = (changeRequest: ChangeRequestVO) => {
   return getOperationTitle(operation, changeRequest.base);
 };
 
-export const getChangeRequestSummary = (changeRequest: ChangeRequestVO) => {
+export const getChangeRequestSummary = (
+  changeRequest: ChangeRequestVO,
+  _messages?: CoreI18nMessages,
+) => {
   const operationIndexes = new Map(operationOrder.map((operation, index) => [operation, index]));
   const counts = changeRequest.operations.reduce((items, operation) => {
     const label = getOperationLabel(operation).toLowerCase();
@@ -294,8 +311,15 @@ export const getChangeRequestSummary = (changeRequest: ChangeRequestVO) => {
   return `${changeRequest.operationCount} item${changeRequest.operationCount === 1 ? "" : "s"}`;
 };
 
-export const getChangeRequestOperationLabel = (changeRequest: ChangeRequestVO) =>
-  `${changeRequest.operationCount} operation${changeRequest.operationCount === 1 ? "" : "s"}`;
+export const getChangeRequestOperationLabel = (
+  changeRequest: ChangeRequestVO,
+  messages?: CoreI18nMessages,
+) =>
+  fmt("{count} {operation}{plural}", {
+    count: changeRequest.operationCount,
+    operation: messages?.activity.operation ?? "operation",
+    plural: changeRequest.operationCount === 1 ? "" : "s",
+  });
 
 export const getChangeRequestRiskHints = (changeRequest: ChangeRequestVO) => {
   const hints = new Set<string>();
@@ -328,28 +352,34 @@ export const getChangeRequestRiskHints = (changeRequest: ChangeRequestVO) => {
   return Array.from(hints).slice(0, 2);
 };
 
-export const getChangeRequestBrief = (changeRequest: ChangeRequestVO) => {
+export const getChangeRequestBrief = (
+  changeRequest: ChangeRequestVO,
+  messages?: CoreI18nMessages,
+) => {
   const scope = getChangeRequestScopeName(changeRequest);
-  const summary = getChangeRequestSummary(changeRequest);
+  const summary = getChangeRequestSummary(changeRequest, messages);
   const risks = getChangeRequestRiskHints(changeRequest);
   const riskText = risks.length > 0 ? ` Watch ${risks.join(" and ")} changes.` : "";
-  return `${getChangeRequestOperationLabel(changeRequest)} in ${scope}: ${summary}.${riskText}`;
+  return `${getChangeRequestOperationLabel(changeRequest, messages)} in ${scope}: ${summary}.${riskText}`;
 };
 
-export const getChangeRequestReviewMessage = (changeRequest: ChangeRequestVO) => {
+export const getChangeRequestReviewMessage = (
+  changeRequest: ChangeRequestVO,
+  messages?: CoreI18nMessages,
+) => {
   if (changeRequest.status === "approved") {
-    return "Approved · ready to merge";
+    return messages?.review.approvedReadyToMerge ?? "Approved · ready to merge";
   }
   if (changeRequest.status === "changes_requested") {
-    return "Changes requested · awaiting revision";
+    return messages?.review.changesRequestedAwaiting ?? "Changes requested · awaiting revision";
   }
   if (changeRequest.status === "rejected" || changeRequest.status === "abandoned") {
-    return "Closed";
+    return messages?.review.statusClosed ?? "Closed";
   }
   if (changeRequest.status === "merged") {
-    return "Merged into Base";
+    return messages?.review.mergedIntoBase ?? "Merged into Base";
   }
-  return "Waiting for your review";
+  return messages?.review.waitingForReview ?? "Waiting for your review";
 };
 
 export const getOperationImpact = (operation: OperationVO) => {

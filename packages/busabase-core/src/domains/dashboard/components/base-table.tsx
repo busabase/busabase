@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 import { SPALink as Link } from "openlib/ui/dashboard";
 import { useState } from "react";
+import { fmt, useCoreI18n, useIString } from "../../../i18n";
 import { fieldColumnWidth, fieldDisplayKind } from "../../base/field-types";
 import { getRecordTitle } from "../helpers/change-request";
 import {
@@ -144,6 +145,8 @@ export function BusaBaseTable({
   relationRecords?: RecordVO[];
   views: ViewVO[];
 }) {
+  const messages = useCoreI18n();
+  const resolveIString = useIString();
   const [editingViewMode, setEditingViewMode] = useState<"create" | "edit" | null>(null);
   const [isDeletingView, setIsDeletingView] = useState(false);
   const [confirmDeleteView, setConfirmDeleteView] = useState<ViewVO | null>(null);
@@ -175,7 +178,7 @@ export function BusaBaseTable({
               }`}
               href={`/base/${base.slug}`}
             >
-              All
+              {messages.base.all}
             </Link>
           ) : null}
           {views.map((view) => {
@@ -196,10 +199,10 @@ export function BusaBaseTable({
           })}
           {base ? (
             <button
-              aria-label="New view"
+              aria-label={messages.base.newView}
               className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-border/70 border-dashed text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
               onClick={() => setEditingViewMode("create")}
-              title="New view"
+              title={messages.base.newView}
               type="button"
             >
               <Plus size={13} />
@@ -208,11 +211,15 @@ export function BusaBaseTable({
         </div>
         <div className="flex flex-shrink-0 items-center gap-2">
           <span className="text-muted-foreground text-xs">
-            {records.length} record{records.length === 1 ? "" : "s"}
+            {fmt(messages.base.recordCount, {
+              count: records.length,
+              plural: records.length === 1 ? "" : "s",
+            })}
             {activeView && activeView.config.filters.length > 0
-              ? ` · ${activeView.config.filters.length} filter${
-                  activeView.config.filters.length === 1 ? "" : "s"
-                }`
+              ? ` · ${fmt(messages.base.filterCount, {
+                  count: activeView.config.filters.length,
+                  plural: activeView.config.filters.length === 1 ? "" : "s",
+                })}`
               : ""}
             {archivedRecords.length > 0 ? (
               <button
@@ -220,7 +227,9 @@ export function BusaBaseTable({
                 onClick={() => setShowArchivedRecords((v) => !v)}
                 type="button"
               >
-                {showArchivedRecords ? "Hide archived" : `${archivedRecords.length} archived`}
+                {showArchivedRecords
+                  ? messages.base.hideArchived
+                  : fmt(messages.base.archivedCount, { count: archivedRecords.length })}
               </button>
             ) : null}
           </span>
@@ -239,7 +248,7 @@ export function BusaBaseTable({
                   type="button"
                 >
                   <PenLine size={13} />
-                  Edit view
+                  {messages.base.editView}
                 </button>
                 <button
                   className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left font-medium text-red-700 text-xs transition-colors hover:bg-red-50 disabled:opacity-60"
@@ -251,7 +260,7 @@ export function BusaBaseTable({
                   type="button"
                 >
                   <Trash2 size={13} />
-                  {isDeletingView ? "Deleting…" : "Delete view"}
+                  {isDeletingView ? messages.common.deleting : messages.base.deleteView}
                 </button>
               </div>
             </details>
@@ -262,7 +271,7 @@ export function BusaBaseTable({
               href={`/base/${base.slug}/new`}
             >
               <Plus size={13} />
-              New record
+              {messages.base.newRecord}
             </Link>
           ) : null}
         </div>
@@ -282,10 +291,10 @@ export function BusaBaseTable({
       <ConfirmActionDialog
         body={
           confirmDeleteView
-            ? `This creates a delete change request for "${confirmDeleteView.name}". The view remains available until that request is reviewed and merged.`
+            ? fmt(messages.base.deleteViewRequestBody, { name: confirmDeleteView.name })
             : ""
         }
-        confirmLabel="Create delete request"
+        confirmLabel={messages.base.createDeleteRequestLabel}
         onCancel={() => setConfirmDeleteView(null)}
         onConfirm={() => {
           if (!confirmDeleteView) {
@@ -296,19 +305,22 @@ export function BusaBaseTable({
           onDeleteView(confirmDeleteView)
             .then(() => setConfirmDeleteView(null))
             .catch((error) => {
-              setViewActionError(error instanceof Error ? error.message : "Failed to delete view");
+              setViewActionError(error instanceof Error ? error.message : messages.base.deleteView);
             })
             .finally(() => setIsDeletingView(false));
         }}
         open={confirmDeleteView !== null}
         pending={isDeletingView}
-        title="Create delete request?"
+        title={messages.base.createDeleteRequestTitle}
       />
       {archivedViews.length > 0 ? (
         <details className="mb-3 rounded-md border border-border/50 text-xs">
           <summary className="flex cursor-pointer list-none items-center gap-1.5 px-3 py-2 font-medium text-muted-foreground hover:text-foreground [&::-webkit-details-marker]:hidden">
             <ChevronRight className="size-3 transition-transform details-open:rotate-90" />
-            {archivedViews.length} archived view{archivedViews.length === 1 ? "" : "s"}
+            {fmt(messages.base.archivedViewsCount, {
+              count: archivedViews.length,
+              plural: archivedViews.length === 1 ? "" : "s",
+            })}
           </summary>
           <div className="divide-y divide-border/40 border-border/40 border-t">
             {archivedViews.map((view) => (
@@ -325,7 +337,9 @@ export function BusaBaseTable({
                     type="button"
                   >
                     <RotateCcw className="size-3" />
-                    {restoringViewId === view.id ? "Restoring…" : "Restore"}
+                    {restoringViewId === view.id
+                      ? messages.common.restoring
+                      : messages.common.restore}
                   </button>
                 ) : null}
               </div>
@@ -345,11 +359,11 @@ export function BusaBaseTable({
                 key={field.id}
                 title={field.slug}
               >
-                {field.name}
+                {resolveIString(field.name)}
               </div>
             ))}
-            <div>Record status</div>
-            <div>Commit</div>
+            <div>{messages.base.recordStatus}</div>
+            <div>{messages.base.commit}</div>
           </div>
           {records.length > 0 ? (
             records.map((record) => (
@@ -381,7 +395,7 @@ export function BusaBaseTable({
             ))
           ) : (
             <div className="px-2 py-6 text-muted-foreground text-sm">
-              Approved change requests appear here after merge.
+              {messages.base.emptyRecords}
             </div>
           )}
           {showArchivedRecords && archivedRecords.length > 0
@@ -404,7 +418,7 @@ export function BusaBaseTable({
                   <div className="min-w-0">
                     <span className="inline-flex max-w-full items-center gap-1.5 truncate rounded-full bg-muted/55 px-2 py-0.5 text-muted-foreground text-xs">
                       <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-current opacity-55" />
-                      archived
+                      {messages.common.archived}
                     </span>
                   </div>
                   <div className="flex items-center gap-1.5">
@@ -419,7 +433,9 @@ export function BusaBaseTable({
                         type="button"
                       >
                         <RotateCcw className="size-3" />
-                        {restoringRecordId === record.id ? "Restoring…" : "Restore"}
+                        {restoringRecordId === record.id
+                          ? messages.common.restoring
+                          : messages.common.restore}
                       </button>
                     ) : null}
                   </div>
@@ -457,6 +473,8 @@ function ViewChangeRequestForm({
   ) => Promise<void>;
   view: ViewVO | null;
 }) {
+  const messages = useCoreI18n();
+  const resolveIString = useIString();
   const initialVisibleFieldSlugs =
     Array.isArray(view?.config.visibleFieldSlugs) && base.fields.length
       ? view.config.visibleFieldSlugs
@@ -484,11 +502,11 @@ function ViewChangeRequestForm({
     const trimmedName = name.trim();
     const trimmedSlug = slug.trim();
     if (!trimmedName) {
-      setFormError("View name is required.");
+      setFormError(messages.base.viewNameRequired);
       return;
     }
     if (mode === "create" && !trimmedSlug) {
-      setFormError("View slug is required.");
+      setFormError(messages.base.viewSlugRequired);
       return;
     }
     const nextConfig: ViewConfigVO = {
@@ -524,7 +542,7 @@ function ViewChangeRequestForm({
       }
       onSubmitted();
     } catch (error) {
-      setFormError(error instanceof Error ? error.message : "Failed to submit view change request");
+      setFormError(error instanceof Error ? error.message : messages.base.failedSubmitView);
     } finally {
       setIsSaving(false);
     }
@@ -533,9 +551,11 @@ function ViewChangeRequestForm({
   return (
     <div className="mb-4 rounded-lg border border-border/70 bg-background px-4 py-3 shadow-sm">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="font-semibold text-sm">{mode === "create" ? "New View" : "Edit View"}</div>
+        <div className="font-semibold text-sm">
+          {mode === "create" ? messages.base.newViewTitle : messages.base.editViewTitle}
+        </div>
         <button
-          aria-label="Close view form"
+          aria-label={messages.base.closeViewForm}
           className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
           onClick={onCancel}
           type="button"
@@ -546,7 +566,7 @@ function ViewChangeRequestForm({
 
       <div className="mt-3 grid gap-3 md:grid-cols-[minmax(0,1fr)_180px]">
         <label className="block">
-          <span className="text-muted-foreground text-xs">Name</span>
+          <span className="text-muted-foreground text-xs">{messages.common.name}</span>
           <input
             className="mt-1 h-8 w-full rounded-md border border-border/70 bg-background px-2.5 text-sm outline-none transition-colors focus:border-primary"
             onChange={(event) => {
@@ -559,7 +579,7 @@ function ViewChangeRequestForm({
           />
         </label>
         <label className="block">
-          <span className="text-muted-foreground text-xs">Slug</span>
+          <span className="text-muted-foreground text-xs">{messages.common.slug}</span>
           <input
             className="mt-1 h-8 w-full rounded-md border border-border/70 bg-background px-2.5 font-mono text-sm outline-none transition-colors focus:border-primary disabled:bg-muted/40 disabled:text-muted-foreground"
             disabled={mode === "edit"}
@@ -568,7 +588,7 @@ function ViewChangeRequestForm({
           />
         </label>
         <label className="block md:col-span-2">
-          <span className="text-muted-foreground text-xs">Description</span>
+          <span className="text-muted-foreground text-xs">{messages.common.description}</span>
           <textarea
             className="mt-1 min-h-16 w-full resize-y rounded-md border border-border/70 bg-background px-2.5 py-2 text-sm outline-none transition-colors focus:border-primary"
             onChange={(event) => setDescription(event.target.value)}
@@ -580,7 +600,10 @@ function ViewChangeRequestForm({
       <div className="mt-3">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="text-muted-foreground text-xs">
-            Visible fields · {visibleFieldSlugs.length}/{base.fields.length}
+            {fmt(messages.base.visibleFields, {
+              total: base.fields.length,
+              visible: visibleFieldSlugs.length,
+            })}
           </div>
           <div className="flex items-center gap-1.5">
             <button
@@ -588,14 +611,14 @@ function ViewChangeRequestForm({
               onClick={() => setVisibleFieldSlugs([])}
               type="button"
             >
-              Clear
+              {messages.base.clear}
             </button>
             <button
               className="rounded-md border border-border/70 bg-background px-2 py-1 text-muted-foreground text-xs transition-colors hover:bg-accent hover:text-foreground"
               onClick={() => setVisibleFieldSlugs(base.fields.map((field) => field.slug))}
               type="button"
             >
-              Select all
+              {messages.base.selectAll}
             </button>
           </div>
         </div>
@@ -610,7 +633,7 @@ function ViewChangeRequestForm({
                 onChange={(event) => toggleField(field.slug, event.target.checked)}
                 type="checkbox"
               />
-              <span>{field.name}</span>
+              <span>{resolveIString(field.name)}</span>
             </label>
           ))}
         </div>
@@ -624,18 +647,22 @@ function ViewChangeRequestForm({
             onClick={onCancel}
             type="button"
           >
-            Cancel
+            {messages.common.cancel}
           </button>
           <SplitSubmitButton
             disabled={isSaving}
             isPrimaryLoading={isSaving}
-            primaryLabel={mode === "create" ? "Add View Request" : "Update View Request"}
-            primaryLoadingLabel="Submitting..."
-            secondaryLabel={mode === "create" ? "Add View Now" : "Update View Now"}
-            secondaryLoadingLabel="Merging..."
+            primaryLabel={
+              mode === "create" ? messages.base.addViewRequest : messages.base.updateViewRequest
+            }
+            primaryLoadingLabel={messages.common.submitting}
+            secondaryLabel={
+              mode === "create" ? messages.base.addViewNow : messages.base.updateViewNow
+            }
+            secondaryLoadingLabel={messages.recordView.merging}
             onPrimary={() => submit()}
             onSecondary={() => submit({ mergeImmediately: true })}
-            hint="Request goes to your inbox for review. Now merges immediately."
+            hint={messages.common.mergeImmediatelyHint}
           />
         </div>
       </div>

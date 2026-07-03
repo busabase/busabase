@@ -7,6 +7,7 @@ import type {
   SearchResultVO,
 } from "busabase-contract/types";
 import { and, desc, eq, ilike, inArray, isNotNull, isNull, or, sql } from "drizzle-orm";
+import { iStringConcat, iStringParse, iStringSchema } from "openlib/i18n/i-string";
 import { z } from "zod";
 import { getContextSpaceId } from "../context";
 import { getDb } from "../db";
@@ -41,6 +42,13 @@ const toSearchText = (fields: Record<string, unknown>) =>
     )
     .join(" ");
 
+// Commit `fields.name` may be an iString record (field CRs) — resolve it to a
+// display string instead of String()-ing an object into "[object Object]".
+const searchTitleText = (value: unknown): string => {
+  const parsed = iStringSchema.safeParse(value);
+  return parsed.success ? iStringParse(parsed.data) : String(value);
+};
+
 const toRecordSearchResult = (record: RecordVO): SearchResultVO => ({
   id: record.id,
   kind: "record",
@@ -57,7 +65,7 @@ const toChangeRequestSearchResult = (changeRequest: ChangeRequestVO): SearchResu
   title:
     changeRequest.operationCount > 1
       ? `${changeRequest.operationCount} operation changeRequest`
-      : String(
+      : searchTitleText(
           changeRequest.primaryOperation?.headCommit.fields.title ??
             changeRequest.primaryOperation?.headCommit.fields.name ??
             changeRequest.id,
@@ -74,7 +82,8 @@ const toBaseSearchResult = (base: ReturnType<typeof toBaseVO>): SearchResultVO =
   id: base.id,
   kind: "base",
   title: base.name,
-  body: `${base.description} ${base.fields.map((field) => `${field.name} ${field.slug}`).join(" ")}`,
+  // Index every locale of each field name so search hits any translation.
+  body: `${base.description} ${base.fields.map((field) => `${iStringConcat(field.name)} ${field.slug}`).join(" ")}`,
   eyebrow: `${base.fields.length} fields · ${base.slug}`,
   href: `/base/${base.slug}`,
   updatedAt: base.createdAt,

@@ -1,9 +1,14 @@
 import type { CoreI18nMessages } from "./messages";
+import { dashboardZhCN } from "./zh-CN";
 
-// Traditional Chinese translations for the shared dashboard catalog. Must mirror
-// the shape of `coreMessagesEn`; the `CoreI18nMessages` type enforces it.
+// Traditional Chinese translations for the shared dashboard catalog. The full
+// catalog is routed through i18n; newly added workbench strings fall back to the
+// complete Simplified Chinese catalog until a native zh-TW copy pass updates
+// each key without leaving hardcoded component literals behind.
 export const dashboardZhTW: CoreI18nMessages = {
+  ...dashboardZhCN,
   common: {
+    ...dashboardZhCN.common,
     open: "開啟",
     loading: "載入中…",
     noFields: "無欄位",
@@ -11,6 +16,7 @@ export const dashboardZhTW: CoreI18nMessages = {
     no: "否",
   },
   nav: {
+    ...dashboardZhCN.nav,
     inbox: "收件匣",
     search: "搜尋",
     activity: "動態",
@@ -18,6 +24,7 @@ export const dashboardZhTW: CoreI18nMessages = {
     new: "新增",
   },
   inbox: {
+    ...dashboardZhCN.inbox,
     title: "評審",
     forReview: "待評審",
     changesRequested: "已要求修改",
@@ -31,6 +38,7 @@ export const dashboardZhTW: CoreI18nMessages = {
     closedChangeRequests: "已關閉的變更請求",
   },
   review: {
+    ...dashboardZhCN.review,
     whatWillChange: "將會變更的內容",
     noFieldChanges: "此操作沒有欄位變更。",
     commentsOnThisChange: "針對此變更的評論",
@@ -59,11 +67,13 @@ export const dashboardZhTW: CoreI18nMessages = {
     statusClosed: "已關閉",
   },
   status: {
+    ...dashboardZhCN.status,
     inReview: "評審中",
     changesRequested: "已要求修改",
     closed: "已關閉",
   },
   comments: {
+    ...dashboardZhCN.comments,
     placeholder: "新增評論…用 @ai 請求代理修訂",
     placeholderOperation: "對此變更發表評論…用 @ai 請求修訂",
     placeholderDiscussion: "給作者留言…用 @ai 請求修訂",

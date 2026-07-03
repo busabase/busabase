@@ -15,6 +15,7 @@ import {
 } from "react";
 import { toast } from "sonner";
 import { useLocation } from "wouter";
+import { fmt, useCoreI18n } from "../../../i18n";
 import { registerNodeDetail } from "../node-detail-registry";
 import type { SkillCodeLanguage } from "./field-preview";
 import { ConfirmActionDialog, EmptyState } from "./primitives";
@@ -37,6 +38,7 @@ function NodeDeleteButton({
   nodeName: string;
   childCount?: number;
 }) {
+  const messages = useCoreI18n();
   const [, setLocation] = useLocation();
   const queryClient = useQueryClient();
   const [confirming, setConfirming] = useState(false);
@@ -44,11 +46,20 @@ function NodeDeleteButton({
   const reviewCr = useMutation(orpc.changeRequests.review.mutationOptions());
   const mergeCr = useMutation(orpc.changeRequests.merge.mutationOptions());
   const pending = createCr.isPending || reviewCr.isPending || mergeCr.isPending;
-  const label = `${nodeType[0]?.toUpperCase()}${nodeType.slice(1)}`;
+  const nodeTypeLabels: Record<string, string> = {
+    doc: messages.nodeDetail.doc,
+    folder: messages.nodeDetail.folder,
+    skill: messages.nodeDetail.skill,
+  };
+  const label = nodeTypeLabels[nodeType] ?? `${nodeType[0]?.toUpperCase()}${nodeType.slice(1)}`;
   const body =
     nodeType === "folder" && childCount > 0
-      ? `This moves "${nodeName}" and its ${childCount} item${childCount === 1 ? "" : "s"} to Trash. You can restore them later.`
-      : `This moves "${nodeName}" to Trash. You can restore it later.`;
+      ? fmt(messages.nodeDetail.deleteFolderBody, {
+          count: childCount,
+          name: nodeName,
+          plural: childCount === 1 ? "" : "s",
+        })
+      : fmt(messages.nodeDetail.deleteBody, { name: nodeName });
 
   const handleConfirm = async () => {
     try {
@@ -61,11 +72,13 @@ function NodeDeleteButton({
       await queryClient.invalidateQueries({
         queryKey: orpc.nodes.listArchived.queryOptions({}).queryKey,
       });
-      toast.success(`${label} moved to Trash`);
+      toast.success(fmt(messages.nodeDetail.movedToTrash, { type: label }));
       setConfirming(false);
       setLocation("/");
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : `Failed to delete ${nodeType}`);
+      toast.error(
+        err instanceof Error ? err.message : fmt(messages.nodeDetail.failedDelete, { type: label }),
+      );
       setConfirming(false);
     }
   };
@@ -78,16 +91,16 @@ function NodeDeleteButton({
         type="button"
       >
         <Trash2 className="size-3.5" />
-        Delete
+        {messages.nodeDetail.delete}
       </button>
       <ConfirmActionDialog
         body={body}
-        confirmLabel="Move to Trash"
+        confirmLabel={messages.nodeDetail.moveToTrash}
         onCancel={() => setConfirming(false)}
         onConfirm={handleConfirm}
         open={confirming}
         pending={pending}
-        title={`Delete ${nodeType}?`}
+        title={fmt(messages.nodeDetail.deleteTitle, { type: label })}
       />
     </>
   );
@@ -192,6 +205,7 @@ export function renderSkillTree(nodes: SkillTreeNode[]): ReactNode {
 }
 
 export function SkillDetailView({ orpc, slug }: { orpc: BusabaseQueryUtils; slug: string | null }) {
+  const messages = useCoreI18n();
   const [openPath, setOpenPath] = useState<string | null>(null);
 
   const skillQuery = useQuery({
@@ -234,12 +248,16 @@ export function SkillDetailView({ orpc, slug }: { orpc: BusabaseQueryUtils; slug
   if (!skill) {
     return skillQuery.isLoading ? (
       <div className="grid min-h-[320px] place-items-center text-muted-foreground text-sm">
-        Loading skill…
+        {messages.nodeDetail.loadingSkill}
       </div>
     ) : (
       <EmptyState
-        title="Skill not found"
-        body={slug ? `No skill matches "${slug}".` : "Select a skill from the sidebar."}
+        title={messages.nodeDetail.skillNotFoundTitle}
+        body={
+          slug
+            ? fmt(messages.nodeDetail.skillNotFoundBody, { slug })
+            : messages.nodeDetail.selectSkillBody
+        }
       />
     );
   }
@@ -282,7 +300,7 @@ export function SkillDetailView({ orpc, slug }: { orpc: BusabaseQueryUtils; slug
       <div className="mt-4 grid gap-4 md:grid-cols-[280px_minmax(0,1fr)]">
         {skill.files.length === 0 ? (
           <div className="rounded-lg border bg-background p-4 text-muted-foreground text-sm">
-            No files yet.
+            {messages.nodeDetail.noFilesYet}
           </div>
         ) : (
           <FileTree
@@ -301,15 +319,17 @@ export function SkillDetailView({ orpc, slug }: { orpc: BusabaseQueryUtils; slug
         <div className="min-h-[320px]">
           {!openPath ? (
             <div className="grid h-full min-h-[320px] place-items-center rounded-md border bg-background p-8 text-center text-muted-foreground text-sm">
-              Select a file to view its content.
+              {messages.nodeDetail.selectFile}
             </div>
           ) : fileQuery.isLoading ? (
             <div className="rounded-md border bg-background p-4 text-muted-foreground text-sm">
-              Reading {openPath}…
+              {fmt(messages.nodeDetail.readingFile, { path: openPath })}
             </div>
           ) : fileQuery.isError ? (
             <div className="rounded-md border bg-background p-4 text-destructive text-sm">
-              {fileQuery.error instanceof Error ? fileQuery.error.message : "Could not read file"}
+              {fileQuery.error instanceof Error
+                ? fileQuery.error.message
+                : messages.nodeDetail.couldNotReadFile}
             </div>
           ) : (
             <CodeBlock
@@ -327,6 +347,7 @@ export function SkillDetailView({ orpc, slug }: { orpc: BusabaseQueryUtils; slug
 registerNodeDetail("skill", SkillDetailView);
 
 export function DocDetailView({ orpc, slug }: { orpc: BusabaseQueryUtils; slug: string | null }) {
+  const messages = useCoreI18n();
   const [, setLocation] = useLocation();
   const docQuery = useQuery({
     ...orpc.docs.get.queryOptions({ input: { nodeId: slug ?? "" } }),
@@ -353,12 +374,16 @@ export function DocDetailView({ orpc, slug }: { orpc: BusabaseQueryUtils; slug: 
   if (!doc) {
     return docQuery.isLoading ? (
       <div className="grid min-h-[320px] place-items-center text-muted-foreground text-sm">
-        Loading doc…
+        {messages.nodeDetail.loadingDoc}
       </div>
     ) : (
       <EmptyState
-        title="Doc not found"
-        body={slug ? `No doc matches "${slug}".` : "Select a doc from the sidebar."}
+        title={messages.nodeDetail.docNotFoundTitle}
+        body={
+          slug
+            ? fmt(messages.nodeDetail.docNotFoundBody, { slug })
+            : messages.nodeDetail.selectDocBody
+        }
       />
     );
   }
@@ -386,7 +411,7 @@ export function DocDetailView({ orpc, slug }: { orpc: BusabaseQueryUtils; slug: 
       await docQuery.refetch();
       setIsEditing(false);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Could not save");
+      setError(caught instanceof Error ? caught.message : messages.nodeDetail.couldNotSave);
     } finally {
       setBusy(null);
     }
@@ -403,7 +428,9 @@ export function DocDetailView({ orpc, slug }: { orpc: BusabaseQueryUtils; slug: 
       });
       setLocation(`/inbox/${changeRequest.id}`);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Could not create change request");
+      setError(
+        caught instanceof Error ? caught.message : messages.nodeDetail.couldNotCreateChangeRequest,
+      );
       setBusy(null);
     }
   };
@@ -430,7 +457,7 @@ export function DocDetailView({ orpc, slug }: { orpc: BusabaseQueryUtils; slug: 
               }}
               type="button"
             >
-              Cancel
+              {messages.common.cancel}
             </button>
             <button
               className="rounded-button border px-3 py-1.5 text-sm hover:bg-muted disabled:opacity-40"
@@ -438,7 +465,9 @@ export function DocDetailView({ orpc, slug }: { orpc: BusabaseQueryUtils; slug: 
               onClick={saveAsChangeRequest}
               type="button"
             >
-              {busy === "changeRequest" ? "Saving…" : "Save as Change Request"}
+              {busy === "changeRequest"
+                ? messages.nodeDetail.saving
+                : messages.nodeDetail.saveAsChangeRequest}
             </button>
             <button
               className="rounded-button bg-primary px-3 py-1.5 text-primary-foreground text-sm disabled:opacity-40"
@@ -446,7 +475,7 @@ export function DocDetailView({ orpc, slug }: { orpc: BusabaseQueryUtils; slug: 
               onClick={save}
               type="button"
             >
-              {busy === "save" ? "Saving…" : "Save"}
+              {busy === "save" ? messages.nodeDetail.saving : messages.nodeDetail.save}
             </button>
           </div>
         ) : (
@@ -456,7 +485,7 @@ export function DocDetailView({ orpc, slug }: { orpc: BusabaseQueryUtils; slug: 
               onClick={startEditing}
               type="button"
             >
-              Edit
+              {messages.common.edit}
             </button>
             <NodeDeleteButton
               nodeId={doc.node.id}
@@ -470,10 +499,10 @@ export function DocDetailView({ orpc, slug }: { orpc: BusabaseQueryUtils; slug: 
       {error ? <p className="mb-3 text-destructive text-sm">{error}</p> : null}
       {isEditing ? (
         <textarea
-          aria-label="Doc body"
+          aria-label={messages.nodeDetail.docBody}
           className="min-h-[60vh] flex-1 resize-none border-0 bg-transparent p-0 text-[15px] text-foreground leading-7 outline-none placeholder:text-muted-foreground"
           onChange={(event) => setDraft(event.target.value)}
-          placeholder="Write…"
+          placeholder={messages.nodeDetail.writePlaceholder}
           value={draft}
         />
       ) : doc.body.trim() ? (
@@ -481,9 +510,7 @@ export function DocDetailView({ orpc, slug }: { orpc: BusabaseQueryUtils; slug: 
           {doc.body}
         </div>
       ) : (
-        <div className="flex-1 text-muted-foreground text-sm">
-          This document is empty. Click Edit to start writing.
-        </div>
+        <div className="flex-1 text-muted-foreground text-sm">{messages.nodeDetail.emptyDoc}</div>
       )}
     </div>
   );
@@ -498,6 +525,7 @@ export function FolderDetailView({
   orpc: BusabaseQueryUtils;
   slug: string | null;
 }) {
+  const messages = useCoreI18n();
   const folderQuery = useQuery({
     ...orpc.folders.get.queryOptions({ input: { nodeId: slug ?? "" } }),
     enabled: Boolean(slug),
@@ -507,12 +535,16 @@ export function FolderDetailView({
   if (!folder) {
     return folderQuery.isLoading ? (
       <div className="grid min-h-[320px] place-items-center text-muted-foreground text-sm">
-        Loading folder…
+        {messages.nodeDetail.loadingFolder}
       </div>
     ) : (
       <EmptyState
-        title="Folder not found"
-        body={slug ? `No folder matches "${slug}".` : "Select a folder from the sidebar."}
+        title={messages.nodeDetail.folderNotFoundTitle}
+        body={
+          slug
+            ? fmt(messages.nodeDetail.folderNotFoundBody, { slug })
+            : messages.nodeDetail.selectFolderBody
+        }
       />
     );
   }
@@ -535,11 +567,15 @@ export function FolderDetailView({
         />
       </div>
       {folder.children.length === 0 ? (
-        <EmptyState title="Empty folder" body="This folder has no items yet." />
+        <EmptyState
+          title={messages.nodeDetail.emptyFolderTitle}
+          body={messages.nodeDetail.emptyFolderBody}
+        />
       ) : (
         <>
           <p className="mb-2 font-semibold text-[11px] uppercase tracking-widest text-muted-foreground/60">
-            {folder.children.length} {folder.children.length === 1 ? "item" : "items"}
+            {folder.children.length}{" "}
+            {folder.children.length === 1 ? messages.nodeDetail.item : messages.nodeDetail.items}
           </p>
           <div className="-mx-2 flex flex-col">
             {folder.children.map((child) => {

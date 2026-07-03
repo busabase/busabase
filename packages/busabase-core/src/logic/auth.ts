@@ -14,13 +14,14 @@ export const getAuthInfo = (): AuthInfo => {
   const spaceId = getContextSpaceId();
   const actorId = resolveActorId("local-user");
   const isLocal = spaceId === LOCAL_SPACE_ID;
+  const space = {
+    id: spaceId,
+    name: isLocal ? "Local Workspace" : spaceId,
+    slug: isLocal ? "local" : null,
+    plan: isLocal ? "local" : null,
+  };
   return {
-    space: {
-      id: spaceId,
-      name: isLocal ? "Local Workspace" : spaceId,
-      slug: isLocal ? "local" : null,
-      plan: isLocal ? "local" : null,
-    },
+    space,
     user: {
       id: actorId,
       name: isLocal ? "Local User" : actorId,
@@ -32,5 +33,7 @@ export const getAuthInfo = (): AuthInfo => {
       spaceId,
       role: "owner",
     },
+    // Single-tenant: the local owner belongs to exactly one space.
+    spaces: [space],
   };
 };
