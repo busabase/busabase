@@ -25,7 +25,7 @@ AI 可以源源不断地生成数据 —— Busabase 让你在数据成为可信
 
 <br/>
 
-<img src="../public/assets/readme/busabase-hero.gif" alt="Busabase" width="100%" />
+<img src="../public/assets/readme/busabase-hero-zh-CN.webp" alt="Busabase" width="100%" />
 
 </div>
 
@@ -35,7 +35,7 @@ Busabase 是一款开源应用，专为解决一个简单的问题而生：
 
 Busabase 为这一审批流程提供了专属的承载空间。它是一款集私有 CMS、知识库、项目数据库与结构化可信数据源于一体的工具，内置变更请求、操作记录、评论、审计追踪，并提供简洁的 API，供应用程序和 AI 智能体调用。
 
-![Busabase 工作流程：提交 → 审核 → 批准 → 合并 → 可信的数据库与知识库](../public/assets/readme/how-it-works.png)
+![Busabase 工作流程：提交 → 审核 → 批准 → 合并 → 可信的数据库与知识库](../public/assets/readme/how-it-works.webp)
 
 **本地优先。审核优先。智能体就绪。**
 
@@ -84,11 +84,11 @@ http://localhost:15419/dashboard/inbox
 
 |  |  |
 | :---: | :---: |
-| ![收件箱审核列表](../public/assets/readme/busabase-inbox-review.png) | ![智能体提案差异对比](../public/assets/readme/busabase-agent-output-preview.png) |
+| ![收件箱审核列表](../public/assets/readme/busabase-inbox-review.webp) | ![智能体提案差异对比](../public/assets/readme/busabase-agent-output-preview.webp) |
 | 收件箱，展示待处理变更请求、审核状态和批准操作 | 合并前的智能体提案变更，包含字段差异和审核操作 |
-| ![记录详情溯源](../public/assets/readme/busabase-record-detail-audit.png) | ![Base 表格](../public/assets/readme/busabase-base-table.png) |
+| ![记录详情溯源](../public/assets/readme/busabase-record-detail-audit.webp) | ![Base 表格](../public/assets/readme/busabase-base-table.webp) |
 | 记录详情页，展示字段、评论、审核历史和溯源信息 | Base 表格，展示结构化记录和富字段 |
-| ![Base 记录表格](../public/assets/readme/busabase-base-records.png) | ![种子数据图谱视图](../public/assets/readme/busabase-graph-view.png) |
+| ![Base 记录表格](../public/assets/readme/busabase-base-records.webp) | ![种子数据图谱视图](../public/assets/readme/busabase-graph-view.webp) |
 | Base 内部的记录——类型化字段、富值和一目了然的批准状态 | 图谱视图，展示跨 Base 种子记录之间的关系 |
 
 ## 为什么要做这个
