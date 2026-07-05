@@ -32,12 +32,15 @@ The default host is the always-on Cloud, which needs credentials. For a local
 server, pass `--base-url http://localhost:15419` (or set `BUSABASE_BASE_URL`); the
 open-source server needs no auth.
 
-## Sign in (Busabase Cloud only)
+## Sign in
 
-> `login` is for **Busabase Cloud** (`https://busabase.com`, or a self-hosted cloud
-> host via `--base-url`). A local open-source server — `busabase server` on
-> `http://localhost:15419` — is **open and needs no login**; just point at it with
-> `--base-url http://localhost:15419` and call the API directly.
+> `login` mainly authenticates against **Busabase Cloud** (`https://busabase.com`, or a
+> self-hosted cloud host via `--base-url`). Pointed at a **local** `busabase server`
+> (`--base-url http://localhost:15419`), it notices the server is open and simply saves
+> the connection — no account or token needed:
+> ```bash
+> busabase-cli login --base-url http://localhost:15419   # connect to a local server
+> ```
 
 Two ways to authenticate against Cloud — **OAuth is preferred**, an API key is the
 fallback. Either way, `login` verifies the credential, picks your space, and writes

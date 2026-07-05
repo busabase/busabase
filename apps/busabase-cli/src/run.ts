@@ -571,7 +571,7 @@ function buildProgram(state: CliState = {}): Command {
     .action(runAction(state, (client) => client.auth.verify()));
 
   addGlobalFlags(program.command("login"))
-    .description("Sign in to Busabase Cloud (OAuth or API key) — a local server needs no login")
+    .description("Sign in to Busabase Cloud (OAuth or API key), or connect to a local server")
     .option("--oauth", "force browser OAuth and skip the method prompt")
     .option("--no-browser", "OAuth: print the sign-in URL instead of opening a browser")
     .option("--refresh", "slide the saved OAuth session forward (no browser, no re-login)")
@@ -579,15 +579,18 @@ function buildProgram(state: CliState = {}): Command {
       "after",
       `
 login authenticates against Busabase Cloud (${DEFAULT_BASE_URL} by default, or a
-self-hosted cloud host via --base-url / BUSABASE_BASE_URL). A local open-source
-server (\`busabase server\`, http://localhost:15419) has no accounts — don't log in;
-just point at it with --base-url http://localhost:15419 and call the API directly.
+self-hosted cloud host via --base-url / BUSABASE_BASE_URL) — OAuth or an API key.
+
+Pointed at a local \`busabase server\` (a loopback --base-url), login detects it's an
+open server and just saves the connection — no account or token needed. If nothing is
+running there, it tells you to start \`busabase server\`.
 
 Examples:
-  busabase-cli login                 # choose OAuth or API key interactively (Cloud)
-  busabase-cli login --oauth         # browser sign-in (recommended)
-  busabase-cli login --api-key sk_…  # store an API key non-interactively
-  busabase-cli login --refresh       # extend the current login session (auto-runs too)`,
+  busabase-cli login                                   # Cloud: choose OAuth or API key
+  busabase-cli login --oauth                           # Cloud: browser sign-in (recommended)
+  busabase-cli login --api-key sk_…                    # Cloud: store an API key (headless/CI)
+  busabase-cli login --base-url http://localhost:15419 # connect to a local server (no auth)
+  busabase-cli login --refresh                         # extend the current session (auto-runs too)`,
     )
     .action(async (_opts: OptionValues, cmd: Command) => {
       const opts = cmd.optsWithGlobals();

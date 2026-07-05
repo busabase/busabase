@@ -426,6 +426,41 @@ describe("busabase-cli commands", () => {
     }
   });
 
+  it("login against an open local server just saves the connection (no auth)", async () => {
+    const home = await mkdtemp(join(tmpdir(), "busabase-home-"));
+    const originalHome = process.env.HOME;
+    process.env.HOME = home;
+    vi.spyOn(console, "log").mockImplementation(() => undefined);
+    vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    const calls: string[] = [];
+    global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      calls.push(`${request.method} ${request.url}`);
+      // Open local server: /api/v1/bases returns 200 with no auth.
+      return jsonResponse([]);
+    }) as typeof fetch;
+
+    try {
+      const exitCode = await runCli([
+        "login",
+        "--base-url",
+        "http://localhost:15419",
+        "--output",
+        "json",
+      ]);
+
+      expect(exitCode).toBe(0);
+      // Only the probe fires — no /api/oauth/* calls.
+      expect(calls).toEqual(["GET http://localhost:15419/api/v1/bases"]);
+      const env = await readFile(join(home, ".busabase", ".env"), "utf8");
+      expect(env).toContain("BUSABASE_BASE_URL=http://localhost:15419");
+      expect(env).not.toContain("BUSABASE_API_KEY=");
+    } finally {
+      process.env.HOME = originalHome;
+      await rm(home, { force: true, recursive: true });
+    }
+  });
+
   it("login --refresh slides the saved OAuth session forward", async () => {
     const home = await mkdtemp(join(tmpdir(), "busabase-home-"));
     const originalHome = process.env.HOME;

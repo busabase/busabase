@@ -63,7 +63,7 @@ const say = (message: string): void => {
   process.stderr.write(`${message}\n`);
 };
 
-/** True for a loopback host — an open-source local server, which has no login. */
+/** True for a loopback host — typically an open-source local server, which has no login. */
 const isLocalHost = (baseUrl: string): boolean => {
   try {
     const { hostname } = new URL(baseUrl);
@@ -72,6 +72,24 @@ const isLocalHost = (baseUrl: string): boolean => {
     return false;
   }
 };
+
+/**
+ * Probe whether a host actually requires authentication, by hitting a normally
+ * auth-gated endpoint with no token. `401`/`403` ⇒ auth required (Cloud, or a
+ * self-hosted cloud edition). Anything else ⇒ open (the local `busabase server`).
+ * Throws a friendly error if the host can't be reached at all.
+ */
+async function probeAuthRequired(baseUrl: string): Promise<boolean> {
+  let res: Response;
+  try {
+    res = await fetch(`${baseUrl}/api/v1/bases`);
+  } catch {
+    throw new Error(
+      `Could not reach ${baseUrl}. Is the server running? Start a local one with \`busabase server\`, or pass a reachable --base-url.`,
+    );
+  }
+  return res.status === 401 || res.status === 403;
+}
 
 async function ask(question: string): Promise<string> {
   const rl = createInterface({ input: process.stdin, output: process.stderr });
@@ -280,15 +298,25 @@ async function pickSpaceId(verify: AuthVerify, preselected?: string): Promise<st
 export async function runLogin(options: LoginOptions): Promise<Record<string, string>> {
   const baseUrl = normalizeBaseUrl(options.baseUrl);
 
-  // login is a Cloud concept: OAuth + API keys live in Busabase Cloud. A loopback host
-  // is almost always the open-source `busabase server`, which is open and has no accounts
-  // — so warn rather than let the user hit a 404 on /api/oauth/authorize. (A self-hosted
-  // cloud edition on localhost still works, so this is a heads-up, not a hard stop.)
-  if (isLocalHost(baseUrl)) {
-    say(`⚠ ${baseUrl} looks like a local server.`);
-    say("  The open-source `busabase server` is open — it needs no login. Just use it:");
-    say(`    busabase-cli bases list --base-url ${baseUrl}`);
-    say("  Continuing anyway in case this is a self-hosted Busabase Cloud…");
+  // login is a Cloud concept, but the CLI also talks to a LOCAL `busabase server`. If the
+  // target is loopback and the user didn't force a method, figure out their real intent by
+  // probing the server: an open local edition (no auth) just needs its base URL saved —
+  // "login" there means "connect the CLI to it". A self-hosted cloud on localhost (401)
+  // falls through to the normal OAuth/API-key flow. An explicit --oauth/--api-key skips
+  // this (the user knows it's a cloud host).
+  if (isLocalHost(baseUrl) && !options.apiKey && !options.oauth) {
+    if (!(await probeAuthRequired(baseUrl))) {
+      writeDotEnvFile({
+        BUSABASE_BASE_URL: baseUrl,
+        BUSABASE_API_KEY: null,
+        BUSABASE_SPACE_ID: null,
+        [EXPIRES_AT_KEY]: null,
+      });
+      say(`✓ Connected to your local Busabase at ${baseUrl} — it's open, no login needed.`);
+      say(`  Saved to ${dotEnvPath()}. Try: busabase-cli bases list`);
+      return { status: "connected (local, no auth)", baseUrl, config: dotEnvPath() };
+    }
+    say(`${baseUrl} requires sign-in (a self-hosted Busabase Cloud) — continuing…`);
     say("");
   }
 
