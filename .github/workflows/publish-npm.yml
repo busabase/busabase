@@ -69,14 +69,9 @@ jobs:
           echo "sdk=$(node -p "require('./apps/busabase-sdk/package.json').version")" >> "$GITHUB_OUTPUT"
           echo "app=$(node -p "require('./apps/busabase/package.json').version")" >> "$GITHUB_OUTPUT"
 
-      - name: Build busabase-cli
-        working-directory: apps/busabase-cli
-        run: |
-          pnpm typecheck
-          pnpm build
-          test -f dist/cli.js
-          node dist/cli.js --help
-
+      # busabase-sdk MUST build before busabase-cli: the CLI keeps busabase-sdk external
+      # (a real runtime dep), so `node dist/cli.js --help` below resolves
+      # busabase-sdk/dist/index.js at runtime — which only exists once the sdk is built.
       - name: Build busabase-sdk
         working-directory: apps/busabase-sdk
         run: |
@@ -84,6 +79,14 @@ jobs:
           pnpm build
           test -f dist/index.js
           test -f dist/index.d.ts
+
+      - name: Build busabase-cli
+        working-directory: apps/busabase-cli
+        run: |
+          pnpm typecheck
+          pnpm build
+          test -f dist/cli.js
+          node dist/cli.js --help
 
       - name: Build + assemble busabase
         working-directory: apps/busabase
