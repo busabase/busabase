@@ -3,7 +3,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { createInterface } from "node:readline/promises";
-import { normalizeBaseUrl } from "busabase-sdk";
+import { DEFAULT_BASE_URL, normalizeBaseUrl } from "busabase-sdk";
 import { dotEnvPath, loadDotEnvFile, writeDotEnvFile } from "./config-file.js";
 
 /**
@@ -30,6 +30,9 @@ const EXPIRES_AT_KEY = "BUSABASE_TOKEN_EXPIRES_AT";
 const SESSION_TOKEN_PREFIX = "bss_";
 /** Auto-refresh a login session once it's within this window of expiry. */
 const AUTO_REFRESH_THRESHOLD_MS = 2 * 24 * 60 * 60 * 1000;
+
+/** Default local `busabase server` address. */
+const DEFAULT_LOCAL_URL = "http://localhost:15419";
 
 export interface LoginOptions {
   baseUrl: string;
@@ -294,46 +297,84 @@ async function pickSpaceId(verify: AuthVerify, preselected?: string): Promise<st
 
 // ── Entry points ──────────────────────────────────────────────────────────────
 
-/** Resolve the sign-in method, obtain a credential, verify, pick a space, persist. */
-export async function runLogin(options: LoginOptions): Promise<Record<string, string>> {
-  const baseUrl = normalizeBaseUrl(options.baseUrl);
+interface LoginTarget {
+  baseUrl: string;
+  method: "none" | "oauth" | "api-key";
+}
 
-  // login is a Cloud concept, but the CLI also talks to a LOCAL `busabase server`. If the
-  // target is loopback and the user didn't force a method, figure out their real intent by
-  // probing the server: an open local edition (no auth) just needs its base URL saved —
-  // "login" there means "connect the CLI to it". A self-hosted cloud on localhost (401)
-  // falls through to the normal OAuth/API-key flow. An explicit --oauth/--api-key skips
-  // this (the user knows it's a cloud host).
-  if (isLocalHost(baseUrl) && !options.apiKey && !options.oauth) {
-    if (!(await probeAuthRequired(baseUrl))) {
-      writeDotEnvFile({
-        BUSABASE_BASE_URL: baseUrl,
-        BUSABASE_API_KEY: null,
-        BUSABASE_SPACE_ID: null,
-        [EXPIRES_AT_KEY]: null,
-      });
-      say(`✓ Connected to your local Busabase at ${baseUrl} — it's open, no login needed.`);
-      say(`  Saved to ${dotEnvPath()}. Try: busabase-cli bases list`);
-      return { status: "connected (local, no auth)", baseUrl, config: dotEnvPath() };
+/**
+ * Interactive "where is your Busabase?" menu. Every option resolves to the same two
+ * axes: which base URL, and how (if at all) to obtain a token — the rest of login just
+ * writes that to ~/.busabase/.env.
+ */
+async function chooseTarget(): Promise<LoginTarget> {
+  const cloud = normalizeBaseUrl(DEFAULT_BASE_URL);
+  say("Where is your Busabase?");
+  say("  1. Personal Desktop / local server — no login");
+  say("  2. Busabase Cloud — browser sign-in (OAuth)");
+  say("  3. Busabase Cloud — paste an API key");
+  say("  4. Self-hosted — browser sign-in (OAuth)");
+  say("  5. Self-hosted — paste an API key");
+  const choice = await ask("Choose 1-5 [2]: ");
+
+  const askSelfHostedUrl = async (): Promise<string> => {
+    const url = await ask("Self-hosted base URL (e.g. https://busabase.example.com): ");
+    if (!url) throw new Error("A self-hosted base URL is required.");
+    return url;
+  };
+
+  switch (choice) {
+    case "1": {
+      const url = (await ask(`Local server URL [${DEFAULT_LOCAL_URL}]: `)) || DEFAULT_LOCAL_URL;
+      return { baseUrl: url, method: "none" };
     }
-    say(`${baseUrl} requires sign-in (a self-hosted Busabase Cloud) — continuing…`);
-    say("");
+    case "3":
+      return { baseUrl: cloud, method: "api-key" };
+    case "4":
+      return { baseUrl: await askSelfHostedUrl(), method: "oauth" };
+    case "5":
+      return { baseUrl: await askSelfHostedUrl(), method: "api-key" };
+    default:
+      return { baseUrl: cloud, method: "oauth" };
+  }
+}
+
+/** Resolve the target (base URL + method), obtain a credential, verify, pick a space, persist. */
+export async function runLogin(options: LoginOptions): Promise<Record<string, string>> {
+  let baseUrl = normalizeBaseUrl(options.baseUrl);
+  let apiKey = options.apiKey;
+
+  // Flags are express lanes; otherwise the interactive menu picks base URL + method.
+  let method: LoginTarget["method"];
+  if (apiKey) {
+    method = "api-key";
+  } else if (options.oauth) {
+    method = "oauth";
+  } else if (isInteractive()) {
+    const target = await chooseTarget();
+    baseUrl = normalizeBaseUrl(target.baseUrl);
+    method = target.method;
+  } else {
+    // No TTY and no flags: connect to a local host, else default to Cloud OAuth.
+    method = isLocalHost(baseUrl) ? "none" : "oauth";
   }
 
-  // Decide the method: explicit --api-key or --oauth win; otherwise ask (or default
-  // to OAuth when there's no TTY to ask on).
-  let method: "oauth" | "api-key";
-  let apiKey = options.apiKey;
-  if (apiKey) method = "api-key";
-  else if (options.oauth) method = "oauth";
-  else if (isInteractive()) {
-    say(`Sign in to Busabase (${baseUrl})`);
-    say("  1. Browser sign-in (OAuth) — recommended");
-    say("  2. Paste an API key");
-    const answer = await ask("Choose 1 or 2 [1]: ");
-    method = answer === "2" ? "api-key" : "oauth";
-  } else {
-    method = "oauth";
+  // "Personal Desktop / local" (any open server): no account — just save the connection.
+  if (method === "none") {
+    if (await probeAuthRequired(baseUrl)) {
+      throw new Error(
+        `${baseUrl} requires sign-in. Re-run \`busabase-cli login\` and pick a Cloud or self-hosted option (OAuth or API key).`,
+      );
+    }
+    writeDotEnvFile({
+      BUSABASE_BASE_URL: baseUrl,
+      BUSABASE_API_KEY: null,
+      BUSABASE_SPACE_ID: null,
+      [EXPIRES_AT_KEY]: null,
+    });
+    say(`✓ Connected to ${baseUrl} — open server, no login needed.`);
+    say(`  Saved to ${dotEnvPath()}. Try: busabase-cli bases list`);
+    return { status: "connected (no auth)", baseUrl, config: dotEnvPath() };
   }
 
   let token: string;
@@ -345,7 +386,7 @@ export async function runLogin(options: LoginOptions): Promise<Record<string, st
     expiresAt = result.expiresAt;
   } else {
     if (!apiKey) {
-      say("Create a key at Dashboard → Settings → API Keys (it's shown once).");
+      say("Create a key in the dashboard → Settings → API Keys (shown once).");
       apiKey = await ask("Paste your API key (sk_…): ");
     }
     if (!apiKey) throw new Error("No API key provided.");

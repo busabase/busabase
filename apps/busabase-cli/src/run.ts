@@ -571,24 +571,25 @@ function buildProgram(state: CliState = {}): Command {
     .action(runAction(state, (client) => client.auth.verify()));
 
   addGlobalFlags(program.command("login"))
-    .description("Sign in to Busabase Cloud (OAuth or API key), or connect to a local server")
+    .description("Connect the CLI to Busabase — Personal/local, Cloud, or self-hosted")
     .option("--oauth", "force browser OAuth and skip the method prompt")
     .option("--no-browser", "OAuth: print the sign-in URL instead of opening a browser")
     .option("--refresh", "slide the saved OAuth session forward (no browser, no re-login)")
     .addHelpText(
       "after",
       `
-login authenticates against Busabase Cloud (${DEFAULT_BASE_URL} by default, or a
-self-hosted cloud host via --base-url / BUSABASE_BASE_URL) — OAuth or an API key.
+Run interactively, login asks where your Busabase is and writes the connection to
+~/.busabase/.env:
+  1. Personal Desktop / local server — no login
+  2. Busabase Cloud — browser sign-in (OAuth)
+  3. Busabase Cloud — paste an API key
+  4. Self-hosted — browser sign-in (OAuth)
+  5. Self-hosted — paste an API key
+The flags below skip the menu (handy for scripts / CI):
 
-Pointed at a local \`busabase server\` (a loopback --base-url), login detects it's an
-open server and just saves the connection — no account or token needed. If nothing is
-running there, it tells you to start \`busabase server\`.
-
-Examples:
-  busabase-cli login                                   # Cloud: choose OAuth or API key
-  busabase-cli login --oauth                           # Cloud: browser sign-in (recommended)
-  busabase-cli login --api-key sk_…                    # Cloud: store an API key (headless/CI)
+  busabase-cli login                                   # pick from the menu
+  busabase-cli login --oauth                           # Cloud browser sign-in
+  busabase-cli login --api-key sk_…                    # Cloud API key (headless/CI)
   busabase-cli login --base-url http://localhost:15419 # connect to a local server (no auth)
   busabase-cli login --refresh                         # extend the current session (auto-runs too)`,
     )

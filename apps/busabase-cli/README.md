@@ -32,27 +32,35 @@ The default host is the always-on Cloud, which needs credentials. For a local
 server, pass `--base-url http://localhost:15419` (or set `BUSABASE_BASE_URL`); the
 open-source server needs no auth.
 
-## Sign in
+## Sign in / connect
 
-> `login` mainly authenticates against **Busabase Cloud** (`https://busabase.com`, or a
-> self-hosted cloud host via `--base-url`). Pointed at a **local** `busabase server`
-> (`--base-url http://localhost:15419`), it notices the server is open and simply saves
-> the connection — no account or token needed:
-> ```bash
-> busabase-cli login --base-url http://localhost:15419   # connect to a local server
-> ```
+`login` connects the CLI to a Busabase and writes it to `~/.busabase/.env`. Run it
+interactively and it asks **where** your Busabase is — every option boils down to the
+same saved config, differing only in base URL and how (if at all) it gets a token:
 
-Two ways to authenticate against Cloud — **OAuth is preferred**, an API key is the
-fallback. Either way, `login` verifies the credential, picks your space, and writes
-`~/.busabase/.env` so every later command (and the installed `busabase` skill) just
-works:
+```
+Where is your Busabase?
+  1. Personal Desktop / local server — no login
+  2. Busabase Cloud — browser sign-in (OAuth)
+  3. Busabase Cloud — paste an API key
+  4. Self-hosted — browser sign-in (OAuth)
+  5. Self-hosted — paste an API key
+```
+
+- **1 (local)** just saves `BUSABASE_BASE_URL` — the open-source `busabase server` needs
+  no account. (It checks the server is reachable and actually open first.)
+- **2–5** obtain a token (OAuth session or `sk_…` API key), verify it against
+  `/api/v1/auth`, pick your space, and save everything.
+
+Flags skip the menu (for scripts / CI):
 
 ```bash
-busabase-cli login                 # choose in a prompt: browser OAuth or paste an API key
-busabase-cli login --oauth         # browser sign-in (opens a PKCE flow, no key to copy)
-busabase-cli login --api-key sk_…  # store an API key non-interactively (headless/CI)
-busabase-cli login --refresh       # slide the current OAuth session forward (no browser)
-busabase-cli logout                # revoke the OAuth session and clear the saved creds
+busabase-cli login                                   # pick from the menu
+busabase-cli login --oauth                           # Cloud browser sign-in
+busabase-cli login --api-key sk_…                    # Cloud API key (headless/CI)
+busabase-cli login --base-url http://localhost:15419 # connect to a local server (no auth)
+busabase-cli login --refresh                         # slide the current OAuth session forward
+busabase-cli logout                                  # revoke the session + clear saved creds
 ```
 
 OAuth mints a rolling login session (`bss_…`). You don't normally need `--refresh`:
