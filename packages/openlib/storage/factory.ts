@@ -31,7 +31,8 @@ function initStorage(configOrUrl?: StorageConfig | string): IStorage {
 export const storage: IStorage = new Proxy({} as IStorage, {
   get(_target, prop) {
     if (!_storage) _storage = initStorage();
-    return (_storage as unknown as Record<string | symbol, unknown>)[prop];
+    const value = (_storage as unknown as Record<string | symbol, unknown>)[prop];
+    return typeof value === "function" ? value.bind(_storage) : value;
   },
 });
 

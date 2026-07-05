@@ -1,10 +1,27 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { HELP, runCli } from "./run";
 
 const originalFetch = global.fetch;
+
+// Isolate HOME so config resolution (and built-in auto-refresh) never reads the real
+// ~/.busabase/.env — otherwise a machine-local token could inject headers or an extra
+// refresh call and make these assertions non-deterministic.
+let suiteHome: string;
+let suiteOriginalHome: string | undefined;
+
+beforeAll(async () => {
+  suiteOriginalHome = process.env.HOME;
+  suiteHome = await mkdtemp(join(tmpdir(), "busabase-suite-home-"));
+  process.env.HOME = suiteHome;
+});
+
+afterAll(async () => {
+  process.env.HOME = suiteOriginalHome;
+  await rm(suiteHome, { force: true, recursive: true });
+});
 
 const requestBody = async (request: Request) => {
   const contentType = request.headers.get("content-type") ?? "";
@@ -365,6 +382,80 @@ describe("busabase-cli commands", () => {
         url: "http://localhost:15419/api/v1/bases/bse_1/fields/change-requests",
       }),
     ]);
+  });
+
+  it("login --api-key verifies the key and persists creds to ~/.busabase/.env", async () => {
+    // Redirect HOME so the test never touches the developer's real ~/.busabase/.env.
+    const home = await mkdtemp(join(tmpdir(), "busabase-home-"));
+    const originalHome = process.env.HOME;
+    process.env.HOME = home;
+    vi.spyOn(console, "log").mockImplementation(() => undefined);
+    vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    const calls: string[] = [];
+    global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      calls.push(`${request.method} ${request.url}`);
+      expect(request.headers.get("authorization")).toBe("Bearer sk_test");
+      return jsonResponse({
+        user: { id: "usr_1", email: "dev@example.com" },
+        space: { id: "spc_1", name: "Space One" },
+        spaces: [{ id: "spc_1", name: "Space One" }],
+      });
+    }) as typeof fetch;
+
+    try {
+      const exitCode = await runCli([
+        "--base-url",
+        "http://localhost:15419",
+        "--output",
+        "json",
+        "login",
+        "--api-key",
+        "sk_test",
+      ]);
+
+      expect(exitCode).toBe(0);
+      expect(calls).toEqual(["GET http://localhost:15419/api/v1/auth"]);
+      const env = await readFile(join(home, ".busabase", ".env"), "utf8");
+      expect(env).toContain("BUSABASE_API_KEY=sk_test");
+      expect(env).toContain("BUSABASE_SPACE_ID=spc_1");
+      expect(env).toContain("BUSABASE_BASE_URL=http://localhost:15419");
+    } finally {
+      process.env.HOME = originalHome;
+      await rm(home, { force: true, recursive: true });
+    }
+  });
+
+  it("login --refresh slides the saved OAuth session forward", async () => {
+    const home = await mkdtemp(join(tmpdir(), "busabase-home-"));
+    const originalHome = process.env.HOME;
+    process.env.HOME = home;
+    vi.spyOn(console, "log").mockImplementation(() => undefined);
+    vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    await mkdir(join(home, ".busabase"), { recursive: true });
+    await writeFile(
+      join(home, ".busabase", ".env"),
+      "BUSABASE_BASE_URL=http://localhost:15419\nBUSABASE_API_KEY=bss_old\nBUSABASE_TOKEN_EXPIRES_AT=2020-01-01T00:00:00.000Z\n",
+    );
+    const calls: string[] = [];
+    global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      calls.push(`${request.method} ${request.url}`);
+      expect(request.headers.get("authorization")).toBe("Bearer bss_old");
+      return jsonResponse({ token: "bss_old", expiresAt: "2099-01-01T00:00:00.000Z" });
+    }) as typeof fetch;
+
+    try {
+      const exitCode = await runCli(["login", "--refresh"]);
+      expect(exitCode).toBe(0);
+      expect(calls).toEqual(["POST http://localhost:15419/api/oauth/refresh"]);
+      const env = await readFile(join(home, ".busabase", ".env"), "utf8");
+      expect(env).toContain("BUSABASE_API_KEY=bss_old");
+      expect(env).toContain("BUSABASE_TOKEN_EXPIRES_AT=2099-01-01T00:00:00.000Z");
+    } finally {
+      process.env.HOME = originalHome;
+      await rm(home, { force: true, recursive: true });
+    }
   });
 
   it("prints response bodies for server-side failures", async () => {

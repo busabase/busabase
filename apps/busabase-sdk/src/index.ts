@@ -6,8 +6,11 @@ import {
   resolveConfig,
 } from "./client.js";
 
-export type { CloudContract } from "busabase-contract/contract/cloud";
-
+// The cloud contract, exported as both a value and a type. The value lets tooling
+// introspect the procedure tree (e.g. busabase-cli auto-generates one command per
+// procedure by walking it); the type parameterizes the client.
+export { type CloudContract, cloudContract } from "busabase-contract/contract/cloud";
+export type { CreatableNodeType } from "busabase-contract/domains";
 // Re-export the full VO / DTO type surface so consumers can type their own code
 // against Busabase objects (BaseVO, RecordVO, ChangeRequestVO, …) without
 // depending on the internal workspace `busabase-contract` package.

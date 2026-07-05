@@ -1,9 +1,15 @@
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { homedir } from "node:os";
-import { basename, extname, join } from "node:path";
-import { cloudContract } from "busabase-contract/contract/cloud";
-import type { CreatableNodeType } from "busabase-contract/domains";
+import { basename, extname } from "node:path";
+import {
+  type BusabaseClient,
+  type ResolvedConfig as BusabaseConfig,
+  type CreatableNodeType,
+  cloudContract,
+  createBusabaseClient,
+  DEFAULT_BASE_URL,
+  normalizeBaseUrl,
+} from "busabase-sdk";
 import {
   Command,
   CommanderError,
@@ -12,45 +18,18 @@ import {
   type OptionValues,
 } from "commander";
 import { banner } from "./banner.js";
-import {
-  type BusabaseClient,
-  createBusabaseClient,
-  DEFAULT_BASE_URL,
-  normalizeBaseUrl,
-  type ResolvedConfig,
-} from "./client.js";
+import { loadDotEnvFile } from "./config-file.js";
 import { render } from "./format.js";
+import { maybeAutoRefresh, runLogin, runLogout, runRefresh } from "./login.js";
+
+/**
+ * CLI config = the SDK's resolved client config plus the terminal-only `output`
+ * mode. `output` never reaches the client factory; it drives {@link render}.
+ */
+type ResolvedConfig = BusabaseConfig & { output: "table" | "json" };
 
 /** Public docs page covering every error below, for both Cloud and local. Linked from each error. */
 const DOCS_TROUBLESHOOTING = "https://busabase.com/docs/troubleshooting";
-
-/**
- * Read `~/.busabase/.env` (written by the setup skill) into a record, so the CLI works without the
- * user first `source`-ing it. Returns `{}` if the file is absent or unreadable. Parses simple
- * `KEY=value` lines, ignoring blanks and `#` comments, and stripping surrounding quotes.
- */
-function loadDotEnvFile(): Record<string, string> {
-  let text: string;
-  try {
-    text = readFileSync(join(homedir(), ".busabase", ".env"), "utf8");
-  } catch {
-    return {};
-  }
-  const out: Record<string, string> = {};
-  for (const line of text.split("\n")) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith("#")) continue;
-    const eq = trimmed.indexOf("=");
-    if (eq === -1) continue;
-    const key = trimmed.slice(0, eq).trim();
-    const value = trimmed
-      .slice(eq + 1)
-      .trim()
-      .replace(/^["']|["']$/g, "");
-    if (key) out[key] = value;
-  }
-  return out;
-}
 
 // The field `type` arrives as a free-form CLI string; the typed contract narrows it
 // to the field-type union. Server-side zod re-validates, so narrow with a cast here.
@@ -317,6 +296,9 @@ function runAction(state: CliState, handler: Handler) {
     const opts = cmd.optsWithGlobals();
     const config = resolveConfig(opts);
     state.config = config;
+    // Built-in auto-refresh: keep an actively-used OAuth login alive. No-op unless the
+    // saved session token is near expiry; keeps the same token, so `config` stays valid.
+    await maybeAutoRefresh(config.baseUrl, config.apiKey);
     const client = createBusabaseClient(config);
     const result = await handler(client, opts, config);
     console.log(render(result, config.output));
@@ -587,6 +569,46 @@ function buildProgram(state: CliState = {}): Command {
   addGlobalFlags(program.command("whoami"))
     .description("Active space, user, and membership")
     .action(runAction(state, (client) => client.auth.verify()));
+
+  addGlobalFlags(program.command("login"))
+    .description("Sign in (browser OAuth or an API key) and save creds to ~/.busabase/.env")
+    .option("--oauth", "force browser OAuth and skip the method prompt")
+    .option("--no-browser", "OAuth: print the sign-in URL instead of opening a browser")
+    .option("--refresh", "slide the saved OAuth session forward (no browser, no re-login)")
+    .addHelpText(
+      "after",
+      `
+Examples:
+  busabase-cli login                 # choose OAuth or API key interactively
+  busabase-cli login --oauth         # browser sign-in (recommended)
+  busabase-cli login --api-key sk_…  # store an API key non-interactively
+  busabase-cli login --refresh       # extend the current login session (auto-runs too)`,
+    )
+    .action(async (_opts: OptionValues, cmd: Command) => {
+      const opts = cmd.optsWithGlobals();
+      const config = resolveConfig(opts);
+      state.config = config;
+      const summary = opts.refresh
+        ? await runRefresh({ baseUrl: config.baseUrl, apiKey: config.apiKey })
+        : await runLogin({
+            baseUrl: config.baseUrl,
+            apiKey: opts.apiKey as string | undefined,
+            spaceId: config.spaceId,
+            oauth: Boolean(opts.oauth),
+            browser: opts.browser !== false,
+          });
+      console.log(render(summary, config.output));
+    });
+
+  addGlobalFlags(program.command("logout"))
+    .description("Revoke the saved OAuth session (if any) and clear ~/.busabase/.env")
+    .action(async (_opts: OptionValues, cmd: Command) => {
+      const opts = cmd.optsWithGlobals();
+      const config = resolveConfig(opts);
+      state.config = config;
+      const summary = await runLogout({ baseUrl: config.baseUrl, apiKey: config.apiKey });
+      console.log(render(summary, config.output));
+    });
 
   const nodes = program.command("nodes").description("Workspace node tree");
   addGlobalFlags(nodes.command("list"))
@@ -1012,8 +1034,8 @@ function explainError(error: unknown, config: ResolvedConfig): string {
     body = [
       `Unauthorized (401) from ${base}.`,
       config.apiKey
-        ? "  The API key was rejected — check it is current (Dashboard → Settings → API Keys)."
-        : "  This host needs an API key. Pass --api-key <token> or export BUSABASE_API_KEY=… (Dashboard → Settings → API Keys).",
+        ? "  The credential was rejected or expired — run `busabase-cli login` to sign in again (browser OAuth or an API key)."
+        : "  This host needs sign-in. Run `busabase-cli login` (browser OAuth or an API key), or pass --api-key <token> / export BUSABASE_API_KEY=….",
       "  Meant to hit a local server? Add --base-url http://localhost:15419 (or export BUSABASE_BASE_URL=…).",
     ].join("\n");
   } else if (

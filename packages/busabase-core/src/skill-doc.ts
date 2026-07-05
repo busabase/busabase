@@ -110,7 +110,8 @@ ${
     ? `
 ## Authentication
 
-All write endpoints require an API key. Pass it as a Bearer token:
+All write endpoints require a Bearer token — either an API key (\`sk_…\`) or a login session
+token from \`busabase-cli login\` (\`bss_…\`). Pass it as:
 
 \`\`\`bash
 -H '${authHeader}'
@@ -480,8 +481,31 @@ design their workspace around what they said (Step 2).`;
 
 ### Then get connected
 
-Busabase Cloud is hosted — nothing to install; every call just needs an **API key** (a Bearer
-token). Find one before any API call:
+Busabase Cloud is hosted — nothing to install. There are **two ways to sign in; prefer OAuth**,
+and fall back to an API key when there's no browser (a headless / SSH / container box).
+
+#### Option A — Sign in with your browser (recommended, one command)
+
+Run this for the user. It opens the browser, the user approves, and it writes the whole
+connection to \`~/.busabase/.env\` **for you** — base URL, a login session token, and the chosen
+space (it even asks which space when the user belongs to more than one):
+
+\`\`\`bash
+npx -y busabase-cli login    # opens the browser; prints a URL to paste if it can't
+\`\`\`
+
+When it prints **"Signed in"**, the connection is saved — just read it back and continue:
+
+\`\`\`bash
+cat ~/.busabase/.env    # BUSABASE_BASE_URL, BUSABASE_API_KEY (login token), BUSABASE_SPACE_ID
+\`\`\`
+
+That's it — skip to verifying what's there (the \`bases\` check near the end of this step). Use
+Option B only if the user has no browser here, or prefers a key.
+
+#### Option B — API key (headless, or if the user prefers a key)
+
+Every call just needs an **API key** (a Bearer token). Find one before any API call:
 
 1. **Did the user paste a key in this chat?** A Busabase key starts with \`sk_\`. If so, use it.
 2. **Otherwise look for a saved local config:**
@@ -563,10 +587,14 @@ printf 'BUSABASE_BASE_URL=%s\\n' "${local}" > ~/.busabase/.env
 \`\`\``;
 
   const step1 = isCloud
-    ? `## Step 1 — Create an API key (only if you don't have one)
+    ? `## Step 1 — Get credentials (only if you don't have any)
 
-Tell the user in plain words: sign in at \`${site}/dashboard\`, open **Settings → API Keys**, and
-**Create key** — copy it (it is shown only once). Then save it so you never have to ask again:
+**Easiest: \`npx -y busabase-cli login\`** — browser sign-in that saves everything to
+\`~/.busabase/.env\`, no key to copy. Use the manual key below only when there's no browser.
+
+Manual API key: tell the user in plain words to sign in at \`${site}/dashboard\`, open
+**Settings → API Keys**, and **Create key** — copy it (it is shown only once). Then save it so
+you never have to ask again:
 
 \`\`\`bash
 mkdir -p ~/.busabase && umask 177

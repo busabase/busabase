@@ -131,31 +131,16 @@ importers:
 
   apps/busabase-cli:
     dependencies:
-      '@orpc/client':
-        specifier: ^1.14.6
-        version: 1.14.6(@opentelemetry/api@1.9.0)
-      '@orpc/contract':
-        specifier: ^1.14.6
-        version: 1.14.6(@opentelemetry/api@1.9.0)
-      '@orpc/openapi-client':
-        specifier: ^1.14.6
-        version: 1.14.6(@opentelemetry/api@1.9.0)
+      busabase-sdk:
+        specifier: workspace:*
+        version: link:../busabase-sdk
       commander:
         specifier: ^14.0.0
         version: 14.0.3
-      zod:
-        specifier: 4.4.3
-        version: 4.4.3
     devDependencies:
       '@types/node':
         specifier: ^24.10.0
         version: 24.10.13
-      busabase-contract:
-        specifier: workspace:*
-        version: link:../../packages/busabase-contract
-      open-domains:
-        specifier: workspace:*
-        version: link:../../packages/open-domains
       tsup:
         specifier: ^8.5.0
         version: 8.5.1(@swc/core@1.15.11(@swc/helpers@0.5.23))(jiti@2.6.1)(postcss@8.5.15)(tsx@4.21.0)(typescript@5.9.3)(yaml@2.9.0)
