@@ -571,15 +571,20 @@ function buildProgram(state: CliState = {}): Command {
     .action(runAction(state, (client) => client.auth.verify()));
 
   addGlobalFlags(program.command("login"))
-    .description("Sign in (browser OAuth or an API key) and save creds to ~/.busabase/.env")
+    .description("Sign in to Busabase Cloud (OAuth or API key) — a local server needs no login")
     .option("--oauth", "force browser OAuth and skip the method prompt")
     .option("--no-browser", "OAuth: print the sign-in URL instead of opening a browser")
     .option("--refresh", "slide the saved OAuth session forward (no browser, no re-login)")
     .addHelpText(
       "after",
       `
+login authenticates against Busabase Cloud (${DEFAULT_BASE_URL} by default, or a
+self-hosted cloud host via --base-url / BUSABASE_BASE_URL). A local open-source
+server (\`busabase server\`, http://localhost:15419) has no accounts — don't log in;
+just point at it with --base-url http://localhost:15419 and call the API directly.
+
 Examples:
-  busabase-cli login                 # choose OAuth or API key interactively
+  busabase-cli login                 # choose OAuth or API key interactively (Cloud)
   busabase-cli login --oauth         # browser sign-in (recommended)
   busabase-cli login --api-key sk_…  # store an API key non-interactively
   busabase-cli login --refresh       # extend the current login session (auto-runs too)`,

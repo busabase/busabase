@@ -63,6 +63,16 @@ const say = (message: string): void => {
   process.stderr.write(`${message}\n`);
 };
 
+/** True for a loopback host — an open-source local server, which has no login. */
+const isLocalHost = (baseUrl: string): boolean => {
+  try {
+    const { hostname } = new URL(baseUrl);
+    return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1";
+  } catch {
+    return false;
+  }
+};
+
 async function ask(question: string): Promise<string> {
   const rl = createInterface({ input: process.stdin, output: process.stderr });
   try {
@@ -269,6 +279,18 @@ async function pickSpaceId(verify: AuthVerify, preselected?: string): Promise<st
 /** Resolve the sign-in method, obtain a credential, verify, pick a space, persist. */
 export async function runLogin(options: LoginOptions): Promise<Record<string, string>> {
   const baseUrl = normalizeBaseUrl(options.baseUrl);
+
+  // login is a Cloud concept: OAuth + API keys live in Busabase Cloud. A loopback host
+  // is almost always the open-source `busabase server`, which is open and has no accounts
+  // — so warn rather than let the user hit a 404 on /api/oauth/authorize. (A self-hosted
+  // cloud edition on localhost still works, so this is a heads-up, not a hard stop.)
+  if (isLocalHost(baseUrl)) {
+    say(`⚠ ${baseUrl} looks like a local server.`);
+    say("  The open-source `busabase server` is open — it needs no login. Just use it:");
+    say(`    busabase-cli bases list --base-url ${baseUrl}`);
+    say("  Continuing anyway in case this is a self-hosted Busabase Cloud…");
+    say("");
+  }
 
   // Decide the method: explicit --api-key or --oauth win; otherwise ask (or default
   // to OAuth when there's no TTY to ask on).
