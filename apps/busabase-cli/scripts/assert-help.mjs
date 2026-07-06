@@ -6,12 +6,20 @@ import { fileURLToPath } from "node:url";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const cliPath = path.join(root, "dist", "cli.js");
+const binPath = path.join(root, "bin", "busabase-cli.mjs");
 
 if (!existsSync(cliPath)) {
   throw new Error("dist/cli.js is missing. Run `pnpm run build` before publishing.");
 }
+if (!existsSync(binPath)) {
+  throw new Error("bin/busabase-cli.mjs is missing. The package bin must be shippable.");
+}
 
 const help = execFileSync(process.execPath, [cliPath, "--help"], {
+  cwd: root,
+  encoding: "utf8",
+});
+const binHelp = execFileSync(process.execPath, [binPath, "--help"], {
   cwd: root,
   encoding: "utf8",
 });
@@ -44,8 +52,8 @@ const forbidden = [
   "--draft-id",
 ];
 
-const missing = required.filter((text) => !help.includes(text));
-const stale = forbidden.filter((text) => help.includes(text));
+const missing = required.filter((text) => !help.includes(text) || !binHelp.includes(text));
+const stale = forbidden.filter((text) => help.includes(text) || binHelp.includes(text));
 
 if (missing.length || stale.length) {
   throw new Error(
