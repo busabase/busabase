@@ -491,7 +491,8 @@ connection to \`~/.busabase/.env\` **for you** — base URL, a login session tok
 space (it even asks which space when the user belongs to more than one):
 
 \`\`\`bash
-npx -y busabase-cli login    # opens the browser; prints a URL to paste if it can't
+npm exec -y --package busabase-cli@latest -- busabase-cli login
+# opens the browser; prints a URL to paste if it can't
 \`\`\`
 
 When it prints **"Signed in"**, the connection is saved — just read it back and continue:
@@ -589,8 +590,9 @@ printf 'BUSABASE_BASE_URL=%s\\n' "${local}" > ~/.busabase/.env
   const step1 = isCloud
     ? `## Step 1 — Get credentials (only if you don't have any)
 
-**Easiest: \`npx -y busabase-cli login\`** — browser sign-in that saves everything to
-\`~/.busabase/.env\`, no key to copy. Use the manual key below only when there's no browser.
+**Easiest: \`npm exec -y --package busabase-cli@latest -- busabase-cli login\`** — browser
+sign-in that saves everything to \`~/.busabase/.env\`, no key to copy. Use the manual key below
+only when there's no browser.
 
 Manual API key: tell the user in plain words to sign in at \`${site}/dashboard\`, open
 **Settings → API Keys**, and **Create key** — copy it (it is shown only once). Then save it so
