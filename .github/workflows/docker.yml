@@ -7,7 +7,8 @@
 #
 # Required secrets: DOCKERHUB_TOKEN (a Docker Hub access token for the `busabase`
 # org with push rights). GHCR uses the built-in GITHUB_TOKEN.
-# Required for deploy dispatch: CR_PAT with access to DEPLOY_REPOSITORY.
+# Required for deploy dispatch: CR_PAT plus DEPLOY_REPOSITORY (for example,
+# vikadata/ops-manager).
 name: Docker
 
 on:
@@ -23,9 +24,6 @@ on:
       - "!apps/busabase/docs/**"
       - "!apps/busabase/public/assets/**"
   workflow_dispatch:
-
-env:
-  DEPLOY_REPOSITORY: vikadata/ops-manager
 
 concurrency:
   group: docker-${{ github.ref }}
@@ -83,10 +81,15 @@ jobs:
       - name: Dispatch internal deploy
         env:
           DEPLOY_TOKEN: ${{ secrets.CR_PAT }}
+          DEPLOY_REPOSITORY: ${{ secrets.DEPLOY_REPOSITORY }}
         run: |
           set -euo pipefail
           if [ -z "${DEPLOY_TOKEN:-}" ]; then
             echo "CR_PAT is not configured; skipping deploy dispatch."
+            exit 0
+          fi
+          if [ -z "${DEPLOY_REPOSITORY:-}" ]; then
+            echo "DEPLOY_REPOSITORY is not configured; skipping deploy dispatch."
             exit 0
           fi
 
