@@ -1,6 +1,6 @@
 {
   "name": "busabase-cli",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "Command-line client for the Busabase OpenAPI REST API. Talks to a local or remote `busabase server`.",
   "license": "MIT",
   "homepage": "https://github.com/busabase/busabase/tree/main/apps/busabase-cli",
@@ -16,7 +16,7 @@
     "access": "public"
   },
   "bin": {
-    "busabase-cli": "./dist/cli.js"
+    "busabase-cli": "./bin/busabase-cli.mjs"
   },
   "main": "./dist/index.js",
   "module": "./dist/index.js",
@@ -26,6 +26,7 @@
     }
   },
   "files": [
+    "bin",
     "dist",
     "README.md"
   ],
