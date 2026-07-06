@@ -151,7 +151,7 @@ describe("busabase-cli golden path (skill commands, in-process)", () => {
     expect(queue.length).toBeGreaterThan(0);
   });
 
-  it("proposes, approves, and merges a folder node through the CLI", async () => {
+  it("creates an auto-merged folder node through the CLI", async () => {
     const created = (await cli(
       "nodes",
       "create-change-request",
@@ -162,17 +162,7 @@ describe("busabase-cli golden path (skill commands, in-process)", () => {
       "--name",
       "CLI Folder",
     )) as { id: string; status: string };
-    expect(created.status).toBe("in_review");
-
-    await cli(
-      "change-requests",
-      "review",
-      "--change-request-id",
-      created.id,
-      "--verdict",
-      "approved",
-    );
-    await cli("change-requests", "merge", "--change-request-id", created.id);
+    expect(created.status).toBe("merged");
 
     const tree = await cli("nodes", "list");
     expect(JSON.stringify(tree)).toContain("CLI Folder");

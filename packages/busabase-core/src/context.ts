@@ -47,6 +47,14 @@ export interface BusabaseContext {
   db?: BusabaseDatabase;
   actorId?: string;
   spaceId?: string;
+  /**
+   * API-key scoped environment variables injected by the host runtime.
+   *
+   * This is intentionally context-scoped rather than written to the host
+   * process.env: Busabase Cloud is a shared Node process, so per-key secrets must
+   * only be exposed to the request / hosted execution they belong to.
+   */
+  envVars?: Record<string, string>;
   /** When true, the request is served by the stateless demo router (no DB). */
   isDemo?: boolean;
   /**
@@ -85,6 +93,16 @@ export function getContextSpaceId(): string {
  */
 export function resolveActorId(inputActorId: string): string {
   return storage.getStore()?.actorId ?? inputActorId;
+}
+
+/** API-key scoped env values for the current hosted/request execution. */
+export function getContextEnvVars(): Record<string, string> {
+  return storage.getStore()?.envVars ?? {};
+}
+
+/** Read one API-key scoped env value from the current hosted/request execution. */
+export function getContextEnvVar(key: string): string | undefined {
+  return getContextEnvVars()[key];
 }
 
 /** True when the current request is served by the stateless demo router. */

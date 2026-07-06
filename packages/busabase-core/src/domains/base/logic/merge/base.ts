@@ -16,6 +16,7 @@ import {
 import type { MergeCtx } from "../../../../logic/cr-lifecycle";
 import { id } from "../../../../logic/kernel";
 import { type MaterializeArgs, registerMaterializer } from "../../../../logic/materialize";
+import { resolveRelationFieldOptions } from "../relation-options";
 
 export const materializeBaseNode = async (
   ctx: MergeCtx,
@@ -51,25 +52,30 @@ export const materializeBaseNode = async (
       ? fields.fields
       : [{ slug: "title", name: "Title", type: "text" as const, required: true, options: {} }];
   await db.insert(busabaseBaseFields).values(
-    (
-      baseFields as Array<{
-        slug: string;
-        name: import("openlib/i18n/i-string").iString;
-        type?: import("busabase-contract/types").FieldType;
-        required?: boolean;
-        options?: Record<string, unknown>;
-      }>
-    ).map((field, index) => ({
-      id: id("bsf"),
-      spaceId: getContextSpaceId(),
-      baseId,
-      slug: field.slug,
-      name: iStringToText(field.name),
-      type: field.type ?? "text",
-      required: field.required ?? false,
-      position: index,
-      options: field.options ?? {},
-    })),
+    await Promise.all(
+      (
+        baseFields as Array<{
+          slug: string;
+          name: import("openlib/i18n/i-string").iString;
+          type?: import("busabase-contract/types").FieldType;
+          required?: boolean;
+          options?: Record<string, unknown>;
+        }>
+      ).map(async (field, index) => ({
+        id: id("bsf"),
+        spaceId: getContextSpaceId(),
+        baseId,
+        slug: field.slug,
+        name: iStringToText(field.name),
+        type: field.type ?? "text",
+        required: field.required ?? false,
+        position: index,
+        // Resolve targetBaseSlug → id on the SAME merge transaction (ctx.db) — a
+        // node-CR base-create commit stores field options verbatim, so this is
+        // where the node path's relation slug is resolved.
+        options: await resolveRelationFieldOptions(db, field.options ?? {}),
+      })),
+    ),
   );
   return baseNodeId;
 };

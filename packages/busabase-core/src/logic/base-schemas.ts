@@ -71,6 +71,9 @@ const fieldOptionsSchema = z
       })
       .optional(),
     targetBaseId: z.string().optional(),
+    // Convenience alias for `targetBaseId`: name the relation target by Base slug.
+    // Resolved to `targetBaseId` on write; never persisted.
+    targetBaseSlug: z.string().optional(),
   })
   .default({});
 

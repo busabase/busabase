@@ -16,9 +16,9 @@ import {
   busabaseRecords,
 } from "../../../db/schema";
 import { insertAuditEvent } from "../../../logic/audit";
-import { getChangeRequest } from "../../../logic/cr-lifecycle";
+import { getChangeRequest, recordMergedNodeCreate } from "../../../logic/cr-lifecycle";
 import { projectCommitFields } from "../../../logic/field-values";
-import { id, now, rootNodeIdForSpace } from "../../../logic/kernel";
+import { CURRENT_USER_ID, id, now, rootNodeIdForSpace } from "../../../logic/kernel";
 import { ensureReady } from "../../../logic/seed";
 import {
   createBaseInputSchema,
@@ -30,6 +30,7 @@ import {
 import { validateRecordFields } from "../field-rules";
 import type { FieldDef } from "../field-types";
 import { getBase } from "./queries";
+import { resolveRelationFieldOptions } from "./relation-options";
 
 export {
   createBaseInputSchema,
@@ -154,17 +155,19 @@ export const createBase = async (input: z.infer<typeof createBaseInputSchema>) =
   });
   if (parsed.fields.length > 0) {
     await db.insert(busabaseBaseFields).values(
-      parsed.fields.map((field, index) => ({
-        id: id("bsf"),
-        spaceId,
-        baseId,
-        slug: field.slug,
-        name: iStringToText(field.name),
-        type: field.type,
-        required: field.required,
-        position: index,
-        options: field.options,
-      })),
+      await Promise.all(
+        parsed.fields.map(async (field, index) => ({
+          id: id("bsf"),
+          spaceId,
+          baseId,
+          slug: field.slug,
+          name: iStringToText(field.name),
+          type: field.type,
+          required: field.required,
+          position: index,
+          options: await resolveRelationFieldOptions(db, field.options),
+        })),
+      ),
     );
   }
 
@@ -172,11 +175,18 @@ export const createBase = async (input: z.infer<typeof createBaseInputSchema>) =
   if (!base) {
     throw new Error("Failed to create base");
   }
-  // Direct create (no change request) — record it so the audit trail is complete.
-  await insertAuditEvent(db, {
-    action: "base.created",
+  // Record the create as an auto-merged structural ChangeRequest (audit +
+  // history + rollback), replacing the old bespoke `base.created` audit action.
+  await recordMergedNodeCreate({
+    nodeId,
     baseId,
-    metadata: { slug: parsed.slug, name: parsed.name, nodeId },
+    nodeType: "base",
+    slug: parsed.slug,
+    name: parsed.name,
+    description: parsed.description,
+    parentNodeId: parentNode.id,
+    message: `Create base ${parsed.name}`,
+    submittedBy: resolveActorId(CURRENT_USER_ID),
   });
   return base;
 };

@@ -25,6 +25,10 @@
       "types": "./nanoid/index.ts",
       "default": "./nanoid/index.ts"
     },
+    "./realtime": {
+      "types": "./realtime/index.ts",
+      "default": "./realtime/index.ts"
+    },
     "./storage": {
       "types": "./storage/index.ts",
       "default": "./storage/index.ts"
@@ -87,6 +91,7 @@
     "nanoid": "^5.1.5",
     "negotiator": "^0.6.3",
     "nprogress": "^0.2.0",
+    "redis": "^5.10.0",
     "zod": "^4.3.6"
   },
   "peerDependencies": {

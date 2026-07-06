@@ -58,6 +58,7 @@ import type {
 } from "./helpers/view-types";
 import { useAttachmentUpload } from "./hooks/use-attachment-upload";
 import { useDashboardRoutes } from "./hooks/use-dashboard-routes";
+import { useBusabaseLiveSync } from "./hooks/use-live-sync";
 import { getNodeDetail } from "./node-detail-registry";
 
 interface BusabaseDashboardProps {
@@ -134,6 +135,7 @@ function BusabaseDashboardContent({
   const archivedBasesList = orpc.bases.listArchived.queryOptions({});
   const archivedNodesList = orpc.nodes.listArchived.queryOptions({});
   const auditEventsList = orpc.auditEvents.list.queryOptions({ input: {} });
+  const authInfoQuery = useQuery(orpc.auth.verify.queryOptions({}));
   const changeRequestsQuery = useQuery({
     ...changeRequestsList,
     initialData: initialChangeRequests,
@@ -152,9 +154,12 @@ function BusabaseDashboardContent({
   // Stable query keys for cache writes/invalidation (orpc is memoized on apiBasePath).
   const listKeys = useMemo(
     () => ({
+      archivedBases: orpc.bases.listArchived.queryOptions({}).queryKey as QueryKey,
+      archivedNodes: orpc.nodes.listArchived.queryOptions({}).queryKey as QueryKey,
       changeRequests: orpc.changeRequests.list.queryOptions({ input: {} }).queryKey as QueryKey,
       records: orpc.records.list.queryOptions({ input: {} }).queryKey as QueryKey,
       bases: orpc.bases.list.queryOptions({}).queryKey as QueryKey,
+      nodes: orpc.nodes.list.queryOptions({}).queryKey as QueryKey,
       auditEvents: orpc.auditEvents.list.queryOptions({ input: {} }).queryKey as QueryKey,
     }),
     [orpc],
@@ -217,6 +222,13 @@ function BusabaseDashboardContent({
         : (bases[0] ?? null),
     [selectedBaseSlug, bases],
   );
+  useBusabaseLiveSync({
+    actorId: authInfoQuery.data?.user.id,
+    activeBaseId: activeBase?.id,
+    listKeys,
+    orpc,
+    queryClient,
+  });
   // Deleted fields scoped to the active base (for the Design tab).
   const deletedFieldsQuery = useQuery({
     ...orpc.bases.listDeletedFields.queryOptions({ input: { baseId: activeBase?.id ?? "" } }),
