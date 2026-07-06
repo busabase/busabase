@@ -229,7 +229,21 @@ const createAuditEventInputSchema = z.object({
 const nodeOperationInputSchema = z.discriminatedUnion("kind", [
   z.object({
     kind: z.literal("create"),
+    ref: z
+      .string()
+      .min(1)
+      .optional()
+      .describe(
+        'Optional in-change-request temp id for this node. A later operation can set parentNodeRef to this value to nest under it — e.g. create a folder with ref "growth", then create Bases with parentNodeRef "growth", all in one change request.',
+      ),
     parentNodeId: z.string().optional(),
+    parentNodeRef: z
+      .string()
+      .min(1)
+      .optional()
+      .describe(
+        "Parent this node under a node an EARLIER operation in the same change request created (matched by its ref). Mutually exclusive with parentNodeId.",
+      ),
     nodeType: z.enum(CREATABLE_NODE_TYPES),
     slug: z
       .string()
@@ -276,7 +290,9 @@ const nodeOperationInputSchema = z.discriminatedUnion("kind", [
   z.object({
     kind: z.literal("move"),
     nodeId: z.string(),
-    parentNodeId: z.string(),
+    // Exactly one of parentNodeId / parentNodeRef (a ref created earlier in this CR).
+    parentNodeId: z.string().optional(),
+    parentNodeRef: z.string().min(1).optional(),
     position: z.number().int().optional(),
   }),
 ]);

@@ -103,6 +103,10 @@ export interface MergeCtx {
   mergedNodeIds: string[];
   mergedRecordIds: string[];
   mergedViewIds: string[];
+  // Temp-ref → real node id, populated as node_create operations materialize so
+  // later operations in the SAME change request can point their parent at a node
+  // this CR is itself creating (create-folder-then-fill-it in one submission).
+  nodeRefs: Map<string, string>;
   // Auto-merged record fields (operationId → merged fields), set when a record
   // moved since the change request's base and a 3-way field merge resolved it.
   resolvedRecordFields: Map<string, Record<string, unknown>>;
@@ -177,10 +181,32 @@ const materializeGenericNode = async (ctx: MergeCtx, args: MaterializeArgs): Pro
   return nodeId;
 };
 
+/**
+ * Resolve the parent node id for a node operation, supporting an in-CR temp ref:
+ * `parentNodeRef` points at a node an EARLIER operation created (looked up in
+ * `ctx.nodeRefs`). Falls back to `parentNodeId`, then the space root.
+ */
+const resolveParentNodeId = (
+  ctx: MergeCtx,
+  fields: { parentNodeId?: string; parentNodeRef?: string },
+  operationId: string,
+): string => {
+  if (fields.parentNodeRef) {
+    const resolved = ctx.nodeRefs.get(fields.parentNodeRef);
+    if (!resolved) {
+      throw new ORPCError("BAD_REQUEST", {
+        message: `Operation ${operationId} references parentNodeRef "${fields.parentNodeRef}", but no earlier operation in this change request created it.`,
+      });
+    }
+    return resolved;
+  }
+  return fields.parentNodeId ?? rootNodeIdForSpace(getContextSpaceId());
+};
+
 const mergeNodeCreate = async (ctx: MergeCtx, item: OperationPO, headCommit: CommitPO) => {
   const { db, timestamp } = ctx;
   const fields = headCommit.fields as NodeCreateFields;
-  const parentNodeId = fields.parentNodeId ?? rootNodeIdForSpace(getContextSpaceId());
+  const parentNodeId = resolveParentNodeId(ctx, fields, item.id);
   const [parentNode] = await db
     .select()
     .from(busabaseNodes)
@@ -194,6 +220,10 @@ const mergeNodeCreate = async (ctx: MergeCtx, item: OperationPO, headCommit: Com
   }
   const materialize = getMaterializer(fields.nodeType) ?? materializeGenericNode;
   const nodeId = await materialize(ctx, { parentNode, fields });
+  // Publish this node's temp ref so later operations in the CR can parent to it.
+  if (fields.ref) {
+    ctx.nodeRefs.set(fields.ref, nodeId);
+  }
   await db
     .update(busabaseOperations)
     .set({ status: "merged", nodeId, updatedAt: timestamp })
@@ -249,17 +279,22 @@ const mergeNodeMove = async (
       message: "Cannot move an archived node. Restore it first.",
     });
   }
-  const fields = headCommit.fields as { parentNodeId?: string; position?: number };
-  if (!fields.parentNodeId) {
-    throw new Error(`Node move commit missing parentNodeId: ${item.id}`);
+  const fields = headCommit.fields as {
+    parentNodeId?: string;
+    parentNodeRef?: string;
+    position?: number;
+  };
+  if (!fields.parentNodeId && !fields.parentNodeRef) {
+    throw new Error(`Node move commit missing parentNodeId/parentNodeRef: ${item.id}`);
   }
+  const parentNodeId = resolveParentNodeId(ctx, fields, item.id);
   const [parentNode] = await ctx.db
     .select()
     .from(busabaseNodes)
-    .where(eq(busabaseNodes.id, fields.parentNodeId))
+    .where(eq(busabaseNodes.id, parentNodeId))
     .limit(1);
   if (!parentNode || parentNode.type !== "folder") {
-    throw new Error(`Parent folder not found: ${fields.parentNodeId}`);
+    throw new Error(`Parent folder not found: ${parentNodeId}`);
   }
   await ctx.db
     .update(busabaseNodes)
@@ -1070,6 +1105,7 @@ const _mergeChangeRequest = async (changeRequestId: string) => {
         mergedNodeIds: [],
         mergedRecordIds: [],
         mergedViewIds: [],
+        nodeRefs: new Map(),
         resolvedRecordFields: new Map(),
       };
       for (const item of operationKinds) {
@@ -1318,6 +1354,7 @@ const _mergeChangeRequest = async (changeRequestId: string) => {
       mergedNodeIds: [],
       mergedRecordIds: [],
       mergedViewIds: [],
+      nodeRefs: new Map(),
       resolvedRecordFields,
     };
     for (const item of operationKinds) {
@@ -1438,4 +1475,54 @@ const _mergeChangeRequest = async (changeRequestId: string) => {
     record: record ? await hydrateRecord(record) : null,
     view: view ? toViewVO(view) : null,
   };
+};
+
+export interface BatchChangeRequestResult {
+  results: Array<{ changeRequestId: string; ok: boolean; status?: string; error?: string }>;
+}
+
+const errorMessage = (error: unknown): string =>
+  error instanceof Error ? error.message : String(error);
+
+/**
+ * Review many change requests with the same verdict in one call (for an agent
+ * clearing a review queue — "approve all of these"). Each is reviewed independently;
+ * a failure (not found / not reviewable) is recorded and the rest still process, so
+ * the caller gets a full per-item report instead of an all-or-nothing abort.
+ */
+export const reviewChangeRequests = async (
+  changeRequestIds: string[],
+  input: z.infer<typeof reviewInputSchema>,
+): Promise<BatchChangeRequestResult> => {
+  const results: BatchChangeRequestResult["results"] = [];
+  for (const changeRequestId of changeRequestIds) {
+    try {
+      const changeRequest = await reviewChangeRequest(changeRequestId, input);
+      results.push({ changeRequestId, ok: true, status: changeRequest.status });
+    } catch (error) {
+      results.push({ changeRequestId, ok: false, error: errorMessage(error) });
+    }
+  }
+  return { results };
+};
+
+/**
+ * Merge many change requests in one call ("merge all of these"). Each merges in its
+ * OWN transaction and in the given order, with failures isolated — so a later
+ * conflicting merge does not roll back the ones already merged, and the caller sees
+ * exactly which succeeded. Order matters when the change requests depend on one another.
+ */
+export const mergeChangeRequests = async (
+  changeRequestIds: string[],
+): Promise<BatchChangeRequestResult> => {
+  const results: BatchChangeRequestResult["results"] = [];
+  for (const changeRequestId of changeRequestIds) {
+    try {
+      const merged = await mergeChangeRequest(changeRequestId);
+      results.push({ changeRequestId, ok: true, status: merged.changeRequest.status });
+    } catch (error) {
+      results.push({ changeRequestId, ok: false, error: errorMessage(error) });
+    }
+  }
+  return { results };
 };

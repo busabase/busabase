@@ -30,6 +30,20 @@ import {
   searchResponseSchema,
 } from "./schemas";
 
+// Per-item outcome for the batch review/merge endpoints. Failures are isolated:
+// one bad change request records an `error` and the rest still process, so an agent
+// acting on "just merge them all" gets a full report instead of an abort.
+const changeRequestBatchResultSchema = z.object({
+  results: z.array(
+    z.object({
+      changeRequestId: z.string(),
+      ok: z.boolean(),
+      status: z.string().optional(),
+      error: z.string().optional(),
+    }),
+  ),
+});
+
 export const busabaseContractRoutes = {
   auth: {
     verify: oc
@@ -187,6 +201,21 @@ export const busabaseContractRoutes = {
       })
       .input(reviewChangeRequestInputSchema.extend({ changeRequestId: z.string() }))
       .output(changeRequestSchema),
+    reviewMany: oc
+      .route({
+        method: "POST",
+        path: "/change-requests/reviews",
+        tags: ["Change Requests"],
+        summary: "Review many change requests",
+        successDescription:
+          "Per-change-request review results (failures isolated — one bad id does not abort the rest).",
+      })
+      .input(
+        reviewChangeRequestInputSchema.extend({
+          changeRequestIds: z.array(z.string()).min(1).max(100),
+        }),
+      )
+      .output(changeRequestBatchResultSchema),
     close: oc
       .route({
         method: "POST",
@@ -213,6 +242,17 @@ export const busabaseContractRoutes = {
           view: viewSchema.nullable(),
         }),
       ),
+    mergeMany: oc
+      .route({
+        method: "POST",
+        path: "/change-requests/merge",
+        tags: ["Change Requests"],
+        summary: "Merge many change requests",
+        successDescription:
+          "Per-change-request merge results (each merged in its own transaction; failures isolated).",
+      })
+      .input(z.object({ changeRequestIds: z.array(z.string()).min(1).max(100) }))
+      .output(changeRequestBatchResultSchema),
   },
   operations: {
     revise: oc

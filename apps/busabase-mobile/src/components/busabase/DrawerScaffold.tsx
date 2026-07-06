@@ -27,6 +27,7 @@ import type { CoreMessages } from "~/i18n/messages";
 import { mobile, radius, typography } from "~/theme/tokens";
 import { useTokens } from "~/theme/use-tokens";
 import { CreateNodeModal } from "./CreateNodeModal";
+import { SpaceSelector } from "./SpaceSelector";
 
 interface DrawerScaffoldProps {
   title: string;
@@ -133,6 +134,7 @@ export function DrawerScaffold({
         refreshing={refreshing}
         onRefresh={onRefresh}
         headerLeading={headerLeading}
+        headerAction={<SpaceSelector compact />}
       >
         {children}
       </NativeScreen>
@@ -145,6 +147,7 @@ export function DrawerScaffold({
                 <Text style={[typography.h2, { color: tokens.foreground }]}>Busabase</Text>
               </View>
             </View>
+            <SpaceSelector />
 
             <ScrollView
               contentContainerStyle={styles.drawerBody}

@@ -14,6 +14,7 @@ import { useState } from "react";
 import { Linking, Pressable, StyleSheet, Switch, Text, View } from "react-native";
 import { ConnectionGuard } from "~/components/busabase/ConnectionGuard";
 import { DrawerScaffold } from "~/components/busabase/DrawerScaffold";
+import { SpaceSelector } from "~/components/busabase/SpaceSelector";
 import { Button } from "~/components/ui/Button";
 import { useConnection } from "~/connection/connection-store";
 import { type LocalePreference, useI18n } from "~/i18n";
@@ -71,6 +72,7 @@ function SettingsContent() {
               Signed in{connection.cloudUser?.email ? ` as ${connection.cloudUser.email}` : ""}
             </Text>
           ) : null}
+          {connection?.mode === "cloud" ? <SpaceSelector /> : null}
           <Text style={[typography.small, { color: tokens.mutedForeground }]}>
             Connected {formatDate(connection?.connectedAt)}
           </Text>

@@ -19,6 +19,10 @@ import type { MergeCtx } from "./store";
 
 export interface NodeCreateFields {
   parentNodeId?: string;
+  /** Temp id for THIS node, so later operations in the same CR can reference it. */
+  ref?: string;
+  /** Reference a node created by an EARLIER operation in the same CR as the parent. */
+  parentNodeRef?: string;
   nodeType?: string;
   slug?: string;
   name?: string;

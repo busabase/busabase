@@ -26,6 +26,8 @@
       "busabase-core": ["../../packages/busabase-core/src/index.ts"],
       "busabase-core/openapi": ["../../packages/busabase-core/src/openapi/spec.ts"],
       "busabase-core/*": ["../../packages/busabase-core/src/*"],
+      "busabase-cli": ["../busabase-cli/src/index.ts"],
+      "busabase-sdk": ["../busabase-sdk/src/index.ts"],
       "share-domains/*": ["../../packages/share-domains/*"],
       "billing": ["../../packages/billing/index.ts"],
       "billing/*": ["../../packages/billing/*"],

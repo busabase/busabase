@@ -9,10 +9,13 @@ export function useBusabaseOrpc() {
   const { getCloudAuthorizationHeaders, state } = useConnection();
   const connection = state.status === "connected" ? state.connection : null;
   const serverUrl = connection?.serverUrl ?? null;
+  const selectedSpaceId = connection?.selectedSpace?.id ?? null;
   // Demo connections hit the hosted demo server, which only serves data in demo
   // mode (?demo=1) — its regular dataset is empty.
   const demo = connection?.mode === "demo";
   const headers = connection?.mode === "cloud" ? getCloudAuthorizationHeaders : undefined;
+  const spaceScope =
+    connection?.mode === "cloud" ? (selectedSpaceId ?? "default") : connection?.mode;
 
   return useMemo(() => {
     if (!serverUrl) return null;
@@ -21,6 +24,7 @@ export function useBusabaseOrpc() {
     return {
       client: createBusabaseORPCClient(rpcUrl, { demo, headers }),
       orpc: createBusabaseQueryUtils(rpcUrl, { demo, headers }),
+      spaceScope,
     };
-  }, [serverUrl, connection?.mode, demo, headers]);
+  }, [serverUrl, connection?.mode, demo, headers, spaceScope]);
 }

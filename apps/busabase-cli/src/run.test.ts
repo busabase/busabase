@@ -171,6 +171,144 @@ describe("busabase-cli commands", () => {
     ]);
   });
 
+  it("creates rich Bases from fields JSON", async () => {
+    const calls: Array<{ body: unknown; method: string; url: string }> = [];
+    global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      calls.push({
+        body: request.body ? await requestBody(request) : null,
+        method: request.method,
+        url: request.url,
+      });
+      return jsonResponse({ id: "bse_1", slug: "products" });
+    }) as typeof fetch;
+
+    const fields = JSON.stringify([
+      { slug: "product_name", name: "产品名称 Product Name", type: "text", required: true },
+      {
+        slug: "status",
+        name: "状态 Status",
+        type: "select",
+        options: { choices: [{ id: "live", name: "Live", color: "emerald" }] },
+      },
+    ]);
+
+    const exitCode = await runCli([
+      "--base-url",
+      "http://localhost:15419",
+      "--output",
+      "json",
+      "bases",
+      "create",
+      "--slug",
+      "products",
+      "--name",
+      "产品目录 Products",
+      "--fields-json",
+      fields,
+      "--parent-node-id",
+      "nod_product",
+    ]);
+
+    expect(exitCode).toBe(0);
+    expect(calls).toEqual([
+      expect.objectContaining({
+        method: "POST",
+        url: "http://localhost:15419/api/v1/bases",
+        body: {
+          fields: JSON.parse(fields),
+          name: "产品目录 Products",
+          parentNodeId: "nod_product",
+          slug: "products",
+        },
+      }),
+    ]);
+  });
+
+  it("creates base node Change Requests from fields JSON", async () => {
+    const calls: Array<{ body: unknown; method: string; url: string }> = [];
+    global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      calls.push({
+        body: request.body ? await requestBody(request) : null,
+        method: request.method,
+        url: request.url,
+      });
+      return jsonResponse({ id: "crq_1", status: "in_review" });
+    }) as typeof fetch;
+
+    const fields = JSON.stringify([
+      { slug: "slug", name: "Slug", type: "text", unique: true },
+      {
+        slug: "category",
+        name: "Category",
+        type: "select",
+        options: { choices: [{ id: "blog", name: "Blog", color: "blue" }] },
+      },
+    ]);
+
+    const exitCode = await runCli([
+      "--base-url",
+      "http://localhost:15419",
+      "--output",
+      "json",
+      "nodes",
+      "create-change-request",
+      "--type",
+      "base",
+      "--slug",
+      "content",
+      "--name",
+      "内容 Content",
+      "--fields-json",
+      fields,
+    ]);
+
+    expect(exitCode).toBe(0);
+    expect(calls).toEqual([
+      expect.objectContaining({
+        method: "POST",
+        url: "http://localhost:15419/api/v1/nodes/change-requests",
+        body: {
+          message: "Create base 内容 Content",
+          operations: [
+            {
+              fields: JSON.parse(fields),
+              kind: "create",
+              name: "内容 Content",
+              nodeType: "base",
+              slug: "content",
+            },
+          ],
+        },
+      }),
+    ]);
+  });
+
+  it("rejects mixed shorthand and JSON field definitions", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    global.fetch = vi.fn() as typeof fetch;
+
+    const exitCode = await runCli([
+      "--base-url",
+      "http://localhost:15419",
+      "bases",
+      "create",
+      "--slug",
+      "products",
+      "--name",
+      "Products",
+      "--field",
+      "name:Name:text",
+      "--fields-json",
+      "[]",
+    ]);
+
+    expect(exitCode).toBe(1);
+    expect(global.fetch).not.toHaveBeenCalled();
+    expect(error.mock.calls.join("\n")).toContain("Pass either --field or --fields-json");
+  });
+
   it("terminally closes a Change Request through the close endpoint", async () => {
     const calls: Array<{ body: unknown; method: string; url: string }> = [];
     global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {

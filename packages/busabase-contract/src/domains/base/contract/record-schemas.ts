@@ -50,6 +50,24 @@ export const createChangeRequestInputSchema = z.object({
   submittedBy: z.string().optional().default("local-producer"),
 });
 
+export const createBulkChangeRequestInputSchema = z.object({
+  records: z
+    .array(z.record(z.string(), z.unknown()))
+    .min(1)
+    .max(1000)
+    .describe(
+      "Field-value maps, one per record to create, each keyed by field slug. All records are proposed as a SINGLE change request (one review, one merge) — use this to import/seed many rows at once instead of one change request per record. Capped at 1000; for very large loads prefer a dedicated import job. Always give each record's PRIMARY field a short human-readable value.",
+    ),
+  message: z
+    .string()
+    .optional()
+    .default("Bulk create records")
+    .describe(
+      'Explanation shown to the human reviewer for the whole batch — e.g. "Import 240 June webinar leads".',
+    ),
+  submittedBy: z.string().optional().default("local-producer"),
+});
+
 export const recordFieldFilterInputSchema = z.object({
   baseId: z.string().optional(),
   fieldSlug: z.string().min(1),

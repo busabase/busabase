@@ -127,12 +127,18 @@ export const mdComponents: StreamdownComponents = {
   td: ({ children }) => <td className="border-b px-3 py-1.5">{children as ReactNode}</td>,
 };
 
-export function MarkdownFieldPreview({
+/**
+ * Shared Preview/Source toggle for rich-text field values (markdown, html).
+ * Both modes render the same raw `source` string; only the preview node differs.
+ */
+function SourceTogglePreview({
   className = "",
-  value,
+  preview,
+  source,
 }: {
   className?: string;
-  value: string;
+  preview: ReactNode;
+  source: string;
 }) {
   const [mode, setMode] = useState<"preview" | "source">("preview");
   return (
@@ -156,15 +162,49 @@ export function MarkdownFieldPreview({
         </div>
       </div>
       {mode === "preview" ? (
-        <div className="min-w-0 break-words text-sm leading-7 [word-break:break-word] [&>*:first-child]:mt-0 [&>*:last-child]:mb-0">
-          <Streamdown components={mdComponents}>{value}</Streamdown>
-        </div>
+        preview
       ) : (
         <div className="min-w-0 whitespace-pre-wrap break-words font-mono text-sm leading-6 text-muted-foreground">
-          {value}
+          {source}
         </div>
       )}
     </div>
+  );
+}
+
+export function MarkdownFieldPreview({
+  className = "",
+  value,
+}: {
+  className?: string;
+  value: string;
+}) {
+  return (
+    <SourceTogglePreview
+      className={className}
+      preview={
+        <div className="min-w-0 break-words text-sm leading-7 [word-break:break-word] [&>*:first-child]:mt-0 [&>*:last-child]:mb-0">
+          <Streamdown components={mdComponents}>{value}</Streamdown>
+        </div>
+      }
+      source={value}
+    />
+  );
+}
+
+export function HtmlFieldPreview({ className = "", value }: { className?: string; value: string }) {
+  return (
+    <SourceTogglePreview
+      className={className}
+      preview={
+        <div
+          className="busabase-html-field min-w-0 break-words leading-6"
+          // biome-ignore lint/security/noDangerouslySetInnerHtml: HTML fields are sanitized through a tag and href allowlist before rendering.
+          dangerouslySetInnerHTML={{ __html: sanitizeHtml(value) }}
+        />
+      }
+      source={value}
+    />
   );
 }
 
@@ -298,11 +338,7 @@ export function FieldValuePreview({
     const html = fieldValueToString(value);
     return (
       <MultilineFieldPreview collapsible={shouldCollapse} title={fieldName}>
-        <div
-          className={`busabase-html-field min-w-0 break-words leading-6 ${className}`}
-          // biome-ignore lint/security/noDangerouslySetInnerHtml: HTML fields are sanitized through a tag and href allowlist before rendering.
-          dangerouslySetInnerHTML={{ __html: sanitizeHtml(html) }}
-        />
+        <HtmlFieldPreview className={className} value={html} />
       </MultilineFieldPreview>
     );
   }

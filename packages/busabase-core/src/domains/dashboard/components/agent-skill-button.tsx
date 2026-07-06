@@ -15,6 +15,7 @@ const AGENTS: { name: string; url: string }[] = [
   { name: "Gemini CLI", url: "https://github.com/google-gemini/gemini-cli" },
   { name: "Cursor", url: "https://cursor.com" },
   { name: "OpenClaw", url: "https://openclaw.ai" },
+  { name: "WorkBuddy", url: "https://copilot.tencent.com/work/" },
   { name: "Buda Agent", url: "https://buda.im" },
   { name: "Hermes", url: "https://hermes-agent.nousresearch.com" },
 ];

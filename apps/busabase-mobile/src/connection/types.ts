@@ -11,6 +11,14 @@ export interface BusabaseConnection {
     name?: string;
     image?: string | null;
   };
+  selectedSpace?: BusabaseSpace | null;
+}
+
+export interface BusabaseSpace {
+  id: string;
+  name: string;
+  slug: string | null;
+  plan: string | null;
 }
 
 interface ConnectionStateBase {

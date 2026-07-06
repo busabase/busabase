@@ -44,6 +44,7 @@ import { BaseGraphView } from "./components/graph-view";
 import { ActivityView, InboxView } from "./components/inbox";
 import { RecordDetailView, RecordEditorView, RecordTopbarActions } from "./components/record-views";
 import { SearchDialog } from "./components/search-dialog";
+import { BaseTableSkeleton } from "./components/skeletons";
 import { BusabaseTopbarBreadcrumb } from "./components/topbar";
 import { getRelationRecordIds } from "./helpers/field";
 import { getLocationPath, readInboxView } from "./helpers/inbox";
@@ -1164,6 +1165,12 @@ function BusabaseDashboardContent({
           <ArchivedBasesView archivedBases={[archivedMatch]} onRestoreBase={submitRestoreBase} />
         );
       }
+      // Cold cache / direct link: the base hasn't resolved yet and the list is
+      // still loading — show a table-shaped skeleton instead of flashing an empty
+      // "not found" state.
+      if (!activeBase && basesQuery.isLoading) {
+        return <BaseTableSkeleton />;
+      }
       return (
         <BaseDetailView
           activeView={selectedBaseView}
@@ -1212,6 +1219,7 @@ function BusabaseDashboardContent({
     auditEvents,
     allChangeRequests,
     bases,
+    basesQuery.isLoading,
     client,
     emptyGuide,
     isChangeRequestRoute,

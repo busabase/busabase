@@ -19,6 +19,7 @@ import { fmt, useCoreI18n } from "../../../i18n";
 import { registerNodeDetail } from "../node-detail-registry";
 import type { SkillCodeLanguage } from "./field-preview";
 import { ConfirmActionDialog, EmptyState } from "./primitives";
+import { NodeDetailSkeleton } from "./skeletons";
 
 /**
  * Delete action for a folder/doc/skill node. Creates a `node_delete` change
@@ -247,9 +248,7 @@ export function SkillDetailView({ orpc, slug }: { orpc: BusabaseQueryUtils; slug
 
   if (!skill) {
     return skillQuery.isLoading ? (
-      <div className="grid min-h-[320px] place-items-center text-muted-foreground text-sm">
-        {messages.nodeDetail.loadingSkill}
-      </div>
+      <NodeDetailSkeleton variant="skill" />
     ) : (
       <EmptyState
         title={messages.nodeDetail.skillNotFoundTitle}
@@ -373,9 +372,7 @@ export function DocDetailView({ orpc, slug }: { orpc: BusabaseQueryUtils; slug: 
 
   if (!doc) {
     return docQuery.isLoading ? (
-      <div className="grid min-h-[320px] place-items-center text-muted-foreground text-sm">
-        {messages.nodeDetail.loadingDoc}
-      </div>
+      <NodeDetailSkeleton variant="doc" />
     ) : (
       <EmptyState
         title={messages.nodeDetail.docNotFoundTitle}
@@ -534,9 +531,7 @@ export function FolderDetailView({
 
   if (!folder) {
     return folderQuery.isLoading ? (
-      <div className="grid min-h-[320px] place-items-center text-muted-foreground text-sm">
-        {messages.nodeDetail.loadingFolder}
-      </div>
+      <NodeDetailSkeleton variant="folder" />
     ) : (
       <EmptyState
         title={messages.nodeDetail.folderNotFoundTitle}

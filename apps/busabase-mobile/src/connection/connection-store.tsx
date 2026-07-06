@@ -18,7 +18,7 @@ import {
 } from "~/auth/session-store";
 import { busabaseConfig } from "./config";
 import { normalizeServerUrl } from "./server-url";
-import type { BusabaseConnection, ConnectionState } from "./types";
+import type { BusabaseConnection, BusabaseSpace, ConnectionState } from "./types";
 
 const STORAGE_KEY = "busabase-mobile.connection.v1";
 const RECENT_SERVER_KEY = "busabase-mobile.recent-server-url.v1";
@@ -52,7 +52,10 @@ interface ConnectionContextValue {
   /** Preset demo server URL, or null when not configured. */
   demoServerUrl: string | null;
   cloudServerUrl: string;
-  getCloudAuthorizationHeaders: () => Promise<Record<string, string>>;
+  getCloudAuthorizationHeaders: (options?: {
+    spaceId?: string | null;
+  }) => Promise<Record<string, string>>;
+  selectSpace: (space: BusabaseSpace | null) => Promise<void>;
   disconnect: () => Promise<void>;
   removeServerFromHistory: (serverUrl: string) => Promise<void>;
 }
@@ -174,15 +177,46 @@ export function ConnectionProvider({ children }: { children: ReactNode }) {
     await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(connection));
   }, []);
 
-  const getCloudAuthorizationHeaders = useCallback(async (): Promise<Record<string, string>> => {
-    const session = await getCloudSession();
-    const token = getCloudSessionToken(session);
-    if (!token) return {};
-    return {
-      authorization: `Bearer ${token}`,
-      "x-busabase-client": "native",
-      "x-busabase-client-platform": "mobile",
-    };
+  const getCloudAuthorizationHeaders = useCallback(
+    async (options?: { spaceId?: string | null }): Promise<Record<string, string>> => {
+      const session = await getCloudSession();
+      const token = getCloudSessionToken(session);
+      if (!token) return {};
+      const headers: Record<string, string> = {
+        authorization: `Bearer ${token}`,
+        "x-busabase-client": "native",
+        "x-busabase-client-platform": "mobile",
+      };
+      const selectedSpace =
+        options && "spaceId" in options
+          ? options.spaceId
+          : state.status === "connected"
+            ? state.connection.selectedSpace?.id
+            : undefined;
+      if (selectedSpace) {
+        headers["x-busabase-space"] = selectedSpace;
+      }
+      return headers;
+    },
+    [state],
+  );
+
+  const selectSpace = useCallback(async (space: BusabaseSpace | null) => {
+    let nextConnection: BusabaseConnection | null = null;
+    setState((current) => {
+      if (current.status !== "connected") return current;
+      nextConnection = {
+        ...current.connection,
+        selectedSpace: space,
+      };
+      return {
+        ...current,
+        connection: nextConnection,
+      };
+    });
+    if (nextConnection) {
+      await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(nextConnection));
+    }
   }, []);
 
   const disconnect = useCallback(async () => {
@@ -223,6 +257,7 @@ export function ConnectionProvider({ children }: { children: ReactNode }) {
       demoServerUrl: DEMO_SERVER_URL,
       cloudServerUrl: CLOUD_SERVER_URL,
       getCloudAuthorizationHeaders,
+      selectSpace,
       disconnect,
       removeServerFromHistory,
     }),
@@ -232,6 +267,7 @@ export function ConnectionProvider({ children }: { children: ReactNode }) {
       connectCloud,
       connectDemo,
       getCloudAuthorizationHeaders,
+      selectSpace,
       disconnect,
       removeServerFromHistory,
     ],

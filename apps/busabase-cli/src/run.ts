@@ -36,6 +36,9 @@ const DOCS_TROUBLESHOOTING = "https://busabase.com/docs/troubleshooting";
 type FieldType = NonNullable<
   Parameters<BusabaseClient["bases"]["create"]>[0]["fields"]
 >[number]["type"];
+type BaseFieldInput = NonNullable<
+  Parameters<BusabaseClient["bases"]["create"]>[0]["fields"]
+>[number];
 
 /**
  * Precedence: explicit flag > exported env var > ~/.busabase/.env file > default. Reading the
@@ -159,6 +162,27 @@ function parseFieldSpecs(specs: string[]) {
       ...(type ? { type: type as FieldType } : {}),
     };
   });
+}
+
+function parseFieldDefinitions(opts: OptionValues): BaseFieldInput[] {
+  const specs = (opts.field as string[] | undefined) ?? [];
+  const fieldsJson = opts.fieldsJson as string | undefined;
+  if (specs.length > 0 && fieldsJson) {
+    throw new Error("Pass either --field or --fields-json, not both.");
+  }
+  if (fieldsJson) {
+    const parsed = parseJsonValue(fieldsJson, "fields-json");
+    if (!Array.isArray(parsed)) {
+      throw new Error(
+        '--fields-json must be a JSON array of field definitions. Example: [{"slug":"status","name":"Status","type":"select","options":{"choices":[{"id":"live","name":"Live"}]}}]',
+      );
+    }
+    return parsed as BaseFieldInput[];
+  }
+  if (specs.length === 0) {
+    throw new Error("Pass at least one --field or provide --fields-json @fields.json.");
+  }
+  return parseFieldSpecs(specs);
 }
 
 function parseJsonValue(raw: string, flagName: string): unknown {
@@ -637,17 +661,22 @@ The flags below skip the menu (handy for scripts / CI):
     .option("--message <text>", "reviewer-facing Change Request message")
     .option("--submitted-by <name>", "producer label")
     .option("--field <slug:name:type...>", "base field, repeatable (for --type base)")
+    .option("--fields-json <json|@file>", "base fields as JSON array (for --type base)")
     .addHelpText(
       "after",
       `
 Examples:
   busabase-cli nodes create-change-request --type folder --slug cms --name "内容管理 CMS"
-  busabase-cli nodes create-change-request --type base --slug blog --name "博客文章 Blog Posts" --field title:Title:text --field body:Body:markdown`,
+  busabase-cli nodes create-change-request --type base --slug blog --name "博客文章 Blog Posts" --field title:Title:text --field body:Body:markdown
+  busabase-cli nodes create-change-request --type base --slug products --name "产品目录 Products" --fields-json @fields.json`,
     )
     .action(
       runAction(state, (client, opts) => {
         const nodeType = opts.type as CreatableNodeType;
         const name = opts.name as string;
+        if (nodeType !== "base" && (opts.field || opts.fieldsJson)) {
+          throw new Error("--field and --fields-json are only valid with --type base.");
+        }
         return client.nodes.createChangeRequest({
           message: (opts.message as string | undefined) ?? `Create ${nodeType} ${name}`,
           submittedBy: opts.submittedBy as string | undefined,
@@ -659,9 +688,7 @@ Examples:
               name,
               description: opts.description as string | undefined,
               parentNodeId: opts.parentNodeId as string | undefined,
-              ...(nodeType === "base"
-                ? { fields: parseFieldSpecs((opts.field as string[] | undefined) ?? []) }
-                : {}),
+              ...(nodeType === "base" ? { fields: parseFieldDefinitions(opts) } : {}),
             },
           ],
         });
@@ -687,9 +714,17 @@ Examples:
     .description("Create a Base")
     .requiredOption("--slug <slug>", "Base slug")
     .requiredOption("--name <name>", "Base name")
-    .requiredOption("--field <slug:name:type...>", "field definition, repeatable")
+    .option("--field <slug:name:type...>", "field definition, repeatable")
+    .option("--fields-json <json|@file>", "field definitions as JSON array")
     .option("--description <text>", "optional description")
     .option("--parent-node-id <id>", "parent folder node id; omit for root")
+    .addHelpText(
+      "after",
+      `
+Examples:
+  busabase-cli bases create --slug products --name "产品目录 Products" --field product_name:"Product Name":text
+  busabase-cli bases create --slug products --name "产品目录 Products" --fields-json @fields.json`,
+    )
     .action(
       runAction(state, (client, opts) =>
         client.bases.create({
@@ -697,7 +732,7 @@ Examples:
           name: opts.name as string,
           description: opts.description as string | undefined,
           parentNodeId: opts.parentNodeId as string | undefined,
-          fields: parseFieldSpecs(opts.field as string[]),
+          fields: parseFieldDefinitions(opts),
         }),
       ),
     );
@@ -1032,7 +1067,7 @@ export const HELP = renderedHelp();
  * concrete next step (set a key for Cloud, point at a local server, or check connectivity), and a
  * link to the troubleshooting docs.
  */
-function explainError(error: unknown, config: ResolvedConfig): string {
+export function explainError(error: unknown, config: ResolvedConfig): string {
   const base = config.baseUrl;
   const msg = error instanceof Error ? error.message : String(error);
   const status = (error as { status?: number }).status;

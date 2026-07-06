@@ -53,6 +53,8 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
   const { getCloudAuthorizationHeaders, state } = useConnection();
   const serverUrl = state.status === "connected" ? state.connection.serverUrl : null;
   const connectionMode = state.status === "connected" ? state.connection.mode : null;
+  const selectedSpaceId =
+    state.status === "connected" ? (state.connection.selectedSpace?.id ?? null) : null;
   const [settings, setSettings] = useState<NotificationSettings>(defaultNotificationSettings);
   const [permissionDenied, setPermissionDenied] = useState(false);
   const pollTimer = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -76,7 +78,7 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
       const changeRequestId = response?.notification.request.content.data?.changeRequestId;
       if (typeof changeRequestId === "string" && changeRequestId) {
         if (serverUrl) {
-          void markChangeRequestSeen(serverUrl, changeRequestId);
+          void markChangeRequestSeen(serverUrl, changeRequestId, selectedSpaceId);
         }
         router.push({ pathname: "/change-requests/[id]", params: { id: changeRequestId } });
       }
@@ -85,7 +87,7 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
     void Notifications.getLastNotificationResponseAsync().then(openFromResponse);
     const subscription = Notifications.addNotificationResponseReceivedListener(openFromResponse);
     return () => subscription.remove();
-  }, [router, serverUrl]);
+  }, [router, serverUrl, selectedSpaceId]);
 
   // Foreground polling loop.
   useEffect(() => {
@@ -102,7 +104,7 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
         return;
       }
       void Promise.resolve(connectionMode === "cloud" ? getCloudAuthorizationHeaders() : {})
-        .then((headers) => checkForNewChangeRequests(serverUrl, headers))
+        .then((headers) => checkForNewChangeRequests(serverUrl, headers, selectedSpaceId))
         .catch(() => {
           // Server unreachable — surface nothing; the next poll retries.
         });
@@ -129,6 +131,7 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
     settings.pollIntervalSec,
     serverUrl,
     connectionMode,
+    selectedSpaceId,
     getCloudAuthorizationHeaders,
   ]);
 
@@ -152,7 +155,7 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
         if (serverUrl) {
           // Don't notify about everything that already exists when turning on.
           const headers = connectionMode === "cloud" ? await getCloudAuthorizationHeaders() : {};
-          await primeSeenChangeRequests(serverUrl, headers).catch(() => undefined);
+          await primeSeenChangeRequests(serverUrl, headers, selectedSpaceId).catch(() => undefined);
         }
         await registerBackgroundWatch();
       } else {
@@ -163,7 +166,7 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
       setSettings(next);
       await saveNotificationSettings(next);
     },
-    [serverUrl, settings, connectionMode, getCloudAuthorizationHeaders],
+    [serverUrl, settings, connectionMode, selectedSpaceId, getCloudAuthorizationHeaders],
   );
 
   const setPollInterval = useCallback(

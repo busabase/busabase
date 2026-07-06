@@ -32,27 +32,38 @@ export async function fetchChangeRequests(
   return (await response.json()) as ChangeRequestVO[];
 }
 
-async function loadSeenIds(serverUrl: string): Promise<Set<string>> {
+const scopeKey = (serverUrl: string, spaceId?: string | null) =>
+  `${serverUrl}${spaceId ? `#${spaceId}` : ""}`;
+
+async function loadSeenIds(serverUrl: string, spaceId?: string | null): Promise<Set<string>> {
   try {
-    const raw = await AsyncStorage.getItem(SEEN_KEY_PREFIX + serverUrl);
+    const raw = await AsyncStorage.getItem(SEEN_KEY_PREFIX + scopeKey(serverUrl, spaceId));
     return new Set(raw ? (JSON.parse(raw) as string[]) : []);
   } catch {
     return new Set();
   }
 }
 
-async function saveSeenIds(serverUrl: string, ids: Set<string>): Promise<void> {
+async function saveSeenIds(
+  serverUrl: string,
+  ids: Set<string>,
+  spaceId?: string | null,
+): Promise<void> {
   await AsyncStorage.setItem(
-    SEEN_KEY_PREFIX + serverUrl,
+    SEEN_KEY_PREFIX + scopeKey(serverUrl, spaceId),
     JSON.stringify([...ids].slice(-MAX_SEEN_IDS)),
   );
 }
 
-export async function markChangeRequestSeen(serverUrl: string, id: string): Promise<void> {
-  const seen = await loadSeenIds(serverUrl);
+export async function markChangeRequestSeen(
+  serverUrl: string,
+  id: string,
+  spaceId?: string | null,
+): Promise<void> {
+  const seen = await loadSeenIds(serverUrl, spaceId);
   if (!seen.has(id)) {
     seen.add(id);
-    await saveSeenIds(serverUrl, seen);
+    await saveSeenIds(serverUrl, seen, spaceId);
   }
 }
 
@@ -60,9 +71,10 @@ export async function markChangeRequestSeen(serverUrl: string, id: string): Prom
 export async function primeSeenChangeRequests(
   serverUrl: string,
   headers: Record<string, string> = {},
+  spaceId?: string | null,
 ): Promise<void> {
   const changeRequests = await fetchChangeRequests(serverUrl, headers);
-  await saveSeenIds(serverUrl, new Set(changeRequests.map((item) => item.id)));
+  await saveSeenIds(serverUrl, new Set(changeRequests.map((item) => item.id)), spaceId);
   await updateBadge(changeRequests);
 }
 
@@ -91,16 +103,17 @@ export interface WatchResult {
 export async function checkForNewChangeRequests(
   serverUrl: string,
   headers: Record<string, string> = {},
+  spaceId?: string | null,
 ): Promise<WatchResult> {
   const changeRequests = await fetchChangeRequests(serverUrl, headers);
-  const seen = await loadSeenIds(serverUrl);
+  const seen = await loadSeenIds(serverUrl, spaceId);
   const inReview = changeRequests.filter((item) => item.status === "in_review");
   const fresh = inReview.filter((item) => !seen.has(item.id));
 
   for (const changeRequest of changeRequests) {
     seen.add(changeRequest.id);
   }
-  await saveSeenIds(serverUrl, seen);
+  await saveSeenIds(serverUrl, seen, spaceId);
   await updateBadge(changeRequests);
 
   if (NOTIFICATIONS_SUPPORTED) {

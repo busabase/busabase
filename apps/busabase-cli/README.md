@@ -77,6 +77,8 @@ busabase-cli bases list
 busabase-cli bases get --slug tasks
 busabase-cli nodes create-change-request --type folder --slug crm --name "CRM"
 busabase-cli nodes create-change-request --type base --slug contacts --name "Contacts" --parent-node-id nod_123 --field name:Name:text
+busabase-cli nodes create-change-request --type base --slug products --name "Products" --fields-json @fields.json
+busabase-cli bases create --slug products --name "Products" --fields-json @fields.json
 busabase-cli bases create-field --base-id bse_123 --slug cover_image --name "Cover image" --field-type attachment --max-files 1 --allowed-mime image/png --allowed-mime image/svg+xml
 busabase-cli bases update-field-change-request --base-id bse_123 --field-id bsf_123 --max-files 1 --allowed-mime image/png
 busabase-cli bases create-change-request --base-id bse_123 --fields-json '{"title":"Hello"}'
