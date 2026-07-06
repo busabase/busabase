@@ -65,9 +65,10 @@ export function buildSkillMarkdown(origin: string, ctx?: SkillMarkdownContext): 
 
   // Cloud mode: the API key is USER-scoped (works across every space the user
   // belongs to), so each request must name its target space explicitly via the
-  // `x-busabase-space` header — otherwise the server silently falls back to the
-  // user's default space. Every cloud example carries the header so a wrong or
-  // unreplaced space id fails loudly instead of writing into the wrong space.
+  // `x-busabase-space` header. With one space the server can use it automatically;
+  // with several, a write missing the header is rejected 400 (the server refuses to
+  // guess). Every cloud example carries the header so a wrong or unreplaced space
+  // id fails loudly, not into the wrong space.
   const spaceHeader = isLocal ? null : `x-busabase-space: ${spaceId}`;
   const headerList = [authHeader, spaceHeader].filter((h): h is string => Boolean(h));
 
@@ -126,8 +127,10 @@ ${
 
 Your API key belongs to the **user**, not to a space: it works across **every space the
 user is a member of**. Each request targets exactly one space via the
-\`x-busabase-space\` header — **without the header the server silently falls back to the
-user's default space**, which may not be the one the user means.
+\`x-busabase-space\` header. With exactly one space the header is optional; **when the
+key spans multiple spaces, a write with no \`x-busabase-space\` header is rejected
+with \`400\`** (it lists your spaces) rather than silently guessing. Always set the
+header once you know the target.
 
 Before the first write of a session:
 
@@ -145,7 +148,7 @@ curl ${base}/api/v1/auth${HAuthOnly}
    assume the default is the one they mean.
 3. Send the chosen ID as \`x-busabase-space\` on **every** call. The examples below
    already carry it (current target: \`${spaceId}\`). A space you're not a member of
-   returns 403.`
+   returns 403; a missing header with multiple spaces returns 400.`
 }
 
 ## API Surface
@@ -157,13 +160,16 @@ Quick reference — every path is relative to the base URL above; worked example
 | List Bases | \`GET /api/v1/bases\` | tables in this workspace |
 | List Nodes | \`GET /api/v1/nodes\` | folders, Bases, Skills |
 | List ChangeRequests | \`GET /api/v1/change-requests\` | the review queue |
-| Create record CR | \`POST /api/v1/bases/:baseId/change-requests\` | propose a record change |
-| Create node CR | \`POST /api/v1/nodes/change-requests\` | propose folder / Skill structure changes |
+| Create record CR | \`POST /api/v1/bases/:baseId/change-requests\` | propose one record change |
+| Bulk create records CR | \`POST /api/v1/bases/:baseId/records/bulk-change-request\` | propose many records (≤1000) as ONE CR |
+| Create node CR | \`POST /api/v1/nodes/change-requests\` | propose folder / Skill structure changes (supports in-CR \`ref\`/\`parentNodeRef\`) |
 | Read Skill files | \`GET /api/v1/skills/:nodeId/files/:filePath\` | read a Skill file |
 | Create Skill file CR | \`POST /api/v1/skills/:nodeId/change-requests\` | propose a Skill file edit |
 | Review (approve / request changes) | \`POST /api/v1/change-requests/:id/reviews\` | approve or request revision |
+| Review many | \`POST /api/v1/change-requests/reviews\` | approve/reject many CRs in one call |
 | Close / abandon ChangeRequest | \`POST /api/v1/change-requests/:id/close\` | terminally close a bad proposal |
 | Merge | \`POST /api/v1/change-requests/:id/merge\` | apply an approved CR |
+| Merge many | \`POST /api/v1/change-requests/merge\` | merge many approved CRs in one call |
 | Read records | \`GET /api/v1/records\` | merged canonical records |
 | Agent work queue | \`GET /api/v1/agent/tasks\` | CRs awaiting your revision |
 | Revise an operation | \`POST /api/v1/operations/:operationId/revisions\` | answer requested changes |
@@ -202,14 +208,78 @@ ${authLine}  -H 'content-type: application/json' \\
   }'
 \`\`\`
 
-Create a node ChangeRequest (folder / Skill structure changes — use
-\`node_create\`, \`node_rename\`, \`node_move\`, or \`node_delete\` semantics):
+Bulk-create many records as ONE ChangeRequest (up to 1000 — one review, one merge,
+instead of a CR per row). Prefer this whenever seeding / importing multiple records:
 
 \`\`\`bash
+curl -X POST ${base}/api/v1/bases/:baseId/records/bulk-change-request \\
+${authLine}  -H 'content-type: application/json' \\
+  --data '{
+    "records": [
+      { "title": "Acme Corp", "channel": "blog" },
+      { "title": "Globex", "channel": "blog" },
+      { "title": "Initech", "channel": "blog" }
+    ],
+    "message": "Import 3 launch-week leads",
+    "submittedBy": "agent"
+  }'
+\`\`\`
+
+Create a node ChangeRequest (folder / Skill structure changes — use
+\`create\`, \`rename\`, \`move\`, \`delete\`, or \`restore\`). \`operations\` is an ordered
+array — one CR can carry many operations, and a create op can declare a temp \`ref\`
+that a later op references via \`parentNodeRef\`, so you can create a folder and fill
+it in a single CR without merging the folder first to learn its real id.
+
+| \`kind\` | Required fields | Does |
+| --- | --- | --- |
+| \`create\` | \`nodeType\` (\`folder\`/\`base\`/\`skill\`/\`doc\`), \`slug\`, \`name\`; optional \`ref\`, \`parentNodeId\`, \`parentNodeRef\`, \`description\`, \`fields\` | create a node (omit parent → root; use \`ref\` for later ops) |
+| \`rename\` | \`nodeId\`; any of \`slug\`, \`name\`, \`description\` | rename / re-slug a node |
+| \`move\` | \`nodeId\`; \`parentNodeId\` or \`parentNodeRef\`; optional \`position\` | move a node under another folder |
+| \`delete\` | \`nodeId\` | archive a node |
+| \`restore\` | \`nodeId\` | un-archive a node |
+
+\`\`\`bash
+# Create a folder, create a base inside it by temp ref, and move an existing node into it:
 curl -X POST ${base}/api/v1/nodes/change-requests \\
 ${authLine}  -H 'content-type: application/json' \\
-  --data '{ "message": "Create a Campaigns folder for Q3 marketing docs", "submittedBy": "agent" }'
+  --data '{
+    "message": "Set up the Growth workspace",
+    "submittedBy": "agent",
+    "operations": [
+      { "kind": "create", "ref": "growth", "nodeType": "folder", "slug": "growth", "name": "Growth" },
+      { "kind": "create", "parentNodeRef": "growth", "nodeType": "base", "slug": "campaigns", "name": "Campaigns",
+        "fields": [{ "slug": "title", "name": "Title", "type": "text", "required": true }] },
+      { "kind": "move", "nodeId": ":existingNodeId", "parentNodeRef": "growth" }
+    ]
+  }'
+
+# Rename a node:
+curl -X POST ${base}/api/v1/nodes/change-requests \\
+${authLine}  -H 'content-type: application/json' \\
+  --data '{
+    "message": "Rename Campaigns → Q3 Campaigns",
+    "submittedBy": "agent",
+    "operations": [
+      { "kind": "rename", "nodeId": "<NODE_ID>", "name": "Q3 Campaigns", "slug": "q3-campaigns" }
+    ]
+  }'
+
+# Move a node into a folder (parentNodeId = the destination folder's node id):
+curl -X POST ${base}/api/v1/nodes/change-requests \\
+${authLine}  -H 'content-type: application/json' \\
+  --data '{
+    "message": "Move the Blog Posts base into Campaigns",
+    "submittedBy": "agent",
+    "operations": [
+      { "kind": "move", "nodeId": "<NODE_ID>", "parentNodeId": "<FOLDER_NODE_ID>" }
+    ]
+  }'
 \`\`\`
+
+> A newly created folder's real \`nodeId\` only exists **after the CR is merged**.
+> Within the same CR, use a temp \`ref\` on the create op and \`parentNodeRef\` on later
+> create/move ops that should target it.
 
 Read Skill files:
 
@@ -266,6 +336,21 @@ Merge an approved ChangeRequest:
 
 \`\`\`bash
 curl -X POST ${base}/api/v1/change-requests/:changeRequestId/merge${H}
+\`\`\`
+
+Review or merge MANY ChangeRequests in one call (for "approve/merge all of these" —
+failures are isolated and reported per id, so one bad id never aborts the rest):
+
+\`\`\`bash
+# Approve several at once
+curl -X POST ${base}/api/v1/change-requests/reviews \\
+${authLine}  -H 'content-type: application/json' \\
+  --data '{ "changeRequestIds": ["crq_1", "crq_2", "crq_3"], "verdict": "approved" }'
+
+# Merge several at once → { "results": [{ "changeRequestId", "ok", "status?", "error?" }] }
+curl -X POST ${base}/api/v1/change-requests/merge \\
+${authLine}  -H 'content-type: application/json' \\
+  --data '{ "changeRequestIds": ["crq_1", "crq_2", "crq_3"] }'
 \`\`\`
 
 Read canonical records:
@@ -410,8 +495,8 @@ function buildBootstrapMarkdown(origin: string, ctx?: SkillMarkdownContext): str
   const isCloud = ctx?.mode === "cloud";
 
   // Base URL + auth fragments woven into the shared Step 3 curl examples. Cloud
-  // calls always carry `x-busabase-space` — the API key is user-scoped, and without
-  // the header writes silently land in the user's default space (Step 0 picks the
+  // calls always carry `x-busabase-space` — the API key is user-scoped, and with
+  // multiple spaces a write without the header is rejected 400 (Step 0 picks the
   // space and exports $BUSABASE_SPACE_ID before any of these run).
   const api = isCloud ? "$BUSABASE_BASE_URL" : local;
   const H = isCloud
@@ -491,7 +576,8 @@ connection to \`~/.busabase/.env\` **for you** — base URL, a login session tok
 space (it even asks which space when the user belongs to more than one):
 
 \`\`\`bash
-npx -y busabase-cli login    # opens the browser; prints a URL to paste if it can't
+npm exec -y --package busabase-cli@latest -- busabase-cli login
+# opens the browser; prints a URL to paste if it can't
 \`\`\`
 
 When it prints **"Signed in"**, the connection is saved — just read it back and continue:
@@ -528,8 +614,9 @@ curl -fsS "$BUSABASE_BASE_URL/api/v1/users/me" -H "Authorization: Bearer $BUSABA
 
 **Then pick the target space — the key is user-scoped, not space-scoped.** The key works
 across every space the user is a member of, and each request targets one space via the
-\`x-busabase-space\` header; without it, writes silently land in the user's *default* space —
-which may not be the one the user means. So look before you write:
+\`x-busabase-space\` header. If the user has **more than one space**, a write without the
+header is **rejected with \`400\`** (the server refuses to guess and lists the candidates);
+with exactly one space the header is optional. Either way, look before you write:
 
 \`\`\`bash
 curl -fsS "$BUSABASE_BASE_URL/api/v1/auth" -H "Authorization: Bearer $BUSABASE_API_KEY"
@@ -589,8 +676,9 @@ printf 'BUSABASE_BASE_URL=%s\\n' "${local}" > ~/.busabase/.env
   const step1 = isCloud
     ? `## Step 1 — Get credentials (only if you don't have any)
 
-**Easiest: \`npx -y busabase-cli login\`** — browser sign-in that saves everything to
-\`~/.busabase/.env\`, no key to copy. Use the manual key below only when there's no browser.
+**Easiest: \`npm exec -y --package busabase-cli@latest -- busabase-cli login\`** — browser
+sign-in that saves everything to \`~/.busabase/.env\`, no key to copy. Use the manual key below
+only when there's no browser.
 
 Manual API key: tell the user in plain words to sign in at \`${site}/dashboard\`, open
 **Settings → API Keys**, and **Create key** — copy it (it is shown only once). Then save it so
@@ -725,7 +813,7 @@ until curl -fsS ${local}/api/v1/bases >/dev/null 2>&1; do sleep 2; done && echo 
 \`\`\``;
 
   const spaceNote = isCloud
-    ? "(Every call carries `x-busabase-space: $BUSABASE_SPACE_ID` — the space picked in Step 0. The API key is user-scoped, so a call without the header silently lands in the user's default space.)"
+    ? "(Every call carries `x-busabase-space: $BUSABASE_SPACE_ID` — the space picked in Step 0. The API key is user-scoped; with multiple spaces a write without the header is rejected 400.)"
     : "(No `spaceId` in local mode.)";
 
   const step4 = `## Step 4 — The last setup step: install the permanent skill
@@ -862,9 +950,11 @@ fold in any edits, and only create on their go-ahead. A sketch worth showing:
 Once they approve, build folder-first so the user never lands in a flat root full of tables:
 
 - Folder / node-tree edits **do require** a Node ChangeRequest: \`POST /api/v1/nodes/change-requests\`,
-  then approve + merge it.
-- Base creation can be direct through \`POST /api/v1/bases\`; pass \`parentNodeId\` when placing the
-  Base under a folder. Omitting \`parentNodeId\` creates a root-level Base node.
+  then approve + merge it. One CR can hold MANY operations — a create op can declare a temp \`ref\`
+  that a later op targets via \`parentNodeRef\`, so **you can create the folder AND the Bases/Docs
+  inside it in a single CR** (no need to merge the folder first to learn its id).
+- Base creation can also be direct through \`POST /api/v1/bases\`; pass \`parentNodeId\` when placing the
+  Base under an already-merged folder. Omitting \`parentNodeId\` creates a root-level Base node.
 
 Worked example for blueprint #1:
 
@@ -878,7 +968,9 @@ ${authLine}  -H 'content-type: application/json' \\
     ],
     "submittedBy": "agent"
   }'
-# Approve + merge the returned folder ChangeRequest, then use the new folder node id as parentNodeId.
+# Approve + merge, then use the new folder node id as parentNodeId below — OR skip the round-trip
+# and add the Base to the SAME CR with { "kind": "create", "parentNodeRef": "content", ... } after
+# giving the folder op a "ref": "content" (see the node ChangeRequest example in API Surface).
 \`\`\`
 
 \`\`\`bash
@@ -925,7 +1017,8 @@ write records directly. **Write for the reviewer:** the Base's PRIMARY field (it
 e.g. \`title\`) becomes the record's display name and the ChangeRequest title — always give it a
 short, human-readable value — and \`message\` is your commit message, shown under the title in the
 review inbox: write a conventional-commit style subject (imperative verb + what + why), never
-\`"update"\` or a bare default. One call per record (there is no bulk endpoint):
+\`"update"\` or a bare default. Seed one record per CR when you want each reviewed individually, or
+propose them all at once with the **bulk** endpoint below (one review, one merge):
 
 \`\`\`bash
 curl -X POST "${api}/api/v1/bases/<BASE_ID>/change-requests" \\
@@ -938,6 +1031,22 @@ ${authLine}  -H 'content-type: application/json' \\
       "status": "draft"
     },
     "message": "Seed: first content draft for review",
+    "submittedBy": "agent"
+  }'
+\`\`\`
+
+To seed several rows in one reviewable unit, use the bulk endpoint instead of N calls:
+
+\`\`\`bash
+curl -X POST "${api}/api/v1/bases/<BASE_ID>/records/bulk-change-request" \\
+${authLine}  -H 'content-type: application/json' \\
+  --data '{
+    "records": [
+      { "title": "Launch announcement blog post", "channel": "blog", "status": "draft" },
+      { "title": "Feature deep-dive", "channel": "blog", "status": "idea" },
+      { "title": "Launch week recap thread", "channel": "social", "status": "idea" }
+    ],
+    "message": "Seed: 3 sample content drafts for review",
     "submittedBy": "agent"
   }'
 \`\`\`

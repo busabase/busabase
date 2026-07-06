@@ -366,10 +366,10 @@ export const createNodeChangeRequest = async (
     metadata: { operation: "node_tree_update" },
   });
 
-  const { getChangeRequest } = await import("./cr-lifecycle");
-  const changeRequest = await getChangeRequest(changeRequestId);
-  if (!changeRequest) {
-    throw new Error("Failed to create node change request");
-  }
-  return changeRequest;
+  // Structural node ops auto-merge: the CR is recorded (audit/history/rollback)
+  // but doesn't wait on a human, so folder/base/skill/doc scaffolding feels
+  // instant. Content (record) CRs never reach this path — see autoApproveAndMerge.
+  const { autoApproveAndMerge } = await import("./cr-lifecycle");
+  const merged = await autoApproveAndMerge(changeRequestId);
+  return merged.changeRequest;
 };

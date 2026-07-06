@@ -23,14 +23,19 @@ import {
   busabaseOperations,
 } from "../../../db/schema";
 import { insertAuditEvent } from "../../../logic/audit";
-import { closeChangeRequest, getChangeRequest } from "../../../logic/cr-lifecycle";
-import { id, now } from "../../../logic/kernel";
+import {
+  closeChangeRequest,
+  getChangeRequest,
+  recordMergedOperation,
+} from "../../../logic/cr-lifecycle";
+import { CURRENT_USER_ID, id, now } from "../../../logic/kernel";
 import { ensureReady } from "../../../logic/seed";
 import { fieldSchema } from "../../../logic/store";
 import { isSystemFieldType } from "../field-types";
 import { busabaseFieldValues } from "../schema";
 import { ConversionNotSupportedError, convertFieldValue } from "../utils/field-conversion";
 import { getBase } from "./queries";
+import { resolveRelationFieldOptions } from "./relation-options";
 
 export {
   convertFieldChangeRequestInputSchema,
@@ -51,7 +56,8 @@ export const createBaseField = async (baseId: string, input: z.infer<typeof fiel
     throw new Error(`Base not found: ${baseId}`);
   }
   const parsed = fieldSchema.parse(input);
-  if (parsed.type === "relation" && !parsed.options.targetBaseId) {
+  const options = await resolveRelationFieldOptions(db, parsed.options);
+  if (parsed.type === "relation" && !options.targetBaseId) {
     throw new Error("Relation field requires a target Base");
   }
   const [existing] = await db
@@ -77,17 +83,30 @@ export const createBaseField = async (baseId: string, input: z.infer<typeof fiel
     type: parsed.type,
     required: parsed.required,
     position: fieldCount,
-    options: parsed.options,
+    options,
   });
   const updatedBase = await getBase(base.id);
   if (!updatedBase) {
     throw new Error("Failed to create field");
   }
-  // Direct create (no change request) — record it so the audit trail is complete.
-  await insertAuditEvent(db, {
-    action: "field.created",
+  // Record the field add as an auto-merged ChangeRequest (audit + history +
+  // rollback), replacing the old bespoke `field.created` audit action.
+  await recordMergedOperation({
+    operation: "base_add_field",
+    targetType: "base",
     baseId: base.id,
-    metadata: { slug: parsed.slug, name: parsed.name, type: parsed.type },
+    fields: {
+      name: parsed.name,
+      slug: parsed.slug,
+      type: parsed.type,
+      required: parsed.required,
+      options: parsed.options,
+    },
+    message: `Add field ${parsed.slug}`,
+    submittedBy: resolveActorId(CURRENT_USER_ID),
+    reviewPolicySnapshot: base.reviewPolicy,
+    sourceMeta: { subject: "base_field", fieldSlug: parsed.slug },
+    auditMetadata: { fieldSlug: parsed.slug },
   });
   return updatedBase;
 };
@@ -104,7 +123,8 @@ export const createFieldChangeRequest = async (
   }
 
   const parsed = createFieldChangeRequestInputSchema.parse(input);
-  if (parsed.type === "relation" && !parsed.options.targetBaseId) {
+  const options = await resolveRelationFieldOptions(db, parsed.options);
+  if (parsed.type === "relation" && !options.targetBaseId) {
     throw new Error("Relation field requires a target Base");
   }
   const [existing] = await db
@@ -131,7 +151,7 @@ export const createFieldChangeRequest = async (
     slug: parsed.slug,
     type: parsed.type,
     required: parsed.required,
-    options: parsed.options,
+    options,
   };
 
   await db.insert(busabaseCommits).values({
@@ -324,13 +344,17 @@ export const createUpdateFieldChangeRequest = async (
   const operationId = id("opr");
   const commitId = id("cmt");
   const timestamp = now();
+  const options =
+    patch.options !== undefined
+      ? await resolveRelationFieldOptions(db, patch.options)
+      : field.options;
   const fields = {
     fieldId: field.id,
     slug: field.slug,
     name: patch.name ?? iStringFromText(field.name),
     type: field.type,
     required: patch.required ?? field.required,
-    options: patch.options !== undefined ? patch.options : field.options,
+    options,
   };
 
   await db.insert(busabaseCommits).values({

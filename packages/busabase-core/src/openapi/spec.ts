@@ -8,6 +8,7 @@ const openApiGenerator = new OpenAPIGenerator({
 
 export async function getBusabaseOpenApiSpec() {
   const spec = await openApiGenerator.generate(busabaseContract, {
+    exclude: (_contract, path) => path[0] === "live",
     info: {
       title: "Busabase API",
       version: process.env.VERSION || "0.0.0",

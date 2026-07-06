@@ -85,7 +85,16 @@ export const fieldOptionsSchema = z
         locale: z.string().optional(),
       })
       .optional(),
-    targetBaseId: z.string().optional(),
+    targetBaseId: z
+      .string()
+      .optional()
+      .describe("Relation target Base id (bse_…). Or pass targetBaseSlug to name it by slug."),
+    targetBaseSlug: z
+      .string()
+      .optional()
+      .describe(
+        "Relation target Base by slug — a convenience alias for targetBaseId, resolved server-side (active bases in the current space). If both are given, targetBaseId wins.",
+      ),
   })
   .default({});
 

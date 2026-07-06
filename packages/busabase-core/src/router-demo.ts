@@ -41,6 +41,8 @@ const demoUnsupported = (action: string) =>
     message: `"${action}" is disabled in the Busabase demo. Run Busabase locally to make persistent changes.`,
   });
 
+const shouldEmitDemoLiveEvent = () => false;
+
 export const busabaseDemoRouter = os.router({
   auth: {
     verify: os.auth.verify.handler(() => demoGetAuthInfo()),
@@ -66,6 +68,14 @@ export const busabaseDemoRouter = os.router({
   },
   agent: {
     listTasks: os.agent.listTasks.handler(() => demoListAgentTasks()),
+  },
+  live: {
+    subscribe: os.live.subscribe.handler(async function* () {
+      if (shouldEmitDemoLiveEvent()) {
+        yield undefined as never;
+      }
+      return undefined;
+    }),
   },
   bases: {
     list: os.bases.list.handler(() => demoListBases()),

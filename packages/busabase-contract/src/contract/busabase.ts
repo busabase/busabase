@@ -1,4 +1,4 @@
-import { oc } from "@orpc/contract";
+import { eventIterator, oc } from "@orpc/contract";
 import { attachmentsContract } from "open-domains/attachments/contract";
 import { z } from "zod";
 import { assetsContract } from "../domains/assets/contract";
@@ -23,6 +23,7 @@ import {
   createCommentInputSchema,
   createNodeChangeRequestInputSchema,
   listInputSchema,
+  liveEventSchema,
   nodeSchema,
   reviewChangeRequestInputSchema,
   reviseOperationInputSchema,
@@ -163,6 +164,11 @@ export const busabaseContractRoutes = {
           "Change requests awaiting an external agent (request-changes or @ai mentions).",
       })
       .output(z.array(agentTaskSchema)),
+  },
+  live: {
+    // RPC-only by design: no `.route(...)`, so OpenAPI generation and MCP tool
+    // discovery skip this long-lived Event Iterator while `/api/rpc` stays typed.
+    subscribe: oc.output(eventIterator(liveEventSchema)),
   },
   bases: baseContract,
   skills: skillContract,
@@ -306,6 +312,7 @@ export {
   createCommentInputSchema,
   createDeleteChangeRequestInputSchema,
   listInputSchema,
+  liveEventSchema,
   nodeSchema,
   operationSchema,
   reviewChangeRequestInputSchema,

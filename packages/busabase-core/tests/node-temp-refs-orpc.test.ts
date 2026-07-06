@@ -72,11 +72,9 @@ describe("Node CR temp refs — oRPC integration", () => {
         },
       ],
     });
-    expect(cr.status).toBe("in_review");
+    // Structural node CRs auto-merge — already applied, no manual merge needed.
+    expect(cr.status).toBe("merged");
     expect(cr.operationCount).toBe(3);
-
-    await client.changeRequests.review({ changeRequestId: cr.id, verdict: "approved" });
-    await client.changeRequests.merge({ changeRequestId: cr.id });
 
     const tree = (await client.nodes.list()) as Array<{ slug: string; children?: unknown[] }>;
     const growth = findNode(tree, "growth");
@@ -99,8 +97,7 @@ describe("Node CR temp refs — oRPC integration", () => {
         { kind: "move", nodeId: orphan.id, parentNodeRef: "archive" },
       ],
     });
-    await client.changeRequests.review({ changeRequestId: cr.id, verdict: "approved" });
-    await client.changeRequests.merge({ changeRequestId: cr.id });
+    expect(cr.status).toBe("merged"); // auto-merged
 
     const after = (await client.nodes.list()) as Array<{ slug: string; children?: unknown[] }>;
     const archive = findNode(after, "archive");

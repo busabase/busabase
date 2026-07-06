@@ -9,7 +9,7 @@ import type { NodeVO } from "busabase-contract/types";
 import { and, asc, eq, isNull } from "drizzle-orm";
 import { storage } from "openlib/storage";
 import type { z } from "zod";
-import { getContextSpaceId } from "../../context";
+import { getContextSpaceId, resolveActorId } from "../../context";
 import { getDb } from "../../db";
 import {
   busabaseChangeRequests,
@@ -22,7 +22,7 @@ import {
 } from "../../db/schema";
 // Doc handlers consume the kernel substrate one-way (no cycle). Doc is storage-backed,
 // so it owns no DB tables — its body lives in object storage.
-import { id, now, rootNodeIdForSpace } from "../../logic/kernel";
+import { CURRENT_USER_ID, id, now, rootNodeIdForSpace } from "../../logic/kernel";
 import { type MaterializeArgs, registerMaterializer } from "../../logic/materialize";
 import {
   ensureReady,
@@ -30,6 +30,8 @@ import {
   insertAuditEvent,
   loadNodesByIds,
   type MergeCtx,
+  recordMergedNodeCreate,
+  recordMergedOperation,
   toNodeVO,
 } from "../../logic/store";
 import { syncDocAssetUsages } from "../assets/handlers";
@@ -134,10 +136,17 @@ export const createDoc = async (input: z.input<typeof createDocInputSchema>): Pr
   if (!node) {
     throw new Error("Failed to create doc node");
   }
-  // Direct create (no change request) — record it so the audit trail is complete.
-  await insertAuditEvent(db, {
-    action: "doc.created",
-    metadata: { nodeId, slug: node.slug, name: node.name },
+  // Record the create as an auto-merged structural ChangeRequest (audit + history
+  // + rollback), replacing the old bespoke `doc.created` audit action.
+  await recordMergedNodeCreate({
+    nodeId,
+    nodeType: "doc",
+    slug: node.slug,
+    name: node.name,
+    description: node.description,
+    parentNodeId: parentNode.id,
+    message: `Create doc ${node.name}`,
+    submittedBy: resolveActorId(CURRENT_USER_ID),
   });
   return toDocVO(node);
 };
@@ -173,9 +182,18 @@ export const updateDocBody = async (
   }
   const parsed = updateDocInputSchema.parse(input);
   await writeDocBody(node.id, parsed.body);
-  // Direct edit (no change request) — record it so the audit trail is complete.
-  const db = await getDb();
-  await insertAuditEvent(db, { action: "doc.updated", metadata: { nodeId: node.id } });
+  // Record the body edit as an auto-merged doc_update ChangeRequest (audit +
+  // history + rollback), replacing the old bespoke `doc.updated` audit action —
+  // the same doc_update op shape the reviewed `createDocChangeRequest` path uses.
+  await recordMergedOperation({
+    operation: "doc_update",
+    targetType: "node",
+    nodeId: node.id,
+    fields: { body: parsed.body },
+    message: `Update doc ${node.name}`,
+    submittedBy: resolveActorId(CURRENT_USER_ID),
+    sourceMeta: { subject: "doc", nodeId: node.id },
+  });
   return toDocVO(node);
 };
 

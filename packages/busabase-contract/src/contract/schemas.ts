@@ -183,6 +183,18 @@ const searchResponseSchema = z.object({
   results: z.array(searchResultSchema),
 });
 
+const liveEventSchema = z.object({
+  kind: z.literal("change_request.merged"),
+  spaceId: z.string(),
+  actorId: z.string(),
+  changeRequestId: z.string(),
+  baseId: z.string().nullable(),
+  nodeIds: z.array(z.string()),
+  recordIds: z.array(z.string()),
+  viewIds: z.array(z.string()),
+  operationCount: z.number(),
+});
+
 const auditActionSchema = z.enum([
   "record.viewed",
   "change_request.created",
@@ -424,6 +436,7 @@ export {
   agentTaskSchema,
   searchResultSchema,
   searchResponseSchema,
+  liveEventSchema,
   auditActionSchema,
   auditEventSchema,
   createAuditEventInputSchema,

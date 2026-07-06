@@ -72,13 +72,15 @@ describe("merge atomicity", () => {
     const bId = (await folderBySlug("atom-b"))!.node.id;
 
     // One CR: rename A (valid) THEN restore B (invalid — B is not archived → throws).
-    const cr = await client.nodes.createChangeRequest({
-      operations: [
-        { kind: "rename", nodeId: aId, name: "A Renamed" },
-        { kind: "restore", nodeId: bId },
-      ],
-    });
-    await expect(approveAndMerge(cr.id)).rejects.toThrow();
+    // Structural CRs auto-merge on create, so the atomic failure surfaces here.
+    await expect(
+      client.nodes.createChangeRequest({
+        operations: [
+          { kind: "rename", nodeId: aId, name: "A Renamed" },
+          { kind: "restore", nodeId: bId },
+        ],
+      }),
+    ).rejects.toThrow();
 
     // The rename must have rolled back — A keeps its original name.
     expect((await folderBySlug("atom-a"))!.node.name).toBe("A");
@@ -95,7 +97,8 @@ describe("merge atomicity", () => {
     const cId = (await folderBySlug("atom-c"))!.node.id;
 
     // Two valid ops in one CR: rename C, then create a child folder under it.
-    const cr = await client.nodes.createChangeRequest({
+    // Auto-merges on create — both ops commit together.
+    await client.nodes.createChangeRequest({
       operations: [
         { kind: "rename", nodeId: cId, name: "C Renamed" },
         {
@@ -107,7 +110,6 @@ describe("merge atomicity", () => {
         },
       ],
     });
-    await approveAndMerge(cr.id);
 
     expect((await folderBySlug("atom-c"))!.node.name).toBe("C Renamed");
     expect(await folderBySlug("atom-c-child")).toBeDefined();

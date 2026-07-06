@@ -7,7 +7,7 @@ import {
 import type { SkillVO } from "busabase-contract/types";
 import { and, asc, eq, isNull } from "drizzle-orm";
 import type { z } from "zod";
-import { getContextSpaceId } from "../../context";
+import { getContextSpaceId, resolveActorId } from "../../context";
 import { getDb } from "../../db";
 import {
   busabaseChangeRequests,
@@ -22,7 +22,7 @@ import {
 // helpers + id/now) from the kernel residue. This is a one-way import — the kernel
 // never imports skill handlers — so there is no cycle. The kernel keeps the skill
 // storage helpers because the seed + merge dispatcher also use them.
-import { hashText, id, now, rootNodeIdForSpace } from "../../logic/kernel";
+import { CURRENT_USER_ID, hashText, id, now, rootNodeIdForSpace } from "../../logic/kernel";
 import { type MaterializeArgs, registerMaterializer } from "../../logic/materialize";
 import {
   ensureReady,
@@ -30,6 +30,7 @@ import {
   insertAuditEvent,
   loadNodesByIds,
   type MergeCtx,
+  recordMergedNodeCreate,
   toNodeVO,
 } from "../../logic/store";
 import {
@@ -112,10 +113,17 @@ export const createSkill = async (input: z.input<typeof createSkillInputSchema>)
     await writeSkillTextFile(node, file.path, file.content);
   }
 
-  // Direct create (no change request) — record it so the audit trail is complete.
-  await insertAuditEvent(db, {
-    action: "skill.created",
-    metadata: { nodeId, slug: parsed.slug, name: parsed.name },
+  // Record the create as an auto-merged structural ChangeRequest (audit + history
+  // + rollback), replacing the old bespoke `skill.created` audit action.
+  await recordMergedNodeCreate({
+    nodeId,
+    nodeType: "skill",
+    slug: parsed.slug,
+    name: parsed.name,
+    description: parsed.description,
+    parentNodeId: parentNode.id,
+    message: `Create skill ${parsed.name}`,
+    submittedBy: resolveActorId(CURRENT_USER_ID),
   });
   return getSkill(nodeId);
 };

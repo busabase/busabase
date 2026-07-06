@@ -1,11 +1,13 @@
 import { implement } from "@orpc/server";
 import { busabaseContract } from "busabase-contract/contract/busabase";
+import { getContextSpaceId } from "./context";
 import { assetsRouter } from "./domains/assets/router";
 import { attachmentsRouter } from "./domains/attachments/router";
 import { baseRouter, recordRouter, viewRouter } from "./domains/base/router";
 import { docRouter } from "./domains/doc/router";
 import { folderRouter } from "./domains/folder/router";
 import { skillRouter } from "./domains/skill/router";
+import { subscribeBusabaseLiveEvents } from "./logic/live-events";
 import {
   closeChangeRequest,
   createAuditEvent,
@@ -55,6 +57,11 @@ export const busabaseRouter = busabase.router({
   },
   agent: {
     listTasks: busabase.agent.listTasks.handler(async () => listAgentTasks()),
+  },
+  live: {
+    subscribe: busabase.live.subscribe.handler(({ signal }) =>
+      subscribeBusabaseLiveEvents(getContextSpaceId(), signal),
+    ),
   },
   bases: baseRouter,
   skills: skillRouter,

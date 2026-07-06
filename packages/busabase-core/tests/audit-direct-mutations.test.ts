@@ -8,8 +8,10 @@ import { seedScenario } from "../src/logic/store";
 import { busabaseRouter } from "../src/router";
 
 /**
- * Direct (non-change-request) mutations must still leave an audit-log entry, so the
- * product stays fully auditable even for operations that bypass propose → review → merge.
+ * Every content-tree mutation is recorded as an auto-merged ChangeRequest (so it's
+ * in history + rollback, not just an audit line): base / doc / skill create, field
+ * add, and doc body update. Destructive maintenance ops with no content-operation
+ * semantics (node purge, asset delete) stay audit-only — they satisfy "audit OR CR".
  */
 
 const MIGRATIONS_CWD = path.resolve(__dirname, "../../../apps/busabase");
@@ -41,15 +43,21 @@ describe("audit trail for direct mutations", () => {
     if (storageDir) await rm(storageDir, { recursive: true, force: true });
   });
 
-  const approveAndMerge = (changeRequestId: string) =>
-    client.changeRequests
-      .review({ changeRequestId, verdict: "approved" })
-      .then(() => client.changeRequests.merge({ changeRequestId }));
+  // A merged CR of a given operation whose predicate matches (how a structural
+  // mutation is now recorded).
+  const hasMergedCR = async (
+    operation: string,
+    match: (cr: {
+      baseId: string | null;
+      nodeId: string | null;
+      node: { slug: string } | null;
+    }) => boolean,
+  ) =>
+    (await client.changeRequests.list()).some(
+      (cr) => cr.status === "merged" && cr.primaryOperation?.operation === operation && match(cr),
+    );
 
-  const auditActions = async () =>
-    (await client.auditEvents.list({ limit: 100 })).map((e) => e.action);
-
-  it("audits base + field direct creation", async () => {
+  it("records merged ChangeRequests for a base create + field add", async () => {
     const base = await client.bases.create({
       slug: "audit-base",
       name: "Audit Base",
@@ -61,44 +69,35 @@ describe("audit trail for direct mutations", () => {
       name: "Extra",
       type: "text",
     });
-    const actions = await auditActions();
-    expect(actions).toContain("base.created");
-    expect(actions).toContain("field.created");
+    expect(await hasMergedCR("node_create", (cr) => cr.node?.slug === "audit-base")).toBe(true);
+    expect(await hasMergedCR("base_add_field", (cr) => cr.baseId === base.id)).toBe(true);
   });
 
-  it("audits doc create + direct body update", async () => {
+  it("records merged ChangeRequests for a doc create + body update", async () => {
     const doc = await client.docs.create({ slug: "audit-doc", name: "Audit Doc", body: "v1" });
     await client.docs.updateBody({ nodeId: doc.node.id, body: "v2" });
-    const actions = await auditActions();
-    expect(actions).toContain("doc.created");
-    expect(actions).toContain("doc.updated");
+    expect(await hasMergedCR("node_create", (cr) => cr.node?.slug === "audit-doc")).toBe(true);
+    expect(await hasMergedCR("doc_update", (cr) => cr.nodeId === doc.node.id)).toBe(true);
   });
 
-  it("audits skill direct creation", async () => {
+  it("records a merged ChangeRequest for a skill create", async () => {
     await client.skills.create({ slug: "audit-skill", name: "Audit Skill" });
-    expect(await auditActions()).toContain("skill.created");
+    expect(await hasMergedCR("node_create", (cr) => cr.node?.slug === "audit-skill")).toBe(true);
   });
 
   it("audits permanent node purge", async () => {
     const folderBySlug = async (slug: string) =>
       (await client.folders.list()).find((f) => f.node.slug === slug);
 
-    await approveAndMerge(
-      (
-        await client.nodes.createChangeRequest({
-          operations: [{ kind: "create", nodeType: "folder", slug: "audit-purge", name: "Purge" }],
-        })
-      ).id,
-    );
+    // Structural node CRs auto-merge — no manual review/merge needed.
+    await client.nodes.createChangeRequest({
+      operations: [{ kind: "create", nodeType: "folder", slug: "audit-purge", name: "Purge" }],
+    });
     const folderId = (await folderBySlug("audit-purge"))!.node.id;
     // Archive it (delete), then permanently purge.
-    await approveAndMerge(
-      (
-        await client.nodes.createChangeRequest({
-          operations: [{ kind: "delete", nodeId: folderId }],
-        })
-      ).id,
-    );
+    await client.nodes.createChangeRequest({
+      operations: [{ kind: "delete", nodeId: folderId }],
+    });
     await client.nodes.purge({ nodeId: folderId });
 
     const events = await client.auditEvents.list({ limit: 100 });
