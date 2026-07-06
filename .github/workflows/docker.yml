@@ -7,8 +7,8 @@
 #
 # Required secrets: DOCKERHUB_TOKEN (a Docker Hub access token for the `busabase`
 # org with push rights). GHCR uses the built-in GITHUB_TOKEN.
-# Required for deploy dispatch: CR_PAT plus DEPLOY_REPOSITORY (for example,
-# vikadata/ops-manager).
+# Required for deploy dispatch: CR_PAT, DEPLOY_REPOSITORY (for example,
+# vikadata/ops-manager), and DEPLOY_EVENT_TYPE (for example, deploy-bika).
 name: Docker
 
 on:
@@ -82,6 +82,7 @@ jobs:
         env:
           DEPLOY_TOKEN: ${{ secrets.CR_PAT }}
           DEPLOY_REPOSITORY: ${{ secrets.DEPLOY_REPOSITORY }}
+          DEPLOY_EVENT_TYPE: ${{ secrets.DEPLOY_EVENT_TYPE }}
         run: |
           set -euo pipefail
           if [ -z "${DEPLOY_TOKEN:-}" ]; then
@@ -92,6 +93,10 @@ jobs:
             echo "DEPLOY_REPOSITORY is not configured; skipping deploy dispatch."
             exit 0
           fi
+          if [ -z "${DEPLOY_EVENT_TYPE:-}" ]; then
+            echo "DEPLOY_EVENT_TYPE is not configured; skipping deploy dispatch."
+            exit 0
+          fi
 
           short_sha="${GITHUB_SHA::7}"
           version="sha-${short_sha}"
@@ -99,9 +104,10 @@ jobs:
           echo "Dispatching deploy for busabase @ ${version}"
           PAYLOAD=$(jq -nc \
             --arg semver "${version}" \
+            --arg event_type "${DEPLOY_EVENT_TYPE}" \
             --arg image "ghcr.io/${{ github.repository_owner }}/busabase:${version}" \
             --arg arch "$(uname -m)" \
-            '{event_type:"deploy-bika",client_payload:{SEMVER_FULL:$semver,edition:"busabase",app:"busabase",containerName:"busabase",image:$image,arch:$arch}}')
+            '{event_type:$event_type,client_payload:{SEMVER_FULL:$semver,edition:"busabase",app:"busabase",containerName:"busabase",image:$image,arch:$arch}}')
           curl --fail -sS -X POST "https://api.github.com/repos/${DEPLOY_REPOSITORY}/dispatches" \
             -H "Authorization: token ${DEPLOY_TOKEN}" \
             -H "Accept: application/vnd.github.everest-preview+json" \
