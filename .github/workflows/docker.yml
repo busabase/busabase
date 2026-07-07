@@ -30,19 +30,16 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  version:
-    name: Compute version
+  build:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-    outputs:
-      version: ${{ steps.compute.outputs.version }}
-      tags: ${{ steps.compute.outputs.tags }}
+      packages: write
     steps:
       - uses: actions/checkout@v4
 
       - name: Compute version and tags
-        id: compute
+        id: version
         shell: bash
         run: |
           set -euo pipefail
@@ -70,7 +67,7 @@ jobs:
 
           {
             echo "version=${semver}"
-            echo "tags<<__TAGS_EOF__"
+            echo "tag_values<<__TAGS_EOF__"
             echo "${tags}"
             echo "__TAGS_EOF__"
           } >> "$GITHUB_OUTPUT"
@@ -78,15 +75,6 @@ jobs:
           echo "Version: ${semver}"
           echo "Tags:"
           echo "${tags}"
-
-  build:
-    needs: version
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
-    steps:
-      - uses: actions/checkout@v4
 
       - uses: docker/setup-qemu-action@v3
 
@@ -112,7 +100,7 @@ jobs:
           REGISTRIES: |
             ghcr.io/${{ github.repository_owner }}/busabase
             docker.io/busabase/busabase
-          TAGS: ${{ needs.version.outputs.tags }}
+          TAGS: ${{ steps.version.outputs.tag_values }}
         run: |
           set -euo pipefail
           refs=()
@@ -159,7 +147,7 @@ jobs:
             exit 0
           fi
 
-          version="${{ needs.version.outputs.version }}"
+          version="${{ steps.version.outputs.version }}"
 
           echo "Dispatching deploy for busabase @ ${version}"
           PAYLOAD=$(jq -nc \
