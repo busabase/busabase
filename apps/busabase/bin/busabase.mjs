@@ -6,7 +6,7 @@ import { existsSync, readdirSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const here = dirname(fileURLToPath(import.meta.url)); // <pkg>/bin
 const pkgRoot = resolve(here, "..");
@@ -163,14 +163,55 @@ async function startServer(argv) {
   await import(entry);
 }
 
+async function runClientCli(argv) {
+  try {
+    const { runCli } = await import("busabase-cli");
+    return await runCli(argv);
+  } catch (error) {
+    const sourceCliWrapper = resolve(pkgRoot, "../busabase-cli/bin/busabase-cli.mjs");
+    if (existsSync(sourceCliWrapper)) {
+      const previousArgv = process.argv;
+      process.argv = [process.execPath, sourceCliWrapper, ...argv];
+      try {
+        await import(pathToFileURL(sourceCliWrapper).href);
+      } finally {
+        process.argv = previousArgv;
+      }
+      return 0;
+    }
+
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(
+      [
+        "busabase: could not load the bundled busabase-cli client.",
+        `Reason: ${message}`,
+        "",
+        "If you are running from source, build the CLI first:",
+        "  pnpm --filter busabase-cli build",
+        "",
+        "Or run the published CLI explicitly:",
+        "  npm exec -y --package busabase-cli@latest -- busabase-cli",
+      ].join("\n"),
+    );
+    return 1;
+  }
+}
+
 async function main() {
   const argv = process.argv.slice(2);
   if (argv[0] === "server") {
     await startServer(argv.slice(1));
     return;
   }
-  const { runCli } = await import("busabase-cli");
-  process.exit(await runCli(argv));
+  const code = await runClientCli(argv);
+  // The delegated client help doesn't know about the server role — append it.
+  const wantsHelp = argv.length === 0 || ["-h", "--help", "help"].includes(argv[0]);
+  if (wantsHelp && code === 0) {
+    console.log(
+      `\nServer:\n  busabase server [--port <n>] [--host <addr>] [--data <dir>]\n${c.dim("  boots the bundled Busabase server (zero setup, pglite) — see `busabase server --help`")}`,
+    );
+  }
+  process.exit(code);
 }
 
 await main();

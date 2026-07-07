@@ -3,10 +3,12 @@
 #
 # Builds the Busabase image from apps/busabase/Dockerfile and pushes multi-arch
 # (amd64 + arm64) to GHCR and Docker Hub, on GitHub's official ubuntu-latest
-# runner. No internal deploy — that stays in the private infra repo.
+# runner. After publishing, it can dispatch the private deploy workflow.
 #
 # Required secrets: DOCKERHUB_TOKEN (a Docker Hub access token for the `busabase`
 # org with push rights). GHCR uses the built-in GITHUB_TOKEN.
+# Required for deploy dispatch: CR_PAT, DEPLOY_REPOSITORY (for example,
+# vikadata/ops-manager), and DEPLOY_EVENT_TYPE (for example, deploy-bika).
 name: Docker
 
 on:
@@ -75,3 +77,40 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - name: Dispatch internal deploy
+        env:
+          DEPLOY_TOKEN: ${{ secrets.CR_PAT }}
+          DEPLOY_REPOSITORY: ${{ secrets.DEPLOY_REPOSITORY }}
+          DEPLOY_EVENT_TYPE: ${{ secrets.DEPLOY_EVENT_TYPE }}
+        run: |
+          set -euo pipefail
+          if [ -z "${DEPLOY_TOKEN:-}" ]; then
+            echo "CR_PAT is not configured; skipping deploy dispatch."
+            exit 0
+          fi
+          if [ -z "${DEPLOY_REPOSITORY:-}" ]; then
+            echo "DEPLOY_REPOSITORY is not configured; skipping deploy dispatch."
+            exit 0
+          fi
+          if [ -z "${DEPLOY_EVENT_TYPE:-}" ]; then
+            echo "DEPLOY_EVENT_TYPE is not configured; skipping deploy dispatch."
+            exit 0
+          fi
+
+          short_sha="${GITHUB_SHA::7}"
+          version="sha-${short_sha}"
+
+          echo "Dispatching deploy for busabase @ ${version}"
+          PAYLOAD=$(jq -nc \
+            --arg semver "${version}" \
+            --arg event_type "${DEPLOY_EVENT_TYPE}" \
+            --arg image "ghcr.io/${{ github.repository_owner }}/busabase:${version}" \
+            --arg arch "$(uname -m)" \
+            '{event_type:$event_type,client_payload:{SEMVER_FULL:$semver,edition:"busabase",app:"busabase",containerName:"busabase",image:$image,arch:$arch}}')
+          curl --fail -sS -X POST "https://api.github.com/repos/${DEPLOY_REPOSITORY}/dispatches" \
+            -H "Authorization: token ${DEPLOY_TOKEN}" \
+            -H "Accept: application/vnd.github.everest-preview+json" \
+            -H "Content-Type: application/json" \
+            --data "${PAYLOAD}"
+          echo "Deploy dispatch sent."

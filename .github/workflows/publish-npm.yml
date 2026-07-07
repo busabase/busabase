@@ -2,12 +2,10 @@
 # (scripts/publish-busabase-repo.ts) PRESERVES `.github`, so it never overwrites
 # this file — edit it here.
 #
-# Publishes busabase-cli + busabase-sdk + busabase to npm with provenance, from
-# the public repo, on GitHub's official ubuntu-latest runner. busabase depends on
-# busabase-cli via workspace:*, so both publish with `pnpm publish` (rewrites the
-# protocol), cli first. busabase-sdk is a standalone built library (its contract
-# deps are bundled into dist), so it publishes independently. Idempotent: versions
-# already on npm are skipped.
+# Publishes busabase-cli + busabase to npm with provenance, from the public repo,
+# on GitHub's official ubuntu-latest runner. busabase depends on busabase-cli via
+# workspace:*, so both publish with `pnpm publish` (rewrites the protocol), cli
+# first. Idempotent: versions already on npm are skipped.
 name: Publish npm
 
 on:
@@ -18,7 +16,6 @@ on:
       - "pnpm-lock.yaml"
       - "pnpm-workspace.yaml"
       - "apps/busabase-cli/**"
-      - "apps/busabase-sdk/**"
       - "apps/busabase/bin/**"
       - "apps/busabase/scripts/pack-standalone.mjs"
       - "apps/busabase/package.json"
@@ -60,25 +57,13 @@ jobs:
       # busabase-desktop and busabase-mobile (Expo/RN); installing those here would
       # pull React Native and run their native postinstall scripts for no reason on
       # an npm publish.
-      - run: pnpm install --frozen-lockfile --filter "busabase..." --filter "busabase-cli..." --filter "busabase-sdk..."
+      - run: pnpm install --frozen-lockfile --filter "busabase..." --filter "busabase-cli..."
 
       - name: Get versions
         id: v
         run: |
           echo "cli=$(node -p "require('./apps/busabase-cli/package.json').version")" >> "$GITHUB_OUTPUT"
-          echo "sdk=$(node -p "require('./apps/busabase-sdk/package.json').version")" >> "$GITHUB_OUTPUT"
           echo "app=$(node -p "require('./apps/busabase/package.json').version")" >> "$GITHUB_OUTPUT"
-
-      # busabase-sdk MUST build before busabase-cli: the CLI keeps busabase-sdk external
-      # (a real runtime dep), so `node dist/cli.js --help` below resolves
-      # busabase-sdk/dist/index.js at runtime — which only exists once the sdk is built.
-      - name: Build busabase-sdk
-        working-directory: apps/busabase-sdk
-        run: |
-          pnpm typecheck
-          pnpm build
-          test -f dist/index.js
-          test -f dist/index.d.ts
 
       - name: Build busabase-cli
         working-directory: apps/busabase-cli
@@ -86,7 +71,9 @@ jobs:
           pnpm typecheck
           pnpm build
           test -f dist/cli.js
+          test -f bin/busabase-cli.mjs
           node dist/cli.js --help
+          node bin/busabase-cli.mjs --help
 
       - name: Build + assemble busabase
         working-directory: apps/busabase
@@ -99,17 +86,11 @@ jobs:
         id: pub
         run: |
           npm view busabase-cli@${{ steps.v.outputs.cli }} version >/dev/null 2>&1 && echo "cli=true" >> "$GITHUB_OUTPUT" || echo "cli=false" >> "$GITHUB_OUTPUT"
-          npm view busabase-sdk@${{ steps.v.outputs.sdk }} version >/dev/null 2>&1 && echo "sdk=true" >> "$GITHUB_OUTPUT" || echo "sdk=false" >> "$GITHUB_OUTPUT"
           npm view busabase@${{ steps.v.outputs.app }} version >/dev/null 2>&1 && echo "app=true" >> "$GITHUB_OUTPUT" || echo "app=false" >> "$GITHUB_OUTPUT"
 
       - name: Publish busabase-cli
         if: steps.pub.outputs.cli != 'true'
         working-directory: apps/busabase-cli
-        run: pnpm publish --access public --no-git-checks
-
-      - name: Publish busabase-sdk
-        if: steps.pub.outputs.sdk != 'true'
-        working-directory: apps/busabase-sdk
         run: pnpm publish --access public --no-git-checks
 
       - name: Publish busabase
@@ -122,6 +103,5 @@ jobs:
           {
             echo "## npm publish"
             echo "- busabase-cli@${{ steps.v.outputs.cli }} — already published: ${{ steps.pub.outputs.cli }}"
-            echo "- busabase-sdk@${{ steps.v.outputs.sdk }} — already published: ${{ steps.pub.outputs.sdk }}"
             echo "- busabase@${{ steps.v.outputs.app }} — already published: ${{ steps.pub.outputs.app }}"
           } >> "$GITHUB_STEP_SUMMARY"
