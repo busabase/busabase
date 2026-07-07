@@ -5,16 +5,16 @@ import { Platform } from "react-native";
 // borders, and white cards on a faintly tinted background. Color is reserved
 // for semantic status (destructive/success/warning) — there is no brand accent.
 export const lightTokens = {
-  background: "#FAFAFA",
+  background: "#F8F8F7",
   surface: "#FFFFFF",
   card: "#FFFFFF",
   foreground: "#0A0A0A",
-  mutedForeground: "#737373",
-  muted: "#F5F5F5",
-  border: "#E5E5E5",
+  mutedForeground: "#6F6F6F",
+  muted: "#F1F1F0",
+  border: "#E1E1DF",
   primary: "#171717",
   primaryForeground: "#FAFAFA",
-  primaryMuted: "#F5F5F5",
+  primaryMuted: "#ECECEA",
   destructive: "#EF4444",
   destructiveForeground: "#FAFAFA",
   success: "#16A34A",
@@ -41,10 +41,10 @@ export const darkTokens: Tokens = {
 };
 
 export const typography = {
-  display: { fontSize: 30, lineHeight: 36, fontWeight: "700" as const, letterSpacing: -0.4 },
-  h1: { fontSize: 24, lineHeight: 30, fontWeight: "600" as const, letterSpacing: -0.3 },
-  h2: { fontSize: 19, lineHeight: 25, fontWeight: "600" as const, letterSpacing: -0.2 },
-  h3: { fontSize: 16, lineHeight: 23, fontWeight: "600" as const, letterSpacing: -0.1 },
+  display: { fontSize: 29, lineHeight: 35, fontWeight: "700" as const, letterSpacing: 0 },
+  h1: { fontSize: 22, lineHeight: 28, fontWeight: "600" as const, letterSpacing: 0 },
+  h2: { fontSize: 18, lineHeight: 24, fontWeight: "600" as const, letterSpacing: 0 },
+  h3: { fontSize: 16, lineHeight: 23, fontWeight: "600" as const, letterSpacing: 0 },
   body: { fontSize: 15, lineHeight: 22, fontWeight: "400" as const },
   bodyEm: { fontSize: 15, lineHeight: 22, fontWeight: "500" as const },
   small: { fontSize: 13, lineHeight: 18, fontWeight: "400" as const },
@@ -54,8 +54,8 @@ export const typography = {
 export const radius = {
   sm: 6,
   md: 8,
-  lg: 12,
-  xl: 16,
+  lg: 10,
+  xl: 14,
   full: 999,
 } as const;
 

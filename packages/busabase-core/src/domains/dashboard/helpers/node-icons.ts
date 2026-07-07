@@ -1,5 +1,5 @@
 import { getNodeType } from "busabase-contract/domains";
-import { FileText, Folder, type LucideIcon, Sparkles, Table2 } from "lucide-react";
+import { FileText, Folder, HardDrive, type LucideIcon, Sparkles, Table2 } from "lucide-react";
 
 /**
  * Maps a node-type definition's platform-neutral `icon` id (declared in each
@@ -11,6 +11,7 @@ const ICON_BY_ID: Record<string, LucideIcon> = {
   folder: Folder,
   table: Table2,
   sparkles: Sparkles,
+  "hard-drive": HardDrive,
   "file-text": FileText,
 };
 

@@ -1,22 +1,34 @@
 import { skipToken, useQuery } from "@tanstack/react-query";
 import { useRouter } from "expo-router";
+import {
+  CircleDot,
+  FileText,
+  GitCommitHorizontal,
+  GitPullRequest,
+  ListChecks,
+  ShieldCheck,
+} from "lucide-react-native";
 import { useMemo } from "react";
-import { Pressable, StyleSheet, Text, View } from "react-native";
 import { useBusabaseOrpc } from "~/api/use-busabase-orpc";
 import { ConnectionGuard } from "~/components/busabase/ConnectionGuard";
 import { DrawerScaffold } from "~/components/busabase/DrawerScaffold";
-import { NativeEmptyState, NativeErrorState, NativeLoadingState } from "~/components/native-screen";
+import {
+  NativeEmptyState,
+  NativeErrorState,
+  NativeLoadingState,
+  NativeRow,
+  NativeSection,
+} from "~/components/native-screen";
 import { type ActivityEvent, type ActivityTone, buildActivityEvents } from "~/lib/activity-events";
 import { formatDate } from "~/lib/format";
-import { radius, typography } from "~/theme/tokens";
 import { useTokens } from "~/theme/use-tokens";
 
-const toneLabel: Record<ActivityTone, string> = {
-  audit: "Audit",
-  change_request: "Change request",
-  operation: "Operation",
-  commit: "Commit",
-  record: "Record",
+const toneMeta: Record<ActivityTone, { label: string; icon: typeof GitPullRequest }> = {
+  audit: { label: "Audit", icon: ShieldCheck },
+  change_request: { label: "Change request", icon: GitPullRequest },
+  operation: { label: "Operation", icon: ListChecks },
+  commit: { label: "Commit", icon: GitCommitHorizontal },
+  record: { label: "Record", icon: FileText },
 };
 
 function ActivityContent() {
@@ -59,31 +71,21 @@ function ActivityContent() {
     }
   };
 
-  const renderRow = (event: ActivityEvent) => (
-    <Pressable
-      key={event.id}
-      accessibilityRole={event.target.kind === "none" ? undefined : "button"}
-      disabled={event.target.kind === "none"}
-      style={({ pressed }) => [
-        styles.row,
-        { backgroundColor: tokens.card, borderColor: tokens.border, opacity: pressed ? 0.78 : 1 },
-      ]}
-      onPress={() => openEvent(event)}
-    >
-      <View style={styles.rowTop}>
-        <View style={[styles.tone, { backgroundColor: tokens.muted }]}>
-          <Text style={[typography.caption, { color: tokens.mutedForeground }]}>
-            {toneLabel[event.tone]}
-          </Text>
-        </View>
-        <Text style={[typography.small, { color: tokens.mutedForeground }]}>
-          {formatDate(event.timestamp)}
-        </Text>
-      </View>
-      <Text style={[typography.bodyEm, { color: tokens.foreground }]}>{event.title}</Text>
-      <Text style={[typography.small, { color: tokens.mutedForeground }]}>{event.body}</Text>
-    </Pressable>
-  );
+  const renderRow = (event: ActivityEvent, index: number, total: number) => {
+    const meta = toneMeta[event.tone] ?? { label: "Activity", icon: CircleDot };
+    const Icon = meta.icon;
+    return (
+      <NativeRow
+        key={event.id}
+        title={event.title}
+        subtitle={event.body}
+        meta={formatDate(event.timestamp)}
+        leading={<Icon size={18} color={tokens.mutedForeground} />}
+        onPress={event.target.kind === "none" ? undefined : () => openEvent(event)}
+        last={index === total - 1}
+      />
+    );
+  };
 
   return (
     <DrawerScaffold
@@ -103,20 +105,14 @@ function ActivityContent() {
         />
       ) : null}
       {today.length > 0 ? (
-        <View style={styles.group}>
-          <Text style={[typography.caption, styles.groupLabel, { color: tokens.mutedForeground }]}>
-            TODAY
-          </Text>
-          {today.map(renderRow)}
-        </View>
+        <NativeSection title="Today" caption={`${today.length}`}>
+          {today.map((event, index) => renderRow(event, index, today.length))}
+        </NativeSection>
       ) : null}
       {earlier.length > 0 ? (
-        <View style={styles.group}>
-          <Text style={[typography.caption, styles.groupLabel, { color: tokens.mutedForeground }]}>
-            EARLIER
-          </Text>
-          {earlier.map(renderRow)}
-        </View>
+        <NativeSection title="Earlier" caption={`${earlier.length}`}>
+          {earlier.map((event, index) => renderRow(event, index, earlier.length))}
+        </NativeSection>
       ) : null}
     </DrawerScaffold>
   );
@@ -129,25 +125,3 @@ export default function ActivityScreen() {
     </ConnectionGuard>
   );
 }
-
-const styles = StyleSheet.create({
-  group: { marginHorizontal: 20, marginBottom: 8, gap: 10 },
-  groupLabel: { marginTop: 6 },
-  row: {
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: radius.lg,
-    padding: 14,
-    gap: 6,
-  },
-  rowTop: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: 12,
-  },
-  tone: {
-    borderRadius: radius.full,
-    paddingHorizontal: 10,
-    paddingVertical: 3,
-  },
-});

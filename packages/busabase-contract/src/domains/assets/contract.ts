@@ -1,10 +1,37 @@
 import { oc } from "@orpc/contract";
+import {
+  ConfirmUploadInputSchema,
+  ConfirmUploadVOSchema,
+  RequestUploadUrlInputSchema,
+  RequestUploadUrlVOSchema,
+} from "open-domains/attachments/types";
 import { z } from "zod";
 import { AssetDetailVOSchema, AssetVOSchema } from "./types";
 
 // Assets domain oRPC routes; composed into the root contract in
 // contract/busabase.ts. The deduped Asset library + its where-used reverse index.
 export const assetsContract = {
+  createUploadUrl: oc
+    .route({
+      method: "POST",
+      path: "/assets/upload-urls",
+      tags: ["Assets"],
+      summary: "Request asset upload URL",
+      successDescription:
+        "Presigned (or dev) upload URL plus the public URL and asset id when identical bytes are already in the library.",
+    })
+    .input(RequestUploadUrlInputSchema)
+    .output(RequestUploadUrlVOSchema),
+  confirm: oc
+    .route({
+      method: "POST",
+      path: "/assets/confirmations",
+      tags: ["Assets"],
+      summary: "Confirm asset upload",
+      successDescription: "Recorded the file and ensured its Busabase Asset library entry.",
+    })
+    .input(ConfirmUploadInputSchema)
+    .output(ConfirmUploadVOSchema),
   list: oc
     .route({
       method: "GET",

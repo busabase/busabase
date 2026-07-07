@@ -36,13 +36,13 @@ Every constructor field is optional and falls back to an environment variable:
 | --------- | -------------------- | -------------------------- |
 | `baseUrl` | `BUSABASE_BASE_URL`  | `https://busabase.com`     |
 | `apiKey`  | `BUSABASE_API_KEY`   | — (none; local is open)    |
-| `spaceId` | `BUSABASE_SPACE_ID`  | token's default space      |
+| `spaceId` | `BUSABASE_SPACE_ID`  | no header; multi-space Cloud calls require one |
 
 `baseUrl` accepts either the server root (`http://host`) or the full API path (`http://host/api/v1`) — the `/api/v1` suffix is normalized away.
 
 ## Two entry points
 
-**`Busabase` class** — an ergonomic wrapper with namespaced methods (`bb.bases`, `bb.records`, `bb.changeRequests`, `bb.nodes`, `bb.views`, `bb.skills`, `bb.docs`, `bb.folders`, `bb.comments`, `bb.auditEvents`, `bb.attachments`, `bb.agent`, `bb.agentTasks`, `bb.search()`, `bb.health()`, `bb.me()`). Drop to `bb.client` for the raw oRPC client (e.g. `bb.client.system.meta()`).
+**`Busabase` class** — an ergonomic wrapper with namespaced methods (`bb.bases`, `bb.records`, `bb.changeRequests`, `bb.nodes`, `bb.views`, `bb.assets`, `bb.skills`, `bb.docs`, `bb.folders`, `bb.comments`, `bb.auditEvents`, `bb.agent`, `bb.agentTasks`, `bb.search()`, `bb.health()`, `bb.me()`). Drop to `bb.client` for the raw oRPC client (e.g. `bb.client.system.meta()`).
 
 **`createBusabaseClient(config?)`** — returns the raw, fully-typed [oRPC](https://orpc.unnoq.com) client directly, if you'd rather not wrap it in a class:
 

@@ -8,63 +8,64 @@ import {
   Wrench,
 } from "lucide-react";
 import type { Metadata } from "next";
+import { getBusabaseServerLL } from "~/lib/i18n-server";
 
 const SUPPORT_EMAIL = "support@busabase.com";
 
-export const metadata: Metadata = {
-  title: "Busabase Support",
-  description:
-    "Get help with Busabase Desktop, Busabase Mobile, Agent Skill setup, and approval-first database workflows.",
+export const generateMetadata = async (): Promise<Metadata> => {
+  const LL = await getBusabaseServerLL();
+  return {
+    title: LL.support.title(),
+    description: LL.support.description(),
+  };
 };
 
-const supportOptions = [
-  {
-    title: "Email support",
-    body: "Send your workspace, device, and a short description of what went wrong. Include screenshots or logs when possible.",
-    href: `mailto:${SUPPORT_EMAIL}`,
-    action: SUPPORT_EMAIL,
-    icon: Mail,
-  },
-  {
-    title: "Set up Agent Skill",
-    body: "Connect Claude Code, Codex, or another AI agent to Busabase so it can create reviewed change requests.",
-    href: "/SETUP_SKILL.md",
-    action: "Open setup guide",
-    icon: BookOpen,
-  },
-  {
-    title: "Download apps",
-    body: "Install the desktop app for the local review engine, or use the mobile app to review changes on the go.",
-    href: "/download",
-    action: "Open downloads",
-    icon: Download,
-  },
-  {
-    title: "Open dashboard",
-    body: "Check the local inbox, activity feed, base schema, and pending change requests in your Busabase workspace.",
-    href: "/dashboard",
-    action: "Open dashboard",
-    icon: Wrench,
-  },
-] as const;
+export default async function SupportPage() {
+  const LL = await getBusabaseServerLL();
+  const supportOptions = [
+    {
+      title: LL.support.emailTitle(),
+      body: LL.support.emailBody(),
+      href: `mailto:${SUPPORT_EMAIL}`,
+      action: SUPPORT_EMAIL,
+      icon: Mail,
+    },
+    {
+      title: LL.support.setupTitle(),
+      body: LL.support.setupBody(),
+      href: "/SETUP_SKILL.md",
+      action: LL.support.setupAction(),
+      icon: BookOpen,
+    },
+    {
+      title: LL.support.downloadTitle(),
+      body: LL.support.downloadBody(),
+      href: "/download",
+      action: LL.support.downloadAction(),
+      icon: Download,
+    },
+    {
+      title: LL.support.dashboardTitle(),
+      body: LL.support.dashboardBody(),
+      href: "/dashboard",
+      action: LL.support.dashboardAction(),
+      icon: Wrench,
+    },
+  ] as const;
 
-export default function SupportPage() {
   return (
     <main className="min-h-screen bg-background text-foreground">
       <section className="mx-auto flex w-full max-w-5xl flex-col px-5 pt-20 pb-16 sm:px-6 lg:px-8">
         <div className="max-w-3xl space-y-6">
           <p className="inline-flex items-center gap-2 rounded-full border border-border bg-card px-3 py-1 text-sm text-muted-foreground">
             <LifeBuoy className="size-4 text-primary" aria-hidden="true" />
-            Support
+            {LL.support.badge()}
           </p>
           <div className="space-y-4">
             <h1 className="text-4xl font-medium tracking-normal text-foreground sm:text-5xl">
-              Get help with Busabase
+              {LL.support.headline()}
             </h1>
-            <p className="text-lg leading-8 text-muted-foreground">
-              Use these support paths for Busabase Desktop, Busabase Mobile, local review workflows,
-              and AI agent setup.
-            </p>
+            <p className="text-lg leading-8 text-muted-foreground">{LL.support.subhead()}</p>
           </div>
         </div>
 
@@ -108,12 +109,8 @@ export default function SupportPage() {
               <MessageSquare className="size-5" aria-hidden="true" />
             </span>
             <div className="space-y-2">
-              <h2 className="text-lg font-medium text-foreground">What to include</h2>
-              <p className="text-sm leading-6 text-muted-foreground">
-                For faster troubleshooting, include your Busabase version, operating system, whether
-                you are using Desktop, Mobile, Cloud, or self-hosted mode, and the exact action that
-                failed.
-              </p>
+              <h2 className="text-lg font-medium text-foreground">{LL.support.includeTitle()}</h2>
+              <p className="text-sm leading-6 text-muted-foreground">{LL.support.includeBody()}</p>
             </div>
           </div>
         </section>

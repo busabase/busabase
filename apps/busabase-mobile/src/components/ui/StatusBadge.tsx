@@ -17,7 +17,9 @@ const labelByStatus: Record<BadgeStatus, string> = {
   archived: "Archived",
 };
 
-export function StatusBadge({ status }: { status: BadgeStatus }) {
+export const getStatusLabel = (status: BadgeStatus) => labelByStatus[status];
+
+export function StatusBadge({ status, compact }: { status: BadgeStatus; compact?: boolean }) {
   const tokens = useTokens();
   const color =
     status === "approved" || status === "merged" || status === "active"
@@ -27,8 +29,10 @@ export function StatusBadge({ status }: { status: BadgeStatus }) {
         : tokens.warning;
 
   return (
-    <View style={[styles.badge, { backgroundColor: tokens.muted }]}>
-      <Text style={[typography.caption, { color }]}>{labelByStatus[status]}</Text>
+    <View
+      style={[styles.badge, compact ? styles.compact : null, { backgroundColor: tokens.muted }]}
+    >
+      <Text style={[typography.caption, { color }]}>{getStatusLabel(status)}</Text>
     </View>
   );
 }
@@ -39,5 +43,9 @@ const styles = StyleSheet.create({
     borderRadius: radius.full,
     paddingHorizontal: 10,
     paddingVertical: 5,
+  },
+  compact: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
   },
 });

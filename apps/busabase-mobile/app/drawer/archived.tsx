@@ -1,24 +1,47 @@
 import { skipToken, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { getNodeType } from "busabase-contract/domains";
 import type { BaseVO, NodeVO } from "busabase-contract/types";
 import { useRouter } from "expo-router";
-import { Alert, StyleSheet, Text, View } from "react-native";
+import { ArchiveRestore, Trash2 } from "lucide-react-native";
+import { useState } from "react";
 import { useBusabaseOrpc } from "~/api/use-busabase-orpc";
 import { ConnectionGuard } from "~/components/busabase/ConnectionGuard";
 import { DrawerScaffold } from "~/components/busabase/DrawerScaffold";
-import { NativeEmptyState, NativeErrorState, NativeLoadingState } from "~/components/native-screen";
+import {
+  NativeActionBar,
+  NativeBottomSheet,
+  NativeEmptyState,
+  NativeErrorState,
+  NativeInlineError,
+  NativeLoadingState,
+  NativeRow,
+  NativeSection,
+} from "~/components/native-screen";
 import { Button } from "~/components/ui/Button";
 import { fmt, useI18n } from "~/i18n";
-import { radius, typography } from "~/theme/tokens";
 import { useTokens } from "~/theme/use-tokens";
 
 const SUBMITTED_BY = "mobile-editor";
 
+const getArchivedNodeMeta = (node: NodeVO) => {
+  const label = getNodeType(node.type)?.label ?? node.type;
+  return `${label} · ${node.slug}`;
+};
+
+type ArchivedAction =
+  | { kind: "base"; name: string; meta: string; base: BaseVO }
+  | { kind: "node"; name: string; meta: string; node: NodeVO };
+
+type ArchivedConfirm = "restore" | "purge" | null;
+
 function ArchivedContent() {
   const router = useRouter();
-  const tokens = useTokens();
   const { t } = useI18n();
+  const tokens = useTokens();
   const buda = useBusabaseOrpc();
   const queryClient = useQueryClient();
+  const [pendingAction, setPendingAction] = useState<ArchivedAction | null>(null);
+  const [confirmAction, setConfirmAction] = useState<ArchivedConfirm>(null);
 
   const basesQuery = useQuery(
     buda
@@ -46,8 +69,11 @@ function ArchivedContent() {
       if (!buda) throw new Error("Not connected");
       return buda.client.bases.restoreChangeRequest({ baseId: base.id, submittedBy: SUBMITTED_BY });
     },
-    onSuccess: (changeRequest) =>
-      router.push({ pathname: "/change-requests/[id]", params: { id: changeRequest.id } }),
+    onSuccess: (changeRequest) => {
+      setPendingAction(null);
+      setConfirmAction(null);
+      router.push({ pathname: "/change-requests/[id]", params: { id: changeRequest.id } });
+    },
   });
 
   const restoreNode = useMutation({
@@ -58,8 +84,11 @@ function ArchivedContent() {
         operations: [{ kind: "restore", nodeId: node.id }],
       });
     },
-    onSuccess: (changeRequest) =>
-      router.push({ pathname: "/change-requests/[id]", params: { id: changeRequest.id } }),
+    onSuccess: (changeRequest) => {
+      setPendingAction(null);
+      setConfirmAction(null);
+      router.push({ pathname: "/change-requests/[id]", params: { id: changeRequest.id } });
+    },
   });
 
   const purge = useMutation({
@@ -67,26 +96,67 @@ function ArchivedContent() {
       if (!buda) throw new Error("Not connected");
       return buda.client.nodes.purge({ nodeId });
     },
-    onSuccess: invalidate,
+    onSuccess: () => {
+      setPendingAction(null);
+      setConfirmAction(null);
+      invalidate();
+    },
   });
 
-  const confirmRestore = (name: string, onConfirm: () => void) =>
-    Alert.alert(t.common.restore, fmt(t.archived.restoreConfirm, { name }), [
-      { text: t.common.cancel, style: "cancel" },
-      { text: t.common.restore, onPress: onConfirm },
-    ]);
-
-  const confirmPurge = (name: string, nodeId: string) =>
-    Alert.alert(t.archived.purgeTitle, fmt(t.archived.purgeConfirm, { name }), [
-      { text: t.common.cancel, style: "cancel" },
-      { text: t.common.deleteForever, style: "destructive", onPress: () => purge.mutate(nodeId) },
-    ]);
+  const openActionSheet = (action: ArchivedAction) => {
+    restoreBase.reset();
+    restoreNode.reset();
+    purge.reset();
+    setConfirmAction(null);
+    setPendingAction(action);
+  };
 
   const archivedBases = basesQuery.data ?? [];
   const archivedNodes = nodesQuery.data ?? [];
   const isLoading = basesQuery.isLoading || nodesQuery.isLoading;
-  const error = basesQuery.error ?? nodesQuery.error ?? purge.error;
+  const actionError = restoreBase.error ?? restoreNode.error ?? purge.error;
+  const error = basesQuery.error ?? nodesQuery.error;
   const isEmpty = !isLoading && archivedBases.length === 0 && archivedNodes.length === 0;
+  const actionPending = restoreBase.isPending || restoreNode.isPending || purge.isPending;
+
+  const closeActionSheet = () => {
+    if (actionPending) {
+      return;
+    }
+    setPendingAction(null);
+    setConfirmAction(null);
+  };
+
+  const restorePendingAction = () => {
+    if (!pendingAction) {
+      return;
+    }
+    if (pendingAction.kind === "base") {
+      restoreBase.mutate(pendingAction.base);
+      return;
+    }
+    restoreNode.mutate(pendingAction.node);
+  };
+
+  const purgePendingAction = () => {
+    if (!pendingAction) {
+      return;
+    }
+    purge.mutate(pendingAction.kind === "base" ? pendingAction.base.nodeId : pendingAction.node.id);
+  };
+
+  const actionTitle =
+    confirmAction === "purge"
+      ? t.archived.purgeTitle
+      : confirmAction === "restore"
+        ? t.common.restore
+        : pendingAction?.name;
+  const actionDescription =
+    pendingAction && confirmAction
+      ? confirmAction === "purge"
+        ? fmt(t.archived.purgeConfirm, { name: pendingAction.name })
+        : fmt(t.archived.restoreConfirm, { name: pendingAction.name })
+      : pendingAction?.meta;
 
   return (
     <DrawerScaffold
@@ -102,46 +172,108 @@ function ArchivedContent() {
       ) : null}
 
       {archivedBases.length > 0 ? (
-        <View style={styles.section}>
-          <Text
-            style={[typography.caption, styles.sectionLabel, { color: tokens.mutedForeground }]}
-          >
-            {t.archived.basesSection}
-          </Text>
-          {archivedBases.map((base) => (
+        <NativeSection title={t.archived.basesSection} caption={`${archivedBases.length}`}>
+          {archivedBases.map((base, index) => (
             <ArchivedRow
               key={base.id}
               name={base.name}
               meta={base.slug}
-              restoring={restoreBase.isPending}
-              purging={purge.isPending}
-              onRestore={() => confirmRestore(base.name, () => restoreBase.mutate(base))}
-              onPurge={() => confirmPurge(base.name, base.nodeId)}
+              last={index === archivedBases.length - 1}
+              disabled={actionPending}
+              onPress={() =>
+                openActionSheet({ kind: "base", name: base.name, meta: base.slug, base })
+              }
             />
           ))}
-        </View>
+        </NativeSection>
       ) : null}
 
       {archivedNodes.length > 0 ? (
-        <View style={styles.section}>
-          <Text
-            style={[typography.caption, styles.sectionLabel, { color: tokens.mutedForeground }]}
-          >
-            {t.archived.nodesSection}
-          </Text>
-          {archivedNodes.map((node) => (
+        <NativeSection title={t.archived.nodesSection} caption={`${archivedNodes.length}`}>
+          {archivedNodes.map((node, index) => (
             <ArchivedRow
               key={node.id}
               name={node.name}
-              meta={`${node.type} · ${node.slug}`}
-              restoring={restoreNode.isPending}
-              purging={purge.isPending}
-              onRestore={() => confirmRestore(node.name, () => restoreNode.mutate(node))}
-              onPurge={() => confirmPurge(node.name, node.id)}
+              meta={getArchivedNodeMeta(node)}
+              last={index === archivedNodes.length - 1}
+              disabled={actionPending}
+              onPress={() =>
+                openActionSheet({
+                  kind: "node",
+                  name: node.name,
+                  meta: getArchivedNodeMeta(node),
+                  node,
+                })
+              }
             />
           ))}
-        </View>
+        </NativeSection>
       ) : null}
+
+      <NativeBottomSheet
+        visible={!!pendingAction}
+        title={actionTitle}
+        description={actionDescription}
+        showCloseButton
+        onClose={closeActionSheet}
+        footer={
+          <NativeActionBar>
+            {actionError ? (
+              <NativeInlineError
+                message={actionError.message}
+                onReset={() => {
+                  restoreBase.reset();
+                  restoreNode.reset();
+                  purge.reset();
+                }}
+              />
+            ) : null}
+            {confirmAction === "restore" ? (
+              <Button
+                label={t.common.restore}
+                loading={actionPending}
+                fullWidth
+                leadingIcon={<ArchiveRestore size={18} color={tokens.primaryForeground} />}
+                onPress={restorePendingAction}
+              />
+            ) : null}
+            {confirmAction === "purge" ? (
+              <Button
+                label={t.common.deleteForever}
+                variant="destructive"
+                loading={actionPending}
+                fullWidth
+                leadingIcon={<Trash2 size={18} color={tokens.destructiveForeground} />}
+                onPress={purgePendingAction}
+              />
+            ) : null}
+            {!confirmAction ? (
+              <>
+                <Button
+                  label={t.common.restore}
+                  fullWidth
+                  leadingIcon={<ArchiveRestore size={18} color={tokens.primaryForeground} />}
+                  onPress={() => setConfirmAction("restore")}
+                />
+                <Button
+                  label={t.common.deleteForever}
+                  variant="secondary"
+                  fullWidth
+                  leadingIcon={<Trash2 size={18} color={tokens.destructive} />}
+                  onPress={() => setConfirmAction("purge")}
+                />
+              </>
+            ) : null}
+            <Button
+              label={confirmAction ? t.common.cancel : t.common.close}
+              variant="ghost"
+              disabled={actionPending}
+              fullWidth
+              onPress={confirmAction ? () => setConfirmAction(null) : closeActionSheet}
+            />
+          </NativeActionBar>
+        }
+      />
     </DrawerScaffold>
   );
 }
@@ -149,45 +281,18 @@ function ArchivedContent() {
 function ArchivedRow({
   name,
   meta,
-  restoring,
-  purging,
-  onRestore,
-  onPurge,
+  last,
+  disabled,
+  onPress,
 }: {
   name: string;
   meta: string;
-  restoring: boolean;
-  purging: boolean;
-  onRestore: () => void;
-  onPurge: () => void;
+  last: boolean;
+  disabled: boolean;
+  onPress: () => void;
 }) {
-  const tokens = useTokens();
-  const { t } = useI18n();
   return (
-    <View style={[styles.row, { backgroundColor: tokens.card, borderColor: tokens.border }]}>
-      <View style={styles.rowText}>
-        <Text numberOfLines={1} style={[typography.bodyEm, { color: tokens.foreground }]}>
-          {name}
-        </Text>
-        <Text numberOfLines={1} style={[typography.caption, { color: tokens.mutedForeground }]}>
-          {meta}
-        </Text>
-      </View>
-      <View style={styles.rowActions}>
-        <Button
-          label={t.common.restore}
-          variant="secondary"
-          loading={restoring}
-          onPress={onRestore}
-        />
-        <Button
-          label={t.common.deleteForever}
-          variant="ghost"
-          loading={purging}
-          onPress={onPurge}
-        />
-      </View>
-    </View>
+    <NativeRow title={name} subtitle={meta} last={last} disabled={disabled} onPress={onPress} />
   );
 }
 
@@ -198,16 +303,3 @@ export default function ArchivedScreen() {
     </ConnectionGuard>
   );
 }
-
-const styles = StyleSheet.create({
-  section: { marginHorizontal: 20, marginTop: 8, gap: 10 },
-  sectionLabel: { textTransform: "uppercase" },
-  row: {
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: radius.lg,
-    padding: 14,
-    gap: 12,
-  },
-  rowText: { gap: 2 },
-  rowActions: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
-});

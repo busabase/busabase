@@ -10,7 +10,6 @@ import type { z } from "zod";
 type BusabaseLiveEvent = z.infer<typeof liveEventSchema>;
 
 interface UseBusabaseLiveSyncOptions {
-  actorId?: string | null;
   activeBaseId?: string | null;
   listKeys: {
     archivedBases: QueryKey;
@@ -26,7 +25,6 @@ interface UseBusabaseLiveSyncOptions {
 }
 
 export function useBusabaseLiveSync({
-  actorId,
   activeBaseId,
   listKeys,
   orpc,
@@ -80,13 +78,6 @@ export function useBusabaseLiveSync({
     };
 
     const handleEvent = (event: BusabaseLiveEvent) => {
-      // Local mutations already invalidate their own queries in mutation handlers.
-      // Skipping same-actor live events avoids an immediate duplicate refresh while
-      // still letting other collaborators' merged CRs update this tab.
-      if (actorId && event.actorId === actorId) {
-        return;
-      }
-
       void queryClient.invalidateQueries({ queryKey: stableListKeys.changeRequests });
       void queryClient.invalidateQueries({ queryKey: stableListKeys.auditEvents });
 
@@ -139,5 +130,5 @@ export function useBusabaseLiveSync({
       }
       void unsubscribe?.();
     };
-  }, [activeBaseId, actorId, orpc, queryClient, stableListKeys]);
+  }, [activeBaseId, orpc, queryClient, stableListKeys]);
 }

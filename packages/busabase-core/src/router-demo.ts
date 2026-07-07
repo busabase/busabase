@@ -145,6 +145,22 @@ export const busabaseDemoRouter = os.router({
       throw demoUnsupported("Skill change request");
     }),
   },
+  drives: {
+    list: os.drives.list.handler(() => []),
+    create: os.drives.create.handler(() => {
+      throw demoUnsupported("Create Drive");
+    }),
+    get: os.drives.get.handler(() => {
+      throw demoUnsupported("Open Drive");
+    }),
+    listFiles: os.drives.listFiles.handler(() => []),
+    readFile: os.drives.readFile.handler(() => {
+      throw demoUnsupported("Read Drive file");
+    }),
+    createChangeRequest: os.drives.createChangeRequest.handler(() => {
+      throw demoUnsupported("Drive change request");
+    }),
+  },
   docs: {
     list: os.docs.list.handler(() => []),
     create: os.docs.create.handler(() => {
@@ -164,15 +180,13 @@ export const busabaseDemoRouter = os.router({
     list: os.folders.list.handler(() => demoListFolders()),
     get: os.folders.get.handler(({ input }) => demoGetFolder(input.nodeId)),
   },
-  attachments: {
-    createUploadUrl: os.attachments.createUploadUrl.handler(() => {
-      throw demoUnsupported("Upload attachment");
-    }),
-    confirm: os.attachments.confirm.handler(() => {
-      throw demoUnsupported("Upload attachment");
-    }),
-  },
   assets: {
+    createUploadUrl: os.assets.createUploadUrl.handler(() => {
+      throw demoUnsupported("Upload asset");
+    }),
+    confirm: os.assets.confirm.handler(() => {
+      throw demoUnsupported("Upload asset");
+    }),
     list: os.assets.list.handler(() => demoListAssets()),
     get: os.assets.get.handler(({ input }) => demoGetAsset(input.assetId)),
     delete: os.assets.delete.handler(() => {

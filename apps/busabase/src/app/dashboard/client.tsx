@@ -7,6 +7,7 @@ import { BusabaseDashboard } from "busabase-core/dashboard";
 import { CreateNodeModal } from "busabase-core/dashboard/create-node-modal";
 import { EmptyAgentGuide } from "busabase-core/dashboard/empty-agent-guide";
 import { getBusabaseDashboardRoutes as getDashboardRoutes } from "busabase-core/dashboard/routes";
+import { CoreI18nProvider } from "busabase-core/i18n";
 import { useRouter } from "next/navigation";
 import { detectBrowserLocale, type Locale } from "openlib/i18n";
 import { addDemoParam } from "openlib/ui/dashboard";
@@ -21,19 +22,20 @@ import { getBusabaseAppLL } from "~/lib/i18n";
 
 interface DashboardClientProps {
   initialPath?: string;
+  localUserName?: string | null;
 }
 
-export function DashboardClient({ initialPath = "/inbox" }: DashboardClientProps) {
+export function DashboardClient({ initialPath = "/inbox", localUserName }: DashboardClientProps) {
   const [queryClient] = useState(() => new QueryClient());
 
   return (
     <QueryClientProvider client={queryClient}>
-      <DashboardClientContent initialPath={initialPath} />
+      <DashboardClientContent initialPath={initialPath} localUserName={localUserName} />
     </QueryClientProvider>
   );
 }
 
-function DashboardClientContent({ initialPath = "/inbox" }: DashboardClientProps) {
+function DashboardClientContent({ initialPath = "/inbox", localUserName }: DashboardClientProps) {
   const router = useRouter();
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
@@ -113,58 +115,81 @@ function DashboardClientContent({ initialPath = "/inbox" }: DashboardClientProps
   return (
     <SPAWrapper
       basePath="/dashboard"
-      context={{ locale, secondaryNavConfig }}
+      context={{
+        activeSpace: {
+          id: "local",
+          name: LL.shell.localSpaceName(),
+          slug: "local",
+        },
+        locale,
+        secondaryNavConfig,
+        spaces: [
+          {
+            id: "local",
+            name: LL.shell.localSpaceName(),
+            slug: "local",
+          },
+        ],
+        user: {
+          avatar: localUserName ? localUserName.slice(0, 2).toUpperCase() : "LR",
+          email: "local@busabase.dev",
+          id: "local-admin",
+          name: localUserName ?? LL.shell.localReviewerName(),
+        },
+      }}
       initialPath={initialPath}
     >
-      <ProductReadyDashboardShell
-        activeChangeRequestCount={
-          changeRequests.filter((changeRequest) => changeRequest.status === "in_review").length
-        }
-        nodes={nodes}
-        onSearchClick={() => setIsSearchOpen(true)}
-        onCreateClick={(parent) => {
-          setCreateParent(parent ?? null);
-          setIsCreateOpen(true);
-        }}
-        locale={locale}
-        languagePref={languagePref}
-        onLocaleChange={changeLocale}
-      >
-        {loadErrorMessage ? (
-          <div className="flex min-h-0 flex-1 items-center justify-center px-6 text-sm text-destructive">
-            {loadErrorMessage}
-          </div>
-        ) : isLoadingDashboardData ? (
-          <div className="flex min-h-0 flex-1 items-center justify-center px-6 text-sm text-muted-foreground">
-            {LL.shell.loadingDashboard()}
-          </div>
-        ) : (
-          <SPARouteRenderer
-            NotFoundComponent={DashboardNotFound}
-            className="flex min-h-0 flex-1 flex-col"
-            routes={routes}
-          />
-        )}
-      </ProductReadyDashboardShell>
-      <CreateNodeModal
-        apiClient={apiClient}
-        open={isCreateOpen}
-        parent={createParent}
-        onOpenChange={(next) => {
-          setIsCreateOpen(next);
-          if (!next) {
-            setCreateParent(null);
+      <CoreI18nProvider locale={locale}>
+        <ProductReadyDashboardShell
+          activeChangeRequestCount={
+            changeRequests.filter((changeRequest) => changeRequest.status === "in_review").length
           }
-        }}
-        onCreated={(changeRequestId, mode) => {
-          router.refresh();
-          if (mode === "merged") {
-            window.location.assign(addDemoParam("/dashboard"));
-          } else {
-            window.location.assign(addDemoParam(`/dashboard/inbox/${changeRequestId}`));
-          }
-        }}
-      />
+          nodes={nodes}
+          onSearchClick={() => setIsSearchOpen(true)}
+          onCreateClick={(parent) => {
+            setCreateParent(parent ?? null);
+            setIsCreateOpen(true);
+          }}
+          locale={locale}
+          languagePref={languagePref}
+          onLocaleChange={changeLocale}
+        >
+          {loadErrorMessage ? (
+            <div className="flex min-h-0 flex-1 items-center justify-center px-6 text-sm text-destructive">
+              {loadErrorMessage}
+            </div>
+          ) : isLoadingDashboardData ? (
+            <div className="flex min-h-0 flex-1 items-center justify-center px-6 text-sm text-muted-foreground">
+              {LL.shell.loadingDashboard()}
+            </div>
+          ) : (
+            <SPARouteRenderer
+              NotFoundComponent={DashboardNotFound}
+              className="flex min-h-0 flex-1 flex-col"
+              routes={routes}
+            />
+          )}
+        </ProductReadyDashboardShell>
+        <CreateNodeModal
+          apiClient={apiClient}
+          open={isCreateOpen}
+          parent={createParent}
+          onOpenChange={(next) => {
+            setIsCreateOpen(next);
+            if (!next) {
+              setCreateParent(null);
+            }
+          }}
+          onCreated={(changeRequestId, mode) => {
+            router.refresh();
+            if (mode === "merged") {
+              window.location.assign(addDemoParam("/dashboard"));
+            } else {
+              window.location.assign(addDemoParam(`/dashboard/inbox/${changeRequestId}`));
+            }
+          }}
+        />
+      </CoreI18nProvider>
     </SPAWrapper>
   );
 }

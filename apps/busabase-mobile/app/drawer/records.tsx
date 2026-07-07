@@ -1,11 +1,15 @@
 import { skipToken, useQuery } from "@tanstack/react-query";
 import { useRouter } from "expo-router";
-import { StyleSheet, View } from "react-native";
 import { useBusabaseOrpc } from "~/api/use-busabase-orpc";
 import { ConnectionGuard } from "~/components/busabase/ConnectionGuard";
 import { DrawerScaffold } from "~/components/busabase/DrawerScaffold";
 import { RecordCard } from "~/components/busabase/RecordCard";
-import { NativeEmptyState, NativeErrorState, NativeLoadingState } from "~/components/native-screen";
+import {
+  NativeEmptyState,
+  NativeErrorState,
+  NativeLoadingState,
+  NativeSection,
+} from "~/components/native-screen";
 
 function RecordsContent() {
   const router = useRouter();
@@ -33,15 +37,18 @@ function RecordsContent() {
           description="Approved and merged Busabase records will appear here."
         />
       ) : null}
-      <View style={styles.list}>
-        {query.data?.map((record) => (
-          <RecordCard
-            key={record.id}
-            record={record}
-            onPress={() => router.push({ pathname: "/records/[id]", params: { id: record.id } })}
-          />
-        ))}
-      </View>
+      {query.data && query.data.length > 0 ? (
+        <NativeSection title="Records" caption={`${query.data.length}`}>
+          {query.data.map((record, index) => (
+            <RecordCard
+              key={record.id}
+              record={record}
+              last={index === query.data.length - 1}
+              onPress={() => router.push({ pathname: "/records/[id]", params: { id: record.id } })}
+            />
+          ))}
+        </NativeSection>
+      ) : null}
     </DrawerScaffold>
   );
 }
@@ -53,7 +60,3 @@ export default function RecordsScreen() {
     </ConnectionGuard>
   );
 }
-
-const styles = StyleSheet.create({
-  list: { marginHorizontal: 20, gap: 12 },
-});

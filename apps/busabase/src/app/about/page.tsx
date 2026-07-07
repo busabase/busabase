@@ -1,10 +1,12 @@
 import type { Metadata } from "next";
 import { getBusabaseServerLL } from "~/lib/i18n-server";
 
-export const metadata: Metadata = {
-  title: "About BusaBase",
-  description:
-    "BusaBase is an approval-first database for AI agents. Every AI-generated record must pass human review before it becomes canonical.",
+export const generateMetadata = async (): Promise<Metadata> => {
+  const LL = await getBusabaseServerLL();
+  return {
+    title: LL.marketing.aboutTitle(),
+    description: LL.marketing.aboutDescription(),
+  };
 };
 
 export default async function AboutPage() {

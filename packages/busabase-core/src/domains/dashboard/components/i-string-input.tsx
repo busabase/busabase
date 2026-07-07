@@ -7,7 +7,7 @@
 import { Languages } from "lucide-react";
 import type { iString, iStringRecord } from "openlib/i18n/i-string";
 import { useState } from "react";
-import { type CoreLocale, coreLocaleOptions, useCoreLocale } from "../../../i18n";
+import { type CoreLocale, coreLocaleOptions, useCoreI18n, useCoreLocale } from "../../../i18n";
 
 const textInputClassName =
   "mt-1 h-8 w-full rounded-md border border-border/70 bg-background px-2.5 text-sm outline-none transition-colors focus:border-primary";
@@ -21,6 +21,7 @@ export function IStringNameInput({
   onChange: (value: iString) => void;
   value: iString;
 }) {
+  const messages = useCoreI18n();
   const locale = useCoreLocale();
   const [expanded, setExpanded] = useState(typeof value !== "string");
 
@@ -62,7 +63,7 @@ export function IStringNameInput({
             expanded || filledCount > 0 ? "text-foreground" : ""
           }`}
           onClick={() => setExpanded((current) => !current)}
-          title="Translations"
+          title={messages.common.translations}
           type="button"
         >
           <Languages size={12} />

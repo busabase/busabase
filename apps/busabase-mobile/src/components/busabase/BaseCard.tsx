@@ -1,29 +1,31 @@
 import type { BaseVO } from "busabase-contract/types";
-import { StyleSheet, Text, View } from "react-native";
+import { Database } from "lucide-react-native";
+import { Text } from "react-native";
+import { NativeRow } from "~/components/native-screen";
 import { formatDate } from "~/lib/format";
-import { radius, typography } from "~/theme/tokens";
+import { typography } from "~/theme/tokens";
 import { useTokens } from "~/theme/use-tokens";
 
-export function BaseCard({ base }: { base: BaseVO }) {
-  const tokens = useTokens();
-  return (
-    <View style={[styles.card, { backgroundColor: tokens.card, borderColor: tokens.border }]}>
-      <Text style={[typography.h3, { color: tokens.foreground }]}>{base.name}</Text>
-      <Text style={[typography.body, { color: tokens.mutedForeground }]}>
-        {base.description || "No description"}
-      </Text>
-      <Text style={[typography.small, { color: tokens.mutedForeground }]}>
-        {base.fields.length} fields · Created {formatDate(base.createdAt)}
-      </Text>
-    </View>
-  );
+interface BaseCardProps {
+  base: BaseVO;
+  onPress?: () => void;
+  last?: boolean;
 }
 
-const styles = StyleSheet.create({
-  card: {
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: radius.lg,
-    padding: 16,
-    gap: 8,
-  },
-});
+export function BaseCard({ base, onPress, last }: BaseCardProps) {
+  const tokens = useTokens();
+  return (
+    <NativeRow
+      title={base.name}
+      subtitle={base.description || "No description"}
+      meta={`${base.fields.length} fields`}
+      leading={<Database size={18} color={tokens.mutedForeground} />}
+      last={last}
+      onPress={onPress}
+    >
+      <Text style={[typography.small, { color: tokens.mutedForeground }]}>
+        Created {formatDate(base.createdAt)}
+      </Text>
+    </NativeRow>
+  );
+}

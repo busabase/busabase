@@ -23,6 +23,23 @@ export interface ActivityEvent {
 
 const shortId = (value: string | null | undefined) => value?.slice(0, 10) ?? "none";
 
+const auditActionLabel: Partial<Record<AuditEventVO["action"], string>> = {
+  "asset.deleted": "Asset deleted",
+  "base.created": "Base created",
+  "change_request.created": "Change request opened",
+  "change_request.deleted": "Delete request opened",
+  "change_request.merged": "Change request merged",
+  "change_request.reviewed": "Change request reviewed",
+  "change_request.updated": "Update request opened",
+  "doc.created": "Doc created",
+  "doc.updated": "Doc updated",
+  "drive.created": "Drive created",
+  "field.created": "Field created",
+  "node.purged": "Node permanently deleted",
+  "record.viewed": "Record viewed",
+  "skill.created": "Skill created",
+};
+
 const getAuditEventTitle = (event: AuditEventVO): string => {
   switch (event.action) {
     case "record.viewed":
@@ -83,7 +100,7 @@ export function buildActivityEvents(
     (event): ActivityEvent => ({
       id: `audit:${event.id}`,
       title: getAuditEventTitle(event),
-      body: `${event.actorId} · ${event.action}`,
+      body: `${event.actorId} · ${auditActionLabel[event.action] ?? event.action}`,
       tone: "audit",
       timestamp: event.createdAt,
       target: event.recordId

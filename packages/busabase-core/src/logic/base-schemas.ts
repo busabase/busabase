@@ -25,6 +25,8 @@ const fieldTypeSchema = z.enum([
   "ai_summary",
   "ai_tags",
   "code",
+  "json",
+  "yaml",
 ]);
 
 const fieldOptionsSchema = z

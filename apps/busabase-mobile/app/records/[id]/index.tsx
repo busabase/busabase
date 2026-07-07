@@ -1,24 +1,29 @@
-import { skipToken, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { skipToken, useMutation, useQuery } from "@tanstack/react-query";
 import type { ChangeRequestVO } from "busabase-contract/types";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { ArrowLeft } from "lucide-react-native";
+import { ArrowLeft, GitPullRequest, MoreHorizontal, Pencil, Trash2 } from "lucide-react-native";
 import { useState } from "react";
-import { Alert, Pressable, StyleSheet, Text, View } from "react-native";
+import { Pressable, StyleSheet } from "react-native";
 import { useBusabaseOrpc } from "~/api/use-busabase-orpc";
+import { CommentsSection } from "~/components/busabase/CommentsSection";
 import { ConnectionGuard } from "~/components/busabase/ConnectionGuard";
 import { FieldList } from "~/components/busabase/FieldList";
 import {
+  NativeActionBar,
+  NativeBottomSheet,
   NativeEmptyState,
   NativeErrorState,
+  NativeInlineError,
   NativeLoadingState,
+  NativeRow,
   NativeScreen,
+  NativeSection,
 } from "~/components/native-screen";
 import { Button } from "~/components/ui/Button";
-import { StatusBadge } from "~/components/ui/StatusBadge";
-import { TextInput } from "~/components/ui/TextInput";
+import { getStatusLabel, StatusBadge } from "~/components/ui/StatusBadge";
 import { getChangeRequestTitle, getRecordTitle } from "~/lib/busabase-display";
 import { formatDate, shortId } from "~/lib/format";
-import { mobile, radius, typography } from "~/theme/tokens";
+import { mobile, radius } from "~/theme/tokens";
 import { useTokens } from "~/theme/use-tokens";
 
 function RecordDetailContent() {
@@ -26,9 +31,9 @@ function RecordDetailContent() {
   const router = useRouter();
   const tokens = useTokens();
   const buda = useBusabaseOrpc();
-  const queryClient = useQueryClient();
   const recordId = typeof params.id === "string" ? params.id : "";
-  const [commentBody, setCommentBody] = useState("");
+  const [actionsSheetOpen, setActionsSheetOpen] = useState(false);
+  const [deleteSheetOpen, setDeleteSheetOpen] = useState(false);
 
   const recordQuery = useQuery(
     buda && recordId
@@ -40,17 +45,9 @@ function RecordDetailContent() {
       ? buda.orpc.records.listChangeRequests.queryOptions({ input: { recordId } })
       : { queryKey: ["no-connection", "record-history", recordId], queryFn: skipToken },
   );
-  const commentsQuery = useQuery(
-    buda && recordId
-      ? buda.orpc.comments.list.queryOptions({
-          input: { subjectType: "record", subjectId: recordId },
-        })
-      : { queryKey: ["no-connection", "comments", "record", recordId], queryFn: skipToken },
-  );
 
   const record = recordQuery.data ?? null;
   const history = (historyQuery.data as ChangeRequestVO[] | undefined) ?? [];
-  const comments = commentsQuery.data ?? [];
 
   const deleteMutation = useMutation({
     mutationFn: async () => {
@@ -62,28 +59,8 @@ function RecordDetailContent() {
       });
     },
     onSuccess: (changeRequest) => {
+      setDeleteSheetOpen(false);
       router.replace({ pathname: "/change-requests/[id]", params: { id: changeRequest.id } });
-    },
-  });
-
-  const commentMutation = useMutation({
-    mutationFn: async (body: string) => {
-      if (!buda || !recordId) throw new Error("Not connected");
-      return buda.client.comments.create({
-        subjectType: "record",
-        subjectId: recordId,
-        body,
-        authorId: "mobile-reviewer",
-        mentionsAi: /(^|\s)@ai(\s|$)/i.test(body),
-      });
-    },
-    onSuccess: () => {
-      setCommentBody("");
-      void queryClient.invalidateQueries({
-        queryKey: buda?.orpc.comments.list.key({
-          input: { subjectType: "record", subjectId: recordId },
-        }),
-      });
     },
   });
 
@@ -134,142 +111,155 @@ function RecordDetailContent() {
       title={getRecordTitle(record)}
       subtitle={`${record.base.name} · ${formatDate(record.updatedAt)}`}
       headerLeading={headerLeading}
-    >
-      <View style={styles.content}>
-        <View style={[styles.card, { backgroundColor: tokens.card, borderColor: tokens.border }]}>
-          <View style={styles.statusRow}>
-            <StatusBadge status={record.status} />
-            <Text style={[typography.small, { color: tokens.mutedForeground }]}>
-              commit {shortId(record.headCommitId)} · by {record.createdBy}
-            </Text>
-          </View>
-          <View style={styles.recordActions}>
-            <View style={styles.recordActionItem}>
-              <Button
-                label="Edit"
-                variant="secondary"
-                fullWidth
-                onPress={() =>
-                  router.push({ pathname: "/records/[id]/edit", params: { id: record.id } })
-                }
-              />
-            </View>
-            <View style={styles.recordActionItem}>
-              <Button
-                label="Delete"
-                variant="destructive"
-                loading={deleteMutation.isPending}
-                fullWidth
-                onPress={() =>
-                  Alert.alert("Delete record", "Create a delete change request for this record?", [
-                    { text: "Cancel", style: "cancel" },
-                    {
-                      text: "Delete",
-                      style: "destructive",
-                      onPress: () => deleteMutation.mutate(),
-                    },
-                  ])
-                }
-              />
-            </View>
-          </View>
+      headerAction={
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Open record actions"
+          hitSlop={mobile.hitSlop}
+          style={[styles.moreButton, { backgroundColor: tokens.primaryMuted }]}
+          onPress={() => setActionsSheetOpen(true)}
+        >
+          <MoreHorizontal size={21} color={tokens.foreground} />
+        </Pressable>
+      }
+      footer={
+        <NativeActionBar>
           {deleteMutation.error ? (
-            <Text style={[typography.small, { color: tokens.destructive }]}>
-              {deleteMutation.error.message}
-            </Text>
+            <NativeInlineError
+              message={deleteMutation.error.message}
+              onReset={() => deleteMutation.reset()}
+            />
           ) : null}
-        </View>
-
-        <View style={[styles.card, { backgroundColor: tokens.card, borderColor: tokens.border }]}>
-          <Text style={[typography.h2, { color: tokens.foreground }]}>Fields</Text>
-          <FieldList fields={record.headCommit.fields} definitions={record.base.fields} />
-        </View>
-
-        <View style={[styles.card, { backgroundColor: tokens.card, borderColor: tokens.border }]}>
-          <Text style={[typography.h2, { color: tokens.foreground }]}>Review history</Text>
-          {history.length === 0 ? (
-            <Text style={[typography.body, { color: tokens.mutedForeground }]}>
-              No change requests yet.
-            </Text>
-          ) : (
-            history.map((changeRequest) => (
-              <Pressable
-                key={changeRequest.id}
-                style={[styles.historyRow, { borderColor: tokens.border }]}
-                onPress={() =>
-                  router.push({
-                    pathname: "/change-requests/[id]",
-                    params: { id: changeRequest.id },
-                  })
-                }
-              >
-                <View style={styles.historyText}>
-                  <Text numberOfLines={1} style={[typography.bodyEm, { color: tokens.foreground }]}>
-                    {getChangeRequestTitle(changeRequest)}
-                  </Text>
-                  <Text style={[typography.small, { color: tokens.mutedForeground }]}>
-                    {changeRequest.submittedBy} · {formatDate(changeRequest.updatedAt)}
-                  </Text>
-                </View>
-                <StatusBadge status={changeRequest.status} />
-              </Pressable>
-            ))
-          )}
-        </View>
-
-        <View style={[styles.card, { backgroundColor: tokens.card, borderColor: tokens.border }]}>
-          <Text style={[typography.h2, { color: tokens.foreground }]}>
-            Comments ({comments.length})
-          </Text>
-          {commentsQuery.isLoading ? (
-            <Text style={[typography.body, { color: tokens.mutedForeground }]}>
-              Loading comments...
-            </Text>
-          ) : comments.length === 0 ? (
-            <Text style={[typography.body, { color: tokens.mutedForeground }]}>
-              No comments yet.
-            </Text>
-          ) : (
-            comments.map((comment) => (
-              <View key={comment.id} style={[styles.commentRow, { borderColor: tokens.border }]}>
-                <View style={styles.commentHeader}>
-                  <Text style={[typography.bodyEm, { color: tokens.foreground }]}>
-                    {comment.authorId}
-                  </Text>
-                  <Text style={[typography.small, { color: tokens.mutedForeground }]}>
-                    {formatDate(comment.createdAt)}
-                  </Text>
-                </View>
-                <Text style={[typography.body, { color: tokens.foreground }]}>{comment.body}</Text>
-              </View>
-            ))
-          )}
-          {commentMutation.error ? (
-            <Text style={[typography.small, { color: tokens.destructive }]}>
-              {commentMutation.error.message}
-            </Text>
-          ) : null}
-          <TextInput
-            label="Add comment"
-            value={commentBody}
-            multiline
-            style={styles.commentInput}
-            textAlignVertical="top"
-            placeholder="Write a note for this record (@ai to mention the agent)"
-            onChangeText={setCommentBody}
-          />
           <Button
-            label="Post comment"
-            loading={commentMutation.isPending}
-            disabled={commentBody.trim().length === 0}
+            label="Edit record"
+            variant="secondary"
             fullWidth
-            onPress={() => {
-              const body = commentBody.trim();
-              if (body) commentMutation.mutate(body);
-            }}
+            leadingIcon={<Pencil size={18} color={tokens.foreground} />}
+            onPress={() =>
+              router.push({ pathname: "/records/[id]/edit", params: { id: record.id } })
+            }
           />
-        </View>
-      </View>
+        </NativeActionBar>
+      }
+    >
+      <NativeSection title="Status">
+        <NativeRow
+          title={getStatusLabel(record.status)}
+          subtitle={`Commit ${shortId(record.headCommitId)} · by ${record.createdBy}`}
+          trailing={<StatusBadge status={record.status} />}
+          last
+        />
+      </NativeSection>
+
+      <NativeSection title="Fields">
+        <FieldList
+          fields={record.headCommit.fields}
+          definitions={record.base.fields}
+          variant="grouped"
+        />
+      </NativeSection>
+
+      <NativeSection title="Review history" caption={`${history.length}`}>
+        {history.length === 0 ? (
+          <NativeRow
+            title="No change requests yet"
+            subtitle="Edits to this record will appear here as review history."
+            leading={<GitPullRequest size={18} color={tokens.mutedForeground} />}
+            last
+          />
+        ) : (
+          history.map((changeRequest, index) => (
+            <NativeRow
+              key={changeRequest.id}
+              title={getChangeRequestTitle(changeRequest)}
+              subtitle={`${changeRequest.submittedBy} · ${formatDate(changeRequest.updatedAt)}`}
+              trailing={<StatusBadge status={changeRequest.status} />}
+              last={index === history.length - 1}
+              onPress={() =>
+                router.push({
+                  pathname: "/change-requests/[id]",
+                  params: { id: changeRequest.id },
+                })
+              }
+            />
+          ))
+        )}
+      </NativeSection>
+
+      <CommentsSection subjectType="record" subjectId={record.id} />
+
+      <NativeBottomSheet
+        visible={actionsSheetOpen}
+        title="Record actions"
+        description="Manage this record without crowding the reading view."
+        showCloseButton
+        onClose={() => setActionsSheetOpen(false)}
+        footer={
+          <NativeActionBar>
+            <Button
+              label="Edit record"
+              variant="secondary"
+              fullWidth
+              leadingIcon={<Pencil size={18} color={tokens.foreground} />}
+              onPress={() => {
+                setActionsSheetOpen(false);
+                router.push({ pathname: "/records/[id]/edit", params: { id: record.id } });
+              }}
+            />
+            <Button
+              label="Create delete change request"
+              variant="destructive"
+              loading={deleteMutation.isPending}
+              fullWidth
+              leadingIcon={<Trash2 size={18} color={tokens.destructiveForeground} />}
+              onPress={() => {
+                setActionsSheetOpen(false);
+                setDeleteSheetOpen(true);
+              }}
+            />
+            <Button
+              label="Close"
+              variant="ghost"
+              disabled={deleteMutation.isPending}
+              fullWidth
+              onPress={() => setActionsSheetOpen(false)}
+            />
+          </NativeActionBar>
+        }
+      />
+
+      <NativeBottomSheet
+        visible={deleteSheetOpen}
+        title="Delete record?"
+        description="This creates a delete change request. The canonical record changes only after the request is reviewed and merged."
+        showCloseButton
+        onClose={() => setDeleteSheetOpen(false)}
+        footer={
+          <NativeActionBar>
+            {deleteMutation.error ? (
+              <NativeInlineError
+                message={deleteMutation.error.message}
+                onReset={() => deleteMutation.reset()}
+              />
+            ) : null}
+            <Button
+              label="Create delete change request"
+              variant="destructive"
+              loading={deleteMutation.isPending}
+              fullWidth
+              leadingIcon={<Trash2 size={18} color={tokens.destructiveForeground} />}
+              onPress={() => deleteMutation.mutate()}
+            />
+            <Button
+              label="Cancel"
+              variant="ghost"
+              disabled={deleteMutation.isPending}
+              fullWidth
+              onPress={() => setDeleteSheetOpen(false)}
+            />
+          </NativeActionBar>
+        }
+      />
     </NativeScreen>
   );
 }
@@ -290,41 +280,11 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  content: { marginHorizontal: 20, gap: 14 },
-  card: {
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: radius.lg,
-    padding: 16,
-    gap: 12,
-  },
-  statusRow: {
-    flexDirection: "row",
+  moreButton: {
+    width: 36,
+    height: 36,
+    borderRadius: radius.full,
     alignItems: "center",
-    justifyContent: "space-between",
-    gap: 12,
+    justifyContent: "center",
   },
-  recordActions: { flexDirection: "row", gap: 10 },
-  recordActionItem: { flex: 1 },
-  historyRow: {
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: radius.md,
-    padding: 12,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
-  },
-  historyText: { flex: 1, minWidth: 0, gap: 2 },
-  commentRow: {
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: radius.md,
-    padding: 12,
-    gap: 6,
-  },
-  commentHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: 12,
-  },
-  commentInput: { minHeight: 80, paddingTop: 12 },
 });

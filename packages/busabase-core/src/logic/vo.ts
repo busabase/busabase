@@ -15,6 +15,7 @@ import type {
   OperationVO,
   RecordLinkVO,
   ReviewVO,
+  UserRefVO,
   ViewConfigVO,
   ViewFilterVO,
   ViewSortVO,
@@ -35,6 +36,11 @@ import type {
 } from "../db/schema";
 
 export const toIso = (date: Date | null) => (date ? date.toISOString() : null);
+
+export type UserRefMap = Map<string, UserRefVO>;
+
+const userRef = (users: UserRefMap | undefined, userId: string): UserRefVO | null =>
+  users?.get(userId) ?? null;
 
 export const normalizeFieldValue = (value: unknown) => {
   if (value === null || value === undefined) {
@@ -98,7 +104,7 @@ export const normalizeViewConfig = (config: ViewPO["config"] | ViewConfigVO): Vi
   visibleFieldSlugs: config.visibleFieldSlugs,
 });
 
-export const toViewVO = (view: ViewPO): ViewVO => ({
+export const toViewVO = (view: ViewPO, users?: UserRefMap): ViewVO => ({
   id: view.id,
   baseId: view.baseId,
   slug: view.slug,
@@ -108,6 +114,7 @@ export const toViewVO = (view: ViewPO): ViewVO => ({
   config: normalizeViewConfig(view.config),
   status: view.status === "archived" ? "archived" : "active",
   createdBy: view.createdBy,
+  createdByUser: userRef(users, view.createdBy),
   archivedAt: toIso(view.archivedAt),
   createdAt: view.createdAt.toISOString(),
   updatedAt: view.updatedAt.toISOString(),
@@ -142,7 +149,7 @@ export const toRecordLinkVO = (link: RecordLinkPO): RecordLinkVO => ({
   updatedAt: link.updatedAt.toISOString(),
 });
 
-export const toCommitVO = (commit: CommitPO): CommitVO => ({
+export const toCommitVO = (commit: CommitPO, users?: UserRefMap): CommitVO => ({
   id: commit.id,
   baseId: commit.baseId,
   targetType: commit.targetType,
@@ -153,20 +160,22 @@ export const toCommitVO = (commit: CommitPO): CommitVO => ({
   operation: commit.operation as OperationKind,
   message: commit.message,
   author: commit.author,
+  authorUser: userRef(users, commit.author),
   createdAt: commit.createdAt.toISOString(),
 });
 
-export const toReviewVO = (review: ReviewPO): ReviewVO => ({
+export const toReviewVO = (review: ReviewPO, users?: UserRefMap): ReviewVO => ({
   id: review.id,
   changeRequestId: review.changeRequestId,
   reviewerId: review.reviewerId,
+  reviewer: userRef(users, review.reviewerId),
   verdict: review.verdict,
   reason: review.reason,
   visibleOperationHeads: review.visibleOperationHeads,
   createdAt: review.createdAt.toISOString(),
 });
 
-export const toCommentVO = (comment: CommentPO): CommentVO => ({
+export const toCommentVO = (comment: CommentPO, users?: UserRefMap): CommentVO => ({
   id: comment.id,
   subjectType: comment.subjectType as CommentSubjectType,
   subjectId: comment.subjectId,
@@ -175,16 +184,18 @@ export const toCommentVO = (comment: CommentPO): CommentVO => ({
   operationId: comment.operationId,
   commitId: comment.commitId,
   authorId: comment.authorId,
+  author: userRef(users, comment.authorId),
   body: comment.body,
   mentionsAi: comment.mentionsAi,
   createdAt: comment.createdAt.toISOString(),
   updatedAt: comment.updatedAt.toISOString(),
 });
 
-export const toAuditEventVO = (event: AuditEventPO): AuditEventVO => ({
+export const toAuditEventVO = (event: AuditEventPO, users?: UserRefMap): AuditEventVO => ({
   id: event.id,
   action: event.action as AuditAction,
   actorId: event.actorId,
+  actor: userRef(users, event.actorId),
   baseId: event.baseId,
   recordId: event.recordId,
   changeRequestId: event.changeRequestId,
@@ -198,6 +209,7 @@ export const toOperationVO = (
   item: OperationPO,
   headCommit: CommitPO,
   baseFields: Record<string, unknown> | null,
+  users?: UserRefMap,
 ): OperationVO => ({
   id: item.id,
   changeRequestId: item.changeRequestId,
@@ -219,6 +231,6 @@ export const toOperationVO = (
   position: item.position,
   createdAt: item.createdAt.toISOString(),
   updatedAt: item.updatedAt.toISOString(),
-  headCommit: toCommitVO(headCommit),
+  headCommit: toCommitVO(headCommit, users),
   baseFields,
 });

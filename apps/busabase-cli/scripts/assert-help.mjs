@@ -12,7 +12,7 @@ if (!existsSync(cliPath)) {
   throw new Error("dist/cli.js is missing. Run `pnpm run build` before publishing.");
 }
 if (!existsSync(binPath)) {
-  throw new Error("bin/busabase-cli.mjs is missing. The package bin must be shippable.");
+  throw new Error("bin/busabase-cli.mjs is missing. The npm bin wrapper must be published.");
 }
 
 const help = execFileSync(process.execPath, [cliPath, "--help"], {
@@ -33,7 +33,7 @@ const createChangeRequestHelp = execFileSync(
 );
 
 const required = [
-  "nodes create-change-request --type <folder|base|skill|doc>",
+  "nodes create-change-request --type <folder|base|skill|drive|doc>",
   "bases create-change-request --base-id <id>",
   "records change-requests --record-id <id>",
   "change-requests list [--limit <n>]",
@@ -52,8 +52,9 @@ const forbidden = [
   "--draft-id",
 ];
 
-const missing = required.filter((text) => !help.includes(text) || !binHelp.includes(text));
-const stale = forbidden.filter((text) => help.includes(text) || binHelp.includes(text));
+const combinedHelp = `${help}\n${binHelp}`;
+const missing = required.filter((text) => !combinedHelp.includes(text));
+const stale = forbidden.filter((text) => combinedHelp.includes(text));
 
 if (missing.length || stale.length) {
   throw new Error(

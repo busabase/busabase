@@ -10,6 +10,8 @@ const en: BaseTranslation = {
     failedToLoadDashboard: "Failed to load dashboard data",
     routeNotFoundTitle: "Dashboard route not found",
     routeNotFoundBody: "Open Inbox, Activity, or a Base from the sidebar.",
+    localSpaceName: "Local Busabase",
+    localReviewerName: "Local Reviewer",
     localPlan: "Local",
     approvalFirstKb: "Approval-first KB",
     addWorkspace: "Add workspace",
@@ -28,7 +30,33 @@ const en: BaseTranslation = {
     base: "Base",
     blogPosts: "Blog Posts",
   },
+  userEnvSettings: {
+    title: "Env Vars",
+    description: "Store runtime secrets for agents and API tools that call this Busabase instance.",
+    openButton: "Env Vars",
+    nameLabel: "Name",
+    valueLabel: "Value",
+    valuePlaceholder: "Value",
+    addVariable: "Add variable",
+    save: "Save",
+    saving: "Saving...",
+    loading: "Loading environment variables...",
+    clear: "Clear",
+    reveal: "Reveal",
+    hide: "Hide",
+    saved: "Environment variables saved",
+    saveFailed: "Failed to save environment variables",
+    cleared: "Environment variables cleared",
+    storageTitle: "Local user scope",
+    storageDescription:
+      "These values are stored in this local Busabase database and injected for the built-in local user.",
+    requestScopeTitle: "Request scope",
+    requestScopeDescription:
+      "API, RPC, and MCP calls can read these values through the Busabase runtime without writing them to process.env.",
+    noVariables: "No variables configured yet.",
+  },
   marketing: {
+    rootDescription: "Open-source local review engine for Busabase.",
     aboutTitle: "About BusaBase",
     aboutDescription:
       "BusaBase is an approval-first database for AI agents. Every AI-generated record must pass human review before it becomes canonical.",
@@ -69,6 +97,7 @@ const en: BaseTranslation = {
       "Download Busabase Desktop for macOS, Windows, and Linux from the public Busabase desktop release channel.",
     downloadOgDescription:
       "Run Busabase as a local-first desktop app for approval-first AI agent data workflows.",
+    apiDocsTitle: "Busabase API Documentation",
     desktopBadge: "Busabase Desktop",
     downloadHeadline: "Download Busabase for your computer",
     downloadSubhead:
@@ -77,6 +106,10 @@ const en: BaseTranslation = {
     openWebDashboard: "Open web dashboard",
     latestDesktopBuild: "Latest desktop build",
     version: "Version {version:string}",
+    appleSilicon: "Apple Silicon",
+    intel: "Intel",
+    windows: "Windows",
+    linux: "Linux",
     macAppleSiliconDescription: "For newer Macs with M-series chips.",
     macIntelDescription: "For Intel-based Macs.",
     windowsDescription: "Choose the .msi or .exe bundle from the latest release.",
@@ -95,6 +128,33 @@ const en: BaseTranslation = {
     installStep1: "Download the bundle for your operating system.",
     installStep2: "Open Busabase Desktop and start the local review engine.",
     installStep3: "Use the release channel for future desktop updates.",
+  },
+  support: {
+    title: "Busabase Support",
+    description:
+      "Get help with Busabase Desktop, Busabase Mobile, Agent Skill setup, and approval-first database workflows.",
+    badge: "Support",
+    headline: "Get help with Busabase",
+    subhead:
+      "Use these support paths for Busabase Desktop, Busabase Mobile, local review workflows, and AI agent setup.",
+    emailTitle: "Email support",
+    emailBody:
+      "Send your workspace, device, and a short description of what went wrong. Include screenshots or logs when possible.",
+    setupTitle: "Set up Agent Skill",
+    setupBody:
+      "Connect Claude Code, Codex, or another AI agent to Busabase so it can create reviewed change requests.",
+    setupAction: "Open setup guide",
+    downloadTitle: "Download apps",
+    downloadBody:
+      "Install the desktop app for the local review engine, or use the mobile app to review changes on the go.",
+    downloadAction: "Open downloads",
+    dashboardTitle: "Open dashboard",
+    dashboardBody:
+      "Check the local inbox, activity feed, base schema, and pending change requests in your Busabase workspace.",
+    dashboardAction: "Open dashboard",
+    includeTitle: "What to include",
+    includeBody:
+      "For faster troubleshooting, include your Busabase version, operating system, whether you are using Desktop, Mobile, Cloud, or self-hosted mode, and the exact action that failed.",
   },
 };
 

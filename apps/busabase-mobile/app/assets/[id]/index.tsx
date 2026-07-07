@@ -1,23 +1,33 @@
 import { skipToken, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { getNodeType } from "busabase-contract/domains";
 import type { AssetUsageVO } from "busabase-contract/domains/assets/types";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { ArrowLeft, ChevronRight, FileText } from "lucide-react-native";
-import { Alert, Image, Linking, Pressable, StyleSheet, Text, View } from "react-native";
+import { ArrowLeft, FileText, MoreHorizontal, Trash2 } from "lucide-react-native";
+import { useState } from "react";
+import { Image, Linking, Pressable, StyleSheet, Text, View } from "react-native";
 import { useBusabaseOrpc } from "~/api/use-busabase-orpc";
 import { ConnectionGuard } from "~/components/busabase/ConnectionGuard";
 import {
+  NativeActionBar,
+  NativeBottomSheet,
   NativeEmptyState,
   NativeErrorState,
+  NativeInlineError,
   NativeLoadingState,
+  NativeRow,
   NativeScreen,
+  NativeSection,
 } from "~/components/native-screen";
 import { Button } from "~/components/ui/Button";
 import { useConnection } from "~/connection/connection-store";
 import { useI18n } from "~/i18n";
-import { isImageRef, resolveAttachmentUrl } from "~/lib/attachment";
+import { getAttachmentKindLabel, isImageRef, resolveAttachmentUrl } from "~/lib/attachment";
 import { formatBytes, shortId } from "~/lib/format";
 import { mobile, radius, typography } from "~/theme/tokens";
 import { useTokens } from "~/theme/use-tokens";
+
+const getUsageNodeLabel = (usage: AssetUsageVO) =>
+  getNodeType(usage.nodeType)?.label ?? usage.nodeType;
 
 function AssetDetailContent() {
   const params = useLocalSearchParams<{ id?: string }>();
@@ -28,6 +38,8 @@ function AssetDetailContent() {
   const buda = useBusabaseOrpc();
   const queryClient = useQueryClient();
   const { state } = useConnection();
+  const [actionsSheetOpen, setActionsSheetOpen] = useState(false);
+  const [deleteSheetOpen, setDeleteSheetOpen] = useState(false);
   const serverUrl = state.status === "connected" ? state.connection.serverUrl : null;
 
   const detailQuery = useQuery(
@@ -42,6 +54,8 @@ function AssetDetailContent() {
       return buda.client.assets.delete({ assetId });
     },
     onSuccess: () => {
+      setActionsSheetOpen(false);
+      setDeleteSheetOpen(false);
       void queryClient.invalidateQueries({ queryKey: buda?.orpc.assets.list.key({}) });
       router.back();
     },
@@ -85,6 +99,7 @@ function AssetDetailContent() {
 
   const { asset, usages } = detailQuery.data;
   const url = resolveAttachmentUrl(serverUrl, asset.url);
+  const assetKindLabel = getAttachmentKindLabel(asset);
 
   const openUsage = (usage: AssetUsageVO) => {
     if (usage.recordId) {
@@ -106,23 +121,25 @@ function AssetDetailContent() {
     router.push({ pathname: "/folder/[nodeId]", params: { nodeId: usage.nodeId } });
   };
 
-  const confirmDelete = () => {
-    Alert.alert(t.assets.deleteTitle, t.assets.deleteConfirm, [
-      { text: t.common.cancel, style: "cancel" },
-      {
-        text: t.common.deleteForever,
-        style: "destructive",
-        onPress: () => deleteMutation.mutate(),
-      },
-    ]);
-  };
-
   return (
-    <NativeScreen title={asset.name} subtitle={asset.fileName} headerLeading={headerLeading}>
-      <View style={styles.content}>
-        <View
-          style={[styles.preview, { backgroundColor: tokens.muted, borderColor: tokens.border }]}
+    <NativeScreen
+      title={asset.name}
+      subtitle={asset.fileName}
+      headerLeading={headerLeading}
+      headerAction={
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Open asset actions"
+          hitSlop={mobile.hitSlop}
+          style={[styles.moreButton, { backgroundColor: tokens.primaryMuted }]}
+          onPress={() => setActionsSheetOpen(true)}
         >
+          <MoreHorizontal size={21} color={tokens.foreground} />
+        </Pressable>
+      }
+    >
+      <NativeSection title={t.assets.preview}>
+        <View style={[styles.preview, { backgroundColor: tokens.muted }]}>
           {isImageRef(asset) ? (
             <Image source={{ uri: url }} resizeMode="contain" style={styles.previewImage} />
           ) : (
@@ -132,76 +149,118 @@ function AssetDetailContent() {
               onPress={() => void Linking.openURL(url).catch(() => undefined)}
             >
               <FileText size={36} color={tokens.mutedForeground} />
-              <Text style={[typography.small, { color: tokens.primary }]}>{t.common.close}</Text>
+              <Text style={[typography.small, { color: tokens.primary }]}>{t.common.open}</Text>
             </Pressable>
           )}
         </View>
+      </NativeSection>
 
-        <View style={[styles.card, { backgroundColor: tokens.card, borderColor: tokens.border }]}>
-          <MetaRow label={t.assets.type} value={asset.mimeType} />
-          <MetaRow label={t.assets.size} value={formatBytes(asset.size)} />
-          {asset.contentHash ? (
-            <MetaRow label={t.assets.contentHash} value={shortId(asset.contentHash)} />
-          ) : null}
-        </View>
-
-        <View style={[styles.card, { backgroundColor: tokens.card, borderColor: tokens.border }]}>
-          <Text style={[typography.h2, { color: tokens.foreground }]}>{t.assets.whereUsed}</Text>
-          {usages.length === 0 ? (
-            <Text style={[typography.small, { color: tokens.mutedForeground }]}>
-              {t.assets.notUsed}
-            </Text>
-          ) : (
-            usages.map((usage) => (
-              <Pressable
-                key={`${usage.nodeId}-${usage.recordId ?? "node"}-${usage.fieldSlug ?? "all"}`}
-                accessibilityRole="button"
-                style={[styles.usageRow, { borderColor: tokens.border }]}
-                onPress={() => openUsage(usage)}
-              >
-                <View style={styles.usageText}>
-                  <Text numberOfLines={1} style={[typography.bodyEm, { color: tokens.foreground }]}>
-                    {usage.nodeName}
-                  </Text>
-                  <Text style={[typography.caption, { color: tokens.mutedForeground }]}>
-                    {usage.fieldSlug ? `${usage.nodeType} · ${usage.fieldSlug}` : usage.nodeType}
-                  </Text>
-                </View>
-                <ChevronRight size={18} color={tokens.mutedForeground} />
-              </Pressable>
-            ))
-          )}
-        </View>
-
-        {deleteMutation.error ? (
-          <Text style={[typography.small, styles.error, { color: tokens.destructive }]}>
-            {deleteMutation.error.message}
-          </Text>
+      <NativeSection title={t.assets.info}>
+        <NativeRow title={t.assets.type} subtitle={assetKindLabel} meta={asset.mimeType} />
+        <NativeRow
+          title={t.assets.size}
+          subtitle={formatBytes(asset.size)}
+          last={!asset.contentHash}
+        />
+        {asset.contentHash ? (
+          <NativeRow title={t.assets.contentHash} subtitle={shortId(asset.contentHash)} last />
         ) : null}
-        <View style={styles.actions}>
-          <Button
-            label={usages.length > 0 ? t.assets.deleteBlocked : t.common.deleteForever}
-            variant="destructive"
-            disabled={usages.length > 0}
-            loading={deleteMutation.isPending}
-            fullWidth
-            onPress={confirmDelete}
-          />
-        </View>
-      </View>
-    </NativeScreen>
-  );
-}
+      </NativeSection>
 
-function MetaRow({ label, value }: { label: string; value: string }) {
-  const tokens = useTokens();
-  return (
-    <View style={styles.metaRow}>
-      <Text style={[typography.small, { color: tokens.mutedForeground }]}>{label}</Text>
-      <Text style={[typography.small, styles.metaValue, { color: tokens.foreground }]}>
-        {value}
-      </Text>
-    </View>
+      <NativeSection title={t.assets.whereUsed} caption={`${usages.length}`}>
+        {usages.length === 0 ? (
+          <NativeRow title={t.assets.notUsed} subtitle={asset.fileName} last />
+        ) : (
+          usages.map((usage, index) => (
+            <NativeRow
+              key={`${usage.nodeId}-${usage.recordId ?? "node"}-${usage.fieldSlug ?? "all"}`}
+              title={usage.nodeName}
+              subtitle={
+                usage.fieldSlug
+                  ? `${getUsageNodeLabel(usage)} · ${usage.fieldSlug}`
+                  : getUsageNodeLabel(usage)
+              }
+              last={index === usages.length - 1}
+              onPress={() => openUsage(usage)}
+            />
+          ))
+        )}
+      </NativeSection>
+
+      <NativeBottomSheet
+        visible={actionsSheetOpen}
+        title={t.assets.actionsTitle}
+        description={usages.length > 0 ? t.assets.deleteBlocked : t.assets.actionsHint}
+        showCloseButton
+        onClose={() => setActionsSheetOpen(false)}
+        footer={
+          <NativeActionBar>
+            {deleteMutation.error ? (
+              <NativeInlineError
+                message={deleteMutation.error.message}
+                onReset={() => deleteMutation.reset()}
+              />
+            ) : null}
+            <Button
+              label={t.common.deleteForever}
+              variant="destructive"
+              disabled={usages.length > 0}
+              loading={deleteMutation.isPending}
+              fullWidth
+              leadingIcon={
+                <Trash2
+                  size={18}
+                  color={usages.length > 0 ? tokens.mutedForeground : tokens.destructiveForeground}
+                />
+              }
+              onPress={() => {
+                setActionsSheetOpen(false);
+                setDeleteSheetOpen(true);
+              }}
+            />
+            <Button
+              label={t.common.close}
+              variant="ghost"
+              disabled={deleteMutation.isPending}
+              fullWidth
+              onPress={() => setActionsSheetOpen(false)}
+            />
+          </NativeActionBar>
+        }
+      />
+
+      <NativeBottomSheet
+        visible={deleteSheetOpen}
+        title={t.assets.deleteTitle}
+        description={t.assets.deleteConfirm}
+        showCloseButton
+        onClose={() => setDeleteSheetOpen(false)}
+        footer={
+          <NativeActionBar>
+            {deleteMutation.error ? (
+              <NativeInlineError
+                message={deleteMutation.error.message}
+                onReset={() => deleteMutation.reset()}
+              />
+            ) : null}
+            <Button
+              label={t.common.deleteForever}
+              variant="destructive"
+              loading={deleteMutation.isPending}
+              fullWidth
+              onPress={() => deleteMutation.mutate()}
+            />
+            <Button
+              label={t.common.cancel}
+              variant="ghost"
+              disabled={deleteMutation.isPending}
+              fullWidth
+              onPress={() => setDeleteSheetOpen(false)}
+            />
+          </NativeActionBar>
+        }
+      />
+    </NativeScreen>
   );
 }
 
@@ -221,36 +280,19 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  content: { marginHorizontal: 20, gap: 14 },
+  moreButton: {
+    width: 44,
+    height: 44,
+    borderRadius: radius.md,
+    alignItems: "center",
+    justifyContent: "center",
+  },
   preview: {
     height: 220,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: radius.lg,
     overflow: "hidden",
     alignItems: "center",
     justifyContent: "center",
   },
   previewImage: { width: "100%", height: "100%" },
   previewFile: { alignItems: "center", gap: 8 },
-  card: {
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: radius.lg,
-    padding: 16,
-    gap: 12,
-  },
-  metaRow: { flexDirection: "row", justifyContent: "space-between", gap: 12 },
-  metaValue: { flexShrink: 1, textAlign: "right" },
-  usageRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: radius.md,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    gap: 12,
-  },
-  usageText: { flex: 1, gap: 2 },
-  actions: { marginTop: 4 },
-  error: { textAlign: "center" },
 });

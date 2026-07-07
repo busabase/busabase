@@ -878,17 +878,25 @@ export const readmeScenario: SeedScenario = {
           id: "bsf_cfg_config",
           slug: "config",
           name: "Config (YAML)",
-          type: "code",
+          type: "yaml",
           required: true,
-          options: { code: { language: "yaml" } },
+          options: {},
+        },
+        {
+          id: "bsf_cfg_runtime_json",
+          slug: "runtime_json",
+          name: "Runtime Config (Code JSON)",
+          type: "code",
+          required: false,
+          options: { code: { language: "json" } },
         },
         {
           id: "bsf_cfg_overrides",
           slug: "overrides",
           name: "Overrides (JSON)",
-          type: "code",
+          type: "json",
           required: false,
-          options: { code: { language: "json" } },
+          options: {},
         },
         {
           id: "bsf_cfg_status",
@@ -1525,7 +1533,7 @@ const records: SeedRecordDef[] = [
           url: "/assets/readme/scenarios/multimodal-review-base.png",
         },
       ],
-      caption: "Gallery showing all 22 Busabase field types with sample values.",
+      caption: "Gallery showing all 24 Busabase field types with sample values.",
       confidence: 0.97,
       labels: ["field-types", "documentation", "ui"],
       status: "approved",
@@ -1571,7 +1579,7 @@ const records: SeedRecordDef[] = [
 <tbody>
 <tr><td style="padding: 0.6rem 1rem; border-bottom: 1px solid var(--border); color: var(--foreground);">AI agent write safety</td><td style="text-align:center; padding: 0.6rem 1rem; border-bottom: 1px solid var(--border); color: var(--muted-foreground);">✗ No gate</td><td style="text-align:center; padding: 0.6rem 1rem; border-bottom: 1px solid var(--border); color: var(--foreground); font-weight: 600;">✓ Change Requests</td></tr>
 <tr style="background: var(--muted);"><td style="padding: 0.6rem 1rem; border-bottom: 1px solid var(--border); color: var(--foreground);">Human approval inbox</td><td style="text-align:center; padding: 0.6rem 1rem; border-bottom: 1px solid var(--border); color: var(--muted-foreground);">✗</td><td style="text-align:center; padding: 0.6rem 1rem; border-bottom: 1px solid var(--border); color: var(--foreground); font-weight: 600;">✓ Built-in inbox</td></tr>
-<tr><td style="padding: 0.6rem 1rem; border-bottom: 1px solid var(--border); color: var(--foreground);">Structured field types</td><td style="text-align:center; padding: 0.6rem 1rem; border-bottom: 1px solid var(--border); color: var(--muted-foreground);">~ Databases only</td><td style="text-align:center; padding: 0.6rem 1rem; border-bottom: 1px solid var(--border); color: var(--foreground); font-weight: 600;">✓ 22 typed fields</td></tr>
+<tr><td style="padding: 0.6rem 1rem; border-bottom: 1px solid var(--border); color: var(--foreground);">Structured field types</td><td style="text-align:center; padding: 0.6rem 1rem; border-bottom: 1px solid var(--border); color: var(--muted-foreground);">~ Databases only</td><td style="text-align:center; padding: 0.6rem 1rem; border-bottom: 1px solid var(--border); color: var(--foreground); font-weight: 600;">✓ 24 typed fields</td></tr>
 <tr style="background: var(--muted);"><td style="padding: 0.6rem 1rem; border-bottom: 1px solid var(--border); color: var(--foreground);">Local-first / offline</td><td style="text-align:center; padding: 0.6rem 1rem; border-bottom: 1px solid var(--border); color: var(--muted-foreground);">✗ Cloud only</td><td style="text-align:center; padding: 0.6rem 1rem; border-bottom: 1px solid var(--border); color: var(--foreground); font-weight: 600;">✓ SQLite on-device</td></tr>
 <tr><td style="padding: 0.6rem 1rem; border-bottom: 1px solid var(--border); color: var(--foreground);">Per-record commit trail</td><td style="text-align:center; padding: 0.6rem 1rem; border-bottom: 1px solid var(--border); color: var(--muted-foreground);">~ Page history</td><td style="text-align:center; padding: 0.6rem 1rem; border-bottom: 1px solid var(--border); color: var(--foreground); font-weight: 600;">✓ Every write logged</td></tr>
 <tr style="background: var(--muted);"><td style="padding: 0.6rem 1rem; border-bottom: 1px solid var(--border); color: var(--foreground);">REST + oRPC API</td><td style="text-align:center; padding: 0.6rem 1rem; border-bottom: 1px solid var(--border); color: var(--muted-foreground);">~ Limited</td><td style="text-align:center; padding: 0.6rem 1rem; border-bottom: 1px solid var(--border); color: var(--foreground); font-weight: 600;">✓ Full API</td></tr>
@@ -1583,7 +1591,7 @@ const records: SeedRecordDef[] = [
 <h2 style="font-size: 1.2rem; font-weight: 700; margin: 0 0 1.25rem; color: var(--foreground);">Why teams switch from Notion to Busabase</h2>
 <ul style="list-style: none; padding: 0; margin: 0; display: grid; gap: 1rem;">
 <li style="display: flex; gap: 0.875rem; align-items: flex-start;"><span style="background: var(--muted); color: var(--foreground); border-radius: 50%; width: 1.5rem; height: 1.5rem; display: flex; align-items: center; justify-content: center; font-size: 0.75rem; font-weight: 700; flex-shrink: 0; margin-top: 0.1rem;">1</span><div><strong style="color: var(--foreground);">Agents write, humans approve.</strong><br><span style="color: var(--muted-foreground); font-size: 0.9rem;">Every AI-generated update lands in a Change Request — reviewable, reversible, and auditable before it touches canonical records.</span></div></li>
-<li style="display: flex; gap: 0.875rem; align-items: flex-start;"><span style="background: var(--muted); color: var(--foreground); border-radius: 50%; width: 1.5rem; height: 1.5rem; display: flex; align-items: center; justify-content: center; font-size: 0.75rem; font-weight: 700; flex-shrink: 0; margin-top: 0.1rem;">2</span><div><strong style="color: var(--foreground);">22 typed fields, not just blocks.</strong><br><span style="color: var(--muted-foreground); font-size: 0.9rem;">Text, Markdown, HTML, Code, Date, Relation, Attachment, AI Summary — each validated at the schema layer.</span></div></li>
+<li style="display: flex; gap: 0.875rem; align-items: flex-start;"><span style="background: var(--muted); color: var(--foreground); border-radius: 50%; width: 1.5rem; height: 1.5rem; display: flex; align-items: center; justify-content: center; font-size: 0.75rem; font-weight: 700; flex-shrink: 0; margin-top: 0.1rem;">2</span><div><strong style="color: var(--foreground);">24 typed fields, not just blocks.</strong><br><span style="color: var(--muted-foreground); font-size: 0.9rem;">Text, Markdown, HTML, Code, JSON, YAML, Date, Relation, Attachment, AI Summary — each validated at the schema layer.</span></div></li>
 <li style="display: flex; gap: 0.875rem; align-items: flex-start;"><span style="background: var(--muted); color: var(--foreground); border-radius: 50%; width: 1.5rem; height: 1.5rem; display: flex; align-items: center; justify-content: center; font-size: 0.75rem; font-weight: 700; flex-shrink: 0; margin-top: 0.1rem;">3</span><div><strong style="color: var(--foreground);">Your data stays local.</strong><br><span style="color: var(--muted-foreground); font-size: 0.9rem;">SQLite + Drizzle on your machine. No cloud dependency, no per-seat pricing, no lock-in.</span></div></li>
 </ul>
 </section>
@@ -1627,7 +1635,7 @@ const records: SeedRecordDef[] = [
 <tr><td style="padding:0.6rem 1rem; border-bottom:1px solid var(--border);">Pricing</td><td style="text-align:center; padding:0.6rem 1rem; border-bottom:1px solid var(--border); color:var(--muted-foreground);">$20/seat/mo</td><td style="text-align:center; padding:0.6rem 1rem; border-bottom:1px solid var(--border); color:var(--foreground); font-weight:600;">Free &amp; open source</td></tr>
 <tr style="background:var(--muted)"><td style="padding:0.6rem 1rem; border-bottom:1px solid var(--border);">AI agent change gate</td><td style="text-align:center; padding:0.6rem 1rem; border-bottom:1px solid var(--border); color:var(--muted-foreground);">✗</td><td style="text-align:center; padding:0.6rem 1rem; border-bottom:1px solid var(--border); color:var(--foreground); font-weight:600;">✓</td></tr>
 <tr><td style="padding:0.6rem 1rem; border-bottom:1px solid var(--border);">Self-hosted</td><td style="text-align:center; padding:0.6rem 1rem; border-bottom:1px solid var(--border); color:var(--muted-foreground);">✗</td><td style="text-align:center; padding:0.6rem 1rem; border-bottom:1px solid var(--border); color:var(--foreground); font-weight:600;">✓</td></tr>
-<tr style="background:var(--muted)"><td style="padding:0.6rem 1rem; border-bottom:1px solid var(--border);">Markdown + HTML + Code fields</td><td style="text-align:center; padding:0.6rem 1rem; border-bottom:1px solid var(--border); color:var(--muted-foreground);">~ Rich text only</td><td style="text-align:center; padding:0.6rem 1rem; border-bottom:1px solid var(--border); color:var(--foreground); font-weight:600;">✓ All 22 types</td></tr>
+<tr style="background:var(--muted)"><td style="padding:0.6rem 1rem; border-bottom:1px solid var(--border);">Markdown + HTML + Code + JSON + YAML fields</td><td style="text-align:center; padding:0.6rem 1rem; border-bottom:1px solid var(--border); color:var(--muted-foreground);">~ Rich text only</td><td style="text-align:center; padding:0.6rem 1rem; border-bottom:1px solid var(--border); color:var(--foreground); font-weight:600;">✓ All 24 types</td></tr>
 <tr><td style="padding:0.6rem 1rem;">Audit trail</td><td style="text-align:center; padding:0.6rem 1rem; color:var(--muted-foreground);">~ Revision history</td><td style="text-align:center; padding:0.6rem 1rem; color:var(--foreground); font-weight:600;">✓ Full commit log</td></tr>
 </tbody></table>
 </section>`,
@@ -2219,6 +2227,8 @@ const { records } = await res.json();
       environment: "production",
       config:
         "server:\n  listen: 443\n  ssl: true\n  worker_processes: auto\n\nroutes:\n  - path: /api/v1\n    upstream: backend:8080\n    timeout: 30s\n\nrate_limit:\n  requests_per_minute: 1000\n  burst: 200\n\nlogging:\n  level: info\n  format: json",
+      runtime_json:
+        '{\n  "service": "api-gateway",\n  "runtime": "nodejs20",\n  "replicas": 6,\n  "features": ["rate-limit", "structured-logs"],\n  "canary": false\n}',
       overrides: '{\n  "RATE_LIMIT_RPM": "1000",\n  "BURST_SIZE": "200",\n  "LOG_LEVEL": "info"\n}',
       status: "active",
       deployed_at: "2026-06-20",
@@ -2678,6 +2688,8 @@ const changeRequests: SeedChangeRequestDef[] = [
           ...records[9].fields,
           config:
             "server:\n  listen: 443\n  ssl: true\n  worker_processes: auto\n\nroutes:\n  - path: /api/v1\n    upstream: backend:8080\n    timeout: 30s\n\nrate_limit:\n  requests_per_minute: 5000\n  burst: 1000\n\nlogging:\n  level: info\n  format: json",
+          runtime_json:
+            '{\n  "service": "api-gateway",\n  "runtime": "nodejs20",\n  "replicas": 10,\n  "features": ["rate-limit", "structured-logs"],\n  "canary": false\n}',
           overrides:
             '{\n  "RATE_LIMIT_RPM": "5000",\n  "BURST_SIZE": "1000",\n  "LOG_LEVEL": "info"\n}',
           notes:
@@ -3145,6 +3157,7 @@ const bulkConfig = bulkRows(
       name,
       environment: pick(CONFIG_ENV, i),
       config: CONFIG_YAML[i % CONFIG_YAML.length](name, i),
+      runtime_json: `{\n  "service": "${name}",\n  "runtime": "nodejs20",\n  "replicas": ${2 + (i % 4)},\n  "port": ${8000 + i}\n}`,
       overrides: `{\n  "log_level": "info",\n  "canary": ${i % 2 === 0}\n}`,
       status: pick(CONFIG_STATUS, i),
       deployed_at: dueDate(i),

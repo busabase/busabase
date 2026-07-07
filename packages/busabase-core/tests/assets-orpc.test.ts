@@ -59,7 +59,7 @@ describe("Assets + attachment dedup — oRPC integration", () => {
 
   describe("content-addressed key + dedup", () => {
     it("hashes to a blobs/sha256 key and dedups same-scope re-uploads", async () => {
-      const req1 = await client.attachments.createUploadUrl({
+      const req1 = await client.assets.createUploadUrl({
         fileName: "logo.png",
         mimeType: "image/png",
         sizeBytes: 1234,
@@ -70,7 +70,7 @@ describe("Assets + attachment dedup — oRPC integration", () => {
       expect(req1.storageKey).toMatch(/\.png$/);
       expect(req1.duplicate).toBe(false);
 
-      const conf1 = await client.attachments.confirm({
+      const conf1 = await client.assets.confirm({
         storageKey: req1.storageKey,
         fileName: "logo.png",
         mimeType: "image/png",
@@ -78,10 +78,11 @@ describe("Assets + attachment dedup — oRPC integration", () => {
         contentHash: HASH_A,
       });
       expect(conf1.attachmentId).toBeTruthy();
+      expect(conf1.assetId).toBeTruthy();
 
       // Request-time dedup: identical bytes in the same scope → skip the upload,
       // reuse the existing key + attachment id.
-      const req2 = await client.attachments.createUploadUrl({
+      const req2 = await client.assets.createUploadUrl({
         fileName: "logo-copy.png",
         mimeType: "image/png",
         sizeBytes: 1234,
@@ -89,17 +90,18 @@ describe("Assets + attachment dedup — oRPC integration", () => {
       });
       expect(req2.duplicate).toBe(true);
       expect(req2.attachmentId).toBe(conf1.attachmentId);
+      expect(req2.assetId).toBe(conf1.assetId);
       expect(req2.storageKey).toBe(req1.storageKey);
     });
 
     it("confirm safety-net dedups a duplicate content hash to the same row", async () => {
-      const req = await client.attachments.createUploadUrl({
+      const req = await client.assets.createUploadUrl({
         fileName: "a.png",
         mimeType: "image/png",
         sizeBytes: 10,
         contentHash: HASH_B,
       });
-      const c1 = await client.attachments.confirm({
+      const c1 = await client.assets.confirm({
         storageKey: req.storageKey,
         fileName: "a.png",
         mimeType: "image/png",
@@ -108,7 +110,7 @@ describe("Assets + attachment dedup — oRPC integration", () => {
       });
       // A second confirm with a different storageKey but the same hash still
       // resolves to the first row (no duplicate registry entry).
-      const c2 = await client.attachments.confirm({
+      const c2 = await client.assets.confirm({
         storageKey: "attachments/elsewhere/x.png",
         fileName: "b.png",
         mimeType: "image/png",
@@ -116,10 +118,11 @@ describe("Assets + attachment dedup — oRPC integration", () => {
         contentHash: HASH_B,
       });
       expect(c2.attachmentId).toBe(c1.attachmentId);
+      expect(c2.assetId).toBe(c1.assetId);
     });
 
     it("falls back to the legacy per-owner key when no hash is supplied", async () => {
-      const req = await client.attachments.createUploadUrl({
+      const req = await client.assets.createUploadUrl({
         fileName: "nohash.png",
         mimeType: "image/png",
         sizeBytes: 10,
@@ -127,6 +130,32 @@ describe("Assets + attachment dedup — oRPC integration", () => {
       expect(req.storageKey).not.toMatch(/blobs\/sha256/);
       expect(req.storageKey).toMatch(/^attachments\//);
       expect(req.duplicate).toBe(false);
+    });
+
+    it("dedups repeat uploads through the asset route only", async () => {
+      const hash = `sha256:${"8".repeat(64)}`;
+      const req = await client.assets.createUploadUrl({
+        fileName: "compat.png",
+        mimeType: "image/png",
+        sizeBytes: 18,
+        contentHash: hash,
+      });
+      const confirmed = await client.assets.confirm({
+        storageKey: req.storageKey,
+        fileName: "compat.png",
+        mimeType: "image/png",
+        sizeBytes: 18,
+        contentHash: hash,
+      });
+      expect(confirmed.assetId).toBeTruthy();
+      const duplicate = await client.assets.createUploadUrl({
+        fileName: "compat-copy.png",
+        mimeType: "image/png",
+        sizeBytes: 18,
+        contentHash: hash,
+      });
+      expect(duplicate.duplicate).toBe(true);
+      expect(duplicate.assetId).toBe(confirmed.assetId);
     });
   });
 
@@ -167,7 +196,9 @@ describe("Assets + attachment dedup — oRPC integration", () => {
           title: "Post",
           cover: [
             {
-              id: asset!.attachmentId,
+              id: asset!.id,
+              assetId: asset!.id,
+              attachmentId: asset!.attachmentId,
               url: asset!.url,
               fileName: asset!.fileName,
               mimeType: asset!.mimeType,
@@ -197,18 +228,68 @@ describe("Assets + attachment dedup — oRPC integration", () => {
       const after = await client.assets.get({ assetId: asset!.id });
       expect(after.usages.find((u) => u.nodeSlug === "assets-wu")).toBeUndefined();
     });
+
+    it("indexes legacy attachmentId-only refs into Assets", async () => {
+      const hashG = `sha256:${"9".repeat(64)}`;
+      const req = await client.assets.createUploadUrl({
+        fileName: "legacy.png",
+        mimeType: "image/png",
+        sizeBytes: 12,
+        contentHash: hashG,
+      });
+      await client.assets.confirm({
+        storageKey: req.storageKey,
+        fileName: "legacy.png",
+        mimeType: "image/png",
+        sizeBytes: 12,
+        contentHash: hashG,
+      });
+      const asset = (await client.assets.list()).find((a) => a.contentHash === hashG);
+      expect(asset).toBeDefined();
+
+      const base = await client.bases.create({
+        slug: "legacy-attachment-ref",
+        name: "Legacy Attachment Ref",
+        fields: [
+          { slug: "title", name: "Title", type: "text", required: true },
+          { slug: "file", name: "File", type: "attachment" },
+        ],
+      });
+      const cr = await client.bases.createChangeRequest({
+        baseId: base.id,
+        fields: {
+          title: "Legacy",
+          file: [
+            {
+              attachmentId: asset!.attachmentId,
+              url: asset!.url,
+              fileName: asset!.fileName,
+              mimeType: asset!.mimeType,
+              size: asset!.size,
+            },
+          ],
+        },
+        message: "legacy attachment id",
+        submittedBy: "agent",
+      });
+      await client.changeRequests.review({ changeRequestId: cr.id, verdict: "approved" });
+      await client.changeRequests.merge({ changeRequestId: cr.id });
+
+      const detail = await client.assets.get({ assetId: asset!.id });
+      expect(detail.usages.some((u) => u.nodeSlug === "legacy-attachment-ref")).toBe(true);
+    });
   });
 
   describe("Where-Used (Doc body embeds)", () => {
     it("records a whole-node usage when a Doc body embeds an attachment's storageKey", async () => {
       const hashD = `sha256:${"d".repeat(64)}`;
-      const req = await client.attachments.createUploadUrl({
+      const req = await client.assets.createUploadUrl({
         fileName: "diagram.png",
         mimeType: "image/png",
         sizeBytes: 99,
         contentHash: hashD,
       });
-      await client.attachments.confirm({
+      await client.assets.confirm({
         storageKey: req.storageKey,
         fileName: "diagram.png",
         mimeType: "image/png",
@@ -239,13 +320,13 @@ describe("Assets + attachment dedup — oRPC integration", () => {
   describe("assets.delete (refcount-guarded)", () => {
     it("deletes an unreferenced asset and removes it from the library", async () => {
       const hashE = `sha256:${"e".repeat(64)}`;
-      const req = await client.attachments.createUploadUrl({
+      const req = await client.assets.createUploadUrl({
         fileName: "temp.png",
         mimeType: "image/png",
         sizeBytes: 7,
         contentHash: hashE,
       });
-      await client.attachments.confirm({
+      await client.assets.confirm({
         storageKey: req.storageKey,
         fileName: "temp.png",
         mimeType: "image/png",
@@ -262,13 +343,13 @@ describe("Assets + attachment dedup — oRPC integration", () => {
 
     it("refuses to delete an asset that is still referenced", async () => {
       const hashF = `sha256:${"f".repeat(64)}`;
-      const req = await client.attachments.createUploadUrl({
+      const req = await client.assets.createUploadUrl({
         fileName: "used.png",
         mimeType: "image/png",
         sizeBytes: 8,
         contentHash: hashF,
       });
-      await client.attachments.confirm({
+      await client.assets.confirm({
         storageKey: req.storageKey,
         fileName: "used.png",
         mimeType: "image/png",
@@ -292,7 +373,9 @@ describe("Assets + attachment dedup — oRPC integration", () => {
           title: "x",
           img: [
             {
-              id: asset!.attachmentId,
+              id: asset!.id,
+              assetId: asset!.id,
+              attachmentId: asset!.attachmentId,
               url: asset!.url,
               fileName: asset!.fileName,
               mimeType: asset!.mimeType,

@@ -22,7 +22,7 @@ npx busabase-cli health
 | -------------- | -------------------- | ------------------------ |
 | `--base-url`   | `BUSABASE_BASE_URL`  | `https://busabase.com`   |
 | `--api-key`    | `BUSABASE_API_KEY`   | _(none — local is open)_ |
-| `--space-id`   | `BUSABASE_SPACE_ID`  | _(cloud default space)_  |
+| `--space-id`   | `BUSABASE_SPACE_ID`  | _(none; multi-space Cloud calls require one)_ |
 | `--output`     | —                    | `table` (`json` for raw) |
 
 Config is read from flags, then env vars, then `~/.busabase/.env` (auto-loaded —
@@ -85,7 +85,7 @@ busabase-cli bases create-change-request --base-id bse_123 --fields-json '{"titl
 busabase-cli bases create-change-request --base-id bse_123 --fields-json @record.json
 busabase-cli records list --base-id bse_123 --limit 20 --output json
 busabase-cli records by-field-text --field-slug status --value-text open
-busabase-cli attachments upload --file ./cover.png --context record-field --output json
+busabase-cli assets upload --file ./cover.png --context record-field --output json
 busabase-cli change-requests list
 busabase-cli change-requests review --change-request-id cr_123 --verdict approved --reason "LGTM"
 busabase-cli change-requests review --change-request-id cr_124 --verdict rejected --reason "Needs revision" # request changes

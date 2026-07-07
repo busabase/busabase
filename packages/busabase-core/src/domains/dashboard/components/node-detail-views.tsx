@@ -1,9 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";
-import type { SkillVO } from "busabase-contract/types";
+import type { FileTreeNodeVO } from "busabase-contract/types";
 import { CodeBlock } from "kui/ai-elements/code-block";
 import { FileTree, FileTreeFile, FileTreeFolder } from "kui/ai-elements/file-tree";
-import { FileText, Folder, Sparkles, Table2, Trash2 } from "lucide-react";
+import { FileText, Folder, HardDrive, Sparkles, Table2, Trash2 } from "lucide-react";
 import { SPALink as Link } from "openlib/ui/dashboard";
 import {
   type ComponentProps,
@@ -114,9 +114,9 @@ export interface SkillTreeNode {
   children: SkillTreeNode[];
 }
 
-// Build a nested tree from the skill's flat file list, synthesizing any parent
+// Build a nested tree from the file-tree node's flat file list, synthesizing any parent
 // folders that have no explicit entry. Folders sort before files, then by name.
-export function buildSkillTree(files: SkillVO["files"]): SkillTreeNode[] {
+export function buildFileTree(files: FileTreeNodeVO["files"]): SkillTreeNode[] {
   const roots: SkillTreeNode[] = [];
   const byPath = new Map<string, SkillTreeNode>();
   const ensureDir = (dirPath: string): SkillTreeNode[] => {
@@ -169,7 +169,7 @@ export const collectFolderPaths = (nodes: SkillTreeNode[]): string[] =>
     node.type === "folder" ? [node.path, ...collectFolderPaths(node.children)] : [],
   );
 
-export const SKILL_LANGUAGE_BY_EXTENSION: Record<string, string> = {
+export const FILE_TREE_LANGUAGE_BY_EXTENSION: Record<string, string> = {
   ts: "typescript",
   tsx: "tsx",
   js: "javascript",
@@ -188,16 +188,16 @@ export const SKILL_LANGUAGE_BY_EXTENSION: Record<string, string> = {
   toml: "toml",
 };
 
-export const guessSkillLanguage = (path: string): SkillCodeLanguage => {
+export const guessFileTreeLanguage = (path: string): SkillCodeLanguage => {
   const ext = path.split(".").pop()?.toLowerCase() ?? "";
-  return (SKILL_LANGUAGE_BY_EXTENSION[ext] ?? "text") as SkillCodeLanguage;
+  return (FILE_TREE_LANGUAGE_BY_EXTENSION[ext] ?? "text") as SkillCodeLanguage;
 };
 
-export function renderSkillTree(nodes: SkillTreeNode[]): ReactNode {
+export function renderFileTree(nodes: SkillTreeNode[]): ReactNode {
   return nodes.map((node) =>
     node.type === "folder" ? (
       <FileTreeFolder key={node.path} name={node.name} path={node.path}>
-        {renderSkillTree(node.children)}
+        {renderFileTree(node.children)}
       </FileTreeFolder>
     ) : (
       <FileTreeFile key={node.path} name={node.name} path={node.path} />
@@ -205,82 +205,192 @@ export function renderSkillTree(nodes: SkillTreeNode[]): ReactNode {
   );
 }
 
-export function SkillDetailView({ orpc, slug }: { orpc: BusabaseQueryUtils; slug: string | null }) {
-  const messages = useCoreI18n();
-  const [openPath, setOpenPath] = useState<string | null>(null);
+interface FileTreeNamespace {
+  createChangeRequest: BusabaseQueryUtils["skills"]["createChangeRequest"];
+  get: BusabaseQueryUtils["skills"]["get"];
+  readFile: BusabaseQueryUtils["skills"]["readFile"];
+}
 
-  const skillQuery = useQuery({
-    ...orpc.skills.get.queryOptions({ input: { nodeId: slug ?? "" } }),
+interface FileTreeDetailViewProps {
+  orpc: BusabaseQueryUtils;
+  slug: string | null;
+  namespace: FileTreeNamespace;
+  nodeType: "skill" | "drive";
+  labels: {
+    notFoundTitle: string;
+    notFoundBody: string;
+    selectBody: string;
+    skeletonVariant: "skill";
+  };
+}
+
+export function FileTreeDetailView({
+  orpc,
+  slug,
+  namespace,
+  nodeType,
+  labels,
+}: FileTreeDetailViewProps) {
+  const messages = useCoreI18n();
+  const queryClient = useQueryClient();
+  const [, setLocation] = useLocation();
+  const [openPath, setOpenPath] = useState<string | null>(null);
+  const [isEditing, setIsEditing] = useState(false);
+  const [draft, setDraft] = useState("");
+  const [busy, setBusy] = useState<null | "save" | "changeRequest">(null);
+  const [fileActionError, setFileActionError] = useState<string | null>(null);
+
+  const fileTreeQuery = useQuery({
+    ...namespace.get.queryOptions({ input: { nodeId: slug ?? "" } }),
     enabled: Boolean(slug),
   });
-  const skill = skillQuery.data ?? null;
+  const fileTree = fileTreeQuery.data ?? null;
 
-  // Reset the open file when switching skills.
+  // Reset the open file when switching file-tree nodes.
   // biome-ignore lint/correctness/useExhaustiveDependencies: reset only on slug change
   useEffect(() => {
     setOpenPath(null);
+    setIsEditing(false);
+    setDraft("");
+    setFileActionError(null);
   }, [slug]);
 
   const fileQuery = useQuery({
-    ...orpc.skills.readFile.queryOptions({
-      input: { nodeId: skill?.node.id ?? "", filePath: openPath ?? "" },
+    ...namespace.readFile.queryOptions({
+      input: { nodeId: fileTree?.node.id ?? "", filePath: openPath ?? "" },
     }),
-    enabled: Boolean(skill && openPath),
+    enabled: Boolean(fileTree && openPath),
   });
+  const createCr = useMutation(namespace.createChangeRequest.mutationOptions());
+  const reviewCr = useMutation(orpc.changeRequests.review.mutationOptions());
+  const mergeCr = useMutation(orpc.changeRequests.merge.mutationOptions());
 
-  const tree = useMemo(() => buildSkillTree(skill?.files ?? []), [skill?.files]);
+  const tree = useMemo(() => buildFileTree(fileTree?.files ?? []), [fileTree?.files]);
   const expandedFolders = useMemo(() => new Set(collectFolderPaths(tree)), [tree]);
   const filePaths = useMemo(
     () =>
-      new Set((skill?.files ?? []).filter((file) => file.type === "file").map((file) => file.path)),
-    [skill?.files],
+      new Set(
+        (fileTree?.files ?? []).filter((file) => file.type === "file").map((file) => file.path),
+      ),
+    [fileTree?.files],
   );
+
+  useEffect(() => {
+    if (!fileTree || openPath) {
+      return;
+    }
+    const entryFile =
+      fileTree.files.find((file) => file.type === "file" && file.path === fileTree.entryFile) ??
+      fileTree.files.find((file) => file.type === "file");
+    if (entryFile) {
+      setOpenPath(entryFile.path);
+    }
+  }, [fileTree, openPath]);
 
   const selectFile = useCallback(
     (path: string) => {
       // FileTreeFolder also fires onSelect; only react to real files.
       if (filePaths.has(path)) {
         setOpenPath(path);
+        setIsEditing(false);
+        setDraft("");
+        setFileActionError(null);
       }
     },
     [filePaths],
   );
 
-  if (!skill) {
-    return skillQuery.isLoading ? (
-      <NodeDetailSkeleton variant="skill" />
+  const startEditingFile = () => {
+    if (!fileQuery.data) {
+      return;
+    }
+    setDraft(fileQuery.data.content);
+    setFileActionError(null);
+    setIsEditing(true);
+  };
+
+  const cancelEditingFile = () => {
+    setIsEditing(false);
+    setDraft("");
+    setFileActionError(null);
+  };
+
+  const saveFile = async (mode: "save" | "changeRequest") => {
+    if (!fileTree || !openPath || !fileQuery.data) {
+      return;
+    }
+    setBusy(mode);
+    setFileActionError(null);
+    try {
+      const changeRequest = await createCr.mutateAsync({
+        nodeId: fileTree.node.id,
+        message: `Update ${openPath}`,
+        operations: [
+          {
+            kind: "update",
+            path: openPath,
+            content: draft,
+            baseContentHash: fileQuery.data.contentHash,
+          },
+        ],
+      });
+      if (mode === "changeRequest") {
+        setLocation(`/inbox/${changeRequest.id}`);
+        return;
+      }
+      await reviewCr.mutateAsync({ changeRequestId: changeRequest.id, verdict: "approved" });
+      await mergeCr.mutateAsync({ changeRequestId: changeRequest.id });
+      await queryClient.invalidateQueries({
+        queryKey: namespace.get.queryOptions({ input: { nodeId: fileTree.node.id } }).queryKey,
+      });
+      await queryClient.invalidateQueries({
+        queryKey: namespace.readFile.queryOptions({
+          input: { nodeId: fileTree.node.id, filePath: openPath },
+        }).queryKey,
+      });
+      await Promise.all([fileTreeQuery.refetch(), fileQuery.refetch()]);
+      setIsEditing(false);
+      setDraft("");
+    } catch (caught) {
+      setFileActionError(
+        caught instanceof Error ? caught.message : messages.nodeDetail.couldNotSave,
+      );
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  if (!fileTree) {
+    return fileTreeQuery.isLoading ? (
+      <NodeDetailSkeleton variant={labels.skeletonVariant} />
     ) : (
       <EmptyState
-        title={messages.nodeDetail.skillNotFoundTitle}
-        body={
-          slug
-            ? fmt(messages.nodeDetail.skillNotFoundBody, { slug })
-            : messages.nodeDetail.selectSkillBody
-        }
+        title={labels.notFoundTitle}
+        body={slug ? fmt(labels.notFoundBody, { slug }) : labels.selectBody}
       />
     );
   }
 
   const metaChips = [
-    skill.visibility,
-    skill.version ? `v${skill.version}` : null,
-    skill.entryFile ? `entry: ${skill.entryFile}` : null,
+    fileTree.visibility,
+    fileTree.version ? `v${fileTree.version}` : null,
+    fileTree.entryFile ? `entry: ${fileTree.entryFile}` : null,
   ].filter((value): value is string => Boolean(value));
 
   return (
     <div className="mx-auto w-full max-w-6xl p-4 md:p-6">
       <div className="rounded-xl border bg-background p-5">
         <div className="flex items-start justify-between gap-4">
-          <h1 className="min-w-0 font-semibold text-xl">{skill.node.name}</h1>
+          <h1 className="min-w-0 font-semibold text-xl">{fileTree.node.name}</h1>
           <NodeDeleteButton
-            nodeId={skill.node.id}
-            nodeName={skill.node.name}
-            nodeType="skill"
+            nodeId={fileTree.node.id}
+            nodeName={fileTree.node.name}
+            nodeType={nodeType}
             orpc={orpc}
           />
         </div>
-        {skill.node.description ? (
-          <p className="mt-1 text-muted-foreground text-sm">{skill.node.description}</p>
+        {fileTree.node.description ? (
+          <p className="mt-1 text-muted-foreground text-sm">{fileTree.node.description}</p>
         ) : null}
         {metaChips.length > 0 ? (
           <div className="mt-3 flex flex-wrap gap-1.5">
@@ -297,7 +407,7 @@ export function SkillDetailView({ orpc, slug }: { orpc: BusabaseQueryUtils; slug
       </div>
 
       <div className="mt-4 grid gap-4 md:grid-cols-[280px_minmax(0,1fr)]">
-        {skill.files.length === 0 ? (
+        {fileTree.files.length === 0 ? (
           <div className="rounded-lg border bg-background p-4 text-muted-foreground text-sm">
             {messages.nodeDetail.noFilesYet}
           </div>
@@ -305,17 +415,69 @@ export function SkillDetailView({ orpc, slug }: { orpc: BusabaseQueryUtils; slug
           <FileTree
             className="max-h-[70vh] overflow-auto"
             defaultExpanded={expandedFolders}
-            key={skill.node.id}
+            key={fileTree.node.id}
             // FileTreeProps.onSelect collides with HTMLAttributes.onSelect; it is
             // invoked with the node path string at runtime.
             onSelect={selectFile as unknown as ComponentProps<typeof FileTree>["onSelect"]}
             selectedPath={openPath ?? undefined}
           >
-            {renderSkillTree(tree)}
+            {renderFileTree(tree)}
           </FileTree>
         )}
 
         <div className="min-h-[320px]">
+          {openPath ? (
+            <div className="mb-2 flex min-h-9 items-center justify-between gap-3 rounded-md border bg-background px-3 py-2">
+              <div className="min-w-0 truncate font-mono text-muted-foreground text-xs">
+                {openPath}
+              </div>
+              {fileQuery.data && !fileQuery.isError ? (
+                isEditing ? (
+                  <div className="flex shrink-0 items-center gap-2">
+                    <button
+                      className="rounded-md px-2.5 py-1.5 text-muted-foreground text-xs transition-colors hover:text-foreground disabled:opacity-40"
+                      disabled={busy !== null}
+                      onClick={cancelEditingFile}
+                      type="button"
+                    >
+                      {messages.common.cancel}
+                    </button>
+                    <button
+                      className="rounded-md border px-2.5 py-1.5 text-xs transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
+                      disabled={busy !== null || draft === fileQuery.data.content}
+                      onClick={() => void saveFile("changeRequest")}
+                      type="button"
+                    >
+                      {busy === "changeRequest"
+                        ? messages.nodeDetail.saving
+                        : messages.nodeDetail.saveAsChangeRequest}
+                    </button>
+                    <button
+                      className="rounded-md bg-foreground px-2.5 py-1.5 text-background text-xs transition-colors hover:bg-foreground/85 disabled:cursor-not-allowed disabled:opacity-50"
+                      disabled={busy !== null || draft === fileQuery.data.content}
+                      onClick={() => void saveFile("save")}
+                      type="button"
+                    >
+                      {busy === "save" ? messages.nodeDetail.saving : messages.nodeDetail.save}
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    className="shrink-0 rounded-md border px-2.5 py-1.5 text-xs transition-colors hover:bg-muted"
+                    onClick={startEditingFile}
+                    type="button"
+                  >
+                    {messages.common.edit}
+                  </button>
+                )
+              ) : null}
+            </div>
+          ) : null}
+          {fileActionError ? (
+            <div className="mb-2 rounded-md border bg-background p-3 text-destructive text-sm">
+              {fileActionError}
+            </div>
+          ) : null}
           {!openPath ? (
             <div className="grid h-full min-h-[320px] place-items-center rounded-md border bg-background p-8 text-center text-muted-foreground text-sm">
               {messages.nodeDetail.selectFile}
@@ -330,10 +492,18 @@ export function SkillDetailView({ orpc, slug }: { orpc: BusabaseQueryUtils; slug
                 ? fileQuery.error.message
                 : messages.nodeDetail.couldNotReadFile}
             </div>
+          ) : isEditing ? (
+            <textarea
+              aria-label={openPath}
+              className="min-h-[520px] w-full resize-y rounded-md border bg-background p-4 font-mono text-sm leading-6 outline-none placeholder:text-muted-foreground"
+              onChange={(event) => setDraft(event.target.value)}
+              spellCheck={false}
+              value={draft}
+            />
           ) : (
             <CodeBlock
               code={fileQuery.data?.content ?? ""}
-              language={guessSkillLanguage(openPath)}
+              language={guessFileTreeLanguage(openPath)}
               showLineNumbers
             />
           )}
@@ -343,7 +513,44 @@ export function SkillDetailView({ orpc, slug }: { orpc: BusabaseQueryUtils; slug
   );
 }
 
+export function SkillDetailView({ orpc, slug }: { orpc: BusabaseQueryUtils; slug: string | null }) {
+  const messages = useCoreI18n();
+  return (
+    <FileTreeDetailView
+      labels={{
+        notFoundTitle: messages.nodeDetail.skillNotFoundTitle,
+        notFoundBody: messages.nodeDetail.skillNotFoundBody,
+        selectBody: messages.nodeDetail.selectSkillBody,
+        skeletonVariant: "skill",
+      }}
+      namespace={orpc.skills}
+      nodeType="skill"
+      orpc={orpc}
+      slug={slug}
+    />
+  );
+}
+
+export function DriveDetailView({ orpc, slug }: { orpc: BusabaseQueryUtils; slug: string | null }) {
+  const messages = useCoreI18n();
+  return (
+    <FileTreeDetailView
+      labels={{
+        notFoundTitle: messages.nodeDetail.driveNotFoundTitle,
+        notFoundBody: messages.nodeDetail.driveNotFoundBody,
+        selectBody: messages.nodeDetail.selectDriveBody,
+        skeletonVariant: "skill",
+      }}
+      namespace={orpc.drives}
+      nodeType="drive"
+      orpc={orpc}
+      slug={slug}
+    />
+  );
+}
+
 registerNodeDetail("skill", SkillDetailView);
+registerNodeDetail("drive", DriveDetailView);
 
 export function DocDetailView({ orpc, slug }: { orpc: BusabaseQueryUtils; slug: string | null }) {
   const messages = useCoreI18n();
@@ -599,6 +806,7 @@ const FOLDER_CHILD_ICONS: Record<string, typeof Folder> = {
   base: Table2,
   doc: FileText,
   skill: Sparkles,
+  drive: HardDrive,
 };
 
 registerNodeDetail("folder", FolderDetailView);

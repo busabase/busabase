@@ -11,7 +11,7 @@ import {
   getRecordTitle,
   operationMeta,
 } from "../helpers/change-request";
-import { formatListTime, shortIdentifier } from "../helpers/format";
+import { formatListTime, formatUserRefLabel, shortIdentifier } from "../helpers/format";
 
 export type ActivityEventTone = "audit" | "change_request" | "operation" | "commit" | "record";
 
@@ -142,7 +142,7 @@ export const buildActivityEvents = (
 
   const auditActivityEvents = auditEvents.map(
     (event): ActivityEvent => ({
-      body: `${event.actorId} · ${event.action}`,
+      body: `${formatUserRefLabel(event.actor, event.actorId)} · ${event.action}`,
       href: event.recordId
         ? `/base/${records.find((record) => record.id === event.recordId)?.base.slug ?? "unknown"}/${event.recordId}`
         : event.changeRequestId

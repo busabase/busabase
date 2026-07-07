@@ -75,12 +75,29 @@ button:disabled {
 }
 
 .desktop-titlebar-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
   padding: 0 12px;
   font-size: 13px;
   font-weight: 600;
   line-height: 1;
   /* Let clicks fall through to the bar so the whole strip stays draggable. */
   pointer-events: none;
+}
+
+.desktop-titlebar-brand-local {
+  display: inline-flex;
+  height: 17px;
+  align-items: center;
+  border: 1px solid hsl(var(--border));
+  border-radius: 4px;
+  padding: 0 6px;
+  background: hsl(var(--muted) / 0.72);
+  color: hsl(var(--muted-foreground));
+  font-size: 10px;
+  font-weight: 650;
+  line-height: 1;
 }
 
 /* Clear the native macOS traffic lights on the left. */

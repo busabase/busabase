@@ -20,7 +20,9 @@ export type FieldType =
   | "auto_number"
   | "ai_summary"
   | "ai_tags"
-  | "code";
+  | "code"
+  | "json"
+  | "yaml";
 
 // OperationKind + NodeType are owned by the node-type registry (single source of truth).
 import type { NodeType, OperationKind } from "../domains/registry";
@@ -52,8 +54,17 @@ export type AuditAction =
   | "doc.created"
   | "doc.updated"
   | "skill.created"
+  | "drive.created"
   | "asset.deleted"
   | "node.purged";
+
+export interface UserRefVO {
+  id: string;
+  name: string | null;
+  email: string | null;
+  image: string | null;
+  role?: string | null;
+}
 
 export interface NodeVO {
   id: string;
@@ -75,9 +86,12 @@ export interface NodeVO {
   children: NodeVO[];
 }
 
-// Attachment field values are stored as AttachmentRef[]; re-exported for the public barrel
-// so clients can type a record's attachment-field value without importing open-domains.
+// Keep the plain open-domains `AttachmentRef` available for lower-level file
+// upload surfaces that are not part of the Busabase Assets library.
 export type { AttachmentRef } from "open-domains/attachments/types";
+// `attachment` base field values are stored as asset-backed refs: `id` is the
+// stable asset id while `attachmentId` points at the underlying file registry row.
+export type { AssetAttachmentRef } from "../domains/base/types";
 
 // Base-domain VOs live in the base domain; re-exported here for the public barrel.
 import type { BaseVO } from "../domains/base/types";
@@ -105,6 +119,7 @@ export interface CommitVO {
   operation: OperationKind;
   message: string;
   author: string;
+  authorUser?: UserRefVO | null;
   createdAt: string;
 }
 
@@ -142,6 +157,7 @@ export interface ChangeRequestVO {
   nodeId: string | null;
   status: ChangeRequestStatus;
   submittedBy: string;
+  submittedByUser?: UserRefVO | null;
   sourceMeta: Record<string, unknown>;
   reviewPolicySnapshot: Record<string, unknown>;
   mergeSummary: Record<string, unknown>;
@@ -158,6 +174,8 @@ export interface ChangeRequestVO {
   reviews: ReviewVO[];
 }
 
+export type { DriveFileVO, DriveVO } from "../domains/drive/types";
+export type { FileTreeFileVO, FileTreeNodeVO } from "../domains/filetree/types";
 // Skill-domain VOs live in the skill domain; re-exported here for the public barrel.
 export type { SkillFileVO, SkillVO } from "../domains/skill/types";
 
@@ -165,6 +183,7 @@ export interface ReviewVO {
   id: string;
   changeRequestId: string;
   reviewerId: string;
+  reviewer?: UserRefVO | null;
   verdict: ReviewVerdict;
   reason: string | null;
   visibleOperationHeads: Record<string, string>;
@@ -180,6 +199,7 @@ export interface CommentVO {
   operationId: string | null;
   commitId: string | null;
   authorId: string;
+  author?: UserRefVO | null;
   body: string;
   mentionsAi: boolean;
   createdAt: string;
@@ -215,6 +235,7 @@ export interface AuditEventVO {
   id: string;
   action: AuditAction;
   actorId: string;
+  actor?: UserRefVO | null;
   baseId: string | null;
   recordId: string | null;
   changeRequestId: string | null;

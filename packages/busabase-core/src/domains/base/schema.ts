@@ -46,6 +46,8 @@ export const busabaseFieldTypeEnum = pgEnum("busabase_field_type", [
   "ai_summary",
   "ai_tags",
   "code",
+  "json",
+  "yaml",
 ]);
 
 export const busabaseBases = pgTable(

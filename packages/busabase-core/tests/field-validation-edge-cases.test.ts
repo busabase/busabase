@@ -57,6 +57,31 @@ describe("text-like fields (text / longtext / markdown / html / code / ai_summar
   });
 });
 
+describe("structured text fields (json / yaml)", () => {
+  it("json accepts valid JSON text and rejects malformed JSON", () => {
+    expect(checkOne("json", '{"ok":true}')).toBeNull();
+    expect(checkOne("json", "[1,2,3]")).toBeNull();
+    expect(checkOne("json", "{bad json")).toMatch(/valid JSON/);
+    expect(checkOne("json", 123)).toMatch(/must be text/);
+  });
+
+  it("yaml accepts valid YAML text and rejects malformed YAML", () => {
+    expect(checkOne("yaml", "ok: true\nitems:\n  - 1")).toBeNull();
+    expect(checkOne("yaml", "bad: [")).toMatch(/valid YAML/);
+    expect(checkOne("yaml", 123)).toMatch(/must be text/);
+  });
+
+  it("code validates structured syntax only when configured with that language", () => {
+    expect(checkOne("code", "{bad json")).toBeNull();
+    expect(checkOne("code", "{bad json", { options: { code: { language: "json" } } })).toMatch(
+      /valid JSON/,
+    );
+    expect(checkOne("code", "bad: [", { options: { code: { language: "yaml" } } })).toMatch(
+      /valid YAML/,
+    );
+  });
+});
+
 describe("number", () => {
   it("accepts the falsy-but-valid zero (not treated as empty)", () => {
     expect(checkOne("number", 0)).toBeNull();

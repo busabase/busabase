@@ -43,6 +43,14 @@ type RootTranslation = {
 		 */
 		routeNotFoundBody: string
 		/**
+		 * L​o​c​a​l​ ​B​u​s​a​b​a​s​e
+		 */
+		localSpaceName: string
+		/**
+		 * L​o​c​a​l​ ​R​e​v​i​e​w​e​r
+		 */
+		localReviewerName: string
+		/**
 		 * L​o​c​a​l
 		 */
 		localPlan: string
@@ -105,7 +113,97 @@ type RootTranslation = {
 		 */
 		blogPosts: string
 	}
+	userEnvSettings: {
+		/**
+		 * E​n​v​ ​V​a​r​s
+		 */
+		title: string
+		/**
+		 * S​t​o​r​e​ ​r​u​n​t​i​m​e​ ​s​e​c​r​e​t​s​ ​f​o​r​ ​a​g​e​n​t​s​ ​a​n​d​ ​A​P​I​ ​t​o​o​l​s​ ​t​h​a​t​ ​c​a​l​l​ ​t​h​i​s​ ​B​u​s​a​b​a​s​e​ ​i​n​s​t​a​n​c​e​.
+		 */
+		description: string
+		/**
+		 * E​n​v​ ​V​a​r​s
+		 */
+		openButton: string
+		/**
+		 * N​a​m​e
+		 */
+		nameLabel: string
+		/**
+		 * V​a​l​u​e
+		 */
+		valueLabel: string
+		/**
+		 * V​a​l​u​e
+		 */
+		valuePlaceholder: string
+		/**
+		 * A​d​d​ ​v​a​r​i​a​b​l​e
+		 */
+		addVariable: string
+		/**
+		 * S​a​v​e
+		 */
+		save: string
+		/**
+		 * S​a​v​i​n​g​.​.​.
+		 */
+		saving: string
+		/**
+		 * L​o​a​d​i​n​g​ ​e​n​v​i​r​o​n​m​e​n​t​ ​v​a​r​i​a​b​l​e​s​.​.​.
+		 */
+		loading: string
+		/**
+		 * C​l​e​a​r
+		 */
+		clear: string
+		/**
+		 * R​e​v​e​a​l
+		 */
+		reveal: string
+		/**
+		 * H​i​d​e
+		 */
+		hide: string
+		/**
+		 * E​n​v​i​r​o​n​m​e​n​t​ ​v​a​r​i​a​b​l​e​s​ ​s​a​v​e​d
+		 */
+		saved: string
+		/**
+		 * F​a​i​l​e​d​ ​t​o​ ​s​a​v​e​ ​e​n​v​i​r​o​n​m​e​n​t​ ​v​a​r​i​a​b​l​e​s
+		 */
+		saveFailed: string
+		/**
+		 * E​n​v​i​r​o​n​m​e​n​t​ ​v​a​r​i​a​b​l​e​s​ ​c​l​e​a​r​e​d
+		 */
+		cleared: string
+		/**
+		 * L​o​c​a​l​ ​u​s​e​r​ ​s​c​o​p​e
+		 */
+		storageTitle: string
+		/**
+		 * T​h​e​s​e​ ​v​a​l​u​e​s​ ​a​r​e​ ​s​t​o​r​e​d​ ​i​n​ ​t​h​i​s​ ​l​o​c​a​l​ ​B​u​s​a​b​a​s​e​ ​d​a​t​a​b​a​s​e​ ​a​n​d​ ​i​n​j​e​c​t​e​d​ ​f​o​r​ ​t​h​e​ ​b​u​i​l​t​-​i​n​ ​l​o​c​a​l​ ​u​s​e​r​.
+		 */
+		storageDescription: string
+		/**
+		 * R​e​q​u​e​s​t​ ​s​c​o​p​e
+		 */
+		requestScopeTitle: string
+		/**
+		 * A​P​I​,​ ​R​P​C​,​ ​a​n​d​ ​M​C​P​ ​c​a​l​l​s​ ​c​a​n​ ​r​e​a​d​ ​t​h​e​s​e​ ​v​a​l​u​e​s​ ​t​h​r​o​u​g​h​ ​t​h​e​ ​B​u​s​a​b​a​s​e​ ​r​u​n​t​i​m​e​ ​w​i​t​h​o​u​t​ ​w​r​i​t​i​n​g​ ​t​h​e​m​ ​t​o​ ​p​r​o​c​e​s​s​.​e​n​v​.
+		 */
+		requestScopeDescription: string
+		/**
+		 * N​o​ ​v​a​r​i​a​b​l​e​s​ ​c​o​n​f​i​g​u​r​e​d​ ​y​e​t​.
+		 */
+		noVariables: string
+	}
 	marketing: {
+		/**
+		 * O​p​e​n​-​s​o​u​r​c​e​ ​l​o​c​a​l​ ​r​e​v​i​e​w​ ​e​n​g​i​n​e​ ​f​o​r​ ​B​u​s​a​b​a​s​e​.
+		 */
+		rootDescription: string
 		/**
 		 * A​b​o​u​t​ ​B​u​s​a​B​a​s​e
 		 */
@@ -219,6 +317,10 @@ type RootTranslation = {
 		 */
 		downloadOgDescription: string
 		/**
+		 * B​u​s​a​b​a​s​e​ ​A​P​I​ ​D​o​c​u​m​e​n​t​a​t​i​o​n
+		 */
+		apiDocsTitle: string
+		/**
 		 * B​u​s​a​b​a​s​e​ ​D​e​s​k​t​o​p
 		 */
 		desktopBadge: string
@@ -247,6 +349,22 @@ type RootTranslation = {
 		 * @param {string} version
 		 */
 		version: RequiredParams<'version'>
+		/**
+		 * A​p​p​l​e​ ​S​i​l​i​c​o​n
+		 */
+		appleSilicon: string
+		/**
+		 * I​n​t​e​l
+		 */
+		intel: string
+		/**
+		 * W​i​n​d​o​w​s
+		 */
+		windows: string
+		/**
+		 * L​i​n​u​x
+		 */
+		linux: string
 		/**
 		 * F​o​r​ ​n​e​w​e​r​ ​M​a​c​s​ ​w​i​t​h​ ​M​-​s​e​r​i​e​s​ ​c​h​i​p​s​.
 		 */
@@ -312,6 +430,80 @@ type RootTranslation = {
 		 */
 		installStep3: string
 	}
+	support: {
+		/**
+		 * B​u​s​a​b​a​s​e​ ​S​u​p​p​o​r​t
+		 */
+		title: string
+		/**
+		 * G​e​t​ ​h​e​l​p​ ​w​i​t​h​ ​B​u​s​a​b​a​s​e​ ​D​e​s​k​t​o​p​,​ ​B​u​s​a​b​a​s​e​ ​M​o​b​i​l​e​,​ ​A​g​e​n​t​ ​S​k​i​l​l​ ​s​e​t​u​p​,​ ​a​n​d​ ​a​p​p​r​o​v​a​l​-​f​i​r​s​t​ ​d​a​t​a​b​a​s​e​ ​w​o​r​k​f​l​o​w​s​.
+		 */
+		description: string
+		/**
+		 * S​u​p​p​o​r​t
+		 */
+		badge: string
+		/**
+		 * G​e​t​ ​h​e​l​p​ ​w​i​t​h​ ​B​u​s​a​b​a​s​e
+		 */
+		headline: string
+		/**
+		 * U​s​e​ ​t​h​e​s​e​ ​s​u​p​p​o​r​t​ ​p​a​t​h​s​ ​f​o​r​ ​B​u​s​a​b​a​s​e​ ​D​e​s​k​t​o​p​,​ ​B​u​s​a​b​a​s​e​ ​M​o​b​i​l​e​,​ ​l​o​c​a​l​ ​r​e​v​i​e​w​ ​w​o​r​k​f​l​o​w​s​,​ ​a​n​d​ ​A​I​ ​a​g​e​n​t​ ​s​e​t​u​p​.
+		 */
+		subhead: string
+		/**
+		 * E​m​a​i​l​ ​s​u​p​p​o​r​t
+		 */
+		emailTitle: string
+		/**
+		 * S​e​n​d​ ​y​o​u​r​ ​w​o​r​k​s​p​a​c​e​,​ ​d​e​v​i​c​e​,​ ​a​n​d​ ​a​ ​s​h​o​r​t​ ​d​e​s​c​r​i​p​t​i​o​n​ ​o​f​ ​w​h​a​t​ ​w​e​n​t​ ​w​r​o​n​g​.​ ​I​n​c​l​u​d​e​ ​s​c​r​e​e​n​s​h​o​t​s​ ​o​r​ ​l​o​g​s​ ​w​h​e​n​ ​p​o​s​s​i​b​l​e​.
+		 */
+		emailBody: string
+		/**
+		 * S​e​t​ ​u​p​ ​A​g​e​n​t​ ​S​k​i​l​l
+		 */
+		setupTitle: string
+		/**
+		 * C​o​n​n​e​c​t​ ​C​l​a​u​d​e​ ​C​o​d​e​,​ ​C​o​d​e​x​,​ ​o​r​ ​a​n​o​t​h​e​r​ ​A​I​ ​a​g​e​n​t​ ​t​o​ ​B​u​s​a​b​a​s​e​ ​s​o​ ​i​t​ ​c​a​n​ ​c​r​e​a​t​e​ ​r​e​v​i​e​w​e​d​ ​c​h​a​n​g​e​ ​r​e​q​u​e​s​t​s​.
+		 */
+		setupBody: string
+		/**
+		 * O​p​e​n​ ​s​e​t​u​p​ ​g​u​i​d​e
+		 */
+		setupAction: string
+		/**
+		 * D​o​w​n​l​o​a​d​ ​a​p​p​s
+		 */
+		downloadTitle: string
+		/**
+		 * I​n​s​t​a​l​l​ ​t​h​e​ ​d​e​s​k​t​o​p​ ​a​p​p​ ​f​o​r​ ​t​h​e​ ​l​o​c​a​l​ ​r​e​v​i​e​w​ ​e​n​g​i​n​e​,​ ​o​r​ ​u​s​e​ ​t​h​e​ ​m​o​b​i​l​e​ ​a​p​p​ ​t​o​ ​r​e​v​i​e​w​ ​c​h​a​n​g​e​s​ ​o​n​ ​t​h​e​ ​g​o​.
+		 */
+		downloadBody: string
+		/**
+		 * O​p​e​n​ ​d​o​w​n​l​o​a​d​s
+		 */
+		downloadAction: string
+		/**
+		 * O​p​e​n​ ​d​a​s​h​b​o​a​r​d
+		 */
+		dashboardTitle: string
+		/**
+		 * C​h​e​c​k​ ​t​h​e​ ​l​o​c​a​l​ ​i​n​b​o​x​,​ ​a​c​t​i​v​i​t​y​ ​f​e​e​d​,​ ​b​a​s​e​ ​s​c​h​e​m​a​,​ ​a​n​d​ ​p​e​n​d​i​n​g​ ​c​h​a​n​g​e​ ​r​e​q​u​e​s​t​s​ ​i​n​ ​y​o​u​r​ ​B​u​s​a​b​a​s​e​ ​w​o​r​k​s​p​a​c​e​.
+		 */
+		dashboardBody: string
+		/**
+		 * O​p​e​n​ ​d​a​s​h​b​o​a​r​d
+		 */
+		dashboardAction: string
+		/**
+		 * W​h​a​t​ ​t​o​ ​i​n​c​l​u​d​e
+		 */
+		includeTitle: string
+		/**
+		 * F​o​r​ ​f​a​s​t​e​r​ ​t​r​o​u​b​l​e​s​h​o​o​t​i​n​g​,​ ​i​n​c​l​u​d​e​ ​y​o​u​r​ ​B​u​s​a​b​a​s​e​ ​v​e​r​s​i​o​n​,​ ​o​p​e​r​a​t​i​n​g​ ​s​y​s​t​e​m​,​ ​w​h​e​t​h​e​r​ ​y​o​u​ ​a​r​e​ ​u​s​i​n​g​ ​D​e​s​k​t​o​p​,​ ​M​o​b​i​l​e​,​ ​C​l​o​u​d​,​ ​o​r​ ​s​e​l​f​-​h​o​s​t​e​d​ ​m​o​d​e​,​ ​a​n​d​ ​t​h​e​ ​e​x​a​c​t​ ​a​c​t​i​o​n​ ​t​h​a​t​ ​f​a​i​l​e​d​.
+		 */
+		includeBody: string
+	}
 }
 
 export type TranslationFunctions = {
@@ -342,6 +534,14 @@ export type TranslationFunctions = {
 		 * Open Inbox, Activity, or a Base from the sidebar.
 		 */
 		routeNotFoundBody: () => LocalizedString
+		/**
+		 * Local Busabase
+		 */
+		localSpaceName: () => LocalizedString
+		/**
+		 * Local Reviewer
+		 */
+		localReviewerName: () => LocalizedString
 		/**
 		 * Local
 		 */
@@ -405,7 +605,97 @@ export type TranslationFunctions = {
 		 */
 		blogPosts: () => LocalizedString
 	}
+	userEnvSettings: {
+		/**
+		 * Env Vars
+		 */
+		title: () => LocalizedString
+		/**
+		 * Store runtime secrets for agents and API tools that call this Busabase instance.
+		 */
+		description: () => LocalizedString
+		/**
+		 * Env Vars
+		 */
+		openButton: () => LocalizedString
+		/**
+		 * Name
+		 */
+		nameLabel: () => LocalizedString
+		/**
+		 * Value
+		 */
+		valueLabel: () => LocalizedString
+		/**
+		 * Value
+		 */
+		valuePlaceholder: () => LocalizedString
+		/**
+		 * Add variable
+		 */
+		addVariable: () => LocalizedString
+		/**
+		 * Save
+		 */
+		save: () => LocalizedString
+		/**
+		 * Saving...
+		 */
+		saving: () => LocalizedString
+		/**
+		 * Loading environment variables...
+		 */
+		loading: () => LocalizedString
+		/**
+		 * Clear
+		 */
+		clear: () => LocalizedString
+		/**
+		 * Reveal
+		 */
+		reveal: () => LocalizedString
+		/**
+		 * Hide
+		 */
+		hide: () => LocalizedString
+		/**
+		 * Environment variables saved
+		 */
+		saved: () => LocalizedString
+		/**
+		 * Failed to save environment variables
+		 */
+		saveFailed: () => LocalizedString
+		/**
+		 * Environment variables cleared
+		 */
+		cleared: () => LocalizedString
+		/**
+		 * Local user scope
+		 */
+		storageTitle: () => LocalizedString
+		/**
+		 * These values are stored in this local Busabase database and injected for the built-in local user.
+		 */
+		storageDescription: () => LocalizedString
+		/**
+		 * Request scope
+		 */
+		requestScopeTitle: () => LocalizedString
+		/**
+		 * API, RPC, and MCP calls can read these values through the Busabase runtime without writing them to process.env.
+		 */
+		requestScopeDescription: () => LocalizedString
+		/**
+		 * No variables configured yet.
+		 */
+		noVariables: () => LocalizedString
+	}
 	marketing: {
+		/**
+		 * Open-source local review engine for Busabase.
+		 */
+		rootDescription: () => LocalizedString
 		/**
 		 * About BusaBase
 		 */
@@ -519,6 +809,10 @@ export type TranslationFunctions = {
 		 */
 		downloadOgDescription: () => LocalizedString
 		/**
+		 * Busabase API Documentation
+		 */
+		apiDocsTitle: () => LocalizedString
+		/**
 		 * Busabase Desktop
 		 */
 		desktopBadge: () => LocalizedString
@@ -546,6 +840,22 @@ export type TranslationFunctions = {
 		 * Version {version}
 		 */
 		version: (arg: { version: string }) => LocalizedString
+		/**
+		 * Apple Silicon
+		 */
+		appleSilicon: () => LocalizedString
+		/**
+		 * Intel
+		 */
+		intel: () => LocalizedString
+		/**
+		 * Windows
+		 */
+		windows: () => LocalizedString
+		/**
+		 * Linux
+		 */
+		linux: () => LocalizedString
 		/**
 		 * For newer Macs with M-series chips.
 		 */
@@ -610,6 +920,80 @@ export type TranslationFunctions = {
 		 * Use the release channel for future desktop updates.
 		 */
 		installStep3: () => LocalizedString
+	}
+	support: {
+		/**
+		 * Busabase Support
+		 */
+		title: () => LocalizedString
+		/**
+		 * Get help with Busabase Desktop, Busabase Mobile, Agent Skill setup, and approval-first database workflows.
+		 */
+		description: () => LocalizedString
+		/**
+		 * Support
+		 */
+		badge: () => LocalizedString
+		/**
+		 * Get help with Busabase
+		 */
+		headline: () => LocalizedString
+		/**
+		 * Use these support paths for Busabase Desktop, Busabase Mobile, local review workflows, and AI agent setup.
+		 */
+		subhead: () => LocalizedString
+		/**
+		 * Email support
+		 */
+		emailTitle: () => LocalizedString
+		/**
+		 * Send your workspace, device, and a short description of what went wrong. Include screenshots or logs when possible.
+		 */
+		emailBody: () => LocalizedString
+		/**
+		 * Set up Agent Skill
+		 */
+		setupTitle: () => LocalizedString
+		/**
+		 * Connect Claude Code, Codex, or another AI agent to Busabase so it can create reviewed change requests.
+		 */
+		setupBody: () => LocalizedString
+		/**
+		 * Open setup guide
+		 */
+		setupAction: () => LocalizedString
+		/**
+		 * Download apps
+		 */
+		downloadTitle: () => LocalizedString
+		/**
+		 * Install the desktop app for the local review engine, or use the mobile app to review changes on the go.
+		 */
+		downloadBody: () => LocalizedString
+		/**
+		 * Open downloads
+		 */
+		downloadAction: () => LocalizedString
+		/**
+		 * Open dashboard
+		 */
+		dashboardTitle: () => LocalizedString
+		/**
+		 * Check the local inbox, activity feed, base schema, and pending change requests in your Busabase workspace.
+		 */
+		dashboardBody: () => LocalizedString
+		/**
+		 * Open dashboard
+		 */
+		dashboardAction: () => LocalizedString
+		/**
+		 * What to include
+		 */
+		includeTitle: () => LocalizedString
+		/**
+		 * For faster troubleshooting, include your Busabase version, operating system, whether you are using Desktop, Mobile, Cloud, or self-hosted mode, and the exact action that failed.
+		 */
+		includeBody: () => LocalizedString
 	}
 }
 

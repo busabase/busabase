@@ -8,6 +8,7 @@ import {
   Bot,
   FileText,
   Folder,
+  HardDrive,
   Images,
   Inbox,
   Menu,
@@ -19,7 +20,7 @@ import {
   Table2,
 } from "lucide-react-native";
 import { type ReactNode, useState } from "react";
-import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Modal, Platform, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useBusabaseOrpc } from "~/api/use-busabase-orpc";
 import { NativeScreen } from "~/components/native-screen";
 import { useI18n } from "~/i18n";
@@ -35,25 +36,39 @@ interface DrawerScaffoldProps {
   children: ReactNode;
   refreshing?: boolean;
   onRefresh?: () => void;
+  headerAction?: ReactNode;
+  footer?: ReactNode;
 }
 
 type NavKey = keyof CoreMessages["nav"];
+type DrawerItem = {
+  key: NavKey;
+  href: string;
+  icon: typeof Inbox;
+  activePaths?: string[];
+};
 
 // Mirrors the web dashboard's primary nav (Inbox · Search · Activity · Graph View).
 const reviewItems = [
-  { key: "inbox", href: "/drawer/inbox", icon: Inbox },
+  { key: "inbox", href: "/drawer/inbox", icon: Inbox, activePaths: ["/change-requests"] },
   { key: "search", href: "/drawer/search", icon: Search },
   { key: "activity", href: "/drawer/activity", icon: Activity },
   { key: "graph", href: "/drawer/graph", icon: Network },
-] as const satisfies ReadonlyArray<{ key: NavKey; href: string; icon: typeof Inbox }>;
+] as const satisfies ReadonlyArray<DrawerItem>;
 
 // Shared media library + trash, mirroring the web dashboard's Assets + Archived views.
 const libraryItems = [
-  { key: "assets", href: "/drawer/assets", icon: Images },
+  { key: "records", href: "/drawer/records", icon: FileText, activePaths: ["/records"] },
+  { key: "bases", href: "/drawer/bases", icon: Table2, activePaths: ["/base"] },
+  { key: "assets", href: "/drawer/assets", icon: Images, activePaths: ["/assets"] },
   { key: "archived", href: "/drawer/archived", icon: Archive },
-] as const satisfies ReadonlyArray<{ key: NavKey; href: string; icon: typeof Inbox }>;
+] as const satisfies ReadonlyArray<DrawerItem>;
 
-const settingsItem = { key: "settings", href: "/drawer/settings", icon: Settings } as const;
+const settingsItem = {
+  key: "settings",
+  href: "/drawer/settings",
+  icon: Settings,
+} as const satisfies DrawerItem;
 
 export function DrawerScaffold({
   title,
@@ -61,6 +76,8 @@ export function DrawerScaffold({
   children,
   refreshing,
   onRefresh,
+  headerAction,
+  footer,
 }: DrawerScaffoldProps) {
   const router = useRouter();
   const pathname = usePathname();
@@ -85,6 +102,7 @@ export function DrawerScaffold({
     !nodesQuery.data[0].baseId
       ? nodesQuery.data[0].children
       : (nodesQuery.data ?? []);
+  const knowledgeCount = countKnowledgeNodes(treeNodes);
 
   const headerLeading = (
     <Pressable
@@ -114,6 +132,11 @@ export function DrawerScaffold({
       router.push({ pathname: "/skill/[nodeId]", params: { nodeId: node.id } });
       return;
     }
+    if (node.type === "drive") {
+      setOpen(false);
+      router.push({ pathname: "/drive/[nodeId]", params: { nodeId: node.id } });
+      return;
+    }
     if (node.type === "doc") {
       setOpen(false);
       router.push({ pathname: "/doc/[nodeId]", params: { nodeId: node.id } });
@@ -134,20 +157,67 @@ export function DrawerScaffold({
         refreshing={refreshing}
         onRefresh={onRefresh}
         headerLeading={headerLeading}
-        headerAction={<SpaceSelector compact />}
+        headerAction={
+          headerAction ? (
+            <View style={styles.headerActions}>
+              <SpaceSelector compact />
+              {headerAction}
+            </View>
+          ) : (
+            <SpaceSelector compact />
+          )
+        }
+        footer={footer}
       >
         {children}
       </NativeScreen>
 
       <Modal animationType="fade" transparent visible={open} onRequestClose={() => setOpen(false)}>
-        <View style={styles.modal}>
-          <View style={[styles.drawer, { backgroundColor: tokens.surface }]}>
-            <View style={styles.drawerHeader}>
+        <View style={[styles.modal, { backgroundColor: "rgba(0, 0, 0, 0.22)" }]}>
+          <View
+            style={[
+              styles.drawer,
+              {
+                backgroundColor: tokens.surface,
+                borderColor: tokens.border,
+              },
+            ]}
+          >
+            <View style={[styles.drawerHeader, { borderColor: tokens.border }]}>
               <View style={styles.drawerTitle}>
                 <Text style={[typography.h2, { color: tokens.foreground }]}>Busabase</Text>
+                <Text
+                  numberOfLines={1}
+                  style={[typography.small, { color: tokens.mutedForeground }]}
+                >
+                  Review workspace
+                </Text>
               </View>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={t.nav.create}
+                hitSlop={mobile.hitSlop}
+                style={[styles.createButton, { backgroundColor: tokens.primary }]}
+                onPress={() => {
+                  setOpen(false);
+                  setCreateOpen(true);
+                }}
+              >
+                <Plus size={18} color={tokens.primaryForeground} />
+                <Text
+                  style={[
+                    typography.small,
+                    styles.createLabel,
+                    { color: tokens.primaryForeground },
+                  ]}
+                >
+                  {t.nav.create}
+                </Text>
+              </Pressable>
             </View>
-            <SpaceSelector />
+            <View style={styles.spaceWrap}>
+              <SpaceSelector />
+            </View>
 
             <ScrollView
               contentContainerStyle={styles.drawerBody}
@@ -164,29 +234,17 @@ export function DrawerScaffold({
                 >
                   {t.nav.review}
                 </Text>
-                <View style={styles.nav}>
+                <View style={styles.navGroup}>
                   {reviewItems.map((item) => {
-                    const Icon = item.icon;
-                    const active = pathname === item.href;
+                    const active = isDrawerItemActive(pathname, item);
                     return (
-                      <Pressable
+                      <DrawerNavRow
                         key={item.href}
-                        style={[
-                          styles.navItem,
-                          { backgroundColor: active ? tokens.primaryMuted : "transparent" },
-                        ]}
+                        active={active}
+                        icon={item.icon}
+                        label={t.nav[item.key]}
                         onPress={() => navigate(item.href)}
-                      >
-                        <Icon size={20} color={active ? tokens.primary : tokens.mutedForeground} />
-                        <Text
-                          style={[
-                            typography.bodyEm,
-                            { color: active ? tokens.foreground : tokens.mutedForeground },
-                          ]}
-                        >
-                          {t.nav[item.key]}
-                        </Text>
-                      </Pressable>
+                      />
                     );
                   })}
                 </View>
@@ -202,29 +260,17 @@ export function DrawerScaffold({
                 >
                   {t.nav.library}
                 </Text>
-                <View style={styles.nav}>
+                <View style={styles.navGroup}>
                   {libraryItems.map((item) => {
-                    const Icon = item.icon;
-                    const active = pathname === item.href;
+                    const active = isDrawerItemActive(pathname, item);
                     return (
-                      <Pressable
+                      <DrawerNavRow
                         key={item.href}
-                        style={[
-                          styles.navItem,
-                          { backgroundColor: active ? tokens.primaryMuted : "transparent" },
-                        ]}
+                        active={active}
+                        icon={item.icon}
+                        label={t.nav[item.key]}
                         onPress={() => navigate(item.href)}
-                      >
-                        <Icon size={20} color={active ? tokens.primary : tokens.mutedForeground} />
-                        <Text
-                          style={[
-                            typography.bodyEm,
-                            { color: active ? tokens.foreground : tokens.mutedForeground },
-                          ]}
-                        >
-                          {t.nav[item.key]}
-                        </Text>
-                      </Pressable>
+                      />
                     );
                   })}
                 </View>
@@ -239,21 +285,13 @@ export function DrawerScaffold({
                       { color: tokens.mutedForeground },
                     ]}
                   >
-                    {t.nav.bases}
+                    {t.nav.knowledge}
                   </Text>
-                  <Pressable
-                    accessibilityRole="button"
-                    accessibilityLabel={t.nav.create}
-                    hitSlop={mobile.hitSlop}
-                    onPress={() => {
-                      setOpen(false);
-                      setCreateOpen(true);
-                    }}
-                  >
-                    <Plus size={18} color={tokens.mutedForeground} />
-                  </Pressable>
+                  <Text style={[typography.small, { color: tokens.mutedForeground }]}>
+                    {knowledgeCount}
+                  </Text>
                 </View>
-                <View style={styles.nav}>
+                <View style={styles.navGroup}>
                   {nodesQuery.isLoading ? (
                     <Text
                       style={[
@@ -262,14 +300,14 @@ export function DrawerScaffold({
                         { color: tokens.mutedForeground },
                       ]}
                     >
-                      Loading bases
+                      Loading knowledge
                     </Text>
                   ) : null}
                   {nodesQuery.error ? (
                     <Text
                       style={[typography.small, styles.sectionHint, { color: tokens.destructive }]}
                     >
-                      Could not load bases
+                      Could not load knowledge
                     </Text>
                   ) : null}
                   {!nodesQuery.isLoading && !nodesQuery.error && treeNodes.length === 0 ? (
@@ -280,7 +318,7 @@ export function DrawerScaffold({
                         { color: tokens.mutedForeground },
                       ]}
                     >
-                      No bases yet
+                      No knowledge yet
                     </Text>
                   ) : null}
                   {treeNodes.map((node) => (
@@ -294,38 +332,15 @@ export function DrawerScaffold({
                   ))}
                 </View>
               </View>
-
-              <View style={styles.nav}>
-                <Pressable
-                  style={[
-                    styles.navItem,
-                    {
-                      backgroundColor:
-                        pathname === settingsItem.href ? tokens.primaryMuted : "transparent",
-                    },
-                  ]}
-                  onPress={() => navigate(settingsItem.href)}
-                >
-                  <settingsItem.icon
-                    size={20}
-                    color={pathname === settingsItem.href ? tokens.primary : tokens.mutedForeground}
-                  />
-                  <Text
-                    style={[
-                      typography.bodyEm,
-                      {
-                        color:
-                          pathname === settingsItem.href
-                            ? tokens.foreground
-                            : tokens.mutedForeground,
-                      },
-                    ]}
-                  >
-                    {t.nav.settings}
-                  </Text>
-                </Pressable>
-              </View>
             </ScrollView>
+            <View style={[styles.drawerFooter, { borderColor: tokens.border }]}>
+              <DrawerNavRow
+                active={isPathActive(pathname, settingsItem.href)}
+                icon={settingsItem.icon}
+                label={t.nav.settings}
+                onPress={() => navigate(settingsItem.href)}
+              />
+            </View>
           </View>
           <Pressable
             accessibilityLabel="Close navigation drawer"
@@ -353,44 +368,124 @@ const styles = StyleSheet.create({
   menuButton: {
     width: 44,
     height: 44,
-    borderRadius: radius.md,
+    borderRadius: radius.full,
     alignItems: "center",
     justifyContent: "center",
   },
   modal: { flex: 1, flexDirection: "row" },
-  edgeDismiss: { flex: 1, backgroundColor: "transparent" },
+  edgeDismiss: { flex: 1 },
   drawer: {
     width: mobile.drawerWidth,
     maxWidth: "82%",
-    paddingTop: 56,
-    paddingHorizontal: 18,
-    gap: 24,
+    paddingTop: Platform.select({ ios: 58, android: 38, default: 48 }),
+    borderRightWidth: StyleSheet.hairlineWidth,
+    ...Platform.select({
+      web: { boxShadow: "8px 0 24px rgba(0, 0, 0, 0.12)" },
+      default: {
+        shadowColor: "#000",
+        shadowOpacity: 0.12,
+        shadowRadius: 16,
+        shadowOffset: { width: 8, height: 0 },
+        elevation: 12,
+      },
+    }),
   },
-  drawerHeader: { flexDirection: "row", alignItems: "flex-start", justifyContent: "space-between" },
-  drawerTitle: { flex: 1, gap: 4, paddingRight: 12 },
+  drawerHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+    paddingHorizontal: 18,
+    paddingBottom: 16,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  drawerTitle: { flex: 1, gap: 1, minWidth: 0 },
+  createButton: {
+    minWidth: 88,
+    height: 36,
+    borderRadius: radius.full,
+    alignItems: "center",
+    justifyContent: "center",
+    flexDirection: "row",
+    gap: 6,
+    paddingHorizontal: 12,
+  },
+  createLabel: { flexShrink: 1 },
+  spaceWrap: { paddingHorizontal: 18, paddingTop: 14 },
   drawerScroll: { flex: 1 },
-  drawerBody: { gap: 24, paddingBottom: 24 },
-  nav: { gap: 6 },
-  section: { gap: 8 },
+  drawerBody: { gap: 18, paddingHorizontal: 10, paddingTop: 18, paddingBottom: 20 },
+  drawerFooter: {
+    borderTopWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: 10,
+    paddingTop: 10,
+    paddingBottom: Platform.select({ ios: 22, android: 14, default: 14 }),
+  },
+  navGroup: { gap: 2 },
+  section: { gap: 7 },
   sectionHeader: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    paddingRight: 4,
+    paddingHorizontal: 8,
   },
   sectionLabel: { textTransform: "uppercase" },
-  sectionHint: { paddingHorizontal: 14, paddingVertical: 8 },
+  sectionHint: { paddingHorizontal: 12, paddingVertical: 8 },
   navItem: {
-    minHeight: mobile.minTouchTarget,
+    minHeight: 44,
     borderRadius: radius.md,
-    paddingHorizontal: 14,
+    paddingRight: 12,
+    paddingLeft: 8,
     flexDirection: "row",
     alignItems: "center",
-    gap: 12,
+    gap: 9,
   },
-  baseItem: { alignItems: "flex-start", paddingVertical: 10 },
+  activeMark: {
+    width: 3,
+    height: 22,
+    borderRadius: radius.full,
+  },
+  baseItem: { alignItems: "center", paddingVertical: 8 },
   baseText: { flex: 1, minWidth: 0 },
+  headerActions: { flexDirection: "row", alignItems: "center", gap: 8 },
 });
+
+function countKnowledgeNodes(nodes: NodeVO[]): number {
+  return nodes.reduce((count, node) => count + 1 + countKnowledgeNodes(node.children), 0);
+}
+
+function DrawerNavRow({
+  active,
+  icon: Icon,
+  label,
+  onPress,
+}: {
+  active: boolean;
+  icon: typeof Inbox;
+  label: string;
+  onPress: () => void;
+}) {
+  const tokens = useTokens();
+
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityState={{ selected: active }}
+      style={[styles.navItem, { backgroundColor: active ? tokens.primaryMuted : "transparent" }]}
+      onPress={onPress}
+    >
+      <View
+        style={[styles.activeMark, { backgroundColor: active ? tokens.primary : "transparent" }]}
+      />
+      <Icon size={20} color={active ? tokens.primary : tokens.mutedForeground} />
+      <Text
+        numberOfLines={1}
+        style={[typography.bodyEm, { color: active ? tokens.foreground : tokens.mutedForeground }]}
+      >
+        {label}
+      </Text>
+    </Pressable>
+  );
+}
 
 // Maps the registry's platform-neutral icon ids to lucide-react-native icons.
 const NODE_ICONS: Record<string, typeof Folder> = {
@@ -399,17 +494,46 @@ const NODE_ICONS: Record<string, typeof Folder> = {
   sparkles: Sparkles,
   "file-text": FileText,
   bot: Bot,
+  "hard-drive": HardDrive,
 };
 
 // Per-node-type icon, subtitle, and whether the row navigates somewhere — all
 // driven by the node-type registry (tappable = the type has a detail screen).
 function nodeNavMeta(node: NodeVO) {
   const definition = getNodeType(node.type);
+  const label = definition?.label ?? node.type;
   return {
     icon: NODE_ICONS[definition?.icon ?? ""] ?? FileText,
-    subtitle: node.type === "base" ? node.slug : (definition?.label ?? node.type),
+    subtitle: node.type === "base" ? `${label} · ${node.slug}` : label,
     tappable: hasCapability(node.type, "hasDetail"),
   };
+}
+
+function isPathActive(pathname: string, basePath: string) {
+  return pathname === basePath || pathname.startsWith(`${basePath}/`);
+}
+
+function isDrawerItemActive(pathname: string, item: DrawerItem) {
+  return [item.href, ...(item.activePaths ?? [])].some((path) => isPathActive(pathname, path));
+}
+
+function isNodeActive(node: NodeVO, pathname: string) {
+  if (node.type === "base") {
+    return isPathActive(pathname, `/base/${node.slug}`);
+  }
+  if (node.type === "skill") {
+    return isPathActive(pathname, `/skill/${node.id}`);
+  }
+  if (node.type === "drive") {
+    return isPathActive(pathname, `/drive/${node.id}`);
+  }
+  if (node.type === "doc") {
+    return isPathActive(pathname, `/doc/${node.id}`);
+  }
+  if (node.type === "folder") {
+    return isPathActive(pathname, `/folder/${node.id}`);
+  }
+  return false;
 }
 
 function NodeNavItem({
@@ -425,12 +549,9 @@ function NodeNavItem({
 }) {
   const tokens = useTokens();
   const meta = nodeNavMeta(node);
-  const active =
-    (node.type === "base" && pathname === `/base/${node.slug}`) ||
-    (node.type === "skill" && pathname === `/skill/${node.id}`) ||
-    (node.type === "doc" && pathname === `/doc/${node.id}`) ||
-    (node.type === "folder" && pathname === `/folder/${node.id}`);
+  const active = isNodeActive(node, pathname);
   const Icon = meta.icon;
+  const showSubtitle = depth === 0 || active;
 
   return (
     <>
@@ -443,12 +564,15 @@ function NodeNavItem({
           styles.baseItem,
           {
             backgroundColor: active ? tokens.primaryMuted : "transparent",
-            paddingLeft: 14 + depth * 14,
+            paddingLeft: 8 + depth * 12,
           },
         ]}
         onPress={() => onPress(node)}
       >
-        <Icon size={20} color={active ? tokens.primary : tokens.mutedForeground} />
+        <View
+          style={[styles.activeMark, { backgroundColor: active ? tokens.primary : "transparent" }]}
+        />
+        <Icon size={18} color={active ? tokens.primary : tokens.mutedForeground} />
         <View style={styles.baseText}>
           <Text
             numberOfLines={1}
@@ -459,9 +583,11 @@ function NodeNavItem({
           >
             {node.name}
           </Text>
-          <Text numberOfLines={1} style={[typography.small, { color: tokens.mutedForeground }]}>
-            {meta.subtitle}
-          </Text>
+          {showSubtitle ? (
+            <Text numberOfLines={1} style={[typography.caption, { color: tokens.mutedForeground }]}>
+              {meta.subtitle}
+            </Text>
+          ) : null}
         </View>
       </Pressable>
       {node.children.map((child) => (

@@ -1,7 +1,7 @@
 import { z } from "zod";
 // Records embed the kernel commit VO. This is a one-way import — the kernel
 // contract never imports record schemas — so there is no cycle and no z.lazy.
-import { commitSchema } from "../../../contract/schemas";
+import { commitSchema, userRefSchema } from "../../../contract/schemas";
 import { baseSchema } from "./base-schemas";
 
 export const recordSchema = z.object({
@@ -12,6 +12,7 @@ export const recordSchema = z.object({
   parentCommitId: z.string().nullable(),
   status: z.enum(["active", "archived"]),
   createdBy: z.string(),
+  createdByUser: userRefSchema.nullable().optional().default(null),
   archivedAt: z.string().nullable(),
   createdAt: z.string(),
   updatedAt: z.string(),

@@ -46,7 +46,7 @@
     "zod": "^4.3.6"
   },
   "devDependencies": {
-    "@types/node": "^24.10.0",
+    "@types/node": "^24.13.2",
     "busabase-contract": "workspace:*",
     "open-domains": "workspace:*",
     "openlib": "workspace:*",
@@ -56,6 +56,6 @@
     "vitest": "^2.1.8"
   },
   "engines": {
-    "node": ">=20.0.0"
+    "node": ">=24.18.0"
   }
 }

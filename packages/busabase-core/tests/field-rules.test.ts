@@ -30,6 +30,8 @@ const ALL_FIELD_TYPES: FieldType[] = [
   "ai_summary",
   "ai_tags",
   "code",
+  "json",
+  "yaml",
 ];
 
 const def = (type: FieldType, extra: Partial<FieldDef> = {}): FieldDef => ({
@@ -65,7 +67,7 @@ describe("SYSTEM_FIELD_TYPES", () => {
 });
 
 describe("validateRecordFields — every field type has a rule path", () => {
-  // Guards that the switch in validateRecordFields handles all 22 types without
+  // Guards that validateRecordFields handles all field types without
   // throwing, and that a reasonable valid value passes for each.
   const VALID: Record<FieldType, unknown> = {
     text: "hello",
@@ -73,6 +75,8 @@ describe("validateRecordFields — every field type has a rule path", () => {
     markdown: "# title",
     html: "<b>x</b>",
     code: "const x = 1;",
+    json: '{"ok":true}',
+    yaml: "ok: true\nitems:\n  - 1",
     attachment: [
       {
         id: "att_1",
@@ -167,6 +171,26 @@ describe("validateRecordFields — rejects bad values per type", () => {
   it("ai_tags must be a list of strings", () => {
     expect(checkOne("ai_tags", ["x"])).toBeNull();
     expect(checkOne("ai_tags", "x")).toMatch(/list of tags/);
+  });
+  it("json rejects malformed JSON", () => {
+    expect(checkOne("json", '{"ok":true}')).toBeNull();
+    expect(checkOne("json", "{bad json")).toMatch(/valid JSON/);
+  });
+  it("yaml rejects malformed YAML", () => {
+    expect(checkOne("yaml", "ok: true\nitems:\n  - 1")).toBeNull();
+    expect(checkOne("yaml", "bad: [")).toMatch(/valid YAML/);
+  });
+  it("code rejects malformed structured text only when its language asks for it", () => {
+    expect(checkOne("code", "{bad json")).toBeNull();
+    expect(checkOne("code", "{bad json", { options: { code: { language: "json" } } })).toMatch(
+      /valid JSON/,
+    );
+    expect(checkOne("code", "bad: [", { options: { code: { language: "yaml" } } })).toMatch(
+      /valid YAML/,
+    );
+    expect(
+      checkOne("code", "bad: [", { options: { code: { language: "typescript" } } }),
+    ).toBeNull();
   });
   describe("attachment", () => {
     const ref = (over: Record<string, unknown> = {}) => ({

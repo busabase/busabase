@@ -2,6 +2,7 @@ import Constants from "expo-constants";
 import { useRouter } from "expo-router";
 import {
   Bell,
+  ChevronRight,
   ExternalLink,
   Languages,
   LogOut,
@@ -11,17 +12,23 @@ import {
   Trash2,
 } from "lucide-react-native";
 import { useState } from "react";
-import { Linking, Pressable, StyleSheet, Switch, Text, View } from "react-native";
+import { Linking, StyleSheet, Switch, View } from "react-native";
 import { ConnectionGuard } from "~/components/busabase/ConnectionGuard";
 import { DrawerScaffold } from "~/components/busabase/DrawerScaffold";
 import { SpaceSelector } from "~/components/busabase/SpaceSelector";
+import {
+  NativeActionBar,
+  NativeBottomSheet,
+  NativeChipList,
+  NativeRow,
+  NativeSection,
+} from "~/components/native-screen";
 import { Button } from "~/components/ui/Button";
 import { useConnection } from "~/connection/connection-store";
 import { type LocalePreference, useI18n } from "~/i18n";
 import { formatDate } from "~/lib/format";
 import { useNotifications } from "~/notifications/notification-provider";
 import type { NotificationSettings } from "~/notifications/notification-settings";
-import { radius, typography } from "~/theme/tokens";
 import { useTokens } from "~/theme/use-tokens";
 
 const intervalOptions: Array<{ label: string; value: NotificationSettings["pollIntervalSec"] }> = [
@@ -32,6 +39,16 @@ const intervalOptions: Array<{ label: string; value: NotificationSettings["pollI
 
 const AGENT_SKILL_URL = "https://busabase.com/SETUP_SKILL.md";
 const SUPPORT_URL = "https://busabase.com/support";
+const TERMS_URL = "https://busabase.com/terms-of-service";
+
+const getDisplayVersion = () => {
+  const version = Constants.expoConfig?.version ?? Constants.nativeAppVersion ?? "—";
+  const buildNumber =
+    Constants.nativeBuildVersion ??
+    Constants.expoConfig?.ios?.buildNumber ??
+    Constants.expoConfig?.android?.versionCode?.toString();
+  return buildNumber ? `v${version}-${buildNumber}` : `v${version}`;
+};
 
 function SettingsContent() {
   const router = useRouter();
@@ -41,129 +58,146 @@ function SettingsContent() {
   const { supported, settings, permissionDenied, setEnabled, setPollInterval, openSystemSettings } =
     useNotifications();
   const [switchingServer, setSwitchingServer] = useState<string | null>(null);
+  const [selectedServer, setSelectedServer] = useState<string | null>(null);
+  const [disconnectSheetOpen, setDisconnectSheetOpen] = useState(false);
+  const [disconnecting, setDisconnecting] = useState(false);
   const connection = state.status === "connected" ? state.connection : null;
   const otherServers = state.serverHistory.filter((url) => url !== connection?.serverUrl);
+  const displayVersion = getDisplayVersion();
 
   const handleDisconnect = async () => {
-    await disconnect();
-    router.replace("/");
+    setDisconnecting(true);
+    try {
+      await disconnect();
+      setDisconnectSheetOpen(false);
+      router.replace("/");
+    } finally {
+      setDisconnecting(false);
+    }
   };
 
   const handleSwitch = async (serverUrl: string) => {
     setSwitchingServer(serverUrl);
     try {
       await connectSelfHosted(serverUrl);
+      setSelectedServer(null);
       router.replace("/drawer/inbox");
     } finally {
       setSwitchingServer(null);
     }
   };
 
+  const handleRemoveSavedServer = async () => {
+    if (!selectedServer) {
+      return;
+    }
+    await removeServerFromHistory(selectedServer);
+    setSelectedServer(null);
+  };
+
+  const connectionLabel = connection
+    ? connection.mode === "cloud"
+      ? "Busabase Cloud"
+      : connection.mode === "demo"
+        ? "Demo workspace"
+        : "Self-hosted server"
+    : "No server connected";
+  const disconnectHint =
+    connection?.mode === "cloud"
+      ? "Signs this device out of Busabase Cloud and clears the secure session."
+      : "Clears the saved URL on this device. Saved servers stay available.";
+  const languageOptions = [
+    { value: "auto" as LocalePreference, label: t.settings.auto },
+    ...options.map((option) => ({
+      value: option.code as LocalePreference,
+      label: option.label,
+    })),
+  ];
+
   return (
     <DrawerScaffold title="Settings" subtitle="Connection and notifications">
-      <View style={styles.sections}>
-        <View style={[styles.card, { backgroundColor: tokens.card, borderColor: tokens.border }]}>
-          <Text style={[typography.h2, { color: tokens.foreground }]}>Current connection</Text>
-          <Text style={[typography.body, { color: tokens.mutedForeground }]}>
-            {connection?.serverUrl ?? "No server connected"}
-          </Text>
-          {connection?.mode === "cloud" ? (
-            <Text style={[typography.small, { color: tokens.mutedForeground }]}>
-              Signed in{connection.cloudUser?.email ? ` as ${connection.cloudUser.email}` : ""}
-            </Text>
-          ) : null}
-          {connection?.mode === "cloud" ? <SpaceSelector /> : null}
-          <Text style={[typography.small, { color: tokens.mutedForeground }]}>
-            Connected {formatDate(connection?.connectedAt)}
-          </Text>
-        </View>
-
-        {otherServers.length > 0 ? (
-          <View style={[styles.card, { backgroundColor: tokens.card, borderColor: tokens.border }]}>
-            <Text style={[typography.h2, { color: tokens.foreground }]}>Saved servers</Text>
-            {otherServers.map((serverUrl) => (
-              <View key={serverUrl} style={[styles.serverRow, { borderColor: tokens.border }]}>
-                <Server size={18} color={tokens.mutedForeground} />
-                <Text
-                  numberOfLines={1}
-                  style={[typography.body, styles.serverUrl, { color: tokens.foreground }]}
-                >
-                  {serverUrl}
-                </Text>
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel={`Switch to ${serverUrl}`}
-                  style={[styles.serverAction, { backgroundColor: tokens.primaryMuted }]}
-                  onPress={() => void handleSwitch(serverUrl)}
-                >
-                  <Text style={[typography.small, { color: tokens.primary }]}>
-                    {switchingServer === serverUrl ? "..." : "Switch"}
-                  </Text>
-                </Pressable>
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel={`Remove ${serverUrl}`}
-                  hitSlop={8}
-                  onPress={() => void removeServerFromHistory(serverUrl)}
-                >
-                  <Trash2 size={18} color={tokens.destructive} />
-                </Pressable>
-              </View>
-            ))}
-          </View>
-        ) : null}
-
-        <View style={[styles.card, { backgroundColor: tokens.card, borderColor: tokens.border }]}>
-          <View style={styles.notificationTitle}>
-            <Languages size={18} color={tokens.foreground} />
-            <Text style={[typography.h2, { color: tokens.foreground }]}>{t.settings.language}</Text>
-          </View>
-          <Text style={[typography.small, { color: tokens.mutedForeground }]}>
-            {t.settings.languageHint}
-          </Text>
-          <View style={styles.languageRow}>
-            {[
-              { value: "auto" as LocalePreference, label: t.settings.auto },
-              ...options.map((option) => ({
-                value: option.code as LocalePreference,
-                label: option.label,
-              })),
-            ].map((option) => {
-              const active = preference === option.value;
-              return (
-                <Pressable
-                  key={option.value}
-                  accessibilityRole="button"
-                  accessibilityState={{ selected: active }}
-                  style={[
-                    styles.intervalChip,
-                    {
-                      backgroundColor: active ? tokens.primaryMuted : "transparent",
-                      borderColor: active ? tokens.primary : tokens.border,
-                    },
-                  ]}
-                  onPress={() => setPreference(option.value)}
-                >
-                  <Text
-                    style={[
-                      typography.small,
-                      { color: active ? tokens.foreground : tokens.mutedForeground },
-                    ]}
-                  >
-                    {option.label}
-                  </Text>
-                </Pressable>
-              );
-            })}
-          </View>
-        </View>
-
-        <View style={[styles.card, { backgroundColor: tokens.card, borderColor: tokens.border }]}>
-          <View style={styles.notificationHeader}>
-            <View style={styles.notificationTitle}>
-              <Bell size={18} color={tokens.foreground} />
-              <Text style={[typography.h2, { color: tokens.foreground }]}>Notifications</Text>
+      <NativeSection title="Connection">
+        <NativeRow
+          title={connectionLabel}
+          subtitle={connection?.serverUrl ?? "Connect a Busabase server to review changes here."}
+          meta={connection ? formatDate(connection.connectedAt) : undefined}
+          leading={<Server size={18} color={tokens.mutedForeground} />}
+        />
+        <NativeRow
+          title="Connect another server"
+          subtitle="Validate a different self-hosted Busabase URL."
+          leading={<Server size={18} color={tokens.mutedForeground} />}
+          trailing={<ChevronRight size={18} color={tokens.mutedForeground} />}
+          onPress={() =>
+            router.push(
+              connection?.serverUrl
+                ? { pathname: "/connect/self-hosted", params: { serverUrl: connection.serverUrl } }
+                : "/connect/self-hosted",
+            )
+          }
+          last={connection?.mode !== "cloud"}
+        />
+        {connection?.mode === "cloud" ? (
+          <NativeRow
+            title="Workspace"
+            subtitle={
+              connection.cloudUser?.email
+                ? `Signed in as ${connection.cloudUser.email}`
+                : "Choose the active Busabase Cloud space"
+            }
+            leading={<Server size={18} color={tokens.mutedForeground} />}
+            last
+          >
+            <View style={styles.rowControl}>
+              <SpaceSelector />
             </View>
+          </NativeRow>
+        ) : null}
+      </NativeSection>
+
+      {otherServers.length > 0 ? (
+        <NativeSection title="Saved servers" caption={`${otherServers.length}`}>
+          {otherServers.map((serverUrl, index) => (
+            <NativeRow
+              key={serverUrl}
+              title={serverUrl}
+              subtitle="Saved self-hosted server"
+              meta={switchingServer === serverUrl ? "Switching" : undefined}
+              leading={<Server size={18} color={tokens.mutedForeground} />}
+              onPress={() => setSelectedServer(serverUrl)}
+              last={index === otherServers.length - 1}
+            />
+          ))}
+        </NativeSection>
+      ) : null}
+
+      <NativeSection title="Language">
+        <NativeRow
+          title={t.settings.language}
+          subtitle={t.settings.languageHint}
+          leading={<Languages size={18} color={tokens.mutedForeground} />}
+          last
+        >
+          <View style={styles.fullBleedChips}>
+            <NativeChipList<LocalePreference>
+              value={preference}
+              options={languageOptions}
+              onChange={setPreference}
+            />
+          </View>
+        </NativeRow>
+      </NativeSection>
+
+      <NativeSection title="Notifications">
+        <NativeRow
+          title="New change requests"
+          subtitle={
+            supported
+              ? "Notify when review work arrives. Background checks run on the system schedule."
+              : "Available only in the iOS and Android app."
+          }
+          leading={<Bell size={18} color={tokens.mutedForeground} />}
+          trailing={
             <Switch
               accessibilityLabel="Notify about new change requests"
               value={supported && settings.enabled}
@@ -171,128 +205,148 @@ function SettingsContent() {
               trackColor={{ true: tokens.primary }}
               onValueChange={(value) => void setEnabled(value)}
             />
-          </View>
-          <Text style={[typography.small, { color: tokens.mutedForeground }]}>
-            {supported
-              ? "Get a notification when a new change request arrives for review. The app polls the server while open; in the background the system checks roughly every 15 minutes."
-              : "Notifications are only available in the iOS and Android app, not on web."}
-          </Text>
-          {permissionDenied ? (
-            <View style={[styles.permissionNote, { borderColor: tokens.destructive }]}>
-              <Text style={[typography.small, { color: tokens.destructive }]}>
-                Notification permission is denied for this app.
-              </Text>
-              <Button
-                label="Open system settings"
-                variant="secondary"
-                fullWidth
-                onPress={openSystemSettings}
+          }
+          last={!permissionDenied && !settings.enabled}
+        />
+        {permissionDenied ? (
+          <NativeRow
+            title="Open system settings"
+            subtitle="Notifications are turned off for this app in system settings."
+            destructive
+            leading={<Bell size={18} color={tokens.destructive} />}
+            onPress={openSystemSettings}
+            last={!settings.enabled}
+          />
+        ) : null}
+        {settings.enabled ? (
+          <NativeRow title="Check every" subtitle="Foreground polling interval" last>
+            <View style={styles.fullBleedChips}>
+              <NativeChipList
+                value={String(settings.pollIntervalSec)}
+                options={intervalOptions.map((option) => ({
+                  value: String(option.value),
+                  label: option.label,
+                }))}
+                onChange={(value) => {
+                  const next = Number(value) as NotificationSettings["pollIntervalSec"];
+                  void setPollInterval(next);
+                }}
               />
             </View>
-          ) : null}
-          {settings.enabled ? (
-            <View style={styles.intervalRow}>
-              <Text style={[typography.small, { color: tokens.mutedForeground }]}>Check every</Text>
-              {intervalOptions.map((option) => {
-                const active = settings.pollIntervalSec === option.value;
-                return (
-                  <Pressable
-                    key={option.value}
-                    accessibilityRole="button"
-                    style={[
-                      styles.intervalChip,
-                      {
-                        backgroundColor: active ? tokens.primaryMuted : "transparent",
-                        borderColor: active ? tokens.primary : tokens.border,
-                      },
-                    ]}
-                    onPress={() => void setPollInterval(option.value)}
-                  >
-                    <Text
-                      style={[
-                        typography.small,
-                        { color: active ? tokens.foreground : tokens.mutedForeground },
-                      ]}
-                    >
-                      {option.label}
-                    </Text>
-                  </Pressable>
-                );
-              })}
-            </View>
-          ) : null}
-        </View>
-
-        {connection ? (
-          <View style={[styles.card, { backgroundColor: tokens.card, borderColor: tokens.border }]}>
-            <View style={styles.notificationTitle}>
-              <Sparkles size={18} color={tokens.foreground} />
-              <Text style={[typography.h2, { color: tokens.foreground }]}>Agent Skill</Text>
-            </View>
-            <Text style={[typography.small, { color: tokens.mutedForeground }]}>
-              Point an AI agent at this server's skill manifest so it can read bases and submit
-              change requests on your behalf.
-            </Text>
-            <Pressable
-              accessibilityRole="link"
-              accessibilityLabel="Open Agent Skill setup guide"
-              style={styles.linkRow}
-              onPress={() => void Linking.openURL(AGENT_SKILL_URL)}
-            >
-              <ExternalLink size={16} color={tokens.primary} />
-              <Text
-                numberOfLines={1}
-                style={[typography.small, styles.serverUrl, { color: tokens.primary }]}
-              >
-                {AGENT_SKILL_URL}
-              </Text>
-            </Pressable>
-          </View>
+          </NativeRow>
         ) : null}
+      </NativeSection>
 
-        <View style={[styles.card, { backgroundColor: tokens.card, borderColor: tokens.border }]}>
-          <View style={styles.notificationTitle}>
-            <Shield size={18} color={tokens.foreground} />
-            <Text style={[typography.h2, { color: tokens.foreground }]}>About</Text>
-          </View>
-          <View style={styles.aboutRow}>
-            <Text style={[typography.body, { color: tokens.foreground }]}>Busabase</Text>
-            <Text style={[typography.small, { color: tokens.mutedForeground }]}>
-              {`v${Constants.expoConfig?.version ?? "—"}`}
-            </Text>
-          </View>
-          <Pressable
-            accessibilityRole="link"
-            accessibilityLabel="Open Privacy Policy"
-            style={styles.linkRow}
-            onPress={() => void Linking.openURL("https://busabase.com/privacy-policy")}
-          >
-            <ExternalLink size={16} color={tokens.primary} />
-            <Text style={[typography.small, { color: tokens.primary }]}>Privacy Policy</Text>
-          </Pressable>
-          <Pressable
-            accessibilityRole="link"
-            accessibilityLabel="Contact Busabase Support"
-            style={styles.linkRow}
-            onPress={() => void Linking.openURL(SUPPORT_URL)}
-          >
-            <ExternalLink size={16} color={tokens.primary} />
-            <Text style={[typography.small, { color: tokens.primary }]}>Support</Text>
-          </Pressable>
-        </View>
+      {connection ? (
+        <NativeSection title="Agent">
+          <NativeRow
+            title="Agent Skill setup"
+            subtitle="Let an AI agent read bases and submit change requests."
+            leading={<Sparkles size={18} color={tokens.mutedForeground} />}
+            onPress={() => void Linking.openURL(AGENT_SKILL_URL)}
+            last
+          />
+        </NativeSection>
+      ) : null}
 
-        <View style={styles.actions}>
-          <View style={styles.row}>
-            <LogOut size={18} color={tokens.destructive} />
-            <Text style={[typography.small, { color: tokens.mutedForeground }]}>
-              {connection?.mode === "cloud"
-                ? "Disconnecting signs this device out of Busabase Cloud and clears the secure session."
-                : "Disconnecting clears the saved URL on this device. Saved servers stay available."}
-            </Text>
-          </View>
-          <Button label="Disconnect" variant="destructive" fullWidth onPress={handleDisconnect} />
-        </View>
-      </View>
+      <NativeSection title="About">
+        <NativeRow
+          title="Busabase"
+          subtitle="Mobile companion app"
+          meta={displayVersion}
+          leading={<Shield size={18} color={tokens.mutedForeground} />}
+        />
+        <NativeRow
+          title="Privacy Policy"
+          leading={<ExternalLink size={16} color={tokens.mutedForeground} />}
+          onPress={() => void Linking.openURL("https://busabase.com/privacy-policy")}
+        />
+        <NativeRow
+          title="Terms of Service"
+          leading={<ExternalLink size={16} color={tokens.mutedForeground} />}
+          onPress={() => void Linking.openURL(TERMS_URL)}
+        />
+        <NativeRow
+          title="Support"
+          leading={<ExternalLink size={16} color={tokens.mutedForeground} />}
+          onPress={() => void Linking.openURL(SUPPORT_URL)}
+          last
+        />
+      </NativeSection>
+
+      <NativeSection title="Danger zone">
+        <NativeRow
+          title="Disconnect this device"
+          subtitle={disconnectHint}
+          destructive
+          leading={<LogOut size={18} color={tokens.destructive} />}
+          onPress={() => setDisconnectSheetOpen(true)}
+          last
+        />
+      </NativeSection>
+
+      <NativeBottomSheet
+        visible={!!selectedServer}
+        title="Saved server"
+        description={selectedServer ?? undefined}
+        showCloseButton
+        onClose={() => setSelectedServer(null)}
+        footer={
+          <NativeActionBar>
+            <Button
+              label="Switch to this server"
+              loading={selectedServer ? switchingServer === selectedServer : false}
+              disabled={!selectedServer || switchingServer !== null}
+              fullWidth
+              onPress={() => {
+                if (selectedServer) {
+                  void handleSwitch(selectedServer);
+                }
+              }}
+            />
+            <Button
+              label="Remove from saved servers"
+              variant="destructive"
+              leadingIcon={<Trash2 size={18} color={tokens.destructiveForeground} />}
+              fullWidth
+              onPress={() => void handleRemoveSavedServer()}
+            />
+            <Button
+              label="Cancel"
+              variant="ghost"
+              disabled={switchingServer !== null}
+              fullWidth
+              onPress={() => setSelectedServer(null)}
+            />
+          </NativeActionBar>
+        }
+      />
+
+      <NativeBottomSheet
+        visible={disconnectSheetOpen}
+        title="Disconnect this device?"
+        description={disconnectHint}
+        showCloseButton
+        onClose={() => setDisconnectSheetOpen(false)}
+        footer={
+          <NativeActionBar>
+            <Button
+              label="Disconnect"
+              variant="destructive"
+              loading={disconnecting}
+              fullWidth
+              onPress={() => void handleDisconnect()}
+            />
+            <Button
+              label="Cancel"
+              variant="ghost"
+              disabled={disconnecting}
+              fullWidth
+              onPress={() => setDisconnectSheetOpen(false)}
+            />
+          </NativeActionBar>
+        }
+      />
     </DrawerScaffold>
   );
 }
@@ -306,52 +360,6 @@ export default function SettingsScreen() {
 }
 
 const styles = StyleSheet.create({
-  sections: { marginHorizontal: 20, gap: 14 },
-  card: {
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: radius.lg,
-    padding: 16,
-    gap: 10,
-  },
-  serverRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: radius.md,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-  },
-  serverUrl: { flex: 1, minWidth: 0 },
-  serverAction: {
-    borderRadius: radius.full,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-  },
-  notificationHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: 12,
-  },
-  notificationTitle: { flexDirection: "row", alignItems: "center", gap: 8 },
-  permissionNote: {
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: radius.md,
-    padding: 12,
-    gap: 10,
-  },
-  intervalRow: { flexDirection: "row", alignItems: "center", gap: 8, flexWrap: "wrap" },
-  languageRow: { flexDirection: "row", alignItems: "center", gap: 8, flexWrap: "wrap" },
-  intervalChip: {
-    minHeight: 32,
-    justifyContent: "center",
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: radius.full,
-    paddingHorizontal: 12,
-  },
-  actions: { gap: 12 },
-  row: { flexDirection: "row", alignItems: "flex-start", gap: 10 },
-  aboutRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
-  linkRow: { flexDirection: "row", alignItems: "center", gap: 8 },
+  rowControl: { paddingTop: 8 },
+  fullBleedChips: { marginHorizontal: -14, paddingTop: 8 },
 });

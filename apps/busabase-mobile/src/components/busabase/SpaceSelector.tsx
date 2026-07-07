@@ -2,11 +2,19 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type { AuthInfo } from "busabase-contract/contract/schemas";
 import { Check, ChevronDown, RefreshCw } from "lucide-react-native";
 import { useState } from "react";
-import { Modal, Pressable, StyleSheet, Text, View } from "react-native";
+import { Pressable, StyleSheet, Text, View } from "react-native";
 import { useConnection } from "~/connection/connection-store";
 import type { BusabaseSpace } from "~/connection/types";
 import { mobile, radius, typography } from "~/theme/tokens";
 import { useTokens } from "~/theme/use-tokens";
+import {
+  NativeActionBar,
+  NativeBottomSheet,
+  NativeInlineError,
+  NativeRow,
+  NativeSection,
+} from "../native-screen";
+import { Button } from "../ui/Button";
 
 interface SpaceSelectorProps {
   compact?: boolean;
@@ -109,67 +117,63 @@ export function SpaceSelector({ compact = false }: SpaceSelectorProps) {
         )}
       </Pressable>
 
-      <Modal animationType="fade" transparent visible={open} onRequestClose={() => setOpen(false)}>
-        <View style={styles.modal}>
-          <Pressable style={styles.backdrop} onPress={() => setOpen(false)} />
-          <View
-            style={[styles.sheet, { backgroundColor: tokens.surface, borderColor: tokens.border }]}
-          >
-            <View style={styles.sheetHeader}>
-              <Text style={[typography.h2, { color: tokens.foreground }]}>Workspaces</Text>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="Refresh workspaces"
-                hitSlop={mobile.hitSlop}
-                onPress={() => void authQuery.refetch()}
-              >
-                <RefreshCw size={18} color={tokens.mutedForeground} />
-              </Pressable>
-            </View>
-            {authQuery.error ? (
-              <Text style={[typography.small, styles.hint, { color: tokens.destructive }]}>
-                Could not load workspaces.
-              </Text>
-            ) : null}
-            {spaces.map((space) => {
+      <NativeBottomSheet
+        visible={open}
+        title="Workspaces"
+        showCloseButton
+        onClose={() => setOpen(false)}
+        footer={
+          <NativeActionBar>
+            <Button
+              label={authQuery.isFetching ? "Refreshing..." : "Refresh workspaces"}
+              variant="secondary"
+              loading={authQuery.isFetching}
+              fullWidth
+              leadingIcon={<RefreshCw size={18} color={tokens.foreground} />}
+              onPress={() => void authQuery.refetch()}
+            />
+          </NativeActionBar>
+        }
+      >
+        {authQuery.error ? (
+          <NativeInlineError
+            message="Could not load workspaces."
+            onReset={() => void authQuery.refetch()}
+          />
+        ) : null}
+        <NativeSection
+          title="Available"
+          caption={spaces.length > 0 ? `${spaces.length}` : undefined}
+        >
+          {spaces.length === 0 ? (
+            <NativeRow
+              title={authQuery.isLoading ? "Loading workspaces" : "No workspaces"}
+              subtitle={
+                authQuery.isLoading
+                  ? "Fetching available Busabase Cloud spaces."
+                  : "Refresh or reconnect to Busabase Cloud."
+              }
+              last
+            />
+          ) : (
+            spaces.map((space, index) => {
               const active = activeSpace?.id === space.id;
               return (
-                <Pressable
+                <NativeRow
                   key={space.id}
-                  accessibilityRole="button"
-                  accessibilityState={{ selected: active }}
-                  style={[
-                    styles.spaceRow,
-                    {
-                      backgroundColor: active ? tokens.primaryMuted : "transparent",
-                      borderColor: tokens.border,
-                    },
-                  ]}
+                  title={space.name}
+                  subtitle={[space.slug ? `@${space.slug}` : null, space.plan]
+                    .filter(Boolean)
+                    .join(" · ")}
+                  trailing={active ? <Check size={18} color={tokens.primary} /> : undefined}
+                  last={index === spaces.length - 1}
                   onPress={() => void handleSelect(space)}
-                >
-                  <View style={styles.spaceText}>
-                    <Text
-                      numberOfLines={1}
-                      style={[typography.bodyEm, { color: tokens.foreground }]}
-                    >
-                      {space.name}
-                    </Text>
-                    <Text
-                      numberOfLines={1}
-                      style={[typography.small, { color: tokens.mutedForeground }]}
-                    >
-                      {[space.slug ? `@${space.slug}` : null, space.plan]
-                        .filter(Boolean)
-                        .join(" · ")}
-                    </Text>
-                  </View>
-                  {active ? <Check size={18} color={tokens.primary} /> : null}
-                </Pressable>
+                />
               );
-            })}
-          </View>
-        </View>
-      </Modal>
+            })
+          )}
+        </NativeSection>
+      </NativeBottomSheet>
     </>
   );
 }
@@ -200,31 +204,4 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     justifyContent: "center",
   },
-  modal: { flex: 1, justifyContent: "flex-end" },
-  backdrop: { ...StyleSheet.absoluteFill, backgroundColor: "rgba(0,0,0,0.28)" },
-  sheet: {
-    margin: 12,
-    borderRadius: radius.lg,
-    borderWidth: StyleSheet.hairlineWidth,
-    padding: 14,
-    gap: 10,
-  },
-  sheetHeader: {
-    minHeight: 40,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-  },
-  hint: { paddingHorizontal: 4 },
-  spaceRow: {
-    minHeight: mobile.minTouchTarget,
-    borderRadius: radius.md,
-    borderWidth: StyleSheet.hairlineWidth,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-  },
-  spaceText: { flex: 1, minWidth: 0 },
 });

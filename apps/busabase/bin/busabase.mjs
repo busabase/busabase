@@ -6,7 +6,7 @@ import { existsSync, readdirSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, resolve } from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
 
 const here = dirname(fileURLToPath(import.meta.url)); // <pkg>/bin
 const pkgRoot = resolve(here, "..");
@@ -186,38 +186,28 @@ async function startServer(argv) {
 }
 
 async function runClientCli(argv) {
+  let runCli;
   try {
-    const { runCli } = await import("busabase-cli");
-    return await runCli(argv);
+    ({ runCli } = await import("busabase-cli"));
   } catch (error) {
-    const sourceCliWrapper = resolve(pkgRoot, "../busabase-cli/bin/busabase-cli.mjs");
-    if (existsSync(sourceCliWrapper)) {
-      const previousArgv = process.argv;
-      process.argv = [process.execPath, sourceCliWrapper, ...argv];
-      try {
-        await import(pathToFileURL(sourceCliWrapper).href);
-      } finally {
-        process.argv = previousArgv;
-      }
+    const siblingBin = resolve(pkgRoot, "../busabase-cli/bin/busabase-cli.mjs");
+    if (existsSync(siblingBin)) {
+      process.env.BUSABASE_CLI_DELEGATED_ARGV = JSON.stringify(argv);
+      await import(siblingBin);
       return 0;
     }
-
     const message = error instanceof Error ? error.message : String(error);
     console.error(
-      [
-        "busabase: could not load the bundled busabase-cli client.",
-        `Reason: ${message}`,
-        "",
-        "If you are running from source, build the CLI first:",
-        "  pnpm --filter busabase-sdk build",
-        "  pnpm --filter busabase-cli build",
-        "",
-        "Or run the published CLI explicitly:",
-        "  npm exec -y --package busabase-cli@latest -- busabase-cli",
-      ].join("\n"),
+      "busabase: could not load busabase-cli.\n" +
+        `Cause: ${message}\n\n` +
+        "If you are running from source, build the CLI first:\n" +
+        "  pnpm --filter busabase-cli build\n\n" +
+        "For one-off npm usage, prefer:\n" +
+        "  npm exec -y --package busabase@latest -- busabase <command>\n",
     );
     return 1;
   }
+  return await runCli(argv);
 }
 
 async function main() {

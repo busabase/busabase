@@ -3,7 +3,14 @@ import { ArrowLeft, CheckCircle, Server, Sparkles } from "lucide-react-native";
 import { useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { validateBusabaseServer } from "~/api/server-health";
-import { NativeScreen } from "~/components/native-screen";
+import {
+  NativeActionBar,
+  NativeChipList,
+  NativeInlineError,
+  NativeRow,
+  NativeScreen,
+  NativeSection,
+} from "~/components/native-screen";
 import { Button } from "~/components/ui/Button";
 import { TextInput } from "~/components/ui/TextInput";
 import { useConnection } from "~/connection/connection-store";
@@ -23,6 +30,10 @@ export default function SelfHostedConnectionScreen() {
   const [loading, setLoading] = useState(false);
   const [demoLoading, setDemoLoading] = useState(false);
   const [validatedUrl, setValidatedUrl] = useState<string | null>(null);
+  const serverOptions = [...new Set([...state.serverHistory, ...urlExamples])].map((example) => ({
+    value: example,
+    label: example,
+  }));
 
   // One tap into the preset hosted demo — no server setup, no login. This is what
   // App Review uses; new users can try Busabase instantly.
@@ -79,65 +90,77 @@ export default function SelfHostedConnectionScreen() {
       title="Connect to Busabase"
       subtitle="Try the demo, or connect your own server"
       headerLeading={headerLeading}
+      footer={
+        <NativeActionBar>
+          {error ? <NativeInlineError message={error} onReset={() => setError(null)} /> : null}
+          <Button
+            label="Connect"
+            loading={loading}
+            disabled={serverUrl.trim().length === 0}
+            fullWidth
+            onPress={handleConnect}
+          />
+        </NativeActionBar>
+      }
     >
       {demoServerUrl ? (
-        <View
-          style={[
-            styles.card,
-            { backgroundColor: tokens.primaryMuted, borderColor: tokens.primary },
-          ]}
-        >
-          <Sparkles size={22} color={tokens.primary} />
-          <Text style={[typography.h2, { color: tokens.foreground }]}>Try the demo</Text>
-          <Text style={[typography.body, { color: tokens.mutedForeground }]}>
-            One tap — no server setup, no login. Explore a seeded Busabase workspace and the full
-            review → merge flow.
-          </Text>
-          <Button label="Try the demo" loading={demoLoading} fullWidth onPress={handleDemo} />
-        </View>
+        <NativeSection title="Demo">
+          <NativeRow
+            title="Try the demo workspace"
+            subtitle="No server setup or login. Explore seeded review flows."
+            leading={<Sparkles size={18} color={tokens.mutedForeground} />}
+            trailing={
+              <Button
+                label="Try demo"
+                loading={demoLoading}
+                variant="secondary"
+                onPress={handleDemo}
+              />
+            }
+            last
+          />
+        </NativeSection>
       ) : null}
 
-      <View style={[styles.card, { backgroundColor: tokens.card, borderColor: tokens.border }]}>
-        <Server size={22} color={tokens.primary} />
-        <Text style={[typography.h2, { color: tokens.foreground }]}>Server URL</Text>
-        <Text style={[typography.body, { color: tokens.mutedForeground }]}>
-          The app checks /api/health before saving the connection.
-        </Text>
-
-        <TextInput
-          label="Busabase server URL"
-          value={serverUrl}
-          error={error ?? undefined}
-          keyboardType="url"
-          returnKeyType="go"
-          autoComplete="url"
-          onChangeText={setServerUrl}
-          onSubmitEditing={handleConnect}
-        />
-
-        <View style={styles.examples}>
-          {[...new Set([...state.serverHistory, ...urlExamples])].map((example) => (
-            <Pressable
-              key={example}
-              style={[styles.example, { backgroundColor: tokens.primaryMuted }]}
-              onPress={() => setServerUrl(example)}
-            >
-              <Text style={[typography.small, { color: tokens.foreground }]}>{example}</Text>
-            </Pressable>
-          ))}
-        </View>
-
-        {validatedUrl ? (
-          <View style={styles.validated}>
-            <CheckCircle size={16} color={tokens.success} />
-            <Text style={[typography.small, { color: tokens.success }]}>
-              Connected to {validatedUrl}
+      <NativeSection title="Server" caption="/api/health">
+        <View style={styles.formRow}>
+          <View style={styles.formHeader}>
+            <Server size={18} color={tokens.mutedForeground} />
+            <Text style={[typography.bodyEm, { color: tokens.foreground }]}>
+              Busabase server URL
             </Text>
           </View>
-        ) : null}
+          <Text style={[typography.small, { color: tokens.mutedForeground }]}>
+            The app validates the server before saving it on this device.
+          </Text>
 
-        <Button label="Connect" loading={loading} fullWidth onPress={handleConnect} />
-      </View>
+          <TextInput
+            value={serverUrl}
+            keyboardType="url"
+            returnKeyType="go"
+            autoComplete="url"
+            onChangeText={setServerUrl}
+            onSubmitEditing={handleConnect}
+          />
+
+          <View style={styles.fullBleedChips}>
+            <NativeChipList<string>
+              value={serverUrl}
+              options={serverOptions}
+              onChange={setServerUrl}
+            />
+          </View>
+
+          {validatedUrl ? (
+            <View style={styles.validated}>
+              <CheckCircle size={16} color={tokens.success} />
+              <Text style={[typography.small, { color: tokens.success }]}>
+                Connected to {validatedUrl}
+              </Text>
+            </View>
+          ) : null}
+        </View>
+      </NativeSection>
     </NativeScreen>
   );
 }
@@ -150,15 +173,8 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  card: {
-    marginHorizontal: 20,
-    marginTop: 12,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: radius.lg,
-    padding: 18,
-    gap: 14,
-  },
-  examples: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
-  example: { borderRadius: radius.full, paddingHorizontal: 12, paddingVertical: 8 },
+  formRow: { paddingHorizontal: 14, paddingVertical: 12, gap: 10 },
+  formHeader: { flexDirection: "row", alignItems: "center", gap: 10 },
+  fullBleedChips: { marginHorizontal: -14 },
   validated: { flexDirection: "row", alignItems: "center", gap: 8 },
 });

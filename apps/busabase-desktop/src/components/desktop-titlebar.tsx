@@ -34,7 +34,8 @@ export function DesktopTitlebar({ actions }: DesktopTitlebarProps) {
           isMac ? "desktop-titlebar-brand desktop-titlebar-brand-macos" : "desktop-titlebar-brand"
         }
       >
-        Busabase
+        <span>Busabase</span>
+        <span className="desktop-titlebar-brand-local">Local</span>
       </span>
       {actions ? <div className="desktop-titlebar-actions">{actions}</div> : null}
       {hasCustomControls ? (

@@ -102,11 +102,11 @@ export function SidebarPanel({
   );
 }
 
-export function SidebarRow({ label, value }: { label: string; value: string }) {
+export function SidebarRow({ label, value }: { label: string; value: ReactNode }) {
   return (
     <div className="grid min-w-0 grid-cols-[124px_minmax(0,1fr)] items-center gap-3 text-sm">
       <div className="truncate text-muted-foreground">{label}</div>
-      <div className="truncate font-mono text-muted-foreground text-xs">{value}</div>
+      <div className="min-w-0 truncate text-muted-foreground text-xs">{value}</div>
     </div>
   );
 }

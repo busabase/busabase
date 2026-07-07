@@ -1,3 +1,5 @@
+import type { UserRefVO } from "busabase-contract/types";
+
 const fieldValueToString = (value: unknown) => {
   if (value === null || value === undefined) {
     return "";
@@ -59,22 +61,60 @@ const formatAttachmentSize = (bytes: number) => {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 };
 
-// Best-effort actor label. There is no user directory yet (actor ids are opaque
-// strings like "local-admin"/"agent"), so we prettify known sentinels and slugs.
-// When a real users source lands, resolve display name + avatar here.
 const KNOWN_ACTOR_LABELS: Record<string, string> = {
   "local-admin": "Local Admin",
+  "local-editor": "Local Editor",
   "local-producer": "Local Producer",
+  "local-user": "Local User",
+  "local-viewer": "Local Viewer",
   agent: "Agent",
   producer: "Producer",
 };
 
-const formatActorLabel = (actorId: unknown): string => {
+const titleCaseToken = (value: string) =>
+  value ? `${value.slice(0, 1).toUpperCase()}${value.slice(1).toLowerCase()}` : "";
+
+const prettifyHumanIdentifier = (value: string) => {
+  if (!/[._-]/.test(value) || !/[a-z]/i.test(value)) {
+    return null;
+  }
+  const parts = value
+    .split(/[._-]+/)
+    .map((part) => part.trim())
+    .filter(Boolean);
+  if (parts.length < 2 || parts.some((part) => part.length > 32)) {
+    return null;
+  }
+  return parts.map(titleCaseToken).join(" ");
+};
+
+const formatOpaqueUserId = (actorId: unknown): string => {
   const id = typeof actorId === "string" ? actorId.trim() : "";
   if (!id) return "—";
-  return (
-    KNOWN_ACTOR_LABELS[id] ?? id.replace(/[._-]+/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())
-  );
+  return KNOWN_ACTOR_LABELS[id] ?? prettifyHumanIdentifier(id) ?? `User ${shortIdentifier(id)}`;
+};
+
+const formatUserRefLabel = (user: UserRefVO | null | undefined, fallbackId?: string | null) => {
+  if (user?.name?.trim()) {
+    return user.name.trim();
+  }
+  if (user?.email?.trim()) {
+    return user.email.trim();
+  }
+  if (fallbackId && KNOWN_ACTOR_LABELS[fallbackId]) {
+    return KNOWN_ACTOR_LABELS[fallbackId];
+  }
+  return fallbackId ? `Unknown user ${shortIdentifier(fallbackId)}` : "Unknown user";
+};
+
+const formatUserRefSubtitle = (user: UserRefVO | null | undefined) => {
+  if (user?.email?.trim() && user.email !== user.name) {
+    return user.email;
+  }
+  if (user?.role?.trim()) {
+    return user.role;
+  }
+  return null;
 };
 
 export {
@@ -85,5 +125,7 @@ export {
   formatDetailTime,
   formatAttachmentSize,
   KNOWN_ACTOR_LABELS,
-  formatActorLabel,
+  formatOpaqueUserId,
+  formatUserRefLabel,
+  formatUserRefSubtitle,
 };

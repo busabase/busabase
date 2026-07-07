@@ -1,20 +1,26 @@
 import { skipToken, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { BaseVO, FieldType, ViewVO } from "busabase-contract/types";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { ArrowLeft, Trash2 } from "lucide-react-native";
+import { ArrowLeft, Plus, Trash2 } from "lucide-react-native";
 import { iStringParse } from "openlib/i18n/i-string";
 import { useMemo, useState } from "react";
-import { Alert, Pressable, StyleSheet, Switch, Text, View } from "react-native";
+import { Pressable, ScrollView, StyleSheet, Switch, Text, View } from "react-native";
 import { useBusabaseOrpc } from "~/api/use-busabase-orpc";
 import { ConnectionGuard } from "~/components/busabase/ConnectionGuard";
 import {
+  NativeActionBar,
+  NativeBottomSheet,
+  NativeChipList,
   NativeEmptyState,
-  NativeErrorState,
+  NativeInlineError,
   NativeLoadingState,
+  NativeRow,
   NativeScreen,
+  NativeSection,
 } from "~/components/native-screen";
 import { Button } from "~/components/ui/Button";
 import { TextInput } from "~/components/ui/TextInput";
+import { getFieldTypeLabel } from "~/lib/field-type-label";
 import { mobile, radius, typography } from "~/theme/tokens";
 import { useTokens } from "~/theme/use-tokens";
 
@@ -79,6 +85,10 @@ function BaseDesignContent() {
   const [choices, setChoices] = useState<string[]>([]);
   const [choiceDraft, setChoiceDraft] = useState("");
   const [viewName, setViewName] = useState("");
+  const [fieldSheetOpen, setFieldSheetOpen] = useState(false);
+  const [viewSheetOpen, setViewSheetOpen] = useState(false);
+  const [viewPendingDelete, setViewPendingDelete] = useState<ViewVO | null>(null);
+  const [choicePendingRemove, setChoicePendingRemove] = useState<string | null>(null);
 
   const addChoice = () => {
     const value = choiceDraft.trim();
@@ -114,6 +124,8 @@ function BaseDesignContent() {
       setRequired(false);
       setChoices([]);
       setChoiceDraft("");
+      setChoicePendingRemove(null);
+      setFieldSheetOpen(false);
       void queryClient.invalidateQueries({ queryKey: buda?.orpc.bases.list.key({}) });
     },
   });
@@ -132,6 +144,7 @@ function BaseDesignContent() {
     },
     onSuccess: (changeRequest) => {
       setViewName("");
+      setViewSheetOpen(false);
       router.push({ pathname: "/change-requests/[id]", params: { id: changeRequest.id } });
     },
   });
@@ -145,22 +158,10 @@ function BaseDesignContent() {
       });
     },
     onSuccess: (changeRequest) => {
+      setViewPendingDelete(null);
       router.push({ pathname: "/change-requests/[id]", params: { id: changeRequest.id } });
     },
   });
-
-  const deleteView = (view: ViewVO) => {
-    Alert.alert("Delete view", `Create a delete change request for "${view.name}"?`, [
-      { text: "Cancel", style: "cancel" },
-      { text: "Delete", style: "destructive", onPress: () => deleteViewMutation.mutate(view) },
-    ]);
-  };
-
-  const mutationError =
-    addFieldMutation.error?.message ??
-    createViewMutation.error?.message ??
-    deleteViewMutation.error?.message ??
-    null;
 
   const headerLeading = (
     <Pressable
@@ -195,24 +196,87 @@ function BaseDesignContent() {
       subtitle={`${base.fields.length} fields`}
       headerLeading={headerLeading}
     >
-      <View style={styles.content}>
-        <View style={[styles.card, { backgroundColor: tokens.card, borderColor: tokens.border }]}>
-          <Text style={[typography.h2, { color: tokens.foreground }]}>Fields</Text>
-          {base.fields.map((field) => (
-            <View key={field.id} style={[styles.fieldRow, { borderColor: tokens.border }]}>
-              <Text style={[typography.bodyEm, { color: tokens.foreground }]}>
-                {iStringParse(field.name)}
-              </Text>
-              <Text style={[typography.caption, { color: tokens.mutedForeground }]}>
-                {field.type}
-                {field.required ? " · required" : ""}
-              </Text>
-            </View>
-          ))}
-        </View>
+      <NativeSection title="Fields" caption={`${base.fields.length}`}>
+        {base.fields.map((field) => (
+          <NativeRow
+            key={field.id}
+            title={iStringParse(field.name)}
+            subtitle={getFieldTypeLabel(field.type)}
+            meta={field.required ? "Required" : undefined}
+          />
+        ))}
+        <NativeRow
+          title="Add field"
+          subtitle="Create a field on this Base."
+          leading={<Plus size={18} color={tokens.mutedForeground} />}
+          onPress={() => {
+            addFieldMutation.reset();
+            setFieldSheetOpen(true);
+          }}
+          last
+        />
+      </NativeSection>
 
-        <View style={[styles.card, { backgroundColor: tokens.card, borderColor: tokens.border }]}>
-          <Text style={[typography.h2, { color: tokens.foreground }]}>Add field</Text>
+      <NativeSection title="Views" caption={`${viewsQuery.data?.length ?? 0}`}>
+        {(viewsQuery.data ?? []).map((view) => (
+          <NativeRow
+            key={view.id}
+            title={view.name}
+            subtitle="Saved view"
+            onPress={() => {
+              deleteViewMutation.reset();
+              setViewPendingDelete(view);
+            }}
+          />
+        ))}
+        <NativeRow
+          title="New view"
+          subtitle="Create a view change request."
+          leading={<Plus size={18} color={tokens.mutedForeground} />}
+          onPress={() => {
+            createViewMutation.reset();
+            setViewSheetOpen(true);
+          }}
+          last
+        />
+      </NativeSection>
+
+      <NativeBottomSheet
+        visible={fieldSheetOpen && !choicePendingRemove}
+        title="Add field"
+        description="Configure a new field and add it directly to this Base."
+        showCloseButton
+        maxHeight="88%"
+        onClose={() => setFieldSheetOpen(false)}
+        footer={
+          <NativeActionBar>
+            {addFieldMutation.error ? (
+              <NativeInlineError
+                message={addFieldMutation.error.message}
+                onReset={() => addFieldMutation.reset()}
+              />
+            ) : null}
+            <Button
+              label="Add field"
+              loading={addFieldMutation.isPending}
+              fullWidth
+              onPress={() => addFieldMutation.mutate()}
+            />
+            <Button
+              label="Cancel"
+              variant="ghost"
+              disabled={addFieldMutation.isPending}
+              fullWidth
+              onPress={() => setFieldSheetOpen(false)}
+            />
+          </NativeActionBar>
+        }
+      >
+        <ScrollView
+          style={styles.sheetScroll}
+          contentContainerStyle={styles.sheetForm}
+          keyboardShouldPersistTaps="handled"
+        >
           <TextInput
             label="Name"
             value={fieldName}
@@ -229,33 +293,12 @@ function BaseDesignContent() {
             onChangeText={(value) => setFieldSlug(toSlug(value))}
           />
           <Text style={[typography.small, { color: tokens.mutedForeground }]}>Type</Text>
-          <View style={styles.chips}>
-            {FIELD_TYPES.map((type) => {
-              const active = type === fieldType;
-              return (
-                <Pressable
-                  key={type}
-                  accessibilityRole="button"
-                  style={[
-                    styles.chip,
-                    {
-                      backgroundColor: active ? tokens.primaryMuted : tokens.surface,
-                      borderColor: active ? tokens.primary : tokens.border,
-                    },
-                  ]}
-                  onPress={() => setFieldType(type)}
-                >
-                  <Text
-                    style={[
-                      typography.small,
-                      { color: active ? tokens.foreground : tokens.mutedForeground },
-                    ]}
-                  >
-                    {type}
-                  </Text>
-                </Pressable>
-              );
-            })}
+          <View style={styles.sheetFullBleed}>
+            <NativeChipList
+              value={fieldType}
+              options={FIELD_TYPES.map((type) => ({ value: type, label: getFieldTypeLabel(type) }))}
+              onChange={setFieldType}
+            />
           </View>
           {CHOICE_TYPES.has(fieldType) ? (
             <View style={styles.choices}>
@@ -271,12 +314,9 @@ function BaseDesignContent() {
                       styles.choiceChip,
                       { backgroundColor: tokens.primaryMuted, borderColor: tokens.primary },
                     ]}
-                    onPress={() =>
-                      setChoices((current) => current.filter((item) => item !== choice))
-                    }
+                    onPress={() => setChoicePendingRemove(choice)}
                   >
                     <Text style={[typography.small, { color: tokens.foreground }]}>{choice}</Text>
-                    <Trash2 size={13} color={tokens.destructive} />
                   </Pressable>
                 ))}
               </View>
@@ -302,53 +342,120 @@ function BaseDesignContent() {
               onValueChange={setRequired}
             />
           </View>
-          <Button
-            label="Add field"
-            loading={addFieldMutation.isPending}
-            fullWidth
-            onPress={() => addFieldMutation.mutate()}
-          />
-        </View>
+        </ScrollView>
+      </NativeBottomSheet>
 
-        <View style={[styles.card, { backgroundColor: tokens.card, borderColor: tokens.border }]}>
-          <Text style={[typography.h2, { color: tokens.foreground }]}>Views</Text>
-          {(viewsQuery.data ?? []).map((view) => (
-            <View
-              key={view.id}
-              style={[styles.fieldRow, styles.viewRow, { borderColor: tokens.border }]}
-            >
-              <Text style={[typography.bodyEm, { color: tokens.foreground }]}>{view.name}</Text>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel={`Delete ${view.name}`}
-                hitSlop={8}
-                onPress={() => deleteView(view)}
-              >
-                <Trash2 size={18} color={tokens.destructive} />
-              </Pressable>
-            </View>
-          ))}
-          <TextInput label="New view name" value={viewName} onChangeText={setViewName} />
-          <Button
-            label="Create view change request"
-            loading={createViewMutation.isPending}
-            disabled={viewName.trim().length === 0}
-            fullWidth
-            onPress={() => createViewMutation.mutate()}
-          />
+      <NativeBottomSheet
+        visible={viewSheetOpen}
+        title="New view"
+        description="Create a change request for a saved Base view."
+        showCloseButton
+        onClose={() => setViewSheetOpen(false)}
+        footer={
+          <NativeActionBar>
+            {createViewMutation.error ? (
+              <NativeInlineError
+                message={createViewMutation.error.message}
+                onReset={() => createViewMutation.reset()}
+              />
+            ) : null}
+            <Button
+              label="Create view change request"
+              loading={createViewMutation.isPending}
+              disabled={viewName.trim().length === 0}
+              fullWidth
+              onPress={() => createViewMutation.mutate()}
+            />
+            <Button
+              label="Cancel"
+              variant="ghost"
+              disabled={createViewMutation.isPending}
+              fullWidth
+              onPress={() => setViewSheetOpen(false)}
+            />
+          </NativeActionBar>
+        }
+      >
+        <View style={styles.sheetForm}>
+          <TextInput label="View name" value={viewName} onChangeText={setViewName} />
         </View>
+      </NativeBottomSheet>
 
-        {mutationError ? (
-          <NativeErrorState
-            message={mutationError}
-            onRetry={() => {
-              addFieldMutation.reset();
-              createViewMutation.reset();
-              deleteViewMutation.reset();
-            }}
-          />
-        ) : null}
-      </View>
+      <NativeBottomSheet
+        visible={!!viewPendingDelete}
+        title="View actions"
+        description={
+          viewPendingDelete
+            ? `${viewPendingDelete.name} · Create a change request before deleting.`
+            : undefined
+        }
+        showCloseButton
+        onClose={() => setViewPendingDelete(null)}
+        footer={
+          <NativeActionBar>
+            {deleteViewMutation.error ? (
+              <NativeInlineError
+                message={deleteViewMutation.error.message}
+                onReset={() => deleteViewMutation.reset()}
+              />
+            ) : null}
+            <Button
+              label="Create delete change request"
+              variant="destructive"
+              loading={deleteViewMutation.isPending}
+              disabled={!viewPendingDelete}
+              fullWidth
+              leadingIcon={<Trash2 size={18} color={tokens.destructiveForeground} />}
+              onPress={() => {
+                if (viewPendingDelete) {
+                  deleteViewMutation.mutate(viewPendingDelete);
+                }
+              }}
+            />
+            <Button
+              label="Cancel"
+              variant="ghost"
+              disabled={deleteViewMutation.isPending}
+              fullWidth
+              onPress={() => setViewPendingDelete(null)}
+            />
+          </NativeActionBar>
+        }
+      />
+
+      <NativeBottomSheet
+        visible={!!choicePendingRemove}
+        title="Remove choice?"
+        description={
+          choicePendingRemove
+            ? `Remove "${choicePendingRemove}" from this new field draft.`
+            : undefined
+        }
+        showCloseButton
+        onClose={() => setChoicePendingRemove(null)}
+        footer={
+          <NativeActionBar>
+            <Button
+              label="Remove choice"
+              variant="destructive"
+              fullWidth
+              leadingIcon={<Trash2 size={18} color={tokens.destructiveForeground} />}
+              onPress={() => {
+                if (choicePendingRemove) {
+                  setChoices((current) => current.filter((item) => item !== choicePendingRemove));
+                }
+                setChoicePendingRemove(null);
+              }}
+            />
+            <Button
+              label="Cancel"
+              variant="ghost"
+              fullWidth
+              onPress={() => setChoicePendingRemove(null)}
+            />
+          </NativeActionBar>
+        }
+      />
     </NativeScreen>
   );
 }
@@ -369,25 +476,9 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  content: { marginHorizontal: 20, gap: 14 },
-  card: {
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: radius.lg,
-    padding: 16,
-    gap: 12,
-  },
-  fieldRow: {
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: radius.md,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    gap: 2,
-  },
-  viewRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-  },
+  sheetScroll: { maxHeight: 460 },
+  sheetForm: { gap: 12, paddingBottom: 8 },
+  sheetFullBleed: { marginHorizontal: -20 },
   chips: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   chip: {
     borderWidth: StyleSheet.hairlineWidth,

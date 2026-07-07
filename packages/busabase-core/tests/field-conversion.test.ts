@@ -22,12 +22,14 @@ describe("toText", () => {
     expect(toText("hello world", "text")).toBe("hello world");
   });
 
-  it("longtext / markdown / html / code / email / url / phone → same string", () => {
+  it("longtext / markdown / html / code / json / yaml / email / url / phone → same string", () => {
     for (const t of [
       "longtext",
       "markdown",
       "html",
       "code",
+      "json",
+      "yaml",
       "email",
       "url",
       "phone",
@@ -114,8 +116,8 @@ describe("fromText", () => {
     expect(fromText("hello", "text")).toBe("hello");
   });
 
-  it("→ longtext / markdown / html / code: returns same string", () => {
-    for (const t of ["longtext", "markdown", "html", "code"] as FieldType[]) {
+  it("→ longtext / markdown / html / code / json / yaml: returns same string", () => {
+    for (const t of ["longtext", "markdown", "html", "code", "json", "yaml"] as FieldType[]) {
       expect(fromText("content", t)).toBe("content");
     }
   });

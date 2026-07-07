@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { userRefSchema } from "../../../contract/schemas";
 
 // Base-owned view Zod schemas. Pure leaf: no kernel imports.
 
@@ -41,6 +42,7 @@ export const viewSchema = z.object({
   config: viewConfigSchema,
   status: z.enum(["active", "archived"]),
   createdBy: z.string(),
+  createdByUser: userRefSchema.nullable().optional().default(null),
   archivedAt: z.string().nullable(),
   createdAt: z.string(),
   updatedAt: z.string(),

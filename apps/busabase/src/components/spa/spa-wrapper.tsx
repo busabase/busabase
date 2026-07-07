@@ -31,10 +31,18 @@ export function SPAWrapper({
   initialPath = "/inbox",
 }: SPAWrapperProps) {
   const [ssrPath = "/inbox", ssrSearch = ""] = initialPath.split("?");
+  const localSpaceForLocale = {
+    ...localSpace,
+    name: context?.activeSpace?.name ?? localSpace.name,
+  };
+  const localUserForLocale = {
+    ...localUser,
+    name: context?.user?.name ?? localUser.name,
+  };
   const value: SPAContextType = {
-    user: localUser,
-    activeSpace: localSpace,
-    spaces: [localSpace],
+    user: localUserForLocale,
+    activeSpace: localSpaceForLocale,
+    spaces: [localSpaceForLocale],
     isDemo: false,
     isLoading: false,
     isLoadingSpaces: false,

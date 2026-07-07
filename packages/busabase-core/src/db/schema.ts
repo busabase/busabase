@@ -40,6 +40,10 @@ export const busabaseOperationKindEnum = pgEnum("busabase_operation_kind", [
   "skill_file_update",
   "skill_file_delete",
   "skill_metadata_update",
+  "drive_file_create",
+  "drive_file_update",
+  "drive_file_delete",
+  "drive_metadata_update",
   "doc_update",
   "base_add_field",
   "base_delete_field",
@@ -318,3 +322,6 @@ export * from "../domains/assets/schema/assets";
 // here so the db barrel stays the one import surface. Kernel CR tables FK into
 // these via lazy refs (the import cycle resolves at runtime).
 export * from "../domains/base/schema";
+// User-scoped runtime environment variables. `user_id = ""` is the local
+// open-source user; cloud hosts store the authenticated user id.
+export * from "../domains/user-env/schema/user-env-vars";

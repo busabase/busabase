@@ -3,7 +3,7 @@
 import { hasCapability } from "busabase-contract/domains";
 import type { NodeVO } from "busabase-contract/types";
 import { Toaster } from "kui/sonner";
-import { Activity, Images, Inbox, type LucideIcon, Plus, Search } from "lucide-react";
+import { Activity, FolderOpen, Images, Inbox, type LucideIcon, Plus, Search } from "lucide-react";
 import { DashboardLayout, type NavGroup, type NavItem, NavMain } from "openlib/ui/dashboard";
 import type { ComponentProps, ReactNode } from "react";
 import { coreMessagesByLocale } from "../../../i18n";
@@ -61,7 +61,8 @@ export function BusabaseDashboardShell({
   chrome,
   locale,
 }: BusabaseDashboardShellProps) {
-  const nav = (isCoreLocale(locale) ? coreMessagesByLocale[locale] : coreMessagesByLocale.en).nav;
+  const messages = isCoreLocale(locale) ? coreMessagesByLocale[locale] : coreMessagesByLocale.en;
+  const nav = messages.nav;
   // The "Bases" group label doubles as the header-action key, so reuse one value.
   const basesLabel = nav.bases;
   const assetsLabel = nav.assets;
@@ -105,8 +106,10 @@ export function BusabaseDashboardShell({
     },
     {
       label: basesLabel,
-      items: buildKnowledgeBaseItems(nodes, (node) =>
-        onCreateClick({ id: node.id, name: node.name }),
+      items: buildKnowledgeBaseItems(
+        nodes,
+        (node) => onCreateClick({ id: node.id, name: node.name }),
+        { newLabel: nav.new, openLabel: messages.common.open },
       ),
       headerAction: Plus,
       headerActionTitle: nav.new,
@@ -184,6 +187,7 @@ function collectNavLeaves(node: NodeVO): { title: string; url: string; icon: Luc
 function buildKnowledgeBaseItems(
   nodes: NodeVO[],
   onCreateChild: (node: NodeVO) => void,
+  labels: { newLabel: string; openLabel: string },
 ): NavItem[] {
   const top =
     nodes.length === 1 && hasCapability(nodes[0].type, "container") && !nodes[0].baseId
@@ -194,13 +198,24 @@ function buildKnowledgeBaseItems(
     if (hasCapability(node.type, "hidden")) return [];
     const icon = nodeIconForType(node.type);
     if (hasCapability(node.type, "container")) {
+      const url = nodeHref(node) ?? "";
       return [
         {
           title: node.name,
-          url: nodeHref(node) ?? "",
+          url,
           icon,
           items: collectNavLeaves(node),
           onAddChild: () => onCreateChild(node),
+          addChildTitle: labels.newLabel,
+          actions: url
+            ? [
+                {
+                  title: labels.openLabel,
+                  url,
+                  icon: FolderOpen,
+                },
+              ]
+            : [],
         },
       ];
     }

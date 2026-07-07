@@ -62,6 +62,24 @@ describe("runLogin", () => {
     expect(env.BUSABASE_BASE_URL).toBe(CLOUD);
   });
 
+  it("requires --space-id for non-interactive login with multiple spaces", async () => {
+    global.fetch = vi.fn(async () =>
+      jsonResponse({
+        user: { id: "usr_1", email: "dev@example.com" },
+        space: { id: "spc_1", name: "Space One" },
+        spaces: [
+          { id: "spc_1", name: "Space One" },
+          { id: "spc_2", name: "Space Two" },
+        ],
+      }),
+    ) as typeof fetch;
+
+    await expect(runLogin({ baseUrl: CLOUD, apiKey: "sk_test", browser: false })).rejects.toThrow(
+      /--space-id/,
+    );
+    expect(loadDotEnvFile()).not.toHaveProperty("BUSABASE_SPACE_ID");
+  });
+
   it("connects to an open local server without a token", async () => {
     // The auth probe (`GET /api/v1/bases`) returns 200 ⇒ open server, no login.
     global.fetch = vi.fn(async () => jsonResponse([])) as typeof fetch;

@@ -11,19 +11,24 @@ import { getRecordTitle } from "../helpers/change-request";
 import {
   getAttachmentRefs,
   getChoiceBadgeClass,
+  getCodeFieldPreviewLanguage,
   getFieldChipEntries,
   getFieldPreviewText,
   getRelationRecordIds,
+  getSafeAttachmentUrl,
 } from "../helpers/field";
 import { fieldValueToString, shortIdentifier } from "../helpers/format";
-import { sanitizeHtml, stripHtmlTags } from "../helpers/html";
+import { isSafeUrl, safeFetchableUrl, sanitizeHtml, stripHtmlTags } from "../helpers/html";
 import type { FieldChip } from "../helpers/view-types";
 import { CheckboxBadge } from "./primitives";
 
 export type SkillCodeLanguage = ComponentProps<typeof CodeBlock>["language"];
 
 export const shouldCollapsePreview = (field: BaseFieldVO | undefined, value: unknown) => {
-  if (!field || !["longtext", "markdown", "html", "code", "ai_summary"].includes(field.type)) {
+  if (
+    !field ||
+    !["longtext", "markdown", "html", "code", "json", "yaml", "ai_summary"].includes(field.type)
+  ) {
     return false;
   }
   const text =
@@ -95,16 +100,34 @@ export const mdComponents: StreamdownComponents = {
   strong: ({ children }) => <strong className="font-semibold">{children as ReactNode}</strong>,
   em: ({ children }) => <em className="italic text-foreground/90">{children as ReactNode}</em>,
   hr: () => <hr className="my-3 border-border" />,
-  a: ({ href, children }) => (
-    <a
-      className="text-primary underline-offset-2 hover:underline"
-      href={href}
-      rel="noreferrer"
-      target="_blank"
-    >
-      {children as ReactNode}
-    </a>
-  ),
+  a: ({ href, children }) =>
+    typeof href === "string" && isSafeUrl(href) ? (
+      <a
+        className="text-primary underline-offset-2 hover:underline"
+        href={href}
+        rel="noreferrer"
+        target="_blank"
+      >
+        {children as ReactNode}
+      </a>
+    ) : (
+      <span>{children as ReactNode}</span>
+    ),
+  img: ({ alt, src, title }) => {
+    const safeSrc = safeFetchableUrl(src);
+    if (!safeSrc) {
+      return alt ? <span className="text-muted-foreground text-xs">{alt}</span> : null;
+    }
+    return (
+      <img
+        alt={typeof alt === "string" ? alt : ""}
+        className="my-2 max-h-72 max-w-full rounded-md border object-contain"
+        loading="lazy"
+        src={safeSrc}
+        title={typeof title === "string" ? title : undefined}
+      />
+    );
+  },
   code: ({ className: cls, children }) => (
     <code className={cls || "rounded bg-muted px-1.5 py-0.5 font-mono text-[0.875em]"}>
       {children as ReactNode}
@@ -140,6 +163,7 @@ function SourceTogglePreview({
   preview: ReactNode;
   source: string;
 }) {
+  const messages = useCoreI18n();
   const [mode, setMode] = useState<"preview" | "source">("preview");
   return (
     <div className={`min-w-0 ${className}`}>
@@ -156,7 +180,7 @@ function SourceTogglePreview({
               onClick={() => setMode(m)}
               type="button"
             >
-              {m === "preview" ? "Preview" : "Source"}
+              {m === "preview" ? messages.recordView.preview : messages.recordView.sourceTab}
             </button>
           ))}
         </div>
@@ -208,6 +232,38 @@ export function HtmlFieldPreview({ className = "", value }: { className?: string
   );
 }
 
+export function CodeLikeFieldPreview({
+  className = "",
+  field,
+  showLineNumbers,
+  value,
+  variant = "detail",
+}: {
+  className?: string;
+  field: BaseFieldVO;
+  showLineNumbers?: boolean;
+  value: unknown;
+  variant?: "detail" | "table";
+}) {
+  const code = fieldValueToString(value);
+  const language = getCodeFieldPreviewLanguage(field, value) as SkillCodeLanguage;
+  const variantClassName =
+    variant === "table"
+      ? "max-h-20 min-w-0 rounded border-border/60 bg-muted/30 text-xs [&_code]:!text-xs [&_pre]:!p-2 [&_pre]:!text-xs"
+      : "min-w-0";
+
+  return (
+    <CodeBlock
+      className={`${variantClassName} ${className}`}
+      code={code}
+      language={language}
+      showLineNumbers={
+        showLineNumbers ?? (variant === "detail" ? code.split("\n").length > 5 : false)
+      }
+    />
+  );
+}
+
 export function FieldValuePreview({
   className = "",
   field,
@@ -237,8 +293,12 @@ export function FieldValuePreview({
     if (attachments.length === 0) {
       return <span className="text-muted-foreground">-</span>;
     }
-    const images = attachments.filter((a) => a.mimeType?.startsWith("image/"));
-    const others = attachments.filter((a) => !a.mimeType?.startsWith("image/"));
+    const images = attachments.filter(
+      (a) => a.mimeType?.startsWith("image/") && getSafeAttachmentUrl(a),
+    );
+    const others = attachments.filter(
+      (a) => !a.mimeType?.startsWith("image/") || !getSafeAttachmentUrl(a),
+    );
     const fileIcon = (mimeType?: string) => {
       if (mimeType?.startsWith("video/")) return <Film className="shrink-0" size={11} />;
       if (mimeType?.startsWith("audio/")) return <Music className="shrink-0" size={11} />;
@@ -248,39 +308,60 @@ export function FieldValuePreview({
       <div className={`flex min-w-0 flex-col gap-2 ${className}`}>
         {images.length > 0 && (
           <div className="flex flex-wrap gap-1.5">
-            {images.map((item) => (
-              <a
-                className="relative block overflow-hidden rounded border bg-muted transition-opacity hover:opacity-80"
-                href={item.url}
-                key={item.id}
-                rel="noreferrer"
-                target="_blank"
-                title={item.fileName}
-              >
-                <img
-                  alt={item.fileName}
-                  className="h-12 w-auto max-w-[10rem] object-cover"
-                  src={item.url}
-                />
-              </a>
-            ))}
+            {images.map((item) => {
+              const safeUrl = getSafeAttachmentUrl(item);
+              return safeUrl ? (
+                <a
+                  className="relative block overflow-hidden rounded border bg-muted transition-opacity hover:opacity-80"
+                  href={safeUrl}
+                  key={item.id}
+                  rel="noreferrer"
+                  target="_blank"
+                  title={item.fileName}
+                >
+                  <img
+                    alt={item.fileName}
+                    className="h-12 w-auto max-w-[10rem] object-cover"
+                    src={safeUrl}
+                  />
+                </a>
+              ) : null;
+            })}
           </div>
         )}
         {others.length > 0 && (
           <div className="flex min-w-0 flex-wrap gap-1.5">
-            {others.map((item) => (
-              <a
-                className="inline-flex max-w-64 items-center gap-1.5 truncate rounded-full border bg-background px-2 py-0.5 text-primary text-xs transition-colors hover:border-primary/40 hover:bg-primary/5 hover:underline"
-                href={item.url}
-                key={item.id}
-                rel="noreferrer"
-                target="_blank"
-                title={item.fileName}
-              >
-                {fileIcon(item.mimeType)}
-                <span className="truncate">{item.fileName}</span>
-              </a>
-            ))}
+            {others.map((item) => {
+              const safeUrl = getSafeAttachmentUrl(item);
+              const className =
+                "inline-flex max-w-64 items-center gap-1.5 truncate rounded-full border bg-background px-2 py-0.5 text-xs";
+              const children = (
+                <>
+                  {fileIcon(item.mimeType)}
+                  <span className="truncate">{item.fileName}</span>
+                </>
+              );
+              return safeUrl ? (
+                <a
+                  className={`${className} text-primary transition-colors hover:border-primary/40 hover:bg-primary/5 hover:underline`}
+                  href={safeUrl}
+                  key={item.id}
+                  rel="noreferrer"
+                  target="_blank"
+                  title={item.fileName}
+                >
+                  {children}
+                </a>
+              ) : (
+                <span
+                  className={`${className} text-foreground`}
+                  key={item.id}
+                  title={item.fileName}
+                >
+                  {children}
+                </span>
+              );
+            })}
           </div>
         )}
       </div>
@@ -344,16 +425,9 @@ export function FieldValuePreview({
   }
 
   if (kind === "code" && field) {
-    const code = fieldValueToString(value);
-    const language = (field.options.code?.language ?? "text") as SkillCodeLanguage;
     return (
       <MultilineFieldPreview collapsible={shouldCollapse} title={fieldName}>
-        <CodeBlock
-          className={`min-w-0 ${className}`}
-          code={code}
-          language={language}
-          showLineNumbers={code.split("\n").length > 5}
-        />
+        <CodeLikeFieldPreview className={className} field={field} value={value} />
       </MultilineFieldPreview>
     );
   }
@@ -409,7 +483,7 @@ export function MultilineFieldPreview({
     <div className="group/field relative min-w-0">
       <button
         aria-label={messages.recordView.expandFullscreen}
-        className="absolute right-0 top-0 z-10 inline-flex items-center justify-center rounded-md border bg-background/90 p-1 text-muted-foreground opacity-0 shadow-sm backdrop-blur transition hover:text-foreground focus-visible:opacity-100 group-hover/field:opacity-100"
+        className="absolute right-0 top-0 z-10 inline-flex items-center justify-center rounded-md border bg-background/90 p-1 text-muted-foreground opacity-70 shadow-sm backdrop-blur transition hover:text-foreground hover:opacity-100 focus-visible:opacity-100 group-hover/field:opacity-100"
         onClick={() => setFullscreen(true)}
         title={messages.recordView.expandFullscreen}
         type="button"
@@ -431,13 +505,15 @@ export function MultilineFieldPreview({
           onClick={() => setExpanded((current) => !current)}
           type="button"
         >
-          {expanded ? "Show less" : "Show full"}
+          {expanded ? messages.recordView.showLess : messages.recordView.showFull}
         </button>
       ) : null}
       <Dialog onOpenChange={setFullscreen} open={fullscreen}>
         <DialogContent className="flex h-[90vh] max-h-[90vh] w-[95vw] max-w-[1040px] flex-col gap-0 overflow-hidden p-0">
           <DialogHeader className="shrink-0 border-b px-5 py-3 text-left">
-            <DialogTitle className="text-sm font-medium">{title ?? "Preview"}</DialogTitle>
+            <DialogTitle className="text-sm font-medium">
+              {title ?? messages.recordView.preview}
+            </DialogTitle>
           </DialogHeader>
           <div className="min-h-0 flex-1 overflow-auto px-5 py-4">{children}</div>
         </DialogContent>

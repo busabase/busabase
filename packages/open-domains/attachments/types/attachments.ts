@@ -72,6 +72,8 @@ export const RequestUploadUrlVOSchema = z.object({
   duplicate: z.boolean().optional(),
   /** Existing attachment id — present only when `duplicate` is true. */
   attachmentId: z.string().optional(),
+  /** Host-specific logical asset id, when the app maps uploads into an Asset library. */
+  assetId: z.string().optional(),
 });
 export type RequestUploadUrlVO = z.infer<typeof RequestUploadUrlVOSchema>;
 
@@ -79,6 +81,8 @@ export type RequestUploadUrlVO = z.infer<typeof RequestUploadUrlVOSchema>;
 export const ConfirmUploadVOSchema = z.object({
   success: z.boolean(),
   attachmentId: z.string(),
+  /** Host-specific logical asset id, when the app maps uploads into an Asset library. */
+  assetId: z.string().optional(),
   storageKey: z.string(),
   publicUrl: z.string(),
 });

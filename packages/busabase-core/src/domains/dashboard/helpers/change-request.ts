@@ -67,6 +67,10 @@ export const operationOrder: OperationKind[] = [
   "skill_file_update",
   "skill_file_delete",
   "skill_metadata_update",
+  "drive_file_create",
+  "drive_file_update",
+  "drive_file_delete",
+  "drive_metadata_update",
 ];
 
 // Operation labels/tones come from the node-type registry (single source of truth).
@@ -110,8 +114,8 @@ export const getNodeHref = (node: NodeVO | null | undefined) => {
   if (!node) {
     return null;
   }
-  if (node.type === "skill") {
-    return `/skill/${node.slug}`;
+  if (node.type === "skill" || node.type === "drive") {
+    return `/${node.type}/${node.slug}`;
   }
   if (node.type === "doc") {
     return `/doc/${node.slug}`;
@@ -181,7 +185,7 @@ export const getOperationSubject = (operation: OperationVO, base?: BaseVO | null
     return guessed;
   }
 
-  if (operation.operation.startsWith("skill_file_") && operation.filePath) {
+  if (operation.operation.includes("_file_") && operation.filePath) {
     return operation.filePath;
   }
 
@@ -220,6 +224,7 @@ const DEFAULT_COMMIT_MESSAGES = new Set([
   "Delete record",
   "Revise operation",
   "Update skill",
+  "Update drive",
   "Update doc",
   "Create view",
   "Update view",
@@ -337,6 +342,12 @@ export const getChangeRequestRiskHints = (changeRequest: ChangeRequestVO) => {
         if (field?.type === "code") {
           hints.add((field.options.code?.language ?? "code").toUpperCase());
         }
+        if (field?.type === "json") {
+          hints.add("JSON");
+        }
+        if (field?.type === "yaml") {
+          hints.add("YAML");
+        }
         if (field?.type === "attachment") {
           hints.add("attachment");
         }
@@ -406,7 +417,7 @@ export const getOperationImpact = (operation: OperationVO) => {
   if (operation.operation === "view_delete") {
     return `Deletes view ${shortIdentifier(operation.targetViewId ?? operation.mergedViewId)}`;
   }
-  if (operation.operation.startsWith("skill_file_")) {
+  if (operation.operation.includes("_file_")) {
     return `${getOperationLabel(operation)} ${operation.filePath ?? "file"}`;
   }
   if (operation.operation === "node_create") {

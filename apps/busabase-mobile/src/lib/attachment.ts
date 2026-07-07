@@ -1,21 +1,64 @@
-import type { AttachmentRef } from "busabase-contract/types";
+import type { AssetAttachmentRef } from "busabase-contract/types";
 
 /** Parse an `attachment` field value (array of denormalized refs) defensively. */
-export function getAttachmentRefs(value: unknown): AttachmentRef[] {
+export function getAttachmentRefs(value: unknown): AssetAttachmentRef[] {
   if (!Array.isArray(value)) {
     return [];
   }
   return value.filter(
-    (item): item is AttachmentRef =>
+    (item): item is AssetAttachmentRef =>
       typeof item === "object" &&
       item !== null &&
-      typeof (item as AttachmentRef).url === "string" &&
-      typeof (item as AttachmentRef).fileName === "string",
+      typeof (item as AssetAttachmentRef).url === "string" &&
+      typeof (item as AssetAttachmentRef).fileName === "string",
   );
 }
 
 export function isImageRef(ref: { mimeType?: string }): boolean {
   return typeof ref.mimeType === "string" && ref.mimeType.startsWith("image/");
+}
+
+export function getAttachmentKindLabel(ref: { mimeType?: string; fileName?: string }): string {
+  const mimeType = ref.mimeType?.toLowerCase() ?? "";
+  const fileName = ref.fileName?.toLowerCase() ?? "";
+  if (mimeType.startsWith("image/")) {
+    return "Image";
+  }
+  if (mimeType.startsWith("video/")) {
+    return "Video";
+  }
+  if (mimeType.startsWith("audio/")) {
+    return "Audio";
+  }
+  if (mimeType === "application/pdf" || fileName.endsWith(".pdf")) {
+    return "PDF";
+  }
+  if (
+    mimeType.includes("spreadsheet") ||
+    mimeType.includes("excel") ||
+    [".csv", ".xls", ".xlsx"].some((suffix) => fileName.endsWith(suffix))
+  ) {
+    return "Spreadsheet";
+  }
+  if (
+    mimeType.includes("presentation") ||
+    [".ppt", ".pptx", ".key"].some((suffix) => fileName.endsWith(suffix))
+  ) {
+    return "Presentation";
+  }
+  if (
+    mimeType.includes("word") ||
+    [".doc", ".docx", ".pages"].some((suffix) => fileName.endsWith(suffix))
+  ) {
+    return "Document";
+  }
+  if (
+    mimeType.startsWith("text/") ||
+    [".md", ".txt", ".json"].some((suffix) => fileName.endsWith(suffix))
+  ) {
+    return "Text file";
+  }
+  return "File";
 }
 
 /**

@@ -5,6 +5,9 @@ import { busabaseRouter } from "busabase-core/router";
 import { busabaseDemoRouter } from "busabase-core/router-demo";
 import { addCorsHeaders, createCorsHeaders } from "openlib/cors";
 import { resolveDemoMode } from "openlib/ui/dashboard/demo";
+import { readBuiltinUserEnvVars } from "~/domains/user-env/logic/user-env";
+import { getBusabaseAppLL, getBusabaseLocaleFromAcceptLanguage } from "~/lib/i18n";
+import { getLocalUserName } from "~/lib/local-user";
 
 const BUSABASE_API_METHODS = "GET, POST, PUT, PATCH, DELETE, OPTIONS";
 
@@ -36,9 +39,12 @@ async function handle(request: Request) {
   );
   const run = () => routeRequest(request, url, Boolean(demoUseCase));
 
-  return demoUseCase
-    ? runWithBusabaseContext({ isDemo: true, demoUseCase, demoLocale }, run)
-    : run();
+  if (demoUseCase) {
+    return runWithBusabaseContext({ isDemo: true, demoUseCase, demoLocale }, run);
+  }
+
+  const envVars = await readBuiltinUserEnvVars();
+  return runWithBusabaseContext({ envVars, localUserName: getLocalUserName() }, run);
 }
 
 async function routeRequest(request: Request, url: URL, isDemo: boolean) {
@@ -47,8 +53,10 @@ async function routeRequest(request: Request, url: URL, isDemo: boolean) {
   }
 
   if (url.pathname === "/api/v1/doc") {
+    const locale = getBusabaseLocaleFromAcceptLanguage(request.headers.get("accept-language"));
+    const LL = getBusabaseAppLL(locale);
     return addCorsHeaders(
-      new Response(getSwaggerHtml(), {
+      new Response(getSwaggerHtml({ lang: locale, title: LL.marketing.apiDocsTitle() }), {
         headers: {
           "content-type": "text/html; charset=utf-8",
         },
@@ -82,11 +90,11 @@ export const OPTIONS = () =>
     headers: createCorsHeaders(BUSABASE_API_METHODS),
   });
 
-const getSwaggerHtml = () => `<!DOCTYPE html>
-<html lang="en">
+const getSwaggerHtml = ({ lang, title }: { lang: string; title: string }) => `<!DOCTYPE html>
+<html lang="${lang}">
 <head>
   <meta charset="UTF-8" />
-  <title>Busabase API Documentation</title>
+  <title>${title}</title>
   <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css" />
   <style>
     body { margin: 0; }

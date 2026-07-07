@@ -85,11 +85,14 @@ export class Busabase {
   get agent(): BusabaseClient["agent"] {
     return this.client.agent;
   }
-  get attachments(): BusabaseClient["attachments"] {
-    return this.client.attachments;
+  get assets(): BusabaseClient["assets"] {
+    return this.client.assets;
   }
   get skills(): BusabaseClient["skills"] {
     return this.client.skills;
+  }
+  get drives(): BusabaseClient["drives"] {
+    return this.client.drives;
   }
   get docs(): BusabaseClient["docs"] {
     return this.client.docs;

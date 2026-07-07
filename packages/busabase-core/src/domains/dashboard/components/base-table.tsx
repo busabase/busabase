@@ -28,10 +28,11 @@ import {
   getFieldChipEntries,
   getFieldPreviewText,
   getRelationRecordIds,
+  getSafeAttachmentUrl,
 } from "../helpers/field";
-import { shortIdentifier } from "../helpers/format";
+import { fieldValueToString, shortIdentifier } from "../helpers/format";
 import type { ViewFormPayload, ViewSubmitOptions } from "../helpers/view-types";
-import { FieldBadge } from "./field-preview";
+import { CodeLikeFieldPreview, FieldBadge } from "./field-preview";
 import { ConfirmActionDialog } from "./primitives";
 import { SplitSubmitButton } from "./split-submit-button";
 
@@ -742,22 +743,29 @@ function RecordTableCell({
         </div>
       );
     }
-    const tableImages = attachments.filter((a) => a.mimeType?.startsWith("image/"));
-    const tableOthers = attachments.filter((a) => !a.mimeType?.startsWith("image/"));
+    const tableImages = attachments.filter(
+      (a) => a.mimeType?.startsWith("image/") && getSafeAttachmentUrl(a),
+    );
+    const tableOthers = attachments.filter(
+      (a) => !a.mimeType?.startsWith("image/") || !getSafeAttachmentUrl(a),
+    );
     return (
       <div
         className={`flex min-w-0 flex-wrap items-center gap-1.5 py-1 ${stickyClassName}`}
         title={attachments.map((item) => item.fileName).join(", ")}
       >
-        {tableImages.slice(0, 3).map((item) => (
-          <img
-            alt={item.fileName}
-            className="h-8 w-auto max-w-[6rem] rounded border object-cover"
-            key={item.id}
-            src={item.url}
-            title={item.fileName}
-          />
-        ))}
+        {tableImages.slice(0, 3).map((item) => {
+          const safeUrl = getSafeAttachmentUrl(item);
+          return safeUrl ? (
+            <img
+              alt={item.fileName}
+              className="h-8 w-auto max-w-[6rem] rounded border object-cover"
+              key={item.id}
+              src={safeUrl}
+              title={item.fileName}
+            />
+          ) : null;
+        })}
         {tableOthers.slice(0, Math.max(0, 3 - tableImages.length)).map((item) => (
           <span
             className="inline-flex max-w-full items-center gap-1 truncate rounded-full bg-muted/70 px-2 py-0.5 text-foreground text-xs"
@@ -815,6 +823,34 @@ function RecordTableCell({
           );
         })}
       </div>
+    );
+  }
+
+  if (kind === "code") {
+    const code = fieldValueToString(rawValue);
+    if (!code) {
+      return (
+        <Link
+          className={`flex min-w-0 items-center py-1 text-muted-foreground ${
+            index === 0 ? stickyClassName : ""
+          }`}
+          href={currentRecordHref}
+          title="-"
+        >
+          -
+        </Link>
+      );
+    }
+    return (
+      <Link
+        className={`block min-w-0 py-1 underline-offset-2 hover:underline ${
+          index === 0 ? stickyClassName : ""
+        }`}
+        href={currentRecordHref}
+        title={code}
+      >
+        <CodeLikeFieldPreview field={field} value={rawValue} variant="table" />
+      </Link>
     );
   }
 

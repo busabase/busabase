@@ -46,6 +46,8 @@ export function toText(
     case "markdown":
     case "html":
     case "code":
+    case "json":
+    case "yaml":
     case "email":
     case "url":
     case "phone":
@@ -114,6 +116,8 @@ export function fromText(
     case "markdown":
     case "html":
     case "code":
+    case "json":
+    case "yaml":
     case "ai_summary":
       return text;
 

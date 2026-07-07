@@ -59,6 +59,17 @@ export const isSafeUrl = (value: string) =>
   /^mailto:/i.test(value) ||
   /^tel:/i.test(value);
 
+export const isSafeFetchableUrl = (value: string) =>
+  value.startsWith("/") || /^https?:\/\//i.test(value);
+
+export const safeFetchableUrl = (value: unknown): string | null => {
+  if (typeof value !== "string") {
+    return null;
+  }
+  const trimmed = value.trim();
+  return trimmed && isSafeFetchableUrl(trimmed) ? trimmed : null;
+};
+
 export const sanitizeHtmlTag = (rawTag: string) => {
   const tagMatch = rawTag.match(/^<\s*(\/)?\s*([a-zA-Z0-9-]+)/);
   if (!tagMatch) {
@@ -99,8 +110,8 @@ export const sanitizeHtmlTag = (rawTag: string) => {
   if (tagName === "img") {
     const srcAttr = rawTag.match(/\s+src\s*=\s*"([^"]*)"/i);
     const altAttr = rawTag.match(/\s+alt\s*=\s*"([^"]*)"/i);
-    const srcValue = srcAttr?.[1] ?? "";
-    const safeSrc = srcValue && isSafeUrl(srcValue) ? ` src="${escapeHtml(srcValue)}"` : "";
+    const srcValue = safeFetchableUrl(srcAttr?.[1]);
+    const safeSrc = srcValue ? ` src="${escapeHtml(srcValue)}"` : "";
     const safeAlt = altAttr?.[1] ? ` alt="${escapeHtml(altAttr[1])}"` : "";
     return `<img${safeSrc}${safeAlt}${sharedAttrs}>`;
   }

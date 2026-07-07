@@ -12,7 +12,7 @@ import {
   getChangeRequestTitle,
   statusTone,
 } from "../helpers/change-request";
-import { formatListTime } from "../helpers/format";
+import { formatListTime, formatUserRefLabel } from "../helpers/format";
 import { type InboxViewKey, inboxTabLabel } from "../helpers/inbox";
 import type { BusabaseListGroup } from "../helpers/view-types";
 import { ActivityRow, buildActivityEvents } from "./activity";
@@ -66,15 +66,22 @@ function BusabaseList({
 export function InboxView({
   activeView,
   changeRequests,
+  currentUserId,
   emptyGuide,
 }: {
   activeView: InboxViewKey;
   changeRequests: ChangeRequestVO[];
+  currentUserId?: string | null;
   emptyGuide?: ReactNode;
 }) {
   return (
     <div className="flex h-full min-h-0 flex-1 flex-col">
-      <InboxList activeView={activeView} changeRequests={changeRequests} emptyGuide={emptyGuide} />
+      <InboxList
+        activeView={activeView}
+        changeRequests={changeRequests}
+        currentUserId={currentUserId}
+        emptyGuide={emptyGuide}
+      />
     </div>
   );
 }
@@ -82,10 +89,12 @@ export function InboxView({
 function InboxList({
   activeView,
   changeRequests,
+  currentUserId,
   emptyGuide,
 }: {
   activeView: InboxViewKey;
   changeRequests: ChangeRequestVO[];
+  currentUserId?: string | null;
   emptyGuide?: ReactNode;
 }) {
   const messages = useCoreI18n();
@@ -95,8 +104,10 @@ function InboxList({
   const changesRequestedChangeRequests = changeRequests.filter(
     (changeRequest) => changeRequest.status === "changes_requested",
   );
-  const createdChangeRequests = changeRequests.filter(
-    (changeRequest) => changeRequest.submittedBy === "local-editor",
+  const createdChangeRequests = changeRequests.filter((changeRequest) =>
+    currentUserId
+      ? changeRequest.submittedBy === currentUserId
+      : changeRequest.submittedBy === "local-editor",
   );
   const approvedChangeRequests = changeRequests.filter(
     (changeRequest) => changeRequest.status === "approved",
@@ -217,6 +228,10 @@ function ReviewChangeRequestRow({ changeRequest }: { changeRequest: ChangeReques
   const riskHints = getChangeRequestRiskHints(changeRequest);
   const statusLabel = changeRequestStatusLabel(changeRequest.status, messages);
   const message = getChangeRequestMessage(changeRequest);
+  const submitterLabel = formatUserRefLabel(
+    changeRequest.submittedByUser,
+    changeRequest.submittedBy,
+  );
 
   return (
     <Link
@@ -245,6 +260,10 @@ function ReviewChangeRequestRow({ changeRequest }: { changeRequest: ChangeReques
           <span className="truncate">{getChangeRequestScopeName(changeRequest)}</span>
           <span>·</span>
           <span>{getChangeRequestOperationLabel(changeRequest, messages)}</span>
+          <span>·</span>
+          <span className="min-w-0 truncate">
+            {messages.review.submittedBy} {submitterLabel}
+          </span>
           <span>·</span>
           <span>{statusLabel}</span>
         </div>

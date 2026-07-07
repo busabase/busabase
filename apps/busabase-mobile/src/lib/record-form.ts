@@ -1,4 +1,4 @@
-import type { AttachmentRef, BaseFieldVO, FieldType } from "busabase-contract/types";
+import type { AssetAttachmentRef, BaseFieldVO, FieldType } from "busabase-contract/types";
 import { getAttachmentRefs } from "./attachment";
 import { stringifyFieldValue } from "./busabase-display";
 
@@ -24,7 +24,7 @@ export function isEditableField(field: BaseFieldVO): boolean {
   return EDITABLE_TYPES.has(field.type);
 }
 
-export type RecordFormValue = string | boolean | string[] | AttachmentRef[];
+export type RecordFormValue = string | boolean | string[] | AssetAttachmentRef[];
 
 export function initialFieldValue(field: BaseFieldVO, value?: unknown): RecordFormValue {
   if (field.type === "checkbox") {
@@ -78,5 +78,16 @@ export function normalizeFormValues(
       }
       return [field.slug, typeof value === "string" ? value : ""];
     }),
+  );
+}
+
+export function recordFormValuesEqual(
+  fields: BaseFieldVO[],
+  left: Record<string, RecordFormValue>,
+  right: Record<string, RecordFormValue>,
+) {
+  return (
+    JSON.stringify(normalizeFormValues(fields, left)) ===
+    JSON.stringify(normalizeFormValues(fields, right))
   );
 }

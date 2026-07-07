@@ -29,6 +29,12 @@ interface BusabaseAgentSkillButtonProps {
   defaultOrigin?: string;
   /** Current UI language — localizes the pasted prompt. Unknown values fall back to English. */
   lang?: string;
+  /**
+   * Cloud only: currently selected Busabase space. When present, the copied
+   * prompt and setup URL tell the agent to use this exact space for
+   * `x-busabase-space` instead of discovering/guessing a default.
+   */
+  targetSpaceId?: string;
 }
 
 interface AgentIntegrationDialogProps {
@@ -46,6 +52,8 @@ interface AgentIntegrationDialogProps {
    * the agent which language to reply in. Unknown values fall back to English.
    */
   lang?: string;
+  /** Cloud only: currently selected Busabase space id. */
+  targetSpaceId?: string;
 }
 
 /**
@@ -58,6 +66,7 @@ export function AgentIntegrationDialog({
   defaultOrigin = "http://localhost:15419",
   edition,
   lang,
+  targetSpaceId,
 }: AgentIntegrationDialogProps) {
   const messages = useCoreI18n();
   const [origin, setOrigin] = useState(defaultOrigin);
@@ -68,13 +77,23 @@ export function AgentIntegrationDialog({
   }, []);
 
   const tabCopy = SKILLS_TAB_COPY[resolvePromptLang(lang)];
-  const skillUrl =
-    edition === "desktop" ? `${origin}/SETUP_SKILL.md?edition=desktop` : `${origin}/SETUP_SKILL.md`;
+  const skillUrl = useMemo(() => {
+    const url = new URL("/SETUP_SKILL.md", origin);
+    if (edition === "desktop") {
+      url.searchParams.set("edition", "desktop");
+    } else if (targetSpaceId) {
+      url.searchParams.set("space", targetSpaceId);
+    }
+    return url.toString();
+  }, [edition, origin, targetSpaceId]);
   const mcpUrl = `${origin}/api/mcp`;
   const openApiJsonUrl = `${origin}/api/v1/openapi.json`;
   const openApiDocUrl = `${origin}/api/v1/doc`;
 
-  const agentSkillPrompt = useMemo(() => createAgentSkillPrompt(skillUrl, lang), [skillUrl, lang]);
+  const agentSkillPrompt = useMemo(
+    () => createAgentSkillPrompt(skillUrl, lang, targetSpaceId),
+    [skillUrl, lang, targetSpaceId],
+  );
 
   const copy = async (text: string, key: string) => {
     await navigator.clipboard.writeText(text);
@@ -246,6 +265,7 @@ export function AgentIntegrationDialog({
 export function BusabaseAgentSkillButton({
   defaultOrigin = "http://localhost:15419",
   lang,
+  targetSpaceId,
 }: BusabaseAgentSkillButtonProps = {}) {
   const messages = useCoreI18n();
   const [open, setOpen] = useState(false);
@@ -269,6 +289,7 @@ export function BusabaseAgentSkillButton({
         onOpenChange={setOpen}
         defaultOrigin={defaultOrigin}
         lang={lang}
+        targetSpaceId={targetSpaceId}
       />
     </>
   );
@@ -309,21 +330,32 @@ const SKILLS_TAB_COPY: Record<PromptLang, { intro: string; copy: string; copied:
  * safety rule visible, and sets the agent's reply language. Everything about HOW to
  * onboard — the welcome, what-it-is, and "ask what to manage first" — lives in SKILL.md.
  */
-function createAgentSkillPrompt(skillUrl: string, lang?: string): string {
+function createAgentSkillPrompt(skillUrl: string, lang?: string, targetSpaceId?: string): string {
+  const targetLine = targetSpaceId
+    ? {
+        en: `\nTarget the currently selected Busabase space: ${targetSpaceId}. Use this exact ID for BUSABASE_SPACE_ID / x-busabase-space unless I explicitly choose another space.\n`,
+        "zh-CN": `\n当前选中的 Busabase 空间是：${targetSpaceId}。除非我明确选择其他空间，否则请用这个 ID 作为 BUSABASE_SPACE_ID / x-busabase-space。\n`,
+        ja: `\n現在選択されている Busabase スペース: ${targetSpaceId}。私が明示的に別のスペースを選ばない限り、この ID を BUSABASE_SPACE_ID / x-busabase-space に使ってください。\n`,
+      }[resolvePromptLang(lang)]
+    : "";
+
   switch (resolvePromptLang(lang)) {
     case "zh-CN":
       return `阅读并遵循 Busabase Agent Skill——它是唯一事实来源：
 ${skillUrl}
+${targetLine}
 
 按它的引导帮我把工作区设置好；未经我批准，绝不要合并 ChangeRequest。请用简体中文回复我。`;
     case "ja":
       return `Busabase Agent Skill を読んで従ってください——これが唯一の信頼できる情報源です：
 ${skillUrl}
+${targetLine}
 
 オンボーディングに従って私をセットアップし、私の承認なしに ChangeRequest をマージしないでください。日本語で返信してください。`;
     default:
       return `Read and follow the Busabase Agent Skill — it is the single source of truth:
 ${skillUrl}
+${targetLine}
 
 Follow its onboarding to set me up, and never merge a ChangeRequest without my approval. Reply to me in English.`;
   }

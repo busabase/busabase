@@ -1,7 +1,15 @@
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const monorepoRoot = join(dirname(fileURLToPath(import.meta.url)), "../..");
+
 /** @type {import('next').NextConfig} */
 const config = {
   reactStrictMode: true,
   reactCompiler: true,
+  turbopack: {
+    root: monorepoRoot,
+  },
   output: "standalone",
   devIndicators: false,
   // Opt large/native packages out of bundling so Next leaves them as plain

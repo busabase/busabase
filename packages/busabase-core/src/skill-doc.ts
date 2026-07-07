@@ -65,10 +65,10 @@ export function buildSkillMarkdown(origin: string, ctx?: SkillMarkdownContext): 
 
   // Cloud mode: the API key is USER-scoped (works across every space the user
   // belongs to), so each request must name its target space explicitly via the
-  // `x-busabase-space` header. With one space the server can use it automatically;
-  // with several, a write missing the header is rejected 400 (the server refuses to
-  // guess). Every cloud example carries the header so a wrong or unreplaced space
-  // id fails loudly, not into the wrong space.
+  // `x-busabase-space` header. Every cloud example carries the header so a
+  // wrong or unreplaced space id fails loudly instead of writing into the wrong
+  // space. The server can resolve a single-space key, but the skill still teaches
+  // agents to set the target explicitly.
   const spaceHeader = isLocal ? null : `x-busabase-space: ${spaceId}`;
   const headerList = [authHeader, spaceHeader].filter((h): h is string => Boolean(h));
 
@@ -127,10 +127,10 @@ ${
 
 Your API key belongs to the **user**, not to a space: it works across **every space the
 user is a member of**. Each request targets exactly one space via the
-\`x-busabase-space\` header. With exactly one space the header is optional; **when the
-key spans multiple spaces, a write with no \`x-busabase-space\` header is rejected
-with \`400\`** (it lists your spaces) rather than silently guessing. Always set the
-header once you know the target.
+\`x-busabase-space\` header. If the user belongs to multiple spaces and the header is
+omitted, the API rejects the request as ambiguous instead of guessing. When the key
+only has one accessible space the server can resolve it, but agents should still
+set the header once they know the target.
 
 Before the first write of a session:
 
@@ -493,11 +493,12 @@ function buildBootstrapMarkdown(origin: string, ctx?: SkillMarkdownContext): str
   const site = origin.replace(/\/$/, "");
   const local = LOCAL_RUNTIME_ORIGIN;
   const isCloud = ctx?.mode === "cloud";
+  const preselectedSpaceId = isCloud ? ctx?.spaceId?.trim() : undefined;
 
   // Base URL + auth fragments woven into the shared Step 3 curl examples. Cloud
-  // calls always carry `x-busabase-space` — the API key is user-scoped, and with
-  // multiple spaces a write without the header is rejected 400 (Step 0 picks the
-  // space and exports $BUSABASE_SPACE_ID before any of these run).
+  // calls always carry `x-busabase-space` — the API key is user-scoped, and Step 0
+  // picks (or receives from the dashboard) the target space before any write.
+  // With multiple spaces, a write without the header is rejected 400.
   const api = isCloud ? "$BUSABASE_BASE_URL" : local;
   const H = isCloud
     ? ` \\\n  -H "Authorization: Bearer $BUSABASE_API_KEY" \\\n  -H "x-busabase-space: $BUSABASE_SPACE_ID"`
@@ -576,9 +577,10 @@ connection to \`~/.busabase/.env\` **for you** — base URL, a login session tok
 space (it even asks which space when the user belongs to more than one):
 
 \`\`\`bash
-npm exec -y --package busabase-cli@latest -- busabase-cli login
+npm exec -y --package busabase-cli@latest -- busabase-cli login${preselectedSpaceId ? ` --space-id ${preselectedSpaceId}` : ""}
 # opens the browser; prints a URL to paste if it can't
 \`\`\`
+${preselectedSpaceId ? `\nThis onboarding was opened from the current dashboard space. Keep this target unless the user explicitly chooses another:\n\n\`\`\`bash\nexport BUSABASE_SPACE_ID="${preselectedSpaceId}"\n\`\`\`\n` : ""}
 
 When it prints **"Signed in"**, the connection is saved — just read it back and continue:
 
@@ -614,9 +616,8 @@ curl -fsS "$BUSABASE_BASE_URL/api/v1/users/me" -H "Authorization: Bearer $BUSABA
 
 **Then pick the target space — the key is user-scoped, not space-scoped.** The key works
 across every space the user is a member of, and each request targets one space via the
-\`x-busabase-space\` header. If the user has **more than one space**, a write without the
-header is **rejected with \`400\`** (the server refuses to guess and lists the candidates);
-with exactly one space the header is optional. Either way, look before you write:
+\`x-busabase-space\` header. If this onboarding URL already named a dashboard space, use that
+space unless the user explicitly changes it. Otherwise, look before you write:
 
 \`\`\`bash
 curl -fsS "$BUSABASE_BASE_URL/api/v1/auth" -H "Authorization: Bearer $BUSABASE_API_KEY"
@@ -624,12 +625,13 @@ curl -fsS "$BUSABASE_BASE_URL/api/v1/auth" -H "Authorization: Bearer $BUSABASE_A
 
 \`spaces\` in the response is every space the user belongs to; \`space\` is the default.
 
+${preselectedSpaceId ? `- **Dashboard space provided** → use \`${preselectedSpaceId}\` unless the user explicitly chooses another.` : ""}
 - **One space** → use its \`id\`, no need to ask.
-- **Multiple spaces** → **ask the user which space to use** — one lettered question listing
+- **Multiple spaces and no dashboard space was provided** → **ask the user which space to use** — one lettered question listing
   the spaces by name (A/B/C…). Never guess, and never silently take the default.
 
 \`\`\`bash
-export BUSABASE_SPACE_ID="<the chosen space id>"
+export BUSABASE_SPACE_ID="${preselectedSpaceId ?? "<the chosen space id>"}"
 curl -fsS "$BUSABASE_BASE_URL/api/v1/bases" \\
   -H "Authorization: Bearer $BUSABASE_API_KEY" -H "x-busabase-space: $BUSABASE_SPACE_ID"
 \`\`\`
@@ -789,12 +791,13 @@ printf 'BUSABASE_API_KEY=%s\\nBUSABASE_BASE_URL=%s\\n' "$BUSABASE_API_KEY" "$BUS
 
 3. Verify it, then pick the target space — a Cloud key is **user-scoped** and works across
    every space the user belongs to, so confirm which one to write into (\`spaces\` lists them
-   all; if there is more than one, ask the user — never guess):
+   all; if the dashboard supplied a target, use it; otherwise if there is more than one, ask
+   the user — never guess):
 
 \`\`\`bash
 curl -fsS "$BUSABASE_BASE_URL/api/v1/users/me" -H "Authorization: Bearer $BUSABASE_API_KEY"
 curl -fsS "$BUSABASE_BASE_URL/api/v1/auth"     -H "Authorization: Bearer $BUSABASE_API_KEY"
-export BUSABASE_SPACE_ID="<the chosen space id>"
+export BUSABASE_SPACE_ID="${preselectedSpaceId ?? "<the chosen space id>"}"
 \`\`\`
 
 4. For the rest of this walkthrough (Steps 2-4 below), every \`${local}\` call becomes
@@ -813,7 +816,7 @@ until curl -fsS ${local}/api/v1/bases >/dev/null 2>&1; do sleep 2; done && echo 
 \`\`\``;
 
   const spaceNote = isCloud
-    ? "(Every call carries `x-busabase-space: $BUSABASE_SPACE_ID` — the space picked in Step 0. The API key is user-scoped; with multiple spaces a write without the header is rejected 400.)"
+    ? "(Every call carries `x-busabase-space: $BUSABASE_SPACE_ID` — the space picked in Step 0. The API key is user-scoped, so do not omit the header.)"
     : "(No `spaceId` in local mode.)";
 
   const step4 = `## Step 4 — The last setup step: install the permanent skill
@@ -913,7 +916,7 @@ they seemed unsure or asked for more options, re-offer this menu:
 
 A blueprint is just a starting **Base** (a table of typed fields). Available field types:
 \`text\`, \`longtext\`, \`markdown\`, \`html\`, \`number\`, \`date\`, \`checkbox\`, \`select\`,
-\`multiselect\`, \`url\`, \`email\`, \`phone\`, \`attachment\`, \`code\`, \`relation\`, plus system
+\`multiselect\`, \`url\`, \`email\`, \`phone\`, \`attachment\`, \`code\`, \`json\`, \`yaml\`, \`relation\`, plus system
 types (\`auto_number\`, \`created_time\`, \`ai_summary\`, \`ai_tags\`, …).
 
 ### Blueprint field maps

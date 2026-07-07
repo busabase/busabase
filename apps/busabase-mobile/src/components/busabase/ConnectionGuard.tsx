@@ -1,8 +1,13 @@
 import { Redirect, useRouter } from "expo-router";
 import { type ReactNode, useCallback, useEffect, useRef, useState } from "react";
-import { AppState, StyleSheet, View } from "react-native";
+import { AppState } from "react-native";
 import { validateBusabaseServer } from "~/api/server-health";
-import { NativeEmptyState, NativeLoadingState, NativeScreen } from "~/components/native-screen";
+import {
+  NativeActionBar,
+  NativeEmptyState,
+  NativeLoadingState,
+  NativeScreen,
+} from "~/components/native-screen";
 import { Button } from "~/components/ui/Button";
 import { useConnection } from "~/connection/connection-store";
 
@@ -68,35 +73,36 @@ export function ConnectionGuard({ children }: { children: ReactNode }) {
 
   if (unreachable) {
     return (
-      <NativeScreen title="Busabase" subtitle={state.connection.serverUrl}>
+      <NativeScreen
+        title="Busabase"
+        subtitle={state.connection.serverUrl}
+        footer={
+          <NativeActionBar>
+            <Button
+              label={checking ? "Retrying..." : "Retry"}
+              loading={checking}
+              fullWidth
+              onPress={() => void checkHealth(true)}
+            />
+            <Button
+              label="Connect to a different server"
+              variant="secondary"
+              fullWidth
+              onPress={async () => {
+                await disconnect();
+                router.replace("/");
+              }}
+            />
+          </NativeActionBar>
+        }
+      >
         <NativeEmptyState
           title="Server unreachable"
           description="The connected Busabase server is not responding. Check that it is running and reachable from this device."
         />
-        <View style={styles.actions}>
-          <Button
-            label={checking ? "Retrying..." : "Retry"}
-            loading={checking}
-            fullWidth
-            onPress={() => void checkHealth(true)}
-          />
-          <Button
-            label="Connect to a different server"
-            variant="secondary"
-            fullWidth
-            onPress={async () => {
-              await disconnect();
-              router.replace("/");
-            }}
-          />
-        </View>
       </NativeScreen>
     );
   }
 
   return children;
 }
-
-const styles = StyleSheet.create({
-  actions: { marginHorizontal: 20, marginTop: 16, gap: 10 },
-});

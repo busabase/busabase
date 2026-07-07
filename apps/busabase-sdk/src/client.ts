@@ -38,8 +38,8 @@ export interface BusabaseConfig {
   apiKey?: string;
   /**
    * Target Busabase Cloud space id, sent as the `x-busabase-space` header. Falls
-   * back to `BUSABASE_SPACE_ID`. When omitted, the server uses the token's default
-   * (oldest) space membership.
+   * back to `BUSABASE_SPACE_ID`. When omitted, no space header is sent; Cloud
+   * accepts that only when the token has a single unambiguous space.
    */
   spaceId?: string;
   /**

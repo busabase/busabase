@@ -33,6 +33,7 @@ describe("Busabase namespaces", () => {
   // *functionally* instead: each namespace's no-arg `list()` must route to that
   // resource's endpoint through the wrapper.
   it.each([
+    ["assets", "assets"],
     ["bases", "bases"],
     ["nodes", "nodes"],
     ["changeRequests", "change-requests"],
@@ -44,6 +45,36 @@ describe("Busabase namespaces", () => {
     const bb = new Busabase({ baseUrl: "http://localhost:15419", fetch: fetchImpl });
     await (bb[ns] as { list: () => Promise<unknown> }).list();
     expect(new URL(requests[0]?.url ?? "").pathname).toContain(segment);
+  });
+
+  it("routes asset upload helpers through /assets, not /attachments", async () => {
+    const requests: Request[] = [];
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      requests.push(request);
+      return new Response(
+        JSON.stringify({
+          duplicate: false,
+          expiresIn: 3600,
+          publicUrl: "https://cdn.example/cover.png",
+          storageKey: "attachments/cover.png",
+          uploadUrl: "https://upload.example/cover.png",
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    }) as unknown as typeof fetch;
+    const bb = new Busabase({ baseUrl: "http://localhost:15419", fetch: fetchImpl });
+
+    await bb.assets.createUploadUrl({
+      fileName: "cover.png",
+      mimeType: "image/png",
+      sizeBytes: 1,
+      context: "record-field",
+    });
+
+    const pathname = new URL(requests[0]?.url ?? "").pathname;
+    expect(pathname).toContain("/api/v1/assets/upload-urls");
+    expect(pathname).not.toContain("/attachments/");
   });
 });
 

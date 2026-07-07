@@ -326,14 +326,16 @@ export function BaseSetupView({
                       </div>
                       {onUpdateFieldName ? (
                         <button
-                          aria-label={`Rename ${resolveIString(field.name)}`}
+                          aria-label={fmt(messages.base.renameFieldAria, {
+                            name: resolveIString(field.name),
+                          })}
                           className="shrink-0 rounded p-1 text-muted-foreground opacity-0 transition-opacity hover:text-foreground focus:opacity-100 group-hover:opacity-100"
                           onClick={() => {
                             setEditingFieldId(field.id === editingFieldId ? null : field.id);
                             setEditingFieldName(field.name);
                             setFieldRenameError(null);
                           }}
-                          title="Rename field"
+                          title={messages.base.renameField}
                           type="button"
                         >
                           <Pencil size={12} />

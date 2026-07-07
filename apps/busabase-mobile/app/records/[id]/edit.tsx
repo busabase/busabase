@@ -3,15 +3,18 @@ import type { RecordVO } from "busabase-contract/types";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { ArrowLeft } from "lucide-react-native";
 import { useEffect, useState } from "react";
-import { Pressable, StyleSheet, View } from "react-native";
+import { Pressable, StyleSheet } from "react-native";
 import { useBusabaseOrpc } from "~/api/use-busabase-orpc";
 import { ConnectionGuard } from "~/components/busabase/ConnectionGuard";
 import { RecordForm } from "~/components/busabase/RecordForm";
 import {
+  NativeActionBar,
+  NativeBottomSheet,
   NativeEmptyState,
-  NativeErrorState,
+  NativeInlineError,
   NativeLoadingState,
   NativeScreen,
+  NativeSection,
 } from "~/components/native-screen";
 import { Button } from "~/components/ui/Button";
 import { getRecordTitle } from "~/lib/busabase-display";
@@ -20,6 +23,7 @@ import {
   buildInitialFormValues,
   normalizeFormValues,
   type RecordFormValue,
+  recordFormValuesEqual,
 } from "~/lib/record-form";
 import { mobile, radius } from "~/theme/tokens";
 import { useTokens } from "~/theme/use-tokens";
@@ -31,6 +35,8 @@ function EditRecordContent() {
   const tokens = useTokens();
   const buda = useBusabaseOrpc();
   const [values, setValues] = useState<Record<string, RecordFormValue>>({});
+  const [initialValues, setInitialValues] = useState<Record<string, RecordFormValue>>({});
+  const [discardOpen, setDiscardOpen] = useState(false);
 
   const recordQuery = useQuery(
     buda && recordId
@@ -40,7 +46,11 @@ function EditRecordContent() {
   const record = (recordQuery.data as RecordVO | undefined) ?? null;
 
   useEffect(() => {
-    if (record) setValues(buildInitialFormValues(record.base.fields, record.headCommit.fields));
+    if (record) {
+      const next = buildInitialFormValues(record.base.fields, record.headCommit.fields);
+      setValues(next);
+      setInitialValues(next);
+    }
   }, [record]);
 
   const submitMutation = useMutation({
@@ -58,13 +68,42 @@ function EditRecordContent() {
     },
   });
 
+  const hasChanges = record
+    ? !recordFormValuesEqual(record.base.fields, initialValues, values)
+    : false;
+  const closeForm = () => {
+    if (submitMutation.isPending) {
+      return;
+    }
+    if (hasChanges) {
+      setDiscardOpen(true);
+      return;
+    }
+    if (router.canGoBack()) {
+      router.back();
+    } else {
+      router.replace("/drawer/inbox");
+    }
+  };
+  const discardChanges = () => {
+    if (submitMutation.isPending) {
+      return;
+    }
+    setDiscardOpen(false);
+    if (router.canGoBack()) {
+      router.back();
+    } else {
+      router.replace("/drawer/inbox");
+    }
+  };
+
   const headerLeading = (
     <Pressable
       accessibilityRole="button"
       accessibilityLabel="Go back"
       hitSlop={mobile.hitSlop}
       style={[styles.backButton, { backgroundColor: tokens.primaryMuted }]}
-      onPress={() => (router.canGoBack() ? router.back() : router.replace("/drawer/inbox"))}
+      onPress={closeForm}
     >
       <ArrowLeft size={22} color={tokens.foreground} />
     </Pressable>
@@ -91,28 +130,59 @@ function EditRecordContent() {
       title={`Edit ${getRecordTitle(record)}`}
       subtitle="Proposes an update change request"
       headerLeading={headerLeading}
+      footer={
+        <NativeActionBar>
+          {submitMutation.error ? (
+            <NativeInlineError
+              message={submitMutation.error.message}
+              onReset={() => submitMutation.reset()}
+            />
+          ) : null}
+          <Button
+            label="Save change request"
+            loading={submitMutation.isPending}
+            disabled={submitMutation.isPending || !hasChanges}
+            fullWidth
+            onPress={() => submitMutation.mutate()}
+          />
+        </NativeActionBar>
+      }
     >
-      <View style={styles.content}>
+      <NativeSection title="Fields" caption={record.base.name}>
         <RecordForm
           fields={record.base.fields}
           values={values}
+          variant="embedded"
           onChange={(fieldSlug, value) =>
             setValues((current) => ({ ...current, [fieldSlug]: value }))
           }
         />
-        {submitMutation.error ? (
-          <NativeErrorState
-            message={submitMutation.error.message}
-            onRetry={() => submitMutation.reset()}
-          />
-        ) : null}
-        <Button
-          label="Save change request"
-          loading={submitMutation.isPending}
-          fullWidth
-          onPress={() => submitMutation.mutate()}
-        />
-      </View>
+      </NativeSection>
+      <NativeBottomSheet
+        visible={discardOpen}
+        title="Discard changes?"
+        description="This closes the record editor and removes unsaved field changes."
+        showCloseButton
+        onClose={() => setDiscardOpen(false)}
+        footer={
+          <NativeActionBar>
+            <Button
+              label="Discard changes"
+              variant="destructive"
+              disabled={submitMutation.isPending}
+              fullWidth
+              onPress={discardChanges}
+            />
+            <Button
+              label="Keep editing"
+              variant="ghost"
+              disabled={submitMutation.isPending}
+              fullWidth
+              onPress={() => setDiscardOpen(false)}
+            />
+          </NativeActionBar>
+        }
+      />
     </NativeScreen>
   );
 }
@@ -133,5 +203,4 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  content: { marginHorizontal: 20, gap: 14 },
 });

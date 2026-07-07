@@ -1,19 +1,20 @@
 import type { SearchResultVO } from "busabase-contract/types";
 import { useRouter } from "expo-router";
+import { FileText, GitPullRequest, Search, Table2 } from "lucide-react-native";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-native";
+import { StyleSheet, Text, View } from "react-native";
 import { useBusabaseOrpc } from "~/api/use-busabase-orpc";
 import { ConnectionGuard } from "~/components/busabase/ConnectionGuard";
 import { DrawerScaffold } from "~/components/busabase/DrawerScaffold";
-import { NativeEmptyState } from "~/components/native-screen";
+import { NativeInlineError, NativeRow, NativeSection } from "~/components/native-screen";
 import { TextInput } from "~/components/ui/TextInput";
-import { radius, typography } from "~/theme/tokens";
+import { typography } from "~/theme/tokens";
 import { useTokens } from "~/theme/use-tokens";
 
-const kindLabel: Record<SearchResultVO["kind"], string> = {
-  record: "Record",
-  change_request: "Change request",
-  base: "Base",
+const kindMeta: Record<SearchResultVO["kind"], { label: string; icon: typeof FileText }> = {
+  record: { label: "Record", icon: FileText },
+  change_request: { label: "Change request", icon: GitPullRequest },
+  base: { label: "Base", icon: Table2 },
 };
 
 const DEBOUNCE_MS = 220;
@@ -92,67 +93,63 @@ function SearchContent() {
       </View>
 
       {error ? (
-        <Text style={[typography.small, styles.message, { color: tokens.destructive }]}>
-          {error}
-        </Text>
-      ) : null}
-
-      {searching ? (
-        <View style={styles.loading}>
-          <ActivityIndicator color={tokens.primary} />
+        <View style={styles.message}>
+          <NativeInlineError message={error} onReset={() => setError(null)} />
         </View>
       ) : null}
 
-      {!searching && hasQuery && results.length === 0 && !error ? (
-        <NativeEmptyState
-          title="No matches"
-          description="Try a title, field value, or Base name."
-        />
-      ) : null}
-
-      {!hasQuery ? (
-        <NativeEmptyState
-          title="Search Busabase"
-          description="Find records, change requests, and Bases across the connected server."
-        />
-      ) : null}
-
-      <View style={styles.list}>
-        {results.map((result) => (
-          <Pressable
-            key={`${result.kind}-${result.id}`}
-            accessibilityRole="button"
-            style={({ pressed }) => [
-              styles.row,
-              {
-                backgroundColor: tokens.card,
-                borderColor: tokens.border,
-                opacity: pressed ? 0.78 : 1,
-              },
-            ]}
-            onPress={() => openResult(result)}
-          >
-            <View style={[styles.kind, { backgroundColor: tokens.muted }]}>
-              <Text style={[typography.caption, { color: tokens.mutedForeground }]}>
-                {kindLabel[result.kind]}
-              </Text>
-            </View>
-            <Text numberOfLines={1} style={[typography.bodyEm, { color: tokens.foreground }]}>
-              {result.title}
-            </Text>
-            {result.eyebrow ? (
-              <Text numberOfLines={1} style={[typography.small, { color: tokens.mutedForeground }]}>
-                {result.eyebrow}
-              </Text>
-            ) : null}
-            {result.body ? (
-              <Text numberOfLines={2} style={[typography.small, { color: tokens.mutedForeground }]}>
-                {result.body}
-              </Text>
-            ) : null}
-          </Pressable>
-        ))}
-      </View>
+      <NativeSection title={hasQuery ? "Results" : "Search"}>
+        {searching ? (
+          <NativeRow
+            title="Searching"
+            subtitle="Looking across records, change requests, and Bases."
+            leading={<Search size={18} color={tokens.mutedForeground} />}
+            last
+          />
+        ) : null}
+        {!searching && hasQuery && results.length === 0 && !error ? (
+          <NativeRow
+            title="No matches"
+            subtitle="Try a title, field value, or Base name."
+            leading={<Search size={18} color={tokens.mutedForeground} />}
+            last
+          />
+        ) : null}
+        {!hasQuery ? (
+          <NativeRow
+            title="Search Busabase"
+            subtitle="Find records, change requests, and Bases across the connected server."
+            leading={<Search size={18} color={tokens.mutedForeground} />}
+            last
+          />
+        ) : null}
+        {!searching && results.length > 0
+          ? results.map((result, index) => {
+              const meta = kindMeta[result.kind];
+              const Icon = meta.icon;
+              return (
+                <NativeRow
+                  key={`${result.kind}-${result.id}`}
+                  title={result.title}
+                  subtitle={result.body || result.eyebrow || meta.label}
+                  meta={meta.label}
+                  leading={<Icon size={18} color={tokens.mutedForeground} />}
+                  onPress={() => openResult(result)}
+                  last={index === results.length - 1}
+                >
+                  {result.eyebrow && result.body ? (
+                    <Text
+                      numberOfLines={1}
+                      style={[typography.caption, { color: tokens.mutedForeground }]}
+                    >
+                      {result.eyebrow}
+                    </Text>
+                  ) : null}
+                </NativeRow>
+              );
+            })
+          : null}
+      </NativeSection>
     </DrawerScaffold>
   );
 }
@@ -168,19 +165,4 @@ export default function SearchScreen() {
 const styles = StyleSheet.create({
   searchBox: { marginHorizontal: 20, marginBottom: 8 },
   message: { marginHorizontal: 20, marginBottom: 8 },
-  loading: { paddingVertical: 16 },
-  list: { marginHorizontal: 20, gap: 10 },
-  row: {
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: radius.lg,
-    padding: 14,
-    gap: 4,
-  },
-  kind: {
-    alignSelf: "flex-start",
-    borderRadius: radius.full,
-    paddingHorizontal: 10,
-    paddingVertical: 3,
-    marginBottom: 2,
-  },
 });

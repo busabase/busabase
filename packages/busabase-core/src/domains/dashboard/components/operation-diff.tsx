@@ -13,6 +13,7 @@ import type {
 } from "busabase-contract/types";
 import { ArrowRight, Minus, Plus } from "lucide-react";
 import { iStringParse } from "openlib/i18n/i-string";
+import { type CoreI18nMessages, fmt, useCoreI18n } from "../../../i18n";
 import { getFieldName } from "../helpers/field";
 import { fieldValueToString } from "../helpers/format";
 import { FieldValuePreview } from "./field-preview";
@@ -87,11 +88,12 @@ export const getOperationFieldLabel = (
   changeRequest: ChangeRequestVO,
   operation: OperationVO,
   slug: string,
+  messages?: CoreI18nMessages,
 ) => {
   if (isViewOperation(operation)) {
-    if (slug === "name") return "Name";
-    if (slug === "config") return "Configuration";
-    if (slug === "description") return "Description";
+    if (slug === "name") return messages?.operationDiff.name ?? "Name";
+    if (slug === "config") return messages?.operationDiff.configuration ?? "Configuration";
+    if (slug === "description") return messages?.operationDiff.description ?? "Description";
   }
   return getFieldName(changeRequest, slug);
 };
@@ -99,6 +101,7 @@ export const getOperationFieldLabel = (
 export const getOperationFieldChanges = (
   changeRequest: ChangeRequestVO,
   operation: OperationVO,
+  messages?: CoreI18nMessages,
 ): OperationFieldChange[] => {
   const before = operation.baseFields;
   return Object.entries(operation.headCommit.fields)
@@ -107,7 +110,7 @@ export const getOperationFieldChanges = (
       const hasBefore = before != null && slug in before && before[slug] !== undefined;
       return {
         slug,
-        label: getOperationFieldLabel(changeRequest, operation, slug),
+        label: getOperationFieldLabel(changeRequest, operation, slug, messages),
         beforeValue: hasBefore ? before[slug] : undefined,
         afterValue,
         status: hasBefore ? "changed" : "added",
@@ -121,13 +124,16 @@ export const getOperationFieldChanges = (
 export const isLongTextValue = (value: unknown) =>
   typeof value === "string" && (value.length > 56 || value.includes("\n"));
 
-export const FILTER_OPERATOR_LABEL: Record<string, string> = {
-  contains: "contains",
-  equals: "is",
-  not_empty: "is not empty",
-  is_empty: "is empty",
-  is_true: "is checked",
-  is_false: "is unchecked",
+export const getFilterOperatorLabel = (messages: CoreI18nMessages, operator: string) => {
+  const labels: Record<string, string> = {
+    contains: messages.operationDiff.contains,
+    equals: messages.operationDiff.equals,
+    not_empty: messages.operationDiff.notEmpty,
+    is_empty: messages.operationDiff.isEmpty,
+    is_true: messages.operationDiff.isTrue,
+    is_false: messages.operationDiff.isFalse,
+  };
+  return labels[operator] ?? operator;
 };
 
 export interface ViewConfigRule {
@@ -139,6 +145,7 @@ export interface ViewConfigRule {
 export const describeViewConfig = (
   changeRequest: ChangeRequestVO,
   config: unknown,
+  messages: CoreI18nMessages,
 ): ViewConfigRule[] => {
   const value = (config ?? {}) as ViewConfigVO;
   const rules: ViewConfigRule[] = [];
@@ -150,7 +157,7 @@ export const describeViewConfig = (
     });
   }
   for (const filter of value.filters ?? []) {
-    const operator = FILTER_OPERATOR_LABEL[filter.operator] ?? filter.operator;
+    const operator = getFilterOperatorLabel(messages, filter.operator);
     const detail =
       filter.value === undefined || filter.value === null || filter.value === ""
         ? ""
@@ -163,7 +170,7 @@ export const describeViewConfig = (
   }
   const visible = value.visibleFieldSlugs;
   if (visible === undefined || visible === null) {
-    rules.push({ key: "field:*", kind: "field", label: "All fields" });
+    rules.push({ key: "field:*", kind: "field", label: messages.operationDiff.allFields });
   } else {
     for (const slug of visible) {
       rules.push({ key: `field:${slug}`, kind: "field", label: getFieldName(changeRequest, slug) });
@@ -173,12 +180,20 @@ export const describeViewConfig = (
 };
 
 export function ViewConfigRuleLine({
+  messages,
   rule,
   status,
 }: {
+  messages: CoreI18nMessages;
   rule: ViewConfigRule;
   status: "added" | "removed" | "unchanged";
 }) {
+  const kindLabel =
+    rule.kind === "sort"
+      ? messages.operationDiff.sort
+      : rule.kind === "filter"
+        ? messages.operationDiff.filter
+        : messages.operationDiff.field;
   const marker =
     status === "added" ? (
       <Plus className="text-emerald-600" size={13} />
@@ -195,7 +210,7 @@ export function ViewConfigRuleLine({
     >
       <span className="mt-0.5 shrink-0">{marker}</span>
       <span className="mt-px shrink-0 rounded border bg-muted/40 px-1.5 text-[10px] uppercase tracking-wide text-muted-foreground">
-        {rule.kind}
+        {kindLabel}
       </span>
       <span className="min-w-0">{rule.label}</span>
     </div>
@@ -205,15 +220,17 @@ export function ViewConfigRuleLine({
 export function ViewConfigRules({
   changeRequest,
   config,
+  messages,
 }: {
   changeRequest: ChangeRequestVO;
   config: unknown;
+  messages: CoreI18nMessages;
 }) {
-  const rules = describeViewConfig(changeRequest, config);
+  const rules = describeViewConfig(changeRequest, config, messages);
   return (
     <div className="flex flex-col gap-1.5">
       {rules.map((rule) => (
-        <ViewConfigRuleLine key={rule.key} rule={rule} status="unchanged" />
+        <ViewConfigRuleLine key={rule.key} messages={messages} rule={rule} status="unchanged" />
       ))}
     </div>
   );
@@ -223,13 +240,15 @@ export function ViewConfigDiff({
   changeRequest,
   before,
   after,
+  messages,
 }: {
   changeRequest: ChangeRequestVO;
   before: unknown;
   after: unknown;
+  messages: CoreI18nMessages;
 }) {
-  const beforeRules = describeViewConfig(changeRequest, before);
-  const afterRules = describeViewConfig(changeRequest, after);
+  const beforeRules = describeViewConfig(changeRequest, before, messages);
+  const afterRules = describeViewConfig(changeRequest, after, messages);
   const beforeKeys = new Set(beforeRules.map((rule) => rule.key));
   const afterKeys = new Set(afterRules.map((rule) => rule.key));
   const lines: { rule: ViewConfigRule; status: "added" | "removed" | "unchanged" }[] = [
@@ -244,23 +263,34 @@ export function ViewConfigDiff({
   return (
     <div className="flex flex-col gap-1.5">
       {lines.map(({ rule, status }) => (
-        <ViewConfigRuleLine key={`${status}:${rule.key}`} rule={rule} status={status} />
+        <ViewConfigRuleLine
+          key={`${status}:${rule.key}`}
+          messages={messages}
+          rule={rule}
+          status={status}
+        />
       ))}
     </div>
   );
 }
 
-export function ChangeStatusBadge({ status }: { status: FieldChangeStatus }) {
+export function ChangeStatusBadge({
+  messages,
+  status,
+}: {
+  messages: CoreI18nMessages;
+  status: FieldChangeStatus;
+}) {
   if (status === "added") {
     return (
       <span className="inline-flex w-fit rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 font-medium text-[11px] text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-300">
-        added
+        {messages.operationDiff.added}
       </span>
     );
   }
   return (
     <span className="inline-flex w-fit rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 font-medium text-[11px] text-amber-700 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-300">
-      changed
+      {messages.operationDiff.changed}
     </span>
   );
 }
@@ -268,9 +298,11 @@ export function ChangeStatusBadge({ status }: { status: FieldChangeStatus }) {
 export function FieldValueDiff({
   change,
   field,
+  messages,
 }: {
   change: OperationFieldChange;
   field?: BaseFieldVO;
+  messages: CoreI18nMessages;
 }) {
   if (change.status === "added") {
     return (
@@ -284,13 +316,13 @@ export function FieldValueDiff({
       <div className="flex flex-col gap-2">
         <div className="rounded-md border border-red-200/70 bg-red-50/40 px-3 py-2 text-muted-foreground text-sm line-through dark:border-red-900/50 dark:bg-red-950/20">
           <div className="mb-1 font-medium text-[11px] text-red-700 no-underline dark:text-red-300">
-            Before
+            {messages.operationDiff.before}
           </div>
           <FieldValuePreview field={field} value={change.beforeValue} />
         </div>
         <div className="rounded-md border border-emerald-200/70 bg-emerald-50/40 px-3 py-2 text-sm dark:border-emerald-900/50 dark:bg-emerald-950/20">
           <div className="mb-1 font-medium text-[11px] text-emerald-700 dark:text-emerald-300">
-            After
+            {messages.operationDiff.after}
           </div>
           <FieldValuePreview field={field} value={change.afterValue} />
         </div>
@@ -319,6 +351,7 @@ export function OperationFieldChangeRow({
   changeRequest: ChangeRequestVO;
   operation: OperationVO;
 }) {
+  const messages = useCoreI18n();
   const isConfig = isViewOperation(operation) && change.slug === "config";
   const baseField = changeRequest.base?.fields.find((field) => field.slug === change.slug);
 
@@ -326,7 +359,7 @@ export function OperationFieldChangeRow({
     <div className="grid gap-3 px-4 py-3 md:grid-cols-[150px_minmax(0,1fr)]">
       <div className="flex flex-col gap-1.5">
         <span className="font-medium text-sm">{change.label}</span>
-        <ChangeStatusBadge status={change.status} />
+        <ChangeStatusBadge messages={messages} status={change.status} />
       </div>
       <div className="min-w-0">
         {isConfig ? (
@@ -335,30 +368,37 @@ export function OperationFieldChangeRow({
               changeRequest={changeRequest}
               before={change.beforeValue}
               after={change.afterValue}
+              messages={messages}
             />
           ) : (
-            <ViewConfigRules changeRequest={changeRequest} config={change.afterValue} />
+            <ViewConfigRules
+              changeRequest={changeRequest}
+              config={change.afterValue}
+              messages={messages}
+            />
           )
         ) : (
-          <FieldValueDiff change={change} field={baseField} />
+          <FieldValueDiff change={change} field={baseField} messages={messages} />
         )}
       </div>
     </div>
   );
 }
 
-const getFieldOrderName = (field: BaseFieldVO | undefined) =>
-  field ? iStringParse(field.name) : "Unknown field";
+const getFieldOrderName = (field: BaseFieldVO | undefined, messages: CoreI18nMessages) =>
+  field ? iStringParse(field.name) : messages.operationDiff.unknownField;
 
 function FieldOrderRow({
   field,
   id,
   index,
+  messages,
   moved,
 }: {
   field?: BaseFieldVO;
   id: string;
   index: number;
+  messages: CoreI18nMessages;
   moved: boolean;
 }) {
   return (
@@ -371,7 +411,7 @@ function FieldOrderRow({
     >
       <span className="text-right font-mono text-muted-foreground tabular-nums">{index + 1}</span>
       <span className="min-w-0">
-        <span className="block truncate font-medium">{getFieldOrderName(field)}</span>
+        <span className="block truncate font-medium">{getFieldOrderName(field, messages)}</span>
         <span className="block truncate font-mono text-muted-foreground text-xs">
           {field ? field.slug : id}
         </span>
@@ -383,11 +423,13 @@ function FieldOrderRow({
 function FieldOrderList({
   fieldsById,
   ids,
+  messages,
   movedIds,
   title,
 }: {
   fieldsById: Map<string, BaseFieldVO>;
   ids: string[];
+  messages: CoreI18nMessages;
   movedIds: Set<string>;
   title: string;
 }) {
@@ -403,6 +445,7 @@ function FieldOrderList({
             id={id}
             index={index}
             key={`${title}:${id}`}
+            messages={messages}
             moved={movedIds.has(id)}
           />
         ))}
@@ -418,6 +461,7 @@ export function FieldOrderDiff({
   changeRequest: ChangeRequestVO;
   operation: OperationVO;
 }) {
+  const messages = useCoreI18n();
   const { afterIds, beforeIds, fieldsById, movedIds } = getFieldOrderDiffModel(
     changeRequest,
     operation,
@@ -426,7 +470,7 @@ export function FieldOrderDiff({
   if (beforeIds.length === 0 || afterIds.length === 0) {
     return (
       <div className="mt-3 rounded-lg border bg-background/40 px-4 py-5 text-muted-foreground text-sm">
-        Field order data is unavailable for this operation.
+        {messages.operationDiff.fieldOrderUnavailable}
       </div>
     );
   }
@@ -434,19 +478,26 @@ export function FieldOrderDiff({
   return (
     <div className="mt-3 rounded-lg border bg-background/40 p-3">
       <div className="mb-3 flex items-center justify-between gap-3">
-        <div className="font-medium text-sm">Field order</div>
+        <div className="font-medium text-sm">{messages.operationDiff.fieldOrder}</div>
         <span className="shrink-0 rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 font-medium text-[11px] text-amber-700 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-300">
-          {movedIds.size} moved
+          {fmt(messages.operationDiff.movedCount, { count: movedIds.size })}
         </span>
       </div>
       <div className="grid gap-3 md:grid-cols-2">
         <FieldOrderList
           fieldsById={fieldsById}
           ids={beforeIds}
+          messages={messages}
           movedIds={movedIds}
-          title="Before"
+          title={messages.operationDiff.before}
         />
-        <FieldOrderList fieldsById={fieldsById} ids={afterIds} movedIds={movedIds} title="After" />
+        <FieldOrderList
+          fieldsById={fieldsById}
+          ids={afterIds}
+          messages={messages}
+          movedIds={movedIds}
+          title={messages.operationDiff.after}
+        />
       </div>
     </div>
   );
@@ -459,15 +510,16 @@ export function OperationFieldChanges({
   changeRequest: ChangeRequestVO;
   operation: OperationVO;
 }) {
+  const messages = useCoreI18n();
   if (isFieldReorderOperation(operation)) {
     return <FieldOrderDiff changeRequest={changeRequest} operation={operation} />;
   }
 
-  const changes = getOperationFieldChanges(changeRequest, operation);
+  const changes = getOperationFieldChanges(changeRequest, operation, messages);
   if (changes.length === 0) {
     return (
       <div className="mt-3 rounded-lg border bg-background/40 px-4 py-5 text-muted-foreground text-sm">
-        No field changes in this operation.
+        {messages.review.noFieldChanges}
       </div>
     );
   }

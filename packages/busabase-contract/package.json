@@ -37,6 +37,14 @@
       "types": "./src/domains/folder/types.ts",
       "default": "./src/domains/folder/types.ts"
     },
+    "./domains/skill/types": {
+      "types": "./src/domains/skill/types.ts",
+      "default": "./src/domains/skill/types.ts"
+    },
+    "./domains/drive/types": {
+      "types": "./src/domains/drive/types.ts",
+      "default": "./src/domains/drive/types.ts"
+    },
     "./domains/assets/types": {
       "types": "./src/domains/assets/types.ts",
       "default": "./src/domains/assets/types.ts"
@@ -48,6 +56,22 @@
     "./domains/skill/contract": {
       "types": "./src/domains/skill/contract.ts",
       "default": "./src/domains/skill/contract.ts"
+    },
+    "./domains/drive/contract": {
+      "types": "./src/domains/drive/contract.ts",
+      "default": "./src/domains/drive/contract.ts"
+    },
+    "./domains/filetree/contract": {
+      "types": "./src/domains/filetree/contract.ts",
+      "default": "./src/domains/filetree/contract.ts"
+    },
+    "./domains/filetree/definition": {
+      "types": "./src/domains/filetree/definition.ts",
+      "default": "./src/domains/filetree/definition.ts"
+    },
+    "./domains/filetree/types": {
+      "types": "./src/domains/filetree/types.ts",
+      "default": "./src/domains/filetree/types.ts"
     },
     "./domains/base/contract/base-schemas": {
       "types": "./src/domains/base/contract/base-schemas.ts",

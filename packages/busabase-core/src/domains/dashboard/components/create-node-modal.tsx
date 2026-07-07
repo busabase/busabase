@@ -84,7 +84,14 @@ export function CreateNodeModal({
       // A Base needs at least one field; start with a Title to build on.
       ...(selectedType === "base"
         ? {
-            fields: [{ slug: "title", name: "Title", type: "text" as const, required: true }],
+            fields: [
+              {
+                slug: "title",
+                name: messages.createNode.defaultTitleField,
+                type: "text" as const,
+                required: true,
+              },
+            ],
           }
         : {}),
     },
@@ -158,7 +165,7 @@ export function CreateNodeModal({
         onOpenChange(next);
       }}
     >
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="sm:max-w-xl">
         <DialogHeader>
           <DialogTitle>
             {fmt(messages.createNode.title, {
@@ -173,13 +180,13 @@ export function CreateNodeModal({
         </DialogHeader>
 
         <div className="flex flex-col gap-3">
-          <div className="grid grid-cols-4 gap-2">
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
             {CREATABLE_TYPES.map((entry) => {
               const Icon = entry.icon;
               const isSelected = entry.type === selectedType;
               return (
                 <button
-                  className={`flex flex-col items-center gap-1.5 rounded-md border p-3 text-xs transition-colors ${
+                  className={`flex min-w-0 flex-col items-center gap-1.5 rounded-md border px-2 py-3 text-xs transition-colors ${
                     isSelected
                       ? "border-primary bg-primary/10 text-foreground"
                       : "text-muted-foreground hover:bg-muted"
@@ -206,7 +213,7 @@ export function CreateNodeModal({
                 }
               }}
               placeholder={fmt(messages.createNode.itemNamePlaceholder, {
-                type: activeType?.label ?? "Item",
+                type: activeType?.label ?? messages.nodeDetail.item,
               })}
               value={name}
             />
@@ -218,7 +225,7 @@ export function CreateNodeModal({
                 setSlugEdited(true);
                 setSlug(toSlug(event.target.value));
               }}
-              placeholder="my-slug"
+              placeholder={messages.createNode.slugPlaceholder}
               value={slug}
             />
           </div>

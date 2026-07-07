@@ -68,6 +68,7 @@ interface BusabaseDashboardProps {
   records: RecordVO[];
   views?: ViewVO[];
   auditEvents?: AuditEventVO[];
+  currentUserId?: string | null;
   apiBasePath?: string;
   apiClient?: BusabaseDashboardApiClient;
   embedded?: boolean;
@@ -111,6 +112,7 @@ function BusabaseDashboardContent({
   apiClient,
   auditEvents: initialAuditEvents = [],
   changeRequests: initialChangeRequests,
+  currentUserId,
   emptyGuide,
   records: initialRecords,
   bases: initialBases,
@@ -127,7 +129,6 @@ function BusabaseDashboardContent({
     () => apiClient ?? createBusabaseRestApiClient(apiBasePath),
     [apiBasePath, apiClient],
   );
-  const uploadAttachment = useAttachmentUpload(client);
   // Reads run through oRPC + React Query, seeded by the SSR props as initialData.
   const changeRequestsList = orpc.changeRequests.list.queryOptions({ input: {} });
   const recordsList = orpc.records.list.queryOptions({ input: {} });
@@ -135,7 +136,6 @@ function BusabaseDashboardContent({
   const archivedBasesList = orpc.bases.listArchived.queryOptions({});
   const archivedNodesList = orpc.nodes.listArchived.queryOptions({});
   const auditEventsList = orpc.auditEvents.list.queryOptions({ input: {} });
-  const authInfoQuery = useQuery(orpc.auth.verify.queryOptions({}));
   const changeRequestsQuery = useQuery({
     ...changeRequestsList,
     initialData: initialChangeRequests,
@@ -161,8 +161,18 @@ function BusabaseDashboardContent({
       bases: orpc.bases.list.queryOptions({}).queryKey as QueryKey,
       nodes: orpc.nodes.list.queryOptions({}).queryKey as QueryKey,
       auditEvents: orpc.auditEvents.list.queryOptions({ input: {} }).queryKey as QueryKey,
+      assets: orpc.assets.list.queryOptions({}).queryKey as QueryKey,
     }),
     [orpc],
+  );
+  const uploadAttachmentBase = useAttachmentUpload(client);
+  const uploadAttachment = useCallback(
+    async (file: File) => {
+      const ref = await uploadAttachmentBase(file);
+      await queryClient.invalidateQueries({ queryKey: listKeys.assets });
+      return ref;
+    },
+    [listKeys.assets, queryClient, uploadAttachmentBase],
   );
   const [error, setError] = useState<string | null>(null);
   const [location, rawSetLocation] = useLocation();
@@ -206,11 +216,13 @@ function BusabaseDashboardContent({
     isBaseChildRoute,
     baseChildParams,
     isSkillRoute,
+    isDriveRoute,
     isDocRoute,
     isFolderRoute,
     isBaseSetupRoute,
     selectedBaseSlug,
     selectedSkillSlug,
+    selectedDriveSlug,
     selectedDocSlug,
     selectedFolderSlug,
     selectedChangeRequestId,
@@ -223,7 +235,6 @@ function BusabaseDashboardContent({
     [selectedBaseSlug, bases],
   );
   useBusabaseLiveSync({
-    actorId: authInfoQuery.data?.user.id,
     activeBaseId: activeBase?.id,
     listKeys,
     orpc,
@@ -658,7 +669,7 @@ function BusabaseDashboardContent({
       setError(null);
       const changeRequest = await client.createChangeRequest(base.id, {
         fields,
-        message: `Create ${base.name} record`,
+        message: fmt(messages.createNode.createRecordMessage, { base: base.name }),
         submittedBy: "local-editor",
       });
       if (options?.mergeImmediately) {
@@ -674,7 +685,13 @@ function BusabaseDashboardContent({
       setLocation(`/inbox/${changeRequest.id}`);
       await refresh();
     },
-    [approveAndMergeChangeRequest, client, refresh, setLocation],
+    [
+      approveAndMergeChangeRequest,
+      client,
+      messages.createNode.createRecordMessage,
+      refresh,
+      setLocation,
+    ],
   );
 
   const submitUpdateRecord = useCallback(
@@ -683,7 +700,9 @@ function BusabaseDashboardContent({
       const changeRequest = await client.createUpdateChangeRequest(record.id, {
         author: "local-editor",
         fields,
-        message: `Update ${getRecordTitle(record)}`,
+        message: fmt(messages.createNode.updateRecordMessage, {
+          record: getRecordTitle(record),
+        }),
       });
       if (options?.mergeImmediately) {
         const merged = await approveAndMergeChangeRequest(changeRequest.id);
@@ -698,7 +717,13 @@ function BusabaseDashboardContent({
       setLocation(`/inbox/${changeRequest.id}`);
       await refresh();
     },
-    [approveAndMergeChangeRequest, client, refresh, setLocation],
+    [
+      approveAndMergeChangeRequest,
+      client,
+      messages.createNode.updateRecordMessage,
+      refresh,
+      setLocation,
+    ],
   );
 
   const submitDeleteRecord = useCallback(
@@ -731,13 +756,15 @@ function BusabaseDashboardContent({
       }
       const changeRequest = await client.createFieldChangeRequest(base.id, {
         ...payload,
-        message: `Add field ${iStringParse(payload.name)}`,
+        message: fmt(messages.createNode.addFieldMessage, {
+          field: iStringParse(payload.name),
+        }),
         submittedBy: "local-editor",
       });
       await refresh();
       setLocation(`/inbox/${changeRequest.id}`);
     },
-    [client, refresh, setLocation],
+    [client, messages.createNode.addFieldMessage, refresh, setLocation],
   );
 
   const submitUpdateFieldName = useCallback(
@@ -751,19 +778,29 @@ function BusabaseDashboardContent({
       const changeRequest = await client.createUpdateFieldChangeRequest(base.id, {
         fieldId,
         patch: { name },
-        message: `Rename field ${iStringParse(name)}`,
+        message: fmt(messages.createNode.renameFieldMessage, {
+          field: iStringParse(name),
+        }),
       });
       if (options?.mergeImmediately) {
         await approveAndMergeChangeRequest(changeRequest.id);
         await refresh();
-        toast.success("Field renamed");
+        toast.success(messages.createNode.fieldRenamed);
         return;
       }
       await refresh();
-      toast.success("Rename request submitted");
+      toast.success(messages.createNode.renameRequestSubmitted);
       setLocation(`/inbox/${changeRequest.id}`);
     },
-    [approveAndMergeChangeRequest, client, refresh, setLocation],
+    [
+      approveAndMergeChangeRequest,
+      client,
+      messages.createNode.fieldRenamed,
+      messages.createNode.renameFieldMessage,
+      messages.createNode.renameRequestSubmitted,
+      refresh,
+      setLocation,
+    ],
   );
 
   const submitRenameBase = useCallback(
@@ -1049,6 +1086,7 @@ function BusabaseDashboardContent({
         <InboxView
           activeView={inboxView}
           changeRequests={allChangeRequests}
+          currentUserId={currentUserId}
           emptyGuide={emptyGuide}
         />
       );
@@ -1204,11 +1242,13 @@ function BusabaseDashboardContent({
     // (each domain registers via registerNodeDetail) instead of a hardcoded branch.
     const nodeDetailRoute = isSkillRoute
       ? { type: "skill", slug: selectedSkillSlug }
-      : isDocRoute
-        ? { type: "doc", slug: selectedDocSlug }
-        : isFolderRoute
-          ? { type: "folder", slug: selectedFolderSlug }
-          : null;
+      : isDriveRoute
+        ? { type: "drive", slug: selectedDriveSlug }
+        : isDocRoute
+          ? { type: "doc", slug: selectedDocSlug }
+          : isFolderRoute
+            ? { type: "folder", slug: selectedFolderSlug }
+            : null;
     if (nodeDetailRoute) {
       const RenderDetail = getNodeDetail(nodeDetailRoute.type);
       if (RenderDetail) {
@@ -1220,6 +1260,7 @@ function BusabaseDashboardContent({
       <InboxView
         activeView={inboxView}
         changeRequests={allChangeRequests}
+        currentUserId={currentUserId}
         emptyGuide={emptyGuide}
       />
     );
@@ -1228,6 +1269,7 @@ function BusabaseDashboardContent({
     activeRecord,
     approveChangeRequest,
     closeChangeRequest,
+    currentUserId,
     auditEvents,
     allChangeRequests,
     bases,
@@ -1240,11 +1282,13 @@ function BusabaseDashboardContent({
     isOperationRoute,
     isRecordRoute,
     isSkillRoute,
+    isDriveRoute,
     isDocRoute,
     isFolderRoute,
     nodeTree,
     orpc,
     selectedSkillSlug,
+    selectedDriveSlug,
     selectedDocSlug,
     selectedFolderSlug,
     selectedBaseView,

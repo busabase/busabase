@@ -2,72 +2,68 @@ import { skipToken, useQuery } from "@tanstack/react-query";
 import type { ChangeRequestVO } from "busabase-contract/types";
 import { useRouter } from "expo-router";
 import { useEffect, useMemo, useState } from "react";
-import { AppState, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { AppState, StyleSheet, View } from "react-native";
 import { useBusabaseOrpc } from "~/api/use-busabase-orpc";
 import { ChangeRequestCard } from "~/components/busabase/ChangeRequestCard";
 import { ConnectionGuard } from "~/components/busabase/ConnectionGuard";
 import { DrawerScaffold } from "~/components/busabase/DrawerScaffold";
-import { NativeEmptyState, NativeErrorState, NativeLoadingState } from "~/components/native-screen";
-import { radius, typography } from "~/theme/tokens";
-import { useTokens } from "~/theme/use-tokens";
+import {
+  NativeEmptyState,
+  NativeErrorState,
+  NativeLoadingState,
+  NativeSection,
+  NativeSegmentedControl,
+} from "~/components/native-screen";
 
-// The local self-hosted editor authors change requests under this id (matches web).
-const LOCAL_AUTHOR = "local-editor";
+// Match both the web/local editor and change requests created from this mobile app.
+const LOCAL_AUTHORS = new Set(["local-editor", "mobile-editor"]);
 
-// Mirrors the web inbox views: For review · Created · Approved · Merged · Rejected.
-const tabs = [
-  { key: "review", label: "For review" },
-  { key: "created", label: "Created" },
-  { key: "approved", label: "Approved" },
-  { key: "merged", label: "Merged" },
-  { key: "rejected", label: "Rejected" },
+const modes = [
+  { key: "review", label: "Review" },
+  { key: "mine", label: "Mine" },
+  { key: "done", label: "Done" },
 ] as const;
 
-type TabKey = (typeof tabs)[number]["key"];
+type InboxMode = (typeof modes)[number]["key"];
 
-const matchesTab = (changeRequest: ChangeRequestVO, tab: TabKey): boolean => {
-  switch (tab) {
+const matchesMode = (changeRequest: ChangeRequestVO, mode: InboxMode): boolean => {
+  switch (mode) {
     case "review":
-      return changeRequest.status === "in_review";
-    case "created":
-      return changeRequest.submittedBy === LOCAL_AUTHOR;
-    case "approved":
-      return changeRequest.status === "approved";
-    case "merged":
-      return changeRequest.status === "merged";
-    case "rejected":
-      return changeRequest.status === "rejected";
+      return changeRequest.status === "in_review" || changeRequest.status === "approved";
+    case "mine":
+      return LOCAL_AUTHORS.has(changeRequest.submittedBy);
+    case "done":
+      return ["merged", "rejected"].includes(changeRequest.status);
   }
 };
 
-const emptyCopy: Record<TabKey, { title: string; description: string }> = {
+const emptyCopy: Record<InboxMode, { title: string; description: string }> = {
   review: {
     title: "Inbox is clear",
     description: "New change requests submitted to the connected Busabase server will appear here.",
   },
-  created: {
+  mine: {
     title: "Nothing created yet",
     description: "Change requests you submit from this device show up here.",
   },
-  approved: {
-    title: "Nothing approved yet",
-    description: "Approved change requests wait here until they are merged.",
+  done: {
+    title: "No completed reviews",
+    description: "Merged and rejected change requests will appear here.",
   },
-  merged: {
-    title: "Nothing merged yet",
-    description: "Merged change requests become canonical records.",
-  },
-  rejected: {
-    title: "Nothing rejected",
-    description: "Change requests sent back for revision will appear here.",
-  },
+};
+
+const isRecentChangeRequest = (changeRequest: ChangeRequestVO) => {
+  const updatedAt = new Date(changeRequest.updatedAt).getTime();
+  if (Number.isNaN(updatedAt)) {
+    return false;
+  }
+  return Date.now() - updatedAt < 24 * 60 * 60 * 1000;
 };
 
 function InboxContent() {
   const router = useRouter();
-  const tokens = useTokens();
   const buda = useBusabaseOrpc();
-  const [activeTab, setActiveTab] = useState<TabKey>("review");
+  const [activeMode, setActiveMode] = useState<InboxMode>("review");
   const query = useQuery(
     buda
       ? buda.orpc.changeRequests.list.queryOptions({ input: { limit: 100 } })
@@ -85,17 +81,15 @@ function InboxContent() {
   }, [query.refetch]);
 
   const counts = useMemo(() => {
-    const next: Record<TabKey, number> = {
+    const next: Record<InboxMode, number> = {
       review: 0,
-      created: 0,
-      approved: 0,
-      merged: 0,
-      rejected: 0,
+      mine: 0,
+      done: 0,
     };
     for (const changeRequest of query.data ?? []) {
-      for (const tab of tabs) {
-        if (matchesTab(changeRequest, tab.key)) {
-          next[tab.key] += 1;
+      for (const mode of modes) {
+        if (matchesMode(changeRequest, mode.key)) {
+          next[mode.key] += 1;
         }
       }
     }
@@ -103,22 +97,62 @@ function InboxContent() {
   }, [query.data]);
 
   const visible = useMemo(
-    () => (query.data ?? []).filter((changeRequest) => matchesTab(changeRequest, activeTab)),
-    [query.data, activeTab],
+    () => (query.data ?? []).filter((changeRequest) => matchesMode(changeRequest, activeMode)),
+    [query.data, activeMode],
   );
 
-  // The "Created" view groups the editor's own requests by open vs. closed (matches web).
-  const createdGroups = useMemo(() => {
-    if (activeTab !== "created") {
+  const groups = useMemo(() => {
+    if (activeMode === "mine") {
+      const isOpen = (changeRequest: ChangeRequestVO) =>
+        changeRequest.status === "in_review" || changeRequest.status === "approved";
+      return [
+        { title: "Open", items: visible.filter(isOpen) },
+        { title: "Closed", items: visible.filter((cr) => !isOpen(cr)) },
+      ].filter((group) => group.items.length > 0);
+    }
+    if (activeMode === "done") {
+      return [
+        { title: "Merged", items: visible.filter((cr) => cr.status === "merged") },
+        { title: "Rejected", items: visible.filter((cr) => cr.status === "rejected") },
+      ].filter((group) => group.items.length > 0);
+    }
+    if (activeMode === "review") {
+      const needsReview = visible.filter((cr) => cr.status === "in_review");
+      return [
+        { title: "Ready to merge", items: visible.filter((cr) => cr.status === "approved") },
+        { title: "New", items: needsReview.filter(isRecentChangeRequest) },
+        { title: "Earlier", items: needsReview.filter((cr) => !isRecentChangeRequest(cr)) },
+      ].filter((group) => group.items.length > 0);
+    }
+    return null;
+  }, [activeMode, visible]);
+
+  const showGroups = (groups ?? []).some((group) => group.items.length > 0);
+  const activeLabel = modes.find((mode) => mode.key === activeMode)?.label ?? "Inbox";
+
+  const openChangeRequest = (changeRequest: ChangeRequestVO) =>
+    router.push({
+      pathname: "/change-requests/[id]",
+      params: { id: changeRequest.id },
+    });
+
+  const renderGroup = (group: { title: string; items: ChangeRequestVO[] }) => {
+    if (group.items.length === 0) {
       return null;
     }
-    const isOpen = (changeRequest: ChangeRequestVO) =>
-      changeRequest.status === "in_review" || changeRequest.status === "approved";
-    return [
-      { title: "Open change requests", items: visible.filter(isOpen) },
-      { title: "Closed change requests", items: visible.filter((cr) => !isOpen(cr)) },
-    ].filter((group) => group.items.length > 0);
-  }, [activeTab, visible]);
+    return (
+      <NativeSection key={group.title} title={group.title} caption={`${group.items.length}`}>
+        {group.items.map((changeRequest, index) => (
+          <ChangeRequestCard
+            key={changeRequest.id}
+            changeRequest={changeRequest}
+            last={index === group.items.length - 1}
+            onPress={() => openChangeRequest(changeRequest)}
+          />
+        ))}
+      </NativeSection>
+    );
+  };
 
   return (
     <DrawerScaffold
@@ -127,54 +161,17 @@ function InboxContent() {
       refreshing={query.isRefetching}
       onRefresh={() => void query.refetch()}
     >
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        style={styles.tabsScroll}
-        contentContainerStyle={styles.tabs}
-      >
-        {tabs.map((tab) => {
-          const active = tab.key === activeTab;
-          return (
-            <Pressable
-              key={tab.key}
-              accessibilityRole="button"
-              style={[
-                styles.tab,
-                {
-                  backgroundColor: active ? tokens.primaryMuted : tokens.card,
-                  borderColor: active ? tokens.primary : tokens.border,
-                },
-              ]}
-              onPress={() => setActiveTab(tab.key)}
-            >
-              <Text
-                style={[
-                  typography.bodyEm,
-                  { color: active ? tokens.foreground : tokens.mutedForeground },
-                ]}
-              >
-                {tab.label}
-              </Text>
-              <View
-                style={[
-                  styles.tabBadge,
-                  { backgroundColor: active ? tokens.primary : tokens.muted },
-                ]}
-              >
-                <Text
-                  style={[
-                    typography.caption,
-                    { color: active ? tokens.primaryForeground : tokens.mutedForeground },
-                  ]}
-                >
-                  {counts[tab.key]}
-                </Text>
-              </View>
-            </Pressable>
-          );
-        })}
-      </ScrollView>
+      <View style={styles.segmentWrap}>
+        <NativeSegmentedControl
+          value={activeMode}
+          options={modes.map((mode) => ({
+            value: mode.key,
+            label: mode.label,
+            meta: counts[mode.key],
+          }))}
+          onChange={setActiveMode}
+        />
+      </View>
 
       {query.isLoading ? <NativeLoadingState label="Loading change requests" /> : null}
       {query.error ? (
@@ -182,50 +179,24 @@ function InboxContent() {
       ) : null}
       {!query.isLoading && !query.error && visible.length === 0 ? (
         <NativeEmptyState
-          title={emptyCopy[activeTab].title}
-          description={emptyCopy[activeTab].description}
+          title={emptyCopy[activeMode].title}
+          description={emptyCopy[activeMode].description}
         />
       ) : null}
-      <View style={styles.list}>
-        {createdGroups
-          ? createdGroups.map((group) => (
-              <View key={group.title} style={styles.group}>
-                <Text
-                  style={[
-                    typography.caption,
-                    styles.groupHeader,
-                    { color: tokens.mutedForeground },
-                  ]}
-                >
-                  {group.title} · {group.items.length}
-                </Text>
-                {group.items.map((changeRequest) => (
-                  <ChangeRequestCard
-                    key={changeRequest.id}
-                    changeRequest={changeRequest}
-                    onPress={() =>
-                      router.push({
-                        pathname: "/change-requests/[id]",
-                        params: { id: changeRequest.id },
-                      })
-                    }
-                  />
-                ))}
-              </View>
-            ))
-          : visible.map((changeRequest) => (
-              <ChangeRequestCard
-                key={changeRequest.id}
-                changeRequest={changeRequest}
-                onPress={() =>
-                  router.push({
-                    pathname: "/change-requests/[id]",
-                    params: { id: changeRequest.id },
-                  })
-                }
-              />
-            ))}
-      </View>
+      {showGroups
+        ? (groups ?? []).map(renderGroup)
+        : visible.length > 0 && (
+            <NativeSection title={activeLabel} caption={`${visible.length}`}>
+              {visible.map((changeRequest, index) => (
+                <ChangeRequestCard
+                  key={changeRequest.id}
+                  changeRequest={changeRequest}
+                  last={index === visible.length - 1}
+                  onPress={() => openChangeRequest(changeRequest)}
+                />
+              ))}
+            </NativeSection>
+          )}
     </DrawerScaffold>
   );
 }
@@ -239,26 +210,5 @@ export default function InboxScreen() {
 }
 
 const styles = StyleSheet.create({
-  tabsScroll: { flexGrow: 0, marginBottom: 14 },
-  tabs: { paddingHorizontal: 20, gap: 8 },
-  tab: {
-    minHeight: 40,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: radius.full,
-    paddingHorizontal: 14,
-  },
-  tabBadge: {
-    minWidth: 22,
-    height: 22,
-    borderRadius: radius.full,
-    alignItems: "center",
-    justifyContent: "center",
-    paddingHorizontal: 6,
-  },
-  list: { marginHorizontal: 20, gap: 12 },
-  group: { gap: 12 },
-  groupHeader: { textTransform: "uppercase" },
+  segmentWrap: { marginTop: 10, marginBottom: 2 },
 });

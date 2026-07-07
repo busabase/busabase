@@ -2,8 +2,8 @@ import type { BaseFieldVO, ChangeRequestVO, FieldType, RecordVO } from "busabase
 import type { AttachmentRef } from "open-domains/attachments/types";
 import { iStringParse } from "openlib/i18n/i-string";
 import { FIELD_TYPE_ORDER } from "../../base/field-types";
-import { fieldValueToString, formatActorLabel, formatNumberField } from "./format";
-import { stripHtmlTags } from "./html";
+import { fieldValueToString, formatNumberField, formatOpaqueUserId } from "./format";
+import { safeFetchableUrl, stripHtmlTags } from "./html";
 import type { FieldChip } from "./view-types";
 
 // Field-type picker order — sourced from the registry (single source of truth).
@@ -117,7 +117,7 @@ export const fieldPreviewText = (value: unknown, type?: FieldType) => {
     return value === true || value === "true" ? "Yes" : "No";
   }
   if (type === "created_by" || type === "updated_by") {
-    return formatActorLabel(value);
+    return formatOpaqueUserId(value);
   }
   if (type === "auto_number") {
     const text = fieldValueToString(value);
@@ -150,25 +150,48 @@ export const getRelationRecordIds = (value: unknown) => {
   return [];
 };
 
+type AnyAttachmentRef = AttachmentRef & {
+  attachmentId?: string;
+  assetId?: string;
+};
+
 /** Parse an `attachment` field value (array of denormalized refs) defensively. */
-export const getAttachmentRefs = (value: unknown): AttachmentRef[] => {
+export const getAttachmentRefs = (value: unknown): AnyAttachmentRef[] => {
   if (!Array.isArray(value)) {
     return [];
   }
-  return value.filter(
-    (item): item is AttachmentRef =>
-      typeof item === "object" &&
-      item !== null &&
-      typeof (item as AttachmentRef).url === "string" &&
-      typeof (item as AttachmentRef).fileName === "string",
-  );
+  const refs: AnyAttachmentRef[] = [];
+  for (const item of value) {
+    if (typeof item !== "object" || item === null) {
+      continue;
+    }
+    const ref = item as Record<string, unknown>;
+    const assetId = typeof ref.assetId === "string" ? ref.assetId : undefined;
+    const attachmentId = typeof ref.attachmentId === "string" ? ref.attachmentId : undefined;
+    const id = typeof ref.id === "string" ? ref.id : assetId !== undefined ? assetId : attachmentId;
+    if (id && typeof ref.url === "string" && typeof ref.fileName === "string") {
+      refs.push({
+        id,
+        assetId,
+        attachmentId,
+        url: ref.url,
+        fileName: ref.fileName,
+        mimeType: typeof ref.mimeType === "string" ? ref.mimeType : "application/octet-stream",
+        size: typeof ref.size === "number" && Number.isFinite(ref.size) ? ref.size : 0,
+      });
+    }
+  }
+  return refs;
 };
+
+export const getSafeAttachmentUrl = (item: AttachmentRef): string | null =>
+  safeFetchableUrl(item.url);
 
 export const isRecordTitleField = (field: BaseFieldVO) =>
   ["title", "name", "subject"].includes(field.slug);
 
 export const isRecordLongField = (field: BaseFieldVO, value: unknown) => {
-  if (["longtext", "markdown", "html", "code", "ai_summary"].includes(field.type)) {
+  if (["longtext", "markdown", "html", "code", "json", "yaml", "ai_summary"].includes(field.type)) {
     return true;
   }
   if (["body", "content", "description", "summary"].includes(field.slug)) {
@@ -184,3 +207,87 @@ export const getFieldName = (changeRequest: ChangeRequestVO, fieldSlug: string) 
 
 export const getRecordFieldType = (record: RecordVO, fieldSlug: string) =>
   record.base.fields.find((field) => field.slug === fieldSlug)?.type;
+
+const CODE_LANGUAGE_ALIASES: Record<string, string> = {
+  docker: "dockerfile",
+  js: "javascript",
+  mjs: "javascript",
+  py: "python",
+  rb: "ruby",
+  sh: "bash",
+  shell: "bash",
+  ts: "typescript",
+  yml: "yaml",
+};
+
+export const normalizeCodeLanguage = (language: string | undefined) => {
+  const normalized = language?.trim().toLowerCase();
+  if (!normalized || normalized === "plain") {
+    return "text";
+  }
+  return CODE_LANGUAGE_ALIASES[normalized] ?? normalized;
+};
+
+export const guessCodeLanguageFromValue = (value: unknown) => {
+  const code = fieldValueToString(value).trim();
+  if (!code) {
+    return "text";
+  }
+
+  if ((code.startsWith("{") || code.startsWith("[")) && looksLikeJson(code)) {
+    return "json";
+  }
+  if (/^<(!doctype|html|head|body|[a-z][\w:-]*(?:\s|>|\/>))/i.test(code)) {
+    return "html";
+  }
+  if (/^\s*(select|with|insert|update|delete|create|alter)\b/im.test(code)) {
+    return "sql";
+  }
+  if (
+    /^\s*(import|export)\s+.*\bfrom\b/m.test(code) ||
+    /^\s*interface\s+\w+/m.test(code) ||
+    /^\s*type\s+\w+\s*=/m.test(code) ||
+    /:\s*(string|number|boolean|unknown|Record<|Array<)/.test(code) ||
+    /\bas\s+const\b/.test(code)
+  ) {
+    return "typescript";
+  }
+  if (/\b(const|let|var)\s+\w+\s*=|\bfunction\s+\w+\s*\(|=>|console\./.test(code)) {
+    return "javascript";
+  }
+  if (
+    /^\s*(def|class)\s+\w+/m.test(code) ||
+    /^\s*from\s+[\w.]+\s+import\b/m.test(code) ||
+    /^\s*import\s+[\w.]+/m.test(code)
+  ) {
+    return "python";
+  }
+  if (
+    /^#!.*\b(?:bash|sh)\b/.test(code) ||
+    /^\s*(export\s+\w+=|curl\s+|npm\s+|pnpm\s+|yarn\s+|docker\s+)/m.test(code)
+  ) {
+    return "bash";
+  }
+  if (/^[\w.-]+:\s+.+/m.test(code) && !/[;{}]/.test(code.slice(0, 240))) {
+    return "yaml";
+  }
+
+  return "text";
+};
+
+export const getCodeFieldPreviewLanguage = (field: BaseFieldVO, value: unknown) => {
+  if (field.type === "json" || field.type === "yaml") {
+    return field.type;
+  }
+  const configuredLanguage = normalizeCodeLanguage(field.options.code?.language);
+  return configuredLanguage === "text" ? guessCodeLanguageFromValue(value) : configuredLanguage;
+};
+
+const looksLikeJson = (value: string) => {
+  try {
+    JSON.parse(value);
+    return true;
+  } catch {
+    return false;
+  }
+};

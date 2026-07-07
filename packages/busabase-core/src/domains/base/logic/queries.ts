@@ -3,7 +3,7 @@ import "server-only";
 import { listRecordsInputSchema } from "busabase-contract/domains/base/contract/record-schemas";
 import { and, asc, desc, eq, inArray, isNotNull, isNull, lt, or, type SQL } from "drizzle-orm";
 import type { z } from "zod";
-import { getContextSpaceId } from "../../../context";
+import { getContextSpaceId, resolveUserRefs } from "../../../context";
 import { getDb } from "../../../db";
 import type { RecordPO } from "../../../db/schema";
 import {
@@ -103,7 +103,8 @@ export const listViews = async (baseId?: string) => {
         )
         .orderBy(asc(busabaseViews.createdAt))
         .then((rows) => rows.map((r) => r.view));
-  return viewRows.map(toViewVO);
+  const users = await resolveUserRefs(viewRows.map((view) => view.createdBy));
+  return viewRows.map((view) => toViewVO(view, users));
 };
 
 export const listRecords = async (input?: z.input<typeof listInputSchema>) => {
@@ -308,7 +309,8 @@ export const listArchivedViews = async (baseId: string) => {
     .from(busabaseViews)
     .where(and(eq(busabaseViews.baseId, resolvedBase.id), eq(busabaseViews.status, "archived")))
     .orderBy(asc(busabaseViews.createdAt));
-  return viewRows.map(toViewVO);
+  const users = await resolveUserRefs(viewRows.map((view) => view.createdBy));
+  return viewRows.map((view) => toViewVO(view, users));
 };
 
 export const listArchivedRecords = async (baseId: string) => {

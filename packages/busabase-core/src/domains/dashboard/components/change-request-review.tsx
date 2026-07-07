@@ -22,8 +22,9 @@ import {
   operationMeta,
   statusTone,
 } from "../helpers/change-request";
-import { formatActorLabel, formatDetailTime } from "../helpers/format";
+import { formatDetailTime } from "../helpers/format";
 import { SubjectCommentThread } from "./comments";
+import { UserRefButton } from "./identity";
 import { OperationFieldChanges } from "./operation-diff";
 import {
   BackLink,
@@ -249,7 +250,11 @@ export function ReviewTimelineEntry({ review }: { review: ReviewVO }) {
       </span>
       <div className="min-w-0">
         <div className="text-sm">
-          <span className="font-medium">{formatActorLabel(review.reviewerId)}</span>{" "}
+          <UserRefButton
+            fallbackId={review.reviewerId}
+            user={review.reviewer}
+            title="Reviewer detail"
+          />{" "}
           {approved ? messages.review.approvedChangeRequest : messages.review.requestedChanges}
           <span className="ml-2 text-muted-foreground text-xs">
             {formatDetailTime(review.createdAt)}
@@ -275,7 +280,7 @@ export function MergeTimelineEntry({ event }: { event: AuditEventVO }) {
       </span>
       <div className="min-w-0">
         <div className="text-sm">
-          <span className="font-medium">{formatActorLabel(event.actorId)}</span>{" "}
+          <UserRefButton fallbackId={event.actorId} user={event.actor} title="Merger detail" />{" "}
           {messages.review.mergedThisChangeRequest}
           <span className="ml-2 text-muted-foreground text-xs">
             {formatDetailTime(event.createdAt)}
@@ -623,7 +628,12 @@ export function ChangeRequestReviewLayout({
             {getChangeRequestTitle(changeRequest, messages)}
           </h1>
           <div className="mt-2.5 flex flex-wrap gap-2 text-muted-foreground text-xs">
-            <span>{formatActorLabel(changeRequest.submittedBy)}</span>
+            <UserRefButton
+              fallbackId={changeRequest.submittedBy}
+              labelClassName="font-medium text-muted-foreground"
+              title="Submitter detail"
+              user={changeRequest.submittedByUser}
+            />
             <span>·</span>
             {getChangeRequestScopeHref(changeRequest) ? (
               <Link
@@ -701,13 +711,35 @@ export function ChangeRequestReviewLayout({
             {approvedReview ? (
               <SidebarRow
                 label={messages.review.approvedBy}
-                value={`${formatActorLabel(approvedReview.reviewerId)} · ${formatDetailTime(approvedReview.createdAt)}`}
+                value={
+                  <span className="inline-flex min-w-0 items-center gap-1">
+                    <UserRefButton
+                      fallbackId={approvedReview.reviewerId}
+                      labelClassName="font-medium"
+                      title="Reviewer detail"
+                      user={approvedReview.reviewer}
+                    />
+                    <span className="shrink-0">·</span>
+                    <span className="shrink-0">{formatDetailTime(approvedReview.createdAt)}</span>
+                  </span>
+                }
               />
             ) : null}
             {mergeEvent ? (
               <SidebarRow
                 label={messages.review.mergedBy}
-                value={`${formatActorLabel(mergeEvent.actorId)} · ${formatDetailTime(mergeEvent.createdAt)}`}
+                value={
+                  <span className="inline-flex min-w-0 items-center gap-1">
+                    <UserRefButton
+                      fallbackId={mergeEvent.actorId}
+                      labelClassName="font-medium"
+                      title="Merger detail"
+                      user={mergeEvent.actor}
+                    />
+                    <span className="shrink-0">·</span>
+                    <span className="shrink-0">{formatDetailTime(mergeEvent.createdAt)}</span>
+                  </span>
+                }
               />
             ) : null}
             <SidebarRow

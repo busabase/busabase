@@ -48,28 +48,28 @@ const downloadOptions = [
   {
     platformId: "darwin-aarch64",
     os: "macOS",
-    title: "Apple Silicon",
+    titleKey: "appleSilicon",
     descriptionKey: "macAppleSiliconDescription",
     icon: Laptop,
   },
   {
     platformId: "darwin-x86_64",
     os: "macOS",
-    title: "Intel",
+    titleKey: "intel",
     descriptionKey: "macIntelDescription",
     icon: Laptop,
   },
   {
     platformId: "windows-x86_64",
     os: "Windows",
-    title: "Windows",
+    titleKey: "windows",
     descriptionKey: "windowsDescription",
     icon: MonitorDown,
   },
   {
     platformId: "linux-x86_64",
     os: "Linux",
-    title: "Linux",
+    titleKey: "linux",
     descriptionKey: "linuxDescription",
     icon: HardDrive,
   },
@@ -98,20 +98,21 @@ const mobileOptions = [
   },
 ] as const;
 
-export const metadata: Metadata = {
-  title: "Download Busabase Desktop",
-  description:
-    "Download Busabase Desktop for macOS, Windows, and Linux from the public Busabase desktop release channel.",
-  alternates: {
-    canonical: CANONICAL_URL,
-  },
-  openGraph: {
-    title: "Download Busabase Desktop",
-    description:
-      "Run Busabase as a local-first desktop app for approval-first AI agent data workflows.",
-    type: "website",
-    url: CANONICAL_URL,
-  },
+export const generateMetadata = async (): Promise<Metadata> => {
+  const LL = await getBusabaseServerLL();
+  return {
+    title: LL.marketing.downloadTitle(),
+    description: LL.marketing.downloadDescription(),
+    alternates: {
+      canonical: CANONICAL_URL,
+    },
+    openGraph: {
+      title: LL.marketing.downloadTitle(),
+      description: LL.marketing.downloadOgDescription(),
+      type: "website",
+      url: CANONICAL_URL,
+    },
+  };
 };
 
 async function getDownloadManifest(): Promise<DownloadManifest | null> {
@@ -202,7 +203,7 @@ export default async function DownloadPage() {
                     </span>
                     <span className="min-w-0 flex-1">
                       <span className="block text-sm font-medium text-foreground">
-                        {option.os} - {option.title}
+                        {option.os} - {LL.marketing[option.titleKey]()}
                       </span>
                       <span className="mt-1 block text-sm leading-5 text-muted-foreground">
                         {LL.marketing[option.descriptionKey]()}
@@ -213,7 +214,7 @@ export default async function DownloadPage() {
 
                 return href ? (
                   <a
-                    key={`${option.os}-${option.title}`}
+                    key={option.platformId}
                     href={href}
                     className="group flex items-center gap-4 rounded-md border border-border bg-background p-4 transition-colors hover:border-primary/40 hover:bg-accent/60"
                   >
@@ -225,7 +226,7 @@ export default async function DownloadPage() {
                   </a>
                 ) : (
                   <div
-                    key={`${option.os}-${option.title}`}
+                    key={option.platformId}
                     className="flex items-center gap-4 rounded-md border border-border bg-background p-4 opacity-70"
                   >
                     {content}

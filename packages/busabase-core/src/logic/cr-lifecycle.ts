@@ -10,7 +10,7 @@ import type {
 } from "busabase-contract/types";
 import { and, asc, desc, eq, inArray, isNull, or } from "drizzle-orm";
 import { z } from "zod";
-import { getContextSpaceId, resolveActorId } from "../context";
+import { getContextSpaceId, resolveActorId, resolveUserRefs } from "../context";
 import { getDb } from "../db";
 import type {
   BusabaseNodeType,
@@ -51,7 +51,7 @@ import {
   mergeViewUpdate as mergeViewUpdateBase,
 } from "../domains/base/handlers";
 import { mergeDocUpdate } from "../domains/doc/handlers";
-import { mergeSkillFile, mergeSkillMetadata } from "../domains/skill/handlers";
+import { mergeFileTreeFile, mergeFileTreeMetadata } from "../domains/filetree/handlers";
 import { insertAuditEvent } from "./audit";
 import { projectCommitFields } from "./field-values";
 import {
@@ -90,6 +90,17 @@ export const reviseOperationInputSchema = z.object({
   author: z.string().optional().default("local-producer"),
   baseCommitId: z.string().optional(),
 });
+
+const changeRequestNotFound = (changeRequestId: string) =>
+  new ORPCError("NOT_FOUND", {
+    message: `ChangeRequest not found: ${changeRequestId}`,
+  });
+
+const changeRequestConflict = (message: string, data?: Record<string, unknown>) =>
+  new ORPCError("CONFLICT", { message, ...(data ? { data } : {}) });
+
+const changeRequestBadRequest = (message: string, data?: Record<string, unknown>) =>
+  new ORPCError("BAD_REQUEST", { message, ...(data ? { data } : {}) });
 
 // ── MergeCtx ─────────────────────────────────────────────────────────────────
 
@@ -570,18 +581,25 @@ export const hydrateChangeRequest = async (
     return null;
   };
 
-  const operations: OperationVO[] = itemRows.map((item) => {
-    const commit = commitsById.get(item.headCommitId);
-    if (!commit) {
-      throw new Error(`Invalid operation graph for ${item.id}`);
-    }
-    return toOperationVO(item, commit, resolveBaseFields(item));
-  });
   const reviewRows = await db
     .select()
     .from(busabaseReviews)
     .where(eq(busabaseReviews.changeRequestId, changeRequest.id))
     .orderBy(desc(busabaseReviews.createdAt));
+  const users = await resolveUserRefs([
+    changeRequest.submittedBy,
+    ...commitRows.map((commit) => commit.author),
+    ...baseCommitRows.map((commit) => commit.author),
+    ...reviewRows.map((review) => review.reviewerId),
+  ]);
+
+  const operations: OperationVO[] = itemRows.map((item) => {
+    const commit = commitsById.get(item.headCommitId);
+    if (!commit) {
+      throw new Error(`Invalid operation graph for ${item.id}`);
+    }
+    return toOperationVO(item, commit, resolveBaseFields(item), users);
+  });
   const base = changeRequest.baseId ? (baseMap.get(changeRequest.baseId) ?? null) : null;
   const node = changeRequest.nodeId ? (nodeMap.get(changeRequest.nodeId) ?? null) : null;
   if (changeRequest.targetType === "base" && !base) {
@@ -598,6 +616,7 @@ export const hydrateChangeRequest = async (
     nodeId: changeRequest.nodeId,
     status: changeRequest.status,
     submittedBy: changeRequest.submittedBy,
+    submittedByUser: users.get(changeRequest.submittedBy) ?? null,
     sourceMeta: changeRequest.sourceMeta,
     reviewPolicySnapshot: changeRequest.reviewPolicySnapshot,
     mergeSummary: changeRequest.mergeSummary,
@@ -611,7 +630,7 @@ export const hydrateChangeRequest = async (
     operations,
     primaryOperation: operations[0] ?? null,
     operationCount: operations.length,
-    reviews: reviewRows.map(toReviewVO) as ReviewVO[],
+    reviews: reviewRows.map((review) => toReviewVO(review, users)) as ReviewVO[],
   };
 };
 
@@ -628,6 +647,8 @@ export const hydrateRecord = async (record: RecordPO): Promise<RecordVO> => {
     throw new Error(`Invalid record graph for ${record.id}`);
   }
 
+  const users = await resolveUserRefs([record.createdBy, headCommit.author]);
+
   return {
     id: record.id,
     baseId: record.baseId,
@@ -636,11 +657,12 @@ export const hydrateRecord = async (record: RecordPO): Promise<RecordVO> => {
     parentCommitId: record.parentCommitId,
     status: record.status === "archived" ? "archived" : "active",
     createdBy: record.createdBy,
+    createdByUser: users.get(record.createdBy) ?? null,
     archivedAt: toIso(record.archivedAt),
     createdAt: record.createdAt.toISOString(),
     updatedAt: record.updatedAt.toISOString(),
     base,
-    headCommit: toCommitVO(headCommit),
+    headCommit: toCommitVO(headCommit, users),
   };
 };
 
@@ -831,7 +853,7 @@ export const reviewChangeRequest = async (
     .where(eq(busabaseChangeRequests.id, changeRequestId))
     .limit(1);
   if (!changeRequest) {
-    throw new Error(`ChangeRequest not found: ${changeRequestId}`);
+    throw changeRequestNotFound(changeRequestId);
   }
   // Idempotent for already-merged CRs: structural CRs auto-merge on create, so a
   // caller still following the old create→review→merge flow (e.g. the CLI/skills)
@@ -844,7 +866,7 @@ export const reviewChangeRequest = async (
     return already;
   }
   if (changeRequest.status !== "in_review" && changeRequest.status !== "changes_requested") {
-    throw new Error(`ChangeRequest is not reviewable: ${changeRequest.status}`);
+    throw changeRequestConflict(`ChangeRequest is not reviewable: ${changeRequest.status}`);
   }
 
   const operationKinds = await db
@@ -852,7 +874,7 @@ export const reviewChangeRequest = async (
     .from(busabaseOperations)
     .where(eq(busabaseOperations.changeRequestId, changeRequest.id));
   if (operationKinds.length === 0) {
-    throw new Error(`ChangeRequest has no operations: ${changeRequest.id}`);
+    throw changeRequestBadRequest(`ChangeRequest has no operations: ${changeRequest.id}`);
   }
   const visibleOperationHeads = Object.fromEntries(
     operationKinds.map((item) => [item.id, item.headCommitId]),
@@ -947,10 +969,10 @@ export const autoApproveAndMerge = async (
     .where(eq(busabaseChangeRequests.id, changeRequestId))
     .limit(1);
   if (!changeRequest) {
-    throw new Error(`ChangeRequest not found: ${changeRequestId}`);
+    throw changeRequestNotFound(changeRequestId);
   }
   if (changeRequest.status !== "in_review" && changeRequest.status !== "changes_requested") {
-    throw new Error(`ChangeRequest is not auto-mergeable: ${changeRequest.status}`);
+    throw changeRequestConflict(`ChangeRequest is not auto-mergeable: ${changeRequest.status}`);
   }
 
   const operations = await db
@@ -958,11 +980,11 @@ export const autoApproveAndMerge = async (
     .from(busabaseOperations)
     .where(eq(busabaseOperations.changeRequestId, changeRequest.id));
   if (operations.length === 0) {
-    throw new Error(`ChangeRequest has no operations: ${changeRequest.id}`);
+    throw changeRequestBadRequest(`ChangeRequest has no operations: ${changeRequest.id}`);
   }
   // Safety net for F2: a content CR must never auto-merge, whatever the caller.
   if (changeRequestHasContentOps(operations)) {
-    throw new Error("Refusing to auto-merge a content (record) change request");
+    throw changeRequestBadRequest("Refusing to auto-merge a content (record) change request");
   }
 
   const timestamp = now();
@@ -1013,6 +1035,9 @@ export const autoApproveAndMerge = async (
  * bespoke `base.created` / `doc.created` / `skill.created` / `field.created` /
  * `doc.updated` audit actions.
  */
+const metadataStringArray = (value: unknown) =>
+  Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+
 export const recordMergedOperation = async (args: {
   operation: OperationPO["operation"];
   targetType: "node" | "base";
@@ -1117,6 +1142,22 @@ export const recordMergedOperation = async (args: {
     changeRequestId,
     metadata: { operation: args.operation, ...mergeSummary },
   });
+  await publishBusabaseLiveEvent({
+    kind: "change_request.merged",
+    spaceId: getContextSpaceId(),
+    actorId: args.submittedBy,
+    changeRequestId,
+    baseId,
+    nodeIds: [
+      ...new Set([
+        ...(args.targetType === "node" && nodeId ? [nodeId] : []),
+        ...metadataStringArray(mergeSummary.mergedNodeIds),
+      ]),
+    ],
+    recordIds: metadataStringArray(mergeSummary.recordIds),
+    viewIds: metadataStringArray(mergeSummary.viewIds),
+    operationCount: 1,
+  });
   return changeRequestId;
 };
 
@@ -1161,11 +1202,11 @@ export const closeChangeRequest = async (changeRequestId: string, reason?: strin
     .where(eq(busabaseChangeRequests.id, changeRequestId))
     .limit(1);
   if (!changeRequest) {
-    throw new Error(`ChangeRequest not found: ${changeRequestId}`);
+    throw changeRequestNotFound(changeRequestId);
   }
   // `conflict` is closable too — the author may abandon an unresolvable conflict.
   if (!["in_review", "changes_requested", "approved", "conflict"].includes(changeRequest.status)) {
-    throw new Error(`ChangeRequest is not closable: ${changeRequest.status}`);
+    throw changeRequestConflict(`ChangeRequest is not closable: ${changeRequest.status}`);
   }
   const timestamp = now();
   await db
@@ -1237,6 +1278,7 @@ export const listAgentTasks = async () => {
       changeRequest.status === "changes_requested" ||
       aiCommentsByChangeRequest.has(changeRequest.id),
   );
+  const commentUsers = await resolveUserRefs(aiCommentRows.map((comment) => comment.authorId));
 
   return Promise.all(
     queued.map(async (changeRequestRow) => {
@@ -1253,8 +1295,8 @@ export const listAgentTasks = async () => {
           ? "changes_requested"
           : "ai_mention") as AgentTaskTrigger,
         reviewReason: latestReview?.reason ?? null,
-        aiComments: (aiCommentsByChangeRequest.get(changeRequestRow.id) ?? []).map(
-          toCommentVO,
+        aiComments: (aiCommentsByChangeRequest.get(changeRequestRow.id) ?? []).map((comment) =>
+          toCommentVO(comment, commentUsers),
         ) as CommentVO[],
       };
     }),
@@ -1317,7 +1359,7 @@ const _mergeChangeRequest = async (changeRequestId: string) => {
     )
     .limit(1);
   if (!changeRequest) {
-    throw new Error(`ChangeRequest not found: ${changeRequestId}`);
+    throw changeRequestNotFound(changeRequestId);
   }
   // Idempotent for already-merged CRs (structural CRs auto-merge on create): a
   // caller re-merging via the old flow gets the merged CR back, not an error.
@@ -1329,7 +1371,9 @@ const _mergeChangeRequest = async (changeRequestId: string) => {
     return { changeRequest: already, record: null, view: null };
   }
   if (changeRequest.status !== "approved") {
-    throw new Error("ChangeRequest must be approved before merge");
+    throw changeRequestConflict("ChangeRequest must be approved before merge", {
+      status: changeRequest.status,
+    });
   }
 
   const timestamp = now();
@@ -1339,7 +1383,7 @@ const _mergeChangeRequest = async (changeRequestId: string) => {
     .where(eq(busabaseOperations.changeRequestId, changeRequest.id))
     .orderBy(asc(busabaseOperations.position), asc(busabaseOperations.createdAt));
   if (operationKinds.length === 0) {
-    throw new Error(`ChangeRequest has no operations: ${changeRequest.id}`);
+    throw changeRequestBadRequest(`ChangeRequest has no operations: ${changeRequest.id}`);
   }
 
   const operationHeadCommitIds = operationKinds.map((item) => item.headCommitId);
@@ -1406,14 +1450,10 @@ const _mergeChangeRequest = async (changeRequestId: string) => {
           await mergeNodeDelete(ctx, item, node);
         } else if (item.operation === "node_restore") {
           await mergeNodeRestore(ctx, item, node);
-        } else if (
-          item.operation === "skill_file_create" ||
-          item.operation === "skill_file_update" ||
-          item.operation === "skill_file_delete"
-        ) {
-          await mergeSkillFile(ctx, item, node, headCommit);
-        } else if (item.operation === "skill_metadata_update") {
-          await mergeSkillMetadata(ctx, item, node, headCommit);
+        } else if (/^[a-z0-9-]+_file_(create|update|delete)$/.test(item.operation)) {
+          await mergeFileTreeFile(ctx, item, node, headCommit);
+        } else if (/^[a-z0-9-]+_metadata_update$/.test(item.operation)) {
+          await mergeFileTreeMetadata(ctx, item, node, headCommit);
         } else if (item.operation === "doc_update") {
           await mergeDocUpdate(ctx, item, node, headCommit);
         } else {
@@ -1761,7 +1801,7 @@ const _mergeChangeRequest = async (changeRequestId: string) => {
   return {
     changeRequest: updatedChangeRequest,
     record: record ? await hydrateRecord(record) : null,
-    view: view ? toViewVO(view) : null,
+    view: view ? toViewVO(view, await resolveUserRefs([view.createdBy])) : null,
   };
 };
 

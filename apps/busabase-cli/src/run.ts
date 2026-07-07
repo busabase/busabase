@@ -236,20 +236,21 @@ async function rawRequest(
   return rawFetch(config, method, path, body);
 }
 
-async function uploadAttachment(config: ResolvedConfig, opts: OptionValues) {
+async function uploadAsset(config: ResolvedConfig, opts: OptionValues) {
   const filePath = opts.file as string;
   const file = readFileSync(filePath);
   const fileName = (opts.fileName as string | undefined) ?? basename(filePath);
   const mimeType = (opts.mimeType as string | undefined) ?? guessMimeType(filePath);
   const context = (opts.context as string | undefined) ?? "record-field";
   const contentHash = `sha256:${createHash("sha256").update(file).digest("hex")}`;
-  const requested = (await rawRequest(config, "POST", "/api/v1/attachments/upload-urls", {
+  const requested = (await rawRequest(config, "POST", "/api/v1/assets/upload-urls", {
     fileName,
     mimeType,
     sizeBytes: file.byteLength,
     context,
     contentHash,
   })) as {
+    assetId?: string;
     attachmentId?: string;
     duplicate?: boolean;
     publicUrl: string;
@@ -259,7 +260,9 @@ async function uploadAttachment(config: ResolvedConfig, opts: OptionValues) {
 
   if (requested.duplicate) {
     return {
-      id: requested.attachmentId,
+      id: requested.assetId ?? requested.attachmentId,
+      assetId: requested.assetId,
+      attachmentId: requested.attachmentId,
       url: requested.publicUrl,
       fileName,
       mimeType,
@@ -281,21 +284,23 @@ async function uploadAttachment(config: ResolvedConfig, opts: OptionValues) {
   if (!uploadResponse.ok) {
     const text = await uploadResponse.text();
     throw new Error(
-      `Attachment byte upload failed (${uploadResponse.status} ${uploadResponse.statusText})${text ? `: ${text}` : ""}`,
+      `Asset byte upload failed (${uploadResponse.status} ${uploadResponse.statusText})${text ? `: ${text}` : ""}`,
     );
   }
 
-  const confirmed = (await rawRequest(config, "POST", "/api/v1/attachments/confirmations", {
+  const confirmed = (await rawRequest(config, "POST", "/api/v1/assets/confirmations", {
     storageKey: requested.storageKey,
     fileName,
     mimeType,
     sizeBytes: file.byteLength,
     context,
     contentHash,
-  })) as { attachmentId: string; publicUrl: string };
+  })) as { assetId?: string; attachmentId: string; publicUrl: string };
 
   return {
-    id: confirmed.attachmentId,
+    id: confirmed.assetId ?? confirmed.attachmentId,
+    assetId: confirmed.assetId,
+    attachmentId: confirmed.attachmentId,
     url: confirmed.publicUrl,
     fileName,
     mimeType,
@@ -536,6 +541,8 @@ function flagSignature(cmd: Command): string {
   return parts.join(" ");
 }
 
+const isHelpHidden = (cmd: Command): boolean => Boolean((cmd as { _noHelp?: boolean })._noHelp);
+
 /**
  * Root help "Commands:" section: every leaf with its full flag signature (the flat
  * commander listing would only show group names). Generated from the command tree,
@@ -551,8 +558,8 @@ function commandsSection(program: Command): string {
     return `  ${sig}\n${" ".repeat(44)}${desc}`;
   };
   for (const cmd of program.commands) {
-    if (cmd.name() === "help") continue;
-    const leaves = cmd.commands.filter((leaf) => leaf.name() !== "help");
+    if (cmd.name() === "help" || isHelpHidden(cmd)) continue;
+    const leaves = cmd.commands.filter((leaf) => leaf.name() !== "help" && !isHelpHidden(leaf));
     if (leaves.length > 0) {
       lines.push("");
       for (const leaf of leaves) lines.push(entry(`${cmd.name()} ${leaf.name()}`, leaf));
@@ -650,8 +657,8 @@ The flags below skip the menu (handy for scripts / CI):
   addGlobalFlags(nodes.command("create-change-request"))
     .description("Propose a new node via a Change Request")
     .addOption(
-      new Option("--type <folder|base|skill|doc>", "node type")
-        .choices(["folder", "base", "skill", "doc"])
+      new Option("--type <folder|base|skill|drive|doc>", "node type")
+        .choices(["folder", "base", "skill", "drive", "doc"])
         .makeOptionMandatory(),
     )
     .requiredOption("--slug <slug>", "node slug")
@@ -956,22 +963,24 @@ Examples:
       ),
     );
 
-  const attachments = program.command("attachments").description("Attachments");
-  addGlobalFlags(attachments.command("upload"))
-    .description("Upload a file and print an attachment ref for record fields")
-    .requiredOption("--file <path>", "local file to upload")
-    .option("--file-name <name>", "stored file name (default: basename of --file)")
-    .option("--mime-type <mime>", "MIME type (default: inferred from extension)")
-    .option("--context <value>", "upload context (default record-field)")
-    .addHelpText(
-      "after",
-      `
+  const addUploadCommand = (parent: Command, hidden = false) =>
+    addGlobalFlags(parent.command("upload", { noHelp: hidden }))
+      .description("Upload a file and print an asset ref for record fields")
+      .requiredOption("--file <path>", "local file to upload")
+      .option("--file-name <name>", "stored file name (default: basename of --file)")
+      .option("--mime-type <mime>", "MIME type (default: inferred from extension)")
+      .option("--context <value>", "upload context (default record-field)")
+      .addHelpText(
+        "after",
+        `
 Example:
-  busabase-cli attachments upload --file ./cover.png --output json
+  busabase-cli assets upload --file ./cover.png --output json
 
 Use the JSON output directly in an attachment field value, e.g. {"cover_image":[<output>]}.`,
-    )
-    .action(runAction(state, (_client, opts, config) => uploadAttachment(config, opts)));
+      )
+      .action(runAction(state, (_client, opts, config) => uploadAsset(config, opts)));
+
+  addUploadCommand(program.command("assets").description("Assets"));
 
   addGlobalFlags(program.command("api"))
     .description("Raw request to any /api/v1 endpoint")

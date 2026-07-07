@@ -1,12 +1,6 @@
 import "server-only";
 
-import type {
-  BaseVO,
-  ChangeRequestStatus,
-  NodeVO,
-  OperationKind,
-  ViewConfigVO,
-} from "busabase-contract/types";
+import type { BaseVO, ChangeRequestStatus, NodeVO, ViewConfigVO } from "busabase-contract/types";
 import { and, eq, inArray } from "drizzle-orm";
 import { iStringToText } from "openlib/i18n/i-string";
 import { getContextSpaceId, LOCAL_SPACE_ID } from "../context";
@@ -18,6 +12,7 @@ import {
   busabaseChangeRequests,
   busabaseCommits,
   busabaseNodes,
+  type busabaseOperationKindEnum,
   busabaseOperations,
   busabaseRecords,
   busabaseReviews,
@@ -25,9 +20,10 @@ import {
 } from "../db/schema";
 import { buildRecordSeedFields } from "../demo/dataset";
 import type { SeedScenario } from "../demo/seed-types";
+import { storagePrefix, writeTextFile } from "../domains/filetree/logic/storage";
 import { skillStoragePrefix, writeSkillTextFile } from "../domains/skill/logic/storage";
 import { ensureProjectionBackfill, projectCommitFields } from "./field-values";
-import { CURRENT_USER_ID, hashText, id, now, ROOT_NODE_ID, rootNodeIdForSpace } from "./kernel";
+import { CURRENT_USER_ID, hashText, now, ROOT_NODE_ID, rootNodeIdForSpace } from "./kernel";
 import { toBaseVO, toNodeVO } from "./vo";
 
 const minutesBefore = (date: Date, minutes: number) => new Date(date.getTime() - minutes * 60_000);
@@ -38,6 +34,8 @@ const globalForStore = globalThis as typeof globalThis & {
 };
 
 // ── Interfaces ────────────────────────────────────────────────────────────────
+
+type DbOperationKind = (typeof busabaseOperationKindEnum.enumValues)[number];
 
 interface SeedRecordInput {
   id: string;
@@ -53,7 +51,7 @@ interface SeedRecordInput {
 interface SeedOperationKindInput {
   id: string;
   commitId: string;
-  operation: OperationKind;
+  operation: DbOperationKind;
   fields: Record<string, unknown>;
   message: string;
   author: string;
@@ -86,7 +84,7 @@ interface SeedNodeChangeRequestInput {
   operation: {
     id: string;
     commitId: string;
-    operation: OperationKind;
+    operation: DbOperationKind;
     filePath?: string | null;
     fields: Record<string, unknown>;
     message: string;
@@ -386,6 +384,8 @@ const SEED_RESEARCH_SKILL_NODE_ID = "nod_skill_ai_research_editor";
 const SEED_SKILL_CHANGE_REQUEST_ID = "crq_seed_skill_research_editor";
 const SEED_SKILL_OPERATION_ID = "opr_seed_skill_research_editor";
 const SEED_SKILL_COMMIT_ID = "cmt_seed_skill_research_editor";
+const DRIVES_FOLDER_NODE_ID = "nod_drives";
+const SEED_TEAM_DRIVE_NODE_ID = "nod_drive_team_files";
 
 const seedSkillNodeIfMissing = async (createdAt: Date) => {
   ensureDefaultStorageUrl();
@@ -510,6 +510,82 @@ const seedSkillNodeIfMissing = async (createdAt: Date) => {
       author: "skill-maintainer-agent",
     },
   });
+};
+
+const seedDriveNodeIfMissing = async (createdAt: Date) => {
+  ensureDefaultStorageUrl();
+  const db = await getDb();
+  const [existingFolder] = await db
+    .select()
+    .from(busabaseNodes)
+    .where(eq(busabaseNodes.id, DRIVES_FOLDER_NODE_ID))
+    .limit(1);
+  if (!existingFolder) {
+    await db.insert(busabaseNodes).values({
+      id: DRIVES_FOLDER_NODE_ID,
+      parentId: ROOT_NODE_ID,
+      type: "folder",
+      slug: "drives",
+      name: "Drives",
+      description: "Pure file-tree Drives managed through review.",
+      position: 2,
+      createdAt,
+      updatedAt: createdAt,
+    });
+  }
+
+  const driveMetadata = {
+    storagePrefix: storagePrefix(SEED_TEAM_DRIVE_NODE_ID),
+    entryFile: "README.md",
+    visibility: "workspace" as const,
+    version: "0.1.0",
+  };
+  const [existingDrive] = await db
+    .select()
+    .from(busabaseNodes)
+    .where(eq(busabaseNodes.id, SEED_TEAM_DRIVE_NODE_ID))
+    .limit(1);
+  if (existingDrive) {
+    await db
+      .update(busabaseNodes)
+      .set({
+        parentId: DRIVES_FOLDER_NODE_ID,
+        type: "drive",
+        slug: "team-files",
+        name: "Team Files",
+        description: "A plain file drive seeded with README.md.",
+        metadata: driveMetadata,
+        updatedAt: createdAt,
+      })
+      .where(eq(busabaseNodes.id, SEED_TEAM_DRIVE_NODE_ID));
+  } else {
+    await db.insert(busabaseNodes).values({
+      id: SEED_TEAM_DRIVE_NODE_ID,
+      parentId: DRIVES_FOLDER_NODE_ID,
+      type: "drive",
+      slug: "team-files",
+      name: "Team Files",
+      description: "A plain file drive seeded with README.md.",
+      metadata: driveMetadata,
+      position: 0,
+      createdAt,
+      updatedAt: createdAt,
+    });
+  }
+
+  const [driveNode] = await db
+    .select()
+    .from(busabaseNodes)
+    .where(eq(busabaseNodes.id, SEED_TEAM_DRIVE_NODE_ID))
+    .limit(1);
+  if (!driveNode) {
+    throw new Error("Failed to seed Drive node");
+  }
+  await writeTextFile(
+    driveNode,
+    "README.md",
+    "# Team Files\n\nA shared Drive for plain files. Propose edits through change requests before merge.\n",
+  );
 };
 
 export const buildNodeTree = (nodes: NodePO[], bases: BasePO[]): NodeVO[] => {
@@ -763,7 +839,7 @@ const applySeedScenario = async (scenario: SeedScenario) => {
       operations: changeRequest.operations.map((operation) => ({
         id: operation.id,
         commitId: operation.commitId,
-        operation: operation.operation,
+        operation: operation.operation as DbOperationKind,
         fields: operation.fields,
         message: operation.message,
         author: operation.author,
@@ -784,9 +860,10 @@ export const seedScenario = async (scenario: SeedScenario) => {
   await ensureReady();
   await applySeedScenario(scenario);
   // The "Agent Skills" demo (folder + AI Research Editor skill + its change
-  // request) is opt-in example content: it ships with `pnpm db:seed:all`, not
+  // request) and Drive demo are opt-in example content: they ship with `pnpm db:seed:all`, not
   // with the first-request auto-seed in ensureReady().
   await seedSkillNodeIfMissing(now());
+  await seedDriveNodeIfMissing(now());
 };
 
 export const loadBasesByIds = async (baseIds: string[]): Promise<Map<string, BaseVO>> => {

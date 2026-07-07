@@ -43,10 +43,11 @@ describe("busabase-cli commands", () => {
   });
 
   it("documents node and terminal Change Request commands in help", () => {
-    expect(HELP).toContain("nodes create-change-request --type <folder|base|skill|doc>");
+    expect(HELP).toContain("nodes create-change-request --type <folder|base|skill|drive|doc>");
     expect(HELP).toContain("change-requests close --change-request-id <id>");
     expect(HELP).toContain("records list [--limit <n>] [--base-id <id>] [--cursor <cursor>]");
-    expect(HELP).toContain("attachments upload --file <path>");
+    expect(HELP).toContain("assets upload --file <path>");
+    expect(HELP).not.toContain("attachments upload");
     expect(HELP).toContain("rejected = request changes, not terminal");
     expect(HELP).not.toContain(["create", "dra", "ft"].join("-"));
     expect(HELP).not.toContain(["dra", "fts "].join(""));
@@ -402,7 +403,7 @@ describe("busabase-cli commands", () => {
     expect(global.fetch).not.toHaveBeenCalled();
   });
 
-  it("uploads attachments and prints a record-field ref", async () => {
+  it("uploads assets and prints an asset-backed record-field ref", async () => {
     const dir = await mkdtemp(join(tmpdir(), "busabase-cli-"));
     const file = join(dir, "cover.svg");
     await writeFile(file, '<svg xmlns="http://www.w3.org/2000/svg"/>');
@@ -416,7 +417,7 @@ describe("busabase-cli commands", () => {
         url: request.url,
       });
       if (request.method === "PUT") return new Response(null, { status: 200 });
-      if (request.url.endsWith("/api/v1/attachments/upload-urls")) {
+      if (request.url.endsWith("/api/v1/assets/upload-urls")) {
         return jsonResponse({
           duplicate: false,
           publicUrl: "https://cdn.example/cover.svg",
@@ -425,6 +426,7 @@ describe("busabase-cli commands", () => {
         });
       }
       return jsonResponse({
+        assetId: "ast_1",
         attachmentId: "att_1",
         publicUrl: "https://cdn.example/cover.svg",
         storageKey: "attachments/cover.svg",
@@ -437,7 +439,7 @@ describe("busabase-cli commands", () => {
         "http://localhost:15419",
         "--output",
         "json",
-        "attachments",
+        "assets",
         "upload",
         "--file",
         file,
@@ -447,9 +449,9 @@ describe("busabase-cli commands", () => {
 
       expect(exitCode).toBe(0);
       expect(calls.map((call) => [call.method, call.url])).toEqual([
-        ["POST", "http://localhost:15419/api/v1/attachments/upload-urls"],
+        ["POST", "http://localhost:15419/api/v1/assets/upload-urls"],
         ["PUT", "https://upload.example/cover.svg"],
-        ["POST", "http://localhost:15419/api/v1/attachments/confirmations"],
+        ["POST", "http://localhost:15419/api/v1/assets/confirmations"],
       ]);
       expect(calls[0]?.body).toEqual(
         expect.objectContaining({
@@ -460,8 +462,10 @@ describe("busabase-cli commands", () => {
         }),
       );
       expect(JSON.parse(log.mock.calls.at(-1)?.[0] as string)).toEqual({
+        assetId: "ast_1",
+        attachmentId: "att_1",
         fileName: "cover.svg",
-        id: "att_1",
+        id: "ast_1",
         mimeType: "image/svg+xml",
         size: 41,
         url: "https://cdn.example/cover.svg",
@@ -469,6 +473,14 @@ describe("busabase-cli commands", () => {
     } finally {
       await rm(dir, { force: true, recursive: true });
     }
+  });
+
+  it("does not expose the old attachments upload command", async () => {
+    global.fetch = vi.fn() as unknown as typeof fetch;
+    const exitCode = await runCli(["attachments", "upload", "--file", "cover.svg"]);
+
+    expect(exitCode).toBe(1);
+    expect(global.fetch).not.toHaveBeenCalled();
   });
 
   it("creates field update Change Requests with attachment options", async () => {

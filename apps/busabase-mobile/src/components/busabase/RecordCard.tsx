@@ -1,42 +1,45 @@
 import type { RecordVO } from "busabase-contract/types";
-import { Pressable, StyleSheet, Text } from "react-native";
+import { StyleSheet, Text, View } from "react-native";
+import { NativeRow } from "~/components/native-screen";
+import { getStatusLabel, StatusBadge } from "~/components/ui/StatusBadge";
 import { getPreview, getRecordTitle } from "~/lib/busabase-display";
 import { formatDate } from "~/lib/format";
-import { radius, typography } from "~/theme/tokens";
+import { typography } from "~/theme/tokens";
 import { useTokens } from "~/theme/use-tokens";
 
-export function RecordCard({ record, onPress }: { record: RecordVO; onPress?: () => void }) {
+interface RecordCardProps {
+  record: RecordVO;
+  onPress?: () => void;
+  last?: boolean;
+}
+
+export function RecordCard({ record, onPress, last }: RecordCardProps) {
   const tokens = useTokens();
+  const statusColor = record.status === "active" ? tokens.success : tokens.destructive;
+
   return (
-    <Pressable
-      accessibilityRole={onPress ? "button" : undefined}
-      disabled={!onPress}
-      style={({ pressed }) => [
-        styles.card,
-        {
-          backgroundColor: tokens.card,
-          borderColor: tokens.border,
-          opacity: pressed ? 0.78 : 1,
-        },
-      ]}
+    <NativeRow
+      title={getRecordTitle(record)}
+      subtitle={getPreview(record.headCommit.fields)}
+      meta={formatDate(record.updatedAt)}
+      leading={<View style={[styles.statusDot, { backgroundColor: statusColor }]} />}
+      trailing={<StatusBadge status={record.status} compact />}
+      last={last}
       onPress={onPress}
     >
-      <Text style={[typography.h3, { color: tokens.foreground }]}>{getRecordTitle(record)}</Text>
-      <Text style={[typography.body, { color: tokens.mutedForeground }]}>
-        {getPreview(record.headCommit.fields)}
-      </Text>
-      <Text style={[typography.small, { color: tokens.mutedForeground }]}>
-        {record.base.name} · {record.status} · {formatDate(record.updatedAt)}
-      </Text>
-    </Pressable>
+      <View>
+        <Text style={[typography.small, { color: tokens.mutedForeground }]}>
+          {record.base.name} · {getStatusLabel(record.status)}
+        </Text>
+      </View>
+    </NativeRow>
   );
 }
 
 const styles = StyleSheet.create({
-  card: {
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: radius.lg,
-    padding: 16,
-    gap: 8,
+  statusDot: {
+    width: 9,
+    height: 9,
+    borderRadius: 999,
   },
 });

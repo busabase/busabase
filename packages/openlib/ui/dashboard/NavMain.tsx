@@ -2,6 +2,12 @@
 
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "kui/collapsible";
 import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "kui/dropdown-menu";
+import {
   SidebarGroup,
   SidebarGroupAction,
   SidebarGroupLabel,
@@ -14,12 +20,12 @@ import {
   SidebarMenuSubButton,
   SidebarMenuSubItem,
 } from "kui/sidebar";
-import { ChevronRight, ExternalLink, Plus, Trash2 } from "lucide-react";
+import { ChevronRight, ExternalLink, MoreHorizontal, Plus, Trash2 } from "lucide-react";
 import { memo, useState } from "react";
 import { useLocation } from "wouter";
 import { SidebarTaskList } from "./SidebarTaskList";
 import { SPALink } from "./SPALink";
-import type { NavGroup } from "./types";
+import type { NavGroup, NavItemAction } from "./types";
 
 interface NavKeyItem {
   title: string;
@@ -32,6 +38,8 @@ const getNavItemKey = (item: NavKeyItem, index: number, prefix = "item") =>
   [prefix, item.id, item.onClick, item.url, item.title, String(index)]
     .filter((v) => v !== undefined && v !== null && v !== "")
     .join(":");
+
+const isExternalUrl = (url: string) => url.startsWith("http://") || url.startsWith("https://");
 
 interface NavMainProps {
   items: NavGroup[];
@@ -62,7 +70,7 @@ function NavMainComponent({
   isTaskListExpanded,
   onTaskListExpandToggle,
 }: NavMainProps) {
-  const [location] = useLocation();
+  const [location, setLocation] = useLocation();
   // A nav url is "active" for the current location on an exact match OR when the
   // location is a descendant route (e.g. a record under a base folder). This keeps
   // the parent folder highlighted and expanded while browsing its child pages.
@@ -78,6 +86,24 @@ function NavMainComponent({
       ...prev,
       [groupKey]: !prev[groupKey],
     }));
+  };
+
+  const handleItemAction = (action: NavItemAction) => {
+    if (action.onSelect) {
+      action.onSelect();
+      return;
+    }
+    if (action.action) {
+      onNavItemAction?.(action.action);
+      return;
+    }
+    if (action.url) {
+      if (isExternalUrl(action.url)) {
+        window.open(action.url, "_blank", "noopener,noreferrer");
+      } else {
+        setLocation(action.url);
+      }
+    }
   };
 
   // Check if any dynamic group exists (for flex layout)
@@ -170,8 +196,13 @@ function NavMainComponent({
                     (item.items?.some((subItem) => isPathActive(subItem.url)) ?? false);
                   const isOpen = isActiveTree || (openOverrides[itemKey] ?? false);
 
-                  // If item has sub-items, render as Collapsible
-                  if (item.items && item.items.length > 0) {
+                  // If item declares sub-items, render as a folder-style row,
+                  // even when the current folder is empty.
+                  if (item.items) {
+                    const hasHoverActions = Boolean(item.onAddChild || item.actions?.length);
+                    const trailingPadding = hasHoverActions ? "pr-[4.25rem]" : "pr-2";
+                    const addChildTitle = item.addChildTitle ?? "New";
+                    const moreActionsTitle = item.moreActionsTitle ?? "More";
                     return (
                       <Collapsible
                         key={itemKey}
@@ -183,68 +214,121 @@ function NavMainComponent({
                         className="group/collapsible"
                       >
                         <SidebarMenuItem>
-                          {item.url ? (
-                            // Navigable parent (e.g. a folder with a detail screen):
-                            // the label links to its page; a separate chevron toggles.
-                            <div
-                              className={`flex min-w-0 items-center rounded-md transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground ${
-                                isPathActive(item.url)
-                                  ? "bg-sidebar-accent text-sidebar-accent-foreground"
-                                  : ""
-                              }`}
-                            >
-                              <SidebarMenuButton
-                                asChild
-                                className="min-w-0 flex-1 bg-transparent pr-1 hover:bg-transparent data-[active=true]:bg-transparent data-[active=true]:text-inherit"
-                                isActive={isPathActive(item.url)}
-                                tooltip={item.title}
+                          <div
+                            className={`group/nav-tree-item relative flex h-8 min-w-0 items-center rounded-md transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground ${
+                              isPathActive(item.url)
+                                ? "bg-sidebar-accent text-sidebar-accent-foreground"
+                                : ""
+                            }`}
+                          >
+                            <CollapsibleTrigger asChild>
+                              <button
+                                className="flex size-7 shrink-0 items-center justify-center rounded-md p-0 text-sidebar-foreground/70 outline-none ring-sidebar-ring transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 group-data-[collapsible=icon]:hidden"
+                                title="Toggle"
+                                type="button"
                               >
-                                <SPALink className="min-w-0" href={item.url}>
-                                  {Icon && <Icon />}
+                                <ChevronRight
+                                  className={`size-3.5 shrink-0 transition-transform duration-200 ${
+                                    isOpen ? "rotate-90" : ""
+                                  }`}
+                                />
+                                <span className="sr-only">Toggle</span>
+                              </button>
+                            </CollapsibleTrigger>
+                            {item.url ? (
+                              isExternalUrl(item.url) ? (
+                                <a
+                                  className={`flex h-8 min-w-0 flex-1 items-center gap-2 py-1.5 text-sm ${trailingPadding}`}
+                                  href={item.url}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  title={item.title}
+                                >
+                                  {Icon && <Icon className="size-4 shrink-0" />}
+                                  <span className="min-w-0 truncate group-data-[collapsible=icon]:hidden">
+                                    {item.title}
+                                  </span>
+                                  <ExternalLink className="ml-auto h-4 w-4 group-data-[collapsible=icon]:hidden" />
+                                </a>
+                              ) : (
+                                <SPALink
+                                  className={`flex h-8 min-w-0 flex-1 items-center gap-2 py-1.5 text-sm ${trailingPadding}`}
+                                  href={item.url}
+                                  title={item.title}
+                                >
+                                  {Icon && <Icon className="size-4 shrink-0" />}
                                   <span className="min-w-0 truncate group-data-[collapsible=icon]:hidden">
                                     {item.title}
                                   </span>
                                 </SPALink>
-                              </SidebarMenuButton>
-                              <div className="flex shrink-0 items-center pr-1 group-data-[collapsible=icon]:hidden">
+                              )
+                            ) : (
+                              <CollapsibleTrigger asChild>
+                                <button
+                                  className={`flex h-8 min-w-0 flex-1 items-center gap-2 py-1.5 text-left text-sm ${trailingPadding}`}
+                                  title={item.title}
+                                  type="button"
+                                >
+                                  {Icon && <Icon className="size-4 shrink-0" />}
+                                  <span className="min-w-0 truncate group-data-[collapsible=icon]:hidden">
+                                    {item.title}
+                                  </span>
+                                </button>
+                              </CollapsibleTrigger>
+                            )}
+                            {hasHoverActions && (
+                              <div className="absolute right-1 flex items-center gap-0.5 opacity-0 transition-opacity group-focus-within/nav-tree-item:opacity-100 group-hover/nav-tree-item:opacity-100 group-data-[collapsible=icon]:hidden">
                                 {item.onAddChild && (
                                   <button
-                                    className="flex size-5 items-center justify-center rounded-md p-0 text-sidebar-foreground opacity-0 outline-none ring-sidebar-ring transition-opacity hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 group-focus-within/menu-item:opacity-100 group-hover/menu-item:opacity-100"
+                                    className="flex size-7 items-center justify-center rounded-md p-0 text-sidebar-foreground/70 outline-none ring-sidebar-ring transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2"
                                     onClick={(e) => {
                                       e.preventDefault();
                                       e.stopPropagation();
                                       item.onAddChild?.();
                                     }}
-                                    title="New"
+                                    title={addChildTitle}
                                     type="button"
                                   >
-                                    <Plus className="size-4 shrink-0" />
-                                    <span className="sr-only">New</span>
+                                    <Plus className="size-3.5 shrink-0" />
+                                    <span className="sr-only">{addChildTitle}</span>
                                   </button>
                                 )}
-                                <CollapsibleTrigger asChild>
-                                  <button
-                                    className="flex size-5 items-center justify-center rounded-md p-0 text-sidebar-foreground outline-none ring-sidebar-ring transition-transform hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 group-data-[state=open]/collapsible:rotate-90"
-                                    title="Toggle"
-                                    type="button"
-                                  >
-                                    <ChevronRight className="size-4 shrink-0" />
-                                    <span className="sr-only">Toggle</span>
-                                  </button>
-                                </CollapsibleTrigger>
+                                {item.actions && item.actions.length > 0 && (
+                                  <DropdownMenu>
+                                    <DropdownMenuTrigger asChild>
+                                      <button
+                                        className="flex size-7 items-center justify-center rounded-md p-0 text-sidebar-foreground/70 outline-none ring-sidebar-ring transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 data-[state=open]:bg-sidebar-accent data-[state=open]:opacity-100"
+                                        onClick={(e) => {
+                                          e.preventDefault();
+                                          e.stopPropagation();
+                                        }}
+                                        title={moreActionsTitle}
+                                        type="button"
+                                      >
+                                        <MoreHorizontal className="size-3.5 shrink-0" />
+                                        <span className="sr-only">{moreActionsTitle}</span>
+                                      </button>
+                                    </DropdownMenuTrigger>
+                                    <DropdownMenuContent align="end">
+                                      {item.actions.map((action) => {
+                                        const ActionIcon = action.icon;
+                                        return (
+                                          <DropdownMenuItem
+                                            key={`${itemKey}:action:${action.title}`}
+                                            variant={action.variant}
+                                            onSelect={() => handleItemAction(action)}
+                                          >
+                                            {ActionIcon && <ActionIcon className="mr-2 size-3.5" />}
+                                            {action.title}
+                                          </DropdownMenuItem>
+                                        );
+                                      })}
+                                    </DropdownMenuContent>
+                                  </DropdownMenu>
+                                )}
                               </div>
-                            </div>
-                          ) : (
-                            <CollapsibleTrigger asChild>
-                              <SidebarMenuButton tooltip={item.title}>
-                                {Icon && <Icon />}
-                                <span className="group-data-[collapsible=icon]:hidden">
-                                  {item.title}
-                                </span>
-                                <ChevronRight className="ml-auto transition-transform duration-200 group-data-[state=open]/collapsible:rotate-90 group-data-[collapsible=icon]:hidden" />
-                              </SidebarMenuButton>
-                            </CollapsibleTrigger>
-                          )}
+                            )}
+                          </div>
                           <CollapsibleContent>
                             <SidebarMenuSub>
                               {(() => {
@@ -269,8 +353,7 @@ function NavMainComponent({
                                       key={getNavItemKey(subItem, subItemIndex, `${itemKey}:sub`)}
                                     >
                                       <SidebarMenuSubButton asChild isActive={isSubItemActive}>
-                                        {subItem.url.startsWith("http://") ||
-                                        subItem.url.startsWith("https://") ? (
+                                        {isExternalUrl(subItem.url) ? (
                                           // External link - use regular anchor tag
                                           <a
                                             href={subItem.url}
@@ -323,8 +406,7 @@ function NavMainComponent({
                           }
                           className="hover:bg-accent data-[active=true]:bg-accent"
                         >
-                          {/* Check if URL is external (http:// or https://) */}
-                          {item.url.startsWith("http://") || item.url.startsWith("https://") ? (
+                          {isExternalUrl(item.url) ? (
                             // External link - use regular anchor tag
                             <a href={item.url} target="_blank" rel="noopener noreferrer">
                               {Icon && <Icon />}
@@ -420,9 +502,27 @@ export const NavMain = memo(NavMainComponent, (prevProps, nextProps) => {
         prevItem.badge !== nextItem.badge ||
         prevItem.status !== nextItem.status ||
         prevItem.spaceName !== nextItem.spaceName ||
-        prevItem.createdAt !== nextItem.createdAt
+        prevItem.createdAt !== nextItem.createdAt ||
+        prevItem.onAddChild !== nextItem.onAddChild ||
+        prevItem.addChildTitle !== nextItem.addChildTitle ||
+        prevItem.moreActionsTitle !== nextItem.moreActionsTitle ||
+        (prevItem.actions?.length ?? 0) !== (nextItem.actions?.length ?? 0)
       ) {
         return false;
+      }
+
+      for (let k = 0; k < (prevItem.actions?.length ?? 0); k++) {
+        const prevAction = prevItem.actions?.[k];
+        const nextAction = nextItem.actions?.[k];
+        if (
+          prevAction?.title !== nextAction?.title ||
+          prevAction?.action !== nextAction?.action ||
+          prevAction?.url !== nextAction?.url ||
+          prevAction?.variant !== nextAction?.variant ||
+          prevAction?.onSelect !== nextAction?.onSelect
+        ) {
+          return false;
+        }
       }
     }
   }

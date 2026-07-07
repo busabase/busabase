@@ -1,5 +1,8 @@
 import type { Metadata } from "next";
 import { Fraunces, Inter, Noto_Serif_SC } from "next/font/google";
+import { headers } from "next/headers";
+import { getBusabaseLocaleFromAcceptLanguage } from "~/lib/i18n";
+import { getBusabaseServerLL } from "~/lib/i18n-server";
 import { Providers } from "./providers";
 import "./global.css";
 
@@ -27,19 +30,25 @@ const notoSerifSC = Noto_Serif_SC({
   preload: false,
 });
 
-export const metadata: Metadata = {
-  title: "Busabase",
-  description: "Open-source local review engine for Busabase.",
+export const generateMetadata = async (): Promise<Metadata> => {
+  const LL = await getBusabaseServerLL();
+  return {
+    title: LL.common.appName(),
+    description: LL.marketing.rootDescription(),
+  };
 };
 
 interface Props {
   children: React.ReactNode;
 }
 
-export default function RootLayout({ children }: Props) {
+export default async function RootLayout({ children }: Props) {
+  const headerList = await headers();
+  const locale = getBusabaseLocaleFromAcceptLanguage(headerList.get("accept-language"));
+
   return (
     <html
-      lang="en"
+      lang={locale}
       className={`${inter.variable} ${fraunces.variable} ${notoSerifSC.variable}`}
       suppressHydrationWarning
     >

@@ -212,6 +212,9 @@ Core concepts:
 | Comment | Discussion attached to records, Change Requests, operations, or commits |
 | Audit Event | A trail of important reads, writes, reviews, merges, and deletes |
 
+Busabase nodes currently include Folder, Base, Skill, Drive, and Doc. See
+**[Node Types](./docs/node-types.md)** for screenshots and details.
+
 ## Use Cases
 
 Any base an agent can write — reviewed first. A few of the things people build on Busabase:

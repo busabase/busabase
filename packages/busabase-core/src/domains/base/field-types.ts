@@ -8,6 +8,7 @@
 // once and every layer picks it up.
 import type { FieldType } from "busabase-contract/types";
 import { type iString, iStringParse, type LocaleType } from "openlib/i18n/i-string";
+import { parseDocument } from "yaml";
 
 /** Minimal field-definition shape both the VO and the persisted row satisfy. */
 export interface FieldDef {
@@ -25,6 +26,9 @@ export interface FieldDef {
       maxFiles?: number;
       allowedMimeTypes?: ReadonlyArray<string>;
       maxFileSize?: number;
+    };
+    code?: {
+      language?: string;
     };
   } | null;
 }
@@ -128,14 +132,30 @@ const isStringArray = (value: unknown): value is string[] =>
  */
 const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024;
 
-/** An inline attachment cell entry: `{ id, url, fileName, mimeType, size }` (extra keys allowed). */
+/**
+ * An inline attachment cell entry. New Busabase refs carry an `assetId` (and
+ * keep `attachmentId` for storage lookup); legacy refs used `id` as the
+ * attachment id. Accept both so imported/API records still index into Assets.
+ */
 const isAttachmentRef = (
   value: unknown,
-): value is { id: string; url: string; fileName: string; mimeType: string; size: number } => {
+): value is {
+  attachmentId?: string;
+  assetId?: string;
+  id?: string;
+  url: string;
+  fileName: string;
+  mimeType: string;
+  size: number;
+} => {
   if (typeof value !== "object" || value === null) return false;
   const ref = value as Record<string, unknown>;
+  const hasId =
+    typeof ref.id === "string" ||
+    typeof ref.assetId === "string" ||
+    typeof ref.attachmentId === "string";
   return (
-    typeof ref.id === "string" &&
+    hasId &&
     typeof ref.url === "string" &&
     typeof ref.fileName === "string" &&
     typeof ref.mimeType === "string" &&
@@ -148,6 +168,39 @@ const isAttachmentRef = (
 // ── reusable validators ──────────────────────────────────────────────────────
 const textValidator = (value: unknown, def: FieldDef) =>
   typeof value === "string" ? null : `${fieldDisplayName(def)} must be text`;
+
+/** JSON is stored as raw text like `code`, but must parse before merge/commit. */
+const jsonValidator = (value: unknown, def: FieldDef) => {
+  if (typeof value !== "string") return `${fieldDisplayName(def)} must be text`;
+  try {
+    JSON.parse(value);
+    return null;
+  } catch {
+    return `${fieldDisplayName(def)} must be valid JSON`;
+  }
+};
+
+/** YAML is stored as raw text like `code`, but must parse before merge/commit. */
+const yamlValidator = (value: unknown, def: FieldDef) => {
+  if (typeof value !== "string") return `${fieldDisplayName(def)} must be text`;
+  try {
+    const document = parseDocument(value);
+    return document.errors.length === 0 ? null : `${fieldDisplayName(def)} must be valid YAML`;
+  } catch {
+    return `${fieldDisplayName(def)} must be valid YAML`;
+  }
+};
+
+const codeValidator = (value: unknown, def: FieldDef) => {
+  const language = def.options?.code?.language?.toLowerCase();
+  if (language === "json") {
+    return jsonValidator(value, def);
+  }
+  if (language === "yaml" || language === "yml") {
+    return yamlValidator(value, def);
+  }
+  return textValidator(value, def);
+};
 
 const numberValidator = (value: unknown, def: FieldDef) =>
   isNumeric(value) ? null : `${fieldDisplayName(def)} must be a number`;
@@ -227,7 +280,21 @@ export const FIELD_TYPES: Record<FieldType, FieldTypeSpec> = {
     label: "code",
     input: "textarea",
     columnWidth: "minmax(128px,420px)",
-    validate: textValidator,
+    validate: codeValidator,
+  },
+  json: {
+    type: "json",
+    label: "json",
+    input: "textarea",
+    columnWidth: "minmax(128px,420px)",
+    validate: jsonValidator,
+  },
+  yaml: {
+    type: "yaml",
+    label: "yaml",
+    input: "textarea",
+    columnWidth: "minmax(128px,420px)",
+    validate: yamlValidator,
   },
   number: {
     type: "number",
@@ -377,6 +444,8 @@ export const FIELD_TYPE_ORDER: FieldType[] = [
   "markdown",
   "html",
   "code",
+  "json",
+  "yaml",
   "attachment",
   "relation",
   "number",
@@ -447,6 +516,9 @@ const DISPLAY_KIND: Partial<Record<FieldType, FieldDisplayKind>> = {
   markdown: "markdown",
   html: "html",
   code: "code",
+  // Structured text fields reuse the code display kind with pinned preview languages.
+  json: "code",
+  yaml: "code",
   url: "link",
   email: "link",
   phone: "link",

@@ -3,7 +3,9 @@ import os from "node:os";
 import path from "node:path";
 import { createRouterClient } from "@orpc/server";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { LOCAL_SPACE_ID } from "../src/context";
 import { DEMO_BASES, DEMO_FOLDERS } from "../src/demo/dataset";
+import { type BusabaseLiveEvent, subscribeBusabaseLiveEvents } from "../src/logic/live-events";
 import { seedScenario } from "../src/logic/store";
 import { busabaseRouter } from "../src/router";
 
@@ -18,6 +20,26 @@ import { busabaseRouter } from "../src/router";
 const MIGRATIONS_CWD = path.resolve(__dirname, "../../../apps/busabase");
 
 type Client = ReturnType<typeof createRouterClient<typeof busabaseRouter, Record<never, never>>>;
+
+const nextLiveEvent = async (iterator: AsyncGenerator<BusabaseLiveEvent>) => {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const result = await Promise.race([
+      iterator.next(),
+      new Promise<never>((_, reject) => {
+        timeout = setTimeout(() => reject(new Error("Timed out waiting for live event")), 1000);
+      }),
+    ]);
+    if (result.done) {
+      throw new Error("Live event stream ended before yielding an event");
+    }
+    return result.value;
+  } finally {
+    if (timeout) {
+      clearTimeout(timeout);
+    }
+  }
+};
 
 describe("Change-request review loop — oRPC", () => {
   let dataDir = "";
@@ -61,6 +83,36 @@ describe("Change-request review loop — oRPC", () => {
       message: "Initial",
       submittedBy: "loop-agent",
     });
+
+  it("publishes live events when CRs are created and reviewed", async () => {
+    const controller = new AbortController();
+    const iterator = subscribeBusabaseLiveEvents(LOCAL_SPACE_ID, controller.signal);
+    try {
+      const createdEventPromise = nextLiveEvent(iterator);
+      const cr = await openCr();
+      const createdEvent = await createdEventPromise;
+      expect(createdEvent.kind).toBe("change_request.created");
+      expect(createdEvent.changeRequestId).toBe(cr.id);
+      expect(createdEvent.baseId).toBe(blogBaseId);
+      expect(createdEvent.actorId).toBe("loop-agent");
+
+      const reviewedEventPromise = nextLiveEvent(iterator);
+      const reviewed = await client.changeRequests.review({
+        changeRequestId: cr.id,
+        verdict: "rejected",
+        reason: "Needs another pass",
+      });
+      const reviewedEvent = await reviewedEventPromise;
+      expect(reviewed.status).toBe("changes_requested");
+      expect(reviewedEvent.kind).toBe("change_request.reviewed");
+      expect(reviewedEvent.changeRequestId).toBe(cr.id);
+      expect(reviewedEvent.baseId).toBe(blogBaseId);
+      expect(reviewedEvent.actorId).toBe("local-admin");
+    } finally {
+      controller.abort();
+      await iterator.return(undefined);
+    }
+  });
 
   it("request changes is non-terminal and revising returns the CR to in_review", async () => {
     const cr = await openCr();

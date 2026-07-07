@@ -1,12 +1,19 @@
 import { Redirect, useRouter } from "expo-router";
-import { Cloud, Server } from "lucide-react-native";
+import { Cloud, Server, Sparkles } from "lucide-react-native";
 import { useState } from "react";
 import { Image, StyleSheet, Text, useColorScheme, View } from "react-native";
 import { signInWithBusabaseCloud } from "~/auth/oauth";
-import { NativeLoadingState, NativeScreen } from "~/components/native-screen";
+import {
+  NativeActionBar,
+  NativeInlineError,
+  NativeLoadingState,
+  NativeRow,
+  NativeScreen,
+  NativeSection,
+} from "~/components/native-screen";
 import { Button } from "~/components/ui/Button";
 import { useConnection } from "~/connection/connection-store";
-import { radius, typography } from "~/theme/tokens";
+import { typography } from "~/theme/tokens";
 import { useTokens } from "~/theme/use-tokens";
 
 export default function ConnectionScreen() {
@@ -47,84 +54,74 @@ export default function ConnectionScreen() {
     }
   };
 
-  return (
-    <NativeScreen title="Busabase" subtitle="Connect to a Busabase workspace">
-      <View style={[styles.hero, { backgroundColor: tokens.card, borderColor: tokens.border }]}>
-        <Image accessibilityLabel="Busabase logo" source={logoSource} style={styles.logo} />
-        <Text style={[typography.display, { color: tokens.foreground }]}>
-          Review change requests on the go
-        </Text>
-        <Text style={[typography.body, { color: tokens.mutedForeground }]}>
-          Sign in to Busabase Cloud, or connect a self-hosted Busabase server.
-        </Text>
-      </View>
+  const footer = cloudError ? (
+    <NativeActionBar>
+      <NativeInlineError message={cloudError} onReset={() => setCloudError(null)} />
+    </NativeActionBar>
+  ) : undefined;
 
-      <View style={styles.actions}>
-        <Button
-          label="Connect Busabase Cloud"
-          loading={cloudLoading}
-          fullWidth
-          onPress={handleCloudConnect}
-        />
-        <View style={[styles.actionNote, { borderColor: tokens.border }]}>
-          <Cloud size={18} color={tokens.primary} />
-          <Text style={[typography.small, { color: tokens.mutedForeground }]}>
-            Opens busabase.com for sign in, then returns to this app with a secure session.
+  return (
+    <NativeScreen title="Busabase" subtitle="Connect to a workspace" footer={footer}>
+      <View style={styles.brand}>
+        <Image accessibilityLabel="Busabase logo" source={logoSource} style={styles.logo} />
+        <View style={styles.brandText}>
+          <Text style={[typography.h1, { color: tokens.foreground }]}>
+            Review changes from your phone
+          </Text>
+          <Text style={[typography.body, { color: tokens.mutedForeground }]}>
+            Choose a hosted workspace, a self-hosted server, or the demo.
           </Text>
         </View>
-        {cloudError ? (
-          <Text style={[typography.small, styles.error, { color: tokens.destructive }]}>
-            {cloudError}
-          </Text>
-        ) : null}
+      </View>
 
-        <Button
-          label="Connect Self-hosted Busabase"
-          fullWidth
+      <NativeSection title="Workspace">
+        <NativeRow
+          title="Busabase Cloud"
+          subtitle="Sign in with busabase.com and return to this app."
+          leading={<Cloud size={18} color={tokens.mutedForeground} />}
+          trailing={
+            <Button
+              label="Sign in"
+              loading={cloudLoading}
+              variant="secondary"
+              onPress={handleCloudConnect}
+            />
+          }
+        />
+        <NativeRow
+          title="Self-hosted server"
+          subtitle="Enter a Busabase server URL and validate /api/health."
+          leading={<Server size={18} color={tokens.mutedForeground} />}
           onPress={() => router.push("/connect/self-hosted")}
+          last={!state.recentServerUrl}
         />
         {state.recentServerUrl ? (
-          <Button
-            label={`Use ${state.recentServerUrl}`}
-            variant="secondary"
-            fullWidth
+          <NativeRow
+            title="Recent server"
+            subtitle={state.recentServerUrl}
+            leading={<Sparkles size={18} color={tokens.mutedForeground} />}
             onPress={() =>
               router.push({
                 pathname: "/connect/self-hosted",
                 params: { serverUrl: state.recentServerUrl },
               })
             }
+            last
           />
         ) : null}
-        <View style={[styles.actionNote, { borderColor: tokens.border }]}>
-          <Server size={18} color={tokens.primary} />
-          <Text style={[typography.small, { color: tokens.mutedForeground }]}>
-            Enter your Busabase server URL. The app validates /api/health, then uses /api/v1.
-          </Text>
-        </View>
-      </View>
+      </NativeSection>
     </NativeScreen>
   );
 }
 
 const styles = StyleSheet.create({
   logo: { width: 44, height: 44 },
-  hero: {
+  brand: {
     marginHorizontal: 20,
-    marginTop: 12,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: radius.lg,
-    padding: 20,
+    marginTop: 18,
+    flexDirection: "row",
+    alignItems: "center",
     gap: 12,
   },
-  actions: { marginHorizontal: 20, marginTop: 20, gap: 12 },
-  actionNote: {
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: radius.md,
-    padding: 12,
-    flexDirection: "row",
-    alignItems: "flex-start",
-    gap: 10,
-  },
-  error: { marginTop: -4 },
+  brandText: { flex: 1, minWidth: 0, gap: 4 },
 });

@@ -3,7 +3,7 @@ import "server-only";
 import type { CommentSubjectType } from "busabase-contract/types";
 import { and, asc, desc, eq } from "drizzle-orm";
 import { z } from "zod";
-import { getContextSpaceId, resolveActorId } from "../context";
+import { getContextSpaceId, resolveActorId, resolveUserRefs } from "../context";
 import { getDb } from "../db";
 import {
   busabaseAuditEvents,
@@ -36,6 +36,7 @@ export const auditEventInputSchema = z.object({
     "doc.created",
     "doc.updated",
     "skill.created",
+    "drive.created",
     "asset.deleted",
     "node.purged",
   ]),
@@ -61,6 +62,18 @@ export const createCommentInputSchema = commentSubjectInputSchema.extend({
 
 export { listInputSchema };
 
+const liveChangeRequestAuditActions = [
+  "change_request.created",
+  "change_request.updated",
+  "change_request.deleted",
+  "change_request.reviewed",
+] as const;
+
+type LiveChangeRequestAuditAction = (typeof liveChangeRequestAuditActions)[number];
+
+const isLiveChangeRequestAuditAction = (action: string): action is LiveChangeRequestAuditAction =>
+  (liveChangeRequestAuditActions as readonly string[]).includes(action);
+
 // ── Logic ─────────────────────────────────────────────────────────────────────
 
 export const insertAuditEvent = async (
@@ -83,7 +96,24 @@ export const insertAuditEvent = async (
       createdAt: now(),
     })
     .returning();
-  return toAuditEventVO(event);
+  const eventVO = toAuditEventVO(event, await resolveUserRefs([event.actorId]));
+
+  if (event.changeRequestId && isLiveChangeRequestAuditAction(event.action)) {
+    const { publishBusabaseLiveEvent } = await import("./live-events");
+    await publishBusabaseLiveEvent({
+      kind: event.action,
+      spaceId: getContextSpaceId(),
+      actorId: event.actorId,
+      changeRequestId: event.changeRequestId,
+      baseId: event.baseId,
+      nodeIds: [],
+      recordIds: event.recordId ? [event.recordId] : [],
+      viewIds: [],
+      operationCount: 0,
+    });
+  }
+
+  return eventVO;
 };
 
 const resolveCommentSubject = async (
@@ -179,7 +209,8 @@ export const listAuditEvents = async (input?: z.input<typeof listInputSchema>) =
     .where(eq(busabaseAuditEvents.spaceId, getContextSpaceId()))
     .orderBy(desc(busabaseAuditEvents.createdAt))
     .limit(parsed.limit);
-  return events.map(toAuditEventVO);
+  const users = await resolveUserRefs(events.map((event) => event.actorId));
+  return events.map((event) => toAuditEventVO(event, users));
 };
 
 export const listComments = async (input: z.infer<typeof commentSubjectInputSchema>) => {
@@ -198,7 +229,8 @@ export const listComments = async (input: z.infer<typeof commentSubjectInputSche
       ),
     )
     .orderBy(asc(busabaseComments.createdAt));
-  return comments.map(toCommentVO);
+  const users = await resolveUserRefs(comments.map((comment) => comment.authorId));
+  return comments.map((comment) => toCommentVO(comment, users));
 };
 
 export const createComment = async (input: z.infer<typeof createCommentInputSchema>) => {
@@ -234,5 +266,5 @@ export const createComment = async (input: z.infer<typeof createCommentInputSche
     const { notifyAgentOfChangeRequest } = await import("./cr-lifecycle");
     notifyAgentOfChangeRequest(subjectLinks.changeRequestId, "ai_mention");
   }
-  return toCommentVO(comment);
+  return toCommentVO(comment, await resolveUserRefs([comment.authorId]));
 };

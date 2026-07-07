@@ -35,8 +35,50 @@ const VALID_INPUT_KINDS = new Set([
 ]);
 
 describe("FIELD_TYPES registry — complete & well-formed for every field type", () => {
-  it("has exactly 22 field types", () => {
-    expect(ALL_FIELD_TYPES).toHaveLength(22);
+  it("has exactly 24 field types", () => {
+    expect(ALL_FIELD_TYPES).toHaveLength(24);
+  });
+
+  it("structured text fields validate their syntax and reuse code display", () => {
+    const jsonDef = { slug: "data", type: "json", name: "Data" } as never;
+    const jsonValidate = FIELD_TYPES.json.validate;
+    expect(jsonValidate?.('{"ok":true}', jsonDef)).toBeNull();
+    expect(jsonValidate?.("[1,2,3]", jsonDef)).toBeNull();
+    expect(jsonValidate?.("{bad json", jsonDef)).toMatch(/valid JSON/);
+    expect(jsonValidate?.(42, jsonDef)).toMatch(/must be text/);
+    expect(fieldDisplayKind("json")).toBe("code");
+
+    const yamlDef = { slug: "config", type: "yaml", name: "Config" } as never;
+    const yamlValidate = FIELD_TYPES.yaml.validate;
+    expect(yamlValidate?.("ok: true\nitems:\n  - 1", yamlDef)).toBeNull();
+    expect(yamlValidate?.("bad: [", yamlDef)).toMatch(/valid YAML/);
+    expect(yamlValidate?.(42, yamlDef)).toMatch(/must be text/);
+    expect(fieldDisplayKind("yaml")).toBe("code");
+
+    const codeJsonDef = {
+      slug: "payload",
+      type: "code",
+      name: "Payload",
+      options: { code: { language: "json" } },
+    } as never;
+    const codeYamlDef = {
+      slug: "config",
+      type: "code",
+      name: "Config",
+      options: { code: { language: "yaml" } },
+    } as never;
+    const codeTsDef = {
+      slug: "snippet",
+      type: "code",
+      name: "Snippet",
+      options: { code: { language: "typescript" } },
+    } as never;
+    expect(FIELD_TYPES.code.validate?.('{"ok":true}', codeJsonDef)).toBeNull();
+    expect(FIELD_TYPES.code.validate?.("{bad json", codeJsonDef)).toMatch(/valid JSON/);
+    expect(FIELD_TYPES.code.validate?.("ok: true", codeYamlDef)).toBeNull();
+    expect(FIELD_TYPES.code.validate?.("bad: [", codeYamlDef)).toMatch(/valid YAML/);
+    expect(FIELD_TYPES.code.validate?.("{bad json", codeTsDef)).toBeNull();
+    expect(FIELD_TYPES.code.validate?.("bad: [", codeTsDef)).toBeNull();
   });
 
   it.each(ALL_FIELD_TYPES)("%s has a consistent, well-formed spec", (type) => {

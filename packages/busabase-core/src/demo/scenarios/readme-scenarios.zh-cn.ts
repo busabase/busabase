@@ -753,17 +753,25 @@ export const readmeScenariosZhCnScenario: SeedScenario = {
           id: "bsf_cfg_config",
           slug: "config",
           name: "配置（YAML）",
-          type: "code",
+          type: "yaml",
           required: true,
-          options: { code: { language: "yaml" } },
+          options: {},
+        },
+        {
+          id: "bsf_cfg_runtime_json",
+          slug: "runtime_json",
+          name: "运行配置（Code JSON）",
+          type: "code",
+          required: false,
+          options: { code: { language: "json" } },
         },
         {
           id: "bsf_cfg_overrides",
           slug: "overrides",
           name: "覆盖项（JSON）",
-          type: "code",
+          type: "json",
           required: false,
-          options: { code: { language: "json" } },
+          options: {},
         },
         {
           id: "bsf_cfg_status",
@@ -1374,7 +1382,7 @@ export const readmeScenariosZhCnScenario: SeedScenario = {
       baseId: ids.labelingBase,
       commitId: "cmt_seed_label_field_types",
       fields: {
-        item: "22 种字段类型展示截图",
+        item: "24 种字段类型展示截图",
         asset: [
           {
             id: "att_label_field_types_zh",
@@ -1385,7 +1393,7 @@ export const readmeScenariosZhCnScenario: SeedScenario = {
             url: "/assets/readme/scenarios/multimodal-review-base.png",
           },
         ],
-        caption: "展示 Busabase 全部 22 种字段类型及示例值的功能图集。",
+        caption: "展示 Busabase 全部 24 种字段类型及示例值的功能图集。",
         confidence: 0.97,
         labels: ["field-types", "documentation", "ui"],
         status: "approved",
@@ -1425,7 +1433,7 @@ export const readmeScenariosZhCnScenario: SeedScenario = {
 <tbody>
 <tr><td style="padding: 0.6rem 1rem; border-bottom: 1px solid var(--border); color: var(--foreground);">AI Agent 写入安全</td><td style="text-align:center; padding: 0.6rem 1rem; border-bottom: 1px solid var(--border); color: var(--muted-foreground);">✗ 无审批门控</td><td style="text-align:center; padding: 0.6rem 1rem; border-bottom: 1px solid var(--border); color: var(--foreground); font-weight: 600;">✓ 变更请求</td></tr>
 <tr style="background: var(--muted);"><td style="padding: 0.6rem 1rem; border-bottom: 1px solid var(--border); color: var(--foreground);">人工审批收件箱</td><td style="text-align:center; padding: 0.6rem 1rem; border-bottom: 1px solid var(--border); color: var(--muted-foreground);">✗</td><td style="text-align:center; padding: 0.6rem 1rem; border-bottom: 1px solid var(--border); color: var(--foreground); font-weight: 600;">✓ 内置收件箱</td></tr>
-<tr><td style="padding: 0.6rem 1rem; border-bottom: 1px solid var(--border); color: var(--foreground);">结构化字段类型</td><td style="text-align:center; padding: 0.6rem 1rem; border-bottom: 1px solid var(--border); color: var(--muted-foreground);">~ 仅部分支持</td><td style="text-align:center; padding: 0.6rem 1rem; border-bottom: 1px solid var(--border); color: var(--foreground); font-weight: 600;">✓ 22 种字段类型</td></tr>
+<tr><td style="padding: 0.6rem 1rem; border-bottom: 1px solid var(--border); color: var(--foreground);">结构化字段类型</td><td style="text-align:center; padding: 0.6rem 1rem; border-bottom: 1px solid var(--border); color: var(--muted-foreground);">~ 仅部分支持</td><td style="text-align:center; padding: 0.6rem 1rem; border-bottom: 1px solid var(--border); color: var(--foreground); font-weight: 600;">✓ 24 种字段类型</td></tr>
 <tr style="background: var(--muted);"><td style="padding: 0.6rem 1rem; border-bottom: 1px solid var(--border); color: var(--foreground);">本地优先 / 离线</td><td style="text-align:center; padding: 0.6rem 1rem; border-bottom: 1px solid var(--border); color: var(--muted-foreground);">✗ 仅云端</td><td style="text-align:center; padding: 0.6rem 1rem; border-bottom: 1px solid var(--border); color: var(--foreground); font-weight: 600;">✓ 本地 SQLite</td></tr>
 <tr><td style="padding: 0.6rem 1rem; border-bottom: 1px solid var(--border); color: var(--foreground);">逐记录提交历史</td><td style="text-align:center; padding: 0.6rem 1rem; border-bottom: 1px solid var(--border); color: var(--muted-foreground);">~ 版本历史</td><td style="text-align:center; padding: 0.6rem 1rem; border-bottom: 1px solid var(--border); color: var(--foreground); font-weight: 600;">✓ 每次写入均记录</td></tr>
 <tr style="background: var(--muted);"><td style="padding: 0.6rem 1rem; border-bottom: 1px solid var(--border); color: var(--foreground);">REST + oRPC API</td><td style="text-align:center; padding: 0.6rem 1rem; border-bottom: 1px solid var(--border); color: var(--muted-foreground);">~ 受限</td><td style="text-align:center; padding: 0.6rem 1rem; border-bottom: 1px solid var(--border); color: var(--foreground); font-weight: 600;">✓ 完整 API</td></tr>
@@ -1437,7 +1445,7 @@ export const readmeScenariosZhCnScenario: SeedScenario = {
 <h2 style="font-size: 1.2rem; font-weight: 700; margin: 0 0 1.25rem; color: var(--foreground);">为什么选择 Busabase 而非飞书多维表格</h2>
 <ul style="list-style: none; padding: 0; margin: 0; display: grid; gap: 1rem;">
 <li style="display: flex; gap: 0.875rem; align-items: flex-start;"><span style="background: var(--muted); color: var(--foreground); border-radius: 50%; width: 1.5rem; height: 1.5rem; display: flex; align-items: center; justify-content: center; font-size: 0.75rem; font-weight: 700; flex-shrink: 0; margin-top: 0.1rem;">1</span><div><strong style="color: var(--foreground);">Agent 写入，人工审批。</strong><br><span style="color: var(--muted-foreground); font-size: 0.9rem;">每一条 AI 生成的更新都进入变更请求——可查看、可撤销、可审计，正式写入前必须人工确认。</span></div></li>
-<li style="display: flex; gap: 0.875rem; align-items: flex-start;"><span style="background: var(--muted); color: var(--foreground); border-radius: 50%; width: 1.5rem; height: 1.5rem; display: flex; align-items: center; justify-content: center; font-size: 0.75rem; font-weight: 700; flex-shrink: 0; margin-top: 0.1rem;">2</span><div><strong style="color: var(--foreground);">22 种强类型字段。</strong><br><span style="color: var(--muted-foreground); font-size: 0.9rem;">文本、Markdown、HTML、代码、日期、关联、附件、AI 摘要——每种字段均在 Schema 层完成校验。</span></div></li>
+<li style="display: flex; gap: 0.875rem; align-items: flex-start;"><span style="background: var(--muted); color: var(--foreground); border-radius: 50%; width: 1.5rem; height: 1.5rem; display: flex; align-items: center; justify-content: center; font-size: 0.75rem; font-weight: 700; flex-shrink: 0; margin-top: 0.1rem;">2</span><div><strong style="color: var(--foreground);">24 种强类型字段。</strong><br><span style="color: var(--muted-foreground); font-size: 0.9rem;">文本、Markdown、HTML、代码、JSON、YAML、日期、关联、附件、AI 摘要——每种字段均在 Schema 层完成校验。</span></div></li>
 <li style="display: flex; gap: 0.875rem; align-items: flex-start;"><span style="background: var(--muted); color: var(--foreground); border-radius: 50%; width: 1.5rem; height: 1.5rem; display: flex; align-items: center; justify-content: center; font-size: 0.75rem; font-weight: 700; flex-shrink: 0; margin-top: 0.1rem;">3</span><div><strong style="color: var(--foreground);">数据本地存储。</strong><br><span style="color: var(--muted-foreground); font-size: 0.9rem;">SQLite + Drizzle 运行在您自己的机器上。无云端依赖，无按席位计费，无数据锁定。</span></div></li>
 </ul>
 </section>
@@ -1526,6 +1534,9 @@ export const readmeScenariosZhCnScenario: SeedScenario = {
         environment: "production",
         config:
           "rateLimit:\n  rpm: 600\n  burst: 100\ntimeout_ms: 30000\ncors:\n  origins:\n    - https://busabase.com",
+        runtime_json:
+          '{\n  "service": "api-gateway",\n  "runtime": "nodejs20",\n  "rate_limit": { "rpm": 600, "burst": 100 }\n}',
+        overrides: '{\n  "RATE_LIMIT_RPM": 600,\n  "BURST_SIZE": 100\n}',
         status: "active",
         deployed_at: "2026-06-18",
         notes: "生产网关配置，变更需经审批后上线。",
@@ -1543,6 +1554,8 @@ export const readmeScenariosZhCnScenario: SeedScenario = {
         name: "typesense-search",
         environment: "staging",
         config: "collections:\n  - records\n  - bases\nquery_by: title,body\nnum_typos: 2",
+        runtime_json:
+          '{\n  "service": "typesense-search",\n  "runtime": "typesense",\n  "collections": ["records", "bases"]\n}',
         overrides: '{ "reindex": true }',
         status: "maintenance",
         deployed_at: "2026-06-10",
@@ -1561,6 +1574,9 @@ export const readmeScenariosZhCnScenario: SeedScenario = {
         name: "agent-worker",
         environment: "production",
         config: "concurrency: 4\nqueue: agent-tasks\nretry:\n  attempts: 3\n  backoff_ms: 500",
+        runtime_json:
+          '{\n  "service": "agent-worker",\n  "runtime": "nodejs20",\n  "queue": "agent-tasks",\n  "concurrency": 4\n}',
+        overrides: '{\n  "retry_attempts": 3,\n  "backoff_ms": 500\n}',
         status: "degraded",
         deployed_at: "2026-06-20",
         notes: "一个 worker 节点 CPU 偏高，待扩容。",
@@ -1902,7 +1918,7 @@ export const readmeScenariosZhCnScenario: SeedScenario = {
               "Busabase 是开源的本地优先数据库，通过变更请求机制为 AI Agent 提供安全写入通道，所有数据变更需人工审批方可生效。",
             target_keywords: "本地优先数据库, ai agent 数据库, 变更请求数据库, 开源数据库",
             html_body:
-              '<section class="hero"><h1>本地优先数据库，专为 AI Agent 设计</h1><p>Busabase 为 AI Agent 提供安全写入通道——每次 Agent 写入都是待审批的变更请求，正式入库前必须人工确认。数据存储在您的设备上，无需云端依赖。</p></section><section class="features"><h2>核心能力</h2><ul><li>变更请求：Agent 提议，人工审批，方可写入</li><li>本地优先：SQLite 存储在您自己的机器上</li><li>22 种字段类型：结构化存储，Schema 层校验</li><li>完整 REST + oRPC API，支持自定义 Agent 接入</li></ul></section>',
+              '<section class="hero"><h1>本地优先数据库，专为 AI Agent 设计</h1><p>Busabase 为 AI Agent 提供安全写入通道——每次 Agent 写入都是待审批的变更请求，正式入库前必须人工确认。数据存储在您的设备上，无需云端依赖。</p></section><section class="features"><h2>核心能力</h2><ul><li>变更请求：Agent 提议，人工审批，方可写入</li><li>本地优先：SQLite 存储在您自己的机器上</li><li>24 种字段类型：结构化存储，Schema 层校验</li><li>完整 REST + oRPC API，支持自定义 Agent 接入</li></ul></section>',
             status: "draft",
             page_score: null,
             notes: null,

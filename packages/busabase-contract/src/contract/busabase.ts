@@ -1,5 +1,4 @@
 import { eventIterator, oc } from "@orpc/contract";
-import { attachmentsContract } from "open-domains/attachments/contract";
 import { z } from "zod";
 import { assetsContract } from "../domains/assets/contract";
 import {
@@ -10,6 +9,7 @@ import {
   viewSchema,
 } from "../domains/base/contract";
 import { docContract } from "../domains/doc/contract";
+import { driveContract } from "../domains/drive/contract";
 import { folderContract } from "../domains/folder/contract";
 import { skillContract } from "../domains/skill/contract";
 import {
@@ -172,9 +172,9 @@ export const busabaseContractRoutes = {
   },
   bases: baseContract,
   skills: skillContract,
+  drives: driveContract,
   docs: docContract,
   folders: folderContract,
-  attachments: attachmentsContract,
   assets: assetsContract,
   changeRequests: {
     list: oc

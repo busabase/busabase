@@ -274,10 +274,10 @@ async function pickSpaceId(verify: AuthVerify, preselected?: string): Promise<st
   const spaces = verify.spaces ?? [];
   if (spaces.length <= 1) return verify.space?.id ?? spaces[0]?.id;
   if (!isInteractive()) {
-    say(
-      `You belong to ${spaces.length} spaces; defaulting to "${verify.space?.name ?? verify.space?.id}". Re-run with --space-id <id> to target another.`,
+    const choices = spaces.map((space) => `${space.name} [${space.id}]`).join(", ");
+    throw new Error(
+      `You belong to ${spaces.length} spaces; pass --space-id <id> to choose one. Available spaces: ${choices}`,
     );
-    return verify.space?.id;
   }
   say("");
   say("Which space should this CLI target?");
@@ -291,8 +291,7 @@ async function pickSpaceId(verify: AuthVerify, preselected?: string): Promise<st
   if (Number.isInteger(choice) && choice >= 1 && choice <= spaces.length) {
     return spaces[choice - 1]?.id;
   }
-  say("Not a valid choice — using the default space.");
-  return verify.space?.id ?? spaces[0]?.id;
+  throw new Error("Not a valid space choice. Re-run login and choose one of the listed spaces.");
 }
 
 // ── Entry points ──────────────────────────────────────────────────────────────

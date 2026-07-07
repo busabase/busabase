@@ -1,17 +1,30 @@
 import { skipToken, useQuery } from "@tanstack/react-query";
 import { useLocalSearchParams, useRouter } from "expo-router";
+import { List, MoreHorizontal, Plus, Settings2, Table2 } from "lucide-react-native";
 import { iStringParse } from "openlib/i18n/i-string";
 import { useMemo, useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useBusabaseOrpc } from "~/api/use-busabase-orpc";
 import { ConnectionGuard } from "~/components/busabase/ConnectionGuard";
 import { DrawerScaffold } from "~/components/busabase/DrawerScaffold";
+import { FieldList } from "~/components/busabase/FieldList";
 import { FieldValue } from "~/components/busabase/FieldValue";
-import { NativeEmptyState, NativeErrorState, NativeLoadingState } from "~/components/native-screen";
+import {
+  NativeActionBar,
+  NativeBottomSheet,
+  NativeChipList,
+  NativeEmptyState,
+  NativeErrorState,
+  NativeLoadingState,
+  NativeRow,
+  NativeSection,
+  NativeSegmentedControl,
+} from "~/components/native-screen";
 import { Button } from "~/components/ui/Button";
-import { getRecordTitle } from "~/lib/busabase-display";
+import { getPreview, getRecordTitle } from "~/lib/busabase-display";
+import { formatDate } from "~/lib/format";
 import { applyViewConfig } from "~/lib/view-config";
-import { radius, typography } from "~/theme/tokens";
+import { mobile, radius, typography } from "~/theme/tokens";
 import { useTokens } from "~/theme/use-tokens";
 
 const FIRST_COLUMN_WIDTH = 180;
@@ -24,6 +37,8 @@ function BaseDetailContent() {
   const tokens = useTokens();
   const buda = useBusabaseOrpc();
   const [activeViewId, setActiveViewId] = useState<string | null>(null);
+  const [displayMode, setDisplayMode] = useState<"list" | "table">("list");
+  const [actionsOpen, setActionsOpen] = useState(false);
 
   const basesQuery = useQuery(
     buda
@@ -80,6 +95,33 @@ function BaseDetailContent() {
       subtitle={base ? `${records.length} records · ${base.fields.length} fields` : slug}
       refreshing={basesQuery.isRefetching || recordsQuery.isRefetching}
       onRefresh={refresh}
+      headerAction={
+        base ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Open base actions"
+            hitSlop={mobile.hitSlop}
+            style={[styles.moreButton, { backgroundColor: tokens.primaryMuted }]}
+            onPress={() => setActionsOpen(true)}
+          >
+            <MoreHorizontal size={21} color={tokens.foreground} />
+          </Pressable>
+        ) : undefined
+      }
+      footer={
+        base ? (
+          <NativeActionBar>
+            <Button
+              label="New record"
+              fullWidth
+              leadingIcon={<Plus size={18} color={tokens.primaryForeground} />}
+              onPress={() =>
+                router.push({ pathname: "/base/[slug]/new", params: { slug: base.slug } })
+              }
+            />
+          </NativeActionBar>
+        ) : undefined
+      }
     >
       {loading ? <NativeLoadingState label="Loading base" /> : null}
       {error ? <NativeErrorState message={error.message} onRetry={refresh} /> : null}
@@ -87,128 +129,157 @@ function BaseDetailContent() {
         <NativeEmptyState title="Base not found" description="This base is not available." />
       ) : null}
       {base ? (
-        <View style={styles.content}>
-          {base.description ? (
-            <Text style={[typography.body, styles.description, { color: tokens.mutedForeground }]}>
-              {base.description}
-            </Text>
-          ) : null}
-
-          <View style={styles.baseActions}>
-            <View style={styles.baseActionItem}>
-              <Button
-                label="New record"
-                fullWidth
-                onPress={() =>
-                  router.push({ pathname: "/base/[slug]/new", params: { slug: base.slug } })
-                }
-              />
-            </View>
-            <View style={styles.baseActionItem}>
-              <Button
-                label="Design"
-                variant="secondary"
-                fullWidth
-                onPress={() =>
-                  router.push({ pathname: "/base/[slug]/design", params: { slug: base.slug } })
-                }
-              />
-            </View>
-          </View>
+        <>
+          <NativeSection title="Info">
+            <NativeRow
+              title={base.description ? "Description" : "Base"}
+              subtitle={base.description || base.slug}
+            />
+            <NativeRow title="Fields" subtitle={`${base.fields.length} configured fields`} last />
+          </NativeSection>
 
           {views.length > 0 ? (
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              style={styles.viewsScroll}
-              contentContainerStyle={styles.views}
-            >
-              {[{ id: null as string | null, name: "All" }, ...views].map((view) => {
-                const active = view.id === activeViewId;
-                return (
-                  <Pressable
-                    key={view.id ?? "all"}
-                    accessibilityRole="button"
-                    style={[
-                      styles.viewChip,
-                      {
-                        backgroundColor: active ? tokens.primaryMuted : tokens.card,
-                        borderColor: active ? tokens.primary : tokens.border,
-                      },
-                    ]}
-                    onPress={() => setActiveViewId(view.id)}
-                  >
-                    <Text
-                      style={[
-                        typography.small,
-                        { color: active ? tokens.foreground : tokens.mutedForeground },
-                      ]}
-                    >
-                      {view.name}
-                    </Text>
-                  </Pressable>
-                );
-              })}
-            </ScrollView>
+            <NativeChipList
+              value={activeViewId}
+              options={[{ value: null as string | null, label: "All" }].concat(
+                views.map((view) => ({ value: view.id, label: view.name })),
+              )}
+              onChange={setActiveViewId}
+            />
           ) : null}
+
+          <NativeSegmentedControl
+            value={displayMode}
+            options={[
+              {
+                value: "list",
+                label: "List",
+                Icon: List,
+              },
+              {
+                value: "table",
+                label: "Table",
+                Icon: Table2,
+              },
+            ]}
+            onChange={setDisplayMode}
+          />
 
           {records.length === 0 ? (
             <NativeEmptyState
               title="No records"
               description="Merged records for this base will show here."
             />
+          ) : displayMode === "list" ? (
+            <NativeSection title="Records" caption={`${records.length}`}>
+              {records.map((record, index) => (
+                <NativeRow
+                  key={record.id}
+                  title={getRecordTitle(record)}
+                  subtitle={getPreview(record.headCommit.fields)}
+                  meta={formatDate(record.updatedAt)}
+                  last={index === records.length - 1}
+                  onPress={() =>
+                    router.push({ pathname: "/records/[id]", params: { id: record.id } })
+                  }
+                >
+                  <FieldList
+                    fields={record.headCommit.fields}
+                    definitions={visibleFields.slice(0, 3)}
+                    limitToDefinitions
+                    variant="compact"
+                  />
+                </NativeRow>
+              ))}
+            </NativeSection>
           ) : (
-            <ScrollView horizontal showsHorizontalScrollIndicator style={styles.tableScroll}>
-              <View>
-                <View style={[styles.tableHeader, { borderColor: tokens.border }]}>
-                  <Text
-                    style={[
-                      typography.caption,
-                      styles.firstCell,
-                      { color: tokens.mutedForeground },
-                    ]}
-                  >
-                    TITLE
-                  </Text>
-                  {visibleFields.map((field) => (
+            <NativeSection title="Table" caption={`${visibleFields.length} fields`}>
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator
+                style={styles.tableScroll}
+                contentContainerStyle={styles.tableContent}
+              >
+                <View>
+                  <View style={[styles.tableHeader, { borderColor: tokens.border }]}>
                     <Text
-                      key={field.id}
-                      numberOfLines={1}
-                      style={[typography.caption, styles.cell, { color: tokens.mutedForeground }]}
+                      style={[
+                        typography.caption,
+                        styles.firstCell,
+                        { color: tokens.mutedForeground },
+                      ]}
                     >
-                      {iStringParse(field.name).toUpperCase()}
-                    </Text>
-                  ))}
-                </View>
-                {records.map((record) => (
-                  <Pressable
-                    key={record.id}
-                    accessibilityRole="button"
-                    style={({ pressed }) => [
-                      styles.tableRow,
-                      { borderColor: tokens.border, opacity: pressed ? 0.7 : 1 },
-                    ]}
-                    onPress={() =>
-                      router.push({ pathname: "/records/[id]", params: { id: record.id } })
-                    }
-                  >
-                    <Text
-                      numberOfLines={1}
-                      style={[typography.bodyEm, styles.firstCell, { color: tokens.foreground }]}
-                    >
-                      {getRecordTitle(record)}
+                      TITLE
                     </Text>
                     {visibleFields.map((field) => (
-                      <View key={field.id} style={styles.cell}>
-                        <FieldValue field={field} value={record.headCommit.fields[field.slug]} />
-                      </View>
+                      <Text
+                        key={field.id}
+                        numberOfLines={1}
+                        style={[typography.caption, styles.cell, { color: tokens.mutedForeground }]}
+                      >
+                        {iStringParse(field.name).toUpperCase()}
+                      </Text>
                     ))}
-                  </Pressable>
-                ))}
-              </View>
-            </ScrollView>
+                  </View>
+                  {records.map((record, index) => (
+                    <Pressable
+                      key={record.id}
+                      accessibilityRole="button"
+                      style={({ pressed }) => [
+                        styles.tableRow,
+                        index === records.length - 1 ? styles.tableRowLast : null,
+                        { borderColor: tokens.border, opacity: pressed ? 0.7 : 1 },
+                      ]}
+                      onPress={() =>
+                        router.push({ pathname: "/records/[id]", params: { id: record.id } })
+                      }
+                    >
+                      <Text
+                        numberOfLines={1}
+                        style={[typography.bodyEm, styles.firstCell, { color: tokens.foreground }]}
+                      >
+                        {getRecordTitle(record)}
+                      </Text>
+                      {visibleFields.map((field) => (
+                        <View key={field.id} style={styles.cell}>
+                          <FieldValue field={field} value={record.headCommit.fields[field.slug]} />
+                        </View>
+                      ))}
+                    </Pressable>
+                  ))}
+                </View>
+              </ScrollView>
+            </NativeSection>
           )}
-        </View>
+
+          <NativeBottomSheet
+            visible={actionsOpen}
+            title="Base actions"
+            description="Manage this base without crowding the record list."
+            showCloseButton
+            onClose={() => setActionsOpen(false)}
+            footer={
+              <NativeActionBar>
+                <Button
+                  label="Edit base design"
+                  variant="secondary"
+                  fullWidth
+                  leadingIcon={<Settings2 size={18} color={tokens.foreground} />}
+                  onPress={() => {
+                    setActionsOpen(false);
+                    router.push({ pathname: "/base/[slug]/design", params: { slug: base.slug } });
+                  }}
+                />
+                <Button
+                  label="Close"
+                  variant="ghost"
+                  fullWidth
+                  onPress={() => setActionsOpen(false)}
+                />
+              </NativeActionBar>
+            }
+          />
+        </>
       ) : null}
     </DrawerScaffold>
   );
@@ -223,20 +294,15 @@ export default function BaseDetailScreen() {
 }
 
 const styles = StyleSheet.create({
-  content: { gap: 12 },
-  description: { marginHorizontal: 20 },
-  baseActions: { flexDirection: "row", gap: 10, marginHorizontal: 20 },
-  baseActionItem: { flex: 1 },
-  viewsScroll: { flexGrow: 0 },
-  views: { paddingHorizontal: 20, gap: 8 },
-  viewChip: {
-    minHeight: 34,
-    justifyContent: "center",
-    borderWidth: StyleSheet.hairlineWidth,
+  moreButton: {
+    width: 36,
+    height: 36,
     borderRadius: radius.full,
-    paddingHorizontal: 12,
+    alignItems: "center",
+    justifyContent: "center",
   },
-  tableScroll: { paddingLeft: 20 },
+  tableScroll: { flexGrow: 0 },
+  tableContent: { paddingLeft: 14 },
   tableHeader: {
     flexDirection: "row",
     alignItems: "center",
@@ -254,6 +320,7 @@ const styles = StyleSheet.create({
     paddingRight: 20,
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
+  tableRowLast: { borderBottomWidth: 0 },
   firstCell: { width: FIRST_COLUMN_WIDTH },
   cell: { width: COLUMN_WIDTH, overflow: "hidden" },
 });

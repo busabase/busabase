@@ -1,6 +1,12 @@
 // View objects owned by the base domain (structured records + views).
+import type { AttachmentRef } from "open-domains/attachments/types";
 import type { iString } from "openlib/i18n/i-string";
-import type { CommitVO, FieldType } from "../../types";
+import type { CommitVO, FieldType, UserRefVO } from "../../types";
+
+export interface AssetAttachmentRef extends AttachmentRef {
+  attachmentId: string;
+  assetId?: string;
+}
 
 export interface BaseFieldVO {
   id: string;
@@ -96,6 +102,7 @@ export interface ViewVO {
   config: ViewConfigVO;
   status: "active" | "archived";
   createdBy: string;
+  createdByUser?: UserRefVO | null;
   archivedAt: string | null;
   createdAt: string;
   updatedAt: string;
@@ -109,6 +116,7 @@ export interface RecordVO {
   parentCommitId: string | null;
   status: "active" | "archived";
   createdBy: string;
+  createdByUser?: UserRefVO | null;
   archivedAt: string | null;
   createdAt: string;
   updatedAt: string;

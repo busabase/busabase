@@ -4,6 +4,8 @@ import type { CommentSubjectType, CommentVO } from "busabase-contract/types";
 import { Reply, Sparkles } from "lucide-react";
 import { Fragment, useRef, useState } from "react";
 import { fmt, useCoreI18n } from "../../../i18n";
+import { formatUserRefLabel } from "../helpers/format";
+import { UserAvatar, UserRefButton } from "./identity";
 
 export const parseMentionsAi = (text: string) => /(^|\s)@ai\b/i.test(text);
 
@@ -106,10 +108,19 @@ export function CommentItem({
 
   return (
     <div className="group flex gap-2.5 border-border/40 border-b py-3 last:border-b-0">
-      <CommentAvatar ai={comment.mentionsAi} authorId={comment.authorId} />
+      {comment.mentionsAi ? (
+        <CommentAvatar ai authorId={comment.authorId} />
+      ) : (
+        <UserAvatar fallbackId={comment.authorId} user={comment.author} />
+      )}
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-2">
-          <span className="font-medium text-sm">{comment.authorId}</span>
+          <UserRefButton
+            fallbackId={comment.authorId}
+            labelClassName="font-medium text-sm"
+            title="Comment author"
+            user={comment.author}
+          />
           {comment.mentionsAi ? <AiMentionBadge /> : null}
           <span className="text-muted-foreground text-xs">
             {new Date(comment.createdAt).toLocaleString()}
@@ -181,7 +192,7 @@ export function SubjectCommentThread({
       .join("\n");
     setBody((current) => {
       const prefix = current.trim().length > 0 ? `${current.replace(/\s+$/, "")}\n\n` : "";
-      return `${prefix}> ${fmt(messages.comments.quotedAttribution, { author: comment.authorId })}\n${quoted}\n\n`;
+      return `${prefix}> ${fmt(messages.comments.quotedAttribution, { author: formatUserRefLabel(comment.author, comment.authorId) })}\n${quoted}\n\n`;
     });
     requestAnimationFrame(() => {
       const element = composerRef.current;

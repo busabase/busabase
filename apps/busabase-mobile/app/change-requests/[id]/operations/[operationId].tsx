@@ -1,31 +1,69 @@
 import { skipToken, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { ChangeRequestVO, OperationVO } from "busabase-contract/types";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { ArrowLeft } from "lucide-react-native";
+import { ArrowLeft, GitCommitHorizontal, ListChecks } from "lucide-react-native";
 import { useEffect, useState } from "react";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { Pressable, ScrollView, StyleSheet } from "react-native";
 import { useBusabaseOrpc } from "~/api/use-busabase-orpc";
 import { CommentsSection } from "~/components/busabase/CommentsSection";
 import { ConnectionGuard } from "~/components/busabase/ConnectionGuard";
 import { FieldList } from "~/components/busabase/FieldList";
 import { RecordForm } from "~/components/busabase/RecordForm";
 import {
+  NativeActionBar,
+  NativeBottomSheet,
   NativeEmptyState,
-  NativeErrorState,
+  NativeInlineError,
   NativeLoadingState,
+  NativeRow,
   NativeScreen,
+  NativeSection,
 } from "~/components/native-screen";
 import { Button } from "~/components/ui/Button";
 import { StatusBadge } from "~/components/ui/StatusBadge";
-import { getChangeRequestScopeName, operationLabels } from "~/lib/busabase-display";
+import {
+  getChangeRequestScopeName,
+  getOperationStatusLabel,
+  operationLabels,
+} from "~/lib/busabase-display";
 import { shortId } from "~/lib/format";
 import {
   buildInitialFormValues,
   normalizeFormValues,
   type RecordFormValue,
 } from "~/lib/record-form";
-import { mobile, radius, typography } from "~/theme/tokens";
+import { mobile, radius } from "~/theme/tokens";
 import { useTokens } from "~/theme/use-tokens";
+
+function OperationSummarySection({
+  changeRequest,
+  operation,
+  label,
+}: {
+  changeRequest: ChangeRequestVO;
+  operation: OperationVO;
+  label: string;
+}) {
+  const tokens = useTokens();
+
+  return (
+    <NativeSection title="Summary">
+      <NativeRow
+        title={label}
+        subtitle={`${getOperationStatusLabel(operation.status)} · position ${operation.position + 1}`}
+        leading={<ListChecks size={18} color={tokens.mutedForeground} />}
+        trailing={<StatusBadge status={changeRequest.status} />}
+      />
+      <NativeRow
+        title="Head commit"
+        subtitle={operation.headCommit.message || "No commit message"}
+        meta={shortId(operation.headCommitId)}
+        leading={<GitCommitHorizontal size={18} color={tokens.mutedForeground} />}
+        last
+      />
+    </NativeSection>
+  );
+}
 
 function OperationDetailContent() {
   const params = useLocalSearchParams<{ id?: string; operationId?: string }>();
@@ -35,7 +73,7 @@ function OperationDetailContent() {
   const tokens = useTokens();
   const buda = useBusabaseOrpc();
   const queryClient = useQueryClient();
-  const [reviseMode, setReviseMode] = useState(false);
+  const [revisionOpen, setRevisionOpen] = useState(false);
   const [values, setValues] = useState<Record<string, RecordFormValue>>({});
 
   const crQuery = useQuery(
@@ -68,7 +106,7 @@ function OperationDetailContent() {
       });
     },
     onSuccess: () => {
-      setReviseMode(false);
+      setRevisionOpen(false);
       void queryClient.invalidateQueries({
         queryKey: buda?.orpc.changeRequests.get.key({ input: { changeRequestId } }),
       });
@@ -107,44 +145,52 @@ function OperationDetailContent() {
   }
 
   const label = operationLabels[operation.operation] ?? operation.operation;
+  const footer =
+    changeRequest.status === "in_review" ? (
+      <NativeActionBar>
+        <Button
+          label="Revise operation"
+          variant="secondary"
+          disabled={revisionOpen}
+          fullWidth
+          onPress={() => {
+            reviseMutation.reset();
+            setRevisionOpen(true);
+          }}
+        />
+      </NativeActionBar>
+    ) : undefined;
 
   return (
     <NativeScreen
       title={label}
       subtitle={`${getChangeRequestScopeName(changeRequest)} · ${shortId(operation.headCommitId)}`}
       headerLeading={headerLeading}
+      footer={footer}
     >
-      <View style={styles.content}>
-        <View style={[styles.card, { backgroundColor: tokens.card, borderColor: tokens.border }]}>
-          <View style={styles.row}>
-            <StatusBadge status={changeRequest.status} />
-            <Text style={[typography.small, { color: tokens.mutedForeground }]}>
-              {operation.status} · position {operation.position + 1}
-            </Text>
-          </View>
-        </View>
+      <OperationSummarySection changeRequest={changeRequest} operation={operation} label={label} />
+      <NativeSection title="Proposed fields">
+        <FieldList
+          fields={operation.headCommit.fields}
+          definitions={changeRequest.base?.fields ?? []}
+          highlight
+        />
+      </NativeSection>
 
-        <View style={[styles.card, { backgroundColor: tokens.card, borderColor: tokens.border }]}>
-          <Text style={[typography.h2, { color: tokens.foreground }]}>Proposed fields</Text>
-          <FieldList
-            fields={operation.headCommit.fields}
-            definitions={changeRequest.base?.fields ?? []}
-            highlight
-          />
-        </View>
-
-        {reviseMode ? (
-          <View style={[styles.card, { backgroundColor: tokens.card, borderColor: tokens.border }]}>
-            <Text style={[typography.h2, { color: tokens.foreground }]}>Revise operation</Text>
-            <RecordForm
-              fields={changeRequest.base?.fields ?? []}
-              values={values}
-              onChange={(slug, value) => setValues((current) => ({ ...current, [slug]: value }))}
-            />
+      <CommentsSection subjectType="operation" subjectId={operation.id} />
+      <NativeBottomSheet
+        visible={revisionOpen}
+        title="Revise operation"
+        description="Adjust the proposed fields and submit a new operation revision."
+        showCloseButton
+        maxHeight="88%"
+        onClose={() => setRevisionOpen(false)}
+        footer={
+          <NativeActionBar>
             {reviseMutation.error ? (
-              <NativeErrorState
+              <NativeInlineError
                 message={reviseMutation.error.message}
-                onRetry={() => reviseMutation.reset()}
+                onReset={() => reviseMutation.reset()}
               />
             ) : null}
             <Button
@@ -153,19 +199,29 @@ function OperationDetailContent() {
               fullWidth
               onPress={() => reviseMutation.mutate()}
             />
-            <Button label="Cancel" variant="ghost" fullWidth onPress={() => setReviseMode(false)} />
-          </View>
-        ) : changeRequest.status === "in_review" ? (
-          <Button
-            label="Revise operation"
-            variant="secondary"
-            fullWidth
-            onPress={() => setReviseMode(true)}
+            <Button
+              label="Cancel"
+              variant="ghost"
+              disabled={reviseMutation.isPending}
+              fullWidth
+              onPress={() => setRevisionOpen(false)}
+            />
+          </NativeActionBar>
+        }
+      >
+        <ScrollView
+          style={styles.revisionSheetScroll}
+          contentContainerStyle={styles.revisionSheetContent}
+          keyboardShouldPersistTaps="handled"
+        >
+          <RecordForm
+            fields={changeRequest.base?.fields ?? []}
+            values={values}
+            variant="embedded"
+            onChange={(slug, value) => setValues((current) => ({ ...current, [slug]: value }))}
           />
-        ) : null}
-
-        <CommentsSection subjectType="operation" subjectId={operation.id} />
-      </View>
+        </ScrollView>
+      </NativeBottomSheet>
     </NativeScreen>
   );
 }
@@ -186,17 +242,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  content: { marginHorizontal: 20, gap: 14 },
-  card: {
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: radius.lg,
-    padding: 16,
-    gap: 12,
-  },
-  row: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: 12,
-  },
+  revisionSheetScroll: { maxHeight: 440 },
+  revisionSheetContent: { paddingBottom: 8 },
 });

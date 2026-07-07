@@ -9,11 +9,7 @@ import type {
   RequestUploadUrlVO,
 } from "open-domains/attachments/types";
 import type { iString } from "openlib/i18n/i-string";
-import {
-  type BusabaseContract,
-  busabaseContract,
-  searchResponseSchema,
-} from "../contract/busabase";
+import { type BusabaseContract, busabaseContract } from "../contract/busabase";
 import type { CreatableNodeType } from "../domains/registry";
 import type {
   AgentTaskVO,
@@ -22,6 +18,7 @@ import type {
   ChangeRequestVO,
   CommentSubjectType,
   CommentVO,
+  DriveVO,
   NodeVO,
   RecordVO,
   SearchResponseVO,
@@ -74,6 +71,11 @@ export interface BusabaseDashboardApiClient {
   listNodes: () => Promise<NodeVO[]>;
   getSkill: (nodeIdOrSlug: string) => Promise<SkillVO>;
   readSkillFile: (
+    nodeId: string,
+    filePath: string,
+  ) => Promise<{ nodeId: string; path: string; content: string; contentHash: string }>;
+  getDrive: (nodeIdOrSlug: string) => Promise<DriveVO>;
+  readDriveFile: (
     nodeId: string,
     filePath: string,
   ) => Promise<{ nodeId: string; path: string; content: string; contentHash: string }>;
@@ -241,8 +243,8 @@ export interface BusabaseDashboardApiClient {
   mergeChangeRequest: (
     changeRequestId: string,
   ) => Promise<{ changeRequest: ChangeRequestVO; record: RecordVO | null; view: ViewVO | null }>;
-  createAttachmentUploadUrl: (input: RequestUploadUrlDTO) => Promise<RequestUploadUrlVO>;
-  confirmAttachment: (input: ConfirmUploadDTO) => Promise<ConfirmUploadVO>;
+  createAssetUploadUrl: (input: RequestUploadUrlDTO) => Promise<RequestUploadUrlVO>;
+  confirmAsset: (input: ConfirmUploadDTO) => Promise<ConfirmUploadVO>;
   createRestoreBaseChangeRequest: (
     baseId: string,
     payload: { submittedBy?: string; message?: string },
@@ -321,7 +323,7 @@ export const createBusabaseRestApiClient = (
   const client = createBusabaseORPCClient(rpcPath);
 
   return {
-    search: (options) => fetchBusabaseSearch(apiBasePath, options),
+    search: (options) => client.search(options),
     listAuditEvents: (options) => client.auditEvents.list(options ?? {}),
     createAuditEvent: (payload) => client.auditEvents.create(payload),
     listComments: (subject) => client.comments.list(subject),
@@ -330,10 +332,10 @@ export const createBusabaseRestApiClient = (
     listNodes: () => client.nodes.list(),
     listArchivedNodes: () => client.nodes.listArchived(),
     purgeNode: (nodeId) => client.nodes.purge({ nodeId }),
-    // Skills go over plain REST, not oRPC: the RPC path /skills/get collides with
-    // the server's REST matcher /skills/:id (same "skills" word). Same approach as search.
-    getSkill: (nodeIdOrSlug) => fetchBusabaseSkill(apiBasePath, nodeIdOrSlug),
-    readSkillFile: (nodeId, filePath) => fetchBusabaseSkillFile(apiBasePath, nodeId, filePath),
+    getSkill: (nodeIdOrSlug) => client.skills.get({ nodeId: nodeIdOrSlug }),
+    readSkillFile: (nodeId, filePath) => client.skills.readFile({ nodeId, filePath }),
+    getDrive: (nodeIdOrSlug) => client.drives.get({ nodeId: nodeIdOrSlug }),
+    readDriveFile: (nodeId, filePath) => client.drives.readFile({ nodeId, filePath }),
     listChangeRequests: (options) => client.changeRequests.list(options ?? {}),
     getChangeRequest: (changeRequestId) => client.changeRequests.get({ changeRequestId }),
     listRecords: (options) => client.records.list(options ?? {}),
@@ -377,8 +379,8 @@ export const createBusabaseRestApiClient = (
     createDeleteChangeRequest: (recordId) =>
       client.records.deleteChangeRequest({ recordId, deleteMode: "archive" }),
     mergeChangeRequest: (changeRequestId) => client.changeRequests.merge({ changeRequestId }),
-    createAttachmentUploadUrl: (input) => client.attachments.createUploadUrl(input),
-    confirmAttachment: (input) => client.attachments.confirm(input),
+    createAssetUploadUrl: (input) => client.assets.createUploadUrl(input),
+    confirmAsset: (input) => client.assets.confirm(input),
     createRestoreBaseChangeRequest: (baseId, payload) =>
       client.bases.restoreChangeRequest({ baseId, ...payload }),
     createRestoreFieldChangeRequest: (baseId, payload) =>
@@ -389,59 +391,5 @@ export const createBusabaseRestApiClient = (
       client.views.restoreChangeRequest({ viewId, ...payload }),
     createRestoreRecordChangeRequest: (recordId, payload) =>
       client.records.restoreChangeRequest({ recordId, ...payload }),
-  };
-};
-
-const fetchBusabaseSearch = async (
-  apiBasePath: string,
-  options: BusabaseSearchOptions,
-): Promise<SearchResponseVO> => {
-  const endpoint = new URL(`${resolveApiUrl(apiBasePath).replace(/\/$/, "")}/search`);
-  endpoint.searchParams.set("query", options.query);
-  if (options.limit !== undefined) {
-    endpoint.searchParams.set("limit", String(options.limit));
-  }
-  if (options.offset !== undefined) {
-    endpoint.searchParams.set("offset", String(options.offset));
-  }
-
-  const response = await fetch(endpoint, { method: "GET" });
-  if (!response.ok) {
-    throw new Error(`Search failed with ${response.status}`);
-  }
-  return searchResponseSchema.parse(await response.json());
-};
-
-const fetchBusabaseSkill = async (apiBasePath: string, nodeIdOrSlug: string): Promise<SkillVO> => {
-  const base = resolveApiUrl(apiBasePath).replace(/\/$/, "");
-  const response = await fetch(`${base}/skills/${encodeURIComponent(nodeIdOrSlug)}`, {
-    method: "GET",
-  });
-  if (!response.ok) {
-    throw new Error(`Failed to load skill (${response.status})`);
-  }
-  return (await response.json()) as SkillVO;
-};
-
-const fetchBusabaseSkillFile = async (
-  apiBasePath: string,
-  nodeId: string,
-  filePath: string,
-): Promise<{ nodeId: string; path: string; content: string; contentHash: string }> => {
-  const base = resolveApiUrl(apiBasePath).replace(/\/$/, "");
-  // Preserve the path structure but encode each segment.
-  const encodedPath = filePath.split("/").map(encodeURIComponent).join("/");
-  const response = await fetch(
-    `${base}/skills/${encodeURIComponent(nodeId)}/files/${encodedPath}`,
-    { method: "GET" },
-  );
-  if (!response.ok) {
-    throw new Error(`Failed to read file (${response.status})`);
-  }
-  return (await response.json()) as {
-    nodeId: string;
-    path: string;
-    content: string;
-    contentHash: string;
   };
 };

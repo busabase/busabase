@@ -1,22 +1,33 @@
 import type { BusabaseDashboardApiClient } from "busabase-contract/api-client";
-import type { AttachmentRef } from "open-domains/attachments/types";
+import type { AssetAttachmentRef } from "busabase-contract/types";
 import { useCallback } from "react";
 
 /**
- * Upload a file for an `attachment` field: request URL → push bytes (dev route
- * or presigned PUT) → confirm (writes busabase_attachments) → return the inline ref
- * stored in the record's field value.
+ * Upload a file for a Base file field: request asset URL → push bytes (dev
+ * route or presigned PUT) → confirm (writes the storage registry row and
+ * busabase_assets) → return the asset-backed inline ref stored in the record.
  */
 export function useAttachmentUpload(client: BusabaseDashboardApiClient) {
   return useCallback(
-    async (file: File): Promise<AttachmentRef> => {
+    async (file: File): Promise<AssetAttachmentRef> => {
       const mimeType = file.type || "application/octet-stream";
-      const requested = await client.createAttachmentUploadUrl({
+      const requested = await client.createAssetUploadUrl({
         fileName: file.name,
         mimeType,
         sizeBytes: file.size,
         context: "record-field",
       });
+      if (requested.duplicate && requested.attachmentId) {
+        return {
+          id: requested.assetId ?? requested.attachmentId,
+          assetId: requested.assetId,
+          attachmentId: requested.attachmentId,
+          url: requested.publicUrl,
+          fileName: file.name,
+          mimeType,
+          size: file.size,
+        };
+      }
       if (requested.uploadUrl.startsWith("/")) {
         const form = new FormData();
         form.append("file", file);
@@ -35,7 +46,7 @@ export function useAttachmentUpload(client: BusabaseDashboardApiClient) {
           throw new Error(`Upload failed (${response.status})`);
         }
       }
-      const confirmed = await client.confirmAttachment({
+      const confirmed = await client.confirmAsset({
         storageKey: requested.storageKey,
         fileName: file.name,
         mimeType,
@@ -43,7 +54,9 @@ export function useAttachmentUpload(client: BusabaseDashboardApiClient) {
         context: "record-field",
       });
       return {
-        id: confirmed.attachmentId,
+        id: confirmed.assetId ?? confirmed.attachmentId,
+        assetId: confirmed.assetId,
+        attachmentId: confirmed.attachmentId,
         url: confirmed.publicUrl,
         fileName: file.name,
         mimeType,

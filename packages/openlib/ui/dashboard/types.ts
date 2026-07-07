@@ -1,5 +1,14 @@
 import type { LucideIcon } from "lucide-react";
 
+export interface NavItemAction {
+  title: string;
+  icon?: LucideIcon;
+  action?: string;
+  url?: string;
+  onSelect?: () => void;
+  variant?: "default" | "destructive";
+}
+
 export interface NavItem {
   title: string;
   url: string;
@@ -24,6 +33,12 @@ export interface NavItem {
    * action on the item that invokes this when clicked.
    */
   onAddChild?: () => void;
+  addChildTitle?: string;
+  /**
+   * Optional dropdown actions rendered from a row's hover "more" affordance.
+   */
+  actions?: NavItemAction[];
+  moreActionsTitle?: string;
   /**
    * Optional click action key (e.g., "billing") for items that trigger actions instead of navigation
    */
@@ -43,7 +58,14 @@ export interface NavItem {
   /**
    * Optional status for recent task items
    */
-  status?: "pending" | "in_progress" | "waiting_for_input" | "completed" | "failed" | "cancelled";
+  status?:
+    | "pending"
+    | "in_progress"
+    | "waiting_for_input"
+    | "completed"
+    | "failed"
+    | "cancelled"
+    | "pending_fork";
 }
 
 export interface NavGroup {

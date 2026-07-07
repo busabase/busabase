@@ -8,6 +8,7 @@ import {
   getAttachmentRefs,
   getChoiceBadgeClass,
   getChoiceLabel,
+  getCodeFieldPreviewLanguage,
   getFieldChipEntries,
   getFieldName,
   getFieldPreviewText,
@@ -15,7 +16,9 @@ import {
   getRelationRecordIds,
   isRecordLongField,
   isRecordTitleField,
+  normalizeCodeLanguage,
 } from "../src/domains/dashboard/helpers/field";
+import { safeFetchableUrl, sanitizeHtml } from "../src/domains/dashboard/helpers/html";
 
 import type { BaseFieldVO, ChangeRequestVO, FieldType, RecordVO } from "../src/types";
 
@@ -247,13 +250,85 @@ describe("getRelationRecordIds", () => {
 
 describe("getAttachmentRefs", () => {
   it("keeps only well-formed refs", () => {
-    const good = { url: "https://cdn/x.png", fileName: "x.png" };
+    const good = {
+      id: "ast_1",
+      url: "https://cdn/x.png",
+      fileName: "x.png",
+      mimeType: "image/png",
+      size: 42,
+    };
     expect(getAttachmentRefs([good, { url: 1 }, null, "junk"])).toEqual([good]);
+  });
+
+  it("normalizes legacy attachmentId and new assetId refs", () => {
+    expect(
+      getAttachmentRefs([
+        {
+          attachmentId: "att_1",
+          url: "https://cdn/x.png",
+          fileName: "x.png",
+          mimeType: "image/png",
+          size: 42,
+        },
+        {
+          assetId: "ast_1",
+          attachmentId: "att_2",
+          url: "https://cdn/y.png",
+          fileName: "y.png",
+          mimeType: "image/png",
+          size: 24,
+        },
+      ]),
+    ).toEqual([
+      {
+        id: "att_1",
+        attachmentId: "att_1",
+        assetId: undefined,
+        url: "https://cdn/x.png",
+        fileName: "x.png",
+        mimeType: "image/png",
+        size: 42,
+      },
+      {
+        id: "ast_1",
+        assetId: "ast_1",
+        attachmentId: "att_2",
+        url: "https://cdn/y.png",
+        fileName: "y.png",
+        mimeType: "image/png",
+        size: 24,
+      },
+    ]);
   });
 
   it("non-array → []", () => {
     expect(getAttachmentRefs("nope")).toEqual([]);
     expect(getAttachmentRefs(undefined)).toEqual([]);
+  });
+});
+
+// ── media URL safety ────────────────────────────────────────────────────────
+
+describe("safeFetchableUrl", () => {
+  it("allows root-relative and absolute HTTP(S) media URLs", () => {
+    expect(safeFetchableUrl("/assets/readme/example.svg")).toBe("/assets/readme/example.svg");
+    expect(safeFetchableUrl("https://cdn.example.com/example.svg")).toBe(
+      "https://cdn.example.com/example.svg",
+    );
+  });
+
+  it("blocks bare relative image filenames before they hit the dashboard route", () => {
+    expect(safeFetchableUrl("ai-native-database-paradigm.svg")).toBeNull();
+    expect(safeFetchableUrl("human-ai-database-collaboration.svg")).toBeNull();
+  });
+
+  it("strips unsafe HTML image sources", () => {
+    expect(sanitizeHtml('<img src="ai-native-database-paradigm.svg" alt="diagram">')).toBe(
+      '<img alt="diagram">',
+    );
+    expect(sanitizeHtml('<img src="/assets/readme/example.svg" alt="diagram">')).toBe(
+      '<img src="/assets/readme/example.svg" alt="diagram">',
+    );
   });
 });
 
@@ -268,11 +343,45 @@ describe("isRecordTitleField / isRecordLongField", () => {
 
   it("long by type, by slug, or by value length", () => {
     expect(isRecordLongField(makeField({ type: "markdown" }), "x")).toBe(true);
+    expect(isRecordLongField(makeField({ type: "html" }), "<p>x</p>")).toBe(true);
+    expect(isRecordLongField(makeField({ type: "code" }), "const x = 1;")).toBe(true);
+    expect(isRecordLongField(makeField({ type: "json" }), '{"ok":true}')).toBe(true);
+    expect(isRecordLongField(makeField({ type: "yaml" }), "ok: true")).toBe(true);
     expect(isRecordLongField(makeField({ slug: "description", type: "text" }), "x")).toBe(true);
     expect(isRecordLongField(makeField({ slug: "status", type: "text" }), "x".repeat(200))).toBe(
       true,
     );
     expect(isRecordLongField(makeField({ slug: "status", type: "text" }), "short")).toBe(false);
+  });
+});
+
+// ── code preview language ───────────────────────────────────────────────────
+
+describe("code preview language", () => {
+  it("normalizes common aliases", () => {
+    expect(normalizeCodeLanguage("TS")).toBe("typescript");
+    expect(normalizeCodeLanguage("yml")).toBe("yaml");
+    expect(normalizeCodeLanguage("plain")).toBe("text");
+  });
+
+  it("honors configured languages and pins structured field types", () => {
+    expect(
+      getCodeFieldPreviewLanguage(
+        makeField({ type: "code", options: { code: { language: "ts" } } }),
+        "const x: number = 1;",
+      ),
+    ).toBe("typescript");
+    expect(getCodeFieldPreviewLanguage(makeField({ type: "json" }), '{"ok":true}')).toBe("json");
+    expect(getCodeFieldPreviewLanguage(makeField({ type: "yaml" }), "ok: true")).toBe("yaml");
+  });
+
+  it("guesses a useful language for unconfigured code fields", () => {
+    expect(
+      getCodeFieldPreviewLanguage(makeField({ type: "code", options: {} }), "const x = 1;"),
+    ).toBe("javascript");
+    expect(
+      getCodeFieldPreviewLanguage(makeField({ type: "code", options: {} }), '{"ok":true}'),
+    ).toBe("json");
   });
 });
 

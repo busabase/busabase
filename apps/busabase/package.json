@@ -79,7 +79,7 @@
     "zod": "^4.3.6",
     "@playwright/test": "^1.56.1",
     "@tailwindcss/postcss": "^4.1.17",
-    "@types/node": "^24.10.0",
+    "@types/node": "^24.13.2",
     "@types/react": "19.2.17",
     "@types/react-dom": "^19.2.3",
     "drizzle-kit": "^0.31.7",

@@ -5,6 +5,8 @@ import { busabaseRouter } from "busabase-core/router";
 import { busabaseDemoRouter } from "busabase-core/router-demo";
 import { addCorsHeaders, createCorsHeaders } from "openlib/cors";
 import { resolveDemoMode } from "openlib/ui/dashboard/demo";
+import { readBuiltinUserEnvVars } from "~/domains/user-env/logic/user-env";
+import { getLocalUserName } from "~/lib/local-user";
 
 const handler = new RPCHandler(busabaseRouter);
 const demoHandler = new RPCHandler(busabaseDemoRouter);
@@ -28,9 +30,12 @@ async function handle(request: Request) {
   };
 
   try {
-    return await (demoUseCase
-      ? runWithBusabaseContext({ isDemo: true, demoUseCase, demoLocale }, run)
-      : run());
+    if (demoUseCase) {
+      return await runWithBusabaseContext({ isDemo: true, demoUseCase, demoLocale }, run);
+    }
+
+    const envVars = await readBuiltinUserEnvVars();
+    return await runWithBusabaseContext({ envVars, localUserName: getLocalUserName() }, run);
   } catch (error) {
     if (error instanceof ORPCError) {
       return addCorsHeaders(

@@ -1,8 +1,24 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { BusabaseDashboardApiClient } from "busabase-contract/api-client";
-import type { BaseFieldVO, BaseVO, ChangeRequestVO, RecordVO } from "busabase-contract/types";
-import { Box, Check, GitMerge, MoreHorizontal, Paperclip, Trash2, X } from "lucide-react";
-import type { AttachmentRef } from "open-domains/attachments/types";
+import type {
+  AssetAttachmentRef,
+  BaseFieldVO,
+  BaseVO,
+  ChangeRequestVO,
+  RecordVO,
+} from "busabase-contract/types";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "kui/dialog";
+import {
+  Box,
+  Check,
+  Eye,
+  GitMerge,
+  Maximize2,
+  MoreHorizontal,
+  Paperclip,
+  Trash2,
+  X,
+} from "lucide-react";
 import { SPALink as Link } from "openlib/ui/dashboard";
 import { useEffect, useState } from "react";
 import { fmt, useCoreI18n, useIString } from "../../../i18n";
@@ -24,18 +40,25 @@ import {
   getFieldChipEntries,
   getRecordFieldType,
   getRelationRecordIds,
+  getSafeAttachmentUrl,
   isRecordLongField,
   isRecordTitleField,
 } from "../helpers/field";
 import {
   fieldValueToString,
-  formatActorLabel,
   formatAttachmentSize,
   formatDetailTime,
+  formatUserRefLabel,
   shortIdentifier,
 } from "../helpers/format";
 import type { RecordSubmitOptions } from "../helpers/view-types";
-import { FieldBadgeList, FieldValuePreview } from "./field-preview";
+import {
+  FieldBadgeList,
+  FieldValuePreview,
+  HtmlFieldPreview,
+  MarkdownFieldPreview,
+} from "./field-preview";
+import { UserRefButton } from "./identity";
 import {
   BusabaseSidePanel,
   ConfirmActionDialog,
@@ -194,11 +217,25 @@ export function RecordDetailView({
           >
             <SidebarRow
               label={messages.recordView.proposedBy}
-              value={formatActorLabel(record.createdBy)}
+              value={
+                <UserRefButton
+                  fallbackId={record.createdBy}
+                  labelClassName="font-medium"
+                  title="Record creator"
+                  user={record.createdByUser}
+                />
+              }
             />
             <SidebarRow
               label={messages.recordView.commitAuthor}
-              value={formatActorLabel(record.headCommit.author)}
+              value={
+                <UserRefButton
+                  fallbackId={record.headCommit.author}
+                  labelClassName="font-medium"
+                  title="Commit author"
+                  user={record.headCommit.authorUser}
+                />
+              }
             />
             <SidebarRow
               label={messages.common.updated}
@@ -213,6 +250,8 @@ export function RecordDetailView({
               </summary>
               <div className="mt-2 space-y-1.5">
                 <SidebarRow label={messages.common.record} value={record.id} />
+                <SidebarRow label="Creator ID" value={record.createdBy} />
+                <SidebarRow label="Author ID" value={record.headCommit.author} />
                 <SidebarRow
                   label={messages.recordView.head}
                   value={shortIdentifier(record.headCommitId)}
@@ -338,7 +377,7 @@ export function RecordEditorView({
     fields: Record<string, unknown>,
     options?: RecordSubmitOptions,
   ) => Promise<void>;
-  onUploadAttachment?: (file: File) => Promise<AttachmentRef>;
+  onUploadAttachment?: (file: File) => Promise<AssetAttachmentRef>;
   records: RecordVO[];
   record: RecordVO | null;
 }) {
@@ -494,7 +533,7 @@ function RecordFieldInput({
 }: {
   field: BaseFieldVO;
   onChange: (value: unknown) => void;
-  onUploadAttachment?: (file: File) => Promise<AttachmentRef>;
+  onUploadAttachment?: (file: File) => Promise<AssetAttachmentRef>;
   records: RecordVO[];
   value: unknown;
 }) {
@@ -617,12 +656,12 @@ function RecordFieldInput({
           {messages.recordView.checked}
         </label>
       ) : kind === "textarea" ? (
-        <textarea
-          aria-label={fieldName}
-          className="min-h-28 w-full resize-y rounded-md border border-border/70 bg-background px-2.5 py-2 font-mono text-sm leading-6 outline-none transition-colors focus:border-primary"
-          id={inputId}
-          onChange={(event) => onChange(event.target.value)}
-          value={fieldValueToString(value)}
+        <RichTextareaFieldEditor
+          field={field}
+          inputId={inputId}
+          label={fieldName}
+          onChange={onChange}
+          value={value}
         />
       ) : (
         // Plain inputs — the registry's input kind doubles as the HTML input type
@@ -636,6 +675,102 @@ function RecordFieldInput({
           value={fieldValueToString(value)}
         />
       )}
+    </div>
+  );
+}
+
+function RichTextareaFieldEditor({
+  field,
+  inputId,
+  label,
+  onChange,
+  value,
+}: {
+  field: BaseFieldVO;
+  inputId: string;
+  label: string;
+  onChange: (value: unknown) => void;
+  value: unknown;
+}) {
+  const messages = useCoreI18n();
+  const text = fieldValueToString(value);
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const [fullscreenOpen, setFullscreenOpen] = useState(false);
+  const canPreview = field.type === "markdown" || field.type === "html";
+  const isCodeLike = field.type === "code" || field.type === "json" || field.type === "yaml";
+
+  const textarea = (className = "min-h-28", withId = true) => (
+    <textarea
+      aria-label={label}
+      className={`${className} w-full resize-y rounded-md border border-border/70 bg-background px-2.5 py-2 font-mono text-sm leading-6 outline-none transition-colors focus:border-primary`}
+      id={withId ? inputId : undefined}
+      onChange={(event) => onChange(event.target.value)}
+      spellCheck={!isCodeLike}
+      value={text}
+    />
+  );
+
+  const preview = () => {
+    if (field.type === "markdown") {
+      return (
+        <div className="min-h-28 rounded-md border border-border/70 bg-background px-2.5 py-2">
+          <MarkdownFieldPreview value={text} />
+        </div>
+      );
+    }
+    if (field.type === "html") {
+      return (
+        <div className="min-h-28 rounded-md border border-border/70 bg-background px-2.5 py-2">
+          <HtmlFieldPreview value={text} />
+        </div>
+      );
+    }
+    return null;
+  };
+
+  return (
+    <div className="min-w-0">
+      {canPreview || isCodeLike ? (
+        <div className="mb-1.5 flex items-center justify-end gap-1.5">
+          {canPreview ? (
+            <button
+              aria-pressed={previewOpen}
+              className={`inline-flex h-7 items-center gap-1 rounded-md border px-2 text-xs transition-colors ${
+                previewOpen
+                  ? "border-primary/40 bg-primary/10 text-primary"
+                  : "border-border/70 bg-background text-muted-foreground hover:bg-accent hover:text-foreground"
+              }`}
+              onClick={() => setPreviewOpen((current) => !current)}
+              type="button"
+            >
+              <Eye size={13} />
+              {messages.recordView.preview}
+            </button>
+          ) : null}
+          <button
+            aria-label={messages.recordView.expandFullscreen}
+            className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-border/70 bg-background text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+            onClick={() => setFullscreenOpen(true)}
+            title={messages.recordView.expandFullscreen}
+            type="button"
+          >
+            <Maximize2 size={13} />
+          </button>
+        </div>
+      ) : null}
+
+      {previewOpen && canPreview ? preview() : textarea()}
+
+      <Dialog onOpenChange={setFullscreenOpen} open={fullscreenOpen}>
+        <DialogContent className="flex h-[90vh] max-h-[90vh] w-[95vw] max-w-[1040px] flex-col gap-0 overflow-hidden p-0">
+          <DialogHeader className="shrink-0 border-b px-5 py-3 text-left">
+            <DialogTitle className="text-sm font-medium">{label}</DialogTitle>
+          </DialogHeader>
+          <div className="min-h-0 flex-1 overflow-auto px-5 py-4">
+            {previewOpen && canPreview ? preview() : textarea("min-h-[58vh]", false)}
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
@@ -718,7 +853,7 @@ function AttachmentFieldEditor({
   field: BaseFieldVO;
   inputId: string;
   onChange: (value: unknown) => void;
-  onUploadAttachment?: (file: File) => Promise<AttachmentRef>;
+  onUploadAttachment?: (file: File) => Promise<AssetAttachmentRef>;
   value: unknown;
 }) {
   const messages = useCoreI18n();
@@ -738,7 +873,7 @@ function AttachmentFieldEditor({
     setUploadError(null);
     setIsUploading(true);
     try {
-      const uploaded: AttachmentRef[] = [];
+      const uploaded: AssetAttachmentRef[] = [];
       for (const file of Array.from(fileList)) {
         uploaded.push(await onUploadAttachment(file));
       }
@@ -776,36 +911,45 @@ function AttachmentFieldEditor({
       {uploadError ? <p className="text-destructive text-xs">{uploadError}</p> : null}
       {attachments.length > 0 ? (
         <ul className="grid gap-1">
-          {attachments.map((item) => (
-            <li
-              className="flex items-center gap-2 rounded-md border border-border/60 bg-muted/30 px-2.5 py-1.5 text-sm"
-              key={item.id}
-            >
-              <Paperclip className="shrink-0 text-muted-foreground" size={13} />
-              <a
-                className="min-w-0 flex-1 truncate text-primary underline-offset-2 hover:underline"
-                href={item.url}
-                rel="noreferrer"
-                target="_blank"
-                title={item.fileName}
+          {attachments.map((item) => {
+            const safeUrl = getSafeAttachmentUrl(item);
+            return (
+              <li
+                className="flex items-center gap-2 rounded-md border border-border/60 bg-muted/30 px-2.5 py-1.5 text-sm"
+                key={item.id}
               >
-                {item.fileName}
-              </a>
-              {formatAttachmentSize(item.size) ? (
-                <span className="shrink-0 text-muted-foreground text-xs">
-                  {formatAttachmentSize(item.size)}
-                </span>
-              ) : null}
-              <button
-                aria-label={fmt(messages.recordView.remove, { name: item.fileName })}
-                className="shrink-0 rounded p-0.5 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
-                onClick={() => onChange(attachments.filter((entry) => entry.id !== item.id))}
-                type="button"
-              >
-                <X size={13} />
-              </button>
-            </li>
-          ))}
+                <Paperclip className="shrink-0 text-muted-foreground" size={13} />
+                {safeUrl ? (
+                  <a
+                    className="min-w-0 flex-1 truncate text-primary underline-offset-2 hover:underline"
+                    href={safeUrl}
+                    rel="noreferrer"
+                    target="_blank"
+                    title={item.fileName}
+                  >
+                    {item.fileName}
+                  </a>
+                ) : (
+                  <span className="min-w-0 flex-1 truncate text-foreground" title={item.fileName}>
+                    {item.fileName}
+                  </span>
+                )}
+                {formatAttachmentSize(item.size) ? (
+                  <span className="shrink-0 text-muted-foreground text-xs">
+                    {formatAttachmentSize(item.size)}
+                  </span>
+                ) : null}
+                <button
+                  aria-label={fmt(messages.recordView.remove, { name: item.fileName })}
+                  className="shrink-0 rounded p-0.5 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
+                  onClick={() => onChange(attachments.filter((entry) => entry.id !== item.id))}
+                  type="button"
+                >
+                  <X size={13} />
+                </button>
+              </li>
+            );
+          })}
         </ul>
       ) : null}
     </div>
@@ -897,7 +1041,10 @@ function RecordFieldPanel({ record, records }: { record: RecordVO; records: Reco
           <div className="mt-3 text-base leading-7">
             <FieldValuePreview
               className={
-                field.type === "html" || field.type === "code"
+                field.type === "html" ||
+                field.type === "code" ||
+                field.type === "json" ||
+                field.type === "yaml"
                   ? "text-sm"
                   : "whitespace-pre-wrap text-foreground/95"
               }
@@ -1011,7 +1158,8 @@ function RecordChangeRequestHistoryRow({
         <div className="min-w-0">
           <div className="truncate font-medium text-sm">{getChangeRequestTitle(changeRequest)}</div>
           <div className="mt-1 text-muted-foreground text-xs">
-            {changeRequest.submittedBy} · {new Date(changeRequest.updatedAt).toLocaleString()}
+            {formatUserRefLabel(changeRequest.submittedByUser, changeRequest.submittedBy)} ·{" "}
+            {new Date(changeRequest.updatedAt).toLocaleString()}
           </div>
         </div>
         <StatusBadge status={changeRequest.status} />
@@ -1099,7 +1247,12 @@ function RecordCommentsPanel({
               key={comment.id}
             >
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <div className="font-medium text-sm">{comment.authorId}</div>
+                <UserRefButton
+                  fallbackId={comment.authorId}
+                  labelClassName="font-medium text-sm"
+                  title="Comment author"
+                  user={comment.author}
+                />
                 <div className="text-muted-foreground text-xs">
                   {new Date(comment.createdAt).toLocaleString()}
                 </div>

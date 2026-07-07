@@ -1,24 +1,35 @@
-import type { AttachmentRef, BaseFieldVO } from "busabase-contract/types";
+import type { AssetAttachmentRef, BaseFieldVO } from "busabase-contract/types";
 import * as DocumentPicker from "expo-document-picker";
 import * as ImagePicker from "expo-image-picker";
-import { FileText, ImagePlus, Paperclip, X } from "lucide-react-native";
+import { FileText, ImagePlus, Paperclip, Trash2 } from "lucide-react-native";
 import { iStringParse } from "openlib/i18n/i-string";
 import { useState } from "react";
 import { ActivityIndicator, Image, Pressable, StyleSheet, Switch, Text, View } from "react-native";
 import { useBusabaseOrpc } from "~/api/use-busabase-orpc";
 import { useConnection } from "~/connection/connection-store";
 import { useI18n } from "~/i18n";
-import { isImageRef, resolveAttachmentUrl } from "~/lib/attachment";
+import { getAttachmentKindLabel, isImageRef, resolveAttachmentUrl } from "~/lib/attachment";
 import { type PickedFile, uploadAttachment } from "~/lib/attachment-upload";
+import { getFieldTypeLabel } from "~/lib/field-type-label";
+import { formatBytes } from "~/lib/format";
 import { isEditableField, type RecordFormValue } from "~/lib/record-form";
 import { radius, typography } from "~/theme/tokens";
 import { useTokens } from "~/theme/use-tokens";
+import {
+  NativeActionBar,
+  NativeBottomSheet,
+  NativeChipList,
+  NativeInlineError,
+  NativeRow,
+} from "../native-screen";
+import { Button } from "../ui/Button";
 import { TextInput } from "../ui/TextInput";
 
 interface RecordFormProps {
   fields: BaseFieldVO[];
   values: Record<string, RecordFormValue>;
   onChange: (slug: string, value: RecordFormValue) => void;
+  variant?: "grouped" | "embedded";
 }
 
 const MULTILINE_TYPES = new Set(["longtext", "markdown", "html"]);
@@ -34,36 +45,33 @@ function ChoiceChips({
   multiple: boolean;
   onToggle: (id: string) => void;
 }) {
-  const tokens = useTokens();
+  const options = choices.map((choice) => ({ value: choice.id, label: choice.name }));
+  const selectedValue = selected[0] ?? null;
+
+  if (multiple) {
+    return (
+      <View style={styles.choiceFullBleed}>
+        <NativeChipList<string | null>
+          value={null}
+          selectedValues={selected}
+          options={options}
+          onChange={(id) => {
+            if (id) onToggle(id);
+          }}
+        />
+      </View>
+    );
+  }
+
   return (
-    <View style={styles.chips}>
-      {choices.map((choice) => {
-        const active = selected.includes(choice.id);
-        return (
-          <Pressable
-            key={choice.id}
-            accessibilityRole="button"
-            accessibilityState={{ selected: active }}
-            style={[
-              styles.chip,
-              {
-                backgroundColor: active ? tokens.primaryMuted : tokens.surface,
-                borderColor: active ? tokens.primary : tokens.border,
-              },
-            ]}
-            onPress={() => onToggle(choice.id)}
-          >
-            <Text
-              style={[
-                typography.small,
-                { color: active ? tokens.foreground : tokens.mutedForeground },
-              ]}
-            >
-              {multiple ? choice.name : choice.name}
-            </Text>
-          </Pressable>
-        );
-      })}
+    <View style={styles.choiceFullBleed}>
+      <NativeChipList<string | null>
+        value={selectedValue}
+        options={options}
+        onChange={(id) => {
+          if (id) onToggle(id);
+        }}
+      />
     </View>
   );
 }
@@ -72,25 +80,33 @@ function FieldRow({
   field,
   value,
   onChange,
+  last,
 }: {
   field: BaseFieldVO;
   value: RecordFormValue;
   onChange: (value: RecordFormValue) => void;
+  last: boolean;
 }) {
   const tokens = useTokens();
+  const rowStyle = [
+    styles.field,
+    !last && { borderBottomWidth: StyleSheet.hairlineWidth, borderColor: tokens.border },
+  ];
   const meta = (
     <View style={styles.meta}>
       <Text style={[typography.bodyEm, { color: tokens.foreground }]}>
         {iStringParse(field.name)}
         {field.required ? <Text style={{ color: tokens.destructive }}> *</Text> : null}
       </Text>
-      <Text style={[typography.caption, { color: tokens.mutedForeground }]}>{field.type}</Text>
+      <Text style={[typography.caption, { color: tokens.mutedForeground }]}>
+        {getFieldTypeLabel(field.type)}
+      </Text>
     </View>
   );
 
   if (!isEditableField(field)) {
     return (
-      <View style={[styles.field, { borderColor: tokens.border }]}>
+      <View style={rowStyle}>
         {meta}
         <Text style={[typography.small, { color: tokens.mutedForeground }]}>
           Managed by the server — edit on web if needed.
@@ -101,7 +117,7 @@ function FieldRow({
 
   if (field.type === "checkbox") {
     return (
-      <View style={[styles.field, styles.checkboxRow, { borderColor: tokens.border }]}>
+      <View style={[...rowStyle, styles.checkboxRow]}>
         {meta}
         <Switch
           value={value === true}
@@ -114,10 +130,12 @@ function FieldRow({
 
   if (field.type === "attachment") {
     const refs = Array.isArray(value)
-      ? value.filter((item): item is AttachmentRef => typeof item === "object" && item !== null)
+      ? value.filter(
+          (item): item is AssetAttachmentRef => typeof item === "object" && item !== null,
+        )
       : [];
     return (
-      <View style={[styles.field, { borderColor: tokens.border }]}>
+      <View style={rowStyle}>
         {meta}
         <AttachmentFieldEditor field={field} refs={refs} onChange={(next) => onChange(next)} />
       </View>
@@ -133,7 +151,7 @@ function FieldRow({
         : [];
     const multiple = field.type === "multiselect";
     return (
-      <View style={[styles.field, { borderColor: tokens.border }]}>
+      <View style={rowStyle}>
         {meta}
         <ChoiceChips
           choices={choices}
@@ -166,7 +184,7 @@ function FieldRow({
             : "default";
 
   return (
-    <View style={[styles.field, { borderColor: tokens.border }]}>
+    <View style={rowStyle}>
       {meta}
       <TextInput
         value={typeof value === "string" ? value : ""}
@@ -188,8 +206,8 @@ function AttachmentFieldEditor({
   onChange,
 }: {
   field: BaseFieldVO;
-  refs: AttachmentRef[];
-  onChange: (refs: AttachmentRef[]) => void;
+  refs: AssetAttachmentRef[];
+  onChange: (refs: AssetAttachmentRef[]) => void;
 }) {
   const tokens = useTokens();
   const { t } = useI18n();
@@ -199,6 +217,8 @@ function AttachmentFieldEditor({
   const connectionMode = state.status === "connected" ? state.connection.mode : null;
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [selectedRef, setSelectedRef] = useState<AssetAttachmentRef | null>(null);
 
   const maxFiles = field.options.attachment?.maxFiles;
   const atLimit = typeof maxFiles === "number" && maxFiles > 0 && refs.length >= maxFiles;
@@ -215,6 +235,7 @@ function AttachmentFieldEditor({
       const ref = await uploadAttachment(buda.client, serverUrl, file, headers);
       // Single-file fields replace; multi-file fields append.
       onChange(maxFiles === 1 ? [ref] : [...refs, ref]);
+      setPickerOpen(false);
     } catch (uploadError) {
       setError(uploadError instanceof Error ? uploadError.message : "Upload failed");
     } finally {
@@ -254,31 +275,24 @@ function AttachmentFieldEditor({
       {refs.length > 0 ? (
         <View style={styles.attachmentRefs}>
           {refs.map((ref) => (
-            <View key={ref.id} style={[styles.attachmentItem, { borderColor: tokens.border }]}>
-              {isImageRef(ref) ? (
-                <Image
-                  source={{ uri: resolveAttachmentUrl(serverUrl, ref.url) }}
-                  resizeMode="cover"
-                  style={styles.attachmentThumb}
-                />
-              ) : (
-                <FileText size={16} color={tokens.mutedForeground} />
-              )}
-              <Text
-                numberOfLines={1}
-                style={[typography.small, styles.attachmentName, { color: tokens.foreground }]}
-              >
-                {ref.fileName}
-              </Text>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel={`${t.attachment.remove} ${ref.fileName}`}
-                hitSlop={8}
-                onPress={() => onChange(refs.filter((item) => item.id !== ref.id))}
-              >
-                <X size={16} color={tokens.destructive} />
-              </Pressable>
-            </View>
+            <NativeRow
+              key={ref.id}
+              title={ref.fileName}
+              subtitle={`${getAttachmentKindLabel(ref)} · ${formatBytes(ref.size)}`}
+              leading={
+                isImageRef(ref) ? (
+                  <Image
+                    source={{ uri: resolveAttachmentUrl(serverUrl, ref.url) }}
+                    resizeMode="cover"
+                    style={styles.attachmentThumb}
+                  />
+                ) : (
+                  <FileText size={18} color={tokens.mutedForeground} />
+                )
+              }
+              onPress={() => setSelectedRef(ref)}
+              last={ref.id === refs[refs.length - 1]?.id}
+            />
           ))}
         </View>
       ) : (
@@ -300,42 +314,129 @@ function AttachmentFieldEditor({
       ) : null}
 
       {atLimit ? null : (
-        <View style={styles.attachmentActions}>
-          <Pressable
-            accessibilityRole="button"
-            disabled={uploading}
-            style={[styles.attachmentButton, { borderColor: tokens.border }]}
-            onPress={() => void pickImage()}
-          >
-            <ImagePlus size={16} color={tokens.primary} />
-            <Text style={[typography.small, { color: tokens.primary }]}>
-              {t.attachment.addImage}
-            </Text>
-          </Pressable>
-          <Pressable
-            accessibilityRole="button"
-            disabled={uploading}
-            style={[styles.attachmentButton, { borderColor: tokens.border }]}
-            onPress={() => void pickDocument()}
-          >
-            <Paperclip size={16} color={tokens.primary} />
-            <Text style={[typography.small, { color: tokens.primary }]}>{t.attachment.add}</Text>
-          </Pressable>
-        </View>
+        <Pressable
+          accessibilityRole="button"
+          disabled={uploading}
+          style={[
+            styles.attachmentAddRow,
+            { backgroundColor: tokens.primaryMuted, opacity: uploading ? 0.62 : 1 },
+          ]}
+          onPress={() => setPickerOpen(true)}
+        >
+          <Paperclip size={16} color={tokens.foreground} />
+          <Text style={[typography.bodyEm, { color: tokens.foreground }]}>{t.attachment.add}</Text>
+        </Pressable>
       )}
+
+      <NativeBottomSheet
+        visible={pickerOpen}
+        title="Add attachment"
+        description="Choose a photo or a file to upload into this record field."
+        showCloseButton
+        onClose={() => setPickerOpen(false)}
+        footer={
+          <NativeActionBar>
+            {uploading ? (
+              <View style={styles.attachmentBusy}>
+                <ActivityIndicator size="small" color={tokens.primary} />
+                <Text style={[typography.small, { color: tokens.mutedForeground }]}>
+                  {t.attachment.uploading}
+                </Text>
+              </View>
+            ) : null}
+            {error ? <NativeInlineError message={error} onReset={() => setError(null)} /> : null}
+            <Button
+              label="Cancel"
+              variant="ghost"
+              disabled={uploading}
+              fullWidth
+              onPress={() => setPickerOpen(false)}
+            />
+          </NativeActionBar>
+        }
+      >
+        <View style={styles.attachmentSheetRows}>
+          <NativeRow
+            title={t.attachment.addImage}
+            subtitle="Pick from the photo library."
+            leading={<ImagePlus size={18} color={tokens.primary} />}
+            disabled={uploading}
+            onPress={() => void pickImage()}
+          />
+          <NativeRow
+            title={t.attachment.add}
+            subtitle="Browse files on this device."
+            leading={<Paperclip size={18} color={tokens.primary} />}
+            disabled={uploading}
+            last
+            onPress={() => void pickDocument()}
+          />
+        </View>
+      </NativeBottomSheet>
+
+      <NativeBottomSheet
+        visible={!!selectedRef}
+        title={selectedRef?.fileName}
+        description={
+          selectedRef
+            ? `${getAttachmentKindLabel(selectedRef)} · ${formatBytes(selectedRef.size)}`
+            : undefined
+        }
+        showCloseButton
+        onClose={() => setSelectedRef(null)}
+        footer={
+          <NativeActionBar>
+            <Button
+              label={t.attachment.remove}
+              variant="destructive"
+              fullWidth
+              leadingIcon={<Trash2 size={18} color={tokens.destructiveForeground} />}
+              onPress={() => {
+                if (selectedRef) {
+                  onChange(refs.filter((item) => item.id !== selectedRef.id));
+                }
+                setSelectedRef(null);
+              }}
+            />
+            <Button
+              label={t.common.cancel}
+              variant="ghost"
+              fullWidth
+              onPress={() => setSelectedRef(null)}
+            />
+          </NativeActionBar>
+        }
+      >
+        {selectedRef && isImageRef(selectedRef) ? (
+          <Image
+            source={{ uri: resolveAttachmentUrl(serverUrl, selectedRef.url) }}
+            resizeMode="contain"
+            style={styles.attachmentPreview}
+          />
+        ) : null}
+      </NativeBottomSheet>
     </View>
   );
 }
 
-export function RecordForm({ fields, values, onChange }: RecordFormProps) {
+export function RecordForm({ fields, values, onChange, variant = "grouped" }: RecordFormProps) {
+  const tokens = useTokens();
   return (
-    <View style={styles.list}>
-      {fields.map((field) => (
+    <View
+      style={[
+        styles.list,
+        variant === "grouped"
+          ? { backgroundColor: tokens.card, borderColor: tokens.border }
+          : styles.embeddedList,
+      ]}
+    >
+      {fields.map((field, index) => (
         <FieldRow
           key={field.id}
           field={field}
           value={values[field.slug] ?? ""}
           onChange={(next) => onChange(field.slug, next)}
+          last={index === fields.length - 1}
         />
       ))}
     </View>
@@ -343,11 +444,18 @@ export function RecordForm({ fields, values, onChange }: RecordFormProps) {
 }
 
 const styles = StyleSheet.create({
-  list: { gap: 12 },
-  field: {
+  list: {
     borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: radius.md,
-    padding: 12,
+    borderRadius: radius.lg,
+    overflow: "hidden",
+  },
+  embeddedList: {
+    borderWidth: 0,
+    borderRadius: 0,
+  },
+  field: {
+    paddingHorizontal: 14,
+    paddingVertical: 12,
     gap: 8,
   },
   meta: { gap: 2 },
@@ -359,33 +467,17 @@ const styles = StyleSheet.create({
   multiline: { minHeight: 96, paddingTop: 10 },
   attachmentEditor: { gap: 10 },
   attachmentRefs: { gap: 8 },
-  attachmentItem: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: radius.md,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-  },
   attachmentThumb: { width: 36, height: 36, borderRadius: radius.sm },
-  attachmentName: { flex: 1 },
+  attachmentPreview: { width: "100%", height: 220, borderRadius: radius.md },
   attachmentBusy: { flexDirection: "row", alignItems: "center", gap: 8 },
-  attachmentActions: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
-  attachmentButton: {
+  attachmentAddRow: {
+    minHeight: 44,
     flexDirection: "row",
     alignItems: "center",
-    gap: 6,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: radius.full,
+    gap: 8,
+    borderRadius: radius.md,
     paddingHorizontal: 12,
-    paddingVertical: 8,
   },
-  chips: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
-  chip: {
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: radius.full,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-  },
+  attachmentSheetRows: { gap: 8 },
+  choiceFullBleed: { marginHorizontal: -14 },
 });

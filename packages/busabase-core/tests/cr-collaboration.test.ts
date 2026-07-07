@@ -66,6 +66,15 @@ describe("Change-request collaboration — oRPC", () => {
     return client.changeRequests.merge({ changeRequestId });
   };
 
+  it("reports merge-before-approval as a conflict instead of an internal error", async () => {
+    const cr = await createCr({ title: "not approved yet", body: "b", channel: "blog" });
+
+    await expect(client.changeRequests.merge({ changeRequestId: cr.id })).rejects.toMatchObject({
+      code: "CONFLICT",
+      message: "ChangeRequest must be approved before merge",
+    });
+  });
+
   // ── revise (request-changes → revise → approve) ───────────────────────────
   describe("operations.revise", () => {
     it("returns a rejected change request to review and merges the revised fields", async () => {

@@ -19,6 +19,7 @@ export function useDashboardRoutes() {
   const [, baseParams] = useRoute("/base/:slug");
   const [isBaseChildRoute, baseChildParams] = useRoute("/base/:slug/:childId");
   const [isSkillRoute, skillParams] = useRoute("/skill/:slug");
+  const [isDriveRoute, driveParams] = useRoute("/drive/:slug");
   const [isDocRoute, docParams] = useRoute("/doc/:slug");
   const [isFolderRoute, folderParams] = useRoute("/folder/:slug");
 
@@ -32,6 +33,7 @@ export function useDashboardRoutes() {
     baseChildParams?.slug ??
     null;
   const selectedSkillSlug = isSkillRoute ? (skillParams?.slug ?? null) : null;
+  const selectedDriveSlug = isDriveRoute ? (driveParams?.slug ?? null) : null;
   const selectedDocSlug = isDocRoute ? (docParams?.slug ?? null) : null;
   const selectedFolderSlug = isFolderRoute ? (folderParams?.slug ?? null) : null;
   const selectedChangeRequestId =
@@ -55,11 +57,13 @@ export function useDashboardRoutes() {
     isBaseChildRoute,
     baseChildParams,
     isSkillRoute,
+    isDriveRoute,
     isDocRoute,
     isFolderRoute,
     isBaseSetupRoute,
     selectedBaseSlug,
     selectedSkillSlug,
+    selectedDriveSlug,
     selectedDocSlug,
     selectedFolderSlug,
     selectedChangeRequestId,

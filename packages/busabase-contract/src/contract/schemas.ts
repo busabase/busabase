@@ -7,12 +7,17 @@ import {
   fieldOptionsSchema,
   fieldTypeSchema,
 } from "../domains/base/contract/base-schemas";
-import { CREATABLE_NODE_TYPES, NODE_TYPES, OPERATION_KINDS } from "../domains/registry";
+import {
+  CREATABLE_NODE_TYPES,
+  NODE_TYPES,
+  type NodeType,
+  OPERATION_KINDS,
+} from "../domains/registry";
 
 export interface NodeOutput {
   id: string;
   parentId: string | null;
-  type: "folder" | "base" | "skill" | "doc";
+  type: NodeType;
   slug: string;
   name: string;
   description: string;
@@ -53,6 +58,14 @@ const nodeSchema: z.ZodType<NodeOutput> = z.lazy(() =>
   }),
 );
 
+const userRefSchema = z.object({
+  id: z.string(),
+  name: z.string().nullable(),
+  email: z.string().nullable(),
+  image: z.string().nullable(),
+  role: z.string().nullable().optional(),
+});
+
 const commitSchema = z.object({
   id: z.string(),
   baseId: z.string().nullable(),
@@ -64,6 +77,7 @@ const commitSchema = z.object({
   operation: z.enum(OPERATION_KINDS),
   message: z.string(),
   author: z.string(),
+  authorUser: userRefSchema.nullable().optional().default(null),
   createdAt: z.string(),
 });
 
@@ -101,6 +115,7 @@ const reviewSchema = z.object({
   id: z.string(),
   changeRequestId: z.string(),
   reviewerId: z.string(),
+  reviewer: userRefSchema.nullable().optional().default(null),
   verdict: z.enum(["approved", "rejected"]),
   reason: z.string().nullable(),
   visibleOperationHeads: z.record(z.string(), z.string()),
@@ -118,6 +133,7 @@ const commentSchema = z.object({
   operationId: z.string().nullable(),
   commitId: z.string().nullable(),
   authorId: z.string(),
+  author: userRefSchema.nullable().optional().default(null),
   body: z.string(),
   mentionsAi: z.boolean(),
   createdAt: z.string(),
@@ -139,6 +155,7 @@ const changeRequestSchema = z.object({
     "conflict",
   ]),
   submittedBy: z.string(),
+  submittedByUser: userRefSchema.nullable().optional().default(null),
   sourceMeta: z.record(z.string(), z.unknown()),
   reviewPolicySnapshot: z.record(z.string(), z.unknown()),
   mergeSummary: z.record(z.string(), z.unknown()),
@@ -184,7 +201,13 @@ const searchResponseSchema = z.object({
 });
 
 const liveEventSchema = z.object({
-  kind: z.literal("change_request.merged"),
+  kind: z.enum([
+    "change_request.created",
+    "change_request.updated",
+    "change_request.deleted",
+    "change_request.reviewed",
+    "change_request.merged",
+  ]),
   spaceId: z.string(),
   actorId: z.string(),
   changeRequestId: z.string(),
@@ -210,6 +233,7 @@ const auditActionSchema = z.enum([
   "doc.created",
   "doc.updated",
   "skill.created",
+  "drive.created",
   "asset.deleted",
   "node.purged",
 ]);
@@ -218,6 +242,7 @@ const auditEventSchema = z.object({
   id: z.string(),
   action: auditActionSchema,
   actorId: z.string(),
+  actor: userRefSchema.nullable().optional().default(null),
   baseId: z.string().nullable(),
   recordId: z.string().nullable(),
   changeRequestId: z.string().nullable(),
@@ -426,6 +451,7 @@ export {
   authUserSchema,
   authMemberSchema,
   authInfoSchema,
+  userRefSchema,
   nodeSchema,
   commitSchema,
   operationSchema,

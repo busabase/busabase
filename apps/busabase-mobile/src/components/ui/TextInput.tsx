@@ -33,7 +33,7 @@ export const TextInput = forwardRef<RNTextInput, TextInputProps>(function TextIn
           styles.input,
           {
             color: tokens.foreground,
-            backgroundColor: tokens.surface,
+            backgroundColor: tokens.muted,
             borderColor: error ? tokens.destructive : tokens.border,
           },
           style,
@@ -50,7 +50,7 @@ export const TextInput = forwardRef<RNTextInput, TextInputProps>(function TextIn
 const styles = StyleSheet.create({
   field: { gap: 6 },
   input: {
-    minHeight: 50,
+    minHeight: 48,
     borderRadius: radius.md,
     borderWidth: StyleSheet.hairlineWidth,
     paddingHorizontal: 14,

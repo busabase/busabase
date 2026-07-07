@@ -1,11 +1,17 @@
 import "server-only";
 
+import { ORPCError } from "@orpc/server";
 import type { AssetDetailVO, AssetUsageVO, AssetVO } from "busabase-contract/domains/assets/types";
 import { and, desc, eq, sql } from "drizzle-orm";
-import { deleteAttachmentSafely } from "open-domains/attachments/logic";
+import {
+  confirmUpload,
+  deleteAttachmentSafely,
+  requestUploadUrl,
+} from "open-domains/attachments/logic";
+import type { ConfirmUploadDTO, RequestUploadUrlDTO } from "open-domains/attachments/types";
 import { storage } from "openlib/storage";
 import { getContextSpaceId, resolveActorId } from "../../context";
-import { getDb } from "../../db";
+import { db, getDb } from "../../db";
 import { attachments, busabaseBaseFields, busabaseBases, busabaseNodes } from "../../db/schema";
 import { insertAuditEvent } from "../../logic/audit";
 import { id } from "../../logic/kernel";
@@ -49,6 +55,20 @@ const assetRowColumns = {
   contentHash: attachments.contentHash,
 };
 
+const sanitizeUploadError = (error: unknown): string => {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.replace(/\/\/([^:@/\s]+):([^@/\s]+)@/g, "//***:***@");
+};
+
+const assetUploadError = (action: string, error: unknown) => {
+  if (error instanceof ORPCError) return error;
+  const detail = sanitizeUploadError(error);
+  return new ORPCError("INTERNAL_SERVER_ERROR", {
+    message: `Failed to ${action}: ${detail}`,
+    data: { error: `Failed to ${action}: ${detail}` },
+  });
+};
+
 /**
  * Get-or-create the library entry for a (deduped) attachment in the current
  * space. Idempotent: a deduped re-upload resolves to the same `attachmentId`
@@ -79,6 +99,41 @@ export const ensureAsset = async (
     .where(and(eq(busabaseAssets.spaceId, spaceId), eq(busabaseAssets.attachmentId, attachmentId)))
     .limit(1);
   return existing?.id ?? assetId;
+};
+
+export const requestAssetUploadUrl = async (input: RequestUploadUrlDTO) => {
+  try {
+    const result = await requestUploadUrl(
+      { ...input, spaceId: input.spaceId ?? getContextSpaceId() },
+      resolveActorId("local"),
+      db,
+      attachments,
+    );
+    if (result.duplicate && result.attachmentId) {
+      const assetId = await ensureAsset(result.attachmentId, input.fileName);
+      return { ...result, assetId };
+    }
+    return result;
+  } catch (error) {
+    throw assetUploadError("create asset upload URL", error);
+  }
+};
+
+export const confirmAssetUpload = async (input: ConfirmUploadDTO) => {
+  try {
+    const result = await confirmUpload(
+      { ...input, spaceId: input.spaceId ?? getContextSpaceId() },
+      resolveActorId("local"),
+      db,
+      attachments,
+    );
+    // Surface every uploaded (deduped) file in the Asset library. Idempotent:
+    // a deduped re-upload maps back to the same attachment → same asset.
+    const assetId = await ensureAsset(result.attachmentId, input.fileName);
+    return { ...result, assetId };
+  } catch (error) {
+    throw assetUploadError("confirm asset upload", error);
+  }
 };
 
 export const listAssets = async (): Promise<AssetVO[]> => {
@@ -191,28 +246,64 @@ export const deleteAsset = async (assetId: string): Promise<{ deleted: boolean }
 // --- where-used sync (Base attachment fields) ------------------------------
 
 interface AttachmentFieldRef {
+  attachmentId?: unknown;
+  assetId?: unknown;
   id?: unknown;
   fileName?: unknown;
 }
 
-/** Pull `{ attachmentId, fileName }` out of an attachment cell (array of refs). */
-const extractAttachmentRefs = (value: unknown): { attachmentId: string; fileName: string }[] => {
+const isAssetId = (value: unknown): value is string =>
+  typeof value === "string" && value.startsWith("ast");
+
+/** Pull asset/attachment ids out of an attachment cell (array of refs). */
+const extractAttachmentRefs = (
+  value: unknown,
+): { assetId: string | null; attachmentId: string | null; fileName: string }[] => {
   if (!Array.isArray(value)) {
     return [];
   }
-  const refs: { attachmentId: string; fileName: string }[] = [];
+  const refs: { assetId: string | null; attachmentId: string | null; fileName: string }[] = [];
   for (const item of value) {
     if (item && typeof item === "object") {
       const ref = item as AttachmentFieldRef;
-      if (typeof ref.id === "string" && ref.id) {
+      const explicitAssetId = typeof ref.assetId === "string" && ref.assetId ? ref.assetId : null;
+      const assetId = explicitAssetId ?? (isAssetId(ref.id) ? ref.id : null);
+      const attachmentId =
+        typeof ref.attachmentId === "string" && ref.attachmentId
+          ? ref.attachmentId
+          : !assetId && typeof ref.id === "string" && ref.id
+            ? ref.id
+            : null;
+      if (assetId || attachmentId) {
+        const fallbackName = attachmentId ?? assetId ?? "asset";
         refs.push({
-          attachmentId: ref.id,
-          fileName: typeof ref.fileName === "string" ? ref.fileName : ref.id,
+          assetId,
+          attachmentId,
+          fileName: typeof ref.fileName === "string" ? ref.fileName : fallbackName,
         });
       }
     }
   }
   return refs;
+};
+
+const resolveAssetRef = async (
+  ref: { assetId: string | null; attachmentId: string | null; fileName: string },
+  tx: Awaited<ReturnType<typeof getDb>>,
+): Promise<string | null> => {
+  if (ref.assetId) {
+    const [asset] = await tx
+      .select({ id: busabaseAssets.id })
+      .from(busabaseAssets)
+      .where(
+        and(eq(busabaseAssets.id, ref.assetId), eq(busabaseAssets.spaceId, getContextSpaceId())),
+      )
+      .limit(1);
+    if (asset) {
+      return asset.id;
+    }
+  }
+  return ref.attachmentId ? ensureAsset(ref.attachmentId, ref.fileName, tx) : null;
 };
 
 /**
@@ -259,8 +350,10 @@ export const syncRecordAssetUsages = async (
       continue;
     }
     for (const ref of extractAttachmentRefs(value)) {
-      const assetId = await ensureAsset(ref.attachmentId, ref.fileName, tx);
-      rows.push({ id: id("aus"), assetId, nodeId: base.nodeId, recordId, fieldSlug });
+      const assetId = await resolveAssetRef(ref, db);
+      if (assetId) {
+        rows.push({ id: id("aus"), assetId, nodeId: base.nodeId, recordId, fieldSlug });
+      }
     }
   }
 
