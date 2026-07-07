@@ -18,10 +18,12 @@ import type {
   ChangeRequestVO,
   CommentSubjectType,
   CommentVO,
+  DriveReadFileVO,
   DriveVO,
   NodeVO,
   RecordVO,
   SearchResponseVO,
+  SkillReadFileVO,
   SkillVO,
   ViewConfigVO,
   ViewVO,
@@ -70,15 +72,9 @@ export interface BusabaseDashboardApiClient {
   }) => Promise<CommentVO>;
   listNodes: () => Promise<NodeVO[]>;
   getSkill: (nodeIdOrSlug: string) => Promise<SkillVO>;
-  readSkillFile: (
-    nodeId: string,
-    filePath: string,
-  ) => Promise<{ nodeId: string; path: string; content: string; contentHash: string }>;
+  readSkillFile: (nodeId: string, filePath: string) => Promise<SkillReadFileVO>;
   getDrive: (nodeIdOrSlug: string) => Promise<DriveVO>;
-  readDriveFile: (
-    nodeId: string,
-    filePath: string,
-  ) => Promise<{ nodeId: string; path: string; content: string; contentHash: string }>;
+  readDriveFile: (nodeId: string, filePath: string) => Promise<DriveReadFileVO>;
   listChangeRequests: (options?: BusabaseListOptions) => Promise<ChangeRequestVO[]>;
   getChangeRequest: (changeRequestId: string) => Promise<ChangeRequestVO>;
   listRecords: (options?: BusabaseListOptions) => Promise<RecordVO[]>;

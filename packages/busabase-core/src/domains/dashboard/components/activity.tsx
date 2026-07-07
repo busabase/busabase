@@ -7,9 +7,9 @@ import {
   getChangeRequestSummary,
   getChangeRequestTitle,
   getOperationImpact,
+  getOperationLabel,
   getOperationTitle,
   getRecordTitle,
-  operationMeta,
 } from "../helpers/change-request";
 import { formatListTime, formatUserRefLabel, shortIdentifier } from "../helpers/format";
 
@@ -83,7 +83,7 @@ export const buildActivityEvents = (
   const changeRequestEvents = changeRequests.flatMap((changeRequest): ActivityEvent[] => {
     const baseEvents: ActivityEvent[] = [
       {
-        body: `${getChangeRequestSummary(changeRequest, messages)} · ${getChangeRequestScopeName(changeRequest)}`,
+        body: `${getChangeRequestSummary(changeRequest, messages)} · ${getChangeRequestScopeName(changeRequest, messages)}`,
         href: `/inbox/${changeRequest.id}`,
         id: `changeRequest:${changeRequest.id}:updated`,
         timestamp: changeRequest.updatedAt,
@@ -110,11 +110,11 @@ export const buildActivityEvents = (
 
     const operationEvents = changeRequest.operations.map(
       (operation): ActivityEvent => ({
-        body: `${operationMeta[operation.operation].label} · ${getOperationImpact(operation)} · ${fmt(messages?.activity.commitRef ?? "commit {id}", { id: shortIdentifier(operation.headCommitId) })}`,
+        body: `${getOperationLabel(operation, messages)} · ${getOperationImpact(operation, messages)} · ${fmt(messages?.activity.commitRef ?? "commit {id}", { id: shortIdentifier(operation.headCommitId) })}`,
         href: `/inbox/${changeRequest.id}/${operation.id}`,
         id: `operation:${operation.id}`,
         timestamp: operation.updatedAt,
-        title: getOperationTitle(operation, changeRequest.base),
+        title: getOperationTitle(operation, changeRequest.base, messages),
         tone: operation.status === "pending" ? "operation" : "commit",
       }),
     );
@@ -131,10 +131,10 @@ export const buildActivityEvents = (
       title:
         record.status === "archived"
           ? fmt(messages?.activity.recordArchivedTitle ?? "Record archived: {title}", {
-              title: getRecordTitle(record),
+              title: getRecordTitle(record, messages),
             })
           : fmt(messages?.activity.recordUpdatedTitle ?? "Record updated: {title}", {
-              title: getRecordTitle(record),
+              title: getRecordTitle(record, messages),
             }),
       tone: "record",
     }),
@@ -142,7 +142,7 @@ export const buildActivityEvents = (
 
   const auditActivityEvents = auditEvents.map(
     (event): ActivityEvent => ({
-      body: `${formatUserRefLabel(event.actor, event.actorId)} · ${event.action}`,
+      body: `${formatUserRefLabel(event.actor, event.actorId, messages)} · ${event.action}`,
       href: event.recordId
         ? `/base/${records.find((record) => record.id === event.recordId)?.base.slug ?? "unknown"}/${event.recordId}`
         : event.changeRequestId

@@ -1,4 +1,5 @@
 import type { UserRefVO } from "busabase-contract/types";
+import { type CoreI18nMessages, fmt } from "../../../i18n";
 
 const fieldValueToString = (value: unknown) => {
   if (value === null || value === undefined) {
@@ -71,6 +72,16 @@ const KNOWN_ACTOR_LABELS: Record<string, string> = {
   producer: "Producer",
 };
 
+const getLocalizedActorLabels = (messages?: CoreI18nMessages): Record<string, string> => ({
+  "local-admin": messages?.actor.localAdmin ?? KNOWN_ACTOR_LABELS["local-admin"],
+  "local-editor": messages?.actor.localEditor ?? KNOWN_ACTOR_LABELS["local-editor"],
+  "local-producer": messages?.actor.localProducer ?? KNOWN_ACTOR_LABELS["local-producer"],
+  "local-user": messages?.actor.localUser ?? KNOWN_ACTOR_LABELS["local-user"],
+  "local-viewer": messages?.actor.localViewer ?? KNOWN_ACTOR_LABELS["local-viewer"],
+  agent: messages?.actor.agent ?? KNOWN_ACTOR_LABELS.agent,
+  producer: messages?.actor.producer ?? KNOWN_ACTOR_LABELS.producer,
+});
+
 const titleCaseToken = (value: string) =>
   value ? `${value.slice(0, 1).toUpperCase()}${value.slice(1).toLowerCase()}` : "";
 
@@ -88,23 +99,38 @@ const prettifyHumanIdentifier = (value: string) => {
   return parts.map(titleCaseToken).join(" ");
 };
 
-const formatOpaqueUserId = (actorId: unknown): string => {
+const formatOpaqueUserId = (actorId: unknown, messages?: CoreI18nMessages): string => {
   const id = typeof actorId === "string" ? actorId.trim() : "";
   if (!id) return "—";
-  return KNOWN_ACTOR_LABELS[id] ?? prettifyHumanIdentifier(id) ?? `User ${shortIdentifier(id)}`;
+  return (
+    getLocalizedActorLabels(messages)[id] ??
+    prettifyHumanIdentifier(id) ??
+    (messages
+      ? fmt(messages.identity.userFallback, { id: shortIdentifier(id) })
+      : `User ${shortIdentifier(id)}`)
+  );
 };
 
-const formatUserRefLabel = (user: UserRefVO | null | undefined, fallbackId?: string | null) => {
+const formatUserRefLabel = (
+  user: UserRefVO | null | undefined,
+  fallbackId?: string | null,
+  messages?: CoreI18nMessages,
+) => {
   if (user?.name?.trim()) {
     return user.name.trim();
   }
   if (user?.email?.trim()) {
     return user.email.trim();
   }
-  if (fallbackId && KNOWN_ACTOR_LABELS[fallbackId]) {
-    return KNOWN_ACTOR_LABELS[fallbackId];
+  if (fallbackId && getLocalizedActorLabels(messages)[fallbackId]) {
+    return getLocalizedActorLabels(messages)[fallbackId];
   }
-  return fallbackId ? `Unknown user ${shortIdentifier(fallbackId)}` : "Unknown user";
+  if (fallbackId) {
+    return messages
+      ? fmt(messages.identity.unknownUserFallback, { id: shortIdentifier(fallbackId) })
+      : `Unknown user ${shortIdentifier(fallbackId)}`;
+  }
+  return messages?.identity.unknownUser ?? "Unknown user";
 };
 
 const formatUserRefSubtitle = (user: UserRefVO | null | undefined) => {

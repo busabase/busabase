@@ -1,6 +1,8 @@
+import { createHash } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { OpenAPIHandler } from "@orpc/openapi/fetch";
 import { createRouterClient } from "@orpc/server";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { CommitPO, NodePO, OperationPO } from "../src/db/schema";
@@ -28,6 +30,10 @@ type SkillsClient = ReturnType<
 // migrations`; busabase-core has none of its own, so the test runs against the
 // reference app's migrations (busabase). Same schema, owned by busabase-core.
 const MIGRATIONS_CWD = path.resolve(__dirname, "../../../apps/busabase");
+const API = "http://busabase.test/api/v1";
+const wasmBytes = Buffer.from([0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00]);
+const wasmBase64 = wasmBytes.toString("base64");
+const wasmHash = `sha256:${createHash("sha256").update(wasmBytes).digest("hex")}`;
 
 describe("Agent Skills API — oRPC integration", () => {
   let dataDir = "";
@@ -190,6 +196,86 @@ describe("Agent Skills API — oRPC integration", () => {
     await approveAndMerge(changeRequest.id);
     const updated = await client.skills.readFile({ nodeId: skill.node.id, filePath: "SKILL.md" });
     expect(updated.content).toContain("## Checklist");
+  });
+
+  it("uploads and reads arbitrary files through the Skill RPC change-request flow", async () => {
+    const skill = await client.skills.create({ slug: "binary-skill", name: "Binary Skill" });
+    const changeRequest = await client.skills.createChangeRequest({
+      nodeId: skill.node.id,
+      message: "Add runtime fixture",
+      operations: [
+        {
+          kind: "create",
+          path: "fixtures/runtime.wasm",
+          contentBase64: wasmBase64,
+          mimeType: "application/wasm",
+        },
+      ],
+    });
+    expect(changeRequest.primaryOperation?.operation).toBe("skill_file_create");
+
+    await approveAndMerge(changeRequest.id);
+    const file = await client.skills.readFile({
+      nodeId: skill.node.id,
+      filePath: "fixtures/runtime.wasm",
+    });
+    expect(file).toMatchObject({
+      encoding: "base64",
+      content: "",
+      contentBase64: wasmBase64,
+      mimeType: "application/wasm",
+      contentHash: wasmHash,
+    });
+    expect(Buffer.from(file.contentBase64, "base64")).toEqual(wasmBytes);
+  });
+
+  it("uploads and reads arbitrary files through the public Skill OpenAPI route", async () => {
+    const handler = new OpenAPIHandler(busabaseRouter);
+    const call = async (method: string, routePath: string, body?: unknown) => {
+      const request = new Request(`${API}${routePath}`, {
+        method,
+        headers: body === undefined ? undefined : { "content-type": "application/json" },
+        body: body === undefined ? undefined : JSON.stringify(body),
+      });
+      const result = await handler.handle(request, { context: {} });
+      if (!result.matched) {
+        throw new Error(`no OpenAPI route matched ${method} ${routePath}`);
+      }
+      return { status: result.response.status, body: await result.response.json() };
+    };
+    const ok = async (method: string, routePath: string, body?: unknown) => {
+      const result = await call(method, routePath, body);
+      if (result.status >= 400) {
+        throw new Error(
+          `${method} ${routePath} -> ${result.status}: ${JSON.stringify(result.body)}`,
+        );
+      }
+      return result.body;
+    };
+
+    const skill = await ok("POST", "/skills", {
+      slug: "openapi-binary-skill",
+      name: "OpenAPI Binary Skill",
+    });
+    const changeRequest = await ok("POST", `/skills/${skill.node.id}/change-requests`, {
+      message: "Add REST runtime fixture",
+      operations: [
+        {
+          kind: "create",
+          path: "fixtures/runtime.wasm",
+          contentBase64: wasmBase64,
+          mimeType: "application/wasm",
+        },
+      ],
+    });
+    await ok("POST", `/change-requests/${changeRequest.id}/reviews`, { verdict: "approved" });
+    await ok("POST", `/change-requests/${changeRequest.id}/merge`);
+
+    const file = await ok("GET", `/skills/${skill.node.id}/files/fixtures/runtime.wasm`);
+    expect(file.encoding).toBe("base64");
+    expect(file.contentBase64).toBe(wasmBase64);
+    expect(file.mimeType).toBe("application/wasm");
+    expect(file.contentHash).toBe(wasmHash);
   });
 
   it("merges create + delete file operations", async () => {

@@ -20,7 +20,7 @@ import {
   type NodePO,
   type OperationPO,
 } from "../../db/schema";
-import { CURRENT_USER_ID, hashText, id, now, rootNodeIdForSpace } from "../../logic/kernel";
+import { CURRENT_USER_ID, hashBuffer, id, now, rootNodeIdForSpace } from "../../logic/kernel";
 import type { MaterializeArgs } from "../../logic/materialize";
 import {
   ensureReady,
@@ -35,10 +35,12 @@ import {
   deleteTextFile,
   getFileTreeNode as getStorageFileTreeNode,
   listStorageFiles,
+  mimeTypeForPath,
   normalizeFilePath,
-  readTextFile,
+  readFile,
   resolveStoragePrefix,
   storagePrefix,
+  writeFile,
   writeTextFile,
 } from "./logic/storage";
 
@@ -73,6 +75,81 @@ const operationKindForInput = (
     return `${type}_metadata_update` as (typeof busabaseOperationKindEnum.enumValues)[number];
   }
   return `${type}_file_${kind}` as (typeof busabaseOperationKindEnum.enumValues)[number];
+};
+
+const TEXT_FILE_EXTENSIONS = new Set([
+  "c",
+  "conf",
+  "cpp",
+  "cts",
+  "bash",
+  "css",
+  "csv",
+  "env",
+  "go",
+  "graphql",
+  "html",
+  "ini",
+  "java",
+  "js",
+  "json",
+  "jsx",
+  "log",
+  "md",
+  "mdx",
+  "mts",
+  "py",
+  "rb",
+  "rs",
+  "sh",
+  "sql",
+  "srt",
+  "toml",
+  "ts",
+  "tsx",
+  "txt",
+  "xml",
+  "yaml",
+  "yml",
+]);
+
+const extensionForPath = (filePath: string) => filePath.split(".").pop()?.toLowerCase() ?? "";
+
+const shouldReadAsText = (filePath: string, _content: Buffer) => {
+  const ext = extensionForPath(filePath);
+  if (TEXT_FILE_EXTENSIONS.has(ext)) {
+    return true;
+  }
+  return false;
+};
+
+const decodeBase64Content = (contentBase64: string) => {
+  const normalized = contentBase64.trim();
+  if (!/^[A-Za-z0-9+/]*={0,2}$/.test(normalized) || normalized.length % 4 !== 0) {
+    throw new ORPCError("BAD_REQUEST", { message: "Invalid base64 file content" });
+  }
+  return Buffer.from(normalized, "base64");
+};
+
+const fileContentFromInput = (input: {
+  content?: string;
+  contentBase64?: string;
+  mimeType?: string;
+}) => {
+  if (input.contentBase64 !== undefined) {
+    return {
+      content: decodeBase64Content(input.contentBase64),
+      contentBase64: input.contentBase64.trim(),
+      encoding: "base64" as const,
+      mimeType: input.mimeType,
+    };
+  }
+  return {
+    content: Buffer.from(input.content ?? "", "utf8"),
+    contentBase64: null,
+    encoding: "utf8" as const,
+    mimeType: input.mimeType,
+  };
 };
 
 export const createFileTreeNode = async (
@@ -134,7 +211,8 @@ export const createFileTreeNode = async (
     }
   }
   for (const file of parsed.files) {
-    await writeTextFile(node, file.path, file.content);
+    const fileContent = fileContentFromInput(file);
+    await writeFile(node, file.path, fileContent.content, fileContent.mimeType);
   }
 
   // Record the create as an auto-merged structural ChangeRequest (audit +
@@ -206,12 +284,16 @@ export const readFileTreeFile = async (
     throw new Error(`${config.label} not found: ${nodeIdOrSlug}`);
   }
   const path = normalizeFilePath(filePath);
-  const content = await readTextFile(node, path);
+  const bytes = await readFile(node, path);
+  const readAsText = shouldReadAsText(path, bytes);
   return {
     nodeId: node.id,
     path,
-    content,
-    contentHash: hashText(content),
+    encoding: readAsText ? ("utf8" as const) : ("base64" as const),
+    content: readAsText ? bytes.toString("utf8") : "",
+    contentBase64: bytes.toString("base64"),
+    mimeType: mimeTypeForPath(path),
+    contentHash: hashBuffer(bytes),
   };
 };
 
@@ -253,14 +335,29 @@ export const createFileTreeChangeRequest = async (
     const operationKind = operationKindForInput(config.type, operation.kind);
     const filePath =
       operation.kind === "metadata_update" ? null : normalizeFilePath(operation.path);
-    const fields =
-      operation.kind === "metadata_update"
-        ? { metadata: operation.metadata }
-        : {
-            filePath,
-            baseContentHash: operation.baseContentHash ?? null,
-            nextContent: operation.kind === "delete" ? null : operation.content,
-          };
+    let fields: Record<string, unknown>;
+    if (operation.kind === "metadata_update") {
+      fields = { metadata: operation.metadata };
+    } else if (operation.kind === "delete") {
+      fields = {
+        filePath,
+        baseContentHash: operation.baseContentHash ?? null,
+        nextContent: null,
+        nextContentBase64: null,
+        encoding: null,
+        mimeType: null,
+      };
+    } else {
+      const fileContent = fileContentFromInput(operation);
+      fields = {
+        filePath,
+        baseContentHash: operation.baseContentHash ?? null,
+        nextContent: fileContent.encoding === "utf8" ? operation.content : null,
+        nextContentBase64: fileContent.encoding === "base64" ? fileContent.contentBase64 : null,
+        encoding: fileContent.encoding,
+        mimeType: fileContent.mimeType ?? null,
+      };
+    }
 
     await db.insert(busabaseCommits).values({
       id: commitId,
@@ -330,10 +427,13 @@ export const mergeFileTreeFile = async (
     filePath?: string;
     baseContentHash?: string | null;
     nextContent?: string | null;
+    nextContentBase64?: string | null;
+    encoding?: "utf8" | "base64" | null;
+    mimeType?: string | null;
   };
   if (fields.baseContentHash) {
-    const currentContent = await readTextFile(node, item.filePath).catch(() => "");
-    if (hashText(currentContent) !== fields.baseContentHash) {
+    const currentContent = await readFile(node, item.filePath).catch(() => Buffer.alloc(0));
+    if (hashBuffer(currentContent) !== fields.baseContentHash) {
       throw new ORPCError("CONFLICT", {
         message: `${labelForType(type)} file changed before merge: ${item.filePath}`,
       });
@@ -341,6 +441,13 @@ export const mergeFileTreeFile = async (
   }
   if (action === "delete") {
     await deleteTextFile(node, item.filePath);
+  } else if (fields.encoding === "base64" && fields.nextContentBase64 !== null) {
+    await writeFile(
+      node,
+      item.filePath,
+      decodeBase64Content(fields.nextContentBase64 ?? ""),
+      fields.mimeType ?? undefined,
+    );
   } else {
     await writeTextFile(node, item.filePath, fields.nextContent ?? "");
   }

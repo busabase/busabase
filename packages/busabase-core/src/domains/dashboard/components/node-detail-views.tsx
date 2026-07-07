@@ -274,6 +274,14 @@ export function FileTreeDetailView({
       ),
     [fileTree?.files],
   );
+  const binaryByteLength = useMemo(() => {
+    const value = fileQuery.data?.contentBase64;
+    if (!value) {
+      return 0;
+    }
+    const padding = value.endsWith("==") ? 2 : value.endsWith("=") ? 1 : 0;
+    return Math.max(0, (value.length / 4) * 3 - padding);
+  }, [fileQuery.data?.contentBase64]);
 
   useEffect(() => {
     if (!fileTree || openPath) {
@@ -301,7 +309,7 @@ export function FileTreeDetailView({
   );
 
   const startEditingFile = () => {
-    if (!fileQuery.data) {
+    if (!fileQuery.data || fileQuery.data.encoding === "base64") {
       return;
     }
     setDraft(fileQuery.data.content);
@@ -465,7 +473,10 @@ export function FileTreeDetailView({
             <div className="min-w-0 truncate font-mono text-muted-foreground text-xs">
               {openPath ?? messages.nodeDetail.selectFile}
             </div>
-            {openPath && fileQuery.data && !fileQuery.isError ? (
+            {openPath &&
+            fileQuery.data &&
+            !fileQuery.isError &&
+            fileQuery.data.encoding !== "base64" ? (
               isEditing ? (
                 <div className="flex shrink-0 flex-wrap items-center gap-2">
                   <button
@@ -525,6 +536,26 @@ export function FileTreeDetailView({
                 {fileQuery.error instanceof Error
                   ? fileQuery.error.message
                   : messages.nodeDetail.couldNotReadFile}
+              </div>
+            ) : fileQuery.data?.encoding === "base64" ? (
+              <div className="p-5 text-muted-foreground text-sm">
+                <p className="font-medium text-foreground">
+                  {messages.nodeDetail.binaryFilePreview}
+                </p>
+                <dl className="mt-4 grid gap-2 font-mono text-xs">
+                  <div className="flex gap-2">
+                    <dt className="w-16 shrink-0 text-muted-foreground">type</dt>
+                    <dd className="min-w-0 truncate">{fileQuery.data.mimeType}</dd>
+                  </div>
+                  <div className="flex gap-2">
+                    <dt className="w-16 shrink-0 text-muted-foreground">bytes</dt>
+                    <dd>{binaryByteLength}</dd>
+                  </div>
+                  <div className="flex gap-2">
+                    <dt className="w-16 shrink-0 text-muted-foreground">hash</dt>
+                    <dd className="min-w-0 truncate">{fileQuery.data.contentHash}</dd>
+                  </div>
+                </dl>
               </div>
             ) : isEditing ? (
               <textarea

@@ -40,20 +40,40 @@ export const createFileTreeInputSchema = z.object({
   version: z.string().optional().default("0.1.0"),
   files: z
     .array(
-      z.object({
-        path: z.string().min(1),
-        content: z.string().default(""),
-      }),
+      z.union([
+        z.object({
+          path: z.string().min(1),
+          content: z.string().default(""),
+          contentBase64: z.undefined().optional(),
+          mimeType: z.string().optional(),
+        }),
+        z.object({
+          path: z.string().min(1),
+          content: z.undefined().optional(),
+          contentBase64: z.string().describe("Base64-encoded bytes for any file payload."),
+          mimeType: z.string().optional(),
+        }),
+      ]),
     )
     .optional()
     .default([]),
 });
 
-export const fileTreeFileOperationInputSchema = z.discriminatedUnion("kind", [
+export const fileTreeFileOperationInputSchema = z.union([
   z.object({
     kind: z.enum(["create", "update"]),
     path: z.string().min(1),
     content: z.string(),
+    contentBase64: z.undefined().optional(),
+    mimeType: z.string().optional(),
+    baseContentHash: z.string().optional(),
+  }),
+  z.object({
+    kind: z.enum(["create", "update"]),
+    path: z.string().min(1),
+    content: z.undefined().optional(),
+    contentBase64: z.string().describe("Base64-encoded bytes for any file payload."),
+    mimeType: z.string().optional(),
     baseContentHash: z.string().optional(),
   }),
   z.object({
@@ -141,7 +161,10 @@ export const makeFileTreeContract = (routeBase: string, tag: string) => {
         z.object({
           nodeId: z.string(),
           path: z.string(),
+          encoding: z.enum(["utf8", "base64"]),
           content: z.string(),
+          contentBase64: z.string().describe("Base64-encoded bytes for lossless file export."),
+          mimeType: z.string(),
           contentHash: z.string(),
         }),
       ),

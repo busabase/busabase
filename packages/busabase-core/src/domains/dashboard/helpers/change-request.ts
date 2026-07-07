@@ -76,6 +76,48 @@ export const operationOrder: OperationKind[] = [
 // Operation labels/tones come from the node-type registry (single source of truth).
 export const operationMeta = OPERATION_META;
 
+const operationLabelKeys: Record<OperationKind, keyof CoreI18nMessages["operation"]> = {
+  drive_file_create: "driveFileCreate",
+  drive_file_delete: "driveFileDelete",
+  drive_file_update: "driveFileUpdate",
+  drive_metadata_update: "driveMetadataUpdate",
+  node_create: "nodeCreate",
+  node_delete: "nodeDelete",
+  node_move: "nodeMove",
+  node_rename: "nodeRename",
+  node_restore: "nodeRestore",
+  base_add_field: "baseAddField",
+  base_archive: "baseArchive",
+  base_convert_field: "baseConvertField",
+  base_delete_field: "baseDeleteField",
+  base_reorder_fields: "baseReorderFields",
+  base_restore: "baseRestore",
+  base_restore_field: "baseRestoreField",
+  base_update_field: "baseUpdateField",
+  doc_update: "docUpdate",
+  record_create: "recordCreate",
+  record_delete: "recordDelete",
+  record_restore: "recordRestore",
+  record_update: "recordUpdate",
+  record_variant: "recordVariant",
+  skill_file_create: "skillFileCreate",
+  skill_file_delete: "skillFileDelete",
+  skill_file_update: "skillFileUpdate",
+  skill_metadata_update: "skillMetadataUpdate",
+  view_create: "viewCreate",
+  view_delete: "viewDelete",
+  view_restore: "viewRestore",
+  view_update: "viewUpdate",
+};
+
+const nodeActionLabelKeys: Record<string, keyof CoreI18nMessages["operation"]> = {
+  create: "actionCreate",
+  delete: "actionDelete",
+  move: "actionMove",
+  rename: "actionRename",
+  restore: "actionRestore",
+};
+
 const getFieldString = (fields: Record<string, unknown>, key: string) => {
   const value = fields[key];
   return typeof value === "string" ? value : "";
@@ -91,7 +133,10 @@ export const getNodeOperationTypeLabel = (operation: OperationVO | null | undefi
   return nodeType ? (getNodeType(nodeType)?.label ?? nodeType) : "";
 };
 
-export const getOperationLabel = (operation: OperationVO | null | undefined) => {
+export const getOperationLabel = (
+  operation: OperationVO | null | undefined,
+  messages?: CoreI18nMessages,
+) => {
   if (!operation) {
     return "";
   }
@@ -100,15 +145,26 @@ export const getOperationLabel = (operation: OperationVO | null | undefined) => 
     const nodeTypeLabel = getNodeOperationTypeLabel(operation);
     if (nodeTypeLabel) {
       const action = operation.operation.replace(/^node_/, "");
-      return `${action.charAt(0).toUpperCase()}${action.slice(1)} ${nodeTypeLabel.toLowerCase()}`;
+      const actionLabel = messages
+        ? messages.operation[nodeActionLabelKeys[action] ?? "actionMove"]
+        : `${action.charAt(0).toUpperCase()}${action.slice(1)}`;
+      return `${actionLabel} ${nodeTypeLabel.toLowerCase()}`;
     }
   }
 
-  return operationMeta[operation.operation].label;
+  return messages
+    ? messages.operation[operationLabelKeys[operation.operation]]
+    : operationMeta[operation.operation].label;
 };
 
-export const getChangeRequestScopeName = (changeRequest: ChangeRequestVO) =>
-  changeRequest.base?.name ?? changeRequest.node?.name ?? "Node tree";
+export const getChangeRequestScopeName = (
+  changeRequest: ChangeRequestVO,
+  messages?: CoreI18nMessages,
+) =>
+  changeRequest.base?.name ??
+  changeRequest.node?.name ??
+  messages?.operation.nodeTree ??
+  "Node tree";
 
 export const getNodeHref = (node: NodeVO | null | undefined) => {
   if (!node) {
@@ -146,14 +202,12 @@ export const getOperationTargetHref = (changeRequest: ChangeRequestVO, operation
 
 export const getOperationTargetLabel = (operation: OperationVO, messages?: CoreI18nMessages) => {
   if (operation.operation.startsWith("view_")) {
-    return messages?.common.open ? `${messages.common.open} view` : "Open view";
+    return messages?.operation.openView ?? "Open view";
   }
   if (operation.targetType === "node") {
-    return messages?.common.open ? `${messages.common.open} node` : "Open node";
+    return messages?.operation.openNode ?? "Open node";
   }
-  return messages?.common.open
-    ? `${messages.common.open} ${messages.common.record}`
-    : "Open record";
+  return messages?.operation.openRecord ?? "Open record";
 };
 
 // Human-readable subject of an operation. For record operations the subject is
@@ -162,14 +216,22 @@ export const getOperationTargetLabel = (operation: OperationVO, messages?: CoreI
 // touch it, from the "before" values. Falls back to a title/name/subject slug
 // guess (views and nodes carry their name there) or the skill file path.
 // Empty string when the operation has no meaningful name.
-export const getOperationSubject = (operation: OperationVO, base?: BaseVO | null) => {
+export const getOperationSubject = (
+  operation: OperationVO,
+  base?: BaseVO | null,
+  messages?: CoreI18nMessages,
+) => {
   if (base && operation.operation.startsWith("record_")) {
     const primaryField = base.fields[0];
     if (primaryField) {
       const subject =
-        fieldPreviewText(operation.headCommit.fields[primaryField.slug], primaryField.type) ||
+        fieldPreviewText(
+          operation.headCommit.fields[primaryField.slug],
+          primaryField.type,
+          messages,
+        ) ||
         (operation.baseFields
-          ? fieldPreviewText(operation.baseFields[primaryField.slug], primaryField.type)
+          ? fieldPreviewText(operation.baseFields[primaryField.slug], primaryField.type, messages)
           : "");
       if (subject) {
         return subject;
@@ -195,17 +257,18 @@ export const getOperationSubject = (operation: OperationVO, base?: BaseVO | null
 export const getOperationTitle = (
   operation: OperationVO | null | undefined,
   base?: BaseVO | null,
+  messages?: CoreI18nMessages,
 ) => {
   if (!operation) {
     return "";
   }
 
-  const subject = getOperationSubject(operation, base);
+  const subject = getOperationSubject(operation, base, messages);
   if (subject) {
     return subject;
   }
 
-  return `${getOperationLabel(operation)} ${shortIdentifier(
+  return `${getOperationLabel(operation, messages)} ${shortIdentifier(
     operation.targetRecordId ??
       operation.sourceRecordId ??
       operation.targetViewId ??
@@ -243,9 +306,12 @@ export const getOperationMessage = (operation: OperationVO | null | undefined) =
 export const getChangeRequestMessage = (changeRequest: ChangeRequestVO) =>
   getOperationMessage(changeRequest.primaryOperation);
 
-export const getRecordTitle = (record: RecordVO | null | undefined) => {
+export const getRecordTitle = (
+  record: RecordVO | null | undefined,
+  messages?: CoreI18nMessages,
+) => {
   if (!record) {
-    return "Record";
+    return messages?.common.record ?? "Record";
   }
 
   // The record title is the value of the base's PRIMARY field (its first field
@@ -254,7 +320,7 @@ export const getRecordTitle = (record: RecordVO | null | undefined) => {
   // or anything else displays correctly, and relation chips show that value.
   const primaryField = record.base.fields[0];
   const primary = primaryField
-    ? fieldPreviewText(record.headCommit.fields[primaryField.slug], primaryField.type)
+    ? fieldPreviewText(record.headCommit.fields[primaryField.slug], primaryField.type, messages)
     : "";
   return primary || shortIdentifier(record.id);
 };
@@ -275,29 +341,39 @@ export const getChangeRequestTitle = (
   messages?: CoreI18nMessages,
 ) => {
   if (changeRequest.operationCount > 1) {
-    return `${changeRequest.operationCount} ${messages?.activity.operation ?? "operation"} ${messages?.activity.changeRequest ?? "change request"}`;
+    return messages
+      ? fmt(messages.operation.multiOperationTitle, {
+          changeRequest: messages.activity.changeRequest,
+          count: changeRequest.operationCount,
+          operation: messages.activity.operation,
+        })
+      : `${changeRequest.operationCount} operation change request`;
   }
 
   const operation = changeRequest.primaryOperation;
   if (!operation) {
-    return `Untitled ${messages?.activity.changeRequest ?? "change request"}`;
+    return messages
+      ? fmt(messages.operation.untitledChangeRequest, {
+          changeRequest: messages.activity.changeRequest,
+        })
+      : "Untitled change request";
   }
 
-  const subject = getOperationSubject(operation, changeRequest.base);
+  const subject = getOperationSubject(operation, changeRequest.base, messages);
   if (subject) {
-    return `${operationMeta[operation.operation].label} ${subject}`;
+    return `${getOperationLabel(operation, messages)} ${subject}`;
   }
 
-  return getOperationTitle(operation, changeRequest.base);
+  return getOperationTitle(operation, changeRequest.base, messages);
 };
 
 export const getChangeRequestSummary = (
   changeRequest: ChangeRequestVO,
-  _messages?: CoreI18nMessages,
+  messages?: CoreI18nMessages,
 ) => {
   const operationIndexes = new Map(operationOrder.map((operation, index) => [operation, index]));
   const counts = changeRequest.operations.reduce((items, operation) => {
-    const label = getOperationLabel(operation).toLowerCase();
+    const label = getOperationLabel(operation, messages).toLowerCase();
     const current = items.get(label) ?? {
       count: 0,
       order: operationIndexes.get(operation.operation) ?? operationOrder.length,
@@ -307,30 +383,52 @@ export const getChangeRequestSummary = (
   }, new Map<string, { count: number; order: number }>());
   const parts = [...counts.entries()]
     .sort((first, second) => first[1].order - second[1].order || first[0].localeCompare(second[0]))
-    .map(([label, item]) => `${item.count} ${label}`);
+    .map(([label, item]) =>
+      messages
+        ? fmt(messages.operation.summaryItem, { count: item.count, label })
+        : `${item.count} ${label}`,
+    );
 
   if (parts.length > 0) {
     return parts.join(" · ");
   }
 
-  return `${changeRequest.operationCount} item${changeRequest.operationCount === 1 ? "" : "s"}`;
+  return messages
+    ? fmt(messages.operation.summaryFallback, {
+        count: changeRequest.operationCount,
+        item: changeRequest.operationCount === 1 ? messages.common.item : messages.common.items,
+      })
+    : `${changeRequest.operationCount} item${changeRequest.operationCount === 1 ? "" : "s"}`;
 };
 
 export const getChangeRequestOperationLabel = (
   changeRequest: ChangeRequestVO,
   messages?: CoreI18nMessages,
 ) =>
-  fmt("{count} {operation}{plural}", {
-    count: changeRequest.operationCount,
-    operation: messages?.activity.operation ?? "operation",
-    plural: changeRequest.operationCount === 1 ? "" : "s",
-  });
+  messages
+    ? fmt(
+        changeRequest.operationCount === 1
+          ? messages.operation.operationCount
+          : messages.operation.operationCountPlural,
+        {
+          count: changeRequest.operationCount,
+          operation: messages.activity.operation,
+        },
+      )
+    : fmt("{count} {operation}{plural}", {
+        count: changeRequest.operationCount,
+        operation: "operation",
+        plural: changeRequest.operationCount === 1 ? "" : "s",
+      });
 
-export const getChangeRequestRiskHints = (changeRequest: ChangeRequestVO) => {
+export const getChangeRequestRiskHints = (
+  changeRequest: ChangeRequestVO,
+  messages?: CoreI18nMessages,
+) => {
   const hints = new Set<string>();
   for (const operation of changeRequest.operations) {
     if (operation.operation.endsWith("_delete")) {
-      hints.add("destructive");
+      hints.add(messages?.operation.destructive ?? "destructive");
     }
     if (operation.operation.startsWith("record_")) {
       const fields = operation.headCommit.fields;
@@ -349,13 +447,13 @@ export const getChangeRequestRiskHints = (changeRequest: ChangeRequestVO) => {
           hints.add("YAML");
         }
         if (field?.type === "attachment") {
-          hints.add("attachment");
+          hints.add(messages?.operation.attachment ?? "attachment");
         }
         if (field?.type === "relation") {
-          hints.add("relation");
+          hints.add(messages?.operation.relation ?? "relation");
         }
         if (typeof value === "string" && value.length > 500) {
-          hints.add("long text");
+          hints.add(messages?.operation.longText ?? "long text");
         }
       }
     }
@@ -367,11 +465,22 @@ export const getChangeRequestBrief = (
   changeRequest: ChangeRequestVO,
   messages?: CoreI18nMessages,
 ) => {
-  const scope = getChangeRequestScopeName(changeRequest);
+  const scope = getChangeRequestScopeName(changeRequest, messages);
   const summary = getChangeRequestSummary(changeRequest, messages);
-  const risks = getChangeRequestRiskHints(changeRequest);
+  const countLabel = getChangeRequestOperationLabel(changeRequest, messages);
+  const risks = getChangeRequestRiskHints(changeRequest, messages);
+  if (messages) {
+    return risks.length > 0
+      ? fmt(messages.operation.riskBrief, {
+          countLabel,
+          risks: risks.join(messages.operation.riskAnd),
+          scope,
+          summary,
+        })
+      : fmt(messages.operation.brief, { countLabel, scope, summary });
+  }
   const riskText = risks.length > 0 ? ` Watch ${risks.join(" and ")} changes.` : "";
-  return `${getChangeRequestOperationLabel(changeRequest, messages)} in ${scope}: ${summary}.${riskText}`;
+  return `${countLabel} in ${scope}: ${summary}.${riskText}`;
 };
 
 export const getChangeRequestReviewMessage = (
@@ -393,41 +502,59 @@ export const getChangeRequestReviewMessage = (
   return messages?.review.waitingForReview ?? "Waiting for your review";
 };
 
-export const getOperationImpact = (operation: OperationVO) => {
+export const getOperationImpact = (operation: OperationVO, messages?: CoreI18nMessages) => {
   if (operation.operation === "record_create") {
-    return "Adds a new record";
+    return messages?.operation.impactRecordCreate ?? "Adds a new record";
   }
   if (operation.operation === "record_update") {
-    return `Updates ${shortIdentifier(operation.targetRecordId)}`;
+    const id = shortIdentifier(operation.targetRecordId);
+    return messages ? fmt(messages.operation.impactRecordUpdate, { id }) : `Updates ${id}`;
   }
   if (operation.operation === "record_delete") {
-    return operation.deleteMode === "archive"
-      ? `Archives ${shortIdentifier(operation.targetRecordId)}`
-      : `Deletes ${shortIdentifier(operation.targetRecordId)}`;
+    const id = shortIdentifier(operation.targetRecordId);
+    if (operation.deleteMode === "archive") {
+      return messages ? fmt(messages.operation.impactRecordArchive, { id }) : `Archives ${id}`;
+    }
+    return messages ? fmt(messages.operation.impactRecordDelete, { id }) : `Deletes ${id}`;
   }
   if (operation.operation === "record_variant") {
-    return `Variants ${shortIdentifier(operation.sourceRecordId)}`;
+    const id = shortIdentifier(operation.sourceRecordId);
+    return messages ? fmt(messages.operation.impactRecordVariant, { id }) : `Variants ${id}`;
   }
   if (operation.operation === "view_create") {
-    return "Adds a new view";
+    return messages?.operation.impactViewCreate ?? "Adds a new view";
   }
   if (operation.operation === "view_update") {
-    return `Updates view ${shortIdentifier(operation.targetViewId ?? operation.mergedViewId)}`;
+    const id = shortIdentifier(operation.targetViewId ?? operation.mergedViewId);
+    return messages ? fmt(messages.operation.impactViewUpdate, { id }) : `Updates view ${id}`;
   }
   if (operation.operation === "view_delete") {
-    return `Deletes view ${shortIdentifier(operation.targetViewId ?? operation.mergedViewId)}`;
+    const id = shortIdentifier(operation.targetViewId ?? operation.mergedViewId);
+    return messages ? fmt(messages.operation.impactViewDelete, { id }) : `Deletes view ${id}`;
   }
   if (operation.operation.includes("_file_")) {
-    return `${getOperationLabel(operation)} ${operation.filePath ?? "file"}`;
+    const file = operation.filePath ?? "file";
+    const label = getOperationLabel(operation, messages);
+    return messages
+      ? fmt(messages.operation.impactFile, { file, operation: label })
+      : `${label} ${file}`;
   }
   if (operation.operation === "node_create") {
     const nodeTypeLabel = getNodeOperationTypeLabel(operation).toLowerCase() || "node";
-    return `Creates ${nodeTypeLabel}`;
+    return messages
+      ? fmt(messages.operation.impactNodeCreate, { nodeType: nodeTypeLabel })
+      : `Creates ${nodeTypeLabel}`;
   }
   if (operation.operation.startsWith("node_")) {
-    return `${getOperationLabel(operation)} ${shortIdentifier(operation.nodeId)}`;
+    const id = shortIdentifier(operation.nodeId);
+    const label = getOperationLabel(operation, messages);
+    return messages
+      ? fmt(messages.operation.impactNode, { id, operation: label })
+      : `${label} ${id}`;
   }
-  return `${getOperationLabel(operation)} ${shortIdentifier(operation.nodeId)}`;
+  const id = shortIdentifier(operation.nodeId);
+  const label = getOperationLabel(operation, messages);
+  return messages ? fmt(messages.operation.impactNode, { id, operation: label }) : `${label} ${id}`;
 };
 
 export const isDerivedFieldSlug = (name: string, slug: string) =>

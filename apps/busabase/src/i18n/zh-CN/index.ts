@@ -41,6 +41,7 @@ const zhCN: Translation = {
     save: "保存",
     saving: "保存中...",
     loading: "正在加载环境变量...",
+    loadFailed: "加载环境变量失败",
     clear: "清空",
     reveal: "显示",
     hide: "隐藏",

@@ -1,6 +1,7 @@
 import type { BaseFieldVO, ChangeRequestVO, FieldType, RecordVO } from "busabase-contract/types";
 import type { AttachmentRef } from "open-domains/attachments/types";
 import { iStringParse } from "openlib/i18n/i-string";
+import type { CoreI18nMessages } from "../../../i18n";
 import { FIELD_TYPE_ORDER } from "../../base/field-types";
 import { fieldValueToString, formatNumberField, formatOpaqueUserId } from "./format";
 import { safeFetchableUrl, stripHtmlTags } from "./html";
@@ -96,9 +97,13 @@ export const getFieldChipEntries = (field: BaseFieldVO, value: unknown): FieldCh
   return [];
 };
 
-export const getFieldPreviewText = (field: BaseFieldVO | undefined, value: unknown) => {
+export const getFieldPreviewText = (
+  field: BaseFieldVO | undefined,
+  value: unknown,
+  messages?: CoreI18nMessages,
+) => {
   if (!field) {
-    return fieldPreviewText(value);
+    return fieldPreviewText(value, undefined, messages);
   }
   if (field.type === "select") {
     return getChoiceLabel(field, value);
@@ -109,15 +114,17 @@ export const getFieldPreviewText = (field: BaseFieldVO | undefined, value: unkno
   if (field.type === "number" && field.options.number?.format === "currency") {
     return formatNumberField(value, field.options.number);
   }
-  return fieldPreviewText(value, field.type);
+  return fieldPreviewText(value, field.type, messages);
 };
 
-export const fieldPreviewText = (value: unknown, type?: FieldType) => {
+export const fieldPreviewText = (value: unknown, type?: FieldType, messages?: CoreI18nMessages) => {
   if (type === "checkbox") {
-    return value === true || value === "true" ? "Yes" : "No";
+    return value === true || value === "true"
+      ? (messages?.common.yes ?? "Yes")
+      : (messages?.common.no ?? "No");
   }
   if (type === "created_by" || type === "updated_by") {
-    return formatOpaqueUserId(value);
+    return formatOpaqueUserId(value, messages);
   }
   if (type === "auto_number") {
     const text = fieldValueToString(value);

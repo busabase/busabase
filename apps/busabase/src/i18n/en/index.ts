@@ -41,6 +41,7 @@ const en: BaseTranslation = {
     save: "Save",
     saving: "Saving...",
     loading: "Loading environment variables...",
+    loadFailed: "Failed to load environment variables",
     clear: "Clear",
     reveal: "Reveal",
     hide: "Hide",

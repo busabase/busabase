@@ -684,6 +684,7 @@ function RecordTableCell({
   record: RecordVO;
   records: RecordVO[];
 }) {
+  const messages = useCoreI18n();
   const rawValue = record.headCommit.fields[field.slug];
   const stickyClassName = index === 0 ? baseTableStickyClassName : "";
   const chips = getFieldChipEntries(field, rawValue);
@@ -697,7 +698,7 @@ function RecordTableCell({
           index === 0 ? stickyClassName : "text-muted-foreground"
         }`}
         href={currentRecordHref}
-        title={checked ? "Yes" : "No"}
+        title={checked ? messages.common.yes : messages.common.no}
       >
         <span
           className={`inline-flex h-5 w-5 shrink-0 items-center justify-center rounded border ${
@@ -801,7 +802,9 @@ function RecordTableCell({
       <div className={`flex min-w-0 flex-wrap gap-1.5 py-1 ${stickyClassName}`}>
         {relationIds.map((recordId) => {
           const linkedRecord = records.find((item) => item.id === recordId);
-          const label = linkedRecord ? getRecordTitle(linkedRecord) : shortIdentifier(recordId);
+          const label = linkedRecord
+            ? getRecordTitle(linkedRecord, messages)
+            : shortIdentifier(recordId);
           const chipClassName = "max-w-full truncate rounded-full bg-muted/70 px-2 py-0.5 text-xs";
           return linkedRecord ? (
             <Link
@@ -854,7 +857,7 @@ function RecordTableCell({
     );
   }
 
-  const value = getFieldPreviewText(field, rawValue);
+  const value = getFieldPreviewText(field, rawValue, messages);
 
   return (
     <Link

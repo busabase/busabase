@@ -61,18 +61,74 @@ export const getFileTreeNode = async (type: string, nodeIdOrSlug: string) => {
   return node ?? null;
 };
 
+export const readFile = async (node: NodePO, filePath: string) => {
+  const path = normalizeFilePath(filePath);
+  return storage.getObject(`${resolveStoragePrefix(node)}${path}`);
+};
+
 export const readTextFile = async (node: NodePO, filePath: string) => {
   const path = normalizeFilePath(filePath);
-  return (await storage.getObject(`${resolveStoragePrefix(node)}${path}`)).toString("utf8");
+  return (await readFile(node, path)).toString("utf8");
+};
+
+export const mimeTypeForPath = (path: string) => {
+  const lower = path.toLowerCase();
+  if (lower.endsWith(".csv")) {
+    return "text/csv; charset=utf-8";
+  }
+  if (lower.endsWith(".html")) {
+    return "text/html; charset=utf-8";
+  }
+  if (lower.endsWith(".json")) {
+    return "application/json";
+  }
+  if (lower.endsWith(".pdf")) {
+    return "application/pdf";
+  }
+  if (lower.endsWith(".png")) {
+    return "image/png";
+  }
+  if (lower.endsWith(".jpg") || lower.endsWith(".jpeg")) {
+    return "image/jpeg";
+  }
+  if (lower.endsWith(".webp")) {
+    return "image/webp";
+  }
+  if (lower.endsWith(".svg")) {
+    return "image/svg+xml";
+  }
+  if (lower.endsWith(".mp3")) {
+    return "audio/mpeg";
+  }
+  if (lower.endsWith(".mp4")) {
+    return "video/mp4";
+  }
+  if (lower.endsWith(".wasm")) {
+    return "application/wasm";
+  }
+  if (lower.endsWith(".md") || lower.endsWith(".txt") || lower.endsWith(".xml")) {
+    return "text/plain; charset=utf-8";
+  }
+  return "application/octet-stream";
+};
+
+export const writeFile = async (
+  node: NodePO,
+  filePath: string,
+  content: Buffer,
+  mimeType?: string,
+) => {
+  const path = normalizeFilePath(filePath);
+  await storage.uploadFileToKey(
+    content,
+    `${resolveStoragePrefix(node)}${path}`,
+    mimeType ?? mimeTypeForPath(path),
+  );
 };
 
 export const writeTextFile = async (node: NodePO, filePath: string, content: string) => {
   const path = normalizeFilePath(filePath);
-  await storage.uploadFileToKey(
-    Buffer.from(content, "utf8"),
-    `${resolveStoragePrefix(node)}${path}`,
-    path.endsWith(".json") ? "application/json" : "text/plain; charset=utf-8",
-  );
+  await writeFile(node, path, Buffer.from(content, "utf8"), mimeTypeForPath(path));
 };
 
 export const deleteTextFile = async (node: NodePO, filePath: string) => {

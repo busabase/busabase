@@ -30,6 +30,7 @@ import {
 } from "../../base/field-types";
 import {
   getChangeRequestTitle,
+  getOperationLabel,
   getRecordTitle,
   isDerivedFieldSlug,
   operationMeta,
@@ -221,7 +222,7 @@ export function RecordDetailView({
                 <UserRefButton
                   fallbackId={record.createdBy}
                   labelClassName="font-medium"
-                  title="Record creator"
+                  title={messages.identity.recordCreator}
                   user={record.createdByUser}
                 />
               }
@@ -232,7 +233,7 @@ export function RecordDetailView({
                 <UserRefButton
                   fallbackId={record.headCommit.author}
                   labelClassName="font-medium"
-                  title="Commit author"
+                  title={messages.identity.commitAuthor}
                   user={record.headCommit.authorUser}
                 />
               }
@@ -318,8 +319,10 @@ export function RecordDetailView({
       <ConfirmActionDialog
         body={
           confirmDeleteAction === "merge"
-            ? fmt(messages.recordView.deleteMergeBody, { title: getRecordTitle(record) })
-            : fmt(messages.recordView.deleteRequestBody, { title: getRecordTitle(record) })
+            ? fmt(messages.recordView.deleteMergeBody, { title: getRecordTitle(record, messages) })
+            : fmt(messages.recordView.deleteRequestBody, {
+                title: getRecordTitle(record, messages),
+              })
         }
         confirmLabel={
           confirmDeleteAction === "merge"
@@ -607,7 +610,7 @@ function RecordFieldInput({
         >
           {targetRecords.map((item) => (
             <option key={item.id} value={item.id}>
-              {getRecordTitle(item)}
+              {getRecordTitle(item, messages)}
             </option>
           ))}
         </select>
@@ -1114,17 +1117,23 @@ function RecordPropertyItem({
 }
 
 function RecordHero({ record }: { record: RecordVO }) {
+  const messages = useCoreI18n();
   const summary =
-    fieldPreviewText(record.headCommit.fields.summary, getRecordFieldType(record, "summary")) ||
+    fieldPreviewText(
+      record.headCommit.fields.summary,
+      getRecordFieldType(record, "summary"),
+      messages,
+    ) ||
     fieldPreviewText(
       record.headCommit.fields.description,
       getRecordFieldType(record, "description"),
+      messages,
     );
 
   return (
     <div className="mt-2">
       <h1 className="max-w-4xl font-semibold text-4xl leading-tight tracking-tight">
-        {getRecordTitle(record)}
+        {getRecordTitle(record, messages)}
       </h1>
       {summary ? (
         <p className="mt-3 max-w-3xl text-muted-foreground text-xl leading-snug">
@@ -1142,6 +1151,7 @@ function RecordChangeRequestHistoryRow({
   changeRequest: ChangeRequestVO;
   recordId: string;
 }) {
+  const messages = useCoreI18n();
   const relatedOperations = changeRequest.operations.filter(
     (operation) =>
       operation.mergedRecordId === recordId ||
@@ -1156,9 +1166,12 @@ function RecordChangeRequestHistoryRow({
     >
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="min-w-0">
-          <div className="truncate font-medium text-sm">{getChangeRequestTitle(changeRequest)}</div>
+          <div className="truncate font-medium text-sm">
+            {getChangeRequestTitle(changeRequest, messages)}
+          </div>
           <div className="mt-1 text-muted-foreground text-xs">
-            {formatUserRefLabel(changeRequest.submittedByUser, changeRequest.submittedBy)} ·{" "}
+            {formatUserRefLabel(changeRequest.submittedByUser, changeRequest.submittedBy, messages)}
+            {" · "}
             {new Date(changeRequest.updatedAt).toLocaleString()}
           </div>
         </div>
@@ -1170,7 +1183,7 @@ function RecordChangeRequestHistoryRow({
             className={`rounded-full px-2 py-0.5 text-xs ${operationMeta[operation.operation].tone}`}
             key={operation.id}
           >
-            {operationMeta[operation.operation].label} · {shortIdentifier(operation.headCommitId)}
+            {getOperationLabel(operation, messages)} · {shortIdentifier(operation.headCommitId)}
           </span>
         ))}
       </div>

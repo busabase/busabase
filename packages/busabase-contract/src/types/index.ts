@@ -174,10 +174,10 @@ export interface ChangeRequestVO {
   reviews: ReviewVO[];
 }
 
-export type { DriveFileVO, DriveVO } from "../domains/drive/types";
-export type { FileTreeFileVO, FileTreeNodeVO } from "../domains/filetree/types";
+export type { DriveFileVO, DriveReadFileVO, DriveVO } from "../domains/drive/types";
+export type { FileTreeFileVO, FileTreeNodeVO, FileTreeReadFileVO } from "../domains/filetree/types";
 // Skill-domain VOs live in the skill domain; re-exported here for the public barrel.
-export type { SkillFileVO, SkillVO } from "../domains/skill/types";
+export type { SkillFileVO, SkillReadFileVO, SkillVO } from "../domains/skill/types";
 
 export interface ReviewVO {
   id: string;

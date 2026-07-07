@@ -58,14 +58,7 @@ export interface NavItem {
   /**
    * Optional status for recent task items
    */
-  status?:
-    | "pending"
-    | "in_progress"
-    | "waiting_for_input"
-    | "completed"
-    | "failed"
-    | "cancelled"
-    | "pending_fork";
+  status?: "pending" | "in_progress" | "waiting_for_input" | "completed" | "failed" | "cancelled";
 }
 
 export interface NavGroup {

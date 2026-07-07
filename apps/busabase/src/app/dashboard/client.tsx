@@ -7,7 +7,7 @@ import { BusabaseDashboard } from "busabase-core/dashboard";
 import { CreateNodeModal } from "busabase-core/dashboard/create-node-modal";
 import { EmptyAgentGuide } from "busabase-core/dashboard/empty-agent-guide";
 import { getBusabaseDashboardRoutes as getDashboardRoutes } from "busabase-core/dashboard/routes";
-import { CoreI18nProvider } from "busabase-core/i18n";
+import { CoreI18nProvider, type CoreLocale, coreMessagesByLocale } from "busabase-core/i18n";
 import { useRouter } from "next/navigation";
 import { detectBrowserLocale, type Locale } from "openlib/i18n";
 import { addDemoParam } from "openlib/ui/dashboard";
@@ -80,6 +80,10 @@ function DashboardClientContent({ initialPath = "/inbox", localUserName }: Dashb
   }, [appLocaleCodes]);
   const locale = languagePref === "auto" ? detectedLocale : languagePref;
   const LL = useMemo(() => getBusabaseAppLL(locale), [locale]);
+  const coreMessages = useMemo(
+    () => coreMessagesByLocale[(locale in coreMessagesByLocale ? locale : "en") as CoreLocale],
+    [locale],
+  );
   const loadErrorMessage = loadError
     ? loadError instanceof Error
       ? loadError.message
@@ -109,7 +113,10 @@ function DashboardClientContent({ initialPath = "/inbox", localUserName }: Dashb
     ),
     [apiClient, auditEvents, changeRequests, records, bases, nodes, isSearchOpen, locale],
   );
-  const routes = useMemo(() => getDashboardRoutes(dashboard), [dashboard]);
+  const routes = useMemo(
+    () => getDashboardRoutes(dashboard, coreMessages),
+    [dashboard, coreMessages],
+  );
   const secondaryNavConfig = useMemo(() => getSecondarySidebarNav(locale), [locale]);
 
   return (

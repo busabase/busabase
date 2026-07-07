@@ -64,7 +64,7 @@ function envToRows(env: Record<string, string>) {
 
 async function fetchUserEnvConfig(): Promise<UserEnvVO> {
   const response = await fetch("/api/user-env/env-vars", { cache: "no-store" });
-  if (!response.ok) throw new Error("Failed to load env vars");
+  if (!response.ok) throw new Error("load_failed");
   return response.json();
 }
 
@@ -74,7 +74,7 @@ async function saveUserEnvConfig(env: Record<string, string>): Promise<UserEnvVO
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ env }),
   });
-  if (!response.ok) throw new Error("Failed to save env vars");
+  if (!response.ok) throw new Error("save_failed");
   return response.json();
 }
 
@@ -184,6 +184,10 @@ export function UserEnvSettingsDialog({
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                 {labels.loading()}
               </div>
+            ) : envQuery.isError ? (
+              <p className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-6 text-center text-sm text-destructive">
+                {labels.loadFailed()}
+              </p>
             ) : (
               <div className="space-y-3">
                 {!hasConfiguredRows(rows) ? (

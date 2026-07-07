@@ -157,10 +157,10 @@ export function OperationReviewSection({
             size={16}
           />
           <span className={`shrink-0 rounded-full border px-2 py-0.5 text-xs ${meta.tone}`}>
-            {operation.position + 1}. {getOperationLabel(operation)}
+            {operation.position + 1}. {getOperationLabel(operation, messages)}
           </span>
           <span className="min-w-0 truncate font-medium text-sm">
-            {getOperationTitle(operation, changeRequest.base)}
+            {getOperationTitle(operation, changeRequest.base, messages)}
           </span>
         </button>
         {changedSinceReview ? (
@@ -178,7 +178,7 @@ export function OperationReviewSection({
           </Link>
         ) : (
           <span className="hidden shrink-0 truncate text-muted-foreground text-xs sm:block">
-            {getOperationImpact(operation)}
+            {getOperationImpact(operation, messages)}
           </span>
         )}
       </div>
@@ -253,7 +253,7 @@ export function ReviewTimelineEntry({ review }: { review: ReviewVO }) {
           <UserRefButton
             fallbackId={review.reviewerId}
             user={review.reviewer}
-            title="Reviewer detail"
+            title={messages.identity.reviewerDetail}
           />{" "}
           {approved ? messages.review.approvedChangeRequest : messages.review.requestedChanges}
           <span className="ml-2 text-muted-foreground text-xs">
@@ -280,7 +280,11 @@ export function MergeTimelineEntry({ event }: { event: AuditEventVO }) {
       </span>
       <div className="min-w-0">
         <div className="text-sm">
-          <UserRefButton fallbackId={event.actorId} user={event.actor} title="Merger detail" />{" "}
+          <UserRefButton
+            fallbackId={event.actorId}
+            user={event.actor}
+            title={messages.identity.mergerDetail}
+          />{" "}
           {messages.review.mergedThisChangeRequest}
           <span className="ml-2 text-muted-foreground text-xs">
             {formatDetailTime(event.createdAt)}
@@ -631,7 +635,7 @@ export function ChangeRequestReviewLayout({
             <UserRefButton
               fallbackId={changeRequest.submittedBy}
               labelClassName="font-medium text-muted-foreground"
-              title="Submitter detail"
+              title={messages.identity.submitterDetail}
               user={changeRequest.submittedByUser}
             />
             <span>·</span>
@@ -640,10 +644,10 @@ export function ChangeRequestReviewLayout({
                 className="text-primary transition-colors hover:underline"
                 href={getChangeRequestScopeHref(changeRequest) ?? "#"}
               >
-                {getChangeRequestScopeName(changeRequest)}
+                {getChangeRequestScopeName(changeRequest, messages)}
               </Link>
             ) : (
-              <span>{getChangeRequestScopeName(changeRequest)}</span>
+              <span>{getChangeRequestScopeName(changeRequest, messages)}</span>
             )}
             <span>·</span>
             <span>{formatDetailTime(changeRequest.createdAt)}</span>
@@ -655,7 +659,7 @@ export function ChangeRequestReviewLayout({
               >
                 {changeRequestStatusLabel(changeRequest.status, messages)}
               </span>
-              {getChangeRequestRiskHints(changeRequest).map((risk) => (
+              {getChangeRequestRiskHints(changeRequest, messages).map((risk) => (
                 <span
                   className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 font-medium text-[11px] text-amber-800"
                   key={risk}
@@ -716,7 +720,7 @@ export function ChangeRequestReviewLayout({
                     <UserRefButton
                       fallbackId={approvedReview.reviewerId}
                       labelClassName="font-medium"
-                      title="Reviewer detail"
+                      title={messages.identity.reviewerDetail}
                       user={approvedReview.reviewer}
                     />
                     <span className="shrink-0">·</span>
@@ -733,7 +737,7 @@ export function ChangeRequestReviewLayout({
                     <UserRefButton
                       fallbackId={mergeEvent.actorId}
                       labelClassName="font-medium"
-                      title="Merger detail"
+                      title={messages.identity.mergerDetail}
                       user={mergeEvent.actor}
                     />
                     <span className="shrink-0">·</span>

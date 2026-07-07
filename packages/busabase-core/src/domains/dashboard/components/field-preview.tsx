@@ -275,6 +275,7 @@ export function FieldValuePreview({
   records?: RecordVO[];
   value: unknown;
 }) {
+  const messages = useCoreI18n();
   const resolveIString = useIString();
   const fieldName = field ? resolveIString(field.name) : undefined;
   const kind = field ? fieldDisplayKind(field.type) : "plain";
@@ -377,7 +378,9 @@ export function FieldValuePreview({
       <div className={`flex min-w-0 flex-wrap gap-1.5 ${className}`}>
         {relationIds.map((recordId) => {
           const linkedRecord = records.find((record) => record.id === recordId);
-          const label = linkedRecord ? getRecordTitle(linkedRecord) : shortIdentifier(recordId);
+          const label = linkedRecord
+            ? getRecordTitle(linkedRecord, messages)
+            : shortIdentifier(recordId);
           const chipClassName =
             "max-w-64 truncate rounded-full border bg-background px-2 py-0.5 text-xs";
           return linkedRecord ? (
@@ -399,7 +402,7 @@ export function FieldValuePreview({
     );
   }
 
-  const text = getFieldPreviewText(field, value);
+  const text = getFieldPreviewText(field, value, messages);
   if (!text) {
     return <span className="text-muted-foreground">-</span>;
   }

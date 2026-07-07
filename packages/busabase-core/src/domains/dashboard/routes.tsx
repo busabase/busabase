@@ -1,5 +1,6 @@
 import { listNodeTypes } from "busabase-contract/domains";
 import type { ReactNode } from "react";
+import type { CoreI18nMessages } from "../../i18n";
 
 /** A wouter route for the workbench SPA (path → element, with breadcrumb/title). */
 export interface BusabaseRouteConfig {
@@ -15,7 +16,10 @@ export interface BusabaseRouteConfig {
  * / skill / doc …). Shared by every Busabase host (open-source `apps/busabase` + cloud
  * `busabase-dashboard`); the host's `SPARouteRenderer` consumes the result.
  */
-export const getBusabaseDashboardRoutes = (dashboard: ReactNode): BusabaseRouteConfig[] => {
+export const getBusabaseDashboardRoutes = (
+  dashboard: ReactNode,
+  messages?: CoreI18nMessages,
+): BusabaseRouteConfig[] => {
   // Detail routes for simple node types (skill, doc, …) come from the node-type
   // registry: any `hasDetail` type gets `/{type}/:slug`. `base` is excluded — it
   // owns the bespoke sub-routes (design / new / view / record) below.
@@ -29,57 +33,102 @@ export const getBusabaseDashboardRoutes = (dashboard: ReactNode): BusabaseRouteC
     }));
 
   return [
-    { path: "/", component: dashboard, breadcrumb: "Inbox", title: "Inbox" },
-    { path: "/inbox", component: dashboard, breadcrumb: "Inbox", title: "Inbox" },
+    {
+      path: "/",
+      component: dashboard,
+      breadcrumb: messages?.routes.inbox ?? "Inbox",
+      title: messages?.routes.inbox ?? "Inbox",
+    },
+    {
+      path: "/inbox",
+      component: dashboard,
+      breadcrumb: messages?.routes.inbox ?? "Inbox",
+      title: messages?.routes.inbox ?? "Inbox",
+    },
     {
       path: "/inbox/:changeRequestId/:operationId",
       component: dashboard,
-      breadcrumb: "Operation",
-      title: "Operation",
+      breadcrumb: messages?.routes.operation ?? "Operation",
+      title: messages?.routes.operation ?? "Operation",
     },
     {
       path: "/inbox/:changeRequestId",
       component: dashboard,
-      breadcrumb: "Change Request",
-      title: "Change Request",
+      breadcrumb: messages?.routes.changeRequest ?? "Change Request",
+      title: messages?.routes.changeRequest ?? "Change Request",
     },
-    { path: "/activity", component: dashboard, breadcrumb: "Activity", title: "Activity" },
-    { path: "/archived", component: dashboard, breadcrumb: "Archived", title: "Archived Bases" },
-    { path: "/graph", component: dashboard, breadcrumb: "Graph", title: "Graph" },
-    { path: "/assets", component: dashboard, breadcrumb: "Assets", title: "Assets" },
+    {
+      path: "/activity",
+      component: dashboard,
+      breadcrumb: messages?.routes.activity ?? "Activity",
+      title: messages?.routes.activity ?? "Activity",
+    },
+    {
+      path: "/archived",
+      component: dashboard,
+      breadcrumb: messages?.common.archived ?? "Archived",
+      title: messages?.routes.archived ?? "Archived Bases",
+    },
+    {
+      path: "/graph",
+      component: dashboard,
+      breadcrumb: messages?.routes.graph ?? "Graph",
+      title: messages?.routes.graph ?? "Graph",
+    },
+    {
+      path: "/assets",
+      component: dashboard,
+      breadcrumb: messages?.routes.assets ?? "Assets",
+      title: messages?.routes.assets ?? "Assets",
+    },
     {
       path: "/assets/:assetId",
       component: dashboard,
-      breadcrumb: "Asset",
-      title: "Asset",
+      breadcrumb: messages?.routes.asset ?? "Asset",
+      title: messages?.routes.asset ?? "Asset",
     },
     ...detailTypeRoutes,
-    { path: "/base/:slug", component: dashboard, breadcrumb: "Base", title: "Base" },
+    {
+      path: "/base/:slug",
+      component: dashboard,
+      breadcrumb: messages?.routes.base ?? "Base",
+      title: messages?.routes.base ?? "Base",
+    },
     {
       path: "/base/:slug/design",
       component: dashboard,
-      breadcrumb: "Base Design",
-      title: "Base Design",
+      breadcrumb: messages?.routes.baseDesign ?? "Base Design",
+      title: messages?.routes.baseDesign ?? "Base Design",
     },
     {
       path: "/base/:slug/setup",
       component: dashboard,
-      breadcrumb: "Base Design",
-      title: "Base Design",
+      breadcrumb: messages?.routes.baseDesign ?? "Base Design",
+      title: messages?.routes.baseDesign ?? "Base Design",
     },
     {
       path: "/base/:slug/new",
       component: dashboard,
-      breadcrumb: "New Record",
-      title: "New Record",
+      breadcrumb: messages?.routes.newRecord ?? "New Record",
+      title: messages?.routes.newRecord ?? "New Record",
     },
-    { path: "/base/:slug/:viewId", component: dashboard, breadcrumb: "View", title: "View" },
+    {
+      path: "/base/:slug/:viewId",
+      component: dashboard,
+      breadcrumb: messages?.routes.view ?? "View",
+      title: messages?.routes.view ?? "View",
+    },
     {
       path: "/base/:slug/:recordId/edit",
       component: dashboard,
-      breadcrumb: "Edit Record",
-      title: "Edit Record",
+      breadcrumb: messages?.routes.editRecord ?? "Edit Record",
+      title: messages?.routes.editRecord ?? "Edit Record",
     },
-    { path: "/base/:slug/:recordId", component: dashboard, breadcrumb: "Record", title: "Record" },
+    {
+      path: "/base/:slug/:recordId",
+      component: dashboard,
+      breadcrumb: messages?.routes.record ?? "Record",
+      title: messages?.routes.record ?? "Record",
+    },
   ];
 };

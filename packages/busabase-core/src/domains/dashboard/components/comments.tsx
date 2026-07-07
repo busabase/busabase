@@ -192,7 +192,9 @@ export function SubjectCommentThread({
       .join("\n");
     setBody((current) => {
       const prefix = current.trim().length > 0 ? `${current.replace(/\s+$/, "")}\n\n` : "";
-      return `${prefix}> ${fmt(messages.comments.quotedAttribution, { author: formatUserRefLabel(comment.author, comment.authorId) })}\n${quoted}\n\n`;
+      return `${prefix}> ${fmt(messages.comments.quotedAttribution, {
+        author: formatUserRefLabel(comment.author, comment.authorId, messages),
+      })}\n${quoted}\n\n`;
     });
     requestAnimationFrame(() => {
       const element = composerRef.current;

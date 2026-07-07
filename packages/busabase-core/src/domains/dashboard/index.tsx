@@ -377,7 +377,7 @@ function BusabaseDashboardContent({
           </span>
         ) : null,
         title: selectedOperation
-          ? getOperationTitle(selectedOperation, selectedChangeRequest?.base)
+          ? getOperationTitle(selectedOperation, selectedChangeRequest?.base, messages)
           : messages.activity.operation,
       };
     }
@@ -408,11 +408,14 @@ function BusabaseDashboardContent({
     }
 
     if (isEditRecordRoute) {
-      return { badge: null, title: `${messages.common.edit} ${getRecordTitle(activeRecord)}` };
+      return {
+        badge: null,
+        title: `${messages.common.edit} ${getRecordTitle(activeRecord, messages)}`,
+      };
     }
 
     if (isRecordRoute) {
-      return { badge: null, title: getRecordTitle(activeRecord) };
+      return { badge: null, title: getRecordTitle(activeRecord, messages) };
     }
 
     if (isBaseViewRoute) {
@@ -469,7 +472,7 @@ function BusabaseDashboardContent({
         },
         {
           label: selectedOperation
-            ? getOperationTitle(selectedOperation, selectedChangeRequest?.base)
+            ? getOperationTitle(selectedOperation, selectedChangeRequest?.base, messages)
             : messages.activity.operation,
         },
       ];
@@ -533,7 +536,7 @@ function BusabaseDashboardContent({
         },
         {
           href: activeRecord ? `/base/${activeRecord.base.slug}/${activeRecord.id}` : undefined,
-          label: activeRecord ? getRecordTitle(activeRecord) : messages.common.record,
+          label: activeRecord ? getRecordTitle(activeRecord, messages) : messages.common.record,
         },
         { label: messages.common.edit },
       ];
@@ -550,7 +553,7 @@ function BusabaseDashboardContent({
               : undefined,
           label: activeBase?.name ?? activeRecord?.base.name ?? messages.nav.base,
         },
-        { label: activeRecord ? getRecordTitle(activeRecord) : messages.common.record },
+        { label: activeRecord ? getRecordTitle(activeRecord, messages) : messages.common.record },
       ];
     }
 
@@ -619,7 +622,9 @@ function BusabaseDashboardContent({
     },
     onMutate: () => setError(null),
     onError: (mutationError) =>
-      setError(mutationError instanceof Error ? mutationError.message : "Operation failed"),
+      setError(
+        mutationError instanceof Error ? mutationError.message : messages.shell.operationFailed,
+      ),
     onSuccess: (result, variables) => {
       if (variables.action !== "merge") {
         return;
@@ -676,7 +681,7 @@ function BusabaseDashboardContent({
         const merged = await approveAndMergeChangeRequest(changeRequest.id);
         const mergedRecord = merged.record;
         if (!mergedRecord) {
-          throw new Error("Merged change request did not return a record");
+          throw new Error(messages.shell.mergeRecordMissing);
         }
         await refresh();
         setLocation(`/base/${mergedRecord.base.slug}/${mergedRecord.id}`);
@@ -689,6 +694,7 @@ function BusabaseDashboardContent({
       approveAndMergeChangeRequest,
       client,
       messages.createNode.createRecordMessage,
+      messages.shell.mergeRecordMissing,
       refresh,
       setLocation,
     ],
@@ -701,14 +707,14 @@ function BusabaseDashboardContent({
         author: "local-editor",
         fields,
         message: fmt(messages.createNode.updateRecordMessage, {
-          record: getRecordTitle(record),
+          record: getRecordTitle(record, messages),
         }),
       });
       if (options?.mergeImmediately) {
         const merged = await approveAndMergeChangeRequest(changeRequest.id);
         const mergedRecord = merged.record;
         if (!mergedRecord) {
-          throw new Error("Merged change request did not return a record");
+          throw new Error(messages.shell.mergeRecordMissing);
         }
         await refresh();
         setLocation(`/base/${mergedRecord.base.slug}/${mergedRecord.id}`);
@@ -721,6 +727,8 @@ function BusabaseDashboardContent({
       approveAndMergeChangeRequest,
       client,
       messages.createNode.updateRecordMessage,
+      messages.shell.mergeRecordMissing,
+      messages,
       refresh,
       setLocation,
     ],
@@ -823,15 +831,22 @@ function BusabaseDashboardContent({
       if (options?.mergeImmediately) {
         await approveAndMergeChangeRequest(changeRequest.id);
         await refresh();
-        toast.success("Base renamed");
+        toast.success(messages.base.baseRenamed);
         setLocation(`/base/${base.slug}`);
         return;
       }
       await refresh();
-      toast.success("Rename request submitted");
+      toast.success(messages.base.renameRequestSubmitted);
       setLocation(`/inbox/${changeRequest.id}`);
     },
-    [approveAndMergeChangeRequest, client, refresh, setLocation],
+    [
+      approveAndMergeChangeRequest,
+      client,
+      messages.base.baseRenamed,
+      messages.base.renameRequestSubmitted,
+      refresh,
+      setLocation,
+    ],
   );
 
   const submitRestoreBase = useCallback(
@@ -839,17 +854,26 @@ function BusabaseDashboardContent({
       setError(null);
       const changeRequest = await client.createRestoreBaseChangeRequest(base.id, {
         submittedBy: "local-editor",
-        message: `Restore base ${base.name}`,
+        message: fmt(messages.base.restoreBaseMessage, { base: base.name }),
       });
       await approveAndMergeChangeRequest(changeRequest.id);
       await queryClient.invalidateQueries({ queryKey: listKeys.bases });
       await queryClient.invalidateQueries({
         queryKey: orpc.bases.listArchived.queryOptions({}).queryKey,
       });
-      toast.success("Base restored");
+      toast.success(messages.base.baseRestored);
       setLocation(`/base/${base.slug}`);
     },
-    [approveAndMergeChangeRequest, client, listKeys.bases, orpc, queryClient, setLocation],
+    [
+      approveAndMergeChangeRequest,
+      client,
+      listKeys.bases,
+      messages.base.baseRestored,
+      messages.base.restoreBaseMessage,
+      orpc,
+      queryClient,
+      setLocation,
+    ],
   );
 
   const submitRestoreNode = useCallback(
@@ -857,7 +881,10 @@ function BusabaseDashboardContent({
       setError(null);
       const changeRequest = await client.createNodeChangeRequest({
         submittedBy: "local-editor",
-        message: `Restore ${node.type} ${node.name}`,
+        message: fmt(messages.base.restoreNodeMessage, {
+          name: node.name,
+          type: node.type,
+        }),
         operations: [{ kind: "restore", nodeId: node.id }],
       });
       await approveAndMergeChangeRequest(changeRequest.id);
@@ -867,9 +894,16 @@ function BusabaseDashboardContent({
       await queryClient.invalidateQueries({
         queryKey: orpc.nodes.list.queryOptions({}).queryKey,
       });
-      toast.success(`${node.type[0].toUpperCase()}${node.type.slice(1)} restored`);
+      toast.success(fmt(messages.base.nodeRestored, { type: node.type }));
     },
-    [approveAndMergeChangeRequest, client, orpc, queryClient],
+    [
+      approveAndMergeChangeRequest,
+      client,
+      messages.base.nodeRestored,
+      messages.base.restoreNodeMessage,
+      orpc,
+      queryClient,
+    ],
   );
 
   const submitPurgeNode = useCallback(
@@ -879,9 +913,9 @@ function BusabaseDashboardContent({
       await queryClient.invalidateQueries({
         queryKey: orpc.nodes.listArchived.queryOptions({}).queryKey,
       });
-      toast.success(`${node.type[0].toUpperCase()}${node.type.slice(1)} permanently deleted`);
+      toast.success(fmt(messages.base.nodeDeletedPermanently, { type: node.type }));
     },
-    [client, orpc, queryClient],
+    [client, messages.base.nodeDeletedPermanently, orpc, queryClient],
   );
 
   const submitRestoreField = useCallback(
@@ -890,25 +924,31 @@ function BusabaseDashboardContent({
       const changeRequest = await client.createRestoreFieldChangeRequest(base.id, {
         fieldId,
         submittedBy: "local-editor",
-        message: "Restore deleted field",
+        message: messages.base.restoreFieldMessage,
       });
       await approveAndMergeChangeRequest(changeRequest.id);
       await refresh();
-      toast.success("Field restored");
+      toast.success(messages.base.fieldRestored);
     },
-    [approveAndMergeChangeRequest, client, refresh],
+    [
+      approveAndMergeChangeRequest,
+      client,
+      messages.base.fieldRestored,
+      messages.base.restoreFieldMessage,
+      refresh,
+    ],
   );
 
   const submitCreateView = useCallback(
     async (base: BaseVO, payload: ViewFormPayload, options?: ViewSubmitOptions) => {
       setError(null);
       if (!payload.slug) {
-        throw new Error("View slug is required.");
+        throw new Error(messages.base.viewSlugRequired);
       }
       const changeRequest = await client.createViewChangeRequest(base.id, {
         config: payload.config,
         description: payload.description,
-        message: payload.message ?? `Create ${payload.name} view`,
+        message: payload.message ?? fmt(messages.base.createViewMessage, { view: payload.name }),
         name: payload.name,
         slug: payload.slug,
         submittedBy: payload.submittedBy ?? "local-editor",
@@ -922,7 +962,14 @@ function BusabaseDashboardContent({
       await refresh();
       setLocation(`/inbox/${changeRequest.id}`);
     },
-    [approveAndMergeChangeRequest, client, refresh, setLocation],
+    [
+      approveAndMergeChangeRequest,
+      client,
+      messages.base.createViewMessage,
+      messages.base.viewSlugRequired,
+      refresh,
+      setLocation,
+    ],
   );
 
   const submitUpdateView = useCallback(
@@ -931,7 +978,9 @@ function BusabaseDashboardContent({
       const changeRequest = await client.createUpdateViewChangeRequest(view.id, {
         config: payload.config,
         description: payload.description,
-        message: payload.message ?? `Update ${payload.name || view.name} view`,
+        message:
+          payload.message ??
+          fmt(messages.base.updateViewMessage, { view: payload.name || view.name }),
         name: payload.name,
         submittedBy: payload.submittedBy ?? "local-editor",
       });
@@ -947,7 +996,15 @@ function BusabaseDashboardContent({
       await refresh();
       setLocation(`/inbox/${changeRequest.id}`);
     },
-    [activeBase?.slug, approveAndMergeChangeRequest, bases, client, refresh, setLocation],
+    [
+      activeBase?.slug,
+      approveAndMergeChangeRequest,
+      bases,
+      client,
+      messages.base.updateViewMessage,
+      refresh,
+      setLocation,
+    ],
   );
 
   const submitDeleteView = useCallback(
@@ -965,7 +1022,7 @@ function BusabaseDashboardContent({
       setError(null);
       const changeRequest = await client.createRestoreViewChangeRequest(view.id, {
         submittedBy: "local-editor",
-        message: `Restore view ${view.name}`,
+        message: fmt(messages.base.restoreViewMessage, { view: view.name }),
       });
       await approveAndMergeChangeRequest(changeRequest.id);
       await queryClient.invalidateQueries({
@@ -973,9 +1030,17 @@ function BusabaseDashboardContent({
           .queryKey,
       });
       await refresh();
-      toast.success("View restored");
+      toast.success(messages.base.viewRestored);
     },
-    [approveAndMergeChangeRequest, client, orpc, queryClient, refresh],
+    [
+      approveAndMergeChangeRequest,
+      client,
+      messages.base.restoreViewMessage,
+      messages.base.viewRestored,
+      orpc,
+      queryClient,
+      refresh,
+    ],
   );
 
   const submitRestoreRecord = useCallback(
@@ -983,7 +1048,7 @@ function BusabaseDashboardContent({
       setError(null);
       const changeRequest = await client.createRestoreRecordChangeRequest(record.id, {
         submittedBy: "local-editor",
-        message: `Restore record`,
+        message: messages.recordView.restoreRecordMessage,
       });
       await approveAndMergeChangeRequest(changeRequest.id);
       await queryClient.invalidateQueries({
@@ -991,9 +1056,17 @@ function BusabaseDashboardContent({
           .queryKey,
       });
       await refresh();
-      toast.success("Record restored");
+      toast.success(messages.recordView.recordRestored);
     },
-    [approveAndMergeChangeRequest, client, orpc, queryClient, refresh],
+    [
+      approveAndMergeChangeRequest,
+      client,
+      messages.recordView.recordRestored,
+      messages.recordView.restoreRecordMessage,
+      orpc,
+      queryClient,
+      refresh,
+    ],
   );
 
   const viewedRecordIds = useRef(new Set<string>());
@@ -1011,7 +1084,7 @@ function BusabaseDashboardContent({
         actorId: "local-viewer",
         baseId: activeRecord.baseId,
         commitId: activeRecord.headCommitId,
-        metadata: { title: getRecordTitle(activeRecord) },
+        metadata: { title: getRecordTitle(activeRecord, messages) },
         recordId: activeRecord.id,
       })
       .then((event) => {
@@ -1023,7 +1096,15 @@ function BusabaseDashboardContent({
       .catch(() => {
         viewedRecordIds.current.delete(activeRecord.id);
       });
-  }, [activeRecord, client, isEditRecordRoute, isRecordRoute, listKeys.auditEvents, queryClient]);
+  }, [
+    activeRecord,
+    client,
+    isEditRecordRoute,
+    isRecordRoute,
+    listKeys.auditEvents,
+    messages,
+    queryClient,
+  ]);
 
   const setSearchOpen = useCallback(
     (open: boolean) => {

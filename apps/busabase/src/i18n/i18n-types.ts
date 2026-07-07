@@ -155,6 +155,10 @@ type RootTranslation = {
 		 */
 		loading: string
 		/**
+		 * F​a​i​l​e​d​ ​t​o​ ​l​o​a​d​ ​e​n​v​i​r​o​n​m​e​n​t​ ​v​a​r​i​a​b​l​e​s
+		 */
+		loadFailed: string
+		/**
 		 * C​l​e​a​r
 		 */
 		clear: string
@@ -646,6 +650,10 @@ export type TranslationFunctions = {
 		 * Loading environment variables...
 		 */
 		loading: () => LocalizedString
+		/**
+		 * Failed to load environment variables
+		 */
+		loadFailed: () => LocalizedString
 		/**
 		 * Clear
 		 */

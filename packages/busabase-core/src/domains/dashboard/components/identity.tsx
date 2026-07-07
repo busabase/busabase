@@ -1,6 +1,7 @@
 import type { UserRefVO } from "busabase-contract/types";
 import { Mail, Shield, UserRound, X } from "lucide-react";
 import { useMemo, useState } from "react";
+import { useCoreI18n } from "../../../i18n";
 import { formatUserRefLabel, formatUserRefSubtitle } from "../helpers/format";
 
 const initialsFor = (label: string) => {
@@ -21,7 +22,8 @@ export function UserAvatar({
   fallbackId?: string | null;
   user?: UserRefVO | null;
 }) {
-  const label = formatUserRefLabel(user, fallbackId);
+  const messages = useCoreI18n();
+  const label = formatUserRefLabel(user, fallbackId, messages);
   if (user?.image) {
     return (
       <img
@@ -44,7 +46,7 @@ export function UserDetailDialog({
   fallbackId,
   onOpenChange,
   open,
-  title = "Member detail",
+  title,
   user,
 }: {
   fallbackId?: string | null;
@@ -53,8 +55,10 @@ export function UserDetailDialog({
   title?: string;
   user?: UserRefVO | null;
 }) {
-  const label = formatUserRefLabel(user, fallbackId);
+  const messages = useCoreI18n();
+  const label = formatUserRefLabel(user, fallbackId, messages);
   const subtitle = formatUserRefSubtitle(user);
+  const dialogTitle = title ?? messages.identity.memberDetail;
 
   if (!open) {
     return null;
@@ -65,7 +69,9 @@ export function UserDetailDialog({
       <section className="w-full max-w-sm rounded-lg border bg-background p-4 shadow-xl">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
-            <div className="text-muted-foreground text-xs uppercase tracking-wide">{title}</div>
+            <div className="text-muted-foreground text-xs uppercase tracking-wide">
+              {dialogTitle}
+            </div>
             <div className="mt-2 flex min-w-0 items-center gap-3">
               <UserAvatar className="size-10" fallbackId={fallbackId} user={user} />
               <div className="min-w-0">
@@ -77,7 +83,7 @@ export function UserDetailDialog({
             </div>
           </div>
           <button
-            aria-label="Close member detail"
+            aria-label={messages.identity.closeMemberDetail}
             className="grid size-8 shrink-0 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
             onClick={() => onOpenChange(false)}
             type="button"
@@ -102,9 +108,9 @@ export function UserDetailDialog({
           <div className="flex min-w-0 items-start gap-2">
             <UserRound className="mt-0.5 shrink-0 text-muted-foreground" size={15} />
             <div className="min-w-0">
-              <div className="text-muted-foreground text-xs">User ID</div>
+              <div className="text-muted-foreground text-xs">{messages.identity.userId}</div>
               <div className="break-all font-mono text-xs">
-                {user?.id ?? fallbackId ?? "unknown"}
+                {user?.id ?? fallbackId ?? messages.identity.unknownUser}
               </div>
             </div>
           </div>
@@ -117,7 +123,7 @@ export function UserDetailDialog({
 export function UserRefButton({
   fallbackId,
   labelClassName = "font-medium",
-  title = "Member detail",
+  title,
   user,
 }: {
   fallbackId?: string | null;
@@ -125,8 +131,12 @@ export function UserRefButton({
   title?: string;
   user?: UserRefVO | null;
 }) {
+  const messages = useCoreI18n();
   const [open, setOpen] = useState(false);
-  const label = useMemo(() => formatUserRefLabel(user, fallbackId), [fallbackId, user]);
+  const label = useMemo(
+    () => formatUserRefLabel(user, fallbackId, messages),
+    [fallbackId, messages, user],
+  );
 
   return (
     <>
@@ -142,7 +152,7 @@ export function UserRefButton({
         fallbackId={fallbackId}
         onOpenChange={setOpen}
         open={open}
-        title={title}
+        title={title ?? messages.identity.memberDetail}
         user={user}
       />
     </>

@@ -27,6 +27,9 @@ export const requireBaseId = (baseId: string | null, context: string) => {
 export const hashText = (content: string) =>
   `sha256:${createHash("sha256").update(content).digest("hex")}`;
 
+export const hashBuffer = (content: Buffer) =>
+  `sha256:${createHash("sha256").update(content).digest("hex")}`;
+
 import { z } from "zod";
 
 export const listInputSchema = z

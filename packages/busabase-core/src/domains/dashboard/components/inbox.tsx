@@ -225,12 +225,13 @@ function BusabaseListToolbar({
 function ReviewChangeRequestRow({ changeRequest }: { changeRequest: ChangeRequestVO }) {
   const messages = useCoreI18n();
   const updatedAt = formatListTime(changeRequest.updatedAt);
-  const riskHints = getChangeRequestRiskHints(changeRequest);
+  const riskHints = getChangeRequestRiskHints(changeRequest, messages);
   const statusLabel = changeRequestStatusLabel(changeRequest.status, messages);
   const message = getChangeRequestMessage(changeRequest);
   const submitterLabel = formatUserRefLabel(
     changeRequest.submittedByUser,
     changeRequest.submittedBy,
+    messages,
   );
 
   return (
@@ -257,7 +258,7 @@ function ReviewChangeRequestRow({ changeRequest }: { changeRequest: ChangeReques
           <div className="mt-0.5 truncate text-muted-foreground text-xs">{message}</div>
         ) : null}
         <div className="mt-1 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-muted-foreground text-xs">
-          <span className="truncate">{getChangeRequestScopeName(changeRequest)}</span>
+          <span className="truncate">{getChangeRequestScopeName(changeRequest, messages)}</span>
           <span>·</span>
           <span>{getChangeRequestOperationLabel(changeRequest, messages)}</span>
           <span>·</span>

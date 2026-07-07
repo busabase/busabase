@@ -146,6 +146,7 @@ const ja: Translation = {
     save: "保存",
     saving: "保存中...",
     loading: "環境変数を読み込み中...",
+    loadFailed: "環境変数の読み込みに失敗しました",
     clear: "クリア",
     reveal: "表示",
     hide: "非表示",
