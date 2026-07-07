@@ -65,7 +65,7 @@ const baseGridTemplate = `minmax(200px,1fr) repeat(${BASE_COLUMNS.length - 1}, m
  * loaded layout so the shimmer lands where the real content will:
  * - `folder` → title + a short list of child rows
  * - `doc`    → title + paragraph lines
- * - `skill`  → header card + two-column (file tree | code) grid
+ * - `skill`  → top metadata bar + two-column file rail / code work area
  */
 export function NodeDetailSkeleton({
   variant = "folder",
@@ -74,22 +74,47 @@ export function NodeDetailSkeleton({
 }) {
   if (variant === "skill") {
     return (
-      <div className="mx-auto w-full max-w-6xl p-4 md:p-6" aria-hidden>
-        <div className="rounded-xl border bg-background p-5">
-          <Skeleton className="h-6 w-48" />
-          <Skeleton className="mt-2 h-4 w-72" />
-          <div className="mt-3 flex gap-1.5">
-            <Skeleton className="h-6 w-16 rounded-full" />
-            <Skeleton className="h-6 w-14 rounded-full" />
+      <div className="flex h-full min-h-0 w-full flex-col bg-background" aria-hidden>
+        <div className="border-border/60 border-b px-4 py-4 md:px-6">
+          <div className="flex items-start gap-3">
+            <Skeleton className="size-8 rounded-md" />
+            <div className="min-w-0 flex-1">
+              <Skeleton className="h-3 w-16" />
+              <Skeleton className="mt-2 h-7 w-56" />
+              <Skeleton className="mt-2 h-4 w-80 max-w-full" />
+            </div>
+            <Skeleton className="h-8 w-20 rounded-md" />
+          </div>
+          <div className="mt-4 flex gap-5">
+            <Skeleton className="h-4 w-14" />
+            <Skeleton className="h-4 w-24" />
+            <Skeleton className="h-4 w-20" />
           </div>
         </div>
-        <div className="mt-4 grid gap-4 md:grid-cols-[280px_minmax(0,1fr)]">
-          <div className="space-y-2 rounded-lg border bg-background p-4">
-            {SKILL_TREE_ROWS.map((row) => (
-              <Skeleton className="h-4" style={{ width: row.width }} key={row.id} />
-            ))}
+        <div className="grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-[300px_minmax(0,1fr)]">
+          <div className="border-border/60 border-b bg-muted/20 lg:border-r lg:border-b-0">
+            <div className="flex min-h-11 items-center justify-between border-border/50 border-b px-4">
+              <Skeleton className="h-3 w-12" />
+              <Skeleton className="h-5 w-7 rounded-md" />
+            </div>
+            <div className="space-y-2 p-4">
+              {SKILL_TREE_ROWS.map((row) => (
+                <Skeleton className="h-4" style={{ width: row.width }} key={row.id} />
+              ))}
+            </div>
           </div>
-          <Skeleton className="min-h-[320px] rounded-md" />
+          <div className="min-h-0">
+            <div className="flex min-h-11 items-center justify-between border-border/60 border-b px-4">
+              <Skeleton className="h-4 w-48" />
+              <Skeleton className="h-7 w-12 rounded-md" />
+            </div>
+            <div className="space-y-3 p-4">
+              <Skeleton className="h-4 w-full" />
+              <Skeleton className="h-4 w-11/12" />
+              <Skeleton className="h-4 w-10/12" />
+              <Skeleton className="h-4 w-2/3" />
+            </div>
+          </div>
         </div>
       </div>
     );

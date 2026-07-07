@@ -371,143 +371,179 @@ export function FileTreeDetailView({
     );
   }
 
-  const metaChips = [
-    fileTree.visibility,
-    fileTree.version ? `v${fileTree.version}` : null,
-    fileTree.entryFile ? `entry: ${fileTree.entryFile}` : null,
-  ].filter((value): value is string => Boolean(value));
+  const fileCount = fileTree.files.filter((file) => file.type === "file").length;
+  const NodeIcon = nodeType === "drive" ? HardDrive : Sparkles;
+  const nodeTypeLabel =
+    nodeType === "drive" ? messages.nodeDetail.drive : messages.nodeDetail.skill;
+  const propertyItems = [
+    { label: messages.nodeDetail.files, value: String(fileCount) },
+    { label: messages.nodeDetail.visibility, value: fileTree.visibility },
+    fileTree.version ? { label: messages.nodeDetail.version, value: `v${fileTree.version}` } : null,
+    fileTree.entryFile ? { label: messages.nodeDetail.entryFile, value: fileTree.entryFile } : null,
+  ].filter((value): value is { label: string; value: string } => Boolean(value));
 
   return (
-    <div className="mx-auto w-full max-w-6xl p-4 md:p-6">
-      <div className="rounded-xl border bg-background p-5">
-        <div className="flex items-start justify-between gap-4">
-          <h1 className="min-w-0 font-semibold text-xl">{fileTree.node.name}</h1>
-          <NodeDeleteButton
-            nodeId={fileTree.node.id}
-            nodeName={fileTree.node.name}
-            nodeType={nodeType}
-            orpc={orpc}
-          />
-        </div>
-        {fileTree.node.description ? (
-          <p className="mt-1 text-muted-foreground text-sm">{fileTree.node.description}</p>
-        ) : null}
-        {metaChips.length > 0 ? (
-          <div className="mt-3 flex flex-wrap gap-1.5">
-            {metaChips.map((chip) => (
-              <span
-                className="rounded-full border bg-muted px-2.5 py-1 text-muted-foreground text-xs"
-                key={chip}
-              >
-                {chip}
-              </span>
-            ))}
-          </div>
-        ) : null}
-      </div>
-
-      <div className="mt-4 grid gap-4 md:grid-cols-[280px_minmax(0,1fr)]">
-        {fileTree.files.length === 0 ? (
-          <div className="rounded-lg border bg-background p-4 text-muted-foreground text-sm">
-            {messages.nodeDetail.noFilesYet}
-          </div>
-        ) : (
-          <FileTree
-            className="max-h-[70vh] overflow-auto"
-            defaultExpanded={expandedFolders}
-            key={fileTree.node.id}
-            // FileTreeProps.onSelect collides with HTMLAttributes.onSelect; it is
-            // invoked with the node path string at runtime.
-            onSelect={selectFile as unknown as ComponentProps<typeof FileTree>["onSelect"]}
-            selectedPath={openPath ?? undefined}
-          >
-            {renderFileTree(tree)}
-          </FileTree>
-        )}
-
-        <div className="min-h-[320px]">
-          {openPath ? (
-            <div className="mb-2 flex min-h-9 items-center justify-between gap-3 rounded-md border bg-background px-3 py-2">
-              <div className="min-w-0 truncate font-mono text-muted-foreground text-xs">
-                {openPath}
+    <div className="flex h-full min-h-0 w-full flex-col bg-background">
+      <header className="border-border/60 border-b px-4 py-4 md:px-6">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+          <div className="flex min-w-0 items-start gap-3">
+            <div className="mt-0.5 grid size-8 shrink-0 place-items-center rounded-md border border-border/70 bg-muted/35 text-muted-foreground">
+              <NodeIcon className="size-4" />
+            </div>
+            <div className="min-w-0">
+              <div className="mb-1 flex items-center gap-2">
+                <span className="font-medium text-[11px] text-muted-foreground uppercase">
+                  {nodeTypeLabel}
+                </span>
               </div>
-              {fileQuery.data && !fileQuery.isError ? (
-                isEditing ? (
-                  <div className="flex shrink-0 items-center gap-2">
-                    <button
-                      className="rounded-md px-2.5 py-1.5 text-muted-foreground text-xs transition-colors hover:text-foreground disabled:opacity-40"
-                      disabled={busy !== null}
-                      onClick={cancelEditingFile}
-                      type="button"
-                    >
-                      {messages.common.cancel}
-                    </button>
-                    <button
-                      className="rounded-md border px-2.5 py-1.5 text-xs transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
-                      disabled={busy !== null || draft === fileQuery.data.content}
-                      onClick={() => void saveFile("changeRequest")}
-                      type="button"
-                    >
-                      {busy === "changeRequest"
-                        ? messages.nodeDetail.saving
-                        : messages.nodeDetail.saveAsChangeRequest}
-                    </button>
-                    <button
-                      className="rounded-md bg-foreground px-2.5 py-1.5 text-background text-xs transition-colors hover:bg-foreground/85 disabled:cursor-not-allowed disabled:opacity-50"
-                      disabled={busy !== null || draft === fileQuery.data.content}
-                      onClick={() => void saveFile("save")}
-                      type="button"
-                    >
-                      {busy === "save" ? messages.nodeDetail.saving : messages.nodeDetail.save}
-                    </button>
-                  </div>
-                ) : (
-                  <button
-                    className="shrink-0 rounded-md border px-2.5 py-1.5 text-xs transition-colors hover:bg-muted"
-                    onClick={startEditingFile}
-                    type="button"
-                  >
-                    {messages.common.edit}
-                  </button>
-                )
+              <h1 className="truncate font-semibold text-2xl text-foreground">
+                {fileTree.node.name}
+              </h1>
+              {fileTree.node.description ? (
+                <p className="mt-1 max-w-3xl text-muted-foreground text-sm leading-6">
+                  {fileTree.node.description}
+                </p>
               ) : null}
             </div>
-          ) : null}
+          </div>
+          <div className="flex shrink-0 items-center gap-2">
+            <NodeDeleteButton
+              nodeId={fileTree.node.id}
+              nodeName={fileTree.node.name}
+              nodeType={nodeType}
+              orpc={orpc}
+            />
+          </div>
+        </div>
+        <dl className="mt-4 flex flex-wrap items-center gap-x-5 gap-y-2 text-xs">
+          {propertyItems.map((item) => (
+            <div className="flex min-w-0 items-center gap-1.5" key={item.label}>
+              <dt className="shrink-0 text-muted-foreground">{item.label}</dt>
+              <dd className="min-w-0 max-w-64 truncate font-mono text-foreground/80">
+                {item.value}
+              </dd>
+            </div>
+          ))}
+        </dl>
+      </header>
+
+      <div className="grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-[300px_minmax(0,1fr)]">
+        <aside className="min-h-[220px] border-border/60 border-b bg-muted/20 lg:min-h-0 lg:border-r lg:border-b-0">
+          <div className="flex h-full min-h-0 flex-col">
+            <div className="flex min-h-11 items-center justify-between gap-3 border-border/50 border-b px-4">
+              <div className="font-medium text-muted-foreground text-xs uppercase">
+                {messages.nodeDetail.files}
+              </div>
+              <div className="rounded-md border border-border/70 bg-background px-1.5 py-0.5 font-mono text-muted-foreground text-[11px]">
+                {fileCount}
+              </div>
+            </div>
+            <div className="min-h-0 flex-1 overflow-auto p-2">
+              {fileTree.files.length === 0 ? (
+                <div className="px-2 py-3 text-muted-foreground text-sm">
+                  {messages.nodeDetail.noFilesYet}
+                </div>
+              ) : (
+                <FileTree
+                  className="rounded-none border-0 bg-transparent font-sans text-[13px]"
+                  defaultExpanded={expandedFolders}
+                  key={fileTree.node.id}
+                  // FileTreeProps.onSelect collides with HTMLAttributes.onSelect; it is
+                  // invoked with the node path string at runtime.
+                  onSelect={selectFile as unknown as ComponentProps<typeof FileTree>["onSelect"]}
+                  selectedPath={openPath ?? undefined}
+                >
+                  {renderFileTree(tree)}
+                </FileTree>
+              )}
+            </div>
+          </div>
+        </aside>
+
+        <main className="flex min-h-0 flex-col">
+          <div className="flex min-h-11 flex-col gap-2 border-border/60 border-b px-4 py-2 md:flex-row md:items-center md:justify-between">
+            <div className="min-w-0 truncate font-mono text-muted-foreground text-xs">
+              {openPath ?? messages.nodeDetail.selectFile}
+            </div>
+            {openPath && fileQuery.data && !fileQuery.isError ? (
+              isEditing ? (
+                <div className="flex shrink-0 flex-wrap items-center gap-2">
+                  <button
+                    className="rounded-md px-2.5 py-1.5 text-muted-foreground text-xs transition-colors hover:bg-muted/60 hover:text-foreground disabled:opacity-40"
+                    disabled={busy !== null}
+                    onClick={cancelEditingFile}
+                    type="button"
+                  >
+                    {messages.common.cancel}
+                  </button>
+                  <button
+                    className="rounded-md border border-border/70 bg-background px-2.5 py-1.5 text-xs transition-colors hover:bg-muted/60 disabled:cursor-not-allowed disabled:opacity-50"
+                    disabled={busy !== null || draft === fileQuery.data.content}
+                    onClick={() => void saveFile("changeRequest")}
+                    type="button"
+                  >
+                    {busy === "changeRequest"
+                      ? messages.nodeDetail.saving
+                      : messages.nodeDetail.saveAsChangeRequest}
+                  </button>
+                  <button
+                    className="rounded-md bg-primary px-2.5 py-1.5 text-primary-foreground text-xs transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
+                    disabled={busy !== null || draft === fileQuery.data.content}
+                    onClick={() => void saveFile("save")}
+                    type="button"
+                  >
+                    {busy === "save" ? messages.nodeDetail.saving : messages.nodeDetail.save}
+                  </button>
+                </div>
+              ) : (
+                <button
+                  className="w-fit shrink-0 rounded-md border border-border/70 bg-background px-2.5 py-1.5 text-xs transition-colors hover:bg-muted/60"
+                  onClick={startEditingFile}
+                  type="button"
+                >
+                  {messages.common.edit}
+                </button>
+              )
+            ) : null}
+          </div>
           {fileActionError ? (
-            <div className="mb-2 rounded-md border bg-background p-3 text-destructive text-sm">
+            <div className="border-border/60 border-b bg-destructive/5 px-4 py-2 text-destructive text-sm">
               {fileActionError}
             </div>
           ) : null}
-          {!openPath ? (
-            <div className="grid h-full min-h-[320px] place-items-center rounded-md border bg-background p-8 text-center text-muted-foreground text-sm">
-              {messages.nodeDetail.selectFile}
-            </div>
-          ) : fileQuery.isLoading ? (
-            <div className="rounded-md border bg-background p-4 text-muted-foreground text-sm">
-              {fmt(messages.nodeDetail.readingFile, { path: openPath })}
-            </div>
-          ) : fileQuery.isError ? (
-            <div className="rounded-md border bg-background p-4 text-destructive text-sm">
-              {fileQuery.error instanceof Error
-                ? fileQuery.error.message
-                : messages.nodeDetail.couldNotReadFile}
-            </div>
-          ) : isEditing ? (
-            <textarea
-              aria-label={openPath}
-              className="min-h-[520px] w-full resize-y rounded-md border bg-background p-4 font-mono text-sm leading-6 outline-none placeholder:text-muted-foreground"
-              onChange={(event) => setDraft(event.target.value)}
-              spellCheck={false}
-              value={draft}
-            />
-          ) : (
-            <CodeBlock
-              code={fileQuery.data?.content ?? ""}
-              language={guessFileTreeLanguage(openPath)}
-              showLineNumbers
-            />
-          )}
-        </div>
+          <div className="min-h-0 flex-1 overflow-auto">
+            {!openPath ? (
+              <div className="grid h-full min-h-[320px] place-items-center p-8 text-center text-muted-foreground text-sm">
+                {messages.nodeDetail.selectFile}
+              </div>
+            ) : fileQuery.isLoading ? (
+              <div className="p-4 text-muted-foreground text-sm">
+                {fmt(messages.nodeDetail.readingFile, { path: openPath })}
+              </div>
+            ) : fileQuery.isError ? (
+              <div className="border-border/60 border-b bg-destructive/5 p-4 text-destructive text-sm">
+                {fileQuery.error instanceof Error
+                  ? fileQuery.error.message
+                  : messages.nodeDetail.couldNotReadFile}
+              </div>
+            ) : isEditing ? (
+              <textarea
+                aria-label={openPath}
+                className="min-h-[calc(100vh-15rem)] w-full resize-none border-0 bg-background p-4 font-mono text-sm leading-6 outline-none placeholder:text-muted-foreground"
+                onChange={(event) => setDraft(event.target.value)}
+                spellCheck={false}
+                value={draft}
+              />
+            ) : (
+              <CodeBlock
+                className="min-h-[calc(100vh-15rem)] !rounded-none !border-0 !bg-transparent"
+                code={fileQuery.data?.content ?? ""}
+                language={guessFileTreeLanguage(openPath)}
+                showLineNumbers
+              />
+            )}
+          </div>
+        </main>
       </div>
     </div>
   );
