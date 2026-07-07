@@ -27,27 +27,6 @@ const MULTI_CHOICES = [
   { id: "m1", name: "alpha" },
   { id: "m2", name: "beta" },
 ];
-const ATTACHMENT_OPTS = {
-  maxFiles: 2,
-  allowedMimeTypes: ["image/png", "text/markdown"],
-  maxFileSize: 10 * 1024 * 1024,
-};
-// Synthetic inline refs — `attachmentId` is a loose text ref (not an FK), so the
-// merge registers them via ensureAsset without a real upload.
-const ATTACH_PNG = {
-  id: "att_ft_png",
-  url: "https://cdn.example.com/x.png",
-  fileName: "x.png",
-  mimeType: "image/png",
-  size: 142_336,
-};
-const ATTACH_MD = {
-  id: "att_ft_md",
-  url: "https://cdn.example.com/n.md",
-  fileName: "notes.md",
-  mimeType: "text/markdown",
-  size: 4_096,
-};
 
 describe("Base field types — end-to-end", () => {
   let dataDir = "";
@@ -110,12 +89,6 @@ describe("Base field types — end-to-end", () => {
           type: "relation",
           options: { targetBaseId: related.id },
         },
-        {
-          slug: "f_attachment",
-          name: "Attachment",
-          type: "attachment",
-          options: { attachment: ATTACHMENT_OPTS },
-        },
         { slug: "f_ai_summary", name: "AI Summary", type: "ai_summary" },
         { slug: "f_ai_tags", name: "AI Tags", type: "ai_tags" },
         { slug: "created_at", name: "Created", type: "created_time" },
@@ -164,7 +137,6 @@ describe("Base field types — end-to-end", () => {
     f_select: "Open",
     f_multiselect: ["alpha", "beta"],
     f_relation: [relatedRecordId],
-    f_attachment: [ATTACH_PNG, ATTACH_MD],
     f_ai_summary: "a summary",
     f_ai_tags: ["x", "y"],
   });
@@ -253,23 +225,6 @@ describe("Base field types — end-to-end", () => {
       ["relation", { f_relation: 42 }, /record id/],
       ["select outside choices", { f_select: "Unknown" }, /one of its options/],
       ["multiselect outside choices", { f_multiselect: ["alpha", "zzz"] }, /list of its options/],
-      ["attachment not an array", { f_attachment: ATTACH_PNG }, /list of attachments/],
-      ["attachment malformed ref", { f_attachment: [{ url: "x" }] }, /invalid attachment/],
-      [
-        "attachment too many files",
-        { f_attachment: [ATTACH_PNG, ATTACH_MD, { ...ATTACH_PNG, id: "a3" }] },
-        /at most 2 files/,
-      ],
-      [
-        "attachment disallowed mime",
-        { f_attachment: [{ ...ATTACH_PNG, mimeType: "application/pdf" }] },
-        /does not allow files of type/,
-      ],
-      [
-        "attachment oversized file",
-        { f_attachment: [{ ...ATTACH_PNG, size: 11 * 1024 * 1024 }] },
-        /larger than/,
-      ],
     ];
 
     it.each(cases)("rejects a bad %s", async (_label, fields, pattern) => {
@@ -297,7 +252,6 @@ describe("Base field types — end-to-end", () => {
       f_select: "Closed",
       f_multiselect: ["beta"],
       f_relation: [relatedRecordId],
-      f_attachment: [ATTACH_MD], // replaced the two-file set with one
       f_ai_summary: "an updated summary",
       f_ai_tags: ["updated"],
     });

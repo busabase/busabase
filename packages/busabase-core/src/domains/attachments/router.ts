@@ -7,7 +7,7 @@
  * (see `../../router.ts`). Auth-agnostic — hosts add auth at the transport edge.
  */
 
-import { implement, ORPCError } from "@orpc/server";
+import { implement } from "@orpc/server";
 import { busabaseContract } from "busabase-contract/contract/busabase";
 import { confirmUpload, requestUploadUrl } from "open-domains/attachments/logic";
 import { attachments } from "open-domains/attachments/schema";
@@ -17,49 +17,27 @@ import { ensureAsset } from "../assets/handlers";
 
 const os = implement(busabaseContract);
 
-const sanitizeUploadError = (error: unknown): string => {
-  const message = error instanceof Error ? error.message : String(error);
-  return message.replace(/\/\/([^:@/\s]+):([^@/\s]+)@/g, "//***:***@");
-};
-
-const attachmentServerError = (action: string, error: unknown) => {
-  if (error instanceof ORPCError) return error;
-  const detail = sanitizeUploadError(error);
-  return new ORPCError("INTERNAL_SERVER_ERROR", {
-    message: `Failed to ${action}: ${detail}`,
-    data: { error: `Failed to ${action}: ${detail}` },
-  });
-};
-
 export const attachmentsRouter = {
-  createUploadUrl: os.attachments.createUploadUrl.handler(async ({ input }) => {
+  createUploadUrl: os.attachments.createUploadUrl.handler(async ({ input }) =>
     // Inject the active space (like `confirm` does) so request-time dedup scopes by
     // the same space the row is stored under — not by the caller-supplied spaceId.
-    try {
-      return await requestUploadUrl(
-        { ...input, spaceId: input.spaceId ?? getContextSpaceId() },
-        resolveActorId("local"),
-        db,
-        attachments,
-      );
-    } catch (error) {
-      throw attachmentServerError("create attachment upload URL", error);
-    }
-  }),
+    requestUploadUrl(
+      { ...input, spaceId: input.spaceId ?? getContextSpaceId() },
+      resolveActorId("local"),
+      db,
+      attachments,
+    ),
+  ),
   confirm: os.attachments.confirm.handler(async ({ input }) => {
-    try {
-      const result = await confirmUpload(
-        { ...input, spaceId: input.spaceId ?? getContextSpaceId() },
-        resolveActorId("local"),
-        db,
-        attachments,
-      );
-      // Surface every uploaded (deduped) file in the Asset library. Idempotent:
-      // a deduped re-upload maps back to the same attachment → same asset.
-      await ensureAsset(result.attachmentId, input.fileName);
-      return result;
-    } catch (error) {
-      throw attachmentServerError("confirm attachment upload", error);
-    }
+    const result = await confirmUpload(
+      { ...input, spaceId: input.spaceId ?? getContextSpaceId() },
+      resolveActorId("local"),
+      db,
+      attachments,
+    );
+    // Surface every uploaded (deduped) file in the Asset library. Idempotent:
+    // a deduped re-upload maps back to the same attachment → same asset.
+    await ensureAsset(result.attachmentId, input.fileName);
+    return result;
   }),
 };

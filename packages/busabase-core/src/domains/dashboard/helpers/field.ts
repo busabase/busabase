@@ -1,6 +1,5 @@
 import type { BaseFieldVO, ChangeRequestVO, FieldType, RecordVO } from "busabase-contract/types";
 import type { AttachmentRef } from "open-domains/attachments/types";
-import { iStringParse } from "openlib/i18n/i-string";
 import { FIELD_TYPE_ORDER } from "../../base/field-types";
 import { fieldValueToString, formatActorLabel, formatNumberField } from "./format";
 import { stripHtmlTags } from "./html";
@@ -177,10 +176,8 @@ export const isRecordLongField = (field: BaseFieldVO, value: unknown) => {
   return fieldValueToString(value).length > 180;
 };
 
-export const getFieldName = (changeRequest: ChangeRequestVO, fieldSlug: string) => {
-  const name = changeRequest.base?.fields.find((field) => field.slug === fieldSlug)?.name;
-  return name ? iStringParse(name) : fieldSlug;
-};
+export const getFieldName = (changeRequest: ChangeRequestVO, fieldSlug: string) =>
+  changeRequest.base?.fields.find((field) => field.slug === fieldSlug)?.name ?? fieldSlug;
 
 export const getRecordFieldType = (record: RecordVO, fieldSlug: string) =>
   record.base.fields.find((field) => field.slug === fieldSlug)?.type;

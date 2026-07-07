@@ -8,7 +8,6 @@ import type {
   ViewConfigVO,
 } from "busabase-contract/types";
 import { and, eq, inArray } from "drizzle-orm";
-import { iStringToText } from "openlib/i18n/i-string";
 import { getContextSpaceId, LOCAL_SPACE_ID } from "../context";
 import { getDb } from "../db";
 import type { BasePO, NodePO } from "../db/schema";
@@ -671,7 +670,7 @@ const applySeedScenario = async (scenario: SeedScenario) => {
           id: field.id,
           baseId: base.id,
           slug: field.slug,
-          name: iStringToText(field.name),
+          name: field.name,
           type: field.type,
           required: field.required,
           position: index,
@@ -693,7 +692,7 @@ const applySeedScenario = async (scenario: SeedScenario) => {
           )
           .limit(1);
         const fieldValues = {
-          name: iStringToText(field.name),
+          name: field.name,
           type: field.type,
           required: field.required,
           position: index,

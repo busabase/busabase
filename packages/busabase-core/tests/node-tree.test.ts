@@ -129,13 +129,12 @@ describe("Node tree + Doc lifecycle — oRPC", () => {
     const folderSlug = async (slug: string) =>
       (await client.folders.list()).find((f) => f.node.slug === slug);
 
-    it("creates, renames, and deletes a folder through auto-merged node CRs", async () => {
-      // Structural node CRs auto-merge: the returned CR is already `merged`, so
-      // no separate review/merge is needed (but a merged CR is still recorded).
+    it("creates, renames, and deletes a folder through merged node CRs", async () => {
+      // Create.
       const createCr = await client.nodes.createChangeRequest({
         operations: [{ kind: "create", nodeType: "folder", slug: "lc-tree", name: "Tree" }],
       });
-      expect(createCr.status).toBe("merged");
+      await approveAndMerge(createCr.id);
       const created = await folderSlug("lc-tree");
       expect(created).toBeDefined();
       const nodeId = created?.node.id ?? "";
@@ -144,18 +143,18 @@ describe("Node tree + Doc lifecycle — oRPC", () => {
       const renameCr = await client.nodes.createChangeRequest({
         operations: [{ kind: "rename", nodeId, name: "Tree Renamed" }],
       });
-      expect(renameCr.status).toBe("merged");
+      await approveAndMerge(renameCr.id);
       expect((await folderSlug("lc-tree"))?.node.name).toBe("Tree Renamed");
 
       // Delete.
       const deleteCr = await client.nodes.createChangeRequest({
         operations: [{ kind: "delete", nodeId }],
       });
-      expect(deleteCr.status).toBe("merged");
+      await approveAndMerge(deleteCr.id);
       expect(await folderSlug("lc-tree")).toBeUndefined();
     });
 
-    it("materializes a Base node created through an auto-merged node CR", async () => {
+    it("materializes a Base node created through a node CR", async () => {
       const cr = await client.nodes.createChangeRequest({
         operations: [
           {
@@ -167,48 +166,9 @@ describe("Node tree + Doc lifecycle — oRPC", () => {
           },
         ],
       });
-      expect(cr.status).toBe("merged");
+      await approveAndMerge(cr.id);
       const bases = await client.bases.list();
       expect(bases.some((b) => b.slug === "lc-node-base")).toBe(true);
-    });
-
-    it("creates a folder and moves a node into it in ONE CR via temp-id", async () => {
-      // A movable folder at the root.
-      const movableCr = await client.nodes.createChangeRequest({
-        operations: [{ kind: "create", nodeType: "folder", slug: "lc-movable", name: "Movable" }],
-      });
-      expect(movableCr.status).toBe("merged");
-      const movableId = (await folderSlug("lc-movable"))?.node.id ?? "";
-      expect(movableId).not.toBe("");
-
-      // One CR: create a destination folder (ref "dest") + move Movable under it.
-      // The move references the not-yet-materialized folder by its in-CR ref.
-      const combo = await client.nodes.createChangeRequest({
-        message: "Create Archive folder and move Movable into it",
-        operations: [
-          {
-            kind: "create",
-            ref: "dest",
-            nodeType: "folder",
-            slug: "lc-archive",
-            name: "Archive",
-          },
-          { kind: "move", nodeId: movableId, parentNodeRef: "dest" },
-        ],
-      });
-      expect(combo.status).toBe("merged");
-
-      const archiveId = (await folderSlug("lc-archive"))?.node.id;
-      expect(archiveId).toBeDefined();
-      expect((await folderSlug("lc-movable"))?.node.parentId).toBe(archiveId);
-    });
-
-    it("rejects a move that references an undeclared parentNodeRef", async () => {
-      await expect(
-        client.nodes.createChangeRequest({
-          operations: [{ kind: "move", nodeId: "nod_whatever", parentNodeRef: "ghost" }],
-        }),
-      ).rejects.toThrow(/no earlier operation declares/);
     });
   });
 });

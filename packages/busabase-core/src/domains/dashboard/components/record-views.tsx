@@ -5,7 +5,6 @@ import { Box, Check, GitMerge, MoreHorizontal, Paperclip, Trash2, X } from "luci
 import type { AttachmentRef } from "open-domains/attachments/types";
 import { SPALink as Link } from "openlib/ui/dashboard";
 import { useEffect, useState } from "react";
-import { fmt, useCoreI18n, useIString } from "../../../i18n";
 import {
   fieldDisplayKind,
   fieldInputKind,
@@ -95,7 +94,6 @@ export function RecordDetailView({
   records: RecordVO[];
   record: RecordVO | null;
 }) {
-  const messages = useCoreI18n();
   const [panelOpen, setPanelOpen] = useState(true);
   const [deleteAction, setDeleteAction] = useState<"change_request" | "merge" | null>(null);
   const [confirmDeleteAction, setConfirmDeleteAction] = useState<"change_request" | "merge" | null>(
@@ -114,7 +112,7 @@ export function RecordDetailView({
   const historyError = historyQuery.error
     ? historyQuery.error instanceof Error
       ? historyQuery.error.message
-      : messages.recordView.failedLoadHistory
+      : "Failed to load history"
     : null;
   const isHistoryLoading = historyQuery.isLoading;
 
@@ -123,8 +121,8 @@ export function RecordDetailView({
       <div className="flex-1 p-4">
         <section>
           <EmptyState
-            title={messages.recordView.recordNotFoundTitle}
-            body={messages.recordView.recordNotFoundBody}
+            title="Record not found"
+            body="The requested canonical record does not exist."
           />
         </section>
       </div>
@@ -149,9 +147,7 @@ export function RecordDetailView({
               type="button"
             >
               <Trash2 size={13} />
-              {deleteAction === "change_request"
-                ? messages.recordView.creating
-                : messages.recordView.deleteChangeRequest}
+              {deleteAction === "change_request" ? "Creating…" : "Delete change request"}
             </button>
             <button
               className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left font-medium text-red-700 text-sm transition-colors hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
@@ -163,16 +159,14 @@ export function RecordDetailView({
               type="button"
             >
               <GitMerge size={13} />
-              {deleteAction === "merge"
-                ? messages.recordView.merging
-                : messages.recordView.deleteAndMerge}
+              {deleteAction === "merge" ? "Merging…" : "Delete & merge"}
             </button>
           </div>
         </details>
         <RailToggleButton onToggle={() => setPanelOpen((current) => !current)} open={panelOpen} />
       </div>
-      <section className="grid w-full min-w-0 gap-6 px-6 pt-2 pb-4 lg:grid-cols-[minmax(0,1fr)_auto]">
-        <main className="min-w-0 max-w-[860px] justify-self-center lg:w-full">
+      <section className="grid w-full min-w-0 gap-6 px-6 pt-2 pb-4 xl:grid-cols-[minmax(0,1fr)_auto]">
+        <main className="min-w-0 max-w-[860px] justify-self-center xl:w-full">
           <RecordHero record={record} />
           <RecordFieldPanel record={record} records={records} />
           <RecordCommentsPanel client={client} record={record} />
@@ -180,45 +174,33 @@ export function RecordDetailView({
         <BusabaseSidePanel open={panelOpen}>
           <SidebarPanel
             quiet
-            title={messages.recordView.lineage}
+            title="Lineage"
             action={
               historyChangeRequests[0] ? (
                 <Link
                   className="text-muted-foreground text-sm transition-colors hover:text-foreground"
                   href={`/inbox/${historyChangeRequests[0].id}`}
                 >
-                  {messages.recordView.source}
+                  Source
                 </Link>
               ) : undefined
             }
           >
-            <SidebarRow
-              label={messages.recordView.proposedBy}
-              value={formatActorLabel(record.createdBy)}
-            />
-            <SidebarRow
-              label={messages.recordView.commitAuthor}
-              value={formatActorLabel(record.headCommit.author)}
-            />
-            <SidebarRow
-              label={messages.common.updated}
-              value={formatDetailTime(record.updatedAt)}
-            />
+            <SidebarRow label="Proposed by" value={formatActorLabel(record.createdBy)} />
+            <SidebarRow label="Commit author" value={formatActorLabel(record.headCommit.author)} />
+            <SidebarRow label="Updated" value={formatDetailTime(record.updatedAt)} />
             <details
-              aria-label={messages.recordView.technicalIds}
+              aria-label="Technical IDs"
               className="mt-3 rounded-md border border-border/70 px-2.5 py-2 text-xs"
             >
               <summary className="cursor-pointer text-muted-foreground transition-colors hover:text-foreground">
-                {messages.recordView.technicalIds}
+                Technical IDs
               </summary>
               <div className="mt-2 space-y-1.5">
-                <SidebarRow label={messages.common.record} value={record.id} />
+                <SidebarRow label="Record" value={record.id} />
+                <SidebarRow label="Head" value={shortIdentifier(record.headCommitId)} />
                 <SidebarRow
-                  label={messages.recordView.head}
-                  value={shortIdentifier(record.headCommitId)}
-                />
-                <SidebarRow
-                  label={messages.recordView.parent}
+                  label="Parent"
                   value={shortIdentifier(record.headCommit.parentCommitId)}
                 />
               </div>
@@ -226,26 +208,24 @@ export function RecordDetailView({
           </SidebarPanel>
           <SidebarPanel
             quiet
-            title={messages.recordView.audit}
+            title="Audit"
             action={
               <Link
                 className="text-muted-foreground text-sm transition-colors hover:text-foreground"
                 href="/activity"
               >
-                {messages.recordView.seeAll}
+                See all
               </Link>
             }
           >
             <div className="flex items-center gap-2 text-muted-foreground text-sm">
               <Box size={16} />
-              <span className="truncate">
-                {fmt(messages.recordView.canonicalRecord, { status: record.status })}
-              </span>
+              <span className="truncate">{record.status} canonical record</span>
             </div>
           </SidebarPanel>
           <SidebarPanel
             quiet
-            title={messages.recordView.reviewHistory}
+            title="Review history"
             action={
               <span className="rounded-full bg-muted/55 px-2 py-0.5 text-muted-foreground text-xs">
                 {isHistoryLoading ? "…" : historyChangeRequests.length}
@@ -268,9 +248,7 @@ export function RecordDetailView({
               </div>
             ) : (
               <div className="py-2 text-muted-foreground text-xs">
-                {isHistoryLoading
-                  ? messages.common.loading
-                  : messages.recordView.noChangeRequestsYet}
+                {isHistoryLoading ? "Loading…" : "No change requests yet."}
               </div>
             )}
           </SidebarPanel>
@@ -279,14 +257,10 @@ export function RecordDetailView({
       <ConfirmActionDialog
         body={
           confirmDeleteAction === "merge"
-            ? fmt(messages.recordView.deleteMergeBody, { title: getRecordTitle(record) })
-            : fmt(messages.recordView.deleteRequestBody, { title: getRecordTitle(record) })
+            ? `This archives "${getRecordTitle(record)}" immediately and records the merge in lineage. Use this only when separate review is not needed.`
+            : `This opens a delete change request for "${getRecordTitle(record)}". The canonical record stays visible until the request is reviewed and merged.`
         }
-        confirmLabel={
-          confirmDeleteAction === "merge"
-            ? messages.recordView.deleteAndMerge
-            : messages.base.createDeleteRequestLabel
-        }
+        confirmLabel={confirmDeleteAction === "merge" ? "Delete & merge" : "Create delete request"}
         onCancel={() => setConfirmDeleteAction(null)}
         onConfirm={async () => {
           if (!confirmDeleteAction) {
@@ -305,11 +279,7 @@ export function RecordDetailView({
         }}
         open={confirmDeleteAction !== null}
         pending={deleteAction !== null}
-        title={
-          confirmDeleteAction === "merge"
-            ? messages.recordView.deleteMergeTitle
-            : messages.recordView.deleteRequestTitle
-        }
+        title={confirmDeleteAction === "merge" ? "Delete and merge now?" : "Create delete request?"}
       />
     </div>
   );
@@ -342,7 +312,6 @@ export function RecordEditorView({
   records: RecordVO[];
   record: RecordVO | null;
 }) {
-  const messages = useCoreI18n();
   const [fields, setFields] = useState<Record<string, unknown>>(() =>
     Object.fromEntries(
       (base?.fields ?? record?.base.fields ?? []).map((field) => [
@@ -377,10 +346,7 @@ export function RecordEditorView({
     return (
       <div className="flex-1 p-4">
         <section>
-          <EmptyState
-            title={messages.base.baseNotFoundTitle}
-            body={messages.base.baseNotFoundBody}
-          />
+          <EmptyState title="Base not found" body="The requested Base does not exist." />
         </section>
       </div>
     );
@@ -391,8 +357,8 @@ export function RecordEditorView({
       <div className="flex-1 p-4">
         <section>
           <EmptyState
-            title={messages.recordView.recordNotFoundTitle}
-            body={messages.recordView.recordNotFoundBody}
+            title="Record not found"
+            body="The requested canonical record does not exist."
           />
         </section>
       </div>
@@ -411,9 +377,7 @@ export function RecordEditorView({
       }
     } catch (submitError) {
       onSubmitError(
-        submitError instanceof Error
-          ? submitError.message
-          : messages.recordView.failedSaveChangeRequest,
+        submitError instanceof Error ? submitError.message : "Failed to save change request",
       );
     } finally {
       setSaveAction(null);
@@ -425,9 +389,7 @@ export function RecordEditorView({
       <section className="mx-auto max-w-5xl px-6 py-4">
         <div className="flex flex-wrap items-end justify-between gap-3 border-border/50 border-b pb-3">
           <div className="font-semibold text-base">
-            {mode === "new"
-              ? fmt(messages.recordView.newRecordTitle, { base: editorBase.name })
-              : messages.recordView.editRecord}
+            {mode === "new" ? `New ${editorBase.name} record` : "Edit record"}
           </div>
         </div>
 
@@ -461,23 +423,19 @@ export function RecordEditorView({
                 : `/base/${editorBase.slug}`
             }
           >
-            {messages.common.cancel}
+            Cancel
           </Link>
           <SplitSubmitButton
             disabled={saveAction !== null}
             isPrimaryLoading={saveAction === "change_request"}
             isSecondaryLoading={saveAction === "merge"}
-            primaryLabel={
-              mode === "new" ? messages.recordView.submitRequest : messages.recordView.updateRequest
-            }
-            primaryLoadingLabel={messages.recordView.saving}
-            secondaryLabel={
-              mode === "new" ? messages.recordView.submitNow : messages.recordView.updateNow
-            }
-            secondaryLoadingLabel={messages.recordView.merging}
+            primaryLabel={mode === "new" ? "Submit Request" : "Update Request"}
+            primaryLoadingLabel="Saving..."
+            secondaryLabel={mode === "new" ? "Submit Now" : "Update Now"}
+            secondaryLoadingLabel="Merging..."
             onPrimary={() => submit(false)}
             onSecondary={() => submit(true)}
-            hint={messages.common.mergeImmediatelyHint}
+            hint="Request goes to your inbox for review. Now merges immediately."
           />
         </div>
       </section>
@@ -498,10 +456,7 @@ function RecordFieldInput({
   records: RecordVO[];
   value: unknown;
 }) {
-  const messages = useCoreI18n();
   const kind = fieldInputKind(field.type);
-  const resolveIString = useIString();
-  const fieldName = resolveIString(field.name);
   const inputId = `record-field-${field.id}`;
   const relationValue = Array.isArray(value)
     ? value.filter((item): item is string => typeof item === "string")
@@ -522,11 +477,11 @@ function RecordFieldInput({
     <div className="grid gap-3 border-border/40 border-b px-2 py-2.5 text-sm transition-colors hover:bg-muted/25 md:grid-cols-[180px_minmax(0,1fr)]">
       <div className="min-w-0">
         <label className="block truncate font-medium" htmlFor={inputId}>
-          {fieldName}
+          {field.name}
           {field.required ? <span className="ml-0.5 text-destructive">*</span> : null}
         </label>
         <div className="mt-1 flex flex-wrap gap-1.5 text-muted-foreground text-[11px]">
-          {isDerivedFieldSlug(fieldName, field.slug) ? null : (
+          {isDerivedFieldSlug(field.name, field.slug) ? null : (
             <>
               <span className="font-mono">{field.slug}</span>
               <span>·</span>
@@ -540,9 +495,7 @@ function RecordFieldInput({
           className="flex min-h-9 items-center rounded-md border border-border/40 bg-muted/40 px-2.5 py-1.5 text-muted-foreground text-sm"
           id={inputId}
         >
-          {fieldValueToString(value) || (
-            <span className="italic opacity-70">{messages.common.autoGenerated}</span>
-          )}
+          {fieldValueToString(value) || <span className="italic opacity-70">Auto-generated</span>}
         </div>
       ) : kind === "attachment" ? (
         <AttachmentFieldEditor
@@ -554,7 +507,7 @@ function RecordFieldInput({
         />
       ) : kind === "relation" ? (
         <select
-          aria-label={fieldName}
+          aria-label={field.name}
           className="min-h-9 w-full rounded-md border border-border/70 bg-background px-2.5 py-1.5 text-sm outline-none transition-colors focus:border-primary"
           id={inputId}
           multiple={field.options.multiple ?? true}
@@ -574,7 +527,7 @@ function RecordFieldInput({
         </select>
       ) : kind === "select" ? (
         <select
-          aria-label={fieldName}
+          aria-label={field.name}
           className="h-9 w-full rounded-md border border-border/70 bg-background px-2.5 py-1.5 text-sm outline-none transition-colors focus:border-primary"
           id={inputId}
           onChange={(event) => onChange(event.target.value)}
@@ -589,7 +542,7 @@ function RecordFieldInput({
         </select>
       ) : kind === "multiselect" ? (
         <select
-          aria-label={fieldName}
+          aria-label={field.name}
           className="min-h-9 w-full rounded-md border border-border/70 bg-background px-2.5 py-1.5 text-sm outline-none transition-colors focus:border-primary"
           id={inputId}
           multiple
@@ -605,7 +558,7 @@ function RecordFieldInput({
           ))}
         </select>
       ) : kind === "tags" ? (
-        <TagFieldEditor inputId={inputId} label={fieldName} onChange={onChange} value={value} />
+        <TagFieldEditor inputId={inputId} label={field.name} onChange={onChange} value={value} />
       ) : kind === "checkbox" ? (
         <label className="inline-flex h-9 items-center gap-2 text-muted-foreground text-sm">
           <input
@@ -614,11 +567,11 @@ function RecordFieldInput({
             onChange={(event) => onChange(event.target.checked)}
             type="checkbox"
           />
-          {messages.recordView.checked}
+          Checked
         </label>
       ) : kind === "textarea" ? (
         <textarea
-          aria-label={fieldName}
+          aria-label={field.name}
           className="min-h-28 w-full resize-y rounded-md border border-border/70 bg-background px-2.5 py-2 font-mono text-sm leading-6 outline-none transition-colors focus:border-primary"
           id={inputId}
           onChange={(event) => onChange(event.target.value)}
@@ -628,7 +581,7 @@ function RecordFieldInput({
         // Plain inputs — the registry's input kind doubles as the HTML input type
         // (text / number / date / url / email / tel).
         <input
-          aria-label={fieldName}
+          aria-label={field.name}
           className="h-9 w-full rounded-md border border-border/70 bg-background px-2.5 py-1.5 text-sm outline-none transition-colors focus:border-primary"
           id={inputId}
           type={kind}
@@ -653,7 +606,6 @@ function TagFieldEditor({
   onChange: (value: unknown) => void;
   value: unknown;
 }) {
-  const messages = useCoreI18n();
   const tags = Array.isArray(value)
     ? value.filter((item): item is string => typeof item === "string")
     : [];
@@ -678,7 +630,7 @@ function TagFieldEditor({
         >
           {tag}
           <button
-            aria-label={fmt(messages.recordView.remove, { name: tag })}
+            aria-label={`Remove ${tag}`}
             className="text-muted-foreground transition-colors hover:text-foreground"
             onClick={() => removeTag(tag)}
             type="button"
@@ -701,7 +653,7 @@ function TagFieldEditor({
             removeTag(tags[tags.length - 1]);
           }
         }}
-        placeholder={tags.length === 0 ? messages.recordView.addTag : ""}
+        placeholder={tags.length === 0 ? "Add tag…" : ""}
         value={draft}
       />
     </div>
@@ -721,9 +673,6 @@ function AttachmentFieldEditor({
   onUploadAttachment?: (file: File) => Promise<AttachmentRef>;
   value: unknown;
 }) {
-  const messages = useCoreI18n();
-  const resolveIString = useIString();
-  const fieldName = resolveIString(field.name);
   const attachments = getAttachmentRefs(value);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
@@ -745,7 +694,7 @@ function AttachmentFieldEditor({
       const next = multiple ? [...attachments, ...uploaded] : uploaded.slice(-1);
       onChange(options.maxFiles && options.maxFiles > 0 ? next.slice(-options.maxFiles) : next);
     } catch (error) {
-      setUploadError(error instanceof Error ? error.message : messages.recordView.uploadFailed);
+      setUploadError(error instanceof Error ? error.message : "Upload failed");
     } finally {
       setIsUploading(false);
     }
@@ -758,11 +707,11 @@ function AttachmentFieldEditor({
         htmlFor={inputId}
       >
         <Paperclip size={14} />
-        {isUploading ? messages.recordView.uploading : messages.recordView.addFile}
+        {isUploading ? "Uploading..." : "Add file"}
       </label>
       <input
         accept={accept}
-        aria-label={fieldName}
+        aria-label={field.name}
         className="sr-only"
         disabled={isUploading || !onUploadAttachment}
         id={inputId}
@@ -797,7 +746,7 @@ function AttachmentFieldEditor({
                 </span>
               ) : null}
               <button
-                aria-label={fmt(messages.recordView.remove, { name: item.fileName })}
+                aria-label={`Remove ${item.fileName}`}
                 className="shrink-0 rounded p-0.5 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
                 onClick={() => onChange(attachments.filter((entry) => entry.id !== item.id))}
                 type="button"
@@ -863,8 +812,6 @@ const normalizeEditorFields = (base: BaseVO, fields: Record<string, unknown>) =>
   );
 
 function RecordFieldPanel({ record, records }: { record: RecordVO; records: RecordVO[] }) {
-  const messages = useCoreI18n();
-  const resolveIString = useIString();
   const allFieldEntries = record.base.fields.map((field) => ({
     field,
     value: record.headCommit.fields[field.slug],
@@ -880,9 +827,7 @@ function RecordFieldPanel({ record, records }: { record: RecordVO; records: Reco
     <section className="mt-5">
       {propertyEntries.length > 0 ? (
         <div className="mb-4 grid gap-x-6 gap-y-3 text-sm md:grid-cols-2">
-          <div className="font-medium text-muted-foreground md:col-span-2">
-            {messages.recordView.properties}
-          </div>
+          <div className="font-medium text-muted-foreground md:col-span-2">Properties</div>
           {propertyEntries.map(({ field, value }) => (
             <RecordPropertyItem field={field} key={field.id} records={records} value={value} />
           ))}
@@ -891,9 +836,7 @@ function RecordFieldPanel({ record, records }: { record: RecordVO; records: Reco
 
       {longFieldEntries.map(({ field, value }) => (
         <section className="mt-8 max-w-3xl" key={field.id}>
-          <div className="font-medium text-muted-foreground text-sm">
-            {resolveIString(field.name)}
-          </div>
+          <div className="font-medium text-muted-foreground text-sm">{field.name}</div>
           <div className="mt-3 text-base leading-7">
             <FieldValuePreview
               className={
@@ -921,13 +864,11 @@ function RecordPropertyItem({
   records: RecordVO[];
   value: unknown;
 }) {
-  const resolveIString = useIString();
-  const fieldName = resolveIString(field.name);
   if (fieldDisplayKind(field.type) === "checkbox") {
     const checked = value === true || value === "true";
     return (
       <div className="grid min-w-0 grid-cols-[112px_minmax(0,1fr)] items-center gap-3">
-        <span className="truncate text-muted-foreground">{fieldName}</span>
+        <span className="truncate text-muted-foreground">{field.name}</span>
         <span
           className={`inline-flex h-5 w-5 items-center justify-center rounded border ${
             checked
@@ -945,7 +886,7 @@ function RecordPropertyItem({
   if (chips.length > 0) {
     return (
       <div className="grid min-w-0 grid-cols-[112px_minmax(0,1fr)] items-start gap-3">
-        <span className="truncate text-muted-foreground">{fieldName}</span>
+        <span className="truncate text-muted-foreground">{field.name}</span>
         <FieldBadgeList chips={chips} />
       </div>
     );
@@ -953,7 +894,7 @@ function RecordPropertyItem({
 
   return (
     <div className="grid min-w-0 grid-cols-[112px_minmax(0,1fr)] items-start gap-3">
-      <span className="truncate text-muted-foreground">{fieldName}</span>
+      <span className="truncate text-muted-foreground">{field.name}</span>
       <div className="min-w-0 truncate">
         <FieldValuePreview
           className="inline text-sm leading-5"
@@ -1037,7 +978,6 @@ function RecordCommentsPanel({
   client: BusabaseDashboardApiClient;
   record: RecordVO;
 }) {
-  const messages = useCoreI18n();
   const queryClient = useQueryClient();
   // Shares the canonical comments key (subjectType, subjectId) with
   // `SubjectCommentThread`, so the two readers stay in sync.
@@ -1058,7 +998,7 @@ function RecordCommentsPanel({
         subjectType: "record",
       }),
     onError: (mutationError) =>
-      setError(mutationError instanceof Error ? mutationError.message : messages.comments.failed),
+      setError(mutationError instanceof Error ? mutationError.message : "Failed to add comment"),
     onSuccess: () => {
       setBody("");
       setError(null);
@@ -1079,9 +1019,9 @@ function RecordCommentsPanel({
   return (
     <section className="mt-6">
       <div className="flex items-center justify-between gap-3">
-        <div className="font-semibold text-sm">{messages.comments.comments}</div>
+        <div className="font-semibold text-sm">Comments</div>
         <span className="rounded-full bg-muted/55 px-2.5 py-1 text-muted-foreground text-xs">
-          {isLoading ? messages.common.loadingPlain : `${comments.length}`}
+          {isLoading ? "Loading" : `${comments.length}`}
         </span>
       </div>
 
@@ -1111,17 +1051,17 @@ function RecordCommentsPanel({
           ))
         ) : (
           <div className="px-2 py-5 text-muted-foreground text-sm">
-            {isLoading ? messages.comments.loading : messages.comments.noComments}
+            {isLoading ? "Loading comments..." : "No comments yet."}
           </div>
         )}
       </div>
 
       <div className="mt-3 rounded-md border border-border/70 bg-background/55 p-3">
         <textarea
-          aria-label={messages.comments.addComment}
+          aria-label="Add comment"
           className="min-h-20 w-full resize-y rounded-md border border-border/70 bg-background px-2.5 py-2 text-sm leading-6 outline-none transition-colors focus:border-primary"
           onChange={(event) => setBody(event.target.value)}
-          placeholder={messages.comments.addComment}
+          placeholder="Add a comment"
           value={body}
         />
         <div className="mt-2 flex justify-end">
@@ -1131,7 +1071,7 @@ function RecordCommentsPanel({
             onClick={submit}
             type="button"
           >
-            {createMutation.isPending ? messages.comments.adding : messages.comments.addComment}
+            {createMutation.isPending ? "Adding..." : "Add Comment"}
           </button>
         </div>
       </div>

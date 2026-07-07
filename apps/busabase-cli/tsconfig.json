@@ -13,7 +13,9 @@
     "resolveJsonModule": true,
     "types": ["node"],
     "paths": {
-      "busabase-sdk": ["../busabase-sdk/src/index.ts"]
+      "busabase-core": ["../../packages/busabase-core/src/index.ts"],
+      "busabase-core/*": ["../../packages/busabase-core/src/*"],
+      "open-domains/*": ["../../packages/open-domains/*"]
     }
   },
   "include": ["src/**/*.ts", "tsup.config.ts"]

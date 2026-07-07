@@ -27,13 +27,7 @@ export const updateDocInputSchema = z.object({
 
 export const createDocChangeRequestInputSchema = z.object({
   body: z.string(),
-  message: z
-    .string()
-    .optional()
-    .default("Update doc")
-    .describe(
-      'Explanation shown to the human reviewer. Write a conventional-commit style subject — imperative verb + what + why, e.g. "Add rollback steps to the deploy runbook".',
-    ),
+  message: z.string().optional().default("Update doc"),
   submittedBy: z.string().optional().default("local-producer"),
 });
 

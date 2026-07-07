@@ -25,7 +25,7 @@ AI は無限にデータを生成できます —— Busabase は、信頼でき
 
 <br/>
 
-<img src="../public/assets/readme/busabase-hero-ja.webp" alt="Busabase" width="100%" />
+<img src="../public/assets/readme/busabase-hero.gif" alt="Busabase" width="100%" />
 
 </div>
 
@@ -35,7 +35,7 @@ Busabaseはシンプルな課題を解決するオープンソースアプリで
 
 Busabaseはその承認プロセスに専用の場所を提供します。プライベートCMS、ナレッジベース、プロジェクトデータベース、そして構造化された信頼できる情報源として機能し、変更リクエスト、オペレーション、コメント、監査証跡、およびアプリやAIエージェント向けのシンプルなAPIを備えています。
 
-![Busabase の仕組み：提案 → レビュー → 承認 → マージ → 信頼できるデータベースとナレッジベース](../public/assets/readme/how-it-works.webp)
+![Busabase の仕組み：提案 → レビュー → 承認 → マージ → 信頼できるデータベースとナレッジベース](../public/assets/readme/how-it-works.png)
 
 **ローカルファースト。レビューファースト。エージェント対応。**
 
@@ -84,11 +84,11 @@ http://localhost:15419/dashboard/inbox
 
 |  |  |
 | :---: | :---: |
-| ![Inbox review list](../public/assets/readme/busabase-inbox-review.webp) | ![Agent-proposed diff](../public/assets/readme/busabase-agent-output-preview.webp) |
+| ![Inbox review list](../public/assets/readme/busabase-inbox-review.png) | ![Agent-proposed diff](../public/assets/readme/busabase-agent-output-preview.png) |
 | 受信トレイ（保留中の変更リクエスト、レビュアーステータス、承認アクション） | マージ前のエージェント提案（フィールド差分とレビュアーアクションを含む） |
-| ![Record detail lineage](../public/assets/readme/busabase-record-detail-audit.webp) | ![Base table](../public/assets/readme/busabase-base-table.webp) |
+| ![Record detail lineage](../public/assets/readme/busabase-record-detail-audit.png) | ![Base table](../public/assets/readme/busabase-base-table.png) |
 | フィールド、コメント、レビュー履歴、系譜を含むレコード詳細ページ | 構造化レコードとリッチフィールドを表示するベーステーブル |
-| ![Base records table](../public/assets/readme/busabase-base-records.webp) | ![Graph view with seed data](../public/assets/readme/busabase-graph-view.webp) |
+| ![Base records table](../public/assets/readme/busabase-base-records.png) | ![Graph view with seed data](../public/assets/readme/busabase-graph-view.png) |
 | ベース内のレコード — 型付きフィールド、リッチな値、承認ステータスが一目でわかる | ベース間のシードレコードの関係を示すグラフビュー |
 
 ## なぜ作られたのか

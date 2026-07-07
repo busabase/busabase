@@ -35,36 +35,8 @@ export const listRecordsResponseSchema = z.object({
 });
 
 export const createChangeRequestInputSchema = z.object({
-  fields: z
-    .record(z.string(), z.unknown())
-    .describe(
-      "Record field values keyed by field slug. The base's PRIMARY field (its first field) becomes the record's display name and the change request title everywhere — always give it a short, human-readable value, never an id or placeholder.",
-    ),
-  message: z
-    .string()
-    .optional()
-    .default("Initial change request")
-    .describe(
-      'Explanation shown to the human reviewer. Write a conventional-commit style subject — imperative verb + what + why, e.g. "Add Acme Corp — qualified lead from the June webinar".',
-    ),
-  submittedBy: z.string().optional().default("local-producer"),
-});
-
-export const createBulkChangeRequestInputSchema = z.object({
-  records: z
-    .array(z.record(z.string(), z.unknown()))
-    .min(1)
-    .max(1000)
-    .describe(
-      "Field-value maps, one per record to create, each keyed by field slug. All records are proposed as a SINGLE change request (one review, one merge) — use this to import/seed many rows at once instead of one change request per record. Capped at 1000; for very large loads prefer a dedicated import job. Always give each record's PRIMARY field a short human-readable value.",
-    ),
-  message: z
-    .string()
-    .optional()
-    .default("Bulk create records")
-    .describe(
-      'Explanation shown to the human reviewer for the whole batch — e.g. "Import 240 June webinar leads".',
-    ),
+  fields: z.record(z.string(), z.unknown()),
+  message: z.string().optional().default("Initial change request"),
   submittedBy: z.string().optional().default("local-producer"),
 });
 

@@ -14,9 +14,6 @@ export interface BusabaseClientOptions {
    * hosted demo's CDN may strip custom request headers like `x-demo-mode`.
    */
   demo?: boolean;
-  headers?:
-    | Record<string, string>
-    | (() => Record<string, string> | Promise<Record<string, string>>);
 }
 
 // RPCLink fetch interceptor that appends `?demo=1` to each outgoing request URL.
@@ -40,8 +37,6 @@ export const createBusabaseORPCClient = (
 ): BusabaseORPCClient => {
   const link = new RPCLink({
     url: resolveApiUrl(apiBasePath),
-    headers: async () =>
-      (typeof opts.headers === "function" ? await opts.headers() : opts.headers) ?? {},
     ...(opts.demo ? { fetch: demoFetch } : {}),
   });
   return createORPCClient<BusabaseORPCClient>(link);

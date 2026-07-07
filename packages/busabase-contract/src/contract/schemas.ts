@@ -3,7 +3,6 @@ import { z } from "zod";
 // (no kernel imports), so the kernel embeds them eagerly with no import cycle.
 import {
   baseSchema,
-  fieldNameSchema,
   fieldOptionsSchema,
   fieldTypeSchema,
 } from "../domains/base/contract/base-schemas";
@@ -183,18 +182,6 @@ const searchResponseSchema = z.object({
   results: z.array(searchResultSchema),
 });
 
-const liveEventSchema = z.object({
-  kind: z.literal("change_request.merged"),
-  spaceId: z.string(),
-  actorId: z.string(),
-  changeRequestId: z.string(),
-  baseId: z.string().nullable(),
-  nodeIds: z.array(z.string()),
-  recordIds: z.array(z.string()),
-  viewIds: z.array(z.string()),
-  operationCount: z.number(),
-});
-
 const auditActionSchema = z.enum([
   "record.viewed",
   "change_request.created",
@@ -241,21 +228,7 @@ const createAuditEventInputSchema = z.object({
 const nodeOperationInputSchema = z.discriminatedUnion("kind", [
   z.object({
     kind: z.literal("create"),
-    ref: z
-      .string()
-      .min(1)
-      .optional()
-      .describe(
-        'Optional in-change-request temp id for this node. A later operation can set parentNodeRef to this value to nest under it — e.g. create a folder with ref "growth", then create Bases with parentNodeRef "growth", all in one change request.',
-      ),
     parentNodeId: z.string().optional(),
-    parentNodeRef: z
-      .string()
-      .min(1)
-      .optional()
-      .describe(
-        "Parent this node under a node an EARLIER operation in the same change request created (matched by its ref). Mutually exclusive with parentNodeId.",
-      ),
     nodeType: z.enum(CREATABLE_NODE_TYPES),
     slug: z
       .string()
@@ -272,7 +245,7 @@ const nodeOperationInputSchema = z.discriminatedUnion("kind", [
             .string()
             .min(1)
             .regex(/^[a-z0-9-]+$/),
-          name: fieldNameSchema,
+          name: z.string().min(1),
           type: fieldTypeSchema.default("text"),
           required: z.boolean().optional().default(false),
           options: fieldOptionsSchema.optional().default({}),
@@ -302,33 +275,19 @@ const nodeOperationInputSchema = z.discriminatedUnion("kind", [
   z.object({
     kind: z.literal("move"),
     nodeId: z.string(),
-    // Exactly one of parentNodeId / parentNodeRef (a ref created earlier in this CR).
-    parentNodeId: z.string().optional(),
-    parentNodeRef: z.string().min(1).optional(),
+    parentNodeId: z.string(),
     position: z.number().int().optional(),
   }),
 ]);
 
 const createNodeChangeRequestInputSchema = z.object({
-  message: z
-    .string()
-    .optional()
-    .default("Update node tree")
-    .describe(
-      'Explanation shown to the human reviewer. Write a conventional-commit style subject — imperative verb + what + why, e.g. "Reorganize marketing docs under a Campaigns folder".',
-    ),
+  message: z.string().optional().default("Update node tree"),
   submittedBy: z.string().optional().default("local-producer"),
   operations: z.array(nodeOperationInputSchema).min(1),
 });
 
 const createDeleteChangeRequestInputSchema = z.object({
-  message: z
-    .string()
-    .optional()
-    .default("Delete record")
-    .describe(
-      'Explanation shown to the human reviewer. Say what is being removed and why, e.g. "Archive duplicate contact — merged into Acme Corp".',
-    ),
+  message: z.string().optional().default("Delete record"),
   submittedBy: z.string().optional().default("local-producer"),
   // Only "archive" is supported — hard delete after retention was never
   // implemented, so the API no longer accepts it (breaking change).
@@ -336,18 +295,8 @@ const createDeleteChangeRequestInputSchema = z.object({
 });
 
 const reviseOperationInputSchema = z.object({
-  fields: z
-    .record(z.string(), z.unknown())
-    .describe(
-      "Updated field values keyed by field slug. If you set the base's PRIMARY field (its first field), keep it a short human-readable name — it is the record's display title everywhere.",
-    ),
-  message: z
-    .string()
-    .optional()
-    .default("Revise operation")
-    .describe(
-      'Explanation shown to the human reviewer. Write a conventional-commit style subject — imperative verb + what + why, e.g. "Update deal stage to qualified — demo booked for July 8".',
-    ),
+  fields: z.record(z.string(), z.unknown()),
+  message: z.string().optional().default("Revise operation"),
   author: z.string().optional().default("local-producer"),
   baseCommitId: z.string().optional(),
 });
@@ -407,16 +356,9 @@ const authMemberSchema = z.object({
 });
 
 const authInfoSchema = z.object({
-  /** The space this request is scoped to (explicit `x-busabase-space` header, else the default). */
   space: authSpaceSchema,
   user: authUserSchema,
   member: authMemberSchema,
-  /**
-   * Every space the authenticated user belongs to. An API key is user-scoped, not
-   * space-scoped — when this has more than one entry, callers should confirm the
-   * intended space and target it explicitly via the `x-busabase-space` header.
-   */
-  spaces: z.array(authSpaceSchema),
 });
 
 export type AuthInfo = z.infer<typeof authInfoSchema>;
@@ -436,7 +378,6 @@ export {
   agentTaskSchema,
   searchResultSchema,
   searchResponseSchema,
-  liveEventSchema,
   auditActionSchema,
   auditEventSchema,
   createAuditEventInputSchema,

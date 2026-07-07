@@ -1,8 +1,6 @@
 import { Redirect, useRouter } from "expo-router";
 import { Cloud, Server } from "lucide-react-native";
-import { useState } from "react";
 import { Image, StyleSheet, Text, useColorScheme, View } from "react-native";
-import { signInWithBusabaseCloud } from "~/auth/oauth";
 import { NativeLoadingState, NativeScreen } from "~/components/native-screen";
 import { Button } from "~/components/ui/Button";
 import { useConnection } from "~/connection/connection-store";
@@ -13,9 +11,7 @@ export default function ConnectionScreen() {
   const router = useRouter();
   const tokens = useTokens();
   const scheme = useColorScheme();
-  const { connectCloud, state } = useConnection();
-  const [cloudLoading, setCloudLoading] = useState(false);
-  const [cloudError, setCloudError] = useState<string | null>(null);
+  const { state } = useConnection();
   const logoSource =
     scheme === "dark"
       ? require("../assets/splash-icon-dark.png")
@@ -33,20 +29,6 @@ export default function ConnectionScreen() {
     return <Redirect href="/drawer/inbox" />;
   }
 
-  const handleCloudConnect = async () => {
-    setCloudError(null);
-    setCloudLoading(true);
-    try {
-      const session = await signInWithBusabaseCloud();
-      await connectCloud(session);
-      router.replace("/drawer/inbox");
-    } catch (error) {
-      setCloudError(error instanceof Error ? error.message : "Could not connect Busabase Cloud");
-    } finally {
-      setCloudLoading(false);
-    }
-  };
-
   return (
     <NativeScreen title="Busabase" subtitle="Connect to a Busabase workspace">
       <View style={[styles.hero, { backgroundColor: tokens.card, borderColor: tokens.border }]}>
@@ -55,28 +37,19 @@ export default function ConnectionScreen() {
           Review change requests on the go
         </Text>
         <Text style={[typography.body, { color: tokens.mutedForeground }]}>
-          Sign in to Busabase Cloud, or connect a self-hosted Busabase server.
+          Start with a self-hosted Busabase server. Cloud connection stays visible for the future
+          but is disabled in this MVP.
         </Text>
       </View>
 
       <View style={styles.actions}>
-        <Button
-          label="Connect Busabase Cloud"
-          loading={cloudLoading}
-          fullWidth
-          onPress={handleCloudConnect}
-        />
+        <Button label="Connect Busabase Cloud" disabled fullWidth />
         <View style={[styles.actionNote, { borderColor: tokens.border }]}>
-          <Cloud size={18} color={tokens.primary} />
+          <Cloud size={18} color={tokens.mutedForeground} />
           <Text style={[typography.small, { color: tokens.mutedForeground }]}>
-            Opens busabase.com for sign in, then returns to this app with a secure session.
+            Cloud auth is planned after the self-hosted review loop is stable.
           </Text>
         </View>
-        {cloudError ? (
-          <Text style={[typography.small, styles.error, { color: tokens.destructive }]}>
-            {cloudError}
-          </Text>
-        ) : null}
 
         <Button
           label="Connect Self-hosted Busabase"
@@ -126,5 +99,4 @@ const styles = StyleSheet.create({
     alignItems: "flex-start",
     gap: 10,
   },
-  error: { marginTop: -4 },
 });

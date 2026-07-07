@@ -1,4 +1,4 @@
-import { eventIterator, oc } from "@orpc/contract";
+import { oc } from "@orpc/contract";
 import { attachmentsContract } from "open-domains/attachments/contract";
 import { z } from "zod";
 import { assetsContract } from "../domains/assets/contract";
@@ -23,27 +23,12 @@ import {
   createCommentInputSchema,
   createNodeChangeRequestInputSchema,
   listInputSchema,
-  liveEventSchema,
   nodeSchema,
   reviewChangeRequestInputSchema,
   reviseOperationInputSchema,
   searchInputSchema,
   searchResponseSchema,
 } from "./schemas";
-
-// Per-item outcome for the batch review/merge endpoints. Failures are isolated:
-// one bad change request records an `error` and the rest still process, so an agent
-// acting on "just merge them all" gets a full report instead of an abort.
-const changeRequestBatchResultSchema = z.object({
-  results: z.array(
-    z.object({
-      changeRequestId: z.string(),
-      ok: z.boolean(),
-      status: z.string().optional(),
-      error: z.string().optional(),
-    }),
-  ),
-});
 
 export const busabaseContractRoutes = {
   auth: {
@@ -52,9 +37,9 @@ export const busabaseContractRoutes = {
         method: "GET",
         path: "/auth",
         tags: ["Auth"],
-        summary: "Verify auth and get the targeted space, user, membership, and all spaces",
+        summary: "Verify auth and get active space, user, and membership",
         successDescription:
-          "The space this request targets, the acting user, their membership, and every space the user belongs to (`spaces`). Open source returns the local space/user; the cloud resolves the real ones from the user API key — when `spaces` has more than one entry, target a specific space with the `x-busabase-space` header instead of relying on the default.",
+          "The active space, acting user, and the user's membership. Open source returns the local space/user; the cloud resolves the real ones from the user API key.",
       })
       .output(authInfoSchema),
   },
@@ -165,11 +150,6 @@ export const busabaseContractRoutes = {
       })
       .output(z.array(agentTaskSchema)),
   },
-  live: {
-    // RPC-only by design: no `.route(...)`, so OpenAPI generation and MCP tool
-    // discovery skip this long-lived Event Iterator while `/api/rpc` stays typed.
-    subscribe: oc.output(eventIterator(liveEventSchema)),
-  },
   bases: baseContract,
   skills: skillContract,
   docs: docContract,
@@ -207,21 +187,6 @@ export const busabaseContractRoutes = {
       })
       .input(reviewChangeRequestInputSchema.extend({ changeRequestId: z.string() }))
       .output(changeRequestSchema),
-    reviewMany: oc
-      .route({
-        method: "POST",
-        path: "/change-requests/reviews",
-        tags: ["Change Requests"],
-        summary: "Review many change requests",
-        successDescription:
-          "Per-change-request review results (failures isolated — one bad id does not abort the rest).",
-      })
-      .input(
-        reviewChangeRequestInputSchema.extend({
-          changeRequestIds: z.array(z.string()).min(1).max(100),
-        }),
-      )
-      .output(changeRequestBatchResultSchema),
     close: oc
       .route({
         method: "POST",
@@ -248,17 +213,6 @@ export const busabaseContractRoutes = {
           view: viewSchema.nullable(),
         }),
       ),
-    mergeMany: oc
-      .route({
-        method: "POST",
-        path: "/change-requests/merge",
-        tags: ["Change Requests"],
-        summary: "Merge many change requests",
-        successDescription:
-          "Per-change-request merge results (each merged in its own transaction; failures isolated).",
-      })
-      .input(z.object({ changeRequestIds: z.array(z.string()).min(1).max(100) }))
-      .output(changeRequestBatchResultSchema),
   },
   operations: {
     revise: oc
@@ -312,7 +266,6 @@ export {
   createCommentInputSchema,
   createDeleteChangeRequestInputSchema,
   listInputSchema,
-  liveEventSchema,
   nodeSchema,
   operationSchema,
   reviewChangeRequestInputSchema,

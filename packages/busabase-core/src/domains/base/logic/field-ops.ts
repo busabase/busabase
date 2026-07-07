@@ -12,7 +12,6 @@ import {
 } from "busabase-contract/domains/base/contract/base-schemas";
 import type { FieldType } from "busabase-contract/types";
 import { and, eq, isNull } from "drizzle-orm";
-import { type iString, iStringFromText, iStringToText } from "openlib/i18n/i-string";
 import type { z } from "zod";
 import { resolveActorId } from "../../../context";
 import { getDb } from "../../../db";
@@ -23,19 +22,14 @@ import {
   busabaseOperations,
 } from "../../../db/schema";
 import { insertAuditEvent } from "../../../logic/audit";
-import {
-  closeChangeRequest,
-  getChangeRequest,
-  recordMergedOperation,
-} from "../../../logic/cr-lifecycle";
-import { CURRENT_USER_ID, id, now } from "../../../logic/kernel";
+import { closeChangeRequest, getChangeRequest } from "../../../logic/cr-lifecycle";
+import { id, now } from "../../../logic/kernel";
 import { ensureReady } from "../../../logic/seed";
 import { fieldSchema } from "../../../logic/store";
 import { isSystemFieldType } from "../field-types";
 import { busabaseFieldValues } from "../schema";
 import { ConversionNotSupportedError, convertFieldValue } from "../utils/field-conversion";
 import { getBase } from "./queries";
-import { resolveRelationFieldOptions } from "./relation-options";
 
 export {
   convertFieldChangeRequestInputSchema,
@@ -56,8 +50,7 @@ export const createBaseField = async (baseId: string, input: z.infer<typeof fiel
     throw new Error(`Base not found: ${baseId}`);
   }
   const parsed = fieldSchema.parse(input);
-  const options = await resolveRelationFieldOptions(db, parsed.options);
-  if (parsed.type === "relation" && !options.targetBaseId) {
+  if (parsed.type === "relation" && !parsed.options.targetBaseId) {
     throw new Error("Relation field requires a target Base");
   }
   const [existing] = await db
@@ -79,34 +72,21 @@ export const createBaseField = async (baseId: string, input: z.infer<typeof fiel
     id: id("bsf"),
     baseId: base.id,
     slug: parsed.slug,
-    name: iStringToText(parsed.name),
+    name: parsed.name,
     type: parsed.type,
     required: parsed.required,
     position: fieldCount,
-    options,
+    options: parsed.options,
   });
   const updatedBase = await getBase(base.id);
   if (!updatedBase) {
     throw new Error("Failed to create field");
   }
-  // Record the field add as an auto-merged ChangeRequest (audit + history +
-  // rollback), replacing the old bespoke `field.created` audit action.
-  await recordMergedOperation({
-    operation: "base_add_field",
-    targetType: "base",
+  // Direct create (no change request) — record it so the audit trail is complete.
+  await insertAuditEvent(db, {
+    action: "field.created",
     baseId: base.id,
-    fields: {
-      name: parsed.name,
-      slug: parsed.slug,
-      type: parsed.type,
-      required: parsed.required,
-      options: parsed.options,
-    },
-    message: `Add field ${parsed.slug}`,
-    submittedBy: resolveActorId(CURRENT_USER_ID),
-    reviewPolicySnapshot: base.reviewPolicy,
-    sourceMeta: { subject: "base_field", fieldSlug: parsed.slug },
-    auditMetadata: { fieldSlug: parsed.slug },
+    metadata: { slug: parsed.slug, name: parsed.name, type: parsed.type },
   });
   return updatedBase;
 };
@@ -123,8 +103,7 @@ export const createFieldChangeRequest = async (
   }
 
   const parsed = createFieldChangeRequestInputSchema.parse(input);
-  const options = await resolveRelationFieldOptions(db, parsed.options);
-  if (parsed.type === "relation" && !options.targetBaseId) {
+  if (parsed.type === "relation" && !parsed.options.targetBaseId) {
     throw new Error("Relation field requires a target Base");
   }
   const [existing] = await db
@@ -151,7 +130,7 @@ export const createFieldChangeRequest = async (
     slug: parsed.slug,
     type: parsed.type,
     required: parsed.required,
-    options,
+    options: parsed.options,
   };
 
   await db.insert(busabaseCommits).values({
@@ -250,7 +229,7 @@ export const createDeleteFieldChangeRequest = async (
   const fields = {
     fieldId: field.id,
     slug: field.slug,
-    name: iStringFromText(field.name),
+    name: field.name,
     type: field.type,
     required: field.required,
     options: field.options,
@@ -321,7 +300,7 @@ export const createDeleteFieldChangeRequest = async (
 export const createUpdateFieldChangeRequest = async (
   baseId: string,
   fieldId: string,
-  patch: { name?: iString; required?: boolean; options?: Record<string, unknown> },
+  patch: { name?: string; required?: boolean; options?: Record<string, unknown> },
   submittedBy = "local-editor",
   message?: string,
 ) => {
@@ -344,17 +323,13 @@ export const createUpdateFieldChangeRequest = async (
   const operationId = id("opr");
   const commitId = id("cmt");
   const timestamp = now();
-  const options =
-    patch.options !== undefined
-      ? await resolveRelationFieldOptions(db, patch.options)
-      : field.options;
   const fields = {
     fieldId: field.id,
     slug: field.slug,
-    name: patch.name ?? iStringFromText(field.name),
+    name: patch.name ?? field.name,
     type: field.type,
     required: patch.required ?? field.required,
-    options,
+    options: patch.options !== undefined ? patch.options : field.options,
   };
 
   await db.insert(busabaseCommits).values({
@@ -746,7 +721,7 @@ export const createRestoreFieldChangeRequest = async (
   const fields = {
     fieldId: field.id,
     slug: field.slug,
-    name: iStringFromText(field.name),
+    name: field.name,
     type: field.type,
     required: field.required,
     options: field.options,

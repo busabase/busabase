@@ -4,7 +4,6 @@ import { type ReactNode, useMemo } from "react";
 import { fmt, useCoreI18n } from "../../../i18n";
 import {
   changeRequestStatusLabel,
-  getChangeRequestMessage,
   getChangeRequestOperationLabel,
   getChangeRequestRiskHints,
   getChangeRequestScopeName,
@@ -143,14 +142,14 @@ function InboxList({
             items: openCreatedChangeRequests.map((changeRequest) => (
               <ReviewChangeRequestRow changeRequest={changeRequest} key={changeRequest.id} />
             )),
-            title: messages.inbox.openChangeRequests,
+            title: "Open change requests",
           },
           {
             count: closedCreatedChangeRequests.length,
             items: closedCreatedChangeRequests.map((changeRequest) => (
               <ReviewChangeRequestRow changeRequest={changeRequest} key={changeRequest.id} />
             )),
-            title: messages.inbox.closedChangeRequests,
+            title: "Closed change requests",
           },
         ]
       : [
@@ -212,11 +211,9 @@ function BusabaseListToolbar({
 }
 
 function ReviewChangeRequestRow({ changeRequest }: { changeRequest: ChangeRequestVO }) {
-  const messages = useCoreI18n();
   const updatedAt = formatListTime(changeRequest.updatedAt);
   const riskHints = getChangeRequestRiskHints(changeRequest);
-  const statusLabel = changeRequestStatusLabel(changeRequest.status, messages);
-  const message = getChangeRequestMessage(changeRequest);
+  const statusLabel = changeRequestStatusLabel(changeRequest.status);
 
   return (
     <Link
@@ -230,7 +227,7 @@ function ReviewChangeRequestRow({ changeRequest }: { changeRequest: ChangeReques
             title={statusLabel}
           />
           <div className="truncate font-semibold text-sm leading-5">
-            {getChangeRequestTitle(changeRequest, messages)}
+            {getChangeRequestTitle(changeRequest)}
           </div>
           {riskHints.length > 0 ? (
             <span className="hidden shrink-0 rounded-full border border-amber-200 bg-amber-50 px-1.5 py-0.5 font-medium text-[11px] text-amber-800 sm:inline-flex">
@@ -238,20 +235,17 @@ function ReviewChangeRequestRow({ changeRequest }: { changeRequest: ChangeReques
             </span>
           ) : null}
         </div>
-        {message ? (
-          <div className="mt-0.5 truncate text-muted-foreground text-xs">{message}</div>
-        ) : null}
         <div className="mt-1 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-muted-foreground text-xs">
           <span className="truncate">{getChangeRequestScopeName(changeRequest)}</span>
           <span>·</span>
-          <span>{getChangeRequestOperationLabel(changeRequest, messages)}</span>
+          <span>{getChangeRequestOperationLabel(changeRequest)}</span>
           <span>·</span>
           <span>{statusLabel}</span>
         </div>
       </div>
       <div className="flex min-w-0 items-center justify-between gap-3 text-muted-foreground text-xs md:justify-end">
         <span className="hidden min-w-0 truncate md:block">
-          {getChangeRequestSummary(changeRequest, messages)}
+          {getChangeRequestSummary(changeRequest)}
         </span>
         <span className="shrink-0 font-mono text-[11px] transition-colors group-hover:text-foreground">
           {updatedAt}
@@ -272,10 +266,9 @@ export function ActivityView({
   emptyGuide?: ReactNode;
   records: RecordVO[];
 }) {
-  const messages = useCoreI18n();
   const events = useMemo(
-    () => buildActivityEvents(changeRequests, records, auditEvents, messages),
-    [auditEvents, changeRequests, records, messages],
+    () => buildActivityEvents(changeRequests, records, auditEvents),
+    [auditEvents, changeRequests, records],
   );
   const changeRequestCount = changeRequests.length;
   const operationCount = changeRequests.reduce(
@@ -291,8 +284,8 @@ export function ActivityView({
     <BusabaseList
       empty={
         <EmptyState
-          title={messages.activity.noActivityTitle}
-          body={messages.activity.noActivityBody}
+          title="No activity yet"
+          body="Change requests, operations, commits, and record views will appear here."
           action={emptyGuide}
         />
       }
@@ -300,24 +293,20 @@ export function ActivityView({
         {
           count: recentEvents.length,
           items: recentEvents.map((event) => <ActivityRow event={event} key={event.id} />),
-          title: messages.activity.today,
+          title: "Today",
         },
         {
           count: earlierEvents.length,
           items: earlierEvents.map((event) => <ActivityRow event={event} key={event.id} />),
-          title: messages.activity.earlier,
+          title: "Earlier",
         },
       ].filter((group) => group.count > 0)}
       toolbar={
         <>
-          <div className="font-medium text-sm">{messages.activity.workspaceActivity}</div>
+          <div className="font-medium text-sm">Workspace activity</div>
           <div className="text-muted-foreground text-xs">
-            {fmt(messages.activity.activityStats, {
-              auditEvents: auditEvents.length,
-              changeRequests: changeRequestCount,
-              operations: operationCount,
-              records: records.length,
-            })}
+            {changeRequestCount} change requests · {operationCount} operations · {records.length}{" "}
+            records · {auditEvents.length} audit events
           </div>
         </>
       }

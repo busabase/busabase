@@ -6,19 +6,20 @@ import {
   type BusabaseDashboardChrome,
   BusabaseDashboardShell as CoreDashboardShell,
 } from "busabase-core/dashboard/dashboard-shell";
+import { coreLocaleOptions } from "busabase-core/i18n";
 import { SidebarMenu, SidebarMenuButton, SidebarMenuItem } from "kui/sidebar";
 import { Network } from "lucide-react";
 import Image from "next/image";
 import { useAddDemoParam } from "openlib/ui/dashboard";
 import { LanguageSwitcher } from "openlib/ui/LanguageSwitcher";
 import type { ReactNode } from "react";
-import { useMemo } from "react";
 import { useLocation } from "wouter";
 import { useSPA } from "~/components/spa/spa-context";
-import { getLanguageOptions } from "~/i18n/config";
-import { getBusabaseAppLL } from "~/lib/i18n";
 
 const BUSABASE_LOGO = "/icon.svg";
+
+/** "Auto" follows the browser language; listed first in the switcher. */
+const AUTO_LANGUAGE_OPTION = { code: "auto", name: "Auto", nativeName: "Auto" };
 
 interface ProductReadyDashboardShellProps {
   children: ReactNode;
@@ -52,22 +53,9 @@ export function ProductReadyDashboardShell({
   const { activeSpace, spaces, unreadCount, user } = useSPA();
   const [location, navigate] = useLocation();
   const addDemoParam = useAddDemoParam();
-  const LL = useMemo(() => getBusabaseAppLL(locale), [locale]);
-  const languageOptions = useMemo(
-    () => [
-      { code: "auto", name: LL.shell.auto(), nativeName: LL.shell.auto() },
-      ...getLanguageOptions(locale === "zh-CN" || locale === "ja" ? locale : "en"),
-    ],
-    [LL, locale],
-  );
 
   const chrome: BusabaseDashboardChrome = {
-    activeSpace: {
-      id: activeSpace.id,
-      logo: BUSABASE_LOGO,
-      name: activeSpace.name,
-      plan: LL.shell.localPlan(),
-    },
+    activeSpace: { id: activeSpace.id, logo: BUSABASE_LOGO, name: activeSpace.name, plan: "Local" },
     footerExtra: (
       <div className="flex flex-col gap-1">
         <SidebarMenu>
@@ -76,10 +64,10 @@ export function ProductReadyDashboardShell({
               className="mx-2 w-[calc(100%-1rem)]"
               isActive={location.split("?")[0] === "/graph"}
               onClick={() => navigate(addDemoParam("/graph"))}
-              tooltip={LL.shell.graphView()}
+              tooltip="Graph View"
             >
               <Network />
-              <span>{LL.shell.graphView()}</span>
+              <span>Graph View</span>
             </SidebarMenuButton>
           </SidebarMenuItem>
         </SidebarMenu>
@@ -88,7 +76,7 @@ export function ProductReadyDashboardShell({
           <LanguageSwitcher
             className="w-full justify-start"
             currentLang={languagePref}
-            languages={languageOptions}
+            languages={[AUTO_LANGUAGE_OPTION, ...coreLocaleOptions]}
             mode="with-text"
             onLanguageChange={onLocaleChange}
           />
@@ -101,7 +89,7 @@ export function ProductReadyDashboardShell({
       id: space.id,
       logo: BUSABASE_LOGO,
       name: space.name,
-      plan: LL.shell.localPlan(),
+      plan: "Local",
     })),
     unreadCount,
     user: { avatar: user.avatar, email: user.email, name: user.name },
@@ -127,21 +115,21 @@ export function ProductReadyDashboardShell({
         <div className="grid flex-1 text-left leading-tight group-data-[collapsible=icon]:hidden">
           <span className="truncate font-medium">Busabase</span>
           <span className="truncate text-xs text-muted-foreground opacity-70">
-            {LL.shell.approvalFirstKb()}
+            Approval-first KB
           </span>
         </div>
       </a>
     ),
     spaceSelectorLabels: {
-      addSpace: LL.shell.addWorkspace(),
-      inviteMembers: LL.shell.inviteMembers(),
-      settings: LL.shell.settings(),
-      spaces: LL.shell.workspaces(),
+      addSpace: "Add workspace",
+      inviteMembers: "Invite members",
+      settings: "Settings",
+      spaces: "Workspaces",
     },
     userMenuLabels: {
-      accountSettings: LL.shell.accountSettings(),
-      logOut: LL.shell.logOut(),
-      notifications: LL.shell.notifications(),
+      accountSettings: "Account settings",
+      logOut: "Log out",
+      notifications: "Notifications",
     },
   };
 

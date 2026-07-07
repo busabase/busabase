@@ -1,7 +1,6 @@
 import type { AuditEventVO, ChangeRequestVO, RecordVO } from "busabase-contract/types";
 import { ChevronRight } from "lucide-react";
 import { SPALink as Link } from "openlib/ui/dashboard";
-import { type CoreI18nMessages, fmt, useCoreI18n } from "../../../i18n";
 import {
   getChangeRequestScopeName,
   getChangeRequestSummary,
@@ -51,70 +50,35 @@ export const getAuditEventTitle = (event: AuditEventVO) => {
   return "Change request merged";
 };
 
-export const getLocalizedAuditEventTitle = (event: AuditEventVO, messages: CoreI18nMessages) => {
-  if (event.action === "record.viewed") {
-    return fmt(messages.activity.recordViewed, {
-      title: String(event.metadata.title ?? shortIdentifier(event.recordId)),
-    });
-  }
-  if (event.action === "change_request.created") {
-    return messages.activity.createChangeRequestOpened;
-  }
-  if (event.action === "change_request.updated") {
-    return messages.activity.updateChangeRequestOpened;
-  }
-  if (event.action === "change_request.deleted") {
-    return messages.activity.deleteChangeRequestOpened;
-  }
-  if (event.action === "change_request.reviewed") {
-    return fmt(messages.activity.changeRequestReviewed, {
-      verdict: String(event.metadata.verdict ?? "reviewed"),
-    });
-  }
-  return messages.activity.changeRequestMerged;
-};
-
 export const buildActivityEvents = (
   changeRequests: ChangeRequestVO[],
   records: RecordVO[],
   auditEvents: AuditEventVO[],
-  messages?: CoreI18nMessages,
 ) => {
   const changeRequestEvents = changeRequests.flatMap((changeRequest): ActivityEvent[] => {
     const baseEvents: ActivityEvent[] = [
       {
-        body: `${getChangeRequestSummary(changeRequest, messages)} · ${getChangeRequestScopeName(changeRequest)}`,
+        body: `${getChangeRequestSummary(changeRequest)} · ${getChangeRequestScopeName(changeRequest)}`,
         href: `/inbox/${changeRequest.id}`,
         id: `changeRequest:${changeRequest.id}:updated`,
         timestamp: changeRequest.updatedAt,
         title:
           changeRequest.status === "merged"
-            ? fmt(messages?.activity.changeRequestMergedTitle ?? "Change request merged: {title}", {
-                title: getChangeRequestTitle(changeRequest, messages),
-              })
+            ? `Change request merged: ${getChangeRequestTitle(changeRequest)}`
             : changeRequest.status === "approved"
-              ? fmt(
-                  messages?.activity.changeRequestApprovedTitle ??
-                    "Change request approved: {title}",
-                  { title: getChangeRequestTitle(changeRequest, messages) },
-                )
-              : fmt(
-                  messages?.activity.changeRequestOpenedTitle ?? "Change request opened: {title}",
-                  {
-                    title: getChangeRequestTitle(changeRequest, messages),
-                  },
-                ),
+              ? `Change request approved: ${getChangeRequestTitle(changeRequest)}`
+              : `Change request opened: ${getChangeRequestTitle(changeRequest)}`,
         tone: "change_request",
       },
     ];
 
     const operationEvents = changeRequest.operations.map(
       (operation): ActivityEvent => ({
-        body: `${operationMeta[operation.operation].label} · ${getOperationImpact(operation)} · ${fmt(messages?.activity.commitRef ?? "commit {id}", { id: shortIdentifier(operation.headCommitId) })}`,
+        body: `${operationMeta[operation.operation].label} · ${getOperationImpact(operation)} · commit ${shortIdentifier(operation.headCommitId)}`,
         href: `/inbox/${changeRequest.id}/${operation.id}`,
         id: `operation:${operation.id}`,
         timestamp: operation.updatedAt,
-        title: getOperationTitle(operation, changeRequest.base),
+        title: getOperationTitle(operation),
         tone: operation.status === "pending" ? "operation" : "commit",
       }),
     );
@@ -124,18 +88,14 @@ export const buildActivityEvents = (
 
   const recordEvents = records.map(
     (record): ActivityEvent => ({
-      body: `${record.base.name} · ${fmt(messages?.activity.headCommit ?? "head commit {id}", { id: shortIdentifier(record.headCommitId) })}`,
+      body: `${record.base.name} · head commit ${shortIdentifier(record.headCommitId)}`,
       href: `/base/${record.base.slug}/${record.id}`,
       id: `record:${record.id}`,
       timestamp: record.updatedAt,
       title:
         record.status === "archived"
-          ? fmt(messages?.activity.recordArchivedTitle ?? "Record archived: {title}", {
-              title: getRecordTitle(record),
-            })
-          : fmt(messages?.activity.recordUpdatedTitle ?? "Record updated: {title}", {
-              title: getRecordTitle(record),
-            }),
+          ? `Record archived: ${getRecordTitle(record)}`
+          : `Record updated: ${getRecordTitle(record)}`,
       tone: "record",
     }),
   );
@@ -150,7 +110,7 @@ export const buildActivityEvents = (
           : "/activity",
       id: `audit:${event.id}`,
       timestamp: event.createdAt,
-      title: messages ? getLocalizedAuditEventTitle(event, messages) : getAuditEventTitle(event),
+      title: getAuditEventTitle(event),
       tone: "audit",
     }),
   );
@@ -161,15 +121,6 @@ export const buildActivityEvents = (
 };
 
 export function ActivityRow({ event }: { event: ActivityEvent }) {
-  const messages = useCoreI18n();
-  const toneLabel: Record<ActivityEventTone, string> = {
-    audit: messages.activity.audit,
-    change_request: messages.activity.changeRequest,
-    commit: messages.activity.commit,
-    operation: messages.activity.operation,
-    record: messages.activity.record,
-  };
-
   return (
     <Link
       className="group grid min-h-16 items-center gap-3 px-3 py-2.5 text-sm transition-colors hover:bg-accent/25 md:grid-cols-[116px_minmax(0,1fr)_120px]"
@@ -179,7 +130,7 @@ export function ActivityRow({ event }: { event: ActivityEvent }) {
         <span
           className={`inline-flex rounded-full px-2 py-0.5 font-medium text-xs capitalize ${activityTone[event.tone]}`}
         >
-          {toneLabel[event.tone]}
+          {event.tone}
         </span>
       </div>
       <div className="min-w-0">

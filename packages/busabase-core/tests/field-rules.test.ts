@@ -73,15 +73,7 @@ describe("validateRecordFields — every field type has a rule path", () => {
     markdown: "# title",
     html: "<b>x</b>",
     code: "const x = 1;",
-    attachment: [
-      {
-        id: "att_1",
-        url: "https://cdn/x.png",
-        fileName: "x.png",
-        mimeType: "image/png",
-        size: 100,
-      },
-    ],
+    attachment: { url: "x" },
     relation: ["rec_1", "rec_2"],
     number: 42,
     date: "2026-06-24T00:00:00.000Z",
@@ -167,47 +159,6 @@ describe("validateRecordFields — rejects bad values per type", () => {
   it("ai_tags must be a list of strings", () => {
     expect(checkOne("ai_tags", ["x"])).toBeNull();
     expect(checkOne("ai_tags", "x")).toMatch(/list of tags/);
-  });
-  describe("attachment", () => {
-    const ref = (over: Record<string, unknown> = {}) => ({
-      id: "att_1",
-      url: "https://cdn/x.png",
-      fileName: "x.png",
-      mimeType: "image/png",
-      size: 1_000,
-      ...over,
-    });
-    it("accepts an array of well-formed refs (and an empty array)", () => {
-      expect(checkOne("attachment", [ref()])).toBeNull();
-      expect(checkOne("attachment", [])).toBeNull();
-    });
-    it("rejects a non-array value", () => {
-      expect(checkOne("attachment", ref())).toMatch(/list of attachments/);
-      expect(checkOne("attachment", "x")).toMatch(/list of attachments/);
-    });
-    it("rejects a malformed ref (missing/!typed fields)", () => {
-      expect(checkOne("attachment", [{ url: "x" }])).toMatch(/invalid attachment/);
-      expect(checkOne("attachment", [ref({ size: "big" })])).toMatch(/invalid attachment/);
-    });
-    it("enforces maxFiles", () => {
-      const opts = { options: { attachment: { maxFiles: 1 } } };
-      expect(checkOne("attachment", [ref()], opts)).toBeNull();
-      expect(checkOne("attachment", [ref(), ref({ id: "att_2" })], opts)).toMatch(/at most 1 file/);
-    });
-    it("enforces allowedMimeTypes", () => {
-      const opts = { options: { attachment: { allowedMimeTypes: ["image/png"] } } };
-      expect(checkOne("attachment", [ref()], opts)).toBeNull();
-      expect(checkOne("attachment", [ref({ mimeType: "application/pdf" })], opts)).toMatch(
-        /does not allow files of type application\/pdf/,
-      );
-    });
-    it("enforces the per-field maxFileSize and the 25MB ceiling", () => {
-      const opts = { options: { attachment: { maxFileSize: 2_000 } } };
-      expect(checkOne("attachment", [ref({ size: 2_000 })], opts)).toBeNull();
-      expect(checkOne("attachment", [ref({ size: 2_001 })], opts)).toMatch(/larger than/);
-      // No per-field limit → the absolute 25MB ceiling still applies.
-      expect(checkOne("attachment", [ref({ size: 25 * 1024 * 1024 + 1 })])).toMatch(/larger than/);
-    });
   });
   it.each(["text", "longtext", "markdown", "html", "code", "ai_summary"] as FieldType[])(
     "%s must be text",

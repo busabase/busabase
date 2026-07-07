@@ -1,9 +1,7 @@
 import type { BaseFieldVO, BaseVO, FieldType, RecordVO, ViewVO } from "busabase-contract/types";
-import { Pencil, RotateCcw } from "lucide-react";
-import { type iString, iStringIsEmpty, iStringParse, iStringTrim } from "openlib/i18n/i-string";
+import { RotateCcw } from "lucide-react";
 import { SPALink as Link } from "openlib/ui/dashboard";
 import { useState } from "react";
-import { fmt, useCoreI18n, useIString } from "../../../i18n";
 import { isDerivedFieldSlug } from "../helpers/change-request";
 import { createDefaultFieldOptions, fieldTypeOptions } from "../helpers/field";
 import type {
@@ -12,7 +10,6 @@ import type {
   ViewSubmitOptions,
 } from "../helpers/view-types";
 import { applyViewConfigToRecords, BusaBaseTable } from "./base-table";
-import { IStringNameInput } from "./i-string-input";
 import { EmptyState, PropertyRow, SidebarPanel } from "./primitives";
 import { SplitSubmitButton } from "./split-submit-button";
 
@@ -88,7 +85,6 @@ export function BaseSetupView({
   onCreateField,
   onRenameBase,
   onRestoreField,
-  onUpdateFieldName,
 }: {
   base: BaseVO | null;
   bases: BaseVO[];
@@ -104,20 +100,12 @@ export function BaseSetupView({
     options?: { mergeImmediately?: boolean },
   ) => Promise<void>;
   onRestoreField?: (base: BaseVO, fieldId: string) => Promise<void>;
-  onUpdateFieldName?: (
-    base: BaseVO,
-    fieldId: string,
-    name: iString,
-    options?: { mergeImmediately?: boolean },
-  ) => Promise<void>;
 }) {
-  const messages = useCoreI18n();
-  const resolveIString = useIString();
   const [baseName, setBaseName] = useState(base?.name ?? "");
   const [baseDescription, setBaseDescription] = useState(base?.description ?? "");
   const [isRenameSaving, setIsRenameSaving] = useState(false);
   const [renameError, setRenameError] = useState<string | null>(null);
-  const [fieldName, setFieldName] = useState<iString>("");
+  const [fieldName, setFieldName] = useState("");
   const [fieldSlug, setFieldSlug] = useState("");
   const [fieldType, setFieldType] = useState<FieldType>("text");
   const [targetBaseId, setTargetBaseId] = useState("");
@@ -134,19 +122,12 @@ export function BaseSetupView({
     affectedRecordIds?: string[];
   } | null>(null);
   const [restoringFieldId, setRestoringFieldId] = useState<string | null>(null);
-  const [editingFieldId, setEditingFieldId] = useState<string | null>(null);
-  const [editingFieldName, setEditingFieldName] = useState<iString>("");
-  const [isFieldRenameSaving, setIsFieldRenameSaving] = useState(false);
-  const [fieldRenameError, setFieldRenameError] = useState<string | null>(null);
 
   if (!base) {
     return (
       <div className="flex-1 p-4">
         <section>
-          <EmptyState
-            title={messages.base.baseNotFoundTitle}
-            body={messages.base.baseNotFoundBody}
-          />
+          <EmptyState title="Base not found" body="The requested Base does not exist." />
         </section>
       </div>
     );
@@ -155,7 +136,7 @@ export function BaseSetupView({
   const submitRename = async (options?: { mergeImmediately?: boolean }) => {
     const name = baseName.trim();
     if (!name) {
-      setRenameError(messages.base.baseNameRequired);
+      setRenameError("Base name is required.");
       return;
     }
     setIsRenameSaving(true);
@@ -163,21 +144,21 @@ export function BaseSetupView({
     try {
       await onRenameBase(base, { name, description: baseDescription.trim() }, options);
     } catch (error) {
-      setRenameError(error instanceof Error ? error.message : messages.base.failedRenameBase);
+      setRenameError(error instanceof Error ? error.message : "Failed to rename base");
     } finally {
       setIsRenameSaving(false);
     }
   };
 
   const submit = async (options?: { mergeImmediately?: boolean }) => {
-    const name = iStringTrim(fieldName);
+    const name = fieldName.trim();
     const slug = fieldSlug.trim();
-    if (iStringIsEmpty(name) || !slug) {
-      setFormError(messages.base.fieldNameSlugRequired);
+    if (!name || !slug) {
+      setFormError("Field name and slug are required.");
       return;
     }
     if (fieldType === "relation" && !targetBaseId) {
-      setFormError(messages.base.relationTargetRequired);
+      setFormError("Relation fields need a target Base.");
       return;
     }
 
@@ -211,7 +192,7 @@ export function BaseSetupView({
       setIsRequired(false);
       setIsMultiple(true);
     } catch (error) {
-      const msg = error instanceof Error ? error.message : messages.base.failedAddField;
+      const msg = error instanceof Error ? error.message : "Failed to add field";
       setFormError(msg);
       // Surface structured error detail if the server returned record/choice ids.
       if (error && typeof error === "object" && "data" in error) {
@@ -222,25 +203,6 @@ export function BaseSetupView({
       }
     } finally {
       setIsSaving(false);
-    }
-  };
-
-  const submitFieldRename = async (fieldId: string, options?: { mergeImmediately?: boolean }) => {
-    if (!base || !onUpdateFieldName) return;
-    const name = iStringTrim(editingFieldName);
-    if (iStringIsEmpty(name)) {
-      setFieldRenameError("Field name is required.");
-      return;
-    }
-    setIsFieldRenameSaving(true);
-    setFieldRenameError(null);
-    try {
-      await onUpdateFieldName(base, fieldId, name, options);
-      setEditingFieldId(null);
-    } catch (error) {
-      setFieldRenameError(error instanceof Error ? error.message : "Failed to rename field");
-    } finally {
-      setIsFieldRenameSaving(false);
     }
   };
 
@@ -261,10 +223,10 @@ export function BaseSetupView({
         <div className="grid gap-6 px-6 py-4 xl:grid-cols-[minmax(0,1fr)_280px]">
           <div className="min-w-0 space-y-6">
             <div>
-              <div className="font-semibold text-sm">{messages.base.baseInfo}</div>
+              <div className="font-semibold text-sm">Base Info</div>
               <div className="mt-3 grid gap-3">
                 <label className="block">
-                  <span className="text-muted-foreground text-xs">{messages.common.name}</span>
+                  <span className="text-muted-foreground text-xs">Name</span>
                   <input
                     className="mt-1 h-8 w-full rounded-md border border-border/70 bg-background px-2.5 text-sm outline-none transition-colors focus:border-primary"
                     onChange={(event) => setBaseName(event.target.value)}
@@ -272,9 +234,7 @@ export function BaseSetupView({
                   />
                 </label>
                 <label className="block">
-                  <span className="text-muted-foreground text-xs">
-                    {messages.common.description}
-                  </span>
+                  <span className="text-muted-foreground text-xs">Description</span>
                   <textarea
                     className="mt-1 w-full rounded-md border border-border/70 bg-background px-2.5 py-1.5 text-sm outline-none transition-colors focus:border-primary resize-none"
                     onChange={(event) => setBaseDescription(event.target.value)}
@@ -287,13 +247,13 @@ export function BaseSetupView({
                 <SplitSubmitButton
                   disabled={isRenameSaving}
                   isPrimaryLoading={isRenameSaving}
-                  primaryLabel={messages.base.requestRename}
-                  primaryLoadingLabel={messages.common.submitting}
-                  secondaryLabel={messages.base.renameNow}
-                  secondaryLoadingLabel={messages.base.renaming}
+                  primaryLabel="Request Rename"
+                  primaryLoadingLabel="Submitting..."
+                  secondaryLabel="Rename Now"
+                  secondaryLoadingLabel="Renaming..."
                   onPrimary={() => submitRename()}
                   onSecondary={() => submitRename({ mergeImmediately: true })}
-                  hint={messages.common.requestReviewHint}
+                  hint="Request goes to your inbox for review. Now writes directly."
                 />
               </div>
               {renameError ? <div className="mt-2 text-red-700 text-sm">{renameError}</div> : null}
@@ -301,109 +261,67 @@ export function BaseSetupView({
 
             <div>
               <div className="mb-2 flex flex-wrap items-end justify-between gap-3">
-                <div className="font-semibold text-sm">{messages.common.fields}</div>
+                <div className="font-semibold text-sm">Fields</div>
                 <span className="rounded-full bg-muted/55 px-2.5 py-1 text-muted-foreground text-xs">
-                  {fmt(messages.base.fieldsCount, { count: base.fields.length })}
+                  {base.fields.length} fields
                 </span>
               </div>
               <div className="grid grid-cols-[minmax(0,1fr)_120px_84px_64px] gap-3 border-border/50 border-b px-2 py-2 text-muted-foreground text-xs">
-                <div>{messages.common.name}</div>
-                <div>{messages.base.type}</div>
-                <div>{messages.base.required}</div>
-                <div>{messages.base.order}</div>
+                <div>Name</div>
+                <div>Type</div>
+                <div>Required</div>
+                <div>Order</div>
               </div>
               {base.fields.map((field) => (
-                <div className="border-border/40 border-b" key={field.id}>
-                  <div className="group grid min-h-12 grid-cols-[minmax(0,1fr)_120px_84px_64px] items-center gap-3 rounded-md px-2 py-2 text-sm transition-colors hover:bg-muted/35">
-                    <div className="flex min-w-0 items-center gap-1.5">
-                      <div className="min-w-0">
-                        <div className="truncate font-medium">{resolveIString(field.name)}</div>
-                        {isDerivedFieldSlug(resolveIString(field.name), field.slug) ? null : (
-                          <div className="mt-0.5 truncate font-mono text-muted-foreground text-xs">
-                            {field.slug}
-                          </div>
-                        )}
+                <div
+                  className="grid min-h-12 grid-cols-[minmax(0,1fr)_120px_84px_64px] items-center gap-3 rounded-md border-border/40 border-b px-2 py-2 text-sm transition-colors hover:bg-muted/35"
+                  key={field.id}
+                >
+                  <div className="min-w-0">
+                    <div className="truncate font-medium">{field.name}</div>
+                    {isDerivedFieldSlug(field.name, field.slug) ? null : (
+                      <div className="mt-0.5 truncate font-mono text-muted-foreground text-xs">
+                        {field.slug}
                       </div>
-                      {onUpdateFieldName ? (
-                        <button
-                          aria-label={`Rename ${resolveIString(field.name)}`}
-                          className="shrink-0 rounded p-1 text-muted-foreground opacity-0 transition-opacity hover:text-foreground focus:opacity-100 group-hover:opacity-100"
-                          onClick={() => {
-                            setEditingFieldId(field.id === editingFieldId ? null : field.id);
-                            setEditingFieldName(field.name);
-                            setFieldRenameError(null);
-                          }}
-                          title="Rename field"
-                          type="button"
-                        >
-                          <Pencil size={12} />
-                        </button>
-                      ) : null}
-                    </div>
-                    <div>
-                      <span className="inline-flex max-w-full truncate rounded-full bg-muted/65 px-2 py-0.5 text-muted-foreground text-xs">
-                        {field.type}
-                      </span>
-                    </div>
-                    <div className="text-muted-foreground text-xs">
-                      {field.required ? messages.base.required : "-"}
-                    </div>
-                    <div className="font-mono text-muted-foreground text-xs">{field.position}</div>
+                    )}
                   </div>
-                  {editingFieldId === field.id ? (
-                    <div className="mb-2 rounded-md border border-border/60 bg-muted/20 p-3">
-                      <IStringNameInput onChange={setEditingFieldName} value={editingFieldName} />
-                      <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
-                        <button
-                          className="rounded-md border border-border/70 bg-background px-3 py-1.5 font-medium text-xs transition-colors hover:bg-accent"
-                          onClick={() => setEditingFieldId(null)}
-                          type="button"
-                        >
-                          Cancel
-                        </button>
-                        <SplitSubmitButton
-                          disabled={isFieldRenameSaving}
-                          isPrimaryLoading={isFieldRenameSaving}
-                          primaryLabel="Request Rename"
-                          primaryLoadingLabel="Submitting..."
-                          secondaryLabel="Rename Now"
-                          secondaryLoadingLabel="Renaming..."
-                          onPrimary={() => submitFieldRename(field.id)}
-                          onSecondary={() =>
-                            submitFieldRename(field.id, { mergeImmediately: true })
-                          }
-                          hint="Request goes to your inbox for review. Now writes directly."
-                        />
-                      </div>
-                      {fieldRenameError ? (
-                        <div className="mt-2 text-red-700 text-sm">{fieldRenameError}</div>
-                      ) : null}
-                    </div>
-                  ) : null}
+                  <div>
+                    <span className="inline-flex max-w-full truncate rounded-full bg-muted/65 px-2 py-0.5 text-muted-foreground text-xs">
+                      {field.type}
+                    </span>
+                  </div>
+                  <div className="text-muted-foreground text-xs">
+                    {field.required ? "Required" : "-"}
+                  </div>
+                  <div className="font-mono text-muted-foreground text-xs">{field.position}</div>
                 </div>
               ))}
             </div>
 
             <div>
-              <div className="font-semibold text-sm">{messages.base.addField}</div>
+              <div className="font-semibold text-sm">Add Field</div>
               <div className="mt-3 grid gap-3 md:grid-cols-2">
-                <IStringNameInput
-                  onChange={(next) => {
-                    setFieldName(next);
-                    if (!fieldSlug) {
-                      setFieldSlug(
-                        iStringParse(next)
-                          .trim()
-                          .toLowerCase()
-                          .replace(/[^a-z0-9]+/g, "-")
-                          .replace(/^-|-$/g, ""),
-                      );
-                    }
-                  }}
-                  value={fieldName}
-                />
                 <label className="block">
-                  <span className="text-muted-foreground text-xs">{messages.common.slug}</span>
+                  <span className="text-muted-foreground text-xs">Name</span>
+                  <input
+                    className="mt-1 h-8 w-full rounded-md border border-border/70 bg-background px-2.5 text-sm outline-none transition-colors focus:border-primary"
+                    onChange={(event) => {
+                      setFieldName(event.target.value);
+                      if (!fieldSlug) {
+                        setFieldSlug(
+                          event.target.value
+                            .trim()
+                            .toLowerCase()
+                            .replace(/[^a-z0-9]+/g, "-")
+                            .replace(/^-|-$/g, ""),
+                        );
+                      }
+                    }}
+                    value={fieldName}
+                  />
+                </label>
+                <label className="block">
+                  <span className="text-muted-foreground text-xs">Slug</span>
                   <input
                     className="mt-1 h-8 w-full rounded-md border border-border/70 bg-background px-2.5 font-mono text-sm outline-none transition-colors focus:border-primary"
                     onChange={(event) => setFieldSlug(event.target.value)}
@@ -411,7 +329,7 @@ export function BaseSetupView({
                   />
                 </label>
                 <label className="block">
-                  <span className="text-muted-foreground text-xs">{messages.base.type}</span>
+                  <span className="text-muted-foreground text-xs">Type</span>
                   <select
                     className="mt-1 h-8 w-full rounded-md border border-border/70 bg-background px-2.5 text-sm outline-none transition-colors focus:border-primary"
                     onChange={(event) => setFieldType(event.target.value as FieldType)}
@@ -426,7 +344,7 @@ export function BaseSetupView({
                 </label>
                 {fieldType === "code" ? (
                   <label className="block">
-                    <span className="text-muted-foreground text-xs">{messages.base.language}</span>
+                    <span className="text-muted-foreground text-xs">Language</span>
                     <select
                       className="mt-1 h-8 w-full rounded-md border border-border/70 bg-background px-2.5 font-mono text-sm outline-none transition-colors focus:border-primary"
                       onChange={(event) => setCodeLanguage(event.target.value)}
@@ -458,15 +376,13 @@ export function BaseSetupView({
                 ) : null}
                 {fieldType === "relation" ? (
                   <label className="block">
-                    <span className="text-muted-foreground text-xs">
-                      {messages.base.targetBase}
-                    </span>
+                    <span className="text-muted-foreground text-xs">Target Base</span>
                     <select
                       className="mt-1 h-8 w-full rounded-md border border-border/70 bg-background px-2.5 text-sm outline-none transition-colors focus:border-primary"
                       onChange={(event) => setTargetBaseId(event.target.value)}
                       value={targetBaseId}
                     >
-                      <option value="">{messages.base.selectBase}</option>
+                      <option value="">Select Base</option>
                       {bases.map((item) => (
                         <option key={item.id} value={item.id}>
                           {item.name}
@@ -477,7 +393,7 @@ export function BaseSetupView({
                 ) : null}
                 {fieldType === "number" ? (
                   <label className="block">
-                    <span className="text-muted-foreground text-xs">{messages.base.format}</span>
+                    <span className="text-muted-foreground text-xs">Format</span>
                     <select
                       className="mt-1 h-8 w-full rounded-md border border-border/70 bg-background px-2.5 text-sm outline-none transition-colors focus:border-primary"
                       onChange={(event) =>
@@ -485,14 +401,14 @@ export function BaseSetupView({
                       }
                       value={numberFormat}
                     >
-                      <option value="plain">{messages.base.plainNumber}</option>
-                      <option value="currency">{messages.base.currency}</option>
+                      <option value="plain">Plain number</option>
+                      <option value="currency">Currency</option>
                     </select>
                   </label>
                 ) : null}
                 {fieldType === "number" && numberFormat === "currency" ? (
                   <label className="block">
-                    <span className="text-muted-foreground text-xs">{messages.base.currency}</span>
+                    <span className="text-muted-foreground text-xs">Currency</span>
                     <select
                       className="mt-1 h-8 w-full rounded-md border border-border/70 bg-background px-2.5 text-sm outline-none transition-colors focus:border-primary"
                       onChange={(event) => setCurrencyCode(event.target.value)}
@@ -517,7 +433,7 @@ export function BaseSetupView({
                       onChange={(event) => setIsRequired(event.target.checked)}
                       type="checkbox"
                     />
-                    {messages.base.required}
+                    Required
                   </label>
                   {fieldType === "relation" ? (
                     <label className="inline-flex items-center gap-2 text-muted-foreground">
@@ -526,20 +442,20 @@ export function BaseSetupView({
                         onChange={(event) => setIsMultiple(event.target.checked)}
                         type="checkbox"
                       />
-                      {messages.base.multiple}
+                      Multiple
                     </label>
                   ) : null}
                 </div>
                 <SplitSubmitButton
                   disabled={isSaving}
                   isPrimaryLoading={isSaving}
-                  primaryLabel={messages.base.addFieldRequest}
-                  primaryLoadingLabel={messages.common.submitting}
-                  secondaryLabel={messages.base.addFieldNow}
-                  secondaryLoadingLabel={messages.base.adding}
+                  primaryLabel="Add Field Request"
+                  primaryLoadingLabel="Submitting..."
+                  secondaryLabel="Add Field Now"
+                  secondaryLoadingLabel="Adding..."
                   onPrimary={() => submit()}
                   onSecondary={() => submit({ mergeImmediately: true })}
-                  hint={messages.common.requestReviewHint}
+                  hint="Request goes to your inbox for review. Now writes directly."
                 />
               </div>
               {formError ? (
@@ -548,9 +464,7 @@ export function BaseSetupView({
                   {formErrorDetail?.recordIds && formErrorDetail.recordIds.length > 0 ? (
                     <div className="mt-2">
                       <div className="mb-1 text-red-600 text-xs font-medium">
-                        {fmt(messages.base.recordsMissingValue, {
-                          count: formErrorDetail.recordIds.length,
-                        })}
+                        Records missing a value ({formErrorDetail.recordIds.length}):
                       </div>
                       <div className="space-y-0.5">
                         {formErrorDetail.recordIds.slice(0, 8).map((rid) => (
@@ -560,9 +474,7 @@ export function BaseSetupView({
                         ))}
                         {formErrorDetail.recordIds.length > 8 ? (
                           <div className="text-red-500 text-xs">
-                            {fmt(messages.base.andMore, {
-                              count: formErrorDetail.recordIds.length - 8,
-                            })}
+                            …and {formErrorDetail.recordIds.length - 8} more
                           </div>
                         ) : null}
                       </div>
@@ -572,9 +484,8 @@ export function BaseSetupView({
                   formErrorDetail.affectedRecordIds.length > 0 ? (
                     <div className="mt-2">
                       <div className="mb-1 text-red-600 text-xs font-medium">
-                        {fmt(messages.base.recordsReferencingRemovedChoices, {
-                          count: formErrorDetail.affectedRecordIds.length,
-                        })}
+                        Records referencing removed choices (
+                        {formErrorDetail.affectedRecordIds.length}):
                       </div>
                       <div className="space-y-0.5">
                         {formErrorDetail.affectedRecordIds.slice(0, 8).map((rid) => (
@@ -584,9 +495,7 @@ export function BaseSetupView({
                         ))}
                         {formErrorDetail.affectedRecordIds.length > 8 ? (
                           <div className="text-red-500 text-xs">
-                            {fmt(messages.base.andMore, {
-                              count: formErrorDetail.affectedRecordIds.length - 8,
-                            })}
+                            …and {formErrorDetail.affectedRecordIds.length - 8} more
                           </div>
                         ) : null}
                       </div>
@@ -599,14 +508,14 @@ export function BaseSetupView({
             {deletedFields.length > 0 ? (
               <div>
                 <div className="mb-2 flex flex-wrap items-end justify-between gap-3">
-                  <div className="font-semibold text-sm">{messages.base.deletedFields}</div>
+                  <div className="font-semibold text-sm">Deleted Fields</div>
                   <span className="rounded-full bg-muted/55 px-2.5 py-1 text-muted-foreground text-xs">
-                    {fmt(messages.base.deletedCount, { count: deletedFields.length })}
+                    {deletedFields.length} deleted
                   </span>
                 </div>
                 <div className="grid grid-cols-[minmax(0,1fr)_120px_80px] gap-3 border-border/50 border-b px-2 py-2 text-muted-foreground text-xs">
-                  <div>{messages.common.name}</div>
-                  <div>{messages.base.type}</div>
+                  <div>Name</div>
+                  <div>Type</div>
                   <div />
                 </div>
                 {deletedFields.map((field) => (
@@ -615,9 +524,7 @@ export function BaseSetupView({
                     key={field.id}
                   >
                     <div className="min-w-0">
-                      <div className="truncate font-medium text-muted-foreground">
-                        {resolveIString(field.name)}
-                      </div>
+                      <div className="truncate font-medium text-muted-foreground">{field.name}</div>
                       <div className="mt-0.5 truncate font-mono text-muted-foreground text-xs">
                         {field.slug}
                       </div>
@@ -635,7 +542,7 @@ export function BaseSetupView({
                         type="button"
                       >
                         <RotateCcw className="size-3" />
-                        {restoringFieldId === field.id ? "…" : messages.common.restore}
+                        {restoringFieldId === field.id ? "…" : "Restore"}
                       </button>
                     </div>
                   </div>
@@ -645,19 +552,14 @@ export function BaseSetupView({
           </div>
 
           <aside className="space-y-3">
-            <SidebarPanel title={messages.base.schema}>
-              <PropertyRow label={messages.common.slug} value={base.slug} />
-              <PropertyRow label={messages.common.fields} value={`${base.fields.length}`} />
+            <SidebarPanel title="Schema">
+              <PropertyRow label="Slug" value={base.slug} />
+              <PropertyRow label="Fields" value={`${base.fields.length}`} />
               <PropertyRow
-                label={messages.base.review}
-                value={fmt(messages.base.approvalRequired, {
-                  count: base.reviewPolicy.requiredApprovals,
-                })}
+                label="Review"
+                value={`${base.reviewPolicy.requiredApprovals} approval required`}
               />
-              <PropertyRow
-                label={messages.common.created}
-                value={new Date(base.createdAt).toLocaleString()}
-              />
+              <PropertyRow label="Created" value={new Date(base.createdAt).toLocaleString()} />
             </SidebarPanel>
           </aside>
         </div>
@@ -667,11 +569,10 @@ export function BaseSetupView({
 }
 
 function BaseDetailHeader({ base }: { base: BaseVO | null }) {
-  const messages = useCoreI18n();
   return (
     <div className="px-6 pt-5 pb-2">
       <div className="min-w-0">
-        <h1 className="truncate font-semibold text-base">{base?.name ?? messages.nav.base}</h1>
+        <h1 className="truncate font-semibold text-base">{base?.name ?? "Base"}</h1>
         {base?.description ? (
           <p className="mt-1 truncate text-muted-foreground text-xs">{base.description}</p>
         ) : null}
@@ -689,8 +590,6 @@ export function BaseTopbarActions({
   activeTab: "records" | "design";
   base: BaseVO;
 }) {
-  const messages = useCoreI18n();
-
   return (
     <nav className="flex rounded-md bg-muted/60 p-0.5 text-xs">
       <Link
@@ -701,7 +600,7 @@ export function BaseTopbarActions({
         }`}
         href={`/base/${base.slug}`}
       >
-        {messages.base.recordsTab}
+        Records
       </Link>
       <Link
         className={`rounded px-2.5 py-1.5 font-medium transition-colors ${
@@ -711,7 +610,7 @@ export function BaseTopbarActions({
         }`}
         href={`/base/${base.slug}/design`}
       >
-        {messages.base.designTab}
+        Design
       </Link>
     </nav>
   );

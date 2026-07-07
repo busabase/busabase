@@ -11,7 +11,6 @@ import {
   Sparkles,
 } from "lucide-react";
 import type { Metadata } from "next";
-import { getBusabaseServerLL } from "~/lib/i18n-server";
 import { DownloadPrimaryCta } from "./download-primary-cta";
 
 const DOWNLOAD_MANIFEST_URL =
@@ -49,28 +48,28 @@ const downloadOptions = [
     platformId: "darwin-aarch64",
     os: "macOS",
     title: "Apple Silicon",
-    descriptionKey: "macAppleSiliconDescription",
+    description: "For newer Macs with M-series chips.",
     icon: Laptop,
   },
   {
     platformId: "darwin-x86_64",
     os: "macOS",
     title: "Intel",
-    descriptionKey: "macIntelDescription",
+    description: "For Intel-based Macs.",
     icon: Laptop,
   },
   {
     platformId: "windows-x86_64",
     os: "Windows",
     title: "Windows",
-    descriptionKey: "windowsDescription",
+    description: "Choose the .msi or .exe bundle from the latest release.",
     icon: MonitorDown,
   },
   {
     platformId: "linux-x86_64",
     os: "Linux",
     title: "Linux",
-    descriptionKey: "linuxDescription",
+    description: "Choose the .deb bundle from the latest release.",
     icon: HardDrive,
   },
 ] as const;
@@ -83,18 +82,18 @@ const mobileOptions = [
   {
     key: "ios",
     os: "iOS",
-    titleKey: "iphoneIpad",
+    title: "iPhone & iPad",
     icon: Apple,
     href: APP_STORE_URL,
-    actionKey: "appStoreAction",
+    action: "Download on the App Store",
   },
   {
     key: "android",
     os: "Android",
-    titleKey: "phoneTablet",
+    title: "Phone & Tablet",
     icon: Smartphone,
     href: GOOGLE_PLAY_URL,
-    actionKey: "googlePlayAction",
+    action: "Get it on Google Play",
   },
 ] as const;
 
@@ -126,12 +125,9 @@ async function getDownloadManifest(): Promise<DownloadManifest | null> {
   }
 }
 
-function formatVersion(
-  manifest: DownloadManifest | null,
-  LL: Awaited<ReturnType<typeof getBusabaseServerLL>>,
-) {
-  if (!manifest?.version) return LL.marketing.latestDesktopBuild();
-  return LL.marketing.version({ version: manifest.version });
+function formatVersion(manifest: DownloadManifest | null) {
+  if (!manifest?.version) return "Latest desktop build";
+  return `Version ${manifest.version}`;
 }
 
 function LogoLockup() {
@@ -147,7 +143,6 @@ function LogoLockup() {
 
 export default async function DownloadPage() {
   const manifest = await getDownloadManifest();
-  const LL = await getBusabaseServerLL();
 
   return (
     <main className="min-h-screen bg-background text-foreground">
@@ -157,28 +152,26 @@ export default async function DownloadPage() {
             <div className="space-y-5">
               <p className="inline-flex items-center gap-2 rounded-full border border-border bg-card px-3 py-1 text-sm text-muted-foreground">
                 <Sparkles className="size-4 text-primary" aria-hidden="true" />
-                {LL.marketing.desktopBadge()}
+                Busabase Desktop
               </p>
               <div className="space-y-4">
                 <h1 className="max-w-3xl text-4xl font-medium tracking-normal text-foreground sm:text-5xl lg:text-6xl">
-                  {LL.marketing.downloadHeadline()}
+                  Download Busabase for your computer
                 </h1>
                 <p className="max-w-2xl text-lg leading-8 text-muted-foreground">
-                  {LL.marketing.downloadSubhead()}
+                  Run the approval-first local database for AI agents from a focused desktop app,
+                  with local storage, review queues, and updater-ready releases.
                 </p>
               </div>
             </div>
 
             <div className="flex flex-col gap-3 sm:flex-row">
-              <DownloadPrimaryCta
-                platforms={manifest?.platforms}
-                label={LL.marketing.downloadLatest()}
-              />
+              <DownloadPrimaryCta platforms={manifest?.platforms} label="Download latest version" />
               <a
                 href="/dashboard"
                 className="inline-flex h-12 items-center justify-center rounded-md border border-border bg-background px-5 text-sm font-medium text-foreground transition-colors hover:bg-muted"
               >
-                {LL.marketing.openWebDashboard()}
+                Open web dashboard
               </a>
             </div>
           </div>
@@ -187,7 +180,7 @@ export default async function DownloadPage() {
             <div className="mb-8 flex items-center justify-between gap-4">
               <LogoLockup />
               <span className="rounded-full bg-accent px-3 py-1 text-xs font-medium text-accent-foreground">
-                {formatVersion(manifest, LL)}
+                {formatVersion(manifest)}
               </span>
             </div>
             <div className="space-y-4">
@@ -205,7 +198,7 @@ export default async function DownloadPage() {
                         {option.os} - {option.title}
                       </span>
                       <span className="mt-1 block text-sm leading-5 text-muted-foreground">
-                        {LL.marketing[option.descriptionKey]()}
+                        {option.description}
                       </span>
                     </span>
                   </>
@@ -240,9 +233,10 @@ export default async function DownloadPage() {
       <section className="border-t border-border bg-muted/40">
         <div className="mx-auto w-full max-w-6xl px-5 py-12 sm:px-6 lg:px-8">
           <div className="mb-6 space-y-2">
-            <h2 className="text-2xl font-medium text-foreground">{LL.marketing.mobileTitle()}</h2>
+            <h2 className="text-2xl font-medium text-foreground">Mobile</h2>
             <p className="max-w-2xl text-sm leading-6 text-muted-foreground">
-              {LL.marketing.mobileBody()}
+              Review queues and approvals on the go — get the Busabase app for iPhone, iPad, and
+              Android.
             </p>
           </div>
           <div className="grid gap-4 sm:grid-cols-2">
@@ -261,10 +255,10 @@ export default async function DownloadPage() {
                   </span>
                   <span className="min-w-0 flex-1">
                     <span className="block text-sm font-medium text-foreground">
-                      {option.os} · {LL.marketing[option.titleKey]()}
+                      {option.os} · {option.title}
                     </span>
                     <span className="mt-1 block text-sm leading-5 text-muted-foreground">
-                      {LL.marketing[option.actionKey]()}
+                      {option.action}
                     </span>
                   </span>
                   <ArrowUpRight
@@ -282,23 +276,20 @@ export default async function DownloadPage() {
         <div className="mx-auto grid w-full max-w-6xl gap-6 px-5 py-12 sm:px-6 lg:grid-cols-2 lg:px-8">
           <div className="rounded-lg border border-border bg-card p-6">
             <ShieldAlert className="mb-4 size-5 text-primary" aria-hidden="true" />
-            <h2 className="text-base font-semibold text-foreground">
-              {LL.marketing.signingNoticeTitle()}
-            </h2>
+            <h2 className="text-base font-semibold text-foreground">Signing notice</h2>
             <p className="mt-3 text-sm leading-6 text-muted-foreground">
-              {LL.marketing.signingNoticeBody()}
+              macOS and Windows bundles may show platform security warnings until code signing and
+              notarization are fully configured.
             </p>
           </div>
 
           <div className="rounded-lg border border-border bg-card p-6">
             <CheckCircle2 className="mb-4 size-5 text-primary" aria-hidden="true" />
-            <h2 className="text-base font-semibold text-foreground">
-              {LL.marketing.installFlowTitle()}
-            </h2>
+            <h2 className="text-base font-semibold text-foreground">Install flow</h2>
             <ol className="mt-3 space-y-2 text-sm leading-6 text-muted-foreground">
-              <li>{LL.marketing.installStep1()}</li>
-              <li>{LL.marketing.installStep2()}</li>
-              <li>{LL.marketing.installStep3()}</li>
+              <li>Download the bundle for your operating system.</li>
+              <li>Open Busabase Desktop and start the local review engine.</li>
+              <li>Use the release channel for future desktop updates.</li>
             </ol>
           </div>
         </div>

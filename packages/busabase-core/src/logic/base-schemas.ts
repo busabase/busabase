@@ -1,5 +1,4 @@
 import { CREATABLE_NODE_TYPES } from "busabase-contract/domains";
-import { fieldNameSchema } from "busabase-contract/domains/base/contract/base-schemas";
 import { z } from "zod";
 
 const fieldTypeSchema = z.enum([
@@ -37,16 +36,6 @@ const fieldOptionsSchema = z
         sourceFieldIds: z.array(z.string()).optional(),
       })
       .optional(),
-    // Per-field limits for `attachment` columns — must mirror the contract's
-    // fieldOptionsSchema; without this the options are silently stripped on write
-    // and the attachment validator's maxFiles/mime/size limits never apply.
-    attachment: z
-      .object({
-        maxFiles: z.number().int().positive().optional(),
-        allowedMimeTypes: z.array(z.string()).optional(),
-        maxFileSize: z.number().int().positive().optional(),
-      })
-      .optional(),
     choices: z
       .array(
         z.object({
@@ -71,15 +60,12 @@ const fieldOptionsSchema = z
       })
       .optional(),
     targetBaseId: z.string().optional(),
-    // Convenience alias for `targetBaseId`: name the relation target by Base slug.
-    // Resolved to `targetBaseId` on write; never persisted.
-    targetBaseSlug: z.string().optional(),
   })
   .default({});
 
 export const fieldSchema = z.object({
   slug: z.string().min(1),
-  name: fieldNameSchema,
+  name: z.string().min(1),
   type: fieldTypeSchema.default("text"),
   required: z.boolean().default(false),
   options: fieldOptionsSchema.optional().default({}),
@@ -115,7 +101,7 @@ const nodeOperationInputSchema = z.discriminatedUnion("kind", [
             .string()
             .min(1)
             .regex(/^[a-z0-9-]+$/),
-          name: fieldNameSchema,
+          name: z.string().min(1),
           type: fieldTypeSchema.default("text"),
           required: z.boolean().optional().default(false),
           options: fieldOptionsSchema.optional().default({}),
@@ -215,16 +201,6 @@ export const restoreViewInputSchema = z.object({
 export const createChangeRequestInputSchema = z.object({
   fields: z.record(z.string(), z.unknown()),
   message: z.string().optional().default("Initial changeRequest"),
-  submittedBy: z.string().optional().default("local-producer"),
-});
-
-// Propose many record_create operations as ONE change request (one review, one
-// merge). The CR/operation/commit model is already 1:N:N and merge applies every
-// operation in a single transaction, so this only adds the write-side entry point.
-// Capped at 1000 — larger loads belong in a dedicated import job, not a reviewable CR.
-export const createBulkChangeRequestInputSchema = z.object({
-  records: z.array(z.record(z.string(), z.unknown())).min(1).max(1000),
-  message: z.string().optional().default("Bulk create records"),
   submittedBy: z.string().optional().default("local-producer"),
 });
 

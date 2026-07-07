@@ -6,7 +6,7 @@
 // 1. Capture screens in the simulator (or a real device).
 // 2. Drop the raw PNGs into public/assets/readme/mobile-raw/ — any filenames.
 // 3. Run: node apps/busabase/scripts/generate-mobile-frames.mjs
-//    → writes <name>-framed.webp next to the other README assets.
+//    → writes <name>-framed.png next to the other README assets.
 import { existsSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -52,10 +52,8 @@ async function frameOne(file) {
 </svg>`;
 
   const base = path.basename(file).replace(/\.(png|jpe?g)$/i, "");
-  // q90 WebP — these framed shots have photographic bezels/gradients, where
-  // lossy compresses far better than lossless with no visible loss.
-  const out = path.join(outDir, `${base}-framed.webp`);
-  await sharp(Buffer.from(svg), { density: 96 }).webp({ quality: 90 }).toFile(out);
+  const out = path.join(outDir, `${base}-framed.png`);
+  await sharp(Buffer.from(svg), { density: 96 }).png().toFile(out);
   console.log(`framed → ${path.relative(process.cwd(), out)}  (${meta.width}×${meta.height})`);
 }
 

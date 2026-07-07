@@ -37,7 +37,7 @@ AI can generate endless data — Busabase is where you <b>review, approve, and m
 
 <br/>
 
-<a href="#screenshots"><img src="./public/assets/readme/busabase-hero.webp" alt="Busabase — review AI-proposed changes before they become trusted data" width="100%" /></a>
+<a href="#screenshots"><img src="./public/assets/readme/busabase-hero.gif" alt="Busabase — review AI-proposed changes before they become trusted data" width="100%" /></a>
 
 </div>
 
@@ -47,7 +47,7 @@ Busabase is a **free and open-source** ([MIT](https://opensource.org/licenses/MI
 
 Busabase gives that approval process a home — an approval-first database and knowledge base for AI agents. It is a private CMS, project database, and structured source of truth with built-in Change Requests, Operations, comments, audit trails, and a simple API for apps and AI agents.
 
-![How Busabase works: propose → change request → review → merge → trusted database & knowledge base, with a revise loop and reject path](./public/assets/readme/how-it-works.webp)
+![How Busabase works: propose → change request → review → merge → trusted database & knowledge base, with a revise loop and reject path](./public/assets/readme/how-it-works.png)
 
 **Free & open source. Local-first. Review-first. Agent-ready.**
 Run it yourself — no SaaS, no account, no vendor. Your data never has to leave your machine.
@@ -160,11 +160,11 @@ Only one process can hold the PGlite database at a time, so run one launcher at 
 
 |  |  |
 | :---: | :---: |
-| ![Inbox review list](./public/assets/readme/busabase-inbox-review.webp) | ![Agent-proposed diff](./public/assets/readme/busabase-agent-output-preview.webp) |
+| ![Inbox review list](./public/assets/readme/busabase-inbox-review.png) | ![Agent-proposed diff](./public/assets/readme/busabase-agent-output-preview.png) |
 | Inbox with pending Change Requests, reviewer status, and approval actions | Agent-proposed changes before merge, including field diffs and reviewer actions |
-| ![Record detail lineage](./public/assets/readme/busabase-record-detail-audit.webp) | ![Base table](./public/assets/readme/busabase-base-table.webp) |
+| ![Record detail lineage](./public/assets/readme/busabase-record-detail-audit.png) | ![Base table](./public/assets/readme/busabase-base-table.png) |
 | Record detail page with fields, comments, review history, and lineage | Base table showing structured records and rich fields |
-| ![Base records table](./public/assets/readme/busabase-base-records.webp) | ![Graph view with seed data](./public/assets/readme/busabase-graph-view.webp) |
+| ![Base records table](./public/assets/readme/busabase-base-records.png) | ![Graph view with seed data](./public/assets/readme/busabase-graph-view.png) |
 | Records inside a Base — typed fields, rich values, and approval status at a glance | Graph view showing relationships between seeded records across Bases |
 
 ### On mobile
@@ -172,11 +172,11 @@ Only one process can hold the PGlite database at a time, so run one launcher at 
 Review and approve agent Change Requests from your phone — the same inbox, proposal preview, and trusted records, in the [Busabase mobile app](https://github.com/busabase/busabase/tree/main/apps/busabase-mobile).
 
 <p align="center">
-  <img src="./public/assets/readme/mobile-inbox-framed.webp" alt="Mobile inbox — pending Change Requests from agents" width="30%" />
+  <img src="./public/assets/readme/mobile-inbox-framed.png" alt="Mobile inbox — pending Change Requests from agents" width="30%" />
   &nbsp;&nbsp;
-  <img src="./public/assets/readme/mobile-change-request-framed.webp" alt="Mobile Change Request — agent-proposed operations and fields under review" width="30%" />
+  <img src="./public/assets/readme/mobile-change-request-framed.png" alt="Mobile Change Request — agent-proposed operations and fields under review" width="30%" />
   &nbsp;&nbsp;
-  <img src="./public/assets/readme/mobile-record-framed.webp" alt="Mobile record detail — trusted fields after approval" width="30%" />
+  <img src="./public/assets/readme/mobile-record-framed.png" alt="Mobile record detail — trusted fields after approval" width="30%" />
 </p>
 
 ## Why This Exists

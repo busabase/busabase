@@ -18,13 +18,10 @@ export const NOTIFICATIONS_SUPPORTED = Platform.OS !== "web";
  * Fetches change requests over the plain REST endpoint so the watcher also
  * works inside background tasks where the oRPC client setup is unnecessary.
  */
-export async function fetchChangeRequests(
-  serverUrl: string,
-  headers: Record<string, string> = {},
-): Promise<ChangeRequestVO[]> {
+export async function fetchChangeRequests(serverUrl: string): Promise<ChangeRequestVO[]> {
   const base = serverUrl.replace(/\/+$/, "");
   const response = await fetch(`${base}/api/v1/change-requests?limit=100`, {
-    headers: { Accept: "application/json", ...headers },
+    headers: { Accept: "application/json" },
   });
   if (!response.ok) {
     throw new Error(`Server responded ${response.status}`);
@@ -32,49 +29,34 @@ export async function fetchChangeRequests(
   return (await response.json()) as ChangeRequestVO[];
 }
 
-const scopeKey = (serverUrl: string, spaceId?: string | null) =>
-  `${serverUrl}${spaceId ? `#${spaceId}` : ""}`;
-
-async function loadSeenIds(serverUrl: string, spaceId?: string | null): Promise<Set<string>> {
+async function loadSeenIds(serverUrl: string): Promise<Set<string>> {
   try {
-    const raw = await AsyncStorage.getItem(SEEN_KEY_PREFIX + scopeKey(serverUrl, spaceId));
+    const raw = await AsyncStorage.getItem(SEEN_KEY_PREFIX + serverUrl);
     return new Set(raw ? (JSON.parse(raw) as string[]) : []);
   } catch {
     return new Set();
   }
 }
 
-async function saveSeenIds(
-  serverUrl: string,
-  ids: Set<string>,
-  spaceId?: string | null,
-): Promise<void> {
+async function saveSeenIds(serverUrl: string, ids: Set<string>): Promise<void> {
   await AsyncStorage.setItem(
-    SEEN_KEY_PREFIX + scopeKey(serverUrl, spaceId),
+    SEEN_KEY_PREFIX + serverUrl,
     JSON.stringify([...ids].slice(-MAX_SEEN_IDS)),
   );
 }
 
-export async function markChangeRequestSeen(
-  serverUrl: string,
-  id: string,
-  spaceId?: string | null,
-): Promise<void> {
-  const seen = await loadSeenIds(serverUrl, spaceId);
+export async function markChangeRequestSeen(serverUrl: string, id: string): Promise<void> {
+  const seen = await loadSeenIds(serverUrl);
   if (!seen.has(id)) {
     seen.add(id);
-    await saveSeenIds(serverUrl, seen, spaceId);
+    await saveSeenIds(serverUrl, seen);
   }
 }
 
 /** Seeds the seen set without notifying — used right after notifications are enabled. */
-export async function primeSeenChangeRequests(
-  serverUrl: string,
-  headers: Record<string, string> = {},
-  spaceId?: string | null,
-): Promise<void> {
-  const changeRequests = await fetchChangeRequests(serverUrl, headers);
-  await saveSeenIds(serverUrl, new Set(changeRequests.map((item) => item.id)), spaceId);
+export async function primeSeenChangeRequests(serverUrl: string): Promise<void> {
+  const changeRequests = await fetchChangeRequests(serverUrl);
+  await saveSeenIds(serverUrl, new Set(changeRequests.map((item) => item.id)));
   await updateBadge(changeRequests);
 }
 
@@ -100,20 +82,16 @@ export interface WatchResult {
  * fetch change requests, diff the in_review set against persisted seen ids,
  * fire one local notification per new change request, and update the badge.
  */
-export async function checkForNewChangeRequests(
-  serverUrl: string,
-  headers: Record<string, string> = {},
-  spaceId?: string | null,
-): Promise<WatchResult> {
-  const changeRequests = await fetchChangeRequests(serverUrl, headers);
-  const seen = await loadSeenIds(serverUrl, spaceId);
+export async function checkForNewChangeRequests(serverUrl: string): Promise<WatchResult> {
+  const changeRequests = await fetchChangeRequests(serverUrl);
+  const seen = await loadSeenIds(serverUrl);
   const inReview = changeRequests.filter((item) => item.status === "in_review");
   const fresh = inReview.filter((item) => !seen.has(item.id));
 
   for (const changeRequest of changeRequests) {
     seen.add(changeRequest.id);
   }
-  await saveSeenIds(serverUrl, seen, spaceId);
+  await saveSeenIds(serverUrl, seen);
   await updateBadge(changeRequests);
 
   if (NOTIFICATIONS_SUPPORTED) {

@@ -2,7 +2,6 @@ import "server-only";
 
 import { ORPCError } from "@orpc/server";
 import { and, eq, inArray, isNull } from "drizzle-orm";
-import { iStringToText } from "openlib/i18n/i-string";
 import type { z } from "zod";
 import { getContextSpaceId, resolveActorId } from "../../../context";
 import { getDb } from "../../../db";
@@ -16,13 +15,12 @@ import {
   busabaseRecords,
 } from "../../../db/schema";
 import { insertAuditEvent } from "../../../logic/audit";
-import { getChangeRequest, recordMergedNodeCreate } from "../../../logic/cr-lifecycle";
+import { getChangeRequest } from "../../../logic/cr-lifecycle";
 import { projectCommitFields } from "../../../logic/field-values";
-import { CURRENT_USER_ID, id, now, rootNodeIdForSpace } from "../../../logic/kernel";
+import { id, now, rootNodeIdForSpace } from "../../../logic/kernel";
 import { ensureReady } from "../../../logic/seed";
 import {
   createBaseInputSchema,
-  createBulkChangeRequestInputSchema,
   createChangeRequestInputSchema,
   createDeleteChangeRequestInputSchema,
   reviseOperationInputSchema,
@@ -30,11 +28,9 @@ import {
 import { validateRecordFields } from "../field-rules";
 import type { FieldDef } from "../field-types";
 import { getBase } from "./queries";
-import { resolveRelationFieldOptions } from "./relation-options";
 
 export {
   createBaseInputSchema,
-  createBulkChangeRequestInputSchema,
   createChangeRequestInputSchema,
   createDeleteChangeRequestInputSchema,
   reviseOperationInputSchema,
@@ -155,19 +151,17 @@ export const createBase = async (input: z.infer<typeof createBaseInputSchema>) =
   });
   if (parsed.fields.length > 0) {
     await db.insert(busabaseBaseFields).values(
-      await Promise.all(
-        parsed.fields.map(async (field, index) => ({
-          id: id("bsf"),
-          spaceId,
-          baseId,
-          slug: field.slug,
-          name: iStringToText(field.name),
-          type: field.type,
-          required: field.required,
-          position: index,
-          options: await resolveRelationFieldOptions(db, field.options),
-        })),
-      ),
+      parsed.fields.map((field, index) => ({
+        id: id("bsf"),
+        spaceId,
+        baseId,
+        slug: field.slug,
+        name: field.name,
+        type: field.type,
+        required: field.required,
+        position: index,
+        options: field.options,
+      })),
     );
   }
 
@@ -175,18 +169,11 @@ export const createBase = async (input: z.infer<typeof createBaseInputSchema>) =
   if (!base) {
     throw new Error("Failed to create base");
   }
-  // Record the create as an auto-merged structural ChangeRequest (audit +
-  // history + rollback), replacing the old bespoke `base.created` audit action.
-  await recordMergedNodeCreate({
-    nodeId,
+  // Direct create (no change request) — record it so the audit trail is complete.
+  await insertAuditEvent(db, {
+    action: "base.created",
     baseId,
-    nodeType: "base",
-    slug: parsed.slug,
-    name: parsed.name,
-    description: parsed.description,
-    parentNodeId: parentNode.id,
-    message: `Create base ${parsed.name}`,
-    submittedBy: resolveActorId(CURRENT_USER_ID),
+    metadata: { slug: parsed.slug, name: parsed.name, nodeId },
   });
   return base;
 };
@@ -279,111 +266,6 @@ export const createChangeRequest = async (
   const changeRequest = await getChangeRequest(changeRequestId);
   if (!changeRequest) {
     throw new Error("Failed to create changeRequest");
-  }
-  return changeRequest;
-};
-
-/**
- * Propose many record creates as ONE change request: a single CR with N
- * `record_create` operations (one commit each), so a reviewer sees one item and
- * merge applies all N in the existing single transaction. Mirrors the per-operation
- * shape of {@link createChangeRequest} in a loop.
- *
- * Every record is validated up front so a bad row rejects the whole batch before any
- * write (the batch is not wrapped in a DB transaction — matching the single-record
- * path — so up-front validation is what keeps the common failure clean).
- */
-export const createBulkChangeRequest = async (
-  baseId: string,
-  input: z.infer<typeof createBulkChangeRequestInputSchema>,
-) => {
-  await ensureReady();
-  const db = await getDb();
-  const base = await getBase(baseId);
-  if (!base) {
-    throw new Error(`Base not found: ${baseId}`);
-  }
-
-  const parsed = createBulkChangeRequestInputSchema.parse(input);
-  // Validate the entire batch before writing anything, so one bad record fails fast
-  // instead of leaving a partially-populated change request behind.
-  for (const fields of parsed.records) {
-    assertValidRecordFields(fields, base.fields);
-    await assertRelationTargetsLive(fields, base.fields);
-  }
-
-  const changeRequestId = id("crq");
-  const timestamp = now();
-
-  await db.insert(busabaseChangeRequests).values({
-    id: changeRequestId,
-    baseId: base.id,
-    status: "in_review",
-    submittedBy: resolveActorId(parsed.submittedBy),
-    sourceMeta: { bulk: true, recordCount: parsed.records.length },
-    reviewPolicySnapshot: base.reviewPolicy,
-    mergeSummary: {},
-    rejectedReason: null,
-    reviewedAt: null,
-    mergedAt: null,
-    createdAt: timestamp,
-    updatedAt: timestamp,
-  });
-
-  for (const [position, fields] of parsed.records.entries()) {
-    const operationId = id("opr");
-    const commitId = id("cmt");
-    await db.insert(busabaseCommits).values({
-      id: commitId,
-      baseId: base.id,
-      operationId: null,
-      parentCommitId: null,
-      fields,
-      operation: "record_create",
-      message: parsed.message,
-      author: "producer",
-      createdAt: timestamp,
-    });
-    await db.insert(busabaseOperations).values({
-      id: operationId,
-      changeRequestId,
-      baseId: base.id,
-      operation: "record_create",
-      status: "pending",
-      targetRecordId: null,
-      targetViewId: null,
-      sourceRecordId: null,
-      sourceCommitId: null,
-      baseCommitId: null,
-      headCommitId: commitId,
-      deleteMode: "archive",
-      mergedRecordId: null,
-      mergedViewId: null,
-      position,
-      createdAt: timestamp,
-      updatedAt: timestamp,
-    });
-    await db.update(busabaseCommits).set({ operationId }).where(eq(busabaseCommits.id, commitId));
-    await projectCommitFields({
-      baseId: base.id,
-      commitId,
-      changeRequestId,
-      operationId,
-      fields,
-    });
-  }
-
-  await insertAuditEvent(db, {
-    action: "change_request.created",
-    actorId: parsed.submittedBy,
-    baseId: base.id,
-    changeRequestId,
-    metadata: { operation: "record_create", bulk: true, recordCount: parsed.records.length },
-  });
-
-  const changeRequest = await getChangeRequest(changeRequestId);
-  if (!changeRequest) {
-    throw new Error("Failed to create bulk changeRequest");
   }
   return changeRequest;
 };

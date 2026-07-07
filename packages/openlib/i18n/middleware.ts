@@ -37,18 +37,12 @@ export function createLanguageOptions<T extends string>(
   autoLabels: Record<T, string>,
   currentLocale: T = "en" as T,
 ) {
-  const autoName = autoLabels[currentLocale] || "Auto (Browser)";
   return [
-    { code: "auto", label: autoName, name: autoName, nativeName: autoName },
-    ...supportedLocales.map((locale) => {
-      const name = displayNames[locale];
-      return {
-        code: locale,
-        label: name,
-        name,
-        nativeName: name,
-      };
-    }),
+    { code: "auto", label: autoLabels[currentLocale] || "Auto (Browser)" },
+    ...supportedLocales.map((locale) => ({
+      code: locale,
+      label: displayNames[locale],
+    })),
   ];
 }
 

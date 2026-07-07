@@ -1,4 +1,5 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import Constants from "expo-constants";
 import {
   createContext,
   type ReactNode,
@@ -8,17 +9,8 @@ import {
   useMemo,
   useState,
 } from "react";
-import { Platform } from "react-native";
-import { revokeBusabaseCloudSession } from "~/auth/oauth";
-import {
-  type CloudSession,
-  clearCloudSession,
-  getCloudSession,
-  getCloudSessionToken,
-} from "~/auth/session-store";
-import { busabaseConfig } from "./config";
 import { normalizeServerUrl } from "./server-url";
-import type { BusabaseConnection, BusabaseSpace, ConnectionState } from "./types";
+import type { BusabaseConnection, ConnectionState } from "./types";
 
 const STORAGE_KEY = "busabase-mobile.connection.v1";
 const RECENT_SERVER_KEY = "busabase-mobile.recent-server-url.v1";
@@ -28,34 +20,17 @@ const MAX_HISTORY = 5;
 // Preset hosted demo server (app.json → expo.extra.busabase.demoServerUrl). Enables a
 // one-tap "Try the demo" so App Review and new users can use the app without
 // self-hosting. null when not configured (the demo entry is then hidden).
-const DEMO_SERVER_URL = busabaseConfig.demoServerUrl;
-const CLOUD_SERVER_URL = busabaseConfig.cloudUrl;
-
-interface NativeCookieManager {
-  clearAll: () => Promise<boolean>;
-}
-
-async function clearBrowserSessionCookies(): Promise<void> {
-  if (Platform.OS === "web") return;
-  const cookieManager = await import("@react-native-cookies/cookies")
-    .then((mod) => mod.default as NativeCookieManager)
-    .catch(() => null);
-  await cookieManager?.clearAll().catch(() => false);
-}
+const DEMO_SERVER_URL: string | null =
+  (Constants.expoConfig?.extra as { busabase?: { demoServerUrl?: string } } | undefined)?.busabase
+    ?.demoServerUrl ?? null;
 
 interface ConnectionContextValue {
   state: ConnectionState;
   connectSelfHosted: (serverUrl: string) => Promise<void>;
-  connectCloud: (session: CloudSession) => Promise<void>;
   /** One-tap connect to the preset hosted demo server. */
   connectDemo: () => Promise<void>;
   /** Preset demo server URL, or null when not configured. */
   demoServerUrl: string | null;
-  cloudServerUrl: string;
-  getCloudAuthorizationHeaders: (options?: {
-    spaceId?: string | null;
-  }) => Promise<Record<string, string>>;
-  selectSpace: (space: BusabaseSpace | null) => Promise<void>;
   disconnect: () => Promise<void>;
   removeServerFromHistory: (serverUrl: string) => Promise<void>;
 }
@@ -86,20 +61,14 @@ export function ConnectionProvider({ children }: { children: ReactNode }) {
       AsyncStorage.getItem(STORAGE_KEY),
       AsyncStorage.getItem(RECENT_SERVER_KEY),
       AsyncStorage.getItem(SERVER_HISTORY_KEY),
-      getCloudSession(),
     ])
-      .then(([raw, recentServerUrl, historyRaw, cloudSession]) => {
+      .then(([raw, recentServerUrl, historyRaw]) => {
         const serverHistory = parseHistory(historyRaw);
         if (!raw) {
           setState({ status: "disconnected", connection: null, recentServerUrl, serverHistory });
           return;
         }
         const connection = JSON.parse(raw) as BusabaseConnection;
-        if (connection.mode === "cloud" && !getCloudSessionToken(cloudSession)) {
-          void AsyncStorage.removeItem(STORAGE_KEY);
-          setState({ status: "disconnected", connection: null, recentServerUrl, serverHistory });
-          return;
-        }
         setState({
           status: "connected",
           connection,
@@ -160,84 +129,16 @@ export function ConnectionProvider({ children }: { children: ReactNode }) {
     await connectWithMode(DEMO_SERVER_URL, "demo");
   }, [connectWithMode]);
 
-  const connectCloud = useCallback(async (session: CloudSession) => {
-    const serverUrl = normalizeServerUrl(CLOUD_SERVER_URL);
-    const connection: BusabaseConnection = {
-      mode: "cloud",
-      serverUrl,
-      connectedAt: new Date().toISOString(),
-      cloudUser: session.user,
-    };
-    setState((current) => ({
-      status: "connected",
-      connection,
-      recentServerUrl: current.recentServerUrl,
-      serverHistory: current.serverHistory,
-    }));
-    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(connection));
-  }, []);
-
-  const getCloudAuthorizationHeaders = useCallback(
-    async (options?: { spaceId?: string | null }): Promise<Record<string, string>> => {
-      const session = await getCloudSession();
-      const token = getCloudSessionToken(session);
-      if (!token) return {};
-      const headers: Record<string, string> = {
-        authorization: `Bearer ${token}`,
-        "x-busabase-client": "native",
-        "x-busabase-client-platform": "mobile",
-      };
-      const selectedSpace =
-        options && "spaceId" in options
-          ? options.spaceId
-          : state.status === "connected"
-            ? state.connection.selectedSpace?.id
-            : undefined;
-      if (selectedSpace) {
-        headers["x-busabase-space"] = selectedSpace;
-      }
-      return headers;
-    },
-    [state],
-  );
-
-  const selectSpace = useCallback(async (space: BusabaseSpace | null) => {
-    let nextConnection: BusabaseConnection | null = null;
-    setState((current) => {
-      if (current.status !== "connected") return current;
-      nextConnection = {
-        ...current.connection,
-        selectedSpace: space,
-      };
-      return {
-        ...current,
-        connection: nextConnection,
-      };
-    });
-    if (nextConnection) {
-      await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(nextConnection));
-    }
-  }, []);
-
   const disconnect = useCallback(async () => {
-    const cloudConnection = state.status === "connected" && state.connection.mode === "cloud";
-    if (cloudConnection) {
-      const session = await getCloudSession();
-      await revokeBusabaseCloudSession(session);
-      await clearCloudSession();
-      await clearBrowserSessionCookies();
-    }
     await AsyncStorage.removeItem(STORAGE_KEY);
     setState((current) => ({
       status: "disconnected",
       connection: null,
       recentServerUrl:
-        current.status === "connected" && current.connection.mode !== "cloud"
-          ? current.connection.serverUrl
-          : current.recentServerUrl,
+        current.status === "connected" ? current.connection.serverUrl : current.recentServerUrl,
       serverHistory: current.serverHistory,
     }));
-  }, [state]);
+  }, []);
 
   const removeServerFromHistory = useCallback(async (serverUrl: string) => {
     let nextHistory: string[] = [];
@@ -252,25 +153,12 @@ export function ConnectionProvider({ children }: { children: ReactNode }) {
     () => ({
       state,
       connectSelfHosted,
-      connectCloud,
       connectDemo,
       demoServerUrl: DEMO_SERVER_URL,
-      cloudServerUrl: CLOUD_SERVER_URL,
-      getCloudAuthorizationHeaders,
-      selectSpace,
       disconnect,
       removeServerFromHistory,
     }),
-    [
-      state,
-      connectSelfHosted,
-      connectCloud,
-      connectDemo,
-      getCloudAuthorizationHeaders,
-      selectSpace,
-      disconnect,
-      removeServerFromHistory,
-    ],
+    [state, connectSelfHosted, connectDemo, disconnect, removeServerFromHistory],
   );
 
   return <ConnectionContext.Provider value={value}>{children}</ConnectionContext.Provider>;

@@ -19,7 +19,6 @@ import type {
   SearchResultVO,
   ViewVO,
 } from "busabase-contract/types";
-import { iStringConcat } from "openlib/i18n/i-string";
 import { getContextDemoLocale, getContextDemoUseCase } from "../context";
 import {
   buildDemoDataset,
@@ -151,7 +150,6 @@ export const demoGetAuthInfo = (): AuthInfo => ({
   space: { id: "demo", name: "Demo Workspace", slug: "demo", plan: "demo" },
   user: { id: DEMO_ACTOR_ID, name: "Demo User", email: null, image: null },
   member: { userId: DEMO_ACTOR_ID, spaceId: "demo", role: "owner" },
-  spaces: [{ id: "demo", name: "Demo Workspace", slug: "demo", plan: "demo" }],
 });
 
 // --- Assets (derived from the seed's attachment field values) ---------------
@@ -324,7 +322,7 @@ export const demoSearch = (input: {
       id: base.id,
       kind: "base",
       title: base.name,
-      body: `${base.description} ${base.fields.map((field) => `${iStringConcat(field.name)} ${field.slug}`).join(" ")}`,
+      body: `${base.description} ${base.fields.map((field) => `${field.name} ${field.slug}`).join(" ")}`,
       eyebrow: `${base.fields.length} fields · ${base.slug}`,
       href: `/base/${base.slug}`,
       updatedAt: base.createdAt,

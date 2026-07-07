@@ -5,7 +5,6 @@ import { SidebarMenu, SidebarMenuButton, SidebarMenuItem } from "kui/sidebar";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "kui/tabs";
 import { Check, Copy, ExternalLink, Sparkles } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import { useCoreI18n } from "../../../i18n";
 
 // Agents the SKILL.md prompt can be pasted into. Brand names — shown as quick links
 // so users can jump to whichever agent they use. Generic across all hosts.
@@ -15,7 +14,6 @@ const AGENTS: { name: string; url: string }[] = [
   { name: "Gemini CLI", url: "https://github.com/google-gemini/gemini-cli" },
   { name: "Cursor", url: "https://cursor.com" },
   { name: "OpenClaw", url: "https://openclaw.ai" },
-  { name: "WorkBuddy", url: "https://copilot.tencent.com/work/" },
   { name: "Buda Agent", url: "https://buda.im" },
   { name: "Hermes", url: "https://hermes-agent.nousresearch.com" },
 ];
@@ -59,7 +57,6 @@ export function AgentIntegrationDialog({
   edition,
   lang,
 }: AgentIntegrationDialogProps) {
-  const messages = useCoreI18n();
   const [origin, setOrigin] = useState(defaultOrigin);
   const [copied, setCopied] = useState<string | null>(null);
 
@@ -86,18 +83,18 @@ export function AgentIntegrationDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-h-[85vh] gap-4 overflow-hidden sm:max-w-2xl">
         <DialogHeader>
-          <DialogTitle>{messages.integration.title}</DialogTitle>
+          <DialogTitle>Agent Integration</DialogTitle>
         </DialogHeader>
         <Tabs defaultValue="skills" className="flex flex-col gap-3">
           <TabsList className="w-full">
             <TabsTrigger value="skills" className="flex-1">
-              {messages.integration.agentSkills}
+              Agent Skills
             </TabsTrigger>
             <TabsTrigger value="mcp" className="flex-1">
               MCP
             </TabsTrigger>
             <TabsTrigger value="openapi" className="flex-1">
-              {messages.integration.openapi}
+              OpenAPI
             </TabsTrigger>
           </TabsList>
 
@@ -105,7 +102,7 @@ export function AgentIntegrationDialog({
           <TabsContent value="skills" className="grid gap-3">
             <p className="text-sm text-muted-foreground">{tabCopy.intro}</p>
             <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
-              <span className="text-foreground/70">{messages.integration.worksWith}</span>
+              <span className="text-foreground/70">Works with</span>
               {AGENTS.map((agent) => (
                 <a
                   key={agent.name}
@@ -148,11 +145,14 @@ export function AgentIntegrationDialog({
 
           {/* ── MCP tab ───────────────────────────────────────────────── */}
           <TabsContent value="mcp" className="grid gap-3">
-            <p className="text-sm text-muted-foreground">{messages.integration.mcpIntro}</p>
+            <p className="text-sm text-muted-foreground">
+              Connect any MCP-compatible agent or IDE directly to this workspace via the Streamable
+              HTTP or SSE transport.
+            </p>
             <div className="grid gap-2">
               <div className="grid gap-1">
                 <span className="text-xs font-medium text-foreground">
-                  {messages.integration.streamableHttp}
+                  Streamable HTTP (recommended)
                 </span>
                 <div className="flex items-center gap-2 rounded-md border bg-muted/30 px-3 py-2">
                   <code className="flex-1 truncate font-mono text-xs text-foreground">
@@ -162,7 +162,7 @@ export function AgentIntegrationDialog({
                     className="shrink-0 rounded p-1 hover:bg-muted"
                     onClick={() => copy(mcpUrl, "mcp-http")}
                     type="button"
-                    aria-label={messages.integration.copyUrl}
+                    aria-label="Copy URL"
                   >
                     {copied === "mcp-http" ? <Check size={14} /> : <Copy size={14} />}
                   </button>
@@ -178,19 +178,25 @@ export function AgentIntegrationDialog({
                     className="shrink-0 rounded p-1 hover:bg-muted"
                     onClick={() => copy(`${mcpUrl}/sse`, "mcp-sse")}
                     type="button"
-                    aria-label={messages.integration.copyUrl}
+                    aria-label="Copy URL"
                   >
                     {copied === "mcp-sse" ? <Check size={14} /> : <Copy size={14} />}
                   </button>
                 </div>
               </div>
             </div>
-            <p className="text-xs text-muted-foreground">{messages.integration.mcpHint}</p>
+            <p className="text-xs text-muted-foreground">
+              Add this URL to your agent's MCP server config. No auth required for local
+              development.
+            </p>
           </TabsContent>
 
           {/* ── OpenAPI tab ───────────────────────────────────────────── */}
           <TabsContent value="openapi" className="grid gap-3">
-            <p className="text-sm text-muted-foreground">{messages.integration.openapiIntro}</p>
+            <p className="text-sm text-muted-foreground">
+              Explore or import the Busabase REST API. Use the JSON spec for code generation or
+              browse the interactive docs.
+            </p>
             <div className="grid gap-2">
               <a
                 className="flex items-center justify-between rounded-md border px-3 py-2.5 text-sm hover:bg-muted"
@@ -199,16 +205,14 @@ export function AgentIntegrationDialog({
                 target="_blank"
               >
                 <div className="grid gap-0.5">
-                  <span className="font-medium">{messages.integration.interactiveDocs}</span>
+                  <span className="font-medium">Interactive docs</span>
                   <span className="font-mono text-xs text-muted-foreground">{openApiDocUrl}</span>
                 </div>
                 <ExternalLink size={15} className="shrink-0 text-muted-foreground" />
               </a>
               <div className="flex items-center gap-2 rounded-md border px-3 py-2.5">
                 <div className="grid flex-1 gap-0.5">
-                  <span className="text-sm font-medium">
-                    {messages.integration.openapiJsonSpec}
-                  </span>
+                  <span className="text-sm font-medium">OpenAPI JSON spec</span>
                   <span className="font-mono text-xs text-muted-foreground">{openApiJsonUrl}</span>
                 </div>
                 <div className="flex shrink-0 gap-1">
@@ -219,7 +223,7 @@ export function AgentIntegrationDialog({
                     target="_blank"
                   >
                     <ExternalLink size={13} />
-                    {messages.common.open}
+                    Open
                   </a>
                   <button
                     className="inline-flex h-8 items-center gap-1 rounded-md border px-2 text-xs hover:bg-muted"
@@ -227,7 +231,7 @@ export function AgentIntegrationDialog({
                     type="button"
                   >
                     {copied === "openapi-url" ? <Check size={13} /> : <Copy size={13} />}
-                    {messages.integration.copyUrl}
+                    Copy URL
                   </button>
                 </div>
               </div>
@@ -247,7 +251,6 @@ export function BusabaseAgentSkillButton({
   defaultOrigin = "http://localhost:15419",
   lang,
 }: BusabaseAgentSkillButtonProps = {}) {
-  const messages = useCoreI18n();
   const [open, setOpen] = useState(false);
 
   return (
@@ -257,10 +260,10 @@ export function BusabaseAgentSkillButton({
           <SidebarMenuButton
             className="mx-2 w-[calc(100%-1rem)]"
             onClick={() => setOpen(true)}
-            tooltip={messages.integration.agentSkills}
+            tooltip="Agent Skills"
           >
             <Sparkles />
-            <span>{messages.integration.agentSkills}</span>
+            <span>Agent Skills</span>
           </SidebarMenuButton>
         </SidebarMenuItem>
       </SidebarMenu>

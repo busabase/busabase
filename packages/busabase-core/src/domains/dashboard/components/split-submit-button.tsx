@@ -2,7 +2,6 @@
 
 import { ChevronDown } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import { useCoreI18n } from "../../../i18n";
 
 interface SplitSubmitButtonProps {
   /** Label for the main (default) action — e.g. "Create Change Request" */
@@ -39,7 +38,6 @@ export function SplitSubmitButton({
   isSecondaryLoading = false,
   hint,
 }: SplitSubmitButtonProps) {
-  const messages = useCoreI18n();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
@@ -75,7 +73,7 @@ export function SplitSubmitButton({
       {/* Dropdown trigger */}
       <button
         aria-expanded={open}
-        aria-label={messages.common.moreSubmitOptions}
+        aria-label="More submit options"
         className="rounded-r-md bg-foreground px-2 py-1.5 text-background transition-colors hover:bg-foreground/85 disabled:cursor-not-allowed disabled:opacity-60"
         disabled={isDisabled}
         onClick={() => setOpen((v) => !v)}

@@ -1,13 +1,11 @@
 import { implement } from "@orpc/server";
 import { busabaseContract } from "busabase-contract/contract/busabase";
-import { getContextSpaceId } from "./context";
 import { assetsRouter } from "./domains/assets/router";
 import { attachmentsRouter } from "./domains/attachments/router";
 import { baseRouter, recordRouter, viewRouter } from "./domains/base/router";
 import { docRouter } from "./domains/doc/router";
 import { folderRouter } from "./domains/folder/router";
 import { skillRouter } from "./domains/skill/router";
-import { subscribeBusabaseLiveEvents } from "./logic/live-events";
 import {
   closeChangeRequest,
   createAuditEvent,
@@ -22,10 +20,8 @@ import {
   listComments,
   listNodes,
   mergeChangeRequest,
-  mergeChangeRequests,
   purgeNode,
   reviewChangeRequest,
-  reviewChangeRequests,
   reviseOperation,
   searchBusabase,
 } from "./logic/store";
@@ -58,11 +54,6 @@ export const busabaseRouter = busabase.router({
   agent: {
     listTasks: busabase.agent.listTasks.handler(async () => listAgentTasks()),
   },
-  live: {
-    subscribe: busabase.live.subscribe.handler(({ signal }) =>
-      subscribeBusabaseLiveEvents(getContextSpaceId(), signal),
-    ),
-  },
   bases: baseRouter,
   skills: skillRouter,
   docs: docRouter,
@@ -82,18 +73,11 @@ export const busabaseRouter = busabase.router({
       const { changeRequestId, ...rest } = input;
       return reviewChangeRequest(changeRequestId, rest);
     }),
-    reviewMany: busabase.changeRequests.reviewMany.handler(async ({ input }) => {
-      const { changeRequestIds, ...rest } = input;
-      return reviewChangeRequests(changeRequestIds, rest);
-    }),
     close: busabase.changeRequests.close.handler(async ({ input }) =>
       closeChangeRequest(input.changeRequestId, input.reason),
     ),
     merge: busabase.changeRequests.merge.handler(async ({ input }) =>
       mergeChangeRequest(input.changeRequestId),
-    ),
-    mergeMany: busabase.changeRequests.mergeMany.handler(async ({ input }) =>
-      mergeChangeRequests(input.changeRequestIds),
     ),
   },
   operations: {

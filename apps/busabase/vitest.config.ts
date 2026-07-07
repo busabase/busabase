@@ -4,10 +4,6 @@ import { defineConfig } from "vitest/config";
 export default defineConfig({
   resolve: {
     alias: {
-      // `busabase-cli` / `busabase-sdk` resolve to their built `dist/` via package
-      // exports; point at source so the CLI golden-path e2e runs without a build.
-      "busabase-cli": path.resolve(__dirname, "../busabase-cli/src/index.ts"),
-      "busabase-sdk": path.resolve(__dirname, "../busabase-sdk/src/index.ts"),
       "busabase-contract/api-client": path.resolve(
         __dirname,
         "../../packages/busabase-contract/src/api-client/index.ts",

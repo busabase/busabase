@@ -1,23 +1,13 @@
-import { getNodeType, OPERATION_KINDS, OPERATION_META } from "busabase-contract/domains";
+import { OPERATION_KINDS, OPERATION_META } from "busabase-contract/domains";
 import type {
-  BaseVO,
   ChangeRequestVO,
   NodeVO,
   OperationKind,
   OperationVO,
   RecordVO,
 } from "busabase-contract/types";
-import { iStringParse, iStringSchema } from "openlib/i18n/i-string";
-import { type CoreI18nMessages, fmt } from "../../../i18n";
 import { fieldPreviewText } from "./field";
 import { fieldValueToString, shortIdentifier } from "./format";
-
-// A commit's `name` may be a multilingual field name (iString record) — resolve
-// it to a display string instead of JSON-stringifying it into the title.
-const nameToString = (value: unknown): string => {
-  const parsed = iStringSchema.safeParse(value);
-  return parsed.success ? iStringParse(parsed.data) : fieldValueToString(value);
-};
 
 export const statusTone = (status: string) => {
   if (status === "merged") {
@@ -35,18 +25,18 @@ export const statusTone = (status: string) => {
   return "border-amber-200 bg-amber-50 text-amber-900";
 };
 
-export const changeRequestStatusLabel = (status: string, messages?: CoreI18nMessages) => {
+export const changeRequestStatusLabel = (status: string) => {
   if (status === "in_review") {
-    return messages?.status.inReview ?? "In review";
+    return "In review";
   }
   if (status === "changes_requested") {
-    return messages?.status.changesRequested ?? "Changes requested";
+    return "Changes requested";
   }
   if (status === "conflict") {
-    return messages?.status.conflict ?? "Conflict";
+    return "Conflict";
   }
   if (status === "rejected" || status === "abandoned") {
-    return messages?.status.closed ?? "Closed";
+    return "Closed";
   }
   return status.charAt(0).toUpperCase() + status.slice(1);
 };
@@ -71,37 +61,6 @@ export const operationOrder: OperationKind[] = [
 
 // Operation labels/tones come from the node-type registry (single source of truth).
 export const operationMeta = OPERATION_META;
-
-const getFieldString = (fields: Record<string, unknown>, key: string) => {
-  const value = fields[key];
-  return typeof value === "string" ? value : "";
-};
-
-export const getNodeOperationTypeLabel = (operation: OperationVO | null | undefined) => {
-  if (!operation?.operation.startsWith("node_")) {
-    return "";
-  }
-
-  const fields = operation.headCommit.fields;
-  const nodeType = getFieldString(fields, "nodeType");
-  return nodeType ? (getNodeType(nodeType)?.label ?? nodeType) : "";
-};
-
-export const getOperationLabel = (operation: OperationVO | null | undefined) => {
-  if (!operation) {
-    return "";
-  }
-
-  if (operation.operation.startsWith("node_")) {
-    const nodeTypeLabel = getNodeOperationTypeLabel(operation);
-    if (nodeTypeLabel) {
-      const action = operation.operation.replace(/^node_/, "");
-      return `${action.charAt(0).toUpperCase()}${action.slice(1)} ${nodeTypeLabel.toLowerCase()}`;
-    }
-  }
-
-  return operationMeta[operation.operation].label;
-};
 
 export const getChangeRequestScopeName = (changeRequest: ChangeRequestVO) =>
   changeRequest.base?.name ?? changeRequest.node?.name ?? "Node tree";
@@ -140,68 +99,31 @@ export const getOperationTargetHref = (changeRequest: ChangeRequestVO, operation
   return getNodeHref(changeRequest.node);
 };
 
-export const getOperationTargetLabel = (operation: OperationVO, messages?: CoreI18nMessages) => {
+export const getOperationTargetLabel = (operation: OperationVO) => {
   if (operation.operation.startsWith("view_")) {
-    return messages?.common.open ? `${messages.common.open} view` : "Open view";
+    return "Open view";
   }
   if (operation.targetType === "node") {
-    return messages?.common.open ? `${messages.common.open} node` : "Open node";
+    return "Open node";
   }
-  return messages?.common.open
-    ? `${messages.common.open} ${messages.common.record}`
-    : "Open record";
+  return "Open record";
 };
 
-// Human-readable subject of an operation. For record operations the subject is
-// the value of the base's PRIMARY field (first by position — same convention as
-// getRecordTitle), read from the head commit or, for updates/deletes that don't
-// touch it, from the "before" values. Falls back to a title/name/subject slug
-// guess (views and nodes carry their name there) or the skill file path.
-// Empty string when the operation has no meaningful name.
-export const getOperationSubject = (operation: OperationVO, base?: BaseVO | null) => {
-  if (base && operation.operation.startsWith("record_")) {
-    const primaryField = base.fields[0];
-    if (primaryField) {
-      const subject =
-        fieldPreviewText(operation.headCommit.fields[primaryField.slug], primaryField.type) ||
-        (operation.baseFields
-          ? fieldPreviewText(operation.baseFields[primaryField.slug], primaryField.type)
-          : "");
-      if (subject) {
-        return subject;
-      }
-    }
-  }
-
-  const guessed =
-    fieldValueToString(operation.headCommit.fields.title) ||
-    nameToString(operation.headCommit.fields.name) ||
-    fieldValueToString(operation.headCommit.fields.subject);
-  if (guessed) {
-    return guessed;
-  }
-
-  if (operation.operation.startsWith("skill_file_") && operation.filePath) {
-    return operation.filePath;
-  }
-
-  return "";
-};
-
-export const getOperationTitle = (
-  operation: OperationVO | null | undefined,
-  base?: BaseVO | null,
-) => {
+export const getOperationTitle = (operation: OperationVO | null | undefined) => {
   if (!operation) {
     return "";
   }
 
-  const subject = getOperationSubject(operation, base);
-  if (subject) {
-    return subject;
+  const title =
+    fieldValueToString(operation.headCommit.fields.title) ||
+    fieldValueToString(operation.headCommit.fields.name) ||
+    fieldValueToString(operation.headCommit.fields.subject);
+
+  if (title) {
+    return title;
   }
 
-  return `${getOperationLabel(operation)} ${shortIdentifier(
+  return `${operationMeta[operation.operation].label} ${shortIdentifier(
     operation.targetRecordId ??
       operation.sourceRecordId ??
       operation.targetViewId ??
@@ -209,34 +131,6 @@ export const getOperationTitle = (
       operation.headCommitId,
   )}`;
 };
-
-// Commit messages the API fills in when the author didn't write one. Pure
-// boilerplate for a reviewer, so the UI hides them (see the input schema
-// defaults in busabase-contract).
-const DEFAULT_COMMIT_MESSAGES = new Set([
-  "Initial change request",
-  "Initial changeRequest",
-  "Update node tree",
-  "Delete record",
-  "Revise operation",
-  "Update skill",
-  "Update doc",
-  "Create view",
-  "Update view",
-  "Delete view",
-  "Restore view",
-  "Add field",
-]);
-
-// The author's own explanation of an operation (its commit message), when it
-// says more than a system default.
-export const getOperationMessage = (operation: OperationVO | null | undefined) => {
-  const message = operation?.headCommit.message.trim() ?? "";
-  return message && !DEFAULT_COMMIT_MESSAGES.has(message) ? message : "";
-};
-
-export const getChangeRequestMessage = (changeRequest: ChangeRequestVO) =>
-  getOperationMessage(changeRequest.primaryOperation);
 
 export const getRecordTitle = (record: RecordVO | null | undefined) => {
   if (!record) {
@@ -263,46 +157,19 @@ export const getOperationCounts = (operations: OperationVO[]) =>
     Object.fromEntries(OPERATION_KINDS.map((kind) => [kind, 0])) as Record<OperationKind, number>,
   );
 
-// Conventional-commit-style title: "<operation verb> <subject>", e.g.
-// "Create Alice Johnson" or "Update view Weekly board" — never a bare commit id.
-export const getChangeRequestTitle = (
-  changeRequest: ChangeRequestVO,
-  messages?: CoreI18nMessages,
-) => {
+export const getChangeRequestTitle = (changeRequest: ChangeRequestVO) => {
   if (changeRequest.operationCount > 1) {
-    return `${changeRequest.operationCount} ${messages?.activity.operation ?? "operation"} ${messages?.activity.changeRequest ?? "change request"}`;
+    return `${changeRequest.operationCount} operation change request`;
   }
 
-  const operation = changeRequest.primaryOperation;
-  if (!operation) {
-    return `Untitled ${messages?.activity.changeRequest ?? "change request"}`;
-  }
-
-  const subject = getOperationSubject(operation, changeRequest.base);
-  if (subject) {
-    return `${operationMeta[operation.operation].label} ${subject}`;
-  }
-
-  return getOperationTitle(operation, changeRequest.base);
+  return getOperationTitle(changeRequest.primaryOperation) || "Untitled change request";
 };
 
-export const getChangeRequestSummary = (
-  changeRequest: ChangeRequestVO,
-  _messages?: CoreI18nMessages,
-) => {
-  const operationIndexes = new Map(operationOrder.map((operation, index) => [operation, index]));
-  const counts = changeRequest.operations.reduce((items, operation) => {
-    const label = getOperationLabel(operation).toLowerCase();
-    const current = items.get(label) ?? {
-      count: 0,
-      order: operationIndexes.get(operation.operation) ?? operationOrder.length,
-    };
-    items.set(label, { ...current, count: current.count + 1 });
-    return items;
-  }, new Map<string, { count: number; order: number }>());
-  const parts = [...counts.entries()]
-    .sort((first, second) => first[1].order - second[1].order || first[0].localeCompare(second[0]))
-    .map(([label, item]) => `${item.count} ${label}`);
+export const getChangeRequestSummary = (changeRequest: ChangeRequestVO) => {
+  const counts = getOperationCounts(changeRequest.operations);
+  const parts = operationOrder
+    .filter((operation) => counts[operation] > 0)
+    .map((operation) => `${counts[operation]} ${operationMeta[operation].label.toLowerCase()}`);
 
   if (parts.length > 0) {
     return parts.join(" · ");
@@ -311,15 +178,8 @@ export const getChangeRequestSummary = (
   return `${changeRequest.operationCount} item${changeRequest.operationCount === 1 ? "" : "s"}`;
 };
 
-export const getChangeRequestOperationLabel = (
-  changeRequest: ChangeRequestVO,
-  messages?: CoreI18nMessages,
-) =>
-  fmt("{count} {operation}{plural}", {
-    count: changeRequest.operationCount,
-    operation: messages?.activity.operation ?? "operation",
-    plural: changeRequest.operationCount === 1 ? "" : "s",
-  });
+export const getChangeRequestOperationLabel = (changeRequest: ChangeRequestVO) =>
+  `${changeRequest.operationCount} operation${changeRequest.operationCount === 1 ? "" : "s"}`;
 
 export const getChangeRequestRiskHints = (changeRequest: ChangeRequestVO) => {
   const hints = new Set<string>();
@@ -352,34 +212,28 @@ export const getChangeRequestRiskHints = (changeRequest: ChangeRequestVO) => {
   return Array.from(hints).slice(0, 2);
 };
 
-export const getChangeRequestBrief = (
-  changeRequest: ChangeRequestVO,
-  messages?: CoreI18nMessages,
-) => {
+export const getChangeRequestBrief = (changeRequest: ChangeRequestVO) => {
   const scope = getChangeRequestScopeName(changeRequest);
-  const summary = getChangeRequestSummary(changeRequest, messages);
+  const summary = getChangeRequestSummary(changeRequest);
   const risks = getChangeRequestRiskHints(changeRequest);
   const riskText = risks.length > 0 ? ` Watch ${risks.join(" and ")} changes.` : "";
-  return `${getChangeRequestOperationLabel(changeRequest, messages)} in ${scope}: ${summary}.${riskText}`;
+  return `${getChangeRequestOperationLabel(changeRequest)} in ${scope}: ${summary}.${riskText}`;
 };
 
-export const getChangeRequestReviewMessage = (
-  changeRequest: ChangeRequestVO,
-  messages?: CoreI18nMessages,
-) => {
+export const getChangeRequestReviewMessage = (changeRequest: ChangeRequestVO) => {
   if (changeRequest.status === "approved") {
-    return messages?.review.approvedReadyToMerge ?? "Approved · ready to merge";
+    return "Approved · ready to merge";
   }
   if (changeRequest.status === "changes_requested") {
-    return messages?.review.changesRequestedAwaiting ?? "Changes requested · awaiting revision";
+    return "Changes requested · awaiting revision";
   }
   if (changeRequest.status === "rejected" || changeRequest.status === "abandoned") {
-    return messages?.review.statusClosed ?? "Closed";
+    return "Closed";
   }
   if (changeRequest.status === "merged") {
-    return messages?.review.mergedIntoBase ?? "Merged into Base";
+    return "Merged into Base";
   }
-  return messages?.review.waitingForReview ?? "Waiting for your review";
+  return "Waiting for your review";
 };
 
 export const getOperationImpact = (operation: OperationVO) => {
@@ -407,16 +261,9 @@ export const getOperationImpact = (operation: OperationVO) => {
     return `Deletes view ${shortIdentifier(operation.targetViewId ?? operation.mergedViewId)}`;
   }
   if (operation.operation.startsWith("skill_file_")) {
-    return `${getOperationLabel(operation)} ${operation.filePath ?? "file"}`;
+    return `${operationMeta[operation.operation].label} ${operation.filePath ?? "file"}`;
   }
-  if (operation.operation === "node_create") {
-    const nodeTypeLabel = getNodeOperationTypeLabel(operation).toLowerCase() || "node";
-    return `Creates ${nodeTypeLabel}`;
-  }
-  if (operation.operation.startsWith("node_")) {
-    return `${getOperationLabel(operation)} ${shortIdentifier(operation.nodeId)}`;
-  }
-  return `${getOperationLabel(operation)} ${shortIdentifier(operation.nodeId)}`;
+  return `${operationMeta[operation.operation].label} ${shortIdentifier(operation.nodeId)}`;
 };
 
 export const isDerivedFieldSlug = (name: string, slug: string) =>

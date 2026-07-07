@@ -7,6 +7,7 @@ import { BusabaseDashboard } from "busabase-core/dashboard";
 import { CreateNodeModal } from "busabase-core/dashboard/create-node-modal";
 import { EmptyAgentGuide } from "busabase-core/dashboard/empty-agent-guide";
 import { getBusabaseDashboardRoutes as getDashboardRoutes } from "busabase-core/dashboard/routes";
+import { coreLocaleOptions } from "busabase-core/i18n";
 import { useRouter } from "next/navigation";
 import { detectBrowserLocale, type Locale } from "openlib/i18n";
 import { addDemoParam } from "openlib/ui/dashboard";
@@ -16,8 +17,6 @@ import { DashboardNotFound } from "~/components/spa/not-found";
 import { SPARouteRenderer } from "~/components/spa/spa-route-renderer";
 import { SPAWrapper } from "~/components/spa/spa-wrapper";
 import { getSecondarySidebarNav } from "~/config/navigation-nested";
-import { SUPPORTED_LOCALES } from "~/i18n/config";
-import { getBusabaseAppLL } from "~/lib/i18n";
 
 interface DashboardClientProps {
   initialPath?: string;
@@ -56,6 +55,11 @@ function DashboardClientContent({ initialPath = "/inbox" }: DashboardClientProps
     changeRequestsQuery.error ??
     recordsQuery.error ??
     auditEventsQuery.error;
+  const loadErrorMessage = loadError
+    ? loadError instanceof Error
+      ? loadError.message
+      : "Failed to load dashboard data"
+    : null;
   const isLoadingDashboardData =
     nodesQuery.isPending ||
     basesQuery.isPending ||
@@ -68,21 +72,18 @@ function DashboardClientContent({ initialPath = "/inbox" }: DashboardClientProps
   // (e.g. "zh-CN") overrides it. The cloud app injects its `[lang]` locale instead.
   const [languagePref, setLanguagePref] = useState("auto");
   const [detectedLocale, setDetectedLocale] = useState<string>("en");
-  const appLocaleCodes = useMemo(() => [...SUPPORTED_LOCALES] as Locale[], []);
+  const coreLocaleCodes = useMemo(
+    () => coreLocaleOptions.map((option) => option.code) as Locale[],
+    [],
+  );
   useEffect(() => {
     const stored = window.localStorage.getItem("busabaseLocale");
     if (stored) {
       setLanguagePref(stored);
     }
-    setDetectedLocale(detectBrowserLocale(appLocaleCodes));
-  }, [appLocaleCodes]);
+    setDetectedLocale(detectBrowserLocale(coreLocaleCodes));
+  }, [coreLocaleCodes]);
   const locale = languagePref === "auto" ? detectedLocale : languagePref;
-  const LL = useMemo(() => getBusabaseAppLL(locale), [locale]);
-  const loadErrorMessage = loadError
-    ? loadError instanceof Error
-      ? loadError.message
-      : LL.shell.failedToLoadDashboard()
-    : null;
   const changeLocale = useCallback((next: string) => {
     setLanguagePref(next);
     window.localStorage.setItem("busabaseLocale", next);
@@ -108,7 +109,7 @@ function DashboardClientContent({ initialPath = "/inbox" }: DashboardClientProps
     [apiClient, auditEvents, changeRequests, records, bases, nodes, isSearchOpen, locale],
   );
   const routes = useMemo(() => getDashboardRoutes(dashboard), [dashboard]);
-  const secondaryNavConfig = useMemo(() => getSecondarySidebarNav(locale), [locale]);
+  const secondaryNavConfig = useMemo(() => getSecondarySidebarNav(), []);
 
   return (
     <SPAWrapper
@@ -136,7 +137,7 @@ function DashboardClientContent({ initialPath = "/inbox" }: DashboardClientProps
           </div>
         ) : isLoadingDashboardData ? (
           <div className="flex min-h-0 flex-1 items-center justify-center px-6 text-sm text-muted-foreground">
-            {LL.shell.loadingDashboard()}
+            Loading dashboard...
           </div>
         ) : (
           <SPARouteRenderer

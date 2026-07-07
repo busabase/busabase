@@ -7,7 +7,6 @@ export * from "./audit";
 export * from "./auth";
 export {
   createBaseInputSchema,
-  createBulkChangeRequestInputSchema,
   createChangeRequestInputSchema,
   createDeleteChangeRequestInputSchema,
   createViewInputSchema,

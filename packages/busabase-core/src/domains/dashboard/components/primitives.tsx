@@ -1,12 +1,9 @@
 import { ArrowLeft, Check, ChevronRight, PenLine, X } from "lucide-react";
 import { SPALink as Link } from "openlib/ui/dashboard";
 import type { ReactNode } from "react";
-import { useCoreI18n } from "../../../i18n";
 import { changeRequestStatusLabel, statusTone } from "../helpers/change-request";
 
 export function CheckboxBadge({ checked }: { checked: boolean }) {
-  const messages = useCoreI18n();
-
   return (
     <span
       className={`inline-flex w-fit items-center gap-1 rounded-full border px-2 py-0.5 font-medium text-xs ${
@@ -16,7 +13,7 @@ export function CheckboxBadge({ checked }: { checked: boolean }) {
       }`}
     >
       {checked ? <Check size={12} /> : <X size={12} />}
-      {checked ? messages.common.yes : messages.common.no}
+      {checked ? "Yes" : "No"}
     </span>
   );
 }
@@ -27,14 +24,14 @@ export function CheckboxBadge({ checked }: { checked: boolean }) {
 export function BusabaseSidePanel({ children, open }: { children: ReactNode; open: boolean }) {
   return (
     <aside
-      className={`min-w-0 space-y-3 transition-[width] duration-200 lg:sticky lg:top-4 lg:self-start ${
-        open ? "w-full lg:w-72 xl:w-80" : "w-full lg:w-12"
+      className={`min-w-0 space-y-3 transition-[width] duration-200 xl:sticky xl:top-4 xl:self-start ${
+        open ? "w-full xl:w-80" : "w-full xl:w-12"
       }`}
     >
       {open ? (
         <div className="min-w-0 space-y-3">{children}</div>
       ) : (
-        <div className="hidden flex-col items-center gap-2 pt-1 lg:flex">
+        <div className="hidden flex-col items-center gap-2 pt-1 xl:flex">
           <span className="size-2 rounded-full bg-muted-foreground/40" />
           <span className="size-2 rounded-full bg-muted-foreground/25" />
           <span className="size-2 rounded-full bg-muted-foreground/25" />
@@ -46,15 +43,12 @@ export function BusabaseSidePanel({ children, open }: { children: ReactNode; ope
 
 // Shared rail collapse/expand toggle, placed in the detail header (xl only).
 export function RailToggleButton({ onToggle, open }: { onToggle: () => void; open: boolean }) {
-  const messages = useCoreI18n();
-  const label = open ? messages.common.close : messages.common.open;
-
   return (
     <button
-      aria-label={label}
+      aria-label={open ? "Collapse side panel" : "Expand side panel"}
       className="hidden size-8 items-center justify-center rounded-md border border-border/60 text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground xl:flex"
       onClick={onToggle}
-      title={label}
+      title={open ? "Collapse side panel" : "Expand side panel"}
       type="button"
     >
       <ChevronRight className={open ? "" : "rotate-180"} size={15} />
@@ -130,8 +124,6 @@ export function ConfirmActionDialog({
   pending?: boolean;
   title: string;
 }) {
-  const messages = useCoreI18n();
-
   if (!open) {
     return null;
   }
@@ -148,7 +140,7 @@ export function ConfirmActionDialog({
             onClick={onCancel}
             type="button"
           >
-            {messages.common.cancel}
+            Cancel
           </button>
           <button
             className={`rounded-md px-3 py-1.5 font-medium text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${
@@ -160,7 +152,7 @@ export function ConfirmActionDialog({
             onClick={onConfirm}
             type="button"
           >
-            {pending ? messages.common.working : confirmLabel}
+            {pending ? "Working..." : confirmLabel}
           </button>
         </div>
       </section>
@@ -190,13 +182,11 @@ export function PropertyRow({ label, value }: { label: string; value: string }) 
 }
 
 export function StatusBadge({ status }: { status: string }) {
-  const messages = useCoreI18n();
-
   return (
     <span
       className={`shrink-0 rounded-full border px-2.5 py-1 font-medium text-xs ${statusTone(status)}`}
     >
-      {changeRequestStatusLabel(status, messages)}
+      {changeRequestStatusLabel(status)}
     </span>
   );
 }

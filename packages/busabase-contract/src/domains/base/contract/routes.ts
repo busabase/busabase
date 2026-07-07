@@ -23,7 +23,6 @@ import {
   updateFieldChangeRequestInputSchema,
 } from "./base-schemas";
 import {
-  createBulkChangeRequestInputSchema,
   createChangeRequestInputSchema,
   listRecordsInputSchema,
   listRecordsResponseSchema,
@@ -129,16 +128,6 @@ export const baseContract = {
       successDescription: "Created change request for review.",
     })
     .input(createChangeRequestInputSchema.extend({ baseId: z.string() }))
-    .output(changeRequestSchema),
-  createBulkChangeRequest: oc
-    .route({
-      method: "POST",
-      path: "/bases/{baseId}/records/bulk-change-request",
-      tags: ["Bases", "Change Requests"],
-      summary: "Create bulk record Change Request in Base",
-      successDescription: "Created one change request proposing many record creates.",
-    })
-    .input(createBulkChangeRequestInputSchema.extend({ baseId: z.string() }))
     .output(changeRequestSchema),
   createField: oc
     .route({

@@ -41,8 +41,6 @@ const demoUnsupported = (action: string) =>
     message: `"${action}" is disabled in the Busabase demo. Run Busabase locally to make persistent changes.`,
   });
 
-const shouldEmitDemoLiveEvent = () => false;
-
 export const busabaseDemoRouter = os.router({
   auth: {
     verify: os.auth.verify.handler(() => demoGetAuthInfo()),
@@ -69,14 +67,6 @@ export const busabaseDemoRouter = os.router({
   agent: {
     listTasks: os.agent.listTasks.handler(() => demoListAgentTasks()),
   },
-  live: {
-    subscribe: os.live.subscribe.handler(async function* () {
-      if (shouldEmitDemoLiveEvent()) {
-        yield undefined as never;
-      }
-      return undefined;
-    }),
-  },
   bases: {
     list: os.bases.list.handler(() => demoListBases()),
     listArchived: os.bases.listArchived.handler(() => []),
@@ -87,9 +77,6 @@ export const busabaseDemoRouter = os.router({
     createChangeRequest: os.bases.createChangeRequest.handler(({ input }) => {
       const { baseId, ...rest } = input;
       return demoCreateChangeRequest(baseId, rest);
-    }),
-    createBulkChangeRequest: os.bases.createBulkChangeRequest.handler(() => {
-      throw demoUnsupported("Bulk record change request");
     }),
     createField: os.bases.createField.handler(() => {
       throw demoUnsupported("Create Base field");
@@ -186,18 +173,12 @@ export const busabaseDemoRouter = os.router({
       const { changeRequestId, ...rest } = input;
       return demoReviewChangeRequest(changeRequestId, rest);
     }),
-    reviewMany: os.changeRequests.reviewMany.handler(() => {
-      throw demoUnsupported("Review many change requests");
-    }),
     close: os.changeRequests.close.handler(({ input }) =>
       demoCloseChangeRequest(input.changeRequestId, input.reason),
     ),
     merge: os.changeRequests.merge.handler(({ input }) =>
       demoMergeChangeRequest(input.changeRequestId),
     ),
-    mergeMany: os.changeRequests.mergeMany.handler(() => {
-      throw demoUnsupported("Merge many change requests");
-    }),
   },
   operations: {
     revise: os.operations.revise.handler(({ input }) => demoReviseOperation(input.operationId)),

@@ -8,7 +8,6 @@ import type {
   RequestUploadUrlDTO,
   RequestUploadUrlVO,
 } from "open-domains/attachments/types";
-import type { iString } from "openlib/i18n/i-string";
 import {
   type BusabaseContract,
   busabaseContract,
@@ -91,7 +90,7 @@ export interface BusabaseDashboardApiClient {
     description?: string;
     fields: Array<{
       slug: string;
-      name: iString;
+      name: string;
       type?: BaseVO["fields"][number]["type"];
       required?: boolean;
     }>;
@@ -109,7 +108,7 @@ export interface BusabaseDashboardApiClient {
           description?: string;
           fields?: Array<{
             slug: string;
-            name: iString;
+            name: string;
             type?: BaseVO["fields"][number]["type"];
             required?: boolean;
           }>;
@@ -131,7 +130,7 @@ export interface BusabaseDashboardApiClient {
   createBaseField: (
     baseId: string,
     payload: {
-      name: iString;
+      name: string;
       options?: {
         ai?: {
           model?: string;
@@ -156,7 +155,7 @@ export interface BusabaseDashboardApiClient {
   createFieldChangeRequest: (
     baseId: string,
     payload: {
-      name: iString;
+      name: string;
       slug: string;
       type?: BaseVO["fields"][number]["type"];
       required?: boolean;
@@ -171,30 +170,6 @@ export interface BusabaseDashboardApiClient {
         inverseFieldId?: string;
         multiple?: boolean;
         targetBaseId?: string;
-      };
-      message?: string;
-      submittedBy?: string;
-    },
-  ) => Promise<ChangeRequestVO>;
-  createUpdateFieldChangeRequest: (
-    baseId: string,
-    payload: {
-      fieldId: string;
-      patch: {
-        name?: iString;
-        required?: boolean;
-        options?: {
-          ai?: {
-            model?: string;
-            prompt?: string;
-            reviewRequired?: boolean;
-            sourceFieldIds?: string[];
-          };
-          choices?: Array<{ color?: string; id: string; name: string }>;
-          inverseFieldId?: string;
-          multiple?: boolean;
-          targetBaseId?: string;
-        };
       };
       message?: string;
       submittedBy?: string;
@@ -347,8 +322,6 @@ export const createBusabaseRestApiClient = (
     createBaseField: (baseId, payload) => client.bases.createField({ baseId, ...payload }),
     createFieldChangeRequest: (baseId, payload) =>
       client.bases.createFieldChangeRequest({ baseId, ...payload }),
-    createUpdateFieldChangeRequest: (baseId, payload) =>
-      client.bases.updateFieldChangeRequest({ baseId, ...payload }),
     createViewChangeRequest: (baseId, payload) =>
       client.bases.createViewChangeRequest({ baseId, ...payload }),
     createUpdateViewChangeRequest: (viewId, payload) =>

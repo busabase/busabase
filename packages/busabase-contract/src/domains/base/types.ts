@@ -1,16 +1,11 @@
 // View objects owned by the base domain (structured records + views).
-import type { iString } from "openlib/i18n/i-string";
 import type { CommitVO, FieldType } from "../../types";
 
 export interface BaseFieldVO {
   id: string;
   baseId: string;
   slug: string;
-  /**
-   * Display name — a plain string or a locale-keyed record
-   * (e.g. { en: "Company", "zh-CN": "公司" }). Resolve with iStringParse.
-   */
-  name: iString;
+  name: string;
   type: FieldType;
   required: boolean;
   position: number;

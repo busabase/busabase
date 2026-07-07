@@ -5,7 +5,6 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
-import sharp from "sharp";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const OUT = path.join(__dirname, "..", "public", "assets", "readme");
@@ -602,12 +601,8 @@ if (LANG === "en") {
   for (const { tab, file } of dialogShots) {
     await page.getByRole("tab", { name: new RegExp(`^${tab}$`, "i") }).click();
     await page.waitForTimeout(600);
-    // These dialog shots aren't window-framed, so convert the PNG capture to
-    // lossless WebP here (crisp UI text, ~⅓ the size).
-    const webpFile = file.replace(/\.(png|jpe?g)$/i, ".webp");
-    const buf = await page.screenshot();
-    await sharp(buf).webp({ lossless: true }).toFile(path.join(OUT, webpFile));
-    console.log(`✓ ${webpFile}`);
+    await page.screenshot({ path: path.join(OUT, file) });
+    console.log(`✓ ${file}`);
   }
 }
 

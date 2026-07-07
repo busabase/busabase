@@ -3,19 +3,15 @@ import type { AuditEventVO, ChangeRequestVO, OperationVO, ReviewVO } from "busab
 import { Check, ChevronRight, GitMerge, Sparkles, X } from "lucide-react";
 import { SPALink as Link } from "openlib/ui/dashboard";
 import { Fragment, useEffect, useMemo, useState } from "react";
-import { fmt, useCoreI18n } from "../../../i18n";
 import {
   changeRequestStatusLabel,
   getChangeRequestBrief,
-  getChangeRequestMessage,
   getChangeRequestReviewMessage,
   getChangeRequestRiskHints,
   getChangeRequestScopeHref,
   getChangeRequestScopeName,
   getChangeRequestTitle,
   getOperationImpact,
-  getOperationLabel,
-  getOperationMessage,
   getOperationTargetHref,
   getOperationTargetLabel,
   getOperationTitle,
@@ -35,13 +31,14 @@ import {
 } from "./primitives";
 
 export function ReviewConflictPanel({ message }: { message: string }) {
-  const messages = useCoreI18n();
-
   return (
     <div className="border-amber-200 border-b bg-amber-50 px-4 py-3 text-amber-900">
       <div className="mx-auto flex max-w-6xl flex-col gap-1.5 text-sm">
-        <div className="font-semibold">{messages.review.mergeNeedsReview}</div>
-        <div className="leading-6">{fmt(messages.review.mergeNeedsReviewBody, { message })}</div>
+        <div className="font-semibold">Merge needs review</div>
+        <div className="leading-6">
+          {message} The change request is still safe here; request a revision or close it after
+          review.
+        </div>
       </div>
     </div>
   );
@@ -76,7 +73,6 @@ export const getChangeRequestConflict = (
  * operation to re-baseline + resolve, or close to abandon.
  */
 export function ConflictDiffPanel({ changeRequest }: { changeRequest: ChangeRequestVO }) {
-  const messages = useCoreI18n();
   const conflict = getChangeRequestConflict(changeRequest);
   if (changeRequest.status !== "conflict") {
     return null;
@@ -85,13 +81,11 @@ export function ConflictDiffPanel({ changeRequest }: { changeRequest: ChangeRequ
     <section className="mt-5 max-w-4xl rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-amber-900 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200">
       <div className="flex items-center gap-2 font-semibold text-sm">
         <X size={15} />
-        {messages.review.mergeConflictTitle}
+        Merge conflict — the record changed since this change request was created
       </div>
       {conflict && conflict.fields.length > 0 ? (
         <div className="mt-2 flex flex-wrap items-center gap-1.5 text-xs">
-          <span className="text-amber-800/80 dark:text-amber-300/80">
-            {messages.review.conflictingFields}
-          </span>
+          <span className="text-amber-800/80 dark:text-amber-300/80">Conflicting fields:</span>
           {conflict.fields.map((field) => (
             <span
               className="rounded-full border border-amber-300 bg-amber-100 px-2 py-0.5 font-medium dark:border-amber-800 dark:bg-amber-900/50"
@@ -102,7 +96,10 @@ export function ConflictDiffPanel({ changeRequest }: { changeRequest: ChangeRequ
           ))}
         </div>
       ) : null}
-      <p className="mt-2 text-xs leading-5">{messages.review.conflictResolveHint}</p>
+      <p className="mt-2 text-xs leading-5">
+        Re-open the proposed change below and revise it to merge against the latest values, or close
+        the change request to abandon it.
+      </p>
     </section>
   );
 }
@@ -137,7 +134,6 @@ export function OperationReviewSection({
   defaultOpen: boolean;
   operation: OperationVO;
 }) {
-  const messages = useCoreI18n();
   const [open, setOpen] = useState(defaultOpen);
   const meta = operationMeta[operation.operation];
   const changedSinceReview = operationChangedSinceReview(changeRequest, operation);
@@ -156,23 +152,23 @@ export function OperationReviewSection({
             size={16}
           />
           <span className={`shrink-0 rounded-full border px-2 py-0.5 text-xs ${meta.tone}`}>
-            {operation.position + 1}. {getOperationLabel(operation)}
+            {operation.position + 1}. {meta.label}
           </span>
           <span className="min-w-0 truncate font-medium text-sm">
-            {getOperationTitle(operation, changeRequest.base)}
+            {getOperationTitle(operation)}
           </span>
         </button>
         {changedSinceReview ? (
           <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-amber-50 px-2 py-0.5 font-medium text-[11px] text-amber-700 dark:bg-amber-950/40 dark:text-amber-300">
             <Sparkles size={11} />
-            {messages.review.changedSinceReview}
+            changed since review
           </span>
         ) : targetHref ? (
           <Link
             className="inline-flex shrink-0 items-center gap-1 text-muted-foreground text-xs transition-colors hover:text-foreground hover:underline"
             href={targetHref}
           >
-            {getOperationTargetLabel(operation, messages)}
+            {getOperationTargetLabel(operation)}
             <ChevronRight size={13} />
           </Link>
         ) : (
@@ -183,21 +179,14 @@ export function OperationReviewSection({
       </div>
       {open ? (
         <div className="px-4 pb-4">
-          {changeRequest.operationCount > 1 && getOperationMessage(operation) ? (
-            <p className="mb-3 border-primary/30 border-l-2 pl-3 text-sm leading-6">
-              {getOperationMessage(operation)}
-            </p>
-          ) : null}
           <OperationFieldChanges changeRequest={changeRequest} operation={operation} />
           <div className="mt-4">
-            <div className="font-medium text-muted-foreground text-xs">
-              {messages.review.commentsOnThisChange}
-            </div>
+            <div className="font-medium text-muted-foreground text-xs">Comments on this change</div>
             <div className="mt-2">
               <SubjectCommentThread
                 client={client}
-                emptyLabel={messages.comments.noCommentsOperation}
-                placeholder={messages.comments.placeholderOperation}
+                emptyLabel="No comments on this change yet."
+                placeholder="Comment on this change… mention @ai to request a revision"
                 subjectId={operation.id}
                 subjectType="operation"
               />
@@ -240,7 +229,6 @@ export function OperationReviewList({
 }
 
 export function ReviewTimelineEntry({ review }: { review: ReviewVO }) {
-  const messages = useCoreI18n();
   const approved = review.verdict === "approved";
   return (
     <div className="flex items-start gap-2.5 rounded-lg border bg-background/40 px-3 py-2.5">
@@ -250,7 +238,7 @@ export function ReviewTimelineEntry({ review }: { review: ReviewVO }) {
       <div className="min-w-0">
         <div className="text-sm">
           <span className="font-medium">{formatActorLabel(review.reviewerId)}</span>{" "}
-          {approved ? messages.review.approvedChangeRequest : messages.review.requestedChanges}
+          {approved ? "approved this change request" : "requested changes"}
           <span className="ml-2 text-muted-foreground text-xs">
             {formatDetailTime(review.createdAt)}
           </span>
@@ -266,8 +254,6 @@ export function ReviewTimelineEntry({ review }: { review: ReviewVO }) {
 }
 
 export function MergeTimelineEntry({ event }: { event: AuditEventVO }) {
-  const messages = useCoreI18n();
-
   return (
     <div className="flex items-start gap-2.5 rounded-lg border bg-background/40 px-3 py-2.5">
       <span className="mt-0.5 shrink-0 text-sky-600">
@@ -275,8 +261,8 @@ export function MergeTimelineEntry({ event }: { event: AuditEventVO }) {
       </span>
       <div className="min-w-0">
         <div className="text-sm">
-          <span className="font-medium">{formatActorLabel(event.actorId)}</span>{" "}
-          {messages.review.mergedThisChangeRequest}
+          <span className="font-medium">{formatActorLabel(event.actorId)}</span> merged this change
+          request
           <span className="ml-2 text-muted-foreground text-xs">
             {formatDetailTime(event.createdAt)}
           </span>
@@ -308,7 +294,6 @@ export function ChangeRequestDiscussion({
   changeRequest: ChangeRequestVO;
   client: BusabaseDashboardApiClient;
 }) {
-  const messages = useCoreI18n();
   const timeline = useMemo<DiscussionTimelineItem[]>(() => {
     const reviewItems = changeRequest.reviews.map((review) => ({
       review,
@@ -328,7 +313,7 @@ export function ChangeRequestDiscussion({
 
   return (
     <section className="mt-8 max-w-4xl">
-      <div className="font-semibold text-base">{messages.review.discussion}</div>
+      <div className="font-semibold text-base">Discussion</div>
       {timeline.length > 0 ? (
         <div className="mt-3 flex flex-col gap-2">
           {timeline.map((item) => (
@@ -345,8 +330,8 @@ export function ChangeRequestDiscussion({
       <div className="mt-3">
         <SubjectCommentThread
           client={client}
-          emptyLabel={messages.comments.noCommentsDiscussion}
-          placeholder={messages.comments.placeholderDiscussion}
+          emptyLabel="No comments yet. Leave feedback for the author or @ai."
+          placeholder="Leave a comment for the author… mention @ai to request a revision"
           subjectId={changeRequest.id}
           subjectType="change_request"
         />
@@ -370,7 +355,6 @@ export function FinishReviewComposer({
   onMerge: (changeRequestId: string) => void;
   onReject: (changeRequestId: string, reason?: string) => void;
 }) {
-  const messages = useCoreI18n();
   const [verdict, setVerdict] = useState<"approve" | "reject" | null>(
     changeRequest.status === "changes_requested" ? null : "approve",
   );
@@ -391,7 +375,7 @@ export function FinishReviewComposer({
           type="button"
         >
           <GitMerge size={16} />
-          {messages.review.mergeIntoBase}
+          Merge into Base
         </button>
         <button
           className="text-muted-foreground text-xs transition-colors hover:text-foreground"
@@ -399,7 +383,7 @@ export function FinishReviewComposer({
           onClick={() => onClose(changeRequest.id)}
           type="button"
         >
-          {messages.review.closeChangeRequest}
+          Close change request
         </button>
       </div>
     );
@@ -411,7 +395,8 @@ export function FinishReviewComposer({
     return (
       <div className="flex flex-col gap-2">
         <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-amber-900 text-xs leading-5 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-300">
-          {messages.review.conflictComposerHint}
+          This change request conflicts with the latest record. Revise the proposed change to merge
+          against the current values, or close it to abandon.
         </div>
         <button
           className="flex w-full items-center justify-center gap-2 rounded-lg border border-border px-3 py-2.5 font-semibold text-sm transition-colors hover:bg-muted disabled:opacity-60"
@@ -420,7 +405,7 @@ export function FinishReviewComposer({
           type="button"
         >
           <X size={16} />
-          {messages.review.closeChangeRequest}
+          Close change request
         </button>
       </div>
     );
@@ -431,7 +416,7 @@ export function FinishReviewComposer({
     return (
       <div className="flex items-center gap-2 text-muted-foreground text-sm">
         <GitMerge size={16} />
-        {getChangeRequestReviewMessage(changeRequest, messages)}
+        {getChangeRequestReviewMessage(changeRequest)}
       </div>
     );
   }
@@ -457,7 +442,8 @@ export function FinishReviewComposer({
     <div className="flex flex-col gap-3">
       {changeRequest.status === "changes_requested" ? (
         <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-amber-900 text-xs leading-5 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-300">
-          {messages.review.changesRequestedHint}
+          Changes were requested. Keep this open while the author or agent revises; approve only
+          after the proposal returns ready for review.
         </div>
       ) : null}
       <div className="flex flex-col gap-1.5 text-sm">
@@ -469,7 +455,7 @@ export function FinishReviewComposer({
             type="radio"
           />
           <Check className="text-emerald-600" size={15} />
-          {messages.review.approve}
+          Approve
         </label>
         <label className="flex cursor-pointer items-center gap-2">
           <input
@@ -479,17 +465,17 @@ export function FinishReviewComposer({
             type="radio"
           />
           <X className="text-amber-600" size={15} />
-          {messages.review.requestChanges}
+          Request changes
         </label>
       </div>
       <textarea
-        aria-label={messages.review.reviewSummary}
+        aria-label="Review summary"
         className="min-h-20 w-full resize-y rounded-md border border-border/70 bg-background px-2.5 py-2 text-sm leading-6 outline-none transition-colors focus:border-primary"
         onChange={(event) => setSummary(event.target.value)}
         placeholder={
           verdict === "reject"
-            ? messages.review.requestChangesPlaceholder
-            : messages.review.approveNotePlaceholder
+            ? "What needs to change? (required — mention @ai to ask the agent)"
+            : "Add an optional note…"
         }
         value={summary}
       />
@@ -499,7 +485,7 @@ export function FinishReviewComposer({
         onClick={submit}
         type="button"
       >
-        {verdict === "reject" ? messages.review.requestChanges : messages.review.approve}
+        {verdict === "reject" ? "Request changes" : "Approve"}
       </button>
       <button
         className="text-muted-foreground text-xs transition-colors hover:text-foreground"
@@ -507,7 +493,7 @@ export function FinishReviewComposer({
         onClick={() => onClose(changeRequest.id)}
         type="button"
       >
-        {messages.review.closeChangeRequest}
+        Close change request
       </button>
     </div>
   );
@@ -534,14 +520,15 @@ export function ChangeRequestDetailPage({
   onMerge: (changeRequestId: string) => void;
   onReject: (changeRequestId: string, reason?: string) => void;
 }) {
-  const messages = useCoreI18n();
-
   if (!changeRequest) {
     return (
       <div className="flex-1 p-4">
         <section className="mx-auto max-w-4xl">
-          <BackLink href="/inbox" label={messages.nav.inbox} />
-          <EmptyState title={messages.review.notFoundTitle} body={messages.review.notFoundBody} />
+          <BackLink href="/inbox" label="Inbox" />
+          <EmptyState
+            title="Change Request not found"
+            body="The selected change request is no longer in the inbox."
+          />
         </section>
       </div>
     );
@@ -587,7 +574,6 @@ export function ChangeRequestReviewLayout({
   onMerge: (changeRequestId: string) => void;
   onReject: (changeRequestId: string, reason?: string) => void;
 }) {
-  const messages = useCoreI18n();
   const approvedReview = useMemo(
     () =>
       changeRequest.reviews
@@ -617,10 +603,10 @@ export function ChangeRequestReviewLayout({
       <div className="mb-2 flex items-center justify-end">
         <RailToggleButton onToggle={() => setPanelOpen((current) => !current)} open={panelOpen} />
       </div>
-      <div className="grid gap-7 lg:grid-cols-[minmax(0,1fr)_auto]">
+      <div className="grid gap-7 xl:grid-cols-[minmax(0,1fr)_auto]">
         <main className="min-w-0">
           <h1 className="max-w-3xl font-semibold text-2xl leading-tight">
-            {getChangeRequestTitle(changeRequest, messages)}
+            {getChangeRequestTitle(changeRequest)}
           </h1>
           <div className="mt-2.5 flex flex-wrap gap-2 text-muted-foreground text-xs">
             <span>{formatActorLabel(changeRequest.submittedBy)}</span>
@@ -643,7 +629,7 @@ export function ChangeRequestReviewLayout({
               <span
                 className={`rounded-full border px-2 py-0.5 font-medium text-xs ${statusTone(changeRequest.status)}`}
               >
-                {changeRequestStatusLabel(changeRequest.status, messages)}
+                {changeRequestStatusLabel(changeRequest.status)}
               </span>
               {getChangeRequestRiskHints(changeRequest).map((risk) => (
                 <span
@@ -654,20 +640,13 @@ export function ChangeRequestReviewLayout({
                 </span>
               ))}
             </div>
-            {getChangeRequestMessage(changeRequest) ? (
-              <p className="mt-2 border-primary/30 border-l-2 pl-3 text-sm leading-6">
-                {getChangeRequestMessage(changeRequest)}
-              </p>
-            ) : null}
-            <p className="mt-2 text-muted-foreground text-sm leading-6">
-              {getChangeRequestBrief(changeRequest, messages)}
-            </p>
+            <p className="mt-2 text-sm leading-6">{getChangeRequestBrief(changeRequest)}</p>
           </div>
 
           <ConflictDiffPanel changeRequest={changeRequest} />
 
           <section className="mt-6 max-w-4xl">
-            <div className="font-semibold text-base">{messages.review.whatWillChange}</div>
+            <div className="font-semibold text-base">What will change</div>
             <OperationReviewList
               changeRequest={changeRequest}
               client={client}
@@ -683,7 +662,7 @@ export function ChangeRequestReviewLayout({
         </main>
 
         <BusabaseSidePanel open={panelOpen}>
-          <SidebarPanel title={messages.review.finishReview}>
+          <SidebarPanel title="Finish review">
             <FinishReviewComposer
               changeRequest={changeRequest}
               isPending={isPending}
@@ -694,30 +673,22 @@ export function ChangeRequestReviewLayout({
             />
           </SidebarPanel>
 
-          <SidebarPanel quiet title={messages.common.description}>
-            <div className="mb-3 text-sm">
-              {getChangeRequestReviewMessage(changeRequest, messages)}
-            </div>
+          <SidebarPanel quiet title="Details">
+            <div className="mb-3 text-sm">{getChangeRequestReviewMessage(changeRequest)}</div>
             {approvedReview ? (
               <SidebarRow
-                label={messages.review.approvedBy}
+                label="Approved by"
                 value={`${formatActorLabel(approvedReview.reviewerId)} · ${formatDetailTime(approvedReview.createdAt)}`}
               />
             ) : null}
             {mergeEvent ? (
               <SidebarRow
-                label={messages.review.mergedBy}
+                label="Merged by"
                 value={`${formatActorLabel(mergeEvent.actorId)} · ${formatDetailTime(mergeEvent.createdAt)}`}
               />
             ) : null}
-            <SidebarRow
-              label={messages.common.created}
-              value={formatDetailTime(changeRequest.createdAt)}
-            />
-            <SidebarRow
-              label={messages.common.updated}
-              value={formatDetailTime(changeRequest.updatedAt)}
-            />
+            <SidebarRow label="Created" value={formatDetailTime(changeRequest.createdAt)} />
+            <SidebarRow label="Updated" value={formatDetailTime(changeRequest.updatedAt)} />
           </SidebarPanel>
         </BusabaseSidePanel>
       </div>

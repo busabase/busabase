@@ -2,7 +2,6 @@ import "server-only";
 
 import { ORPCError } from "@orpc/server";
 import { CREATABLE_NODE_TYPES } from "busabase-contract/domains";
-import { fieldNameSchema } from "busabase-contract/domains/base/contract/base-schemas";
 import type { NodeVO } from "busabase-contract/types";
 import { and, asc, desc, eq, inArray, isNotNull, isNull, ne } from "drizzle-orm";
 import { z } from "zod";
@@ -26,11 +25,7 @@ export { toNodeVO };
 const nodeOperationInputSchema = z.discriminatedUnion("kind", [
   z.object({
     kind: z.literal("create"),
-    // In-CR temp id for this node; a later operation can set parentNodeRef to it.
-    ref: z.string().min(1).optional(),
     parentNodeId: z.string().optional(),
-    // Parent this node under a node an EARLIER operation in the same CR created.
-    parentNodeRef: z.string().min(1).optional(),
     nodeType: z.enum(CREATABLE_NODE_TYPES),
     slug: z
       .string()
@@ -46,7 +41,7 @@ const nodeOperationInputSchema = z.discriminatedUnion("kind", [
             .string()
             .min(1)
             .regex(/^[a-z0-9-]+$/),
-          name: fieldNameSchema,
+          name: z.string().min(1),
           type: z.string().optional().default("text"),
           required: z.boolean().optional().default(false),
           options: z.record(z.string(), z.unknown()).optional().default({}),
@@ -76,9 +71,7 @@ const nodeOperationInputSchema = z.discriminatedUnion("kind", [
   z.object({
     kind: z.literal("move"),
     nodeId: z.string(),
-    // Exactly one of parentNodeId / parentNodeRef (validated in createNodeChangeRequest).
-    parentNodeId: z.string().optional(),
-    parentNodeRef: z.string().min(1).optional(),
+    parentNodeId: z.string(),
     position: z.number().int().optional(),
   }),
 ]);
@@ -88,41 +81,6 @@ export const createNodeChangeRequestInputSchema = z.object({
   submittedBy: z.string().optional().default("local-producer"),
   operations: z.array(nodeOperationInputSchema).min(1),
 });
-
-type NodeOperationInput = z.infer<typeof nodeOperationInputSchema>;
-
-/**
- * Validate in-CR temp references up front (before any write): a `parentNodeRef`
- * must name a `ref` declared by an EARLIER operation (topological order, no
- * forward/self references), refs are unique, and an operation may not set both
- * `parentNodeId` and `parentNodeRef`. This keeps the failure at submission time
- * with a clear message instead of surfacing mid-merge.
- */
-const assertValidNodeRefs = (operations: NodeOperationInput[]) => {
-  const declaredRefs = new Set<string>();
-  operations.forEach((operation, index) => {
-    const parentNodeId = "parentNodeId" in operation ? operation.parentNodeId : undefined;
-    const parentNodeRef = "parentNodeRef" in operation ? operation.parentNodeRef : undefined;
-    if (parentNodeId && parentNodeRef) {
-      throw new ORPCError("BAD_REQUEST", {
-        message: `Operation ${index} sets both parentNodeId and parentNodeRef — use exactly one.`,
-      });
-    }
-    if (parentNodeRef && !declaredRefs.has(parentNodeRef)) {
-      throw new ORPCError("BAD_REQUEST", {
-        message: `Operation ${index} references parentNodeRef "${parentNodeRef}", which no earlier operation declares (references cannot be forward or self).`,
-      });
-    }
-    if (operation.kind === "create" && operation.ref) {
-      if (declaredRefs.has(operation.ref)) {
-        throw new ORPCError("BAD_REQUEST", {
-          message: `Duplicate node ref "${operation.ref}" — each ref must be unique within a change request.`,
-        });
-      }
-      declaredRefs.add(operation.ref);
-    }
-  });
-};
 
 export const listNodes = async (): Promise<NodeVO[]> => {
   await ensureReady();
@@ -283,7 +241,6 @@ export const createNodeChangeRequest = async (
   await ensureReady();
   const db = await getDb();
   const parsed = createNodeChangeRequestInputSchema.parse(input);
-  assertValidNodeRefs(parsed.operations);
   const submittedBy = resolveActorId(parsed.submittedBy);
   const changeRequestId = id("crq");
   const timestamp = now();
@@ -366,10 +323,10 @@ export const createNodeChangeRequest = async (
     metadata: { operation: "node_tree_update" },
   });
 
-  // Structural node ops auto-merge: the CR is recorded (audit/history/rollback)
-  // but doesn't wait on a human, so folder/base/skill/doc scaffolding feels
-  // instant. Content (record) CRs never reach this path — see autoApproveAndMerge.
-  const { autoApproveAndMerge } = await import("./cr-lifecycle");
-  const merged = await autoApproveAndMerge(changeRequestId);
-  return merged.changeRequest;
+  const { getChangeRequest } = await import("./cr-lifecycle");
+  const changeRequest = await getChangeRequest(changeRequestId);
+  if (!changeRequest) {
+    throw new Error("Failed to create node change request");
+  }
+  return changeRequest;
 };

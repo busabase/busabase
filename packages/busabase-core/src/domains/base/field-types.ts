@@ -7,25 +7,17 @@
 // / spec.compute). The client maps spec.input → a component. Add a field type here
 // once and every layer picks it up.
 import type { FieldType } from "busabase-contract/types";
-import { type iString, iStringParse, type LocaleType } from "openlib/i18n/i-string";
 
 /** Minimal field-definition shape both the VO and the persisted row satisfy. */
 export interface FieldDef {
   slug: string;
-  /** Display name — plain string or locale-keyed record; render via fieldDisplayName. */
-  name: iString;
+  name: string;
   type: FieldType;
   required?: boolean;
   options?: {
     choices?: ReadonlyArray<{ id: string; name: string; color?: string }>;
     multiple?: boolean;
     targetBaseId?: string;
-    /** Per-field limits for `attachment` columns (all optional; see attachmentValidator). */
-    attachment?: {
-      maxFiles?: number;
-      allowedMimeTypes?: ReadonlyArray<string>;
-      maxFileSize?: number;
-    };
   } | null;
 }
 
@@ -76,13 +68,6 @@ export interface FieldTypeSpec {
   compute?: (ctx: SystemComputeCtx) => unknown;
 }
 
-/**
- * Resolve a field's display name to a string. Server-side messages have no user
- * locale, so this uses iStringParse's default fallback (requested → any → en).
- */
-export const fieldDisplayName = (def: Pick<FieldDef, "name">, locale?: LocaleType): string =>
-  iStringParse(def.name, locale);
-
 // ── value predicates (shared by the per-type validators) ─────────────────────
 const isEmpty = (value: unknown): boolean => value === undefined || value === null || value === "";
 
@@ -120,66 +105,12 @@ const choiceMatches = (value: unknown, def: FieldDef): boolean => {
 const isStringArray = (value: unknown): value is string[] =>
   Array.isArray(value) && value.every((item) => typeof item === "string");
 
-/**
- * Absolute per-file ceiling for attachment values, mirroring the upload guard
- * (open-domains/attachments `MAX_FILE_SIZE` = 25MB). Duplicated as a local constant
- * so this registry stays isomorphic — importing the server-only upload logic would
- * leak it into the client bundle.
- */
-const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024;
-
-/** An inline attachment cell entry: `{ id, url, fileName, mimeType, size }` (extra keys allowed). */
-const isAttachmentRef = (
-  value: unknown,
-): value is { id: string; url: string; fileName: string; mimeType: string; size: number } => {
-  if (typeof value !== "object" || value === null) return false;
-  const ref = value as Record<string, unknown>;
-  return (
-    typeof ref.id === "string" &&
-    typeof ref.url === "string" &&
-    typeof ref.fileName === "string" &&
-    typeof ref.mimeType === "string" &&
-    typeof ref.size === "number" &&
-    Number.isFinite(ref.size) &&
-    ref.size >= 0
-  );
-};
-
 // ── reusable validators ──────────────────────────────────────────────────────
 const textValidator = (value: unknown, def: FieldDef) =>
-  typeof value === "string" ? null : `${fieldDisplayName(def)} must be text`;
+  typeof value === "string" ? null : `${def.name} must be text`;
 
 const numberValidator = (value: unknown, def: FieldDef) =>
-  isNumeric(value) ? null : `${fieldDisplayName(def)} must be a number`;
-
-/**
- * Validate an `attachment` cell — an Airtable-style ARRAY of attachment refs
- * (empty array = no files). Enforces the field's `options.attachment` limits
- * (maxFiles / allowedMimeTypes / maxFileSize) plus the absolute 25MB ceiling.
- */
-const attachmentValidator = (value: unknown, def: FieldDef): string | null => {
-  const name = fieldDisplayName(def);
-  if (!Array.isArray(value)) return `${name} must be a list of attachments`;
-  if (!value.every(isAttachmentRef)) return `${name} has an invalid attachment`;
-
-  const opts = def.options?.attachment;
-  if (opts?.maxFiles !== undefined && value.length > opts.maxFiles) {
-    return `${name} allows at most ${opts.maxFiles} file${opts.maxFiles === 1 ? "" : "s"}`;
-  }
-
-  const allowed = opts?.allowedMimeTypes;
-  if (allowed && allowed.length > 0) {
-    const bad = value.find((ref) => !allowed.includes(ref.mimeType));
-    if (bad) return `${name} does not allow files of type ${bad.mimeType}`;
-  }
-
-  const limit = Math.min(opts?.maxFileSize ?? MAX_ATTACHMENT_BYTES, MAX_ATTACHMENT_BYTES);
-  if (value.some((ref) => ref.size > limit)) {
-    return `${name} has a file larger than the ${Math.round(limit / (1024 * 1024))}MB limit`;
-  }
-
-  return null;
-};
+  isNumeric(value) ? null : `${def.name} must be a number`;
 
 // ── computed-value helpers (system fields) ───────────────────────────────────
 const computeCreatedTime = (c: SystemComputeCtx) =>
@@ -242,15 +173,14 @@ export const FIELD_TYPES: Record<FieldType, FieldTypeSpec> = {
     input: "checkbox",
     columnWidth: "minmax(92px,112px)",
     validate: (value, def) =>
-      typeof value === "boolean" ? null : `${fieldDisplayName(def)} must be true or false`,
+      typeof value === "boolean" ? null : `${def.name} must be true or false`,
   },
   date: {
     type: "date",
     label: "date",
     input: "date",
     columnWidth: "minmax(116px,150px)",
-    validate: (value, def) =>
-      isValidDate(value) ? null : `${fieldDisplayName(def)} must be a valid date`,
+    validate: (value, def) => (isValidDate(value) ? null : `${def.name} must be a valid date`),
   },
   email: {
     type: "email",
@@ -260,15 +190,14 @@ export const FIELD_TYPES: Record<FieldType, FieldTypeSpec> = {
     validate: (value, def) =>
       typeof value === "string" && EMAIL_RE.test(value)
         ? null
-        : `${fieldDisplayName(def)} must be a valid email`,
+        : `${def.name} must be a valid email`,
   },
   url: {
     type: "url",
     label: "url",
     input: "url",
     columnWidth: "minmax(180px,260px)",
-    validate: (value, def) =>
-      isValidUrl(value) ? null : `${fieldDisplayName(def)} must be a valid URL`,
+    validate: (value, def) => (isValidUrl(value) ? null : `${def.name} must be a valid URL`),
   },
   phone: {
     type: "phone",
@@ -278,7 +207,7 @@ export const FIELD_TYPES: Record<FieldType, FieldTypeSpec> = {
     validate: (value, def) =>
       typeof value === "string" && PHONE_RE.test(value)
         ? null
-        : `${fieldDisplayName(def)} must be a valid phone number`,
+        : `${def.name} must be a valid phone number`,
   },
   select: {
     type: "select",
@@ -288,7 +217,7 @@ export const FIELD_TYPES: Record<FieldType, FieldTypeSpec> = {
     validate: (value, def) =>
       typeof value === "string" && choiceMatches(value, def)
         ? null
-        : `${fieldDisplayName(def)} must be one of its options`,
+        : `${def.name} must be one of its options`,
   },
   multiselect: {
     type: "multiselect",
@@ -298,7 +227,7 @@ export const FIELD_TYPES: Record<FieldType, FieldTypeSpec> = {
     validate: (value, def) =>
       Array.isArray(value) && value.every((v) => typeof v === "string" && choiceMatches(v, def))
         ? null
-        : `${fieldDisplayName(def)} must be a list of its options`,
+        : `${def.name} must be a list of its options`,
   },
   relation: {
     type: "relation",
@@ -308,14 +237,13 @@ export const FIELD_TYPES: Record<FieldType, FieldTypeSpec> = {
     validate: (value, def) =>
       typeof value === "string" || isStringArray(value)
         ? null
-        : `${fieldDisplayName(def)} must be a record id or a list of record ids`,
+        : `${def.name} must be a record id or a list of record ids`,
   },
   attachment: {
     type: "attachment",
     label: "file",
     input: "attachment",
     columnWidth: "minmax(128px,180px)",
-    validate: attachmentValidator,
   },
   ai_summary: {
     type: "ai_summary",
@@ -330,8 +258,7 @@ export const FIELD_TYPES: Record<FieldType, FieldTypeSpec> = {
     label: "AI tags",
     input: "tags",
     columnWidth: "minmax(140px,220px)",
-    validate: (value, def) =>
-      isStringArray(value) ? null : `${fieldDisplayName(def)} must be a list of tags`,
+    validate: (value, def) => (isStringArray(value) ? null : `${def.name} must be a list of tags`),
   },
   created_time: {
     type: "created_time",

@@ -6,7 +6,7 @@ Busabase has **no built-in model**. It runs locally and speaks plain HTTP, so yo
 
 You connect in two moves: **paste one prompt** to onboard, then **install a permanent skill** so the agent just knows Busabase every session.
 
-![The Agent Integration panel — copy one prompt to point any agent at this workspace.](../public/assets/readme/busabase-agent-skills.webp)
+![The Agent Integration panel — copy one prompt to point any agent at this workspace.](../public/assets/readme/busabase-agent-skills.png)
 
 ## Onboard with one prompt
 
@@ -15,11 +15,11 @@ You connect in two moves: **paste one prompt** to onboard, then **install a perm
 3. **It connects.** No account or API key is needed locally; the agent confirms the local server is up and saves the base URL to `~/.busabase/.env` so every future session — and the installed skill — can read it.
 4. **It sketches the structure, you confirm, then it builds.** Before creating anything, the agent shows you the planned shape — folders, bases, fields, relations — and waits for your go-ahead. On approval it creates the bases (always more than one node, so the workspace never opens empty); see them in **Graph View**.
 
-   ![Graph View — the structure the agent proposed, made concrete.](../public/assets/readme/busabase-graph-view.webp)
+   ![Graph View — the structure the agent proposed, made concrete.](../public/assets/readme/busabase-graph-view.png)
 
 5. **It seeds sample records — and you approve the first one together.** Starter records arrive as **Change Requests** (never written directly). The agent walks you through approving and merging the first one from the **Inbox**, so you watch the propose → review → merge loop close end to end.
 
-   ![The Inbox — every AI submission waits here for your review.](../public/assets/readme/busabase-inbox-review.webp)
+   ![The Inbox — every AI submission waits here for your review.](../public/assets/readme/busabase-inbox-review.png)
 
 ## Install the skill for everyday use
 
@@ -37,11 +37,11 @@ Once connected, pick whichever fits the task — all three read the same `~/.bus
 
 | Method | Best for |
 | --- | --- |
-| **`busabase-cli`** | The ergonomic everyday loop: `npx busabase-cli bases list`, `change-requests review --change-request-id crq_123 --verdict approved`, `change-requests merge --change-request-id crq_123`. |
+| **`busabase-cli`** | The ergonomic everyday loop: `npx busabase-cli bases list`, `drafts review --verdict approved`, `drafts merge`. |
 | **`curl`** | Quick, zero-install calls against `http://localhost:15419/api/v1`. |
 | **MCP / OpenAPI** | The complete, current surface — connect over MCP at `/api/mcp`, or read `/api/v1/openapi.json`. |
 
-![MCP endpoint — connect any MCP-capable agent or IDE.](../public/assets/readme/busabase-mcp.webp)
+![MCP endpoint — connect any MCP-capable agent or IDE.](../public/assets/readme/busabase-mcp.png)
 
 The loop never changes: **list → propose a Change Request → you review → merge → read back**. Never bypass review unless you explicitly ask for a direct merge.
 

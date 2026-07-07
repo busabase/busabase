@@ -62,7 +62,6 @@ import {
   requireBaseId,
   rootNodeIdForSpace,
 } from "./kernel";
-import { publishBusabaseLiveEvent } from "./live-events";
 import { getMaterializer, type MaterializeArgs, type NodeCreateFields } from "./materialize";
 import { loadNodesByIds } from "./nodes";
 import { ensureReady, loadBasesByIds } from "./seed";
@@ -104,10 +103,6 @@ export interface MergeCtx {
   mergedNodeIds: string[];
   mergedRecordIds: string[];
   mergedViewIds: string[];
-  // Temp-ref → real node id, populated as node_create operations materialize so
-  // later operations in the SAME change request can point their parent at a node
-  // this CR is itself creating (create-folder-then-fill-it in one submission).
-  nodeRefs: Map<string, string>;
   // Auto-merged record fields (operationId → merged fields), set when a record
   // moved since the change request's base and a 3-way field merge resolved it.
   resolvedRecordFields: Map<string, Record<string, unknown>>;
@@ -182,32 +177,10 @@ const materializeGenericNode = async (ctx: MergeCtx, args: MaterializeArgs): Pro
   return nodeId;
 };
 
-/**
- * Resolve the parent node id for a node operation, supporting an in-CR temp ref:
- * `parentNodeRef` points at a node an EARLIER operation created (looked up in
- * `ctx.nodeRefs`). Falls back to `parentNodeId`, then the space root.
- */
-const resolveParentNodeId = (
-  ctx: MergeCtx,
-  fields: { parentNodeId?: string; parentNodeRef?: string },
-  operationId: string,
-): string => {
-  if (fields.parentNodeRef) {
-    const resolved = ctx.nodeRefs.get(fields.parentNodeRef);
-    if (!resolved) {
-      throw new ORPCError("BAD_REQUEST", {
-        message: `Operation ${operationId} references parentNodeRef "${fields.parentNodeRef}", but no earlier operation in this change request created it.`,
-      });
-    }
-    return resolved;
-  }
-  return fields.parentNodeId ?? rootNodeIdForSpace(getContextSpaceId());
-};
-
 const mergeNodeCreate = async (ctx: MergeCtx, item: OperationPO, headCommit: CommitPO) => {
   const { db, timestamp } = ctx;
   const fields = headCommit.fields as NodeCreateFields;
-  const parentNodeId = resolveParentNodeId(ctx, fields, item.id);
+  const parentNodeId = fields.parentNodeId ?? rootNodeIdForSpace(getContextSpaceId());
   const [parentNode] = await db
     .select()
     .from(busabaseNodes)
@@ -221,10 +194,6 @@ const mergeNodeCreate = async (ctx: MergeCtx, item: OperationPO, headCommit: Com
   }
   const materialize = getMaterializer(fields.nodeType) ?? materializeGenericNode;
   const nodeId = await materialize(ctx, { parentNode, fields });
-  // Publish this node's temp ref so later operations in the CR can parent to it.
-  if (fields.ref) {
-    ctx.nodeRefs.set(fields.ref, nodeId);
-  }
   await db
     .update(busabaseOperations)
     .set({ status: "merged", nodeId, updatedAt: timestamp })
@@ -280,22 +249,17 @@ const mergeNodeMove = async (
       message: "Cannot move an archived node. Restore it first.",
     });
   }
-  const fields = headCommit.fields as {
-    parentNodeId?: string;
-    parentNodeRef?: string;
-    position?: number;
-  };
-  if (!fields.parentNodeId && !fields.parentNodeRef) {
-    throw new Error(`Node move commit missing parentNodeId/parentNodeRef: ${item.id}`);
+  const fields = headCommit.fields as { parentNodeId?: string; position?: number };
+  if (!fields.parentNodeId) {
+    throw new Error(`Node move commit missing parentNodeId: ${item.id}`);
   }
-  const parentNodeId = resolveParentNodeId(ctx, fields, item.id);
   const [parentNode] = await ctx.db
     .select()
     .from(busabaseNodes)
-    .where(eq(busabaseNodes.id, parentNodeId))
+    .where(eq(busabaseNodes.id, fields.parentNodeId))
     .limit(1);
   if (!parentNode || parentNode.type !== "folder") {
-    throw new Error(`Parent folder not found: ${parentNodeId}`);
+    throw new Error(`Parent folder not found: ${fields.parentNodeId}`);
   }
   await ctx.db
     .update(busabaseNodes)
@@ -833,16 +797,6 @@ export const reviewChangeRequest = async (
   if (!changeRequest) {
     throw new Error(`ChangeRequest not found: ${changeRequestId}`);
   }
-  // Idempotent for already-merged CRs: structural CRs auto-merge on create, so a
-  // caller still following the old create→review→merge flow (e.g. the CLI/skills)
-  // must not error here — return the merged CR unchanged.
-  if (changeRequest.status === "merged") {
-    const already = await getChangeRequest(changeRequest.id);
-    if (!already) {
-      throw new Error("Failed to load merged changeRequest");
-    }
-    return already;
-  }
   if (changeRequest.status !== "in_review" && changeRequest.status !== "changes_requested") {
     throw new Error(`ChangeRequest is not reviewable: ${changeRequest.status}`);
   }
@@ -905,252 +859,6 @@ export const reviewChangeRequest = async (
   }
   return updated;
 };
-
-// ── Auto-merge (structural ops) ─────────────────────────────────────────────
-//
-// Every content-tree mutation flows through a ChangeRequest so it is auditable,
-// reviewable, and revertable. STRUCTURAL / administrative ops (folder / base /
-// doc / skill scaffolding, schema convenience, destructive admin) don't need a
-// human in the loop — they auto-merge here, but still leave a first-class merged
-// CR. CONTENT ops (record_*) — the reviewable material busabase exists to gate —
-// never take this path; they keep the human review loop.
-
-/**
- * Reviewer id stamped on the auto-approval row so history is honest that the
- * merge was machine-driven, not a human approval. Not a real user — `reviewerId`
- * is a plain text column (no FK), and the one-vote-per-CR unique index is keyed
- * by reviewer, so this never collides with a later human vote.
- */
-export const AUTO_MERGE_REVIEWER_ID = "system:auto-merge";
-
-/** True when any operation is reviewable content (a record change). */
-const changeRequestHasContentOps = (operations: OperationPO[]): boolean =>
-  operations.some((op) => op.operation.startsWith("record_"));
-
-/**
- * Approve `changeRequestId` as the system reviewer and merge it in one step — the
- * structural-op fast path that keeps `createBase` / `createDoc` / … feeling
- * instant while still recording a merged CR. Refuses to touch a CR that carries
- * any content (record) operation, so content review can never be bypassed here.
- * Returns the same `_mergeChangeRequest` result (CR now `merged`, plus any
- * materialized record/view), so callers can hydrate the created VO.
- */
-export const autoApproveAndMerge = async (
-  changeRequestId: string,
-  reason = "Auto-merged: structural change",
-) => {
-  await ensureReady();
-  const db = await getDb();
-  const [changeRequest] = await db
-    .select()
-    .from(busabaseChangeRequests)
-    .where(eq(busabaseChangeRequests.id, changeRequestId))
-    .limit(1);
-  if (!changeRequest) {
-    throw new Error(`ChangeRequest not found: ${changeRequestId}`);
-  }
-  if (changeRequest.status !== "in_review" && changeRequest.status !== "changes_requested") {
-    throw new Error(`ChangeRequest is not auto-mergeable: ${changeRequest.status}`);
-  }
-
-  const operations = await db
-    .select()
-    .from(busabaseOperations)
-    .where(eq(busabaseOperations.changeRequestId, changeRequest.id));
-  if (operations.length === 0) {
-    throw new Error(`ChangeRequest has no operations: ${changeRequest.id}`);
-  }
-  // Safety net for F2: a content CR must never auto-merge, whatever the caller.
-  if (changeRequestHasContentOps(operations)) {
-    throw new Error("Refusing to auto-merge a content (record) change request");
-  }
-
-  const timestamp = now();
-  await db
-    .insert(busabaseReviews)
-    .values({
-      id: id("rev"),
-      changeRequestId: changeRequest.id,
-      reviewerId: AUTO_MERGE_REVIEWER_ID,
-      verdict: "approved",
-      reason,
-      visibleOperationHeads: {},
-      createdAt: timestamp,
-    })
-    .onConflictDoUpdate({
-      target: [busabaseReviews.changeRequestId, busabaseReviews.reviewerId],
-      set: { verdict: "approved", reason, createdAt: timestamp },
-    });
-  await db
-    .update(busabaseChangeRequests)
-    .set({
-      status: "approved",
-      rejectedReason: null,
-      reviewedAt: timestamp,
-      updatedAt: timestamp,
-    })
-    .where(eq(busabaseChangeRequests.id, changeRequest.id));
-  await insertAuditEvent(db, {
-    action: "change_request.reviewed",
-    actorId: CURRENT_USER_ID,
-    baseId: changeRequest.baseId,
-    changeRequestId: changeRequest.id,
-    metadata: { verdict: "approved", auto: true },
-  });
-
-  return mergeChangeRequest(changeRequest.id);
-};
-
-/**
- * Record an already-performed structural mutation as a **merged** ChangeRequest —
- * so a direct write (`createBase`/`createDoc`/`createSkill`, `createBaseField`,
- * `updateDocBody`) still leaves a first-class, auditable, history-visible CR
- * without re-running the merge (the rows already exist; the per-type materializers
- * are NOT input-parity with the direct writes — a doc's body / a base's exact
- * fields would be lost). Writes the same ledger shape the create→auto-merge path
- * produces (CR + commit + merged operation + system review + the three CR audit
- * events), so history/UI render it identically. This is what replaces the old
- * bespoke `base.created` / `doc.created` / `skill.created` / `field.created` /
- * `doc.updated` audit actions.
- */
-export const recordMergedOperation = async (args: {
-  operation: OperationPO["operation"];
-  targetType: "node" | "base";
-  nodeId?: string | null;
-  baseId?: string | null;
-  fields: Record<string, unknown>;
-  message: string;
-  submittedBy: string;
-  sourceMeta?: Record<string, unknown>;
-  reviewPolicySnapshot?: Record<string, unknown>;
-  mergeSummary?: Record<string, unknown>;
-  auditMetadata?: Record<string, unknown>;
-}): Promise<string> => {
-  const db = await getDb();
-  const timestamp = now();
-  const changeRequestId = id("crq");
-  const operationId = id("opr");
-  const commitId = id("cmt");
-  const nodeId = args.nodeId ?? null;
-  const baseId = args.baseId ?? null;
-  const mergeSummary = args.mergeSummary ?? {};
-
-  await db.insert(busabaseChangeRequests).values({
-    id: changeRequestId,
-    baseId,
-    targetType: args.targetType,
-    nodeId,
-    status: "merged",
-    submittedBy: args.submittedBy,
-    sourceMeta: { ...(args.sourceMeta ?? {}), autoMerged: true },
-    reviewPolicySnapshot: args.reviewPolicySnapshot ?? { kind: "single", requiredApprovals: 1 },
-    mergeSummary,
-    rejectedReason: null,
-    reviewedAt: timestamp,
-    mergedAt: timestamp,
-    createdAt: timestamp,
-    updatedAt: timestamp,
-  });
-  await db.insert(busabaseCommits).values({
-    id: commitId,
-    baseId,
-    targetType: args.targetType,
-    nodeId,
-    operationId,
-    parentCommitId: null,
-    fields: args.fields,
-    operation: args.operation,
-    message: args.message,
-    author: args.submittedBy,
-    createdAt: timestamp,
-  });
-  await db.insert(busabaseOperations).values({
-    id: operationId,
-    changeRequestId,
-    baseId,
-    targetType: args.targetType,
-    nodeId,
-    operation: args.operation,
-    status: "merged",
-    targetRecordId: null,
-    targetViewId: null,
-    filePath: null,
-    sourceRecordId: null,
-    sourceCommitId: null,
-    baseCommitId: null,
-    headCommitId: commitId,
-    deleteMode: "archive",
-    mergedRecordId: null,
-    mergedViewId: null,
-    position: 0,
-    createdAt: timestamp,
-    updatedAt: timestamp,
-  });
-  await db.insert(busabaseReviews).values({
-    id: id("rev"),
-    changeRequestId,
-    reviewerId: AUTO_MERGE_REVIEWER_ID,
-    verdict: "approved",
-    reason: "Auto-merged: structural change",
-    visibleOperationHeads: {},
-    createdAt: timestamp,
-  });
-
-  await insertAuditEvent(db, {
-    action: "change_request.created",
-    actorId: args.submittedBy,
-    baseId,
-    changeRequestId,
-    metadata: { operation: args.operation, autoMerged: true, ...(args.auditMetadata ?? {}) },
-  });
-  await insertAuditEvent(db, {
-    action: "change_request.reviewed",
-    actorId: CURRENT_USER_ID,
-    baseId,
-    changeRequestId,
-    metadata: { verdict: "approved", auto: true },
-  });
-  await insertAuditEvent(db, {
-    action: "change_request.merged",
-    actorId: CURRENT_USER_ID,
-    baseId,
-    changeRequestId,
-    metadata: { operation: args.operation, ...mergeSummary },
-  });
-  return changeRequestId;
-};
-
-/** `recordMergedOperation` specialized to a node_create (base/doc/skill/folder). */
-export const recordMergedNodeCreate = async (args: {
-  nodeId: string;
-  baseId?: string | null;
-  nodeType: string;
-  slug: string;
-  name: string;
-  description?: string;
-  parentNodeId: string;
-  message: string;
-  submittedBy: string;
-}): Promise<string> =>
-  recordMergedOperation({
-    operation: "node_create",
-    targetType: "node",
-    nodeId: args.nodeId,
-    baseId: args.baseId ?? null,
-    fields: {
-      kind: "create",
-      nodeType: args.nodeType,
-      parentNodeId: args.parentNodeId,
-      slug: args.slug,
-      name: args.name,
-      description: args.description ?? "",
-    },
-    message: args.message,
-    submittedBy: args.submittedBy,
-    sourceMeta: { subject: "node_tree" },
-    mergeSummary: { mergedNodeIds: [args.nodeId] },
-    auditMetadata: { nodeType: args.nodeType },
-  });
 
 export const closeChangeRequest = async (changeRequestId: string, reason?: string) => {
   await ensureReady();
@@ -1319,15 +1027,6 @@ const _mergeChangeRequest = async (changeRequestId: string) => {
   if (!changeRequest) {
     throw new Error(`ChangeRequest not found: ${changeRequestId}`);
   }
-  // Idempotent for already-merged CRs (structural CRs auto-merge on create): a
-  // caller re-merging via the old flow gets the merged CR back, not an error.
-  if (changeRequest.status === "merged") {
-    const already = await getChangeRequest(changeRequest.id);
-    if (!already) {
-      throw new Error("Failed to load merged changeRequest");
-    }
-    return { changeRequest: already, record: null, view: null };
-  }
   if (changeRequest.status !== "approved") {
     throw new Error("ChangeRequest must be approved before merge");
   }
@@ -1371,7 +1070,6 @@ const _mergeChangeRequest = async (changeRequestId: string) => {
         mergedNodeIds: [],
         mergedRecordIds: [],
         mergedViewIds: [],
-        nodeRefs: new Map(),
         resolvedRecordFields: new Map(),
       };
       for (const item of operationKinds) {
@@ -1445,17 +1143,6 @@ const _mergeChangeRequest = async (changeRequestId: string) => {
       baseId: null,
       changeRequestId: changeRequest.id,
       metadata: { mergedNodeIds: [...new Set(mergedNodeIds)] },
-    });
-    await publishBusabaseLiveEvent({
-      kind: "change_request.merged",
-      spaceId: getContextSpaceId(),
-      actorId: changeRequest.submittedBy,
-      changeRequestId: changeRequest.id,
-      baseId: null,
-      nodeIds: [...new Set(mergedNodeIds)],
-      recordIds: [],
-      viewIds: [],
-      operationCount: operationKinds.length,
     });
     const updated = await getChangeRequest(changeRequest.id);
     if (!updated) {
@@ -1631,7 +1318,6 @@ const _mergeChangeRequest = async (changeRequestId: string) => {
       mergedNodeIds: [],
       mergedRecordIds: [],
       mergedViewIds: [],
-      nodeRefs: new Map(),
       resolvedRecordFields,
     };
     for (const item of operationKinds) {
@@ -1723,17 +1409,6 @@ const _mergeChangeRequest = async (changeRequestId: string) => {
       viewIds: mergedViewIds,
     },
   });
-  await publishBusabaseLiveEvent({
-    kind: "change_request.merged",
-    spaceId: getContextSpaceId(),
-    actorId: changeRequest.submittedBy,
-    changeRequestId: changeRequest.id,
-    baseId: changeRequest.baseId,
-    nodeIds: [],
-    recordIds: [...new Set(mergedRecordIds)],
-    viewIds: [...new Set(mergedViewIds)],
-    operationCount: operationKinds.length,
-  });
 
   const updatedChangeRequest = await getChangeRequest(changeRequest.id);
   const spaceId = getContextSpaceId();
@@ -1763,54 +1438,4 @@ const _mergeChangeRequest = async (changeRequestId: string) => {
     record: record ? await hydrateRecord(record) : null,
     view: view ? toViewVO(view) : null,
   };
-};
-
-export interface BatchChangeRequestResult {
-  results: Array<{ changeRequestId: string; ok: boolean; status?: string; error?: string }>;
-}
-
-const errorMessage = (error: unknown): string =>
-  error instanceof Error ? error.message : String(error);
-
-/**
- * Review many change requests with the same verdict in one call (for an agent
- * clearing a review queue — "approve all of these"). Each is reviewed independently;
- * a failure (not found / not reviewable) is recorded and the rest still process, so
- * the caller gets a full per-item report instead of an all-or-nothing abort.
- */
-export const reviewChangeRequests = async (
-  changeRequestIds: string[],
-  input: z.infer<typeof reviewInputSchema>,
-): Promise<BatchChangeRequestResult> => {
-  const results: BatchChangeRequestResult["results"] = [];
-  for (const changeRequestId of changeRequestIds) {
-    try {
-      const changeRequest = await reviewChangeRequest(changeRequestId, input);
-      results.push({ changeRequestId, ok: true, status: changeRequest.status });
-    } catch (error) {
-      results.push({ changeRequestId, ok: false, error: errorMessage(error) });
-    }
-  }
-  return { results };
-};
-
-/**
- * Merge many change requests in one call ("merge all of these"). Each merges in its
- * OWN transaction and in the given order, with failures isolated — so a later
- * conflicting merge does not roll back the ones already merged, and the caller sees
- * exactly which succeeded. Order matters when the change requests depend on one another.
- */
-export const mergeChangeRequests = async (
-  changeRequestIds: string[],
-): Promise<BatchChangeRequestResult> => {
-  const results: BatchChangeRequestResult["results"] = [];
-  for (const changeRequestId of changeRequestIds) {
-    try {
-      const merged = await mergeChangeRequest(changeRequestId);
-      results.push({ changeRequestId, ok: true, status: merged.changeRequest.status });
-    } catch (error) {
-      results.push({ changeRequestId, ok: false, error: errorMessage(error) });
-    }
-  }
-  return { results };
 };

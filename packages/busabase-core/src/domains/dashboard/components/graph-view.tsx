@@ -25,8 +25,7 @@ import ELK, { type ElkNode } from "elkjs/lib/elk.bundled.js";
 import { Folder, Network } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import { useLocation } from "wouter";
-import { type CoreLocale, fmt, useCoreI18n, useCoreLocale } from "../../../i18n";
-import { fieldDisplayName, fieldLabel } from "../../base/field-types";
+import { fieldLabel } from "../../base/field-types";
 
 // Card geometry (px). Node height is exactly HEADER_H + rows * ROW_H.
 const HEADER_H = 36;
@@ -135,7 +134,7 @@ interface BuiltGraph {
   folderCount: number;
 }
 
-function buildGraph(bases: BaseVO[], nodes?: NodeVO[], locale?: CoreLocale): BuiltGraph {
+function buildGraph(bases: BaseVO[], nodes?: NodeVO[]): BuiltGraph {
   const baseMap = new Map(bases.map((b) => [b.id, b]));
   const baseIds = new Set(bases.map((b) => b.id));
 
@@ -161,11 +160,7 @@ function buildGraph(bases: BaseVO[], nodes?: NodeVO[], locale?: CoreLocale): Bui
           f.type === "relation" && f.options.targetBaseId && baseIds.has(f.options.targetBaseId)
             ? (baseMap.get(f.options.targetBaseId)?.name ?? f.options.targetBaseId)
             : undefined;
-        return {
-          name: fieldDisplayName(f, locale),
-          typeLabel: fieldLabel(f.type),
-          targetName: linkedTarget,
-        };
+        return { name: f.name, typeLabel: fieldLabel(f.type), targetName: linkedTarget };
       }),
     );
   }
@@ -297,9 +292,7 @@ const nodeTypes = { baseTable: BaseTableNode };
 const edgeTypes = { ortho: OrthogonalEdge };
 
 function GraphInner({ bases, nodes: nodeTree }: BaseGraphViewProps) {
-  const messages = useCoreI18n();
-  const locale = useCoreLocale();
-  const built = useMemo(() => buildGraph(bases, nodeTree, locale), [bases, nodeTree, locale]);
+  const built = useMemo(() => buildGraph(bases, nodeTree), [bases, nodeTree]);
   const { baseNodes, edgeMeta, adjacency, relationCount, oneWayCount, biCount, folderCount } =
     built;
 
@@ -417,10 +410,10 @@ function GraphInner({ bases, nodes: nodeTree }: BaseGraphViewProps) {
       {/* Header badge */}
       <div className="pointer-events-none absolute left-4 top-3 z-10 flex items-center gap-2">
         <Network className="size-4 text-primary" />
-        <span className="text-sm font-medium text-muted-foreground">{messages.nav.graph}</span>
+        <span className="text-sm font-medium text-muted-foreground">Graph View</span>
         <span className="rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">
-          {fmt(messages.graph.summary, { bases: bases.length, relations: relationCount })}
-          {folderCount > 0 ? fmt(messages.graph.foldersSuffix, { folders: folderCount }) : ""}
+          {bases.length} bases · {relationCount} relations
+          {folderCount > 0 ? ` · ${folderCount} folders` : ""}
         </span>
       </div>
 
@@ -430,13 +423,13 @@ function GraphInner({ bases, nodes: nodeTree }: BaseGraphViewProps) {
           {oneWayCount > 0 && (
             <span className="flex items-center gap-1">
               <span style={{ color: EDGE_ONE_WAY }}>→</span>
-              <span>{fmt(messages.graph.oneWay, { count: oneWayCount })}</span>
+              <span>one-way ({oneWayCount})</span>
             </span>
           )}
           {biCount > 0 && (
             <span className="flex items-center gap-1">
               <span style={{ color: EDGE_BIDIRECTIONAL }}>⇄</span>
-              <span>{fmt(messages.graph.bidirectional, { count: biCount })}</span>
+              <span>bidirectional ({biCount})</span>
             </span>
           )}
         </div>
@@ -445,7 +438,8 @@ function GraphInner({ bases, nodes: nodeTree }: BaseGraphViewProps) {
       {/* Hint when no relations */}
       {relationCount === 0 && (
         <div className="pointer-events-none absolute bottom-6 left-0 right-0 z-10 text-center text-xs text-muted-foreground">
-          {messages.graph.noRelationsHint}
+          Add a <strong className="text-primary">relation</strong> field in any Base Design to draw
+          edges here.
         </div>
       )}
 

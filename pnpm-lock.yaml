@@ -113,9 +113,6 @@ importers:
       tailwindcss:
         specifier: ^4.1.17
         version: 4.2.0
-      typesafe-i18n:
-        specifier: ^5.26.2
-        version: 5.27.1(typescript@5.9.3)
       typescript:
         specifier: ^5.9.3
         version: 5.9.3
@@ -131,16 +128,28 @@ importers:
 
   apps/busabase-cli:
     dependencies:
-      busabase-sdk:
-        specifier: workspace:*
-        version: link:../busabase-sdk
-      commander:
-        specifier: ^14.0.0
-        version: 14.0.3
+      '@orpc/client':
+        specifier: ^1.14.6
+        version: 1.14.6(@opentelemetry/api@1.9.0)
+      '@orpc/contract':
+        specifier: ^1.14.6
+        version: 1.14.6(@opentelemetry/api@1.9.0)
+      '@orpc/openapi-client':
+        specifier: ^1.14.6
+        version: 1.14.6(@opentelemetry/api@1.9.0)
+      zod:
+        specifier: 4.4.3
+        version: 4.4.3
     devDependencies:
       '@types/node':
         specifier: ^24.10.0
         version: 24.10.13
+      busabase-contract:
+        specifier: workspace:*
+        version: link:../../packages/busabase-contract
+      open-domains:
+        specifier: workspace:*
+        version: link:../../packages/open-domains
       tsup:
         specifier: ^8.5.0
         version: 8.5.1(@swc/core@1.15.11(@swc/helpers@0.5.23))(jiti@2.6.1)(postcss@8.5.15)(tsx@4.21.0)(typescript@5.9.3)(yaml@2.9.0)
@@ -150,9 +159,6 @@ importers:
       typescript:
         specifier: ^5.9.3
         version: 5.9.3
-      vitest:
-        specifier: ^2.1.8
-        version: 2.1.9(@types/node@24.10.13)(jsdom@27.4.0(@noble/hashes@2.2.0)(bufferutil@4.1.0)(utf-8-validate@6.0.6))(less@3.13.1)(lightningcss@1.31.1)(msw@2.12.10(@types/node@24.10.13)(typescript@5.9.3))(sass@1.101.0)(stylus@0.64.0)(terser@5.48.0)
 
   apps/busabase-desktop:
     dependencies:
@@ -223,9 +229,6 @@ importers:
       '@react-native-async-storage/async-storage':
         specifier: 2.2.0
         version: 2.2.0(react-native@0.85.3(@babel/core@7.29.7)(@react-native-community/cli@20.1.3(bufferutil@4.1.0)(typescript@6.0.3)(utf-8-validate@5.0.10))(@react-native/metro-config@0.85.3(@babel/core@7.29.7))(@types/react@19.2.17)(bufferutil@4.1.0)(react@19.2.3)(utf-8-validate@5.0.10))
-      '@react-native-cookies/cookies':
-        specifier: ^6.2.1
-        version: 6.2.1(react-native@0.85.3(@babel/core@7.29.7)(@react-native-community/cli@20.1.3(bufferutil@4.1.0)(typescript@6.0.3)(utf-8-validate@5.0.10))(@react-native/metro-config@0.85.3(@babel/core@7.29.7))(@types/react@19.2.17)(bufferutil@4.1.0)(react@19.2.3)(utf-8-validate@5.0.10))
       '@react-navigation/native':
         specifier: ^7.1.6
         version: 7.1.28(react-native@0.85.3(@babel/core@7.29.7)(@react-native-community/cli@20.1.3(bufferutil@4.1.0)(typescript@6.0.3)(utf-8-validate@5.0.10))(@react-native/metro-config@0.85.3(@babel/core@7.29.7))(@types/react@19.2.17)(bufferutil@4.1.0)(react@19.2.3)(utf-8-validate@5.0.10))(react@19.2.3)
@@ -250,9 +253,6 @@ importers:
       expo-constants:
         specifier: ~56.0.18
         version: 56.0.18(expo@56.0.11)(react-native@0.85.3(@babel/core@7.29.7)(@react-native-community/cli@20.1.3(bufferutil@4.1.0)(typescript@6.0.3)(utf-8-validate@5.0.10))(@react-native/metro-config@0.85.3(@babel/core@7.29.7))(@types/react@19.2.17)(bufferutil@4.1.0)(react@19.2.3)(utf-8-validate@5.0.10))
-      expo-crypto:
-        specifier: ~56.0.4
-        version: 56.0.4(expo@56.0.11)
       expo-document-picker:
         specifier: ~56.0.4
         version: 56.0.4(expo@56.0.11)
@@ -268,9 +268,6 @@ importers:
       expo-router:
         specifier: ~56.2.10
         version: 56.2.10(a37aa6fb5f565005760ebc445eff7ca2)
-      expo-secure-store:
-        specifier: ^56.0.4
-        version: 56.0.4(expo@56.0.11)
       expo-splash-screen:
         specifier: ~56.0.10
         version: 56.0.10(expo@56.0.11)(typescript@6.0.3)
@@ -283,15 +280,9 @@ importers:
       expo-task-manager:
         specifier: ~56.0.18
         version: 56.0.18(expo@56.0.11)(react-native@0.85.3(@babel/core@7.29.7)(@react-native-community/cli@20.1.3(bufferutil@4.1.0)(typescript@6.0.3)(utf-8-validate@5.0.10))(@react-native/metro-config@0.85.3(@babel/core@7.29.7))(@types/react@19.2.17)(bufferutil@4.1.0)(react@19.2.3)(utf-8-validate@5.0.10))
-      expo-web-browser:
-        specifier: ~56.0.5
-        version: 56.0.5(expo@56.0.11)(react-native@0.85.3(@babel/core@7.29.7)(@react-native-community/cli@20.1.3(bufferutil@4.1.0)(typescript@6.0.3)(utf-8-validate@5.0.10))(@react-native/metro-config@0.85.3(@babel/core@7.29.7))(@types/react@19.2.17)(bufferutil@4.1.0)(react@19.2.3)(utf-8-validate@5.0.10))
       lucide-react-native:
         specifier: ^0.556.0
         version: 0.556.0(react-native-svg@15.15.4(react-native@0.85.3(@babel/core@7.29.7)(@react-native-community/cli@20.1.3(bufferutil@4.1.0)(typescript@6.0.3)(utf-8-validate@5.0.10))(@react-native/metro-config@0.85.3(@babel/core@7.29.7))(@types/react@19.2.17)(bufferutil@4.1.0)(react@19.2.3)(utf-8-validate@5.0.10))(react@19.2.3))(react-native@0.85.3(@babel/core@7.29.7)(@react-native-community/cli@20.1.3(bufferutil@4.1.0)(typescript@6.0.3)(utf-8-validate@5.0.10))(@react-native/metro-config@0.85.3(@babel/core@7.29.7))(@types/react@19.2.17)(bufferutil@4.1.0)(react@19.2.3)(utf-8-validate@5.0.10))(react@19.2.3)
-      openlib:
-        specifier: workspace:*
-        version: link:../../packages/openlib
       react:
         specifier: 19.2.3
         version: 19.2.3
@@ -333,46 +324,6 @@ importers:
         specifier: ^6.0.3
         version: 6.0.3
 
-  apps/busabase-sdk:
-    dependencies:
-      '@orpc/client':
-        specifier: ^1.14.6
-        version: 1.14.6(@opentelemetry/api@1.9.0)
-      '@orpc/contract':
-        specifier: ^1.14.6
-        version: 1.14.6(@opentelemetry/api@1.9.0)
-      '@orpc/openapi-client':
-        specifier: ^1.14.6
-        version: 1.14.6(@opentelemetry/api@1.9.0)
-      zod:
-        specifier: 4.4.3
-        version: 4.4.3
-    devDependencies:
-      '@types/node':
-        specifier: ^24.10.0
-        version: 24.10.13
-      busabase-contract:
-        specifier: workspace:*
-        version: link:../../packages/busabase-contract
-      open-domains:
-        specifier: workspace:*
-        version: link:../../packages/open-domains
-      openlib:
-        specifier: workspace:*
-        version: link:../../packages/openlib
-      tsup:
-        specifier: ^8.5.0
-        version: 8.5.1(@swc/core@1.15.11(@swc/helpers@0.5.23))(jiti@2.6.1)(postcss@8.5.15)(tsx@4.21.0)(typescript@5.9.3)(yaml@2.9.0)
-      tsx:
-        specifier: ^4.20.5
-        version: 4.21.0
-      typescript:
-        specifier: ^5.9.3
-        version: 5.9.3
-      vitest:
-        specifier: ^2.1.8
-        version: 2.1.9(@types/node@24.10.13)(jsdom@27.4.0(@noble/hashes@2.2.0)(bufferutil@4.1.0)(utf-8-validate@6.0.6))(less@3.13.1)(lightningcss@1.31.1)(msw@2.12.10(@types/node@24.10.13)(typescript@5.9.3))(sass@1.101.0)(stylus@0.64.0)(terser@5.48.0)
-
   packages/busabase-contract:
     dependencies:
       '@orpc/client':
@@ -390,9 +341,6 @@ importers:
       open-domains:
         specifier: workspace:*
         version: link:../open-domains
-      openlib:
-        specifier: workspace:*
-        version: link:../openlib
       zod:
         specifier: 4.4.3
         version: 4.4.3
@@ -776,9 +724,6 @@ importers:
       react-dom:
         specifier: ^19.2.4
         version: 19.2.7(react@19.2.7)
-      redis:
-        specifier: ^5.10.0
-        version: 5.10.0
       wouter:
         specifier: ^3.9.0
         version: 3.9.0(react@19.2.7)
@@ -3564,12 +3509,6 @@ packages:
     engines: {node: '>=20.19.4'}
     hasBin: true
 
-  '@react-native-cookies/cookies@6.2.1':
-    resolution: {integrity: sha512-D17wCA0DXJkGJIxkL74Qs9sZ3sA+c+kCoGmXVknW7bVw/W+Vv1m/7mWTNi9DLBZSRddhzYw8SU0aJapIaM/g5w==}
-    deprecated: This package is deprecated. Use @preeternal/react-native-cookie-manager or react-native-nitro-cookies instead.
-    peerDependencies:
-      react-native: '>= 0.60.2'
-
   '@react-native-masked-view/masked-view@0.3.2':
     resolution: {integrity: sha512-XwuQoW7/GEgWRMovOQtX3A4PrXhyaZm0lVUiY8qJDvdngjLms9Cpdck6SmGAUNqQwcj2EadHC1HwL0bEyoa/SQ==}
     peerDependencies:
@@ -3668,34 +3607,6 @@ packages:
 
   '@react-navigation/routers@7.5.3':
     resolution: {integrity: sha512-1tJHg4KKRJuQ1/EvJxatrMef3NZXEPzwUIUZ3n1yJ2t7Q97siwRtbynRpQG9/69ebbtiZ8W3ScOZF/OmhvM4Rg==}
-
-  '@redis/bloom@5.10.0':
-    resolution: {integrity: sha512-doIF37ob+l47n0rkpRNgU8n4iacBlKM9xLiP1LtTZTvz8TloJB8qx/MgvhMhKdYG+CvCY2aPBnN2706izFn/4A==}
-    engines: {node: '>= 18'}
-    peerDependencies:
-      '@redis/client': ^5.10.0
-
-  '@redis/client@5.10.0':
-    resolution: {integrity: sha512-JXmM4XCoso6C75Mr3lhKA3eNxSzkYi3nCzxDIKY+YOszYsJjuKbFgVtguVPbLMOttN4iu2fXoc2BGhdnYhIOxA==}
-    engines: {node: '>= 18'}
-
-  '@redis/json@5.10.0':
-    resolution: {integrity: sha512-B2G8XlOmTPUuZtD44EMGbtoepQG34RCDXLZbjrtON1Djet0t5Ri7/YPXvL9aomXqP8lLTreaprtyLKF4tmXEEA==}
-    engines: {node: '>= 18'}
-    peerDependencies:
-      '@redis/client': ^5.10.0
-
-  '@redis/search@5.10.0':
-    resolution: {integrity: sha512-3SVcPswoSfp2HnmWbAGUzlbUPn7fOohVu2weUQ0S+EMiQi8jwjL+aN2p6V3TI65eNfVsJ8vyPvqWklm6H6esmg==}
-    engines: {node: '>= 18'}
-    peerDependencies:
-      '@redis/client': ^5.10.0
-
-  '@redis/time-series@5.10.0':
-    resolution: {integrity: sha512-cPkpddXH5kc/SdRhF0YG0qtjL+noqFT0AcHbQ6axhsPsO7iqPi1cjxgdkE9TNeKiBUUdCaU1DbqkR/LzbzPBhg==}
-    engines: {node: '>= 18'}
-    peerDependencies:
-      '@redis/client': ^5.10.0
 
   '@rive-app/react-webgl2@4.26.2':
     resolution: {integrity: sha512-AwJ7wzx6jzfTD2rrQ8Tt5u5W7b9B4ctnQQnHfIs4ldUM5DV3tE11d81sHOeYNrW9GishgOvU9jsMdHsSnozNzg==}
@@ -5083,10 +4994,6 @@ packages:
     resolution: {integrity: sha512-eYm0QWBtUrBWZWG0d386OGAw16Z995PiOVo2B7bjWSbHedGl5e0ZWaq65kOGgUSNesEIDkB9ISbTg/JK9dhCZA==}
     engines: {node: '>=6'}
 
-  cluster-key-slot@1.1.2:
-    resolution: {integrity: sha512-RMr0FhtfXemyinomL4hrWcYJxmX6deFdCxpJzhDttxgO1+bcCnkk+9drydLVDmAMG7NE6aN/fl4F7ucU/90gAA==}
-    engines: {node: '>=0.10.0'}
-
   cmdk@1.1.1:
     resolution: {integrity: sha512-Vsv7kFaXm+ptHDMZ7izaRsP70GgrW9NBNGswt9OZaVBLlE0SNpDq8eu/VGXyF9r7M0azK3Wy7OlYXsuyYLFzHg==}
     peerDependencies:
@@ -5128,10 +5035,6 @@ packages:
   commander@12.1.0:
     resolution: {integrity: sha512-Vw8qHK3bZM9y/P10u3Vib8o/DdkvA2OtPtZvD871QKjy74Wj1WSKFILMPRPSdUSx5RFK1arlJzEtA4PkFgnbuA==}
     engines: {node: '>=18'}
-
-  commander@14.0.3:
-    resolution: {integrity: sha512-H+y0Jo/T1RZ9qPP4Eh1pkcQcLRglraJaSLoyOtHxu6AapkjWVCy2Sit1QQ4x3Dng8qDlSsZEet7g5Pq06MvTgw==}
-    engines: {node: '>=20'}
 
   commander@2.20.3:
     resolution: {integrity: sha512-GpVkmM8vF2vQUkj2LvZmD35JxeJOLCwJ9cUkugyk2nuhbv3+mJvpLYYt+0+USMxE+oj+ey/lJEnhZw75x/OMcQ==}
@@ -5855,11 +5758,6 @@ packages:
       expo: '*'
       react-native: '*'
 
-  expo-crypto@56.0.4:
-    resolution: {integrity: sha512-fRNEhoXRXgAWBpe3/hq5X+KXTit3OZqdiAGts1YvNEUHQb+H5591mpPac0Yw+sZg9pXcrjRnzo5AxvZaENpc7g==}
-    peerDependencies:
-      expo: '*'
-
   expo-document-picker@56.0.4:
     resolution: {integrity: sha512-75Apf74XNkYYohObIH19VZw42xpe0gmEnPccuzGXKVAzlvTYCfibSgW17F+6vt4paOfZEnAoZ1QFZM6dmaujRA==}
     peerDependencies:
@@ -5965,11 +5863,6 @@ packages:
       react-server-dom-webpack:
         optional: true
 
-  expo-secure-store@56.0.4:
-    resolution: {integrity: sha512-hjEi/gmpdFFJ9lYbdp3k3p/WchV7Gi0Qt8jt/m/0WJadqQrskafHAlDxbZkII1cN3Yd7zp9Lvkeq3UfGhSwirQ==}
-    peerDependencies:
-      expo: '*'
-
   expo-server@56.0.5:
     resolution: {integrity: sha512-SmM2p2g3Jrktpiazcst+OxhjSzOHXKAY4BPURHYHXvApzzoybMmrNF4IEZ8DKZ145BhSe4ydAmlEFCRTsdtgUQ==}
     engines: {node: '>=20.16.0'}
@@ -6013,12 +5906,6 @@ packages:
 
   expo-task-manager@56.0.18:
     resolution: {integrity: sha512-abTKDhlZ572wSwNuZ9HkDw6rl+kKLq0TkqheIEbGoRkMQVEGV3D5GYYY0gg84TO/HvAqiipdcBFQH8+9uHj70Q==}
-    peerDependencies:
-      expo: '*'
-      react-native: '*'
-
-  expo-web-browser@56.0.5:
-    resolution: {integrity: sha512-kaN+wcR5lHwPCH1IgrU1XyPUQvBRzdF1TMp65uAF9iUCyipqYnmrvV87eqAmrdkFFopWVgU7FcxPu1UZw+gvUQ==}
     peerDependencies:
       expo: '*'
       react-native: '*'
@@ -8129,10 +8016,6 @@ packages:
     resolution: {integrity: sha512-6tDA8g98We0zd0GvVeMT9arEOnTw9qM03L9cJXaCjrip1OO764RDBLBfrB4cwzNGDj5OA5ioymC9GkizgWJDUg==}
     engines: {node: '>=8'}
 
-  redis@5.10.0:
-    resolution: {integrity: sha512-0/Y+7IEiTgVGPrLFKy8oAEArSyEJkU0zvgV5xyi9NzNQ+SLZmyFbUsWIbgPcd4UdUh00opXGKlXJwMmsis5Byw==}
-    engines: {node: '>= 18'}
-
   refractor@3.6.0:
     resolution: {integrity: sha512-MY9W41IOWxxk31o+YvFCNyNzdkc9M20NoZK5vq6jkv4I/uh2zkWcfudj0Q1fovjUQJrNewS9NMzeTtqPf+n5EA==}
 
@@ -8799,12 +8682,6 @@ packages:
     resolution: {integrity: sha512-OZs6gsjF4vMp32qrCbiVSkrFmXtG/AZhY3t0iAMrMBiAZyV9oALtXO8hsrHbMXF9x6L3grlFuwW2oAz7cav+Gw==}
     engines: {node: '>= 0.6'}
 
-  typesafe-i18n@5.27.1:
-    resolution: {integrity: sha512-749uWo2ZXETT//kWjVYPm8QPYR8xLh8G0wLfoAyCAtAmysX67uCaAyLjAjAWojL6fuJpE5B6yIjwvO9orXzUPg==}
-    hasBin: true
-    peerDependencies:
-      typescript: '>=3.5.1'
-
   typescript@5.9.3:
     resolution: {integrity: sha512-jl1vZzPDinLr9eUt3J/t7V6FgNEw9QjvBPdysz9KfQDD41fQrC2Y4vKQdiaUpFT4bXlb1RHhLpp8wtm6M5TgSw==}
     engines: {node: '>=14.17'}
@@ -8925,10 +8802,6 @@ packages:
 
   utf-8-validate@5.0.10:
     resolution: {integrity: sha512-Z6czzLq4u8fPOyx7TU6X3dvUZVvoJmxSQ+IcrlmagKhilxlhZgxPK6C5Jqbkw1IDUmFTM+cz9QDnnLTwDz/2gQ==}
-    engines: {node: '>=6.14.2'}
-
-  utf-8-validate@6.0.6:
-    resolution: {integrity: sha512-q3l3P9UtEEiAHcsgsqTgf9PPjctrDWoIXW3NpOHFdRDbLvu4DLIcxHangJ4RLrWkBcKjmcs/6NkerI8T/rE4LA==}
     engines: {node: '>=6.14.2'}
 
   util-deprecate@1.0.2:
@@ -13216,11 +13089,6 @@ snapshots:
       - utf-8-validate
     optional: true
 
-  '@react-native-cookies/cookies@6.2.1(react-native@0.85.3(@babel/core@7.29.7)(@react-native-community/cli@20.1.3(bufferutil@4.1.0)(typescript@6.0.3)(utf-8-validate@5.0.10))(@react-native/metro-config@0.85.3(@babel/core@7.29.7))(@types/react@19.2.17)(bufferutil@4.1.0)(react@19.2.3)(utf-8-validate@5.0.10))':
-    dependencies:
-      invariant: 2.2.4
-      react-native: 0.85.3(@babel/core@7.29.7)(@react-native-community/cli@20.1.3(bufferutil@4.1.0)(typescript@6.0.3)(utf-8-validate@5.0.10))(@react-native/metro-config@0.85.3(@babel/core@7.29.7))(@types/react@19.2.17)(bufferutil@4.1.0)(react@19.2.3)(utf-8-validate@5.0.10)
-
   '@react-native-masked-view/masked-view@0.3.2(react-native@0.85.3(@babel/core@7.29.7)(@react-native-community/cli@20.1.3(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@5.0.10))(@react-native/metro-config@0.85.3(@babel/core@7.29.7))(@types/react@19.2.17)(bufferutil@4.1.0)(react@19.2.7)(utf-8-validate@5.0.10))(react@19.2.7)':
     dependencies:
       react: 19.2.7
@@ -13441,26 +13309,6 @@ snapshots:
   '@react-navigation/routers@7.5.3':
     dependencies:
       nanoid: 3.3.12
-
-  '@redis/bloom@5.10.0(@redis/client@5.10.0)':
-    dependencies:
-      '@redis/client': 5.10.0
-
-  '@redis/client@5.10.0':
-    dependencies:
-      cluster-key-slot: 1.1.2
-
-  '@redis/json@5.10.0(@redis/client@5.10.0)':
-    dependencies:
-      '@redis/client': 5.10.0
-
-  '@redis/search@5.10.0(@redis/client@5.10.0)':
-    dependencies:
-      '@redis/client': 5.10.0
-
-  '@redis/time-series@5.10.0(@redis/client@5.10.0)':
-    dependencies:
-      '@redis/client': 5.10.0
 
   '@rive-app/react-webgl2@4.26.2(react@19.2.7)':
     dependencies:
@@ -15014,8 +14862,6 @@ snapshots:
 
   clsx@2.1.1: {}
 
-  cluster-key-slot@1.1.2: {}
-
   cmdk@1.1.1(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7):
     dependencies:
       '@radix-ui/react-compose-refs': 1.1.2(@types/react@19.2.17)(react@19.2.7)
@@ -15061,8 +14907,6 @@ snapshots:
     optional: true
 
   commander@12.1.0: {}
-
-  commander@14.0.3: {}
 
   commander@2.20.3: {}
 
@@ -15873,10 +15717,6 @@ snapshots:
       - supports-color
     optional: true
 
-  expo-crypto@56.0.4(expo@56.0.11):
-    dependencies:
-      expo: 56.0.11(d50df2c0b0a4d41d11bd64039be8271c)
-
   expo-document-picker@56.0.4(expo@56.0.11):
     dependencies:
       expo: 56.0.11(d50df2c0b0a4d41d11bd64039be8271c)
@@ -16229,10 +16069,6 @@ snapshots:
       - supports-color
     optional: true
 
-  expo-secure-store@56.0.4(expo@56.0.11):
-    dependencies:
-      expo: 56.0.11(d50df2c0b0a4d41d11bd64039be8271c)
-
   expo-server@56.0.5: {}
 
   expo-splash-screen@56.0.10(expo@56.0.11)(typescript@6.0.3):
@@ -16312,11 +16148,6 @@ snapshots:
       expo: 56.0.11(d50df2c0b0a4d41d11bd64039be8271c)
       react-native: 0.85.3(@babel/core@7.29.7)(@react-native-community/cli@20.1.3(bufferutil@4.1.0)(typescript@6.0.3)(utf-8-validate@5.0.10))(@react-native/metro-config@0.85.3(@babel/core@7.29.7))(@types/react@19.2.17)(bufferutil@4.1.0)(react@19.2.3)(utf-8-validate@5.0.10)
       unimodules-app-loader: 56.0.1
-
-  expo-web-browser@56.0.5(expo@56.0.11)(react-native@0.85.3(@babel/core@7.29.7)(@react-native-community/cli@20.1.3(bufferutil@4.1.0)(typescript@6.0.3)(utf-8-validate@5.0.10))(@react-native/metro-config@0.85.3(@babel/core@7.29.7))(@types/react@19.2.17)(bufferutil@4.1.0)(react@19.2.3)(utf-8-validate@5.0.10)):
-    dependencies:
-      expo: 56.0.11(d50df2c0b0a4d41d11bd64039be8271c)
-      react-native: 0.85.3(@babel/core@7.29.7)(@react-native-community/cli@20.1.3(bufferutil@4.1.0)(typescript@6.0.3)(utf-8-validate@5.0.10))(@react-native/metro-config@0.85.3(@babel/core@7.29.7))(@types/react@19.2.17)(bufferutil@4.1.0)(react@19.2.3)(utf-8-validate@5.0.10)
 
   expo@56.0.11(bffde175d19ca4beaa3e3ad3f4b728e6):
     dependencies:
@@ -17200,35 +17031,6 @@ snapshots:
       whatwg-mimetype: 4.0.0
       whatwg-url: 15.1.0
       ws: 8.21.0(bufferutil@4.1.0)(utf-8-validate@5.0.10)
-      xml-name-validator: 5.0.0
-    transitivePeerDependencies:
-      - '@noble/hashes'
-      - bufferutil
-      - supports-color
-      - utf-8-validate
-    optional: true
-
-  jsdom@27.4.0(@noble/hashes@2.2.0)(bufferutil@4.1.0)(utf-8-validate@6.0.6):
-    dependencies:
-      '@acemir/cssom': 0.9.31
-      '@asamuzakjp/dom-selector': 6.7.8
-      '@exodus/bytes': 1.14.1(@noble/hashes@2.2.0)
-      cssstyle: 5.3.7
-      data-urls: 6.0.1
-      decimal.js: 10.6.0
-      html-encoding-sniffer: 6.0.0(@noble/hashes@2.2.0)
-      http-proxy-agent: 7.0.2
-      https-proxy-agent: 7.0.6
-      is-potential-custom-element-name: 1.0.1
-      parse5: 8.0.0
-      saxes: 6.0.0
-      symbol-tree: 3.2.4
-      tough-cookie: 6.0.0
-      w3c-xmlserializer: 5.0.0
-      webidl-conversions: 8.0.1
-      whatwg-mimetype: 4.0.0
-      whatwg-url: 15.1.0
-      ws: 8.21.0(bufferutil@4.1.0)(utf-8-validate@6.0.6)
       xml-name-validator: 5.0.0
     transitivePeerDependencies:
       - '@noble/hashes'
@@ -19400,14 +19202,6 @@ snapshots:
       indent-string: 4.0.0
       strip-indent: 3.0.0
 
-  redis@5.10.0:
-    dependencies:
-      '@redis/bloom': 5.10.0(@redis/client@5.10.0)
-      '@redis/client': 5.10.0
-      '@redis/json': 5.10.0(@redis/client@5.10.0)
-      '@redis/search': 5.10.0(@redis/client@5.10.0)
-      '@redis/time-series': 5.10.0(@redis/client@5.10.0)
-
   refractor@3.6.0:
     dependencies:
       hastscript: 6.0.0
@@ -20201,10 +19995,6 @@ snapshots:
       media-typer: 1.1.0
       mime-types: 3.0.2
 
-  typesafe-i18n@5.27.1(typescript@5.9.3):
-    dependencies:
-      typescript: 5.9.3
-
   typescript@5.9.3: {}
 
   typescript@6.0.3: {}
@@ -20343,11 +20133,6 @@ snapshots:
       node-gyp-build: 4.8.4
     optional: true
 
-  utf-8-validate@6.0.6:
-    dependencies:
-      node-gyp-build: 4.8.4
-    optional: true
-
   util-deprecate@1.0.2:
     optional: true
 
@@ -20468,42 +20253,6 @@ snapshots:
     optionalDependencies:
       '@types/node': 24.10.13
       jsdom: 27.4.0(@noble/hashes@2.2.0)(bufferutil@4.1.0)(utf-8-validate@5.0.10)
-    transitivePeerDependencies:
-      - less
-      - lightningcss
-      - msw
-      - sass
-      - sass-embedded
-      - stylus
-      - sugarss
-      - supports-color
-      - terser
-
-  vitest@2.1.9(@types/node@24.10.13)(jsdom@27.4.0(@noble/hashes@2.2.0)(bufferutil@4.1.0)(utf-8-validate@6.0.6))(less@3.13.1)(lightningcss@1.31.1)(msw@2.12.10(@types/node@24.10.13)(typescript@5.9.3))(sass@1.101.0)(stylus@0.64.0)(terser@5.48.0):
-    dependencies:
-      '@vitest/expect': 2.1.9
-      '@vitest/mocker': 2.1.9(msw@2.12.10(@types/node@24.10.13)(typescript@5.9.3))(vite@5.4.21(@types/node@24.10.13)(less@3.13.1)(lightningcss@1.31.1)(sass@1.101.0)(stylus@0.64.0)(terser@5.48.0))
-      '@vitest/pretty-format': 2.1.9
-      '@vitest/runner': 2.1.9
-      '@vitest/snapshot': 2.1.9
-      '@vitest/spy': 2.1.9
-      '@vitest/utils': 2.1.9
-      chai: 5.3.3
-      debug: 4.4.3
-      expect-type: 1.3.0
-      magic-string: 0.30.21
-      pathe: 1.1.2
-      std-env: 3.10.0
-      tinybench: 2.9.0
-      tinyexec: 0.3.2
-      tinypool: 1.1.1
-      tinyrainbow: 1.2.0
-      vite: 5.4.21(@types/node@24.10.13)(less@3.13.1)(lightningcss@1.31.1)(sass@1.101.0)(stylus@0.64.0)(terser@5.48.0)
-      vite-node: 2.1.9(@types/node@24.10.13)(less@3.13.1)(lightningcss@1.31.1)(sass@1.101.0)(stylus@0.64.0)(terser@5.48.0)
-      why-is-node-running: 2.3.0
-    optionalDependencies:
-      '@types/node': 24.10.13
-      jsdom: 27.4.0(@noble/hashes@2.2.0)(bufferutil@4.1.0)(utf-8-validate@6.0.6)
     transitivePeerDependencies:
       - less
       - lightningcss
@@ -20636,12 +20385,6 @@ snapshots:
     optionalDependencies:
       bufferutil: 4.1.0
       utf-8-validate: 5.0.10
-
-  ws@8.21.0(bufferutil@4.1.0)(utf-8-validate@6.0.6):
-    optionalDependencies:
-      bufferutil: 4.1.0
-      utf-8-validate: 6.0.6
-    optional: true
 
   xcode@3.0.1:
     dependencies:

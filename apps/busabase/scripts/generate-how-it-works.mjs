@@ -109,11 +109,10 @@ ${arrow("M1036,196 L1063,187", C.ink, "ink")}
 ${arrow("M1036,240 L1063,257", C.ink, "ink")}
 </svg>`;
 
-// Keep the SVG as the editable source; embed the 2x lossless WebP in the README
-// (GitHub renders relative WebP reliably, whereas raw SVGs can be served as
-// text/plain; lossless keeps the flat diagram crisp at ~⅓ the size of PNG).
+// Keep the SVG as the editable source; embed the 2x PNG in the README (GitHub
+// renders relative PNGs reliably, whereas raw SVGs can be served as text/plain).
 const svgOut = path.join(appRoot, "public/assets/readme/how-it-works.svg");
-const webpOut = path.join(appRoot, "public/assets/readme/how-it-works.webp");
+const pngOut = path.join(appRoot, "public/assets/readme/how-it-works.png");
 writeFileSync(svgOut, `${svg}\n`);
-await sharp(Buffer.from(svg), { density: 144 }).webp({ lossless: true }).toFile(webpOut);
-console.log(`how-it-works → ${path.relative(process.cwd(), svgOut)} + .webp (2x)`);
+await sharp(Buffer.from(svg), { density: 144 }).png().toFile(pngOut);
+console.log(`how-it-works → ${path.relative(process.cwd(), svgOut)} + .png (2x)`);

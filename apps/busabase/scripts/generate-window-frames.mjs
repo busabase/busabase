@@ -2,11 +2,12 @@
 // Wrap the raw screenshots in a clean macOS-window chrome (traffic-light dots +
 // title bar + soft shadow) for the README and docs. Raw captures live in
 // *-raw/ folders (written by capture-readme-screenshots.mjs); the framed
-// versions keep the same basename.
+// versions are written back under the SAME filename, so the README/docs
+// references don't change.
 //
 // Two jobs:
-//   public/assets/readme/desktop-raw/   → public/assets/readme/            (titled, lossless .webp)
-//   public/assets/readme/scenarios-raw/ → public/assets/readme/scenarios/  (dots only, .png)
+//   public/assets/readme/desktop-raw/   → public/assets/readme/            (titled)
+//   public/assets/readme/scenarios-raw/ → public/assets/readme/scenarios/  (dots only)
 //
 // Run: node apps/busabase/scripts/generate-window-frames.mjs
 import { existsSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
@@ -20,9 +21,7 @@ const readmeDir = path.join(appRoot, "public/assets/readme");
 // Each job frames every screenshot in `raw` and writes it to `out` under the
 // same filename. `titled` jobs show the per-file window title from `titles`.
 const jobs = [
-  // README/docs shots → lossless WebP (crisp UI text, ~⅓ the size of PNG).
-  { raw: path.join(readmeDir, "desktop-raw"), out: readmeDir, titled: true, webp: true },
-  // Scenario shots stay PNG — they're seeded as demo attachments that expect .png.
+  { raw: path.join(readmeDir, "desktop-raw"), out: readmeDir, titled: true },
   {
     raw: path.join(readmeDir, "scenarios-raw"),
     out: path.join(readmeDir, "scenarios"),
@@ -49,7 +48,7 @@ const dots = ["#ff5f57", "#febc2e", "#28c840"];
 
 const xmlEscape = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
-async function frameOne(rawDir, outDir, file, titled, webp) {
+async function frameOne(rawDir, outDir, file, titled) {
   const inPath = path.join(rawDir, file);
   const meta = await sharp(inPath).metadata();
   const W = meta.width;
@@ -104,11 +103,10 @@ async function frameOne(rawDir, outDir, file, titled, webp) {
   <rect x="${winX + 0.5}" y="${winY + 0.5}" width="${winW - 1}" height="${winH - 1}" rx="${radius}" ry="${radius}" fill="none" stroke="${border}" stroke-width="1.5"/>
 </svg>`;
 
-  const out = path.join(outDir, webp ? file.replace(/\.(png|jpe?g)$/i, ".webp") : file);
+  const out = path.join(outDir, file);
   // Default density (72) renders the SVG 1:1, keeping the embedded screenshot at
   // its native resolution (no upscale blur on the screenshot text).
-  const rendered = sharp(Buffer.from(svg));
-  await (webp ? rendered.webp({ lossless: true }) : rendered.png()).toFile(out);
+  await sharp(Buffer.from(svg)).png().toFile(out);
   console.log(`framed → ${path.relative(process.cwd(), out)}  (${W}×${H})`);
 }
 
@@ -126,5 +124,5 @@ for (const job of jobs) {
     continue;
   }
   console.log(`\n${rel} → framing ${files.length}…`);
-  for (const f of files.sort()) await frameOne(job.raw, job.out, f, job.titled, job.webp);
+  for (const f of files.sort()) await frameOne(job.raw, job.out, f, job.titled);
 }

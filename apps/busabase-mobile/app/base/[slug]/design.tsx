@@ -2,7 +2,6 @@ import { skipToken, useMutation, useQuery, useQueryClient } from "@tanstack/reac
 import type { BaseVO, FieldType, ViewVO } from "busabase-contract/types";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { ArrowLeft, Trash2 } from "lucide-react-native";
-import { iStringParse } from "openlib/i18n/i-string";
 import { useMemo, useState } from "react";
 import { Alert, Pressable, StyleSheet, Switch, Text, View } from "react-native";
 import { useBusabaseOrpc } from "~/api/use-busabase-orpc";
@@ -200,9 +199,7 @@ function BaseDesignContent() {
           <Text style={[typography.h2, { color: tokens.foreground }]}>Fields</Text>
           {base.fields.map((field) => (
             <View key={field.id} style={[styles.fieldRow, { borderColor: tokens.border }]}>
-              <Text style={[typography.bodyEm, { color: tokens.foreground }]}>
-                {iStringParse(field.name)}
-              </Text>
+              <Text style={[typography.bodyEm, { color: tokens.foreground }]}>{field.name}</Text>
               <Text style={[typography.caption, { color: tokens.mutedForeground }]}>
                 {field.type}
                 {field.required ? " · required" : ""}

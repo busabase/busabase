@@ -1,20 +1,7 @@
-import { iStringRecordSchema } from "openlib/i18n/i-string";
 import { z } from "zod";
 
 // Base-owned field + base Zod schemas. Pure leaf: imports nothing from the kernel
 // contract, so the kernel can embed `baseSchema` eagerly with no import cycle.
-// (openlib/i18n/i-string is zod-only — safe for the client bundle.)
-
-// Field display names are iStrings: a plain string or a locale-keyed record like
-// { en: "Company", "zh-CN": "公司" }. Slugs stay the stable identifier; the name is
-// display-only. A record must carry at least one non-empty value.
-export const fieldNameSchema = z.union([
-  z.string().min(1),
-  iStringRecordSchema.refine(
-    (record) => Object.values(record).some((value) => value && value.trim().length > 0),
-    "field name must have at least one non-empty locale value",
-  ),
-]);
 
 export const fieldTypeSchema = z.enum([
   "text",
@@ -85,16 +72,7 @@ export const fieldOptionsSchema = z
         locale: z.string().optional(),
       })
       .optional(),
-    targetBaseId: z
-      .string()
-      .optional()
-      .describe("Relation target Base id (bse_…). Or pass targetBaseSlug to name it by slug."),
-    targetBaseSlug: z
-      .string()
-      .optional()
-      .describe(
-        "Relation target Base by slug — a convenience alias for targetBaseId, resolved server-side (active bases in the current space). If both are given, targetBaseId wins.",
-      ),
+    targetBaseId: z.string().optional(),
   })
   .default({});
 
@@ -102,7 +80,7 @@ export const baseFieldSchema = z.object({
   id: z.string(),
   baseId: z.string(),
   slug: z.string(),
-  name: fieldNameSchema,
+  name: z.string(),
   type: fieldTypeSchema,
   required: z.boolean(),
   position: z.number(),
@@ -135,7 +113,7 @@ export const createBaseInputSchema = z.object({
     .array(
       z.object({
         slug: z.string().min(1),
-        name: fieldNameSchema,
+        name: z.string().min(1),
         type: fieldTypeSchema.default("text"),
         required: z.boolean().default(false),
         options: fieldOptionsSchema.optional().default({}),
@@ -145,7 +123,7 @@ export const createBaseInputSchema = z.object({
 });
 
 export const createBaseFieldInputSchema = z.object({
-  name: fieldNameSchema,
+  name: z.string().min(1),
   // Field slugs are snake_case identifiers (e.g. `cover_image`, `publish_date`) — the
   // seed and the inline-fields path on `POST /bases` already allow underscores, so the
   // add-field endpoint must too. (Base/folder/view slugs stay kebab-case: they go in URLs.)
@@ -172,7 +150,7 @@ export const deleteFieldChangeRequestInputSchema = z.object({
 export const updateFieldChangeRequestInputSchema = z.object({
   fieldId: z.string().min(1),
   patch: z.object({
-    name: fieldNameSchema.optional(),
+    name: z.string().min(1).optional(),
     required: z.boolean().optional(),
     options: fieldOptionsSchema.optional(),
   }),

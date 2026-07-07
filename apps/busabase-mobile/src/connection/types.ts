@@ -1,24 +1,9 @@
 export interface BusabaseConnection {
   // "demo" = the preset hosted demo server (one-tap, for App Review and new users);
-  // "self-hosted" = a server URL the user entered;
-  // "cloud" = authenticated Busabase Cloud session.
-  mode: "self-hosted" | "demo" | "cloud";
+  // "self-hosted" = a server URL the user entered.
+  mode: "self-hosted" | "demo";
   serverUrl: string;
   connectedAt: string;
-  cloudUser?: {
-    id?: string;
-    email?: string;
-    name?: string;
-    image?: string | null;
-  };
-  selectedSpace?: BusabaseSpace | null;
-}
-
-export interface BusabaseSpace {
-  id: string;
-  name: string;
-  slug: string | null;
-  plan: string | null;
 }
 
 interface ConnectionStateBase {

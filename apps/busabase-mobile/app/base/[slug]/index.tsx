@@ -1,6 +1,5 @@
 import { skipToken, useQuery } from "@tanstack/react-query";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { iStringParse } from "openlib/i18n/i-string";
 import { useMemo, useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useBusabaseOrpc } from "~/api/use-busabase-orpc";
@@ -176,7 +175,7 @@ function BaseDetailContent() {
                       numberOfLines={1}
                       style={[typography.caption, styles.cell, { color: tokens.mutedForeground }]}
                     >
-                      {iStringParse(field.name).toUpperCase()}
+                      {field.name.toUpperCase()}
                     </Text>
                   ))}
                 </View>

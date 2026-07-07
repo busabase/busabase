@@ -64,7 +64,16 @@ export function BusabaseDashboardShell({
   const nav = (isCoreLocale(locale) ? coreMessagesByLocale[locale] : coreMessagesByLocale.en).nav;
   // The "Bases" group label doubles as the header-action key, so reuse one value.
   const basesLabel = nav.bases;
-  const assetsLabel = nav.assets;
+  // Assets is a global (non-node-tree) view; label localized inline until it
+  // graduates into the core i18n nav messages.
+  const assetsLabel =
+    locale === "zh-CN"
+      ? "资产"
+      : locale === "zh-TW"
+        ? "資產"
+        : locale === "ja"
+          ? "アセット"
+          : "Assets";
   // Pinned nav (fixed at the top, never scrolls): Inbox + Search.
   const pinnedNav: NavGroup[] = [
     {
@@ -100,7 +109,7 @@ export function BusabaseDashboardShell({
         // Hidden for now — the Archived/Trash view is reachable via its route
         // (/archived) but no longer shown in the sidebar. To restore, re-add the
         // `Archive` icon import from lucide-react.
-        // { title: nav.archived, url: "/archived", icon: Archive },
+        // { title: "Archived", url: "/archived", icon: Archive },
       ],
     },
     {

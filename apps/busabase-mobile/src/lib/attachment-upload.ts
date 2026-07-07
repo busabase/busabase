@@ -21,7 +21,6 @@ export async function uploadAttachment(
   client: BusabaseClient,
   serverUrl: string,
   file: PickedFile,
-  headers: Record<string, string> = {},
 ): Promise<AttachmentRef> {
   const mimeType = file.mimeType || "application/octet-stream";
   const requested = await client.attachments.createUploadUrl({
@@ -39,7 +38,6 @@ export async function uploadAttachment(
     form.append("storageKey", requested.storageKey);
     const response = await fetch(resolveAttachmentUrl(serverUrl, requested.uploadUrl), {
       method: "POST",
-      headers,
       body: form,
     });
     if (!response.ok) {

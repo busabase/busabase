@@ -34,13 +34,14 @@ describe("Boundary P16 — node/view merge state guards", () => {
       ).id,
     );
 
-    // A rename CR targeting the now-archived node must not merge. Structural CRs
-    // auto-merge on create, so the guard rejects at the create call.
-    await expect(
-      raw.nodes.createChangeRequest({
-        operations: [{ kind: "rename", nodeId: doc.node.id, name: "Renamed" }],
-      }),
-    ).rejects.toThrow(/archived node/i);
+    // A rename CR targeting the now-archived node must not merge.
+    const renameCr = await raw.nodes.createChangeRequest({
+      operations: [{ kind: "rename", nodeId: doc.node.id, name: "Renamed" }],
+    });
+    await raw.changeRequests.review({ changeRequestId: renameCr.id, verdict: "approved" });
+    await expect(raw.changeRequests.merge({ changeRequestId: renameCr.id })).rejects.toThrow(
+      /archived node/i,
+    );
   });
 
   it("Fix 2: restoring a view that is not archived is rejected", async () => {

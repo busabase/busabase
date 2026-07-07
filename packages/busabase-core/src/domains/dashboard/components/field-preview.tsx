@@ -5,7 +5,6 @@ import { FileText, Film, Maximize2, Music } from "lucide-react";
 import { SPALink as Link } from "openlib/ui/dashboard";
 import { type ComponentProps, type ReactNode, useState } from "react";
 import { Streamdown, type Components as StreamdownComponents } from "streamdown";
-import { useCoreI18n, useIString } from "../../../i18n";
 import { fieldDisplayKind, fieldLinkPrefix } from "../../base/field-types";
 import { getRecordTitle } from "../helpers/change-request";
 import {
@@ -127,18 +126,12 @@ export const mdComponents: StreamdownComponents = {
   td: ({ children }) => <td className="border-b px-3 py-1.5">{children as ReactNode}</td>,
 };
 
-/**
- * Shared Preview/Source toggle for rich-text field values (markdown, html).
- * Both modes render the same raw `source` string; only the preview node differs.
- */
-function SourceTogglePreview({
+export function MarkdownFieldPreview({
   className = "",
-  preview,
-  source,
+  value,
 }: {
   className?: string;
-  preview: ReactNode;
-  source: string;
+  value: string;
 }) {
   const [mode, setMode] = useState<"preview" | "source">("preview");
   return (
@@ -162,49 +155,15 @@ function SourceTogglePreview({
         </div>
       </div>
       {mode === "preview" ? (
-        preview
-      ) : (
-        <div className="min-w-0 whitespace-pre-wrap break-words font-mono text-sm leading-6 text-muted-foreground">
-          {source}
-        </div>
-      )}
-    </div>
-  );
-}
-
-export function MarkdownFieldPreview({
-  className = "",
-  value,
-}: {
-  className?: string;
-  value: string;
-}) {
-  return (
-    <SourceTogglePreview
-      className={className}
-      preview={
         <div className="min-w-0 break-words text-sm leading-7 [word-break:break-word] [&>*:first-child]:mt-0 [&>*:last-child]:mb-0">
           <Streamdown components={mdComponents}>{value}</Streamdown>
         </div>
-      }
-      source={value}
-    />
-  );
-}
-
-export function HtmlFieldPreview({ className = "", value }: { className?: string; value: string }) {
-  return (
-    <SourceTogglePreview
-      className={className}
-      preview={
-        <div
-          className="busabase-html-field min-w-0 break-words leading-6"
-          // biome-ignore lint/security/noDangerouslySetInnerHtml: HTML fields are sanitized through a tag and href allowlist before rendering.
-          dangerouslySetInnerHTML={{ __html: sanitizeHtml(value) }}
-        />
-      }
-      source={value}
-    />
+      ) : (
+        <div className="min-w-0 whitespace-pre-wrap break-words font-mono text-sm leading-6 text-muted-foreground">
+          {value}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -219,8 +178,6 @@ export function FieldValuePreview({
   records?: RecordVO[];
   value: unknown;
 }) {
-  const resolveIString = useIString();
-  const fieldName = field ? resolveIString(field.name) : undefined;
   const kind = field ? fieldDisplayKind(field.type) : "plain";
 
   if (kind === "checkbox") {
@@ -328,7 +285,7 @@ export function FieldValuePreview({
   if (kind === "markdown") {
     const md = fieldValueToString(value);
     return (
-      <MultilineFieldPreview collapsible={shouldCollapse} title={fieldName}>
+      <MultilineFieldPreview collapsible={shouldCollapse} title={field?.name}>
         <MarkdownFieldPreview className={className} value={md} />
       </MultilineFieldPreview>
     );
@@ -337,8 +294,12 @@ export function FieldValuePreview({
   if (kind === "html") {
     const html = fieldValueToString(value);
     return (
-      <MultilineFieldPreview collapsible={shouldCollapse} title={fieldName}>
-        <HtmlFieldPreview className={className} value={html} />
+      <MultilineFieldPreview collapsible={shouldCollapse} title={field?.name}>
+        <div
+          className={`busabase-html-field min-w-0 break-words leading-6 ${className}`}
+          // biome-ignore lint/security/noDangerouslySetInnerHtml: HTML fields are sanitized through a tag and href allowlist before rendering.
+          dangerouslySetInnerHTML={{ __html: sanitizeHtml(html) }}
+        />
       </MultilineFieldPreview>
     );
   }
@@ -347,7 +308,7 @@ export function FieldValuePreview({
     const code = fieldValueToString(value);
     const language = (field.options.code?.language ?? "text") as SkillCodeLanguage;
     return (
-      <MultilineFieldPreview collapsible={shouldCollapse} title={fieldName}>
+      <MultilineFieldPreview collapsible={shouldCollapse} title={field.name}>
         <CodeBlock
           className={`min-w-0 ${className}`}
           code={code}
@@ -380,7 +341,7 @@ export function FieldValuePreview({
   // Multi-line text (longtext / ai_summary) gets the same collapse + fullscreen chrome.
   const isMultiline = Boolean(field && ["longtext", "ai_summary"].includes(field.type));
   return isMultiline ? (
-    <MultilineFieldPreview collapsible={shouldCollapse} title={fieldName}>
+    <MultilineFieldPreview collapsible={shouldCollapse} title={field?.name}>
       {rendered}
     </MultilineFieldPreview>
   ) : (
@@ -402,16 +363,15 @@ export function MultilineFieldPreview({
   collapsible: boolean;
   title?: string;
 }) {
-  const messages = useCoreI18n();
   const [expanded, setExpanded] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
   return (
     <div className="group/field relative min-w-0">
       <button
-        aria-label={messages.recordView.expandFullscreen}
+        aria-label="Expand to fullscreen"
         className="absolute right-0 top-0 z-10 inline-flex items-center justify-center rounded-md border bg-background/90 p-1 text-muted-foreground opacity-0 shadow-sm backdrop-blur transition hover:text-foreground focus-visible:opacity-100 group-hover/field:opacity-100"
         onClick={() => setFullscreen(true)}
-        title={messages.recordView.expandFullscreen}
+        title="Expand to fullscreen"
         type="button"
       >
         <Maximize2 className="size-3.5" />

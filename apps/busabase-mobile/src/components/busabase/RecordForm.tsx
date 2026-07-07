@@ -2,7 +2,6 @@ import type { AttachmentRef, BaseFieldVO } from "busabase-contract/types";
 import * as DocumentPicker from "expo-document-picker";
 import * as ImagePicker from "expo-image-picker";
 import { FileText, ImagePlus, Paperclip, X } from "lucide-react-native";
-import { iStringParse } from "openlib/i18n/i-string";
 import { useState } from "react";
 import { ActivityIndicator, Image, Pressable, StyleSheet, Switch, Text, View } from "react-native";
 import { useBusabaseOrpc } from "~/api/use-busabase-orpc";
@@ -81,7 +80,7 @@ function FieldRow({
   const meta = (
     <View style={styles.meta}>
       <Text style={[typography.bodyEm, { color: tokens.foreground }]}>
-        {iStringParse(field.name)}
+        {field.name}
         {field.required ? <Text style={{ color: tokens.destructive }}> *</Text> : null}
       </Text>
       <Text style={[typography.caption, { color: tokens.mutedForeground }]}>{field.type}</Text>
@@ -194,9 +193,8 @@ function AttachmentFieldEditor({
   const tokens = useTokens();
   const { t } = useI18n();
   const buda = useBusabaseOrpc();
-  const { getCloudAuthorizationHeaders, state } = useConnection();
+  const { state } = useConnection();
   const serverUrl = state.status === "connected" ? state.connection.serverUrl : null;
-  const connectionMode = state.status === "connected" ? state.connection.mode : null;
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -211,8 +209,7 @@ function AttachmentFieldEditor({
     setUploading(true);
     setError(null);
     try {
-      const headers = connectionMode === "cloud" ? await getCloudAuthorizationHeaders() : {};
-      const ref = await uploadAttachment(buda.client, serverUrl, file, headers);
+      const ref = await uploadAttachment(buda.client, serverUrl, file);
       // Single-file fields replace; multi-file fields append.
       onChange(maxFiles === 1 ? [ref] : [...refs, ref]);
     } catch (uploadError) {
