@@ -30,7 +30,57 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  version:
+    name: Compute version
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.compute.outputs.version }}
+      tags: ${{ steps.compute.outputs.tags }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compute version and tags
+        id: compute
+        shell: bash
+        run: |
+          set -euo pipefail
+          package_version=$(jq -r '.version' apps/busabase/package.json)
+          short_sha="${GITHUB_SHA::7}"
+          ref_slug=$(printf '%s' "${GITHUB_REF_NAME}" | sed 's#[^A-Za-z0-9_.-]#-#g')
+
+          if [ "${GITHUB_REF_NAME}" = "main" ]; then
+            build_meta="release.${GITHUB_RUN_NUMBER}.${short_sha}"
+          else
+            build_meta="alpha.${GITHUB_RUN_NUMBER}.${short_sha}"
+          fi
+          semver="${package_version}-${build_meta}"
+
+          tags="${semver}
+          v${semver}
+          ${package_version}
+          ${ref_slug}
+          ${ref_slug}-${short_sha}"
+          if [ "${GITHUB_REF}" = "refs/heads/main" ]; then
+            tags="${tags}
+          latest"
+          fi
+          tags=$(printf '%s\n' "${tags}" | sed 's/^[[:space:]]*//')
+
+          {
+            echo "version=${semver}"
+            echo "tags<<__TAGS_EOF__"
+            echo "${tags}"
+            echo "__TAGS_EOF__"
+          } >> "$GITHUB_OUTPUT"
+
+          echo "Version: ${semver}"
+          echo "Tags:"
+          echo "${tags}"
+
   build:
+    needs: version
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -55,16 +105,28 @@ jobs:
           username: busabase
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Docker metadata
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: |
+      - name: Prepare Docker tags
+        id: tags
+        shell: bash
+        env:
+          REGISTRIES: |
             ghcr.io/${{ github.repository_owner }}/busabase
             docker.io/busabase/busabase
-          tags: |
-            type=raw,value=latest
-            type=sha,format=short
+          TAGS: ${{ needs.version.outputs.tags }}
+        run: |
+          set -euo pipefail
+          refs=()
+          while IFS= read -r registry; do
+            [ -n "$registry" ] || continue
+            while IFS= read -r tag; do
+              [ -n "$tag" ] && refs+=("${registry}:${tag}")
+            done <<< "$TAGS"
+          done <<< "$REGISTRIES"
+          {
+            echo "tags<<__TAGS_EOF__"
+            printf '%s\n' "${refs[@]}"
+            echo "__TAGS_EOF__"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Build and push
         uses: docker/build-push-action@v6
@@ -73,8 +135,7 @@ jobs:
           file: ./apps/busabase/Dockerfile
           platforms: linux/amd64,linux/arm64
           push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
+          tags: ${{ steps.tags.outputs.tags }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -98,8 +159,7 @@ jobs:
             exit 0
           fi
 
-          short_sha="${GITHUB_SHA::7}"
-          version="sha-${short_sha}"
+          version="${{ needs.version.outputs.version }}"
 
           echo "Dispatching deploy for busabase @ ${version}"
           PAYLOAD=$(jq -nc \
