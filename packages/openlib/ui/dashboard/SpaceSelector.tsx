@@ -73,6 +73,8 @@ export interface SpaceSelectorProps {
   compact?: boolean;
   /** App logo image URL to use instead of Lucide icon */
   appLogo?: string;
+  /** Optional workspace-level actions rendered before the spaces list. */
+  extraMenuItems?: React.ReactNode;
 }
 
 const defaultLabels = {
@@ -94,6 +96,7 @@ export function SpaceSelector({
   labels: customLabels,
   compact = false,
   appLogo,
+  extraMenuItems,
 }: SpaceSelectorProps) {
   const { isMobile, state } = useSidebar();
   const isCollapsed = state === "collapsed";
@@ -272,6 +275,13 @@ export function SpaceSelector({
                   </div>
                 )}
               </div>
+
+              {extraMenuItems && (
+                <>
+                  <DropdownMenuSeparator className="my-0 shrink-0" />
+                  <div className="shrink-0 p-1">{extraMenuItems}</div>
+                </>
+              )}
 
               <DropdownMenuSeparator className="my-0 shrink-0" />
 

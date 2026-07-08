@@ -26,6 +26,7 @@ interface AppSidebarProps extends React.ComponentProps<typeof Sidebar> {
   onSpaceSettingsClick?: () => void;
   onInviteMembersClick?: () => void;
   spaceSelectorReadonly?: boolean;
+  spaceSelectorExtraMenuItems?: React.ReactNode;
   isLoadingSpaces?: boolean;
   /**
    * App branding configuration displayed when no spaces are available
@@ -104,6 +105,7 @@ export function AppSidebar({
   onSpaceSettingsClick,
   onInviteMembersClick,
   spaceSelectorReadonly,
+  spaceSelectorExtraMenuItems,
   isLoadingSpaces,
   branding,
   appLogo,
@@ -179,6 +181,7 @@ export function AppSidebar({
             readonly={spaceSelectorReadonly}
             labels={spaceSelectorLabels}
             appLogo={appLogo}
+            extraMenuItems={spaceSelectorExtraMenuItems}
           />
         ) : null}
       </SidebarHeader>

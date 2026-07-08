@@ -52,6 +52,7 @@ describe("Node CR temp refs — oRPC integration", () => {
 
   it("creates a folder and nests new nodes under it via parentNodeRef in one CR", async () => {
     const cr = await client.nodes.createChangeRequest({
+      autoMerge: true,
       message: "Set up the Growth workspace",
       operations: [
         { kind: "create", ref: "growth", nodeType: "folder", slug: "growth", name: "Growth" },
@@ -91,6 +92,7 @@ describe("Node CR temp refs — oRPC integration", () => {
     expect(orphan).toBeDefined();
 
     const cr = await client.nodes.createChangeRequest({
+      autoMerge: true,
       message: "File the orphan note under Archive",
       operations: [
         { kind: "create", ref: "archive", nodeType: "folder", slug: "archive", name: "Archive" },

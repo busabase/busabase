@@ -65,9 +65,9 @@ The merge already materializes a base node via `mergeNodeCreate` + the base mate
 
 The single decision function. Rules (MVP):
 
-- **Structural op kinds** (`node_create`/`node_rename`/`node_move`/`node_delete`/`node_restore`, base-field convenience, `asset_delete`, `node_purge`): **auto-merge** when the actor has a write role in the space (owner/admin/member-with-write). No human review.
+- **Structural op kinds** (`node_create`/`node_rename`/`node_move`/`node_delete`/`node_restore`, base-field convenience, `asset_delete`, `node_purge`): convenience endpoints may **auto-merge**, but explicit `nodes.createChangeRequest` defaults to review-first and requires `autoMerge:true` for immediate merge.
 - **Content op kinds** (`record_*`): **always** `requiresHumanReview = true` (unless the caller is explicitly self-approving per today's rules). Never auto-merge by policy.
-- A space MAY later opt structural ops into governance via a space-level policy; out of scope for MVP (default = structural auto-merges).
+- A space MAY later opt structural ops into governance via a space-level policy; out of scope for MVP. Explicit node Change Requests are already review-first by default.
 
 Auto-merge records a review row with reviewer = a **system actor** (e.g. `submittedBy` + `verdict:"approved", reason:"auto-merge: structural op"`) so the ledger is honest about *why* it merged without a human. This keeps "never approve your own *content* work" intact — it's scoped to structural ops and attributed.
 

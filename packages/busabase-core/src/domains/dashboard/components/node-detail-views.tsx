@@ -3,7 +3,7 @@ import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-quer
 import type { FileTreeNodeVO } from "busabase-contract/types";
 import { CodeBlock } from "kui/ai-elements/code-block";
 import { FileTree, FileTreeFile, FileTreeFolder } from "kui/ai-elements/file-tree";
-import { FileText, Folder, HardDrive, Sparkles, Table2, Trash2 } from "lucide-react";
+import { File, FileText, Folder, HardDrive, Sparkles, Table2, Trash2 } from "lucide-react";
 import { SPALink as Link } from "openlib/ui/dashboard";
 import {
   type ComponentProps,
@@ -17,6 +17,7 @@ import { toast } from "sonner";
 import { useLocation } from "wouter";
 import { fmt, useCoreI18n } from "../../../i18n";
 import { registerNodeDetail } from "../node-detail-registry";
+import { AssetMetadataBlock, assetKindIcon, formatAssetSize } from "./assets";
 import type { SkillCodeLanguage } from "./field-preview";
 import { ConfirmActionDialog, EmptyState } from "./primitives";
 import { NodeDetailSkeleton } from "./skeletons";
@@ -49,7 +50,9 @@ function NodeDeleteButton({
   const pending = createCr.isPending || reviewCr.isPending || mergeCr.isPending;
   const nodeTypeLabels: Record<string, string> = {
     doc: messages.nodeDetail.doc,
+    file: messages.nodeDetail.file,
     folder: messages.nodeDetail.folder,
+    drive: messages.nodeDetail.drive,
     skill: messages.nodeDetail.skill,
   };
   const label = nodeTypeLabels[nodeType] ?? `${nodeType[0]?.toUpperCase()}${nodeType.slice(1)}`;
@@ -142,15 +145,7 @@ export function buildFileTree(files: FileTreeNodeVO["files"]): SkillTreeNode[] {
     const segments = file.path.split("/");
     const name = segments[segments.length - 1] ?? file.path;
     const parentPath = segments.slice(0, -1).join("/");
-    if (file.type === "folder") {
-      if (!byPath.has(file.path)) {
-        const node: SkillTreeNode = { name, path: file.path, type: "folder", children: [] };
-        byPath.set(file.path, node);
-        ensureDir(parentPath).push(node);
-      }
-    } else {
-      ensureDir(parentPath).push({ name, path: file.path, type: "file", children: [] });
-    }
+    ensureDir(parentPath).push({ name, path: file.path, type: "file", children: [] });
   }
   const sortNodes = (nodes: SkillTreeNode[]) => {
     nodes.sort((a, b) =>
@@ -268,28 +263,15 @@ export function FileTreeDetailView({
   const tree = useMemo(() => buildFileTree(fileTree?.files ?? []), [fileTree?.files]);
   const expandedFolders = useMemo(() => new Set(collectFolderPaths(tree)), [tree]);
   const filePaths = useMemo(
-    () =>
-      new Set(
-        (fileTree?.files ?? []).filter((file) => file.type === "file").map((file) => file.path),
-      ),
+    () => new Set((fileTree?.files ?? []).map((file) => file.path)),
     [fileTree?.files],
   );
-  const binaryByteLength = useMemo(() => {
-    const value = fileQuery.data?.contentBase64;
-    if (!value) {
-      return 0;
-    }
-    const padding = value.endsWith("==") ? 2 : value.endsWith("=") ? 1 : 0;
-    return Math.max(0, (value.length / 4) * 3 - padding);
-  }, [fileQuery.data?.contentBase64]);
-
   useEffect(() => {
     if (!fileTree || openPath) {
       return;
     }
     const entryFile =
-      fileTree.files.find((file) => file.type === "file" && file.path === fileTree.entryFile) ??
-      fileTree.files.find((file) => file.type === "file");
+      fileTree.files.find((file) => file.path === fileTree.entryFile) ?? fileTree.files[0];
     if (entryFile) {
       setOpenPath(entryFile.path);
     }
@@ -309,7 +291,7 @@ export function FileTreeDetailView({
   );
 
   const startEditingFile = () => {
-    if (!fileQuery.data || fileQuery.data.encoding === "base64") {
+    if (!fileQuery.data || fileQuery.data.encoding !== "utf8") {
       return;
     }
     setDraft(fileQuery.data.content);
@@ -379,7 +361,7 @@ export function FileTreeDetailView({
     );
   }
 
-  const fileCount = fileTree.files.filter((file) => file.type === "file").length;
+  const fileCount = fileTree.files.length;
   const NodeIcon = nodeType === "drive" ? HardDrive : Sparkles;
   const nodeTypeLabel =
     nodeType === "drive" ? messages.nodeDetail.drive : messages.nodeDetail.skill;
@@ -476,7 +458,7 @@ export function FileTreeDetailView({
             {openPath &&
             fileQuery.data &&
             !fileQuery.isError &&
-            fileQuery.data.encoding !== "base64" ? (
+            fileQuery.data.encoding === "utf8" ? (
               isEditing ? (
                 <div className="flex shrink-0 flex-wrap items-center gap-2">
                   <button
@@ -537,19 +519,38 @@ export function FileTreeDetailView({
                   ? fileQuery.error.message
                   : messages.nodeDetail.couldNotReadFile}
               </div>
-            ) : fileQuery.data?.encoding === "base64" ? (
+            ) : fileQuery.data && fileQuery.data.encoding !== "utf8" ? (
               <div className="p-5 text-muted-foreground text-sm">
                 <p className="font-medium text-foreground">
-                  {messages.nodeDetail.binaryFilePreview}
+                  {messages.nodeDetail.assetFilePreview}
                 </p>
                 <dl className="mt-4 grid gap-2 font-mono text-xs">
                   <div className="flex gap-2">
-                    <dt className="w-16 shrink-0 text-muted-foreground">type</dt>
-                    <dd className="min-w-0 truncate">{fileQuery.data.mimeType}</dd>
+                    <dt className="w-16 shrink-0 text-muted-foreground">name</dt>
+                    <dd className="min-w-0 truncate">{fileQuery.data.displayName ?? openPath}</dd>
                   </div>
                   <div className="flex gap-2">
-                    <dt className="w-16 shrink-0 text-muted-foreground">bytes</dt>
-                    <dd>{binaryByteLength}</dd>
+                    <dt className="w-16 shrink-0 text-muted-foreground">asset</dt>
+                    <dd className="min-w-0 truncate">{fileQuery.data.assetId}</dd>
+                  </div>
+                  {fileQuery.data.assetUrl ? (
+                    <div className="flex gap-2">
+                      <dt className="w-16 shrink-0 text-muted-foreground">url</dt>
+                      <dd className="min-w-0 truncate">
+                        <a
+                          className="text-primary underline-offset-2 hover:underline"
+                          href={fileQuery.data.assetUrl}
+                          rel="noreferrer"
+                          target="_blank"
+                        >
+                          {fileQuery.data.assetUrl}
+                        </a>
+                      </dd>
+                    </div>
+                  ) : null}
+                  <div className="flex gap-2">
+                    <dt className="w-16 shrink-0 text-muted-foreground">type</dt>
+                    <dd className="min-w-0 truncate">{fileQuery.data.mimeType}</dd>
                   </div>
                   <div className="flex gap-2">
                     <dt className="w-16 shrink-0 text-muted-foreground">hash</dt>
@@ -618,6 +619,113 @@ export function DriveDetailView({ orpc, slug }: { orpc: BusabaseQueryUtils; slug
 
 registerNodeDetail("skill", SkillDetailView);
 registerNodeDetail("drive", DriveDetailView);
+
+export function FileNodeDetailView({
+  orpc,
+  slug,
+}: {
+  orpc: BusabaseQueryUtils;
+  slug: string | null;
+}) {
+  const messages = useCoreI18n();
+  const fileQuery = useQuery({
+    ...orpc.files.get.queryOptions({ input: { nodeId: slug ?? "" } }),
+    enabled: Boolean(slug),
+  });
+  const detail = fileQuery.data ?? null;
+
+  if (!detail) {
+    return fileQuery.isLoading ? (
+      <NodeDetailSkeleton variant="doc" />
+    ) : (
+      <EmptyState
+        title={messages.nodeDetail.fileNotFoundTitle}
+        body={
+          slug
+            ? fmt(messages.nodeDetail.fileNotFoundBody, { slug })
+            : messages.nodeDetail.selectFileNodeBody
+        }
+      />
+    );
+  }
+
+  const { node, asset } = detail;
+  const Icon = assetKindIcon(asset.mimeType);
+  const isImage = asset.mimeType.startsWith("image/");
+  const metaRows = [
+    { label: "file", value: asset.fileName },
+    { label: "type", value: asset.mimeType },
+    { label: "size", value: formatAssetSize(asset.size) },
+    { label: "asset", value: asset.id },
+    asset.contentHash ? { label: "hash", value: asset.contentHash } : null,
+  ].filter((row): row is { label: string; value: string } => Boolean(row));
+
+  return (
+    <div className="mx-auto flex w-full max-w-5xl flex-col gap-4 p-4 md:p-6">
+      <div className="flex flex-col gap-3 border-border/60 border-b pb-4 md:flex-row md:items-start md:justify-between">
+        <div className="min-w-0">
+          <div className="mb-2 flex items-center gap-2 text-muted-foreground text-xs uppercase">
+            <File className="size-4" />
+            {messages.nodeDetail.file}
+          </div>
+          <h1 className="truncate font-semibold text-2xl tracking-tight">{node.name}</h1>
+          {node.description ? (
+            <p className="mt-2 text-muted-foreground text-sm">{node.description}</p>
+          ) : null}
+        </div>
+        <NodeDeleteButton orpc={orpc} nodeId={node.id} nodeName={node.name} nodeType="file" />
+      </div>
+
+      <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_320px]">
+        <div className="grid min-h-[320px] place-items-center overflow-hidden rounded-md border bg-muted">
+          {isImage ? (
+            <img alt={asset.name} className="max-h-[65vh] w-full object-contain" src={asset.url} />
+          ) : (
+            <a
+              className="flex flex-col items-center gap-2 p-8 text-muted-foreground text-sm hover:text-foreground"
+              href={asset.url}
+              rel="noreferrer"
+              target="_blank"
+            >
+              <Icon className="size-12" />
+              {messages.assets.openFile}
+            </a>
+          )}
+        </div>
+
+        <aside className="rounded-md border bg-background p-4">
+          <h2 className="font-medium text-sm">{messages.nodeDetail.backingAsset}</h2>
+          <dl className="mt-3 grid gap-2 font-mono text-xs">
+            {metaRows.map((row) => (
+              <div className="flex gap-2" key={row.label}>
+                <dt className="w-14 shrink-0 text-muted-foreground">{row.label}</dt>
+                <dd className="min-w-0 truncate" title={row.value}>
+                  {row.value}
+                </dd>
+              </div>
+            ))}
+            <div className="flex gap-2">
+              <dt className="w-14 shrink-0 text-muted-foreground">url</dt>
+              <dd className="min-w-0 truncate">
+                <a
+                  className="text-primary underline-offset-2 hover:underline"
+                  href={asset.url}
+                  rel="noreferrer"
+                  target="_blank"
+                >
+                  {asset.url}
+                </a>
+              </dd>
+            </div>
+          </dl>
+          <AssetMetadataBlock compact metadata={asset.metadata} />
+        </aside>
+      </div>
+    </div>
+  );
+}
+
+registerNodeDetail("file", FileNodeDetailView);
 
 export function DocDetailView({ orpc, slug }: { orpc: BusabaseQueryUtils; slug: string | null }) {
   const messages = useCoreI18n();
@@ -872,6 +980,7 @@ const FOLDER_CHILD_ICONS: Record<string, typeof Folder> = {
   folder: Folder,
   base: Table2,
   doc: FileText,
+  file: File,
   skill: Sparkles,
   drive: HardDrive,
 };

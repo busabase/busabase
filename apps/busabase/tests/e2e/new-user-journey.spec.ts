@@ -29,13 +29,18 @@ test.use({
 });
 
 test("a new user tours the approval-first knowledge base", async ({ page }) => {
-  await test.step("lands on the dashboard — Inbox, Activity, and Content bases", async () => {
+  await test.step("lands on the dashboard — focused review nav and title menu", async () => {
     await page.goto("/");
     await expect(page).toHaveURL(/\/dashboard\/inbox/);
     await expect(page.getByRole("link", { exact: true, name: "Inbox" })).toBeVisible();
     await expect(page.getByRole("link", { exact: true, name: "Activity" })).toBeVisible();
-    await expect(page.getByRole("link", { exact: true, name: "Assets" })).toBeVisible();
+    await expect(page.getByRole("link", { exact: true, name: "Assets" })).toHaveCount(0);
     await expect(page.getByRole("link", { exact: true, name: "Content" })).toBeVisible();
+    await page.getByRole("button", { name: /Busabase/ }).click();
+    await expect(page.getByRole("menuitem", { name: "Archive" })).toBeVisible();
+    await expect(page.getByRole("menuitem", { name: "Assets" })).toBeVisible();
+    await expect(page.getByRole("menuitem", { name: "Graph View" })).toBeVisible();
+    await page.keyboard.press("Escape");
   });
 
   await test.step("browses the Blog Posts base and its saved views", async () => {

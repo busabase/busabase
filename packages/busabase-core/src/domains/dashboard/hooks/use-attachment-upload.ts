@@ -9,13 +9,13 @@ import { useCallback } from "react";
  */
 export function useAttachmentUpload(client: BusabaseDashboardApiClient) {
   return useCallback(
-    async (file: File): Promise<AssetAttachmentRef> => {
+    async (file: File, context = "record-field"): Promise<AssetAttachmentRef> => {
       const mimeType = file.type || "application/octet-stream";
       const requested = await client.createAssetUploadUrl({
         fileName: file.name,
         mimeType,
         sizeBytes: file.size,
-        context: "record-field",
+        context,
       });
       if (requested.duplicate && requested.attachmentId) {
         return {
@@ -51,7 +51,7 @@ export function useAttachmentUpload(client: BusabaseDashboardApiClient) {
         fileName: file.name,
         mimeType,
         sizeBytes: file.size,
-        context: "record-field",
+        context,
       });
       return {
         id: confirmed.assetId ?? confirmed.attachmentId,

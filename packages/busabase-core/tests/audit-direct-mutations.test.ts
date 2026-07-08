@@ -89,13 +89,19 @@ describe("audit trail for direct mutations", () => {
     const folderBySlug = async (slug: string) =>
       (await client.folders.list()).find((f) => f.node.slug === slug);
 
-    // Structural node CRs auto-merge — no manual review/merge needed.
+    // Explicit auto-merge keeps this audit setup compact.
     await client.nodes.createChangeRequest({
+      autoMerge: true,
       operations: [{ kind: "create", nodeType: "folder", slug: "audit-purge", name: "Purge" }],
     });
-    const folderId = (await folderBySlug("audit-purge"))!.node.id;
+    const folder = await folderBySlug("audit-purge");
+    if (!folder) {
+      throw new Error("Expected audit-purge folder to exist");
+    }
+    const folderId = folder.node.id;
     // Archive it (delete), then permanently purge.
     await client.nodes.createChangeRequest({
+      autoMerge: true,
       operations: [{ kind: "delete", nodeId: folderId }],
     });
     await client.nodes.purge({ nodeId: folderId });

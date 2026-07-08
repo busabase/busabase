@@ -5,12 +5,17 @@ import {
   createFileTreeChangeRequestInputSchema,
   createFileTreeInputSchema,
 } from "busabase-contract/domains/filetree/contract";
-import type { FileTreeNodeVO } from "busabase-contract/types";
+import type { FileTreeFileVO, FileTreeNodeVO } from "busabase-contract/types";
 import { and, asc, eq, isNull } from "drizzle-orm";
+import { confirmUpload, requestUploadUrl } from "open-domains/attachments/logic";
+import { storage } from "openlib/storage";
 import type { z } from "zod";
 import { getContextSpaceId, resolveActorId } from "../../context";
 import { getDb } from "../../db";
 import {
+  attachments,
+  busabaseAssets,
+  busabaseAssetUsages,
   busabaseChangeRequests,
   busabaseCommits,
   busabaseNodes,
@@ -22,8 +27,8 @@ import {
 } from "../../db/schema";
 import { CURRENT_USER_ID, hashBuffer, id, now, rootNodeIdForSpace } from "../../logic/kernel";
 import type { MaterializeArgs } from "../../logic/materialize";
+import { ensureReady } from "../../logic/seed";
 import {
-  ensureReady,
   getChangeRequest,
   insertAuditEvent,
   loadNodesByIds,
@@ -32,16 +37,16 @@ import {
   toNodeVO,
 } from "../../logic/store";
 import {
-  deleteTextFile,
+  contentKindForMimeType,
+  createAsset,
+  replaceAssetUsageRows,
+  resolveAssetFile,
+} from "../assets/handlers";
+import type { AssetUsageOwnerType } from "../assets/schema/assets";
+import {
   getFileTreeNode as getStorageFileTreeNode,
-  listStorageFiles,
   mimeTypeForPath,
   normalizeFilePath,
-  readFile,
-  resolveStoragePrefix,
-  storagePrefix,
-  writeFile,
-  writeTextFile,
 } from "./logic/storage";
 
 export interface FileTreeSeedInput {
@@ -57,10 +62,18 @@ export interface FileTreeSeedFile {
 }
 
 export interface FileTreeKindConfig {
-  type: string;
+  type: "drive" | "skill";
   label: string;
   entryFile: string;
   seedFiles: (input: FileTreeSeedInput) => FileTreeSeedFile[];
+}
+
+interface StoredFileInput {
+  path: string;
+  content?: string;
+  assetId?: string;
+  displayName?: string;
+  mimeType?: string;
 }
 
 const labelLower = (config: FileTreeKindConfig) => config.label.toLowerCase();
@@ -77,79 +90,262 @@ const operationKindForInput = (
   return `${type}_file_${kind}` as (typeof busabaseOperationKindEnum.enumValues)[number];
 };
 
-const TEXT_FILE_EXTENSIONS = new Set([
-  "c",
-  "conf",
-  "cpp",
-  "cts",
-  "bash",
-  "css",
-  "csv",
-  "env",
-  "go",
-  "graphql",
-  "html",
-  "ini",
-  "java",
-  "js",
-  "json",
-  "jsx",
-  "log",
-  "md",
-  "mdx",
-  "mts",
-  "py",
-  "rb",
-  "rs",
-  "sh",
-  "sql",
-  "srt",
-  "toml",
-  "ts",
-  "tsx",
-  "txt",
-  "xml",
-  "yaml",
-  "yml",
-]);
-
-const extensionForPath = (filePath: string) => filePath.split(".").pop()?.toLowerCase() ?? "";
-
-const shouldReadAsText = (filePath: string, _content: Buffer) => {
-  const ext = extensionForPath(filePath);
-  if (TEXT_FILE_EXTENSIONS.has(ext)) {
-    return true;
-  }
-  return false;
+const usageOwnerType = (configOrType: FileTreeKindConfig | string): AssetUsageOwnerType => {
+  const type = typeof configOrType === "string" ? configOrType : configOrType.type;
+  return type === "skill" ? "skill" : "drive";
 };
 
-const decodeBase64Content = (contentBase64: string) => {
-  const normalized = contentBase64.trim();
-  if (!/^[A-Za-z0-9+/]*={0,2}$/.test(normalized) || normalized.length % 4 !== 0) {
-    throw new ORPCError("BAD_REQUEST", { message: "Invalid base64 file content" });
+const normalizeUsagePath = (filePath: string) => normalizeFilePath(filePath);
+
+const displayNameForPath = (path: string) => path.split("/").at(-1) || path;
+
+const createAttachmentFromBuffer = async (
+  path: string,
+  bytes: Buffer,
+  mimeType: string,
+  tx: Awaited<ReturnType<typeof getDb>>,
+) => {
+  const contentHash = hashBuffer(bytes);
+  const fileName = displayNameForPath(path);
+  const requested = await requestUploadUrl(
+    {
+      fileName,
+      mimeType,
+      sizeBytes: bytes.length,
+      contentHash,
+      context: "file-tree",
+      spaceId: getContextSpaceId(),
+    },
+    resolveActorId("local"),
+    tx,
+    attachments,
+  );
+  if (!requested.duplicate) {
+    await storage.uploadFileToKey(bytes, requested.storageKey, mimeType);
   }
-  return Buffer.from(normalized, "base64");
+  const confirmed = requested.attachmentId
+    ? {
+        attachmentId: requested.attachmentId,
+        storageKey: requested.storageKey,
+        publicUrl: requested.publicUrl,
+        success: true,
+      }
+    : await confirmUpload(
+        {
+          storageKey: requested.storageKey,
+          fileName,
+          mimeType,
+          sizeBytes: bytes.length,
+          contentHash,
+          context: "file-tree",
+          spaceId: getContextSpaceId(),
+        },
+        resolveActorId("local"),
+        tx,
+        attachments,
+      );
+  return confirmed.attachmentId;
 };
 
-const fileContentFromInput = (input: {
-  content?: string;
-  contentBase64?: string;
-  mimeType?: string;
-}) => {
-  if (input.contentBase64 !== undefined) {
-    return {
-      content: decodeBase64Content(input.contentBase64),
-      contentBase64: input.contentBase64.trim(),
-      encoding: "base64" as const,
-      mimeType: input.mimeType,
-    };
+const findMountedAsset = async (
+  node: NodePO,
+  path: string,
+  tx: Awaited<ReturnType<typeof getDb>>,
+) => {
+  const [row] = await tx
+    .select({
+      usageId: busabaseAssetUsages.id,
+      assetId: busabaseAssetUsages.assetId,
+      attachmentId: busabaseAssets.attachmentId,
+    })
+    .from(busabaseAssetUsages)
+    .innerJoin(busabaseAssets, eq(busabaseAssetUsages.assetId, busabaseAssets.id))
+    .where(
+      and(
+        eq(busabaseAssetUsages.spaceId, getContextSpaceId()),
+        eq(busabaseAssetUsages.ownerType, usageOwnerType(node.type)),
+        eq(busabaseAssetUsages.nodeId, node.id),
+        eq(busabaseAssetUsages.path, path),
+      ),
+    )
+    .limit(1);
+  return row ?? null;
+};
+
+const mountAssetAtPath = async (
+  node: NodePO,
+  path: string,
+  assetId: string,
+  metadata: Record<string, unknown>,
+  tx: Awaited<ReturnType<typeof getDb>>,
+) => {
+  await replaceAssetUsageRows(
+    {
+      ownerType: usageOwnerType(node.type),
+      nodeId: node.id,
+      path,
+    },
+    [
+      {
+        ownerType: usageOwnerType(node.type),
+        nodeId: node.id,
+        path,
+        assetId,
+        metadata,
+      },
+    ],
+    tx,
+  );
+};
+
+const upsertFileAssetAtPath = async (
+  node: NodePO,
+  input: StoredFileInput,
+  tx: Awaited<ReturnType<typeof getDb>>,
+) => {
+  const path = normalizeUsagePath(input.path);
+  const existing = await findMountedAsset(node, path, tx);
+
+  if (input.assetId) {
+    const incoming = await resolveAssetFile(input.assetId, tx);
+    if (existing) {
+      await tx
+        .update(busabaseAssets)
+        .set({
+          attachmentId: incoming.attachmentId,
+          name: input.displayName ?? incoming.fileName,
+          contentKind: contentKindForMimeType(input.mimeType ?? incoming.mimeType),
+          metadata: incoming.metadata ?? {},
+        })
+        .where(eq(busabaseAssets.id, existing.assetId));
+      await mountAssetAtPath(
+        node,
+        path,
+        existing.assetId,
+        { displayName: input.displayName ?? incoming.fileName },
+        tx,
+      );
+      return existing.assetId;
+    }
+    await mountAssetAtPath(
+      node,
+      path,
+      incoming.id,
+      { displayName: input.displayName ?? incoming.fileName },
+      tx,
+    );
+    return incoming.id;
   }
-  return {
-    content: Buffer.from(input.content ?? "", "utf8"),
-    contentBase64: null,
-    encoding: "utf8" as const,
-    mimeType: input.mimeType,
-  };
+
+  const content = input.content ?? "";
+  const mimeType = input.mimeType ?? mimeTypeForPath(path);
+  const bytes = Buffer.from(content, "utf8");
+  const attachmentId = await createAttachmentFromBuffer(path, bytes, mimeType, tx);
+  if (existing) {
+    await tx
+      .update(busabaseAssets)
+      .set({
+        attachmentId,
+        name: input.displayName ?? displayNameForPath(path),
+        contentKind: "text",
+        metadata: {},
+      })
+      .where(eq(busabaseAssets.id, existing.assetId));
+    await mountAssetAtPath(
+      node,
+      path,
+      existing.assetId,
+      { displayName: input.displayName ?? displayNameForPath(path) },
+      tx,
+    );
+    return existing.assetId;
+  }
+
+  const assetId = await createAsset(
+    attachmentId,
+    input.displayName ?? displayNameForPath(path),
+    {
+      contentKind: "text",
+      metadata: {},
+    },
+    tx,
+  );
+  await mountAssetAtPath(
+    node,
+    path,
+    assetId,
+    { displayName: input.displayName ?? displayNameForPath(path) },
+    tx,
+  );
+  return assetId;
+};
+
+export const writeFileTreeTextFile = async (
+  node: NodePO,
+  filePath: string,
+  content: string,
+  tx?: Awaited<ReturnType<typeof getDb>>,
+) => {
+  const db = tx ?? (await getDb());
+  await upsertFileAssetAtPath(node, { path: filePath, content }, db);
+};
+
+const deleteFileAssetAtPath = async (
+  node: NodePO,
+  path: string,
+  tx: Awaited<ReturnType<typeof getDb>>,
+) => {
+  await replaceAssetUsageRows(
+    {
+      ownerType: usageOwnerType(node.type),
+      nodeId: node.id,
+      path: normalizeUsagePath(path),
+    },
+    [],
+    tx,
+  );
+};
+
+const listAssetUsageFiles = async (node: NodePO): Promise<FileTreeFileVO[]> => {
+  const db = await getDb();
+  const rows = await db
+    .select({
+      path: busabaseAssetUsages.path,
+      metadata: busabaseAssetUsages.metadata,
+      updatedAt: busabaseAssetUsages.updatedAt,
+      assetId: busabaseAssets.id,
+      assetName: busabaseAssets.name,
+      contentKind: busabaseAssets.contentKind,
+      fileName: attachments.fileName,
+      mimeType: attachments.mimeType,
+      sizeBytes: attachments.sizeBytes,
+    })
+    .from(busabaseAssetUsages)
+    .innerJoin(busabaseAssets, eq(busabaseAssetUsages.assetId, busabaseAssets.id))
+    .innerJoin(attachments, eq(busabaseAssets.attachmentId, attachments.id))
+    .where(
+      and(
+        eq(busabaseAssetUsages.spaceId, getContextSpaceId()),
+        eq(busabaseAssetUsages.ownerType, usageOwnerType(node.type)),
+        eq(busabaseAssetUsages.nodeId, node.id),
+      ),
+    )
+    .orderBy(asc(busabaseAssetUsages.path));
+
+  return rows
+    .filter((row) => row.path)
+    .map((row) => ({
+      path: row.path,
+      name: row.path.split("/").at(-1) ?? row.path,
+      size: row.sizeBytes,
+      updatedAt: row.updatedAt.toISOString(),
+      mimeType: row.mimeType,
+      assetId: row.assetId,
+      displayName:
+        typeof row.metadata.displayName === "string"
+          ? row.metadata.displayName
+          : row.assetName || row.fileName,
+    }));
 };
 
 export const createFileTreeNode = async (
@@ -184,7 +380,6 @@ export const createFileTreeNode = async (
     name: parsed.name,
     description: parsed.description,
     metadata: {
-      storagePrefix: storagePrefix(nodeId),
       entryFile: config.entryFile,
       visibility: parsed.visibility,
       version: parsed.version,
@@ -199,25 +394,21 @@ export const createFileTreeNode = async (
     throw new Error(`Failed to create ${labelLower(config)} node`);
   }
 
-  const inputPaths = new Set(parsed.files.map((file) => normalizeFilePath(file.path)));
+  const inputPaths = new Set(parsed.files.map((file) => normalizeUsagePath(file.path)));
   for (const seedFile of config.seedFiles({
     slug: parsed.slug,
     name: parsed.name,
     description: parsed.description,
     version: parsed.version,
   })) {
-    if (!inputPaths.has(normalizeFilePath(seedFile.path))) {
-      await writeTextFile(node, seedFile.path, seedFile.content);
+    if (!inputPaths.has(normalizeUsagePath(seedFile.path))) {
+      await upsertFileAssetAtPath(node, seedFile, db);
     }
   }
   for (const file of parsed.files) {
-    const fileContent = fileContentFromInput(file);
-    await writeFile(node, file.path, fileContent.content, fileContent.mimeType);
+    await upsertFileAssetAtPath(node, file, db);
   }
 
-  // Record the create as an auto-merged structural ChangeRequest (audit +
-  // history + rollback), matching folder/base/doc creation and replacing the
-  // old bespoke file-tree created audit events.
   await recordMergedNodeCreate({
     nodeId,
     nodeType: config.type,
@@ -242,10 +433,9 @@ export const getFileTreeNode = async (
   }
   const nodeMap = await loadNodesByIds([node.id]);
   const nodeVO = nodeMap.get(node.id) ?? toNodeVO(node, null);
-  const files = await listStorageFiles(node);
+  const files = await listAssetUsageFiles(node);
   return {
     node: nodeVO,
-    storagePrefix: resolveStoragePrefix(node),
     entryFile: node.metadata.entryFile || config.entryFile,
     visibility: node.metadata.visibility || "private",
     version: node.metadata.version || "0.1.0",
@@ -270,7 +460,7 @@ export const listFileTreeFiles = async (config: FileTreeKindConfig, nodeIdOrSlug
   if (!node) {
     throw new Error(`${config.label} not found: ${nodeIdOrSlug}`);
   }
-  return listStorageFiles(node);
+  return listAssetUsageFiles(node);
 };
 
 export const readFileTreeFile = async (
@@ -279,21 +469,54 @@ export const readFileTreeFile = async (
   filePath: string,
 ) => {
   await ensureReady();
+  const db = await getDb();
   const node = await getStorageFileTreeNode(config.type, nodeIdOrSlug);
   if (!node) {
     throw new Error(`${config.label} not found: ${nodeIdOrSlug}`);
   }
-  const path = normalizeFilePath(filePath);
-  const bytes = await readFile(node, path);
-  const readAsText = shouldReadAsText(path, bytes);
+  const path = normalizeUsagePath(filePath);
+  const [row] = await db
+    .select({
+      assetId: busabaseAssets.id,
+      assetName: busabaseAssets.name,
+      contentKind: busabaseAssets.contentKind,
+      usageMetadata: busabaseAssetUsages.metadata,
+      storageKey: attachments.storageKey,
+      fileName: attachments.fileName,
+      mimeType: attachments.mimeType,
+      contentHash: attachments.contentHash,
+    })
+    .from(busabaseAssetUsages)
+    .innerJoin(busabaseAssets, eq(busabaseAssetUsages.assetId, busabaseAssets.id))
+    .innerJoin(attachments, eq(busabaseAssets.attachmentId, attachments.id))
+    .where(
+      and(
+        eq(busabaseAssetUsages.spaceId, getContextSpaceId()),
+        eq(busabaseAssetUsages.ownerType, usageOwnerType(config)),
+        eq(busabaseAssetUsages.nodeId, node.id),
+        eq(busabaseAssetUsages.path, path),
+      ),
+    )
+    .limit(1);
+  if (!row) {
+    throw new Error(`${config.label} file not found: ${path}`);
+  }
+
+  const isText = row.contentKind === "text";
+  const content = isText ? (await storage.getObject(row.storageKey)).toString("utf8") : "";
   return {
     nodeId: node.id,
     path,
-    encoding: readAsText ? ("utf8" as const) : ("base64" as const),
-    content: readAsText ? bytes.toString("utf8") : "",
-    contentBase64: bytes.toString("base64"),
-    mimeType: mimeTypeForPath(path),
-    contentHash: hashBuffer(bytes),
+    encoding: isText ? ("utf8" as const) : ("url" as const),
+    content,
+    mimeType: row.mimeType,
+    assetId: row.assetId,
+    displayName:
+      typeof row.usageMetadata.displayName === "string"
+        ? row.usageMetadata.displayName
+        : row.assetName || row.fileName,
+    assetUrl: storage.getPublicUrl(row.storageKey),
+    contentHash: row.contentHash ?? (isText ? hashBuffer(Buffer.from(content, "utf8")) : ""),
   };
 };
 
@@ -334,7 +557,7 @@ export const createFileTreeChangeRequest = async (
     const commitId = id("cmt");
     const operationKind = operationKindForInput(config.type, operation.kind);
     const filePath =
-      operation.kind === "metadata_update" ? null : normalizeFilePath(operation.path);
+      operation.kind === "metadata_update" ? null : normalizeUsagePath(operation.path);
     let fields: Record<string, unknown>;
     if (operation.kind === "metadata_update") {
       fields = { metadata: operation.metadata };
@@ -343,19 +566,27 @@ export const createFileTreeChangeRequest = async (
         filePath,
         baseContentHash: operation.baseContentHash ?? null,
         nextContent: null,
-        nextContentBase64: null,
         encoding: null,
         mimeType: null,
       };
-    } else {
-      const fileContent = fileContentFromInput(operation);
+    } else if ("assetId" in operation) {
+      const asset = await resolveAssetFile(operation.assetId);
       fields = {
         filePath,
         baseContentHash: operation.baseContentHash ?? null,
-        nextContent: fileContent.encoding === "utf8" ? operation.content : null,
-        nextContentBase64: fileContent.encoding === "base64" ? fileContent.contentBase64 : null,
-        encoding: fileContent.encoding,
-        mimeType: fileContent.mimeType ?? null,
+        nextContent: null,
+        encoding: "asset",
+        mimeType: operation.mimeType ?? asset.mimeType,
+        assetId: asset.id,
+        displayName: operation.displayName ?? asset.fileName,
+      };
+    } else {
+      fields = {
+        filePath,
+        baseContentHash: operation.baseContentHash ?? null,
+        nextContent: operation.content,
+        encoding: "utf8",
+        mimeType: operation.mimeType ?? mimeTypeForPath(filePath ?? ""),
       };
     }
 
@@ -412,6 +643,29 @@ export const createFileTreeChangeRequest = async (
   return changeRequest;
 };
 
+const readCurrentContentHash = async (
+  node: NodePO,
+  filePath: string,
+  tx: Awaited<ReturnType<typeof getDb>>,
+) => {
+  const [row] = await tx
+    .select({ contentHash: attachments.contentHash, storageKey: attachments.storageKey })
+    .from(busabaseAssetUsages)
+    .innerJoin(busabaseAssets, eq(busabaseAssetUsages.assetId, busabaseAssets.id))
+    .innerJoin(attachments, eq(busabaseAssets.attachmentId, attachments.id))
+    .where(
+      and(
+        eq(busabaseAssetUsages.spaceId, getContextSpaceId()),
+        eq(busabaseAssetUsages.ownerType, usageOwnerType(node.type)),
+        eq(busabaseAssetUsages.nodeId, node.id),
+        eq(busabaseAssetUsages.path, normalizeUsagePath(filePath)),
+      ),
+    )
+    .limit(1);
+  if (!row) return null;
+  return row.contentHash ?? hashBuffer(await storage.getObject(row.storageKey));
+};
+
 export const mergeFileTreeFile = async (
   _ctx: MergeCtx,
   item: OperationPO,
@@ -428,28 +682,46 @@ export const mergeFileTreeFile = async (
     baseContentHash?: string | null;
     nextContent?: string | null;
     nextContentBase64?: string | null;
-    encoding?: "utf8" | "base64" | null;
+    encoding?: "utf8" | "asset" | "base64" | null;
     mimeType?: string | null;
+    assetId?: string | null;
+    displayName?: string | null;
   };
   if (fields.baseContentHash) {
-    const currentContent = await readFile(node, item.filePath).catch(() => Buffer.alloc(0));
-    if (hashBuffer(currentContent) !== fields.baseContentHash) {
+    const currentHash = await readCurrentContentHash(node, item.filePath, _ctx.db);
+    if (currentHash !== fields.baseContentHash) {
       throw new ORPCError("CONFLICT", {
         message: `${labelForType(type)} file changed before merge: ${item.filePath}`,
       });
     }
   }
   if (action === "delete") {
-    await deleteTextFile(node, item.filePath);
-  } else if (fields.encoding === "base64" && fields.nextContentBase64 !== null) {
-    await writeFile(
+    await deleteFileAssetAtPath(node, item.filePath, _ctx.db);
+  } else if (fields.encoding === "base64" || fields.nextContentBase64 != null) {
+    throw new ORPCError("BAD_REQUEST", {
+      message: `${labelForType(type)} legacy direct binary file commits are no longer supported. Upload binary files as Assets and merge an asset operation.`,
+    });
+  } else if (fields.encoding === "asset" && fields.assetId) {
+    await upsertFileAssetAtPath(
       node,
-      item.filePath,
-      decodeBase64Content(fields.nextContentBase64 ?? ""),
-      fields.mimeType ?? undefined,
+      {
+        path: item.filePath,
+        assetId: fields.assetId,
+        displayName: fields.displayName ?? undefined,
+        mimeType: fields.mimeType ?? undefined,
+      },
+      _ctx.db,
     );
   } else {
-    await writeTextFile(node, item.filePath, fields.nextContent ?? "");
+    await upsertFileAssetAtPath(
+      node,
+      {
+        path: item.filePath,
+        content: fields.nextContent ?? "",
+        mimeType: fields.mimeType ?? undefined,
+      },
+      _ctx.db,
+    );
   }
 };
 
@@ -498,7 +770,6 @@ export const makeMaterializer =
       name,
       description,
       metadata: {
-        storagePrefix: storagePrefix(nodeId),
         entryFile: config.entryFile,
         visibility: "private" as const,
         version,
@@ -515,7 +786,7 @@ export const makeMaterializer =
       .limit(1);
     if (node) {
       for (const file of config.seedFiles({ slug, name, description, version })) {
-        await writeTextFile(node, file.path, file.content);
+        await upsertFileAssetAtPath(node, file, db);
       }
     }
     return nodeId;

@@ -3,7 +3,7 @@
     "name": "Busabase",
     "slug": "busabase-mobile",
     "scheme": "busabase",
-    "version": "0.1.0",
+    "version": "0.9.2",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "automatic",

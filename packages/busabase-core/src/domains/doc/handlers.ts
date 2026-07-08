@@ -24,8 +24,8 @@ import {
 // so it owns no DB tables — its body lives in object storage.
 import { CURRENT_USER_ID, id, now, rootNodeIdForSpace } from "../../logic/kernel";
 import { type MaterializeArgs, registerMaterializer } from "../../logic/materialize";
+import { ensureReady } from "../../logic/seed";
 import {
-  ensureReady,
   getChangeRequest,
   insertAuditEvent,
   loadNodesByIds,

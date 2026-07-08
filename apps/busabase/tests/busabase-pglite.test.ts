@@ -52,9 +52,7 @@ describe("busabase pglite integration flow", () => {
     expect(seededSkill.files.map((file) => file.path)).toEqual(
       expect.arrayContaining([
         "SKILL.md",
-        "examples",
         "examples/review-comment.md",
-        "references",
         "references/source-policy.md",
         "skill.json",
       ]),

@@ -38,7 +38,7 @@ export type ChangeRequestStatus =
 export type OperationStatus = "pending" | "merged" | "archived" | "failed";
 export type ChangeRequestTargetType = "base" | "node";
 export type ReviewVerdict = "approved" | "rejected";
-export type SearchResultKind = "record" | "change_request" | "base";
+export type SearchResultKind = "record" | "change_request" | "base" | "file";
 export type CommentSubjectType = "record" | "change_request" | "operation" | "commit";
 export type AuditAction =
   | "record.viewed"
@@ -53,9 +53,11 @@ export type AuditAction =
   | "field.created"
   | "doc.created"
   | "doc.updated"
+  | "file.created"
   | "skill.created"
   | "drive.created"
   | "asset.deleted"
+  | "asset.metadata_updated"
   | "node.purged";
 
 export interface UserRefVO {
@@ -74,10 +76,10 @@ export interface NodeVO {
   name: string;
   description: string;
   metadata: {
-    storagePrefix?: string;
     entryFile?: string;
     visibility?: "private" | "workspace" | "public";
     version?: string;
+    assetId?: string;
   };
   position: number;
   createdAt: string;
@@ -174,7 +176,9 @@ export interface ChangeRequestVO {
   reviews: ReviewVO[];
 }
 
+export type { AssetDetailVO, AssetUsageVO, AssetVO } from "../domains/assets/types";
 export type { DriveFileVO, DriveReadFileVO, DriveVO } from "../domains/drive/types";
+export type { FileNodeMetadata, FileNodeVO } from "../domains/file-node/types";
 export type { FileTreeFileVO, FileTreeNodeVO, FileTreeReadFileVO } from "../domains/filetree/types";
 // Skill-domain VOs live in the skill domain; re-exported here for the public barrel.
 export type { SkillFileVO, SkillReadFileVO, SkillVO } from "../domains/skill/types";

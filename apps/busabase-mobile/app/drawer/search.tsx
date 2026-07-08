@@ -1,6 +1,6 @@
 import type { SearchResultVO } from "busabase-contract/types";
 import { useRouter } from "expo-router";
-import { FileText, GitPullRequest, Search, Table2 } from "lucide-react-native";
+import { File, FileText, GitPullRequest, Search, Table2 } from "lucide-react-native";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { StyleSheet, Text, View } from "react-native";
 import { useBusabaseOrpc } from "~/api/use-busabase-orpc";
@@ -15,6 +15,7 @@ const kindMeta: Record<SearchResultVO["kind"], { label: string; icon: typeof Fil
   record: { label: "Record", icon: FileText },
   change_request: { label: "Change request", icon: GitPullRequest },
   base: { label: "Base", icon: Table2 },
+  file: { label: "File", icon: File },
 };
 
 const DEBOUNCE_MS = 220;
@@ -68,10 +69,22 @@ function SearchContent() {
         router.push({ pathname: "/records/[id]", params: { id: result.id } });
       } else if (result.kind === "change_request") {
         router.push({ pathname: "/change-requests/[id]", params: { id: result.id } });
-      } else {
+      } else if (result.kind === "base") {
         // Base results carry a web href like "/base/{slug}"; derive the slug.
         const slug = result.href.split("/").filter(Boolean).pop() ?? result.id;
         router.push({ pathname: "/base/[slug]", params: { slug } });
+      } else {
+        const parts = result.href.split("/").filter(Boolean);
+        const [kind, id] = parts;
+        if (kind === "drive" && id) {
+          router.push({ pathname: "/drive/[nodeId]", params: { nodeId: id } });
+        } else if (kind === "skill" && id) {
+          router.push({ pathname: "/skill/[nodeId]", params: { nodeId: id } });
+        } else if (kind === "assets" && id) {
+          router.push({ pathname: "/assets/[id]", params: { id } });
+        } else {
+          router.push("/drawer/assets");
+        }
       }
     },
     [router],
@@ -80,13 +93,13 @@ function SearchContent() {
   const hasQuery = query.trim().length > 0;
 
   return (
-    <DrawerScaffold title="Search" subtitle="Records, change requests, and Bases">
+    <DrawerScaffold title="Search" subtitle="Records, change requests, Bases, and files">
       <View style={styles.searchBox}>
         <TextInput
           label="Search"
           value={query}
           autoFocus
-          placeholder="Search records, change requests, Bases"
+          placeholder="Search records, change requests, Bases, files"
           returnKeyType="search"
           onChangeText={setQuery}
         />
@@ -102,7 +115,7 @@ function SearchContent() {
         {searching ? (
           <NativeRow
             title="Searching"
-            subtitle="Looking across records, change requests, and Bases."
+            subtitle="Looking across records, change requests, Bases, and files."
             leading={<Search size={18} color={tokens.mutedForeground} />}
             last
           />
@@ -118,7 +131,7 @@ function SearchContent() {
         {!hasQuery ? (
           <NativeRow
             title="Search Busabase"
-            subtitle="Find records, change requests, and Bases across the connected server."
+            subtitle="Find records, change requests, Bases, and files across the connected server."
             leading={<Search size={18} color={tokens.mutedForeground} />}
             last
           />

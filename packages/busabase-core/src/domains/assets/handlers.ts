@@ -15,13 +15,20 @@ import { db, getDb } from "../../db";
 import { attachments, busabaseBaseFields, busabaseBases, busabaseNodes } from "../../db/schema";
 import { insertAuditEvent } from "../../logic/audit";
 import { id } from "../../logic/kernel";
-import { ensureReady } from "../../logic/store";
-import { busabaseAssets, busabaseAssetUsages } from "./schema/assets";
+import { ensureReady } from "../../logic/seed";
+import {
+  type AssetContentKind,
+  type AssetUsageOwnerType,
+  busabaseAssets,
+  busabaseAssetUsages,
+} from "./schema/assets";
 
 interface AssetRow {
   id: string;
   attachmentId: string;
   name: string;
+  contentKind: AssetContentKind;
+  metadata: Record<string, unknown>;
   createdAt: Date;
   storageKey: string;
   fileName: string;
@@ -30,10 +37,42 @@ interface AssetRow {
   contentHash: string | null;
 }
 
+interface UpdateAssetMetadataInput {
+  assetId: string;
+  metadata: Record<string, unknown>;
+  mode?: "merge" | "replace";
+}
+
+export const contentKindForMimeType = (mimeType: string): AssetContentKind =>
+  mimeType.startsWith("text/") ||
+  mimeType.includes("json") ||
+  mimeType.includes("xml") ||
+  mimeType.includes("yaml") ||
+  mimeType.includes("javascript") ||
+  mimeType.includes("typescript")
+    ? "text"
+    : "binary";
+
+export interface ResolvedAssetFile {
+  id: string;
+  attachmentId: string;
+  name: string;
+  contentKind: AssetContentKind;
+  metadata: Record<string, unknown>;
+  fileName: string;
+  mimeType: string;
+  size: number;
+  url: string;
+  storageKey: string;
+  contentHash: string | null;
+}
+
 const toAssetVO = (row: AssetRow, usageCount: number): AssetVO => ({
   id: row.id,
   attachmentId: row.attachmentId,
   name: row.name,
+  contentKind: row.contentKind,
+  metadata: row.metadata ?? {},
   fileName: row.fileName,
   mimeType: row.mimeType,
   size: row.sizeBytes,
@@ -47,6 +86,8 @@ const assetRowColumns = {
   id: busabaseAssets.id,
   attachmentId: busabaseAssets.attachmentId,
   name: busabaseAssets.name,
+  contentKind: busabaseAssets.contentKind,
+  metadata: busabaseAssets.metadata,
   createdAt: busabaseAssets.createdAt,
   storageKey: attachments.storageKey,
   fileName: attachments.fileName,
@@ -69,10 +110,37 @@ const assetUploadError = (action: string, error: unknown) => {
   });
 };
 
+export const createAsset = async (
+  attachmentId: string,
+  name: string,
+  options?: {
+    contentKind?: AssetContentKind;
+    metadata?: Record<string, unknown>;
+    createdBy?: string;
+  },
+  tx?: Awaited<ReturnType<typeof getDb>>,
+): Promise<string> => {
+  const db = tx ?? (await getDb());
+  const assetId = id("ast");
+  const [inserted] = await db
+    .insert(busabaseAssets)
+    .values({
+      id: assetId,
+      attachmentId,
+      name,
+      contentKind: options?.contentKind ?? "binary",
+      metadata: options?.metadata ?? {},
+      createdBy: options?.createdBy ?? resolveActorId("local-producer"),
+    })
+    .returning();
+  if (!inserted) throw new Error("Failed to create asset");
+  return inserted.id;
+};
+
 /**
- * Get-or-create the library entry for a (deduped) attachment in the current
- * space. Idempotent: a deduped re-upload resolves to the same `attachmentId`
- * and therefore the same asset. Called after an attachment upload is confirmed.
+ * Compatibility helper for old inline attachment references that carry only an
+ * `attachmentId`. New file flows should call `createAsset` so each logical file
+ * gets its own stable identity even when Attachment bytes are deduped.
  */
 export const ensureAsset = async (
   attachmentId: string,
@@ -81,24 +149,12 @@ export const ensureAsset = async (
 ): Promise<string> => {
   const db = tx ?? (await getDb());
   const spaceId = getContextSpaceId();
-  // Insert-first: the common "new asset" path is a single query. `returning` is
-  // empty only when the (space, attachment) unique index conflicts — i.e. the asset
-  // already exists (deduped re-upload / re-referenced file) — so we read it then.
-  const assetId = id("ast");
-  const [inserted] = await db
-    .insert(busabaseAssets)
-    .values({ id: assetId, attachmentId, name, createdBy: resolveActorId("local-producer") })
-    .onConflictDoNothing()
-    .returning();
-  if (inserted) {
-    return inserted.id;
-  }
   const [existing] = await db
     .select({ id: busabaseAssets.id })
     .from(busabaseAssets)
     .where(and(eq(busabaseAssets.spaceId, spaceId), eq(busabaseAssets.attachmentId, attachmentId)))
     .limit(1);
-  return existing?.id ?? assetId;
+  return existing?.id ?? createAsset(attachmentId, name, undefined, db);
 };
 
 export const requestAssetUploadUrl = async (input: RequestUploadUrlDTO) => {
@@ -110,7 +166,9 @@ export const requestAssetUploadUrl = async (input: RequestUploadUrlDTO) => {
       attachments,
     );
     if (result.duplicate && result.attachmentId) {
-      const assetId = await ensureAsset(result.attachmentId, input.fileName);
+      const assetId = await createAsset(result.attachmentId, input.fileName, {
+        contentKind: contentKindForMimeType(input.mimeType),
+      });
       return { ...result, assetId };
     }
     return result;
@@ -127,9 +185,15 @@ export const confirmAssetUpload = async (input: ConfirmUploadDTO) => {
       db,
       attachments,
     );
-    // Surface every uploaded (deduped) file in the Asset library. Idempotent:
-    // a deduped re-upload maps back to the same attachment → same asset.
-    const assetId = await ensureAsset(result.attachmentId, input.fileName);
+    // Surface every uploaded file as a logical Asset. Attachment rows/objects may
+    // dedupe by content hash, but Asset identity is not deduped.
+    const assetId = await createAsset(result.attachmentId, input.fileName, {
+      contentKind: contentKindForMimeType(input.mimeType),
+      metadata:
+        input.metadata && typeof input.metadata === "object" && !Array.isArray(input.metadata)
+          ? (input.metadata as Record<string, unknown>)
+          : {},
+    });
     return { ...result, assetId };
   } catch (error) {
     throw assetUploadError("confirm asset upload", error);
@@ -178,9 +242,12 @@ export const getAsset = async (assetId: string): Promise<AssetDetailVO> => {
 
   const usageRows = await db
     .select({
+      ownerType: busabaseAssetUsages.ownerType,
       nodeId: busabaseAssetUsages.nodeId,
+      path: busabaseAssetUsages.path,
       recordId: busabaseAssetUsages.recordId,
       fieldSlug: busabaseAssetUsages.fieldSlug,
+      blockId: busabaseAssetUsages.blockId,
       createdAt: busabaseAssetUsages.createdAt,
       nodeName: busabaseNodes.name,
       nodeType: busabaseNodes.type,
@@ -192,16 +259,79 @@ export const getAsset = async (assetId: string): Promise<AssetDetailVO> => {
     .orderBy(desc(busabaseAssetUsages.createdAt));
 
   const usages: AssetUsageVO[] = usageRows.map((u) => ({
+    ownerType: u.ownerType,
     nodeId: u.nodeId,
     nodeName: u.nodeName,
     nodeType: u.nodeType,
     nodeSlug: u.nodeSlug,
+    path: u.path === "" ? null : u.path,
     recordId: u.recordId === "" ? null : u.recordId,
     fieldSlug: u.fieldSlug === "" ? null : u.fieldSlug,
+    blockId: u.blockId === "" ? null : u.blockId,
     createdAt: u.createdAt.toISOString(),
   }));
 
   return { asset: toAssetVO(row, usages.length), usages };
+};
+
+export const resolveAssetFile = async (
+  assetId: string,
+  tx?: Awaited<ReturnType<typeof getDb>>,
+): Promise<ResolvedAssetFile> => {
+  await ensureReady();
+  const db = tx ?? (await getDb());
+  const spaceId = getContextSpaceId();
+
+  const [row] = await db
+    .select(assetRowColumns)
+    .from(busabaseAssets)
+    .innerJoin(attachments, eq(busabaseAssets.attachmentId, attachments.id))
+    .where(and(eq(busabaseAssets.id, assetId), eq(busabaseAssets.spaceId, spaceId)))
+    .limit(1);
+  if (!row) {
+    throw new Error(`Asset not found: ${assetId}`);
+  }
+
+  return {
+    id: row.id,
+    attachmentId: row.attachmentId,
+    name: row.name,
+    contentKind: row.contentKind,
+    metadata: row.metadata ?? {},
+    fileName: row.fileName,
+    mimeType: row.mimeType,
+    size: row.sizeBytes,
+    url: storage.getPublicUrl(row.storageKey),
+    storageKey: row.storageKey,
+    contentHash: row.contentHash,
+  };
+};
+
+export const updateAssetMetadata = async (
+  input: UpdateAssetMetadataInput,
+): Promise<AssetDetailVO> => {
+  await ensureReady();
+  const db = await getDb();
+  const spaceId = getContextSpaceId();
+  const [asset] = await db
+    .select({ id: busabaseAssets.id, metadata: busabaseAssets.metadata })
+    .from(busabaseAssets)
+    .where(and(eq(busabaseAssets.id, input.assetId), eq(busabaseAssets.spaceId, spaceId)))
+    .limit(1);
+  if (!asset) {
+    throw new Error(`Asset not found: ${input.assetId}`);
+  }
+  const nextMetadata =
+    input.mode === "replace" ? input.metadata : { ...(asset.metadata ?? {}), ...input.metadata };
+  await db
+    .update(busabaseAssets)
+    .set({ metadata: nextMetadata })
+    .where(eq(busabaseAssets.id, input.assetId));
+  await insertAuditEvent(db, {
+    action: "asset.metadata_updated",
+    metadata: { assetId: input.assetId, mode: input.mode },
+  });
+  return getAsset(input.assetId);
 };
 
 /**
@@ -251,6 +381,65 @@ interface AttachmentFieldRef {
   id?: unknown;
   fileName?: unknown;
 }
+
+export interface AssetUsageInput {
+  assetId: string;
+  ownerType: AssetUsageOwnerType;
+  nodeId: string;
+  path?: string;
+  recordId?: string;
+  fieldSlug?: string;
+  blockId?: string;
+  metadata?: Record<string, unknown>;
+}
+
+export const replaceAssetUsageRows = async (
+  where: {
+    ownerType: AssetUsageOwnerType;
+    nodeId: string;
+    path?: string;
+    recordId?: string;
+    fieldSlug?: string;
+    blockId?: string;
+  },
+  rows: AssetUsageInput[],
+  tx?: Awaited<ReturnType<typeof getDb>>,
+): Promise<void> => {
+  const db = tx ?? (await getDb());
+  const conditions = [
+    eq(busabaseAssetUsages.spaceId, getContextSpaceId()),
+    eq(busabaseAssetUsages.ownerType, where.ownerType),
+    eq(busabaseAssetUsages.nodeId, where.nodeId),
+  ];
+  if (where.path !== undefined) conditions.push(eq(busabaseAssetUsages.path, where.path));
+  if (where.recordId !== undefined) {
+    conditions.push(eq(busabaseAssetUsages.recordId, where.recordId));
+  }
+  if (where.fieldSlug !== undefined) {
+    conditions.push(eq(busabaseAssetUsages.fieldSlug, where.fieldSlug));
+  }
+  if (where.blockId !== undefined) conditions.push(eq(busabaseAssetUsages.blockId, where.blockId));
+
+  await db.delete(busabaseAssetUsages).where(and(...conditions));
+  if (rows.length > 0) {
+    await db
+      .insert(busabaseAssetUsages)
+      .values(
+        rows.map((row) => ({
+          id: id("aus"),
+          assetId: row.assetId,
+          ownerType: row.ownerType,
+          nodeId: row.nodeId,
+          path: row.path ?? "",
+          recordId: row.recordId ?? "",
+          fieldSlug: row.fieldSlug ?? "",
+          blockId: row.blockId ?? "",
+          metadata: row.metadata ?? {},
+        })),
+      )
+      .onConflictDoNothing();
+  }
+};
 
 const isAssetId = (value: unknown): value is string =>
   typeof value === "string" && value.startsWith("ast");
@@ -342,8 +531,12 @@ export const syncRecordAssetUsages = async (
     id: string;
     assetId: string;
     nodeId: string;
+    ownerType: AssetUsageOwnerType;
+    path?: string;
     recordId: string;
     fieldSlug: string;
+    blockId?: string;
+    metadata?: Record<string, unknown>;
   }[] = [];
   for (const [fieldSlug, value] of Object.entries(fields)) {
     if (!attachmentSlugs.has(fieldSlug)) {
@@ -352,7 +545,14 @@ export const syncRecordAssetUsages = async (
     for (const ref of extractAttachmentRefs(value)) {
       const assetId = await resolveAssetRef(ref, db);
       if (assetId) {
-        rows.push({ id: id("aus"), assetId, nodeId: base.nodeId, recordId, fieldSlug });
+        rows.push({
+          id: id("aus"),
+          assetId,
+          ownerType: "base",
+          nodeId: base.nodeId,
+          recordId,
+          fieldSlug,
+        });
       }
     }
   }
@@ -418,14 +618,18 @@ export const syncDocAssetUsages = async (
   const rows: {
     id: string;
     assetId: string;
+    ownerType: AssetUsageOwnerType;
     nodeId: string;
     recordId: string;
     fieldSlug: string;
+    blockId?: string;
+    path?: string;
+    metadata?: Record<string, unknown>;
   }[] = [];
   for (const att of candidates) {
     if (att.storageKey && body.includes(att.storageKey)) {
       const assetId = await ensureAsset(att.id, att.fileName, tx);
-      rows.push({ id: id("aus"), assetId, nodeId, recordId: "", fieldSlug: "" });
+      rows.push({ id: id("aus"), assetId, ownerType: "doc", nodeId, recordId: "", fieldSlug: "" });
     }
   }
 
@@ -435,6 +639,7 @@ export const syncDocAssetUsages = async (
     .where(
       and(
         eq(busabaseAssetUsages.nodeId, nodeId),
+        eq(busabaseAssetUsages.ownerType, "doc"),
         eq(busabaseAssetUsages.recordId, ""),
         eq(busabaseAssetUsages.fieldSlug, ""),
       ),

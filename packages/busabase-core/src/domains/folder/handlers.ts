@@ -7,7 +7,8 @@ import { getDb } from "../../db";
 import { busabaseNodes, type NodePO } from "../../db/schema";
 import { id } from "../../logic/kernel";
 import { type MaterializeArgs, registerMaterializer } from "../../logic/materialize";
-import { ensureReady, loadNodesByIds, type MergeCtx, toNodeVO } from "../../logic/store";
+import { ensureReady } from "../../logic/seed";
+import { loadNodesByIds, type MergeCtx, toNodeVO } from "../../logic/store";
 
 const getFolderNode = async (nodeIdOrSlug: string) => {
   const db = await getDb();

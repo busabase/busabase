@@ -31,6 +31,16 @@ export async function getBusabaseOpenApiSpec() {
         description:
           "Workspace tree endpoints for folders, Bases, files, agents, and future node types.",
       },
+      {
+        name: "Files",
+        description:
+          "First-class File nodes backed by Assets and created through Node Change Requests.",
+      },
+      {
+        name: "Assets",
+        description:
+          "Logical Busabase files backed by deduped Attachments, including AI-readable metadata and where-used references.",
+      },
       { name: "ChangeRequests", description: "Human review workflow for proposed changes." },
       {
         name: "Records",

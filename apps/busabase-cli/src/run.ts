@@ -19,14 +19,14 @@ import {
 } from "commander";
 import { banner } from "./banner.js";
 import { loadDotEnvFile } from "./config-file.js";
-import { render } from "./format.js";
+import { type OutputFormat, render } from "./format.js";
 import { maybeAutoRefresh, runLogin, runLogout, runRefresh } from "./login.js";
 
 /**
  * CLI config = the SDK's resolved client config plus the terminal-only `output`
  * mode. `output` never reaches the client factory; it drives {@link render}.
  */
-type ResolvedConfig = BusabaseConfig & { output: "table" | "json" };
+type ResolvedConfig = BusabaseConfig & { output: OutputFormat };
 
 /** Public docs page covering every error below, for both Cloud and local. Linked from each error. */
 const DOCS_TROUBLESHOOTING = "https://busabase.com/docs/troubleshooting";
@@ -39,6 +39,10 @@ type FieldType = NonNullable<
 type BaseFieldInput = NonNullable<
   Parameters<BusabaseClient["bases"]["create"]>[0]["fields"]
 >[number];
+type NodeCreateOperation = Extract<
+  Parameters<BusabaseClient["nodes"]["createChangeRequest"]>[0]["operations"][number],
+  { kind: "create" }
+>;
 
 /**
  * Precedence: explicit flag > exported env var > ~/.busabase/.env file > default. Reading the
@@ -59,7 +63,7 @@ function resolveConfig(opts: OptionValues): ResolvedConfig {
       (opts.spaceId as string | undefined) ??
       process.env.BUSABASE_SPACE_ID ??
       file.BUSABASE_SPACE_ID,
-    output: (opts.output as "table" | "json" | undefined) ?? "table",
+    output: (opts.output as OutputFormat | undefined) ?? "text",
   };
 }
 
@@ -80,7 +84,11 @@ function addGlobalFlags(cmd: Command): Command {
     .option("--api-key <token>", "bearer token for cloud hosts (env BUSABASE_API_KEY)")
     .option("--space-id <id>", "target Busabase space (env BUSABASE_SPACE_ID)")
     .addOption(
-      new Option("--output <fmt>", "table | json (default table)").choices(["table", "json"]),
+      new Option("--output <fmt>", "text | table | json (default text)").choices([
+        "text",
+        "table",
+        "json",
+      ]),
     );
 }
 
@@ -183,6 +191,14 @@ function parseFieldDefinitions(opts: OptionValues): BaseFieldInput[] {
     throw new Error("Pass at least one --field or provide --fields-json @fields.json.");
   }
   return parseFieldSpecs(specs);
+}
+
+function parseFileNodeMetadata(opts: OptionValues): NodeCreateOperation["metadata"] {
+  const assetId = opts.assetId as string | undefined;
+  if (!assetId) {
+    throw new Error("--asset-id is required with --type file.");
+  }
+  return { assetId };
 }
 
 function parseJsonValue(raw: string, flagName: string): unknown {
@@ -609,13 +625,16 @@ function buildProgram(state: CliState = {}): Command {
     .addHelpText(
       "after",
       `
-Run interactively, login asks where your Busabase is and writes the connection to
-~/.busabase/.env:
-  1. Personal Desktop / local server — no login
-  2. Busabase Cloud — browser sign-in (OAuth)
+Busabase is an approval-first database and knowledge base for AI agents: agents
+propose changes, humans review and merge what becomes trusted data.
+
+Run interactively, login explains the connection choices and writes the selected
+Busabase instance to ~/.busabase/.env:
+  1. Local/Desktop on this computer — no account, no login
+  2. Busabase Cloud — browser sign-in (recommended)
   3. Busabase Cloud — paste an API key
-  4. Self-hosted — browser sign-in (OAuth)
-  5. Self-hosted — paste an API key
+  4. Self-hosted Busabase — browser sign-in
+  5. Self-hosted Busabase — paste an API key
 The flags below skip the menu (handy for scripts / CI):
 
   busabase-cli login                                   # pick from the menu
@@ -657,8 +676,8 @@ The flags below skip the menu (handy for scripts / CI):
   addGlobalFlags(nodes.command("create-change-request"))
     .description("Propose a new node via a Change Request")
     .addOption(
-      new Option("--type <folder|base|skill|drive|doc>", "node type")
-        .choices(["folder", "base", "skill", "drive", "doc"])
+      new Option("--type <folder|base|skill|drive|file|doc>", "node type")
+        .choices(["folder", "base", "skill", "drive", "file", "doc"])
         .makeOptionMandatory(),
     )
     .requiredOption("--slug <slug>", "node slug")
@@ -669,13 +688,15 @@ The flags below skip the menu (handy for scripts / CI):
     .option("--submitted-by <name>", "producer label")
     .option("--field <slug:name:type...>", "base field, repeatable (for --type base)")
     .option("--fields-json <json|@file>", "base fields as JSON array (for --type base)")
+    .option("--asset-id <id>", "backing Asset id (required for --type file)")
     .addHelpText(
       "after",
       `
 Examples:
   busabase-cli nodes create-change-request --type folder --slug cms --name "内容管理 CMS"
   busabase-cli nodes create-change-request --type base --slug blog --name "博客文章 Blog Posts" --field title:Title:text --field body:Body:markdown
-  busabase-cli nodes create-change-request --type base --slug products --name "产品目录 Products" --fields-json @fields.json`,
+  busabase-cli nodes create-change-request --type base --slug products --name "产品目录 Products" --fields-json @fields.json
+  busabase-cli nodes create-change-request --type file --slug board-plan --name "Board Plan" --asset-id ast_123`,
     )
     .action(
       runAction(state, (client, opts) => {
@@ -683,6 +704,9 @@ Examples:
         const name = opts.name as string;
         if (nodeType !== "base" && (opts.field || opts.fieldsJson)) {
           throw new Error("--field and --fields-json are only valid with --type base.");
+        }
+        if (nodeType !== "file" && opts.assetId) {
+          throw new Error("--asset-id is only valid with --type file.");
         }
         return client.nodes.createChangeRequest({
           message: (opts.message as string | undefined) ?? `Create ${nodeType} ${name}`,
@@ -696,6 +720,7 @@ Examples:
               description: opts.description as string | undefined,
               parentNodeId: opts.parentNodeId as string | undefined,
               ...(nodeType === "base" ? { fields: parseFieldDefinitions(opts) } : {}),
+              ...(nodeType === "file" ? { metadata: parseFileNodeMetadata(opts) } : {}),
             },
           ],
         });

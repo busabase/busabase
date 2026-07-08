@@ -101,7 +101,9 @@ export const createBaseInputSchema = z.object({
 const nodeOperationInputSchema = z.discriminatedUnion("kind", [
   z.object({
     kind: z.literal("create"),
+    ref: z.string().min(1).optional(),
     parentNodeId: z.string().optional(),
+    parentNodeRef: z.string().min(1).optional(),
     nodeType: z.enum(CREATABLE_NODE_TYPES),
     slug: z
       .string()
@@ -141,9 +143,14 @@ const nodeOperationInputSchema = z.discriminatedUnion("kind", [
     nodeId: z.string(),
   }),
   z.object({
+    kind: z.literal("restore"),
+    nodeId: z.string(),
+  }),
+  z.object({
     kind: z.literal("move"),
     nodeId: z.string(),
-    parentNodeId: z.string(),
+    parentNodeId: z.string().optional(),
+    parentNodeRef: z.string().min(1).optional(),
     position: z.number().int().optional(),
   }),
 ]);

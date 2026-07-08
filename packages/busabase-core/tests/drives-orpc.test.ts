@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -13,12 +12,6 @@ type DrivesClient = ReturnType<
 
 const MIGRATIONS_CWD = path.resolve(__dirname, "../../../apps/busabase");
 const API = "http://busabase.test/api/v1";
-const imageBytes = Buffer.from([
-  0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,
-]);
-const imageBase64 = imageBytes.toString("base64");
-const imageHash = `sha256:${createHash("sha256").update(imageBytes).digest("hex")}`;
-
 describe("Drive API — oRPC integration", () => {
   let dataDir = "";
   let storageDir = "";
@@ -54,6 +47,23 @@ describe("Drive API — oRPC integration", () => {
     return client.changeRequests.merge({ changeRequestId });
   };
 
+  const createAsset = async (input: {
+    fileName: string;
+    mimeType: string;
+    sizeBytes: number;
+    contentHash: string;
+  }) => {
+    const request = await client.assets.createUploadUrl(input);
+    const confirmed = await client.assets.confirm({
+      storageKey: request.storageKey,
+      ...input,
+    });
+    return {
+      ...(await client.assets.get({ assetId: confirmed.assetId as string })).asset,
+      assetId: confirmed.assetId as string,
+    };
+  };
+
   it("creates a Drive and merges file updates with hash protection", async () => {
     const drive = await client.drives.create({
       slug: "team-drive",
@@ -62,7 +72,7 @@ describe("Drive API — oRPC integration", () => {
     });
     expect(drive.node.type).toBe("drive");
     expect(drive.files.map((file) => file.path)).toEqual(
-      expect.arrayContaining(["README.md", "notes", "notes/today.md"]),
+      expect.arrayContaining(["README.md", "notes/today.md"]),
     );
 
     const current = await client.drives.readFile({
@@ -87,8 +97,17 @@ describe("Drive API — oRPC integration", () => {
     ).resolves.toMatchObject({ content: "today\nupdated\n" });
   });
 
-  it("uploads and reads arbitrary files through the Drive RPC change-request flow", async () => {
-    const drive = await client.drives.create({ slug: "binary-drive", name: "Binary Drive" });
+  it("uploads and reads arbitrary Drive files as asset refs through the RPC change-request flow", async () => {
+    const asset = await createAsset({
+      fileName: "logo.png",
+      mimeType: "image/png",
+      sizeBytes: 512,
+      contentHash: `sha256:${"a".repeat(64)}`,
+    });
+    const drive = await client.drives.create({
+      slug: "asset-file-drive",
+      name: "Asset File Drive",
+    });
     const createCr = await client.drives.createChangeRequest({
       nodeId: drive.node.id,
       message: "Add product image",
@@ -96,7 +115,8 @@ describe("Drive API — oRPC integration", () => {
         {
           kind: "create",
           path: "media/logo.png",
-          contentBase64: imageBase64,
+          assetId: asset.assetId,
+          displayName: "Product Logo",
           mimeType: "image/png",
         },
       ],
@@ -110,16 +130,15 @@ describe("Drive API — oRPC integration", () => {
       filePath: "media/logo.png",
     });
     expect(file).toMatchObject({
-      encoding: "base64",
+      encoding: "url",
       content: "",
-      contentBase64: imageBase64,
       mimeType: "image/png",
-      contentHash: imageHash,
+      assetId: asset.assetId,
+      displayName: "Product Logo",
     });
-    expect(Buffer.from(file.contentBase64, "base64")).toEqual(imageBytes);
   });
 
-  it("uploads and reads arbitrary files through the public Drive OpenAPI route", async () => {
+  it("uploads and reads arbitrary Drive files as asset refs through the public OpenAPI route", async () => {
     const handler = new OpenAPIHandler(busabaseRouter);
     const call = async (method: string, routePath: string, body?: unknown) => {
       const request = new Request(`${API}${routePath}`, {
@@ -143,17 +162,37 @@ describe("Drive API — oRPC integration", () => {
       return result.body;
     };
 
-    const drive = await ok("POST", "/drives", {
-      slug: "openapi-binary-drive",
-      name: "OpenAPI Binary Drive",
+    const asset = await createAsset({
+      fileName: "export.bin",
+      mimeType: "application/octet-stream",
+      sizeBytes: 256,
+      contentHash: `sha256:${"b".repeat(64)}`,
     });
+    const drive = await ok("POST", "/drives", {
+      slug: "openapi-asset-file-drive",
+      name: "OpenAPI Asset File Drive",
+    });
+    const legacyUpload = await call("POST", `/drives/${drive.node.id}/change-requests`, {
+      message: "Legacy direct binary upload",
+      operations: [
+        {
+          kind: "create",
+          path: "rest/legacy.bin",
+          contentBase64: "AA==",
+          mimeType: "application/octet-stream",
+        },
+      ],
+    });
+    expect(legacyUpload.status).toBeGreaterThanOrEqual(400);
+
     const changeRequest = await ok("POST", `/drives/${drive.node.id}/change-requests`, {
       message: "Add REST archive",
       operations: [
         {
           kind: "create",
           path: "rest/export.bin",
-          contentBase64: imageBase64,
+          assetId: asset.assetId,
+          displayName: "REST Export",
           mimeType: "application/octet-stream",
         },
       ],
@@ -162,9 +201,141 @@ describe("Drive API — oRPC integration", () => {
     await ok("POST", `/change-requests/${changeRequest.id}/merge`);
 
     const file = await ok("GET", `/drives/${drive.node.id}/files/rest/export.bin`);
-    expect(file.encoding).toBe("base64");
-    expect(file.contentBase64).toBe(imageBase64);
-    expect(file.contentHash).toBe(imageHash);
+    expect(file.encoding).toBe("url");
+    expect(file.assetId).toBe(asset.assetId);
+    expect(file.displayName).toBe("REST Export");
+  });
+
+  it("stores Drive files as Assets with searchable AI-readable metadata", async () => {
+    const asset = await createAsset({
+      fileName: "wealth-guide.pdf",
+      mimeType: "application/pdf",
+      sizeBytes: 2048,
+      contentHash: `sha256:${"c".repeat(64)}`,
+    });
+    const drive = await client.drives.create({
+      slug: "asset-backed-drive",
+      name: "Asset Backed Drive",
+    });
+    const createCr = await client.drives.createChangeRequest({
+      nodeId: drive.node.id,
+      message: "Add customer PDF",
+      operations: [
+        {
+          kind: "create",
+          path: "materials/wealth-guide.pdf",
+          assetId: asset.assetId,
+          displayName: "Wealth Guide PDF",
+          mimeType: "application/pdf",
+        },
+      ],
+    });
+    await approveAndMerge(createCr.id);
+    await client.assets.updateMetadata({
+      assetId: asset.assetId,
+      metadata: {
+        summary: "ACME Wealth Guide brochure",
+        extractedText: "insurer: ACME\nproduct: Wealth Guide\nfileType: brochure\n",
+        tags: ["brochure", "insurance"],
+        schema: "asset-meta/v1",
+      },
+    });
+
+    const files = await client.drives.listFiles({ nodeId: drive.node.id });
+    expect(files.find((file) => file.path.startsWith(".busabase/"))).toBeUndefined();
+    expect(files.find((file) => file.path === "materials/wealth-guide.pdf")).toMatchObject({
+      mimeType: "application/pdf",
+      assetId: asset.assetId,
+      displayName: "Wealth Guide PDF",
+    });
+    expect(files.find((file) => file.path.endsWith(".meta"))).toBeUndefined();
+
+    const file = await client.drives.readFile({
+      nodeId: drive.node.id,
+      filePath: "materials/wealth-guide.pdf",
+    });
+    expect(file).toMatchObject({
+      encoding: "url",
+      content: "",
+      mimeType: "application/pdf",
+      assetId: asset.assetId,
+      displayName: "Wealth Guide PDF",
+      assetUrl: asset.url,
+    });
+
+    const assetDetail = await client.assets.get({ assetId: asset.assetId });
+    expect(assetDetail.asset.metadata).toMatchObject({
+      summary: "ACME Wealth Guide brochure",
+      schema: "asset-meta/v1",
+    });
+    expect(assetDetail.usages).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          nodeSlug: "asset-backed-drive",
+          nodeType: "drive",
+          ownerType: "drive",
+          path: "materials/wealth-guide.pdf",
+        }),
+      ]),
+    );
+
+    const byDisplayName = await client.search({ query: "Wealth Guide", limit: 10 });
+    expect(byDisplayName.results).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: "file",
+          title: "Wealth Guide PDF",
+          href: "/drive/asset-backed-drive",
+        }),
+      ]),
+    );
+
+    const byMetaBody = await client.search({ query: "brochure", limit: 10 });
+    expect(byMetaBody.results).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: "file",
+          title: "Wealth Guide PDF",
+          href: "/drive/asset-backed-drive",
+        }),
+      ]),
+    );
+  });
+
+  it("creates a Drive with an initial Asset-backed file", async () => {
+    const asset = await createAsset({
+      fileName: "initial-deck.pdf",
+      mimeType: "application/pdf",
+      sizeBytes: 1024,
+      contentHash: `sha256:${"d".repeat(64)}`,
+    });
+    const drive = await client.drives.create({
+      slug: "initial-asset-backed-drive",
+      name: "Initial Asset Backed Drive",
+      files: [
+        {
+          path: "deck.pdf",
+          assetId: asset.assetId,
+          displayName: "Initial Deck",
+        },
+      ],
+    });
+
+    expect(drive.files.find((file) => file.path === "deck.pdf")).toMatchObject({
+      assetId: asset.assetId,
+      displayName: "Initial Deck",
+      mimeType: "application/pdf",
+    });
+    const assetDetail = await client.assets.get({ assetId: asset.assetId });
+    expect(assetDetail.usages).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          nodeSlug: "initial-asset-backed-drive",
+          ownerType: "drive",
+          path: "deck.pdf",
+        }),
+      ]),
+    );
   });
 
   it("returns CONFLICT for stale Drive file merges", async () => {

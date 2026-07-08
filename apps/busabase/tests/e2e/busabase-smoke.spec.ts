@@ -16,9 +16,17 @@ test("REST OPTIONS advertises node change-request methods", async ({ request }, 
 
 test("dashboard routes render the review-first seeded experience", async ({ page }) => {
   await page.goto("/dashboard");
-  await expect(page.getByRole("link", { name: /Busabase.*Approval-first KB/ })).toBeVisible();
+  await expect(page.getByRole("button", { name: /Busabase.*Approval-first KB/ })).toBeVisible();
   await expect(page.getByRole("link", { name: "Inbox" })).toBeVisible();
   await expect(page.getByRole("link", { name: "Activity" })).toBeVisible();
+  await expect(page.getByRole("link", { exact: true, name: "Assets" })).toHaveCount(0);
+  await page.getByRole("button", { name: /Busabase.*Approval-first KB/ }).click();
+  await expect(page.getByRole("menuitem", { name: "Archive" })).toBeVisible();
+  await expect(page.getByRole("menuitem", { name: "Assets" })).toBeVisible();
+  await expect(page.getByRole("menuitem", { name: "Graph View" })).toBeVisible();
+  await page.getByRole("menuitem", { name: "Assets" }).click();
+  await expect(page).toHaveURL(/\/dashboard\/assets$/);
+  await page.goto("/dashboard");
   await expect(page.getByRole("link", { exact: true, name: "Content" })).toBeVisible();
   await page.getByRole("button", { exact: true, name: "Toggle" }).click();
   await expect(page.getByRole("link", { exact: true, name: "Blog Posts" })).toBeVisible();

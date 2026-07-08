@@ -308,12 +308,21 @@ interface LoginTarget {
  */
 async function chooseTarget(): Promise<LoginTarget> {
   const cloud = normalizeBaseUrl(DEFAULT_BASE_URL);
-  say("Where is your Busabase?");
-  say("  1. Personal Desktop / local server — no login");
-  say("  2. Busabase Cloud — browser sign-in (OAuth)");
+  say("Busabase is an approval-first database and knowledge base for AI agents.");
+  say("Agents propose changes; humans review and merge what becomes trusted data.");
+  say("This login connects the CLI to the Busabase instance you want to use.");
+  say("");
+  say("How should this CLI connect?");
+  say("  1. Local/Desktop on this computer — no account, no login");
+  say("     Use when you run `busabase server` or the Busabase Desktop app locally.");
+  say("  2. Busabase Cloud — browser sign-in (recommended)");
+  say("     Best for humans: opens the browser and saves a refreshable CLI session.");
   say("  3. Busabase Cloud — paste an API key");
-  say("  4. Self-hosted — browser sign-in (OAuth)");
-  say("  5. Self-hosted — paste an API key");
+  say("     Best for CI, servers, or agents where a browser is not available.");
+  say("  4. Self-hosted Busabase — browser sign-in");
+  say("     Use your team's Busabase URL when it supports OAuth login.");
+  say("  5. Self-hosted Busabase — paste an API key");
+  say("     Use your team's Busabase URL with a long-lived key for automation.");
   const choice = await ask("Choose 1-5 [2]: ");
 
   const askSelfHostedUrl = async (): Promise<string> => {

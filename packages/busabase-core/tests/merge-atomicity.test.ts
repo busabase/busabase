@@ -68,13 +68,19 @@ describe("merge atomicity", () => {
         })
       ).id,
     );
-    const aId = (await folderBySlug("atom-a"))!.node.id;
-    const bId = (await folderBySlug("atom-b"))!.node.id;
+    const folderA = await folderBySlug("atom-a");
+    const folderB = await folderBySlug("atom-b");
+    if (!folderA || !folderB) {
+      throw new Error("Expected atom-a and atom-b folders to exist");
+    }
+    const aId = folderA.node.id;
+    const bId = folderB.node.id;
 
     // One CR: rename A (valid) THEN restore B (invalid — B is not archived → throws).
-    // Structural CRs auto-merge on create, so the atomic failure surfaces here.
+    // Explicit auto-merge makes the atomic failure surface on create.
     await expect(
       client.nodes.createChangeRequest({
+        autoMerge: true,
         operations: [
           { kind: "rename", nodeId: aId, name: "A Renamed" },
           { kind: "restore", nodeId: bId },
@@ -83,7 +89,7 @@ describe("merge atomicity", () => {
     ).rejects.toThrow();
 
     // The rename must have rolled back — A keeps its original name.
-    expect((await folderBySlug("atom-a"))!.node.name).toBe("A");
+    expect((await folderBySlug("atom-a"))?.node.name).toBe("A");
   });
 
   it("commits every op when a multi-op node CR fully succeeds", async () => {
@@ -94,11 +100,16 @@ describe("merge atomicity", () => {
         })
       ).id,
     );
-    const cId = (await folderBySlug("atom-c"))!.node.id;
+    const folderC = await folderBySlug("atom-c");
+    if (!folderC) {
+      throw new Error("Expected atom-c folder to exist");
+    }
+    const cId = folderC.node.id;
 
     // Two valid ops in one CR: rename C, then create a child folder under it.
-    // Auto-merges on create — both ops commit together.
+    // Explicit auto-merge commits both ops together.
     await client.nodes.createChangeRequest({
+      autoMerge: true,
       operations: [
         { kind: "rename", nodeId: cId, name: "C Renamed" },
         {
@@ -111,7 +122,7 @@ describe("merge atomicity", () => {
       ],
     });
 
-    expect((await folderBySlug("atom-c"))!.node.name).toBe("C Renamed");
+    expect((await folderBySlug("atom-c"))?.node.name).toBe("C Renamed");
     expect(await folderBySlug("atom-c-child")).toBeDefined();
   });
 });

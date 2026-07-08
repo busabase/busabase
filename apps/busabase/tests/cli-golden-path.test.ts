@@ -37,11 +37,10 @@ describe("busabase-cli golden path (skill commands, in-process)", () => {
     delete process.env.BUSABASE_SPACE_ID;
     process.env.HOME = homeDir;
 
-    const { busabaseRouter } = await import("busabase-core/router");
     const { seedScenario } = await import("busabase-core/logic/store");
     const { englishScenario } = await import("busabase-core/demo/dataset");
     await seedScenario(englishScenario);
-
+    const { busabaseRouter } = await import("busabase-core/router");
     const handler = new OpenAPIHandler(busabaseRouter);
     // Contract route paths already carry the `/api/v1` prefix, so the request the
     // SDK builds (`<base>/api/v1/...`) matches without a prefix option — exactly
@@ -151,7 +150,7 @@ describe("busabase-cli golden path (skill commands, in-process)", () => {
     expect(queue.length).toBeGreaterThan(0);
   });
 
-  it("creates an auto-merged folder node through the CLI", async () => {
+  it("creates a folder node Change Request through the CLI, then reviews and merges it", async () => {
     const created = (await cli(
       "nodes",
       "create-change-request",
@@ -162,7 +161,18 @@ describe("busabase-cli golden path (skill commands, in-process)", () => {
       "--name",
       "CLI Folder",
     )) as { id: string; status: string };
-    expect(created.status).toBe("merged");
+    expect(created.status).toBe("in_review");
+
+    const reviewed = (await cli(
+      "change-requests",
+      "review",
+      "--change-request-id",
+      created.id,
+      "--verdict",
+      "approved",
+    )) as { status: string };
+    expect(reviewed.status).toBe("approved");
+    await cli("change-requests", "merge", "--change-request-id", created.id);
 
     const tree = await cli("nodes", "list");
     expect(JSON.stringify(tree)).toContain("CLI Folder");

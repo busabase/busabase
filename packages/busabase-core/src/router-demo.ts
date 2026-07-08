@@ -161,6 +161,15 @@ export const busabaseDemoRouter = os.router({
       throw demoUnsupported("Drive change request");
     }),
   },
+  files: {
+    list: os.files.list.handler(() => []),
+    create: os.files.create.handler(() => {
+      throw demoUnsupported("Create File");
+    }),
+    get: os.files.get.handler(() => {
+      throw demoUnsupported("Open File");
+    }),
+  },
   docs: {
     list: os.docs.list.handler(() => []),
     create: os.docs.create.handler(() => {
@@ -189,6 +198,9 @@ export const busabaseDemoRouter = os.router({
     }),
     list: os.assets.list.handler(() => demoListAssets()),
     get: os.assets.get.handler(({ input }) => demoGetAsset(input.assetId)),
+    updateMetadata: os.assets.updateMetadata.handler(() => {
+      throw demoUnsupported("Update asset metadata");
+    }),
     delete: os.assets.delete.handler(() => {
       throw demoUnsupported("Delete asset");
     }),

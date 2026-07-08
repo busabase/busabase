@@ -8,6 +8,13 @@ import {
 import { z } from "zod";
 import { AssetDetailVOSchema, AssetVOSchema } from "./types";
 
+export const UpdateAssetMetadataInputSchema = z.object({
+  assetId: z.string(),
+  metadata: z.record(z.string(), z.unknown()),
+  mode: z.enum(["merge", "replace"]).optional().default("merge"),
+});
+export type UpdateAssetMetadataInput = z.infer<typeof UpdateAssetMetadataInputSchema>;
+
 // Assets domain oRPC routes; composed into the root contract in
 // contract/busabase.ts. The deduped Asset library + its where-used reverse index.
 export const assetsContract = {
@@ -50,6 +57,17 @@ export const assetsContract = {
       successDescription: "Asset metadata plus every place it is referenced (where-used).",
     })
     .input(z.object({ assetId: z.string() }))
+    .output(AssetDetailVOSchema),
+  updateMetadata: oc
+    .route({
+      method: "PATCH",
+      path: "/assets/{assetId}/metadata",
+      tags: ["Assets"],
+      summary: "Update asset metadata",
+      successDescription:
+        "Updated AI-readable metadata for a file, such as summary, extracted text, tags, source URL, or schema-specific hints.",
+    })
+    .input(UpdateAssetMetadataInputSchema)
     .output(AssetDetailVOSchema),
   delete: oc
     .route({

@@ -14,14 +14,53 @@ export interface FileTreeKindConfig {
 export const fileTreeFileSchema = z.object({
   path: z.string(),
   name: z.string(),
-  type: z.enum(["file", "folder"]),
   size: z.number(),
   updatedAt: z.string().nullable(),
+  mimeType: z.string().nullable(),
+  assetId: z.string(),
+  displayName: z.string().nullable(),
 });
+
+const assetFileInputSchema = z
+  .object({
+    path: z.string().min(1),
+    assetId: z.string().min(1),
+    displayName: z.string().optional(),
+    mimeType: z.string().optional(),
+  })
+  .strict();
+
+const textFileInputSchema = z
+  .object({
+    path: z.string().min(1),
+    content: z.string().default(""),
+    mimeType: z.string().optional(),
+  })
+  .strict();
+
+const assetFileOperationInputSchema = z
+  .object({
+    kind: z.enum(["create", "update"]),
+    path: z.string().min(1),
+    assetId: z.string().min(1),
+    displayName: z.string().optional(),
+    mimeType: z.string().optional(),
+    baseContentHash: z.string().optional(),
+  })
+  .strict();
+
+const textFileOperationInputSchema = z
+  .object({
+    kind: z.enum(["create", "update"]),
+    path: z.string().min(1),
+    content: z.string(),
+    mimeType: z.string().optional(),
+    baseContentHash: z.string().optional(),
+  })
+  .strict();
 
 export const fileTreeNodeSchema = z.object({
   node: nodeSchema,
-  storagePrefix: z.string(),
   entryFile: z.string(),
   visibility: z.enum(["private", "workspace", "public"]),
   version: z.string(),
@@ -39,58 +78,33 @@ export const createFileTreeInputSchema = z.object({
   visibility: z.enum(["private", "workspace", "public"]).optional().default("private"),
   version: z.string().optional().default("0.1.0"),
   files: z
-    .array(
-      z.union([
-        z.object({
-          path: z.string().min(1),
-          content: z.string().default(""),
-          contentBase64: z.undefined().optional(),
-          mimeType: z.string().optional(),
-        }),
-        z.object({
-          path: z.string().min(1),
-          content: z.undefined().optional(),
-          contentBase64: z.string().describe("Base64-encoded bytes for any file payload."),
-          mimeType: z.string().optional(),
-        }),
-      ]),
-    )
+    .array(z.union([assetFileInputSchema, textFileInputSchema]))
     .optional()
     .default([]),
 });
 
 export const fileTreeFileOperationInputSchema = z.union([
-  z.object({
-    kind: z.enum(["create", "update"]),
-    path: z.string().min(1),
-    content: z.string(),
-    contentBase64: z.undefined().optional(),
-    mimeType: z.string().optional(),
-    baseContentHash: z.string().optional(),
-  }),
-  z.object({
-    kind: z.enum(["create", "update"]),
-    path: z.string().min(1),
-    content: z.undefined().optional(),
-    contentBase64: z.string().describe("Base64-encoded bytes for any file payload."),
-    mimeType: z.string().optional(),
-    baseContentHash: z.string().optional(),
-  }),
-  z.object({
-    kind: z.literal("delete"),
-    path: z.string().min(1),
-    baseContentHash: z.string().optional(),
-  }),
-  z.object({
-    kind: z.literal("metadata_update"),
-    metadata: z
-      .object({
-        entryFile: z.string().optional(),
-        visibility: z.enum(["private", "workspace", "public"]).optional(),
-        version: z.string().optional(),
-      })
-      .default({}),
-  }),
+  assetFileOperationInputSchema,
+  textFileOperationInputSchema,
+  z
+    .object({
+      kind: z.literal("delete"),
+      path: z.string().min(1),
+      baseContentHash: z.string().optional(),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("metadata_update"),
+      metadata: z
+        .object({
+          entryFile: z.string().optional(),
+          visibility: z.enum(["private", "workspace", "public"]).optional(),
+          version: z.string().optional(),
+        })
+        .default({}),
+    })
+    .strict(),
 ]);
 
 export const createFileTreeChangeRequestInputSchema = z.object({
@@ -115,7 +129,7 @@ export const makeFileTreeContract = (routeBase: string, tag: string) => {
         path: basePath,
         tags: [tag],
         summary: `List ${label} nodes`,
-        successDescription: `${label} nodes with their storage-backed file trees.`,
+        successDescription: `${label} nodes with their Asset-backed file trees.`,
       })
       .output(z.array(fileTreeNodeSchema)),
     create: oc
@@ -144,7 +158,7 @@ export const makeFileTreeContract = (routeBase: string, tag: string) => {
         path: `${basePath}/{nodeId}/files` as `/${string}`,
         tags: [tag],
         summary: `List ${label} files`,
-        successDescription: `Storage-backed files under the ${label} node prefix.`,
+        successDescription: `Asset-backed files mounted under the ${label} node.`,
       })
       .input(z.object({ nodeId: z.string() }))
       .output(z.array(fileTreeFileSchema)),
@@ -161,10 +175,12 @@ export const makeFileTreeContract = (routeBase: string, tag: string) => {
         z.object({
           nodeId: z.string(),
           path: z.string(),
-          encoding: z.enum(["utf8", "base64"]),
+          encoding: z.enum(["utf8", "url"]),
           content: z.string(),
-          contentBase64: z.string().describe("Base64-encoded bytes for lossless file export."),
           mimeType: z.string(),
+          assetId: z.string(),
+          displayName: z.string().nullable(),
+          assetUrl: z.string().nullable(),
           contentHash: z.string(),
         }),
       ),

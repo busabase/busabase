@@ -219,6 +219,8 @@ const buildDemoAssetIndex = (): {
             id: ref.attachmentId,
             attachmentId: ref.attachmentId,
             name: ref.fileName,
+            contentKind: "binary",
+            metadata: {},
             fileName: ref.fileName,
             mimeType: ref.mimeType,
             size: ref.size,
@@ -230,12 +232,15 @@ const buildDemoAssetIndex = (): {
         }
         const list = usages.get(ref.attachmentId) ?? [];
         list.push({
+          ownerType: "base",
           nodeId: base.nodeId ?? base.id,
           nodeName: base.name,
           nodeType: "base",
           nodeSlug: base.slug,
+          path: null,
           recordId: record.id,
           fieldSlug: slug,
+          blockId: null,
           createdAt: epoch,
         });
         usages.set(ref.attachmentId, list);

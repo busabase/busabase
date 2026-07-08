@@ -20,8 +20,8 @@ import {
 } from "../db/schema";
 import { buildRecordSeedFields } from "../demo/dataset";
 import type { SeedScenario } from "../demo/seed-types";
-import { storagePrefix, writeTextFile } from "../domains/filetree/logic/storage";
-import { skillStoragePrefix, writeSkillTextFile } from "../domains/skill/logic/storage";
+import { writeFileTreeTextFile } from "../domains/filetree/handlers";
+import { writeSkillTextFile } from "../domains/skill/logic/storage";
 import { ensureProjectionBackfill, projectCommitFields } from "./field-values";
 import { CURRENT_USER_ID, hashText, now, ROOT_NODE_ID, rootNodeIdForSpace } from "./kernel";
 import { toBaseVO, toNodeVO } from "./vo";
@@ -415,7 +415,6 @@ const seedSkillNodeIfMissing = async (createdAt: Date) => {
     .where(eq(busabaseNodes.id, SEED_RESEARCH_SKILL_NODE_ID))
     .limit(1);
   const skillMetadata = {
-    storagePrefix: skillStoragePrefix(SEED_RESEARCH_SKILL_NODE_ID),
     entryFile: "SKILL.md",
     visibility: "workspace" as const,
     version: "0.1.0",
@@ -535,7 +534,6 @@ const seedDriveNodeIfMissing = async (createdAt: Date) => {
   }
 
   const driveMetadata = {
-    storagePrefix: storagePrefix(SEED_TEAM_DRIVE_NODE_ID),
     entryFile: "README.md",
     visibility: "workspace" as const,
     version: "0.1.0",
@@ -581,7 +579,7 @@ const seedDriveNodeIfMissing = async (createdAt: Date) => {
   if (!driveNode) {
     throw new Error("Failed to seed Drive node");
   }
-  await writeTextFile(
+  await writeFileTreeTextFile(
     driveNode,
     "README.md",
     "# Team Files\n\nA shared Drive for plain files. Propose edits through change requests before merge.\n",

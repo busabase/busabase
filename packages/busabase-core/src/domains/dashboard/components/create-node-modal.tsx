@@ -15,6 +15,7 @@ import { Input } from "kui/input";
 import { useState } from "react";
 import { fmt, useCoreI18n } from "../../../i18n";
 import { nodeIconForId } from "../helpers/node-icons";
+import { useAttachmentUpload } from "../hooks/use-attachment-upload";
 import { SplitSubmitButton } from "./split-submit-button";
 
 // The creatable types, composed from the registry — adding a creatable node type
@@ -58,22 +59,29 @@ export function CreateNodeModal({
   const [name, setName] = useState("");
   const [slug, setSlug] = useState("");
   const [description, setDescription] = useState("");
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [slugEdited, setSlugEdited] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const activeType =
     CREATABLE_TYPES.find((entry) => entry.type === selectedType) ?? CREATABLE_TYPES[0];
+  const uploadAttachment = useAttachmentUpload(apiClient);
 
   const reset = () => {
     setName("");
     setSlug("");
     setDescription("");
+    setSelectedFile(null);
     setSlugEdited(false);
     setError(null);
   };
 
-  const buildOperations = (trimmedName: string, finalSlug: string) => [
+  const buildOperations = (
+    trimmedName: string,
+    finalSlug: string,
+    metadata?: Record<string, unknown>,
+  ) => [
     {
       kind: "create" as const,
       nodeType: selectedType,
@@ -81,6 +89,7 @@ export function CreateNodeModal({
       slug: finalSlug,
       name: trimmedName,
       description: description.trim(),
+      ...(metadata ? { metadata } : {}),
       // A Base needs at least one field; start with a Title to build on.
       ...(selectedType === "base"
         ? {
@@ -97,6 +106,20 @@ export function CreateNodeModal({
     },
   ];
 
+  const uploadFileNodeAsset = async () => {
+    if (selectedType !== "file") {
+      return undefined;
+    }
+    if (!selectedFile) {
+      throw new Error(messages.createNode.fileRequired);
+    }
+    const uploaded = await uploadAttachment(selectedFile, "file-node");
+    if (!uploaded.assetId) {
+      throw new Error(messages.createNode.fileUploadMissingAsset);
+    }
+    return { assetId: uploaded.assetId };
+  };
+
   const submitAsChangeRequest = async () => {
     const trimmedName = name.trim();
     const finalSlug = (slugEdited ? slug : toSlug(trimmedName)).trim();
@@ -107,12 +130,13 @@ export function CreateNodeModal({
     setSubmitting(true);
     setError(null);
     try {
+      const metadata = await uploadFileNodeAsset();
       const changeRequest = await apiClient.createNodeChangeRequest({
         message: fmt(messages.createNode.message, {
           name: trimmedName,
           type: activeType?.label ?? "item",
         }),
-        operations: buildOperations(trimmedName, finalSlug),
+        operations: buildOperations(trimmedName, finalSlug, metadata),
       });
       reset();
       onOpenChange(false);
@@ -134,15 +158,15 @@ export function CreateNodeModal({
     setSubmitting(true);
     setError(null);
     try {
+      const metadata = await uploadFileNodeAsset();
       const changeRequest = await apiClient.createNodeChangeRequest({
+        autoMerge: true,
         message: fmt(messages.createNode.message, {
           name: trimmedName,
           type: activeType?.label ?? "item",
         }),
-        operations: buildOperations(trimmedName, finalSlug),
+        operations: buildOperations(trimmedName, finalSlug, metadata),
       });
-      await apiClient.approveChangeRequest(changeRequest.id, messages.createNode.autoApproved);
-      await apiClient.mergeChangeRequest(changeRequest.id);
       reset();
       onOpenChange(false);
       onCreated(changeRequest.id, "merged");
@@ -153,7 +177,8 @@ export function CreateNodeModal({
     }
   };
 
-  const isDisabled = submitting || name.trim().length === 0;
+  const isDisabled =
+    submitting || name.trim().length === 0 || (selectedType === "file" && !selectedFile);
 
   return (
     <Dialog
@@ -165,7 +190,7 @@ export function CreateNodeModal({
         onOpenChange(next);
       }}
     >
-      <DialogContent className="sm:max-w-xl">
+      <DialogContent className="sm:max-w-3xl">
         <DialogHeader>
           <DialogTitle>
             {fmt(messages.createNode.title, {
@@ -180,7 +205,7 @@ export function CreateNodeModal({
         </DialogHeader>
 
         <div className="flex flex-col gap-3">
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-6">
             {CREATABLE_TYPES.map((entry) => {
               const Icon = entry.icon;
               const isSelected = entry.type === selectedType;
@@ -192,7 +217,10 @@ export function CreateNodeModal({
                       : "text-muted-foreground hover:bg-muted"
                   }`}
                   key={entry.type}
-                  onClick={() => setSelectedType(entry.type)}
+                  onClick={() => {
+                    setSelectedType(entry.type);
+                    setError(null);
+                  }}
                   type="button"
                 >
                   <Icon className="size-5" />
@@ -218,6 +246,34 @@ export function CreateNodeModal({
               value={name}
             />
           </div>
+          {selectedType === "file" ? (
+            <div className="flex flex-col gap-1.5 text-sm">
+              <span className="text-muted-foreground">{messages.createNode.file}</span>
+              <Input
+                accept="*/*"
+                onChange={(event) => {
+                  const file = event.currentTarget.files?.[0] ?? null;
+                  setSelectedFile(file);
+                  if (file && !name.trim()) {
+                    setName(file.name);
+                    if (!slugEdited) {
+                      setSlug(toSlug(file.name));
+                    }
+                  }
+                }}
+                type="file"
+              />
+              {selectedFile ? (
+                <span className="text-muted-foreground text-xs">
+                  {selectedFile.type || "application/octet-stream"} · {selectedFile.size} B
+                </span>
+              ) : (
+                <span className="text-muted-foreground text-xs">
+                  {messages.createNode.fileRequired}
+                </span>
+              )}
+            </div>
+          ) : null}
           <div className="flex flex-col gap-1.5 text-sm">
             <span className="text-muted-foreground">{messages.common.slug}</span>
             <Input

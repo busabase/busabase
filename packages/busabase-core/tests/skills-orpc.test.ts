@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -31,10 +30,6 @@ type SkillsClient = ReturnType<
 // reference app's migrations (busabase). Same schema, owned by busabase-core.
 const MIGRATIONS_CWD = path.resolve(__dirname, "../../../apps/busabase");
 const API = "http://busabase.test/api/v1";
-const wasmBytes = Buffer.from([0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00]);
-const wasmBase64 = wasmBytes.toString("base64");
-const wasmHash = `sha256:${createHash("sha256").update(wasmBytes).digest("hex")}`;
-
 describe("Agent Skills API — oRPC integration", () => {
   let dataDir = "";
   let storageDir = "";
@@ -73,7 +68,24 @@ describe("Agent Skills API — oRPC integration", () => {
     return client.changeRequests.merge({ changeRequestId });
   };
 
-  it("lists created skills with their storage-backed file trees", async () => {
+  const createAsset = async (input: {
+    fileName: string;
+    mimeType: string;
+    sizeBytes: number;
+    contentHash: string;
+  }) => {
+    const request = await client.assets.createUploadUrl(input);
+    const confirmed = await client.assets.confirm({
+      storageKey: request.storageKey,
+      ...input,
+    });
+    return {
+      ...(await client.assets.get({ assetId: confirmed.assetId as string })).asset,
+      assetId: confirmed.assetId as string,
+    };
+  };
+
+  it("lists created skills with their Asset-backed file trees", async () => {
     await client.skills.create({
       slug: "ai-research-editor",
       name: "AI Research Editor",
@@ -198,8 +210,17 @@ describe("Agent Skills API — oRPC integration", () => {
     expect(updated.content).toContain("## Checklist");
   });
 
-  it("uploads and reads arbitrary files through the Skill RPC change-request flow", async () => {
-    const skill = await client.skills.create({ slug: "binary-skill", name: "Binary Skill" });
+  it("uploads and reads arbitrary Skill files as asset refs through the RPC change-request flow", async () => {
+    const asset = await createAsset({
+      fileName: "runtime.wasm",
+      mimeType: "application/wasm",
+      sizeBytes: 8,
+      contentHash: `sha256:${"e".repeat(64)}`,
+    });
+    const skill = await client.skills.create({
+      slug: "asset-file-skill",
+      name: "Asset File Skill",
+    });
     const changeRequest = await client.skills.createChangeRequest({
       nodeId: skill.node.id,
       message: "Add runtime fixture",
@@ -207,7 +228,8 @@ describe("Agent Skills API — oRPC integration", () => {
         {
           kind: "create",
           path: "fixtures/runtime.wasm",
-          contentBase64: wasmBase64,
+          assetId: asset.assetId,
+          displayName: "Runtime WASM",
           mimeType: "application/wasm",
         },
       ],
@@ -220,16 +242,15 @@ describe("Agent Skills API — oRPC integration", () => {
       filePath: "fixtures/runtime.wasm",
     });
     expect(file).toMatchObject({
-      encoding: "base64",
+      encoding: "url",
       content: "",
-      contentBase64: wasmBase64,
       mimeType: "application/wasm",
-      contentHash: wasmHash,
+      assetId: asset.assetId,
+      displayName: "Runtime WASM",
     });
-    expect(Buffer.from(file.contentBase64, "base64")).toEqual(wasmBytes);
   });
 
-  it("uploads and reads arbitrary files through the public Skill OpenAPI route", async () => {
+  it("uploads and reads arbitrary Skill files as asset refs through the public OpenAPI route", async () => {
     const handler = new OpenAPIHandler(busabaseRouter);
     const call = async (method: string, routePath: string, body?: unknown) => {
       const request = new Request(`${API}${routePath}`, {
@@ -253,17 +274,37 @@ describe("Agent Skills API — oRPC integration", () => {
       return result.body;
     };
 
-    const skill = await ok("POST", "/skills", {
-      slug: "openapi-binary-skill",
-      name: "OpenAPI Binary Skill",
+    const asset = await createAsset({
+      fileName: "runtime.wasm",
+      mimeType: "application/wasm",
+      sizeBytes: 8,
+      contentHash: `sha256:${"f".repeat(64)}`,
     });
+    const skill = await ok("POST", "/skills", {
+      slug: "openapi-asset-file-skill",
+      name: "OpenAPI Asset File Skill",
+    });
+    const legacyUpload = await call("POST", `/skills/${skill.node.id}/change-requests`, {
+      message: "Legacy direct binary upload",
+      operations: [
+        {
+          kind: "create",
+          path: "fixtures/legacy.wasm",
+          contentBase64: "AA==",
+          mimeType: "application/wasm",
+        },
+      ],
+    });
+    expect(legacyUpload.status).toBeGreaterThanOrEqual(400);
+
     const changeRequest = await ok("POST", `/skills/${skill.node.id}/change-requests`, {
       message: "Add REST runtime fixture",
       operations: [
         {
           kind: "create",
           path: "fixtures/runtime.wasm",
-          contentBase64: wasmBase64,
+          assetId: asset.assetId,
+          displayName: "REST Runtime WASM",
           mimeType: "application/wasm",
         },
       ],
@@ -272,10 +313,10 @@ describe("Agent Skills API — oRPC integration", () => {
     await ok("POST", `/change-requests/${changeRequest.id}/merge`);
 
     const file = await ok("GET", `/skills/${skill.node.id}/files/fixtures/runtime.wasm`);
-    expect(file.encoding).toBe("base64");
-    expect(file.contentBase64).toBe(wasmBase64);
+    expect(file.encoding).toBe("url");
+    expect(file.assetId).toBe(asset.assetId);
+    expect(file.displayName).toBe("REST Runtime WASM");
     expect(file.mimeType).toBe("application/wasm");
-    expect(file.contentHash).toBe(wasmHash);
   });
 
   it("merges create + delete file operations", async () => {
@@ -379,6 +420,30 @@ describe("Agent Skills API — oRPC integration", () => {
     const skill = await client.skills.get({ nodeId: newNodeId });
     expect(skill.node.slug).toBe("materialized-skill");
     expect(skill.files.some((file) => file.path === "SKILL.md")).toBe(true);
+  });
+
+  it("rejects legacy direct-binary commit fields instead of writing an empty text file", async () => {
+    await expect(
+      mergeSkillFile(
+        {} as MergeCtx,
+        {
+          id: "qop_legacy",
+          operation: "skill_file_create",
+          filePath: "bin/runtime.wasm",
+        } as OperationPO,
+        { type: "skill" } as NodePO,
+        {
+          fields: {
+            encoding: "base64",
+            nextContentBase64: "AA==",
+            mimeType: "application/wasm",
+          },
+        } as unknown as CommitPO,
+      ),
+    ).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      message: expect.stringContaining("legacy direct binary file commits"),
+    });
   });
 
   // --- guard branches unreachable through the dispatcher ----------------------

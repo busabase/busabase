@@ -5,6 +5,7 @@ import { assetsRouter } from "./domains/assets/router";
 import { baseRouter, recordRouter, viewRouter } from "./domains/base/router";
 import { docRouter } from "./domains/doc/router";
 import { driveRouter } from "./domains/drive/router";
+import { fileRouter } from "./domains/file-node/router";
 import { folderRouter } from "./domains/folder/router";
 import { skillRouter } from "./domains/skill/router";
 import { subscribeBusabaseLiveEvents } from "./logic/live-events";
@@ -66,6 +67,7 @@ export const busabaseRouter = busabase.router({
   bases: baseRouter,
   skills: skillRouter,
   drives: driveRouter,
+  files: fileRouter,
   docs: docRouter,
   folders: folderRouter,
   assets: assetsRouter,

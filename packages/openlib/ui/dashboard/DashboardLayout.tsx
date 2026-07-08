@@ -17,6 +17,7 @@ interface DashboardLayoutProps {
   onSpaceSettingsClick?: () => void;
   onInviteMembersClick?: () => void;
   spaceSelectorReadonly?: boolean;
+  spaceSelectorExtraMenuItems?: React.ReactNode;
   isLoadingSpaces?: boolean;
   /**
    * App branding configuration displayed when no spaces are available
@@ -109,6 +110,7 @@ export function DashboardLayout({
   onSpaceSettingsClick,
   onInviteMembersClick,
   spaceSelectorReadonly,
+  spaceSelectorExtraMenuItems,
   isLoadingSpaces,
   branding,
   appLogo,
@@ -156,6 +158,7 @@ export function DashboardLayout({
         onSpaceSettingsClick={onSpaceSettingsClick}
         onInviteMembersClick={onInviteMembersClick}
         spaceSelectorReadonly={spaceSelectorReadonly}
+        spaceSelectorExtraMenuItems={spaceSelectorExtraMenuItems}
         isLoadingSpaces={isLoadingSpaces}
         branding={branding}
         appLogo={appLogo}

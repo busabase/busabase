@@ -22,10 +22,10 @@ export interface NodeOutput {
   name: string;
   description: string;
   metadata: {
-    storagePrefix?: string;
     entryFile?: string;
     visibility?: "private" | "workspace" | "public";
     version?: string;
+    assetId?: string;
   };
   position: number;
   createdAt: string;
@@ -44,10 +44,10 @@ const nodeSchema: z.ZodType<NodeOutput> = z.lazy(() =>
     description: z.string(),
     metadata: z
       .object({
-        storagePrefix: z.string().optional(),
         entryFile: z.string().optional(),
         visibility: z.enum(["private", "workspace", "public"]).optional(),
         version: z.string().optional(),
+        assetId: z.string().optional(),
       })
       .default({}),
     position: z.number(),
@@ -184,7 +184,7 @@ const agentTaskSchema = z.object({
 
 const searchResultSchema = z.object({
   id: z.string(),
-  kind: z.enum(["record", "change_request", "base"]),
+  kind: z.enum(["record", "change_request", "base", "file"]),
   title: z.string(),
   body: z.string(),
   eyebrow: z.string(),
@@ -232,9 +232,11 @@ const auditActionSchema = z.enum([
   "field.created",
   "doc.created",
   "doc.updated",
+  "file.created",
   "skill.created",
   "drive.created",
   "asset.deleted",
+  "asset.metadata_updated",
   "node.purged",
 ]);
 
@@ -343,6 +345,13 @@ const createNodeChangeRequestInputSchema = z.object({
       'Explanation shown to the human reviewer. Write a conventional-commit style subject — imperative verb + what + why, e.g. "Reorganize marketing docs under a Campaigns folder".',
     ),
   submittedBy: z.string().optional().default("local-producer"),
+  autoMerge: z
+    .boolean()
+    .optional()
+    .default(false)
+    .describe(
+      "Whether to approve and merge this structural node change immediately. Defaults to false so node Change Request creation is review-first unless explicitly requested.",
+    ),
   operations: z.array(nodeOperationInputSchema).min(1),
 });
 

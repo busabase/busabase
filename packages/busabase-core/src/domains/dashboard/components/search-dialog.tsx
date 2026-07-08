@@ -17,12 +17,13 @@ import { useCoreI18n } from "../../../i18n";
 import { normalizeSearchText, searchKindIcon } from "../helpers/search";
 import { EmptyState } from "./primitives";
 
-type SearchTab = "all" | "records" | "bases" | "change_requests";
-const SEARCH_TABS: SearchTab[] = ["all", "records", "bases", "change_requests"];
+type SearchTab = "all" | "records" | "bases" | "files" | "change_requests";
+const SEARCH_TABS: SearchTab[] = ["all", "records", "bases", "files", "change_requests"];
 const TAB_KIND: Record<SearchTab, SearchResultKind | null> = {
   all: null,
   records: "record",
   bases: "base",
+  files: "file",
   change_requests: "change_request",
 };
 
@@ -94,6 +95,7 @@ export function SearchDialog({
     all: messages.search.all,
     bases: messages.search.bases,
     change_requests: messages.search.changeRequests,
+    files: messages.nodeDetail.files,
     records: messages.search.records,
   };
 

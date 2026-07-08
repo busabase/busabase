@@ -23,7 +23,7 @@ npx busabase-cli health
 | `--base-url`   | `BUSABASE_BASE_URL`  | `https://busabase.com`   |
 | `--api-key`    | `BUSABASE_API_KEY`   | _(none — local is open)_ |
 | `--space-id`   | `BUSABASE_SPACE_ID`  | _(none; multi-space Cloud calls require one)_ |
-| `--output`     | —                    | `table` (`json` for raw) |
+| `--output`     | —                    | `text` (`json` for raw, `table` for aligned columns) |
 
 Config is read from flags, then env vars, then `~/.busabase/.env` (auto-loaded —
 no need to `source` it), then the default. An exported env var overrides the file.
@@ -39,12 +39,20 @@ interactively and it asks **where** your Busabase is — every option boils down
 same saved config, differing only in base URL and how (if at all) it gets a token:
 
 ```
-Where is your Busabase?
-  1. Personal Desktop / local server — no login
-  2. Busabase Cloud — browser sign-in (OAuth)
+Busabase is an approval-first database and knowledge base for AI agents.
+Agents propose changes; humans review and merge what becomes trusted data.
+
+How should this CLI connect?
+  1. Local/Desktop on this computer — no account, no login
+     Use when you run `busabase server` or the Busabase Desktop app locally.
+  2. Busabase Cloud — browser sign-in (recommended)
+     Best for humans: opens the browser and saves a refreshable CLI session.
   3. Busabase Cloud — paste an API key
-  4. Self-hosted — browser sign-in (OAuth)
-  5. Self-hosted — paste an API key
+     Best for CI, servers, or agents where a browser is not available.
+  4. Self-hosted Busabase — browser sign-in
+     Use your team's Busabase URL when it supports OAuth login.
+  5. Self-hosted Busabase — paste an API key
+     Use your team's Busabase URL with a long-lived key for automation.
 ```
 
 - **1 (local)** just saves `BUSABASE_BASE_URL` — the open-source `busabase server` needs
@@ -69,11 +77,22 @@ stays alive as long as you keep using it. If you've been away and it lapses, jus
 `busabase-cli login` again. Prefer an API key for long-lived automation — create one
 at **Dashboard → Settings → API Keys**.
 
+## Output modes
+
+The default output is `text`, designed for terminals. Tree-like responses such as
+`nodes list` render as an indented tree, and nested objects are summarized so rows
+do not turn into unreadable JSON blobs.
+
+Use `--output json` for agents, scripts, and piping into tools such as `jq`. Use
+`--output table` when you want the older aligned-column view for flat lists.
+
 ## Examples
 
 ```bash
 busabase-cli whoami                       # active space / user / membership
 busabase-cli bases list
+busabase-cli nodes list                   # terminal-friendly tree by default
+busabase-cli nodes list --output json      # raw tree for scripts / agents
 busabase-cli bases get --slug tasks
 busabase-cli nodes create-change-request --type folder --slug crm --name "CRM"
 busabase-cli nodes create-change-request --type base --slug contacts --name "Contacts" --parent-node-id nod_123 --field name:Name:text

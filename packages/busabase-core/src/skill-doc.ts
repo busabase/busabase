@@ -165,6 +165,8 @@ Quick reference — every path is relative to the base URL above; worked example
 | Create node CR | \`POST /api/v1/nodes/change-requests\` | propose folder / Skill structure changes (supports in-CR \`ref\`/\`parentNodeRef\`) |
 | Read Skill files | \`GET /api/v1/skills/:nodeId/files/:filePath\` | read a Skill file |
 | Create Skill file CR | \`POST /api/v1/skills/:nodeId/change-requests\` | propose a Skill file edit |
+| Request asset upload | \`POST /api/v1/assets/upload-urls\` | request an upload target for attachment-field files |
+| Confirm asset upload | \`POST /api/v1/assets/confirmations\` | confirm uploaded bytes and get an attachment-field ref |
 | Review (approve / request changes) | \`POST /api/v1/change-requests/:id/reviews\` | approve or request revision |
 | Review many | \`POST /api/v1/change-requests/reviews\` | approve/reject many CRs in one call |
 | Close / abandon ChangeRequest | \`POST /api/v1/change-requests/:id/close\` | terminally close a bad proposal |
@@ -306,6 +308,17 @@ ${authLine}  -H 'content-type: application/json' \\
     "message": "Rewrite SKILL.md quickstart for the new auth flow",
     "submittedBy": "agent"
   }'
+\`\`\`
+
+Upload an asset for an attachment field. The CLI reads the same \`BUSABASE_*\`
+environment values used by setup (or \`~/.busabase/.env\`), calls the Assets
+API, uploads the bytes, confirms them, and prints a ref you can store directly
+in an attachment field array:
+
+\`\`\`bash
+npx busabase-cli assets upload --file ./cover.svg --context record-field --output json
+# Put the JSON output directly into an attachment field array:
+# {"cover_image":[{"id":"...","assetId":"...","attachmentId":"...","url":"...","fileName":"cover.svg","mimeType":"image/svg+xml","size":1234}]}
 \`\`\`
 
 Approve a ChangeRequest:

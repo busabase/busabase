@@ -1170,6 +1170,7 @@ export const recordMergedNodeCreate = async (args: {
   name: string;
   description?: string;
   parentNodeId: string;
+  metadata?: Record<string, unknown>;
   message: string;
   submittedBy: string;
 }): Promise<string> =>
@@ -1185,6 +1186,7 @@ export const recordMergedNodeCreate = async (args: {
       slug: args.slug,
       name: args.name,
       description: args.description ?? "",
+      metadata: args.metadata ?? {},
     },
     message: args.message,
     submittedBy: args.submittedBy,

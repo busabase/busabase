@@ -86,6 +86,7 @@ const nodeOperationInputSchema = z.discriminatedUnion("kind", [
 export const createNodeChangeRequestInputSchema = z.object({
   message: z.string().optional().default("Update node tree"),
   submittedBy: z.string().optional().default("local-producer"),
+  autoMerge: z.boolean().optional().default(false),
   operations: z.array(nodeOperationInputSchema).min(1),
 });
 
@@ -366,10 +367,18 @@ export const createNodeChangeRequest = async (
     metadata: { operation: "node_tree_update" },
   });
 
-  // Structural node ops auto-merge: the CR is recorded (audit/history/rollback)
-  // but doesn't wait on a human, so folder/base/skill/doc scaffolding feels
-  // instant. Content (record) CRs never reach this path — see autoApproveAndMerge.
-  const { autoApproveAndMerge } = await import("./cr-lifecycle");
-  const merged = await autoApproveAndMerge(changeRequestId);
-  return merged.changeRequest;
+  if (parsed.autoMerge) {
+    // Only explicit "create now" / setup flows auto-merge; plain
+    // nodes.createChangeRequest is review-first by default.
+    const { autoApproveAndMerge } = await import("./cr-lifecycle");
+    const merged = await autoApproveAndMerge(changeRequestId);
+    return merged.changeRequest;
+  }
+
+  const { getChangeRequest } = await import("./cr-lifecycle");
+  const changeRequest = await getChangeRequest(changeRequestId);
+  if (!changeRequest) {
+    throw new Error(`Failed to create node change request: ${changeRequestId}`);
+  }
+  return changeRequest;
 };

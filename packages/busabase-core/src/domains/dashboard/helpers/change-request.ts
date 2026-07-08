@@ -170,7 +170,7 @@ export const getNodeHref = (node: NodeVO | null | undefined) => {
   if (!node) {
     return null;
   }
-  if (node.type === "skill" || node.type === "drive") {
+  if (node.type === "skill" || node.type === "drive" || node.type === "file") {
     return `/${node.type}/${node.slug}`;
   }
   if (node.type === "doc") {

@@ -152,4 +152,107 @@ describe("createBusabaseClient request assembly", () => {
     await client.bases.list();
     expect(requests[0]?.headers.get("x-dynamic")).toBe("live");
   });
+
+  it("sends FileNode Change Requests with Asset metadata through /nodes/change-requests", async () => {
+    const requests: Request[] = [];
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      requests.push(request);
+      return new Response(JSON.stringify({ id: "crq_1", status: "in_review" }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }) as unknown as typeof fetch;
+    const client = createBusabaseClient({
+      baseUrl: "http://localhost:15419",
+      fetch: fetchImpl,
+    });
+
+    await client.nodes.createChangeRequest({
+      message: "Create board plan",
+      operations: [
+        {
+          kind: "create",
+          nodeType: "file",
+          slug: "board-plan",
+          name: "Board Plan",
+          metadata: { assetId: "ast_1" },
+        },
+      ],
+    });
+
+    expect(requests).toHaveLength(1);
+    expect(requests[0]?.method).toBe("POST");
+    expect(requests[0]?.url).toBe("http://localhost:15419/api/v1/nodes/change-requests");
+    expect(await requests[0]?.json()).toEqual({
+      message: "Create board plan",
+      operations: [
+        {
+          kind: "create",
+          metadata: { assetId: "ast_1" },
+          name: "Board Plan",
+          nodeType: "file",
+          slug: "board-plan",
+        },
+      ],
+    });
+  });
+
+  it("sends Asset metadata updates through PATCH /assets/{assetId}/metadata", async () => {
+    const requests: Request[] = [];
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      requests.push(request);
+      return new Response(JSON.stringify({ asset: { id: "ast_1", metadata: {} }, usages: [] }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }) as unknown as typeof fetch;
+    const client = createBusabaseClient({
+      baseUrl: "http://localhost:15419",
+      fetch: fetchImpl,
+    });
+
+    await client.assets.updateMetadata({
+      assetId: "ast_1",
+      metadata: {
+        summary: "AI-readable PDF summary",
+        extractedText: "customer: ACME",
+      },
+      mode: "replace",
+    });
+
+    expect(requests).toHaveLength(1);
+    expect(requests[0]?.method).toBe("PATCH");
+    expect(requests[0]?.url).toBe("http://localhost:15419/api/v1/assets/ast_1/metadata");
+    expect(await requests[0]?.json()).toEqual({
+      metadata: {
+        summary: "AI-readable PDF summary",
+        extractedText: "customer: ACME",
+      },
+      mode: "replace",
+    });
+  });
+
+  it("routes FileNode lookups through /files/{nodeId}", async () => {
+    const requests: Request[] = [];
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      requests.push(request);
+      return new Response(JSON.stringify({}), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }) as unknown as typeof fetch;
+    const client = createBusabaseClient({
+      baseUrl: "http://localhost:15419",
+      fetch: fetchImpl,
+    });
+
+    await client.files.get({ nodeId: "board-plan" });
+
+    expect(requests).toHaveLength(1);
+    expect(requests[0]?.method).toBe("GET");
+    expect(requests[0]?.url).toBe("http://localhost:15419/api/v1/files/board-plan");
+  });
 });

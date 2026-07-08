@@ -133,6 +133,7 @@ describe("Node tree + Doc lifecycle — oRPC", () => {
       // Structural node CRs auto-merge: the returned CR is already `merged`, so
       // no separate review/merge is needed (but a merged CR is still recorded).
       const createCr = await client.nodes.createChangeRequest({
+        autoMerge: true,
         operations: [{ kind: "create", nodeType: "folder", slug: "lc-tree", name: "Tree" }],
       });
       expect(createCr.status).toBe("merged");
@@ -142,6 +143,7 @@ describe("Node tree + Doc lifecycle — oRPC", () => {
 
       // Rename.
       const renameCr = await client.nodes.createChangeRequest({
+        autoMerge: true,
         operations: [{ kind: "rename", nodeId, name: "Tree Renamed" }],
       });
       expect(renameCr.status).toBe("merged");
@@ -149,6 +151,7 @@ describe("Node tree + Doc lifecycle — oRPC", () => {
 
       // Delete.
       const deleteCr = await client.nodes.createChangeRequest({
+        autoMerge: true,
         operations: [{ kind: "delete", nodeId }],
       });
       expect(deleteCr.status).toBe("merged");
@@ -157,6 +160,7 @@ describe("Node tree + Doc lifecycle — oRPC", () => {
 
     it("materializes a Base node created through an auto-merged node CR", async () => {
       const cr = await client.nodes.createChangeRequest({
+        autoMerge: true,
         operations: [
           {
             kind: "create",
@@ -175,6 +179,7 @@ describe("Node tree + Doc lifecycle — oRPC", () => {
     it("creates a folder and moves a node into it in ONE CR via temp-id", async () => {
       // A movable folder at the root.
       const movableCr = await client.nodes.createChangeRequest({
+        autoMerge: true,
         operations: [{ kind: "create", nodeType: "folder", slug: "lc-movable", name: "Movable" }],
       });
       expect(movableCr.status).toBe("merged");
@@ -184,6 +189,7 @@ describe("Node tree + Doc lifecycle — oRPC", () => {
       // One CR: create a destination folder (ref "dest") + move Movable under it.
       // The move references the not-yet-materialized folder by its in-CR ref.
       const combo = await client.nodes.createChangeRequest({
+        autoMerge: true,
         message: "Create Archive folder and move Movable into it",
         operations: [
           {

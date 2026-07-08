@@ -38,6 +38,7 @@ describe("Boundary P16 — node/view merge state guards", () => {
     // auto-merge on create, so the guard rejects at the create call.
     await expect(
       raw.nodes.createChangeRequest({
+        autoMerge: true,
         operations: [{ kind: "rename", nodeId: doc.node.id, name: "Renamed" }],
       }),
     ).rejects.toThrow(/archived node/i);

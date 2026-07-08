@@ -94,6 +94,9 @@ export class Busabase {
   get drives(): BusabaseClient["drives"] {
     return this.client.drives;
   }
+  get files(): BusabaseClient["files"] {
+    return this.client.files;
+  }
   get docs(): BusabaseClient["docs"] {
     return this.client.docs;
   }

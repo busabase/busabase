@@ -19,6 +19,7 @@
 import { baseNodeType } from "./base/definition";
 import { docNodeType } from "./doc/definition";
 import { driveNodeType } from "./drive/definition";
+import { fileNodeType } from "./file-node/definition";
 import { folderNodeType } from "./folder/definition";
 import { skillNodeType } from "./skill/definition";
 import type {
@@ -69,6 +70,7 @@ export const BUILTIN_NODE_TYPES = [
   baseNodeType,
   skillNodeType,
   driveNodeType,
+  fileNodeType,
   docNodeType,
 ] as const;
 

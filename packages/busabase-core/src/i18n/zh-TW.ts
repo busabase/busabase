@@ -23,6 +23,7 @@ export const dashboardZhTW: CoreI18nMessages = {
     inbox: "收件匣",
     search: "搜尋",
     activity: "動態",
+    archive: "封存",
     bases: "資料庫",
     new: "新增",
   },

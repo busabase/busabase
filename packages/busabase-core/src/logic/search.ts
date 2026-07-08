@@ -8,14 +8,19 @@ import type {
 } from "busabase-contract/types";
 import { and, desc, eq, ilike, inArray, isNotNull, isNull, or, sql } from "drizzle-orm";
 import { iStringConcat, iStringParse, iStringSchema } from "openlib/i18n/i-string";
+import { storage } from "openlib/storage";
 import { z } from "zod";
 import { getContextSpaceId } from "../context";
 import { getDb } from "../db";
 import {
+  attachments,
+  busabaseAssets,
+  busabaseAssetUsages,
   busabaseBaseFields,
   busabaseBases,
   busabaseChangeRequests,
   busabaseFieldValues,
+  busabaseNodes,
   busabaseRecords,
 } from "../db/schema";
 import { hydrateChangeRequest, hydrateRecord } from "./cr-lifecycle";
@@ -88,6 +93,114 @@ const toBaseSearchResult = (base: ReturnType<typeof toBaseVO>): SearchResultVO =
   href: `/base/${base.slug}`,
   updatedAt: base.createdAt,
 });
+
+const fileResultHref = (nodeType: string, nodeSlug: string) => {
+  if (nodeType === "drive") return `/drive/${nodeSlug}`;
+  if (nodeType === "skill") return `/skill/${nodeSlug}`;
+  if (nodeType === "file") return `/file/${nodeSlug}`;
+  if (nodeType === "doc") return `/doc/${nodeSlug}`;
+  if (nodeType === "base") return `/base/${nodeSlug}`;
+  return `/${nodeType}/${nodeSlug}`;
+};
+
+const fileMatchesQuery = (query: string, ...values: (string | null | undefined)[]) => {
+  const lowerQuery = query.toLowerCase();
+  return values.some((value) => value?.toLowerCase().includes(lowerQuery));
+};
+
+const MAX_FILE_SEARCH_TEXT_BYTES = 256 * 1024;
+
+const searchAssetBackedFiles = async (query: string, limit: number): Promise<SearchResultVO[]> => {
+  const db = await getDb();
+  const spaceId = getContextSpaceId();
+  const rows = await db
+    .select({
+      assetId: busabaseAssets.id,
+      assetName: busabaseAssets.name,
+      contentKind: busabaseAssets.contentKind,
+      metadata: busabaseAssets.metadata,
+      storageKey: attachments.storageKey,
+      sizeBytes: attachments.sizeBytes,
+      fileName: attachments.fileName,
+      mimeType: attachments.mimeType,
+      contentHash: attachments.contentHash,
+      usageMetadata: busabaseAssetUsages.metadata,
+      usagePath: busabaseAssetUsages.path,
+      ownerType: busabaseAssetUsages.ownerType,
+      recordId: busabaseAssetUsages.recordId,
+      fieldSlug: busabaseAssetUsages.fieldSlug,
+      blockId: busabaseAssetUsages.blockId,
+      updatedAt: busabaseAssetUsages.updatedAt,
+      nodeId: busabaseNodes.id,
+      nodeName: busabaseNodes.name,
+      nodeDescription: busabaseNodes.description,
+      nodeSlug: busabaseNodes.slug,
+      nodeType: busabaseNodes.type,
+    })
+    .from(busabaseAssetUsages)
+    .innerJoin(busabaseAssets, eq(busabaseAssetUsages.assetId, busabaseAssets.id))
+    .innerJoin(attachments, eq(busabaseAssets.attachmentId, attachments.id))
+    .innerJoin(busabaseNodes, eq(busabaseAssetUsages.nodeId, busabaseNodes.id))
+    .where(
+      and(
+        eq(busabaseNodes.spaceId, spaceId),
+        eq(busabaseAssetUsages.spaceId, spaceId),
+        isNull(busabaseNodes.archivedAt),
+      ),
+    );
+  const results: SearchResultVO[] = [];
+
+  for (const row of rows) {
+    const textContent =
+      row.contentKind === "text" && row.sizeBytes <= MAX_FILE_SEARCH_TEXT_BYTES
+        ? await storage
+            .getObject(row.storageKey)
+            .then((bytes) => bytes.toString("utf8"))
+            .catch(() => "")
+        : "";
+    const body = [
+      row.assetName,
+      JSON.stringify(row.metadata ?? {}),
+      JSON.stringify(row.usageMetadata ?? {}),
+      textContent,
+      row.fileName,
+      row.mimeType,
+      row.contentHash,
+      row.usagePath,
+      row.ownerType,
+      row.fieldSlug,
+      row.recordId,
+      row.blockId,
+      row.nodeName,
+      row.nodeDescription,
+      row.nodeSlug,
+      row.nodeType,
+    ]
+      .filter(Boolean)
+      .join(" ");
+    if (!fileMatchesQuery(query, body)) {
+      continue;
+    }
+    results.push({
+      id: `${row.assetId}:${row.nodeId}:${row.usagePath}:${row.recordId}:${row.fieldSlug}:${row.blockId}`,
+      kind: "file",
+      title:
+        typeof row.usageMetadata.displayName === "string"
+          ? row.usageMetadata.displayName
+          : row.usagePath
+            ? row.usagePath.split("/").at(-1) || row.assetName
+            : row.assetName,
+      body: body.slice(0, 280),
+      eyebrow: `${row.nodeName} · ${row.ownerType}`,
+      href: fileResultHref(row.nodeType, row.nodeSlug),
+      updatedAt: row.updatedAt.toISOString(),
+    });
+    if (results.length >= limit) {
+      return results;
+    }
+  }
+  return results;
+};
 
 export const searchBusabase = async (
   input?: z.input<typeof searchInputSchema>,
@@ -216,21 +329,24 @@ export const searchBusabase = async (
   const changeRequestsById = new Map(
     changeRequestRows.map((changeRequest) => [changeRequest.id, changeRequest]),
   );
-  const projectionResults = await Promise.all(
-    projectionRows.slice(0, parsed.limit).flatMap((row) => {
-      if (row.recordId) {
-        const record = recordsById.get(row.recordId);
-        return record ? [hydrateRecord(record).then(toRecordSearchResult)] : [];
-      }
-      if (row.changeRequestId) {
-        const changeRequest = changeRequestsById.get(row.changeRequestId);
-        return changeRequest
-          ? [hydrateChangeRequest(changeRequest).then(toChangeRequestSearchResult)]
-          : [];
-      }
-      return [];
-    }),
-  );
+  const [projectionResults, fileResults] = await Promise.all([
+    Promise.all(
+      projectionRows.slice(0, parsed.limit).flatMap((row) => {
+        if (row.recordId) {
+          const record = recordsById.get(row.recordId);
+          return record ? [hydrateRecord(record).then(toRecordSearchResult)] : [];
+        }
+        if (row.changeRequestId) {
+          const changeRequest = changeRequestsById.get(row.changeRequestId);
+          return changeRequest
+            ? [hydrateChangeRequest(changeRequest).then(toChangeRequestSearchResult)]
+            : [];
+        }
+        return [];
+      }),
+    ),
+    searchAssetBackedFiles(query, parsed.limit),
+  ]);
 
   const baseResults = [...baseRowsById.values()].map((base) =>
     toBaseSearchResult(
@@ -242,7 +358,7 @@ export const searchBusabase = async (
   );
 
   const dedupedResults = new Map<string, SearchResultVO>();
-  for (const result of [...projectionResults, ...baseResults]) {
+  for (const result of [...projectionResults, ...baseResults, ...fileResults]) {
     dedupedResults.set(`${result.kind}:${result.id}`, result);
   }
   const results = [...dedupedResults.values()].slice(0, parsed.limit);

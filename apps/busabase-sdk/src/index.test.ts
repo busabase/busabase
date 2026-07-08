@@ -38,6 +38,7 @@ describe("Busabase namespaces", () => {
     ["nodes", "nodes"],
     ["changeRequests", "change-requests"],
     ["skills", "skills"],
+    ["files", "files"],
     ["docs", "docs"],
     ["folders", "folders"],
   ] as const)("%s.list() routes through the wrapper to /%s", async (ns, segment) => {
@@ -74,6 +75,29 @@ describe("Busabase namespaces", () => {
 
     const pathname = new URL(requests[0]?.url ?? "").pathname;
     expect(pathname).toContain("/api/v1/assets/upload-urls");
+    expect(pathname).not.toContain("/attachments/");
+  });
+
+  it("routes Asset metadata writes through /assets", async () => {
+    const requests: Request[] = [];
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      requests.push(request);
+      return new Response(JSON.stringify({ asset: { id: "ast_1", metadata: {} }, usages: [] }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }) as unknown as typeof fetch;
+    const bb = new Busabase({ baseUrl: "http://localhost:15419", fetch: fetchImpl });
+
+    await bb.assets.updateMetadata({
+      assetId: "ast_1",
+      metadata: { summary: "Readable by agents" },
+    });
+
+    const pathname = new URL(requests[0]?.url ?? "").pathname;
+    expect(requests[0]?.method).toBe("PATCH");
+    expect(pathname).toBe("/api/v1/assets/ast_1/metadata");
     expect(pathname).not.toContain("/attachments/");
   });
 });

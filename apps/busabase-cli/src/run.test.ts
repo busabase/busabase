@@ -43,7 +43,8 @@ describe("busabase-cli commands", () => {
   });
 
   it("documents node and terminal Change Request commands in help", () => {
-    expect(HELP).toContain("nodes create-change-request --type <folder|base|skill|drive|doc>");
+    expect(HELP).toContain("nodes create-change-request --type <folder|base|skill|drive|file|doc>");
+    expect(HELP).toContain("--asset-id <id>");
     expect(HELP).toContain("change-requests close --change-request-id <id>");
     expect(HELP).toContain("records list [--limit <n>] [--base-id <id>] [--cursor <cursor>]");
     expect(HELP).toContain("assets upload --file <path>");
@@ -52,6 +53,8 @@ describe("busabase-cli commands", () => {
     expect(HELP).not.toContain(["create", "dra", "ft"].join("-"));
     expect(HELP).not.toContain(["dra", "fts "].join(""));
     expect(HELP).not.toContain(["--dra", "ft-id"].join(""));
+    expect(HELP).not.toContain("--attachment-id <id>");
+    expect(HELP).not.toContain("--content-hash <hash>");
   });
 
   it("generates commands for the full OpenAPI surface (previously uncovered domains)", () => {
@@ -60,7 +63,10 @@ describe("busabase-cli commands", () => {
     expect(HELP).toContain("records delete-change-request");
     // Whole domains that had no curated command.
     expect(HELP).toContain("assets list");
+    expect(HELP).toContain("assets update-metadata");
     expect(HELP).toContain("docs create");
+    expect(HELP).toContain("files create");
+    expect(HELP).toContain("files get");
     expect(HELP).toContain("skills read-file");
     expect(HELP).toContain("views delete-change-request");
     expect(HELP).toContain("comments create");
@@ -132,6 +138,46 @@ describe("busabase-cli commands", () => {
     ]);
   });
 
+  it("routes generated Asset metadata updates through the public Assets API", async () => {
+    const calls: Array<{ body: unknown; method: string; url: string }> = [];
+    global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      calls.push({
+        body: request.body ? await request.json() : null,
+        method: request.method,
+        url: request.url,
+      });
+      return jsonResponse({ asset: { id: "ast_1", metadata: {} }, usages: [] });
+    }) as typeof fetch;
+
+    const exitCode = await runCli([
+      "--base-url",
+      "http://localhost:15419",
+      "--output",
+      "json",
+      "assets",
+      "update-metadata",
+      "--asset-id",
+      "ast_1",
+      "--metadata-json",
+      '{"summary":"AI-readable PDF summary","tags":["insurance"]}',
+      "--mode",
+      "replace",
+    ]);
+
+    expect(exitCode).toBe(0);
+    expect(calls).toEqual([
+      expect.objectContaining({
+        method: "PATCH",
+        url: "http://localhost:15419/api/v1/assets/ast_1/metadata",
+        body: {
+          metadata: { summary: "AI-readable PDF summary", tags: ["insurance"] },
+          mode: "replace",
+        },
+      }),
+    ]);
+  });
+
   it("creates a folder node Change Request through the node endpoint", async () => {
     const calls: Array<{ body: unknown; method: string; url: string }> = [];
     global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -170,6 +216,51 @@ describe("busabase-cli commands", () => {
         },
       }),
     ]);
+  });
+
+  it("prints nodes list as a terminal-friendly tree by default", async () => {
+    const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    global.fetch = vi.fn(async () =>
+      jsonResponse([
+        {
+          id: "nod_root",
+          parentId: null,
+          type: "folder",
+          slug: "workspace",
+          name: "Workspace",
+          description: "",
+          metadata: {},
+          position: 0,
+          createdAt: "2026-07-07T00:00:00.000Z",
+          updatedAt: "2026-07-07T00:00:00.000Z",
+          baseId: null,
+          children: [
+            {
+              id: "nod_blog",
+              parentId: "nod_root",
+              type: "base",
+              slug: "blog",
+              name: "Blog Posts",
+              description: "",
+              metadata: {},
+              position: 0,
+              createdAt: "2026-07-07T00:00:00.000Z",
+              updatedAt: "2026-07-07T00:00:00.000Z",
+              baseId: "bse_blog",
+              children: [],
+            },
+          ],
+        },
+      ]),
+    ) as typeof fetch;
+
+    const exitCode = await runCli(["--base-url", "http://localhost:15419", "nodes", "list"]);
+
+    expect(exitCode).toBe(0);
+    const output = log.mock.calls.at(-1)?.[0] as string;
+    expect(output).toContain("[folder] Workspace /workspace");
+    expect(output).toContain("└─ [base] Blog Posts /blog");
+    expect(output).not.toContain('"children"');
   });
 
   it("creates rich Bases from fields JSON", async () => {
@@ -284,6 +375,84 @@ describe("busabase-cli commands", () => {
         },
       }),
     ]);
+  });
+
+  it("creates FileNode Change Requests with Asset metadata", async () => {
+    const calls: Array<{ body: unknown; method: string; url: string }> = [];
+    global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      calls.push({
+        body: request.body ? await requestBody(request) : null,
+        method: request.method,
+        url: request.url,
+      });
+      return jsonResponse({ id: "crq_1", status: "in_review" });
+    }) as typeof fetch;
+
+    const exitCode = await runCli([
+      "--base-url",
+      "http://localhost:15419",
+      "--output",
+      "json",
+      "nodes",
+      "create-change-request",
+      "--type",
+      "file",
+      "--slug",
+      "board-plan",
+      "--name",
+      "Board Plan",
+      "--description",
+      "Planning PDF",
+      "--parent-node-id",
+      "nod_parent",
+      "--asset-id",
+      "ast_1",
+    ]);
+
+    expect(exitCode).toBe(0);
+    expect(calls).toEqual([
+      expect.objectContaining({
+        method: "POST",
+        url: "http://localhost:15419/api/v1/nodes/change-requests",
+        body: {
+          message: "Create file Board Plan",
+          operations: [
+            {
+              description: "Planning PDF",
+              kind: "create",
+              metadata: { assetId: "ast_1" },
+              name: "Board Plan",
+              nodeType: "file",
+              parentNodeId: "nod_parent",
+              slug: "board-plan",
+            },
+          ],
+        },
+      }),
+    ]);
+  });
+
+  it("rejects FileNode Change Requests without an Asset id before fetching", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    global.fetch = vi.fn() as typeof fetch;
+
+    const exitCode = await runCli([
+      "--base-url",
+      "http://localhost:15419",
+      "nodes",
+      "create-change-request",
+      "--type",
+      "file",
+      "--slug",
+      "board-plan",
+      "--name",
+      "Board Plan",
+    ]);
+
+    expect(exitCode).toBe(1);
+    expect(global.fetch).not.toHaveBeenCalled();
+    expect(error.mock.calls.join("\n")).toContain("--asset-id is required with --type file");
   });
 
   it("rejects mixed shorthand and JSON field definitions", async () => {

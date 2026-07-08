@@ -89,6 +89,18 @@ interface FileTreeScreenProps {
 
 type FileTreeVisibility = FileTreeNodeVO["visibility"];
 type FileEditorMode = "preview" | "edit";
+type FileTreeListItem =
+  | (FileTreeFileVO & { type: "file" })
+  | {
+      path: string;
+      name: string;
+      type: "folder";
+      size: 0;
+      updatedAt: null;
+      mimeType: null;
+      assetId: null;
+      displayName: null;
+    };
 
 interface MetadataDraft {
   entryFile: string;
@@ -199,14 +211,14 @@ const getParentPath = (path: string) => {
 
 const normalizeFolderPath = (path: string) => path.replace(/^\/+|\/+$/g, "");
 
-const getFolderForFile = (file: FileTreeFileVO) => {
+const getFolderForFile = (file: FileTreeListItem) => {
   if (file.type === "folder") {
     return normalizeFolderPath(file.path);
   }
   return getParentPath(file.path) === "Root" ? "" : normalizeFolderPath(getParentPath(file.path));
 };
 
-const getDisplayName = (file: FileTreeFileVO, currentFolder: string) => {
+const getDisplayName = (file: FileTreeListItem, currentFolder: string) => {
   const prefix = currentFolder ? `${currentFolder}/` : "";
   const relativePath = file.path.startsWith(prefix) ? file.path.slice(prefix.length) : file.path;
   return file.name || relativePath.split("/").filter(Boolean).at(-1) || file.path;
@@ -218,10 +230,10 @@ const getParentFolder = (folderPath: string) => {
   return parts.join("/");
 };
 
-const getFolderItemCount = (files: FileTreeFileVO[], folderPath: string) =>
+const getFolderItemCount = (files: FileTreeListItem[], folderPath: string) =>
   files.filter((file) => getFolderForFile(file) === normalizeFolderPath(folderPath)).length;
 
-const sortFilesForMobile = (files: FileTreeFileVO[], currentFolder: string) =>
+const sortFilesForMobile = (files: FileTreeListItem[], currentFolder: string) =>
   [...files].sort((left, right) => {
     if (left.type !== right.type) {
       return left.type === "folder" ? -1 : 1;
@@ -235,6 +247,35 @@ const sortFilesForMobile = (files: FileTreeFileVO[], currentFolder: string) =>
       },
     );
   });
+
+const buildFileTreeListItems = (files: FileTreeFileVO[]): FileTreeListItem[] => {
+  const folders = new Map<string, FileTreeListItem>();
+  for (const file of files) {
+    const parts = file.path.split("/").filter(Boolean);
+    for (let index = 1; index < parts.length; index++) {
+      const folderPath = parts.slice(0, index).join("/");
+      if (!folders.has(folderPath)) {
+        folders.set(folderPath, {
+          path: folderPath,
+          name: parts[index - 1] ?? folderPath,
+          type: "folder",
+          size: 0,
+          updatedAt: null,
+          mimeType: null,
+          assetId: null,
+          displayName: null,
+        });
+      }
+    }
+  }
+  return [
+    ...folders.values(),
+    ...files.map((file) => ({
+      ...file,
+      type: "file" as const,
+    })),
+  ];
+};
 
 export function FileTreeScreen({
   title,
@@ -265,11 +306,12 @@ export function FileTreeScreen({
   const [metadataChangeMessage, setMetadataChangeMessage] = useState("");
 
   const files = fileTree?.files ?? [];
-  const fileCount = files.filter((file) => file.type === "file").length;
-  const folderCount = files.length - fileCount;
+  const fileItems = buildFileTreeListItems(files);
+  const fileCount = files.length;
+  const folderCount = fileItems.length - fileCount;
   const itemSummary = `${formatCount(fileCount, "file")} · ${formatCount(folderCount, "folder")}`;
   const visibleFiles = sortFilesForMobile(
-    files.filter((file) => getFolderForFile(file) === currentFolder),
+    fileItems.filter((file) => getFolderForFile(file) === currentFolder),
     currentFolder,
   );
   const currentFolderLabel = currentFolder || "Root";
@@ -296,7 +338,7 @@ export function FileTreeScreen({
       : undefined;
   const metadataMessagePlaceholder = `Update ${entityLabel.toLowerCase()} settings`;
 
-  const openFileForPreview = async (file: FileTreeFileVO) => {
+  const openFileForPreview = async (file: FileTreeListItem) => {
     if (file.type !== "file") {
       return;
     }
@@ -606,7 +648,7 @@ export function FileTreeScreen({
                 const isFile = file.type === "file";
                 const Icon = isFile ? FileText : Folder;
                 const last = index === visibleFiles.length - 1;
-                const folderItemCount = isFile ? 0 : getFolderItemCount(files, file.path);
+                const folderItemCount = isFile ? 0 : getFolderItemCount(fileItems, file.path);
                 return (
                   <NativeRow
                     key={file.path}

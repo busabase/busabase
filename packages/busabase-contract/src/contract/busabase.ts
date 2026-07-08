@@ -10,6 +10,7 @@ import {
 } from "../domains/base/contract";
 import { docContract } from "../domains/doc/contract";
 import { driveContract } from "../domains/drive/contract";
+import { fileContract } from "../domains/file-node/contract";
 import { folderContract } from "../domains/folder/contract";
 import { skillContract } from "../domains/skill/contract";
 import {
@@ -64,7 +65,8 @@ export const busabaseContractRoutes = {
       path: "/search",
       tags: ["Search"],
       summary: "Search Busabase",
-      successDescription: "Paginated search results across records, change requests, and Bases.",
+      successDescription:
+        "Paginated search results across records, change requests, Bases, File nodes, and Assets.",
     })
     .input(searchInputSchema)
     .output(searchResponseSchema),
@@ -173,6 +175,7 @@ export const busabaseContractRoutes = {
   bases: baseContract,
   skills: skillContract,
   drives: driveContract,
+  files: fileContract,
   docs: docContract,
   folders: folderContract,
   assets: assetsContract,

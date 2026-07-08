@@ -13,6 +13,7 @@ import { type BusabaseContract, busabaseContract } from "../contract/busabase";
 import type { CreatableNodeType } from "../domains/registry";
 import type {
   AgentTaskVO,
+  AssetDetailVO,
   AuditEventVO,
   BaseVO,
   ChangeRequestVO,
@@ -97,6 +98,7 @@ export interface BusabaseDashboardApiClient {
   createNodeChangeRequest: (payload: {
     message?: string;
     submittedBy?: string;
+    autoMerge?: boolean;
     operations: Array<
       | {
           kind: "create";
@@ -105,6 +107,7 @@ export interface BusabaseDashboardApiClient {
           slug: string;
           name: string;
           description?: string;
+          metadata?: Record<string, unknown>;
           fields?: Array<{
             slug: string;
             name: iString;
@@ -241,6 +244,11 @@ export interface BusabaseDashboardApiClient {
   ) => Promise<{ changeRequest: ChangeRequestVO; record: RecordVO | null; view: ViewVO | null }>;
   createAssetUploadUrl: (input: RequestUploadUrlDTO) => Promise<RequestUploadUrlVO>;
   confirmAsset: (input: ConfirmUploadDTO) => Promise<ConfirmUploadVO>;
+  updateAssetMetadata: (input: {
+    assetId: string;
+    metadata: Record<string, unknown>;
+    mode?: "merge" | "replace";
+  }) => Promise<AssetDetailVO>;
   createRestoreBaseChangeRequest: (
     baseId: string,
     payload: { submittedBy?: string; message?: string },
@@ -377,6 +385,7 @@ export const createBusabaseRestApiClient = (
     mergeChangeRequest: (changeRequestId) => client.changeRequests.merge({ changeRequestId }),
     createAssetUploadUrl: (input) => client.assets.createUploadUrl(input),
     confirmAsset: (input) => client.assets.confirm(input),
+    updateAssetMetadata: (input) => client.assets.updateMetadata(input),
     createRestoreBaseChangeRequest: (baseId, payload) =>
       client.bases.restoreChangeRequest({ baseId, ...payload }),
     createRestoreFieldChangeRequest: (baseId, payload) =>

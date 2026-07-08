@@ -21,6 +21,49 @@ export function assetKindIcon(mimeType: string) {
   return FileText;
 }
 
+export function hasAssetMetadata(metadata: Record<string, unknown> | null | undefined) {
+  return Object.keys(metadata ?? {}).length > 0;
+}
+
+export function formatAssetMetadata(metadata: Record<string, unknown> | null | undefined) {
+  return JSON.stringify(hasAssetMetadata(metadata) ? metadata : {}, null, 2);
+}
+
+export function AssetMetadataBlock({
+  metadata,
+  framed = false,
+  compact = false,
+}: {
+  metadata: Record<string, unknown> | null | undefined;
+  framed?: boolean;
+  compact?: boolean;
+}) {
+  const messages = useCoreI18n();
+  const content = (
+    <>
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <h2 className="font-medium text-sm">{messages.assets.metadata}</h2>
+        {hasAssetMetadata(metadata) ? (
+          <span className="rounded-full border bg-muted px-2 py-0.5 text-muted-foreground text-[10px] uppercase">
+            {messages.assets.metadataJson}
+          </span>
+        ) : null}
+      </div>
+      <pre
+        className={`overflow-auto whitespace-pre-wrap break-words rounded-md border bg-muted/40 p-3 font-mono text-[11px] leading-5 ${compact ? "max-h-48" : "max-h-72"}`}
+      >
+        {formatAssetMetadata(metadata)}
+      </pre>
+    </>
+  );
+
+  return framed ? (
+    <div className="rounded-xl border bg-background p-4">{content}</div>
+  ) : (
+    <div className="mt-3 border-t pt-3">{content}</div>
+  );
+}
+
 export function AssetsHeader({ count }: { count: number }) {
   const messages = useCoreI18n();
 
@@ -134,6 +177,11 @@ export function AssetLibraryView({
                 {asset.usageCount > 0 ? (
                   <span className="absolute top-1.5 right-1.5 rounded-full bg-foreground/80 px-1.5 py-0.5 font-medium text-[10px] text-background">
                     {asset.usageCount}×
+                  </span>
+                ) : null}
+                {hasAssetMetadata(asset.metadata) ? (
+                  <span className="absolute bottom-1.5 left-1.5 rounded-full bg-background/90 px-1.5 py-0.5 font-medium text-[10px] text-foreground uppercase shadow-sm">
+                    {messages.assets.metadataBadge}
                   </span>
                 ) : null}
               </div>
@@ -269,6 +317,8 @@ export function AssetDetailView({
               ) : null}
             </div>
           </div>
+
+          <AssetMetadataBlock framed metadata={asset.metadata} />
 
           <div className="rounded-xl border bg-background p-4">
             <h2 className="mb-2 font-medium text-sm">{messages.assets.whereUsed}</h2>

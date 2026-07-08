@@ -1,8 +1,8 @@
 CREATE TYPE "public"."busabase_change_request_status" AS ENUM('in_review', 'changes_requested', 'approved', 'rejected', 'merged', 'abandoned', 'conflict');--> statement-breakpoint
 CREATE TYPE "public"."busabase_comment_subject" AS ENUM('record', 'change_request', 'operation', 'commit');--> statement-breakpoint
-CREATE TYPE "public"."busabase_operation_kind" AS ENUM('record_create', 'record_update', 'record_delete', 'record_variant', 'view_create', 'view_update', 'view_delete', 'view_restore', 'node_create', 'node_rename', 'node_delete', 'node_restore', 'node_move', 'skill_file_create', 'skill_file_update', 'skill_file_delete', 'skill_metadata_update', 'doc_update', 'base_add_field', 'base_delete_field', 'base_update_field', 'base_convert_field', 'base_reorder_fields', 'base_restore_field', 'base_archive', 'base_restore', 'record_restore');--> statement-breakpoint
+CREATE TYPE "public"."busabase_operation_kind" AS ENUM('record_create', 'record_update', 'record_delete', 'record_variant', 'view_create', 'view_update', 'view_delete', 'view_restore', 'node_create', 'node_rename', 'node_delete', 'node_restore', 'node_move', 'skill_file_create', 'skill_file_update', 'skill_file_delete', 'skill_metadata_update', 'drive_file_create', 'drive_file_update', 'drive_file_delete', 'drive_metadata_update', 'doc_update', 'base_add_field', 'base_delete_field', 'base_update_field', 'base_convert_field', 'base_reorder_fields', 'base_restore_field', 'base_archive', 'base_restore', 'record_restore');--> statement-breakpoint
 CREATE TYPE "public"."busabase_review_verdict" AS ENUM('approved', 'rejected');--> statement-breakpoint
-CREATE TYPE "public"."busabase_field_type" AS ENUM('text', 'longtext', 'markdown', 'html', 'attachment', 'relation', 'number', 'date', 'checkbox', 'select', 'multiselect', 'url', 'email', 'phone', 'created_time', 'updated_time', 'created_by', 'updated_by', 'auto_number', 'ai_summary', 'ai_tags', 'code');--> statement-breakpoint
+CREATE TYPE "public"."busabase_field_type" AS ENUM('text', 'longtext', 'markdown', 'html', 'attachment', 'relation', 'number', 'date', 'checkbox', 'select', 'multiselect', 'url', 'email', 'phone', 'created_time', 'updated_time', 'created_by', 'updated_by', 'auto_number', 'ai_summary', 'ai_tags', 'code', 'json', 'yaml');--> statement-breakpoint
 CREATE TABLE "busabase_audit_events" (
 	"id" text PRIMARY KEY NOT NULL,
 	"space_id" text NOT NULL,
@@ -135,10 +135,15 @@ CREATE TABLE "busabase_asset_usages" (
 	"id" text PRIMARY KEY NOT NULL,
 	"space_id" text NOT NULL,
 	"asset_id" text NOT NULL,
+	"owner_type" text DEFAULT 'base' NOT NULL,
 	"node_id" text NOT NULL,
+	"path" text DEFAULT '' NOT NULL,
 	"record_id" text DEFAULT '' NOT NULL,
 	"field_slug" text DEFAULT '' NOT NULL,
-	"created_at" timestamp DEFAULT now() NOT NULL
+	"block_id" text DEFAULT '' NOT NULL,
+	"metadata" jsonb DEFAULT '{}'::jsonb NOT NULL,
+	"created_at" timestamp DEFAULT now() NOT NULL,
+	"updated_at" timestamp DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
 CREATE TABLE "busabase_assets" (
@@ -146,6 +151,8 @@ CREATE TABLE "busabase_assets" (
 	"space_id" text NOT NULL,
 	"attachment_id" text NOT NULL,
 	"name" text NOT NULL,
+	"content_kind" text DEFAULT 'binary' NOT NULL,
+	"metadata" jsonb DEFAULT '{}'::jsonb NOT NULL,
 	"created_by" text DEFAULT 'local-producer' NOT NULL,
 	"created_at" timestamp DEFAULT now() NOT NULL,
 	"updated_at" timestamp DEFAULT now() NOT NULL
@@ -244,6 +251,13 @@ CREATE TABLE "busabase_views" (
 	"updated_at" timestamp DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
+CREATE TABLE "busabase_user_env_vars" (
+	"user_id" text PRIMARY KEY NOT NULL,
+	"env_payload" jsonb NOT NULL,
+	"created_at" timestamp DEFAULT now() NOT NULL,
+	"updated_at" timestamp DEFAULT now() NOT NULL
+);
+--> statement-breakpoint
 ALTER TABLE "busabase_audit_events" ADD CONSTRAINT "busabase_audit_events_base_id_busabase_bases_id_fk" FOREIGN KEY ("base_id") REFERENCES "public"."busabase_bases"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "busabase_audit_events" ADD CONSTRAINT "busabase_audit_events_record_id_busabase_records_id_fk" FOREIGN KEY ("record_id") REFERENCES "public"."busabase_records"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "busabase_audit_events" ADD CONSTRAINT "busabase_audit_events_change_request_id_busabase_change_requests_id_fk" FOREIGN KEY ("change_request_id") REFERENCES "public"."busabase_change_requests"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
@@ -315,9 +329,10 @@ CREATE INDEX "attachments_storage_key_idx" ON "attachments" USING btree ("storag
 CREATE INDEX "attachments_content_hash_idx" ON "attachments" USING btree ("content_hash");--> statement-breakpoint
 CREATE INDEX "busabase_asset_usages_asset_idx" ON "busabase_asset_usages" USING btree ("asset_id");--> statement-breakpoint
 CREATE INDEX "busabase_asset_usages_node_idx" ON "busabase_asset_usages" USING btree ("node_id");--> statement-breakpoint
-CREATE UNIQUE INDEX "busabase_asset_usages_uniq" ON "busabase_asset_usages" USING btree ("asset_id","node_id","record_id","field_slug");--> statement-breakpoint
+CREATE INDEX "busabase_asset_usages_node_path_idx" ON "busabase_asset_usages" USING btree ("node_id","path");--> statement-breakpoint
+CREATE UNIQUE INDEX "busabase_asset_usages_uniq" ON "busabase_asset_usages" USING btree ("owner_type","asset_id","node_id","path","record_id","field_slug","block_id");--> statement-breakpoint
 CREATE INDEX "busabase_assets_space_idx" ON "busabase_assets" USING btree ("space_id");--> statement-breakpoint
-CREATE UNIQUE INDEX "busabase_assets_space_attachment_uniq" ON "busabase_assets" USING btree ("space_id","attachment_id");--> statement-breakpoint
+CREATE INDEX "busabase_assets_space_attachment_idx" ON "busabase_assets" USING btree ("space_id","attachment_id");--> statement-breakpoint
 CREATE UNIQUE INDEX "busabase_fields_base_slug_uniq" ON "busabase_base_fields" USING btree ("base_id","slug") WHERE "busabase_base_fields"."deleted_at" IS NULL;--> statement-breakpoint
 CREATE UNIQUE INDEX "busabase_bases_node_uniq" ON "busabase_bases" USING btree ("node_id");--> statement-breakpoint
 CREATE UNIQUE INDEX "busabase_bases_space_slug_uniq" ON "busabase_bases" USING btree ("space_id","slug") WHERE "busabase_bases"."archived_at" IS NULL;--> statement-breakpoint

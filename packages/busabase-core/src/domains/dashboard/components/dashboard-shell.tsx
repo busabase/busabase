@@ -44,6 +44,10 @@ interface BusabaseDashboardShellProps {
   chrome: BusabaseDashboardChrome;
   /** Active UI locale for the sidebar nav labels (defaults to English). */
   locale?: string;
+  /** Optional top-level destinations hidden by a host that exposes them elsewhere. */
+  hiddenNavItems?: Array<"assets">;
+  /** Optional top-level destinations pinned with Inbox/Search by a host. */
+  pinnedNavItems?: Array<"activity">;
 }
 
 /**
@@ -60,13 +64,25 @@ export function BusabaseDashboardShell({
   onCreateClick,
   chrome,
   locale,
+  hiddenNavItems = [],
+  pinnedNavItems = [],
 }: BusabaseDashboardShellProps) {
   const messages = isCoreLocale(locale) ? coreMessagesByLocale[locale] : coreMessagesByLocale.en;
   const nav = messages.nav;
   // The "Bases" group label doubles as the header-action key, so reuse one value.
   const basesLabel = nav.bases;
   const assetsLabel = nav.assets;
-  // Pinned nav (fixed at the top, never scrolls): Inbox + Search.
+  const hiddenNavItemSet = new Set(hiddenNavItems);
+  const pinnedNavItemSet = new Set(pinnedNavItems);
+  const scrollShortcutItems: NavItem[] = [
+    ...(pinnedNavItemSet.has("activity")
+      ? []
+      : [{ title: nav.activity, url: "/activity", icon: Activity }]),
+    ...(hiddenNavItemSet.has("assets")
+      ? []
+      : [{ title: assetsLabel, url: "/assets", icon: Images }]),
+  ];
+  // Pinned nav (fixed at the top, never scrolls): Inbox + Search + optional host shortcuts.
   const pinnedNav: NavGroup[] = [
     {
       label: "",
@@ -83,27 +99,27 @@ export function BusabaseDashboardShell({
           badge: activeChangeRequestCount || undefined,
         },
         { title: nav.search, url: "", icon: Search, onClick: "search" },
+        ...(pinnedNavItemSet.has("activity")
+          ? [{ title: nav.activity, url: "/activity", icon: Activity }]
+          : []),
       ],
     },
   ];
 
-  // Scrollable nav (everything below the pinned header): Activity, Assets, Bases tree.
+  // Scrollable nav (everything below the pinned header): optional shortcuts + Bases tree.
   const scrollNav: NavGroup[] = [
-    {
-      label: "",
-      // Flush top (pt-0) so Activity sits 4px under the pinned Search row, while
-      // keeping the default bottom padding (pb-2) so the gap down to the Bases
-      // section header is unchanged.
-      className: "pt-0",
-      items: [
-        { title: nav.activity, url: "/activity", icon: Activity },
-        { title: assetsLabel, url: "/assets", icon: Images },
-        // Hidden for now — the Archived/Trash view is reachable via its route
-        // (/archived) but no longer shown in the sidebar. To restore, re-add the
-        // `Archive` icon import from lucide-react.
-        // { title: nav.archived, url: "/archived", icon: Archive },
-      ],
-    },
+    ...(scrollShortcutItems.length > 0
+      ? [
+          {
+            label: "",
+            // Flush top (pt-0) so Activity sits 4px under the pinned Search row, while
+            // keeping the default bottom padding (pb-2) so the gap down to the Bases
+            // section header is unchanged.
+            className: "pt-0",
+            items: scrollShortcutItems,
+          },
+        ]
+      : []),
     {
       label: basesLabel,
       items: buildKnowledgeBaseItems(
