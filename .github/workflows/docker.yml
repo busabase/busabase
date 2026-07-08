@@ -43,20 +43,22 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          package_version=$(jq -r '.version' apps/busabase/package.json)
+          package_version=$(node -p "require('./apps/busabase/package.json').version")
           short_sha="${GITHUB_SHA::7}"
           ref_slug=$(printf '%s' "${GITHUB_REF_NAME}" | sed 's#[^A-Za-z0-9_.-]#-#g')
 
-          if [ "${GITHUB_REF_NAME}" = "main" ]; then
-            build_meta="release.${GITHUB_RUN_NUMBER}.${short_sha}"
-          else
-            build_meta="alpha.${GITHUB_RUN_NUMBER}.${short_sha}"
+          if ! [[ "${package_version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]]; then
+            echo "apps/busabase/package.json version is not SemVer: ${package_version}" >&2
+            exit 1
           fi
-          semver="${package_version}-${build_meta}"
 
-          tags="${semver}
-          v${semver}
-          ${package_version}
+          docker_version="${package_version%%+*}"
+          major_minor=$(printf '%s' "${docker_version}" | cut -d. -f1,2)
+          major=$(printf '%s' "${docker_version}" | cut -d. -f1)
+
+          tags="${docker_version}
+          ${major_minor}
+          ${major}
           ${ref_slug}
           ${ref_slug}-${short_sha}"
           if [ "${GITHUB_REF}" = "refs/heads/main" ]; then
@@ -66,13 +68,13 @@ jobs:
           tags=$(printf '%s\n' "${tags}" | sed 's/^[[:space:]]*//')
 
           {
-            echo "version=${semver}"
+            echo "version=${docker_version}"
             echo "tag_values<<__TAGS_EOF__"
             echo "${tags}"
             echo "__TAGS_EOF__"
           } >> "$GITHUB_OUTPUT"
 
-          echo "Version: ${semver}"
+          echo "Version: ${docker_version}"
           echo "Tags:"
           echo "${tags}"
 
