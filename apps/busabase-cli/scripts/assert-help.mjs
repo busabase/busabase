@@ -33,7 +33,7 @@ const createChangeRequestHelp = execFileSync(
 );
 
 const required = [
-  "nodes create-change-request --type <folder|base|skill|drive|doc>",
+  "nodes create-change-request --type <folder|base|skill|drive|file|doc>",
   "bases create-change-request --base-id <id>",
   "records change-requests --record-id <id>",
   "change-requests list [--limit <n>]",
