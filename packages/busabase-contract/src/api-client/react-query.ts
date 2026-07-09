@@ -50,11 +50,21 @@ export const createBusabaseORPCClient = (
 /**
  * TanStack Query utils for the Busabase contract: `orpc.records.list.queryOptions(...)`,
  * `orpc.records.updateChangeRequest.mutationOptions(...)`, `orpc.<proc>.key(...)`, etc.
+ *
+ * `keyPrefix` prepends a segment to EVERY generated query/mutation key. The cloud
+ * passes the active space id so one space's cached reads can never be served under
+ * another (per-space cache isolation) — every query, `listKeys` entry and `.key()`
+ * built from these utils is namespaced in one place. Open source leaves it default.
  */
 export const createBusabaseQueryUtils = (
   apiBasePath = "/api/rpc",
   opts: BusabaseClientOptions = {},
-) => createTanstackQueryUtils(createBusabaseORPCClient(apiBasePath, opts));
+  keyPrefix?: string,
+) =>
+  createTanstackQueryUtils(
+    createBusabaseORPCClient(apiBasePath, opts),
+    keyPrefix ? { path: [keyPrefix] } : undefined,
+  );
 
 export type BusabaseQueryUtils = ReturnType<typeof createBusabaseQueryUtils>;
 

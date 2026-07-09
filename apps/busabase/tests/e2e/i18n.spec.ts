@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./_fixtures";
 
 // Sidebar nav labels come from busabase-core's i18n catalog (CoreDashboardShell
 // receives the resolved locale), and the language preference defaults to "Auto"
@@ -17,5 +17,5 @@ test("language switcher defaults to Auto (no stored preference)", async ({ page 
   await page.evaluate(() => window.localStorage.removeItem("busabaseLocale"));
   await page.reload();
   await page.getByRole("button", { name: /Busabase/ }).click();
-  await expect(page.getByText("Auto", { exact: true })).toBeVisible();
+  await expect(page.getByText("Auto", { exact: true }).first()).toBeVisible();
 });

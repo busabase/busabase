@@ -176,6 +176,27 @@ export interface ChangeRequestVO {
   reviews: ReviewVO[];
 }
 
+// Per-item outcome from the batch review/merge endpoints. Failures are isolated:
+// a bad id records `ok: false` + `error` and the rest still process.
+export interface ChangeRequestBatchResultVO {
+  results: Array<{
+    changeRequestId: string;
+    ok: boolean;
+    status?: string;
+    error?: string;
+  }>;
+}
+
+// Whole-space inbox tab counts (not a capped page) — one number per inbox tab.
+export interface ChangeRequestCountsVO {
+  review: number;
+  changes: number;
+  created: number;
+  approved: number;
+  merged: number;
+  rejected: number;
+}
+
 export type { AssetDetailVO, AssetUsageVO, AssetVO } from "../domains/assets/types";
 export type { DriveFileVO, DriveReadFileVO, DriveVO } from "../domains/drive/types";
 export type { FileNodeMetadata, FileNodeVO } from "../domains/file-node/types";

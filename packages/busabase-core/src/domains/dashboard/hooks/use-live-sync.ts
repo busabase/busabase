@@ -9,6 +9,24 @@ import type { z } from "zod";
 
 type BusabaseLiveEvent = z.infer<typeof liveEventSchema>;
 
+const isExpectedLiveClose = (error: unknown, signal: AbortSignal) => {
+  if (signal.aborted) {
+    return true;
+  }
+
+  if (!(error instanceof Error)) {
+    return false;
+  }
+
+  return (
+    error.name === "AbortError" ||
+    error.name === "ResponseAborted" ||
+    error.message === "Connection closed." ||
+    error.message === "Connection closed" ||
+    error.message.toLowerCase().includes("aborted")
+  );
+};
+
 interface UseBusabaseLiveSyncOptions {
   activeBaseId?: string | null;
   listKeys: {
@@ -17,8 +35,11 @@ interface UseBusabaseLiveSyncOptions {
     auditEvents: QueryKey;
     bases: QueryKey;
     changeRequests: QueryKey;
+    changeRequestsPaged: QueryKey;
+    changeRequestCounts: QueryKey;
     nodes: QueryKey;
     records: QueryKey;
+    recordsCount: QueryKey;
   };
   orpc: BusabaseQueryUtils;
   queryClient: QueryClient;
@@ -38,8 +59,11 @@ export function useBusabaseLiveSync({
       listKeys.auditEvents,
       listKeys.bases,
       listKeys.changeRequests,
+      listKeys.changeRequestsPaged,
+      listKeys.changeRequestCounts,
       listKeys.nodes,
       listKeys.records,
+      listKeys.recordsCount,
       listKeys,
     ],
   );
@@ -47,6 +71,7 @@ export function useBusabaseLiveSync({
   useEffect(() => {
     let cancelled = false;
     let unsubscribe: (() => Promise<void>) | null = null;
+    let abortController: AbortController | null = null;
     let retryTimer: ReturnType<typeof setTimeout> | null = null;
 
     const invalidateBaseScope = (baseId: string) => {
@@ -70,7 +95,10 @@ export function useBusabaseLiveSync({
       void queryClient.invalidateQueries({ queryKey: stableListKeys.bases });
       void queryClient.invalidateQueries({ queryKey: stableListKeys.archivedBases });
       void queryClient.invalidateQueries({ queryKey: stableListKeys.records });
+      void queryClient.invalidateQueries({ queryKey: stableListKeys.recordsCount });
       void queryClient.invalidateQueries({ queryKey: stableListKeys.changeRequests });
+      void queryClient.invalidateQueries({ queryKey: stableListKeys.changeRequestsPaged });
+      void queryClient.invalidateQueries({ queryKey: stableListKeys.changeRequestCounts });
       void queryClient.invalidateQueries({ queryKey: stableListKeys.auditEvents });
       if (activeBaseId) {
         invalidateBaseScope(activeBaseId);
@@ -79,6 +107,8 @@ export function useBusabaseLiveSync({
 
     const handleEvent = (event: BusabaseLiveEvent) => {
       void queryClient.invalidateQueries({ queryKey: stableListKeys.changeRequests });
+      void queryClient.invalidateQueries({ queryKey: stableListKeys.changeRequestsPaged });
+      void queryClient.invalidateQueries({ queryKey: stableListKeys.changeRequestCounts });
       void queryClient.invalidateQueries({ queryKey: stableListKeys.auditEvents });
 
       if (event.nodeIds.length > 0) {
@@ -90,6 +120,7 @@ export function useBusabaseLiveSync({
 
       if (event.recordIds.length > 0 || event.viewIds.length > 0 || event.baseId) {
         void queryClient.invalidateQueries({ queryKey: stableListKeys.records });
+        void queryClient.invalidateQueries({ queryKey: stableListKeys.recordsCount });
         void queryClient.invalidateQueries({ queryKey: stableListKeys.bases });
         void queryClient.invalidateQueries({ queryKey: stableListKeys.archivedBases });
         if (event.baseId) {
@@ -106,19 +137,24 @@ export function useBusabaseLiveSync({
       // Redis pub/sub does not retain history. Refresh on every reconnect so a
       // temporarily disconnected tab still converges to the latest workspace state.
       invalidateWorkspace();
-      unsubscribe = consumeEventIterator(orpc.live.subscribe.call(undefined), {
-        onEvent: handleEvent,
-        onError: () => {
-          if (!cancelled) {
-            retryTimer = setTimeout(connect, 3000);
-          }
+      const controller = new AbortController();
+      abortController = controller;
+      unsubscribe = consumeEventIterator(
+        orpc.live.subscribe.call(undefined, { signal: controller.signal }),
+        {
+          onEvent: handleEvent,
+          onError: (error) => {
+            if (!cancelled && !isExpectedLiveClose(error, controller.signal)) {
+              retryTimer = setTimeout(connect, 3000);
+            }
+          },
+          onSuccess: () => {
+            if (!cancelled) {
+              retryTimer = setTimeout(connect, 3000);
+            }
+          },
         },
-        onSuccess: () => {
-          if (!cancelled) {
-            retryTimer = setTimeout(connect, 3000);
-          }
-        },
-      });
+      );
     };
 
     connect();
@@ -128,7 +164,8 @@ export function useBusabaseLiveSync({
       if (retryTimer) {
         clearTimeout(retryTimer);
       }
-      void unsubscribe?.();
+      abortController?.abort();
+      void unsubscribe?.().catch(() => undefined);
     };
   }, [activeBaseId, orpc, queryClient, stableListKeys]);
 }

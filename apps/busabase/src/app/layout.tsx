@@ -35,6 +35,9 @@ export const generateMetadata = async (): Promise<Metadata> => {
   return {
     title: LL.common.appName(),
     description: LL.marketing.rootDescription(),
+    icons: {
+      icon: "/icon.svg",
+    },
   };
 };
 

@@ -1,13 +1,4 @@
-import { type APIRequestContext, type APIResponse, expect, test } from "@playwright/test";
-
-const unique = (prefix: string) => `${prefix} ${Date.now()} ${Math.floor(Math.random() * 1000)}`;
-
-const json = async <T>(response: APIResponse): Promise<T> => {
-  if (!response.ok) {
-    throw new Error(`${response.status} ${await response.text()}`);
-  }
-  return response.json() as Promise<T>;
-};
+import { type APIRequestContext, expect, json, test, unique } from "./_fixtures";
 
 interface BaseVO {
   id: string;
@@ -60,7 +51,7 @@ test("review -> merge -> refresh keeps user-visible lineage", async ({ page, req
   await page.getByRole("button", { exact: true, name: "Approve" }).click();
   await expect(page.getByText("Approved · ready to merge")).toBeVisible();
   await page.getByRole("button", { name: "Merge into Base" }).click();
-  await expect(page).toHaveURL(/\/dashboard\/base\/blog\/qrc/);
+  await expect(page).toHaveURL(/\/dashboard\/base\/blog\/rec/);
   await expect(page.getByText("Lineage", { exact: true })).toBeVisible();
   await expect(page.getByText("Review history")).toBeVisible();
   await expect(page.getByLabel("Technical IDs")).not.toHaveAttribute("open", "");
@@ -146,7 +137,7 @@ test("same-field merge conflict stays visible and recoverable", async ({ page, r
   const recordId = merged.record.id;
 
   const firstUpdate = await json<ChangeRequestVO>(
-    await request.post(`/api/v1/records/${recordId}/update-change-request`, {
+    await request.put(`/api/v1/records/${recordId}/change-requests`, {
       data: {
         fields: { title: `${title} A`, body: "original body", channel: "blog" },
         message: "First title edit",
@@ -155,7 +146,7 @@ test("same-field merge conflict stays visible and recoverable", async ({ page, r
     }),
   );
   const conflictingUpdate = await json<ChangeRequestVO>(
-    await request.post(`/api/v1/records/${recordId}/update-change-request`, {
+    await request.put(`/api/v1/records/${recordId}/change-requests`, {
       data: {
         fields: { title: `${title} B`, body: "original body", channel: "blog" },
         message: "Second title edit",
@@ -211,15 +202,18 @@ test("record delete request explains impact and preserves the canonical record",
 
   await page.goto(`/dashboard/base/blog/${merged.record.id}`);
   await expect(page.getByRole("heading", { name: title })).toBeVisible();
+  // Delete actions live behind the record's "⋯" menu (a <details> disclosure).
+  await page.locator("details").filter({ hasText: "Delete change request" }).first().click();
   await page.getByRole("button", { name: "Delete Change Request" }).click();
   await expect(page.getByText("Create delete request?")).toBeVisible();
   await expect(page.getByText("The canonical record stays visible")).toBeVisible();
   await page.getByRole("button", { name: "Cancel" }).click();
   await expect(page.getByRole("heading", { name: title })).toBeVisible();
 
+  await page.locator("details").filter({ hasText: "Delete change request" }).first().click();
   await page.getByRole("button", { name: "Delete Change Request" }).click();
   await page.getByRole("button", { name: "Create delete request" }).click();
-  await expect(page).toHaveURL(/\/dashboard\/inbox\/qdf/);
+  await expect(page).toHaveURL(/\/dashboard\/inbox\/crq/);
   await expect(page.getByText("Waiting for your review")).toBeVisible();
   await expect(page.getByText("destructive", { exact: true })).toBeVisible();
 

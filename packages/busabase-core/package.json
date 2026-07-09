@@ -132,6 +132,7 @@
     "@orpc/tanstack-query": "1.14.6",
     "@orpc/zod": "^1.14.6",
     "@tanstack/react-query": "^5.101.0",
+    "@tanstack/react-virtual": "^3.13.12",
     "@xyflow/react": "^12.10.0",
     "busabase-contract": "workspace:*",
     "drizzle-orm": "^0.45.1",

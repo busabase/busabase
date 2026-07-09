@@ -140,20 +140,22 @@ const commentSchema = z.object({
   updatedAt: z.string(),
 });
 
+const changeRequestStatusSchema = z.enum([
+  "in_review",
+  "changes_requested",
+  "approved",
+  "rejected",
+  "merged",
+  "abandoned",
+  "conflict",
+]);
+
 const changeRequestSchema = z.object({
   id: z.string(),
   baseId: z.string().nullable(),
   targetType: z.enum(["base", "node"]),
   nodeId: z.string().nullable(),
-  status: z.enum([
-    "in_review",
-    "changes_requested",
-    "approved",
-    "rejected",
-    "merged",
-    "abandoned",
-    "conflict",
-  ]),
+  status: changeRequestStatusSchema,
   submittedBy: z.string(),
   submittedByUser: userRefSchema.nullable().optional().default(null),
   sourceMeta: z.record(z.string(), z.unknown()),
@@ -409,6 +411,38 @@ const listInputSchema = z
   .optional()
   .default({ limit: 50 });
 
+// Keyset-paginated change request listing. `status` narrows to specific
+// statuses (e.g. the inbox "rejected" tab passes ["rejected","abandoned"]);
+// `mine` narrows to change requests submitted by the acting user (the
+// "created" tab). Both are resolved server-side against the request context.
+const listChangeRequestsPagedInputSchema = z
+  .object({
+    limit: z.coerce.number().int().min(1).max(100).optional().default(50),
+    /** Opaque base64 cursor (`createdAt|id`) for keyset pagination. */
+    cursor: z.string().optional(),
+    status: z.array(changeRequestStatusSchema).optional(),
+    mine: z.boolean().optional(),
+  })
+  .optional()
+  .default({ limit: 50 });
+
+const listChangeRequestsResponseSchema = z.object({
+  changeRequests: z.array(changeRequestSchema),
+  nextCursor: z.string().nullable(),
+});
+
+// Server-side inbox tab counts. Computed over the whole space (not a capped
+// page) so the tab badges are correct regardless of how many change requests
+// exist. `created` is scoped to the acting user.
+const changeRequestCountsSchema = z.object({
+  review: z.number().int().nonnegative(),
+  changes: z.number().int().nonnegative(),
+  created: z.number().int().nonnegative(),
+  approved: z.number().int().nonnegative(),
+  merged: z.number().int().nonnegative(),
+  rejected: z.number().int().nonnegative(),
+});
+
 const searchInputSchema = z.object({
   query: z.string().default(""),
   limit: z.coerce.number().int().min(1).max(100).optional().default(20),
@@ -467,7 +501,9 @@ export {
   reviewSchema,
   commentSubjectTypeSchema,
   commentSchema,
+  changeRequestStatusSchema,
   changeRequestSchema,
+  changeRequestCountsSchema,
   agentTaskSchema,
   searchResultSchema,
   searchResponseSchema,
@@ -483,5 +519,7 @@ export {
   commentSubjectInputSchema,
   createCommentInputSchema,
   listInputSchema,
+  listChangeRequestsPagedInputSchema,
+  listChangeRequestsResponseSchema,
   searchInputSchema,
 };

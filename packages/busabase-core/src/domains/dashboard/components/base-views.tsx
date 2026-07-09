@@ -8,6 +8,7 @@ import { isDerivedFieldSlug } from "../helpers/change-request";
 import { createDefaultFieldOptions, fieldTypeOptions } from "../helpers/field";
 import type {
   CreateBaseFieldPayload,
+  RecordsPagination,
   ViewFormPayload,
   ViewSubmitOptions,
 } from "../helpers/view-types";
@@ -21,6 +22,7 @@ export function BaseDetailView({
   archivedViews = [],
   archivedRecords = [],
   records,
+  pagination,
   base,
   onCreateView,
   onDeleteView,
@@ -33,6 +35,7 @@ export function BaseDetailView({
   archivedViews?: ViewVO[];
   archivedRecords?: RecordVO[];
   records: RecordVO[];
+  pagination?: RecordsPagination;
   base: BaseVO | null;
   onCreateView: (
     base: BaseVO,
@@ -73,6 +76,7 @@ export function BaseDetailView({
             onUpdateView={onUpdateView}
             records={filteredRecords}
             relationRecords={records}
+            pagination={pagination}
             views={baseViews}
           />
         </div>

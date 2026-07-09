@@ -4,6 +4,7 @@ import {
   QueryClient,
   QueryClientProvider,
   type QueryKey,
+  useInfiniteQuery,
   useMutation,
   useQueries,
   useQuery,
@@ -61,6 +62,10 @@ import { useDashboardRoutes } from "./hooks/use-dashboard-routes";
 import { useBusabaseLiveSync } from "./hooks/use-live-sync";
 import { getNodeDetail } from "./node-detail-registry";
 
+// Records per "load more" page. Server caps limit at 100; 50 keeps parity with
+// the previous single-shot list size while staying paginated.
+const RECORDS_PAGE_SIZE = 50;
+
 interface BusabaseDashboardProps {
   nodes: NodeVO[];
   bases: BaseVO[];
@@ -70,6 +75,12 @@ interface BusabaseDashboardProps {
   auditEvents?: AuditEventVO[];
   currentUserId?: string | null;
   apiBasePath?: string;
+  /**
+   * Namespaces every dashboard query key so one space's cached reads are never
+   * served under another. The cloud passes the active space id; open source (a
+   * single space) leaves the default.
+   */
+  cacheSpaceKey?: string;
   apiClient?: BusabaseDashboardApiClient;
   embedded?: boolean;
   onSearchOpenChange?: (open: boolean) => void;
@@ -109,12 +120,14 @@ export function BusabaseDashboard({
 
 function BusabaseDashboardContent({
   apiBasePath = "/api/rpc",
+  cacheSpaceKey = "local",
   apiClient,
   auditEvents: initialAuditEvents = [],
   changeRequests: initialChangeRequests,
-  currentUserId,
   emptyGuide,
-  records: initialRecords,
+  // `records` (SSR seed) is intentionally not consumed: the table now loads per
+  // base via keyset pagination so rows reflect exactly what was fetched. The
+  // prop stays for host compatibility.
   bases: initialBases,
   nodes: nodeTree,
   views: initialViews = [],
@@ -123,7 +136,10 @@ function BusabaseDashboardContent({
   searchOpen,
 }: BusabaseDashboardProps) {
   const messages = useCoreI18n();
-  const orpc = useMemo(() => createBusabaseQueryUtils(apiBasePath), [apiBasePath]);
+  const orpc = useMemo(
+    () => createBusabaseQueryUtils(apiBasePath, {}, cacheSpaceKey),
+    [apiBasePath, cacheSpaceKey],
+  );
   const queryClient = useQueryClient();
   const client = useMemo(
     () => apiClient ?? createBusabaseRestApiClient(apiBasePath),
@@ -131,7 +147,6 @@ function BusabaseDashboardContent({
   );
   // Reads run through oRPC + React Query, seeded by the SSR props as initialData.
   const changeRequestsList = orpc.changeRequests.list.queryOptions({ input: {} });
-  const recordsList = orpc.records.list.queryOptions({ input: {} });
   const basesList = orpc.bases.list.queryOptions({});
   const archivedBasesList = orpc.bases.listArchived.queryOptions({});
   const archivedNodesList = orpc.nodes.listArchived.queryOptions({});
@@ -140,13 +155,11 @@ function BusabaseDashboardContent({
     ...changeRequestsList,
     initialData: initialChangeRequests,
   });
-  const recordsQuery = useQuery({ ...recordsList, initialData: initialRecords });
   const basesQuery = useQuery({ ...basesList, initialData: initialBases });
   const archivedBasesQuery = useQuery(archivedBasesList);
   const archivedNodesQuery = useQuery(archivedNodesList);
   const auditEventsQuery = useQuery({ ...auditEventsList, initialData: initialAuditEvents });
   const allChangeRequests = changeRequestsQuery.data ?? [];
-  const baseRecords = recordsQuery.data ?? [];
   const bases = basesQuery.data ?? [];
   const archivedBases = archivedBasesQuery.data ?? [];
   const archivedNodes = archivedNodesQuery.data ?? [];
@@ -156,8 +169,13 @@ function BusabaseDashboardContent({
     () => ({
       archivedBases: orpc.bases.listArchived.queryOptions({}).queryKey as QueryKey,
       archivedNodes: orpc.nodes.listArchived.queryOptions({}).queryKey as QueryKey,
+      // Partial keys (no input) so invalidation matches every paged/counted
+      // query regardless of base, tab, or cursor.
       changeRequests: orpc.changeRequests.list.queryOptions({ input: {} }).queryKey as QueryKey,
-      records: orpc.records.list.queryOptions({ input: {} }).queryKey as QueryKey,
+      changeRequestsPaged: orpc.changeRequests.listPaged.key() as QueryKey,
+      changeRequestCounts: orpc.changeRequests.counts.key() as QueryKey,
+      records: orpc.records.listPaged.key() as QueryKey,
+      recordsCount: orpc.records.count.key() as QueryKey,
       bases: orpc.bases.list.queryOptions({}).queryKey as QueryKey,
       nodes: orpc.nodes.list.queryOptions({}).queryKey as QueryKey,
       auditEvents: orpc.auditEvents.list.queryOptions({ input: {} }).queryKey as QueryKey,
@@ -283,7 +301,89 @@ function BusabaseDashboardContent({
     }
     return baseViews.find((view) => view.slug === childId || view.id === childId) ?? null;
   }, [baseChildParams?.childId, baseViews]);
+  // Carry the active view's filters (tagged with each field's type) to the server
+  // for best-effort push-down; the client filter below stays the exact authority.
+  const activeViewFilters = useMemo(() => {
+    const filters = selectedBaseView?.config.filters ?? [];
+    if (filters.length === 0) {
+      return undefined;
+    }
+    const fieldTypeBySlug = new Map(
+      (activeBase?.fields ?? []).map((field) => [field.slug, field.type]),
+    );
+    return filters.map((filter) => ({
+      fieldSlug: filter.fieldSlug,
+      fieldType: fieldTypeBySlug.get(filter.fieldSlug),
+      operator: filter.operator,
+      value: filter.value,
+    }));
+  }, [selectedBaseView, activeBase?.fields]);
+  // Records load per active base via keyset pagination ("load more"), so a base
+  // with more than one page is fully reachable instead of silently capped.
+  const recordsInfiniteQuery = useInfiniteQuery({
+    ...orpc.records.listPaged.infiniteOptions({
+      input: (pageParam: string | undefined) => ({
+        baseId: activeBase?.id,
+        cursor: pageParam,
+        limit: RECORDS_PAGE_SIZE,
+        filters: activeViewFilters,
+      }),
+      initialPageParam: undefined as string | undefined,
+      getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
+    }),
+    enabled: Boolean(activeBase?.id),
+  });
+  const baseRecords = useMemo(
+    () => recordsInfiniteQuery.data?.pages.flatMap((page) => page.records) ?? [],
+    [recordsInfiniteQuery.data],
+  );
+  // Whole-base total for the table header ("N of total"), decoupled from paging.
+  const recordCountQuery = useQuery({
+    ...orpc.records.count.queryOptions({ input: { baseId: activeBase?.id ?? "" } }),
+    enabled: Boolean(activeBase?.id),
+  });
+  const recordsPagination = useMemo(
+    () => ({
+      total: recordCountQuery.data?.total ?? null,
+      loaded: baseRecords.length,
+      hasMore: recordsInfiniteQuery.hasNextPage,
+      isLoadingMore: recordsInfiniteQuery.isFetchingNextPage,
+      loadMore: () => {
+        void recordsInfiniteQuery.fetchNextPage();
+      },
+    }),
+    [
+      recordCountQuery.data?.total,
+      baseRecords.length,
+      recordsInfiniteQuery.hasNextPage,
+      recordsInfiniteQuery.isFetchingNextPage,
+      recordsInfiniteQuery.fetchNextPage,
+    ],
+  );
   const isBaseViewRoute = Boolean(isBaseChildRoute && selectedBaseView);
+  // View filters/sorts are applied client-side over the loaded pages, so a view
+  // with a filter or sort is only correct once every page is in. Auto-load the
+  // rest (instead of leaving it behind "load more") so filtered/sorted views are
+  // complete without the user paging to the bottom by hand. The default (no
+  // filter/sort) view stays lazily paginated.
+  const viewNeedsAllRecords = Boolean(
+    selectedBaseView &&
+      (selectedBaseView.config.filters.length > 0 || selectedBaseView.config.sorts.length > 0),
+  );
+  useEffect(() => {
+    if (
+      viewNeedsAllRecords &&
+      recordsInfiniteQuery.hasNextPage &&
+      !recordsInfiniteQuery.isFetchingNextPage
+    ) {
+      void recordsInfiniteQuery.fetchNextPage();
+    }
+  }, [
+    viewNeedsAllRecords,
+    recordsInfiniteQuery.hasNextPage,
+    recordsInfiniteQuery.isFetchingNextPage,
+    recordsInfiniteQuery.fetchNextPage,
+  ]);
   const isRecordRoute = Boolean(isBaseChildRoute && !selectedBaseView && !isBaseSetupRoute);
   const selectedRecordId =
     isEditRecordRoute && editRecordParams?.recordId
@@ -596,7 +696,10 @@ function BusabaseDashboardContent({
   const refresh = useCallback(async () => {
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: listKeys.changeRequests }),
+      queryClient.invalidateQueries({ queryKey: listKeys.changeRequestsPaged }),
+      queryClient.invalidateQueries({ queryKey: listKeys.changeRequestCounts }),
       queryClient.invalidateQueries({ queryKey: listKeys.records }),
+      queryClient.invalidateQueries({ queryKey: listKeys.recordsCount }),
       queryClient.invalidateQueries({ queryKey: listKeys.bases }),
       queryClient.invalidateQueries({ queryKey: listKeys.auditEvents }),
       queryClient.invalidateQueries({
@@ -669,6 +772,66 @@ function BusabaseDashboardContent({
       return client.mergeChangeRequest(changeRequestId);
     },
     [client],
+  );
+
+  // Batch review from the inbox. "approveMerge" approves the selected change
+  // requests, then merges only the ones that approved cleanly; failures are
+  // isolated per item (the server never aborts the whole batch).
+  const batchMutation = useMutation({
+    mutationFn: async (variables: {
+      action: "approveMerge" | "reject";
+      changeRequestIds: string[];
+      reason?: string;
+    }) => {
+      if (variables.action === "reject") {
+        return client.reviewChangeRequestsMany(
+          variables.changeRequestIds,
+          "rejected",
+          variables.reason,
+        );
+      }
+      const approveResult = await client.reviewChangeRequestsMany(
+        variables.changeRequestIds,
+        "approved",
+      );
+      const approvedIds = approveResult.results
+        .filter((item) => item.ok)
+        .map((item) => item.changeRequestId);
+      const mergeResult = approvedIds.length
+        ? await client.mergeChangeRequestsMany(approvedIds)
+        : { results: [] };
+      const mergedOk = new Set(
+        mergeResult.results.filter((item) => item.ok).map((item) => item.changeRequestId),
+      );
+      // A change request counts as done only if it both approved and merged.
+      return {
+        results: approveResult.results.map((item) =>
+          item.ok ? { ...item, ok: mergedOk.has(item.changeRequestId) } : item,
+        ),
+      };
+    },
+    onMutate: () => setError(null),
+    onError: (mutationError) =>
+      setError(
+        mutationError instanceof Error ? mutationError.message : messages.shell.operationFailed,
+      ),
+    onSuccess: (result) => {
+      const ok = result.results.filter((item) => item.ok).length;
+      const failed = result.results.length - ok;
+      const summary = fmt(messages.inbox.batchResult, { ok, failed });
+      if (failed > 0) {
+        toast.error(summary);
+      } else {
+        toast.success(summary);
+      }
+    },
+    onSettled: () => refresh(),
+  });
+  const isBatchPending = batchMutation.isPending;
+  const runBatchReview = useCallback(
+    (action: "approveMerge" | "reject", changeRequestIds: string[], reason?: string) =>
+      batchMutation.mutate({ action, changeRequestIds, reason }),
+    [batchMutation],
   );
 
   const submitCreateRecord = useCallback(
@@ -1168,9 +1331,10 @@ function BusabaseDashboardContent({
       return (
         <InboxView
           activeView={inboxView}
-          changeRequests={allChangeRequests}
-          currentUserId={currentUserId}
           emptyGuide={emptyGuide}
+          orpc={orpc}
+          onBatchReview={runBatchReview}
+          isBatchPending={isBatchPending}
         />
       );
     }
@@ -1310,6 +1474,7 @@ function BusabaseDashboardContent({
           archivedViews={archivedViewsForBase}
           archivedRecords={archivedRecordsForBase}
           records={records}
+          pagination={recordsPagination}
           base={activeBase}
           onCreateView={submitCreateView}
           onDeleteView={submitDeleteView}
@@ -1344,9 +1509,10 @@ function BusabaseDashboardContent({
     return (
       <InboxView
         activeView={inboxView}
-        changeRequests={allChangeRequests}
-        currentUserId={currentUserId}
         emptyGuide={emptyGuide}
+        orpc={orpc}
+        onBatchReview={runBatchReview}
+        isBatchPending={isBatchPending}
       />
     );
   }, [
@@ -1354,7 +1520,6 @@ function BusabaseDashboardContent({
     activeRecord,
     approveChangeRequest,
     closeChangeRequest,
-    currentUserId,
     auditEvents,
     allChangeRequests,
     bases,
@@ -1381,6 +1546,8 @@ function BusabaseDashboardContent({
     selectedBaseView,
     isNewRecordRoute,
     isPending,
+    isBatchPending,
+    runBatchReview,
     locationPath,
     inboxView,
     mergeChangeRequest,
@@ -1414,6 +1581,7 @@ function BusabaseDashboardContent({
     isArchivedRoute,
     selectedBaseSlug,
     setLocation,
+    recordsPagination,
   ]);
 
   const content = (

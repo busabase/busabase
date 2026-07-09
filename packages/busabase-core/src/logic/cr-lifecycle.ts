@@ -1,6 +1,7 @@
 import "server-only";
 
 import { ORPCError } from "@orpc/server";
+import { listChangeRequestsPagedInputSchema } from "busabase-contract/contract/schemas";
 import type {
   ChangeRequestVO,
   CommentVO,
@@ -8,7 +9,7 @@ import type {
   RecordVO,
   ReviewVO,
 } from "busabase-contract/types";
-import { and, asc, desc, eq, inArray, isNull, or } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, lt, or, type SQL, sql } from "drizzle-orm";
 import { z } from "zod";
 import { getContextSpaceId, resolveActorId, resolveUserRefs } from "../context";
 import { getDb } from "../db";
@@ -679,6 +680,119 @@ export const listChangeRequests = async (input?: z.input<typeof listInputSchema>
     .orderBy(desc(busabaseChangeRequests.createdAt))
     .limit(parsed.limit);
   return Promise.all(changeRequestRows.map(hydrateChangeRequest));
+};
+
+// `|` separates the ISO timestamp (which contains colons) from the id.
+const encodeChangeRequestCursor = (createdAt: Date, changeRequestId: string): string =>
+  Buffer.from(`${createdAt.toISOString()}|${changeRequestId}`, "utf8").toString("base64");
+
+const decodeChangeRequestCursor = (cursor: string): { createdAt: Date; id: string } | null => {
+  try {
+    const decoded = Buffer.from(cursor, "base64").toString("utf8");
+    const sep = decoded.indexOf("|");
+    if (sep < 0) return null;
+    const iso = decoded.slice(0, sep);
+    const id = decoded.slice(sep + 1);
+    const createdAt = new Date(iso);
+    if (Number.isNaN(createdAt.getTime()) || !id) return null;
+    return { createdAt, id };
+  } catch {
+    return null;
+  }
+};
+
+// The "created" inbox tab / `mine` filter is scoped to the acting user. In the
+// cloud this resolves to the real user id; open-source falls back to the local
+// editor — matching how `submittedBy` is stored on creation (record-ops.ts).
+const mineActorId = () => resolveActorId("local-editor");
+
+/**
+ * Keyset-paginated change request list mirroring listRecordsPaged. Orders by
+ * (createdAt DESC, id DESC) and walks backwards via an opaque base64 cursor.
+ * `status` narrows to specific statuses (inbox tabs); `mine` narrows to the
+ * acting user's submissions.
+ */
+export const listChangeRequestsPaged = async (
+  input?: z.input<typeof listChangeRequestsPagedInputSchema>,
+) => {
+  await ensureReady();
+  const db = await getDb();
+  const parsed = listChangeRequestsPagedInputSchema.parse(input);
+  const filters: SQL[] = [eq(busabaseChangeRequests.spaceId, getContextSpaceId())];
+  if (parsed.status && parsed.status.length > 0) {
+    filters.push(inArray(busabaseChangeRequests.status, parsed.status));
+  }
+  if (parsed.mine) {
+    filters.push(eq(busabaseChangeRequests.submittedBy, mineActorId()));
+  }
+  if (parsed.cursor) {
+    const decoded = decodeChangeRequestCursor(parsed.cursor);
+    if (decoded) {
+      filters.push(
+        or(
+          lt(busabaseChangeRequests.createdAt, decoded.createdAt),
+          and(
+            eq(busabaseChangeRequests.createdAt, decoded.createdAt),
+            lt(busabaseChangeRequests.id, decoded.id),
+          ),
+        ) as SQL,
+      );
+    }
+  }
+
+  const rows = await db
+    .select()
+    .from(busabaseChangeRequests)
+    .where(and(...filters))
+    .orderBy(desc(busabaseChangeRequests.createdAt), desc(busabaseChangeRequests.id))
+    .limit(parsed.limit + 1);
+
+  const hasMore = rows.length > parsed.limit;
+  const pageRows = hasMore ? rows.slice(0, parsed.limit) : rows;
+  const last = pageRows[pageRows.length - 1];
+  const nextCursor = hasMore && last ? encodeChangeRequestCursor(last.createdAt, last.id) : null;
+
+  const changeRequests = await Promise.all(pageRows.map(hydrateChangeRequest));
+  return { changeRequests, nextCursor };
+};
+
+/**
+ * Whole-space inbox tab counts. One grouped query by status plus a scoped count
+ * for the "created" tab — so the badges are correct regardless of how many
+ * change requests exist (the client used to compute these from a capped page).
+ */
+export const countChangeRequests = async () => {
+  await ensureReady();
+  const db = await getDb();
+  const spaceId = getContextSpaceId();
+  const byStatus = await db
+    .select({
+      status: busabaseChangeRequests.status,
+      count: sql<number>`count(*)::int`,
+    })
+    .from(busabaseChangeRequests)
+    .where(eq(busabaseChangeRequests.spaceId, spaceId))
+    .groupBy(busabaseChangeRequests.status);
+  const statusCount = new Map(byStatus.map((row) => [row.status, row.count]));
+
+  const [createdRow] = await db
+    .select({ count: sql<number>`count(*)::int` })
+    .from(busabaseChangeRequests)
+    .where(
+      and(
+        eq(busabaseChangeRequests.spaceId, spaceId),
+        eq(busabaseChangeRequests.submittedBy, mineActorId()),
+      ),
+    );
+
+  return {
+    review: statusCount.get("in_review") ?? 0,
+    changes: statusCount.get("changes_requested") ?? 0,
+    created: createdRow?.count ?? 0,
+    approved: statusCount.get("approved") ?? 0,
+    merged: statusCount.get("merged") ?? 0,
+    rejected: (statusCount.get("rejected") ?? 0) + (statusCount.get("abandoned") ?? 0),
+  };
 };
 
 export const getChangeRequest = async (changeRequestId: string) => {

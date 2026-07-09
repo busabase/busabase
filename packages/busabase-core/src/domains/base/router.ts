@@ -1,8 +1,9 @@
-import { implement } from "@orpc/server";
+import { implement, ORPCError } from "@orpc/server";
 import { busabaseContract } from "busabase-contract/contract/busabase";
 // Record CR history is a kernel CR-lifecycle read, not a base handler.
 import { listRecordChangeRequests } from "../../logic/store";
 import {
+  countRecords,
   createArchiveBaseChangeRequest,
   createBase,
   createBaseField,
@@ -119,10 +120,11 @@ export const baseRouter = {
 export const recordRouter = {
   list: os.records.list.handler(async ({ input }) => listRecords(input)),
   listPaged: os.records.listPaged.handler(async ({ input }) => listRecordsPaged(input)),
+  count: os.records.count.handler(async ({ input }) => countRecords(input)),
   get: os.records.get.handler(async ({ input }) => {
     const record = await getRecord(input.recordId);
     if (!record) {
-      throw new Error(`Record not found: ${input.recordId}`);
+      throw new ORPCError("NOT_FOUND", { message: `Record not found: ${input.recordId}` });
     }
     return record;
   }),

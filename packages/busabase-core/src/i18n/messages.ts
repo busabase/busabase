@@ -157,6 +157,11 @@ export const coreMessagesEn = {
     emptyBody: "Change requests will appear here when the review workflow reaches this state.",
     openChangeRequests: "Open change requests",
     closedChangeRequests: "Closed change requests",
+    selectedCount: "{count} selected",
+    clearSelection: "Clear",
+    batchApproveMerge: "Approve & merge",
+    batchReject: "Reject",
+    batchResult: "{ok} done, {failed} failed",
   },
   activity: {
     audit: "audit",

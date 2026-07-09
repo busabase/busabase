@@ -110,7 +110,7 @@ export function SpaceSelector({
   const [isOpen, setIsOpen] = React.useState(false);
 
   const currentSpace = activeSpace || internalActiveSpace;
-  const logoSrc = appLogo || currentSpace?.logo;
+  const logoSrc = currentSpace?.logo || appLogo;
 
   const handleSpaceChange = (space: (typeof spaces)[0]) => {
     setInternalActiveSpace(space);
@@ -136,8 +136,7 @@ export function SpaceSelector({
   if (!currentSpace) return null;
 
   if (readonly) {
-    const logoSrc =
-      appLogo || (typeof currentSpace.logo === "string" ? currentSpace.logo : currentSpace.logo);
+    const logoSrc = currentSpace.logo || appLogo;
 
     return (
       <SidebarMenu>

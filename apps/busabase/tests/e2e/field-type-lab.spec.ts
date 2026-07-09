@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./_fixtures";
 
 // The seeded "Field Type Lab" base (slug: field-type-lab) carries one column per
 // Busabase field type. These specs drive the new-record form through the real
@@ -12,7 +12,7 @@ const NEW_URL = "/dashboard/base/field-type-lab/new";
 const TITLE = "E2E field coverage row";
 
 test("creates a Field Type Lab record filling every editable input kind", async ({ page }) => {
-  await page.goto(NEW_URL);
+  await page.goto(NEW_URL, { waitUntil: "commit" });
   await expect(page.getByText("New Field Type Lab record")).toBeVisible();
 
   // System + AI fields are hidden on create — there is nothing to enter yet.
@@ -49,7 +49,7 @@ test("creates a Field Type Lab record filling every editable input kind", async 
 });
 
 test("blocks creation when the required Text field is empty", async ({ page }) => {
-  await page.goto(NEW_URL);
+  await page.goto(NEW_URL, { waitUntil: "commit" });
   await expect(page.getByText("New Field Type Lab record")).toBeVisible();
 
   // Leave the required "Text" field empty; fill an optional one so the form is not blank.
@@ -62,7 +62,7 @@ test("blocks creation when the required Text field is empty", async ({ page }) =
 });
 
 test("submitting for review routes the new record to the inbox", async ({ page }) => {
-  await page.goto(NEW_URL);
+  await page.goto(NEW_URL, { waitUntil: "commit" });
   await page.getByLabel("Text", { exact: true }).fill("Review-first lab row");
 
   // The primary action queues a change request for review rather than merging.

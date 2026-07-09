@@ -15,6 +15,7 @@
     "types": ["node"],
     "paths": {
       "busabase-contract": ["../../packages/busabase-contract/src/index.ts"],
+      "busabase-contract/domains": ["../../packages/busabase-contract/src/domains/registry.ts"],
       "busabase-contract/*": ["../../packages/busabase-contract/src/*"],
       "open-domains/attachments/types": [
         "../../packages/open-domains/attachments/types/attachments.ts"

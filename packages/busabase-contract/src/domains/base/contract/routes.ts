@@ -23,6 +23,8 @@ import {
   updateFieldChangeRequestInputSchema,
 } from "./base-schemas";
 import {
+  countRecordsInputSchema,
+  countRecordsResponseSchema,
   createBulkChangeRequestInputSchema,
   createChangeRequestInputSchema,
   listRecordsInputSchema,
@@ -275,6 +277,16 @@ export const recordContract = {
     })
     .input(listRecordsInputSchema)
     .output(listRecordsResponseSchema),
+  count: oc
+    .route({
+      method: "GET",
+      path: "/records/count",
+      tags: ["Records"],
+      summary: "Count records",
+      successDescription: "Total active records in the space, optionally scoped to a base.",
+    })
+    .input(countRecordsInputSchema)
+    .output(countRecordsResponseSchema),
   get: oc
     .route({
       method: "GET",

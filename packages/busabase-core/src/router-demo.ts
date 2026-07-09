@@ -41,6 +41,14 @@ const demoUnsupported = (action: string) =>
     message: `"${action}" is disabled in the Busabase demo. Run Busabase locally to make persistent changes.`,
   });
 
+async function* subscribeDemoLiveEvents(signal?: AbortSignal) {
+  while (!signal?.aborted) {
+    await new Promise<void>((resolve) => {
+      signal?.addEventListener("abort", () => resolve(), { once: true });
+    });
+  }
+}
+
 const shouldEmitDemoLiveEvent = () => false;
 
 export const busabaseDemoRouter = os.router({
@@ -70,11 +78,11 @@ export const busabaseDemoRouter = os.router({
     listTasks: os.agent.listTasks.handler(() => demoListAgentTasks()),
   },
   live: {
-    subscribe: os.live.subscribe.handler(async function* () {
+    subscribe: os.live.subscribe.handler(async function* ({ signal }) {
       if (shouldEmitDemoLiveEvent()) {
         yield undefined as never;
       }
-      return undefined;
+      yield* subscribeDemoLiveEvents(signal);
     }),
   },
   bases: {
@@ -207,6 +215,37 @@ export const busabaseDemoRouter = os.router({
   },
   changeRequests: {
     list: os.changeRequests.list.handler(() => demoListChangeRequests()),
+    listPaged: os.changeRequests.listPaged.handler(async ({ input }) => {
+      const all = await demoListChangeRequests();
+      const status = input?.status ?? [];
+      const mine = input?.mine ?? false;
+      const changeRequests = all.filter((changeRequest) => {
+        if (status.length > 0 && !status.includes(changeRequest.status)) {
+          return false;
+        }
+        if (mine && changeRequest.submittedBy !== "local-editor") {
+          return false;
+        }
+        return true;
+      });
+      return { changeRequests, nextCursor: null };
+    }),
+    counts: os.changeRequests.counts.handler(async () => {
+      const all = await demoListChangeRequests();
+      const countBy = (predicate: (changeRequest: (typeof all)[number]) => boolean) =>
+        all.filter(predicate).length;
+      return {
+        review: countBy((changeRequest) => changeRequest.status === "in_review"),
+        changes: countBy((changeRequest) => changeRequest.status === "changes_requested"),
+        created: countBy((changeRequest) => changeRequest.submittedBy === "local-editor"),
+        approved: countBy((changeRequest) => changeRequest.status === "approved"),
+        merged: countBy((changeRequest) => changeRequest.status === "merged"),
+        rejected: countBy(
+          (changeRequest) =>
+            changeRequest.status === "rejected" || changeRequest.status === "abandoned",
+        ),
+      };
+    }),
     get: os.changeRequests.get.handler(({ input }) => demoGetChangeRequest(input.changeRequestId)),
     review: os.changeRequests.review.handler(({ input }) => {
       const { changeRequestId, ...rest } = input;
@@ -234,6 +273,13 @@ export const busabaseDemoRouter = os.router({
       records: await demoListRecords(),
       nextCursor: null,
     })),
+    count: os.records.count.handler(async ({ input }) => {
+      const all = await demoListRecords();
+      const total = input?.baseId
+        ? all.filter((record) => record.baseId === input.baseId).length
+        : all.length;
+      return { total };
+    }),
     get: os.records.get.handler(({ input }) => demoGetRecord(input.recordId)),
     search: os.records.search.handler(({ input }) => demoListRecordsByFieldText(input)),
     updateChangeRequest: os.records.updateChangeRequest.handler(({ input }) => {

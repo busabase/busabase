@@ -3,6 +3,7 @@ import { z } from "zod";
 // contract never imports record schemas — so there is no cycle and no z.lazy.
 import { commitSchema, userRefSchema } from "../../../contract/schemas";
 import { baseSchema } from "./base-schemas";
+import { viewFilterOperatorSchema } from "./view-schemas";
 
 export const recordSchema = z.object({
   id: z.string(),
@@ -20,12 +21,25 @@ export const recordSchema = z.object({
   headCommit: commitSchema,
 });
 
+// A view filter carried to the server for best-effort push-down. `fieldType`
+// lets the server decide pushability: only text/number/checkbox project a
+// faithful value column, so only those are pushed (as a SUPERSET — the client's
+// applyViewConfigToRecords stays the exact authority and narrows the rest).
+export const listRecordsFilterSchema = z.object({
+  fieldSlug: z.string(),
+  fieldType: z.string().optional(),
+  operator: viewFilterOperatorSchema,
+  value: z.unknown().optional(),
+});
+
 export const listRecordsInputSchema = z
   .object({
     limit: z.coerce.number().int().min(1).max(100).optional().default(50),
     baseId: z.string().optional(),
     /** Opaque base64 cursor (`createdAt:id`) for keyset pagination. */
     cursor: z.string().optional(),
+    /** View filters for server-side push-down (superset; client still narrows). */
+    filters: z.array(listRecordsFilterSchema).optional(),
   })
   .optional()
   .default({ limit: 50 });
@@ -33,6 +47,18 @@ export const listRecordsInputSchema = z
 export const listRecordsResponseSchema = z.object({
   records: z.array(recordSchema),
   nextCursor: z.string().nullable(),
+});
+
+export const countRecordsInputSchema = z
+  .object({
+    baseId: z.string().optional(),
+  })
+  .optional()
+  .default({});
+
+export const countRecordsResponseSchema = z.object({
+  /** Total active records in the space (optionally scoped to a base). */
+  total: z.number().int().nonnegative(),
 });
 
 export const createChangeRequestInputSchema = z.object({

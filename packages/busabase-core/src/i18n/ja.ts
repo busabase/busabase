@@ -152,6 +152,11 @@ export const dashboardJa: CoreI18nMessages = {
     emptyBody: "レビューワークフローがこの状態になると、変更リクエストがここに表示されます。",
     openChangeRequests: "進行中の変更リクエスト",
     closedChangeRequests: "クローズした変更リクエスト",
+    selectedCount: "{count} 件選択中",
+    clearSelection: "クリア",
+    batchApproveMerge: "承認してマージ",
+    batchReject: "却下",
+    batchResult: "{ok} 件成功、{failed} 件失敗",
   },
   activity: {
     audit: "監査",

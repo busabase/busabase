@@ -1,6 +1,13 @@
-import type { AuditEventVO, ChangeRequestVO, RecordVO } from "busabase-contract/types";
+import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
+import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";
+import type {
+  AuditEventVO,
+  ChangeRequestStatus,
+  ChangeRequestVO,
+  RecordVO,
+} from "busabase-contract/types";
 import { SPALink as Link } from "openlib/ui/dashboard";
-import { type ReactNode, useMemo } from "react";
+import { type ReactNode, useMemo, useState } from "react";
 import { fmt, useCoreI18n } from "../../../i18n";
 import {
   changeRequestStatusLabel,
@@ -22,11 +29,18 @@ function BusabaseList({
   empty,
   groups,
   toolbar,
+  hasMore,
+  isLoadingMore,
+  onLoadMore,
 }: {
   empty: ReactNode;
   groups: BusabaseListGroup[];
   toolbar?: ReactNode;
+  hasMore?: boolean;
+  isLoadingMore?: boolean;
+  onLoadMore?: () => void;
 }) {
+  const messages = useCoreI18n();
   const visibleGroups = groups.filter((group) =>
     typeof group.count === "number" ? group.count > 0 : Boolean(group.items),
   );
@@ -58,29 +72,66 @@ function BusabaseList({
         ) : (
           empty
         )}
+        {hasMore ? (
+          <div className="flex items-center justify-center pt-4">
+            <button
+              className="inline-flex h-8 items-center rounded-md border border-border/70 px-3 font-medium text-muted-foreground text-xs transition-colors hover:bg-accent hover:text-foreground disabled:opacity-60"
+              disabled={isLoadingMore}
+              onClick={() => onLoadMore?.()}
+              type="button"
+            >
+              {isLoadingMore ? messages.common.loading : messages.search.loadMore}
+            </button>
+          </div>
+        ) : null}
       </div>
     </section>
   );
 }
 
+const INBOX_PAGE_SIZE = 50;
+
+// Server-side filter for each inbox tab. The paginated list + counts endpoints
+// resolve `mine` / `status` against the request context, so tab badges and rows
+// stay correct no matter how many change requests exist.
+const tabFilter = (tab: InboxViewKey): { status?: ChangeRequestStatus[]; mine?: boolean } => {
+  switch (tab) {
+    case "changes":
+      return { status: ["changes_requested"] };
+    case "created":
+      return { mine: true };
+    case "approved":
+      return { status: ["approved"] };
+    case "merged":
+      return { status: ["merged"] };
+    case "rejected":
+      return { status: ["rejected", "abandoned"] };
+    default:
+      return { status: ["in_review"] };
+  }
+};
+
 export function InboxView({
   activeView,
-  changeRequests,
-  currentUserId,
   emptyGuide,
+  orpc,
+  onBatchReview,
+  isBatchPending,
 }: {
   activeView: InboxViewKey;
-  changeRequests: ChangeRequestVO[];
-  currentUserId?: string | null;
   emptyGuide?: ReactNode;
+  orpc: BusabaseQueryUtils;
+  onBatchReview: (action: "approveMerge" | "reject", ids: string[], reason?: string) => void;
+  isBatchPending: boolean;
 }) {
   return (
     <div className="flex h-full min-h-0 flex-1 flex-col">
       <InboxList
         activeView={activeView}
-        changeRequests={changeRequests}
-        currentUserId={currentUserId}
         emptyGuide={emptyGuide}
+        orpc={orpc}
+        onBatchReview={onBatchReview}
+        isBatchPending={isBatchPending}
       />
     </div>
   );
@@ -88,88 +139,106 @@ export function InboxView({
 
 function InboxList({
   activeView,
-  changeRequests,
-  currentUserId,
   emptyGuide,
+  orpc,
+  onBatchReview,
+  isBatchPending,
 }: {
   activeView: InboxViewKey;
-  changeRequests: ChangeRequestVO[];
-  currentUserId?: string | null;
   emptyGuide?: ReactNode;
+  orpc: BusabaseQueryUtils;
+  onBatchReview: (action: "approveMerge" | "reject", ids: string[], reason?: string) => void;
+  isBatchPending: boolean;
 }) {
   const messages = useCoreI18n();
-  const reviewChangeRequests = changeRequests.filter(
-    (changeRequest) => changeRequest.status === "in_review",
-  );
-  const changesRequestedChangeRequests = changeRequests.filter(
-    (changeRequest) => changeRequest.status === "changes_requested",
-  );
-  const createdChangeRequests = changeRequests.filter((changeRequest) =>
-    currentUserId
-      ? changeRequest.submittedBy === currentUserId
-      : changeRequest.submittedBy === "local-editor",
-  );
-  const approvedChangeRequests = changeRequests.filter(
-    (changeRequest) => changeRequest.status === "approved",
-  );
-  const mergedChangeRequests = changeRequests.filter(
-    (changeRequest) => changeRequest.status === "merged",
-  );
-  const rejectedChangeRequests = changeRequests.filter(
-    (changeRequest) => changeRequest.status === "rejected" || changeRequest.status === "abandoned",
-  );
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+
+  // Whole-space tab counts (not derived from a capped page).
+  const countsQuery = useQuery(orpc.changeRequests.counts.queryOptions({}));
+  const counts = countsQuery.data;
   const inboxCounts: Record<InboxViewKey, number> = {
-    approved: approvedChangeRequests.length,
-    changes: changesRequestedChangeRequests.length,
-    created: createdChangeRequests.length,
-    merged: mergedChangeRequests.length,
-    rejected: rejectedChangeRequests.length,
-    review: reviewChangeRequests.length,
+    approved: counts?.approved ?? 0,
+    changes: counts?.changes ?? 0,
+    created: counts?.created ?? 0,
+    merged: counts?.merged ?? 0,
+    rejected: counts?.rejected ?? 0,
+    review: counts?.review ?? 0,
   };
-  const activeChangeRequests =
-    activeView === "created"
-      ? createdChangeRequests
-      : activeView === "changes"
-        ? changesRequestedChangeRequests
-        : activeView === "approved"
-          ? approvedChangeRequests
-          : activeView === "merged"
-            ? mergedChangeRequests
-            : activeView === "rejected"
-              ? rejectedChangeRequests
-              : reviewChangeRequests;
+
+  // The active tab's rows load via keyset pagination ("load more").
+  const listQuery = useInfiniteQuery({
+    ...orpc.changeRequests.listPaged.infiniteOptions({
+      input: (pageParam: string | undefined) => ({
+        ...tabFilter(activeView),
+        cursor: pageParam,
+        limit: INBOX_PAGE_SIZE,
+      }),
+      initialPageParam: undefined as string | undefined,
+      getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
+    }),
+  });
+  const activeChangeRequests = useMemo(
+    () => listQuery.data?.pages.flatMap((page) => page.changeRequests) ?? [],
+    [listQuery.data],
+  );
+
+  // Selection + batch actions are offered on the review queue (the import
+  // approve → merge path). Selection is scoped to the ids currently loaded.
+  const selectable = activeView === "review";
+  const selected = useMemo(
+    () => activeChangeRequests.map((cr) => cr.id).filter((id) => selectedIds.has(id)),
+    [activeChangeRequests, selectedIds],
+  );
+  const toggleSelected = (id: string) =>
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  const clearSelection = () => setSelectedIds(new Set());
+
+  const renderRow = (changeRequest: ChangeRequestVO) =>
+    selectable ? (
+      <SelectableChangeRequestRow
+        changeRequest={changeRequest}
+        key={changeRequest.id}
+        onToggle={() => toggleSelected(changeRequest.id)}
+        selected={selectedIds.has(changeRequest.id)}
+      />
+    ) : (
+      <ReviewChangeRequestRow changeRequest={changeRequest} key={changeRequest.id} />
+    );
+
   const isOpenStatus = (status: ChangeRequestVO["status"]) =>
     status === "in_review" || status === "changes_requested" || status === "approved";
-  const openCreatedChangeRequests = createdChangeRequests.filter((changeRequest) =>
+  const openCreated = activeChangeRequests.filter((changeRequest) =>
     isOpenStatus(changeRequest.status),
   );
-  const closedCreatedChangeRequests = createdChangeRequests.filter(
+  const closedCreated = activeChangeRequests.filter(
     (changeRequest) => !isOpenStatus(changeRequest.status),
   );
   const groups =
     activeView === "created"
       ? [
           {
-            count: openCreatedChangeRequests.length,
-            items: openCreatedChangeRequests.map((changeRequest) => (
-              <ReviewChangeRequestRow changeRequest={changeRequest} key={changeRequest.id} />
-            )),
+            count: openCreated.length,
+            items: openCreated.map(renderRow),
             title: messages.inbox.openChangeRequests,
           },
           {
-            count: closedCreatedChangeRequests.length,
-            items: closedCreatedChangeRequests.map((changeRequest) => (
-              <ReviewChangeRequestRow changeRequest={changeRequest} key={changeRequest.id} />
-            )),
+            count: closedCreated.length,
+            items: closedCreated.map(renderRow),
             title: messages.inbox.closedChangeRequests,
           },
         ]
       : [
           {
             count: activeChangeRequests.length,
-            items: activeChangeRequests.map((changeRequest) => (
-              <ReviewChangeRequestRow changeRequest={changeRequest} key={changeRequest.id} />
-            )),
+            items: activeChangeRequests.map(renderRow),
           },
         ];
 
@@ -183,8 +252,79 @@ function InboxList({
         />
       }
       groups={groups}
-      toolbar={<BusabaseListToolbar activeView={activeView} counts={inboxCounts} />}
+      hasMore={listQuery.hasNextPage}
+      isLoadingMore={listQuery.isFetchingNextPage}
+      onLoadMore={() => {
+        void listQuery.fetchNextPage();
+      }}
+      toolbar={
+        <>
+          <BusabaseListToolbar activeView={activeView} counts={inboxCounts} />
+          {selectable && selected.length > 0 ? (
+            <div className="flex shrink-0 items-center gap-2">
+              <span className="text-muted-foreground text-xs">
+                {fmt(messages.inbox.selectedCount, { count: selected.length })}
+              </span>
+              <button
+                className="inline-flex h-7 items-center rounded-md bg-foreground px-2.5 font-medium text-background text-xs transition-colors hover:bg-foreground/85 disabled:opacity-60"
+                disabled={isBatchPending}
+                onClick={() => {
+                  onBatchReview("approveMerge", selected);
+                  clearSelection();
+                }}
+                type="button"
+              >
+                {messages.inbox.batchApproveMerge}
+              </button>
+              <button
+                className="inline-flex h-7 items-center rounded-md border border-border/70 px-2.5 font-medium text-xs transition-colors hover:bg-accent disabled:opacity-60"
+                disabled={isBatchPending}
+                onClick={() => {
+                  onBatchReview("reject", selected);
+                  clearSelection();
+                }}
+                type="button"
+              >
+                {messages.inbox.batchReject}
+              </button>
+              <button
+                className="text-muted-foreground text-xs underline-offset-2 hover:underline"
+                onClick={clearSelection}
+                type="button"
+              >
+                {messages.inbox.clearSelection}
+              </button>
+            </div>
+          ) : null}
+        </>
+      }
     />
+  );
+}
+
+function SelectableChangeRequestRow({
+  changeRequest,
+  onToggle,
+  selected,
+}: {
+  changeRequest: ChangeRequestVO;
+  onToggle: () => void;
+  selected: boolean;
+}) {
+  const messages = useCoreI18n();
+  return (
+    <div className="flex items-center gap-2 pl-3">
+      <input
+        aria-label={getChangeRequestTitle(changeRequest, messages)}
+        checked={selected}
+        className="size-4 shrink-0 accent-foreground"
+        onChange={onToggle}
+        type="checkbox"
+      />
+      <div className="min-w-0 flex-1">
+        <ReviewChangeRequestRow changeRequest={changeRequest} />
+      </div>
+    </div>
   );
 }
 

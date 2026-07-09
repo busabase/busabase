@@ -17,6 +17,17 @@ export interface RecordSubmitOptions {
   mergeImmediately?: boolean;
 }
 
+// Table pagination controls threaded from the dashboard down to BusaBaseTable.
+export interface RecordsPagination {
+  /** Whole-base total, or null while the count query is loading. */
+  total: number | null;
+  /** Records loaded into the client so far (across fetched pages). */
+  loaded: number;
+  hasMore: boolean;
+  isLoadingMore: boolean;
+  loadMore: () => void;
+}
+
 export interface ViewSubmitOptions {
   mergeImmediately?: boolean;
 }

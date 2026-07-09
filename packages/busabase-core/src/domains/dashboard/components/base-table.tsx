@@ -1,3 +1,4 @@
+import { useVirtualizer } from "@tanstack/react-virtual";
 import type {
   BaseFieldVO,
   BaseVO,
@@ -18,7 +19,7 @@ import {
   X,
 } from "lucide-react";
 import { SPALink as Link } from "openlib/ui/dashboard";
-import { useState } from "react";
+import { type CSSProperties, useCallback, useLayoutEffect, useRef, useState } from "react";
 import { fmt, useCoreI18n, useIString } from "../../../i18n";
 import { fieldColumnWidth, fieldDisplayKind } from "../../base/field-types";
 import { getRecordTitle } from "../helpers/change-request";
@@ -31,7 +32,7 @@ import {
   getSafeAttachmentUrl,
 } from "../helpers/field";
 import { fieldValueToString, shortIdentifier } from "../helpers/format";
-import type { ViewFormPayload, ViewSubmitOptions } from "../helpers/view-types";
+import type { RecordsPagination, ViewFormPayload, ViewSubmitOptions } from "../helpers/view-types";
 import { CodeLikeFieldPreview, FieldBadge } from "./field-preview";
 import { ConfirmActionDialog } from "./primitives";
 import { SplitSubmitButton } from "./split-submit-button";
@@ -111,6 +112,69 @@ const toSlug = (value: string) =>
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-|-$/g, "");
 
+// Above this many rows the records list is virtualized (windowed).
+const VIRTUALIZE_ROW_THRESHOLD = 100;
+
+// The scroll viewport is an app-shell ancestor, and which element actually
+// scrolls differs between the open-source and cloud shells. Walk up to the
+// nearest genuinely-scrolling ancestor instead of assuming a fixed container.
+const findScrollParent = (el: HTMLElement | null): HTMLElement | null => {
+  let node = el?.parentElement ?? null;
+  while (node) {
+    const overflowY = getComputedStyle(node).overflowY;
+    if ((overflowY === "auto" || overflowY === "scroll") && node.scrollHeight > node.clientHeight) {
+      return node;
+    }
+    node = node.parentElement;
+  }
+  return null;
+};
+
+// One canonical record row, shared by the plain and virtualized render paths.
+// `style` carries the absolute-positioning transform when virtualized.
+function BusaBaseRecordRow({
+  record,
+  fields,
+  columnTemplate,
+  baseSlug,
+  relationRecords,
+  style,
+}: {
+  record: RecordVO;
+  fields: BaseFieldVO[];
+  columnTemplate: string;
+  baseSlug?: string;
+  relationRecords: RecordVO[];
+  style?: CSSProperties;
+}) {
+  return (
+    <div
+      className="group grid min-h-12 items-center gap-3 rounded-md border-border/40 border-b px-2 py-1.5 text-sm transition-colors hover:bg-muted/35"
+      style={{ gridTemplateColumns: columnTemplate, ...style }}
+    >
+      {fields.map((field, index) => (
+        <RecordTableCell
+          currentRecordHref={`/base/${baseSlug ?? record.base.slug}/${record.id}`}
+          field={field}
+          index={index}
+          key={field.id}
+          record={record}
+          records={relationRecords}
+        />
+      ))}
+      <div className="min-w-0">
+        <span className="inline-flex max-w-full items-center gap-1.5 truncate rounded-full bg-muted/55 px-2 py-0.5 text-muted-foreground text-xs capitalize">
+          <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-current opacity-55" />
+          <span className="truncate">{record.status}</span>
+        </span>
+      </div>
+      <div className="truncate font-mono text-muted-foreground/80 text-xs">
+        {shortIdentifier(record.headCommitId)}
+      </div>
+    </div>
+  );
+}
+
 export function BusaBaseTable({
   activeView,
   archivedViews = [],
@@ -123,6 +187,7 @@ export function BusaBaseTable({
   onUpdateView,
   records,
   relationRecords = records,
+  pagination,
   views,
 }: {
   activeView: ViewVO | null;
@@ -144,6 +209,7 @@ export function BusaBaseTable({
   ) => Promise<void>;
   records: RecordVO[];
   relationRecords?: RecordVO[];
+  pagination?: RecordsPagination;
   views: ViewVO[];
 }) {
   const messages = useCoreI18n();
@@ -166,8 +232,37 @@ export function BusaBaseTable({
   const fieldColumns = fields.map((field, index) => getRecordTableColumnWidth(field, index));
   const columnTemplate = [...fieldColumns, "96px", "96px"].join(" ");
 
+  // Virtualize only long lists (small tables — the common case — render plainly
+  // and are untouched). Rows are absolutely positioned inside a spacer; the grid
+  // template + sticky first column are preserved.
+  const shouldVirtualize = records.length > VIRTUALIZE_ROW_THRESHOLD;
+  const tableRootRef = useRef<HTMLDivElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
+  const [listScrollMargin, setListScrollMargin] = useState(0);
+  const getScrollElement = useCallback(() => findScrollParent(tableRootRef.current), []);
+  // Measure where the row list starts relative to the (ancestor) scroll viewport,
+  // so virtualized rows sit correctly beneath the base header + toolbar.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: re-measure when the list toggles / row count changes.
+  useLayoutEffect(() => {
+    const scrollEl = getScrollElement();
+    if (shouldVirtualize && listRef.current && scrollEl) {
+      const margin =
+        listRef.current.getBoundingClientRect().top -
+        scrollEl.getBoundingClientRect().top +
+        scrollEl.scrollTop;
+      setListScrollMargin(margin);
+    }
+  }, [shouldVirtualize, records.length, columnTemplate, getScrollElement]);
+  const rowVirtualizer = useVirtualizer({
+    count: records.length,
+    getScrollElement,
+    estimateSize: () => 48,
+    overscan: 12,
+    scrollMargin: listScrollMargin,
+  });
+
   return (
-    <div>
+    <div ref={tableRootRef}>
       <div className="mb-3 flex min-w-0 flex-wrap items-center justify-between gap-3">
         <div className="flex min-w-0 flex-wrap items-center gap-1.5">
           {base ? (
@@ -212,10 +307,18 @@ export function BusaBaseTable({
         </div>
         <div className="flex flex-shrink-0 items-center gap-2">
           <span className="text-muted-foreground text-xs">
-            {fmt(messages.base.recordCount, {
-              count: records.length,
-              plural: records.length === 1 ? "" : "s",
-            })}
+            {(() => {
+              // With a view filter active, records.length is the filtered rows
+              // shown; without one, show the true whole-base total (so the header
+              // reports "240 records", not the page size) once the count loads.
+              const hasFilter = Boolean(activeView && activeView.config.filters.length > 0);
+              const displayCount =
+                !hasFilter && pagination?.total != null ? pagination.total : records.length;
+              return fmt(messages.base.recordCount, {
+                count: displayCount,
+                plural: displayCount === 1 ? "" : "s",
+              });
+            })()}
             {activeView && activeView.config.filters.length > 0
               ? ` · ${fmt(messages.base.filterCount, {
                   count: activeView.config.filters.length,
@@ -366,38 +469,48 @@ export function BusaBaseTable({
             <div>{messages.base.recordStatus}</div>
             <div>{messages.base.commit}</div>
           </div>
-          {records.length > 0 ? (
-            records.map((record) => (
-              <div
-                className="group grid min-h-12 items-center gap-3 rounded-md border-border/40 border-b px-2 py-1.5 text-sm transition-colors hover:bg-muted/35"
-                key={record.id}
-                style={{ gridTemplateColumns: columnTemplate }}
-              >
-                {fields.map((field, index) => (
-                  <RecordTableCell
-                    currentRecordHref={`/base/${base?.slug ?? record.base.slug}/${record.id}`}
-                    field={field}
-                    index={index}
-                    key={field.id}
-                    record={record}
-                    records={relationRecords}
-                  />
-                ))}
-                <div className="min-w-0">
-                  <span className="inline-flex max-w-full items-center gap-1.5 truncate rounded-full bg-muted/55 px-2 py-0.5 text-muted-foreground text-xs capitalize">
-                    <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-current opacity-55" />
-                    <span className="truncate">{record.status}</span>
-                  </span>
-                </div>
-                <div className="truncate font-mono text-muted-foreground/80 text-xs">
-                  {shortIdentifier(record.headCommitId)}
-                </div>
-              </div>
-            ))
-          ) : (
+          {records.length === 0 ? (
             <div className="px-2 py-6 text-muted-foreground text-sm">
               {messages.base.emptyRecords}
             </div>
+          ) : shouldVirtualize ? (
+            <div
+              ref={listRef}
+              className="relative"
+              style={{ height: rowVirtualizer.getTotalSize() }}
+            >
+              {rowVirtualizer.getVirtualItems().map((virtualRow) => {
+                const record = records[virtualRow.index];
+                return (
+                  <BusaBaseRecordRow
+                    baseSlug={base?.slug}
+                    columnTemplate={columnTemplate}
+                    fields={fields}
+                    key={record.id}
+                    record={record}
+                    relationRecords={relationRecords}
+                    style={{
+                      position: "absolute",
+                      top: 0,
+                      left: 0,
+                      width: "100%",
+                      transform: `translateY(${virtualRow.start - rowVirtualizer.options.scrollMargin}px)`,
+                    }}
+                  />
+                );
+              })}
+            </div>
+          ) : (
+            records.map((record) => (
+              <BusaBaseRecordRow
+                baseSlug={base?.slug}
+                columnTemplate={columnTemplate}
+                fields={fields}
+                key={record.id}
+                record={record}
+                relationRecords={relationRecords}
+              />
+            ))
           )}
           {showArchivedRecords && archivedRecords.length > 0
             ? archivedRecords.map((record) => (
@@ -445,6 +558,23 @@ export function BusaBaseTable({
             : null}
         </div>
       </div>
+      {pagination?.hasMore ? (
+        <div className="flex items-center justify-center pt-3">
+          <button
+            className="inline-flex h-8 items-center gap-2 rounded-md border border-border/70 px-3 font-medium text-muted-foreground text-xs transition-colors hover:bg-accent hover:text-foreground disabled:opacity-60"
+            disabled={pagination.isLoadingMore}
+            onClick={() => pagination.loadMore()}
+            type="button"
+          >
+            {pagination.isLoadingMore ? messages.common.loading : messages.search.loadMore}
+            {pagination.total != null ? (
+              <span className="text-muted-foreground/70">
+                {pagination.loaded} / {pagination.total}
+              </span>
+            ) : null}
+          </button>
+        </div>
+      ) : null}
     </div>
   );
 }

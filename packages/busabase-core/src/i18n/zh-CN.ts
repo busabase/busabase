@@ -152,6 +152,11 @@ export const dashboardZhCN: CoreI18nMessages = {
     emptyBody: "当评审流程进入该状态时，变更请求会显示在这里。",
     openChangeRequests: "进行中的变更请求",
     closedChangeRequests: "已关闭的变更请求",
+    selectedCount: "已选 {count} 项",
+    clearSelection: "清除",
+    batchApproveMerge: "批量通过并合并",
+    batchReject: "批量拒绝",
+    batchResult: "成功 {ok} 项，失败 {failed} 项",
   },
   activity: {
     audit: "审计",

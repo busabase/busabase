@@ -17,12 +17,15 @@ import {
   agentTaskSchema,
   auditEventSchema,
   authInfoSchema,
+  changeRequestCountsSchema,
   changeRequestSchema,
   commentSchema,
   commentSubjectInputSchema,
   createAuditEventInputSchema,
   createCommentInputSchema,
   createNodeChangeRequestInputSchema,
+  listChangeRequestsPagedInputSchema,
+  listChangeRequestsResponseSchema,
   listInputSchema,
   liveEventSchema,
   nodeSchema,
@@ -190,6 +193,27 @@ export const busabaseContractRoutes = {
       })
       .input(listInputSchema)
       .output(z.array(changeRequestSchema)),
+    listPaged: oc
+      .route({
+        method: "GET",
+        path: "/change-requests/paged",
+        tags: ["Change Requests"],
+        summary: "List change requests with keyset pagination",
+        successDescription:
+          "A page of change requests plus an opaque nextCursor (null at the end). Filter with `status` and/or `mine`.",
+      })
+      .input(listChangeRequestsPagedInputSchema)
+      .output(listChangeRequestsResponseSchema),
+    counts: oc
+      .route({
+        method: "GET",
+        path: "/change-requests/counts",
+        tags: ["Change Requests"],
+        summary: "Count change requests by inbox tab",
+        successDescription:
+          "Whole-space change request counts per inbox tab (review / changes / created / approved / merged / rejected).",
+      })
+      .output(changeRequestCountsSchema),
     get: oc
       .route({
         method: "GET",

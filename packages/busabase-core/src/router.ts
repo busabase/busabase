@@ -1,4 +1,4 @@
-import { implement } from "@orpc/server";
+import { implement, ORPCError } from "@orpc/server";
 import { busabaseContract } from "busabase-contract/contract/busabase";
 import { getContextSpaceId } from "./context";
 import { assetsRouter } from "./domains/assets/router";
@@ -11,6 +11,7 @@ import { skillRouter } from "./domains/skill/router";
 import { subscribeBusabaseLiveEvents } from "./logic/live-events";
 import {
   closeChangeRequest,
+  countChangeRequests,
   createAuditEvent,
   createComment,
   createNodeChangeRequest,
@@ -20,6 +21,7 @@ import {
   listArchivedNodes,
   listAuditEvents,
   listChangeRequests,
+  listChangeRequestsPaged,
   listComments,
   listNodes,
   mergeChangeRequest,
@@ -73,10 +75,16 @@ export const busabaseRouter = busabase.router({
   assets: assetsRouter,
   changeRequests: {
     list: busabase.changeRequests.list.handler(async ({ input }) => listChangeRequests(input)),
+    listPaged: busabase.changeRequests.listPaged.handler(async ({ input }) =>
+      listChangeRequestsPaged(input),
+    ),
+    counts: busabase.changeRequests.counts.handler(async () => countChangeRequests()),
     get: busabase.changeRequests.get.handler(async ({ input }) => {
       const changeRequest = await getChangeRequest(input.changeRequestId);
       if (!changeRequest) {
-        throw new Error(`ChangeRequest not found: ${input.changeRequestId}`);
+        throw new ORPCError("NOT_FOUND", {
+          message: `Change request not found: ${input.changeRequestId}`,
+        });
       }
       return changeRequest;
     }),

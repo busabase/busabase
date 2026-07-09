@@ -2,9 +2,13 @@ import { defineConfig, devices } from "@playwright/test";
 
 export default defineConfig({
   testDir: "./tests/e2e",
-  timeout: 30 * 1000,
+  // The dashboard is a client SPA that streams its RSC response, so each full-page
+  // navigation reloads the bundle and refetches over RPC before content mounts.
+  // Give web-first assertions and whole tests room for that (paired with the
+  // waitUntil:"commit" navigation default in tests/e2e/_fixtures.ts).
+  timeout: 60 * 1000,
   expect: {
-    timeout: 5000,
+    timeout: 15000,
   },
   fullyParallel: true,
   forbidOnly: !!process.env.CI,

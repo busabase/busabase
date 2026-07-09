@@ -1,7 +1,25 @@
 import "server-only";
 
-import { listRecordsInputSchema } from "busabase-contract/domains/base/contract/record-schemas";
-import { and, asc, desc, eq, inArray, isNotNull, isNull, lt, or, type SQL } from "drizzle-orm";
+import {
+  countRecordsInputSchema,
+  listRecordsInputSchema,
+} from "busabase-contract/domains/base/contract/record-schemas";
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  exists,
+  ilike,
+  inArray,
+  isNotNull,
+  isNull,
+  lt,
+  ne,
+  or,
+  type SQL,
+  sql,
+} from "drizzle-orm";
 import type { z } from "zod";
 import { getContextSpaceId, resolveUserRefs } from "../../../context";
 import { getDb } from "../../../db";
@@ -141,6 +159,70 @@ const decodeRecordCursor = (cursor: string): { createdAt: Date; id: string } | n
   }
 };
 
+// Field types whose text/number/boolean projection into busabaseFieldValues is
+// faithful, so a filter on them can be pushed to SQL. Everything else (select /
+// relation / multiselect / json / date) is left to the client filter, which
+// stays authoritative.
+const PUSHABLE_TEXT_TYPES = new Set([
+  "text",
+  "longtext",
+  "markdown",
+  "html",
+  "url",
+  "email",
+  "phone",
+  "code",
+]);
+const PUSHABLE_NUMBER_TYPES = new Set(["number", "auto_number"]);
+
+// Translate one view filter to a SUPERSET-safe SQL predicate (an EXISTS over the
+// record's projected field values), or null when it can't be pushed (the client
+// then handles it). Superset = never excludes a record the client would keep, so
+// pushing is always a pure narrowing optimization on top of the client filter.
+const buildPushableRecordFilter = (
+  db: Awaited<ReturnType<typeof getDb>>,
+  filter: { fieldSlug: string; fieldType?: string; operator: string; value?: unknown },
+): SQL | null => {
+  const type = filter.fieldType ?? "";
+  const isTextLike = PUSHABLE_TEXT_TYPES.has(type);
+  const isNumberLike = PUSHABLE_NUMBER_TYPES.has(type);
+
+  const matches = (predicate: SQL): SQL =>
+    exists(
+      db
+        .select({ one: sql`1` })
+        .from(busabaseFieldValues)
+        .where(
+          and(
+            eq(busabaseFieldValues.recordId, busabaseRecords.id),
+            eq(busabaseFieldValues.fieldSlug, filter.fieldSlug),
+            isNull(busabaseFieldValues.deletedAt),
+            predicate,
+          ),
+        ),
+    );
+
+  // contains / equals → substring match on the faithful text projection.
+  // `equals` is deliberately widened to a substring (superset); the client
+  // narrows it to an exact match. No LIKE-escaping, so we never match LESS.
+  if (
+    (filter.operator === "contains" || filter.operator === "equals") &&
+    (isTextLike || isNumberLike)
+  ) {
+    return matches(ilike(busabaseFieldValues.valueText, `%${String(filter.value ?? "")}%`));
+  }
+  if (filter.operator === "not_empty" && (isTextLike || isNumberLike)) {
+    return matches(
+      and(isNotNull(busabaseFieldValues.valueText), ne(busabaseFieldValues.valueText, "")) as SQL,
+    );
+  }
+  if (filter.operator === "is_true" && type === "checkbox") {
+    return matches(eq(busabaseFieldValues.valueBool, true));
+  }
+  // is_empty / is_false / select / relation / multiselect / json / date → client.
+  return null;
+};
+
 /**
  * Keyset-paginated record list. Orders by (createdAt DESC, id DESC) and walks
  * backwards via an opaque base64 `createdAt:id` cursor. Returns one extra row to
@@ -169,6 +251,16 @@ export const listRecordsPaged = async (input?: z.input<typeof listRecordsInputSc
       );
     }
   }
+  // Best-effort server-side view-filter push-down (superset; the client filter
+  // stays authoritative). Non-pushable filters are skipped here.
+  if (parsed.filters) {
+    for (const filter of parsed.filters) {
+      const condition = buildPushableRecordFilter(db, filter);
+      if (condition) {
+        filters.push(condition);
+      }
+    }
+  }
 
   const rows = await db
     .select()
@@ -184,6 +276,29 @@ export const listRecordsPaged = async (input?: z.input<typeof listRecordsInputSc
 
   const records = await Promise.all(pageRows.map(hydrateRecord));
   return { records, nextCursor };
+};
+
+/**
+ * Count active records in the current space (optionally scoped to a base).
+ * Feeds the table header total so the UI can show "N of total" instead of
+ * silently capping at a page size.
+ */
+export const countRecords = async (input?: z.input<typeof countRecordsInputSchema>) => {
+  await ensureReady();
+  const db = await getDb();
+  const parsed = countRecordsInputSchema.parse(input);
+  const filters: SQL[] = [
+    eq(busabaseRecords.spaceId, getContextSpaceId()),
+    eq(busabaseRecords.status, "active"),
+  ];
+  if (parsed.baseId) {
+    filters.push(eq(busabaseRecords.baseId, parsed.baseId));
+  }
+  const [row] = await db
+    .select({ count: sql<number>`count(*)::int` })
+    .from(busabaseRecords)
+    .where(and(...filters));
+  return { total: row?.count ?? 0 };
 };
 
 export const getRecord = async (recordId: string) => {

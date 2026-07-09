@@ -16,6 +16,7 @@ import type {
   AssetDetailVO,
   AuditEventVO,
   BaseVO,
+  ChangeRequestBatchResultVO,
   ChangeRequestVO,
   CommentSubjectType,
   CommentVO,
@@ -226,6 +227,12 @@ export interface BusabaseDashboardApiClient {
   approveChangeRequest: (changeRequestId: string, reason?: string) => Promise<ChangeRequestVO>;
   rejectChangeRequest: (changeRequestId: string, reason?: string) => Promise<ChangeRequestVO>;
   closeChangeRequest: (changeRequestId: string, reason?: string) => Promise<ChangeRequestVO>;
+  reviewChangeRequestsMany: (
+    changeRequestIds: string[],
+    verdict: "approved" | "rejected",
+    reason?: string,
+  ) => Promise<ChangeRequestBatchResultVO>;
+  mergeChangeRequestsMany: (changeRequestIds: string[]) => Promise<ChangeRequestBatchResultVO>;
   reviseOperation: (
     operationId: string,
     payload: { fields: Record<string, unknown>; message?: string; author?: string },
@@ -374,6 +381,12 @@ export const createBusabaseRestApiClient = (
       }),
     closeChangeRequest: (changeRequestId, reason) =>
       client.changeRequests.close(reason ? { changeRequestId, reason } : { changeRequestId }),
+    reviewChangeRequestsMany: (changeRequestIds, verdict, reason) =>
+      client.changeRequests.reviewMany(
+        reason ? { changeRequestIds, verdict, reason } : { changeRequestIds, verdict },
+      ),
+    mergeChangeRequestsMany: (changeRequestIds) =>
+      client.changeRequests.mergeMany({ changeRequestIds }),
     reviseOperation: (operationId, payload) =>
       client.operations.revise({ operationId, ...payload }),
     createChangeRequest: (baseId, payload) =>
