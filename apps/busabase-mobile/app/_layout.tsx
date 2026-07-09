@@ -10,6 +10,8 @@ import { I18nProvider } from "~/i18n";
 // Imported for its side effect: defines the background change-request watch task.
 import "~/notifications/background-task";
 import { NotificationProvider } from "~/notifications/notification-provider";
+import { MobileUpdateGate } from "~/updates/mobile-update-gate";
+import { MobileUpdateProvider } from "~/updates/mobile-update-provider";
 
 void SplashScreen.preventAutoHideAsync();
 
@@ -33,10 +35,13 @@ export default function RootLayout() {
           <I18nProvider>
             <ConnectionProvider>
               <NotificationProvider>
-                <AppStatusBar />
-                {/* Routes are auto-discovered from the app/ tree; every screen hides
-                    the native header and renders its own NativeScreen chrome. */}
-                <Stack screenOptions={{ headerShown: false }} />
+                <MobileUpdateProvider>
+                  <AppStatusBar />
+                  {/* Routes are auto-discovered from the app/ tree; every screen hides
+                      the native header and renders its own NativeScreen chrome. */}
+                  <Stack screenOptions={{ headerShown: false }} />
+                  <MobileUpdateGate />
+                </MobileUpdateProvider>
               </NotificationProvider>
             </ConnectionProvider>
           </I18nProvider>

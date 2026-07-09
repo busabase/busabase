@@ -45,7 +45,7 @@ interface DocVO {
 const docStoragePrefix = (nodeId: string) => `busabase/nodes/${nodeId}/doc/`;
 const docBodyKey = (nodeId: string) => `${docStoragePrefix(nodeId)}doc.md`;
 
-const writeDocBody = async (nodeId: string, body: string) => {
+export const writeDocBody = async (nodeId: string, body: string) => {
   await storage.uploadFileToKey(
     Buffer.from(body, "utf8"),
     docBodyKey(nodeId),
@@ -166,7 +166,13 @@ export const listDocs = async (): Promise<DocVO[]> => {
   const nodes = await db
     .select()
     .from(busabaseNodes)
-    .where(and(eq(busabaseNodes.type, "doc"), isNull(busabaseNodes.archivedAt)))
+    .where(
+      and(
+        eq(busabaseNodes.spaceId, getContextSpaceId()),
+        eq(busabaseNodes.type, "doc"),
+        isNull(busabaseNodes.archivedAt),
+      ),
+    )
     .orderBy(asc(busabaseNodes.position), asc(busabaseNodes.createdAt));
   return Promise.all(nodes.map(toDocVO));
 };

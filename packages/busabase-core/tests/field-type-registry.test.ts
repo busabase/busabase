@@ -23,6 +23,7 @@ const VALID_INPUT_KINDS = new Set([
   "number",
   "date",
   "url",
+  "embed",
   "email",
   "tel",
   "checkbox",
@@ -35,8 +36,8 @@ const VALID_INPUT_KINDS = new Set([
 ]);
 
 describe("FIELD_TYPES registry — complete & well-formed for every field type", () => {
-  it("has exactly 24 field types", () => {
-    expect(ALL_FIELD_TYPES).toHaveLength(24);
+  it("has exactly 25 field types", () => {
+    expect(ALL_FIELD_TYPES).toHaveLength(25);
   });
 
   it("structured text fields validate their syntax and reuse code display", () => {
@@ -135,6 +136,7 @@ describe("FIELD_TYPES registry — complete & well-formed for every field type",
       "markdown",
       "html",
       "code",
+      "embed",
       "link",
       "plain",
     ]);
@@ -148,6 +150,7 @@ describe("FIELD_TYPES registry — complete & well-formed for every field type",
       "chips",
     ]);
     expect(["url", "email", "phone"].map(fieldDisplayKind)).toEqual(["link", "link", "link"]);
+    expect(fieldDisplayKind("embed")).toBe("embed");
     expect(fieldDisplayKind("text")).toBe("plain");
   });
 

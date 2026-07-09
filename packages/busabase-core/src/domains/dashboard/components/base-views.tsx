@@ -22,6 +22,7 @@ export function BaseDetailView({
   archivedViews = [],
   archivedRecords = [],
   records,
+  orderedRecords,
   pagination,
   base,
   onCreateView,
@@ -35,6 +36,12 @@ export function BaseDetailView({
   archivedViews?: ViewVO[];
   archivedRecords?: RecordVO[];
   records: RecordVO[];
+  /**
+   * When the active view's sort was pushed to the server, these are the rows in
+   * the authoritative server order — use them directly (no client re-sort) so
+   * paging shows correct order without loading the whole base.
+   */
+  orderedRecords?: RecordVO[];
   pagination?: RecordsPagination;
   base: BaseVO | null;
   onCreateView: (
@@ -55,10 +62,14 @@ export function BaseDetailView({
   const baseViews = views.filter((view) => view.baseId === base?.id);
   const baseArchivedViews = archivedViews.filter((view) => view.baseId === base?.id);
   const baseArchivedRecords = archivedRecords.filter((record) => record.baseId === base?.id);
-  const filteredRecords = applyViewConfigToRecords(
-    records.filter((record) => record.baseId === base?.id),
-    activeView?.config,
-  );
+  // `orderedRecords` (server-sorted) is authoritative when present — skip the
+  // client filter/sort so we don't reorder the server's paginated order.
+  const filteredRecords = orderedRecords
+    ? orderedRecords.filter((record) => record.baseId === base?.id)
+    : applyViewConfigToRecords(
+        records.filter((record) => record.baseId === base?.id),
+        activeView?.config,
+      );
   return (
     <div className="min-h-0 flex-1 overflow-auto">
       <section>

@@ -9,6 +9,7 @@
 import type { FieldType } from "busabase-contract/types";
 import { type iString, iStringParse, type LocaleType } from "openlib/i18n/i-string";
 import { parseDocument } from "yaml";
+import { validateEmbedUrl } from "./utils/embed";
 
 /** Minimal field-definition shape both the VO and the persisted row satisfy. */
 export interface FieldDef {
@@ -29,6 +30,11 @@ export interface FieldDef {
     };
     code?: {
       language?: string;
+    };
+    embed?: {
+      aspectRatio?: "16:9" | "4:3" | "1:1";
+      height?: number;
+      providers?: ReadonlyArray<string>;
     };
   } | null;
 }
@@ -337,6 +343,13 @@ export const FIELD_TYPES: Record<FieldType, FieldTypeSpec> = {
     validate: (value, def) =>
       isValidUrl(value) ? null : `${fieldDisplayName(def)} must be a valid URL`,
   },
+  embed: {
+    type: "embed",
+    label: "embed",
+    input: "url",
+    columnWidth: "minmax(220px,320px)",
+    validate: validateEmbedUrl,
+  },
   phone: {
     type: "phone",
     label: "phone",
@@ -454,6 +467,7 @@ export const FIELD_TYPE_ORDER: FieldType[] = [
   "select",
   "multiselect",
   "url",
+  "embed",
   "email",
   "phone",
   "created_time",
@@ -503,6 +517,7 @@ export type FieldDisplayKind =
   | "markdown"
   | "html"
   | "code"
+  | "embed"
   | "link"
   | "plain";
 
@@ -520,6 +535,7 @@ const DISPLAY_KIND: Partial<Record<FieldType, FieldDisplayKind>> = {
   json: "code",
   yaml: "code",
   url: "link",
+  embed: "embed",
   email: "link",
   phone: "link",
 };

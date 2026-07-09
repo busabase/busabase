@@ -583,6 +583,16 @@ export const datasetZhCnScenario: SeedScenario = {
         },
         { id: "bsf_lab_url", slug: "url", name: "链接", type: "url", required: false, options: {} },
         {
+          id: "bsf_lab_embed",
+          slug: "embed",
+          name: "嵌入",
+          type: "embed",
+          required: false,
+          options: {
+            embed: { aspectRatio: "16:9", providers: ["youtube", "google_drive", "generic"] },
+          },
+        },
+        {
           id: "bsf_lab_email",
           slug: "email",
           name: "邮箱",
@@ -1071,6 +1081,7 @@ export const datasetZhCnScenario: SeedScenario = {
         updated_by: "field-type-agent",
         updated_time: "2026-06-21T10:30:00.000Z",
         url: "https://busabase.local/field-type-lab",
+        embed: "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
       },
       message: "种子数据：完整字段类型覆盖记录",
       author: "seed-qa",
@@ -1326,6 +1337,7 @@ export const datasetZhCnScenario: SeedScenario = {
           "select",
           "multiselect",
           "url",
+          "embed",
           "email",
           "phone",
           "created_time",

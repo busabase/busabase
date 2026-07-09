@@ -929,7 +929,7 @@ they seemed unsure or asked for more options, re-offer this menu:
 
 A blueprint is just a starting **Base** (a table of typed fields). Available field types:
 \`text\`, \`longtext\`, \`markdown\`, \`html\`, \`number\`, \`date\`, \`checkbox\`, \`select\`,
-\`multiselect\`, \`url\`, \`email\`, \`phone\`, \`attachment\`, \`code\`, \`json\`, \`yaml\`, \`relation\`, plus system
+\`multiselect\`, \`url\`, \`embed\`, \`email\`, \`phone\`, \`attachment\`, \`code\`, \`json\`, \`yaml\`, \`relation\`, plus system
 types (\`auto_number\`, \`created_time\`, \`ai_summary\`, \`ai_tags\`, …).
 
 ### Blueprint field maps
@@ -1100,7 +1100,8 @@ If the user picks *Something else*, don't hunt for a matching template — **des
 
 1. Ask what they manage and the few attributes that matter.
 2. Build a Base with **4–6 fields**, choosing types from the list above (\`select\` for fixed
-   choices, \`markdown\`/\`html\` for bodies, \`attachment\` for files, \`email\`/\`url\`/\`date\` for
+   choices, \`markdown\`/\`html\` for bodies, \`attachment\` for files, \`embed\` for YouTube/Google Drive
+   previews, \`email\`/\`url\`/\`date\` for
    typed values), following the same shape as the starter blueprints.
 3. Run the exact same **3a → 3b → 3c → 3d**. Nothing else changes.
 

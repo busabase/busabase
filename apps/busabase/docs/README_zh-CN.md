@@ -90,6 +90,8 @@ http://localhost:15419/dashboard/inbox
 | 记录详情页，展示字段、评论、审核历史和溯源信息 | Base 表格，展示结构化记录和富字段 |
 | ![Base 记录表格](../public/assets/readme/busabase-base-records.webp) | ![种子数据图谱视图](../public/assets/readme/busabase-graph-view.webp) |
 | Base 内部的记录——类型化字段、富值和一目了然的批准状态 | 图谱视图，展示跨 Base 种子记录之间的关系 |
+| ![Doc 详情](../public/assets/readme/busabase-doc-detail.webp) | ![File 详情](../public/assets/readme/busabase-file-detail.webp) |
+| 长文本 Markdown Doc，通过审核流程版本化编辑 | 由 Asset 库支撑的一等 File 节点 |
 
 ## 为什么要做这个
 
@@ -255,7 +257,7 @@ Busabase：供智能体提案、供人批准的数据库。
 - 记录变更的提交历史
 - 记录和审核对象上的评论
 - 读写操作的审计事件
-- Markdown、HTML、链接、文件、关联关系字段及富字段类型
+- Markdown、HTML、链接、嵌入、文件、关联关系字段及富字段类型
 - 支持搜索的索引字段值
 - 面向应用、工作流和 AI 智能体的 REST API
 - 针对智能体提案的人工介入协作

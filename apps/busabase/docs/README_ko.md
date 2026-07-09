@@ -90,6 +90,8 @@ http://localhost:15419/dashboard/inbox
 | 필드, 댓글, 검토 기록, 계보가 있는 레코드 상세 페이지 | 구조화된 레코드와 풍부한 필드를 보여주는 베이스 테이블 |
 | ![Base records table](../public/assets/readme/busabase-base-records.webp) | ![Graph view with seed data](../public/assets/readme/busabase-graph-view.webp) |
 | 베이스 내 레코드 — 타입이 지정된 필드, 풍부한 값, 한눈에 보이는 승인 상태 | 베이스 간 시드 레코드 관계를 보여주는 그래프 뷰 |
+| ![Doc detail](../public/assets/readme/busabase-doc-detail.webp) | ![File detail](../public/assets/readme/busabase-file-detail.webp) |
+| 리뷰를 통해 버전 관리되는 장문 Markdown Doc | Asset 라이브러리가 뒷받침하는 퍼스트클래스 File 노드 |
 
 ## 왜 만들었나요
 

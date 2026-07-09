@@ -4,6 +4,7 @@ import { datasetZhCnScenario } from "./dataset.zh-cn";
 import { directoryListingZhCnScenario } from "./directory-listing.zh-cn";
 import { expandZhCnScenario } from "./expand.zh-cn";
 import { financeInvoiceZhCnScenario } from "./finance-invoice.zh-cn";
+import { zhCnNodeTypesScenario } from "./node-types.zh-cn";
 import { readmeScenariosZhCnScenario } from "./readme-scenarios.zh-cn";
 
 const mergeScenarios = (...scenarios: SeedScenario[]): SeedScenario => ({
@@ -12,6 +13,9 @@ const mergeScenarios = (...scenarios: SeedScenario[]): SeedScenario => ({
   records: scenarios.flatMap((s) => s.records ?? []),
   views: scenarios.flatMap((s) => s.views ?? []),
   changeRequests: scenarios.flatMap((s) => s.changeRequests ?? []),
+  docs: scenarios.flatMap((s) => s.docs ?? []),
+  files: scenarios.flatMap((s) => s.files ?? []),
+  comments: scenarios.flatMap((s) => s.comments ?? []),
 });
 
 export const zhCnScenario: SeedScenario = mergeScenarios(
@@ -21,4 +25,5 @@ export const zhCnScenario: SeedScenario = mergeScenarios(
   expandZhCnScenario,
   directoryListingZhCnScenario,
   agentIntegrationsZhCnScenario,
+  zhCnNodeTypesScenario,
 );

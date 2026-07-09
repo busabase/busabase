@@ -36,6 +36,7 @@ export const busabaseFieldTypeEnum = pgEnum("busabase_field_type", [
   "select",
   "multiselect",
   "url",
+  "embed",
   "email",
   "phone",
   "created_time",
@@ -103,6 +104,11 @@ export const busabaseBaseFields = pgTable(
           prompt?: string;
           model?: string;
           reviewRequired?: boolean;
+        };
+        embed?: {
+          aspectRatio?: "16:9" | "4:3" | "1:1";
+          height?: number;
+          providers?: string[];
         };
       }>()
       .notNull()

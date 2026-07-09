@@ -151,18 +151,12 @@ const searchAssetBackedFiles = async (query: string, limit: number): Promise<Sea
   const results: SearchResultVO[] = [];
 
   for (const row of rows) {
-    const textContent =
-      row.contentKind === "text" && row.sizeBytes <= MAX_FILE_SEARCH_TEXT_BYTES
-        ? await storage
-            .getObject(row.storageKey)
-            .then((bytes) => bytes.toString("utf8"))
-            .catch(() => "")
-        : "";
-    const body = [
+    // Cheap, already-in-memory columns. Most hits match here (name / path /
+    // metadata), so we test them BEFORE ever reaching for the file body.
+    const metaBody = [
       row.assetName,
       JSON.stringify(row.metadata ?? {}),
       JSON.stringify(row.usageMetadata ?? {}),
-      textContent,
       row.fileName,
       row.mimeType,
       row.contentHash,
@@ -178,8 +172,24 @@ const searchAssetBackedFiles = async (query: string, limit: number): Promise<Sea
     ]
       .filter(Boolean)
       .join(" ");
-    if (!fileMatchesQuery(query, body)) {
-      continue;
+
+    let body = metaBody;
+    if (!fileMatchesQuery(query, metaBody)) {
+      // Only now — when metadata didn't already match — pay for the file body,
+      // and only for text files within the size budget. A network/disk
+      // getObject per row was the scalability hazard; a name-heavy query now
+      // fills `limit` and returns without reading a single file.
+      if (row.contentKind !== "text" || row.sizeBytes > MAX_FILE_SEARCH_TEXT_BYTES) {
+        continue;
+      }
+      const textContent = await storage
+        .getObject(row.storageKey)
+        .then((bytes) => bytes.toString("utf8"))
+        .catch(() => "");
+      if (!fileMatchesQuery(query, textContent)) {
+        continue;
+      }
+      body = `${metaBody} ${textContent}`;
     }
     results.push({
       id: `${row.assetId}:${row.nodeId}:${row.usagePath}:${row.recordId}:${row.fieldSlug}:${row.blockId}`,

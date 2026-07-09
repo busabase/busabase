@@ -605,5 +605,8 @@ export const dashboardZhCN: CoreI18nMessages = {
     metadata: "Metadata",
     metadataJson: "json",
     metadataBadge: "meta",
+    unusedOnly: "仅显示未使用",
+    unusedBadge: "{count} 个未使用",
+    noUnusedAssets: "没有未使用的资产。",
   },
 };

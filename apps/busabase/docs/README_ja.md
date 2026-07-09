@@ -90,6 +90,8 @@ http://localhost:15419/dashboard/inbox
 | フィールド、コメント、レビュー履歴、系譜を含むレコード詳細ページ | 構造化レコードとリッチフィールドを表示するベーステーブル |
 | ![Base records table](../public/assets/readme/busabase-base-records.webp) | ![Graph view with seed data](../public/assets/readme/busabase-graph-view.webp) |
 | ベース内のレコード — 型付きフィールド、リッチな値、承認ステータスが一目でわかる | ベース間のシードレコードの関係を示すグラフビュー |
+| ![Doc detail](../public/assets/readme/busabase-doc-detail.webp) | ![File detail](../public/assets/readme/busabase-file-detail.webp) |
+| レビューを通じてバージョン管理される長文 Markdown Doc | Asset ライブラリに支えられた一級 File ノード |
 
 ## なぜ作られたのか
 

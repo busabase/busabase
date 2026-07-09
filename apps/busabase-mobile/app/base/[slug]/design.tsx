@@ -38,6 +38,7 @@ const FIELD_TYPES: FieldType[] = [
   "select",
   "multiselect",
   "url",
+  "embed",
   "email",
   "phone",
   "attachment",

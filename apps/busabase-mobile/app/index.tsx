@@ -15,12 +15,14 @@ import { Button } from "~/components/ui/Button";
 import { useConnection } from "~/connection/connection-store";
 import { typography } from "~/theme/tokens";
 import { useTokens } from "~/theme/use-tokens";
+import { useMobileUpdate } from "~/updates/mobile-update-provider";
 
 export default function ConnectionScreen() {
   const router = useRouter();
   const tokens = useTokens();
   const scheme = useColorScheme();
   const { connectCloud, state } = useConnection();
+  const { isFeatureEnabled } = useMobileUpdate();
   const [cloudLoading, setCloudLoading] = useState(false);
   const [cloudError, setCloudError] = useState<string | null>(null);
   const logoSource =
@@ -59,6 +61,7 @@ export default function ConnectionScreen() {
       <NativeInlineError message={cloudError} onReset={() => setCloudError(null)} />
     </NativeActionBar>
   ) : undefined;
+  const cloudEnabled = isFeatureEnabled("cloudLogin");
 
   return (
     <NativeScreen title="Busabase" subtitle="Connect to a workspace" footer={footer}>
@@ -75,19 +78,21 @@ export default function ConnectionScreen() {
       </View>
 
       <NativeSection title="Workspace">
-        <NativeRow
-          title="Busabase Cloud"
-          subtitle="Sign in with busabase.com and return to this app."
-          leading={<Cloud size={18} color={tokens.mutedForeground} />}
-          trailing={
-            <Button
-              label="Sign in"
-              loading={cloudLoading}
-              variant="secondary"
-              onPress={handleCloudConnect}
-            />
-          }
-        />
+        {cloudEnabled ? (
+          <NativeRow
+            title="Busabase Cloud"
+            subtitle="Sign in with busabase.com and return to this app."
+            leading={<Cloud size={18} color={tokens.mutedForeground} />}
+            trailing={
+              <Button
+                label="Sign in"
+                loading={cloudLoading}
+                variant="secondary"
+                onPress={handleCloudConnect}
+              />
+            }
+          />
+        ) : null}
         <NativeRow
           title="Self-hosted server"
           subtitle="Enter a Busabase server URL and validate /api/health."

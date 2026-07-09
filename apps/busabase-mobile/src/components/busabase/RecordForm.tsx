@@ -179,7 +179,7 @@ function FieldRow({
         ? "email-address"
         : field.type === "phone"
           ? "phone-pad"
-          : field.type === "url"
+          : field.type === "url" || field.type === "embed"
             ? "url"
             : "default";
 

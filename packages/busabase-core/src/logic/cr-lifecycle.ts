@@ -20,6 +20,7 @@ import type {
   NodePO,
   OperationPO,
   RecordPO,
+  ReviewPO,
   ViewPO,
 } from "../db/schema";
 import {
@@ -516,44 +517,81 @@ export const notifyAgentOfChangeRequest = (changeRequestId: string, trigger: Age
 
 // ── Hydrate ───────────────────────────────────────────────────────────────────
 
-export const hydrateChangeRequest = async (
-  changeRequest: ChangeRequestPO,
-): Promise<ChangeRequestVO> => {
+/**
+ * Batch-hydrate change requests: one query per relation (operations, commits,
+ * views, reviews, bases, nodes, users) across ALL the change requests, instead
+ * of the per-CR fan-out `hydrateChangeRequest` would do in a `.map()`. Output is
+ * identical to calling the singular on each row — this is a pure N+1 fix.
+ */
+export const hydrateChangeRequests = async (
+  changeRequests: ChangeRequestPO[],
+): Promise<ChangeRequestVO[]> => {
+  if (changeRequests.length === 0) {
+    return [];
+  }
   const db = await getDb();
-  const baseMap = await loadBasesByIds(changeRequest.baseId ? [changeRequest.baseId] : []);
-  const nodeMap = await loadNodesByIds(changeRequest.nodeId ? [changeRequest.nodeId] : []);
+  const changeRequestIds = changeRequests.map((changeRequest) => changeRequest.id);
+
+  const baseMap = await loadBasesByIds([
+    ...new Set(
+      changeRequests
+        .map((changeRequest) => changeRequest.baseId)
+        .filter((baseId): baseId is string => Boolean(baseId)),
+    ),
+  ]);
+  const nodeMap = await loadNodesByIds([
+    ...new Set(
+      changeRequests
+        .map((changeRequest) => changeRequest.nodeId)
+        .filter((nodeId): nodeId is string => Boolean(nodeId)),
+    ),
+  ]);
+
+  // Every operation across all CRs in one query; grouped per CR preserving
+  // (position, createdAt) order.
   const itemRows = await db
     .select()
     .from(busabaseOperations)
-    .where(eq(busabaseOperations.changeRequestId, changeRequest.id))
+    .where(inArray(busabaseOperations.changeRequestId, changeRequestIds))
     .orderBy(asc(busabaseOperations.position), asc(busabaseOperations.createdAt));
-  const operationHeadCommitIds = itemRows.map((item) => item.headCommitId);
+  const operationsByCr = new Map<string, OperationPO[]>();
+  for (const item of itemRows) {
+    const list = operationsByCr.get(item.changeRequestId);
+    if (list) {
+      list.push(item);
+    } else {
+      operationsByCr.set(item.changeRequestId, [item]);
+    }
+  }
+
+  // Head commits + record base-commits in one query.
+  const allCommitIds = [
+    ...new Set([
+      ...itemRows.map((item) => item.headCommitId),
+      ...itemRows
+        .map((item) => item.baseCommitId)
+        .filter((commitId): commitId is string => Boolean(commitId)),
+    ]),
+  ];
   const commitRows =
-    operationHeadCommitIds.length > 0
-      ? await db
-          .select()
-          .from(busabaseCommits)
-          .where(inArray(busabaseCommits.id, operationHeadCommitIds))
+    allCommitIds.length > 0
+      ? await db.select().from(busabaseCommits).where(inArray(busabaseCommits.id, allCommitIds))
       : [];
   const commitsById = new Map(commitRows.map((commit) => [commit.id, commit]));
 
-  const baseCommitIds = itemRows
-    .map((item) => item.baseCommitId)
-    .filter((cid): cid is string => Boolean(cid));
-  const baseCommitRows =
-    baseCommitIds.length > 0
-      ? await db.select().from(busabaseCommits).where(inArray(busabaseCommits.id, baseCommitIds))
-      : [];
-  const baseCommitsById = new Map(baseCommitRows.map((commit) => [commit.id, commit]));
-  const viewTargetIds = itemRows
-    .filter(
-      (item) =>
-        (item.operation === "view_update" ||
-          item.operation === "view_delete" ||
-          item.operation === "view_restore") &&
-        item.targetViewId,
-    )
-    .map((item) => item.targetViewId as string);
+  const viewTargetIds = [
+    ...new Set(
+      itemRows
+        .filter(
+          (item) =>
+            (item.operation === "view_update" ||
+              item.operation === "view_delete" ||
+              item.operation === "view_restore") &&
+            item.targetViewId,
+        )
+        .map((item) => item.targetViewId as string),
+    ),
+  ];
   const viewRows =
     viewTargetIds.length > 0
       ? await db.select().from(busabaseViews).where(inArray(busabaseViews.id, viewTargetIds))
@@ -562,7 +600,7 @@ export const hydrateChangeRequest = async (
 
   const resolveBaseFields = (item: OperationPO): Record<string, unknown> | null => {
     if (item.operation === "record_update" || item.operation === "record_delete") {
-      const baseCommit = item.baseCommitId ? baseCommitsById.get(item.baseCommitId) : undefined;
+      const baseCommit = item.baseCommitId ? commitsById.get(item.baseCommitId) : undefined;
       return baseCommit ? baseCommit.fields : null;
     }
     if (
@@ -582,89 +620,135 @@ export const hydrateChangeRequest = async (
     return null;
   };
 
+  // Every review across all CRs in one query; grouped per CR (createdAt desc).
   const reviewRows = await db
     .select()
     .from(busabaseReviews)
-    .where(eq(busabaseReviews.changeRequestId, changeRequest.id))
+    .where(inArray(busabaseReviews.changeRequestId, changeRequestIds))
     .orderBy(desc(busabaseReviews.createdAt));
+  const reviewsByCr = new Map<string, ReviewPO[]>();
+  for (const review of reviewRows) {
+    const list = reviewsByCr.get(review.changeRequestId);
+    if (list) {
+      list.push(review);
+    } else {
+      reviewsByCr.set(review.changeRequestId, [review]);
+    }
+  }
+
   const users = await resolveUserRefs([
-    changeRequest.submittedBy,
+    ...changeRequests.map((changeRequest) => changeRequest.submittedBy),
     ...commitRows.map((commit) => commit.author),
-    ...baseCommitRows.map((commit) => commit.author),
     ...reviewRows.map((review) => review.reviewerId),
   ]);
 
-  const operations: OperationVO[] = itemRows.map((item) => {
-    const commit = commitsById.get(item.headCommitId);
-    if (!commit) {
-      throw new Error(`Invalid operation graph for ${item.id}`);
+  return changeRequests.map((changeRequest) => {
+    const operations: OperationVO[] = (operationsByCr.get(changeRequest.id) ?? []).map((item) => {
+      const commit = commitsById.get(item.headCommitId);
+      if (!commit) {
+        throw new Error(`Invalid operation graph for ${item.id}`);
+      }
+      return toOperationVO(item, commit, resolveBaseFields(item), users);
+    });
+    const base = changeRequest.baseId ? (baseMap.get(changeRequest.baseId) ?? null) : null;
+    const node = changeRequest.nodeId ? (nodeMap.get(changeRequest.nodeId) ?? null) : null;
+    if (changeRequest.targetType === "base" && !base) {
+      throw new Error(`Invalid changeRequest graph for ${changeRequest.id}`);
     }
-    return toOperationVO(item, commit, resolveBaseFields(item), users);
+    if (changeRequest.targetType === "node" && changeRequest.nodeId && !node) {
+      throw new Error(`Invalid node changeRequest graph for ${changeRequest.id}`);
+    }
+
+    return {
+      id: changeRequest.id,
+      baseId: changeRequest.baseId,
+      targetType: changeRequest.targetType,
+      nodeId: changeRequest.nodeId,
+      status: changeRequest.status,
+      submittedBy: changeRequest.submittedBy,
+      submittedByUser: users.get(changeRequest.submittedBy) ?? null,
+      sourceMeta: changeRequest.sourceMeta,
+      reviewPolicySnapshot: changeRequest.reviewPolicySnapshot,
+      mergeSummary: changeRequest.mergeSummary,
+      rejectedReason: changeRequest.rejectedReason,
+      reviewedAt: toIso(changeRequest.reviewedAt),
+      mergedAt: toIso(changeRequest.mergedAt),
+      createdAt: changeRequest.createdAt.toISOString(),
+      updatedAt: changeRequest.updatedAt.toISOString(),
+      base,
+      node,
+      operations,
+      primaryOperation: operations[0] ?? null,
+      operationCount: operations.length,
+      reviews: (reviewsByCr.get(changeRequest.id) ?? []).map((review) =>
+        toReviewVO(review, users),
+      ) as ReviewVO[],
+    };
   });
-  const base = changeRequest.baseId ? (baseMap.get(changeRequest.baseId) ?? null) : null;
-  const node = changeRequest.nodeId ? (nodeMap.get(changeRequest.nodeId) ?? null) : null;
-  if (changeRequest.targetType === "base" && !base) {
+};
+
+export const hydrateChangeRequest = async (
+  changeRequest: ChangeRequestPO,
+): Promise<ChangeRequestVO> => {
+  const [vo] = await hydrateChangeRequests([changeRequest]);
+  if (!vo) {
     throw new Error(`Invalid changeRequest graph for ${changeRequest.id}`);
   }
-  if (changeRequest.targetType === "node" && changeRequest.nodeId && !node) {
-    throw new Error(`Invalid node changeRequest graph for ${changeRequest.id}`);
-  }
+  return vo;
+};
 
-  return {
-    id: changeRequest.id,
-    baseId: changeRequest.baseId,
-    targetType: changeRequest.targetType,
-    nodeId: changeRequest.nodeId,
-    status: changeRequest.status,
-    submittedBy: changeRequest.submittedBy,
-    submittedByUser: users.get(changeRequest.submittedBy) ?? null,
-    sourceMeta: changeRequest.sourceMeta,
-    reviewPolicySnapshot: changeRequest.reviewPolicySnapshot,
-    mergeSummary: changeRequest.mergeSummary,
-    rejectedReason: changeRequest.rejectedReason,
-    reviewedAt: toIso(changeRequest.reviewedAt),
-    mergedAt: toIso(changeRequest.mergedAt),
-    createdAt: changeRequest.createdAt.toISOString(),
-    updatedAt: changeRequest.updatedAt.toISOString(),
-    base,
-    node,
-    operations,
-    primaryOperation: operations[0] ?? null,
-    operationCount: operations.length,
-    reviews: reviewRows.map((review) => toReviewVO(review, users)) as ReviewVO[],
-  };
+/**
+ * Batch-hydrate records: bases + head commits + users resolved once for the
+ * whole set instead of per-record. Output is identical to `hydrateRecord` per
+ * row — a pure N+1 fix.
+ */
+export const hydrateRecords = async (records: RecordPO[]): Promise<RecordVO[]> => {
+  if (records.length === 0) {
+    return [];
+  }
+  const db = await getDb();
+  const baseMap = await loadBasesByIds([...new Set(records.map((record) => record.baseId))]);
+  const headCommitIds = [...new Set(records.map((record) => record.headCommitId))];
+  const commitRows = await db
+    .select()
+    .from(busabaseCommits)
+    .where(inArray(busabaseCommits.id, headCommitIds));
+  const commitsById = new Map(commitRows.map((commit) => [commit.id, commit]));
+  const users = await resolveUserRefs([
+    ...records.map((record) => record.createdBy),
+    ...commitRows.map((commit) => commit.author),
+  ]);
+
+  return records.map((record) => {
+    const base = baseMap.get(record.baseId);
+    const headCommit = commitsById.get(record.headCommitId);
+    if (!base || !headCommit) {
+      throw new Error(`Invalid record graph for ${record.id}`);
+    }
+    return {
+      id: record.id,
+      baseId: record.baseId,
+      headCommitId: record.headCommitId,
+      parentRecordId: record.parentRecordId,
+      parentCommitId: record.parentCommitId,
+      status: record.status === "archived" ? "archived" : "active",
+      createdBy: record.createdBy,
+      createdByUser: users.get(record.createdBy) ?? null,
+      archivedAt: toIso(record.archivedAt),
+      createdAt: record.createdAt.toISOString(),
+      updatedAt: record.updatedAt.toISOString(),
+      base,
+      headCommit: toCommitVO(headCommit, users),
+    };
+  });
 };
 
 export const hydrateRecord = async (record: RecordPO): Promise<RecordVO> => {
-  const db = await getDb();
-  const baseMap = await loadBasesByIds([record.baseId]);
-  const [headCommit] = await db
-    .select()
-    .from(busabaseCommits)
-    .where(eq(busabaseCommits.id, record.headCommitId))
-    .limit(1);
-  const base = baseMap.get(record.baseId);
-  if (!base || !headCommit) {
+  const [vo] = await hydrateRecords([record]);
+  if (!vo) {
     throw new Error(`Invalid record graph for ${record.id}`);
   }
-
-  const users = await resolveUserRefs([record.createdBy, headCommit.author]);
-
-  return {
-    id: record.id,
-    baseId: record.baseId,
-    headCommitId: record.headCommitId,
-    parentRecordId: record.parentRecordId,
-    parentCommitId: record.parentCommitId,
-    status: record.status === "archived" ? "archived" : "active",
-    createdBy: record.createdBy,
-    createdByUser: users.get(record.createdBy) ?? null,
-    archivedAt: toIso(record.archivedAt),
-    createdAt: record.createdAt.toISOString(),
-    updatedAt: record.updatedAt.toISOString(),
-    base,
-    headCommit: toCommitVO(headCommit, users),
-  };
+  return vo;
 };
 
 // ── CRUD ──────────────────────────────────────────────────────────────────────
@@ -679,7 +763,7 @@ export const listChangeRequests = async (input?: z.input<typeof listInputSchema>
     .where(eq(busabaseChangeRequests.spaceId, getContextSpaceId()))
     .orderBy(desc(busabaseChangeRequests.createdAt))
     .limit(parsed.limit);
-  return Promise.all(changeRequestRows.map(hydrateChangeRequest));
+  return hydrateChangeRequests(changeRequestRows);
 };
 
 // `|` separates the ISO timestamp (which contains colons) from the id.
@@ -752,7 +836,7 @@ export const listChangeRequestsPaged = async (
   const last = pageRows[pageRows.length - 1];
   const nextCursor = hasMore && last ? encodeChangeRequestCursor(last.createdAt, last.id) : null;
 
-  const changeRequests = await Promise.all(pageRows.map(hydrateChangeRequest));
+  const changeRequests = await hydrateChangeRequests(pageRows);
   return { changeRequests, nextCursor };
 };
 
@@ -842,11 +926,10 @@ export const listRecordChangeRequests = async (recordId: string) => {
   const changeRequestsById = new Map(
     changeRequestRows.map((changeRequest) => [changeRequest.id, changeRequest]),
   );
-  return Promise.all(
+  return hydrateChangeRequests(
     changeRequestIds
       .map((crId) => changeRequestsById.get(crId))
-      .filter((changeRequest): changeRequest is ChangeRequestPO => Boolean(changeRequest))
-      .map(hydrateChangeRequest),
+      .filter((changeRequest): changeRequest is ChangeRequestPO => Boolean(changeRequest)),
   );
 };
 

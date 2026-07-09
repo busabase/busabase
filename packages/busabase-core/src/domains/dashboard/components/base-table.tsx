@@ -10,9 +10,11 @@ import type {
 import {
   Check,
   ChevronRight,
+  ExternalLink,
   MoreHorizontal,
   Paperclip,
   PenLine,
+  PlaySquare,
   Plus,
   RotateCcw,
   Trash2,
@@ -22,6 +24,7 @@ import { SPALink as Link } from "openlib/ui/dashboard";
 import { type CSSProperties, useCallback, useLayoutEffect, useRef, useState } from "react";
 import { fmt, useCoreI18n, useIString } from "../../../i18n";
 import { fieldColumnWidth, fieldDisplayKind } from "../../base/field-types";
+import { resolveEmbedPreview } from "../../base/utils/embed";
 import { getRecordTitle } from "../helpers/change-request";
 import {
   fieldPreviewText,
@@ -111,6 +114,13 @@ const toSlug = (value: string) =>
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-|-$/g, "");
+
+const toSlugInput = (value: string) =>
+  value
+    .toLowerCase()
+    .replace(/[^a-z0-9-]+/g, "-")
+    .replace(/-{2,}/g, "-")
+    .replace(/^-+/g, "");
 
 // Above this many rows the records list is virtualized (windowed).
 const VIRTUALIZE_ROW_THRESHOLD = 100;
@@ -631,7 +641,7 @@ function ViewChangeRequestForm({
 
   const submit = async (options?: ViewSubmitOptions) => {
     const trimmedName = name.trim();
-    const trimmedSlug = slug.trim();
+    const trimmedSlug = toSlug(slug);
     if (!trimmedName) {
       setFormError(messages.base.viewNameRequired);
       return;
@@ -714,7 +724,7 @@ function ViewChangeRequestForm({
           <input
             className="mt-1 h-8 w-full rounded-md border border-border/70 bg-background px-2.5 font-mono text-sm outline-none transition-colors focus:border-primary disabled:bg-muted/40 disabled:text-muted-foreground"
             disabled={mode === "edit"}
-            onChange={(event) => setSlug(toSlug(event.target.value))}
+            onChange={(event) => setSlug(toSlugInput(event.target.value))}
             value={slug}
           />
         </label>
@@ -983,6 +993,45 @@ function RecordTableCell({
         title={code}
       >
         <CodeLikeFieldPreview field={field} value={rawValue} variant="table" />
+      </Link>
+    );
+  }
+
+  if (kind === "embed") {
+    const preview = resolveEmbedPreview(rawValue, field);
+    if (!preview) {
+      return (
+        <Link
+          className={`flex min-w-0 items-center py-1 text-muted-foreground ${
+            index === 0 ? stickyClassName : ""
+          }`}
+          href={currentRecordHref}
+          title="-"
+        >
+          -
+        </Link>
+      );
+    }
+    return (
+      <Link
+        className={`flex min-w-0 items-center gap-2 py-1 ${
+          index === 0 ? `${stickyClassName} font-medium text-foreground` : "text-muted-foreground"
+        }`}
+        href={currentRecordHref}
+        title={preview.sourceUrl}
+      >
+        <span className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded border bg-muted/35 text-muted-foreground">
+          <PlaySquare size={14} />
+        </span>
+        <span className="min-w-0">
+          <span className="block truncate font-medium text-foreground text-xs">
+            {preview.label}
+          </span>
+          <span className="block truncate text-muted-foreground text-[11px]">
+            {preview.hostname}
+          </span>
+        </span>
+        <ExternalLink className="ml-auto shrink-0 text-muted-foreground" size={12} />
       </Link>
     );
   }

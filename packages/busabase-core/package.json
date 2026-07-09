@@ -65,13 +65,13 @@
       "types": "./src/domains/folder/handlers.ts",
       "default": "./src/domains/folder/handlers.ts"
     },
-    "./domains/user-env/logic": {
-      "types": "./src/domains/user-env/logic/user-env-logic.ts",
-      "default": "./src/domains/user-env/logic/user-env-logic.ts"
+    "./domains/vault/logic": {
+      "types": "./src/domains/vault/logic/vault-logic.ts",
+      "default": "./src/domains/vault/logic/vault-logic.ts"
     },
-    "./domains/user-env/types": {
-      "types": "./src/domains/user-env/types/user-env.ts",
-      "default": "./src/domains/user-env/types/user-env.ts"
+    "./domains/vault/types": {
+      "types": "./src/domains/vault/types/vault.ts",
+      "default": "./src/domains/vault/types/vault.ts"
     },
     "./dashboard": {
       "types": "./src/domains/dashboard/index.tsx",

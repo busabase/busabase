@@ -11,6 +11,7 @@ const labelByFieldType: Record<FieldType, string> = {
   created_time: "Created time",
   date: "Date",
   email: "Email",
+  embed: "Embed",
   html: "HTML",
   json: "JSON",
   longtext: "Long text",

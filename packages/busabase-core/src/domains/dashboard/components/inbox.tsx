@@ -9,6 +9,7 @@ import type {
 import { SPALink as Link } from "openlib/ui/dashboard";
 import { type ReactNode, useMemo, useState } from "react";
 import { fmt, useCoreI18n } from "../../../i18n";
+import { buildActivityEvents } from "../helpers/activity-events";
 import {
   changeRequestStatusLabel,
   getChangeRequestMessage,
@@ -22,7 +23,7 @@ import {
 import { formatListTime, formatUserRefLabel } from "../helpers/format";
 import { type InboxViewKey, inboxTabLabel } from "../helpers/inbox";
 import type { BusabaseListGroup } from "../helpers/view-types";
-import { ActivityRow, buildActivityEvents } from "./activity";
+import { ActivityRow } from "./activity";
 import { EmptyState } from "./primitives";
 
 function BusabaseList({

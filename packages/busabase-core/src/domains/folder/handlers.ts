@@ -71,7 +71,13 @@ export const listFolders = async (): Promise<FolderVO[]> => {
   const folders = await db
     .select()
     .from(busabaseNodes)
-    .where(and(eq(busabaseNodes.type, "folder"), isNull(busabaseNodes.archivedAt)))
+    .where(
+      and(
+        eq(busabaseNodes.spaceId, getContextSpaceId()),
+        eq(busabaseNodes.type, "folder"),
+        isNull(busabaseNodes.archivedAt),
+      ),
+    )
     .orderBy(asc(busabaseNodes.position), asc(busabaseNodes.createdAt));
   return Promise.all(folders.map(toFolderVO));
 };

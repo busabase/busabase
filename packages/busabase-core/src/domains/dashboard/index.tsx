@@ -66,6 +66,10 @@ import { getNodeDetail } from "./node-detail-registry";
 // the previous single-shot list size while staying paginated.
 const RECORDS_PAGE_SIZE = 50;
 
+// Field types whose sort can be pushed to the DB (their typed value column orders
+// the same way the client would). Others keep the client-side locale sort.
+const SERVER_SORTABLE_FIELD_TYPES = new Set(["number", "auto_number", "date"]);
+
 interface BusabaseDashboardProps {
   nodes: NodeVO[];
   bases: BaseVO[];
@@ -318,6 +322,24 @@ function BusabaseDashboardContent({
       value: filter.value,
     }));
   }, [selectedBaseView, activeBase?.fields]);
+  // A single number/date sort with no filters can be pushed to the DB, which then
+  // orders + paginates authoritatively — so the base doesn't have to be pulled
+  // into the browser to sort. (Filters are superset-pushed and the client still
+  // narrows them, so a filtered view stays client-side. Multi-column and
+  // text/other sorts also stay client-side.)
+  const activeViewSort = useMemo(() => {
+    const config = selectedBaseView?.config;
+    if (!config || config.filters.length > 0 || config.sorts.length !== 1) {
+      return undefined;
+    }
+    const sort = config.sorts[0];
+    const fieldType = (activeBase?.fields ?? []).find((f) => f.slug === sort.fieldSlug)?.type;
+    if (!fieldType || !SERVER_SORTABLE_FIELD_TYPES.has(fieldType)) {
+      return undefined;
+    }
+    return { fieldSlug: sort.fieldSlug, fieldType, direction: sort.direction };
+  }, [selectedBaseView, activeBase?.fields]);
+  const serverSortedView = Boolean(activeViewSort);
   // Records load per active base via keyset pagination ("load more"), so a base
   // with more than one page is fully reachable instead of silently capped.
   const recordsInfiniteQuery = useInfiniteQuery({
@@ -327,6 +349,7 @@ function BusabaseDashboardContent({
         cursor: pageParam,
         limit: RECORDS_PAGE_SIZE,
         filters: activeViewFilters,
+        sort: activeViewSort,
       }),
       initialPageParam: undefined as string | undefined,
       getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
@@ -362,12 +385,12 @@ function BusabaseDashboardContent({
   );
   const isBaseViewRoute = Boolean(isBaseChildRoute && selectedBaseView);
   // View filters/sorts are applied client-side over the loaded pages, so a view
-  // with a filter or sort is only correct once every page is in. Auto-load the
-  // rest (instead of leaving it behind "load more") so filtered/sorted views are
-  // complete without the user paging to the bottom by hand. The default (no
-  // filter/sort) view stays lazily paginated.
+  // with a filter or sort is only correct once every page is in — UNLESS the sort
+  // was pushed to the server (serverSortedView), which orders + paginates for us.
+  // So auto-load-all only when the view still needs client-side filter/sort.
   const viewNeedsAllRecords = Boolean(
     selectedBaseView &&
+      !serverSortedView &&
       (selectedBaseView.config.filters.length > 0 || selectedBaseView.config.sorts.length > 0),
   );
   useEffect(() => {
@@ -1474,6 +1497,7 @@ function BusabaseDashboardContent({
           archivedViews={archivedViewsForBase}
           archivedRecords={archivedRecordsForBase}
           records={records}
+          orderedRecords={serverSortedView ? baseRecords : undefined}
           pagination={recordsPagination}
           base={activeBase}
           onCreateView={submitCreateView}
@@ -1582,6 +1606,8 @@ function BusabaseDashboardContent({
     selectedBaseSlug,
     setLocation,
     recordsPagination,
+    serverSortedView,
+    baseRecords,
   ]);
 
   const content = (

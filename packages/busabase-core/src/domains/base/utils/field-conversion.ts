@@ -50,6 +50,7 @@ export function toText(
     case "yaml":
     case "email":
     case "url":
+    case "embed":
     case "phone":
     case "ai_summary":
       return typeof value === "string" ? value : String(value);
@@ -125,6 +126,9 @@ export function fromText(
       return EMAIL_RE.test(text) ? text : null;
 
     case "url":
+      return URL_RE.test(text) ? text : null;
+
+    case "embed":
       return URL_RE.test(text) ? text : null;
 
     case "phone":

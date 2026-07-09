@@ -86,10 +86,64 @@ export interface SeedViewDef {
   useCases: DemoUseCase[];
 }
 
+export interface SeedDocDef {
+  nodeId: string;
+  slug: string;
+  name: string;
+  description: string;
+  /** Markdown body written to storage. */
+  body: string;
+  position: number;
+  /** Optional in-review `doc_update` change request, to demo the Doc review flow. */
+  changeRequest?: {
+    id: string;
+    operationId: string;
+    commitId: string;
+    submittedBy: string;
+    minutesAgo: number;
+    message: string;
+    /** Proposed body carried by the change request. */
+    nextBody: string;
+  };
+}
+
+export interface SeedFileDef {
+  nodeId: string;
+  slug: string;
+  name: string;
+  description: string;
+  fileName: string;
+  mimeType: string;
+  /** File bytes (text content) written to storage. */
+  body: string;
+  attachmentId: string;
+  assetId: string;
+  storageKey: string;
+  position: number;
+}
+
+export interface SeedCommentDef {
+  id: string;
+  subjectType: "record" | "change_request" | "operation" | "commit";
+  /** A record id or change-request id that this scenario also seeds. */
+  subjectId: string;
+  authorId: string;
+  body: string;
+  mentionsAi?: boolean;
+  /** Minutes before the dataset "now" anchor that this comment was posted. */
+  minutesAgo: number;
+}
+
 export interface SeedScenario {
   folders?: SeedFolderDef[];
   bases?: SeedBaseDef[];
   records?: SeedRecordDef[];
   views?: SeedViewDef[];
   changeRequests?: SeedChangeRequestDef[];
+  /** First-class Doc nodes (long-form Markdown edited through review). */
+  docs?: SeedDocDef[];
+  /** First-class File nodes, each backed by an Asset. */
+  files?: SeedFileDef[];
+  /** Review discussion threaded under the scenario's change requests / records. */
+  comments?: SeedCommentDef[];
 }

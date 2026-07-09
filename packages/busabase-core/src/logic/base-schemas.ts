@@ -15,6 +15,7 @@ const fieldTypeSchema = z.enum([
   "select",
   "multiselect",
   "url",
+  "embed",
   "email",
   "phone",
   "created_time",
@@ -61,6 +62,13 @@ const fieldOptionsSchema = z
     code: z
       .object({
         language: z.string().optional(),
+      })
+      .optional(),
+    embed: z
+      .object({
+        aspectRatio: z.enum(["16:9", "4:3", "1:1"]).optional(),
+        height: z.number().int().positive().max(1200).optional(),
+        providers: z.array(z.string()).optional(),
       })
       .optional(),
     inverseFieldId: z.string().optional(),

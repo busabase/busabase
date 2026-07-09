@@ -11,7 +11,7 @@ import {
   updateFieldChangeRequestInputSchema,
 } from "busabase-contract/domains/base/contract/base-schemas";
 import type { FieldType } from "busabase-contract/types";
-import { and, eq, isNull } from "drizzle-orm";
+import { and, asc, eq, gt, isNotNull, isNull, or, sql } from "drizzle-orm";
 import { type iString, iStringFromText, iStringToText } from "openlib/i18n/i-string";
 import type { z } from "zod";
 import { resolveActorId } from "../../../context";
@@ -419,6 +419,11 @@ export const createUpdateFieldChangeRequest = async (
   return changeRequest;
 };
 
+// Bound the field-value scan so a large base can't OOM the preview: process
+// non-null rows in id-keyset chunks and return at most a sample of conflicts.
+const PREVIEW_SCAN_CHUNK = 1000;
+const PREVIEW_CONFLICT_SAMPLE_CAP = 100;
+
 export const previewFieldConversion = async (
   baseId: string,
   fieldId: string,
@@ -448,41 +453,86 @@ export const previewFieldConversion = async (
     throw new ConversionNotSupportedError(field.type, newType);
   }
 
-  // Load record-level field values for this field only
-  const valueRows = await db
-    .select()
+  const scopeFilter = and(
+    eq(busabaseFieldValues.baseId, base.id),
+    eq(busabaseFieldValues.fieldId, fieldId),
+    isNull(busabaseFieldValues.changeRequestId),
+  );
+
+  // Exact totals straight from SQL — no row materialization. A row counts as
+  // "null" iff ALL four value columns are NULL, mirroring the JS nullish check
+  // (valueJson ?? valueText ?? valueNumber ?? valueBool).
+  const [totals] = await db
+    .select({ count: sql<number>`count(*)::int` })
+    .from(busabaseFieldValues)
+    .where(scopeFilter);
+  const totalCount = totals?.count ?? 0;
+  const [nulls] = await db
+    .select({ count: sql<number>`count(*)::int` })
     .from(busabaseFieldValues)
     .where(
       and(
-        eq(busabaseFieldValues.baseId, base.id),
-        eq(busabaseFieldValues.fieldId, fieldId),
-        isNull(busabaseFieldValues.changeRequestId),
+        scopeFilter,
+        isNull(busabaseFieldValues.valueJson),
+        isNull(busabaseFieldValues.valueText),
+        isNull(busabaseFieldValues.valueNumber),
+        isNull(busabaseFieldValues.valueBool),
       ),
     );
+  const nullCount = nulls?.count ?? 0;
 
-  const totalCount = valueRows.length;
+  // Convertibility needs the per-row JS conversion, so scan the NON-null rows in
+  // bounded chunks (keyset by id) rather than loading the whole column at once,
+  // and cap the returned conflict SAMPLE. `convertibleCount` stays exact (every
+  // non-null row is examined); the true conflict count is derivable as
+  // totalCount - convertibleCount - nullCount.
+  const notAllNull = or(
+    isNotNull(busabaseFieldValues.valueJson),
+    isNotNull(busabaseFieldValues.valueText),
+    isNotNull(busabaseFieldValues.valueNumber),
+    isNotNull(busabaseFieldValues.valueBool),
+  );
   const conflicts: Array<{ recordId: string; currentValue: unknown }> = [];
-  let nullCount = 0;
   let convertibleCount = 0;
-
-  for (const row of valueRows) {
-    const currentValue = row.valueJson ?? row.valueText ?? row.valueNumber ?? row.valueBool ?? null;
-    if (currentValue === null || currentValue === undefined) {
-      nullCount++;
-      continue;
+  let cursor = "";
+  for (;;) {
+    const chunk = await db
+      .select()
+      .from(busabaseFieldValues)
+      .where(and(scopeFilter, notAllNull, gt(busabaseFieldValues.id, cursor)))
+      .orderBy(asc(busabaseFieldValues.id))
+      .limit(PREVIEW_SCAN_CHUNK);
+    if (chunk.length === 0) {
+      break;
     }
-    try {
-      const converted = convertFieldValue(currentValue, field.type, newType, {
-        choices: field.options?.choices ?? [],
-      });
-      if (converted === null || converted === undefined) {
-        conflicts.push({ recordId: row.recordId ?? "", currentValue });
-      } else {
-        convertibleCount++;
+    for (const row of chunk) {
+      const currentValue =
+        row.valueJson ?? row.valueText ?? row.valueNumber ?? row.valueBool ?? null;
+      if (currentValue === null || currentValue === undefined) {
+        continue; // notAllNull guarantees this can't happen; defensive only.
       }
-    } catch {
-      conflicts.push({ recordId: row.recordId ?? "", currentValue });
+      try {
+        const converted = convertFieldValue(currentValue, field.type, newType, {
+          choices: field.options?.choices ?? [],
+        });
+        if (converted === null || converted === undefined) {
+          if (conflicts.length < PREVIEW_CONFLICT_SAMPLE_CAP) {
+            conflicts.push({ recordId: row.recordId ?? "", currentValue });
+          }
+        } else {
+          convertibleCount++;
+        }
+      } catch {
+        if (conflicts.length < PREVIEW_CONFLICT_SAMPLE_CAP) {
+          conflicts.push({ recordId: row.recordId ?? "", currentValue });
+        }
+      }
     }
+    const lastRow = chunk[chunk.length - 1];
+    if (!lastRow || chunk.length < PREVIEW_SCAN_CHUNK) {
+      break;
+    }
+    cursor = lastRow.id;
   }
 
   return {

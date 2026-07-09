@@ -327,6 +327,5 @@ export * from "../domains/assets/schema/assets";
 // here so the db barrel stays the one import surface. Kernel CR tables FK into
 // these via lazy refs (the import cycle resolves at runtime).
 export * from "../domains/base/schema";
-// User-scoped runtime environment variables. `user_id = ""` is the local
-// open-source user; cloud hosts store the authenticated user id.
-export * from "../domains/user-env/schema/user-env-vars";
+// Vault-managed secrets and variables used by agents, MCP, and API tools.
+export * from "../domains/vault/schema/vault-items";

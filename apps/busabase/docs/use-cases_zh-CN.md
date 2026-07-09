@@ -211,4 +211,4 @@ Busabase 可以对如下业务 Base 建模：
 
 使用 Busabase 在一个本地场景中验证所有支持的字段类型和审核操作。
 
-种子数据中的 `Field Type Lab` Base 包含文本、长文本、Markdown、HTML、附件、关联关系、数字、日期、复选框、单选、多选、URL、邮箱、电话、创建/更新元数据字段、自动编号、AI 摘要和 AI 标签。
+种子数据中的 `Field Type Lab` Base 包含文本、长文本、Markdown、HTML、附件、关联关系、数字、日期、复选框、单选、多选、URL、嵌入、邮箱、电话、创建/更新元数据字段、自动编号、AI 摘要和 AI 标签。`embed`/嵌入字段保存普通 URL，并在记录详情页把 YouTube、Google Drive 等支持 iframe 的链接预览出来；表格中保持轻量的来源卡片，避免一次加载大量 iframe。

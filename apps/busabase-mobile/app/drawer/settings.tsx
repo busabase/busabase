@@ -3,6 +3,7 @@ import { useRouter } from "expo-router";
 import {
   Bell,
   ChevronRight,
+  Download,
   ExternalLink,
   Languages,
   LogOut,
@@ -30,6 +31,7 @@ import { formatDate } from "~/lib/format";
 import { useNotifications } from "~/notifications/notification-provider";
 import type { NotificationSettings } from "~/notifications/notification-settings";
 import { useTokens } from "~/theme/use-tokens";
+import { useMobileUpdate } from "~/updates/mobile-update-provider";
 
 const intervalOptions: Array<{ label: string; value: NotificationSettings["pollIntervalSec"] }> = [
   { label: "30s", value: 30 },
@@ -57,6 +59,13 @@ function SettingsContent() {
   const { state, disconnect, connectSelfHosted, removeServerFromHistory } = useConnection();
   const { supported, settings, permissionDenied, setEnabled, setPollInterval, openSystemSettings } =
     useNotifications();
+  const {
+    checking,
+    decision,
+    error: updateError,
+    checkForUpdates,
+    isFeatureEnabled,
+  } = useMobileUpdate();
   const [switchingServer, setSwitchingServer] = useState<string | null>(null);
   const [selectedServer, setSelectedServer] = useState<string | null>(null);
   const [disconnectSheetOpen, setDisconnectSheetOpen] = useState(false);
@@ -192,16 +201,18 @@ function SettingsContent() {
         <NativeRow
           title="New change requests"
           subtitle={
-            supported
-              ? "Notify when review work arrives. Background checks run on the system schedule."
-              : "Available only in the iOS and Android app."
+            !isFeatureEnabled("notifications")
+              ? "Disabled for this review build."
+              : supported
+                ? "Notify when review work arrives. Background checks run on the system schedule."
+                : "Available only in the iOS and Android app."
           }
           leading={<Bell size={18} color={tokens.mutedForeground} />}
           trailing={
             <Switch
               accessibilityLabel="Notify about new change requests"
-              value={supported && settings.enabled}
-              disabled={!supported}
+              value={isFeatureEnabled("notifications") && supported && settings.enabled}
+              disabled={!supported || !isFeatureEnabled("notifications")}
               trackColor={{ true: tokens.primary }}
               onValueChange={(value) => void setEnabled(value)}
             />
@@ -237,7 +248,7 @@ function SettingsContent() {
         ) : null}
       </NativeSection>
 
-      {connection ? (
+      {connection && isFeatureEnabled("externalAgentManifest") ? (
         <NativeSection title="Agent">
           <NativeRow
             title="Agent Skill setup"
@@ -255,6 +266,19 @@ function SettingsContent() {
           subtitle="Mobile companion app"
           meta={displayVersion}
           leading={<Shield size={18} color={tokens.mutedForeground} />}
+        />
+        <NativeRow
+          title="Check for updates"
+          subtitle={
+            updateError
+              ? "Could not check the latest version."
+              : decision?.latestVersion
+                ? `Latest version v${decision.latestVersion}`
+                : "Read the latest release policy."
+          }
+          meta={checking ? "Checking" : undefined}
+          leading={<Download size={16} color={tokens.mutedForeground} />}
+          onPress={() => void checkForUpdates({ manual: true })}
         />
         <NativeRow
           title="Privacy Policy"

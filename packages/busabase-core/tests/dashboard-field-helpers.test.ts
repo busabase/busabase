@@ -181,6 +181,27 @@ describe("getFieldPreviewText", () => {
     const field = makeField({ type: "number", options: {} as BaseFieldVO["options"] });
     expect(getFieldPreviewText(field, "42")).toBe("42");
   });
+
+  it("embed → provider label when the URL can be embedded", () => {
+    const field = makeField({ type: "embed", options: {} as BaseFieldVO["options"] });
+    expect(getFieldPreviewText(field, "https://www.youtube.com/watch?v=dQw4w9WgXcQ")).toBe(
+      "YouTube",
+    );
+    expect(getFieldPreviewText(field, "https://drive.google.com/file/d/abc123/view")).toBe(
+      "Google Drive",
+    );
+    expect(getFieldPreviewText(field, "https://example.com/embed")).toBe("example.com");
+  });
+
+  it("embed → raw fallback when provider options reject the URL", () => {
+    const field = makeField({
+      type: "embed",
+      options: { embed: { providers: ["youtube"] } } as BaseFieldVO["options"],
+    });
+    expect(getFieldPreviewText(field, "https://example.com/embed")).toBe(
+      "https://example.com/embed",
+    );
+  });
 });
 
 // ── fieldPreviewText ─────────────────────────────────────────────────────────

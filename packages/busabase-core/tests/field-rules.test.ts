@@ -20,6 +20,7 @@ const ALL_FIELD_TYPES: FieldType[] = [
   "select",
   "multiselect",
   "url",
+  "embed",
   "email",
   "phone",
   "created_time",
@@ -93,6 +94,7 @@ describe("validateRecordFields — every field type has a rule path", () => {
     select: "Open",
     multiselect: ["a", "b"],
     url: "https://example.com",
+    embed: "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
     email: "a@b.com",
     phone: "+1 555-123-4567",
     ai_summary: "a summary",
@@ -144,6 +146,16 @@ describe("validateRecordFields — rejects bad values per type", () => {
   it("url rejects non-http(s) and garbage", () => {
     expect(checkOne("url", "ftp://host/x")).toMatch(/valid URL/);
     expect(checkOne("url", "not a url")).toMatch(/valid URL/);
+  });
+  it("embed accepts supported URLs and rejects garbage", () => {
+    expect(checkOne("embed", "https://youtu.be/dQw4w9WgXcQ")).toBeNull();
+    expect(checkOne("embed", "https://drive.google.com/file/d/abc123/view")).toBeNull();
+    expect(checkOne("embed", "not a url")).toMatch(/embeddable/);
+    expect(
+      checkOne("embed", "https://example.com", {
+        options: { embed: { providers: ["youtube", "google_drive"] } },
+      }),
+    ).toMatch(/embeddable/);
   });
   it("phone rejects letters", () => {
     expect(checkOne("phone", "call-me")).toMatch(/valid phone/);

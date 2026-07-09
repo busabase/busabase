@@ -3,6 +3,7 @@ import type { AttachmentRef } from "open-domains/attachments/types";
 import { iStringParse } from "openlib/i18n/i-string";
 import type { CoreI18nMessages } from "../../../i18n";
 import { FIELD_TYPE_ORDER } from "../../base/field-types";
+import { resolveEmbedPreview } from "../../base/utils/embed";
 import { fieldValueToString, formatNumberField, formatOpaqueUserId } from "./format";
 import { safeFetchableUrl, stripHtmlTags } from "./html";
 import type { FieldChip } from "./view-types";
@@ -113,6 +114,11 @@ export const getFieldPreviewText = (
   }
   if (field.type === "number" && field.options.number?.format === "currency") {
     return formatNumberField(value, field.options.number);
+  }
+  if (field.type === "embed") {
+    return (
+      resolveEmbedPreview(value, field)?.label ?? fieldPreviewText(value, field.type, messages)
+    );
   }
   return fieldPreviewText(value, field.type, messages);
 };

@@ -619,5 +619,8 @@ export const dashboardJa: CoreI18nMessages = {
     metadata: "Metadata",
     metadataJson: "json",
     metadataBadge: "meta",
+    unusedOnly: "未使用のみ表示",
+    unusedBadge: "未使用 {count} 件",
+    noUnusedAssets: "未使用のアセットはありません。",
   },
 };

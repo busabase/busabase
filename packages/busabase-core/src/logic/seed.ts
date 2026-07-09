@@ -3,13 +3,18 @@ import "server-only";
 import type { BaseVO, ChangeRequestStatus, NodeVO, ViewConfigVO } from "busabase-contract/types";
 import { and, eq, inArray } from "drizzle-orm";
 import { iStringToText } from "openlib/i18n/i-string";
+import { storage } from "openlib/storage";
 import { getContextSpaceId, LOCAL_SPACE_ID } from "../context";
 import { getDb } from "../db";
 import type { BasePO, NodePO } from "../db/schema";
 import {
+  attachments,
+  busabaseAssets,
+  busabaseAssetUsages,
   busabaseBaseFields,
   busabaseBases,
   busabaseChangeRequests,
+  busabaseComments,
   busabaseCommits,
   busabaseNodes,
   type busabaseOperationKindEnum,
@@ -19,11 +24,12 @@ import {
   busabaseViews,
 } from "../db/schema";
 import { buildRecordSeedFields } from "../demo/dataset";
-import type { SeedScenario } from "../demo/seed-types";
+import type { SeedCommentDef, SeedDocDef, SeedFileDef, SeedScenario } from "../demo/seed-types";
+import { writeDocBody } from "../domains/doc/handlers";
 import { writeFileTreeTextFile } from "../domains/filetree/handlers";
 import { writeSkillTextFile } from "../domains/skill/logic/storage";
 import { ensureProjectionBackfill, projectCommitFields } from "./field-values";
-import { CURRENT_USER_ID, hashText, now, ROOT_NODE_ID, rootNodeIdForSpace } from "./kernel";
+import { CURRENT_USER_ID, hashText, id, now, ROOT_NODE_ID, rootNodeIdForSpace } from "./kernel";
 import { toBaseVO, toNodeVO } from "./vo";
 
 const minutesBefore = (date: Date, minutes: number) => new Date(date.getTime() - minutes * 60_000);
@@ -386,6 +392,8 @@ const SEED_SKILL_OPERATION_ID = "opr_seed_skill_research_editor";
 const SEED_SKILL_COMMIT_ID = "cmt_seed_skill_research_editor";
 const DRIVES_FOLDER_NODE_ID = "nod_drives";
 const SEED_TEAM_DRIVE_NODE_ID = "nod_drive_team_files";
+const DOCS_FOLDER_NODE_ID = "nod_docs";
+const FILES_FOLDER_NODE_ID = "nod_files";
 
 const seedSkillNodeIfMissing = async (createdAt: Date) => {
   ensureDefaultStorageUrl();
@@ -584,6 +592,270 @@ const seedDriveNodeIfMissing = async (createdAt: Date) => {
     "README.md",
     "# Team Files\n\nA shared Drive for plain files. Propose edits through change requests before merge.\n",
   );
+};
+
+// ── Per-node-type example content (Docs, Files) + review Comments ──────────────
+// The content itself is locale-specific and lives in the scenario
+// (`scenario.docs` / `scenario.files` / `scenario.comments`), so English and
+// Simplified Chinese share this seeding structure but carry different data.
+
+const seedDocNodesIfMissing = async (createdAt: Date, docs: SeedDocDef[]) => {
+  if (docs.length === 0) {
+    return;
+  }
+  ensureDefaultStorageUrl();
+  const db = await getDb();
+  const [existingFolder] = await db
+    .select()
+    .from(busabaseNodes)
+    .where(eq(busabaseNodes.id, DOCS_FOLDER_NODE_ID))
+    .limit(1);
+  if (!existingFolder) {
+    await db.insert(busabaseNodes).values({
+      id: DOCS_FOLDER_NODE_ID,
+      parentId: ROOT_NODE_ID,
+      type: "folder",
+      slug: "docs",
+      name: "Docs",
+      description: "Long-form Markdown documents edited through review.",
+      position: 3,
+      createdAt,
+      updatedAt: createdAt,
+    });
+  }
+
+  for (const doc of docs) {
+    const [existingDoc] = await db
+      .select()
+      .from(busabaseNodes)
+      .where(eq(busabaseNodes.id, doc.nodeId))
+      .limit(1);
+    const values = {
+      parentId: DOCS_FOLDER_NODE_ID,
+      type: "doc" as const,
+      slug: doc.slug,
+      name: doc.name,
+      description: doc.description,
+    };
+    if (existingDoc) {
+      await db
+        .update(busabaseNodes)
+        .set({ ...values, updatedAt: createdAt })
+        .where(eq(busabaseNodes.id, doc.nodeId));
+    } else {
+      await db.insert(busabaseNodes).values({
+        id: doc.nodeId,
+        ...values,
+        position: doc.position,
+        createdAt,
+        updatedAt: createdAt,
+      });
+    }
+    await writeDocBody(doc.nodeId, doc.body);
+
+    if (doc.changeRequest) {
+      const cr = doc.changeRequest;
+      await seedNodeChangeRequestIfMissing({
+        id: cr.id,
+        nodeId: doc.nodeId,
+        status: "in_review",
+        submittedBy: cr.submittedBy,
+        sourceMeta: {
+          seed: true,
+          scenario: "doc-body-update",
+          subject: "doc",
+          nodeId: doc.nodeId,
+        },
+        createdAt: minutesBefore(createdAt, cr.minutesAgo),
+        operation: {
+          id: cr.operationId,
+          commitId: cr.commitId,
+          operation: "doc_update",
+          filePath: null,
+          fields: { body: cr.nextBody },
+          message: cr.message,
+          author: cr.submittedBy,
+        },
+      });
+    }
+  }
+};
+
+const seedFileNodesIfMissing = async (createdAt: Date, files: SeedFileDef[]) => {
+  if (files.length === 0) {
+    return;
+  }
+  ensureDefaultStorageUrl();
+  const db = await getDb();
+  const spaceId = getContextSpaceId();
+  const [existingFolder] = await db
+    .select()
+    .from(busabaseNodes)
+    .where(eq(busabaseNodes.id, FILES_FOLDER_NODE_ID))
+    .limit(1);
+  if (!existingFolder) {
+    await db.insert(busabaseNodes).values({
+      id: FILES_FOLDER_NODE_ID,
+      parentId: ROOT_NODE_ID,
+      type: "folder",
+      slug: "files",
+      name: "Files",
+      description: "First-class uploaded files backed by the Asset library.",
+      position: 4,
+      createdAt,
+      updatedAt: createdAt,
+    });
+  }
+
+  for (const file of files) {
+    const [existingFile] = await db
+      .select()
+      .from(busabaseNodes)
+      .where(eq(busabaseNodes.id, file.nodeId))
+      .limit(1);
+    if (existingFile) {
+      continue;
+    }
+
+    const buffer = Buffer.from(file.body, "utf8");
+    await storage.uploadFileToKey(buffer, file.storageKey, file.mimeType);
+
+    // Attachment = the deduped physical bytes; Asset = the space-scoped logical handle
+    // a File node points at. Both keyed by fixed ids so a re-run is a no-op.
+    const [existingAttachment] = await db
+      .select()
+      .from(attachments)
+      .where(eq(attachments.id, file.attachmentId))
+      .limit(1);
+    if (!existingAttachment) {
+      await db.insert(attachments).values({
+        id: file.attachmentId,
+        storageKey: file.storageKey,
+        fileName: file.fileName,
+        mimeType: file.mimeType,
+        sizeBytes: buffer.length,
+        contentHash: null,
+        context: "file-node",
+        userId: CURRENT_USER_ID,
+        spaceId,
+        metadata: {},
+        createdAt,
+        updatedAt: createdAt,
+      });
+    }
+
+    const [existingAsset] = await db
+      .select()
+      .from(busabaseAssets)
+      .where(eq(busabaseAssets.id, file.assetId))
+      .limit(1);
+    if (!existingAsset) {
+      await db.insert(busabaseAssets).values({
+        id: file.assetId,
+        spaceId,
+        attachmentId: file.attachmentId,
+        name: file.fileName,
+        contentKind: "text",
+        metadata: {},
+        createdBy: CURRENT_USER_ID,
+        createdAt,
+        updatedAt: createdAt,
+      });
+    }
+
+    await db.insert(busabaseNodes).values({
+      id: file.nodeId,
+      parentId: FILES_FOLDER_NODE_ID,
+      type: "file",
+      slug: file.slug,
+      name: file.name,
+      description: file.description,
+      metadata: { assetId: file.assetId },
+      position: file.position,
+      createdAt,
+      updatedAt: createdAt,
+    });
+
+    // Where-used row so the Asset shows the File node as a reference (guards deletion).
+    await db
+      .insert(busabaseAssetUsages)
+      .values({
+        id: id("aus"),
+        spaceId,
+        assetId: file.assetId,
+        ownerType: "file_node",
+        nodeId: file.nodeId,
+        path: "",
+        recordId: "",
+        fieldSlug: "file:asset",
+        blockId: "",
+        metadata: {},
+        createdAt,
+        updatedAt: createdAt,
+      })
+      .onConflictDoNothing();
+  }
+};
+
+const seedCommentsIfMissing = async (createdAt: Date, comments: SeedCommentDef[]) => {
+  if (comments.length === 0) {
+    return;
+  }
+  const db = await getDb();
+  for (const comment of comments) {
+    const [existing] = await db
+      .select()
+      .from(busabaseComments)
+      .where(eq(busabaseComments.id, comment.id))
+      .limit(1);
+    if (existing) {
+      continue;
+    }
+
+    // Resolve the subject links the same way createComment does, so the comment
+    // threads correctly under its change request or record.
+    let recordId: string | null = null;
+    let changeRequestId: string | null = null;
+    let commitId: string | null = null;
+    if (comment.subjectType === "change_request") {
+      const [cr] = await db
+        .select({ id: busabaseChangeRequests.id })
+        .from(busabaseChangeRequests)
+        .where(eq(busabaseChangeRequests.id, comment.subjectId))
+        .limit(1);
+      if (!cr) {
+        continue;
+      }
+      changeRequestId = cr.id;
+    } else if (comment.subjectType === "record") {
+      const [record] = await db
+        .select({ id: busabaseRecords.id, headCommitId: busabaseRecords.headCommitId })
+        .from(busabaseRecords)
+        .where(eq(busabaseRecords.id, comment.subjectId))
+        .limit(1);
+      if (!record) {
+        continue;
+      }
+      recordId = record.id;
+      commitId = record.headCommitId;
+    }
+
+    const commentedAt = minutesBefore(createdAt, comment.minutesAgo);
+    await db.insert(busabaseComments).values({
+      id: comment.id,
+      subjectType: comment.subjectType,
+      subjectId: comment.subjectId,
+      recordId,
+      changeRequestId,
+      operationId: null,
+      commitId,
+      authorId: comment.authorId,
+      body: comment.body,
+      mentionsAi: comment.mentionsAi ?? false,
+      createdAt: commentedAt,
+      updatedAt: commentedAt,
+    });
+  }
 };
 
 export const buildNodeTree = (nodes: NodePO[], bases: BasePO[]): NodeVO[] => {
@@ -857,11 +1129,16 @@ const applySeedScenario = async (scenario: SeedScenario) => {
 export const seedScenario = async (scenario: SeedScenario) => {
   await ensureReady();
   await applySeedScenario(scenario);
-  // The "Agent Skills" demo (folder + AI Research Editor skill + its change
-  // request) and Drive demo are opt-in example content: they ship with `pnpm db:seed:all`, not
-  // with the first-request auto-seed in ensureReady().
+  // The per-node-type demos (Skill, Drive, Doc, File) are opt-in example content:
+  // they ship with `pnpm db:seed:all`, not with the first-request auto-seed in
+  // ensureReady(). Together with the scenario's folders + bases they make the
+  // seeded workspace cover every builtin node type.
   await seedSkillNodeIfMissing(now());
   await seedDriveNodeIfMissing(now());
+  await seedDocNodesIfMissing(now(), scenario.docs ?? []);
+  await seedFileNodesIfMissing(now(), scenario.files ?? []);
+  // Comments thread under the change requests above, so they must already exist.
+  await seedCommentsIfMissing(now(), scenario.comments ?? []);
 };
 
 export const loadBasesByIds = async (baseIds: string[]): Promise<Map<string, BaseVO>> => {

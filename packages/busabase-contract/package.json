@@ -53,6 +53,14 @@
       "types": "./src/domains/assets/types.ts",
       "default": "./src/domains/assets/types.ts"
     },
+    "./domains/vault/contract": {
+      "types": "./src/domains/vault/contract.ts",
+      "default": "./src/domains/vault/contract.ts"
+    },
+    "./domains/vault/types": {
+      "types": "./src/domains/vault/types.ts",
+      "default": "./src/domains/vault/types.ts"
+    },
     "./domains/doc/contract": {
       "types": "./src/domains/doc/contract.ts",
       "default": "./src/domains/doc/contract.ts"

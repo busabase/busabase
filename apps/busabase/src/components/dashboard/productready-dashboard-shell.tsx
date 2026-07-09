@@ -16,14 +16,14 @@ import {
   DropdownMenuTrigger,
 } from "kui/dropdown-menu";
 import { SidebarMenu, SidebarMenuButton, SidebarMenuItem } from "kui/sidebar";
-import { Archive, Check, ChevronsUpDown, Images, Languages, Network, Variable } from "lucide-react";
+import { Archive, Check, ChevronsUpDown, Images, Languages, Network, Vault } from "lucide-react";
 import Image from "next/image";
 import { useAddDemoParam } from "openlib/ui/dashboard";
 import type { ReactNode } from "react";
 import { useMemo, useState } from "react";
 import { useLocation } from "wouter";
 import { useSPA } from "~/components/spa/spa-context";
-import { UserEnvSettingsDialog } from "~/domains/user-env/components/user-env-settings-dialog";
+import { VaultSettingsDialog } from "~/domains/vault/components/vault-settings-dialog";
 import { getLanguageOptions } from "~/i18n/config";
 import { getBusabaseAppLL } from "~/lib/i18n";
 
@@ -63,7 +63,7 @@ export function ProductReadyDashboardShell({
   const addDemoParam = useAddDemoParam();
   const LL = useMemo(() => getBusabaseAppLL(locale), [locale]);
   const coreMessages = useCoreI18n();
-  const [envDialogOpen, setEnvDialogOpen] = useState(false);
+  const [vaultDialogOpen, setVaultDialogOpen] = useState(false);
   const currentPath = location.split("?")[0];
   const languageOptions = useMemo(
     () => [
@@ -170,9 +170,9 @@ export function ProductReadyDashboardShell({
                   <span>{LL.shell.graphView()}</span>
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
-                <DropdownMenuItem onSelect={() => setEnvDialogOpen(true)}>
-                  <Variable />
-                  <span>{LL.userEnvSettings.openButton()}</span>
+                <DropdownMenuItem onSelect={() => setVaultDialogOpen(true)}>
+                  <Vault />
+                  <span>{LL.vaultSettings.openButton()}</span>
                 </DropdownMenuItem>
                 <DropdownMenuLabel className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
                   <Languages className="size-3.5" />
@@ -195,10 +195,10 @@ export function ProductReadyDashboardShell({
             </DropdownMenu>
           </SidebarMenuItem>
         </SidebarMenu>
-        <UserEnvSettingsDialog
-          labels={LL.userEnvSettings}
-          open={envDialogOpen}
-          onOpenChange={setEnvDialogOpen}
+        <VaultSettingsDialog
+          labels={LL.vaultSettings}
+          open={vaultDialogOpen}
+          onOpenChange={setVaultDialogOpen}
           showTrigger={false}
         />
       </div>

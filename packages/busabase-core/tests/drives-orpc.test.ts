@@ -138,6 +138,44 @@ describe("Drive API — oRPC integration", () => {
     });
   });
 
+  it("keeps the mounted Asset's identity and cleans up the orphaned upload when replacing a file", async () => {
+    const original = await createAsset({
+      fileName: "deck-v1.pdf",
+      mimeType: "application/pdf",
+      sizeBytes: 1024,
+      contentHash: `sha256:${"1".repeat(64)}`,
+    });
+    const drive = await client.drives.create({
+      slug: "asset-replace-drive",
+      name: "Asset Replace Drive",
+      files: [{ path: "deck.pdf", assetId: original.assetId, displayName: "Deck v1" }],
+    });
+
+    const replacement = await createAsset({
+      fileName: "deck-v2.pdf",
+      mimeType: "application/pdf",
+      sizeBytes: 2048,
+      contentHash: `sha256:${"2".repeat(64)}`,
+    });
+    expect((await client.assets.list()).some((a) => a.id === replacement.assetId)).toBe(true);
+
+    const updateCr = await client.drives.createChangeRequest({
+      nodeId: drive.node.id,
+      operations: [
+        { kind: "update", path: "deck.pdf", assetId: replacement.assetId, displayName: "Deck v2" },
+      ],
+    });
+    await approveAndMerge(updateCr.id);
+
+    const file = await client.drives.readFile({ nodeId: drive.node.id, filePath: "deck.pdf" });
+    expect(file.assetId).toBe(original.assetId);
+    expect(file.displayName).toBe("Deck v2");
+
+    const library = await client.assets.list();
+    expect(library.some((a) => a.id === original.assetId)).toBe(true);
+    expect(library.some((a) => a.id === replacement.assetId)).toBe(false);
+  });
+
   it("uploads and reads arbitrary Drive files as asset refs through the public OpenAPI route", async () => {
     const handler = new OpenAPIHandler(busabaseRouter);
     const call = async (method: string, routePath: string, body?: unknown) => {

@@ -14,6 +14,7 @@ const EDITABLE_TYPES: ReadonlySet<FieldType> = new Set<FieldType>([
   "select",
   "multiselect",
   "url",
+  "embed",
   "email",
   "phone",
   "attachment",

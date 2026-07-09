@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";
 import { ArrowLeft, FileText, Film, Image as ImageIcon, Music, Trash2 } from "lucide-react";
-import type { ReactNode } from "react";
+import { type ReactNode, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { fmt, useCoreI18n } from "../../../i18n";
 import { EmptyState } from "./primitives";
@@ -64,7 +64,7 @@ export function AssetMetadataBlock({
   );
 }
 
-export function AssetsHeader({ count }: { count: number }) {
+export function AssetsHeader({ count, unusedCount = 0 }: { count: number; unusedCount?: number }) {
   const messages = useCoreI18n();
 
   return (
@@ -74,6 +74,11 @@ export function AssetsHeader({ count }: { count: number }) {
       {count > 0 ? (
         <span className="rounded-full border bg-muted px-2 py-0.5 text-muted-foreground text-xs">
           {count}
+        </span>
+      ) : null}
+      {unusedCount > 0 ? (
+        <span className="rounded-full border border-destructive/40 px-2 py-0.5 text-destructive text-xs">
+          {fmt(messages.assets.unusedBadge, { count: unusedCount })}
         </span>
       ) : null}
     </div>
@@ -115,7 +120,13 @@ export function AssetLibraryView({
 }) {
   const messages = useCoreI18n();
   const listQuery = useQuery(orpc.assets.list.queryOptions({}));
-  const assets = listQuery.data ?? [];
+  const [unusedOnly, setUnusedOnly] = useState(false);
+  const allAssets = listQuery.data ?? [];
+  const unusedCount = useMemo(
+    () => allAssets.filter((asset) => asset.usageCount === 0).length,
+    [allAssets],
+  );
+  const assets = unusedOnly ? allAssets.filter((asset) => asset.usageCount === 0) : allAssets;
 
   if (listQuery.isLoading) {
     return (
@@ -137,7 +148,7 @@ export function AssetLibraryView({
       </div>
     );
   }
-  if (assets.length === 0) {
+  if (allAssets.length === 0) {
     return (
       <div className="mx-auto w-full max-w-6xl p-4 md:p-6">
         <AssetsHeader count={0} />
@@ -151,50 +162,69 @@ export function AssetLibraryView({
   }
   return (
     <div className="mx-auto w-full max-w-6xl p-4 md:p-6">
-      <AssetsHeader count={assets.length} />
-      <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
-        {assets.map((asset) => {
-          const Icon = assetKindIcon(asset.mimeType);
-          const isImage = asset.mimeType.startsWith("image/");
-          return (
-            <button
-              className="group flex flex-col overflow-hidden rounded-lg border bg-background text-left transition-colors hover:border-foreground/30"
-              key={asset.id}
-              onClick={() => onOpenAsset(asset.id)}
-              type="button"
-            >
-              <div className="relative grid aspect-square place-items-center overflow-hidden bg-muted">
-                {isImage ? (
-                  <img
-                    alt={asset.name}
-                    className="h-full w-full object-cover"
-                    loading="lazy"
-                    src={asset.url}
-                  />
-                ) : (
-                  <Icon className="size-10 text-muted-foreground" />
-                )}
-                {asset.usageCount > 0 ? (
-                  <span className="absolute top-1.5 right-1.5 rounded-full bg-foreground/80 px-1.5 py-0.5 font-medium text-[10px] text-background">
-                    {asset.usageCount}×
-                  </span>
-                ) : null}
-                {hasAssetMetadata(asset.metadata) ? (
-                  <span className="absolute bottom-1.5 left-1.5 rounded-full bg-background/90 px-1.5 py-0.5 font-medium text-[10px] text-foreground uppercase shadow-sm">
-                    {messages.assets.metadataBadge}
-                  </span>
-                ) : null}
-              </div>
-              <div className="flex flex-col gap-0.5 p-2">
-                <span className="truncate font-medium text-sm" title={asset.name}>
-                  {asset.name}
-                </span>
-                <span className="text-muted-foreground text-xs">{formatAssetSize(asset.size)}</span>
-              </div>
-            </button>
-          );
-        })}
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <AssetsHeader count={allAssets.length} unusedCount={unusedCount} />
+        {unusedCount > 0 ? (
+          <label className="flex items-center gap-1.5 text-muted-foreground text-sm">
+            <input
+              checked={unusedOnly}
+              className="size-4 shrink-0 accent-foreground"
+              onChange={(event) => setUnusedOnly(event.target.checked)}
+              type="checkbox"
+            />
+            {messages.assets.unusedOnly}
+          </label>
+        ) : null}
       </div>
+      {assets.length === 0 ? (
+        <p className="mt-4 text-muted-foreground text-sm">{messages.assets.noUnusedAssets}</p>
+      ) : (
+        <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
+          {assets.map((asset) => {
+            const Icon = assetKindIcon(asset.mimeType);
+            const isImage = asset.mimeType.startsWith("image/");
+            return (
+              <button
+                className="group flex flex-col overflow-hidden rounded-lg border bg-background text-left transition-colors hover:border-foreground/30"
+                key={asset.id}
+                onClick={() => onOpenAsset(asset.id)}
+                type="button"
+              >
+                <div className="relative grid aspect-square place-items-center overflow-hidden bg-muted">
+                  {isImage ? (
+                    <img
+                      alt={asset.name}
+                      className="h-full w-full object-cover"
+                      loading="lazy"
+                      src={asset.url}
+                    />
+                  ) : (
+                    <Icon className="size-10 text-muted-foreground" />
+                  )}
+                  {asset.usageCount > 0 ? (
+                    <span className="absolute top-1.5 right-1.5 rounded-full bg-foreground/80 px-1.5 py-0.5 font-medium text-[10px] text-background">
+                      {asset.usageCount}×
+                    </span>
+                  ) : null}
+                  {hasAssetMetadata(asset.metadata) ? (
+                    <span className="absolute bottom-1.5 left-1.5 rounded-full bg-background/90 px-1.5 py-0.5 font-medium text-[10px] text-foreground uppercase shadow-sm">
+                      {messages.assets.metadataBadge}
+                    </span>
+                  ) : null}
+                </div>
+                <div className="flex flex-col gap-0.5 p-2">
+                  <span className="truncate font-medium text-sm" title={asset.name}>
+                    {asset.name}
+                  </span>
+                  <span className="text-muted-foreground text-xs">
+                    {formatAssetSize(asset.size)}
+                  </span>
+                </div>
+              </button>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }

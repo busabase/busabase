@@ -335,13 +335,19 @@ export const updateAssetMetadata = async (
 };
 
 /**
- * Delete an asset from the library. Refused while it is still referenced (the
- * Where-Used index doubles as the delete guard). On success removes the asset row
- * and, via `deleteAttachmentSafely`, the stored object iff no other registry row
- * (e.g. another space's deduped copy) still points at the same bytes.
+ * Delete an Asset row. Refused while it is still referenced (the Where-Used
+ * index doubles as the delete guard). `attachmentId` is a loose text ref, not
+ * an FK — other Asset rows (e.g. two file names deduped onto one Attachment,
+ * or the row we just repointed onto this Attachment during a file-tree
+ * replace) can legitimately still point at the same bytes, so the physical
+ * Attachment is only removed via `deleteAttachmentSafely` once no other
+ * `busabase_assets` row references it.
  */
-export const deleteAsset = async (assetId: string): Promise<{ deleted: boolean }> => {
-  const db = await getDb();
+export const deleteAssetRow = async (
+  assetId: string,
+  tx?: Awaited<ReturnType<typeof getDb>>,
+): Promise<{ deleted: boolean }> => {
+  const db = tx ?? (await getDb());
   const spaceId = getContextSpaceId();
 
   const [asset] = await db
@@ -350,7 +356,7 @@ export const deleteAsset = async (assetId: string): Promise<{ deleted: boolean }
     .where(and(eq(busabaseAssets.id, assetId), eq(busabaseAssets.spaceId, spaceId)))
     .limit(1);
   if (!asset) {
-    throw new Error(`Asset not found: ${assetId}`);
+    return { deleted: false };
   }
 
   const [usageCount] = await db
@@ -364,13 +370,30 @@ export const deleteAsset = async (assetId: string): Promise<{ deleted: boolean }
   }
 
   await db.delete(busabaseAssets).where(eq(busabaseAssets.id, assetId));
-  await deleteAttachmentSafely(asset.attachmentId, db, attachments);
+
+  const [stillSharedByOtherAsset] = await db
+    .select({ id: busabaseAssets.id })
+    .from(busabaseAssets)
+    .where(eq(busabaseAssets.attachmentId, asset.attachmentId))
+    .limit(1);
+  if (!stillSharedByOtherAsset) {
+    await deleteAttachmentSafely(asset.attachmentId, db, attachments);
+  }
+
   // Direct delete (no change request) — record it so the audit trail is complete.
   await insertAuditEvent(db, {
     action: "asset.deleted",
     metadata: { assetId, attachmentId: asset.attachmentId },
   });
   return { deleted: true };
+};
+
+export const deleteAsset = async (assetId: string): Promise<{ deleted: boolean }> => {
+  const result = await deleteAssetRow(assetId);
+  if (!result.deleted) {
+    throw new Error(`Asset not found: ${assetId}`);
+  }
+  return result;
 };
 
 // --- where-used sync (Base attachment fields) ------------------------------

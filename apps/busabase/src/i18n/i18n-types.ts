@@ -113,19 +113,27 @@ type RootTranslation = {
 		 */
 		blogPosts: string
 	}
-	userEnvSettings: {
+	vaultSettings: {
 		/**
-		 * E​n​v​ ​V​a​r​s
+		 * V​a​u​l​t
 		 */
 		title: string
 		/**
-		 * S​t​o​r​e​ ​r​u​n​t​i​m​e​ ​s​e​c​r​e​t​s​ ​f​o​r​ ​a​g​e​n​t​s​ ​a​n​d​ ​A​P​I​ ​t​o​o​l​s​ ​t​h​a​t​ ​c​a​l​l​ ​t​h​i​s​ ​B​u​s​a​b​a​s​e​ ​i​n​s​t​a​n​c​e​.
+		 * S​t​o​r​e​ ​s​e​c​r​e​t​s​ ​a​n​d​ ​v​a​r​i​a​b​l​e​s​ ​f​o​r​ ​a​g​e​n​t​s​,​ ​M​C​P​ ​s​e​r​v​e​r​s​,​ ​a​n​d​ ​A​P​I​ ​t​o​o​l​s​ ​t​h​a​t​ ​c​a​l​l​ ​t​h​i​s​ ​B​u​s​a​b​a​s​e​ ​i​n​s​t​a​n​c​e​.
 		 */
 		description: string
 		/**
-		 * E​n​v​ ​V​a​r​s
+		 * V​a​u​l​t
 		 */
 		openButton: string
+		/**
+		 * S​e​c​r​e​t​s
+		 */
+		secretsTab: string
+		/**
+		 * V​a​r​i​a​b​l​e​s
+		 */
+		variablesTab: string
 		/**
 		 * N​a​m​e
 		 */
@@ -139,6 +147,18 @@ type RootTranslation = {
 		 */
 		valuePlaceholder: string
 		/**
+		 * D​e​s​c​r​i​p​t​i​o​n
+		 */
+		descriptionLabel: string
+		/**
+		 * O​p​t​i​o​n​a​l​ ​n​o​t​e
+		 */
+		descriptionPlaceholder: string
+		/**
+		 * A​d​d​ ​s​e​c​r​e​t
+		 */
+		addSecret: string
+		/**
 		 * A​d​d​ ​v​a​r​i​a​b​l​e
 		 */
 		addVariable: string
@@ -151,11 +171,11 @@ type RootTranslation = {
 		 */
 		saving: string
 		/**
-		 * L​o​a​d​i​n​g​ ​e​n​v​i​r​o​n​m​e​n​t​ ​v​a​r​i​a​b​l​e​s​.​.​.
+		 * L​o​a​d​i​n​g​ ​v​a​u​l​t​ ​i​t​e​m​s​.​.​.
 		 */
 		loading: string
 		/**
-		 * F​a​i​l​e​d​ ​t​o​ ​l​o​a​d​ ​e​n​v​i​r​o​n​m​e​n​t​ ​v​a​r​i​a​b​l​e​s
+		 * F​a​i​l​e​d​ ​t​o​ ​l​o​a​d​ ​v​a​u​l​t​ ​i​t​e​m​s
 		 */
 		loadFailed: string
 		/**
@@ -171,33 +191,49 @@ type RootTranslation = {
 		 */
 		hide: string
 		/**
-		 * E​n​v​i​r​o​n​m​e​n​t​ ​v​a​r​i​a​b​l​e​s​ ​s​a​v​e​d
+		 * V​a​u​l​t​ ​s​a​v​e​d
 		 */
 		saved: string
 		/**
-		 * F​a​i​l​e​d​ ​t​o​ ​s​a​v​e​ ​e​n​v​i​r​o​n​m​e​n​t​ ​v​a​r​i​a​b​l​e​s
+		 * F​a​i​l​e​d​ ​t​o​ ​s​a​v​e​ ​v​a​u​l​t
 		 */
 		saveFailed: string
 		/**
-		 * E​n​v​i​r​o​n​m​e​n​t​ ​v​a​r​i​a​b​l​e​s​ ​c​l​e​a​r​e​d
+		 * V​a​u​l​t​ ​c​l​e​a​r​e​d
 		 */
 		cleared: string
 		/**
-		 * L​o​c​a​l​ ​u​s​e​r​ ​s​c​o​p​e
+		 * L​o​c​a​l​ ​v​a​u​l​t
 		 */
 		storageTitle: string
 		/**
-		 * T​h​e​s​e​ ​v​a​l​u​e​s​ ​a​r​e​ ​s​t​o​r​e​d​ ​i​n​ ​t​h​i​s​ ​l​o​c​a​l​ ​B​u​s​a​b​a​s​e​ ​d​a​t​a​b​a​s​e​ ​a​n​d​ ​i​n​j​e​c​t​e​d​ ​f​o​r​ ​t​h​e​ ​b​u​i​l​t​-​i​n​ ​l​o​c​a​l​ ​u​s​e​r​.
+		 * T​h​e​s​e​ ​i​t​e​m​s​ ​a​r​e​ ​s​t​o​r​e​d​ ​i​n​ ​t​h​i​s​ ​l​o​c​a​l​ ​B​u​s​a​b​a​s​e​ ​d​a​t​a​b​a​s​e​.​ ​S​e​c​r​e​t​s​ ​a​r​e​ ​e​n​c​r​y​p​t​e​d​ ​w​h​e​n​ ​a​ ​v​a​u​l​t​ ​e​n​c​r​y​p​t​i​o​n​ ​k​e​y​ ​i​s​ ​c​o​n​f​i​g​u​r​e​d​.
 		 */
 		storageDescription: string
 		/**
-		 * R​e​q​u​e​s​t​ ​s​c​o​p​e
+		 * P​e​r​m​i​s​s​i​o​n​s
 		 */
-		requestScopeTitle: string
+		accessTitle: string
 		/**
-		 * A​P​I​,​ ​R​P​C​,​ ​a​n​d​ ​M​C​P​ ​c​a​l​l​s​ ​c​a​n​ ​r​e​a​d​ ​t​h​e​s​e​ ​v​a​l​u​e​s​ ​t​h​r​o​u​g​h​ ​t​h​e​ ​B​u​s​a​b​a​s​e​ ​r​u​n​t​i​m​e​ ​w​i​t​h​o​u​t​ ​w​r​i​t​i​n​g​ ​t​h​e​m​ ​t​o​ ​p​r​o​c​e​s​s​.​e​n​v​.
+		 * R​u​n​t​i​m​e​ ​a​c​c​e​s​s​ ​c​o​n​t​r​o​l​s​ ​w​h​e​t​h​e​r​ ​A​P​I​,​ ​R​P​C​,​ ​a​n​d​ ​M​C​P​ ​c​a​l​l​s​ ​m​a​y​ ​u​s​e​ ​a​n​ ​i​t​e​m​.​ ​U​s​i​n​g​ ​a​ ​s​e​c​r​e​t​ ​i​s​ ​s​e​p​a​r​a​t​e​ ​f​r​o​m​ ​r​e​v​e​a​l​i​n​g​ ​i​t​.
 		 */
-		requestScopeDescription: string
+		accessDescription: string
+		/**
+		 * R​u​n​t​i​m​e​ ​a​c​c​e​s​s
+		 */
+		runtimeAccess: string
+		/**
+		 * S​e​n​s​i​t​i​v​e
+		 */
+		secretsBadge: string
+		/**
+		 * N​o​n​-​s​e​n​s​i​t​i​v​e
+		 */
+		variablesBadge: string
+		/**
+		 * N​o​ ​s​e​c​r​e​t​s​ ​c​o​n​f​i​g​u​r​e​d​ ​y​e​t​.
+		 */
+		noSecrets: string
 		/**
 		 * N​o​ ​v​a​r​i​a​b​l​e​s​ ​c​o​n​f​i​g​u​r​e​d​ ​y​e​t​.
 		 */
@@ -609,19 +645,27 @@ export type TranslationFunctions = {
 		 */
 		blogPosts: () => LocalizedString
 	}
-	userEnvSettings: {
+	vaultSettings: {
 		/**
-		 * Env Vars
+		 * Vault
 		 */
 		title: () => LocalizedString
 		/**
-		 * Store runtime secrets for agents and API tools that call this Busabase instance.
+		 * Store secrets and variables for agents, MCP servers, and API tools that call this Busabase instance.
 		 */
 		description: () => LocalizedString
 		/**
-		 * Env Vars
+		 * Vault
 		 */
 		openButton: () => LocalizedString
+		/**
+		 * Secrets
+		 */
+		secretsTab: () => LocalizedString
+		/**
+		 * Variables
+		 */
+		variablesTab: () => LocalizedString
 		/**
 		 * Name
 		 */
@@ -635,6 +679,18 @@ export type TranslationFunctions = {
 		 */
 		valuePlaceholder: () => LocalizedString
 		/**
+		 * Description
+		 */
+		descriptionLabel: () => LocalizedString
+		/**
+		 * Optional note
+		 */
+		descriptionPlaceholder: () => LocalizedString
+		/**
+		 * Add secret
+		 */
+		addSecret: () => LocalizedString
+		/**
 		 * Add variable
 		 */
 		addVariable: () => LocalizedString
@@ -647,11 +703,11 @@ export type TranslationFunctions = {
 		 */
 		saving: () => LocalizedString
 		/**
-		 * Loading environment variables...
+		 * Loading vault items...
 		 */
 		loading: () => LocalizedString
 		/**
-		 * Failed to load environment variables
+		 * Failed to load vault items
 		 */
 		loadFailed: () => LocalizedString
 		/**
@@ -667,33 +723,49 @@ export type TranslationFunctions = {
 		 */
 		hide: () => LocalizedString
 		/**
-		 * Environment variables saved
+		 * Vault saved
 		 */
 		saved: () => LocalizedString
 		/**
-		 * Failed to save environment variables
+		 * Failed to save vault
 		 */
 		saveFailed: () => LocalizedString
 		/**
-		 * Environment variables cleared
+		 * Vault cleared
 		 */
 		cleared: () => LocalizedString
 		/**
-		 * Local user scope
+		 * Local vault
 		 */
 		storageTitle: () => LocalizedString
 		/**
-		 * These values are stored in this local Busabase database and injected for the built-in local user.
+		 * These items are stored in this local Busabase database. Secrets are encrypted when a vault encryption key is configured.
 		 */
 		storageDescription: () => LocalizedString
 		/**
-		 * Request scope
+		 * Permissions
 		 */
-		requestScopeTitle: () => LocalizedString
+		accessTitle: () => LocalizedString
 		/**
-		 * API, RPC, and MCP calls can read these values through the Busabase runtime without writing them to process.env.
+		 * Runtime access controls whether API, RPC, and MCP calls may use an item. Using a secret is separate from revealing it.
 		 */
-		requestScopeDescription: () => LocalizedString
+		accessDescription: () => LocalizedString
+		/**
+		 * Runtime access
+		 */
+		runtimeAccess: () => LocalizedString
+		/**
+		 * Sensitive
+		 */
+		secretsBadge: () => LocalizedString
+		/**
+		 * Non-sensitive
+		 */
+		variablesBadge: () => LocalizedString
+		/**
+		 * No secrets configured yet.
+		 */
+		noSecrets: () => LocalizedString
 		/**
 		 * No variables configured yet.
 		 */

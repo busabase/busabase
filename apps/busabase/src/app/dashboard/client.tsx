@@ -45,24 +45,20 @@ function DashboardClientContent({ initialPath = "/inbox", localUserName }: Dashb
   const nodesQuery = useQuery(orpc.nodes.list.queryOptions({}));
   const basesQuery = useQuery(orpc.bases.list.queryOptions({}));
   const changeRequestsQuery = useQuery(orpc.changeRequests.list.queryOptions({ input: {} }));
-  const recordsQuery = useQuery(orpc.records.list.queryOptions({ input: {} }));
   const auditEventsQuery = useQuery(orpc.auditEvents.list.queryOptions({ input: {} }));
   const nodes = nodesQuery.data ?? [];
   const bases = basesQuery.data ?? [];
   const changeRequests = changeRequestsQuery.data ?? [];
-  const records = recordsQuery.data ?? [];
+  // The core dashboard loads records itself via records.listPaged and ignores
+  // this prop, so we don't fetch the whole records table just to hand it over.
+  const records = useMemo<never[]>(() => [], []);
   const auditEvents = auditEventsQuery.data ?? [];
   const loadError =
-    nodesQuery.error ??
-    basesQuery.error ??
-    changeRequestsQuery.error ??
-    recordsQuery.error ??
-    auditEventsQuery.error;
+    nodesQuery.error ?? basesQuery.error ?? changeRequestsQuery.error ?? auditEventsQuery.error;
   const isLoadingDashboardData =
     nodesQuery.isPending ||
     basesQuery.isPending ||
     changeRequestsQuery.isPending ||
-    recordsQuery.isPending ||
     auditEventsQuery.isPending;
   // Local single-tenant app: persist the chosen UI language preference in
   // localStorage. The default is "auto" — follow the browser language, the same

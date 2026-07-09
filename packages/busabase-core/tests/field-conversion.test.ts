@@ -32,6 +32,7 @@ describe("toText", () => {
       "yaml",
       "email",
       "url",
+      "embed",
       "phone",
     ] as FieldType[]) {
       expect(toText("value", t)).toBe("value");
@@ -136,6 +137,16 @@ describe("fromText", () => {
 
   it("→ url: invalid format → null", () => {
     expect(fromText("not-a-url", "url")).toBeNull();
+  });
+
+  it("→ embed: valid http(s) url passes through", () => {
+    expect(fromText("https://www.youtube.com/watch?v=dQw4w9WgXcQ", "embed")).toBe(
+      "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+    );
+  });
+
+  it("→ embed: invalid format → null", () => {
+    expect(fromText("not-a-url", "embed")).toBeNull();
   });
 
   it("→ number: valid numeric string → number", () => {

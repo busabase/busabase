@@ -166,6 +166,8 @@ Only one process can hold the PGlite database at a time, so run one launcher at 
 | Record detail page with fields, comments, review history, and lineage | Base table showing structured records and rich fields |
 | ![Base records table](./apps/busabase/public/assets/readme/busabase-base-records.webp) | ![Graph view with seed data](./apps/busabase/public/assets/readme/busabase-graph-view.webp) |
 | Records inside a Base — typed fields, rich values, and approval status at a glance | Graph view showing relationships between seeded records across Bases |
+| ![Doc detail](./apps/busabase/public/assets/readme/busabase-doc-detail.webp) | ![File detail](./apps/busabase/public/assets/readme/busabase-file-detail.webp) |
+| Long-form Markdown Doc, versioned and edited through review | First-class File node backed by the Asset library |
 
 ### On mobile
 
@@ -352,7 +354,7 @@ Busabase: a database for agents to propose and people to approve.
 - Commit history for record changes
 - Comments on records and review objects
 - Audit events for reads and writes
-- Markdown, HTML, links, files, relation fields, and rich field types
+- Markdown, HTML, links, embeds, files, relation fields, and rich field types
 - Search-ready indexed field values
 - REST API for apps, workflows, and AI agents
 - Human-in-the-loop collaboration for agent-proposed changes

@@ -16,6 +16,7 @@ import { TextInput } from "~/components/ui/TextInput";
 import { useConnection } from "~/connection/connection-store";
 import { mobile, radius, typography } from "~/theme/tokens";
 import { useTokens } from "~/theme/use-tokens";
+import { useMobileUpdate } from "~/updates/mobile-update-provider";
 
 const urlExamples = ["http://localhost:15419", "http://10.0.2.2:15419"];
 
@@ -24,6 +25,7 @@ export default function SelfHostedConnectionScreen() {
   const params = useLocalSearchParams<{ serverUrl?: string }>();
   const tokens = useTokens();
   const { connectSelfHosted, connectDemo, demoServerUrl, state } = useConnection();
+  const { isFeatureEnabled } = useMobileUpdate();
   const initialServerUrl = typeof params.serverUrl === "string" ? params.serverUrl : urlExamples[0];
   const [serverUrl, setServerUrl] = useState(initialServerUrl);
   const [error, setError] = useState<string | null>(null);
@@ -103,7 +105,7 @@ export default function SelfHostedConnectionScreen() {
         </NativeActionBar>
       }
     >
-      {demoServerUrl ? (
+      {demoServerUrl && isFeatureEnabled("demoServer") ? (
         <NativeSection title="Demo">
           <NativeRow
             title="Try the demo workspace"

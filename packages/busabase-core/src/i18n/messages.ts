@@ -621,6 +621,9 @@ export const coreMessagesEn = {
     metadata: "Metadata",
     metadataJson: "json",
     metadataBadge: "meta",
+    unusedOnly: "Show unused only",
+    unusedBadge: "{count} unused",
+    noUnusedAssets: "No unused assets found.",
   },
 };
 

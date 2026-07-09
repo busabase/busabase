@@ -1,6 +1,6 @@
 import "server-only";
 
-import { and, eq, isNull, ne } from "drizzle-orm";
+import { and, eq, inArray, isNull, ne } from "drizzle-orm";
 import { type iString, iStringToText } from "openlib/i18n/i-string";
 import { getContextSpaceId } from "../../../../context";
 import type { BaseFieldPO, CommitPO, OperationPO } from "../../../../db/schema";
@@ -383,23 +383,34 @@ export const mergeBaseConvertField = async (
   // index held the converted one — e.g. a select cell holding a raw label instead
   // of a choice id. Update each affected record's head commit in lockstep.
   if (fieldSlug && convertedByRecord.size > 0) {
+    // Batch the head-commit lookups (was 2 SELECTs per record → 3N queries).
+    const recordIds = [...convertedByRecord.keys()];
+    const recordRows = await db
+      .select({ id: busabaseRecords.id, headCommitId: busabaseRecords.headCommitId })
+      .from(busabaseRecords)
+      .where(inArray(busabaseRecords.id, recordIds));
+    const headCommitIdByRecord = new Map(recordRows.map((row) => [row.id, row.headCommitId]));
+    const headCommitIds = [...new Set(recordRows.map((row) => row.headCommitId))];
+    const commitRows =
+      headCommitIds.length > 0
+        ? await db
+            .select({ id: busabaseCommits.id, fields: busabaseCommits.fields })
+            .from(busabaseCommits)
+            .where(inArray(busabaseCommits.id, headCommitIds))
+        : [];
+    const fieldsByCommit = new Map(commitRows.map((row) => [row.id, row.fields]));
+
+    // Each record's head commit gets a distinct converted value, so the writes
+    // stay per-commit; only the reads were the N+1.
     for (const [recordId, converted] of convertedByRecord) {
-      const [record] = await db
-        .select({ headCommitId: busabaseRecords.headCommitId })
-        .from(busabaseRecords)
-        .where(eq(busabaseRecords.id, recordId))
-        .limit(1);
-      if (!record) continue;
-      const [commit] = await db
-        .select({ fields: busabaseCommits.fields })
-        .from(busabaseCommits)
-        .where(eq(busabaseCommits.id, record.headCommitId))
-        .limit(1);
-      if (!commit) continue;
+      const headCommitId = headCommitIdByRecord.get(recordId);
+      if (!headCommitId) continue;
+      const fields = fieldsByCommit.get(headCommitId);
+      if (!fields) continue;
       await db
         .update(busabaseCommits)
-        .set({ fields: { ...commit.fields, [fieldSlug]: converted } })
-        .where(eq(busabaseCommits.id, record.headCommitId));
+        .set({ fields: { ...fields, [fieldSlug]: converted } })
+        .where(eq(busabaseCommits.id, headCommitId));
     }
   }
 

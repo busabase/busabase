@@ -8,6 +8,7 @@ import { driveRouter } from "./domains/drive/router";
 import { fileRouter } from "./domains/file-node/router";
 import { folderRouter } from "./domains/folder/router";
 import { skillRouter } from "./domains/skill/router";
+import { vaultRouter } from "./domains/vault/router";
 import { subscribeBusabaseLiveEvents } from "./logic/live-events";
 import {
   closeChangeRequest,
@@ -73,6 +74,7 @@ export const busabaseRouter = busabase.router({
   docs: docRouter,
   folders: folderRouter,
   assets: assetsRouter,
+  vault: vaultRouter,
   changeRequests: {
     list: busabase.changeRequests.list.handler(async ({ input }) => listChangeRequests(input)),
     listPaged: busabase.changeRequests.listPaged.handler(async ({ input }) =>

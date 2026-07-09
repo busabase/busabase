@@ -2,7 +2,7 @@ import { createBusabaseOpenApiClient } from "busabase-contract/api-client";
 import { busabaseContract } from "busabase-contract/contract/busabase";
 import { runWithBusabaseContext } from "busabase-core/context";
 import { createOpenApiMcpHandler } from "openlib/mcp";
-import { readBuiltinUserEnvVars } from "~/domains/user-env/logic/user-env";
+import { readBuiltinVaultRuntimeEnv } from "~/domains/vault/logic/vault";
 import { getLocalUserName } from "~/lib/local-user";
 
 const openApiMcpHandler = createOpenApiMcpHandler({
@@ -15,8 +15,8 @@ const openApiMcpHandler = createOpenApiMcpHandler({
 });
 
 export const mcpHandler = async (request: Request) => {
-  const envVars = await readBuiltinUserEnvVars();
-  return runWithBusabaseContext({ envVars, localUserName: getLocalUserName() }, async () =>
+  const vaultRuntimeEnv = await readBuiltinVaultRuntimeEnv();
+  return runWithBusabaseContext({ vaultRuntimeEnv, localUserName: getLocalUserName() }, async () =>
     openApiMcpHandler(request),
   );
 };

@@ -466,7 +466,7 @@ Screenshots (capture with `?demo=routine`):
 
 Use Busabase to verify every supported field type and review operation in one local scenario.
 
-The seeded `Field Type Lab` base includes text, long text, Markdown, HTML, attachment, relation, number, date, checkbox, select, multiselect, URL, email, phone, created/updated metadata fields, auto number, AI summary, and AI tags. Its review request shows a full field-level diff and view operations, so seed and demo data exercise the same surfaces that real bases use.
+The seeded `Field Type Lab` base includes text, long text, Markdown, HTML, attachment, relation, number, date, checkbox, select, multiselect, URL, embed, email, phone, created/updated metadata fields, auto number, AI summary, and AI tags. The `embed` field stores a normal URL and previews supported iframe providers such as YouTube and Google Drive in record detail while keeping table cells lightweight. Its review request shows a full field-level diff and view operations, so seed and demo data exercise the same surfaces that real bases use.
 
 Screenshots (capture with `?demo=field-types`):
 
@@ -474,5 +474,5 @@ Screenshots (capture with `?demo=field-types`):
 | --- | --- |
 | ![Field Type Lab base with every supported field type](../public/assets/readme/scenarios/field-types-base.png) | ![Agent proposes all-field coverage changes for review](../public/assets/readme/scenarios/field-types-inbox.png) |
 | Field Type Lab base with every supported field type | Agent proposes all-field coverage changes for review |
-| ![Reviewer checks attachment, relation, AI, system, and scalar field diffs](../public/assets/readme/scenarios/field-types-review.png) | ![Approved all-field record with review history](../public/assets/readme/scenarios/field-types-record.png) |
-| Reviewer checks attachment, relation, AI, system, and scalar field diffs | Approved all-field record with review history |
+| ![Reviewer checks attachment, relation, embed, AI, system, and scalar field diffs](../public/assets/readme/scenarios/field-types-review.png) | ![Approved all-field record with iframe embed preview and review history](../public/assets/readme/scenarios/field-types-record.png) |
+| Reviewer checks attachment, relation, embed, AI, system, and scalar field diffs | Approved all-field record with iframe embed preview and review history |

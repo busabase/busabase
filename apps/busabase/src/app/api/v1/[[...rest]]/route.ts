@@ -5,7 +5,7 @@ import { busabaseRouter } from "busabase-core/router";
 import { busabaseDemoRouter } from "busabase-core/router-demo";
 import { addCorsHeaders, createCorsHeaders } from "openlib/cors";
 import { resolveDemoMode } from "openlib/ui/dashboard/demo";
-import { readBuiltinUserEnvVars } from "~/domains/user-env/logic/user-env";
+import { readBuiltinVaultRuntimeEnv } from "~/domains/vault/logic/vault";
 import { getBusabaseAppLL, getBusabaseLocaleFromAcceptLanguage } from "~/lib/i18n";
 import { getLocalUserName } from "~/lib/local-user";
 
@@ -43,8 +43,8 @@ async function handle(request: Request) {
     return runWithBusabaseContext({ isDemo: true, demoUseCase, demoLocale }, run);
   }
 
-  const envVars = await readBuiltinUserEnvVars();
-  return runWithBusabaseContext({ envVars, localUserName: getLocalUserName() }, run);
+  const vaultRuntimeEnv = await readBuiltinVaultRuntimeEnv();
+  return runWithBusabaseContext({ vaultRuntimeEnv, localUserName: getLocalUserName() }, run);
 }
 
 async function routeRequest(request: Request, url: URL, isDemo: boolean) {

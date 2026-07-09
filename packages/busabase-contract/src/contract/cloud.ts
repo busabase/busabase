@@ -75,6 +75,8 @@ const notFoundErrors = {
 
 // Paths are relative — the shared `/api/v1` prefix is applied once on the router
 // below, exactly like the workbench routes.
+const { vault: _localVault, ...cloudWorkbenchRoutes } = busabaseContractRoutes;
+
 const cloudExtraRoutes = {
   system: {
     health: oc
@@ -171,7 +173,7 @@ const cloudExtraRoutes = {
 };
 
 export const cloudContract = oc.prefix("/api/v1").router({
-  ...busabaseContractRoutes,
+  ...cloudWorkbenchRoutes,
   ...cloudExtraRoutes,
 });
 

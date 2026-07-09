@@ -39,6 +39,7 @@ import {
 import {
   contentKindForMimeType,
   createAsset,
+  deleteAssetRow,
   replaceAssetUsageRows,
   resolveAssetFile,
 } from "../assets/handlers";
@@ -147,6 +148,25 @@ const createAttachmentFromBuffer = async (
   return confirmed.attachmentId;
 };
 
+// After a file-tree replace keeps the existing mounted Asset's identity (see
+// `upsertFileAssetAtPath`), the Asset row minted moments earlier by the
+// upload-confirm flow for `incoming` is left with zero usages. Clean it up
+// opportunistically — but only if it's genuinely unused; if the caller passed
+// an `assetId` that's already mounted somewhere else, leave it alone.
+const deleteOrphanedUploadedAsset = async (
+  assetId: string,
+  tx: Awaited<ReturnType<typeof getDb>>,
+) => {
+  const [usage] = await tx
+    .select({ id: busabaseAssetUsages.id })
+    .from(busabaseAssetUsages)
+    .where(eq(busabaseAssetUsages.assetId, assetId))
+    .limit(1);
+  if (!usage) {
+    await deleteAssetRow(assetId, tx);
+  }
+};
+
 const findMountedAsset = async (
   node: NodePO,
   path: string,
@@ -225,6 +245,9 @@ const upsertFileAssetAtPath = async (
         { displayName: input.displayName ?? incoming.fileName },
         tx,
       );
+      if (incoming.id !== existing.assetId) {
+        await deleteOrphanedUploadedAsset(incoming.id, tx);
+      }
       return existing.assetId;
     }
     await mountAssetAtPath(
@@ -449,7 +472,13 @@ export const listFileTreeNodes = async (config: FileTreeKindConfig) => {
   const nodes = await db
     .select()
     .from(busabaseNodes)
-    .where(and(eq(busabaseNodes.type, config.type), isNull(busabaseNodes.archivedAt)))
+    .where(
+      and(
+        eq(busabaseNodes.spaceId, getContextSpaceId()),
+        eq(busabaseNodes.type, config.type),
+        isNull(busabaseNodes.archivedAt),
+      ),
+    )
     .orderBy(asc(busabaseNodes.position), asc(busabaseNodes.createdAt));
   return Promise.all(nodes.map((node) => getFileTreeNode(config, node.id)));
 };

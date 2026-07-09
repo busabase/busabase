@@ -542,6 +542,18 @@ const shots = [
     waitFor: "text=Graph View",
   },
   {
+    // Long-form Doc node — versioned Markdown edited through review
+    file: "busabase-doc-detail.png",
+    url: `${BASE}/dashboard/doc/agent-operating-guide?demo=1`,
+    waitFor: "text=How agents work here",
+  },
+  {
+    // First-class File node — backed by the Asset library
+    file: "busabase-file-detail.png",
+    url: `${BASE}/dashboard/file/product-brief?demo=1`,
+    waitFor: "text=Backing asset",
+  },
+  {
     // Deduped global asset library (DAM) — illustrates Attachments & Assets
     file: "busabase-assets.png",
     url: `${BASE}/dashboard/assets?demo=1`,
@@ -574,10 +586,17 @@ const ctx = await browser.newContext({
 });
 const page = await ctx.newPage();
 
+const gotoShot = async (url) => {
+  // The dashboard keeps live subscription requests open, so waiting for
+  // "load"/"domcontentloaded"/"networkidle" can hang even when the UI is
+  // ready to capture. The stable page content is guarded by waitForSelector.
+  await page.goto(url, { waitUntil: "commit", timeout: 60000 });
+};
+
 for (const shot of LANG === "en" ? shots : []) {
-  await page.goto(shot.url, { waitUntil: "networkidle" });
+  await gotoShot(shot.url);
   try {
-    await page.waitForSelector(shot.waitFor, { timeout: 5000 });
+    await page.waitForSelector(shot.waitFor, { timeout: 15000 });
   } catch {
     console.warn(`! waitFor missed for ${shot.file}: ${shot.waitFor}`);
   }
@@ -589,7 +608,7 @@ for (const shot of LANG === "en" ? shots : []) {
 
 // Agent Integration dialog tabs (English-only; the demo dialog is not localized).
 if (LANG === "en") {
-  await page.goto(`${BASE}/dashboard/inbox?demo=1`, { waitUntil: "networkidle" });
+  await gotoShot(`${BASE}/dashboard/inbox?demo=1`);
   await page.waitForTimeout(800);
   // Open the dialog from the sidebar footer button (before it opens, the only
   // "Agent Skills" text is the sidebar button — not yet the in-dialog tab).
@@ -615,12 +634,12 @@ for (const scenario of scenarioShots) {
   for (const cell of scenario.cells) {
     const file = `${scenario.key}-${cell.kind}.png`;
     const url = routeForScenarioShot(scenario, cell.kind);
-    await page.goto(url, { waitUntil: "networkidle" });
+    await gotoShot(url);
     // review pages show the CR author as a title-cased display name, not the
     // raw "<x>-agent" handle — wait on the stable "What will change" heading.
     const waitFor = cell.kind === "review" ? "text=What will change" : cell.waitFor;
     try {
-      await page.waitForSelector(waitFor, { timeout: 5000 });
+      await page.waitForSelector(waitFor, { timeout: 15000 });
     } catch {
       console.warn(`! waitFor missed for ${file}: ${waitFor}`);
     }

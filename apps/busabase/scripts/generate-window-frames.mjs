@@ -38,6 +38,8 @@ const titles = {
   "busabase-base-table.png": "Base",
   "busabase-base-records.png": "Base — Records",
   "busabase-graph-view.png": "Graph",
+  "busabase-doc-detail.png": "Doc — Agent Operating Guide",
+  "busabase-file-detail.png": "File — Product Brief",
 };
 
 // macOS chrome tokens (warm neutrals to match the cream/ink palette)

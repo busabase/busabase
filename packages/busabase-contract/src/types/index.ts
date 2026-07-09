@@ -11,6 +11,7 @@ export type FieldType =
   | "select"
   | "multiselect"
   | "url"
+  | "embed"
   | "email"
   | "phone"
   | "created_time"
@@ -203,6 +204,17 @@ export type { FileNodeMetadata, FileNodeVO } from "../domains/file-node/types";
 export type { FileTreeFileVO, FileTreeNodeVO, FileTreeReadFileVO } from "../domains/filetree/types";
 // Skill-domain VOs live in the skill domain; re-exported here for the public barrel.
 export type { SkillFileVO, SkillReadFileVO, SkillVO } from "../domains/skill/types";
+export type {
+  UpdateVaultSettingsDTO,
+  VaultAccessPolicy,
+  VaultEnvironment,
+  VaultItemInput,
+  VaultItemKind,
+  VaultItemVO,
+  VaultRuntimeEnv,
+  VaultScopeType,
+  VaultSettingsVO,
+} from "../domains/vault/types";
 
 export interface ReviewVO {
   id: string;

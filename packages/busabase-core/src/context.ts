@@ -49,13 +49,13 @@ export interface BusabaseContext {
   actorId?: string;
   spaceId?: string;
   /**
-   * User-scoped environment variables injected by the host runtime.
+   * User-scoped Vault values exposed to the current request/runtime.
    *
    * This is intentionally context-scoped rather than written to the host
    * process.env: Busabase Cloud is a shared Node process, so per-user secrets
    * must only be exposed to the request / hosted execution they belong to.
    */
-  envVars?: Record<string, string>;
+  vaultRuntimeEnv?: Record<string, string>;
   resolveUsers?: (userIds: string[]) => Promise<Map<string, UserRefVO>>;
   /**
    * Display name injected by the single-user open-source host. Cloud must not
@@ -164,14 +164,15 @@ export function resolveActorId(inputActorId: string): string {
   return storage.getStore()?.actorId ?? inputActorId;
 }
 
-/** User-scoped env values for the current hosted/request execution. */
-export function getContextEnvVars(): Record<string, string> {
-  return storage.getStore()?.envVars ?? {};
+/** User-scoped Vault runtime values for the current hosted/request execution. */
+export function getContextVaultRuntimeEnv(): Record<string, string> {
+  const store = storage.getStore();
+  return store?.vaultRuntimeEnv ?? {};
 }
 
-/** Read one user-scoped env value from the current hosted/request execution. */
-export function getContextEnvVar(key: string): string | undefined {
-  return getContextEnvVars()[key];
+/** Read one user-scoped Vault runtime value from the current hosted/request execution. */
+export function getContextVaultRuntimeValue(key: string): string | undefined {
+  return getContextVaultRuntimeEnv()[key];
 }
 
 export async function resolveUserRefs(userIds: Iterable<string | null | undefined>) {

@@ -32,14 +32,25 @@ export const listRecordsFilterSchema = z.object({
   value: z.unknown().optional(),
 });
 
+// A view sort carried to the server for push-down. Only number/date fields sort
+// authoritatively in SQL (their typed value column matches the client's ordering);
+// other field types are left to the client sort. `fieldType` lets the server decide.
+export const listRecordsSortSchema = z.object({
+  fieldSlug: z.string(),
+  fieldType: z.string().optional(),
+  direction: z.enum(["asc", "desc"]).optional().default("asc"),
+});
+
 export const listRecordsInputSchema = z
   .object({
     limit: z.coerce.number().int().min(1).max(100).optional().default(50),
     baseId: z.string().optional(),
-    /** Opaque base64 cursor (`createdAt:id`) for keyset pagination. */
+    /** Opaque base64 cursor for keyset pagination (createdAt-keyed, or sort-keyed when `sort` is set). */
     cursor: z.string().optional(),
     /** View filters for server-side push-down (superset; client still narrows). */
     filters: z.array(listRecordsFilterSchema).optional(),
+    /** View sort for server-side push-down (number/date fields only). */
+    sort: listRecordsSortSchema.optional(),
   })
   .optional()
   .default({ limit: 50 });

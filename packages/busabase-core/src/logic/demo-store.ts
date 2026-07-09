@@ -10,7 +10,9 @@ import type {
   BaseVO,
   ChangeRequestStatus,
   ChangeRequestVO,
+  CommentSubjectType,
   CommentVO,
+  FileNodeVO,
   NodeVO,
   OperationKind,
   OperationVO,
@@ -25,6 +27,7 @@ import {
   buildDemoDataset,
   DEMO_ACTOR_ID,
   type DemoDataset,
+  type DemoDocVO,
   englishScenario,
 } from "../demo/dataset";
 import { zhCnScenario } from "../demo/scenarios/zh-cn";
@@ -132,9 +135,40 @@ export const demoListRecordChangeRequests = (recordId: string): ChangeRequestVO[
 
 export const demoListAuditEvents = (): AuditEventVO[] => dataset().auditEvents;
 
-// No seeded comments / agent tasks in the demo dataset; the review surfaces
-// treat empty as "no discussion yet" / "no agent work queued".
-export const demoListComments = (): CommentVO[] => [];
+export const demoListComments = (input: {
+  subjectType: CommentSubjectType;
+  subjectId: string;
+}): CommentVO[] =>
+  dataset().comments.filter(
+    (comment) => comment.subjectType === input.subjectType && comment.subjectId === input.subjectId,
+  );
+
+export const demoListDocs = (): DemoDocVO[] => dataset().docs;
+
+export const demoGetDoc = (nodeIdOrSlug: string): DemoDocVO => {
+  const doc = dataset().docs.find(
+    (item) => item.node.id === nodeIdOrSlug || item.node.slug === nodeIdOrSlug,
+  );
+  if (!doc) {
+    throw notFound("Doc", nodeIdOrSlug);
+  }
+  return doc;
+};
+
+export const demoListFileNodes = (): FileNodeVO[] => dataset().files;
+
+export const demoGetFileNode = (nodeIdOrSlug: string): FileNodeVO => {
+  const file = dataset().files.find(
+    (item) => item.node.id === nodeIdOrSlug || item.node.slug === nodeIdOrSlug,
+  );
+  if (!file) {
+    throw notFound("File", nodeIdOrSlug);
+  }
+  return file;
+};
+
+// No agent tasks in the demo dataset; the review surface treats empty as "no
+// agent work queued".
 
 export const demoListAgentTasks = (): AgentTaskVO[] =>
   dataset()

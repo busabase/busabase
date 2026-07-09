@@ -13,6 +13,7 @@ import { driveContract } from "../domains/drive/contract";
 import { fileContract } from "../domains/file-node/contract";
 import { folderContract } from "../domains/folder/contract";
 import { skillContract } from "../domains/skill/contract";
+import { vaultContract } from "../domains/vault/contract";
 import {
   agentTaskSchema,
   auditEventSchema,
@@ -182,6 +183,7 @@ export const busabaseContractRoutes = {
   docs: docContract,
   folders: folderContract,
   assets: assetsContract,
+  vault: vaultContract,
   changeRequests: {
     list: oc
       .route({
@@ -325,6 +327,18 @@ export {
   viewSchema,
   viewSortSchema,
 } from "../domains/base/contract";
+export {
+  UpdateVaultSettingsInputSchema,
+  VaultAccessPolicySchema,
+  VaultEnvironmentSchema,
+  VaultItemInputSchema,
+  VaultItemKindSchema,
+  VaultItemVOSchema,
+  VaultRuntimeEnvSchema,
+  VaultScopeTypeSchema,
+  VaultSettingsVOSchema,
+  VaultSuccessSchema,
+} from "../domains/vault/types";
 export {
   auditEventSchema,
   authInfoSchema,

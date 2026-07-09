@@ -4,6 +4,8 @@ import { Platform } from "react-native";
 interface BusabaseExtra {
   cloudUrl?: string;
   demoServerUrl?: string;
+  appStoreUrl?: string;
+  updateManifestUrl?: string;
 }
 
 const readExtra = (): BusabaseExtra => {
@@ -19,6 +21,14 @@ const localWebOAuthRedirectUri =
 export const busabaseConfig = {
   cloudUrl: process.env.EXPO_PUBLIC_BUSABASE_CLOUD_URL ?? extra.cloudUrl ?? defaultCloudUrl,
   demoServerUrl: extra.demoServerUrl ?? null,
+  appStoreUrl:
+    process.env.EXPO_PUBLIC_BUSABASE_APP_STORE_URL ??
+    extra.appStoreUrl ??
+    "https://apps.apple.com/app/id6783588467",
+  updateManifestUrl:
+    process.env.EXPO_PUBLIC_BUSABASE_UPDATE_MANIFEST_URL ??
+    extra.updateManifestUrl ??
+    "https://s1.busabase.com/public/downloads/busabase-mobile/latest.json",
   oauthClientId: "busabase-mobile",
   oauthClientPlatform: "mobile",
   oauthRedirectUri:

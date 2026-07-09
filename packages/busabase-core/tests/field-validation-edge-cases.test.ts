@@ -170,6 +170,27 @@ describe("url", () => {
   });
 });
 
+describe("embed", () => {
+  it("accepts common user-facing YouTube and Google Drive URLs", () => {
+    expect(checkOne("embed", "https://www.youtube.com/watch?v=dQw4w9WgXcQ")).toBeNull();
+    expect(checkOne("embed", "https://youtu.be/dQw4w9WgXcQ")).toBeNull();
+    expect(checkOne("embed", "https://drive.google.com/file/d/abc123/view")).toBeNull();
+  });
+  it("accepts generic http(s) URLs unless providers are restricted", () => {
+    expect(checkOne("embed", "https://example.com/embed")).toBeNull();
+    expect(
+      checkOne("embed", "https://example.com/embed", {
+        options: { embed: { providers: ["youtube", "google_drive"] } },
+      }),
+    ).toMatch(/embeddable/);
+  });
+  it("rejects non-http(s) values and non-strings", () => {
+    expect(checkOne("embed", "ftp://host/x")).toMatch(/embeddable/);
+    expect(checkOne("embed", "not a url")).toMatch(/embeddable/);
+    expect(checkOne("embed", 123)).toMatch(/embeddable/);
+  });
+});
+
 describe("phone", () => {
   it("accepts international, spaced, and punctuated forms at/above the 6-char floor", () => {
     expect(checkOne("phone", "+1 555-123-4567")).toBeNull();

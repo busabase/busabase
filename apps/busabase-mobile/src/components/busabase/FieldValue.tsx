@@ -57,7 +57,7 @@ function getLinkHref(field: BaseFieldVO | undefined, value: unknown): string | n
   if (!field || typeof value !== "string" || !value) {
     return null;
   }
-  if (field.type === "url") {
+  if (field.type === "url" || field.type === "embed") {
     return value;
   }
   if (field.type === "email") {

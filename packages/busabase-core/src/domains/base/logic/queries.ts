@@ -10,6 +10,7 @@ import {
   desc,
   eq,
   exists,
+  gt,
   ilike,
   inArray,
   isNotNull,
@@ -32,7 +33,7 @@ import {
   busabaseRecords,
   busabaseViews,
 } from "../../../db/schema";
-import { hydrateRecord } from "../../../logic/cr-lifecycle";
+import { hydrateRecord, hydrateRecords } from "../../../logic/cr-lifecycle";
 import { ensureReady } from "../../../logic/seed";
 import { listInputSchema, recordFieldFilterInputSchema } from "../../../logic/store";
 import { toBaseVO, toFieldVO, toRecordLinkVO, toViewVO } from "../../../logic/vo";
@@ -137,7 +138,7 @@ export const listRecords = async (input?: z.input<typeof listInputSchema>) => {
     )
     .orderBy(desc(busabaseRecords.createdAt))
     .limit(parsed.limit);
-  return Promise.all(recordRows.map(hydrateRecord));
+  return hydrateRecords(recordRows);
 };
 
 // `|` separates the ISO timestamp (which itself contains colons) from the id.
@@ -169,6 +170,7 @@ const PUSHABLE_TEXT_TYPES = new Set([
   "markdown",
   "html",
   "url",
+  "embed",
   "email",
   "phone",
   "code",
@@ -223,10 +225,58 @@ const buildPushableRecordFilter = (
   return null;
 };
 
+// Which typed value column a sort field maps to. Only number/date sort in SQL —
+// their column ordering matches the client's (numeric / chronological). text and
+// other types keep the client's locale-aware sort (and stay a client concern).
+const SORT_DATE_TYPES = new Set(["date"]);
+const sortColumnFor = (
+  fieldType?: string,
+):
+  | { col: typeof busabaseFieldValues.valueNumber; kind: "number" }
+  | { col: typeof busabaseFieldValues.valueDate; kind: "date" }
+  | null => {
+  if (fieldType && PUSHABLE_NUMBER_TYPES.has(fieldType)) {
+    return { col: busabaseFieldValues.valueNumber, kind: "number" };
+  }
+  if (fieldType && SORT_DATE_TYPES.has(fieldType)) {
+    return { col: busabaseFieldValues.valueDate, kind: "date" };
+  }
+  return null;
+};
+
+// Sort cursor = base64 JSON of the row's sort value (null-safe) + its id.
+const encodeSortCursor = (value: number | Date | null, id: string): string =>
+  Buffer.from(
+    JSON.stringify({ v: value instanceof Date ? value.toISOString() : value, id }),
+    "utf8",
+  ).toString("base64");
+
+const decodeSortCursor = (
+  cursor: string,
+  kind: "number" | "date",
+): { value: number | Date | null; id: string } | null => {
+  try {
+    const parsed = JSON.parse(Buffer.from(cursor, "base64").toString("utf8"));
+    if (typeof parsed?.id !== "string") return null;
+    if (parsed.v === null || parsed.v === undefined) {
+      return { value: null, id: parsed.id };
+    }
+    if (kind === "date") {
+      const date = new Date(parsed.v);
+      return Number.isNaN(date.getTime()) ? null : { value: date, id: parsed.id };
+    }
+    const num = Number(parsed.v);
+    return Number.isNaN(num) ? null : { value: num, id: parsed.id };
+  } catch {
+    return null;
+  }
+};
+
 /**
- * Keyset-paginated record list. Orders by (createdAt DESC, id DESC) and walks
- * backwards via an opaque base64 `createdAt:id` cursor. Returns one extra row to
- * decide whether a `nextCursor` is owed.
+ * Keyset-paginated record list. Default order is (createdAt DESC, id DESC). When
+ * a number/date `sort` is given it pushes down: LEFT JOINs the field value and
+ * orders by that typed column (NULLS LAST, id ASC tiebreak), so a sorted big base
+ * paginates server-side instead of loading every page into the browser.
  */
 export const listRecordsPaged = async (input?: z.input<typeof listRecordsInputSchema>) => {
   await ensureReady();
@@ -239,6 +289,71 @@ export const listRecordsPaged = async (input?: z.input<typeof listRecordsInputSc
   if (parsed.baseId) {
     filters.push(eq(busabaseRecords.baseId, parsed.baseId));
   }
+  // Best-effort server-side view-filter push-down (superset; the client filter
+  // stays authoritative). Non-pushable filters are skipped here. Applies to both
+  // the sort and default paths below.
+  if (parsed.filters) {
+    for (const filter of parsed.filters) {
+      const condition = buildPushableRecordFilter(db, filter);
+      if (condition) {
+        filters.push(condition);
+      }
+    }
+  }
+
+  const sortInfo = parsed.sort ? sortColumnFor(parsed.sort.fieldType) : null;
+  if (parsed.sort && sortInfo) {
+    // ── Sort-field keyset path (number/date). ORDER BY the typed value column
+    // NULLS LAST, id ASC as a stable tiebreaker. The keyset predicate mirrors
+    // that ordering so paging never skips or repeats a row. ──
+    const { col: sortCol, kind } = sortInfo;
+    const direction = parsed.sort.direction;
+    if (parsed.cursor) {
+      const decoded = decodeSortCursor(parsed.cursor, kind);
+      if (decoded) {
+        const { value: cv, id: cid } = decoded;
+        if (cv === null) {
+          // Cursor is already in the trailing NULL bucket: only later nulls (by id).
+          filters.push(and(isNull(sortCol), gt(busabaseRecords.id, cid)) as SQL);
+        } else {
+          const valueAfter = direction === "asc" ? gt(sortCol, cv) : lt(sortCol, cv);
+          filters.push(
+            or(
+              // NULLS LAST → every null row sorts after a non-null cursor row.
+              isNull(sortCol),
+              valueAfter,
+              and(eq(sortCol, cv), gt(busabaseRecords.id, cid)),
+            ) as SQL,
+          );
+        }
+      }
+    }
+    const orderByValue =
+      direction === "asc" ? sql`${sortCol} asc nulls last` : sql`${sortCol} desc nulls last`;
+    const rows = await db
+      .select({ record: busabaseRecords, sortValue: sortCol })
+      .from(busabaseRecords)
+      .leftJoin(
+        busabaseFieldValues,
+        and(
+          eq(busabaseFieldValues.recordId, busabaseRecords.id),
+          eq(busabaseFieldValues.fieldSlug, parsed.sort.fieldSlug),
+          isNull(busabaseFieldValues.deletedAt),
+        ),
+      )
+      .where(and(...filters))
+      .orderBy(orderByValue, asc(busabaseRecords.id))
+      .limit(parsed.limit + 1);
+
+    const hasMore = rows.length > parsed.limit;
+    const pageRows = hasMore ? rows.slice(0, parsed.limit) : rows;
+    const last = pageRows[pageRows.length - 1];
+    const nextCursor = hasMore && last ? encodeSortCursor(last.sortValue, last.record.id) : null;
+    const records = await hydrateRecords(pageRows.map((row) => row.record));
+    return { records, nextCursor };
+  }
+
+  // ── Default createdAt keyset path (unchanged). ──
   if (parsed.cursor) {
     const decoded = decodeRecordCursor(parsed.cursor);
     if (decoded) {
@@ -249,16 +364,6 @@ export const listRecordsPaged = async (input?: z.input<typeof listRecordsInputSc
           and(eq(busabaseRecords.createdAt, decoded.createdAt), lt(busabaseRecords.id, decoded.id)),
         ) as SQL,
       );
-    }
-  }
-  // Best-effort server-side view-filter push-down (superset; the client filter
-  // stays authoritative). Non-pushable filters are skipped here.
-  if (parsed.filters) {
-    for (const filter of parsed.filters) {
-      const condition = buildPushableRecordFilter(db, filter);
-      if (condition) {
-        filters.push(condition);
-      }
     }
   }
 
@@ -274,7 +379,7 @@ export const listRecordsPaged = async (input?: z.input<typeof listRecordsInputSc
   const last = pageRows[pageRows.length - 1];
   const nextCursor = hasMore && last ? encodeRecordCursor(last.createdAt, last.id) : null;
 
-  const records = await Promise.all(pageRows.map(hydrateRecord));
+  const records = await hydrateRecords(pageRows);
   return { records, nextCursor };
 };
 
@@ -365,11 +470,10 @@ export const listRecordsByFieldText = async (
     .from(busabaseRecords)
     .where(and(inArray(busabaseRecords.id, recordIds), eq(busabaseRecords.status, "active")));
   const recordsById = new Map(recordRows.map((record) => [record.id, record]));
-  return Promise.all(
+  return hydrateRecords(
     recordIds
       .map((recordId) => recordsById.get(recordId))
-      .filter((record): record is RecordPO => Boolean(record))
-      .map(hydrateRecord),
+      .filter((record): record is RecordPO => Boolean(record)),
   );
 };
 
@@ -440,5 +544,5 @@ export const listArchivedRecords = async (baseId: string) => {
     .from(busabaseRecords)
     .where(and(eq(busabaseRecords.baseId, resolvedBase.id), eq(busabaseRecords.status, "archived")))
     .orderBy(desc(busabaseRecords.createdAt));
-  return Promise.all(recordRows.map(hydrateRecord));
+  return hydrateRecords(recordRows);
 };

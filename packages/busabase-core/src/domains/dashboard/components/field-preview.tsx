@@ -1,12 +1,13 @@
 import type { BaseFieldVO, RecordVO } from "busabase-contract/types";
 import { CodeBlock } from "kui/ai-elements/code-block";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "kui/dialog";
-import { FileText, Film, Maximize2, Music } from "lucide-react";
+import { ExternalLink, FileText, Film, Maximize2, Music, PlaySquare } from "lucide-react";
 import { SPALink as Link } from "openlib/ui/dashboard";
 import { type ComponentProps, type ReactNode, useState } from "react";
 import { Streamdown, type Components as StreamdownComponents } from "streamdown";
 import { useCoreI18n, useIString } from "../../../i18n";
 import { fieldDisplayKind, fieldLinkPrefix } from "../../base/field-types";
+import { embedAspectRatio, embedHeight, resolveEmbedPreview } from "../../base/utils/embed";
 import { getRecordTitle } from "../helpers/change-request";
 import {
   getAttachmentRefs,
@@ -264,6 +265,65 @@ export function CodeLikeFieldPreview({
   );
 }
 
+const EMBED_RATIO_CLASS: Record<string, string> = {
+  "16:9": "aspect-video",
+  "4:3": "aspect-[4/3]",
+  "1:1": "aspect-square",
+};
+
+export function EmbedFieldPreview({
+  className = "",
+  field,
+  value,
+}: {
+  className?: string;
+  field: BaseFieldVO;
+  value: unknown;
+}) {
+  const preview = resolveEmbedPreview(value, field);
+  if (!preview) {
+    return <span className="text-muted-foreground">-</span>;
+  }
+
+  const ratioClass = EMBED_RATIO_CLASS[embedAspectRatio(field)] ?? EMBED_RATIO_CLASS["16:9"];
+  const height = embedHeight(field);
+  const heightStyle = height ? { height } : undefined;
+  return (
+    <div className={`min-w-0 ${className}`}>
+      <div
+        className={`overflow-hidden rounded-md border bg-muted/30 ${height ? "" : ratioClass}`}
+        style={heightStyle}
+      >
+        <iframe
+          allow="accelerometer; autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"
+          allowFullScreen
+          className="h-full w-full border-0"
+          loading="lazy"
+          referrerPolicy="strict-origin-when-cross-origin"
+          sandbox="allow-forms allow-presentation allow-same-origin allow-scripts"
+          src={preview.embedUrl}
+          title={`${preview.label} embed`}
+        />
+      </div>
+      <div className="mt-2 flex min-w-0 items-center justify-between gap-2 text-xs">
+        <span className="inline-flex min-w-0 items-center gap-1.5 text-muted-foreground">
+          <PlaySquare className="shrink-0" size={13} />
+          <span className="truncate">{preview.label}</span>
+        </span>
+        <a
+          className="inline-flex shrink-0 items-center gap-1 text-primary underline-offset-2 hover:underline"
+          href={preview.sourceUrl}
+          rel="noreferrer"
+          target="_blank"
+        >
+          Open
+          <ExternalLink size={12} />
+        </a>
+      </div>
+    </div>
+  );
+}
+
 export function FieldValuePreview({
   className = "",
   field,
@@ -431,6 +491,14 @@ export function FieldValuePreview({
     return (
       <MultilineFieldPreview collapsible={shouldCollapse} title={fieldName}>
         <CodeLikeFieldPreview className={className} field={field} value={value} />
+      </MultilineFieldPreview>
+    );
+  }
+
+  if (kind === "embed" && field) {
+    return (
+      <MultilineFieldPreview collapsible={false} title={fieldName}>
+        <EmbedFieldPreview className={className} field={field} value={value} />
       </MultilineFieldPreview>
     );
   }

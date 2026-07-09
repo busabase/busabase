@@ -8,7 +8,7 @@ import { deleteAttachmentSafely } from "open-domains/attachments/logic";
 import { storage } from "openlib/storage";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { getDb } from "../src/db";
-import { attachments } from "../src/db/schema";
+import { attachments, busabaseAssets } from "../src/db/schema";
 import { busabaseRouter } from "../src/router";
 
 /**
@@ -561,6 +561,65 @@ describe("Assets + attachment dedup — oRPC integration", () => {
       await client.changeRequests.merge({ changeRequestId: cr.id });
 
       await expect(client.assets.delete({ assetId: asset.id })).rejects.toThrow(/still referenced/);
+    });
+
+    it("does not delete the Attachment while another Asset row still points at it", async () => {
+      const db = await getDb();
+      const hashG = `sha256:${"1".repeat(64)}`;
+      const hashH = `sha256:${"2".repeat(64)}`;
+      const reqA = await client.assets.createUploadUrl({
+        fileName: "shared-a.png",
+        mimeType: "image/png",
+        sizeBytes: 9,
+        contentHash: hashG,
+      });
+      await client.assets.confirm({
+        storageKey: reqA.storageKey,
+        fileName: "shared-a.png",
+        mimeType: "image/png",
+        sizeBytes: 9,
+        contentHash: hashG,
+      });
+      const assetA = expectDefined(
+        (await client.assets.list()).find((a) => a.contentHash === hashG),
+      );
+      const reqB = await client.assets.createUploadUrl({
+        fileName: "shared-b.png",
+        mimeType: "image/png",
+        sizeBytes: 10,
+        contentHash: hashH,
+      });
+      await client.assets.confirm({
+        storageKey: reqB.storageKey,
+        fileName: "shared-b.png",
+        mimeType: "image/png",
+        sizeBytes: 10,
+        contentHash: hashH,
+      });
+      const assetB = expectDefined(
+        (await client.assets.list()).find((a) => a.contentHash === hashH),
+      );
+
+      // Simulate two logical Assets deduped onto the same physical Attachment
+      // (e.g. a file-tree replace that repointed assetA's attachmentId onto
+      // assetB's upload — see `upsertFileAssetAtPath`).
+      await db
+        .update(busabaseAssets)
+        .set({ attachmentId: assetB.attachmentId })
+        .where(eq(busabaseAssets.id, assetA.id));
+
+      const res = await client.assets.delete({ assetId: assetB.id });
+      expect(res.deleted).toBe(true);
+      expect((await client.assets.list()).some((a) => a.id === assetB.id)).toBe(false);
+
+      // assetA still resolves — its (shared) Attachment must not have been removed.
+      const stillReadable = await client.assets.get({ assetId: assetA.id });
+      expect(stillReadable.asset.attachmentId).toBe(assetB.attachmentId);
+      const [attachmentRow] = await db
+        .select({ id: attachments.id })
+        .from(attachments)
+        .where(eq(attachments.id, assetB.attachmentId));
+      expect(attachmentRow).toBeDefined();
     });
   });
 

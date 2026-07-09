@@ -40,6 +40,11 @@ export interface BaseFieldVO {
     code?: {
       language?: string;
     };
+    embed?: {
+      aspectRatio?: "16:9" | "4:3" | "1:1";
+      height?: number;
+      providers?: string[];
+    };
     inverseFieldId?: string;
     multiple?: boolean;
     targetBaseId?: string;

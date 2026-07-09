@@ -37,6 +37,13 @@ const toSlug = (value: string) =>
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-|-$/g, "");
 
+const toSlugInput = (value: string) =>
+  value
+    .toLowerCase()
+    .replace(/[^a-z0-9-]+/g, "-")
+    .replace(/-{2,}/g, "-")
+    .replace(/^-+/g, "");
+
 interface CreateNodeModalProps {
   open: boolean;
   apiClient: BusabaseDashboardApiClient;
@@ -279,7 +286,7 @@ export function CreateNodeModal({
             <Input
               onChange={(event) => {
                 setSlugEdited(true);
-                setSlug(toSlug(event.target.value));
+                setSlug(toSlugInput(event.target.value));
               }}
               placeholder={messages.createNode.slugPlaceholder}
               value={slug}

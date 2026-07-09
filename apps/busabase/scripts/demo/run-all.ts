@@ -12,6 +12,9 @@
  *   08 Nodes      — folder create/rename/move/delete via CR
  *   09 Search     — GET /search across all domains
  *   10 Audit      — GET /audit-events, POST audit event
+ *   11 Drives     — pure file-tree Drive: create, read file, CR update
+ *   12 Files      — upload Asset → create first-class File node → read back
+ *   13 Comments   — review comment (+@agent mention) on a CR and a record
  *
  * Usage:
  *   BUSABASE_URL=http://localhost:15419 pnpm exec tsx scripts/demo/run-all.ts
@@ -31,6 +34,9 @@ import { run as run07 } from "./07-change-requests";
 import { run as run08 } from "./08-nodes";
 import { run as run09 } from "./09-search";
 import { run as run10 } from "./10-audit";
+import { run as run11 } from "./11-drives";
+import { run as run12 } from "./12-files";
+import { run as run13 } from "./13-comments";
 
 const SUITES = [
   { name: "01-folders", run: run01 },
@@ -43,6 +49,9 @@ const SUITES = [
   { name: "08-nodes", run: run08 },
   { name: "09-search", run: run09 },
   { name: "10-audit", run: run10 },
+  { name: "11-drives", run: run11 },
+  { name: "12-files", run: run12 },
+  { name: "13-comments", run: run13 },
 ];
 
 async function main() {

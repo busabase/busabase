@@ -13,7 +13,9 @@ import type {
   BaseFieldVO,
   BaseVO,
   ChangeRequestVO,
+  CommentVO,
   CommitVO,
+  FileNodeVO,
   NodeVO,
   OperationVO,
   RecordVO,
@@ -39,6 +41,7 @@ import {
   FINANCE_RECORDS,
   FINANCE_VIEWS,
 } from "./scenarios/finance-invoice";
+import { enNodeTypesScenario } from "./scenarios/node-types.en";
 import { readmeScenario } from "./scenarios/readme-scenarios";
 import type {
   SeedBaseDef,
@@ -76,6 +79,10 @@ export const DEMO_CRM_CONTACTS_BASE_ID = "bse_local_crm_contacts";
 export const DEMO_CRM_CONTACTS_BASE_NODE_ID = "nod_base_crm_contacts";
 export const DEMO_CRM_DEALS_BASE_ID = "bse_local_crm_deals";
 export const DEMO_CRM_DEALS_BASE_NODE_ID = "nod_base_crm_deals";
+// Same ids `logic/seed.ts` uses for the real local DB's Docs/Files folders, so the
+// demo sidebar and a real local workspace never drift on these node ids.
+export const DEMO_DOCS_FOLDER_NODE_ID = "nod_docs";
+export const DEMO_FILES_FOLDER_NODE_ID = "nod_files";
 
 const BLOG_APPROVAL_RECORD_ID = "rec_seed_blog_approval";
 const BLOG_APPROVAL_COMMIT_ID = "cmt_seed_blog_approval";
@@ -594,6 +601,14 @@ const fieldTypeLabFields: SeedFieldDef[] = [
     },
   },
   { id: "bsf_lab_url", slug: "url", name: "URL", type: "url", required: false, options: {} },
+  {
+    id: "bsf_lab_embed",
+    slug: "embed",
+    name: "Embed",
+    type: "embed",
+    required: false,
+    options: { embed: { aspectRatio: "16:9", providers: ["youtube", "google_drive", "generic"] } },
+  },
   {
     id: "bsf_lab_email",
     slug: "email",
@@ -2023,6 +2038,7 @@ export const DEMO_RECORDS: SeedRecordDef[] = [
       updated_by: "field-type-agent",
       updated_time: "2026-06-21T10:30:00.000Z",
       url: "https://busabase.local/field-type-lab",
+      embed: "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
     },
     message: "Seed complete field type coverage record",
     author: "seed-qa",
@@ -2296,6 +2312,7 @@ export const DEMO_VIEWS: SeedViewDef[] = [
         "select",
         "multiselect",
         "url",
+        "embed",
         "email",
         "phone",
         "created_time",
@@ -2600,6 +2617,7 @@ export const DEMO_CHANGE_REQUESTS: SeedChangeRequestDef[] = [
           select: "in-review",
           text: "All field types coverage",
           updated_by: "field-type-agent",
+          embed: "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
         },
         fields: {
           ai_summary: "Updated seed record still exercises every Busabase field type.",
@@ -2640,6 +2658,7 @@ export const DEMO_CHANGE_REQUESTS: SeedChangeRequestDef[] = [
           updated_by: "field-type-agent",
           updated_time: "2026-06-21T10:45:00.000Z",
           url: "https://busabase.local/field-type-lab",
+          embed: "https://drive.google.com/file/d/1ZdR3L3wQbYE0n-sample/view",
         },
         message: "Exercise every field type in one review diff",
         author: "field-type-agent",
@@ -2680,6 +2699,7 @@ export const DEMO_CHANGE_REQUESTS: SeedChangeRequestDef[] = [
               "select",
               "multiselect",
               "url",
+              "embed",
               "email",
               "phone",
               "created_time",
@@ -2709,6 +2729,7 @@ export const DEMO_CHANGE_REQUESTS: SeedChangeRequestDef[] = [
               "select",
               "multiselect",
               "url",
+              "embed",
               "email",
               "phone",
               "created_time",
@@ -2853,6 +2874,14 @@ export const DEMO_CHANGE_REQUESTS: SeedChangeRequestDef[] = [
 const includesUseCase = (tags: DemoUseCase[], useCase: DemoUseCase) =>
   useCase === "1" || tags.includes(useCase);
 
+// Mirrors the real (private) DocVO shape in `domains/doc/handlers.ts` — the demo
+// never touches storage, so `body` is just the seed's Markdown text in-memory.
+export interface DemoDocVO {
+  node: NodeVO;
+  storagePrefix: string;
+  body: string;
+}
+
 export interface DemoDataset {
   bases: BaseVO[];
   nodes: NodeVO[];
@@ -2860,6 +2889,9 @@ export interface DemoDataset {
   views: ViewVO[];
   changeRequests: ChangeRequestVO[];
   auditEvents: AuditEventVO[];
+  docs: DemoDocVO[];
+  files: FileNodeVO[];
+  comments: CommentVO[];
 }
 
 const iso = (anchor: Date, minutesAgo: number) =>
@@ -2948,6 +2980,74 @@ export const buildDemoDataset = (
         })),
     }))
     .filter((folder) => folder.children.length > 0);
+
+  // Docs/Files are workspace-structural content (like Skill/Drive), not use-case
+  // tagged Bases — always include them regardless of `useCase`, matching the real
+  // local DB seed (`logic/seed.ts`'s seedDocNodesIfMissing/seedFileNodesIfMissing),
+  // which also seeds them unconditionally. Same folder/node ids as that real seed,
+  // so a screenshot of the demo and of a real local workspace read identically.
+  const docNodes: NodeVO[] = (scenario.docs ?? []).map((doc, index) => ({
+    id: doc.nodeId,
+    parentId: DEMO_DOCS_FOLDER_NODE_ID,
+    type: "doc" as const,
+    slug: doc.slug,
+    name: doc.name,
+    description: doc.description,
+    metadata: {},
+    position: doc.position ?? index,
+    createdAt: rootCreatedAt,
+    updatedAt: rootCreatedAt,
+    baseId: null,
+    children: [],
+  }));
+  if (docNodes.length > 0) {
+    folderNodes.push({
+      id: DEMO_DOCS_FOLDER_NODE_ID,
+      parentId: DEMO_ROOT_NODE_ID,
+      type: "folder",
+      slug: "docs",
+      name: "Docs",
+      description: "Long-form Markdown documents edited through review.",
+      metadata: {},
+      position: 21,
+      createdAt: rootCreatedAt,
+      updatedAt: rootCreatedAt,
+      baseId: null,
+      children: docNodes,
+    });
+  }
+
+  const fileNodes: NodeVO[] = (scenario.files ?? []).map((file, index) => ({
+    id: file.nodeId,
+    parentId: DEMO_FILES_FOLDER_NODE_ID,
+    type: "file" as const,
+    slug: file.slug,
+    name: file.name,
+    description: file.description,
+    metadata: { assetId: file.assetId },
+    position: file.position ?? index,
+    createdAt: rootCreatedAt,
+    updatedAt: rootCreatedAt,
+    baseId: null,
+    children: [],
+  }));
+  if (fileNodes.length > 0) {
+    folderNodes.push({
+      id: DEMO_FILES_FOLDER_NODE_ID,
+      parentId: DEMO_ROOT_NODE_ID,
+      type: "folder",
+      slug: "files",
+      name: "Files",
+      description: "First-class uploaded files backed by the Asset library.",
+      metadata: {},
+      position: 22,
+      createdAt: rootCreatedAt,
+      updatedAt: rootCreatedAt,
+      baseId: null,
+      children: fileNodes,
+    });
+  }
+
   nodes.push({
     id: DEMO_ROOT_NODE_ID,
     parentId: null,
@@ -3011,7 +3111,7 @@ export const buildDemoDataset = (
       updatedAt: iso(anchor, view.minutesAgo),
     }));
 
-  const changeRequests: ChangeRequestVO[] = (scenario.changeRequests ?? [])
+  const baseChangeRequests: ChangeRequestVO[] = (scenario.changeRequests ?? [])
     .filter((cr) => baseById.has(cr.baseId) && includesUseCase(cr.useCases, useCase))
     .map((cr) => {
       const createdAt = iso(anchor, cr.minutesAgo);
@@ -3092,6 +3192,159 @@ export const buildDemoDataset = (
       };
     });
 
+  // A Doc's optional in-review `doc_update` change request (mirrors the real
+  // local DB seed's `seedNodeChangeRequestIfMissing`, `logic/seed.ts`): a single
+  // node-targeted operation, always included regardless of `useCase` (Docs are
+  // not use-case tagged — see the docNodes comment above).
+  const docChangeRequests: ChangeRequestVO[] = (scenario.docs ?? []).flatMap((doc) => {
+    const cr = doc.changeRequest;
+    if (!cr) {
+      return [];
+    }
+    const createdAt = iso(anchor, cr.minutesAgo);
+    const operation: OperationVO = {
+      id: cr.operationId,
+      changeRequestId: cr.id,
+      baseId: null,
+      targetType: "node",
+      nodeId: doc.nodeId,
+      operation: "doc_update",
+      status: "pending",
+      targetRecordId: null,
+      targetViewId: null,
+      filePath: null,
+      sourceRecordId: null,
+      sourceCommitId: null,
+      baseCommitId: null,
+      headCommitId: cr.commitId,
+      deleteMode: "archive",
+      mergedRecordId: null,
+      mergedViewId: null,
+      position: 0,
+      createdAt,
+      updatedAt: createdAt,
+      headCommit: {
+        id: cr.commitId,
+        baseId: null,
+        targetType: "node",
+        nodeId: doc.nodeId,
+        operationId: cr.operationId,
+        parentCommitId: null,
+        fields: { body: cr.nextBody },
+        operation: "doc_update",
+        message: cr.message,
+        author: cr.submittedBy,
+        createdAt,
+      },
+      baseFields: null,
+    };
+    return [
+      {
+        id: cr.id,
+        baseId: null,
+        targetType: "node" as const,
+        nodeId: doc.nodeId,
+        status: "in_review" as const,
+        submittedBy: cr.submittedBy,
+        sourceMeta: {
+          seed: true,
+          scenario: "doc-body-update",
+          subject: "doc",
+          nodeId: doc.nodeId,
+        },
+        reviewPolicySnapshot: REVIEW_POLICY,
+        mergeSummary: {},
+        rejectedReason: null,
+        reviewedAt: null,
+        mergedAt: null,
+        createdAt,
+        updatedAt: createdAt,
+        base: null,
+        node: docNodes.find((node) => node.id === doc.nodeId) ?? null,
+        operations: [operation],
+        primaryOperation: operation,
+        operationCount: 1,
+        reviews: [],
+      },
+    ];
+  });
+
+  const changeRequests: ChangeRequestVO[] = [...baseChangeRequests, ...docChangeRequests];
+  const changeRequestById = new Map(changeRequests.map((cr) => [cr.id, cr]));
+  const recordById = new Map(records.map((record) => [record.id, record]));
+
+  const docs: DemoDocVO[] = (scenario.docs ?? []).map((doc, index) => ({
+    node: docNodes[index],
+    storagePrefix: `busabase/nodes/${doc.nodeId}/doc/`,
+    body: doc.body,
+  }));
+
+  // No real storage in the demo, so a File's "asset" is fabricated in-memory: a
+  // `data:` URL carries the actual seed bytes (no Buffer/base64 needed — this file
+  // stays isomorphic), so the fabricated download link/preview still works.
+  const files: FileNodeVO[] = (scenario.files ?? []).map((file, index) => ({
+    node: fileNodes[index],
+    asset: {
+      id: file.assetId,
+      attachmentId: file.attachmentId,
+      name: file.fileName,
+      contentKind: "text" as const,
+      metadata: {},
+      fileName: file.fileName,
+      mimeType: file.mimeType,
+      size: new TextEncoder().encode(file.body).length,
+      url: `data:${file.mimeType.includes("charset") ? file.mimeType : `${file.mimeType};charset=utf-8`},${encodeURIComponent(file.body)}`,
+      contentHash: null,
+      usageCount: 1,
+      createdAt: rootCreatedAt,
+    },
+  }));
+
+  // Resolve each seeded comment's subject against the just-built (use-case
+  // filtered) records/changeRequests, mirroring `logic/seed.ts`'s
+  // `seedCommentsIfMissing`. A comment whose subject didn't survive this
+  // use-case's filter (or targets a domain the demo doesn't model, e.g. Skill CRs)
+  // is silently dropped rather than shown orphaned.
+  const comments: CommentVO[] = (scenario.comments ?? []).flatMap((comment) => {
+    const createdAt = iso(anchor, comment.minutesAgo);
+    const base: Pick<CommentVO, "recordId" | "changeRequestId" | "operationId" | "commitId"> = {
+      recordId: null,
+      changeRequestId: null,
+      operationId: null,
+      commitId: null,
+    };
+    if (comment.subjectType === "change_request") {
+      const cr = changeRequestById.get(comment.subjectId);
+      if (!cr) {
+        return [];
+      }
+      base.changeRequestId = cr.id;
+    } else if (comment.subjectType === "record") {
+      const record = recordById.get(comment.subjectId);
+      if (!record) {
+        return [];
+      }
+      base.recordId = record.id;
+      base.commitId = record.headCommitId;
+    } else {
+      // `operation`/`commit` subjects aren't produced by any seed content today.
+      return [];
+    }
+    return [
+      {
+        id: comment.id,
+        subjectType: comment.subjectType,
+        subjectId: comment.subjectId,
+        ...base,
+        authorId: comment.authorId,
+        body: comment.body,
+        mentionsAi: comment.mentionsAi ?? false,
+        createdAt,
+        updatedAt: createdAt,
+      },
+    ];
+  });
+
   // A small seeded activity trail so the Activity view is not empty in demo.
   const auditEvents: AuditEventVO[] = changeRequests.slice(0, 6).map((cr, index) => ({
     id: `qae_demo_${cr.id}`,
@@ -3106,7 +3359,17 @@ export const buildDemoDataset = (
     createdAt: iso(anchor, 40 - index),
   }));
 
-  return { bases: baseVOs, nodes, records, views, changeRequests, auditEvents };
+  return {
+    bases: baseVOs,
+    nodes,
+    records,
+    views,
+    changeRequests,
+    auditEvents,
+    docs,
+    files,
+    comments,
+  };
 };
 
 /** English default seed — used by ensureReady() to populate a fresh local workspace. */
@@ -3116,4 +3379,7 @@ export const englishScenario: SeedScenario = {
   records: DEMO_RECORDS,
   views: DEMO_VIEWS,
   changeRequests: DEMO_CHANGE_REQUESTS,
+  docs: enNodeTypesScenario.docs,
+  files: enNodeTypesScenario.files,
+  comments: enNodeTypesScenario.comments,
 };

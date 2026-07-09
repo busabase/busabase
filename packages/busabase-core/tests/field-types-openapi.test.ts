@@ -112,6 +112,7 @@ describe("Base field types — OpenAPI (/api/v1) route round-trip", () => {
     f_date: "2026-06-24T00:00:00.000Z",
     f_email: "a@b.com",
     f_url: "https://example.com",
+    f_embed: "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
     f_phone: "+1 555-123-4567",
     f_select: "Open",
     f_multiselect: ["alpha", "beta"],
@@ -168,6 +169,7 @@ describe("Base field types — OpenAPI (/api/v1) route round-trip", () => {
         { slug: "f_date", name: "Date", type: "date" },
         { slug: "f_email", name: "Email", type: "email" },
         { slug: "f_url", name: "Url", type: "url" },
+        { slug: "f_embed", name: "Embed", type: "embed" },
         { slug: "f_phone", name: "Phone", type: "phone" },
         { slug: "f_select", name: "Select", type: "select", options: { choices: SELECT_CHOICES } },
         {
@@ -270,6 +272,7 @@ describe("Base field types — OpenAPI (/api/v1) route round-trip", () => {
     const cases: Array<[string, Record<string, unknown>, RegExp]> = [
       ["number", { f_number: "abc" }, /must be a number/],
       ["email", { f_email: "not-an-email" }, /valid email/],
+      ["embed", { f_embed: "not a url" }, /embeddable/],
       ["checkbox", { f_checkbox: "yes" }, /true or false/],
       ["json", { f_json: "{bad json" }, /valid JSON/],
       ["yaml", { f_yaml: "bad: [" }, /valid YAML/],

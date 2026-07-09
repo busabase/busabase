@@ -10,6 +10,8 @@ import {
   demoGetAsset,
   demoGetAuthInfo,
   demoGetChangeRequest,
+  demoGetDoc,
+  demoGetFileNode,
   demoGetFolder,
   demoGetRecord,
   demoListAgentTasks,
@@ -18,6 +20,8 @@ import {
   demoListBases,
   demoListChangeRequests,
   demoListComments,
+  demoListDocs,
+  demoListFileNodes,
   demoListFolders,
   demoListNodes,
   demoListRecordChangeRequests,
@@ -71,7 +75,7 @@ export const busabaseDemoRouter = os.router({
     create: os.auditEvents.create.handler(({ input }) => demoCreateAuditEvent(input)),
   },
   comments: {
-    list: os.comments.list.handler(() => demoListComments()),
+    list: os.comments.list.handler(({ input }) => demoListComments(input)),
     create: os.comments.create.handler(({ input }) => demoCreateComment(input)),
   },
   agent: {
@@ -170,22 +174,18 @@ export const busabaseDemoRouter = os.router({
     }),
   },
   files: {
-    list: os.files.list.handler(() => []),
+    list: os.files.list.handler(() => demoListFileNodes()),
     create: os.files.create.handler(() => {
       throw demoUnsupported("Create File");
     }),
-    get: os.files.get.handler(() => {
-      throw demoUnsupported("Open File");
-    }),
+    get: os.files.get.handler(({ input }) => demoGetFileNode(input.nodeId)),
   },
   docs: {
-    list: os.docs.list.handler(() => []),
+    list: os.docs.list.handler(() => demoListDocs()),
     create: os.docs.create.handler(() => {
       throw demoUnsupported("Create Doc");
     }),
-    get: os.docs.get.handler(() => {
-      throw demoUnsupported("Open Doc");
-    }),
+    get: os.docs.get.handler(({ input }) => demoGetDoc(input.nodeId)),
     updateBody: os.docs.updateBody.handler(() => {
       throw demoUnsupported("Update Doc");
     }),
@@ -211,6 +211,19 @@ export const busabaseDemoRouter = os.router({
     }),
     delete: os.assets.delete.handler(() => {
       throw demoUnsupported("Delete asset");
+    }),
+  },
+  vault: {
+    get: os.vault.get.handler(() => ({
+      ownerId: "demo-user",
+      items: [],
+      updatedAt: null,
+    })),
+    update: os.vault.update.handler(() => {
+      throw demoUnsupported("Update Vault");
+    }),
+    clear: os.vault.clear.handler(() => {
+      throw demoUnsupported("Clear Vault");
     }),
   },
   changeRequests: {
