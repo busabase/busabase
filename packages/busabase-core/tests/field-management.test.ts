@@ -35,6 +35,7 @@ describe("Field management — delete / update / convert", () => {
 
     // Create a dedicated test base with a variety of field types
     const base = await client.bases.create({
+      autoMerge: true,
       slug: "field-mgmt-test",
       name: "Field Management Test",
       fields: [
@@ -306,6 +307,7 @@ describe("Field management — delete / update / convert", () => {
     it("converts number field to text: updates field type and migrates all values", async () => {
       // Create a fresh base for this test to avoid state bleed
       const base = await client.bases.create({
+        autoMerge: true,
         slug: "convert-test",
         name: "Convert Test",
         fields: [
@@ -332,6 +334,7 @@ describe("Field management — delete / update / convert", () => {
 
     it("converts select field to text: replaces choice ids with labels", async () => {
       const base = await client.bases.create({
+        autoMerge: true,
         slug: "select-to-text",
         name: "Select To Text",
         fields: [
@@ -365,6 +368,7 @@ describe("Field management — delete / update / convert", () => {
 
     it("auto_create mode: creates new choices for unmatched values when converting to select", async () => {
       const base = await client.bases.create({
+        autoMerge: true,
         slug: "text-to-select",
         name: "Text To Select",
         fields: [{ slug: "category", name: "Category", type: "text" }],
@@ -412,6 +416,7 @@ describe("Field management — delete / update / convert", () => {
   describe("reorderFields", () => {
     it("reorders fields via change request", async () => {
       const base = await client.bases.create({
+        autoMerge: true,
         slug: "reorder-test",
         name: "Reorder Test",
         fields: [
@@ -437,6 +442,7 @@ describe("Field management — delete / update / convert", () => {
   describe("record restore", () => {
     it("restores an archived record", async () => {
       const base = await client.bases.create({
+        autoMerge: true,
         slug: "restore-record-test",
         name: "Restore Record Test",
         fields: [{ slug: "title", name: "Title", type: "text", required: true }],
@@ -474,6 +480,7 @@ describe("Field management — delete / update / convert", () => {
   describe("field restore", () => {
     it("restores a soft-deleted field", async () => {
       const base = await client.bases.create({
+        autoMerge: true,
         slug: "restore-field-test",
         name: "Restore Field Test",
         fields: [{ slug: "title", name: "Title", type: "text", required: true }],
@@ -507,6 +514,7 @@ describe("Field management — delete / update / convert", () => {
   describe("partial index: slug reuse after delete", () => {
     it("allows creating a new field with the same slug after soft-delete", async () => {
       const base = await client.bases.create({
+        autoMerge: true,
         slug: "slug-reuse-test",
         name: "Slug Reuse Test",
         fields: [{ slug: "title", name: "Title", type: "text", required: true }],
@@ -545,6 +553,7 @@ describe("Field management — delete / update / convert", () => {
   describe("concurrent convert check", () => {
     it("rejects a second convert CR while one is in_review", async () => {
       const base = await client.bases.create({
+        autoMerge: true,
         slug: "concurrent-convert-test",
         name: "Concurrent Convert Test",
         fields: [
@@ -578,6 +587,7 @@ describe("Field management — delete / update / convert", () => {
   describe("listBases filters archived bases", () => {
     it("does not return a base after it is archived", async () => {
       const base = await client.bases.create({
+        autoMerge: true,
         slug: "archive-filter-test",
         name: "Archive Filter Test",
         fields: [{ slug: "title", name: "Title", type: "text", required: true }],
@@ -600,6 +610,7 @@ describe("Field management — delete / update / convert", () => {
   describe("reorderFields completeness validation", () => {
     it("rejects when fieldIds does not include all active fields", async () => {
       const base = await client.bases.create({
+        autoMerge: true,
         slug: "reorder-partial-test",
         name: "Reorder Partial Test",
         fields: [
@@ -617,6 +628,7 @@ describe("Field management — delete / update / convert", () => {
 
     it("accepts when all active fields are included", async () => {
       const base = await client.bases.create({
+        autoMerge: true,
         slug: "reorder-complete-test",
         name: "Reorder Complete Test",
         fields: [
@@ -640,6 +652,7 @@ describe("Field management — delete / update / convert", () => {
   describe("merge blocked on archived base", () => {
     it("rejects merging a field operation after the base is archived", async () => {
       const base = await client.bases.create({
+        autoMerge: true,
         slug: "archived-merge-block-test",
         name: "Archived Merge Block Test",
         fields: [

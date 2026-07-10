@@ -157,6 +157,37 @@ export function NodeDetailSkeleton({
   );
 }
 
+const INBOX_ROW_SKELETONS = [
+  { id: "inbox-row-1", width: "72%" },
+  { id: "inbox-row-2", width: "58%" },
+  { id: "inbox-row-3", width: "66%" },
+  { id: "inbox-row-4", width: "50%" },
+  { id: "inbox-row-5", width: "62%" },
+];
+
+/**
+ * Loading placeholder for the inbox/activity list while its page query is
+ * still in flight. Mirrors the real row shape (status dot + title + meta
+ * line) so a slow first load shimmers into place instead of momentarily
+ * rendering nothing — which used to be visually indistinguishable from a
+ * genuinely empty inbox (both showed 0 rows until data or an error arrived).
+ */
+export function InboxListSkeleton() {
+  return (
+    <div className="space-y-4" aria-hidden>
+      {INBOX_ROW_SKELETONS.map((row) => (
+        <div className="flex min-w-0 flex-col gap-1.5 py-1" key={row.id}>
+          <div className="flex items-center gap-2">
+            <Skeleton className="size-2 shrink-0 rounded-full" />
+            <Skeleton className="h-4" style={{ width: row.width }} />
+          </div>
+          <Skeleton className="ml-4 h-3 w-1/3" />
+        </div>
+      ))}
+    </div>
+  );
+}
+
 /**
  * Skeleton for the base table pane — a header strip and a grid of rows/cells —
  * shown while a base's data is still loading (cold cache / direct link), so the

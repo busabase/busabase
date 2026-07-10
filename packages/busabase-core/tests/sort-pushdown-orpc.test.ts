@@ -43,6 +43,7 @@ describe("Sort push-down keyset — oRPC integration", () => {
         { slug: "name", name: "Name", type: "text", required: true, options: {} },
         { slug: "score", name: "Score", type: "number", required: false, options: {} },
       ],
+      autoMerge: true,
     });
     baseId = base.id;
 

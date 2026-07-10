@@ -1,1 +1,0 @@
-ALTER TYPE "public"."busabase_field_type" ADD VALUE 'embed' BEFORE 'email';

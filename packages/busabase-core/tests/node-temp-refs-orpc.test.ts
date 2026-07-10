@@ -86,7 +86,12 @@ describe("Node CR temp refs — oRPC integration", () => {
 
   it("moves an existing node into a folder created in the same CR (parentNodeRef on move)", async () => {
     // A pre-existing top-level doc.
-    await client.docs.create({ slug: "orphan-note", name: "Orphan Note", body: "hi\n" });
+    await client.docs.create({
+      autoMerge: true,
+      slug: "orphan-note",
+      name: "Orphan Note",
+      body: "hi\n",
+    });
     const before = (await client.nodes.list()) as Array<{ slug: string; children?: unknown[] }>;
     const orphan = findNode(before, "orphan-note");
     expect(orphan).toBeDefined();

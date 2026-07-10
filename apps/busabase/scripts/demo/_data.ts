@@ -61,6 +61,10 @@ export function toApiBase(b: SeedBaseDef) {
       .filter((f) => !["relation", "ai_summary", "ai_tags", "created_time"].includes(f.type))
       .slice(0, 8)
       .map(toApiField),
+    // This walkthrough asserts on the materialized Base immediately after POST
+    // (it's smoke-testing the API surface, not the review-first policy), so it
+    // opts out of the new review-first default the same way a seed script does.
+    autoMerge: true,
   };
 }
 

@@ -743,19 +743,24 @@ Examples:
       }),
     );
   addGlobalFlags(bases.command("create"))
-    .description("Create a Base")
+    .description("Create a Base — review-first by default: returns a pending Change Request")
     .requiredOption("--slug <slug>", "Base slug")
     .requiredOption("--name <name>", "Base name")
     .option("--field <slug:name:type...>", "field definition, repeatable")
     .option("--fields-json <json|@file>", "field definitions as JSON array")
     .option("--description <text>", "optional description")
     .option("--parent-node-id <id>", "parent folder node id; omit for root")
+    .option(
+      "--auto-merge",
+      "skip review and create the Base immediately (default: propose a pending Change Request)",
+    )
     .addHelpText(
       "after",
       `
 Examples:
   busabase-cli bases create --slug products --name "产品目录 Products" --field product_name:"Product Name":text
-  busabase-cli bases create --slug products --name "产品目录 Products" --fields-json @fields.json`,
+  busabase-cli bases create --slug products --name "产品目录 Products" --fields-json @fields.json
+  busabase-cli bases create --slug products --name "Products" --auto-merge   # skip review, create immediately`,
     )
     .action(
       runAction(state, (client, opts) =>
@@ -765,6 +770,7 @@ Examples:
           description: opts.description as string | undefined,
           parentNodeId: opts.parentNodeId as string | undefined,
           fields: parseFieldDefinitions(opts),
+          ...(opts.autoMerge ? { autoMerge: true } : {}),
         }),
       ),
     );

@@ -160,6 +160,7 @@ function BusaBaseRecordRow({
   return (
     <div
       className="group grid min-h-12 items-center gap-3 rounded-md border-border/40 border-b px-2 py-1.5 text-sm transition-colors hover:bg-muted/35"
+      data-record-id={record.id}
       style={{ gridTemplateColumns: columnTemplate, ...style }}
     >
       {fields.map((field, index) => (
@@ -189,6 +190,7 @@ export function BusaBaseTable({
   activeView,
   archivedViews = [],
   archivedRecords = [],
+  archivedPagination,
   base,
   onCreateView,
   onDeleteView,
@@ -203,6 +205,7 @@ export function BusaBaseTable({
   activeView: ViewVO | null;
   archivedViews?: ViewVO[];
   archivedRecords?: RecordVO[];
+  archivedPagination?: { hasMore: boolean; isLoadingMore: boolean; loadMore: () => void };
   base: BaseVO | null;
   onCreateView: (
     base: BaseVO,
@@ -566,6 +569,20 @@ export function BusaBaseTable({
                 </div>
               ))
             : null}
+          {showArchivedRecords && archivedPagination?.hasMore ? (
+            <div className="flex items-center justify-center pt-2">
+              <button
+                className="inline-flex h-8 items-center rounded-md border border-border/70 px-3 font-medium text-muted-foreground text-xs transition-colors hover:bg-accent hover:text-foreground disabled:opacity-60"
+                disabled={archivedPagination.isLoadingMore}
+                onClick={() => archivedPagination.loadMore()}
+                type="button"
+              >
+                {archivedPagination.isLoadingMore
+                  ? messages.common.loading
+                  : messages.search.loadMore}
+              </button>
+            </div>
+          ) : null}
         </div>
       </div>
       {pagination?.hasMore ? (

@@ -17,6 +17,7 @@ import {
 } from "../db/schema";
 import { insertAuditEvent } from "./audit";
 import { id, now } from "./kernel";
+import { publishChangeRequestPendingReview } from "./live-events";
 import { buildNodeTree, ensureReady } from "./seed";
 import { toNodeVO } from "./vo";
 
@@ -145,6 +146,8 @@ export const listNodes = async (): Promise<NodeVO[]> => {
 /**
  * Flat list of archived folder/doc/skill nodes for the Trash view. Base nodes are
  * excluded — an archived base is surfaced (and restored) via `bases.listArchived`.
+ * Permanently-deleted (`deletedAt`) nodes are excluded too — once purged, an item
+ * leaves the Trash for good even though its row is kept.
  */
 export const listArchivedNodes = async (): Promise<NodeVO[]> => {
   await ensureReady();
@@ -157,6 +160,7 @@ export const listArchivedNodes = async (): Promise<NodeVO[]> => {
       and(
         eq(busabaseNodes.spaceId, spaceId),
         isNotNull(busabaseNodes.archivedAt),
+        isNull(busabaseNodes.deletedAt),
         ne(busabaseNodes.type, "base"),
       ),
     )
@@ -213,11 +217,18 @@ const collectSubtreeIds = async (
 };
 
 /**
- * Permanently delete an archived folder/doc/skill node (and its subtree) from the
- * Trash. Irreversible. Refused unless the node is archived, and refused if the
- * subtree contains a Base (a Base's commit history is FK-restricted and is a
- * separate concern). Deletes in dependency order — operations → commits →
- * change-requests → nodes — because operations.headCommitId restricts commits.
+ * Permanently delete an archived node (and its subtree) from the Trash.
+ * Irreversible from the UI's perspective, but implemented as a SOFT delete: every
+ * row in the subtree is stamped with `deletedAt` and kept forever (never a real
+ * `db.delete()`), so it disappears from every list/tree/search query without
+ * touching history (operations/commits/change-requests referencing it are left
+ * untouched — they were only ever hard-deleted before to satisfy delete
+ * ordering, which no longer applies now that nothing is physically removed).
+ * This also sidesteps the Base commit history's FK-restrict on `busabaseBases`
+ * that made a hard delete impossible for a Base subtree, so — unlike the old
+ * hard-delete path — a subtree containing a Base is now allowed: the Base's
+ * `busabase_bases` row (and any nested Bases') is soft-deleted in lockstep via
+ * its 1:1 `nodeId`.
  */
 export const purgeNode = async (nodeId: string): Promise<{ purged: boolean }> => {
   await ensureReady();
@@ -236,36 +247,38 @@ export const purgeNode = async (nodeId: string): Promise<{ purged: boolean }> =>
       message: "Only archived items can be permanently deleted. Delete it first.",
     });
   }
-  const subtreeIds = await collectSubtreeIds(db, nodeId);
-  const subtreeNodes = await db
-    .select({ id: busabaseNodes.id, type: busabaseNodes.type })
-    .from(busabaseNodes)
-    .where(inArray(busabaseNodes.id, subtreeIds));
-  if (subtreeNodes.some((n) => n.type === "base")) {
+  if (node.deletedAt) {
     throw new ORPCError("CONFLICT", {
-      message:
-        "Cannot permanently delete a folder that contains a Base. Restore it and remove the Base first.",
+      message: "This item was already permanently deleted.",
     });
   }
+  const subtreeIds = await collectSubtreeIds(db, nodeId);
+  const timestamp = now();
 
-  // Dependency-ordered hard delete (operations reference commits via a RESTRICT
-  // FK, so a single cascade from nodes could evaluate them out of order).
-  const crRows = await db
-    .select({ id: busabaseChangeRequests.id })
-    .from(busabaseChangeRequests)
-    .where(inArray(busabaseChangeRequests.nodeId, subtreeIds));
-  const crIds = crRows.map((c) => c.id);
-  if (crIds.length > 0) {
-    await db.delete(busabaseOperations).where(inArray(busabaseOperations.changeRequestId, crIds));
+  await db
+    .update(busabaseNodes)
+    .set({ deletedAt: timestamp, updatedAt: timestamp })
+    .where(inArray(busabaseNodes.id, subtreeIds));
+  // Soft-delete any Base(s) in the subtree in lockstep (nodeId is a 1:1 FK to the
+  // node), mirroring how archive/restore keep the two tables in sync elsewhere.
+  const baseRows = await db
+    .select({ id: busabaseBases.id })
+    .from(busabaseBases)
+    .where(inArray(busabaseBases.nodeId, subtreeIds));
+  if (baseRows.length > 0) {
+    await db
+      .update(busabaseBases)
+      .set({ deletedAt: timestamp })
+      .where(
+        inArray(
+          busabaseBases.id,
+          baseRows.map((b) => b.id),
+        ),
+      );
   }
-  await db.delete(busabaseOperations).where(inArray(busabaseOperations.nodeId, subtreeIds));
-  await db.delete(busabaseCommits).where(inArray(busabaseCommits.nodeId, subtreeIds));
-  if (crIds.length > 0) {
-    await db.delete(busabaseChangeRequests).where(inArray(busabaseChangeRequests.id, crIds));
-  }
-  await db.delete(busabaseNodes).where(inArray(busabaseNodes.id, subtreeIds));
-  // Permanent destructive delete (no change request) — record it so the audit
-  // trail is complete (this is the one mutation that cannot be undone).
+
+  // No change request — record it so the audit trail is complete (this is the
+  // one mutation the UI treats as irreversible).
   await insertAuditEvent(db, {
     action: "node.purged",
     metadata: {
@@ -374,6 +387,16 @@ export const createNodeChangeRequest = async (
     const merged = await autoApproveAndMerge(changeRequestId);
     return merged.changeRequest;
   }
+
+  // Review-first path (the UI's default "New" flow): this CR is now sitting in
+  // someone's inbox waiting on a human, so fire the pending-review signal —
+  // never for the autoMerge branch above, which never becomes reviewable.
+  await publishChangeRequestPendingReview({
+    spaceId: getContextSpaceId(),
+    baseId: null,
+    changeRequestId,
+    submittedBy,
+  });
 
   const { getChangeRequest } = await import("./cr-lifecycle");
   const changeRequest = await getChangeRequest(changeRequestId);

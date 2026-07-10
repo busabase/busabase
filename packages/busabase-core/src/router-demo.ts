@@ -1,5 +1,6 @@
 import { implement, ORPCError } from "@orpc/server";
 import { busabaseContract } from "busabase-contract/contract/busabase";
+import { buildActivityItemsFromVOs } from "./logic/activity";
 import {
   demoCloseChangeRequest,
   demoCreateAuditEvent,
@@ -74,6 +75,19 @@ export const busabaseDemoRouter = os.router({
     list: os.auditEvents.list.handler(() => demoListAuditEvents()),
     create: os.auditEvents.create.handler(({ input }) => demoCreateAuditEvent(input)),
   },
+  activity: {
+    listPaged: os.activity.listPaged.handler(async ({ input }) => {
+      const [changeRequests, records, auditEvents] = await Promise.all([
+        demoListChangeRequests(),
+        demoListRecords(),
+        demoListAuditEvents(),
+      ]);
+      const all = buildActivityItemsFromVOs(changeRequests, records, auditEvents);
+      const limit = input?.limit ?? 50;
+      // Demo data is small: return the newest page, no cursor.
+      return { items: all.slice(0, limit), nextCursor: null };
+    }),
+  },
   comments: {
     list: os.comments.list.handler(({ input }) => demoListComments(input)),
     create: os.comments.create.handler(({ input }) => demoCreateComment(input)),
@@ -140,6 +154,10 @@ export const busabaseDemoRouter = os.router({
     listDeletedFields: os.bases.listDeletedFields.handler(() => []),
     listArchivedViews: os.bases.listArchivedViews.handler(() => []),
     listArchivedRecords: os.bases.listArchivedRecords.handler(() => []),
+    listArchivedRecordsPaged: os.bases.listArchivedRecordsPaged.handler(() => ({
+      records: [],
+      nextCursor: null,
+    })),
   },
   skills: {
     list: os.skills.list.handler(() => []),

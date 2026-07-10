@@ -42,15 +42,39 @@ export type UserRefMap = Map<string, UserRefVO>;
 const userRef = (users: UserRefMap | undefined, userId: string): UserRefVO | null =>
   users?.get(userId) ?? null;
 
-export const normalizeFieldValue = (value: unknown) => {
+const VALUE_TEXT_INDEX_LIMIT = 1024;
+const JSON_LIKE_FIELD_TYPES = new Set<FieldType>(["json", "attachment", "relation"]);
+const DATE_FIELD_TYPES = new Set<FieldType>(["date", "created_time", "updated_time"]);
+
+const trimIndexText = (value: string) =>
+  value.length > VALUE_TEXT_INDEX_LIMIT ? value.slice(0, VALUE_TEXT_INDEX_LIMIT) : value;
+
+const parseJsonString = (value: string) => {
+  try {
+    return JSON.parse(value);
+  } catch {
+    return value;
+  }
+};
+
+export const normalizeFieldValue = (value: unknown, fieldType?: FieldType) => {
   if (value === null || value === undefined) {
     return {};
   }
-  if (typeof value === "string") {
-    const maybeDate = new Date(value);
+  if (fieldType && JSON_LIKE_FIELD_TYPES.has(fieldType)) {
+    const serialized = typeof value === "string" ? value : JSON.stringify(value);
     return {
-      valueText: value,
-      valueDate: Number.isNaN(maybeDate.getTime()) ? null : maybeDate,
+      valueText: null,
+      valueJson: typeof value === "string" ? parseJsonString(value) : value,
+      valueHash:
+        serialized.length > 256 ? `${serialized.length}:${serialized.slice(0, 128)}` : null,
+    };
+  }
+  if (typeof value === "string") {
+    const maybeDate = DATE_FIELD_TYPES.has(fieldType as FieldType) ? new Date(value) : null;
+    return {
+      valueText: trimIndexText(value),
+      valueDate: maybeDate && !Number.isNaN(maybeDate.getTime()) ? maybeDate : null,
       valueHash: value.length > 256 ? `${value.length}:${value.slice(0, 128)}` : null,
     };
   }
@@ -68,7 +92,7 @@ export const normalizeFieldValue = (value: unknown) => {
     serialized = String(value);
   }
   return {
-    valueText: Array.isArray(value) ? value.join(", ") : null,
+    valueText: Array.isArray(value) ? trimIndexText(value.join(", ")) : null,
     valueJson: value,
     valueHash: serialized.slice(0, 256),
   };

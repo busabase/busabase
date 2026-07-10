@@ -66,6 +66,7 @@ describe("Drive API — oRPC integration", () => {
 
   it("creates a Drive and merges file updates with hash protection", async () => {
     const drive = await client.drives.create({
+      autoMerge: true,
       slug: "team-drive",
       name: "Team Drive",
       files: [{ path: "notes/today.md", content: "today\n" }],
@@ -105,6 +106,7 @@ describe("Drive API — oRPC integration", () => {
       contentHash: `sha256:${"a".repeat(64)}`,
     });
     const drive = await client.drives.create({
+      autoMerge: true,
       slug: "asset-file-drive",
       name: "Asset File Drive",
     });
@@ -146,6 +148,7 @@ describe("Drive API — oRPC integration", () => {
       contentHash: `sha256:${"1".repeat(64)}`,
     });
     const drive = await client.drives.create({
+      autoMerge: true,
       slug: "asset-replace-drive",
       name: "Asset Replace Drive",
       files: [{ path: "deck.pdf", assetId: original.assetId, displayName: "Deck v1" }],
@@ -207,6 +210,7 @@ describe("Drive API — oRPC integration", () => {
       contentHash: `sha256:${"b".repeat(64)}`,
     });
     const drive = await ok("POST", "/drives", {
+      autoMerge: true,
       slug: "openapi-asset-file-drive",
       name: "OpenAPI Asset File Drive",
     });
@@ -252,6 +256,7 @@ describe("Drive API — oRPC integration", () => {
       contentHash: `sha256:${"c".repeat(64)}`,
     });
     const drive = await client.drives.create({
+      autoMerge: true,
       slug: "asset-backed-drive",
       name: "Asset Backed Drive",
     });
@@ -348,6 +353,7 @@ describe("Drive API — oRPC integration", () => {
       contentHash: `sha256:${"d".repeat(64)}`,
     });
     const drive = await client.drives.create({
+      autoMerge: true,
       slug: "initial-asset-backed-drive",
       name: "Initial Asset Backed Drive",
       files: [
@@ -377,7 +383,11 @@ describe("Drive API — oRPC integration", () => {
   });
 
   it("returns CONFLICT for stale Drive file merges", async () => {
-    const drive = await client.drives.create({ slug: "stale-drive", name: "Stale Drive" });
+    const drive = await client.drives.create({
+      autoMerge: true,
+      slug: "stale-drive",
+      name: "Stale Drive",
+    });
     const staleCr = await client.drives.createChangeRequest({
       nodeId: drive.node.id,
       operations: [
@@ -400,7 +410,11 @@ describe("Drive API — oRPC integration", () => {
   });
 
   it("returns BAD_REQUEST for invalid Drive file paths", async () => {
-    const drive = await client.drives.create({ slug: "path-drive", name: "Path Drive" });
+    const drive = await client.drives.create({
+      autoMerge: true,
+      slug: "path-drive",
+      name: "Path Drive",
+    });
 
     await expect(
       client.drives.createChangeRequest({
@@ -411,7 +425,11 @@ describe("Drive API — oRPC integration", () => {
   });
 
   it("still exposes ORPCError instances to local callers", async () => {
-    const drive = await client.drives.create({ slug: "error-drive", name: "Error Drive" });
+    const drive = await client.drives.create({
+      autoMerge: true,
+      slug: "error-drive",
+      name: "Error Drive",
+    });
 
     await expect(
       client.drives.createChangeRequest({

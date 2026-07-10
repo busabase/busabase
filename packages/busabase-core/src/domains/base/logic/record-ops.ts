@@ -16,9 +16,14 @@ import {
   busabaseRecords,
 } from "../../../db/schema";
 import { insertAuditEvent } from "../../../logic/audit";
-import { getChangeRequest, recordMergedNodeCreate } from "../../../logic/cr-lifecycle";
+import {
+  getChangeRequest,
+  recordMergedNodeCreate,
+  recordPendingNodeCreate,
+} from "../../../logic/cr-lifecycle";
 import { projectCommitFields } from "../../../logic/field-values";
 import { CURRENT_USER_ID, id, now, rootNodeIdForSpace } from "../../../logic/kernel";
+import { publishChangeRequestPendingReview } from "../../../logic/live-events";
 import { ensureReady } from "../../../logic/seed";
 import {
   createBaseInputSchema,
@@ -91,7 +96,12 @@ const assertRelationTargetsLive = async (
   }
 };
 
-export const createBase = async (input: z.infer<typeof createBaseInputSchema>) => {
+// `z.input` (not `z.infer`/output) — matches createDoc/createFileNode/
+// createFileTreeNode's parameter typing: callers may omit any field with a
+// schema default (including the new `autoMerge`), since `.parse()` below
+// fills it in. Using the output type here would wrongly force every caller
+// to pass `autoMerge` explicitly just to satisfy the compiler.
+export const createBase = async (input: z.input<typeof createBaseInputSchema>) => {
   await ensureReady();
   const db = await getDb();
   const parsed = createBaseInputSchema.parse(input);
@@ -124,6 +134,23 @@ export const createBase = async (input: z.infer<typeof createBaseInputSchema>) =
     .limit(1);
   if (!parentNode || parentNode.type !== "folder") {
     throw new Error(`Parent folder not found: ${parentNodeId}`);
+  }
+
+  // Review-first by default: propose the Base as a pending node_create
+  // ChangeRequest instead of materializing it immediately. Callers that don't
+  // need human review (seed/migration scripts, an explicit no-review agent
+  // task) pass `autoMerge: true` to keep today's instant-create behavior.
+  if (!parsed.autoMerge) {
+    return recordPendingNodeCreate({
+      nodeType: "base",
+      slug: parsed.slug,
+      name: parsed.name,
+      description: parsed.description,
+      parentNodeId: parentNode.id,
+      fields: parsed.fields,
+      message: `Create base ${parsed.name}`,
+      submittedBy: resolveActorId(CURRENT_USER_ID),
+    });
   }
 
   const baseId = id("bse");
@@ -275,6 +302,12 @@ export const createChangeRequest = async (
     commitId,
     metadata: { operation: "record_create" },
   });
+  await publishChangeRequestPendingReview({
+    spaceId: getContextSpaceId(),
+    baseId: base.id,
+    changeRequestId,
+    submittedBy: resolveActorId(parsed.submittedBy),
+  });
 
   const changeRequest = await getChangeRequest(changeRequestId);
   if (!changeRequest) {
@@ -379,6 +412,12 @@ export const createBulkChangeRequest = async (
     baseId: base.id,
     changeRequestId,
     metadata: { operation: "record_create", bulk: true, recordCount: parsed.records.length },
+  });
+  await publishChangeRequestPendingReview({
+    spaceId: getContextSpaceId(),
+    baseId: base.id,
+    changeRequestId,
+    submittedBy: resolveActorId(parsed.submittedBy),
   });
 
   const changeRequest = await getChangeRequest(changeRequestId);
@@ -485,6 +524,12 @@ export const createDeleteChangeRequest = async (
     commitId,
     metadata: { deleteMode: parsed.deleteMode, operation: "record_delete" },
   });
+  await publishChangeRequestPendingReview({
+    spaceId: getContextSpaceId(),
+    baseId: record.baseId,
+    changeRequestId,
+    submittedBy: resolveActorId(parsed.submittedBy),
+  });
 
   const changeRequest = await getChangeRequest(changeRequestId);
   if (!changeRequest) {
@@ -588,6 +633,12 @@ export const createUpdateChangeRequest = async (
     operationId,
     commitId,
     metadata: { operation: "record_update" },
+  });
+  await publishChangeRequestPendingReview({
+    spaceId: getContextSpaceId(),
+    baseId: record.baseId,
+    changeRequestId,
+    submittedBy: resolveActorId(parsed.author),
   });
 
   const changeRequest = await getChangeRequest(changeRequestId);
@@ -693,6 +744,12 @@ export const createRestoreChangeRequest = async (
     commitId,
     metadata: { operation: "record_restore" },
   });
+  await publishChangeRequestPendingReview({
+    spaceId: getContextSpaceId(),
+    baseId: record.baseId,
+    changeRequestId,
+    submittedBy: resolveActorId(submittedBy),
+  });
 
   const changeRequest = await getChangeRequest(changeRequestId);
   if (!changeRequest) {
@@ -776,6 +833,12 @@ export const createArchiveBaseChangeRequest = async (
     commitId,
     metadata: { operation: "base_archive" },
   });
+  await publishChangeRequestPendingReview({
+    spaceId: getContextSpaceId(),
+    baseId: base.id,
+    changeRequestId,
+    submittedBy: resolveActorId(submittedBy),
+  });
 
   const changeRequest = await getChangeRequest(changeRequestId);
   if (!changeRequest) {
@@ -791,8 +854,10 @@ export const createRestoreBaseChangeRequest = async (
 ) => {
   await ensureReady();
   const db = await getDb();
-  // getBase only returns non-archived bases via the VO? It returns by id/slug
-  // regardless of archivedAt, so resolve directly here too.
+  // getBase's id-fallback excludes a permanently-deleted base (deletedAt IS NOT
+  // NULL) but still resolves a merely-archived one, so it can't be used alone
+  // here — fall back to a raw lookup that also finds an archived (not yet
+  // purged) base, then re-check deletedAt explicitly below.
   const base = await getBase(baseId);
   let resolvedId = base?.id ?? null;
   if (!resolvedId) {
@@ -813,6 +878,11 @@ export const createRestoreBaseChangeRequest = async (
     .limit(1);
   if (!baseRow) {
     throw new Error(`Base not found: ${baseId}`);
+  }
+  if (baseRow.deletedAt) {
+    throw new ORPCError("CONFLICT", {
+      message: `Base was permanently deleted and cannot be restored: ${baseId}`,
+    });
   }
   if (!baseRow.archivedAt) {
     throw new Error(`Base is not archived: ${baseId}`);
@@ -880,6 +950,12 @@ export const createRestoreBaseChangeRequest = async (
     operationId,
     commitId,
     metadata: { operation: "base_restore" },
+  });
+  await publishChangeRequestPendingReview({
+    spaceId: getContextSpaceId(),
+    baseId: baseRow.id,
+    changeRequestId,
+    submittedBy: resolveActorId(submittedBy),
   });
 
   const changeRequest = await getChangeRequest(changeRequestId);

@@ -209,6 +209,13 @@ const liveEventSchema = z.object({
     "change_request.deleted",
     "change_request.reviewed",
     "change_request.merged",
+    // Fired only when a CONTENT change request freshly enters human review
+    // (record_* ops created via record-ops.ts) — never for structural ops
+    // that auto-merge instantly (those still fire "change_request.created"
+    // via the audit funnel, but nothing needs reviewing). Consumed by
+    // `use-live-sync.ts` to pop a desktop Notification, and by
+    // busabase-cloud's host hook to persist an inbox notification row.
+    "change_request.pending_review",
   ]),
   spaceId: z.string(),
   actorId: z.string(),

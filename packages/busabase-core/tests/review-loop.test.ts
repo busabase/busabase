@@ -96,6 +96,14 @@ describe("Change-request review loop — oRPC", () => {
       expect(createdEvent.baseId).toBe(blogBaseId);
       expect(createdEvent.actorId).toBe("loop-agent");
 
+      // Creating a CR also broadcasts a "needs review" signal for desktop/inbox
+      // notifications (see `publishChangeRequestPendingReview`) — drain it before
+      // listening for the next lifecycle event, or the next `nextLiveEvent()` call
+      // below would consume this one instead of the "reviewed" event it expects.
+      const pendingReviewEvent = await nextLiveEvent(iterator);
+      expect(pendingReviewEvent.kind).toBe("change_request.pending_review");
+      expect(pendingReviewEvent.changeRequestId).toBe(cr.id);
+
       const reviewedEventPromise = nextLiveEvent(iterator);
       const reviewed = await client.changeRequests.review({
         changeRequestId: cr.id,

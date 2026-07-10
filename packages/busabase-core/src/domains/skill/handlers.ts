@@ -4,7 +4,7 @@ import type {
   createSkillChangeRequestInputSchema,
   createSkillInputSchema,
 } from "busabase-contract/domains/skill/contract";
-import type { SkillVO } from "busabase-contract/types";
+import type { ChangeRequestVO, SkillVO } from "busabase-contract/types";
 import type { z } from "zod";
 import type { CommitPO, NodePO, OperationPO } from "../../db/schema";
 import { registerMaterializer } from "../../logic/materialize";
@@ -37,7 +37,7 @@ export const skillFileTreeConfig = {
 } satisfies FileTreeKindConfig;
 
 export const createSkill = (input: z.input<typeof createSkillInputSchema>) =>
-  createFileTreeNode(skillFileTreeConfig, input) as Promise<SkillVO>;
+  createFileTreeNode(skillFileTreeConfig, input) as Promise<SkillVO | ChangeRequestVO>;
 
 export const getSkill = (nodeIdOrSlug: string): Promise<SkillVO> =>
   getFileTreeNode(skillFileTreeConfig, nodeIdOrSlug) as Promise<SkillVO>;

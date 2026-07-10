@@ -27,7 +27,13 @@ import { NodeDetailSkeleton } from "./skeletons";
  * request and approve-merges it (soft-archive → recoverable from Trash). Folders
  * warn about the cascade (their subtree is archived in one batch).
  */
-function NodeDeleteButton({
+/**
+ * Exported so `BaseDetailView` (base-views.tsx) can reuse the exact same
+ * delete-to-Trash flow for a Base's own node — `mergeNodeDelete` already
+ * special-cases `node.type === "base"` (archives the base + its records in
+ * lockstep), so this button works unchanged with `nodeType="base"`.
+ */
+export function NodeDeleteButton({
   orpc,
   nodeId,
   nodeType,
@@ -54,6 +60,7 @@ function NodeDeleteButton({
     folder: messages.nodeDetail.folder,
     drive: messages.nodeDetail.drive,
     skill: messages.nodeDetail.skill,
+    base: messages.nodeDetail.base,
   };
   const label = nodeTypeLabels[nodeType] ?? `${nodeType[0]?.toUpperCase()}${nodeType.slice(1)}`;
   const body =

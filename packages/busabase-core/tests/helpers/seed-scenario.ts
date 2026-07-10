@@ -8,6 +8,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { createRouterClient } from "@orpc/server";
+import type { BaseVO } from "busabase-contract/types";
 import { afterAll } from "vitest";
 import { getContextSpaceId, LOCAL_SPACE_ID, runWithBusabaseContext } from "../../src/context";
 import { getDb } from "../../src/db";
@@ -35,7 +36,22 @@ function buildClient(raw: RawClient) {
       list: () => raw.bases.list(),
       listArchived: () => raw.bases.listArchived(),
       get: (input: { baseId: string }) => raw.bases.get(input),
-      create: (input: Parameters<RawClient["bases"]["create"]>[0]) => raw.bases.create(input),
+      // Test convenience default: `createBase` is review-first by default in
+      // production (a pending ChangeRequest), but nearly every test in this
+      // suite immediately asserts on the materialized Base it just created —
+      // exactly like `mergeImmediately` below skips review for record/field/view
+      // CRs. Pass `autoMerge: false` explicitly to exercise the pending path
+      // (the return type here assumes the default `autoMerge: true`, so an
+      // explicit override needs its own cast at the call site).
+      create: async (input: Parameters<RawClient["bases"]["create"]>[0]): Promise<BaseVO> => {
+        const result = await raw.bases.create({ autoMerge: true, ...input });
+        if ("status" in result) {
+          throw new Error(
+            "seed-scenario bases.create: expected a materialized BaseVO — pass autoMerge: false explicitly and handle the ChangeRequestVO yourself if you need the pending path",
+          );
+        }
+        return result;
+      },
       createField: (input: Parameters<RawClient["bases"]["createField"]>[0]) =>
         raw.bases.createField(input),
       listViews: (input?: { baseId?: string }) => raw.bases.listViews(input ?? {}),

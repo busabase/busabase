@@ -244,6 +244,7 @@ describe("Assets + attachment dedup — oRPC integration", () => {
   describe("Where-Used (synced from Base record merges)", () => {
     it("records a usage when a record references the asset, and clears it on delete", async () => {
       const base = await client.bases.create({
+        autoMerge: true,
         slug: "assets-wu",
         name: "Where Used",
         fields: [
@@ -314,6 +315,7 @@ describe("Assets + attachment dedup — oRPC integration", () => {
       );
 
       const base = await client.bases.create({
+        autoMerge: true,
         slug: "legacy-attachment-ref",
         name: "Legacy Attachment Ref",
         fields: [
@@ -366,7 +368,12 @@ describe("Assets + attachment dedup — oRPC integration", () => {
         (await client.assets.list()).find((a) => a.contentHash === hashD),
       );
 
-      const doc = await client.docs.create({ slug: "wu-doc", name: "WU Doc", body: "# start" });
+      const doc = await client.docs.create({
+        autoMerge: true,
+        slug: "wu-doc",
+        name: "WU Doc",
+        body: "# start",
+      });
       const cr = await client.docs.createChangeRequest({
         nodeId: doc.node.id,
         body: `# Spec\n\n![diagram](${asset.url})\n`,
@@ -531,6 +538,7 @@ describe("Assets + attachment dedup — oRPC integration", () => {
       );
 
       const base = await client.bases.create({
+        autoMerge: true,
         slug: "del-guard",
         name: "Delete Guard",
         fields: [

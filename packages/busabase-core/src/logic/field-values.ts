@@ -5,9 +5,7 @@ import { getContextSpaceId } from "../context";
 import { getDb } from "../db";
 import {
   busabaseBaseFields,
-  busabaseCommits,
   busabaseFieldValues,
-  busabaseOperations,
   busabaseRecordLinks,
   busabaseRecords,
 } from "../db/schema";
@@ -103,7 +101,7 @@ export const projectCommitFields = async (input: {
         fieldId: field.id,
         fieldSlug,
         fieldType: field.type,
-        ...normalizeFieldValue(value),
+        ...normalizeFieldValue(value, field.type),
         createdAt: timestamp,
         updatedAt: timestamp,
       },
@@ -157,80 +155,9 @@ export const projectCommitFields = async (input: {
   }
 };
 
-export const projectCommitFieldsIfMissing = async (input: {
-  baseId: string;
-  commitId: string;
-  changeRequestId?: string | null;
-  operationId?: string | null;
-  recordId?: string | null;
-}) => {
-  const db = await getDb();
-  const projectionFilter = input.recordId
-    ? eq(busabaseFieldValues.recordId, input.recordId)
-    : input.operationId
-      ? eq(busabaseFieldValues.operationId, input.operationId)
-      : input.changeRequestId
-        ? eq(busabaseFieldValues.changeRequestId, input.changeRequestId)
-        : null;
-  if (!projectionFilter) {
-    return;
-  }
-
-  const existingProjection = await db
-    .select()
-    .from(busabaseFieldValues)
-    .where(projectionFilter)
-    .limit(1);
-  if (existingProjection.length > 0 && !input.recordId) {
-    return;
-  }
-
-  const [commit] = await db
-    .select()
-    .from(busabaseCommits)
-    .where(eq(busabaseCommits.id, input.commitId))
-    .limit(1);
-  if (!commit) {
-    return;
-  }
-
-  if (existingProjection.length > 0 && input.recordId) {
-    const relationFieldRows = await db
-      .select()
-      .from(busabaseBaseFields)
-      .where(
-        and(eq(busabaseBaseFields.baseId, input.baseId), eq(busabaseBaseFields.type, "relation")),
-      );
-    const hasRelationValue = relationFieldRows.some((field) => Boolean(commit.fields[field.slug]));
-    if (!hasRelationValue) {
-      return;
-    }
-  }
-
-  await projectCommitFields({ ...input, fields: commit.fields });
-};
-
-export const ensureProjectionBackfill = async () => {
-  const db = await getDb();
-  const operationKindRows = await db.select().from(busabaseOperations);
-  for (const item of operationKindRows) {
-    if (!item.baseId) {
-      continue;
-    }
-    await projectCommitFieldsIfMissing({
-      baseId: item.baseId,
-      commitId: item.headCommitId,
-      changeRequestId: item.changeRequestId,
-      operationId: item.id,
-    });
-  }
-
-  const recordRows = await db.select().from(busabaseRecords);
-  for (const record of recordRows) {
-    await projectCommitFieldsIfMissing({
-      baseId: record.baseId,
-      commitId: record.headCommitId,
-      recordId: record.id,
-    });
-  }
-};
+// NOTE: The projection backfill (ensureProjectionBackfill /
+// projectCommitFieldsIfMissing) was removed. Every write projects at write time
+// via projectCommitFields, and the seed (applySeedScenario) resolves its own
+// forward-reference relation links with a targeted re-projection of the records
+// it just wrote — so there is no need for a whole-space repair sweep, on the
+// request path or anywhere else.

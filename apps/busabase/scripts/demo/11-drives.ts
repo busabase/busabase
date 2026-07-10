@@ -79,6 +79,9 @@ export async function run() {
         drive = await api<DriveVO>("POST", "/drives", {
           ...def,
           ...(parentNodeId ? { parentNodeId } : {}),
+          // Smoke-testing the API surface, not the review-first policy — opt
+          // out the same way a seed script does.
+          autoMerge: true,
         });
       } catch {
         const list = await api<DriveVO[]>("GET", "/drives");

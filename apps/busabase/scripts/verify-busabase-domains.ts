@@ -26,6 +26,7 @@ import {
   createUpdateChangeRequest,
   createUpdateViewChangeRequest,
   createViewChangeRequest,
+  getBase,
   getRecord,
   listRecords,
   listViews,
@@ -64,12 +65,19 @@ const approveAndMerge = async (changeRequestId: string) => {
 
 async function main() {
   // --- base + record_create ------------------------------------------------
+  // autoMerge: true — this harness verifies the direct-write/materializer
+  // parity itself, not the review-first default; skip review to keep asserting
+  // on the materialized Base immediately, like it always did.
   const base = await createBase({
     slug: "verify-probe",
     name: "Verify Probe",
     description: "",
     fields: [{ slug: "title", name: "Title", type: "text", required: true, options: {} }],
+    autoMerge: true,
   });
+  if ("status" in base) {
+    throw new Error("Expected createBase({ autoMerge: true }) to return a materialized BaseVO");
+  }
   assert.equal(base.slug, "verify-probe", "base created");
   ok("base created");
 
@@ -183,6 +191,8 @@ async function main() {
   ok("node_create (skill) materializer merged");
 
   // --- skill create + skill_file_* + skill_metadata_update -----------------
+  // autoMerge: true — same rationale as the base above: this harness verifies
+  // the direct-write/materializer parity, not the review-first default.
   const skill = await createSkill({
     slug: "probe-skill",
     name: "Probe Skill",
@@ -190,7 +200,11 @@ async function main() {
     visibility: "private",
     version: "0.1.0",
     files: [],
+    autoMerge: true,
   });
+  if ("status" in skill) {
+    throw new Error("Expected createSkill({ autoMerge: true }) to return a materialized SkillVO");
+  }
   const skillNodeId = skill.node.id;
   ok("skill node created");
 
@@ -212,7 +226,17 @@ async function main() {
   ok("skill_file_create / update / metadata_update merged");
 
   // --- doc domain (stage 7 proof: new type by registration, zero migration) -
-  const doc = await createDoc({ slug: "probe-doc", name: "Probe Doc", body: "# Hello\n" });
+  // autoMerge: true — same rationale: verifying direct-write/materializer
+  // parity, not the review-first default.
+  const doc = await createDoc({
+    slug: "probe-doc",
+    name: "Probe Doc",
+    body: "# Hello\n",
+    autoMerge: true,
+  });
+  if ("status" in doc) {
+    throw new Error("Expected createDoc({ autoMerge: true }) to return a materialized DocVO");
+  }
   assert.match(doc.body, /Hello/, "doc created with body");
   assert.equal(doc.node.type, "doc", "doc node has type doc");
   ok("doc created");
@@ -244,6 +268,80 @@ async function main() {
   const materializedDoc = await getDoc("probe-node-doc");
   assert.match(materializedDoc.body, /Probe Node Doc/, "node_create doc materializer seeded body");
   ok("node_create (doc) materializer merged");
+
+  // --- review-first DEFAULT: createBase/createDoc/createSkill(createFileTreeNode)
+  // without `autoMerge` must propose a PENDING ChangeRequest, not materialize
+  // anything — the fix this harness exists to guard against a regression on.
+  const pendingBaseCr = await createBase({
+    slug: "review-first-probe-base",
+    name: "Review First Probe Base",
+    description: "",
+    fields: [{ slug: "title", name: "Title", type: "text", required: true, options: {} }],
+  });
+  if (!("status" in pendingBaseCr)) {
+    throw new Error("Expected createBase() with no autoMerge to return a pending ChangeRequestVO");
+  }
+  assert.equal(pendingBaseCr.status, "in_review", "createBase() defaults to a pending CR");
+  assert.equal(pendingBaseCr.node, null, "createBase() default path materializes nothing yet");
+  const baseBeforeMerge = await getBase("review-first-probe-base");
+  assert.equal(baseBeforeMerge, null, "the Base does not exist before the pending CR is merged");
+  await approveAndMerge(pendingBaseCr.id);
+  // A node_create ChangeRequest never backfills its own `.node` column (a
+  // pre-existing merge-engine characteristic, not something this fix changes —
+  // the same is true of the Dashboard's `nodes.createChangeRequest`), so
+  // materialization is confirmed by looking the Base up directly, same as the
+  // Doc/Skill checks below.
+  const mergedBase = await getBase("review-first-probe-base");
+  assert.ok(mergedBase, "approving + merging the pending CR materializes the Base");
+  ok("createBase() review-first default (pending CR → approve+merge materializes)");
+
+  const pendingDocCr = await createDoc({
+    slug: "review-first-probe-doc",
+    name: "Review First Probe Doc",
+    body: "# Custom initial body\n",
+  });
+  if (!("status" in pendingDocCr)) {
+    throw new Error("Expected createDoc() with no autoMerge to return a pending ChangeRequestVO");
+  }
+  assert.equal(pendingDocCr.status, "in_review", "createDoc() defaults to a pending CR");
+  assert.equal(pendingDocCr.node, null, "createDoc() default path materializes nothing yet");
+  await approveAndMerge(pendingDocCr.id);
+  const mergedDoc = await getDoc("review-first-probe-doc");
+  assert.match(
+    mergedDoc.body,
+    /Custom initial body/,
+    "merging the pending Doc CR carries the custom initial body through (not the synthesized default header)",
+  );
+  ok(
+    "createDoc() review-first default (pending CR carries custom body → approve+merge materializes)",
+  );
+
+  const pendingSkillCr = await createSkill({
+    slug: "review-first-probe-skill",
+    name: "Review First Probe Skill",
+    description: "",
+    visibility: "private",
+    version: "0.1.0",
+    files: [{ path: "notes.md", content: "custom initial file\n" }],
+  });
+  if (!("status" in pendingSkillCr)) {
+    throw new Error("Expected createSkill() with no autoMerge to return a pending ChangeRequestVO");
+  }
+  assert.equal(pendingSkillCr.status, "in_review", "createSkill() defaults to a pending CR");
+  assert.equal(pendingSkillCr.node, null, "createSkill() default path materializes nothing yet");
+  await approveAndMerge(pendingSkillCr.id);
+  const mergedSkill = await getSkill("review-first-probe-skill");
+  assert.ok(
+    mergedSkill.files.some((file) => file.path === "SKILL.md"),
+    "merging the pending Skill CR still seeds the default SKILL.md",
+  );
+  assert.ok(
+    mergedSkill.files.some((file) => file.path === "notes.md"),
+    "merging the pending Skill CR carries the custom initial file through (createFileTreeNode's initialFiles)",
+  );
+  ok(
+    "createSkill()/createFileTreeNode() review-first default (pending CR carries custom files → approve+merge materializes)",
+  );
 
   // --- record_delete (last; archives the record) ---------------------------
   const deleteCr = await createDeleteChangeRequest(recordId as string, {

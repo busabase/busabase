@@ -38,7 +38,12 @@ import { ArchivedBasesView } from "./components/archived-bases";
 import { AssetsView } from "./components/assets";
 import { BaseDetailView, BaseSetupView, BaseTopbarActions } from "./components/base-views";
 import { ChangeRequestDetailPage, ReviewConflictPanel } from "./components/change-request-review";
-import { getChangeRequestTitle, getOperationTitle, getRecordTitle } from "./helpers/change-request";
+import {
+  getChangeRequestReviewMessage,
+  getChangeRequestTitle,
+  getOperationTitle,
+  getRecordTitle,
+} from "./helpers/change-request";
 // Side-effect import: registers the skill/doc/folder node-detail renderers.
 import "./components/node-detail-views";
 import { BaseGraphView } from "./components/graph-view";
@@ -128,6 +133,7 @@ function BusabaseDashboardContent({
   apiClient,
   auditEvents: initialAuditEvents = [],
   changeRequests: initialChangeRequests,
+  currentUserId = null,
   emptyGuide,
   // `records` (SSR seed) is intentionally not consumed: the table now loads per
   // base via keyset pagination so rows reflect exactly what was fetched. The
@@ -263,6 +269,9 @@ function BusabaseDashboardContent({
     listKeys,
     orpc,
     queryClient,
+    currentUserId,
+    notificationTitle: messages.shell.changeRequestPendingReviewTitle,
+    notificationBody: messages.shell.changeRequestPendingReviewBody,
   });
   // Deleted fields scoped to the active base (for the Design tab).
   const deletedFieldsQuery = useQuery({
@@ -279,11 +288,38 @@ function BusabaseDashboardContent({
     enabled: Boolean(activeBase?.id && isBaseDetailRoute),
   });
   const archivedViewsForBase = archivedViewsQuery.data ?? [];
-  const archivedRecordsQuery = useQuery({
-    ...orpc.bases.listArchivedRecords.queryOptions({ input: { baseId: activeBase?.id ?? "" } }),
+  // Archived ("trash") records keyset-paginate too, so a Base with a large
+  // soft-deleted history doesn't load it all at once when the section expands.
+  const archivedRecordsInfiniteQuery = useInfiniteQuery({
+    ...orpc.bases.listArchivedRecordsPaged.infiniteOptions({
+      input: (pageParam: string | undefined) => ({
+        baseId: activeBase?.id ?? "",
+        cursor: pageParam,
+        limit: RECORDS_PAGE_SIZE,
+      }),
+      initialPageParam: undefined as string | undefined,
+      getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
+    }),
     enabled: Boolean(activeBase?.id && isBaseDetailRoute),
   });
-  const archivedRecordsForBase = archivedRecordsQuery.data ?? [];
+  const archivedRecordsForBase = useMemo(
+    () => archivedRecordsInfiniteQuery.data?.pages.flatMap((page) => page.records) ?? [],
+    [archivedRecordsInfiniteQuery.data],
+  );
+  const archivedRecordsPagination = useMemo(
+    () => ({
+      hasMore: archivedRecordsInfiniteQuery.hasNextPage,
+      isLoadingMore: archivedRecordsInfiniteQuery.isFetchingNextPage,
+      loadMore: () => {
+        void archivedRecordsInfiniteQuery.fetchNextPage();
+      },
+    }),
+    [
+      archivedRecordsInfiniteQuery.hasNextPage,
+      archivedRecordsInfiniteQuery.isFetchingNextPage,
+      archivedRecordsInfiniteQuery.fetchNextPage,
+    ],
+  );
   // Views are scoped to the active base (the oRPC endpoint is per-base).
   const viewsList = orpc.bases.listViews.queryOptions({
     input: { baseId: activeBase?.id ?? "" },
@@ -361,9 +397,15 @@ function BusabaseDashboardContent({
     [recordsInfiniteQuery.data],
   );
   // Whole-base total for the table header ("N of total"), decoupled from paging.
+  // `refetchInterval` is a low-frequency second line of defense alongside the
+  // live-sync SSE stream + focus/visibility refresh (use-live-sync.ts): if a
+  // merge lands from another tab/CLI/agent while this tab's SSE connection
+  // has gone silently stale and it never regains focus, this still converges
+  // within a minute instead of showing a stale count indefinitely.
   const recordCountQuery = useQuery({
     ...orpc.records.count.queryOptions({ input: { baseId: activeBase?.id ?? "" } }),
     enabled: Boolean(activeBase?.id),
+    refetchInterval: 60_000,
   });
   const recordsPagination = useMemo(
     () => ({
@@ -737,27 +779,46 @@ function BusabaseDashboardContent({
       action: "approve" | "reject" | "merge" | "close";
       changeRequestId: string;
       reason?: string;
-    }) => {
+    }): Promise<
+      | { action: "approve"; changeRequest: ChangeRequestVO }
+      | { action: "merge"; record: RecordVO | null }
+      | undefined
+    > => {
       if (variables.action === "approve") {
-        await client.approveChangeRequest(variables.changeRequestId, variables.reason);
-      } else if (variables.action === "reject") {
-        await client.rejectChangeRequest(variables.changeRequestId, variables.reason);
-      } else if (variables.action === "close") {
-        await client.closeChangeRequest(variables.changeRequestId, variables.reason);
-      } else {
-        return client.mergeChangeRequest(variables.changeRequestId);
+        const changeRequest = await client.approveChangeRequest(
+          variables.changeRequestId,
+          variables.reason,
+        );
+        return { action: "approve", changeRequest };
       }
+      if (variables.action === "reject") {
+        await client.rejectChangeRequest(variables.changeRequestId, variables.reason);
+        return undefined;
+      }
+      if (variables.action === "close") {
+        await client.closeChangeRequest(variables.changeRequestId, variables.reason);
+        return undefined;
+      }
+      const merged = await client.mergeChangeRequest(variables.changeRequestId);
+      return { action: "merge", record: merged.record };
     },
     onMutate: () => setError(null),
     onError: (mutationError) =>
       setError(
         mutationError instanceof Error ? mutationError.message : messages.shell.operationFailed,
       ),
-    onSuccess: (result, variables) => {
-      if (variables.action !== "merge") {
+    onSuccess: (result) => {
+      if (!result) {
         return;
       }
-      const record = result?.record;
+      if (result.action === "approve") {
+        // Approving used to leave the reviewer without any feedback beyond a
+        // silent background refresh — surface the same "ready to merge"
+        // status message the review panel itself shows.
+        toast.success(getChangeRequestReviewMessage(result.changeRequest, messages));
+        return;
+      }
+      const record = result.record;
       if (record) {
         setLocation(`/base/${record.base.slug}/${record.id}`);
       }
@@ -1106,6 +1167,21 @@ function BusabaseDashboardContent({
     [client, messages.base.nodeDeletedPermanently, orpc, queryClient],
   );
 
+  // Same `nodes.purge` endpoint as submitPurgeNode — a Base's `nodeId` (1:1
+  // with its `busabase_bases` row) is what purge actually targets, so this is
+  // the Trash "Bases" section's counterpart to the folders/docs/skills purge.
+  const submitPurgeBase = useCallback(
+    async (base: BaseVO) => {
+      setError(null);
+      await client.purgeNode(base.nodeId);
+      await queryClient.invalidateQueries({
+        queryKey: orpc.bases.listArchived.queryOptions({}).queryKey,
+      });
+      toast.success(fmt(messages.base.nodeDeletedPermanently, { type: "base" }));
+    },
+    [client, messages.base.nodeDeletedPermanently, orpc, queryClient],
+  );
+
   const submitRestoreField = useCallback(
     async (base: BaseVO, fieldId: string) => {
       setError(null);
@@ -1240,8 +1316,7 @@ function BusabaseDashboardContent({
       });
       await approveAndMergeChangeRequest(changeRequest.id);
       await queryClient.invalidateQueries({
-        queryKey: orpc.bases.listArchivedRecords.queryOptions({ input: { baseId: record.baseId } })
-          .queryKey,
+        queryKey: orpc.bases.listArchivedRecordsPaged.key(),
       });
       await refresh();
       toast.success(messages.recordView.recordRestored);
@@ -1381,14 +1456,7 @@ function BusabaseDashboardContent({
     }
 
     if (locationPath === "/activity") {
-      return (
-        <ActivityView
-          auditEvents={auditEvents}
-          changeRequests={allChangeRequests}
-          emptyGuide={emptyGuide}
-          records={records}
-        />
-      );
+      return <ActivityView orpc={orpc} emptyGuide={emptyGuide} />;
     }
 
     if (locationPath === "/assets" || locationPath.startsWith("/assets/")) {
@@ -1412,6 +1480,7 @@ function BusabaseDashboardContent({
         <ArchivedBasesView
           archivedBases={archivedBases}
           archivedNodes={archivedNodes}
+          onPurgeBase={submitPurgeBase}
           onPurgeNode={submitPurgeNode}
           onRestoreBase={submitRestoreBase}
           onRestoreNode={submitRestoreNode}
@@ -1429,6 +1498,7 @@ function BusabaseDashboardContent({
           base={activeBase}
           bases={bases}
           deletedFields={deletedFields}
+          orpc={orpc}
           onCreateField={submitCreateBaseField}
           onRenameBase={submitRenameBase}
           onRestoreField={submitRestoreField}
@@ -1496,8 +1566,10 @@ function BusabaseDashboardContent({
           activeView={selectedBaseView}
           archivedViews={archivedViewsForBase}
           archivedRecords={archivedRecordsForBase}
+          archivedPagination={archivedRecordsPagination}
           records={records}
           orderedRecords={serverSortedView ? baseRecords : undefined}
+          orpc={orpc}
           pagination={recordsPagination}
           base={activeBase}
           onCreateView={submitCreateView}
@@ -1545,7 +1617,6 @@ function BusabaseDashboardContent({
     approveChangeRequest,
     closeChangeRequest,
     auditEvents,
-    allChangeRequests,
     bases,
     basesQuery.isLoading,
     client,
@@ -1589,6 +1660,7 @@ function BusabaseDashboardContent({
     submitRestoreBase,
     submitRestoreNode,
     submitPurgeNode,
+    submitPurgeBase,
     submitRestoreField,
     submitRestoreView,
     submitRestoreRecord,
@@ -1601,6 +1673,7 @@ function BusabaseDashboardContent({
     archivedNodes,
     archivedViewsForBase,
     archivedRecordsForBase,
+    archivedRecordsPagination,
     deletedFields,
     isArchivedRoute,
     selectedBaseSlug,

@@ -1,4 +1,4 @@
-import type { AuditEventVO, ChangeRequestVO, RecordVO } from "busabase-contract/types";
+import type { ActivityItemVO, AuditEventVO } from "busabase-contract/types";
 import { type CoreI18nMessages, fmt } from "../../../i18n";
 import {
   getChangeRequestScopeName,
@@ -64,60 +64,61 @@ export const getLocalizedAuditEventTitle = (event: AuditEventVO, messages: CoreI
   return messages.activity.changeRequestMerged;
 };
 
-export const buildActivityEvents = (
-  changeRequests: ChangeRequestVO[],
-  records: RecordVO[],
-  auditEvents: AuditEventVO[],
+/**
+ * Format ONE server-paginated activity descriptor into a renderable ActivityEvent
+ * (title / body / href), applying i18n on the client. The server (activity.listPaged)
+ * merges + paginates the four event sources; this only renders a single item, so
+ * the whole change-request / record / audit tables never reach the browser.
+ * Returns null for an operation whose parent CR didn't carry it (shouldn't happen).
+ */
+export const buildActivityEventFromItem = (
+  item: ActivityItemVO,
   messages?: CoreI18nMessages,
-) => {
-  const changeRequestEvents = changeRequests.flatMap((changeRequest): ActivityEvent[] => {
-    const baseEvents: ActivityEvent[] = [
-      {
-        body: `${getChangeRequestSummary(changeRequest, messages)} · ${getChangeRequestScopeName(changeRequest, messages)}`,
-        href: `/inbox/${changeRequest.id}`,
-        id: `changeRequest:${changeRequest.id}:updated`,
-        timestamp: changeRequest.updatedAt,
-        title:
-          changeRequest.status === "merged"
-            ? fmt(messages?.activity.changeRequestMergedTitle ?? "Change request merged: {title}", {
+): ActivityEvent | null => {
+  if (item.kind === "change_request") {
+    const changeRequest = item.changeRequest;
+    return {
+      body: `${getChangeRequestSummary(changeRequest, messages)} · ${getChangeRequestScopeName(changeRequest, messages)}`,
+      href: `/inbox/${changeRequest.id}`,
+      id: `changeRequest:${changeRequest.id}:updated`,
+      timestamp: item.timestamp,
+      title:
+        changeRequest.status === "merged"
+          ? fmt(messages?.activity.changeRequestMergedTitle ?? "Change request merged: {title}", {
+              title: getChangeRequestTitle(changeRequest, messages),
+            })
+          : changeRequest.status === "approved"
+            ? fmt(
+                messages?.activity.changeRequestApprovedTitle ?? "Change request approved: {title}",
+                { title: getChangeRequestTitle(changeRequest, messages) },
+              )
+            : fmt(messages?.activity.changeRequestOpenedTitle ?? "Change request opened: {title}", {
                 title: getChangeRequestTitle(changeRequest, messages),
-              })
-            : changeRequest.status === "approved"
-              ? fmt(
-                  messages?.activity.changeRequestApprovedTitle ??
-                    "Change request approved: {title}",
-                  { title: getChangeRequestTitle(changeRequest, messages) },
-                )
-              : fmt(
-                  messages?.activity.changeRequestOpenedTitle ?? "Change request opened: {title}",
-                  {
-                    title: getChangeRequestTitle(changeRequest, messages),
-                  },
-                ),
-        tone: "change_request",
-      },
-    ];
+              }),
+      tone: "change_request",
+    };
+  }
 
-    const operationEvents = changeRequest.operations.map(
-      (operation): ActivityEvent => ({
-        body: `${getOperationLabel(operation, messages)} · ${getOperationImpact(operation, messages)} · ${fmt(messages?.activity.commitRef ?? "commit {id}", { id: shortIdentifier(operation.headCommitId) })}`,
-        href: `/inbox/${changeRequest.id}/${operation.id}`,
-        id: `operation:${operation.id}`,
-        timestamp: operation.updatedAt,
-        title: getOperationTitle(operation, changeRequest.base, messages),
-        tone: operation.status === "pending" ? "operation" : "commit",
-      }),
-    );
+  if (item.kind === "operation") {
+    const operation = item.changeRequest.operations.find((op) => op.id === item.operationId);
+    if (!operation) return null;
+    return {
+      body: `${getOperationLabel(operation, messages)} · ${getOperationImpact(operation, messages)} · ${fmt(messages?.activity.commitRef ?? "commit {id}", { id: shortIdentifier(operation.headCommitId) })}`,
+      href: `/inbox/${item.changeRequest.id}/${operation.id}`,
+      id: `operation:${operation.id}`,
+      timestamp: item.timestamp,
+      title: getOperationTitle(operation, item.changeRequest.base, messages),
+      tone: operation.status === "pending" ? "operation" : "commit",
+    };
+  }
 
-    return [...baseEvents, ...operationEvents];
-  });
-
-  const recordEvents = records.map(
-    (record): ActivityEvent => ({
+  if (item.kind === "record") {
+    const record = item.record;
+    return {
       body: `${record.base.name} · ${fmt(messages?.activity.headCommit ?? "head commit {id}", { id: shortIdentifier(record.headCommitId) })}`,
       href: `/base/${record.base.slug}/${record.id}`,
       id: `record:${record.id}`,
-      timestamp: record.updatedAt,
+      timestamp: item.timestamp,
       title:
         record.status === "archived"
           ? fmt(messages?.activity.recordArchivedTitle ?? "Record archived: {title}", {
@@ -127,27 +128,20 @@ export const buildActivityEvents = (
               title: getRecordTitle(record, messages),
             }),
       tone: "record",
-    }),
-  );
+    };
+  }
 
-  // O(1) record lookup instead of records.find() per audit event (was O(audit × records)).
-  const recordsById = new Map(records.map((record) => [record.id, record]));
-  const auditActivityEvents = auditEvents.map(
-    (event): ActivityEvent => ({
-      body: `${formatUserRefLabel(event.actor, event.actorId, messages)} · ${event.action}`,
-      href: event.recordId
-        ? `/base/${recordsById.get(event.recordId)?.base.slug ?? "unknown"}/${event.recordId}`
-        : event.changeRequestId
-          ? `/inbox/${event.changeRequestId}`
-          : "/activity",
-      id: `audit:${event.id}`,
-      timestamp: event.createdAt,
-      title: messages ? getLocalizedAuditEventTitle(event, messages) : getAuditEventTitle(event),
-      tone: "audit",
-    }),
-  );
-
-  return [...changeRequestEvents, ...recordEvents, ...auditActivityEvents].sort(
-    (first, second) => new Date(second.timestamp).getTime() - new Date(first.timestamp).getTime(),
-  );
+  const event = item.auditEvent;
+  return {
+    body: `${formatUserRefLabel(event.actor, event.actorId, messages)} · ${event.action}`,
+    href: event.recordId
+      ? `/base/${item.record?.base.slug ?? "unknown"}/${event.recordId}`
+      : event.changeRequestId
+        ? `/inbox/${event.changeRequestId}`
+        : "/activity",
+    id: `audit:${event.id}`,
+    timestamp: item.timestamp,
+    title: messages ? getLocalizedAuditEventTitle(event, messages) : getAuditEventTitle(event),
+    tone: "audit",
+  };
 };

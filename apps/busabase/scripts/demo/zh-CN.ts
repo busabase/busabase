@@ -123,6 +123,9 @@ export async function run() {
         description: base.description ?? "",
         ...(parentNodeId ? { parentNodeId } : {}),
         fields,
+        // Smoke-testing the API surface, not the review-first policy — opt out
+        // the same way a seed script does.
+        autoMerge: true,
       });
       baseIdMap.set(base.id, created.id);
     });

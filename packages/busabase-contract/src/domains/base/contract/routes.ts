@@ -27,6 +27,7 @@ import {
   countRecordsResponseSchema,
   createBulkChangeRequestInputSchema,
   createChangeRequestInputSchema,
+  listArchivedRecordsPagedInputSchema,
   listRecordsInputSchema,
   listRecordsResponseSchema,
   recordFieldFilterInputSchema,
@@ -112,16 +113,28 @@ export const baseContract = {
     })
     .input(z.object({ baseId: z.string() }))
     .output(z.array(recordSchema)),
+  listArchivedRecordsPaged: oc
+    .route({
+      method: "GET",
+      path: "/bases/{baseId}/records/archived/paged",
+      tags: ["Records"],
+      summary: "List archived records for a Base with keyset pagination",
+      successDescription:
+        "A page of archived (soft-deleted) records plus an opaque nextCursor (null at the end).",
+    })
+    .input(listArchivedRecordsPagedInputSchema)
+    .output(listRecordsResponseSchema),
   create: oc
     .route({
       method: "POST",
       path: "/bases",
       tags: ["Bases"],
       summary: "Create Base",
-      successDescription: "Created Base.",
+      successDescription:
+        "Review-first by default: a pending ChangeRequest proposing the Base. Returns the materialized Base instead when `autoMerge: true` is passed.",
     })
     .input(createBaseInputSchema)
-    .output(baseSchema),
+    .output(z.union([baseSchema, changeRequestSchema])),
   createChangeRequest: oc
     .route({
       method: "POST",

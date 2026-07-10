@@ -41,6 +41,7 @@ describe("Filter push-down parity — oRPC integration", () => {
         { slug: "score", name: "Score", type: "number", required: false, options: {} },
         { slug: "active", name: "Active", type: "checkbox", required: false, options: {} },
       ],
+      autoMerge: true,
     });
     baseId = base.id;
 

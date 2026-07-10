@@ -65,7 +65,9 @@ describe("Boundary P2 — oRPC", () => {
         type: f.type ?? "text",
         required: f.required ?? false,
       })),
+      autoMerge: true,
     });
+    if ("status" in base) throw new Error("Expected materialized BaseVO");
     return base;
   };
 
@@ -160,7 +162,9 @@ describe("Boundary P2 — oRPC", () => {
           options: { targetBaseId: baseB.id },
         },
       ],
+      autoMerge: true,
     });
+    if ("status" in baseA) throw new Error("Expected materialized BaseVO");
     const targetRecordId = await createRecord(baseB.id, { title: "target" });
 
     const archiveCr = await client.bases.archiveChangeRequest({ baseId: baseB.id });

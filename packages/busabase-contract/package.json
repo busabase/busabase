@@ -21,6 +21,10 @@
       "types": "./src/contract/schemas.ts",
       "default": "./src/contract/schemas.ts"
     },
+    "./contract/activity-schemas": {
+      "types": "./src/contract/activity-schemas.ts",
+      "default": "./src/contract/activity-schemas.ts"
+    },
     "./types": {
       "types": "./src/types/index.ts",
       "default": "./src/types/index.ts"

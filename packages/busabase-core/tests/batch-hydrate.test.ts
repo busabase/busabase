@@ -37,12 +37,14 @@ describe("Batch hydrate — per-item relation isolation", () => {
     client = createRouterClient(busabaseRouter);
 
     const baseA = await client.bases.create({
+      autoMerge: true,
       slug: "alpha",
       name: "Alpha",
       fields: [{ slug: "name", name: "Name", type: "text", required: true, options: {} }],
     });
     baseAId = baseA.id;
     const baseB = await client.bases.create({
+      autoMerge: true,
       slug: "beta",
       name: "Beta",
       fields: [{ slug: "title", name: "Title", type: "text", required: true, options: {} }],

@@ -9,6 +9,7 @@ import { fileRouter } from "./domains/file-node/router";
 import { folderRouter } from "./domains/folder/router";
 import { skillRouter } from "./domains/skill/router";
 import { vaultRouter } from "./domains/vault/router";
+import { listActivityPaged } from "./logic/activity";
 import { subscribeBusabaseLiveEvents } from "./logic/live-events";
 import {
   closeChangeRequest,
@@ -54,6 +55,9 @@ export const busabaseRouter = busabase.router({
   auditEvents: {
     list: busabase.auditEvents.list.handler(async ({ input }) => listAuditEvents(input)),
     create: busabase.auditEvents.create.handler(async ({ input }) => createAuditEvent(input)),
+  },
+  activity: {
+    listPaged: busabase.activity.listPaged.handler(async ({ input }) => listActivityPaged(input)),
   },
   comments: {
     list: busabase.comments.list.handler(async ({ input }) => listComments(input)),

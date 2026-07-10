@@ -1,3 +1,4 @@
+import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";
 import type { BaseFieldVO, BaseVO, FieldType, RecordVO, ViewVO } from "busabase-contract/types";
 import { Pencil, RotateCcw } from "lucide-react";
 import { type iString, iStringIsEmpty, iStringParse, iStringTrim } from "openlib/i18n/i-string";
@@ -14,6 +15,7 @@ import type {
 } from "../helpers/view-types";
 import { applyViewConfigToRecords, BusaBaseTable } from "./base-table";
 import { IStringNameInput } from "./i-string-input";
+import { NodeDeleteButton } from "./node-detail-views";
 import { EmptyState, PropertyRow, SidebarPanel } from "./primitives";
 import { SplitSubmitButton } from "./split-submit-button";
 
@@ -21,8 +23,10 @@ export function BaseDetailView({
   activeView,
   archivedViews = [],
   archivedRecords = [],
+  archivedPagination,
   records,
   orderedRecords,
+  orpc,
   pagination,
   base,
   onCreateView,
@@ -35,6 +39,7 @@ export function BaseDetailView({
   activeView: ViewVO | null;
   archivedViews?: ViewVO[];
   archivedRecords?: RecordVO[];
+  archivedPagination?: { hasMore: boolean; isLoadingMore: boolean; loadMore: () => void };
   records: RecordVO[];
   /**
    * When the active view's sort was pushed to the server, these are the rows in
@@ -42,6 +47,8 @@ export function BaseDetailView({
    * paging shows correct order without loading the whole base.
    */
   orderedRecords?: RecordVO[];
+  /** Wired through to the header's delete-to-Trash button (NodeDeleteButton). */
+  orpc: BusabaseQueryUtils;
   pagination?: RecordsPagination;
   base: BaseVO | null;
   onCreateView: (
@@ -73,12 +80,13 @@ export function BaseDetailView({
   return (
     <div className="min-h-0 flex-1 overflow-auto">
       <section>
-        <BaseDetailHeader base={base} />
+        <BaseDetailHeader base={base} orpc={orpc} />
         <div className="px-6 py-5">
           <BusaBaseTable
             activeView={activeView}
             archivedViews={baseArchivedViews}
             archivedRecords={baseArchivedRecords}
+            archivedPagination={archivedPagination}
             base={base}
             onCreateView={onCreateView}
             onDeleteView={onDeleteView}
@@ -100,6 +108,7 @@ export function BaseSetupView({
   base,
   bases,
   deletedFields = [],
+  orpc,
   onCreateField,
   onRenameBase,
   onRestoreField,
@@ -108,6 +117,8 @@ export function BaseSetupView({
   base: BaseVO | null;
   bases: BaseVO[];
   deletedFields?: BaseFieldVO[];
+  /** Wired through to the header's delete-to-Trash button (NodeDeleteButton). */
+  orpc: BusabaseQueryUtils;
   onCreateField: (
     base: BaseVO,
     payload: CreateBaseFieldPayload,
@@ -272,7 +283,7 @@ export function BaseSetupView({
   return (
     <div className="min-h-0 flex-1 overflow-auto">
       <section>
-        <BaseDetailHeader base={base} />
+        <BaseDetailHeader base={base} orpc={orpc} />
         <div className="grid gap-6 px-6 py-4 xl:grid-cols-[minmax(0,1fr)_280px]">
           <div className="min-w-0 space-y-6">
             <div>
@@ -683,14 +694,23 @@ export function BaseSetupView({
   );
 }
 
-function BaseDetailHeader({ base }: { base: BaseVO | null }) {
+function BaseDetailHeader({ base, orpc }: { base: BaseVO | null; orpc: BusabaseQueryUtils }) {
   const messages = useCoreI18n();
   return (
     <div className="px-6 pt-5 pb-2">
-      <div className="min-w-0">
-        <h1 className="truncate font-semibold text-base">{base?.name ?? messages.nav.base}</h1>
-        {base?.description ? (
-          <p className="mt-1 truncate text-muted-foreground text-xs">{base.description}</p>
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <h1 className="truncate font-semibold text-base">{base?.name ?? messages.nav.base}</h1>
+          {base?.description ? (
+            <p className="mt-1 truncate text-muted-foreground text-xs">{base.description}</p>
+          ) : null}
+        </div>
+        {/* Archive-to-Trash entry point for the Base itself — previously the
+            detail page had no delete/archive action at all (only field/view/
+            record actions existed). `mergeNodeDelete` already special-cases
+            `node.type === "base"`, so the shared NodeDeleteButton works as-is. */}
+        {base ? (
+          <NodeDeleteButton nodeId={base.nodeId} nodeName={base.name} nodeType="base" orpc={orpc} />
         ) : null}
       </div>
     </div>

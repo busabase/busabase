@@ -131,12 +131,20 @@ export const mergeBaseRestore = async (ctx: MergeCtx, item: OperationPO, _headCo
       spaceId: busabaseBases.spaceId,
       nodeId: busabaseBases.nodeId,
       archivedAt: busabaseBases.archivedAt,
+      deletedAt: busabaseBases.deletedAt,
     })
     .from(busabaseBases)
     .where(eq(busabaseBases.id, baseId))
     .limit(1);
   if (!target) {
     throw new Error(`base_restore target not found: ${baseId}`);
+  }
+  // Defense in depth (the merge-time gate in cr-lifecycle already blocks this):
+  // a permanently deleted base can never come back.
+  if (target.deletedAt) {
+    throw new ORPCError("CONFLICT", {
+      message: "Cannot restore: this base was permanently deleted.",
+    });
   }
   // Restore-after-reuse: if a new active base grabbed this slug while it was
   // archived, restoring would collide on the (now partial) unique index. Fail

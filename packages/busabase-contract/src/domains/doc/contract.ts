@@ -19,6 +19,11 @@ export const createDocInputSchema = z.object({
   name: z.string().min(1),
   description: z.string().optional().default(""),
   body: z.string().optional().default(""),
+  // Review-first by default: without `autoMerge: true`, this proposes the Doc
+  // as a pending ChangeRequest (status "in_review") instead of creating it
+  // immediately. Pass `autoMerge: true` only for callers that don't need human
+  // review (seed/migration scripts, an explicit no-review agent task).
+  autoMerge: z.boolean().optional().default(false),
 });
 
 export const updateDocInputSchema = z.object({
@@ -54,10 +59,11 @@ export const docContract = {
       path: "/docs",
       tags: ["Docs"],
       summary: "Create Doc node",
-      successDescription: "Created Doc node and initialized its body.",
+      successDescription:
+        "Review-first by default: a pending ChangeRequest proposing the Doc. Returns the materialized Doc node instead when `autoMerge: true` is passed.",
     })
     .input(createDocInputSchema)
-    .output(docSchema),
+    .output(z.union([docSchema, changeRequestSchema])),
   get: oc
     .route({
       method: "GET",

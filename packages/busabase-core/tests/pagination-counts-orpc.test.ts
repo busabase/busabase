@@ -35,6 +35,7 @@ describe("Pagination & counts — oRPC integration", () => {
       slug: "contacts",
       name: "Contacts",
       fields: [{ slug: "name", name: "Name", type: "text", required: true, options: {} }],
+      autoMerge: true,
     });
     baseId = base.id;
   });

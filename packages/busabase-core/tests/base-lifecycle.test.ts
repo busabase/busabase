@@ -87,7 +87,9 @@ describe("Base-domain DB lifecycle — oRPC", () => {
           { slug: "title", name: "Title", type: "text", required: true },
           { slug: "owner", name: "Owner", type: "text" },
         ],
+        autoMerge: true,
       });
+      if ("status" in created) throw new Error("Expected materialized BaseVO");
 
       expect(created.slug).toBe("lc-projects");
       expect(created.fields.map((f) => f.slug)).toEqual(["title", "owner"]);
@@ -103,12 +105,16 @@ describe("Base-domain DB lifecycle — oRPC", () => {
         slug: "lc-dup",
         name: "Dup One",
         fields: [{ slug: "title", name: "Title", type: "text" }],
+        autoMerge: true,
       });
+      if ("status" in first) throw new Error("Expected materialized BaseVO");
       const second = await client.bases.create({
         slug: "lc-dup",
         name: "Dup Two — should be ignored",
         fields: [{ slug: "other", name: "Other", type: "text" }],
+        autoMerge: true,
       });
+      if ("status" in second) throw new Error("Expected materialized BaseVO");
 
       expect(second.id).toBe(first.id);
       expect(second.name).toBe("Dup One");
@@ -134,7 +140,9 @@ describe("Base-domain DB lifecycle — oRPC", () => {
         slug: "lc-fields",
         name: "Fields",
         fields: [{ slug: "title", name: "Title", type: "text", required: true }],
+        autoMerge: true,
       });
+      if ("status" in base) throw new Error("Expected materialized BaseVO");
       const updated = await client.bases.createField({
         baseId: base.id,
         slug: "status",

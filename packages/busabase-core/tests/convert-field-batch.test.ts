@@ -49,6 +49,7 @@ describe("mergeBaseConvertField — batched commit rewrite keeps values per-reco
         { slug: "title", name: "Title", type: "text", required: true, options: {} },
         { slug: "category", name: "Category", type: "text", required: false, options: {} },
       ],
+      autoMerge: true,
     });
     baseId = base.id;
     categoryFieldId = base.fields.find((field) => field.slug === "category")?.id ?? "";

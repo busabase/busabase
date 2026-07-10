@@ -57,6 +57,7 @@ export const coreMessagesEn = {
     file: "File",
     doc: "Doc",
     folder: "Folder",
+    base: "Base",
     files: "Files",
     visibility: "Visibility",
     version: "Version",
@@ -128,6 +129,8 @@ export const coreMessagesEn = {
     routeNotFoundBody: "Open Inbox, Activity, or a Base from the sidebar.",
     operationFailed: "Operation failed",
     mergeRecordMissing: "Merged change request did not return a record",
+    changeRequestPendingReviewTitle: "New change request",
+    changeRequestPendingReviewBody: "A new change request is waiting for your review.",
   },
   routes: {
     inbox: "Inbox",
@@ -162,6 +165,9 @@ export const coreMessagesEn = {
     batchApproveMerge: "Approve & merge",
     batchReject: "Reject",
     batchResult: "{ok} done, {failed} failed",
+    loadFailedTitle: "Couldn't load",
+    loadFailedBody: "Something went wrong loading these change requests.",
+    retry: "Retry",
   },
   activity: {
     audit: "audit",

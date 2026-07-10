@@ -87,6 +87,7 @@ describe("Agent Skills API — oRPC integration", () => {
 
   it("lists created skills with their Asset-backed file trees", async () => {
     await client.skills.create({
+      autoMerge: true,
       slug: "ai-research-editor",
       name: "AI Research Editor",
       description: "Reviews agent research drafts for source quality before publishing.",
@@ -105,6 +106,7 @@ describe("Agent Skills API — oRPC integration", () => {
 
   it("creates a skill, seeding default SKILL.md + skill.json when none are supplied", async () => {
     const created = await client.skills.create({
+      autoMerge: true,
       slug: "launch-writer",
       name: "Launch Writer",
       description: "Drafts launch posts with a review checklist.",
@@ -127,6 +129,7 @@ describe("Agent Skills API — oRPC integration", () => {
 
   it("honours caller-supplied SKILL.md / skill.json instead of the defaults", async () => {
     const created = await client.skills.create({
+      autoMerge: true,
       slug: "custom-entry",
       name: "Custom Entry",
       visibility: "workspace",
@@ -147,14 +150,23 @@ describe("Agent Skills API — oRPC integration", () => {
   });
 
   it("is idempotent on slug — re-creating returns the existing skill", async () => {
-    const first = await client.skills.create({ slug: "dedup-skill", name: "Dedup Skill" });
-    const second = await client.skills.create({ slug: "dedup-skill", name: "Different Name" });
+    const first = await client.skills.create({
+      autoMerge: true,
+      slug: "dedup-skill",
+      name: "Dedup Skill",
+    });
+    const second = await client.skills.create({
+      autoMerge: true,
+      slug: "dedup-skill",
+      name: "Different Name",
+    });
     expect(second.node.id).toBe(first.node.id);
   });
 
   it("rejects creation under a missing / non-folder parent", async () => {
     await expect(
       client.skills.create({
+        autoMerge: true,
         slug: "orphan-skill",
         name: "Orphan",
         parentNodeId: "pnd_does_not_exist",
@@ -163,7 +175,11 @@ describe("Agent Skills API — oRPC integration", () => {
   });
 
   it("gets a skill by node id and by slug, and 404s an unknown one", async () => {
-    const created = await client.skills.create({ slug: "gettable", name: "Gettable" });
+    const created = await client.skills.create({
+      autoMerge: true,
+      slug: "gettable",
+      name: "Gettable",
+    });
     const byId = await client.skills.get({ nodeId: created.node.id });
     const bySlug = await client.skills.get({ nodeId: "gettable" });
     expect(byId.node.id).toBe(created.node.id);
@@ -173,7 +189,7 @@ describe("Agent Skills API — oRPC integration", () => {
   });
 
   it("lists files and reads a file, 404ing unknown skills", async () => {
-    const created = await client.skills.create({ slug: "filey", name: "Filey" });
+    const created = await client.skills.create({ autoMerge: true, slug: "filey", name: "Filey" });
     const files = await client.skills.listFiles({ nodeId: created.node.id });
     expect(files.some((file) => file.path === "SKILL.md")).toBe(true);
 
@@ -186,7 +202,11 @@ describe("Agent Skills API — oRPC integration", () => {
   });
 
   it("creates a skill change request and merges a file update", async () => {
-    const skill = await client.skills.create({ slug: "cr-update", name: "CR Update" });
+    const skill = await client.skills.create({
+      autoMerge: true,
+      slug: "cr-update",
+      name: "CR Update",
+    });
     const current = await client.skills.readFile({ nodeId: skill.node.id, filePath: "SKILL.md" });
 
     const changeRequest = await client.skills.createChangeRequest({
@@ -218,6 +238,7 @@ describe("Agent Skills API — oRPC integration", () => {
       contentHash: `sha256:${"e".repeat(64)}`,
     });
     const skill = await client.skills.create({
+      autoMerge: true,
       slug: "asset-file-skill",
       name: "Asset File Skill",
     });
@@ -281,6 +302,7 @@ describe("Agent Skills API — oRPC integration", () => {
       contentHash: `sha256:${"f".repeat(64)}`,
     });
     const skill = await ok("POST", "/skills", {
+      autoMerge: true,
       slug: "openapi-asset-file-skill",
       name: "OpenAPI Asset File Skill",
     });
@@ -320,7 +342,11 @@ describe("Agent Skills API — oRPC integration", () => {
   });
 
   it("merges create + delete file operations", async () => {
-    const skill = await client.skills.create({ slug: "cr-files", name: "CR Files" });
+    const skill = await client.skills.create({
+      autoMerge: true,
+      slug: "cr-files",
+      name: "CR Files",
+    });
 
     const createCr = await client.skills.createChangeRequest({
       nodeId: skill.node.id,
@@ -348,7 +374,11 @@ describe("Agent Skills API — oRPC integration", () => {
   });
 
   it("merges a metadata_update operation", async () => {
-    const skill = await client.skills.create({ slug: "cr-meta", name: "CR Meta" });
+    const skill = await client.skills.create({
+      autoMerge: true,
+      slug: "cr-meta",
+      name: "CR Meta",
+    });
     const metaCr = await client.skills.createChangeRequest({
       nodeId: skill.node.id,
       operations: [
@@ -364,7 +394,11 @@ describe("Agent Skills API — oRPC integration", () => {
   });
 
   it("blocks a stale file merge when baseContentHash no longer matches", async () => {
-    const skill = await client.skills.create({ slug: "cr-stale", name: "CR Stale" });
+    const skill = await client.skills.create({
+      autoMerge: true,
+      slug: "cr-stale",
+      name: "CR Stale",
+    });
     const staleCr = await client.skills.createChangeRequest({
       nodeId: skill.node.id,
       operations: [

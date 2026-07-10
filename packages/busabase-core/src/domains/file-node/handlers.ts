@@ -2,7 +2,7 @@ import "server-only";
 
 import { ORPCError } from "@orpc/server";
 import { createFileNodeInputSchema } from "busabase-contract/domains/file-node/contract";
-import type { FileNodeVO, NodeVO } from "busabase-contract/types";
+import type { ChangeRequestVO, FileNodeVO, NodeVO } from "busabase-contract/types";
 import { and, asc, eq, isNull } from "drizzle-orm";
 import type { z } from "zod";
 import { getContextSpaceId, resolveActorId } from "../../context";
@@ -11,7 +11,13 @@ import { busabaseAssetUsages, busabaseNodes, type NodePO } from "../../db/schema
 import { CURRENT_USER_ID, id, now, rootNodeIdForSpace } from "../../logic/kernel";
 import { type MaterializeArgs, registerMaterializer } from "../../logic/materialize";
 import { ensureReady } from "../../logic/seed";
-import { loadNodesByIds, type MergeCtx, recordMergedNodeCreate, toNodeVO } from "../../logic/store";
+import {
+  loadNodesByIds,
+  type MergeCtx,
+  recordMergedNodeCreate,
+  recordPendingNodeCreate,
+  toNodeVO,
+} from "../../logic/store";
 import { resolveAssetFile } from "../assets/handlers";
 
 const getString = (value: unknown) => (typeof value === "string" ? value : null);
@@ -109,7 +115,7 @@ const toFileNodeVO = async (node: NodePO): Promise<FileNodeVO> => {
 
 export const createFileNode = async (
   input: z.input<typeof createFileNodeInputSchema>,
-): Promise<FileNodeVO> => {
+): Promise<FileNodeVO | ChangeRequestVO> => {
   await ensureReady();
   const db = await getDb();
   const parsed = createFileNodeInputSchema.parse(input);
@@ -126,6 +132,23 @@ export const createFileNode = async (
     .limit(1);
   if (!parentNode || parentNode.type !== "folder") {
     throw new Error(`Parent folder not found: ${parentNodeId}`);
+  }
+
+  // Review-first by default: propose the File node as a pending node_create
+  // ChangeRequest instead of materializing it immediately. Callers that don't
+  // need human review (seed/migration scripts, an explicit no-review agent
+  // task) pass `autoMerge: true` to keep today's instant-create behavior.
+  if (!parsed.autoMerge) {
+    return recordPendingNodeCreate({
+      nodeType: "file",
+      slug: parsed.slug,
+      name: parsed.name,
+      description: parsed.description,
+      parentNodeId: parentNode.id,
+      metadata: { assetId: asset.id },
+      message: `Create file ${parsed.name}`,
+      submittedBy: resolveActorId(CURRENT_USER_ID),
+    });
   }
 
   const nodeId = id("nod");

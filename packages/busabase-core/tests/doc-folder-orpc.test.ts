@@ -46,6 +46,7 @@ describe("Doc & Folder domains — oRPC integration", () => {
 
   it("creates a doc with a seeded body and lists it", async () => {
     const doc = await client.docs.create({
+      autoMerge: true,
       slug: "runbook",
       name: "Runbook",
       body: "# Runbook\n\nStep one.\n",
@@ -59,22 +60,32 @@ describe("Doc & Folder domains — oRPC integration", () => {
   });
 
   it("is idempotent on slug — a second create returns the existing doc", async () => {
-    const first = await client.docs.create({ slug: "policy", name: "Policy", body: "v1\n" });
-    const again = await client.docs.create({ slug: "policy", name: "Policy (dupe)", body: "v2\n" });
+    const first = await client.docs.create({
+      autoMerge: true,
+      slug: "policy",
+      name: "Policy",
+      body: "v1\n",
+    });
+    const again = await client.docs.create({
+      autoMerge: true,
+      slug: "policy",
+      name: "Policy (dupe)",
+      body: "v2\n",
+    });
     expect(again.node.id).toBe(first.node.id);
     // Body is not overwritten by the idempotent re-create.
     expect(again.body).toBe("v1\n");
   });
 
   it("gets a doc by slug and rejects an unknown one", async () => {
-    await client.docs.create({ slug: "faq", name: "FAQ", body: "Q&A\n" });
+    await client.docs.create({ autoMerge: true, slug: "faq", name: "FAQ", body: "Q&A\n" });
     const doc = await client.docs.get({ nodeId: "faq" });
     expect(doc.body).toContain("Q&A");
     await expect(client.docs.get({ nodeId: "does-not-exist" })).rejects.toThrow();
   });
 
   it("runs the approval-first doc edit: change request → review → merge writes the body", async () => {
-    await client.docs.create({ slug: "guide", name: "Guide", body: "draft\n" });
+    await client.docs.create({ autoMerge: true, slug: "guide", name: "Guide", body: "draft\n" });
 
     const cr = await client.docs.createChangeRequest({
       nodeId: "guide",
@@ -96,7 +107,12 @@ describe("Doc & Folder domains — oRPC integration", () => {
   it("lists folders and resolves a folder's children, rejecting an unknown folder", async () => {
     // A doc with no explicit parent attaches to the space root folder, so at least
     // one folder always exists and the doc shows up among its children.
-    await client.docs.create({ slug: "nested-note", name: "Nested Note", body: "hi\n" });
+    await client.docs.create({
+      autoMerge: true,
+      slug: "nested-note",
+      name: "Nested Note",
+      body: "hi\n",
+    });
 
     const folders = await client.folders.list();
     expect(folders.length).toBeGreaterThan(0);

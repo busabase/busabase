@@ -95,7 +95,10 @@ export interface BusabaseDashboardApiClient {
       type?: BaseVO["fields"][number]["type"];
       required?: boolean;
     }>;
-  }) => Promise<BaseVO>;
+    // Review-first by default: without `autoMerge: true`, returns a pending
+    // ChangeRequestVO instead of the materialized BaseVO.
+    autoMerge?: boolean;
+  }) => Promise<BaseVO | ChangeRequestVO>;
   createNodeChangeRequest: (payload: {
     message?: string;
     submittedBy?: string;

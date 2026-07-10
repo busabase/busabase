@@ -56,6 +56,9 @@ export async function run() {
           name: def.name,
           description: def.description,
           body: def.body,
+          // Smoke-testing the API surface, not the review-first policy — opt
+          // out the same way a seed script does.
+          autoMerge: true,
         });
       } catch {
         doc = await api<DocVO>("GET", `/docs/${def.slug}`);

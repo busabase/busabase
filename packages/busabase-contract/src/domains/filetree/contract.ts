@@ -81,6 +81,11 @@ export const createFileTreeInputSchema = z.object({
     .array(z.union([assetFileInputSchema, textFileInputSchema]))
     .optional()
     .default([]),
+  // Review-first by default: without `autoMerge: true`, this proposes the node
+  // as a pending ChangeRequest (status "in_review") instead of creating it
+  // immediately. Pass `autoMerge: true` only for callers that don't need human
+  // review (seed/migration scripts, an explicit no-review agent task).
+  autoMerge: z.boolean().optional().default(false),
 });
 
 export const fileTreeFileOperationInputSchema = z.union([
@@ -138,10 +143,10 @@ export const makeFileTreeContract = (routeBase: string, tag: string) => {
         path: basePath,
         tags: [tag],
         summary: `Create ${label} node`,
-        successDescription: `Created ${label} node and initialized file tree.`,
+        successDescription: `Review-first by default: a pending ChangeRequest proposing the ${label} node. Returns the materialized ${label} node instead when \`autoMerge: true\` is passed.`,
       })
       .input(createFileTreeInputSchema)
-      .output(fileTreeNodeSchema),
+      .output(z.union([fileTreeNodeSchema, changeRequestSchema])),
     get: oc
       .route({
         method: "GET",

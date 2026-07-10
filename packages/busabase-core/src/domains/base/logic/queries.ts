@@ -2,6 +2,7 @@ import "server-only";
 
 import {
   countRecordsInputSchema,
+  listArchivedRecordsPagedInputSchema,
   listRecordsInputSchema,
 } from "busabase-contract/domains/base/contract/record-schemas";
 import {
@@ -68,8 +69,11 @@ export const getBase = async (baseId: string) => {
   const spaceId = getContextSpaceId();
   // Slug resolution prefers the ACTIVE base: after slug reuse an archived base
   // and a new active base can share a slug, and navigating to /base/<slug>
-  // must land on the live one. (The id fallback below stays unfiltered so an
-  // archived base is still reachable by id for the restore / notice flows.)
+  // must land on the live one. (The id fallback below stays unfiltered on
+  // archivedAt so an archived-but-not-purged base is still reachable by id for
+  // the restore / notice flows — but a permanently deleted one is excluded:
+  // once purged there is no restore flow left, so it must resolve to "not
+  // found" like everything else that's been purged.)
   const [base] = await db
     .select()
     .from(busabaseBases)
@@ -86,7 +90,13 @@ export const getBase = async (baseId: string) => {
     : await db
         .select()
         .from(busabaseBases)
-        .where(and(eq(busabaseBases.id, baseId), eq(busabaseBases.spaceId, spaceId)))
+        .where(
+          and(
+            eq(busabaseBases.id, baseId),
+            eq(busabaseBases.spaceId, spaceId),
+            isNull(busabaseBases.deletedAt),
+          ),
+        )
         .limit(1);
   if (!baseById) {
     return null;
@@ -484,7 +494,15 @@ export const listArchivedBases = async () => {
   const baseRows = await db
     .select()
     .from(busabaseBases)
-    .where(and(eq(busabaseBases.spaceId, spaceId), isNotNull(busabaseBases.archivedAt)))
+    .where(
+      and(
+        eq(busabaseBases.spaceId, spaceId),
+        isNotNull(busabaseBases.archivedAt),
+        // Permanently-deleted bases leave the Trash for good — they're excluded
+        // here the same way a purged folder/doc/skill leaves listArchivedNodes.
+        isNull(busabaseBases.deletedAt),
+      ),
+    )
     .orderBy(asc(busabaseBases.createdAt));
   const fieldRows = await db
     .select()
@@ -545,4 +563,45 @@ export const listArchivedRecords = async (baseId: string) => {
     .where(and(eq(busabaseRecords.baseId, resolvedBase.id), eq(busabaseRecords.status, "archived")))
     .orderBy(desc(busabaseRecords.createdAt));
   return hydrateRecords(recordRows);
+};
+
+// Keyset-paginated archived records — same (createdAt, id) cursor as the active
+// table, so the "trash" section never loads the whole soft-deleted history.
+export const listArchivedRecordsPaged = async (
+  input: z.input<typeof listArchivedRecordsPagedInputSchema>,
+) => {
+  await ensureReady();
+  const db = await getDb();
+  const parsed = listArchivedRecordsPagedInputSchema.parse(input);
+  const resolvedBase = await getBase(parsed.baseId);
+  if (!resolvedBase) {
+    return { records: [], nextCursor: null };
+  }
+  const filters: SQL[] = [
+    eq(busabaseRecords.baseId, resolvedBase.id),
+    eq(busabaseRecords.status, "archived"),
+  ];
+  if (parsed.cursor) {
+    const decoded = decodeRecordCursor(parsed.cursor);
+    if (decoded) {
+      filters.push(
+        or(
+          lt(busabaseRecords.createdAt, decoded.createdAt),
+          and(eq(busabaseRecords.createdAt, decoded.createdAt), lt(busabaseRecords.id, decoded.id)),
+        ) as SQL,
+      );
+    }
+  }
+  const rows = await db
+    .select()
+    .from(busabaseRecords)
+    .where(and(...filters))
+    .orderBy(desc(busabaseRecords.createdAt), desc(busabaseRecords.id))
+    .limit(parsed.limit + 1);
+  const hasMore = rows.length > parsed.limit;
+  const pageRows = hasMore ? rows.slice(0, parsed.limit) : rows;
+  const last = pageRows[pageRows.length - 1];
+  const nextCursor = hasMore && last ? encodeRecordCursor(last.createdAt, last.id) : null;
+  const records = await hydrateRecords(pageRows);
+  return { records, nextCursor };
 };

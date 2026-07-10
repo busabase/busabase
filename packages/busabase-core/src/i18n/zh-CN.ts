@@ -52,6 +52,7 @@ export const dashboardZhCN: CoreI18nMessages = {
     file: "文件",
     doc: "文档",
     folder: "文件夹",
+    base: "数据库",
     files: "文件",
     visibility: "可见性",
     version: "版本",
@@ -123,6 +124,8 @@ export const dashboardZhCN: CoreI18nMessages = {
     routeNotFoundBody: "请从侧边栏打开收件箱、动态或数据库。",
     operationFailed: "操作失败",
     mergeRecordMissing: "已合并的变更请求没有返回记录",
+    changeRequestPendingReviewTitle: "新的变更请求",
+    changeRequestPendingReviewBody: "有新的变更请求等待你审核。",
   },
   routes: {
     inbox: "收件箱",
@@ -157,6 +160,9 @@ export const dashboardZhCN: CoreI18nMessages = {
     batchApproveMerge: "批量通过并合并",
     batchReject: "批量拒绝",
     batchResult: "成功 {ok} 项，失败 {failed} 项",
+    loadFailedTitle: "加载失败",
+    loadFailedBody: "加载这些变更请求时出错了。",
+    retry: "重试",
   },
   activity: {
     audit: "审计",

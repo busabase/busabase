@@ -49,7 +49,13 @@ describe("Boundary P13 — folder delete keeps Base table in lockstep", () => {
     const folder = findInTree(await raw.nodes.list(), "proj");
     expect(folder).toBeTruthy();
 
-    const base = await raw.bases.create({ name: "B", slug: "b-proj", parentNodeId: folder?.id });
+    const base = await raw.bases.create({
+      name: "B",
+      slug: "b-proj",
+      parentNodeId: folder?.id,
+      autoMerge: true,
+    });
+    if ("status" in base) throw new Error("Expected materialized BaseVO");
     await client.records.createChangeRequest({
       baseId: base.id,
       fields: { title: "R1" },

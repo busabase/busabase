@@ -91,6 +91,7 @@ describe("multilingual field names — end-to-end", () => {
         { slug: "title", name: "Title", type: "text", required: true },
         { slug: "company", name: COMPANY_NAME, type: "text" },
       ],
+      autoMerge: true,
     });
     const company = base.fields.find((field) => field.slug === "company");
     expect(company?.name).toEqual(COMPANY_NAME);
@@ -104,6 +105,7 @@ describe("multilingual field names — end-to-end", () => {
       slug: "iname-add",
       name: "iName Add",
       fields: [{ slug: "title", name: "Title", type: "text", required: true }],
+      autoMerge: true,
     });
     const updated = await client.bases.createField({
       baseId: base.id,
@@ -124,6 +126,7 @@ describe("multilingual field names — end-to-end", () => {
         { slug: "title", name: "Title", type: "text", required: true },
         { slug: "stage", name: "Stage", type: "text" },
       ],
+      autoMerge: true,
     });
     const stage = base.fields.find((field) => field.slug === "stage");
     expect(stage).toBeDefined();

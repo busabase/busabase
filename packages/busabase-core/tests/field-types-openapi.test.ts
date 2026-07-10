@@ -144,6 +144,7 @@ describe("Base field types — OpenAPI (/api/v1) route round-trip", () => {
       slug: "ftapi-related",
       name: "Related",
       fields: [{ slug: "title", name: "Title", type: "text", required: true }],
+      autoMerge: true,
     });
     const relCr = await ok("POST", `/bases/${related.id}/change-requests`, {
       fields: { title: "linked" },
@@ -198,6 +199,7 @@ describe("Base field types — OpenAPI (/api/v1) route round-trip", () => {
         { slug: "updated_by", name: "Editor", type: "updated_by" },
         { slug: "seq", name: "Seq", type: "auto_number" },
       ],
+      autoMerge: true,
     });
     baseId = base.id;
   });

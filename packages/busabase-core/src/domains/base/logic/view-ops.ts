@@ -14,6 +14,7 @@ import {
 import { insertAuditEvent } from "../../../logic/audit";
 import { getChangeRequest } from "../../../logic/cr-lifecycle";
 import { id, now } from "../../../logic/kernel";
+import { publishChangeRequestPendingReview } from "../../../logic/live-events";
 import { ensureReady } from "../../../logic/seed";
 import {
   createViewInputSchema,
@@ -121,6 +122,12 @@ export const createViewChangeRequest = async (
     operationId,
     metadata: { operation: "view_create", viewSlug: parsed.slug },
   });
+  await publishChangeRequestPendingReview({
+    spaceId: getContextSpaceId(),
+    baseId: base.id,
+    changeRequestId,
+    submittedBy: resolveActorId(parsed.submittedBy),
+  });
 
   const changeRequest = await getChangeRequest(changeRequestId);
   if (!changeRequest) {
@@ -212,6 +219,12 @@ export const createUpdateViewChangeRequest = async (
     commitId,
     operationId,
     metadata: { operation: "view_update", viewId: view.id },
+  });
+  await publishChangeRequestPendingReview({
+    spaceId: getContextSpaceId(),
+    baseId: view.baseId,
+    changeRequestId,
+    submittedBy: resolveActorId(parsed.submittedBy),
   });
 
   const changeRequest = await getChangeRequest(changeRequestId);
@@ -305,6 +318,12 @@ export const createDeleteViewChangeRequest = async (
     commitId,
     operationId,
     metadata: { operation: "view_delete", viewId: view.id },
+  });
+  await publishChangeRequestPendingReview({
+    spaceId: getContextSpaceId(),
+    baseId: view.baseId,
+    changeRequestId,
+    submittedBy: resolveActorId(parsed.submittedBy),
   });
 
   const changeRequest = await getChangeRequest(changeRequestId);
@@ -401,6 +420,12 @@ export const createRestoreViewChangeRequest = async (
     commitId,
     operationId,
     metadata: { operation: "view_restore", viewId: view.id },
+  });
+  await publishChangeRequestPendingReview({
+    spaceId: getContextSpaceId(),
+    baseId: view.baseId,
+    changeRequestId,
+    submittedBy: resolveActorId(parsed.submittedBy),
   });
 
   const changeRequest = await getChangeRequest(changeRequestId);

@@ -34,6 +34,7 @@ describe("Batch review & merge — oRPC integration", () => {
       slug: "posts",
       name: "Posts",
       fields: [{ slug: "title", name: "Title", type: "text", required: true, options: {} }],
+      autoMerge: true,
     });
     baseId = base.id;
   });

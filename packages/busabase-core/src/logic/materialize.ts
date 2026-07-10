@@ -1,4 +1,5 @@
 import type { FieldType } from "busabase-contract/types";
+import type { iString } from "openlib/i18n/i-string";
 import type { NodePO } from "../db/schema";
 import type { MergeCtx } from "./store";
 
@@ -30,10 +31,35 @@ export interface NodeCreateFields {
   metadata?: Record<string, unknown>;
   fields?: Array<{
     slug: string;
-    name: string;
+    // i18n-capable, matching the contract's fieldNameSchema (a plain string or a
+    // locale-keyed record) — the same shape `nodeOperationInputSchema`'s "create"
+    // variant already sends through this exact field for the Dashboard's
+    // generic node_create path.
+    name: iString;
     type?: FieldType;
     required?: boolean;
     options?: Record<string, unknown>;
+  }>;
+  /**
+   * Doc-only: initial body carried through a pending review — set only by
+   * `createDoc`'s review-first path (the Dashboard's generic node_create flow
+   * never sends one, so `materializeDocNode` falls back to a synthesized
+   * default header). Not persisted onto the node row itself.
+   */
+  body?: string;
+  /**
+   * Drive/Skill-only: initial file-tree files carried through a pending review
+   * — set only by `createFileTreeNode`'s review-first path. Materialized with
+   * the same `upsertFileAssetAtPath` the direct-write path uses, applied at
+   * merge time instead of immediately, so nothing touches storage until the
+   * change request is approved.
+   */
+  initialFiles?: Array<{
+    path: string;
+    content?: string;
+    assetId?: string;
+    displayName?: string;
+    mimeType?: string;
   }>;
 }
 

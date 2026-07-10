@@ -4,7 +4,7 @@ import type {
   createDriveChangeRequestInputSchema,
   createDriveInputSchema,
 } from "busabase-contract/domains/drive/contract";
-import type { DriveVO } from "busabase-contract/types";
+import type { ChangeRequestVO, DriveVO } from "busabase-contract/types";
 import type { z } from "zod";
 import { registerMaterializer } from "../../logic/materialize";
 import {
@@ -19,7 +19,7 @@ import {
 import { driveFileTreeConfig } from "./logic/config";
 
 export const createDrive = (input: z.input<typeof createDriveInputSchema>) =>
-  createFileTreeNode(driveFileTreeConfig, input) as Promise<DriveVO>;
+  createFileTreeNode(driveFileTreeConfig, input) as Promise<DriveVO | ChangeRequestVO>;
 
 export const getDrive = (nodeIdOrSlug: string): Promise<DriveVO> =>
   getFileTreeNode(driveFileTreeConfig, nodeIdOrSlug) as Promise<DriveVO>;

@@ -2,7 +2,7 @@ CREATE TYPE "public"."busabase_change_request_status" AS ENUM('in_review', 'chan
 CREATE TYPE "public"."busabase_comment_subject" AS ENUM('record', 'change_request', 'operation', 'commit');--> statement-breakpoint
 CREATE TYPE "public"."busabase_operation_kind" AS ENUM('record_create', 'record_update', 'record_delete', 'record_variant', 'view_create', 'view_update', 'view_delete', 'view_restore', 'node_create', 'node_rename', 'node_delete', 'node_restore', 'node_move', 'skill_file_create', 'skill_file_update', 'skill_file_delete', 'skill_metadata_update', 'drive_file_create', 'drive_file_update', 'drive_file_delete', 'drive_metadata_update', 'doc_update', 'base_add_field', 'base_delete_field', 'base_update_field', 'base_convert_field', 'base_reorder_fields', 'base_restore_field', 'base_archive', 'base_restore', 'record_restore');--> statement-breakpoint
 CREATE TYPE "public"."busabase_review_verdict" AS ENUM('approved', 'rejected');--> statement-breakpoint
-CREATE TYPE "public"."busabase_field_type" AS ENUM('text', 'longtext', 'markdown', 'html', 'attachment', 'relation', 'number', 'date', 'checkbox', 'select', 'multiselect', 'url', 'email', 'phone', 'created_time', 'updated_time', 'created_by', 'updated_by', 'auto_number', 'ai_summary', 'ai_tags', 'code', 'json', 'yaml');--> statement-breakpoint
+CREATE TYPE "public"."busabase_field_type" AS ENUM('text', 'longtext', 'markdown', 'html', 'attachment', 'relation', 'number', 'date', 'checkbox', 'select', 'multiselect', 'url', 'embed', 'email', 'phone', 'created_time', 'updated_time', 'created_by', 'updated_by', 'auto_number', 'ai_summary', 'ai_tags', 'code', 'json', 'yaml');--> statement-breakpoint
 CREATE TABLE "busabase_audit_events" (
 	"id" text PRIMARY KEY NOT NULL,
 	"space_id" text NOT NULL,
@@ -77,6 +77,7 @@ CREATE TABLE "busabase_nodes" (
 	"metadata" jsonb DEFAULT '{}'::jsonb NOT NULL,
 	"position" integer DEFAULT 0 NOT NULL,
 	"archived_at" timestamp,
+	"deleted_at" timestamp,
 	"created_at" timestamp DEFAULT now() NOT NULL,
 	"updated_at" timestamp DEFAULT now() NOT NULL
 );
@@ -180,7 +181,8 @@ CREATE TABLE "busabase_bases" (
 	"description" text DEFAULT '' NOT NULL,
 	"review_policy" jsonb DEFAULT '{"kind":"single","requiredApprovals":1}'::jsonb NOT NULL,
 	"created_at" timestamp DEFAULT now() NOT NULL,
-	"archived_at" timestamp
+	"archived_at" timestamp,
+	"deleted_at" timestamp
 );
 --> statement-breakpoint
 CREATE TABLE "busabase_field_values" (
@@ -251,9 +253,18 @@ CREATE TABLE "busabase_views" (
 	"updated_at" timestamp DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
-CREATE TABLE "busabase_user_env_vars" (
-	"user_id" text PRIMARY KEY NOT NULL,
-	"env_payload" jsonb NOT NULL,
+CREATE TABLE "busabase_vault_items" (
+	"id" text PRIMARY KEY NOT NULL,
+	"user_id" text NOT NULL,
+	"kind" text NOT NULL,
+	"key" text NOT NULL,
+	"value_payload" jsonb NOT NULL,
+	"scope_type" text DEFAULT 'personal' NOT NULL,
+	"scope_id" text,
+	"environment" text DEFAULT 'local' NOT NULL,
+	"description" text DEFAULT '' NOT NULL,
+	"access" jsonb DEFAULT '{"runtime":true,"reveal":true,"edit":true,"share":false}'::jsonb NOT NULL,
+	"last_used_at" timestamp,
 	"created_at" timestamp DEFAULT now() NOT NULL,
 	"updated_at" timestamp DEFAULT now() NOT NULL
 );
@@ -352,4 +363,7 @@ CREATE INDEX "busabase_records_base_created_idx" ON "busabase_records" USING btr
 CREATE INDEX "busabase_records_status_created_idx" ON "busabase_records" USING btree ("status","created_at");--> statement-breakpoint
 CREATE INDEX "busabase_records_head_commit_idx" ON "busabase_records" USING btree ("head_commit_id");--> statement-breakpoint
 CREATE UNIQUE INDEX "busabase_views_base_slug_uniq" ON "busabase_views" USING btree ("base_id","slug") WHERE "busabase_views"."archived_at" IS NULL;--> statement-breakpoint
-CREATE INDEX "busabase_views_base_status_position_idx" ON "busabase_views" USING btree ("base_id","status","created_at");
+CREATE INDEX "busabase_views_base_status_position_idx" ON "busabase_views" USING btree ("base_id","status","created_at");--> statement-breakpoint
+CREATE INDEX "busabase_vault_items_user_updated_idx" ON "busabase_vault_items" USING btree ("user_id","updated_at");--> statement-breakpoint
+CREATE INDEX "busabase_vault_items_user_kind_idx" ON "busabase_vault_items" USING btree ("user_id","kind");--> statement-breakpoint
+CREATE INDEX "busabase_vault_items_user_key_idx" ON "busabase_vault_items" USING btree ("user_id","key");

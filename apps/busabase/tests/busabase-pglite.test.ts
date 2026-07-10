@@ -79,13 +79,18 @@ describe("busabase pglite integration flow", () => {
     expect(Array.isArray(mergedNodeIds) ? mergedNodeIds : []).toHaveLength(1);
     const agentSkillsFolderId = String(Array.isArray(mergedNodeIds) ? mergedNodeIds[0] : "");
 
-    const skill = await skills.createSkill({
+    const skillResult = await skills.createSkill({
       description: "Drafts launch announcements with a consistent review checklist.",
       files: [{ content: "Tone: concise and evidence-led.\n", path: "references/tone.md" }],
       name: "Launch Writer",
       parentNodeId: agentSkillsFolderId,
       slug: "launch-writer",
+      autoMerge: true,
     });
+    if ("status" in skillResult) {
+      throw new Error("Expected createSkill({ autoMerge: true }) to return a materialized SkillVO");
+    }
+    const skill = skillResult;
     expect(skill.node.type).toBe("skill");
     expect(skill.files.some((file) => file.path === "SKILL.md")).toBe(true);
     expect(skill.files.some((file) => file.path === "references/tone.md")).toBe(true);

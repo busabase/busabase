@@ -60,6 +60,16 @@ export const listRecordsResponseSchema = z.object({
   nextCursor: z.string().nullable(),
 });
 
+// Archived ("trash") records for one Base, keyset-paginated the same way as the
+// active table (createdAt-keyed cursor) so the archived section never loads the
+// whole soft-deleted history at once. Reuses listRecordsResponseSchema.
+export const listArchivedRecordsPagedInputSchema = z.object({
+  baseId: z.string(),
+  limit: z.coerce.number().int().min(1).max(100).optional().default(50),
+  /** Opaque base64 cursor (createdAt-keyed) for keyset pagination. */
+  cursor: z.string().optional(),
+});
+
 export const countRecordsInputSchema = z
   .object({
     baseId: z.string().optional(),

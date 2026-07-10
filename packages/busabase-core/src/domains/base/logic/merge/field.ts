@@ -1,6 +1,6 @@
 import "server-only";
 
-import { and, eq, inArray, isNull, ne } from "drizzle-orm";
+import { and, asc, eq, gt, inArray, isNull, ne } from "drizzle-orm";
 import { type iString, iStringToText } from "openlib/i18n/i-string";
 import { getContextSpaceId } from "../../../../context";
 import type { BaseFieldPO, CommitPO, OperationPO } from "../../../../db/schema";
@@ -149,36 +149,50 @@ export const mergeBaseUpdateField = async (
       const { busabaseFieldValues } = await import("../../../../db/schema");
       const { busabaseRecords } = await import("../../../../db/schema");
       const { isEmptyFieldValue } = await import("../../field-types");
-      // Active records in this base.
-      const activeRecords = await db
-        .select({ id: busabaseRecords.id })
-        .from(busabaseRecords)
-        .where(
-          and(
-            eq(busabaseRecords.baseId, currentField.baseId),
-            eq(busabaseRecords.status, "active"),
-          ),
-        );
-      const valueRows = await db
-        .select()
-        .from(busabaseFieldValues)
-        .where(
-          and(
-            eq(busabaseFieldValues.fieldId, fieldData.fieldId),
-            isNull(busabaseFieldValues.deletedAt),
-            isNull(busabaseFieldValues.changeRequestId),
-          ),
-        );
-      const valueByRecord = new Map(valueRows.map((row) => [row.recordId, row]));
+      // Scan active records in bounded id-keyset chunks (loading each chunk's
+      // values via inArray) instead of the whole base + whole column at once.
+      const GUARD_SCAN_CHUNK = 500;
       const offending: string[] = [];
-      for (const record of activeRecords) {
-        const row = valueByRecord.get(record.id);
-        const raw = row
-          ? (row.valueJson ?? row.valueText ?? row.valueNumber ?? row.valueBool ?? null)
-          : null;
-        if (isEmptyFieldValue(raw)) {
-          offending.push(record.id);
+      let cursor = "";
+      for (;;) {
+        const recordChunk = await db
+          .select({ id: busabaseRecords.id })
+          .from(busabaseRecords)
+          .where(
+            and(
+              eq(busabaseRecords.baseId, currentField.baseId),
+              eq(busabaseRecords.status, "active"),
+              gt(busabaseRecords.id, cursor),
+            ),
+          )
+          .orderBy(asc(busabaseRecords.id))
+          .limit(GUARD_SCAN_CHUNK);
+        if (recordChunk.length === 0) break;
+        const recordIds = recordChunk.map((record) => record.id);
+        const valueRows = await db
+          .select()
+          .from(busabaseFieldValues)
+          .where(
+            and(
+              eq(busabaseFieldValues.fieldId, fieldData.fieldId),
+              isNull(busabaseFieldValues.deletedAt),
+              isNull(busabaseFieldValues.changeRequestId),
+              inArray(busabaseFieldValues.recordId, recordIds),
+            ),
+          );
+        const valueByRecord = new Map(valueRows.map((row) => [row.recordId, row]));
+        for (const record of recordChunk) {
+          const row = valueByRecord.get(record.id);
+          const raw = row
+            ? (row.valueJson ?? row.valueText ?? row.valueNumber ?? row.valueBool ?? null)
+            : null;
+          if (isEmptyFieldValue(raw)) {
+            offending.push(record.id);
+          }
         }
+        const last = recordChunk[recordChunk.length - 1];
+        if (!last || recordChunk.length < GUARD_SCAN_CHUNK) break;
+        cursor = last.id;
       }
       if (offending.length > 0) {
         throw new ORPCError("BAD_REQUEST", {
@@ -210,31 +224,45 @@ export const mergeBaseUpdateField = async (
       if (removed.length > 0) {
         const { busabaseFieldValues } = await import("../../../../db/schema");
         const { busabaseRecords } = await import("../../../../db/schema");
-        const valueRows = await db
-          .select({
-            recordId: busabaseFieldValues.recordId,
-            valueJson: busabaseFieldValues.valueJson,
-            valueText: busabaseFieldValues.valueText,
-            status: busabaseRecords.status,
-          })
-          .from(busabaseFieldValues)
-          .innerJoin(busabaseRecords, eq(busabaseFieldValues.recordId, busabaseRecords.id))
-          .where(
-            and(
-              eq(busabaseFieldValues.fieldId, fieldData.fieldId),
-              isNull(busabaseFieldValues.deletedAt),
-              isNull(busabaseFieldValues.changeRequestId),
-            ),
-          );
+        // Scan the projected values in bounded id-keyset chunks rather than the
+        // whole column at once.
+        const GUARD_SCAN_CHUNK = 500;
         const removedSet = new Set(removed);
         const affected = new Set<string>();
-        for (const row of valueRows) {
-          if (row.status !== "active" || !row.recordId) continue;
-          const raw = row.valueJson ?? row.valueText ?? null;
-          const ids = Array.isArray(raw) ? raw : raw == null ? [] : [raw];
-          if (ids.some((cid) => typeof cid === "string" && removedSet.has(cid))) {
-            affected.add(row.recordId);
+        let cursor = "";
+        for (;;) {
+          const valueRows = await db
+            .select({
+              id: busabaseFieldValues.id,
+              recordId: busabaseFieldValues.recordId,
+              valueJson: busabaseFieldValues.valueJson,
+              valueText: busabaseFieldValues.valueText,
+              status: busabaseRecords.status,
+            })
+            .from(busabaseFieldValues)
+            .innerJoin(busabaseRecords, eq(busabaseFieldValues.recordId, busabaseRecords.id))
+            .where(
+              and(
+                eq(busabaseFieldValues.fieldId, fieldData.fieldId),
+                isNull(busabaseFieldValues.deletedAt),
+                isNull(busabaseFieldValues.changeRequestId),
+                gt(busabaseFieldValues.id, cursor),
+              ),
+            )
+            .orderBy(asc(busabaseFieldValues.id))
+            .limit(GUARD_SCAN_CHUNK);
+          if (valueRows.length === 0) break;
+          for (const row of valueRows) {
+            if (row.status !== "active" || !row.recordId) continue;
+            const raw = row.valueJson ?? row.valueText ?? null;
+            const ids = Array.isArray(raw) ? raw : raw == null ? [] : [raw];
+            if (ids.some((cid) => typeof cid === "string" && removedSet.has(cid))) {
+              affected.add(row.recordId);
+            }
           }
+          const last = valueRows[valueRows.length - 1];
+          if (!last || valueRows.length < GUARD_SCAN_CHUNK) break;
+          cursor = last.id;
         }
         if (affected.size > 0) {
           throw new ORPCError("BAD_REQUEST", {
@@ -304,18 +332,25 @@ export const mergeBaseConvertField = async (
     .limit(1);
   const fieldSlug = fieldRow?.slug ?? fieldData.slug ?? null;
 
-  // Load record-level values for this field
-  const valueRows = await db
-    .select()
-    .from(busabaseFieldValues)
-    .where(
-      and(
-        eq(busabaseFieldValues.fieldId, fieldData.fieldId),
-        isNull(busabaseFieldValues.changeRequestId),
-      ),
-    );
+  // Field-value scan is chunked (id keyset) so converting a field on a large base
+  // never loads the whole column — nor holds every converted value — in memory.
+  const CONVERT_SCAN_CHUNK = 500;
+  const valueScopeFilter = and(
+    eq(busabaseFieldValues.fieldId, fieldData.fieldId),
+    isNull(busabaseFieldValues.changeRequestId),
+  );
+  const scanChunk = (cursor: string) =>
+    db
+      .select()
+      .from(busabaseFieldValues)
+      .where(and(valueScopeFilter, gt(busabaseFieldValues.id, cursor)))
+      .orderBy(asc(busabaseFieldValues.id))
+      .limit(CONVERT_SCAN_CHUNK);
 
-  // Compute new choices for auto_create mode
+  // Pass 1 (auto_create only): collect one choice per distinct value across the
+  // WHOLE column, scanned in bounded chunks. Choice ids follow discovery order
+  // (now deterministic by id); each value still resolves to its own choice by
+  // name in the conversion below, so the mapping is unchanged.
   let newChoices = fieldData.choices ?? [];
   if (
     (fieldData.newType === "select" || fieldData.newType === "multiselect") &&
@@ -323,14 +358,22 @@ export const mergeBaseConvertField = async (
   ) {
     const existingNames = new Set(newChoices.map((c) => c.name));
     const extra: typeof newChoices = [];
-    for (const row of valueRows) {
-      const raw = row.valueJson ?? row.valueText ?? row.valueNumber ?? row.valueBool ?? null;
-      if (raw === null || raw === undefined) continue;
-      const text = typeof raw === "string" ? raw : String(raw);
-      if (text && !existingNames.has(text)) {
-        existingNames.add(text);
-        extra.push({ id: `auto_${extra.length + newChoices.length}`, name: text });
+    let cursor = "";
+    for (;;) {
+      const chunk = await scanChunk(cursor);
+      if (chunk.length === 0) break;
+      for (const row of chunk) {
+        const raw = row.valueJson ?? row.valueText ?? row.valueNumber ?? row.valueBool ?? null;
+        if (raw === null || raw === undefined) continue;
+        const text = typeof raw === "string" ? raw : String(raw);
+        if (text && !existingNames.has(text)) {
+          existingNames.add(text);
+          extra.push({ id: `auto_${extra.length + newChoices.length}`, name: text });
+        }
       }
+      const last = chunk[chunk.length - 1];
+      if (!last || chunk.length < CONVERT_SCAN_CHUNK) break;
+      cursor = last.id;
     }
     newChoices = [...newChoices, ...extra];
   }
@@ -345,45 +388,14 @@ export const mergeBaseConvertField = async (
     .set({ type: fieldData.newType, options: newOptions })
     .where(eq(busabaseBaseFields.id, fieldData.fieldId));
 
-  // Migrate field values: convert each row's stored value to the new type, and
-  // remember the converted value per record so we can rewrite the authoritative
-  // record data (commit.fields) below.
-  const convertedByRecord = new Map<string, unknown>();
-  for (const row of valueRows) {
-    const raw = row.valueJson ?? row.valueText ?? row.valueNumber ?? row.valueBool ?? null;
-    let converted: unknown = null;
-    if (raw !== null && raw !== undefined) {
-      try {
-        converted = convertFieldValue(raw, fieldData.fromType, fieldData.newType, {
-          choices: newChoices,
-        });
-      } catch {
-        converted = null;
-      }
-    }
-    if (row.recordId) convertedByRecord.set(row.recordId, converted);
-    const norm = normalizeFieldValue(converted);
-    await db
-      .update(busabaseFieldValues)
-      .set({
-        fieldType: fieldData.newType,
-        valueText: norm.valueText ?? null,
-        valueNumber: norm.valueNumber ?? null,
-        valueBool: norm.valueBool ?? null,
-        valueDate: norm.valueDate ? new Date(norm.valueDate) : null,
-        valueJson: norm.valueJson !== undefined ? norm.valueJson : null,
-        updatedAt: timestamp,
-      })
-      .where(eq(busabaseFieldValues.id, row.id));
-  }
-
-  // Rewrite the authoritative record data. Records are hydrated from their head
-  // commit's `fields` JSON (NOT from busabase_field_values), so without this the
-  // displayed/edited value would keep the pre-conversion representation while the
-  // index held the converted one — e.g. a select cell holding a raw label instead
-  // of a choice id. Update each affected record's head commit in lockstep.
-  if (fieldSlug && convertedByRecord.size > 0) {
-    // Batch the head-commit lookups (was 2 SELECTs per record → 3N queries).
+  // Rewrite the authoritative record data for one chunk. Records are hydrated from
+  // their head commit's `fields` JSON (NOT from busabase_field_values), so without
+  // this the displayed/edited value would keep the pre-conversion representation
+  // while the index held the converted one — e.g. a select cell holding a raw label
+  // instead of a choice id. Batched reads (was 2 SELECTs per record → 3N queries);
+  // per-commit writes, since each record's head commit gets a distinct value.
+  const rewriteCommitFields = async (convertedByRecord: Map<string, unknown>) => {
+    if (!fieldSlug || convertedByRecord.size === 0) return;
     const recordIds = [...convertedByRecord.keys()];
     const recordRows = await db
       .select({ id: busabaseRecords.id, headCommitId: busabaseRecords.headCommitId })
@@ -399,9 +411,6 @@ export const mergeBaseConvertField = async (
             .where(inArray(busabaseCommits.id, headCommitIds))
         : [];
     const fieldsByCommit = new Map(commitRows.map((row) => [row.id, row.fields]));
-
-    // Each record's head commit gets a distinct converted value, so the writes
-    // stay per-commit; only the reads were the N+1.
     for (const [recordId, converted] of convertedByRecord) {
       const headCommitId = headCommitIdByRecord.get(recordId);
       if (!headCommitId) continue;
@@ -412,6 +421,48 @@ export const mergeBaseConvertField = async (
         .set({ fields: { ...fields, [fieldSlug]: converted } })
         .where(eq(busabaseCommits.id, headCommitId));
     }
+  };
+
+  // Pass 2: convert each value → update its projected row → rewrite that record's
+  // commit, all in bounded id-keyset chunks (updates don't touch id, so the keyset
+  // stays stable). Peak memory is one chunk, not the whole column. Each record has
+  // exactly one record-level value row for this field, so it lands in one chunk.
+  let convertCursor = "";
+  for (;;) {
+    const chunk = await scanChunk(convertCursor);
+    if (chunk.length === 0) break;
+    const convertedByRecord = new Map<string, unknown>();
+    for (const row of chunk) {
+      const raw = row.valueJson ?? row.valueText ?? row.valueNumber ?? row.valueBool ?? null;
+      let converted: unknown = null;
+      if (raw !== null && raw !== undefined) {
+        try {
+          converted = convertFieldValue(raw, fieldData.fromType, fieldData.newType, {
+            choices: newChoices,
+          });
+        } catch {
+          converted = null;
+        }
+      }
+      if (row.recordId) convertedByRecord.set(row.recordId, converted);
+      const norm = normalizeFieldValue(converted);
+      await db
+        .update(busabaseFieldValues)
+        .set({
+          fieldType: fieldData.newType,
+          valueText: norm.valueText ?? null,
+          valueNumber: norm.valueNumber ?? null,
+          valueBool: norm.valueBool ?? null,
+          valueDate: norm.valueDate ? new Date(norm.valueDate) : null,
+          valueJson: norm.valueJson !== undefined ? norm.valueJson : null,
+          updatedAt: timestamp,
+        })
+        .where(eq(busabaseFieldValues.id, row.id));
+    }
+    await rewriteCommitFields(convertedByRecord);
+    const last = chunk[chunk.length - 1];
+    if (!last || chunk.length < CONVERT_SCAN_CHUNK) break;
+    convertCursor = last.id;
   }
 
   await db

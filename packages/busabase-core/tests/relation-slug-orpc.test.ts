@@ -51,6 +51,7 @@ describe("Relation field target by slug — oRPC integration", () => {
       slug: "companies",
       name: "Companies",
       fields: [{ slug: "name", name: "Name", type: "text", required: true, options: {} }],
+      autoMerge: true,
     });
     companiesId = companies.id;
   });
@@ -74,6 +75,7 @@ describe("Relation field target by slug — oRPC integration", () => {
       slug: "contacts-a",
       name: "Contacts A",
       fields: [{ slug: "name", name: "Name", type: "text", required: true, options: {} }],
+      autoMerge: true,
     });
     await client.bases.createField({
       baseId: base.id,
@@ -101,6 +103,7 @@ describe("Relation field target by slug — oRPC integration", () => {
           options: { targetBaseSlug: "companies" },
         },
       ],
+      autoMerge: true,
     });
     const opts = await optionsFor(base.id, "company");
     expect(opts?.targetBaseId).toBe(companiesId);
@@ -111,6 +114,7 @@ describe("Relation field target by slug — oRPC integration", () => {
       slug: "contacts-c",
       name: "Contacts C",
       fields: [{ slug: "name", name: "Name", type: "text", required: true, options: {} }],
+      autoMerge: true,
     });
     const cr = await client.bases.createFieldChangeRequest({
       baseId: base.id,
@@ -139,6 +143,7 @@ describe("Relation field target by slug — oRPC integration", () => {
           options: { targetBaseId: companiesId },
         },
       ],
+      autoMerge: true,
     });
     const field = (await client.bases.get({ baseId: base.id }))?.fields.find(
       (f) => f.slug === "company",
@@ -189,6 +194,7 @@ describe("Relation field target by slug — oRPC integration", () => {
       slug: "contacts-e",
       name: "Contacts E",
       fields: [{ slug: "name", name: "Name", type: "text", required: true, options: {} }],
+      autoMerge: true,
     });
     await client.bases.createField({
       baseId: base.id,
@@ -207,6 +213,7 @@ describe("Relation field target by slug — oRPC integration", () => {
       slug: "contacts-f",
       name: "Contacts F",
       fields: [{ slug: "name", name: "Name", type: "text", required: true, options: {} }],
+      autoMerge: true,
     });
     await expect(
       client.bases.createField({

@@ -5,7 +5,7 @@ import {
   createFileTreeChangeRequestInputSchema,
   createFileTreeInputSchema,
 } from "busabase-contract/domains/filetree/contract";
-import type { FileTreeFileVO, FileTreeNodeVO } from "busabase-contract/types";
+import type { ChangeRequestVO, FileTreeFileVO, FileTreeNodeVO } from "busabase-contract/types";
 import { and, asc, eq, isNull } from "drizzle-orm";
 import { confirmUpload, requestUploadUrl } from "open-domains/attachments/logic";
 import { storage } from "openlib/storage";
@@ -26,6 +26,7 @@ import {
   type OperationPO,
 } from "../../db/schema";
 import { CURRENT_USER_ID, hashBuffer, id, now, rootNodeIdForSpace } from "../../logic/kernel";
+import { publishChangeRequestPendingReview } from "../../logic/live-events";
 import type { MaterializeArgs } from "../../logic/materialize";
 import { ensureReady } from "../../logic/seed";
 import {
@@ -34,6 +35,7 @@ import {
   loadNodesByIds,
   type MergeCtx,
   recordMergedNodeCreate,
+  recordPendingNodeCreate,
   toNodeVO,
 } from "../../logic/store";
 import {
@@ -374,7 +376,7 @@ const listAssetUsageFiles = async (node: NodePO): Promise<FileTreeFileVO[]> => {
 export const createFileTreeNode = async (
   config: FileTreeKindConfig,
   input: z.input<typeof createFileTreeInputSchema>,
-) => {
+): Promise<FileTreeNodeVO | ChangeRequestVO> => {
   await ensureReady();
   const db = await getDb();
   const parsed = createFileTreeInputSchema.parse(input);
@@ -391,6 +393,24 @@ export const createFileTreeNode = async (
     .limit(1);
   if (!parentNode || parentNode.type !== "folder") {
     throw new Error(`Parent folder not found: ${parentNodeId}`);
+  }
+
+  // Review-first by default: propose the node as a pending node_create
+  // ChangeRequest instead of materializing it immediately. Callers that don't
+  // need human review (seed/migration scripts, an explicit no-review agent
+  // task) pass `autoMerge: true` to keep today's instant-create behavior.
+  if (!parsed.autoMerge) {
+    return recordPendingNodeCreate({
+      nodeType: config.type,
+      slug: parsed.slug,
+      name: parsed.name,
+      description: parsed.description,
+      parentNodeId: parentNode.id,
+      metadata: { visibility: parsed.visibility, version: parsed.version },
+      initialFiles: parsed.files,
+      message: `Create ${labelLower(config)} ${parsed.name}`,
+      submittedBy: resolveActorId(CURRENT_USER_ID),
+    });
   }
 
   const nodeId = id("nod");
@@ -664,6 +684,12 @@ export const createFileTreeChangeRequest = async (
     changeRequestId,
     metadata: { operation: `${config.type}_update`, nodeId: node.id },
   });
+  await publishChangeRequestPendingReview({
+    spaceId: getContextSpaceId(),
+    baseId: null,
+    changeRequestId,
+    submittedBy: resolveActorId(parsed.submittedBy),
+  });
 
   const changeRequest = await getChangeRequest(changeRequestId);
   if (!changeRequest) {
@@ -790,6 +816,10 @@ export const makeMaterializer =
       typeof fields.metadata === "object" && fields.metadata !== null ? fields.metadata : {};
     const version =
       "version" in metadata && typeof metadata.version === "string" ? metadata.version : "0.1.0";
+    // Carried through a review-first `createFileTreeNode` call's pending change
+    // request (see `recordPendingNodeCreate`) — the Dashboard's generic
+    // node_create flow never sets this, so it seeds only the config defaults.
+    const initialFiles = Array.isArray(fields.initialFiles) ? fields.initialFiles : [];
 
     await db.insert(busabaseNodes).values({
       id: nodeId,
@@ -814,7 +844,15 @@ export const makeMaterializer =
       .where(eq(busabaseNodes.id, nodeId))
       .limit(1);
     if (node) {
+      // Mirrors createFileTreeNode's direct-write dual loop: seed the config's
+      // default files, skipping any path the caller's own initial files replace.
+      const inputPaths = new Set(initialFiles.map((file) => normalizeUsagePath(file.path)));
       for (const file of config.seedFiles({ slug, name, description, version })) {
+        if (!inputPaths.has(normalizeUsagePath(file.path))) {
+          await upsertFileAssetAtPath(node, file, db);
+        }
+      }
+      for (const file of initialFiles) {
         await upsertFileAssetAtPath(node, file, db);
       }
     }

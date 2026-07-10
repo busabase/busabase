@@ -1,15 +1,10 @@
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";
-import type {
-  AuditEventVO,
-  ChangeRequestStatus,
-  ChangeRequestVO,
-  RecordVO,
-} from "busabase-contract/types";
+import type { ChangeRequestStatus, ChangeRequestVO } from "busabase-contract/types";
 import { SPALink as Link } from "openlib/ui/dashboard";
 import { type ReactNode, useMemo, useState } from "react";
 import { fmt, useCoreI18n } from "../../../i18n";
-import { buildActivityEvents } from "../helpers/activity-events";
+import { type ActivityEvent, buildActivityEventFromItem } from "../helpers/activity-events";
 import {
   changeRequestStatusLabel,
   getChangeRequestMessage,
@@ -25,6 +20,7 @@ import { type InboxViewKey, inboxTabLabel } from "../helpers/inbox";
 import type { BusabaseListGroup } from "../helpers/view-types";
 import { ActivityRow } from "./activity";
 import { EmptyState } from "./primitives";
+import { InboxListSkeleton } from "./skeletons";
 
 function BusabaseList({
   empty,
@@ -33,6 +29,10 @@ function BusabaseList({
   hasMore,
   isLoadingMore,
   onLoadMore,
+  isLoading,
+  isError,
+  onRetry,
+  errorBody,
 }: {
   empty: ReactNode;
   groups: BusabaseListGroup[];
@@ -40,6 +40,12 @@ function BusabaseList({
   hasMore?: boolean;
   isLoadingMore?: boolean;
   onLoadMore?: () => void;
+  /** True while the first page is still in flight — renders a skeleton, never the empty state (a "0 rows" empty state is otherwise indistinguishable from "still loading"). */
+  isLoading?: boolean;
+  /** True when the page query failed — renders a retry prompt instead of silently falling back to the empty state. */
+  isError?: boolean;
+  onRetry?: () => void;
+  errorBody?: string;
 }) {
   const messages = useCoreI18n();
   const visibleGroups = groups.filter((group) =>
@@ -54,7 +60,23 @@ function BusabaseList({
         </div>
       ) : null}
       <div className="min-h-0 flex-1 overflow-auto px-5 py-3">
-        {visibleGroups.length > 0 ? (
+        {isLoading ? (
+          <InboxListSkeleton />
+        ) : isError ? (
+          <EmptyState
+            action={
+              <button
+                className="inline-flex h-8 items-center rounded-md border border-border/70 px-3 font-medium text-xs transition-colors hover:bg-accent hover:text-foreground"
+                onClick={() => onRetry?.()}
+                type="button"
+              >
+                {messages.inbox.retry}
+              </button>
+            }
+            body={errorBody ?? messages.inbox.loadFailedBody}
+            title={messages.inbox.loadFailedTitle}
+          />
+        ) : visibleGroups.length > 0 ? (
           <div className="space-y-3">
             {visibleGroups.map((group, index) => (
               <div key={`${group.title ?? "list"}-${index}`}>
@@ -73,7 +95,7 @@ function BusabaseList({
         ) : (
           empty
         )}
-        {hasMore ? (
+        {!isLoading && !isError && hasMore ? (
           <div className="flex items-center justify-center pt-4">
             <button
               className="inline-flex h-8 items-center rounded-md border border-border/70 px-3 font-medium text-muted-foreground text-xs transition-colors hover:bg-accent hover:text-foreground disabled:opacity-60"
@@ -258,6 +280,12 @@ function InboxList({
       onLoadMore={() => {
         void listQuery.fetchNextPage();
       }}
+      isLoading={listQuery.isLoading}
+      isError={listQuery.isError}
+      errorBody={listQuery.error instanceof Error ? listQuery.error.message : undefined}
+      onRetry={() => {
+        void listQuery.refetch();
+      }}
       toolbar={
         <>
           <BusabaseListToolbar activeView={activeView} counts={inboxCounts} />
@@ -422,27 +450,33 @@ function ReviewChangeRequestRow({ changeRequest }: { changeRequest: ChangeReques
   );
 }
 
+const ACTIVITY_PAGE_SIZE = 40;
+
 export function ActivityView({
-  auditEvents,
-  changeRequests,
+  orpc,
   emptyGuide,
-  records,
 }: {
-  auditEvents: AuditEventVO[];
-  changeRequests: ChangeRequestVO[];
+  orpc: BusabaseQueryUtils;
   emptyGuide?: ReactNode;
-  records: RecordVO[];
 }) {
   const messages = useCoreI18n();
+  // Keyset-paginated feed (activity.listPaged) — the whole CR/record/audit tables
+  // are no longer pulled into the browser; each page is rendered from descriptors.
+  const listQuery = useInfiniteQuery({
+    ...orpc.activity.listPaged.infiniteOptions({
+      input: (pageParam: string | undefined) => ({ cursor: pageParam, limit: ACTIVITY_PAGE_SIZE }),
+      initialPageParam: undefined as string | undefined,
+      getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
+    }),
+  });
   const events = useMemo(
-    () => buildActivityEvents(changeRequests, records, auditEvents, messages),
-    [auditEvents, changeRequests, records, messages],
+    () =>
+      (listQuery.data?.pages.flatMap((page) => page.items) ?? [])
+        .map((item) => buildActivityEventFromItem(item, messages))
+        .filter((event): event is ActivityEvent => event !== null),
+    [listQuery.data, messages],
   );
-  const changeRequestCount = changeRequests.length;
-  const operationCount = changeRequests.reduce(
-    (count, changeRequest) => count + changeRequest.operations.length,
-    0,
-  );
+
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   const recentEvents = events.filter((event) => new Date(event.timestamp) >= today);
@@ -457,6 +491,9 @@ export function ActivityView({
           action={emptyGuide}
         />
       }
+      hasMore={listQuery.hasNextPage}
+      isLoadingMore={listQuery.isFetchingNextPage}
+      onLoadMore={() => listQuery.fetchNextPage()}
       groups={[
         {
           count: recentEvents.length,
@@ -469,19 +506,7 @@ export function ActivityView({
           title: messages.activity.earlier,
         },
       ].filter((group) => group.count > 0)}
-      toolbar={
-        <>
-          <div className="font-medium text-sm">{messages.activity.workspaceActivity}</div>
-          <div className="text-muted-foreground text-xs">
-            {fmt(messages.activity.activityStats, {
-              auditEvents: auditEvents.length,
-              changeRequests: changeRequestCount,
-              operations: operationCount,
-              records: records.length,
-            })}
-          </div>
-        </>
-      }
+      toolbar={<div className="font-medium text-sm">{messages.activity.workspaceActivity}</div>}
     />
   );
 }

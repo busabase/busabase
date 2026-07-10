@@ -27,6 +27,7 @@ import {
   getRecord,
   listArchivedBases,
   listArchivedRecords,
+  listArchivedRecordsPaged,
   listArchivedViews,
   listBases,
   listDeletedFields,
@@ -67,6 +68,9 @@ export const baseRouter = {
   ),
   listArchivedRecords: os.bases.listArchivedRecords.handler(async ({ input }) =>
     listArchivedRecords(input.baseId),
+  ),
+  listArchivedRecordsPaged: os.bases.listArchivedRecordsPaged.handler(async ({ input }) =>
+    listArchivedRecordsPaged(input),
   ),
   createFieldChangeRequest: os.bases.createFieldChangeRequest.handler(async ({ input }) => {
     const { baseId, ...rest } = input;

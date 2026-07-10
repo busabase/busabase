@@ -39,6 +39,7 @@ describe("Bulk record Change Request — oRPC integration", () => {
         { slug: "name", name: "Name", type: "text", required: true, options: {} },
         { slug: "email", name: "Email", type: "email", required: false, options: {} },
       ],
+      autoMerge: true,
     });
     baseId = base.id;
   });

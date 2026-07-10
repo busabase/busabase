@@ -25,3 +25,6 @@ export * from "./nodes";
 export * from "./search";
 export * from "./seed";
 export * from "./vo";
+// Note: activity (listActivityPaged / buildActivityItemsFromVOs) is imported
+// directly from "./activity" by the routers — kept out of this barrel to avoid a
+// load-order cycle (it depends on cr-lifecycle's hydrators).

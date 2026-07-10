@@ -969,8 +969,11 @@ Once they approve, build folder-first so the user never lands in a flat root ful
   then approve + merge it. One CR can hold MANY operations — a create op can declare a temp \`ref\`
   that a later op targets via \`parentNodeRef\`, so **you can create the folder AND the Bases/Docs
   inside it in a single CR** (no need to merge the folder first to learn its id).
-- Base creation can also be direct through \`POST /api/v1/bases\`; pass \`parentNodeId\` when placing the
-  Base under an already-merged folder. Omitting \`parentNodeId\` creates a root-level Base node.
+- \`POST /api/v1/bases\` defaults to the same review-first behavior — it returns a pending
+  ChangeRequest, not a materialized Base, unless you pass \`"autoMerge": true\`. Since the user already
+  said yes to this exact structure in step 3a, add \`"autoMerge": true\` here to materialize it
+  immediately instead of making them approve it a second time; pass \`parentNodeId\` when placing the
+  Base under an already-merged folder (omit it for a root-level Base node).
 
 Worked example for blueprint #1:
 
@@ -997,6 +1000,7 @@ ${authLine}  -H 'content-type: application/json' \\
     "name": "Content Pipeline",
     "description": "Briefs, drafts, and SEO metadata reviewed before publishing.",
     "parentNodeId": "<FOLDER_NODE_ID>",
+    "autoMerge": true,
     "fields": [
       { "slug": "title", "name": "Title", "type": "text", "required": true },
       { "slug": "brief", "name": "Brief", "type": "markdown" },

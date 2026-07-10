@@ -72,6 +72,20 @@ export interface BusabaseContext {
   demoUseCase?: string | null;
   /** Which language the demo dataset is served in; only set when `isDemo`. */
   demoLocale?: DemoLocale;
+  /**
+   * Host hook: invoked (best-effort, errors swallowed by the caller) whenever a
+   * change request freshly enters human review, so a multi-tenant host
+   * (`apps/busabase-cloud`) can persist an inbox notification for whoever should
+   * review it. The open-source host leaves this undefined — its reviewers get
+   * the ephemeral desktop Notification via the live SSE event instead (see
+   * `publishChangeRequestPendingReview` in `logic/live-events.ts`).
+   */
+  onChangeRequestPendingReview?: (args: {
+    spaceId: string;
+    baseId: string | null;
+    changeRequestId: string;
+    submittedBy: string;
+  }) => void | Promise<void>;
 }
 
 /** Tenant id used by the single-tenant open-source app and as a safe default. */
@@ -234,4 +248,9 @@ export function getContextDemoUseCase(): DemoUseCase {
 /** Language of the demo dataset for the current request (defaults to English). */
 export function getContextDemoLocale(): DemoLocale {
   return storage.getStore()?.demoLocale ?? "en";
+}
+
+/** The host's registered "CR entered review" notification hook, if any (cloud-only). */
+export function getContextChangeRequestPendingReviewHook() {
+  return storage.getStore()?.onChangeRequestPendingReview;
 }

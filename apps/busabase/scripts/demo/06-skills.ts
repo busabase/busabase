@@ -54,6 +54,9 @@ export async function run() {
       const skill = await api<SkillVO>("POST", "/skills", {
         ...def,
         ...(parentNodeId ? { parentNodeId } : {}),
+        // Smoke-testing the API surface, not the review-first policy — opt out
+        // the same way a seed script does.
+        autoMerge: true,
       });
       assert(skill.node.slug === def.slug, `slug mismatch: ${skill.node.slug}`);
       assert(skill.files.length >= 1, "expected at least 1 file");

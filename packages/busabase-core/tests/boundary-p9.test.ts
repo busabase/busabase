@@ -36,7 +36,8 @@ describe("Boundary P9 — node soft-delete + restore", () => {
     await seedScenario("p9-doc-soft-delete");
     const raw: RawClient = createRouterClient(busabaseRouter);
 
-    const doc = await raw.docs.create({ slug: "note", name: "Note" });
+    const doc = await raw.docs.create({ slug: "note", name: "Note", autoMerge: true });
+    if ("status" in doc) throw new Error("Expected materialized DocVO");
     await deleteNode(raw, doc.node.id);
 
     expect((await raw.docs.list()).some((d) => d.node.id === doc.node.id)).toBe(false);
@@ -63,7 +64,9 @@ describe("Boundary P9 — node soft-delete + restore", () => {
       slug: "charter",
       name: "Charter",
       parentNodeId: folder?.id,
+      autoMerge: true,
     });
+    if ("status" in childDoc) throw new Error("Expected materialized DocVO");
 
     await deleteNode(raw, folder?.id as string);
 
@@ -81,11 +84,13 @@ describe("Boundary P9 — node soft-delete + restore", () => {
     await seedScenario("p9-slug-reuse");
     const raw: RawClient = createRouterClient(busabaseRouter);
 
-    const first = await raw.docs.create({ slug: "spec", name: "Spec" });
+    const first = await raw.docs.create({ slug: "spec", name: "Spec", autoMerge: true });
+    if ("status" in first) throw new Error("Expected materialized DocVO");
     await deleteNode(raw, first.node.id);
 
     // Slug freed → a new doc can take "spec".
-    const second = await raw.docs.create({ slug: "spec", name: "Spec v2" });
+    const second = await raw.docs.create({ slug: "spec", name: "Spec v2", autoMerge: true });
+    if ("status" in second) throw new Error("Expected materialized DocVO");
     expect(second.node.id).not.toBe(first.node.id);
 
     // Restoring the original now collides with the active sibling → CONFLICT.

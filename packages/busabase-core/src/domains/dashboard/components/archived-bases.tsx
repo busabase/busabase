@@ -62,6 +62,14 @@ function TrashRow({
   );
 }
 
+/** Pending purge confirmation — a Base or a folder/doc/skill node, unified so one
+ * ConfirmActionDialog instance serves both Trash sections. */
+interface PurgeTarget {
+  id: string;
+  name: string;
+  run: () => Promise<void>;
+}
+
 /**
  * Unified Trash view: archived Bases plus archived folder/doc/skill nodes, each
  * with a Restore action. (Kept the `ArchivedBasesView` export name to avoid
@@ -73,17 +81,19 @@ export function ArchivedBasesView({
   onRestoreBase,
   onRestoreNode,
   onPurgeNode,
+  onPurgeBase,
 }: {
   archivedBases: BaseVO[];
   archivedNodes?: NodeVO[];
   onRestoreBase: (base: BaseVO) => Promise<void>;
   onRestoreNode?: (node: NodeVO) => Promise<void>;
   onPurgeNode?: (node: NodeVO) => Promise<void>;
+  onPurgeBase?: (base: BaseVO) => Promise<void>;
 }) {
   const messages = useCoreI18n();
   const [restoringId, setRestoringId] = useState<string | null>(null);
   const [errors, setErrors] = useState<Record<string, string>>({});
-  const [confirmPurge, setConfirmPurge] = useState<NodeVO | null>(null);
+  const [confirmPurge, setConfirmPurge] = useState<PurgeTarget | null>(null);
   const [purging, setPurging] = useState(false);
 
   const runRestore = async (key: string, fn: () => Promise<void>, fallback: string) => {
@@ -99,19 +109,19 @@ export function ArchivedBasesView({
   };
 
   const runPurge = async () => {
-    if (!confirmPurge || !onPurgeNode) {
+    if (!confirmPurge) {
       return;
     }
-    const node = confirmPurge;
+    const target = confirmPurge;
     setPurging(true);
-    setErrors((prev) => ({ ...prev, [node.id]: "" }));
+    setErrors((prev) => ({ ...prev, [target.id]: "" }));
     try {
-      await onPurgeNode(node);
+      await target.run();
       setConfirmPurge(null);
     } catch (err) {
       setErrors((prev) => ({
         ...prev,
-        [node.id]: err instanceof Error ? err.message : messages.trash.failedDeletePermanently,
+        [target.id]: err instanceof Error ? err.message : messages.trash.failedDeletePermanently,
       }));
       setConfirmPurge(null);
     } finally {
@@ -146,6 +156,16 @@ export function ArchivedBasesView({
                 error={errors[base.id]}
                 key={base.id}
                 meta={base.slug}
+                onPurge={
+                  onPurgeBase
+                    ? () =>
+                        setConfirmPurge({
+                          id: base.id,
+                          name: base.name,
+                          run: () => onPurgeBase(base),
+                        })
+                    : undefined
+                }
                 onRestore={() =>
                   runRestore(base.id, () => onRestoreBase(base), messages.trash.failedRestoreBase)
                 }
@@ -175,7 +195,16 @@ export function ArchivedBasesView({
                   error={errors[node.id]}
                   key={node.id}
                   meta={`${node.type} · ${node.slug}`}
-                  onPurge={onPurgeNode ? () => setConfirmPurge(node) : undefined}
+                  onPurge={
+                    onPurgeNode
+                      ? () =>
+                          setConfirmPurge({
+                            id: node.id,
+                            name: node.name,
+                            run: () => onPurgeNode(node),
+                          })
+                      : undefined
+                  }
                   onRestore={() =>
                     runRestore(node.id, () => onRestoreNode(node), messages.trash.failedRestoreItem)
                   }

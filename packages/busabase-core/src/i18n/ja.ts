@@ -52,6 +52,7 @@ export const dashboardJa: CoreI18nMessages = {
     file: "ファイル",
     doc: "ドキュメント",
     folder: "フォルダー",
+    base: "ベース",
     files: "ファイル",
     visibility: "公開範囲",
     version: "バージョン",
@@ -123,6 +124,8 @@ export const dashboardJa: CoreI18nMessages = {
     routeNotFoundBody: "サイドバーから受信トレイ、アクティビティ、またはベースを開いてください。",
     operationFailed: "操作に失敗しました",
     mergeRecordMissing: "マージ済み変更リクエストからレコードが返されませんでした",
+    changeRequestPendingReviewTitle: "新しい変更リクエスト",
+    changeRequestPendingReviewBody: "レビュー待ちの新しい変更リクエストがあります。",
   },
   routes: {
     inbox: "受信トレイ",
@@ -157,6 +160,9 @@ export const dashboardJa: CoreI18nMessages = {
     batchApproveMerge: "承認してマージ",
     batchReject: "却下",
     batchResult: "{ok} 件成功、{failed} 件失敗",
+    loadFailedTitle: "読み込みに失敗しました",
+    loadFailedBody: "この変更リクエストの読み込み中にエラーが発生しました。",
+    retry: "再試行",
   },
   activity: {
     audit: "監査",

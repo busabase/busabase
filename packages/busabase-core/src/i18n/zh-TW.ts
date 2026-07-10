@@ -65,6 +65,9 @@ export const dashboardZhTW: CoreI18nMessages = {
     emptyBody: "當評審流程進入該狀態時，變更請求會顯示在這裡。",
     openChangeRequests: "進行中的變更請求",
     closedChangeRequests: "已關閉的變更請求",
+    loadFailedTitle: "載入失敗",
+    loadFailedBody: "載入這些變更請求時發生錯誤。",
+    retry: "重試",
   },
   actor: {
     ...dashboardZhCN.actor,

@@ -48,6 +48,12 @@ export const changeRequestStatusLabel = (status: string, messages?: CoreI18nMess
   if (status === "rejected" || status === "abandoned") {
     return messages?.status.closed ?? "Closed";
   }
+  if (status === "approved") {
+    return messages?.inbox.approved ?? "Approved";
+  }
+  if (status === "merged") {
+    return messages?.inbox.merged ?? "Merged";
+  }
   return status.charAt(0).toUpperCase() + status.slice(1);
 };
 

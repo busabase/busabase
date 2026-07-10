@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   getFieldOrderDiffModel,
   isFieldReorderOperation,
-} from "../src/domains/dashboard/components/operation-diff";
+} from "../src/domains/dashboard/helpers/operation-diff";
 
 const timestamp = "2026-07-03T00:00:00.000Z";
 

@@ -5,7 +5,7 @@ import {
   createDocInputSchema,
   updateDocInputSchema,
 } from "busabase-contract/domains/doc/contract";
-import type { NodeVO } from "busabase-contract/types";
+import type { ChangeRequestVO, NodeVO } from "busabase-contract/types";
 import { and, asc, eq, isNull } from "drizzle-orm";
 import { storage } from "openlib/storage";
 import type { z } from "zod";
@@ -23,6 +23,7 @@ import {
 // Doc handlers consume the kernel substrate one-way (no cycle). Doc is storage-backed,
 // so it owns no DB tables — its body lives in object storage.
 import { CURRENT_USER_ID, id, now, rootNodeIdForSpace } from "../../logic/kernel";
+import { publishChangeRequestPendingReview } from "../../logic/live-events";
 import { type MaterializeArgs, registerMaterializer } from "../../logic/materialize";
 import { ensureReady } from "../../logic/seed";
 import {
@@ -32,6 +33,7 @@ import {
   type MergeCtx,
   recordMergedNodeCreate,
   recordMergedOperation,
+  recordPendingNodeCreate,
   toNodeVO,
 } from "../../logic/store";
 import { syncDocAssetUsages } from "../assets/handlers";
@@ -98,7 +100,9 @@ const toDocVO = async (node: NodePO): Promise<DocVO> => {
   };
 };
 
-export const createDoc = async (input: z.input<typeof createDocInputSchema>): Promise<DocVO> => {
+export const createDoc = async (
+  input: z.input<typeof createDocInputSchema>,
+): Promise<DocVO | ChangeRequestVO> => {
   await ensureReady();
   const db = await getDb();
   const parsed = createDocInputSchema.parse(input);
@@ -115,6 +119,23 @@ export const createDoc = async (input: z.input<typeof createDocInputSchema>): Pr
     .limit(1);
   if (!parentNode || parentNode.type !== "folder") {
     throw new Error(`Parent folder not found: ${parentNodeId}`);
+  }
+
+  // Review-first by default: propose the Doc as a pending node_create
+  // ChangeRequest instead of materializing it immediately. Callers that don't
+  // need human review (seed/migration scripts, an explicit no-review agent
+  // task) pass `autoMerge: true` to keep today's instant-create behavior.
+  if (!parsed.autoMerge) {
+    return recordPendingNodeCreate({
+      nodeType: "doc",
+      slug: parsed.slug,
+      name: parsed.name,
+      description: parsed.description,
+      parentNodeId: parentNode.id,
+      body: parsed.body,
+      message: `Create doc ${parsed.name}`,
+      submittedBy: resolveActorId(CURRENT_USER_ID),
+    });
   }
 
   const nodeId = id("nod");
@@ -204,6 +225,9 @@ export const updateDocBody = async (
 };
 
 // node_create materialization for a Doc node: the node + a seeded body file.
+// `fields.body` carries a review-first `createDoc` call's initial body through
+// the pending change request (see `recordPendingNodeCreate`); the Dashboard's
+// generic node_create flow never sets it, so it keeps the synthesized default.
 export const materializeDocNode = async (ctx: MergeCtx, args: MaterializeArgs): Promise<string> => {
   const { db, timestamp } = ctx;
   const { parentNode, fields } = args;
@@ -219,7 +243,7 @@ export const materializeDocNode = async (ctx: MergeCtx, args: MaterializeArgs): 
     createdAt: timestamp,
     updatedAt: timestamp,
   });
-  await writeDocBody(nodeId, `# ${fields.name}\n`);
+  await writeDocBody(nodeId, fields.body || `# ${fields.name}\n`);
   return nodeId;
 };
 
@@ -302,6 +326,12 @@ export const createDocChangeRequest = async (
     baseId: null,
     changeRequestId,
     metadata: { operation: "doc_update", nodeId: node.id },
+  });
+  await publishChangeRequestPendingReview({
+    spaceId: getContextSpaceId(),
+    baseId: null,
+    changeRequestId,
+    submittedBy: resolveActorId(parsed.submittedBy),
   });
 
   const changeRequest = await getChangeRequest(changeRequestId);

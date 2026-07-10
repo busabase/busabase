@@ -140,6 +140,9 @@ export async function run() {
         description: def.description,
         assetId,
         ...(parentNodeId ? { parentNodeId } : {}),
+        // Smoke-testing the API surface, not the review-first policy — opt out
+        // the same way a seed script does.
+        autoMerge: true,
       });
       assert(file.node.slug === def.slug, `slug mismatch: ${file.node.slug}`);
       assert(file.node.type === "file", `expected type=file, got ${file.node.type}`);

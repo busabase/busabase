@@ -5,22 +5,8 @@
     {
       "idx": 0,
       "version": "7",
-      "when": 1783492634045,
-      "tag": "0000_orange_molten_man",
-      "breakpoints": true
-    },
-    {
-      "idx": 1,
-      "version": "7",
-      "when": 1783577498174,
-      "tag": "0001_jittery_namor",
-      "breakpoints": true
-    },
-    {
-      "idx": 2,
-      "version": "7",
-      "when": 1783593391342,
-      "tag": "0002_same_gamma_corps",
+      "when": 1783651300759,
+      "tag": "0000_overrated_franklin_richards",
       "breakpoints": true
     }
   ]

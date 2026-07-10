@@ -71,6 +71,7 @@ describe("Base field types — end-to-end", () => {
       slug: "ft-related",
       name: "Related",
       fields: [{ slug: "title", name: "Title", type: "text", required: true }],
+      autoMerge: true,
     });
     const relCr = await client.bases.createChangeRequest({
       baseId: related.id,
@@ -127,6 +128,7 @@ describe("Base field types — end-to-end", () => {
         { slug: "updated_by", name: "Editor", type: "updated_by" },
         { slug: "seq", name: "Seq", type: "auto_number" },
       ],
+      autoMerge: true,
     });
     baseId = base.id;
   });
@@ -335,6 +337,7 @@ describe("Base field types — end-to-end", () => {
       slug: "ft-required",
       name: "Required",
       fields: [{ slug: "title", name: "Title", type: "text", required: true }],
+      autoMerge: true,
     });
     await expect(
       client.bases.createChangeRequest({ baseId: related.id, fields: {}, submittedBy: "agent" }),

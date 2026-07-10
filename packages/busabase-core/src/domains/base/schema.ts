@@ -68,6 +68,10 @@ export const busabaseBases = pgTable(
       .default({ kind: "single", requiredApprovals: 1 }),
     createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
     archivedAt: timestamp("archived_at", { mode: "date" }),
+    // Permanent-delete marker, kept in lockstep with the owning `busabase_nodes`
+    // row's `deletedAt` (see purgeNode in logic/nodes.ts) so `bases.list` /
+    // `bases.listArchived` can filter without joining the node table.
+    deletedAt: timestamp("deleted_at", { mode: "date" }),
   },
   (base) => [
     uniqueIndex("busabase_bases_node_uniq").on(base.nodeId),

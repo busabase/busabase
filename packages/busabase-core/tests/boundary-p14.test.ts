@@ -36,7 +36,8 @@ describe("Boundary P14 — cross-tenant get-by-id is space-scoped", () => {
     });
     const view = (await raw.bases.listViews({ baseId: base.id }))[0];
     expect(view).toBeTruthy();
-    const doc = await raw.docs.create({ slug: "notes", name: "Notes" });
+    const doc = await raw.docs.create({ slug: "notes", name: "Notes", autoMerge: true });
+    if ("status" in doc) throw new Error("Expected materialized DocVO");
 
     // From a DIFFERENT space, none of these ids resolve.
     await runWithBusabaseContext({ spaceId: OTHER }, async () => {

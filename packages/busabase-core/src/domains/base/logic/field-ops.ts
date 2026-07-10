@@ -14,7 +14,7 @@ import type { FieldType } from "busabase-contract/types";
 import { and, asc, eq, gt, isNotNull, isNull, or, sql } from "drizzle-orm";
 import { type iString, iStringFromText, iStringToText } from "openlib/i18n/i-string";
 import type { z } from "zod";
-import { resolveActorId } from "../../../context";
+import { getContextSpaceId, resolveActorId } from "../../../context";
 import { getDb } from "../../../db";
 import {
   busabaseBaseFields,
@@ -29,6 +29,7 @@ import {
   recordMergedOperation,
 } from "../../../logic/cr-lifecycle";
 import { CURRENT_USER_ID, id, now } from "../../../logic/kernel";
+import { publishChangeRequestPendingReview } from "../../../logic/live-events";
 import { ensureReady } from "../../../logic/seed";
 import { fieldSchema } from "../../../logic/store";
 import { isSystemFieldType } from "../field-types";
@@ -208,6 +209,12 @@ export const createFieldChangeRequest = async (
     operationId,
     metadata: { operation: "base_add_field", fieldSlug: parsed.slug },
   });
+  await publishChangeRequestPendingReview({
+    spaceId: getContextSpaceId(),
+    baseId: base.id,
+    changeRequestId,
+    submittedBy: resolveActorId(parsed.submittedBy),
+  });
 
   const changeRequest = await getChangeRequest(changeRequestId);
   if (!changeRequest) {
@@ -310,6 +317,12 @@ export const createDeleteFieldChangeRequest = async (
     operationId,
     metadata: { operation: "base_delete_field", fieldSlug: field.slug },
   });
+  await publishChangeRequestPendingReview({
+    spaceId: getContextSpaceId(),
+    baseId: base.id,
+    changeRequestId,
+    submittedBy: resolveActorId(submittedBy),
+  });
 
   const changeRequest = await getChangeRequest(changeRequestId);
   if (!changeRequest) {
@@ -410,6 +423,12 @@ export const createUpdateFieldChangeRequest = async (
     commitId,
     operationId,
     metadata: { operation: "base_update_field", fieldSlug: field.slug },
+  });
+  await publishChangeRequestPendingReview({
+    spaceId: getContextSpaceId(),
+    baseId: base.id,
+    changeRequestId,
+    submittedBy: resolveActorId(submittedBy),
   });
 
   const changeRequest = await getChangeRequest(changeRequestId);
@@ -667,6 +686,12 @@ export const createConvertFieldChangeRequest = async (
     operationId,
     metadata: { operation: "base_convert_field", fieldSlug: field.slug, newType },
   });
+  await publishChangeRequestPendingReview({
+    spaceId: getContextSpaceId(),
+    baseId: base.id,
+    changeRequestId,
+    submittedBy: resolveActorId(submittedBy),
+  });
 
   const changeRequest = await getChangeRequest(changeRequestId);
   if (!changeRequest) {
@@ -756,6 +781,12 @@ export const createReorderFieldsChangeRequest = async (
     commitId,
     operationId,
     metadata: { operation: "base_reorder_fields" },
+  });
+  await publishChangeRequestPendingReview({
+    spaceId: getContextSpaceId(),
+    baseId: base.id,
+    changeRequestId,
+    submittedBy: resolveActorId(submittedBy),
   });
 
   const changeRequest = await getChangeRequest(changeRequestId);
@@ -855,6 +886,12 @@ export const createRestoreFieldChangeRequest = async (
     commitId,
     operationId,
     metadata: { operation: "base_restore_field", fieldSlug: field.slug },
+  });
+  await publishChangeRequestPendingReview({
+    spaceId: getContextSpaceId(),
+    baseId: base.id,
+    changeRequestId,
+    submittedBy: resolveActorId(submittedBy),
   });
 
   const changeRequest = await getChangeRequest(changeRequestId);

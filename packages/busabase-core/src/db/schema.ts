@@ -106,6 +106,13 @@ export const busabaseNodes = pgTable(
     // kept, not deleted, since commits FK-restrict the base). Partial slug index
     // below frees the slug for reuse while archived.
     archivedAt: timestamp("archived_at", { mode: "date" }),
+    // Permanent-delete marker ("Trash → Delete forever"). Only ever set once the
+    // row is already archived, and never cleared — the row (and its history) is
+    // kept forever, just hidden from every list/tree/search query. This makes
+    // "purge" a soft, reversible-at-the-data-level operation for ALL node types
+    // (including Base, sidestepping the commits FK-restrict that blocks a hard
+    // delete) instead of a real `db.delete()`.
+    deletedAt: timestamp("deleted_at", { mode: "date" }),
     createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { mode: "date" }).defaultNow().notNull(),
   },

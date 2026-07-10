@@ -46,6 +46,7 @@ describe("previewFieldConversion — bounded scan + exact counts", () => {
         { slug: "name", name: "Name", type: "text", required: true, options: {} },
         { slug: "tag", name: "Tag", type: "text", required: false, options: {} },
       ],
+      autoMerge: true,
     });
     baseId = base.id;
     tagFieldId = base.fields.find((field) => field.slug === "tag")?.id ?? "";

@@ -28,7 +28,7 @@ import type { SeedCommentDef, SeedDocDef, SeedFileDef, SeedScenario } from "../d
 import { writeDocBody } from "../domains/doc/handlers";
 import { writeFileTreeTextFile } from "../domains/filetree/handlers";
 import { writeSkillTextFile } from "../domains/skill/logic/storage";
-import { ensureProjectionBackfill, projectCommitFields } from "./field-values";
+import { projectCommitFields } from "./field-values";
 import { CURRENT_USER_ID, hashText, id, now, ROOT_NODE_ID, rootNodeIdForSpace } from "./kernel";
 import { toBaseVO, toNodeVO } from "./vo";
 
@@ -937,7 +937,12 @@ export const ensureReady = async () => {
     // A fresh workspace starts empty; example content (Bases / records / the
     // Agent Skills demo) comes only from the explicit `pnpm db:seed:all`
     // (seedScenario), not from this first-request auto-seed.
-    await ensureProjectionBackfill();
+    //
+    // No projection backfill on the request path: every write projects at write
+    // time (projectCommitFields) and the seed resolves its forward-ref relation
+    // links via applySeedScenario's own backfill. Scanning the whole space on the
+    // first request after each restart only ever helped a legacy pre-projection
+    // DB — which a clean/seeded database never is.
   })();
 
   readyBySpace.set(spaceId, ready);
@@ -1123,7 +1128,40 @@ const applySeedScenario = async (scenario: SeedScenario) => {
     });
   }
 
-  await ensureProjectionBackfill();
+  // Resolve seed forward-reference relation links: re-project every seeded record
+  // now that ALL records exist. On the first per-record pass projectCommitFields
+  // drops a relation link whose target wasn't inserted yet (it only keeps links
+  // to existing targets); this second pass, with everything present, rebuilds
+  // them. This is scoped to the records the seed just wrote — no whole-space scan.
+  const seededRecords = await db
+    .select({
+      id: busabaseRecords.id,
+      baseId: busabaseRecords.baseId,
+      headCommitId: busabaseRecords.headCommitId,
+    })
+    .from(busabaseRecords);
+  const headCommitIds = [...new Set(seededRecords.map((record) => record.headCommitId))];
+  const commitFieldsById = new Map(
+    headCommitIds.length > 0
+      ? (
+          await db
+            .select({ id: busabaseCommits.id, fields: busabaseCommits.fields })
+            .from(busabaseCommits)
+            .where(inArray(busabaseCommits.id, headCommitIds))
+        ).map((commit) => [commit.id, commit.fields])
+      : [],
+  );
+  for (const record of seededRecords) {
+    const fields = commitFieldsById.get(record.headCommitId);
+    if (fields) {
+      await projectCommitFields({
+        baseId: record.baseId,
+        commitId: record.headCommitId,
+        recordId: record.id,
+        fields,
+      });
+    }
+  }
 };
 
 export const seedScenario = async (scenario: SeedScenario) => {

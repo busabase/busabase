@@ -1,5 +1,6 @@
 import { oc } from "@orpc/contract";
 import { z } from "zod";
+import { changeRequestSchema } from "../../contract/schemas";
 import { FileNodeVOSchema } from "./types";
 
 export const createFileNodeInputSchema = z.object({
@@ -11,6 +12,11 @@ export const createFileNodeInputSchema = z.object({
   name: z.string().min(1),
   description: z.string().optional().default(""),
   assetId: z.string().min(1),
+  // Review-first by default: without `autoMerge: true`, this proposes the File
+  // node as a pending ChangeRequest (status "in_review") instead of creating it
+  // immediately. Pass `autoMerge: true` only for callers that don't need human
+  // review (seed/migration scripts, an explicit no-review agent task).
+  autoMerge: z.boolean().optional().default(false),
 });
 
 export const fileContract = {
@@ -29,10 +35,11 @@ export const fileContract = {
       path: "/files",
       tags: ["Files"],
       summary: "Create File node",
-      successDescription: "Created a first-class File node that references an Asset.",
+      successDescription:
+        "Review-first by default: a pending ChangeRequest proposing the File node. Returns the materialized File node instead when `autoMerge: true` is passed.",
     })
     .input(createFileNodeInputSchema)
-    .output(FileNodeVOSchema),
+    .output(z.union([FileNodeVOSchema, changeRequestSchema])),
   get: oc
     .route({
       method: "GET",

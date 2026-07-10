@@ -59,6 +59,7 @@ describe("Node tree + Doc lifecycle — oRPC", () => {
   describe("docs", () => {
     it("creates, reads (by slug and id), lists, and updates a Doc body", async () => {
       const created = await client.docs.create({
+        autoMerge: true,
         slug: "lc-doc",
         name: "Lifecycle Doc",
         body: "# Hello\n",
@@ -82,20 +83,40 @@ describe("Node tree + Doc lifecycle — oRPC", () => {
     });
 
     it("is idempotent on a duplicate slug", async () => {
-      const first = await client.docs.create({ slug: "lc-doc-dup", name: "Dup", body: "a" });
-      const second = await client.docs.create({ slug: "lc-doc-dup", name: "Dup2", body: "b" });
+      const first = await client.docs.create({
+        autoMerge: true,
+        slug: "lc-doc-dup",
+        name: "Dup",
+        body: "a",
+      });
+      const second = await client.docs.create({
+        autoMerge: true,
+        slug: "lc-doc-dup",
+        name: "Dup2",
+        body: "b",
+      });
       expect(second.node.id).toBe(first.node.id);
     });
 
     it("rejects an unknown parent and a missing doc", async () => {
       await expect(
-        client.docs.create({ parentNodeId: "pnd_nope", slug: "lc-doc-orphan", name: "X" }),
+        client.docs.create({
+          autoMerge: true,
+          parentNodeId: "pnd_nope",
+          slug: "lc-doc-orphan",
+          name: "X",
+        }),
       ).rejects.toThrow(/Parent folder not found/);
       await expect(client.docs.get({ nodeId: "pnd_missing" })).rejects.toThrow(/Doc not found/);
     });
 
     it("updates a Doc body through a merged change request", async () => {
-      const doc = await client.docs.create({ slug: "lc-doc-cr", name: "CR Doc", body: "v1" });
+      const doc = await client.docs.create({
+        autoMerge: true,
+        slug: "lc-doc-cr",
+        name: "CR Doc",
+        body: "v1",
+      });
       const cr = await client.docs.createChangeRequest({
         nodeId: doc.node.id,
         body: "v2 via change request",

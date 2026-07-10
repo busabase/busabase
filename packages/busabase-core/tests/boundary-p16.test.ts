@@ -23,7 +23,8 @@ describe("Boundary P16 — node/view merge state guards", () => {
     await seedScenario("p16-rename-archived");
     const raw: RawClient = createRouterClient(busabaseRouter);
 
-    const doc = await raw.docs.create({ slug: "draft", name: "Draft" });
+    const doc = await raw.docs.create({ slug: "draft", name: "Draft", autoMerge: true });
+    if ("status" in doc) throw new Error("Expected materialized DocVO");
     // Archive the doc.
     await approveMerge(
       raw,

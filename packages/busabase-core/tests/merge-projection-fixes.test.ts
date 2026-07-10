@@ -57,6 +57,7 @@ describe("merge projection fixes", () => {
         { slug: "title", name: "Title", type: "text", required: true },
         { slug: "status", name: "Status", type: "text" },
       ],
+      autoMerge: true,
     });
     const baseId = base.id;
 
@@ -108,6 +109,7 @@ describe("merge projection fixes", () => {
         { slug: "title", name: "Title", type: "text", required: true },
         { slug: "category", name: "Category", type: "text" },
       ],
+      autoMerge: true,
     });
     const baseId = base.id;
     const categoryFieldId = base.fields.find((f) => f.slug === "category")!.id;
@@ -158,6 +160,7 @@ describe("merge projection fixes", () => {
       slug: "restore-links",
       name: "Restore Links",
       fields: [{ slug: "title", name: "Title", type: "text", required: true }],
+      autoMerge: true,
     });
     const baseId = base.id;
     await client.bases.createField({

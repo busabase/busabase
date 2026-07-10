@@ -39,10 +39,18 @@ describe("Node listings are space-scoped — oRPC integration", () => {
     // A parentless doc also creates that space's root folder, so this seeds both
     // a doc and a folder into each of two distinct spaces.
     await inSpace("space_a", () =>
-      client.docs.create({ slug: "doc-a", name: "Doc A", body: "a\n" }),
+      client.docs.create({ autoMerge: true, slug: "doc-a", name: "Doc A", body: "a\n" }),
     );
     await inSpace("space_b", () =>
-      client.docs.create({ slug: "doc-b", name: "Doc B", body: "b\n" }),
+      client.docs.create({ autoMerge: true, slug: "doc-b", name: "Doc B", body: "b\n" }),
+    );
+
+    // Drives are file-tree nodes listed via `listFileTreeNodes` — the third P0 fix.
+    await inSpace("space_a", () =>
+      client.drives.create({ autoMerge: true, slug: "drive-a", name: "Drive A" }),
+    );
+    await inSpace("space_b", () =>
+      client.drives.create({ autoMerge: true, slug: "drive-b", name: "Drive B" }),
     );
   });
 
@@ -72,5 +80,16 @@ describe("Node listings are space-scoped — oRPC integration", () => {
     // No folder id leaks across spaces.
     expect(a.some((f) => bIds.has(f.node.id))).toBe(false);
     expect(b.some((f) => aIds.has(f.node.id))).toBe(false);
+  });
+
+  it("listFileTreeNodes (drives) returns only the active space's drives", async () => {
+    const a = await inSpace("space_a", () => client.drives.list());
+    const b = await inSpace("space_b", () => client.drives.list());
+    const aSlugs = a.map((d) => d.node.slug);
+    const bSlugs = b.map((d) => d.node.slug);
+    expect(aSlugs).toContain("drive-a");
+    expect(aSlugs).not.toContain("drive-b");
+    expect(bSlugs).toContain("drive-b");
+    expect(bSlugs).not.toContain("drive-a");
   });
 });

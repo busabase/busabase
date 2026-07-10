@@ -14,6 +14,7 @@ import { fileContract } from "../domains/file-node/contract";
 import { folderContract } from "../domains/folder/contract";
 import { skillContract } from "../domains/skill/contract";
 import { vaultContract } from "../domains/vault/contract";
+import { listActivityPagedInputSchema, listActivityResponseSchema } from "./activity-schemas";
 import {
   agentTaskSchema,
   auditEventSchema,
@@ -136,6 +137,19 @@ export const busabaseContractRoutes = {
       })
       .input(createAuditEventInputSchema)
       .output(auditEventSchema),
+  },
+  activity: {
+    listPaged: oc
+      .route({
+        method: "GET",
+        path: "/activity/paged",
+        tags: ["Activity"],
+        summary: "List the activity feed with keyset pagination",
+        successDescription:
+          "A page of activity items (change requests, operations, records and audit events merged, newest first) plus an opaque nextCursor (null at the end).",
+      })
+      .input(listActivityPagedInputSchema)
+      .output(listActivityResponseSchema),
   },
   comments: {
     list: oc

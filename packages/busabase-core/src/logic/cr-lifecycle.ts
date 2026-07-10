@@ -461,6 +461,14 @@ const mergeNodeRestore = async (ctx: MergeCtx, _item: OperationPO, node: NodePO)
   if (!node.archivedAt) {
     throw new ORPCError("CONFLICT", { message: "Node is not archived" });
   }
+  // A purged node's `deletedAt` is a terminal state (its row is kept, but only
+  // for history) — it must never leave the tree it was hidden from, so restore
+  // is refused even though `archivedAt` is still set.
+  if (node.deletedAt) {
+    throw new ORPCError("CONFLICT", {
+      message: "Cannot restore: this item was permanently deleted.",
+    });
+  }
   // Guard slug reuse: if an active sibling took this slug while archived, restoring
   // would collide on the partial unique index — fail with a clear message.
   const [slugTaken] = await db
@@ -1392,6 +1400,120 @@ export const recordMergedNodeCreate = async (args: {
     auditMetadata: { nodeType: args.nodeType },
   });
 
+/**
+ * Create a PENDING (`in_review`) node_create ChangeRequest — the review-first
+ * counterpart to `recordMergedNodeCreate`. This is what `createBase` /
+ * `createDoc` / `createFileNode` / `createFileTreeNode` call by DEFAULT (no
+ * `autoMerge: true`): nothing is materialized — no node/base/doc row, no
+ * storage write — until a human (or an explicit `autoMerge: true` caller)
+ * approves and merges it, exactly like the Dashboard's "New" modal default.
+ * Reuses the generic `node_create` operation + the same per-type materializer
+ * (`getMaterializer`) that the Dashboard's `nodes.createChangeRequest` path
+ * merges through, so a merged CR from either path produces identical rows.
+ * Returns the pending ChangeRequestVO (its `node`/`base` are null until merged).
+ */
+export const recordPendingNodeCreate = async (args: {
+  nodeType: string;
+  slug: string;
+  name: string;
+  description?: string;
+  parentNodeId: string;
+  metadata?: Record<string, unknown>;
+  fields?: NodeCreateFields["fields"];
+  body?: string;
+  initialFiles?: NodeCreateFields["initialFiles"];
+  message: string;
+  submittedBy: string;
+}): Promise<ChangeRequestVO> => {
+  await ensureReady();
+  const db = await getDb();
+  const submittedBy = resolveActorId(args.submittedBy);
+  const changeRequestId = id("crq");
+  const operationId = id("opr");
+  const commitId = id("cmt");
+  const timestamp = now();
+
+  const fields: Record<string, unknown> = {
+    kind: "create",
+    nodeType: args.nodeType,
+    parentNodeId: args.parentNodeId,
+    slug: args.slug,
+    name: args.name,
+    description: args.description ?? "",
+    metadata: args.metadata ?? {},
+    ...(args.fields ? { fields: args.fields } : {}),
+    ...(args.body !== undefined ? { body: args.body } : {}),
+    ...(args.initialFiles ? { initialFiles: args.initialFiles } : {}),
+  };
+
+  await db.insert(busabaseChangeRequests).values({
+    id: changeRequestId,
+    baseId: null,
+    targetType: "node",
+    nodeId: null,
+    status: "in_review",
+    submittedBy,
+    sourceMeta: { subject: "node_tree" },
+    reviewPolicySnapshot: { kind: "single", requiredApprovals: 1 },
+    mergeSummary: {},
+    rejectedReason: null,
+    reviewedAt: null,
+    mergedAt: null,
+    createdAt: timestamp,
+    updatedAt: timestamp,
+  });
+  await db.insert(busabaseCommits).values({
+    id: commitId,
+    baseId: null,
+    targetType: "node",
+    nodeId: null,
+    operationId: null,
+    parentCommitId: null,
+    fields,
+    operation: "node_create",
+    message: args.message,
+    author: submittedBy,
+    createdAt: timestamp,
+  });
+  await db.insert(busabaseOperations).values({
+    id: operationId,
+    changeRequestId,
+    baseId: null,
+    targetType: "node",
+    nodeId: null,
+    operation: "node_create",
+    status: "pending",
+    targetRecordId: null,
+    targetViewId: null,
+    filePath: null,
+    sourceRecordId: null,
+    sourceCommitId: null,
+    baseCommitId: null,
+    headCommitId: commitId,
+    deleteMode: "archive",
+    mergedRecordId: null,
+    mergedViewId: null,
+    position: 0,
+    createdAt: timestamp,
+    updatedAt: timestamp,
+  });
+  await db.update(busabaseCommits).set({ operationId }).where(eq(busabaseCommits.id, commitId));
+
+  await insertAuditEvent(db, {
+    action: "change_request.created",
+    actorId: submittedBy,
+    baseId: null,
+    changeRequestId,
+    metadata: { operation: "node_create", nodeType: args.nodeType },
+  });
+
+  const changeRequest = await getChangeRequest(changeRequestId);
+  if (!changeRequest) {
+    throw new Error(`Failed to create pending node change request: ${changeRequestId}`);
+  }
+  return changeRequest;
+};
+
 export const closeChangeRequest = async (changeRequestId: string, reason?: string) => {
   await ensureReady();
   const db = await getDb();
@@ -1709,10 +1831,18 @@ const _mergeChangeRequest = async (changeRequestId: string) => {
   if (changeRequest.baseId) {
     const { busabaseBases } = await import("../domains/base/schema");
     const [baseRow] = await db
-      .select({ archivedAt: busabaseBases.archivedAt })
+      .select({ archivedAt: busabaseBases.archivedAt, deletedAt: busabaseBases.deletedAt })
       .from(busabaseBases)
       .where(eq(busabaseBases.id, changeRequest.baseId))
       .limit(1);
+    // A purged base is a terminal state — unlike a plain archive, NOTHING can
+    // merge into it, including base_restore (restoring would resurrect it into
+    // `bases.list` while its row is only meant to be kept for history).
+    if (baseRow?.deletedAt) {
+      throw new ORPCError("FORBIDDEN", {
+        message: "Cannot merge into a permanently deleted base",
+      });
+    }
     const isBaseArchive = operationKinds.every(
       (op) => op.operation === "base_archive" || op.operation === "base_restore",
     );

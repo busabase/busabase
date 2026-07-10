@@ -52,6 +52,7 @@ describe("node / field restore fixes", () => {
   // ── A: node trash/restore preserves individually-deleted records ───────────
   it("restoring a trashed base does not resurrect a record deleted individually (#A)", async () => {
     const base = await client.bases.create({
+      autoMerge: true,
       slug: "trash-restore",
       name: "Trash Restore",
       fields: [{ slug: "title", name: "Title", type: "text", required: true }],
@@ -99,6 +100,7 @@ describe("node / field restore fixes", () => {
   // ── C: field restore rejected when its slug was reused ─────────────────────
   it("restoring a field whose slug was reused is rejected (#C)", async () => {
     const base = await client.bases.create({
+      autoMerge: true,
       slug: "field-slug-collide",
       name: "Field Slug Collide",
       fields: [

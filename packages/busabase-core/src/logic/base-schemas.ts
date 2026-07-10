@@ -104,6 +104,10 @@ export const createBaseInputSchema = z.object({
   name: z.string().min(1),
   description: z.string().optional().default(""),
   fields: z.array(fieldSchema).default([]),
+  // Must mirror busabase-contract's createBaseInputSchema (same drift risk as
+  // fieldOptionsSchema above) — without this, `autoMerge` from the oRPC layer's
+  // contract-validated input is silently stripped by this internal re-parse.
+  autoMerge: z.boolean().optional().default(false),
 });
 
 const nodeOperationInputSchema = z.discriminatedUnion("kind", [

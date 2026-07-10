@@ -72,7 +72,9 @@ describe("Boundary P3 — oRPC", () => {
         required: f.required ?? false,
         options: f.options,
       })),
+      autoMerge: true,
     });
+    if ("status" in base) throw new Error("Expected materialized BaseVO");
     return base;
   };
 
