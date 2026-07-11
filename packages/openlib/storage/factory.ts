@@ -48,3 +48,33 @@ export const createStorage = (configOrUrl: StorageConfig | string): IStorage =>
 export const resetStorage = (): void => {
   _storage = null;
 };
+
+/**
+ * True when the active storage provider is the local filesystem adapter.
+ *
+ * Consumers that need a provider-aware fast path (e.g. Drive grep's local text
+ * cache, which skips the cache directory entirely for `local` — object bytes
+ * already live on disk) can't do `storage instanceof LocalStorage`: `storage`
+ * is a lazy-init `Proxy` whose prototype chain doesn't resolve to the real
+ * instance. This forces init (if needed) and checks the real singleton.
+ */
+export const isLocalStorageProvider = (): boolean => {
+  if (!_storage) _storage = initStorage();
+  return _storage instanceof LocalStorage;
+};
+
+/**
+ * Resolve a storage key to its real filesystem path — only valid when the
+ * active provider is `LocalStorage` (guard with `isLocalStorageProvider()`
+ * first). Lets a local-provider-aware caller stream a large object directly
+ * off disk (e.g. Drive grep's text cache, which otherwise has no way to get a
+ * raw fs path out of the `IStorage` interface) instead of buffering the whole
+ * object via `getObject`.
+ */
+export const getLocalStoragePath = (key: string): string => {
+  if (!_storage) _storage = initStorage();
+  if (!(_storage instanceof LocalStorage)) {
+    throw new Error("getLocalStoragePath() called while the active storage provider is not local");
+  }
+  return _storage.getLocalPath(key);
+};

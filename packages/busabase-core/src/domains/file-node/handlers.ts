@@ -19,6 +19,7 @@ import {
   toNodeVO,
 } from "../../logic/store";
 import { resolveAssetFile } from "../assets/handlers";
+import { getAssetTextStatus } from "../assets/logic/asset-texts-logic";
 
 const getString = (value: unknown) => (typeof value === "string" ? value : null);
 
@@ -93,7 +94,14 @@ const toFileNodeVO = async (node: NodePO): Promise<FileNodeVO> => {
   }
   const nodeMap = await loadNodesByIds([node.id]);
   const nodeVO: NodeVO = nodeMap.get(node.id) ?? toNodeVO(node, null);
-  const asset = await resolveAssetFile(assetId);
+  const [asset, textStatus] = await Promise.all([
+    resolveAssetFile(assetId),
+    // Best-effort: a text-status lookup failure must degrade to "missing"
+    // rather than break the whole node's render (this join runs once per
+    // node across every folder listing — an N+1, and not something a
+    // transient text-table hiccup should be able to take down).
+    getAssetTextStatus(assetId).catch(() => "missing" as const),
+  ]);
   return {
     node: nodeVO,
     asset: {
@@ -108,6 +116,7 @@ const toFileNodeVO = async (node: NodePO): Promise<FileNodeVO> => {
       url: asset.url,
       contentHash: asset.contentHash,
       usageCount: 0,
+      textStatus,
       createdAt: node.createdAt.toISOString(),
     },
   };

@@ -137,6 +137,17 @@ export class LocalStorage implements IStorage {
   }
 
   /**
+   * Resolve a storage key to its real filesystem path. Only meaningful for
+   * `LocalStorage` — lets a caller stream a large object directly (e.g.
+   * `node:fs.createReadStream`) without going through `getObject`'s
+   * whole-buffer read, when it already knows it's talking to this provider
+   * (see `openlib/storage/factory.ts`'s `getLocalStoragePath`).
+   */
+  getLocalPath(key: string): string {
+    return path.join(this.rootDir, key);
+  }
+
+  /**
    * Get object content as Buffer
    */
   async getObject(key: string): Promise<Buffer> {
@@ -145,6 +156,26 @@ export class LocalStorage implements IStorage {
       throw new Error(`Object not found: ${key}`);
     }
     return readFile(filePath);
+  }
+
+  /**
+   * Get a byte range of a file as a Buffer (inclusive `start`/`end`, mirrors
+   * HTTP Range semantics) via `fs.createReadStream(path, { start, end })`.
+   */
+  async getObjectRange(key: string, start: number, end: number): Promise<Buffer> {
+    const filePath = path.join(this.rootDir, key);
+    if (!(await this.objectExists(key))) {
+      throw new Error(`Object not found: ${key}`);
+    }
+    return new Promise((resolve, reject) => {
+      const chunks: Buffer[] = [];
+      const stream = fs.createReadStream(filePath, { start, end });
+      stream.on("data", (chunk) => {
+        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+      });
+      stream.on("end", () => resolve(Buffer.concat(chunks)));
+      stream.on("error", reject);
+    });
   }
 
   /**

@@ -76,6 +76,11 @@ export function resolveDemoMode(
  * Append the active `?demo` (and `?lang`, when the demo is non-English) to a URL so
  * the demo survives navigation. No-op outside demo mode or when `?demo=` is already
  * present. Reads the current page URL, so call client-side.
+ *
+ * Also carries `?hidden=1` forward when present on the current URL — used by the
+ * screenshot capture script to suppress demo-only banners across internal
+ * redirects (e.g. `/dashboard` → `/spaces/:id/agent/:id`) that would otherwise
+ * drop it, since only `demo`/`lang` were previously preserved here.
  */
 export function addDemoParam(url: string): string {
   const { useCase, locale } = resolveDemoMode();
@@ -86,5 +91,35 @@ export function addDemoParam(url: string): string {
   if (locale === "zh-CN" && !/[?&]lang=/.test(next)) {
     next += "&lang=zh-CN";
   }
+  if (resolveHideDemoChrome() && !/[?&]hidden=/.test(next)) {
+    next += "&hidden=1";
+  }
   return next;
+}
+
+const HIDE_CHROME_KEY = "buda-demo-hidden-chrome";
+
+/**
+ * Whether demo-only chrome (banners, watermarks) should stay visually
+ * suppressed — used by the screenshot capture script so captures read as a
+ * real running app. Sticky for the browser tab via sessionStorage: the first
+ * page that carries `?hidden=1` records it, since not every internal
+ * redirect in the app preserves arbitrary extra query params the way it
+ * preserves `?demo=`.
+ */
+export function resolveHideDemoChrome(): boolean {
+  if (typeof window === "undefined") return false;
+  if (new URLSearchParams(window.location.search).get("hidden") === "1") {
+    try {
+      window.sessionStorage.setItem(HIDE_CHROME_KEY, "1");
+    } catch {
+      // sessionStorage unavailable (private mode, etc.) — fall through to URL-only check
+    }
+    return true;
+  }
+  try {
+    return window.sessionStorage.getItem(HIDE_CHROME_KEY) === "1";
+  } catch {
+    return false;
+  }
 }

@@ -17,6 +17,12 @@ import { insertAuditEvent } from "../../logic/audit";
 import { id } from "../../logic/kernel";
 import { ensureReady } from "../../logic/seed";
 import {
+  autoRegisterAssetText,
+  deriveAssetTextStatus,
+  gcTextObjectIfUnreferenced,
+} from "./logic/asset-texts-logic";
+import { type AssetTextStatus, busabaseAssetTexts } from "./schema/asset-texts";
+import {
   type AssetContentKind,
   type AssetUsageOwnerType,
   busabaseAssets,
@@ -35,6 +41,7 @@ interface AssetRow {
   mimeType: string;
   sizeBytes: number;
   contentHash: string | null;
+  textStatus: AssetTextStatus | null;
 }
 
 interface UpdateAssetMetadataInput {
@@ -79,6 +86,7 @@ const toAssetVO = (row: AssetRow, usageCount: number): AssetVO => ({
   url: storage.getPublicUrl(row.storageKey),
   contentHash: row.contentHash,
   usageCount,
+  textStatus: deriveAssetTextStatus(row.textStatus),
   createdAt: row.createdAt.toISOString(),
 });
 
@@ -94,7 +102,11 @@ const assetRowColumns = {
   mimeType: attachments.mimeType,
   sizeBytes: attachments.sizeBytes,
   contentHash: attachments.contentHash,
+  textStatus: busabaseAssetTexts.status,
 };
+
+/** `assetRowColumns` needs this LEFT JOIN (0..1 `busabase_asset_texts` row) for `textStatus`. */
+const withAssetTextJoin = eq(busabaseAssetTexts.assetId, busabaseAssets.id);
 
 const sanitizeUploadError = (error: unknown): string => {
   const message = error instanceof Error ? error.message : String(error);
@@ -187,13 +199,31 @@ export const confirmAssetUpload = async (input: ConfirmUploadDTO) => {
     );
     // Surface every uploaded file as a logical Asset. Attachment rows/objects may
     // dedupe by content hash, but Asset identity is not deduped.
+    const contentKind = contentKindForMimeType(input.mimeType);
     const assetId = await createAsset(result.attachmentId, input.fileName, {
-      contentKind: contentKindForMimeType(input.mimeType),
+      contentKind,
       metadata:
         input.metadata && typeof input.metadata === "object" && !Array.isArray(input.metadata)
           ? (input.metadata as Record<string, unknown>)
           : {},
     });
+    // Drive Grep Retrieval: text-kind uploads are greppable immediately — the
+    // row points at this asset's own bytes, no writer/scan needed. `contentKind`
+    // and `knownMissing: true` (assetId was JUST minted above) are already
+    // known here, so binary uploads pay zero extra queries for this. Isolated
+    // in its own try/catch — a text-registration hiccup (e.g. the text table
+    // briefly unavailable) must never fail an otherwise-successful upload.
+    try {
+      await autoRegisterAssetText(assetId, undefined, {
+        knownContentKind: contentKind,
+        knownMissing: true,
+      });
+    } catch (error) {
+      console.warn(
+        `[assets] autoRegisterAssetText failed for asset ${assetId} (non-fatal):`,
+        error,
+      );
+    }
     return { ...result, assetId };
   } catch (error) {
     throw assetUploadError("confirm asset upload", error);
@@ -209,6 +239,7 @@ export const listAssets = async (): Promise<AssetVO[]> => {
     .select(assetRowColumns)
     .from(busabaseAssets)
     .innerJoin(attachments, eq(busabaseAssets.attachmentId, attachments.id))
+    .leftJoin(busabaseAssetTexts, withAssetTextJoin)
     .where(eq(busabaseAssets.spaceId, spaceId))
     .orderBy(desc(busabaseAssets.createdAt));
 
@@ -234,6 +265,7 @@ export const getAsset = async (assetId: string): Promise<AssetDetailVO> => {
     .select(assetRowColumns)
     .from(busabaseAssets)
     .innerJoin(attachments, eq(busabaseAssets.attachmentId, attachments.id))
+    .leftJoin(busabaseAssetTexts, withAssetTextJoin)
     .where(and(eq(busabaseAssets.id, assetId), eq(busabaseAssets.spaceId, spaceId)))
     .limit(1);
   if (!row) {
@@ -286,6 +318,7 @@ export const resolveAssetFile = async (
     .select(assetRowColumns)
     .from(busabaseAssets)
     .innerJoin(attachments, eq(busabaseAssets.attachmentId, attachments.id))
+    .leftJoin(busabaseAssetTexts, withAssetTextJoin)
     .where(and(eq(busabaseAssets.id, assetId), eq(busabaseAssets.spaceId, spaceId)))
     .limit(1);
   if (!row) {
@@ -369,7 +402,28 @@ export const deleteAssetRow = async (
     );
   }
 
+  // Drive Grep Retrieval: `busabase_asset_texts.assetId` cascade-deletes with
+  // the asset (`onDelete: "cascade"`), but nothing else garbage-collects the
+  // derived-text blob that row pointed at — capture its identity BEFORE the
+  // delete cascades the row away, since nothing can look it up afterward.
+  const [textRow] = await db
+    .select({
+      textContentHash: busabaseAssetTexts.textContentHash,
+      writtenBy: busabaseAssetTexts.writtenBy,
+    })
+    .from(busabaseAssetTexts)
+    .where(eq(busabaseAssetTexts.assetId, assetId))
+    .limit(1);
+
   await db.delete(busabaseAssets).where(eq(busabaseAssets.id, assetId));
+
+  // Auto-registered rows never own a separate blob (they just point at the
+  // asset's own attachment bytes, cleaned up below via `deleteAttachmentSafely`)
+  // — only derived (`putText`-written) text has a content-addressed object
+  // that can leak once its row is gone.
+  if (textRow && textRow.writtenBy !== "auto" && textRow.textContentHash) {
+    await gcTextObjectIfUnreferenced(textRow.textContentHash, null, db);
+  }
 
   const [stillSharedByOtherAsset] = await db
     .select({ id: busabaseAssets.id })

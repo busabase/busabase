@@ -16,7 +16,16 @@ import {
   DropdownMenuTrigger,
 } from "kui/dropdown-menu";
 import { SidebarMenu, SidebarMenuButton, SidebarMenuItem } from "kui/sidebar";
-import { Archive, Check, ChevronsUpDown, Images, Languages, Network, Vault } from "lucide-react";
+import {
+  Archive,
+  Check,
+  ChevronsUpDown,
+  Images,
+  Languages,
+  Network,
+  Vault,
+  Webhook,
+} from "lucide-react";
 import Image from "next/image";
 import { useAddDemoParam } from "openlib/ui/dashboard";
 import type { ReactNode } from "react";
@@ -24,6 +33,7 @@ import { useMemo, useState } from "react";
 import { useLocation } from "wouter";
 import { useSPA } from "~/components/spa/spa-context";
 import { VaultSettingsDialog } from "~/domains/vault/components/vault-settings-dialog";
+import { WebhookSettingsDialog } from "~/domains/webhook/components/webhook-settings-dialog";
 import { getLanguageOptions } from "~/i18n/config";
 import { getBusabaseAppLL } from "~/lib/i18n";
 
@@ -64,6 +74,7 @@ export function ProductReadyDashboardShell({
   const LL = useMemo(() => getBusabaseAppLL(locale), [locale]);
   const coreMessages = useCoreI18n();
   const [vaultDialogOpen, setVaultDialogOpen] = useState(false);
+  const [webhookDialogOpen, setWebhookDialogOpen] = useState(false);
   const currentPath = location.split("?")[0];
   const languageOptions = useMemo(
     () => [
@@ -174,6 +185,10 @@ export function ProductReadyDashboardShell({
                   <Vault />
                   <span>{LL.vaultSettings.openButton()}</span>
                 </DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => setWebhookDialogOpen(true)}>
+                  <Webhook />
+                  <span>{LL.webhookSettings.openButton()}</span>
+                </DropdownMenuItem>
                 <DropdownMenuLabel className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
                   <Languages className="size-3.5" />
                   {LL.shell.settings()}
@@ -199,6 +214,12 @@ export function ProductReadyDashboardShell({
           labels={LL.vaultSettings}
           open={vaultDialogOpen}
           onOpenChange={setVaultDialogOpen}
+          showTrigger={false}
+        />
+        <WebhookSettingsDialog
+          labels={LL.webhookSettings}
+          open={webhookDialogOpen}
+          onOpenChange={setWebhookDialogOpen}
           showTrigger={false}
         />
       </div>

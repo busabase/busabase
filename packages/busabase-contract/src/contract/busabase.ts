@@ -14,6 +14,7 @@ import { fileContract } from "../domains/file-node/contract";
 import { folderContract } from "../domains/folder/contract";
 import { skillContract } from "../domains/skill/contract";
 import { vaultContract } from "../domains/vault/contract";
+import { webhookContract } from "../domains/webhook/contract";
 import { listActivityPagedInputSchema, listActivityResponseSchema } from "./activity-schemas";
 import {
   agentTaskSchema,
@@ -198,6 +199,7 @@ export const busabaseContractRoutes = {
   folders: folderContract,
   assets: assetsContract,
   vault: vaultContract,
+  webhooks: webhookContract,
   changeRequests: {
     list: oc
       .route({
@@ -353,6 +355,21 @@ export {
   VaultSettingsVOSchema,
   VaultSuccessSchema,
 } from "../domains/vault/types";
+export {
+  ListWebhookDeliveriesInputSchema,
+  ListWebhookRulesInputSchema,
+  WebhookActionKindSchema,
+  WebhookDeliveryStatusSchema,
+  WebhookDeliveryVOSchema,
+  WebhookEventTypeSchema,
+  WebhookHttpConfigSchema,
+  WebhookHttpConfigVOSchema,
+  WebhookRuleInputSchema,
+  WebhookRuleUpdateInputSchema,
+  WebhookRuleVOSchema,
+  WebhookSnippetConfigSchema,
+  WebhookSnippetConfigVOSchema,
+} from "../domains/webhook/types";
 export {
   auditEventSchema,
   authInfoSchema,

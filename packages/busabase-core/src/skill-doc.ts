@@ -321,6 +321,33 @@ npx busabase-cli assets upload --file ./cover.svg --context record-field --outpu
 # {"cover_image":[{"id":"...","assetId":"...","attachmentId":"...","url":"...","fileName":"cover.svg","mimeType":"image/svg+xml","size":1234}]}
 \`\`\`
 
+Search inside Drive files (any size, any format) and read exact line ranges — Busabase
+stores/indexes/searches text but never generates it. Text-kind files (csv/log/md/json/…) are
+searchable immediately with zero setup. Binary files (PDF/docx/images/…) need an agent to supply
+their text once via \`putText\` — run your own extractor, then hand the result back:
+
+\`\`\`bash
+# Search every text-bearing asset in a Space (real file + line + column numbers):
+curl -X POST ${base}/api/v1/assets/grep \\
+${authLine}  -H 'content-type: application/json' \\
+  --data '{"pattern": "Termination", "scope": {"drivePath": "contracts/"}, "contextLines": 2}'
+# → { matches: [{ assetId, fileName, drivePath, line, column, text, before, after }],
+#     filesScanned, missing: [assetId, ...], stale: [...], unsearchable, truncated }
+# \`missing\` names binary assets with no text yet — extract-and-supply them, don't assume
+# full coverage. \`stale\` names assets whose text was derived from a since-replaced file.
+
+# Read an exact line range (works on multi-GB files — a byte-range read, not a full download):
+curl "${base}/api/v1/assets/:assetId/text/lines?startLine=120&endLine=160"${H}
+
+# Supply text for a binary asset after running your own extractor (inline for small text):
+npx busabase-cli assets put-text --asset-id :assetId --file ./extracted.txt
+# Or mark a scanned/image-only file as having no extractable text (so grep stops flagging
+# it as "missing" and instead reports it under "unsearchable"):
+npx busabase-cli assets put-text --asset-id :assetId --none
+# CLI/SDK pick inline vs. presigned upload by size automatically (≤1MB inline, larger
+# goes through POST /assets/text/upload-urls → PUT bytes → putText({storageKey})).
+\`\`\`
+
 Approve a ChangeRequest:
 
 \`\`\`bash

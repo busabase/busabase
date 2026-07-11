@@ -328,6 +328,8 @@ export type AuditEventPO = typeof busabaseAuditEvents.$inferSelect;
 // Attachments table — shared, auth-agnostic (lives in open-domains; consumed by
 // both apps/busabase and apps/busabase-cloud).
 export * from "open-domains/attachments/schema";
+// Assets domain: Drive Grep Retrieval text slot (0..1 row per Asset).
+export * from "../domains/assets/schema/asset-texts";
 // Assets domain: the deduped Asset library + its where-used reverse index.
 export * from "../domains/assets/schema/assets";
 // Base-domain tables, enum, and PO types live in the base domain; re-exported
@@ -336,3 +338,7 @@ export * from "../domains/assets/schema/assets";
 export * from "../domains/base/schema";
 // Vault-managed secrets and variables used by agents, MCP, and API tools.
 export * from "../domains/vault/schema/vault-items";
+export * from "../domains/webhook/schema/webhook-deliveries";
+// Webhook automation: configurable rules (HTTP webhook / notify-agent /
+// sandboxed snippet) dispatched on Busabase events, plus their delivery log.
+export * from "../domains/webhook/schema/webhook-rules";

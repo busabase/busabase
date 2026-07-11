@@ -45,6 +45,7 @@ import {
   replaceAssetUsageRows,
   resolveAssetFile,
 } from "../assets/handlers";
+import { handleAssetAttachmentRepoint } from "../assets/logic/asset-texts-logic";
 import type { AssetUsageOwnerType } from "../assets/schema/assets";
 import {
   getFileTreeNode as getStorageFileTreeNode,
@@ -220,6 +221,37 @@ const mountAssetAtPath = async (
   );
 };
 
+/**
+ * Run the Drive Grep Retrieval staleness hook in its own nested transaction
+ * (a Postgres SAVEPOINT under `tx`, via drizzle's `tx.transaction()`) so a
+ * failure inside it rolls back in isolation. A plain JS try/catch around the
+ * hook alone is NOT enough: a failed statement poisons the surrounding
+ * Postgres transaction for every statement after it (including the
+ * mount/cleanup calls right after this one in `upsertFileAssetAtPath`) until
+ * a ROLLBACK — only a real savepoint lets the rest of a legitimate file
+ * replace still commit. Best-effort: logs and swallows either way.
+ */
+const runAssetAttachmentRepointHook = async (
+  assetId: string,
+  newAttachmentId: string,
+  tx: Awaited<ReturnType<typeof getDb>>,
+) => {
+  try {
+    await tx.transaction(async (savepointTx) => {
+      await handleAssetAttachmentRepoint(
+        assetId,
+        newAttachmentId,
+        savepointTx as unknown as Awaited<ReturnType<typeof getDb>>,
+      );
+    });
+  } catch (error) {
+    console.error(
+      `[filetree] handleAssetAttachmentRepoint failed for asset ${assetId} (non-fatal):`,
+      error,
+    );
+  }
+};
+
 const upsertFileAssetAtPath = async (
   node: NodePO,
   input: StoredFileInput,
@@ -231,6 +263,7 @@ const upsertFileAssetAtPath = async (
   if (input.assetId) {
     const incoming = await resolveAssetFile(input.assetId, tx);
     if (existing) {
+      const attachmentChanged = existing.attachmentId !== incoming.attachmentId;
       await tx
         .update(busabaseAssets)
         .set({
@@ -240,6 +273,15 @@ const upsertFileAssetAtPath = async (
           metadata: incoming.metadata ?? {},
         })
         .where(eq(busabaseAssets.id, existing.assetId));
+      // Drive Grep Retrieval staleness hook: a repointed attachment may
+      // invalidate derived text (flips to `stale`) or, for a pure text-kind
+      // row, auto-re-register against the new bytes (never goes stale).
+      // Isolated (savepoint) + best-effort: an unrelated failure in text
+      // bookkeeping must never roll back — and lose — an otherwise valid,
+      // already-applied file replacement.
+      if (attachmentChanged) {
+        await runAssetAttachmentRepointHook(existing.assetId, incoming.attachmentId, tx);
+      }
       await mountAssetAtPath(
         node,
         path,
@@ -267,6 +309,7 @@ const upsertFileAssetAtPath = async (
   const bytes = Buffer.from(content, "utf8");
   const attachmentId = await createAttachmentFromBuffer(path, bytes, mimeType, tx);
   if (existing) {
+    const attachmentChanged = existing.attachmentId !== attachmentId;
     await tx
       .update(busabaseAssets)
       .set({
@@ -276,6 +319,11 @@ const upsertFileAssetAtPath = async (
         metadata: {},
       })
       .where(eq(busabaseAssets.id, existing.assetId));
+    // Same isolation as the asset-based path above — never let text
+    // bookkeeping abort a legitimate file replace.
+    if (attachmentChanged) {
+      await runAssetAttachmentRepointHook(existing.assetId, attachmentId, tx);
+    }
     await mountAssetAtPath(
       node,
       path,

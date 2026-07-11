@@ -3296,6 +3296,8 @@ export const buildDemoDataset = (
       url: `data:${file.mimeType.includes("charset") ? file.mimeType : `${file.mimeType};charset=utf-8`},${encodeURIComponent(file.body)}`,
       contentHash: null,
       usageCount: 1,
+      // Text-kind demo files are conceptually auto-registered, same as the real seed.
+      textStatus: "present" as const,
       createdAt: rootCreatedAt,
     },
   }));

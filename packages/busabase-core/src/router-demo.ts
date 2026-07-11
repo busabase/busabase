@@ -230,6 +230,21 @@ export const busabaseDemoRouter = os.router({
     delete: os.assets.delete.handler(() => {
       throw demoUnsupported("Delete asset");
     }),
+    // Drive Grep Retrieval needs real per-asset object storage (text slots,
+    // the grep cache) that the stateless in-memory demo dataset doesn't
+    // back — same "no real storage" boundary as uploads/updates/deletes above.
+    putText: os.assets.putText.handler(() => {
+      throw demoUnsupported("Write asset text");
+    }),
+    createTextUploadUrl: os.assets.createTextUploadUrl.handler(() => {
+      throw demoUnsupported("Write asset text");
+    }),
+    grep: os.assets.grep.handler(() => {
+      throw demoUnsupported("Grep assets");
+    }),
+    readTextLines: os.assets.readTextLines.handler(() => {
+      throw demoUnsupported("Read asset text lines");
+    }),
   },
   vault: {
     get: os.vault.get.handler(() => ({
@@ -242,6 +257,25 @@ export const busabaseDemoRouter = os.router({
     }),
     clear: os.vault.clear.handler(() => {
       throw demoUnsupported("Clear Vault");
+    }),
+  },
+  webhooks: {
+    list: os.webhooks.list.handler(() => []),
+    get: os.webhooks.get.handler(() => {
+      throw demoUnsupported("Open webhook rule");
+    }),
+    create: os.webhooks.create.handler(() => {
+      throw demoUnsupported("Create webhook rule");
+    }),
+    update: os.webhooks.update.handler(() => {
+      throw demoUnsupported("Update webhook rule");
+    }),
+    delete: os.webhooks.delete.handler(() => {
+      throw demoUnsupported("Delete webhook rule");
+    }),
+    deliveries: os.webhooks.deliveries.handler(() => []),
+    testFire: os.webhooks.testFire.handler(() => {
+      throw demoUnsupported("Test-fire webhook rule");
     }),
   },
   changeRequests: {

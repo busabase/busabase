@@ -239,6 +239,229 @@ type RootTranslation = {
 		 */
 		noVariables: string
 	}
+	webhookSettings: {
+		/**
+		 * W​e​b​h​o​o​k​s
+		 */
+		title: string
+		/**
+		 * A​u​t​o​m​a​t​i​c​a​l​l​y​ ​f​i​r​e​ ​a​ ​w​e​b​h​o​o​k​,​ ​n​o​t​i​f​y​ ​a​n​ ​a​g​e​n​t​,​ ​o​r​ ​r​u​n​ ​a​ ​s​a​n​d​b​o​x​e​d​ ​s​n​i​p​p​e​t​ ​w​h​e​n​ ​s​o​m​e​t​h​i​n​g​ ​h​a​p​p​e​n​s​ ​i​n​ ​t​h​i​s​ ​s​p​a​c​e​.
+		 */
+		description: string
+		/**
+		 * W​e​b​h​o​o​k​s
+		 */
+		openButton: string
+		/**
+		 * A​d​d​ ​r​u​l​e
+		 */
+		addRule: string
+		/**
+		 * L​o​a​d​i​n​g​ ​w​e​b​h​o​o​k​ ​r​u​l​e​s​.​.​.
+		 */
+		rulesLoading: string
+		/**
+		 * F​a​i​l​e​d​ ​t​o​ ​l​o​a​d​ ​w​e​b​h​o​o​k​ ​r​u​l​e​s
+		 */
+		rulesLoadFailed: string
+		/**
+		 * N​o​ ​w​e​b​h​o​o​k​ ​r​u​l​e​s​ ​c​o​n​f​i​g​u​r​e​d​ ​y​e​t​.
+		 */
+		noRules: string
+		/**
+		 * N​a​m​e
+		 */
+		nameLabel: string
+		/**
+		 * e​.​g​.​ ​N​o​t​i​f​y​ ​S​l​a​c​k​ ​o​n​ ​n​e​w​ ​r​e​c​o​r​d​s
+		 */
+		namePlaceholder: string
+		/**
+		 * E​v​e​n​t
+		 */
+		eventTypeLabel: string
+		/**
+		 * N​e​w​ ​R​e​c​o​r​d
+		 */
+		eventTypeRecordCreated: string
+		/**
+		 * @​A​I​ ​m​e​n​t​i​o​n
+		 */
+		eventTypeAiMention: string
+		/**
+		 * C​h​a​n​g​e​s​ ​r​e​q​u​e​s​t​e​d
+		 */
+		eventTypeChangesRequested: string
+		/**
+		 * B​a​s​e
+		 */
+		baseScopeLabel: string
+		/**
+		 * A​l​l​ ​b​a​s​e​s
+		 */
+		baseScopeAll: string
+		/**
+		 * A​c​t​i​o​n
+		 */
+		actionKindLabel: string
+		/**
+		 * W​e​b​h​o​o​k
+		 */
+		actionKindWebhook: string
+		/**
+		 * N​o​t​i​f​y​ ​a​g​e​n​t
+		 */
+		actionKindNotifyAgent: string
+		/**
+		 * R​u​n​ ​c​o​d​e​ ​s​n​i​p​p​e​t
+		 */
+		actionKindRunSnippet: string
+		/**
+		 * T​a​r​g​e​t​ ​U​R​L
+		 */
+		targetUrlLabel: string
+		/**
+		 * h​t​t​p​s​:​/​/​e​x​a​m​p​l​e​.​c​o​m​/​h​o​o​k​s​/​b​u​s​a​b​a​s​e
+		 */
+		targetUrlPlaceholder: string
+		/**
+		 * S​e​c​r​e​t
+		 */
+		secretLabel: string
+		/**
+		 * O​p​t​i​o​n​a​l​ ​—​ ​u​s​e​d​ ​t​o​ ​s​i​g​n​ ​t​h​e​ ​r​e​q​u​e​s​t
+		 */
+		secretPlaceholder: string
+		/**
+		 * L​e​a​v​e​ ​b​l​a​n​k​ ​t​o​ ​k​e​e​p​ ​t​h​e​ ​c​u​r​r​e​n​t​ ​s​e​c​r​e​t
+		 */
+		secretKeepPlaceholder: string
+		/**
+		 * S​e​c​r​e​t​ ​c​o​n​f​i​g​u​r​e​d
+		 */
+		secretConfigured: string
+		/**
+		 * C​o​d​e
+		 */
+		snippetCodeLabel: string
+		/**
+		 * /​/​ ​I​n​s​p​e​c​t​ ​`​i​n​p​u​t​`​,​ ​t​h​e​n​ ​r​e​t​u​r​n​ ​t​h​e​ ​c​a​l​l​ ​t​o​ ​m​a​k​e​:​ ​u​r​l​,​ ​m​e​t​h​o​d​,​ ​h​e​a​d​e​r​s​,​ ​b​o​d​y
+		 */
+		snippetCodePlaceholder: string
+		/**
+		 * T​h​e​ ​s​n​i​p​p​e​t​ ​r​e​c​e​i​v​e​s​ ​`​i​n​p​u​t​`​ ​(​t​h​e​ ​e​v​e​n​t​ ​p​a​y​l​o​a​d​)​ ​a​n​d​ ​m​a​y​ ​r​e​t​u​r​n​ ​a​n​ ​o​b​j​e​c​t​ ​w​i​t​h​ ​u​r​l​,​ ​m​e​t​h​o​d​,​ ​h​e​a​d​e​r​s​,​ ​a​n​d​ ​b​o​d​y​ ​t​o​ ​m​a​k​e​ ​o​n​e​ ​o​u​t​b​o​u​n​d​ ​c​a​l​l​.​ ​A​n​y​t​h​i​n​g​ ​e​l​s​e​ ​i​s​ ​j​u​s​t​ ​r​e​c​o​r​d​e​d​.​ ​I​t​ ​c​a​n​n​o​t​ ​a​c​c​e​s​s​ ​t​h​e​ ​n​e​t​w​o​r​k​ ​o​r​ ​f​i​l​e​s​y​s​t​e​m​ ​i​t​s​e​l​f​.
+		 */
+		snippetHelperCaption: string
+		/**
+		 * T​i​m​e​o​u​t​ ​(​m​s​)
+		 */
+		snippetTimeoutLabel: string
+		/**
+		 * E​n​a​b​l​e​d
+		 */
+		enabledLabel: string
+		/**
+		 * C​a​n​c​e​l
+		 */
+		cancel: string
+		/**
+		 * C​r​e​a​t​e​ ​r​u​l​e
+		 */
+		createRule: string
+		/**
+		 * S​a​v​e​ ​c​h​a​n​g​e​s
+		 */
+		saveChanges: string
+		/**
+		 * S​a​v​i​n​g​.​.​.
+		 */
+		saving: string
+		/**
+		 * W​e​b​h​o​o​k​ ​r​u​l​e​ ​s​a​v​e​d
+		 */
+		saved: string
+		/**
+		 * F​a​i​l​e​d​ ​t​o​ ​s​a​v​e​ ​w​e​b​h​o​o​k​ ​r​u​l​e
+		 */
+		saveFailed: string
+		/**
+		 * E​d​i​t​ ​r​u​l​e
+		 */
+		editRuleAction: string
+		/**
+		 * D​e​l​e​t​e​ ​r​u​l​e
+		 */
+		deleteRuleAction: string
+		/**
+		 * D​e​l​e​t​e​ ​w​e​b​h​o​o​k​ ​r​u​l​e
+		 */
+		deleteConfirmTitle: string
+		/**
+		 * D​e​l​e​t​e​ ​t​h​e​ ​r​u​l​e​ ​"​{​n​a​m​e​}​"​?​ ​T​h​i​s​ ​c​a​n​n​o​t​ ​b​e​ ​u​n​d​o​n​e​.
+		 * @param {string} name
+		 */
+		deleteConfirmBody: RequiredParams<'name'>
+		/**
+		 * D​e​l​e​t​e
+		 */
+		deleteConfirmAction: string
+		/**
+		 * F​a​i​l​e​d​ ​t​o​ ​d​e​l​e​t​e​ ​w​e​b​h​o​o​k​ ​r​u​l​e
+		 */
+		deleteFailed: string
+		/**
+		 * T​e​s​t​ ​f​i​r​e​d​ ​—​ ​s​u​c​c​e​s​s
+		 */
+		testFireSuccess: string
+		/**
+		 * T​e​s​t​ ​f​i​r​e​d​ ​—​ ​f​a​i​l​e​d​,​ ​s​e​e​ ​l​o​g​ ​b​e​l​o​w
+		 */
+		testFireDeliveryFailed: string
+		/**
+		 * F​a​i​l​e​d​ ​t​o​ ​t​e​s​t​-​f​i​r​e​ ​w​e​b​h​o​o​k​ ​r​u​l​e
+		 */
+		testFireRequestFailed: string
+		/**
+		 * S​u​c​c​e​s​s
+		 */
+		statusSuccess: string
+		/**
+		 * F​a​i​l​e​d
+		 */
+		statusFailed: string
+		/**
+		 * S​k​i​p​p​e​d
+		 */
+		statusSkipped: string
+		/**
+		 * N​e​v​e​r​ ​r​u​n
+		 */
+		statusNeverRun: string
+		/**
+		 * T​e​s​t​ ​n​o​w
+		 */
+		testNowAction: string
+		/**
+		 * V​i​e​w​ ​l​o​g
+		 */
+		viewLogAction: string
+		/**
+		 * H​i​d​e​ ​l​o​g
+		 */
+		hideLogAction: string
+		/**
+		 * L​o​a​d​i​n​g​ ​d​e​l​i​v​e​r​i​e​s​.​.​.
+		 */
+		deliveriesLoading: string
+		/**
+		 * F​a​i​l​e​d​ ​t​o​ ​l​o​a​d​ ​d​e​l​i​v​e​r​i​e​s
+		 */
+		deliveriesLoadFailed: string
+		/**
+		 * N​o​ ​d​e​l​i​v​e​r​i​e​s​ ​y​e​t​.
+		 */
+		noDeliveries: string
+	}
 	marketing: {
 		/**
 		 * O​p​e​n​-​s​o​u​r​c​e​ ​l​o​c​a​l​ ​r​e​v​i​e​w​ ​e​n​g​i​n​e​ ​f​o​r​ ​B​u​s​a​b​a​s​e​.
@@ -770,6 +993,228 @@ export type TranslationFunctions = {
 		 * No variables configured yet.
 		 */
 		noVariables: () => LocalizedString
+	}
+	webhookSettings: {
+		/**
+		 * Webhooks
+		 */
+		title: () => LocalizedString
+		/**
+		 * Automatically fire a webhook, notify an agent, or run a sandboxed snippet when something happens in this space.
+		 */
+		description: () => LocalizedString
+		/**
+		 * Webhooks
+		 */
+		openButton: () => LocalizedString
+		/**
+		 * Add rule
+		 */
+		addRule: () => LocalizedString
+		/**
+		 * Loading webhook rules...
+		 */
+		rulesLoading: () => LocalizedString
+		/**
+		 * Failed to load webhook rules
+		 */
+		rulesLoadFailed: () => LocalizedString
+		/**
+		 * No webhook rules configured yet.
+		 */
+		noRules: () => LocalizedString
+		/**
+		 * Name
+		 */
+		nameLabel: () => LocalizedString
+		/**
+		 * e.g. Notify Slack on new records
+		 */
+		namePlaceholder: () => LocalizedString
+		/**
+		 * Event
+		 */
+		eventTypeLabel: () => LocalizedString
+		/**
+		 * New Record
+		 */
+		eventTypeRecordCreated: () => LocalizedString
+		/**
+		 * @AI mention
+		 */
+		eventTypeAiMention: () => LocalizedString
+		/**
+		 * Changes requested
+		 */
+		eventTypeChangesRequested: () => LocalizedString
+		/**
+		 * Base
+		 */
+		baseScopeLabel: () => LocalizedString
+		/**
+		 * All bases
+		 */
+		baseScopeAll: () => LocalizedString
+		/**
+		 * Action
+		 */
+		actionKindLabel: () => LocalizedString
+		/**
+		 * Webhook
+		 */
+		actionKindWebhook: () => LocalizedString
+		/**
+		 * Notify agent
+		 */
+		actionKindNotifyAgent: () => LocalizedString
+		/**
+		 * Run code snippet
+		 */
+		actionKindRunSnippet: () => LocalizedString
+		/**
+		 * Target URL
+		 */
+		targetUrlLabel: () => LocalizedString
+		/**
+		 * https://example.com/hooks/busabase
+		 */
+		targetUrlPlaceholder: () => LocalizedString
+		/**
+		 * Secret
+		 */
+		secretLabel: () => LocalizedString
+		/**
+		 * Optional — used to sign the request
+		 */
+		secretPlaceholder: () => LocalizedString
+		/**
+		 * Leave blank to keep the current secret
+		 */
+		secretKeepPlaceholder: () => LocalizedString
+		/**
+		 * Secret configured
+		 */
+		secretConfigured: () => LocalizedString
+		/**
+		 * Code
+		 */
+		snippetCodeLabel: () => LocalizedString
+		/**
+		 * // Inspect `input`, then return the call to make: url, method, headers, body
+		 */
+		snippetCodePlaceholder: () => LocalizedString
+		/**
+		 * The snippet receives `input` (the event payload) and may return an object with url, method, headers, and body to make one outbound call. Anything else is just recorded. It cannot access the network or filesystem itself.
+		 */
+		snippetHelperCaption: () => LocalizedString
+		/**
+		 * Timeout (ms)
+		 */
+		snippetTimeoutLabel: () => LocalizedString
+		/**
+		 * Enabled
+		 */
+		enabledLabel: () => LocalizedString
+		/**
+		 * Cancel
+		 */
+		cancel: () => LocalizedString
+		/**
+		 * Create rule
+		 */
+		createRule: () => LocalizedString
+		/**
+		 * Save changes
+		 */
+		saveChanges: () => LocalizedString
+		/**
+		 * Saving...
+		 */
+		saving: () => LocalizedString
+		/**
+		 * Webhook rule saved
+		 */
+		saved: () => LocalizedString
+		/**
+		 * Failed to save webhook rule
+		 */
+		saveFailed: () => LocalizedString
+		/**
+		 * Edit rule
+		 */
+		editRuleAction: () => LocalizedString
+		/**
+		 * Delete rule
+		 */
+		deleteRuleAction: () => LocalizedString
+		/**
+		 * Delete webhook rule
+		 */
+		deleteConfirmTitle: () => LocalizedString
+		/**
+		 * Delete the rule "{name}"? This cannot be undone.
+		 */
+		deleteConfirmBody: (arg: { name: string }) => LocalizedString
+		/**
+		 * Delete
+		 */
+		deleteConfirmAction: () => LocalizedString
+		/**
+		 * Failed to delete webhook rule
+		 */
+		deleteFailed: () => LocalizedString
+		/**
+		 * Test fired — success
+		 */
+		testFireSuccess: () => LocalizedString
+		/**
+		 * Test fired — failed, see log below
+		 */
+		testFireDeliveryFailed: () => LocalizedString
+		/**
+		 * Failed to test-fire webhook rule
+		 */
+		testFireRequestFailed: () => LocalizedString
+		/**
+		 * Success
+		 */
+		statusSuccess: () => LocalizedString
+		/**
+		 * Failed
+		 */
+		statusFailed: () => LocalizedString
+		/**
+		 * Skipped
+		 */
+		statusSkipped: () => LocalizedString
+		/**
+		 * Never run
+		 */
+		statusNeverRun: () => LocalizedString
+		/**
+		 * Test now
+		 */
+		testNowAction: () => LocalizedString
+		/**
+		 * View log
+		 */
+		viewLogAction: () => LocalizedString
+		/**
+		 * Hide log
+		 */
+		hideLogAction: () => LocalizedString
+		/**
+		 * Loading deliveries...
+		 */
+		deliveriesLoading: () => LocalizedString
+		/**
+		 * Failed to load deliveries
+		 */
+		deliveriesLoadFailed: () => LocalizedString
+		/**
+		 * No deliveries yet.
+		 */
+		noDeliveries: () => LocalizedString
 	}
 	marketing: {
 		/**

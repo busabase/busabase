@@ -324,6 +324,41 @@ async function uploadAsset(config: ResolvedConfig, opts: OptionValues) {
   };
 }
 
+/** Mirrors the server's INLINE_TEXT_MAX_BYTES cap (1MB) — asset-texts-logic.ts. */
+const INLINE_TEXT_MAX_BYTES = 1024 * 1024;
+
+/**
+ * Drive Grep Retrieval `putText` — one call for callers, picking inline vs
+ * presigned by size (mirrors `Busabase.putText` in the SDK).
+ */
+async function putTextCommand(client: BusabaseClient, opts: OptionValues) {
+  const assetId = opts.assetId as string;
+  const text = opts.file ? readFileSync(opts.file as string, "utf8") : (opts.text as string);
+  if (opts.none) {
+    return client.assets.putText({ assetId, none: true });
+  }
+  if (text === undefined) {
+    throw new Error("Provide --text <string>, --file <path>, or --none.");
+  }
+  const sizeBytes = Buffer.byteLength(text, "utf8");
+  if (sizeBytes <= INLINE_TEXT_MAX_BYTES) {
+    return client.assets.putText({ assetId, text });
+  }
+  const upload = await client.assets.createTextUploadUrl({ assetId, sizeBytes });
+  const uploadResponse = await fetch(upload.uploadUrl, {
+    method: "PUT",
+    headers: { "content-type": "text/plain; charset=utf-8" },
+    body: text,
+  });
+  if (!uploadResponse.ok) {
+    const body = await uploadResponse.text();
+    throw new Error(
+      `Text byte upload failed (${uploadResponse.status} ${uploadResponse.statusText})${body ? `: ${body}` : ""}`,
+    );
+  }
+  return client.assets.putText({ assetId, storageKey: upload.storageKey });
+}
+
 interface CliState {
   /** Last config a command resolved — lets `runCli` explain transport errors with the real target. */
   config?: ResolvedConfig;
@@ -393,6 +428,8 @@ interface GenField {
   kind: GenFlagKind;
   required: boolean;
   choices?: string[];
+  /** This is the sole field and its JSON value IS the whole input, not a single property of it. */
+  root?: boolean;
 }
 
 /** Peel ZodOptional/ZodDefault/ZodNullable wrappers; a default or optional wrapper means not-required. */
@@ -429,11 +466,20 @@ function classifyKind(inner: any): { kind: GenFlagKind; choices?: string[] } {
   return { kind: "json" };
 }
 
-/** Derive the flag set for a procedure from its input object schema (empty when it takes no input). */
+/**
+ * Derive the flag set for a procedure from its input object schema (empty when it takes no
+ * input). A schema whose top level isn't a plain object — e.g. a discriminated union like the
+ * webhook rule input (`WebhookRuleInputSchema`) — has no per-field shape to introspect, so this
+ * falls back to a single `--input-json` flag for the whole payload instead of silently
+ * generating a flag-less, unusable command.
+ */
 function inputFields(inputSchema: unknown): GenField[] {
+  if (inputSchema === undefined) return [];
   const { inner } = unwrapSchema(inputSchema);
   const shape = inner?.shape ?? (inner?.def?.type === "object" ? inner.def.shape : undefined);
-  if (!shape || typeof shape !== "object") return [];
+  if (!shape || typeof shape !== "object") {
+    return [{ key: "input", kind: "json", required: true, root: true }];
+  }
   const fields: GenField[] = [];
   for (const [key, sub] of Object.entries(shape as Record<string, any>)) {
     const { inner: unwrapped, optional } = unwrapSchema(sub);
@@ -502,14 +548,16 @@ function registerGeneratedCommands(program: Command, state: CliState): void {
     leaf.addHelpText("after", `\nOpenAPI: ${route.method} ${route.path}`);
     leaf.action(
       runAction(state, (client, opts) => {
-        const input: Record<string, unknown> = {};
+        let input: unknown = {};
         for (const f of fields) {
           if (GLOBAL_LONG_FLAGS.has(`--${kebab(f.key)}`)) continue;
           const optKey = f.kind === "json" ? `${f.key}Json` : f.key;
           const value = (opts as Record<string, unknown>)[optKey];
           if (value === undefined) continue;
-          input[f.key] =
+          const parsed =
             f.kind === "json" ? parseJsonValue(value as string, `${kebab(f.key)}-json`) : value;
+          if (f.root) input = parsed;
+          else (input as Record<string, unknown>)[f.key] = parsed;
         }
         // The oRPC client is a Proxy: `.call`/`.bind` are intercepted as route
         // segments, so the method must be invoked directly (target[procKey](input)).
@@ -1011,7 +1059,67 @@ Use the JSON output directly in an attachment field value, e.g. {"cover_image":[
       )
       .action(runAction(state, (_client, opts, config) => uploadAsset(config, opts)));
 
-  addUploadCommand(program.command("assets").description("Assets"));
+  const assetsCommand = program.command("assets").description("Assets");
+  addUploadCommand(assetsCommand);
+
+  addGlobalFlags(assetsCommand.command("put-text"))
+    .description("Write (or mark none) an asset's Drive Grep Retrieval text slot")
+    .requiredOption("--asset-id <id>", "asset id")
+    .option("--text <string>", "inline text (≤1MB)")
+    .option("--file <path>", "read text from a local file instead of --text")
+    .option("--none", "mark as having no extractable text (e.g. a scanned, image-only PDF)")
+    .addHelpText(
+      "after",
+      `
+Examples:
+  busabase-cli assets put-text --asset-id ast_123 --file ./extracted.txt
+  busabase-cli assets put-text --asset-id ast_123 --text "plain text"
+  busabase-cli assets put-text --asset-id ast_123 --none`,
+    )
+    .action(runAction(state, (client, opts) => putTextCommand(client, opts)));
+
+  addGlobalFlags(assetsCommand.command("grep"))
+    .description("Search every text-bearing asset in scope")
+    .requiredOption("--pattern <regex>", "literal or regex pattern")
+    .option("--flags <flags>", 'RegExp flags, e.g. "i" for case-insensitive')
+    .option("--asset-ids <ids...>", "scope: specific asset ids")
+    .option("--drive-path <path>", "scope: Drive/Skill mounted path prefix")
+    .option("--mime-types <types...>", "scope: MIME types")
+    .option("--max-matches <n>", "max matches (default 100, cap 1000)", parsePositiveInt)
+    .option("--context-lines <n>", "lines of before/after context (default 0, cap 10)", parseNum)
+    .action(
+      runAction(state, (client, opts) =>
+        client.assets.grep({
+          pattern: opts.pattern as string,
+          flags: opts.flags as string | undefined,
+          scope:
+            opts.assetIds || opts.drivePath || opts.mimeTypes
+              ? {
+                  assetIds: opts.assetIds as string[] | undefined,
+                  drivePath: opts.drivePath as string | undefined,
+                  mimeTypes: opts.mimeTypes as string[] | undefined,
+                }
+              : undefined,
+          maxMatches: opts.maxMatches as number | undefined,
+          contextLines: opts.contextLines as number | undefined,
+        }),
+      ),
+    );
+
+  addGlobalFlags(assetsCommand.command("read-lines"))
+    .description("Read an exact line range from an asset's text (range capped at 2000 lines)")
+    .requiredOption("--asset-id <id>", "asset id")
+    .requiredOption("--start-line <n>", "first line (1-based)", parsePositiveInt)
+    .requiredOption("--end-line <n>", "last line (1-based)", parsePositiveInt)
+    .action(
+      runAction(state, (client, opts) =>
+        client.assets.readTextLines({
+          assetId: opts.assetId as string,
+          startLine: opts.startLine as number,
+          endLine: opts.endLine as number,
+        }),
+      ),
+    );
 
   addGlobalFlags(program.command("api"))
     .description("Raw request to any /api/v1 endpoint")

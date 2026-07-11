@@ -4,7 +4,13 @@ export {
   createDevAttachmentRoute,
   createDevUploadRoute,
 } from "./dev-routes";
-export { createStorage, resetStorage, storage } from "./factory";
+export {
+  createStorage,
+  getLocalStoragePath,
+  isLocalStorageProvider,
+  resetStorage,
+  storage,
+} from "./factory";
 export { LocalStorage } from "./local";
 export {
   extractFileExtension,

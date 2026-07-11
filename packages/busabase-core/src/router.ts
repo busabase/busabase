@@ -9,6 +9,7 @@ import { fileRouter } from "./domains/file-node/router";
 import { folderRouter } from "./domains/folder/router";
 import { skillRouter } from "./domains/skill/router";
 import { vaultRouter } from "./domains/vault/router";
+import { webhookRouter } from "./domains/webhook/router";
 import { listActivityPaged } from "./logic/activity";
 import { subscribeBusabaseLiveEvents } from "./logic/live-events";
 import {
@@ -79,6 +80,7 @@ export const busabaseRouter = busabase.router({
   folders: folderRouter,
   assets: assetsRouter,
   vault: vaultRouter,
+  webhooks: webhookRouter,
   changeRequests: {
     list: busabase.changeRequests.list.handler(async ({ input }) => listChangeRequests(input)),
     listPaged: busabase.changeRequests.listPaged.handler(async ({ input }) =>

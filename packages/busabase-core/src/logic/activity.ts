@@ -273,12 +273,18 @@ export const listActivityPaged = async (
 
   // Lazy import breaks the module-load cycle (cr-lifecycle pulls in the whole
   // merge/handler graph); by the time this runs it is fully initialized.
-  const { hydrateChangeRequests, hydrateRecords } = await import("./cr-lifecycle");
+  const { hydrateChangeRequests, hydrateRecords, LIST_MAX_OPERATIONS_PER_CHANGE_REQUEST } =
+    await import("./cr-lifecycle");
   const [crVOs, recordVOs] = await Promise.all([
-    hydrateChangeRequests(crPOs),
+    hydrateChangeRequests(crPOs, {
+      maxOperationsPerChangeRequest: LIST_MAX_OPERATIONS_PER_CHANGE_REQUEST,
+    }),
     hydrateRecords(recordPOs),
   ]);
   const crById = new Map(crVOs.map((cr) => [cr.id, cr]));
+  const operationIdsByCrId = new Map(
+    crVOs.map((cr) => [cr.id, new Set(cr.operations.map((operation) => operation.id))]),
+  );
   const recordById = new Map(recordVOs.map((record) => [record.id, record]));
   const auditUsers = await resolveUserRefs(auditPOs.map((event) => event.actorId));
   const auditById = new Map(auditPOs.map((event) => [event.id, toAuditEventVO(event, auditUsers)]));
@@ -291,7 +297,7 @@ export const listActivityPaged = async (
         items.push({ kind: "change_request", timestamp: event.ts.toISOString(), changeRequest });
     } else if (event.kind === "operation") {
       const changeRequest = event.changeRequestId ? crById.get(event.changeRequestId) : undefined;
-      if (changeRequest)
+      if (changeRequest && operationIdsByCrId.get(changeRequest.id)?.has(event.id))
         items.push({
           kind: "operation",
           timestamp: event.ts.toISOString(),

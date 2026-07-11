@@ -1,7 +1,7 @@
 {
   "name": "busabase-core",
   "description": "Shared Busabase open-core protocol, local store, API helpers, and dashboard components.",
-  "version": "0.9.3",
+  "version": "0.9.4",
   "private": true,
   "type": "module",
   "exports": {
@@ -73,6 +73,14 @@
       "types": "./src/domains/vault/types/vault.ts",
       "default": "./src/domains/vault/types/vault.ts"
     },
+    "./domains/webhook/logic": {
+      "types": "./src/domains/webhook/logic/webhook-logic.ts",
+      "default": "./src/domains/webhook/logic/webhook-logic.ts"
+    },
+    "./domains/webhook/types": {
+      "types": "./src/domains/webhook/types/webhook.ts",
+      "default": "./src/domains/webhook/types/webhook.ts"
+    },
     "./dashboard": {
       "types": "./src/domains/dashboard/index.tsx",
       "default": "./src/domains/dashboard/index.tsx"
@@ -92,6 +100,10 @@
     "./dashboard/agent-skill-button": {
       "types": "./src/domains/dashboard/components/agent-skill-button.tsx",
       "default": "./src/domains/dashboard/components/agent-skill-button.tsx"
+    },
+    "./dashboard/primitives": {
+      "types": "./src/domains/dashboard/components/primitives.tsx",
+      "default": "./src/domains/dashboard/components/primitives.tsx"
     },
     "./dashboard/node-icons": {
       "types": "./src/domains/dashboard/helpers/node-icons.ts",
@@ -142,6 +154,7 @@
     "open-domains": "workspace:*",
     "openlib": "workspace:*",
     "postgres": "^3.4.6",
+    "quickjs-emscripten": "^0.32.0",
     "react": "^19.2.7",
     "server-only": "^0.0.1",
     "streamdown": "^2.3.0",

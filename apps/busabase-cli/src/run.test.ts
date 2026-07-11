@@ -71,6 +71,17 @@ describe("busabase-cli commands", () => {
     expect(HELP).toContain("views delete-change-request");
     expect(HELP).toContain("comments create");
     expect(HELP).toContain("users me");
+    // Webhook automation domain (whole domain has no curated commands).
+    expect(HELP).toContain("webhooks list");
+    expect(HELP).toContain("webhooks get --id <value>");
+    expect(HELP).toContain("webhooks delete --id <value>");
+    expect(HELP).toContain("webhooks test-fire --id <value>");
+    expect(HELP).toContain("webhooks deliveries --rule-id <value>");
+    // create/update take a top-level discriminated-union input (no per-field
+    // shape to introspect), so the generator must fall back to a single JSON
+    // flag for the whole payload instead of silently emitting zero flags.
+    expect(HELP).toContain("webhooks create --input-json <json|@file>");
+    expect(HELP).toContain("webhooks update --input-json <json|@file>");
   });
 
   it("keeps curated commands over generated duplicates", () => {
@@ -175,6 +186,187 @@ describe("busabase-cli commands", () => {
           mode: "replace",
         },
       }),
+    ]);
+  });
+
+  it("routes a generated command with a discriminated-union input via --input-json", async () => {
+    const calls: Array<{ body: unknown; method: string; url: string }> = [];
+    global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      calls.push({
+        body: request.body ? await request.json() : null,
+        method: request.method,
+        url: request.url,
+      });
+      return jsonResponse({ id: "whk_1" });
+    }) as typeof fetch;
+
+    const payload = {
+      name: "notify on new posts",
+      eventType: "record.created",
+      baseId: null,
+      actionKind: "webhook",
+      config: { targetUrl: "https://example.com/hook" },
+      enabled: true,
+    };
+    const exitCode = await runCli([
+      "--base-url",
+      "http://localhost:15419",
+      "--output",
+      "json",
+      "webhooks",
+      "create",
+      "--input-json",
+      JSON.stringify(payload),
+    ]);
+
+    expect(exitCode).toBe(0);
+    expect(calls).toEqual([
+      expect.objectContaining({
+        method: "POST",
+        url: "http://localhost:15419/api/v1/webhooks",
+        body: payload,
+      }),
+    ]);
+  });
+
+  it("routes a generated path-only mutation (webhooks test-fire) with no request body", async () => {
+    const calls: Array<{ body: unknown; method: string; url: string }> = [];
+    global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      calls.push({
+        body: request.body ? await requestBody(request) : null,
+        method: request.method,
+        url: request.url,
+      });
+      return jsonResponse({ id: "whd_1", ruleId: "whk_1", status: "success" });
+    }) as typeof fetch;
+
+    const exitCode = await runCli([
+      "--base-url",
+      "http://localhost:15419",
+      "--output",
+      "json",
+      "webhooks",
+      "test-fire",
+      "--id",
+      "whk_1",
+    ]);
+
+    expect(exitCode).toBe(0);
+    expect(calls).toEqual([
+      expect.objectContaining({
+        method: "POST",
+        url: "http://localhost:15419/api/v1/webhooks/whk_1/test-fire",
+      }),
+    ]);
+  });
+
+  it("routes generated webhooks get/delete GET/DELETE commands with the id path param", async () => {
+    const calls: Array<{ method: string; url: string }> = [];
+    global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      calls.push({ method: request.method, url: request.url });
+      return jsonResponse({ id: "whk_1", success: true });
+    }) as typeof fetch;
+
+    await runCli([
+      "--base-url",
+      "http://localhost:15419",
+      "--output",
+      "json",
+      "webhooks",
+      "get",
+      "--id",
+      "whk_1",
+    ]);
+    await runCli([
+      "--base-url",
+      "http://localhost:15419",
+      "--output",
+      "json",
+      "webhooks",
+      "delete",
+      "--id",
+      "whk_1",
+    ]);
+
+    expect(calls).toEqual([
+      { method: "GET", url: "http://localhost:15419/api/v1/webhooks/whk_1" },
+      { method: "DELETE", url: "http://localhost:15419/api/v1/webhooks/whk_1" },
+    ]);
+  });
+
+  it("routes generated webhooks update (--input-json) through PUT with the id path param", async () => {
+    const calls: Array<{ body: unknown; method: string; url: string }> = [];
+    global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      calls.push({
+        body: request.body ? await request.json() : null,
+        method: request.method,
+        url: request.url,
+      });
+      return jsonResponse({ id: "whk_1" });
+    }) as typeof fetch;
+
+    const payload = {
+      id: "whk_1",
+      name: "renamed",
+      eventType: "record.created",
+      baseId: null,
+      actionKind: "webhook",
+      config: { targetUrl: "https://example.com/hook" },
+      enabled: false,
+    };
+    const exitCode = await runCli([
+      "--base-url",
+      "http://localhost:15419",
+      "--output",
+      "json",
+      "webhooks",
+      "update",
+      "--input-json",
+      JSON.stringify(payload),
+    ]);
+
+    expect(exitCode).toBe(0);
+    // `id` is both the path param and part of the JSON body — the oRPC client
+    // extracts it for the URL and still leaves it in the payload it sends.
+    expect(calls).toEqual([
+      expect.objectContaining({
+        method: "PUT",
+        url: "http://localhost:15419/api/v1/webhooks/whk_1",
+      }),
+    ]);
+  });
+
+  it("routes generated webhooks deliveries with a path param plus a numeric query flag", async () => {
+    const calls: Array<{ method: string; url: string }> = [];
+    global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      calls.push({ method: request.method, url: request.url });
+      return jsonResponse([]);
+    }) as typeof fetch;
+
+    const exitCode = await runCli([
+      "--base-url",
+      "http://localhost:15419",
+      "--output",
+      "json",
+      "webhooks",
+      "deliveries",
+      "--rule-id",
+      "whk_1",
+      "--limit",
+      "5",
+    ]);
+
+    expect(exitCode).toBe(0);
+    expect(calls).toEqual([
+      {
+        method: "GET",
+        url: "http://localhost:15419/api/v1/webhooks/whk_1/deliveries?limit=5",
+      },
     ]);
   });
 
@@ -822,5 +1014,408 @@ describe("busabase-cli commands", () => {
 
     expect(exitCode).toBe(1);
     expect(error.mock.calls.join("\n")).toContain('HTTP 500 : {"error":"storage missing"}');
+  });
+
+  // ── Drive Grep Retrieval: assets put-text / grep / read-lines ────────────────
+  // The underlying router/logic is already covered in packages/busabase-core; these
+  // tests exercise only the CLI's own wiring: flag parsing, the inline-vs-presigned
+  // size branch in putTextCommand, and error surfacing. Request/response shapes below
+  // (e.g. assetId living in the URL path, not the JSON body) were confirmed against
+  // the real oRPC client before writing these assertions, not assumed.
+  describe("assets put-text / grep / read-lines (Drive Grep Retrieval)", () => {
+    it("writes inline text via put-text --text", async () => {
+      const calls: Array<{ body: unknown; method: string; url: string }> = [];
+      global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const request = input instanceof Request ? input : new Request(input, init);
+        calls.push({
+          body: request.body ? await requestBody(request) : null,
+          method: request.method,
+          url: request.url,
+        });
+        return jsonResponse({
+          assetId: "ast_1",
+          textStatus: "present",
+          lineCount: 1,
+          charCount: 12,
+          byteCount: 12,
+        });
+      }) as typeof fetch;
+
+      const exitCode = await runCli([
+        "--base-url",
+        "http://localhost:15419",
+        "--output",
+        "json",
+        "assets",
+        "put-text",
+        "--asset-id",
+        "ast_1",
+        "--text",
+        "small string",
+      ]);
+
+      expect(exitCode).toBe(0);
+      // assetId is a path param on PUT /assets/{assetId}/text, not a body field.
+      expect(calls).toEqual([
+        expect.objectContaining({
+          method: "PUT",
+          url: "http://localhost:15419/api/v1/assets/ast_1/text",
+          body: { text: "small string" },
+        }),
+      ]);
+    });
+
+    it("writes text from a large --file via the presigned upload flow (createTextUploadUrl -> PUT -> putText)", async () => {
+      const dir = await mkdtemp(join(tmpdir(), "busabase-cli-text-"));
+      const file = join(dir, "large.txt");
+      const largeText = "a".repeat(1024 * 1024 + 100); // exceeds the 1MB inline cap
+      await writeFile(file, largeText, "utf8");
+      const calls: Array<{ body: unknown; method: string; url: string }> = [];
+      global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const request = input instanceof Request ? input : new Request(input, init);
+        calls.push({
+          body: request.body ? await requestBody(request) : null,
+          method: request.method,
+          url: request.url,
+        });
+        if (request.url === "https://upload.example/large.txt") {
+          return new Response(null, { status: 200 });
+        }
+        if (request.url.endsWith("/api/v1/assets/text/upload-urls")) {
+          return jsonResponse({
+            uploadUrl: "https://upload.example/large.txt",
+            storageKey: "asset-texts/pending/large.txt",
+            expiresIn: 3600,
+          });
+        }
+        return jsonResponse({
+          assetId: "ast_1",
+          textStatus: "present",
+          lineCount: 1,
+          charCount: largeText.length,
+          byteCount: largeText.length,
+        });
+      }) as typeof fetch;
+
+      try {
+        const exitCode = await runCli([
+          "--base-url",
+          "http://localhost:15419",
+          "--output",
+          "json",
+          "assets",
+          "put-text",
+          "--asset-id",
+          "ast_1",
+          "--file",
+          file,
+        ]);
+
+        expect(exitCode).toBe(0);
+        expect(calls.map((call) => [call.method, call.url])).toEqual([
+          ["POST", "http://localhost:15419/api/v1/assets/text/upload-urls"],
+          ["PUT", "https://upload.example/large.txt"],
+          ["PUT", "http://localhost:15419/api/v1/assets/ast_1/text"],
+        ]);
+        expect(calls[0]?.body).toEqual({ assetId: "ast_1", sizeBytes: largeText.length });
+        // Middle call is a raw byte PUT (text/plain), not JSON — assert the real bytes went out.
+        expect((calls[1]?.body as string)?.length).toBe(largeText.length);
+        expect(calls[2]?.body).toEqual({ storageKey: "asset-texts/pending/large.txt" });
+      } finally {
+        await rm(dir, { force: true, recursive: true });
+      }
+    });
+
+    it("marks an asset's text slot as none via put-text --none", async () => {
+      const calls: Array<{ body: unknown; method: string; url: string }> = [];
+      global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const request = input instanceof Request ? input : new Request(input, init);
+        calls.push({
+          body: request.body ? await requestBody(request) : null,
+          method: request.method,
+          url: request.url,
+        });
+        return jsonResponse({
+          assetId: "ast_1",
+          textStatus: "none",
+          lineCount: 0,
+          charCount: 0,
+          byteCount: 0,
+        });
+      }) as typeof fetch;
+
+      const exitCode = await runCli([
+        "--base-url",
+        "http://localhost:15419",
+        "--output",
+        "json",
+        "assets",
+        "put-text",
+        "--asset-id",
+        "ast_1",
+        "--none",
+      ]);
+
+      expect(exitCode).toBe(0);
+      expect(calls).toEqual([
+        expect.objectContaining({
+          method: "PUT",
+          url: "http://localhost:15419/api/v1/assets/ast_1/text",
+          body: { none: true },
+        }),
+      ]);
+    });
+
+    it("rejects put-text without --text, --file, or --none before making any HTTP call", async () => {
+      const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+      global.fetch = vi.fn() as typeof fetch;
+
+      const exitCode = await runCli([
+        "--base-url",
+        "http://localhost:15419",
+        "assets",
+        "put-text",
+        "--asset-id",
+        "ast_1",
+      ]);
+
+      expect(exitCode).toBe(1);
+      expect(global.fetch).not.toHaveBeenCalled();
+      expect(error.mock.calls.join("\n")).toContain(
+        "Provide --text <string>, --file <path>, or --none.",
+      );
+    });
+
+    it("surfaces a clear error when the presigned text upload PUT fails (no silent failure)", async () => {
+      const dir = await mkdtemp(join(tmpdir(), "busabase-cli-text-"));
+      const file = join(dir, "large.txt");
+      const largeText = "b".repeat(1024 * 1024 + 100);
+      await writeFile(file, largeText, "utf8");
+      const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+      const calls: Array<{ method: string; url: string }> = [];
+      global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const request = input instanceof Request ? input : new Request(input, init);
+        calls.push({ method: request.method, url: request.url });
+        if (request.url === "https://upload.example/large.txt") {
+          return new Response("disk full", { status: 500, statusText: "Internal Server Error" });
+        }
+        return jsonResponse({
+          uploadUrl: "https://upload.example/large.txt",
+          storageKey: "asset-texts/pending/large.txt",
+          expiresIn: 3600,
+        });
+      }) as typeof fetch;
+
+      try {
+        const exitCode = await runCli([
+          "--base-url",
+          "http://localhost:15419",
+          "assets",
+          "put-text",
+          "--asset-id",
+          "ast_1",
+          "--file",
+          file,
+        ]);
+
+        expect(exitCode).toBe(1);
+        // Only 2 calls: createTextUploadUrl + the failed PUT — putText is never reached.
+        expect(calls.map((call) => [call.method, call.url])).toEqual([
+          ["POST", "http://localhost:15419/api/v1/assets/text/upload-urls"],
+          ["PUT", "https://upload.example/large.txt"],
+        ]);
+        expect(error.mock.calls.join("\n")).toContain(
+          "Text byte upload failed (500 Internal Server Error): disk full",
+        );
+      } finally {
+        await rm(dir, { force: true, recursive: true });
+      }
+    });
+
+    it("surfaces a clear error without a trailing colon when the failed presigned PUT has an empty body", async () => {
+      const dir = await mkdtemp(join(tmpdir(), "busabase-cli-text-"));
+      const file = join(dir, "large.txt");
+      const largeText = "e".repeat(1024 * 1024 + 100);
+      await writeFile(file, largeText, "utf8");
+      const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+      global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const request = input instanceof Request ? input : new Request(input, init);
+        if (request.url === "https://upload.example/large.txt") {
+          return new Response(null, { status: 503, statusText: "Service Unavailable" });
+        }
+        return jsonResponse({
+          uploadUrl: "https://upload.example/large.txt",
+          storageKey: "asset-texts/pending/large.txt",
+          expiresIn: 3600,
+        });
+      }) as typeof fetch;
+
+      try {
+        const exitCode = await runCli([
+          "--base-url",
+          "http://localhost:15419",
+          "assets",
+          "put-text",
+          "--asset-id",
+          "ast_1",
+          "--file",
+          file,
+        ]);
+
+        expect(exitCode).toBe(1);
+        expect(error.mock.calls.join("\n")).toContain(
+          "Text byte upload failed (503 Service Unavailable)",
+        );
+        expect(error.mock.calls.join("\n")).not.toMatch(/Service Unavailable\):/);
+      } finally {
+        await rm(dir, { force: true, recursive: true });
+      }
+    });
+
+    it("searches every text-bearing asset via grep with only --pattern (no spurious scope/defaults sent)", async () => {
+      const calls: Array<{ body: unknown; method: string; url: string }> = [];
+      global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const request = input instanceof Request ? input : new Request(input, init);
+        calls.push({
+          body: request.body ? await requestBody(request) : null,
+          method: request.method,
+          url: request.url,
+        });
+        return jsonResponse({
+          matches: [],
+          filesScanned: 0,
+          missing: [],
+          stale: [],
+          unsearchable: 0,
+          errored: [],
+          notReached: 0,
+          truncated: false,
+        });
+      }) as typeof fetch;
+
+      const exitCode = await runCli([
+        "--base-url",
+        "http://localhost:15419",
+        "--output",
+        "json",
+        "assets",
+        "grep",
+        "--pattern",
+        "foo",
+      ]);
+
+      expect(exitCode).toBe(0);
+      expect(calls).toEqual([
+        expect.objectContaining({
+          method: "POST",
+          url: "http://localhost:15419/api/v1/assets/grep",
+          body: { pattern: "foo" },
+        }),
+      ]);
+    });
+
+    it("searches with a full grep scope, flags, and match options", async () => {
+      const calls: Array<{ body: unknown; method: string; url: string }> = [];
+      global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const request = input instanceof Request ? input : new Request(input, init);
+        calls.push({
+          body: request.body ? await requestBody(request) : null,
+          method: request.method,
+          url: request.url,
+        });
+        return jsonResponse({
+          matches: [],
+          filesScanned: 0,
+          missing: [],
+          stale: [],
+          unsearchable: 0,
+          errored: [],
+          notReached: 0,
+          truncated: false,
+        });
+      }) as typeof fetch;
+
+      const exitCode = await runCli([
+        "--base-url",
+        "http://localhost:15419",
+        "--output",
+        "json",
+        "assets",
+        "grep",
+        "--pattern",
+        "foo",
+        "--flags",
+        "i",
+        "--asset-ids",
+        "a1",
+        "a2",
+        "--drive-path",
+        "/docs",
+        "--mime-types",
+        "application/pdf",
+        "text/plain",
+        "--max-matches",
+        "50",
+        "--context-lines",
+        "3",
+      ]);
+
+      expect(exitCode).toBe(0);
+      expect(calls).toEqual([
+        expect.objectContaining({
+          method: "POST",
+          url: "http://localhost:15419/api/v1/assets/grep",
+          body: {
+            pattern: "foo",
+            flags: "i",
+            scope: {
+              assetIds: ["a1", "a2"],
+              drivePath: "/docs",
+              mimeTypes: ["application/pdf", "text/plain"],
+            },
+            maxMatches: 50,
+            contextLines: 3,
+          },
+        }),
+      ]);
+    });
+
+    it("reads an exact line range via read-lines, as GET query params", async () => {
+      const calls: Array<{ method: string; url: string }> = [];
+      global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const request = input instanceof Request ? input : new Request(input, init);
+        calls.push({ method: request.method, url: request.url });
+        return jsonResponse({
+          lines: ["a", "b"],
+          startLine: 10,
+          endLine: 20,
+          totalLines: 100,
+          truncated: false,
+        });
+      }) as typeof fetch;
+
+      const exitCode = await runCli([
+        "--base-url",
+        "http://localhost:15419",
+        "--output",
+        "json",
+        "assets",
+        "read-lines",
+        "--asset-id",
+        "ast_1",
+        "--start-line",
+        "10",
+        "--end-line",
+        "20",
+      ]);
+
+      expect(exitCode).toBe(0);
+      expect(calls).toEqual([
+        {
+          method: "GET",
+          url: "http://localhost:15419/api/v1/assets/ast_1/text/lines?startLine=10&endLine=20",
+        },
+      ]);
+    });
   });
 });

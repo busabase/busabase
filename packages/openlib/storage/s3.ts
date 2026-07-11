@@ -1,4 +1,8 @@
-import type { ListObjectsV2CommandOutput, S3Client as S3ClientType } from "@aws-sdk/client-s3";
+import type {
+  GetObjectCommandOutput,
+  ListObjectsV2CommandOutput,
+  S3Client as S3ClientType,
+} from "@aws-sdk/client-s3";
 import type { IStorage, MultipartPart, StorageConfig } from "./types";
 
 // Lazy-load the AWS SDK. The storage factory STATICALLY imports this module (for
@@ -17,6 +21,27 @@ let _presignerPromise: Promise<typeof import("@aws-sdk/s3-request-presigner")> |
 const loadGetSignedUrl = async () => {
   _presignerPromise ??= import("@aws-sdk/s3-request-presigner");
   return (await _presignerPromise).getSignedUrl;
+};
+
+/**
+ * True for the AWS SDK's "416 Range Not Satisfiable" shape — seen as
+ * `error.name === "InvalidRange"` on real S3/MinIO, but different S3-compatible
+ * backends (R2, self-hosted MinIO versions) have been observed to only set the
+ * HTTP status on `$metadata`/`Code`, so this checks every field the SDK is
+ * known to populate rather than trusting a single one.
+ */
+const isRangeNotSatisfiableError = (error: unknown): boolean => {
+  if (!error || typeof error !== "object") return false;
+  const err = error as {
+    name?: unknown;
+    Code?: unknown;
+    $metadata?: { httpStatusCode?: unknown };
+  };
+  return (
+    err.name === "InvalidRange" ||
+    err.Code === "InvalidRange" ||
+    err.$metadata?.httpStatusCode === 416
+  );
 };
 
 /**
@@ -548,6 +573,45 @@ export class S3Storage implements IStorage {
       Key: key,
     });
     const response = await client.send(command);
+    if (!response.Body) throw new Error(`Object not found: ${key}`);
+    const chunks: Uint8Array[] = [];
+    for await (const chunk of response.Body as AsyncIterable<Uint8Array>) {
+      chunks.push(chunk);
+    }
+    return Buffer.concat(chunks);
+  }
+
+  /**
+   * Get a byte range of an object as a Buffer (inclusive `start`/`end`, mirrors
+   * HTTP Range semantics) via `Range: bytes=start-end` on `GetObjectCommand`.
+   *
+   * A range that starts at or past EOF (e.g. `readObjectInChunks`'s
+   * next-window probe on an object whose size is an exact multiple of the
+   * chunk size, or any range read against a 0-byte object) is a normal,
+   * expected shape of a chunked "read until short/empty" loop — S3/R2 answer
+   * it with `416 Range Not Satisfiable` (`InvalidRange`), which the SDK
+   * surfaces as a thrown error. `LocalStorage.getObjectRange` has no such
+   * failure mode (`fs.createReadStream` past EOF just yields nothing), so to
+   * keep both providers behaviorally identical for callers, normalize this
+   * one specific error into an empty Buffer instead of propagating it.
+   */
+  async getObjectRange(key: string, start: number, end: number): Promise<Buffer> {
+    const { GetObjectCommand } = await loadS3Sdk();
+    const client = await this.getClient();
+    const command = new GetObjectCommand({
+      Bucket: this.config.bucketName,
+      Key: key,
+      Range: `bytes=${start}-${end}`,
+    });
+    let response: GetObjectCommandOutput;
+    try {
+      response = await client.send(command);
+    } catch (error: unknown) {
+      if (isRangeNotSatisfiableError(error)) {
+        return Buffer.alloc(0);
+      }
+      throw error;
+    }
     if (!response.Body) throw new Error(`Object not found: ${key}`);
     const chunks: Uint8Array[] = [];
     for await (const chunk of response.Body as AsyncIterable<Uint8Array>) {

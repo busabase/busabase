@@ -83,6 +83,14 @@ export interface IStorage {
   getObject(key: string): Promise<Buffer>;
 
   /**
+   * Get a byte range of an object as a Buffer (HTTP `Range: bytes=start-end`,
+   * inclusive on both ends — mirrors the HTTP Range semantics). Used for
+   * ranged reads of large objects (e.g. Drive `readLines`) without loading
+   * the whole object into memory.
+   */
+  getObjectRange(key: string, start: number, end: number): Promise<Buffer>;
+
+  /**
    * Copy object
    */
   copyObject(sourceKey: string, destinationKey: string): Promise<void>;

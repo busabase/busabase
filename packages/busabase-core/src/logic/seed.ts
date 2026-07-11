@@ -29,7 +29,15 @@ import { writeDocBody } from "../domains/doc/handlers";
 import { writeFileTreeTextFile } from "../domains/filetree/handlers";
 import { writeSkillTextFile } from "../domains/skill/logic/storage";
 import { projectCommitFields } from "./field-values";
-import { CURRENT_USER_ID, hashText, id, now, ROOT_NODE_ID, rootNodeIdForSpace } from "./kernel";
+import {
+  CURRENT_USER_ID,
+  hashBuffer,
+  hashText,
+  id,
+  now,
+  ROOT_NODE_ID,
+  rootNodeIdForSpace,
+} from "./kernel";
 import { toBaseVO, toNodeVO } from "./vo";
 
 const minutesBefore = (date: Date, minutes: number) => new Date(date.getTime() - minutes * 60_000);
@@ -681,6 +689,38 @@ const seedDocNodesIfMissing = async (createdAt: Date, docs: SeedDocDef[]) => {
   }
 };
 
+/**
+ * Ensure the "Files" folder (parent of every first-class File node) exists.
+ * Shared by `seedFileNodesIfMissing` (gated on the scenario having files) and
+ * `seedGrepDemoFixture` (which seeds a File node unconditionally, even for a
+ * scenario/test with an empty `files` list — it must not assume the other
+ * function already created this folder).
+ */
+const ensureFilesFolder = async (createdAt: Date) => {
+  const db = await getDb();
+  const [existingFolder] = await db
+    .select()
+    .from(busabaseNodes)
+    .where(eq(busabaseNodes.id, FILES_FOLDER_NODE_ID))
+    .limit(1);
+  if (!existingFolder) {
+    await db
+      .insert(busabaseNodes)
+      .values({
+        id: FILES_FOLDER_NODE_ID,
+        parentId: ROOT_NODE_ID,
+        type: "folder",
+        slug: "files",
+        name: "Files",
+        description: "First-class uploaded files backed by the Asset library.",
+        position: 4,
+        createdAt,
+        updatedAt: createdAt,
+      })
+      .onConflictDoNothing();
+  }
+};
+
 const seedFileNodesIfMissing = async (createdAt: Date, files: SeedFileDef[]) => {
   if (files.length === 0) {
     return;
@@ -688,24 +728,7 @@ const seedFileNodesIfMissing = async (createdAt: Date, files: SeedFileDef[]) => 
   ensureDefaultStorageUrl();
   const db = await getDb();
   const spaceId = getContextSpaceId();
-  const [existingFolder] = await db
-    .select()
-    .from(busabaseNodes)
-    .where(eq(busabaseNodes.id, FILES_FOLDER_NODE_ID))
-    .limit(1);
-  if (!existingFolder) {
-    await db.insert(busabaseNodes).values({
-      id: FILES_FOLDER_NODE_ID,
-      parentId: ROOT_NODE_ID,
-      type: "folder",
-      slug: "files",
-      name: "Files",
-      description: "First-class uploaded files backed by the Asset library.",
-      position: 4,
-      createdAt,
-      updatedAt: createdAt,
-    });
-  }
+  await ensureFilesFolder(createdAt);
 
   for (const file of files) {
     const [existingFile] = await db
@@ -795,6 +818,118 @@ const seedFileNodesIfMissing = async (createdAt: Date, files: SeedFileDef[]) => 
       })
       .onConflictDoNothing();
   }
+};
+
+const GREP_DEMO_NODE_ID = "nod_grep_demo_invoice";
+const GREP_DEMO_ATTACHMENT_ID = "att_grep_demo_invoice_pdf";
+const GREP_DEMO_ASSET_ID = "ast_grep_demo_invoice";
+const GREP_DEMO_STORAGE_KEY = "files/seed/grep-demo-invoice.pdf";
+
+/**
+ * Drive Grep Retrieval demo fixture: a small binary (PDF) File node whose text
+ * is supplied through the REAL `putText` code path — simulating exactly what
+ * an external agent does after running its own extractor. Busabase never
+ * parses PDFs (see the spec's "no extraction library, ever" boundary); the
+ * bytes here just need to look like a PDF, not be read as one.
+ *
+ * Idempotent (checked by fixed node id) so `pnpm db:seed` stays re-runnable.
+ * Together with `seedFileNodesIfMissing`'s text-kind files (auto-registered,
+ * no writer needed), this makes the demo dataset immediately greppable end to
+ * end: `assets.grep({ pattern: "ACME Corp" })` finds a hit in this fixture,
+ * and `assets.grep({ pattern: "signups" })` finds one in a plain CSV/text File.
+ */
+const seedGrepDemoFixture = async (createdAt: Date) => {
+  ensureDefaultStorageUrl();
+  const db = await getDb();
+  const spaceId = getContextSpaceId();
+
+  const [existing] = await db
+    .select({ id: busabaseNodes.id })
+    .from(busabaseNodes)
+    .where(eq(busabaseNodes.id, GREP_DEMO_NODE_ID))
+    .limit(1);
+  if (existing) {
+    return;
+  }
+  // Independent of `seedFileNodesIfMissing` — this fixture seeds unconditionally
+  // even when the scenario's own `files` list is empty, so it can't assume that
+  // function already created the "Files" folder.
+  await ensureFilesFolder(createdAt);
+
+  const { buildMinimalPdfBuffer, GREP_DEMO_EXTRACTED_TEXT, GREP_DEMO_FIXTURE_FILE_NAME } =
+    await import("../demo/grep-fixture");
+  const pdfBuffer = buildMinimalPdfBuffer();
+  await storage.uploadFileToKey(pdfBuffer, GREP_DEMO_STORAGE_KEY, "application/pdf");
+
+  await db
+    .insert(attachments)
+    .values({
+      id: GREP_DEMO_ATTACHMENT_ID,
+      storageKey: GREP_DEMO_STORAGE_KEY,
+      fileName: GREP_DEMO_FIXTURE_FILE_NAME,
+      mimeType: "application/pdf",
+      sizeBytes: pdfBuffer.length,
+      contentHash: hashBuffer(pdfBuffer),
+      context: "file-node",
+      userId: CURRENT_USER_ID,
+      spaceId,
+      metadata: {},
+      createdAt,
+      updatedAt: createdAt,
+    })
+    .onConflictDoNothing();
+
+  await db
+    .insert(busabaseAssets)
+    .values({
+      id: GREP_DEMO_ASSET_ID,
+      spaceId,
+      attachmentId: GREP_DEMO_ATTACHMENT_ID,
+      name: GREP_DEMO_FIXTURE_FILE_NAME,
+      contentKind: "binary",
+      metadata: {},
+      createdBy: CURRENT_USER_ID,
+      createdAt,
+      updatedAt: createdAt,
+    })
+    .onConflictDoNothing();
+
+  await db.insert(busabaseNodes).values({
+    id: GREP_DEMO_NODE_ID,
+    parentId: FILES_FOLDER_NODE_ID,
+    type: "file",
+    slug: "globex-cloud-invoice-2026-06-demo",
+    name: "Globex Cloud Invoice (grep demo)",
+    description: "Drive Grep Retrieval demo fixture — a binary PDF with agent-supplied text.",
+    metadata: { assetId: GREP_DEMO_ASSET_ID },
+    position: 100,
+    createdAt,
+    updatedAt: createdAt,
+  });
+
+  await db
+    .insert(busabaseAssetUsages)
+    .values({
+      id: id("aus"),
+      spaceId,
+      assetId: GREP_DEMO_ASSET_ID,
+      ownerType: "file_node",
+      nodeId: GREP_DEMO_NODE_ID,
+      path: "",
+      recordId: "",
+      fieldSlug: "file:asset",
+      blockId: "",
+      metadata: {},
+      createdAt,
+      updatedAt: createdAt,
+    })
+    .onConflictDoNothing();
+
+  // The part that matters: simulate an external agent supplying extracted
+  // text for a binary asset, through the SAME public `putText` logic every
+  // other writer uses — no shortcut, no direct row insert.
+  const { putAssetText } = await import("../domains/assets/logic/asset-texts-logic");
+  await putAssetText({ assetId: GREP_DEMO_ASSET_ID, text: GREP_DEMO_EXTRACTED_TEXT });
 };
 
 const seedCommentsIfMissing = async (createdAt: Date, comments: SeedCommentDef[]) => {
@@ -1175,6 +1310,20 @@ export const seedScenario = async (scenario: SeedScenario) => {
   await seedDriveNodeIfMissing(now());
   await seedDocNodesIfMissing(now(), scenario.docs ?? []);
   await seedFileNodesIfMissing(now(), scenario.files ?? []);
+  // Drive Grep Retrieval demo fixture — binary PDF + agent-supplied text via
+  // putText. Runs unconditionally (unlike `seedFileNodesIfMissing`, which
+  // early-returns when a scenario has no files), so every scenario pays for
+  // this fixture's storage writes + putText call. Isolated in its own
+  // try/catch so a storage hiccup seeding THIS fixture can't fail seeding for
+  // scenarios that otherwise have nothing to do with the grep demo.
+  try {
+    await seedGrepDemoFixture(now());
+  } catch (error) {
+    console.error(
+      "[seed] seedGrepDemoFixture failed — continuing without the grep demo fixture:",
+      error,
+    );
+  }
   // Comments thread under the change requests above, so they must already exist.
   await seedCommentsIfMissing(now(), scenario.comments ?? []);
 };

@@ -1,7 +1,7 @@
 {
   "name": "open-domains",
   "description": "Auth-agnostic, open-source-reusable domains (parallel to share-domains). Consumed by OSS app kernels such as busabase-core (and future buda-core).",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "private": true,
   "type": "module",
   "exports": {

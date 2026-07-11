@@ -128,6 +128,14 @@ describe("activity.listPaged — keyset merge parity", () => {
         new Date(paged[i - 1].timestamp).getTime(),
       );
     }
+    // 4. Operation feed items must carry the embedded operation they render.
+    for (const item of paged) {
+      if (item.kind === "operation") {
+        expect(
+          item.changeRequest.operations.some((operation) => operation.id === item.operationId),
+        ).toBe(true);
+      }
+    }
   });
 
   it("returns identical results regardless of page size", async () => {

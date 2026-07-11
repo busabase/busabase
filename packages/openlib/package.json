@@ -1,7 +1,7 @@
 {
   "name": "openlib",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Open-source utility library for busabase and openbuda apps",
   "type": "module",
   "exports": {

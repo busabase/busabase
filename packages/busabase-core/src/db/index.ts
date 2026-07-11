@@ -1,6 +1,6 @@
 import "server-only";
 
-import { existsSync, rmSync } from "node:fs";
+import { existsSync, renameSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import { drizzle as drizzlePglite } from "drizzle-orm/pglite";
@@ -70,7 +70,11 @@ function initSync(): DbInstance {
 async function initPglite(dataDir: string): Promise<DbInstance> {
   await ensureLocalDir(dataDir);
   const { PGlite } = await import("@electric-sql/pglite");
-  const client = await new PGlite(dataDir);
+  // pg_trgm backs the trigram indexes in domains/base/schema.ts (busabase_field_values
+  // text/slug) — without registering it here, `CREATE EXTENSION pg_trgm` in the
+  // enable_pg_trgm migration has nothing to load and fails on PGLite.
+  const { pg_trgm } = await import("@electric-sql/pglite/contrib/pg_trgm");
+  const client = await new PGlite(dataDir, { extensions: { pg_trgm } });
   const db = drizzlePglite({ client, schema });
 
   const state = getDbState();
@@ -95,10 +99,18 @@ async function initAsync(): Promise<DbInstance> {
     } catch (error) {
       const isFileBased = dataDir && !dataDir.startsWith("memory://");
       if (isFileBased && existsSync(dataDir)) {
-        console.warn(
-          `[Busabase DB] PGLite failed to start (${(error as Error).message}). Resetting local data dir and retrying.`,
+        // Never destroy an unreadable data dir outright — a crash mid-write (OOM,
+        // kill -9, container restart) can leave PGLite unable to start, and this
+        // is the only local copy of a "review-first, local-first" database. Move
+        // it aside (recoverable) instead of rmSync (irrecoverable) so the app can
+        // still boot with a fresh dir, and the old one is there to inspect/restore.
+        const quarantineDir = `${dataDir}.quarantined-${Date.now()}`;
+        console.error(
+          `[Busabase DB] PGLite failed to start (${(error as Error).message}). ` +
+            `Moving the unreadable data dir to ${quarantineDir} and starting a fresh one — ` +
+            `your previous local data was NOT deleted; recover it by inspecting/restoring that folder.`,
         );
-        rmSync(dataDir, { recursive: true, force: true });
+        renameSync(dataDir, quarantineDir);
         return initPglite(dataDir);
       }
       throw error;

@@ -232,6 +232,15 @@ export const busabaseFieldValues = pgTable(
       "gin",
       sql`to_tsvector('simple', coalesce(${base.valueText}, ''))`,
     ),
+    // Trigram indexes back the `ilike('%...%')` substring-match fallback in
+    // logic/search.ts (partial-word matches the tsvector index above can't do,
+    // since it only matches whole lexemes). Without these, that OR branch has
+    // no usable index, so Postgres falls back to a full sequential scan for the
+    // ENTIRE query — including queries with zero hits — and it gets slower as
+    // busabase_field_values grows. Requires `CREATE EXTENSION pg_trgm` (see the
+    // enable_pg_trgm migration).
+    index("busabase_field_values_text_trgm_idx").using("gin", sql`${base.valueText} gin_trgm_ops`),
+    index("busabase_field_values_slug_trgm_idx").using("gin", sql`${base.fieldSlug} gin_trgm_ops`),
     index("busabase_field_values_base_field_number_idx").on(
       base.baseId,
       base.fieldSlug,

@@ -1,5 +1,6 @@
 // New i18n modules
 
+export * from "./canonical-url";
 export * from "./detect-server-locale";
 export * from "./i-string";
 export * from "./i18n";
@@ -19,6 +20,7 @@ export {
   useLocale,
 } from "./locale";
 export * from "./middleware";
+export * from "./page-metadata";
 export type {
   Locale,
   Locale as LocaleFromTypes,

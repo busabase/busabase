@@ -59,6 +59,8 @@ export type AuditAction =
   | "drive.created"
   | "asset.deleted"
   | "asset.metadata_updated"
+  | "asset.text_written"
+  | "asset.text_marked_none"
   | "node.purged";
 
 export interface UserRefVO {

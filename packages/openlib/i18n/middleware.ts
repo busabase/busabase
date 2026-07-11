@@ -289,3 +289,87 @@ export function createI18nProxy<T extends string>(config: I18nProxyConfig<T>) {
     return i18nMiddleware(req, ev);
   };
 }
+
+// ============================================
+// Default-locale canonical URL redirect (Next.js middleware)
+// Hides the default locale's URL prefix (e.g. /en/docs -> /docs) via a permanent
+// redirect, while leaving other locale prefixes untouched.
+// ============================================
+
+/** Strip a known locale prefix from a pathname, e.g. "/zh-CN/docs" -> "/docs". */
+function stripLocalePrefix<T extends string>(
+  pathname: string,
+  supportedLocales: readonly T[],
+): string {
+  const locale = supportedLocales.find(
+    (supportedLocale) =>
+      pathname === `/${supportedLocale}` || pathname.startsWith(`/${supportedLocale}/`),
+  );
+
+  if (!locale) return pathname;
+
+  return pathname.slice(locale.length + 1) || "/";
+}
+
+function isApiOrTrpcPath(pathname: string): boolean {
+  return pathname.startsWith("/api/") || pathname.startsWith("/trpc/");
+}
+
+export interface DefaultLocaleRedirectConfig<T extends string> {
+  /** Supported locales for this app */
+  supportedLocales: readonly T[];
+  /** Default locale whose URL prefix should be hidden (e.g. 'en') */
+  defaultLocale: T;
+  /** Canonical (locale-less) paths to skip redirecting, e.g. dashboard/API routes */
+  skipPaths: string[];
+  /** Cookie name used to persist the resolved locale (default: LANG_COOKIE_NAME) */
+  cookieName?: string;
+  /** Cookie max-age in seconds (default: LANG_COOKIE_MAX_AGE) */
+  cookieMaxAge?: number;
+}
+
+/**
+ * Create a Next.js middleware helper that redirects default-locale-prefixed paths
+ * (e.g. /en/docs) to their canonical, prefix-less form (/docs) with a permanent
+ * (308) redirect, and persists the resolved locale in a cookie.
+ *
+ * Returns a function to call from `proxy.ts`/`middleware.ts` with the current
+ * request; it resolves to `null` when no redirect is needed (path isn't under the
+ * default locale prefix, or it's a skip/API path), or a redirect response otherwise.
+ *
+ * Note: Uses 'any' for NextRequest/NextResponse to avoid version conflicts between
+ * sharelib and app's next versions (see module note above).
+ */
+export function createDefaultLocaleRedirect<T extends string>(
+  config: DefaultLocaleRedirectConfig<T>,
+) {
+  const {
+    supportedLocales,
+    defaultLocale,
+    skipPaths,
+    cookieName = LANG_COOKIE_NAME,
+    cookieMaxAge = LANG_COOKIE_MAX_AGE,
+  } = config;
+
+  return async (request: any): Promise<any | null> => {
+    const pathname = request.nextUrl.pathname;
+    const locale = getLocaleFromPath(pathname, supportedLocales);
+    if (locale !== defaultLocale) return null;
+
+    const canonicalPathname = stripLocalePrefix(pathname, supportedLocales);
+    if (skipPaths.some((path) => matchesPathBoundary(canonicalPathname, path))) return null;
+    if (isApiOrTrpcPath(pathname)) return null;
+
+    // Dynamically import NextResponse to use app's version
+    const { NextResponse } = await import("next/server");
+    const url = request.nextUrl.clone();
+    url.pathname = canonicalPathname;
+    const response = NextResponse.redirect(url, 308);
+    response.cookies.set(cookieName, defaultLocale, {
+      path: "/",
+      maxAge: cookieMaxAge,
+      sameSite: "lax",
+    });
+    return response;
+  };
+}

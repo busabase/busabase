@@ -110,6 +110,14 @@ const fileMatchesQuery = (query: string, ...values: (string | null | undefined)[
 
 const MAX_FILE_SEARCH_TEXT_BYTES = 256 * 1024;
 
+// Upper bound on how many asset-usage rows a single search scans before
+// falling back to metadata/body matching in JS. Without this, the query below
+// pulled every asset usage in the space unconditionally — fine for a handful
+// of files, but an unbounded full-table fetch (plus a JS loop over all of it)
+// for any space that has accumulated a large asset library. Ordered by
+// recency so the cap favors the files someone is most likely searching for.
+const MAX_ASSET_USAGE_SCAN_ROWS = 1000;
+
 const searchAssetBackedFiles = async (query: string, limit: number): Promise<SearchResultVO[]> => {
   const db = await getDb();
   const spaceId = getContextSpaceId();
@@ -147,7 +155,9 @@ const searchAssetBackedFiles = async (query: string, limit: number): Promise<Sea
         eq(busabaseAssetUsages.spaceId, spaceId),
         isNull(busabaseNodes.archivedAt),
       ),
-    );
+    )
+    .orderBy(desc(busabaseAssetUsages.updatedAt))
+    .limit(MAX_ASSET_USAGE_SCAN_ROWS);
   const results: SearchResultVO[] = [];
 
   for (const row of rows) {

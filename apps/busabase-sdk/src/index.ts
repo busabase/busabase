@@ -106,10 +106,55 @@ export class Busabase {
   get agentTasks(): BusabaseClient["agentTasks"] {
     return this.client.agentTasks;
   }
+  get webhooks(): BusabaseClient["webhooks"] {
+    return this.client.webhooks;
+  }
 
   /** Full-text search across records, change requests, and Bases. */
   search(input: Parameters<BusabaseClient["search"]>[0]) {
     return this.client.search(input);
+  }
+
+  /**
+   * Supply text for an Asset's Drive Grep Retrieval text slot in one call —
+   * inline for small text, a presigned upload for large text — so callers
+   * never see the underlying three-step flow
+   * (`createTextUploadUrl` → PUT bytes → `putText({ storageKey })`).
+   *
+   * @example
+   * ```ts
+   * await bb.putText(assetId, extractedText); // picks inline vs presigned by size
+   * ```
+   */
+  async putText(
+    assetId: string,
+    text: string,
+  ): Promise<Awaited<ReturnType<BusabaseClient["assets"]["putText"]>>> {
+    // Mirrors the server's INLINE_TEXT_MAX_BYTES cap (1MB) — see
+    // packages/busabase-core/src/domains/assets/logic/asset-texts-logic.ts.
+    const INLINE_TEXT_MAX_BYTES = 1024 * 1024;
+    const byteLength =
+      typeof Buffer !== "undefined" ? Buffer.byteLength(text, "utf8") : new Blob([text]).size;
+    if (byteLength <= INLINE_TEXT_MAX_BYTES) {
+      return this.client.assets.putText({ assetId, text });
+    }
+    const upload = await this.client.assets.createTextUploadUrl({
+      assetId,
+      sizeBytes: byteLength,
+    });
+    const doFetch = this.config.fetch ?? fetch;
+    const response = await doFetch(upload.uploadUrl, {
+      method: "PUT",
+      headers: { "content-type": "text/plain; charset=utf-8" },
+      body: text,
+    });
+    if (!response.ok) {
+      const detail = await response.text().catch(() => "");
+      throw new Error(
+        `putText: presigned upload failed (${response.status} ${response.statusText})${detail ? `: ${detail}` : ""}`,
+      );
+    }
+    return this.client.assets.putText({ assetId, storageKey: upload.storageKey });
   }
 
   /** Service health — reaches the server without requiring auth. */

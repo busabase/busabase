@@ -261,6 +261,8 @@ const buildDemoAssetIndex = (): {
             url: ref.url,
             contentHash: null,
             usageCount: 0,
+            // Decorative demo-only binary refs — no text supplied.
+            textStatus: "missing",
             createdAt: epoch,
           });
         }

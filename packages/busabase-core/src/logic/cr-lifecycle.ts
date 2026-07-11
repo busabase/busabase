@@ -54,6 +54,7 @@ import {
 } from "../domains/base/handlers";
 import { mergeDocUpdate } from "../domains/doc/handlers";
 import { mergeFileTreeFile, mergeFileTreeMetadata } from "../domains/filetree/handlers";
+import { dispatchWebhookEvent } from "../domains/webhook/logic/dispatch";
 import { insertAuditEvent } from "./audit";
 import { projectCommitFields } from "./field-values";
 import {
@@ -509,17 +510,26 @@ const mergeNodeRestore = async (ctx: MergeCtx, _item: OperationPO, node: NodePO)
 
 export type AgentTaskTrigger = "changes_requested" | "ai_mention";
 
+/**
+ * Fire-and-forget: dispatch any `notify_agent` webhook rules watching this
+ * trigger. Generalizes the old single hardcoded `BUSABASE_AGENT_WEBHOOK_URL`
+ * POST into the general webhook rule system — same best-effort philosophy
+ * (never throws, never awaited by callers), now with a persisted delivery-log
+ * row (see `dispatchWebhookEvent`) instead of a silent `.catch(() => {})`.
+ * Stays synchronous (void-returning) so both call sites — which already don't
+ * await it — keep working unchanged.
+ */
 export const notifyAgentOfChangeRequest = (changeRequestId: string, trigger: AgentTaskTrigger) => {
-  const url = process.env.BUSABASE_AGENT_WEBHOOK_URL;
-  if (!url) {
-    return;
-  }
-  void fetch(url, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ event: "agent.task", trigger, changeRequestId }),
-  }).catch(() => {
-    // Best-effort
+  void (async () => {
+    const db = await getDb();
+    await dispatchWebhookEvent(db, {
+      spaceId: getContextSpaceId(),
+      baseId: null,
+      eventType: trigger,
+      payload: { event: "agent.task", trigger, changeRequestId },
+    });
+  })().catch((error) => {
+    console.error("[busabase] notifyAgentOfChangeRequest dispatch failed", error);
   });
 };
 
@@ -533,6 +543,7 @@ export const notifyAgentOfChangeRequest = (changeRequestId: string, trigger: Age
  */
 export const hydrateChangeRequests = async (
   changeRequests: ChangeRequestPO[],
+  options?: { maxOperationsPerChangeRequest?: number },
 ): Promise<ChangeRequestVO[]> => {
   if (changeRequests.length === 0) {
     return [];
@@ -572,11 +583,26 @@ export const hydrateChangeRequests = async (
     }
   }
 
-  // Head commits + record base-commits in one query.
+  // `operationCount` below always reflects the true total from `operationsByCr`.
+  // Only the *embedded* `operations` VOs are capped here — a bulk-change-request
+  // (up to 1000 record proposals in ONE CR, see createBulkChangeRequestInputSchema)
+  // would otherwise force every list request to hydrate + transfer full field
+  // diffs for every proposed record. Callers that need every operation (the
+  // single-CR detail view, `/agent/tasks`) simply omit `maxOperationsPerChangeRequest`.
+  const maxOps = options?.maxOperationsPerChangeRequest;
+  const hydratedOperationsByCr =
+    maxOps === undefined
+      ? operationsByCr
+      : new Map([...operationsByCr].map(([crId, ops]) => [crId, ops.slice(0, maxOps)]));
+  const hydratedItemRows = [...hydratedOperationsByCr.values()].flat();
+
+  // Head commits + record base-commits in one query — scoped to the operations
+  // actually being hydrated, so a capped list doesn't still pay to fetch (and
+  // hold in memory) full commit field payloads for the truncated operations.
   const allCommitIds = [
     ...new Set([
-      ...itemRows.map((item) => item.headCommitId),
-      ...itemRows
+      ...hydratedItemRows.map((item) => item.headCommitId),
+      ...hydratedItemRows
         .map((item) => item.baseCommitId)
         .filter((commitId): commitId is string => Boolean(commitId)),
     ]),
@@ -589,7 +615,7 @@ export const hydrateChangeRequests = async (
 
   const viewTargetIds = [
     ...new Set(
-      itemRows
+      hydratedItemRows
         .filter(
           (item) =>
             (item.operation === "view_update" ||
@@ -651,13 +677,15 @@ export const hydrateChangeRequests = async (
   ]);
 
   return changeRequests.map((changeRequest) => {
-    const operations: OperationVO[] = (operationsByCr.get(changeRequest.id) ?? []).map((item) => {
-      const commit = commitsById.get(item.headCommitId);
-      if (!commit) {
-        throw new Error(`Invalid operation graph for ${item.id}`);
-      }
-      return toOperationVO(item, commit, resolveBaseFields(item), users);
-    });
+    const operations: OperationVO[] = (hydratedOperationsByCr.get(changeRequest.id) ?? []).map(
+      (item) => {
+        const commit = commitsById.get(item.headCommitId);
+        if (!commit) {
+          throw new Error(`Invalid operation graph for ${item.id}`);
+        }
+        return toOperationVO(item, commit, resolveBaseFields(item), users);
+      },
+    );
     const base = changeRequest.baseId ? (baseMap.get(changeRequest.baseId) ?? null) : null;
     const node = changeRequest.nodeId ? (nodeMap.get(changeRequest.nodeId) ?? null) : null;
     if (changeRequest.targetType === "base" && !base) {
@@ -677,7 +705,10 @@ export const hydrateChangeRequests = async (
       submittedByUser: users.get(changeRequest.submittedBy) ?? null,
       sourceMeta: changeRequest.sourceMeta,
       reviewPolicySnapshot: changeRequest.reviewPolicySnapshot,
-      mergeSummary: changeRequest.mergeSummary,
+      mergeSummary:
+        maxOps === undefined
+          ? changeRequest.mergeSummary
+          : capMergeSummaryArrays(changeRequest.mergeSummary),
       rejectedReason: changeRequest.rejectedReason,
       reviewedAt: toIso(changeRequest.reviewedAt),
       mergedAt: toIso(changeRequest.mergedAt),
@@ -687,13 +718,34 @@ export const hydrateChangeRequests = async (
       node,
       operations,
       primaryOperation: operations[0] ?? null,
-      operationCount: operations.length,
-      reviews: (reviewsByCr.get(changeRequest.id) ?? []).map((review) =>
-        toReviewVO(review, users),
-      ) as ReviewVO[],
+      operationCount: operationsByCr.get(changeRequest.id)?.length ?? 0,
+      reviews: (reviewsByCr.get(changeRequest.id) ?? []).map((review) => {
+        const reviewVO = toReviewVO(review, users);
+        // `visibleOperationHeads` (one entry per operation the reviewer saw) is
+        // only read by the single-CR review page (change-request-review.tsx) to
+        // detect staleness before approving — list rows never approve inline, so
+        // it's dropped here rather than transferred (and re-fetched) unused. A
+        // bulk-change-request's review carries one entry per proposed record.
+        return maxOps === undefined ? reviewVO : { ...reviewVO, visibleOperationHeads: {} };
+      }) as ReviewVO[],
     };
   });
 };
+
+// `mergeSummary` is a stored JSON blob (populated once at merge time), not
+// something derived from `operations` — so capping `operations` above doesn't
+// touch it. Its only UI consumer reads `.conflict` (change-request-review.tsx);
+// the array fields (recordIds/viewIds/mergedNodeIds a bulk merge writes one
+// entry per record/view) are write-only audit data today. Truncate those
+// arrays for list contexts instead of dropping the key, so shape stays intact.
+const MERGE_SUMMARY_LIST_ARRAY_CAP = 5;
+const capMergeSummaryArrays = (mergeSummary: Record<string, unknown>): Record<string, unknown> =>
+  Object.fromEntries(
+    Object.entries(mergeSummary).map(([key, value]) => [
+      key,
+      Array.isArray(value) ? value.slice(0, MERGE_SUMMARY_LIST_ARRAY_CAP) : value,
+    ]),
+  );
 
 export const hydrateChangeRequest = async (
   changeRequest: ChangeRequestPO,
@@ -771,7 +823,9 @@ export const listChangeRequests = async (input?: z.input<typeof listInputSchema>
     .where(eq(busabaseChangeRequests.spaceId, getContextSpaceId()))
     .orderBy(desc(busabaseChangeRequests.createdAt))
     .limit(parsed.limit);
-  return hydrateChangeRequests(changeRequestRows);
+  return hydrateChangeRequests(changeRequestRows, {
+    maxOperationsPerChangeRequest: LIST_MAX_OPERATIONS_PER_CHANGE_REQUEST,
+  });
 };
 
 // `|` separates the ISO timestamp (which contains colons) from the id.
@@ -797,6 +851,15 @@ const decodeChangeRequestCursor = (cursor: string): { createdAt: Date; id: strin
 // cloud this resolves to the real user id; open-source falls back to the local
 // editor — matching how `submittedBy` is stored on creation (record-ops.ts).
 const mineActorId = () => resolveActorId("local-editor");
+
+// Inbox rows only ever need a representative sample of a CR's operations (the
+// title/summary/risk-hint helpers already special-case operationCount > 1).
+// Capping here keeps a page's payload bounded even when a bulk-change-request
+// (up to 1000 record proposals in ONE CR) is on the page — the detail view
+// (getChangeRequest) hydrates every operation, uncapped. Kept small: even one
+// CR's full field-diff is a few KB, and a page can hold several bulk CRs, so
+// this multiplies quickly — 5 is already generous for an inline row preview.
+export const LIST_MAX_OPERATIONS_PER_CHANGE_REQUEST = 5;
 
 /**
  * Keyset-paginated change request list mirroring listRecordsPaged. Orders by
@@ -844,7 +907,9 @@ export const listChangeRequestsPaged = async (
   const last = pageRows[pageRows.length - 1];
   const nextCursor = hasMore && last ? encodeChangeRequestCursor(last.createdAt, last.id) : null;
 
-  const changeRequests = await hydrateChangeRequests(pageRows);
+  const changeRequests = await hydrateChangeRequests(pageRows, {
+    maxOperationsPerChangeRequest: LIST_MAX_OPERATIONS_PER_CHANGE_REQUEST,
+  });
   return { changeRequests, nextCursor };
 };
 
@@ -1989,6 +2054,12 @@ const _mergeChangeRequest = async (changeRequestId: string) => {
   // single connection (projectCommitFields / asset-usage helpers take the tx).
   const mergedRecordIds: string[] = [];
   const mergedViewIds: string[] = [];
+  // Record ids attributable specifically to a record_create/record_variant
+  // operation in THIS loop — as opposed to record_update/record_delete/
+  // record_restore, which also push their (pre-existing) record id onto
+  // ctx.mergedRecordIds. Used below to fire a `record.created` webhook only
+  // for genuinely new records, not every record merely touched by the CR.
+  const newlyCreatedRecordIds: string[] = [];
   await db.transaction(async (tx) => {
     const ctx: MergeCtx = {
       db: tx as unknown as MergeCtx["db"],
@@ -2011,9 +2082,12 @@ const _mergeChangeRequest = async (changeRequestId: string) => {
 
       switch (item.operation) {
         case "record_create":
-        case "record_variant":
+        case "record_variant": {
+          const beforeCount = ctx.mergedRecordIds.length;
           await mergeRecordCreateBase(ctx, item, headCommit);
+          newlyCreatedRecordIds.push(...ctx.mergedRecordIds.slice(beforeCount));
           break;
+        }
         case "view_create":
           await mergeViewCreateBase(ctx, item, headCommit);
           break;
@@ -2103,6 +2177,41 @@ const _mergeChangeRequest = async (changeRequestId: string) => {
     viewIds: [...new Set(mergedViewIds)],
     operationCount: operationKinds.length,
   });
+
+  // Fire `record.created` webhook rules for genuinely new records (not every
+  // record touched by this CR — see newlyCreatedRecordIds above). Fire-and-forget:
+  // must never block or fail the merge response.
+  if (newlyCreatedRecordIds.length > 0) {
+    const webhookSpaceId = getContextSpaceId();
+    const newlyCreatedRecordRows = await db
+      .select()
+      .from(busabaseRecords)
+      .where(
+        and(
+          inArray(busabaseRecords.id, newlyCreatedRecordIds),
+          eq(busabaseRecords.spaceId, webhookSpaceId),
+        ),
+      );
+    for (const recordRow of newlyCreatedRecordRows) {
+      void hydrateRecord(recordRow)
+        .then((recordVO) =>
+          dispatchWebhookEvent(db, {
+            spaceId: webhookSpaceId,
+            baseId: changeRequest.baseId,
+            eventType: "record.created",
+            payload: {
+              recordId: recordVO.id,
+              baseId: changeRequest.baseId,
+              changeRequestId: changeRequest.id,
+              fields: recordVO.headCommit.fields,
+            },
+          }),
+        )
+        .catch((error) => {
+          console.error("[busabase] record.created webhook dispatch failed", error);
+        });
+    }
+  }
 
   const updatedChangeRequest = await getChangeRequest(changeRequest.id);
   const spaceId = getContextSpaceId();
