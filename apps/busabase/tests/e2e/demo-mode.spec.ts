@@ -47,7 +47,16 @@ test("?demo={use-case} focuses the seed (blog excludes other bases)", async ({ r
     await request.get("/api/v1/change-requests?demo=blog"),
   );
   expect(changeRequests.length).toBeGreaterThan(0);
-  expect(changeRequests.every((cr) => cr.baseId === bases[0].id)).toBe(true);
+  // Base-scoped CRs must all belong to the blog base — that's the actual
+  // "excludes other bases" guarantee. Doc-level CRs (baseId: null, e.g. the
+  // seeded Agent Operating Guide update) are deliberately NOT use-case-scoped
+  // — they're general knowledge-base content the demo shows regardless of
+  // which base-focused scenario is selected (confirmed: the same doc CR
+  // appears identically under every ?demo={use-case}), so they're excluded
+  // from this check rather than asserted to have blog's baseId.
+  const baseScoped = changeRequests.filter((cr) => cr.baseId !== null);
+  expect(baseScoped.length).toBeGreaterThan(0);
+  expect(baseScoped.every((cr) => cr.baseId === bases[0].id)).toBe(true);
 
   const records = await json<RecordVO[]>(await request.get("/api/v1/records?demo=blog"));
   expect(records.every((record) => record.base.slug === "blog")).toBe(true);
