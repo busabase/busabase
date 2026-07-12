@@ -1,5 +1,6 @@
 import "server-only";
 
+import { ORPCError } from "@orpc/server";
 import {
   createDocChangeRequestInputSchema,
   createDocInputSchema,
@@ -37,6 +38,10 @@ import {
   toNodeVO,
 } from "../../logic/store";
 import { syncDocAssetUsages } from "../assets/handlers";
+import {
+  READ_LINES_MAX_LINES,
+  READ_LINES_MAX_RESPONSE_BYTES,
+} from "../assets/logic/asset-grep-logic";
 
 interface DocVO {
   node: NodeVO;
@@ -60,14 +65,148 @@ export const writeDocBody = async (nodeId: string, body: string) => {
   );
 };
 
+/**
+ * A Doc body is written unbounded today, and every edit's full body is also
+ * duplicated into `busabase_commits.fields.body` forever (no pruning) — this
+ * cap only bounds the SIZE of any one snapshot, not the count of them; it
+ * doesn't solve unbounded history growth over many edits, only the
+ * pathological single-huge-Doc case. ~300,000 bytes comfortably covers
+ * ~100,000 CJK characters (≈3 bytes/char in UTF-8) — generous for a "Doc"
+ * (a wiki page / spec / meeting note), well short of book-length content.
+ * Checked in bytes (not JS string `.length`, which counts UTF-16 code units)
+ * so multi-byte content isn't under-counted, mirroring `putText`'s
+ * `INLINE_TEXT_MAX_BYTES` check in `asset-texts-logic.ts`.
+ */
+const DOC_BODY_MAX_BYTES = 300_000;
+
+const assertDocBodySize = (body: string): void => {
+  const byteLength = Buffer.byteLength(body, "utf8");
+  if (byteLength > DOC_BODY_MAX_BYTES) {
+    throw new ORPCError("PAYLOAD_TOO_LARGE", {
+      message: `Doc body is ${byteLength} bytes, exceeding the ${DOC_BODY_MAX_BYTES}-byte limit (~100,000 CJK characters). Split large content across multiple Docs.`,
+    });
+  }
+};
+
 // Swallows a missing/failed read to an empty body — the right default for
 // this module's own callers (a Doc node can legitimately have no body object
-// yet). `logic/grep.ts`'s Docs adapter deliberately does NOT reuse this
-// swallow (it reads via `docBodyKey` directly, without `.catch`), since a
-// storage error there must surface as `coverage.docs.errored`, not a clean
-// "scanned, empty, no match".
+// yet). `logic/grep.ts`'s Docs adapter and `readDocLines` below deliberately
+// do NOT reuse this swallow (see `readDocBodyForGrep`), since a storage error
+// there must surface as a real error, not a clean "scanned, empty, no match".
 const readDocBody = async (nodeId: string) =>
   (await storage.getObject(docBodyKey(nodeId)).catch(() => Buffer.from(""))).toString("utf8");
+
+/**
+ * Read a Doc body WITHOUT `readDocBody`'s empty-on-failure swallow — a
+ * genuine storage failure must surface as a real error to the caller, not a
+ * silent empty read. Relocated here from `logic/grep.ts` (Unified Grep P2a),
+ * which originally defined this for its own Docs adapter; it now has a
+ * second caller (`readDocLines` below), and both are Doc-domain concerns, so
+ * this is a more natural home than the grep module. `logic/grep.ts` imports
+ * it from here — exactly one implementation.
+ */
+export const readDocBodyForGrep = async (nodeId: string): Promise<string> =>
+  (await storage.getObject(docBodyKey(nodeId))).toString("utf8");
+
+/**
+ * Split a text blob into lines with the same convention the assets grep
+ * adapter's `iterateLinesFromFile` (Node's `readline`) uses: a trailing `\n`
+ * does not create a phantom empty final line, `\r\n` is normalized to `\n`,
+ * and an empty body is zero lines (not one empty line) — so a Doc's reported
+ * line numbers match what `docs.get` + a text editor would show. Relocated
+ * here from `logic/grep.ts` for the same reason as `readDocBodyForGrep`
+ * above — shared by the Docs grep adapter AND `readDocLines`.
+ */
+export const splitDocLines = (body: string): string[] => {
+  if (body.length === 0) return [];
+  const raw = body.split("\n");
+  if (body.endsWith("\n")) raw.pop(); // trailing "\n" does not add a phantom empty last line
+  return raw.map((line) => (line.endsWith("\r") ? line.slice(0, -1) : line));
+};
+
+export interface DocLinesResult {
+  lines: string[];
+  startLine: number;
+  endLine: number;
+  totalLines: number;
+  truncated: boolean;
+}
+
+/**
+ * Clamp + slice an already-split Doc body (`splitDocLines`'s output) down to
+ * `[startLine, endLine]`, applying the SAME numeric caps `assets.readTextLines`
+ * uses (`READ_LINES_MAX_LINES` / `READ_LINES_MAX_RESPONSE_BYTES`, imported
+ * from `asset-grep-logic.ts` rather than redefined, so the two endpoints can
+ * never silently drift apart).
+ *
+ * Pure and synchronous, unlike `readAssetTextLines` — Docs are KB-scale and
+ * read/split in full up front (no checkpoints / byte-range storage reads;
+ * see `readDocLines` below), so this is a plain in-memory array slice. That
+ * also lets it be shared by BOTH the real storage-backed `readDocLines` below
+ * AND the stateless demo router's `demoReadDocLines` (`logic/demo-store.ts`,
+ * whose seed Doc body is already fully in memory) — one clamp/cap/truncated
+ * implementation, not two.
+ *
+ * `truncated` semantics deliberately differ slightly from
+ * `readAssetTextLines`'s: it is `true` whenever a CAP (too many lines
+ * requested, or the response byte budget) prevented returning everything
+ * asked for — not merely because the request ran past EOF. A request that is
+ * satisfied in full, right up to the Doc's last real line, is not
+ * "truncated" even though `endLine` gets clamped down to `totalLines`
+ * (mirrors `readAssetTextLines`'s own "reports truncated: false when the
+ * requested range reaches exactly EOF" regression test).
+ */
+export const sliceDocLinesRange = (
+  lines: string[],
+  startLine: number,
+  endLine: number,
+): DocLinesResult => {
+  const requestedStart = Math.max(1, startLine);
+  let requestedEnd = Math.max(requestedStart, endLine);
+  let lineCountCapped = false;
+  if (requestedEnd - requestedStart + 1 > READ_LINES_MAX_LINES) {
+    requestedEnd = requestedStart + READ_LINES_MAX_LINES - 1;
+    lineCountCapped = true;
+  }
+
+  const totalLines = lines.length;
+  if (totalLines === 0) {
+    return {
+      lines: [],
+      startLine: requestedStart,
+      endLine: requestedEnd,
+      totalLines,
+      truncated: false,
+    };
+  }
+
+  const clampedStart = Math.min(requestedStart, totalLines);
+  const clampedEnd = Math.min(requestedEnd, totalLines);
+
+  const collected: string[] = [];
+  let bytesCollected = 0;
+  let byteCapHit = false;
+  for (let line = clampedStart; line <= clampedEnd; line++) {
+    const text = lines[line - 1];
+    const lineBytes = Buffer.byteLength(text, "utf8") + 1; // +1 for the newline, mirrors readAssetTextLines
+    // Byte cap hit — but always keep at least the first collected line, even
+    // if it alone exceeds the cap (never return nothing).
+    if (bytesCollected + lineBytes > READ_LINES_MAX_RESPONSE_BYTES && collected.length > 0) {
+      byteCapHit = true;
+      break;
+    }
+    collected.push(text);
+    bytesCollected += lineBytes;
+  }
+
+  return {
+    lines: collected,
+    startLine: clampedStart,
+    endLine: collected.length > 0 ? clampedStart + collected.length - 1 : clampedStart,
+    totalLines,
+    truncated: byteCapHit || lineCountCapped,
+  };
+};
 
 const getDocNode = async (nodeIdOrSlug: string) => {
   const db = await getDb();
@@ -117,6 +256,7 @@ export const createDoc = async (
   await ensureReady();
   const db = await getDb();
   const parsed = createDocInputSchema.parse(input);
+  assertDocBodySize(parsed.body);
   const existing = await getDocNode(parsed.slug);
   if (existing) {
     return toDocVO(existing);
@@ -192,6 +332,28 @@ export const getDoc = async (nodeIdOrSlug: string): Promise<DocVO> => {
   return toDocVO(node);
 };
 
+// The Doc-domain equivalent of `assets.readTextLines` — an agent's follow-up
+// after a Unified Grep match lands inside a Doc (`source: "docs"`), so it can
+// read just the lines around the match instead of `getDoc`'s entire body.
+// Unlike `readAssetTextLines`, there are no checkpoints / byte-range storage
+// reads: a Doc body is read in full (same as `readDocBodyForGrep` /
+// `docs.get()` already do — Docs are KB-scale, this is an explicit,
+// already-made architecture decision), split into all its lines, then sliced
+// in memory via `sliceDocLinesRange`.
+export const readDocLines = async (
+  nodeIdOrSlug: string,
+  startLine: number,
+  endLine: number,
+): Promise<DocLinesResult> => {
+  await ensureReady();
+  const node = await getDocNode(nodeIdOrSlug);
+  if (!node) {
+    throw new ORPCError("NOT_FOUND", { message: `Doc not found: ${nodeIdOrSlug}` });
+  }
+  const body = await readDocBodyForGrep(node.id);
+  return sliceDocLinesRange(splitDocLines(body), startLine, endLine);
+};
+
 export const listDocs = async (): Promise<DocVO[]> => {
   await ensureReady();
   const db = await getDb();
@@ -219,6 +381,7 @@ export const updateDocBody = async (
     throw new Error(`Doc not found: ${nodeIdOrSlug}`);
   }
   const parsed = updateDocInputSchema.parse(input);
+  assertDocBodySize(parsed.body);
   await writeDocBody(node.id, parsed.body);
   // Record the body edit as an auto-merged doc_update ChangeRequest (audit +
   // history + rollback), replacing the old bespoke `doc.updated` audit action —
@@ -273,6 +436,7 @@ export const createDocChangeRequest = async (
     throw new Error(`Doc not found: ${nodeIdOrSlug}`);
   }
   const parsed = createDocChangeRequestInputSchema.parse(input);
+  assertDocBodySize(parsed.body);
   const changeRequestId = id("crq");
   const operationId = id("opr");
   const commitId = id("cmt");

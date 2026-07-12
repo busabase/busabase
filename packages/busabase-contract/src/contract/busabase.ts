@@ -1,5 +1,6 @@
 import { eventIterator, oc } from "@orpc/contract";
 import { z } from "zod";
+import { airappContract } from "../domains/airapp/contract";
 import { assetsContract } from "../domains/assets/contract";
 import {
   baseContract,
@@ -224,6 +225,7 @@ export const busabaseContractRoutes = {
   bases: baseContract,
   skills: skillContract,
   drives: driveContract,
+  airapps: airappContract,
   files: fileContract,
   docs: docContract,
   folders: folderContract,

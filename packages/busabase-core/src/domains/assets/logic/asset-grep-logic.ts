@@ -67,8 +67,12 @@ export const grepTimeoutMs = (): number => {
   const parsed = raw ? Number(raw) : Number.NaN;
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : 10_000;
 };
-const READ_LINES_MAX_LINES = 2000;
-const READ_LINES_MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
+// Exported so `domains/doc/handlers.ts`'s `readDocLines` (the Doc-domain
+// equivalent of this file's `readAssetTextLines`) reuses these exact values
+// instead of redefining them — one source of truth for the readLines caps
+// shared by both the assets and Docs surfaces.
+export const READ_LINES_MAX_LINES = 2000;
+export const READ_LINES_MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
 
 /**
  * Overridable (`BUSABASE_GREP_CONCURRENCY`) — how many candidate files are

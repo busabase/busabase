@@ -15,6 +15,8 @@
  *   11 Drives     — pure file-tree Drive: create, read file, CR update
  *   12 Files      — upload Asset → create first-class File node → read back
  *   13 Comments   — review comment (+@agent mention) on a CR and a record
+ *   14 AirApps    — 3 example AirApp nodes (Hono works; Vite/Hono+Vite seeded
+ *                   but marked known-unavailable — see the file's own docblock)
  *
  * Usage:
  *   BUSABASE_URL=http://localhost:15419 pnpm exec tsx scripts/demo/run-all.ts
@@ -37,6 +39,7 @@ import { run as run10 } from "./10-audit";
 import { run as run11 } from "./11-drives";
 import { run as run12 } from "./12-files";
 import { run as run13 } from "./13-comments";
+import { run as run14 } from "./14-airapps";
 
 const SUITES = [
   { name: "01-folders", run: run01 },
@@ -52,6 +55,7 @@ const SUITES = [
   { name: "11-drives", run: run11 },
   { name: "12-files", run: run12 },
   { name: "13-comments", run: run13 },
+  { name: "14-airapps", run: run14 },
 ];
 
 async function main() {

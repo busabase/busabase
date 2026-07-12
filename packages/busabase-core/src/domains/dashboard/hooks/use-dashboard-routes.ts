@@ -20,6 +20,7 @@ export function useDashboardRoutes() {
   const [isBaseChildRoute, baseChildParams] = useRoute("/base/:slug/:childId");
   const [isSkillRoute, skillParams] = useRoute("/skill/:slug");
   const [isDriveRoute, driveParams] = useRoute("/drive/:slug");
+  const [isAirappRoute, airappParams] = useRoute("/airapp/:slug");
   const [isFileRoute, fileParams] = useRoute("/file/:slug");
   const [isDocRoute, docParams] = useRoute("/doc/:slug");
   const [isFolderRoute, folderParams] = useRoute("/folder/:slug");
@@ -35,6 +36,7 @@ export function useDashboardRoutes() {
     null;
   const selectedSkillSlug = isSkillRoute ? (skillParams?.slug ?? null) : null;
   const selectedDriveSlug = isDriveRoute ? (driveParams?.slug ?? null) : null;
+  const selectedAirappSlug = isAirappRoute ? (airappParams?.slug ?? null) : null;
   const selectedFileSlug = isFileRoute ? (fileParams?.slug ?? null) : null;
   const selectedDocSlug = isDocRoute ? (docParams?.slug ?? null) : null;
   const selectedFolderSlug = isFolderRoute ? (folderParams?.slug ?? null) : null;
@@ -60,6 +62,7 @@ export function useDashboardRoutes() {
     baseChildParams,
     isSkillRoute,
     isDriveRoute,
+    isAirappRoute,
     isFileRoute,
     isDocRoute,
     isFolderRoute,
@@ -67,6 +70,7 @@ export function useDashboardRoutes() {
     selectedBaseSlug,
     selectedSkillSlug,
     selectedDriveSlug,
+    selectedAirappSlug,
     selectedFileSlug,
     selectedDocSlug,
     selectedFolderSlug,

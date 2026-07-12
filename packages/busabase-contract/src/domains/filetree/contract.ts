@@ -86,6 +86,15 @@ export const createFileTreeInputSchema = z.object({
   // immediately. Pass `autoMerge: true` only for callers that don't need human
   // review (seed/migration scripts, an explicit no-review agent task).
   autoMerge: z.boolean().optional().default(false),
+  // "merge" (default): `files` is layered on top of the config's default seed
+  // files by path — a caller supplying just a couple of extra files (e.g. a
+  // Skill's own reference doc) still gets the default scaffold (SKILL.md,
+  // skill.json, ...) for any path they didn't provide themselves. "replace":
+  // `files` replaces the defaults entirely — for a caller handing over a
+  // complete, different-shaped project (e.g. an AirApp seeded with a Vite
+  // project instead of the default Hono template) who does NOT want leftover
+  // default files with unrelated content mixed in.
+  mergeMode: z.enum(["merge", "replace"]).optional().default("merge"),
 });
 
 export const fileTreeFileOperationInputSchema = z.union([

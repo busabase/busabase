@@ -9,7 +9,7 @@ import { busabaseNodes } from "../../../db/schema";
 import { spaceIdColumn } from "../../../db/space-column";
 
 export type AssetContentKind = "text" | "binary";
-export type AssetUsageOwnerType = "drive" | "skill" | "base" | "doc" | "file_node";
+export type AssetUsageOwnerType = "drive" | "skill" | "airapp" | "base" | "doc" | "file_node";
 
 export const busabaseAssets = pgTable(
   "busabase_assets",

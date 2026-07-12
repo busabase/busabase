@@ -1550,6 +1550,7 @@ export const recordPendingNodeCreate = async (args: {
   fields?: NodeCreateFields["fields"];
   body?: string;
   initialFiles?: NodeCreateFields["initialFiles"];
+  mergeMode?: NodeCreateFields["mergeMode"];
   message: string;
   submittedBy: string;
 }): Promise<ChangeRequestVO> => {
@@ -1572,6 +1573,7 @@ export const recordPendingNodeCreate = async (args: {
     ...(args.fields ? { fields: args.fields } : {}),
     ...(args.body !== undefined ? { body: args.body } : {}),
     ...(args.initialFiles ? { initialFiles: args.initialFiles } : {}),
+    ...(args.mergeMode ? { mergeMode: args.mergeMode } : {}),
   };
 
   await db.insert(busabaseChangeRequests).values({

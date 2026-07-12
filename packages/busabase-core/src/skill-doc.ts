@@ -382,6 +382,15 @@ ${authLine}  -H 'content-type: application/json' \\
   --data '{"pattern": "ACME Corp", "sources": ["records"], "scope": {"records": {"baseSlugs": ["contracts"]}}}'
 \`\`\`
 
+After a grep match with \`source: "docs"\`, read just the lines around it instead of the whole
+Doc body (\`docs/:nodeId\` returns the ENTIRE body) — the same \`assets/grep\` →
+\`assets/:assetId/text/lines\` follow-up loop above, for Docs:
+
+\`\`\`bash
+curl "${base}/api/v1/docs/:nodeId/lines?startLine=118&endLine=122"${H}
+# → { lines: [...], startLine, endLine, totalLines, truncated }
+\`\`\`
+
 Approve a ChangeRequest:
 
 \`\`\`bash

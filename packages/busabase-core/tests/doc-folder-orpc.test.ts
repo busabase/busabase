@@ -4,6 +4,7 @@ import path from "node:path";
 import { createRouterClient } from "@orpc/server";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { busabaseRouter } from "../src/router";
+import { busabaseDemoRouter } from "../src/router-demo";
 
 /**
  * Integration coverage for the Doc and Folder domains through the real oRPC router
@@ -123,5 +124,162 @@ describe("Doc & Folder domains — oRPC integration", () => {
     expect(root.children.some((child) => child.slug === "nested-note")).toBe(true);
 
     await expect(client.folders.get({ nodeId: "no-such-folder" })).rejects.toThrow();
+  });
+
+  // The Doc-domain equivalent of `assets.readTextLines` (see
+  // `tests/drive-grep-retrieval.test.ts`'s `readLines` describe block, which
+  // this mirrors) — an agent's follow-up after a Unified Grep match lands
+  // inside a Doc, so it can read just the lines around the match instead of
+  // `docs.get`'s entire body.
+  describe("readLines", () => {
+    it("returns the exact requested line range, clamped and reported honestly", async () => {
+      const lines = Array.from({ length: 30 }, (_, i) => `line ${i + 1}`);
+      await client.docs.create({
+        autoMerge: true,
+        slug: "read-lines-mid",
+        name: "Read Lines Mid",
+        body: lines.join("\n"),
+      });
+
+      const result = await client.docs.readLines({
+        nodeId: "read-lines-mid",
+        startLine: 10,
+        endLine: 15,
+      });
+      expect(result.lines).toEqual([
+        "line 10",
+        "line 11",
+        "line 12",
+        "line 13",
+        "line 14",
+        "line 15",
+      ]);
+      expect(result.startLine).toBe(10);
+      expect(result.endLine).toBe(15);
+      expect(result.totalLines).toBe(30);
+      expect(result.truncated).toBe(false);
+    });
+
+    it("clamps a range that runs past EOF", async () => {
+      await client.docs.create({
+        autoMerge: true,
+        slug: "read-lines-short",
+        name: "Read Lines Short",
+        body: "a\nb\nc",
+      });
+
+      const result = await client.docs.readLines({
+        nodeId: "read-lines-short",
+        startLine: 1,
+        endLine: 10,
+      });
+      expect(result.lines).toEqual(["a", "b", "c"]);
+      expect(result.totalLines).toBe(3);
+    });
+
+    it("reports truncated: false when the requested range reaches exactly EOF", async () => {
+      const lines = Array.from({ length: 12 }, (_, i) => `line ${i + 1}`);
+      await client.docs.create({
+        autoMerge: true,
+        slug: "read-lines-exact-eof",
+        name: "Read Lines Exact EOF",
+        body: lines.join("\n"),
+      });
+
+      const result = await client.docs.readLines({
+        nodeId: "read-lines-exact-eof",
+        startLine: 1,
+        endLine: 12,
+      });
+      expect(result.lines).toHaveLength(12);
+      expect(result.totalLines).toBe(12);
+      expect(result.truncated).toBe(false);
+    });
+
+    it("caps a request exceeding the 2000-line cap, reporting truncated: true", async () => {
+      const lines = Array.from({ length: 3000 }, (_, i) => `l${i}`);
+      await client.docs.create({
+        autoMerge: true,
+        slug: "read-lines-cap",
+        name: "Read Lines Cap",
+        body: lines.join("\n"),
+      });
+
+      const result = await client.docs.readLines({
+        nodeId: "read-lines-cap",
+        startLine: 1,
+        endLine: 3000,
+      });
+      expect(result.lines.length).toBeLessThanOrEqual(2000);
+      // Unlike `assets.readTextLines` (whose `truncated` only reflects a
+      // byte-cap-driven early stop for the already-capped window — see
+      // `sliceDocLinesRange`'s doc comment), Docs' `readLines` also flags
+      // `truncated: true` when the 2000-line cap itself reduced the window,
+      // so a caller always knows it got less than it asked for.
+      expect(result.truncated).toBe(true);
+    });
+
+    it("grep → readLines loop: the reported match line matches the read-back content", async () => {
+      const lines = Array.from({ length: 30 }, (_, i) =>
+        i === 20 ? "NEEDLE-HERE" : `filler ${i}`,
+      );
+      const doc = await client.docs.create({
+        autoMerge: true,
+        slug: "read-lines-loop",
+        name: "Read Lines Loop",
+        body: lines.join("\n"),
+      });
+      if (!("node" in doc)) throw new Error("Expected a materialized DocVO (autoMerge: true)");
+
+      const grep = await client.grep({
+        pattern: "NEEDLE-HERE",
+        sources: ["docs"],
+        scope: { docs: { nodeIds: [doc.node.id] } },
+      });
+      const match = grep.matches[0];
+      expect(match).toBeDefined();
+      if (!match || match.source !== "docs") throw new Error("Expected a docs match");
+
+      const read = await client.docs.readLines({
+        nodeId: doc.node.id,
+        startLine: match.line,
+        endLine: match.line,
+      });
+      expect(read.lines[0]).toBe("NEEDLE-HERE");
+    });
+
+    it("rejects a non-existent nodeId with NOT_FOUND", async () => {
+      await expect(
+        client.docs.readLines({ nodeId: "read-lines-does-not-exist", startLine: 1, endLine: 5 }),
+      ).rejects.toMatchObject({ code: "NOT_FOUND" });
+    });
+  });
+});
+
+// `readLines` is a pure read backed entirely by the seed dataset's in-memory
+// `DemoDocVO.body` (same as `docs.get` already relies on in demo mode) — no
+// real storage needed, unlike `assets.readTextLines`/`assets.grep`, which stay
+// `demoUnsupported` for lack of per-asset object storage in the stateless demo
+// dataset (see `router-demo.ts`). No existing test file exercises
+// `busabaseDemoRouter` yet, so this is a self-contained, DB/storage-free
+// integration check (the demo router never touches the db).
+describe("Doc domain — readLines (demo mode)", () => {
+  const demoClient = createRouterClient(busabaseDemoRouter);
+
+  it("reads a range from the seeded demo Doc's in-memory body", async () => {
+    const result = await demoClient.docs.readLines({
+      nodeId: "agent-operating-guide",
+      startLine: 1,
+      endLine: 2,
+    });
+    expect(result.lines[0]).toBe("# Agent Operating Guide");
+    expect(result.totalLines).toBeGreaterThan(2);
+    expect(result.truncated).toBe(false);
+  });
+
+  it("rejects a non-existent nodeId with NOT_FOUND", async () => {
+    await expect(
+      demoClient.docs.readLines({ nodeId: "does-not-exist", startLine: 1, endLine: 5 }),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
   });
 });

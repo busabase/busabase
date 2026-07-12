@@ -1569,4 +1569,51 @@ describe("busabase-cli commands", () => {
       ]);
     });
   });
+
+  // The Doc-domain equivalent of `assets read-lines` above — an agent's
+  // follow-up after a Unified Grep match lands inside a Doc (`source:
+  // "docs"`). Unlike `assets`, the `docs` command group has no curated
+  // commands at all — every `docs *` command (including this one) is
+  // auto-generated straight from the OpenAPI contract (see
+  // `registerGeneratedCommands`), so this test is the routing regression
+  // guard: a contract/router typo here would have nothing else to catch it.
+  describe("docs read-lines (generated command)", () => {
+    it("reads an exact line range via read-lines, as GET query params", async () => {
+      const calls: Array<{ method: string; url: string }> = [];
+      global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const request = input instanceof Request ? input : new Request(input, init);
+        calls.push({ method: request.method, url: request.url });
+        return jsonResponse({
+          lines: ["a", "b"],
+          startLine: 10,
+          endLine: 20,
+          totalLines: 100,
+          truncated: false,
+        });
+      }) as typeof fetch;
+
+      const exitCode = await runCli([
+        "--base-url",
+        "http://localhost:15419",
+        "--output",
+        "json",
+        "docs",
+        "read-lines",
+        "--node-id",
+        "nod_1",
+        "--start-line",
+        "10",
+        "--end-line",
+        "20",
+      ]);
+
+      expect(exitCode).toBe(0);
+      expect(calls).toEqual([
+        {
+          method: "GET",
+          url: "http://localhost:15419/api/v1/docs/nod_1/lines?startLine=10&endLine=20",
+        },
+      ]);
+    });
+  });
 });

@@ -5,6 +5,7 @@ import { CREATABLE_NODE_TYPES } from "busabase-contract/domains";
 import { fieldNameSchema } from "busabase-contract/domains/base/contract/base-schemas";
 import type { NodeVO } from "busabase-contract/types";
 import { and, asc, desc, eq, inArray, isNotNull, isNull, ne } from "drizzle-orm";
+import { storage } from "openlib/storage";
 import { z } from "zod";
 import { getContextSpaceId, resolveActorId, withContextSourceMeta } from "../context";
 import { getDb } from "../db";
@@ -15,6 +16,7 @@ import {
   busabaseNodes,
   busabaseOperations,
 } from "../db/schema";
+import { docBodyKey } from "../domains/doc/handlers";
 import { insertAuditEvent } from "./audit";
 import { id, now } from "./kernel";
 import { publishChangeRequestPendingReview } from "./live-events";
@@ -229,6 +231,16 @@ const collectSubtreeIds = async (
  * hard-delete path — a subtree containing a Base is now allowed: the Base's
  * `busabase_bases` row (and any nested Bases') is soft-deleted in lockstep via
  * its 1:1 `nodeId`.
+ *
+ * Doc nodes are the one type backed by an object-storage blob outside this
+ * table (`doc/handlers.ts`'s `docBodyKey` — a markdown object keyed by
+ * nodeId, not tracked in any DB row). Nothing else in the codebase ever
+ * deletes that object (`node_delete`'s soft-archive path must NOT touch it —
+ * restore needs the body back), so purge — the one point genuinely never
+ * reachable again — is where it's safe to free it: the full body already
+ * survives forever in `busabase_commits.fields.body` history, so deleting the
+ * live object here is not a loss of the "kept forever" audit guarantee above,
+ * just the removal of a copy nothing will ever read again.
  */
 export const purgeNode = async (nodeId: string): Promise<{ purged: boolean }> => {
   await ensureReady();
@@ -259,6 +271,20 @@ export const purgeNode = async (nodeId: string): Promise<{ purged: boolean }> =>
     .update(busabaseNodes)
     .set({ deletedAt: timestamp, updatedAt: timestamp })
     .where(inArray(busabaseNodes.id, subtreeIds));
+
+  // Free any Doc bodies' storage objects in the purged subtree — see the
+  // module doc above for why this is the one safe point to do it. Best-effort
+  // and non-blocking: a storage hiccup here must never fail the purge itself
+  // (the DB rows are already the source of truth; `deleteObject` on either
+  // provider is itself safe against a missing/already-gone key).
+  const docNodeRows = await db
+    .select({ id: busabaseNodes.id })
+    .from(busabaseNodes)
+    .where(and(inArray(busabaseNodes.id, subtreeIds), eq(busabaseNodes.type, "doc")));
+  if (docNodeRows.length > 0) {
+    await Promise.allSettled(docNodeRows.map((row) => storage.deleteObject(docBodyKey(row.id))));
+  }
+
   // Soft-delete any Base(s) in the subtree in lockstep (nodeId is a 1:1 FK to the
   // node), mirroring how archive/restore keep the two tables in sync elsewhere.
   const baseRows = await db

@@ -1,6 +1,8 @@
 import { oc } from "@orpc/contract";
 import { z } from "zod";
 import { changeRequestSchema, nodeSchema } from "../../contract/schemas";
+import { ReadLinesVOSchema } from "../assets/types";
+import { ReadDocLinesInputSchema } from "./types";
 
 // --- Doc domain schemas (storage-backed body) ---
 
@@ -74,6 +76,17 @@ export const docContract = {
     })
     .input(z.object({ nodeId: z.string() }))
     .output(docSchema),
+  readLines: oc
+    .route({
+      method: "GET",
+      path: "/docs/{nodeId}/lines",
+      tags: ["Docs"],
+      summary: "Read an exact line range from a Doc body",
+      successDescription:
+        "Lines [startLine, endLine] (range capped at 2000 lines / ~2MB response) sliced from the Doc's full body — Docs are KB-scale, so the whole body is read in memory; no byte-range/checkpoint machinery like assets.readTextLines uses for potentially multi-GB files. The Doc-domain follow-up to a Unified Grep match with `source: \"docs\"`, so an agent can read just the lines around a match instead of `get`'s entire body.",
+    })
+    .input(ReadDocLinesInputSchema)
+    .output(ReadLinesVOSchema),
   updateBody: oc
     .route({
       method: "PUT",

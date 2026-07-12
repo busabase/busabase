@@ -1,6 +1,7 @@
 import { implement, ORPCError } from "@orpc/server";
 import { busabaseContract } from "busabase-contract/contract/busabase";
 import { getContextSpaceId } from "./context";
+import { airappRouter } from "./domains/airapp/router";
 import { assetsRouter } from "./domains/assets/router";
 import { baseRouter, recordRouter, viewRouter } from "./domains/base/router";
 import { docRouter } from "./domains/doc/router";
@@ -80,6 +81,7 @@ export const busabaseRouter = busabase.router({
   bases: baseRouter,
   skills: skillRouter,
   drives: driveRouter,
+  airapps: airappRouter,
   files: fileRouter,
   docs: docRouter,
   folders: folderRouter,

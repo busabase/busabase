@@ -345,6 +345,23 @@ describe("Busabase.assets.grep / readTextLines route through the typed client wi
   });
 });
 
+describe("Busabase.docs.readLines routes through the typed client with zero wrapper code", () => {
+  // The Doc-domain equivalent of `assets.readTextLines` above — no SDK wrapper
+  // exists for it either, reached directly via `bb.docs.readLines`.
+  it("docs.readLines() gets /docs/{nodeId}/lines with the range as query params", async () => {
+    const { fetchImpl, requests } = okFetch();
+    const bb = new Busabase({ baseUrl: "http://localhost:15419", fetch: fetchImpl });
+
+    await bb.docs.readLines({ nodeId: "nod_1", startLine: 10, endLine: 20 });
+
+    expect(requests[0]?.method).toBe("GET");
+    const url = new URL(requests[0]?.url ?? "");
+    expect(url.pathname).toBe("/api/v1/docs/nod_1/lines");
+    expect(url.searchParams.get("startLine")).toBe("10");
+    expect(url.searchParams.get("endLine")).toBe("20");
+  });
+});
+
 describe("Busabase webhooks domain (via the bb.webhooks getter) routes correctly", () => {
   it("create() POSTs the full rule payload to /webhooks", async () => {
     const { fetchImpl, requests } = okFetch();

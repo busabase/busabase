@@ -57,6 +57,7 @@ export type AuditAction =
   | "file.created"
   | "skill.created"
   | "drive.created"
+  | "airapp.created"
   | "asset.deleted"
   | "asset.metadata_updated"
   | "asset.text_written"
@@ -202,6 +203,8 @@ export interface ChangeRequestCountsVO {
 
 // Activity-feed descriptor (discriminated union) — inferred from its zod schema.
 export type { ActivityItemVO } from "../contract/activity-schemas";
+// AirApp-domain VOs live in the airapp domain; re-exported here for the public barrel.
+export type { AirAppFileVO, AirAppReadFileVO, AirAppVO } from "../domains/airapp/types";
 export type {
   AssetDetailVO,
   AssetTextStatus,

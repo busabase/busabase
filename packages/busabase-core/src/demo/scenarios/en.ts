@@ -17,5 +17,6 @@ export const enScenario: SeedScenario = {
   changeRequests: DEMO_CHANGE_REQUESTS,
   docs: enNodeTypesScenario.docs,
   files: enNodeTypesScenario.files,
+  fileTreeNodes: enNodeTypesScenario.fileTreeNodes,
   comments: enNodeTypesScenario.comments,
 };

@@ -28,6 +28,31 @@ export function assert(condition: boolean, message: string): asserts condition {
   if (!condition) throw new Error(message);
 }
 
+export interface NodeTreeVO {
+  id: string;
+  type: string;
+  name: string;
+  children?: NodeTreeVO[];
+}
+
+/**
+ * `GET /nodes` returns a nested tree (one root element with `children`), not
+ * a flat list — a plain top-level `.find()` only ever sees the root and
+ * silently returns `undefined` for every other folder. Search recursively.
+ */
+export function findFolderByName(nodes: NodeTreeVO[], name: string): NodeTreeVO | undefined {
+  for (const node of nodes) {
+    if (node.type === "folder" && node.name === name) {
+      return node;
+    }
+    const found = findFolderByName(node.children ?? [], name);
+    if (found) {
+      return found;
+    }
+  }
+  return undefined;
+}
+
 /** Approve + merge a change request. Returns the merge result. */
 export async function approveMerge(crId: string) {
   await api("POST", `/change-requests/${crId}/reviews`, { verdict: "approved" });

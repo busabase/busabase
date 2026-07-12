@@ -36,7 +36,7 @@ export type AssetVO = z.infer<typeof AssetVOSchema>;
 
 /** One place an asset is referenced — the row behind "Where Used". */
 export const AssetUsageVOSchema = z.object({
-  ownerType: z.enum(["drive", "skill", "base", "doc", "file_node"]),
+  ownerType: z.enum(["drive", "skill", "airapp", "base", "doc", "file_node"]),
   nodeId: z.string(),
   nodeName: z.string(),
   nodeType: z.string(),

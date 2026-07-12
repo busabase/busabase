@@ -24,10 +24,15 @@ import {
   busabaseViews,
 } from "../db/schema";
 import { buildRecordSeedFields } from "../demo/dataset";
-import type { SeedCommentDef, SeedDocDef, SeedFileDef, SeedScenario } from "../demo/seed-types";
+import type {
+  SeedCommentDef,
+  SeedDocDef,
+  SeedFileDef,
+  SeedFileTreeDef,
+  SeedScenario,
+} from "../demo/seed-types";
 import { writeDocBody } from "../domains/doc/handlers";
 import { writeFileTreeTextFile } from "../domains/filetree/handlers";
-import { writeSkillTextFile } from "../domains/skill/logic/storage";
 import { projectCommitFields } from "./field-values";
 import {
   CURRENT_USER_ID,
@@ -393,213 +398,172 @@ const ensureDefaultStorageUrl = () => {
   process.env.STORAGE_URL ??= `local://${process.cwd()}/.data/busabase-storage?base_url=/api/dev/attachment`;
 };
 
-const SKILLS_FOLDER_NODE_ID = "nod_skills";
-const SEED_RESEARCH_SKILL_NODE_ID = "nod_skill_ai_research_editor";
-const SEED_SKILL_CHANGE_REQUEST_ID = "crq_seed_skill_research_editor";
-const SEED_SKILL_OPERATION_ID = "opr_seed_skill_research_editor";
-const SEED_SKILL_COMMIT_ID = "cmt_seed_skill_research_editor";
-const DRIVES_FOLDER_NODE_ID = "nod_drives";
-const SEED_TEAM_DRIVE_NODE_ID = "nod_drive_team_files";
 const DOCS_FOLDER_NODE_ID = "nod_docs";
 const FILES_FOLDER_NODE_ID = "nod_files";
 
-const seedSkillNodeIfMissing = async (createdAt: Date) => {
-  ensureDefaultStorageUrl();
-  const db = await getDb();
-  const [existingFolder] = await db
-    .select()
-    .from(busabaseNodes)
-    .where(eq(busabaseNodes.id, SKILLS_FOLDER_NODE_ID))
-    .limit(1);
-  if (!existingFolder) {
-    await db.insert(busabaseNodes).values({
-      id: SKILLS_FOLDER_NODE_ID,
-      parentId: ROOT_NODE_ID,
-      type: "folder",
-      slug: "skills",
-      name: "Agent Skills",
-      description: "Versioned Skill folders that agents can read and update through review.",
-      position: 1,
-      createdAt,
-      updatedAt: createdAt,
-    });
-  }
+interface FileTreeFolderConfig {
+  folderNodeId: string;
+  slug: string;
+  name: string;
+  description: string;
+  position: number;
+  /** Default `metadata.entryFile` for nodes of this kind (e.g. "SKILL.md", "package.json"). */
+  entryFile: string;
+}
 
-  const [existingSkill] = await db
-    .select()
-    .from(busabaseNodes)
-    .where(eq(busabaseNodes.id, SEED_RESEARCH_SKILL_NODE_ID))
-    .limit(1);
-  const skillMetadata = {
+// One sidebar folder per file-tree kind (Skill/Drive/AirApp), each created
+// lazily the first time a scenario actually seeds a node of that kind.
+const FILE_TREE_FOLDER_CONFIG: Record<SeedFileTreeDef["nodeType"], FileTreeFolderConfig> = {
+  skill: {
+    folderNodeId: "nod_skills",
+    slug: "skills",
+    name: "Agent Skills",
+    description: "Versioned Skill folders that agents can read and update through review.",
+    position: 1,
     entryFile: "SKILL.md",
-    visibility: "workspace" as const,
-    version: "0.1.0",
-  };
-  if (existingSkill) {
-    await db
-      .update(busabaseNodes)
-      .set({
-        parentId: SKILLS_FOLDER_NODE_ID,
-        type: "skill",
-        slug: "ai-research-editor",
-        name: "AI Research Editor",
-        description: "Reviews agent research drafts for source quality before publishing.",
-        metadata: skillMetadata,
-        updatedAt: createdAt,
-      })
-      .where(eq(busabaseNodes.id, SEED_RESEARCH_SKILL_NODE_ID));
-  } else {
-    await db.insert(busabaseNodes).values({
-      id: SEED_RESEARCH_SKILL_NODE_ID,
-      parentId: SKILLS_FOLDER_NODE_ID,
-      type: "skill",
-      slug: "ai-research-editor",
-      name: "AI Research Editor",
-      description: "Reviews agent research drafts for source quality before publishing.",
-      metadata: skillMetadata,
-      position: 0,
-      createdAt,
-      updatedAt: createdAt,
-    });
-  }
-
-  const [skillNode] = await db
-    .select()
-    .from(busabaseNodes)
-    .where(eq(busabaseNodes.id, SEED_RESEARCH_SKILL_NODE_ID))
-    .limit(1);
-  if (!skillNode) {
-    throw new Error("Failed to seed Skill node");
-  }
-
-  const skillMd = `---\nname: ai-research-editor\ndescription: Reviews agent research drafts for source quality before publishing.\n---\n\n# AI Research Editor\n\nUse this skill when an agent proposes AI industry analysis, newsletter copy, or social threads that need source checks before merge.\n\n## Workflow\n\n1. Read the proposed ChangeRequest operations.\n2. Check whether every factual claim has a source URL or a clear internal record reference.\n3. Flag unsupported claims before approval.\n4. Keep edits concise and preserve the author's thesis.\n`;
-  await writeSkillTextFile(skillNode, "SKILL.md", skillMd);
-  await writeSkillTextFile(
-    skillNode,
-    "skill.json",
-    `${JSON.stringify(
-      {
-        name: "ai-research-editor",
-        description: "Reviews agent research drafts for source quality before publishing.",
-        version: "0.1.0",
-      },
-      null,
-      2,
-    )}\n`,
-  );
-  await writeSkillTextFile(
-    skillNode,
-    "references/source-policy.md",
-    "# Source policy\n\nPrefer primary sources, official documentation, direct company posts, and clearly dated analyst notes. Reject claims that only cite vague social chatter.\n",
-  );
-  await writeSkillTextFile(
-    skillNode,
-    "examples/review-comment.md",
-    "This draft is directionally useful, but the claim about enterprise adoption needs a dated source before approval.\n",
-  );
-
-  await seedNodeChangeRequestIfMissing({
-    id: SEED_SKILL_CHANGE_REQUEST_ID,
-    nodeId: skillNode.id,
-    status: "in_review",
-    submittedBy: "skill-maintainer-agent",
-    sourceMeta: {
-      seed: true,
-      scenario: "skill-file-update",
-      workflow: "skill-governance",
-      subject: "skill",
-      nodeId: skillNode.id,
-    },
-    createdAt: minutesBefore(createdAt, 6),
-    operation: {
-      id: SEED_SKILL_OPERATION_ID,
-      commitId: SEED_SKILL_COMMIT_ID,
-      operation: "skill_file_update",
-      filePath: "SKILL.md",
-      fields: {
-        filePath: "SKILL.md",
-        baseContentHash: hashText(skillMd),
-        nextContent: `${skillMd}\n## Merge guardrails\n\n- Do not approve drafts that lack source receipts for market-size, policy, or benchmark claims.\n- Prefer a short reviewer note over rewriting the entire article.\n`,
-      },
-      message: "Add merge guardrails to AI Research Editor Skill",
-      author: "skill-maintainer-agent",
-    },
-  });
+  },
+  drive: {
+    folderNodeId: "nod_drives",
+    slug: "drives",
+    name: "Drives",
+    description: "Pure file-tree Drives managed through review.",
+    position: 2,
+    entryFile: "README.md",
+  },
+  airapp: {
+    folderNodeId: "nod_airapps",
+    slug: "airapps",
+    name: "AirApps",
+    description: "Runnable AirApp projects managed through review.",
+    position: 5,
+    entryFile: "package.json",
+  },
 };
 
-const seedDriveNodeIfMissing = async (createdAt: Date) => {
+/**
+ * Skill, Drive, and AirApp nodes are all the same shape under the hood — a
+ * folder-scoped file-tree node whose files are written through
+ * `writeFileTreeTextFile` — so one generic, scenario-driven seeder replaces
+ * what used to be `seedSkillNodeIfMissing`/`seedDriveNodeIfMissing` (each
+ * hardcoding its own fixed content, with no AirApp equivalent at all).
+ * Idempotent per def, keyed by `def.nodeId`, exactly like the two functions
+ * it replaces.
+ */
+const seedFileTreeNodesIfMissing = async (createdAt: Date, defs: SeedFileTreeDef[]) => {
+  if (defs.length === 0) {
+    return;
+  }
   ensureDefaultStorageUrl();
   const db = await getDb();
-  const [existingFolder] = await db
-    .select()
-    .from(busabaseNodes)
-    .where(eq(busabaseNodes.id, DRIVES_FOLDER_NODE_ID))
-    .limit(1);
-  if (!existingFolder) {
-    await db.insert(busabaseNodes).values({
-      id: DRIVES_FOLDER_NODE_ID,
-      parentId: ROOT_NODE_ID,
-      type: "folder",
-      slug: "drives",
-      name: "Drives",
-      description: "Pure file-tree Drives managed through review.",
-      position: 2,
-      createdAt,
-      updatedAt: createdAt,
-    });
-  }
 
-  const driveMetadata = {
-    entryFile: "README.md",
-    visibility: "workspace" as const,
-    version: "0.1.0",
-  };
-  const [existingDrive] = await db
-    .select()
-    .from(busabaseNodes)
-    .where(eq(busabaseNodes.id, SEED_TEAM_DRIVE_NODE_ID))
-    .limit(1);
-  if (existingDrive) {
-    await db
-      .update(busabaseNodes)
-      .set({
-        parentId: DRIVES_FOLDER_NODE_ID,
-        type: "drive",
-        slug: "team-files",
-        name: "Team Files",
-        description: "A plain file drive seeded with README.md.",
-        metadata: driveMetadata,
+  const neededFolderTypes = new Set(defs.map((def) => def.nodeType));
+  for (const nodeType of neededFolderTypes) {
+    const folderConfig = FILE_TREE_FOLDER_CONFIG[nodeType];
+    const [existingFolder] = await db
+      .select()
+      .from(busabaseNodes)
+      .where(eq(busabaseNodes.id, folderConfig.folderNodeId))
+      .limit(1);
+    if (!existingFolder) {
+      await db.insert(busabaseNodes).values({
+        id: folderConfig.folderNodeId,
+        parentId: ROOT_NODE_ID,
+        type: "folder",
+        slug: folderConfig.slug,
+        name: folderConfig.name,
+        description: folderConfig.description,
+        position: folderConfig.position,
+        createdAt,
         updatedAt: createdAt,
-      })
-      .where(eq(busabaseNodes.id, SEED_TEAM_DRIVE_NODE_ID));
-  } else {
-    await db.insert(busabaseNodes).values({
-      id: SEED_TEAM_DRIVE_NODE_ID,
-      parentId: DRIVES_FOLDER_NODE_ID,
-      type: "drive",
-      slug: "team-files",
-      name: "Team Files",
-      description: "A plain file drive seeded with README.md.",
-      metadata: driveMetadata,
-      position: 0,
-      createdAt,
-      updatedAt: createdAt,
-    });
+      });
+    }
   }
 
-  const [driveNode] = await db
-    .select()
-    .from(busabaseNodes)
-    .where(eq(busabaseNodes.id, SEED_TEAM_DRIVE_NODE_ID))
-    .limit(1);
-  if (!driveNode) {
-    throw new Error("Failed to seed Drive node");
+  for (const def of defs) {
+    const folderConfig = FILE_TREE_FOLDER_CONFIG[def.nodeType];
+    const metadata = {
+      entryFile: folderConfig.entryFile,
+      visibility: "workspace" as const,
+      version: "0.1.0",
+    };
+    const [existingNode] = await db
+      .select()
+      .from(busabaseNodes)
+      .where(eq(busabaseNodes.id, def.nodeId))
+      .limit(1);
+    if (existingNode) {
+      await db
+        .update(busabaseNodes)
+        .set({
+          parentId: folderConfig.folderNodeId,
+          type: def.nodeType,
+          slug: def.slug,
+          name: def.name,
+          description: def.description,
+          metadata,
+          updatedAt: createdAt,
+        })
+        .where(eq(busabaseNodes.id, def.nodeId));
+    } else {
+      await db.insert(busabaseNodes).values({
+        id: def.nodeId,
+        parentId: folderConfig.folderNodeId,
+        type: def.nodeType,
+        slug: def.slug,
+        name: def.name,
+        description: def.description,
+        metadata,
+        position: def.position,
+        createdAt,
+        updatedAt: createdAt,
+      });
+    }
+
+    const [node] = await db
+      .select()
+      .from(busabaseNodes)
+      .where(eq(busabaseNodes.id, def.nodeId))
+      .limit(1);
+    if (!node) {
+      throw new Error(`Failed to seed ${def.nodeType} node: ${def.nodeId}`);
+    }
+
+    for (const file of def.files) {
+      await writeFileTreeTextFile(node, file.path, file.content);
+    }
+
+    if (def.changeRequest) {
+      const cr = def.changeRequest;
+      const baseFile = def.files.find((file) => file.path === cr.filePath);
+      await seedNodeChangeRequestIfMissing({
+        id: cr.id,
+        nodeId: node.id,
+        status: "in_review",
+        submittedBy: cr.submittedBy,
+        sourceMeta: {
+          seed: true,
+          scenario: cr.scenario,
+          workflow: cr.workflow,
+          subject: def.nodeType,
+          nodeId: node.id,
+        },
+        createdAt: minutesBefore(createdAt, cr.minutesAgo),
+        operation: {
+          id: cr.operationId,
+          commitId: cr.commitId,
+          operation: `${def.nodeType}_file_update` as DbOperationKind,
+          filePath: cr.filePath,
+          fields: {
+            filePath: cr.filePath,
+            baseContentHash: baseFile ? hashText(baseFile.content) : null,
+            nextContent: cr.nextContent,
+          },
+          message: cr.message,
+          author: cr.submittedBy,
+        },
+      });
+    }
   }
-  await writeFileTreeTextFile(
-    driveNode,
-    "README.md",
-    "# Team Files\n\nA shared Drive for plain files. Propose edits through change requests before merge.\n",
-  );
 };
 
 // ── Per-node-type example content (Docs, Files) + review Comments ──────────────
@@ -1302,12 +1266,11 @@ const applySeedScenario = async (scenario: SeedScenario) => {
 export const seedScenario = async (scenario: SeedScenario) => {
   await ensureReady();
   await applySeedScenario(scenario);
-  // The per-node-type demos (Skill, Drive, Doc, File) are opt-in example content:
-  // they ship with `pnpm db:seed:all`, not with the first-request auto-seed in
-  // ensureReady(). Together with the scenario's folders + bases they make the
-  // seeded workspace cover every builtin node type.
-  await seedSkillNodeIfMissing(now());
-  await seedDriveNodeIfMissing(now());
+  // The per-node-type demos (Skill, Drive, AirApp, Doc, File) are opt-in example
+  // content: they ship with `pnpm db:seed:all`, not with the first-request
+  // auto-seed in ensureReady(). Together with the scenario's folders + bases
+  // they make the seeded workspace cover every builtin node type.
+  await seedFileTreeNodesIfMissing(now(), scenario.fileTreeNodes ?? []);
   await seedDocNodesIfMissing(now(), scenario.docs ?? []);
   await seedFileNodesIfMissing(now(), scenario.files ?? []);
   // Drive Grep Retrieval demo fixture — binary PDF + agent-supplied text via

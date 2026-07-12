@@ -66,7 +66,7 @@ export interface FileTreeSeedFile {
 }
 
 export interface FileTreeKindConfig {
-  type: "drive" | "skill";
+  type: "drive" | "skill" | "airapp";
   label: string;
   entryFile: string;
   seedFiles: (input: FileTreeSeedInput) => FileTreeSeedFile[];
@@ -94,12 +94,54 @@ const operationKindForInput = (
   return `${type}_file_${kind}` as (typeof busabaseOperationKindEnum.enumValues)[number];
 };
 
+// Maps a file-tree kind's `type` to its Asset usage owner type. Every file-tree
+// kind (drive/skill/airapp/…) is its own `AssetUsageOwnerType` so asset-usage
+// rows stay correctly tagged — a prior version of this function collapsed
+// anything that wasn't "skill" into "drive", silently mis-tagging every other
+// file-tree kind's files as Drive files in the asset-usage index.
 const usageOwnerType = (configOrType: FileTreeKindConfig | string): AssetUsageOwnerType => {
   const type = typeof configOrType === "string" ? configOrType : configOrType.type;
-  return type === "skill" ? "skill" : "drive";
+  if (type === "skill" || type === "drive" || type === "airapp") {
+    return type;
+  }
+  throw new Error(`Unsupported file-tree kind for asset usage: ${type}`);
 };
 
 const normalizeUsagePath = (filePath: string) => normalizeFilePath(filePath);
+
+/**
+ * Resolves the file set to seed a new file-tree node with, given whatever
+ * files the caller provided and the config's default seed template.
+ *
+ * "merge" (default): layers `providedFiles` on top of `config.seedFiles()`'s
+ * output by path — a caller supplying just a couple of extra files (e.g. a
+ * Skill's own reference doc) still gets the rest of the default scaffold
+ * (SKILL.md, skill.json, ...) for any path they didn't provide themselves.
+ * "replace": `providedFiles` (when non-empty) replaces the defaults
+ * entirely — for a caller handing over a complete, different-shaped project
+ * (e.g. an AirApp seeded with a Vite project instead of the default Hono
+ * template) who does not want unrelated default files with unrelated
+ * content mixed in. Only ever falls back to the config's defaults alone
+ * when the caller provided no files at all.
+ */
+const resolveSeedFiles = (
+  config: FileTreeKindConfig,
+  input: FileTreeSeedInput,
+  providedFiles: StoredFileInput[],
+  mergeMode: "merge" | "replace",
+): StoredFileInput[] => {
+  if (providedFiles.length === 0) {
+    return config.seedFiles(input);
+  }
+  if (mergeMode === "replace") {
+    return providedFiles;
+  }
+  const providedPaths = new Set(providedFiles.map((file) => normalizeUsagePath(file.path)));
+  const defaults = config
+    .seedFiles(input)
+    .filter((file) => !providedPaths.has(normalizeUsagePath(file.path)));
+  return [...defaults, ...providedFiles];
+};
 
 const displayNameForPath = (path: string) => path.split("/").at(-1) || path;
 
@@ -456,6 +498,7 @@ export const createFileTreeNode = async (
       parentNodeId: parentNode.id,
       metadata: { visibility: parsed.visibility, version: parsed.version },
       initialFiles: parsed.files,
+      mergeMode: parsed.mergeMode,
       message: `Create ${labelLower(config)} ${parsed.name}`,
       submittedBy: resolveActorId(CURRENT_USER_ID),
     });
@@ -485,18 +528,18 @@ export const createFileTreeNode = async (
     throw new Error(`Failed to create ${labelLower(config)} node`);
   }
 
-  const inputPaths = new Set(parsed.files.map((file) => normalizeUsagePath(file.path)));
-  for (const seedFile of config.seedFiles({
-    slug: parsed.slug,
-    name: parsed.name,
-    description: parsed.description,
-    version: parsed.version,
-  })) {
-    if (!inputPaths.has(normalizeUsagePath(seedFile.path))) {
-      await upsertFileAssetAtPath(node, seedFile, db);
-    }
-  }
-  for (const file of parsed.files) {
+  const seedFiles = resolveSeedFiles(
+    config,
+    {
+      slug: parsed.slug,
+      name: parsed.name,
+      description: parsed.description,
+      version: parsed.version,
+    },
+    parsed.files,
+    parsed.mergeMode,
+  );
+  for (const file of seedFiles) {
     await upsertFileAssetAtPath(node, file, db);
   }
 
@@ -868,6 +911,7 @@ export const makeMaterializer =
     // request (see `recordPendingNodeCreate`) — the Dashboard's generic
     // node_create flow never sets this, so it seeds only the config defaults.
     const initialFiles = Array.isArray(fields.initialFiles) ? fields.initialFiles : [];
+    const mergeMode = fields.mergeMode ?? "merge";
 
     await db.insert(busabaseNodes).values({
       id: nodeId,
@@ -892,15 +936,14 @@ export const makeMaterializer =
       .where(eq(busabaseNodes.id, nodeId))
       .limit(1);
     if (node) {
-      // Mirrors createFileTreeNode's direct-write dual loop: seed the config's
-      // default files, skipping any path the caller's own initial files replace.
-      const inputPaths = new Set(initialFiles.map((file) => normalizeUsagePath(file.path)));
-      for (const file of config.seedFiles({ slug, name, description, version })) {
-        if (!inputPaths.has(normalizeUsagePath(file.path))) {
-          await upsertFileAssetAtPath(node, file, db);
-        }
-      }
-      for (const file of initialFiles) {
+      // Mirrors createFileTreeNode's direct-write path — see resolveSeedFiles.
+      const seedFiles = resolveSeedFiles(
+        config,
+        { slug, name, description, version },
+        initialFiles,
+        mergeMode,
+      );
+      for (const file of seedFiles) {
         await upsertFileAssetAtPath(node, file, db);
       }
     }

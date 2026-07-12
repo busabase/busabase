@@ -4,6 +4,7 @@ import type { AssetTextStatus } from "busabase-contract/types";
 import {
   AlertTriangle,
   ArrowLeft,
+  ChevronRight,
   FileText,
   FileX,
   Film,
@@ -11,7 +12,7 @@ import {
   Music,
   Trash2,
 } from "lucide-react";
-import { type ReactNode, useMemo, useState } from "react";
+import { type ReactNode, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { fmt, useCoreI18n } from "../../../i18n";
 import { EmptyState } from "./primitives";
@@ -114,6 +115,145 @@ export function AssetMetadataBlock({
     <div className="rounded-xl border bg-background p-4">{content}</div>
   ) : (
     <div className="mt-3 border-t pt-3">{content}</div>
+  );
+}
+
+// How many lines each fetch (first expand, or "load more") pulls — well under
+// the server's 2000-line/~2MB cap (see readTextLines' successDescription), so
+// an initial preview stays cheap even for a huge file.
+const TEXT_PREVIEW_WINDOW_SIZE = 500;
+
+/**
+ * Collapsed-by-default preview of an asset's extracted text (Drive Grep
+ * Retrieval's `readTextLines`). Only ever rendered for `present`/`stale`
+ * textStatus (see call site) — `missing`/`none` have nothing to preview.
+ * Fetches lazily (nothing hits the network until expanded), in appendable
+ * 500-line windows instead of the full file, and keeps already-fetched
+ * chunks in local state rather than growing a single ever-larger query.
+ */
+export function AssetTextPreviewPanel({
+  orpc,
+  assetId,
+  textStatus,
+}: {
+  orpc: BusabaseQueryUtils;
+  assetId: string;
+  textStatus: AssetTextStatus;
+}) {
+  const messages = useCoreI18n();
+  const [isExpanded, setIsExpanded] = useState(false);
+  const [lines, setLines] = useState<string[]>([]);
+  const [loadedThrough, setLoadedThrough] = useState(0);
+  const [totalLines, setTotalLines] = useState<number | null>(null);
+  const [truncated, setTruncated] = useState(false);
+  const [range, setRange] = useState({ startLine: 1, endLine: TEXT_PREVIEW_WINDOW_SIZE });
+
+  // Reset all accumulated preview state when the asset itself changes — this
+  // component's local state would otherwise leak across assets if the parent
+  // AssetDetailView instance is reused for a different assetId.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: reset only on assetId change
+  useEffect(() => {
+    setIsExpanded(false);
+    setLines([]);
+    setLoadedThrough(0);
+    setTotalLines(null);
+    setTruncated(false);
+    setRange({ startLine: 1, endLine: TEXT_PREVIEW_WINDOW_SIZE });
+  }, [assetId]);
+
+  const textLinesQuery = useQuery({
+    ...orpc.assets.readTextLines.queryOptions({
+      input: { assetId, startLine: range.startLine, endLine: range.endLine },
+    }),
+    enabled: isExpanded,
+  });
+
+  // Append each newly-resolved window to the accumulated preview once, keyed
+  // off `loadedThrough` so re-fetches of an already-loaded window (e.g.
+  // collapsing then re-expanding) don't duplicate lines.
+  useEffect(() => {
+    const data = textLinesQuery.data;
+    if (!data || data.startLine <= loadedThrough) return;
+    setLines((current) => [...current, ...data.lines]);
+    setLoadedThrough(data.endLine);
+    setTotalLines(data.totalLines);
+    setTruncated(data.truncated);
+  }, [textLinesQuery.data, loadedThrough]);
+
+  if (textStatus !== "present" && textStatus !== "stale") return null;
+
+  const hasMore = totalLines !== null && (truncated || totalLines > loadedThrough);
+  const isBusy = textLinesQuery.isFetching;
+
+  return (
+    <div className="rounded-xl border bg-background p-4">
+      <button
+        className="flex w-full items-center gap-1.5 text-left font-medium text-sm"
+        onClick={() => setIsExpanded((current) => !current)}
+        type="button"
+      >
+        <ChevronRight
+          className={`size-3.5 shrink-0 text-muted-foreground transition-transform ${isExpanded ? "rotate-90" : ""}`}
+        />
+        {isExpanded ? messages.assets.textPreviewHide : messages.assets.textPreviewShow}
+      </button>
+
+      {isExpanded ? (
+        <div className="mt-3 border-t pt-3">
+          {textStatus === "stale" ? (
+            <p className="mb-2 rounded-md border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-amber-800 text-xs dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-300">
+              {messages.assets.textPreviewStaleWarning}
+            </p>
+          ) : null}
+
+          {textLinesQuery.isError ? (
+            <p className="rounded-md border border-destructive/40 bg-destructive/10 px-2.5 py-1.5 text-destructive text-xs">
+              {textLinesQuery.error instanceof Error
+                ? textLinesQuery.error.message
+                : messages.assets.textPreviewFailed}
+            </p>
+          ) : null}
+
+          {lines.length > 0 ? (
+            <pre className="max-h-96 overflow-y-auto whitespace-pre-wrap break-words rounded-md border bg-muted/40 p-3 font-mono text-[11px] leading-5">
+              {lines.join("\n")}
+            </pre>
+          ) : null}
+
+          {isBusy ? (
+            <p className="mt-2 text-muted-foreground text-xs">
+              {messages.assets.textPreviewLoading}
+            </p>
+          ) : null}
+
+          <div className="mt-2 flex items-center gap-2">
+            {!isBusy && hasMore ? (
+              <button
+                className="rounded-md border bg-background px-2.5 py-1 text-xs hover:bg-muted"
+                onClick={() =>
+                  setRange({
+                    startLine: loadedThrough + 1,
+                    endLine: loadedThrough + TEXT_PREVIEW_WINDOW_SIZE,
+                  })
+                }
+                type="button"
+              >
+                {messages.search.loadMore}
+              </button>
+            ) : null}
+            {totalLines !== null && loadedThrough > 0 ? (
+              <span className="text-muted-foreground text-[11px]">
+                {fmt(messages.assets.textPreviewRange, {
+                  start: 1,
+                  end: loadedThrough,
+                  total: totalLines,
+                })}
+              </span>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
+    </div>
   );
 }
 
@@ -401,6 +541,8 @@ export function AssetDetailView({
               ) : null}
             </div>
           </div>
+
+          <AssetTextPreviewPanel assetId={asset.id} orpc={orpc} textStatus={asset.textStatus} />
 
           <AssetMetadataBlock framed metadata={asset.metadata} />
 

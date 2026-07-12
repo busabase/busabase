@@ -12,7 +12,9 @@
  * refused — see the old Fix 3 below, replaced).
  */
 import { createRouterClient } from "@orpc/server";
+import { storage } from "openlib/storage";
 import { describe, expect, it } from "vitest";
+import { docBodyKey } from "../src/domains/doc/handlers";
 import { busabaseRouter } from "../src/router";
 import { seedScenario } from "./helpers/seed-scenario";
 
@@ -126,5 +128,26 @@ describe("Boundary P12 — Trash permanent delete (purge)", () => {
     await expect(raw.bases.restoreChangeRequest({ baseId: base.id })).rejects.toThrow(
       /permanently deleted/i,
     );
+  });
+
+  it("Fix 5: purging a Doc frees its body object in storage — but soft-delete (archive) alone does not", async () => {
+    await seedScenario("p12-purge-doc-storage");
+    const raw: RawClient = createRouterClient(busabaseRouter);
+
+    const doc = await raw.docs.create({ slug: "leaky", name: "Leaky", autoMerge: true });
+    if ("status" in doc) throw new Error("Expected materialized DocVO");
+    await raw.docs.updateBody({ nodeId: doc.node.id, body: "some real content" });
+    expect(await storage.objectExists(docBodyKey(doc.node.id))).toBe(true);
+
+    await deleteNode(raw, doc.node.id);
+    // Soft-delete (archive, recoverable via restore) must NOT touch storage —
+    // otherwise restoring the doc would come back with an empty body.
+    expect(await storage.objectExists(docBodyKey(doc.node.id))).toBe(true);
+
+    const res = await raw.nodes.purge({ nodeId: doc.node.id });
+    expect(res.purged).toBe(true);
+    // Purge is the one point genuinely never reachable again — the body
+    // object must be freed (it already survives forever in commit history).
+    expect(await storage.objectExists(docBodyKey(doc.node.id))).toBe(false);
   });
 });

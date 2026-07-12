@@ -1,3 +1,4 @@
+import { nodepodProxy } from "@scelar/nodepod/next";
 import { type NextRequest, NextResponse } from "next/server";
 import { DEMO_LOCALE_HEADER, resolveDemoMode } from "openlib/ui/dashboard/demo";
 
@@ -36,7 +37,16 @@ const readParam = (request: NextRequest, key: string): string | null => {
   }
 };
 
-export function proxy(request: NextRequest) {
+export async function proxy(request: NextRequest) {
+  // Nodepod (AirApp node's in-browser Run panel, via busabase-core's
+  // dashboard) needs its service worker reachable at `/__sw__.js` on this
+  // app's own origin. Unified with apps/busabase-cloud's approach (compose
+  // nodepodProxy into the app's existing proxy.ts) rather than a separate
+  // `app/__sw__.js/route.ts` — see the airapp changelog for why both forms
+  // work and why this one was chosen for consistency across the two apps.
+  const nodepodResponse = await nodepodProxy(request);
+  if (nodepodResponse) return nodepodResponse;
+
   // Resolve the page `?demo`/`?lang` (0/false/off → not demo) into the demo signals;
   // `route.ts` validates the use-case into a `DemoUseCase`.
   const { useCase, locale } = resolveDemoMode({
@@ -57,5 +67,8 @@ export function proxy(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/api/v1/:path*", "/api/rpc/:path*"],
+  // Next.js statically analyzes `matcher` at build time and requires literal
+  // strings — it cannot resolve an imported `nodepodMatcher` reference here,
+  // even though its value is exactly this same literal ("/__sw__.js").
+  matcher: ["/api/v1/:path*", "/api/rpc/:path*", "/__sw__.js"],
 };

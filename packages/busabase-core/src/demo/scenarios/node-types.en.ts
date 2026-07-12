@@ -1,12 +1,108 @@
+import { AIRAPP_DEMO_HONO_API, AIRAPP_DEMO_SQLITE } from "../../domains/airapp/demo-content";
 import type { SeedScenario } from "../seed-types";
 
-// English per-node-type example content: Docs + Files + review Comments. Shipped via
-// `pnpm db:seed:all`, on top of the scenario's folders/bases/records. The zh-CN
-// counterpart (`node-types.zh-cn.ts`) mirrors this structure with different data.
+// English per-node-type example content: Skills + Drives + AirApps + Docs + Files +
+// review Comments. Shipped via `pnpm db:seed:all`, on top of the scenario's
+// folders/bases/records. The zh-CN counterpart (`node-types.zh-cn.ts`) mirrors this
+// structure with different data — AirApps are English-only for now (see the
+// canvas-node changelog for why).
+//
+// AirApp content comes from `domains/airapp/demo-content` — the same catalog
+// `apps/busabase/scripts/demo/14-airapps.ts` uses to create all 6 demos via
+// the REST API, so the two never drift. Only the two fast, dependency-light
+// demos (Hono API, SQLite) are seeded here; the Vite-based ones (slower
+// installs, two of them deliberately broken) are left out of this fast
+// baseline seed.
 
 const DOC_GUIDE_CR_ID = "crq_seed_doc_operating_guide";
 
+// ── Skill: AI Research Editor ────────────────────────────────────────────────
+// Same content that used to be hardcoded directly in seed.ts's
+// `seedSkillNodeIfMissing` — moved here verbatim so it's scenario-driven instead.
+
+const AI_RESEARCH_EDITOR_SKILL_MD = `---\nname: ai-research-editor\ndescription: Reviews agent research drafts for source quality before publishing.\n---\n\n# AI Research Editor\n\nUse this skill when an agent proposes AI industry analysis, newsletter copy, or social threads that need source checks before merge.\n\n## Workflow\n\n1. Read the proposed ChangeRequest operations.\n2. Check whether every factual claim has a source URL or a clear internal record reference.\n3. Flag unsupported claims before approval.\n4. Keep edits concise and preserve the author's thesis.\n`;
+
 export const enNodeTypesScenario: SeedScenario = {
+  fileTreeNodes: [
+    {
+      nodeType: "skill",
+      nodeId: "nod_skill_ai_research_editor",
+      slug: "ai-research-editor",
+      name: "AI Research Editor",
+      description: "Reviews agent research drafts for source quality before publishing.",
+      position: 0,
+      files: [
+        { path: "SKILL.md", content: AI_RESEARCH_EDITOR_SKILL_MD },
+        {
+          path: "skill.json",
+          content: `${JSON.stringify(
+            {
+              name: "ai-research-editor",
+              description: "Reviews agent research drafts for source quality before publishing.",
+              version: "0.1.0",
+            },
+            null,
+            2,
+          )}\n`,
+        },
+        {
+          path: "references/source-policy.md",
+          content:
+            "# Source policy\n\nPrefer primary sources, official documentation, direct company posts, and clearly dated analyst notes. Reject claims that only cite vague social chatter.\n",
+        },
+        {
+          path: "examples/review-comment.md",
+          content:
+            "This draft is directionally useful, but the claim about enterprise adoption needs a dated source before approval.\n",
+        },
+      ],
+      changeRequest: {
+        id: "crq_seed_skill_research_editor",
+        operationId: "opr_seed_skill_research_editor",
+        commitId: "cmt_seed_skill_research_editor",
+        submittedBy: "skill-maintainer-agent",
+        minutesAgo: 6,
+        filePath: "SKILL.md",
+        nextContent: `${AI_RESEARCH_EDITOR_SKILL_MD}\n## Merge guardrails\n\n- Do not approve drafts that lack source receipts for market-size, policy, or benchmark claims.\n- Prefer a short reviewer note over rewriting the entire article.\n`,
+        message: "Add merge guardrails to AI Research Editor Skill",
+        scenario: "skill-file-update",
+        workflow: "skill-governance",
+      },
+    },
+    {
+      nodeType: "drive",
+      nodeId: "nod_drive_team_files",
+      slug: "team-files",
+      name: "Team Files",
+      description: "A plain file drive seeded with README.md.",
+      position: 0,
+      files: [
+        {
+          path: "README.md",
+          content:
+            "# Team Files\n\nA shared Drive for plain files. Propose edits through change requests before merge.\n",
+        },
+      ],
+    },
+    {
+      nodeType: "airapp",
+      nodeId: "nod_airapp_hono_api_demo",
+      slug: AIRAPP_DEMO_HONO_API.slug,
+      name: AIRAPP_DEMO_HONO_API.name,
+      description: AIRAPP_DEMO_HONO_API.description,
+      position: 0,
+      files: AIRAPP_DEMO_HONO_API.files,
+    },
+    {
+      nodeType: "airapp",
+      nodeId: "nod_airapp_sqlite_demo",
+      slug: AIRAPP_DEMO_SQLITE.slug,
+      name: AIRAPP_DEMO_SQLITE.name,
+      description: AIRAPP_DEMO_SQLITE.description,
+      position: 1,
+      files: AIRAPP_DEMO_SQLITE.files,
+    },
+  ],
   docs: [
     {
       nodeId: "nod_doc_agent_operating_guide",

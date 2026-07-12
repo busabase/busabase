@@ -245,6 +245,7 @@ function BusabaseDashboardContent({
     baseChildParams,
     isSkillRoute,
     isDriveRoute,
+    isAirappRoute,
     isFileRoute,
     isDocRoute,
     isFolderRoute,
@@ -252,6 +253,7 @@ function BusabaseDashboardContent({
     selectedBaseSlug,
     selectedSkillSlug,
     selectedDriveSlug,
+    selectedAirappSlug,
     selectedFileSlug,
     selectedDocSlug,
     selectedFolderSlug,
@@ -1588,13 +1590,15 @@ function BusabaseDashboardContent({
       ? { type: "skill", slug: selectedSkillSlug }
       : isDriveRoute
         ? { type: "drive", slug: selectedDriveSlug }
-        : isFileRoute
-          ? { type: "file", slug: selectedFileSlug }
-          : isDocRoute
-            ? { type: "doc", slug: selectedDocSlug }
-            : isFolderRoute
-              ? { type: "folder", slug: selectedFolderSlug }
-              : null;
+        : isAirappRoute
+          ? { type: "airapp", slug: selectedAirappSlug }
+          : isFileRoute
+            ? { type: "file", slug: selectedFileSlug }
+            : isDocRoute
+              ? { type: "doc", slug: selectedDocSlug }
+              : isFolderRoute
+                ? { type: "folder", slug: selectedFolderSlug }
+                : null;
     if (nodeDetailRoute) {
       const RenderDetail = getNodeDetail(nodeDetailRoute.type);
       if (RenderDetail) {
@@ -1628,6 +1632,7 @@ function BusabaseDashboardContent({
     isRecordRoute,
     isSkillRoute,
     isDriveRoute,
+    isAirappRoute,
     isFileRoute,
     isDocRoute,
     isFolderRoute,
@@ -1635,6 +1640,7 @@ function BusabaseDashboardContent({
     orpc,
     selectedSkillSlug,
     selectedDriveSlug,
+    selectedAirappSlug,
     selectedFileSlug,
     selectedDocSlug,
     selectedFolderSlug,

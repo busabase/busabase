@@ -31,6 +31,7 @@ import {
   englishScenario,
 } from "../demo/dataset";
 import { zhCnScenario } from "../demo/scenarios/zh-cn";
+import { type DocLinesResult, sliceDocLinesRange, splitDocLines } from "../domains/doc/handlers";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Stateless demo read/write layer. Every function reads the shared seed
@@ -153,6 +154,22 @@ export const demoGetDoc = (nodeIdOrSlug: string): DemoDocVO => {
     throw notFound("Doc", nodeIdOrSlug);
   }
   return doc;
+};
+
+// Unlike `assets.readTextLines`/`assets.grep` (demoUnsupported below — no real
+// per-asset object storage backs the stateless demo dataset), a Doc's `body`
+// is already a full in-memory string on `DemoDocVO` (same as `demoGetDoc`
+// already relies on) — no checkpoints/storage needed, so this is a real,
+// working demo implementation, not `demoUnsupported`. Reuses the exact same
+// clamp/cap/truncated logic (`sliceDocLinesRange`) the real storage-backed
+// `readDocLines` uses, so demo and production report identically.
+export const demoReadDocLines = (
+  nodeIdOrSlug: string,
+  startLine: number,
+  endLine: number,
+): DocLinesResult => {
+  const doc = demoGetDoc(nodeIdOrSlug);
+  return sliceDocLinesRange(splitDocLines(doc.body), startLine, endLine);
 };
 
 export const demoListFileNodes = (): FileNodeVO[] => dataset().files;

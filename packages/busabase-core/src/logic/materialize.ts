@@ -61,6 +61,15 @@ export interface NodeCreateFields {
     displayName?: string;
     mimeType?: string;
   }>;
+  /**
+   * Drive/Skill/AirApp-only: how `initialFiles` combines with the config's
+   * default seed files. "merge" (default): layered on top by path, so a
+   * caller supplying just a couple of extra files still gets the rest of the
+   * default scaffold. "replace": `initialFiles` replaces the defaults
+   * entirely — for a caller handing over a complete, different-shaped
+   * project who does not want unrelated default files mixed in.
+   */
+  mergeMode?: "merge" | "replace";
 }
 
 export interface MaterializeArgs {

@@ -44,6 +44,7 @@ export const auditEventInputSchema = z.object({
     "file.created",
     "skill.created",
     "drive.created",
+    "airapp.created",
     "asset.deleted",
     "asset.metadata_updated",
     "asset.text_written",

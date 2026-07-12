@@ -1,7 +1,7 @@
 {
   "name": "busabase-core",
   "description": "Shared Busabase open-core protocol, local store, API helpers, and dashboard components.",
-  "version": "0.9.4",
+  "version": "0.9.5",
   "private": true,
   "type": "module",
   "exports": {
@@ -52,6 +52,14 @@
     "./domains/drive/handlers": {
       "types": "./src/domains/drive/handlers.ts",
       "default": "./src/domains/drive/handlers.ts"
+    },
+    "./domains/airapp/handlers": {
+      "types": "./src/domains/airapp/handlers.ts",
+      "default": "./src/domains/airapp/handlers.ts"
+    },
+    "./domains/airapp/demo-content": {
+      "types": "./src/domains/airapp/demo-content.ts",
+      "default": "./src/domains/airapp/demo-content.ts"
     },
     "./domains/base/handlers": {
       "types": "./src/domains/base/handlers.ts",
@@ -147,6 +155,7 @@
     "@orpc/server": "^1.14.6",
     "@orpc/tanstack-query": "1.14.6",
     "@orpc/zod": "^1.14.6",
+    "@scelar/nodepod": "^1.9.5",
     "@tanstack/react-query": "^5.101.0",
     "@tanstack/react-virtual": "^3.13.12",
     "@xyflow/react": "^12.10.0",

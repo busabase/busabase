@@ -16,6 +16,7 @@
  * Dependency-free so it can sit at the base of the dependency graph.
  */
 
+import { airappNodeType } from "./airapp/definition";
 import { baseNodeType } from "./base/definition";
 import { docNodeType } from "./doc/definition";
 import { driveNodeType } from "./drive/definition";
@@ -70,6 +71,7 @@ export const BUILTIN_NODE_TYPES = [
   baseNodeType,
   skillNodeType,
   driveNodeType,
+  airappNodeType,
   fileNodeType,
   docNodeType,
 ] as const;

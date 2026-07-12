@@ -30,6 +30,7 @@ import {
   demoListRecordsByFieldText,
   demoListViews,
   demoMergeChangeRequest,
+  demoReadDocLines,
   demoReviewChangeRequest,
   demoReviseOperation,
   demoSearch,
@@ -200,6 +201,22 @@ export const busabaseDemoRouter = os.router({
       throw demoUnsupported("Drive change request");
     }),
   },
+  airapps: {
+    list: os.airapps.list.handler(() => []),
+    create: os.airapps.create.handler(() => {
+      throw demoUnsupported("Create AirApp");
+    }),
+    get: os.airapps.get.handler(() => {
+      throw demoUnsupported("Open AirApp");
+    }),
+    listFiles: os.airapps.listFiles.handler(() => []),
+    readFile: os.airapps.readFile.handler(() => {
+      throw demoUnsupported("Read AirApp file");
+    }),
+    createChangeRequest: os.airapps.createChangeRequest.handler(() => {
+      throw demoUnsupported("AirApp change request");
+    }),
+  },
   files: {
     list: os.files.list.handler(() => demoListFileNodes()),
     create: os.files.create.handler(() => {
@@ -213,6 +230,13 @@ export const busabaseDemoRouter = os.router({
       throw demoUnsupported("Create Doc");
     }),
     get: os.docs.get.handler(({ input }) => demoGetDoc(input.nodeId)),
+    // The Doc body is already fully in memory on the demo dataset (same as
+    // `get` above relies on), so — unlike `assets.readTextLines` below, which
+    // needs real per-asset storage the demo dataset doesn't have —
+    // `readLines` gets a real, working demo implementation.
+    readLines: os.docs.readLines.handler(({ input }) =>
+      demoReadDocLines(input.nodeId, input.startLine, input.endLine),
+    ),
     updateBody: os.docs.updateBody.handler(() => {
       throw demoUnsupported("Update Doc");
     }),

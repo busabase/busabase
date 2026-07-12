@@ -36,13 +36,12 @@ import type {
 } from "busabase-contract/contract/grep-schemas";
 import type { FieldType } from "busabase-contract/types";
 import { and, asc, desc, eq, inArray, isNull, or } from "drizzle-orm";
-import { storage } from "openlib/storage";
 import { getContextSpaceId } from "../context";
 import { getDb } from "../db";
 import { busabaseCommits, busabaseNodes } from "../db/schema";
 import { grepAssets, grepTimeoutMs } from "../domains/assets/logic/asset-grep-logic";
 import { busabaseBaseFields, busabaseBases, busabaseRecords } from "../domains/base/schema";
-import { docBodyKey } from "../domains/doc/handlers";
+import { readDocBodyForGrep, splitDocLines } from "../domains/doc/handlers";
 import { ensureReady } from "./seed";
 import { compileGrepPattern, scanLines } from "./text-scan-core";
 
@@ -107,35 +106,15 @@ const resolveCandidateDocs = async (
 };
 
 /**
- * Read a Doc body for grep purposes — same storage key and full-buffer-read
- * shape as `doc/handlers.ts`'s `readDocBody` (Doc bodies are storage-native,
- * KB-scale markdown objects; see the spec's "Doc bodies stay storage-native"
- * decision record — a chunked/streaming reader is deliberately NOT built
- * here), but WITHOUT that function's `.catch(() => Buffer.from(""))` swallow.
- * That swallow is the right default for `doc/handlers.ts`'s own callers (a
- * Doc can legitimately have no body object yet); grep's honest-coverage
- * contract needs the opposite — a genuine storage failure must surface as
- * `coverage.docs.errored`, never silently read back as a clean empty scan.
+ * `readDocBodyForGrep` and `splitDocLines` (grep's honest-coverage Doc body
+ * read + the shared line-splitting convention) now live in
+ * `domains/doc/handlers.ts` — a more natural home, since they're Doc-domain
+ * concerns, not grep-specific, and `readDocLines` (the Doc-domain equivalent
+ * of `assets.readTextLines`) is a second caller. Imported above; this file
+ * keeps only the thin async-generator adapter that feeds `scanLines`, shared
+ * by BOTH the docs adapter (a Doc body) and the records adapter (one field's
+ * flattened value) below.
  */
-const readDocBodyForGrep = async (nodeId: string): Promise<string> =>
-  (await storage.getObject(docBodyKey(nodeId))).toString("utf8");
-
-/**
- * Split a text blob into lines with the same convention the files adapter's
- * `iterateLinesFromFile` (Node's `readline`) uses: a trailing `\n` does not
- * create a phantom empty final line, `\r\n` is normalized to `\n`, and an
- * empty body is zero lines (not one empty line) — so a Doc's reported line
- * numbers match what `docs.get` + a text editor would show. Shared by BOTH
- * the docs adapter (a Doc body) and the records adapter (one field's
- * flattened value) — one splitter, not two slightly-different ones.
- */
-const splitDocLines = (body: string): string[] => {
-  if (body.length === 0) return [];
-  const raw = body.split("\n");
-  if (body.endsWith("\n")) raw.pop(); // trailing "\n" does not add a phantom empty last line
-  return raw.map((line) => (line.endsWith("\r") ? line.slice(0, -1) : line));
-};
-
 async function* linesFromBody(body: string): AsyncGenerator<string> {
   for (const line of splitDocLines(body)) {
     yield line;

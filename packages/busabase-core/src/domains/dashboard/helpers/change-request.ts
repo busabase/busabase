@@ -77,6 +77,10 @@ export const operationOrder: OperationKind[] = [
   "drive_file_update",
   "drive_file_delete",
   "drive_metadata_update",
+  "airapp_file_create",
+  "airapp_file_update",
+  "airapp_file_delete",
+  "airapp_metadata_update",
 ];
 
 // Operation labels/tones come from the node-type registry (single source of truth).
@@ -87,6 +91,10 @@ const operationLabelKeys: Record<OperationKind, keyof CoreI18nMessages["operatio
   drive_file_delete: "driveFileDelete",
   drive_file_update: "driveFileUpdate",
   drive_metadata_update: "driveMetadataUpdate",
+  airapp_file_create: "airappFileCreate",
+  airapp_file_delete: "airappFileDelete",
+  airapp_file_update: "airappFileUpdate",
+  airapp_metadata_update: "airappMetadataUpdate",
   node_create: "nodeCreate",
   node_delete: "nodeDelete",
   node_move: "nodeMove",

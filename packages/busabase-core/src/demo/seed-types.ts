@@ -122,6 +122,45 @@ export interface SeedFileDef {
   position: number;
 }
 
+export interface SeedFileTreeChangeRequestDef {
+  id: string;
+  operationId: string;
+  commitId: string;
+  submittedBy: string;
+  /** Minutes before the dataset "now" anchor that this change request was submitted. */
+  minutesAgo: number;
+  /**
+   * Path (within the def's `files`) whose current content becomes the change
+   * request's base-content hash, and whose proposed replacement is `nextContent`.
+   */
+  filePath: string;
+  /** Proposed replacement content for `filePath`. */
+  nextContent: string;
+  message: string;
+  /** `sourceMeta.scenario` — a short label for what workflow this demos. */
+  scenario: string;
+  /** `sourceMeta.workflow` — a short label for the review workflow being demoed. */
+  workflow: string;
+}
+
+/**
+ * A Skill, Drive, or AirApp node — all three are file-tree nodes that share
+ * the exact same shape (a folder-scoped node with files written through
+ * `writeFileTreeTextFile`), so one generic definition covers all of them
+ * instead of three copy-pasted per-kind interfaces.
+ */
+export interface SeedFileTreeDef {
+  nodeType: "skill" | "drive" | "airapp";
+  nodeId: string;
+  slug: string;
+  name: string;
+  description: string;
+  files: { path: string; content: string }[];
+  position: number;
+  /** Optional in-review file-update change request, to demo the node's review flow. */
+  changeRequest?: SeedFileTreeChangeRequestDef;
+}
+
 export interface SeedCommentDef {
   id: string;
   subjectType: "record" | "change_request" | "operation" | "commit";
@@ -144,6 +183,8 @@ export interface SeedScenario {
   docs?: SeedDocDef[];
   /** First-class File nodes, each backed by an Asset. */
   files?: SeedFileDef[];
+  /** Skill / Drive / AirApp nodes — all file-tree nodes, see `SeedFileTreeDef`. */
+  fileTreeNodes?: SeedFileTreeDef[];
   /** Review discussion threaded under the scenario's change requests / records. */
   comments?: SeedCommentDef[];
 }
