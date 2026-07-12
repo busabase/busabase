@@ -26,5 +26,11 @@ export default defineConfig({
     // PGLite seed → change-request → review → merge integration flows exceed
     // vitest's 5s default on cold CI runners; give DB-heavy tests headroom.
     testTimeout: 30_000,
+    // `beforeAll` (PGLite spin-up + seeding) falls under `hookTimeout`, not
+    // `testTimeout` — it silently stayed at vitest's 10s default and timed
+    // out under real concurrent-file resource contention even though the
+    // test itself was fine (see the same fix + explanation in
+    // packages/busabase-core/vitest.config.ts).
+    hookTimeout: 30_000,
   },
 });

@@ -326,6 +326,20 @@ describe("Webhook automation domain — oRPC", () => {
       const parsed = JSON.parse(hit!.body);
       expect(parsed.title).toBe("Function test");
 
+      // `waitForHit` only proves the test listener received the sandboxed
+      // function's fetch() request — it settles the moment that request
+      // lands, which can be BEFORE `recordDelivery` finishes writing the
+      // delivery row (the function still has to receive the response, keep
+      // executing, return, and only then does dispatchOneRule persist the
+      // row). Poll for the row itself rather than assuming it's already
+      // there — this was a real, if rare, race under concurrent test-file
+      // load (delivery row not yet committed when this test's own request
+      // resolved), not a bug in the dispatch path itself.
+      await waitFor(async () => {
+        const deliveries = await client.webhooks.deliveries({ ruleId: rule.id, limit: 5 });
+        return deliveries.length > 0;
+      }, 2000);
+
       const deliveries = await client.webhooks.deliveries({ ruleId: rule.id, limit: 5 });
       expect(deliveries[0]?.status).toBe("success");
       // No single HTTP call is "the" delivery anymore — the function may

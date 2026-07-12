@@ -30,6 +30,13 @@ export default defineConfig({
     command: "pnpm dev",
     url: "http://localhost:15419",
     reuseExistingServer: !process.env.CI,
-    timeout: 120 * 1000,
+    // 120s wasn't enough on a real (cold, 2-core) GitHub Actions runner: the
+    // first Turbopack dev compile + first PGLite migration, with no warm
+    // `.next`/pnpm build cache, genuinely took longer than that — confirmed
+    // by a real CI run timing out at ~121s, essentially exactly the old
+    // limit, not failing fast with a startup error. 240s gives real cold
+    // starts headroom without masking an actual crash (a crashed process
+    // still fails immediately, well under either timeout).
+    timeout: 240 * 1000,
   },
 });
