@@ -168,10 +168,19 @@ jobs:
       - name: Build
         working-directory: apps/busabase
         run: NODE_OPTIONS=--max-old-space-size=4096 pnpm build
+      # `next start` warns "does not work with output: standalone" and never
+      # actually serves on this build (confirmed: a real CI run using
+      # `pnpm start` sat on an unreachable port until wait-on timed out) —
+      # this app builds standalone (next.config's `output: "standalone"`,
+      # same as the Dockerfile/npm-publish runtime), so start it the same
+      # way those do: run the generated server.js directly, which is a
+      # plain Node http server that honors PORT.
       - name: Start server
         working-directory: apps/busabase
         run: |
-          pnpm start &
+          server_js="$(find .next/standalone -path '*/apps/busabase/server.js' | head -1)"
+          test -n "$server_js" || { echo "standalone server.js not found"; exit 1; }
+          PORT=15419 node "$server_js" &
           echo $! > /tmp/busabase-server.pid
           npx wait-on http://localhost:15419 --timeout 60000
       - name: Run benchmark suite

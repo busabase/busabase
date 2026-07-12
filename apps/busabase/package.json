@@ -25,8 +25,8 @@
   "scripts": {
     "build": "next build",
     "pack:standalone": "node scripts/pack-standalone.mjs",
-    "dev": "tsx scripts/verify-local-start.ts && next dev",
-    "start": "next start",
+    "dev": "tsx scripts/verify-local-start.ts && next dev -p 15419",
+    "start": "next start -p 15419",
     "test": "vitest run",
     "test:e2e": "playwright test tests/e2e",
     "typesafe-i18n": "typesafe-i18n --no-watch",
