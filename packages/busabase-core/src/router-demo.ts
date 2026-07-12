@@ -61,11 +61,20 @@ export const busabaseDemoRouter = os.router({
     verify: os.auth.verify.handler(() => demoGetAuthInfo()),
   },
   search: os.search.handler(({ input }) => demoSearch(input)),
+  // Unified Grep (P2a) needs real per-source storage (Drive text slots +
+  // Doc bodies) the stateless in-memory demo dataset doesn't have — same
+  // boundary `assets.grep`/`assets.editContent` already draw below.
+  grep: os.grep.handler(() => {
+    throw demoUnsupported("Unified grep");
+  }),
   nodes: {
     list: os.nodes.list.handler(() => demoListNodes()),
     listArchived: os.nodes.listArchived.handler(() => []),
     createChangeRequest: os.nodes.createChangeRequest.handler(() => {
       throw demoUnsupported("Node tree change request");
+    }),
+    move: os.nodes.move.handler(() => {
+      throw demoUnsupported("Move node");
     }),
     purge: os.nodes.purge.handler(() => {
       throw demoUnsupported("Permanently delete node");
@@ -230,6 +239,9 @@ export const busabaseDemoRouter = os.router({
     delete: os.assets.delete.handler(() => {
       throw demoUnsupported("Delete asset");
     }),
+    download: os.assets.download.handler(() => {
+      throw demoUnsupported("Download asset");
+    }),
     // Drive Grep Retrieval needs real per-asset object storage (text slots,
     // the grep cache) that the stateless in-memory demo dataset doesn't
     // back — same "no real storage" boundary as uploads/updates/deletes above.
@@ -244,6 +256,11 @@ export const busabaseDemoRouter = os.router({
     }),
     readTextLines: os.assets.readTextLines.handler(() => {
       throw demoUnsupported("Read asset text lines");
+    }),
+    // editContent needs a real Drive/Skill mount + the filetree ChangeRequest
+    // pipeline — same "no real storage" boundary as the rest of this slice.
+    editContent: os.assets.editContent.handler(() => {
+      throw demoUnsupported("Edit asset content");
     }),
   },
   vault: {
@@ -276,6 +293,25 @@ export const busabaseDemoRouter = os.router({
     deliveries: os.webhooks.deliveries.handler(() => []),
     testFire: os.webhooks.testFire.handler(() => {
       throw demoUnsupported("Test-fire webhook rule");
+    }),
+  },
+  // Dump domain needs real per-space DB rows and object storage the stateless
+  // in-memory demo dataset doesn't have — unsupported in demo mode.
+  dump: {
+    exportTables: os.dump.exportTables.handler(() => {
+      throw demoUnsupported("Export space");
+    }),
+    importBegin: os.dump.importBegin.handler(() => {
+      throw demoUnsupported("Import space");
+    }),
+    importTables: os.dump.importTables.handler(() => {
+      throw demoUnsupported("Import space");
+    }),
+    importCommit: os.dump.importCommit.handler(() => {
+      throw demoUnsupported("Import space");
+    }),
+    importAbort: os.dump.importAbort.handler(() => {
+      throw demoUnsupported("Import space");
     }),
   },
   changeRequests: {

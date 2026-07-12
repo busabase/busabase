@@ -6,7 +6,7 @@ import {
   Text,
   View,
 } from "react-native";
-import { radius, typography } from "~/theme/tokens";
+import { mobile, radius, spacing, typography } from "~/theme/tokens";
 import { useTokens } from "~/theme/use-tokens";
 
 interface TextInputProps extends RNTextInputProps {
@@ -48,12 +48,14 @@ export const TextInput = forwardRef<RNTextInput, TextInputProps>(function TextIn
 });
 
 const styles = StyleSheet.create({
-  field: { gap: 6 },
+  field: { gap: spacing[1] + 2 },
   input: {
-    minHeight: 48,
+    minHeight: mobile.minTouchTarget,
     borderRadius: radius.md,
     borderWidth: StyleSheet.hairlineWidth,
-    paddingHorizontal: 14,
+    paddingHorizontal: spacing[3] + 2,
+    // Intentionally above typography.body (15) — 16px prevents iOS Safari/RN
+    // WebView auto-zoom-on-focus.
     fontSize: 16,
   },
 });

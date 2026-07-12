@@ -208,3 +208,67 @@ export const ReadLinesVOSchema = z.object({
   truncated: z.boolean(),
 });
 export type ReadLinesVO = z.infer<typeof ReadLinesVOSchema>;
+
+// ── editContent — string-replace edits to a mounted file, via ChangeRequest ──
+// A coding-agent-style Edit-tool shape (oldString → newString, same/first vs
+// replaceAll), applied to the CURRENT, REAL, canonical file content of an asset
+// mounted in a Drive or Skill. Unlike `putText` (derived/extracted text, direct
+// write, disposable), this edits the file's actual bytes and always goes through
+// the existing filetree ChangeRequest pipeline for human review — never auto-merged.
+
+/** One string-replace edit — mirrors a coding-agent Edit tool's exact semantics. */
+export const AssetContentEditSchema = z
+  .object({
+    oldString: z.string().min(1),
+    newString: z.string(),
+    /** Replace every occurrence instead of requiring a single unique match. */
+    replaceAll: z.boolean().optional().default(false),
+  })
+  .strict();
+export type AssetContentEdit = z.infer<typeof AssetContentEditSchema>;
+
+/**
+ * `POST /assets/{assetId}/edit-content` — apply `edits` sequentially (each
+ * against the result of the previous one) to the asset's current mounted Drive/
+ * Skill text content, then propose the result as a `content`-shaped `update`
+ * operation on the existing filetree ChangeRequest pipeline (`baseContentHash`
+ * threaded through for the same optimistic-concurrency conflict check any other
+ * file edit gets). Requires the asset to be mounted in exactly one Drive/Skill
+ * location — ambiguous or absent mounts are rejected rather than guessed at.
+ */
+export const EditAssetContentInputSchema = z.object({
+  assetId: z.string(),
+  edits: z.array(AssetContentEditSchema).min(1),
+  message: z
+    .string()
+    .optional()
+    .default("Edit file content")
+    .describe(
+      'Explanation shown to the human reviewer. Write a conventional-commit style subject — imperative verb + what + why, e.g. "Fix typo in setup instructions".',
+    ),
+  submittedBy: z.string().optional().default("agent"),
+});
+export type EditAssetContentInput = z.infer<typeof EditAssetContentInputSchema>;
+
+/**
+ * `GET /assets/{assetId}/content` result. oRPC contracts here are JSON in/out
+ * (no raw binary passthrough exists anywhere else in this codebase — grepped
+ * the assets/drive domains and the Drive Grep Retrieval streaming reads, which
+ * all stay server-side/byte-range, never a raw-binary oRPC response), so the
+ * pragmatic, consistent-with-`AssetVO.url` shape is a resolved download URL:
+ * `storage.getPublicUrl` locally (served by the existing static /uploads
+ * route), or a presigned S3 URL in cloud deployments. Callers (browsers,
+ * `busabase-dump`) then do a plain HTTP GET against `downloadUrl`.
+ */
+export const AssetDownloadInputSchema = z.object({ assetId: z.string() });
+export type AssetDownloadInput = z.infer<typeof AssetDownloadInputSchema>;
+
+export const AssetDownloadVOSchema = z.object({
+  assetId: z.string(),
+  downloadUrl: z.string(),
+  fileName: z.string(),
+  mimeType: z.string(),
+  size: z.number().int().nonnegative(),
+  contentHash: z.string().nullable(),
+});
+export type AssetDownloadVO = z.infer<typeof AssetDownloadVOSchema>;

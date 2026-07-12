@@ -19,7 +19,7 @@ import type {
   CreateTextUploadUrlVO,
   PutTextInput,
 } from "busabase-contract/domains/assets/types";
-import { and, eq, ne } from "drizzle-orm";
+import { and, eq, inArray, ne } from "drizzle-orm";
 import { generateNanoID } from "openlib/nanoid";
 import { storage } from "openlib/storage";
 import { getContextSpaceId, resolveActorId } from "../../../context";
@@ -73,6 +73,25 @@ export const getAssetTextStatus = async (assetId: string, tx?: Db): Promise<Asse
     .where(eq(busabaseAssetTexts.assetId, assetId))
     .limit(1);
   return deriveAssetTextStatus(row?.status);
+};
+
+/**
+ * Batch-load `busabase_asset_texts` rows for a set of assetIds, keyed by
+ * assetId. Shared by grep's candidate resolution (self-heal + present/missing/
+ * stale bucketing, `asset-grep-logic.ts`) and by `search.ts`'s file-body
+ * eligibility gate — "what text does this asset have" has exactly ONE
+ * implementation, reused rather than duplicated.
+ */
+export const loadAssetTextRows = async (
+  db: Db,
+  assetIds: string[],
+): Promise<Map<string, AssetTextPO>> => {
+  if (assetIds.length === 0) return new Map();
+  const rows = await db
+    .select()
+    .from(busabaseAssetTexts)
+    .where(inArray(busabaseAssetTexts.assetId, assetIds));
+  return new Map(rows.map((row) => [row.assetId, row]));
 };
 
 /**

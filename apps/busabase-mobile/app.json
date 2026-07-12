@@ -60,7 +60,8 @@
       ],
       "expo-background-task",
       "expo-status-bar",
-      "./plugins/with-android-cookies-gradle-repositories.cjs"
+      "./plugins/with-android-cookies-gradle-repositories.cjs",
+      "expo-font"
     ],
     "experiments": {
       "typedRoutes": true

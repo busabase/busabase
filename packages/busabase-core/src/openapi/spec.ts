@@ -22,6 +22,11 @@ export async function getBusabaseOpenApiSpec() {
           "Auth verification — the active space, acting user, and membership for the request.",
       },
       {
+        name: "Search",
+        description:
+          "Full-text search and unified grep (regex/literal scan across files, Docs, and Base records with one pattern and one coverage report).",
+      },
+      {
         name: "Bases",
         description:
           "Developer-facing Base endpoints. This is the straightforward table/database API surface.",

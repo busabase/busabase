@@ -1,9 +1,12 @@
 import { Platform } from "react-native";
 
-// Mirrors the busabase web dashboard, which inherits KUI's neutral (shadcn/Linear)
-// theme: a monochrome grayscale scale with a near-black primary, subtle gray
-// borders, and white cards on a faintly tinted background. Color is reserved
-// for semantic status (destructive/success/warning) — there is no brand accent.
+// Mirrors the busabase web dashboard, which inherits openlib/KUI's neutral
+// (shadcn/Linear) OKLCH theme converted to sRGB hex: a monochrome grayscale
+// scale with a near-black primary, subtle gray borders, and white cards on a
+// faintly tinted background. Color is reserved for semantic status — the
+// merged/review/rejected trio below (the 茶 Cha palette) plus destructive —
+// there is no brand accent. Canonical source: packages/openlib/shared.css +
+// apps/busabase-cloud/content/spec/design-system.md.
 export const lightTokens = {
   background: "#F8F8F7",
   surface: "#FFFFFF",
@@ -17,8 +20,18 @@ export const lightTokens = {
   primaryMuted: "#ECECEA",
   destructive: "#EF4444",
   destructiveForeground: "#FAFAFA",
+  // 茶 (Cha) semantic status palette — the only chromatic colors in the
+  // product. "text" is the on-light emphasis variant (-strong).
+  merged: { base: "#5E8C6A", text: "#43704F" },
+  review: { base: "#C79A3E", text: "#8A6A24" },
+  rejected: { base: "#B95B3F", text: "#9A4531" },
+  // Kept for non-CR contexts (network/misc warnings) — not part of Cha.
   success: "#16A34A",
   warning: "#D97706",
+  overlay: "rgba(0, 0, 0, 0.32)",
+  scrim: "rgba(0, 0, 0, 0.22)",
+  handle: "rgba(120, 120, 120, 0.34)",
+  shadow: "#000000",
 };
 
 export type Tokens = typeof lightTokens;
@@ -36,14 +49,50 @@ export const darkTokens: Tokens = {
   primaryMuted: "#262626",
   destructive: "#EF4444",
   destructiveForeground: "#FAFAFA",
+  // "text" is the on-dark emphasis variant (-soft).
+  merged: { base: "#5E8C6A", text: "#93C3A2" },
+  review: { base: "#C79A3E", text: "#DCBD7C" },
+  rejected: { base: "#B95B3F", text: "#DB9678" },
   success: "#4ADE80",
   warning: "#FBBF24",
+  overlay: "rgba(0, 0, 0, 0.5)",
+  scrim: "rgba(0, 0, 0, 0.4)",
+  handle: "rgba(160, 160, 160, 0.34)",
+  shadow: "#000000",
 };
 
+// Serif family names come from @expo-google-fonts/fraunces (loaded via
+// useFonts in app/_layout.tsx). Display/h1/h2 are the one deliberate
+// divergence from Linear's all-sans look, matching the web dashboard's
+// Fraunces headings; h3 and below stay on the system sans body font so
+// dense list/table UI still reads as Linear-quiet.
+export const serifFontFamily = {
+  medium: "Fraunces_500Medium",
+  semiBold: "Fraunces_600SemiBold",
+} as const;
+
 export const typography = {
-  display: { fontSize: 29, lineHeight: 35, fontWeight: "700" as const, letterSpacing: 0 },
-  h1: { fontSize: 22, lineHeight: 28, fontWeight: "600" as const, letterSpacing: 0 },
-  h2: { fontSize: 18, lineHeight: 24, fontWeight: "600" as const, letterSpacing: 0 },
+  display: {
+    fontSize: 29,
+    lineHeight: 35,
+    fontWeight: "700" as const,
+    letterSpacing: 0,
+    fontFamily: serifFontFamily.semiBold,
+  },
+  h1: {
+    fontSize: 22,
+    lineHeight: 28,
+    fontWeight: "600" as const,
+    letterSpacing: 0,
+    fontFamily: serifFontFamily.semiBold,
+  },
+  h2: {
+    fontSize: 18,
+    lineHeight: 24,
+    fontWeight: "600" as const,
+    letterSpacing: 0,
+    fontFamily: serifFontFamily.medium,
+  },
   h3: { fontSize: 16, lineHeight: 23, fontWeight: "600" as const, letterSpacing: 0 },
   body: { fontSize: 15, lineHeight: 22, fontWeight: "400" as const },
   bodyEm: { fontSize: 15, lineHeight: 22, fontWeight: "500" as const },

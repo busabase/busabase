@@ -1,8 +1,12 @@
 import { boolean, index, jsonb, pgTable, text, timestamp } from "drizzle-orm/pg-core";
 import { spaceIdColumn } from "../../../db/space-column";
 
-export type WebhookEventType = "record.created" | "ai_mention" | "changes_requested";
-export type WebhookActionKind = "webhook" | "notify_agent" | "run_snippet";
+export type WebhookEventType =
+  | "record.created"
+  | "ai_mention"
+  | "changes_requested"
+  | "asset.uploaded";
+export type WebhookActionKind = "webhook" | "notify_agent" | "run_function";
 export type WebhookDeliveryStatus = "success" | "failed" | "skipped";
 
 /**
@@ -24,12 +28,12 @@ export interface WebhookRuleHttpConfigPO {
   headers?: Record<string, string>;
 }
 
-export interface WebhookRuleSnippetConfigPO {
+export interface WebhookRuleFunctionConfigPO {
   code: string;
   timeoutMs: number;
 }
 
-export type WebhookRuleConfigPO = WebhookRuleHttpConfigPO | WebhookRuleSnippetConfigPO;
+export type WebhookRuleConfigPO = WebhookRuleHttpConfigPO | WebhookRuleFunctionConfigPO;
 
 export const busabaseWebhookRules = pgTable(
   "busabase_webhook_rules",

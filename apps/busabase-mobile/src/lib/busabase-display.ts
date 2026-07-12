@@ -93,6 +93,33 @@ export function getChangeRequestScopeName(changeRequest: ChangeRequestVO) {
   return changeRequest.base?.name ?? changeRequest.node?.name ?? "Node tree";
 }
 
+// Commit messages the API fills in when the author didn't write one. Pure
+// boilerplate for a reviewer, so the UI hides them. Mirrors
+// packages/busabase-core/src/domains/dashboard/helpers/change-request.ts —
+// ported (not imported) because that package isn't wired into the mobile
+// Metro bundle; keep in sync if the web list adds/removes defaults.
+const DEFAULT_COMMIT_MESSAGES = new Set([
+  "Initial change request",
+  "Initial changeRequest",
+  "Update node tree",
+  "Delete record",
+  "Revise operation",
+  "Update skill",
+  "Update drive",
+  "Update doc",
+  "Create view",
+  "Update view",
+  "Delete view",
+  "Restore view",
+  "Add field",
+]);
+
+/** The author's own explanation of an operation, when it says more than a system default. */
+export function getChangeRequestMessage(changeRequest: ChangeRequestVO) {
+  const message = changeRequest.primaryOperation?.headCommit.message?.trim() ?? "";
+  return message && !DEFAULT_COMMIT_MESSAGES.has(message) ? message : "";
+}
+
 // Conventional-commit-style title, mirroring the web dashboard helper:
 // "<operation verb> <subject>" where the subject is the base's PRIMARY field
 // (first by position) value, falling back to title-ish slug guesses.

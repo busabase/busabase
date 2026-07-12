@@ -9,7 +9,7 @@ import type { ChangeRequestVO, NodeVO } from "busabase-contract/types";
 import { and, asc, eq, isNull } from "drizzle-orm";
 import { storage } from "openlib/storage";
 import type { z } from "zod";
-import { getContextSpaceId, resolveActorId } from "../../context";
+import { getContextSpaceId, resolveActorId, withContextSourceMeta } from "../../context";
 import { getDb } from "../../db";
 import {
   busabaseChangeRequests,
@@ -45,7 +45,12 @@ interface DocVO {
 }
 
 const docStoragePrefix = (nodeId: string) => `busabase/nodes/${nodeId}/doc/`;
-const docBodyKey = (nodeId: string) => `${docStoragePrefix(nodeId)}doc.md`;
+// Exported so `logic/grep.ts`'s Docs adapter (Unified Grep P2a) can address
+// the exact same storage object `readDocBody` reads, without depending on
+// this module's swallow-to-empty error handling below (see `readDocBody`'s
+// comment) — grep's honest-coverage contract needs a genuine storage failure
+// to surface as `coverage.docs.errored`, not silently read as an empty body.
+export const docBodyKey = (nodeId: string) => `${docStoragePrefix(nodeId)}doc.md`;
 
 export const writeDocBody = async (nodeId: string, body: string) => {
   await storage.uploadFileToKey(
@@ -55,6 +60,12 @@ export const writeDocBody = async (nodeId: string, body: string) => {
   );
 };
 
+// Swallows a missing/failed read to an empty body — the right default for
+// this module's own callers (a Doc node can legitimately have no body object
+// yet). `logic/grep.ts`'s Docs adapter deliberately does NOT reuse this
+// swallow (it reads via `docBodyKey` directly, without `.catch`), since a
+// storage error there must surface as `coverage.docs.errored`, not a clean
+// "scanned, empty, no match".
 const readDocBody = async (nodeId: string) =>
   (await storage.getObject(docBodyKey(nodeId)).catch(() => Buffer.from(""))).toString("utf8");
 
@@ -219,7 +230,7 @@ export const updateDocBody = async (
     fields: { body: parsed.body },
     message: `Update doc ${node.name}`,
     submittedBy: resolveActorId(CURRENT_USER_ID),
-    sourceMeta: { subject: "doc", nodeId: node.id },
+    sourceMeta: withContextSourceMeta({ subject: "doc", nodeId: node.id }),
   });
   return toDocVO(node);
 };
@@ -274,7 +285,7 @@ export const createDocChangeRequest = async (
     nodeId: node.id,
     status: "in_review",
     submittedBy: parsed.submittedBy,
-    sourceMeta: { subject: "doc", nodeId: node.id },
+    sourceMeta: withContextSourceMeta({ subject: "doc", nodeId: node.id }),
     reviewPolicySnapshot: { kind: "single", requiredApprovals: 1 },
     mergeSummary: {},
     rejectedReason: null,

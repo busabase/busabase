@@ -1,3 +1,4 @@
+import * as Haptics from "expo-haptics";
 import type { ReactNode } from "react";
 import { Pressable, type PressableProps, StyleSheet, Text, View } from "react-native";
 import { mobile, radius, typography } from "~/theme/tokens";
@@ -21,10 +22,22 @@ export function Button({
   fullWidth,
   leadingIcon,
   style,
+  onPress,
   ...rest
 }: ButtonProps) {
   const tokens = useTokens();
   const isDisabled = disabled || loading;
+
+  const handlePress: PressableProps["onPress"] = (event) => {
+    // Primary/destructive are the state-changing actions (approve, merge,
+    // delete, etc.) — every other variant is navigational/neutral.
+    if (variant === "destructive") {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+    } else if (variant === "primary") {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    }
+    onPress?.(event);
+  };
 
   const backgroundColor = (() => {
     if (isDisabled) return tokens.muted;
@@ -43,6 +56,8 @@ export function Button({
 
   return (
     <Pressable
+      accessibilityRole="button"
+      accessibilityState={{ disabled: isDisabled, busy: !!loading }}
       disabled={isDisabled}
       style={(state) => [
         styles.base,
@@ -57,6 +72,7 @@ export function Button({
         },
         typeof style === "function" ? style(state) : style,
       ]}
+      onPress={handlePress}
       {...rest}
     >
       <View style={styles.content}>

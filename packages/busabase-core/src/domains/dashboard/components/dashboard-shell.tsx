@@ -3,11 +3,14 @@
 import { hasCapability } from "busabase-contract/domains";
 import type { NodeVO } from "busabase-contract/types";
 import { Toaster } from "kui/sonner";
-import { Activity, FolderOpen, Images, Inbox, type LucideIcon, Plus, Search } from "lucide-react";
+import { Activity, FolderOpen, Images, Inbox, Plus, Search } from "lucide-react";
+import type { NavDropPosition, NavNodeDropParams } from "openlib/ui/dashboard";
 import { DashboardLayout, type NavGroup, type NavItem, NavMain } from "openlib/ui/dashboard";
 import type { ComponentProps, ReactNode } from "react";
+import { useMemo } from "react";
 import { coreMessagesByLocale } from "../../../i18n";
 import { nodeIconForType } from "../helpers/node-icons";
+import type { MoveNodePayload } from "../hooks/use-move-node";
 
 const isCoreLocale = (locale: string | undefined): locale is keyof typeof coreMessagesByLocale =>
   locale !== undefined && locale in coreMessagesByLocale;
@@ -29,6 +32,7 @@ export type BusabaseDashboardChrome = Omit<
   | "onNavItemAction"
   | "className"
   | "headerClassName"
+  | "hideSidebarTrigger"
   | "pageClassName"
   | "sidebarClassName"
   | "defaultOpen"
@@ -48,6 +52,13 @@ interface BusabaseDashboardShellProps {
   hiddenNavItems?: Array<"assets">;
   /** Optional top-level destinations pinned with Inbox/Search by a host. */
   pinnedNavItems?: Array<"activity">;
+  /**
+   * Wires up sidebar drag-and-drop reordering/reparenting. Omit to leave the
+   * tree read-only (no drag handles rendered). The host owns the actual
+   * mutation (see `useMoveNode`); this shell only translates a drop into the
+   * `{ nodeId, parentNodeId?, position? }` the `nodes.move` endpoint expects.
+   */
+  onMoveNode?: (payload: MoveNodePayload) => void;
 }
 
 /**
@@ -66,7 +77,80 @@ export function BusabaseDashboardShell({
   locale,
   hiddenNavItems = [],
   pinnedNavItems = [],
+  onMoveNode,
 }: BusabaseDashboardShellProps) {
+  // Flat id → NodeVO index over the REAL tree (not the display-flattened
+  // NavItem tree) so drag-and-drop can check a drop target's actual type and
+  // walk its true ancestor chain, regardless of how the sidebar visually
+  // nests/unwraps folders.
+  const nodeIndex = useMemo(() => {
+    const map = new Map<string, NodeVO>();
+    const visit = (list: NodeVO[]) => {
+      for (const node of list) {
+        map.set(node.id, node);
+        if (node.children.length > 0) visit(node.children);
+      }
+    };
+    visit(nodes);
+    return map;
+  }, [nodes]);
+
+  // A node may only become the child of `parentId` if that parent isn't the
+  // node itself or one of its own descendants (would orphan the subtree in a
+  // cycle). `parentId === null` means the space root, which is always valid.
+  // Mirrors the server-side guard in `mergeNodeMove`.
+  const isValidParentId = (draggedId: string, parentId: string | null): boolean => {
+    if (parentId === null) return true;
+    if (parentId === draggedId) return false;
+    let cursor: NodeVO | undefined = nodeIndex.get(parentId);
+    while (cursor) {
+      if (cursor.id === draggedId) return false;
+      cursor = cursor.parentId ? nodeIndex.get(cursor.parentId) : undefined;
+    }
+    return true;
+  };
+
+  // Shared by both the live drag-over indicator (NavMain's `isDropAllowed`
+  // prop) and the final drop handler below, for EVERY drop position — not
+  // just "inside". A "before"/"after" drop reparents the dragged node into
+  // the target's OWN parent, which is just as capable of creating a cycle
+  // (drag an ancestor folder to sit as a sibling inside one of its own
+  // descendants) as dropping directly "inside" a descendant is. The one
+  // "inside"-only extra rule: the target itself must actually be a container.
+  const isDropAllowed = (
+    draggedId: string,
+    targetId: string,
+    position: NavDropPosition,
+  ): boolean => {
+    const target = nodeIndex.get(targetId);
+    if (!target) return false;
+    if (position === "inside") {
+      return hasCapability(target.type, "container") && isValidParentId(draggedId, targetId);
+    }
+    return isValidParentId(draggedId, target.parentId ?? null);
+  };
+
+  const handleNodeDrop = ({ draggedId, targetId, position }: NavNodeDropParams) => {
+    if (!onMoveNode) return;
+    if (!isDropAllowed(draggedId, targetId, position)) return;
+    if (position === "inside") {
+      const target = nodeIndex.get(targetId);
+      onMoveNode({
+        nodeId: draggedId,
+        parentNodeId: targetId,
+        position: target?.children.length ?? 0,
+      });
+      return;
+    }
+    const target = nodeIndex.get(targetId);
+    if (!target) return;
+    onMoveNode({
+      nodeId: draggedId,
+      parentNodeId: target.parentId ?? undefined,
+      position: position === "before" ? target.position : target.position + 1,
+    });
+  };
+
   const messages = isCoreLocale(locale) ? coreMessagesByLocale[locale] : coreMessagesByLocale.en;
   const nav = messages.nav;
   // The "Bases" group label doubles as the header-action key, so reuse one value.
@@ -158,12 +242,15 @@ export function BusabaseDashboardShell({
               items={scrollNav}
               onHeaderActionClick={handleHeaderActionClick}
               onNavItemAction={handleNavItemAction}
+              onNodeDrop={onMoveNode ? handleNodeDrop : undefined}
+              isDropAllowed={onMoveNode ? isDropAllowed : undefined}
             />
           </div>
         }
         onHeaderActionClick={handleHeaderActionClick}
         onNavItemAction={handleNavItemAction}
         headerClassName="!h-0 !min-h-0 overflow-hidden border-0"
+        hideSidebarTrigger
         pageClassName="gap-0 p-0"
         sidebarClassName="h-full"
       >
@@ -182,23 +269,67 @@ function nodeHref(node: NodeVO): string | null {
   return hasCapability(node.type, "hasDetail") ? `/${node.type}/${node.slug}` : null;
 }
 
-// Collect every navigable leaf (a node with a detail screen) under a node as flat
-// sub-items (the sidebar nests one level).
-function collectNavLeaves(node: NodeVO): { title: string; url: string; icon: LucideIcon }[] {
-  return node.children.flatMap((child) => {
-    if (hasCapability(child.type, "hidden")) return [];
-    const url = nodeHref(child);
+/**
+ * Build the NavItem(s) for a single node — a collapsible folder row (with its
+ * own recursively-built `items`) if the node is a container, otherwise a plain
+ * clickable leaf row if it has a detail screen, otherwise nothing. Applied at
+ * EVERY depth (both at the top of `buildKnowledgeBaseItems` and recursively
+ * via `buildNavChildren`), so a folder nested arbitrarily deep gets the exact
+ * same chevron/add-child/actions treatment as a top-level one — the sidebar
+ * (NavMain) renders `NavItem.items` recursively, so nothing here needs to
+ * flatten nested folders away anymore.
+ */
+function buildNavItem(
+  node: NodeVO,
+  onCreateChild: (node: NodeVO) => void,
+  labels: { newLabel: string; openLabel: string },
+): NavItem[] {
+  if (hasCapability(node.type, "hidden")) return [];
+  const icon = nodeIconForType(node.type);
+  if (hasCapability(node.type, "container")) {
+    const url = nodeHref(node) ?? "";
     return [
-      ...(url ? [{ title: child.name, url, icon: nodeIconForType(child.type) }] : []),
-      ...collectNavLeaves(child),
+      {
+        title: node.name,
+        url,
+        icon,
+        id: node.id,
+        items: buildNavChildren(node, onCreateChild, labels),
+        onAddChild: () => onCreateChild(node),
+        addChildTitle: labels.newLabel,
+        actions: url
+          ? [
+              {
+                title: labels.openLabel,
+                url,
+                icon: FolderOpen,
+              },
+            ]
+          : [],
+      },
     ];
-  });
+  }
+  const url = nodeHref(node);
+  return url ? [{ title: node.name, url, icon, id: node.id }] : [];
+}
+
+// Recursively build every child of `node` as a NavItem — a container child
+// becomes its own nested collapsible folder (via `buildNavItem`'s recursive
+// call back into this function for ITS children), a detail-bearing child
+// becomes a plain leaf row, at any depth.
+function buildNavChildren(
+  node: NodeVO,
+  onCreateChild: (node: NodeVO) => void,
+  labels: { newLabel: string; openLabel: string },
+): NavItem[] {
+  return node.children.flatMap((child) => buildNavItem(child, onCreateChild, labels));
 }
 
 /**
  * Build the Bases nav from the node tree, preserving structure. Container types
- * become collapsible parents (detail-bearing descendants nested underneath);
- * other detail types are clickable rows. A single root container is unwrapped.
+ * become collapsible parents (detail-bearing descendants nested underneath, at
+ * any depth); other detail types are clickable rows. A single root container
+ * is unwrapped.
  */
 function buildKnowledgeBaseItems(
   nodes: NodeVO[],
@@ -210,32 +341,5 @@ function buildKnowledgeBaseItems(
       ? nodes[0].children
       : nodes;
 
-  return top.flatMap((node): NavItem[] => {
-    if (hasCapability(node.type, "hidden")) return [];
-    const icon = nodeIconForType(node.type);
-    if (hasCapability(node.type, "container")) {
-      const url = nodeHref(node) ?? "";
-      return [
-        {
-          title: node.name,
-          url,
-          icon,
-          items: collectNavLeaves(node),
-          onAddChild: () => onCreateChild(node),
-          addChildTitle: labels.newLabel,
-          actions: url
-            ? [
-                {
-                  title: labels.openLabel,
-                  url,
-                  icon: FolderOpen,
-                },
-              ]
-            : [],
-        },
-      ];
-    }
-    const url = nodeHref(node);
-    return url ? [{ title: node.name, url, icon }] : [];
-  });
+  return top.flatMap((node) => buildNavItem(node, onCreateChild, labels));
 }

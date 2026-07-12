@@ -6,12 +6,16 @@ import {
   RequestUploadUrlVOSchema,
 } from "open-domains/attachments/types";
 import { z } from "zod";
+import { changeRequestSchema } from "../../contract/schemas";
 import {
   AssetDetailVOSchema,
+  AssetDownloadInputSchema,
+  AssetDownloadVOSchema,
   AssetTextVOSchema,
   AssetVOSchema,
   CreateTextUploadUrlInputSchema,
   CreateTextUploadUrlVOSchema,
+  EditAssetContentInputSchema,
   GrepInputSchema,
   GrepResultVOSchema,
   PutTextInputSchema,
@@ -91,6 +95,17 @@ export const assetsContract = {
     })
     .input(z.object({ assetId: z.string() }))
     .output(z.object({ deleted: z.boolean() })),
+  download: oc
+    .route({
+      method: "GET",
+      path: "/assets/{assetId}/content",
+      tags: ["Assets"],
+      summary: "Get an asset's binary content download URL",
+      successDescription:
+        "A resolved, time-bounded download URL for the asset's raw bytes (local dev: the existing static /uploads route; cloud/S3: a presigned URL) plus its file metadata — see AssetDownloadVOSchema for why this returns a URL, not a raw-binary oRPC response.",
+    })
+    .input(AssetDownloadInputSchema)
+    .output(AssetDownloadVOSchema),
 
   // ── Drive Grep Retrieval ─────────────────────────────────────────────────
   // Busabase stores, indexes, and searches text; it never generates it. Text
@@ -140,4 +155,20 @@ export const assetsContract = {
     })
     .input(ReadTextLinesInputSchema)
     .output(ReadLinesVOSchema),
+
+  // ── editContent — edit an asset's REAL file content via ChangeRequest ──────
+  // Unlike putText (derived/extracted text, direct write, disposable), this
+  // edits the asset's actual mounted Drive/Skill file bytes and always goes
+  // through the existing filetree ChangeRequest pipeline — never auto-merged.
+  editContent: oc
+    .route({
+      method: "POST",
+      path: "/assets/{assetId}/edit-content",
+      tags: ["Assets", "Change Requests"],
+      summary: "Edit an asset's file content via string-replace edits, as a ChangeRequest",
+      successDescription:
+        'Applied the string-replace edits (coding-agent Edit-tool semantics: unique-match or replaceAll) to the asset\'s current mounted Drive/Skill file content and proposed the result as a ChangeRequest (status "in_review") for human review. Reuses the existing filetree update-via-CR pipeline end to end, including baseContentHash optimistic-concurrency conflict protection at merge time. Requires the asset to be mounted in exactly one editable Drive/Skill location.',
+    })
+    .input(EditAssetContentInputSchema)
+    .output(changeRequestSchema),
 };

@@ -32,4 +32,18 @@ describe("Busabase OpenAPI asset upload routes", () => {
     expect(serialized).toContain('"mode"');
     expect(serialized).toContain('"Assets"');
   });
+
+  it("documents editContent — string-replace edits to an asset's content via ChangeRequest", async () => {
+    const spec = await getBusabaseOpenApiSpec();
+    const paths = Object.keys(spec.paths ?? {});
+
+    expect(paths).toContain("/api/v1/assets/{assetId}/edit-content");
+    const serialized = JSON.stringify(spec.paths?.["/api/v1/assets/{assetId}/edit-content"] ?? {});
+    expect(serialized).toContain('"post"');
+    expect(serialized).toContain('"edits"');
+    expect(serialized).toContain('"oldString"');
+    expect(serialized).toContain('"newString"');
+    expect(serialized).toContain('"replaceAll"');
+    expect(serialized).toContain('"Assets"');
+  });
 });

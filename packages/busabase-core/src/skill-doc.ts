@@ -348,6 +348,40 @@ npx busabase-cli assets put-text --asset-id :assetId --none
 # goes through POST /assets/text/upload-urls → PUT bytes → putText({storageKey})).
 \`\`\`
 
+Search EVERYTHING in a Space — files AND Doc bodies AND Base records — in one call. Use this
+(not \`assets/grep\` above) when the answer could live anywhere; use \`assets/grep\` instead when
+you specifically only care about files and want its fuller \`missing\`/\`stale\`/\`unsearchable\`
+file-only reporting. Same pattern language (regex, guarded against catastrophic backtracking),
+same \`maxMatches\`/\`contextLines\` semantics — files are scanned first, then Docs, then whatever
+budget remains goes to records, so a low \`maxMatches\` always drops the records tail first, never
+files/Docs. Records are read from the CANONICAL record commit (\`headCommit.fields\`), never the
+1024-char-truncated \`search\` projection, so a match can come from deep inside a long
+\`longtext\`/\`markdown\` field that \`search\` would silently miss:
+
+\`\`\`bash
+curl -X POST ${base}/api/v1/grep \\
+${authLine}  -H 'content-type: application/json' \\
+  --data '{"pattern": "Termination", "sources": ["files", "docs", "records"], "contextLines": 2}'
+# → { matches: [{ source: "files", assetId, fileName, drivePath, line, column, text, before, after }
+#              | { source: "docs", nodeId, slug, name, line, column, text, before, after }
+#              | { source: "records", baseId, baseSlug, recordId, fieldSlug, line, column, text, before, after },
+#              ...],
+#     coverage: { files: { scanned, missing, stale, unsearchable, errored, notReached },
+#                 docs: { scanned, errored, notReached },
+#                 records: { scanned, errored, notReached } },
+#     truncated }
+# matches are ordered files-first, then docs, then records. Scope down to one source (and narrow
+# further — assetIds/drivePath/mimeTypes for files, nodeIds for docs, baseIds/baseSlugs for
+# records — baseIds/baseSlugs are a union: either match puts a Base in scope) with
+# "sources": ["docs"] etc.:
+curl -X POST ${base}/api/v1/grep \\
+${authLine}  -H 'content-type: application/json' \\
+  --data '{"pattern": "ACME Corp", "sources": ["docs"], "scope": {"docs": {"nodeIds": ["nod_..."]}}}'
+curl -X POST ${base}/api/v1/grep \\
+${authLine}  -H 'content-type: application/json' \\
+  --data '{"pattern": "ACME Corp", "sources": ["records"], "scope": {"records": {"baseSlugs": ["contracts"]}}}'
+\`\`\`
+
 Approve a ChangeRequest:
 
 \`\`\`bash

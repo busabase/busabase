@@ -35,7 +35,7 @@ export const webhookContract = {
       tags: ["Webhooks"],
       summary: "Create webhook automation rule",
       successDescription:
-        "Created webhook automation rule. Dispatches on the configured event via an HTTP webhook, an agent notification, or a sandboxed snippet.",
+        "Created webhook automation rule. Dispatches on the configured event via an HTTP webhook, an agent notification, or a sandboxed function.",
     })
     .input(WebhookRuleInputSchema)
     .output(WebhookRuleVOSchema),

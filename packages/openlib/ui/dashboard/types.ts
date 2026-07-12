@@ -14,13 +14,22 @@ export interface NavItem {
   url: string;
   icon?: LucideIcon;
   isActive?: boolean;
-  items?: {
-    title: string;
-    url: string;
-    icon?: LucideIcon;
-  }[];
   /**
-   * Optional ID for the item (e.g., task ID for delete operations)
+   * Sub-items, recursively — a sub-item is itself a full `NavItem`, so it may
+   * carry its own `items` and render as a nested collapsible folder at any
+   * depth (see NavMain, which renders rows recursively). An item with no
+   * `items` (or an empty array) is a plain leaf row. This is a
+   * backward-compatible widening of the previous flat, leaf-only sub-item
+   * shape: a flat list of leaves is still valid, since a leaf is just a
+   * `NavItem` whose `items` is undefined. `id` (below) doubles as the
+   * drag-and-drop identity at every depth — a sub-item needs one to
+   * participate in drag-and-drop (see NavMain's `onNodeDrop`).
+   */
+  items?: NavItem[];
+  /**
+   * Optional ID for the item (e.g., task ID for delete operations). Also
+   * doubles as the drag-and-drop identity when NavMain's `onNodeDrop` is
+   * supplied — items without an `id` are never draggable/droppable.
    */
   id?: string;
   /**

@@ -152,7 +152,6 @@ function EditRecordContent() {
         <RecordForm
           fields={record.base.fields}
           values={values}
-          variant="embedded"
           onChange={(fieldSlug, value) =>
             setValues((current) => ({ ...current, [fieldSlug]: value }))
           }

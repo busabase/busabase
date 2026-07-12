@@ -6,7 +6,7 @@ import { fieldNameSchema } from "busabase-contract/domains/base/contract/base-sc
 import type { NodeVO } from "busabase-contract/types";
 import { and, asc, desc, eq, inArray, isNotNull, isNull, ne } from "drizzle-orm";
 import { z } from "zod";
-import { getContextSpaceId, resolveActorId } from "../context";
+import { getContextSpaceId, resolveActorId, withContextSourceMeta } from "../context";
 import { getDb } from "../db";
 import {
   busabaseBases,
@@ -309,7 +309,7 @@ export const createNodeChangeRequest = async (
     nodeId: null,
     status: "in_review",
     submittedBy,
-    sourceMeta: { subject: "node_tree" },
+    sourceMeta: withContextSourceMeta({ subject: "node_tree" }),
     reviewPolicySnapshot: { kind: "single", requiredApprovals: 1 },
     mergeSummary: {},
     rejectedReason: null,
@@ -404,4 +404,32 @@ export const createNodeChangeRequest = async (
     throw new Error(`Failed to create node change request: ${changeRequestId}`);
   }
   return changeRequest;
+};
+
+export const moveNodeInputSchema = z.object({
+  nodeId: z.string(),
+  parentNodeId: z.string().optional(),
+  position: z.number().int().optional(),
+  message: z.string().optional(),
+  submittedBy: z.string().optional(),
+});
+
+// Ergonomic single-node wrapper around createNodeChangeRequest's generic "move"
+// operation: reordering/reparenting is a low-risk structural tweak, so it
+// auto-merges immediately instead of sitting in review like content changes.
+export const moveNode = async (input: z.input<typeof moveNodeInputSchema>) => {
+  const parsed = moveNodeInputSchema.parse(input);
+  return createNodeChangeRequest({
+    message: parsed.message ?? "Reorder node",
+    submittedBy: parsed.submittedBy,
+    autoMerge: true,
+    operations: [
+      {
+        kind: "move",
+        nodeId: parsed.nodeId,
+        parentNodeId: parsed.parentNodeId,
+        position: parsed.position,
+      },
+    ],
+  });
 };

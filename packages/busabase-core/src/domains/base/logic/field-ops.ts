@@ -14,7 +14,7 @@ import type { FieldType } from "busabase-contract/types";
 import { and, asc, eq, gt, isNotNull, isNull, or, sql } from "drizzle-orm";
 import { type iString, iStringFromText, iStringToText } from "openlib/i18n/i-string";
 import type { z } from "zod";
-import { getContextSpaceId, resolveActorId } from "../../../context";
+import { getContextSpaceId, resolveActorId, withContextSourceMeta } from "../../../context";
 import { getDb } from "../../../db";
 import {
   busabaseBaseFields,
@@ -106,7 +106,7 @@ export const createBaseField = async (baseId: string, input: z.infer<typeof fiel
     message: `Add field ${parsed.slug}`,
     submittedBy: resolveActorId(CURRENT_USER_ID),
     reviewPolicySnapshot: base.reviewPolicy,
-    sourceMeta: { subject: "base_field", fieldSlug: parsed.slug },
+    sourceMeta: withContextSourceMeta({ subject: "base_field", fieldSlug: parsed.slug }),
     auditMetadata: { fieldSlug: parsed.slug },
   });
   return updatedBase;
@@ -171,7 +171,7 @@ export const createFieldChangeRequest = async (
     baseId: base.id,
     status: "in_review",
     submittedBy: resolveActorId(parsed.submittedBy),
-    sourceMeta: { subject: "base_field", fieldSlug: parsed.slug },
+    sourceMeta: withContextSourceMeta({ subject: "base_field", fieldSlug: parsed.slug }),
     reviewPolicySnapshot: base.reviewPolicy,
     mergeSummary: {},
     rejectedReason: null,
@@ -279,7 +279,7 @@ export const createDeleteFieldChangeRequest = async (
     baseId: base.id,
     status: "in_review",
     submittedBy: resolveActorId(submittedBy),
-    sourceMeta: { subject: "base_field", fieldSlug: field.slug },
+    sourceMeta: withContextSourceMeta({ subject: "base_field", fieldSlug: field.slug }),
     reviewPolicySnapshot: base.reviewPolicy,
     mergeSummary: {},
     rejectedReason: null,
@@ -386,7 +386,7 @@ export const createUpdateFieldChangeRequest = async (
     baseId: base.id,
     status: "in_review",
     submittedBy: resolveActorId(submittedBy),
-    sourceMeta: { subject: "base_field", fieldSlug: field.slug },
+    sourceMeta: withContextSourceMeta({ subject: "base_field", fieldSlug: field.slug }),
     reviewPolicySnapshot: base.reviewPolicy,
     mergeSummary: {},
     rejectedReason: null,
@@ -648,7 +648,11 @@ export const createConvertFieldChangeRequest = async (
     baseId: base.id,
     status: "in_review",
     submittedBy: resolveActorId(submittedBy),
-    sourceMeta: { subject: "base_convert_field", fieldId: field.id, fieldSlug: field.slug },
+    sourceMeta: withContextSourceMeta({
+      subject: "base_convert_field",
+      fieldId: field.id,
+      fieldSlug: field.slug,
+    }),
     reviewPolicySnapshot: base.reviewPolicy,
     mergeSummary: {},
     rejectedReason: null,
@@ -744,7 +748,7 @@ export const createReorderFieldsChangeRequest = async (
     baseId: base.id,
     status: "in_review",
     submittedBy: resolveActorId(submittedBy),
-    sourceMeta: { subject: "base_reorder_fields" },
+    sourceMeta: withContextSourceMeta({ subject: "base_reorder_fields" }),
     reviewPolicySnapshot: base.reviewPolicy,
     mergeSummary: {},
     rejectedReason: null,
@@ -849,7 +853,7 @@ export const createRestoreFieldChangeRequest = async (
     baseId: base.id,
     status: "in_review",
     submittedBy: resolveActorId(submittedBy),
-    sourceMeta: { subject: "base_field", fieldSlug: field.slug },
+    sourceMeta: withContextSourceMeta({ subject: "base_field", fieldSlug: field.slug }),
     reviewPolicySnapshot: base.reviewPolicy,
     mergeSummary: {},
     rejectedReason: null,

@@ -161,6 +161,17 @@ export async function* iterateLinesFromFile(
 export interface AssetTextSource {
   /** Iterate lines starting at the given byte offset (default: from the start). */
   iterateLines(startByteOffset?: number): AsyncGenerator<string>;
+  /**
+   * Concrete on-disk path backing this source, when one exists — the local
+   * storage provider's real fs path, or a remote object already pulled into
+   * the size-capped disk cache via `ensureCached`. Undefined only for the
+   * rare legacy no-content-hash streaming fallback below, which has no
+   * on-disk file to point at. Exposed so callers (the optional
+   * `rg`-accelerated grep path in `asset-grep-logic.ts`) can hand `rg` a
+   * real file instead of re-fetching/re-caching through a separate
+   * mechanism.
+   */
+  filePath?: string;
 }
 
 /**
@@ -181,6 +192,7 @@ export const openAssetTextSource = async (row: {
     }
     const filePath = getLocalStoragePath(row.textStorageKey);
     return {
+      filePath,
       iterateLines: (startByteOffset = 0) => iterateLinesFromFile(filePath, startByteOffset),
     };
   }
@@ -216,6 +228,7 @@ export const openAssetTextSource = async (row: {
 
   const filePath = await ensureCached(row.textContentHash, row.textStorageKey);
   return {
+    filePath,
     iterateLines: (startByteOffset = 0) => iterateLinesFromFile(filePath, startByteOffset),
   };
 };

@@ -29,7 +29,6 @@ interface RecordFormProps {
   fields: BaseFieldVO[];
   values: Record<string, RecordFormValue>;
   onChange: (slug: string, value: RecordFormValue) => void;
-  variant?: "grouped" | "embedded";
 }
 
 const MULTILINE_TYPES = new Set(["longtext", "markdown", "html"]);
@@ -419,17 +418,9 @@ function AttachmentFieldEditor({
   );
 }
 
-export function RecordForm({ fields, values, onChange, variant = "grouped" }: RecordFormProps) {
-  const tokens = useTokens();
+export function RecordForm({ fields, values, onChange }: RecordFormProps) {
   return (
-    <View
-      style={[
-        styles.list,
-        variant === "grouped"
-          ? { backgroundColor: tokens.card, borderColor: tokens.border }
-          : styles.embeddedList,
-      ]}
-    >
+    <View>
       {fields.map((field, index) => (
         <FieldRow
           key={field.id}
@@ -444,15 +435,6 @@ export function RecordForm({ fields, values, onChange, variant = "grouped" }: Re
 }
 
 const styles = StyleSheet.create({
-  list: {
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: radius.lg,
-    overflow: "hidden",
-  },
-  embeddedList: {
-    borderWidth: 0,
-    borderRadius: 0,
-  },
   field: {
     paddingHorizontal: 14,
     paddingVertical: 12,

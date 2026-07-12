@@ -217,7 +217,6 @@ function OperationDetailContent() {
           <RecordForm
             fields={changeRequest.base?.fields ?? []}
             values={values}
-            variant="embedded"
             onChange={(slug, value) => setValues((current) => ({ ...current, [slug]: value }))}
           />
         </ScrollView>

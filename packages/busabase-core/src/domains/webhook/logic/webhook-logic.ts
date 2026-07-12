@@ -8,17 +8,17 @@ import { busabaseWebhookDeliveries } from "../schema/webhook-deliveries";
 import {
   busabaseWebhookRules,
   type WebhookRuleConfigPO,
+  type WebhookRuleFunctionConfigPO,
   type WebhookRuleHttpConfigPO,
-  type WebhookRuleSnippetConfigPO,
 } from "../schema/webhook-rules";
 import type {
   WebhookDeliveryVO,
+  WebhookFunctionConfigVO,
   WebhookHttpConfig,
   WebhookHttpConfigVO,
   WebhookRuleInput,
   WebhookRuleUpdateInput,
   WebhookRuleVO,
-  WebhookSnippetConfigVO,
 } from "../types/webhook";
 import { encryptWebhookSecret } from "./webhook-crypto";
 
@@ -36,7 +36,7 @@ const toHttpConfigVO = (config: WebhookRuleHttpConfigPO): WebhookHttpConfigVO =>
   headers: config.headers,
 });
 
-const toSnippetConfigVO = (config: WebhookRuleSnippetConfigPO): WebhookSnippetConfigVO => ({
+const toFunctionConfigVO = (config: WebhookRuleFunctionConfigPO): WebhookFunctionConfigVO => ({
   code: config.code,
   timeoutMs: config.timeoutMs,
 });
@@ -62,11 +62,11 @@ export const toWebhookRuleVO = (po: WebhookRuleRow): WebhookRuleVO => {
   };
 
   switch (po.actionKind) {
-    case "run_snippet":
+    case "run_function":
       return {
         ...commonFields,
-        actionKind: "run_snippet",
-        config: toSnippetConfigVO(po.config as WebhookRuleSnippetConfigPO),
+        actionKind: "run_function",
+        config: toFunctionConfigVO(po.config as WebhookRuleFunctionConfigPO),
       };
     case "webhook":
       return {
@@ -118,7 +118,7 @@ const buildConfigPO = (
   input: WebhookRuleInput | WebhookRuleUpdateInput,
   existingConfig?: WebhookRuleConfigPO,
 ): WebhookRuleConfigPO => {
-  if (input.actionKind === "run_snippet") {
+  if (input.actionKind === "run_function") {
     return { code: input.config.code, timeoutMs: input.config.timeoutMs };
   }
   return buildHttpConfigPO(input.config, existingConfig);

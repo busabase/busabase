@@ -1,7 +1,12 @@
 import "server-only";
 
 import { ORPCError } from "@orpc/server";
-import type { AssetDetailVO, AssetUsageVO, AssetVO } from "busabase-contract/domains/assets/types";
+import type {
+  AssetDetailVO,
+  AssetDownloadVO,
+  AssetUsageVO,
+  AssetVO,
+} from "busabase-contract/domains/assets/types";
 import { and, desc, eq, sql } from "drizzle-orm";
 import {
   confirmUpload,
@@ -16,6 +21,7 @@ import { attachments, busabaseBaseFields, busabaseBases, busabaseNodes } from ".
 import { insertAuditEvent } from "../../logic/audit";
 import { id } from "../../logic/kernel";
 import { ensureReady } from "../../logic/seed";
+import { dispatchWebhookEvent } from "../webhook/logic/dispatch";
 import {
   autoRegisterAssetText,
   deriveAssetTextStatus,
@@ -191,8 +197,9 @@ export const requestAssetUploadUrl = async (input: RequestUploadUrlDTO) => {
 
 export const confirmAssetUpload = async (input: ConfirmUploadDTO) => {
   try {
+    const spaceId = input.spaceId ?? getContextSpaceId();
     const result = await confirmUpload(
-      { ...input, spaceId: input.spaceId ?? getContextSpaceId() },
+      { ...input, spaceId },
       resolveActorId("local"),
       db,
       attachments,
@@ -223,6 +230,37 @@ export const confirmAssetUpload = async (input: ConfirmUploadDTO) => {
         `[assets] autoRegisterAssetText failed for asset ${assetId} (non-fatal):`,
         error,
       );
+    }
+    // Drive Grep Retrieval's missing link: a binary (non-text) upload starts
+    // `textStatus: "missing"` and nothing else ever automatically supplies the
+    // extracted text — fire `asset.uploaded` so a space admin can configure a
+    // rule (e.g. `run_function` calling an external extraction service, then
+    // `putText`ing the result back) to close that loop. Text-kind uploads
+    // auto-register as "present" immediately above and never need external
+    // extraction, so they're excluded here — firing for them would just be
+    // noise. `baseId: null` because assets aren't scoped to a Base the way
+    // records are, so this can only ever match space-wide rules (see
+    // dispatchWebhookEvent's rule-matching in dispatch.ts). Fire-and-forget —
+    // NOT awaited — exactly like the `record.created` dispatch in
+    // cr-lifecycle.ts: this must never add latency (including up to a
+    // `run_function` rule's 5s timeoutMs) to the upload-confirm response.
+    // `dispatchWebhookEvent` itself never throws internally, but the
+    // `.catch()` here is defensive belt-and-suspenders, matching that call
+    // site's own style.
+    if (contentKind !== "text") {
+      void dispatchWebhookEvent(db, {
+        spaceId,
+        baseId: null,
+        eventType: "asset.uploaded",
+        payload: {
+          assetId,
+          fileName: input.fileName,
+          mimeType: input.mimeType,
+          textStatus: "missing",
+        },
+      }).catch((error) => {
+        console.error("[busabase] asset.uploaded webhook dispatch failed", error);
+      });
     }
     return { ...result, assetId };
   } catch (error) {
@@ -304,6 +342,39 @@ export const getAsset = async (assetId: string): Promise<AssetDetailVO> => {
   }));
 
   return { asset: toAssetVO(row, usages.length), usages };
+};
+
+/**
+ * `GET /assets/{assetId}/content` — see `AssetDownloadVOSchema` for why this
+ * resolves a URL instead of streaming raw bytes through oRPC. Reuses the same
+ * `storage.getPublicUrl` the library list/detail views already return in
+ * `AssetVO.url`; in a presigned-URL storage backend this naturally becomes a
+ * time-bounded signed URL instead of a static one, with no caller changes.
+ */
+export const downloadAsset = async (assetId: string): Promise<AssetDownloadVO> => {
+  await ensureReady();
+  const db = await getDb();
+  const spaceId = getContextSpaceId();
+
+  const [row] = await db
+    .select(assetRowColumns)
+    .from(busabaseAssets)
+    .innerJoin(attachments, eq(busabaseAssets.attachmentId, attachments.id))
+    .leftJoin(busabaseAssetTexts, withAssetTextJoin)
+    .where(and(eq(busabaseAssets.id, assetId), eq(busabaseAssets.spaceId, spaceId)))
+    .limit(1);
+  if (!row) {
+    throw new ORPCError("NOT_FOUND", { message: `Asset not found: ${assetId}` });
+  }
+
+  return {
+    assetId: row.id,
+    downloadUrl: storage.getPublicUrl(row.storageKey),
+    fileName: row.fileName,
+    mimeType: row.mimeType,
+    size: row.sizeBytes,
+    contentHash: row.contentHash,
+  };
 };
 
 export const resolveAssetFile = async (

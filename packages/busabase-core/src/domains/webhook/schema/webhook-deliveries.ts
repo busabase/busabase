@@ -12,7 +12,7 @@ export const busabaseWebhookDeliveries = pgTable(
     status: text("status").$type<WebhookDeliveryStatus>().notNull(),
     httpStatus: integer("http_status"),
     // Truncated (a few KB max, see logic/dispatch.ts) response body / error
-    // message / captured snippet console.log output — never the raw payload.
+    // message / captured function console.log output — never the raw payload.
     detail: text("detail"),
     durationMs: integer("duration_ms"),
     createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),

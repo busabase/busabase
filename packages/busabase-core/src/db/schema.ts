@@ -340,5 +340,5 @@ export * from "../domains/base/schema";
 export * from "../domains/vault/schema/vault-items";
 export * from "../domains/webhook/schema/webhook-deliveries";
 // Webhook automation: configurable rules (HTTP webhook / notify-agent /
-// sandboxed snippet) dispatched on Busabase events, plus their delivery log.
+// sandboxed function) dispatched on Busabase events, plus their delivery log.
 export * from "../domains/webhook/schema/webhook-rules";

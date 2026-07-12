@@ -190,6 +190,28 @@ export const dashboardJa: CoreI18nMessages = {
     workspaceActivity: "ワークスペースのアクティビティ",
     activityStats:
       "{changeRequests} 件の変更リクエスト · {operations} 件の操作 · {records} 件のレコード · {auditEvents} 件の監査イベント",
+    openedChangeRequest: "変更リクエストを開きました",
+    approvedChangeRequest: "変更リクエストを承認しました",
+    mergedChangeRequest: "変更リクエストをマージしました",
+    reviewedChangeRequest: "変更リクエストをレビューしました",
+    proposedOperation: "操作を提案しました",
+    committedOperation: "操作をコミットしました",
+    updatedRecord: "レコードを更新しました",
+    archivedRecord: "レコードをアーカイブしました",
+    viewedRecord: "レコードを表示しました",
+    recordedAuditEvent: "監査イベントを記録しました",
+    viaChannel: "{channel} 経由",
+    ownedBy: "{name} が所有",
+    channelWebUi: "Web UI",
+    channelBrowser: "ブラウザ",
+    channelOpenApi: "OpenAPI",
+    channelSdk: "SDK",
+    channelCli: "CLI",
+    channelMcp: "MCP",
+    channelSkill: "Skill",
+    channelWebhook: "Webhook",
+    channelAutomation: "自動化",
+    channelImport: "インポート",
   },
   actor: {
     localAdmin: "ローカル管理者",
@@ -628,5 +650,14 @@ export const dashboardJa: CoreI18nMessages = {
     unusedOnly: "未使用のみ表示",
     unusedBadge: "未使用 {count} 件",
     noUnusedAssets: "未使用のアセットはありません。",
+    textStatusMissing: "まだ検索できません",
+    textStatusMissingHint:
+      "このファイルにはまだテキストが提供されていないため、grep では見つかりません。",
+    textStatusNone: "テキストなし",
+    textStatusNoneHint:
+      "抽出可能なテキストがないとマークされています（スキャンした画像のみのファイルなど）。",
+    textStatusStale: "テキストが古い",
+    textStatusStaleHint:
+      "テキスト提供後にファイルが差し替えられたため、grep の対象から除外されています。再提供が必要です。",
   },
 };

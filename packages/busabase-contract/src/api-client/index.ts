@@ -132,6 +132,18 @@ export interface BusabaseDashboardApiClient {
   }) => Promise<ChangeRequestVO>;
   listArchivedNodes: () => Promise<NodeVO[]>;
   purgeNode: (nodeId: string) => Promise<{ purged: boolean }>;
+  /**
+   * Move/reorder a node — auto-merges immediately (no human review), since
+   * repositioning a node in the tree is a low-risk structural tweak rather
+   * than a content change. Backs the sidebar's drag-and-drop.
+   */
+  moveNode: (payload: {
+    nodeId: string;
+    parentNodeId?: string;
+    position?: number;
+    message?: string;
+    submittedBy?: string;
+  }) => Promise<ChangeRequestVO>;
   listViews: (baseId: string) => Promise<ViewVO[]>;
   createBaseField: (
     baseId: string,
@@ -346,6 +358,7 @@ export const createBusabaseRestApiClient = (
     listNodes: () => client.nodes.list(),
     listArchivedNodes: () => client.nodes.listArchived(),
     purgeNode: (nodeId) => client.nodes.purge({ nodeId }),
+    moveNode: (payload) => client.nodes.move(payload),
     getSkill: (nodeIdOrSlug) => client.skills.get({ nodeId: nodeIdOrSlug }),
     readSkillFile: (nodeId, filePath) => client.skills.readFile({ nodeId, filePath }),
     getDrive: (nodeIdOrSlug) => client.drives.get({ nodeId: nodeIdOrSlug }),

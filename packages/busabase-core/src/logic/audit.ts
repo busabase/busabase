@@ -3,7 +3,13 @@ import "server-only";
 import type { CommentSubjectType } from "busabase-contract/types";
 import { and, asc, desc, eq } from "drizzle-orm";
 import { z } from "zod";
-import { getContextSpaceId, resolveActorId, resolveUserRefs } from "../context";
+import {
+  getContextSourceProvenance,
+  getContextSpaceId,
+  resolveActorId,
+  resolveUserRefs,
+  withContextSourceMeta,
+} from "../context";
 import { getDb } from "../db";
 import {
   busabaseAuditEvents,
@@ -78,6 +84,15 @@ type LiveChangeRequestAuditAction = (typeof liveChangeRequestAuditActions)[numbe
 const isLiveChangeRequestAuditAction = (action: string): action is LiveChangeRequestAuditAction =>
   (liveChangeRequestAuditActions as readonly string[]).includes(action);
 
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
+const withAuditSourceMeta = (metadata: Record<string, unknown>) => {
+  if (!getContextSourceProvenance()) return metadata;
+  const sourceMeta = isRecord(metadata.sourceMeta) ? metadata.sourceMeta : {};
+  return { ...metadata, sourceMeta: withContextSourceMeta(sourceMeta) };
+};
+
 // ── Logic ─────────────────────────────────────────────────────────────────────
 
 export const insertAuditEvent = async (
@@ -96,7 +111,7 @@ export const insertAuditEvent = async (
       changeRequestId: parsed.changeRequestId ?? null,
       operationId: parsed.operationId ?? null,
       commitId: parsed.commitId ?? null,
-      metadata: parsed.metadata,
+      metadata: withAuditSourceMeta(parsed.metadata),
       createdAt: now(),
     })
     .returning();

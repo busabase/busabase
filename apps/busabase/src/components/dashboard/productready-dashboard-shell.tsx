@@ -6,6 +6,7 @@ import {
   type BusabaseDashboardChrome,
   BusabaseDashboardShell as CoreDashboardShell,
 } from "busabase-core/dashboard/dashboard-shell";
+import type { MoveNodePayload } from "busabase-core/dashboard/use-move-node";
 import { useCoreI18n } from "busabase-core/i18n";
 import {
   DropdownMenu,
@@ -45,6 +46,8 @@ interface ProductReadyDashboardShellProps {
   nodes: NodeVO[];
   onSearchClick: () => void;
   onCreateClick: (parent?: { id: string; name: string }) => void;
+  /** Wires up sidebar drag-and-drop; omit to leave the tree read-only. */
+  onMoveNode?: (payload: MoveNodePayload) => void;
   /** Resolved active locale (drives sidebar/content i18n). */
   locale: string;
   /** Saved preference shown in the switcher — `"auto"` or a concrete locale. */
@@ -64,6 +67,7 @@ export function ProductReadyDashboardShell({
   nodes,
   onSearchClick,
   onCreateClick,
+  onMoveNode,
   locale,
   languagePref,
   onLocaleChange,
@@ -245,6 +249,7 @@ export function ProductReadyDashboardShell({
       locale={locale}
       nodes={nodes}
       onCreateClick={onCreateClick}
+      onMoveNode={onMoveNode}
       onSearchClick={onSearchClick}
       pinnedNavItems={["activity"]}
     >

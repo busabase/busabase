@@ -287,6 +287,19 @@ describe("Busabase.putText", () => {
   });
 });
 
+describe("Busabase.grep() (Unified Grep) routes through the typed client", () => {
+  it("grep() posts to /grep — proves the SDK wrapper actually reaches the new top-level endpoint", async () => {
+    const { fetchImpl, requests } = okFetch();
+    const bb = new Busabase({ baseUrl: "http://localhost:15419", fetch: fetchImpl });
+
+    await bb.grep({ pattern: "TODO", sources: ["docs"] });
+
+    expect(requests[0]?.method).toBe("POST");
+    expect(new URL(requests[0]?.url ?? "").pathname).toBe("/api/v1/grep");
+    expect(await requests[0]?.clone().json()).toEqual({ pattern: "TODO", sources: ["docs"] });
+  });
+});
+
 describe("Busabase.assets.grep / readTextLines route through the typed client with zero wrapper code", () => {
   // No SDK wrapper exists for these two — they're reached directly via
   // `bb.assets.<method>`. That's by design (see index.ts), but it also means a
@@ -313,6 +326,22 @@ describe("Busabase.assets.grep / readTextLines route through the typed client wi
     expect(url.pathname).toBe("/api/v1/assets/ast_1/text/lines");
     expect(url.searchParams.get("startLine")).toBe("10");
     expect(url.searchParams.get("endLine")).toBe("20");
+  });
+
+  it("assets.editContent() posts to /assets/{assetId}/edit-content — also no SDK wrapper", async () => {
+    const { fetchImpl, requests } = okFetch();
+    const bb = new Busabase({ baseUrl: "http://localhost:15419", fetch: fetchImpl });
+
+    await bb.assets.editContent({
+      assetId: "ast_1",
+      edits: [{ oldString: "ACME Corp", newString: "Umbrella Inc" }],
+    });
+
+    expect(requests[0]?.method).toBe("POST");
+    expect(new URL(requests[0]?.url ?? "").pathname).toBe("/api/v1/assets/ast_1/edit-content");
+    expect(await requests[0]?.clone().json()).toEqual({
+      edits: [{ oldString: "ACME Corp", newString: "Umbrella Inc" }],
+    });
   });
 });
 

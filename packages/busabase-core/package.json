@@ -113,6 +113,10 @@
       "types": "./src/domains/dashboard/routes.tsx",
       "default": "./src/domains/dashboard/routes.tsx"
     },
+    "./dashboard/use-move-node": {
+      "types": "./src/domains/dashboard/hooks/use-move-node.ts",
+      "default": "./src/domains/dashboard/hooks/use-move-node.ts"
+    },
     "./openapi": {
       "types": "./src/openapi/spec.ts",
       "default": "./src/openapi/spec.ts"

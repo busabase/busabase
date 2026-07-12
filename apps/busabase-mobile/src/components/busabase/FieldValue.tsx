@@ -105,7 +105,10 @@ export function FieldValue({ field, value, highlight }: FieldValueProps) {
   const href = getLinkHref(field, value);
   if (href) {
     return (
-      <Pressable onPress={() => void Linking.openURL(href).catch(() => undefined)}>
+      <Pressable
+        accessibilityRole="link"
+        onPress={() => void Linking.openURL(href).catch(() => undefined)}
+      >
         <Text style={[typography.body, styles.link, { color: tokens.primary }]}>
           {String(value)}
         </Text>

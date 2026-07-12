@@ -116,6 +116,20 @@ export class Busabase {
   }
 
   /**
+   * Unified grep — one regex/literal pattern scanned across every in-scope
+   * source (Drive/Skill files, Doc bodies, and Base records — records read
+   * the canonical `headCommit.fields`, never the truncated search
+   * projection), with a shared `maxMatches`/deadline budget and per-source
+   * honest coverage. Use this when the answer could live anywhere; use
+   * `client.assets.grep` directly instead when you specifically only care
+   * about files and want its fuller `missing`/`stale`/`unsearchable`
+   * file-only reporting.
+   */
+  grep(input: Parameters<BusabaseClient["grep"]>[0]) {
+    return this.client.grep(input);
+  }
+
+  /**
    * Supply text for an Asset's Drive Grep Retrieval text slot in one call —
    * inline for small text, a presigned upload for large text — so callers
    * never see the underlying three-step flow

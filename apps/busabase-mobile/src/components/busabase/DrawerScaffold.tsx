@@ -173,7 +173,7 @@ export function DrawerScaffold({
       </NativeScreen>
 
       <Modal animationType="fade" transparent visible={open} onRequestClose={() => setOpen(false)}>
-        <View style={[styles.modal, { backgroundColor: "rgba(0, 0, 0, 0.22)" }]}>
+        <View style={[styles.modal, { backgroundColor: tokens.scrim }]}>
           <View
             style={[
               styles.drawer,

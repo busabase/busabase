@@ -35,6 +35,10 @@ type RootTranslation = {
 		 */
 		failedToLoadDashboard: string
 		/**
+		 * C​o​u​l​d​n​'​t​ ​m​o​v​e​ ​t​h​e​ ​i​t​e​m​.​ ​P​l​e​a​s​e​ ​t​r​y​ ​a​g​a​i​n​.
+		 */
+		nodeMoveFailed: string
+		/**
 		 * D​a​s​h​b​o​a​r​d​ ​r​o​u​t​e​ ​n​o​t​ ​f​o​u​n​d
 		 */
 		routeNotFoundTitle: string
@@ -245,7 +249,7 @@ type RootTranslation = {
 		 */
 		title: string
 		/**
-		 * A​u​t​o​m​a​t​i​c​a​l​l​y​ ​f​i​r​e​ ​a​ ​w​e​b​h​o​o​k​,​ ​n​o​t​i​f​y​ ​a​n​ ​a​g​e​n​t​,​ ​o​r​ ​r​u​n​ ​a​ ​s​a​n​d​b​o​x​e​d​ ​s​n​i​p​p​e​t​ ​w​h​e​n​ ​s​o​m​e​t​h​i​n​g​ ​h​a​p​p​e​n​s​ ​i​n​ ​t​h​i​s​ ​s​p​a​c​e​.
+		 * A​u​t​o​m​a​t​i​c​a​l​l​y​ ​f​i​r​e​ ​a​ ​w​e​b​h​o​o​k​,​ ​n​o​t​i​f​y​ ​a​n​ ​a​g​e​n​t​,​ ​o​r​ ​r​u​n​ ​a​ ​s​a​n​d​b​o​x​e​d​ ​f​u​n​c​t​i​o​n​ ​w​h​e​n​ ​s​o​m​e​t​h​i​n​g​ ​h​a​p​p​e​n​s​ ​i​n​ ​t​h​i​s​ ​s​p​a​c​e​.
 		 */
 		description: string
 		/**
@@ -293,6 +297,10 @@ type RootTranslation = {
 		 */
 		eventTypeChangesRequested: string
 		/**
+		 * A​s​s​e​t​ ​u​p​l​o​a​d​e​d
+		 */
+		eventTypeAssetUploaded: string
+		/**
 		 * B​a​s​e
 		 */
 		baseScopeLabel: string
@@ -313,9 +321,9 @@ type RootTranslation = {
 		 */
 		actionKindNotifyAgent: string
 		/**
-		 * R​u​n​ ​c​o​d​e​ ​s​n​i​p​p​e​t
+		 * R​u​n​ ​f​u​n​c​t​i​o​n
 		 */
-		actionKindRunSnippet: string
+		actionKindRunFunction: string
 		/**
 		 * T​a​r​g​e​t​ ​U​R​L
 		 */
@@ -343,19 +351,20 @@ type RootTranslation = {
 		/**
 		 * C​o​d​e
 		 */
-		snippetCodeLabel: string
+		functionCodeLabel: string
 		/**
-		 * /​/​ ​I​n​s​p​e​c​t​ ​`​i​n​p​u​t​`​,​ ​t​h​e​n​ ​r​e​t​u​r​n​ ​t​h​e​ ​c​a​l​l​ ​t​o​ ​m​a​k​e​:​ ​u​r​l​,​ ​m​e​t​h​o​d​,​ ​h​e​a​d​e​r​s​,​ ​b​o​d​y
+		 * /​/​ ​I​n​s​p​e​c​t​ ​`​i​n​p​u​t​`​,​ ​t​h​e​n​ ​c​a​l​l​ ​f​e​t​c​h​(​u​r​l​,​ ​o​p​t​i​o​n​s​)​ ​i​f​ ​n​e​e​d​e​d​
+	​r​e​t​u​r​n​ ​t​r​u​e​;
 		 */
-		snippetCodePlaceholder: string
+		functionCodePlaceholder: string
 		/**
-		 * T​h​e​ ​s​n​i​p​p​e​t​ ​r​e​c​e​i​v​e​s​ ​`​i​n​p​u​t​`​ ​(​t​h​e​ ​e​v​e​n​t​ ​p​a​y​l​o​a​d​)​ ​a​n​d​ ​m​a​y​ ​r​e​t​u​r​n​ ​a​n​ ​o​b​j​e​c​t​ ​w​i​t​h​ ​u​r​l​,​ ​m​e​t​h​o​d​,​ ​h​e​a​d​e​r​s​,​ ​a​n​d​ ​b​o​d​y​ ​t​o​ ​m​a​k​e​ ​o​n​e​ ​o​u​t​b​o​u​n​d​ ​c​a​l​l​.​ ​A​n​y​t​h​i​n​g​ ​e​l​s​e​ ​i​s​ ​j​u​s​t​ ​r​e​c​o​r​d​e​d​.​ ​I​t​ ​c​a​n​n​o​t​ ​a​c​c​e​s​s​ ​t​h​e​ ​n​e​t​w​o​r​k​ ​o​r​ ​f​i​l​e​s​y​s​t​e​m​ ​i​t​s​e​l​f​.
+		 * T​h​e​ ​f​u​n​c​t​i​o​n​ ​r​e​c​e​i​v​e​s​ ​`​i​n​p​u​t​`​ ​(​t​h​e​ ​e​v​e​n​t​ ​p​a​y​l​o​a​d​)​ ​a​n​d​ ​c​a​n​ ​c​a​l​l​ ​`​f​e​t​c​h​(​u​r​l​,​ ​o​p​t​i​o​n​s​)​`​ ​t​o​ ​m​a​k​e​ ​o​u​t​b​o​u​n​d​ ​H​T​T​P​ ​r​e​q​u​e​s​t​s​ ​d​i​r​e​c​t​l​y​.​ ​I​t​s​ ​r​e​t​u​r​n​ ​v​a​l​u​e​ ​i​s​ ​r​e​c​o​r​d​e​d​ ​f​o​r​ ​v​i​s​i​b​i​l​i​t​y​ ​o​n​l​y​.
 		 */
-		snippetHelperCaption: string
+		functionHelperCaption: string
 		/**
 		 * T​i​m​e​o​u​t​ ​(​m​s​)
 		 */
-		snippetTimeoutLabel: string
+		functionTimeoutLabel: string
 		/**
 		 * E​n​a​b​l​e​d
 		 */
@@ -790,6 +799,10 @@ export type TranslationFunctions = {
 		 */
 		failedToLoadDashboard: () => LocalizedString
 		/**
+		 * Couldn't move the item. Please try again.
+		 */
+		nodeMoveFailed: () => LocalizedString
+		/**
 		 * Dashboard route not found
 		 */
 		routeNotFoundTitle: () => LocalizedString
@@ -1000,7 +1013,7 @@ export type TranslationFunctions = {
 		 */
 		title: () => LocalizedString
 		/**
-		 * Automatically fire a webhook, notify an agent, or run a sandboxed snippet when something happens in this space.
+		 * Automatically fire a webhook, notify an agent, or run a sandboxed function when something happens in this space.
 		 */
 		description: () => LocalizedString
 		/**
@@ -1048,6 +1061,10 @@ export type TranslationFunctions = {
 		 */
 		eventTypeChangesRequested: () => LocalizedString
 		/**
+		 * Asset uploaded
+		 */
+		eventTypeAssetUploaded: () => LocalizedString
+		/**
 		 * Base
 		 */
 		baseScopeLabel: () => LocalizedString
@@ -1068,9 +1085,9 @@ export type TranslationFunctions = {
 		 */
 		actionKindNotifyAgent: () => LocalizedString
 		/**
-		 * Run code snippet
+		 * Run function
 		 */
-		actionKindRunSnippet: () => LocalizedString
+		actionKindRunFunction: () => LocalizedString
 		/**
 		 * Target URL
 		 */
@@ -1098,19 +1115,20 @@ export type TranslationFunctions = {
 		/**
 		 * Code
 		 */
-		snippetCodeLabel: () => LocalizedString
+		functionCodeLabel: () => LocalizedString
 		/**
-		 * // Inspect `input`, then return the call to make: url, method, headers, body
+		 * // Inspect `input`, then call fetch(url, options) if needed
+	return true;
 		 */
-		snippetCodePlaceholder: () => LocalizedString
+		functionCodePlaceholder: () => LocalizedString
 		/**
-		 * The snippet receives `input` (the event payload) and may return an object with url, method, headers, and body to make one outbound call. Anything else is just recorded. It cannot access the network or filesystem itself.
+		 * The function receives `input` (the event payload) and can call `fetch(url, options)` to make outbound HTTP requests directly. Its return value is recorded for visibility only.
 		 */
-		snippetHelperCaption: () => LocalizedString
+		functionHelperCaption: () => LocalizedString
 		/**
 		 * Timeout (ms)
 		 */
-		snippetTimeoutLabel: () => LocalizedString
+		functionTimeoutLabel: () => LocalizedString
 		/**
 		 * Enabled
 		 */

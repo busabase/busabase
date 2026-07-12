@@ -1,51 +1,143 @@
-import { ChevronRight } from "lucide-react";
+import {
+  CheckCircle2,
+  ChevronRight,
+  Eye,
+  GitCommitHorizontal,
+  type LucideIcon,
+  MessageSquareText,
+  PencilLine,
+} from "lucide-react";
 import { SPALink as Link } from "openlib/ui/dashboard";
-import { useCoreI18n } from "../../../i18n";
 import type { ActivityEvent, ActivityEventTone } from "../helpers/activity-events";
-import { formatListTime } from "../helpers/format";
+import { formatDetailTime, formatListTime } from "../helpers/format";
 
 export type { ActivityEvent, ActivityEventTone } from "../helpers/activity-events";
 
-export const activityTone: Record<ActivityEventTone, string> = {
+const activityAvatarTone: Record<ActivityEventTone, string> = {
   audit: "border-slate-200 bg-slate-50 text-slate-700",
-  commit: "border-sky-200 bg-sky-50 text-sky-800",
-  change_request: "border-amber-200 bg-amber-50 text-amber-900",
-  operation: "border-violet-200 bg-violet-50 text-violet-800",
-  record: "border-emerald-200 bg-emerald-50 text-emerald-800",
+  commit: "border-sky-200 bg-sky-50 text-sky-700",
+  change_request: "border-amber-200 bg-amber-50 text-amber-800",
+  operation: "border-violet-200 bg-violet-50 text-violet-700",
+  record: "border-emerald-200 bg-emerald-50 text-emerald-700",
 };
 
-export function ActivityRow({ event }: { event: ActivityEvent }) {
-  const messages = useCoreI18n();
-  const toneLabel: Record<ActivityEventTone, string> = {
-    audit: messages.activity.audit,
-    change_request: messages.activity.changeRequest,
-    commit: messages.activity.commit,
-    operation: messages.activity.operation,
-    record: messages.activity.record,
-  };
+const activityIconTone: Record<ActivityEventTone, string> = {
+  audit: "border-slate-200 bg-background text-slate-600",
+  commit: "border-sky-200 bg-background text-sky-600",
+  change_request: "border-amber-200 bg-background text-amber-700",
+  operation: "border-violet-200 bg-background text-violet-600",
+  record: "border-emerald-200 bg-background text-emerald-600",
+};
+
+const activityIcons = {
+  audit: Eye,
+  change_request: MessageSquareText,
+  commit: GitCommitHorizontal,
+  operation: PencilLine,
+  record: CheckCircle2,
+} satisfies Record<ActivityEventTone, LucideIcon>;
+
+const getInitials = (value: string) => {
+  const parts = value.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) {
+    return "U";
+  }
+  if (parts.length === 1) {
+    return parts[0].slice(0, 2).toUpperCase();
+  }
+  return `${parts[0].slice(0, 1)}${parts[1].slice(0, 1)}`.toUpperCase();
+};
+
+function ActivityAvatar({ event }: { event: ActivityEvent }) {
+  const Icon = activityIcons[event.tone];
 
   return (
+    <div className="relative mt-0.5 size-10 shrink-0">
+      <div
+        className={`flex size-10 items-center justify-center overflow-hidden rounded-full border text-xs font-semibold ${activityAvatarTone[event.tone]}`}
+      >
+        {event.actorImage ? (
+          <img
+            alt=""
+            aria-hidden="true"
+            className="size-full object-cover"
+            src={event.actorImage}
+          />
+        ) : (
+          <span>{getInitials(event.actorName)}</span>
+        )}
+      </div>
+      <span
+        className={`-bottom-0.5 -right-0.5 absolute flex size-4 items-center justify-center rounded-full border ${activityIconTone[event.tone]}`}
+      >
+        <Icon aria-hidden="true" size={10} strokeWidth={2.4} />
+      </span>
+    </div>
+  );
+}
+
+function ActivityProvenanceByline({ event }: { event: ActivityEvent }) {
+  if (!event.provenance?.byline) {
+    return null;
+  }
+
+  return (
+    <div className="mt-1 min-w-0 truncate text-muted-foreground text-xs leading-5">
+      {event.provenance.byline}
+    </div>
+  );
+}
+
+export function ActivityRow({ event }: { event: ActivityEvent }) {
+  return (
     <Link
-      className="group grid min-h-16 items-center gap-3 px-3 py-2.5 text-sm transition-colors hover:bg-accent/25 md:grid-cols-[116px_minmax(0,1fr)_120px]"
+      className="group block rounded-md px-2 text-sm transition-colors hover:bg-accent/25 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
       href={event.href}
     >
-      <div>
-        <span
-          className={`inline-flex rounded-full px-2 py-0.5 font-medium text-xs capitalize ${activityTone[event.tone]}`}
-        >
-          {toneLabel[event.tone]}
-        </span>
-      </div>
-      <div className="min-w-0">
-        <div className="truncate font-semibold text-sm leading-5">{event.title}</div>
-        <div className="mt-0.5 line-clamp-2 text-muted-foreground text-xs">{event.body}</div>
-      </div>
-      <div className="flex items-center justify-between gap-2 text-muted-foreground text-xs md:justify-end">
-        <span className="font-mono">{formatListTime(event.timestamp)}</span>
-        <ChevronRight
-          className="shrink-0 transition-colors group-hover:text-foreground"
-          size={14}
-        />
+      <div className="flex min-w-0 gap-3">
+        <div className="relative flex w-11 shrink-0 justify-center pt-3">
+          <span
+            aria-hidden="true"
+            className="absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-border/60 transition-colors group-hover:bg-border"
+          />
+          <ActivityAvatar event={event} />
+        </div>
+        <div className="min-w-0 flex-1 border-border/50 border-b py-3.5 pr-2 transition-colors group-hover:border-transparent">
+          <div className="flex min-w-0 items-start gap-2">
+            <div className="min-w-0 flex-1">
+              <div className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1">
+                <span className="min-w-0 max-w-full truncate font-semibold text-foreground">
+                  {event.actorName}
+                </span>
+                <span className="text-muted-foreground">{event.actionLabel}</span>
+              </div>
+            </div>
+            <div className="flex shrink-0 items-center gap-1 pt-0.5 font-mono text-muted-foreground text-xs">
+              <span>{formatListTime(event.timestamp)}</span>
+              <ChevronRight
+                aria-hidden="true"
+                className="shrink-0 transition-colors group-hover:text-foreground"
+                size={14}
+              />
+            </div>
+          </div>
+          <div className="mt-1.5 line-clamp-2 font-semibold leading-5">{event.title}</div>
+          {event.body ? (
+            <p className="mt-1 line-clamp-2 text-muted-foreground text-xs leading-5">
+              {event.body}
+            </p>
+          ) : null}
+          <ActivityProvenanceByline event={event} />
+          <div className="mt-2 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-muted-foreground text-xs">
+            {event.sourceLabel ? (
+              <>
+                <span className="min-w-0 truncate">{event.sourceLabel}</span>
+                <span aria-hidden="true">·</span>
+              </>
+            ) : null}
+            <span className="font-mono">{formatDetailTime(event.timestamp)}</span>
+          </div>
+        </div>
       </div>
     </Link>
   );

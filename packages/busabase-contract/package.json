@@ -21,6 +21,10 @@
       "types": "./src/contract/schemas.ts",
       "default": "./src/contract/schemas.ts"
     },
+    "./contract/grep-schemas": {
+      "types": "./src/contract/grep-schemas.ts",
+      "default": "./src/contract/grep-schemas.ts"
+    },
     "./contract/activity-schemas": {
       "types": "./src/contract/activity-schemas.ts",
       "default": "./src/contract/activity-schemas.ts"
@@ -56,6 +60,10 @@
     "./domains/assets/types": {
       "types": "./src/domains/assets/types.ts",
       "default": "./src/domains/assets/types.ts"
+    },
+    "./domains/dump/types": {
+      "types": "./src/domains/dump/types.ts",
+      "default": "./src/domains/dump/types.ts"
     },
     "./domains/vault/contract": {
       "types": "./src/domains/vault/contract.ts",

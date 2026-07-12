@@ -79,4 +79,100 @@ describe("buildActivityEventFromItem", () => {
     expect(event?.href).toBe("/base/slug5/rec5");
     expect(event?.tone).toBe("record");
   });
+
+  it("shows owner and channel without a credential label when no credential exists", () => {
+    const item = {
+      kind: "change_request",
+      timestamp: "2026-01-01T00:00:00.000Z",
+      changeRequest: {
+        id: "cr1",
+        status: "in_review",
+        submittedBy: "usr_1",
+        submittedByUser: { id: "usr_1", name: "Kelly", email: null, image: null, role: "owner" },
+        sourceMeta: {
+          provenance: {
+            owner: { id: "usr_1", name: "Kelly" },
+            channel: "web_ui",
+          },
+        },
+        operations: [],
+        updatedAt: "2026-01-01T00:00:00.000Z",
+        createdAt: "2026-01-01T00:00:00.000Z",
+      },
+    } as unknown as ActivityItemVO;
+
+    const event = buildActivityEventFromItem(item);
+    expect(event?.actorName).toBe("Kelly");
+    expect(event?.provenance?.byline).toBe("via Web UI");
+    expect(event?.provenance?.channelLabel).toBe("via Web UI");
+    expect(event?.provenance?.ownerLabel).toBeUndefined();
+  });
+
+  it("uses provenance owner as the actor for user-channel writes", () => {
+    const item = {
+      kind: "change_request",
+      timestamp: "2026-01-01T00:00:00.000Z",
+      changeRequest: {
+        id: "cr_owner",
+        status: "in_review",
+        submittedBy: "local-admin",
+        submittedByUser: {
+          id: "local-admin",
+          name: "Local Admin",
+          email: null,
+          image: null,
+          role: "owner",
+        },
+        sourceMeta: {
+          provenance: {
+            owner: { id: "usr_1", name: "Kelly" },
+            channel: "cli",
+          },
+        },
+        operations: [],
+        updatedAt: "2026-01-01T00:00:00.000Z",
+        createdAt: "2026-01-01T00:00:00.000Z",
+      },
+    } as unknown as ActivityItemVO;
+
+    const event = buildActivityEventFromItem(item);
+    expect(event?.actorName).toBe("Kelly");
+    expect(event?.provenance?.byline).toBe("via CLI");
+    expect(event?.provenance?.ownerLabel).toBeUndefined();
+  });
+
+  it("uses API key name as the actor and keeps provenance in a quiet byline", () => {
+    const item = {
+      kind: "change_request",
+      timestamp: "2026-01-01T00:00:00.000Z",
+      changeRequest: {
+        id: "cr2",
+        status: "in_review",
+        submittedBy: "usr_1",
+        submittedByUser: { id: "usr_1", name: "Kelly", email: null, image: null, role: "owner" },
+        sourceMeta: {
+          provenance: {
+            owner: { id: "usr_1", name: "Kelly" },
+            apiKey: {
+              id: "apk_1",
+              name: "Writer integration",
+            },
+            channel: "sdk",
+          },
+        },
+        operations: [],
+        updatedAt: "2026-01-01T00:00:00.000Z",
+        createdAt: "2026-01-01T00:00:00.000Z",
+      },
+    } as unknown as ActivityItemVO;
+
+    const event = buildActivityEventFromItem(item);
+    expect(event?.actorName).toBe("Writer integration");
+    expect(event?.provenance?.byline).toBe("via SDK · owned by Kelly");
+    expect(event?.provenance?.channelLabel).toBe("via SDK");
+    expect(event?.provenance?.ownerLabel).toBe("owned by Kelly");
+    expect(event?.provenance?.byline).not.toContain("Human");
+    expect(event?.provenance?.byline).not.toContain("AI Agent");
+    expect(event?.provenance?.byline).not.toContain("API Key:");
+  });
 });

@@ -2,6 +2,7 @@ import { ChevronRight, X } from "lucide-react-native";
 import type { ReactNode } from "react";
 import {
   ActivityIndicator,
+  KeyboardAvoidingView,
   Modal,
   Platform,
   Pressable,
@@ -13,7 +14,7 @@ import {
   type ViewStyle,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { mobile, radius, typography } from "~/theme/tokens";
+import { mobile, radius, spacing, typography } from "~/theme/tokens";
 import { useTokens } from "~/theme/use-tokens";
 import { Button } from "./ui/Button";
 
@@ -42,43 +43,53 @@ export function NativeScreen({
 
   return (
     <SafeAreaView edges={["top"]} style={[styles.safe, { backgroundColor: tokens.background }]}>
-      <ScrollView
-        style={styles.scroll}
-        contentContainerStyle={[styles.content, footer ? styles.contentWithFooter : null]}
-        refreshControl={
-          onRefresh ? (
-            <RefreshControl
-              refreshing={!!refreshing}
-              onRefresh={onRefresh}
-              tintColor={tokens.primary}
-            />
-          ) : undefined
-        }
+      <KeyboardAvoidingView
+        style={styles.safe}
+        behavior={Platform.select({ ios: "padding", default: undefined })}
+        keyboardVerticalOffset={Platform.select({ ios: mobile.headerHeight, default: 0 })}
       >
-        <View style={[styles.header, { borderColor: tokens.border }]}>
-          {headerLeading ? <View style={styles.headerLeading}>{headerLeading}</View> : null}
-          <View style={styles.titleBlock}>
-            <Text numberOfLines={1} style={[typography.h1, { color: tokens.foreground }]}>
-              {title}
-            </Text>
-            {subtitle ? (
-              <Text numberOfLines={1} style={[typography.small, { color: tokens.mutedForeground }]}>
-                {subtitle}
-              </Text>
-            ) : null}
-          </View>
-          {headerAction ? <View style={styles.headerAction}>{headerAction}</View> : null}
-        </View>
-        {children}
-      </ScrollView>
-      {footer ? (
-        <SafeAreaView
-          edges={["bottom"]}
-          style={[styles.footer, { backgroundColor: tokens.surface, borderColor: tokens.border }]}
+        <ScrollView
+          style={styles.scroll}
+          contentContainerStyle={[styles.content, footer ? styles.contentWithFooter : null]}
+          keyboardShouldPersistTaps="handled"
+          refreshControl={
+            onRefresh ? (
+              <RefreshControl
+                refreshing={!!refreshing}
+                onRefresh={onRefresh}
+                tintColor={tokens.primary}
+              />
+            ) : undefined
+          }
         >
-          {footer}
-        </SafeAreaView>
-      ) : null}
+          <View style={[styles.header, { borderColor: tokens.border }]}>
+            {headerLeading ? <View style={styles.headerLeading}>{headerLeading}</View> : null}
+            <View style={styles.titleBlock}>
+              <Text numberOfLines={1} style={[typography.h1, { color: tokens.foreground }]}>
+                {title}
+              </Text>
+              {subtitle ? (
+                <Text
+                  numberOfLines={1}
+                  style={[typography.small, { color: tokens.mutedForeground }]}
+                >
+                  {subtitle}
+                </Text>
+              ) : null}
+            </View>
+            {headerAction ? <View style={styles.headerAction}>{headerAction}</View> : null}
+          </View>
+          {children}
+        </ScrollView>
+        {footer ? (
+          <SafeAreaView
+            edges={["bottom"]}
+            style={[styles.footer, { backgroundColor: tokens.surface, borderColor: tokens.border }]}
+          >
+            {footer}
+          </SafeAreaView>
+        ) : null}
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
@@ -336,8 +347,16 @@ export function NativeBottomSheet({
 
   return (
     <Modal animationType="slide" transparent visible={visible} onRequestClose={onClose}>
-      <View style={styles.sheetScrim}>
-        <Pressable style={styles.sheetDismiss} onPress={onClose} />
+      <KeyboardAvoidingView
+        style={[styles.sheetScrim, { backgroundColor: tokens.overlay }]}
+        behavior={Platform.select({ ios: "padding", default: undefined })}
+      >
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Close"
+          style={styles.sheetDismiss}
+          onPress={onClose}
+        />
         <View
           style={[
             styles.sheet,
@@ -345,7 +364,7 @@ export function NativeBottomSheet({
             maxHeight ? { maxHeight } : null,
           ]}
         >
-          <View style={styles.sheetHandle} />
+          <View style={[styles.sheetHandle, { backgroundColor: tokens.handle }]} />
           {showCloseButton ? (
             <View style={styles.sheetTitleRow}>
               {title ? (
@@ -378,7 +397,7 @@ export function NativeBottomSheet({
             <View style={[styles.sheetFooter, { borderColor: tokens.border }]}>{footer}</View>
           ) : null}
         </View>
-      </View>
+      </KeyboardAvoidingView>
     </Modal>
   );
 }
@@ -390,13 +409,19 @@ interface NativeSectionProps {
   style?: ViewStyle;
 }
 
+// Mirrors the web dashboard's list group (inbox.tsx BusaBaseList): a
+// muted-pill label above a plain divider-separated row list — deliberately
+// NOT a bordered/backgrounded card. Boxing every group in its own card was
+// making the screen read as a stack of separate boxed widgets instead of one
+// continuous Linear-style list; rows now sit directly on the screen
+// background and are separated only by NativeRow's own hairline dividers.
 export function NativeSection({ title, caption, children, style }: NativeSectionProps) {
   const tokens = useTokens();
 
   return (
     <View style={[styles.sectionWrap, style]}>
       {title ? (
-        <View style={styles.sectionHeader}>
+        <View style={[styles.sectionHeader, { backgroundColor: tokens.muted }]}>
           <Text
             style={[typography.caption, styles.sectionTitle, { color: tokens.mutedForeground }]}
           >
@@ -407,9 +432,7 @@ export function NativeSection({ title, caption, children, style }: NativeSection
           ) : null}
         </View>
       ) : null}
-      <View style={[styles.section, { backgroundColor: tokens.card, borderColor: tokens.border }]}>
-        {children}
-      </View>
+      {children}
     </View>
   );
 }
@@ -509,33 +532,33 @@ const styles = StyleSheet.create({
   content: { paddingBottom: 36 },
   contentWithFooter: { paddingBottom: 132 },
   header: {
-    paddingHorizontal: 20,
+    paddingHorizontal: spacing[5],
     paddingTop: Platform.select({ ios: 8, android: 12, default: 10 }),
     paddingBottom: 14,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    gap: 16,
+    gap: spacing[4],
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
   headerLeading: { width: 44 },
   headerAction: { minWidth: 44, alignItems: "flex-end" },
   titleBlock: { flex: 1, gap: 2, minWidth: 0 },
-  state: { alignItems: "center", justifyContent: "center", gap: 12, paddingVertical: 48 },
+  state: { alignItems: "center", justifyContent: "center", gap: spacing[3], paddingVertical: 48 },
   statePanel: {
-    marginHorizontal: 20,
-    marginTop: 24,
+    marginHorizontal: spacing[5],
+    marginTop: spacing[6],
     paddingHorizontal: 18,
     paddingVertical: 30,
     alignItems: "center",
-    gap: 12,
+    gap: spacing[3],
   },
   stateTitle: { textAlign: "center" },
   stateBody: { maxWidth: 320, textAlign: "center" },
   footer: {
     borderTopWidth: StyleSheet.hairlineWidth,
-    paddingHorizontal: 20,
-    paddingTop: 12,
+    paddingHorizontal: spacing[5],
+    paddingTop: spacing[3],
     paddingBottom: 8,
   },
   actionBar: { gap: 10 },
@@ -544,29 +567,28 @@ const styles = StyleSheet.create({
   inlineError: {
     borderWidth: StyleSheet.hairlineWidth,
     borderRadius: radius.md,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
+    paddingHorizontal: spacing[3],
+    paddingVertical: spacing[2],
     flexDirection: "row",
     alignItems: "center",
     gap: 10,
   },
   inlineErrorText: { flex: 1, minWidth: 0 },
-  sheetScrim: { flex: 1, justifyContent: "flex-end", backgroundColor: "rgba(0, 0, 0, 0.32)" },
+  sheetScrim: { flex: 1, justifyContent: "flex-end" },
   sheetDismiss: { flex: 1 },
   sheet: {
     borderTopLeftRadius: radius.xl,
     borderTopRightRadius: radius.xl,
-    paddingHorizontal: 20,
+    paddingHorizontal: spacing[5],
     paddingTop: 10,
-    paddingBottom: 24,
-    gap: 12,
+    paddingBottom: spacing[6],
+    gap: spacing[3],
   },
   sheetHandle: {
     alignSelf: "center",
     width: 38,
     height: 4,
     borderRadius: radius.full,
-    backgroundColor: "rgba(120, 120, 120, 0.34)",
     marginBottom: 4,
   },
   sheetTitleRow: {
@@ -577,14 +599,14 @@ const styles = StyleSheet.create({
   },
   sheetTitle: { flex: 1, minWidth: 0 },
   sheetFooter: {
-    marginHorizontal: -20,
+    marginHorizontal: -spacing[5],
     marginBottom: -4,
     borderTopWidth: StyleSheet.hairlineWidth,
-    paddingHorizontal: 20,
-    paddingTop: 12,
+    paddingHorizontal: spacing[5],
+    paddingTop: spacing[3],
   },
   chipsScroll: { flexGrow: 0 },
-  chipsContent: { paddingHorizontal: 20, gap: 8 },
+  chipsContent: { paddingHorizontal: spacing[5], gap: 8 },
   chip: {
     minHeight: 34,
     flexDirection: "row",
@@ -604,7 +626,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 6,
   },
   segmented: {
-    marginHorizontal: 20,
+    marginHorizontal: spacing[5],
     minHeight: 38,
     borderWidth: StyleSheet.hairlineWidth,
     borderRadius: radius.md,
@@ -628,20 +650,17 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     paddingHorizontal: 6,
   },
-  sectionWrap: { marginHorizontal: 20, marginTop: 14, gap: 7 },
+  sectionWrap: { marginHorizontal: spacing[5], marginTop: 12, gap: 6 },
   sectionHeader: {
-    paddingHorizontal: 2,
+    alignSelf: "flex-start",
+    borderRadius: radius.sm,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "space-between",
-    gap: 12,
+    gap: 6,
   },
   sectionTitle: { textTransform: "uppercase" },
-  section: {
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: radius.lg,
-    overflow: "hidden",
-  },
   nativeRow: {
     minHeight: 58,
     paddingHorizontal: 14,

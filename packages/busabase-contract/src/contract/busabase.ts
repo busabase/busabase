@@ -10,12 +10,14 @@ import {
 } from "../domains/base/contract";
 import { docContract } from "../domains/doc/contract";
 import { driveContract } from "../domains/drive/contract";
+import { dumpContract } from "../domains/dump/contract";
 import { fileContract } from "../domains/file-node/contract";
 import { folderContract } from "../domains/folder/contract";
 import { skillContract } from "../domains/skill/contract";
 import { vaultContract } from "../domains/vault/contract";
 import { webhookContract } from "../domains/webhook/contract";
 import { listActivityPagedInputSchema, listActivityResponseSchema } from "./activity-schemas";
+import { UnifiedGrepInputSchema, UnifiedGrepResultVOSchema } from "./grep-schemas";
 import {
   agentTaskSchema,
   auditEventSchema,
@@ -31,6 +33,7 @@ import {
   listChangeRequestsResponseSchema,
   listInputSchema,
   liveEventSchema,
+  moveNodeInputSchema,
   nodeSchema,
   reviewChangeRequestInputSchema,
   reviseOperationInputSchema,
@@ -76,6 +79,22 @@ export const busabaseContractRoutes = {
     })
     .input(searchInputSchema)
     .output(searchResponseSchema),
+  // Unified Grep (P2a files+docs, P2b records) — top-level, cross-source
+  // superset of `assets.grep`. See apps/busabase/content/spec/unified-grep.md.
+  // Composes `logic/grep.ts`; `assets.grep` (files-only specialist) is
+  // unchanged and stays the dedicated endpoint for its fuller
+  // missing/stale/unsearchable reporting.
+  grep: oc
+    .route({
+      method: "POST",
+      path: "/grep",
+      tags: ["Search"],
+      summary: "Search files, Docs, and Base records with one pattern (unified grep)",
+      successDescription:
+        "Streaming regex/literal matches across every in-scope source — Drive/Skill files, Doc bodies, and Base records (canonical headCommit.fields, never the truncated search projection) — with one shared pattern, one shared maxMatches/deadline budget (files scanned first, then docs, then whatever budget remains goes to records), and a per-source honest coverage report (files keeps its existing missing/stale/unsearchable/errored/notReached; docs and records report scanned/errored/notReached). truncated is set when any source truncated or has notReached > 0.",
+    })
+    .input(UnifiedGrepInputSchema)
+    .output(UnifiedGrepResultVOSchema),
   nodes: {
     list: oc
       .route({
@@ -104,6 +123,17 @@ export const busabaseContractRoutes = {
         successDescription: "Created change request for folder or node tree changes.",
       })
       .input(createNodeChangeRequestInputSchema)
+      .output(changeRequestSchema),
+    move: oc
+      .route({
+        method: "POST",
+        path: "/nodes/{nodeId}/move",
+        tags: ["Nodes"],
+        summary: "Move or reorder a node",
+        successDescription:
+          "Merged change request that repositioned the node under its (optionally new) parent. Applied immediately (auto-merged) since reordering is a low-risk structural tweak, not a review-worthy content change.",
+      })
+      .input(moveNodeInputSchema)
       .output(changeRequestSchema),
     purge: oc
       .route({
@@ -200,6 +230,7 @@ export const busabaseContractRoutes = {
   assets: assetsContract,
   vault: vaultContract,
   webhooks: webhookContract,
+  dump: dumpContract,
   changeRequests: {
     list: oc
       .route({
@@ -362,14 +393,31 @@ export {
   WebhookDeliveryStatusSchema,
   WebhookDeliveryVOSchema,
   WebhookEventTypeSchema,
+  WebhookFunctionConfigSchema,
+  WebhookFunctionConfigVOSchema,
   WebhookHttpConfigSchema,
   WebhookHttpConfigVOSchema,
   WebhookRuleInputSchema,
   WebhookRuleUpdateInputSchema,
   WebhookRuleVOSchema,
-  WebhookSnippetConfigSchema,
-  WebhookSnippetConfigVOSchema,
 } from "../domains/webhook/types";
+export {
+  GrepSourceSchema,
+  UnifiedGrepCoverageSchema,
+  UnifiedGrepDocMatchVOSchema,
+  UnifiedGrepDocsCoverageSchema,
+  UnifiedGrepDocsScopeSchema,
+  UnifiedGrepFileMatchVOSchema,
+  UnifiedGrepFilesCoverageSchema,
+  UnifiedGrepFilesScopeSchema,
+  UnifiedGrepInputSchema,
+  UnifiedGrepMatchVOSchema,
+  UnifiedGrepRecordMatchVOSchema,
+  UnifiedGrepRecordsCoverageSchema,
+  UnifiedGrepRecordsScopeSchema,
+  UnifiedGrepResultVOSchema,
+  UnifiedGrepScopeSchema,
+} from "./grep-schemas";
 export {
   auditEventSchema,
   authInfoSchema,

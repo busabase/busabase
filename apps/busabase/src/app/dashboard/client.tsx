@@ -1,12 +1,13 @@
 "use client";
 
-import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
+import { QueryClient, QueryClientProvider, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createBusabaseRestApiClient } from "busabase-contract/api-client";
 import { createBusabaseQueryUtils } from "busabase-contract/api-client/react-query";
 import { BusabaseDashboard } from "busabase-core/dashboard";
 import { CreateNodeModal } from "busabase-core/dashboard/create-node-modal";
 import { EmptyAgentGuide } from "busabase-core/dashboard/empty-agent-guide";
 import { getBusabaseDashboardRoutes as getDashboardRoutes } from "busabase-core/dashboard/routes";
+import { useMoveNode } from "busabase-core/dashboard/use-move-node";
 import { CoreI18nProvider, type CoreLocale, coreMessagesByLocale } from "busabase-core/i18n";
 import { useRouter } from "next/navigation";
 import { detectBrowserLocale, type Locale } from "openlib/i18n";
@@ -42,7 +43,9 @@ function DashboardClientContent({ initialPath = "/inbox", localUserName }: Dashb
   const [createParent, setCreateParent] = useState<{ id: string; name: string } | null>(null);
   const apiClient = useMemo(() => createBusabaseRestApiClient("/api/v1"), []);
   const orpc = useMemo(() => createBusabaseQueryUtils("/api/rpc"), []);
+  const queryClient = useQueryClient();
   const nodesQuery = useQuery(orpc.nodes.list.queryOptions({}));
+  const nodesQueryKey = orpc.nodes.list.queryOptions({}).queryKey;
   const basesQuery = useQuery(orpc.bases.list.queryOptions({}));
   const changeRequestsQuery = useQuery(orpc.changeRequests.list.queryOptions({ input: {} }));
   const auditEventsQuery = useQuery(orpc.auditEvents.list.queryOptions({ input: {} }));
@@ -76,6 +79,12 @@ function DashboardClientContent({ initialPath = "/inbox", localUserName }: Dashb
   }, [appLocaleCodes]);
   const locale = languagePref === "auto" ? detectedLocale : languagePref;
   const LL = useMemo(() => getBusabaseAppLL(locale), [locale]);
+  const moveNodeMutation = useMoveNode({
+    apiClient,
+    queryClient,
+    nodesQueryKey,
+    onMoveError: LL.shell.nodeMoveFailed(),
+  });
   const coreMessages = useMemo(
     () => coreMessagesByLocale[(locale in coreMessagesByLocale ? locale : "en") as CoreLocale],
     [locale],
@@ -153,6 +162,7 @@ function DashboardClientContent({ initialPath = "/inbox", localUserName }: Dashb
             setCreateParent(parent ?? null);
             setIsCreateOpen(true);
           }}
+          onMoveNode={(payload) => moveNodeMutation.mutate(payload)}
           locale={locale}
           languagePref={languagePref}
           onLocaleChange={changeLocale}

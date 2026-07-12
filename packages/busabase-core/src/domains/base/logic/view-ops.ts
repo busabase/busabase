@@ -3,7 +3,7 @@ import "server-only";
 import { ORPCError } from "@orpc/server";
 import { and, eq } from "drizzle-orm";
 import type { z } from "zod";
-import { getContextSpaceId, resolveActorId } from "../../../context";
+import { getContextSpaceId, resolveActorId, withContextSourceMeta } from "../../../context";
 import { getDb } from "../../../db";
 import {
   busabaseChangeRequests,
@@ -84,7 +84,7 @@ export const createViewChangeRequest = async (
     baseId: base.id,
     status: "in_review",
     submittedBy: resolveActorId(parsed.submittedBy),
-    sourceMeta: { subject: "view", viewSlug: parsed.slug },
+    sourceMeta: withContextSourceMeta({ subject: "view", viewSlug: parsed.slug }),
     reviewPolicySnapshot: base.reviewPolicy,
     mergeSummary: {},
     rejectedReason: null,
@@ -182,7 +182,7 @@ export const createUpdateViewChangeRequest = async (
     baseId: view.baseId,
     status: "in_review",
     submittedBy: resolveActorId(parsed.submittedBy),
-    sourceMeta: { subject: "view", viewId: view.id },
+    sourceMeta: withContextSourceMeta({ subject: "view", viewId: view.id }),
     reviewPolicySnapshot: base.reviewPolicy,
     mergeSummary: {},
     rejectedReason: null,
@@ -281,7 +281,7 @@ export const createDeleteViewChangeRequest = async (
     baseId: view.baseId,
     status: "in_review",
     submittedBy: resolveActorId(parsed.submittedBy),
-    sourceMeta: { subject: "view", viewId: view.id },
+    sourceMeta: withContextSourceMeta({ subject: "view", viewId: view.id }),
     reviewPolicySnapshot: base.reviewPolicy,
     mergeSummary: {},
     rejectedReason: null,
@@ -383,7 +383,7 @@ export const createRestoreViewChangeRequest = async (
     baseId: view.baseId,
     status: "in_review",
     submittedBy: resolveActorId(parsed.submittedBy),
-    sourceMeta: { subject: "view", viewId: view.id },
+    sourceMeta: withContextSourceMeta({ subject: "view", viewId: view.id }),
     reviewPolicySnapshot: base.reviewPolicy,
     mergeSummary: {},
     rejectedReason: null,

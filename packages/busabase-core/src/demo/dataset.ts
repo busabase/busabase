@@ -55,6 +55,28 @@ import type {
 
 export const DEMO_ACTOR_ID = "local-admin";
 const REVIEW_POLICY = { kind: "single" as const, requiredApprovals: 1 };
+const DEMO_PROVENANCE_OWNER = { id: DEMO_ACTOR_ID, image: null, name: "Kelly" };
+
+const demoSourceMeta = ({
+  apiKeyName,
+  channel,
+  scenario,
+  workflow,
+}: {
+  apiKeyName?: string;
+  channel: "automation" | "cli" | "mcp" | "openapi" | "sdk" | "skill" | "web_ui" | "webhook";
+  scenario: string;
+  workflow: string;
+}) => ({
+  seed: true,
+  scenario,
+  workflow,
+  provenance: {
+    ...(apiKeyName ? { apiKey: { name: apiKeyName } } : {}),
+    channel,
+    owner: DEMO_PROVENANCE_OWNER,
+  },
+});
 
 // ── Shared identifiers (kept identical to the legacy store.ts seed so demo and
 // real local data reference the same nodes/bases/records) ────────────────────
@@ -2339,7 +2361,12 @@ export const DEMO_CHANGE_REQUESTS: SeedChangeRequestDef[] = [
     baseId: DEMO_BLOG_BASE_ID,
     status: "in_review",
     submittedBy: "ai-research-agent",
-    sourceMeta: { seed: true, scenario: "single-create", workflow: "ai-industry-blogger" },
+    sourceMeta: demoSourceMeta({
+      apiKeyName: "AI Research Agent",
+      channel: "openapi",
+      scenario: "single-create",
+      workflow: "ai-industry-blogger",
+    }),
     minutesAgo: 40,
     useCases: ["blog", "review-loop", "canonical"],
     operations: [
@@ -2362,7 +2389,12 @@ export const DEMO_CHANGE_REQUESTS: SeedChangeRequestDef[] = [
     baseId: DEMO_BLOG_BASE_ID,
     status: "in_review",
     submittedBy: "analysis-agent",
-    sourceMeta: { seed: true, scenario: "single-update", workflow: "ai-industry-blogger" },
+    sourceMeta: demoSourceMeta({
+      apiKeyName: "Kelly Personal CLI",
+      channel: "cli",
+      scenario: "single-update",
+      workflow: "ai-industry-blogger",
+    }),
     minutesAgo: 28,
     useCases: ["blog", "review-loop", "conflict", "canonical"],
     operations: [
@@ -2392,11 +2424,12 @@ export const DEMO_CHANGE_REQUESTS: SeedChangeRequestDef[] = [
     baseId: DEMO_SOCIAL_BASE_ID,
     status: "in_review",
     submittedBy: "social-editor-agent",
-    sourceMeta: {
-      seed: true,
+    sourceMeta: demoSourceMeta({
+      apiKeyName: "Content Studio App",
+      channel: "sdk",
       scenario: "batch-create-update-delete",
       workflow: "ai-industry-blogger",
-    },
+    }),
     minutesAgo: 16,
     useCases: ["social", "batch-import"],
     operations: [
@@ -2458,11 +2491,12 @@ export const DEMO_CHANGE_REQUESTS: SeedChangeRequestDef[] = [
     baseId: DEMO_NEWSLETTER_BASE_ID,
     status: "approved",
     submittedBy: "newsletter-agent",
-    sourceMeta: {
-      seed: true,
+    sourceMeta: demoSourceMeta({
+      apiKeyName: "Newsletter Agent",
+      channel: "openapi",
       scenario: "approved-ready-to-merge",
       workflow: "ai-industry-blogger",
-    },
+    }),
     minutesAgo: 8,
     reviewedMinutesAgo: 4,
     useCases: ["newsletter", "media"],
@@ -2487,8 +2521,12 @@ export const DEMO_CHANGE_REQUESTS: SeedChangeRequestDef[] = [
     id: "crq_seed_newsletter_html_brief",
     baseId: DEMO_NEWSLETTER_BASE_ID,
     status: "in_review",
-    submittedBy: "newsletter-html-agent",
-    sourceMeta: { seed: true, scenario: "html-create-update", workflow: "ai-industry-blogger" },
+    submittedBy: DEMO_ACTOR_ID,
+    sourceMeta: demoSourceMeta({
+      channel: "cli",
+      scenario: "html-create-update",
+      workflow: "ai-industry-blogger",
+    }),
     minutesAgo: 2,
     useCases: ["newsletter", "media"],
     operations: [
@@ -2502,7 +2540,7 @@ export const DEMO_CHANGE_REQUESTS: SeedChangeRequestDef[] = [
           audience: "self-hosted AI teams",
         },
         message: "Create HTML weekend briefing",
-        author: "newsletter-html-agent",
+        author: DEMO_ACTOR_ID,
       },
       {
         id: "opr_seed_newsletter_html_update",
@@ -2520,7 +2558,7 @@ export const DEMO_CHANGE_REQUESTS: SeedChangeRequestDef[] = [
           audience: "solo AI creators",
         },
         message: "Update creator stack memo with HTML flow",
-        author: "newsletter-html-agent",
+        author: DEMO_ACTOR_ID,
       },
     ],
   },
@@ -2529,7 +2567,12 @@ export const DEMO_CHANGE_REQUESTS: SeedChangeRequestDef[] = [
     baseId: DEMO_MEDIA_ASSETS_BASE_ID,
     status: "in_review",
     submittedBy: "media-metadata-agent",
-    sourceMeta: { seed: true, scenario: "media-metadata", workflow: "multimodal-review" },
+    sourceMeta: demoSourceMeta({
+      apiKeyName: "Media Pipeline App",
+      channel: "sdk",
+      scenario: "media-metadata",
+      workflow: "multimodal-review",
+    }),
     minutesAgo: 3,
     useCases: ["media"],
     operations: [
@@ -2585,7 +2628,12 @@ export const DEMO_CHANGE_REQUESTS: SeedChangeRequestDef[] = [
     baseId: DEMO_FIELD_TYPE_LAB_BASE_ID,
     status: "in_review",
     submittedBy: "field-type-agent",
-    sourceMeta: { seed: true, scenario: "field-type-coverage", workflow: "qa-seed" },
+    sourceMeta: demoSourceMeta({
+      apiKeyName: "Field Type Agent",
+      channel: "skill",
+      scenario: "field-type-coverage",
+      workflow: "qa-seed",
+    }),
     minutesAgo: 2,
     useCases: ["field-types"],
     operations: [
@@ -2755,7 +2803,12 @@ export const DEMO_CHANGE_REQUESTS: SeedChangeRequestDef[] = [
     baseId: DEMO_BLOG_BASE_ID,
     status: "in_review",
     submittedBy: "workflow-agent",
-    sourceMeta: { seed: true, scenario: "view-update", workflow: "ai-industry-blogger" },
+    sourceMeta: demoSourceMeta({
+      apiKeyName: "Workflow Agent",
+      channel: "mcp",
+      scenario: "view-update",
+      workflow: "ai-industry-blogger",
+    }),
     minutesAgo: 1,
     useCases: ["blog"],
     operations: [
@@ -2799,7 +2852,12 @@ export const DEMO_CHANGE_REQUESTS: SeedChangeRequestDef[] = [
     baseId: DEMO_CRM_COMPANIES_BASE_ID,
     status: "in_review",
     submittedBy: "crm-hygiene-agent",
-    sourceMeta: { seed: true, scenario: "crm-hygiene", workflow: "data-stewardship" },
+    sourceMeta: demoSourceMeta({
+      apiKeyName: "CRM Hygiene Automation",
+      channel: "automation",
+      scenario: "crm-hygiene",
+      workflow: "data-stewardship",
+    }),
     minutesAgo: 12,
     useCases: ["crm"],
     operations: [
@@ -2832,8 +2890,12 @@ export const DEMO_CHANGE_REQUESTS: SeedChangeRequestDef[] = [
     id: "crq_seed_crm_deal_update",
     baseId: DEMO_CRM_DEALS_BASE_ID,
     status: "in_review",
-    submittedBy: "ops-reconcile-agent",
-    sourceMeta: { seed: true, scenario: "operations-status", workflow: "ops-review" },
+    submittedBy: DEMO_ACTOR_ID,
+    sourceMeta: demoSourceMeta({
+      channel: "web_ui",
+      scenario: "operations-status",
+      workflow: "ops-review",
+    }),
     minutesAgo: 10,
     useCases: ["operations"],
     operations: [
@@ -3357,7 +3419,7 @@ export const buildDemoDataset = (
     changeRequestId: cr.id,
     operationId: cr.primaryOperation?.id ?? null,
     commitId: cr.primaryOperation?.headCommitId ?? null,
-    metadata: { seed: true },
+    metadata: { seed: true, sourceMeta: cr.sourceMeta },
     createdAt: iso(anchor, 40 - index),
   }));
 

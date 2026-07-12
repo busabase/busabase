@@ -202,7 +202,12 @@ export interface ChangeRequestCountsVO {
 
 // Activity-feed descriptor (discriminated union) — inferred from its zod schema.
 export type { ActivityItemVO } from "../contract/activity-schemas";
-export type { AssetDetailVO, AssetUsageVO, AssetVO } from "../domains/assets/types";
+export type {
+  AssetDetailVO,
+  AssetTextStatus,
+  AssetUsageVO,
+  AssetVO,
+} from "../domains/assets/types";
 export type { DriveFileVO, DriveReadFileVO, DriveVO } from "../domains/drive/types";
 export type { FileNodeMetadata, FileNodeVO } from "../domains/file-node/types";
 export type { FileTreeFileVO, FileTreeNodeVO, FileTreeReadFileVO } from "../domains/filetree/types";

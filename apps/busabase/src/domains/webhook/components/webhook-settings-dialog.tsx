@@ -92,11 +92,11 @@ const ruleToForm = (rule: WebhookRuleVO): FormState => ({
   eventType: rule.eventType,
   baseId: rule.baseId ?? ALL_BASES_VALUE,
   actionKind: rule.actionKind,
-  targetUrl: rule.actionKind === "run_snippet" ? "" : rule.config.targetUrl,
+  targetUrl: rule.actionKind === "run_function" ? "" : rule.config.targetUrl,
   secret: "",
-  hasSecret: rule.actionKind === "run_snippet" ? false : rule.config.hasSecret,
-  code: rule.actionKind === "run_snippet" ? rule.config.code : "",
-  timeoutMs: rule.actionKind === "run_snippet" ? rule.config.timeoutMs : 2000,
+  hasSecret: rule.actionKind === "run_function" ? false : rule.config.hasSecret,
+  code: rule.actionKind === "run_function" ? rule.config.code : "",
+  timeoutMs: rule.actionKind === "run_function" ? rule.config.timeoutMs : 2000,
   enabled: rule.enabled,
 });
 
@@ -116,10 +116,10 @@ function buildCreateInput(form: FormState): WebhookRuleInput {
     enabled: form.enabled,
   };
   switch (form.actionKind) {
-    case "run_snippet":
+    case "run_function":
       return {
         ...common,
-        actionKind: "run_snippet",
+        actionKind: "run_function",
         config: { code: form.code, timeoutMs: form.timeoutMs },
       };
     case "webhook":
@@ -138,10 +138,10 @@ function buildUpdateInput(form: FormState, id: string): WebhookRuleUpdateInput {
     enabled: form.enabled,
   };
   switch (form.actionKind) {
-    case "run_snippet":
+    case "run_function":
       return {
         ...common,
-        actionKind: "run_snippet",
+        actionKind: "run_function",
         config: { code: form.code, timeoutMs: form.timeoutMs },
       };
     case "webhook":
@@ -159,6 +159,8 @@ function eventTypeLabel(eventType: WebhookEventType, labels: WebhookSettingsLabe
       return labels.eventTypeAiMention();
     case "changes_requested":
       return labels.eventTypeChangesRequested();
+    case "asset.uploaded":
+      return labels.eventTypeAssetUploaded();
   }
 }
 
@@ -168,8 +170,8 @@ function actionKindLabel(actionKind: WebhookActionKind, labels: WebhookSettingsL
       return labels.actionKindWebhook();
     case "notify_agent":
       return labels.actionKindNotifyAgent();
-    case "run_snippet":
-      return labels.actionKindRunSnippet();
+    case "run_function":
+      return labels.actionKindRunFunction();
   }
 }
 
@@ -493,6 +495,7 @@ export function WebhookSettingsDialog({
               <SelectItem value="changes_requested">
                 {labels.eventTypeChangesRequested()}
               </SelectItem>
+              <SelectItem value="asset.uploaded">{labels.eventTypeAssetUploaded()}</SelectItem>
             </SelectContent>
           </Select>
         </div>
@@ -532,28 +535,28 @@ export function WebhookSettingsDialog({
           <SelectContent>
             <SelectItem value="webhook">{labels.actionKindWebhook()}</SelectItem>
             <SelectItem value="notify_agent">{labels.actionKindNotifyAgent()}</SelectItem>
-            <SelectItem value="run_snippet">{labels.actionKindRunSnippet()}</SelectItem>
+            <SelectItem value="run_function">{labels.actionKindRunFunction()}</SelectItem>
           </SelectContent>
         </Select>
       </div>
 
-      {form.actionKind === "run_snippet" ? (
+      {form.actionKind === "run_function" ? (
         <div className="space-y-3">
           <div className="space-y-1.5">
-            <Label htmlFor="webhook-snippet-code">{labels.snippetCodeLabel()}</Label>
+            <Label htmlFor="webhook-function-code">{labels.functionCodeLabel()}</Label>
             <Textarea
-              id="webhook-snippet-code"
+              id="webhook-function-code"
               className="min-h-40 font-mono text-sm"
-              placeholder={labels.snippetCodePlaceholder()}
+              placeholder={labels.functionCodePlaceholder()}
               value={form.code}
               onChange={(event) => setForm((current) => ({ ...current, code: event.target.value }))}
             />
-            <p className="text-xs text-muted-foreground">{labels.snippetHelperCaption()}</p>
+            <p className="text-xs text-muted-foreground">{labels.functionHelperCaption()}</p>
           </div>
           <div className="space-y-1.5">
-            <Label htmlFor="webhook-snippet-timeout">{labels.snippetTimeoutLabel()}</Label>
+            <Label htmlFor="webhook-function-timeout">{labels.functionTimeoutLabel()}</Label>
             <Input
-              id="webhook-snippet-timeout"
+              id="webhook-function-timeout"
               type="number"
               min={100}
               max={5000}

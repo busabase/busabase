@@ -189,6 +189,44 @@ describe("busabase-cli commands", () => {
     ]);
   });
 
+  it("routes generated assets edit-content through the public Assets API (--edits-json array field)", async () => {
+    const calls: Array<{ body: unknown; method: string; url: string }> = [];
+    global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      calls.push({
+        body: request.body ? await request.json() : null,
+        method: request.method,
+        url: request.url,
+      });
+      return jsonResponse({ id: "crq_1", status: "in_review" });
+    }) as typeof fetch;
+
+    const edits = [{ oldString: "ACME Corp", newString: "Umbrella Inc" }];
+    const exitCode = await runCli([
+      "--base-url",
+      "http://localhost:15419",
+      "--output",
+      "json",
+      "assets",
+      "edit-content",
+      "--asset-id",
+      "ast_1",
+      "--edits-json",
+      JSON.stringify(edits),
+      "--message",
+      "Rename ACME to Umbrella",
+    ]);
+
+    expect(exitCode).toBe(0);
+    expect(calls).toEqual([
+      expect.objectContaining({
+        method: "POST",
+        url: "http://localhost:15419/api/v1/assets/ast_1/edit-content",
+        body: { edits, message: "Rename ACME to Umbrella" },
+      }),
+    ]);
+  });
+
   it("routes a generated command with a discriminated-union input via --input-json", async () => {
     const calls: Array<{ body: unknown; method: string; url: string }> = [];
     global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -1375,6 +1413,119 @@ describe("busabase-cli commands", () => {
             },
             maxMatches: 50,
             contextLines: 3,
+          },
+        }),
+      ]);
+    });
+
+    it("routes the top-level `grep` command (Unified Grep) to POST /grep, not /assets/grep", async () => {
+      const calls: Array<{ body: unknown; method: string; url: string }> = [];
+      global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const request = input instanceof Request ? input : new Request(input, init);
+        calls.push({
+          body: request.body ? await requestBody(request) : null,
+          method: request.method,
+          url: request.url,
+        });
+        return jsonResponse({
+          matches: [],
+          coverage: {
+            files: {
+              scanned: 0,
+              missing: [],
+              stale: [],
+              unsearchable: 0,
+              errored: [],
+              notReached: 0,
+            },
+            docs: { scanned: 0, errored: [], notReached: 0 },
+            records: { scanned: 0, errored: [], notReached: 0 },
+          },
+          truncated: false,
+        });
+      }) as typeof fetch;
+
+      const exitCode = await runCli([
+        "--base-url",
+        "http://localhost:15419",
+        "--output",
+        "json",
+        "grep",
+        "--pattern",
+        "foo",
+        "--sources",
+        "docs",
+        "--node-ids",
+        "nod_1",
+        "nod_2",
+      ]);
+
+      expect(exitCode).toBe(0);
+      expect(calls).toEqual([
+        expect.objectContaining({
+          method: "POST",
+          url: "http://localhost:15419/api/v1/grep",
+          body: {
+            pattern: "foo",
+            sources: ["docs"],
+            scope: { docs: { nodeIds: ["nod_1", "nod_2"] } },
+          },
+        }),
+      ]);
+    });
+
+    it("routes the top-level `grep` command's records scope (--base-ids/--base-slugs) and 'records' source", async () => {
+      const calls: Array<{ body: unknown; method: string; url: string }> = [];
+      global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const request = input instanceof Request ? input : new Request(input, init);
+        calls.push({
+          body: request.body ? await requestBody(request) : null,
+          method: request.method,
+          url: request.url,
+        });
+        return jsonResponse({
+          matches: [],
+          coverage: {
+            files: {
+              scanned: 0,
+              missing: [],
+              stale: [],
+              unsearchable: 0,
+              errored: [],
+              notReached: 0,
+            },
+            docs: { scanned: 0, errored: [], notReached: 0 },
+            records: { scanned: 0, errored: [], notReached: 0 },
+          },
+          truncated: false,
+        });
+      }) as typeof fetch;
+
+      const exitCode = await runCli([
+        "--base-url",
+        "http://localhost:15419",
+        "--output",
+        "json",
+        "grep",
+        "--pattern",
+        "ACME",
+        "--sources",
+        "records",
+        "--base-ids",
+        "qbs_1",
+        "--base-slugs",
+        "contracts",
+      ]);
+
+      expect(exitCode).toBe(0);
+      expect(calls).toEqual([
+        expect.objectContaining({
+          method: "POST",
+          url: "http://localhost:15419/api/v1/grep",
+          body: {
+            pattern: "ACME",
+            sources: ["records"],
+            scope: { records: { baseIds: ["qbs_1"], baseSlugs: ["contracts"] } },
           },
         }),
       ]);

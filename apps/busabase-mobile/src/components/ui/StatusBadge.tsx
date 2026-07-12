@@ -21,20 +21,31 @@ export const getStatusLabel = (status: BadgeStatus) => labelByStatus[status];
 
 export function StatusBadge({ status, compact }: { status: BadgeStatus; compact?: boolean }) {
   const tokens = useTokens();
-  const color =
+  const cha =
     status === "approved" || status === "merged" || status === "active"
-      ? tokens.success
+      ? tokens.merged
       : status === "rejected" || status === "abandoned" || status === "archived"
-        ? tokens.destructive
-        : tokens.warning;
+        ? tokens.rejected
+        : tokens.review;
 
   return (
     <View
-      style={[styles.badge, compact ? styles.compact : null, { backgroundColor: tokens.muted }]}
+      style={[
+        styles.badge,
+        compact ? styles.compact : null,
+        { backgroundColor: withAlpha(cha.base, 0.12) },
+      ]}
     >
-      <Text style={[typography.caption, { color }]}>{getStatusLabel(status)}</Text>
+      <Text style={[typography.caption, { color: cha.text }]}>{getStatusLabel(status)}</Text>
     </View>
   );
+}
+
+function withAlpha(hex: string, alpha: number) {
+  const clamped = Math.round(Math.min(1, Math.max(0, alpha)) * 255)
+    .toString(16)
+    .padStart(2, "0");
+  return `${hex}${clamped}`;
 }
 
 const styles = StyleSheet.create({

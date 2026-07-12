@@ -1,4 +1,6 @@
+import { Fraunces_500Medium, Fraunces_600SemiBold } from "@expo-google-fonts/fraunces";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { useFonts } from "expo-font";
 import { Stack } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import { StatusBar } from "expo-status-bar";
@@ -24,9 +26,19 @@ function AppStatusBar() {
 }
 
 export default function RootLayout() {
+  const [fontsLoaded, fontError] = useFonts({
+    Fraunces_500Medium,
+    Fraunces_600SemiBold,
+  });
+
   useEffect(() => {
-    void SplashScreen.hideAsync();
-  }, []);
+    // Don't block the app on a slow font fetch — hide splash once fonts are
+    // ready, or on error/timeout, whichever comes first. typography.h1/h2
+    // falls back to the system serif when the family name isn't registered.
+    if (fontsLoaded || fontError) {
+      void SplashScreen.hideAsync();
+    }
+  }, [fontsLoaded, fontError]);
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>

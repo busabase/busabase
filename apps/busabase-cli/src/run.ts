@@ -775,6 +775,34 @@ Examples:
       }),
     );
 
+  addGlobalFlags(nodes.command("move"))
+    .description("Move or reorder a node (applied immediately, no review needed)")
+    .requiredOption("--node-id <id>", "node id to move")
+    .option("--parent-node-id <id>", "new parent folder node id; omit to keep the current parent")
+    .option("--position <n>", "new position among the target parent's children", (v) =>
+      Number.parseInt(v, 10),
+    )
+    .option("--message <text>", "Change Request message")
+    .option("--submitted-by <name>", "producer label")
+    .addHelpText(
+      "after",
+      `
+Examples:
+  busabase-cli nodes move --node-id nod_123 --position 0
+  busabase-cli nodes move --node-id nod_123 --parent-node-id nod_456 --position 2`,
+    )
+    .action(
+      runAction(state, (client, opts) =>
+        client.nodes.move({
+          nodeId: opts.nodeId as string,
+          parentNodeId: opts.parentNodeId as string | undefined,
+          position: opts.position as number | undefined,
+          message: opts.message as string | undefined,
+          submittedBy: opts.submittedBy as string | undefined,
+        }),
+      ),
+    );
+
   const bases = program.command("bases").description("Bases (structured tables)");
   addGlobalFlags(bases.command("list"))
     .description("List Bases in the active space")
@@ -1040,6 +1068,60 @@ Examples:
           offset: opts.offset as number | undefined,
         }),
       ),
+    );
+
+  addGlobalFlags(program.command("grep"))
+    .description(
+      "Search files, Docs, and Base records with one pattern (unified grep; use `assets grep` for files-only)",
+    )
+    .requiredOption("--pattern <regex>", "literal or regex pattern")
+    .option("--flags <flags>", 'RegExp flags, e.g. "i" for case-insensitive')
+    .option(
+      "--sources <sources...>",
+      'sources to scan: "files", "docs", and/or "records" (default: all three)',
+    )
+    .option("--asset-ids <ids...>", "files scope: specific asset ids")
+    .option("--drive-path <path>", "files scope: Drive/Skill mounted path prefix")
+    .option("--mime-types <types...>", "files scope: MIME types")
+    .option("--node-ids <ids...>", "docs scope: specific Doc node ids")
+    .option("--base-ids <ids...>", "records scope: specific Base ids")
+    .option("--base-slugs <slugs...>", "records scope: specific Base slugs")
+    .option(
+      "--max-matches <n>",
+      "max matches, shared across sources (default 100, cap 1000)",
+      parsePositiveInt,
+    )
+    .option("--context-lines <n>", "lines of before/after context (default 0, cap 10)", parseNum)
+    .action(
+      runAction(state, (client, opts) => {
+        const filesScope =
+          opts.assetIds || opts.drivePath || opts.mimeTypes
+            ? {
+                assetIds: opts.assetIds as string[] | undefined,
+                drivePath: opts.drivePath as string | undefined,
+                mimeTypes: opts.mimeTypes as string[] | undefined,
+              }
+            : undefined;
+        const docsScope = opts.nodeIds ? { nodeIds: opts.nodeIds as string[] } : undefined;
+        const recordsScope =
+          opts.baseIds || opts.baseSlugs
+            ? {
+                baseIds: opts.baseIds as string[] | undefined,
+                baseSlugs: opts.baseSlugs as string[] | undefined,
+              }
+            : undefined;
+        return client.grep({
+          pattern: opts.pattern as string,
+          flags: opts.flags as string | undefined,
+          sources: opts.sources as ("files" | "docs" | "records")[] | undefined,
+          scope:
+            filesScope || docsScope || recordsScope
+              ? { files: filesScope, docs: docsScope, records: recordsScope }
+              : undefined,
+          maxMatches: opts.maxMatches as number | undefined,
+          contextLines: opts.contextLines as number | undefined,
+        });
+      }),
     );
 
   const addUploadCommand = (parent: Command, hidden = false) =>

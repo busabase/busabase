@@ -47,6 +47,12 @@ interface DashboardLayoutProps {
   pageClassName?: string;
   headerClassName?: string;
   /**
+   * Suppress the built-in header SidebarTrigger. Set this when the page content
+   * renders its own trigger (typically alongside collapsing this header to zero
+   * height via `headerClassName`) — otherwise two overlapping toggle buttons render.
+   */
+  hideSidebarTrigger?: boolean;
+  /**
    * Callback when a navigation group's header action button is clicked
    */
   onHeaderActionClick?: (groupLabel: string) => void;
@@ -127,6 +133,7 @@ export function DashboardLayout({
   sidebarClassName,
   pageClassName,
   headerClassName,
+  hideSidebarTrigger,
   onHeaderActionClick,
   onNavItemAction,
   headerActions,
@@ -188,7 +195,7 @@ export function DashboardLayout({
           )}
         >
           <div className="flex items-center gap-2 px-6">
-            <SidebarTrigger className="-ml-1" />
+            {!hideSidebarTrigger && <SidebarTrigger className="-ml-1" />}
             <Separator orientation="vertical" className="mr-2 data-[orientation=vertical]:h-4" />
             {headerBadge}
             {breadcrumbs}

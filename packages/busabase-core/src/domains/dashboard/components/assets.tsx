@@ -1,6 +1,16 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";
-import { ArrowLeft, FileText, Film, Image as ImageIcon, Music, Trash2 } from "lucide-react";
+import type { AssetTextStatus } from "busabase-contract/types";
+import {
+  AlertTriangle,
+  ArrowLeft,
+  FileText,
+  FileX,
+  Film,
+  Image as ImageIcon,
+  Music,
+  Trash2,
+} from "lucide-react";
 import { type ReactNode, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { fmt, useCoreI18n } from "../../../i18n";
@@ -27,6 +37,49 @@ export function hasAssetMetadata(metadata: Record<string, unknown> | null | unde
 
 export function formatAssetMetadata(metadata: Record<string, unknown> | null | undefined) {
   return JSON.stringify(hasAssetMetadata(metadata) ? metadata : {}, null, 2);
+}
+
+// `present` is the expected/healthy state — silent, no badge, matching the
+// existing convention here (badges only appear for notable/actionable states,
+// like `unusedBadge` above). `missing` and `stale` are the two states an
+// agent/user can actually act on (supply text / re-supply after a replace);
+// `none` is a deliberate terminal "nothing to extract" state. See the Drive
+// Grep Retrieval spec's textStatus lifecycle for the full state machine.
+export function AssetTextStatusChip({ status }: { status: AssetTextStatus }) {
+  const messages = useCoreI18n();
+  if (status === "present") return null;
+
+  const config = {
+    missing: {
+      Icon: FileText,
+      label: messages.assets.textStatusMissing,
+      hint: messages.assets.textStatusMissingHint,
+      className: "border-muted-foreground/30 bg-muted text-muted-foreground",
+    },
+    none: {
+      Icon: FileX,
+      label: messages.assets.textStatusNone,
+      hint: messages.assets.textStatusNoneHint,
+      className: "border-muted-foreground/30 bg-muted text-muted-foreground",
+    },
+    stale: {
+      Icon: AlertTriangle,
+      label: messages.assets.textStatusStale,
+      hint: messages.assets.textStatusStaleHint,
+      className:
+        "border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-300",
+    },
+  }[status];
+
+  return (
+    <span
+      className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 font-medium text-[11px] ${config.className}`}
+      title={config.hint}
+    >
+      <config.Icon className="size-3" />
+      {config.label}
+    </span>
+  );
 }
 
 export function AssetMetadataBlock({
@@ -137,7 +190,7 @@ export function AssetLibraryView({
   }
   if (listQuery.isError) {
     return (
-      <div className="mx-auto w-full max-w-6xl p-4 md:p-6">
+      <div className="w-full p-4 md:p-6">
         <AssetsHeader count={0} />
         <EmptyState
           body={
@@ -150,7 +203,7 @@ export function AssetLibraryView({
   }
   if (allAssets.length === 0) {
     return (
-      <div className="mx-auto w-full max-w-6xl p-4 md:p-6">
+      <div className="w-full p-4 md:p-6">
         <AssetsHeader count={0} />
         <EmptyState
           body={messages.assets.emptyBody}
@@ -161,7 +214,7 @@ export function AssetLibraryView({
     );
   }
   return (
-    <div className="mx-auto w-full max-w-6xl p-4 md:p-6">
+    <div className="w-full p-4 md:p-6">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <AssetsHeader count={allAssets.length} unusedCount={unusedCount} />
         {unusedCount > 0 ? (
@@ -179,7 +232,7 @@ export function AssetLibraryView({
       {assets.length === 0 ? (
         <p className="mt-4 text-muted-foreground text-sm">{messages.assets.noUnusedAssets}</p>
       ) : (
-        <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
+        <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-8">
           {assets.map((asset) => {
             const Icon = assetKindIcon(asset.mimeType);
             const isImage = asset.mimeType.startsWith("image/");
@@ -275,7 +328,7 @@ export function AssetDetailView({
   ];
 
   return (
-    <div className="mx-auto w-full max-w-5xl p-4 md:p-6">
+    <div className="w-full p-4 md:p-6">
       <button
         className="mb-3 inline-flex items-center gap-1 text-muted-foreground text-sm hover:text-foreground"
         onClick={onBack}
@@ -284,7 +337,7 @@ export function AssetDetailView({
         <ArrowLeft className="size-4" /> {messages.assets.title}
       </button>
 
-      <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_320px]">
+      <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_340px] xl:grid-cols-[minmax(0,1fr)_380px]">
         <div className="grid min-h-[240px] place-items-center overflow-hidden rounded-xl border bg-muted">
           {isImage ? (
             <img alt={asset.name} className="max-h-[60vh] w-full object-contain" src={asset.url} />
@@ -304,7 +357,7 @@ export function AssetDetailView({
         <div className="flex flex-col gap-4">
           <div className="rounded-xl border bg-background p-4">
             <h1 className="break-words font-semibold text-lg">{asset.name}</h1>
-            <div className="mt-2 flex flex-wrap gap-1.5">
+            <div className="mt-2 flex flex-wrap items-center gap-1.5">
               {metaChips.map((chip) => (
                 <span
                   className="rounded-full border bg-muted px-2 py-0.5 text-muted-foreground text-xs"
@@ -313,6 +366,7 @@ export function AssetDetailView({
                   {chip}
                 </span>
               ))}
+              <AssetTextStatusChip status={asset.textStatus} />
             </div>
             {asset.contentHash ? (
               <p

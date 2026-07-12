@@ -11,7 +11,14 @@ import "server-only";
  * `errored` (a scan that was attempted but failed — NOT the same as a clean
  * scanned-no-match) / not-reached (present, in scope, but the deadline or
  * maxMatches budget ran out before the scan got to it).
+ *
+ * Candidate files are scanned through a concurrency-limited batch pool (see
+ * `grepConcurrency`) rather than one at a time, and — for literal (non-regex)
+ * patterns only — through the optional `rg` (ripgrep) binary when present on
+ * the system, for a large real-world speedup; see the "Optional `rg`
+ * acceleration" section below for the exact safety scope.
  */
+import { type ExecFileException, execFile } from "node:child_process";
 import { ORPCError } from "@orpc/server";
 import type {
   GrepInput,
@@ -30,113 +37,49 @@ import {
   busabaseNodes,
 } from "../../../db/schema";
 import { ensureReady } from "../../../logic/seed";
+import {
+  compileGrepPattern,
+  LONG_LINE_GUARD_CHARS,
+  scanLines,
+} from "../../../logic/text-scan-core";
 import { type AssetTextPO, busabaseAssetTexts } from "../schema/asset-texts";
-import { autoRegisterAssetText } from "./asset-texts-logic";
+import { autoRegisterAssetText, loadAssetTextRows } from "./asset-texts-logic";
 import { readObjectInChunks } from "./object-stream";
 import { openAssetTextSource } from "./text-cache";
 import { nearestCheckpointAtOrBefore, TextStreamScanner } from "./text-scan";
 
 type Db = Awaited<ReturnType<typeof getDb>>;
 
+// Re-exported so existing direct importers (this module used to define these
+// itself) and the `pnpm exec vitest` suite (`grep-pattern-guard.test.ts`)
+// keep working unmodified after the source-neutral scanner core moved to
+// `logic/text-scan-core.ts` (Unified Grep P2a) — a mechanical relocation, not
+// a behavior change. `logic/grep.ts` (the new top-level unified entry) also
+// imports `compileGrepPattern` directly from `text-scan-core.ts`, so both the
+// files adapter and the Docs adapter compile through the exact same function.
+export { compileGrepPattern };
+
 // ── Guardrails ────────────────────────────────────────────────────────────────
 
 /** Overridable (`BUSABASE_GREP_TIMEOUT_MS`) so tests can exercise the timeout path deterministically. */
-const grepTimeoutMs = (): number => {
+export const grepTimeoutMs = (): number => {
   const raw = process.env.BUSABASE_GREP_TIMEOUT_MS;
   const parsed = raw ? Number(raw) : Number.NaN;
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : 10_000;
 };
-const MAX_PATTERN_LENGTH = 500;
-/**
- * Regex against a line is only ever run within this many chars — bounds one
- * exec's cost. Deliberately tight (not the object/response caps elsewhere in
- * this file): catastrophic-backtracking cost is exponential in input length,
- * so even at this size a crafted pattern that slips past
- * `CATASTROPHIC_PATTERN_HINT` / `hasOverlappingQuantifiedAlternation` can
- * still make a single `regex.exec` call run far longer than is comfortable —
- * a single `exec` is NOT interruptible by the scan deadline (that's only
- * re-checked between lines). This guard reduces, but does not eliminate, that
- * residual risk; see the Drive Grep Retrieval PR report for the full caveat.
- */
-const LONG_LINE_GUARD_CHARS = 8 * 1024;
 const READ_LINES_MAX_LINES = 2000;
 const READ_LINES_MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
-/** How often (in scanned lines) to re-check the wall-clock budget mid-file. */
-const DEADLINE_CHECK_EVERY_LINES = 500;
-
-// A crude but effective heuristic for classic catastrophic-backtracking shapes:
-// a quantified group directly re-quantified, e.g. `(a+)+`, `(a*)*`, `(a+){2,}`.
-const CATASTROPHIC_PATTERN_HINT = /\([^()]*[+*][^()]*\)[+*]|\([^()]*[+*][^()]*\)\{\d*,/;
 
 /**
- * The other classic catastrophic-backtracking shape: a quantified group whose
- * alternation branches overlap — one is a prefix of another, or two are
- * identical — e.g. `(a|a)*`, `(a|aa)*`. Detected structurally (split the
- * group body on unescaped `|`, compare branches) rather than flagging ANY
- * quantified alternation, which would false-positive on ordinary, safe
- * patterns like `(cat|dog)*` or `(foo|bar){2,5}` (their branches share no
- * prefix relationship, so they can't blow up the same way).
- *
- * Same scope limitation as `CATASTROPHIC_PATTERN_HINT`: only looks at groups
- * with no nested parens (`[^()]*`) — a crude-but-effective heuristic, not a
- * full regex parser.
+ * Overridable (`BUSABASE_GREP_CONCURRENCY`) — how many candidate files are
+ * scanned in parallel per batch. Mirrors `grepTimeoutMs`'s style: read once
+ * per call (cheap), parsed as a number, falling back to the default on a
+ * missing/invalid value.
  */
-const hasOverlappingQuantifiedAlternation = (pattern: string): boolean => {
-  const groupWithQuantifier = /\(([^()]*)\)(?:[+*]|\{\d*,)/g;
-  for (const match of pattern.matchAll(groupWithQuantifier)) {
-    const body = match[1];
-    if (!body.includes("|")) continue;
-    const branches = body.split(/(?<!\\)\|/).filter((branch) => branch.length > 0);
-    for (let i = 0; i < branches.length; i++) {
-      for (let j = i + 1; j < branches.length; j++) {
-        const a = branches[i];
-        const b = branches[j];
-        if (a === b || a.startsWith(b) || b.startsWith(a)) {
-          return true;
-        }
-      }
-    }
-  }
-  return false;
-};
-
-/**
- * Compile a caller-supplied grep pattern defensively: length-capped, a
- * heuristic reject for classic catastrophic-backtracking shapes, and only the
- * `i` flag is honored (line-by-line scanning already makes `m`/`s` moot; `g`/`y`
- * would introduce `lastIndex` statefulness we don't want).
- *
- * NOTE (residual risk, not fully closed): these heuristics catch the classic
- * shapes named above, but regex catastrophic backtracking has other forms
- * this crude structural check does not exhaustively cover, and a single
- * `regex.exec` call is not itself interruptible by the scan deadline once
- * started (see `LONG_LINE_GUARD_CHARS`). A fully robust fix would run pattern
- * matching in a worker thread with a hard timeout — out of scope for this
- * pass; flagged here as a follow-up rather than silently claimed solved.
- */
-export const compileGrepPattern = (pattern: string, flags = ""): RegExp => {
-  if (pattern.length === 0) {
-    throw new ORPCError("BAD_REQUEST", { message: "pattern must not be empty." });
-  }
-  if (pattern.length > MAX_PATTERN_LENGTH) {
-    throw new ORPCError("BAD_REQUEST", {
-      message: `pattern exceeds the ${MAX_PATTERN_LENGTH}-char limit.`,
-    });
-  }
-  if (CATASTROPHIC_PATTERN_HINT.test(pattern) || hasOverlappingQuantifiedAlternation(pattern)) {
-    throw new ORPCError("BAD_REQUEST", {
-      message:
-        "pattern rejected: nested/overlapping quantifiers can cause catastrophic backtracking.",
-    });
-  }
-  const safeFlags = [...new Set([...flags].filter((flag) => flag === "i"))].join("");
-  try {
-    return new RegExp(pattern, safeFlags);
-  } catch (error) {
-    throw new ORPCError("BAD_REQUEST", {
-      message: `Invalid pattern: ${error instanceof Error ? error.message : String(error)}`,
-    });
-  }
+const grepConcurrency = (): number => {
+  const raw = process.env.BUSABASE_GREP_CONCURRENCY;
+  const parsed = raw ? Number(raw) : Number.NaN;
+  return Number.isInteger(parsed) && parsed >= 1 ? parsed : 4;
 };
 
 // ── Candidate resolution ────────────────────────────────────────────────────
@@ -245,22 +188,15 @@ const displayFor = (
   return { fileName: candidate.fallbackName, drivePath: info?.drivePath ?? "" };
 };
 
-const loadAssetTextRows = async (db: Db, assetIds: string[]): Promise<Map<string, AssetTextPO>> => {
-  if (assetIds.length === 0) return new Map();
-  const rows = await db
-    .select()
-    .from(busabaseAssetTexts)
-    .where(inArray(busabaseAssetTexts.assetId, assetIds));
-  return new Map(rows.map((row) => [row.assetId, row]));
-};
-
 // ── Line-by-line matching with context ──────────────────────────────────────
-
-interface PendingMatch {
-  match: GrepMatchVO;
-  afterNeeded: number;
-}
-
+// The actual scan (pattern compile, rolling context window, long-line guard,
+// deadline checks, maxMatches) lives in the source-neutral `scanLines` core
+// (`logic/text-scan-core.ts`, Unified Grep P2a) — this wrapper is the files
+// adapter's ONLY job: attach `assetId`/`fileName`/`drivePath` to each
+// source-neutral `LineHit` to rebuild a `GrepMatchVO`, exactly as `grepAssets`
+// did inline before the extraction. `logic/grep.ts`'s Docs adapter calls the
+// SAME `scanLines` function and wraps its hits with `nodeId`/`slug`/`name`
+// instead — one scanner, two addressing schemes.
 const scanLinesForMatches = async (
   lines: AsyncIterable<string>,
   opts: {
@@ -272,85 +208,200 @@ const scanLinesForMatches = async (
     deadline: number;
   },
 ): Promise<{ matches: GrepMatchVO[]; truncated: boolean }> => {
-  const matches: GrepMatchVO[] = [];
-  const pending: PendingMatch[] = [];
-  const rollingBefore: string[] = [];
-  let lineNumber = 0;
-  let linesSinceCheck = 0;
-  let truncated = false;
-
-  const flushReady = () => {
-    while (pending.length > 0 && pending[0].afterNeeded === 0) {
-      const next = pending.shift();
-      if (next) matches.push(next.match);
-    }
+  const { hits, truncated } = await scanLines(lines, {
+    regex: opts.regex,
+    contextLines: opts.contextLines,
+    maxMatches: opts.maxMatches,
+    deadline: opts.deadline,
+  });
+  return {
+    matches: hits.map((hit) => ({
+      assetId: opts.assetId,
+      fileName: opts.display.fileName,
+      drivePath: opts.display.drivePath,
+      ...hit,
+    })),
+    truncated,
   };
+};
 
-  for await (const rawLine of lines) {
-    lineNumber++;
-    linesSinceCheck++;
-    if (linesSinceCheck >= DEADLINE_CHECK_EVERY_LINES) {
-      linesSinceCheck = 0;
-      if (Date.now() >= opts.deadline) {
-        truncated = true;
-        break;
-      }
-    }
+// ── Optional `rg` (ripgrep) acceleration ────────────────────────────────────
+//
+// `rg`'s regex engine (Rust's `regex` crate) is NOT identical to JS's —
+// notably no backreferences/lookaround by default, plus other edge-case
+// differences. Silently routing arbitrary user regex through `rg` risks
+// returning DIFFERENT matches than the documented JS-regex-based behavior —
+// a correctness regression, not an optimization. So:
+//
+//   - `rg` is ONLY ever used for a LITERAL (non-regex) `pattern`, detected by
+//     `isLiteralPattern` below. `rg -F` (fixed-strings) is then guaranteed
+//     byte-identical semantics to `new RegExp(escapedLiteral)`. ANY pattern
+//     with a regex metacharacter always falls through to the JS scanner —
+//     unconditionally, no exceptions.
+//   - Scoped further to `contextLines === 0` — `-A/-B/-C` context-line parity
+//     with `scanLinesForMatches`'s pending/rolling-window semantics is real
+//     complexity for a P1 perf pass; whenever context lines are requested,
+//     grep falls back to the JS scanner regardless of pattern.
+//   - `rg` availability is detected once and memoized for the process
+//     lifetime; missing/broken `rg` silently and permanently falls back to
+//     the JS path.
+//   - Invoked via `execFile` with an argument array — never a shell string —
+//     since `pattern` is user-supplied (command-injection defense).
 
-    for (const item of pending) {
-      if (item.afterNeeded > 0) {
-        item.match.after.push(rawLine);
-        item.afterNeeded--;
-      }
-    }
-    flushReady();
-    if (matches.length >= opts.maxMatches) {
-      truncated = true;
-      break;
-    }
+const REGEX_METACHARACTERS = /[.^$*+?()[\]{}|\\]/;
 
-    if (matches.length + pending.length < opts.maxMatches) {
-      const withinGuard = rawLine.length > LONG_LINE_GUARD_CHARS;
-      const guardedLine = withinGuard ? rawLine.slice(0, LONG_LINE_GUARD_CHARS) : rawLine;
-      const execResult = opts.regex.exec(guardedLine);
-      if (execResult) {
-        const match: GrepMatchVO = {
-          assetId: opts.assetId,
-          fileName: opts.display.fileName,
-          drivePath: opts.display.drivePath,
-          line: lineNumber,
-          column: execResult.index + 1,
-          text: withinGuard ? `${guardedLine}…` : guardedLine,
-          before: [...rollingBefore],
-          after: [],
-        };
-        if (opts.contextLines > 0) {
-          pending.push({ match, afterNeeded: opts.contextLines });
-        } else {
-          matches.push(match);
+/**
+ * True when `pattern` contains none of JS regex's metacharacters — safe to
+ * treat as a literal string (and therefore eligible for the `rg -F`
+ * acceleration path). ANY match here means the pattern is NOT literal and
+ * must always use the JS regex scanner.
+ */
+export const isLiteralPattern = (pattern: string): boolean => !REGEX_METACHARACTERS.test(pattern);
+
+let rgAvailablePromise: Promise<boolean> | null = null;
+
+/**
+ * Detect the `rg` binary once per process, memoized for the process
+ * lifetime — never re-spawned per grep call. A missing binary (ENOENT) or a
+ * non-zero exit from `--version` silently and permanently falls back to the
+ * JS scanner for the rest of this process; this is optional acceleration,
+ * never a hard dependency.
+ */
+export const isRgAvailable = (): Promise<boolean> => {
+  if (!rgAvailablePromise) {
+    rgAvailablePromise = new Promise((resolve) => {
+      execFile("rg", ["--version"], (error) => {
+        if (error) {
+          console.debug(
+            "[asset-grep-logic] `rg` binary not found — grep will use the JS scanner for this process.",
+          );
         }
-      }
-    }
+        resolve(!error);
+      });
+    });
+  }
+  return rgAvailablePromise;
+};
 
-    if (opts.contextLines > 0) {
-      rollingBefore.push(rawLine);
-      if (rollingBefore.length > opts.contextLines) rollingBefore.shift();
-    }
+/** Generous cap on `rg --json` stdout — match events are small, this bounds a pathological file. */
+const RG_MAX_BUFFER_BYTES = 64 * 1024 * 1024;
 
-    if (matches.length >= opts.maxMatches && pending.length === 0) {
-      truncated = true;
-      break;
+/**
+ * Run `rg` and collect its stdout, treating a timeout-kill as a distinct
+ * outcome (never thrown) and rg's "no matches" exit code (1) as success with
+ * empty-ish output — only a genuine failure (bad invocation, real exit code
+ * >1) rejects.
+ */
+const execFileRg = (
+  args: string[],
+  timeoutMs: number,
+): Promise<{ stdout: string; killed: boolean }> =>
+  new Promise((resolve, reject) => {
+    execFile(
+      "rg",
+      args,
+      { timeout: Math.max(1, timeoutMs), maxBuffer: RG_MAX_BUFFER_BYTES },
+      (error: ExecFileException | null, stdout) => {
+        if (error?.killed) {
+          resolve({ stdout: stdout ?? "", killed: true });
+          return;
+        }
+        if (error && error.code !== 1) {
+          reject(error);
+          return;
+        }
+        resolve({ stdout: stdout ?? "", killed: false });
+      },
+    );
+  });
+
+interface RgMatchEvent {
+  type: "match";
+  data: {
+    line_number: number;
+    lines: { text: string };
+    submatches: { start: number; end: number }[];
+  };
+}
+
+const isRgMatchEvent = (value: unknown): value is RgMatchEvent => {
+  if (typeof value !== "object" || value === null) return false;
+  const record = value as Record<string, unknown>;
+  return record.type === "match" && typeof record.data === "object" && record.data !== null;
+};
+
+/**
+ * Convert `rg`'s 0-based BYTE offset (`submatches[].start`, since `rg`
+ * operates on raw bytes) into the same 1-based CHARACTER column convention
+ * `scanLinesForMatches` produces via `execResult.index + 1` — re-decode the
+ * UTF-8 byte-prefix up to the offset and count its (UTF-16 code unit) length.
+ */
+const rgByteOffsetToColumn = (lineText: string, byteOffset: number): number => {
+  const bytes = Buffer.from(lineText, "utf8");
+  const prefix = bytes.subarray(0, byteOffset).toString("utf8");
+  return prefix.length + 1;
+};
+
+/**
+ * Scan one file via `rg -F --json`. Only ever called for a literal pattern
+ * against a real on-disk file, with `contextLines === 0` (see the section
+ * banner above for why). Mirrors `scanLinesForMatches`'s guardrails: the
+ * long-line guard (`LONG_LINE_GUARD_CHARS`), `maxMatches` capping, and the
+ * scan deadline (via `execFile`'s `timeout`, treating a timeout-kill as
+ * `truncated: true` for this file, never as an `errored` failure).
+ */
+const scanFileWithRg = async (
+  filePath: string,
+  pattern: string,
+  opts: {
+    assetId: string;
+    display: DisplayInfo;
+    maxMatches: number;
+    deadline: number;
+    caseInsensitive: boolean;
+  },
+): Promise<{ matches: GrepMatchVO[]; truncated: boolean }> => {
+  const args = ["-F", "-n", "--json", "-m", String(opts.maxMatches)];
+  if (opts.caseInsensitive) args.push("-i");
+  args.push("--", pattern, filePath);
+
+  const { stdout, killed } = await execFileRg(args, opts.deadline - Date.now());
+
+  const matches: GrepMatchVO[] = [];
+  for (const line of stdout.split("\n")) {
+    if (!line) continue;
+    let event: unknown;
+    try {
+      event = JSON.parse(line);
+    } catch {
+      continue;
     }
+    if (!isRgMatchEvent(event)) continue;
+    const submatch = event.data.submatches[0];
+    if (!submatch) continue;
+
+    const rawText = event.data.lines.text.replace(/\r?\n$/, "");
+    const withinGuard = rawText.length > LONG_LINE_GUARD_CHARS;
+    const text = withinGuard ? `${rawText.slice(0, LONG_LINE_GUARD_CHARS)}…` : rawText;
+
+    matches.push({
+      assetId: opts.assetId,
+      fileName: opts.display.fileName,
+      drivePath: opts.display.drivePath,
+      line: event.data.line_number,
+      column: rgByteOffsetToColumn(rawText, submatch.start),
+      text,
+      before: [],
+      after: [],
+    });
+    if (matches.length >= opts.maxMatches) break;
   }
 
-  // EOF (or deadline break) — flush whatever pending matches have (partial `after` is fine).
-  while (pending.length > 0 && matches.length < opts.maxMatches) {
-    const next = pending.shift();
-    if (next) matches.push(next.match);
-  }
-  if (pending.length > 0) truncated = true;
-
-  return { matches: matches.slice(0, opts.maxMatches), truncated };
+  const overshoot = matches.length > opts.maxMatches;
+  return {
+    matches: overshoot ? matches.slice(0, opts.maxMatches) : matches,
+    truncated: killed || overshoot,
+  };
 };
 
 // ── grep ─────────────────────────────────────────────────────────────────────
@@ -405,7 +456,7 @@ export const grepAssets = async (input: GrepInput): Promise<GrepResultVO> => {
   }
 
   const deadline = Date.now() + grepTimeoutMs();
-  const matches: GrepMatchVO[] = [];
+  let matches: GrepMatchVO[] = [];
   let filesScanned = 0;
   let truncated = false;
   // Honest coverage: a candidate whose scan itself fails (storage error,
@@ -418,34 +469,99 @@ export const grepAssets = async (input: GrepInput): Promise<GrepResultVO> => {
   // than only implied by the global `truncated` flag.
   let notReached = 0;
 
-  for (let i = 0; i < present.length; i++) {
-    const { candidate, row } = present[i];
+  // `rg`-eligibility facts that don't depend on any one candidate — computed
+  // once, not per file/batch.
+  const literalPattern = isLiteralPattern(input.pattern);
+  const caseInsensitive = input.flags.includes("i");
+
+  const concurrency = Math.max(1, grepConcurrency());
+  for (let i = 0; i < present.length; ) {
+    // Budget check BEFORE dispatching the next batch — same two checks the
+    // old sequential loop did before each file, just now per-batch. A batch
+    // that's already been dispatched always runs to completion (see below);
+    // this is the gate that stops a NEW batch from starting.
     if (Date.now() >= deadline || matches.length >= input.maxMatches) {
       truncated = true;
       notReached = present.length - i;
       break;
     }
-    try {
-      const source = await openAssetTextSource(row);
-      const result = await scanLinesForMatches(source.iterateLines(0), {
-        assetId: candidate.assetId,
-        display: displayFor(displayByAsset, candidate),
-        regex,
-        contextLines: input.contextLines,
-        maxMatches: input.maxMatches - matches.length,
-        deadline,
-      });
-      filesScanned++;
-      matches.push(...result.matches);
-      if (result.truncated) truncated = true;
-    } catch {
-      // Asset deleted mid-flight, object missing, corrupt cache file, etc. —
-      // this candidate was NOT actually searched. Record it so the caller can
-      // tell "searched, no match" apart from "we don't actually know" —
-      // skipping gracefully rather than failing the whole grep for every
-      // other candidate, but never silently as a clean scan.
-      errored.push(candidate.assetId);
+
+    const batch = present.slice(i, i + concurrency);
+    // Every file in this batch gets the SAME remaining-match budget,
+    // computed once per batch (not per file) — the value the sequential loop
+    // already passed to `scanLinesForMatches`'s `maxMatches`.
+    const batchMaxMatches = input.maxMatches - matches.length;
+
+    const settled = await Promise.allSettled(
+      batch.map(async ({ candidate, row }) => {
+        const source = await openAssetTextSource(row);
+        const display = displayFor(displayByAsset, candidate);
+        const canUseRg =
+          literalPattern &&
+          input.contextLines === 0 &&
+          source.filePath !== undefined &&
+          (await isRgAvailable());
+        if (canUseRg && source.filePath) {
+          try {
+            return await scanFileWithRg(source.filePath, input.pattern, {
+              assetId: candidate.assetId,
+              display,
+              maxMatches: batchMaxMatches,
+              deadline,
+              caseInsensitive,
+            });
+          } catch {
+            // Unexpected `rg` invocation failure for this file — silently
+            // fall back to the JS scanner rather than treating a workable
+            // file as `errored`; `rg` is optional acceleration only.
+          }
+        }
+        return scanLinesForMatches(source.iterateLines(0), {
+          assetId: candidate.assetId,
+          display,
+          regex,
+          contextLines: input.contextLines,
+          maxMatches: batchMaxMatches,
+          deadline,
+        });
+      }),
+    );
+
+    // Fold per-file outcomes into the shared counters in one place, after
+    // the whole batch settles — not scattered increments inside concurrent
+    // callbacks — and in the batch's original candidate order (not
+    // completion order), so `matches` stays deterministic regardless of
+    // which file's I/O happened to finish first.
+    for (let j = 0; j < batch.length; j++) {
+      const outcome = settled[j];
+      if (outcome.status === "fulfilled") {
+        filesScanned++;
+        matches.push(...outcome.value.matches);
+        if (outcome.value.truncated) truncated = true;
+      } else {
+        // Asset deleted mid-flight, object missing, corrupt cache file, etc.
+        // — this candidate was NOT actually searched. Record it so the
+        // caller can tell "searched, no match" apart from "we don't
+        // actually know" — skipping gracefully rather than failing the
+        // whole grep for every other candidate, but never silently as a
+        // clean scan.
+        errored.push(batch[j].candidate.assetId);
+      }
     }
+
+    // A dispatched batch always runs every file to completion, even if an
+    // earlier file in the SAME batch already reached `maxMatches` mid-way
+    // (no in-flight cancellation) — so `matches` can overshoot by up to
+    // `concurrency - 1` files' worth of matches, a bounded amount, never
+    // unbounded. Cap it back down right here so the response never actually
+    // exceeds `maxMatches`, and so the next iteration's pre-dispatch budget
+    // check (top of the loop) sees the true, capped state.
+    if (matches.length > input.maxMatches) {
+      matches = matches.slice(0, input.maxMatches);
+      truncated = true;
+    }
+
+    i += batch.length;
   }
   if (matches.length >= input.maxMatches) truncated = true;
 

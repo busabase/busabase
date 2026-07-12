@@ -1,16 +1,15 @@
 import type { ChangeRequestVO } from "busabase-contract/types";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import {
-  getChangeRequestReviewCue,
+  getChangeRequestMessage,
   getChangeRequestScopeName,
   getChangeRequestTitle,
   getOperationSummary,
-  getPreview,
 } from "~/lib/busabase-display";
-import { formatDate } from "~/lib/format";
+import { formatListTime } from "~/lib/format";
 import { mobile, typography } from "~/theme/tokens";
 import { useTokens } from "~/theme/use-tokens";
-import { StatusBadge } from "../ui/StatusBadge";
+import { getStatusLabel } from "../ui/StatusBadge";
 
 interface ChangeRequestCardProps {
   changeRequest: ChangeRequestVO;
@@ -18,24 +17,28 @@ interface ChangeRequestCardProps {
   last?: boolean;
 }
 
+// Mirrors the web dashboard's ReviewChangeRequestRow hierarchy
+// (packages/busabase-core/src/domains/dashboard/components/inbox.tsx):
+// status carries color via the dot ONLY (no visible text on it) and carries
+// its label ONLY as plain text at the end of the metadata line — never both
+// at once as a colored chip, which reads as redundant. The optional second
+// line is the author's own commit message, not a synthesized field preview,
+// and is omitted entirely when there isn't one (matching web).
 export function ChangeRequestCard({ changeRequest, onPress, last }: ChangeRequestCardProps) {
   const tokens = useTokens();
   const scopeName = getChangeRequestScopeName(changeRequest);
   const operationSummary = getOperationSummary(changeRequest);
-  const preview = getPreview(changeRequest.primaryOperation?.headCommit.fields ?? {}, {
-    fallback: "",
-    maxLength: 104,
-  });
-  const reviewCue = getChangeRequestReviewCue(changeRequest);
+  const message = getChangeRequestMessage(changeRequest);
   const title = getChangeRequestTitle(changeRequest);
+  const statusLabel = getStatusLabel(changeRequest.status);
   const statusColor =
     changeRequest.status === "approved" || changeRequest.status === "merged"
-      ? tokens.success
+      ? tokens.merged.base
       : changeRequest.status === "rejected" ||
           changeRequest.status === "abandoned" ||
           changeRequest.status === "conflict"
-        ? tokens.destructive
-        : tokens.warning;
+        ? tokens.rejected.base
+        : tokens.review.base;
 
   return (
     <Pressable
@@ -52,26 +55,25 @@ export function ChangeRequestCard({ changeRequest, onPress, last }: ChangeReques
       <View style={styles.titleRow}>
         <View style={[styles.statusDot, { backgroundColor: statusColor }]} />
         <Text
-          numberOfLines={2}
+          numberOfLines={1}
           style={[typography.bodyEm, styles.titleText, { color: tokens.foreground }]}
         >
           {title}
         </Text>
       </View>
-      <View style={styles.statusRow}>
-        <Text numberOfLines={1} style={[typography.small, { color: tokens.mutedForeground }]}>
-          {formatDate(changeRequest.updatedAt)}
+      {message ? (
+        <Text
+          numberOfLines={1}
+          style={[typography.small, styles.messageText, { color: tokens.mutedForeground }]}
+        >
+          {message}
         </Text>
-        <StatusBadge status={changeRequest.status} compact />
-      </View>
+      ) : null}
       <Text
-        numberOfLines={2}
-        style={[typography.small, styles.previewText, { color: tokens.foreground }]}
+        numberOfLines={1}
+        style={[typography.caption, styles.metaText, { color: tokens.mutedForeground }]}
       >
-        {preview || operationSummary}
-      </Text>
-      <Text numberOfLines={1} style={[typography.caption, { color: tokens.mutedForeground }]}>
-        {reviewCue} · {scopeName} · {operationSummary}
+        {scopeName} · {operationSummary} · {statusLabel} · {formatListTime(changeRequest.updatedAt)}
       </Text>
     </Pressable>
   );
@@ -79,29 +81,22 @@ export function ChangeRequestCard({ changeRequest, onPress, last }: ChangeReques
 
 const styles = StyleSheet.create({
   reviewRow: {
-    minHeight: 96,
+    minHeight: 58,
     paddingHorizontal: 14,
-    paddingVertical: 12,
-    gap: 6,
+    paddingVertical: 11,
+    gap: 3,
   },
   titleRow: {
     flexDirection: "row",
-    alignItems: "flex-start",
-    gap: 10,
+    alignItems: "center",
+    gap: 8,
   },
   statusDot: {
-    width: 9,
-    height: 9,
+    width: 8,
+    height: 8,
     borderRadius: 999,
-    marginTop: 7,
   },
   titleText: { flex: 1, minWidth: 0 },
-  statusRow: {
-    paddingLeft: 19,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: 10,
-  },
-  previewText: { paddingLeft: 19 },
+  messageText: { paddingLeft: 16 },
+  metaText: { paddingLeft: 16 },
 });

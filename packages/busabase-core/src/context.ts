@@ -44,10 +44,42 @@ export type { DemoUseCase };
 /** Locale of the demo dataset the stateless demo serves. */
 export type DemoLocale = "en" | "zh-CN";
 
+export type BusabaseSourceChannel =
+  | "web_ui"
+  | "browser"
+  | "openapi"
+  | "sdk"
+  | "cli"
+  | "mcp"
+  | "skill"
+  | "webhook"
+  | "automation"
+  | "import";
+
+export interface BusabaseSourceProvenance {
+  owner?: {
+    id?: string | null;
+    name?: string | null;
+    email?: string | null;
+    image?: string | null;
+  };
+  apiKey?: {
+    id?: string | null;
+    name?: string | null;
+  };
+  channel?: BusabaseSourceChannel | string | null;
+}
+
 export interface BusabaseContext {
   db?: BusabaseDatabase;
   actorId?: string;
   spaceId?: string;
+  /**
+   * Host-provided source attribution for writes in this request. Open source
+   * leaves this unset; cloud uses it to stamp ChangeRequests/AuditEvents with
+   * the owner user, API key name, and write channel.
+   */
+  sourceProvenance?: BusabaseSourceProvenance;
   /**
    * User-scoped Vault values exposed to the current request/runtime.
    *
@@ -176,6 +208,52 @@ export function getContextSpaceId(): string {
  */
 export function resolveActorId(inputActorId: string): string {
   return storage.getStore()?.actorId ?? inputActorId;
+}
+
+export function getContextSourceProvenance(): BusabaseSourceProvenance | undefined {
+  return storage.getStore()?.sourceProvenance;
+}
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
+const mergeRecord = (
+  contextValue: Record<string, unknown> | undefined,
+  explicitValue: unknown,
+): Record<string, unknown> | undefined => {
+  if (!isRecord(explicitValue)) return contextValue;
+  return { ...(contextValue ?? {}), ...explicitValue };
+};
+
+export function withContextSourceMeta(
+  sourceMeta: Record<string, unknown> = {},
+): Record<string, unknown> {
+  const provenance = getContextSourceProvenance();
+  if (!provenance) return sourceMeta;
+
+  const explicitProvenance = isRecord(sourceMeta.provenance) ? sourceMeta.provenance : {};
+  const contextProvenance = provenance as Record<string, unknown>;
+  const owner = mergeRecord(
+    isRecord(contextProvenance.owner) ? contextProvenance.owner : undefined,
+    explicitProvenance.owner,
+  );
+  const apiKey = mergeRecord(
+    isRecord(contextProvenance.apiKey) ? contextProvenance.apiKey : undefined,
+    explicitProvenance.apiKey,
+  );
+  const mergedProvenance = {
+    ...contextProvenance,
+    ...explicitProvenance,
+  };
+  if (owner) mergedProvenance.owner = owner;
+  else delete mergedProvenance.owner;
+  if (apiKey) mergedProvenance.apiKey = apiKey;
+  else delete mergedProvenance.apiKey;
+
+  return {
+    ...sourceMeta,
+    provenance: mergedProvenance,
+  };
 }
 
 /** User-scoped Vault runtime values for the current hosted/request execution. */

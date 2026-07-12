@@ -22,7 +22,7 @@ import {
 } from "~/components/native-screen";
 import { Button } from "~/components/ui/Button";
 import { getPreview, getRecordTitle } from "~/lib/busabase-display";
-import { formatDate } from "~/lib/format";
+import { formatListTime } from "~/lib/format";
 import { applyViewConfig } from "~/lib/view-config";
 import { mobile, radius, typography } from "~/theme/tokens";
 import { useTokens } from "~/theme/use-tokens";
@@ -172,25 +172,34 @@ function BaseDetailContent() {
             />
           ) : displayMode === "list" ? (
             <NativeSection title="Records" caption={`${records.length}`}>
-              {records.map((record, index) => (
-                <NativeRow
-                  key={record.id}
-                  title={getRecordTitle(record)}
-                  subtitle={getPreview(record.headCommit.fields)}
-                  meta={formatDate(record.updatedAt)}
-                  last={index === records.length - 1}
-                  onPress={() =>
-                    router.push({ pathname: "/records/[id]", params: { id: record.id } })
-                  }
-                >
-                  <FieldList
-                    fields={record.headCommit.fields}
-                    definitions={visibleFields.slice(0, 3)}
-                    limitToDefinitions
-                    variant="compact"
-                  />
-                </NativeRow>
-              ))}
+              {records.map((record, index) => {
+                const title = getRecordTitle(record);
+                const preview = getPreview(record.headCommit.fields);
+                // Sparse (often single-field) records can make the preview
+                // echo the title verbatim — drop it rather than show the
+                // same text twice (see RecordCard.tsx for the same fix).
+                const subtitle =
+                  preview.trim().toLowerCase() === title.trim().toLowerCase() ? undefined : preview;
+                return (
+                  <NativeRow
+                    key={record.id}
+                    title={title}
+                    subtitle={subtitle}
+                    meta={formatListTime(record.updatedAt)}
+                    last={index === records.length - 1}
+                    onPress={() =>
+                      router.push({ pathname: "/records/[id]", params: { id: record.id } })
+                    }
+                  >
+                    <FieldList
+                      fields={record.headCommit.fields}
+                      definitions={visibleFields.slice(0, 3)}
+                      limitToDefinitions
+                      variant="compact"
+                    />
+                  </NativeRow>
+                );
+              })}
             </NativeSection>
           ) : (
             <NativeSection title="Table" caption={`${visibleFields.length} fields`}>

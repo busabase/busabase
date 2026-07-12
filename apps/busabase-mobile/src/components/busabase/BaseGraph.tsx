@@ -7,11 +7,6 @@ import Svg, { Circle, Defs, G, Line, Marker, Path, Text as SvgText } from "react
 import { typography } from "~/theme/tokens";
 import { useTokens } from "~/theme/use-tokens";
 
-const GRAPH_BG = "#0d0d12";
-const NODE_COLOR = "#6366f1";
-const NODE_COLOR_ISOLATED = "#4b4b6b";
-const EDGE_COLOR = "#4444aa";
-const LABEL_COLOR = "#94a3b8";
 const NODE_R = 18;
 const ARROW_SIZE = 6;
 
@@ -107,12 +102,19 @@ export function BaseGraph({ bases, width, height, onNodePress }: BaseGraphProps)
     [bases, width, height],
   );
 
+  // Strictly monochrome, theme-following canvas — no brand accent. Nodes use
+  // the primary/foreground scale; edges and labels use border/muted tokens.
+  const nodeColor = tokens.primary;
+  const nodeColorIsolated = tokens.mutedForeground;
+  const edgeColor = tokens.mutedForeground;
+  const labelColor = tokens.mutedForeground;
+
   return (
-    <View style={[styles.container, { width, height, backgroundColor: GRAPH_BG }]}>
+    <View style={[styles.container, { width, height, backgroundColor: tokens.background }]}>
       {/* Header badge */}
       <View style={styles.badge}>
-        <View style={[styles.dot, { backgroundColor: NODE_COLOR }]} />
-        <Text style={[typography.caption, { color: LABEL_COLOR }]}>
+        <View style={[styles.dot, { backgroundColor: nodeColor }]} />
+        <Text style={[typography.caption, { color: labelColor }]}>
           {bases.length} bases · {edgeCount} relations
         </Text>
       </View>
@@ -135,7 +137,7 @@ export function BaseGraph({ bases, width, height, onNodePress }: BaseGraphProps)
             >
               <Path
                 d={`M0,0 L0,${ARROW_SIZE} L${ARROW_SIZE},${ARROW_SIZE / 2} z`}
-                fill={EDGE_COLOR}
+                fill={edgeColor}
                 fillOpacity={0.8}
               />
             </Marker>
@@ -154,9 +156,9 @@ export function BaseGraph({ bases, width, height, onNodePress }: BaseGraphProps)
                 y1={sy}
                 x2={tx}
                 y2={ty}
-                stroke={EDGE_COLOR}
+                stroke={edgeColor}
                 strokeWidth={1.5}
-                strokeOpacity={0.55}
+                strokeOpacity={0.4}
                 markerEnd="url(#arrow)"
               />
             );
@@ -173,12 +175,12 @@ export function BaseGraph({ bases, width, height, onNodePress }: BaseGraphProps)
             return (
               <G key={node.id} onPress={() => onNodePress(node.slug)}>
                 {/* Outer glow ring */}
-                <Circle cx={cx} cy={cy} r={NODE_R + 5} fill={NODE_COLOR} fillOpacity={0.15} />
+                <Circle cx={cx} cy={cy} r={NODE_R + 5} fill={nodeColor} fillOpacity={0.1} />
                 <Circle
                   cx={cx}
                   cy={cy}
                   r={NODE_R}
-                  fill={isConnected ? NODE_COLOR : NODE_COLOR_ISOLATED}
+                  fill={isConnected ? nodeColor : nodeColorIsolated}
                   fillOpacity={0.9}
                 />
                 <SvgText
@@ -187,7 +189,7 @@ export function BaseGraph({ bases, width, height, onNodePress }: BaseGraphProps)
                   textAnchor="middle"
                   fontSize={11}
                   fontWeight="500"
-                  fill={LABEL_COLOR}
+                  fill={labelColor}
                 >
                   {label}
                 </SvgText>
@@ -200,7 +202,9 @@ export function BaseGraph({ bases, width, height, onNodePress }: BaseGraphProps)
       {/* Hint */}
       {bases.length > 0 ? (
         <View style={styles.hint}>
-          <Text style={[typography.caption, { color: "#44446688" }]}>Tap a node to open</Text>
+          <Text style={[typography.caption, { color: tokens.mutedForeground }]}>
+            Tap a node to open
+          </Text>
         </View>
       ) : null}
     </View>

@@ -366,6 +366,21 @@ const createNodeChangeRequestInputSchema = z.object({
   operations: z.array(nodeOperationInputSchema).min(1),
 });
 
+const moveNodeInputSchema = z.object({
+  nodeId: z.string(),
+  parentNodeId: z
+    .string()
+    .optional()
+    .describe("New parent folder node id. Omit to keep the current parent and only reorder."),
+  position: z
+    .number()
+    .int()
+    .optional()
+    .describe("New position among the target parent's children."),
+  message: z.string().optional().describe("Reviewer-facing Change Request message."),
+  submittedBy: z.string().optional(),
+});
+
 const createDeleteChangeRequestInputSchema = z.object({
   message: z
     .string()
@@ -522,6 +537,7 @@ export {
   createAuditEventInputSchema,
   nodeOperationInputSchema,
   createNodeChangeRequestInputSchema,
+  moveNodeInputSchema,
   createDeleteChangeRequestInputSchema,
   reviseOperationInputSchema,
   reviewChangeRequestInputSchema,

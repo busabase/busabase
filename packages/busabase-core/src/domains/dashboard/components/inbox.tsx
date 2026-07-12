@@ -481,32 +481,77 @@ export function ActivityView({
   today.setHours(0, 0, 0, 0);
   const recentEvents = events.filter((event) => new Date(event.timestamp) >= today);
   const earlierEvents = events.filter((event) => new Date(event.timestamp) < today);
+  const activityGroups = [
+    {
+      count: recentEvents.length,
+      items: recentEvents.map((event) => <ActivityRow event={event} key={event.id} />),
+      title: messages.activity.today,
+    },
+    {
+      count: earlierEvents.length,
+      items: earlierEvents.map((event) => <ActivityRow event={event} key={event.id} />),
+      title: messages.activity.earlier,
+    },
+  ].filter((group) => group.count > 0);
+  const loadError =
+    listQuery.error instanceof Error ? listQuery.error.message : messages.inbox.loadFailedBody;
 
   return (
-    <BusabaseList
-      empty={
-        <EmptyState
-          title={messages.activity.noActivityTitle}
-          body={messages.activity.noActivityBody}
-          action={emptyGuide}
-        />
-      }
-      hasMore={listQuery.hasNextPage}
-      isLoadingMore={listQuery.isFetchingNextPage}
-      onLoadMore={() => listQuery.fetchNextPage()}
-      groups={[
-        {
-          count: recentEvents.length,
-          items: recentEvents.map((event) => <ActivityRow event={event} key={event.id} />),
-          title: messages.activity.today,
-        },
-        {
-          count: earlierEvents.length,
-          items: earlierEvents.map((event) => <ActivityRow event={event} key={event.id} />),
-          title: messages.activity.earlier,
-        },
-      ].filter((group) => group.count > 0)}
-      toolbar={<div className="font-medium text-sm">{messages.activity.workspaceActivity}</div>}
-    />
+    <section className="flex min-h-0 flex-1 flex-col overflow-hidden">
+      <div className="flex items-center justify-between gap-4 border-b px-5 py-2.5">
+        <div className="font-medium text-sm">{messages.activity.workspaceActivity}</div>
+      </div>
+      <div className="min-h-0 flex-1 overflow-auto px-4 py-4 sm:px-5">
+        {listQuery.isPending ? (
+          <InboxListSkeleton />
+        ) : listQuery.isError ? (
+          <EmptyState
+            action={
+              <button
+                className="inline-flex h-8 items-center rounded-md border border-border/70 px-3 font-medium text-xs transition-colors hover:bg-accent hover:text-foreground"
+                onClick={() => listQuery.refetch()}
+                type="button"
+              >
+                {messages.inbox.retry}
+              </button>
+            }
+            body={loadError}
+            title={messages.inbox.loadFailedTitle}
+          />
+        ) : activityGroups.length > 0 ? (
+          <div className="w-full space-y-6">
+            {activityGroups.map((group) => (
+              <div key={group.title}>
+                <div className="mb-1.5 flex items-center gap-2 px-2 text-muted-foreground text-xs">
+                  <span className="font-medium">{group.title}</span>
+                  <span className="font-mono">{group.count}</span>
+                </div>
+                <div>{group.items}</div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="w-full">
+            <EmptyState
+              title={messages.activity.noActivityTitle}
+              body={messages.activity.noActivityBody}
+              action={emptyGuide}
+            />
+          </div>
+        )}
+        {!listQuery.isPending && !listQuery.isError && listQuery.hasNextPage ? (
+          <div className="flex items-center justify-center pt-4">
+            <button
+              className="inline-flex h-8 items-center rounded-md border border-border/70 px-3 font-medium text-muted-foreground text-xs transition-colors hover:bg-accent hover:text-foreground disabled:opacity-60"
+              disabled={listQuery.isFetchingNextPage}
+              onClick={() => listQuery.fetchNextPage()}
+              type="button"
+            >
+              {listQuery.isFetchingNextPage ? messages.common.loading : messages.search.loadMore}
+            </button>
+          </div>
+        ) : null}
+      </div>
+    </section>
   );
 }

@@ -14,9 +14,10 @@ import { busabaseRouter } from "../src/router";
  * The `webhook` domain: rules that fire on space/base events (`record.created`,
  * `ai_mention`, `changes_requested`) via a signed HTTP POST, the `notify_agent`
  * generalization of the old hardcoded agent webhook, or a sandboxed
- * `run_snippet` action. Covers CRUD, dispatch on real events (record merge / an
+ * `run_function` action. Covers CRUD, dispatch on real events (record merge / an
  * `@ai` mention), the secret round-trip on update, scoping (disabled / base),
- * the QuickJS sandbox's isolation + timeout, and input validation.
+ * the QuickJS sandbox's isolation + timeout + `fetch` bridge (SSRF guard, call
+ * cap, hang timeout), and input validation.
  */
 
 const MIGRATIONS_CWD = path.resolve(__dirname, "../../../apps/busabase");
@@ -59,6 +60,12 @@ describe("Webhook automation domain — oRPC", () => {
   let ssrfProbeServer: ReturnType<typeof createServer>;
   let ssrfProbePort = 0;
   let ssrfProbeReceived: Hit[] = [];
+  // A THIRD local listener, also on 127.0.0.1 and allowlisted, that accepts
+  // the connection but never writes a response — used to prove a
+  // `run_function` fetch call that hangs is bounded by the function's own
+  // `timeoutMs` (the wall-clock race in sandbox.ts), not left to hang forever.
+  let hangingServer: ReturnType<typeof createServer>;
+  let hangingPort = 0;
 
   beforeAll(async () => {
     originalCwd = process.cwd();
@@ -102,16 +109,23 @@ describe("Webhook automation domain — oRPC", () => {
     await new Promise<void>((resolve) => ssrfProbeServer.listen(0, "127.0.0.1", resolve));
     ssrfProbePort = (ssrfProbeServer.address() as { port: number }).port;
 
-    // The SSRF guard added to dispatch.ts (see dispatch.ts's "SSRF guard"
-    // section) blocks loopback targets like 127.0.0.1 — which is exactly
-    // where `server` above lives, and which every pre-existing test in this
-    // file legitimately dispatches to. Rather than weakening the guard, opt
-    // THIS EXACT host:port into a narrowly-scoped, test-only allowlist that
-    // dispatch.ts only honors when Vitest itself has set `VITEST` (never
-    // true in production) — see `isTestAllowlistedTarget` in dispatch.ts.
+    hangingServer = createServer(() => {
+      // Deliberately never call res.write/res.end — the connection just sits
+      // open until the client (fetch's own AbortSignal.timeout) gives up.
+    });
+    await new Promise<void>((resolve) => hangingServer.listen(0, "127.0.0.1", resolve));
+    hangingPort = (hangingServer.address() as { port: number }).port;
+
+    // The SSRF guard added to ssrf-guard.ts (see its "SSRF guard" section)
+    // blocks loopback targets like 127.0.0.1 — which is exactly where
+    // `server` above lives, and which every pre-existing test in this file
+    // legitimately dispatches to. Rather than weakening the guard, opt THESE
+    // EXACT host:ports into a narrowly-scoped, test-only allowlist that the
+    // guard only honors when Vitest itself has set `VITEST` (never true in
+    // production) — see `isTestAllowlistedTarget` in ssrf-guard.ts.
     // `ssrfProbePort` above is deliberately NOT included, so the "SSRF
     // protection" tests below still prove the block is real.
-    process.env.BUSABASE_WEBHOOK_TEST_ALLOW_TARGETS = `127.0.0.1:${port}`;
+    process.env.BUSABASE_WEBHOOK_TEST_ALLOW_TARGETS = `127.0.0.1:${port},127.0.0.1:${hangingPort}`;
 
     client = createRouterClient(busabaseRouter);
     await seedScenario({ folders: DEMO_FOLDERS, bases: DEMO_BASES });
@@ -123,6 +137,7 @@ describe("Webhook automation domain — oRPC", () => {
   afterAll(async () => {
     await new Promise((resolve) => server.close(resolve));
     await new Promise((resolve) => ssrfProbeServer.close(resolve));
+    await new Promise((resolve) => hangingServer.close(resolve));
     delete process.env.BUSABASE_WEBHOOK_TEST_ALLOW_TARGETS;
     delete process.env.PG_DATABASE_URL;
     delete process.env.STORAGE_URL;
@@ -281,26 +296,45 @@ describe("Webhook automation domain — oRPC", () => {
       expect(parsed.changeRequestId).toBe(cr.id);
     });
 
-    it("run_snippet computes a call spec in-sandbox and the host performs the one HTTP call", async () => {
+    it("run_function calls fetch directly from inside the sandbox and the delivery is recorded", async () => {
       received = [];
-      await client.webhooks.create({
-        name: "test snippet",
+      const rule = await client.webhooks.create({
+        name: "test function",
         eventType: "record.created",
         baseId: null,
-        actionKind: "run_snippet",
+        actionKind: "run_function",
         config: {
-          code: `console.log("hello from sandbox", input.recordId); return { url: ${JSON.stringify(hookUrl("snippet-hook"))}, method: "POST", body: { title: input.fields.title } };`,
+          code: `
+            console.log("hello from sandbox", input.recordId);
+            const response = await fetch(${JSON.stringify(hookUrl("function-hook"))}, {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({ title: input.fields.title }),
+            });
+            console.log("fetch status", response.status, response.ok);
+            return { status: response.status };
+          `,
           timeoutMs: 1000,
         },
         enabled: true,
       });
 
-      await createAndMergeRecord(blogBaseId, "Snippet test");
-      expect(await waitForHit("snippet-hook")).toBe(true);
+      await createAndMergeRecord(blogBaseId, "Function test");
+      expect(await waitForHit("function-hook")).toBe(true);
 
-      const hit = received.find((r) => r.path === "/snippet-hook");
+      const hit = received.find((r) => r.path === "/function-hook");
       const parsed = JSON.parse(hit!.body);
-      expect(parsed.title).toBe("Snippet test");
+      expect(parsed.title).toBe("Function test");
+
+      const deliveries = await client.webhooks.deliveries({ ruleId: rule.id, limit: 5 });
+      expect(deliveries[0]?.status).toBe("success");
+      // No single HTTP call is "the" delivery anymore — the function may
+      // make zero, one, or several fetch calls — so httpStatus/durationMs
+      // are no longer meaningful and stay null; the captured logs are what
+      // make the delivery debuggable instead.
+      expect(deliveries[0]?.httpStatus).toBeNull();
+      expect(deliveries[0]?.durationMs).toBeNull();
+      expect(deliveries[0]?.detail).toContain("fetch status 200 true");
     });
 
     it("does not fire a disabled rule", async () => {
@@ -387,6 +421,89 @@ describe("Webhook automation domain — oRPC", () => {
       const deliveries = await client.webhooks.deliveries({ ruleId: rule.id, limit: 5 });
       expect(deliveries[0]?.status).toBe("failed");
       expect(deliveries[0]?.detail).toContain("after 3 attempts");
+    });
+  });
+
+  // ── asset.uploaded dispatch ──────────────────────────────────────────────────
+  //
+  // Wires the Drive Grep Retrieval "missing extraction step" to the webhook
+  // domain (see assets/handlers.ts's `confirmAssetUpload`): a binary upload
+  // starts `textStatus: "missing"` with nothing to auto-supply it — an
+  // `asset.uploaded` rule (e.g. `run_function` calling an external extractor,
+  // then `putText`ing the result back) closes that gap. Text-kind uploads
+  // auto-register as "present" immediately and must NOT fire this event.
+
+  describe("asset.uploaded dispatch", () => {
+    const uploadAsset = async (opts: { fileName: string; mimeType: string; hashByte: string }) => {
+      const contentHash = `sha256:${opts.hashByte.repeat(64)}`;
+      const req = await client.assets.createUploadUrl({
+        fileName: opts.fileName,
+        mimeType: opts.mimeType,
+        sizeBytes: 100,
+        contentHash,
+      });
+      return client.assets.confirm({
+        storageKey: req.storageKey,
+        fileName: opts.fileName,
+        mimeType: opts.mimeType,
+        sizeBytes: 100,
+        contentHash,
+      });
+    };
+
+    it("fires a delivery with the expected payload when a binary (non-text) file is uploaded", async () => {
+      received = [];
+      const rule = await client.webhooks.create({
+        name: "test asset.uploaded binary",
+        eventType: "asset.uploaded",
+        baseId: null,
+        actionKind: "webhook",
+        config: { targetUrl: hookUrl("asset-uploaded-hook") },
+        enabled: true,
+      });
+
+      const confirmed = await uploadAsset({
+        fileName: "board-plan.pdf",
+        mimeType: "application/pdf",
+        hashByte: "a",
+      });
+      expect(await waitForHit("asset-uploaded-hook")).toBe(true);
+
+      const hit = received.find((r) => r.path === "/asset-uploaded-hook");
+      const parsed = JSON.parse(hit!.body);
+      expect(parsed.event).toBe("asset.uploaded");
+      expect(parsed.assetId).toBe(confirmed.assetId);
+      expect(parsed.fileName).toBe("board-plan.pdf");
+      expect(parsed.mimeType).toBe("application/pdf");
+      expect(parsed.textStatus).toBe("missing");
+
+      const deliveries = await client.webhooks.deliveries({ ruleId: rule.id, limit: 10 });
+      expect(deliveries[0]?.status).toBe("success");
+    });
+
+    it("does NOT fire for a text-kind upload (auto-registers as present, no extraction needed)", async () => {
+      received = [];
+      // Reuses the "asset-uploaded-hook" rule created in the previous test —
+      // still enabled, still watching `asset.uploaded` space-wide.
+      await uploadAsset({
+        fileName: "notes.md",
+        mimeType: "text/markdown",
+        hashByte: "b",
+      });
+      // Give any (wrongly) in-flight dispatch a real chance to land, then assert
+      // nothing arrived — this is the negative-space equivalent of waitForHit.
+      await sleep(500);
+      expect(received.some((r) => r.path === "/asset-uploaded-hook")).toBe(false);
+
+      // A second text-kind mime, to cover the ".csv"-style case called out in
+      // the spec, not just markdown.
+      await uploadAsset({
+        fileName: "data.csv",
+        mimeType: "text/csv",
+        hashByte: "c",
+      });
+      await sleep(500);
+      expect(received.some((r) => r.path === "/asset-uploaded-hook")).toBe(false);
     });
   });
 
@@ -509,14 +626,14 @@ describe("Webhook automation domain — oRPC", () => {
 
   // ── Sandbox ────────────────────────────────────────────────────────────────
 
-  describe("run_snippet sandbox", () => {
-    it("cannot reach fetch/require/process", async () => {
+  describe("run_function sandbox", () => {
+    it("exposes fetch but not require/process", async () => {
       received = [];
       await client.webhooks.create({
         name: "test sandbox escape",
         eventType: "record.created",
         baseId: null,
-        actionKind: "run_snippet",
+        actionKind: "run_function",
         config: {
           code: `console.log("types:", typeof fetch, typeof require, typeof process); return null;`,
           timeoutMs: 1000,
@@ -534,16 +651,16 @@ describe("Webhook automation domain — oRPC", () => {
       }, 2000);
       const deliveries = await client.webhooks.deliveries({ ruleId: escapeRule!.id, limit: 5 });
       expect(deliveries[0]?.status).toBe("success");
-      expect(deliveries[0]?.detail).toContain("types: undefined undefined undefined");
+      expect(deliveries[0]?.detail).toContain("types: function undefined undefined");
     });
 
     it("enforces the configured timeout on an infinite loop instead of hanging", async () => {
       received = [];
       await client.webhooks.create({
-        name: "test snippet timeout",
+        name: "test function timeout",
         eventType: "record.created",
         baseId: null,
-        actionKind: "run_snippet",
+        actionKind: "run_function",
         config: { code: "while (true) {}", timeoutMs: 200 },
         enabled: true,
       });
@@ -551,7 +668,7 @@ describe("Webhook automation domain — oRPC", () => {
       await createAndMergeRecord(blogBaseId, "Timeout test");
 
       const rules = await client.webhooks.list();
-      const timeoutRule = rules.find((r) => r.name === "test snippet timeout");
+      const timeoutRule = rules.find((r) => r.name === "test function timeout");
       const settled = await waitFor(async () => {
         const deliveries = await client.webhooks.deliveries({ ruleId: timeoutRule!.id, limit: 5 });
         return deliveries.length > 0;
@@ -560,6 +677,114 @@ describe("Webhook automation domain — oRPC", () => {
 
       const deliveries = await client.webhooks.deliveries({ ruleId: timeoutRule!.id, limit: 5 });
       expect(deliveries[0]?.status).toBe("failed");
+    });
+
+    it("enforces the configured timeout when a fetch call hangs", async () => {
+      received = [];
+      const rule = await client.webhooks.create({
+        name: "test function fetch hang",
+        eventType: "record.created",
+        baseId: null,
+        actionKind: "run_function",
+        config: {
+          code: `await fetch(${JSON.stringify(`http://127.0.0.1:${hangingPort}/hang`)}); return "unreachable";`,
+          timeoutMs: 300,
+        },
+        enabled: true,
+      });
+
+      await createAndMergeRecord(blogBaseId, "Fetch hang test");
+
+      const settled = await waitFor(async () => {
+        const deliveries = await client.webhooks.deliveries({ ruleId: rule.id, limit: 5 });
+        return deliveries.length > 0;
+      }, 3000);
+      expect(settled, "expected a delivery to be recorded within the bounded wait").toBe(true);
+
+      const deliveries = await client.webhooks.deliveries({ ruleId: rule.id, limit: 5 });
+      expect(deliveries[0]?.status).toBe("failed");
+      expect(deliveries[0]?.detail?.toLowerCase()).toContain("timed out");
+    });
+
+    it("blocks a function's fetch to an SSRF target and lets the function catch the rejection", async () => {
+      received = [];
+      ssrfProbeReceived = [];
+      const rule = await client.webhooks.create({
+        name: "test function ssrf",
+        eventType: "record.created",
+        baseId: null,
+        actionKind: "run_function",
+        config: {
+          code: `
+            try {
+              await fetch(${JSON.stringify(`http://127.0.0.1:${ssrfProbePort}/ssrf-from-function`)});
+              return "should not reach here";
+            } catch (error) {
+              console.log("caught:", error.message);
+              throw error;
+            }
+          `,
+          timeoutMs: 1000,
+        },
+        enabled: true,
+      });
+
+      await createAndMergeRecord(blogBaseId, "Function SSRF test");
+
+      const settled = await waitFor(async () => {
+        const deliveries = await client.webhooks.deliveries({ ruleId: rule.id, limit: 5 });
+        return deliveries.length > 0;
+      }, 2000);
+      expect(settled, "expected a delivery to be recorded within the bounded wait").toBe(true);
+
+      const deliveries = await client.webhooks.deliveries({ ruleId: rule.id, limit: 5 });
+      expect(deliveries[0]?.status).toBe("failed");
+      expect(deliveries[0]?.detail?.toLowerCase()).toContain("blocked");
+
+      // Same decisive assertion as the "SSRF protection" describe above: the
+      // real listener never actually received a request.
+      expect(ssrfProbeReceived.some((hit) => hit.path === "/ssrf-from-function")).toBe(false);
+    });
+
+    it("caps the number of fetch calls a single execution may make", async () => {
+      received = [];
+      const rule = await client.webhooks.create({
+        name: "test function fetch cap",
+        eventType: "record.created",
+        baseId: null,
+        actionKind: "run_function",
+        config: {
+          code: `
+            const errors = [];
+            for (let i = 0; i < 11; i++) {
+              try {
+                await fetch(${JSON.stringify(hookUrl("cap-hook"))});
+              } catch (error) {
+                errors.push(error.message);
+              }
+            }
+            console.log("errors:", JSON.stringify(errors));
+            return { errorCount: errors.length };
+          `,
+          timeoutMs: 3000,
+        },
+        enabled: true,
+      });
+
+      await createAndMergeRecord(blogBaseId, "Function fetch cap test");
+
+      const settled = await waitFor(async () => {
+        const deliveries = await client.webhooks.deliveries({ ruleId: rule.id, limit: 5 });
+        return deliveries.length > 0;
+      }, 5000);
+      expect(settled, "expected a delivery to be recorded within the bounded wait").toBe(true);
+
+      const deliveries = await client.webhooks.deliveries({ ruleId: rule.id, limit: 5 });
+      // The function itself completed fine (it caught the 11th call's
+      // rejection instead of letting it propagate) — only the 11th of 11
+      // calls should have been rejected for exceeding the cap.
+      expect(deliveries[0]?.status).toBe("success");
+      expect(deliveries[0]?.detail).toContain("fetch call limit exceeded");
     });
   });
 
@@ -588,6 +813,31 @@ describe("Webhook automation domain — oRPC", () => {
       const parsed = JSON.parse(hit!.body);
       expect(parsed._test).toBe(true);
       expect(parsed.recordId).toBe("test-record");
+    });
+
+    it("fires an asset.uploaded rule on demand with a synthetic asset payload", async () => {
+      received = [];
+      const rule = await client.webhooks.create({
+        name: "test test-fire asset.uploaded",
+        eventType: "asset.uploaded",
+        baseId: null,
+        actionKind: "webhook",
+        config: { targetUrl: hookUrl("test-fire-asset-hook") },
+        // Deliberately disabled — testFire must still run.
+        enabled: false,
+      });
+
+      const delivery = await client.webhooks.testFire({ id: rule.id });
+      expect(delivery.ruleId).toBe(rule.id);
+      expect(delivery.status).toBe("success");
+
+      expect(await waitForHit("test-fire-asset-hook")).toBe(true);
+      const hit = received.find((r) => r.path === "/test-fire-asset-hook");
+      const parsed = JSON.parse(hit!.body);
+      expect(parsed._test).toBe(true);
+      expect(parsed.assetId).toBeTruthy();
+      expect(parsed.fileName).toBeTruthy();
+      expect(parsed.textStatus).toBe("missing");
     });
   });
 

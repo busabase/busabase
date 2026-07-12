@@ -1,9 +1,9 @@
 import type { RecordVO } from "busabase-contract/types";
 import { StyleSheet, Text, View } from "react-native";
 import { NativeRow } from "~/components/native-screen";
-import { getStatusLabel, StatusBadge } from "~/components/ui/StatusBadge";
+import { getStatusLabel } from "~/components/ui/StatusBadge";
 import { getPreview, getRecordTitle } from "~/lib/busabase-display";
-import { formatDate } from "~/lib/format";
+import { formatListTime } from "~/lib/format";
 import { typography } from "~/theme/tokens";
 import { useTokens } from "~/theme/use-tokens";
 
@@ -13,17 +13,25 @@ interface RecordCardProps {
   last?: boolean;
 }
 
+// Status carries color via the leading dot only; the word appears once, in
+// the metadata line below — no separate colored chip (see
+// ChangeRequestCard.tsx for the same fix and its web-parity rationale).
 export function RecordCard({ record, onPress, last }: RecordCardProps) {
   const tokens = useTokens();
   const statusColor = record.status === "active" ? tokens.success : tokens.destructive;
+  const title = getRecordTitle(record);
+  const preview = getPreview(record.headCommit.fields);
+  // Sparse (often single-field) records can make the preview echo the title
+  // verbatim — drop it rather than show the same text twice.
+  const subtitle =
+    preview.trim().toLowerCase() === title.trim().toLowerCase() ? undefined : preview;
 
   return (
     <NativeRow
-      title={getRecordTitle(record)}
-      subtitle={getPreview(record.headCommit.fields)}
-      meta={formatDate(record.updatedAt)}
+      title={title}
+      subtitle={subtitle}
+      meta={formatListTime(record.updatedAt)}
       leading={<View style={[styles.statusDot, { backgroundColor: statusColor }]} />}
-      trailing={<StatusBadge status={record.status} compact />}
       last={last}
       onPress={onPress}
     >

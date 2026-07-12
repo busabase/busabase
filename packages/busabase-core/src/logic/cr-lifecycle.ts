@@ -9,9 +9,14 @@ import type {
   RecordVO,
   ReviewVO,
 } from "busabase-contract/types";
-import { and, asc, desc, eq, inArray, isNull, lt, or, type SQL, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, lt, ne, or, type SQL, sql } from "drizzle-orm";
 import { z } from "zod";
-import { getContextSpaceId, resolveActorId, resolveUserRefs } from "../context";
+import {
+  getContextSpaceId,
+  resolveActorId,
+  resolveUserRefs,
+  withContextSourceMeta,
+} from "../context";
 import { getDb } from "../db";
 import type {
   BusabaseNodeType,
@@ -299,10 +304,16 @@ const mergeNodeMove = async (
     parentNodeRef?: string;
     position?: number;
   };
-  if (!fields.parentNodeId && !fields.parentNodeRef) {
+  // Neither given means "reorder in place" — keep the node's current parent
+  // rather than falling back to the space root (resolveParentNodeId's default
+  // for create, where an implicit root parent is the right behavior).
+  const parentNodeId =
+    !fields.parentNodeId && !fields.parentNodeRef
+      ? node.parentId
+      : resolveParentNodeId(ctx, fields, item.id);
+  if (!parentNodeId) {
     throw new Error(`Node move commit missing parentNodeId/parentNodeRef: ${item.id}`);
   }
-  const parentNodeId = resolveParentNodeId(ctx, fields, item.id);
   const [parentNode] = await ctx.db
     .select()
     .from(busabaseNodes)
@@ -311,14 +322,66 @@ const mergeNodeMove = async (
   if (!parentNode || parentNode.type !== "folder") {
     throw new Error(`Parent folder not found: ${parentNodeId}`);
   }
-  await ctx.db
-    .update(busabaseNodes)
-    .set({
-      parentId: parentNode.id,
-      position: fields.position ?? node.position,
-      updatedAt: ctx.timestamp,
+  // Reject moving a node into itself or one of its own descendants — walk the
+  // target parent's ancestor chain and check for the moved node's id. Without
+  // this a folder could be re-parented under its own child, orphaning the
+  // whole subtree in a cycle that no longer resolves to the space root.
+  if (parentNode.id === node.id) {
+    throw new ORPCError("CONFLICT", {
+      message: "Cannot move a node into itself.",
+    });
+  }
+  let ancestorId: string | null = parentNode.parentId;
+  while (ancestorId) {
+    if (ancestorId === node.id) {
+      throw new ORPCError("CONFLICT", {
+        message: "Cannot move a node into one of its own descendants.",
+      });
+    }
+    const [ancestor] = await ctx.db
+      .select({ parentId: busabaseNodes.parentId })
+      .from(busabaseNodes)
+      .where(eq(busabaseNodes.id, ancestorId))
+      .limit(1);
+    ancestorId = ancestor?.parentId ?? null;
+  }
+  // Renumber every sibling under the target parent so the moved node lands at
+  // exactly the requested position and everyone else shifts to make room.
+  // Just writing `position: fields.position` on the moved node alone would
+  // collide with whichever sibling already holds that value — display order
+  // (sortNodes in seed.ts) breaks that tie by createdAt, so the drop would
+  // silently fail to visibly reorder anything for the common case of
+  // dropping a node next to an existing sibling.
+  const siblings = await ctx.db
+    .select({
+      id: busabaseNodes.id,
+      position: busabaseNodes.position,
+      createdAt: busabaseNodes.createdAt,
     })
-    .where(eq(busabaseNodes.id, node.id));
+    .from(busabaseNodes)
+    .where(
+      and(
+        eq(busabaseNodes.parentId, parentNode.id),
+        ne(busabaseNodes.id, node.id),
+        isNull(busabaseNodes.archivedAt),
+      ),
+    );
+  siblings.sort((a, b) => a.position - b.position || a.createdAt.getTime() - b.createdAt.getTime());
+  const requestedPosition = fields.position ?? node.position;
+  const insertIndex = Math.max(0, Math.min(requestedPosition, siblings.length));
+  const orderedIds = siblings.map((sibling) => sibling.id);
+  orderedIds.splice(insertIndex, 0, node.id);
+  await Promise.all(
+    orderedIds.map((id, position) =>
+      ctx.db
+        .update(busabaseNodes)
+        .set({
+          position,
+          ...(id === node.id ? { parentId: parentNode.id, updatedAt: ctx.timestamp } : {}),
+        })
+        .where(eq(busabaseNodes.id, id)),
+    ),
+  );
 };
 
 const mergeNodeDelete = async (ctx: MergeCtx, _item: OperationPO, node: NodePO) => {
@@ -1337,7 +1400,7 @@ export const recordMergedOperation = async (args: {
     nodeId,
     status: "merged",
     submittedBy: args.submittedBy,
-    sourceMeta: { ...(args.sourceMeta ?? {}), autoMerged: true },
+    sourceMeta: withContextSourceMeta({ ...(args.sourceMeta ?? {}), autoMerged: true }),
     reviewPolicySnapshot: args.reviewPolicySnapshot ?? { kind: "single", requiredApprovals: 1 },
     mergeSummary,
     rejectedReason: null,
@@ -1460,7 +1523,7 @@ export const recordMergedNodeCreate = async (args: {
     },
     message: args.message,
     submittedBy: args.submittedBy,
-    sourceMeta: { subject: "node_tree" },
+    sourceMeta: withContextSourceMeta({ subject: "node_tree" }),
     mergeSummary: { mergedNodeIds: [args.nodeId] },
     auditMetadata: { nodeType: args.nodeType },
   });
@@ -1518,7 +1581,7 @@ export const recordPendingNodeCreate = async (args: {
     nodeId: null,
     status: "in_review",
     submittedBy,
-    sourceMeta: { subject: "node_tree" },
+    sourceMeta: withContextSourceMeta({ subject: "node_tree" }),
     reviewPolicySnapshot: { kind: "single", requiredApprovals: 1 },
     mergeSummary: {},
     rejectedReason: null,

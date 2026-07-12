@@ -190,8 +190,8 @@ describe("Webhook automation domain — OpenAPI (/api/v1) route round-trip", () 
       name: "bad discriminated union",
       eventType: "record.created",
       baseId: null,
-      actionKind: "run_snippet",
-      // run_snippet requires WebhookSnippetConfigSchema (`code`), not a targetUrl.
+      actionKind: "run_function",
+      // run_function requires WebhookFunctionConfigSchema (`code`), not a targetUrl.
       config: { targetUrl: hookUrl("never") },
       enabled: true,
     });
@@ -255,30 +255,30 @@ describe("Webhook automation domain — OpenAPI (/api/v1) route round-trip", () 
     expect(fired.status).toBe("success");
   });
 
-  it("round-trips a run_snippet rule (sandboxed config, no secret) over REST", async () => {
+  it("round-trips a run_function rule (sandboxed config, no secret) over REST", async () => {
     const created = await ok("POST", "/webhooks", {
-      name: "rest run_snippet rule",
+      name: "rest run_function rule",
       eventType: "changes_requested",
       baseId: null,
-      actionKind: "run_snippet",
-      config: { code: "call({ url: 'https://example.com/never', method: 'GET' })", timeoutMs: 500 },
+      actionKind: "run_function",
+      config: { code: "await fetch('https://example.com/never'); return null;", timeoutMs: 500 },
       enabled: true,
     });
-    expect(created.actionKind).toBe("run_snippet");
-    if (created.actionKind === "run_snippet") {
-      expect(created.config.code).toContain("call(");
+    expect(created.actionKind).toBe("run_function");
+    if (created.actionKind === "run_function") {
+      expect(created.config.code).toContain("fetch(");
       expect(created.config.timeoutMs).toBe(500);
     }
 
     const updated = await ok("PUT", `/webhooks/${created.id}`, {
-      name: "rest run_snippet rule",
+      name: "rest run_function rule",
       eventType: "changes_requested",
       baseId: null,
-      actionKind: "run_snippet",
-      config: { code: "call({ url: 'https://example.com/still-never', method: 'GET' })" },
+      actionKind: "run_function",
+      config: { code: "await fetch('https://example.com/still-never'); return null;" },
       enabled: true,
     });
-    if (updated.actionKind === "run_snippet") {
+    if (updated.actionKind === "run_function") {
       expect(updated.config.code).toContain("still-never");
       // Omitted timeoutMs on update falls back to the schema default, not the previous value.
       expect(updated.config.timeoutMs).toBe(2000);

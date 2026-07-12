@@ -4,7 +4,7 @@ import { ORPCError } from "@orpc/server";
 import { and, eq, inArray, isNull } from "drizzle-orm";
 import { iStringToText } from "openlib/i18n/i-string";
 import type { z } from "zod";
-import { getContextSpaceId, resolveActorId } from "../../../context";
+import { getContextSpaceId, resolveActorId, withContextSourceMeta } from "../../../context";
 import { getDb } from "../../../db";
 import {
   busabaseBaseFields,
@@ -254,7 +254,7 @@ export const createChangeRequest = async (
     baseId: base.id,
     status: "in_review",
     submittedBy: resolveActorId(parsed.submittedBy),
-    sourceMeta: {},
+    sourceMeta: withContextSourceMeta({}),
     reviewPolicySnapshot: base.reviewPolicy,
     mergeSummary: {},
     rejectedReason: null,
@@ -353,7 +353,7 @@ export const createBulkChangeRequest = async (
     baseId: base.id,
     status: "in_review",
     submittedBy: resolveActorId(parsed.submittedBy),
-    sourceMeta: { bulk: true, recordCount: parsed.records.length },
+    sourceMeta: withContextSourceMeta({ bulk: true, recordCount: parsed.records.length }),
     reviewPolicySnapshot: base.reviewPolicy,
     mergeSummary: {},
     rejectedReason: null,
@@ -476,7 +476,7 @@ export const createDeleteChangeRequest = async (
     baseId: record.baseId,
     status: "in_review",
     submittedBy: resolveActorId(parsed.submittedBy),
-    sourceMeta: {},
+    sourceMeta: withContextSourceMeta({}),
     reviewPolicySnapshot: {},
     mergeSummary: {},
     rejectedReason: null,
@@ -586,7 +586,7 @@ export const createUpdateChangeRequest = async (
     baseId: record.baseId,
     status: "in_review",
     submittedBy: resolveActorId(parsed.author),
-    sourceMeta: {},
+    sourceMeta: withContextSourceMeta({}),
     reviewPolicySnapshot: base.reviewPolicy,
     mergeSummary: {},
     rejectedReason: null,
@@ -703,7 +703,7 @@ export const createRestoreChangeRequest = async (
     baseId: record.baseId,
     status: "in_review",
     submittedBy: resolveActorId(submittedBy),
-    sourceMeta: {},
+    sourceMeta: withContextSourceMeta({}),
     reviewPolicySnapshot: base.reviewPolicy,
     mergeSummary: {},
     rejectedReason: null,
@@ -793,7 +793,7 @@ export const createArchiveBaseChangeRequest = async (
     baseId: base.id,
     status: "in_review",
     submittedBy: resolveActorId(submittedBy),
-    sourceMeta: { subject: "base_archive" },
+    sourceMeta: withContextSourceMeta({ subject: "base_archive" }),
     reviewPolicySnapshot: base.reviewPolicy,
     mergeSummary: {},
     rejectedReason: null,
@@ -911,7 +911,7 @@ export const createRestoreBaseChangeRequest = async (
     baseId: baseRow.id,
     status: "in_review",
     submittedBy: resolveActorId(submittedBy),
-    sourceMeta: { subject: "base_restore" },
+    sourceMeta: withContextSourceMeta({ subject: "base_restore" }),
     reviewPolicySnapshot: baseRow.reviewPolicy,
     mergeSummary: {},
     rejectedReason: null,

@@ -1,9 +1,14 @@
 import { z } from "zod";
 
-export const WebhookEventTypeSchema = z.enum(["record.created", "ai_mention", "changes_requested"]);
+export const WebhookEventTypeSchema = z.enum([
+  "record.created",
+  "ai_mention",
+  "changes_requested",
+  "asset.uploaded",
+]);
 export type WebhookEventType = z.infer<typeof WebhookEventTypeSchema>;
 
-export const WebhookActionKindSchema = z.enum(["webhook", "notify_agent", "run_snippet"]);
+export const WebhookActionKindSchema = z.enum(["webhook", "notify_agent", "run_function"]);
 export type WebhookActionKind = z.infer<typeof WebhookActionKindSchema>;
 
 export const WebhookDeliveryStatusSchema = z.enum(["success", "failed", "skipped"]);
@@ -22,11 +27,11 @@ export const WebhookHttpConfigSchema = z.object({
 });
 export type WebhookHttpConfig = z.infer<typeof WebhookHttpConfigSchema>;
 
-export const WebhookSnippetConfigSchema = z.object({
+export const WebhookFunctionConfigSchema = z.object({
   code: z.string().min(1).max(20000),
   timeoutMs: z.number().int().min(100).max(5000).default(2000),
 });
-export type WebhookSnippetConfig = z.infer<typeof WebhookSnippetConfigSchema>;
+export type WebhookFunctionConfig = z.infer<typeof WebhookFunctionConfigSchema>;
 
 // ── Per-action config (output/VO side) — secret is NEVER echoed back ───────
 
@@ -37,14 +42,14 @@ export const WebhookHttpConfigVOSchema = z.object({
 });
 export type WebhookHttpConfigVO = z.infer<typeof WebhookHttpConfigVOSchema>;
 
-// Snippet config has no secret to redact — safe to expose as-is.
-export const WebhookSnippetConfigVOSchema = WebhookSnippetConfigSchema;
-export type WebhookSnippetConfigVO = z.infer<typeof WebhookSnippetConfigVOSchema>;
+// Function config has no secret to redact — safe to expose as-is.
+export const WebhookFunctionConfigVOSchema = WebhookFunctionConfigSchema;
+export type WebhookFunctionConfigVO = z.infer<typeof WebhookFunctionConfigVOSchema>;
 
 // ── Rule input (create / update) ────────────────────────────────────────────
 //
 // Discriminated on `actionKind` so the config shape is actually enforced per
-// action at parse time (a `run_snippet` rule can't be created with a
+// action at parse time (a `run_function` rule can't be created with a
 // `targetUrl`, a `webhook` rule can't be created with `code`, etc).
 
 const webhookRuleCommonInputFields = {
@@ -67,8 +72,8 @@ export const WebhookRuleInputSchema = z.discriminatedUnion("actionKind", [
   }),
   z.object({
     ...webhookRuleCommonInputFields,
-    actionKind: z.literal("run_snippet"),
-    config: WebhookSnippetConfigSchema,
+    actionKind: z.literal("run_function"),
+    config: WebhookFunctionConfigSchema,
   }),
 ]);
 export type WebhookRuleInput = z.infer<typeof WebhookRuleInputSchema>;
@@ -89,8 +94,8 @@ export const WebhookRuleUpdateInputSchema = z.discriminatedUnion("actionKind", [
   z.object({
     id: z.string(),
     ...webhookRuleCommonInputFields,
-    actionKind: z.literal("run_snippet"),
-    config: WebhookSnippetConfigSchema,
+    actionKind: z.literal("run_function"),
+    config: WebhookFunctionConfigSchema,
   }),
 ]);
 export type WebhookRuleUpdateInput = z.infer<typeof WebhookRuleUpdateInputSchema>;
@@ -124,8 +129,8 @@ export const WebhookRuleVOSchema = z.discriminatedUnion("actionKind", [
   }),
   z.object({
     ...webhookRuleVOCommonFields,
-    actionKind: z.literal("run_snippet"),
-    config: WebhookSnippetConfigVOSchema,
+    actionKind: z.literal("run_function"),
+    config: WebhookFunctionConfigVOSchema,
   }),
 ]);
 export type WebhookRuleVO = z.infer<typeof WebhookRuleVOSchema>;

@@ -10,7 +10,7 @@ import { and, asc, eq, isNull } from "drizzle-orm";
 import { confirmUpload, requestUploadUrl } from "open-domains/attachments/logic";
 import { storage } from "openlib/storage";
 import type { z } from "zod";
-import { getContextSpaceId, resolveActorId } from "../../context";
+import { getContextSpaceId, resolveActorId, withContextSourceMeta } from "../../context";
 import { getDb } from "../../db";
 import {
   attachments,
@@ -639,7 +639,7 @@ export const createFileTreeChangeRequest = async (
     nodeId: node.id,
     status: "in_review",
     submittedBy: parsed.submittedBy,
-    sourceMeta: { subject: config.type, nodeId: node.id },
+    sourceMeta: withContextSourceMeta({ subject: config.type, nodeId: node.id }),
     reviewPolicySnapshot: { kind: "single", requiredApprovals: 1 },
     mergeSummary: {},
     rejectedReason: null,

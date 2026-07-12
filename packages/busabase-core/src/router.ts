@@ -5,12 +5,14 @@ import { assetsRouter } from "./domains/assets/router";
 import { baseRouter, recordRouter, viewRouter } from "./domains/base/router";
 import { docRouter } from "./domains/doc/router";
 import { driveRouter } from "./domains/drive/router";
+import { dumpRouter } from "./domains/dump/router";
 import { fileRouter } from "./domains/file-node/router";
 import { folderRouter } from "./domains/folder/router";
 import { skillRouter } from "./domains/skill/router";
 import { vaultRouter } from "./domains/vault/router";
 import { webhookRouter } from "./domains/webhook/router";
 import { listActivityPaged } from "./logic/activity";
+import { grepUnified } from "./logic/grep";
 import { subscribeBusabaseLiveEvents } from "./logic/live-events";
 import {
   closeChangeRequest,
@@ -29,6 +31,7 @@ import {
   listNodes,
   mergeChangeRequest,
   mergeChangeRequests,
+  moveNode,
   purgeNode,
   reviewChangeRequest,
   reviewChangeRequests,
@@ -45,12 +48,14 @@ export const busabaseRouter = busabase.router({
     verify: busabase.auth.verify.handler(async () => getAuthInfo()),
   },
   search: busabase.search.handler(async ({ input }) => searchBusabase(input)),
+  grep: busabase.grep.handler(async ({ input }) => grepUnified(input)),
   nodes: {
     list: busabase.nodes.list.handler(async () => listNodes()),
     listArchived: busabase.nodes.listArchived.handler(async () => listArchivedNodes()),
     createChangeRequest: busabase.nodes.createChangeRequest.handler(async ({ input }) =>
       createNodeChangeRequest(input),
     ),
+    move: busabase.nodes.move.handler(async ({ input }) => moveNode(input)),
     purge: busabase.nodes.purge.handler(async ({ input }) => purgeNode(input.nodeId)),
   },
   auditEvents: {
@@ -81,6 +86,7 @@ export const busabaseRouter = busabase.router({
   assets: assetsRouter,
   vault: vaultRouter,
   webhooks: webhookRouter,
+  dump: dumpRouter,
   changeRequests: {
     list: busabase.changeRequests.list.handler(async ({ input }) => listChangeRequests(input)),
     listPaged: busabase.changeRequests.listPaged.handler(async ({ input }) =>

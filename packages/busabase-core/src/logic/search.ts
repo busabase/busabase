@@ -8,7 +8,6 @@ import type {
 } from "busabase-contract/types";
 import { and, desc, eq, ilike, inArray, isNotNull, isNull, or, sql } from "drizzle-orm";
 import { iStringConcat, iStringParse, iStringSchema } from "openlib/i18n/i-string";
-import { storage } from "openlib/storage";
 import { z } from "zod";
 import { getContextSpaceId } from "../context";
 import { getDb } from "../db";
@@ -23,6 +22,11 @@ import {
   busabaseNodes,
   busabaseRecords,
 } from "../db/schema";
+import {
+  autoRegisterAssetText,
+  loadAssetTextRows,
+} from "../domains/assets/logic/asset-texts-logic";
+import { openAssetTextSource } from "../domains/assets/logic/text-cache";
 import { hydrateChangeRequest, hydrateRecord } from "./cr-lifecycle";
 import { ensureReady } from "./seed";
 import { toBaseVO } from "./vo";
@@ -108,7 +112,20 @@ const fileMatchesQuery = (query: string, ...values: (string | null | undefined)[
   return values.some((value) => value?.toLowerCase().includes(lowerQuery));
 };
 
-const MAX_FILE_SEARCH_TEXT_BYTES = 256 * 1024;
+/**
+ * Wall-clock budget for the WHOLE body-scan phase of one `search()` call (not
+ * per file) — mirrors `grepTimeoutMs()` in `asset-grep-logic.ts`: read once
+ * per call, parsed as a number, sensible default on missing/invalid.
+ * Overridable via `BUSABASE_SEARCH_FILE_SCAN_TIMEOUT_MS` so tests can exercise
+ * the timeout path deterministically. Without this, a query that matches no
+ * metadata across many large `present`-status text files could scan
+ * gigabytes with no time bound now that the old 256KB-per-file cap is gone.
+ */
+const searchFileScanTimeoutMs = (): number => {
+  const raw = process.env.BUSABASE_SEARCH_FILE_SCAN_TIMEOUT_MS;
+  const parsed = raw ? Number(raw) : Number.NaN;
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : 5_000;
+};
 
 // Upper bound on how many asset-usage rows a single search scans before
 // falling back to metadata/body matching in JS. Without this, the query below
@@ -127,8 +144,6 @@ const searchAssetBackedFiles = async (query: string, limit: number): Promise<Sea
       assetName: busabaseAssets.name,
       contentKind: busabaseAssets.contentKind,
       metadata: busabaseAssets.metadata,
-      storageKey: attachments.storageKey,
-      sizeBytes: attachments.sizeBytes,
       fileName: attachments.fileName,
       mimeType: attachments.mimeType,
       contentHash: attachments.contentHash,
@@ -158,6 +173,34 @@ const searchAssetBackedFiles = async (query: string, limit: number): Promise<Sea
     )
     .orderBy(desc(busabaseAssetUsages.updatedAt))
     .limit(MAX_ASSET_USAGE_SCAN_ROWS);
+
+  // Same "one source of truth for what text an asset has" infrastructure the
+  // grep engine uses (`asset-grep-logic.ts`'s `grepAssets`), instead of a
+  // separate raw-bytes read. Batch-load existing text rows, then lazily
+  // self-heal any text-kind asset that predates this feature and has no row
+  // yet — mirrors grep's exact self-heal pattern so legacy assets stay
+  // content-searchable without a backfill job.
+  const assetIds = [...new Set(rows.map((row) => row.assetId))];
+  let textRows = await loadAssetTextRows(db, assetIds);
+  const toSelfHeal = [
+    ...new Set(
+      rows
+        .filter((row) => row.contentKind === "text" && !textRows.has(row.assetId))
+        .map((row) => row.assetId),
+    ),
+  ];
+  if (toSelfHeal.length > 0) {
+    await Promise.all(
+      toSelfHeal.map((assetId) =>
+        autoRegisterAssetText(assetId, db, { knownContentKind: "text", knownMissing: true }),
+      ),
+    );
+    textRows = await loadAssetTextRows(db, assetIds);
+  }
+
+  // Wall-clock budget for the WHOLE body-scan phase below (not per file) —
+  // computed once, before the loop starts.
+  const deadline = Date.now() + searchFileScanTimeoutMs();
   const results: SearchResultVO[] = [];
 
   for (const row of rows) {
@@ -185,21 +228,43 @@ const searchAssetBackedFiles = async (query: string, limit: number): Promise<Sea
 
     let body = metaBody;
     if (!fileMatchesQuery(query, metaBody)) {
-      // Only now — when metadata didn't already match — pay for the file body,
-      // and only for text files within the size budget. A network/disk
-      // getObject per row was the scalability hazard; a name-heavy query now
-      // fills `limit` and returns without reading a single file.
-      if (row.contentKind !== "text" || row.sizeBytes > MAX_FILE_SEARCH_TEXT_BYTES) {
+      // Only now — when metadata didn't already match — pay for the file
+      // body, and only for an asset with a `present` text row (a `missing` /
+      // `none` / `stale` row, or no row at all, means: not eligible — fall
+      // through exactly like today's "not eligible" path, no error).
+      const textRow = textRows.get(row.assetId);
+      if (!textRow || textRow.status !== "present") {
         continue;
       }
-      const textContent = await storage
-        .getObject(row.storageKey)
-        .then((bytes) => bytes.toString("utf8"))
-        .catch(() => "");
-      if (!fileMatchesQuery(query, textContent)) {
+      // Budget check BEFORE starting this candidate's body scan — once the
+      // deadline trips, every REMAINING candidate skips straight to this same
+      // "not eligible for body scan" fallthrough (they still get the
+      // metadata-only matching above, unaffected).
+      if (Date.now() >= deadline) {
         continue;
       }
-      body = `${metaBody} ${textContent}`;
+      let matchedLine: string | undefined;
+      try {
+        const source = await openAssetTextSource(textRow);
+        for await (const line of source.iterateLines()) {
+          if (fileMatchesQuery(query, line)) {
+            matchedLine = line;
+            break;
+          }
+        }
+      } catch {
+        // Best-effort, mirrors the old `.catch(() => "")` swallow: a read
+        // failure (deleted mid-flight, corrupt cache, etc.) is treated as no
+        // match on this file rather than failing the whole search.
+      }
+      if (matchedLine === undefined) {
+        continue;
+      }
+      // The matched LINE, not the whole file — we no longer hold the whole
+      // body in memory, so the snippet now reflects the real match location
+      // instead of arbitrary head bytes (see the task's disclosed behavior
+      // change).
+      body = `${metaBody} ${matchedLine}`;
     }
     results.push({
       id: `${row.assetId}:${row.nodeId}:${row.usagePath}:${row.recordId}:${row.fieldSlug}:${row.blockId}`,
