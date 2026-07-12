@@ -185,6 +185,7 @@ function BusabaseDashboardContent({
       changeRequests: orpc.changeRequests.list.queryOptions({ input: {} }).queryKey as QueryKey,
       changeRequestsPaged: orpc.changeRequests.listPaged.key() as QueryKey,
       changeRequestCounts: orpc.changeRequests.counts.key() as QueryKey,
+      changeRequestDetail: orpc.changeRequests.get.key() as QueryKey,
       records: orpc.records.listPaged.key() as QueryKey,
       recordsCount: orpc.records.count.key() as QueryKey,
       bases: orpc.bases.list.queryOptions({}).queryKey as QueryKey,
@@ -512,20 +513,23 @@ function BusabaseDashboardContent({
       setRelationRecordIds((previous) => [...previous, ...fresh]);
     }
   }, [missingRelationRecordIds, relationRecordIds]);
-  // A change request opened by direct link may not be in the list query (e.g. a
-  // merged/closed CR); fetch it on demand via React Query and fall back to it.
+  // The list query caps each CR's `operations` (see LIST_MAX_OPERATIONS_PER_CHANGE_REQUEST)
+  // and strips `reviews[].visibleOperationHeads` for payload size — fine for inbox
+  // rows, but the single-CR detail view needs the uncapped, un-stripped shape
+  // (full diffs past 5 operations; `changedSinceReview` staleness detection).
+  // It also covers a change request opened by direct link that isn't in the
+  // list query at all (e.g. a merged/closed CR).
+  const isChangeRequestDetailRoute = isChangeRequestRoute || isOperationRoute;
   const fallbackChangeRequestQuery = useQuery({
     ...orpc.changeRequests.get.queryOptions({
       input: { changeRequestId: selectedChangeRequestId ?? "" },
     }),
-    enabled:
-      Boolean(selectedChangeRequestId) &&
-      !allChangeRequests.some((changeRequest) => changeRequest.id === selectedChangeRequestId),
+    enabled: Boolean(selectedChangeRequestId) && isChangeRequestDetailRoute,
   });
   const selectedChangeRequest = useMemo(
     () =>
-      allChangeRequests.find((changeRequest) => changeRequest.id === selectedChangeRequestId) ??
       fallbackChangeRequestQuery.data ??
+      allChangeRequests.find((changeRequest) => changeRequest.id === selectedChangeRequestId) ??
       null,
     [allChangeRequests, selectedChangeRequestId, fallbackChangeRequestQuery.data],
   );
@@ -766,6 +770,7 @@ function BusabaseDashboardContent({
       queryClient.invalidateQueries({ queryKey: listKeys.changeRequests }),
       queryClient.invalidateQueries({ queryKey: listKeys.changeRequestsPaged }),
       queryClient.invalidateQueries({ queryKey: listKeys.changeRequestCounts }),
+      queryClient.invalidateQueries({ queryKey: listKeys.changeRequestDetail }),
       queryClient.invalidateQueries({ queryKey: listKeys.records }),
       queryClient.invalidateQueries({ queryKey: listKeys.recordsCount }),
       queryClient.invalidateQueries({ queryKey: listKeys.bases }),

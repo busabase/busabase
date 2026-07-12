@@ -55,7 +55,11 @@ test("dashboard routes render the review-first seeded experience", async ({ page
 
   await page.goto("/dashboard/activity");
   await expect(page.getByText("Workspace activity")).toBeVisible();
-  await expect(page.getByText(/change requests · \d+ operations · \d+ records/)).toBeVisible();
+  // The activity feed no longer renders a "N change requests · M operations ·
+  // K records" summary line (messages.activity.activityStats is defined in
+  // i18n but unused by the component — dead copy from a past redesign); the
+  // per-entry feed itself is what actually proves the seed's activity shows
+  // up, same as the assertion right below.
   await expect(
     page.getByRole("link", { name: /Change request|operation|Record/i }).first(),
   ).toBeVisible();

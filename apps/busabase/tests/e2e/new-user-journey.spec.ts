@@ -83,6 +83,13 @@ test("a new user tours the approval-first knowledge base", async ({ page }) => {
   await test.step("checks the workspace activity feed", async () => {
     await page.goto("/dashboard/activity");
     await expect(page.getByText("Workspace activity")).toBeVisible();
-    await expect(page.getByText(/change requests · \d+ operations · \d+ records/)).toBeVisible();
+    // No "N change requests · M operations · K records" summary line is
+    // rendered anymore (messages.activity.activityStats is defined in i18n
+    // but unused by the component — dead copy from a past redesign); assert
+    // the per-entry feed itself instead, which is what actually proves the
+    // seed's activity shows up.
+    await expect(
+      page.getByRole("link", { name: /Change request|operation|Record/i }).first(),
+    ).toBeVisible();
   });
 });

@@ -170,7 +170,11 @@ test("same-field merge conflict stays visible and recoverable", async ({ page, r
   await expect(page.getByText("Approved · ready to merge")).toBeVisible();
   await page.getByRole("button", { name: "Merge into Base" }).click();
   await expect(page.getByText("Merge needs review")).toBeVisible();
-  await expect(page.getByText(/Conflicting field.*title/)).toBeVisible();
+  // The conflict is surfaced twice by design: the raw backend message (in the
+  // ReviewConflictPanel banner) embeds "Conflicting field(s): title", and the
+  // ConflictDiffPanel below it restates the same fields as a styled pill list —
+  // match either, .first() avoids a strict-mode multi-match failure.
+  await expect(page.getByText(/Conflicting field.*title/).first()).toBeVisible();
   await expect(page.getByText("The change request is still safe here")).toBeVisible();
   await expect(page.getByRole("heading", { name: `${title} B` })).toBeVisible();
 });
