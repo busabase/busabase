@@ -90,6 +90,13 @@ export interface NodeVO {
   updatedAt: string;
   baseId: string | null;
   children: NodeVO[];
+  /**
+   * Whether this node has children beyond what `children` carries — see the
+   * matching field on the contract's `NodeOutput` (contract/schemas.ts) for
+   * the full depth-boundary explanation. Optional/omitted is safe to treat
+   * as `children.length > 0`.
+   */
+  hasChildren?: boolean;
 }
 
 // Keep the plain open-domains `AttachmentRef` available for lower-level file

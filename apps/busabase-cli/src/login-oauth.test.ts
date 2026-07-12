@@ -99,6 +99,35 @@ describe("runLogin --oauth (PKCE loopback)", () => {
     expect(env.BUSABASE_SPACE_ID).toBe("spc_1");
   });
 
+  it("persists the apiKey when the server issues a cli-consent API key instead of a session", async () => {
+    global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      if (request.url.endsWith("/api/oauth/token")) {
+        return jsonResponse({ apiKey: "sk_abc123", prefix: "sk_", expiresAt: null });
+      }
+      if (request.url.endsWith("/api/v1/auth")) {
+        return jsonResponse({
+          user: { id: "usr_1", email: "dev@example.com" },
+          space: { id: "spc_1", name: "Space One" },
+          spaces: [{ id: "spc_1", name: "Space One" }],
+        });
+      }
+      return originalFetch(input as RequestInfo, init);
+    }) as typeof fetch;
+
+    const loginPromise = runLogin({ baseUrl: CLOUD, oauth: true, browser: false });
+    const authorizeUrl = new URL(await waitFor(findAuthorizeUrl));
+    const state = authorizeUrl.searchParams.get("state");
+    const redirectUri = authorizeUrl.searchParams.get("redirect_uri") as string;
+    await originalFetch(`${redirectUri}?code=auth_code_123&state=${state}`);
+
+    const summary = await loginPromise;
+    expect(summary).toMatchObject({ status: "signed in", method: "oauth" });
+    const env = loadDotEnvFile();
+    expect(env.BUSABASE_API_KEY).toBe("sk_abc123");
+    expect(env.BUSABASE_TOKEN_EXPIRES_AT).toBeUndefined();
+  });
+
   it("rejects a callback whose state does not match the request", async () => {
     global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) =>
       originalFetch(input as RequestInfo, init),

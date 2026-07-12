@@ -59,6 +59,32 @@ interface BusabaseDashboardShellProps {
    * `{ nodeId, parentNodeId?, position? }` the `nodes.move` endpoint expects.
    */
   onMoveNode?: (payload: MoveNodePayload) => void;
+  /**
+   * Ids of nodes whose children are currently being lazy-fetched (see
+   * `onExpandNode` below) — drives the folder's loading row. Omit/empty when
+   * the host doesn't lazy-load (e.g. it fetched the whole tree up front).
+   */
+  loadingNodeIds?: Set<string>;
+  /**
+   * Fired when a depth-boundary folder (`node.hasChildren` but no loaded
+   * `node.children`) is expanded for the first time. The host owns fetching
+   * + caching that folder's children (e.g. via `nodes.list({ parentId,
+   * depth })`) and merging the result back into the `nodes` tree passed in —
+   * this shell only relays the signal. Omit for a host that always loads the
+   * whole tree up front (nothing ever has `hasChildren` with empty
+   * `children` in that case, so the affordance never appears).
+   */
+  onExpandNode?: (nodeId: string) => void;
+  /**
+   * Server-authoritative "is `nodeId` a descendant of `potentialAncestorId`"
+   * check (walks the parentId chain via `nodes.isDescendant`), consulted
+   * before COMMITTING a cross-branch drag-and-drop drop — the full tree may
+   * not be loaded client-side (lazy-loaded folders), so the local
+   * `isValidParentId` walk below is only a fast pre-check/live-drag-visual
+   * cue, not the actual gate. Omit when the host always loads the whole tree
+   * up front, in which case the local walk alone is already authoritative.
+   */
+  checkIsDescendant?: (params: { nodeId: string; potentialAncestorId: string }) => Promise<boolean>;
 }
 
 /**
@@ -78,6 +104,9 @@ export function BusabaseDashboardShell({
   hiddenNavItems = [],
   pinnedNavItems = [],
   onMoveNode,
+  loadingNodeIds,
+  onExpandNode,
+  checkIsDescendant,
 }: BusabaseDashboardShellProps) {
   // Flat id → NodeVO index over the REAL tree (not the display-flattened
   // NavItem tree) so drag-and-drop can check a drop target's actual type and
@@ -130,9 +159,39 @@ export function BusabaseDashboardShell({
     return isValidParentId(draggedId, target.parentId ?? null);
   };
 
-  const handleNodeDrop = ({ draggedId, targetId, position }: NavNodeDropParams) => {
+  // Resolves the candidate new parent id for a drop at `position` on `target`
+  // — `targetId` itself for "inside", `target`'s own parent for
+  // "before"/"after" (a reorder reparents into the target's sibling level).
+  // Shared by the local pre-check and the server gate below so both ask the
+  // exact same question.
+  const candidateParentIdFor = (targetId: string, position: NavDropPosition): string | null => {
+    if (position === "inside") return targetId;
+    return nodeIndex.get(targetId)?.parentId ?? null;
+  };
+
+  const handleNodeDrop = async ({ draggedId, targetId, position }: NavNodeDropParams) => {
     if (!onMoveNode) return;
+    // Fast local pre-check (same as the live drag-over cue) — catches every
+    // cycle detectable from whatever's currently loaded, and every non-cycle
+    // rejection (e.g. dropping "inside" a non-container). Always run first
+    // since it's free and covers the common case.
     if (!isDropAllowed(draggedId, targetId, position)) return;
+    // Server-authoritative gate for the one thing the local check can't fully
+    // rule out: `targetId`'s subtree may extend beyond what's loaded
+    // client-side (lazy-loaded folders), so a candidate parent that's
+    // actually a descendant of `draggedId` through an unloaded branch would
+    // otherwise slip past `isValidParentId`'s local walk. Skipped when the
+    // host doesn't supply `checkIsDescendant` (it always loads the whole
+    // tree up front, so the local walk is already authoritative there).
+    const candidateParentId = candidateParentIdFor(targetId, position);
+    if (checkIsDescendant && candidateParentId !== null) {
+      if (candidateParentId === draggedId) return;
+      const candidateIsDescendantOfDragged = await checkIsDescendant({
+        nodeId: candidateParentId,
+        potentialAncestorId: draggedId,
+      });
+      if (candidateIsDescendantOfDragged) return;
+    }
     if (position === "inside") {
       const target = nodeIndex.get(targetId);
       onMoveNode({
@@ -210,6 +269,7 @@ export function BusabaseDashboardShell({
         nodes,
         (node) => onCreateClick({ id: node.id, name: node.name }),
         { newLabel: nav.new, openLabel: messages.common.open },
+        loadingNodeIds,
       ),
       headerAction: Plus,
       headerActionTitle: nav.new,
@@ -244,6 +304,7 @@ export function BusabaseDashboardShell({
               onNavItemAction={handleNavItemAction}
               onNodeDrop={onMoveNode ? handleNodeDrop : undefined}
               isDropAllowed={onMoveNode ? isDropAllowed : undefined}
+              onExpand={onExpandNode ? (item) => item.id && onExpandNode(item.id) : undefined}
             />
           </div>
         }
@@ -278,11 +339,20 @@ function nodeHref(node: NodeVO): string | null {
  * same chevron/add-child/actions treatment as a top-level one — the sidebar
  * (NavMain) renders `NavItem.items` recursively, so nothing here needs to
  * flatten nested folders away anymore.
+ *
+ * `node.hasChildren`/`node.children` carry through to `NavItem.hasChildren`
+ * regardless of depth: a node sitting at a `nodes.list` depth boundary has
+ * `children: []` but `hasChildren: true`, so it still renders as an
+ * expandable folder (NavMain) with an `onExpand` affordance instead of
+ * silently looking like an empty leaf. `loadingNodeIds` (host-supplied,
+ * populated while a lazy per-folder fetch is in flight) drives the row's
+ * loading state for exactly that case.
  */
 function buildNavItem(
   node: NodeVO,
   onCreateChild: (node: NodeVO) => void,
   labels: { newLabel: string; openLabel: string },
+  loadingNodeIds?: Set<string>,
 ): NavItem[] {
   if (hasCapability(node.type, "hidden")) return [];
   const icon = nodeIconForType(node.type);
@@ -294,7 +364,9 @@ function buildNavItem(
         url,
         icon,
         id: node.id,
-        items: buildNavChildren(node, onCreateChild, labels),
+        items: buildNavChildren(node, onCreateChild, labels, loadingNodeIds),
+        hasChildren: node.hasChildren ?? node.children.length > 0,
+        isLoadingChildren: loadingNodeIds?.has(node.id) ?? false,
         onAddChild: () => onCreateChild(node),
         addChildTitle: labels.newLabel,
         actions: url
@@ -316,13 +388,20 @@ function buildNavItem(
 // Recursively build every child of `node` as a NavItem — a container child
 // becomes its own nested collapsible folder (via `buildNavItem`'s recursive
 // call back into this function for ITS children), a detail-bearing child
-// becomes a plain leaf row, at any depth.
+// becomes a plain leaf row, at any depth. `node.children` is `[]` for a node
+// sitting exactly at a `nodes.list` depth boundary (see `buildNavItem`), so
+// this naturally returns `[]` there too — the boundary's `hasChildren: true`
+// is what keeps it rendering as an (empty, expandable) folder rather than
+// collapsing into a leaf.
 function buildNavChildren(
   node: NodeVO,
   onCreateChild: (node: NodeVO) => void,
   labels: { newLabel: string; openLabel: string },
+  loadingNodeIds?: Set<string>,
 ): NavItem[] {
-  return node.children.flatMap((child) => buildNavItem(child, onCreateChild, labels));
+  return node.children.flatMap((child) =>
+    buildNavItem(child, onCreateChild, labels, loadingNodeIds),
+  );
 }
 
 /**
@@ -335,11 +414,12 @@ function buildKnowledgeBaseItems(
   nodes: NodeVO[],
   onCreateChild: (node: NodeVO) => void,
   labels: { newLabel: string; openLabel: string },
+  loadingNodeIds?: Set<string>,
 ): NavItem[] {
   const top =
     nodes.length === 1 && hasCapability(nodes[0].type, "container") && !nodes[0].baseId
       ? nodes[0].children
       : nodes;
 
-  return top.flatMap((node) => buildNavItem(node, onCreateChild, labels));
+  return top.flatMap((node) => buildNavItem(node, onCreateChild, labels, loadingNodeIds));
 }

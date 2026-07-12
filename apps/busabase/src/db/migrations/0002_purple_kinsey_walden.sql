@@ -1,2 +1,0 @@
-CREATE INDEX "busabase_field_values_text_trgm_idx" ON "busabase_field_values" USING gin ("value_text" gin_trgm_ops);--> statement-breakpoint
-CREATE INDEX "busabase_field_values_slug_trgm_idx" ON "busabase_field_values" USING gin ("field_slug" gin_trgm_ops);

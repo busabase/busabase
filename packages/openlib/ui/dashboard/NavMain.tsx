@@ -137,6 +137,15 @@ interface NavMainProps {
    * consumer can still reject in `onNodeDrop`).
    */
   isDropAllowed?: (draggedId: string, targetId: string, position: NavDropPosition) => boolean;
+  /**
+   * Called when a folder row (`item.hasChildren` or `item.items`) transitions
+   * to open while it has no loaded `items` yet (`item.hasChildren: true` but
+   * `items` empty/undefined) — the signal for a consumer that lazy-loads a
+   * folder's children on first expand to kick off that fetch. Never called
+   * for a folder that already has `items` loaded, or on every open/close —
+   * only the "needs its children" transition.
+   */
+  onExpand?: (item: NavItem) => void;
 }
 
 function NavMainComponent({
@@ -147,6 +156,7 @@ function NavMainComponent({
   onTaskListExpandToggle,
   onNodeDrop,
   isDropAllowed,
+  onExpand,
 }: NavMainProps) {
   const [location, setLocation] = useLocation();
   // A nav url is "active" for the current location on an exact match OR when the
@@ -172,9 +182,11 @@ function NavMainComponent({
     const visit = (list: NavItem[]) => {
       for (const item of list) {
         if (item.id) ids.push(item.id);
-        if (item.items) {
+        // A `hasChildren`-only folder (not yet expanded/loaded) is still a
+        // valid "inside" drop target, same as one with `items` already loaded.
+        if (item.items || item.hasChildren) {
           if (item.id) folders.add(item.id);
-          visit(item.items);
+          if (item.items) visit(item.items);
         }
       }
     };
@@ -350,12 +362,15 @@ function NavMainComponent({
     const isOpen = isActiveTree || (openOverrides[itemKey] ?? false);
 
     // If item declares sub-items, render as a folder-style row, even when the
-    // current folder is empty.
-    if (item.items) {
+    // current folder is empty. `hasChildren` alone (no `items` loaded yet —
+    // a lazy-loaded folder that hasn't been expanded/fetched) renders the
+    // same expandable folder row, just with an empty/loading body until
+    // `onExpand` populates it.
+    if (item.items || item.hasChildren) {
       // Captured as a local so it stays narrowed to non-undefined inside
       // `renderFolderRow` below — TS doesn't carry a property narrow
       // (`item.items`) across a nested closure boundary.
-      const folderItems = item.items;
+      const folderItems = item.items ?? [];
       const canDrag = dragEnabled && Boolean(item.id);
       const hoverActionCount =
         (item.onAddChild ? 1 : 0) + (item.actions?.length ? 1 : 0) + (canDrag ? 1 : 0);
@@ -376,7 +391,15 @@ function NavMainComponent({
           key={itemKey}
           asChild
           open={isOpen}
-          onOpenChange={(open) => setOpenOverrides((prev) => ({ ...prev, [itemKey]: open }))}
+          onOpenChange={(open) => {
+            setOpenOverrides((prev) => ({ ...prev, [itemKey]: open }));
+            // Fire the lazy-load signal only on the actual "needs children"
+            // transition — a folder that already has `items` loaded (or is
+            // being closed) never triggers a refetch.
+            if (open && item.hasChildren && !item.items?.length) {
+              onExpand?.(item);
+            }
+          }}
           className="group/collapsible"
         >
           <ItemWrapper>
@@ -557,6 +580,18 @@ function NavMainComponent({
                     ),
                   );
                 })()}
+                {/* Lazy-load placeholder: shown only while a `hasChildren`
+                    folder's children are being fetched (never alongside
+                    already-loaded `items`, which render above instead). Plain
+                    `<div>`, not a `SidebarMenuSubButton` — this row is
+                    decorative only, not a real link/action. */}
+                {item.isLoadingChildren && folderItems.length === 0 && (
+                  <SidebarMenuSubItem className="pointer-events-none">
+                    <div className="flex h-7 min-w-0 items-center gap-2 overflow-hidden rounded-md px-2">
+                      <span className="h-3.5 w-2/3 animate-pulse rounded bg-sidebar-foreground/10" />
+                    </div>
+                  </SidebarMenuSubItem>
+                )}
               </SidebarMenuSub>
             </CollapsibleContent>
           </ItemWrapper>
@@ -867,6 +902,9 @@ export const NavMain = memo(NavMainComponent, (prevProps, nextProps) => {
         prevItem.onAddChild !== nextItem.onAddChild ||
         prevItem.addChildTitle !== nextItem.addChildTitle ||
         prevItem.moreActionsTitle !== nextItem.moreActionsTitle ||
+        prevItem.hasChildren !== nextItem.hasChildren ||
+        prevItem.isLoadingChildren !== nextItem.isLoadingChildren ||
+        (prevItem.items?.length ?? 0) !== (nextItem.items?.length ?? 0) ||
         (prevItem.actions?.length ?? 0) !== (nextItem.actions?.length ?? 0)
       ) {
         return false;

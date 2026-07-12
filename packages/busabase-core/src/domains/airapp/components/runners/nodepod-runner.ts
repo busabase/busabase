@@ -47,6 +47,7 @@ export class NodepodRunner implements AirAppRunner {
     this.nodepod = await Nodepod.boot({
       files,
       onServerReady: (_port, url) => this.emitReady(url),
+      watermark: false,
     });
   }
 

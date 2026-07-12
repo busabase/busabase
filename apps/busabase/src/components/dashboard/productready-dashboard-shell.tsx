@@ -17,24 +17,14 @@ import {
   DropdownMenuTrigger,
 } from "kui/dropdown-menu";
 import { SidebarMenu, SidebarMenuButton, SidebarMenuItem } from "kui/sidebar";
-import {
-  Archive,
-  Check,
-  ChevronsUpDown,
-  Images,
-  Languages,
-  Network,
-  Vault,
-  Webhook,
-} from "lucide-react";
+import { Archive, ChevronsUpDown, Images, Network, Settings } from "lucide-react";
 import Image from "next/image";
 import { useAddDemoParam } from "openlib/ui/dashboard";
 import type { ReactNode } from "react";
 import { useMemo, useState } from "react";
 import { useLocation } from "wouter";
 import { useSPA } from "~/components/spa/spa-context";
-import { VaultSettingsDialog } from "~/domains/vault/components/vault-settings-dialog";
-import { WebhookSettingsDialog } from "~/domains/webhook/components/webhook-settings-dialog";
+import { SettingsDialog } from "~/domains/settings/components/settings-dialog";
 import { getLanguageOptions } from "~/i18n/config";
 import { getBusabaseAppLL } from "~/lib/i18n";
 
@@ -53,6 +43,12 @@ interface ProductReadyDashboardShellProps {
   /** Saved preference shown in the switcher — `"auto"` or a concrete locale. */
   languagePref: string;
   onLocaleChange: (locale: string) => void;
+  /** Ids of nodes whose children are currently being lazy-fetched. */
+  loadingNodeIds?: Set<string>;
+  /** Fired when a depth-boundary folder is expanded for the first time. */
+  onExpandNode?: (nodeId: string) => void;
+  /** Server-authoritative descendant check, gates cross-branch drag-and-drop drops. */
+  checkIsDescendant?: (params: { nodeId: string; potentialAncestorId: string }) => Promise<boolean>;
 }
 
 /**
@@ -71,21 +67,20 @@ export function ProductReadyDashboardShell({
   locale,
   languagePref,
   onLocaleChange,
+  loadingNodeIds,
+  onExpandNode,
+  checkIsDescendant,
 }: ProductReadyDashboardShellProps) {
   const { activeSpace, spaces, unreadCount, user } = useSPA();
   const [location, navigate] = useLocation();
   const addDemoParam = useAddDemoParam();
   const LL = useMemo(() => getBusabaseAppLL(locale), [locale]);
   const coreMessages = useCoreI18n();
-  const [vaultDialogOpen, setVaultDialogOpen] = useState(false);
-  const [webhookDialogOpen, setWebhookDialogOpen] = useState(false);
+  const [settingsDialogOpen, setSettingsDialogOpen] = useState(false);
   const currentPath = location.split("?")[0];
   const languageOptions = useMemo(
-    () => [
-      { code: "auto", name: LL.shell.auto(), nativeName: LL.shell.auto() },
-      ...getLanguageOptions(locale === "zh-CN" || locale === "ja" ? locale : "en"),
-    ],
-    [LL, locale],
+    () => getLanguageOptions(locale === "zh-CN" || locale === "ja" ? locale : "en"),
+    [locale],
   );
 
   const chrome: BusabaseDashboardChrome = {
@@ -185,46 +180,23 @@ export function ProductReadyDashboardShell({
                   <span>{LL.shell.graphView()}</span>
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
-                <DropdownMenuItem onSelect={() => setVaultDialogOpen(true)}>
-                  <Vault />
-                  <span>{LL.vaultSettings.openButton()}</span>
+                <DropdownMenuItem onSelect={() => setSettingsDialogOpen(true)}>
+                  <Settings />
+                  <span>{LL.shell.settings()}</span>
                 </DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => setWebhookDialogOpen(true)}>
-                  <Webhook />
-                  <span>{LL.webhookSettings.openButton()}</span>
-                </DropdownMenuItem>
-                <DropdownMenuLabel className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
-                  <Languages className="size-3.5" />
-                  {LL.shell.settings()}
-                </DropdownMenuLabel>
-                {languageOptions.map((option) => {
-                  const isActive = option.code === languagePref;
-                  return (
-                    <DropdownMenuItem
-                      key={option.code}
-                      onSelect={() => onLocaleChange(option.code)}
-                      className={isActive ? "bg-accent" : undefined}
-                    >
-                      <span>{option.nativeName || option.name}</span>
-                      {isActive ? <Check className="ml-auto size-4" /> : null}
-                    </DropdownMenuItem>
-                  );
-                })}
               </DropdownMenuContent>
             </DropdownMenu>
           </SidebarMenuItem>
         </SidebarMenu>
-        <VaultSettingsDialog
-          labels={LL.vaultSettings}
-          open={vaultDialogOpen}
-          onOpenChange={setVaultDialogOpen}
-          showTrigger={false}
-        />
-        <WebhookSettingsDialog
-          labels={LL.webhookSettings}
-          open={webhookDialogOpen}
-          onOpenChange={setWebhookDialogOpen}
-          showTrigger={false}
+        <SettingsDialog
+          labels={LL.settingsDialog}
+          vaultLabels={LL.vaultSettings}
+          webhookLabels={LL.webhookSettings}
+          open={settingsDialogOpen}
+          onOpenChange={setSettingsDialogOpen}
+          languageOptions={languageOptions}
+          languagePref={languagePref}
+          onLocaleChange={onLocaleChange}
         />
       </div>
     ),
@@ -252,6 +224,9 @@ export function ProductReadyDashboardShell({
       onMoveNode={onMoveNode}
       onSearchClick={onSearchClick}
       pinnedNavItems={["activity"]}
+      loadingNodeIds={loadingNodeIds}
+      onExpandNode={onExpandNode}
+      checkIsDescendant={checkIsDescendant}
     >
       {children}
     </CoreDashboardShell>

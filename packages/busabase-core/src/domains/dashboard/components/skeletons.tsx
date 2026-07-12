@@ -157,6 +157,38 @@ export function NodeDetailSkeleton({
   );
 }
 
+const FILE_CONTENT_LINES = [
+  { id: "file-line-1", width: "92%" },
+  { id: "file-line-2", width: "76%" },
+  { id: "file-line-3", width: "84%" },
+  { id: "file-line-4", width: "60%" },
+  { id: "file-line-5", width: "88%" },
+  { id: "file-line-6", width: "70%" },
+  { id: "file-line-7", width: "80%" },
+  { id: "file-line-8", width: "52%" },
+];
+
+/**
+ * Loading placeholder for a single file's content pane while a `readFile`
+ * query is in flight — shared by the file-tree browser
+ * (`node-detail-views.tsx`'s `FileTreeDetailView`) and the AirApp Files tab
+ * (`AirAppDetailView.tsx`), which have the exact same "reading file" state.
+ * The surrounding header/file-tree chrome is already rendered by the time
+ * this shows (see `NodeDetailSkeleton` above for that outer shell), so this
+ * only needs to shimmer the content area itself — a handful of
+ * varying-width bars standing in for lines of code/text, replacing the old
+ * plain "Reading …" message.
+ */
+export function FileContentSkeleton() {
+  return (
+    <div className="space-y-2.5 p-4" aria-hidden>
+      {FILE_CONTENT_LINES.map((line) => (
+        <Skeleton className="h-4" style={{ width: line.width }} key={line.id} />
+      ))}
+    </div>
+  );
+}
+
 const INBOX_ROW_SKELETONS = [
   { id: "inbox-row-1", width: "72%" },
   { id: "inbox-row-2", width: "58%" },

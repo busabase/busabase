@@ -16,7 +16,8 @@ import {
   renderFileTree,
 } from "../../dashboard/components/file-tree-browser";
 import { EmptyState } from "../../dashboard/components/primitives";
-import { NodeDetailSkeleton } from "../../dashboard/components/skeletons";
+import { FileContentSkeleton, NodeDetailSkeleton } from "../../dashboard/components/skeletons";
+import { useAirAppRunnerStore } from "../store/airapp-runner-store";
 import { AirAppRunLogs, AirAppRunPreview, useAirAppRunner } from "./RunPanel";
 
 interface AirAppDetailViewProps {
@@ -148,6 +149,7 @@ export function AirAppDetailView({ orpc, slug }: AirAppDetailViewProps) {
               nodeId={airapp.node.id}
               nodeName={airapp.node.name}
               nodeType="airapp"
+              onDeleted={() => useAirAppRunnerStore.getState().disposeEntry(airapp.node.id)}
               orpc={orpc}
             />
           </div>
@@ -181,7 +183,7 @@ export function AirAppDetailView({ orpc, slug }: AirAppDetailViewProps) {
         </TabsList>
 
         <TabsContent className={TAB_CONTENT_CLASS} forceMount value="app">
-          <AirAppRunPreview runner={runner} />
+          <AirAppRunPreview airapp={airapp} runner={runner} />
         </TabsContent>
 
         <TabsContent className={TAB_CONTENT_CLASS} forceMount value="files">
@@ -232,9 +234,7 @@ export function AirAppDetailView({ orpc, slug }: AirAppDetailViewProps) {
                     {messages.nodeDetail.selectFile}
                   </div>
                 ) : fileQuery.isLoading ? (
-                  <div className="p-4 text-muted-foreground text-sm">
-                    {fmt(messages.nodeDetail.readingFile, { path: openPath })}
-                  </div>
+                  <FileContentSkeleton />
                 ) : fileQuery.isError ? (
                   <div className="border-border/60 border-b bg-destructive/5 p-4 text-destructive text-sm">
                     {fileQuery.error instanceof Error

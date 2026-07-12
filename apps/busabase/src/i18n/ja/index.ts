@@ -32,6 +32,14 @@ const ja: Translation = {
     base: "ベース",
     blogPosts: "ブログ記事",
   },
+  settingsDialog: {
+    title: "設定",
+    description: "この Busabase ワークスペースの環境設定です。",
+    languageLabel: "言語",
+    languageTab: "言語",
+    vaultTab: "保管庫",
+    webhookTab: "Webhook",
+  },
   marketing: {
     rootDescription: "Busabase のオープンソースなローカルレビューエンジン。",
     aboutTitle: "BusaBase について",

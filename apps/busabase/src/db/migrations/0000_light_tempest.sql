@@ -1,6 +1,7 @@
+CREATE EXTENSION IF NOT EXISTS pg_trgm;--> statement-breakpoint
 CREATE TYPE "public"."busabase_change_request_status" AS ENUM('in_review', 'changes_requested', 'approved', 'rejected', 'merged', 'abandoned', 'conflict');--> statement-breakpoint
 CREATE TYPE "public"."busabase_comment_subject" AS ENUM('record', 'change_request', 'operation', 'commit');--> statement-breakpoint
-CREATE TYPE "public"."busabase_operation_kind" AS ENUM('record_create', 'record_update', 'record_delete', 'record_variant', 'view_create', 'view_update', 'view_delete', 'view_restore', 'node_create', 'node_rename', 'node_delete', 'node_restore', 'node_move', 'skill_file_create', 'skill_file_update', 'skill_file_delete', 'skill_metadata_update', 'drive_file_create', 'drive_file_update', 'drive_file_delete', 'drive_metadata_update', 'doc_update', 'base_add_field', 'base_delete_field', 'base_update_field', 'base_convert_field', 'base_reorder_fields', 'base_restore_field', 'base_archive', 'base_restore', 'record_restore');--> statement-breakpoint
+CREATE TYPE "public"."busabase_operation_kind" AS ENUM('record_create', 'record_update', 'record_delete', 'record_variant', 'view_create', 'view_update', 'view_delete', 'view_restore', 'node_create', 'node_rename', 'node_delete', 'node_restore', 'node_move', 'skill_file_create', 'skill_file_update', 'skill_file_delete', 'skill_metadata_update', 'drive_file_create', 'drive_file_update', 'drive_file_delete', 'drive_metadata_update', 'airapp_file_create', 'airapp_file_update', 'airapp_file_delete', 'airapp_metadata_update', 'doc_update', 'base_add_field', 'base_delete_field', 'base_update_field', 'base_convert_field', 'base_reorder_fields', 'base_restore_field', 'base_archive', 'base_restore', 'record_restore');--> statement-breakpoint
 CREATE TYPE "public"."busabase_review_verdict" AS ENUM('approved', 'rejected');--> statement-breakpoint
 CREATE TYPE "public"."busabase_field_type" AS ENUM('text', 'longtext', 'markdown', 'html', 'attachment', 'relation', 'number', 'date', 'checkbox', 'select', 'multiselect', 'url', 'embed', 'email', 'phone', 'created_time', 'updated_time', 'created_by', 'updated_by', 'auto_number', 'ai_summary', 'ai_tags', 'code', 'json', 'yaml');--> statement-breakpoint
 CREATE TABLE "busabase_audit_events" (
@@ -128,6 +129,24 @@ CREATE TABLE "attachments" (
 	"user_id" text NOT NULL,
 	"space_id" text,
 	"metadata" jsonb,
+	"created_at" timestamp DEFAULT now() NOT NULL,
+	"updated_at" timestamp DEFAULT now() NOT NULL
+);
+--> statement-breakpoint
+CREATE TABLE "busabase_asset_texts" (
+	"id" text PRIMARY KEY NOT NULL,
+	"space_id" text NOT NULL,
+	"asset_id" text NOT NULL,
+	"status" text DEFAULT 'present' NOT NULL,
+	"text_storage_key" text NOT NULL,
+	"text_content_hash" text,
+	"source_content_hash" text,
+	"written_by" text DEFAULT 'auto' NOT NULL,
+	"line_count" bigint DEFAULT 0 NOT NULL,
+	"char_count" bigint DEFAULT 0 NOT NULL,
+	"byte_count" bigint DEFAULT 0 NOT NULL,
+	"line_checkpoints" jsonb DEFAULT '[]'::jsonb NOT NULL,
+	"stats_computed_at" timestamp,
 	"created_at" timestamp DEFAULT now() NOT NULL,
 	"updated_at" timestamp DEFAULT now() NOT NULL
 );
@@ -269,6 +288,34 @@ CREATE TABLE "busabase_vault_items" (
 	"updated_at" timestamp DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
+CREATE TABLE "busabase_webhook_deliveries" (
+	"id" text PRIMARY KEY NOT NULL,
+	"rule_id" text NOT NULL,
+	"space_id" text NOT NULL,
+	"event_type" text NOT NULL,
+	"status" text NOT NULL,
+	"http_status" integer,
+	"detail" text,
+	"duration_ms" integer,
+	"created_at" timestamp DEFAULT now() NOT NULL
+);
+--> statement-breakpoint
+CREATE TABLE "busabase_webhook_rules" (
+	"id" text PRIMARY KEY NOT NULL,
+	"space_id" text NOT NULL,
+	"base_id" text,
+	"name" text NOT NULL,
+	"event_type" text NOT NULL,
+	"action_kind" text NOT NULL,
+	"config" jsonb NOT NULL,
+	"enabled" boolean DEFAULT true NOT NULL,
+	"created_by" text NOT NULL,
+	"created_at" timestamp DEFAULT now() NOT NULL,
+	"updated_at" timestamp DEFAULT now() NOT NULL,
+	"last_triggered_at" timestamp,
+	"last_status" text
+);
+--> statement-breakpoint
 ALTER TABLE "busabase_audit_events" ADD CONSTRAINT "busabase_audit_events_base_id_busabase_bases_id_fk" FOREIGN KEY ("base_id") REFERENCES "public"."busabase_bases"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "busabase_audit_events" ADD CONSTRAINT "busabase_audit_events_record_id_busabase_records_id_fk" FOREIGN KEY ("record_id") REFERENCES "public"."busabase_records"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "busabase_audit_events" ADD CONSTRAINT "busabase_audit_events_change_request_id_busabase_change_requests_id_fk" FOREIGN KEY ("change_request_id") REFERENCES "public"."busabase_change_requests"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
@@ -290,6 +337,7 @@ ALTER TABLE "busabase_operations" ADD CONSTRAINT "busabase_operations_target_vie
 ALTER TABLE "busabase_operations" ADD CONSTRAINT "busabase_operations_head_commit_id_busabase_commits_id_fk" FOREIGN KEY ("head_commit_id") REFERENCES "public"."busabase_commits"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "busabase_operations" ADD CONSTRAINT "busabase_operations_merged_view_id_busabase_views_id_fk" FOREIGN KEY ("merged_view_id") REFERENCES "public"."busabase_views"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "busabase_reviews" ADD CONSTRAINT "busabase_reviews_change_request_id_busabase_change_requests_id_fk" FOREIGN KEY ("change_request_id") REFERENCES "public"."busabase_change_requests"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "busabase_asset_texts" ADD CONSTRAINT "busabase_asset_texts_asset_id_busabase_assets_id_fk" FOREIGN KEY ("asset_id") REFERENCES "public"."busabase_assets"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "busabase_asset_usages" ADD CONSTRAINT "busabase_asset_usages_asset_id_busabase_assets_id_fk" FOREIGN KEY ("asset_id") REFERENCES "public"."busabase_assets"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "busabase_asset_usages" ADD CONSTRAINT "busabase_asset_usages_node_id_busabase_nodes_id_fk" FOREIGN KEY ("node_id") REFERENCES "public"."busabase_nodes"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "busabase_base_fields" ADD CONSTRAINT "busabase_base_fields_base_id_busabase_bases_id_fk" FOREIGN KEY ("base_id") REFERENCES "public"."busabase_bases"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
@@ -338,6 +386,9 @@ CREATE INDEX "attachments_context_idx" ON "attachments" USING btree ("context");
 CREATE INDEX "attachments_created_at_idx" ON "attachments" USING btree ("created_at");--> statement-breakpoint
 CREATE INDEX "attachments_storage_key_idx" ON "attachments" USING btree ("storage_key");--> statement-breakpoint
 CREATE INDEX "attachments_content_hash_idx" ON "attachments" USING btree ("content_hash");--> statement-breakpoint
+CREATE UNIQUE INDEX "busabase_asset_texts_asset_uniq" ON "busabase_asset_texts" USING btree ("asset_id");--> statement-breakpoint
+CREATE INDEX "busabase_asset_texts_space_status_idx" ON "busabase_asset_texts" USING btree ("space_id","status");--> statement-breakpoint
+CREATE INDEX "busabase_asset_texts_content_hash_idx" ON "busabase_asset_texts" USING btree ("text_content_hash");--> statement-breakpoint
 CREATE INDEX "busabase_asset_usages_asset_idx" ON "busabase_asset_usages" USING btree ("asset_id");--> statement-breakpoint
 CREATE INDEX "busabase_asset_usages_node_idx" ON "busabase_asset_usages" USING btree ("node_id");--> statement-breakpoint
 CREATE INDEX "busabase_asset_usages_node_path_idx" ON "busabase_asset_usages" USING btree ("node_id","path");--> statement-breakpoint
@@ -349,6 +400,8 @@ CREATE UNIQUE INDEX "busabase_bases_node_uniq" ON "busabase_bases" USING btree (
 CREATE UNIQUE INDEX "busabase_bases_space_slug_uniq" ON "busabase_bases" USING btree ("space_id","slug") WHERE "busabase_bases"."archived_at" IS NULL;--> statement-breakpoint
 CREATE INDEX "busabase_field_values_base_field_text_idx" ON "busabase_field_values" USING btree ("base_id","field_slug","value_text");--> statement-breakpoint
 CREATE INDEX "busabase_field_values_text_fts_idx" ON "busabase_field_values" USING gin (to_tsvector('simple', coalesce("value_text", '')));--> statement-breakpoint
+CREATE INDEX "busabase_field_values_text_trgm_idx" ON "busabase_field_values" USING gin ("value_text" gin_trgm_ops);--> statement-breakpoint
+CREATE INDEX "busabase_field_values_slug_trgm_idx" ON "busabase_field_values" USING gin ("field_slug" gin_trgm_ops);--> statement-breakpoint
 CREATE INDEX "busabase_field_values_base_field_number_idx" ON "busabase_field_values" USING btree ("base_id","field_slug","value_number");--> statement-breakpoint
 CREATE INDEX "busabase_field_values_base_field_date_idx" ON "busabase_field_values" USING btree ("base_id","field_slug","value_date");--> statement-breakpoint
 CREATE INDEX "busabase_field_values_record_idx" ON "busabase_field_values" USING btree ("record_id");--> statement-breakpoint
@@ -366,4 +419,6 @@ CREATE UNIQUE INDEX "busabase_views_base_slug_uniq" ON "busabase_views" USING bt
 CREATE INDEX "busabase_views_base_status_position_idx" ON "busabase_views" USING btree ("base_id","status","created_at");--> statement-breakpoint
 CREATE INDEX "busabase_vault_items_user_updated_idx" ON "busabase_vault_items" USING btree ("user_id","updated_at");--> statement-breakpoint
 CREATE INDEX "busabase_vault_items_user_kind_idx" ON "busabase_vault_items" USING btree ("user_id","kind");--> statement-breakpoint
-CREATE INDEX "busabase_vault_items_user_key_idx" ON "busabase_vault_items" USING btree ("user_id","key");
+CREATE INDEX "busabase_vault_items_user_key_idx" ON "busabase_vault_items" USING btree ("user_id","key");--> statement-breakpoint
+CREATE INDEX "busabase_webhook_deliveries_rule_created_idx" ON "busabase_webhook_deliveries" USING btree ("rule_id","created_at");--> statement-breakpoint
+CREATE INDEX "busabase_webhook_rules_space_event_enabled_idx" ON "busabase_webhook_rules" USING btree ("space_id","event_type","enabled");

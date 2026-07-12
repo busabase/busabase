@@ -1531,6 +1531,81 @@ describe("busabase-cli commands", () => {
       ]);
     });
 
+    it("routes the top-level `grep` command's files scope (--asset-ids/--drive-path/--mime-types) and match options (--flags/--max-matches/--context-lines)", async () => {
+      const calls: Array<{ body: unknown; method: string; url: string }> = [];
+      global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const request = input instanceof Request ? input : new Request(input, init);
+        calls.push({
+          body: request.body ? await requestBody(request) : null,
+          method: request.method,
+          url: request.url,
+        });
+        return jsonResponse({
+          matches: [],
+          coverage: {
+            files: {
+              scanned: 0,
+              missing: [],
+              stale: [],
+              unsearchable: 0,
+              errored: [],
+              notReached: 0,
+            },
+            docs: { scanned: 0, errored: [], notReached: 0 },
+            records: { scanned: 0, errored: [], notReached: 0 },
+          },
+          truncated: false,
+        });
+      }) as typeof fetch;
+
+      const exitCode = await runCli([
+        "--base-url",
+        "http://localhost:15419",
+        "--output",
+        "json",
+        "grep",
+        "--pattern",
+        "Termination",
+        "--flags",
+        "i",
+        "--sources",
+        "files",
+        "--asset-ids",
+        "ast_1",
+        "ast_2",
+        "--drive-path",
+        "contracts/",
+        "--mime-types",
+        "application/pdf",
+        "--max-matches",
+        "50",
+        "--context-lines",
+        "2",
+      ]);
+
+      expect(exitCode).toBe(0);
+      expect(calls).toEqual([
+        expect.objectContaining({
+          method: "POST",
+          url: "http://localhost:15419/api/v1/grep",
+          body: {
+            pattern: "Termination",
+            flags: "i",
+            sources: ["files"],
+            scope: {
+              files: {
+                assetIds: ["ast_1", "ast_2"],
+                drivePath: "contracts/",
+                mimeTypes: ["application/pdf"],
+              },
+            },
+            maxMatches: 50,
+            contextLines: 2,
+          },
+        }),
+      ]);
+    });
+
     it("reads an exact line range via read-lines, as GET query params", async () => {
       const calls: Array<{ method: string; url: string }> = [];
       global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {

@@ -83,11 +83,28 @@ export function useMoveNode({
   apiClient,
   queryClient,
   nodesQueryKey,
+  invalidateQueryKey,
   onMoveError,
 }: {
   apiClient: Pick<BusabaseDashboardApiClient, "moveNode">;
   queryClient: QueryClient;
+  /**
+   * EXACT key of the tree currently rendered in the sidebar — must match the
+   * key the host's own `nodes.list` query is mounted under (`get`/`setQueryData`
+   * require an exact match, unlike `invalidateQueries`), since the optimistic
+   * patch reads and rewrites that exact cache entry.
+   */
   nodesQueryKey: QueryKey;
+  /**
+   * Broader key used to invalidate on settle — defaults to `nodesQueryKey`.
+   * Pass a shorter/partial `nodes.list` key (e.g. built from `.queryOptions({})`,
+   * with no `input`) when the host also lazy-loads individual folders as
+   * their own separate `nodes.list` queries (see `useLazyNodeChildren`): a
+   * partial key with no `input` matches every one of those too, so a move
+   * invalidates the root tree AND every lazily-fetched folder in one call,
+   * not just the exact root entry.
+   */
+  invalidateQueryKey?: QueryKey;
   /** i18n error toast message; defaults to a plain English fallback. */
   onMoveError?: string;
 }) {
@@ -108,7 +125,7 @@ export function useMoveNode({
       toast.error(onMoveError ?? "Couldn't move the item. Please try again.");
     },
     onSettled: () => {
-      queryClient.invalidateQueries({ queryKey: nodesQueryKey });
+      queryClient.invalidateQueries({ queryKey: invalidateQueryKey ?? nodesQueryKey });
     },
   });
 }

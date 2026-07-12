@@ -13,7 +13,10 @@ import { dotEnvPath, loadDotEnvFile, writeDotEnvFile } from "./config-file.js";
  *
  *   - **OAuth (preferred)**: opens the browser to Busabase Cloud's PKCE
  *     authorization endpoint, catches the redirect on a loopback server, and
- *     exchanges the code for a native session token (`bss_…`). No key to copy.
+ *     exchanges the code for a credential. The server shows a consent page for
+ *     `client_platform=cli` (pick or create an API key, `sk_…`, since the CLI is
+ *     built for agent/unattended use); other native clients get a session token
+ *     (`bss_…`) silently. No key to copy either way.
  *   - **API key**: paste (or pass `--api-key`) an `sk_…` key from the dashboard.
  *
  * Both end the same way: verify against `/api/v1/auth`, pick the target space, and
@@ -240,11 +243,14 @@ async function oauthLogin(
   const payload = (await tokenRes.json()) as {
     token?: string;
     accessToken?: string;
-    expiresAt?: string;
+    apiKey?: string;
+    expiresAt?: string | null;
   };
-  const token = payload.token ?? payload.accessToken;
-  if (!token) throw new Error("Token exchange returned no session token.");
-  return { token, expiresAt: payload.expiresAt };
+  // cli-consent authorizations return a long-lived `apiKey` (sk_…) instead of a
+  // session token — same credential slot, just a different prefix at runtime.
+  const token = payload.apiKey ?? payload.token ?? payload.accessToken;
+  if (!token) throw new Error("Token exchange returned no credential.");
+  return { token, expiresAt: payload.expiresAt ?? undefined };
 }
 
 /** POST the current session token to `/api/oauth/refresh`; returns the slid-forward token. */

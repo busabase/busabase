@@ -27,6 +27,22 @@ export interface NavItem {
    */
   items?: NavItem[];
   /**
+   * Whether this item has children beyond what `items` carries. When `true`
+   * and `items` is empty/undefined, NavMain still renders the row as an
+   * expandable folder (chevron + `Collapsible`) instead of a leaf — for a
+   * consumer that lazy-loads a folder's contents on first expand rather than
+   * eagerly loading the whole tree. Omit/`false` is the existing behavior:
+   * a row with no `items` renders as a plain leaf.
+   */
+  hasChildren?: boolean;
+  /**
+   * Shows a loading row inside this folder's `CollapsibleContent` (e.g. a
+   * skeleton/spinner) while its children are being fetched — pair with
+   * `hasChildren` + `onExpand` for a lazy-loaded folder. Ignored for a leaf
+   * row (no `items`/`hasChildren`).
+   */
+  isLoadingChildren?: boolean;
+  /**
    * Optional ID for the item (e.g., task ID for delete operations). Also
    * doubles as the drag-and-drop identity when NavMain's `onNodeDrop` is
    * supplied — items without an `id` are never draggable/droppable.

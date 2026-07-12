@@ -1,0 +1,192 @@
+# Owned by this open-source repo (busabase/busabase). The kapps sync
+# (scripts/publish-busabase-repo.ts) PRESERVES `.github`, so it never overwrites
+# this file — edit it here.
+#
+# Lint + typecheck + unit/integration tests + coverage badge + e2e on every push
+# to main and every pull request. Benchmark only runs on push to main (it needs a
+# real built+seeded server and is too slow/noisy to gate external PRs on).
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: 24.18.0
+  # Server-side subtrees only — apps/busabase-desktop (Tauri) and
+  # apps/busabase-mobile (Expo/RN) are excluded from CI installs the same way
+  # publish-npm.yml excludes them: nothing here needs native toolchains or RN
+  # postinstall scripts, and installing them would just slow every job down.
+  INSTALL_FILTER: --filter "busabase..." --filter "busabase-cli..." --filter "busabase-sdk..."
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      # Biome's config (biome.json) is repo-root scoped and needs no
+      # workspace deps installed to lint — just the biome binary itself.
+      - run: pnpm install --frozen-lockfile --filter busabase-repo
+      - run: pnpm exec biome check .
+
+  typecheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile ${{ env.INSTALL_FILTER }}
+      # Deliberately mirrors INSTALL_FILTER (not `pnpm -r`, which ignores the
+      # install filter and would also try to typecheck busabase-desktop /
+      # busabase-mobile — their react-native/tauri deps were never installed
+      # above, so that would fail in a genuinely clean CI environment even
+      # though it happens to pass on a machine with leftover node_modules
+      # from an earlier broader install). `--if-present` skips workspace
+      # packages that don't define a `typecheck` script (busabase-contract,
+      # open-domains — pure type/contract packages checked transitively via
+      # their consumers) instead of failing the whole job on them.
+      - run: pnpm ${{ env.INSTALL_FILTER }} --if-present run typecheck
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile ${{ env.INSTALL_FILTER }}
+      # Same INSTALL_FILTER scoping as typecheck above (not `pnpm -r`) —
+      # busabase-mobile/busabase-desktop don't define a `test` script today
+      # so `-r` would happen to skip them too, but scoping explicitly means
+      # that stays true by construction instead of by coincidence. Runs
+      # busabase-core (the bulk of the suite), busabase-cli, busabase-sdk,
+      # and busabase's own vitest tests. All PGLite-backed, no external
+      # services.
+      - run: pnpm ${{ env.INSTALL_FILTER }} --if-present run test
+
+  # Regenerates the coverage badge SVG that apps/busabase/public/assets/readme/
+  # coverage.svg — linked from the root README — points at, and commits it back
+  # to main when it actually changed. PR runs still compute + report coverage
+  # (so a reviewer can see the number) but never push a commit from a PR
+  # context; only a push-to-main run has somewhere safe to commit to.
+  coverage:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile ${{ env.INSTALL_FILTER }}
+      - run: pnpm --filter busabase-core run coverage:badge
+      - name: Report coverage in step summary
+        run: |
+          pct=$(node -p "require('./packages/busabase-core/coverage/coverage-summary.json').total.lines.pct")
+          echo "## Coverage (busabase-core: logic/ + domains/)" >> "$GITHUB_STEP_SUMMARY"
+          echo "Lines: **${pct}%**" >> "$GITHUB_STEP_SUMMARY"
+      - name: Commit updated badge (push to main only)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          if git diff --quiet -- apps/busabase/public/assets/readme/coverage.svg; then
+            echo "Badge unchanged, nothing to commit."
+            exit 0
+          fi
+          git config user.name "busabase-bot"
+          git config user.email "bot@busabase.com"
+          git add apps/busabase/public/assets/readme/coverage.svg
+          git commit -m "chore: update coverage badge [skip ci]"
+          git push
+
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile ${{ env.INSTALL_FILTER }}
+      - run: pnpm exec playwright install --with-deps chromium
+        working-directory: apps/busabase
+      - name: Configure local env (PGLite + local storage, no external services)
+        working-directory: apps/busabase
+        run: cp .env.example .env
+      # Seeds the exact fixture tree the specs assert against (e.g.
+      # "CMS holds Blog Posts" in busabase-smoke.spec.ts) — the Playwright
+      # webServer config only boots `pnpm dev`, it never seeds data itself.
+      - run: pnpm db:seed:all
+        working-directory: apps/busabase
+      - run: pnpm test:e2e
+        working-directory: apps/busabase
+        env:
+          CI: true
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: apps/busabase/playwright-report/
+          retention-days: 14
+
+  benchmark:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [lint, typecheck, test]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile ${{ env.INSTALL_FILTER }}
+      - name: Configure local env
+        working-directory: apps/busabase
+        run: cp .env.example .env
+      - run: pnpm db:seed:all
+        working-directory: apps/busabase
+      - name: Build
+        working-directory: apps/busabase
+        run: NODE_OPTIONS=--max-old-space-size=4096 pnpm build
+      - name: Start server
+        working-directory: apps/busabase
+        run: |
+          pnpm start &
+          echo $! > /tmp/busabase-server.pid
+          npx wait-on http://localhost:15419 --timeout 60000
+      - name: Run benchmark suite
+        working-directory: apps/busabase
+        env:
+          DURATION: 8
+          CONNECTIONS: 20
+        run: pnpm perf:suite | tee /tmp/perf-suite.log
+      - name: Stop server
+        if: always()
+        run: kill "$(cat /tmp/busabase-server.pid)" 2>/dev/null || true
+      - name: Report benchmark in step summary
+        if: always()
+        run: |
+          echo "## Benchmark (autocannon, ${DURATION:-8}s x ${CONNECTIONS:-20} connections)" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          cat /tmp/perf-suite.log >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"

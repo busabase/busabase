@@ -81,6 +81,10 @@
       "types": "./src/domains/vault/types/vault.ts",
       "default": "./src/domains/vault/types/vault.ts"
     },
+    "./domains/vault/components": {
+      "types": "./src/domains/vault/components/vault-settings-panel.tsx",
+      "default": "./src/domains/vault/components/vault-settings-panel.tsx"
+    },
     "./domains/webhook/logic": {
       "types": "./src/domains/webhook/logic/webhook-logic.ts",
       "default": "./src/domains/webhook/logic/webhook-logic.ts"
@@ -113,6 +117,10 @@
       "types": "./src/domains/dashboard/components/primitives.tsx",
       "default": "./src/domains/dashboard/components/primitives.tsx"
     },
+    "./domains/webhook/components": {
+      "types": "./src/domains/webhook/components/webhook-settings-panel.tsx",
+      "default": "./src/domains/webhook/components/webhook-settings-panel.tsx"
+    },
     "./dashboard/node-icons": {
       "types": "./src/domains/dashboard/helpers/node-icons.ts",
       "default": "./src/domains/dashboard/helpers/node-icons.ts"
@@ -124,6 +132,10 @@
     "./dashboard/use-move-node": {
       "types": "./src/domains/dashboard/hooks/use-move-node.ts",
       "default": "./src/domains/dashboard/hooks/use-move-node.ts"
+    },
+    "./dashboard/use-lazy-node-children": {
+      "types": "./src/domains/dashboard/hooks/use-lazy-node-children.ts",
+      "default": "./src/domains/dashboard/hooks/use-lazy-node-children.ts"
     },
     "./openapi": {
       "types": "./src/openapi/spec.ts",
@@ -173,7 +185,8 @@
     "streamdown": "^2.3.0",
     "wouter": "^3.9.0",
     "yaml": "^2.9.0",
-    "zod": "^4.3.6"
+    "zod": "^4.3.6",
+    "zustand": "5.0.12"
   },
   "devDependencies": {
     "@types/node": "^24.13.2",
@@ -186,6 +199,7 @@
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
     "coverage:badge": "vitest run --coverage --coverage.include='src/logic/**' --coverage.include='src/domains/**' --coverage.exclude='src/domains/dashboard/**' --coverage.exclude='**/*.test.ts' --coverage.exclude='**/types/**' --coverage.reporter=json-summary --coverage.reporter=text-summary && node scripts/coverage-badge.mjs",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "bench:grep": "NODE_OPTIONS=--conditions=react-server tsx scripts/bench-grep.ts"
   }
 }

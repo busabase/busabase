@@ -125,6 +125,12 @@ export const coreMessagesEn = {
     logsEmpty: "Install and start output will stream here once you click Run.",
     noRunnableFiles: "This AirApp has no text files to run.",
     runFailed: "Failed to run this AirApp",
+    pinToSidePanel: "Open in side panel",
+  },
+  sidePanel: {
+    open: "Open side panel",
+    collapse: "Collapse side panel",
+    closeTab: "Close tab",
   },
   nav: {
     inbox: "Inbox",

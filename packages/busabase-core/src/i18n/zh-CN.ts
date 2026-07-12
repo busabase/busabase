@@ -120,6 +120,12 @@ export const dashboardZhCN: CoreI18nMessages = {
     logsEmpty: "点击“运行”后，安装与启动输出会显示在这里。",
     noRunnableFiles: "此 AirApp 没有可运行的文本文件。",
     runFailed: "运行此 AirApp 失败",
+    pinToSidePanel: "在侧边栏中打开",
+  },
+  sidePanel: {
+    open: "展开侧边栏",
+    collapse: "收起侧边栏",
+    closeTab: "关闭标签页",
   },
   nav: {
     inbox: "收件箱",

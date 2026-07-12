@@ -31,6 +31,14 @@ const en: BaseTranslation = {
     base: "Base",
     blogPosts: "Blog Posts",
   },
+  settingsDialog: {
+    title: "Settings",
+    description: "Preferences for this Busabase workspace.",
+    languageLabel: "Language",
+    languageTab: "Language",
+    vaultTab: "Vault",
+    webhookTab: "Webhooks",
+  },
   vaultSettings: {
     title: "Vault",
     description:

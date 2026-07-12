@@ -957,7 +957,30 @@ const seedCommentsIfMissing = async (createdAt: Date, comments: SeedCommentDef[]
   }
 };
 
-export const buildNodeTree = (nodes: NodePO[], bases: BasePO[]): NodeVO[] => {
+/**
+ * Nest a flat row set into a `NodeVO[]` tree, grouped by `parentId`.
+ *
+ * `options.rootParentId` picks which bucket is the "top" of the returned
+ * array — `null` (default) is every existing caller: the space root's own
+ * `parentId === null` row. `listNodes`'s bounded per-folder fetch passes an
+ * explicit node id instead, to build a forest rooted at THAT node's children
+ * from the same flat `nodes` rows (used for the lazy "expand a folder" path,
+ * where the folder itself isn't part of `nodes` and only its descendants are).
+ *
+ * `options.forceHasChildrenIds` marks node ids that must report
+ * `hasChildren: true` even though `nodes` doesn't include their children —
+ * the depth-boundary case: `listNodes` fetches one extra grouped
+ * existence-only query for just the deepest returned level and passes the
+ * ids that have real (unfetched) children here, so the sidebar still shows
+ * an expand affordance instead of silently rendering them as leaves.
+ */
+export const buildNodeTree = (
+  nodes: NodePO[],
+  bases: BasePO[],
+  options?: { rootParentId?: string | null; forceHasChildrenIds?: Set<string> },
+): NodeVO[] => {
+  const rootParentId = options?.rootParentId ?? null;
+  const forceHasChildrenIds = options?.forceHasChildrenIds;
   const baseIdByNodeId = new Map(bases.map((base) => [base.nodeId, base.id]));
   const childrenByParentId = new Map<string | null, NodePO[]>();
   for (const node of nodes) {
@@ -969,14 +992,13 @@ export const buildNodeTree = (nodes: NodePO[], bases: BasePO[]): NodeVO[] => {
   const sortNodes = (items: NodePO[]) =>
     items.sort((a, b) => a.position - b.position || a.createdAt.getTime() - b.createdAt.getTime());
 
-  const hydrate = (node: NodePO): NodeVO =>
-    toNodeVO(
-      node,
-      baseIdByNodeId.get(node.id) ?? null,
-      sortNodes(childrenByParentId.get(node.id) ?? []).map(hydrate),
-    );
+  const hydrate = (node: NodePO): NodeVO => {
+    const children = sortNodes(childrenByParentId.get(node.id) ?? []).map(hydrate);
+    const hasChildren = children.length > 0 || (forceHasChildrenIds?.has(node.id) ?? false);
+    return toNodeVO(node, baseIdByNodeId.get(node.id) ?? null, children, hasChildren);
+  };
 
-  return sortNodes(childrenByParentId.get(null) ?? []).map(hydrate);
+  return sortNodes(childrenByParentId.get(rootParentId) ?? []).map(hydrate);
 };
 
 export const ensureReady = async () => {

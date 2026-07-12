@@ -8,7 +8,9 @@ import { type ComponentProps, useCallback, useEffect, useMemo, useState } from "
 import { useLocation } from "wouter";
 import { fmt, useCoreI18n } from "../../../i18n";
 import { AirAppDetailView } from "../../airapp/components/AirAppDetailView";
+import { AirAppSidePanelPreview } from "../../airapp/components/RunPanel";
 import { registerNodeDetail } from "../node-detail-registry";
+import { registerSidePanelTab } from "../side-panel-registry";
 import { AssetMetadataBlock, assetKindIcon, formatAssetSize } from "./assets";
 import {
   buildFileTree,
@@ -20,7 +22,7 @@ import {
   type SkillTreeNode,
 } from "./file-tree-browser";
 import { EmptyState } from "./primitives";
-import { NodeDetailSkeleton } from "./skeletons";
+import { FileContentSkeleton, NodeDetailSkeleton } from "./skeletons";
 
 // Re-exported for backward compat — these building blocks moved to
 // `./file-tree-browser` so `AirAppDetailView` can reuse them without a
@@ -345,9 +347,7 @@ export function FileTreeDetailView({
                 {messages.nodeDetail.selectFile}
               </div>
             ) : fileQuery.isLoading ? (
-              <div className="p-4 text-muted-foreground text-sm">
-                {fmt(messages.nodeDetail.readingFile, { path: openPath })}
-              </div>
+              <FileContentSkeleton />
             ) : fileQuery.isError ? (
               <div className="border-border/60 border-b bg-destructive/5 p-4 text-destructive text-sm">
                 {fileQuery.error instanceof Error
@@ -455,6 +455,7 @@ export function DriveDetailView({ orpc, slug }: { orpc: BusabaseQueryUtils; slug
 registerNodeDetail("skill", SkillDetailView);
 registerNodeDetail("drive", DriveDetailView);
 registerNodeDetail("airapp", AirAppDetailView);
+registerSidePanelTab("airapp-preview", AirAppSidePanelPreview);
 
 export function FileNodeDetailView({
   orpc,

@@ -73,6 +73,22 @@ export interface BusabaseDashboardApiClient {
     subjectId: string;
   }) => Promise<CommentVO>;
   listNodes: () => Promise<NodeVO[]>;
+  /**
+   * Load a single node's children (used by the sidebar's lazy per-folder
+   * expand once the depth-bounded eager prefetch bottoms out at a node with
+   * `hasChildren: true` but no loaded `children`). `depth` controls how many
+   * additional levels beneath the returned children are eagerly included.
+   */
+  listNodeChildren: (parentId: string, depth?: number) => Promise<NodeVO[]>;
+  /**
+   * Server-authoritative check: is `nodeId` a descendant of
+   * `potentialAncestorId` (walks the parentId chain)? Gates cross-branch
+   * drag-and-drop drops when the full tree may not be loaded client-side.
+   */
+  isNodeDescendant: (params: {
+    nodeId: string;
+    potentialAncestorId: string;
+  }) => Promise<{ isDescendant: boolean }>;
   getSkill: (nodeIdOrSlug: string) => Promise<SkillVO>;
   readSkillFile: (nodeId: string, filePath: string) => Promise<SkillReadFileVO>;
   getDrive: (nodeIdOrSlug: string) => Promise<DriveVO>;
@@ -356,6 +372,8 @@ export const createBusabaseRestApiClient = (
     listAgentTasks: () => client.agent.listTasks({}),
     createComment: (payload) => client.comments.create(payload),
     listNodes: () => client.nodes.list(),
+    listNodeChildren: (parentId, depth) => client.nodes.list({ parentId, depth }),
+    isNodeDescendant: (params) => client.nodes.isDescendant(params),
     listArchivedNodes: () => client.nodes.listArchived(),
     purgeNode: (nodeId) => client.nodes.purge({ nodeId }),
     moveNode: (payload) => client.nodes.move(payload),

@@ -30,9 +30,12 @@ import {
   createAuditEventInputSchema,
   createCommentInputSchema,
   createNodeChangeRequestInputSchema,
+  isDescendantInputSchema,
+  isDescendantOutputSchema,
   listChangeRequestsPagedInputSchema,
   listChangeRequestsResponseSchema,
   listInputSchema,
+  listNodesInputSchema,
   liveEventSchema,
   moveNodeInputSchema,
   nodeSchema,
@@ -103,9 +106,22 @@ export const busabaseContractRoutes = {
         path: "/nodes",
         tags: ["Nodes"],
         summary: "List node tree",
-        successDescription: "Workspace node tree including folders, Bases, files, and agents.",
+        successDescription:
+          "Workspace node tree including folders, Bases, files, and agents. With no `parentId`/`depth`, returns the FULL tree (legacy behavior, still what every non-sidebar caller gets). Passing `parentId` and/or `depth` switches to a depth-bounded fetch: `parentId` omitted/null starts from the space root and returns it wrapped exactly like the legacy call (just depth-limited); an explicit `parentId` returns that node's children directly, ready to merge into its `NodeVO.children` for a sidebar's lazy per-folder expand. See `NodeVO.hasChildren` for how a depth boundary is surfaced.",
       })
+      .input(listNodesInputSchema)
       .output(z.array(nodeSchema)),
+    isDescendant: oc
+      .route({
+        method: "GET",
+        path: "/nodes/{nodeId}/is-descendant",
+        tags: ["Nodes"],
+        summary: "Check whether a node is a descendant of another",
+        successDescription:
+          "Server-authoritative parentId-chain walk from nodeId up to potentialAncestorId. Used to gate cross-branch drag-and-drop drops in the sidebar, since the full tree is no longer guaranteed to be loaded client-side (depth-bounded lazy load) — a purely local walk could wrongly allow dropping a folder into its own unloaded descendant.",
+      })
+      .input(isDescendantInputSchema)
+      .output(isDescendantOutputSchema),
     listArchived: oc
       .route({
         method: "GET",

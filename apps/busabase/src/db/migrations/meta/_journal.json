@@ -5,43 +5,8 @@
     {
       "idx": 0,
       "version": "7",
-      "when": 1783651300759,
-      "tag": "0000_overrated_franklin_richards",
-      "breakpoints": true
-    },
-    {
-      "idx": 1,
-      "version": "7",
-      "when": 1783653589828,
-      "tag": "0001_enable_pg_trgm",
-      "breakpoints": true
-    },
-    {
-      "idx": 2,
-      "version": "7",
-      "when": 1783653608401,
-      "tag": "0002_purple_kinsey_walden",
-      "breakpoints": true
-    },
-    {
-      "idx": 3,
-      "version": "7",
-      "when": 1783683378438,
-      "tag": "0003_rapid_cannonball",
-      "breakpoints": true
-    },
-    {
-      "idx": 4,
-      "version": "7",
-      "when": 1783704912135,
-      "tag": "0004_gray_menace",
-      "breakpoints": true
-    },
-    {
-      "idx": 5,
-      "version": "7",
-      "when": 1783831116144,
-      "tag": "0005_concerned_leper_queen",
+      "when": 1783866423884,
+      "tag": "0000_light_tempest",
       "breakpoints": true
     }
   ]

@@ -121,6 +121,12 @@ export const dashboardJa: CoreI18nMessages = {
     logsEmpty: "「実行」をクリックすると、インストールと起動の出力がここに表示されます。",
     noRunnableFiles: "この AirApp には実行可能なテキストファイルがありません。",
     runFailed: "この AirApp の実行に失敗しました",
+    pinToSidePanel: "サイドパネルで開く",
+  },
+  sidePanel: {
+    open: "サイドパネルを開く",
+    collapse: "サイドパネルを閉じる",
+    closeTab: "タブを閉じる",
   },
   nav: {
     inbox: "受信トレイ",

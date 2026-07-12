@@ -50,6 +50,7 @@ import { BaseGraphView } from "./components/graph-view";
 import { ActivityView, InboxView } from "./components/inbox";
 import { RecordDetailView, RecordEditorView, RecordTopbarActions } from "./components/record-views";
 import { SearchDialog } from "./components/search-dialog";
+import { SidePanel } from "./components/side-panel";
 import { BaseTableSkeleton } from "./components/skeletons";
 import { BusabaseTopbarBreadcrumb } from "./components/topbar";
 import { getRelationRecordIds } from "./helpers/field";
@@ -1707,7 +1708,10 @@ function BusabaseDashboardContent({
         )
       ) : null}
 
-      <div className="min-h-0 flex-1">{activeView}</div>
+      <div className="flex min-h-0 flex-1">
+        <div className="min-h-0 flex-1 overflow-hidden">{activeView}</div>
+        <SidePanel orpc={orpc} />
+      </div>
       <SearchDialog
         bases={bases}
         orpc={orpc}

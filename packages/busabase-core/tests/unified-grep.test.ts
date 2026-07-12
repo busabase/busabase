@@ -315,7 +315,7 @@ describe("Unified Grep — POST /grep (files + docs + records)", () => {
       await approveAndMerge(cr.id);
     };
 
-    it("finds a marker past char 1024 of a longtext field via records grep, but NOT via search — the fidelity gap this task closes", async () => {
+    it("finds a marker past char 8000 of a longtext field via records grep, but NOT via search — the fidelity gap this task closes", async () => {
       const base = await seedBase({
         slug: "grep-records-longtext",
         name: "Longtext Base",
@@ -323,8 +323,11 @@ describe("Unified Grep — POST /grep (files + docs + records)", () => {
       });
       const marker = "LONGTAILMARKER9271";
       // VALUE_TEXT_INDEX_LIMIT (logic/vo.ts) truncates search's projection at
-      // 1024 chars — pad well past that boundary before the marker.
-      const padding = "x".repeat(1100);
+      // 8000 chars — pad well past that boundary before the marker. (Raised
+      // from 1024 in a later fidelity pass; grep's records adapter has no
+      // ceiling at all, so this gap — narrower now, not closed — persists at
+      // any threshold search chooses.)
+      const padding = "x".repeat(8100);
       const value = `${padding} ${marker} tail content`;
       const recordId = await createBaseRecord(base.id, { notes: value });
 

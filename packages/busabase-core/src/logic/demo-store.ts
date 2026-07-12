@@ -55,7 +55,43 @@ const notFound = (what: string, id: string) =>
 
 // ── Reads ────────────────────────────────────────────────────────────────────
 
+// Demo mode never truncates: the whole seeded tree is always in memory
+// already (see `dataset()` above), so `nodes.list`'s `parentId`/`depth`
+// bounding is a real-DB-only concern — the demo handler ignores its input and
+// always returns the full tree, same as the real store's own legacy
+// (no-params) call. `hasChildren` on every node is therefore always exactly
+// `children.length > 0`, already true from how the fixtures are built.
 export const demoListNodes = () => dataset().nodes;
+
+/**
+ * Demo counterpart to the real store's `isDescendantOf` — same "walk up from
+ * nodeId, does the parentId chain reach potentialAncestorId" contract, just
+ * over the in-memory seeded tree instead of the DB (the whole tree is always
+ * present, so this is a one-shot build-a-parent-map-then-walk, not a series
+ * of queries).
+ */
+export const demoIsDescendant = (nodeId: string, potentialAncestorId: string): boolean => {
+  if (nodeId === potentialAncestorId) return false;
+  const parentById = new Map<string, string | null>();
+  const visit = (nodes: NodeVO[], parentId: string | null) => {
+    for (const node of nodes) {
+      parentById.set(node.id, parentId);
+      if (node.children.length > 0) visit(node.children, node.id);
+    }
+  };
+  visit(dataset().nodes, null);
+  let cursorId: string | null = nodeId;
+  const visited = new Set<string>();
+  while (cursorId !== null) {
+    if (visited.has(cursorId)) return false;
+    visited.add(cursorId);
+    if (!parentById.has(cursorId)) return false;
+    const ancestorId: string | null = parentById.get(cursorId) ?? null;
+    if (ancestorId === potentialAncestorId) return true;
+    cursorId = ancestorId;
+  }
+  return false;
+};
 
 // Folder nodes live one level under the synthetic root node; each already carries
 // its base children, so a FolderVO is just { node, children }.

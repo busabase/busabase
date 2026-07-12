@@ -17,5 +17,7 @@ test("language switcher defaults to Auto (no stored preference)", async ({ page 
   await page.evaluate(() => window.localStorage.removeItem("busabaseLocale"));
   await page.reload();
   await page.getByRole("button", { name: /Busabase/ }).click();
+  await page.getByRole("menuitem", { name: "Settings" }).click();
+  await expect(page.getByRole("dialog")).toBeVisible();
   await expect(page.getByText("Auto", { exact: true }).first()).toBeVisible();
 });

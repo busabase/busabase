@@ -1,6 +1,7 @@
 import { implement, ORPCError } from "@orpc/server";
 import { busabaseContract } from "busabase-contract/contract/busabase";
 import { getContextSpaceId } from "./context";
+import { getDb } from "./db";
 import { airappRouter } from "./domains/airapp/router";
 import { assetsRouter } from "./domains/assets/router";
 import { baseRouter, recordRouter, viewRouter } from "./domains/base/router";
@@ -23,6 +24,7 @@ import {
   createNodeChangeRequest,
   getAuthInfo,
   getChangeRequest,
+  isDescendantOf,
   listAgentTasks,
   listArchivedNodes,
   listAuditEvents,
@@ -51,7 +53,15 @@ export const busabaseRouter = busabase.router({
   search: busabase.search.handler(async ({ input }) => searchBusabase(input)),
   grep: busabase.grep.handler(async ({ input }) => grepUnified(input)),
   nodes: {
-    list: busabase.nodes.list.handler(async () => listNodes()),
+    list: busabase.nodes.list.handler(async ({ input }) => listNodes(input)),
+    isDescendant: busabase.nodes.isDescendant.handler(async ({ input }) => ({
+      isDescendant: await isDescendantOf(
+        await getDb(),
+        getContextSpaceId(),
+        input.nodeId,
+        input.potentialAncestorId,
+      ),
+    })),
     listArchived: busabase.nodes.listArchived.handler(async () => listArchivedNodes()),
     createChangeRequest: busabase.nodes.createChangeRequest.handler(async ({ input }) =>
       createNodeChangeRequest(input),

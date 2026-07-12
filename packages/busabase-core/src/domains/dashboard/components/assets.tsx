@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";
 import type { AssetTextStatus } from "busabase-contract/types";
+import { Skeleton } from "kui/skeleton";
 import {
   AlertTriangle,
   ArrowLeft,
@@ -302,6 +303,43 @@ export function AssetsView({
   );
 }
 
+const ASSET_CARD_SKELETON_IDS = [
+  "asset-card-skel-1",
+  "asset-card-skel-2",
+  "asset-card-skel-3",
+  "asset-card-skel-4",
+  "asset-card-skel-5",
+  "asset-card-skel-6",
+  "asset-card-skel-7",
+  "asset-card-skel-8",
+];
+
+// Mirrors the card grid rendered once `listQuery` resolves (square thumbnail
+// + name/size below it), at the same responsive column counts, so the
+// library's first load shimmers into shape instead of showing plain text in
+// an otherwise-empty pane.
+function AssetLibrarySkeleton() {
+  return (
+    <div className="w-full p-4 md:p-6" aria-hidden>
+      <div className="flex items-center gap-2">
+        <Skeleton className="size-5 rounded" />
+        <Skeleton className="h-6 w-24" />
+      </div>
+      <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-8">
+        {ASSET_CARD_SKELETON_IDS.map((id) => (
+          <div className="flex flex-col overflow-hidden rounded-lg border bg-background" key={id}>
+            <Skeleton className="aspect-square w-full rounded-none" />
+            <div className="flex flex-col gap-1.5 p-2">
+              <Skeleton className="h-4 w-4/5" />
+              <Skeleton className="h-3 w-1/3" />
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export function AssetLibraryView({
   orpc,
   onOpenAsset,
@@ -322,11 +360,7 @@ export function AssetLibraryView({
   const assets = unusedOnly ? allAssets.filter((asset) => asset.usageCount === 0) : allAssets;
 
   if (listQuery.isLoading) {
-    return (
-      <div className="grid min-h-[320px] place-items-center text-muted-foreground text-sm">
-        {messages.assets.loading}
-      </div>
-    );
+    return <AssetLibrarySkeleton />;
   }
   if (listQuery.isError) {
     return (
@@ -422,6 +456,31 @@ export function AssetLibraryView({
   );
 }
 
+// Mirrors the detail pane rendered once `detailQuery` resolves — a "Back" row,
+// a large preview area, and a title/chips card — so opening an asset shimmers
+// into shape instead of showing plain text in an otherwise-empty pane.
+function AssetDetailSkeleton() {
+  return (
+    <div className="w-full p-4 md:p-6" aria-hidden>
+      <Skeleton className="mb-3 h-4 w-20" />
+      <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_340px] xl:grid-cols-[minmax(0,1fr)_380px]">
+        <Skeleton className="min-h-[240px] w-full rounded-xl" />
+        <div className="flex flex-col gap-4">
+          <div className="rounded-xl border bg-background p-4">
+            <Skeleton className="h-5 w-3/4" />
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              <Skeleton className="h-5 w-16 rounded-full" />
+              <Skeleton className="h-5 w-20 rounded-full" />
+              <Skeleton className="h-5 w-12 rounded-full" />
+            </div>
+          </div>
+          <Skeleton className="h-24 w-full rounded-xl" />
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function AssetDetailView({
   orpc,
   assetId,
@@ -451,9 +510,7 @@ export function AssetDetailView({
 
   if (!detail) {
     return detailQuery.isLoading ? (
-      <div className="grid min-h-[320px] place-items-center text-muted-foreground text-sm">
-        {messages.assets.loadingOne}
-      </div>
+      <AssetDetailSkeleton />
     ) : (
       <EmptyState body={messages.assets.notFoundBody} title={messages.assets.notFoundTitle} />
     );

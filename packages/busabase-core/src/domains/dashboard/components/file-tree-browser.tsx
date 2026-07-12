@@ -36,12 +36,17 @@ export function NodeDeleteButton({
   nodeType,
   nodeName,
   childCount = 0,
+  onDeleted,
 }: {
   orpc: BusabaseQueryUtils;
   nodeId: string;
   nodeType: string;
   nodeName: string;
   childCount?: number;
+  /** Optional hook fired right after a successful delete (e.g. so an
+   *  airapp node can tear down its live Nodepod runner instead of leaking
+   *  it). No-op for node types that don't pass it. */
+  onDeleted?: () => void;
 }) {
   const messages = useCoreI18n();
   const [, setLocation] = useLocation();
@@ -83,6 +88,7 @@ export function NodeDeleteButton({
       toast.success(fmt(messages.nodeDetail.movedToTrash, { type: label }));
       setConfirming(false);
       setLocation("/");
+      onDeleted?.();
     } catch (err) {
       toast.error(
         err instanceof Error ? err.message : fmt(messages.nodeDetail.failedDelete, { type: label }),

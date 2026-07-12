@@ -42,7 +42,20 @@ export type UserRefMap = Map<string, UserRefVO>;
 const userRef = (users: UserRefMap | undefined, userId: string): UserRefVO | null =>
   users?.get(userId) ?? null;
 
-const VALUE_TEXT_INDEX_LIMIT = 1024;
+/**
+ * `busabase_field_values.valueText` is the tsvector/pg_trgm-indexed
+ * projection the older full-text `search` endpoint ranks/paginates against
+ * at the SQL level — raising this trades some storage/index size for search
+ * fidelity, not a free lunch, so it's a deliberate ceiling, not "as large as
+ * possible." 8,000 chars (~a few paragraphs) covers the vast majority of
+ * real long-field content while keeping the GIN indexes reasonably sized.
+ * `grep`'s records adapter (Unified Grep P2b, `logic/grep.ts`) reads
+ * `headCommit.fields` directly — genuinely untruncated, no ceiling at all —
+ * for exactly the cases this projection still can't reach; see
+ * apps/busabase-cloud/content/spec/grep-retrieval-strategy.md for the full
+ * search-vs-grep fidelity tradeoff. Previously 1,024.
+ */
+const VALUE_TEXT_INDEX_LIMIT = 8_000;
 const JSON_LIKE_FIELD_TYPES = new Set<FieldType>(["json", "attachment", "relation"]);
 const DATE_FIELD_TYPES = new Set<FieldType>(["date", "created_time", "updated_time"]);
 
@@ -144,7 +157,18 @@ export const toViewVO = (view: ViewPO, users?: UserRefMap): ViewVO => ({
   updatedAt: view.updatedAt.toISOString(),
 });
 
-export const toNodeVO = (node: NodePO, baseId: string | null, children: NodeVO[] = []): NodeVO => ({
+// `hasChildren` defaults to `children.length > 0` — accurate for every
+// existing caller, which always hands `toNodeVO` a node's REAL (untruncated)
+// children. Only `listNodes`'s depth-bounded path ever passes an explicit
+// override (`true` for a node at the depth boundary whose real children exist
+// but weren't fetched, so `children` is `[]` yet `hasChildren` must stay
+// `true` to keep the sidebar's expand affordance).
+export const toNodeVO = (
+  node: NodePO,
+  baseId: string | null,
+  children: NodeVO[] = [],
+  hasChildren: boolean = children.length > 0,
+): NodeVO => ({
   id: node.id,
   parentId: node.parentId,
   type: node.type,
@@ -157,6 +181,7 @@ export const toNodeVO = (node: NodePO, baseId: string | null, children: NodeVO[]
   updatedAt: node.updatedAt.toISOString(),
   baseId,
   children,
+  hasChildren,
 });
 
 export const toRecordLinkVO = (link: RecordLinkPO): RecordLinkVO => ({

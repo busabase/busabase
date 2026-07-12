@@ -117,6 +117,32 @@ type RootTranslation = {
 		 */
 		blogPosts: string
 	}
+	settingsDialog: {
+		/**
+		 * S​e​t​t​i​n​g​s
+		 */
+		title: string
+		/**
+		 * P​r​e​f​e​r​e​n​c​e​s​ ​f​o​r​ ​t​h​i​s​ ​B​u​s​a​b​a​s​e​ ​w​o​r​k​s​p​a​c​e​.
+		 */
+		description: string
+		/**
+		 * L​a​n​g​u​a​g​e
+		 */
+		languageLabel: string
+		/**
+		 * L​a​n​g​u​a​g​e
+		 */
+		languageTab: string
+		/**
+		 * V​a​u​l​t
+		 */
+		vaultTab: string
+		/**
+		 * W​e​b​h​o​o​k​s
+		 */
+		webhookTab: string
+	}
 	vaultSettings: {
 		/**
 		 * V​a​u​l​t
@@ -880,6 +906,32 @@ export type TranslationFunctions = {
 		 * Blog Posts
 		 */
 		blogPosts: () => LocalizedString
+	}
+	settingsDialog: {
+		/**
+		 * Settings
+		 */
+		title: () => LocalizedString
+		/**
+		 * Preferences for this Busabase workspace.
+		 */
+		description: () => LocalizedString
+		/**
+		 * Language
+		 */
+		languageLabel: () => LocalizedString
+		/**
+		 * Language
+		 */
+		languageTab: () => LocalizedString
+		/**
+		 * Vault
+		 */
+		vaultTab: () => LocalizedString
+		/**
+		 * Webhooks
+		 */
+		webhookTab: () => LocalizedString
 	}
 	vaultSettings: {
 		/**

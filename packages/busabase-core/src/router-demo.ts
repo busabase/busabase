@@ -15,6 +15,7 @@ import {
   demoGetFileNode,
   demoGetFolder,
   demoGetRecord,
+  demoIsDescendant,
   demoListAgentTasks,
   demoListAssets,
   demoListAuditEvents,
@@ -69,7 +70,13 @@ export const busabaseDemoRouter = os.router({
     throw demoUnsupported("Unified grep");
   }),
   nodes: {
+    // Demo mode ignores `parentId`/`depth` — the seeded tree is always fully
+    // in memory already, so there's nothing to lazily bound (see
+    // `demoListNodes`'s doc comment in logic/demo-store.ts).
     list: os.nodes.list.handler(() => demoListNodes()),
+    isDescendant: os.nodes.isDescendant.handler(({ input }) => ({
+      isDescendant: demoIsDescendant(input.nodeId, input.potentialAncestorId),
+    })),
     listArchived: os.nodes.listArchived.handler(() => []),
     createChangeRequest: os.nodes.createChangeRequest.handler(() => {
       throw demoUnsupported("Node tree change request");

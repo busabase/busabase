@@ -1,24 +1,42 @@
 "use client";
 
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";
 import type { AirAppVO } from "busabase-contract/types";
 import { Button } from "kui/button";
-import { Loader2, Play, RotateCcw } from "lucide-react";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "kui/dialog";
+import { Loader2, Maximize2, PanelRightOpen, Play, RotateCcw } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useCoreI18n } from "../../../i18n";
+import { fmt, useCoreI18n } from "../../../i18n";
+import { EmptyState } from "../../dashboard/components/primitives";
+import { NodeDetailSkeleton } from "../../dashboard/components/skeletons";
+import type { SidePanelTabProps } from "../../dashboard/side-panel-registry";
+import { useSidePanelStore } from "../../dashboard/store/side-panel-store";
+import {
+  type AirAppRunStatus,
+  IDLE_ENTRY,
+  useAirAppRunnerStore,
+} from "../store/airapp-runner-store";
 import { NodepodRunner } from "./runners/nodepod-runner";
-import type { AirAppRunner } from "./runners/types";
-
-type RunStatus = "idle" | "loading-files" | "installing" | "starting" | "ready" | "error";
-
-const MAX_LOG_LINES = 2000;
 
 /**
  * Owns the Nodepod runner lifecycle (mount/install/start, log streaming,
  * preview URL) independent of which tab is currently visible. Called once at
  * the AirAppDetailView level so switching between the App/Files/Logs tabs
  * never unmounts this state and never disposes a live running app.
+ *
+ * The actual run state lives in `useAirAppRunnerStore`, keyed by node id —
+ * NOT in component-local `useState`/`useRef` — because the node-detail
+ * registry (`dashboard/node-detail-registry.tsx`) always hands back the same
+ * `AirAppDetailView` function reference for every airapp node, so React never
+ * unmounts it when the user switches between two different airapp nodes
+ * (only the `slug` prop changes). Component-local state would therefore leak
+ * across nodes unless explicitly reset — and the previous implementation did
+ * that reset by disposing the runner on every node-id change, which also
+ * killed a still-running app the moment the user switched away and back.
+ * Keying the store by node id gives every node its own independent state
+ * with no disposal needed on switch; disposal now only happens via the
+ * explicit `disposeEntry` action (see `NodeDeleteButton`'s `onDeleted`).
  */
 export function useAirAppRunner({
   orpc,
@@ -29,57 +47,29 @@ export function useAirAppRunner({
 }) {
   const messages = useCoreI18n();
   const queryClient = useQueryClient();
-  const [status, setStatus] = useState<RunStatus>("idle");
-  const [logLines, setLogLines] = useState<string[]>([]);
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const runnerRef = useRef<AirAppRunner | null>(null);
+  const nodeId = airapp?.node.id ?? null;
 
-  const appendLog = useCallback((chunk: string) => {
-    setLogLines((prev) => {
-      const next = [...prev, chunk];
-      return next.length > MAX_LOG_LINES ? next.slice(next.length - MAX_LOG_LINES) : next;
-    });
-  }, []);
-
-  // Tear down the runner (kill processes, release the VFS) on unmount or when
-  // switching to a different airapp node.
-  useEffect(
-    () => () => {
-      runnerRef.current?.dispose();
-      runnerRef.current = null;
-    },
-    [],
+  const selectEntry = useCallback(
+    (state: ReturnType<typeof useAirAppRunnerStore.getState>) =>
+      nodeId ? (state.entries[nodeId] ?? IDLE_ENTRY) : IDLE_ENTRY,
+    [nodeId],
   );
-  // biome-ignore lint/correctness/useExhaustiveDependencies: reset run state on node change only
-  useEffect(() => {
-    runnerRef.current?.dispose();
-    runnerRef.current = null;
-    setStatus("idle");
-    setLogLines([]);
-    setPreviewUrl(null);
-    setError(null);
-  }, [airapp?.node.id]);
+  const entry = useAirAppRunnerStore(selectEntry);
+  const { status, logLines, previewUrl, error } = entry;
 
   const run = useCallback(async () => {
     if (!airapp) {
       return;
     }
-    setError(null);
-    setPreviewUrl(null);
-    setLogLines([]);
-    runnerRef.current?.dispose();
+    const currentNodeId = airapp.node.id;
+    const store = useAirAppRunnerStore.getState();
 
     const runner = new NodepodRunner();
-    runnerRef.current = runner;
-    runner.onLog(appendLog);
-    runner.onReady((url) => {
-      setPreviewUrl(url);
-      setStatus("ready");
-    });
+    store.beginRun(currentNodeId, runner);
+    runner.onLog((chunk) => useAirAppRunnerStore.getState().appendLog(currentNodeId, chunk));
+    runner.onReady((url) => useAirAppRunnerStore.getState().setPreviewUrl(currentNodeId, url));
 
     try {
-      setStatus("loading-files");
       // Mount every text (utf8) file into the runner's virtual filesystem;
       // asset-backed binary files (`encoding: "url"`, e.g. images) are skipped
       // for V1 — Nodepod's virtual fs takes `Uint8Array` too, so binary mounting
@@ -95,9 +85,9 @@ export function useAirAppRunner({
         }),
       );
       const files: Record<string, string> = {};
-      for (const entry of entries) {
-        if (entry) {
-          files[entry[0]] = entry[1];
+      for (const fileEntry of entries) {
+        if (fileEntry) {
+          files[fileEntry[0]] = fileEntry[1];
         }
       }
       if (Object.keys(files).length === 0) {
@@ -105,18 +95,22 @@ export function useAirAppRunner({
       }
 
       await runner.mount(files);
-      setStatus("installing");
+      useAirAppRunnerStore.getState().setStatus(currentNodeId, "installing");
       await runner.install();
-      setStatus("starting");
+      useAirAppRunnerStore.getState().setStatus(currentNodeId, "starting");
       await runner.start();
       // status flips to "ready" from the onReady callback once the dev server
       // actually reports listening — starting a process isn't the same as it
       // being reachable yet.
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : messages.airapp.runFailed);
-      setStatus("error");
+      useAirAppRunnerStore
+        .getState()
+        .setError(
+          currentNodeId,
+          caught instanceof Error ? caught.message : messages.airapp.runFailed,
+        );
     }
-  }, [appendLog, messages, airapp, orpc, queryClient]);
+  }, [messages, airapp, orpc, queryClient]);
 
   const isBusy = status === "loading-files" || status === "installing" || status === "starting";
 
@@ -125,18 +119,39 @@ export function useAirAppRunner({
 
 export type AirAppRunnerState = ReturnType<typeof useAirAppRunner>;
 
-/** "App" tab content: Run button + live preview iframe. */
-export function AirAppRunPreview({ runner }: { runner: AirAppRunnerState }) {
+/** "App" tab content: Run button + live preview iframe. `airapp` is optional
+ *  context (name/id) used by the "pin to side panel" and fullscreen actions —
+ *  the preview itself only needs `runner`. */
+export function AirAppRunPreview({
+  runner,
+  airapp,
+}: {
+  runner: AirAppRunnerState;
+  airapp: AirAppVO | null;
+}) {
   const messages = useCoreI18n();
   const { status, previewUrl, error, run, isBusy } = runner;
+  const [fullscreen, setFullscreen] = useState(false);
 
-  const statusLabel: Record<RunStatus, string> = {
+  const statusLabel: Record<AirAppRunStatus, string> = {
     idle: messages.airapp.statusIdle,
     "loading-files": messages.airapp.statusLoadingFiles,
     installing: messages.airapp.statusInstalling,
     starting: messages.airapp.statusStarting,
     ready: messages.airapp.statusReady,
     error: messages.airapp.statusError,
+  };
+
+  const pinToSidePanel = () => {
+    if (!airapp) {
+      return;
+    }
+    useSidePanelStore.getState().openTab({
+      id: `airapp-${airapp.node.id}`,
+      type: "airapp-preview",
+      title: airapp.node.name,
+      payload: { nodeId: airapp.node.id },
+    });
   };
 
   return (
@@ -148,24 +163,50 @@ export function AirAppRunPreview({ runner }: { runner: AirAppRunnerState }) {
           </span>
           <span className="text-muted-foreground/70">{statusLabel[status]}</span>
         </div>
-        <Button
-          disabled={isBusy}
-          onClick={() => void run()}
-          size="sm"
-          type="button"
-          variant={status === "ready" ? "outline" : "default"}
-        >
-          {isBusy ? (
-            <Loader2 className="size-3.5 animate-spin" />
-          ) : status === "ready" || status === "error" ? (
-            <RotateCcw className="size-3.5" />
-          ) : (
-            <Play className="size-3.5" />
-          )}
-          {status === "ready" || status === "error"
-            ? messages.airapp.runAgain
-            : messages.airapp.run}
-        </Button>
+        <div className="flex items-center gap-1.5">
+          {airapp ? (
+            <Button
+              aria-label={messages.airapp.pinToSidePanel}
+              onClick={pinToSidePanel}
+              size="icon-sm"
+              title={messages.airapp.pinToSidePanel}
+              type="button"
+              variant="outline"
+            >
+              <PanelRightOpen className="size-3.5" />
+            </Button>
+          ) : null}
+          {previewUrl ? (
+            <Button
+              aria-label={messages.recordView.expandFullscreen}
+              onClick={() => setFullscreen(true)}
+              size="icon-sm"
+              title={messages.recordView.expandFullscreen}
+              type="button"
+              variant="outline"
+            >
+              <Maximize2 className="size-3.5" />
+            </Button>
+          ) : null}
+          <Button
+            disabled={isBusy}
+            onClick={() => void run()}
+            size="sm"
+            type="button"
+            variant={status === "ready" ? "outline" : "default"}
+          >
+            {isBusy ? (
+              <Loader2 className="size-3.5 animate-spin" />
+            ) : status === "ready" || status === "error" ? (
+              <RotateCcw className="size-3.5" />
+            ) : (
+              <Play className="size-3.5" />
+            )}
+            {status === "ready" || status === "error"
+              ? messages.airapp.runAgain
+              : messages.airapp.run}
+          </Button>
+        </div>
       </div>
 
       {error ? (
@@ -192,6 +233,26 @@ export function AirAppRunPreview({ runner }: { runner: AirAppRunnerState }) {
           </div>
         )}
       </div>
+
+      {previewUrl ? (
+        <Dialog onOpenChange={setFullscreen} open={fullscreen}>
+          <DialogContent className="flex h-[90vh] max-h-[90vh] w-[95vw] max-w-[1040px] flex-col gap-0 overflow-hidden p-0">
+            <DialogHeader className="shrink-0 border-b px-5 py-3 text-left">
+              <DialogTitle className="text-sm font-medium">
+                {airapp?.node.name ?? messages.airapp.previewTitle}
+              </DialogTitle>
+            </DialogHeader>
+            <div className="min-h-0 flex-1">
+              <iframe
+                className="h-full w-full border-0 bg-white"
+                sandbox="allow-same-origin allow-scripts"
+                src={previewUrl}
+                title={messages.airapp.previewTitle}
+              />
+            </div>
+          </DialogContent>
+        </Dialog>
+      ) : null}
     </div>
   );
 }
@@ -222,4 +283,37 @@ export function AirAppRunLogs({ runner }: { runner: AirAppRunnerState }) {
       </pre>
     </div>
   );
+}
+
+/**
+ * Side-panel tab renderer for an airapp's live preview (registered as
+ * `"airapp-preview"` in `dashboard/components/node-detail-views.tsx`).
+ * Fetches the same airapp record `AirAppDetailView` fetches; because the run
+ * state (`useAirAppRunnerStore`) is keyed by node id, this instance
+ * automatically shares the same live run state as the main detail view for
+ * the same node — no extra wiring needed.
+ */
+export function AirAppSidePanelPreview({ orpc, payload }: SidePanelTabProps) {
+  const messages = useCoreI18n();
+  const { nodeId } = payload as { nodeId: string };
+
+  const airappQuery = useQuery({
+    ...orpc.airapps.get.queryOptions({ input: { nodeId } }),
+    enabled: Boolean(nodeId),
+  });
+  const airapp = airappQuery.data ?? null;
+  const runner = useAirAppRunner({ orpc, airapp });
+
+  if (!airapp) {
+    return airappQuery.isLoading ? (
+      <NodeDetailSkeleton variant="skill" />
+    ) : (
+      <EmptyState
+        body={fmt(messages.nodeDetail.airappNotFoundBody, { slug: nodeId })}
+        title={messages.nodeDetail.airappNotFoundTitle}
+      />
+    );
+  }
+
+  return <AirAppRunPreview airapp={airapp} runner={runner} />;
 }

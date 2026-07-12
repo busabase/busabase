@@ -32,6 +32,17 @@ export interface NodeOutput {
   updatedAt: string;
   baseId: string | null;
   children: NodeOutput[];
+  /**
+   * Whether this node has children beyond what `children` carries. Always
+   * accurate when the full subtree was loaded (equals `children.length > 0`).
+   * The one case it differs: a node sitting exactly at a `nodes.list` `depth`
+   * boundary — `children` is `[]` (not fetched) but `hasChildren` is `true`,
+   * telling the sidebar to render an expand affordance and lazy-fetch on
+   * click instead of rendering it as a leaf. Optional or missing means the
+   * caller can safely treat it as `children.length > 0` (which is exactly
+   * what it equals whenever it's omitted).
+   */
+  hasChildren?: boolean;
 }
 
 const nodeSchema: z.ZodType<NodeOutput> = z.lazy(() =>
@@ -55,8 +66,50 @@ const nodeSchema: z.ZodType<NodeOutput> = z.lazy(() =>
     updatedAt: z.string(),
     baseId: z.string().nullable(),
     children: z.array(nodeSchema),
+    hasChildren: z.boolean().optional(),
   }),
 );
+
+// Depth-bounded tree fetch (sidebar lazy-load). `parentId` omitted/null starts
+// from the space root (same envelope `nodes.list()` always returned: a single
+// wrapped root node); an explicit `parentId` starts from that node's CHILDREN
+// instead (the shape a folder's lazy "expand" wants to merge straight into
+// `NodeVO.children`). `depth` is capped at 5 — deep enough for any realistic
+// nested-folder workspace in one round trip chain, shallow enough that a
+// pathological/very deep tree can't turn one `nodes.list` call into an
+// unbounded number of level-by-level queries server-side. Leaving BOTH fields
+// unset is intentionally NOT the same as `{ depth: 2 }` — it is the legacy
+// "return the whole tree" call every existing non-sidebar caller (CLI, SDK,
+// mobile app, tests, busabase-cloud's own dashboard) already makes and keeps
+// making unchanged; only a caller that opts in by passing `parentId` and/or
+// `depth` gets the new bounded behavior.
+const listNodesInputSchema = z
+  .object({
+    parentId: z
+      .string()
+      .nullable()
+      .optional()
+      .describe("Node to start from. Omit or null to start from the space root."),
+    depth: z.coerce
+      .number()
+      .int()
+      .min(1)
+      .max(5)
+      .optional()
+      .describe(
+        "How many levels beneath the start point to eagerly include (default 2 once either field is set). Capped at 5.",
+      ),
+  })
+  .optional();
+
+const isDescendantInputSchema = z.object({
+  nodeId: z.string(),
+  potentialAncestorId: z.string(),
+});
+
+const isDescendantOutputSchema = z.object({
+  isDescendant: z.boolean(),
+});
 
 const userRefSchema = z.object({
   id: z.string(),
@@ -521,6 +574,9 @@ export {
   authInfoSchema,
   userRefSchema,
   nodeSchema,
+  listNodesInputSchema,
+  isDescendantInputSchema,
+  isDescendantOutputSchema,
   commitSchema,
   operationSchema,
   reviewSchema,

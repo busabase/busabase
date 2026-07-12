@@ -13,45 +13,98 @@ import type {
   WebhookRuleUpdateInput,
   WebhookRuleVO,
 } from "busabase-contract/domains/webhook/types";
-import { ConfirmActionDialog } from "busabase-core/dashboard/primitives";
 import { Badge } from "kui/badge";
 import { Button } from "kui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "kui/dialog";
+import { DialogFooter } from "kui/dialog";
 import { Input } from "kui/input";
 import { Label } from "kui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "kui/select";
-import { SidebarMenu, SidebarMenuButton, SidebarMenuItem } from "kui/sidebar";
+import { Skeleton } from "kui/skeleton";
 import { Switch } from "kui/switch";
 import { Textarea } from "kui/textarea";
-import {
-  ChevronDown,
-  ChevronUp,
-  Loader2,
-  Pencil,
-  Plus,
-  Save,
-  Trash2,
-  Webhook as WebhookIcon,
-  Zap,
-} from "lucide-react";
-import { useMemo, useState } from "react";
-import type { TranslationFunctions } from "~/i18n/i18n-types";
+import { ChevronDown, ChevronUp, Loader2, Pencil, Plus, Save, Trash2, Zap } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { ConfirmActionDialog } from "../../dashboard/components/primitives";
+
+// Mirrors exactly the fields used from `TranslationFunctions["webhookSettings"]`
+// in apps/busabase's i18n types. Defined locally so busabase-core does not
+// depend on any app-specific i18n alias.
+export interface WebhookSettingsLabels {
+  title: () => string;
+  description: () => string;
+  openButton: () => string;
+  cancel: () => string;
+  saving: () => string;
+  saveChanges: () => string;
+  createRule: () => string;
+  addRule: () => string;
+  saved: () => string;
+  saveFailed: () => string;
+  deleteFailed: () => string;
+  testFireSuccess: () => string;
+  testFireDeliveryFailed: () => string;
+  testFireRequestFailed: () => string;
+  deliveriesLoading: () => string;
+  deliveriesLoadFailed: () => string;
+  noDeliveries: () => string;
+  rulesLoading: () => string;
+  rulesLoadFailed: () => string;
+  noRules: () => string;
+  enabledLabel: () => string;
+  testNowAction: () => string;
+  hideLogAction: () => string;
+  viewLogAction: () => string;
+  editRuleAction: () => string;
+  deleteRuleAction: () => string;
+  nameLabel: () => string;
+  namePlaceholder: () => string;
+  eventTypeLabel: () => string;
+  eventTypeRecordCreated: () => string;
+  eventTypeAiMention: () => string;
+  eventTypeChangesRequested: () => string;
+  eventTypeAssetUploaded: () => string;
+  baseScopeLabel: () => string;
+  baseScopeAll: () => string;
+  actionKindLabel: () => string;
+  actionKindWebhook: () => string;
+  actionKindNotifyAgent: () => string;
+  actionKindRunFunction: () => string;
+  functionCodeLabel: () => string;
+  functionCodePlaceholder: () => string;
+  functionHelperCaption: () => string;
+  functionTimeoutLabel: () => string;
+  targetUrlLabel: () => string;
+  targetUrlPlaceholder: () => string;
+  secretLabel: () => string;
+  secretConfigured: () => string;
+  secretKeepPlaceholder: () => string;
+  secretPlaceholder: () => string;
+  statusSuccess: () => string;
+  statusFailed: () => string;
+  statusSkipped: () => string;
+  statusNeverRun: () => string;
+  deleteConfirmBody: (args: { name: string }) => string;
+  deleteConfirmAction: () => string;
+  deleteConfirmTitle: () => string;
+}
 
 interface Props {
   labels: WebhookSettingsLabels;
-  open?: boolean;
-  onOpenChange?: (open: boolean) => void;
-  showTrigger?: boolean;
+  /** Whether the panel is currently visible/mounted — gates data fetching and
+   * resets the inline form/expanded-log state when it flips back to false,
+   * matching the previous dialog-close behavior. */
+  active?: boolean;
+  /** Base path for the oRPC RPC endpoint this panel talks to. OSS mounts the
+   * busabase-core contract at `/api/rpc`; multi-tenant hosts (e.g.
+   * busabase-cloud) mount it under `/api/rpc/core` and route it through a
+   * space-scoped AsyncLocalStorage context. Mirrors `apiBasePath` on
+   * `busabase-core/domains/dashboard`'s shared component. */
+  apiBasePath?: string;
+  /** Query-key namespace so per-space caches never collide in a multi-tenant
+   * host. Mirrors `cacheSpaceKey` on the shared dashboard component; OSS
+   * leaves it at the default. */
+  cacheSpaceKey?: string;
 }
-
-export type WebhookSettingsLabels = TranslationFunctions["webhookSettings"];
 
 // Sentinel used for the "All bases" select option — Radix `Select.Item` can't
 // take an empty-string value, and the wire representation of "space-wide" is
@@ -207,26 +260,97 @@ function formatRelativeTime(iso: string): string {
   return rtf.format(-diffDay, "day");
 }
 
-export function WebhookSettingsDialog({
+const WEBHOOK_RULE_ROW_SKELETON_IDS = [
+  "webhook-rule-skel-1",
+  "webhook-rule-skel-2",
+  "webhook-rule-skel-3",
+];
+
+// Mirrors `renderRuleRow` below (name + type/action/status badges, plus a row
+// of icon-button actions) so the top-level rules list shimmers into place
+// instead of showing a spinner over an otherwise-empty dialog.
+function WebhookRulesSkeleton() {
+  return (
+    <div className="space-y-3" aria-hidden>
+      {WEBHOOK_RULE_ROW_SKELETON_IDS.map((id) => (
+        <div key={id} className="rounded-md border bg-background p-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex min-w-0 flex-wrap items-center gap-2">
+              <Skeleton className="h-4 w-32" />
+              <Skeleton className="h-5 w-20 rounded-full" />
+              <Skeleton className="h-5 w-16 rounded-full" />
+            </div>
+            <div className="flex shrink-0 items-center gap-2">
+              <Skeleton className="h-5 w-9 rounded-full" />
+              <Skeleton className="h-8 w-8 rounded-md" />
+              <Skeleton className="h-8 w-8 rounded-md" />
+              <Skeleton className="h-8 w-8 rounded-md" />
+              <Skeleton className="h-8 w-8 rounded-md" />
+            </div>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+const WEBHOOK_DELIVERY_ROW_SKELETON_IDS = ["webhook-delivery-skel-1", "webhook-delivery-skel-2"];
+
+// Nested, denser counterpart to `WebhookRulesSkeleton` above — mirrors the
+// smaller delivery rows rendered by `renderDeliveries` inside an expanded
+// rule (status badge + http status + timestamp), with fewer/thinner rows
+// since this sits inside an already-expanded parent row.
+function WebhookDeliveriesSkeleton() {
+  return (
+    <div className="space-y-2" aria-hidden>
+      {WEBHOOK_DELIVERY_ROW_SKELETON_IDS.map((id) => (
+        <div key={id} className="rounded-md border bg-muted/10 p-2">
+          <div className="flex items-center gap-2">
+            <Skeleton className="h-4 w-16 rounded-full" />
+            <Skeleton className="h-3 w-8" />
+            <Skeleton className="ml-auto h-3 w-14" />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * Presentational panel with the full webhook settings feature set: rule
+ * list, create/edit form, delivery log, test-fire, and delete confirmation.
+ * Contains its own data-fetching (OSS is currently the only real consumer).
+ * Callers are responsible for the outer chrome (Dialog, Tab body, etc.) and
+ * for gating visibility via `active`.
+ */
+export function WebhookSettingsPanel({
   labels,
-  open: controlledOpen,
-  onOpenChange,
-  showTrigger = true,
+  active = true,
+  apiBasePath = "/api/rpc",
+  cacheSpaceKey = "local",
 }: Props) {
-  const [internalOpen, setInternalOpen] = useState(false);
-  const open = controlledOpen ?? internalOpen;
-  const setOpen = onOpenChange ?? setInternalOpen;
   const [formOpen, setFormOpen] = useState(false);
   const [form, setForm] = useState<FormState>(emptyForm());
   const [expandedRuleId, setExpandedRuleId] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<WebhookRuleVO | null>(null);
   const [message, setMessage] = useState<string | null>(null);
 
+  useEffect(() => {
+    if (!active) {
+      setFormOpen(false);
+      setForm(emptyForm());
+      setExpandedRuleId(null);
+    }
+  }, [active]);
+
   const queryClient = useQueryClient();
-  const orpc = useMemo(() => createBusabaseQueryUtils("/api/rpc"), []);
+  const orpc = useMemo(
+    () => createBusabaseQueryUtils(apiBasePath, {}, cacheSpaceKey),
+    [apiBasePath, cacheSpaceKey],
+  );
   const rulesQueryOptions = useMemo(() => orpc.webhooks.list.queryOptions({}), [orpc]);
-  const rulesQuery = useQuery({ ...rulesQueryOptions, enabled: open });
-  const basesQuery = useQuery({ ...orpc.bases.list.queryOptions({}), enabled: open });
+  const rulesQuery = useQuery({ ...rulesQueryOptions, enabled: active });
+  const basesQuery = useQuery({ ...orpc.bases.list.queryOptions({}), enabled: active });
   const deliveriesQuery = useQuery({
     ...orpc.webhooks.deliveries.queryOptions({
       input: { ruleId: expandedRuleId ?? "", limit: 10 },
@@ -322,14 +446,9 @@ export function WebhookSettingsDialog({
 
   const saving = createMutation.isPending || updateMutation.isPending;
 
-  const renderDeliveries = (ruleId: string) => {
+  const renderDeliveries = (_ruleId: string) => {
     if (deliveriesQuery.isPending) {
-      return (
-        <div className="flex min-h-16 items-center justify-center text-xs text-muted-foreground">
-          <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />
-          {labels.deliveriesLoading()}
-        </div>
-      );
+      return <WebhookDeliveriesSkeleton />;
     }
     if (deliveriesQuery.isError) {
       return (
@@ -438,12 +557,7 @@ export function WebhookSettingsDialog({
 
   const renderList = () => {
     if (rulesQuery.isPending) {
-      return (
-        <div className="flex min-h-32 items-center justify-center text-sm text-muted-foreground">
-          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-          {labels.rulesLoading()}
-        </div>
-      );
+      return <WebhookRulesSkeleton />;
     }
     if (rulesQuery.isError) {
       return (
@@ -618,71 +732,32 @@ export function WebhookSettingsDialog({
 
   return (
     <>
-      {showTrigger ? (
-        <SidebarMenu>
-          <SidebarMenuItem>
-            <SidebarMenuButton
-              className="mx-2 w-[calc(100%-1rem)]"
-              onClick={() => setOpen(true)}
-              tooltip={labels.openButton()}
-            >
-              <WebhookIcon />
-              <span>{labels.openButton()}</span>
-            </SidebarMenuButton>
-          </SidebarMenuItem>
-        </SidebarMenu>
-      ) : null}
-      <Dialog
-        open={open}
-        onOpenChange={(next) => {
-          setOpen(next);
-          if (!next) {
-            closeForm();
-            setExpandedRuleId(null);
-          }
-        }}
-      >
-        <DialogContent className="max-h-[88vh] overflow-hidden sm:max-w-3xl">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <WebhookIcon className="h-5 w-5" />
-              {labels.title()}
-            </DialogTitle>
-            <DialogDescription>{labels.description()}</DialogDescription>
-          </DialogHeader>
+      <div className="min-h-0 space-y-4 overflow-y-auto pr-1">
+        {formOpen ? renderForm() : renderList()}
+        {message ? <p className="text-sm text-muted-foreground">{message}</p> : null}
+      </div>
 
-          <div className="min-h-0 space-y-4 overflow-y-auto pr-1">
-            {formOpen ? renderForm() : renderList()}
-            {message ? <p className="text-sm text-muted-foreground">{message}</p> : null}
-          </div>
-
-          <DialogFooter className="gap-2 sm:justify-between sm:space-x-0">
-            {formOpen ? (
-              <>
-                <Button variant="outline" type="button" onClick={closeForm} disabled={saving}>
-                  {labels.cancel()}
-                </Button>
-                <Button type="button" onClick={save} disabled={saving}>
-                  {saving ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <Save className="h-4 w-4" />
-                  )}
-                  {saving ? labels.saving() : form.id ? labels.saveChanges() : labels.createRule()}
-                </Button>
-              </>
-            ) : (
-              <>
-                <span />
-                <Button variant="outline" type="button" onClick={openCreateForm}>
-                  <Plus className="h-4 w-4" />
-                  {labels.addRule()}
-                </Button>
-              </>
-            )}
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <DialogFooter className="gap-2 sm:justify-between sm:space-x-0">
+        {formOpen ? (
+          <>
+            <Button variant="outline" type="button" onClick={closeForm} disabled={saving}>
+              {labels.cancel()}
+            </Button>
+            <Button type="button" onClick={save} disabled={saving}>
+              {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+              {saving ? labels.saving() : form.id ? labels.saveChanges() : labels.createRule()}
+            </Button>
+          </>
+        ) : (
+          <>
+            <span />
+            <Button variant="outline" type="button" onClick={openCreateForm}>
+              <Plus className="h-4 w-4" />
+              {labels.addRule()}
+            </Button>
+          </>
+        )}
+      </DialogFooter>
 
       <ConfirmActionDialog
         body={confirmDelete ? labels.deleteConfirmBody({ name: confirmDelete.name }) : ""}

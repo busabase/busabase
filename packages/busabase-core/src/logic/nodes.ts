@@ -128,21 +128,193 @@ const assertValidNodeRefs = (operations: NodeOperationInput[]) => {
   });
 };
 
-export const listNodes = async (): Promise<NodeVO[]> => {
+export interface ListNodesInput {
+  parentId?: string | null;
+  depth?: number;
+}
+
+const DEFAULT_NODE_LIST_DEPTH = 2;
+// A depth-bounded fetch is `depth` sequential level-by-level round trips (see
+// listNodesBounded below) — no `WITH RECURSIVE` precedent exists elsewhere in
+// this codebase, and a handful of round trips per lazy-expand/eager-prefetch
+// call is easy to review and plenty fast for a sidebar tree. The cap keeps a
+// caller from turning one `nodes.list` request into an unbounded number of
+// them against a pathologically deep tree.
+const MAX_NODE_LIST_DEPTH = 5;
+
+const clampDepth = (depth: number | undefined): number =>
+  Math.min(Math.max(Math.trunc(depth ?? DEFAULT_NODE_LIST_DEPTH), 1), MAX_NODE_LIST_DEPTH);
+
+const fetchBaseRowsForNodeIds = async (db: Awaited<ReturnType<typeof getDb>>, nodeIds: string[]) =>
+  nodeIds.length
+    ? db.select().from(busabaseBases).where(inArray(busabaseBases.nodeId, nodeIds))
+    : [];
+
+/** One level's non-archived children of `parentIds` (empty input short-circuits). */
+const fetchChildNodeRows = async (
+  db: Awaited<ReturnType<typeof getDb>>,
+  spaceId: string,
+  parentIds: string[],
+) =>
+  parentIds.length
+    ? db
+        .select()
+        .from(busabaseNodes)
+        .where(
+          and(
+            eq(busabaseNodes.spaceId, spaceId),
+            inArray(busabaseNodes.parentId, parentIds),
+            isNull(busabaseNodes.archivedAt),
+          ),
+        )
+        .orderBy(asc(busabaseNodes.position), asc(busabaseNodes.createdAt))
+    : [];
+
+/** The space-root row(s) — `parentId IS NULL` (today, always exactly one per space). */
+const fetchRootNodeRows = async (db: Awaited<ReturnType<typeof getDb>>, spaceId: string) =>
+  db
+    .select()
+    .from(busabaseNodes)
+    .where(and(eq(busabaseNodes.spaceId, spaceId), isNull(busabaseNodes.parentId)))
+    .orderBy(asc(busabaseNodes.position), asc(busabaseNodes.createdAt));
+
+/**
+ * Which of `ids` have at least one (non-archived) child — a single grouped
+ * existence query, NOT one query per node, so annotating `hasChildren` on a
+ * depth boundary stays O(1) round trips regardless of how many nodes sit at
+ * that boundary.
+ */
+const idsWithChildren = async (
+  db: Awaited<ReturnType<typeof getDb>>,
+  spaceId: string,
+  ids: string[],
+): Promise<Set<string>> => {
+  if (ids.length === 0) return new Set();
+  const rows = await db
+    .select({ parentId: busabaseNodes.parentId })
+    .from(busabaseNodes)
+    .where(
+      and(
+        eq(busabaseNodes.spaceId, spaceId),
+        inArray(busabaseNodes.parentId, ids),
+        isNull(busabaseNodes.archivedAt),
+      ),
+    )
+    .groupBy(busabaseNodes.parentId);
+  return new Set(rows.map((row) => row.parentId).filter((id): id is string => id !== null));
+};
+
+/**
+ * Depth-bounded fetch, `depth` levels below `parentId` (or the space root
+ * when `parentId` is null): a `depth`-round-trip level-by-level BFS (bounded,
+ * see MAX_NODE_LIST_DEPTH above) instead of one unbounded query.
+ *
+ * `parentId === null`: mirrors the legacy envelope exactly — returns the
+ * single wrapped root node, with `children` populated `depth` levels beneath
+ * it (so `depth: 2` = root + its children + its grandchildren).
+ *
+ * `parentId` given: returns that node's CHILDREN directly (not wrapped),
+ * each populated `depth - 1` further levels beneath — the shape a sidebar's
+ * lazy "expand this folder" wants to merge straight into `NodeVO.children`.
+ *
+ * Either way, `hasChildren` is exact for every returned node except the
+ * deepest fetched level, where it's backfilled via `idsWithChildren`.
+ */
+const listNodesBounded = async (
+  db: Awaited<ReturnType<typeof getDb>>,
+  spaceId: string,
+  parentId: string | null,
+  rawDepth: number | undefined,
+): Promise<NodeVO[]> => {
+  const depth = clampDepth(rawDepth);
+  const rootRows = parentId === null ? await fetchRootNodeRows(db, spaceId) : [];
+  const allRows = [...rootRows];
+  let frontier = parentId === null ? rootRows.map((row) => row.id) : [parentId];
+  let deepestLevelIds = parentId === null ? frontier : [];
+
+  for (let level = 0; level < depth && frontier.length > 0; level++) {
+    const rows = await fetchChildNodeRows(db, spaceId, frontier);
+    allRows.push(...rows);
+    deepestLevelIds = rows.map((row) => row.id);
+    frontier = deepestLevelIds;
+  }
+
+  const [hasChildrenIds, baseRows] = await Promise.all([
+    idsWithChildren(db, spaceId, deepestLevelIds),
+    fetchBaseRowsForNodeIds(
+      db,
+      allRows.map((row) => row.id),
+    ),
+  ]);
+
+  return buildNodeTree(allRows, baseRows, {
+    rootParentId: parentId,
+    forceHasChildrenIds: hasChildrenIds,
+  });
+};
+
+export const listNodes = async (input?: ListNodesInput): Promise<NodeVO[]> => {
   await ensureReady();
   const db = await getDb();
   const spaceId = getContextSpaceId();
-  const [nodeRows, baseRows] = await Promise.all([
-    db
-      .select()
+
+  // Legacy full-tree call — preserved byte-for-byte (one unbounded query, no
+  // level-by-level round trips) for every existing caller that hasn't opted
+  // into the new bounded contract (CLI, SDK, mobile app, tests, and
+  // busabase-cloud's own dashboard, none of which implement lazy-expand yet).
+  // Only a caller that explicitly sets `parentId` and/or `depth` gets the
+  // depth-bounded behavior below.
+  if (input?.parentId === undefined && input?.depth === undefined) {
+    const [nodeRows, baseRows] = await Promise.all([
+      db
+        .select()
+        .from(busabaseNodes)
+        // Exclude archived nodes (archived base nodes are kept but must leave the
+        // tree, mirroring how bases.list hides archived bases).
+        .where(and(eq(busabaseNodes.spaceId, spaceId), isNull(busabaseNodes.archivedAt)))
+        .orderBy(asc(busabaseNodes.position), asc(busabaseNodes.createdAt)),
+      db.select().from(busabaseBases).where(eq(busabaseBases.spaceId, spaceId)),
+    ]);
+    return buildNodeTree(nodeRows, baseRows);
+  }
+
+  return listNodesBounded(db, spaceId, input.parentId ?? null, input.depth);
+};
+
+/**
+ * Server-authoritative ancestor check: does `nodeId`'s `parentId` chain reach
+ * `potentialAncestorId`? Walks one row at a time (workspace trees are
+ * shallow; no recursive-CTE precedent elsewhere in this codebase — see
+ * `listNodesBounded` above). A node is never its own descendant.
+ *
+ * Backs the sidebar's drag-and-drop cross-branch cycle guard: with the tree
+ * now lazily loaded beyond the eager-prefetch depth, a purely client-side
+ * walk over whatever happens to be loaded can no longer be trusted to catch
+ * "drop this folder into one of its own descendants" — the descendant in
+ * question might not be loaded client-side at all.
+ */
+export const isDescendantOf = async (
+  db: Awaited<ReturnType<typeof getDb>>,
+  spaceId: string,
+  nodeId: string,
+  potentialAncestorId: string,
+): Promise<boolean> => {
+  if (nodeId === potentialAncestorId) return false;
+  const visited = new Set<string>();
+  let cursorId: string | null = nodeId;
+  while (cursorId) {
+    if (visited.has(cursorId)) return false; // cycle guard against corrupt data
+    visited.add(cursorId);
+    const [row] = await db
+      .select({ parentId: busabaseNodes.parentId })
       .from(busabaseNodes)
-      // Exclude archived nodes (archived base nodes are kept but must leave the
-      // tree, mirroring how bases.list hides archived bases).
-      .where(and(eq(busabaseNodes.spaceId, spaceId), isNull(busabaseNodes.archivedAt)))
-      .orderBy(asc(busabaseNodes.position), asc(busabaseNodes.createdAt)),
-    db.select().from(busabaseBases).where(eq(busabaseBases.spaceId, spaceId)),
-  ]);
-  return buildNodeTree(nodeRows, baseRows);
+      .where(and(eq(busabaseNodes.id, cursorId), eq(busabaseNodes.spaceId, spaceId)))
+      .limit(1);
+    if (!row) return false;
+    if (row.parentId === potentialAncestorId) return true;
+    cursorId = row.parentId;
+  }
+  return false;
 };
 
 /**

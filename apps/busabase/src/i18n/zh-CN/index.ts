@@ -31,6 +31,14 @@ const zhCN: Translation = {
     base: "数据库",
     blogPosts: "博客文章",
   },
+  settingsDialog: {
+    title: "设置",
+    description: "此 Busabase 工作区的偏好设置。",
+    languageLabel: "语言",
+    languageTab: "语言",
+    vaultTab: "保险库",
+    webhookTab: "Webhook",
+  },
   vaultSettings: {
     title: "保险库",
     description: "为调用此 Busabase 实例的智能体、MCP 服务和 API 工具保存密钥与变量。",
