@@ -38,6 +38,7 @@ const zhCN: Translation = {
     languageTab: "语言",
     vaultTab: "保险库",
     webhookTab: "Webhook",
+    cloudConnectTab: "云端连接",
   },
   vaultSettings: {
     title: "保险库",
@@ -132,6 +133,27 @@ const zhCN: Translation = {
     deliveriesLoading: "正在加载投递记录...",
     deliveriesLoadFailed: "加载投递记录失败",
     noDeliveries: "还没有投递记录。",
+  },
+  cloudConnect: {
+    title: "云端连接",
+    description:
+      "将此本地实例连接到 Busabase Cloud，它就会作为一个远程空间出现，可从任意设备访问。",
+    statusLabel: "状态",
+    statusConnected: "已连接",
+    statusConnecting: "连接中...",
+    statusReconnecting: "重新连接中...",
+    statusError: "出错",
+    statusDisconnected: "未连接",
+    cloudUrlLabel: "云端地址",
+    tunnelIdLabel: "隧道 ID",
+    connectButton: "连接到 Busabase Cloud",
+    disconnectButton: "断开连接",
+    connectFailed: "启动云端连接流程失败，请重试。",
+    disconnectFailed: "断开连接失败，请重试。",
+    popupBlocked: "浏览器拦截了登录弹窗，请允许弹窗后重试。",
+    aboutTitle: "关于云端连接",
+    aboutDescription:
+      "登录会在弹窗中打开 Busabase Cloud，并生成一个仅作用于此隧道的凭证——不是你完整的云端账号会话。断开连接会撤销该凭证。",
   },
   marketing: {
     rootDescription: "Busabase 的开源本地评审引擎。",

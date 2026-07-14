@@ -38,6 +38,7 @@ const en: BaseTranslation = {
     languageTab: "Language",
     vaultTab: "Vault",
     webhookTab: "Webhooks",
+    cloudConnectTab: "Cloud Connect",
   },
   vaultSettings: {
     title: "Vault",
@@ -135,6 +136,27 @@ const en: BaseTranslation = {
     deliveriesLoading: "Loading deliveries...",
     deliveriesLoadFailed: "Failed to load deliveries",
     noDeliveries: "No deliveries yet.",
+  },
+  cloudConnect: {
+    title: "Cloud Connect",
+    description:
+      "Connect this local instance to Busabase Cloud so it shows up as a remote space you can reach from any device.",
+    statusLabel: "Status",
+    statusConnected: "Connected",
+    statusConnecting: "Connecting...",
+    statusReconnecting: "Reconnecting...",
+    statusError: "Error",
+    statusDisconnected: "Disconnected",
+    cloudUrlLabel: "Cloud URL",
+    tunnelIdLabel: "Tunnel ID",
+    connectButton: "Connect to Busabase Cloud",
+    disconnectButton: "Disconnect",
+    connectFailed: "Failed to start the Cloud connect flow. Please try again.",
+    disconnectFailed: "Failed to disconnect. Please try again.",
+    popupBlocked: "Your browser blocked the sign-in popup. Please allow popups and try again.",
+    aboutTitle: "About Cloud Connect",
+    aboutDescription:
+      "Signing in opens Busabase Cloud in a popup and mints a credential scoped only to this tunnel — not your full Cloud account session. Disconnecting revokes it.",
   },
   marketing: {
     rootDescription: "Open-source local review engine for Busabase.",

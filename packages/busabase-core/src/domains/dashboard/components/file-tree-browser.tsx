@@ -14,8 +14,9 @@ import { Trash2 } from "lucide-react";
 import type { ReactNode } from "react";
 import { useState } from "react";
 import { toast } from "sonner";
-import { useLocation } from "wouter";
+import { useLocation, useSearch } from "wouter";
 import { fmt, useCoreI18n } from "../../../i18n";
+import { mergeSearchIntoHref } from "../helpers/link-search";
 import type { SkillCodeLanguage } from "./field-preview";
 import { ConfirmActionDialog } from "./primitives";
 
@@ -49,7 +50,9 @@ export function NodeDeleteButton({
   onDeleted?: () => void;
 }) {
   const messages = useCoreI18n();
-  const [, setLocation] = useLocation();
+  const [, rawSetLocation] = useLocation();
+  const currentSearch = useSearch();
+  const setLocation = (to: string) => rawSetLocation(mergeSearchIntoHref(to, currentSearch));
   const queryClient = useQueryClient();
   const [confirming, setConfirming] = useState(false);
   const createCr = useMutation(orpc.nodes.createChangeRequest.mutationOptions());

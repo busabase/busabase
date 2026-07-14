@@ -1418,6 +1418,72 @@ describe("busabase-cli commands", () => {
       ]);
     });
 
+    it("routes the `search` command to GET /search with query/limit/offset", async () => {
+      const calls: Array<{ method: string; url: string }> = [];
+      global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const request = input instanceof Request ? input : new Request(input, init);
+        calls.push({ method: request.method, url: request.url });
+        return jsonResponse({ results: [], hasMore: false, limit: 20, offset: 0, query: "foo" });
+      }) as typeof fetch;
+
+      const exitCode = await runCli([
+        "--base-url",
+        "http://localhost:15419",
+        "--output",
+        "json",
+        "search",
+        "--query",
+        "foo",
+        "--limit",
+        "20",
+        "--offset",
+        "0",
+      ]);
+
+      expect(exitCode).toBe(0);
+      expect(calls).toEqual([
+        {
+          method: "GET",
+          url: "http://localhost:15419/api/v1/search?query=foo&limit=20&offset=0",
+        },
+      ]);
+    });
+
+    it("routes the `search` command's --sources flag as repeated query params", async () => {
+      const calls: Array<{ method: string; url: string }> = [];
+      global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const request = input instanceof Request ? input : new Request(input, init);
+        calls.push({ method: request.method, url: request.url });
+        return jsonResponse({ results: [], hasMore: false, limit: 20, offset: 0, query: "foo" });
+      }) as typeof fetch;
+
+      const exitCode = await runCli([
+        "--base-url",
+        "http://localhost:15419",
+        "--output",
+        "json",
+        "search",
+        "--query",
+        "foo",
+        "--sources",
+        "files",
+        "records",
+      ]);
+
+      expect(exitCode).toBe(0);
+      // The oRPC client serializes an array input as bracket-indexed query
+      // params (sources[0]=files&sources[1]=records), not repeated keys —
+      // and the server accepts both shapes (see
+      // search-sources-openapi.test.ts for the repeated-key shape a human
+      // would type by hand with curl).
+      expect(calls).toEqual([
+        {
+          method: "GET",
+          url: "http://localhost:15419/api/v1/search?query=foo&sources%5B0%5D=files&sources%5B1%5D=records",
+        },
+      ]);
+    });
+
     it("routes the top-level `grep` command (Unified Grep) to POST /grep, not /assets/grep", async () => {
       const calls: Array<{ body: unknown; method: string; url: string }> = [];
       global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {

@@ -593,6 +593,26 @@ const gotoShot = async (url) => {
   await page.goto(url, { waitUntil: "commit", timeout: 60000 });
 };
 
+const waitForImages = async () => {
+  await page.waitForFunction(
+    () =>
+      [...document.images].every((image) => {
+        const rect = image.getBoundingClientRect();
+        const intersectsViewport =
+          rect.bottom > 0 &&
+          rect.right > 0 &&
+          rect.top < window.innerHeight &&
+          rect.left < window.innerWidth;
+        return (
+          !intersectsViewport ||
+          (image.complete && image.naturalWidth > 0 && image.naturalHeight > 0)
+        );
+      }),
+    undefined,
+    { timeout: 15000 },
+  );
+};
+
 for (const shot of LANG === "en" ? shots : []) {
   await gotoShot(shot.url);
   try {
@@ -600,6 +620,7 @@ for (const shot of LANG === "en" ? shots : []) {
   } catch {
     console.warn(`! waitFor missed for ${shot.file}: ${shot.waitFor}`);
   }
+  await waitForImages();
   await page.waitForTimeout(1000);
   const out = path.join(RAW_OUT, shot.file);
   await page.screenshot({ path: out });
@@ -618,6 +639,7 @@ if (LANG === "en") {
   } catch {
     console.warn("! Agent Integration dialog did not open");
   }
+  await waitForImages();
   for (const { tab, file } of dialogShots) {
     await page.getByRole("tab", { name: new RegExp(`^${tab}$`, "i") }).click();
     await page.waitForTimeout(600);
@@ -637,12 +659,14 @@ for (const scenario of scenarioShots) {
     await gotoShot(url);
     // review pages show the CR author as a title-cased display name, not the
     // raw "<x>-agent" handle — wait on the stable "What will change" heading.
-    const waitFor = cell.kind === "review" ? "text=What will change" : cell.waitFor;
+    const waitFor =
+      LANG !== "en" ? "main" : cell.kind === "review" ? "text=What will change" : cell.waitFor;
     try {
       await page.waitForSelector(waitFor, { timeout: 15000 });
     } catch {
       console.warn(`! waitFor missed for ${file}: ${waitFor}`);
     }
+    await waitForImages();
     await page.waitForTimeout(1000);
     await page.screenshot({ path: path.join(SCENARIO_OUT, file) });
     console.log(`✓ scenarios/${file}`);

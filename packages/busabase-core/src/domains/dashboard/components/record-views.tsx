@@ -21,6 +21,7 @@ import {
 } from "lucide-react";
 import { SPALink as Link } from "openlib/ui/dashboard";
 import { useEffect, useState } from "react";
+import { useSearch } from "wouter";
 import { fmt, useCoreI18n, useIString } from "../../../i18n";
 import {
   fieldDisplayKind,
@@ -52,6 +53,7 @@ import {
   formatUserRefLabel,
   shortIdentifier,
 } from "../helpers/format";
+import { mergeSearchIntoHref, useHrefWithCurrentSearch } from "../helpers/link-search";
 import type { RecordSubmitOptions } from "../helpers/view-types";
 import {
   FieldBadgeList,
@@ -82,6 +84,7 @@ export function RecordTopbarActions({
   base: BaseVO;
   recordId: string;
 }) {
+  const currentSearch = useSearch();
   return (
     <nav className="flex rounded-md bg-muted/60 p-0.5 text-xs">
       <Link
@@ -90,7 +93,7 @@ export function RecordTopbarActions({
             ? "bg-background text-foreground shadow-sm"
             : "text-muted-foreground hover:text-foreground"
         }`}
-        href={`/base/${base.slug}/${recordId}`}
+        href={mergeSearchIntoHref(`/base/${base.slug}/${recordId}`, currentSearch)}
       >
         View
       </Link>
@@ -100,7 +103,7 @@ export function RecordTopbarActions({
             ? "bg-background text-foreground shadow-sm"
             : "text-muted-foreground hover:text-foreground"
         }`}
-        href={`/base/${base.slug}/${recordId}/edit`}
+        href={mergeSearchIntoHref(`/base/${base.slug}/${recordId}/edit`, currentSearch)}
       >
         Edit
       </Link>
@@ -120,6 +123,7 @@ export function RecordDetailView({
   record: RecordVO | null;
 }) {
   const messages = useCoreI18n();
+  const currentSearch = useSearch();
   const [panelOpen, setPanelOpen] = useState(true);
   const [deleteAction, setDeleteAction] = useState<"change_request" | "merge" | null>(null);
   const [confirmDeleteAction, setConfirmDeleteAction] = useState<"change_request" | "merge" | null>(
@@ -209,7 +213,7 @@ export function RecordDetailView({
               historyChangeRequests[0] ? (
                 <Link
                   className="text-muted-foreground text-sm transition-colors hover:text-foreground"
-                  href={`/inbox/${historyChangeRequests[0].id}`}
+                  href={mergeSearchIntoHref(`/inbox/${historyChangeRequests[0].id}`, currentSearch)}
                 >
                   {messages.recordView.source}
                 </Link>
@@ -270,7 +274,7 @@ export function RecordDetailView({
             action={
               <Link
                 className="text-muted-foreground text-sm transition-colors hover:text-foreground"
-                href="/activity"
+                href={mergeSearchIntoHref("/activity", currentSearch)}
               >
                 {messages.recordView.seeAll}
               </Link>
@@ -1152,6 +1156,7 @@ function RecordChangeRequestHistoryRow({
   recordId: string;
 }) {
   const messages = useCoreI18n();
+  const href = useHrefWithCurrentSearch(`/inbox/${changeRequest.id}`);
   const relatedOperations = changeRequest.operations.filter(
     (operation) =>
       operation.mergedRecordId === recordId ||
@@ -1162,7 +1167,7 @@ function RecordChangeRequestHistoryRow({
   return (
     <Link
       className="block rounded-md border-border/40 border-b px-2 py-2.5 transition-colors hover:bg-muted/35"
-      href={`/inbox/${changeRequest.id}`}
+      href={href}
     >
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="min-w-0">

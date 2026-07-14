@@ -333,9 +333,16 @@ export const resolveApiUrl = (apiBasePath: string) => {
 // contract-declared verb (e.g. PUT for records.updateChangeRequest) 405s.
 export const createBusabaseORPCClient = (
   apiBasePath = "/api/rpc",
+  opts?: {
+    headers?:
+      | Record<string, string>
+      | (() => Record<string, string> | Promise<Record<string, string>>);
+  },
 ): ContractRouterClient<BusabaseContract> => {
   const link = new RPCLink({
     url: resolveApiUrl(apiBasePath),
+    headers: async () =>
+      (typeof opts?.headers === "function" ? await opts.headers() : opts?.headers) ?? {},
   });
 
   return createORPCClient(link);
@@ -358,11 +365,16 @@ export const createBusabaseOpenApiClient = (options: {
 
 export const createBusabaseRestApiClient = (
   apiBasePath = "/api/v1",
+  opts?: {
+    headers?:
+      | Record<string, string>
+      | (() => Record<string, string> | Promise<Record<string, string>>);
+  },
 ): BusabaseDashboardApiClient => {
   const rpcPath = apiBasePath.endsWith("/v1")
     ? `${apiBasePath.slice(0, -"/v1".length)}/rpc`
     : apiBasePath;
-  const client = createBusabaseORPCClient(rpcPath);
+  const client = createBusabaseORPCClient(rpcPath, opts);
 
   return {
     search: (options) => client.search(options),

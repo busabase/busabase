@@ -12,10 +12,60 @@ import {
 import { SidebarMenu, SidebarMenuButton, SidebarMenuItem, useSidebar } from "kui/sidebar";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "kui/tooltip";
 import { cn } from "kui/utils";
-import { Check, ChevronsUpDown, Focus, Plus, Settings, UserPlus } from "lucide-react";
+import {
+  Check,
+  ChevronsUpDown,
+  Cloud,
+  Focus,
+  Monitor,
+  Plus,
+  Settings,
+  UserPlus,
+} from "lucide-react";
 import * as React from "react";
 import { AvatarLogo } from "../avatar-logo";
 import type { Space } from "./types";
+
+/** Whether a space is a synthetic "remote space" (e.g. a connected tunnel). */
+const isRemoteSpace = (space: Space): boolean => space.kind === "remote_tunnel";
+
+/** Whether a remote space's connection is currently down — drives dimming. */
+const isRemoteSpaceOffline = (space: Space): boolean =>
+  isRemoteSpace(space) && space.online === false;
+
+/**
+ * Small Cloud/Local icon next to a space's name, so every space's type is
+ * visible, not just the special one. Only shown when the current `spaces`
+ * list actually contains a `kind: "remote_tunnel"` entry (e.g. busabase-cloud
+ * with a connected Local ↔ Cloud Tunnel instance) — every other consumer of
+ * `SpaceSelector` has no local/cloud distinction to show, so this stays
+ * strictly additive there: a space list with no remote entries renders
+ * byte-for-byte as it always has.
+ */
+function SpaceTypeBadge({ space, show }: { space: Space; show: boolean }) {
+  if (!show) return null;
+  const remote = isRemoteSpace(space);
+  const offline = isRemoteSpaceOffline(space);
+  const Icon = remote ? Monitor : Cloud;
+  const label = remote ? (offline ? "Local (offline)" : "Local") : "Cloud";
+  return (
+    <TooltipProvider delayDuration={300}>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <span
+            className={cn(
+              "inline-flex shrink-0 items-center justify-center",
+              offline ? "text-muted-foreground/50" : "text-blue-600/80 dark:text-blue-400/80",
+            )}
+          >
+            <Icon className="size-3.5" />
+          </span>
+        </TooltipTrigger>
+        <TooltipContent side="bottom">{label}</TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  );
+}
 
 // Helper to get plan badge styles based on plan type
 // Minimal, refined design with subtle borders - Studio-Grade aesthetic
@@ -102,6 +152,9 @@ export function SpaceSelector({
   const isCollapsed = state === "collapsed";
   const avatarSize = compact || isCollapsed ? "xxs" : "sm";
   const labels = { ...defaultLabels, ...customLabels };
+  // Only show the Cloud/Local type badge when the list actually has a
+  // remote entry to distinguish from — see SpaceTypeBadge's doc comment.
+  const hasRemoteSpace = spaces.some(isRemoteSpace);
 
   // Fallback to internal state if not controlled, or just use first space if activeSpace is undefined
   const [internalActiveSpace, setInternalActiveSpace] = React.useState(spaces[0]);
@@ -151,12 +204,17 @@ export function SpaceSelector({
               // clipping it inside the fixed button height. Icon-collapsed rail still
               // pins to 32px via the base `!size-8`.
               "h-auto",
+              isRemoteSpaceOffline(currentSpace) && "opacity-60 grayscale",
             )}
           >
             <AvatarLogo src={logoSrc} fallback={currentSpace.name[0]} size={avatarSize} />
             <div className="grid flex-1 text-left text-sm leading-tight group-data-[collapsible=icon]:!hidden">
-              <span className="break-words line-clamp-2 font-medium" title={currentSpace.name}>
+              <span
+                className="flex items-center gap-1.5 break-words line-clamp-2 font-medium"
+                title={currentSpace.name}
+              >
                 {currentSpace.name}
+                <SpaceTypeBadge space={currentSpace} show={hasRemoteSpace} />
               </span>
               <span
                 className={`inline-flex w-fit rounded-md px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${getPlanBadgeStyle(currentSpace.plan ?? "free")}`}
@@ -184,12 +242,17 @@ export function SpaceSelector({
                 // clipping it inside the fixed button height. Icon-collapsed rail still
                 // pins to 32px via the base `!size-8`.
                 "h-auto",
+                isRemoteSpaceOffline(currentSpace) && "opacity-60 grayscale",
               )}
             >
               <AvatarLogo src={logoSrc} fallback={currentSpace.name[0]} size={avatarSize} />
               <div className="grid flex-1 text-left text-sm leading-tight group-data-[collapsible=icon]:!hidden">
-                <span className="break-words line-clamp-2 font-medium" title={currentSpace.name}>
+                <span
+                  className="flex items-center gap-1.5 break-words line-clamp-2 font-medium"
+                  title={currentSpace.name}
+                >
                   {currentSpace.name}
+                  <SpaceTypeBadge space={currentSpace} show={hasRemoteSpace} />
                 </span>
                 <span
                   className={`inline-flex w-fit rounded-md px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide ${getPlanBadgeStyle(currentSpace.plan ?? "free")}`}
@@ -208,12 +271,21 @@ export function SpaceSelector({
           >
             <div className="flex max-h-[min(32rem,var(--radix-dropdown-menu-content-available-height))] flex-col">
               {/* Active Space Header */}
-              <div className="shrink-0 p-3 pb-2">
+              <div
+                className={cn(
+                  "shrink-0 p-3 pb-2",
+                  isRemoteSpaceOffline(currentSpace) && "opacity-60 grayscale",
+                )}
+              >
                 <div className="flex items-center gap-3">
                   <AvatarLogo src={logoSrc} fallback={currentSpace.name[0]} size="md" />
                   <div className="min-w-0 flex-1">
-                    <div className="truncate font-medium" title={currentSpace.name}>
+                    <div
+                      className="flex items-center gap-1.5 truncate font-medium"
+                      title={currentSpace.name}
+                    >
                       {currentSpace.name}
+                      <SpaceTypeBadge space={currentSpace} show={hasRemoteSpace} />
                     </div>
                     <span
                       className={`mt-1 inline-flex w-fit rounded-md px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide ${getPlanBadgeStyle(currentSpace.plan ?? "free")}`}
@@ -295,12 +367,19 @@ export function SpaceSelector({
                     <DropdownMenuItem
                       key={space.id || space.name}
                       onClick={() => handleSpaceChange(space)}
-                      className="min-w-0 w-full cursor-pointer items-center gap-2 p-2"
+                      className={cn(
+                        "min-w-0 w-full cursor-pointer items-center gap-2 p-2",
+                        isRemoteSpaceOffline(space) && "opacity-60 grayscale",
+                      )}
                     >
                       <AvatarLogo src={space.logo} fallback={space.name[0]} size="xs" />
                       <div className="flex min-w-0 flex-1 items-center gap-2">
-                        <span className="truncate" title={space.name}>
-                          {space.name}
+                        <span
+                          className="flex min-w-0 items-center gap-1.5 truncate"
+                          title={space.name}
+                        >
+                          <span className="truncate">{space.name}</span>
+                          <SpaceTypeBadge space={space} show={hasRemoteSpace} />
                         </span>
                         <span
                           className={`inline-flex shrink-0 rounded-md px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wide ${getPlanBadgeStyle(space.plan ?? "free")}`}

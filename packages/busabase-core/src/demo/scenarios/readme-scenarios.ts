@@ -4,8 +4,8 @@ import type { SeedChangeRequestDef, SeedRecordDef, SeedScenario, SeedViewDef } f
 // Image evidence (audit/review screenshots) so the Compliance "Evidence"
 // attachment column shows thumbnails instead of an empty "-".
 const EVIDENCE_URLS = [
-  "/assets/readme/busabase-record-detail-audit.png",
-  "/assets/readme/busabase-inbox-review.png",
+  "/assets/readme/busabase-record-detail-audit.webp",
+  "/assets/readme/busabase-inbox-review.webp",
   "/assets/readme/scenarios/canonical-base.png",
 ];
 const evidenceShot = (slug: string, i = 0) => [
@@ -1478,7 +1478,7 @@ const records: SeedRecordDef[] = [
           fileName: "inbox-approval-flow.png",
           mimeType: "image/png",
           size: 142336,
-          url: "/assets/readme/busabase-inbox-review.png",
+          url: "/assets/readme/busabase-inbox-review.webp",
         },
       ],
       caption: "User opens the Inbox, sees a pending Change Request, and clicks Approve.",
@@ -3069,11 +3069,11 @@ const LABELING_STATUS = ["queued", "needs-correction", "approved"] as const;
 // thumbnails (every clip/frame is a captured frame of the Busabase UI).
 const LABELING_ASSET_URLS = [
   "/assets/readme/scenarios/multimodal-review-base.png",
-  "/assets/readme/busabase-inbox-review.png",
+  "/assets/readme/busabase-inbox-review.webp",
   "/assets/readme/scenarios/canonical-base.png",
-  "/assets/readme/busabase-record-detail-audit.png",
+  "/assets/readme/busabase-record-detail-audit.webp",
   "/assets/readme/scenarios/field-types-record.png",
-  "/assets/readme/busabase-base-table.png",
+  "/assets/readme/busabase-base-table.webp",
 ];
 const LABELING_CAPTIONS = [
   (item: string) =>

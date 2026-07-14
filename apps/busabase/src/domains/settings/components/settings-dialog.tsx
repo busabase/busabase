@@ -2,8 +2,10 @@
 
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "kui/dialog";
 import type { LucideIcon } from "lucide-react";
-import { Check, Languages, Vault, Webhook } from "lucide-react";
-import { useState } from "react";
+import { Check, Cloud, Languages, Vault, Webhook } from "lucide-react";
+import { useEffect, useState } from "react";
+import type { CloudConnectSettingsLabels } from "~/domains/settings/components/cloud-connect-settings-tab";
+import { CloudConnectSettingsTab } from "~/domains/settings/components/cloud-connect-settings-tab";
 import type { VaultSettingsLabels } from "~/domains/vault/components/vault-settings-tab";
 import { VaultSettingsTab } from "~/domains/vault/components/vault-settings-tab";
 import type { WebhookSettingsLabels } from "~/domains/webhook/components/webhook-settings-tab";
@@ -18,17 +20,20 @@ interface LanguageOption {
   nativeName: string;
 }
 
-type SettingsTab = "language" | "vault" | "webhook";
+type SettingsTab = "language" | "vault" | "webhook" | "cloudConnect";
 
 interface Props {
   labels: SettingsDialogLabels;
   vaultLabels: VaultSettingsLabels;
   webhookLabels: WebhookSettingsLabels;
+  cloudConnectLabels: CloudConnectSettingsLabels;
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
   languageOptions: LanguageOption[];
   languagePref: string;
   onLocaleChange: (locale: string) => void;
+  /** Jump straight to a specific tab the next time the dialog opens. */
+  initialTab?: SettingsTab;
 }
 
 function LanguageTabContent({
@@ -66,18 +71,28 @@ export function SettingsDialog({
   labels,
   vaultLabels,
   webhookLabels,
+  cloudConnectLabels,
   open,
   onOpenChange,
   languageOptions,
   languagePref,
   onLocaleChange,
+  initialTab,
 }: Props) {
-  const [activeTab, setActiveTab] = useState<SettingsTab>("language");
+  const [activeTab, setActiveTab] = useState<SettingsTab>(initialTab ?? "language");
+
+  // Jump to the requested tab whenever the dialog is (re-)opened with one —
+  // e.g. after the Cloud Connect popup finishes, the caller reopens with
+  // initialTab="cloudConnect" so the user lands back where they left off.
+  useEffect(() => {
+    if (open && initialTab) setActiveTab(initialTab);
+  }, [open, initialTab]);
 
   const tabs: { id: SettingsTab; icon: LucideIcon; label: string }[] = [
     { id: "language", icon: Languages, label: labels.languageTab() },
     { id: "vault", icon: Vault, label: labels.vaultTab() },
     { id: "webhook", icon: Webhook, label: labels.webhookTab() },
+    { id: "cloudConnect", icon: Cloud, label: labels.cloudConnectTab() },
   ];
 
   return (
@@ -116,6 +131,12 @@ export function SettingsDialog({
             ) : null}
             {activeTab === "webhook" ? (
               <WebhookSettingsTab labels={webhookLabels} active={activeTab === "webhook"} />
+            ) : null}
+            {activeTab === "cloudConnect" ? (
+              <CloudConnectSettingsTab
+                labels={cloudConnectLabels}
+                active={activeTab === "cloudConnect"}
+              />
             ) : null}
           </div>
         </div>

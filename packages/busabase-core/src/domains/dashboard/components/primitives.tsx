@@ -3,6 +3,7 @@ import { SPALink as Link } from "openlib/ui/dashboard";
 import type { ReactNode } from "react";
 import { useCoreI18n } from "../../../i18n";
 import { changeRequestStatusLabel, statusTone } from "../helpers/change-request";
+import { useHrefWithCurrentSearch } from "../helpers/link-search";
 
 export function CheckboxBadge({ checked }: { checked: boolean }) {
   const messages = useCoreI18n();
@@ -169,10 +170,11 @@ export function ConfirmActionDialog({
 }
 
 export function BackLink({ href, label }: { href: string; label: string }) {
+  const hrefWithSearch = useHrefWithCurrentSearch(href);
   return (
     <Link
       className="inline-flex items-center gap-1.5 text-muted-foreground text-xs transition-colors hover:text-foreground"
-      href={href}
+      href={hrefWithSearch}
     >
       <ArrowLeft size={14} />
       {label}

@@ -192,6 +192,7 @@ export function ProductReadyDashboardShell({
           labels={LL.settingsDialog}
           vaultLabels={LL.vaultSettings}
           webhookLabels={LL.webhookSettings}
+          cloudConnectLabels={LL.cloudConnect}
           open={settingsDialogOpen}
           onOpenChange={setSettingsDialogOpen}
           languageOptions={languageOptions}

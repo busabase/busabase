@@ -1,8 +1,11 @@
 @import "tailwindcss";
 @import "kui/styles.css";
+@import "fumadocs-ui/css/neutral.css";
+@import "fumadocs-ui/css/preset.css";
 @import "../../../../packages/openlib/shared.css";
 
 @source "../../src";
+@source "../../content";
 @source "../../../../packages/kui";
 @source "../../../../packages/busabase-core";
 @source "../../../../packages/openlib";
@@ -20,6 +23,10 @@
   --font-geist-sans:
     var(--font-inter), ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   --font-sora: var(--font-serif);
+
+  --color-fd-card: oklch(0.992 0.004 88);
+  --color-fd-border: oklch(0.93 0.004 80);
+  --color-fd-muted: oklch(0.96 0.005 82);
 }
 
 @layer base {
@@ -35,6 +42,21 @@
   h6 {
     font-family: var(--font-serif);
   }
+}
+
+figure.shiki > [role="region"] {
+  padding-top: 0;
+  padding-bottom: 0;
+}
+
+figure.shiki {
+  background: var(--color-fd-card);
+  border-color: var(--color-fd-border);
+  border-radius: 1rem;
+}
+
+figure.shiki code {
+  background: var(--color-fd-muted);
 }
 
 .busabase-html-field {

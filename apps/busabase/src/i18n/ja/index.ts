@@ -39,6 +39,7 @@ const ja: Translation = {
     languageTab: "言語",
     vaultTab: "保管庫",
     webhookTab: "Webhook",
+    cloudConnectTab: "クラウド接続",
   },
   marketing: {
     rootDescription: "Busabase のオープンソースなローカルレビューエンジン。",
@@ -239,6 +240,28 @@ const ja: Translation = {
     deliveriesLoading: "配信履歴を読み込み中...",
     deliveriesLoadFailed: "配信履歴の読み込みに失敗しました",
     noDeliveries: "まだ配信履歴がありません。",
+  },
+  cloudConnect: {
+    title: "クラウド接続",
+    description:
+      "このローカルインスタンスを Busabase Cloud に接続すると、どのデバイスからでもアクセスできるリモートスペースとして表示されます。",
+    statusLabel: "状態",
+    statusConnected: "接続済み",
+    statusConnecting: "接続中...",
+    statusReconnecting: "再接続中...",
+    statusError: "エラー",
+    statusDisconnected: "未接続",
+    cloudUrlLabel: "クラウド URL",
+    tunnelIdLabel: "トンネル ID",
+    connectButton: "Busabase Cloud に接続",
+    disconnectButton: "接続を解除",
+    connectFailed: "クラウド接続フローの開始に失敗しました。もう一度お試しください。",
+    disconnectFailed: "接続の解除に失敗しました。もう一度お試しください。",
+    popupBlocked:
+      "ブラウザがサインインのポップアップをブロックしました。ポップアップを許可してから再試行してください。",
+    aboutTitle: "クラウド接続について",
+    aboutDescription:
+      "サインインするとポップアップで Busabase Cloud が開き、このトンネルにのみ有効な認証情報が発行されます — クラウドアカウントの完全なセッションではありません。接続を解除するとその認証情報は失効します。",
   },
 };
 

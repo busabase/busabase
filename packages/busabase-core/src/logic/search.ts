@@ -31,11 +31,33 @@ import { hydrateChangeRequest, hydrateRecord } from "./cr-lifecycle";
 import { ensureReady } from "./seed";
 import { toBaseVO } from "./vo";
 
+export const SEARCH_SOURCES = ["records", "files", "names"] as const;
+export type SearchSource = (typeof SEARCH_SOURCES)[number];
+
 // Schema defined locally to avoid circular deps with store.ts
 export const searchInputSchema = z.object({
   query: z.string().default(""),
   limit: z.number().int().min(1).max(100).optional().default(20),
   offset: z.number().int().min(0).optional().default(0),
+  /**
+   * Restrict which content this call searches — "records" (the field-value
+   * ranking query + their originating ChangeRequests), "files" (Drive/Skill
+   * asset content), "names" (Base/field name matches). Omitted/undefined
+   * means all three, matching every caller before this parameter existed.
+   * `search()` has no way to skip the expensive records-ranking query
+   * otherwise — it always ran regardless of what content type a caller
+   * actually cared about (see apps/busabase/content/spec/unified-grep.md's
+   * "Search vs Grep" section for the measured cost of that).
+   *
+   * A GET query param that occurs exactly once (`?sources=records`) arrives
+   * as a bare string, not a 1-element array — only a REPEATED occurrence
+   * (`?sources=records&sources=files`) becomes an array. Accept both shapes
+   * and normalize to an array.
+   */
+  sources: z
+    .union([z.array(z.enum(SEARCH_SOURCES)), z.enum(SEARCH_SOURCES)])
+    .transform((value) => (Array.isArray(value) ? value : [value]))
+    .optional(),
 });
 
 export const recordPrimaryText = (record: RecordVO): string => {
@@ -309,33 +331,42 @@ export const searchBusabase = async (
   const spaceId = getContextSpaceId();
   const textSearch = sql`to_tsvector('simple', coalesce(${busabaseFieldValues.valueText}, '')) @@ plainto_tsquery('simple', ${query})`;
 
-  const projectionRows = await db
-    .select({
-      changeRequestId: busabaseFieldValues.changeRequestId,
-      recordId: busabaseFieldValues.recordId,
-    })
-    .from(busabaseFieldValues)
-    .where(
-      and(
-        eq(busabaseFieldValues.spaceId, spaceId),
-        isNotNull(busabaseFieldValues.valueText),
-        isNull(busabaseFieldValues.deletedAt),
-        or(
-          textSearch,
-          ilike(busabaseFieldValues.valueText, pattern),
-          ilike(busabaseFieldValues.fieldSlug, pattern),
-        ),
-      ),
-    )
-    .groupBy(busabaseFieldValues.recordId, busabaseFieldValues.changeRequestId)
-    .orderBy(
-      desc(
-        sql`max(ts_rank(to_tsvector('simple', coalesce(${busabaseFieldValues.valueText}, '')), plainto_tsquery('simple', ${query})))`,
-      ),
-      desc(sql`max(${busabaseFieldValues.updatedAt})`),
-    )
-    .limit(pageSize)
-    .offset(parsed.offset);
+  // No `sources` means every caller before this parameter existed — search
+  // everything, unchanged behavior.
+  const wantsSource = (source: SearchSource) => !parsed.sources || parsed.sources.includes(source);
+  const wantsRecords = wantsSource("records");
+  const wantsFiles = wantsSource("files");
+  const wantsNames = wantsSource("names");
+
+  const projectionRows = wantsRecords
+    ? await db
+        .select({
+          changeRequestId: busabaseFieldValues.changeRequestId,
+          recordId: busabaseFieldValues.recordId,
+        })
+        .from(busabaseFieldValues)
+        .where(
+          and(
+            eq(busabaseFieldValues.spaceId, spaceId),
+            isNotNull(busabaseFieldValues.valueText),
+            isNull(busabaseFieldValues.deletedAt),
+            or(
+              textSearch,
+              ilike(busabaseFieldValues.valueText, pattern),
+              ilike(busabaseFieldValues.fieldSlug, pattern),
+            ),
+          ),
+        )
+        .groupBy(busabaseFieldValues.recordId, busabaseFieldValues.changeRequestId)
+        .orderBy(
+          desc(
+            sql`max(ts_rank(to_tsvector('simple', coalesce(${busabaseFieldValues.valueText}, '')), plainto_tsquery('simple', ${query})))`,
+          ),
+          desc(sql`max(${busabaseFieldValues.updatedAt})`),
+        )
+        .limit(pageSize)
+        .offset(parsed.offset)
+    : [];
 
   const recordIds = projectionRows
     .map((row) => row.recordId)
@@ -357,7 +388,7 @@ export const searchBusabase = async (
           .from(busabaseChangeRequests)
           .where(inArray(busabaseChangeRequests.id, changeRequestIds))
       : Promise.resolve([]),
-    parsed.offset === 0
+    wantsNames && parsed.offset === 0
       ? db
           .select()
           .from(busabaseBases)
@@ -373,7 +404,7 @@ export const searchBusabase = async (
             ),
           )
       : Promise.resolve([]),
-    parsed.offset === 0
+    wantsNames && parsed.offset === 0
       ? db
           .select()
           .from(busabaseBaseFields)
@@ -430,7 +461,7 @@ export const searchBusabase = async (
         return [];
       }),
     ),
-    searchAssetBackedFiles(query, parsed.limit),
+    wantsFiles ? searchAssetBackedFiles(query, parsed.limit) : Promise.resolve([]),
   ]);
 
   const baseResults = [...baseRowsById.values()].map((base) =>

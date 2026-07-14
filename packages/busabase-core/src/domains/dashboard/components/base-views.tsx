@@ -4,9 +4,11 @@ import { Pencil, RotateCcw } from "lucide-react";
 import { type iString, iStringIsEmpty, iStringParse, iStringTrim } from "openlib/i18n/i-string";
 import { SPALink as Link } from "openlib/ui/dashboard";
 import { useState } from "react";
+import { useSearch } from "wouter";
 import { fmt, useCoreI18n, useIString } from "../../../i18n";
 import { isDerivedFieldSlug } from "../helpers/change-request";
 import { createDefaultFieldOptions, fieldTypeOptions } from "../helpers/field";
+import { mergeSearchIntoHref } from "../helpers/link-search";
 import type {
   CreateBaseFieldPayload,
   RecordsPagination,
@@ -727,6 +729,7 @@ export function BaseTopbarActions({
   base: BaseVO;
 }) {
   const messages = useCoreI18n();
+  const currentSearch = useSearch();
 
   return (
     <nav className="flex rounded-md bg-muted/60 p-0.5 text-xs">
@@ -736,7 +739,7 @@ export function BaseTopbarActions({
             ? "bg-background text-foreground shadow-sm"
             : "text-muted-foreground hover:text-foreground"
         }`}
-        href={`/base/${base.slug}`}
+        href={mergeSearchIntoHref(`/base/${base.slug}`, currentSearch)}
       >
         {messages.base.recordsTab}
       </Link>
@@ -746,7 +749,7 @@ export function BaseTopbarActions({
             ? "bg-background text-foreground shadow-sm"
             : "text-muted-foreground hover:text-foreground"
         }`}
-        href={`/base/${base.slug}/design`}
+        href={mergeSearchIntoHref(`/base/${base.slug}/design`, currentSearch)}
       >
         {messages.base.designTab}
       </Link>

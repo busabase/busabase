@@ -1191,23 +1191,28 @@ const BULK_COMPANY_SOURCE: BulkCompanySrc[] = [
 
 const BULK_COMPANIES: SeedRecordDef[] = BULK_COMPANY_SOURCE.map((c, i) => {
   const domain = domainOf(c.website);
+  const initials = c.name
+    .split(/\s+/)
+    .map((part) => part[0])
+    .join("")
+    .slice(0, 2)
+    .toUpperCase();
+  const logoSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128"><rect width="128" height="128" rx="24" fill="#18181b"/><text x="64" y="72" text-anchor="middle" font-family="Arial,sans-serif" font-size="42" font-weight="700" fill="#fafafa">${initials}</text></svg>`;
   return {
     id: bulkCompanyId(i),
     baseId: DEMO_CRM_COMPANIES_BASE_ID,
     commitId: `cmt_seed_crm_company_bulk_${pad3(i)}`,
     fields: {
       name: c.name,
-      // Real brand logos enriched from the company's domain (the same move a real
-      // CRM would make). Google's favicon service returns a PNG and is reliable;
-      // for major brands the favicon IS the logo mark.
+      // Keep demo logos self-contained so screenshots and recordings work offline.
       logo: [
         {
           id: `att_company_logo_${pad3(i)}`,
           attachmentId: `att_company_logo_${pad3(i)}`,
-          fileName: `${domain}.png`,
-          mimeType: "image/png",
+          fileName: `${domain}.svg`,
+          mimeType: "image/svg+xml",
           size: 8000 + i * 50,
-          url: `https://www.google.com/s2/favicons?domain=${domain}&sz=128`,
+          url: `data:image/svg+xml,${encodeURIComponent(logoSvg)}`,
         },
       ],
       industry: c.industry,
@@ -1334,8 +1339,8 @@ const BLOG_COVERS = [
   "/assets/readme/scenarios/canonical-base.png",
   "/assets/readme/scenarios/multimodal-review-base.png",
   "/assets/readme/scenarios/multimodal-review-record.png",
-  "/assets/readme/busabase-inbox-review.png",
-  "/assets/readme/busabase-record-detail-audit.png",
+  "/assets/readme/busabase-inbox-review.webp",
+  "/assets/readme/busabase-record-detail-audit.webp",
 ];
 interface BulkBlogSrc {
   title: string;
@@ -1739,10 +1744,10 @@ const BULK_NEWSLETTERS: SeedRecordDef[] = BULK_NEWSLETTER_SOURCE.map((n, i) => (
 
 // ── Media Assets ─────────────────────────────────────────────────────────────
 const MEDIA_ASSET_URLS = [
-  "/assets/readme/busabase-inbox-review.png",
+  "/assets/readme/busabase-inbox-review.webp",
   "/assets/readme/scenarios/multimodal-review-base.png",
   "/assets/readme/scenarios/canonical-base.png",
-  "/assets/readme/busabase-record-detail-audit.png",
+  "/assets/readme/busabase-record-detail-audit.webp",
   "/assets/readme/scenarios/multimodal-review-record.png",
 ];
 const MEDIA_REVIEW = ["queued", "in-review", "approved"] as const;
@@ -1987,7 +1992,7 @@ export const DEMO_RECORDS: SeedRecordDef[] = [
           fileName: "approval-inbox-walkthrough.mp4",
           mimeType: "video/mp4",
           size: 8_241_336,
-          url: "/assets/readme/busabase-inbox-review.png",
+          url: "/assets/readme/busabase-inbox-review.webp",
         },
         {
           id: "att_seed_transcript",
@@ -1995,7 +2000,7 @@ export const DEMO_RECORDS: SeedRecordDef[] = [
           fileName: "approval-inbox-transcript.vtt",
           mimeType: "text/vtt",
           size: 18_432,
-          url: "/assets/readme/busabase-record-detail-audit.png",
+          url: "/assets/readme/busabase-record-detail-audit.webp",
         },
       ],
       detected_objects: ["dashboard", "human-review", "agent-output"],
@@ -2598,7 +2603,7 @@ export const DEMO_CHANGE_REQUESTS: SeedChangeRequestDef[] = [
               fileName: "approval-inbox-walkthrough.mp4",
               mimeType: "video/mp4",
               size: 8_241_336,
-              url: "/assets/readme/busabase-inbox-review.png",
+              url: "/assets/readme/busabase-inbox-review.webp",
             },
             {
               id: "att_seed_transcript",
@@ -2606,7 +2611,7 @@ export const DEMO_CHANGE_REQUESTS: SeedChangeRequestDef[] = [
               fileName: "approval-inbox-transcript.vtt",
               mimeType: "text/vtt",
               size: 18_432,
-              url: "/assets/readme/busabase-record-detail-audit.png",
+              url: "/assets/readme/busabase-record-detail-audit.webp",
             },
           ],
           detected_objects: ["dashboard", "human-review", "agent-output"],

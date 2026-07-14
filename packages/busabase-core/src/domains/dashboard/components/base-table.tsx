@@ -22,6 +22,7 @@ import {
 } from "lucide-react";
 import { SPALink as Link } from "openlib/ui/dashboard";
 import { type CSSProperties, useCallback, useLayoutEffect, useRef, useState } from "react";
+import { useSearch } from "wouter";
 import { fmt, useCoreI18n, useIString } from "../../../i18n";
 import { fieldColumnWidth, fieldDisplayKind } from "../../base/field-types";
 import { resolveEmbedPreview } from "../../base/utils/embed";
@@ -35,6 +36,7 @@ import {
   getSafeAttachmentUrl,
 } from "../helpers/field";
 import { fieldValueToString, shortIdentifier } from "../helpers/format";
+import { mergeSearchIntoHref, useHrefWithCurrentSearch } from "../helpers/link-search";
 import type { RecordsPagination, ViewFormPayload, ViewSubmitOptions } from "../helpers/view-types";
 import { CodeLikeFieldPreview, FieldBadge } from "./field-preview";
 import { ConfirmActionDialog } from "./primitives";
@@ -157,6 +159,9 @@ function BusaBaseRecordRow({
   relationRecords: RecordVO[];
   style?: CSSProperties;
 }) {
+  const currentRecordHref = useHrefWithCurrentSearch(
+    `/base/${baseSlug ?? record.base.slug}/${record.id}`,
+  );
   return (
     <div
       className="group grid min-h-12 items-center gap-3 rounded-md border-border/40 border-b px-2 py-1.5 text-sm transition-colors hover:bg-muted/35"
@@ -165,7 +170,7 @@ function BusaBaseRecordRow({
     >
       {fields.map((field, index) => (
         <RecordTableCell
-          currentRecordHref={`/base/${baseSlug ?? record.base.slug}/${record.id}`}
+          currentRecordHref={currentRecordHref}
           field={field}
           index={index}
           key={field.id}
@@ -226,6 +231,7 @@ export function BusaBaseTable({
   views: ViewVO[];
 }) {
   const messages = useCoreI18n();
+  const currentSearch = useSearch();
   const resolveIString = useIString();
   const [editingViewMode, setEditingViewMode] = useState<"create" | "edit" | null>(null);
   const [isDeletingView, setIsDeletingView] = useState(false);
@@ -285,7 +291,7 @@ export function BusaBaseTable({
                   ? "bg-muted/25 text-muted-foreground hover:bg-accent hover:text-foreground"
                   : "bg-background text-foreground shadow-sm"
               }`}
-              href={`/base/${base.slug}`}
+              href={mergeSearchIntoHref(`/base/${base.slug}`, currentSearch)}
             >
               {messages.base.all}
             </Link>
@@ -299,7 +305,7 @@ export function BusaBaseTable({
                     ? "bg-background text-foreground shadow-sm"
                     : "bg-muted/25 text-muted-foreground hover:bg-accent hover:text-foreground"
                 }`}
-                href={`/base/${base?.slug ?? ""}/${view.slug}`}
+                href={mergeSearchIntoHref(`/base/${base?.slug ?? ""}/${view.slug}`, currentSearch)}
                 key={view.id}
               >
                 {view.name}
@@ -385,7 +391,7 @@ export function BusaBaseTable({
           {base ? (
             <Link
               className="inline-flex h-7 items-center gap-1.5 rounded-md bg-foreground px-2.5 font-medium text-background text-xs transition-colors hover:bg-foreground/85"
-              href={`/base/${base.slug}/new`}
+              href={mergeSearchIntoHref(`/base/${base.slug}/new`, currentSearch)}
             >
               <Plus size={13} />
               {messages.base.newRecord}
@@ -534,7 +540,10 @@ export function BusaBaseTable({
                 >
                   {fields.map((field, index) => (
                     <RecordTableCell
-                      currentRecordHref={`/base/${base?.slug ?? record.base.slug}/${record.id}`}
+                      currentRecordHref={mergeSearchIntoHref(
+                        `/base/${base?.slug ?? record.base.slug}/${record.id}`,
+                        currentSearch,
+                      )}
                       field={field}
                       index={index}
                       key={field.id}
@@ -842,6 +851,7 @@ function RecordTableCell({
   records: RecordVO[];
 }) {
   const messages = useCoreI18n();
+  const currentSearch = useSearch();
   const rawValue = record.headCommit.fields[field.slug];
   const stickyClassName = index === 0 ? baseTableStickyClassName : "";
   const chips = getFieldChipEntries(field, rawValue);
@@ -966,7 +976,10 @@ function RecordTableCell({
           return linkedRecord ? (
             <Link
               className={`${chipClassName} text-primary transition-colors hover:bg-primary/10 hover:underline`}
-              href={`/base/${linkedRecord.base.slug}/${linkedRecord.id}`}
+              href={mergeSearchIntoHref(
+                `/base/${linkedRecord.base.slug}/${linkedRecord.id}`,
+                currentSearch,
+              )}
               key={recordId}
               title={label}
             >

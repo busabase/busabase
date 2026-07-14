@@ -1060,12 +1060,17 @@ Examples:
     .requiredOption("--query <q>", "search query")
     .option("--limit <n>", "max results", parseNum)
     .option("--offset <n>", "results offset", parseNum)
+    .option(
+      "--sources <sources...>",
+      'restrict which content to search: "records", "files", and/or "names" (default: all three)',
+    )
     .action(
       runAction(state, (client, opts) =>
         client.search({
           query: opts.query as string,
           limit: opts.limit as number | undefined,
           offset: opts.offset as number | undefined,
+          sources: opts.sources as ("records" | "files" | "names")[] | undefined,
         }),
       ),
     );

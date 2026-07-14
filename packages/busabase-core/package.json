@@ -200,6 +200,7 @@
     "test:coverage": "vitest run --coverage",
     "coverage:badge": "vitest run --coverage --coverage.include='src/logic/**' --coverage.include='src/domains/**' --coverage.exclude='src/domains/dashboard/**' --coverage.exclude='**/*.test.ts' --coverage.exclude='**/types/**' --coverage.reporter=json-summary --coverage.reporter=text-summary && node scripts/coverage-badge.mjs",
     "typecheck": "tsc --noEmit",
-    "bench:grep": "NODE_OPTIONS=--conditions=react-server tsx scripts/bench-grep.ts"
+    "bench:grep": "NODE_OPTIONS=--conditions=react-server tsx scripts/bench-grep.ts",
+    "bench:search-vs-grep": "NODE_OPTIONS=--conditions=react-server tsx scripts/bench-search-vs-grep.ts"
   }
 }

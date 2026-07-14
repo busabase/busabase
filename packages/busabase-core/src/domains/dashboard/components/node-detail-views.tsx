@@ -5,10 +5,11 @@ import { FileTree } from "kui/ai-elements/file-tree";
 import { AppWindow, File, FileText, Folder, HardDrive, Sparkles, Table2 } from "lucide-react";
 import { SPALink as Link } from "openlib/ui/dashboard";
 import { type ComponentProps, useCallback, useEffect, useMemo, useState } from "react";
-import { useLocation } from "wouter";
+import { useLocation, useSearch } from "wouter";
 import { fmt, useCoreI18n } from "../../../i18n";
 import { AirAppDetailView } from "../../airapp/components/AirAppDetailView";
 import { AirAppSidePanelPreview } from "../../airapp/components/RunPanel";
+import { mergeSearchIntoHref } from "../helpers/link-search";
 import { registerNodeDetail } from "../node-detail-registry";
 import { registerSidePanelTab } from "../side-panel-registry";
 import { AssetMetadataBlock, assetKindIcon, formatAssetSize } from "./assets";
@@ -65,7 +66,12 @@ export function FileTreeDetailView({
 }: FileTreeDetailViewProps) {
   const messages = useCoreI18n();
   const queryClient = useQueryClient();
-  const [, setLocation] = useLocation();
+  const [, rawSetLocation] = useLocation();
+  const currentSearch = useSearch();
+  const setLocation = useCallback(
+    (to: string) => rawSetLocation(mergeSearchIntoHref(to, currentSearch)),
+    [rawSetLocation, currentSearch],
+  );
   const [openPath, setOpenPath] = useState<string | null>(null);
   const [isEditing, setIsEditing] = useState(false);
   const [draft, setDraft] = useState("");
@@ -566,7 +572,12 @@ registerNodeDetail("file", FileNodeDetailView);
 
 export function DocDetailView({ orpc, slug }: { orpc: BusabaseQueryUtils; slug: string | null }) {
   const messages = useCoreI18n();
-  const [, setLocation] = useLocation();
+  const [, rawSetLocation] = useLocation();
+  const currentSearch = useSearch();
+  const setLocation = useCallback(
+    (to: string) => rawSetLocation(mergeSearchIntoHref(to, currentSearch)),
+    [rawSetLocation, currentSearch],
+  );
   const docQuery = useQuery({
     ...orpc.docs.get.queryOptions({ input: { nodeId: slug ?? "" } }),
     enabled: Boolean(slug),
@@ -742,6 +753,7 @@ export function FolderDetailView({
   slug: string | null;
 }) {
   const messages = useCoreI18n();
+  const currentSearch = useSearch();
   const folderQuery = useQuery({
     ...orpc.folders.get.queryOptions({ input: { nodeId: slug ?? "" } }),
     enabled: Boolean(slug),
@@ -798,7 +810,7 @@ export function FolderDetailView({
                 <Link
                   key={child.id}
                   className="group flex items-center gap-3 rounded-md px-2 py-2 transition-colors hover:bg-muted/50"
-                  href={`/${child.type}/${child.slug}`}
+                  href={mergeSearchIntoHref(`/${child.type}/${child.slug}`, currentSearch)}
                 >
                   <Icon className="size-4 shrink-0 text-muted-foreground" />
                   <span className="flex-1 truncate text-sm">{child.name}</span>

@@ -5,6 +5,7 @@ import { ExternalLink, FileText, Film, Maximize2, Music, PlaySquare } from "luci
 import { SPALink as Link } from "openlib/ui/dashboard";
 import { type ComponentProps, type ReactNode, useState } from "react";
 import { Streamdown, type Components as StreamdownComponents } from "streamdown";
+import { useSearch } from "wouter";
 import { useCoreI18n, useIString } from "../../../i18n";
 import { fieldDisplayKind, fieldLinkPrefix } from "../../base/field-types";
 import { embedAspectRatio, embedHeight, resolveEmbedPreview } from "../../base/utils/embed";
@@ -20,6 +21,7 @@ import {
 } from "../helpers/field";
 import { fieldValueToString, shortIdentifier } from "../helpers/format";
 import { isSafeUrl, safeFetchableUrl, sanitizeHtml, stripHtmlTags } from "../helpers/html";
+import { mergeSearchIntoHref } from "../helpers/link-search";
 import type { FieldChip } from "../helpers/view-types";
 import { CheckboxBadge } from "./primitives";
 
@@ -337,6 +339,7 @@ export function FieldValuePreview({
 }) {
   const messages = useCoreI18n();
   const resolveIString = useIString();
+  const currentSearch = useSearch();
   const fieldName = field ? resolveIString(field.name) : undefined;
   const kind = field ? fieldDisplayKind(field.type) : "plain";
 
@@ -446,7 +449,10 @@ export function FieldValuePreview({
           return linkedRecord ? (
             <Link
               className={`${chipClassName} text-primary transition-colors hover:border-primary/40 hover:bg-primary/5 hover:underline`}
-              href={`/base/${linkedRecord.base.slug}/${linkedRecord.id}`}
+              href={mergeSearchIntoHref(
+                `/base/${linkedRecord.base.slug}/${linkedRecord.id}`,
+                currentSearch,
+              )}
               key={recordId}
               title={label}
             >

@@ -33,9 +33,9 @@ import {
   Trash2,
 } from "lucide-react";
 import { type CSSProperties, memo, type ReactNode, useMemo, useRef, useState } from "react";
-import { useLocation } from "wouter";
+import { useLocation, useSearch } from "wouter";
 import { SidebarTaskList } from "./SidebarTaskList";
-import { SPALink } from "./SPALink";
+import { mergeSearchIntoHref, SPALink } from "./SPALink";
 import type { NavGroup, NavItem, NavItemAction } from "./types";
 
 /** Drop position relative to the row the dragged item was released over. */
@@ -159,6 +159,7 @@ function NavMainComponent({
   onExpand,
 }: NavMainProps) {
   const [location, setLocation] = useLocation();
+  const currentSearch = useSearch();
   // A nav url is "active" for the current location on an exact match OR when the
   // location is a descendant route (e.g. a record under a base folder). This keeps
   // the parent folder highlighted and expanded while browsing its child pages.
@@ -321,7 +322,7 @@ function NavMainComponent({
       if (isExternalUrl(action.url)) {
         window.open(action.url, "_blank", "noopener,noreferrer");
       } else {
-        setLocation(action.url);
+        setLocation(mergeSearchIntoHref(action.url, currentSearch));
       }
     }
   };

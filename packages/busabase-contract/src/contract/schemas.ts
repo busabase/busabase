@@ -521,10 +521,25 @@ const changeRequestCountsSchema = z.object({
   rejected: z.number().int().nonnegative(),
 });
 
+const SEARCH_SOURCES = ["records", "files", "names"] as const;
+
 const searchInputSchema = z.object({
   query: z.string().default(""),
   limit: z.coerce.number().int().min(1).max(100).optional().default(20),
   offset: z.coerce.number().int().min(0).optional().default(0),
+  /**
+   * Restrict which content this call searches. Omitted means all three
+   * (unchanged behavior for every caller before this parameter existed).
+   *
+   * A GET query param that occurs exactly once (`?sources=records`) arrives
+   * as a bare string, not a 1-element array — only a REPEATED occurrence
+   * (`?sources=records&sources=files`) becomes an array. Accept both shapes
+   * and normalize to an array.
+   */
+  sources: z
+    .union([z.array(z.enum(SEARCH_SOURCES)), z.enum(SEARCH_SOURCES)])
+    .transform((value) => (Array.isArray(value) ? value : [value]))
+    .optional(),
 });
 
 // ── Auth verification (GET /auth) ───────────────────────────────────────────

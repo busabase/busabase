@@ -142,6 +142,10 @@ type RootTranslation = {
 		 * W​e​b​h​o​o​k​s
 		 */
 		webhookTab: string
+		/**
+		 * C​l​o​u​d​ ​C​o​n​n​e​c​t
+		 */
+		cloudConnectTab: string
 	}
 	vaultSettings: {
 		/**
@@ -496,6 +500,76 @@ type RootTranslation = {
 		 * N​o​ ​d​e​l​i​v​e​r​i​e​s​ ​y​e​t​.
 		 */
 		noDeliveries: string
+	}
+	cloudConnect: {
+		/**
+		 * C​l​o​u​d​ ​C​o​n​n​e​c​t
+		 */
+		title: string
+		/**
+		 * C​o​n​n​e​c​t​ ​t​h​i​s​ ​l​o​c​a​l​ ​i​n​s​t​a​n​c​e​ ​t​o​ ​B​u​s​a​b​a​s​e​ ​C​l​o​u​d​ ​s​o​ ​i​t​ ​s​h​o​w​s​ ​u​p​ ​a​s​ ​a​ ​r​e​m​o​t​e​ ​s​p​a​c​e​ ​y​o​u​ ​c​a​n​ ​r​e​a​c​h​ ​f​r​o​m​ ​a​n​y​ ​d​e​v​i​c​e​.
+		 */
+		description: string
+		/**
+		 * S​t​a​t​u​s
+		 */
+		statusLabel: string
+		/**
+		 * C​o​n​n​e​c​t​e​d
+		 */
+		statusConnected: string
+		/**
+		 * C​o​n​n​e​c​t​i​n​g​.​.​.
+		 */
+		statusConnecting: string
+		/**
+		 * R​e​c​o​n​n​e​c​t​i​n​g​.​.​.
+		 */
+		statusReconnecting: string
+		/**
+		 * E​r​r​o​r
+		 */
+		statusError: string
+		/**
+		 * D​i​s​c​o​n​n​e​c​t​e​d
+		 */
+		statusDisconnected: string
+		/**
+		 * C​l​o​u​d​ ​U​R​L
+		 */
+		cloudUrlLabel: string
+		/**
+		 * T​u​n​n​e​l​ ​I​D
+		 */
+		tunnelIdLabel: string
+		/**
+		 * C​o​n​n​e​c​t​ ​t​o​ ​B​u​s​a​b​a​s​e​ ​C​l​o​u​d
+		 */
+		connectButton: string
+		/**
+		 * D​i​s​c​o​n​n​e​c​t
+		 */
+		disconnectButton: string
+		/**
+		 * F​a​i​l​e​d​ ​t​o​ ​s​t​a​r​t​ ​t​h​e​ ​C​l​o​u​d​ ​c​o​n​n​e​c​t​ ​f​l​o​w​.​ ​P​l​e​a​s​e​ ​t​r​y​ ​a​g​a​i​n​.
+		 */
+		connectFailed: string
+		/**
+		 * F​a​i​l​e​d​ ​t​o​ ​d​i​s​c​o​n​n​e​c​t​.​ ​P​l​e​a​s​e​ ​t​r​y​ ​a​g​a​i​n​.
+		 */
+		disconnectFailed: string
+		/**
+		 * Y​o​u​r​ ​b​r​o​w​s​e​r​ ​b​l​o​c​k​e​d​ ​t​h​e​ ​s​i​g​n​-​i​n​ ​p​o​p​u​p​.​ ​P​l​e​a​s​e​ ​a​l​l​o​w​ ​p​o​p​u​p​s​ ​a​n​d​ ​t​r​y​ ​a​g​a​i​n​.
+		 */
+		popupBlocked: string
+		/**
+		 * A​b​o​u​t​ ​C​l​o​u​d​ ​C​o​n​n​e​c​t
+		 */
+		aboutTitle: string
+		/**
+		 * S​i​g​n​i​n​g​ ​i​n​ ​o​p​e​n​s​ ​B​u​s​a​b​a​s​e​ ​C​l​o​u​d​ ​i​n​ ​a​ ​p​o​p​u​p​ ​a​n​d​ ​m​i​n​t​s​ ​a​ ​c​r​e​d​e​n​t​i​a​l​ ​s​c​o​p​e​d​ ​o​n​l​y​ ​t​o​ ​t​h​i​s​ ​t​u​n​n​e​l​ ​—​ ​n​o​t​ ​y​o​u​r​ ​f​u​l​l​ ​C​l​o​u​d​ ​a​c​c​o​u​n​t​ ​s​e​s​s​i​o​n​.​ ​D​i​s​c​o​n​n​e​c​t​i​n​g​ ​r​e​v​o​k​e​s​ ​i​t​.
+		 */
+		aboutDescription: string
 	}
 	marketing: {
 		/**
@@ -932,6 +1006,10 @@ export type TranslationFunctions = {
 		 * Webhooks
 		 */
 		webhookTab: () => LocalizedString
+		/**
+		 * Cloud Connect
+		 */
+		cloudConnectTab: () => LocalizedString
 	}
 	vaultSettings: {
 		/**
@@ -1285,6 +1363,76 @@ export type TranslationFunctions = {
 		 * No deliveries yet.
 		 */
 		noDeliveries: () => LocalizedString
+	}
+	cloudConnect: {
+		/**
+		 * Cloud Connect
+		 */
+		title: () => LocalizedString
+		/**
+		 * Connect this local instance to Busabase Cloud so it shows up as a remote space you can reach from any device.
+		 */
+		description: () => LocalizedString
+		/**
+		 * Status
+		 */
+		statusLabel: () => LocalizedString
+		/**
+		 * Connected
+		 */
+		statusConnected: () => LocalizedString
+		/**
+		 * Connecting...
+		 */
+		statusConnecting: () => LocalizedString
+		/**
+		 * Reconnecting...
+		 */
+		statusReconnecting: () => LocalizedString
+		/**
+		 * Error
+		 */
+		statusError: () => LocalizedString
+		/**
+		 * Disconnected
+		 */
+		statusDisconnected: () => LocalizedString
+		/**
+		 * Cloud URL
+		 */
+		cloudUrlLabel: () => LocalizedString
+		/**
+		 * Tunnel ID
+		 */
+		tunnelIdLabel: () => LocalizedString
+		/**
+		 * Connect to Busabase Cloud
+		 */
+		connectButton: () => LocalizedString
+		/**
+		 * Disconnect
+		 */
+		disconnectButton: () => LocalizedString
+		/**
+		 * Failed to start the Cloud connect flow. Please try again.
+		 */
+		connectFailed: () => LocalizedString
+		/**
+		 * Failed to disconnect. Please try again.
+		 */
+		disconnectFailed: () => LocalizedString
+		/**
+		 * Your browser blocked the sign-in popup. Please allow popups and try again.
+		 */
+		popupBlocked: () => LocalizedString
+		/**
+		 * About Cloud Connect
+		 */
+		aboutTitle: () => LocalizedString
+		/**
+		 * Signing in opens Busabase Cloud in a popup and mints a credential scoped only to this tunnel — not your full Cloud account session. Disconnecting revokes it.
+		 */
+		aboutDescription: () => LocalizedString
 	}
 	marketing: {
 		/**

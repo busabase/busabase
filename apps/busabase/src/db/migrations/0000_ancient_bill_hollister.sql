@@ -1,4 +1,3 @@
-CREATE EXTENSION IF NOT EXISTS pg_trgm;--> statement-breakpoint
 CREATE TYPE "public"."busabase_change_request_status" AS ENUM('in_review', 'changes_requested', 'approved', 'rejected', 'merged', 'abandoned', 'conflict');--> statement-breakpoint
 CREATE TYPE "public"."busabase_comment_subject" AS ENUM('record', 'change_request', 'operation', 'commit');--> statement-breakpoint
 CREATE TYPE "public"."busabase_operation_kind" AS ENUM('record_create', 'record_update', 'record_delete', 'record_variant', 'view_create', 'view_update', 'view_delete', 'view_restore', 'node_create', 'node_rename', 'node_delete', 'node_restore', 'node_move', 'skill_file_create', 'skill_file_update', 'skill_file_delete', 'skill_metadata_update', 'drive_file_create', 'drive_file_update', 'drive_file_delete', 'drive_metadata_update', 'airapp_file_create', 'airapp_file_update', 'airapp_file_delete', 'airapp_metadata_update', 'doc_update', 'base_add_field', 'base_delete_field', 'base_update_field', 'base_convert_field', 'base_reorder_fields', 'base_restore_field', 'base_archive', 'base_restore', 'record_restore');--> statement-breakpoint
@@ -400,6 +399,10 @@ CREATE UNIQUE INDEX "busabase_bases_node_uniq" ON "busabase_bases" USING btree (
 CREATE UNIQUE INDEX "busabase_bases_space_slug_uniq" ON "busabase_bases" USING btree ("space_id","slug") WHERE "busabase_bases"."archived_at" IS NULL;--> statement-breakpoint
 CREATE INDEX "busabase_field_values_base_field_text_idx" ON "busabase_field_values" USING btree ("base_id","field_slug","value_text");--> statement-breakpoint
 CREATE INDEX "busabase_field_values_text_fts_idx" ON "busabase_field_values" USING gin (to_tsvector('simple', coalesce("value_text", '')));--> statement-breakpoint
+-- Backs the ilike('%...%') substring-match fallback in logic/search.ts with a
+-- usable index (gin_trgm_ops) below — without it, that OR branch forces a
+-- sequential scan for every global search query, including no-hit ones.
+CREATE EXTENSION IF NOT EXISTS pg_trgm;--> statement-breakpoint
 CREATE INDEX "busabase_field_values_text_trgm_idx" ON "busabase_field_values" USING gin ("value_text" gin_trgm_ops);--> statement-breakpoint
 CREATE INDEX "busabase_field_values_slug_trgm_idx" ON "busabase_field_values" USING gin ("field_slug" gin_trgm_ops);--> statement-breakpoint
 CREATE INDEX "busabase_field_values_base_field_number_idx" ON "busabase_field_values" USING btree ("base_id","field_slug","value_number");--> statement-breakpoint

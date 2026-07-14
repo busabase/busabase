@@ -24,9 +24,10 @@ import type { NodeVO } from "busabase-contract/types";
 import ELK, { type ElkNode } from "elkjs/lib/elk.bundled.js";
 import { Folder, Network } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef } from "react";
-import { useLocation } from "wouter";
+import { useLocation, useSearch } from "wouter";
 import { type CoreLocale, fmt, useCoreI18n, useCoreLocale } from "../../../i18n";
 import { fieldDisplayName, fieldLabel } from "../../base/field-types";
+import { mergeSearchIntoHref } from "../helpers/link-search";
 
 // Card geometry (px). Node height is exactly HEADER_H + rows * ROW_H.
 const HEADER_H = 36;
@@ -386,9 +387,11 @@ function GraphInner({ bases, nodes: nodeTree }: BaseGraphViewProps) {
   }, [baseNodes, edgeMeta, setNodes, setEdges, doFit]);
 
   const [, navigate] = useLocation();
+  const currentSearch = useSearch();
   const onNodeClick = useCallback(
-    (_: unknown, node: BaseNode) => navigate(`/base/${node.data.slug}`),
-    [navigate],
+    (_: unknown, node: BaseNode) =>
+      navigate(mergeSearchIntoHref(`/base/${node.data.slug}`, currentSearch)),
+    [navigate, currentSearch],
   );
 
   const onNodeMouseEnter = useCallback(

@@ -134,6 +134,19 @@ export interface Space {
   logo: LucideIcon | string; // Support both icon components and custom image URLs
   plan?: string;
   id?: string;
+  /**
+   * Discriminates a synthetic "remote space" (e.g. Busabase's Local ↔ Cloud
+   * Tunnel: a connected self-hosted instance surfaced as a space) from a real
+   * space. Additive + optional — absent/undefined for every existing space
+   * producer; `SpaceSelector` only renders the "Remote" treatment when this is
+   * set, so a `Space` without it renders byte-for-byte as it always has.
+   */
+  kind?: "remote_tunnel";
+  /**
+   * Whether a `kind: "remote_tunnel"` space's connection is currently live.
+   * Undefined/irrelevant for a real space.
+   */
+  online?: boolean;
 }
 
 export interface UserData {

@@ -54,7 +54,9 @@
   "plugins": {
     "updater": {
       "pubkey": "",
-      "endpoints": ["https://s1.busabase.com/public/downloads/busabase-desktop/latest.json"]
+      "endpoints": [
+        "https://s1.busabase.com/public/downloads/busabase-desktop/latest.json"
+      ]
     }
   }
 }

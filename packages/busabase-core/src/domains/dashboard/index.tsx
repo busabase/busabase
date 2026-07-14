@@ -14,7 +14,10 @@ import {
   type BusabaseDashboardApiClient,
   createBusabaseRestApiClient,
 } from "busabase-contract/api-client";
-import { createBusabaseQueryUtils } from "busabase-contract/api-client/react-query";
+import {
+  type BusabaseClientOptions,
+  createBusabaseQueryUtils,
+} from "busabase-contract/api-client/react-query";
 import type {
   AuditEventVO,
   BaseVO,
@@ -55,6 +58,7 @@ import { BaseTableSkeleton } from "./components/skeletons";
 import { BusabaseTopbarBreadcrumb } from "./components/topbar";
 import { getRelationRecordIds } from "./helpers/field";
 import { getLocationPath, readInboxView } from "./helpers/inbox";
+import { mergeSearchIntoHref } from "./helpers/link-search";
 import { isConflictErrorMessage } from "./helpers/search";
 import type {
   BusabaseBreadcrumbItem,
@@ -91,6 +95,13 @@ interface BusabaseDashboardProps {
    * single space) leaves the default.
    */
   cacheSpaceKey?: string;
+  /**
+   * Options threaded into the internally-built oRPC clients (e.g. the cloud's
+   * per-request `x-busabase-space` header naming the active space so the
+   * server can dispatch locally vs through a tunnel). Open source (a single
+   * space) leaves the default.
+   */
+  apiClientOptions?: BusabaseClientOptions;
   apiClient?: BusabaseDashboardApiClient;
   embedded?: boolean;
   onSearchOpenChange?: (open: boolean) => void;
@@ -131,6 +142,7 @@ export function BusabaseDashboard({
 function BusabaseDashboardContent({
   apiBasePath = "/api/rpc",
   cacheSpaceKey = "local",
+  apiClientOptions,
   apiClient,
   auditEvents: initialAuditEvents = [],
   changeRequests: initialChangeRequests,
@@ -148,13 +160,13 @@ function BusabaseDashboardContent({
 }: BusabaseDashboardProps) {
   const messages = useCoreI18n();
   const orpc = useMemo(
-    () => createBusabaseQueryUtils(apiBasePath, {}, cacheSpaceKey),
-    [apiBasePath, cacheSpaceKey],
+    () => createBusabaseQueryUtils(apiBasePath, apiClientOptions ?? {}, cacheSpaceKey),
+    [apiBasePath, apiClientOptions, cacheSpaceKey],
   );
   const queryClient = useQueryClient();
   const client = useMemo(
-    () => apiClient ?? createBusabaseRestApiClient(apiBasePath),
-    [apiBasePath, apiClient],
+    () => apiClient ?? createBusabaseRestApiClient(apiBasePath, apiClientOptions),
+    [apiBasePath, apiClient, apiClientOptions],
   );
   // Reads run through oRPC + React Query, seeded by the SSR props as initialData.
   const changeRequestsList = orpc.changeRequests.list.queryOptions({ input: {} });
@@ -206,15 +218,19 @@ function BusabaseDashboardContent({
   );
   const [error, setError] = useState<string | null>(null);
   const [location, rawSetLocation] = useLocation();
+  const search = useSearch();
   // Wrap every programmatic navigation so it keeps `?demo` in demo mode (the
-  // productready/buda pattern, applied once at the source instead of per call site).
+  // productready/buda pattern, applied once at the source instead of per call
+  // site) AND carries forward the rest of the current query string — e.g.
+  // busabase-cloud's `?space=tnl_…` selecting a connected Local ↔ Cloud
+  // Tunnel remote space, which a bare `setLocation(`/inbox/${id}`)` would
+  // otherwise silently drop, bouncing the host app back to its default space.
   const addDemoParam = useAddDemoParam();
   const setLocation = useCallback(
     (to: string, options?: { replace?: boolean; state?: unknown }) =>
-      rawSetLocation(addDemoParam(to), options),
-    [rawSetLocation, addDemoParam],
+      rawSetLocation(addDemoParam(mergeSearchIntoHref(to, search)), options),
+    [rawSetLocation, addDemoParam, search],
   );
-  const search = useSearch();
   const locationPath = getLocationPath(location);
   const inboxView = readInboxView(search);
   const [uncontrolledSearchOpen, setUncontrolledSearchOpen] = useState(false);

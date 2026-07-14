@@ -364,6 +364,7 @@ export const demoSearch = (input: {
   query: string;
   limit?: number;
   offset?: number;
+  sources?: ("records" | "files" | "names")[];
 }): SearchResponseVO => {
   const query = (input.query ?? "").trim();
   const limit = input.limit ?? 20;
@@ -371,58 +372,74 @@ export const demoSearch = (input: {
   const data = dataset();
   const needle = query.toLowerCase();
   const match = (haystack: string) => needle === "" || haystack.toLowerCase().includes(needle);
+  // No `sources` means every caller before this parameter existed — search
+  // everything, same default as the real (non-demo) searchBusabase.
+  const wantsSource = (source: "records" | "files" | "names") =>
+    !input.sources || input.sources.includes(source);
+  // Demo mode has no separate file-content search — `files` has nothing to
+  // additionally include or exclude here (mirrors real search's own "no
+  // Doc bodies" boundary, just a different missing source).
+  const wantsRecords = wantsSource("records");
+  const wantsNames = wantsSource("names");
 
-  const recordResults: SearchResultVO[] = data.records
-    .filter((record) => match(`${toSearchText(record.headCommit.fields)}`))
-    .map((record) => ({
-      id: record.id,
-      kind: "record",
-      // Title = base's primary (first) field value — same convention as store.ts.
-      title: String(record.headCommit.fields[record.base.fields[0]?.slug ?? ""] ?? "") || record.id,
-      body: String(record.headCommit.fields.body ?? record.headCommit.fields.description ?? ""),
-      eyebrow: `${record.base.name} · canonical record`,
-      href: `/base/${record.base.slug}/${record.id}`,
-      updatedAt: record.updatedAt,
-    }));
+  const recordResults: SearchResultVO[] = !wantsRecords
+    ? []
+    : data.records
+        .filter((record) => match(`${toSearchText(record.headCommit.fields)}`))
+        .map((record) => ({
+          id: record.id,
+          kind: "record",
+          // Title = base's primary (first) field value — same convention as store.ts.
+          title:
+            String(record.headCommit.fields[record.base.fields[0]?.slug ?? ""] ?? "") || record.id,
+          body: String(record.headCommit.fields.body ?? record.headCommit.fields.description ?? ""),
+          eyebrow: `${record.base.name} · canonical record`,
+          href: `/base/${record.base.slug}/${record.id}`,
+          updatedAt: record.updatedAt,
+        }));
 
-  const changeRequestResults: SearchResultVO[] = data.changeRequests
-    .filter((changeRequest) =>
-      match(
-        changeRequest.operations
-          .map((operation) => toSearchText(operation.headCommit.fields))
-          .join(" "),
-      ),
-    )
-    .map((changeRequest) => ({
-      id: changeRequest.id,
-      kind: "change_request",
-      title:
-        changeRequest.operationCount > 1
-          ? `${changeRequest.operationCount} operation changeRequest`
-          : String(
-              changeRequest.primaryOperation?.headCommit.fields.title ??
-                changeRequest.primaryOperation?.headCommit.fields.name ??
-                changeRequest.id,
-            ),
-      body: changeRequest.operations
-        .map((operation) => toSearchText(operation.headCommit.fields))
-        .join(" "),
-      eyebrow: `${changeRequest.base?.name ?? "Node tree"} · ${changeRequest.status}`,
-      href: `/inbox/${changeRequest.id}`,
-      updatedAt: changeRequest.updatedAt,
-    }));
+  const changeRequestResults: SearchResultVO[] = !wantsRecords
+    ? []
+    : data.changeRequests
+        .filter((changeRequest) =>
+          match(
+            changeRequest.operations
+              .map((operation) => toSearchText(operation.headCommit.fields))
+              .join(" "),
+          ),
+        )
+        .map((changeRequest) => ({
+          id: changeRequest.id,
+          kind: "change_request",
+          title:
+            changeRequest.operationCount > 1
+              ? `${changeRequest.operationCount} operation changeRequest`
+              : String(
+                  changeRequest.primaryOperation?.headCommit.fields.title ??
+                    changeRequest.primaryOperation?.headCommit.fields.name ??
+                    changeRequest.id,
+                ),
+          body: changeRequest.operations
+            .map((operation) => toSearchText(operation.headCommit.fields))
+            .join(" "),
+          eyebrow: `${changeRequest.base?.name ?? "Node tree"} · ${changeRequest.status}`,
+          href: `/inbox/${changeRequest.id}`,
+          updatedAt: changeRequest.updatedAt,
+        }));
 
-  const baseResults: SearchResultVO[] = data.bases
-    .filter((base) => match(`${base.name} ${base.description} ${base.slug}`))
-    .map((base) => ({
-      id: base.id,
-      kind: "base",
-      title: base.name,
-      body: `${base.description} ${base.fields.map((field) => `${iStringConcat(field.name)} ${field.slug}`).join(" ")}`,
-      eyebrow: `${base.fields.length} fields · ${base.slug}`,
-      href: `/base/${base.slug}`,
-      updatedAt: base.createdAt,
-    }));
+  const baseResults: SearchResultVO[] = !wantsNames
+    ? []
+    : data.bases
+        .filter((base) => match(`${base.name} ${base.description} ${base.slug}`))
+        .map((base) => ({
+          id: base.id,
+          kind: "base",
+          title: base.name,
+          body: `${base.description} ${base.fields.map((field) => `${iStringConcat(field.name)} ${field.slug}`).join(" ")}`,
+          eyebrow: `${base.fields.length} fields · ${base.slug}`,
+          href: `/base/${base.slug}`,
+          updatedAt: base.createdAt,
+        }));
 
   const results = [...recordResults, ...changeRequestResults, ...baseResults].slice(
     offset,

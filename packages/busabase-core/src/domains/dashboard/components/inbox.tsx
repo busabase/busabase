@@ -17,6 +17,7 @@ import {
 } from "../helpers/change-request";
 import { formatListTime, formatUserRefLabel } from "../helpers/format";
 import { type InboxViewKey, inboxTabLabel } from "../helpers/inbox";
+import { useHrefWithCurrentSearch } from "../helpers/link-search";
 import type { BusabaseListGroup } from "../helpers/view-types";
 import { ActivityRow } from "./activity";
 import { EmptyState } from "./primitives";
@@ -402,11 +403,12 @@ function ReviewChangeRequestRow({ changeRequest }: { changeRequest: ChangeReques
     changeRequest.submittedBy,
     messages,
   );
+  const href = useHrefWithCurrentSearch(`/inbox/${changeRequest.id}`);
 
   return (
     <Link
       className="group grid min-h-14 items-center gap-2 px-3 py-2.5 transition-colors hover:bg-accent/25 md:grid-cols-[minmax(0,1fr)_220px]"
-      href={`/inbox/${changeRequest.id}`}
+      href={href}
     >
       <div className="min-w-0">
         <div className="flex min-w-0 items-center gap-2">
