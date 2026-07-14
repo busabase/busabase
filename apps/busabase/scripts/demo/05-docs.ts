@@ -4,6 +4,7 @@
  */
 
 import { api, approveMerge, assert, BASE, makeRunner } from "./_client";
+import { findFolderBySlug, moveNodeToFolder, needsMove } from "./_nodes";
 
 interface NodeVO {
   id: string;
@@ -43,6 +44,9 @@ export async function run() {
   console.log(`\n📄  Docs  →  ${BASE}\n`);
 
   let docId = "";
+  const nodes = await api<import("./_client").NodeTreeVO[]>("GET", "/nodes");
+  const docsFolder = findFolderBySlug(nodes, "docs");
+  assert(!!docsFolder, "Docs folder not found; run 01-folders first");
 
   // ── Create docs ───────────────────────────────────────────────────────────
 
@@ -56,6 +60,7 @@ export async function run() {
           name: def.name,
           description: def.description,
           body: def.body,
+          parentNodeId: docsFolder.node.id,
           // Smoke-testing the API surface, not the review-first policy — opt
           // out the same way a seed script does.
           autoMerge: true,
@@ -65,6 +70,9 @@ export async function run() {
       }
       assert(doc.node.slug === def.slug, `slug mismatch: ${doc.node.slug}`);
       assert(doc.node.type === "doc", `expected type=doc, got ${doc.node.type}`);
+      if (needsMove(nodes, def.slug, "docs")) {
+        await moveNodeToFolder(def.slug, "docs", nodes);
+      }
       if (def === DEMO_DOCS[0]) docId = doc.node.id;
     });
   }

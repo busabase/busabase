@@ -5,6 +5,7 @@
 
 import { api, approveMerge, assert, BASE, makeRunner } from "./_client";
 import { DEMO_FOLDERS } from "./_data";
+import { STANDARD_DEMO_FOLDERS } from "./_nodes";
 
 interface NodeVO {
   id: string;
@@ -50,7 +51,7 @@ export async function run() {
     const root = nodes.find((n) => n.type === "folder" && n.slug === "root");
     if (!root) return;
     let created = 0;
-    for (const def of DEMO_FOLDERS) {
+    for (const def of STANDARD_DEMO_FOLDERS) {
       if (folders.some((f) => f.node.slug === def.slug)) continue;
       const cr = await api<{ id: string }>("POST", "/nodes/change-requests", {
         message: `demo: ensure folder ${def.slug}`,

@@ -32,6 +32,7 @@ export interface NodeTreeVO {
   id: string;
   type: string;
   name: string;
+  slug: string;
   children?: NodeTreeVO[];
 }
 

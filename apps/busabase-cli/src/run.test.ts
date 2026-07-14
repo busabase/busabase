@@ -43,7 +43,9 @@ describe("busabase-cli commands", () => {
   });
 
   it("documents node and terminal Change Request commands in help", () => {
-    expect(HELP).toContain("nodes create-change-request --type <folder|base|skill|drive|file|doc>");
+    expect(HELP).toContain(
+      "nodes create-change-request --type <folder|base|skill|drive|airapp|file|doc>",
+    );
     expect(HELP).toContain("--asset-id <id>");
     expect(HELP).toContain("change-requests close --change-request-id <id>");
     expect(HELP).toContain("records list [--limit <n>] [--base-id <id>] [--cursor <cursor>]");
@@ -91,6 +93,10 @@ describe("busabase-cli commands", () => {
     expect(HELP).toContain("records change-requests --record-id <id>");
     expect(HELP).not.toContain("records search ");
     expect(HELP).not.toContain("records list-change-requests");
+    // airapps.listFiles is aliased by the curated `airapps files`, so the generator
+    // must NOT also emit `airapps list-files`.
+    expect(HELP).toContain("airapps files --node-id <id>");
+    expect(HELP).not.toContain("airapps list-files");
   });
 
   it("routes a generated GET command to the right method and path", async () => {
@@ -707,6 +713,187 @@ describe("busabase-cli commands", () => {
     expect(exitCode).toBe(1);
     expect(global.fetch).not.toHaveBeenCalled();
     expect(error.mock.calls.join("\n")).toContain("Pass either --field or --fields-json");
+  });
+
+  it("creates an airapp node Change Request through the node endpoint", async () => {
+    const calls: Array<{ body: unknown; method: string; url: string }> = [];
+    global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      calls.push({
+        body: request.body ? await requestBody(request) : null,
+        method: request.method,
+        url: request.url,
+      });
+      return jsonResponse({ id: "crq_1", status: "in_review" });
+    }) as typeof fetch;
+
+    const exitCode = await runCli([
+      "--base-url",
+      "http://localhost:15419",
+      "--output",
+      "json",
+      "nodes",
+      "create-change-request",
+      "--type",
+      "airapp",
+      "--slug",
+      "hello-app",
+      "--name",
+      "Hello App",
+    ]);
+
+    expect(exitCode).toBe(0);
+    expect(calls).toEqual([
+      expect.objectContaining({
+        method: "POST",
+        url: "http://localhost:15419/api/v1/nodes/change-requests",
+        body: {
+          message: "Create airapp Hello App",
+          operations: [
+            { kind: "create", name: "Hello App", nodeType: "airapp", slug: "hello-app" },
+          ],
+        },
+      }),
+    ]);
+  });
+
+  it("lists AirApps through the airapps endpoint", async () => {
+    const calls: Array<{ method: string; url: string }> = [];
+    global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      calls.push({ method: request.method, url: request.url });
+      return jsonResponse([]);
+    }) as typeof fetch;
+
+    const exitCode = await runCli([
+      "--base-url",
+      "http://localhost:15419",
+      "--output",
+      "json",
+      "airapps",
+      "list",
+    ]);
+
+    expect(exitCode).toBe(0);
+    expect(calls).toEqual([{ method: "GET", url: "http://localhost:15419/api/v1/airapps" }]);
+  });
+
+  it("gets one AirApp by node id", async () => {
+    const calls: Array<{ method: string; url: string }> = [];
+    global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      calls.push({ method: request.method, url: request.url });
+      return jsonResponse({
+        node: { id: "nod_1" },
+        entryFile: "package.json",
+        visibility: "private",
+        version: "0.1.0",
+        files: [],
+      });
+    }) as typeof fetch;
+
+    const exitCode = await runCli([
+      "--base-url",
+      "http://localhost:15419",
+      "--output",
+      "json",
+      "airapps",
+      "get",
+      "--node-id",
+      "nod_1",
+    ]);
+
+    expect(exitCode).toBe(0);
+    expect(calls).toEqual([{ method: "GET", url: "http://localhost:15419/api/v1/airapps/nod_1" }]);
+  });
+
+  it("creates an AirApp from inline files JSON (review-first, no autoMerge)", async () => {
+    const calls: Array<{ body: unknown; method: string; url: string }> = [];
+    global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      calls.push({
+        body: request.body ? await requestBody(request) : null,
+        method: request.method,
+        url: request.url,
+      });
+      return jsonResponse({ id: "crq_1", status: "in_review" });
+    }) as typeof fetch;
+
+    const files = JSON.stringify([{ path: "index.js", content: "console.log('hi')" }]);
+
+    const exitCode = await runCli([
+      "--base-url",
+      "http://localhost:15419",
+      "--output",
+      "json",
+      "airapps",
+      "create",
+      "--slug",
+      "hello-app",
+      "--name",
+      "Hello App",
+      "--files-json",
+      files,
+    ]);
+
+    expect(exitCode).toBe(0);
+    expect(calls).toEqual([
+      expect.objectContaining({
+        method: "POST",
+        url: "http://localhost:15419/api/v1/airapps",
+        body: {
+          slug: "hello-app",
+          name: "Hello App",
+          files: JSON.parse(files),
+        },
+      }),
+    ]);
+  });
+
+  it("creates an AirApp immediately with --auto-merge", async () => {
+    const calls: Array<{ body: unknown; method: string; url: string }> = [];
+    global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      calls.push({
+        body: request.body ? await requestBody(request) : null,
+        method: request.method,
+        url: request.url,
+      });
+      return jsonResponse({
+        node: { id: "nod_1" },
+        entryFile: "package.json",
+        visibility: "private",
+        version: "0.1.0",
+        files: [],
+      });
+    }) as typeof fetch;
+
+    const exitCode = await runCli([
+      "--base-url",
+      "http://localhost:15419",
+      "--output",
+      "json",
+      "airapps",
+      "create",
+      "--slug",
+      "hello-app",
+      "--name",
+      "Hello App",
+      "--auto-merge",
+    ]);
+
+    expect(exitCode).toBe(0);
+    expect(calls).toEqual([
+      expect.objectContaining({
+        method: "POST",
+        url: "http://localhost:15419/api/v1/airapps",
+        body: {
+          slug: "hello-app",
+          name: "Hello App",
+          autoMerge: true,
+        },
+      }),
+    ]);
   });
 
   it("terminally closes a Change Request through the close endpoint", async () => {

@@ -4,7 +4,8 @@
  * exercises the same /drives endpoints the seeded "Team Files" Drive is built on.
  */
 
-import { api, approveMerge, assert, BASE, makeRunner } from "./_client";
+import { api, approveMerge, assert, BASE, makeRunner, type NodeTreeVO } from "./_client";
+import { findFolderBySlug, moveNodeToFolder, needsMove } from "./_nodes";
 
 interface NodeVO {
   id: string;
@@ -61,10 +62,11 @@ export async function run() {
   // ── Find Drives folder ─────────────────────────────────────────────────────
 
   let parentNodeId: string | undefined;
+  let nodes: NodeTreeVO[] = [];
   await step("GET /nodes — locate Drives folder", async () => {
-    const nodes = await api<NodeVO[]>("GET", "/nodes");
-    const folder = nodes.find((n) => n.type === "folder" && n.name === "Drives");
-    parentNodeId = folder?.id;
+    nodes = await api<NodeTreeVO[]>("GET", "/nodes");
+    parentNodeId = findFolderBySlug(nodes, "drives")?.node.id;
+    assert(!!parentNodeId, "Drives folder not found; run 01-folders first");
   });
 
   // ── Create drives (idempotent by slug) ─────────────────────────────────────
@@ -91,6 +93,9 @@ export async function run() {
       }
       assert(drive.node.slug === def.slug, `slug mismatch: ${drive.node.slug}`);
       assert(drive.node.type === "drive", `expected type=drive, got ${drive.node.type}`);
+      if (needsMove(nodes, def.slug, "drives")) {
+        await moveNodeToFolder(def.slug, "drives", nodes);
+      }
       created.push(drive);
     });
   }

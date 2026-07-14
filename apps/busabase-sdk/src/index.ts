@@ -11,6 +11,7 @@ import {
 // procedure by walking it); the type parameterizes the client.
 export { type CloudContract, cloudContract } from "busabase-contract/contract/cloud";
 export type { CreatableNodeType } from "busabase-contract/domains";
+export { CREATABLE_NODE_TYPES } from "busabase-contract/domains";
 // Re-export the full VO / DTO type surface so consumers can type their own code
 // against Busabase objects (BaseVO, RecordVO, ChangeRequestVO, …) without
 // depending on the internal workspace `busabase-contract` package.

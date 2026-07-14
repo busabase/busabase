@@ -6,7 +6,8 @@
  *   POST /assets/upload-urls → push bytes (dev relay) → POST /assets/confirmations → POST /files
  */
 
-import { api, assert, BASE, makeRunner } from "./_client";
+import { api, assert, BASE, makeRunner, type NodeTreeVO } from "./_client";
+import { findFolderBySlug, moveNodeToFolder, needsMove } from "./_nodes";
 
 interface NodeVO {
   id: string;
@@ -91,10 +92,11 @@ export async function run() {
   // ── Find Files folder ──────────────────────────────────────────────────────
 
   let parentNodeId: string | undefined;
+  let nodes: NodeTreeVO[] = [];
   await step("GET /nodes — locate Files folder", async () => {
-    const nodes = await api<NodeVO[]>("GET", "/nodes");
-    const folder = nodes.find((n) => n.type === "folder" && n.name === "Files");
-    parentNodeId = folder?.id;
+    nodes = await api<NodeTreeVO[]>("GET", "/nodes");
+    parentNodeId = findFolderBySlug(nodes, "files")?.node.id;
+    assert(!!parentNodeId, "Files folder not found; run 01-folders first");
   });
 
   // ── Create files (upload Asset → create File node, idempotent by slug) ──────
@@ -108,6 +110,9 @@ export async function run() {
       const existing = await api<FileNodeVO[]>("GET", "/files");
       const already = existing.find((f) => f.node.slug === def.slug);
       if (already) {
+        if (needsMove(nodes, def.slug, "files")) {
+          await moveNodeToFolder(def.slug, "files", nodes);
+        }
         created.push(already);
         return;
       }

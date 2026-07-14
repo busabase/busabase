@@ -15,7 +15,8 @@
  */
 
 import { ALL_AIRAPP_DEMOS } from "busabase-core/domains/airapp/demo-content";
-import { api, assert, BASE, findFolderByName, makeRunner, type NodeTreeVO } from "./_client";
+import { api, assert, BASE, makeRunner, type NodeTreeVO } from "./_client";
+import { findFolderBySlug, moveNodeToFolder, needsMove } from "./_nodes";
 
 interface NodeVO {
   id: string;
@@ -44,10 +45,11 @@ export async function run() {
   console.log(`\n📱  AirApps  →  ${BASE}\n`);
 
   let parentNodeId: string | undefined;
+  let nodes: NodeTreeVO[] = [];
   await step("GET /nodes — locate AirApps folder", async () => {
-    const nodes = await api<NodeTreeVO[]>("GET", "/nodes");
-    const folder = findFolderByName(nodes, "AirApps");
-    parentNodeId = folder?.id;
+    nodes = await api<NodeTreeVO[]>("GET", "/nodes");
+    parentNodeId = findFolderBySlug(nodes, "airapps")?.node.id;
+    assert(!!parentNodeId, "AirApps folder not found; run 01-folders first");
   });
 
   const created: AirAppVO[] = [];
@@ -83,6 +85,9 @@ export async function run() {
         airapp.files.length === def.files.length,
         `expected ${def.files.length} files, got ${airapp.files.length}`,
       );
+      if (needsMove(nodes, def.slug, "airapps")) {
+        await moveNodeToFolder(def.slug, "airapps", nodes);
+      }
       created.push(airapp);
     });
   }

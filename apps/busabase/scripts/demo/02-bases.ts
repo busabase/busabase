@@ -3,8 +3,9 @@
  * Uses DEMO_BASES as the canonical field definitions (same source as the DB seed).
  */
 
-import { api, assert, BASE, makeRunner } from "./_client";
+import { api, assert, BASE, makeRunner, type NodeTreeVO } from "./_client";
 import { DEMO_BASES, toApiBase } from "./_data";
+import { findFolderBySlug, folderSlugForSeedNodeId, moveNodeToFolder, needsMove } from "./_nodes";
 
 interface BaseVO {
   id: string;
@@ -19,13 +20,21 @@ export async function run() {
 
   let allBases: BaseVO[] = [];
   const createdBases: Map<string, BaseVO> = new Map();
+  const nodes = await api<NodeTreeVO[]>("GET", "/nodes");
 
   // Create each base from DEMO_BASES via POST /bases (idempotent by slug)
   for (const def of DEMO_BASES) {
     await step(`POST /bases — create/idempotent "${def.name}"`, async () => {
-      const base = await api<BaseVO>("POST", "/bases", toApiBase(def));
+      const folderSlug = folderSlugForSeedNodeId(def.folderNodeId);
+      assert(!!folderSlug, `no demo folder mapping for seed node "${def.folderNodeId}"`);
+      const folder = findFolderBySlug(nodes, folderSlug);
+      assert(!!folder, `folder slug "${folderSlug}" not found`);
+      const base = await api<BaseVO>("POST", "/bases", toApiBase(def, folder.node.id));
       assert(base.slug === def.slug, `slug mismatch: ${base.slug} ≠ ${def.slug}`);
       assert(base.fields.length > 0, "base has no fields");
+      if (needsMove(nodes, def.slug, folderSlug)) {
+        await moveNodeToFolder(def.slug, folderSlug, nodes);
+      }
       createdBases.set(def.slug, base);
     });
   }

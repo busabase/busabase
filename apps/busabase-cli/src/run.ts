@@ -4,6 +4,7 @@ import { basename, extname } from "node:path";
 import {
   type BusabaseClient,
   type ResolvedConfig as BusabaseConfig,
+  CREATABLE_NODE_TYPES,
   type CreatableNodeType,
   cloudContract,
   createBusabaseClient,
@@ -498,6 +499,7 @@ const GENERATED_SKIP = new Set<string>([
   "auth.verify", // `whoami`
   "records.search", // `records by-field-text`
   "records.listChangeRequests", // `records change-requests`
+  "airapps.listFiles", // `airapps files`
 ]);
 
 /** Walk `cloudContract` and register a leaf command per procedure not already covered by hand. */
@@ -724,8 +726,8 @@ The flags below skip the menu (handy for scripts / CI):
   addGlobalFlags(nodes.command("create-change-request"))
     .description("Propose a new node via a Change Request")
     .addOption(
-      new Option("--type <folder|base|skill|drive|file|doc>", "node type")
-        .choices(["folder", "base", "skill", "drive", "file", "doc"])
+      new Option(`--type <${CREATABLE_NODE_TYPES.join("|")}>`, "node type")
+        .choices(CREATABLE_NODE_TYPES)
         .makeOptionMandatory(),
     )
     .requiredOption("--slug <slug>", "node slug")
@@ -948,6 +950,127 @@ Examples:
           >,
           message: opts.message as string | undefined,
           submittedBy: opts.submittedBy as string | undefined,
+        }),
+      ),
+    );
+
+  const airapps = program.command("airapps").description("AirApps (sandboxed mini-apps)");
+  addGlobalFlags(airapps.command("list"))
+    .description("List AirApps in the active space")
+    .action(runAction(state, (client) => client.airapps.list()));
+  addGlobalFlags(airapps.command("get"))
+    .description("Get one AirApp by node id")
+    .requiredOption("--node-id <id>", "AirApp node id")
+    .action(
+      runAction(state, (client, opts) => client.airapps.get({ nodeId: opts.nodeId as string })),
+    );
+  addGlobalFlags(airapps.command("create"))
+    .description("Create an AirApp — review-first by default: returns a pending Change Request")
+    .requiredOption("--slug <slug>", "AirApp slug")
+    .requiredOption("--name <name>", "AirApp name")
+    .option("--description <text>", "optional description")
+    .option("--parent-node-id <id>", "parent folder node id; omit for root")
+    .addOption(
+      new Option(
+        "--visibility <private|workspace|public>",
+        "AirApp visibility (default private)",
+      ).choices(["private", "workspace", "public"]),
+    )
+    .option("--version <semver>", "AirApp version (default 0.1.0)")
+    .option(
+      "--files-json <json|@file>",
+      'files as a JSON array, or @file.json — text files {"path","content","mimeType?"} or asset-backed files {"path","assetId","displayName?","mimeType?"}',
+    )
+    .addOption(
+      new Option(
+        "--merge-mode <merge|replace>",
+        "how --files-json combines with the default scaffold (default merge)",
+      ).choices(["merge", "replace"]),
+    )
+    .option(
+      "--auto-merge",
+      "skip review and create the AirApp immediately (default: propose a pending Change Request)",
+    )
+    .addHelpText(
+      "after",
+      `
+mergeMode explains how --files-json combines with the AirApp's default scaffold:
+  merge (default) — your files are layered on top of the default Hono-template
+                     scaffold by path; supply just a few files (e.g. one custom
+                     route) and still get the rest of the scaffold for any path
+                     you didn't provide yourself.
+  replace          — your files replace the scaffold entirely; use this when
+                     handing over a complete, self-contained project (e.g. a Vite
+                     app) so you don't end up with stray unrelated default files
+                     mixed in.
+
+Examples:
+  busabase-cli airapps create --slug hello-app --name "Hello App" --files-json @files.json
+  busabase-cli airapps create --slug vite-app --name "Vite App" --files-json @files.json --merge-mode replace
+  busabase-cli airapps create --slug hello-app --name "Hello App" --files-json @files.json --auto-merge   # skip review, create immediately`,
+    )
+    .action(
+      runAction(state, (client, opts) =>
+        client.airapps.create({
+          slug: opts.slug as string,
+          name: opts.name as string,
+          description: opts.description as string | undefined,
+          parentNodeId: opts.parentNodeId as string | undefined,
+          visibility: opts.visibility as "private" | "workspace" | "public" | undefined,
+          version: opts.version as string | undefined,
+          files: opts.filesJson
+            ? (parseJsonValue(opts.filesJson as string, "files-json") as Parameters<
+                BusabaseClient["airapps"]["create"]
+              >[0]["files"])
+            : undefined,
+          mergeMode: opts.mergeMode as "merge" | "replace" | undefined,
+          ...(opts.autoMerge ? { autoMerge: true } : {}),
+        }),
+      ),
+    );
+  addGlobalFlags(airapps.command("files"))
+    .description("List an AirApp's files")
+    .requiredOption("--node-id <id>", "AirApp node id")
+    .action(
+      runAction(state, (client, opts) =>
+        client.airapps.listFiles({ nodeId: opts.nodeId as string }),
+      ),
+    );
+  addGlobalFlags(airapps.command("read-file"))
+    .description("Read one AirApp file's content")
+    .requiredOption("--node-id <id>", "AirApp node id")
+    .requiredOption("--path <path>", "file path within the AirApp")
+    .action(
+      runAction(state, (client, opts) =>
+        client.airapps.readFile({ nodeId: opts.nodeId as string, filePath: opts.path as string }),
+      ),
+    );
+  addGlobalFlags(airapps.command("create-change-request"))
+    .description("Propose file changes to an existing AirApp via a Change Request")
+    .requiredOption("--node-id <id>", "AirApp node id")
+    .requiredOption(
+      "--operations-json <json|@file>",
+      'file operations as a JSON array, or @file.json — "create"/"update" (text {"kind","path","content","mimeType?"} or asset-backed {"kind","path","assetId","displayName?","mimeType?"}), "delete" {"kind","path"}, or "metadata_update" {"kind","metadata":{"entryFile?","visibility?","version?"}}',
+    )
+    .option("--message <text>", "reviewer-facing Change Request message")
+    .option("--submitted-by <name>", "producer label")
+    .addHelpText(
+      "after",
+      `
+Examples:
+  busabase-cli airapps create-change-request --node-id nod_123 --operations-json @operations.json
+  busabase-cli airapps create-change-request --node-id nod_123 --operations-json '[{"kind":"update","path":"index.js","content":"..."}]' --message "Fix handler bug"`,
+    )
+    .action(
+      runAction(state, (client, opts) =>
+        client.airapps.createChangeRequest({
+          nodeId: opts.nodeId as string,
+          message: opts.message as string | undefined,
+          submittedBy: opts.submittedBy as string | undefined,
+          operations: parseJsonValue(
+            opts.operationsJson as string,
+            "operations-json",
+          ) as Parameters<BusabaseClient["airapps"]["createChangeRequest"]>[0]["operations"],
         }),
       ),
     );

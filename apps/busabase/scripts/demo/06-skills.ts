@@ -3,8 +3,9 @@
  * Migrated from scripts/demo-skills.ts; uses DEMO_SKILLS from _data.ts.
  */
 
-import { api, approveMerge, assert, BASE, makeRunner } from "./_client";
+import { api, approveMerge, assert, BASE, makeRunner, type NodeTreeVO } from "./_client";
 import { DEMO_SKILLS } from "./_data";
+import { findFolderBySlug, moveNodeToFolder, needsMove } from "./_nodes";
 
 interface NodeVO {
   id: string;
@@ -39,10 +40,11 @@ export async function run() {
   // ── Find Skills folder ────────────────────────────────────────────────────
 
   let parentNodeId: string | undefined;
+  let nodes: NodeTreeVO[] = [];
   await step("GET /nodes — locate Skills folder", async () => {
-    const nodes = await api<NodeVO[]>("GET", "/nodes");
-    const folder = nodes.find((n) => n.type === "folder" && n.name === "Skills");
-    parentNodeId = folder?.id;
+    nodes = await api<NodeTreeVO[]>("GET", "/nodes");
+    parentNodeId = findFolderBySlug(nodes, "skills")?.node.id;
+    assert(!!parentNodeId, "Agent Skills folder not found; run 01-folders first");
   });
 
   // ── Create skills (idempotent by slug) ───────────────────────────────────
@@ -60,6 +62,9 @@ export async function run() {
       });
       assert(skill.node.slug === def.slug, `slug mismatch: ${skill.node.slug}`);
       assert(skill.files.length >= 1, "expected at least 1 file");
+      if (needsMove(nodes, def.slug, "skills")) {
+        await moveNodeToFolder(def.slug, "skills", nodes);
+      }
       created.push(skill);
     });
   }

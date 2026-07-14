@@ -4,7 +4,6 @@
  * so API behaviour and seeded state always reflect identical content.
  */
 
-// biome-ignore lint/correctness/noUnusedImports: re-exported for consumers
 export {
   DEMO_BASES,
   DEMO_BLOG_BASE_ID,
@@ -52,11 +51,12 @@ export function toApiField(f: SeedFieldDef) {
 }
 
 /** Map a seed base def to a POST /bases body (omits DB-specific fields). */
-export function toApiBase(b: SeedBaseDef) {
+export function toApiBase(b: SeedBaseDef, parentNodeId: string) {
   return {
     slug: b.slug,
     name: b.name,
     description: b.description,
+    parentNodeId,
     fields: b.fields
       .filter((f) => !["relation", "ai_summary", "ai_tags", "created_time"].includes(f.type))
       .slice(0, 8)
