@@ -1,5 +1,5 @@
 /**
- * 14-airapps: create all 7 example AirApp nodes (see `busabase-core/domains/
+ * 14-airapps: create all 8 example AirApp nodes (see `busabase-core/domains/
  * airapp/demo-content` for the full catalog and the Nodepod/Vite/Babel/SWC/
  * HyperFrames investigation behind each one) via the real REST API — the OpenAPI create
  * → approve/merge path, the same one an agent goes through, not the Run
@@ -100,11 +100,12 @@ export async function run() {
     }
   });
 
-  if (created[0]) {
+  const honoDemo = created.find((airapp) => airapp.node.slug === "demo-hono-api");
+  if (honoDemo) {
     await step("GET /airapps/{id}/files/package.json — read seeded content", async () => {
       const file = await api<FileContentVO>(
         "GET",
-        `/airapps/${created[0].node.id}/files/package.json`,
+        `/airapps/${honoDemo.node.id}/files/package.json`,
       );
       assert(file.content.includes("hono-api-demo"), "unexpected package.json content");
       assert(file.contentHash.startsWith("sha256:"), "unexpected hash format");

@@ -1,4 +1,8 @@
-import { AIRAPP_DEMO_HONO_API, AIRAPP_DEMO_SQLITE } from "../../domains/airapp/demo-content";
+import {
+  AIRAPP_DEMO_HONO_API,
+  AIRAPP_DEMO_PURE_HTML,
+  AIRAPP_DEMO_SQLITE,
+} from "../../domains/airapp/demo-content";
 import type { SeedScenario } from "../seed-types";
 
 // English per-node-type example content: Skills + Drives + AirApps + Docs + Files +
@@ -8,9 +12,9 @@ import type { SeedScenario } from "../seed-types";
 // canvas-node changelog for why).
 //
 // AirApp content comes from `domains/airapp/demo-content` — the same catalog
-// `apps/busabase/scripts/demo/14-airapps.ts` uses to create all 6 demos via
-// the REST API, so the two never drift. Only the two fast, dependency-light
-// demos (Hono API, SQLite) are seeded here; the Vite-based ones (slower
+// `apps/busabase/scripts/demo/14-airapps.ts` uses to create all 8 demos via
+// the REST API, so the two never drift. Only the three fast, dependency-light
+// demos (Pure HTML, Hono API, SQLite) are seeded here; the Vite-based ones (slower
 // installs, two of them deliberately broken) are left out of this fast
 // baseline seed.
 
@@ -102,11 +106,20 @@ export const enNodeTypesScenario: SeedScenario = {
     },
     {
       nodeType: "airapp",
+      nodeId: "nod_airapp_pure_html_demo",
+      slug: AIRAPP_DEMO_PURE_HTML.slug,
+      name: AIRAPP_DEMO_PURE_HTML.name,
+      description: AIRAPP_DEMO_PURE_HTML.description,
+      position: 0,
+      files: AIRAPP_DEMO_PURE_HTML.files,
+    },
+    {
+      nodeType: "airapp",
       nodeId: "nod_airapp_hono_api_demo",
       slug: AIRAPP_DEMO_HONO_API.slug,
       name: AIRAPP_DEMO_HONO_API.name,
       description: AIRAPP_DEMO_HONO_API.description,
-      position: 0,
+      position: 1,
       files: AIRAPP_DEMO_HONO_API.files,
     },
     {
@@ -115,7 +128,7 @@ export const enNodeTypesScenario: SeedScenario = {
       slug: AIRAPP_DEMO_SQLITE.slug,
       name: AIRAPP_DEMO_SQLITE.name,
       description: AIRAPP_DEMO_SQLITE.description,
-      position: 1,
+      position: 2,
       files: AIRAPP_DEMO_SQLITE.files,
     },
   ],

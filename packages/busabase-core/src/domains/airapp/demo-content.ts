@@ -7,18 +7,27 @@
  *     that creates all of these via the real REST API (`POST /airapps`).
  *   - `packages/busabase-core/src/demo/scenarios/node-types.en.ts` — a
  *     lower-level seed path (direct DB writes, no HTTP) consumed by
- *     `pnpm db:seed:all` and demo mode. It only seeds the two fast,
- *     dependency-light demos (Hono API, SQLite) — the Vite-based ones are
- *     intentionally left out of that fast baseline seed (slower installs,
- *     and two of the five are deliberately-broken negative examples).
+ *     `pnpm db:seed:all` and demo mode. It only seeds the three fast,
+ *     dependency-light demos (Pure HTML, Hono API, SQLite) — the Vite-based
+ *     ones are intentionally left out of that fast baseline seed (slower
+ *     installs, and two of the six are deliberately-broken negative
+ *     examples).
  *
  * What each demo shows about the Run panel (Nodepod-backed, see
- * `packages/busabase-core/src/domains/airapp/`) — 5 working, 2 kept as live,
+ * `packages/busabase-core/src/domains/airapp/`) — 6 working, 2 kept as live,
  * runnable negative examples rather than deleted, so a Run click shows the
  * real upstream failure instead of it only being documented in prose:
  *
- *   1. "Hono API Demo"          — pure Hono + @hono/node-server. Works.
- *   2. "Vite + React Demo"      — works, pinned to `vite@7.3.1` (the exact
+ *   1. "Pure HTML Demo"         — no package.json dependencies, no framework,
+ *      no bundler: index.html + CSS + a script tag, served by a five-line
+ *      node:http static file server. Same "npm install && npm run dev" path
+ *      every other demo uses — `npm install` with nothing to install is
+ *      reported by Nodepod itself as `added 0 packages in 0.0s`, so there's
+ *      no meaningful startup cost to keeping every AirApp on one execution
+ *      model instead of special-casing dependency-free projects at the
+ *      runner level. The lowest-friction AirApp starting point.
+ *   2. "Hono API Demo"          — pure Hono + @hono/node-server. Works.
+ *   3. "Vite + React Demo"      — works, pinned to `vite@7.3.1` (the exact
  *      version Nodepod's own repo, github.com/R1ck404/Nodepod
  *      examples/issue-44-react-dev-server, labels "known good" —
  *      `vite@^5.4.10`/`4.5.5` crash with `Cannot destructure property
@@ -27,30 +36,30 @@
  *      esbuild-based JSX transform instead, avoiding Babel altogether.
  *      Trade-off: no Fast Refresh — edits full-reload instead of preserving
  *      component state.
- *   3. "Hono + Vite Dev Server" — works, same vite@7.3.1 pin. No React/Babel
+ *   4. "Hono + Vite Dev Server" — works, same vite@7.3.1 pin. No React/Babel
  *      involved (Hono mounted as Vite middleware via `configureServer`,
  *      plain HTML/JS frontend), so this one was only ever blocked by the
  *      vite@5 `createServer` crash, not the Babel issue below.
- *   4. "Vite + React with Fast Refresh" — identical app to #2, but with
+ *   5. "Vite + React with Fast Refresh" — identical app to #3, but with
  *      `@vitejs/plugin-react` (Babel-based Fast Refresh) left in. Originally
  *      seeded as a known-broken negative example (`[BABEL] .length is not a
  *      valid Plugin property`, reproduced byte-for-byte against Nodepod's own
  *      "known good" example) — re-verified working after bumping
  *      `@scelar/nodepod` 1.9.5 → 1.9.9 (real click-through test: the counter
  *      button works and Fast Refresh preserves state on edit). Prefer this
- *      one over #2 unless there's a specific reason to avoid Babel.
- *   5. "Vite + React (SWC, known broken)" — same app again, with
+ *      one over #3 unless there's a specific reason to avoid Babel.
+ *   6. "Vite + React (SWC, known broken)" — same app again, with
  *      `@vitejs/plugin-react-swc` instead (SWC-based Fast Refresh, no
  *      Babel). Fails differently: `Failed to load native binding` —
  *      `@swc/core` ships a platform-native binary, same class of problem as
  *      the original esbuild crash, just a different native tool Nodepod
  *      doesn't polyfill. Re-verified still broken (identical error) as of
  *      `@scelar/nodepod` 1.9.9.
- *   6. "SQLite Demo"            — works. Adapted from Nodepod's own
+ *   7. "SQLite Demo"            — works. Adapted from Nodepod's own
  *      `examples/sqlite-test`: real `node:sqlite` (Node's built-in module,
  *      no external dependency) backing a small list UI, proving an AirApp
  *      can hold real queryable state, not just serve static responses.
- *   7. "HyperFrames Preview (known broken)" — HeyGen's open-source
+ *   8. "HyperFrames Preview (known broken)" — HeyGen's open-source
  *      HTML-to-MP4 video framework (github.com/heygen-com/hyperframes).
  *      `npm install` genuinely succeeds (no native-binary blocker — its full
  *      render pipeline needs Puppeteer + FFmpeg, architecturally incompatible
@@ -70,13 +79,13 @@
  * looks Next.js-named but is actually an internal reload-behavior debug
  * harness (a single static `index.html`, nothing Next.js-related); no real
  * Next.js example exists upstream to adapt. Next.js's default compiler is
- * SWC (still known-broken here, see #5) — its Babel fallback (see #4) is no
+ * SWC (still known-broken here, see #6) — its Babel fallback (see #5) is no
  * longer known-broken as of Nodepod 1.9.6+, so a from-scratch Next.js-with-
  * Babel demo might now be worth revisiting, but hasn't been tried.
  *
  * See the airapp changelogs under `apps/busabase/content/changelog/` for the
- * full investigation behind #2, #4, and #5, including how #2's working
- * config was found and when #4 was confirmed fixed.
+ * full investigation behind #3, #5, and #6, including how #3's working
+ * config was found and when #5 was confirmed fixed.
  */
 
 export interface AirAppDemoFile {
@@ -177,7 +186,93 @@ input {
 }
 `;
 
-// ── 1. Hono API Demo (works today) ────────────────────────────────────────
+// ── 1. Pure HTML Demo (works today, zero framework) ───────────────────────
+
+const PURE_HTML_PACKAGE_JSON = JSON.stringify(
+  {
+    name: "pure-html-demo",
+    private: true,
+    version: "0.1.0",
+    type: "module",
+    scripts: { dev: "node server.js" },
+  },
+  null,
+  2,
+);
+
+const PURE_HTML_SERVER_JS = `import { createServer } from "node:http";
+import { readFileSync } from "node:fs";
+import { extname } from "node:path";
+
+// No framework, no bundler — five lines of node:http serving three static
+// files by extension. This is the entire "backend."
+const contentTypes = {
+  ".html": "text/html; charset=utf-8",
+  ".css": "text/css; charset=utf-8",
+  ".js": "text/javascript; charset=utf-8",
+};
+
+createServer((req, res) => {
+  const path = req.url === "/" ? "/index.html" : req.url;
+  try {
+    const body = readFileSync(\`.\${path}\`);
+    res.writeHead(200, {
+      "Content-Type": contentTypes[extname(path)] || "application/octet-stream",
+    });
+    res.end(body);
+  } catch {
+    res.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
+    res.end("Not found");
+  }
+}).listen(3000, () => console.log("Pure HTML Demo listening on port 3000"));
+`;
+
+const PURE_HTML_INDEX_HTML = `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Pure HTML Demo</title>
+    <link rel="stylesheet" href="/style.css" />
+  </head>
+  <body>
+    <main class="card">
+      <span class="badge">AirApp · Pure HTML</span>
+      <h1>Pure HTML Demo</h1>
+      <p>No framework, no bundler, no dependencies in package.json — just
+      index.html, CSS, and a script tag, served by a five-line node:http server.</p>
+      <p>Count: <span id="count">0</span></p>
+      <button id="increment" type="button">+1</button>
+    </main>
+    <script src="/client.js"></script>
+  </body>
+</html>
+`;
+
+const PURE_HTML_CLIENT_JS = `let count = 0;
+const countEl = document.getElementById("count");
+
+document.getElementById("increment").addEventListener("click", () => {
+  count += 1;
+  countEl.textContent = String(count);
+});
+`;
+
+export const AIRAPP_DEMO_PURE_HTML: AirAppDemoDef = {
+  slug: "demo-pure-html",
+  name: "Pure HTML Demo",
+  description:
+    "Zero framework, zero build step — just index.html, CSS, and a script tag, served by a five-line node:http server. The lowest-friction AirApp starting point.",
+  files: [
+    { path: "package.json", content: PURE_HTML_PACKAGE_JSON },
+    { path: "server.js", content: PURE_HTML_SERVER_JS },
+    { path: "index.html", content: PURE_HTML_INDEX_HTML },
+    { path: "style.css", content: CARD_STYLE_CSS("#f59e0b", "#b45309") },
+    { path: "client.js", content: PURE_HTML_CLIENT_JS },
+  ],
+};
+
+// ── 2. Hono API Demo (works today) ─────────────────────────────────────────
 
 const HONO_PACKAGE_JSON = JSON.stringify(
   {
@@ -260,7 +355,7 @@ export const AIRAPP_DEMO_HONO_API: AirAppDemoDef = {
   ],
 };
 
-// ── 2. Vite + React Demo (works — no Babel) ─────────────────────────────────
+// ── 3. Vite + React Demo (works — no Babel) ─────────────────────────────────
 
 // `vite@^5.4.10` (and 4.5.5) crash inside Nodepod with `Cannot destructure
 // property 'createServer'` before the dev server even binds a port. Pinning
@@ -362,7 +457,7 @@ export const AIRAPP_DEMO_VITE_REACT: AirAppDemoDef = {
   ],
 };
 
-// ── 3. Hono + Vite Dev Server ───────────────────────────────────────────────
+// ── 4. Hono + Vite Dev Server ───────────────────────────────────────────────
 
 const HONO_VITE_PACKAGE_JSON = JSON.stringify(
   {
@@ -447,7 +542,7 @@ export const AIRAPP_DEMO_HONO_VITE: AirAppDemoDef = {
   ],
 };
 
-// ── 4. Vite + React with Fast Refresh (Babel) ───────────────────────────────
+// ── 5. Vite + React with Fast Refresh (Babel) ───────────────────────────────
 
 // Same vite@7.3.1 + React app as demo #2, but with `@vitejs/plugin-react`
 // (Babel-based Fast Refresh) left in instead of dropped. Originally seeded as
@@ -518,7 +613,7 @@ export const AIRAPP_DEMO_VITE_REACT_BABEL: AirAppDemoDef = {
   ],
 };
 
-// ── 5. Vite + React (SWC — known broken) ────────────────────────────────────
+// ── 6. Vite + React (SWC — known broken) ────────────────────────────────────
 
 // Same app again, this time with `@vitejs/plugin-react-swc` (SWC-based Fast
 // Refresh, no Babel at all) — an attempt to keep Fast Refresh without
@@ -586,7 +681,7 @@ export const AIRAPP_DEMO_VITE_REACT_SWC_BROKEN: AirAppDemoDef = {
   ],
 };
 
-// ── 6. SQLite Demo (works) ──────────────────────────────────────────────────
+// ── 7. SQLite Demo (works) ──────────────────────────────────────────────────
 
 // Adapted from Nodepod's own examples/sqlite-test — real `node:sqlite`
 // (Node's built-in SQLite module, no external dependency) running inside
@@ -720,7 +815,7 @@ export const AIRAPP_DEMO_SQLITE: AirAppDemoDef = {
   ],
 };
 
-// ── 7. HyperFrames Preview (known broken) ───────────────────────────────────
+// ── 8. HyperFrames Preview (known broken) ───────────────────────────────────
 
 // HeyGen's open-source HTML-to-MP4 video framework
 // (github.com/heygen-com/hyperframes). Spike-tested directly in Nodepod:
@@ -755,6 +850,7 @@ export const AIRAPP_DEMO_HYPERFRAMES_BROKEN: AirAppDemoDef = {
 
 /** Full gallery, in the narrative order described in this file's docblock. */
 export const ALL_AIRAPP_DEMOS: AirAppDemoDef[] = [
+  AIRAPP_DEMO_PURE_HTML,
   AIRAPP_DEMO_HONO_API,
   AIRAPP_DEMO_VITE_REACT,
   AIRAPP_DEMO_HONO_VITE,
