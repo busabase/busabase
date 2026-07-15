@@ -59,7 +59,7 @@ type RootTranslation = {
 		 */
 		localPlan: string
 		/**
-		 * A​p​p​r​o​v​a​l​-​f​i​r​s​t​ ​K​B
+		 * T​r​u​s​t​e​d​ ​I​n​t​e​l​l​i​g​e​n​t​ ​D​a​t​a​b​a​s​e
 		 */
 		approvalFirstKb: string
 		/**
@@ -923,7 +923,7 @@ export type TranslationFunctions = {
 		 */
 		localPlan: () => LocalizedString
 		/**
-		 * Approval-first KB
+		 * Trusted Intelligent Database
 		 */
 		approvalFirstKb: () => LocalizedString
 		/**

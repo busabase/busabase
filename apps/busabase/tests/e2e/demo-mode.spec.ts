@@ -81,7 +81,9 @@ test("dashboard renders the demo review queue from ?demo=1", async ({ page }) =>
   // server render reads — purely server-side, no client code or cookie.
   await page.goto("/dashboard/inbox?demo=1");
   await expect(page.getByText("Busabase", { exact: true }).first()).toBeVisible();
-  await expect(page.getByText("Approval-first KB", { exact: true }).first()).toBeVisible();
+  await expect(
+    page.getByText("Trusted Intelligent Database", { exact: true }).first(),
+  ).toBeVisible();
   await expect(page.getByRole("link", { name: /For review \d+/ })).toBeVisible();
 });
 

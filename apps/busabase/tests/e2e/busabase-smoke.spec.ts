@@ -16,11 +16,13 @@ test("REST OPTIONS advertises node change-request methods", async ({ request }, 
 
 test("dashboard routes render the review-first seeded experience", async ({ page }) => {
   await page.goto("/dashboard");
-  await expect(page.getByRole("button", { name: /Busabase.*Approval-first KB/ })).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: /Busabase.*Trusted Intelligent Database/ }),
+  ).toBeVisible();
   await expect(page.getByRole("link", { name: "Inbox" })).toBeVisible();
   await expect(page.getByRole("link", { name: "Activity" })).toBeVisible();
   await expect(page.getByRole("link", { exact: true, name: "Assets" })).toHaveCount(0);
-  await page.getByRole("button", { name: /Busabase.*Approval-first KB/ }).click();
+  await page.getByRole("button", { name: /Busabase.*Trusted Intelligent Database/ }).click();
   await expect(page.getByRole("menuitem", { name: "Archive" })).toBeVisible();
   await expect(page.getByRole("menuitem", { name: "Assets" })).toBeVisible();
   await expect(page.getByRole("menuitem", { name: "Graph View" })).toBeVisible();
