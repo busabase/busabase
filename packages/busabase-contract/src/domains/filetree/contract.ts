@@ -68,7 +68,12 @@ export const fileTreeNodeSchema = z.object({
 });
 
 export const createFileTreeInputSchema = z.object({
-  parentNodeId: z.string().optional(),
+  parentNodeId: z
+    .string()
+    .optional()
+    .describe(
+      "Parent node id. Must be a folder or the space root; container-incapable node types (Base, Doc, AirApp, etc.) cannot hold children.",
+    ),
   slug: z
     .string()
     .min(1)
@@ -152,10 +157,15 @@ export const makeFileTreeContract = (routeBase: string, tag: string) => {
         path: basePath,
         tags: [tag],
         summary: `Create ${label} node`,
-        successDescription: `Review-first by default: a pending ChangeRequest proposing the ${label} node. Returns the materialized ${label} node instead when \`autoMerge: true\` is passed.`,
+        successDescription: `Review-first by default: a pending ChangeRequest proposing the ${label} node (\`materialized: false\`). Returns the materialized ${label} node instead (\`materialized: true\`) when \`autoMerge: true\` is passed.`,
       })
       .input(createFileTreeInputSchema)
-      .output(z.union([fileTreeNodeSchema, changeRequestSchema])),
+      .output(
+        z.union([
+          fileTreeNodeSchema.extend({ materialized: z.literal(true) }),
+          changeRequestSchema.extend({ materialized: z.literal(false) }),
+        ]),
+      ),
     get: oc
       .route({
         method: "GET",

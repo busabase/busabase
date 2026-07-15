@@ -15,7 +15,7 @@ const ja: Translation = {
     localSpaceName: "ローカル Busabase",
     localReviewerName: "ローカルレビュアー",
     localPlan: "ローカル",
-    approvalFirstKb: "承認優先ナレッジベース",
+    approvalFirstKb: "信頼できるインテリジェントデータベース",
     addWorkspace: "ワークスペースを追加",
     inviteMembers: "メンバーを招待",
     accountSettings: "アカウント設定",

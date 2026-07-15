@@ -72,6 +72,7 @@ import {
 } from "./kernel";
 import { publishBusabaseLiveEvent } from "./live-events";
 import { getMaterializer, type MaterializeArgs, type NodeCreateFields } from "./materialize";
+import { assertContainerParent } from "./node-parent";
 import { loadNodesByIds } from "./nodes";
 import { ensureReady, loadBasesByIds } from "./seed";
 import {
@@ -227,14 +228,16 @@ const mergeNodeCreate = async (ctx: MergeCtx, item: OperationPO, headCommit: Com
   const { db, timestamp } = ctx;
   const fields = headCommit.fields as NodeCreateFields;
   const parentNodeId = resolveParentNodeId(ctx, fields, item.id);
-  const [parentNode] = await db
+  const [parentNodeRow] = await db
     .select()
     .from(busabaseNodes)
     .where(eq(busabaseNodes.id, parentNodeId))
     .limit(1);
-  if (!parentNode || parentNode.type !== "folder") {
-    throw new Error(`Parent folder not found: ${parentNodeId}`);
-  }
+  const parentNode = assertContainerParent(
+    parentNodeRow,
+    fields.nodeType ?? "unknown",
+    parentNodeId,
+  );
   if (!fields.nodeType || !fields.slug || !fields.name) {
     throw new Error(`Node create commit missing required fields: ${item.id}`);
   }
@@ -314,14 +317,12 @@ const mergeNodeMove = async (
   if (!parentNodeId) {
     throw new Error(`Node move commit missing parentNodeId/parentNodeRef: ${item.id}`);
   }
-  const [parentNode] = await ctx.db
+  const [parentNodeRow] = await ctx.db
     .select()
     .from(busabaseNodes)
     .where(eq(busabaseNodes.id, parentNodeId))
     .limit(1);
-  if (!parentNode || parentNode.type !== "folder") {
-    throw new Error(`Parent folder not found: ${parentNodeId}`);
-  }
+  const parentNode = assertContainerParent(parentNodeRow, node.type, parentNodeId);
   // Reject moving a node into itself or one of its own descendants — walk the
   // target parent's ancestor chain and check for the moved node's id. Without
   // this a folder could be re-parented under its own child, orphaning the

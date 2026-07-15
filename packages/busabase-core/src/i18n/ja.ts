@@ -142,7 +142,7 @@ export const dashboardJa: CoreI18nMessages = {
     new: "新規",
   },
   shell: {
-    approvalFirstKb: "承認優先ナレッジベース",
+    approvalFirstKb: "信頼できるインテリジェントデータベース",
     addWorkspace: "ワークスペースを追加",
     inviteMembers: "メンバーを招待",
     settings: "設定",

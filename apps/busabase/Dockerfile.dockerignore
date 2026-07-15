@@ -10,6 +10,9 @@
 !.npmrc
 !.npmrc.*
 
+!patches/
+!patches/**
+
 !apps/
 !apps/busabase/
 !apps/busabase/**

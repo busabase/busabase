@@ -131,10 +131,15 @@ export const baseContract = {
       tags: ["Bases"],
       summary: "Create Base",
       successDescription:
-        "Review-first by default: a pending ChangeRequest proposing the Base. Returns the materialized Base instead when `autoMerge: true` is passed.",
+        "Review-first by default: a pending ChangeRequest proposing the Base (`materialized: false`). Returns the materialized Base instead (`materialized: true`) when `autoMerge: true` is passed.",
     })
     .input(createBaseInputSchema)
-    .output(z.union([baseSchema, changeRequestSchema])),
+    .output(
+      z.union([
+        baseSchema.extend({ materialized: z.literal(true) }),
+        changeRequestSchema.extend({ materialized: z.literal(false) }),
+      ]),
+    ),
   createChangeRequest: oc
     .route({
       method: "POST",

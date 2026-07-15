@@ -10,6 +10,7 @@ import { getDb } from "../../db";
 import { busabaseAssetUsages, busabaseNodes, type NodePO } from "../../db/schema";
 import { CURRENT_USER_ID, id, now, rootNodeIdForSpace } from "../../logic/kernel";
 import { type MaterializeArgs, registerMaterializer } from "../../logic/materialize";
+import { assertContainerParent } from "../../logic/node-parent";
 import { ensureReady } from "../../logic/seed";
 import {
   loadNodesByIds,
@@ -124,31 +125,29 @@ const toFileNodeVO = async (node: NodePO): Promise<FileNodeVO> => {
 
 export const createFileNode = async (
   input: z.input<typeof createFileNodeInputSchema>,
-): Promise<FileNodeVO | ChangeRequestVO> => {
+): Promise<(FileNodeVO & { materialized: true }) | (ChangeRequestVO & { materialized: false })> => {
   await ensureReady();
   const db = await getDb();
   const parsed = createFileNodeInputSchema.parse(input);
   const existing = await getFileNode(parsed.slug);
   if (existing) {
-    return toFileNodeVO(existing);
+    return { ...(await toFileNodeVO(existing)), materialized: true as const };
   }
   const asset = await resolveAssetFile(parsed.assetId);
   const parentNodeId = parsed.parentNodeId ?? rootNodeIdForSpace(getContextSpaceId());
-  const [parentNode] = await db
+  const [parentNodeRow] = await db
     .select()
     .from(busabaseNodes)
     .where(eq(busabaseNodes.id, parentNodeId))
     .limit(1);
-  if (!parentNode || parentNode.type !== "folder") {
-    throw new Error(`Parent folder not found: ${parentNodeId}`);
-  }
+  const parentNode = assertContainerParent(parentNodeRow, "file", parentNodeId);
 
   // Review-first by default: propose the File node as a pending node_create
   // ChangeRequest instead of materializing it immediately. Callers that don't
   // need human review (seed/migration scripts, an explicit no-review agent
   // task) pass `autoMerge: true` to keep today's instant-create behavior.
   if (!parsed.autoMerge) {
-    return recordPendingNodeCreate({
+    const changeRequest = await recordPendingNodeCreate({
       nodeType: "file",
       slug: parsed.slug,
       name: parsed.name,
@@ -158,6 +157,7 @@ export const createFileNode = async (
       message: `Create file ${parsed.name}`,
       submittedBy: resolveActorId(CURRENT_USER_ID),
     });
+    return { ...changeRequest, materialized: false as const };
   }
 
   const nodeId = id("nod");
@@ -191,7 +191,7 @@ export const createFileNode = async (
   if (!node) {
     throw new Error("Failed to create file node");
   }
-  return toFileNodeVO(node);
+  return { ...(await toFileNodeVO(node)), materialized: true as const };
 };
 
 export const getFileNodeDetail = async (nodeIdOrSlug: string): Promise<FileNodeVO> => {

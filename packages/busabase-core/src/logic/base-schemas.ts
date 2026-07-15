@@ -233,20 +233,28 @@ export const restoreViewInputSchema = z.object({
   submittedBy: z.string().optional().default("local-producer"),
 });
 
+// Must mirror busabase-contract's createChangeRequestInputSchema (same drift
+// risk noted on createBaseInputSchema's `autoMerge` above) — without
+// `idempotencyKey` here too, it would be silently stripped by this internal
+// re-parse even though the oRPC layer's contract validated and passed it through.
 export const createChangeRequestInputSchema = z.object({
   fields: z.record(z.string(), z.unknown()),
   message: z.string().optional().default("Initial changeRequest"),
   submittedBy: z.string().optional().default("local-producer"),
+  idempotencyKey: z.string().optional(),
 });
 
 // Propose many record_create operations as ONE change request (one review, one
 // merge). The CR/operation/commit model is already 1:N:N and merge applies every
 // operation in a single transaction, so this only adds the write-side entry point.
 // Capped at 1000 — larger loads belong in a dedicated import job, not a reviewable CR.
+// Must mirror busabase-contract's createBulkChangeRequestInputSchema — see
+// `idempotencyKey` note on createChangeRequestInputSchema above.
 export const createBulkChangeRequestInputSchema = z.object({
   records: z.array(z.record(z.string(), z.unknown())).min(1).max(1000),
   message: z.string().optional().default("Bulk create records"),
   submittedBy: z.string().optional().default("local-producer"),
+  idempotencyKey: z.string().optional(),
 });
 
 export const createDeleteChangeRequestInputSchema = z.object({

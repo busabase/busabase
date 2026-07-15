@@ -1712,27 +1712,27 @@ function BusabaseDashboardContent({
   ]);
 
   const content = (
-    <div className="flex h-full min-h-0 flex-col bg-background">
-      <div className="flex h-10 shrink-0 items-center gap-2 border-b bg-background/80 px-4 py-1.5 backdrop-blur-sm md:h-12">
-        <SidebarTrigger className="h-8 w-8 shrink-0" />
-        <BusabaseTopbarBreadcrumb items={breadcrumbItems} />
-        {titlebar.badge ? <div className="ml-1 shrink-0">{titlebar.badge}</div> : null}
-        {topbarActions ? <div className="shrink-0">{topbarActions}</div> : null}
-      </div>
-      {error ? (
-        isConflictErrorMessage(error) ? (
-          <ReviewConflictPanel message={error} />
-        ) : (
-          <div className="border-red-200 border-b bg-red-50 px-4 py-2 text-red-800 text-sm">
-            {error}
-          </div>
-        )
-      ) : null}
+    <div className="flex h-full min-h-0 bg-background">
+      <div className="flex min-h-0 flex-1 flex-col">
+        <div className="flex h-10 shrink-0 items-center gap-2 border-b bg-background/80 px-4 py-1.5 backdrop-blur-sm md:h-12">
+          <SidebarTrigger className="h-8 w-8 shrink-0" />
+          <BusabaseTopbarBreadcrumb items={breadcrumbItems} />
+          {titlebar.badge ? <div className="ml-1 shrink-0">{titlebar.badge}</div> : null}
+          {topbarActions ? <div className="shrink-0">{topbarActions}</div> : null}
+        </div>
+        {error ? (
+          isConflictErrorMessage(error) ? (
+            <ReviewConflictPanel message={error} />
+          ) : (
+            <div className="border-red-200 border-b bg-red-50 px-4 py-2 text-red-800 text-sm">
+              {error}
+            </div>
+          )
+        ) : null}
 
-      <div className="flex min-h-0 flex-1">
         <div className="min-h-0 flex-1 overflow-hidden">{activeView}</div>
-        <SidePanel orpc={orpc} />
       </div>
+      <SidePanel orpc={orpc} />
       <SearchDialog
         bases={bases}
         orpc={orpc}

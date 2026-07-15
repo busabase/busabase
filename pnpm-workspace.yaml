@@ -14,3 +14,6 @@ onlyBuiltDependencies:
   - prisma
   - sharp
   - unrs-resolver
+
+patchedDependencies:
+  '@scelar/nodepod@1.9.9': patches/@scelar__nodepod@1.9.9.patch

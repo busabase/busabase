@@ -14,7 +14,7 @@ const en: BaseTranslation = {
     localSpaceName: "Local Busabase",
     localReviewerName: "Local Reviewer",
     localPlan: "Local",
-    approvalFirstKb: "Approval-first KB",
+    approvalFirstKb: "Trusted Intelligent Database",
     addWorkspace: "Add workspace",
     inviteMembers: "Invite members",
     accountSettings: "Account settings",

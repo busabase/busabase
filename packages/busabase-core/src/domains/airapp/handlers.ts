@@ -187,7 +187,9 @@ export const airappFileTreeConfig = {
 } satisfies FileTreeKindConfig;
 
 export const createAirApp = (input: z.input<typeof createAirAppInputSchema>) =>
-  createFileTreeNode(airappFileTreeConfig, input) as Promise<AirAppVO | ChangeRequestVO>;
+  createFileTreeNode(airappFileTreeConfig, input) as Promise<
+    (AirAppVO & { materialized: true }) | (ChangeRequestVO & { materialized: false })
+  >;
 
 export const getAirApp = (nodeIdOrSlug: string): Promise<AirAppVO> =>
   getFileTreeNode(airappFileTreeConfig, nodeIdOrSlug) as Promise<AirAppVO>;

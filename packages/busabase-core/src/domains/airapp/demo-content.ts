@@ -13,7 +13,7 @@
  *     and two of the five are deliberately-broken negative examples).
  *
  * What each demo shows about the Run panel (Nodepod-backed, see
- * `packages/busabase-core/src/domains/airapp/`) — 4 working, 2 kept as live,
+ * `packages/busabase-core/src/domains/airapp/`) — 5 working, 2 kept as live,
  * runnable negative examples rather than deleted, so a Run click shows the
  * real upstream failure instead of it only being documented in prose:
  *
@@ -31,17 +31,21 @@
  *      involved (Hono mounted as Vite middleware via `configureServer`,
  *      plain HTML/JS frontend), so this one was only ever blocked by the
  *      vite@5 `createServer` crash, not the Babel issue below.
- *   4. "Vite + React (Babel, known broken)" — identical app to #2, but with
- *      `@vitejs/plugin-react` (Babel-based Fast Refresh) left in. Every file
- *      request 500s with `[BABEL] .length is not a valid Plugin property` —
- *      reproduced byte-for-byte against Nodepod's own "known good" example,
- *      not a config difference on our end.
+ *   4. "Vite + React with Fast Refresh" — identical app to #2, but with
+ *      `@vitejs/plugin-react` (Babel-based Fast Refresh) left in. Originally
+ *      seeded as a known-broken negative example (`[BABEL] .length is not a
+ *      valid Plugin property`, reproduced byte-for-byte against Nodepod's own
+ *      "known good" example) — re-verified working after bumping
+ *      `@scelar/nodepod` 1.9.5 → 1.9.9 (real click-through test: the counter
+ *      button works and Fast Refresh preserves state on edit). Prefer this
+ *      one over #2 unless there's a specific reason to avoid Babel.
  *   5. "Vite + React (SWC, known broken)" — same app again, with
  *      `@vitejs/plugin-react-swc` instead (SWC-based Fast Refresh, no
  *      Babel). Fails differently: `Failed to load native binding` —
  *      `@swc/core` ships a platform-native binary, same class of problem as
  *      the original esbuild crash, just a different native tool Nodepod
- *      doesn't polyfill.
+ *      doesn't polyfill. Re-verified still broken (identical error) as of
+ *      `@scelar/nodepod` 1.9.9.
  *   6. "SQLite Demo"            — works. Adapted from Nodepod's own
  *      `examples/sqlite-test`: real `node:sqlite` (Node's built-in module,
  *      no external dependency) backing a small list UI, proving an AirApp
@@ -55,7 +59,8 @@
  *      command) crashes immediately with `TypeError: require is not a
  *      function` inside Nodepod's Node runtime — reproduced identically with
  *      and without `"type": "module"` in package.json, so it isn't a
- *      CJS/ESM config mistake on our end.
+ *      CJS/ESM config mistake on our end. Re-verified still broken (identical
+ *      error) as of `@scelar/nodepod` 1.9.9.
  *
  * Deliberately not ported: most of Nodepod's other `examples/*` are their
  * own internal regression-test harnesses (multi-boot races, native-WASI
@@ -65,14 +70,13 @@
  * looks Next.js-named but is actually an internal reload-behavior debug
  * harness (a single static `index.html`, nothing Next.js-related); no real
  * Next.js example exists upstream to adapt. Next.js's default compiler is
- * SWC (already known-broken here, see #5) and its Babel fallback is also
- * already known-broken (see #4), so a from-scratch Next.js demo would very
- * likely just reproduce one of those two failures rather than reveal
- * anything new — not added for now.
+ * SWC (still known-broken here, see #5) — its Babel fallback (see #4) is no
+ * longer known-broken as of Nodepod 1.9.6+, so a from-scratch Next.js-with-
+ * Babel demo might now be worth revisiting, but hasn't been tried.
  *
  * See the airapp changelogs under `apps/busabase/content/changelog/` for the
  * full investigation behind #2, #4, and #5, including how #2's working
- * config was found.
+ * config was found and when #4 was confirmed fixed.
  */
 
 export interface AirAppDemoFile {
@@ -443,16 +447,17 @@ export const AIRAPP_DEMO_HONO_VITE: AirAppDemoDef = {
   ],
 };
 
-// ── 4. Vite + React (Babel — known broken) ──────────────────────────────────
+// ── 4. Vite + React with Fast Refresh (Babel) ───────────────────────────────
 
 // Same vite@7.3.1 + React app as demo #2, but with `@vitejs/plugin-react`
-// (Babel-based Fast Refresh) left in instead of dropped. Kept as a seeded,
-// runnable negative example — clicking Run reproduces the exact failure
-// documented in the airapp changelog: every file request 500s with
-// `[BABEL] .length is not a valid Plugin property`. Useful as a live
-// regression check once Nodepod fixes this upstream (Run should start
-// succeeding instead of erroring), and as a reference for anyone tempted to
-// add `@vitejs/plugin-react` back for Fast Refresh.
+// (Babel-based Fast Refresh) left in instead of dropped. Originally seeded as
+// a known-broken negative example — every file request 500'd with `[BABEL]
+// .length is not a valid Plugin property` — but re-verified after bumping
+// `@scelar/nodepod` from 1.9.5 to 1.9.9 (2026-07-13/14 releases) and the bug
+// is genuinely fixed upstream: confirmed live, including clicking the
+// counter button and watching Fast Refresh preserve component state on edit.
+// Kept alongside demo #2 (the esbuild-transform version) since this one
+// demonstrates real Fast Refresh, which #2 explicitly trades away.
 const VITE_BABEL_PACKAGE_JSON = JSON.stringify(
   {
     name: "vite-react-babel-demo",
@@ -489,8 +494,8 @@ export default function App() {
   const [count, setCount] = useState(0);
   return (
     <main style={{ fontFamily: "system-ui, sans-serif", padding: "2rem" }}>
-      <h1>Vite + React (Babel, known broken)</h1>
-      <p>If you're reading this, Nodepod's Babel plugin-loading bug is fixed — file an update on the airapp changelog.</p>
+      <h1>Vite + React with Fast Refresh</h1>
+      <p>Real Vite dev server, running inside Nodepod (vite@7.3.1, @vitejs/plugin-react — Babel-based Fast Refresh, edits preserve component state).</p>
       <button type="button" onClick={() => setCount((c) => c + 1)}>
         count is {count}
       </button>
@@ -499,11 +504,11 @@ export default function App() {
 }
 `;
 
-export const AIRAPP_DEMO_VITE_REACT_BABEL_BROKEN: AirAppDemoDef = {
+export const AIRAPP_DEMO_VITE_REACT_BABEL: AirAppDemoDef = {
   slug: "demo-vite-react-babel",
-  name: "Vite + React (Babel, known broken)",
+  name: "Vite + React with Fast Refresh",
   description:
-    "⚠️ Known broken: @vitejs/plugin-react uses Babel internally, which has a bug in Nodepod (`[BABEL] .length is not a valid Plugin property`). Kept as a live regression check — see 'Vite + React Demo' for the working config (drop the plugin, use esbuild's JSX transform instead).",
+    "A real Vite dev server (vite@7.3.1) with @vitejs/plugin-react's Babel-based Fast Refresh — edits preserve component state, unlike 'Vite + React Demo'. Was a known-broken negative example until Nodepod fixed its Babel plugin-loading bug upstream (1.9.6+).",
   files: [
     { path: "package.json", content: VITE_BABEL_PACKAGE_JSON },
     { path: "vite.config.js", content: VITE_BABEL_CONFIG_JS },
@@ -753,7 +758,7 @@ export const ALL_AIRAPP_DEMOS: AirAppDemoDef[] = [
   AIRAPP_DEMO_HONO_API,
   AIRAPP_DEMO_VITE_REACT,
   AIRAPP_DEMO_HONO_VITE,
-  AIRAPP_DEMO_VITE_REACT_BABEL_BROKEN,
+  AIRAPP_DEMO_VITE_REACT_BABEL,
   AIRAPP_DEMO_VITE_REACT_SWC_BROKEN,
   AIRAPP_DEMO_SQLITE,
   AIRAPP_DEMO_HYPERFRAMES_BROKEN,

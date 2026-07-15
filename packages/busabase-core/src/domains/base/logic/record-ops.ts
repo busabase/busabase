@@ -24,6 +24,7 @@ import {
 import { projectCommitFields } from "../../../logic/field-values";
 import { CURRENT_USER_ID, id, now, rootNodeIdForSpace } from "../../../logic/kernel";
 import { publishChangeRequestPendingReview } from "../../../logic/live-events";
+import { assertContainerParent } from "../../../logic/node-parent";
 import { ensureReady } from "../../../logic/seed";
 import {
   createBaseInputSchema,
@@ -96,6 +97,39 @@ const assertRelationTargetsLive = async (
   }
 };
 
+/** Postgres `unique_violation` — both the postgres-js driver and PGLite (a real
+ *  Postgres engine) surface the raw driver error's `.code === "23505"`. Drizzle
+ *  wraps that in a `DrizzleQueryError` whose own `.code` is undefined but whose
+ *  `.cause` is the raw driver error — check both so this doesn't silently miss
+ *  the wrapped shape. Used to detect a concurrent idempotency-key race that slipped
+ *  past the up-front SELECT check. */
+const isUniqueViolation = (error: unknown): boolean => {
+  const directCode = (error as { code?: unknown } | null | undefined)?.code;
+  if (directCode === "23505") return true;
+  const causeCode = (error as { cause?: { code?: unknown } } | null | undefined)?.cause?.code;
+  return causeCode === "23505";
+};
+
+const findChangeRequestByIdempotencyKey = async (
+  db: Awaited<ReturnType<typeof getDb>>,
+  baseId: string,
+  submittedBy: string,
+  idempotencyKey: string,
+): Promise<string | null> => {
+  const [existing] = await db
+    .select({ id: busabaseChangeRequests.id })
+    .from(busabaseChangeRequests)
+    .where(
+      and(
+        eq(busabaseChangeRequests.baseId, baseId),
+        eq(busabaseChangeRequests.submittedBy, submittedBy),
+        eq(busabaseChangeRequests.idempotencyKey, idempotencyKey),
+      ),
+    )
+    .limit(1);
+  return existing?.id ?? null;
+};
+
 // `z.input` (not `z.infer`/output) — matches createDoc/createFileNode/
 // createFileTreeNode's parameter typing: callers may omit any field with a
 // schema default (including the new `autoMerge`), since `.parse()` below
@@ -122,26 +156,24 @@ export const createBase = async (input: z.input<typeof createBaseInputSchema>) =
   if (existingActive) {
     const existing = await getBase(existingActive.id);
     if (existing) {
-      return existing;
+      return { ...existing, materialized: true as const };
     }
   }
 
   const parentNodeId = parsed.parentNodeId ?? rootNodeIdForSpace(getContextSpaceId());
-  const [parentNode] = await db
+  const [parentNodeRow] = await db
     .select()
     .from(busabaseNodes)
     .where(eq(busabaseNodes.id, parentNodeId))
     .limit(1);
-  if (!parentNode || parentNode.type !== "folder") {
-    throw new Error(`Parent folder not found: ${parentNodeId}`);
-  }
+  const parentNode = assertContainerParent(parentNodeRow, "base", parentNodeId);
 
   // Review-first by default: propose the Base as a pending node_create
   // ChangeRequest instead of materializing it immediately. Callers that don't
   // need human review (seed/migration scripts, an explicit no-review agent
   // task) pass `autoMerge: true` to keep today's instant-create behavior.
   if (!parsed.autoMerge) {
-    return recordPendingNodeCreate({
+    const changeRequest = await recordPendingNodeCreate({
       nodeType: "base",
       slug: parsed.slug,
       name: parsed.name,
@@ -151,6 +183,7 @@ export const createBase = async (input: z.input<typeof createBaseInputSchema>) =
       message: `Create base ${parsed.name}`,
       submittedBy: resolveActorId(CURRENT_USER_ID),
     });
+    return { ...changeRequest, materialized: false as const };
   }
 
   const baseId = id("bse");
@@ -215,7 +248,7 @@ export const createBase = async (input: z.input<typeof createBaseInputSchema>) =
     message: `Create base ${parsed.name}`,
     submittedBy: resolveActorId(CURRENT_USER_ID),
   });
-  return base;
+  return { ...base, materialized: true as const };
 };
 
 export const createChangeRequest = async (
@@ -232,10 +265,71 @@ export const createChangeRequest = async (
   const parsed = createChangeRequestInputSchema.parse(input);
   assertValidRecordFields(parsed.fields, base.fields);
   await assertRelationTargetsLive(parsed.fields, base.fields);
+  const submittedBy = resolveActorId(parsed.submittedBy);
+
+  // Idempotency: a client-supplied key lets a retry (e.g. after a timeout, or
+  // after a false-500 like the live-event-publish bug fixed alongside this)
+  // return the SAME change request instead of creating a content-identical
+  // duplicate. Scoped by base + submitter, checked up front so the common
+  // sequential-retry case never touches the write path below at all.
+  if (parsed.idempotencyKey) {
+    const existingId = await findChangeRequestByIdempotencyKey(
+      db,
+      base.id,
+      submittedBy,
+      parsed.idempotencyKey,
+    );
+    if (existingId) {
+      const existing = await getChangeRequest(existingId);
+      if (existing) {
+        return existing;
+      }
+    }
+  }
+
   const changeRequestId = id("crq");
   const operationId = id("opr");
   const commitId = id("cmt");
   const timestamp = now();
+
+  // Insert the ChangeRequest row FIRST (ahead of its commit/operation) so the
+  // partial unique index on (baseId, submittedBy, idempotencyKey) — the
+  // concurrent-race safety net behind the up-front check above — rejects a
+  // colliding retry before any commit/operation row is written, instead of
+  // after, which would otherwise leave an orphaned commit behind.
+  try {
+    await db.insert(busabaseChangeRequests).values({
+      id: changeRequestId,
+      baseId: base.id,
+      status: "in_review",
+      submittedBy,
+      idempotencyKey: parsed.idempotencyKey ?? null,
+      sourceMeta: withContextSourceMeta({}),
+      reviewPolicySnapshot: base.reviewPolicy,
+      mergeSummary: {},
+      rejectedReason: null,
+      reviewedAt: null,
+      mergedAt: null,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    });
+  } catch (error) {
+    if (parsed.idempotencyKey && isUniqueViolation(error)) {
+      const existingId = await findChangeRequestByIdempotencyKey(
+        db,
+        base.id,
+        submittedBy,
+        parsed.idempotencyKey,
+      );
+      if (existingId) {
+        const existing = await getChangeRequest(existingId);
+        if (existing) {
+          return existing;
+        }
+      }
+    }
+    throw error;
+  }
 
   await db.insert(busabaseCommits).values({
     id: commitId,
@@ -247,21 +341,6 @@ export const createChangeRequest = async (
     message: parsed.message,
     author: "producer",
     createdAt: timestamp,
-  });
-
-  await db.insert(busabaseChangeRequests).values({
-    id: changeRequestId,
-    baseId: base.id,
-    status: "in_review",
-    submittedBy: resolveActorId(parsed.submittedBy),
-    sourceMeta: withContextSourceMeta({}),
-    reviewPolicySnapshot: base.reviewPolicy,
-    mergeSummary: {},
-    rejectedReason: null,
-    reviewedAt: null,
-    mergedAt: null,
-    createdAt: timestamp,
-    updatedAt: timestamp,
   });
 
   await db.insert(busabaseOperations).values({
@@ -286,6 +365,11 @@ export const createChangeRequest = async (
 
   await db.update(busabaseCommits).set({ operationId }).where(eq(busabaseCommits.id, commitId));
 
+  // NOT wrapped: this projects the proposed field values reviewers/search/list
+  // depend on — unlike the audit log and live notification below, a failure
+  // here would leave a "successfully created" CR that's silently missing its
+  // substantive data, which is worse than surfacing the error (a retry with
+  // the same idempotencyKey is now safe either way, thanks to the check above).
   await projectCommitFields({
     baseId: base.id,
     commitId,
@@ -293,20 +377,25 @@ export const createChangeRequest = async (
     operationId,
     fields: parsed.fields,
   });
-  await insertAuditEvent(db, {
-    action: "change_request.created",
-    actorId: parsed.submittedBy,
-    baseId: base.id,
-    changeRequestId,
-    operationId,
-    commitId,
-    metadata: { operation: "record_create" },
-  });
+  try {
+    await insertAuditEvent(db, {
+      action: "change_request.created",
+      actorId: parsed.submittedBy,
+      baseId: base.id,
+      changeRequestId,
+      operationId,
+      commitId,
+      metadata: { operation: "record_create" },
+    });
+  } catch {
+    // Best-effort — an audit-log write failure must never fail change-request
+    // creation; the CR/operation/commit rows above are already durably committed.
+  }
   await publishChangeRequestPendingReview({
     spaceId: getContextSpaceId(),
     baseId: base.id,
     changeRequestId,
-    submittedBy: resolveActorId(parsed.submittedBy),
+    submittedBy,
   });
 
   const changeRequest = await getChangeRequest(changeRequestId);
@@ -344,24 +433,60 @@ export const createBulkChangeRequest = async (
     assertValidRecordFields(fields, base.fields);
     await assertRelationTargetsLive(fields, base.fields);
   }
+  const submittedBy = resolveActorId(parsed.submittedBy);
+
+  // Idempotency — see the identical comment in createChangeRequest above.
+  if (parsed.idempotencyKey) {
+    const existingId = await findChangeRequestByIdempotencyKey(
+      db,
+      base.id,
+      submittedBy,
+      parsed.idempotencyKey,
+    );
+    if (existingId) {
+      const existing = await getChangeRequest(existingId);
+      if (existing) {
+        return existing;
+      }
+    }
+  }
 
   const changeRequestId = id("crq");
   const timestamp = now();
 
-  await db.insert(busabaseChangeRequests).values({
-    id: changeRequestId,
-    baseId: base.id,
-    status: "in_review",
-    submittedBy: resolveActorId(parsed.submittedBy),
-    sourceMeta: withContextSourceMeta({ bulk: true, recordCount: parsed.records.length }),
-    reviewPolicySnapshot: base.reviewPolicy,
-    mergeSummary: {},
-    rejectedReason: null,
-    reviewedAt: null,
-    mergedAt: null,
-    createdAt: timestamp,
-    updatedAt: timestamp,
-  });
+  try {
+    await db.insert(busabaseChangeRequests).values({
+      id: changeRequestId,
+      baseId: base.id,
+      status: "in_review",
+      submittedBy,
+      idempotencyKey: parsed.idempotencyKey ?? null,
+      sourceMeta: withContextSourceMeta({ bulk: true, recordCount: parsed.records.length }),
+      reviewPolicySnapshot: base.reviewPolicy,
+      mergeSummary: {},
+      rejectedReason: null,
+      reviewedAt: null,
+      mergedAt: null,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    });
+  } catch (error) {
+    if (parsed.idempotencyKey && isUniqueViolation(error)) {
+      const existingId = await findChangeRequestByIdempotencyKey(
+        db,
+        base.id,
+        submittedBy,
+        parsed.idempotencyKey,
+      );
+      if (existingId) {
+        const existing = await getChangeRequest(existingId);
+        if (existing) {
+          return existing;
+        }
+      }
+    }
+    throw error;
+  }
 
   for (const [position, fields] of parsed.records.entries()) {
     const operationId = id("opr");
@@ -406,18 +531,23 @@ export const createBulkChangeRequest = async (
     });
   }
 
-  await insertAuditEvent(db, {
-    action: "change_request.created",
-    actorId: parsed.submittedBy,
-    baseId: base.id,
-    changeRequestId,
-    metadata: { operation: "record_create", bulk: true, recordCount: parsed.records.length },
-  });
+  try {
+    await insertAuditEvent(db, {
+      action: "change_request.created",
+      actorId: parsed.submittedBy,
+      baseId: base.id,
+      changeRequestId,
+      metadata: { operation: "record_create", bulk: true, recordCount: parsed.records.length },
+    });
+  } catch {
+    // Best-effort — an audit-log write failure must never fail change-request
+    // creation; the CR/operation/commit rows above are already durably committed.
+  }
   await publishChangeRequestPendingReview({
     spaceId: getContextSpaceId(),
     baseId: base.id,
     changeRequestId,
-    submittedBy: resolveActorId(parsed.submittedBy),
+    submittedBy,
   });
 
   const changeRequest = await getChangeRequest(changeRequestId);

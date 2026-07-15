@@ -177,6 +177,11 @@ export const busabaseChangeRequests = pgTable(
     rejectedReason: text("rejected_reason"),
     reviewedAt: timestamp("reviewed_at", { mode: "date" }),
     mergedAt: timestamp("merged_at", { mode: "date" }),
+    // Optional client-supplied dedup key for createChangeRequest/createBulkChangeRequest
+    // retries (e.g. after a timeout, or a false-500 the caller can't tell apart from a
+    // real failure). Scoped by (baseId, submittedBy) via the partial unique index below —
+    // NULL (the common case, no idempotency key supplied) is unconstrained.
+    idempotencyKey: text("idempotency_key"),
     createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { mode: "date" }).defaultNow().notNull(),
   },
@@ -184,6 +189,9 @@ export const busabaseChangeRequests = pgTable(
     index("busabase_change_requests_base_created_idx").on(base.baseId, base.createdAt),
     index("busabase_change_requests_node_created_idx").on(base.nodeId, base.createdAt),
     index("busabase_change_requests_status_created_idx").on(base.status, base.createdAt),
+    uniqueIndex("busabase_change_requests_idempotency_uniq")
+      .on(base.baseId, base.submittedBy, base.idempotencyKey)
+      .where(sql`${base.idempotencyKey} IS NOT NULL`),
   ],
 );
 

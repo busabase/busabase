@@ -1,0 +1,40 @@
+diff --git a/dist/__sw__.js b/dist/__sw__.js
+index 832b6d339ef79befd5b318ac59d0b9ac2088868a..2a6216670d1e3bdab3761c3c530dfafa75603709 100644
+--- a/dist/__sw__.js
++++ b/dist/__sw__.js
+@@ -693,6 +693,35 @@ self.addEventListener("fetch", (event) => {
+     return;
+   }
+ 
++  // 1.5. [busabase patch] reserved API bridge prefix — never claimed by a
++  //      pod, so it can never collide with an AirApp's own /api/* routes.
++  //      Strips the prefix and replays the request against the real host
++  //      origin with credentials included, so the browser's own (possibly
++  //      httpOnly) session cookie rides along automatically — this is a
++  //      genuine browser-native fetch, never routed through the virtual
++  //      Node process, which has no access to real browser cookies.
++  if (url.pathname.startsWith("/__busabase_api__/")) {
++    const target = new URL(
++      url.pathname.slice("/__busabase_api__".length) + url.search,
++      self.location.origin,
++    );
++    const bridgeFetch = (async () => {
++      let body;
++      if (request.method !== "GET" && request.method !== "HEAD") {
++        body = await request.clone().arrayBuffer();
++      }
++      return fetch(target.href, {
++        method: request.method,
++        headers: request.headers,
++        body,
++        credentials: "include",
++        redirect: "follow",
++      });
++    })();
++    event.respondWith(bridgeFetch);
++    return;
++  }
++
+   // 2. only same-origin (and localhost-alias) URLs can belong to a pod;
+   //    cross-origin (fonts, CDNs) always passes through
+   const sameOrigin =

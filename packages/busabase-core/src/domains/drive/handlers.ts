@@ -19,7 +19,9 @@ import {
 import { driveFileTreeConfig } from "./logic/config";
 
 export const createDrive = (input: z.input<typeof createDriveInputSchema>) =>
-  createFileTreeNode(driveFileTreeConfig, input) as Promise<DriveVO | ChangeRequestVO>;
+  createFileTreeNode(driveFileTreeConfig, input) as Promise<
+    (DriveVO & { materialized: true }) | (ChangeRequestVO & { materialized: false })
+  >;
 
 export const getDrive = (nodeIdOrSlug: string): Promise<DriveVO> =>
   getFileTreeNode(driveFileTreeConfig, nodeIdOrSlug) as Promise<DriveVO>;

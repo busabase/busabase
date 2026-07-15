@@ -1,0 +1,2 @@
+ALTER TABLE "busabase_change_requests" ADD COLUMN "idempotency_key" text;--> statement-breakpoint
+CREATE UNIQUE INDEX "busabase_change_requests_idempotency_uniq" ON "busabase_change_requests" USING btree ("base_id","submitted_by","idempotency_key") WHERE "busabase_change_requests"."idempotency_key" IS NOT NULL;

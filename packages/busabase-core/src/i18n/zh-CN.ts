@@ -141,7 +141,7 @@ export const dashboardZhCN: CoreI18nMessages = {
     new: "新建",
   },
   shell: {
-    approvalFirstKb: "审批优先知识库",
+    approvalFirstKb: "可信赖的智能数据库",
     addWorkspace: "添加工作区",
     inviteMembers: "邀请成员",
     settings: "设置",

@@ -171,7 +171,7 @@ describe("Agent Skills API — oRPC integration", () => {
         name: "Orphan",
         parentNodeId: "pnd_does_not_exist",
       }),
-    ).rejects.toThrow(/Parent folder not found/);
+    ).rejects.toThrow(/Parent node not found/);
   });
 
   it("gets a skill by node id and by slug, and 404s an unknown one", async () => {

@@ -1235,6 +1235,30 @@ seed("projdoc", PROJDOC, "knowledge", [
       status: "draft",
     },
   },
+  {
+    minutesAgo: 2300,
+    fields: {
+      title: "AirApp sandbox — architecture notes",
+      project: "AirApp",
+      type: "report",
+      version: "1.0",
+      content:
+        "Nodepod runs Node's API surface inside a Web Worker — no real OS process, so anything needing a native binary or a real headless browser is out of scope. See the AirApp docs for the current working/broken tool matrix.",
+      status: "published",
+    },
+  },
+  {
+    minutesAgo: 3100,
+    fields: {
+      title: "Unified grep — retrieval strategy",
+      project: "Search",
+      type: "spec",
+      version: "1.1",
+      content:
+        "One regex/literal scan across files, Docs, and Base records, with one coverage report per query.",
+      status: "published",
+    },
+  },
 ]);
 
 seed("events", EVENTS, "operations", [
@@ -1445,6 +1469,27 @@ seed("weekly", WEEKLY, "routine", [
       blockers: "Design bandwidth",
       next_week: "Finish onboarding",
       status: "draft",
+    },
+  },
+  {
+    minutesAgo: 30100,
+    fields: {
+      period: "2026-W22",
+      highlights:
+        "## Highlights\n- Migrated search to the unified grep index\n- Fixed 3 flaky e2e specs",
+      blockers: "None",
+      next_week: "Onboarding revamp kickoff",
+      status: "submitted",
+    },
+  },
+  {
+    minutesAgo: 40100,
+    fields: {
+      period: "2026-W21",
+      highlights: "## Highlights\n- Webhook retries shipped\n- Docs pass on the API reference",
+      blockers: "Waiting on design review for the new empty states",
+      next_week: "Search migration",
+      status: "submitted",
     },
   },
 ]);
@@ -1843,8 +1888,20 @@ seed("evals", EVALS, "dataset", [
       task: "Record summarization",
       score: 0.79,
       benchmark: "internal-summ-v2",
-      eval_date: "2026-06-02",
+      eval_date: "2026-05-27",
       notes: "On-device fallback.",
+    },
+  },
+  {
+    minutesAgo: 2100,
+    fields: {
+      model: "gpt-5-mini",
+      task: "Change-request risk scoring",
+      score: 0.85,
+      benchmark: "internal-risk-v1",
+      eval_date: "2026-05-20",
+      notes:
+        "Cheaper alternative to gpt-5 for risk scoring — 9 points lower but well within acceptable range for low-stakes changes.",
     },
   },
 ]);

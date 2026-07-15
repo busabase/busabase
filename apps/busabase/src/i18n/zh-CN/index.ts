@@ -14,7 +14,7 @@ const zhCN: Translation = {
     localSpaceName: "本地 Busabase",
     localReviewerName: "本地评审员",
     localPlan: "本地",
-    approvalFirstKb: "审批优先知识库",
+    approvalFirstKb: "可信赖的智能数据库",
     addWorkspace: "添加工作区",
     inviteMembers: "邀请成员",
     accountSettings: "账号设置",

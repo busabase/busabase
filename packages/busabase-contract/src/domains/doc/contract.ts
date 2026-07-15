@@ -13,7 +13,12 @@ export const docSchema = z.object({
 });
 
 export const createDocInputSchema = z.object({
-  parentNodeId: z.string().optional(),
+  parentNodeId: z
+    .string()
+    .optional()
+    .describe(
+      "Parent node id. Must be a folder or the space root; container-incapable node types (Base, Doc, AirApp, etc.) cannot hold children.",
+    ),
   slug: z
     .string()
     .min(1)
@@ -62,10 +67,15 @@ export const docContract = {
       tags: ["Docs"],
       summary: "Create Doc node",
       successDescription:
-        "Review-first by default: a pending ChangeRequest proposing the Doc. Returns the materialized Doc node instead when `autoMerge: true` is passed.",
+        "Review-first by default: a pending ChangeRequest proposing the Doc (`materialized: false`). Returns the materialized Doc node instead (`materialized: true`) when `autoMerge: true` is passed.",
     })
     .input(createDocInputSchema)
-    .output(z.union([docSchema, changeRequestSchema])),
+    .output(
+      z.union([
+        docSchema.extend({ materialized: z.literal(true) }),
+        changeRequestSchema.extend({ materialized: z.literal(false) }),
+      ]),
+    ),
   get: oc
     .route({
       method: "GET",

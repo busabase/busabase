@@ -28,7 +28,12 @@ interface CloudConnectStatusResponse {
 }
 
 const POLL_INTERVAL_MS = 2000;
-const POPUP_FEATURES = "width=520,height=680,noopener,noreferrer";
+// No `noopener`/`noreferrer` here — both make `window.open()` return `null`
+// unconditionally per spec (https://html.spec.whatwg.org/multipage/nav-history-apis.html),
+// which would make the popup-blocked check below fire on every click. We need
+// the live reference anyway, to navigate it once the authorize URL is fetched
+// and to close it on error.
+const POPUP_FEATURES = "width=520,height=680";
 
 async function fetchStatus(): Promise<CloudConnectStatusResponse> {
   const res = await fetch("/api/cloud-connect/status");
@@ -73,6 +78,16 @@ export function CloudConnectSettingsTab({ labels, active }: Props) {
   const handleConnect = async () => {
     setActionError(null);
     setIsConnecting(true);
+    // Open the popup synchronously, still within the click gesture — opening it only after
+    // the `await fetch` below resolves loses the "direct result of a user gesture" status
+    // browsers require and gets silently blocked (esp. Safari). Navigate it once we know
+    // the authorize URL instead of opening it with a URL up front.
+    const popup = window.open("", "busabase-cloud-connect", POPUP_FEATURES);
+    if (!popup) {
+      setActionError(labels.popupBlocked());
+      setIsConnecting(false);
+      return;
+    }
     try {
       const res = await fetch("/api/cloud-connect/connect", {
         method: "POST",
@@ -83,13 +98,11 @@ export function CloudConnectSettingsTab({ labels, active }: Props) {
       if (!res.ok || !body.authorizeUrl) {
         throw new Error(body.error ?? labels.connectFailed());
       }
-      const popup = window.open(body.authorizeUrl, "busabase-cloud-connect", POPUP_FEATURES);
-      if (!popup) {
-        throw new Error(labels.popupBlocked());
-      }
+      popup.location.href = body.authorizeUrl;
       hasEditedCloudUrl.current = false;
       setSnapshot((current) => (current ? { ...current, status: "connecting" } : current));
     } catch (error) {
+      popup.close();
       setActionError(error instanceof Error ? error.message : labels.connectFailed());
     } finally {
       setIsConnecting(false);

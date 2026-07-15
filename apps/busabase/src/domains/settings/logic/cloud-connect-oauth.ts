@@ -9,11 +9,12 @@
  * Adaptation from the CLI precedent: `apps/busabase-cli` has no running HTTP
  * server of its own, so it spins up an ephemeral loopback callback server just
  * for the OAuth round-trip. `apps/busabase` IS already a running Next.js
- * server reachable at `http://localhost:<port>` (a loopback address
- * `isAllowedRedirectUri` already accepts generically) — so its own
- * `/api/cloud-connect/callback` route IS the callback endpoint; no second
- * server is spun up. Pending-flow state (the PKCE code_verifier) is kept
- * in-memory here, keyed by `state`, exactly like the CLI keeps it in the
+ * server, whether reachable at `http://localhost:<port>` (dev) or at this
+ * instance's own public HTTPS hostname (a self-hosted deployment) — both are
+ * accepted by Cloud's `isAllowedRedirectUri` for `client_platform=tunnel` —
+ * so its own `/api/cloud-connect/callback` route IS the callback endpoint; no
+ * second server is spun up. Pending-flow state (the PKCE code_verifier) is
+ * kept in-memory here, keyed by `state`, exactly like the CLI keeps it in the
  * closure of its loopback server.
  */
 import "server-only";

@@ -129,7 +129,7 @@ describe("Base-domain DB lifecycle — oRPC", () => {
           name: "Orphan",
           fields: [{ slug: "title", name: "Title", type: "text" }],
         }),
-      ).rejects.toThrow(/Parent folder not found/);
+      ).rejects.toThrow(/Parent node not found/);
     });
   });
 

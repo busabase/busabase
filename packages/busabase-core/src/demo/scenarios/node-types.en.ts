@@ -74,13 +74,29 @@ export const enNodeTypesScenario: SeedScenario = {
       nodeId: "nod_drive_team_files",
       slug: "team-files",
       name: "Team Files",
-      description: "A plain file drive seeded with README.md.",
+      description:
+        "A plain file drive for team documents — onboarding, policy, and shared reference files.",
       position: 0,
       files: [
         {
           path: "README.md",
           content:
-            "# Team Files\n\nA shared Drive for plain files. Propose edits through change requests before merge.\n",
+            "# Team Files\n\nA shared Drive for plain files — onboarding docs, policies, and reference sheets the whole team pulls from. Propose edits through change requests before merge.\n\n## Contents\n\n- `onboarding/first-week.md` — what a new hire does in week one\n- `policy/expense-approval.md` — who approves what, and at what amount\n- `reference/team-roster.csv` — who's on the team and what they own\n",
+        },
+        {
+          path: "onboarding/first-week.md",
+          content:
+            "# First week checklist\n\n## Day 1\n\n- Get access to Busabase, the shared inbox, and the team calendar.\n- Read the Agent Operating Guide (Docs) — it's how every change gets reviewed here.\n- Meet your onboarding buddy for a 30-minute walkthrough.\n\n## Day 2-3\n\n- Shadow a review: watch a teammate approve or request changes on a real change request.\n- Open your first change request — even a small doc fix counts. The goal is to feel the propose → review → merge loop once before it matters.\n\n## Day 4-5\n\n- Pick up one small task from the backlog with your onboarding buddy as reviewer.\n- Set up your notification preferences so review requests actually reach you.\n\n## By the end of week one\n\nYou should have had at least one change request approved and merged, and reviewed at least one teammate's change.\n",
+        },
+        {
+          path: "policy/expense-approval.md",
+          content:
+            "# Expense approval policy\n\n| Amount | Approver |\n| --- | --- |\n| Under $100 | Self-approve, just log it |\n| $100 - $1,000 | Team lead |\n| $1,000 - $10,000 | Department head |\n| Over $10,000 | Finance + department head |\n\n## Submitting\n\nOpen a change request against the Invoices base with the receipt attached. Approval happens the same way as any other change here — reviewed, then merged.\n\n## Reimbursement timing\n\nApproved expenses are paid out in the next payroll cycle after merge, not immediately — budget 1-2 weeks.\n",
+        },
+        {
+          path: "reference/team-roster.csv",
+          content:
+            "name,role,team,started\nAlex Rivera,Engineering Lead,Platform,2024-03-11\nJordan Lee,Product Manager,Platform,2024-06-02\nSam Okafor,Support Engineer,Support,2024-09-15\nPriya Nair,Designer,Design,2025-01-20\nCasey Morgan,DevOps Engineer,Platform,2025-04-07\n",
         },
       ],
     },

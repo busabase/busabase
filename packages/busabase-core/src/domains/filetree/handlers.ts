@@ -28,6 +28,7 @@ import {
 import { CURRENT_USER_ID, hashBuffer, id, now, rootNodeIdForSpace } from "../../logic/kernel";
 import { publishChangeRequestPendingReview } from "../../logic/live-events";
 import type { MaterializeArgs } from "../../logic/materialize";
+import { assertContainerParent } from "../../logic/node-parent";
 import { ensureReady } from "../../logic/seed";
 import {
   getChangeRequest,
@@ -466,31 +467,31 @@ const listAssetUsageFiles = async (node: NodePO): Promise<FileTreeFileVO[]> => {
 export const createFileTreeNode = async (
   config: FileTreeKindConfig,
   input: z.input<typeof createFileTreeInputSchema>,
-): Promise<FileTreeNodeVO | ChangeRequestVO> => {
+): Promise<
+  (FileTreeNodeVO & { materialized: true }) | (ChangeRequestVO & { materialized: false })
+> => {
   await ensureReady();
   const db = await getDb();
   const parsed = createFileTreeInputSchema.parse(input);
   const existing = await getStorageFileTreeNode(config.type, parsed.slug);
   if (existing) {
-    return getFileTreeNode(config, existing.id);
+    return { ...(await getFileTreeNode(config, existing.id)), materialized: true as const };
   }
 
   const parentNodeId = parsed.parentNodeId ?? rootNodeIdForSpace(getContextSpaceId());
-  const [parentNode] = await db
+  const [parentNodeRow] = await db
     .select()
     .from(busabaseNodes)
     .where(eq(busabaseNodes.id, parentNodeId))
     .limit(1);
-  if (!parentNode || parentNode.type !== "folder") {
-    throw new Error(`Parent folder not found: ${parentNodeId}`);
-  }
+  const parentNode = assertContainerParent(parentNodeRow, config.type, parentNodeId);
 
   // Review-first by default: propose the node as a pending node_create
   // ChangeRequest instead of materializing it immediately. Callers that don't
   // need human review (seed/migration scripts, an explicit no-review agent
   // task) pass `autoMerge: true` to keep today's instant-create behavior.
   if (!parsed.autoMerge) {
-    return recordPendingNodeCreate({
+    const changeRequest = await recordPendingNodeCreate({
       nodeType: config.type,
       slug: parsed.slug,
       name: parsed.name,
@@ -502,6 +503,7 @@ export const createFileTreeNode = async (
       message: `Create ${labelLower(config)} ${parsed.name}`,
       submittedBy: resolveActorId(CURRENT_USER_ID),
     });
+    return { ...changeRequest, materialized: false as const };
   }
 
   const nodeId = id("nod");
@@ -553,7 +555,7 @@ export const createFileTreeNode = async (
     message: `Create ${labelLower(config)} ${parsed.name}`,
     submittedBy: resolveActorId(CURRENT_USER_ID),
   });
-  return getFileTreeNode(config, nodeId);
+  return { ...(await getFileTreeNode(config, nodeId)), materialized: true as const };
 };
 
 export const getFileTreeNode = async (

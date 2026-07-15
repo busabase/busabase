@@ -26,6 +26,7 @@ import {
 import { CURRENT_USER_ID, id, now, rootNodeIdForSpace } from "../../logic/kernel";
 import { publishChangeRequestPendingReview } from "../../logic/live-events";
 import { type MaterializeArgs, registerMaterializer } from "../../logic/materialize";
+import { assertContainerParent } from "../../logic/node-parent";
 import { ensureReady } from "../../logic/seed";
 import {
   getChangeRequest,
@@ -252,32 +253,30 @@ const toDocVO = async (node: NodePO): Promise<DocVO> => {
 
 export const createDoc = async (
   input: z.input<typeof createDocInputSchema>,
-): Promise<DocVO | ChangeRequestVO> => {
+): Promise<(DocVO & { materialized: true }) | (ChangeRequestVO & { materialized: false })> => {
   await ensureReady();
   const db = await getDb();
   const parsed = createDocInputSchema.parse(input);
   assertDocBodySize(parsed.body);
   const existing = await getDocNode(parsed.slug);
   if (existing) {
-    return toDocVO(existing);
+    return { ...(await toDocVO(existing)), materialized: true as const };
   }
 
   const parentNodeId = parsed.parentNodeId ?? rootNodeIdForSpace(getContextSpaceId());
-  const [parentNode] = await db
+  const [parentNodeRow] = await db
     .select()
     .from(busabaseNodes)
     .where(eq(busabaseNodes.id, parentNodeId))
     .limit(1);
-  if (!parentNode || parentNode.type !== "folder") {
-    throw new Error(`Parent folder not found: ${parentNodeId}`);
-  }
+  const parentNode = assertContainerParent(parentNodeRow, "doc", parentNodeId);
 
   // Review-first by default: propose the Doc as a pending node_create
   // ChangeRequest instead of materializing it immediately. Callers that don't
   // need human review (seed/migration scripts, an explicit no-review agent
   // task) pass `autoMerge: true` to keep today's instant-create behavior.
   if (!parsed.autoMerge) {
-    return recordPendingNodeCreate({
+    const changeRequest = await recordPendingNodeCreate({
       nodeType: "doc",
       slug: parsed.slug,
       name: parsed.name,
@@ -287,6 +286,7 @@ export const createDoc = async (
       message: `Create doc ${parsed.name}`,
       submittedBy: resolveActorId(CURRENT_USER_ID),
     });
+    return { ...changeRequest, materialized: false as const };
   }
 
   const nodeId = id("nod");
@@ -320,7 +320,7 @@ export const createDoc = async (
     message: `Create doc ${node.name}`,
     submittedBy: resolveActorId(CURRENT_USER_ID),
   });
-  return toDocVO(node);
+  return { ...(await toDocVO(node)), materialized: true as const };
 };
 
 export const getDoc = async (nodeIdOrSlug: string): Promise<DocVO> => {

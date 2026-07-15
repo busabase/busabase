@@ -134,7 +134,12 @@ export const baseSchema = z.object({
 });
 
 export const createBaseInputSchema = z.object({
-  parentNodeId: z.string().optional(),
+  parentNodeId: z
+    .string()
+    .optional()
+    .describe(
+      "Parent node id. Must be a folder or the space root; container-incapable node types (Base, Doc, AirApp, etc.) cannot hold children.",
+    ),
   slug: z
     .string()
     .min(1)

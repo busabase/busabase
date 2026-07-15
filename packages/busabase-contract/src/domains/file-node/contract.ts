@@ -4,7 +4,12 @@ import { changeRequestSchema } from "../../contract/schemas";
 import { FileNodeVOSchema } from "./types";
 
 export const createFileNodeInputSchema = z.object({
-  parentNodeId: z.string().optional(),
+  parentNodeId: z
+    .string()
+    .optional()
+    .describe(
+      "Parent node id. Must be a folder or the space root; container-incapable node types (Base, Doc, AirApp, etc.) cannot hold children.",
+    ),
   slug: z
     .string()
     .min(1)
@@ -36,10 +41,15 @@ export const fileContract = {
       tags: ["Files"],
       summary: "Create File node",
       successDescription:
-        "Review-first by default: a pending ChangeRequest proposing the File node. Returns the materialized File node instead when `autoMerge: true` is passed.",
+        "Review-first by default: a pending ChangeRequest proposing the File node (`materialized: false`). Returns the materialized File node instead (`materialized: true`) when `autoMerge: true` is passed.",
     })
     .input(createFileNodeInputSchema)
-    .output(z.union([FileNodeVOSchema, changeRequestSchema])),
+    .output(
+      z.union([
+        FileNodeVOSchema.extend({ materialized: z.literal(true) }),
+        changeRequestSchema.extend({ materialized: z.literal(false) }),
+      ]),
+    ),
   get: oc
     .route({
       method: "GET",

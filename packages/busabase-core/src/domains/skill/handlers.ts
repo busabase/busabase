@@ -37,7 +37,9 @@ export const skillFileTreeConfig = {
 } satisfies FileTreeKindConfig;
 
 export const createSkill = (input: z.input<typeof createSkillInputSchema>) =>
-  createFileTreeNode(skillFileTreeConfig, input) as Promise<SkillVO | ChangeRequestVO>;
+  createFileTreeNode(skillFileTreeConfig, input) as Promise<
+    (SkillVO & { materialized: true }) | (ChangeRequestVO & { materialized: false })
+  >;
 
 export const getSkill = (nodeIdOrSlug: string): Promise<SkillVO> =>
   getFileTreeNode(skillFileTreeConfig, nodeIdOrSlug) as Promise<SkillVO>;

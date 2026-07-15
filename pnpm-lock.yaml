@@ -4,6 +4,11 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
+patchedDependencies:
+  '@scelar/nodepod@1.9.9':
+    hash: ccae398d42721d4626b09606735168a6bf31f4ec1ab757a230a55efb0bdaff6b
+    path: patches/@scelar__nodepod@1.9.9.patch
+
 importers:
 
   .:
@@ -40,8 +45,8 @@ importers:
         specifier: ^1.56.1
         version: 1.58.2
       '@scelar/nodepod':
-        specifier: ^1.9.5
-        version: 1.9.5(next@16.2.6(@babel/core@7.29.7)(@opentelemetry/api@1.9.0)(@playwright/test@1.58.2)(babel-plugin-react-compiler@1.0.0)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(sass@1.101.0))(vite@5.4.21(@types/node@24.13.2)(less@3.13.1)(lightningcss@1.31.1)(sass@1.101.0)(stylus@0.64.0)(terser@5.48.0))
+        specifier: ^1.9.9
+        version: 1.9.9(patch_hash=ccae398d42721d4626b09606735168a6bf31f4ec1ab757a230a55efb0bdaff6b)(next@16.2.6(@babel/core@7.29.7)(@opentelemetry/api@1.9.0)(@playwright/test@1.58.2)(babel-plugin-react-compiler@1.0.0)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(sass@1.101.0))(vite@5.4.21(@types/node@24.13.2)(less@3.13.1)(lightningcss@1.31.1)(sass@1.101.0)(stylus@0.64.0)(terser@5.48.0))
       '@tailwindcss/postcss':
         specifier: ^4.1.17
         version: 4.1.18
@@ -440,8 +445,8 @@ importers:
         specifier: ^1.14.6
         version: 1.14.6(@opentelemetry/api@1.9.0)(@orpc/contract@1.14.6(@opentelemetry/api@1.9.0))(@orpc/server@1.14.6(@opentelemetry/api@1.9.0)(ws@8.21.0(bufferutil@4.1.0)(utf-8-validate@5.0.10)))(ws@8.21.0(bufferutil@4.1.0)(utf-8-validate@5.0.10))(zod@4.4.3)
       '@scelar/nodepod':
-        specifier: ^1.9.5
-        version: 1.9.5(next@16.2.6(@babel/core@7.29.7)(@opentelemetry/api@1.9.0)(@playwright/test@1.58.2)(babel-plugin-react-compiler@1.0.0)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(sass@1.101.0))(vite@7.1.9(@types/node@24.13.2)(jiti@2.6.1)(less@3.13.1)(lightningcss@1.31.1)(sass@1.101.0)(stylus@0.64.0)(terser@5.48.0)(tsx@4.21.0)(yaml@2.9.0))
+        specifier: ^1.9.9
+        version: 1.9.9(patch_hash=ccae398d42721d4626b09606735168a6bf31f4ec1ab757a230a55efb0bdaff6b)(next@16.2.6(@babel/core@7.29.7)(@opentelemetry/api@1.9.0)(@playwright/test@1.58.2)(babel-plugin-react-compiler@1.0.0)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(sass@1.101.0))(vite@7.1.9(@types/node@24.13.2)(jiti@2.6.1)(less@3.13.1)(lightningcss@1.31.1)(sass@1.101.0)(stylus@0.64.0)(terser@5.48.0)(tsx@4.21.0)(yaml@2.9.0))
       '@tanstack/react-query':
         specifier: ^5.101.0
         version: 5.101.0(react@19.2.7)
@@ -1628,11 +1633,11 @@ packages:
 
   '@esbuild-kit/core-utils@3.3.2':
     resolution: {integrity: sha512-sPRAnw9CdSsRmEtnsl2WXWdyquogVpB3yZ3dgwJfe8zrOzTsV7cJvmwrKVa+0ma5BoiGJ+BoqkMvawbayKUsqQ==}
-    deprecated: 'Merged into tsx: https://tsx.hirok.io'
+    deprecated: 'Merged into tsx: https://tsx.is'
 
   '@esbuild-kit/esm-loader@2.6.5':
     resolution: {integrity: sha512-FxEMIkJKnodyA1OaCUoEvbYRkoZlLZ4d/eXFu9Fh8CbBBgP5EmZxrfTRyN0qpXZ4vOvqnE5YdRdcrmUUXuU+dA==}
-    deprecated: 'Merged into tsx: https://tsx.hirok.io'
+    deprecated: 'Merged into tsx: https://tsx.is'
 
   '@esbuild/aix-ppc64@0.21.5':
     resolution: {integrity: sha512-1SDgH6ZSPTlggy1yI6+Dbkiz8xzpHJEVAlF/AM1tHPLsf5STom9rwtjE4hKAF20FfXXNTFqEYXyJNWh1GiZedQ==}
@@ -3979,8 +3984,8 @@ packages:
     cpu: [x64]
     os: [win32]
 
-  '@scelar/nodepod@1.9.5':
-    resolution: {integrity: sha512-WoQYKtm9pjOOpbh1Y/1ef9qhRqK1Zjql3WMrNtEB3k5xT7wJGQ7ZmSeQANKi/sa6KDMnib2UKKnMcgVrzFcY+Q==}
+  '@scelar/nodepod@1.9.9':
+    resolution: {integrity: sha512-ZhYJLHsK9f6oyQefvD8t9eNEI5nvtex4zHbgYoq14/+TVcj4XSarNPncKhoDIpnMQjxo7ug5FhDTIR3Vq6sZ8Q==}
     engines: {node: '>=20.0.0', pnpm: '>=9.0.0'}
     peerDependencies:
       '@xterm/addon-fit': ^0.11.0
@@ -14762,7 +14767,7 @@ snapshots:
   '@rollup/rollup-win32-x64-msvc@4.57.1':
     optional: true
 
-  '@scelar/nodepod@1.9.5(next@16.2.6(@babel/core@7.29.7)(@opentelemetry/api@1.9.0)(@playwright/test@1.58.2)(babel-plugin-react-compiler@1.0.0)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(sass@1.101.0))(vite@5.4.21(@types/node@24.13.2)(less@3.13.1)(lightningcss@1.31.1)(sass@1.101.0)(stylus@0.64.0)(terser@5.48.0))':
+  '@scelar/nodepod@1.9.9(patch_hash=ccae398d42721d4626b09606735168a6bf31f4ec1ab757a230a55efb0bdaff6b)(next@16.2.6(@babel/core@7.29.7)(@opentelemetry/api@1.9.0)(@playwright/test@1.58.2)(babel-plugin-react-compiler@1.0.0)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(sass@1.101.0))(vite@5.4.21(@types/node@24.13.2)(less@3.13.1)(lightningcss@1.31.1)(sass@1.101.0)(stylus@0.64.0)(terser@5.48.0))':
     dependencies:
       '@noble/hashes': 1.8.0
       acorn: 8.17.0
@@ -14777,7 +14782,7 @@ snapshots:
       next: 16.2.6(@babel/core@7.29.7)(@opentelemetry/api@1.9.0)(@playwright/test@1.58.2)(babel-plugin-react-compiler@1.0.0)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(sass@1.101.0)
       vite: 5.4.21(@types/node@24.13.2)(less@3.13.1)(lightningcss@1.31.1)(sass@1.101.0)(stylus@0.64.0)(terser@5.48.0)
 
-  '@scelar/nodepod@1.9.5(next@16.2.6(@babel/core@7.29.7)(@opentelemetry/api@1.9.0)(@playwright/test@1.58.2)(babel-plugin-react-compiler@1.0.0)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(sass@1.101.0))(vite@7.1.9(@types/node@24.13.2)(jiti@2.6.1)(less@3.13.1)(lightningcss@1.31.1)(sass@1.101.0)(stylus@0.64.0)(terser@5.48.0)(tsx@4.21.0)(yaml@2.9.0))':
+  '@scelar/nodepod@1.9.9(patch_hash=ccae398d42721d4626b09606735168a6bf31f4ec1ab757a230a55efb0bdaff6b)(next@16.2.6(@babel/core@7.29.7)(@opentelemetry/api@1.9.0)(@playwright/test@1.58.2)(babel-plugin-react-compiler@1.0.0)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(sass@1.101.0))(vite@7.1.9(@types/node@24.13.2)(jiti@2.6.1)(less@3.13.1)(lightningcss@1.31.1)(sass@1.101.0)(stylus@0.64.0)(terser@5.48.0)(tsx@4.21.0)(yaml@2.9.0))':
     dependencies:
       '@noble/hashes': 1.8.0
       acorn: 8.17.0

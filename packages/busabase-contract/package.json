@@ -4,10 +4,17 @@
   "version": "0.9.6",
   "private": true,
   "type": "module",
+  "scripts": {
+    "test": "vitest run"
+  },
   "exports": {
     ".": {
       "types": "./src/index.ts",
       "default": "./src/index.ts"
+    },
+    "./access-control/api-key-level": {
+      "types": "./src/access-control/api-key-level.ts",
+      "default": "./src/access-control/api-key-level.ts"
     },
     "./contract/busabase": {
       "types": "./src/contract/busabase.ts",

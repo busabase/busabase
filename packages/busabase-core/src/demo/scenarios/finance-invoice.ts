@@ -16,10 +16,18 @@ export const FINANCE_PO_PLATFORM_ID = "rec_seed_po_platform";
 const FINANCE_PO_PLATFORM_COMMIT_ID = "cmt_seed_po_platform";
 export const FINANCE_PO_DESIGN_ID = "rec_seed_po_design";
 const FINANCE_PO_DESIGN_COMMIT_ID = "cmt_seed_po_design";
+export const FINANCE_PO_MARKETING_ID = "rec_seed_po_marketing";
+const FINANCE_PO_MARKETING_COMMIT_ID = "cmt_seed_po_marketing";
+export const FINANCE_PO_SUPPORT_ID = "rec_seed_po_support";
+const FINANCE_PO_SUPPORT_COMMIT_ID = "cmt_seed_po_support";
 export const FINANCE_INVOICE_GLOBEX_ID = "rec_seed_invoice_globex_cloud";
 const FINANCE_INVOICE_GLOBEX_COMMIT_ID = "cmt_seed_invoice_globex_cloud";
 export const FINANCE_INVOICE_FIGMA_ID = "rec_seed_invoice_figma_seats";
 const FINANCE_INVOICE_FIGMA_COMMIT_ID = "cmt_seed_invoice_figma_seats";
+export const FINANCE_INVOICE_MARKETING_ID = "rec_seed_invoice_marketing_suite";
+const FINANCE_INVOICE_MARKETING_COMMIT_ID = "cmt_seed_invoice_marketing_suite";
+export const FINANCE_INVOICE_SUPPORT_ID = "rec_seed_invoice_support_platform";
+const FINANCE_INVOICE_SUPPORT_COMMIT_ID = "cmt_seed_invoice_support_platform";
 export const FINANCE_INVOICE_REVIEW_ID = "crq_seed_invoice_three_way_match";
 
 export const FINANCE_FOLDERS: SeedFolderDef[] = [
@@ -272,6 +280,42 @@ export const FINANCE_RECORDS: SeedRecordDef[] = [
     useCases: ["finance"],
   },
   {
+    id: FINANCE_PO_MARKETING_ID,
+    baseId: DEMO_PURCHASE_ORDERS_BASE_ID,
+    commitId: FINANCE_PO_MARKETING_COMMIT_ID,
+    fields: {
+      approved_at: "2026-06-02",
+      budget: 42000,
+      currency: "USD",
+      owner: "marketing.ops@busabase.local",
+      po_number: "PO-2026-0503",
+      status: "closed",
+      vendor: "Marketing Analytics Suite",
+    },
+    message: "Seed marketing analytics purchase order",
+    author: "seed-finance",
+    minutesAgo: 150,
+    useCases: ["finance"],
+  },
+  {
+    id: FINANCE_PO_SUPPORT_ID,
+    baseId: DEMO_PURCHASE_ORDERS_BASE_ID,
+    commitId: FINANCE_PO_SUPPORT_COMMIT_ID,
+    fields: {
+      approved_at: "2026-06-10",
+      budget: 9600,
+      currency: "USD",
+      owner: "support.ops@busabase.local",
+      po_number: "PO-2026-0519",
+      status: "open",
+      vendor: "Support Ticketing Platform",
+    },
+    message: "Seed support ticketing purchase order",
+    author: "seed-finance",
+    minutesAgo: 140,
+    useCases: ["finance"],
+  },
+  {
     id: FINANCE_INVOICE_GLOBEX_ID,
     baseId: DEMO_INVOICES_BASE_ID,
     commitId: FINANCE_INVOICE_GLOBEX_COMMIT_ID,
@@ -337,6 +381,74 @@ export const FINANCE_RECORDS: SeedRecordDef[] = [
     message: "Seed matched design software invoice",
     author: "seed-finance",
     minutesAgo: 118,
+    useCases: ["finance"],
+  },
+  {
+    id: FINANCE_INVOICE_MARKETING_ID,
+    baseId: DEMO_INVOICES_BASE_ID,
+    commitId: FINANCE_INVOICE_MARKETING_COMMIT_ID,
+    fields: {
+      ai_summary: "Marketing analytics invoice matches PO and has been paid.",
+      amount: 42000,
+      due_date: "2026-06-25",
+      flags: ["po-match"],
+      invoice_file: [
+        {
+          id: "att_seed_invoice_marketing_pdf",
+          attachmentId: "att_seed_invoice_marketing_pdf",
+          fileName: "marketing-analytics-invoice.pdf",
+          mimeType: "application/pdf",
+          size: 301_056,
+          url: "/assets/readme/scenarios/finance-review-base.png",
+        },
+      ],
+      invoice_number: "INV-MKT-2026-0512",
+      "purchase-order": [FINANCE_PO_MARKETING_ID],
+      ready_to_pay: true,
+      review_notes: "Annual contract renewal, amount matches PO exactly. Paid on schedule.",
+      status: "paid",
+      tax: 0,
+      total: 42000,
+      vendor: "Marketing Analytics Suite",
+    },
+    message: "Seed paid marketing analytics invoice",
+    author: "seed-finance",
+    minutesAgo: 100,
+    useCases: ["finance"],
+  },
+  {
+    id: FINANCE_INVOICE_SUPPORT_ID,
+    baseId: DEMO_INVOICES_BASE_ID,
+    commitId: FINANCE_INVOICE_SUPPORT_COMMIT_ID,
+    fields: {
+      ai_summary:
+        "Support platform invoice is $1,200 over the approved PO amount — flagged for AP review before payment.",
+      amount: 10800,
+      due_date: "2026-07-15",
+      flags: ["amount-mismatch"],
+      invoice_file: [
+        {
+          id: "att_seed_invoice_support_pdf",
+          attachmentId: "att_seed_invoice_support_pdf",
+          fileName: "support-platform-invoice.pdf",
+          mimeType: "application/pdf",
+          size: 187_392,
+          url: "/assets/readme/scenarios/finance-review-record.png",
+        },
+      ],
+      invoice_number: "INV-SUP-2026-0533",
+      "purchase-order": [FINANCE_PO_SUPPORT_ID],
+      ready_to_pay: false,
+      review_notes:
+        "Vendor billed for an add-on seat tier not on the approved PO. Waiting on a decision to approve the overage or push back.",
+      status: "exception",
+      tax: 800,
+      total: 11600,
+      vendor: "Support Ticketing Platform",
+    },
+    message: "Seed support platform invoice with a PO amount mismatch",
+    author: "seed-finance",
+    minutesAgo: 75,
     useCases: ["finance"],
   },
 ];

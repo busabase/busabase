@@ -15,6 +15,13 @@
       "when": 1784007620435,
       "tag": "0001_famous_daredevil",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1784030651516,
+      "tag": "0002_perpetual_the_leader",
+      "breakpoints": true
     }
   ]
 }

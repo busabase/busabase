@@ -106,7 +106,7 @@ describe("Node tree + Doc lifecycle — oRPC", () => {
           slug: "lc-doc-orphan",
           name: "X",
         }),
-      ).rejects.toThrow(/Parent folder not found/);
+      ).rejects.toThrow(/Parent node not found/);
       await expect(client.docs.get({ nodeId: "pnd_missing" })).rejects.toThrow(/Doc not found/);
     });
 

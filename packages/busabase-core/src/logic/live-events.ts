@@ -45,17 +45,24 @@ export interface ChangeRequestPendingReviewArgs {
 export const publishChangeRequestPendingReview = async (
   args: ChangeRequestPendingReviewArgs,
 ): Promise<void> => {
-  await publishBusabaseLiveEvent({
-    kind: "change_request.pending_review",
-    spaceId: args.spaceId,
-    actorId: args.submittedBy,
-    changeRequestId: args.changeRequestId,
-    baseId: args.baseId,
-    nodeIds: [],
-    recordIds: [],
-    viewIds: [],
-    operationCount: 0,
-  });
+  try {
+    await publishBusabaseLiveEvent({
+      kind: "change_request.pending_review",
+      spaceId: args.spaceId,
+      actorId: args.submittedBy,
+      changeRequestId: args.changeRequestId,
+      baseId: args.baseId,
+      nodeIds: [],
+      recordIds: [],
+      viewIds: [],
+      operationCount: 0,
+    });
+  } catch {
+    // Best-effort — a live-event/notification failure must never fail the
+    // change-request creation that already committed above (Redis network
+    // errors in cloud mode; a throwing subscriber re-entering synchronously
+    // in local mode).
+  }
 
   const hook = getContextChangeRequestPendingReviewHook();
   if (!hook) {

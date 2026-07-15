@@ -96,6 +96,12 @@ export const createChangeRequestInputSchema = z.object({
       'Explanation shown to the human reviewer. Write a conventional-commit style subject — imperative verb + what + why, e.g. "Add Acme Corp — qualified lead from the June webinar".',
     ),
   submittedBy: z.string().optional().default("local-producer"),
+  idempotencyKey: z
+    .string()
+    .optional()
+    .describe(
+      "Optional client-supplied key that dedupes retries. Scoped per base + submitter: calling this endpoint again with the SAME idempotencyKey (e.g. after a timeout or a 5xx where you couldn't tell if the first call succeeded) returns the change request created by the first call instead of creating a duplicate. Omit for normal one-shot calls; only set it when you might retry.",
+    ),
 });
 
 export const createBulkChangeRequestInputSchema = z.object({
@@ -114,6 +120,12 @@ export const createBulkChangeRequestInputSchema = z.object({
       'Explanation shown to the human reviewer for the whole batch — e.g. "Import 240 June webinar leads".',
     ),
   submittedBy: z.string().optional().default("local-producer"),
+  idempotencyKey: z
+    .string()
+    .optional()
+    .describe(
+      "Optional client-supplied key that dedupes retries. Scoped per base + submitter: calling this endpoint again with the SAME idempotencyKey returns the bulk change request created by the first call instead of creating a duplicate. Omit for normal one-shot calls; only set it when you might retry.",
+    ),
 });
 
 export const recordFieldFilterInputSchema = z.object({

@@ -2239,6 +2239,72 @@ const { records } = await res.json();
     minutesAgo: 110,
     useCases: ["config-mgmt"],
   },
+  {
+    id: "rec_seed_config_api_gateway_staging",
+    baseId: ids.configBase,
+    commitId: "cmt_seed_config_api_gateway_staging",
+    fields: {
+      name: "api-gateway",
+      environment: "staging",
+      config:
+        "server:\n  listen: 8443\n  ssl: true\n  worker_processes: 2\n\nroutes:\n  - path: /api/v1\n    upstream: backend-staging:8080\n    timeout: 30s\n\nrate_limit:\n  requests_per_minute: 200\n  burst: 50\n\nlogging:\n  level: debug\n  format: json",
+      runtime_json:
+        '{\n  "service": "api-gateway",\n  "runtime": "nodejs20",\n  "replicas": 2,\n  "features": ["rate-limit", "structured-logs", "canary"],\n  "canary": true\n}',
+      overrides: '{\n  "RATE_LIMIT_RPM": "200",\n  "BURST_SIZE": "50",\n  "LOG_LEVEL": "debug"\n}',
+      status: "active",
+      deployed_at: "2026-06-24",
+      notes:
+        "Staging mirror of the production gateway config, used to soak new releases before promotion.",
+    },
+    message: "Seed api-gateway staging config",
+    author: "seed-devops",
+    minutesAgo: 95,
+    useCases: ["config-mgmt"],
+  },
+  {
+    id: "rec_seed_config_worker_pool",
+    baseId: ids.configBase,
+    commitId: "cmt_seed_config_worker_pool",
+    fields: {
+      name: "worker-pool",
+      environment: "production",
+      config:
+        "queue:\n  name: default\n  concurrency: 12\n  visibility_timeout: 120s\n\nretry:\n  max_attempts: 5\n  backoff: exponential\n\nmetrics:\n  export: prometheus\n  port: 9100",
+      runtime_json:
+        '{\n  "service": "worker-pool",\n  "runtime": "nodejs20",\n  "replicas": 4,\n  "features": ["dead-letter-queue"],\n  "canary": false\n}',
+      overrides: '{\n  "CONCURRENCY": "12",\n  "MAX_ATTEMPTS": "5"\n}',
+      status: "degraded",
+      deployed_at: "2026-06-22",
+      notes:
+        "Running at reduced concurrency after a memory-limit incident on 2026-06-22; capacity review scheduled before restoring to 12.",
+    },
+    message: "Seed worker-pool production config (degraded)",
+    author: "seed-devops",
+    minutesAgo: 80,
+    useCases: ["config-mgmt"],
+  },
+  {
+    id: "rec_seed_config_search_indexer",
+    baseId: ids.configBase,
+    commitId: "cmt_seed_config_search_indexer",
+    fields: {
+      name: "search-indexer",
+      environment: "production",
+      config:
+        "index:\n  name: records-v3\n  shards: 4\n  replicas: 1\n\nreindex:\n  batch_size: 500\n  schedule: '0 3 * * *'\n\nsource:\n  driver: postgres\n  poll_interval: 30s",
+      runtime_json:
+        '{\n  "service": "search-indexer",\n  "runtime": "nodejs20",\n  "replicas": 1,\n  "features": ["scheduled-reindex"],\n  "canary": false\n}',
+      overrides: '{\n  "BATCH_SIZE": "500",\n  "SHARDS": "4"\n}',
+      status: "maintenance",
+      deployed_at: "2026-06-25",
+      notes:
+        "Paused for the nightly full reindex (03:00 UTC) — expect brief search staleness until it completes.",
+    },
+    message: "Seed search-indexer production config (maintenance window)",
+    author: "seed-devops",
+    minutesAgo: 45,
+    useCases: ["config-mgmt"],
+  },
 ];
 
 const views: SeedViewDef[] = [

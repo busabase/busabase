@@ -146,7 +146,7 @@ export const coreMessagesEn = {
     new: "New",
   },
   shell: {
-    approvalFirstKb: "Approval-first KB",
+    approvalFirstKb: "Trusted Intelligent Database",
     addWorkspace: "Add workspace",
     inviteMembers: "Invite members",
     settings: "Settings",

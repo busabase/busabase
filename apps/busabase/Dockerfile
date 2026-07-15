@@ -7,6 +7,7 @@ WORKDIR /app
 
 FROM base AS deps
 COPY pnpm-lock.yaml pnpm-workspace.yaml package.json ./
+COPY patches patches
 RUN pnpm fetch
 
 COPY apps/busabase/package.json apps/busabase/
@@ -41,14 +42,14 @@ RUN NODE_OPTIONS=--max-old-space-size=3072 pnpm build
 # prod node_modules with just the migration toolchain to copy into the runner.
 FROM base AS drizzle
 WORKDIR /drizzle-only
-COPY pnpm-workspace.yaml ./
 COPY apps/busabase/package.json /tmp/app-package.json
 RUN set -e; \
+    node -e "require('node:fs').writeFileSync('package.json', JSON.stringify({ private: true }))"; \
     APP_JSON=/tmp/app-package.json; \
     DRIZZLE_VERSION=$(node -pe "const p=require('$APP_JSON'); (p.devDependencies?.['drizzle-kit'] || p.dependencies?.['drizzle-kit'] || '').replace(/^[^0-9]*/, '')"); \
     DRIZZLE_ORM_VERSION=$(node -pe "const p=require('$APP_JSON'); (p.devDependencies?.['drizzle-orm'] || p.dependencies?.['drizzle-orm'] || '').replace(/^[^0-9]*/, '')"); \
     POSTGRES_VERSION=$(node -pe "const p=require('$APP_JSON'); (p.devDependencies?.postgres || p.dependencies?.postgres || '').replace(/^[^0-9]*/, '')"); \
-    pnpm add -w drizzle-kit@${DRIZZLE_VERSION} drizzle-orm@${DRIZZLE_ORM_VERSION} postgres@${POSTGRES_VERSION} --prod
+    pnpm add drizzle-kit@${DRIZZLE_VERSION} drizzle-orm@${DRIZZLE_ORM_VERSION} postgres@${POSTGRES_VERSION} --prod --allow-build=esbuild
 
 FROM node:24.18.0-bookworm-slim AS runner
 ENV NODE_ENV=production \
