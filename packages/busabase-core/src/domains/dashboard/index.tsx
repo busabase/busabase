@@ -433,6 +433,7 @@ function BusabaseDashboardContent({
       loaded: baseRecords.length,
       hasMore: recordsInfiniteQuery.hasNextPage,
       isLoadingMore: recordsInfiniteQuery.isFetchingNextPage,
+      isLoading: recordsInfiniteQuery.isLoading,
       loadMore: () => {
         void recordsInfiniteQuery.fetchNextPage();
       },
@@ -442,6 +443,7 @@ function BusabaseDashboardContent({
       baseRecords.length,
       recordsInfiniteQuery.hasNextPage,
       recordsInfiniteQuery.isFetchingNextPage,
+      recordsInfiniteQuery.isLoading,
       recordsInfiniteQuery.fetchNextPage,
     ],
   );

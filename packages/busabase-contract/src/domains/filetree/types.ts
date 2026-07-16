@@ -16,6 +16,11 @@ export interface FileTreeNodeVO {
   visibility: "private" | "workspace" | "public";
   version: string;
   files: FileTreeFileVO[];
+  // Paths silently dropped from this create call by an uploaded `.gitignore`
+  // (upload-safety layer 1 — see busabase-core's `logic/upload-safety.ts`).
+  // Optional here (absent on plain get/list reads); the oRPC output schema
+  // (`fileTreeNodeSchema`) defaults it to `[]` on the wire either way.
+  skippedGitignorePaths?: string[];
 }
 
 export interface FileTreeReadFileVO {

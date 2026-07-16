@@ -321,6 +321,40 @@ npx busabase-cli assets upload --file ./cover.svg --context record-field --outpu
 # {"cover_image":[{"id":"...","assetId":"...","attachmentId":"...","url":"...","fileName":"cover.svg","mimeType":"image/svg+xml","size":1234}]}
 \`\`\`
 
+No CLI? Same three-call flow in raw curl — request a URL, PUT the bytes, confirm:
+
+\`\`\`bash
+# 1. Request an upload URL
+curl -s -X POST ${base}/api/v1/assets/upload-urls \\
+${authLine}  -H 'content-type: application/json' \\
+  --data '{ "fileName": "cover.svg", "mimeType": "image/svg+xml", "sizeBytes": 1234 }'
+# -> { "uploadUrl": "...", "storageKey": "...", "publicUrl": "...", "expiresIn": 900,
+#      "duplicate": false }
+# If "duplicate" is true, identical bytes are already stored — skip steps 2-3 and use
+# "attachmentId"/"assetId"/"publicUrl" from this response directly.
+
+# 2. PUT the raw bytes to uploadUrl exactly as returned (no extra headers beyond Content-Type)
+curl -s -X PUT "<uploadUrl from step 1>" \\
+  --data-binary @cover.svg -H 'content-type: image/svg+xml'
+
+# 3. Confirm — same fileName/mimeType/sizeBytes as step 1, plus the storageKey it returned
+curl -s -X POST ${base}/api/v1/assets/confirmations \\
+${authLine}  -H 'content-type: application/json' \\
+  --data '{ "storageKey": "<storageKey from step 1>", "fileName": "cover.svg",
+            "mimeType": "image/svg+xml", "sizeBytes": 1234 }'
+# -> { "success": true, "attachmentId": "...", "assetId": "...", "storageKey": "...",
+#      "publicUrl": "..." }
+\`\`\`
+
+Build the attachment field array entry yourself from what you already know plus the confirm
+response — \`id\` ← \`attachmentId\`, \`url\` ← \`publicUrl\`, and \`fileName\`/\`mimeType\`/\`size\` are the
+same values you sent in step 1/3 (\`size\` = \`sizeBytes\`):
+
+\`\`\`json
+{ "cover_image": [{ "id": "<attachmentId>", "url": "<publicUrl>", "fileName": "cover.svg",
+                     "mimeType": "image/svg+xml", "size": 1234 }] }
+\`\`\`
+
 Search inside Drive files (any size, any format) and read exact line ranges — Busabase
 stores/indexes/searches text but never generates it. Text-kind files (csv/log/md/json/…) are
 searchable immediately with zero setup. Binary files (PDF/docx/images/…) need an agent to supply

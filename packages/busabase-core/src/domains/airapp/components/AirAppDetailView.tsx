@@ -4,8 +4,10 @@ import { useQuery } from "@tanstack/react-query";
 import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";
 import { CodeBlock } from "kui/ai-elements/code-block";
 import { FileTree } from "kui/ai-elements/file-tree";
+import { Button } from "kui/button";
+import { Popover, PopoverContent, PopoverTrigger } from "kui/popover";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "kui/tabs";
-import { AppWindow, Files, MonitorPlay, Terminal } from "lucide-react";
+import { AppWindow, Files, Info, MonitorPlay, Terminal } from "lucide-react";
 import { type ComponentProps, useCallback, useEffect, useMemo, useState } from "react";
 import { fmt, useCoreI18n } from "../../../i18n";
 import {
@@ -18,7 +20,7 @@ import {
 import { EmptyState } from "../../dashboard/components/primitives";
 import { FileContentSkeleton, NodeDetailSkeleton } from "../../dashboard/components/skeletons";
 import { useAirAppRunnerStore } from "../store/airapp-runner-store";
-import { AirAppRunLogs, AirAppRunPreview, useAirAppRunner } from "./RunPanel";
+import { AirAppRunControls, AirAppRunLogs, AirAppRunPreview, useAirAppRunner } from "./RunPanel";
 
 interface AirAppDetailViewProps {
   orpc: BusabaseQueryUtils;
@@ -32,9 +34,11 @@ const TAB_CONTENT_CLASS =
   "mt-0 flex min-h-0 flex-1 flex-col data-[state=inactive]:hidden data-[state=inactive]:pointer-events-none";
 
 /**
- * AirApp node detail: a tabbed layout. "App" (default) is the live run
- * preview — a Run button plus the preview iframe, since the primary thing a
- * user wants when opening an AirApp is to see it working. "Files" is the
+ * AirApp node detail: a single compact toolbar (identity + tab switcher + run
+ * controls) over a tabbed layout, so the AirApp content — especially the live
+ * preview — gets maximum vertical space. "App" (default) is the live run
+ * preview iframe, since the primary thing a user wants when opening an AirApp
+ * is to see it working; the Run button lives in the toolbar. "Files" is the
  * read-only file-tree browser (V1's edit surface for an airapp is the agent's
  * normal ChangeRequest flow). "Logs" is the streaming install/start console.
  * All three tabs stay mounted (forceMount + CSS hide) so switching away from
@@ -122,29 +126,70 @@ export function AirAppDetailView({ orpc, slug }: AirAppDetailViewProps) {
 
   return (
     <div className="flex h-full min-h-0 w-full flex-col bg-background">
-      <header className="border-border/60 border-b px-4 py-4 md:px-6">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-          <div className="flex min-w-0 items-start gap-3">
-            <div className="mt-0.5 grid size-8 shrink-0 place-items-center rounded-md border border-border/70 bg-muted/35 text-muted-foreground">
-              <AppWindow className="size-4" />
-            </div>
-            <div className="min-w-0">
-              <div className="mb-1 flex items-center gap-2">
-                <span className="font-medium text-[11px] text-muted-foreground uppercase">
-                  {messages.nodeDetail.airapp}
-                </span>
-              </div>
-              <h1 className="truncate font-semibold text-2xl text-foreground">
-                {airapp.node.name}
-              </h1>
-              {airapp.node.description ? (
-                <p className="mt-1 max-w-3xl text-muted-foreground text-sm leading-6">
-                  {airapp.node.description}
-                </p>
-              ) : null}
-            </div>
+      {/* The Tabs root wraps the header so the TabsList can live inside the
+          single compact toolbar row — one ~48px bar (identity + info popover,
+          tab switcher, run controls, delete) replaces the old stacked
+          title-block / properties / tab-row chrome, giving the app preview
+          maximum vertical space. Name/description/properties moved into the
+          Info popover. */}
+      <Tabs className="flex min-h-0 flex-1 flex-col" defaultValue="app">
+        <header className="flex h-12 shrink-0 items-center gap-2 border-border/60 border-b px-3 md:px-4">
+          <div className="flex min-w-0 items-center gap-2">
+            <AppWindow className="size-4 shrink-0 text-muted-foreground" />
+            <h1 className="truncate font-medium text-foreground text-sm">{airapp.node.name}</h1>
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button
+                  aria-label={messages.airapp.details}
+                  className="shrink-0 text-muted-foreground"
+                  size="icon-sm"
+                  title={messages.airapp.details}
+                  type="button"
+                  variant="ghost"
+                >
+                  <Info className="size-3.5" />
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent align="start" className="w-80">
+                {airapp.node.description ? (
+                  <p className="mb-3 text-muted-foreground text-sm leading-6">
+                    {airapp.node.description}
+                  </p>
+                ) : null}
+                <dl className="flex flex-col gap-2 text-xs">
+                  {propertyItems.map((item) => (
+                    <div
+                      className="flex min-w-0 items-center justify-between gap-3"
+                      key={item.label}
+                    >
+                      <dt className="shrink-0 text-muted-foreground">{item.label}</dt>
+                      <dd className="min-w-0 truncate font-mono text-foreground/80">
+                        {item.value}
+                      </dd>
+                    </div>
+                  ))}
+                </dl>
+              </PopoverContent>
+            </Popover>
           </div>
-          <div className="flex shrink-0 items-center gap-2">
+
+          <TabsList className="h-8 shrink-0">
+            <TabsTrigger className="gap-1.5" value="app">
+              <MonitorPlay className="size-3.5" />
+              {messages.airapp.tabPreview}
+            </TabsTrigger>
+            <TabsTrigger className="gap-1.5" value="files">
+              <Files className="size-3.5" />
+              {messages.airapp.tabFiles}
+            </TabsTrigger>
+            <TabsTrigger className="gap-1.5" value="logs">
+              <Terminal className="size-3.5" />
+              {messages.airapp.tabLogs}
+            </TabsTrigger>
+          </TabsList>
+
+          <div className="ml-auto flex shrink-0 items-center gap-1.5">
+            <AirAppRunControls airapp={airapp} runner={runner} />
             <NodeDeleteButton
               nodeId={airapp.node.id}
               nodeName={airapp.node.name}
@@ -153,37 +198,10 @@ export function AirAppDetailView({ orpc, slug }: AirAppDetailViewProps) {
               orpc={orpc}
             />
           </div>
-        </div>
-        <dl className="mt-4 flex flex-wrap items-center gap-x-5 gap-y-2 text-xs">
-          {propertyItems.map((item) => (
-            <div className="flex min-w-0 items-center gap-1.5" key={item.label}>
-              <dt className="shrink-0 text-muted-foreground">{item.label}</dt>
-              <dd className="min-w-0 max-w-64 truncate font-mono text-foreground/80">
-                {item.value}
-              </dd>
-            </div>
-          ))}
-        </dl>
-      </header>
-
-      <Tabs className="flex min-h-0 flex-1 flex-col" defaultValue="app">
-        <TabsList className="mx-4 mt-3 h-9 w-fit shrink-0 md:mx-6">
-          <TabsTrigger className="gap-1.5" value="app">
-            <MonitorPlay className="size-3.5" />
-            {messages.airapp.tabPreview}
-          </TabsTrigger>
-          <TabsTrigger className="gap-1.5" value="files">
-            <Files className="size-3.5" />
-            {messages.airapp.tabFiles}
-          </TabsTrigger>
-          <TabsTrigger className="gap-1.5" value="logs">
-            <Terminal className="size-3.5" />
-            {messages.airapp.tabLogs}
-          </TabsTrigger>
-        </TabsList>
+        </header>
 
         <TabsContent className={TAB_CONTENT_CLASS} forceMount value="app">
-          <AirAppRunPreview airapp={airapp} runner={runner} />
+          <AirAppRunPreview airapp={airapp} runner={runner} showToolbar={false} />
         </TabsContent>
 
         <TabsContent className={TAB_CONTENT_CLASS} forceMount value="files">

@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   createBusabaseClient,
+  createBusabaseRpcClient,
   DEFAULT_BASE_URL,
   normalizeBaseUrl,
   resolveConfig,
@@ -256,3 +257,95 @@ describe("createBusabaseClient request assembly", () => {
     expect(requests[0]?.url).toBe("http://localhost:15419/api/v1/files/board-plan");
   });
 });
+
+/**
+ * createBusabaseRpcClient targets the internal cookie-authenticated /api/rpc
+ * transport (the dashboard's own frontend, and — via the bridge documented in
+ * apps/busabase/docs/node-types.md — an AirApp running via Nodepod), not the
+ * public apiKey-authenticated /api/v1 REST surface createBusabaseClient uses.
+ * These tests only cover request assembly; the transport itself (RPCLink →
+ * real server → ambient session cookie) was verified end-to-end in a real
+ * browser against a real busabase-cloud session — see the AirApp API bridge
+ * changelog.
+ */
+describe("createBusabaseRpcClient request assembly", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("throws when apiBasePath is relative and there is no window (no ambient session outside a browser)", () => {
+    expect(() => createBusabaseRpcClient()).toThrow(/must be an absolute URL/);
+    expect(() => createBusabaseRpcClient({ apiBasePath: "/api/rpc" })).toThrow(
+      /must be an absolute URL/,
+    );
+  });
+
+  it("resolves a relative apiBasePath against window.location.origin (default targets apps/busabase, unnamespaced)", async () => {
+    vi.stubGlobal("window", { location: { origin: "http://localhost:15419" } });
+    const { fetchImpl, requests } = createRpcCaptureFetch();
+    const client = createBusabaseRpcClient({ fetch: fetchImpl });
+    await client.changeRequests.counts();
+    expect(requests).toHaveLength(1);
+    expect(requests[0]?.url).toBe(
+      "http://localhost:15419/api/rpc/changeRequests/counts?data=%7B%7D",
+    );
+  });
+
+  it("resolves the /__busabase_api__ bridge path, with the /core namespace busabase-cloud mounts its own procedures under", async () => {
+    vi.stubGlobal("window", { location: { origin: "http://localhost:15419" } });
+    const { fetchImpl, requests } = createRpcCaptureFetch();
+    const client = createBusabaseRpcClient({
+      apiBasePath: "/__busabase_api__/api/rpc/core",
+      fetch: fetchImpl,
+    });
+    await client.changeRequests.counts();
+    expect(requests[0]?.url).toBe(
+      "http://localhost:15419/__busabase_api__/api/rpc/core/changeRequests/counts?data=%7B%7D",
+    );
+  });
+
+  it("accepts an absolute URL without requiring window", async () => {
+    const { fetchImpl, requests } = createRpcCaptureFetch();
+    const client = createBusabaseRpcClient({
+      apiBasePath: "https://busabase.com/api/rpc",
+      fetch: fetchImpl,
+    });
+    await client.changeRequests.counts();
+    expect(requests[0]?.url).toBe("https://busabase.com/api/rpc/changeRequests/counts?data=%7B%7D");
+  });
+
+  it("sends no authorization or space header — auth is purely the ambient cookie", async () => {
+    vi.stubGlobal("window", { location: { origin: "http://localhost:15419" } });
+    const { fetchImpl, requests } = createRpcCaptureFetch();
+    const client = createBusabaseRpcClient({ fetch: fetchImpl });
+    await client.changeRequests.counts();
+    expect(requests[0]?.headers.get("authorization")).toBeNull();
+    expect(requests[0]?.headers.get("x-busabase-space")).toBeNull();
+  });
+
+  it("merges extra headers", async () => {
+    vi.stubGlobal("window", { location: { origin: "http://localhost:15419" } });
+    const { fetchImpl, requests } = createRpcCaptureFetch();
+    const client = createBusabaseRpcClient({
+      headers: { "x-demo-mode": "readme" },
+      fetch: fetchImpl,
+    });
+    await client.changeRequests.counts();
+    expect(requests[0]?.headers.get("x-demo-mode")).toBe("readme");
+  });
+});
+
+// changeRequests.counts() is a no-input RPC procedure — RPCLink still POSTs an
+// empty JSON body for it, matching what the real dashboard sends.
+function createRpcCaptureFetch() {
+  const requests: Request[] = [];
+  const fetchImpl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const request = input instanceof Request ? input : new Request(input, init);
+    requests.push(request);
+    return new Response(JSON.stringify({ json: { review: 0 } }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+  }) as unknown as typeof fetch;
+  return { fetchImpl, requests };
+}

@@ -19,7 +19,9 @@ export type * from "busabase-contract/types";
 export {
   type BusabaseClient,
   type BusabaseConfig,
+  type BusabaseRpcConfig,
   createBusabaseClient,
+  createBusabaseRpcClient,
   DEFAULT_BASE_URL,
   normalizeBaseUrl,
   type ResolvedConfig,

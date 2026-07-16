@@ -92,6 +92,10 @@ export function beginCloudConnectAuthorize(input: BeginConnectInput): { authoriz
   authorizeUrl.searchParams.set("redirect_uri", input.redirectUri);
   authorizeUrl.searchParams.set("state", state);
   authorizeUrl.searchParams.set("tunnel_id", input.tunnelId);
+  // Force re-authentication so Cloud Connect never silently links this OSS
+  // instance to whatever account the default browser already has a live
+  // session for — the admin always confirms which account they're connecting.
+  authorizeUrl.searchParams.set("prompt", "login");
 
   return { authorizeUrl: authorizeUrl.toString() };
 }

@@ -1,4 +1,6 @@
 import {
+  AIRAPP_DEMO_COMPLIANCE_BOARD,
+  AIRAPP_DEMO_DEAL_PIPELINE,
   AIRAPP_DEMO_HONO_API,
   AIRAPP_DEMO_PURE_HTML,
   AIRAPP_DEMO_SQLITE,
@@ -12,11 +14,17 @@ import type { SeedScenario } from "../seed-types";
 // canvas-node changelog for why).
 //
 // AirApp content comes from `domains/airapp/demo-content` — the same catalog
-// `apps/busabase/scripts/demo/14-airapps.ts` uses to create all 8 demos via
-// the REST API, so the two never drift. Only the three fast, dependency-light
-// demos (Pure HTML, Hono API, SQLite) are seeded here; the Vite-based ones (slower
+// `apps/busabase/scripts/demo/14-airapps.ts` uses to create all 10 demos via
+// the REST API, so the two never drift. Only the fast, dependency-light demos
+// (Pure HTML, Hono API, SQLite, Deal Pipeline Board, Compliance Status Board —
+// all zero npm dependencies) are seeded here; the Vite-based ones (slower
 // installs, two of them deliberately broken) are left out of this fast
-// baseline seed.
+// baseline seed. Deal Pipeline Board / Compliance Status Board read the
+// `deals` / `compliance-checklists` Bases live at Run-time via the
+// `/__busabase_api__/` bridge (see `demo-content.ts`'s docblock) — those
+// Bases come from a different scenario (`cross-functional.ts`) in this same
+// `db:seed:all` pipeline, but since the read happens at Run-time rather than
+// seed-time, scenario ordering between the two doesn't matter.
 
 const DOC_GUIDE_CR_ID = "crq_seed_doc_operating_guide";
 
@@ -130,6 +138,24 @@ export const enNodeTypesScenario: SeedScenario = {
       description: AIRAPP_DEMO_SQLITE.description,
       position: 2,
       files: AIRAPP_DEMO_SQLITE.files,
+    },
+    {
+      nodeType: "airapp",
+      nodeId: "nod_airapp_deal_pipeline_demo",
+      slug: AIRAPP_DEMO_DEAL_PIPELINE.slug,
+      name: AIRAPP_DEMO_DEAL_PIPELINE.name,
+      description: AIRAPP_DEMO_DEAL_PIPELINE.description,
+      position: 3,
+      files: AIRAPP_DEMO_DEAL_PIPELINE.files,
+    },
+    {
+      nodeType: "airapp",
+      nodeId: "nod_airapp_compliance_board_demo",
+      slug: AIRAPP_DEMO_COMPLIANCE_BOARD.slug,
+      name: AIRAPP_DEMO_COMPLIANCE_BOARD.name,
+      description: AIRAPP_DEMO_COMPLIANCE_BOARD.description,
+      position: 4,
+      files: AIRAPP_DEMO_COMPLIANCE_BOARD.files,
     },
   ],
   docs: [

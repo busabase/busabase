@@ -1552,6 +1552,9 @@ export const recordPendingNodeCreate = async (args: {
   body?: string;
   initialFiles?: NodeCreateFields["initialFiles"];
   mergeMode?: NodeCreateFields["mergeMode"];
+  /** Extra keys merged into this CR's `sourceMeta` bag (e.g. upload-safety's
+   * `skippedGitignorePaths` — see `logic/upload-safety.ts`). */
+  sourceMeta?: Record<string, unknown>;
   message: string;
   submittedBy: string;
 }): Promise<ChangeRequestVO> => {
@@ -1584,7 +1587,7 @@ export const recordPendingNodeCreate = async (args: {
     nodeId: null,
     status: "in_review",
     submittedBy,
-    sourceMeta: withContextSourceMeta({ subject: "node_tree" }),
+    sourceMeta: withContextSourceMeta({ subject: "node_tree", ...(args.sourceMeta ?? {}) }),
     reviewPolicySnapshot: { kind: "single", requiredApprovals: 1 },
     mergeSummary: {},
     rejectedReason: null,

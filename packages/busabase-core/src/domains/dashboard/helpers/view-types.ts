@@ -25,6 +25,8 @@ export interface RecordsPagination {
   loaded: number;
   hasMore: boolean;
   isLoadingMore: boolean;
+  /** True while the first page of records for the active base is still in flight. */
+  isLoading: boolean;
   loadMore: () => void;
 }
 

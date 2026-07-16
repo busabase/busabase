@@ -5,6 +5,7 @@ import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-quer
 import type { AirAppVO } from "busabase-contract/types";
 import { Button } from "kui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "kui/dialog";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "kui/select";
 import { Loader2, Maximize2, PanelRightOpen, Play, RotateCcw } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { fmt, useCoreI18n } from "../../../i18n";
@@ -17,7 +18,8 @@ import {
   IDLE_ENTRY,
   useAirAppRunnerStore,
 } from "../store/airapp-runner-store";
-import { NodepodRunner } from "./runners/nodepod-runner";
+import { createAirAppRunner } from "./runners/runner-factory";
+import type { AirAppRunnerKind } from "./runners/types";
 
 /**
  * Owns the Nodepod runner lifecycle (mount/install/start, log streaming,
@@ -56,6 +58,17 @@ export function useAirAppRunner({
   );
   const entry = useAirAppRunnerStore(selectEntry);
   const { status, logLines, previewUrl, error } = entry;
+  const selectedRunnerKind = useAirAppRunnerStore((state) =>
+    nodeId ? (state.selectedKinds[nodeId] ?? "nodepod") : "nodepod",
+  );
+  const setRunnerKind = useCallback(
+    (kind: AirAppRunnerKind) => {
+      if (nodeId) {
+        useAirAppRunnerStore.getState().selectRunnerKind(nodeId, kind);
+      }
+    },
+    [nodeId],
+  );
 
   const run = useCallback(async () => {
     if (!airapp) {
@@ -63,9 +76,10 @@ export function useAirAppRunner({
     }
     const currentNodeId = airapp.node.id;
     const store = useAirAppRunnerStore.getState();
+    const runnerKind = store.getSelectedRunnerKind(currentNodeId);
 
-    const runner = new NodepodRunner();
-    store.beginRun(currentNodeId, runner);
+    const runner = createAirAppRunner(runnerKind, { orpc, nodeId: currentNodeId });
+    store.beginRun(currentNodeId, runner, runnerKind);
     runner.onLog((chunk) => useAirAppRunnerStore.getState().appendLog(currentNodeId, chunk));
     runner.onReady((url) => useAirAppRunnerStore.getState().setPreviewUrl(currentNodeId, url));
 
@@ -114,23 +128,35 @@ export function useAirAppRunner({
 
   const isBusy = status === "loading-files" || status === "installing" || status === "starting";
 
-  return { status, logLines, previewUrl, error, run, isBusy };
+  return {
+    status,
+    logLines,
+    previewUrl,
+    error,
+    run,
+    isBusy,
+    runnerKind: selectedRunnerKind,
+    setRunnerKind,
+  };
 }
 
 export type AirAppRunnerState = ReturnType<typeof useAirAppRunner>;
 
-/** "App" tab content: Run button + live preview iframe. `airapp` is optional
- *  context (name/id) used by the "pin to side panel" and fullscreen actions —
- *  the preview itself only needs `runner`. */
-export function AirAppRunPreview({
-  runner,
-  airapp,
-}: {
+interface AirAppRunControlsProps {
   runner: AirAppRunnerState;
+  /** Optional context (name/id) used by the "pin to side panel" and
+   *  fullscreen actions — the run/status controls only need `runner`. */
   airapp: AirAppVO | null;
-}) {
+}
+
+/** The run control cluster (status label, pin-to-side-panel, fullscreen + its
+ *  Dialog, Run button) shared by the AirApp detail-view header and the
+ *  side-panel toolbar so both surfaces stay identical. The fullscreen Dialog
+ *  state lives here; the Dialog renders via portal, so where this component
+ *  sits in the layout doesn't matter. */
+export function AirAppRunControls({ runner, airapp }: AirAppRunControlsProps) {
   const messages = useCoreI18n();
-  const { status, previewUrl, error, run, isBusy } = runner;
+  const { status, previewUrl, run, isBusy, runnerKind, setRunnerKind } = runner;
   const [fullscreen, setFullscreen] = useState(false);
 
   const statusLabel: Record<AirAppRunStatus, string> = {
@@ -155,59 +181,122 @@ export function AirAppRunPreview({
   };
 
   return (
+    <div className="flex items-center gap-1.5">
+      <span className="hidden text-muted-foreground/70 text-xs sm:inline">
+        {statusLabel[status]}
+      </span>
+      <Select
+        disabled={isBusy}
+        onValueChange={(value) => setRunnerKind(value as AirAppRunnerKind)}
+        value={runnerKind}
+      >
+        <SelectTrigger
+          aria-label={messages.airapp.engineLabel}
+          className="h-7 w-auto min-w-0 gap-1 px-2 text-xs"
+        >
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="nodepod">{messages.airapp.engineNodepod}</SelectItem>
+          <SelectItem value="local-node">{messages.airapp.engineLocalNode}</SelectItem>
+        </SelectContent>
+      </Select>
+      <span className="hidden text-muted-foreground/70 text-xs md:inline">
+        {runnerKind === "local-node"
+          ? messages.airapp.engineLocalNodeHint
+          : messages.airapp.engineNodepodHint}
+      </span>
+      {airapp ? (
+        <Button
+          aria-label={messages.airapp.pinToSidePanel}
+          onClick={pinToSidePanel}
+          size="icon-sm"
+          title={messages.airapp.pinToSidePanel}
+          type="button"
+          variant="outline"
+        >
+          <PanelRightOpen className="size-3.5" />
+        </Button>
+      ) : null}
+      {previewUrl ? (
+        <Button
+          aria-label={messages.recordView.expandFullscreen}
+          onClick={() => setFullscreen(true)}
+          size="icon-sm"
+          title={messages.recordView.expandFullscreen}
+          type="button"
+          variant="outline"
+        >
+          <Maximize2 className="size-3.5" />
+        </Button>
+      ) : null}
+      <Button
+        disabled={isBusy}
+        onClick={() => void run()}
+        size="sm"
+        type="button"
+        variant={status === "ready" ? "outline" : "default"}
+      >
+        {isBusy ? (
+          <Loader2 className="size-3.5 animate-spin" />
+        ) : status === "ready" || status === "error" ? (
+          <RotateCcw className="size-3.5" />
+        ) : (
+          <Play className="size-3.5" />
+        )}
+        {status === "ready" || status === "error" ? messages.airapp.runAgain : messages.airapp.run}
+      </Button>
+      {previewUrl ? (
+        <Dialog onOpenChange={setFullscreen} open={fullscreen}>
+          <DialogContent className="flex h-[90vh] max-h-[90vh] w-[95vw] max-w-[1040px] flex-col gap-0 overflow-hidden p-0">
+            <DialogHeader className="shrink-0 border-b px-5 py-3 text-left">
+              <DialogTitle className="font-medium text-sm">
+                {airapp?.node.name ?? messages.airapp.previewTitle}
+              </DialogTitle>
+            </DialogHeader>
+            <div className="min-h-0 flex-1">
+              <iframe
+                className="h-full w-full border-0 bg-white"
+                sandbox="allow-same-origin allow-scripts"
+                src={previewUrl}
+                title={messages.airapp.previewTitle}
+              />
+            </div>
+          </DialogContent>
+        </Dialog>
+      ) : null}
+    </div>
+  );
+}
+
+interface AirAppRunPreviewProps {
+  runner: AirAppRunnerState;
+  /** Optional context (name/id) forwarded to `AirAppRunControls` — the
+   *  preview itself only needs `runner`. */
+  airapp: AirAppVO | null;
+  /** The side panel has no unified header of its own, so it keeps the local
+   *  toolbar row (default). The detail view hosts `AirAppRunControls` in its
+   *  own compact header instead and passes `false` so the preview iframe gets
+   *  every vertical pixel below it. */
+  showToolbar?: boolean;
+}
+
+/** "App" tab content: the live preview iframe, optionally topped by a local
+ *  run toolbar (see `showToolbar`). */
+export function AirAppRunPreview({ runner, airapp, showToolbar = true }: AirAppRunPreviewProps) {
+  const messages = useCoreI18n();
+  const { status, previewUrl, error } = runner;
+
+  return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="flex min-h-11 items-center justify-between gap-2 border-border/60 border-b px-4 py-2">
-        <div className="flex items-center gap-2 text-xs">
-          <span className="font-medium text-muted-foreground uppercase">
+      {showToolbar ? (
+        <div className="flex min-h-11 items-center justify-between gap-2 border-border/60 border-b px-4 py-2">
+          <span className="font-medium text-muted-foreground text-xs uppercase">
             {messages.airapp.runPanelTitle}
           </span>
-          <span className="text-muted-foreground/70">{statusLabel[status]}</span>
+          <AirAppRunControls airapp={airapp} runner={runner} />
         </div>
-        <div className="flex items-center gap-1.5">
-          {airapp ? (
-            <Button
-              aria-label={messages.airapp.pinToSidePanel}
-              onClick={pinToSidePanel}
-              size="icon-sm"
-              title={messages.airapp.pinToSidePanel}
-              type="button"
-              variant="outline"
-            >
-              <PanelRightOpen className="size-3.5" />
-            </Button>
-          ) : null}
-          {previewUrl ? (
-            <Button
-              aria-label={messages.recordView.expandFullscreen}
-              onClick={() => setFullscreen(true)}
-              size="icon-sm"
-              title={messages.recordView.expandFullscreen}
-              type="button"
-              variant="outline"
-            >
-              <Maximize2 className="size-3.5" />
-            </Button>
-          ) : null}
-          <Button
-            disabled={isBusy}
-            onClick={() => void run()}
-            size="sm"
-            type="button"
-            variant={status === "ready" ? "outline" : "default"}
-          >
-            {isBusy ? (
-              <Loader2 className="size-3.5 animate-spin" />
-            ) : status === "ready" || status === "error" ? (
-              <RotateCcw className="size-3.5" />
-            ) : (
-              <Play className="size-3.5" />
-            )}
-            {status === "ready" || status === "error"
-              ? messages.airapp.runAgain
-              : messages.airapp.run}
-          </Button>
-        </div>
-      </div>
+      ) : null}
 
       {error ? (
         <div className="border-border/60 border-b bg-destructive/5 px-4 py-2 text-destructive text-xs">
@@ -233,31 +322,13 @@ export function AirAppRunPreview({
           </div>
         )}
       </div>
-
-      {previewUrl ? (
-        <Dialog onOpenChange={setFullscreen} open={fullscreen}>
-          <DialogContent className="flex h-[90vh] max-h-[90vh] w-[95vw] max-w-[1040px] flex-col gap-0 overflow-hidden p-0">
-            <DialogHeader className="shrink-0 border-b px-5 py-3 text-left">
-              <DialogTitle className="text-sm font-medium">
-                {airapp?.node.name ?? messages.airapp.previewTitle}
-              </DialogTitle>
-            </DialogHeader>
-            <div className="min-h-0 flex-1">
-              <iframe
-                className="h-full w-full border-0 bg-white"
-                sandbox="allow-same-origin allow-scripts"
-                src={previewUrl}
-                title={messages.airapp.previewTitle}
-              />
-            </div>
-          </DialogContent>
-        </Dialog>
-      ) : null}
     </div>
   );
 }
 
-/** "Logs" tab content: the streaming install/start log console. */
+/** "Logs" tab content: the streaming install/start log console. No local
+ *  title row — the "Logs" tab trigger in the detail-view header already names
+ *  this surface, so the console gets the full panel height. */
 export function AirAppRunLogs({ runner }: { runner: AirAppRunnerState }) {
   const messages = useCoreI18n();
   const logRef = useRef<HTMLPreElement | null>(null);
@@ -272,9 +343,6 @@ export function AirAppRunLogs({ runner }: { runner: AirAppRunnerState }) {
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="border-border/50 border-b px-4 py-1.5 font-medium text-[11px] text-muted-foreground uppercase">
-        {messages.airapp.logsTitle}
-      </div>
       <pre
         className="min-h-0 flex-1 overflow-auto whitespace-pre-wrap break-words bg-muted/20 p-3 font-mono text-[11px] text-foreground/80 leading-5"
         ref={logRef}

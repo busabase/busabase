@@ -223,11 +223,17 @@ export const busabaseFieldValues = pgTable(
     updatedAt: timestamp("updated_at", { mode: "date" }).defaultNow().notNull(),
   },
   (base) => [
-    index("busabase_field_values_base_field_text_idx").on(
-      base.baseId,
-      base.fieldSlug,
-      base.valueText,
-    ),
+    // Deliberately (baseId, fieldSlug) only — NOT valueText. valueText now
+    // projects up to 8,000 chars (see vo.ts VALUE_TEXT_INDEX_LIMIT), and a
+    // multi-byte-heavy value at that length overflows Postgres's ~2,704-byte
+    // btree row-size limit, aborting the write (2026-07-15 news-merge
+    // incident: long Chinese article bodies/HTML). Exact-value lookups
+    // (listRecordsByFieldText, e.g. de-dup-by-key search) still work — this
+    // index narrows to the (base, field) row set, then the equality check on
+    // valueText runs as a filter over that narrowed set. Full-text/substring
+    // search continues to use the GIN indexes below, which are unaffected by
+    // this limit (GIN doesn't have btree's fixed-size-entry constraint).
+    index("busabase_field_values_base_field_idx").on(base.baseId, base.fieldSlug),
     index("busabase_field_values_text_fts_idx").using(
       "gin",
       sql`to_tsvector('simple', coalesce(${base.valueText}, ''))`,

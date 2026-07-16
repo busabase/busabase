@@ -143,14 +143,12 @@ test("AirApp run panel: run, watermark, nav persistence, fullscreen, side panel"
   await test.step("pin AirApp B too — both tabs coexist and show their own content", async () => {
     await sidebarLink(page, appB.name).click();
     await expect(page).toHaveURL(new RegExp(`/dashboard/airapp/${appB.slug}$`));
-    // Scoped to the main canvas's "App" tabpanel: once A is pinned, its side
-    // panel tab renders the same AirAppRunPreview component (including ITS
-    // own "Open in side panel" button), so the bare role/name query is no
-    // longer unique on the page.
-    await page
-      .getByRole("tabpanel", { name: "App" })
-      .getByRole("button", { name: "Open in side panel" })
-      .click();
+    // Scoped to the detail view's compact <header> toolbar (which hosts the
+    // run controls, not the "App" tabpanel): once A is pinned, its side panel
+    // tab renders AirAppRunPreview's own toolbar (including ITS own "Open in
+    // side panel" button), so the bare role/name query is no longer unique on
+    // the page.
+    await page.locator("header").getByRole("button", { name: "Open in side panel" }).click();
 
     const tabA = page.locator('[role="tab"]', { hasText: appA.name });
     const tabB = page.locator('[role="tab"]', { hasText: appB.name });

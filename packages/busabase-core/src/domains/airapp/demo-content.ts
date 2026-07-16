@@ -86,7 +86,57 @@
  * See the airapp changelogs under `apps/busabase/content/changelog/` for the
  * full investigation behind #3, #5, and #6, including how #3's working
  * config was found and when #5 was confirmed fixed.
+ *
+ * #9-11 are a different category from #1-8 above: those prove out Nodepod
+ * *capabilities* (a framework/runtime either works or it doesn't); these
+ * three prove out the actual product pitch — an AirApp as a real, live tool,
+ * not just a sandboxed toy.
+ *
+ * #9-10 read the workspace's own live data via the public REST API
+ * (`GET /api/v1/bases`, `GET /api/v1/records/paged`) — read-only, no writes,
+ * so there's no risk of an AirApp corrupting real Base data. Both are
+ * zero-dependency (`node:http` + a static page, same execution model as #1)
+ * so they also qualify for the fast baseline seed.
+ *
+ * Both fetch through the `/__busabase_api__/<real-path>` bridge (see
+ * `changelog/20260715-airapp-busabase-api-bridge.md`), NOT a bare
+ * `fetch("/api/v1/...")`. A first attempt at these two demos tried the bare
+ * path and got a flat 404 from every request, including real busabase
+ * routes — confirmed (via a purpose-built probe returning
+ * `GUEST_SERVER_404_FOR:<path>` from the AirApp's *own* server) that
+ * Nodepod's service worker claims the entire preview scope and routes every
+ * same-origin fetch to the sandboxed guest process, with no passthrough to
+ * the real network — same-origin alone doesn't get you there, same as that
+ * changelog already found. The bridge prefix is what actually reaches the
+ * real backend (with the viewer's session, since it's a genuine
+ * `credentials: "include"` browser fetch outside the sandbox). Both demos'
+ * `fetch()` calls run in the client-side `<script>` the guest server serves
+ * (a real browser context, not the sandboxed Worker) — the only path
+ * actually verified here; whether the bridge also intercepts a fetch made
+ * server-side, inside the guest Node process itself, wasn't tested.
+ *
+ *   9. "Deal Pipeline Board"    — reads the standard demo dataset's `deals`
+ *      Base (CRM folder) and renders it as a 4-column kanban (Prospecting /
+ *      Proposal / Won / Lost) with a running amount total per column. Shows
+ *      a friendly empty state (not an error) if the `deals` Base isn't
+ *      present, e.g. a workspace seeded without the CRM folder.
+ *  10. "Compliance Status Board" — reads `compliance-checklists` (Compliance
+ *      folder), groups by status (Missing / In review / Complete), and
+ *      flags any item whose `due_date` has passed and isn't Complete yet —
+ *      the kind of "what needs attention today" view a compliance owner
+ *      would actually want, not just a raw table.
+ *  11. "Kelly Email" — a different flavor of "real, not synthetic": a real
+ *      app-in-skill (an email review desk), not a live-data view over the
+ *      seeded demo dataset, ported from the `kelly-email` local skill. See
+ *      `demo-content-kelly-email.ts` for the full port rationale (esbuild
+ *      bundling to work around a Nodepod TypeScript-stripper bug, why the
+ *      bundle's file placement matters) — kept in its own file purely for
+ *      size (~390KB of real app content vs. a few KB per demo here). Not
+ *      zero-dependency (48 real npm packages), so unlike #9-10 it's not in
+ *      the fast baseline seed.
  */
+
+import { AIRAPP_DEMO_KELLY_EMAIL } from "./demo-content-kelly-email";
 
 export interface AirAppDemoFile {
   path: string;
@@ -848,6 +898,346 @@ export const AIRAPP_DEMO_HYPERFRAMES_BROKEN: AirAppDemoDef = {
   files: [{ path: "package.json", content: HYPERFRAMES_PACKAGE_JSON }],
 };
 
+// ── 9. Deal Pipeline Board (works today, reads live workspace data) ────────
+
+const DEAL_PIPELINE_PACKAGE_JSON = JSON.stringify(
+  {
+    name: "deal-pipeline-board",
+    private: true,
+    version: "0.1.0",
+    type: "module",
+    scripts: { dev: "node server.js" },
+  },
+  null,
+  2,
+);
+
+// Same five-line static-file server as the Pure HTML demo (#1) — the fetch
+// to Busabase's own API happens client-side, see the module docblock for why.
+const DEAL_PIPELINE_SERVER_JS = `import { createServer } from "node:http";
+import { readFileSync } from "node:fs";
+import { extname } from "node:path";
+
+const contentTypes = {
+  ".html": "text/html; charset=utf-8",
+  ".css": "text/css; charset=utf-8",
+  ".js": "text/javascript; charset=utf-8",
+};
+
+createServer((req, res) => {
+  const path = req.url === "/" ? "/index.html" : req.url;
+  try {
+    const body = readFileSync(\`.\${path}\`);
+    res.writeHead(200, {
+      "Content-Type": contentTypes[extname(path)] || "application/octet-stream",
+    });
+    res.end(body);
+  } catch {
+    res.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
+    res.end("Not found");
+  }
+}).listen(3000, () => console.log("Deal Pipeline Board listening on port 3000"));
+`;
+
+const BOARD_STYLE_CSS = `:root { color-scheme: light; }
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  background: #f8fafc;
+  color: #0f172a;
+}
+
+header {
+  padding: 1.5rem 2rem 1rem;
+  border-bottom: 1px solid #e2e8f0;
+  background: white;
+}
+
+header .badge {
+  display: inline-block;
+  padding: 0.2rem 0.6rem;
+  border-radius: 999px;
+  background: #eef2ff;
+  color: #4338ca;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+header h1 { margin: 0.5rem 0 0.25rem; font-size: 1.4rem; }
+header p { margin: 0; color: #64748b; font-size: 0.85rem; }
+
+#board {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(15rem, 1fr);
+  gap: 1rem;
+  padding: 1.5rem 2rem;
+  align-items: start;
+}
+
+.column {
+  background: #f1f5f9;
+  border-radius: 0.75rem;
+  padding: 0.75rem;
+}
+
+.column h2 {
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin: 0.25rem 0.5rem 0.75rem;
+  display: flex;
+  justify-content: space-between;
+  color: #475569;
+}
+
+.column .total { font-weight: 700; color: #0f172a; }
+
+.item {
+  background: white;
+  border-radius: 0.5rem;
+  padding: 0.75rem;
+  margin-bottom: 0.5rem;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
+  font-size: 0.85rem;
+}
+
+.item .name { font-weight: 600; margin-bottom: 0.25rem; }
+.item .meta { color: #64748b; font-size: 0.78rem; }
+.item.overdue { border-left: 3px solid #dc2626; }
+
+#empty {
+  margin: 2rem;
+  padding: 1.5rem;
+  border: 1px dashed #cbd5e1;
+  border-radius: 0.75rem;
+  color: #64748b;
+  font-size: 0.9rem;
+  max-width: 32rem;
+}
+`;
+
+const DEAL_PIPELINE_INDEX_HTML = `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Deal Pipeline Board</title>
+    <link rel="stylesheet" href="/style.css" />
+  </head>
+  <body>
+    <header>
+      <span class="badge">AirApp · Live workspace data</span>
+      <h1>Deal Pipeline Board</h1>
+      <p>Reads this workspace's own "deals" Base via the Busabase REST API — not seeded, not synthetic.</p>
+    </header>
+    <div id="board"></div>
+    <script src="/client.js"></script>
+  </body>
+</html>
+`;
+
+const DEAL_PIPELINE_CLIENT_JS = `const STAGES = [
+  { id: "prospecting", label: "Prospecting" },
+  { id: "proposal", label: "Proposal" },
+  { id: "won", label: "Won" },
+  { id: "lost", label: "Lost" },
+];
+
+const board = document.getElementById("board");
+
+function money(n) {
+  return typeof n === "number" ? "$" + n.toLocaleString("en-US") : "—";
+}
+
+function showEmpty(message) {
+  board.innerHTML = "";
+  const div = document.createElement("div");
+  div.id = "empty";
+  div.textContent = message;
+  board.replaceWith(div);
+}
+
+async function loadDeals() {
+  const basesRes = await fetch("/__busabase_api__/api/v1/bases");
+  if (!basesRes.ok) throw new Error("GET /api/v1/bases → " + basesRes.status);
+  const bases = await basesRes.json();
+  const deals = bases.find((b) => b.slug === "deals");
+  if (!deals) {
+    showEmpty(
+      'No "deals" Base found in this workspace (slug: deals). This demo reads a real Base live — seed the standard demo dataset (CRM folder) to see it populated.',
+    );
+    return;
+  }
+
+  const recordsRes = await fetch("/__busabase_api__/api/v1/records/paged?baseId=" + deals.id + "&limit=100");
+  if (!recordsRes.ok) throw new Error("GET /api/v1/records/paged → " + recordsRes.status);
+  const { records } = await recordsRes.json();
+
+  for (const stage of STAGES) {
+    const items = records.filter((r) => r.headCommit?.fields?.stage === stage.id);
+    const total = items.reduce((sum, r) => sum + (Number(r.headCommit?.fields?.amount) || 0), 0);
+
+    const column = document.createElement("div");
+    column.className = "column";
+    column.innerHTML =
+      '<h2>' + stage.label + ' <span class="total">' + money(total) + "</span></h2>";
+
+    for (const record of items) {
+      const fields = record.headCommit?.fields ?? {};
+      const item = document.createElement("div");
+      item.className = "item";
+      item.innerHTML =
+        '<div class="name"></div><div class="meta"></div>';
+      item.querySelector(".name").textContent = fields.name || "(untitled)";
+      item.querySelector(".meta").textContent =
+        [money(fields.amount), fields.owner, fields.close_date].filter(Boolean).join(" · ");
+      column.appendChild(item);
+    }
+    board.appendChild(column);
+  }
+}
+
+loadDeals().catch((err) => showEmpty("Couldn't load deals: " + err.message));
+`;
+
+export const AIRAPP_DEMO_DEAL_PIPELINE: AirAppDemoDef = {
+  slug: "demo-deal-pipeline",
+  name: "Deal Pipeline Board",
+  description:
+    'A live kanban over this workspace\'s own "deals" Base (CRM folder), read via the public REST API — not a synthetic demo. Zero npm dependencies.',
+  files: [
+    { path: "package.json", content: DEAL_PIPELINE_PACKAGE_JSON },
+    { path: "server.js", content: DEAL_PIPELINE_SERVER_JS },
+    { path: "index.html", content: DEAL_PIPELINE_INDEX_HTML },
+    { path: "style.css", content: BOARD_STYLE_CSS },
+    { path: "client.js", content: DEAL_PIPELINE_CLIENT_JS },
+  ],
+};
+
+// ── 10. Compliance Status Board (works today, reads live workspace data) ───
+
+const COMPLIANCE_BOARD_PACKAGE_JSON = JSON.stringify(
+  {
+    name: "compliance-status-board",
+    private: true,
+    version: "0.1.0",
+    type: "module",
+    scripts: { dev: "node server.js" },
+  },
+  null,
+  2,
+);
+
+const COMPLIANCE_BOARD_SERVER_JS = DEAL_PIPELINE_SERVER_JS.replace(
+  "Deal Pipeline Board",
+  "Compliance Status Board",
+);
+
+const COMPLIANCE_BOARD_INDEX_HTML = `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Compliance Status Board</title>
+    <link rel="stylesheet" href="/style.css" />
+  </head>
+  <body>
+    <header>
+      <span class="badge">AirApp · Live workspace data</span>
+      <h1>Compliance Status Board</h1>
+      <p>Reads this workspace's own "compliance-checklists" Base via the Busabase REST API and flags overdue items.</p>
+    </header>
+    <div id="board"></div>
+    <script src="/client.js"></script>
+  </body>
+</html>
+`;
+
+const COMPLIANCE_BOARD_CLIENT_JS = `const STATUSES = [
+  { id: "missing", label: "Missing" },
+  { id: "review", label: "In review" },
+  { id: "complete", label: "Complete" },
+];
+
+const board = document.getElementById("board");
+
+function showEmpty(message) {
+  const div = document.createElement("div");
+  div.id = "empty";
+  div.textContent = message;
+  board.replaceWith(div);
+}
+
+function isOverdue(fields) {
+  if (fields.status === "complete" || !fields.due_date) return false;
+  return new Date(fields.due_date).getTime() < Date.now();
+}
+
+async function loadChecklist() {
+  const basesRes = await fetch("/__busabase_api__/api/v1/bases");
+  if (!basesRes.ok) throw new Error("GET /api/v1/bases → " + basesRes.status);
+  const bases = await basesRes.json();
+  const checklist = bases.find((b) => b.slug === "compliance-checklists");
+  if (!checklist) {
+    showEmpty(
+      'No "compliance-checklists" Base found in this workspace (slug: compliance-checklists). This demo reads a real Base live — seed the standard demo dataset (Compliance folder) to see it populated.',
+    );
+    return;
+  }
+
+  const recordsRes = await fetch("/__busabase_api__/api/v1/records/paged?baseId=" + checklist.id + "&limit=100");
+  if (!recordsRes.ok) throw new Error("GET /api/v1/records/paged → " + recordsRes.status);
+  const { records } = await recordsRes.json();
+
+  for (const status of STATUSES) {
+    const items = records.filter((r) => r.headCommit?.fields?.status === status.id);
+    const overdueCount = items.filter((r) => isOverdue(r.headCommit?.fields ?? {})).length;
+
+    const column = document.createElement("div");
+    column.className = "column";
+    column.innerHTML =
+      '<h2>' +
+      status.label +
+      ' <span class="total">' +
+      (overdueCount > 0 ? overdueCount + " overdue" : "") +
+      "</span></h2>";
+
+    for (const record of items) {
+      const fields = record.headCommit?.fields ?? {};
+      const item = document.createElement("div");
+      item.className = "item" + (isOverdue(fields) ? " overdue" : "");
+      item.innerHTML = '<div class="name"></div><div class="meta"></div>';
+      item.querySelector(".name").textContent = fields.item || "(untitled)";
+      item.querySelector(".meta").textContent =
+        [fields.owner, fields.due_date].filter(Boolean).join(" · ");
+      column.appendChild(item);
+    }
+    board.appendChild(column);
+  }
+}
+
+loadChecklist().catch((err) => showEmpty("Couldn't load checklist: " + err.message));
+`;
+
+export const AIRAPP_DEMO_COMPLIANCE_BOARD: AirAppDemoDef = {
+  slug: "demo-compliance-board",
+  name: "Compliance Status Board",
+  description:
+    'A live status board over this workspace\'s own "compliance-checklists" Base (Compliance folder), flagging overdue items — read via the public REST API, not a synthetic demo. Zero npm dependencies.',
+  files: [
+    { path: "package.json", content: COMPLIANCE_BOARD_PACKAGE_JSON },
+    { path: "server.js", content: COMPLIANCE_BOARD_SERVER_JS },
+    { path: "index.html", content: COMPLIANCE_BOARD_INDEX_HTML },
+    { path: "style.css", content: BOARD_STYLE_CSS },
+    { path: "client.js", content: COMPLIANCE_BOARD_CLIENT_JS },
+  ],
+};
+
 /** Full gallery, in the narrative order described in this file's docblock. */
 export const ALL_AIRAPP_DEMOS: AirAppDemoDef[] = [
   AIRAPP_DEMO_PURE_HTML,
@@ -858,4 +1248,7 @@ export const ALL_AIRAPP_DEMOS: AirAppDemoDef[] = [
   AIRAPP_DEMO_VITE_REACT_SWC_BROKEN,
   AIRAPP_DEMO_SQLITE,
   AIRAPP_DEMO_HYPERFRAMES_BROKEN,
+  AIRAPP_DEMO_DEAL_PIPELINE,
+  AIRAPP_DEMO_COMPLIANCE_BOARD,
+  AIRAPP_DEMO_KELLY_EMAIL,
 ];

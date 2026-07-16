@@ -65,6 +65,11 @@ export const fileTreeNodeSchema = z.object({
   visibility: z.enum(["private", "workspace", "public"]),
   version: z.string(),
   files: z.array(fileTreeFileSchema),
+  // Paths silently dropped from this create call by an uploaded `.gitignore`
+  // (upload-safety layer 1 — see `logic/upload-safety.ts`). Empty on
+  // ordinary get/list responses and on creates that didn't include a
+  // `.gitignore`.
+  skippedGitignorePaths: z.array(z.string()).optional().default([]),
 });
 
 export const createFileTreeInputSchema = z.object({

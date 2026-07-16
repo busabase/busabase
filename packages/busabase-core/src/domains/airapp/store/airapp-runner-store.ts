@@ -1,7 +1,9 @@
 "use client";
 
 import { create } from "zustand";
-import type { AirAppRunner } from "../components/runners/types";
+import type { AirAppRunner, AirAppRunnerKind } from "../components/runners/types";
+
+const DEFAULT_RUNNER_KIND: AirAppRunnerKind = "nodepod";
 
 /**
  * AirApp run state, keyed by node id, so it survives the node-detail registry
@@ -28,6 +30,10 @@ export interface AirAppRunEntry {
   previewUrl: string | null;
   error: string | null;
   runner: AirAppRunner | null;
+  /** Which engine `runner` was built with — kept alongside `runner` so the
+   *  engine picker can show the running/last-used engine even though
+   *  `AirAppRunner` itself doesn't expose its own kind. */
+  runnerKind: AirAppRunnerKind;
 }
 
 const MAX_LOG_LINES = 2000;
@@ -38,13 +44,21 @@ export const IDLE_ENTRY: AirAppRunEntry = {
   previewUrl: null,
   error: null,
   runner: null,
+  runnerKind: DEFAULT_RUNNER_KIND,
 };
 
 interface AirAppRunnerStoreState {
   entries: Record<string, AirAppRunEntry>;
+  /** The user's selected engine per node, independent of whether a run is
+   *  currently in flight — read by `RunPanel` before starting a new run, and
+   *  set by the engine-picker UI in `AirAppDetailView`. Defaults to
+   *  `"nodepod"` (V1's only engine) for any node with no explicit choice. */
+  selectedKinds: Record<string, AirAppRunnerKind>;
+  selectRunnerKind: (nodeId: string, kind: AirAppRunnerKind) => void;
+  getSelectedRunnerKind: (nodeId: string) => AirAppRunnerKind;
   /** Starts a fresh run for `nodeId`: disposes any existing runner for that
    *  node first, then resets the entry to a clean "loading-files" state. */
-  beginRun: (nodeId: string, runner: AirAppRunner) => void;
+  beginRun: (nodeId: string, runner: AirAppRunner, runnerKind: AirAppRunnerKind) => void;
   setStatus: (nodeId: string, status: AirAppRunStatus) => void;
   appendLog: (nodeId: string, chunk: string) => void;
   setPreviewUrl: (nodeId: string, url: string) => void;
@@ -59,8 +73,14 @@ const getEntry = (entries: Record<string, AirAppRunEntry>, nodeId: string): AirA
 
 export const useAirAppRunnerStore = create<AirAppRunnerStoreState>((set, get) => ({
   entries: {},
+  selectedKinds: {},
 
-  beginRun: (nodeId, runner) => {
+  selectRunnerKind: (nodeId, kind) =>
+    set((state) => ({ selectedKinds: { ...state.selectedKinds, [nodeId]: kind } })),
+
+  getSelectedRunnerKind: (nodeId) => get().selectedKinds[nodeId] ?? DEFAULT_RUNNER_KIND,
+
+  beginRun: (nodeId, runner, runnerKind) => {
     get().entries[nodeId]?.runner?.dispose();
     set((state) => ({
       entries: {
@@ -71,6 +91,7 @@ export const useAirAppRunnerStore = create<AirAppRunnerStoreState>((set, get) =>
           previewUrl: null,
           error: null,
           runner,
+          runnerKind,
         },
       },
     }));

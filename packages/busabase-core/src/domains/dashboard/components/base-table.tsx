@@ -7,6 +7,7 @@ import type {
   ViewFilterVO,
   ViewVO,
 } from "busabase-contract/types";
+import { Skeleton } from "kui/skeleton";
 import {
   Check,
   ChevronRight,
@@ -187,6 +188,48 @@ function BusaBaseRecordRow({
       <div className="truncate font-mono text-muted-foreground/80 text-xs">
         {shortIdentifier(record.headCommitId)}
       </div>
+    </div>
+  );
+}
+
+// Stable ids + cycling widths for the loading-rows skeleton below, following the
+// same static-array convention as skeletons.tsx (deterministic, no index keys).
+const SKELETON_ROWS = [
+  "skel-row-1",
+  "skel-row-2",
+  "skel-row-3",
+  "skel-row-4",
+  "skel-row-5",
+  "skel-row-6",
+];
+const SKELETON_CELL_WIDTHS = ["80%", "60%", "72%", "55%", "66%"];
+
+// Body-only loading placeholder shown while the active base's first page of
+// records is still in flight. Mirrors the real rows' column template so the
+// table doesn't jump when data arrives, and — unlike the page-level
+// BaseTableSkeleton — leaves the already-loaded header/view-tabs/toolbar above
+// it alone instead of replacing them with a fake shimmer.
+function BusaBaseTableRowsSkeleton({ columnTemplate }: { columnTemplate: string }) {
+  return (
+    <div aria-hidden>
+      {SKELETON_ROWS.map((rowId, rowIndex) => (
+        <div
+          className="grid min-h-12 items-center gap-3 border-border/40 border-b px-2 py-1.5"
+          key={rowId}
+          style={{ gridTemplateColumns: columnTemplate }}
+        >
+          {columnTemplate.split(" ").map((column, columnIndex) => (
+            <Skeleton
+              className="h-4"
+              // biome-ignore lint/suspicious/noArrayIndexKey: fixed-order grid cells, no stable id
+              key={`${rowId}-${column}-${columnIndex}`}
+              style={{
+                width: SKELETON_CELL_WIDTHS[(rowIndex + columnIndex) % SKELETON_CELL_WIDTHS.length],
+              }}
+            />
+          ))}
+        </div>
+      ))}
     </div>
   );
 }
@@ -488,7 +531,9 @@ export function BusaBaseTable({
             <div>{messages.base.recordStatus}</div>
             <div>{messages.base.commit}</div>
           </div>
-          {records.length === 0 ? (
+          {pagination?.isLoading ? (
+            <BusaBaseTableRowsSkeleton columnTemplate={columnTemplate} />
+          ) : records.length === 0 ? (
             <div className="px-2 py-6 text-muted-foreground text-sm">
               {messages.base.emptyRecords}
             </div>

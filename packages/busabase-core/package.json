@@ -159,6 +159,7 @@
     }
   },
   "dependencies": {
+    "@anthropic-ai/sandbox-runtime": "0.0.65",
     "@electric-sql/pglite": "^0.3.15",
     "@orpc/client": "^1.14.6",
     "@orpc/contract": "^1.14.6",
@@ -174,6 +175,7 @@
     "busabase-contract": "workspace:*",
     "drizzle-orm": "^0.45.1",
     "elkjs": "^0.9.3",
+    "ignore": "^7.0.5",
     "kui": "workspace:*",
     "lucide-react": "^0.556.0",
     "open-domains": "workspace:*",

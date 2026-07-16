@@ -209,6 +209,10 @@ async function oauthLogin(
         authorizeUrl.searchParams.set("code_challenge_method", "S256");
         authorizeUrl.searchParams.set("redirect_uri", redirect);
         authorizeUrl.searchParams.set("state", state);
+        // Force re-authentication so `busabase login` never silently reuses
+        // whatever session the default browser already has live for a
+        // different account.
+        authorizeUrl.searchParams.set("prompt", "login");
         const href = authorizeUrl.toString();
         say("");
         say("Open this URL in your browser to sign in:");

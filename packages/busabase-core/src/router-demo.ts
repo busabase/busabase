@@ -223,6 +223,11 @@ export const busabaseDemoRouter = os.router({
     createChangeRequest: os.airapps.createChangeRequest.handler(() => {
       throw demoUnsupported("AirApp change request");
     }),
+    // Server-side process execution has no meaningful demo equivalent (no
+    // filesystem/process to spawn against in the stateless demo dataset).
+    runLocalNode: os.airapps.runLocalNode.handler(() => {
+      throw demoUnsupported("Local Node.js execution");
+    }),
   },
   files: {
     list: os.files.list.handler(() => demoListFileNodes()),

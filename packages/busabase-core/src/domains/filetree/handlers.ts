@@ -40,6 +40,12 @@ import {
   toNodeVO,
 } from "../../logic/store";
 import {
+  allFilteredByGitignore,
+  assertNoForbiddenPaths,
+  filterByGitignore,
+  scanForSecrets,
+} from "../../logic/upload-safety";
+import {
   contentKindForMimeType,
   createAsset,
   deleteAssetRow,
@@ -478,6 +484,20 @@ export const createFileTreeNode = async (
     return { ...(await getFileTreeNode(config, existing.id)), materialized: true as const };
   }
 
+  // Upload safety — three independent layers, always in this order (see
+  // ../../logic/upload-safety.ts). Runs once per real (non-idempotent)
+  // create call, before the review-first/autoMerge branch below, and the
+  // filtered `files` list is what actually gets seeded downstream.
+  const gitignoreResult = filterByGitignore(parsed.files);
+  if (allFilteredByGitignore(parsed.files, gitignoreResult)) {
+    throw new ORPCError("BAD_REQUEST", {
+      message: "All files in this request were excluded by .gitignore; nothing to upload.",
+    });
+  }
+  const files = gitignoreResult.kept;
+  assertNoForbiddenPaths(files.map((file) => file.path));
+  scanForSecrets(files);
+
   const parentNodeId = parsed.parentNodeId ?? rootNodeIdForSpace(getContextSpaceId());
   const [parentNodeRow] = await db
     .select()
@@ -498,8 +518,9 @@ export const createFileTreeNode = async (
       description: parsed.description,
       parentNodeId: parentNode.id,
       metadata: { visibility: parsed.visibility, version: parsed.version },
-      initialFiles: parsed.files,
+      initialFiles: files,
       mergeMode: parsed.mergeMode,
+      sourceMeta: { skippedGitignorePaths: gitignoreResult.skipped },
       message: `Create ${labelLower(config)} ${parsed.name}`,
       submittedBy: resolveActorId(CURRENT_USER_ID),
     });
@@ -538,7 +559,7 @@ export const createFileTreeNode = async (
       description: parsed.description,
       version: parsed.version,
     },
-    parsed.files,
+    files,
     parsed.mergeMode,
   );
   for (const file of seedFiles) {
@@ -555,7 +576,11 @@ export const createFileTreeNode = async (
     message: `Create ${labelLower(config)} ${parsed.name}`,
     submittedBy: resolveActorId(CURRENT_USER_ID),
   });
-  return { ...(await getFileTreeNode(config, nodeId)), materialized: true as const };
+  return {
+    ...(await getFileTreeNode(config, nodeId)),
+    materialized: true as const,
+    skippedGitignorePaths: gitignoreResult.skipped,
+  };
 };
 
 export const getFileTreeNode = async (
@@ -674,6 +699,31 @@ export const createFileTreeChangeRequest = async (
     throw new Error(`${config.label} not found: ${nodeIdOrSlug}`);
   }
   const parsed = createFileTreeChangeRequestInputSchema.parse(input);
+
+  // Upload safety — same three layers as createFileTreeNode (see
+  // ../../logic/upload-safety.ts), run before any DB write. A
+  // `metadata_update` operation carries no `path`, so it skips all three
+  // checks; a `delete` operation has a `path` but no `content`, so it goes
+  // through steps 1-2 but has nothing for step 3 to scan.
+  type FileTreeOperation = (typeof parsed.operations)[number];
+  const hasPath = (
+    operation: FileTreeOperation,
+  ): operation is Exclude<FileTreeOperation, { kind: "metadata_update" }> =>
+    operation.kind !== "metadata_update";
+  const pathBearingOperations = parsed.operations.filter(hasPath);
+  const gitignoreResult = filterByGitignore(pathBearingOperations);
+  if (allFilteredByGitignore(pathBearingOperations, gitignoreResult)) {
+    throw new ORPCError("BAD_REQUEST", {
+      message: "All files in this request were excluded by .gitignore; nothing to upload.",
+    });
+  }
+  assertNoForbiddenPaths(gitignoreResult.kept.map((operation) => operation.path));
+  scanForSecrets(gitignoreResult.kept);
+  const keptOperations = new Set(gitignoreResult.kept);
+  const operations = parsed.operations.filter(
+    (operation) => !hasPath(operation) || keptOperations.has(operation),
+  );
+
   const changeRequestId = id("crq");
   const timestamp = now();
 
@@ -684,7 +734,11 @@ export const createFileTreeChangeRequest = async (
     nodeId: node.id,
     status: "in_review",
     submittedBy: parsed.submittedBy,
-    sourceMeta: withContextSourceMeta({ subject: config.type, nodeId: node.id }),
+    sourceMeta: withContextSourceMeta({
+      subject: config.type,
+      nodeId: node.id,
+      skippedGitignorePaths: gitignoreResult.skipped,
+    }),
     reviewPolicySnapshot: { kind: "single", requiredApprovals: 1 },
     mergeSummary: {},
     rejectedReason: null,
@@ -694,7 +748,7 @@ export const createFileTreeChangeRequest = async (
     updatedAt: timestamp,
   });
 
-  for (const [position, operation] of parsed.operations.entries()) {
+  for (const [position, operation] of operations.entries()) {
     const operationId = id("opr");
     const commitId = id("cmt");
     const operationKind = operationKindForInput(config.type, operation.kind);

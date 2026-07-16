@@ -8,6 +8,7 @@ import {
   listAirApps,
   readAirAppFile,
 } from "./handlers";
+import { runAirAppLocalNode } from "./logic/local-node-runtime";
 
 // AirApp domain oRPC handler slice; aggregated into the kernel router (router.ts).
 const os = implement(busabaseContract);
@@ -24,4 +25,7 @@ export const airappRouter = {
     const { nodeId, ...rest } = input;
     return createAirAppChangeRequest(nodeId, rest);
   }),
+  runLocalNode: os.airapps.runLocalNode.handler(({ input, signal }) =>
+    runAirAppLocalNode(input, signal),
+  ),
 };
