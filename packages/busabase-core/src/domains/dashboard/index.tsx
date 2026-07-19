@@ -104,6 +104,18 @@ interface BusabaseDashboardProps {
   apiClientOptions?: BusabaseClientOptions;
   apiClient?: BusabaseDashboardApiClient;
   embedded?: boolean;
+  /**
+   * Full-screen, chrome-free rendering: skips the topbar (SidebarTrigger,
+   * breadcrumb, badges, topbar actions), the side panel, and the search
+   * dialog, rendering only the current SPA-routed node's detail pane. Distinct
+   * from `embedded` (which only swaps the outer wrapper tag/height styling and
+   * still shows the full topbar) — this is for hosts with NO chrome of their
+   * own around the dashboard at all, e.g. busabase-mobile's WebView embed of a
+   * single AirApp's Run/Files/Logs UI, where a sidebar toggle or breadcrumb
+   * back to the rest of the workspace makes no sense. Defaults to false so
+   * every existing browser consumer is unaffected.
+   */
+  chromeless?: boolean;
   onSearchOpenChange?: (open: boolean) => void;
   /**
    * Leave enabled for standalone consumers. Hosts that already mount an app-wide
@@ -155,6 +167,7 @@ function BusabaseDashboardContent({
   nodes: nodeTree,
   views: initialViews = [],
   embedded = false,
+  chromeless = false,
   onSearchOpenChange,
   searchOpen,
 }: BusabaseDashboardProps) {
@@ -1009,6 +1022,57 @@ function BusabaseDashboardContent({
     ],
   );
 
+  // Kanban drag-to-move: set one field on a record and auto-merge the resulting
+  // ChangeRequest (an instant change that still leaves an audit trail, per the
+  // approval model). Unlike submitUpdateRecord it does NOT navigate — the user
+  // stays on the board — and refreshes in place so the card lands in its column.
+  const submitMoveRecord = useCallback(
+    async (record: RecordVO, fieldSlug: string, value: string | null) => {
+      setError(null);
+      const changeRequest = await client.createUpdateChangeRequest(record.id, {
+        author: "local-editor",
+        fields: { ...record.headCommit.fields, [fieldSlug]: value },
+        message: fmt(messages.createNode.updateRecordMessage, {
+          record: getRecordTitle(record, messages),
+        }),
+      });
+      await approveAndMergeChangeRequest(changeRequest.id);
+      await refresh();
+    },
+    [
+      approveAndMergeChangeRequest,
+      client,
+      messages,
+      messages.createNode.updateRecordMessage,
+      refresh,
+    ],
+  );
+
+  // Gantt drag-to-reschedule: patch several fields at once (start/end dates) via
+  // one auto-merged ChangeRequest, staying on the timeline. `patch` is the full
+  // fields object the caller already merged, matching submitMoveRecord's shape.
+  const submitPatchRecord = useCallback(
+    async (record: RecordVO, patch: Record<string, unknown>) => {
+      setError(null);
+      const changeRequest = await client.createUpdateChangeRequest(record.id, {
+        author: "local-editor",
+        fields: patch,
+        message: fmt(messages.createNode.updateRecordMessage, {
+          record: getRecordTitle(record, messages),
+        }),
+      });
+      await approveAndMergeChangeRequest(changeRequest.id);
+      await refresh();
+    },
+    [
+      approveAndMergeChangeRequest,
+      client,
+      messages,
+      messages.createNode.updateRecordMessage,
+      refresh,
+    ],
+  );
+
   const submitDeleteRecord = useCallback(
     async (record: RecordVO, options?: RecordSubmitOptions) => {
       setError(null);
@@ -1602,6 +1666,8 @@ function BusabaseDashboardContent({
           onDeleteView={submitDeleteView}
           onRestoreView={submitRestoreView}
           onRestoreRecord={submitRestoreRecord}
+          onMoveRecord={submitMoveRecord}
+          onPatchRecord={submitPatchRecord}
           onUpdateView={submitUpdateView}
           views={views}
         />
@@ -1694,6 +1760,8 @@ function BusabaseDashboardContent({
     submitRestoreField,
     submitRestoreView,
     submitRestoreRecord,
+    submitMoveRecord,
+    submitPatchRecord,
     submitUpdateFieldName,
     submitUpdateRecord,
     submitUpdateView,
@@ -1712,6 +1780,26 @@ function BusabaseDashboardContent({
     serverSortedView,
     baseRecords,
   ]);
+
+  // Chrome-free: no topbar, no side panel, no search dialog — just the current
+  // node-detail pane (still preceded by the error banner, since that reflects
+  // the current view's own state rather than app-wide navigation chrome).
+  if (chromeless) {
+    return (
+      <div className="flex h-full min-h-0 flex-1 flex-col bg-background">
+        {error ? (
+          isConflictErrorMessage(error) ? (
+            <ReviewConflictPanel message={error} />
+          ) : (
+            <div className="border-red-200 border-b bg-red-50 px-4 py-2 text-red-800 text-sm">
+              {error}
+            </div>
+          )
+        ) : null}
+        <div className="min-h-0 flex-1 overflow-hidden">{activeView}</div>
+      </div>
+    );
+  }
 
   const content = (
     <div className="flex h-full min-h-0 bg-background">

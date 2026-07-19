@@ -4,6 +4,7 @@ import type { ExportTablesInput, ExportTablesVO } from "busabase-contract/domain
 import { and, asc, eq, gt } from "drizzle-orm";
 import { getContextSpaceId } from "../../../context";
 import { getDb } from "../../../db";
+import { requireSpaceManagerForDump } from "./_guard";
 import { DUMP_TABLE_REGISTRY } from "./table-registry";
 
 /**
@@ -13,6 +14,7 @@ import { DUMP_TABLE_REGISTRY } from "./table-registry";
  * below is load-bearing). Ordered by `id` for a stable, gap-tolerant cursor.
  */
 export const exportTableRows = async (input: ExportTablesInput): Promise<ExportTablesVO> => {
+  requireSpaceManagerForDump();
   const table = DUMP_TABLE_REGISTRY[input.table];
   const spaceId = getContextSpaceId();
   const db = await getDb();

@@ -1,7 +1,7 @@
 import "server-only";
 
 import { ORPCError } from "@orpc/server";
-import type { ViewConfigVO } from "busabase-contract/types";
+import type { ViewConfigVO, ViewType } from "busabase-contract/types";
 import { and, eq, isNull } from "drizzle-orm";
 import { getContextSpaceId, resolveActorId } from "../../../../context";
 import type { CommitPO, OperationPO } from "../../../../db/schema";
@@ -36,6 +36,11 @@ const stampFieldIds = async (
   };
 };
 
+/** Same reachable-race reasoning as record.ts's targetRecordNotFound, for a
+ *  view target that's gone by merge time. */
+const targetViewNotFound = (viewId: string | null) =>
+  new ORPCError("NOT_FOUND", { message: `Target view not found: ${viewId}` });
+
 export const mergeViewCreate = async (ctx: MergeCtx, item: OperationPO, headCommit: CommitPO) => {
   const { db, timestamp } = ctx;
   const baseId = requireBaseId(item.baseId, item.operation);
@@ -45,6 +50,7 @@ export const mergeViewCreate = async (ctx: MergeCtx, item: OperationPO, headComm
     description?: string;
     name?: string;
     slug?: string;
+    type?: ViewType;
   };
   if (!viewFields.name || !viewFields.slug) {
     throw new Error(`View create commit missing name or slug: ${item.id}`);
@@ -56,7 +62,7 @@ export const mergeViewCreate = async (ctx: MergeCtx, item: OperationPO, headComm
     slug: viewFields.slug,
     name: viewFields.name,
     description: viewFields.description ?? "",
-    type: "table",
+    type: viewFields.type ?? "table",
     config: await stampFieldIds(ctx, baseId, normalizeViewConfig(viewFields.config ?? {})),
     status: "active",
     createdBy: resolveActorId(CURRENT_USER_ID),
@@ -75,12 +81,13 @@ export const mergeViewUpdate = async (ctx: MergeCtx, item: OperationPO, headComm
   const { db, timestamp } = ctx;
   const targetView = item.targetViewId ? ctx.targetViewsById.get(item.targetViewId) : undefined;
   if (!targetView) {
-    throw new Error(`Target view not found: ${item.targetViewId}`);
+    throw targetViewNotFound(item.targetViewId);
   }
   const viewFields = headCommit.fields as {
     config?: ViewConfigVO;
     description?: string;
     name?: string;
+    type?: ViewType;
   };
   await db
     .update(busabaseViews)
@@ -92,6 +99,7 @@ export const mergeViewUpdate = async (ctx: MergeCtx, item: OperationPO, headComm
       ),
       description: viewFields.description ?? targetView.description,
       name: viewFields.name ?? targetView.name,
+      type: viewFields.type ?? targetView.type,
       updatedAt: timestamp,
     })
     .where(eq(busabaseViews.id, targetView.id));
@@ -106,7 +114,7 @@ export const mergeViewDelete = async (ctx: MergeCtx, item: OperationPO, _headCom
   const { db, timestamp } = ctx;
   const targetView = item.targetViewId ? ctx.targetViewsById.get(item.targetViewId) : undefined;
   if (!targetView) {
-    throw new Error(`Target view not found: ${item.targetViewId}`);
+    throw targetViewNotFound(item.targetViewId);
   }
   await db
     .update(busabaseViews)
@@ -123,7 +131,7 @@ export const mergeViewRestore = async (ctx: MergeCtx, item: OperationPO, _headCo
   const { db, timestamp } = ctx;
   const targetView = item.targetViewId ? ctx.targetViewsById.get(item.targetViewId) : undefined;
   if (!targetView) {
-    throw new Error(`Target view not found: ${item.targetViewId}`);
+    throw targetViewNotFound(item.targetViewId);
   }
   if (targetView.status !== "archived") {
     throw new ORPCError("CONFLICT", { message: "Cannot restore a view that is not archived" });

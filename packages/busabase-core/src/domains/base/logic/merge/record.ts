@@ -1,5 +1,6 @@
 import "server-only";
 
+import { ORPCError } from "@orpc/server";
 import { and, eq, isNull, max } from "drizzle-orm";
 import { getContextSpaceId, resolveActorId } from "../../../../context";
 import type { BaseFieldPO, CommitPO, OperationPO } from "../../../../db/schema";
@@ -32,7 +33,6 @@ const assertMergedFieldsValid = async (
   const defs = await loadBaseFieldDefs(ctx.db, baseId);
   const errors = validateRecordFields(fields, defs);
   if (errors.length > 0) {
-    const { ORPCError } = await import("@orpc/server");
     const first = errors[0];
     throw new ORPCError("BAD_REQUEST", {
       message: `required field missing after schema change: ${first.slug}`,
@@ -40,6 +40,14 @@ const assertMergedFieldsValid = async (
     });
   }
 };
+
+/** The record this already-approved operation targets is gone by merge time
+ *  (e.g. purged after the CR was created but before it was reviewed) — a
+ *  legitimate race reachable through normal usage, not an internal invariant
+ *  violation. The primary gate for this is prevalidateMergeableOperations in
+ *  cr-lifecycle.ts; this is a defensive re-check in the same spirit. */
+const targetRecordNotFound = (recordId: string | null) =>
+  new ORPCError("NOT_FOUND", { message: `Target record not found: ${recordId}` });
 
 export const loadBaseFieldDefs = (db: MergeCtx["db"], baseId: string): Promise<BaseFieldPO[]> =>
   db.select().from(busabaseBaseFields).where(eq(busabaseBaseFields.baseId, baseId));
@@ -82,9 +90,20 @@ export const applyComputedRecordFields = async (
     existing: args.existing,
     nextAutoNumber: (def) => autoNumbers.get(def.slug) ?? 1,
   });
-  const userFields = { ...args.fields };
-  for (const def of defs) {
-    if (isSystemFieldType(def.type)) delete userFields[def.slug];
+  // Keep only values for slugs the base actually defines — this is what makes
+  // field-rules.ts's documented "unknown field slugs are ignored (dropped)"
+  // contract true for the record content itself, not just the search-index
+  // projection (projectCommitFields already filters unknown slugs there; this
+  // mirrors that here so a client-supplied ghost field never survives into the
+  // merged commit/record). System-computed fields are always server-owned, so
+  // any client-submitted value for them is discarded too — `overrides` below
+  // supplies the real value.
+  const defsBySlug = new Map(defs.map((def) => [def.slug, def]));
+  const userFields: Record<string, unknown> = {};
+  for (const [slug, value] of Object.entries(args.fields)) {
+    const def = defsBySlug.get(slug);
+    if (!def || isSystemFieldType(def.type)) continue;
+    userFields[slug] = value;
   }
   return { ...userFields, ...overrides };
 };
@@ -137,7 +156,7 @@ export const mergeRecordUpdate = async (ctx: MergeCtx, item: OperationPO, headCo
     ? ctx.targetRecordsById.get(item.targetRecordId)
     : undefined;
   if (!targetRecord) {
-    throw new Error(`Target record not found: ${item.targetRecordId}`);
+    throw targetRecordNotFound(item.targetRecordId);
   }
 
   const resolvedFields = ctx.resolvedRecordFields.get(item.id);
@@ -147,10 +166,22 @@ export const mergeRecordUpdate = async (ctx: MergeCtx, item: OperationPO, headCo
     .from(busabaseCommits)
     .where(eq(busabaseCommits.id, targetRecord.headCommitId))
     .limit(1);
+  // When no concurrent edit was detected, `resolvedFields` is unset — the 3-way
+  // merge branch in cr-lifecycle.ts only runs when the record moved since this
+  // operation's base commit. But `headCommit.fields` here is just THIS
+  // operation's submitted delta: createUpdateChangeRequest / reviseOperation
+  // store only whatever fields the caller actually sent, so an omitted key
+  // means "leave it alone", not "clear it" (an explicit `null` still clears —
+  // both are own keys on the delta object, `undefined` never is). Carry the
+  // record's current full field set forward and let the delta's keys override
+  // on top of it, mirroring exactly what threeWayMergeFields already does when
+  // it DOES run. Without this, projectCommitFields' full REPLACE of the
+  // record's field-value rows (below) used only the delta, silently deleting
+  // every field the caller didn't resubmit.
   const fields = await applyComputedRecordFields(ctx, {
     baseId,
     mode: "update",
-    fields: resolvedFields ?? headCommit.fields,
+    fields: resolvedFields ?? { ...(currentCommit?.fields ?? {}), ...headCommit.fields },
     existing: currentCommit?.fields ?? undefined,
   });
   await assertMergedFieldsValid(ctx, baseId, fields);
@@ -204,7 +235,7 @@ export const mergeRecordDelete = async (
     ? ctx.targetRecordsById.get(item.targetRecordId)
     : undefined;
   if (!targetRecord) {
-    throw new Error(`Target record not found: ${item.targetRecordId}`);
+    throw targetRecordNotFound(item.targetRecordId);
   }
   await db
     .update(busabaseRecords)
@@ -239,7 +270,7 @@ export const mergeRecordRestore = async (
     ? ctx.targetRecordsById.get(item.targetRecordId)
     : undefined;
   if (!targetRecord) {
-    throw new Error(`Target record not found: ${item.targetRecordId}`);
+    throw targetRecordNotFound(item.targetRecordId);
   }
   await db
     .update(busabaseRecords)

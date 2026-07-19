@@ -1229,7 +1229,7 @@ describe("busabase-cli commands", () => {
     }
   });
 
-  it("prints response bodies for server-side failures", async () => {
+  it("prints the real server error message for a server-side failure, not the raw JSON blob", async () => {
     const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
     global.fetch = vi.fn(
       async () => new Response('{"error":"storage missing"}', { status: 500 }),
@@ -1238,7 +1238,10 @@ describe("busabase-cli commands", () => {
     const exitCode = await runCli(["--base-url", "http://localhost:15419", "records", "list"]);
 
     expect(exitCode).toBe(1);
-    expect(error.mock.calls.join("\n")).toContain('HTTP 500 : {"error":"storage missing"}');
+    // `records list` goes through rawFetch (outside the typed contract) — its
+    // `formatRawErrorBody` now extracts the server's `error` field instead of
+    // dumping the raw `{"error":"..."}` JSON verbatim.
+    expect(error.mock.calls.join("\n")).toContain("HTTP 500 : storage missing");
   });
 
   // ── Drive Grep Retrieval: assets put-text / grep / read-lines ────────────────

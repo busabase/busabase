@@ -72,6 +72,7 @@ import {
 } from "./kernel";
 import { publishBusabaseLiveEvent } from "./live-events";
 import { getMaterializer, type MaterializeArgs, type NodeCreateFields } from "./materialize";
+import { assertNodePermission, initializeNodeAcl, recomputeSpaceNodeAcl } from "./node-acl";
 import { assertContainerParent } from "./node-parent";
 import { loadNodesByIds } from "./nodes";
 import { ensureReady, loadBasesByIds } from "./seed";
@@ -105,8 +106,49 @@ const changeRequestNotFound = (changeRequestId: string) =>
     message: `ChangeRequest not found: ${changeRequestId}`,
   });
 
+/** Caller-supplied operationId doesn't resolve — a genuine "not found" client error. */
+const operationNotFound = (operationId: string) =>
+  new ORPCError("NOT_FOUND", { message: `Operation not found: ${operationId}` });
+
+/** The record an already-approved operation targets is gone by merge time (e.g.
+ *  purged after the CR was created but before it was reviewed) — a legitimate
+ *  race reachable through normal usage, not an internal invariant violation. */
+const targetRecordNotFound = (recordId: string) =>
+  new ORPCError("NOT_FOUND", { message: `Target record not found: ${recordId}` });
+
+/** Same race as {@link targetRecordNotFound}, for a view target. */
+const targetViewNotFound = (viewId: string) =>
+  new ORPCError("NOT_FOUND", { message: `Target view not found: ${viewId}` });
+
+/** The node an already-approved node-CR operation targets is gone by merge time
+ *  (purged after the CR was created but before merge) — same reachable-race
+ *  reasoning as {@link targetRecordNotFound}. */
+const mergeTargetNodeNotFound = (nodeId: string) =>
+  new ORPCError("NOT_FOUND", { message: `Node not found: ${nodeId}` });
+
 const changeRequestConflict = (message: string, data?: Record<string, unknown>) =>
   new ORPCError("CONFLICT", { message, ...(data ? { data } : {}) });
+
+// Marks an ORPCError as a genuine *record content* merge conflict — i.e. the
+// target record's fields diverged from what this ChangeRequest's operation was
+// based on, and the 3-way merge could not reconcile them automatically. This is
+// the ONLY kind of CONFLICT error that should cause mergeChangeRequest() to
+// persist status="conflict" + a mergeSummary.conflict diff onto the CR (see the
+// try/catch around _mergeChangeRequest below), because it's the only case with
+// an actual escape hatch (reviseOperation / close). Every other CONFLICT thrown
+// inside _mergeChangeRequest is a plain precondition guard (not approved yet,
+// already merged, base archived, record already archived, …) and must NOT
+// mutate the CR — guard clauses are read-only checks, not side effects.
+const isRecordMergeFieldConflict = Symbol("isRecordMergeFieldConflict");
+type MergeConflictTag = Record<typeof isRecordMergeFieldConflict, true | undefined>;
+const recordMergeFieldConflict = (
+  message: string,
+  data: { recordId: string; conflicts: string[] },
+) => {
+  const error = new ORPCError("CONFLICT", { message, data });
+  (error as unknown as MergeConflictTag)[isRecordMergeFieldConflict] = true;
+  return error;
+};
 
 const changeRequestBadRequest = (message: string, data?: Record<string, unknown>) =>
   new ORPCError("BAD_REQUEST", { message, ...(data ? { data } : {}) });
@@ -243,6 +285,9 @@ const mergeNodeCreate = async (ctx: MergeCtx, item: OperationPO, headCommit: Com
   }
   const materialize = getMaterializer(fields.nodeType) ?? materializeGenericNode;
   const nodeId = await materialize(ctx, { parentNode, fields });
+  // Materialize this node's ACL state: inherited effectiveVisibility +
+  // inherited principal rows + creator (= CR submitter, ctx.actorId) grant.
+  await initializeNodeAcl(db, getContextSpaceId(), nodeId, parentNode.id, ctx.actorId);
   // Publish this node's temp ref so later operations in the CR can parent to it.
   if (fields.ref) {
     ctx.nodeRefs.set(fields.ref, nodeId);
@@ -383,6 +428,12 @@ const mergeNodeMove = async (
         .where(eq(busabaseNodes.id, id)),
     ),
   );
+  // Re-parenting changes the whole subtree's inherited visibility/grants —
+  // re-materialize the space's ACL state (cheap: spaces are small, and this
+  // runs inside the merge transaction so it stays atomic with the move).
+  if (parentNode.id !== node.parentId) {
+    await recomputeSpaceNodeAcl(ctx.db, getContextSpaceId());
+  }
 };
 
 const mergeNodeDelete = async (ctx: MergeCtx, _item: OperationPO, node: NodePO) => {
@@ -1083,7 +1134,7 @@ export const reviseOperation = async (
     .where(eq(busabaseOperations.id, operationId))
     .limit(1);
   if (!operation) {
-    throw new Error(`Operation not found: ${operationId}`);
+    throw operationNotFound(operationId);
   }
 
   const [changeRequest] = await db
@@ -1189,10 +1240,19 @@ export const reviewChangeRequest = async (
   if (!changeRequest) {
     throw changeRequestNotFound(changeRequestId);
   }
-  // Idempotent for already-merged CRs: structural CRs auto-merge on create, so a
-  // caller still following the old create→review→merge flow (e.g. the CLI/skills)
-  // must not error here — return the merged CR unchanged.
+  // Idempotent ONLY for a re-affirming "approved" on an already-merged CR:
+  // structural CRs auto-merge on create, so a caller still following the old
+  // create→review→merge flow (e.g. the CLI/skills) must not error on that
+  // harmless repeat. "rejected" is a different story — the merge already
+  // happened and nothing about it is reversible via review, so silently
+  // no-op'ing it the same way would tell the caller their rejection "worked"
+  // when it did nothing at all. Surface that explicitly instead.
   if (changeRequest.status === "merged") {
+    if (parsed.verdict !== "approved") {
+      throw changeRequestConflict(
+        "Cannot reject: this ChangeRequest has already been merged and cannot be reversed via review. Use a delete/restore ChangeRequest to undo merged changes instead.",
+      );
+    }
     const already = await getChangeRequest(changeRequest.id);
     if (!already) {
       throw new Error("Failed to load merged changeRequest");
@@ -1561,6 +1621,9 @@ export const recordPendingNodeCreate = async (args: {
   await ensureReady();
   const db = await getDb();
   const submittedBy = resolveActorId(args.submittedBy);
+  // ChangeRequest-submission gate (node ACL): proposing a create inside a
+  // parent requires `changeRequest` level on that parent.
+  await assertNodePermission(args.parentNodeId, "changeRequest", submittedBy);
   const changeRequestId = id("crq");
   const operationId = id("opr");
   const commitId = id("cmt");
@@ -1764,9 +1827,18 @@ export const mergeChangeRequest = async (changeRequestId: string) => {
   try {
     return await _mergeChangeRequest(changeRequestId);
   } catch (err) {
-    if (err instanceof ORPCError && err.code === "CONFLICT") {
+    if (
+      err instanceof ORPCError &&
+      err.code === "CONFLICT" &&
+      (err as unknown as MergeConflictTag)[isRecordMergeFieldConflict]
+    ) {
       // Mark the CR as conflicted so callers can inspect it, and persist the
       // conflicting field list into mergeSummary so the UI can render a diff.
+      // Only genuine record-content merge conflicts (recordMergeFieldConflict
+      // above) reach here — precondition guards inside _mergeChangeRequest
+      // (not approved yet, already merged, base archived, …) also throw
+      // ORPCError("CONFLICT", …) but must propagate as plain errors without
+      // mutating the CR's status/mergeSummary.
       // Best-effort: if the update fails (e.g. enum not yet migrated), still re-throw original.
       try {
         const db = await getDb();
@@ -1860,6 +1932,31 @@ const _mergeChangeRequest = async (changeRequestId: string) => {
     // file writes are not transactional but are idempotently re-synced on retry.)
     const mergedNodeIds: string[] = [];
     await db.transaction(async (tx) => {
+      // DB-level TOCTOU guard: atomically claim this CR for merging by flipping
+      // approved -> merged right here, before any operation runs. Two concurrent
+      // mergeChangeRequest() calls both pass the stale read-only check above, but
+      // only one of these guarded UPDATEs can match "status = approved" — the
+      // loser sees 0 rows affected and throws instead of re-running every
+      // operation (which would otherwise double-create nodes/records). Because
+      // this happens inside the same transaction as the operations loop below,
+      // throwing here rolls back the whole transaction, so a losing writer can
+      // never persist partial work.
+      const [claimed] = await tx
+        .update(busabaseChangeRequests)
+        .set({ status: "merged", mergedAt: timestamp, updatedAt: timestamp })
+        .where(
+          and(
+            eq(busabaseChangeRequests.id, changeRequest.id),
+            eq(busabaseChangeRequests.status, "approved"),
+          ),
+        )
+        .returning();
+      if (!claimed) {
+        throw changeRequestConflict(
+          "This change request is already being merged or was already processed.",
+        );
+      }
+
       const ctx: MergeCtx = {
         db: tx as unknown as MergeCtx["db"],
         timestamp,
@@ -1894,7 +1991,7 @@ const _mergeChangeRequest = async (changeRequestId: string) => {
           .where(eq(busabaseNodes.id, item.nodeId))
           .limit(1);
         if (!node) {
-          throw new Error(`Node not found: ${item.nodeId}`);
+          throw mergeTargetNodeNotFound(item.nodeId);
         }
 
         if (item.operation === "node_rename") {
@@ -1922,12 +2019,12 @@ const _mergeChangeRequest = async (changeRequestId: string) => {
         ctx.mergedNodeIds.push(item.nodeId);
       }
 
+      // status/mergedAt were already flipped by the guarded claim UPDATE above;
+      // this just fills in the mergeSummary once the loop knows the final ids.
       await tx
         .update(busabaseChangeRequests)
         .set({
-          status: "merged",
           mergeSummary: { mergedNodeIds: [...new Set(ctx.mergedNodeIds)] },
-          mergedAt: timestamp,
           updatedAt: timestamp,
         })
         .where(eq(busabaseChangeRequests.id, changeRequest.id));
@@ -2049,7 +2146,7 @@ const _mergeChangeRequest = async (changeRequestId: string) => {
 
       const targetView = targetViewsById.get(item.targetViewId);
       if (!targetView || targetView.status !== "active") {
-        throw new Error(`Target view not found: ${item.targetViewId}`);
+        throw targetViewNotFound(item.targetViewId);
       }
       continue;
     }
@@ -2060,7 +2157,7 @@ const _mergeChangeRequest = async (changeRequestId: string) => {
 
     const targetRecord = targetRecordsById.get(item.targetRecordId);
     if (!targetRecord) {
-      throw new Error(`Target record not found: ${item.targetRecordId}`);
+      throw targetRecordNotFound(item.targetRecordId);
     }
 
     // Guard record ops against the target's lifecycle state (mirrors the
@@ -2104,12 +2201,12 @@ const _mergeChangeRequest = async (changeRequestId: string) => {
         proposed.fields,
       );
       if (conflicts.length > 0) {
-        throw new ORPCError("CONFLICT", {
-          message: `Cannot merge — the record changed since this change request. Conflicting field${
+        throw recordMergeFieldConflict(
+          `Cannot merge — the record changed since this change request. Conflicting field${
             conflicts.length === 1 ? "" : "s"
           }: ${conflicts.map((field) => `"${field}"`).join(", ")}. Revise the change request to resolve.`,
-          data: { recordId: item.targetRecordId, conflicts },
-        });
+          { recordId: item.targetRecordId, conflicts },
+        );
       }
       resolvedRecordFields.set(item.id, merged);
     }
@@ -2130,6 +2227,31 @@ const _mergeChangeRequest = async (changeRequestId: string) => {
   // for genuinely new records, not every record merely touched by the CR.
   const newlyCreatedRecordIds: string[] = [];
   await db.transaction(async (tx) => {
+    // DB-level TOCTOU guard: atomically claim this CR for merging by flipping
+    // approved -> merged right here, before any operation runs. Two concurrent
+    // mergeChangeRequest() calls both pass the stale read-only check above, but
+    // only one of these guarded UPDATEs can match "status = approved" — the
+    // loser sees 0 rows affected and throws instead of re-running every
+    // operation (which would otherwise double-create records/views). Because
+    // this happens inside the same transaction as the operations loop below,
+    // throwing here rolls back the whole transaction, so a losing writer can
+    // never persist partial work.
+    const [claimed] = await tx
+      .update(busabaseChangeRequests)
+      .set({ status: "merged", mergedAt: timestamp, updatedAt: timestamp })
+      .where(
+        and(
+          eq(busabaseChangeRequests.id, changeRequest.id),
+          eq(busabaseChangeRequests.status, "approved"),
+        ),
+      )
+      .returning();
+    if (!claimed) {
+      throw changeRequestConflict(
+        "This change request is already being merged or was already processed.",
+      );
+    }
+
     const ctx: MergeCtx = {
       db: tx as unknown as MergeCtx["db"],
       timestamp,
@@ -2207,11 +2329,11 @@ const _mergeChangeRequest = async (changeRequestId: string) => {
       }
     }
 
+    // status/mergedAt were already flipped by the guarded claim UPDATE above;
+    // this just fills in the mergeSummary once the loop knows the final ids.
     await tx
       .update(busabaseChangeRequests)
       .set({
-        status: "merged",
-        mergedAt: timestamp,
         mergeSummary: {
           operationCount: operationKinds.length,
           recordIds: ctx.mergedRecordIds,

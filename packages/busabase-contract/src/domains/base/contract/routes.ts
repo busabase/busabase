@@ -146,10 +146,16 @@ export const baseContract = {
       path: "/bases/{baseId}/change-requests",
       tags: ["Bases", "Change Requests"],
       summary: "Create Change Request in Base",
-      successDescription: "Created change request for review.",
+      successDescription:
+        "Review-first by default: a pending ChangeRequest proposing the record (`materialized: false`). Returns the materialized record instead (`materialized: true`) when `autoMerge: true` is passed.",
     })
     .input(createChangeRequestInputSchema.extend({ baseId: z.string() }))
-    .output(changeRequestSchema),
+    .output(
+      z.union([
+        recordSchema.extend({ materialized: z.literal(true) }),
+        changeRequestSchema.extend({ materialized: z.literal(false) }),
+      ]),
+    ),
   createBulkChangeRequest: oc
     .route({
       method: "POST",

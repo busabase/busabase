@@ -9,4 +9,4 @@ export const dynamic = "force-dynamic";
  *
  * Thin wrapper over openlib `createDevUploadRoute` (shared across apps).
  */
-export const { POST } = createDevUploadRoute();
+export const { POST, PUT } = createDevUploadRoute();

@@ -5,6 +5,8 @@ import { directoryListingZhCnScenario } from "./directory-listing.zh-cn";
 import { expandZhCnScenario } from "./expand.zh-cn";
 import { financeInvoiceZhCnScenario } from "./finance-invoice.zh-cn";
 import { zhCnNodeTypesScenario } from "./node-types.zh-cn";
+import { agentGalleryZhCnScenario } from "./product-gallery.zh-cn";
+import { roadmapZhCnScenario } from "./product-roadmap.zh-cn";
 import { readmeScenariosZhCnScenario } from "./readme-scenarios.zh-cn";
 
 const mergeScenarios = (...scenarios: SeedScenario[]): SeedScenario => ({
@@ -25,5 +27,7 @@ export const zhCnScenario: SeedScenario = mergeScenarios(
   expandZhCnScenario,
   directoryListingZhCnScenario,
   agentIntegrationsZhCnScenario,
+  agentGalleryZhCnScenario,
+  roadmapZhCnScenario,
   zhCnNodeTypesScenario,
 );

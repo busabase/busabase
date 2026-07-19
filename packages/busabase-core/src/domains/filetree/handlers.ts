@@ -28,6 +28,11 @@ import {
 import { CURRENT_USER_ID, hashBuffer, id, now, rootNodeIdForSpace } from "../../logic/kernel";
 import { publishChangeRequestPendingReview } from "../../logic/live-events";
 import type { MaterializeArgs } from "../../logic/materialize";
+import {
+  assertNodePermission,
+  buildNodeVisibilityCondition,
+  initializeNodeAcl,
+} from "../../logic/node-acl";
 import { assertContainerParent } from "../../logic/node-parent";
 import { ensureReady } from "../../logic/seed";
 import {
@@ -88,6 +93,15 @@ interface StoredFileInput {
 }
 
 const labelLower = (config: FileTreeKindConfig) => config.label.toLowerCase();
+
+/** Caller-supplied nodeIdOrSlug doesn't resolve to a filetree node (Skill/Drive/etc.)
+ *  — a genuine "not found" client error. */
+const fileTreeNodeNotFound = (config: FileTreeKindConfig, nodeIdOrSlug: string) =>
+  new ORPCError("NOT_FOUND", { message: `${config.label} not found: ${nodeIdOrSlug}` });
+
+/** Caller-supplied path doesn't resolve to a file within an existing filetree node. */
+const fileTreeFileNotFound = (config: FileTreeKindConfig, path: string) =>
+  new ORPCError("NOT_FOUND", { message: `${config.label} file not found: ${path}` });
 
 const labelForType = (type: string) => `${type.slice(0, 1).toUpperCase()}${type.slice(1)}`;
 
@@ -546,6 +560,14 @@ export const createFileTreeNode = async (
     updatedAt: createdAt,
   });
 
+  await initializeNodeAcl(
+    db,
+    getContextSpaceId(),
+    nodeId,
+    parentNode.id,
+    resolveActorId(CURRENT_USER_ID),
+  );
+
   const [node] = await db.select().from(busabaseNodes).where(eq(busabaseNodes.id, nodeId)).limit(1);
   if (!node) {
     throw new Error(`Failed to create ${labelLower(config)} node`);
@@ -590,7 +612,7 @@ export const getFileTreeNode = async (
   await ensureReady();
   const node = await getStorageFileTreeNode(config.type, nodeIdOrSlug);
   if (!node) {
-    throw new Error(`${config.label} not found: ${nodeIdOrSlug}`);
+    throw fileTreeNodeNotFound(config, nodeIdOrSlug);
   }
   const nodeMap = await loadNodesByIds([node.id]);
   const nodeVO = nodeMap.get(node.id) ?? toNodeVO(node, null);
@@ -615,6 +637,7 @@ export const listFileTreeNodes = async (config: FileTreeKindConfig) => {
         eq(busabaseNodes.spaceId, getContextSpaceId()),
         eq(busabaseNodes.type, config.type),
         isNull(busabaseNodes.archivedAt),
+        buildNodeVisibilityCondition(db),
       ),
     )
     .orderBy(asc(busabaseNodes.position), asc(busabaseNodes.createdAt));
@@ -625,7 +648,7 @@ export const listFileTreeFiles = async (config: FileTreeKindConfig, nodeIdOrSlug
   await ensureReady();
   const node = await getStorageFileTreeNode(config.type, nodeIdOrSlug);
   if (!node) {
-    throw new Error(`${config.label} not found: ${nodeIdOrSlug}`);
+    throw fileTreeNodeNotFound(config, nodeIdOrSlug);
   }
   return listAssetUsageFiles(node);
 };
@@ -639,7 +662,7 @@ export const readFileTreeFile = async (
   const db = await getDb();
   const node = await getStorageFileTreeNode(config.type, nodeIdOrSlug);
   if (!node) {
-    throw new Error(`${config.label} not found: ${nodeIdOrSlug}`);
+    throw fileTreeNodeNotFound(config, nodeIdOrSlug);
   }
   const path = normalizeUsagePath(filePath);
   const [row] = await db
@@ -666,7 +689,7 @@ export const readFileTreeFile = async (
     )
     .limit(1);
   if (!row) {
-    throw new Error(`${config.label} file not found: ${path}`);
+    throw fileTreeFileNotFound(config, path);
   }
 
   const isText = row.contentKind === "text";
@@ -696,8 +719,11 @@ export const createFileTreeChangeRequest = async (
   const db = await getDb();
   const node = await getStorageFileTreeNode(config.type, nodeIdOrSlug);
   if (!node) {
-    throw new Error(`${config.label} not found: ${nodeIdOrSlug}`);
+    throw fileTreeNodeNotFound(config, nodeIdOrSlug);
   }
+  // ChangeRequest-submission gate (node ACL): visibility alone isn't enough
+  // to propose file edits — requires `changeRequest` level on this node.
+  await assertNodePermission(node.id, "changeRequest");
   const parsed = createFileTreeChangeRequestInputSchema.parse(input);
 
   // Upload safety — same three layers as createFileTreeNode (see

@@ -2,22 +2,31 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import type {
   BaseFieldVO,
   BaseVO,
+  GalleryCardSize,
+  GalleryCoverFit,
+  GanttScale,
   RecordVO,
   ViewConfigVO,
   ViewFilterVO,
+  ViewType,
   ViewVO,
 } from "busabase-contract/types";
 import { Skeleton } from "kui/skeleton";
 import {
+  CalendarDays,
   Check,
   ChevronRight,
+  Columns3,
   ExternalLink,
+  GanttChart,
+  LayoutGrid,
   MoreHorizontal,
   Paperclip,
   PenLine,
   PlaySquare,
   Plus,
   RotateCcw,
+  Table2,
   Trash2,
   X,
 } from "lucide-react";
@@ -39,9 +48,31 @@ import {
 import { fieldValueToString, shortIdentifier } from "../helpers/format";
 import { mergeSearchIntoHref, useHrefWithCurrentSearch } from "../helpers/link-search";
 import type { RecordsPagination, ViewFormPayload, ViewSubmitOptions } from "../helpers/view-types";
+import { BusaBaseCalendar } from "./base-calendar";
+import { BusaBaseGallery } from "./base-gallery";
+import { BusaBaseGantt } from "./base-gantt";
+import { BusaBaseKanban } from "./base-kanban";
 import { CodeLikeFieldPreview, FieldBadge } from "./field-preview";
 import { ConfirmActionDialog } from "./primitives";
 import { SplitSubmitButton } from "./split-submit-button";
+
+// Per-view-type tab glyph (kept in one place so tabs and the type picker agree).
+function ViewTypeIcon({ type }: { type: ViewType }) {
+  const className = "shrink-0 opacity-70";
+  if (type === "gallery") {
+    return <LayoutGrid className={className} size={12} />;
+  }
+  if (type === "kanban") {
+    return <Columns3 className={className} size={12} />;
+  }
+  if (type === "calendar") {
+    return <CalendarDays className={className} size={12} />;
+  }
+  if (type === "gantt") {
+    return <GanttChart className={className} size={12} />;
+  }
+  return <Table2 className={className} size={12} />;
+}
 
 const getRecordTableColumnWidth = (field: BaseFieldVO, index: number) => {
   if (index === 0) {
@@ -244,6 +275,8 @@ export function BusaBaseTable({
   onDeleteView,
   onRestoreView,
   onRestoreRecord,
+  onMoveRecord,
+  onPatchRecord,
   onUpdateView,
   records,
   relationRecords = records,
@@ -263,6 +296,10 @@ export function BusaBaseTable({
   onDeleteView: (view: ViewVO) => Promise<void>;
   onRestoreView?: (view: ViewVO) => Promise<void>;
   onRestoreRecord?: (record: RecordVO) => Promise<void>;
+  /** Kanban drag-to-move: set one field on a record and auto-merge, no navigation. */
+  onMoveRecord?: (record: RecordVO, fieldSlug: string, value: string | null) => Promise<void>;
+  /** Gantt drag-to-reschedule: patch several fields at once and auto-merge, no navigation. */
+  onPatchRecord?: (record: RecordVO, patch: Record<string, unknown>) => Promise<void>;
   onUpdateView: (
     view: ViewVO,
     payload: ViewFormPayload,
@@ -351,6 +388,7 @@ export function BusaBaseTable({
                 href={mergeSearchIntoHref(`/base/${base?.slug ?? ""}/${view.slug}`, currentSearch)}
                 key={view.id}
               >
+                <ViewTypeIcon type={view.type} />
                 {view.name}
               </Link>
             );
@@ -513,132 +551,162 @@ export function BusaBaseTable({
           </div>
         </details>
       ) : null}
-      <div className="overflow-x-auto pb-5">
-        <div className="w-max min-w-full">
-          <div
-            className="grid items-center gap-3 border-border/50 border-b px-2 py-2 text-muted-foreground text-xs"
-            style={{ gridTemplateColumns: columnTemplate }}
-          >
-            {fields.map((field, index) => (
-              <div
-                className={`truncate ${index === 0 ? baseTableHeaderStickyClassName : ""}`}
-                key={field.id}
-                title={field.slug}
-              >
-                {resolveIString(field.name)}
-              </div>
-            ))}
-            <div>{messages.base.recordStatus}</div>
-            <div>{messages.base.commit}</div>
-          </div>
-          {pagination?.isLoading ? (
-            <BusaBaseTableRowsSkeleton columnTemplate={columnTemplate} />
-          ) : records.length === 0 ? (
-            <div className="px-2 py-6 text-muted-foreground text-sm">
-              {messages.base.emptyRecords}
-            </div>
-          ) : shouldVirtualize ? (
+      {activeView?.type === "gallery" ? (
+        <BusaBaseGallery
+          activeView={activeView}
+          archivedRecords={archivedRecords}
+          base={base}
+          fields={fields}
+          onRestoreRecord={onRestoreRecord}
+          records={records}
+          showArchivedRecords={showArchivedRecords}
+        />
+      ) : activeView?.type === "kanban" ? (
+        <BusaBaseKanban
+          activeView={activeView}
+          base={base}
+          fields={fields}
+          onMoveRecord={onMoveRecord}
+          records={records}
+        />
+      ) : activeView?.type === "calendar" ? (
+        <BusaBaseCalendar activeView={activeView} base={base} fields={fields} records={records} />
+      ) : activeView?.type === "gantt" ? (
+        <BusaBaseGantt
+          activeView={activeView}
+          base={base}
+          fields={fields}
+          onPatchRecord={onPatchRecord}
+          records={records}
+        />
+      ) : (
+        <div className="overflow-x-auto pb-5">
+          <div className="w-max min-w-full">
             <div
-              ref={listRef}
-              className="relative"
-              style={{ height: rowVirtualizer.getTotalSize() }}
+              className="grid items-center gap-3 border-border/50 border-b px-2 py-2 text-muted-foreground text-xs"
+              style={{ gridTemplateColumns: columnTemplate }}
             >
-              {rowVirtualizer.getVirtualItems().map((virtualRow) => {
-                const record = records[virtualRow.index];
-                return (
-                  <BusaBaseRecordRow
-                    baseSlug={base?.slug}
-                    columnTemplate={columnTemplate}
-                    fields={fields}
-                    key={record.id}
-                    record={record}
-                    relationRecords={relationRecords}
-                    style={{
-                      position: "absolute",
-                      top: 0,
-                      left: 0,
-                      width: "100%",
-                      transform: `translateY(${virtualRow.start - rowVirtualizer.options.scrollMargin}px)`,
-                    }}
-                  />
-                );
-              })}
-            </div>
-          ) : (
-            records.map((record) => (
-              <BusaBaseRecordRow
-                baseSlug={base?.slug}
-                columnTemplate={columnTemplate}
-                fields={fields}
-                key={record.id}
-                record={record}
-                relationRecords={relationRecords}
-              />
-            ))
-          )}
-          {showArchivedRecords && archivedRecords.length > 0
-            ? archivedRecords.map((record) => (
+              {fields.map((field, index) => (
                 <div
-                  className="group grid min-h-12 items-center gap-3 rounded-md border-border/40 border-b bg-muted/10 px-2 py-1.5 text-sm opacity-60 transition-colors hover:opacity-100"
-                  key={record.id}
-                  style={{ gridTemplateColumns: columnTemplate }}
+                  className={`truncate ${index === 0 ? baseTableHeaderStickyClassName : ""}`}
+                  key={field.id}
+                  title={field.slug}
                 >
-                  {fields.map((field, index) => (
-                    <RecordTableCell
-                      currentRecordHref={mergeSearchIntoHref(
-                        `/base/${base?.slug ?? record.base.slug}/${record.id}`,
-                        currentSearch,
-                      )}
-                      field={field}
-                      index={index}
-                      key={field.id}
-                      record={record}
-                      records={relationRecords}
-                    />
-                  ))}
-                  <div className="min-w-0">
-                    <span className="inline-flex max-w-full items-center gap-1.5 truncate rounded-full bg-muted/55 px-2 py-0.5 text-muted-foreground text-xs">
-                      <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-current opacity-55" />
-                      {messages.common.archived}
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-1.5">
-                    {onRestoreRecord ? (
-                      <button
-                        className="inline-flex items-center gap-1 rounded border border-border/60 bg-background px-2 py-0.5 text-xs transition-colors hover:bg-accent disabled:opacity-50"
-                        disabled={restoringRecordId === record.id}
-                        onClick={() => {
-                          setRestoringRecordId(record.id);
-                          onRestoreRecord(record).finally(() => setRestoringRecordId(null));
-                        }}
-                        type="button"
-                      >
-                        <RotateCcw className="size-3" />
-                        {restoringRecordId === record.id
-                          ? messages.common.restoring
-                          : messages.common.restore}
-                      </button>
-                    ) : null}
-                  </div>
+                  {resolveIString(field.name)}
                 </div>
-              ))
-            : null}
-          {showArchivedRecords && archivedPagination?.hasMore ? (
-            <div className="flex items-center justify-center pt-2">
-              <button
-                className="inline-flex h-8 items-center rounded-md border border-border/70 px-3 font-medium text-muted-foreground text-xs transition-colors hover:bg-accent hover:text-foreground disabled:opacity-60"
-                disabled={archivedPagination.isLoadingMore}
-                onClick={() => archivedPagination.loadMore()}
-                type="button"
-              >
-                {archivedPagination.isLoadingMore
-                  ? messages.common.loading
-                  : messages.search.loadMore}
-              </button>
+              ))}
+              <div>{messages.base.recordStatus}</div>
+              <div>{messages.base.commit}</div>
             </div>
-          ) : null}
+            {pagination?.isLoading ? (
+              <BusaBaseTableRowsSkeleton columnTemplate={columnTemplate} />
+            ) : records.length === 0 ? (
+              <div className="px-2 py-6 text-muted-foreground text-sm">
+                {messages.base.emptyRecords}
+              </div>
+            ) : shouldVirtualize ? (
+              <div
+                ref={listRef}
+                className="relative"
+                style={{ height: rowVirtualizer.getTotalSize() }}
+              >
+                {rowVirtualizer.getVirtualItems().map((virtualRow) => {
+                  const record = records[virtualRow.index];
+                  return (
+                    <BusaBaseRecordRow
+                      baseSlug={base?.slug}
+                      columnTemplate={columnTemplate}
+                      fields={fields}
+                      key={record.id}
+                      record={record}
+                      relationRecords={relationRecords}
+                      style={{
+                        position: "absolute",
+                        top: 0,
+                        left: 0,
+                        width: "100%",
+                        transform: `translateY(${virtualRow.start - rowVirtualizer.options.scrollMargin}px)`,
+                      }}
+                    />
+                  );
+                })}
+              </div>
+            ) : (
+              records.map((record) => (
+                <BusaBaseRecordRow
+                  baseSlug={base?.slug}
+                  columnTemplate={columnTemplate}
+                  fields={fields}
+                  key={record.id}
+                  record={record}
+                  relationRecords={relationRecords}
+                />
+              ))
+            )}
+            {showArchivedRecords && archivedRecords.length > 0
+              ? archivedRecords.map((record) => (
+                  <div
+                    className="group grid min-h-12 items-center gap-3 rounded-md border-border/40 border-b bg-muted/10 px-2 py-1.5 text-sm opacity-60 transition-colors hover:opacity-100"
+                    key={record.id}
+                    style={{ gridTemplateColumns: columnTemplate }}
+                  >
+                    {fields.map((field, index) => (
+                      <RecordTableCell
+                        currentRecordHref={mergeSearchIntoHref(
+                          `/base/${base?.slug ?? record.base.slug}/${record.id}`,
+                          currentSearch,
+                        )}
+                        field={field}
+                        index={index}
+                        key={field.id}
+                        record={record}
+                        records={relationRecords}
+                      />
+                    ))}
+                    <div className="min-w-0">
+                      <span className="inline-flex max-w-full items-center gap-1.5 truncate rounded-full bg-muted/55 px-2 py-0.5 text-muted-foreground text-xs">
+                        <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-current opacity-55" />
+                        {messages.common.archived}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      {onRestoreRecord ? (
+                        <button
+                          className="inline-flex items-center gap-1 rounded border border-border/60 bg-background px-2 py-0.5 text-xs transition-colors hover:bg-accent disabled:opacity-50"
+                          disabled={restoringRecordId === record.id}
+                          onClick={() => {
+                            setRestoringRecordId(record.id);
+                            onRestoreRecord(record).finally(() => setRestoringRecordId(null));
+                          }}
+                          type="button"
+                        >
+                          <RotateCcw className="size-3" />
+                          {restoringRecordId === record.id
+                            ? messages.common.restoring
+                            : messages.common.restore}
+                        </button>
+                      ) : null}
+                    </div>
+                  </div>
+                ))
+              : null}
+            {showArchivedRecords && archivedPagination?.hasMore ? (
+              <div className="flex items-center justify-center pt-2">
+                <button
+                  className="inline-flex h-8 items-center rounded-md border border-border/70 px-3 font-medium text-muted-foreground text-xs transition-colors hover:bg-accent hover:text-foreground disabled:opacity-60"
+                  disabled={archivedPagination.isLoadingMore}
+                  onClick={() => archivedPagination.loadMore()}
+                  type="button"
+                >
+                  {archivedPagination.isLoadingMore
+                    ? messages.common.loading
+                    : messages.search.loadMore}
+                </button>
+              </div>
+            ) : null}
+          </div>
         </div>
-      </div>
+      )}
       {pagination?.hasMore ? (
         <div className="flex items-center justify-center pt-3">
           <button
@@ -691,10 +759,34 @@ function ViewChangeRequestForm({
     Array.isArray(view?.config.visibleFieldSlugs) && base.fields.length
       ? view.config.visibleFieldSlugs
       : base.fields.map((field) => field.slug);
+  const attachmentFields = base.fields.filter((field) => field.type === "attachment");
+  const selectFields = base.fields.filter((field) => field.type === "select");
+  const dateFields = base.fields.filter(
+    (field) =>
+      field.type === "date" || field.type === "created_time" || field.type === "updated_time",
+  );
   const [name, setName] = useState(view?.name ?? "");
   const [slug, setSlug] = useState(view?.slug ?? "");
   const [description, setDescription] = useState(view?.description ?? "");
   const [visibleFieldSlugs, setVisibleFieldSlugs] = useState(initialVisibleFieldSlugs);
+  const [viewType, setViewType] = useState<ViewType>(view?.type ?? "table");
+  // "" means auto (first attachment field); "__none__" means explicitly no cover.
+  const [coverFieldSlug, setCoverFieldSlug] = useState<string>(
+    view?.config.coverFieldSlug === null ? "__none__" : (view?.config.coverFieldSlug ?? ""),
+  );
+  const [coverFit, setCoverFit] = useState<GalleryCoverFit>(view?.config.coverFit ?? "cover");
+  const [cardSize, setCardSize] = useState<GalleryCardSize>(view?.config.cardSize ?? "medium");
+  const [showFieldLabels, setShowFieldLabels] = useState<boolean>(
+    view?.config.showFieldLabels ?? false,
+  );
+  // "" means auto (first field of the right type).
+  const [stackByFieldSlug, setStackByFieldSlug] = useState<string>(
+    view?.config.stackByFieldSlug ?? "",
+  );
+  const [dateFieldSlug, setDateFieldSlug] = useState<string>(view?.config.dateFieldSlug ?? "");
+  const [startFieldSlug, setStartFieldSlug] = useState<string>(view?.config.startFieldSlug ?? "");
+  const [endFieldSlug, setEndFieldSlug] = useState<string>(view?.config.endFieldSlug ?? "");
+  const [ganttScale, setGanttScale] = useState<GanttScale>(view?.config.ganttScale ?? "month");
   const [isSaving, setIsSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
@@ -725,6 +817,34 @@ function ViewChangeRequestForm({
       filters: view?.config.filters ?? [],
       sorts: view?.config.sorts ?? [],
       ...(visibleFieldSlugs.length === base.fields.length ? {} : { visibleFieldSlugs }),
+      // Gallery presentation config — only meaningful for gallery views.
+      ...(viewType === "gallery"
+        ? {
+            coverFieldSlug:
+              coverFieldSlug === "__none__"
+                ? null
+                : coverFieldSlug === ""
+                  ? undefined
+                  : coverFieldSlug,
+            coverFit,
+            cardSize,
+            showFieldLabels,
+          }
+        : {}),
+      // Kanban / calendar config — "" means auto-pick the first field of the type.
+      ...(viewType === "kanban"
+        ? { stackByFieldSlug: stackByFieldSlug === "" ? undefined : stackByFieldSlug }
+        : {}),
+      ...(viewType === "calendar"
+        ? { dateFieldSlug: dateFieldSlug === "" ? undefined : dateFieldSlug }
+        : {}),
+      ...(viewType === "gantt"
+        ? {
+            startFieldSlug: startFieldSlug === "" ? undefined : startFieldSlug,
+            endFieldSlug: endFieldSlug === "" ? undefined : endFieldSlug,
+            ganttScale,
+          }
+        : {}),
     };
 
     setIsSaving(true);
@@ -738,6 +858,7 @@ function ViewChangeRequestForm({
             description: description.trim(),
             name: trimmedName,
             slug: trimmedSlug,
+            type: viewType,
           },
           options,
         );
@@ -748,6 +869,7 @@ function ViewChangeRequestForm({
             config: nextConfig,
             description: description.trim(),
             name: trimmedName,
+            type: viewType,
           },
           options,
         );
@@ -808,6 +930,200 @@ function ViewChangeRequestForm({
           />
         </label>
       </div>
+
+      <div className="mt-3">
+        <span className="text-muted-foreground text-xs">{messages.base.viewType}</span>
+        <div className="mt-1.5 flex gap-2">
+          {(
+            [
+              { icon: <Table2 size={14} />, label: messages.base.viewTypeTable, value: "table" },
+              {
+                icon: <LayoutGrid size={14} />,
+                label: messages.base.viewTypeGallery,
+                value: "gallery",
+              },
+              {
+                icon: <Columns3 size={14} />,
+                label: messages.base.viewTypeKanban,
+                value: "kanban",
+              },
+              {
+                icon: <CalendarDays size={14} />,
+                label: messages.base.viewTypeCalendar,
+                value: "calendar",
+              },
+              {
+                icon: <GanttChart size={14} />,
+                label: messages.base.viewTypeGantt,
+                value: "gantt",
+              },
+            ] as const
+          ).map((option) => (
+            <button
+              className={`inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 font-medium text-xs transition-colors ${
+                viewType === option.value
+                  ? "border-primary bg-primary/10 text-foreground"
+                  : "border-border/70 bg-background text-muted-foreground hover:bg-accent hover:text-foreground"
+              }`}
+              key={option.value}
+              onClick={() => setViewType(option.value)}
+              type="button"
+            >
+              {option.icon}
+              {option.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {viewType === "gallery" ? (
+        <div className="mt-3 grid gap-3 rounded-md border border-border/50 bg-muted/15 p-3 md:grid-cols-3">
+          <label className="block">
+            <span className="text-muted-foreground text-xs">{messages.base.coverField}</span>
+            <select
+              className="mt-1 h-8 w-full rounded-md border border-border/70 bg-background px-2.5 text-sm outline-none transition-colors focus:border-primary"
+              onChange={(event) => setCoverFieldSlug(event.target.value)}
+              value={coverFieldSlug}
+            >
+              <option value="">{messages.base.coverFieldAuto}</option>
+              {attachmentFields.map((field) => (
+                <option key={field.id} value={field.slug}>
+                  {resolveIString(field.name)}
+                </option>
+              ))}
+              <option value="__none__">{messages.base.coverFieldNone}</option>
+            </select>
+          </label>
+          <label className="block">
+            <span className="text-muted-foreground text-xs">{messages.base.coverFit}</span>
+            <select
+              className="mt-1 h-8 w-full rounded-md border border-border/70 bg-background px-2.5 text-sm outline-none transition-colors focus:border-primary"
+              onChange={(event) => setCoverFit(event.target.value as GalleryCoverFit)}
+              value={coverFit}
+            >
+              <option value="cover">{messages.base.coverFitCrop}</option>
+              <option value="fit">{messages.base.coverFitFit}</option>
+            </select>
+          </label>
+          <label className="block">
+            <span className="text-muted-foreground text-xs">{messages.base.cardSize}</span>
+            <select
+              className="mt-1 h-8 w-full rounded-md border border-border/70 bg-background px-2.5 text-sm outline-none transition-colors focus:border-primary"
+              onChange={(event) => setCardSize(event.target.value as GalleryCardSize)}
+              value={cardSize}
+            >
+              <option value="small">{messages.base.cardSizeSmall}</option>
+              <option value="medium">{messages.base.cardSizeMedium}</option>
+              <option value="large">{messages.base.cardSizeLarge}</option>
+            </select>
+          </label>
+          <label className="inline-flex items-center gap-2 text-muted-foreground text-sm md:col-span-3">
+            <input
+              checked={showFieldLabels}
+              onChange={(event) => setShowFieldLabels(event.target.checked)}
+              type="checkbox"
+            />
+            {messages.base.showFieldLabels}
+          </label>
+        </div>
+      ) : null}
+
+      {viewType === "kanban" ? (
+        <div className="mt-3 rounded-md border border-border/50 bg-muted/15 p-3">
+          <label className="block md:max-w-xs">
+            <span className="text-muted-foreground text-xs">{messages.base.stackByField}</span>
+            <select
+              className="mt-1 h-8 w-full rounded-md border border-border/70 bg-background px-2.5 text-sm outline-none transition-colors focus:border-primary"
+              onChange={(event) => setStackByFieldSlug(event.target.value)}
+              value={stackByFieldSlug}
+            >
+              <option value="">{messages.base.stackByFieldAuto}</option>
+              {selectFields.map((field) => (
+                <option key={field.id} value={field.slug}>
+                  {resolveIString(field.name)}
+                </option>
+              ))}
+            </select>
+          </label>
+          {selectFields.length === 0 ? (
+            <div className="mt-2 text-amber-700 text-xs">{messages.base.kanbanNoSelect}</div>
+          ) : null}
+        </div>
+      ) : null}
+
+      {viewType === "calendar" ? (
+        <div className="mt-3 rounded-md border border-border/50 bg-muted/15 p-3">
+          <label className="block md:max-w-xs">
+            <span className="text-muted-foreground text-xs">{messages.base.dateField}</span>
+            <select
+              className="mt-1 h-8 w-full rounded-md border border-border/70 bg-background px-2.5 text-sm outline-none transition-colors focus:border-primary"
+              onChange={(event) => setDateFieldSlug(event.target.value)}
+              value={dateFieldSlug}
+            >
+              <option value="">{messages.base.dateFieldAuto}</option>
+              {dateFields.map((field) => (
+                <option key={field.id} value={field.slug}>
+                  {resolveIString(field.name)}
+                </option>
+              ))}
+            </select>
+          </label>
+          {dateFields.length === 0 ? (
+            <div className="mt-2 text-amber-700 text-xs">{messages.base.calendarNoDate}</div>
+          ) : null}
+        </div>
+      ) : null}
+
+      {viewType === "gantt" ? (
+        <div className="mt-3 grid gap-3 rounded-md border border-border/50 bg-muted/15 p-3 md:grid-cols-3">
+          <label className="block">
+            <span className="text-muted-foreground text-xs">{messages.base.ganttStartField}</span>
+            <select
+              className="mt-1 h-8 w-full rounded-md border border-border/70 bg-background px-2.5 text-sm outline-none transition-colors focus:border-primary"
+              onChange={(event) => setStartFieldSlug(event.target.value)}
+              value={startFieldSlug}
+            >
+              <option value="">{messages.base.dateFieldAuto}</option>
+              {dateFields.map((field) => (
+                <option key={field.id} value={field.slug}>
+                  {resolveIString(field.name)}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="block">
+            <span className="text-muted-foreground text-xs">{messages.base.ganttEndField}</span>
+            <select
+              className="mt-1 h-8 w-full rounded-md border border-border/70 bg-background px-2.5 text-sm outline-none transition-colors focus:border-primary"
+              onChange={(event) => setEndFieldSlug(event.target.value)}
+              value={endFieldSlug}
+            >
+              <option value="">{messages.base.dateFieldAuto}</option>
+              {dateFields.map((field) => (
+                <option key={field.id} value={field.slug}>
+                  {resolveIString(field.name)}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="block">
+            <span className="text-muted-foreground text-xs">{messages.base.ganttScale}</span>
+            <select
+              className="mt-1 h-8 w-full rounded-md border border-border/70 bg-background px-2.5 text-sm outline-none transition-colors focus:border-primary"
+              onChange={(event) => setGanttScale(event.target.value as GanttScale)}
+              value={ganttScale}
+            >
+              <option value="week">{messages.base.ganttWeek}</option>
+              <option value="month">{messages.base.ganttMonth}</option>
+            </select>
+          </label>
+          {dateFields.length < 2 ? (
+            <div className="mt-1 text-amber-700 text-xs md:col-span-3">
+              {messages.base.ganttNoDates}
+            </div>
+          ) : null}
+        </div>
+      ) : null}
 
       <div className="mt-3">
         <div className="flex flex-wrap items-center justify-between gap-2">

@@ -32,6 +32,14 @@ export {
   updateViewInputSchema,
 };
 
+/** Caller-supplied baseId doesn't resolve — a genuine "not found" client error. */
+const baseNotFound = (baseId: string) =>
+  new ORPCError("NOT_FOUND", { message: `Base not found: ${baseId}` });
+
+/** Caller-supplied viewId doesn't resolve (or isn't active) — a genuine "not found" client error. */
+const viewNotFound = (viewId: string) =>
+  new ORPCError("NOT_FOUND", { message: `View not found: ${viewId}` });
+
 export const createViewChangeRequest = async (
   baseId: string,
   input: z.input<typeof createViewInputSchema>,
@@ -40,7 +48,7 @@ export const createViewChangeRequest = async (
   const db = await getDb();
   const base = await getBase(baseId);
   if (!base) {
-    throw new Error(`Base not found: ${baseId}`);
+    throw baseNotFound(baseId);
   }
 
   const rawParsed = createViewInputSchema.parse(input);
@@ -66,6 +74,7 @@ export const createViewChangeRequest = async (
     description: parsed.description,
     name: parsed.name,
     slug: parsed.slug,
+    type: parsed.type,
   };
 
   await db.insert(busabaseCommits).values({
@@ -148,10 +157,13 @@ export const createUpdateViewChangeRequest = async (
     .where(and(eq(busabaseViews.id, viewId), eq(busabaseViews.spaceId, getContextSpaceId())))
     .limit(1);
   if (!view || view.status !== "active") {
-    throw new Error(`View not found: ${viewId}`);
+    throw viewNotFound(viewId);
   }
   const base = await getBase(view.baseId);
   if (!base) {
+    // view.baseId is an internal FK we just resolved the view through, not a
+    // client-supplied id — a miss here means the data is inconsistent, not that
+    // the caller passed a bad id. Keep as a plain Error (500) to surface the bug.
     throw new Error(`Base not found: ${view.baseId}`);
   }
 
@@ -164,6 +176,7 @@ export const createUpdateViewChangeRequest = async (
     config: parsed.config ?? normalizeViewConfig(view.config),
     description: parsed.description ?? view.description,
     name: parsed.name ?? view.name,
+    type: parsed.type ?? view.type,
   };
 
   await db.insert(busabaseCommits).values({
@@ -246,10 +259,11 @@ export const createDeleteViewChangeRequest = async (
     .where(and(eq(busabaseViews.id, viewId), eq(busabaseViews.spaceId, getContextSpaceId())))
     .limit(1);
   if (!view || view.status !== "active") {
-    throw new Error(`View not found: ${viewId}`);
+    throw viewNotFound(viewId);
   }
   const base = await getBase(view.baseId);
   if (!base) {
+    // Internal FK, not client input — see comment in createUpdateViewChangeRequest.
     throw new Error(`Base not found: ${view.baseId}`);
   }
 
@@ -345,13 +359,14 @@ export const createRestoreViewChangeRequest = async (
     .where(and(eq(busabaseViews.id, viewId), eq(busabaseViews.spaceId, getContextSpaceId())))
     .limit(1);
   if (!view) {
-    throw new Error(`View not found: ${viewId}`);
+    throw viewNotFound(viewId);
   }
   if (view.status !== "archived") {
     throw new Error(`View is not archived: ${viewId}`);
   }
   const base = await getBase(view.baseId);
   if (!base) {
+    // Internal FK, not client input — see comment in createUpdateViewChangeRequest.
     throw new Error(`Base not found: ${view.baseId}`);
   }
 

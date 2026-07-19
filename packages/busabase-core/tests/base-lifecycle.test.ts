@@ -224,6 +224,93 @@ describe("Base-domain DB lifecycle — oRPC", () => {
       expect(await activeSlugs(blogBaseId)).not.toContain("lc-view");
     });
 
+    it("round-trips a gallery view type and its cover config through merge", async () => {
+      const createCr = await client.bases.createViewChangeRequest({
+        baseId: blogBaseId,
+        slug: "lc-gallery",
+        name: "Gallery",
+        type: "gallery",
+        config: {
+          filters: [],
+          sorts: [],
+          coverFieldSlug: "cover",
+          coverFit: "fit",
+          cardSize: "large",
+          showFieldLabels: true,
+        },
+      });
+      await approveAndMerge(createCr.id);
+
+      const views = await client.bases.listViews({ baseId: blogBaseId });
+      const gallery = views.find((v) => v.slug === "lc-gallery");
+      expect(gallery?.type).toBe("gallery");
+      expect(gallery?.config.coverFieldSlug).toBe("cover");
+      expect(gallery?.config.coverFit).toBe("fit");
+      expect(gallery?.config.cardSize).toBe("large");
+      expect(gallery?.config.showFieldLabels).toBe(true);
+
+      // Switching a gallery back to a table via update persists the new type.
+      const updateCr = await client.views.updateChangeRequest({
+        viewId: gallery?.id ?? "",
+        type: "table",
+      });
+      await approveAndMerge(updateCr.id);
+      const afterUpdate = await client.bases.listViews({ baseId: blogBaseId });
+      expect(afterUpdate.find((v) => v.slug === "lc-gallery")?.type).toBe("table");
+    });
+
+    it("round-trips kanban and calendar view config through merge", async () => {
+      const kanbanCr = await client.bases.createViewChangeRequest({
+        baseId: blogBaseId,
+        slug: "lc-kanban",
+        name: "Board",
+        type: "kanban",
+        config: { filters: [], sorts: [], stackByFieldSlug: "status" },
+      });
+      await approveAndMerge(kanbanCr.id);
+
+      const calendarCr = await client.bases.createViewChangeRequest({
+        baseId: blogBaseId,
+        slug: "lc-calendar",
+        name: "Calendar",
+        type: "calendar",
+        config: { filters: [], sorts: [], dateFieldSlug: "published_at" },
+      });
+      await approveAndMerge(calendarCr.id);
+
+      const views = await client.bases.listViews({ baseId: blogBaseId });
+      const kanban = views.find((v) => v.slug === "lc-kanban");
+      const calendar = views.find((v) => v.slug === "lc-calendar");
+      expect(kanban?.type).toBe("kanban");
+      expect(kanban?.config.stackByFieldSlug).toBe("status");
+      expect(calendar?.type).toBe("calendar");
+      expect(calendar?.config.dateFieldSlug).toBe("published_at");
+    });
+
+    it("round-trips gantt view config through merge", async () => {
+      const cr = await client.bases.createViewChangeRequest({
+        baseId: blogBaseId,
+        slug: "lc-gantt",
+        name: "Timeline",
+        type: "gantt",
+        config: {
+          filters: [],
+          sorts: [],
+          startFieldSlug: "start_at",
+          endFieldSlug: "end_at",
+          ganttScale: "week",
+        },
+      });
+      await approveAndMerge(cr.id);
+      const gantt = (await client.bases.listViews({ baseId: blogBaseId })).find(
+        (v) => v.slug === "lc-gantt",
+      );
+      expect(gantt?.type).toBe("gantt");
+      expect(gantt?.config.startFieldSlug).toBe("start_at");
+      expect(gantt?.config.endFieldSlug).toBe("end_at");
+      expect(gantt?.config.ganttScale).toBe("week");
+    });
+
     it("rejects a duplicate view slug", async () => {
       const cr = await client.bases.createViewChangeRequest({
         baseId: blogBaseId,
@@ -270,6 +357,24 @@ describe("Base-domain DB lifecycle — oRPC", () => {
 
       const afterIds = (await client.records.list()).map((r) => r.id);
       expect(afterIds).not.toContain(recordId);
+    });
+
+    it("persists a single-field update through merge (kanban drag-to-move path)", async () => {
+      const recordId = await createRecord({
+        title: "Move Me",
+        body: "body",
+        channel: "blog",
+      });
+      const before = await client.records.get({ recordId });
+      // Mirror submitMoveRecord: resubmit all fields with just the stack field changed.
+      const moveCr = await client.records.updateChangeRequest({
+        recordId,
+        fields: { ...before.headCommit.fields, channel: "social" },
+        message: "Move",
+      });
+      await approveAndMerge(moveCr.id);
+      const after = await client.records.get({ recordId });
+      expect(after.headCommit.fields.channel).toBe("social");
     });
 
     it("refuses to delete an already-archived record", async () => {

@@ -18,12 +18,15 @@ import {
 import { insertAuditEvent } from "../../../logic/audit";
 import {
   getChangeRequest,
+  mergeChangeRequest,
   recordMergedNodeCreate,
   recordPendingNodeCreate,
+  reviewChangeRequest,
 } from "../../../logic/cr-lifecycle";
 import { projectCommitFields } from "../../../logic/field-values";
 import { CURRENT_USER_ID, id, now, rootNodeIdForSpace } from "../../../logic/kernel";
 import { publishChangeRequestPendingReview } from "../../../logic/live-events";
+import { assertBaseChangeRequestPermission, initializeNodeAcl } from "../../../logic/node-acl";
 import { assertContainerParent } from "../../../logic/node-parent";
 import { ensureReady } from "../../../logic/seed";
 import {
@@ -45,6 +48,14 @@ export {
   createDeleteChangeRequestInputSchema,
   reviseOperationInputSchema,
 };
+
+/** Caller-supplied baseId doesn't resolve — a genuine "not found" client error. */
+const baseNotFound = (baseId: string) =>
+  new ORPCError("NOT_FOUND", { message: `Base not found: ${baseId}` });
+
+/** Caller-supplied recordId doesn't resolve — a genuine "not found" client error. */
+const recordNotFound = (recordId: string) =>
+  new ORPCError("NOT_FOUND", { message: `Record not found: ${recordId}` });
 
 const assertValidRecordFields = (
   fields: Record<string, unknown>,
@@ -213,6 +224,7 @@ export const createBase = async (input: z.input<typeof createBaseInputSchema>) =
     reviewPolicy: { kind: "single", requiredApprovals: 1 },
     createdAt,
   });
+  await initializeNodeAcl(db, spaceId, nodeId, parentNode.id, resolveActorId(CURRENT_USER_ID));
   if (parsed.fields.length > 0) {
     await db.insert(busabaseBaseFields).values(
       await Promise.all(
@@ -253,14 +265,20 @@ export const createBase = async (input: z.input<typeof createBaseInputSchema>) =
 
 export const createChangeRequest = async (
   baseId: string,
-  input: z.infer<typeof createChangeRequestInputSchema>,
+  // `z.input` (not `z.infer`/output) — matches createBase/createDoc/
+  // createFileNode/createFileTreeNode: callers may omit any field with a
+  // schema default (e.g. `autoMerge`), since `.parse()` below fills it in.
+  input: z.input<typeof createChangeRequestInputSchema>,
 ) => {
   await ensureReady();
   const db = await getDb();
   const base = await getBase(baseId);
   if (!base) {
-    throw new Error(`Base not found: ${baseId}`);
+    throw baseNotFound(baseId);
   }
+  // ChangeRequest-submission gate (node ACL): read-level visibility (getBase
+  // above) is not enough to propose — requires `changeRequest` level.
+  await assertBaseChangeRequestPermission(base.id);
 
   const parsed = createChangeRequestInputSchema.parse(input);
   assertValidRecordFields(parsed.fields, base.fields);
@@ -282,7 +300,10 @@ export const createChangeRequest = async (
     if (existingId) {
       const existing = await getChangeRequest(existingId);
       if (existing) {
-        return existing;
+        // Retry returns whatever the first call produced, as-is (merged or
+        // still pending) — always the ChangeRequestVO shape, never re-derived
+        // as a record, even if the original call also passed autoMerge.
+        return { ...existing, materialized: false as const };
       }
     }
   }
@@ -324,7 +345,7 @@ export const createChangeRequest = async (
       if (existingId) {
         const existing = await getChangeRequest(existingId);
         if (existing) {
-          return existing;
+          return { ...existing, materialized: false as const };
         }
       }
     }
@@ -402,7 +423,20 @@ export const createChangeRequest = async (
   if (!changeRequest) {
     throw new Error("Failed to create changeRequest");
   }
-  return changeRequest;
+
+  // Review-first by default (see the schema doc on `autoMerge` above). A caller
+  // that doesn't need human review approves and merges right away, so it gets
+  // the materialized record back instead of having to poll/approve/merge itself
+  // in three separate calls — matching createBase's autoMerge shortcut.
+  if (parsed.autoMerge) {
+    await reviewChangeRequest(changeRequestId, { verdict: "approved" });
+    const merged = await mergeChangeRequest(changeRequestId);
+    if (!merged.record) {
+      throw new Error("Auto-merge did not produce a record");
+    }
+    return { ...merged.record, materialized: true as const };
+  }
+  return { ...changeRequest, materialized: false as const };
 };
 
 /**
@@ -423,8 +457,10 @@ export const createBulkChangeRequest = async (
   const db = await getDb();
   const base = await getBase(baseId);
   if (!base) {
-    throw new Error(`Base not found: ${baseId}`);
+    throw baseNotFound(baseId);
   }
+  // ChangeRequest-submission gate (node ACL) — same as createChangeRequest.
+  await assertBaseChangeRequestPermission(base.id);
 
   const parsed = createBulkChangeRequestInputSchema.parse(input);
   // Validate the entire batch before writing anything, so one bad record fails fast
@@ -570,7 +606,7 @@ export const createDeleteChangeRequest = async (
     .where(and(eq(busabaseRecords.id, recordId), eq(busabaseRecords.spaceId, getContextSpaceId())))
     .limit(1);
   if (!record) {
-    throw new Error(`Record not found: ${recordId}`);
+    throw recordNotFound(recordId);
   }
   if (record.status === "archived") {
     throw new Error(`Record is already archived: ${recordId}`);
@@ -681,7 +717,7 @@ export const createUpdateChangeRequest = async (
     .where(and(eq(busabaseRecords.id, recordId), eq(busabaseRecords.spaceId, getContextSpaceId())))
     .limit(1);
   if (!record) {
-    throw new Error(`Record not found: ${recordId}`);
+    throw recordNotFound(recordId);
   }
   if (record.status === "archived") {
     throw new Error(`Record is already archived: ${recordId}`);
@@ -691,7 +727,24 @@ export const createUpdateChangeRequest = async (
   if (!base) {
     throw new Error(`Base not found: ${record.baseId}`);
   }
-  assertValidRecordFields(parsed.fields, base.fields);
+  // `parsed.fields` is only the caller's partial delta — an omitted required
+  // field means "leave it alone", not "this record has no value for it".
+  // Validate against the MERGED view (current committed fields + delta) so the
+  // required-check only fires when a field is genuinely missing a value, not
+  // merely un-resubmitted. This mirrors mergeRecordUpdate in merge/record.ts,
+  // which already merges the same way before persisting; what actually gets
+  // stored as the commit's delta (parsed.fields) is untouched by this — only
+  // the requiredness CHECK sees the merged fields.
+  const [currentCommit] = await db
+    .select({ fields: busabaseCommits.fields })
+    .from(busabaseCommits)
+    .where(eq(busabaseCommits.id, record.headCommitId))
+    .limit(1);
+  const mergedFieldsForValidation = {
+    ...(currentCommit?.fields as Record<string, unknown> | undefined),
+    ...parsed.fields,
+  };
+  assertValidRecordFields(mergedFieldsForValidation, base.fields);
   await assertRelationTargetsLive(parsed.fields, base.fields);
 
   const changeRequestId = id("crq");
@@ -791,7 +844,7 @@ export const createRestoreChangeRequest = async (
     .where(and(eq(busabaseRecords.id, recordId), eq(busabaseRecords.spaceId, getContextSpaceId())))
     .limit(1);
   if (!record) {
-    throw new Error(`Record not found: ${recordId}`);
+    throw recordNotFound(recordId);
   }
   if (record.status !== "archived") {
     throw new Error(`Record is not archived: ${recordId}`);
@@ -897,7 +950,7 @@ export const createArchiveBaseChangeRequest = async (
   const db = await getDb();
   const base = await getBase(baseId);
   if (!base) {
-    throw new Error(`Base not found: ${baseId}`);
+    throw baseNotFound(baseId);
   }
 
   const changeRequestId = id("crq");
@@ -999,7 +1052,7 @@ export const createRestoreBaseChangeRequest = async (
     resolvedId = row?.id ?? null;
   }
   if (!resolvedId) {
-    throw new Error(`Base not found: ${baseId}`);
+    throw baseNotFound(baseId);
   }
   const [baseRow] = await db
     .select()
@@ -1007,7 +1060,7 @@ export const createRestoreBaseChangeRequest = async (
     .where(eq(busabaseBases.id, resolvedId))
     .limit(1);
   if (!baseRow) {
-    throw new Error(`Base not found: ${baseId}`);
+    throw baseNotFound(baseId);
   }
   if (baseRow.deletedAt) {
     throw new ORPCError("CONFLICT", {

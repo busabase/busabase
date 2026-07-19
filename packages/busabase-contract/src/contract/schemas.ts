@@ -70,6 +70,21 @@ const nodeSchema: z.ZodType<NodeOutput> = z.lazy(() =>
   }),
 );
 
+// One direct node-level access grant (busabase_node_principals row, direct
+// grants only — inherited copies materialized down the tree are an internal
+// detail and never serialized). `role` reuses the ApiKeyPermissionLevel
+// ladder: read < changeRequest < write < manage.
+const nodePrincipalSchema = z.object({
+  id: z.string(),
+  nodeId: z.string(),
+  principalType: z.enum(["user", "team", "space"]),
+  principalId: z.string(),
+  role: z.enum(["read", "changeRequest", "write", "manage"]),
+  grantedBy: z.string(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+
 // Depth-bounded tree fetch (sidebar lazy-load). `parentId` omitted/null starts
 // from the space root (same envelope `nodes.list()` always returned: a single
 // wrapped root node); an explicit `parentId` starts from that node's CHILDREN
@@ -589,6 +604,7 @@ export {
   authInfoSchema,
   userRefSchema,
   nodeSchema,
+  nodePrincipalSchema,
   listNodesInputSchema,
   isDescendantInputSchema,
   isDescendantOutputSchema,

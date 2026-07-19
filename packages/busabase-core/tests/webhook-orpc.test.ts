@@ -5,8 +5,12 @@ import os from "node:os";
 import path from "node:path";
 import { createRouterClient } from "@orpc/server";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { LOCAL_SPACE_ID } from "../src/context";
+import { getDb } from "../src/db";
 import { DEMO_BASES, DEMO_FOLDERS } from "../src/demo/dataset";
 import { MAX_WEBHOOK_RULES_PER_SPACE } from "../src/domains/webhook/logic/webhook-logic";
+import { busabaseWebhookRules } from "../src/domains/webhook/schema/webhook-rules";
+import { id, now } from "../src/logic/kernel";
 import { seedScenario } from "../src/logic/store";
 import { busabaseRouter } from "../src/router";
 
@@ -163,6 +167,43 @@ describe("Webhook automation domain — oRPC", () => {
 
   const waitForHit = (route: string, timeoutMs = 2000) =>
     waitFor(() => received.some((hit) => hit.path === `/${route}`), timeoutMs);
+
+  /**
+   * Insert a `webhook`-kind rule row directly, bypassing `webhooks.create`'s
+   * own create-time SSRF check (webhook-logic.ts's `assertTargetUrlIsSafe`).
+   * The "SSRF protection" tests below need a rule whose targetUrl is ALREADY
+   * unsafe to exist so they can prove the separate, load-bearing dispatch-time
+   * gate (`checkUrlIsSafeToFetch` in dispatch.ts, run before EVERY delivery
+   * attempt) blocks it — create-time validation intentionally doesn't replace
+   * that gate (a target can still start safe and become unsafe later via DNS
+   * rebinding), so a row can legitimately reach dispatch with an unsafe
+   * targetUrl in production too (e.g. one created before this stricter
+   * create-time check shipped).
+   */
+  const insertUnsafeWebhookRule = async (name: string, targetUrl: string) => {
+    const db = await getDb();
+    const timestamp = now();
+    const [row] = await db
+      .insert(busabaseWebhookRules)
+      .values({
+        id: id("wh"),
+        spaceId: LOCAL_SPACE_ID,
+        baseId: null,
+        name,
+        eventType: "record.created",
+        actionKind: "webhook",
+        config: { targetUrl },
+        enabled: true,
+        createdBy: "webhook-test",
+        createdAt: timestamp,
+        updatedAt: timestamp,
+        lastTriggeredAt: null,
+        lastStatus: null,
+      })
+      .returning();
+    if (!row) throw new Error("failed to insert test webhook rule");
+    return row;
+  };
 
   // ── CRUD ───────────────────────────────────────────────────────────────────
 
@@ -531,19 +572,19 @@ describe("Webhook automation domain — oRPC", () => {
   // via the delivery log). `ssrfProbeServer`/`ssrfProbePort` (bound to
   // 127.0.0.1, real and listening, deliberately NOT in the test allowlist)
   // exist so these tests can prove the block happens BEFORE any connection —
-  // not just that it eventually fails for some unrelated reason.
+  // not just that it eventually fails for some unrelated reason. The two tests
+  // below insert the "already unsafe" rule directly via `insertUnsafeWebhookRule`
+  // (bypassing `webhooks.create`) specifically to isolate and prove THIS
+  // dispatch-time gate, separately from the create-time rejection covered by
+  // "rejects an obviously unsafe targetUrl at create time" further down.
 
   describe("SSRF protection", () => {
     it("blocks a rule targeting a loopback address before any connection is attempted", async () => {
       ssrfProbeReceived = [];
-      const rule = await client.webhooks.create({
-        name: "test ssrf loopback",
-        eventType: "record.created",
-        baseId: null,
-        actionKind: "webhook",
-        config: { targetUrl: `http://127.0.0.1:${ssrfProbePort}/ssrf-loopback` },
-        enabled: true,
-      });
+      const rule = await insertUnsafeWebhookRule(
+        "test ssrf loopback",
+        `http://127.0.0.1:${ssrfProbePort}/ssrf-loopback`,
+      );
 
       const startedAt = Date.now();
       await createAndMergeRecord(blogBaseId, "SSRF loopback test");
@@ -573,14 +614,10 @@ describe("Webhook automation domain — oRPC", () => {
     });
 
     it("blocks a rule targeting the cloud metadata IP literal before any connection is attempted", async () => {
-      const rule = await client.webhooks.create({
-        name: "test ssrf metadata",
-        eventType: "record.created",
-        baseId: null,
-        actionKind: "webhook",
-        config: { targetUrl: "http://169.254.169.254/latest/meta-data/" },
-        enabled: true,
-      });
+      const rule = await insertUnsafeWebhookRule(
+        "test ssrf metadata",
+        "http://169.254.169.254/latest/meta-data/",
+      );
 
       const startedAt = Date.now();
       await createAndMergeRecord(blogBaseId, "SSRF metadata test");
@@ -600,6 +637,62 @@ describe("Webhook automation domain — oRPC", () => {
       const deliveries = await client.webhooks.deliveries({ ruleId: rule.id, limit: 5 });
       expect(deliveries[0]?.status).toBe("failed");
       expect(deliveries[0]?.detail?.toLowerCase()).toContain("blocked");
+    });
+
+    it("rejects an obviously unsafe targetUrl at create time, before any rule is persisted", async () => {
+      await expect(
+        client.webhooks.create({
+          name: "test create-time ssrf reject",
+          eventType: "record.created",
+          baseId: null,
+          actionKind: "webhook",
+          config: { targetUrl: "http://169.254.169.254/latest/meta-data/" },
+          enabled: true,
+        }),
+      ).rejects.toThrow(/not allowed/i);
+
+      const rules = await client.webhooks.list();
+      expect(rules.some((r) => r.name === "test create-time ssrf reject")).toBe(false);
+    });
+
+    it("rejects an obviously unsafe targetUrl at update time too", async () => {
+      const rule = await client.webhooks.create({
+        name: "test update-time ssrf reject",
+        eventType: "record.created",
+        baseId: null,
+        actionKind: "webhook",
+        config: { targetUrl: hookUrl("update-ssrf-guard") },
+        enabled: true,
+      });
+
+      await expect(
+        client.webhooks.update({
+          id: rule.id,
+          name: rule.name,
+          eventType: rule.eventType,
+          baseId: rule.baseId,
+          actionKind: "webhook",
+          config: { targetUrl: "http://127.0.0.1/latest/meta-data/" },
+          enabled: true,
+        }),
+      ).rejects.toThrow(/not allowed/i);
+
+      // The original safe targetUrl must survive the rejected update untouched.
+      const unchanged = await client.webhooks.get({ id: rule.id });
+      if (unchanged.actionKind !== "webhook") throw new Error("expected a webhook-kind rule");
+      expect(unchanged.config.targetUrl).toBe(hookUrl("update-ssrf-guard"));
+    });
+
+    it("does not reject a run_function rule (no targetUrl to check)", async () => {
+      const rule = await client.webhooks.create({
+        name: "test run_function ssrf-exempt",
+        eventType: "record.created",
+        baseId: null,
+        actionKind: "run_function",
+        config: { code: "return null;", timeoutMs: 200 },
+        enabled: true,
+      });
+      expect(rule.name).toBe("test run_function ssrf-exempt");
     });
   });
 

@@ -71,8 +71,12 @@ describe("Staleness-aware 3-way merge — oRPC", () => {
     return merged.record.id;
   };
 
-  // Record commits are full snapshots (the editor submits the whole record), so a
-  // proposal carries every field with one changed — mirroring real usage.
+  // NOTE: real callers normally submit only the fields they're actually
+  // changing (a partial update — see record-update-partial-fields.test.ts for
+  // the dedicated coverage of that path and the data-loss bug it used to hit).
+  // This helper instead resubmits every field on every update so these
+  // particular tests can assert 3-way merge / conflict detection in isolation
+  // without also depending on the partial-submission fix.
   const proposeUpdate = (recordId: string, overrides: Record<string, unknown>) =>
     client.records.updateChangeRequest({
       recordId,
@@ -108,5 +112,53 @@ describe("Staleness-aware 3-way merge — oRPC", () => {
     await expect(client.changeRequests.merge({ changeRequestId: titleCrD.id })).rejects.toThrow(
       /Conflicting field.*title/,
     );
+  });
+
+  // Regression test for a real TOCTOU race: two near-simultaneous merge calls for
+  // the same approved CR (e.g. a client retry after a timeout, or a double-click)
+  // both read status="approved" before either commits. Without a DB-level guard,
+  // both would proceed to re-run every operation (double-creating the record) and
+  // the loser's failure could leave the CR corrupted instead of cleanly merged.
+  it("serializes concurrent merge() calls on the same CR instead of double-executing", async () => {
+    const cr = await client.bases.createChangeRequest({
+      baseId: blogBaseId,
+      fields: { title: "race title", body: "race body", channel: "blog" },
+      message: "Create",
+      submittedBy: "agent",
+    });
+    await client.changeRequests.review({ changeRequestId: cr.id, verdict: "approved" });
+
+    const results = await Promise.allSettled([
+      client.changeRequests.merge({ changeRequestId: cr.id }),
+      client.changeRequests.merge({ changeRequestId: cr.id }),
+    ]);
+
+    const fulfilled = results.filter(
+      (
+        result,
+      ): result is PromiseFulfilledResult<
+        Awaited<ReturnType<typeof client.changeRequests.merge>>
+      > => result.status === "fulfilled",
+    );
+    const rejected = results.filter(
+      (result): result is PromiseRejectedResult => result.status === "rejected",
+    );
+
+    // Exactly one caller wins the race and gets a real merge result back.
+    expect(fulfilled).toHaveLength(1);
+    expect(fulfilled[0]?.value.record).toBeTruthy();
+
+    // The other caller loses the race with a clear, distinct error — not a
+    // record-content merge conflict (no field diff), just "someone else already
+    // claimed this merge".
+    expect(rejected).toHaveLength(1);
+    expect(String(rejected[0]?.reason)).toMatch(/already being merged|already processed/i);
+    expect(String(rejected[0]?.reason)).not.toMatch(/Conflicting field/);
+
+    // The CR ends up in a clean terminal state — merged, not stuck in "conflict"
+    // with an empty payload (the corruption this regression test guards against).
+    const finalCr = await client.changeRequests.get({ changeRequestId: cr.id });
+    expect(finalCr?.status).toBe("merged");
+    expect(finalCr?.mergeSummary).toBeTruthy();
   });
 });

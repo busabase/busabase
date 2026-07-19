@@ -19,6 +19,7 @@ import type {
   ViewConfigVO,
   ViewFilterVO,
   ViewSortVO,
+  ViewType,
   ViewVO,
 } from "busabase-contract/types";
 import { iStringFromText } from "openlib/i18n/i-string";
@@ -135,10 +136,27 @@ export const toBaseVO = (base: BasePO, fields: BaseFieldPO[]): BaseVO => ({
   fields: fields.sort((a, b) => a.position - b.position).map(toFieldVO),
 });
 
+// `view.type` is a free-text DB column; map it to a known ViewType, defaulting
+// any unrecognized value to "table" so a bad row can never crash a render.
+const KNOWN_VIEW_TYPES: readonly ViewType[] = ["table", "gallery", "kanban", "calendar", "gantt"];
+const toViewType = (raw: string): ViewType =>
+  (KNOWN_VIEW_TYPES as readonly string[]).includes(raw) ? (raw as ViewType) : "table";
+
 export const normalizeViewConfig = (config: ViewPO["config"] | ViewConfigVO): ViewConfigVO => ({
   filters: (config.filters ?? []) as ViewFilterVO[],
   sorts: (config.sorts ?? []) as ViewSortVO[],
   visibleFieldSlugs: config.visibleFieldSlugs,
+  // Per-view-type presentation config — passed through untouched for the types
+  // that don't use a given field (a table ignores coverFieldSlug, etc.).
+  coverFieldSlug: (config as ViewConfigVO).coverFieldSlug ?? null,
+  coverFit: (config as ViewConfigVO).coverFit,
+  cardSize: (config as ViewConfigVO).cardSize,
+  showFieldLabels: (config as ViewConfigVO).showFieldLabels,
+  stackByFieldSlug: (config as ViewConfigVO).stackByFieldSlug ?? null,
+  dateFieldSlug: (config as ViewConfigVO).dateFieldSlug ?? null,
+  startFieldSlug: (config as ViewConfigVO).startFieldSlug ?? null,
+  endFieldSlug: (config as ViewConfigVO).endFieldSlug ?? null,
+  ganttScale: (config as ViewConfigVO).ganttScale,
 });
 
 export const toViewVO = (view: ViewPO, users?: UserRefMap): ViewVO => ({
@@ -147,7 +165,7 @@ export const toViewVO = (view: ViewPO, users?: UserRefMap): ViewVO => ({
   slug: view.slug,
   name: view.name,
   description: view.description,
-  type: "table",
+  type: toViewType(view.type),
   config: normalizeViewConfig(view.config),
   status: view.status === "archived" ? "archived" : "active",
   createdBy: view.createdBy,

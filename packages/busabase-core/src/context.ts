@@ -118,6 +118,25 @@ export interface BusabaseContext {
     changeRequestId: string;
     submittedBy: string;
   }) => void | Promise<void>;
+  /**
+   * Host-computed "the current actor is a space owner/admin" signal. Managers
+   * short-circuit every node-ACL check to full (`manage`) access. Left unset
+   * by the open-source single-user host — an ABSENT value means "treat as
+   * manager" (no auth = no restriction, unchanged local behavior); a cloud
+   * host must always set it explicitly (true or false). This is the
+   * auth-agnostic seam: busabase-core never reads any members/role table,
+   * the host resolves the role and injects one boolean.
+   */
+  isSpaceManager?: boolean;
+  /**
+   * Host-computed "this space's default content visibility is restricted"
+   * signal (`spaces.nodeVisibilityMode === "restricted"` on busabase-cloud).
+   * When true, nodes with NO explicit visibility anywhere in their ancestor
+   * chain (`effectiveVisibility` NULL) are hidden from non-managers like
+   * `private` ones, instead of the open-mode default of member-visible.
+   * Unset = open (the open-source and legacy default).
+   */
+  restrictedVisibility?: boolean;
 }
 
 /** Tenant id used by the single-tenant open-source app and as a safe default. */
@@ -208,6 +227,15 @@ export function getContextSpaceId(): string {
  */
 export function resolveActorId(inputActorId: string): string {
   return storage.getStore()?.actorId ?? inputActorId;
+}
+
+/**
+ * The host-authenticated actor id, or undefined in open-source local mode.
+ * Used as a mode detector by node-ACL write paths: creator auto-grants only
+ * make sense when a real multi-tenant host resolved a real user.
+ */
+export function getContextActorId(): string | undefined {
+  return storage.getStore()?.actorId;
 }
 
 export function getContextSourceProvenance(): BusabaseSourceProvenance | undefined {
@@ -331,4 +359,19 @@ export function getContextDemoLocale(): DemoLocale {
 /** The host's registered "CR entered review" notification hook, if any (cloud-only). */
 export function getContextChangeRequestPendingReviewHook() {
   return storage.getStore()?.onChangeRequestPendingReview;
+}
+
+/**
+ * Whether the current actor short-circuits node-ACL checks as a space
+ * owner/admin. ABSENT (open-source local mode, or any host that predates this
+ * field) deliberately means `true` — no auth = no restriction — so only a
+ * host that explicitly injects `false` gets enforcement.
+ */
+export function getContextIsSpaceManager(): boolean {
+  return storage.getStore()?.isSpaceManager ?? true;
+}
+
+/** Whether this space hides default-visibility (NULL) nodes from non-managers. */
+export function getContextRestrictedVisibility(): boolean {
+  return storage.getStore()?.restrictedVisibility ?? false;
 }

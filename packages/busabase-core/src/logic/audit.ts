@@ -1,5 +1,6 @@
 import "server-only";
 
+import { ORPCError } from "@orpc/server";
 import type { CommentSubjectType } from "busabase-contract/types";
 import { and, asc, desc, eq } from "drizzle-orm";
 import { z } from "zod";
@@ -136,6 +137,12 @@ export const insertAuditEvent = async (
   return eventVO;
 };
 
+/** Caller-supplied comment subjectId doesn't resolve within the current space —
+ *  a genuine "not found" client error (they're commenting on something that
+ *  doesn't exist or they can't see). */
+const commentSubjectNotFound = (kind: string, subjectId: string) =>
+  new ORPCError("NOT_FOUND", { message: `${kind} not found: ${subjectId}` });
+
 const resolveCommentSubject = async (
   db: Awaited<ReturnType<typeof getDb>>,
   subjectType: CommentSubjectType,
@@ -149,7 +156,7 @@ const resolveCommentSubject = async (
       .where(and(eq(busabaseRecords.id, subjectId), eq(busabaseRecords.spaceId, spaceId)))
       .limit(1);
     if (!record) {
-      throw new Error(`Record not found: ${subjectId}`);
+      throw commentSubjectNotFound("Record", subjectId);
     }
     return {
       commitId: record.headCommitId,
@@ -168,7 +175,7 @@ const resolveCommentSubject = async (
       )
       .limit(1);
     if (!changeRequest) {
-      throw new Error(`ChangeRequest not found: ${subjectId}`);
+      throw commentSubjectNotFound("ChangeRequest", subjectId);
     }
     return {
       commitId: null,
@@ -185,7 +192,7 @@ const resolveCommentSubject = async (
       .where(and(eq(busabaseOperations.id, subjectId), eq(busabaseOperations.spaceId, spaceId)))
       .limit(1);
     if (!operation) {
-      throw new Error(`Operation not found: ${subjectId}`);
+      throw commentSubjectNotFound("Operation", subjectId);
     }
     return {
       commitId: operation.headCommitId,
@@ -201,7 +208,7 @@ const resolveCommentSubject = async (
     .where(and(eq(busabaseCommits.id, subjectId), eq(busabaseCommits.spaceId, spaceId)))
     .limit(1);
   if (!commit) {
-    throw new Error(`Commit not found: ${subjectId}`);
+    throw commentSubjectNotFound("Commit", subjectId);
   }
   return {
     commitId: commit.id,

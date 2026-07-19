@@ -21,6 +21,7 @@ import {
 import { id as generateId, rootNodeIdForSpace } from "../../../logic/kernel";
 import { ensureReady } from "../../../logic/seed";
 import { writeDocBody } from "../../doc/handlers";
+import { requireSpaceManagerForDump } from "./_guard";
 import { DUMP_IMPORT_ORDER, DUMP_TABLE_REGISTRY } from "./table-registry";
 
 /**
@@ -64,6 +65,7 @@ const requireSession = (sessionId: string): ImportSession => {
 };
 
 export const beginImportSession = async (): Promise<{ sessionId: string }> => {
+  requireSpaceManagerForDump();
   sweepExpiredSessions();
   // A target space reached only through the dump routes (never touched by any
   // other domain route first) has never had `ensureReady()` run against it —
@@ -130,6 +132,7 @@ const coerceDateColumns = <T extends Record<string, unknown>>(
 };
 
 export const importTableRows = async (input: ImportTablesInput): Promise<ImportTablesVO> => {
+  requireSpaceManagerForDump();
   const session = requireSession(input.sessionId);
   const spaceId = getContextSpaceId();
   if (spaceId !== session.spaceId) {
@@ -196,6 +199,19 @@ export const importTableRows = async (input: ImportTablesInput): Promise<ImportT
       .map((row) =>
         sourceRootId && row.parentId === sourceRootId ? { ...row, parentId: rootId } : row,
       );
+  }
+  if (input.table === "nodePrincipals") {
+    // A `principalType: "space"` grant means "everyone in this space", and
+    // encodes that by storing the space's own id in `principalId` (see
+    // busabase_node_principals schema). On a cross-space restore the row's
+    // `spaceId` is re-stamped to the target below, so its `principalId` must
+    // move with it — otherwise the restored grant would still name the SOURCE
+    // space ("everyone in a space that isn't this one"), an orphaned grant.
+    // User/team principals carry an opaque id that is space-independent and is
+    // left untouched. (Same-id DR restore: this is a harmless no-op.)
+    rows = rows.map((row) =>
+      row.principalType === "space" ? { ...row, principalId: spaceId } : row,
+    );
   }
   const stampedRows = rows.map((row) =>
     coerceDateColumns(table, { ...row, spaceId } as Record<string, unknown>),
@@ -334,6 +350,7 @@ const checkBlobCompleteness = async (
 };
 
 export const commitImportSession = async (sessionId: string): Promise<ImportCommitVO> => {
+  requireSpaceManagerForDump();
   const session = requireSession(sessionId);
   const warnings: string[] = [];
 
@@ -360,6 +377,7 @@ export const commitImportSession = async (sessionId: string): Promise<ImportComm
 };
 
 export const abortImportSession = async (sessionId: string): Promise<{ ok: boolean }> => {
+  requireSpaceManagerForDump();
   const session = requireSession(sessionId);
   const db = await getDb();
 

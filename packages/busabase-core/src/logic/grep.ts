@@ -42,6 +42,7 @@ import { busabaseCommits, busabaseNodes } from "../db/schema";
 import { grepAssets, grepTimeoutMs } from "../domains/assets/logic/asset-grep-logic";
 import { busabaseBaseFields, busabaseBases, busabaseRecords } from "../domains/base/schema";
 import { readDocBodyForGrep, splitDocLines } from "../domains/doc/handlers";
+import { buildNodeVisibilityCondition, buildNodeVisibilityExists } from "./node-acl";
 import { ensureReady } from "./seed";
 import { compileGrepPattern, scanLines } from "./text-scan-core";
 
@@ -95,6 +96,13 @@ const resolveCandidateDocs = async (
     eq(busabaseNodes.type, "doc"),
     isNull(busabaseNodes.archivedAt),
   ];
+  // Node ACL in the candidate SQL (never post-filtered): the scanned/truncated
+  // coverage stats are computed from this candidate set, so a post-filter
+  // would both skew those numbers and reveal that hidden docs exist.
+  const visible = buildNodeVisibilityCondition(db);
+  if (visible) {
+    conditions.push(visible);
+  }
   if (scope?.docs?.nodeIds?.length) {
     conditions.push(inArray(busabaseNodes.id, scope.docs.nodeIds));
   }
@@ -150,6 +158,11 @@ const resolveCandidateRecords = async (
     isNull(busabaseBases.archivedAt),
     isNull(busabaseBases.deletedAt),
   ];
+  // Node ACL in the candidate SQL — same reasoning as resolveCandidateDocs.
+  const recordsVisible = buildNodeVisibilityExists(db, busabaseBases.nodeId);
+  if (recordsVisible) {
+    conditions.push(recordsVisible);
+  }
   const baseIds = scope?.records?.baseIds;
   const baseSlugs = scope?.records?.baseSlugs;
   if (baseIds?.length || baseSlugs?.length) {

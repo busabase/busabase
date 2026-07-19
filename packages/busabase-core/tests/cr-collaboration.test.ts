@@ -75,6 +75,39 @@ describe("Change-request collaboration — oRPC", () => {
     });
   });
 
+  // ── review on an already-merged CR ────────────────────────────────────────
+  describe("review after merge", () => {
+    it("re-approving an already-merged CR is a harmless no-op (idempotent)", async () => {
+      const cr = await createCr({ title: "re-approve after merge", body: "b", channel: "blog" });
+      await approveAndMerge(cr.id);
+
+      const reviewed = await client.changeRequests.review({
+        changeRequestId: cr.id,
+        verdict: "approved",
+      });
+      expect(reviewed.status).toBe("merged");
+      expect(reviewed.reviews).toHaveLength(1);
+    });
+
+    it("rejecting an already-merged CR throws instead of silently no-op'ing", async () => {
+      const cr = await createCr({ title: "reject after merge", body: "b", channel: "blog" });
+      await approveAndMerge(cr.id);
+
+      await expect(
+        client.changeRequests.review({ changeRequestId: cr.id, verdict: "rejected" }),
+      ).rejects.toMatchObject({
+        code: "CONFLICT",
+        message: expect.stringContaining("already been merged"),
+      });
+
+      // The CR must stay exactly as merged — no phantom review recorded, no
+      // status change from the failed attempt.
+      const stillMerged = await client.changeRequests.get({ changeRequestId: cr.id });
+      expect(stillMerged?.status).toBe("merged");
+      expect(stillMerged?.reviews).toHaveLength(1);
+    });
+  });
+
   // ── revise (request-changes → revise → approve) ───────────────────────────
   describe("operations.revise", () => {
     it("returns a rejected change request to review and merges the revised fields", async () => {

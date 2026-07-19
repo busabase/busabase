@@ -193,11 +193,25 @@ const viewSortSchema = z.object({
   fieldSlug: z.string().min(1),
 });
 
+// Mirror of busabase-contract's viewTypeSchema — the internal re-parse would
+// otherwise strip an unknown `type`/gallery config even though the oRPC layer
+// validated and passed them through.
+const viewTypeSchema = z.enum(["table", "gallery", "kanban", "calendar", "gantt"]);
+
 export const viewConfigSchema = z
   .object({
     filters: z.array(viewFilterSchema).optional().default([]),
     sorts: z.array(viewSortSchema).optional().default([]),
     visibleFieldSlugs: z.array(z.string()).nullable().optional(),
+    coverFieldSlug: z.string().nullable().optional(),
+    coverFit: z.enum(["cover", "fit"]).optional(),
+    cardSize: z.enum(["small", "medium", "large"]).optional(),
+    showFieldLabels: z.boolean().optional(),
+    stackByFieldSlug: z.string().nullable().optional(),
+    dateFieldSlug: z.string().nullable().optional(),
+    startFieldSlug: z.string().nullable().optional(),
+    endFieldSlug: z.string().nullable().optional(),
+    ganttScale: z.enum(["week", "month"]).optional(),
   })
   .optional()
   .default({ filters: [], sorts: [] });
@@ -213,6 +227,7 @@ export const createViewInputSchema = z.object({
     .regex(/^[a-z0-9-]+$/)
     .optional(),
   submittedBy: z.string().optional().default("local-producer"),
+  type: viewTypeSchema.optional().default("table"),
 });
 
 export const updateViewInputSchema = z.object({
@@ -221,6 +236,7 @@ export const updateViewInputSchema = z.object({
   message: z.string().optional().default("Update view"),
   name: z.string().min(1).optional(),
   submittedBy: z.string().optional().default("local-producer"),
+  type: viewTypeSchema.optional(),
 });
 
 export const deleteViewInputSchema = z.object({
@@ -242,6 +258,7 @@ export const createChangeRequestInputSchema = z.object({
   message: z.string().optional().default("Initial changeRequest"),
   submittedBy: z.string().optional().default("local-producer"),
   idempotencyKey: z.string().optional(),
+  autoMerge: z.boolean().optional().default(false),
 });
 
 // Propose many record_create operations as ONE change request (one review, one

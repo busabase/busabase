@@ -18,6 +18,7 @@ import type {
 import { applyViewConfigToRecords, BusaBaseTable } from "./base-table";
 import { IStringNameInput } from "./i-string-input";
 import { NodeDeleteButton } from "./node-detail-views";
+import { NodePermissionsButton } from "./node-permissions-button";
 import { EmptyState, PropertyRow, SidebarPanel } from "./primitives";
 import { SplitSubmitButton } from "./split-submit-button";
 
@@ -35,6 +36,8 @@ export function BaseDetailView({
   onDeleteView,
   onRestoreView,
   onRestoreRecord,
+  onMoveRecord,
+  onPatchRecord,
   onUpdateView,
   views,
 }: {
@@ -61,6 +64,8 @@ export function BaseDetailView({
   onDeleteView: (view: ViewVO) => Promise<void>;
   onRestoreView?: (view: ViewVO) => Promise<void>;
   onRestoreRecord?: (record: RecordVO) => Promise<void>;
+  onMoveRecord?: (record: RecordVO, fieldSlug: string, value: string | null) => Promise<void>;
+  onPatchRecord?: (record: RecordVO, patch: Record<string, unknown>) => Promise<void>;
   onUpdateView: (
     view: ViewVO,
     payload: ViewFormPayload,
@@ -94,6 +99,8 @@ export function BaseDetailView({
             onDeleteView={onDeleteView}
             onRestoreView={onRestoreView}
             onRestoreRecord={onRestoreRecord}
+            onMoveRecord={onMoveRecord}
+            onPatchRecord={onPatchRecord}
             onUpdateView={onUpdateView}
             records={filteredRecords}
             relationRecords={records}
@@ -712,7 +719,15 @@ function BaseDetailHeader({ base, orpc }: { base: BaseVO | null; orpc: BusabaseQ
             record actions existed). `mergeNodeDelete` already special-cases
             `node.type === "base"`, so the shared NodeDeleteButton works as-is. */}
         {base ? (
-          <NodeDeleteButton nodeId={base.nodeId} nodeName={base.name} nodeType="base" orpc={orpc} />
+          <div className="flex shrink-0 items-center gap-2">
+            <NodePermissionsButton nodeId={base.nodeId} nodeName={base.name} orpc={orpc} />
+            <NodeDeleteButton
+              nodeId={base.nodeId}
+              nodeName={base.name}
+              nodeType="base"
+              orpc={orpc}
+            />
+          </div>
         ) : null}
       </div>
     </div>

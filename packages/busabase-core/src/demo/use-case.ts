@@ -40,6 +40,8 @@ export const DEMO_USE_CASES = [
   "config-mgmt",
   "directories",
   "agent-integrations",
+  "gallery",
+  "roadmap",
 ] as const;
 
 export type DemoUseCase = (typeof DEMO_USE_CASES)[number];

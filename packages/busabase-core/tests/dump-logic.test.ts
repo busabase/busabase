@@ -245,4 +245,149 @@ describe("dump domain logic — oRPC integration", () => {
     expect(commit.ok).toBe(true);
     expect(commit.warnings.some((w) => /attachmentId that was not imported/i.test(w))).toBe(true);
   });
+
+  // ── nodePrincipals: cross-space restore remaps a "space" grant's principalId ─
+  it("importTables remaps a principalType:'space' grant's principalId to the target space", async () => {
+    const sourceSpace = "space_dump_np_source";
+    const targetSpace = "space_dump_np_target";
+    const sourceRootId = "nod_root_np_source_fabricated";
+    const folderId = "nod_np_folder_child";
+
+    const { sessionId } = await inSpace(targetSpace, () => client.dump.importBegin());
+
+    // A source root + one child folder, exactly as they'd arrive over the wire.
+    // The importer drops the source root and remaps the child onto the target's
+    // own root (same path the round-trip test exercises).
+    await inSpace(targetSpace, () =>
+      client.dump.importTables({
+        sessionId,
+        table: "nodes",
+        rows: [
+          {
+            id: sourceRootId,
+            spaceId: sourceSpace,
+            parentId: null,
+            type: "folder",
+            slug: "root",
+            name: "Workspace",
+            description: "",
+            metadata: {},
+            position: 0,
+            effectiveVisibility: null,
+            archivedAt: null,
+            deletedAt: null,
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+          },
+          {
+            id: folderId,
+            spaceId: sourceSpace,
+            parentId: sourceRootId,
+            type: "folder",
+            slug: "shared-folder",
+            name: "Shared Folder",
+            description: "",
+            metadata: {},
+            position: 0,
+            effectiveVisibility: null,
+            archivedAt: null,
+            deletedAt: null,
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+          },
+        ],
+      }),
+    );
+
+    // Two grants on the folder: a "space" grant (everyone in the SOURCE space —
+    // principalId is the source space id) and a "user" grant. On restore the
+    // space grant must move to the target space; the user grant is untouched.
+    await inSpace(targetSpace, () =>
+      client.dump.importTables({
+        sessionId,
+        table: "nodePrincipals",
+        rows: [
+          {
+            id: "nprin_space_grant",
+            spaceId: sourceSpace,
+            nodeId: folderId,
+            sourceNodeId: folderId,
+            principalType: "space",
+            principalId: sourceSpace,
+            role: "read",
+            grantedBy: "local-user",
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+          },
+          {
+            id: "nprin_user_grant",
+            spaceId: sourceSpace,
+            nodeId: folderId,
+            sourceNodeId: folderId,
+            principalType: "user",
+            principalId: "usr_specific_person",
+            role: "write",
+            grantedBy: "local-user",
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+          },
+        ],
+      }),
+    );
+
+    await inSpace(targetSpace, () => client.dump.importCommit({ sessionId }));
+
+    const principals = await inSpace(targetSpace, () =>
+      client.nodes.principals.list({ nodeId: folderId }),
+    );
+    const spaceGrant = principals.find((p) => p.principalType === "space");
+    const userGrant = principals.find((p) => p.principalType === "user");
+
+    // The "everyone in the space" grant now names the TARGET space, not the source.
+    expect(spaceGrant?.principalId).toBe(targetSpace);
+    // The user grant's opaque id is space-independent — left exactly as-is.
+    expect(userGrant?.principalId).toBe("usr_specific_person");
+    expect(userGrant?.role).toBe("write");
+  });
+
+  // ── admin gate: full-fidelity dump is a space owner/admin operation ────────
+  // `dump.exportTables` is a raw table scan that bypasses node ACLs, so a
+  // non-manager member could otherwise exfiltrate private nodes. The guard reads
+  // the host-injected `isSpaceManager` (busabase-cloud sets it from the real
+  // owner/admin role; OSS leaves it unset = manager, so the CLI is unaffected).
+  describe("admin gate (isSpaceManager)", () => {
+    const asRole = <T>(
+      spaceId: string,
+      isSpaceManager: boolean | undefined,
+      fn: () => Promise<T>,
+    ): Promise<T> => runWithBusabaseContext({ spaceId, isSpaceManager }, fn);
+
+    it("a non-manager is FORBIDDEN from exporting (no ACL-bypassing exfiltration)", async () => {
+      await expect(
+        asRole("space_dump_guard", false, () =>
+          client.dump.exportTables({ table: "records", limit: 10 }),
+        ),
+      ).rejects.toThrow(/owner\/admin|access|forbidden/i);
+    });
+
+    it("a non-manager is FORBIDDEN from starting an import", async () => {
+      await expect(
+        asRole("space_dump_guard", false, () => client.dump.importBegin()),
+      ).rejects.toThrow(/owner\/admin|access|forbidden/i);
+    });
+
+    it("a manager (isSpaceManager: true) may export", async () => {
+      const page = await asRole("space_dump_guard_mgr", true, () =>
+        client.dump.exportTables({ table: "records", limit: 10 }),
+      );
+      expect(Array.isArray(page.rows)).toBe(true);
+    });
+
+    it("an unset role (OSS / CLI default) is treated as manager and may export", async () => {
+      const page = await asRole("space_dump_guard_oss", undefined, () =>
+        client.dump.exportTables({ table: "records", limit: 10 }),
+      );
+      expect(Array.isArray(page.rows)).toBe(true);
+    });
+  });
 });

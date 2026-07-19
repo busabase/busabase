@@ -137,7 +137,10 @@ export const mergeBaseRestore = async (ctx: MergeCtx, item: OperationPO, _headCo
     .where(eq(busabaseBases.id, baseId))
     .limit(1);
   if (!target) {
-    throw new Error(`base_restore target not found: ${baseId}`);
+    // Same reachable-race reasoning as merge/record.ts's targetRecordNotFound —
+    // the base could have been purged after the restore CR was created but
+    // before it was merged. Defensive re-check; the primary gate is in cr-lifecycle.
+    throw new ORPCError("NOT_FOUND", { message: `base_restore target not found: ${baseId}` });
   }
   // Defense in depth (the merge-time gate in cr-lifecycle already blocks this):
   // a permanently deleted base can never come back.

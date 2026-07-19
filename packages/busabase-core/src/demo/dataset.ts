@@ -42,6 +42,12 @@ import {
   FINANCE_VIEWS,
 } from "./scenarios/finance-invoice";
 import { enNodeTypesScenario } from "./scenarios/node-types.en";
+import {
+  AGENT_GALLERY_BASES,
+  AGENT_GALLERY_RECORDS,
+  AGENT_GALLERY_VIEWS,
+} from "./scenarios/product-gallery";
+import { ROADMAP_BASES, ROADMAP_RECORDS, ROADMAP_VIEWS } from "./scenarios/product-roadmap";
 import { readmeScenario } from "./scenarios/readme-scenarios";
 import type {
   SeedBaseDef,
@@ -962,6 +968,8 @@ export const DEMO_BASES: SeedBaseDef[] = [
   },
   ...FINANCE_BASES,
   ...DIRECTORY_LISTINGS_BASES,
+  ...AGENT_GALLERY_BASES,
+  ...ROADMAP_BASES,
   ...AGENT_INTEGRATIONS_BASES,
   ...CROSS_FUNCTIONAL_BASES,
   ...(readmeScenario.bases ?? []),
@@ -2353,6 +2361,8 @@ export const DEMO_RECORDS: SeedRecordDef[] = [
   ...BULK_MEDIA,
   ...FINANCE_RECORDS,
   ...DIRECTORY_LISTINGS_RECORDS,
+  ...AGENT_GALLERY_RECORDS,
+  ...ROADMAP_RECORDS,
   ...AGENT_INTEGRATIONS_RECORDS,
   ...CROSS_FUNCTIONAL_RECORDS,
   ...(readmeScenario.records ?? []),
@@ -2452,6 +2462,8 @@ export const DEMO_VIEWS: SeedViewDef[] = [
   },
   ...FINANCE_VIEWS,
   ...DIRECTORY_LISTINGS_VIEWS,
+  ...AGENT_GALLERY_VIEWS,
+  ...ROADMAP_VIEWS,
   ...AGENT_INTEGRATIONS_VIEWS,
   ...(readmeScenario.views ?? []),
 ];
@@ -3265,7 +3277,7 @@ export const buildDemoDataset = (
       slug: view.slug,
       name: view.name,
       description: view.description,
-      type: "table",
+      type: view.type ?? "table",
       config: view.config,
       status: "active",
       createdBy: DEMO_ACTOR_ID,

@@ -20,6 +20,7 @@ import type {
   WebhookRuleUpdateInput,
   WebhookRuleVO,
 } from "../types/webhook";
+import { checkUrlIsSafeToFetch } from "./ssrf-guard";
 import { encryptWebhookSecret } from "./webhook-crypto";
 
 type WebhookRuleRow = typeof busabaseWebhookRules.$inferSelect;
@@ -114,6 +115,29 @@ const buildHttpConfigPO = (
   };
 };
 
+/**
+ * Reject an obviously-unsafe targetUrl at create/update time instead of only
+ * discovering it the first time the rule fires. This mirrors — but does not
+ * replace — the real SSRF gate `checkUrlIsSafeToFetch` already runs before
+ * EVERY dispatch attempt (dispatch.ts): a host can still change what it
+ * resolves to after this check passes (DNS rebinding), so dispatch-time
+ * enforcement stays load-bearing. This is purely a fast, friendlier rejection
+ * for the common case (a target that's already unreachable/blocked right now),
+ * matching contract-layer input validation's spirit of failing fast on bad
+ * input. `run_function` rules have no `targetUrl` and are skipped.
+ */
+const assertTargetUrlIsSafe = async (
+  input: WebhookRuleInput | WebhookRuleUpdateInput,
+): Promise<void> => {
+  if (input.actionKind === "run_function") return;
+  const safety = await checkUrlIsSafeToFetch(input.config.targetUrl);
+  if (safety.blocked) {
+    throw new ORPCError("BAD_REQUEST", {
+      message: `targetUrl is not allowed: ${safety.reason ?? "blocked by SSRF protection"}`,
+    });
+  }
+};
+
 const buildConfigPO = (
   input: WebhookRuleInput | WebhookRuleUpdateInput,
   existingConfig?: WebhookRuleConfigPO,
@@ -179,6 +203,7 @@ export const createWebhookRule = async (
       message: `Webhook rule limit reached (max ${MAX_WEBHOOK_RULES_PER_SPACE} per space) — delete an existing rule before creating another.`,
     });
   }
+  await assertTargetUrlIsSafe(input);
 
   const timestamp = now();
   const config = buildConfigPO(input);
@@ -224,6 +249,7 @@ export const updateWebhookRule = async (
   if (!existing) {
     throw new ORPCError("NOT_FOUND", { message: `Webhook rule not found: ${ruleId}` });
   }
+  await assertTargetUrlIsSafe(input);
   const config = buildConfigPO(input, existing.config);
   const [row] = await db
     .update(busabaseWebhookRules)

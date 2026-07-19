@@ -27,7 +27,19 @@ import type {
   ReadLinesVO,
   ReadTextLinesInput,
 } from "busabase-contract/domains/assets/types";
-import { and, eq, inArray, isNull, like } from "drizzle-orm";
+import {
+  and,
+  eq,
+  exists,
+  inArray,
+  isNotNull,
+  isNull,
+  like,
+  notExists,
+  or,
+  type SQL,
+  sql,
+} from "drizzle-orm";
 import { getContextSpaceId } from "../../../context";
 import { getDb } from "../../../db";
 import {
@@ -36,6 +48,7 @@ import {
   busabaseAssetUsages,
   busabaseNodes,
 } from "../../../db/schema";
+import { buildNodeVisibilityCondition } from "../../../logic/node-acl";
 import { ensureReady } from "../../../logic/seed";
 import {
   compileGrepPattern,
@@ -112,6 +125,29 @@ const resolveCandidateAssets = async (
   if (scope?.mimeTypes?.length) {
     conditions.push(inArray(attachments.mimeType, scope.mimeTypes));
   }
+  // Node ACL: assets have no node of their own — their visibility derives
+  // from where they're mounted. An asset with NO node-linked usage stays
+  // searchable (space-level blob, unchanged); an asset whose only mounts are
+  // hidden nodes is excluded, in the candidate SQL (never post-filtered — the
+  // grep coverage stats come from this set).
+  const visibleNode = buildNodeVisibilityCondition(db);
+  if (visibleNode) {
+    const anyNodeUsage = db
+      .select({ one: sql`1` })
+      .from(busabaseAssetUsages)
+      .where(
+        and(
+          eq(busabaseAssetUsages.assetId, busabaseAssets.id),
+          isNotNull(busabaseAssetUsages.nodeId),
+        ),
+      );
+    const visibleNodeUsage = db
+      .select({ one: sql`1` })
+      .from(busabaseAssetUsages)
+      .innerJoin(busabaseNodes, eq(busabaseAssetUsages.nodeId, busabaseNodes.id))
+      .where(and(eq(busabaseAssetUsages.assetId, busabaseAssets.id), visibleNode));
+    conditions.push(or(notExists(anyNodeUsage), exists(visibleNodeUsage)) as SQL);
+  }
   const rows = await db
     .select({
       assetId: busabaseAssets.id,
@@ -139,6 +175,7 @@ const resolveCandidateAssets = async (
         inArray(busabaseAssetUsages.ownerType, ["drive", "skill"]),
         like(busabaseAssetUsages.path, `${scope.drivePath}%`),
         isNull(busabaseNodes.archivedAt),
+        buildNodeVisibilityCondition(db),
       ),
     );
   const mounted = new Set(usageRows.map((row) => row.assetId));

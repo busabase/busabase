@@ -106,6 +106,16 @@ export const busabaseNodes = pgTable(
       .notNull()
       .default({}),
     position: integer("position").notNull().default(0),
+    // Materialized access-control visibility: the STRICTEST explicitly-set
+    // `metadata.visibility` along this node's ancestor chain (self included),
+    // private > workspace > public. NULL = nothing explicit anywhere in the
+    // chain = "follow the space default" (open mode: visible to members;
+    // restricted mode: hidden like private). Recomputed on create / move /
+    // visibility change by `recomputeEffectiveVisibility` (logic/node-acl.ts)
+    // — read paths only ever check this column, never walk the tree. Kept as a
+    // real column (not in the metadata jsonb) so the visibility index below is
+    // a plain btree, not a jsonb expression index.
+    effectiveVisibility: text("effective_visibility").$type<"private" | "workspace" | "public">(),
     // Soft-archive marker. Set when the owning base is archived (base nodes are
     // kept, not deleted, since commits FK-restrict the base). Partial slug index
     // below frees the slug for reuse while archived.
@@ -125,6 +135,98 @@ export const busabaseNodes = pgTable(
       .on(base.parentId, base.slug)
       .where(sql`${base.archivedAt} IS NULL`),
     index("busabase_nodes_parent_position_idx").on(base.parentId, base.position),
+    index("busabase_nodes_effective_visibility_idx").on(base.spaceId, base.effectiveVisibility),
+  ],
+);
+
+/**
+ * Node-level access grants — "who can do what on this node" (any node type:
+ * folder/base/doc/drive/skill/airapp/file). Modeled on buda-core's
+ * `node_principals` (agents), adapted to busabase's tree.
+ *
+ * `role` reuses the existing `ApiKeyPermissionLevel` ladder
+ * (`read < changeRequest < write < manage`, busabase-contract
+ * access-control/api-key-level) instead of inventing a second
+ * owner/editor/viewer vocabulary — "how far can this identity go on this
+ * node" is the same question the API-key levels already answer, and
+ * `hasApiKeyLevel` is reused as the comparison.
+ *
+ * `principalId` is an OPAQUE string (a user id, or the space id for
+ * `principalType: "space"` = "everyone in this space") — deliberately NOT a
+ * foreign key into any auth schema, preserving busabase-core's documented
+ * auth-agnostic rule (same precedent as buda-core's node_principals).
+ * `"team"` is accepted by the type for forward-compat but has no resolution
+ * logic or UI in v1 (busabase-cloud has no team infrastructure yet).
+ *
+ * A space owner/admin (`isSpaceManager` in BusabaseContext, host-injected)
+ * always short-circuits to `manage` — no principal row needed.
+ *
+ * Grants INHERIT down the tree by materialization, mirroring the
+ * `effectiveVisibility` column's write-time philosophy: a grant defined on a
+ * folder is copied to every descendant node as extra rows with
+ * `sourceNodeId` = the folder (a DIRECT grant has `sourceNodeId === nodeId`).
+ * `recomputeSpaceNodeAcl` (logic/node-acl.ts) rebuilds the inherited rows on
+ * node create / move / grant change, so every read stays a single
+ * per-node EXISTS — no recursive ancestor walk on the hot path. Removing the
+ * source grant removes the whole inherited set (`sourceNodeId` match).
+ */
+export const busabaseNodePrincipals = pgTable(
+  "busabase_node_principals",
+  {
+    id: text("id").primaryKey(),
+    spaceId: spaceIdColumn(),
+    nodeId: text("node_id")
+      .notNull()
+      .references(() => busabaseNodes.id, { onDelete: "cascade" }),
+    // The node this grant was DEFINED on: equal to nodeId for a direct grant,
+    // an ancestor's id for a materialized inherited copy.
+    sourceNodeId: text("source_node_id")
+      .notNull()
+      .references(() => busabaseNodes.id, { onDelete: "cascade" }),
+    principalType: text("principal_type").$type<"user" | "team" | "space">().notNull(),
+    principalId: text("principal_id").notNull(),
+    role: text("role").$type<"read" | "changeRequest" | "write" | "manage">().notNull(),
+    grantedBy: text("granted_by").notNull(),
+    createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { mode: "date" }).defaultNow().notNull(),
+  },
+  (base) => [
+    uniqueIndex("busabase_node_principals_node_principal_source_uniq").on(
+      base.nodeId,
+      base.principalType,
+      base.principalId,
+      base.sourceNodeId,
+    ),
+    index("busabase_node_principals_node_idx").on(base.nodeId),
+    index("busabase_node_principals_principal_idx").on(base.principalType, base.principalId),
+  ],
+);
+
+/**
+ * Per-actor node favorites (Notion-style "⭐ Favorites") — modeled on
+ * `apps/mcpsdk/src/db/schema/favorites.ts`'s `(packageId, createdBy)`
+ * composite-unique pattern, adapted to `(nodeId, actorId)` plus this schema's
+ * existing `spaceIdColumn()` tenant convention. A row is purely additive
+ * (never moves/hides the node from its real tree position); read paths join
+ * back to `busabaseNodes` and apply the same archived/deleted/visibility
+ * filtering the tree already uses, so a favorited node that's later archived,
+ * purged, or (cloud) hidden from this actor silently drops out of the list
+ * without ever deleting this row (the grant/visibility might come back).
+ */
+export const busabaseFavorites = pgTable(
+  "busabase_favorites",
+  {
+    id: text("id").primaryKey(),
+    spaceId: spaceIdColumn(),
+    nodeId: text("node_id")
+      .notNull()
+      .references(() => busabaseNodes.id, { onDelete: "cascade" }),
+    actorId: text("actor_id").notNull(),
+    createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
+  },
+  (base) => [
+    uniqueIndex("busabase_favorites_node_actor_uniq").on(base.nodeId, base.actorId),
+    index("busabase_favorites_actor_idx").on(base.actorId),
   ],
 );
 
@@ -330,6 +432,8 @@ export const busabaseAuditEvents = pgTable(
 );
 
 export type NodePO = typeof busabaseNodes.$inferSelect;
+export type NodePrincipalPO = typeof busabaseNodePrincipals.$inferSelect;
+export type FavoritePO = typeof busabaseFavorites.$inferSelect;
 export type CommentPO = typeof busabaseComments.$inferSelect;
 export type CommitPO = typeof busabaseCommits.$inferSelect;
 export type ChangeRequestPO = typeof busabaseChangeRequests.$inferSelect;

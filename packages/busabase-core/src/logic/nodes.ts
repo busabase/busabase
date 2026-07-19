@@ -13,13 +13,15 @@ import {
   busabaseBases,
   busabaseChangeRequests,
   busabaseCommits,
+  busabaseFavorites,
   busabaseNodes,
   busabaseOperations,
 } from "../db/schema";
 import { docBodyKey } from "../domains/doc/handlers";
 import { insertAuditEvent } from "./audit";
-import { id, now } from "./kernel";
+import { id, now, rootNodeIdForSpace } from "./kernel";
 import { publishChangeRequestPendingReview } from "./live-events";
+import { assertNodePermission, assertNodeVisible, buildNodeVisibilityCondition } from "./node-acl";
 import { buildNodeTree, ensureReady } from "./seed";
 import { toNodeVO } from "./vo";
 
@@ -165,6 +167,7 @@ const fetchChildNodeRows = async (
             eq(busabaseNodes.spaceId, spaceId),
             inArray(busabaseNodes.parentId, parentIds),
             isNull(busabaseNodes.archivedAt),
+            buildNodeVisibilityCondition(db),
           ),
         )
         .orderBy(asc(busabaseNodes.position), asc(busabaseNodes.createdAt))
@@ -270,8 +273,16 @@ export const listNodes = async (input?: ListNodesInput): Promise<NodeVO[]> => {
         .select()
         .from(busabaseNodes)
         // Exclude archived nodes (archived base nodes are kept but must leave the
-        // tree, mirroring how bases.list hides archived bases).
-        .where(and(eq(busabaseNodes.spaceId, spaceId), isNull(busabaseNodes.archivedAt)))
+        // tree, mirroring how bases.list hides archived bases) and nodes the
+        // actor can't see (node ACL; a hidden folder structurally hides its
+        // subtree because buildNodeTree only assembles rows that came back).
+        .where(
+          and(
+            eq(busabaseNodes.spaceId, spaceId),
+            isNull(busabaseNodes.archivedAt),
+            buildNodeVisibilityCondition(db),
+          ),
+        )
         .orderBy(asc(busabaseNodes.position), asc(busabaseNodes.createdAt)),
       db.select().from(busabaseBases).where(eq(busabaseBases.spaceId, spaceId)),
     ]);
@@ -336,6 +347,7 @@ export const listArchivedNodes = async (): Promise<NodeVO[]> => {
         isNotNull(busabaseNodes.archivedAt),
         isNull(busabaseNodes.deletedAt),
         ne(busabaseNodes.type, "base"),
+        buildNodeVisibilityCondition(db),
       ),
     )
     .orderBy(desc(busabaseNodes.archivedAt));
@@ -428,7 +440,8 @@ export const purgeNode = async (nodeId: string): Promise<{ purged: boolean }> =>
   }
   if (!node.archivedAt) {
     throw new ORPCError("CONFLICT", {
-      message: "Only archived items can be permanently deleted. Delete it first.",
+      message:
+        "Only archived items can be permanently deleted. Archive it first (submit a delete-kind ChangeRequest and merge it), then purge again.",
     });
   }
   if (node.deletedAt) {
@@ -497,6 +510,25 @@ export const createNodeChangeRequest = async (
   const parsed = createNodeChangeRequestInputSchema.parse(input);
   assertValidNodeRefs(parsed.operations);
   const submittedBy = resolveActorId(parsed.submittedBy);
+
+  // ChangeRequest-submission gate (node ACL): proposing against an existing
+  // node requires `changeRequest` level on it; creating a new node requires it
+  // on the target parent. A create op parented to a ref (a node THIS CR
+  // creates) is covered by that earlier create op's own parent check.
+  for (const operation of parsed.operations) {
+    if (operation.kind === "create") {
+      if (!operation.parentNodeRef) {
+        await assertNodePermission(
+          operation.parentNodeId ?? rootNodeIdForSpace(getContextSpaceId()),
+          "changeRequest",
+          submittedBy,
+        );
+      }
+    } else {
+      await assertNodePermission(operation.nodeId, "changeRequest", submittedBy);
+    }
+  }
+
   const changeRequestId = id("crq");
   const timestamp = now();
 
@@ -630,4 +662,84 @@ export const moveNode = async (input: z.input<typeof moveNodeInputSchema>) => {
       },
     ],
   });
+};
+
+/**
+ * Toggle the current actor's favorite on a node — Notion-style "⭐ Favorites":
+ * a true upsert-or-delete against the `(nodeId, actorId)` unique pair
+ * (`busabase_favorites_node_actor_uniq`), never a blind insert. Race-safe at
+ * the DB level, not just in-app: a concurrent double-toggle (two rapid clicks
+ * before the first settles) can never create a duplicate row — the losing
+ * insert is a no-op via `onConflictDoNothing`, so the pair always ends in a
+ * single consistent state. Requires the node to be visible to the actor
+ * first — favoriting an unknown/invisible nodeId is a clean NOT_FOUND, never
+ * a silent no-op. Purely additive: never touches the node's real position in
+ * the tree, only this side table.
+ */
+export const toggleNodeFavorite = async (
+  nodeId: string,
+  actorId: string,
+): Promise<{ favorited: boolean }> => {
+  await ensureReady();
+  const db = await getDb();
+  const spaceId = getContextSpaceId();
+  await assertNodeVisible(nodeId, actorId);
+
+  const [existing] = await db
+    .select({ id: busabaseFavorites.id })
+    .from(busabaseFavorites)
+    .where(and(eq(busabaseFavorites.nodeId, nodeId), eq(busabaseFavorites.actorId, actorId)))
+    .limit(1);
+
+  if (existing) {
+    await db.delete(busabaseFavorites).where(eq(busabaseFavorites.id, existing.id));
+    return { favorited: false };
+  }
+
+  await db
+    .insert(busabaseFavorites)
+    .values({ id: id("fav"), spaceId, nodeId, actorId, createdAt: now() })
+    .onConflictDoNothing();
+  return { favorited: true };
+};
+
+/**
+ * The current actor's favorited nodes, newest-favorited first, PO→VO mapped
+ * via the same `toNodeVO` mapper every other node read uses. Filtered through
+ * the SAME `archivedAt IS NULL` + `buildNodeVisibilityCondition` predicate
+ * `listNodes`/`searchBusabase` already apply (not a second, possibly
+ * diverging filter) — a favorited node that's later archived, purged, or
+ * (cloud) hidden from this actor silently drops out of the list. The
+ * `busabase_favorites` row itself is left untouched either way: a later
+ * restore / visibility grant makes the node reappear on the next fetch,
+ * since this is a read-time filter, not a destructive delete of the favorite.
+ */
+export const listFavoriteNodes = async (actorId: string): Promise<NodeVO[]> => {
+  await ensureReady();
+  const db = await getDb();
+  const spaceId = getContextSpaceId();
+
+  const rows = await db
+    .select({ node: busabaseNodes })
+    .from(busabaseFavorites)
+    .innerJoin(busabaseNodes, eq(busabaseNodes.id, busabaseFavorites.nodeId))
+    .where(
+      and(
+        eq(busabaseFavorites.actorId, actorId),
+        eq(busabaseNodes.spaceId, spaceId),
+        isNull(busabaseNodes.archivedAt),
+        buildNodeVisibilityCondition(db, actorId),
+      ),
+    )
+    .orderBy(desc(busabaseFavorites.createdAt));
+
+  const favoriteNodes = rows.map((row) => row.node);
+  if (favoriteNodes.length === 0) return [];
+
+  const baseRows = await fetchBaseRowsForNodeIds(
+    db,
+    favoriteNodes.map((node) => node.id),
+  );
+  const baseIdByNodeId = new Map(baseRows.map((base) => [base.nodeId, base.id]));
+  return favoriteNodes.map((node) => toNodeVO(node, baseIdByNodeId.get(node.id) ?? null));
 };

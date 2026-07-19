@@ -139,10 +139,9 @@ export async function requestUploadUrl(
     ? contentAddressedKey(input.contentHash, input.fileName)
     : `attachments/${userId}/${context}/${generateNanoID()}${ext ? `.${ext}` : ""}`;
 
-  // Dev mode uploads through the app's /api/dev/upload route (avoids
-  // presigned-URL CORS/signature issues with the local storage adapter).
-  // The storage adapter returns the right target: s3/r2/minio presign for a direct
-  // browser→bucket PUT; local returns the dev relay sentinel (handled by the uploader).
+  // The storage adapter returns the right target: an s3/r2/minio presign for a
+  // direct browser→bucket PUT, or the local dev relay URL carrying ?key=. Either
+  // way the client just PUTs the bytes to it — no dev-vs-prod branching.
   const uploadUrl = await storage.generateUploadPresignedUrl(
     storageKey,
     input.mimeType,

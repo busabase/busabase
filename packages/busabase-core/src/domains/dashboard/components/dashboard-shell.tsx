@@ -1,16 +1,29 @@
 "use client";
 
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";
 import { hasCapability } from "busabase-contract/domains";
 import type { NodeVO } from "busabase-contract/types";
 import { Toaster } from "kui/sonner";
-import { Activity, FolderOpen, Images, Inbox, Plus, Search } from "lucide-react";
-import type { NavDropPosition, NavNodeDropParams } from "openlib/ui/dashboard";
+import { Activity, FolderOpen, Images, Inbox, Plus, Search, Shield, Star } from "lucide-react";
+import type { NavDropPosition, NavItemAction, NavNodeDropParams } from "openlib/ui/dashboard";
 import { DashboardLayout, type NavGroup, type NavItem, NavMain } from "openlib/ui/dashboard";
 import type { ComponentProps, ReactNode } from "react";
-import { useMemo } from "react";
+import { useCallback, useMemo, useState } from "react";
+import { toast } from "sonner";
 import { coreMessagesByLocale } from "../../../i18n";
 import { nodeIconForType } from "../helpers/node-icons";
 import type { MoveNodePayload } from "../hooks/use-move-node";
+import { NodePermissionsDialog } from "./node-permissions-button";
+
+/** Stable, always-disabled query used in place of `orpc.nodes.listFavorites.queryOptions({})`
+ * when a host omitted `orpc` — keeps the `useQuery` call unconditional (rules of
+ * hooks) while never actually firing a request. */
+const DISABLED_FAVORITES_QUERY = {
+  queryKey: ["busabase-dashboard-shell", "favorites-disabled"],
+  queryFn: async () => [] as NodeVO[],
+  enabled: false,
+};
 
 const isCoreLocale = (locale: string | undefined): locale is keyof typeof coreMessagesByLocale =>
   locale !== undefined && locale in coreMessagesByLocale;
@@ -46,12 +59,17 @@ interface BusabaseDashboardShellProps {
   onCreateClick: (parent?: { id: string; name: string }) => void;
   /** Identity + presentation forwarded to the shared `DashboardLayout`. */
   chrome: BusabaseDashboardChrome;
+  /**
+   * oRPC query utils, needed only to power the sidebar "•••" → Permissions
+   * entry (opens the shared `NodePermissionsDialog`). Omit to leave the sidebar
+   * without a Permissions action — the node-detail toolbars carry their own
+   * `NodePermissionsButton` regardless.
+   */
+  orpc?: BusabaseQueryUtils;
   /** Active UI locale for the sidebar nav labels (defaults to English). */
   locale?: string;
   /** Optional top-level destinations hidden by a host that exposes them elsewhere. */
   hiddenNavItems?: Array<"assets">;
-  /** Optional top-level destinations pinned with Inbox/Search by a host. */
-  pinnedNavItems?: Array<"activity">;
   /**
    * Wires up sidebar drag-and-drop reordering/reparenting. Omit to leave the
    * tree read-only (no drag handles rendered). The host owns the actual
@@ -100,14 +118,20 @@ export function BusabaseDashboardShell({
   onSearchClick,
   onCreateClick,
   chrome,
+  orpc,
   locale,
   hiddenNavItems = [],
-  pinnedNavItems = [],
   onMoveNode,
   loadingNodeIds,
   onExpandNode,
   checkIsDescendant,
 }: BusabaseDashboardShellProps) {
+  // The node targeted by the sidebar "•••" → Permissions action; drives the
+  // one shared `NodePermissionsDialog` rendered below (only when a host wired
+  // `orpc`). Same single-dialog-per-shell pattern as the node-detail toolbars.
+  const [permissionsTarget, setPermissionsTarget] = useState<{ id: string; name: string } | null>(
+    null,
+  );
   // Flat id → NodeVO index over the REAL tree (not the display-flattened
   // NavItem tree) so drag-and-drop can check a drop target's actual type and
   // walk its true ancestor chain, regardless of how the sidebar visually
@@ -216,16 +240,140 @@ export function BusabaseDashboardShell({
   const basesLabel = nav.bases;
   const assetsLabel = nav.assets;
   const hiddenNavItemSet = new Set(hiddenNavItems);
-  const pinnedNavItemSet = new Set(pinnedNavItems);
+
+  // Notion-style Favorites: the current actor's favorited nodes, kept in their
+  // own TanStack Query entry (invalidated after every toggle below) — never
+  // wired when a host omitted `orpc` (same gate the Permissions action uses),
+  // in which case `DISABLED_FAVORITES_QUERY` keeps the `useQuery` call itself
+  // unconditional (rules of hooks) while never firing a request.
+  const queryClient = useQueryClient();
+  const favoritesQuery = useQuery(
+    orpc ? orpc.nodes.listFavorites.queryOptions({}) : DISABLED_FAVORITES_QUERY,
+  );
+  const favoriteNodes = favoritesQuery.data ?? [];
+  const favoriteNodeIds = useMemo(
+    () => new Set(favoriteNodes.map((node) => node.id)),
+    [favoriteNodes],
+  );
+  const toggleFavoriteMutation = useMutation(
+    orpc
+      ? orpc.nodes.toggleFavorite.mutationOptions()
+      : { mutationFn: async () => Promise.reject(new Error("Favorites require orpc")) },
+  );
+  // Plain invalidate-and-refetch (no optimistic cache write): the Favorites
+  // list is small and this keeps the toggle handler simple — P0 tradeoff, see
+  // the sidebar-favorites spec's Roadmap for the optimistic-update follow-up.
+  const handleToggleFavorite = useCallback(
+    (node: NodeVO) => {
+      if (!orpc) return;
+      const wasFavorited = favoriteNodeIds.has(node.id);
+      toggleFavoriteMutation.mutate(
+        { nodeId: node.id },
+        {
+          onSuccess: () => {
+            queryClient.invalidateQueries({
+              queryKey: orpc.nodes.listFavorites.queryOptions({}).queryKey,
+            });
+            toast.success(messages.favorites.updated);
+          },
+          onError: () => {
+            toast.error(
+              wasFavorited ? messages.favorites.removeFailed : messages.favorites.addFailed,
+            );
+          },
+        },
+      );
+    },
+    [
+      orpc,
+      queryClient,
+      favoriteNodeIds,
+      toggleFavoriteMutation,
+      messages.favorites.updated,
+      messages.favorites.removeFailed,
+      messages.favorites.addFailed,
+    ],
+  );
+
+  // Single source of truth for "top-level after root-unwrap" — the exact
+  // NavItem list rendered as the Bases tree's top level today. Hoisted into
+  // its own memo (rather than an inline call) so it can be reused as-is by
+  // the sidebar without recomputing per render.
+  const baseNavItems = useMemo(
+    () =>
+      buildKnowledgeBaseItems(
+        nodes,
+        (node) => onCreateClick({ id: node.id, name: node.name }),
+        {
+          newLabel: nav.new,
+          openLabel: messages.common.open,
+          permissionsLabel: messages.permissions.title,
+          favoriteAddLabel: messages.favorites.add,
+          favoriteRemoveLabel: messages.favorites.remove,
+        },
+        loadingNodeIds,
+        // Only offer the sidebar Permissions action when a host wired orpc — the
+        // dialog can't do anything without it.
+        orpc ? (node) => setPermissionsTarget({ id: node.id, name: node.name }) : undefined,
+        // Same orpc gate for the Favorites toggle action — no persistence layer
+        // to call without it.
+        orpc ? { favoriteNodeIds, onToggle: handleToggleFavorite } : undefined,
+      ),
+    [
+      nodes,
+      onCreateClick,
+      nav.new,
+      messages.common.open,
+      messages.permissions.title,
+      messages.favorites.add,
+      messages.favorites.remove,
+      loadingNodeIds,
+      orpc,
+      favoriteNodeIds,
+      handleToggleFavorite,
+    ],
+  );
+
+  // Favorites nav group: a FLAT list of the actor's favorited nodes (already
+  // fully resolved `NodeVO`s from `nodes.listFavorites`, not a tree to walk),
+  // built via the same `buildNavItem` every Bases-tree row uses — see
+  // `buildFavoriteItems` below for why each result is flattened to a plain,
+  // non-expandable row. Only ever rendered non-empty (see `scrollNav` below),
+  // mirroring the existing `scrollShortcutItems.length > 0` pattern.
+  const favoriteNavItems = useMemo(
+    () =>
+      buildFavoriteItems(
+        favoriteNodes,
+        {
+          openLabel: messages.common.open,
+          permissionsLabel: messages.permissions.title,
+          favoriteAddLabel: messages.favorites.add,
+          favoriteRemoveLabel: messages.favorites.remove,
+        },
+        orpc ? (node) => setPermissionsTarget({ id: node.id, name: node.name }) : undefined,
+        orpc ? { favoriteNodeIds, onToggle: handleToggleFavorite } : undefined,
+      ),
+    [
+      favoriteNodes,
+      messages.common.open,
+      messages.permissions.title,
+      messages.favorites.add,
+      messages.favorites.remove,
+      orpc,
+      favoriteNodeIds,
+      handleToggleFavorite,
+    ],
+  );
+
   const scrollShortcutItems: NavItem[] = [
-    ...(pinnedNavItemSet.has("activity")
-      ? []
-      : [{ title: nav.activity, url: "/activity", icon: Activity }]),
+    { title: nav.activity, url: "/activity", icon: Activity },
     ...(hiddenNavItemSet.has("assets")
       ? []
       : [{ title: assetsLabel, url: "/assets", icon: Images }]),
   ];
-  // Pinned nav (fixed at the top, never scrolls): Inbox + Search + optional host shortcuts.
+  // Pinned nav (fixed at the top, never scrolls): Inbox + Search only —
+  // everything else (Activity, Favorites, Bases) scrolls underneath, same
+  // convention as apps/buda's own locked-header sidebar.
   const pinnedNav: NavGroup[] = [
     {
       label: "",
@@ -242,14 +390,12 @@ export function BusabaseDashboardShell({
           badge: activeChangeRequestCount || undefined,
         },
         { title: nav.search, url: "", icon: Search, onClick: "search" },
-        ...(pinnedNavItemSet.has("activity")
-          ? [{ title: nav.activity, url: "/activity", icon: Activity }]
-          : []),
       ],
     },
   ];
 
-  // Scrollable nav (everything below the pinned header): optional shortcuts + Bases tree.
+  // Scrollable nav (everything below the pinned header): optional shortcuts +
+  // Favorites (only when non-empty) + Bases tree.
   const scrollNav: NavGroup[] = [
     ...(scrollShortcutItems.length > 0
       ? [
@@ -263,14 +409,21 @@ export function BusabaseDashboardShell({
           },
         ]
       : []),
+    // An empty Favorites section is exactly the clutter this feature is meant
+    // to reduce — only rendered once the actor has favorited at least one
+    // (still-visible, non-archived) node.
+    ...(favoriteNavItems.length > 0
+      ? [
+          {
+            label: nav.favorites,
+            items: favoriteNavItems,
+            className: "group-data-[collapsible=icon]:hidden",
+          },
+        ]
+      : []),
     {
       label: basesLabel,
-      items: buildKnowledgeBaseItems(
-        nodes,
-        (node) => onCreateClick({ id: node.id, name: node.name }),
-        { newLabel: nav.new, openLabel: messages.common.open },
-        loadingNodeIds,
-      ),
+      items: baseNavItems,
       headerAction: Plus,
       headerActionTitle: nav.new,
       className: "group-data-[collapsible=icon]:hidden",
@@ -317,6 +470,17 @@ export function BusabaseDashboardShell({
       >
         {children}
       </DashboardLayout>
+      {orpc && permissionsTarget && (
+        <NodePermissionsDialog
+          nodeId={permissionsTarget.id}
+          nodeName={permissionsTarget.name}
+          onOpenChange={(next) => {
+            if (!next) setPermissionsTarget(null);
+          }}
+          open
+          orpc={orpc}
+        />
+      )}
     </div>
   );
 }
@@ -328,6 +492,25 @@ function nodeHref(node: NodeVO): string | null {
     return node.slug ? `/base/${node.slug}` : null;
   }
   return hasCapability(node.type, "hasDetail") ? `/${node.type}/${node.slug}` : null;
+}
+
+interface NavItemLabels {
+  newLabel: string;
+  openLabel: string;
+  permissionsLabel: string;
+  favoriteAddLabel: string;
+  favoriteRemoveLabel: string;
+}
+
+/**
+ * Wires the sidebar "•••" → "Add to Favorites"/"Remove from Favorites" toggle
+ * (label reflects current state) into `buildNavItem` — omit to leave the
+ * action off entirely (no host wired `orpc`, same gate the Permissions action
+ * uses, since there's no persistence layer to call without it).
+ */
+interface FavoriteActionContext {
+  favoriteNodeIds: Set<string>;
+  onToggle: (node: NodeVO) => void;
 }
 
 /**
@@ -351,11 +534,38 @@ function nodeHref(node: NodeVO): string | null {
 function buildNavItem(
   node: NodeVO,
   onCreateChild: (node: NodeVO) => void,
-  labels: { newLabel: string; openLabel: string },
+  labels: NavItemLabels,
   loadingNodeIds?: Set<string>,
+  onOpenPermissions?: (node: NodeVO) => void,
+  favoriteContext?: FavoriteActionContext,
 ): NavItem[] {
   if (hasCapability(node.type, "hidden")) return [];
   const icon = nodeIconForType(node.type);
+  // The "•••" Permissions action, shared by container and leaf rows so every
+  // node type surfaced in the sidebar can be managed in place (matches buda's
+  // per-agent Permissions menu entry). Only present when the host wired orpc.
+  const permissionsAction: NavItemAction | null = onOpenPermissions
+    ? {
+        title: labels.permissionsLabel,
+        icon: Shield,
+        onSelect: () => onOpenPermissions(node),
+      }
+    : null;
+  // The "•••" Favorites toggle — same shared mechanism, one click, same menu
+  // as Open/Permissions (see apps/busabase/content/spec/sidebar-favorites.md).
+  // Label reflects the node's CURRENT membership in `favoriteNodeIds`, so a
+  // freshly-favorited row immediately reads "Remove from Favorites" the next
+  // time this menu opens (driven by the `nodes.listFavorites` query, refetched
+  // after every toggle).
+  const favoriteAction: NavItemAction | null = favoriteContext
+    ? {
+        title: favoriteContext.favoriteNodeIds.has(node.id)
+          ? labels.favoriteRemoveLabel
+          : labels.favoriteAddLabel,
+        icon: Star,
+        onSelect: () => favoriteContext.onToggle(node),
+      }
+    : null;
   if (hasCapability(node.type, "container")) {
     const url = nodeHref(node) ?? "";
     return [
@@ -364,25 +574,42 @@ function buildNavItem(
         url,
         icon,
         id: node.id,
-        items: buildNavChildren(node, onCreateChild, labels, loadingNodeIds),
+        items: buildNavChildren(
+          node,
+          onCreateChild,
+          labels,
+          loadingNodeIds,
+          onOpenPermissions,
+          favoriteContext,
+        ),
         hasChildren: node.hasChildren ?? node.children.length > 0,
         isLoadingChildren: loadingNodeIds?.has(node.id) ?? false,
         onAddChild: () => onCreateChild(node),
         addChildTitle: labels.newLabel,
-        actions: url
-          ? [
-              {
-                title: labels.openLabel,
-                url,
-                icon: FolderOpen,
-              },
-            ]
-          : [],
+        actions: [
+          ...(url ? [{ title: labels.openLabel, url, icon: FolderOpen }] : []),
+          ...(permissionsAction ? [permissionsAction] : []),
+          ...(favoriteAction ? [favoriteAction] : []),
+        ],
       },
     ];
   }
   const url = nodeHref(node);
-  return url ? [{ title: node.name, url, icon, id: node.id }] : [];
+  const leafActions = [
+    ...(permissionsAction ? [permissionsAction] : []),
+    ...(favoriteAction ? [favoriteAction] : []),
+  ];
+  return url
+    ? [
+        {
+          title: node.name,
+          url,
+          icon,
+          id: node.id,
+          actions: leafActions.length > 0 ? leafActions : undefined,
+        },
+      ]
+    : [];
 }
 
 // Recursively build every child of `node` as a NavItem — a container child
@@ -396,11 +623,13 @@ function buildNavItem(
 function buildNavChildren(
   node: NodeVO,
   onCreateChild: (node: NodeVO) => void,
-  labels: { newLabel: string; openLabel: string },
+  labels: NavItemLabels,
   loadingNodeIds?: Set<string>,
+  onOpenPermissions?: (node: NodeVO) => void,
+  favoriteContext?: FavoriteActionContext,
 ): NavItem[] {
   return node.children.flatMap((child) =>
-    buildNavItem(child, onCreateChild, labels, loadingNodeIds),
+    buildNavItem(child, onCreateChild, labels, loadingNodeIds, onOpenPermissions, favoriteContext),
   );
 }
 
@@ -413,13 +642,69 @@ function buildNavChildren(
 function buildKnowledgeBaseItems(
   nodes: NodeVO[],
   onCreateChild: (node: NodeVO) => void,
-  labels: { newLabel: string; openLabel: string },
+  labels: NavItemLabels,
   loadingNodeIds?: Set<string>,
+  onOpenPermissions?: (node: NodeVO) => void,
+  favoriteContext?: FavoriteActionContext,
 ): NavItem[] {
   const top =
     nodes.length === 1 && hasCapability(nodes[0].type, "container") && !nodes[0].baseId
       ? nodes[0].children
       : nodes;
 
-  return top.flatMap((node) => buildNavItem(node, onCreateChild, labels, loadingNodeIds));
+  return top.flatMap((node) =>
+    buildNavItem(node, onCreateChild, labels, loadingNodeIds, onOpenPermissions, favoriteContext),
+  );
+}
+
+// A favorited node's own NavItem stripped of every container-only field
+// (`items`/`hasChildren`/`isLoadingChildren`/`onAddChild`/`addChildTitle`) —
+// every node type the sidebar renders has its own detail-page url (see
+// `nodeHref`), so this never loses navigability, only the (here meaningless,
+// since a favorited NodeVO carries no live `children`) folder chrome a
+// container-type favorite would otherwise render.
+function toFlatFavoriteNavItem(item: NavItem): NavItem {
+  const {
+    items: _items,
+    hasChildren: _hasChildren,
+    isLoadingChildren: _isLoadingChildren,
+    onAddChild: _onAddChild,
+    addChildTitle: _addChildTitle,
+    ...rest
+  } = item;
+  return rest;
+}
+
+/**
+ * Build the Favorites nav group from a FLAT list of already-resolved
+ * `NodeVO`s (`nodes.listFavorites`'s result) — NOT a tree to walk, unlike
+ * `buildKnowledgeBaseItems` above. Reuses `buildNavItem` (same
+ * title/icon/actions treatment every Bases-tree row gets, including the
+ * Favorites toggle itself so "Remove from Favorites" is available right from
+ * this group too) against each node with no `onCreateChild` affordance (a
+ * Favorites shortcut row never offers "add child here"), then flattens away
+ * any container-only fields the underlying node type might otherwise render.
+ */
+function buildFavoriteItems(
+  favoriteNodes: NodeVO[],
+  labels: Pick<
+    NavItemLabels,
+    "openLabel" | "permissionsLabel" | "favoriteAddLabel" | "favoriteRemoveLabel"
+  >,
+  onOpenPermissions?: (node: NodeVO) => void,
+  favoriteContext?: FavoriteActionContext,
+): NavItem[] {
+  // `newLabel` (the "+ New" child-create affordance) never surfaces here — a
+  // Favorites shortcut row has no `onAddChild` — so an empty string is safe.
+  const itemLabels: NavItemLabels = { newLabel: "", ...labels };
+  return favoriteNodes.flatMap((node) =>
+    buildNavItem(
+      node,
+      () => undefined,
+      itemLabels,
+      undefined,
+      onOpenPermissions,
+      favoriteContext,
+    ).map(toFlatFavoriteNavItem),
+  );
 }

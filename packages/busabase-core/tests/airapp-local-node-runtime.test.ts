@@ -180,7 +180,10 @@ describe("acquireSandboxLock", () => {
   });
 });
 
-describe("runAirAppLocalNode — fail-open sandboxing-unsupported warning path", () => {
+// The dependency-check fail-open warning is specific to the `"srt"` engine
+// (the bare `"local-node"` engine spawns directly and never touches
+// SandboxManager), so this path is exercised with `engine: "srt"`.
+describe("runAirAppLocalNode — srt fail-open sandboxing-unsupported warning path", () => {
   afterEach(() => {
     vi.resetModules();
     vi.doUnmock("@anthropic-ai/sandbox-runtime");
@@ -223,7 +226,11 @@ describe("runAirAppLocalNode — fail-open sandboxing-unsupported warning path",
     const { runAirAppLocalNode } = await import("../src/domains/airapp/logic/local-node-runtime");
 
     const events: Array<{ type: string; [key: string]: unknown }> = [];
-    for await (const event of runAirAppLocalNode({ nodeId: "test-node", files: {} })) {
+    for await (const event of runAirAppLocalNode({
+      nodeId: "test-node",
+      files: {},
+      engine: "srt",
+    })) {
       events.push(event as { type: string; [key: string]: unknown });
     }
 

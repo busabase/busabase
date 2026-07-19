@@ -10,9 +10,20 @@ import {
   DropdownMenuTrigger,
 } from "kui/dropdown-menu";
 import { SidebarMenu, SidebarMenuButton, SidebarMenuItem, useSidebar } from "kui/sidebar";
-import { BadgeCheck, Bell, ChevronsUpDown, ExternalLink, LogOut } from "lucide-react";
+import {
+  BadgeCheck,
+  Bell,
+  Check,
+  ChevronsUpDown,
+  ExternalLink,
+  Loader2,
+  LogOut,
+  Plus,
+  Users,
+} from "lucide-react";
 import { AvatarLogo } from "../avatar-logo";
-import type { UserData, UserMenuItem } from "./types";
+import { useAccountSwitcherContext } from "./account-switcher-context";
+import type { NavUserLabels, SwitchableAccountView, UserData, UserMenuItem } from "./types";
 
 interface NavUserProps {
   user: UserData;
@@ -24,12 +35,24 @@ interface NavUserProps {
   extraMenuItems?: UserMenuItem[];
   /** Use compact button size (md:h-8 md:p-0) */
   compact?: boolean;
+  /**
+   * Accounts signed in on this device. Omit (or pass <2 entries) and the menu
+   * renders exactly as it did before account switching existed — the switcher
+   * and the split sign-out only appear once there is something to switch to.
+   */
+  accounts?: SwitchableAccountView[];
+  onSwitchAccount?: (sessionToken: string) => void;
+  /** Shown whenever provided, even for a single account. */
+  onAddAccount?: () => void;
+  /** Revokes every account on the device. Only rendered alongside `accounts`. */
+  onSignOutAll?: () => void;
+  /** Session token currently being switched to — renders a spinner on that row. */
+  switchingTo?: string | null;
+  /** At `maximumSessions`: adding another would silently not be listed, so the
+   *  entry is disabled and explained instead. */
+  isAccountsFull?: boolean;
   /** Labels for i18n support */
-  labels?: {
-    accountSettings?: string;
-    notifications?: string;
-    logOut?: string;
-  };
+  labels?: NavUserLabels;
 }
 
 export function NavUser({
@@ -40,10 +63,35 @@ export function NavUser({
   onNotificationClick,
   extraMenuItems,
   compact = false,
+  accounts: accountsProp,
+  onSwitchAccount: onSwitchAccountProp,
+  onAddAccount: onAddAccountProp,
+  onSignOutAll: onSignOutAllProp,
+  switchingTo: switchingToProp,
+  isAccountsFull: isAccountsFullProp,
   labels,
 }: NavUserProps) {
   const { isMobile, state } = useSidebar();
   const isCollapsed = !isMobile && state === "collapsed";
+
+  // NavUser renders from several sidebars per app; the context lets the app
+  // provide the switcher once instead of threading it through each of them.
+  // Explicit props still win, so a caller that already passes them (or a test)
+  // needs no provider.
+  const ctx = useAccountSwitcherContext();
+  const accounts = accountsProp ?? ctx?.accounts;
+  const onSwitchAccount = onSwitchAccountProp ?? ctx?.switchTo;
+  const onAddAccount = onAddAccountProp ?? ctx?.onAddAccount;
+  const onSignOutAll = onSignOutAllProp ?? ctx?.signOutAll;
+  const switchingTo = switchingToProp ?? ctx?.switchingTo ?? null;
+  const isAccountsFull = isAccountsFullProp ?? ctx?.isFull ?? false;
+  // Most callers' `onSignOut` is the app's raw `authClient.signOut()`, which
+  // revokes *every* signed-in account. Once the switcher is mounted, prefer its
+  // single-account revoke so "Log out" means what it says.
+  const handleSignOut = ctx?.signOutCurrent ?? onSignOut;
+
+  // Only a second account makes "switching" and "which one am I?" meaningful.
+  const hasMultipleAccounts = (accounts?.length ?? 0) > 1;
 
   return (
     <SidebarMenu>
@@ -68,20 +116,83 @@ export function NavUser({
             </SidebarMenuButton>
           </DropdownMenuTrigger>
           <DropdownMenuContent
-            className="w-[--radix-dropdown-menu-trigger-width] min-w-56 rounded-lg"
+            // The account rows make this menu grow: at the 5-account cap it is
+            // already ~600px, which does not fit a short laptop viewport, and
+            // raising `maximumSessions` would grow it without bound. Radix
+            // measures the space left to the viewport edge for us; cap to that
+            // and scroll, so the menu fits any screen at any account count.
+            className="flex max-h-[var(--radix-dropdown-menu-content-available-height)] w-[--radix-dropdown-menu-trigger-width] min-w-56 flex-col overflow-y-auto rounded-lg"
             side={isMobile ? "bottom" : "right"}
             align="end"
             sideOffset={4}
+            collisionPadding={8}
           >
-            <DropdownMenuLabel className="p-0 font-normal">
-              <div className="flex items-center gap-2 px-1 py-1.5 text-left text-sm">
-                <AvatarLogo src={user.avatar} fallback={user.name} size="sm" />
-                <div className="grid flex-1 text-left text-sm leading-tight">
-                  <span className="truncate font-medium">{user.name}</span>
-                  <span className="truncate text-xs">{user.email}</span>
+            {hasMultipleAccounts ? (
+              // Which account is active must be unambiguous without opening a
+              // submenu — mis-acting as the wrong account is the real risk of
+              // multi-account, not slow switching.
+              <DropdownMenuGroup>
+                {accounts?.map((account) => (
+                  <DropdownMenuItem
+                    key={account.sessionToken}
+                    onSelect={(event) => {
+                      if (account.isActive) return;
+                      // Keep the menu open so the spinner is visible.
+                      event.preventDefault();
+                      onSwitchAccount?.(account.sessionToken);
+                    }}
+                    className={`gap-2 ${account.isActive ? "bg-accent" : ""}`}
+                    aria-current={account.isActive ? "true" : undefined}
+                  >
+                    <AvatarLogo
+                      src={account.image ?? undefined}
+                      fallback={account.name}
+                      size="sm"
+                      className={account.isActive ? "" : "opacity-60"}
+                    />
+                    <div className="grid min-w-0 flex-1 text-left leading-tight">
+                      <span
+                        className={`truncate text-sm ${account.isActive ? "font-medium" : "font-normal text-muted-foreground"}`}
+                      >
+                        {account.name}
+                      </span>
+                      <span className="truncate text-muted-foreground text-xs">
+                        {account.email}
+                      </span>
+                    </div>
+                    {switchingTo === account.sessionToken ? (
+                      <Loader2 className="size-4 shrink-0 animate-spin" />
+                    ) : account.isActive ? (
+                      <Check className="size-4 shrink-0" />
+                    ) : null}
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuGroup>
+            ) : (
+              <DropdownMenuLabel className="p-0 font-normal">
+                <div className="flex items-center gap-2 px-1 py-1.5 text-left text-sm">
+                  <AvatarLogo src={user.avatar} fallback={user.name} size="sm" />
+                  <div className="grid flex-1 text-left text-sm leading-tight">
+                    <span className="truncate font-medium">{user.name}</span>
+                    <span className="truncate text-xs">{user.email}</span>
+                  </div>
                 </div>
-              </div>
-            </DropdownMenuLabel>
+              </DropdownMenuLabel>
+            )}
+            {onAddAccount && (
+              <DropdownMenuItem
+                onClick={isAccountsFull ? undefined : onAddAccount}
+                disabled={isAccountsFull}
+                className="gap-2"
+              >
+                {isAccountsFull ? <Users className="size-4" /> : <Plus className="size-4" />}
+                <span className="truncate">
+                  {isAccountsFull
+                    ? (labels?.accountsFull ?? "Account limit reached")
+                    : (labels?.addAccount ?? "Add account")}
+                </span>
+              </DropdownMenuItem>
+            )}
             <DropdownMenuSeparator />
             <DropdownMenuGroup>
               <DropdownMenuItem onClick={onAccountClick}>
@@ -139,10 +250,28 @@ export function NavUser({
               </>
             )}
             <DropdownMenuSeparator />
-            <DropdownMenuItem onClick={onSignOut}>
-              <LogOut />
-              {labels?.logOut ?? "Log out"}
-            </DropdownMenuItem>
+            {hasMultipleAccounts && onSignOutAll ? (
+              // `signOut()` revokes every account at once. With more than one
+              // signed in, a bare "Log out" would silently take them all down,
+              // so the two outcomes are named separately and the
+              // least-destructive one comes first.
+              <>
+                <DropdownMenuItem onClick={handleSignOut}>
+                  <LogOut />
+                  {labels?.logOutCurrent ?? "Log out current account"}
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={onSignOutAll}>
+                  <LogOut />
+                  <span className="truncate">{labels?.logOutAll ?? "Log out of all accounts"}</span>
+                  <span className="ml-auto text-muted-foreground text-xs">{accounts?.length}</span>
+                </DropdownMenuItem>
+              </>
+            ) : (
+              <DropdownMenuItem onClick={handleSignOut}>
+                <LogOut />
+                {labels?.logOut ?? "Log out"}
+              </DropdownMenuItem>
+            )}
           </DropdownMenuContent>
         </DropdownMenu>
       </SidebarMenuItem>

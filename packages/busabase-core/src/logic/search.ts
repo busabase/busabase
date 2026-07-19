@@ -28,6 +28,11 @@ import {
 } from "../domains/assets/logic/asset-texts-logic";
 import { openAssetTextSource } from "../domains/assets/logic/text-cache";
 import { hydrateChangeRequest, hydrateRecord } from "./cr-lifecycle";
+import {
+  buildBaseVisibilityExists,
+  buildNodeVisibilityCondition,
+  buildNodeVisibilityExists,
+} from "./node-acl";
 import { ensureReady } from "./seed";
 import { toBaseVO } from "./vo";
 
@@ -191,6 +196,7 @@ const searchAssetBackedFiles = async (query: string, limit: number): Promise<Sea
         eq(busabaseNodes.spaceId, spaceId),
         eq(busabaseAssetUsages.spaceId, spaceId),
         isNull(busabaseNodes.archivedAt),
+        buildNodeVisibilityCondition(db),
       ),
     )
     .orderBy(desc(busabaseAssetUsages.updatedAt))
@@ -350,6 +356,10 @@ export const searchBusabase = async (
             eq(busabaseFieldValues.spaceId, spaceId),
             isNotNull(busabaseFieldValues.valueText),
             isNull(busabaseFieldValues.deletedAt),
+            // Node ACL, applied IN the candidate SQL (not post-filtered) so
+            // pagination/hasMore never over-counts hidden rows — a mismatch
+            // there would both break paging and leak that private rows exist.
+            buildBaseVisibilityExists(db, busabaseFieldValues.baseId),
             or(
               textSearch,
               ilike(busabaseFieldValues.valueText, pattern),
@@ -396,6 +406,7 @@ export const searchBusabase = async (
             and(
               eq(busabaseBases.spaceId, spaceId),
               isNull(busabaseBases.archivedAt),
+              buildNodeVisibilityExists(db, busabaseBases.nodeId),
               or(
                 ilike(busabaseBases.name, pattern),
                 ilike(busabaseBases.description, pattern),
@@ -411,6 +422,7 @@ export const searchBusabase = async (
           .where(
             and(
               eq(busabaseBaseFields.spaceId, spaceId),
+              buildBaseVisibilityExists(db, busabaseBaseFields.baseId),
               or(ilike(busabaseBaseFields.name, pattern), ilike(busabaseBaseFields.slug, pattern)),
             ),
           )

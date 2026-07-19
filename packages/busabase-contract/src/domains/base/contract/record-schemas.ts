@@ -102,6 +102,12 @@ export const createChangeRequestInputSchema = z.object({
     .describe(
       "Optional client-supplied key that dedupes retries. Scoped per base + submitter: calling this endpoint again with the SAME idempotencyKey (e.g. after a timeout or a 5xx where you couldn't tell if the first call succeeded) returns the change request created by the first call instead of creating a duplicate. Omit for normal one-shot calls; only set it when you might retry.",
     ),
+  // Review-first by default: without `autoMerge: true`, this proposes the record
+  // as a pending ChangeRequest (status "in_review") instead of creating it
+  // immediately. Pass `autoMerge: true` only for callers that don't need human
+  // review — approves and merges the change request right away, returning the
+  // materialized record instead of the pending ChangeRequest.
+  autoMerge: z.boolean().optional().default(false),
 });
 
 export const createBulkChangeRequestInputSchema = z.object({

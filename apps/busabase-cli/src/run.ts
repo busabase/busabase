@@ -22,6 +22,7 @@ import { banner } from "./banner.js";
 import { loadDotEnvFile } from "./config-file.js";
 import { type OutputFormat, render } from "./format.js";
 import { maybeAutoRefresh, runLogin, runLogout, runRefresh } from "./login.js";
+import { runInstall, runPublish } from "./package/commands.js";
 
 /**
  * CLI config = the SDK's resolved client config plus the terminal-only `output`
@@ -215,6 +216,39 @@ function parseJsonValue(raw: string, flagName: string): unknown {
   }
 }
 
+/**
+ * Format a non-OK raw-fetch response body into a readable error message. The
+ * server's JSON error shape is `{ error, code, data }` (see `encodeOpenApiError`
+ * in apps/busabase/src/app/api/v1/[[...rest]]/route.ts) — when the body parses
+ * as that shape, surface `error` (and, if present, each `data.issues` entry as
+ * `path: message`) instead of the raw JSON blob. Falls back to the raw text for
+ * any non-JSON / unrecognized body so nothing is ever silently dropped.
+ */
+function formatRawErrorBody(status: number, statusText: string, text: string): string {
+  try {
+    const parsed = JSON.parse(text) as { error?: unknown; data?: unknown };
+    if (typeof parsed.error === "string") {
+      const issues = (parsed.data as { issues?: unknown } | undefined)?.issues;
+      let message = parsed.error;
+      if (Array.isArray(issues) && issues.length > 0) {
+        const details = issues
+          .map((issue) => {
+            if (!issue || typeof issue !== "object") return String(issue);
+            const { path, message: issueMessage } = issue as { path?: unknown; message?: unknown };
+            const pathLabel = Array.isArray(path) ? path.join(".") : undefined;
+            return pathLabel ? `${pathLabel}: ${issueMessage}` : String(issueMessage ?? issue);
+          })
+          .join("; ");
+        message = `${message} — ${details}`;
+      }
+      return `HTTP ${status} ${statusText}: ${message}`;
+    }
+  } catch {
+    // Not JSON (or not the expected shape) — fall through to the raw text below.
+  }
+  return `HTTP ${status} ${statusText}: ${text}`;
+}
+
 /** Raw fetch for endpoints outside the typed contract (health / openapi / api passthrough). */
 async function rawFetch(
   config: ResolvedConfig,
@@ -234,7 +268,7 @@ async function rawFetch(
   });
   const text = await res.text();
   if (!res.ok) {
-    throw new Error(`HTTP ${res.status} ${res.statusText}: ${text}`);
+    throw new Error(formatRawErrorBody(res.status, res.statusText, text));
   }
   if (!text) return null;
   try {
@@ -382,6 +416,29 @@ function runAction(state: CliState, handler: Handler) {
     await maybeAutoRefresh(config.baseUrl, config.apiKey);
     const client = createBusabaseClient(config);
     const result = await handler(client, opts, config);
+    console.log(render(result, config.output));
+  };
+}
+
+type ArgHandler = (
+  arg: string,
+  client: BusabaseClient,
+  opts: OptionValues,
+  config: ResolvedConfig,
+) => Promise<unknown>;
+
+/**
+ * {@link runAction} for a command with one positional argument. Commander passes
+ * `(arg, opts, cmd)` to such an action, so the arity differs from a flags-only leaf.
+ */
+function runArgAction(state: CliState, handler: ArgHandler) {
+  return async (arg: string, _opts: OptionValues, cmd: Command): Promise<void> => {
+    const opts = cmd.optsWithGlobals();
+    const config = resolveConfig(opts);
+    state.config = config;
+    await maybeAutoRefresh(config.baseUrl, config.apiKey);
+    const client = createBusabaseClient(config);
+    const result = await handler(arg, client, opts, config);
     console.log(render(result, config.output));
   };
 }
@@ -777,6 +834,50 @@ Examples:
       }),
     );
 
+  addGlobalFlags(nodes.command("archive"))
+    .description(
+      "Propose archiving a node via a Change Request (review-first by default) — the only way to move a node into the archived state; DELETE /nodes/{nodeId} (`nodes purge`) only permanently removes a node that is ALREADY archived",
+    )
+    .requiredOption("--node-id <id>", "node id to archive")
+    .option("--message <text>", "reviewer-facing Change Request message")
+    .option("--submitted-by <name>", "producer label")
+    .option(
+      "--auto-merge",
+      "skip review and archive immediately (default: propose a pending Change Request)",
+    )
+    .addHelpText(
+      "after",
+      `
+Examples:
+  busabase-cli nodes archive --node-id nod_123
+  busabase-cli nodes archive --node-id nod_123 --auto-merge   # skip review, archive immediately`,
+    )
+    .action(
+      runAction(state, (client, opts) =>
+        client.nodes.createChangeRequest({
+          message: (opts.message as string | undefined) ?? "Archive node",
+          submittedBy: opts.submittedBy as string | undefined,
+          autoMerge: Boolean(opts.autoMerge),
+          operations: [{ kind: "delete", nodeId: opts.nodeId as string }],
+        }),
+      ),
+    );
+
+  addGlobalFlags(nodes.command("list-archived"))
+    .description(
+      "List archived (soft-deleted) nodes — folders, Docs, Skills, etc. (the Trash view)",
+    )
+    .action(runAction(state, (client) => client.nodes.listArchived()));
+
+  addGlobalFlags(nodes.command("purge"))
+    .description(
+      "Permanently delete an ALREADY-archived node and its subtree (irreversible). Archive it first with `nodes archive` if it isn't archived yet.",
+    )
+    .requiredOption("--node-id <id>", "archived node id to purge")
+    .action(
+      runAction(state, (client, opts) => client.nodes.purge({ nodeId: opts.nodeId as string })),
+    );
+
   addGlobalFlags(nodes.command("move"))
     .description("Move or reorder a node (applied immediately, no review needed)")
     .requiredOption("--node-id <id>", "node id to move")
@@ -928,17 +1029,22 @@ Examples:
       }),
     );
   addGlobalFlags(bases.command("create-change-request"))
-    .description("Propose a new record via a Change Request")
+    .description("Propose a new record via a Change Request — review-first by default")
     .requiredOption("--base-id <id>", "target Base id")
     .requiredOption("--fields-json <json|@file>", "record fields as JSON, or @file.json")
     .option("--message <text>", "reviewer-facing Change Request message")
     .option("--submitted-by <name>", "producer label")
+    .option(
+      "--auto-merge",
+      "skip review and create the record immediately (default: propose a pending Change Request)",
+    )
     .addHelpText(
       "after",
       `
 Examples:
   busabase-cli bases create-change-request --base-id bse_123 --fields-json '{"title":"Hello","status":"draft"}'
-  busabase-cli bases create-change-request --base-id bse_123 --fields-json @record.json`,
+  busabase-cli bases create-change-request --base-id bse_123 --fields-json @record.json
+  busabase-cli bases create-change-request --base-id bse_123 --fields-json '{"title":"Hello"}' --auto-merge   # skip review, create immediately`,
     )
     .action(
       runAction(state, (client, opts) =>
@@ -950,6 +1056,7 @@ Examples:
           >,
           message: opts.message as string | undefined,
           submittedBy: opts.submittedBy as string | undefined,
+          ...(opts.autoMerge ? { autoMerge: true } : {}),
         }),
       ),
     );
@@ -1327,6 +1434,81 @@ Examples:
           assetId: opts.assetId as string,
           startLine: opts.startLine as number,
           endLine: opts.endLine as number,
+        }),
+      ),
+    );
+
+  addGlobalFlags(program.command("install"))
+    .description("Install a Busabase package from a GitHub repo into this space")
+    .argument("<github-url>", "GitHub repo URL, optionally /tree/<ref>[/<subdir>]")
+    .option("--into-folder <name>", "target folder slug (default: the package's manifest name)")
+    .option("--dry-run", "print the plan (tree, record counts, collisions) and create nothing")
+    .option(
+      "--auto-merge",
+      "merge the package's records and docs on the spot instead of leaving them as change requests to review — this TRUSTS THE PACKAGE AUTHOR, since skills and AirApps carry code your agents will run (default: review first)",
+    )
+    .option(
+      "--rename",
+      "install colliding items under suffixed slugs (-2, -3, …) instead of failing",
+    )
+    .addHelpText(
+      "after",
+      `
+The URL's git ref is the version pin — a tag installs that tag's content forever,
+even after the branch moves on. GITHUB_TOKEN is honored for private repos.
+
+Examples:
+  busabase-cli install https://github.com/acme/support-kb-template
+  busabase-cli install https://github.com/acme/packages/tree/v1.2.0/skills/pdf-summarizer
+  busabase-cli install https://github.com/acme/support-kb-template --dry-run
+  busabase-cli install https://github.com/acme/support-kb-template --into-folder support --auto-merge
+
+Folders, Bases, their fields and their views are structure and are always created
+immediately. Records are content: by default they land as change requests for you
+to review, and --auto-merge merges them on the spot instead.
+
+A package whose records carry relation values requires --auto-merge — a relation
+stores the ids of the records it points at, and those exist only once the records
+are merged, so review-first would install every relation empty. Defining a relation
+field with nothing linked yet does not trigger this.`,
+    )
+    .action(
+      runArgAction(state, (repoUrl, client, opts, config) =>
+        runInstall(client, repoUrl, {
+          intoFolder: opts.intoFolder as string | undefined,
+          dryRun: Boolean(opts.dryRun),
+          autoMerge: Boolean(opts.autoMerge),
+          rename: Boolean(opts.rename),
+          json: config.output === "json",
+          githubToken: process.env.GITHUB_TOKEN,
+        }),
+      ),
+    );
+
+  addGlobalFlags(program.command("publish"))
+    .description("Export a node subtree as a Busabase package directory you can push to GitHub")
+    .argument("<node-slug-or-id>", "the folder/node to publish")
+    .requiredOption("-o, --out-dir <dir>", "output directory for the package")
+    .option("--name <name>", "package name (default: reuse busabase.json, else the node slug)")
+    .option("--dry-run", "list the files that would be written and write nothing")
+    .addHelpText(
+      "after",
+      `
+Output is deterministic: publishing twice from an unchanged space produces
+byte-identical files, so a GitHub diff shows exactly what changed.
+
+Examples:
+  busabase-cli publish support-kb -o ./support-kb-template
+  busabase-cli publish support-kb -o ./support-kb-template --name "Support KB" --dry-run`,
+    )
+    .action(
+      runArgAction(state, (nodeSlugOrId, client, opts, config) =>
+        runPublish(client, nodeSlugOrId, {
+          outDir: opts.outDir as string,
+          name: opts.name as string | undefined,
+          dryRun: Boolean(opts.dryRun),
+          json: config.output === "json",
+          baseUrl: config.baseUrl,
         }),
       ),
     );

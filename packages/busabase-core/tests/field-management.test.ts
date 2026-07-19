@@ -411,6 +411,212 @@ describe("Field management — delete / update / convert", () => {
     });
   });
 
+  // ── convert rejects surface as BAD_REQUEST, not a raw 500 ───────────────────
+  //
+  // These conversions are all intentionally disallowed (system-computed target
+  // types, and relation/attachment on either side) — the rejection itself is
+  // correct. What's under test is *how* it's reported: a clean oRPC BAD_REQUEST,
+  // not an unclassified Error that the OpenAPIHandler turns into a generic 500.
+  describe("convert rejects with BAD_REQUEST (not a raw 500)", () => {
+    let guardrailsBaseId = "";
+    let textFieldId = "";
+    let systemFieldId = "";
+    let relationFieldId = "";
+    let attachmentFieldId = "";
+
+    beforeAll(async () => {
+      const base = await client.bases.create({
+        autoMerge: true,
+        slug: "convert-guardrails",
+        name: "Convert Guardrails",
+        fields: [{ slug: "title", name: "Title", type: "text" }],
+      });
+      guardrailsBaseId = base.id;
+      textFieldId = base.fields.find((f) => f.slug === "title")!.id;
+
+      // A system-computed field, plus a relation and an attachment field, added
+      // directly (not via the convert path) so we have real fields to convert
+      // from.
+      await client.bases.createField({
+        baseId: guardrailsBaseId,
+        slug: "created",
+        name: "Created",
+        type: "auto_number",
+      });
+      await client.bases.createField({
+        baseId: guardrailsBaseId,
+        slug: "linked",
+        name: "Linked",
+        type: "relation",
+        options: { targetBaseId: guardrailsBaseId },
+      });
+      await client.bases.createField({
+        baseId: guardrailsBaseId,
+        slug: "files",
+        name: "Files",
+        type: "attachment",
+      });
+
+      systemFieldId = await getFieldId(guardrailsBaseId, "created");
+      relationFieldId = await getFieldId(guardrailsBaseId, "linked");
+      attachmentFieldId = await getFieldId(guardrailsBaseId, "files");
+    });
+
+    const systemNewTypes = [
+      "created_by",
+      "updated_by",
+      "created_time",
+      "updated_time",
+      "auto_number",
+    ] as const;
+
+    for (const newType of systemNewTypes) {
+      it(`previewFieldConversion: converting text field to "${newType}" → BAD_REQUEST`, async () => {
+        await expect(
+          client.bases.previewFieldConversion({
+            baseId: guardrailsBaseId,
+            fieldId: textFieldId,
+            newType,
+          }),
+        ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+      });
+
+      it(`createConvertFieldChangeRequest: converting text field to "${newType}" → BAD_REQUEST`, async () => {
+        await expect(
+          client.bases.convertFieldChangeRequest({
+            baseId: guardrailsBaseId,
+            fieldId: textFieldId,
+            newType,
+            selectChoiceMode: "null_on_missing",
+          }),
+        ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+      });
+    }
+
+    it("previewFieldConversion: converting an existing system field → BAD_REQUEST", async () => {
+      await expect(
+        client.bases.previewFieldConversion({
+          baseId: guardrailsBaseId,
+          fieldId: systemFieldId,
+          newType: "text",
+        }),
+      ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    });
+
+    it("createConvertFieldChangeRequest: converting an existing system field → BAD_REQUEST", async () => {
+      await expect(
+        client.bases.convertFieldChangeRequest({
+          baseId: guardrailsBaseId,
+          fieldId: systemFieldId,
+          newType: "text",
+          selectChoiceMode: "null_on_missing",
+        }),
+      ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    });
+
+    it("previewFieldConversion: converting a relation field → BAD_REQUEST", async () => {
+      await expect(
+        client.bases.previewFieldConversion({
+          baseId: guardrailsBaseId,
+          fieldId: relationFieldId,
+          newType: "text",
+        }),
+      ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    });
+
+    it("createConvertFieldChangeRequest: converting a relation field → BAD_REQUEST", async () => {
+      await expect(
+        client.bases.convertFieldChangeRequest({
+          baseId: guardrailsBaseId,
+          fieldId: relationFieldId,
+          newType: "text",
+          selectChoiceMode: "null_on_missing",
+        }),
+      ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    });
+
+    it("previewFieldConversion: converting an attachment field → BAD_REQUEST", async () => {
+      await expect(
+        client.bases.previewFieldConversion({
+          baseId: guardrailsBaseId,
+          fieldId: attachmentFieldId,
+          newType: "text",
+        }),
+      ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    });
+
+    it("createConvertFieldChangeRequest: converting an attachment field → BAD_REQUEST", async () => {
+      await expect(
+        client.bases.convertFieldChangeRequest({
+          baseId: guardrailsBaseId,
+          fieldId: attachmentFieldId,
+          newType: "text",
+          selectChoiceMode: "null_on_missing",
+        }),
+      ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    });
+
+    it("previewFieldConversion: converting a text field to relation → BAD_REQUEST", async () => {
+      await expect(
+        client.bases.previewFieldConversion({
+          baseId: guardrailsBaseId,
+          fieldId: textFieldId,
+          newType: "relation",
+        }),
+      ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    });
+
+    it("createConvertFieldChangeRequest: converting a text field to attachment → BAD_REQUEST", async () => {
+      await expect(
+        client.bases.convertFieldChangeRequest({
+          baseId: guardrailsBaseId,
+          fieldId: textFieldId,
+          newType: "attachment",
+          selectChoiceMode: "null_on_missing",
+        }),
+      ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    });
+  });
+
+  // ── relation field requires a target Base ────────────────────────────────────
+
+  describe("relation field without a target Base rejects with BAD_REQUEST (not a raw 500)", () => {
+    let noTargetBaseId = "";
+
+    beforeAll(async () => {
+      const base = await client.bases.create({
+        autoMerge: true,
+        slug: "relation-no-target-test",
+        name: "Relation No Target Test",
+        fields: [{ slug: "title", name: "Title", type: "text" }],
+      });
+      noTargetBaseId = base.id;
+    });
+
+    it("createField: relation field with no options → BAD_REQUEST", async () => {
+      await expect(
+        client.bases.createField({
+          baseId: noTargetBaseId,
+          slug: "linked",
+          name: "Linked",
+          type: "relation",
+        }),
+      ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    });
+
+    it("createFieldChangeRequest: relation field with no options → BAD_REQUEST", async () => {
+      await expect(
+        client.bases.createFieldChangeRequest({
+          baseId: noTargetBaseId,
+          slug: "linked",
+          name: "Linked",
+          type: "relation",
+          required: false,
+        }),
+      ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    });
+  });
+
   // ── reorderFields ────────────────────────────────────────────────────────────
 
   describe("reorderFields", () => {

@@ -177,8 +177,14 @@ describe("busabase pglite integration flow", () => {
       },
       message: "Vitest PGlite flow",
       submittedBy: "vitest",
+      autoMerge: false,
     });
     expect(changeRequest.status).toBe("in_review");
+    if (changeRequest.materialized) {
+      throw new Error(
+        "Expected a pending ChangeRequest (autoMerge: false), got a materialized record",
+      );
+    }
     const firstOperation = changeRequest.primaryOperation;
     if (!firstOperation) {
       throw new Error("Expected change request to contain a primary operation");

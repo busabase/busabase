@@ -259,6 +259,69 @@ describe("createBusabaseClient request assembly", () => {
 });
 
 /**
+ * The server's OpenAPI error body is a bespoke `{ error, code, data }` shape
+ * (encodeOpenApiError in apps/busabase/src/app/api/v1/[[...rest]]/route.ts),
+ * not oRPC's own `{ defined, code, status, message, data }` JSON shape.
+ * Without `customErrorResponseBodyDecoder` in createBusabaseClient, OpenAPILink
+ * can't recognize that body and falls back to a generic per-status message
+ * ("Bad Request" / "Conflict"), discarding the server's real error text and
+ * (for a 400) every `data.issues` field-path detail. These assert the real
+ * content survives into the thrown error's `.message`.
+ */
+describe("createBusabaseClient error decoding", () => {
+  const errorFetch = (status: number, statusText: string, body: unknown) =>
+    vi.fn(
+      async () =>
+        new Response(JSON.stringify(body), {
+          status,
+          statusText,
+          headers: { "content-type": "application/json" },
+        }),
+    ) as unknown as typeof fetch;
+
+  it("surfaces the real server message for a 409 instead of the generic status phrase", async () => {
+    const client = createBusabaseClient({
+      baseUrl: "http://localhost:15419",
+      fetch: errorFetch(409, "Conflict", {
+        error: "ChangeRequest must be approved before merge",
+        code: "CONFLICT",
+        data: { status: "in_review" },
+      }),
+    });
+
+    await expect(client.bases.list()).rejects.toThrow(
+      "ChangeRequest must be approved before merge",
+    );
+  });
+
+  it("surfaces field-path validation detail from data.issues for a 400", async () => {
+    const client = createBusabaseClient({
+      baseUrl: "http://localhost:15419",
+      fetch: errorFetch(400, "Bad Request", {
+        error: "Input validation failed",
+        code: "BAD_REQUEST",
+        data: {
+          issues: [{ path: ["fields", "score"], message: "Expected number, received string" }],
+        },
+      }),
+    });
+
+    await expect(client.bases.list()).rejects.toThrow(
+      /Input validation failed.*fields\.score: Expected number, received string/,
+    );
+  });
+
+  it("falls back to OpenAPILink's default decoding for a body that isn't the {error} shape", async () => {
+    const client = createBusabaseClient({
+      baseUrl: "http://localhost:15419",
+      fetch: errorFetch(500, "Internal Server Error", { unexpected: "shape" }),
+    });
+
+    await expect(client.bases.list()).rejects.toThrow();
+  });
+});
+
+/**
  * createBusabaseRpcClient targets the internal cookie-authenticated /api/rpc
  * transport (the dashboard's own frontend, and — via the bridge documented in
  * apps/busabase/docs/node-types.md — an AirApp running via Nodepod), not the

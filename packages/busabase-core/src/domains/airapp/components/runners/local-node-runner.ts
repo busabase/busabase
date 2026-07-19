@@ -7,9 +7,13 @@ import type { AirAppRunner } from "./types";
 
 /**
  * `AirAppRunner` implementation backed by a real server-side
- * `npm install` + `npm run dev` OS process (sandboxed at the OS level via
- * `@anthropic-ai/sandbox-runtime`'s `SandboxManager`, see
- * `logic/local-node-runtime.ts`), driven over the single
+ * `npm install` + `npm run dev` OS process. Backs BOTH the `"local-node"`
+ * (bare host Node.js — previewable, data bridge via reverse proxy) and
+ * `"srt"` (OS-sandboxed via `@anthropic-ai/sandbox-runtime`'s `SandboxManager`
+ * — isolated, but no live preview) engines; the two differ ONLY in the
+ * server-side execution mode, selected by the `engine` option passed straight
+ * through to the `runLocalNode` RPC (see `logic/local-node-runtime.ts`).
+ * Driven over the single
  * `airapps.runLocalNode` oRPC event iterator rather than separate RPCs per
  * `AirAppRunner` method — the server naturally runs install straight into
  * start on one stream (there's no separate "check exit code" call), so this
@@ -24,6 +28,7 @@ import type { AirAppRunner } from "./types";
 export class LocalNodeRunner implements AirAppRunner {
   private readonly orpc: BusabaseQueryUtils;
   private readonly nodeId: string;
+  private readonly engine: "local-node" | "srt";
   private files: Record<string, string> = {};
   private controller: AbortController | null = null;
   private logCallbacks: Array<(line: string) => void> = [];
@@ -31,9 +36,14 @@ export class LocalNodeRunner implements AirAppRunner {
   private lastReadyUrl: string | null = null;
   private installDeferred: { resolve: () => void; reject: (error: unknown) => void } | null = null;
 
-  constructor(options: { orpc: BusabaseQueryUtils; nodeId: string }) {
+  constructor(options: {
+    orpc: BusabaseQueryUtils;
+    nodeId: string;
+    engine: "local-node" | "srt";
+  }) {
     this.orpc = options.orpc;
     this.nodeId = options.nodeId;
+    this.engine = options.engine;
   }
 
   private emitLog(line: string): void {
@@ -88,7 +98,7 @@ export class LocalNodeRunner implements AirAppRunner {
       this.installDeferred = { resolve, reject };
       consumeEventIterator(
         this.orpc.airapps.runLocalNode.call(
-          { nodeId: this.nodeId, files: this.files },
+          { nodeId: this.nodeId, files: this.files, engine: this.engine },
           { signal: controller.signal },
         ),
         {

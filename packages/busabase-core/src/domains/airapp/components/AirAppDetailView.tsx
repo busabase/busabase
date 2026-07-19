@@ -17,6 +17,7 @@ import {
   NodeDeleteButton,
   renderFileTree,
 } from "../../dashboard/components/file-tree-browser";
+import { NodePermissionsButton } from "../../dashboard/components/node-permissions-button";
 import { EmptyState } from "../../dashboard/components/primitives";
 import { FileContentSkeleton, NodeDetailSkeleton } from "../../dashboard/components/skeletons";
 import { useAirAppRunnerStore } from "../store/airapp-runner-store";
@@ -190,6 +191,11 @@ export function AirAppDetailView({ orpc, slug }: AirAppDetailViewProps) {
 
           <div className="ml-auto flex shrink-0 items-center gap-1.5">
             <AirAppRunControls airapp={airapp} runner={runner} />
+            <NodePermissionsButton
+              nodeId={airapp.node.id}
+              nodeName={airapp.node.name}
+              orpc={orpc}
+            />
             <NodeDeleteButton
               nodeId={airapp.node.id}
               nodeName={airapp.node.name}

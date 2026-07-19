@@ -38,6 +38,7 @@ import {
   listNodesInputSchema,
   liveEventSchema,
   moveNodeInputSchema,
+  nodePrincipalSchema,
   nodeSchema,
   reviewChangeRequestInputSchema,
   reviseOperationInputSchema,
@@ -163,6 +164,91 @@ export const busabaseContractRoutes = {
       })
       .input(z.object({ nodeId: z.string() }))
       .output(z.object({ purged: z.boolean() })),
+    updateVisibility: oc
+      .route({
+        method: "POST",
+        path: "/nodes/{nodeId}/visibility",
+        tags: ["Nodes", "Permissions"],
+        summary: "Set a node's visibility (private / workspace / public)",
+        successDescription:
+          "Updated the node's own explicit visibility and re-materialized the subtree's effective visibility (a child can only ever be as open as its strictest ancestor). Requires `manage` level on the node. The workspace root cannot be made private. `public` currently behaves as `workspace` (no anonymous surface yet).",
+      })
+      .input(
+        z.object({
+          nodeId: z.string(),
+          visibility: z.enum(["private", "workspace", "public"]).nullable(),
+        }),
+      )
+      .output(z.object({ updated: z.boolean() })),
+    toggleFavorite: oc
+      .route({
+        method: "POST",
+        path: "/nodes/{nodeId}/favorite",
+        tags: ["Nodes", "Favorites"],
+        summary: "Toggle the current actor's favorite on a node",
+        successDescription:
+          "Upserted or deleted a row keyed by the (nodeId, actorId) unique pair — a true toggle, race-safe under a rapid double-click, never a duplicate. `favorited` reflects the node's new state for the acting user. Purely additive: never moves or hides the node from its real position in the Bases tree.",
+      })
+      .input(z.object({ nodeId: z.string() }))
+      .output(z.object({ favorited: z.boolean() })),
+    listFavorites: oc
+      .route({
+        method: "GET",
+        path: "/nodes/favorites",
+        tags: ["Nodes", "Favorites"],
+        summary: "List the current actor's favorited nodes",
+        successDescription:
+          "The acting user's favorited nodes, newest-favorited first, filtered through the same archived/deleted/visibility rules as the main tree — a favorited node that's later archived, purged, or (cloud) hidden from this actor silently drops out rather than erroring.",
+      })
+      .output(z.array(nodeSchema)),
+    principals: {
+      list: oc
+        .route({
+          method: "GET",
+          path: "/nodes/{nodeId}/principals",
+          tags: ["Nodes", "Permissions"],
+          summary: "List a node's direct access grants",
+          successDescription:
+            "Direct grants defined ON this node (inherited copies from ancestor folders are not listed). Requires the node to be visible to the caller.",
+        })
+        .input(z.object({ nodeId: z.string() }))
+        .output(z.array(nodePrincipalSchema)),
+      add: oc
+        .route({
+          method: "POST",
+          path: "/nodes/{nodeId}/principals",
+          tags: ["Nodes", "Permissions"],
+          summary: "Grant (or update) a principal's access level on a node",
+          successDescription:
+            "Upserted one direct grant (same principal twice updates its level) and re-materialized inherited copies down the subtree. Requires `manage` level on the node.",
+        })
+        .input(
+          z.object({
+            nodeId: z.string(),
+            principalType: z.enum(["user", "space"]),
+            principalId: z.string().min(1),
+            role: z.enum(["read", "changeRequest", "write", "manage"]),
+          }),
+        )
+        .output(z.object({ granted: z.boolean() })),
+      remove: oc
+        .route({
+          method: "DELETE",
+          path: "/nodes/{nodeId}/principals",
+          tags: ["Nodes", "Permissions"],
+          summary: "Revoke a principal's access grant on a node",
+          successDescription:
+            "Removed the direct grant (and its materialized inherited copies). Requires `manage` level on the node.",
+        })
+        .input(
+          z.object({
+            nodeId: z.string(),
+            principalType: z.enum(["user", "space"]),
+            principalId: z.string().min(1),
+          }),
+        )
+        .output(z.object({ removed: z.boolean() })),
+    },
   },
   auditEvents: {
     list: oc

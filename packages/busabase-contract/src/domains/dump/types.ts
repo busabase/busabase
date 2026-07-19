@@ -13,6 +13,9 @@ import { z } from "zod";
  * webhook signing secrets are intentionally excluded — never dumped. */
 export const DumpTableSchema = z.enum([
   "nodes",
+  /** Node-level access grants (permissions). Not secret — restore must keep them
+   * so a backed-up space's sharing/permission config survives a full restore. */
+  "nodePrincipals",
   "bases",
   "baseFields",
   "views",

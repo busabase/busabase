@@ -1,6 +1,6 @@
 import { implement, ORPCError } from "@orpc/server";
 import { busabaseContract } from "busabase-contract/contract/busabase";
-import { getContextSpaceId } from "./context";
+import { getContextSpaceId, resolveActorId } from "./context";
 import { getDb } from "./db";
 import { airappRouter } from "./domains/airapp/router";
 import { assetsRouter } from "./domains/assets/router";
@@ -17,6 +17,12 @@ import { listActivityPaged } from "./logic/activity";
 import { grepUnified } from "./logic/grep";
 import { subscribeBusabaseLiveEvents } from "./logic/live-events";
 import {
+  grantNodePrincipal,
+  listNodePrincipals,
+  revokeNodePrincipal,
+  updateNodeVisibility,
+} from "./logic/node-acl";
+import {
   closeChangeRequest,
   countChangeRequests,
   createAuditEvent,
@@ -31,6 +37,7 @@ import {
   listChangeRequests,
   listChangeRequestsPaged,
   listComments,
+  listFavoriteNodes,
   listNodes,
   mergeChangeRequest,
   mergeChangeRequests,
@@ -40,6 +47,7 @@ import {
   reviewChangeRequests,
   reviseOperation,
   searchBusabase,
+  toggleNodeFavorite,
 } from "./logic/store";
 
 // Kernel oRPC router: kernel routes inline (search / nodes / audit / comments /
@@ -68,6 +76,52 @@ export const busabaseRouter = busabase.router({
     ),
     move: busabase.nodes.move.handler(async ({ input }) => moveNode(input)),
     purge: busabase.nodes.purge.handler(async ({ input }) => purgeNode(input.nodeId)),
+    updateVisibility: busabase.nodes.updateVisibility.handler(async ({ input }) => {
+      await updateNodeVisibility(input.nodeId, input.visibility, resolveActorId("local-user"));
+      return { updated: true };
+    }),
+    toggleFavorite: busabase.nodes.toggleFavorite.handler(async ({ input }) =>
+      toggleNodeFavorite(input.nodeId, resolveActorId("local-user")),
+    ),
+    listFavorites: busabase.nodes.listFavorites.handler(async () =>
+      listFavoriteNodes(resolveActorId("local-user")),
+    ),
+    principals: {
+      list: busabase.nodes.principals.list.handler(async ({ input }) => {
+        const rows = await listNodePrincipals(input.nodeId, resolveActorId("local-user"));
+        return rows.map((row) => ({
+          id: row.id,
+          nodeId: row.nodeId,
+          principalType: row.principalType,
+          principalId: row.principalId,
+          role: row.role,
+          grantedBy: row.grantedBy,
+          createdAt: row.createdAt.toISOString(),
+          updatedAt: row.updatedAt.toISOString(),
+        }));
+      }),
+      add: busabase.nodes.principals.add.handler(async ({ input }) => {
+        await grantNodePrincipal(
+          input.nodeId,
+          {
+            principalType: input.principalType,
+            principalId: input.principalId,
+            role: input.role,
+          },
+          resolveActorId("local-user"),
+        );
+        return { granted: true };
+      }),
+      remove: busabase.nodes.principals.remove.handler(async ({ input }) => {
+        await revokeNodePrincipal(
+          input.nodeId,
+          input.principalType,
+          input.principalId,
+          resolveActorId("local-user"),
+        );
+        return { removed: true };
+      }),
+    },
   },
   auditEvents: {
     list: busabase.auditEvents.list.handler(async ({ input }) => listAuditEvents(input)),

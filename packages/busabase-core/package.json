@@ -1,7 +1,7 @@
 {
   "name": "busabase-core",
   "description": "Shared Busabase open-core protocol, local store, API helpers, and dashboard components.",
-  "version": "0.9.6",
+  "version": "0.9.8",
   "private": true,
   "type": "module",
   "exports": {
@@ -61,6 +61,14 @@
       "types": "./src/domains/airapp/demo-content.ts",
       "default": "./src/domains/airapp/demo-content.ts"
     },
+    "./domains/airapp/logic/local-preview-proxy": {
+      "types": "./src/domains/airapp/logic/local-preview-proxy.ts",
+      "default": "./src/domains/airapp/logic/local-preview-proxy.ts"
+    },
+    "./domains/airapp/logic/local-preview-bridge": {
+      "types": "./src/domains/airapp/logic/local-preview-bridge.ts",
+      "default": "./src/domains/airapp/logic/local-preview-bridge.ts"
+    },
     "./domains/base/handlers": {
       "types": "./src/domains/base/handlers.ts",
       "default": "./src/domains/base/handlers.ts"
@@ -104,6 +112,10 @@
     "./dashboard/dashboard-shell": {
       "types": "./src/domains/dashboard/components/dashboard-shell.tsx",
       "default": "./src/domains/dashboard/components/dashboard-shell.tsx"
+    },
+    "./dashboard/node-permissions": {
+      "types": "./src/domains/dashboard/components/node-permissions-button.tsx",
+      "default": "./src/domains/dashboard/components/node-permissions-button.tsx"
     },
     "./dashboard/empty-agent-guide": {
       "types": "./src/domains/dashboard/components/empty-agent-guide.tsx",

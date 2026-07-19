@@ -88,25 +88,20 @@ export class LocalStorage implements IStorage {
   /**
    * Generate presigned URL for uploading file
    *
-   * NOTE: Local storage doesn't strictly support "upload to URL" in the same way S3 does
-   * (where the client PUTs directly to the storage service).
-   *
-   * In a real app using LocalStorage, you would typically need an API route that accepts the upload
-   * and saves it.
-   *
-   * For compatibility, we'll return a special URL that our API client or frontend
-   * should recognize and handle by sending to a proxy endpoint instead of directly PUTting.
-   * Or if we have a local dev server that accepts PUTs at this URL.
+   * Local storage has no browser-direct PUT target the way S3 does, so we return
+   * the host app's dev relay (`openlib/storage/dev-routes` PUT handler) as the
+   * upload URL. The key travels in the query string.
    */
   async generateUploadPresignedUrl(
-    _key: string,
+    key: string,
     _mimeType: string,
     _expiresIn?: number,
   ): Promise<string> {
-    // Local storage has no browser-direct PUT; the host app's dev relay accepts a
-    // multipart POST (file + storageKey) and writes to disk. The uploader hook
-    // recognizes this exact sentinel and switches to a FormData POST.
-    return "/api/dev/upload";
+    // A root-relative URL: the client resolves it against the host it's already
+    // talking to (ordinary URL resolution — no dev-specific knowledge) and PUTs
+    // the raw bytes to it exactly as it would an S3 presigned URL. The storage
+    // key rides in the query string because the URL is all the client has.
+    return `/api/dev/upload?key=${encodeURIComponent(key)}`;
   }
 
   /**

@@ -34,6 +34,12 @@ export const airAppRunLocalNodeInputSchema = z.object({
   /** Text files to mount into the sandbox workdir before installing, keyed by
    *  path (same shape `RunPanel` already assembles for `NodepodRunner.mount`). */
   files: z.record(z.string(), z.string()),
+  /** Server-side execution mode. `"local-node"` spawns a bare host Node.js
+   *  process (previewable, data bridge via reverse proxy, NOT OS-isolated);
+   *  `"srt"` wraps the same commands in the OS sandbox (isolated execution,
+   *  but live preview is unreachable). `"nodepod"` never calls this endpoint —
+   *  it runs entirely in-browser. */
+  engine: z.enum(["local-node", "srt"]).default("local-node"),
 });
 
 export const airAppRuntimeEventSchema = z.discriminatedUnion("type", [

@@ -85,6 +85,7 @@ async function main() {
     fields: { title: "Harness Record" },
     message: "verify create",
     submittedBy: "local-editor",
+    autoMerge: false,
   });
   assert.equal(recordCr.status, "in_review", "record CR in review");
   const recordMerge = await approveAndMerge(recordCr.id);

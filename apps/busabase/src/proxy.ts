@@ -47,6 +47,24 @@ export async function proxy(request: NextRequest) {
   const nodepodResponse = await nodepodProxy(request);
   if (nodepodResponse) return nodepodResponse;
 
+  // Local Node.js AirApp data bridge: an app running under the Local Node
+  // engine (served same-origin via the reverse proxy) calls the fixed
+  // `/__busabase_api__/<path>` prefix (shared with Nodepod's SW bridge and the
+  // busabase-sdk RPC client). Underscore-prefixed route folders are excluded
+  // from Next.js routing, so we rewrite that prefix here to the internal
+  // `/api/airapp-bridge/<path>` route which replays the request to the real
+  // backend with the viewer's cookie. Mirrors apps/busabase-cloud's proxy.ts.
+  // (Nodepod previews never reach this — their service worker answers
+  // `/__busabase_api__/` before it hits the network.)
+  if (request.nextUrl.pathname.startsWith("/__busabase_api__/")) {
+    const rewritten = request.nextUrl.clone();
+    rewritten.pathname = request.nextUrl.pathname.replace(
+      "/__busabase_api__/",
+      "/api/airapp-bridge/",
+    );
+    return NextResponse.rewrite(rewritten);
+  }
+
   // Resolve the page `?demo`/`?lang` (0/false/off → not demo) into the demo signals;
   // `route.ts` validates the use-case into a `DemoUseCase`.
   const { useCase, locale } = resolveDemoMode({
@@ -70,5 +88,5 @@ export const config = {
   // Next.js statically analyzes `matcher` at build time and requires literal
   // strings — it cannot resolve an imported `nodepodMatcher` reference here,
   // even though its value is exactly this same literal ("/__sw__.js").
-  matcher: ["/api/v1/:path*", "/api/rpc/:path*", "/__sw__.js"],
+  matcher: ["/api/v1/:path*", "/api/rpc/:path*", "/__busabase_api__/:path*", "/__sw__.js"],
 };

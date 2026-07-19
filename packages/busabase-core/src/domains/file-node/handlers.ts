@@ -10,6 +10,7 @@ import { getDb } from "../../db";
 import { busabaseAssetUsages, busabaseNodes, type NodePO } from "../../db/schema";
 import { CURRENT_USER_ID, id, now, rootNodeIdForSpace } from "../../logic/kernel";
 import { type MaterializeArgs, registerMaterializer } from "../../logic/materialize";
+import { buildNodeVisibilityCondition, initializeNodeAcl } from "../../logic/node-acl";
 import { assertContainerParent } from "../../logic/node-parent";
 import { ensureReady } from "../../logic/seed";
 import {
@@ -29,6 +30,8 @@ const getFileNodeAssetId = (node: NodePO): string | null => getString(node.metad
 const getFileNode = async (nodeIdOrSlug: string) => {
   const db = await getDb();
   const spaceId = getContextSpaceId();
+  // Node ACL: hidden file nodes resolve to null — indistinguishable from absent.
+  const visible = buildNodeVisibilityCondition(db);
   const [byId] = await db
     .select()
     .from(busabaseNodes)
@@ -38,6 +41,7 @@ const getFileNode = async (nodeIdOrSlug: string) => {
         eq(busabaseNodes.spaceId, spaceId),
         eq(busabaseNodes.type, "file"),
         isNull(busabaseNodes.archivedAt),
+        visible,
       ),
     )
     .limit(1);
@@ -53,6 +57,7 @@ const getFileNode = async (nodeIdOrSlug: string) => {
         eq(busabaseNodes.spaceId, spaceId),
         eq(busabaseNodes.type, "file"),
         isNull(busabaseNodes.archivedAt),
+        visible,
       ),
     )
     .limit(1);
@@ -176,6 +181,13 @@ export const createFileNode = async (
     updatedAt: timestamp,
   });
   await syncFileNodeAssetUsage(nodeId, asset.id, db);
+  await initializeNodeAcl(
+    db,
+    getContextSpaceId(),
+    nodeId,
+    parentNode.id,
+    resolveActorId(CURRENT_USER_ID),
+  );
   await recordMergedNodeCreate({
     nodeId,
     nodeType: "file",
@@ -214,6 +226,7 @@ export const listFileNodes = async (): Promise<FileNodeVO[]> => {
         eq(busabaseNodes.type, "file"),
         eq(busabaseNodes.spaceId, getContextSpaceId()),
         isNull(busabaseNodes.archivedAt),
+        buildNodeVisibilityCondition(db),
       ),
     )
     .orderBy(asc(busabaseNodes.position), asc(busabaseNodes.createdAt));

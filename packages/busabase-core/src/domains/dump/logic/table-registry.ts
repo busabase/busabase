@@ -13,6 +13,7 @@ import {
   busabaseComments,
   busabaseCommits,
   busabaseFieldValues,
+  busabaseNodePrincipals,
   busabaseNodes,
   busabaseOperations,
   busabaseRecordLinks,
@@ -31,6 +32,13 @@ import {
  */
 export const DUMP_TABLE_REGISTRY = {
   nodes: busabaseNodes,
+  // Node-level access grants. Not a secret (unlike vault items / webhook
+  // secrets) — a full-fidelity restore must recreate them or the restored
+  // space silently loses every sharing/permission grant. Materialized
+  // inherited rows are dumped as-is alongside direct grants, so the exact
+  // post-materialization ACL state is restored (import inserts rows raw, which
+  // does not re-run `recomputeSpaceNodeAcl`, so nothing recreates them for us).
+  nodePrincipals: busabaseNodePrincipals,
   bases: busabaseBases,
   baseFields: busabaseBaseFields,
   views: busabaseViews,
@@ -60,6 +68,8 @@ export const DUMP_TABLE_REGISTRY = {
  */
 export const DUMP_IMPORT_ORDER: DumpTable[] = [
   "nodes",
+  // After `nodes`: `nodeId` and `sourceNodeId` both FK into busabase_nodes.
+  "nodePrincipals",
   "bases",
   "baseFields",
   "views",

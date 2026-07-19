@@ -11,6 +11,8 @@ import {
   Shield,
   Sparkles,
   Trash2,
+  Vault,
+  Webhook,
 } from "lucide-react-native";
 import { useState } from "react";
 import { Linking, StyleSheet, Switch, View } from "react-native";
@@ -246,6 +248,22 @@ function SettingsContent() {
             </View>
           </NativeRow>
         ) : null}
+      </NativeSection>
+
+      <NativeSection title="Automation">
+        <NativeRow
+          title="Vault"
+          subtitle="Manage secrets and variables used at runtime."
+          leading={<Vault size={18} color={tokens.mutedForeground} />}
+          onPress={() => router.push("/drawer/settings/vault")}
+        />
+        <NativeRow
+          title="Webhook Rules"
+          subtitle="Automation rules triggered by workspace events."
+          leading={<Webhook size={18} color={tokens.mutedForeground} />}
+          onPress={() => router.push("/drawer/settings/webhook")}
+          last
+        />
       </NativeSection>
 
       {connection && isFeatureEnabled("externalAgentManifest") ? (

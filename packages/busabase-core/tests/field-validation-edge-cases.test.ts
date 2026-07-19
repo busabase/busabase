@@ -139,6 +139,14 @@ describe("date", () => {
     expect(checkOne("date", true)).toMatch(/valid date/);
     expect(checkOne("date", {})).toMatch(/valid date/);
   });
+  it("rejects year 0 and negative ISO-8601 extended years (both parse fine in JS Date but crash Postgres timestamp inserts)", () => {
+    expect(checkOne("date", "0000-01-01")).toMatch(/valid date/);
+    expect(checkOne("date", "-000001-01-01")).toMatch(/valid date/);
+  });
+  it("still accepts the year-1 and year-9999 boundaries (must not regress)", () => {
+    expect(checkOne("date", "0001-01-01")).toBeNull();
+    expect(checkOne("date", "9999-12-31")).toBeNull();
+  });
 });
 
 describe("email", () => {
@@ -229,8 +237,11 @@ describe("multiselect", () => {
     expect(checkOne("multiselect", ["a", "b"], MULTI_OPTS)).toBeNull();
     expect(checkOne("multiselect", ["m1", "m2"], MULTI_OPTS)).toBeNull();
   });
-  it("accepts an empty array (documents current behavior: emptiness is not a choice violation)", () => {
+  it("accepts an empty array when NOT required (documents current behavior: emptiness is not a choice violation)", () => {
     expect(checkOne("multiselect", [], MULTI_OPTS)).toBeNull();
+  });
+  it("rejects an empty array on a REQUIRED multiselect — [] is not a meaningful value", () => {
+    expect(checkOne("multiselect", [], { ...MULTI_OPTS, required: true })).toMatch(/is required/);
   });
   it("rejects a bare string, an out-of-set member, and non-string members", () => {
     expect(checkOne("multiselect", "a", MULTI_OPTS)).toMatch(/list of its options/);
@@ -240,10 +251,13 @@ describe("multiselect", () => {
 });
 
 describe("relation", () => {
-  it("accepts a single record id, a list of ids, and an empty list", () => {
+  it("accepts a single record id, a list of ids, and an empty list when NOT required", () => {
     expect(checkOne("relation", "rec_1")).toBeNull();
     expect(checkOne("relation", ["rec_1", "rec_2"])).toBeNull();
     expect(checkOne("relation", [])).toBeNull();
+  });
+  it("rejects an empty list on a REQUIRED relation — [] is not a meaningful value", () => {
+    expect(checkOne("relation", [], { required: true })).toMatch(/is required/);
   });
   it("rejects numbers, mixed-type arrays, and objects", () => {
     expect(checkOne("relation", 5)).toMatch(/record id/);
@@ -282,6 +296,9 @@ describe("attachment", () => {
   it("honors required (empty value flagged before the shape validator)", () => {
     expect(checkOne("attachment", undefined, { required: true })).toMatch(/is required/);
   });
+  it("rejects an empty array on a REQUIRED attachment — [] is not a meaningful value", () => {
+    expect(checkOne("attachment", [], { required: true })).toMatch(/is required/);
+  });
 });
 
 describe("required & empty handling across types", () => {
@@ -290,11 +307,19 @@ describe("required & empty handling across types", () => {
       expect(checkOne("text", empty, { required: true })).toMatch(/is required/);
     }
   });
-  it("skips an empty optional field of any type without error", () => {
+  it("flags an empty array as empty too, uniformly across every array-shaped required type", () => {
+    expect(checkOne("multiselect", [], { ...MULTI_OPTS, required: true })).toMatch(/is required/);
+    expect(checkOne("attachment", [], { required: true })).toMatch(/is required/);
+    expect(checkOne("relation", [], { required: true })).toMatch(/is required/);
+  });
+  it("skips an empty optional field of any type without error, including an empty array", () => {
     expect(checkOne("number", "")).toBeNull();
     expect(checkOne("email", null)).toBeNull();
     expect(checkOne("select", undefined, SELECT_OPTS)).toBeNull();
     expect(checkOne("relation", null)).toBeNull();
+    expect(checkOne("relation", [])).toBeNull(); // optional array field: [] still fine
+    expect(checkOne("multiselect", [], MULTI_OPTS)).toBeNull();
+    expect(checkOne("attachment", [])).toBeNull();
   });
   it("does NOT treat the present-but-falsy values false / 0 as empty", () => {
     expect(checkOne("checkbox", false, { required: true })).toBeNull();

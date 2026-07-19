@@ -112,12 +112,16 @@ import type { BaseVO } from "../domains/base/types";
 export type {
   BaseFieldVO,
   BaseVO,
+  GalleryCardSize,
+  GalleryCoverFit,
+  GanttScale,
   RecordLinkVO,
   RecordVO,
   ViewConfigVO,
   ViewFilterOperator,
   ViewFilterVO,
   ViewSortVO,
+  ViewType,
   ViewVO,
 } from "../domains/base/types";
 

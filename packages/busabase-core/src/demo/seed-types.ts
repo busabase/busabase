@@ -3,6 +3,7 @@ import type {
   ChangeRequestStatus,
   OperationKind,
   ViewConfigVO,
+  ViewType,
 } from "busabase-contract/types";
 import type { DemoUseCase } from "../context";
 
@@ -81,6 +82,7 @@ export interface SeedViewDef {
   slug: string;
   name: string;
   description: string;
+  type?: ViewType;
   config: ViewConfigVO;
   minutesAgo: number;
   useCases: DemoUseCase[];

@@ -91,10 +91,28 @@ export interface ViewSortVO {
   fieldId?: string;
 }
 
+export type ViewType = "table" | "gallery" | "kanban" | "calendar" | "gantt";
+export type GalleryCoverFit = "cover" | "fit";
+export type GalleryCardSize = "small" | "medium" | "large";
+export type GanttScale = "week" | "month";
+
 export interface ViewConfigVO {
   filters: ViewFilterVO[];
   sorts: ViewSortVO[];
   visibleFieldSlugs?: string[] | null;
+  // Gallery-only presentation config (see view-schemas.ts).
+  coverFieldSlug?: string | null;
+  coverFit?: GalleryCoverFit;
+  cardSize?: GalleryCardSize;
+  showFieldLabels?: boolean;
+  // Kanban-only: single-select field that stacks records into columns.
+  stackByFieldSlug?: string | null;
+  // Calendar-only: date field that positions records on the month grid.
+  dateFieldSlug?: string | null;
+  // Gantt-only: start/end date fields bounding each bar + axis granularity.
+  startFieldSlug?: string | null;
+  endFieldSlug?: string | null;
+  ganttScale?: GanttScale;
 }
 
 export interface ViewVO {
@@ -103,7 +121,7 @@ export interface ViewVO {
   slug: string;
   name: string;
   description: string;
-  type: "table";
+  type: ViewType;
   config: ViewConfigVO;
   status: "active" | "archived";
   createdBy: string;

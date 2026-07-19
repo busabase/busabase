@@ -353,6 +353,9 @@ function NavMainComponent({
   ): ReactNode => {
     const Icon = item.icon;
     const itemKey = getNavItemKey(item, index, keyPrefix);
+    // Label for the per-row "•••" action menu — shared by the folder row and
+    // both leaf rows (they all render `item.actions` the same way).
+    const moreActionsTitle = item.moreActionsTitle ?? "More";
     // A folder is open when it (or one of its descendants, at any depth) is
     // the active route, or when manually expanded. Selecting a folder thus
     // also expands it, and navigating away collapses it again.
@@ -385,7 +388,6 @@ function NavMainComponent({
               ? "pr-[4.25rem]"
               : "pr-[6rem]";
       const addChildTitle = item.addChildTitle ?? "New";
-      const moreActionsTitle = item.moreActionsTitle ?? "More";
       const ItemWrapper = depth === 0 ? SidebarMenuItem : SidebarMenuSubItem;
       const renderFolderRow = (dragProps?: NavRowDragProps) => (
         <Collapsible
@@ -657,6 +659,46 @@ function NavMainComponent({
               {item.badge}
             </SidebarMenuBadge>
           )}
+          {/* Generic per-row action menu (e.g. Permissions) — additive: only
+              renders when a caller supplies `actions`, so existing leaf rows
+              are unchanged. Sits left of the drag handle. A leaf using both
+              `onDelete` and `actions` alongside drag isn't a current pattern;
+              revisit the right-offsets if that combination ever appears. */}
+          {item.actions && item.actions.length > 0 && (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <SidebarMenuAction
+                  showOnHover
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                  }}
+                  title={moreActionsTitle}
+                  className={`group-data-[collapsible=icon]:hidden data-[state=open]:bg-sidebar-accent data-[state=open]:opacity-100 ${
+                    dragEnabled && item.id ? "right-7" : ""
+                  }`}
+                >
+                  <MoreHorizontal />
+                  <span className="sr-only">{moreActionsTitle}</span>
+                </SidebarMenuAction>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                {item.actions.map((action) => {
+                  const ActionIcon = action.icon;
+                  return (
+                    <DropdownMenuItem
+                      key={`${itemKey}:action:${action.title}`}
+                      variant={action.variant}
+                      onSelect={() => handleItemAction(action)}
+                    >
+                      {ActionIcon && <ActionIcon className="mr-2 size-3.5" />}
+                      {action.title}
+                    </DropdownMenuItem>
+                  );
+                })}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
           {item.onDelete && item.id && (
             <SidebarMenuAction
               showOnHover
@@ -701,6 +743,7 @@ function NavMainComponent({
 
     const isSubItemActive = isSiblingActiveMatch;
     const SubIcon = item.icon;
+    const hasSubActions = !!(item.actions && item.actions.length > 0);
     const renderSubItemRow = (dragProps?: NavRowDragProps) => (
       <SidebarMenuSubItem
         key={itemKey}
@@ -711,7 +754,15 @@ function NavMainComponent({
         <SidebarMenuSubButton
           asChild
           isActive={isSubItemActive}
-          className={dragEnabled && item.id ? "pr-7" : undefined}
+          className={
+            // Reserve trailing room for whichever hover controls exist: one
+            // slot (pr-7) for drag OR the actions menu, two (pr-14) for both.
+            hasSubActions && dragEnabled && item.id
+              ? "pr-14"
+              : hasSubActions || (dragEnabled && item.id)
+                ? "pr-7"
+                : undefined
+          }
         >
           {isExternalUrl(item.url) ? (
             // External link - use regular anchor tag
@@ -728,6 +779,44 @@ function NavMainComponent({
             </SPALink>
           )}
         </SidebarMenuSubButton>
+        {/* Generic per-row action menu (e.g. Permissions) for a nested leaf.
+            Additive: only when a caller supplies `actions`. Sits left of the
+            drag handle when both are present. */}
+        {hasSubActions && (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                className={`absolute top-1/2 hidden size-5 -translate-y-1/2 items-center justify-center rounded-md p-0 text-sidebar-foreground/60 outline-none ring-sidebar-ring transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground focus-visible:ring-2 group-hover/subitem:flex data-[state=open]:flex data-[state=open]:bg-sidebar-accent ${
+                  dragEnabled && item.id ? "right-7" : "right-1"
+                }`}
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                }}
+                title={moreActionsTitle}
+                type="button"
+              >
+                <MoreHorizontal className="size-3 shrink-0" />
+                <span className="sr-only">{moreActionsTitle}</span>
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              {(item.actions ?? []).map((action) => {
+                const ActionIcon = action.icon;
+                return (
+                  <DropdownMenuItem
+                    key={`${itemKey}:action:${action.title}`}
+                    variant={action.variant}
+                    onSelect={() => handleItemAction(action)}
+                  >
+                    {ActionIcon && <ActionIcon className="mr-2 size-3.5" />}
+                    {action.title}
+                  </DropdownMenuItem>
+                );
+              })}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )}
         {dragEnabled && item.id && (
           // See the folder-row comment above: the handle, not the row/link,
           // must own the drag listeners.

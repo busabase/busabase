@@ -1,4 +1,4 @@
-import type { Nodepod as NodepodInstance, NodepodProcess } from "@scelar/nodepod";
+import type { Nodepod as NodepodInstance, NodepodProcess, RequestProxy } from "@scelar/nodepod";
 import type { AirAppRunner } from "./types";
 
 /**
@@ -15,8 +15,9 @@ import type { AirAppRunner } from "./types";
  * "create empty runtime, then write files" step — `nodepod.spawn(cmd, args)`
  * runs a command and resolves once it's *running* (not once it exits — a dev
  * server never exits on its own), and `nodepod.port(num)` resolves a
- * same-origin preview URL for a listening port via the `onServerReady`
- * callback. Teardown is `nodepod.teardown()`, not a `dispose()` method.
+ * same-origin preview URL for a port this instance is listening on (null for
+ * other instances' ports). Teardown is `nodepod.teardown()`, not a
+ * `dispose()` method.
  * `AirAppRunner`'s `mount/install/start/onLog/onReady/dispose` shape is our
  * own adapter over that surface, kept stable so a future WebContainer-based
  * runner can implement the same interface.
@@ -28,6 +29,8 @@ export class NodepodRunner implements AirAppRunner {
   private logCallbacks: Array<(line: string) => void> = [];
   private readyCallbacks: Array<(previewPath: string) => void> = [];
   private lastReadyUrl: string | null = null;
+  private proxy: RequestProxy | null = null;
+  private proxyListener: ((port: number, url: string) => void) | null = null;
 
   private emitLog(line: string): void {
     for (const cb of this.logCallbacks) {
@@ -43,12 +46,30 @@ export class NodepodRunner implements AirAppRunner {
   }
 
   async mount(files: Record<string, string>): Promise<void> {
-    const { Nodepod } = await import("@scelar/nodepod");
+    const { Nodepod, getProxyInstance } = await import("@scelar/nodepod");
     this.nodepod = await Nodepod.boot({
       files,
-      onServerReady: (_port, url) => this.emitReady(url),
       watermark: false,
+      // Start fetching + compiling esbuild-wasm (~10MB) during boot so it
+      // overlaps the npm install instead of stalling the first build step.
+      preloadEsbuild: true,
     });
+    // Deliberately NOT using boot's `onServerReady`: Nodepod's RequestProxy is
+    // a page-lifetime singleton that captures only the FIRST boot's callback —
+    // every later boot's callback is silently dropped. After the first runner
+    // is disposed (e.g. on re-run), no runner would ever hear "server ready"
+    // again and the run stays stuck at "starting" with no preview. Subscribing
+    // to the singleton's event stream instead works for every boot; `port()`
+    // is scoped to this instance's id, so events from other AirApp nodes
+    // running on the same page resolve to null and are ignored.
+    this.proxy = getProxyInstance();
+    this.proxyListener = (port: number) => {
+      const url = this.nodepod?.port(port);
+      if (url) {
+        this.emitReady(url);
+      }
+    };
+    this.proxy.on("server-ready", this.proxyListener);
   }
 
   async install(): Promise<void> {
@@ -92,6 +113,11 @@ export class NodepodRunner implements AirAppRunner {
   }
 
   dispose(): void {
+    if (this.proxy && this.proxyListener) {
+      this.proxy.off("server-ready", this.proxyListener);
+    }
+    this.proxy = null;
+    this.proxyListener = null;
     this.devProcess?.kill();
     this.installProcess?.kill();
     this.nodepod?.teardown();

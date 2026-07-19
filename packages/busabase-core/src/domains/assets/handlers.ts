@@ -307,7 +307,7 @@ export const getAsset = async (assetId: string): Promise<AssetDetailVO> => {
     .where(and(eq(busabaseAssets.id, assetId), eq(busabaseAssets.spaceId, spaceId)))
     .limit(1);
   if (!row) {
-    throw new Error(`Asset not found: ${assetId}`);
+    throw new ORPCError("NOT_FOUND", { message: `Asset not found: ${assetId}` });
   }
 
   const usageRows = await db
@@ -393,7 +393,7 @@ export const resolveAssetFile = async (
     .where(and(eq(busabaseAssets.id, assetId), eq(busabaseAssets.spaceId, spaceId)))
     .limit(1);
   if (!row) {
-    throw new Error(`Asset not found: ${assetId}`);
+    throw new ORPCError("NOT_FOUND", { message: `Asset not found: ${assetId}` });
   }
 
   return {
@@ -423,7 +423,7 @@ export const updateAssetMetadata = async (
     .where(and(eq(busabaseAssets.id, input.assetId), eq(busabaseAssets.spaceId, spaceId)))
     .limit(1);
   if (!asset) {
-    throw new Error(`Asset not found: ${input.assetId}`);
+    throw new ORPCError("NOT_FOUND", { message: `Asset not found: ${input.assetId}` });
   }
   const nextMetadata =
     input.mode === "replace" ? input.metadata : { ...(asset.metadata ?? {}), ...input.metadata };
@@ -516,7 +516,7 @@ export const deleteAssetRow = async (
 export const deleteAsset = async (assetId: string): Promise<{ deleted: boolean }> => {
   const result = await deleteAssetRow(assetId);
   if (!result.deleted) {
-    throw new Error(`Asset not found: ${assetId}`);
+    throw new ORPCError("NOT_FOUND", { message: `Asset not found: ${assetId}` });
   }
   return result;
 };

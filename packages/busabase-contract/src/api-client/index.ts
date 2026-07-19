@@ -160,6 +160,14 @@ export interface BusabaseDashboardApiClient {
     message?: string;
     submittedBy?: string;
   }) => Promise<ChangeRequestVO>;
+  /**
+   * Toggle the current actor's favorite on a node — a true upsert-or-delete
+   * against the `(nodeId, actorId)` unique pair server-side. `favorited`
+   * reflects the node's new state for the acting user.
+   */
+  toggleNodeFavorite: (nodeId: string) => Promise<{ favorited: boolean }>;
+  /** The current actor's favorited nodes (see `nodes.listFavorites`). */
+  listFavoriteNodes: () => Promise<NodeVO[]>;
   listViews: (baseId: string) => Promise<ViewVO[]>;
   createBaseField: (
     baseId: string,
@@ -389,6 +397,8 @@ export const createBusabaseRestApiClient = (
     listArchivedNodes: () => client.nodes.listArchived(),
     purgeNode: (nodeId) => client.nodes.purge({ nodeId }),
     moveNode: (payload) => client.nodes.move(payload),
+    toggleNodeFavorite: (nodeId) => client.nodes.toggleFavorite({ nodeId }),
+    listFavoriteNodes: () => client.nodes.listFavorites(),
     getSkill: (nodeIdOrSlug) => client.skills.get({ nodeId: nodeIdOrSlug }),
     readSkillFile: (nodeId, filePath) => client.skills.readFile({ nodeId, filePath }),
     getDrive: (nodeIdOrSlug) => client.drives.get({ nodeId: nodeIdOrSlug }),
@@ -435,8 +445,13 @@ export const createBusabaseRestApiClient = (
       client.changeRequests.mergeMany({ changeRequestIds }),
     reviseOperation: (operationId, payload) =>
       client.operations.revise({ operationId, ...payload }),
+    // This facade's payload never sets `autoMerge`, so the call always takes the
+    // review-first branch of the endpoint's `materialized` union — narrow back
+    // to the plain ChangeRequestVO this facade has always returned, rather than
+    // pushing the (record-create-only) auto-merge union onto every dashboard
+    // consumer of this interface.
     createChangeRequest: (baseId, payload) =>
-      client.bases.createChangeRequest({ baseId, ...payload }),
+      client.bases.createChangeRequest({ baseId, ...payload }) as Promise<ChangeRequestVO>,
     createUpdateChangeRequest: (recordId, payload) =>
       client.records.updateChangeRequest({ recordId, ...payload }),
     createDeleteChangeRequest: (recordId) =>

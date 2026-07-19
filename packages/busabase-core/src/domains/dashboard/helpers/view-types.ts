@@ -1,4 +1,4 @@
-import type { FieldType, ViewConfigVO } from "busabase-contract/types";
+import type { FieldType, ViewConfigVO, ViewType } from "busabase-contract/types";
 import type { iString } from "openlib/i18n/i-string";
 import type { ReactNode } from "react";
 
@@ -71,6 +71,7 @@ export interface ViewFormPayload {
   name: string;
   slug?: string;
   submittedBy?: string;
+  type?: ViewType;
 }
 
 export interface FieldChip {

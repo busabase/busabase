@@ -35,6 +35,7 @@ import {
   busabaseViews,
 } from "../../../db/schema";
 import { hydrateRecord, hydrateRecords } from "../../../logic/cr-lifecycle";
+import { buildBaseVisibilityExists, buildNodeVisibilityExists } from "../../../logic/node-acl";
 import { ensureReady } from "../../../logic/seed";
 import { listInputSchema, recordFieldFilterInputSchema } from "../../../logic/store";
 import { toBaseVO, toFieldVO, toRecordLinkVO, toViewVO } from "../../../logic/vo";
@@ -48,7 +49,13 @@ export const listBases = async () => {
   const baseRows = await db
     .select()
     .from(busabaseBases)
-    .where(and(eq(busabaseBases.spaceId, spaceId), isNull(busabaseBases.archivedAt)))
+    .where(
+      and(
+        eq(busabaseBases.spaceId, spaceId),
+        isNull(busabaseBases.archivedAt),
+        buildNodeVisibilityExists(db, busabaseBases.nodeId),
+      ),
+    )
     .orderBy(asc(busabaseBases.createdAt));
   const fieldRows = await db
     .select()
@@ -74,6 +81,9 @@ export const getBase = async (baseId: string) => {
   // the restore / notice flows — but a permanently deleted one is excluded:
   // once purged there is no restore flow left, so it must resolve to "not
   // found" like everything else that's been purged.)
+  // Node ACL: a base whose node the actor can't see resolves to null here —
+  // indistinguishable from a base that doesn't exist.
+  const visible = buildNodeVisibilityExists(db, busabaseBases.nodeId);
   const [base] = await db
     .select()
     .from(busabaseBases)
@@ -82,6 +92,7 @@ export const getBase = async (baseId: string) => {
         eq(busabaseBases.slug, baseId),
         eq(busabaseBases.spaceId, spaceId),
         isNull(busabaseBases.archivedAt),
+        visible,
       ),
     )
     .limit(1);
@@ -95,6 +106,7 @@ export const getBase = async (baseId: string) => {
             eq(busabaseBases.id, baseId),
             eq(busabaseBases.spaceId, spaceId),
             isNull(busabaseBases.deletedAt),
+            visible,
           ),
         )
         .limit(1);
@@ -128,6 +140,7 @@ export const listViews = async (baseId?: string) => {
             eq(busabaseViews.spaceId, getContextSpaceId()),
             eq(busabaseViews.status, "active"),
             isNull(busabaseBases.archivedAt),
+            buildNodeVisibilityExists(db, busabaseBases.nodeId),
           ),
         )
         .orderBy(asc(busabaseViews.createdAt))
@@ -144,7 +157,11 @@ export const listRecords = async (input?: z.input<typeof listInputSchema>) => {
     .select()
     .from(busabaseRecords)
     .where(
-      and(eq(busabaseRecords.spaceId, getContextSpaceId()), eq(busabaseRecords.status, "active")),
+      and(
+        eq(busabaseRecords.spaceId, getContextSpaceId()),
+        eq(busabaseRecords.status, "active"),
+        buildBaseVisibilityExists(db, busabaseRecords.baseId),
+      ),
     )
     .orderBy(desc(busabaseRecords.createdAt))
     .limit(parsed.limit);
@@ -296,6 +313,10 @@ export const listRecordsPaged = async (input?: z.input<typeof listRecordsInputSc
     eq(busabaseRecords.spaceId, getContextSpaceId()),
     eq(busabaseRecords.status, "active"),
   ];
+  const recordsVisible = buildBaseVisibilityExists(db, busabaseRecords.baseId);
+  if (recordsVisible) {
+    filters.push(recordsVisible);
+  }
   if (parsed.baseId) {
     filters.push(eq(busabaseRecords.baseId, parsed.baseId));
   }
@@ -406,6 +427,10 @@ export const countRecords = async (input?: z.input<typeof countRecordsInputSchem
     eq(busabaseRecords.spaceId, getContextSpaceId()),
     eq(busabaseRecords.status, "active"),
   ];
+  const countVisible = buildBaseVisibilityExists(db, busabaseRecords.baseId);
+  if (countVisible) {
+    filters.push(countVisible);
+  }
   if (parsed.baseId) {
     filters.push(eq(busabaseRecords.baseId, parsed.baseId));
   }
@@ -422,7 +447,13 @@ export const getRecord = async (recordId: string) => {
   const [record] = await db
     .select()
     .from(busabaseRecords)
-    .where(and(eq(busabaseRecords.id, recordId), eq(busabaseRecords.spaceId, getContextSpaceId())))
+    .where(
+      and(
+        eq(busabaseRecords.id, recordId),
+        eq(busabaseRecords.spaceId, getContextSpaceId()),
+        buildBaseVisibilityExists(db, busabaseRecords.baseId),
+      ),
+    )
     .limit(1);
   return record ? hydrateRecord(record) : null;
 };
@@ -438,6 +469,10 @@ export const listRecordLinks = async (recordId: string) => {
         eq(busabaseRecordLinks.spaceId, getContextSpaceId()),
         eq(busabaseRecordLinks.sourceRecordId, recordId),
         isNull(busabaseRecordLinks.deletedAt),
+        // Gate on the SOURCE base's node visibility (links hang off a source
+        // record); a link whose target base is private still shows only the
+        // target record id — following it hits getRecord's own gate.
+        buildBaseVisibilityExists(db, busabaseRecordLinks.baseId),
       ),
     )
     .orderBy(asc(busabaseRecordLinks.position), asc(busabaseRecordLinks.createdAt));
@@ -457,6 +492,10 @@ export const listRecordsByFieldText = async (
     isNotNull(busabaseFieldValues.recordId),
     isNull(busabaseFieldValues.deletedAt),
   ];
+  const fieldTextVisible = buildBaseVisibilityExists(db, busabaseFieldValues.baseId);
+  if (fieldTextVisible) {
+    filters.push(fieldTextVisible);
+  }
   if (parsed.baseId) {
     filters.push(eq(busabaseFieldValues.baseId, parsed.baseId));
   }
@@ -501,6 +540,7 @@ export const listArchivedBases = async () => {
         // Permanently-deleted bases leave the Trash for good — they're excluded
         // here the same way a purged folder/doc/skill leaves listArchivedNodes.
         isNull(busabaseBases.deletedAt),
+        buildNodeVisibilityExists(db, busabaseBases.nodeId),
       ),
     )
     .orderBy(asc(busabaseBases.createdAt));

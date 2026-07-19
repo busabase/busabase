@@ -87,6 +87,26 @@ export const busabaseDemoRouter = os.router({
     purge: os.nodes.purge.handler(() => {
       throw demoUnsupported("Permanently delete node");
     }),
+    updateVisibility: os.nodes.updateVisibility.handler(() => {
+      throw demoUnsupported("Node visibility");
+    }),
+    toggleFavorite: os.nodes.toggleFavorite.handler(() => {
+      throw demoUnsupported("Toggle favorite");
+    }),
+    // Demo mode has no persisted state to favorite against — an empty list is
+    // truthful (matches `listArchived`'s demo handler above), not an error.
+    listFavorites: os.nodes.listFavorites.handler(() => []),
+    principals: {
+      // The demo dataset has no grants — an empty list is truthful, and it
+      // lets the Permissions dialog render read-only in demo mode.
+      list: os.nodes.principals.list.handler(() => []),
+      add: os.nodes.principals.add.handler(() => {
+        throw demoUnsupported("Node permissions");
+      }),
+      remove: os.nodes.principals.remove.handler(() => {
+        throw demoUnsupported("Node permissions");
+      }),
+    },
   },
   auditEvents: {
     list: os.auditEvents.list.handler(() => demoListAuditEvents()),
@@ -129,7 +149,11 @@ export const busabaseDemoRouter = os.router({
     }),
     createChangeRequest: os.bases.createChangeRequest.handler(({ input }) => {
       const { baseId, ...rest } = input;
-      return demoCreateChangeRequest(baseId, rest);
+      // Demo mode doesn't implement a real merge engine, so `autoMerge` is a
+      // no-op here — every demo record create stays review-first (matches how
+      // `bases.create`'s demo handler above never reaches the materialized
+      // branch either).
+      return { ...demoCreateChangeRequest(baseId, rest), materialized: false as const };
     }),
     createBulkChangeRequest: os.bases.createBulkChangeRequest.handler(() => {
       throw demoUnsupported("Bulk record change request");

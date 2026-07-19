@@ -264,150 +264,148 @@ export function SpaceSelector({
             </SidebarMenuButton>
           </DropdownMenuTrigger>
           <DropdownMenuContent
-            className="w-96 min-w-96 max-w-96 rounded-lg p-0 overflow-hidden"
+            className="flex max-h-[min(32rem,var(--radix-dropdown-menu-content-available-height))] w-96 min-w-96 max-w-96 flex-col overflow-hidden rounded-lg p-0"
             align="start"
             side={isMobile ? "bottom" : "right"}
             sideOffset={4}
           >
-            <div className="flex max-h-[min(32rem,var(--radix-dropdown-menu-content-available-height))] flex-col">
-              {/* Active Space Header */}
-              <div
-                className={cn(
-                  "shrink-0 p-3 pb-2",
-                  isRemoteSpaceOffline(currentSpace) && "opacity-60 grayscale",
-                )}
-              >
-                <div className="flex items-center gap-3">
-                  <AvatarLogo src={logoSrc} fallback={currentSpace.name[0]} size="md" />
-                  <div className="min-w-0 flex-1">
-                    <div
-                      className="flex items-center gap-1.5 truncate font-medium"
-                      title={currentSpace.name}
-                    >
-                      {currentSpace.name}
-                      <SpaceTypeBadge space={currentSpace} show={hasRemoteSpace} />
-                    </div>
-                    <span
-                      className={`mt-1 inline-flex w-fit rounded-md px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide ${getPlanBadgeStyle(currentSpace.plan ?? "free")}`}
-                    >
-                      {currentSpace.plan ?? "Free"}
-                    </span>
+            {/* Active Space Header */}
+            <div
+              className={cn(
+                "shrink-0 p-3 pb-2",
+                isRemoteSpaceOffline(currentSpace) && "opacity-60 grayscale",
+              )}
+            >
+              <div className="flex items-center gap-3">
+                <AvatarLogo src={logoSrc} fallback={currentSpace.name[0]} size="md" />
+                <div className="min-w-0 flex-1">
+                  <div
+                    className="flex items-center gap-1.5 truncate font-medium"
+                    title={currentSpace.name}
+                  >
+                    {currentSpace.name}
+                    <SpaceTypeBadge space={currentSpace} show={hasRemoteSpace} />
                   </div>
-                  {onFocusMode && (
-                    <div className="flex shrink-0 items-center gap-0.5 self-start">
-                      <TooltipProvider delayDuration={300}>
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setIsOpen(false);
-                                onFocusMode();
-                              }}
-                              className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
-                            >
-                              <Focus className="size-4" />
-                            </button>
-                          </TooltipTrigger>
-                          <TooltipContent side="bottom">
-                            {labels.focusMode ?? "Agent Focus Mode"}
-                          </TooltipContent>
-                        </Tooltip>
-                      </TooltipProvider>
-                    </div>
+                  <span
+                    className={`mt-1 inline-flex w-fit rounded-md px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide ${getPlanBadgeStyle(currentSpace.plan ?? "free")}`}
+                  >
+                    {currentSpace.plan ?? "Free"}
+                  </span>
+                </div>
+                {onFocusMode && (
+                  <div className="flex shrink-0 items-center gap-0.5 self-start">
+                    <TooltipProvider delayDuration={300}>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setIsOpen(false);
+                              onFocusMode();
+                            }}
+                            className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
+                          >
+                            <Focus className="size-4" />
+                          </button>
+                        </TooltipTrigger>
+                        <TooltipContent side="bottom">
+                          {labels.focusMode ?? "Agent Focus Mode"}
+                        </TooltipContent>
+                      </Tooltip>
+                    </TooltipProvider>
+                  </div>
+                )}
+              </div>
+
+              {/* Action Buttons */}
+              {(onSettingsClick || onInviteMembersClick) && (
+                <div className="mt-3 flex gap-2">
+                  {onSettingsClick && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-8 flex-1 text-xs"
+                      onClick={handleSettingsClick}
+                    >
+                      <Settings className="mr-1.5 size-3.5" />
+                      {labels.settings}
+                    </Button>
+                  )}
+                  {onInviteMembersClick && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-8 flex-1 text-xs"
+                      onClick={handleInviteMembersClick}
+                    >
+                      <UserPlus className="mr-1.5 size-3.5" />
+                      {labels.inviteMembers}
+                    </Button>
                   )}
                 </div>
-
-                {/* Action Buttons */}
-                {(onSettingsClick || onInviteMembersClick) && (
-                  <div className="mt-3 flex gap-2">
-                    {onSettingsClick && (
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="h-8 flex-1 text-xs"
-                        onClick={handleSettingsClick}
-                      >
-                        <Settings className="mr-1.5 size-3.5" />
-                        {labels.settings}
-                      </Button>
-                    )}
-                    {onInviteMembersClick && (
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="h-8 flex-1 text-xs"
-                        onClick={handleInviteMembersClick}
-                      >
-                        <UserPlus className="mr-1.5 size-3.5" />
-                        {labels.inviteMembers}
-                      </Button>
-                    )}
-                  </div>
-                )}
-              </div>
-
-              {extraMenuItems && (
-                <>
-                  <DropdownMenuSeparator className="my-0 shrink-0" />
-                  <div className="shrink-0 p-1">{extraMenuItems}</div>
-                </>
-              )}
-
-              <DropdownMenuSeparator className="my-0 shrink-0" />
-
-              {/* Spaces List */}
-              <div className="min-h-0 flex-1 overflow-y-auto p-1">
-                <DropdownMenuLabel className="px-2 py-1.5 text-muted-foreground text-xs">
-                  {labels.spaces}
-                </DropdownMenuLabel>
-                {spaces.map((space) => {
-                  const isActive = space.id === currentSpace.id;
-                  return (
-                    <DropdownMenuItem
-                      key={space.id || space.name}
-                      onClick={() => handleSpaceChange(space)}
-                      className={cn(
-                        "min-w-0 w-full cursor-pointer items-center gap-2 p-2",
-                        isRemoteSpaceOffline(space) && "opacity-60 grayscale",
-                      )}
-                    >
-                      <AvatarLogo src={space.logo} fallback={space.name[0]} size="xs" />
-                      <div className="flex min-w-0 flex-1 items-center gap-2">
-                        <span
-                          className="flex min-w-0 items-center gap-1.5 truncate"
-                          title={space.name}
-                        >
-                          <span className="truncate">{space.name}</span>
-                          <SpaceTypeBadge space={space} show={hasRemoteSpace} />
-                        </span>
-                        <span
-                          className={`inline-flex shrink-0 rounded-md px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wide ${getPlanBadgeStyle(space.plan ?? "free")}`}
-                        >
-                          {space.plan ?? "Free"}
-                        </span>
-                      </div>
-                      {isActive && <Check className="size-4 shrink-0 text-muted-foreground" />}
-                    </DropdownMenuItem>
-                  );
-                })}
-              </div>
-
-              {/* Add Space */}
-              {onAddSpace && (
-                <>
-                  <DropdownMenuSeparator className="my-0 shrink-0" />
-                  <div className="shrink-0 p-1">
-                    <DropdownMenuItem className="cursor-pointer gap-2 p-2" onClick={handleAddSpace}>
-                      <div className="flex size-6 items-center justify-center rounded-md border bg-background">
-                        <Plus className="size-4" />
-                      </div>
-                      <span className="text-muted-foreground">{labels.addSpace}</span>
-                    </DropdownMenuItem>
-                  </div>
-                </>
               )}
             </div>
+
+            {extraMenuItems && (
+              <>
+                <DropdownMenuSeparator className="my-0 shrink-0" />
+                <div className="shrink-0 p-1">{extraMenuItems}</div>
+              </>
+            )}
+
+            <DropdownMenuSeparator className="my-0 shrink-0" />
+
+            {/* Spaces List */}
+            <div className="min-h-0 flex-1 overscroll-contain overflow-y-auto p-1">
+              <DropdownMenuLabel className="px-2 py-1.5 text-muted-foreground text-xs">
+                {labels.spaces}
+              </DropdownMenuLabel>
+              {spaces.map((space) => {
+                const isActive = space.id === currentSpace.id;
+                return (
+                  <DropdownMenuItem
+                    key={space.id || space.name}
+                    onClick={() => handleSpaceChange(space)}
+                    className={cn(
+                      "min-w-0 w-full cursor-pointer items-center gap-2 p-2",
+                      isRemoteSpaceOffline(space) && "opacity-60 grayscale",
+                    )}
+                  >
+                    <AvatarLogo src={space.logo} fallback={space.name[0]} size="xs" />
+                    <div className="flex min-w-0 flex-1 items-center gap-2">
+                      <span
+                        className="flex min-w-0 items-center gap-1.5 truncate"
+                        title={space.name}
+                      >
+                        <span className="truncate">{space.name}</span>
+                        <SpaceTypeBadge space={space} show={hasRemoteSpace} />
+                      </span>
+                      <span
+                        className={`inline-flex shrink-0 rounded-md px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wide ${getPlanBadgeStyle(space.plan ?? "free")}`}
+                      >
+                        {space.plan ?? "Free"}
+                      </span>
+                    </div>
+                    {isActive && <Check className="size-4 shrink-0 text-muted-foreground" />}
+                  </DropdownMenuItem>
+                );
+              })}
+            </div>
+
+            {/* Add Space */}
+            {onAddSpace && (
+              <>
+                <DropdownMenuSeparator className="my-0 shrink-0" />
+                <div className="shrink-0 p-1">
+                  <DropdownMenuItem className="cursor-pointer gap-2 p-2" onClick={handleAddSpace}>
+                    <div className="flex size-6 items-center justify-center rounded-md border bg-background">
+                      <Plus className="size-4" />
+                    </div>
+                    <span className="text-muted-foreground">{labels.addSpace}</span>
+                  </DropdownMenuItem>
+                </div>
+              </>
+            )}
           </DropdownMenuContent>
         </DropdownMenu>
       </SidebarMenuItem>

@@ -29,6 +29,20 @@
       "when": 1784114037234,
       "tag": "0003_skinny_madame_hydra",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1784197405676,
+      "tag": "0004_wandering_aqueduct",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1784383417948,
+      "tag": "0005_rich_speed_demon",
+      "breakpoints": true
     }
   ]
 }

@@ -34,7 +34,7 @@ import { ensureReady } from "../../../logic/seed";
 import { fieldSchema } from "../../../logic/store";
 import { isSystemFieldType } from "../field-types";
 import { busabaseFieldValues } from "../schema";
-import { ConversionNotSupportedError, convertFieldValue } from "../utils/field-conversion";
+import { convertFieldValue } from "../utils/field-conversion";
 import { getBase } from "./queries";
 import { resolveRelationFieldOptions } from "./relation-options";
 
@@ -49,17 +49,33 @@ export {
   updateFieldChangeRequestInputSchema,
 };
 
+/** Caller-supplied baseId doesn't resolve — a genuine "not found" client error. */
+const baseNotFound = (baseId: string) =>
+  new ORPCError("NOT_FOUND", { message: `Base not found: ${baseId}` });
+
+/** Caller-supplied fieldId doesn't resolve (or is soft-deleted) — a genuine "not found" client error. */
+const fieldNotFound = (fieldId: string) =>
+  new ORPCError("NOT_FOUND", { message: `Field not found: ${fieldId}` });
+
+/** Requested field-type conversion is intentionally disallowed — a client validation error, not a server fault. */
+const conversionNotSupported = (fromType: FieldType, newType: FieldType) =>
+  new ORPCError("BAD_REQUEST", { message: `Cannot convert from "${fromType}" to "${newType}"` });
+
+/** Caller declared type: "relation" but didn't supply a target Base — a client input error, not a server fault. */
+const relationRequiresTargetBase = () =>
+  new ORPCError("BAD_REQUEST", { message: "Relation field requires a target Base" });
+
 export const createBaseField = async (baseId: string, input: z.infer<typeof fieldSchema>) => {
   await ensureReady();
   const db = await getDb();
   const base = await getBase(baseId);
   if (!base) {
-    throw new Error(`Base not found: ${baseId}`);
+    throw baseNotFound(baseId);
   }
   const parsed = fieldSchema.parse(input);
   const options = await resolveRelationFieldOptions(db, parsed.options);
   if (parsed.type === "relation" && !options.targetBaseId) {
-    throw new Error("Relation field requires a target Base");
+    throw relationRequiresTargetBase();
   }
   const [existing] = await db
     .select()
@@ -120,13 +136,13 @@ export const createFieldChangeRequest = async (
   const db = await getDb();
   const base = await getBase(baseId);
   if (!base) {
-    throw new Error(`Base not found: ${baseId}`);
+    throw baseNotFound(baseId);
   }
 
   const parsed = createFieldChangeRequestInputSchema.parse(input);
   const options = await resolveRelationFieldOptions(db, parsed.options);
   if (parsed.type === "relation" && !options.targetBaseId) {
-    throw new Error("Relation field requires a target Base");
+    throw relationRequiresTargetBase();
   }
   const [existing] = await db
     .select()
@@ -233,7 +249,7 @@ export const createDeleteFieldChangeRequest = async (
   const db = await getDb();
   const base = await getBase(baseId);
   if (!base) {
-    throw new Error(`Base not found: ${baseId}`);
+    throw baseNotFound(baseId);
   }
   const [field] = await db
     .select()
@@ -241,7 +257,7 @@ export const createDeleteFieldChangeRequest = async (
     .where(and(eq(busabaseBaseFields.id, fieldId), eq(busabaseBaseFields.baseId, base.id)))
     .limit(1);
   if (!field) {
-    throw new Error(`Field not found: ${fieldId}`);
+    throw fieldNotFound(fieldId);
   }
   if (field.deletedAt) {
     throw new Error(`Field is already deleted: ${fieldId}`);
@@ -342,7 +358,7 @@ export const createUpdateFieldChangeRequest = async (
   const db = await getDb();
   const base = await getBase(baseId);
   if (!base) {
-    throw new Error(`Base not found: ${baseId}`);
+    throw baseNotFound(baseId);
   }
   const [field] = await db
     .select()
@@ -350,7 +366,7 @@ export const createUpdateFieldChangeRequest = async (
     .where(and(eq(busabaseBaseFields.id, fieldId), eq(busabaseBaseFields.baseId, base.id)))
     .limit(1);
   if (!field || field.deletedAt) {
-    throw new Error(`Field not found: ${fieldId}`);
+    throw fieldNotFound(fieldId);
   }
 
   const changeRequestId = id("crq");
@@ -452,7 +468,7 @@ export const previewFieldConversion = async (
   const db = await getDb();
   const base = await getBase(baseId);
   if (!base) {
-    throw new Error(`Base not found: ${baseId}`);
+    throw baseNotFound(baseId);
   }
   const [field] = await db
     .select()
@@ -460,16 +476,18 @@ export const previewFieldConversion = async (
     .where(and(eq(busabaseBaseFields.id, fieldId), eq(busabaseBaseFields.baseId, base.id)))
     .limit(1);
   if (!field || field.deletedAt) {
-    throw new Error(`Field not found: ${fieldId}`);
+    throw fieldNotFound(fieldId);
   }
   if (isSystemFieldType(field.type)) {
-    throw new Error(`Cannot convert system field: ${field.slug}`);
+    throw new ORPCError("BAD_REQUEST", {
+      message: `Cannot convert system field: ${field.slug}`,
+    });
   }
   if (field.type === "relation" || field.type === "attachment") {
-    throw new ConversionNotSupportedError(field.type, newType);
+    throw conversionNotSupported(field.type, newType);
   }
   if (isSystemFieldType(newType) || newType === "relation" || newType === "attachment") {
-    throw new ConversionNotSupportedError(field.type, newType);
+    throw conversionNotSupported(field.type, newType);
   }
 
   const scopeFilter = and(
@@ -574,7 +592,7 @@ export const createConvertFieldChangeRequest = async (
   const db = await getDb();
   const base = await getBase(baseId);
   if (!base) {
-    throw new Error(`Base not found: ${baseId}`);
+    throw baseNotFound(baseId);
   }
   const [field] = await db
     .select()
@@ -582,16 +600,18 @@ export const createConvertFieldChangeRequest = async (
     .where(and(eq(busabaseBaseFields.id, fieldId), eq(busabaseBaseFields.baseId, base.id)))
     .limit(1);
   if (!field || field.deletedAt) {
-    throw new Error(`Field not found: ${fieldId}`);
+    throw fieldNotFound(fieldId);
   }
   if (isSystemFieldType(field.type)) {
-    throw new Error(`Cannot convert system field: ${field.slug}`);
+    throw new ORPCError("BAD_REQUEST", {
+      message: `Cannot convert system field: ${field.slug}`,
+    });
   }
   if (field.type === "relation" || field.type === "attachment") {
-    throw new ConversionNotSupportedError(field.type, newType);
+    throw conversionNotSupported(field.type, newType);
   }
   if (isSystemFieldType(newType) || newType === "relation" || newType === "attachment") {
-    throw new ConversionNotSupportedError(field.type, newType);
+    throw conversionNotSupported(field.type, newType);
   }
 
   // A field may only have one in-review convert CR at a time. But a CR that has
@@ -714,7 +734,7 @@ export const createReorderFieldsChangeRequest = async (
   const db = await getDb();
   const base = await getBase(baseId);
   if (!base) {
-    throw new Error(`Base not found: ${baseId}`);
+    throw baseNotFound(baseId);
   }
 
   // All active (non-deleted) field IDs must be included
@@ -810,7 +830,7 @@ export const createRestoreFieldChangeRequest = async (
   const db = await getDb();
   const base = await getBase(baseId);
   if (!base) {
-    throw new Error(`Base not found: ${baseId}`);
+    throw baseNotFound(baseId);
   }
   const [field] = await db
     .select()
@@ -818,7 +838,7 @@ export const createRestoreFieldChangeRequest = async (
     .where(and(eq(busabaseBaseFields.id, fieldId), eq(busabaseBaseFields.baseId, base.id)))
     .limit(1);
   if (!field) {
-    throw new Error(`Field not found: ${fieldId}`);
+    throw fieldNotFound(fieldId);
   }
   if (!field.deletedAt) {
     throw new Error(`Field is not deleted: ${fieldId}`);

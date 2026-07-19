@@ -432,6 +432,28 @@ export const DIRECTORY_LISTINGS_VIEWS: SeedViewDef[] = [
     minutesAgo: 58,
     useCases: ["directories"],
   },
+  {
+    id: "viw_seed_dir_board",
+    baseId: DEMO_DIRECTORY_LISTINGS_BASE_ID,
+    slug: "board",
+    name: "Submission board",
+    description: "Every listing stacked by status — drag a card to move it along.",
+    type: "kanban",
+    config: { filters: [], sorts: [], stackByFieldSlug: "status" },
+    minutesAgo: 57,
+    useCases: ["directories"],
+  },
+  {
+    id: "viw_seed_dir_calendar",
+    baseId: DEMO_DIRECTORY_LISTINGS_BASE_ID,
+    slug: "calendar",
+    name: "Submission calendar",
+    description: "Listings placed on the month they were submitted.",
+    type: "calendar",
+    config: { filters: [], sorts: [], dateFieldSlug: "submitted" },
+    minutesAgo: 56,
+    useCases: ["directories"],
+  },
 ];
 
 export const directoryListingScenario: SeedScenario = {

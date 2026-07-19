@@ -22,6 +22,7 @@ import {
   renderFileTree,
   type SkillTreeNode,
 } from "./file-tree-browser";
+import { NodePermissionsButton } from "./node-permissions-button";
 import { EmptyState } from "./primitives";
 import { FileContentSkeleton, NodeDetailSkeleton } from "./skeletons";
 
@@ -240,6 +241,11 @@ export function FileTreeDetailView({
             </div>
           </div>
           <div className="flex shrink-0 items-center gap-2">
+            <NodePermissionsButton
+              nodeId={fileTree.node.id}
+              nodeName={fileTree.node.name}
+              orpc={orpc}
+            />
             <NodeDeleteButton
               nodeId={fileTree.node.id}
               nodeName={fileTree.node.name}
@@ -516,6 +522,7 @@ export function FileNodeDetailView({
             <p className="mt-2 text-muted-foreground text-sm">{node.description}</p>
           ) : null}
         </div>
+        <NodePermissionsButton nodeId={node.id} nodeName={node.name} orpc={orpc} />
         <NodeDeleteButton orpc={orpc} nodeId={node.id} nodeName={node.name} nodeType="file" />
       </div>
 
@@ -714,6 +721,7 @@ export function DocDetailView({ orpc, slug }: { orpc: BusabaseQueryUtils; slug: 
             >
               {messages.common.edit}
             </button>
+            <NodePermissionsButton nodeId={doc.node.id} nodeName={doc.node.name} orpc={orpc} />
             <NodeDeleteButton
               nodeId={doc.node.id}
               nodeName={doc.node.name}
@@ -784,13 +792,16 @@ export function FolderDetailView({
             <p className="mt-2 text-muted-foreground text-sm">{folder.node.description}</p>
           ) : null}
         </div>
-        <NodeDeleteButton
-          childCount={folder.children.length}
-          nodeId={folder.node.id}
-          nodeName={folder.node.name}
-          nodeType="folder"
-          orpc={orpc}
-        />
+        <div className="flex shrink-0 items-center gap-2">
+          <NodePermissionsButton nodeId={folder.node.id} nodeName={folder.node.name} orpc={orpc} />
+          <NodeDeleteButton
+            childCount={folder.children.length}
+            nodeId={folder.node.id}
+            nodeName={folder.node.name}
+            nodeType="folder"
+            orpc={orpc}
+          />
+        </div>
       </div>
       {folder.children.length === 0 ? (
         <EmptyState

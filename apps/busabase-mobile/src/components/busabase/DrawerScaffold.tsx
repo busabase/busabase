@@ -4,6 +4,7 @@ import type { NodeVO } from "busabase-contract/types";
 import { usePathname, useRouter } from "expo-router";
 import {
   Activity,
+  AppWindow,
   Archive,
   Bot,
   FileText,
@@ -135,6 +136,11 @@ export function DrawerScaffold({
     if (node.type === "drive") {
       setOpen(false);
       router.push({ pathname: "/drive/[nodeId]", params: { nodeId: node.id } });
+      return;
+    }
+    if (node.type === "airapp") {
+      setOpen(false);
+      router.push({ pathname: "/airapp/[nodeId]", params: { nodeId: node.id } });
       return;
     }
     if (node.type === "doc") {
@@ -495,6 +501,7 @@ const NODE_ICONS: Record<string, typeof Folder> = {
   "file-text": FileText,
   bot: Bot,
   "hard-drive": HardDrive,
+  "app-window": AppWindow,
 };
 
 // Per-node-type icon, subtitle, and whether the row navigates somewhere — all
@@ -526,6 +533,9 @@ function isNodeActive(node: NodeVO, pathname: string) {
   }
   if (node.type === "drive") {
     return isPathActive(pathname, `/drive/${node.id}`);
+  }
+  if (node.type === "airapp") {
+    return isPathActive(pathname, `/airapp/${node.id}`);
   }
   if (node.type === "doc") {
     return isPathActive(pathname, `/doc/${node.id}`);

@@ -149,16 +149,15 @@ export function useS3Uploader<TMetadata = unknown>({
         return { publicUrl, attachmentId };
       }
 
-      const isDevUpload = uploadUrl === "/api/dev/upload";
-
-      if (isDevUpload) {
-        const formData = new FormData();
-        formData.append("file", file);
-        formData.append("storageKey", storageKey);
-        await uploadWithProgress("/api/dev/upload", formData, undefined, file.name);
-      } else {
-        await uploadWithProgress(uploadUrl, file, { "Content-Type": file.type }, file.name);
-      }
+      // One uniform path: PUT the raw bytes to whatever URL the server handed us
+      // — an S3 presigned URL or the local dev relay. The client never branches on
+      // where it's uploading; the server absorbed that difference.
+      await uploadWithProgress(
+        uploadUrl,
+        file,
+        { "Content-Type": file.type || "application/octet-stream" },
+        file.name,
+      );
 
       setUploadProgress({ fileName: file.name, percent: 100, loaded: file.size, total: file.size });
 

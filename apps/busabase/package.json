@@ -1,7 +1,7 @@
 {
   "name": "busabase",
   "description": "Open-source Busabase review app + CLI. `busabase server` boots a zero-setup local instance (pglite); other subcommands act as an OpenAPI client.",
-  "version": "0.9.6",
+  "version": "0.9.8",
   "private": false,
   "license": "MIT",
   "homepage": "https://github.com/busabase/busabase/tree/main/apps/busabase",
@@ -64,8 +64,8 @@
     "busabase-cli": "workspace:*"
   },
   "devDependencies": {
-    "@electric-sql/pglite": "^0.3.15",
     "@anthropic-ai/sandbox-runtime": "0.0.65",
+    "@electric-sql/pglite": "^0.3.15",
     "@orpc/client": "^1.14.6",
     "@orpc/contract": "^1.14.6",
     "@orpc/openapi": "^1.14.6",
@@ -78,6 +78,7 @@
     "@types/react": "19.2.17",
     "@types/react-dom": "^19.2.3",
     "@types/ws": "^8.18.1",
+    "@zip.js/zip.js": "^2.8.20",
     "autocannon": "^8.0.0",
     "busabase-contract": "workspace:*",
     "busabase-core": "workspace:*",

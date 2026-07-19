@@ -3,7 +3,7 @@ import { SidebarInset, SidebarProvider, SidebarTrigger } from "kui/sidebar";
 import { cn } from "kui/utils";
 import type * as React from "react";
 import { AppSidebar } from "./AppSidebar";
-import type { AppBranding, NavGroup, Space, UserData, UserMenuItem } from "./types";
+import type { AppBranding, NavGroup, NavUserLabels, Space, UserData, UserMenuItem } from "./types";
 
 interface DashboardLayoutProps {
   children: React.ReactNode;
@@ -85,11 +85,7 @@ interface DashboardLayoutProps {
   /**
    * Labels for NavUser i18n support
    */
-  userMenuLabels?: {
-    accountSettings?: string;
-    notifications?: string;
-    logOut?: string;
-  };
+  userMenuLabels?: NavUserLabels;
   /**
    * Optional badge to display before breadcrumbs (e.g., "Multi-Space Mode")
    */

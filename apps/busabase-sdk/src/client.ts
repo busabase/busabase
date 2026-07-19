@@ -1,4 +1,4 @@
-import { createORPCClient } from "@orpc/client";
+import { createORPCClient, ORPCError } from "@orpc/client";
 import { RPCLink } from "@orpc/client/fetch";
 import { type ContractRouterClient, inferRPCMethodFromContractRouter } from "@orpc/contract";
 import { OpenAPILink } from "@orpc/openapi-client/fetch";
@@ -92,6 +92,51 @@ export function resolveConfig(config: BusabaseConfig = {}): ResolvedConfig {
   };
 }
 
+/** One entry of a Zod validation failure, as the server puts on `data.issues`
+ *  for a 400 (see `Input validation failed` responses). */
+interface BusabaseErrorIssue {
+  path?: unknown;
+  message?: unknown;
+}
+
+/**
+ * The server's OpenAPI error body is a bespoke `{ error, code, data }` shape
+ * (see `encodeOpenApiError` in `apps/busabase/src/app/api/v1/[[...rest]]/route.ts`),
+ * not oRPC's own `{ defined, code, status, message, data }` shape. `OpenAPILink`'s
+ * built-in `isORPCErrorJson` check requires the latter, so without this decoder
+ * it never recognizes the body, falls back to a generic per-status message
+ * ("Bad Request" / "Conflict" / …), and silently drops the server's real error
+ * text — including, for a 400, the field-level `data.issues` detail entirely.
+ * This reconstructs a real message from the actual body so CLI/SDK callers see
+ * what the server actually said. Returning `undefined` for anything that
+ * doesn't look like this shape lets `OpenAPILink` fall back to its own decoding.
+ */
+const decodeBusabaseError = (
+  deserializedBody: unknown,
+  response: { status: number },
+): ORPCError<string, unknown> | undefined => {
+  if (!deserializedBody || typeof deserializedBody !== "object") {
+    return undefined;
+  }
+  const body = deserializedBody as { error?: unknown; code?: unknown; data?: unknown };
+  if (typeof body.error !== "string") {
+    return undefined;
+  }
+  const code = typeof body.code === "string" ? body.code : `HTTP_${response.status}`;
+  const issues = (body.data as { issues?: unknown } | undefined)?.issues;
+  let message = body.error;
+  if (Array.isArray(issues) && issues.length > 0) {
+    const details = (issues as BusabaseErrorIssue[])
+      .map((issue) => {
+        const path = Array.isArray(issue?.path) ? issue.path.join(".") : undefined;
+        return path ? `${path}: ${issue?.message}` : String(issue?.message ?? issue);
+      })
+      .join("; ");
+    message = `${message} — ${details}`;
+  }
+  return new ORPCError(code, { status: response.status, message, data: body.data });
+};
+
 /**
  * Build a fully-typed Busabase client over the public `/api/v1` REST surface.
  * Config fields default from `BUSABASE_BASE_URL` / `BUSABASE_API_KEY` /
@@ -109,6 +154,7 @@ export function createBusabaseClient(config: BusabaseConfig = {}): BusabaseClien
   const link = new OpenAPILink(cloudContract, {
     url: resolved.baseUrl,
     fetch: resolved.fetch,
+    customErrorResponseBodyDecoder: decodeBusabaseError,
     headers: async () => {
       const extra =
         typeof resolved.headers === "function" ? await resolved.headers() : resolved.headers;

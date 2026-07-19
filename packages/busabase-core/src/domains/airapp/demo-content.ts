@@ -134,8 +134,24 @@
  *      size (~390KB of real app content vs. a few KB per demo here). Not
  *      zero-dependency (48 real npm packages), so unlike #9-10 it's not in
  *      the fast baseline seed.
+ *  12. "Workspace Data Explorer" — the canonical SDK-RPC data reader. Same
+ *      "real, live workspace data" pitch as #9-10, but where those two hit the
+ *      raw REST API with bare `fetch("/__busabase_api__/api/v1/...")`, this one
+ *      goes through `busabase-sdk`'s `createBusabaseRpcClient` (the fully-typed
+ *      oRPC transport the dashboard's own frontend uses) to list the
+ *      workspace's nodes (`nodes.list`) and drill into them: a Doc renders its
+ *      body (`docs.get`), a Base renders its records as a table
+ *      (`records.listPaged` by the base node's `baseId`), a File shows its
+ *      asset metadata + a text preview (`files.get`), and anything else shows
+ *      metadata. Auto-detects `/api/rpc/core` (busabase-cloud) vs `/api/rpc`
+ *      (OSS busabase) by probing both. Like Kelly Email it has an esbuild build
+ *      step (the SDK + its `@orpc/client` dep + the cloud contract's zod graph
+ *      bundle to a ~418KB browser script, baked in at authoring time and served
+ *      as a static `client.js`), so it's likewise NOT in the fast baseline
+ *      seed. See `demo-content-data-explorer.ts`.
  */
 
+import { AIRAPP_DEMO_DATA_EXPLORER } from "./demo-content-data-explorer";
 import { AIRAPP_DEMO_KELLY_EMAIL } from "./demo-content-kelly-email";
 
 export interface AirAppDemoFile {
@@ -274,7 +290,9 @@ createServer((req, res) => {
     res.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
     res.end("Not found");
   }
-}).listen(3000, () => console.log("Pure HTML Demo listening on port 3000"));
+}).listen(Number(process.env.PORT) || 3000, function () {
+  console.log(\`Pure HTML Demo listening on port \${this.address().port}\`);
+});
 `;
 
 const PURE_HTML_INDEX_HTML = `<!doctype html>
@@ -354,7 +372,7 @@ app.get("/api/greeting", (c) =>
   c.json({ message: "Hello from a real Hono server, running inside Nodepod." }),
 );
 
-serve({ fetch: app.fetch, port: 3000 }, (info) => {
+serve({ fetch: app.fetch, port: Number(process.env.PORT) || 3000 }, (info) => {
   console.log(\`Hono API Demo listening on port \${info.port}\`);
 });
 `;
@@ -788,7 +806,7 @@ app.post("/api/items", async (c) => {
   return c.json(rows);
 });
 
-serve({ fetch: app.fetch, port: 3000 }, (info) => {
+serve({ fetch: app.fetch, port: Number(process.env.PORT) || 3000 }, (info) => {
   console.log(\`SQLite Demo listening on port \${info.port}\`);
 });
 `;
@@ -936,7 +954,9 @@ createServer((req, res) => {
     res.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
     res.end("Not found");
   }
-}).listen(3000, () => console.log("Deal Pipeline Board listening on port 3000"));
+}).listen(Number(process.env.PORT) || 3000, function () {
+  console.log(\`Deal Pipeline Board listening on port \${this.address().port}\`);
+});
 `;
 
 const BOARD_STYLE_CSS = `:root { color-scheme: light; }
@@ -1027,7 +1047,7 @@ const DEAL_PIPELINE_INDEX_HTML = `<!doctype html>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Deal Pipeline Board</title>
-    <link rel="stylesheet" href="/style.css" />
+    <link rel="stylesheet" href="style.css" />
   </head>
   <body>
     <header>
@@ -1036,7 +1056,7 @@ const DEAL_PIPELINE_INDEX_HTML = `<!doctype html>
       <p>Reads this workspace's own "deals" Base via the Busabase REST API — not seeded, not synthetic.</p>
     </header>
     <div id="board"></div>
-    <script src="/client.js"></script>
+    <script src="client.js"></script>
   </body>
 </html>
 `;
@@ -1144,7 +1164,7 @@ const COMPLIANCE_BOARD_INDEX_HTML = `<!doctype html>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Compliance Status Board</title>
-    <link rel="stylesheet" href="/style.css" />
+    <link rel="stylesheet" href="style.css" />
   </head>
   <body>
     <header>
@@ -1153,7 +1173,7 @@ const COMPLIANCE_BOARD_INDEX_HTML = `<!doctype html>
       <p>Reads this workspace's own "compliance-checklists" Base via the Busabase REST API and flags overdue items.</p>
     </header>
     <div id="board"></div>
-    <script src="/client.js"></script>
+    <script src="client.js"></script>
   </body>
 </html>
 `;
@@ -1250,5 +1270,6 @@ export const ALL_AIRAPP_DEMOS: AirAppDemoDef[] = [
   AIRAPP_DEMO_HYPERFRAMES_BROKEN,
   AIRAPP_DEMO_DEAL_PIPELINE,
   AIRAPP_DEMO_COMPLIANCE_BOARD,
+  AIRAPP_DEMO_DATA_EXPLORER,
   AIRAPP_DEMO_KELLY_EMAIL,
 ];

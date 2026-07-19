@@ -15,7 +15,7 @@ import type * as React from "react";
 import { NavMain } from "./NavMain";
 import { NavUser } from "./NavUser";
 import { SpaceSelector } from "./SpaceSelector";
-import type { AppBranding, NavGroup, Space, UserData, UserMenuItem } from "./types";
+import type { AppBranding, NavGroup, NavUserLabels, Space, UserData, UserMenuItem } from "./types";
 
 interface AppSidebarProps extends React.ComponentProps<typeof Sidebar> {
   navMain?: NavGroup[];
@@ -76,11 +76,7 @@ interface AppSidebarProps extends React.ComponentProps<typeof Sidebar> {
   /**
    * Labels for NavUser i18n support
    */
-  userMenuLabels?: {
-    accountSettings?: string;
-    notifications?: string;
-    logOut?: string;
-  };
+  userMenuLabels?: NavUserLabels;
   /**
    * Whether the task list is expanded (showing all tasks with scroll)
    */

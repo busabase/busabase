@@ -135,13 +135,11 @@ export interface Space {
   plan?: string;
   id?: string;
   /**
-   * Discriminates a synthetic "remote space" (e.g. Busabase's Local ↔ Cloud
-   * Tunnel: a connected self-hosted instance surfaced as a space) from a real
-   * space. Additive + optional — absent/undefined for every existing space
-   * producer; `SpaceSelector` only renders the "Remote" treatment when this is
-   * set, so a `Space` without it renders byte-for-byte as it always has.
+   * Discriminates persisted workspace/developer spaces and synthetic remote
+   * tunnel spaces. `SpaceSelector` only renders the Remote treatment for
+   * `remote_tunnel`; the other values remain visually unchanged.
    */
-  kind?: "remote_tunnel";
+  kind?: "workspace" | "developer" | "remote_tunnel" | null;
   /**
    * Whether a `kind: "remote_tunnel"` space's connection is currently live.
    * Undefined/irrelevant for a real space.
@@ -153,6 +151,35 @@ export interface UserData {
   name: string;
   email: string;
   avatar: string;
+}
+
+/** Labels for the user menu. Optional per key — each falls back to English. */
+export interface NavUserLabels {
+  accountSettings?: string;
+  notifications?: string;
+  logOut?: string;
+  /** Account-switcher entries; only rendered when a switcher is present. */
+  addAccount?: string;
+  accountsFull?: string;
+  logOutCurrent?: string;
+  logOutAll?: string;
+}
+
+/**
+ * One account signed in on this device, as `NavUser` renders it.
+ *
+ * Presentational only — deliberately structural rather than an import from
+ * `share-domains`, so `openlib` stays free of an auth dependency. The
+ * `SwitchableAccount` that `useAccountSwitcher` produces satisfies this shape.
+ */
+export interface SwitchableAccountView {
+  userId: string;
+  /** Identifies the row and is what gets handed back to `onSwitchAccount`. */
+  sessionToken: string;
+  name: string;
+  email: string;
+  image: string | null;
+  isActive: boolean;
 }
 
 export interface UserMenuItem {

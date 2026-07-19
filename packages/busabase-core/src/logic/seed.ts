@@ -1,6 +1,12 @@
 import "server-only";
 
-import type { BaseVO, ChangeRequestStatus, NodeVO, ViewConfigVO } from "busabase-contract/types";
+import type {
+  BaseVO,
+  ChangeRequestStatus,
+  NodeVO,
+  ViewConfigVO,
+  ViewType,
+} from "busabase-contract/types";
 import { and, eq, inArray } from "drizzle-orm";
 import { iStringToText } from "openlib/i18n/i-string";
 import { storage } from "openlib/storage";
@@ -117,6 +123,7 @@ interface SeedViewInput {
   slug: string;
   name: string;
   description: string;
+  type?: ViewType;
   config: ViewConfigVO;
   createdAt: Date;
 }
@@ -137,6 +144,7 @@ const seedViewIfMissing = async (input: SeedViewInput) => {
         config: input.config,
         description: input.description,
         name: input.name,
+        type: input.type ?? "table",
         updatedAt: input.createdAt,
       })
       .where(eq(busabaseViews.id, input.id));
@@ -149,7 +157,7 @@ const seedViewIfMissing = async (input: SeedViewInput) => {
     slug: input.slug,
     name: input.name,
     description: input.description,
-    type: "table",
+    type: input.type ?? "table",
     config: input.config,
     status: "active",
     createdBy: CURRENT_USER_ID,
@@ -1214,6 +1222,7 @@ const applySeedScenario = async (scenario: SeedScenario) => {
       slug: view.slug,
       name: view.name,
       description: view.description,
+      type: view.type,
       config: view.config,
       createdAt: minutesBefore(createdAt, view.minutesAgo),
     });

@@ -2,7 +2,7 @@ import { type APIRequestContext, expect, json, type Page, test, unique } from ".
 
 // AirApp's Run panel is a real in-browser sandboxed Node.js runtime
 // (@scelar/nodepod, see packages/busabase-core/src/domains/airapp/components/
-// runners/nodepod-runner.ts) — clicking "Run" genuinely does `npm install` +
+// runners/nodepod-runner.ts) — opening an AirApp genuinely does `npm install` +
 // `npm run dev` inside a virtual filesystem and serves a real preview over an
 // iframe `src`. That's slow (a real npm install, real network fetches for
 // package tarballs) and only works in a real browser, so this is a genuine
@@ -15,12 +15,15 @@ import { type APIRequestContext, expect, json, type Page, test, unique } from ".
 // through UI forms — same reasoning as review-experience.spec.ts /
 // review-verdicts.spec.ts: the local single-connection PGLite dev DB can 500
 // a browser write that overlaps the SPA's background refetches. The UI only
-// drives the actual behavior under test: Run, watermark absence, run-state
-// persistence across client-side navigation (the regression this session's
-// fix targets), fullscreen, and the side panel.
+// drives the actual behavior under test: auto-run on open, restart, watermark
+// absence, run-state persistence across client-side navigation, fullscreen,
+// and the side panel.
 //
 // A real "npm install" + Hono server boot inside Nodepod takes real
-// wall-clock seconds, so this file needs generous timeouts.
+// wall-clock seconds, so this file needs generous timeouts. Later runs are
+// faster than the first: Nodepod snapshot-caches installed node_modules in
+// IndexedDB keyed by the dependency manifest, so the restart step and app B
+// (same default seed project) restore from cache instead of the network.
 
 interface AirAppNodeVO {
   node: { id: string; slug: string; name: string; type: string };
@@ -29,7 +32,7 @@ interface AirAppNodeVO {
 }
 
 const RUN_READY_TIMEOUT = 120_000;
-test.setTimeout(240_000);
+test.setTimeout(300_000);
 
 const slugify = (value: string) =>
   value
@@ -54,7 +57,14 @@ const createAirApp = async (request: APIRequestContext, namePrefix: string) => {
 const sidebarLink = (page: Page, name: string) =>
   page.locator('[data-sidebar="sidebar"]').getByRole("link", { name, exact: true });
 
-test("AirApp run panel: run, watermark, nav persistence, fullscreen, side panel", async ({
+// "Ready" = the header status label says Running. The Restart button alone is
+// ambiguous (it also shows in the error state), so assert the status text.
+const expectRunning = (page: Page) =>
+  expect(page.locator("header").getByText("Running", { exact: true })).toBeVisible({
+    timeout: RUN_READY_TIMEOUT,
+  });
+
+test("AirApp run panel: auto-run, restart, watermark, nav persistence, fullscreen, side panel", async ({
   page,
   request,
 }) => {
@@ -63,14 +73,13 @@ test("AirApp run panel: run, watermark, nav persistence, fullscreen, side panel"
 
   let appASrc = "";
 
-  await test.step("core run flow: Run -> ready -> preview iframe visible with a src", async () => {
+  await test.step("auto-run on open: no click needed -> ready -> preview iframe visible with a src", async () => {
     await page.goto(`/dashboard/airapp/${appA.slug}`);
     await expect(page.getByRole("heading", { name: appA.name })).toBeVisible();
 
-    await page.getByRole("button", { name: "Run", exact: true }).click();
-    await expect(page.getByRole("button", { name: "Run again" })).toBeVisible({
-      timeout: RUN_READY_TIMEOUT,
-    });
+    // No Run click — opening the detail view starts the app by itself.
+    await expectRunning(page);
+    await expect(page.getByRole("button", { name: "Restart" })).toBeVisible();
 
     const iframe = page.locator('iframe[title="AirApp preview"]');
     await expect(iframe).toBeVisible();
@@ -86,21 +95,42 @@ test("AirApp run panel: run, watermark, nav persistence, fullscreen, side panel"
     await expect(nodepodWatermarkLinks).toHaveCount(0);
   });
 
+  await test.step("restart: a second run on the same node reaches ready again (regression: proxy singleton dropped every post-first onServerReady)", async () => {
+    await page.getByRole("button", { name: "Restart" }).click();
+    // Restart disposes the old Nodepod and boots a fresh one; before the fix
+    // the new boot's server-ready event was delivered to the disposed
+    // runner's (cleared) callbacks, so the run hung at "Starting dev server…"
+    // forever and this assertion times out.
+    await expectRunning(page);
+    const iframe = page.locator('iframe[title="AirApp preview"]');
+    await expect(iframe).toBeVisible();
+    appASrc = (await iframe.getAttribute("src")) ?? "";
+    expect(appASrc.length).toBeGreaterThan(0);
+  });
+
   await test.step("run state survives switching away and back via client-side navigation", async () => {
     // Client-side nav (sidebar link click), NOT page.goto — a hard reload would
     // trivially "lose" the zustand run state and prove nothing about the fix.
     await sidebarLink(page, appB.name).click();
     await expect(page).toHaveURL(new RegExp(`/dashboard/airapp/${appB.slug}$`));
     await expect(page.getByRole("heading", { name: appB.name })).toBeVisible();
-    // B has never been run — fresh idle state, not "Run again".
-    await expect(page.getByRole("button", { name: "Run", exact: true })).toBeVisible();
+    // B auto-runs on first open too; it shares A's dependency manifest, so its
+    // install restores from the IndexedDB snapshot cache. Both A and B running
+    // at once also exercises the per-instance server-ready filtering — before
+    // the proxy fix, one node's ready event landed on the other's callbacks.
+    await expectRunning(page);
+    const iframeB = page.locator('iframe[title="AirApp preview"]');
+    await expect(iframeB).toBeVisible();
+    const appBSrc = (await iframeB.getAttribute("src")) ?? "";
+    expect(appBSrc.length).toBeGreaterThan(0);
+    expect(appBSrc).not.toBe(appASrc);
 
     await sidebarLink(page, appA.name).click();
     await expect(page).toHaveURL(new RegExp(`/dashboard/airapp/${appA.slug}$`));
     await expect(page.getByRole("heading", { name: appA.name })).toBeVisible();
 
-    // Still ready, not reset to a fresh "Run" idle state — the actual bug fix.
-    await expect(page.getByRole("button", { name: "Run again" })).toBeVisible();
+    // Still ready with ITS OWN preview — not reset to idle, not B's src.
+    await expect(page.getByRole("button", { name: "Restart" })).toBeVisible();
     const iframe = page.locator('iframe[title="AirApp preview"]');
     await expect(iframe).toBeVisible();
     await expect(iframe).toHaveAttribute("src", appASrc);
@@ -138,45 +168,5 @@ test("AirApp run panel: run, watermark, nav persistence, fullscreen, side panel"
     const iframe = page.locator('iframe[title="AirApp preview"]');
     await expect(iframe).toBeVisible();
     await expect(iframe).toHaveAttribute("src", appASrc);
-  });
-
-  await test.step("pin AirApp B too — both tabs coexist and show their own content", async () => {
-    await sidebarLink(page, appB.name).click();
-    await expect(page).toHaveURL(new RegExp(`/dashboard/airapp/${appB.slug}$`));
-    // Scoped to the detail view's compact <header> toolbar (which hosts the
-    // run controls, not the "App" tabpanel): once A is pinned, its side panel
-    // tab renders AirAppRunPreview's own toolbar (including ITS own "Open in
-    // side panel" button), so the bare role/name query is no longer unique on
-    // the page.
-    await page.locator("header").getByRole("button", { name: "Open in side panel" }).click();
-
-    const tabA = page.locator('[role="tab"]', { hasText: appA.name });
-    const tabB = page.locator('[role="tab"]', { hasText: appB.name });
-    await expect(tabA).toBeVisible();
-    await expect(tabB).toBeVisible();
-
-    // Navigate the main canvas off of both AirApps so the side panel's iframe
-    // is the only "AirApp preview" node that can be VISIBLE — same
-    // disambiguation as the Inbox step above. (Every open side-panel tab's
-    // content stays mounted, just CSS-hidden when inactive — see
-    // side-panel.tsx — so A's iframe is still present in the DOM even while
-    // B's tab is active; assert on visibility, not presence.)
-    await sidebarLink(page, "Inbox").click();
-    await expect(page).toHaveURL(/\/dashboard\/inbox$/);
-
-    // B was pinned last, so its (idle — never run) tab is active by default.
-    await expect(page.getByText("Click Run to start this AirApp")).toBeVisible();
-    await expect(page.locator('iframe[title="AirApp preview"]')).not.toBeVisible();
-
-    // Switching to A's tab shows A's live, still-running preview.
-    await tabA.click();
-    const iframe = page.locator('iframe[title="AirApp preview"]');
-    await expect(iframe).toBeVisible();
-    await expect(iframe).toHaveAttribute("src", appASrc);
-
-    // And back to B's tab shows B's idle state again, not A's.
-    await tabB.click();
-    await expect(page.getByText("Click Run to start this AirApp")).toBeVisible();
-    await expect(page.locator('iframe[title="AirApp preview"]')).not.toBeVisible();
   });
 });

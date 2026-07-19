@@ -94,7 +94,19 @@ export const fieldDisplayName = (def: Pick<FieldDef, "name">, locale?: LocaleTyp
   iStringParse(def.name, locale);
 
 // ── value predicates (shared by the per-type validators) ─────────────────────
-const isEmpty = (value: unknown): boolean => value === undefined || value === null || value === "";
+// An empty array (`[]`) carries no meaningful value for array-shaped field types
+// (attachment / multiselect / relation) — treat it the same as omitted/null/""
+// so a required field can't be satisfied by explicitly submitting an empty list.
+// This is the single shared gate for every type's "required" check (see
+// `isEmptyFieldValue` export below, used by validateRecordFields in
+// field-rules.ts), so this one change covers all array-shaped types uniformly.
+// A NON-required array field submitting `[]` is unaffected: isEmpty only gates
+// the required-check, so it still passes through with no error, same as `undefined`.
+const isEmpty = (value: unknown): boolean =>
+  value === undefined ||
+  value === null ||
+  value === "" ||
+  (Array.isArray(value) && value.length === 0);
 
 const isNumeric = (value: unknown): boolean => {
   if (typeof value === "number") return Number.isFinite(value);
@@ -117,7 +129,15 @@ const isValidUrl = (value: unknown): boolean => {
 
 const isValidDate = (value: unknown): boolean => {
   if (typeof value !== "string" && typeof value !== "number") return false;
-  return !Number.isNaN(new Date(value).getTime());
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return false;
+  // Reject year <= 0 (e.g. "0000-01-01", or a negative ISO-8601 extended year like
+  // "-000001-01-01"). JS's Date constructor happily parses both, but this app only
+  // accepts plain ISO date strings — not Postgres's BC/extended-year notation — and
+  // Postgres's timestamp columns reject or mis-handle these on insert, surfacing as an
+  // unclassified 500 instead of a clean validation error. Use getUTCFullYear() (not
+  // getFullYear()) so the check isn't sensitive to the server's local timezone offset.
+  return date.getUTCFullYear() > 0;
 };
 
 /** Choice membership accepts either the choice id or its display name. */
@@ -137,6 +157,19 @@ const isStringArray = (value: unknown): value is string[] =>
  * leak it into the client bundle.
  */
 const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024;
+
+/**
+ * Human-readable byte size for an error message. `Math.round(bytes / (1024*1024))`
+ * rounds every sub-~512KB limit down to "0MB" — meaningless to whoever configured a
+ * small limit (e.g. a 1KB test fixture, or a deliberately tight icon-upload cap).
+ * Picks KB for anything under 1MB so the number stays legible.
+ */
+const formatByteSize = (bytes: number): string => {
+  if (bytes < 1024 * 1024) {
+    return `${Math.max(1, Math.round(bytes / 1024))}KB`;
+  }
+  return `${Math.round(bytes / (1024 * 1024))}MB`;
+};
 
 /**
  * An inline attachment cell entry. New Busabase refs carry an `assetId` (and
@@ -212,6 +245,21 @@ const numberValidator = (value: unknown, def: FieldDef) =>
   isNumeric(value) ? null : `${fieldDisplayName(def)} must be a number`;
 
 /**
+ * Match a concrete mimeType against an `allowedMimeTypes` entry. Supports exact
+ * equality plus a single trailing `/*` wildcard (e.g. `"image/*"` matching any
+ * `image/...` mimeType) — the common `"type/*"` convention also used by the
+ * browser `accept` attribute. Deliberately minimal: not a general glob engine.
+ */
+const mimeTypeMatches = (mimeType: string, pattern: string): boolean => {
+  if (pattern === mimeType) return true;
+  if (pattern.endsWith("/*")) {
+    const prefix = pattern.slice(0, -1); // "image/*" -> "image/"
+    return mimeType.startsWith(prefix);
+  }
+  return false;
+};
+
+/**
  * Validate an `attachment` cell — an Airtable-style ARRAY of attachment refs
  * (empty array = no files). Enforces the field's `options.attachment` limits
  * (maxFiles / allowedMimeTypes / maxFileSize) plus the absolute 25MB ceiling.
@@ -228,13 +276,15 @@ const attachmentValidator = (value: unknown, def: FieldDef): string | null => {
 
   const allowed = opts?.allowedMimeTypes;
   if (allowed && allowed.length > 0) {
-    const bad = value.find((ref) => !allowed.includes(ref.mimeType));
+    const bad = value.find(
+      (ref) => !allowed.some((pattern) => mimeTypeMatches(ref.mimeType, pattern)),
+    );
     if (bad) return `${name} does not allow files of type ${bad.mimeType}`;
   }
 
   const limit = Math.min(opts?.maxFileSize ?? MAX_ATTACHMENT_BYTES, MAX_ATTACHMENT_BYTES);
   if (value.some((ref) => ref.size > limit)) {
-    return `${name} has a file larger than the ${Math.round(limit / (1024 * 1024))}MB limit`;
+    return `${name} has a file larger than the ${formatByteSize(limit)} limit`;
   }
 
   return null;

@@ -26,6 +26,11 @@ import {
 import { CURRENT_USER_ID, id, now, rootNodeIdForSpace } from "../../logic/kernel";
 import { publishChangeRequestPendingReview } from "../../logic/live-events";
 import { type MaterializeArgs, registerMaterializer } from "../../logic/materialize";
+import {
+  assertNodePermission,
+  buildNodeVisibilityCondition,
+  initializeNodeAcl,
+} from "../../logic/node-acl";
 import { assertContainerParent } from "../../logic/node-parent";
 import { ensureReady } from "../../logic/seed";
 import {
@@ -212,6 +217,8 @@ export const sliceDocLinesRange = (
 const getDocNode = async (nodeIdOrSlug: string) => {
   const db = await getDb();
   const spaceId = getContextSpaceId();
+  // Node ACL: hidden docs resolve to null — indistinguishable from absent.
+  const visible = buildNodeVisibilityCondition(db);
   const [byId] = await db
     .select()
     .from(busabaseNodes)
@@ -220,6 +227,7 @@ const getDocNode = async (nodeIdOrSlug: string) => {
         eq(busabaseNodes.id, nodeIdOrSlug),
         eq(busabaseNodes.spaceId, spaceId),
         isNull(busabaseNodes.archivedAt),
+        visible,
       ),
     )
     .limit(1);
@@ -235,6 +243,7 @@ const getDocNode = async (nodeIdOrSlug: string) => {
               eq(busabaseNodes.spaceId, spaceId),
               eq(busabaseNodes.type, "doc"),
               isNull(busabaseNodes.archivedAt),
+              visible,
             ),
           )
           .limit(1);
@@ -303,6 +312,13 @@ export const createDoc = async (
     updatedAt: createdAt,
   });
   await writeDocBody(nodeId, parsed.body || `# ${parsed.name}\n`);
+  await initializeNodeAcl(
+    db,
+    getContextSpaceId(),
+    nodeId,
+    parentNode.id,
+    resolveActorId(CURRENT_USER_ID),
+  );
 
   const [node] = await db.select().from(busabaseNodes).where(eq(busabaseNodes.id, nodeId)).limit(1);
   if (!node) {
@@ -327,7 +343,7 @@ export const getDoc = async (nodeIdOrSlug: string): Promise<DocVO> => {
   await ensureReady();
   const node = await getDocNode(nodeIdOrSlug);
   if (!node) {
-    throw new Error(`Doc not found: ${nodeIdOrSlug}`);
+    throw new ORPCError("NOT_FOUND", { message: `Doc not found: ${nodeIdOrSlug}` });
   }
   return toDocVO(node);
 };
@@ -365,6 +381,7 @@ export const listDocs = async (): Promise<DocVO[]> => {
         eq(busabaseNodes.spaceId, getContextSpaceId()),
         eq(busabaseNodes.type, "doc"),
         isNull(busabaseNodes.archivedAt),
+        buildNodeVisibilityCondition(db),
       ),
     )
     .orderBy(asc(busabaseNodes.position), asc(busabaseNodes.createdAt));
@@ -378,7 +395,7 @@ export const updateDocBody = async (
   await ensureReady();
   const node = await getDocNode(nodeIdOrSlug);
   if (!node) {
-    throw new Error(`Doc not found: ${nodeIdOrSlug}`);
+    throw new ORPCError("NOT_FOUND", { message: `Doc not found: ${nodeIdOrSlug}` });
   }
   const parsed = updateDocInputSchema.parse(input);
   assertDocBodySize(parsed.body);
@@ -433,8 +450,11 @@ export const createDocChangeRequest = async (
   const db = await getDb();
   const node = await getDocNode(nodeIdOrSlug);
   if (!node) {
-    throw new Error(`Doc not found: ${nodeIdOrSlug}`);
+    throw new ORPCError("NOT_FOUND", { message: `Doc not found: ${nodeIdOrSlug}` });
   }
+  // ChangeRequest-submission gate (node ACL): visibility alone isn't enough
+  // to propose an edit — requires `changeRequest` level on this doc.
+  await assertNodePermission(node.id, "changeRequest");
   const parsed = createDocChangeRequestInputSchema.parse(input);
   assertDocBodySize(parsed.body);
   const changeRequestId = id("crq");

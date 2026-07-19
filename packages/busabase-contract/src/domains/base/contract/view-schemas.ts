@@ -26,10 +26,44 @@ export const viewSortSchema = z.object({
   fieldId: z.string().optional(),
 });
 
+// Supported view types. `table` is the classic grid; `gallery` renders records
+// as a responsive card wall with an attachment-image cover; `kanban` stacks
+// records into columns by a select field (drag to change); `calendar` places
+// records on a month grid by a date field. New view kinds only add an enum
+// member here — the model is unchanged.
+export const viewTypeSchema = z.enum(["table", "gallery", "kanban", "calendar", "gantt"]);
+export type ViewType = z.infer<typeof viewTypeSchema>;
+
+// Gantt time-axis granularity.
+export const ganttScaleSchema = z.enum(["week", "month"]);
+
+// How a gallery cover image fills its fixed-aspect area.
+// `cover` = CSS object-fit: cover (crop to fill); `fit` = contain (letterbox).
+export const galleryCoverFitSchema = z.enum(["cover", "fit"]);
+
+// Card size presets —列数由 CSS 响应式回流决定，不做自由拖拽尺寸。
+export const galleryCardSizeSchema = z.enum(["small", "medium", "large"]);
+
 export const viewConfigSchema = z.object({
   filters: z.array(viewFilterSchema).default([]),
   sorts: z.array(viewSortSchema).default([]),
   visibleFieldSlugs: z.array(z.string()).nullable().optional(),
+  // ── Gallery-only presentation config (ignored by table views) ──
+  // Which attachment field supplies the cover image (null = no cover).
+  coverFieldSlug: z.string().nullable().optional(),
+  coverFit: galleryCoverFitSchema.optional(),
+  cardSize: galleryCardSizeSchema.optional(),
+  // Whether to render the field label above each value on a card.
+  showFieldLabels: z.boolean().optional(),
+  // ── Kanban-only: which single-select field stacks records into columns.
+  stackByFieldSlug: z.string().nullable().optional(),
+  // ── Calendar-only: which date field positions records on the month grid.
+  dateFieldSlug: z.string().nullable().optional(),
+  // ── Gantt-only: the start/end date fields bounding each record's bar, plus
+  // the time-axis granularity.
+  startFieldSlug: z.string().nullable().optional(),
+  endFieldSlug: z.string().nullable().optional(),
+  ganttScale: ganttScaleSchema.optional(),
 });
 
 export const viewSchema = z.object({
@@ -38,7 +72,7 @@ export const viewSchema = z.object({
   slug: z.string(),
   name: z.string(),
   description: z.string(),
-  type: z.literal("table"),
+  type: viewTypeSchema,
   config: viewConfigSchema,
   status: z.enum(["active", "archived"]),
   createdBy: z.string(),
@@ -53,6 +87,7 @@ export const createViewInputSchema = z.object({
   description: z.string().optional().default(""),
   message: z.string().optional().default("Create view"),
   name: z.string().min(1),
+  type: viewTypeSchema.optional().default("table"),
   slug: z
     .string()
     .min(1)
@@ -66,6 +101,7 @@ export const updateViewInputSchema = z.object({
   description: z.string().optional(),
   message: z.string().optional().default("Update view"),
   name: z.string().min(1).optional(),
+  type: viewTypeSchema.optional(),
   submittedBy: z.string().optional().default("local-producer"),
 });
 

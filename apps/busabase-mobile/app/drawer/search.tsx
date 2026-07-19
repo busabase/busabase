@@ -1,6 +1,6 @@
 import type { SearchResultVO } from "busabase-contract/types";
 import { useRouter } from "expo-router";
-import { File, FileText, GitPullRequest, Search, Table2 } from "lucide-react-native";
+import { AppWindow, File, FileText, GitPullRequest, Search, Table2 } from "lucide-react-native";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { StyleSheet, Text, View } from "react-native";
 import { useBusabaseOrpc } from "~/api/use-busabase-orpc";
@@ -11,11 +11,32 @@ import { TextInput } from "~/components/ui/TextInput";
 import { typography } from "~/theme/tokens";
 import { useTokens } from "~/theme/use-tokens";
 
+// `kind: "file"` is a catch-all bucket shared by several href-distinguished node
+// types (see fileResultHref in busabase-core). Icons/labels below key off that
+// shared "file" kind since SearchResultVO has no separate kind for doc/airapp.
 const kindMeta: Record<SearchResultVO["kind"], { label: string; icon: typeof FileText }> = {
   record: { label: "Record", icon: FileText },
   change_request: { label: "Change request", icon: GitPullRequest },
   base: { label: "Base", icon: Table2 },
   file: { label: "File", icon: File },
+};
+
+// Href-prefix-specific overrides for "file"-kind results, applied after the
+// generic kindMeta lookup (see openResult below for the matching href parsing).
+const filePrefixMeta: Record<string, { label: string; icon: typeof FileText }> = {
+  doc: { label: "Doc", icon: FileText },
+  airapp: { label: "AirApp", icon: AppWindow },
+};
+
+const getResultMeta = (result: SearchResultVO): { label: string; icon: typeof FileText } => {
+  if (result.kind === "file") {
+    const prefix = result.href.split("/").filter(Boolean)[0];
+    const override = prefix ? filePrefixMeta[prefix] : undefined;
+    if (override) {
+      return override;
+    }
+  }
+  return kindMeta[result.kind];
 };
 
 const DEBOUNCE_MS = 220;
@@ -80,8 +101,20 @@ function SearchContent() {
           router.push({ pathname: "/drive/[nodeId]", params: { nodeId: id } });
         } else if (kind === "skill" && id) {
           router.push({ pathname: "/skill/[nodeId]", params: { nodeId: id } });
+        } else if (kind === "doc" && id) {
+          router.push({ pathname: "/doc/[nodeId]", params: { nodeId: id } });
+        } else if (kind === "airapp" && id) {
+          // AirApp detail screen ("app/airapp/[nodeId]") is landing in a
+          // parallel change on this branch — wire the navigation now so it
+          // lights up as soon as that route exists.
+          router.push({ pathname: "/airapp/[nodeId]", params: { nodeId: id } });
         } else if (kind === "assets" && id) {
           router.push({ pathname: "/assets/[id]", params: { id } });
+        } else if (kind === "file" && id) {
+          // Standalone File nodes have no dedicated mobile detail screen yet.
+          // Surface inline feedback and stay on the search screen instead of
+          // falling through to the (wrong) assets list screen.
+          setError("This file type isn't viewable on mobile yet.");
         } else {
           router.push("/drawer/assets");
         }
@@ -138,7 +171,7 @@ function SearchContent() {
         ) : null}
         {!searching && results.length > 0
           ? results.map((result, index) => {
-              const meta = kindMeta[result.kind];
+              const meta = getResultMeta(result);
               const Icon = meta.icon;
               return (
                 <NativeRow

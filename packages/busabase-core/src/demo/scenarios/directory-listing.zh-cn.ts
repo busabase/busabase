@@ -429,6 +429,28 @@ const directoryViews: SeedViewDef[] = [
     minutesAgo: 58,
     useCases: ["directories"],
   },
+  {
+    id: "viw_seed_dir_zh_board",
+    baseId: DEMO_DIRECTORY_LISTINGS_BASE_ID,
+    slug: "board",
+    name: "投放看板",
+    description: "所有渠道按状态分列 —— 拖动卡片即可推进。",
+    type: "kanban",
+    config: { filters: [], sorts: [], stackByFieldSlug: "status" },
+    minutesAgo: 57,
+    useCases: ["directories"],
+  },
+  {
+    id: "viw_seed_dir_zh_calendar",
+    baseId: DEMO_DIRECTORY_LISTINGS_BASE_ID,
+    slug: "calendar",
+    name: "投放日历",
+    description: "按提交月份把渠道排到日历上。",
+    type: "calendar",
+    config: { filters: [], sorts: [], dateFieldSlug: "submitted" },
+    minutesAgo: 56,
+    useCases: ["directories"],
+  },
 ];
 
 export const directoryListingZhCnScenario: SeedScenario = {

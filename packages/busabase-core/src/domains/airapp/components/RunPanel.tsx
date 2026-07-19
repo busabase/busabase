@@ -126,6 +126,23 @@ export function useAirAppRunner({
     }
   }, [messages, airapp, orpc, queryClient]);
 
+  // Auto-run: opening an AirApp starts it immediately — the header button is
+  // then only a restart. Reads the store directly (not the rendered `status`)
+  // because two surfaces can mount this hook for the same node in one commit
+  // (detail view + pinned side panel); the first run() flips the entry to
+  // "loading-files" synchronously via beginRun, so the second surface sees a
+  // non-idle entry and skips. Only a truly idle (never-run) node auto-starts:
+  // "error" stays on screen for the user to read, "ready" keeps running.
+  useEffect(() => {
+    if (!nodeId || !airapp) {
+      return;
+    }
+    const current = useAirAppRunnerStore.getState().entries[nodeId];
+    if (!current || current.status === "idle") {
+      void run();
+    }
+  }, [nodeId, airapp, run]);
+
   const isBusy = status === "loading-files" || status === "installing" || status === "starting";
 
   return {
@@ -168,6 +185,12 @@ export function AirAppRunControls({ runner, airapp }: AirAppRunControlsProps) {
     error: messages.airapp.statusError,
   };
 
+  const engineHint: Record<AirAppRunnerKind, string> = {
+    nodepod: messages.airapp.engineNodepodHint,
+    "local-node": messages.airapp.engineLocalNodeHint,
+    srt: messages.airapp.engineSrtHint,
+  };
+
   const pinToSidePanel = () => {
     if (!airapp) {
       return;
@@ -185,27 +208,33 @@ export function AirAppRunControls({ runner, airapp }: AirAppRunControlsProps) {
       <span className="hidden text-muted-foreground/70 text-xs sm:inline">
         {statusLabel[status]}
       </span>
-      <Select
-        disabled={isBusy}
-        onValueChange={(value) => setRunnerKind(value as AirAppRunnerKind)}
-        value={runnerKind}
-      >
-        <SelectTrigger
-          aria-label={messages.airapp.engineLabel}
-          className="h-7 w-auto min-w-0 gap-1 px-2 text-xs"
-        >
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem value="nodepod">{messages.airapp.engineNodepod}</SelectItem>
-          <SelectItem value="local-node">{messages.airapp.engineLocalNode}</SelectItem>
-        </SelectContent>
-      </Select>
-      <span className="hidden text-muted-foreground/70 text-xs md:inline">
-        {runnerKind === "local-node"
-          ? messages.airapp.engineLocalNodeHint
-          : messages.airapp.engineNodepodHint}
-      </span>
+      {/* Engine picker is a dev-only affordance: in a production build this
+       *  compiles out entirely, so end users never see it and always get the
+       *  default engine ("nodepod"). */}
+      {process.env.NODE_ENV === "development" ? (
+        <>
+          <Select
+            disabled={isBusy}
+            onValueChange={(value) => setRunnerKind(value as AirAppRunnerKind)}
+            value={runnerKind}
+          >
+            <SelectTrigger
+              aria-label={messages.airapp.engineLabel}
+              className="h-7 w-auto min-w-0 gap-1 px-2 text-xs"
+            >
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="nodepod">{messages.airapp.engineNodepod}</SelectItem>
+              <SelectItem value="local-node">{messages.airapp.engineLocalNode}</SelectItem>
+              <SelectItem value="srt">{messages.airapp.engineSrt}</SelectItem>
+            </SelectContent>
+          </Select>
+          <span className="hidden text-muted-foreground/70 text-xs md:inline">
+            {engineHint[runnerKind]}
+          </span>
+        </>
+      ) : null}
       {airapp ? (
         <Button
           aria-label={messages.airapp.pinToSidePanel}

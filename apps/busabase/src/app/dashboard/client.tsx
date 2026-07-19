@@ -11,10 +11,10 @@ import { useLazyNodeChildren } from "busabase-core/dashboard/use-lazy-node-child
 import { useMoveNode } from "busabase-core/dashboard/use-move-node";
 import { CoreI18nProvider, type CoreLocale, coreMessagesByLocale } from "busabase-core/i18n";
 import { Skeleton } from "kui/skeleton";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { detectBrowserLocale, type Locale } from "openlib/i18n";
 import { addDemoParam } from "openlib/ui/dashboard";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { ProductReadyDashboardShell } from "~/components/dashboard/productready-dashboard-shell";
 import { DashboardNotFound } from "~/components/spa/not-found";
 import { SPARouteRenderer } from "~/components/spa/spa-route-renderer";
@@ -51,18 +51,24 @@ const DASHBOARD_SKELETON_CONTENT_ROWS = [
  * can't know which specific view (inbox/base/node) will land; it approximates
  * the shared shell shape instead — a nav rail plus a content pane — so the
  * switch from this to the real layout doesn't jump.
+ *
+ * `chromeless` (the WebView embed path) omits the fake nav rail entirely —
+ * showing a sidebar-shaped skeleton, even a fake one, would violate the "no
+ * sidebar at all" contract while the real content is still loading.
  */
-function DashboardShellSkeleton() {
+function DashboardShellSkeleton({ chromeless = false }: { chromeless?: boolean }) {
   return (
     <div className="flex min-h-0 flex-1" aria-hidden>
-      <div className="hidden w-56 shrink-0 flex-col gap-1.5 border-border/60 border-r p-3 md:flex">
-        {DASHBOARD_SKELETON_NAV_ITEMS.map((item) => (
-          <div className="flex items-center gap-2 px-1 py-1.5" key={item.id}>
-            <Skeleton className="size-4 shrink-0 rounded" />
-            <Skeleton className="h-3.5" style={{ width: item.width }} />
-          </div>
-        ))}
-      </div>
+      {chromeless ? null : (
+        <div className="hidden w-56 shrink-0 flex-col gap-1.5 border-border/60 border-r p-3 md:flex">
+          {DASHBOARD_SKELETON_NAV_ITEMS.map((item) => (
+            <div className="flex items-center gap-2 px-1 py-1.5" key={item.id}>
+              <Skeleton className="size-4 shrink-0 rounded" />
+              <Skeleton className="h-3.5" style={{ width: item.width }} />
+            </div>
+          ))}
+        </div>
+      )}
       <div className="flex min-h-0 flex-1 flex-col p-6">
         <Skeleton className="h-6 w-40" />
         <Skeleton className="mt-2 h-4 w-72 max-w-full" />
@@ -81,13 +87,21 @@ export function DashboardClient({ initialPath = "/inbox", localUserName }: Dashb
 
   return (
     <QueryClientProvider client={queryClient}>
-      <DashboardClientContent initialPath={initialPath} localUserName={localUserName} />
+      {/* useSearchParams (for ?chromeless=1) requires a Suspense boundary. */}
+      <Suspense fallback={<DashboardShellSkeleton />}>
+        <DashboardClientContent initialPath={initialPath} localUserName={localUserName} />
+      </Suspense>
     </QueryClientProvider>
   );
 }
 
 function DashboardClientContent({ initialPath = "/inbox", localUserName }: DashboardClientProps) {
   const router = useRouter();
+  // `?chromeless=1` renders just the current node's detail pane with no
+  // sidebar/topbar — used by busabase-mobile's WebView embed of a single
+  // AirApp's Run/Files/Logs UI (see BusabaseDashboard's `chromeless` prop).
+  const searchParams = useSearchParams();
+  const chromeless = searchParams.get("chromeless") === "1";
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [createParent, setCreateParent] = useState<{ id: string; name: string } | null>(null);
@@ -177,6 +191,7 @@ function DashboardClientContent({ initialPath = "/inbox", localUserName }: Dashb
         auditEvents={auditEvents}
         changeRequests={changeRequests}
         embedded
+        chromeless={chromeless}
         emptyGuide={<EmptyAgentGuide lang={locale} />}
         locale={locale}
         nodes={nodes}
@@ -187,13 +202,40 @@ function DashboardClientContent({ initialPath = "/inbox", localUserName }: Dashb
         searchOpen={isSearchOpen}
       />
     ),
-    [apiClient, auditEvents, changeRequests, records, bases, nodes, isSearchOpen, locale],
+    [
+      apiClient,
+      auditEvents,
+      changeRequests,
+      records,
+      bases,
+      nodes,
+      isSearchOpen,
+      locale,
+      chromeless,
+    ],
   );
   const routes = useMemo(
     () => getDashboardRoutes(dashboard, coreMessages),
     [dashboard, coreMessages],
   );
   const secondaryNavConfig = useMemo(() => getSecondarySidebarNav(locale), [locale]);
+
+  // Shared regardless of chrome mode: load error / loading skeleton / the
+  // SPA-routed dashboard (every route pattern renders the same `dashboard`
+  // element, which reads the current location itself).
+  const routedContent = loadErrorMessage ? (
+    <div className="flex min-h-0 flex-1 items-center justify-center px-6 text-sm text-destructive">
+      {loadErrorMessage}
+    </div>
+  ) : isLoadingDashboardData ? (
+    <DashboardShellSkeleton chromeless={chromeless} />
+  ) : (
+    <SPARouteRenderer
+      NotFoundComponent={DashboardNotFound}
+      className="flex min-h-0 flex-1 flex-col"
+      routes={routes}
+    />
+  );
 
   return (
     <SPAWrapper
@@ -223,38 +265,35 @@ function DashboardClientContent({ initialPath = "/inbox", localUserName }: Dashb
       initialPath={initialPath}
     >
       <CoreI18nProvider locale={locale}>
-        <ProductReadyDashboardShell
-          activeChangeRequestCount={
-            changeRequests.filter((changeRequest) => changeRequest.status === "in_review").length
-          }
-          nodes={nodes}
-          onSearchClick={() => setIsSearchOpen(true)}
-          onCreateClick={(parent) => {
-            setCreateParent(parent ?? null);
-            setIsCreateOpen(true);
-          }}
-          onMoveNode={(payload) => moveNodeMutation.mutate(payload)}
-          locale={locale}
-          languagePref={languagePref}
-          onLocaleChange={changeLocale}
-          loadingNodeIds={loadingNodeIds}
-          onExpandNode={onExpandNode}
-          checkIsDescendant={checkIsDescendant}
-        >
-          {loadErrorMessage ? (
-            <div className="flex min-h-0 flex-1 items-center justify-center px-6 text-sm text-destructive">
-              {loadErrorMessage}
-            </div>
-          ) : isLoadingDashboardData ? (
-            <DashboardShellSkeleton />
-          ) : (
-            <SPARouteRenderer
-              NotFoundComponent={DashboardNotFound}
-              className="flex min-h-0 flex-1 flex-col"
-              routes={routes}
-            />
-          )}
-        </ProductReadyDashboardShell>
+        {chromeless ? (
+          // No sidebar, no topbar, no navigation — just the current node's
+          // detail pane, full screen (busabase-mobile's WebView embed target).
+          <div className="flex h-dvh min-h-0 flex-col overflow-hidden bg-background">
+            {routedContent}
+          </div>
+        ) : (
+          <ProductReadyDashboardShell
+            activeChangeRequestCount={
+              changeRequests.filter((changeRequest) => changeRequest.status === "in_review").length
+            }
+            nodes={nodes}
+            orpc={orpc}
+            onSearchClick={() => setIsSearchOpen(true)}
+            onCreateClick={(parent) => {
+              setCreateParent(parent ?? null);
+              setIsCreateOpen(true);
+            }}
+            onMoveNode={(payload) => moveNodeMutation.mutate(payload)}
+            locale={locale}
+            languagePref={languagePref}
+            onLocaleChange={changeLocale}
+            loadingNodeIds={loadingNodeIds}
+            onExpandNode={onExpandNode}
+            checkIsDescendant={checkIsDescendant}
+          >
+            {routedContent}
+          </ProductReadyDashboardShell>
+        )}
         <CreateNodeModal
           apiClient={apiClient}
           open={isCreateOpen}

@@ -5,9 +5,21 @@ import { and, eq, isNull } from "drizzle-orm";
 import { getContextSpaceId } from "../../../context";
 import { getDb } from "../../../db";
 import { busabaseNodes } from "../../../db/schema";
+import { buildNodeVisibilityCondition } from "../../../logic/node-acl";
 
 export const normalizeFilePath = (filePath: string) => {
-  const normalized = filePath.replace(/\\/g, "/").replace(/^\/+/, "");
+  const normalized = filePath.replace(/\\/g, "/");
+  // A leading "/" used to be silently stripped here, so a caller who typed
+  // "/README.md" got a working "README.md" with no indication anything had
+  // changed. Reject it instead: paths in a Skill/Drive tree are always
+  // relative to the node's own root, never absolute, and a caller who typed a
+  // leading slash out of Unix/URL habit deserves a clear signal to drop it,
+  // not a silent rewrite they'd never notice.
+  if (normalized.startsWith("/")) {
+    throw new ORPCError("BAD_REQUEST", {
+      message: `Invalid file path: "${filePath}" — paths are relative to the node's root; do not start with "/".`,
+    });
+  }
   if (
     !normalized ||
     normalized.includes("\0") ||
@@ -21,6 +33,10 @@ export const normalizeFilePath = (filePath: string) => {
 export const getFileTreeNode = async (type: string, nodeIdOrSlug: string) => {
   const db = await getDb();
   const spaceId = getContextSpaceId();
+  // Node ACL: a node the actor can't see resolves to null here — every
+  // drive/skill/airapp get/listFiles/readFile funnels through this lookup, so
+  // the caller-visible outcome is the same "not found" as a nonexistent node.
+  const visible = buildNodeVisibilityCondition(db);
   const [byId] = await db
     .select()
     .from(busabaseNodes)
@@ -29,6 +45,7 @@ export const getFileTreeNode = async (type: string, nodeIdOrSlug: string) => {
         eq(busabaseNodes.id, nodeIdOrSlug),
         eq(busabaseNodes.spaceId, spaceId),
         isNull(busabaseNodes.archivedAt),
+        visible,
       ),
     )
     .limit(1);
@@ -44,6 +61,7 @@ export const getFileTreeNode = async (type: string, nodeIdOrSlug: string) => {
               eq(busabaseNodes.spaceId, spaceId),
               eq(busabaseNodes.type, type),
               isNull(busabaseNodes.archivedAt),
+              visible,
             ),
           )
           .limit(1);

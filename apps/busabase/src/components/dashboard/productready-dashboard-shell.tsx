@@ -1,5 +1,6 @@
 "use client";
 
+import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";
 import type { NodeVO } from "busabase-contract/types";
 import { BusabaseAgentSkillButton } from "busabase-core/dashboard/agent-skill-button";
 import {
@@ -36,6 +37,8 @@ interface ProductReadyDashboardShellProps {
   nodes: NodeVO[];
   onSearchClick: () => void;
   onCreateClick: (parent?: { id: string; name: string }) => void;
+  /** oRPC query utils — forwarded to the core shell to power the sidebar "•••" → Permissions entry. */
+  orpc?: BusabaseQueryUtils;
   /** Wires up sidebar drag-and-drop; omit to leave the tree read-only. */
   onMoveNode?: (payload: MoveNodePayload) => void;
   /** Resolved active locale (drives sidebar/content i18n). */
@@ -63,6 +66,7 @@ export function ProductReadyDashboardShell({
   nodes,
   onSearchClick,
   onCreateClick,
+  orpc,
   onMoveNode,
   locale,
   languagePref,
@@ -221,10 +225,10 @@ export function ProductReadyDashboardShell({
       hiddenNavItems={["assets"]}
       locale={locale}
       nodes={nodes}
+      orpc={orpc}
       onCreateClick={onCreateClick}
       onMoveNode={onMoveNode}
       onSearchClick={onSearchClick}
-      pinnedNavItems={["activity"]}
       loadingNodeIds={loadingNodeIds}
       onExpandNode={onExpandNode}
       checkIsDescendant={checkIsDescendant}

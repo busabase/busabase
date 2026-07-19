@@ -20,7 +20,9 @@ export function createAirAppRunner(
     case "nodepod":
       return new NodepodRunner();
     case "local-node":
-      return new LocalNodeRunner(context);
+      return new LocalNodeRunner({ ...context, engine: "local-node" });
+    case "srt":
+      return new LocalNodeRunner({ ...context, engine: "srt" });
     default: {
       const exhaustive: never = kind;
       throw new Error(`Unknown AirApp runner kind: ${exhaustive}`);

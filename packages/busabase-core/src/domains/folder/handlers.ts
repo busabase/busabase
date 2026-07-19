@@ -1,5 +1,6 @@
 import "server-only";
 
+import { ORPCError } from "@orpc/server";
 import type { FolderVO } from "busabase-contract/domains/folder/types";
 import { and, asc, eq, isNull } from "drizzle-orm";
 import { getContextSpaceId } from "../../context";
@@ -7,12 +8,15 @@ import { getDb } from "../../db";
 import { busabaseNodes, type NodePO } from "../../db/schema";
 import { id } from "../../logic/kernel";
 import { type MaterializeArgs, registerMaterializer } from "../../logic/materialize";
+import { buildNodeVisibilityCondition } from "../../logic/node-acl";
 import { ensureReady } from "../../logic/seed";
 import { loadNodesByIds, type MergeCtx, toNodeVO } from "../../logic/store";
 
 const getFolderNode = async (nodeIdOrSlug: string) => {
   const db = await getDb();
   const spaceId = getContextSpaceId();
+  // Node ACL: hidden folders resolve to null — indistinguishable from absent.
+  const visible = buildNodeVisibilityCondition(db);
   const [byId] = await db
     .select()
     .from(busabaseNodes)
@@ -21,6 +25,7 @@ const getFolderNode = async (nodeIdOrSlug: string) => {
         eq(busabaseNodes.id, nodeIdOrSlug),
         eq(busabaseNodes.spaceId, spaceId),
         isNull(busabaseNodes.archivedAt),
+        visible,
       ),
     )
     .limit(1);
@@ -36,6 +41,7 @@ const getFolderNode = async (nodeIdOrSlug: string) => {
               eq(busabaseNodes.spaceId, spaceId),
               eq(busabaseNodes.type, "folder"),
               isNull(busabaseNodes.archivedAt),
+              visible,
             ),
           )
           .limit(1);
@@ -47,7 +53,13 @@ const toFolderVO = async (folderNode: NodePO): Promise<FolderVO> => {
   const childRows = await db
     .select()
     .from(busabaseNodes)
-    .where(and(eq(busabaseNodes.parentId, folderNode.id), isNull(busabaseNodes.archivedAt)))
+    .where(
+      and(
+        eq(busabaseNodes.parentId, folderNode.id),
+        isNull(busabaseNodes.archivedAt),
+        buildNodeVisibilityCondition(db),
+      ),
+    )
     .orderBy(asc(busabaseNodes.position), asc(busabaseNodes.createdAt));
   // Hydrate the folder + children together so base children resolve their baseId.
   const nodeMap = await loadNodesByIds([folderNode.id, ...childRows.map((row) => row.id)]);
@@ -60,7 +72,7 @@ export const getFolder = async (nodeIdOrSlug: string): Promise<FolderVO> => {
   await ensureReady();
   const folderNode = await getFolderNode(nodeIdOrSlug);
   if (!folderNode) {
-    throw new Error(`Folder not found: ${nodeIdOrSlug}`);
+    throw new ORPCError("NOT_FOUND", { message: `Folder not found: ${nodeIdOrSlug}` });
   }
   return toFolderVO(folderNode);
 };
@@ -76,6 +88,7 @@ export const listFolders = async (): Promise<FolderVO[]> => {
         eq(busabaseNodes.spaceId, getContextSpaceId()),
         eq(busabaseNodes.type, "folder"),
         isNull(busabaseNodes.archivedAt),
+        buildNodeVisibilityCondition(db),
       ),
     )
     .orderBy(asc(busabaseNodes.position), asc(busabaseNodes.createdAt));

@@ -1,3 +1,4 @@
+export * from "./account-switcher-context";
 export * from "./DashboardLayout";
 export * from "./demo";
 export * from "./demo-client";
