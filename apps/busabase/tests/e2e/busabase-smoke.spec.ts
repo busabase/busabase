@@ -53,7 +53,8 @@ test("dashboard routes render the review-first seeded experience", async ({ page
   await page.getByRole("button", { name: "Search" }).click();
   await expect(page.getByRole("dialog")).toBeVisible();
   await page.getByPlaceholder(/Search records/).fill("agent");
-  await expect(page.getByText("result").first()).toBeVisible();
+  await expect(page.getByRole("tab", { name: /Recent/ })).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByRole("button", { name: /^Agent Integrations/ })).toBeVisible();
 
   await page.goto("/dashboard/activity");
   await expect(page.getByText("Workspace activity")).toBeVisible();

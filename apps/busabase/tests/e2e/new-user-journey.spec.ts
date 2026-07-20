@@ -74,9 +74,14 @@ test("a new user tours the approval-first knowledge base", async ({ page }) => {
   await test.step("searches the seeded knowledge base", async () => {
     await page.getByRole("button", { name: "Search" }).click();
     await expect(page.getByRole("dialog")).toBeVisible();
-    await page.getByPlaceholder(/Search records/).fill("busabase");
-    // Verify search runs against the seed and reports results (content varies).
-    await expect(page.getByText("result").first()).toBeVisible();
+    await page.getByPlaceholder(/Search records/).fill("agent");
+    // Recent is the default quick-jump surface. Verify it resolves a concrete
+    // seeded node instead of relying on the removed aggregate result-count copy.
+    await expect(page.getByRole("tab", { name: /Recent/ })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    await expect(page.getByRole("button", { name: /^Agent Integrations/ })).toBeVisible();
     await page.keyboard.press("Escape");
   });
 
