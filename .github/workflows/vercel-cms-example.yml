@@ -61,13 +61,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: pnpm/action-setup@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: pnpm
-
       - name: Check Vercel configuration
         id: vercel_config
         shell: bash
@@ -90,6 +83,15 @@ jobs:
           else
             echo "ready=true" >> "$GITHUB_OUTPUT"
           fi
+
+      - uses: pnpm/action-setup@v4
+        if: steps.vercel_config.outputs.ready == 'true'
+
+      - uses: actions/setup-node@v4
+        if: steps.vercel_config.outputs.ready == 'true'
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
 
       - name: Install example and workspace dependencies
         if: steps.vercel_config.outputs.ready == 'true'

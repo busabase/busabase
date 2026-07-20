@@ -13,6 +13,7 @@ RUN pnpm fetch
 COPY apps/busabase/package.json apps/busabase/
 COPY packages/busabase-contract/package.json packages/busabase-contract/
 COPY packages/busabase-core/package.json packages/busabase-core/
+COPY packages/busabase-package/package.json packages/busabase-package/
 COPY packages/open-domains/package.json packages/open-domains/
 COPY packages/openlib/package.json packages/openlib/
 COPY packages/kui/package.json packages/kui/
@@ -22,6 +23,7 @@ RUN pnpm install --offline --frozen-lockfile --ignore-scripts
 COPY apps/busabase apps/busabase
 COPY packages/busabase-contract packages/busabase-contract
 COPY packages/busabase-core packages/busabase-core
+COPY packages/busabase-package packages/busabase-package
 COPY packages/open-domains packages/open-domains
 COPY packages/openlib packages/openlib
 COPY packages/kui packages/kui
