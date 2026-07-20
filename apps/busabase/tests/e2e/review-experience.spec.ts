@@ -49,7 +49,9 @@ test("review -> merge -> refresh keeps user-visible lineage", async ({ page, req
   await expect(page.getByText("Waiting for your review")).toBeVisible();
   await page.getByRole("radio", { name: "Approve" }).check();
   await page.getByRole("button", { exact: true, name: "Approve" }).click();
-  await expect(page.getByText("Approved · ready to merge")).toBeVisible();
+  await expect(
+    page.getByRole("complementary").getByText("Approved · ready to merge"),
+  ).toBeVisible();
   await page.getByRole("button", { name: "Merge into Base" }).click();
   await expect(page).toHaveURL(/\/dashboard\/local\/base\/blog\/rec/);
   await expect(page.getByText("Lineage", { exact: true })).toBeVisible();
