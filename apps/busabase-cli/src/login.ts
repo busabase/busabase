@@ -3,6 +3,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { createInterface } from "node:readline/promises";
+import { BUSABASE_CLI_CLIENT_ID } from "busabase-contract/auth/device-authorization";
 import { DEFAULT_BASE_URL, normalizeBaseUrl } from "busabase-sdk";
 import { dotEnvPath, loadDotEnvFile, writeDotEnvFile } from "./config-file.js";
 
@@ -11,26 +12,23 @@ import { dotEnvPath, loadDotEnvFile, writeDotEnvFile } from "./config-file.js";
  * every later CLI/SDK call and the installed `busabase` skill authenticate with no
  * further prompts. Two methods, like `claude` login:
  *
- *   - **OAuth (preferred)**: opens the browser to Busabase Cloud's PKCE
- *     authorization endpoint, catches the redirect on a loopback server, and
- *     exchanges the code for a credential. The server shows a consent page for
- *     `client_platform=cli` (pick or create an API key, `sk_…`, since the CLI is
- *     built for agent/unattended use); other native clients get a session token
- *     (`bss_…`) silently. No key to copy either way.
+ *   - **Device authorization (preferred)**: prints a short code and a URL that
+ *     can be opened on any computer or phone, then polls until the user approves.
+ *     This works over SSH and inside containers without a loopback callback.
+ *   - **Loopback OAuth (legacy fallback)**: explicitly requested by flag when
+ *     browser and CLI share the same machine.
  *   - **API key**: paste (or pass `--api-key`) an `sk_…` key from the dashboard.
  *
  * Both end the same way: verify against `/api/v1/auth`, pick the target space, and
  * write `BUSABASE_BASE_URL` / `BUSABASE_API_KEY` / `BUSABASE_SPACE_ID`.
  */
 
-const CLI_CLIENT_ID = "busabase-cli";
 const CLI_CLIENT_PLATFORM = "cli";
 const OAUTH_TIMEOUT_MS = 5 * 60 * 1000;
 
 /** Env key holding the OAuth session expiry (ISO), used to drive built-in auto-refresh. */
 const EXPIRES_AT_KEY = "BUSABASE_TOKEN_EXPIRES_AT";
-/** Native login session tokens carry this prefix; API keys (`sk_…`) do not expire. */
-const SESSION_TOKEN_PREFIX = "bss_";
+const LEGACY_SESSION_TOKEN_PREFIX = "bss_";
 /** Auto-refresh a login session once it's within this window of expiry. */
 const AUTO_REFRESH_THRESHOLD_MS = 2 * 24 * 60 * 60 * 1000;
 
@@ -42,7 +40,9 @@ export interface LoginOptions {
   /** Global `--api-key`; when present, login runs the non-interactive API-key path. */
   apiKey?: string;
   spaceId?: string;
-  /** `--oauth` forces the browser flow (skips the method prompt). */
+  /** `--device-code` forces RFC 8628 device authorization. */
+  deviceCode?: boolean;
+  /** `--oauth` retains the legacy same-machine loopback flow. */
   oauth?: boolean;
   /** `--no-browser` sets this false: print the URL instead of opening a browser. */
   browser: boolean;
@@ -58,6 +58,8 @@ interface AuthVerify {
   user?: { id?: string; name?: string; email?: string };
   space?: { id?: string; name?: string; slug?: string };
   spaces?: Array<{ id: string; name: string; slug?: string }>;
+  createdSpace?: boolean;
+  bootstrapRequired?: boolean;
 }
 
 const base64url = (buffer: Buffer): string => buffer.toString("base64url");
@@ -140,10 +142,10 @@ async function verifyAuth(baseUrl: string, token: string): Promise<AuthVerify> {
 // ── OAuth (PKCE loopback) ─────────────────────────────────────────────────────
 
 /** Run the browser PKCE flow and return the native session token (+ its expiry). */
-async function oauthLogin(
+async function loopbackOauthLogin(
   baseUrl: string,
   useBrowser: boolean,
-): Promise<{ token: string; expiresAt?: string }> {
+): Promise<{ token: string; expiresAt?: string; apiKeyExpiresAt?: string }> {
   const codeVerifier = base64url(randomBytes(32));
   const codeChallenge = base64url(createHash("sha256").update(codeVerifier).digest());
   const state = base64url(randomBytes(16));
@@ -203,7 +205,7 @@ async function oauthLogin(
         const redirect = `http://127.0.0.1:${port}/callback`;
         const authorizeUrl = new URL(`${baseUrl}/api/oauth/authorize`);
         authorizeUrl.searchParams.set("response_type", "code");
-        authorizeUrl.searchParams.set("client_id", CLI_CLIENT_ID);
+        authorizeUrl.searchParams.set("client_id", BUSABASE_CLI_CLIENT_ID);
         authorizeUrl.searchParams.set("client_platform", CLI_CLIENT_PLATFORM);
         authorizeUrl.searchParams.set("code_challenge", codeChallenge);
         authorizeUrl.searchParams.set("code_challenge_method", "S256");
@@ -232,7 +234,7 @@ async function oauthLogin(
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
       grant_type: "authorization_code",
-      client_id: CLI_CLIENT_ID,
+      client_id: BUSABASE_CLI_CLIENT_ID,
       client_platform: CLI_CLIENT_PLATFORM,
       code,
       code_verifier: codeVerifier,
@@ -254,7 +256,154 @@ async function oauthLogin(
   // session token — same credential slot, just a different prefix at runtime.
   const token = payload.apiKey ?? payload.token ?? payload.accessToken;
   if (!token) throw new Error("Token exchange returned no credential.");
-  return { token, expiresAt: payload.expiresAt ?? undefined };
+  return payload.apiKey
+    ? { token, apiKeyExpiresAt: payload.expiresAt ?? undefined }
+    : { token, expiresAt: payload.expiresAt ?? undefined };
+}
+
+interface DeviceCodeResponse {
+  device_code?: string;
+  user_code?: string;
+  verification_uri?: string;
+  verification_uri_complete?: string;
+  expires_in?: number;
+  interval?: number;
+}
+
+interface DeviceTokenResponse {
+  access_token?: string;
+  expires_in?: number;
+  error?: string;
+  error_description?: string;
+}
+
+const delay = (durationMs: number): Promise<void> =>
+  new Promise((resolve) => setTimeout(resolve, durationMs));
+
+async function readDeviceResponse(response: Response): Promise<DeviceTokenResponse> {
+  return (await response.json().catch(() => ({}))) as DeviceTokenResponse;
+}
+
+/** RFC 8628 login: no local callback and no credential ever written to output. */
+async function deviceLogin(
+  baseUrl: string,
+  useBrowser: boolean,
+): Promise<{ token: string; apiKeyExpiresAt?: string }> {
+  const origin = new URL(baseUrl).origin;
+  let codeResponse: Response;
+  try {
+    codeResponse = await fetch(`${baseUrl}/api/auth/device/code`, {
+      method: "POST",
+      headers: { "content-type": "application/json", origin },
+      body: JSON.stringify({
+        client_id: BUSABASE_CLI_CLIENT_ID,
+        scope: "openid profile email",
+      }),
+    });
+  } catch {
+    throw new Error(`Could not start device sign-in because ${baseUrl} could not be reached.`);
+  }
+
+  const code = (await codeResponse.json().catch(() => ({}))) as DeviceCodeResponse & {
+    error_description?: string;
+  };
+  if (!codeResponse.ok) {
+    throw new Error(
+      `Could not start device sign-in (HTTP ${codeResponse.status})${code.error_description ? `: ${code.error_description}` : "."}`,
+    );
+  }
+  if (!code.device_code || !code.user_code || !code.verification_uri) {
+    throw new Error("Device sign-in returned an incomplete authorization response.");
+  }
+
+  const verificationUrl = code.verification_uri_complete ?? code.verification_uri;
+  say("");
+  say("Authorize Busabase CLI in any browser:");
+  say(`  ${code.verification_uri}`);
+  say(`  Code: ${code.user_code}`);
+  say("");
+  if (useBrowser) openBrowser(verificationUrl);
+  say("Waiting for authorization…");
+
+  const expiresInSeconds = Math.max(1, code.expires_in ?? 15 * 60);
+  const deadline = Date.now() + expiresInSeconds * 1000;
+  let intervalSeconds = Math.max(1, code.interval ?? 5);
+  let consecutiveNetworkFailures = 0;
+
+  while (Date.now() < deadline) {
+    await delay(intervalSeconds * 1000);
+    let tokenResponse: Response;
+    try {
+      tokenResponse = await fetch(`${baseUrl}/api/auth/device/token`, {
+        method: "POST",
+        headers: { "content-type": "application/json", origin },
+        body: JSON.stringify({
+          grant_type: "urn:ietf:params:oauth:grant-type:device_code",
+          device_code: code.device_code,
+          client_id: BUSABASE_CLI_CLIENT_ID,
+        }),
+      });
+      consecutiveNetworkFailures = 0;
+    } catch {
+      consecutiveNetworkFailures += 1;
+      if (consecutiveNetworkFailures >= 3) {
+        throw new Error(
+          "Device sign-in lost its network connection. Check connectivity and run `busabase-cli login` again.",
+        );
+      }
+      continue;
+    }
+
+    const payload = await readDeviceResponse(tokenResponse);
+    if (tokenResponse.ok && payload.access_token) {
+      const finalizeResponse = await fetch(`${baseUrl}/api/v1/device/finalize`, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${payload.access_token}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ deviceCode: code.device_code }),
+      });
+      const finalized = (await finalizeResponse.json().catch(() => ({}))) as {
+        apiKey?: string;
+        expiresAt?: string | null;
+        credentialType?: string;
+        error?: string | { message?: string };
+        message?: string;
+      };
+      if (!finalizeResponse.ok || !finalized.apiKey || finalized.credentialType !== "api_key") {
+        const finalizeError =
+          typeof finalized.error === "string"
+            ? finalized.error
+            : (finalized.error?.message ?? finalized.message);
+        throw new Error(
+          `Device sign-in could not finalize the selected API key${finalizeError ? `: ${finalizeError}` : ` (HTTP ${finalizeResponse.status})`}.`,
+        );
+      }
+      return {
+        token: finalized.apiKey,
+        apiKeyExpiresAt: finalized.expiresAt ?? undefined,
+      };
+    }
+
+    switch (payload.error) {
+      case "authorization_pending":
+        continue;
+      case "slow_down":
+        intervalSeconds += 5;
+        continue;
+      case "access_denied":
+        throw new Error("Device sign-in was denied. No credential was saved.");
+      case "expired_token":
+        throw new Error("The device code expired. Run `busabase-cli login` to request a new one.");
+      default:
+        throw new Error(
+          `Device sign-in failed${payload.error_description ? `: ${payload.error_description}` : ` (HTTP ${tokenResponse.status})`}.`,
+        );
+    }
+  }
+
+  throw new Error("The device code expired. Run `busabase-cli login` to request a new one.");
 }
 
 /** POST the current session token to `/api/oauth/refresh`; returns the slid-forward token. */
@@ -308,7 +457,7 @@ async function pickSpaceId(verify: AuthVerify, preselected?: string): Promise<st
 
 interface LoginTarget {
   baseUrl: string;
-  method: "none" | "oauth" | "api-key";
+  method: "none" | "device" | "loopback-oauth" | "api-key";
 }
 
 /**
@@ -325,12 +474,12 @@ async function chooseTarget(): Promise<LoginTarget> {
   say("How should this CLI connect?");
   say("  1. Local/Desktop on this computer — no account, no login");
   say("     Use when you run `busabase server` or the Busabase Desktop app locally.");
-  say("  2. Busabase Cloud — browser sign-in (recommended)");
-  say("     Best for humans: opens the browser and saves a refreshable CLI session.");
+  say("  2. Busabase Cloud — device sign-in (recommended)");
+  say("     Works locally, over SSH, and in containers; approve from any browser.");
   say("  3. Busabase Cloud — paste an API key");
   say("     Best for CI, servers, or agents where a browser is not available.");
-  say("  4. Self-hosted Busabase — browser sign-in");
-  say("     Use your team's Busabase URL when it supports OAuth login.");
+  say("  4. Self-hosted Busabase — device sign-in");
+  say("     Use your team's Busabase URL when it supports device authorization.");
   say("  5. Self-hosted Busabase — paste an API key");
   say("     Use your team's Busabase URL with a long-lived key for automation.");
   const choice = await ask("Choose 1-5 [2]: ");
@@ -349,11 +498,11 @@ async function chooseTarget(): Promise<LoginTarget> {
     case "3":
       return { baseUrl: cloud, method: "api-key" };
     case "4":
-      return { baseUrl: await askSelfHostedUrl(), method: "oauth" };
+      return { baseUrl: await askSelfHostedUrl(), method: "device" };
     case "5":
       return { baseUrl: await askSelfHostedUrl(), method: "api-key" };
     default:
-      return { baseUrl: cloud, method: "oauth" };
+      return { baseUrl: cloud, method: "device" };
   }
 }
 
@@ -366,15 +515,17 @@ export async function runLogin(options: LoginOptions): Promise<Record<string, st
   let method: LoginTarget["method"];
   if (apiKey) {
     method = "api-key";
+  } else if (options.deviceCode) {
+    method = "device";
   } else if (options.oauth) {
-    method = "oauth";
+    method = "loopback-oauth";
   } else if (isInteractive()) {
     const target = await chooseTarget();
     baseUrl = normalizeBaseUrl(target.baseUrl);
     method = target.method;
   } else {
     // No TTY and no flags: connect to a local host, else default to Cloud OAuth.
-    method = isLocalHost(baseUrl) ? "none" : "oauth";
+    method = isLocalHost(baseUrl) ? "none" : "device";
   }
 
   // "Personal Desktop / local" (any open server): no account — just save the connection.
@@ -396,12 +547,19 @@ export async function runLogin(options: LoginOptions): Promise<Record<string, st
   }
 
   let token: string;
-  // OAuth sessions expire (and auto-refresh); API keys don't, so leave it unset.
+  // Only session expiry belongs in BUSABASE_TOKEN_EXPIRES_AT. API keys can have
+  // their own expiry, but they are never refreshable OAuth sessions.
   let expiresAt: string | undefined;
-  if (method === "oauth") {
-    const result = await oauthLogin(baseUrl, options.browser);
+  let apiKeyExpiresAt: string | undefined;
+  if (method === "device") {
+    const result = await deviceLogin(baseUrl, options.browser);
+    token = result.token;
+    apiKeyExpiresAt = result.apiKeyExpiresAt;
+  } else if (method === "loopback-oauth") {
+    const result = await loopbackOauthLogin(baseUrl, options.browser);
     token = result.token;
     expiresAt = result.expiresAt;
+    apiKeyExpiresAt = result.apiKeyExpiresAt;
   } else {
     if (!apiKey) {
       say("Create a key in the dashboard → Settings → API Keys (shown once).");
@@ -428,10 +586,13 @@ export async function runLogin(options: LoginOptions): Promise<Record<string, st
 
   return {
     status: "signed in",
-    method,
+    method: method === "loopback-oauth" ? "oauth" : method,
+    credentialType: method === "device" ? "api_key" : expiresAt ? "session" : "api_key",
     user: verify.user?.email ?? verify.user?.name ?? verify.user?.id ?? "(unknown)",
     space: spaceId ?? "(server default)",
-    expiresAt: expiresAt ?? "(no expiry — API key)",
+    createdSpace: String(Boolean(verify.createdSpace)),
+    bootstrapRequired: String(Boolean(verify.bootstrapRequired)),
+    expiresAt: expiresAt ?? apiKeyExpiresAt ?? "(no expiry — API key)",
     baseUrl,
     config: dotEnvPath(),
   };
@@ -439,17 +600,20 @@ export async function runLogin(options: LoginOptions): Promise<Record<string, st
 
 /**
  * `busabase-cli login --refresh` — slide the saved OAuth session forward without a
- * browser. No-op for API keys (they don't expire). An already-expired session can't
- * refresh itself, so we tell the user to `login` again.
+ * browser. No-op for API keys (including keys with a fixed expiry) because they
+ * cannot be refreshed. An already-expired session must sign in again.
  */
 export async function runRefresh(options: LogoutOptions): Promise<Record<string, string>> {
   const baseUrl = normalizeBaseUrl(options.baseUrl);
   const token = options.apiKey;
   if (!token) throw new Error("Not signed in — run `busabase-cli login` first.");
-  if (!token.startsWith(SESSION_TOKEN_PREFIX)) {
+  const file = loadDotEnvFile();
+  const isSavedExpiringSession =
+    file.BUSABASE_API_KEY === token && Boolean(file.BUSABASE_TOKEN_EXPIRES_AT);
+  if (!token.startsWith(LEGACY_SESSION_TOKEN_PREFIX) && !isSavedExpiringSession) {
     return {
       status: "nothing to refresh",
-      detail: "This credential is an API key, which doesn't expire. Only OAuth sessions refresh.",
+      detail: "This credential is an API key and cannot be refreshed. Only OAuth sessions refresh.",
     };
   }
 
@@ -490,13 +654,14 @@ export async function runRefresh(options: LogoutOptions): Promise<Record<string,
  * own 401 (which points the user at `login`).
  */
 export async function maybeAutoRefresh(baseUrl: string, apiKey?: string): Promise<void> {
-  if (!apiKey?.startsWith(SESSION_TOKEN_PREFIX)) return;
+  if (!apiKey) return;
   const file = loadDotEnvFile();
   if (file.BUSABASE_API_KEY !== apiKey) return; // token came from a flag/env, not our file
   const expiresRaw = file[EXPIRES_AT_KEY];
   if (!expiresRaw) return;
   const expiresAt = Date.parse(expiresRaw);
   if (Number.isNaN(expiresAt)) return;
+  if (expiresAt <= Date.now()) return;
   if (expiresAt - Date.now() > AUTO_REFRESH_THRESHOLD_MS) return;
 
   try {
@@ -510,15 +675,34 @@ export async function maybeAutoRefresh(baseUrl: string, apiKey?: string): Promis
   }
 }
 
+/** Fail before a data command when the file-stored login session is already expired. */
+export function assertCredentialNotExpired(apiKey?: string): void {
+  if (!apiKey) return;
+  const file = loadDotEnvFile();
+  if (file.BUSABASE_API_KEY !== apiKey) return;
+  const expiresRaw = file[EXPIRES_AT_KEY];
+  if (!expiresRaw) return;
+  const expiresAt = Date.parse(expiresRaw);
+  if (!Number.isNaN(expiresAt) && expiresAt <= Date.now()) {
+    throw new Error(
+      "Your saved device login has expired. Run `busabase-cli login --device-code` to authorize this CLI again.",
+    );
+  }
+}
+
 /** Revoke a saved OAuth session (best effort) and clear the credential from disk. */
 export async function runLogout(options: LogoutOptions): Promise<Record<string, string>> {
   const baseUrl = normalizeBaseUrl(options.baseUrl);
   const token = options.apiKey;
   let revoked = "no session to revoke";
 
-  // Only native session tokens are revocable server-side; API keys are managed in
-  // the dashboard, so we just drop them from the local config.
-  if (token?.startsWith("bss_")) {
+  const file = loadDotEnvFile();
+  // BUSABASE_TOKEN_EXPIRES_AT is session-only; an API key's own expiry is not stored here.
+  if (
+    token &&
+    (token.startsWith(LEGACY_SESSION_TOKEN_PREFIX) ||
+      (file.BUSABASE_API_KEY === token && file[EXPIRES_AT_KEY]))
+  ) {
     try {
       const res = await fetch(`${baseUrl}/api/oauth/revoke`, {
         method: "POST",

@@ -5,7 +5,17 @@ import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-quer
 import { hasCapability } from "busabase-contract/domains";
 import type { NodeVO } from "busabase-contract/types";
 import { Toaster } from "kui/sonner";
-import { Activity, FolderOpen, Images, Inbox, Plus, Search, Shield, Star } from "lucide-react";
+import {
+  Activity,
+  FolderOpen,
+  Github,
+  Images,
+  Inbox,
+  Plus,
+  Search,
+  Shield,
+  Star,
+} from "lucide-react";
 import type { NavDropPosition, NavItemAction, NavNodeDropParams } from "openlib/ui/dashboard";
 import { DashboardLayout, type NavGroup, type NavItem, NavMain } from "openlib/ui/dashboard";
 import type { ComponentProps, ReactNode } from "react";
@@ -57,6 +67,16 @@ interface BusabaseDashboardShellProps {
   activeChangeRequestCount: number;
   onSearchClick: () => void;
   onCreateClick: (parent?: { id: string; name: string }) => void;
+  /**
+   * Opens the "Install from GitHub" dialog — a sibling of the create entry
+   * point, since installing a package is the other way content arrives in a
+   * space. Omit to render no entry point at all: both install procedures are
+   * gated on the space owner/admin role server-side (a package can carry skills
+   * and AirApps, i.e. code this space's agents will execute), so a host that
+   * knows the viewer is a plain member should leave this out rather than offer
+   * a control that can only end in a FORBIDDEN.
+   */
+  onInstallClick?: () => void;
   /** Identity + presentation forwarded to the shared `DashboardLayout`. */
   chrome: BusabaseDashboardChrome;
   /**
@@ -117,6 +137,7 @@ export function BusabaseDashboardShell({
   activeChangeRequestCount,
   onSearchClick,
   onCreateClick,
+  onInstallClick,
   chrome,
   orpc,
   locale,
@@ -370,6 +391,13 @@ export function BusabaseDashboardShell({
     ...(hiddenNavItemSet.has("assets")
       ? []
       : [{ title: assetsLabel, url: "/assets", icon: Images }]),
+    // Sits with the other sidebar shortcuts rather than competing with the
+    // Bases group's "+": creating an item and installing a package are siblings,
+    // but only one of them is the everyday action. Rendered only when the host
+    // wired a handler (see `onInstallClick` — it is the admin gate).
+    ...(onInstallClick
+      ? [{ title: nav.installFromGithub, url: "", icon: Github, onClick: "install-from-github" }]
+      : []),
   ];
   // Pinned nav (fixed at the top, never scrolls): Inbox + Search only —
   // everything else (Activity, Favorites, Bases) scrolls underneath, same
@@ -438,6 +466,9 @@ export function BusabaseDashboardShell({
   const handleNavItemAction = (action: string) => {
     if (action === "search") {
       onSearchClick();
+    }
+    if (action === "install-from-github") {
+      onInstallClick?.();
     }
   };
 

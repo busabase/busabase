@@ -45,19 +45,19 @@ test("review -> merge -> refresh keeps user-visible lineage", async ({ page, req
     }),
   );
 
-  await page.goto(`/dashboard/inbox/${created.id}`);
+  await page.goto(`/dashboard/local/inbox/${created.id}`);
   await expect(page.getByText("Waiting for your review")).toBeVisible();
   await page.getByRole("radio", { name: "Approve" }).check();
   await page.getByRole("button", { exact: true, name: "Approve" }).click();
   await expect(page.getByText("Approved · ready to merge")).toBeVisible();
   await page.getByRole("button", { name: "Merge into Base" }).click();
-  await expect(page).toHaveURL(/\/dashboard\/base\/blog\/rec/);
+  await expect(page).toHaveURL(/\/dashboard\/local\/base\/blog\/rec/);
   await expect(page.getByText("Lineage", { exact: true })).toBeVisible();
   await expect(page.getByText("Review history")).toBeVisible();
   await expect(page.getByLabel("Technical IDs")).not.toHaveAttribute("open", "");
   await expect(page.getByRole("heading", { name: title })).toBeVisible();
   await page.getByRole("link", { exact: true, name: "Source" }).click();
-  await expect(page).toHaveURL(new RegExp(`/dashboard/inbox/${created.id}$`));
+  await expect(page).toHaveURL(new RegExp(`/dashboard/local/inbox/${created.id}$`));
   await page.goBack();
 
   await page.reload();
@@ -86,7 +86,7 @@ test("request changes is recoverable and revision returns to review", async ({ p
     throw new Error("Created CR has no operation");
   }
 
-  await page.goto(`/dashboard/inbox/${created.id}`);
+  await page.goto(`/dashboard/local/inbox/${created.id}`);
   await page.getByRole("radio", { name: "Request changes" }).check();
   await page.getByLabel("Review summary").fill("Tighten the claim and mention @ai.");
   await page.getByRole("button", { exact: true, name: "Request changes" }).click();
@@ -164,7 +164,7 @@ test("same-field merge conflict stays visible and recoverable", async ({ page, r
     await request.post(`/api/v1/change-requests/${firstUpdate.id}/merge`, { data: {} }),
   );
 
-  await page.goto(`/dashboard/inbox/${conflictingUpdate.id}`);
+  await page.goto(`/dashboard/local/inbox/${conflictingUpdate.id}`);
   await page.getByRole("radio", { name: "Approve" }).check();
   await page.getByRole("button", { exact: true, name: "Approve" }).click();
   await expect(page.getByText("Approved · ready to merge")).toBeVisible();
@@ -204,7 +204,7 @@ test("record delete request explains impact and preserves the canonical record",
     await request.post(`/api/v1/change-requests/${createCr.id}/merge`, { data: {} }),
   );
 
-  await page.goto(`/dashboard/base/blog/${merged.record.id}`);
+  await page.goto(`/dashboard/local/base/blog/${merged.record.id}`);
   await expect(page.getByRole("heading", { name: title })).toBeVisible();
   // Delete actions live behind the record's "⋯" menu (a <details> disclosure).
   await page.locator("details").filter({ hasText: "Delete change request" }).first().click();
@@ -217,10 +217,10 @@ test("record delete request explains impact and preserves the canonical record",
   await page.locator("details").filter({ hasText: "Delete change request" }).first().click();
   await page.getByRole("button", { name: "Delete Change Request" }).click();
   await page.getByRole("button", { name: "Create delete request" }).click();
-  await expect(page).toHaveURL(/\/dashboard\/inbox\/crq/);
+  await expect(page).toHaveURL(/\/dashboard\/local\/inbox\/crq/);
   await expect(page.getByText("Waiting for your review")).toBeVisible();
   await expect(page.getByText("destructive", { exact: true })).toBeVisible();
 
-  await page.goto(`/dashboard/base/blog/${merged.record.id}`);
+  await page.goto(`/dashboard/local/base/blog/${merged.record.id}`);
   await expect(page.getByRole("heading", { name: title })).toBeVisible();
 });

@@ -10,6 +10,12 @@ import type {
 } from "open-domains/attachments/types";
 import type { iString } from "openlib/i18n/i-string";
 import { type BusabaseContract, busabaseContract } from "../contract/busabase";
+import type {
+  InstallFromGithubDTO,
+  InstallPlanFromGithubDTO,
+  InstallPlanVO,
+  InstallResultVO,
+} from "../domains/install/types";
 import type { CreatableNodeType } from "../domains/registry";
 import type {
   AgentTaskVO,
@@ -160,6 +166,8 @@ export interface BusabaseDashboardApiClient {
     message?: string;
     submittedBy?: string;
   }) => Promise<ChangeRequestVO>;
+  /** Shallow-merge top-level metadata keys on an active node. */
+  updateNodeMetadata: (nodeId: string, metadata: Record<string, unknown>) => Promise<NodeVO>;
   /**
    * Toggle the current actor's favorite on a node — a true upsert-or-delete
    * against the `(nodeId, actorId)` unique pair server-side. `favorited`
@@ -313,6 +321,15 @@ export interface BusabaseDashboardApiClient {
     recordId: string,
     payload: { submittedBy?: string; message?: string },
   ) => Promise<ChangeRequestVO>;
+  /**
+   * Dry-run "Install from GitHub" — the server fetches the repo, validates the
+   * package and reports what it *would* create. Creates nothing. Space
+   * owner/admin only (a package can carry skills and AirApps, i.e. code this
+   * space's agents will execute), so a member gets a FORBIDDEN here.
+   */
+  planInstallFromGithub: (input: InstallPlanFromGithubDTO) => Promise<InstallPlanVO>;
+  /** Performs the install planned by `planInstallFromGithub`. Same admin gate. */
+  installFromGithub: (input: InstallFromGithubDTO) => Promise<InstallResultVO>;
 }
 
 function getBaseUrl() {
@@ -397,6 +414,7 @@ export const createBusabaseRestApiClient = (
     listArchivedNodes: () => client.nodes.listArchived(),
     purgeNode: (nodeId) => client.nodes.purge({ nodeId }),
     moveNode: (payload) => client.nodes.move(payload),
+    updateNodeMetadata: (nodeId, metadata) => client.nodes.updateMetadata({ nodeId, metadata }),
     toggleNodeFavorite: (nodeId) => client.nodes.toggleFavorite({ nodeId }),
     listFavoriteNodes: () => client.nodes.listFavorites(),
     getSkill: (nodeIdOrSlug) => client.skills.get({ nodeId: nodeIdOrSlug }),
@@ -470,5 +488,7 @@ export const createBusabaseRestApiClient = (
       client.views.restoreChangeRequest({ viewId, ...payload }),
     createRestoreRecordChangeRequest: (recordId, payload) =>
       client.records.restoreChangeRequest({ recordId, ...payload }),
+    planInstallFromGithub: (input) => client.install.planFromGithub(input),
+    installFromGithub: (input) => client.install.fromGithub(input),
   };
 };

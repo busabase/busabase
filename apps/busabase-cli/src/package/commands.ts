@@ -10,13 +10,19 @@ import {
   type PackageManifest,
   PackageManifestSchema,
 } from "busabase-contract/domains/package/types";
+import { applyInstall } from "busabase-package/apply";
+import { collectPackageTree, findSourceNode } from "busabase-package/collect";
+import { fetchGithubPackageFiles } from "busabase-package/github";
+import { readPackageTree } from "busabase-package/layout-read";
+import { renderPackageTree, writePackageFiles } from "busabase-package/layout-write";
+import {
+  assertPlanIsApplicable,
+  buildInstallPlan,
+  renderPlan,
+  resolveTargetState,
+} from "busabase-package/plan";
+import { suggestSlug } from "busabase-package/tree";
 import type { BusabaseClient } from "busabase-sdk";
-import { applyInstall } from "./apply.js";
-import { collectPackageTree, findSourceNode } from "./collect.js";
-import { fetchGithubPackageFiles } from "./github.js";
-import { readPackageTree } from "./layout-read.js";
-import { renderPackageTree, writePackageFiles } from "./layout-write.js";
-import { assertPlanIsApplicable, buildInstallPlan, type ExistingNode, renderPlan } from "./plan.js";
 
 /** Progress is diagnostics, not data — it must never pollute `--output json` on stdout. */
 const reportProgress = (message: string): void => {
@@ -47,16 +53,14 @@ export const runInstall = async (
   // the manifest sits at the root of what we hold.
   const tree = readPackageTree(files);
 
-  const [nodes, bases] = await Promise.all([client.nodes.list(), client.bases.list()]);
-  const targetFolderSlug = options.intoFolder ?? tree.manifest.name;
-  const plan = buildInstallPlan(
-    tree,
-    {
-      targetFolder: findTargetFolder(nodes as unknown as ExistingNode[], targetFolderSlug),
-      existingBaseSlugs: new Set(bases.map((base) => base.slug)),
-    },
-    { intoFolder: options.intoFolder, rename: options.rename },
-  );
+  // Slugify to match what `buildInstallPlan` will actually target — a manifest
+  // name is free-form, a slug is not. Looking the existing folder up by the raw
+  // name resolves collisions against a folder the install never touches.
+  const targetFolderSlug = options.intoFolder ?? suggestSlug(tree.manifest.name);
+  const plan = buildInstallPlan(tree, await resolveTargetState(client, targetFolderSlug), {
+    intoFolder: options.intoFolder,
+    rename: options.rename,
+  });
 
   if (options.dryRun) {
     const report = `${renderPlan(plan)}\n\nDry run — nothing was created.`;
@@ -73,17 +77,6 @@ export const runInstall = async (
 
   if (options.json) return { installed: true, ...result };
   return renderInstallReport(plan.targetFolderSlug, result);
-};
-
-/** The target folder is addressed by slug at the space root. */
-const findTargetFolder = (
-  nodes: readonly ExistingNode[],
-  slug: string,
-): ExistingNode | undefined => {
-  // `nodes.list()` returns the root wrapper as a single element; the package's target
-  // folder is a child of the root, or a root-level node itself.
-  const roots = nodes.length === 1 && nodes[0].children ? nodes[0].children : nodes;
-  return roots.find((node) => node.slug === slug && node.type === "folder");
 };
 
 const toPlanSummary = (plan: ReturnType<typeof buildInstallPlan>) => ({

@@ -21,7 +21,7 @@ export interface NodeOutput {
   slug: string;
   name: string;
   description: string;
-  metadata: {
+  metadata: Record<string, unknown> & {
     entryFile?: string;
     visibility?: "private" | "workspace" | "public";
     version?: string;
@@ -60,6 +60,7 @@ const nodeSchema: z.ZodType<NodeOutput> = z.lazy(() =>
         version: z.string().optional(),
         assetId: z.string().optional(),
       })
+      .catchall(z.unknown())
       .default({}),
     position: z.number(),
     createdAt: z.string(),
@@ -124,6 +125,11 @@ const isDescendantInputSchema = z.object({
 
 const isDescendantOutputSchema = z.object({
   isDescendant: z.boolean(),
+});
+
+const updateNodeMetadataInputSchema = z.object({
+  nodeId: z.string(),
+  metadata: z.record(z.string(), z.unknown()),
 });
 
 // Cheap name/slug-only node lookup — the backend half of the dashboard's
@@ -339,6 +345,7 @@ const auditActionSchema = z.enum([
   "asset.metadata_updated",
   "asset.text_written",
   "asset.text_marked_none",
+  "node.metadata_updated",
   "node.purged",
 ]);
 
@@ -615,6 +622,10 @@ const authInfoSchema = z.object({
    * intended space and target it explicitly via the `x-busabase-space` header.
    */
   spaces: z.array(authSpaceSchema),
+  /** Cloud only: the server created this user's first Space during this exact request. */
+  createdSpace: z.boolean().optional(),
+  /** Cloud only: this auto-created Space still needs its idempotent starter initialization. */
+  bootstrapRequired: z.boolean().optional(),
 });
 
 export type AuthInfo = z.infer<typeof authInfoSchema>;
@@ -630,6 +641,7 @@ export {
   listNodesInputSchema,
   isDescendantInputSchema,
   isDescendantOutputSchema,
+  updateNodeMetadataInputSchema,
   searchNodesByNameInputSchema,
   nodeSearchResultSchema,
   commitSchema,

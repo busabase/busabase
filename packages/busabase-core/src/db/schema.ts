@@ -92,17 +92,19 @@ export const busabaseNodes = pgTable(
     name: text("name").notNull(),
     description: text("description").notNull().default(""),
     metadata: jsonb("metadata")
-      .$type<{
-        entryFile?: string;
-        visibility?: "private" | "workspace" | "public";
-        version?: string;
-        assetId?: string;
-        attachmentId?: string;
-        fileName?: string;
-        mimeType?: string;
-        size?: number;
-        contentHash?: string | null;
-      }>()
+      .$type<
+        Record<string, unknown> & {
+          entryFile?: string;
+          visibility?: "private" | "workspace" | "public";
+          version?: string;
+          assetId?: string;
+          attachmentId?: string;
+          fileName?: string;
+          mimeType?: string;
+          size?: number;
+          contentHash?: string | null;
+        }
+      >()
       .notNull()
       .default({}),
     position: integer("position").notNull().default(0),

@@ -248,7 +248,7 @@ describe("Drive API — oRPC integration", () => {
     expect(file.displayName).toBe("REST Export");
   });
 
-  it("stores Drive files as Assets with searchable AI-readable metadata", async () => {
+  it("stores Drive files with AI-readable metadata without treating it as file text", async () => {
     const asset = await createAsset({
       fileName: "wealth-guide.pdf",
       mimeType: "application/pdf",
@@ -333,16 +333,15 @@ describe("Drive API — oRPC integration", () => {
       ]),
     );
 
-    const byMetaBody = await client.search({ query: "brochure", limit: 10 });
-    expect(byMetaBody.results).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          kind: "file",
-          title: "Wealth Guide PDF",
-          href: "/drive/asset-backed-drive",
-        }),
-      ]),
-    );
+    const byMetadataOnly = await client.search({ query: "brochure", limit: 10 });
+    expect(
+      byMetadataOnly.results.some(
+        (result) =>
+          result.kind === "file" &&
+          result.title === "Wealth Guide PDF" &&
+          result.href === "/drive/asset-backed-drive",
+      ),
+    ).toBe(false);
   });
 
   it("creates a Drive with an initial Asset-backed file", async () => {

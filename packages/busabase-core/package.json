@@ -1,7 +1,7 @@
 {
   "name": "busabase-core",
   "description": "Shared Busabase open-core protocol, local store, API helpers, and dashboard components.",
-  "version": "0.9.9",
+  "version": "0.9.10",
   "private": true,
   "type": "module",
   "exports": {
@@ -109,6 +109,10 @@
       "types": "./src/domains/dashboard/components/create-node-modal.tsx",
       "default": "./src/domains/dashboard/components/create-node-modal.tsx"
     },
+    "./dashboard/install-from-github-modal": {
+      "types": "./src/domains/dashboard/components/install-from-github-modal.tsx",
+      "default": "./src/domains/dashboard/components/install-from-github-modal.tsx"
+    },
     "./dashboard/dashboard-shell": {
       "types": "./src/domains/dashboard/components/dashboard-shell.tsx",
       "default": "./src/domains/dashboard/components/dashboard-shell.tsx"
@@ -185,6 +189,7 @@
     "@tanstack/react-virtual": "^3.13.12",
     "@xyflow/react": "^12.10.0",
     "busabase-contract": "workspace:*",
+    "busabase-package": "workspace:*",
     "drizzle-orm": "^0.45.1",
     "elkjs": "^0.9.3",
     "ignore": "^7.0.5",

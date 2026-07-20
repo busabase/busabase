@@ -1,6 +1,14 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";
 import type { AssetTextStatus } from "busabase-contract/types";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "kui/dialog";
 import { Skeleton } from "kui/skeleton";
 import {
   AlertTriangle,
@@ -11,12 +19,15 @@ import {
   Film,
   Image as ImageIcon,
   Music,
+  RefreshCw,
   Trash2,
+  Upload,
 } from "lucide-react";
 import { type ReactNode, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { fmt, useCoreI18n } from "../../../i18n";
-import { EmptyState } from "./primitives";
+import { INLINE_ASSET_TEXT_MAX_BYTES, isTxtFile, utf8ByteLength } from "../helpers/asset-text-grep";
+import { ConfirmActionDialog, EmptyState } from "./primitives";
 
 export const assetSizeUnits = ["B", "KB", "MB", "GB"];
 export function formatAssetSize(bytes: number): string {
@@ -296,10 +307,14 @@ export function AssetsView({
   onOpenNode: (nodeType: string, nodeSlug: string) => void;
   emptyGuide?: ReactNode;
 }) {
-  return assetId ? (
-    <AssetDetailView assetId={assetId} onBack={onBack} onOpenNode={onOpenNode} orpc={orpc} />
-  ) : (
-    <AssetLibraryView emptyGuide={emptyGuide} onOpenAsset={onOpenAsset} orpc={orpc} />
+  return (
+    <div className="h-full min-h-0 w-full min-w-0 overflow-auto" data-dashboard-scroll="assets">
+      {assetId ? (
+        <AssetDetailView assetId={assetId} onBack={onBack} onOpenNode={onOpenNode} orpc={orpc} />
+      ) : (
+        <AssetLibraryView emptyGuide={emptyGuide} onOpenAsset={onOpenAsset} orpc={orpc} />
+      )}
+    </div>
   );
 }
 
@@ -456,6 +471,330 @@ export function AssetLibraryView({
   );
 }
 
+type AssetTextWriteMode = "paste" | "upload";
+type AssetTextWritePhase = "idle" | "requesting" | "uploading" | "binding" | "saving";
+
+export function AssetSearchableTextPanel({
+  assetId,
+  orpc,
+  status,
+  onPersisted,
+}: {
+  assetId: string;
+  orpc: BusabaseQueryUtils;
+  status: AssetTextStatus;
+  onPersisted: () => Promise<void>;
+}) {
+  const messages = useCoreI18n();
+  const [open, setOpen] = useState(false);
+  const [mode, setMode] = useState<AssetTextWriteMode>("paste");
+  const [text, setText] = useState("");
+  const [file, setFile] = useState<File | null>(null);
+  const [pendingStorageKey, setPendingStorageKey] = useState<string | null>(null);
+  const [phase, setPhase] = useState<AssetTextWritePhase>("idle");
+  const [error, setError] = useState<string | null>(null);
+  const [confirmReplace, setConfirmReplace] = useState(false);
+  const [confirmNone, setConfirmNone] = useState(false);
+  const putTextMutation = useMutation(orpc.assets.putText.mutationOptions());
+  const createUploadMutation = useMutation(orpc.assets.createTextUploadUrl.mutationOptions());
+  const byteCount = utf8ByteLength(text);
+  const pasteTooLarge = byteCount > INLINE_ASSET_TEXT_MAX_BYTES;
+  const isBusy = phase !== "idle";
+  const actionLabel =
+    status === "present" ? messages.assets.textReplace : messages.assets.textSupply;
+
+  const resetWriteState = () => {
+    setText("");
+    setFile(null);
+    setPendingStorageKey(null);
+    setError(null);
+    setPhase("idle");
+    setMode("paste");
+    setConfirmReplace(false);
+  };
+
+  const persistSuccess = async () => {
+    await onPersisted();
+    toast.success(messages.assets.textWriteSuccess);
+    setOpen(false);
+    resetWriteState();
+  };
+
+  const writePaste = async () => {
+    setPhase("saving");
+    await putTextMutation.mutateAsync({ assetId, text });
+    await persistSuccess();
+  };
+
+  const validateUpload = (selectedFile: File) => {
+    if (!isTxtFile(selectedFile)) {
+      throw new Error(messages.assets.textUploadTxtOnly);
+    }
+    if (selectedFile.size === 0) {
+      throw new Error(messages.assets.textUploadEmpty);
+    }
+  };
+
+  const writeUpload = async () => {
+    if (!file) return;
+    validateUpload(file);
+    let storageKey = pendingStorageKey;
+    if (!storageKey) {
+      setPhase("requesting");
+      const upload = await createUploadMutation.mutateAsync({ assetId, sizeBytes: file.size });
+      setPhase("uploading");
+      const response = await fetch(upload.uploadUrl, {
+        method: "PUT",
+        body: file,
+        headers: { "Content-Type": "text/plain; charset=utf-8" },
+      });
+      if (!response.ok) {
+        throw new Error(fmt(messages.assets.textUploadHttpFailed, { status: response.status }));
+      }
+      storageKey = upload.storageKey;
+      setPendingStorageKey(storageKey);
+    }
+    setPhase("binding");
+    try {
+      await putTextMutation.mutateAsync({ assetId, storageKey });
+    } catch (bindError) {
+      // The server may consume/delete the temporary object before a later
+      // persistence failure. Re-uploading is the only reliable retry path.
+      setPendingStorageKey(null);
+      if (bindError instanceof Error && bindError.message.includes("not valid UTF-8")) {
+        throw new Error(messages.assets.textUploadUtf8Only);
+      }
+      throw bindError;
+    }
+    await persistSuccess();
+  };
+
+  const executeWrite = async () => {
+    setError(null);
+    try {
+      if (mode === "paste") await writePaste();
+      else await writeUpload();
+    } catch (writeError) {
+      setError(writeError instanceof Error ? writeError.message : messages.assets.textWriteFailed);
+      setPhase("idle");
+    }
+  };
+
+  const requestWrite = () => {
+    if (status === "present") {
+      // Do not stack this confirmation beside the KUI dialog: its focus trap
+      // makes sibling overlays inaccessible. Preserve the entered payload and
+      // reopen it if the user cancels.
+      setOpen(false);
+      setConfirmReplace(true);
+      return;
+    }
+    void executeWrite();
+  };
+
+  const markNone = async () => {
+    setError(null);
+    setPhase("saving");
+    try {
+      await putTextMutation.mutateAsync({ assetId, none: true });
+      await persistSuccess();
+      setConfirmNone(false);
+    } catch (writeError) {
+      setError(writeError instanceof Error ? writeError.message : messages.assets.textWriteFailed);
+      setPhase("idle");
+      setConfirmNone(false);
+    }
+  };
+
+  const submitDisabled =
+    isBusy || (mode === "paste" ? text.length === 0 || pasteTooLarge : file === null);
+
+  return (
+    <div className="rounded-xl border bg-background p-4">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <h2 className="font-medium text-sm">{messages.assets.searchableText}</h2>
+          <p className="mt-1 text-muted-foreground text-xs leading-5">
+            {messages.assets.searchableTextDescription}
+          </p>
+        </div>
+        <AssetTextStatusChip status={status} />
+      </div>
+      <div className="mt-3 flex flex-wrap gap-2">
+        <button
+          className="inline-flex items-center gap-1.5 rounded-md bg-foreground px-2.5 py-1.5 font-medium text-background text-xs hover:bg-foreground/85"
+          onClick={() => setOpen(true)}
+          type="button"
+        >
+          <RefreshCw className="size-3.5" />
+          {actionLabel}
+        </button>
+        {status !== "none" ? (
+          <button
+            className="rounded-md border bg-background px-2.5 py-1.5 text-muted-foreground text-xs hover:bg-muted hover:text-foreground"
+            onClick={() => setConfirmNone(true)}
+            type="button"
+          >
+            {messages.assets.textMarkNone}
+          </button>
+        ) : null}
+      </div>
+      {error && !open ? (
+        <div className="mt-3 rounded-md border border-destructive/40 bg-destructive/10 px-2.5 py-2 text-destructive text-xs">
+          {error}
+        </div>
+      ) : null}
+
+      <Dialog
+        open={open}
+        onOpenChange={(nextOpen) => {
+          if (isBusy) return;
+          setOpen(nextOpen);
+          if (!nextOpen) resetWriteState();
+        }}
+      >
+        <DialogContent className="sm:max-w-xl">
+          <DialogHeader>
+            <DialogTitle>{actionLabel}</DialogTitle>
+            <DialogDescription>{messages.assets.textWriteDescription}</DialogDescription>
+          </DialogHeader>
+
+          <div className="flex rounded-md border bg-muted p-1" role="tablist">
+            {(["paste", "upload"] as const).map((writeMode) => (
+              <button
+                aria-selected={mode === writeMode}
+                className={`flex-1 rounded-sm px-3 py-1.5 font-medium text-sm ${
+                  mode === writeMode
+                    ? "bg-background text-foreground shadow-sm"
+                    : "text-muted-foreground"
+                }`}
+                disabled={isBusy}
+                key={writeMode}
+                onClick={() => {
+                  setMode(writeMode);
+                  setError(null);
+                }}
+                role="tab"
+                type="button"
+              >
+                {writeMode === "paste" ? messages.assets.textPaste : messages.assets.textUpload}
+              </button>
+            ))}
+          </div>
+
+          {mode === "paste" ? (
+            <div>
+              <label className="font-medium text-sm" htmlFor="asset-searchable-text">
+                {messages.assets.textPasteLabel}
+              </label>
+              <textarea
+                className="mt-2 min-h-48 w-full resize-y rounded-md border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
+                disabled={isBusy}
+                id="asset-searchable-text"
+                onChange={(event) => setText(event.target.value)}
+                placeholder={messages.assets.textPastePlaceholder}
+                value={text}
+              />
+              <div
+                className={`mt-1 text-xs ${pasteTooLarge ? "text-destructive" : "text-muted-foreground"}`}
+              >
+                {fmt(messages.assets.textByteCount, {
+                  count: byteCount,
+                  limit: INLINE_ASSET_TEXT_MAX_BYTES,
+                })}
+                {pasteTooLarge ? ` ${messages.assets.textPasteTooLarge}` : ""}
+              </div>
+            </div>
+          ) : (
+            <div>
+              <label className="font-medium text-sm" htmlFor="asset-searchable-text-file">
+                {messages.assets.textUploadLabel}
+              </label>
+              <input
+                accept=".txt,text/plain"
+                className="mt-2 block w-full rounded-md border bg-background px-3 py-2 text-sm file:mr-3 file:rounded-md file:border-0 file:bg-muted file:px-2.5 file:py-1 file:text-foreground file:text-xs"
+                disabled={isBusy}
+                id="asset-searchable-text-file"
+                onChange={(event) => {
+                  setFile(event.target.files?.[0] ?? null);
+                  setPendingStorageKey(null);
+                  setError(null);
+                }}
+                type="file"
+              />
+              <p className="mt-1 text-muted-foreground text-xs">{messages.assets.textUploadHint}</p>
+            </div>
+          )}
+
+          {error ? (
+            <div className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-destructive text-sm">
+              {error}
+            </div>
+          ) : null}
+          {isBusy ? (
+            <p aria-live="polite" className="text-muted-foreground text-sm">
+              {phase === "requesting"
+                ? messages.assets.textUploadPreparing
+                : phase === "uploading"
+                  ? messages.assets.textUploading
+                  : phase === "binding"
+                    ? messages.assets.textUploadBinding
+                    : messages.assets.textSaving}
+            </p>
+          ) : null}
+
+          <DialogFooter>
+            <button
+              className="rounded-md border bg-background px-3 py-1.5 font-medium text-sm hover:bg-muted"
+              disabled={isBusy}
+              onClick={() => setOpen(false)}
+              type="button"
+            >
+              {messages.common.cancel}
+            </button>
+            <button
+              className="inline-flex items-center gap-1.5 rounded-md bg-foreground px-3 py-1.5 font-medium text-background text-sm hover:bg-foreground/85 disabled:cursor-not-allowed disabled:opacity-50"
+              disabled={submitDisabled}
+              onClick={requestWrite}
+              type="button"
+            >
+              <Upload className="size-4" />
+              {isBusy ? messages.common.working : actionLabel}
+            </button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <ConfirmActionDialog
+        body={messages.assets.textReplaceConfirmBody}
+        confirmLabel={messages.assets.textReplaceConfirm}
+        destructive={false}
+        onCancel={() => {
+          setConfirmReplace(false);
+          setOpen(true);
+        }}
+        onConfirm={() => {
+          setConfirmReplace(false);
+          void executeWrite();
+        }}
+        open={confirmReplace}
+        pending={isBusy}
+        title={messages.assets.textReplaceConfirmTitle}
+      />
+      <ConfirmActionDialog
+        body={messages.assets.textMarkNoneConfirmBody}
+        confirmLabel={messages.assets.textMarkNoneConfirm}
+        destructive={false}
+        onCancel={() => setConfirmNone(false)}
+        onConfirm={() => void markNone()}
+        open={confirmNone}
+        pending={isBusy}
+        title={messages.assets.textMarkNoneConfirmTitle}
+      />
+    </div>
+  );
+}
+
 // Mirrors the detail pane rendered once `detailQuery` resolves — a "Back" row,
 // a large preview area, and a title/chips card — so opening an asset shimmers
 // into shape instead of showing plain text in an otherwise-empty pane.
@@ -495,6 +834,7 @@ export function AssetDetailView({
   const messages = useCoreI18n();
   const detailQuery = useQuery(orpc.assets.get.queryOptions({ input: { assetId } }));
   const queryClient = useQueryClient();
+  const [textRevision, setTextRevision] = useState(0);
   const deleteMutation = useMutation({
     ...orpc.assets.delete.mutationOptions(),
     onSuccess: () => {
@@ -507,6 +847,17 @@ export function AssetDetailView({
     },
   });
   const detail = detailQuery.data ?? null;
+
+  const refreshAssetText = async () => {
+    await Promise.all([
+      queryClient.invalidateQueries({
+        queryKey: orpc.assets.get.queryOptions({ input: { assetId } }).queryKey,
+      }),
+      queryClient.invalidateQueries({ queryKey: orpc.assets.list.queryOptions({}).queryKey }),
+      queryClient.invalidateQueries({ queryKey: orpc.assets.readTextLines.key() }),
+    ]);
+    setTextRevision((current) => current + 1);
+  };
 
   if (!detail) {
     return detailQuery.isLoading ? (
@@ -563,7 +914,6 @@ export function AssetDetailView({
                   {chip}
                 </span>
               ))}
-              <AssetTextStatusChip status={asset.textStatus} />
             </div>
             {asset.contentHash ? (
               <p
@@ -599,7 +949,19 @@ export function AssetDetailView({
             </div>
           </div>
 
-          <AssetTextPreviewPanel assetId={asset.id} orpc={orpc} textStatus={asset.textStatus} />
+          <AssetSearchableTextPanel
+            assetId={asset.id}
+            onPersisted={refreshAssetText}
+            orpc={orpc}
+            status={asset.textStatus}
+          />
+
+          <AssetTextPreviewPanel
+            assetId={asset.id}
+            key={`${asset.id}:${textRevision}`}
+            orpc={orpc}
+            textStatus={asset.textStatus}
+          />
 
           <AssetMetadataBlock framed metadata={asset.metadata} />
 

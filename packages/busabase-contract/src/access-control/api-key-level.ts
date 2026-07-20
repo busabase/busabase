@@ -127,6 +127,7 @@ export const PROCEDURE_LEVEL_OVERRIDES: Record<string, ApiKeyPermissionLevel> = 
   "airapps.create": "write",
   "files.create": "write",
   "nodes.move": "write",
+  "nodes.updateMetadata": "write",
   "comments.create": "write",
   "auditEvents.create": "write",
   "assets.updateMetadata": "write",

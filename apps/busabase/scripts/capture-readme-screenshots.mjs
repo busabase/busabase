@@ -495,15 +495,15 @@ const scenarioShots = [
 const routeForScenarioShot = (scenario, kind) => {
   const suffix = `?demo=${scenario.demo}${langParam}`;
   if (kind === "base") {
-    return `${BASE}/dashboard/base/${scenario.base}${suffix}`;
+    return `${BASE}/dashboard/local/base/${scenario.base}${suffix}`;
   }
   if (kind === "inbox") {
-    return `${BASE}/dashboard/inbox${suffix}`;
+    return `${BASE}/dashboard/local/inbox${suffix}`;
   }
   if (kind === "review") {
-    return `${BASE}/dashboard/inbox/${scenario.cr}${suffix}`;
+    return `${BASE}/dashboard/local/inbox/${scenario.cr}${suffix}`;
   }
-  return `${BASE}/dashboard/base/${scenario.base}/${scenario.record}${suffix}`;
+  return `${BASE}/dashboard/local/base/${scenario.base}/${scenario.record}${suffix}`;
 };
 
 // Each shot loads a FULL url with ?demo so the proxy keeps demo mode on
@@ -512,57 +512,57 @@ const routeForScenarioShot = (scenario, kind) => {
 const shots = [
   {
     file: "busabase-inbox-review.png",
-    url: `${BASE}/dashboard/inbox?demo=1`,
+    url: `${BASE}/dashboard/local/inbox?demo=1`,
     waitFor: "text=For review",
   },
   {
     file: "busabase-agent-output-preview.png",
-    url: `${BASE}/dashboard/inbox/crq_seed_blog_update?demo=1`,
+    url: `${BASE}/dashboard/local/inbox/crq_seed_blog_update?demo=1`,
     waitFor: "text=What will change",
   },
   {
     file: "busabase-record-detail-audit.png",
-    url: `${BASE}/dashboard/base/blog/rec_seed_blog_approval?demo=1`,
+    url: `${BASE}/dashboard/local/base/blog/rec_seed_blog_approval?demo=1`,
     waitFor: "text=AI agents are moving from demos into operator workflows",
   },
   {
     file: "busabase-base-table.png",
-    url: `${BASE}/dashboard/base/blog?demo=1`,
+    url: `${BASE}/dashboard/local/base/blog?demo=1`,
     waitFor: "text=Blog Posts",
   },
   {
     // Rich base with image thumbnails — labeling queue shows asset column
     file: "busabase-base-records.png",
-    url: `${BASE}/dashboard/base/labeling-queue?demo=labeling`,
+    url: `${BASE}/dashboard/local/base/labeling-queue?demo=labeling`,
     waitFor: "text=Labeling Queue",
   },
   {
     file: "busabase-graph-view.png",
-    url: `${BASE}/dashboard/graph?demo=1`,
+    url: `${BASE}/dashboard/local/graph?demo=1`,
     waitFor: "text=Graph View",
   },
   {
     // Long-form Doc node — versioned Markdown edited through review
     file: "busabase-doc-detail.png",
-    url: `${BASE}/dashboard/doc/agent-operating-guide?demo=1`,
+    url: `${BASE}/dashboard/local/doc/agent-operating-guide?demo=1`,
     waitFor: "text=How agents work here",
   },
   {
     // First-class File node — backed by the Asset library
     file: "busabase-file-detail.png",
-    url: `${BASE}/dashboard/file/product-brief?demo=1`,
+    url: `${BASE}/dashboard/local/file/product-brief?demo=1`,
     waitFor: "text=Backing asset",
   },
   {
     // Deduped global asset library (DAM) — illustrates Attachments & Assets
     file: "busabase-assets.png",
-    url: `${BASE}/dashboard/assets?demo=1`,
+    url: `${BASE}/dashboard/local/assets?demo=1`,
     waitFor: "text=Assets",
   },
   {
     // Workspace activity feed — illustrates Events / audit history
     file: "busabase-activity.png",
-    url: `${BASE}/dashboard/activity?demo=1`,
+    url: `${BASE}/dashboard/local/activity?demo=1`,
     waitFor: "text=Workspace activity",
   },
 ];
@@ -629,7 +629,7 @@ for (const shot of LANG === "en" ? shots : []) {
 
 // Agent Integration dialog tabs (English-only; the demo dialog is not localized).
 if (LANG === "en") {
-  await gotoShot(`${BASE}/dashboard/inbox?demo=1`);
+  await gotoShot(`${BASE}/dashboard/local/inbox?demo=1`);
   await page.waitForTimeout(800);
   // Open the dialog from the sidebar footer button (before it opens, the only
   // "Agent Skills" text is the sidebar button — not yet the in-dialog tab).

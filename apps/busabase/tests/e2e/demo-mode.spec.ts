@@ -79,7 +79,7 @@ test("demo writes are synthetic and never persist (refresh resets)", async ({ re
 test("dashboard renders the demo review queue from ?demo=1", async ({ page }) => {
   // proxy.ts turns the document's `?demo` into the `x-demo-mode` header the
   // server render reads — purely server-side, no client code or cookie.
-  await page.goto("/dashboard/inbox?demo=1");
+  await page.goto("/dashboard/local/inbox?demo=1");
   await expect(page.getByText("Busabase", { exact: true }).first()).toBeVisible();
   await expect(
     page.getByText("Trusted Intelligent Database", { exact: true }).first(),
@@ -90,9 +90,9 @@ test("dashboard renders the demo review queue from ?demo=1", async ({ page }) =>
 test("demo use-case persists across SPA navigation (?demo=blog)", async ({ page }) => {
   // SPALink (wouter) preserves the active demo value on click, so the Referer
   // keeps `?demo=blog` and the demo router keeps serving the focused use-case.
-  await page.goto("/dashboard/inbox?demo=blog");
+  await page.goto("/dashboard/local/inbox?demo=blog");
   const activity = page.getByRole("link", { name: "Activity" });
   await expect(activity).toBeVisible();
   await activity.click();
-  await expect(page).toHaveURL(/\/dashboard\/activity\?demo=blog$/);
+  await expect(page).toHaveURL(/\/dashboard\/local\/activity\?demo=blog$/);
 });

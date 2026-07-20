@@ -2,6 +2,7 @@
 
 import type { ReactNode } from "react";
 import { Router } from "wouter";
+import { getDashboardBasePath } from "~/lib/dashboard-routes";
 import { SPAContext, type SPAContextType } from "./spa-context";
 
 interface SPAWrapperProps {
@@ -25,7 +26,7 @@ const localUser = {
 };
 
 export function SPAWrapper({
-  basePath = "/dashboard",
+  basePath = getDashboardBasePath(),
   children,
   context,
   initialPath = "/inbox",
@@ -53,11 +54,13 @@ export function SPAWrapper({
     ...context,
   };
 
+  const ssrPathWithSpace = `${basePath}${ssrPath}`;
+
   return (
     <SPAContext.Provider value={value}>
       <div className="flex h-screen flex-col overflow-hidden">
         <div className="min-h-0 flex-1">
-          <Router base={basePath} ssrPath={ssrPath} ssrSearch={ssrSearch}>
+          <Router base={basePath} ssrPath={ssrPathWithSpace} ssrSearch={ssrSearch}>
             {children}
           </Router>
         </div>

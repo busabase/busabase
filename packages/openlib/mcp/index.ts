@@ -1,7 +1,14 @@
 import type { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
-import type { z } from "zod";
+import {
+  CallToolRequestSchema,
+  ListToolsRequestSchema,
+  type Tool,
+} from "@modelcontextprotocol/sdk/types.js";
+import type { AnySchema } from "@orpc/contract";
+import type { JSONSchema } from "@orpc/openapi";
+import { ZodToJsonSchemaConverter } from "@orpc/zod/zod4";
 
 type CallToolResult = {
   content: Array<{ type: "text"; text: string }>;
@@ -12,19 +19,10 @@ export type McpToolExtra = {
   authInfo?: AuthInfo;
 };
 
-export type McpInputSchema = z.ZodRawShape | z.ZodType;
+export type McpInputSchema = AnySchema;
 
 type McpServerLike = {
-  registerTool: (
-    name: string,
-    config: {
-      title?: string;
-      description?: string;
-      inputSchema?: McpInputSchema;
-      _meta?: Record<string, unknown>;
-    },
-    callback: (args: unknown, extra: unknown) => Promise<CallToolResult> | CallToolResult,
-  ) => unknown;
+  setRequestHandler: Server["setRequestHandler"];
 };
 
 type McpRouteHandler = (request: Request) => Response | Promise<Response>;
@@ -37,7 +35,7 @@ export type OpenApiProcedure = {
       summary?: string;
       successDescription?: string;
     };
-    inputSchema?: z.ZodType;
+    inputSchema?: AnySchema;
   };
 };
 
@@ -53,12 +51,8 @@ export interface McpToolCallContext {
 }
 
 interface OpenApiMcpToolCustomizationOptions {
+  additionalInputSchema?: (tool: DiscoveredOpenApiTool) => McpInputSchema | undefined;
   description?: (tool: DiscoveredOpenApiTool, defaultDescription: string) => string;
-  inputSchema?: (
-    tool: DiscoveredOpenApiTool,
-    defaultSchema: McpInputSchema | undefined,
-  ) => McpInputSchema | undefined;
-  transformInput?: (input: unknown, tool: DiscoveredOpenApiTool) => unknown;
 }
 
 export interface CreateMcpToolsFromOpenApiContractOptions<TClient> {
@@ -93,7 +87,7 @@ export interface CreateOpenApiMcpHandlerOptions<TClient>
 }
 
 type McpSession = {
-  server: McpServer;
+  server: Server;
   transport: WebStandardStreamableHTTPServerTransport;
 };
 
@@ -125,60 +119,206 @@ export const createMcpToolsFromOpenApiContract = <TClient>(
 export const registerOpenApiMcpTools = <TClient>(
   options: RegisterOpenApiMcpToolsOptions<TClient>,
 ) => {
-  const tools = createMcpToolsFromOpenApiContract({
+  const discoveredTools = createMcpToolsFromOpenApiContract({
     contract: options.contract,
     client: {} as TClient,
     exclude: options.exclude,
     include: options.include,
     name: options.name,
   });
+  const schemaConverter = new ZodToJsonSchemaConverter();
+  const tools = new Map(
+    discoveredTools.map((tool) => {
+      const route = tool.contractProcedure["~orpc"]?.route;
+      const contractInputSchema = tool.contractProcedure["~orpc"]?.inputSchema;
+      const additionalInputSchema = options.additionalInputSchema?.(tool);
+      const contractJsonSchema = contractInputSchema
+        ? convertMcpInputSchema(schemaConverter, contractInputSchema, tool.name)
+        : emptyMcpInputSchema();
+      const additionalJsonSchema = additionalInputSchema
+        ? convertMcpInputSchema(schemaConverter, additionalInputSchema, tool.name)
+        : undefined;
+      const inputSchema = additionalJsonSchema
+        ? mergeAdditionalInputSchema(contractJsonSchema, additionalJsonSchema, tool.name)
+        : contractJsonSchema;
+      const defaultDescription = [
+        route?.successDescription ?? route?.summary ?? `Call ${tool.name}`,
+        route?.method && route?.path ? `${route.method} ${route.path}` : null,
+      ]
+        .filter(Boolean)
+        .join("\n\n");
 
-  for (const tool of tools) {
-    const route = tool.contractProcedure["~orpc"]?.route;
-    const defaultDescription = [
-      route?.successDescription ?? route?.summary ?? `Call ${tool.name}`,
-      route?.method && route?.path ? `${route.method} ${route.path}` : null,
-    ]
-      .filter(Boolean)
-      .join("\n\n");
-    const defaultInputSchema = tool.contractProcedure["~orpc"]?.inputSchema;
-    options.server.registerTool(
-      tool.name,
-      {
-        title: route?.summary ?? tool.name,
-        description: options.description
-          ? options.description(tool, defaultDescription)
-          : defaultDescription,
-        inputSchema: options.inputSchema
-          ? options.inputSchema(tool, defaultInputSchema)
-          : defaultInputSchema,
-        _meta: {
-          openApiPath: route?.path,
-          openApiMethod: route?.method,
-          orpcPath: tool.keyPath.join("."),
+      return [
+        tool.name,
+        {
+          additionalInputKeys: new Set(Object.keys(additionalJsonSchema?.properties ?? {})),
+          additionalInputSchema,
+          contractInputSchema,
+          definition: {
+            name: tool.name,
+            title: route?.summary ?? tool.name,
+            description: options.description
+              ? options.description(tool, defaultDescription)
+              : defaultDescription,
+            inputSchema,
+            _meta: {
+              openApiPath: route?.path,
+              openApiMethod: route?.method,
+              orpcPath: tool.keyPath.join("."),
+            },
+          } satisfies Tool,
+          tool,
         },
-      },
-      async (args, extra) => {
-        try {
-          const client = options.createClient(extra as McpToolExtra, { args, tool });
-          const operation = getByPath(client, tool.keyPath);
-          if (typeof operation !== "function") {
-            throw new Error(`OpenAPI client operation missing: ${tool.keyPath.join(".")}`);
-          }
+      ] as const;
+    }),
+  );
 
-          const defaultInput = defaultInputSchema ? args : undefined;
-          const input = options.transformInput
-            ? options.transformInput(defaultInput, tool)
-            : defaultInput;
-          const output = await operation(input);
-          return asMcpJson(output);
-        } catch (error) {
-          return asMcpError(error);
-        }
-      },
+  options.server.setRequestHandler(ListToolsRequestSchema, async () => ({
+    tools: [...tools.values()].map(({ definition }) => definition),
+  }));
+  options.server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
+    try {
+      const registered = tools.get(request.params.name);
+      if (!registered) {
+        throw new Error(`MCP tool not found: ${request.params.name}`);
+      }
+
+      const rawArgs = request.params.arguments ?? {};
+      const additionalInput = registered.additionalInputSchema
+        ? await validateMcpInput(
+            registered.additionalInputSchema,
+            rawArgs,
+            registered.tool.name,
+            "additional",
+          )
+        : undefined;
+      const contextArgs = isRecord(additionalInput) ? { ...rawArgs, ...additionalInput } : rawArgs;
+      const operationArgs = omitKeys(rawArgs, registered.additionalInputKeys);
+      const input = registered.contractInputSchema
+        ? await validateMcpInput(
+            registered.contractInputSchema,
+            operationArgs,
+            registered.tool.name,
+            "contract",
+          )
+        : undefined;
+      const client = options.createClient(extra as McpToolExtra, {
+        args: contextArgs,
+        tool: registered.tool,
+      });
+      const operation = getByPath(client, registered.tool.keyPath);
+      if (typeof operation !== "function") {
+        throw new Error(`OpenAPI client operation missing: ${registered.tool.keyPath.join(".")}`);
+      }
+
+      return asMcpJson(await operation(input));
+    } catch (error) {
+      return asMcpError(error);
+    }
+  });
+};
+
+const emptyMcpInputSchema = (): Tool["inputSchema"] => ({
+  type: "object",
+  properties: {},
+});
+
+const convertMcpInputSchema = (
+  converter: ZodToJsonSchemaConverter,
+  inputSchema: McpInputSchema,
+  toolName: string,
+): Tool["inputSchema"] => {
+  if (!converter.condition(inputSchema)) {
+    throw new Error(`MCP tool ${toolName} must use a Zod input schema`);
+  }
+
+  const [, jsonSchema] = converter.convert(inputSchema, { strategy: "input" });
+  if (jsonSchema.type !== undefined && jsonSchema.type !== "object") {
+    throw new Error(
+      `MCP tool ${toolName} must use an object-shaped input schema; received ${String(jsonSchema.type)}`,
     );
   }
+
+  return { type: "object", ...jsonSchema } as Tool["inputSchema"];
 };
+
+const mergeAdditionalInputSchema = (
+  contractSchema: Tool["inputSchema"],
+  additionalSchema: Tool["inputSchema"],
+  toolName: string,
+): Tool["inputSchema"] => {
+  if (
+    hasSchemaEntries(additionalSchema.anyOf) ||
+    hasSchemaEntries(additionalSchema.oneOf) ||
+    hasSchemaEntries(additionalSchema.allOf)
+  ) {
+    throw new Error(`MCP tool ${toolName} additional input schema must be a direct object schema`);
+  }
+
+  const contractProperties = collectJsonSchemaPropertyNames(contractSchema);
+  for (const key of Object.keys(additionalSchema.properties ?? {})) {
+    if (contractProperties.has(key)) {
+      throw new Error(`MCP tool ${toolName} has duplicate input field ${key}`);
+    }
+  }
+
+  return {
+    ...contractSchema,
+    type: "object",
+    properties: {
+      ...contractSchema.properties,
+      ...additionalSchema.properties,
+    },
+    required: uniqueStrings([
+      ...(contractSchema.required ?? []),
+      ...(additionalSchema.required ?? []),
+    ]),
+  };
+};
+
+const hasSchemaEntries = (value: unknown): boolean => Array.isArray(value) && value.length > 0;
+
+const collectJsonSchemaPropertyNames = (schema: JSONSchema): Set<string> => {
+  if (!schema || typeof schema !== "object") return new Set();
+
+  const names = new Set(Object.keys(schema.properties ?? {}));
+  for (const branch of [
+    ...(schema.anyOf ?? []),
+    ...(schema.oneOf ?? []),
+    ...(schema.allOf ?? []),
+  ]) {
+    for (const name of collectJsonSchemaPropertyNames(branch)) names.add(name);
+  }
+  return names;
+};
+
+const validateMcpInput = async (
+  schema: McpInputSchema,
+  input: unknown,
+  toolName: string,
+  source: "additional" | "contract",
+): Promise<unknown> => {
+  const result = await schema["~standard"].validate(input);
+  if (result.issues) {
+    throw new Error(
+      `Invalid ${source} input for MCP tool ${toolName}: ${result.issues
+        .map((issue) => issue.message)
+        .join("; ")}`,
+    );
+  }
+  return result.value;
+};
+
+const omitKeys = (input: Record<string, unknown>, keys: Set<string>) =>
+  Object.fromEntries(Object.entries(input).filter(([key]) => !keys.has(key)));
+
+const uniqueStrings = (values: readonly string[]): string[] | undefined => {
+  const unique = [...new Set(values)];
+  return unique.length ? unique : undefined;
+};
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  !!value && typeof value === "object" && !Array.isArray(value);
 
 export const createOpenApiMcpHandler = <TClient>(
   options: CreateOpenApiMcpHandlerOptions<TClient>,
@@ -186,17 +326,18 @@ export const createOpenApiMcpHandler = <TClient>(
   const sessions = new Map<string, McpSession>();
 
   const createSession = async () => {
-    const server = new McpServer(options.serverInfo ?? { name: "OpenAPI MCP", version: "0.1.0" });
+    const server = new Server(options.serverInfo ?? { name: "OpenAPI MCP", version: "0.1.0" }, {
+      capabilities: { tools: {} },
+    });
     registerOpenApiMcpTools({
       server,
+      additionalInputSchema: options.additionalInputSchema,
       contract: options.contract,
       createClient: options.createClient,
       description: options.description,
       exclude: options.exclude,
       include: options.include,
-      inputSchema: options.inputSchema,
       name: options.name,
-      transformInput: options.transformInput,
     });
 
     let sessionId = "";

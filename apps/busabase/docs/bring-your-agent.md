@@ -11,13 +11,13 @@ You connect in two moves: **paste one prompt** to onboard, then **install a perm
 ## Onboard with one prompt
 
 1. **Copy the prompt.** In the dashboard sidebar open **Agent Skills** and copy the short prompt. It points your agent at your local `http://localhost:15419/SETUP_SKILL.md` — a self-contained onboarding script — and tells it to reply in your language and never merge without your approval.
-2. **Paste it into your agent.** Instead of dumping commands, it opens with a short welcome — what Busabase is, why the review gate matters — and asks **"what do you want to manage?"** Answer in a sentence (e.g. *"my sales leads / a CRM"*).
+2. **Paste it into your agent.** It opens with a short welcome, connects first, and only asks what you want to manage when this is a genuinely new workspace.
 3. **It connects.** No account or API key is needed locally; the agent confirms the local server is up and saves the base URL to `~/.busabase/.env` so every future session — and the installed skill — can read it.
-4. **It sketches the structure, you confirm, then it builds.** Before creating anything, the agent shows you the planned shape — folders, bases, fields, relations — and waits for your go-ahead. On approval it creates the bases (always more than one node, so the workspace never opens empty); see them in **Graph View**.
+4. **It preserves existing workspaces.** An existing workspace, including an intentionally empty one, is connected with zero structure or record writes. A new workspace receives a small starter structure automatically; see it in **Graph View**.
 
    ![Graph View — the structure the agent proposed, made concrete.](../public/assets/readme/busabase-graph-view.webp)
 
-5. **It seeds sample records — and you approve the first one together.** Starter records arrive as **Change Requests** (never written directly). The agent walks you through approving and merging the first one from the **Inbox**, so you watch the propose → review → merge loop close end to end.
+5. **It seeds sample records without another approval step.** Versioned starter records are written through audited, idempotent Change Requests and auto-merged only during initialization. Everyday agent work remains review-first.
 
    ![The Inbox — every AI submission waits here for your review.](../public/assets/readme/busabase-inbox-review.webp)
 

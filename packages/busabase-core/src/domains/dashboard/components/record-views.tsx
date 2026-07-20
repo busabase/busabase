@@ -160,7 +160,10 @@ export function RecordDetailView({
   }
 
   return (
-    <div className="min-h-0 flex-1 overflow-auto overflow-x-hidden">
+    <div
+      className="h-full min-h-0 w-full min-w-0 flex-1 overflow-auto overflow-x-hidden"
+      data-record-detail-scroll
+    >
       <div className="flex items-center justify-end gap-2 px-6 pt-4">
         <details className="relative">
           <summary className="flex size-8 cursor-pointer list-none items-center justify-center rounded-md border border-border/70 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground [&::-webkit-details-marker]:hidden">
@@ -467,7 +470,10 @@ export function RecordEditorView({
   };
 
   return (
-    <div className="min-h-0 flex-1 overflow-auto">
+    <div
+      className="h-full min-h-0 w-full min-w-0 flex-1 overflow-auto"
+      data-dashboard-scroll="record-editor"
+    >
       <section className="mx-auto max-w-5xl px-6 py-4">
         <div className="flex flex-wrap items-end justify-between gap-3 border-border/50 border-b pb-3">
           <div className="font-semibold text-base">

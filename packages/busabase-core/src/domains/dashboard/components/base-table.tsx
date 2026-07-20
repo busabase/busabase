@@ -31,7 +31,14 @@ import {
   X,
 } from "lucide-react";
 import { SPALink as Link } from "openlib/ui/dashboard";
-import { type CSSProperties, useCallback, useLayoutEffect, useRef, useState } from "react";
+import {
+  type CSSProperties,
+  type RefObject,
+  useCallback,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import { useSearch } from "wouter";
 import { fmt, useCoreI18n, useIString } from "../../../i18n";
 import { fieldColumnWidth, fieldDisplayKind } from "../../base/field-types";
@@ -159,21 +166,6 @@ const toSlugInput = (value: string) =>
 // Above this many rows the records list is virtualized (windowed).
 const VIRTUALIZE_ROW_THRESHOLD = 100;
 
-// The scroll viewport is an app-shell ancestor, and which element actually
-// scrolls differs between the open-source and cloud shells. Walk up to the
-// nearest genuinely-scrolling ancestor instead of assuming a fixed container.
-const findScrollParent = (el: HTMLElement | null): HTMLElement | null => {
-  let node = el?.parentElement ?? null;
-  while (node) {
-    const overflowY = getComputedStyle(node).overflowY;
-    if ((overflowY === "auto" || overflowY === "scroll") && node.scrollHeight > node.clientHeight) {
-      return node;
-    }
-    node = node.parentElement;
-  }
-  return null;
-};
-
 // One canonical record row, shared by the plain and virtualized render paths.
 // `style` carries the absolute-positioning transform when virtualized.
 function BusaBaseRecordRow({
@@ -281,6 +273,7 @@ export function BusaBaseTable({
   records,
   relationRecords = records,
   pagination,
+  scrollElementRef,
   views,
 }: {
   activeView: ViewVO | null;
@@ -308,6 +301,7 @@ export function BusaBaseTable({
   records: RecordVO[];
   relationRecords?: RecordVO[];
   pagination?: RecordsPagination;
+  scrollElementRef: RefObject<HTMLElement | null>;
   views: ViewVO[];
 }) {
   const messages = useCoreI18n();
@@ -338,7 +332,7 @@ export function BusaBaseTable({
   const tableRootRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const [listScrollMargin, setListScrollMargin] = useState(0);
-  const getScrollElement = useCallback(() => findScrollParent(tableRootRef.current), []);
+  const getScrollElement = useCallback(() => scrollElementRef.current, [scrollElementRef]);
   // Measure where the row list starts relative to the (ancestor) scroll viewport,
   // so virtualized rows sit correctly beneath the base header + toolbar.
   // biome-ignore lint/correctness/useExhaustiveDependencies: re-measure when the list toggles / row count changes.

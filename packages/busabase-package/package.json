@@ -1,0 +1,66 @@
+{
+  "name": "busabase-package",
+  "description": "The `busabase-package@1` format: GitHub source, layout read/write, install planning, and the five-pass apply. Shared by busabase-cli (`install` / `publish`) and busabase-core's server-side install domain. Node-only APIs are fine here — it is never browser-bundled.",
+  "version": "0.9.10",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./apply": {
+      "types": "./src/apply.ts",
+      "default": "./src/apply.ts"
+    },
+    "./client": {
+      "types": "./src/client.ts",
+      "default": "./src/client.ts"
+    },
+    "./collect": {
+      "types": "./src/collect.ts",
+      "default": "./src/collect.ts"
+    },
+    "./frontmatter": {
+      "types": "./src/frontmatter.ts",
+      "default": "./src/frontmatter.ts"
+    },
+    "./github": {
+      "types": "./src/github.ts",
+      "default": "./src/github.ts"
+    },
+    "./layout-read": {
+      "types": "./src/layout-read.ts",
+      "default": "./src/layout-read.ts"
+    },
+    "./layout-write": {
+      "types": "./src/layout-write.ts",
+      "default": "./src/layout-write.ts"
+    },
+    "./plan": {
+      "types": "./src/plan.ts",
+      "default": "./src/plan.ts"
+    },
+    "./tree": {
+      "types": "./src/tree.ts",
+      "default": "./src/tree.ts"
+    }
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "lint": "biome format . --write && biome check .",
+    "lint:err": "biome format . --write && biome check . --write --diagnostic-level=error"
+  },
+  "dependencies": {
+    "@orpc/contract": "^1.14.6",
+    "@zip.js/zip.js": "^2.8.20",
+    "busabase-contract": "workspace:*",
+    "yaml": "^2.9.0",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@types/node": "^24.13.2",
+    "typescript": "^5.9.3",
+    "vitest": "^2.1.8"
+  },
+  "engines": {
+    "node": ">=24.18.0"
+  }
+}

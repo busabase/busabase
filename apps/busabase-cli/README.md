@@ -45,37 +45,41 @@ Agents propose changes; humans review and merge what becomes trusted data.
 How should this CLI connect?
   1. Local/Desktop on this computer — no account, no login
      Use when you run `busabase server` or the Busabase Desktop app locally.
-  2. Busabase Cloud — browser sign-in (recommended)
-     Best for humans: opens the browser and saves a refreshable CLI session.
+  2. Busabase Cloud — device sign-in (recommended)
+     Works locally, over SSH, and in containers; approve from any browser.
   3. Busabase Cloud — paste an API key
      Best for CI, servers, or agents where a browser is not available.
-  4. Self-hosted Busabase — browser sign-in
-     Use your team's Busabase URL when it supports OAuth login.
+  4. Self-hosted Busabase — device sign-in
+     Use your team's Busabase URL when it supports device authorization.
   5. Self-hosted Busabase — paste an API key
      Use your team's Busabase URL with a long-lived key for automation.
 ```
 
 - **1 (local)** just saves `BUSABASE_BASE_URL` — the open-source `busabase server` needs
   no account. (It checks the server is reachable and actually open first.)
-- **2–5** obtain a token (OAuth session or `sk_…` API key), verify it against
+- **2–5** obtain an `sk_…` API key (selected or created during browser consent, or pasted), verify it against
   `/api/v1/auth`, pick your space, and save everything.
 
 Flags skip the menu (for scripts / CI):
 
 ```bash
 busabase-cli login                                   # pick from the menu
-busabase-cli login --oauth                           # Cloud browser sign-in
+busabase-cli login --device-code                     # Cloud/remote device sign-in
+busabase-cli login --oauth                           # legacy same-machine loopback OAuth
 busabase-cli login --api-key sk_…                    # Cloud API key (headless/CI)
 busabase-cli login --base-url http://localhost:15419 # connect to a local server (no auth)
 busabase-cli login --refresh                         # slide the current OAuth session forward
 busabase-cli logout                                  # revoke the session + clear saved creds
 ```
 
-OAuth mints a rolling login session (`bss_…`). You don't normally need `--refresh`:
-the CLI **auto-refreshes** an actively-used session before it expires, so a session
-stays alive as long as you keep using it. If you've been away and it lapses, just run
-`busabase-cli login` again. Prefer an API key for long-lived automation — create one
-at **Dashboard → Settings → API Keys**.
+Device authorization uses a short-lived, opaque login session only for the hand-off. In the
+browser you select an existing API key or create a new one; the waiting CLI exchanges the
+temporary session for that key, immediately discards the session, and saves only the `sk_…`
+credential. The key secret is never rendered in the browser or printed by device login.
+
+`--refresh` applies only to legacy OAuth sessions. API keys are not refreshable; if a key expires
+or is revoked, run `busabase-cli login` again and select or create another key. Credentials are
+saved with restricted file permissions.
 
 ## Output modes
 

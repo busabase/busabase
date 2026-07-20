@@ -37,6 +37,8 @@ interface ProductReadyDashboardShellProps {
   nodes: NodeVO[];
   onSearchClick: () => void;
   onCreateClick: (parent?: { id: string; name: string }) => void;
+  /** Opens the "Install from GitHub" dialog — forwarded to the core shell's sidebar entry. */
+  onInstallClick?: () => void;
   /** oRPC query utils — forwarded to the core shell to power the sidebar "•••" → Permissions entry. */
   orpc?: BusabaseQueryUtils;
   /** Wires up sidebar drag-and-drop; omit to leave the tree read-only. */
@@ -66,6 +68,7 @@ export function ProductReadyDashboardShell({
   nodes,
   onSearchClick,
   onCreateClick,
+  onInstallClick,
   orpc,
   onMoveNode,
   locale,
@@ -227,6 +230,7 @@ export function ProductReadyDashboardShell({
       nodes={nodes}
       orpc={orpc}
       onCreateClick={onCreateClick}
+      onInstallClick={onInstallClick}
       onMoveNode={onMoveNode}
       onSearchClick={onSearchClick}
       loadingNodeIds={loadingNodeIds}

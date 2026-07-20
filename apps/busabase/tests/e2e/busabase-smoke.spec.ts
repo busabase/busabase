@@ -15,7 +15,7 @@ test("REST OPTIONS advertises node change-request methods", async ({ request }, 
 });
 
 test("dashboard routes render the review-first seeded experience", async ({ page }) => {
-  await page.goto("/dashboard");
+  await page.goto("/dashboard/local");
   await expect(
     page.getByRole("button", { name: /Busabase.*Trusted Intelligent Database/ }),
   ).toBeVisible();
@@ -27,8 +27,8 @@ test("dashboard routes render the review-first seeded experience", async ({ page
   await expect(page.getByRole("menuitem", { name: "Assets" })).toBeVisible();
   await expect(page.getByRole("menuitem", { name: "Graph View" })).toBeVisible();
   await page.getByRole("menuitem", { name: "Assets" }).click();
-  await expect(page).toHaveURL(/\/dashboard\/assets$/);
-  await page.goto("/dashboard");
+  await expect(page).toHaveURL(/\/dashboard\/local\/assets$/);
+  await page.goto("/dashboard/local");
   // Seeded tree: CMS holds Blog Posts; Marketing holds Social Content + Newsletter.
   // Folders collapse by default, each with its own "Toggle" — expand per folder.
   await expect(page.getByRole("link", { exact: true, name: "CMS" })).toBeVisible();
@@ -56,7 +56,7 @@ test("dashboard routes render the review-first seeded experience", async ({ page
   await expect(page.getByRole("tab", { name: /Recent/ })).toHaveAttribute("aria-selected", "true");
   await expect(page.getByRole("button", { name: /^Agent Integrations/ })).toBeVisible();
 
-  await page.goto("/dashboard/activity");
+  await page.goto("/dashboard/local/activity");
   await expect(page.getByText("Workspace activity")).toBeVisible();
   // The activity feed no longer renders a "N change requests · M operations ·
   // K records" summary line (messages.activity.activityStats is defined in
@@ -67,7 +67,7 @@ test("dashboard routes render the review-first seeded experience", async ({ page
     page.getByRole("link", { name: /Change request|operation|Record/i }).first(),
   ).toBeVisible();
 
-  await page.goto("/dashboard/base/blog");
+  await page.goto("/dashboard/local/base/blog");
   await expect(page.getByRole("heading", { name: "Blog Posts" })).toBeVisible();
   await expect(page.getByRole("link", { exact: true, name: "All" })).toBeVisible();
   await expect(page.getByRole("link", { exact: true, name: "Ready to publish" })).toBeVisible();
@@ -77,33 +77,33 @@ test("dashboard routes render the review-first seeded experience", async ({ page
   await expect(page.getByRole("link", { name: "New record" })).toBeVisible();
 
   await page.getByRole("link", { exact: true, name: "Ready to publish" }).click();
-  await expect(page).toHaveURL(/\/dashboard\/base\/blog\/ready-to-publish$/);
+  await expect(page).toHaveURL(/\/dashboard\/local\/base\/blog\/ready-to-publish$/);
   await expect(page.getByRole("heading", { name: "Blog Posts" })).toBeVisible();
 
   await page.getByRole("link", { exact: true, name: "Drafts" }).click();
-  await expect(page).toHaveURL(/\/dashboard\/base\/blog\/drafts$/);
+  await expect(page).toHaveURL(/\/dashboard\/local\/base\/blog\/drafts$/);
   await expect(page.getByRole("heading", { name: "Blog Posts" })).toBeVisible();
 
   // Create a record as a Change Request (the primary "Submit Request" action).
-  await page.goto("/dashboard/base/blog/new");
+  await page.goto("/dashboard/local/base/blog/new");
   await expect(page.getByText("New Blog Posts record")).toBeVisible();
   await page.getByLabel("Title").fill("Smoke test AI market note");
   await page.getByLabel("Body").fill("A browser smoke test creates this change request note.");
   await page.getByRole("button", { name: "Submit Request" }).click();
-  await expect(page).toHaveURL(/\/dashboard\/inbox\/crq/);
+  await expect(page).toHaveURL(/\/dashboard\/local\/inbox\/crq/);
   await expect(
     page.getByRole("heading", { name: "Smoke test AI market note" }).first(),
   ).toBeVisible();
   await expect(page.getByText("Waiting for your review")).toBeVisible();
 
   // Create + merge in one step via the "More submit options → Submit Now" split button.
-  await page.goto("/dashboard/base/blog/new");
+  await page.goto("/dashboard/local/base/blog/new");
   await expect(page.getByText("New Blog Posts record")).toBeVisible();
   await page.getByLabel("Title").fill("Smoke direct merge AI note");
   await page.getByLabel("Body").fill("A browser smoke test creates and merges this note.");
   await page.getByRole("button", { name: "More submit options" }).click();
   await page.getByRole("button", { name: "Submit Now" }).click();
-  await expect(page).toHaveURL(/\/dashboard\/base\/blog\/rec/);
+  await expect(page).toHaveURL(/\/dashboard\/local\/base\/blog\/rec/);
   await expect(page.getByRole("heading", { name: "Smoke direct merge AI note" })).toBeVisible();
   await expect(page.getByText("Lineage", { exact: true })).toBeVisible();
 
@@ -117,7 +117,7 @@ test("dashboard routes render the review-first seeded experience", async ({ page
   await page.getByRole("button", { name: "Cancel" }).click();
   await expect(page.getByRole("heading", { name: "Smoke direct merge AI note" })).toBeVisible();
 
-  await page.goto("/dashboard/inbox/crq_seed_newsletter_html_brief");
+  await page.goto("/dashboard/local/inbox/crq_seed_newsletter_html_brief");
   await expect(page.getByText("What will change")).toBeVisible();
   // Expand the long-text operation; its title varies with the seed.
   await page
@@ -130,7 +130,7 @@ test("dashboard routes render the review-first seeded experience", async ({ page
   // HTML is rendered safely — no raw script leaks through.
   await expect(page.getByText("alert('unsafe')")).toHaveCount(0);
 
-  await page.goto("/dashboard/inbox/crq_seed_view_ready");
+  await page.goto("/dashboard/local/inbox/crq_seed_view_ready");
   await expect(page.getByRole("heading", { name: "Ready with sources" })).toBeVisible();
   await expect(page.getByRole("button", { name: /Update view.*Ready with sources/ })).toBeVisible();
   await expect(page.getByText("Source URL is not empty")).toBeVisible();

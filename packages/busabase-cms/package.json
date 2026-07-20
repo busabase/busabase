@@ -1,0 +1,82 @@
+{
+  "name": "busabase-cms",
+  "version": "0.1.0",
+  "description": "Typed Posts, Pages, Categories, and Tags for Busabase CMS, Next.js, and Fumadocs.",
+  "license": "MIT",
+  "homepage": "https://github.com/busabase/busabase/tree/main/packages/busabase-cms",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/busabase/busabase.git",
+    "directory": "packages/busabase-cms"
+  },
+  "bugs": "https://github.com/busabase/busabase/issues",
+  "type": "module",
+  "private": false,
+  "publishConfig": {
+    "access": "public"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./next": {
+      "types": "./dist/next.d.ts",
+      "default": "./dist/next.js"
+    },
+    "./fumadocs": {
+      "types": "./dist/fumadocs.d.ts",
+      "default": "./dist/fumadocs.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "sideEffects": false,
+  "scripts": {
+    "build": "tsup src/index.ts src/next.ts src/fumadocs.ts --format esm --dts --clean",
+    "prepack": "pnpm run build",
+    "prepublishOnly": "pnpm run typecheck && pnpm run test && pnpm run lint:err && pnpm run build",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "lint": "biome format . --write && biome check .",
+    "lint:err": "biome check . --diagnostic-level=error"
+  },
+  "dependencies": {
+    "busabase-sdk": "workspace:*",
+    "fumadocs-core": "16.7.7",
+    "rehype-sanitize": "^6.0.0",
+    "remark-gfm": "^4.0.1",
+    "sanitize-html": "^2.17.6",
+    "server-only": "^0.0.1",
+    "zod": "^4.3.6"
+  },
+  "peerDependencies": {
+    "next": ">=15 <17",
+    "react": ">=19"
+  },
+  "peerDependenciesMeta": {
+    "next": {
+      "optional": true
+    },
+    "react": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@types/node": "^24.13.2",
+    "@types/react": "^19.2.17",
+    "@types/sanitize-html": "^2.16.1",
+    "next": "16.2.6",
+    "react": "^19.2.7",
+    "tsup": "^8.5.0",
+    "typescript": "^5.9.3",
+    "vitest": "^2.1.8"
+  },
+  "engines": {
+    "node": ">=24.18.0"
+  }
+}

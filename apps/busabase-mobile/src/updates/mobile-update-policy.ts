@@ -119,7 +119,9 @@ export function resolveMobileUpdateDecision(
   const optionalUpdate =
     !forceUpdate &&
     (matchesAnyVersionRule(manifest.mobilePolicy?.optionalUpdate, current) ||
-      (!!latestVersion && compareVersions(current.version, latestVersion) < 0));
+      (current.platform === "android" &&
+        !!latestVersion &&
+        compareVersions(current.version, latestVersion) < 0));
   const reviewBuild = findReviewBuild(manifest, current);
   const disabledFeatures = new Set(reviewBuild?.disabledFeatures ?? []);
 

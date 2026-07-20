@@ -22,7 +22,13 @@ import { runBackup, runRestore } from "./backup/commands.js";
 import { banner } from "./banner.js";
 import { loadDotEnvFile } from "./config-file.js";
 import { type OutputFormat, render } from "./format.js";
-import { maybeAutoRefresh, runLogin, runLogout, runRefresh } from "./login.js";
+import {
+  assertCredentialNotExpired,
+  maybeAutoRefresh,
+  runLogin,
+  runLogout,
+  runRefresh,
+} from "./login.js";
 import { runInstall, runPublish } from "./package/commands.js";
 
 /**
@@ -412,6 +418,7 @@ function runAction(state: CliState, handler: Handler) {
     const opts = cmd.optsWithGlobals();
     const config = resolveConfig(opts);
     state.config = config;
+    assertCredentialNotExpired(config.apiKey);
     // Built-in auto-refresh: keep an actively-used OAuth login alive. No-op unless the
     // saved session token is near expiry; keeps the same token, so `config` stays valid.
     await maybeAutoRefresh(config.baseUrl, config.apiKey);
@@ -437,6 +444,7 @@ function runArgAction(state: CliState, handler: ArgHandler) {
     const opts = cmd.optsWithGlobals();
     const config = resolveConfig(opts);
     state.config = config;
+    assertCredentialNotExpired(config.apiKey);
     await maybeAutoRefresh(config.baseUrl, config.apiKey);
     const client = createBusabaseClient(config);
     const result = await handler(arg, client, opts, config);
@@ -727,8 +735,9 @@ function buildProgram(state: CliState = {}): Command {
 
   addGlobalFlags(program.command("login"))
     .description("Connect the CLI to Busabase — Personal/local, Cloud, or self-hosted")
-    .option("--oauth", "force browser OAuth and skip the method prompt")
-    .option("--no-browser", "OAuth: print the sign-in URL instead of opening a browser")
+    .option("--device-code", "force device authorization and skip the method prompt")
+    .option("--oauth", "legacy same-machine OAuth callback flow")
+    .option("--no-browser", "print the sign-in URL instead of opening a browser")
     .option("--refresh", "slide the saved OAuth session forward (no browser, no re-login)")
     .addHelpText(
       "after",
@@ -739,14 +748,15 @@ propose changes, humans review and merge what becomes trusted data.
 Run interactively, login explains the connection choices and writes the selected
 Busabase instance to ~/.busabase/.env:
   1. Local/Desktop on this computer — no account, no login
-  2. Busabase Cloud — browser sign-in (recommended)
+  2. Busabase Cloud — device sign-in (recommended; works over SSH)
   3. Busabase Cloud — paste an API key
-  4. Self-hosted Busabase — browser sign-in
+  4. Self-hosted Busabase — device sign-in
   5. Self-hosted Busabase — paste an API key
 The flags below skip the menu (handy for scripts / CI):
 
   busabase-cli login                                   # pick from the menu
-  busabase-cli login --oauth                           # Cloud browser sign-in
+  busabase-cli login --device-code                     # Cloud device sign-in
+  busabase-cli login --oauth                           # legacy same-machine callback
   busabase-cli login --api-key sk_…                    # Cloud API key (headless/CI)
   busabase-cli login --base-url http://localhost:15419 # connect to a local server (no auth)
   busabase-cli login --refresh                         # extend the current session (auto-runs too)`,
@@ -761,6 +771,7 @@ The flags below skip the menu (handy for scripts / CI):
             baseUrl: config.baseUrl,
             apiKey: opts.apiKey as string | undefined,
             spaceId: config.spaceId,
+            deviceCode: Boolean(opts.deviceCode),
             oauth: Boolean(opts.oauth),
             browser: opts.browser !== false,
           });

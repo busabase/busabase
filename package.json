@@ -1,7 +1,7 @@
 {
   "name": "busabase-repo",
   "private": true,
-  "version": "0.9.9",
+  "version": "0.9.10",
   "packageManager": "pnpm@10.15.1",
   "workspaces": [
     "apps/*",
@@ -10,6 +10,8 @@
   "scripts": {
     "dev": "pnpm --filter busabase dev",
     "build": "pnpm --filter busabase build",
+    "example:dev": "pnpm --filter busabase-example-nextjs-fumadocs dev",
+    "example:build": "pnpm --filter busabase-example-nextjs-fumadocs build",
     "start": "pnpm --filter busabase start",
     "typecheck": "pnpm --filter busabase typecheck",
     "lint": "pnpm --filter busabase lint:err",

@@ -74,7 +74,7 @@ test("AirApp run panel: auto-run, restart, watermark, nav persistence, fullscree
   let appASrc = "";
 
   await test.step("auto-run on open: no click needed -> ready -> preview iframe visible with a src", async () => {
-    await page.goto(`/dashboard/airapp/${appA.slug}`);
+    await page.goto(`/dashboard/local/airapp/${appA.slug}`);
     await expect(page.getByRole("heading", { name: appA.name })).toBeVisible();
 
     // No Run click — opening the detail view starts the app by itself.
@@ -112,7 +112,7 @@ test("AirApp run panel: auto-run, restart, watermark, nav persistence, fullscree
     // Client-side nav (sidebar link click), NOT page.goto — a hard reload would
     // trivially "lose" the zustand run state and prove nothing about the fix.
     await sidebarLink(page, appB.name).click();
-    await expect(page).toHaveURL(new RegExp(`/dashboard/airapp/${appB.slug}$`));
+    await expect(page).toHaveURL(new RegExp(`/dashboard/local/airapp/${appB.slug}$`));
     await expect(page.getByRole("heading", { name: appB.name })).toBeVisible();
     // B auto-runs on first open too; it shares A's dependency manifest, so its
     // install restores from the IndexedDB snapshot cache. Both A and B running
@@ -126,7 +126,7 @@ test("AirApp run panel: auto-run, restart, watermark, nav persistence, fullscree
     expect(appBSrc).not.toBe(appASrc);
 
     await sidebarLink(page, appA.name).click();
-    await expect(page).toHaveURL(new RegExp(`/dashboard/airapp/${appA.slug}$`));
+    await expect(page).toHaveURL(new RegExp(`/dashboard/local/airapp/${appA.slug}$`));
     await expect(page.getByRole("heading", { name: appA.name })).toBeVisible();
 
     // Still ready with ITS OWN preview — not reset to idle, not B's src.
@@ -136,14 +136,19 @@ test("AirApp run panel: auto-run, restart, watermark, nav persistence, fullscree
     await expect(iframe).toHaveAttribute("src", appASrc);
   });
 
-  await test.step("fullscreen: opens a dialog with the preview, closes cleanly", async () => {
-    await page.getByRole("button", { name: "Expand to fullscreen" }).click();
-    const dialog = page.getByRole("dialog");
-    await expect(dialog).toBeVisible();
-    await expect(dialog.locator('iframe[title="AirApp preview"]')).toBeVisible();
+  await test.step("fullscreen: preview fills the viewport and the floating button restores it", async () => {
+    await page.getByRole("button", { name: "Enter fullscreen" }).click();
+    const fullscreen = page.locator(`section[aria-label="${appA.name}"]`);
+    await expect(fullscreen).toBeVisible();
+    await expect(fullscreen).toHaveCSS("position", "fixed");
+    await expect(fullscreen.locator('iframe[title="AirApp preview"]')).toBeVisible();
 
-    await dialog.getByRole("button", { name: "Close" }).click();
-    await expect(dialog).toBeHidden();
+    const bounds = await fullscreen.boundingBox();
+    const viewport = page.viewportSize();
+    expect(bounds).toEqual({ x: 0, y: 0, width: viewport?.width, height: viewport?.height });
+
+    await fullscreen.getByRole("button", { name: "Exit fullscreen" }).click();
+    await expect(fullscreen).toBeHidden();
     // The underlying page is still interactive — the inline preview iframe survives.
     await expect(page.locator('iframe[title="AirApp preview"]')).toBeVisible();
   });
@@ -154,12 +159,59 @@ test("AirApp run panel: auto-run, restart, watermark, nav persistence, fullscree
     await expect(tabA).toBeVisible();
   });
 
+  await test.step("side panel supports split, maximized, fullscreen, and restore modes", async () => {
+    const sidePanel = page.getByRole("region", { name: "Side panel" });
+    await expect(sidePanel).toHaveAttribute("data-layout", "split");
+    await expect(sidePanel).toBeVisible();
+    const splitBounds = await sidePanel.boundingBox();
+    const viewport = page.viewportSize();
+    expect(splitBounds).not.toBeNull();
+    expect(viewport).not.toBeNull();
+    expect(splitBounds?.width).toBe(420);
+    expect((splitBounds?.x ?? 0) + (splitBounds?.width ?? 0)).toBeLessThanOrEqual(
+      viewport?.width ?? 0,
+    );
+
+    const resizeHandle = sidePanel.getByRole("button", { name: "Resize side panel" });
+    const resizeBounds = await resizeHandle.boundingBox();
+    expect(resizeBounds).not.toBeNull();
+    if (!resizeBounds) {
+      throw new Error("Side panel resize handle has no bounds");
+    }
+    await page.mouse.move(
+      resizeBounds.x + resizeBounds.width / 2,
+      resizeBounds.y + resizeBounds.height / 2,
+    );
+    await page.mouse.down();
+    await page.mouse.move(
+      resizeBounds.x + resizeBounds.width / 2 - 80,
+      resizeBounds.y + resizeBounds.height / 2,
+    );
+    await page.mouse.up();
+    await expect.poll(async () => (await sidePanel.boundingBox())?.width).toBe(500);
+
+    await sidePanel.getByRole("button", { name: "Maximize side panel" }).click();
+    await expect(sidePanel).toHaveAttribute("data-layout", "maximized");
+    await expect(sidePanel).toHaveCSS("position", "fixed");
+
+    await sidePanel.getByRole("button", { name: "Enter fullscreen" }).click();
+    const fullscreen = page.locator(`section[aria-label="${appA.name}"]`);
+    await expect(fullscreen).toBeVisible();
+    await fullscreen.getByRole("button", { name: "Exit fullscreen" }).click();
+    await expect(fullscreen).toBeHidden();
+    await expect(sidePanel).toHaveAttribute("data-layout", "maximized");
+
+    await sidePanel.getByRole("button", { name: "Restore side panel" }).click();
+    await expect(sidePanel).toHaveAttribute("data-layout", "split");
+    await expect.poll(async () => (await sidePanel.boundingBox())?.width).toBe(500);
+  });
+
   await test.step("side panel is dashboard-level-persistent across a route change to a non-AirApp view", async () => {
     // "Inbox" is the pinned top nav item every Busabase host has (see
     // dashboard-shell.tsx's pinnedNav) — a real client-side route transition
     // away from any AirApp view.
     await sidebarLink(page, "Inbox").click();
-    await expect(page).toHaveURL(/\/dashboard\/inbox$/);
+    await expect(page).toHaveURL(/\/dashboard\/local\/inbox$/);
 
     const tabA = page.locator('[role="tab"]', { hasText: appA.name });
     await expect(tabA).toBeVisible();

@@ -17,8 +17,12 @@ export interface SidePanelTab {
   payload: unknown;
 }
 
-interface SidePanelStoreState {
+export type SidePanelLayout = "split" | "maximized";
+
+export interface SidePanelStoreState {
   isOpen: boolean;
+  layout: SidePanelLayout;
+  width: number;
   activeTabId: string | null;
   tabs: SidePanelTab[];
   /** Opens (and activates) `tab`. If a tab with the same `id` is already
@@ -30,10 +34,21 @@ interface SidePanelStoreState {
   setActiveTab: (id: string) => void;
   /** Toggles panel visibility only — never touches `tabs`. */
   setOpen: (open: boolean) => void;
+  setLayout: (layout: SidePanelLayout) => void;
+  setWidth: (width: number) => void;
 }
+
+export const DEFAULT_SIDE_PANEL_WIDTH = 420;
+export const MIN_SIDE_PANEL_WIDTH = 320;
+export const MAX_SIDE_PANEL_WIDTH = 760;
+
+export const clampSidePanelWidth = (width: number) =>
+  Math.min(MAX_SIDE_PANEL_WIDTH, Math.max(MIN_SIDE_PANEL_WIDTH, width));
 
 export const useSidePanelStore = create<SidePanelStoreState>((set, get) => ({
   isOpen: false,
+  layout: "split",
+  width: DEFAULT_SIDE_PANEL_WIDTH,
   activeTabId: null,
   tabs: [],
 
@@ -65,10 +80,15 @@ export const useSidePanelStore = create<SidePanelStoreState>((set, get) => ({
       tabs: nextTabs,
       activeTabId: previous?.id ?? null,
       isOpen: previous ? get().isOpen : false,
+      layout: previous ? get().layout : "split",
     });
   },
 
   setActiveTab: (id) => set({ activeTabId: id }),
 
-  setOpen: (open) => set({ isOpen: open }),
+  setOpen: (open) => set({ isOpen: open, ...(!open ? { layout: "split" as const } : {}) }),
+
+  setLayout: (layout) => set({ layout, isOpen: true }),
+
+  setWidth: (width) => set({ width: clampSidePanelWidth(width) }),
 }));

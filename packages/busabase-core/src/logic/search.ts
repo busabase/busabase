@@ -170,10 +170,7 @@ const searchAssetBackedFiles = async (query: string, limit: number): Promise<Sea
       assetId: busabaseAssets.id,
       assetName: busabaseAssets.name,
       contentKind: busabaseAssets.contentKind,
-      metadata: busabaseAssets.metadata,
       fileName: attachments.fileName,
-      mimeType: attachments.mimeType,
-      contentHash: attachments.contentHash,
       usageMetadata: busabaseAssetUsages.metadata,
       usagePath: busabaseAssetUsages.path,
       ownerType: busabaseAssetUsages.ownerType,
@@ -234,28 +231,25 @@ const searchAssetBackedFiles = async (query: string, limit: number): Promise<Sea
   for (const row of rows) {
     // Cheap, already-in-memory columns. Most hits match here (name / path /
     // metadata), so we test them BEFORE ever reaching for the file body.
-    const metaBody = [
+    const displayName =
+      typeof row.usageMetadata.displayName === "string" ? row.usageMetadata.displayName : null;
+    // Ordinary search may find a file by identity, but internal metadata is
+    // not user content. Raw JSON, hashes, MIME types, ids, owner types and
+    // field/block references must not produce invisible, inexplicable hits.
+    const identityText = [
       row.assetName,
-      JSON.stringify(row.metadata ?? {}),
-      JSON.stringify(row.usageMetadata ?? {}),
+      displayName,
       row.fileName,
-      row.mimeType,
-      row.contentHash,
       row.usagePath,
-      row.ownerType,
-      row.fieldSlug,
-      row.recordId,
-      row.blockId,
       row.nodeName,
       row.nodeDescription,
       row.nodeSlug,
-      row.nodeType,
     ]
       .filter(Boolean)
       .join(" ");
 
-    let body = metaBody;
-    if (!fileMatchesQuery(query, metaBody)) {
+    let body = [row.nodeDescription, row.usagePath, row.fileName].filter(Boolean).join(" ");
+    if (!fileMatchesQuery(query, identityText)) {
       // Only now — when metadata didn't already match — pay for the file
       // body, and only for an asset with a `present` text row (a `missing` /
       // `none` / `stale` row, or no row at all, means: not eligible — fall
@@ -292,17 +286,19 @@ const searchAssetBackedFiles = async (query: string, limit: number): Promise<Sea
       // body in memory, so the snippet now reflects the real match location
       // instead of arbitrary head bytes (see the task's disclosed behavior
       // change).
-      body = `${metaBody} ${matchedLine}`;
+      // Put the evidence first. `SearchResultVO.body` is capped below, and the
+      // metadata blob can easily exceed that cap before the matching line is
+      // reached, leaving a correct result with no visible reason for the hit.
+      body = matchedLine;
     }
     results.push({
       id: `${row.assetId}:${row.nodeId}:${row.usagePath}:${row.recordId}:${row.fieldSlug}:${row.blockId}`,
       kind: "file",
-      title:
-        typeof row.usageMetadata.displayName === "string"
-          ? row.usageMetadata.displayName
-          : row.usagePath
-            ? row.usagePath.split("/").at(-1) || row.assetName
-            : row.assetName,
+      title: displayName
+        ? displayName
+        : row.usagePath
+          ? row.usagePath.split("/").at(-1) || row.assetName
+          : row.assetName,
       body: body.slice(0, 280),
       eyebrow: `${row.nodeName} · ${row.ownerType}`,
       href: fileResultHref(row.nodeType, row.nodeSlug),

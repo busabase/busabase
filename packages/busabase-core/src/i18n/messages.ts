@@ -153,6 +153,8 @@ export const coreMessagesEn = {
     noRunnableFiles: "This AirApp has no text files to run.",
     runFailed: "Failed to run this AirApp",
     pinToSidePanel: "Open in side panel",
+    enterFullscreen: "Enter fullscreen",
+    exitFullscreen: "Exit fullscreen",
     details: "AirApp details",
     engineLabel: "Engine",
     engineNodepod: "Nodepod (Browser)",
@@ -163,9 +165,13 @@ export const coreMessagesEn = {
     engineSrtHint: "OS-sandboxed · isolated, no live preview",
   },
   sidePanel: {
+    label: "Side panel",
     open: "Open side panel",
     collapse: "Collapse side panel",
     closeTab: "Close tab",
+    maximize: "Maximize side panel",
+    restore: "Restore side panel",
+    resize: "Resize side panel",
   },
   nav: {
     inbox: "Inbox",
@@ -180,6 +186,7 @@ export const coreMessagesEn = {
     review: "Review",
     new: "New",
     favorites: "Favorites",
+    installFromGithub: "Install from GitHub…",
   },
   shell: {
     approvalFirstKb: "Trusted Intelligent Database",
@@ -778,6 +785,41 @@ export const coreMessagesEn = {
     textPreviewLoading: "Loading text…",
     textPreviewFailed: "Failed to load text content.",
     textPreviewRange: "Showing {start}–{end} of {total} lines",
+    searchableText: "Searchable text",
+    searchableTextDescription:
+      "Derived text used by grep. Supplying or replacing it does not edit the source file.",
+    textSupply: "Supply searchable text",
+    textReplace: "Replace searchable text",
+    textMarkNone: "Mark as no text",
+    textWriteDescription:
+      "This updates derived searchable text only. The original file stays unchanged; source-file edits use the separate reviewed editContent flow.",
+    textPaste: "Paste text",
+    textUpload: "Upload .txt",
+    textPasteLabel: "UTF-8 searchable text",
+    textPastePlaceholder: "Paste extracted or OCR text…",
+    textByteCount: "{count} / {limit} UTF-8 bytes",
+    textPasteTooLarge: "Use a .txt upload for text over 1 MB.",
+    textUploadLabel: "UTF-8 .txt file",
+    textUploadHint:
+      "The upload is stored as derived searchable text; it does not replace the source file.",
+    textUploadTxtOnly: "Choose a plain-text .txt file.",
+    textUploadEmpty: "The selected .txt file is empty.",
+    textUploadUtf8Only: "The selected file is not valid UTF-8 text.",
+    textUploadHttpFailed: "Text upload failed with status {status}.",
+    textUploadPreparing: "Preparing upload…",
+    textUploading: "Uploading text…",
+    textUploadBinding: "Attaching uploaded text…",
+    textSaving: "Saving searchable text…",
+    textWriteSuccess: "Searchable text updated",
+    textWriteFailed: "Could not update searchable text.",
+    textReplaceConfirmTitle: "Replace searchable text?",
+    textReplaceConfirmBody:
+      "The current derived text will be replaced. The source file will not change.",
+    textReplaceConfirm: "Replace text",
+    textMarkNoneConfirmTitle: "Mark this file as having no text?",
+    textMarkNoneConfirmBody:
+      "Grep will report this file as intentionally unsearchable. You can supply text later without changing the source file.",
+    textMarkNoneConfirm: "Mark as no text",
   },
   favorites: {
     add: "Add to Favorites",
@@ -785,6 +827,63 @@ export const coreMessagesEn = {
     updated: "Favorites updated",
     removeFailed: "Couldn't remove from Favorites",
     addFailed: "Couldn't add to Favorites",
+  },
+  install: {
+    title: "Install from GitHub",
+    description:
+      "Paste a link to a repository that holds a Busabase package. You'll see exactly what it would create before anything is installed.",
+    repoUrl: "Repository URL",
+    repoUrlPlaceholder: "https://github.com/owner/repo",
+    repoUrlHint:
+      "A tag or branch pins the version: .../tree/v1.2.0 — and a monorepo's package lives at .../tree/main/subdir.",
+    repoUrlRequired: "Enter a GitHub repository URL.",
+    preview: "Preview",
+    previewing: "Fetching package…",
+    previewFailed: "Could not read that package.",
+    source: "Source",
+    sourceRef: "at {ref}",
+    sourceSubdir: "in {subdir}",
+    packageVersion: "Version {version}",
+    packageAuthor: "by {author}",
+    packageLicense: "{license} license",
+    contents: "What this would create",
+    emptyPackage: "This package contains nothing to install.",
+    baseSummary: "{fields} fields · {records} records",
+    fileTreeSummary: "{files} files",
+    countsSummary:
+      "{folders} folders · {docs} docs · {bases} bases · {records} records · {files} files",
+    collisionsTitle: "Names already taken",
+    collisionsBody:
+      "These would clash with content that already exists. Nothing is ever overwritten — either install them under new names, or choose a different target folder.",
+    collisionNode: 'A node named "{slug}" already exists in {path}.',
+    collisionBase:
+      'A Base named "{slug}" already exists in this space (Base names are space-wide).',
+    collisionRenamedTo: 'Will be installed as "{renamedTo}".',
+    rename: "Install clashing items under new names",
+    renameHint: "Adds a suffix (-2, -3, …). Existing content is left untouched.",
+    warningsTitle: "Worth knowing",
+    targetFolder: "Install into folder",
+    targetFolderHint:
+      "A new folder is created for the package. Defaults to the package's own name.",
+    autoMerge: "Install immediately, without review",
+    autoMergeBody:
+      "By default the package's content arrives as change requests you read before anything goes live. Skipping that means trusting the author: a package can carry skills and AirApps, and that is code this space's agents will run.",
+    autoMergeRequiredTitle: "This package can only be installed without review",
+    autoMergeRequiredBody:
+      "Its records link to each other, and a link can only point at a record that already exists. Held for review, every link would arrive empty — so the records have to be created immediately. Read the package on GitHub first: installing it runs the author's skills and AirApps in this space.",
+    install: "Install",
+    installing: "Installing…",
+    installingHint: "This can take a while — each item is created one at a time.",
+    installFailed: "Could not install the package.",
+    resultTitle: "Installed into {folder}",
+    resultCounts:
+      "{folders} folders · {bases} bases · {views} views · {docs} docs · {records} records · {files} files",
+    pendingTitle: "{count} change requests are waiting for you",
+    pendingBody:
+      "The package's content is proposed, not live. Nothing from it reaches your space until you review and merge it.",
+    reviewNow: "Review them now",
+    noPending: "Everything was merged — the package is live in your space.",
+    done: "Done",
   },
 };
 

@@ -31,7 +31,7 @@ test.use({
 test("a new user tours the approval-first knowledge base", async ({ page }) => {
   await test.step("lands on the dashboard — focused review nav and title menu", async () => {
     await page.goto("/");
-    await expect(page).toHaveURL(/\/dashboard\/inbox/);
+    await expect(page).toHaveURL(/\/dashboard\/local\/inbox/);
     await expect(page.getByRole("link", { exact: true, name: "Inbox" })).toBeVisible();
     await expect(page.getByRole("link", { exact: true, name: "Activity" })).toBeVisible();
     await expect(page.getByRole("link", { exact: true, name: "Assets" })).toHaveCount(0);
@@ -44,7 +44,7 @@ test("a new user tours the approval-first knowledge base", async ({ page }) => {
   });
 
   await test.step("browses the Blog Posts base and its saved views", async () => {
-    await page.goto("/dashboard/base/blog");
+    await page.goto("/dashboard/local/base/blog");
     await expect(page.getByRole("heading", { name: "Blog Posts" })).toBeVisible();
     await expect(page.getByRole("link", { exact: true, name: "All" })).toBeVisible();
     await expect(page.getByRole("link", { exact: true, name: "Ready to publish" })).toBeVisible();
@@ -58,13 +58,13 @@ test("a new user tours the approval-first knowledge base", async ({ page }) => {
 
   await test.step("switches between the base's saved views", async () => {
     await page.getByRole("link", { exact: true, name: "Ready to publish" }).click();
-    await expect(page).toHaveURL(/\/dashboard\/base\/blog\/ready-to-publish$/);
+    await expect(page).toHaveURL(/\/dashboard\/local\/base\/blog\/ready-to-publish$/);
     await page.getByRole("link", { exact: true, name: "Drafts" }).click();
-    await expect(page).toHaveURL(/\/dashboard\/base\/blog\/drafts$/);
+    await expect(page).toHaveURL(/\/dashboard\/local\/base\/blog\/drafts$/);
   });
 
   await test.step("tours the Field Type Lab — one column per field type", async () => {
-    await page.goto("/dashboard/base/field-type-lab");
+    await page.goto("/dashboard/local/base/field-type-lab");
     await expect(page.getByRole("heading", { name: "Field Type Lab" })).toBeVisible();
     await expect(page.getByText("Number", { exact: true })).toBeVisible();
     await expect(page.getByText("Select", { exact: true })).toBeVisible();
@@ -86,7 +86,7 @@ test("a new user tours the approval-first knowledge base", async ({ page }) => {
   });
 
   await test.step("checks the workspace activity feed", async () => {
-    await page.goto("/dashboard/activity");
+    await page.goto("/dashboard/local/activity");
     await expect(page.getByText("Workspace activity")).toBeVisible();
     // No "N change requests · M operations · K records" summary line is
     // rendered anymore (messages.activity.activityStats is defined in i18n

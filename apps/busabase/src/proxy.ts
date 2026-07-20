@@ -1,6 +1,7 @@
 import { nodepodProxy } from "@scelar/nodepod/next";
 import { type NextRequest, NextResponse } from "next/server";
 import { DEMO_LOCALE_HEADER, resolveDemoMode } from "openlib/ui/dashboard/demo";
+import { getLegacyDashboardRedirect } from "~/lib/dashboard-routes";
 
 /**
  * Demo mode is resolved PURELY server-side — no client code, no cookie. The
@@ -38,6 +39,13 @@ const readParam = (request: NextRequest, key: string): string | null => {
 };
 
 export async function proxy(request: NextRequest) {
+  const redirectPath = getLegacyDashboardRedirect(request.nextUrl.pathname);
+  if (redirectPath) {
+    const redirected = request.nextUrl.clone();
+    redirected.pathname = redirectPath;
+    return NextResponse.redirect(redirected, 308);
+  }
+
   // Nodepod (AirApp node's in-browser Run panel, via busabase-core's
   // dashboard) needs its service worker reachable at `/__sw__.js` on this
   // app's own origin. Unified with apps/busabase-cloud's approach (compose
@@ -81,6 +89,7 @@ export async function proxy(request: NextRequest) {
       headers.set(DEMO_LOCALE_HEADER, locale);
     }
   }
+
   return NextResponse.next({ request: { headers } });
 }
 
@@ -88,5 +97,5 @@ export const config = {
   // Next.js statically analyzes `matcher` at build time and requires literal
   // strings — it cannot resolve an imported `nodepodMatcher` reference here,
   // even though its value is exactly this same literal ("/__sw__.js").
-  matcher: ["/api/v1/:path*", "/api/rpc/:path*", "/__busabase_api__/:path*", "/__sw__.js"],
+  matcher: ["/dashboard/:path*", "/api/:path*", "/__sw__.js", "/__busabase_api__/:path*"],
 };

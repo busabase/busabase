@@ -8,7 +8,7 @@ import { expect, test } from "./_fixtures";
 // failure modes — a missing required field, and that server-managed fields are
 // not askable on create.
 
-const NEW_URL = "/dashboard/base/field-type-lab/new";
+const NEW_URL = "/dashboard/local/base/field-type-lab/new";
 const TITLE = "E2E field coverage row";
 
 test("creates a Field Type Lab record filling every editable input kind", async ({ page }) => {
@@ -41,7 +41,7 @@ test("creates a Field Type Lab record filling every editable input kind", async 
   await page.getByRole("button", { name: "Submit Now" }).click();
 
   // Lands on the canonical record view; the primary (first) field is the title.
-  await expect(page).toHaveURL(/\/dashboard\/base\/field-type-lab\/[\w-]+$/);
+  await expect(page).toHaveURL(/\/dashboard\/local\/base\/field-type-lab\/[\w-]+$/);
   await expect(page.getByRole("heading", { name: TITLE }).first()).toBeVisible();
   // A couple of the entered values are rendered on the record detail.
   await expect(page.getByText("qa@example.com")).toBeVisible();
@@ -58,7 +58,7 @@ test("blocks creation when the required Text field is empty", async ({ page }) =
 
   // Server-side validation surfaces in the error banner; we stay on the form.
   await expect(page.getByText(/required/i)).toBeVisible();
-  await expect(page).toHaveURL(/\/dashboard\/base\/field-type-lab\/new$/);
+  await expect(page).toHaveURL(/\/dashboard\/local\/base\/field-type-lab\/new$/);
 });
 
 test("submitting for review routes the new record to the inbox", async ({ page }) => {
@@ -68,6 +68,6 @@ test("submitting for review routes the new record to the inbox", async ({ page }
   // The primary action queues a change request for review rather than merging.
   await page.getByRole("button", { name: "Submit Request" }).click();
 
-  await expect(page).toHaveURL(/\/dashboard\/inbox\/[\w-]+$/);
+  await expect(page).toHaveURL(/\/dashboard\/local\/inbox\/[\w-]+$/);
   await expect(page.getByText("Review-first lab row").first()).toBeVisible();
 });

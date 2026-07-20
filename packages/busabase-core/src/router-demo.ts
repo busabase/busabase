@@ -86,6 +86,9 @@ export const busabaseDemoRouter = os.router({
     move: os.nodes.move.handler(() => {
       throw demoUnsupported("Move node");
     }),
+    updateMetadata: os.nodes.updateMetadata.handler(() => {
+      throw demoUnsupported("Update node metadata");
+    }),
     purge: os.nodes.purge.handler(() => {
       throw demoUnsupported("Permanently delete node");
     }),
@@ -377,6 +380,17 @@ export const busabaseDemoRouter = os.router({
     }),
     importAbort: os.dump.importAbort.handler(() => {
       throw demoUnsupported("Import space");
+    }),
+  },
+  // Install writes a real node tree, Bases and change requests, and fetches from
+  // GitHub to do it — neither the writes nor the outbound request has anywhere to
+  // land in the stateless in-memory demo dataset.
+  install: {
+    planFromGithub: os.install.planFromGithub.handler(() => {
+      throw demoUnsupported("Install from GitHub");
+    }),
+    fromGithub: os.install.fromGithub.handler(() => {
+      throw demoUnsupported("Install from GitHub");
     }),
   },
   changeRequests: {

@@ -10,6 +10,7 @@ import { driveRouter } from "./domains/drive/router";
 import { dumpRouter } from "./domains/dump/router";
 import { fileRouter } from "./domains/file-node/router";
 import { folderRouter } from "./domains/folder/router";
+import { installRouter } from "./domains/install/router";
 import { skillRouter } from "./domains/skill/router";
 import { vaultRouter } from "./domains/vault/router";
 import { webhookRouter } from "./domains/webhook/router";
@@ -49,6 +50,7 @@ import {
   searchBusabase,
   searchNodesByName,
   toggleNodeFavorite,
+  updateNodeMetadata,
 } from "./logic/store";
 
 // Kernel oRPC router: kernel routes inline (search / nodes / audit / comments /
@@ -79,6 +81,9 @@ export const busabaseRouter = busabase.router({
       createNodeChangeRequest(input),
     ),
     move: busabase.nodes.move.handler(async ({ input }) => moveNode(input)),
+    updateMetadata: busabase.nodes.updateMetadata.handler(async ({ input }) =>
+      updateNodeMetadata(input),
+    ),
     purge: busabase.nodes.purge.handler(async ({ input }) => purgeNode(input.nodeId)),
     updateVisibility: busabase.nodes.updateVisibility.handler(async ({ input }) => {
       await updateNodeVisibility(input.nodeId, input.visibility, resolveActorId("local-user"));
@@ -157,6 +162,7 @@ export const busabaseRouter = busabase.router({
   vault: vaultRouter,
   webhooks: webhookRouter,
   dump: dumpRouter,
+  install: installRouter,
   changeRequests: {
     list: busabase.changeRequests.list.handler(async ({ input }) => listChangeRequests(input)),
     listPaged: busabase.changeRequests.listPaged.handler(async ({ input }) =>

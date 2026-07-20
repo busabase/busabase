@@ -1,7 +1,19 @@
 import { skipToken, useQuery } from "@tanstack/react-query";
-import type { SearchResultKind, SearchResultVO } from "busabase-contract/types";
+import { getNodeType, NODE_TYPES, type NodeType } from "busabase-contract/domains";
+import type { NodeSearchResultVO, SearchResultKind, SearchResultVO } from "busabase-contract/types";
 import { useRouter } from "expo-router";
-import { AppWindow, File, FileText, GitPullRequest, Search, Table2 } from "lucide-react-native";
+import {
+  AppWindow,
+  Bot,
+  File,
+  FileText,
+  Folder,
+  GitPullRequest,
+  HardDrive,
+  Search,
+  Sparkles,
+  Table2,
+} from "lucide-react-native";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { StyleSheet, Text, View } from "react-native";
 import { useBusabaseOrpc } from "~/api/use-busabase-orpc";
@@ -16,12 +28,17 @@ import {
 } from "~/components/native-screen";
 import { Button } from "~/components/ui/Button";
 import { TextInput } from "~/components/ui/TextInput";
+import {
+  findKnownNodeByTypeAndSlug,
+  type KnownNode,
+  type KnownNodeCache,
+  nodeSearchResultToKnownNode,
+} from "~/search/known-node-cache";
+import { getMobileNodeDestination } from "~/search/node-navigation";
+import { useKnownNodeCache } from "~/search/use-known-node-cache";
 import { typography } from "~/theme/tokens";
 import { useTokens } from "~/theme/use-tokens";
 
-// `kind: "file"` is a catch-all bucket shared by several href-distinguished node
-// types (see fileResultHref in busabase-core). Icons/labels below key off that
-// shared "file" kind since SearchResultVO has no separate kind for doc/airapp.
 const kindMeta: Record<SearchResultVO["kind"], { label: string; icon: typeof FileText }> = {
   record: { label: "Record", icon: FileText },
   change_request: { label: "Change request", icon: GitPullRequest },
@@ -29,20 +46,27 @@ const kindMeta: Record<SearchResultVO["kind"], { label: string; icon: typeof Fil
   file: { label: "File", icon: File },
 };
 
-// Href-prefix-specific overrides for "file"-kind results, applied after the
-// generic kindMeta lookup (see openResult below for the matching href parsing).
 const filePrefixMeta: Record<string, { label: string; icon: typeof FileText }> = {
   doc: { label: "Doc", icon: FileText },
   airapp: { label: "AirApp", icon: AppWindow },
 };
 
-const getResultMeta = (result: SearchResultVO): { label: string; icon: typeof FileText } => {
+const nodeIcons: Record<string, typeof FileText> = {
+  folder: Folder,
+  base: Table2,
+  skill: Sparkles,
+  drive: HardDrive,
+  airapp: AppWindow,
+  file: File,
+  doc: FileText,
+  bot: Bot,
+};
+
+const getResultMeta = (result: SearchResultVO) => {
   if (result.kind === "file") {
     const prefix = result.href.split("/").filter(Boolean)[0];
     const override = prefix ? filePrefixMeta[prefix] : undefined;
-    if (override) {
-      return override;
-    }
+    if (override) return override;
   }
   return kindMeta[result.kind];
 };
@@ -50,36 +74,50 @@ const getResultMeta = (result: SearchResultVO): { label: string; icon: typeof Fi
 const DEBOUNCE_MS = 180;
 const PAGE_SIZE = 20;
 
-// Mirrors web's SearchDialog category tabs (search-dialog.tsx) — same tab
-// set, same "All excludes change_request" rule, same per-tab result count
-// derived client-side from one fetched page (not a separate server count).
-type SearchTab = "all" | "records" | "bases" | "files" | "change_requests";
+type SearchTab = "recent" | "all" | "records" | "files" | "change_requests";
 const SEARCH_TABS: { value: SearchTab; label: string }[] = [
+  { value: "recent", label: "Recent" },
   { value: "all", label: "All" },
   { value: "records", label: "Records" },
-  { value: "bases", label: "Bases" },
   { value: "files", label: "Files" },
   { value: "change_requests", label: "Change requests" },
 ];
 const TAB_KIND: Record<SearchTab, SearchResultKind | null> = {
+  recent: null,
   all: null,
   records: "record",
-  bases: "base",
   files: "file",
   change_requests: "change_request",
 };
+
+const normalizeSearchText = (value: string) => value.trim().toLowerCase();
+
+interface RecentLocalState {
+  cache: KnownNodeCache | null;
+  ready: boolean;
+  results: KnownNode[];
+}
 
 function SearchContent() {
   const router = useRouter();
   const tokens = useTokens();
   const buda = useBusabaseOrpc();
+  const nodeCache = useKnownNodeCache();
   const [query, setQuery] = useState("");
   const [debouncedQuery, setDebouncedQuery] = useState("");
-  const [tab, setTab] = useState<SearchTab>("all");
+  const [tab, setTab] = useState<SearchTab>("recent");
   const [limit, setLimit] = useState(PAGE_SIZE);
   const [error, setError] = useState<string | null>(null);
+  const [recentLocalState, setRecentLocalState] = useState<RecentLocalState>({
+    cache: null,
+    ready: false,
+    results: [],
+  });
 
-  const hasQuery = debouncedQuery.length > 0;
+  const normalizedQuery = normalizeSearchText(query);
+  const hasQuery = normalizedQuery.length > 0;
+  const normalizedDebouncedQuery = normalizeSearchText(debouncedQuery);
+  const isDebouncedQueryCurrent = normalizedDebouncedQuery === normalizedQuery;
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -89,114 +127,196 @@ function SearchContent() {
     return () => clearTimeout(timer);
   }, [query]);
 
+  useEffect(() => {
+    let cancelled = false;
+    let readVersion = 0;
+    setRecentLocalState({ cache: nodeCache, ready: false, results: [] });
+    if (!nodeCache) {
+      setRecentLocalState({ cache: null, ready: true, results: [] });
+      return;
+    }
+    const read = () => {
+      const currentRead = ++readVersion;
+      const result = hasQuery ? nodeCache.fuzzyMatch(query) : nodeCache.listVisited();
+      void result.then((results) => {
+        if (cancelled || currentRead !== readVersion) return;
+        setRecentLocalState({ cache: nodeCache, ready: true, results });
+      });
+    };
+    read();
+    const unsubscribe = nodeCache.subscribe(read);
+    return () => {
+      cancelled = true;
+      unsubscribe();
+    };
+  }, [hasQuery, nodeCache, query]);
+
+  const recentCacheIsCurrent = recentLocalState.cache === nodeCache;
+  const recentCacheReady = recentCacheIsCurrent && recentLocalState.ready;
+  const recentLocalResults = recentCacheIsCurrent ? recentLocalState.results : [];
+
   const searchQuery = useQuery(
     buda
       ? {
           ...buda.orpc.search.queryOptions({ input: { query: debouncedQuery, limit, offset: 0 } }),
-          enabled: hasQuery,
+          enabled: tab !== "recent" && normalizedDebouncedQuery.length > 0,
         }
       : { queryKey: ["no-connection", "search"], queryFn: skipToken },
   );
+
+  const recentUsesNetworkFallback =
+    tab === "recent" && hasQuery && recentCacheReady && recentLocalResults.length === 0;
+  const nodeSearchQuery = useQuery(
+    buda
+      ? {
+          ...buda.orpc.nodes.searchByName.queryOptions({
+            input: { query: debouncedQuery, limit: PAGE_SIZE },
+          }),
+          enabled:
+            recentUsesNetworkFallback &&
+            normalizedDebouncedQuery.length > 0 &&
+            isDebouncedQueryCurrent,
+        }
+      : { queryKey: ["no-connection", "node-search"], queryFn: skipToken },
+  );
+
+  const recentNetworkResults: NodeSearchResultVO[] = isDebouncedQueryCurrent
+    ? (nodeSearchQuery.data ?? [])
+    : [];
+
+  useEffect(() => {
+    if (!nodeCache || recentNetworkResults.length === 0) return;
+    void nodeCache.merge(recentNetworkResults.map(nodeSearchResultToKnownNode));
+  }, [nodeCache, recentNetworkResults]);
+
   const allResults = searchQuery.data?.results ?? [];
   const hasMore = searchQuery.data?.hasMore ?? false;
-  const searching = searchQuery.isFetching;
-
-  const visibleResults = useMemo(() => {
-    if (tab === "all") {
-      return allResults.filter((result) => result.kind !== "change_request");
-    }
+  const contentResults = useMemo(() => {
+    if (tab === "all") return allResults.filter((result) => result.kind !== "change_request");
     const kind = TAB_KIND[tab];
     return kind ? allResults.filter((result) => result.kind === kind) : allResults;
   }, [allResults, tab]);
+  const recentResults = recentUsesNetworkFallback
+    ? recentNetworkResults.map(nodeSearchResultToKnownNode)
+    : recentLocalResults;
+  const searching =
+    tab === "recent"
+      ? !recentCacheReady ||
+        (recentUsesNetworkFallback && (!isDebouncedQueryCurrent || nodeSearchQuery.isFetching))
+      : searchQuery.isFetching;
 
   const tabOptions = useMemo(
     () =>
       SEARCH_TABS.map(({ value, label }) => {
-        if (!hasQuery) {
-          return { value, label };
-        }
         const kind = TAB_KIND[value];
         const count =
-          value === "all"
-            ? allResults.filter((result) => result.kind !== "change_request").length
-            : kind
-              ? allResults.filter((result) => result.kind === kind).length
-              : allResults.length;
+          value === "recent"
+            ? recentResults.length
+            : value === "all"
+              ? allResults.filter((result) => result.kind !== "change_request").length
+              : kind
+                ? allResults.filter((result) => result.kind === kind).length
+                : 0;
         return { value, label, meta: count > 0 ? count : undefined };
       }),
-    [allResults, hasQuery],
+    [allResults, recentResults.length],
+  );
+
+  const openKnownNode = useCallback(
+    async (node: KnownNode) => {
+      const destination = getMobileNodeDestination(node);
+      if (destination.status === "unsupported") {
+        setError(destination.message);
+        return;
+      }
+      await nodeCache?.merge([node]);
+      await nodeCache?.markVisited(node.id);
+      router.push({ pathname: destination.pathname, params: destination.params } as never);
+    },
+    [nodeCache, router],
+  );
+
+  const resolveKnownNode = useCallback(
+    async (type: NodeType, slug: string): Promise<KnownNode | undefined> => {
+      const cachedNode = nodeCache
+        ? findKnownNodeByTypeAndSlug(await nodeCache.list(), type, slug)
+        : undefined;
+      if (cachedNode || !buda) return cachedNode;
+      try {
+        const matches = await buda.client.nodes.searchByName({ query: slug, limit: PAGE_SIZE });
+        const match = matches.find((node) => node.type === type && node.slug === slug);
+        return match ? nodeSearchResultToKnownNode(match) : undefined;
+      } catch (caught) {
+        setError(caught instanceof Error ? caught.message : "Couldn't resolve this node.");
+        return undefined;
+      }
+    },
+    [buda, nodeCache],
   );
 
   const openResult = useCallback(
-    (result: SearchResultVO) => {
+    async (result: SearchResultVO) => {
       if (result.kind === "record") {
         router.push({ pathname: "/records/[id]", params: { id: result.id } });
       } else if (result.kind === "change_request") {
         router.push({ pathname: "/change-requests/[id]", params: { id: result.id } });
       } else if (result.kind === "base") {
-        // Base results carry a web href like "/base/{slug}"; derive the slug.
         const slug = result.href.split("/").filter(Boolean).pop() ?? result.id;
-        router.push({ pathname: "/base/[slug]", params: { slug } });
+        const node = await resolveKnownNode("base", slug);
+        if (node) await openKnownNode(node);
+        else router.push({ pathname: "/base/[slug]", params: { slug } });
       } else {
-        const parts = result.href.split("/").filter(Boolean);
-        const [kind, id] = parts;
-        if (kind === "drive" && id) {
-          router.push({ pathname: "/drive/[nodeId]", params: { nodeId: id } });
-        } else if (kind === "skill" && id) {
-          router.push({ pathname: "/skill/[nodeId]", params: { nodeId: id } });
-        } else if (kind === "doc" && id) {
-          router.push({ pathname: "/doc/[nodeId]", params: { nodeId: id } });
-        } else if (kind === "airapp" && id) {
-          // AirApp detail screen ("app/airapp/[nodeId]") is landing in a
-          // parallel change on this branch — wire the navigation now so it
-          // lights up as soon as that route exists.
-          router.push({ pathname: "/airapp/[nodeId]", params: { nodeId: id } });
-        } else if (kind === "assets" && id) {
-          router.push({ pathname: "/assets/[id]", params: { id } });
-        } else if (kind === "file" && id) {
-          // Standalone File nodes have no dedicated mobile detail screen yet.
-          // Surface inline feedback and stay on the search screen instead of
-          // falling through to the (wrong) assets list screen.
-          setError("This file type isn't viewable on mobile yet.");
+        const [kind, slug] = result.href.split("/").filter(Boolean);
+        const nodeType = NODE_TYPES.find((type) => type === kind);
+        if (nodeType && slug) {
+          const resolvedNode = await resolveKnownNode(nodeType, slug);
+          if (resolvedNode) {
+            await openKnownNode(resolvedNode);
+          } else {
+            setError("This search result's node is no longer available.");
+          }
+        } else if (kind === "assets" && slug) {
+          router.push({ pathname: "/assets/[id]", params: { id: slug } });
         } else {
           router.push("/drawer/assets");
         }
       }
     },
-    [router],
+    [openKnownNode, resolveKnownNode, router],
   );
 
-  const searchErrorMessage = searchQuery.isError
-    ? searchQuery.error instanceof Error
-      ? searchQuery.error.message
+  const activeQueryError = tab === "recent" ? nodeSearchQuery.error : searchQuery.error;
+  const searchErrorMessage = activeQueryError
+    ? activeQueryError instanceof Error
+      ? activeQueryError.message
       : "Search failed"
     : null;
   const displayedError = error ?? searchErrorMessage;
   const resetError = useCallback(() => {
     setError(null);
-    if (searchErrorMessage) {
-      void searchQuery.refetch();
-    }
-  }, [searchErrorMessage, searchQuery.refetch]);
+    if (!searchErrorMessage) return;
+    if (tab === "recent") void nodeSearchQuery.refetch();
+    else void searchQuery.refetch();
+  }, [nodeSearchQuery.refetch, searchErrorMessage, searchQuery.refetch, tab]);
+
+  const resultCount = tab === "recent" ? recentResults.length : contentResults.length;
 
   return (
-    <DrawerScaffold title="Search" subtitle="Records, change requests, Bases, and files">
+    <DrawerScaffold title="Search" subtitle="Recent nodes and workspace content">
       <View style={styles.searchBox}>
         <TextInput
           label="Search"
           value={query}
           autoFocus
-          placeholder="Search records, change requests, Bases, files"
+          placeholder="Search nodes, records, change requests, and files"
           returnKeyType="search"
           onChangeText={setQuery}
         />
       </View>
 
-      {hasQuery ? (
-        <View style={styles.tabsWrap}>
-          <NativeChipList value={tab} options={tabOptions} onChange={setTab} />
-        </View>
-      ) : null}
+      <View style={styles.tabsWrap}>
+        <NativeChipList value={tab} options={tabOptions} onChange={setTab} />
+      </View>
 
       {displayedError ? (
         <View style={styles.message}>
@@ -204,33 +324,53 @@ function SearchContent() {
         </View>
       ) : null}
 
-      <NativeSection title={hasQuery ? "Results" : "Search"}>
-        {searching && visibleResults.length === 0 ? (
+      <NativeSection title={tab === "recent" ? "Recent" : hasQuery ? "Results" : "Search"}>
+        {searching && resultCount === 0 ? (
           <NativeRow
             title="Searching"
-            subtitle="Looking across records, change requests, Bases, and files."
+            subtitle={
+              tab === "recent"
+                ? "Looking for nodes by name."
+                : "Looking across records, change requests, Bases, and files."
+            }
             leading={<Search size={18} color={tokens.mutedForeground} />}
             last
           />
         ) : null}
-        {!searching && hasQuery && visibleResults.length === 0 && !displayedError ? (
+        {!searching && resultCount === 0 && !displayedError ? (
           <NativeRow
-            title="No matches"
-            subtitle="Try a title, field value, or Base name."
+            title={tab === "recent" && !hasQuery ? "No recent nodes" : "No matches"}
+            subtitle={
+              tab === "recent" && !hasQuery
+                ? "Nodes you open will appear here."
+                : tab === "recent"
+                  ? "Try another node name or switch tabs for full-text search."
+                  : hasQuery
+                    ? "Try a title, field value, or another tab."
+                    : "Enter a query to search workspace content."
+            }
             leading={<Search size={18} color={tokens.mutedForeground} />}
             last
           />
         ) : null}
-        {!hasQuery ? (
-          <NativeRow
-            title="Search Busabase"
-            subtitle="Find records, change requests, Bases, and files across the connected server."
-            leading={<Search size={18} color={tokens.mutedForeground} />}
-            last
-          />
-        ) : null}
-        {visibleResults.length > 0
-          ? visibleResults.map((result, index) => {
+        {tab === "recent"
+          ? recentResults.map((node, index) => {
+              const definition = getNodeType(node.type);
+              const Icon = nodeIcons[node.type] ?? FileText;
+              const unsupported = node.type === "file";
+              return (
+                <NativeRow
+                  key={node.id}
+                  title={node.name}
+                  subtitle={unsupported ? "Not viewable on mobile yet" : node.slug}
+                  meta={definition?.label ?? node.type}
+                  leading={<Icon size={18} color={tokens.mutedForeground} />}
+                  onPress={() => void openKnownNode(node)}
+                  last={index === recentResults.length - 1}
+                />
+              );
+            })
+          : contentResults.map((result, index) => {
               const meta = getResultMeta(result);
               const Icon = meta.icon;
               return (
@@ -240,8 +380,8 @@ function SearchContent() {
                   subtitle={result.body || result.eyebrow || meta.label}
                   meta={meta.label}
                   leading={<Icon size={18} color={tokens.mutedForeground} />}
-                  onPress={() => openResult(result)}
-                  last={index === visibleResults.length - 1}
+                  onPress={() => void openResult(result)}
+                  last={index === contentResults.length - 1}
                 >
                   {result.eyebrow && result.body ? (
                     <Text
@@ -253,11 +393,10 @@ function SearchContent() {
                   ) : null}
                 </NativeRow>
               );
-            })
-          : null}
+            })}
       </NativeSection>
 
-      {hasMore && tab !== "change_requests" ? (
+      {hasQuery && hasMore && tab !== "recent" && tab !== "change_requests" ? (
         <View style={styles.loadMore}>
           <NativeActionBar>
             <Button

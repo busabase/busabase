@@ -397,14 +397,14 @@ export function SearchDialog({
             setHighlightedIndex(0);
           }}
         >
-          <TabsList className="h-auto w-full justify-start gap-1 border-b bg-transparent px-3 py-2">
+          <TabsList className="h-auto w-full justify-start gap-0.5 border-b bg-transparent px-2 py-2 sm:gap-1 sm:px-3">
             {SEARCH_TABS.map((t) => {
               const count = hasQuery && (t === "recent" || tab !== "recent") ? tabCount(t) : null;
               return (
                 <TabsTrigger
                   key={t}
                   value={t}
-                  className="group h-7 gap-1.5 rounded-lg px-2.5 text-[13px] font-medium text-muted-foreground shadow-none transition-colors data-[state=active]:bg-muted data-[state=active]:text-foreground data-[state=active]:shadow-none"
+                  className="group h-7 gap-1 rounded-lg px-1.5 font-medium text-muted-foreground text-xs shadow-none transition-colors data-[state=active]:bg-muted data-[state=active]:text-foreground data-[state=active]:shadow-none sm:gap-1.5 sm:px-2.5 sm:text-[13px]"
                 >
                   {tabLabel[t]}
                   {count !== null && count > 0 && (

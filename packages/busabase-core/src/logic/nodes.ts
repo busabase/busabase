@@ -1,7 +1,10 @@
 import "server-only";
 
 import { ORPCError } from "@orpc/server";
-import { searchNodesByNameInputSchema } from "busabase-contract/contract/schemas";
+import {
+  searchNodesByNameInputSchema,
+  updateNodeMetadataInputSchema,
+} from "busabase-contract/contract/schemas";
 import { CREATABLE_NODE_TYPES } from "busabase-contract/domains";
 import { fieldNameSchema } from "busabase-contract/domains/base/contract/base-schemas";
 import type { NodeSearchResultVO, NodeVO } from "busabase-contract/types";
@@ -707,6 +710,81 @@ export const moveNode = async (input: z.input<typeof moveNodeInputSchema>) => {
       },
     ],
   });
+};
+
+/** Direct, audited top-level metadata merge for SDK-managed node identities. */
+export const updateNodeMetadata = async (
+  input: z.input<typeof updateNodeMetadataInputSchema>,
+): Promise<NodeVO> => {
+  await ensureReady();
+  const db = await getDb();
+  const spaceId = getContextSpaceId();
+  const parsed = updateNodeMetadataInputSchema.parse(input);
+  const actorId = resolveActorId("local-user");
+
+  const [node] = await db
+    .select()
+    .from(busabaseNodes)
+    .where(
+      and(
+        eq(busabaseNodes.id, parsed.nodeId),
+        eq(busabaseNodes.spaceId, spaceId),
+        isNull(busabaseNodes.archivedAt),
+        isNull(busabaseNodes.deletedAt),
+      ),
+    )
+    .limit(1);
+  if (!node) {
+    throw new ORPCError("NOT_FOUND", { message: `Node not found: ${parsed.nodeId}` });
+  }
+
+  await assertNodePermission(node.id, "write", actorId);
+  const timestamp = now();
+  const metadataPatch = JSON.stringify(parsed.metadata);
+  const [updatedNode] = await db
+    .update(busabaseNodes)
+    // PostgreSQL's jsonb concatenation is an atomic top-level merge, so
+    // concurrent patches to different keys cannot overwrite one another.
+    .set({
+      metadata: sql<typeof node.metadata>`${busabaseNodes.metadata} || ${metadataPatch}::jsonb`,
+      updatedAt: timestamp,
+    })
+    .where(
+      and(
+        eq(busabaseNodes.id, node.id),
+        eq(busabaseNodes.spaceId, spaceId),
+        isNull(busabaseNodes.archivedAt),
+        isNull(busabaseNodes.deletedAt),
+      ),
+    )
+    .returning();
+  if (!updatedNode) {
+    throw new ORPCError("NOT_FOUND", { message: `Node not found: ${parsed.nodeId}` });
+  }
+
+  const [base] = await db
+    .select({ id: busabaseBases.id })
+    .from(busabaseBases)
+    .where(
+      and(
+        eq(busabaseBases.nodeId, updatedNode.id),
+        eq(busabaseBases.spaceId, spaceId),
+        isNull(busabaseBases.deletedAt),
+      ),
+    )
+    .limit(1);
+
+  await insertAuditEvent(db, {
+    action: "node.metadata_updated",
+    actorId,
+    baseId: base?.id ?? null,
+    metadata: {
+      nodeId: updatedNode.id,
+      updatedKeys: Object.keys(parsed.metadata).sort(),
+    },
+  });
+
+  return toNodeVO(updatedNode, base?.id ?? null);
 };
 
 /**

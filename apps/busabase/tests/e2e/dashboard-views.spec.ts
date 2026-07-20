@@ -17,7 +17,7 @@ const RENDER_TIMEOUT = 45_000;
 test.setTimeout(90_000);
 
 test("graph view renders the relation summary badge", async ({ page }) => {
-  await page.goto("/dashboard/graph?demo=1", { waitUntil: "commit" });
+  await page.goto("/dashboard/local/graph?demo=1", { waitUntil: "commit" });
   // The badge ("Graph") + summary ("{n} bases · {m} relations") render before the
   // React Flow layout settles, so they are a stable render signal for this route.
   await expect(page.getByText(/\d+ bases · \d+ relations/)).toBeVisible({
@@ -26,7 +26,7 @@ test("graph view renders the relation summary badge", async ({ page }) => {
 });
 
 test("archived (trash) view renders with its empty state", async ({ page }) => {
-  await page.goto("/dashboard/archived?demo=1", { waitUntil: "commit" });
+  await page.goto("/dashboard/local/archived?demo=1", { waitUntil: "commit" });
   await expect(page.getByRole("heading", { name: "Trash" })).toBeVisible({
     timeout: RENDER_TIMEOUT,
   });
@@ -35,7 +35,7 @@ test("archived (trash) view renders with its empty state", async ({ page }) => {
 });
 
 test("assets library route renders the seeded media", async ({ page }) => {
-  await page.goto("/dashboard/assets?demo=media", { waitUntil: "commit" });
+  await page.goto("/dashboard/local/assets?demo=media", { waitUntil: "commit" });
   await expect(page.getByRole("heading", { name: "Assets", exact: true })).toBeVisible({
     timeout: RENDER_TIMEOUT,
   });
@@ -44,17 +44,17 @@ test("assets library route renders the seeded media", async ({ page }) => {
 });
 
 test("activity entries link through to a working detail page", async ({ page }) => {
-  await page.goto("/dashboard/activity?demo=1", { waitUntil: "commit" });
+  await page.goto("/dashboard/local/activity?demo=1", { waitUntil: "commit" });
   await expect(page.getByText("Workspace activity")).toBeVisible({ timeout: RENDER_TIMEOUT });
 
-  // Activity rows link to a change request detail at /dashboard/inbox/{id} (the
-  // sidebar "Inbox" nav is /dashboard/inbox with no trailing id, so this href
+  // Activity rows link to a change request detail at /dashboard/local/inbox/{id} (the
+  // sidebar "Inbox" nav is /dashboard/local/inbox with no trailing id, so this href
   // uniquely targets a feed entry rather than the nav). Follow the first one and
   // confirm it lands on a real detail route, not a not-found page.
-  const entry = page.locator('a[href*="/dashboard/inbox/"]').first();
+  const entry = page.locator('a[href*="/dashboard/local/inbox/"]').first();
   await expect(entry).toBeVisible({ timeout: RENDER_TIMEOUT });
   await entry.click();
 
-  await expect(page).toHaveURL(/\/dashboard\/inbox\/.+/, { timeout: RENDER_TIMEOUT });
+  await expect(page).toHaveURL(/\/dashboard\/local\/inbox\/.+/, { timeout: RENDER_TIMEOUT });
   await expect(page.getByText(/not found/i)).toHaveCount(0);
 });

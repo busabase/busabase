@@ -1,6 +1,6 @@
 [package]
 name = "busabase_desktop"
-version = "0.9.9"
+version = "0.9.10"
 description = "Busabase Desktop - private local-first Busabase knowledge base shell"
 authors = ["Busabase Team"]
 edition = "2021"

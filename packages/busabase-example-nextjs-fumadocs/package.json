@@ -1,0 +1,36 @@
+{
+  "name": "busabase-example-nextjs-fumadocs",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Runnable Next.js and Fumadocs example for the four-Base Busabase CMS.",
+  "scripts": {
+    "predev": "pnpm --filter busabase-sdk build && pnpm --filter busabase-cms build",
+    "dev": "next dev",
+    "prebuild": "pnpm --filter busabase-sdk build && pnpm --filter busabase-cms build",
+    "build": "next build",
+    "start": "next start",
+    "typecheck": "next typegen && tsc --noEmit"
+  },
+  "dependencies": {
+    "busabase-cms": "workspace:*",
+    "busabase-sdk": "workspace:*",
+    "fumadocs-core": "16.7.7",
+    "fumadocs-ui": "16.7.7",
+    "lucide-react": "^0.556.0",
+    "next": "16.2.6",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7",
+    "server-only": "^0.0.1"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4.1.17",
+    "@types/node": "^24.13.2",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "tailwindcss": "^4.1.17",
+    "typescript": "^5.9.3"
+  },
+  "engines": {
+    "node": ">=24.18.0"
+  }
+}

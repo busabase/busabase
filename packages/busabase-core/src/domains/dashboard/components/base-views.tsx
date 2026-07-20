@@ -3,7 +3,7 @@ import type { BaseFieldVO, BaseVO, FieldType, RecordVO, ViewVO } from "busabase-
 import { Pencil, RotateCcw } from "lucide-react";
 import { type iString, iStringIsEmpty, iStringParse, iStringTrim } from "openlib/i18n/i-string";
 import { SPALink as Link } from "openlib/ui/dashboard";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useSearch } from "wouter";
 import { fmt, useCoreI18n, useIString } from "../../../i18n";
 import { isDerivedFieldSlug } from "../helpers/change-request";
@@ -73,6 +73,7 @@ export function BaseDetailView({
   ) => Promise<void>;
   views: ViewVO[];
 }) {
+  const scrollElementRef = useRef<HTMLDivElement>(null);
   const baseViews = views.filter((view) => view.baseId === base?.id);
   const baseArchivedViews = archivedViews.filter((view) => view.baseId === base?.id);
   const baseArchivedRecords = archivedRecords.filter((record) => record.baseId === base?.id);
@@ -85,7 +86,11 @@ export function BaseDetailView({
         activeView?.config,
       );
   return (
-    <div className="min-h-0 flex-1 overflow-auto">
+    <div
+      className="h-full min-h-0 w-full min-w-0 flex-1 overflow-auto"
+      data-base-detail-scroll
+      ref={scrollElementRef}
+    >
       <section>
         <BaseDetailHeader base={base} orpc={orpc} />
         <div className="px-6 py-5">
@@ -105,6 +110,7 @@ export function BaseDetailView({
             records={filteredRecords}
             relationRecords={records}
             pagination={pagination}
+            scrollElementRef={scrollElementRef}
             views={baseViews}
           />
         </div>
@@ -290,7 +296,10 @@ export function BaseSetupView({
   };
 
   return (
-    <div className="min-h-0 flex-1 overflow-auto">
+    <div
+      className="h-full min-h-0 w-full min-w-0 flex-1 overflow-auto"
+      data-dashboard-scroll="base-design"
+    >
       <section>
         <BaseDetailHeader base={base} orpc={orpc} />
         <div className="grid gap-6 px-6 py-4 xl:grid-cols-[minmax(0,1fr)_280px]">

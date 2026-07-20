@@ -24,7 +24,9 @@ export function useBusabaseOrpc() {
     return {
       client: createBusabaseORPCClient(rpcUrl, { demo, headers }),
       orpc: createBusabaseQueryUtils(rpcUrl, { demo, headers }),
+      serverUrl,
       spaceScope,
+      userId: connection?.cloudUser?.id ?? null,
     };
-  }, [serverUrl, connection?.mode, demo, headers, spaceScope]);
+  }, [serverUrl, connection?.mode, connection?.cloudUser?.id, demo, headers, spaceScope]);
 }

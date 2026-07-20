@@ -62,6 +62,7 @@ export type AuditAction =
   | "asset.metadata_updated"
   | "asset.text_written"
   | "asset.text_marked_none"
+  | "node.metadata_updated"
   | "node.purged";
 
 export interface UserRefVO {
@@ -96,7 +97,7 @@ export interface NodeVO {
   slug: string;
   name: string;
   description: string;
-  metadata: {
+  metadata: Record<string, unknown> & {
     entryFile?: string;
     visibility?: "private" | "workspace" | "public";
     version?: string;

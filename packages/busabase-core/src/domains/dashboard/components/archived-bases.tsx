@@ -130,7 +130,10 @@ export function ArchivedBasesView({
   };
 
   return (
-    <div className="min-h-0 flex-1 overflow-auto">
+    <div
+      className="h-full min-h-0 w-full min-w-0 flex-1 overflow-auto"
+      data-dashboard-scroll="archived"
+    >
       <div className="px-6 pt-5 pb-2">
         <div className="flex items-center gap-2">
           <Archive className="size-4 text-muted-foreground" />

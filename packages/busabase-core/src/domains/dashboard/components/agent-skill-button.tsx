@@ -345,18 +345,18 @@ function createAgentSkillPrompt(skillUrl: string, lang?: string, targetSpaceId?:
 ${skillUrl}
 ${targetLine}
 
-按它的引导帮我把工作区设置好；未经我批准，绝不要合并 ChangeRequest。请用简体中文回复我。`;
+按它的引导帮我把工作区设置好。除 Skill 明确允许的版本化 system-onboarding 示例初始化外，未经我批准绝不要合并 ChangeRequest。请用简体中文回复我。`;
     case "ja":
       return `Busabase Agent Skill を読んで従ってください——これが唯一の信頼できる情報源です：
 ${skillUrl}
 ${targetLine}
 
-オンボーディングに従って私をセットアップし、私の承認なしに ChangeRequest をマージしないでください。日本語で返信してください。`;
+オンボーディングに従ってセットアップしてください。Skill が明示的に許可するバージョン付き system-onboarding のサンプル初期化を除き、私の承認なしに ChangeRequest をマージしないでください。日本語で返信してください。`;
     default:
       return `Read and follow the Busabase Agent Skill — it is the single source of truth:
 ${skillUrl}
 ${targetLine}
 
-Follow its onboarding to set me up, and never merge a ChangeRequest without my approval. Reply to me in English.`;
+Follow its onboarding to set me up. Never merge a ChangeRequest without my approval except for the versioned system-onboarding sample initialization explicitly allowed by the Skill. Reply to me in English.`;
   }
 }

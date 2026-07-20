@@ -6,6 +6,7 @@ import { createBusabaseQueryUtils } from "busabase-contract/api-client/react-que
 import { BusabaseDashboard } from "busabase-core/dashboard";
 import { CreateNodeModal } from "busabase-core/dashboard/create-node-modal";
 import { EmptyAgentGuide } from "busabase-core/dashboard/empty-agent-guide";
+import { InstallFromGithubModal } from "busabase-core/dashboard/install-from-github-modal";
 import { getBusabaseDashboardRoutes as getDashboardRoutes } from "busabase-core/dashboard/routes";
 import { useLazyNodeChildren } from "busabase-core/dashboard/use-lazy-node-children";
 import { useMoveNode } from "busabase-core/dashboard/use-move-node";
@@ -21,6 +22,7 @@ import { SPARouteRenderer } from "~/components/spa/spa-route-renderer";
 import { SPAWrapper } from "~/components/spa/spa-wrapper";
 import { getSecondarySidebarNav } from "~/config/navigation-nested";
 import { SUPPORTED_LOCALES } from "~/i18n/config";
+import { buildDashboardUrl, getDashboardBasePath } from "~/lib/dashboard-routes";
 import { getBusabaseAppLL } from "~/lib/i18n";
 
 interface DashboardClientProps {
@@ -97,6 +99,7 @@ export function DashboardClient({ initialPath = "/inbox", localUserName }: Dashb
 
 function DashboardClientContent({ initialPath = "/inbox", localUserName }: DashboardClientProps) {
   const router = useRouter();
+  const queryClient = useQueryClient();
   // `?chromeless=1` renders just the current node's detail pane with no
   // sidebar/topbar — used by busabase-mobile's WebView embed of a single
   // AirApp's Run/Files/Logs UI (see BusabaseDashboard's `chromeless` prop).
@@ -104,10 +107,10 @@ function DashboardClientContent({ initialPath = "/inbox", localUserName }: Dashb
   const chromeless = searchParams.get("chromeless") === "1";
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
+  const [isInstallOpen, setIsInstallOpen] = useState(false);
   const [createParent, setCreateParent] = useState<{ id: string; name: string } | null>(null);
   const apiClient = useMemo(() => createBusabaseRestApiClient("/api/v1"), []);
   const orpc = useMemo(() => createBusabaseQueryUtils("/api/rpc"), []);
-  const queryClient = useQueryClient();
   // Depth-bounded eager prefetch: root + 2 levels beneath it, matching the
   // server's own default (see DEFAULT_NODE_LIST_DEPTH in
   // packages/busabase-core/src/logic/nodes.ts). Anything deeper is loaded
@@ -239,7 +242,7 @@ function DashboardClientContent({ initialPath = "/inbox", localUserName }: Dashb
 
   return (
     <SPAWrapper
-      basePath="/dashboard"
+      basePath={getDashboardBasePath()}
       context={{
         activeSpace: {
           id: "local",
@@ -283,6 +286,11 @@ function DashboardClientContent({ initialPath = "/inbox", localUserName }: Dashb
               setCreateParent(parent ?? null);
               setIsCreateOpen(true);
             }}
+            // Single-tenant open-source app: there is no membership to check, and
+            // busabase-core's own `isSpaceManager` seam defaults to "manager"
+            // when a host leaves it unset — so the entry point is always offered
+            // here. The cloud host is where the role gate actually bites.
+            onInstallClick={() => setIsInstallOpen(true)}
             onMoveNode={(payload) => moveNodeMutation.mutate(payload)}
             locale={locale}
             languagePref={languagePref}
@@ -305,12 +313,30 @@ function DashboardClientContent({ initialPath = "/inbox", localUserName }: Dashb
             }
           }}
           onCreated={(changeRequestId, mode) => {
+            queryClient.invalidateQueries({ queryKey: orpc.nodes.list.key() });
+            queryClient.invalidateQueries({ queryKey: orpc.bases.list.key() });
+            queryClient.invalidateQueries({ queryKey: orpc.changeRequests.list.key() });
             router.refresh();
             if (mode === "merged") {
-              window.location.assign(addDemoParam("/dashboard"));
+              router.push(addDemoParam(buildDashboardUrl("/")));
             } else {
-              window.location.assign(addDemoParam(`/dashboard/inbox/${changeRequestId}`));
+              router.push(addDemoParam(buildDashboardUrl(`/inbox/${changeRequestId}`)));
             }
+          }}
+        />
+        <InstallFromGithubModal
+          apiClient={apiClient}
+          open={isInstallOpen}
+          onOpenChange={setIsInstallOpen}
+          // Structure (the folder, its Bases, fields and views) is materialized
+          // immediately, so the tree has changed even when every record is still
+          // pending review — reload rather than leave a stale sidebar.
+          onInstalled={() => {
+            router.refresh();
+            window.location.assign(addDemoParam(buildDashboardUrl("/")));
+          }}
+          onReviewChangeRequests={() => {
+            window.location.assign(addDemoParam(buildDashboardUrl("/inbox")));
           }}
         />
       </CoreI18nProvider>

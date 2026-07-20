@@ -1,6 +1,6 @@
 {
   "name": "busabase-mobile",
-  "version": "0.9.9",
+  "version": "0.9.10",
   "main": "expo-router/entry",
   "private": true,
   "scripts": {
@@ -16,6 +16,7 @@
     "build:all": "eas build --platform all",
     "submit:ios": "eas submit --platform ios",
     "submit:android": "eas submit --platform android",
+    "test": "vitest run && node --test ../../scripts/publish-busabase-mobile-cdn-downloads.test.cjs",
     "typecheck": "tsc --noEmit",
     "lint": "biome format . --write && biome check ."
   },

@@ -3,7 +3,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { loadDotEnvFile, writeDotEnvFile } from "./config-file";
-import { maybeAutoRefresh, runLogin, runLogout, runRefresh } from "./login";
+import {
+  assertCredentialNotExpired,
+  maybeAutoRefresh,
+  runLogin,
+  runLogout,
+  runRefresh,
+} from "./login";
 
 /**
  * Auth is the first thing a skill/agent does, so the non-interactive login, session
@@ -102,7 +108,7 @@ describe("runLogin", () => {
 });
 
 describe("runRefresh", () => {
-  it("no-ops for an API key (which never expires)", async () => {
+  it("no-ops for an API key because API keys are not refreshable", async () => {
     global.fetch = vi.fn() as typeof fetch;
     const summary = await runRefresh({ baseUrl: CLOUD, apiKey: "sk_static" });
     expect(summary.status).toBe("nothing to refresh");
@@ -175,6 +181,24 @@ describe("maybeAutoRefresh", () => {
     global.fetch = vi.fn() as typeof fetch;
     await maybeAutoRefresh(CLOUD, "bss_flag");
     expect(global.fetch).not.toHaveBeenCalled();
+  });
+});
+
+describe("assertCredentialNotExpired", () => {
+  it("gives an actionable error for an expired file-stored device session", () => {
+    writeDotEnvFile({
+      BUSABASE_API_KEY: "opaque-device-token",
+      BUSABASE_TOKEN_EXPIRES_AT: "2000-01-01T00:00:00.000Z",
+    });
+    expect(() => assertCredentialNotExpired("opaque-device-token")).toThrow(/login --device-code/);
+  });
+
+  it("does not classify an overriding API key using the saved session expiry", () => {
+    writeDotEnvFile({
+      BUSABASE_API_KEY: "opaque-device-token",
+      BUSABASE_TOKEN_EXPIRES_AT: "2000-01-01T00:00:00.000Z",
+    });
+    expect(() => assertCredentialNotExpired("sk_override")).not.toThrow();
   });
 });
 

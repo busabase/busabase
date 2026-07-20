@@ -8,7 +8,7 @@ import { busabaseRouter } from "../src/router";
 
 /**
  * Asset-backed file search must still find matches by FILE CONTENT (which needs a
- * storage read) as well as by name/metadata. The scalability fix reordered the
+ * storage read) as well as by visible file identity. The scalability fix reordered the
  * loop so the file body is only fetched when the in-memory columns didn't already
  * match — these tests pin both paths so that optimisation can't drop content hits.
  */
@@ -79,7 +79,9 @@ describe("Asset-backed file search — content vs metadata", () => {
 
   it("finds a file by a marker that lives ONLY in its content (storage read path)", async () => {
     const search = await client.search({ query: "ZEBRAWIDGET", limit: 10 });
-    expect(search.results.some((result) => result.href === "/file/quarterly")).toBe(true);
+    const result = search.results.find((item) => item.href === "/file/quarterly");
+    expect(result).toBeDefined();
+    expect(result?.body).toContain("ZEBRAWIDGET");
   });
 
   it("finds a file by its filename without depending on content", async () => {
@@ -87,9 +89,14 @@ describe("Asset-backed file search — content vs metadata", () => {
     expect(search.results.some((result) => result.href === "/file/quarterly")).toBe(true);
   });
 
-  it("finds a file by its node name (metadata match)", async () => {
+  it("finds a file by its visible node name", async () => {
     const search = await client.search({ query: "Finance upload", limit: 10 });
     expect(search.results.some((result) => result.href === "/file/quarterly")).toBe(true);
+  });
+
+  it("does not expose an internal content hash as searchable file content", async () => {
+    const search = await client.search({ query: "sha256:cccccccc", limit: 10 });
+    expect(search.results.some((result) => result.href === "/file/quarterly")).toBe(false);
   });
 
   it("does not match an unrelated query", async () => {

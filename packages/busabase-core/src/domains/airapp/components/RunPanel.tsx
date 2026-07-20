@@ -4,10 +4,10 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";
 import type { AirAppVO } from "busabase-contract/types";
 import { Button } from "kui/button";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "kui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "kui/select";
-import { Loader2, Maximize2, PanelRightOpen, Play, RotateCcw } from "lucide-react";
+import { Loader2, Maximize, Minimize, Pin, Play, RotateCcw } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { fmt, useCoreI18n } from "../../../i18n";
 import { EmptyState } from "../../dashboard/components/primitives";
 import { NodeDetailSkeleton } from "../../dashboard/components/skeletons";
@@ -164,17 +164,40 @@ interface AirAppRunControlsProps {
   /** Optional context (name/id) used by the "pin to side panel" and
    *  fullscreen actions — the run/status controls only need `runner`. */
   airapp: AirAppVO | null;
+  showPinToSidePanel?: boolean;
 }
 
-/** The run control cluster (status label, pin-to-side-panel, fullscreen + its
- *  Dialog, Run button) shared by the AirApp detail-view header and the
- *  side-panel toolbar so both surfaces stay identical. The fullscreen Dialog
- *  state lives here; the Dialog renders via portal, so where this component
- *  sits in the layout doesn't matter. */
-export function AirAppRunControls({ runner, airapp }: AirAppRunControlsProps) {
+/** The run control cluster shared by the AirApp detail-view header and the
+ *  side-panel toolbar. Fullscreen is a viewport surface rather than a modal:
+ *  the preview fills the browser and a floating restore button returns to the
+ *  exact surface it came from (detail view or side panel). */
+export function AirAppRunControls({
+  runner,
+  airapp,
+  showPinToSidePanel = true,
+}: AirAppRunControlsProps) {
   const messages = useCoreI18n();
   const { status, previewUrl, run, isBusy, runnerKind, setRunnerKind } = runner;
   const [fullscreen, setFullscreen] = useState(false);
+
+  useEffect(() => {
+    if (!fullscreen) {
+      return;
+    }
+
+    const previousOverflow = document.body.style.overflow;
+    const exitOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setFullscreen(false);
+      }
+    };
+    document.body.style.overflow = "hidden";
+    window.addEventListener("keydown", exitOnEscape);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", exitOnEscape);
+    };
+  }, [fullscreen]);
 
   const statusLabel: Record<AirAppRunStatus, string> = {
     idle: messages.airapp.statusIdle,
@@ -230,12 +253,12 @@ export function AirAppRunControls({ runner, airapp }: AirAppRunControlsProps) {
               <SelectItem value="srt">{messages.airapp.engineSrt}</SelectItem>
             </SelectContent>
           </Select>
-          <span className="hidden text-muted-foreground/70 text-xs md:inline">
+          <span className="hidden text-muted-foreground/70 text-xs 2xl:inline">
             {engineHint[runnerKind]}
           </span>
         </>
       ) : null}
-      {airapp ? (
+      {airapp && showPinToSidePanel ? (
         <Button
           aria-label={messages.airapp.pinToSidePanel}
           onClick={pinToSidePanel}
@@ -244,19 +267,19 @@ export function AirAppRunControls({ runner, airapp }: AirAppRunControlsProps) {
           type="button"
           variant="outline"
         >
-          <PanelRightOpen className="size-3.5" />
+          <Pin className="size-3.5" />
         </Button>
       ) : null}
       {previewUrl ? (
         <Button
-          aria-label={messages.recordView.expandFullscreen}
+          aria-label={messages.airapp.enterFullscreen}
           onClick={() => setFullscreen(true)}
           size="icon-sm"
-          title={messages.recordView.expandFullscreen}
+          title={messages.airapp.enterFullscreen}
           type="button"
           variant="outline"
         >
-          <Maximize2 className="size-3.5" />
+          <Maximize className="size-3.5" />
         </Button>
       ) : null}
       <Button
@@ -275,25 +298,33 @@ export function AirAppRunControls({ runner, airapp }: AirAppRunControlsProps) {
         )}
         {status === "ready" || status === "error" ? messages.airapp.runAgain : messages.airapp.run}
       </Button>
-      {previewUrl ? (
-        <Dialog onOpenChange={setFullscreen} open={fullscreen}>
-          <DialogContent className="flex h-[90vh] max-h-[90vh] w-[95vw] max-w-[1040px] flex-col gap-0 overflow-hidden p-0">
-            <DialogHeader className="shrink-0 border-b px-5 py-3 text-left">
-              <DialogTitle className="font-medium text-sm">
-                {airapp?.node.name ?? messages.airapp.previewTitle}
-              </DialogTitle>
-            </DialogHeader>
-            <div className="min-h-0 flex-1">
+      {previewUrl && fullscreen && typeof document !== "undefined"
+        ? createPortal(
+            <section
+              aria-label={airapp?.node.name ?? messages.airapp.previewTitle}
+              className="fixed inset-0 z-[100] bg-background"
+            >
+              <Button
+                aria-label={messages.airapp.exitFullscreen}
+                className="absolute top-3 right-3 z-10 bg-background/90 shadow-lg backdrop-blur-sm"
+                onClick={() => setFullscreen(false)}
+                size="icon"
+                title={messages.airapp.exitFullscreen}
+                type="button"
+                variant="outline"
+              >
+                <Minimize className="size-4" />
+              </Button>
               <iframe
                 className="h-full w-full border-0 bg-white"
                 sandbox="allow-same-origin allow-scripts"
                 src={previewUrl}
                 title={messages.airapp.previewTitle}
               />
-            </div>
-          </DialogContent>
-        </Dialog>
-      ) : null}
+            </section>,
+            document.body,
+          )
+        : null}
     </div>
   );
 }
@@ -323,7 +354,7 @@ export function AirAppRunPreview({ runner, airapp, showToolbar = true }: AirAppR
           <span className="font-medium text-muted-foreground text-xs uppercase">
             {messages.airapp.runPanelTitle}
           </span>
-          <AirAppRunControls airapp={airapp} runner={runner} />
+          <AirAppRunControls airapp={airapp} runner={runner} showPinToSidePanel={false} />
         </div>
       ) : null}
 

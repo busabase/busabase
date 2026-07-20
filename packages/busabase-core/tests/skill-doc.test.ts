@@ -11,6 +11,11 @@ import { buildSkillMarkdown } from "../src/skill-doc";
 
 const cloud = buildSkillMarkdown("https://busabase.com", { mode: "cloud", spaceId: "spc_x" });
 const local = buildSkillMarkdown("http://localhost:15419", { mode: "local" });
+const cloudBootstrap = buildSkillMarkdown("https://busabase.com", {
+  mode: "cloud",
+  stage: "bootstrap",
+  spaceId: "spc_x",
+});
 
 describe("buildSkillMarkdown advertises the batch/bulk/temp-ref/assets surface", () => {
   it("documents the bulk record change-request endpoint", () => {
@@ -57,5 +62,45 @@ describe("buildSkillMarkdown advertises the batch/bulk/temp-ref/assets surface",
     // Cloud space-targeting section must reflect the 400-on-ambiguity behavior.
     expect(cloud).toMatch(/rejected|400/);
     expect(cloud).not.toContain("silently falls back to the\nuser's default space");
+  });
+});
+
+describe("generated Cloud onboarding", () => {
+  it("uses device authorization without exposing or requesting secrets", () => {
+    expect(cloudBootstrap).toContain("login --device-code");
+    expect(cloudBootstrap).toContain("selects an\nexisting API key or creates a new one");
+    expect(cloudBootstrap).toContain("The browser never receives the\nkey secret");
+    expect(cloudBootstrap).not.toContain("cat ~/.busabase/.env");
+    expect(cloudBootstrap).not.toContain("<paste the new key>");
+    expect(cloudBootstrap).not.toContain('export BUSABASE_API_KEY="sk_');
+  });
+
+  it("branches on the persistent bootstrap marker instead of Space emptiness", () => {
+    expect(cloudBootstrap).toContain("bootstrapRequired: true");
+    expect(cloudBootstrap).toContain("bootstrapRequired: false");
+    expect(cloudBootstrap).toContain("agentBootstrapVersion");
+    expect(cloudBootstrap).not.toContain("`bases` is `[]`");
+  });
+
+  it("uses a dashboard-selected Space as a locked target, not as proof it is existing", () => {
+    expect(cloudBootstrap).toContain("Dashboard Space supplied (`spc_x`)");
+    expect(cloudBootstrap).toContain(
+      "Preselection does not decide whether initialization is required",
+    );
+    expect(cloudBootstrap).toContain("including a preselected empty Space with no");
+    expect(cloudBootstrap).toContain(
+      "initialize this\n  Space even when the dashboard preselected it",
+    );
+    expect(cloudBootstrap).not.toContain("and no dashboard Space was\npreselected");
+  });
+
+  it("auto-merges idempotent system starter data and marks completion", () => {
+    expect(cloudBootstrap).toContain('"submittedBy": "system-onboarding"');
+    expect(cloudBootstrap).toContain(
+      '"idempotencyKey": "system-onboarding:v1:content:launch-announcement"',
+    );
+    expect(cloudBootstrap).toContain('"autoMerge": true');
+    expect(cloudBootstrap).toContain("/api/v1/onboarding/bootstrap-complete");
+    expect(cloudBootstrap).not.toContain("First approval");
   });
 });

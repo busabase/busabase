@@ -3,7 +3,7 @@
     "name": "Busabase",
     "slug": "busabase-mobile",
     "scheme": "busabase",
-    "version": "0.9.9",
+    "version": "0.9.10",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "automatic",
@@ -58,7 +58,6 @@
       ],
       "expo-background-task",
       "expo-status-bar",
-      "./plugins/with-android-cookies-gradle-repositories.cjs",
       "expo-font"
     ],
     "experiments": {

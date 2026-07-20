@@ -52,7 +52,7 @@ pnpm --filter busabase dev
 ダッシュボードを開く:
 
 ```txt
-http://localhost:15419/dashboard/inbox
+http://localhost:15419/dashboard/local/inbox
 ```
 
 Busabaseは開発サーバーが起動する前にローカル起動チェックを実行します。依存関係、`PG_DATABASE_URL`、または`STORAGE_URL`が不足している場合、空のダッシュボードを開く代わりにセットアップメッセージとともにコマンドが失敗します。デフォルトの`.env.example`は`.data/busabase`以下のPGliteと`.data/busabase-storage`以下のローカルファイルストレージを使用します。
@@ -77,7 +77,7 @@ docker run --rm -p 15419:15419 busabase:local
 コンテナを開く:
 
 ```txt
-http://localhost:15419/dashboard/inbox
+http://localhost:15419/dashboard/local/inbox
 ```
 
 ## スクリーンショット
@@ -276,7 +276,7 @@ CHANGE_REQUEST_ID=$(curl -s -X POST \
     "submittedBy": "local-agent"
   }' | jq -r '.id')
 
-echo "Review: http://localhost:15419/dashboard/inbox/$CHANGE_REQUEST_ID"
+echo "Review: http://localhost:15419/dashboard/local/inbox/$CHANGE_REQUEST_ID"
 
 curl -s -X POST "http://localhost:15419/api/v1/change-requests/$CHANGE_REQUEST_ID/merge" \
   | jq '.record.id, .record.headCommit.fields.title'
@@ -327,7 +327,7 @@ http://localhost:15419/api/v1/doc
 - 1つのローカルワークスペース
 - アプリローカルのDrizzleスキーマ
 - `.data/busabase`以下のPGliteによる永続化
-- `/dashboard/inbox`のダッシュボード
+- `/dashboard/local/inbox`のダッシュボード
 - ローカルアプリと信頼されたエージェント向けのREST API
 
 ## セキュリティに関する注意

@@ -62,7 +62,7 @@ Pick whichever way you like — all of them give you the same review-first datab
 npx busabase server
 ```
 
-Open **http://localhost:15419/dashboard/inbox**. That's the whole setup: a full local
+Open **http://localhost:15419/dashboard/local/inbox**. That's the whole setup: a full local
 instance with **no database to run and nothing to configure.** Busabase seeds example
 Bases, records, and Change Requests on first request, so you can inspect the review
 workflow immediately.
@@ -78,7 +78,7 @@ npx busabase-cli --help   # the API client on its own (talks to any busabase ser
 docker run --rm -p 15419:15419 busabase/busabase
 ```
 
-Open **http://localhost:15419/dashboard/inbox**. Stores everything locally — no
+Open **http://localhost:15419/dashboard/local/inbox**. Stores everything locally — no
 external services. Images are published to Docker Hub (`busabase/busabase`) and GHCR
 (`ghcr.io/busabase/busabase`).
 
@@ -96,10 +96,12 @@ cp apps/busabase/.env.example apps/busabase/.env
 pnpm --filter busabase dev
 ```
 
-Open **http://localhost:15419/dashboard/inbox**. A local-start check runs first: if
+Open **http://localhost:15419/dashboard/local/inbox**. A local-start check runs first: if
 dependencies, `PG_DATABASE_URL`, or `STORAGE_URL` are missing, it fails with a setup message
 instead of a blank dashboard. The default `.env.example` uses PGlite under `.data/busabase`
 and local file storage under `.data/busabase-storage`.
+
+Dashboard URLs include the fixed local workspace id: `/dashboard/local/inbox`.
 
 ---
 
@@ -407,7 +409,7 @@ CHANGE_REQUEST_ID=$(curl -s -X POST \
   }' | jq -r '.id')
 
 # 3. Review it in the dashboard.
-echo "Review: http://localhost:15419/dashboard/inbox/$CHANGE_REQUEST_ID"
+echo "Review: http://localhost:15419/dashboard/local/inbox/$CHANGE_REQUEST_ID"
 
 # 4. Optional automation after a human approves: merge and read canonical records.
 curl -s -X POST "http://localhost:15419/api/v1/change-requests/$CHANGE_REQUEST_ID/merge" \
@@ -479,7 +481,7 @@ The local open-source version is intentionally small:
 - one local workspace
 - app-local Drizzle schema
 - PGlite persistence under `.data/busabase`
-- dashboard at `/dashboard/inbox`
+- dashboard at `/dashboard/local/inbox`
 - REST API for local apps and trusted agents
 
 The goal is to make a private, reviewable data workspace that anyone can run.
@@ -496,7 +498,7 @@ Busabase is built in the open — bug reports, feature ideas, docs, and PRs are 
 
 ```bash
 pnpm install
-pnpm --filter busabase dev   # http://localhost:15419/dashboard/inbox
+pnpm --filter busabase dev   # http://localhost:15419/dashboard/local/inbox
 ```
 
 Before sending a PR, run `pnpm --filter busabase typecheck && pnpm --filter busabase lint`. Found a bug or have an idea? [Open an issue](https://github.com/busabase/busabase/issues) or start a [discussion](https://github.com/busabase/busabase/discussions).
@@ -514,4 +516,4 @@ Before sending a PR, run `pnpm --filter busabase typecheck && pnpm --filter busa
 
 ## License
 
-[MIT](./LICENSE) © Busabase
+[MIT](../../LICENSE) © Busabase

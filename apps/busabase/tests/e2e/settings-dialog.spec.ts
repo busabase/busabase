@@ -5,7 +5,7 @@ import { expect, test } from "./_fixtures";
 // dropdown itself so the language list isn't mixed in with navigation items).
 
 test("Settings menu item opens the settings dialog", async ({ page }) => {
-  await page.goto("/dashboard/inbox");
+  await page.goto("/dashboard/local/inbox");
   await page.getByRole("button", { name: /Busabase/ }).click();
   await page.getByRole("menuitem", { name: "Settings" }).click();
   await expect(page.getByRole("dialog")).toBeVisible();
@@ -13,7 +13,7 @@ test("Settings menu item opens the settings dialog", async ({ page }) => {
 });
 
 test("switching language inside the settings dialog updates the UI", async ({ page }) => {
-  await page.goto("/dashboard/inbox");
+  await page.goto("/dashboard/local/inbox");
   await page.evaluate(() => window.localStorage.removeItem("busabaseLocale"));
   await page.reload();
   await page.getByRole("button", { name: /Busabase/ }).click();

@@ -52,7 +52,7 @@ pnpm --filter busabase dev
 打开控制台：
 
 ```txt
-http://localhost:15419/dashboard/inbox
+http://localhost:15419/dashboard/local/inbox
 ```
 
 Busabase 在开发服务器启动前会执行本地启动检查。如果缺少依赖项、`PG_DATABASE_URL` 或 `STORAGE_URL`，命令将失败并输出配置提示，而不是打开一个空白的控制台。默认的 `.env.example` 使用 `.data/busabase` 下的 PGlite，以及 `.data/busabase-storage` 下的本地文件存储。
@@ -77,7 +77,7 @@ docker run --rm -p 15419:15419 busabase:local
 打开容器：
 
 ```txt
-http://localhost:15419/dashboard/inbox
+http://localhost:15419/dashboard/local/inbox
 ```
 
 ## 截图
@@ -307,7 +307,7 @@ CHANGE_REQUEST_ID=$(curl -s -X POST \
   }' | jq -r '.id')
 
 # 3. 在控制台中审核它。
-echo "Review: http://localhost:15419/dashboard/inbox/$CHANGE_REQUEST_ID"
+echo "Review: http://localhost:15419/dashboard/local/inbox/$CHANGE_REQUEST_ID"
 
 # 4. 人工批准后可选的自动化操作。
 curl -s -X POST "http://localhost:15419/api/v1/change-requests/$CHANGE_REQUEST_ID/merge" \
@@ -367,7 +367,7 @@ Busabase 从本地优先起步，然后向外扩展。
 - 单个本地工作空间
 - 应用本地 Drizzle schema
 - `.data/busabase` 下的 PGlite 持久化
-- `/dashboard/inbox` 控制台
+- `/dashboard/local/inbox` 控制台
 - 面向本地应用和可信智能体的 REST API
 
 ## 安全说明

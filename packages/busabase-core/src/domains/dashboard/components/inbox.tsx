@@ -499,11 +499,14 @@ export function ActivityView({
     listQuery.error instanceof Error ? listQuery.error.message : messages.inbox.loadFailedBody;
 
   return (
-    <section className="flex min-h-0 flex-1 flex-col overflow-hidden">
+    <section className="flex h-full min-h-0 w-full min-w-0 flex-1 flex-col overflow-hidden">
       <div className="flex items-center justify-between gap-4 border-b px-5 py-2.5">
         <div className="font-medium text-sm">{messages.activity.workspaceActivity}</div>
       </div>
-      <div className="min-h-0 flex-1 overflow-auto px-4 py-4 sm:px-5">
+      <div
+        className="min-h-0 flex-1 overflow-auto px-4 py-4 sm:px-5"
+        data-dashboard-scroll="activity"
+      >
         {listQuery.isPending ? (
           <InboxListSkeleton />
         ) : listQuery.isError ? (

@@ -51,13 +51,13 @@ test("closing an open change request abandons it without merging", async ({ page
   const title = unique("E2E close open CR");
   const created = await createChangeRequest(request, blog.id, title);
 
-  await page.goto(`/dashboard/inbox/${created.id}`, NAV);
+  await page.goto(`/dashboard/local/inbox/${created.id}`, NAV);
   await expect(page.getByText("Waiting for your review")).toBeVisible({ timeout: RENDER_TIMEOUT });
 
   await page.getByRole("button", { name: "Close change request" }).click();
 
   // Stays on the CR (no merge redirect), and the status flips to Closed.
-  await expect(page).toHaveURL(new RegExp(`/dashboard/inbox/${created.id}$`));
+  await expect(page).toHaveURL(new RegExp(`/dashboard/local/inbox/${created.id}$`));
   await expect(page.getByText("Closed").first()).toBeVisible();
   // The review controls are gone — a closed CR is no longer actionable.
   await expect(page.getByRole("radio", { name: "Approve" })).toHaveCount(0);
@@ -84,7 +84,7 @@ test("closing an approved change request abandons it instead of merging", async 
     }),
   );
 
-  await page.goto(`/dashboard/inbox/${created.id}`, NAV);
+  await page.goto(`/dashboard/local/inbox/${created.id}`, NAV);
   await expect(page.getByText("Approved · ready to merge")).toBeVisible({
     timeout: RENDER_TIMEOUT,
   });
@@ -93,10 +93,10 @@ test("closing an approved change request abandons it instead of merging", async 
   // Choose the abandon exit rather than merging.
   await page.getByRole("button", { name: "Close change request" }).click();
 
-  await expect(page).toHaveURL(new RegExp(`/dashboard/inbox/${created.id}$`));
+  await expect(page).toHaveURL(new RegExp(`/dashboard/local/inbox/${created.id}$`));
   await expect(page.getByText("Closed").first()).toBeVisible();
   // Never merged — no canonical-record redirect happened.
-  await expect(page).not.toHaveURL(/\/dashboard\/base\/blog\/rec/);
+  await expect(page).not.toHaveURL(/\/dashboard\/local\/base\/blog\/rec/);
 
   const reloaded = await json<ChangeRequestVO>(
     await request.get(`/api/v1/change-requests/${created.id}`),

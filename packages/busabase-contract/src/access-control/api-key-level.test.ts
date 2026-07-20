@@ -43,6 +43,13 @@ describe("resolveRequiredLevel", () => {
     expect(hasApiKeyLevel("changeRequest", createBaseLevel)).toBe(false);
   });
 
+  it("classifies direct node metadata updates as write", () => {
+    const level = resolveRequiredLevel(["workbench", "nodes", "updateMetadata"], "PATCH");
+    expect(level).toBe("write");
+    expect(hasApiKeyLevel("changeRequest", level)).toBe(false);
+    expect(hasApiKeyLevel("write", level)).toBe(true);
+  });
+
   it("an unclassified new mutation path defaults to manage (fail-closed)", () => {
     expect(resolveRequiredLevel(["workbench", "someFutureDomain", "doSomething"], "POST")).toBe(
       "manage",

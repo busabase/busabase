@@ -1,7 +1,7 @@
 import { type APIResponse, test as base } from "@playwright/test";
 
 // Why this file exists:
-// busabase's `/dashboard/*` is a force-dynamic catch-all page (`app/dashboard/
+// busabase's `/dashboard/local/*` is a force-dynamic catch-all page (`app/dashboard/[spaceId]/
 // [[...slug]]/page.tsx`) that renders a client SPA and *streams* its RSC response.
 // The document therefore never fires the `load` (or `domcontentloaded`) event, so
 // Playwright's `page.goto`, which defaults to `waitUntil: "load"`, hangs until the

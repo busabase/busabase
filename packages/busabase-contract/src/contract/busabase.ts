@@ -14,6 +14,7 @@ import { driveContract } from "../domains/drive/contract";
 import { dumpContract } from "../domains/dump/contract";
 import { fileContract } from "../domains/file-node/contract";
 import { folderContract } from "../domains/folder/contract";
+import { installContract } from "../domains/install/contract";
 import { skillContract } from "../domains/skill/contract";
 import { vaultContract } from "../domains/vault/contract";
 import { webhookContract } from "../domains/webhook/contract";
@@ -46,6 +47,7 @@ import {
   searchInputSchema,
   searchNodesByNameInputSchema,
   searchResponseSchema,
+  updateNodeMetadataInputSchema,
 } from "./schemas";
 
 // Per-item outcome for the batch review/merge endpoints. Failures are isolated:
@@ -166,6 +168,17 @@ export const busabaseContractRoutes = {
       })
       .input(moveNodeInputSchema)
       .output(changeRequestSchema),
+    updateMetadata: oc
+      .route({
+        method: "PATCH",
+        path: "/nodes/{nodeId}/metadata",
+        tags: ["Nodes"],
+        summary: "Update node metadata",
+        successDescription:
+          "Shallow-merged the supplied top-level keys into the active node's existing metadata. Requires write access on the node.",
+      })
+      .input(updateNodeMetadataInputSchema)
+      .output(nodeSchema),
     purge: oc
       .route({
         method: "DELETE",
@@ -348,6 +361,7 @@ export const busabaseContractRoutes = {
   vault: vaultContract,
   webhooks: webhookContract,
   dump: dumpContract,
+  install: installContract,
   changeRequests: {
     list: oc
       .route({

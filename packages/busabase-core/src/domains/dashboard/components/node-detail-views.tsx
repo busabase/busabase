@@ -699,7 +699,10 @@ export function DocDetailView({ orpc, slug }: { orpc: BusabaseQueryUtils; slug: 
   };
 
   return (
-    <div className="mx-auto flex h-full w-full max-w-3xl flex-col px-6 py-10">
+    <div
+      className="mx-auto flex h-full min-h-0 w-full min-w-0 max-w-3xl flex-col overflow-auto px-6 py-10"
+      data-dashboard-scroll="doc-detail"
+    >
       <div className="mb-5 flex items-start justify-between gap-4">
         <div className="min-w-0">
           <h1 className="truncate font-semibold text-3xl text-foreground tracking-tight">
@@ -813,7 +816,10 @@ export function FolderDetailView({
   }
 
   return (
-    <div className="mx-auto w-full max-w-3xl px-6 py-8">
+    <div
+      className="mx-auto h-full min-h-0 w-full min-w-0 max-w-3xl overflow-auto px-6 py-8"
+      data-dashboard-scroll="folder-detail"
+    >
       <div className="mb-8 flex items-start justify-between gap-4">
         <div className="min-w-0">
           <h1 className="font-semibold text-2xl tracking-tight">{folder.node.name}</h1>

@@ -20,12 +20,15 @@ import {
   Sparkles,
   Table2,
 } from "lucide-react-native";
-import { type ReactNode, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useState } from "react";
 import { Modal, Platform, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useBusabaseOrpc } from "~/api/use-busabase-orpc";
 import { NativeScreen } from "~/components/native-screen";
 import { useI18n } from "~/i18n";
 import type { CoreMessages } from "~/i18n/messages";
+import { flattenNodesForCache, nodeToKnownNode } from "~/search/known-node-cache";
+import { getMobileNodeDestination } from "~/search/node-navigation";
+import { useKnownNodeCache } from "~/search/use-known-node-cache";
 import { mobile, radius, typography } from "~/theme/tokens";
 import { useTokens } from "~/theme/use-tokens";
 import { CreateNodeModal } from "./CreateNodeModal";
@@ -85,6 +88,7 @@ export function DrawerScaffold({
   const tokens = useTokens();
   const { t } = useI18n();
   const buda = useBusabaseOrpc();
+  const nodeCache = useKnownNodeCache();
   const [open, setOpen] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
 
@@ -94,6 +98,11 @@ export function DrawerScaffold({
       : { queryKey: ["no-connection", "nodes"], queryFn: skipToken }),
     enabled: open && !!buda,
   });
+
+  useEffect(() => {
+    if (!nodeCache || !nodesQuery.data) return;
+    void nodeCache.merge(flattenNodesForCache(nodesQuery.data));
+  }, [nodeCache, nodesQuery.data]);
 
   // Unwrap the single root workspace folder so its contents show directly,
   // instead of a redundant "Local workspace" row (matches the web sidebar).
@@ -122,38 +131,19 @@ export function DrawerScaffold({
     router.replace(href as never);
   };
 
-  const navigateNode = (node: NodeVO) => {
-    if (node.type === "base") {
+  const navigateNode = useCallback(
+    (node: NodeVO) => {
+      const destination = getMobileNodeDestination(node);
+      if (destination.status === "unsupported") return;
       setOpen(false);
-      router.push({ pathname: "/base/[slug]", params: { slug: node.slug } });
-      return;
-    }
-    if (node.type === "skill") {
-      setOpen(false);
-      router.push({ pathname: "/skill/[nodeId]", params: { nodeId: node.id } });
-      return;
-    }
-    if (node.type === "drive") {
-      setOpen(false);
-      router.push({ pathname: "/drive/[nodeId]", params: { nodeId: node.id } });
-      return;
-    }
-    if (node.type === "airapp") {
-      setOpen(false);
-      router.push({ pathname: "/airapp/[nodeId]", params: { nodeId: node.id } });
-      return;
-    }
-    if (node.type === "doc") {
-      setOpen(false);
-      router.push({ pathname: "/doc/[nodeId]", params: { nodeId: node.id } });
-      return;
-    }
-    if (node.type === "folder") {
-      setOpen(false);
-      router.push({ pathname: "/folder/[nodeId]", params: { nodeId: node.id } });
-      return;
-    }
-  };
+      void (async () => {
+        await nodeCache?.merge([nodeToKnownNode(node)]);
+        await nodeCache?.markVisited(node.id);
+        router.push({ pathname: destination.pathname, params: destination.params } as never);
+      })();
+    },
+    [nodeCache, router],
+  );
 
   return (
     <>
@@ -509,10 +499,15 @@ const NODE_ICONS: Record<string, typeof Folder> = {
 function nodeNavMeta(node: NodeVO) {
   const definition = getNodeType(node.type);
   const label = definition?.label ?? node.type;
+  const mobileUnsupported = node.type === "file";
   return {
     icon: NODE_ICONS[definition?.icon ?? ""] ?? FileText,
-    subtitle: node.type === "base" ? `${label} · ${node.slug}` : label,
-    tappable: hasCapability(node.type, "hasDetail"),
+    subtitle: mobileUnsupported
+      ? `${label} · Not viewable on mobile yet`
+      : node.type === "base"
+        ? `${label} · ${node.slug}`
+        : label,
+    tappable: hasCapability(node.type, "hasDetail") && !mobileUnsupported,
   };
 }
 

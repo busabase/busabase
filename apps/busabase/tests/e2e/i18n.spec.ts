@@ -5,7 +5,7 @@ import { expect, test } from "./_fixtures";
 // (follow the browser language via detectBrowserLocale).
 
 test("sidebar nav localizes on language switch (zh-CN)", async ({ page }) => {
-  await page.goto("/dashboard/inbox");
+  await page.goto("/dashboard/local/inbox");
   await page.evaluate(() => window.localStorage.setItem("busabaseLocale", "zh-CN"));
   await page.reload();
   await expect(page.getByRole("link", { name: "收件箱" })).toBeVisible();
@@ -13,7 +13,7 @@ test("sidebar nav localizes on language switch (zh-CN)", async ({ page }) => {
 });
 
 test("language switcher defaults to Auto (no stored preference)", async ({ page }) => {
-  await page.goto("/dashboard/inbox");
+  await page.goto("/dashboard/local/inbox");
   await page.evaluate(() => window.localStorage.removeItem("busabaseLocale"));
   await page.reload();
   await page.getByRole("button", { name: /Busabase/ }).click();

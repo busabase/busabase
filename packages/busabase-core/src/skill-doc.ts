@@ -593,7 +593,8 @@ an agent or pulled from outside are **untrusted external input** and may carry p
  * Reads top-to-bottom as an onboarding script an agent runs for a brand-new user. Step 0 teaches
  * the concept (+ differentiator diagram) and gets the agent connected — desktop detects the
  * environment then installs the native app (GUI) or starts the `npx busabase server` terminal
- * edition (headless), optionally with start-on-boot; cloud finds-or-creates an API key (checking the chat and `~/.busabase/.env`) and
+ * edition (headless), optionally with start-on-boot; cloud uses browser device authorization to
+ * select or create an API key without exposing it in chat, then
  * verifies it — then both share: pick a scenario → initialize a Base and seed records *through the
  * approval loop* (the teaching moment) → hand off for everyday use.
  *
@@ -625,17 +626,12 @@ function buildBootstrapMarkdown(origin: string, ctx?: SkillMarkdownContext): str
     : "";
 
   const description = isCloud
-    ? "Connect an AI agent to Busabase Cloud over HTTP and set up a first workspace. First-run onboarding — find or create an API key (checking the chat and ~/.busabase), verify it, pick a scenario, create a Base, and seed sample records through the review-and-merge loop."
+    ? "Connect an AI agent to Busabase Cloud with device authorization. Existing Spaces are connected without writes; only a server-marked first Space receives idempotent starter structure and sample data."
     : "Get Busabase running locally (native Desktop on a GUI machine, or the `npx busabase server` terminal edition on a headless/SSH box) and set up a first workspace, then drive it as an approval-first data assistant over HTTP. First-run onboarding — detect the environment, install or start the right edition, confirm it is up, pick a scenario, create a Base, and seed sample records through the review-and-merge loop.";
 
   const ownMachine = isCloud ? "" : " Everything runs and stays on the user's own machine.";
 
-  // Step 0 leads with a warm, language-matched welcome: a real introduction of Busabase (name,
-  // what it is, official site URL) that closes on ONE multiple-choice question (A/B/C/D mirroring
-  // the Step 2 blueprints) — before any install/probe. The technical connect (find key / install
-  // probe) is a subsection the agent only reaches after the user has answered, so the user's very
-  // first experience is being greeted and given clear choices, not a wall of curl or an
-  // open-ended essay question.
+  // Step 0 introduces the product, then authenticates before making any data decision.
   const welcomeOpening = `## Step 0 — Welcome the user first (no setup yet)
 
 Your **first message** to the user must be a warm, informative welcome **in the user's language** —
@@ -652,121 +648,58 @@ shape and adapt the wording naturally:
    reviews and approves it, and only then is it merged into the real data.
 3. **Why it matters** — unlike a normal table, wiki, or Notion where an AI edit is instantly live,
    here a wrong move stays a harmless proposal until they say yes. They keep control.
-4. **Together we can** — stand up a real workspace in minutes, seeded with starter records they
-   approve one by one.
-5. **Ask with options** — do **not** end on an open-ended question. Close with **one
-   multiple-choice question** — "What would you like to manage?" — offering lettered options
-   **A/B/C/D** that mirror the Step 2 blueprints, plus a free-form escape hatch. The user answers
-   with a single letter (or one sentence).
+4. **Together we can** — connect their existing Space without changing it, or initialize a
+   server-marked first Space with useful starter data.
+5. **Connect before asking about data.** Existing users finish after selecting a Space; only a
+   genuinely new Space needs a starter-scenario choice.
 
-Model opening — translate into their language, keep this voice, and keep the lettered options:
+Model opening — translate into their language and keep this voice:
 
 > 👋 Welcome! This is **Busabase** (${site}) — an *approval-first* workspace built for working
 > safely with AI agents. Your data lives in **Bases** (typed tables), and I never edit them
 > directly: every change I make is a **ChangeRequest** that you review — approve it and it merges,
 > reject it and it vanishes. A wrong move stays a harmless proposal until you say yes.
-> In a few minutes we'll set it up together and seed a real workspace with records you approve one
-> by one. **To make it yours — what would you like to manage?**
->
-> **A.** 📝 Content pipeline — blog / social content reviewed before publish
-> **B.** ✅ Compliance checklists — controlled items where every change leaves an audit trail
-> **C.** 📚 Knowledge base — notes, FAQs, and sources an agent reads but only you change
-> **D.** 👥 CRM contacts — leads an agent enriches and you approve
->
-> Or just tell me in one sentence what you'd like to manage.
+> I'll connect securely first. If you already have a Space, I will only connect to it and leave
+> its structure and records untouched. If this is your first Space, I can initialize a small
+> starter workspace automatically.
 
-Conduct **everything** below in the user's language. Only once they've answered (a letter or a
-sentence, or asked you to just go ahead) do you get technically connected, just below — then
-design their workspace around what they said (Step 2).`;
+Conduct **everything** below in the user's language, then proceed directly to connection.`;
 
   const step0 = isCloud
     ? `${welcomeOpening}
 
 ### Then get connected
 
-Busabase Cloud is hosted — nothing to install. There are **two ways to sign in; prefer OAuth**,
-and fall back to an API key when there's no browser (a headless / SSH / container box).
-
-#### Option A — Sign in with your browser (recommended, one command)
-
-Run this for the user. It opens the browser, the user approves, and it writes the whole
-connection to \`~/.busabase/.env\` **for you** — base URL, a login session token, and the chosen
-space (it even asks which space when the user belongs to more than one):
+Busabase Cloud is hosted — nothing to install. Use RFC 8628 device authorization: it works on a
+local machine, over SSH, and in a container because the browser can be on any computer or phone.
+The CLI saves the selected API key without printing it. Never ask the user to paste a secret in chat,
+and never print or display \`~/.busabase/.env\`.
 
 \`\`\`bash
-npm exec -y --package busabase-cli@latest -- busabase-cli login${preselectedSpaceId ? ` --space-id ${preselectedSpaceId}` : ""}
-# opens the browser; prints a URL to paste if it can't
+npm exec -y --package busabase-cli@latest -- busabase-cli login --device-code${preselectedSpaceId ? ` --space-id ${preselectedSpaceId}` : ""}
 \`\`\`
-${preselectedSpaceId ? `\nThis onboarding was opened from the current dashboard space. Keep this target unless the user explicitly chooses another:\n\n\`\`\`bash\nexport BUSABASE_SPACE_ID="${preselectedSpaceId}"\n\`\`\`\n` : ""}
-
-When it prints **"Signed in"**, the connection is saved — just read it back and continue:
+The terminal shows a short code and a verification URL, then waits. The user signs in, selects an
+existing API key or creates a new one, and approves in any browser. The browser never receives the
+key secret; the waiting CLI receives and saves it through a one-time exchange. On success the CLI
+prints a safe summary containing the selected Space plus
+\`createdSpace\` and \`bootstrapRequired\`; it never prints the credential.
 
 \`\`\`bash
-cat ~/.busabase/.env    # BUSABASE_BASE_URL, BUSABASE_API_KEY (login token), BUSABASE_SPACE_ID
+set -a; . ~/.busabase/.env; set +a
+npm exec -y --package busabase-cli@latest -- busabase-cli whoami --output json
 \`\`\`
 
-That's it — skip to verifying what's there (the \`bases\` check near the end of this step). Use
-Option B only if the user has no browser here, or prefers a key.
+Branch only on the server-owned state, never on whether a Space happens to be empty:
 
-#### Option B — API key (headless, or if the user prefers a key)
+${preselectedSpaceId ? `- **Dashboard Space supplied (\`${preselectedSpaceId}\`)** → lock this as the target: never create or switch Spaces. Preselection does not decide whether initialization is required; continue by checking \`bootstrapRequired\`.` : ""}
+- **\`bootstrapRequired: false\`** → existing user/Space, including a preselected empty Space with no
+  bootstrap marker. Connect only and jump to Step 4 with zero structure or record writes.
+- **\`bootstrapRequired: true\`** → the selected Space was auto-created for this user and still carries
+  the persistent version-0 bootstrap marker. Ask the Step 2 scenario question, then initialize this
+  Space even when the dashboard preselected it.
 
-Every call just needs an **API key** (a Bearer token). Find one before any API call:
-
-1. **Did the user paste a key in this chat?** A Busabase key starts with \`sk_\`. If so, use it.
-2. **Otherwise look for a saved local config:**
-
-\`\`\`bash
-cat ~/.busabase/.env 2>/dev/null    # look for BUSABASE_API_KEY (and optional BUSABASE_BASE_URL)
-\`\`\`
-
-If there is no key in either place, create one in **Step 1**, then come back. Once you have a key,
-set it and verify:
-
-\`\`\`bash
-export BUSABASE_BASE_URL="${site}"
-export BUSABASE_API_KEY="sk_..."    # from the chat or ~/.busabase/.env
-curl -fsS "$BUSABASE_BASE_URL/api/v1/users/me" -H "Authorization: Bearer $BUSABASE_API_KEY"
-\`\`\`
-
-- **401 on \`users/me\`** → the key is wrong or expired. Go to **Step 1**.
-- **It returns the user** → the key works. Now pick the space, just below.
-
-**Then pick the target space — the key is user-scoped, not space-scoped.** The key works
-across every space the user is a member of, and each request targets one space via the
-\`x-busabase-space\` header. If this onboarding URL already named a dashboard space, use that
-space unless the user explicitly changes it. Otherwise, look before you write:
-
-\`\`\`bash
-curl -fsS "$BUSABASE_BASE_URL/api/v1/auth" -H "Authorization: Bearer $BUSABASE_API_KEY"
-\`\`\`
-
-\`spaces\` in the response is every space the user belongs to; \`space\` is the default.
-
-${preselectedSpaceId ? `- **Dashboard space provided** → use \`${preselectedSpaceId}\` unless the user explicitly chooses another.` : ""}
-- **One space** → use its \`id\`, no need to ask.
-- **Multiple spaces and no dashboard space was provided** → **ask the user which space to use** — one lettered question listing
-  the spaces by name (A/B/C…). Never guess, and never silently take the default.
-
-\`\`\`bash
-export BUSABASE_SPACE_ID="${preselectedSpaceId ?? "<the chosen space id>"}"
-curl -fsS "$BUSABASE_BASE_URL/api/v1/bases" \\
-  -H "Authorization: Bearer $BUSABASE_API_KEY" -H "x-busabase-space: $BUSABASE_SPACE_ID"
-\`\`\`
-
-- **\`bases\` is \`[]\`** → connected, empty. Go to **Step 2**.
-- **\`bases\` already has entries** → connected and in use. Jump to **Step 4 (ongoing use)**.
-
-From here on, send \`x-busabase-space: $BUSABASE_SPACE_ID\` on **every** call (the examples
-below already include it).
-
-Once it verifies, **persist this connection to \`~/.busabase/.env\`** — the installed \`busabase\`
-skill and every future session read it from there, so write it now (Cloud needs the base URL,
-the key, and the chosen space):
-
-\`\`\`bash
-mkdir -p ~/.busabase && umask 177
-printf 'BUSABASE_BASE_URL=%s\\nBUSABASE_API_KEY=%s\\nBUSABASE_SPACE_ID=%s\\n' "$BUSABASE_BASE_URL" "$BUSABASE_API_KEY" "$BUSABASE_SPACE_ID" > ~/.busabase/.env
-\`\`\``
+An empty existing Space has no marker and is therefore connect-only. A retry after interrupted
+initialization still has the version-0 marker and safely resumes Step 3.`
     : `${welcomeOpening}
 
 ### Then get connected
@@ -793,23 +726,11 @@ printf 'BUSABASE_BASE_URL=%s\\n' "${local}" > ~/.busabase/.env
 \`\`\``;
 
   const step1 = isCloud
-    ? `## Step 1 — Get credentials (only if you don't have any)
+    ? `## Step 1 — Device sign-in recovery
 
-**Easiest: \`npm exec -y --package busabase-cli@latest -- busabase-cli login\`** — browser
-sign-in that saves everything to \`~/.busabase/.env\`, no key to copy. Use the manual key below
-only when there's no browser.
-
-Manual API key: tell the user in plain words to sign in at \`${site}/dashboard\`, open
-**Settings → API Keys**, and **Create key** — copy it (it is shown only once). Then save it so
-you never have to ask again:
-
-\`\`\`bash
-mkdir -p ~/.busabase && umask 177
-export BUSABASE_API_KEY="<paste the new key>"
-printf 'BUSABASE_API_KEY=%s\\nBUSABASE_BASE_URL=%s\\n' "$BUSABASE_API_KEY" "${site}" > ~/.busabase/.env
-\`\`\`
-
-Now go back to **Step 0** and verify the key.`
+Step 0 already runs the supported sign-in path. If authorization is denied or the code expires,
+run \`busabase-cli login --device-code\` again. If polling reports a network error, restore
+connectivity and retry. Never request, echo, inspect, or paste a credential in chat.`
     : `## Step 1 — Install & start (pick the edition that fits this machine)
 
 Don't default to the GUI download — **first detect the environment**, because a headless / SSH /
@@ -895,29 +816,15 @@ Don't offer Cloud proactively here — this walkthrough defaults to a local inst
 says they specifically want the hosted Cloud edition, support it instead of redirecting them to
 install anything:
 
-1. Tell them in plain words: sign in at \`${site}/dashboard\`, open **Settings → API Keys**, and
-   **Create key** — copy it (it is shown only once).
-2. Save it so you never have to ask again:
+Use the same device sign-in as the Cloud setup. It works from this local/headless environment while
+the user approves in any browser, and saves the credential without exposing it:
 
 \`\`\`bash
-mkdir -p ~/.busabase && umask 177
-export BUSABASE_API_KEY="<paste the new key>"
-export BUSABASE_BASE_URL="${site}"
-printf 'BUSABASE_API_KEY=%s\\nBUSABASE_BASE_URL=%s\\n' "$BUSABASE_API_KEY" "$BUSABASE_BASE_URL" > ~/.busabase/.env
+npm exec -y --package busabase-cli@latest -- busabase-cli login --device-code --base-url "${site}"${preselectedSpaceId ? ` --space-id ${preselectedSpaceId}` : ""}
+set -a; . ~/.busabase/.env; set +a
 \`\`\`
 
-3. Verify it, then pick the target space — a Cloud key is **user-scoped** and works across
-   every space the user belongs to, so confirm which one to write into (\`spaces\` lists them
-   all; if the dashboard supplied a target, use it; otherwise if there is more than one, ask
-   the user — never guess):
-
-\`\`\`bash
-curl -fsS "$BUSABASE_BASE_URL/api/v1/users/me" -H "Authorization: Bearer $BUSABASE_API_KEY"
-curl -fsS "$BUSABASE_BASE_URL/api/v1/auth"     -H "Authorization: Bearer $BUSABASE_API_KEY"
-export BUSABASE_SPACE_ID="${preselectedSpaceId ?? "<the chosen space id>"}"
-\`\`\`
-
-4. For the rest of this walkthrough (Steps 2-4 below), every \`${local}\` call becomes
+For the rest of this walkthrough (Steps 2-4 below), every \`${local}\` call becomes
    \`$BUSABASE_BASE_URL\` with \`-H "Authorization: Bearer $BUSABASE_API_KEY"\` and
    \`-H "x-busabase-space: $BUSABASE_SPACE_ID"\` added — there is no local server to install
    or start, so skip straight to Step 2 once the key verifies.
@@ -955,16 +862,17 @@ and in their language.** Don't claim "you're connected / all set" before this po
 once *all* of it has landed —
 
 - ✅ **connected** — the host responds (you proved it in Step 0)
-- ✅ **workspace initialized** — a real Base (plus structure) and records they approved themselves
+- ✅ **workspace ready** — existing Spaces were left untouched; a new Space was initialized once
 - ✅ **skill installed** — \`busabase\` is permanent, so every future session just works
 
 Tell them so, and close the journey with the tracker fully checked — e.g.:
 
-> ✅ Choose · ✅ Connect · ✅ Build · ✅ First approval · ✅ Skill
+> ✅ Connect · ✅ Initialize (new Spaces only) · ✅ Verify · ✅ Skill
 > 🎉 *You're all set — Busabase is connected, your first workspace is live, and the skill is
 > installed. From here it's everyday use: I propose, you approve, we merge.*
 
-Never bypass review unless the user explicitly asks for a direct merge.`;
+Normal agent work remains review-first. Only the versioned system-onboarding initializer may use
+\`autoMerge\` for starter structure and sample records.`;
 
   return `---
 name: busabase
@@ -980,34 +888,33 @@ welcome — no need to recite it here.)
 
 ## The journey at a glance — and how to run it
 
-You are guiding the user through **five milestones**. Keep this map in mind the whole way:
+You are guiding the user through four milestones. Existing users skip initialization entirely:
 
 | # | Milestone | Covered by | Done when |
 | - | --------- | ---------- | --------- |
-| 1 | 👋 **Choose** — meet Busabase, pick what to manage | Step 0 welcome | user answered A/B/C/D (or a sentence) |
-| 2 | 🔌 **Connect** — get a live workspace | Step 0 connect + Step 1 | \`/api/v1/bases\` answers |
-| 3 | 🏗️ **Build** — blueprint sketched, approved, created | Step 2 + Step 3a | Base + structure exist |
-| 4 | ✅ **First approval** — seed records, close the loop | Step 3b–3d | first record merged & canonical |
-| 5 | 🎓 **Skill installed** — set up for every future session | Step 4 | \`npx skills add\` done, 🎉 |
+| 1 | 🔌 **Connect** | Step 0 + Step 1 | device login returns the selected Space |
+| 2 | 🏗️ **Initialize if required** | Step 2 + Step 3 | version-0 Space gets starter data |
+| 3 | ✅ **Verify** | Step 3 | starter records read back and marker becomes version 1 |
+| 4 | 🎓 **Skill installed** | Step 4 | \`npx skills add\` done, 🎉 |
 
 **Conduct rules — these create the step-by-step feel; follow them at every turn:**
 
 - **Show progress at every milestone boundary.** When a milestone completes, open your next
   message with a one-line tracker (in the user's language), e.g.
-  \`✅ Choose · ✅ Connect · ▶ Build · ○ First approval · ○ Skill\` — so the user always knows
+  \`✅ Connect · ▶ Initialize · ○ Verify · ○ Skill\` — so the user always knows
   where they are and how much is left. Don't spam it mid-milestone; boundaries only.
 - **One question per message, lettered options whenever possible** (A/B/C/D…). Never two open
   questions at once, and never a question buried under a wall of output. If the user's answer is
   ambiguous, ask one short follow-up — still with options.
 - **Announce → act → confirm.** Before each action, say in one plain line what you're about to do
   and why. After it, confirm with a ✅ line what just became true ("✅ Server is up", "✅ Base
-  created — here's the structure you approved"). Never run several setup actions silently and
+  created — your starter workspace is ready"). Never run several setup actions silently and
   dump the results.
 - **The user sees outcomes and choices, not commands.** Run the curl / install commands yourself;
   translate results into plain language. Only show a command when the user must run it (e.g.
-  creating a Cloud API key in the browser).
+  completing device authorization in the browser).
 - **Small numbered sub-plans for anything multi-part.** When a milestone has several moves (e.g.
-  Step 3: sketch → create → seed → approve), tell the user the mini-plan first ("three quick
+  Step 3: inspect → create → seed → verify), tell the user the mini-plan first ("three quick
   things: …"), then tick through it.
 
 Here is the first move.
@@ -1016,12 +923,11 @@ ${step0}
 
 ${step1}
 
-## Step 2 — Turn their answer into a blueprint
+## Step 2 — Choose a starter only for a new Space
 
-You already asked the **A/B/C/D question** back in Step 0 — build on that answer here, don't ask
-again. Letters map straight onto the blueprints below (**A → 1, B → 2, C → 3, D → 4**); a
-free-form answer maps to the closest one, or a custom design (see *Custom blueprint*). Only if
-they seemed unsure or asked for more options, re-offer this menu:
+Enter this step whenever Step 0 returned \`bootstrapRequired: true\`, including when the dashboard
+preselected the target Space. Ask one low-cost question. If the user says "just go ahead", use Knowledge Base.
+Existing users never see this question and receive zero data writes:
 
 | # | Blueprint | Good for |
 | - | --------- | -------- |
@@ -1054,12 +960,12 @@ types (\`auto_number\`, \`created_time\`, \`ai_summary\`, \`ai_tags\`, …).
   (email), \`stage\` (select: lead/qualified/customer/churned), \`notes\` (longtext), \`last_touch\`
   (date).
 
-## Step 3 — Initialize: structure first, then data through the loop
+## Step 3 — Initialize automatically and idempotently
 
-**3a. Show the planned structure first, get a yes, then create.** First **sketch the plan for the
-user as a visual**: the folder, the Base(s), their fields, and any relations, drawn as a quick tree
-/ graph (this mirrors what Busabase's **Graph View** will render). Ask *"shall I build this?"*,
-fold in any edits, and only create on their go-ahead. A sketch worth showing:
+This is a deliberate exception to the everyday approval loop. The user already chose a starter
+for a server-marked new Space, so create its small example structure and records directly. Do not
+ask them to approve structure or sample rows. Every write carries system provenance and stable
+identity so retries cannot duplicate data. Briefly show what is being built:
 
 \`\`\`txt
 📁 CRM
@@ -1067,33 +973,32 @@ fold in any edits, and only create on their go-ahead. A sketch worth showing:
         └─ relates to ─► 📊 Companies   name· domain· tier· owner
 \`\`\`
 
-Once they approve, build folder-first so the user never lands in a flat root full of tables:
+Build folder-first so the user never lands in a flat root full of tables:
 
-- Folder / node-tree edits **do require** a Node ChangeRequest: \`POST /api/v1/nodes/change-requests\`,
-  then approve + merge it. One CR can hold MANY operations — a create op can declare a temp \`ref\`
+- Folder / node-tree edits use an audited Node ChangeRequest with \`"autoMerge": true\`. One CR can
+  hold MANY operations — a create op can declare a temp \`ref\`
   that a later op targets via \`parentNodeRef\`, so **you can create the folder AND the Bases/Docs
   inside it in a single CR** (no need to merge the folder first to learn its id).
-- \`POST /api/v1/bases\` defaults to the same review-first behavior — it returns a pending
-  ChangeRequest, not a materialized Base, unless you pass \`"autoMerge": true\`. Since the user already
-  said yes to this exact structure in step 3a, add \`"autoMerge": true\` here to materialize it
-  immediately instead of making them approve it a second time; pass \`parentNodeId\` when placing the
+- \`POST /api/v1/bases\` carries \`"autoMerge": true\`; its stable slug makes retries idempotent.
+  Pass \`parentNodeId\` when placing the
   Base under an already-merged folder (omit it for a root-level Base node).
 
 Worked example for blueprint #1:
+
+First list nodes and Bases. Skip any stable slug already present; create only missing pieces.
 
 \`\`\`bash
 curl -X POST "${api}/api/v1/nodes/change-requests" \\
 ${authLine}  -H 'content-type: application/json' \\
   --data '{
     "message": "Create Content workspace folder",
+    "autoMerge": true,
     "operations": [
       { "kind": "create", "nodeType": "folder", "slug": "content", "name": "Content" }
     ],
-    "submittedBy": "agent"
+    "submittedBy": "system-onboarding"
   }'
-# Approve + merge, then use the new folder node id as parentNodeId below — OR skip the round-trip
-# and add the Base to the SAME CR with { "kind": "create", "parentNodeRef": "content", ... } after
-# giving the folder op a "ref": "content" (see the node ChangeRequest example in API Surface).
+# Read back the folder node id and use it as parentNodeId below.
 \`\`\`
 
 \`\`\`bash
@@ -1128,21 +1033,16 @@ create a **Pages** base the same way with an \`html_body\` field of \`"type": "h
 
 > **Always leave the workspace with more than one node.** A brand-new space holding a single empty
 > Base renders as an empty screen — there's nothing for the user to see. So before seeding, give it
-> structure: create a containing **folder** node and put the Base inside it (a node ChangeRequest —
-> \`POST /api/v1/nodes/change-requests\`, then approve + merge it), or create a second related Base
+> structure: create a containing **folder** node and put the Base inside it, or create a second related Base
 > (e.g. CRM Contacts **+** Companies, or Content Pipeline **+** Pages). Combined with the seeded +
 > merged record in 3c, the user opens a populated tree, never a blank one.
 
 Once created, point the user to the live **Graph View** (open \`${api}/dashboard\` → *Graph View*
-in the sidebar) so they can see the real structure they just approved — the sketch made concrete.
+in the sidebar) so they can see the real starter structure.
 
-**3b. Seed 3–5 sample records as ChangeRequests** — this is the part the user reviews, so never
-write records directly. **Write for the reviewer:** the Base's PRIMARY field (its first field,
-e.g. \`title\`) becomes the record's display name and the ChangeRequest title — always give it a
-short, human-readable value — and \`message\` is your commit message, shown under the title in the
-review inbox: write a conventional-commit style subject (imperative verb + what + why), never
-\`"update"\` or a bare default. Seed one record per CR when you want each reviewed individually, or
-propose them all at once with the **bulk** endpoint below (one review, one merge):
+**3b. Seed 3–5 canonical sample records without review prompts.** Use one record call per sample
+because the single-record endpoint supports both \`autoMerge\` and \`idempotencyKey\`; the bulk
+endpoint does not auto-merge. Use a short human-readable PRIMARY field and stable versioned keys:
 
 \`\`\`bash
 curl -X POST "${api}/api/v1/bases/<BASE_ID>/change-requests" \\
@@ -1154,53 +1054,26 @@ ${authLine}  -H 'content-type: application/json' \\
       "channel": "blog",
       "status": "draft"
     },
-    "message": "Seed: first content draft for review",
-    "submittedBy": "agent"
+    "message": "Initialize starter content draft",
+    "submittedBy": "system-onboarding",
+    "idempotencyKey": "system-onboarding:v1:content:launch-announcement",
+    "autoMerge": true
   }'
 \`\`\`
 
-To seed several rows in one reviewable unit, use the bulk endpoint instead of N calls:
+${spaceNote} Repeat with distinct stable keys for the other sample rows. The endpoint records the
+audited ChangeRequest and merges it immediately, leaving no \`in_review\` onboarding items.
 
-\`\`\`bash
-curl -X POST "${api}/api/v1/bases/<BASE_ID>/records/bulk-change-request" \\
-${authLine}  -H 'content-type: application/json' \\
-  --data '{
-    "records": [
-      { "title": "Launch announcement blog post", "channel": "blog", "status": "draft" },
-      { "title": "Feature deep-dive", "channel": "blog", "status": "idea" },
-      { "title": "Launch week recap thread", "channel": "social", "status": "idea" }
-    ],
-    "message": "Seed: 3 sample content drafts for review",
-    "submittedBy": "agent"
-  }'
-\`\`\`
-
-${spaceNote} Each call returns a ChangeRequest \`id\`.
-
-**3c. Walk the user through approving the first one — together.** This is the teaching moment:
-show them the ChangeRequest, then approve and merge it so they watch the loop close end-to-end:
-
-\`\`\`bash
-curl -X POST "${api}/api/v1/change-requests/<CR_ID>/reviews" \\
-${authLine}  -H 'content-type: application/json' --data '{ "verdict": "approved" }'
-curl -X POST "${api}/api/v1/change-requests/<CR_ID>/merge"${H}
-\`\`\`
-
-After merge the record is canonical — confirm it (lists merged records across the workspace):
+**3c. Read back canonical data, then mark bootstrap complete.** Never mark completion before all
+expected nodes, Bases, and records have been read back successfully:
 
 \`\`\`bash
 curl "${api}/api/v1/records"${H}
+curl -X POST "${api}/api/v1/onboarding/bootstrap-complete"${H}
 \`\`\`
 
-**3d. Ask how to handle the remaining ChangeRequests — one lettered question:**
-
-> The other seeded records are still waiting in review. What shall we do with them?
-> **A.** ✅ Approve & merge them all now
-> **B.** 👀 Walk through them one by one, like we just did
-> **C.** 📋 Leave them \`in_review\` — you'll review them later in the dashboard
-
-Whatever they pick, confirm with a ✅ line when it's done. The workspace is now initialized: a
-real Base plus seeded records the user reviewed themselves.
+The completion call is idempotent and changes \`agentBootstrapVersion\` from 0 to 1 while preserving
+the rest of the Space onboarding state. Re-run \`whoami\`; \`bootstrapRequired\` must now be false.
 
 ### Custom blueprint (any scenario — this is what keeps it general)
 
@@ -1211,10 +1084,11 @@ If the user picks *Something else*, don't hunt for a matching template — **des
    choices, \`markdown\`/\`html\` for bodies, \`attachment\` for files, \`embed\` for YouTube/Google Drive
    previews, \`email\`/\`url\`/\`date\` for
    typed values), following the same shape as the starter blueprints.
-3. Run the exact same **3a → 3b → 3c → 3d**. Nothing else changes.
+3. Run the same idempotent **structure → sample records → read-back → mark complete** sequence.
 
 The starter blueprints are only calibrated examples — the real capability is that you can model
-*whatever the user actually has* and still drive it through the same approval loop.
+*whatever the user actually has*. The automatic-merge exception ends when bootstrap is complete;
+all later agent changes use the normal review loop.
 
 ${step4}
 `;

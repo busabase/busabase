@@ -1820,7 +1820,7 @@ function BusabaseDashboardContent({
   // the current view's own state rather than app-wide navigation chrome).
   if (chromeless) {
     return (
-      <div className="flex h-full min-h-0 flex-1 flex-col bg-background">
+      <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col bg-background">
         {error ? (
           isConflictErrorMessage(error) ? (
             <ReviewConflictPanel message={error} />
@@ -1830,14 +1830,16 @@ function BusabaseDashboardContent({
             </div>
           )
         ) : null}
-        <div className="min-h-0 flex-1 overflow-hidden">{activeView}</div>
+        <div className="min-h-0 min-w-0 flex-1 overflow-hidden" data-dashboard-active-view>
+          {activeView}
+        </div>
       </div>
     );
   }
 
   const content = (
     <div className="flex h-full min-h-0 bg-background">
-      <div className="flex min-h-0 flex-1 flex-col">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         <div className="flex h-10 shrink-0 items-center gap-2 border-b bg-background/80 px-4 py-1.5 backdrop-blur-sm md:h-12">
           <SidebarTrigger className="h-8 w-8 shrink-0" />
           <BusabaseTopbarBreadcrumb items={breadcrumbItems} />
@@ -1854,7 +1856,9 @@ function BusabaseDashboardContent({
           )
         ) : null}
 
-        <div className="min-h-0 flex-1 overflow-hidden">{activeView}</div>
+        <div className="min-h-0 min-w-0 flex-1 overflow-hidden" data-dashboard-active-view>
+          {activeView}
+        </div>
       </div>
       <SidePanel orpc={orpc} />
       <SearchDialog nodeCache={nodeCache} orpc={orpc} onClose={closeSearch} open={isSearchOpen} />
@@ -1862,7 +1866,7 @@ function BusabaseDashboardContent({
   );
 
   if (embedded) {
-    return <div className="flex min-h-0 flex-1 flex-col">{content}</div>;
+    return <div className="flex min-h-0 min-w-0 flex-1 flex-col">{content}</div>;
   }
 
   return (

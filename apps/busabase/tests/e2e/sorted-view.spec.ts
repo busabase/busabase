@@ -16,7 +16,7 @@ test.use({ locale: "en-US" });
  * order, complementing the keyset-correctness integration test.
  */
 test("a server-sorted view renders records in publish_date-descending order", async ({ page }) => {
-  await page.goto("/dashboard/base/blog/all-records");
+  await page.goto("/dashboard/local/base/blog/all-records");
 
   const rows = page.locator("[data-record-id]");
   await expect(rows.first()).toBeVisible({ timeout: RENDER_TIMEOUT });
