@@ -1,0 +1,144 @@
+# Owned by this open-source repo (busabase/busabase). The kapps publish script
+# preserves `.github`, so future source syncs do not overwrite this workflow.
+#
+# Required repository secrets: VERCEL_TOKEN, VERCEL_ORG_ID, and
+# VERCEL_PROJECT_ID.
+name: Deploy Busabase CMS example to Vercel
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "packages/busabase-example-nextjs-fumadocs/**"
+      - "packages/busabase-cms/**"
+      - "apps/busabase-sdk/**"
+      - "packages/busabase-contract/**"
+      - "pnpm-lock.yaml"
+      - "pnpm-workspace.yaml"
+      - "package.json"
+      - ".github/workflows/vercel-cms-example.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "packages/busabase-example-nextjs-fumadocs/**"
+      - "packages/busabase-cms/**"
+      - "apps/busabase-sdk/**"
+      - "packages/busabase-contract/**"
+      - "pnpm-lock.yaml"
+      - "pnpm-workspace.yaml"
+      - "package.json"
+      - ".github/workflows/vercel-cms-example.yml"
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Vercel deployment environment
+        required: true
+        default: preview
+        type: choice
+        options:
+          - preview
+          - production
+
+concurrency:
+  group: vercel-cms-example-${{ github.event.pull_request.number || github.ref }}-${{ inputs.environment || github.event_name }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: 24.18.0
+  EXAMPLE_DIRECTORY: packages/busabase-example-nextjs-fumadocs
+  DEPLOY_ENVIRONMENT: ${{ (github.event_name == 'push' || inputs.environment == 'production') && 'production' || 'preview' }}
+  VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+  VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+  VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+
+jobs:
+  deploy:
+    name: Deploy ${{ (github.event_name == 'push' || inputs.environment == 'production') && 'production' || 'preview' }}
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - name: Check Vercel configuration
+        id: vercel_config
+        shell: bash
+        run: |
+          set -euo pipefail
+          missing=()
+          [ -n "${VERCEL_TOKEN:-}" ] || missing+=(VERCEL_TOKEN)
+          [ -n "${VERCEL_ORG_ID:-}" ] || missing+=(VERCEL_ORG_ID)
+          [ -n "${VERCEL_PROJECT_ID:-}" ] || missing+=(VERCEL_PROJECT_ID)
+
+          if [ "${#missing[@]}" -gt 0 ]; then
+            joined=$(IFS=,; echo "${missing[*]}")
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::Skipping deployment; missing repository secrets: ${joined}"
+            {
+              echo "## Busabase CMS example deployment skipped"
+              echo
+              echo "Missing repository secrets: \`${joined}\`."
+            } >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install example and workspace dependencies
+        if: steps.vercel_config.outputs.ready == 'true'
+        run: pnpm install --frozen-lockfile --filter "busabase-example-nextjs-fumadocs..."
+
+      - name: Install Vercel CLI
+        if: steps.vercel_config.outputs.ready == 'true'
+        run: npm install --global vercel@latest
+
+      - name: Pull Vercel environment
+        if: steps.vercel_config.outputs.ready == 'true'
+        working-directory: ${{ env.EXAMPLE_DIRECTORY }}
+        run: vercel pull --yes --environment="$DEPLOY_ENVIRONMENT" --token="$VERCEL_TOKEN"
+
+      - name: Build Vercel project
+        if: steps.vercel_config.outputs.ready == 'true'
+        working-directory: ${{ env.EXAMPLE_DIRECTORY }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "$DEPLOY_ENVIRONMENT" = "production" ]; then
+            vercel build --prod --token="$VERCEL_TOKEN"
+          else
+            vercel build --token="$VERCEL_TOKEN"
+          fi
+
+      - name: Deploy prebuilt output
+        if: steps.vercel_config.outputs.ready == 'true'
+        id: deploy
+        working-directory: ${{ env.EXAMPLE_DIRECTORY }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "$DEPLOY_ENVIRONMENT" = "production" ]; then
+            deployment_url=$(vercel deploy --prebuilt --prod --token="$VERCEL_TOKEN")
+          else
+            deployment_url=$(vercel deploy --prebuilt --token="$VERCEL_TOKEN")
+          fi
+          echo "url=${deployment_url}" >> "$GITHUB_OUTPUT"
+
+      - name: Report deployment
+        if: steps.vercel_config.outputs.ready == 'true'
+        env:
+          DEPLOYMENT_URL: ${{ steps.deploy.outputs.url }}
+        shell: bash
+        run: |
+          {
+            echo "## Busabase CMS example deployment"
+            echo
+            echo "- Environment: **${DEPLOY_ENVIRONMENT}**"
+            echo "- URL: [${DEPLOYMENT_URL}](${DEPLOYMENT_URL})"
+          } >> "$GITHUB_STEP_SUMMARY"
