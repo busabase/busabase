@@ -2,7 +2,9 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";
 import { CodeBlock } from "kui/ai-elements/code-block";
 import { FileTree } from "kui/ai-elements/file-tree";
-import { AppWindow, File, FileText, Folder, HardDrive, Sparkles, Table2 } from "lucide-react";
+import { Button } from "kui/button";
+import { Popover, PopoverContent, PopoverTrigger } from "kui/popover";
+import { AppWindow, File, FileText, Folder, HardDrive, Info, Sparkles, Table2 } from "lucide-react";
 import { SPALink as Link } from "openlib/ui/dashboard";
 import { type ComponentProps, useCallback, useEffect, useMemo, useState } from "react";
 import { useLocation, useSearch } from "wouter";
@@ -218,52 +220,60 @@ export function FileTreeDetailView({
 
   return (
     <div className="flex h-full min-h-0 w-full flex-col bg-background">
-      <header className="border-border/60 border-b px-4 py-4 md:px-6">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-          <div className="flex min-w-0 items-start gap-3">
-            <div className="mt-0.5 grid size-8 shrink-0 place-items-center rounded-md border border-border/70 bg-muted/35 text-muted-foreground">
-              <NodeIcon className="size-4" />
-            </div>
-            <div className="min-w-0">
-              <div className="mb-1 flex items-center gap-2">
-                <span className="font-medium text-[11px] text-muted-foreground uppercase">
-                  {nodeTypeLabel}
-                </span>
-              </div>
-              <h1 className="truncate font-semibold text-2xl text-foreground">
-                {fileTree.node.name}
-              </h1>
+      {/* Single compact toolbar (identity + info popover, actions) replaces the
+          old stacked title-block / properties chrome, giving the file browser
+          maximum vertical space — mirrors AirAppDetailView's header pattern.
+          Description/properties moved into the Info popover. */}
+      <header className="flex h-12 shrink-0 items-center gap-2 border-border/60 border-b px-3 md:px-4">
+        <div className="flex min-w-0 items-center gap-2">
+          <span title={nodeTypeLabel}>
+            <NodeIcon className="size-4 shrink-0 text-muted-foreground" />
+          </span>
+          <h1 className="truncate font-medium text-foreground text-sm">{fileTree.node.name}</h1>
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button
+                aria-label={messages.nodeDetail.details}
+                className="shrink-0 text-muted-foreground"
+                size="icon-sm"
+                title={messages.nodeDetail.details}
+                type="button"
+                variant="ghost"
+              >
+                <Info className="size-3.5" />
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent align="start" className="w-80">
               {fileTree.node.description ? (
-                <p className="mt-1 max-w-3xl text-muted-foreground text-sm leading-6">
+                <p className="mb-3 text-muted-foreground text-sm leading-6">
                   {fileTree.node.description}
                 </p>
               ) : null}
-            </div>
-          </div>
-          <div className="flex shrink-0 items-center gap-2">
-            <NodePermissionsButton
-              nodeId={fileTree.node.id}
-              nodeName={fileTree.node.name}
-              orpc={orpc}
-            />
-            <NodeDeleteButton
-              nodeId={fileTree.node.id}
-              nodeName={fileTree.node.name}
-              nodeType={nodeType}
-              orpc={orpc}
-            />
-          </div>
+              <dl className="flex flex-col gap-2 text-xs">
+                {propertyItems.map((item) => (
+                  <div className="flex min-w-0 items-center justify-between gap-3" key={item.label}>
+                    <dt className="shrink-0 text-muted-foreground">{item.label}</dt>
+                    <dd className="min-w-0 truncate font-mono text-foreground/80">{item.value}</dd>
+                  </div>
+                ))}
+              </dl>
+            </PopoverContent>
+          </Popover>
         </div>
-        <dl className="mt-4 flex flex-wrap items-center gap-x-5 gap-y-2 text-xs">
-          {propertyItems.map((item) => (
-            <div className="flex min-w-0 items-center gap-1.5" key={item.label}>
-              <dt className="shrink-0 text-muted-foreground">{item.label}</dt>
-              <dd className="min-w-0 max-w-64 truncate font-mono text-foreground/80">
-                {item.value}
-              </dd>
-            </div>
-          ))}
-        </dl>
+
+        <div className="ml-auto flex shrink-0 items-center gap-1.5">
+          <NodePermissionsButton
+            nodeId={fileTree.node.id}
+            nodeName={fileTree.node.name}
+            orpc={orpc}
+          />
+          <NodeDeleteButton
+            nodeId={fileTree.node.id}
+            nodeName={fileTree.node.name}
+            nodeType={nodeType}
+            orpc={orpc}
+          />
+        </div>
       </header>
 
       <div className="grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-[300px_minmax(0,1fr)]">
@@ -510,24 +520,71 @@ export function FileNodeDetailView({
   ].filter((row): row is { label: string; value: string } => Boolean(row));
 
   return (
-    <div className="mx-auto flex w-full max-w-5xl flex-col gap-4 p-4 md:p-6">
-      <div className="flex flex-col gap-3 border-border/60 border-b pb-4 md:flex-row md:items-start md:justify-between">
-        <div className="min-w-0">
-          <div className="mb-2 flex items-center gap-2 text-muted-foreground text-xs uppercase">
-            <File className="size-4" />
-            {messages.nodeDetail.file}
-          </div>
-          <h1 className="truncate font-semibold text-2xl tracking-tight">{node.name}</h1>
-          {node.description ? (
-            <p className="mt-2 text-muted-foreground text-sm">{node.description}</p>
-          ) : null}
+    <div className="flex h-full min-h-0 w-full flex-col bg-background">
+      {/* Single compact toolbar (identity + info popover, actions) replaces the
+          old stacked title-block / metadata-sidebar chrome, giving the asset
+          preview maximum space — mirrors AirAppDetailView's header pattern.
+          Description/backing-asset metadata moved into the Info popover. */}
+      <header className="flex h-12 shrink-0 items-center gap-2 border-border/60 border-b px-3 md:px-4">
+        <div className="flex min-w-0 items-center gap-2">
+          <File className="size-4 shrink-0 text-muted-foreground" />
+          <h1 className="truncate font-medium text-foreground text-sm">{node.name}</h1>
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button
+                aria-label={messages.nodeDetail.details}
+                className="shrink-0 text-muted-foreground"
+                size="icon-sm"
+                title={messages.nodeDetail.details}
+                type="button"
+                variant="ghost"
+              >
+                <Info className="size-3.5" />
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent align="start" className="w-80">
+              {node.description ? (
+                <p className="mb-3 text-muted-foreground text-sm leading-6">{node.description}</p>
+              ) : null}
+              <h2 className="mb-2 font-medium text-xs uppercase text-muted-foreground">
+                {messages.nodeDetail.backingAsset}
+              </h2>
+              <dl className="flex flex-col gap-2 text-xs">
+                {metaRows.map((row) => (
+                  <div className="flex min-w-0 items-center justify-between gap-3" key={row.label}>
+                    <dt className="shrink-0 text-muted-foreground">{row.label}</dt>
+                    <dd className="min-w-0 truncate font-mono text-foreground/80" title={row.value}>
+                      {row.value}
+                    </dd>
+                  </div>
+                ))}
+                <div className="flex min-w-0 items-center justify-between gap-3">
+                  <dt className="shrink-0 text-muted-foreground">url</dt>
+                  <dd className="min-w-0 truncate">
+                    <a
+                      className="text-primary underline-offset-2 hover:underline"
+                      href={asset.url}
+                      rel="noreferrer"
+                      target="_blank"
+                    >
+                      {asset.url}
+                    </a>
+                  </dd>
+                </div>
+              </dl>
+              <AssetMetadataBlock compact metadata={asset.metadata} />
+            </PopoverContent>
+          </Popover>
         </div>
-        <NodePermissionsButton nodeId={node.id} nodeName={node.name} orpc={orpc} />
-        <NodeDeleteButton orpc={orpc} nodeId={node.id} nodeName={node.name} nodeType="file" />
-      </div>
 
-      <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_320px]">
-        <div className="grid min-h-[320px] place-items-center overflow-hidden rounded-md border bg-muted">
+        <div className="ml-auto flex shrink-0 items-center gap-1.5">
+          <NodePermissionsButton nodeId={node.id} nodeName={node.name} orpc={orpc} />
+          <NodeDeleteButton orpc={orpc} nodeId={node.id} nodeName={node.name} nodeType="file" />
+        </div>
+      </header>
+
+      <div className="min-h-0 flex-1 overflow-auto p-4 md:p-6">
+        <div className="mx-auto grid h-full min-h-[320px] max-w-5xl place-items-center overflow-hidden rounded-md border bg-muted">
           {isImage ? (
             <img alt={asset.name} className="max-h-[65vh] w-full object-contain" src={asset.url} />
           ) : (
@@ -542,34 +599,6 @@ export function FileNodeDetailView({
             </a>
           )}
         </div>
-
-        <aside className="rounded-md border bg-background p-4">
-          <h2 className="font-medium text-sm">{messages.nodeDetail.backingAsset}</h2>
-          <dl className="mt-3 grid gap-2 font-mono text-xs">
-            {metaRows.map((row) => (
-              <div className="flex gap-2" key={row.label}>
-                <dt className="w-14 shrink-0 text-muted-foreground">{row.label}</dt>
-                <dd className="min-w-0 truncate" title={row.value}>
-                  {row.value}
-                </dd>
-              </div>
-            ))}
-            <div className="flex gap-2">
-              <dt className="w-14 shrink-0 text-muted-foreground">url</dt>
-              <dd className="min-w-0 truncate">
-                <a
-                  className="text-primary underline-offset-2 hover:underline"
-                  href={asset.url}
-                  rel="noreferrer"
-                  target="_blank"
-                >
-                  {asset.url}
-                </a>
-              </dd>
-            </div>
-          </dl>
-          <AssetMetadataBlock compact metadata={asset.metadata} />
-        </aside>
       </div>
     </div>
   );

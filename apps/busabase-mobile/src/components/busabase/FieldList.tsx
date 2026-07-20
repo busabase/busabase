@@ -142,7 +142,7 @@ const styles = StyleSheet.create({
   compactRow: { gap: 3 },
   compactLabel: { textTransform: "uppercase" },
   compactValue: { minWidth: 0 },
-  groupedRow: { paddingHorizontal: 14, paddingVertical: 12, gap: 7 },
+  groupedRow: { paddingHorizontal: 14, paddingVertical: 10, gap: 6 },
   groupedLabelLine: {
     flexDirection: "row",
     alignItems: "center",

@@ -61,22 +61,68 @@ export const ExportTablesVOSchema = z.object({
 });
 export type ExportTablesVO = z.infer<typeof ExportTablesVOSchema>;
 
+/**
+ * `POST /dump/export/asset-texts/{assetId}/content` — resolve the download URL
+ * for ONE asset's extracted-text object.
+ *
+ * Why this exists as its own route instead of reusing `assets.readTextLines`:
+ * an `asset-texts` blob is content-addressed by the sha256 of its EXACT bytes,
+ * so a backup that cannot reproduce those bytes byte-for-byte produces a row
+ * whose `textContentHash` no longer matches its own object. `readTextLines` is
+ * a line-oriented reader (`lines: string[]`, capped at 2000 lines / ~2MB) — it
+ * cannot round-trip a trailing newline, CRLF endings, a >2000-line file, or a
+ * long line hit by its truncation guard. This route mirrors
+ * `assets.download` instead: resolve a URL, let the caller stream the real
+ * bytes, no size ceiling.
+ */
+export const ExportAssetTextInputSchema = z.object({ assetId: z.string() });
+export type ExportAssetTextInput = z.infer<typeof ExportAssetTextInputSchema>;
+
+export const ExportAssetTextVOSchema = z.object({
+  assetId: z.string(),
+  /** The row's `text_storage_key` — the exact key a restore must write back to. */
+  textStorageKey: z.string(),
+  /**
+   * `null` when this row owns no separate text object and therefore needs no
+   * blob in the archive:
+   *  - auto-registered text-kind rows (`writtenBy: "auto"`), whose
+   *    `textStorageKey` IS the owning attachment's own key — those bytes are
+   *    already archived by the attachment-blob pass, and re-archiving them
+   *    would duplicate bytes and collide on restore;
+   *  - `status: "none"` rows (no extractable text), whose key is `""`.
+   */
+  downloadUrl: z.string().nullable(),
+  /** `sha256:<hex>` of the text bytes, so a backup can verify what it downloaded. */
+  textContentHash: z.string().nullable(),
+  byteCount: z.number().int().nonnegative(),
+});
+export type ExportAssetTextVO = z.infer<typeof ExportAssetTextVOSchema>;
+
 export const ImportBeginVOSchema = z.object({
   sessionId: z.string(),
 });
 export type ImportBeginVO = z.infer<typeof ImportBeginVOSchema>;
 
 /**
- * `docBodies` and `attachmentBlobs` are pseudo-tables: doc markdown and
- * attachment bytes live in object storage, not a DB row. `attachmentBlobs`
- * rows are `{ storageKey, mimeType, base64 }` — written directly via
- * `storage.uploadFileToKey`, one per unique `busabase_attachments.storageKey`
- * in the archive (content-addressed, so re-importing the same blob twice is
- * a harmless overwrite of identical bytes).
+ * `docBodies`, `attachmentBlobs` and `assetTextBlobs` are pseudo-tables: doc
+ * markdown, attachment bytes and extracted-text bytes live in object storage,
+ * not a DB row. `attachmentBlobs` rows are `{ storageKey, mimeType, base64 }` —
+ * written directly via `storage.uploadFileToKey`, one per unique
+ * `busabase_attachments.storageKey` in the archive (content-addressed, so
+ * re-importing the same blob twice is a harmless overwrite of identical bytes).
+ * `assetTextBlobs` rows are `{ textStorageKey, base64 }`, one per
+ * `busabase_asset_texts` row that owns a DERIVED text object
+ * (`asset-texts/blobs/sha256/…`); auto-registered rows are deliberately absent
+ * because their key is the attachment's own key, already covered above.
  */
 export const ImportTablesInputSchema = z.object({
   sessionId: z.string(),
-  table: z.union([DumpTableSchema, z.literal("docBodies"), z.literal("attachmentBlobs")]),
+  table: z.union([
+    DumpTableSchema,
+    z.literal("docBodies"),
+    z.literal("attachmentBlobs"),
+    z.literal("assetTextBlobs"),
+  ]),
   rows: z.array(z.record(z.string(), z.unknown())),
 });
 export type ImportTablesInput = z.infer<typeof ImportTablesInputSchema>;

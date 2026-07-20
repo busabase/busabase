@@ -12,7 +12,7 @@ import { busabaseRouter } from "../src/router";
  * real oRPC router against a real PGLite DB + local object storage — mirrors
  * the harness convention used by `node-space-isolation.test.ts` /
  * `node-restore-fixes.test.ts`. Complements
- * `packages/busabase-dump/src/format/archive.test.ts`, which only covers the
+ * `apps/busabase-cli/src/backup/format/archive.test.ts`, which only covers the
  * archive-file layer, not the server-side session/integrity logic.
  */
 

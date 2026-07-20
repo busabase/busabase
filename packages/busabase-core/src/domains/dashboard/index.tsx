@@ -58,6 +58,7 @@ import { BaseTableSkeleton } from "./components/skeletons";
 import { BusabaseTopbarBreadcrumb } from "./components/topbar";
 import { getRelationRecordIds } from "./helpers/field";
 import { getLocationPath, readInboxView } from "./helpers/inbox";
+import { createKnownNodeCache, type KnownNode, nodeRoutePath } from "./helpers/known-node-cache";
 import { mergeSearchIntoHref } from "./helpers/link-search";
 import { isConflictErrorMessage } from "./helpers/search";
 import type {
@@ -69,8 +70,27 @@ import type {
 } from "./helpers/view-types";
 import { useAttachmentUpload } from "./hooks/use-attachment-upload";
 import { useDashboardRoutes } from "./hooks/use-dashboard-routes";
+import { useKeyboardShortcut } from "./hooks/use-keyboard-shortcut";
 import { useBusabaseLiveSync } from "./hooks/use-live-sync";
 import { getNodeDetail } from "./node-detail-registry";
+
+// Flattens the (already-fetched, for sidebar-tree rendering) node tree into
+// `KnownNode` cache entries — free, no new request: every `nodes.list`
+// response (root eager-prefetch + each lazily-expanded folder) already flows
+// through this `nodeTree`/`nodes` prop. `path` mirrors the server's
+// `toNodeSearchResultVO` (logic/vo.ts) convention (`/${type}/${slug}`) —
+// every built-in node type has its own detail route.
+const flattenNodesForCache = (nodes: NodeVO[]): KnownNode[] =>
+  nodes.flatMap((node) => [
+    {
+      id: node.id,
+      type: node.type,
+      name: node.name,
+      slug: node.slug,
+      path: nodeRoutePath(node.type, node.slug),
+    },
+    ...flattenNodesForCache(node.children),
+  ]);
 
 // Records per "load more" page. Server caps limit at 100; 50 keeps parity with
 // the previous single-shot list size while staying paginated.
@@ -181,6 +201,10 @@ function BusabaseDashboardContent({
     () => apiClient ?? createBusabaseRestApiClient(apiBasePath, apiClientOptions),
     [apiBasePath, apiClient, apiClientOptions],
   );
+  const nodeCache = useMemo(
+    () => createKnownNodeCache(`${cacheSpaceKey}:${currentUserId ?? "anonymous"}`),
+    [cacheSpaceKey, currentUserId],
+  );
   // Reads run through oRPC + React Query, seeded by the SSR props as initialData.
   const changeRequestsList = orpc.changeRequests.list.queryOptions({ input: {} });
   const basesList = orpc.bases.list.queryOptions({});
@@ -248,16 +272,6 @@ function BusabaseDashboardContent({
   const inboxView = readInboxView(search);
   const [uncontrolledSearchOpen, setUncontrolledSearchOpen] = useState(false);
   const isSearchOpen = searchOpen ?? uncontrolledSearchOpen;
-  const changeRequests = useMemo(
-    () =>
-      allChangeRequests.filter(
-        (changeRequest) =>
-          changeRequest.status === "in_review" ||
-          changeRequest.status === "changes_requested" ||
-          changeRequest.status === "approved",
-      ),
-    [allChangeRequests],
-  );
 
   const {
     isArchivedRoute,
@@ -1473,6 +1487,26 @@ function BusabaseDashboardContent({
     setSearchOpen(false);
   }, [setSearchOpen]);
 
+  // Feed the `KnownNode` quick-jump cache from every node already fetched for
+  // the sidebar tree (root eager-prefetch + lazily-expanded folders) — see
+  // apps/busabase/content/spec/search-quick-jump.md. `nodeTree` is referentially
+  // stable across unrelated re-renders (`useLazyNodeChildren`'s `mergeLazyChildren`
+  // preserves object identity for untouched subtrees), so this only actually
+  // re-merges when the tree really changed.
+  useEffect(() => {
+    nodeCache.merge(flattenNodesForCache(nodeTree));
+  }, [nodeCache, nodeTree]);
+
+  // Global Cmd+K (Mac) / Ctrl+K (Windows/Linux) quick-jump shortcut — opens the
+  // search dialog from anywhere in the dashboard. Registered as two separate
+  // bindings (not one "meta-or-ctrl" combo) since `useKeyboardShortcut` treats
+  // each modifier exactly, matching how this repo's other cross-platform
+  // shortcuts are declared (e.g. the GM-panel toggle's `["meta.shift.m",
+  // "ctrl.alt.m"]` pair in apps/*/keyboard-shortcuts-provider.tsx).
+  const openSearch = useCallback(() => setSearchOpen(true), [setSearchOpen]);
+  useKeyboardShortcut({ keys: "cmd+k", handler: openSearch });
+  useKeyboardShortcut({ keys: "ctrl+k", handler: openSearch });
+
   const topbarActions = useMemo(() => {
     // Record view/edit → a View/Edit switch in the titlebar (far right).
     if ((isRecordRoute || isEditRecordRoute) && activeBase && selectedRecordId) {
@@ -1823,14 +1857,7 @@ function BusabaseDashboardContent({
         <div className="min-h-0 flex-1 overflow-hidden">{activeView}</div>
       </div>
       <SidePanel orpc={orpc} />
-      <SearchDialog
-        bases={bases}
-        orpc={orpc}
-        changeRequests={changeRequests}
-        onClose={closeSearch}
-        open={isSearchOpen}
-        records={records}
-      />
+      <SearchDialog nodeCache={nodeCache} orpc={orpc} onClose={closeSearch} open={isSearchOpen} />
     </div>
   );
 

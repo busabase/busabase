@@ -81,9 +81,9 @@ export function ChangeRequestCard({ changeRequest, onPress, last }: ChangeReques
 
 const styles = StyleSheet.create({
   reviewRow: {
-    minHeight: 58,
+    minHeight: 52,
     paddingHorizontal: 14,
-    paddingVertical: 11,
+    paddingVertical: 9,
     gap: 3,
   },
   titleRow: {

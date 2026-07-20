@@ -8,9 +8,11 @@ type CallToolResult = {
   isError?: boolean;
 };
 
-type McpToolExtra = {
+export type McpToolExtra = {
   authInfo?: AuthInfo;
 };
+
+export type McpInputSchema = z.ZodRawShape | z.ZodType;
 
 type McpServerLike = {
   registerTool: (
@@ -18,7 +20,7 @@ type McpServerLike = {
     config: {
       title?: string;
       description?: string;
-      inputSchema?: z.ZodRawShape | z.ZodType;
+      inputSchema?: McpInputSchema;
       _meta?: Record<string, unknown>;
     },
     callback: (args: unknown, extra: unknown) => Promise<CallToolResult> | CallToolResult,
@@ -27,7 +29,7 @@ type McpServerLike = {
 
 type McpRouteHandler = (request: Request) => Response | Promise<Response>;
 
-type OpenApiProcedure = {
+export type OpenApiProcedure = {
   "~orpc"?: {
     route?: {
       method?: string;
@@ -39,10 +41,24 @@ type OpenApiProcedure = {
   };
 };
 
-interface DiscoveredOpenApiTool {
+export interface DiscoveredOpenApiTool {
   contractProcedure: OpenApiProcedure;
   keyPath: string[];
   name: string;
+}
+
+export interface McpToolCallContext {
+  args: unknown;
+  tool: DiscoveredOpenApiTool;
+}
+
+interface OpenApiMcpToolCustomizationOptions {
+  description?: (tool: DiscoveredOpenApiTool, defaultDescription: string) => string;
+  inputSchema?: (
+    tool: DiscoveredOpenApiTool,
+    defaultSchema: McpInputSchema | undefined,
+  ) => McpInputSchema | undefined;
+  transformInput?: (input: unknown, tool: DiscoveredOpenApiTool) => unknown;
 }
 
 export interface CreateMcpToolsFromOpenApiContractOptions<TClient> {
@@ -53,18 +69,20 @@ export interface CreateMcpToolsFromOpenApiContractOptions<TClient> {
   name?: (keyPath: string[], procedure: OpenApiProcedure) => string;
 }
 
-export interface RegisterOpenApiMcpToolsOptions<TClient> {
+export interface RegisterOpenApiMcpToolsOptions<TClient>
+  extends OpenApiMcpToolCustomizationOptions {
   server: McpServerLike;
   contract: unknown;
-  createClient: (extra: McpToolExtra) => TClient;
+  createClient: (extra: McpToolExtra, context: McpToolCallContext) => TClient;
   exclude?: (tool: DiscoveredOpenApiTool) => boolean;
   include?: (tool: DiscoveredOpenApiTool) => boolean;
   name?: (keyPath: string[], procedure: OpenApiProcedure) => string;
 }
 
-export interface CreateOpenApiMcpHandlerOptions<TClient> {
+export interface CreateOpenApiMcpHandlerOptions<TClient>
+  extends OpenApiMcpToolCustomizationOptions {
   contract: unknown;
-  createClient: (extra: McpToolExtra) => TClient;
+  createClient: (extra: McpToolExtra, context: McpToolCallContext) => TClient;
   exclude?: (tool: DiscoveredOpenApiTool) => boolean;
   include?: (tool: DiscoveredOpenApiTool) => boolean;
   name?: (keyPath: string[], procedure: OpenApiProcedure) => string;
@@ -117,17 +135,23 @@ export const registerOpenApiMcpTools = <TClient>(
 
   for (const tool of tools) {
     const route = tool.contractProcedure["~orpc"]?.route;
+    const defaultDescription = [
+      route?.successDescription ?? route?.summary ?? `Call ${tool.name}`,
+      route?.method && route?.path ? `${route.method} ${route.path}` : null,
+    ]
+      .filter(Boolean)
+      .join("\n\n");
+    const defaultInputSchema = tool.contractProcedure["~orpc"]?.inputSchema;
     options.server.registerTool(
       tool.name,
       {
         title: route?.summary ?? tool.name,
-        description: [
-          route?.successDescription ?? route?.summary ?? `Call ${tool.name}`,
-          route?.method && route?.path ? `${route.method} ${route.path}` : null,
-        ]
-          .filter(Boolean)
-          .join("\n\n"),
-        inputSchema: {},
+        description: options.description
+          ? options.description(tool, defaultDescription)
+          : defaultDescription,
+        inputSchema: options.inputSchema
+          ? options.inputSchema(tool, defaultInputSchema)
+          : defaultInputSchema,
         _meta: {
           openApiPath: route?.path,
           openApiMethod: route?.method,
@@ -136,13 +160,16 @@ export const registerOpenApiMcpTools = <TClient>(
       },
       async (args, extra) => {
         try {
-          const client = options.createClient(extra as McpToolExtra);
+          const client = options.createClient(extra as McpToolExtra, { args, tool });
           const operation = getByPath(client, tool.keyPath);
           if (typeof operation !== "function") {
             throw new Error(`OpenAPI client operation missing: ${tool.keyPath.join(".")}`);
           }
 
-          const input = tool.contractProcedure["~orpc"]?.inputSchema ? args : undefined;
+          const defaultInput = defaultInputSchema ? args : undefined;
+          const input = options.transformInput
+            ? options.transformInput(defaultInput, tool)
+            : defaultInput;
           const output = await operation(input);
           return asMcpJson(output);
         } catch (error) {
@@ -164,9 +191,12 @@ export const createOpenApiMcpHandler = <TClient>(
       server,
       contract: options.contract,
       createClient: options.createClient,
+      description: options.description,
       exclude: options.exclude,
       include: options.include,
+      inputSchema: options.inputSchema,
       name: options.name,
+      transformInput: options.transformInput,
     });
 
     let sessionId = "";

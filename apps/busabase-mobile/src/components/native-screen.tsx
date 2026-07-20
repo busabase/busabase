@@ -1,3 +1,4 @@
+import * as Haptics from "expo-haptics";
 import { ChevronRight, X } from "lucide-react-native";
 import type { ReactNode } from "react";
 import {
@@ -229,7 +230,10 @@ export function NativeChipList<T extends string | null>({
                 borderColor: active ? tokens.primary : tokens.border,
               },
             ]}
-            onPress={() => onChange(option.value)}
+            onPress={() => {
+              void Haptics.selectionAsync();
+              onChange(option.value);
+            }}
           >
             <Text
               style={[
@@ -294,7 +298,12 @@ export function NativeSegmentedControl<T extends string>({
             accessibilityRole="button"
             accessibilityState={{ selected: active }}
             style={[styles.segment, { backgroundColor: active ? tokens.surface : "transparent" }]}
-            onPress={() => onChange(option.value)}
+            onPress={() => {
+              if (!active) {
+                void Haptics.selectionAsync();
+              }
+              onChange(option.value);
+            }}
           >
             {option.Icon ? (
               <option.Icon size={15} color={active ? tokens.foreground : tokens.mutedForeground} />
@@ -534,7 +543,7 @@ const styles = StyleSheet.create({
   header: {
     paddingHorizontal: spacing[5],
     paddingTop: Platform.select({ ios: 8, android: 12, default: 10 }),
-    paddingBottom: 14,
+    paddingBottom: 12,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
@@ -549,7 +558,7 @@ const styles = StyleSheet.create({
     marginHorizontal: spacing[5],
     marginTop: spacing[6],
     paddingHorizontal: 18,
-    paddingVertical: 30,
+    paddingVertical: spacing[6],
     alignItems: "center",
     gap: spacing[3],
   },
@@ -608,14 +617,14 @@ const styles = StyleSheet.create({
   chipsScroll: { flexGrow: 0 },
   chipsContent: { paddingHorizontal: spacing[5], gap: 8 },
   chip: {
-    minHeight: 34,
+    minHeight: 30,
     flexDirection: "row",
     alignItems: "center",
-    gap: 7,
+    gap: 6,
     justifyContent: "center",
     borderWidth: StyleSheet.hairlineWidth,
     borderRadius: radius.full,
-    paddingHorizontal: 12,
+    paddingHorizontal: 10,
   },
   chipBadge: {
     minWidth: 20,
@@ -627,7 +636,7 @@ const styles = StyleSheet.create({
   },
   segmented: {
     marginHorizontal: spacing[5],
-    minHeight: 38,
+    minHeight: 34,
     borderWidth: StyleSheet.hairlineWidth,
     borderRadius: radius.md,
     padding: 3,
@@ -650,7 +659,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     paddingHorizontal: 6,
   },
-  sectionWrap: { marginHorizontal: spacing[5], marginTop: 12, gap: 6 },
+  sectionWrap: { marginHorizontal: spacing[5], marginTop: 10, gap: 5 },
   sectionHeader: {
     alignSelf: "flex-start",
     borderRadius: radius.sm,
@@ -662,14 +671,14 @@ const styles = StyleSheet.create({
   },
   sectionTitle: { textTransform: "uppercase" },
   nativeRow: {
-    minHeight: 58,
+    minHeight: 52,
     paddingHorizontal: 14,
-    paddingVertical: 11,
+    paddingVertical: 9,
     flexDirection: "row",
     alignItems: "center",
     gap: 10,
   },
-  rowLeading: { width: 32, alignItems: "center" },
+  rowLeading: { width: 28, alignItems: "center" },
   rowText: { flex: 1, minWidth: 0, gap: 3 },
   rowTitleLine: {
     flexDirection: "row",

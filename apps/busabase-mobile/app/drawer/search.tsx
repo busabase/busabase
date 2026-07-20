@@ -1,12 +1,20 @@
-import type { SearchResultVO } from "busabase-contract/types";
+import { skipToken, useQuery } from "@tanstack/react-query";
+import type { SearchResultKind, SearchResultVO } from "busabase-contract/types";
 import { useRouter } from "expo-router";
 import { AppWindow, File, FileText, GitPullRequest, Search, Table2 } from "lucide-react-native";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { StyleSheet, Text, View } from "react-native";
 import { useBusabaseOrpc } from "~/api/use-busabase-orpc";
 import { ConnectionGuard } from "~/components/busabase/ConnectionGuard";
 import { DrawerScaffold } from "~/components/busabase/DrawerScaffold";
-import { NativeInlineError, NativeRow, NativeSection } from "~/components/native-screen";
+import {
+  NativeActionBar,
+  NativeChipList,
+  NativeInlineError,
+  NativeRow,
+  NativeSection,
+} from "~/components/native-screen";
+import { Button } from "~/components/ui/Button";
 import { TextInput } from "~/components/ui/TextInput";
 import { typography } from "~/theme/tokens";
 import { useTokens } from "~/theme/use-tokens";
@@ -39,50 +47,85 @@ const getResultMeta = (result: SearchResultVO): { label: string; icon: typeof Fi
   return kindMeta[result.kind];
 };
 
-const DEBOUNCE_MS = 220;
+const DEBOUNCE_MS = 180;
+const PAGE_SIZE = 20;
+
+// Mirrors web's SearchDialog category tabs (search-dialog.tsx) — same tab
+// set, same "All excludes change_request" rule, same per-tab result count
+// derived client-side from one fetched page (not a separate server count).
+type SearchTab = "all" | "records" | "bases" | "files" | "change_requests";
+const SEARCH_TABS: { value: SearchTab; label: string }[] = [
+  { value: "all", label: "All" },
+  { value: "records", label: "Records" },
+  { value: "bases", label: "Bases" },
+  { value: "files", label: "Files" },
+  { value: "change_requests", label: "Change requests" },
+];
+const TAB_KIND: Record<SearchTab, SearchResultKind | null> = {
+  all: null,
+  records: "record",
+  bases: "base",
+  files: "file",
+  change_requests: "change_request",
+};
 
 function SearchContent() {
   const router = useRouter();
   const tokens = useTokens();
   const buda = useBusabaseOrpc();
   const [query, setQuery] = useState("");
-  const [results, setResults] = useState<SearchResultVO[]>([]);
-  const [searching, setSearching] = useState(false);
+  const [debouncedQuery, setDebouncedQuery] = useState("");
+  const [tab, setTab] = useState<SearchTab>("all");
+  const [limit, setLimit] = useState(PAGE_SIZE);
   const [error, setError] = useState<string | null>(null);
-  const requestId = useRef(0);
+
+  const hasQuery = debouncedQuery.length > 0;
 
   useEffect(() => {
-    const trimmed = query.trim();
-    if (!buda || !trimmed) {
-      setResults([]);
-      setSearching(false);
-      setError(null);
-      return;
-    }
-    setSearching(true);
-    const current = ++requestId.current;
     const timer = setTimeout(() => {
-      buda.client
-        .search({ query: trimmed, limit: 20, offset: 0 })
-        .then((response) => {
-          if (current === requestId.current) {
-            setResults(response.results);
-            setError(null);
-          }
-        })
-        .catch((caught) => {
-          if (current === requestId.current) {
-            setError(caught instanceof Error ? caught.message : "Search failed");
-          }
-        })
-        .finally(() => {
-          if (current === requestId.current) {
-            setSearching(false);
-          }
-        });
+      setDebouncedQuery(query.trim());
+      setLimit(PAGE_SIZE);
     }, DEBOUNCE_MS);
     return () => clearTimeout(timer);
-  }, [buda, query]);
+  }, [query]);
+
+  const searchQuery = useQuery(
+    buda
+      ? {
+          ...buda.orpc.search.queryOptions({ input: { query: debouncedQuery, limit, offset: 0 } }),
+          enabled: hasQuery,
+        }
+      : { queryKey: ["no-connection", "search"], queryFn: skipToken },
+  );
+  const allResults = searchQuery.data?.results ?? [];
+  const hasMore = searchQuery.data?.hasMore ?? false;
+  const searching = searchQuery.isFetching;
+
+  const visibleResults = useMemo(() => {
+    if (tab === "all") {
+      return allResults.filter((result) => result.kind !== "change_request");
+    }
+    const kind = TAB_KIND[tab];
+    return kind ? allResults.filter((result) => result.kind === kind) : allResults;
+  }, [allResults, tab]);
+
+  const tabOptions = useMemo(
+    () =>
+      SEARCH_TABS.map(({ value, label }) => {
+        if (!hasQuery) {
+          return { value, label };
+        }
+        const kind = TAB_KIND[value];
+        const count =
+          value === "all"
+            ? allResults.filter((result) => result.kind !== "change_request").length
+            : kind
+              ? allResults.filter((result) => result.kind === kind).length
+              : allResults.length;
+        return { value, label, meta: count > 0 ? count : undefined };
+      }),
+    [allResults, hasQuery],
+  );
 
   const openResult = useCallback(
     (result: SearchResultVO) => {
@@ -123,7 +166,18 @@ function SearchContent() {
     [router],
   );
 
-  const hasQuery = query.trim().length > 0;
+  const searchErrorMessage = searchQuery.isError
+    ? searchQuery.error instanceof Error
+      ? searchQuery.error.message
+      : "Search failed"
+    : null;
+  const displayedError = error ?? searchErrorMessage;
+  const resetError = useCallback(() => {
+    setError(null);
+    if (searchErrorMessage) {
+      void searchQuery.refetch();
+    }
+  }, [searchErrorMessage, searchQuery.refetch]);
 
   return (
     <DrawerScaffold title="Search" subtitle="Records, change requests, Bases, and files">
@@ -138,14 +192,20 @@ function SearchContent() {
         />
       </View>
 
-      {error ? (
+      {hasQuery ? (
+        <View style={styles.tabsWrap}>
+          <NativeChipList value={tab} options={tabOptions} onChange={setTab} />
+        </View>
+      ) : null}
+
+      {displayedError ? (
         <View style={styles.message}>
-          <NativeInlineError message={error} onReset={() => setError(null)} />
+          <NativeInlineError message={displayedError} onReset={resetError} />
         </View>
       ) : null}
 
       <NativeSection title={hasQuery ? "Results" : "Search"}>
-        {searching ? (
+        {searching && visibleResults.length === 0 ? (
           <NativeRow
             title="Searching"
             subtitle="Looking across records, change requests, Bases, and files."
@@ -153,7 +213,7 @@ function SearchContent() {
             last
           />
         ) : null}
-        {!searching && hasQuery && results.length === 0 && !error ? (
+        {!searching && hasQuery && visibleResults.length === 0 && !displayedError ? (
           <NativeRow
             title="No matches"
             subtitle="Try a title, field value, or Base name."
@@ -169,8 +229,8 @@ function SearchContent() {
             last
           />
         ) : null}
-        {!searching && results.length > 0
-          ? results.map((result, index) => {
+        {visibleResults.length > 0
+          ? visibleResults.map((result, index) => {
               const meta = getResultMeta(result);
               const Icon = meta.icon;
               return (
@@ -181,7 +241,7 @@ function SearchContent() {
                   meta={meta.label}
                   leading={<Icon size={18} color={tokens.mutedForeground} />}
                   onPress={() => openResult(result)}
-                  last={index === results.length - 1}
+                  last={index === visibleResults.length - 1}
                 >
                   {result.eyebrow && result.body ? (
                     <Text
@@ -196,6 +256,19 @@ function SearchContent() {
             })
           : null}
       </NativeSection>
+
+      {hasMore && tab !== "change_requests" ? (
+        <View style={styles.loadMore}>
+          <NativeActionBar>
+            <Button
+              label={searching ? "Loading…" : "Load more"}
+              variant="secondary"
+              disabled={searching}
+              onPress={() => setLimit((current) => current + PAGE_SIZE)}
+            />
+          </NativeActionBar>
+        </View>
+      ) : null}
     </DrawerScaffold>
   );
 }
@@ -210,5 +283,7 @@ export default function SearchScreen() {
 
 const styles = StyleSheet.create({
   searchBox: { marginHorizontal: 20, marginBottom: 8 },
+  tabsWrap: { marginBottom: 8 },
   message: { marginHorizontal: 20, marginBottom: 8 },
+  loadMore: { marginHorizontal: 20, marginTop: 4 },
 });

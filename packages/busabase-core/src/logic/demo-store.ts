@@ -13,6 +13,7 @@ import type {
   CommentSubjectType,
   CommentVO,
   FileNodeVO,
+  NodeSearchResultVO,
   NodeVO,
   OperationKind,
   OperationVO,
@@ -91,6 +92,44 @@ export const demoIsDescendant = (nodeId: string, potentialAncestorId: string): b
     cursorId = ancestorId;
   }
   return false;
+};
+
+/**
+ * Demo counterpart to the real store's `searchNodesByName` — same "plain
+ * name/slug match across every node type" contract, just an in-memory
+ * substring scan over the seeded tree instead of an `ilike` query (the whole
+ * tree is always in memory already, see `dataset()` above). Exact-slug
+ * matches still sort first, mirroring the real store's ordering.
+ */
+export const demoSearchNodesByName = (input: {
+  query: string;
+  limit?: number;
+}): NodeSearchResultVO[] => {
+  const query = input.query.trim().toLowerCase();
+  if (!query) return [];
+  const limit = input.limit ?? 20;
+  const flatten = (nodes: NodeVO[]): NodeVO[] =>
+    nodes.flatMap((node) => [node, ...flatten(node.children)]);
+
+  return flatten(dataset().nodes)
+    .filter(
+      (node) => node.name.toLowerCase().includes(query) || node.slug.toLowerCase().includes(query),
+    )
+    .sort((a, b) => {
+      const aExact = a.slug.toLowerCase() === query ? 0 : 1;
+      const bExact = b.slug.toLowerCase() === query ? 0 : 1;
+      if (aExact !== bExact) return aExact - bExact;
+      return a.name.localeCompare(b.name);
+    })
+    .slice(0, limit)
+    .map((node) => ({
+      id: node.id,
+      type: node.type,
+      name: node.name,
+      slug: node.slug,
+      path: `/${node.type}/${node.slug}`,
+      updatedAt: node.updatedAt,
+    }));
 };
 
 // Folder nodes live one level under the synthetic root node; each already carries

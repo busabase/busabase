@@ -1,6 +1,6 @@
 import { implement } from "@orpc/server";
 import { busabaseContract } from "busabase-contract/contract/busabase";
-import { exportTableRows } from "./logic/export-logic";
+import { exportAssetTextBlob, exportTableRows } from "./logic/export-logic";
 import {
   abortImportSession,
   beginImportSession,
@@ -15,6 +15,7 @@ const os = implement(busabaseContract);
 
 export const dumpRouter = {
   exportTables: os.dump.exportTables.handler(async ({ input }) => exportTableRows(input)),
+  exportAssetText: os.dump.exportAssetText.handler(async ({ input }) => exportAssetTextBlob(input)),
   importBegin: os.dump.importBegin.handler(async () => beginImportSession()),
   importTables: os.dump.importTables.handler(async ({ input }) => importTableRows(input)),
   importCommit: os.dump.importCommit.handler(async ({ input }) =>

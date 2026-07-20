@@ -40,9 +40,11 @@ import {
   moveNodeInputSchema,
   nodePrincipalSchema,
   nodeSchema,
+  nodeSearchResultSchema,
   reviewChangeRequestInputSchema,
   reviseOperationInputSchema,
   searchInputSchema,
+  searchNodesByNameInputSchema,
   searchResponseSchema,
 } from "./schemas";
 
@@ -112,6 +114,17 @@ export const busabaseContractRoutes = {
       })
       .input(listNodesInputSchema)
       .output(z.array(nodeSchema)),
+    searchByName: oc
+      .route({
+        method: "GET",
+        path: "/nodes/search",
+        tags: ["Nodes", "Search"],
+        summary: "Search nodes by name/slug (cheap, name-only quick-jump)",
+        successDescription:
+          "Plain ilike match on name/slug across every node type (folder/base/skill/drive/airapp/file/doc), scoped by the same node-visibility ACL as `nodes.list`. No content scan and no full-text ranking — ordered exact-slug-match first, then by name. Backs the dashboard search dialog's 'Recent' tab cache-miss path (see apps/busabase/content/spec/search-quick-jump.md); the heavier `search` endpoint remains the dedicated full-text content search.",
+      })
+      .input(searchNodesByNameInputSchema)
+      .output(z.array(nodeSearchResultSchema)),
     isDescendant: oc
       .route({
         method: "GET",

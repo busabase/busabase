@@ -111,6 +111,8 @@ busabase-cli change-requests review --change-request-id cr_124 --verdict rejecte
 busabase-cli change-requests close --change-request-id cr_125 --reason "Wrong proposal"                  # terminal close
 busabase-cli change-requests merge --change-request-id cr_123
 busabase-cli search --query invoice
+busabase-cli backup -o ./space.bbdump              # full-fidelity backup of the active space
+busabase-cli restore ./space.bbdump                # restore an archive into an EMPTY space
 busabase-cli api --method get --path /nodes        # raw OpenAPI passthrough
 ```
 

@@ -55,6 +55,26 @@ export const mergeViewCreate = async (ctx: MergeCtx, item: OperationPO, headComm
   if (!viewFields.name || !viewFields.slug) {
     throw new Error(`View create commit missing name or slug: ${item.id}`);
   }
+  // TOCTOU guard: createViewChangeRequest's propose-time slug check only sees
+  // views that existed at proposal time. Two CRs proposed before either merges
+  // can both pass, then race to merge — without this check the second hits the
+  // DB's unique(baseId, slug) index and 500s instead of returning a clean conflict.
+  const [existingSibling] = await db
+    .select({ id: busabaseViews.id, name: busabaseViews.name })
+    .from(busabaseViews)
+    .where(
+      and(
+        eq(busabaseViews.baseId, baseId),
+        eq(busabaseViews.slug, viewFields.slug),
+        isNull(busabaseViews.archivedAt),
+      ),
+    )
+    .limit(1);
+  if (existingSibling) {
+    throw new ORPCError("CONFLICT", {
+      message: `A view with slug "${viewFields.slug}" already exists in this Base ("${existingSibling.name}"). Choose a different slug.`,
+    });
+  }
   await db.insert(busabaseViews).values({
     id: viewId,
     spaceId: getContextSpaceId(),

@@ -237,5 +237,54 @@ describe("Node tree + Doc lifecycle — oRPC", () => {
         }),
       ).rejects.toThrow(/no earlier operation declares/);
     });
+
+    // ── TOCTOU race: two CRs proposed before either merges, both targeting the
+    // same slug under the same parent. Neither sees the other at propose time,
+    // so both reach merge — mergeNodeCreate must catch the second one with a
+    // clean CONFLICT instead of an unclassified unique-constraint 500.
+    it("returns a CONFLICT (not a crash) when two folder_create CRs race on the same slug", async () => {
+      const crA = await client.nodes.createChangeRequest({
+        operations: [
+          { kind: "create", nodeType: "folder", slug: "lc-race-folder", name: "Race A" },
+        ],
+      });
+      const crB = await client.nodes.createChangeRequest({
+        operations: [
+          { kind: "create", nodeType: "folder", slug: "lc-race-folder", name: "Race B" },
+        ],
+      });
+
+      await approveAndMerge(crA.id);
+      await expect(approveAndMerge(crB.id)).rejects.toMatchObject({ code: "CONFLICT" });
+
+      // The successful first merge is unaffected by the second's failed merge —
+      // exactly one folder with this slug exists, and it's Race A.
+      const race = await folderSlug("lc-race-folder");
+      expect(race).toBeDefined();
+      expect(race?.node.name).toBe("Race A");
+    });
+
+    // Same race, but through a nodeType:"base" node CR — a SEPARATE code path
+    // from bases.create's idempotent-shortcut (createBase in record-ops.ts),
+    // since materializeBaseNode is invoked only via mergeNodeCreate here.
+    it("returns a CONFLICT (not a crash) when two nodeType:base node CRs race on the same slug", async () => {
+      const baseOp = (name: string) => ({
+        kind: "create" as const,
+        nodeType: "base" as const,
+        slug: "lc-race-base",
+        name,
+        fields: [{ slug: "title", name: "Title", type: "text" as const, required: true }],
+      });
+      const crA = await client.nodes.createChangeRequest({ operations: [baseOp("Race Base A")] });
+      const crB = await client.nodes.createChangeRequest({ operations: [baseOp("Race Base B")] });
+
+      await approveAndMerge(crA.id);
+      await expect(approveAndMerge(crB.id)).rejects.toMatchObject({ code: "CONFLICT" });
+
+      const bases = await client.bases.list();
+      const matches = bases.filter((b) => b.slug === "lc-race-base");
+      expect(matches).toHaveLength(1);
+      expect(matches[0]?.name).toBe("Race Base A");
+    });
   });
 });

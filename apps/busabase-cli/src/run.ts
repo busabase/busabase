@@ -18,6 +18,7 @@ import {
   Option,
   type OptionValues,
 } from "commander";
+import { runBackup, runRestore } from "./backup/commands.js";
 import { banner } from "./banner.js";
 import { loadDotEnvFile } from "./config-file.js";
 import { type OutputFormat, render } from "./format.js";
@@ -1509,6 +1510,72 @@ Examples:
           dryRun: Boolean(opts.dryRun),
           json: config.output === "json",
           baseUrl: config.baseUrl,
+        }),
+      ),
+    );
+
+  addGlobalFlags(program.command("backup"))
+    .description("Back up the active space to a full-fidelity .bbdump archive")
+    .option("-o, --out-file <file>", "output archive path", "space.bbdump")
+    .option(
+      "--no-history",
+      "full-fidelity rows, but omit the history tables (commits, change requests, operations, comments, reviews, audit events)",
+    )
+    .option("--state-only", "superseded by `busabase-cli publish` — see the error text")
+    .addHelpText(
+      "after",
+      `
+A backup is full fidelity: raw rows with their original ids, every doc body, and
+every attachment's bytes, in one integrity-checked archive. Vault items and
+webhook signing secrets are never written to it.
+
+Examples:
+  busabase-cli backup                                        # → ./space.bbdump
+  busabase-cli backup -o ./backups/acme-2026-07-19.bbdump
+  busabase-cli backup --no-history                           # smaller: current state only
+
+To hand content to someone else rather than back it up, use \`busabase-cli publish\`,
+which writes a readable, diffable package directory you can push to GitHub.`,
+    )
+    .action(
+      runAction(state, (client, opts, config) =>
+        runBackup(client, {
+          outFile: opts.outFile as string,
+          includeHistory: opts.history !== false,
+          stateOnly: Boolean(opts.stateOnly),
+          json: config.output === "json",
+          baseUrl: config.baseUrl,
+          spaceId: config.spaceId,
+          toolVersion: pkgVersion(),
+        }),
+      ),
+    );
+
+  addGlobalFlags(program.command("restore"))
+    .description("Restore a .bbdump archive into an EMPTY space, preserving original ids")
+    .argument("<file>", "path to the .bbdump archive")
+    .option("--resume", "resume a previously interrupted restore (not yet implemented)")
+    .option("--into-folder <name>", "state-only archives only — see the error text")
+    .addHelpText(
+      "after",
+      `
+The archive's checksum is verified before a single row is written, and the target
+space must be EMPTY — a restore replays original ids, so it cannot merge into a
+space that already holds content.
+
+Examples:
+  busabase-cli restore ./space.bbdump
+  busabase-cli restore ./backups/acme-2026-07-19.bbdump --space-id spc_123
+
+To add content to a space that is already in use, use \`busabase-cli install\` instead.`,
+    )
+    .action(
+      runArgAction(state, (file, client, opts, config) =>
+        runRestore(client, {
+          file,
+          resume: Boolean(opts.resume),
+          intoFolder: opts.intoFolder as string | undefined,
+          json: config.output === "json",
         }),
       ),
     );

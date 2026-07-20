@@ -9,6 +9,7 @@ import type {
   CommentVO,
   CommitVO,
   FieldType,
+  NodeSearchResultVO,
   NodeVO,
   OperationKind,
   OperationStatus,
@@ -200,6 +201,24 @@ export const toNodeVO = (
   baseId,
   children,
   hasChildren,
+});
+
+/**
+ * Cheap projection for `nodes.searchByName` (see `logic/nodes.ts`'s
+ * `searchNodesByName`) — deliberately a much smaller shape than `toNodeVO`'s
+ * `NodeVO` (no `description`/`metadata`/tree). `path` is the route this node
+ * navigates to (`/${type}/${slug}`), the same convention `nodeHref`
+ * (dashboard-shell.tsx) and `fileResultHref` (logic/search.ts) already use —
+ * every one of the 7 built-in node types has `hasDetail: true`, so this is
+ * never conditional.
+ */
+export const toNodeSearchResultVO = (node: NodePO): NodeSearchResultVO => ({
+  id: node.id,
+  type: node.type,
+  name: node.name,
+  slug: node.slug,
+  path: `/${node.type}/${node.slug}`,
+  updatedAt: node.updatedAt.toISOString(),
 });
 
 export const toRecordLinkVO = (link: RecordLinkPO): RecordLinkVO => ({

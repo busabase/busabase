@@ -56,6 +56,9 @@ interface UpdateAssetMetadataInput {
   mode?: "merge" | "replace";
 }
 
+const assetNotFound = (assetId: string) =>
+  new ORPCError("NOT_FOUND", { message: `Asset not found: ${assetId}` });
+
 export const contentKindForMimeType = (mimeType: string): AssetContentKind =>
   mimeType.startsWith("text/") ||
   mimeType.includes("json") ||
@@ -307,7 +310,7 @@ export const getAsset = async (assetId: string): Promise<AssetDetailVO> => {
     .where(and(eq(busabaseAssets.id, assetId), eq(busabaseAssets.spaceId, spaceId)))
     .limit(1);
   if (!row) {
-    throw new ORPCError("NOT_FOUND", { message: `Asset not found: ${assetId}` });
+    throw assetNotFound(assetId);
   }
 
   const usageRows = await db
@@ -364,7 +367,7 @@ export const downloadAsset = async (assetId: string): Promise<AssetDownloadVO> =
     .where(and(eq(busabaseAssets.id, assetId), eq(busabaseAssets.spaceId, spaceId)))
     .limit(1);
   if (!row) {
-    throw new ORPCError("NOT_FOUND", { message: `Asset not found: ${assetId}` });
+    throw assetNotFound(assetId);
   }
 
   return {
@@ -393,7 +396,7 @@ export const resolveAssetFile = async (
     .where(and(eq(busabaseAssets.id, assetId), eq(busabaseAssets.spaceId, spaceId)))
     .limit(1);
   if (!row) {
-    throw new ORPCError("NOT_FOUND", { message: `Asset not found: ${assetId}` });
+    throw assetNotFound(assetId);
   }
 
   return {
@@ -423,7 +426,7 @@ export const updateAssetMetadata = async (
     .where(and(eq(busabaseAssets.id, input.assetId), eq(busabaseAssets.spaceId, spaceId)))
     .limit(1);
   if (!asset) {
-    throw new ORPCError("NOT_FOUND", { message: `Asset not found: ${input.assetId}` });
+    throw assetNotFound(input.assetId);
   }
   const nextMetadata =
     input.mode === "replace" ? input.metadata : { ...(asset.metadata ?? {}), ...input.metadata };
@@ -516,7 +519,7 @@ export const deleteAssetRow = async (
 export const deleteAsset = async (assetId: string): Promise<{ deleted: boolean }> => {
   const result = await deleteAssetRow(assetId);
   if (!result.deleted) {
-    throw new ORPCError("NOT_FOUND", { message: `Asset not found: ${assetId}` });
+    throw assetNotFound(assetId);
   }
   return result;
 };

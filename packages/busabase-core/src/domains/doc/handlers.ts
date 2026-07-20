@@ -85,6 +85,9 @@ export const writeDocBody = async (nodeId: string, body: string) => {
  */
 const DOC_BODY_MAX_BYTES = 300_000;
 
+const docNotFound = (nodeIdOrSlug: string) =>
+  new ORPCError("NOT_FOUND", { message: `Doc not found: ${nodeIdOrSlug}` });
+
 const assertDocBodySize = (body: string): void => {
   const byteLength = Buffer.byteLength(body, "utf8");
   if (byteLength > DOC_BODY_MAX_BYTES) {
@@ -343,7 +346,7 @@ export const getDoc = async (nodeIdOrSlug: string): Promise<DocVO> => {
   await ensureReady();
   const node = await getDocNode(nodeIdOrSlug);
   if (!node) {
-    throw new ORPCError("NOT_FOUND", { message: `Doc not found: ${nodeIdOrSlug}` });
+    throw docNotFound(nodeIdOrSlug);
   }
   return toDocVO(node);
 };
@@ -364,7 +367,7 @@ export const readDocLines = async (
   await ensureReady();
   const node = await getDocNode(nodeIdOrSlug);
   if (!node) {
-    throw new ORPCError("NOT_FOUND", { message: `Doc not found: ${nodeIdOrSlug}` });
+    throw docNotFound(nodeIdOrSlug);
   }
   const body = await readDocBodyForGrep(node.id);
   return sliceDocLinesRange(splitDocLines(body), startLine, endLine);
@@ -395,7 +398,7 @@ export const updateDocBody = async (
   await ensureReady();
   const node = await getDocNode(nodeIdOrSlug);
   if (!node) {
-    throw new ORPCError("NOT_FOUND", { message: `Doc not found: ${nodeIdOrSlug}` });
+    throw docNotFound(nodeIdOrSlug);
   }
   const parsed = updateDocInputSchema.parse(input);
   assertDocBodySize(parsed.body);
@@ -450,7 +453,7 @@ export const createDocChangeRequest = async (
   const db = await getDb();
   const node = await getDocNode(nodeIdOrSlug);
   if (!node) {
-    throw new ORPCError("NOT_FOUND", { message: `Doc not found: ${nodeIdOrSlug}` });
+    throw docNotFound(nodeIdOrSlug);
   }
   // ChangeRequest-submission gate (node ACL): visibility alone isn't enough
   // to propose an edit — requires `changeRequest` level on this doc.

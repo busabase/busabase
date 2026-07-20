@@ -175,6 +175,39 @@ export interface MergeCtx {
   resolvedRecordFields: Map<string, Record<string, unknown>>;
 }
 
+/**
+ * DB-level TOCTOU guard: atomically claim this CR for merging by flipping
+ * approved -> merged right here, before any operation runs. Two concurrent
+ * mergeChangeRequest() calls both pass the stale read-only check above, but
+ * only one of these guarded UPDATEs can match "status = approved" — the
+ * loser sees 0 rows affected and throws instead of re-running every
+ * operation (which would otherwise double-create nodes/records). Because
+ * this happens inside the same transaction as the operations loop below,
+ * throwing here rolls back the whole transaction, so a losing writer can
+ * never persist partial work.
+ */
+const claimChangeRequestForMerge = async (
+  tx: MergeCtx["db"],
+  changeRequestId: string,
+  timestamp: Date,
+): Promise<void> => {
+  const [claimed] = await tx
+    .update(busabaseChangeRequests)
+    .set({ status: "merged", mergedAt: timestamp, updatedAt: timestamp })
+    .where(
+      and(
+        eq(busabaseChangeRequests.id, changeRequestId),
+        eq(busabaseChangeRequests.status, "approved"),
+      ),
+    )
+    .returning();
+  if (!claimed) {
+    throw changeRequestConflict(
+      "This change request is already being merged or was already processed.",
+    );
+  }
+};
+
 // ── 3-way field merge ─────────────────────────────────────────────────────────
 
 interface ThreeWayMergeResult {
@@ -282,6 +315,28 @@ const mergeNodeCreate = async (ctx: MergeCtx, item: OperationPO, headCommit: Com
   );
   if (!fields.nodeType || !fields.slug || !fields.name) {
     throw new Error(`Node create commit missing required fields: ${item.id}`);
+  }
+  // TOCTOU guard: propose-time slug checks (if any) only see siblings that
+  // existed at proposal time. Two ChangeRequests proposed before either
+  // merges can both pass, then race to merge — without this check the
+  // second hits the DB's unique(parentId, slug) index and 500s instead of
+  // returning a clean conflict. Covers all 7 node types (base/folder/doc/
+  // skill/file/drive/airapp) since they all flow through this one dispatcher.
+  const [existingSibling] = await db
+    .select({ id: busabaseNodes.id, name: busabaseNodes.name })
+    .from(busabaseNodes)
+    .where(
+      and(
+        eq(busabaseNodes.parentId, parentNode.id),
+        eq(busabaseNodes.slug, fields.slug),
+        isNull(busabaseNodes.archivedAt),
+      ),
+    )
+    .limit(1);
+  if (existingSibling) {
+    throw new ORPCError("CONFLICT", {
+      message: `A ${fields.nodeType} with slug "${fields.slug}" already exists in this location ("${existingSibling.name}"). Choose a different slug.`,
+    });
   }
   const materialize = getMaterializer(fields.nodeType) ?? materializeGenericNode;
   const nodeId = await materialize(ctx, { parentNode, fields });
@@ -1932,30 +1987,11 @@ const _mergeChangeRequest = async (changeRequestId: string) => {
     // file writes are not transactional but are idempotently re-synced on retry.)
     const mergedNodeIds: string[] = [];
     await db.transaction(async (tx) => {
-      // DB-level TOCTOU guard: atomically claim this CR for merging by flipping
-      // approved -> merged right here, before any operation runs. Two concurrent
-      // mergeChangeRequest() calls both pass the stale read-only check above, but
-      // only one of these guarded UPDATEs can match "status = approved" — the
-      // loser sees 0 rows affected and throws instead of re-running every
-      // operation (which would otherwise double-create nodes/records). Because
-      // this happens inside the same transaction as the operations loop below,
-      // throwing here rolls back the whole transaction, so a losing writer can
-      // never persist partial work.
-      const [claimed] = await tx
-        .update(busabaseChangeRequests)
-        .set({ status: "merged", mergedAt: timestamp, updatedAt: timestamp })
-        .where(
-          and(
-            eq(busabaseChangeRequests.id, changeRequest.id),
-            eq(busabaseChangeRequests.status, "approved"),
-          ),
-        )
-        .returning();
-      if (!claimed) {
-        throw changeRequestConflict(
-          "This change request is already being merged or was already processed.",
-        );
-      }
+      await claimChangeRequestForMerge(
+        tx as unknown as MergeCtx["db"],
+        changeRequest.id,
+        timestamp,
+      );
 
       const ctx: MergeCtx = {
         db: tx as unknown as MergeCtx["db"],
@@ -2227,30 +2263,7 @@ const _mergeChangeRequest = async (changeRequestId: string) => {
   // for genuinely new records, not every record merely touched by the CR.
   const newlyCreatedRecordIds: string[] = [];
   await db.transaction(async (tx) => {
-    // DB-level TOCTOU guard: atomically claim this CR for merging by flipping
-    // approved -> merged right here, before any operation runs. Two concurrent
-    // mergeChangeRequest() calls both pass the stale read-only check above, but
-    // only one of these guarded UPDATEs can match "status = approved" — the
-    // loser sees 0 rows affected and throws instead of re-running every
-    // operation (which would otherwise double-create records/views). Because
-    // this happens inside the same transaction as the operations loop below,
-    // throwing here rolls back the whole transaction, so a losing writer can
-    // never persist partial work.
-    const [claimed] = await tx
-      .update(busabaseChangeRequests)
-      .set({ status: "merged", mergedAt: timestamp, updatedAt: timestamp })
-      .where(
-        and(
-          eq(busabaseChangeRequests.id, changeRequest.id),
-          eq(busabaseChangeRequests.status, "approved"),
-        ),
-      )
-      .returning();
-    if (!claimed) {
-      throw changeRequestConflict(
-        "This change request is already being merged or was already processed.",
-      );
-    }
+    await claimChangeRequestForMerge(tx as unknown as MergeCtx["db"], changeRequest.id, timestamp);
 
     const ctx: MergeCtx = {
       db: tx as unknown as MergeCtx["db"],

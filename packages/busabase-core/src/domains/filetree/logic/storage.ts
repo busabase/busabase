@@ -7,6 +7,14 @@ import { getDb } from "../../../db";
 import { busabaseNodes } from "../../../db/schema";
 import { buildNodeVisibilityCondition } from "../../../logic/node-acl";
 
+// The DB-level bound this guard mirrors: attachments.file_name is
+// `varchar("file_name", { length: 255 })` (packages/open-domains/attachments/schema/attachments.ts).
+// Postgres/PGLite count `varchar(n)` limits in characters, not bytes, so a
+// plain JS `.length` check on the (already-decoded, UTF-16) string is the
+// correct match — not `Buffer.byteLength`, which would measure UTF-8 bytes
+// and reject strings that are actually within the DB's character bound.
+const MAX_FILENAME_LENGTH = 255;
+
 export const normalizeFilePath = (filePath: string) => {
   const normalized = filePath.replace(/\\/g, "/");
   // A leading "/" used to be silently stripped here, so a caller who typed
@@ -26,6 +34,20 @@ export const normalizeFilePath = (filePath: string) => {
     normalized.split("/").some((part) => !part || part === "." || part === "..")
   ) {
     throw new ORPCError("BAD_REQUEST", { message: `Invalid file path: ${filePath}` });
+  }
+  // Only the final path segment becomes `attachments.file_name` (see
+  // `displayNameForPath` in ../handlers.ts, which does the same
+  // `split("/").at(-1)` extraction) — intermediate folder segments are never
+  // stored in that column, so only the filename itself needs to respect the
+  // DB's varchar(255) bound. Catching this here, before it ever reaches
+  // upload-logic's `db.insert`, turns an uncaught "value too long for type
+  // character varying(255)" 500 at merge time into a clear BAD_REQUEST at
+  // propose time.
+  const filename = normalized.split("/").at(-1) ?? normalized;
+  if (filename.length > MAX_FILENAME_LENGTH) {
+    throw new ORPCError("BAD_REQUEST", {
+      message: `Filename too long: "${filename}" (${filename.length} chars, max ${MAX_FILENAME_LENGTH})`,
+    });
   }
   return normalized;
 };

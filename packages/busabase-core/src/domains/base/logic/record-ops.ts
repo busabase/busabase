@@ -38,6 +38,7 @@ import {
 } from "../../../logic/store";
 import { validateRecordFields } from "../field-rules";
 import type { FieldDef } from "../field-types";
+import { baseNotFound } from "./errors";
 import { getBase } from "./queries";
 import { resolveRelationFieldOptions } from "./relation-options";
 
@@ -48,10 +49,6 @@ export {
   createDeleteChangeRequestInputSchema,
   reviseOperationInputSchema,
 };
-
-/** Caller-supplied baseId doesn't resolve — a genuine "not found" client error. */
-const baseNotFound = (baseId: string) =>
-  new ORPCError("NOT_FOUND", { message: `Base not found: ${baseId}` });
 
 /** Caller-supplied recordId doesn't resolve — a genuine "not found" client error. */
 const recordNotFound = (recordId: string) =>
@@ -167,6 +164,19 @@ export const createBase = async (input: z.input<typeof createBaseInputSchema>) =
   if (existingActive) {
     const existing = await getBase(existingActive.id);
     if (existing) {
+      // Idempotent-retry shortcut: only safe when the resubmission actually
+      // looks like the SAME intended base. `name` is the cheap, meaningful
+      // identity check here — deliberately NOT a deep-equality check of
+      // `fields` (option objects can differ incidentally — `{}` vs undefined
+      // defaults, key ordering — without representing a different schema).
+      // A slug collision with a genuinely different name is a real conflict:
+      // silently returning the existing base would discard the caller's
+      // submitted name/fields with no signal at all.
+      if (existing.name !== parsed.name) {
+        throw new ORPCError("CONFLICT", {
+          message: `Base slug "${parsed.slug}" is already in use by a different Base ("${existing.name}"). Choose a different slug, or omit "name" differences if you intended to reuse it.`,
+        });
+      }
       return { ...existing, materialized: true as const };
     }
   }

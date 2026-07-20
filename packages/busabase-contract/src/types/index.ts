@@ -72,6 +72,23 @@ export interface UserRefVO {
   role?: string | null;
 }
 
+/**
+ * Cheap, name/slug-only match from `nodes.searchByName` (see
+ * `apps/busabase/content/spec/search-quick-jump.md`) — deliberately a much
+ * smaller projection than `NodeVO` (no `description`/`metadata`/tree shape):
+ * this backs the dashboard's instant quick-jump palette, not the sidebar tree
+ * or a node's own detail view. `path` is the route this node navigates to
+ * (e.g. `/base/{slug}`), not a filesystem/breadcrumb tree path.
+ */
+export interface NodeSearchResultVO {
+  id: string;
+  type: NodeType;
+  name: string;
+  slug: string;
+  path: string;
+  updatedAt: string;
+}
+
 export interface NodeVO {
   id: string;
   parentId: string | null;

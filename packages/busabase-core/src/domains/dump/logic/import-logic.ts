@@ -13,6 +13,7 @@ import { getDb } from "../../../db";
 import {
   attachments,
   busabaseAssets,
+  busabaseAssetTexts,
   busabaseFieldValues,
   busabaseNodes,
   busabaseRecordLinks,
@@ -165,6 +166,28 @@ export const importTableRows = async (input: ImportTablesInput): Promise<ImportT
     return { inserted: input.rows.length };
   }
 
+  // Extracted-text bytes (Drive Grep Retrieval). Same treatment as
+  // `attachmentBlobs`, and for the same reason: the `busabase_asset_texts` ROW
+  // travels as an ordinary dump table, but the object its `text_storage_key`
+  // points at lives in storage, so without this the restored row claims
+  // `status: "present"` over bytes that were never captured and grep silently
+  // finds nothing. Only DERIVED text arrives here (`asset-texts/blobs/sha256/…`)
+  // — auto-registered rows point at the attachment's own key, already written
+  // by `attachmentBlobs` above. Written before the `assetTexts` rows that
+  // reference these keys (see `full-importer.ts`).
+  if (input.table === "assetTextBlobs") {
+    for (const row of input.rows) {
+      const textStorageKey = row.textStorageKey as string;
+      const base64 = row.base64 as string;
+      await storage.uploadFileToKey(
+        Buffer.from(base64, "base64"),
+        textStorageKey,
+        "text/plain; charset=utf-8",
+      );
+    }
+    return { inserted: input.rows.length };
+  }
+
   const table = DUMP_TABLE_REGISTRY[input.table];
   const db = await getDb();
 
@@ -241,10 +264,18 @@ export const importTableRows = async (input: ImportTablesInput): Promise<ImportT
  *  - `assets.attachmentId` — no FK by design (loose ref into the shared,
  *    auth-agnostic `attachments` table); orphan means the Asset's physical
  *    file registry row never got imported.
- *  - blob completeness — every imported `attachments.storageKey` must have
- *    actual bytes in object storage (the `attachmentBlobs` pseudo-table write
- *    happens before the `attachments` row in import order, but a partial
- *    archive or a storage write failure could still leave a dangling key).
+ *  - attachment blob completeness — every imported `attachments.storageKey`
+ *    must have actual bytes in object storage (the `attachmentBlobs`
+ *    pseudo-table write happens before the `attachments` row in import order,
+ *    but a partial archive or a storage write failure could still leave a
+ *    dangling key).
+ *  - asset-text blob completeness — same class of dangling reference for every
+ *    imported `assetTexts.textStorageKey`. This one was NOT covered until an
+ *    end-to-end restore proved it silently lost extracted text: the row said
+ *    `status: "present"`, the object did not exist, and grep returned zero
+ *    matches for content the source could find. An archive predating the
+ *    `assetTextBlobs` pseudo-table restores exactly that way, so the warning
+ *    here is what makes the loss visible instead of silent.
  * All findings are reported as non-fatal `warnings` (the import already
  * committed real rows the operator likely wants to keep and re-run to fix
  * incrementally, rather than a hard rollback of a large space import).
@@ -349,6 +380,46 @@ const checkBlobCompleteness = async (
     : [];
 };
 
+/**
+ * Every imported `busabase_asset_texts` row whose `status` is not `none` must
+ * have real bytes at its `text_storage_key`. Rows marked `none` legitimately
+ * carry an empty key and are skipped. Auto-registered rows point at the
+ * attachment's own key, so this also transitively re-checks that the
+ * attachment blob landed — a text-kind asset whose bytes went missing is just
+ * as unsearchable as a missing derived text.
+ */
+const checkAssetTextBlobCompleteness = async (
+  db: Awaited<ReturnType<typeof getDb>>,
+  spaceId: string,
+  assetTextIds: Set<string>,
+): Promise<string[]> => {
+  if (assetTextIds.size === 0) return [];
+  const rows = await db
+    .select({
+      id: busabaseAssetTexts.id,
+      status: busabaseAssetTexts.status,
+      textStorageKey: busabaseAssetTexts.textStorageKey,
+    })
+    .from(busabaseAssetTexts)
+    .where(
+      and(
+        eq(busabaseAssetTexts.spaceId, spaceId),
+        inArray(busabaseAssetTexts.id, [...assetTextIds]),
+      ),
+    );
+  const missing: string[] = [];
+  for (const row of rows) {
+    if (row.status === "none" || row.textStorageKey === "") continue;
+    const exists = await storage.objectExists(row.textStorageKey);
+    if (!exists) missing.push(row.textStorageKey);
+  }
+  return missing.length > 0
+    ? [
+        `${missing.length} assetTexts row(s) have no bytes in storage for their textStorageKey — the extracted text they claim to hold is not searchable (grep will silently return no matches for it).`,
+      ]
+    : [];
+};
+
 export const commitImportSession = async (sessionId: string): Promise<ImportCommitVO> => {
   requireSpaceManagerForDump();
   const session = requireSession(sessionId);
@@ -364,12 +435,14 @@ export const commitImportSession = async (sessionId: string): Promise<ImportComm
   const linkIds = session.insertedIds.get("recordLinks") ?? new Set<string>();
   const assetIds = session.insertedIds.get("assets") ?? new Set<string>();
   const attachmentIds = session.insertedIds.get("attachments") ?? new Set<string>();
+  const assetTextIds = session.insertedIds.get("assetTexts") ?? new Set<string>();
 
   warnings.push(
     ...(await checkFieldValueOrphans(db, spaceId, fieldValueIds)),
     ...(await checkRecordLinkOrphans(db, spaceId, linkIds)),
     ...(await checkAssetAttachmentOrphans(db, spaceId, assetIds)),
     ...(await checkBlobCompleteness(db, attachmentIds)),
+    ...(await checkAssetTextBlobCompleteness(db, spaceId, assetTextIds)),
   );
 
   sessions.delete(sessionId);

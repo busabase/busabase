@@ -47,6 +47,7 @@ import {
   reviewChangeRequests,
   reviseOperation,
   searchBusabase,
+  searchNodesByName,
   toggleNodeFavorite,
 } from "./logic/store";
 
@@ -62,6 +63,9 @@ export const busabaseRouter = busabase.router({
   grep: busabase.grep.handler(async ({ input }) => grepUnified(input)),
   nodes: {
     list: busabase.nodes.list.handler(async ({ input }) => listNodes(input)),
+    searchByName: busabase.nodes.searchByName.handler(async ({ input }) =>
+      searchNodesByName(input),
+    ),
     isDescendant: busabase.nodes.isDescendant.handler(async ({ input }) => ({
       isDescendant: await isDescendantOf(
         await getDb(),

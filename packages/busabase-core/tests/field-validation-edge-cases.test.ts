@@ -80,6 +80,27 @@ describe("structured text fields (json / yaml)", () => {
       /valid YAML/,
     );
   });
+
+  // Regression: `JSON.parse` on a well-formed-but-absurdly-deep string (e.g.
+  // 10,000 levels of `[[[[...]]]]`) succeeds fine in V8 — it does NOT throw,
+  // so jsonValidator's own try/catch never fires. The crash actually happened
+  // downstream, when the parsed deeply-nested structure was written to the
+  // `valueJson` jsonb column: drizzle-orm's jsonb column serialization
+  // (`mapToDriverValue` → `JSON.stringify`) blows the call stack with an
+  // unclassified RangeError, surfacing as a raw 500. The fix rejects
+  // pathologically deep input here — before any parsing — with a clean
+  // validation error, so it never reaches that downstream re-serialization.
+  it("json rejects pathologically deep nesting with a clean validation error instead of crashing", () => {
+    const buildNested = (depth: number) => "[".repeat(depth) + "]".repeat(depth);
+
+    // Previously crashed the whole write path with an unclassified 500.
+    expect(checkOne("json", buildNested(10_000))).toMatch(/nested too deeply/);
+
+    // A reasonably-sized valid JSON value (including moderate nesting well
+    // under the cap) still works normally — no false-positive rejection.
+    expect(checkOne("json", buildNested(100))).toBeNull();
+    expect(checkOne("json", JSON.stringify({ a: [1, 2, { b: "c" }], d: null }))).toBeNull();
+  });
 });
 
 describe("number", () => {

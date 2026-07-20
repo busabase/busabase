@@ -208,9 +208,59 @@ const isAttachmentRef = (
 const textValidator = (value: unknown, def: FieldDef) =>
   typeof value === "string" ? null : `${fieldDisplayName(def)} must be text`;
 
+/**
+ * Cheap pre-check for pathological bracket/brace nesting depth, run BEFORE
+ * `JSON.parse` — a single pass over the raw text, string-literal-aware so
+ * brackets inside quoted JSON string values aren't miscounted.
+ *
+ * Why this exists: `JSON.parse` on a deeply-nested-but-well-formed string
+ * (e.g. 10,000 levels of `[[[[...]]]]`) succeeds fine in V8 — it does NOT
+ * throw, so jsonValidator's own try/catch below never fires. The crash
+ * happens much later in the write path: `normalizeFieldValue` (logic/vo.ts)
+ * parses the string into a real nested-array structure for the `valueJson`
+ * jsonb column, and drizzle-orm's jsonb column serialization
+ * (`mapToDriverValue` → `JSON.stringify`) then blows the call stack with an
+ * unclassified `RangeError` when the record is written — surfacing as a raw
+ * 500, not a clean validation error. Rejecting over-deep input here, before
+ * any parsing is attempted, keeps a pathologically nested value from ever
+ * reaching that downstream re-serialization.
+ */
+const MAX_JSON_NESTING_DEPTH = 1000;
+
+const exceedsMaxNestingDepth = (value: string, maxDepth: number): boolean => {
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let i = 0; i < value.length; i++) {
+    const char = value[i];
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (char === "\\") {
+        escaped = true;
+      } else if (char === '"') {
+        inString = false;
+      }
+      continue;
+    }
+    if (char === '"') {
+      inString = true;
+    } else if (char === "[" || char === "{") {
+      depth++;
+      if (depth > maxDepth) return true;
+    } else if (char === "]" || char === "}") {
+      depth--;
+    }
+  }
+  return false;
+};
+
 /** JSON is stored as raw text like `code`, but must parse before merge/commit. */
 const jsonValidator = (value: unknown, def: FieldDef) => {
   if (typeof value !== "string") return `${fieldDisplayName(def)} must be text`;
+  if (exceedsMaxNestingDepth(value, MAX_JSON_NESTING_DEPTH)) {
+    return `${fieldDisplayName(def)} is nested too deeply (max ${MAX_JSON_NESTING_DEPTH} levels)`;
+  }
   try {
     JSON.parse(value);
     return null;

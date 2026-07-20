@@ -1,10 +1,11 @@
 import "server-only";
 
 import { ORPCError } from "@orpc/server";
+import { searchNodesByNameInputSchema } from "busabase-contract/contract/schemas";
 import { CREATABLE_NODE_TYPES } from "busabase-contract/domains";
 import { fieldNameSchema } from "busabase-contract/domains/base/contract/base-schemas";
-import type { NodeVO } from "busabase-contract/types";
-import { and, asc, desc, eq, inArray, isNotNull, isNull, ne } from "drizzle-orm";
+import type { NodeSearchResultVO, NodeVO } from "busabase-contract/types";
+import { and, asc, desc, eq, ilike, inArray, isNotNull, isNull, ne, or, sql } from "drizzle-orm";
 import { storage } from "openlib/storage";
 import { z } from "zod";
 import { getContextSpaceId, resolveActorId, withContextSourceMeta } from "../context";
@@ -23,7 +24,7 @@ import { id, now, rootNodeIdForSpace } from "./kernel";
 import { publishChangeRequestPendingReview } from "./live-events";
 import { assertNodePermission, assertNodeVisible, buildNodeVisibilityCondition } from "./node-acl";
 import { buildNodeTree, ensureReady } from "./seed";
-import { toNodeVO } from "./vo";
+import { toNodeSearchResultVO, toNodeVO } from "./vo";
 
 export { toNodeVO };
 
@@ -352,6 +353,50 @@ export const listArchivedNodes = async (): Promise<NodeVO[]> => {
     )
     .orderBy(desc(busabaseNodes.archivedAt));
   return nodeRows.map((node) => toNodeVO(node, null));
+};
+
+/**
+ * Cheap name/slug-only lookup across ALL 7 node types (folder/base/skill/
+ * drive/airapp/file/doc) — the backend half of the dashboard quick-jump
+ * palette's `KnownNode` cache-miss path (see
+ * apps/busabase/content/spec/search-quick-jump.md). Deliberately NOT bolted
+ * onto `searchBusabase` (logic/search.ts), which also does 5s-budgeted
+ * asset-body scanning and full-text ranking — the wrong cost profile for
+ * "find a node by the name I already know." Just a plain `ilike` on
+ * `name`/`slug`, scoped through the same `buildNodeVisibilityCondition` ACL
+ * every other node-listing query in this file already uses, ordered
+ * exact-slug-match first (case-insensitive) so a known name always sorts to
+ * the top, then alphabetically.
+ */
+export const searchNodesByName = async (
+  input: z.input<typeof searchNodesByNameInputSchema>,
+): Promise<NodeSearchResultVO[]> => {
+  await ensureReady();
+  const db = await getDb();
+  const spaceId = getContextSpaceId();
+  const parsed = searchNodesByNameInputSchema.parse(input);
+  const query = parsed.query.trim();
+  if (!query) return [];
+  // PostgreSQL LIKE treats %, _ and \\ as pattern syntax. Search-by-name is a
+  // literal substring lookup, so user input must not broaden the result set.
+  const escapedQuery = query.replace(/[\\%_]/g, "\\$&");
+  const pattern = `%${escapedQuery}%`;
+
+  const rows = await db
+    .select()
+    .from(busabaseNodes)
+    .where(
+      and(
+        eq(busabaseNodes.spaceId, spaceId),
+        isNull(busabaseNodes.archivedAt),
+        buildNodeVisibilityCondition(db),
+        or(ilike(busabaseNodes.name, pattern), ilike(busabaseNodes.slug, pattern)),
+      ),
+    )
+    .orderBy(desc(sql`lower(${busabaseNodes.slug}) = lower(${query})`), asc(busabaseNodes.name))
+    .limit(parsed.limit);
+
+  return rows.map(toNodeSearchResultVO);
 };
 
 export const loadNodesByIds = async (nodeIds: string[]): Promise<Map<string, NodeVO>> => {

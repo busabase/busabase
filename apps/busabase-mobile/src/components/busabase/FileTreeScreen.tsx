@@ -999,9 +999,9 @@ export function FileTreeScreen({
 const styles = StyleSheet.create({
   errorWrap: { marginHorizontal: 20, marginTop: 12 },
   overviewIntro: {
-    minHeight: 64,
+    minHeight: 58,
     paddingHorizontal: 14,
-    paddingVertical: 12,
+    paddingVertical: 10,
     flexDirection: "row",
     alignItems: "flex-start",
     justifyContent: "space-between",
@@ -1015,9 +1015,9 @@ const styles = StyleSheet.create({
     paddingVertical: 5,
   },
   statsStrip: {
-    minHeight: 58,
+    minHeight: 52,
     paddingHorizontal: 14,
-    paddingVertical: 10,
+    paddingVertical: 9,
     flexDirection: "row",
     gap: 12,
     borderBottomWidth: StyleSheet.hairlineWidth,

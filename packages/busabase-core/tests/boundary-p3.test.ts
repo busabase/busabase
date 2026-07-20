@@ -317,4 +317,32 @@ describe("Boundary P3 — oRPC", () => {
 
     expect(await seqOf(ids[1])).toBe(2);
   });
+
+  // ── Fix 9: createBase slug collision with a different name is a real conflict ──
+  it("Fix 9: createBase rejects a slug collision with a different name, but preserves the idempotent-retry shortcut", async () => {
+    const first = await makeBase("p3-slug-collision", [{ slug: "title", name: "Title" }]);
+
+    // Genuinely different submission colliding on slug — must NOT silently
+    // return the existing base's data; must surface as a real conflict.
+    await expect(
+      client.bases.create({
+        slug: "p3-slug-collision",
+        name: "Completely Different Name",
+        fields: [{ slug: "other", name: "Other", type: "text", required: false }],
+        autoMerge: true,
+      }),
+    ).rejects.toMatchObject({ code: "CONFLICT" });
+
+    // Same slug + same name = legitimate idempotent retry — must still
+    // succeed and return the existing base unchanged (not error).
+    const retry = await client.bases.create({
+      slug: "p3-slug-collision",
+      name: "p3-slug-collision",
+      fields: [{ slug: "title", name: "Title", type: "text", required: false }],
+      autoMerge: true,
+    });
+    if ("status" in retry) throw new Error("Expected materialized BaseVO");
+    expect(retry.id).toBe(first.id);
+    expect(retry.name).toBe(first.name);
+  });
 });

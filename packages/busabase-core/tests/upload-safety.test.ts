@@ -254,6 +254,86 @@ describe("Upload safety (.gitignore filter + default-deny list + secret scan) �
     });
   });
 
+  describe("Filename length guard (normalizeFilePath, ../logic/storage.ts)", () => {
+    // Mirrors the DB-level bound on `attachments.file_name`
+    // (`varchar("file_name", { length: 255 })` in
+    // packages/open-domains/attachments/schema/attachments.ts) — a filename
+    // longer than this used to reach `db.insert` unchecked and crash with a
+    // raw, uncaught "value too long for type character varying(255)" 500 at
+    // *merge* time (the propose step never touches the DB row, so it looked
+    // fine right up until merge).
+    const boundaryName = "a".repeat(255);
+    const overBoundaryName = "a".repeat(256);
+
+    it("accepts a filename exactly at the 255-char boundary (drives.create)", async () => {
+      const created = await client.drives.create({
+        autoMerge: true,
+        slug: "boundary-filename-drive",
+        name: "Boundary Filename Drive",
+        mergeMode: "replace",
+        files: [{ path: boundaryName, content: "ok\n" }],
+      });
+      expect(created.files.map((file) => file.path)).toEqual([boundaryName]);
+    });
+
+    it("rejects a filename one over the 255-char boundary with a clean BAD_REQUEST, not a downstream crash", async () => {
+      await expect(
+        client.drives.create({
+          autoMerge: true,
+          slug: "over-boundary-filename-drive",
+          name: "Over Boundary Filename Drive",
+          mergeMode: "replace",
+          files: [{ path: overBoundaryName, content: "nope\n" }],
+        }),
+      ).rejects.toMatchObject({
+        code: "BAD_REQUEST",
+        message: expect.stringContaining("Filename too long"),
+      });
+    });
+
+    it("does not reject a long intermediate folder segment — only the final filename segment is stored in attachments.file_name", async () => {
+      const longFolder = "b".repeat(300);
+      const created = await client.drives.create({
+        autoMerge: true,
+        slug: "long-folder-short-filename-drive",
+        name: "Long Folder Short Filename Drive",
+        mergeMode: "replace",
+        files: [{ path: `${longFolder}/short.md`, content: "ok\n" }],
+      });
+      expect(created.files.map((file) => file.path)).toEqual([`${longFolder}/short.md`]);
+    });
+
+    it("rejects an over-length filename proposed through createFileTreeChangeRequest via the real oRPC router + PGLite (not just the unit-level normalizeFilePath function) — this is the integration tier that would have caught the original crash", async () => {
+      // `createFileTreeChangeRequest` calls the exact same `normalizeUsagePath`
+      // (== `normalizeFilePath`) guard at propose time (handlers.ts ~line 782)
+      // that `upsertFileAssetAtPath` calls again at merge time (~line 323) —
+      // one shared choke point, two callers. Before this fix, neither caller
+      // checked filename length, so a CR like this one *proposed* successfully
+      // and only blew up with an uncaught DB error once merge's `db.insert`
+      // hit the real varchar(255) column. Asserting the rejection happens here,
+      // through the real router client and a real PGLite instance (not a
+      // direct call to `normalizeFilePath`), proves the fix is actually wired
+      // into the request path merge would have used — the same class of gap
+      // this test suite exists to catch (see file header).
+      const skill = await client.skills.create({
+        autoMerge: true,
+        slug: "merge-filename-length-skill",
+        name: "Merge Filename Length Skill",
+      });
+
+      await expect(
+        client.skills.createChangeRequest({
+          nodeId: skill.node.id,
+          message: "Add a file with an over-long name",
+          operations: [{ kind: "create", path: overBoundaryName, content: "nope\n" }],
+        }),
+      ).rejects.toMatchObject({
+        code: "BAD_REQUEST",
+        message: expect.stringContaining("Filename too long"),
+      });
+    });
+  });
+
   describe("Regression baseline — a clean batch keeps working exactly as before", () => {
     it("a clean batch with no .gitignore, no forbidden paths, and no secrets succeeds unchanged (drives.create)", async () => {
       const created = await client.drives.create({

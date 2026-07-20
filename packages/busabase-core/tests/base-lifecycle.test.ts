@@ -100,7 +100,7 @@ describe("Base-domain DB lifecycle — oRPC", () => {
       expect(all.some((b) => b.slug === "lc-projects")).toBe(true);
     });
 
-    it("is idempotent on a duplicate slug (returns the existing Base)", async () => {
+    it("is idempotent on a duplicate slug + matching name (returns the existing Base)", async () => {
       const first = await client.bases.create({
         slug: "lc-dup",
         name: "Dup One",
@@ -108,9 +108,13 @@ describe("Base-domain DB lifecycle — oRPC", () => {
         autoMerge: true,
       });
       if ("status" in first) throw new Error("Expected materialized BaseVO");
+      // Same slug + same name = legitimate idempotent retry (e.g. a seed/
+      // migration script safely re-running bases.create) — still succeeds and
+      // returns the ORIGINAL base's fields untouched, ignoring the resubmitted
+      // `fields`.
       const second = await client.bases.create({
         slug: "lc-dup",
-        name: "Dup Two — should be ignored",
+        name: "Dup One",
         fields: [{ slug: "other", name: "Other", type: "text" }],
         autoMerge: true,
       });
@@ -119,6 +123,27 @@ describe("Base-domain DB lifecycle — oRPC", () => {
       expect(second.id).toBe(first.id);
       expect(second.name).toBe("Dup One");
       expect(second.fields.map((f) => f.slug)).toEqual(["title"]);
+    });
+
+    it("rejects a duplicate slug with a DIFFERENT name as a conflict, instead of silently discarding it", async () => {
+      const first = await client.bases.create({
+        slug: "lc-dup-conflict",
+        name: "Dup One",
+        fields: [{ slug: "title", name: "Title", type: "text" }],
+        autoMerge: true,
+      });
+      if ("status" in first) throw new Error("Expected materialized BaseVO");
+
+      // A genuinely different submission colliding on slug is a real
+      // conflict — it must NOT silently return the existing base's data.
+      await expect(
+        client.bases.create({
+          slug: "lc-dup-conflict",
+          name: "Dup Two — a different Base",
+          fields: [{ slug: "other", name: "Other", type: "text" }],
+          autoMerge: true,
+        }),
+      ).rejects.toMatchObject({ code: "CONFLICT" });
     });
 
     it("rejects an unknown parent node id", async () => {
@@ -325,6 +350,34 @@ describe("Base-domain DB lifecycle — oRPC", () => {
           name: "Dup Again",
         }),
       ).rejects.toThrow(/View slug already exists/);
+    });
+
+    // TOCTOU race: two CRs proposed before either merges, both targeting the
+    // same slug on the same Base. createViewChangeRequest's propose-time check
+    // only sees views that exist at proposal time, so neither sees the other —
+    // both reach merge, and mergeViewCreate must catch the second one with a
+    // clean CONFLICT instead of an unclassified unique-constraint 500.
+    it("returns a CONFLICT (not a crash) when two view_create CRs race on the same slug", async () => {
+      const crA = await client.bases.createViewChangeRequest({
+        baseId: blogBaseId,
+        slug: "lc-view-race",
+        name: "Race A",
+      });
+      const crB = await client.bases.createViewChangeRequest({
+        baseId: blogBaseId,
+        slug: "lc-view-race",
+        name: "Race B",
+      });
+
+      await approveAndMerge(crA.id);
+      await expect(approveAndMerge(crB.id)).rejects.toMatchObject({ code: "CONFLICT" });
+
+      // The successful first merge is unaffected — exactly one view with this
+      // slug exists, and it's Race A.
+      const views = await client.bases.listViews({ baseId: blogBaseId });
+      const matches = views.filter((v) => v.slug === "lc-view-race");
+      expect(matches).toHaveLength(1);
+      expect(matches[0]?.name).toBe("Race A");
     });
 
     it("rejects update/delete of an unknown View", async () => {

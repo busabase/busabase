@@ -23,6 +23,7 @@ import {
   updateViewInputSchema,
 } from "../../../logic/store";
 import { normalizeViewConfig } from "../../../logic/vo";
+import { baseNotFound } from "./errors";
 import { getBase, listViews } from "./queries";
 
 export {
@@ -31,10 +32,6 @@ export {
   restoreViewInputSchema,
   updateViewInputSchema,
 };
-
-/** Caller-supplied baseId doesn't resolve — a genuine "not found" client error. */
-const baseNotFound = (baseId: string) =>
-  new ORPCError("NOT_FOUND", { message: `Base not found: ${baseId}` });
 
 /** Caller-supplied viewId doesn't resolve (or isn't active) — a genuine "not found" client error. */
 const viewNotFound = (viewId: string) =>

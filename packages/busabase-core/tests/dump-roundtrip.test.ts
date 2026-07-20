@@ -31,7 +31,8 @@ import { busabaseRouter } from "../src/router";
  * PGLite dir + a fresh object-storage tree — the closest in-process analogue of
  * a real disaster-recovery restore onto a clean environment. Parity is asserted
  * on the *target*, not just "no error": per-table row counts, doc-body bytes,
- * attachment-blob bytes, and the permission grant all survive.
+ * attachment-blob bytes, extracted-text (`asset-texts`) blob bytes, and the
+ * permission grant all survive.
  */
 
 type Client = ReturnType<typeof createRouterClient<typeof busabaseRouter, Record<never, never>>>;
@@ -117,6 +118,7 @@ describe("dump domain — full demo-seed backup round trip", () => {
   let sourceTables = new Map<string, Row[]>();
   const sourceDocBodies = new Map<string, string>();
   const sourceBlobs = new Map<string, { mimeType: string; base64: string }>();
+  const sourceTextBlobs = new Map<string, string>();
   const grantNodeId = enScenario.bases?.[0]?.nodeId ?? "";
   const grantPrincipalId = "usr_roundtrip_reviewer";
 
@@ -169,6 +171,21 @@ describe("dump domain — full demo-seed backup round trip", () => {
       });
     }
 
+    // Extracted-text bytes for every asset text that owns its OWN object.
+    // `dump.exportAssetText` is what decides that (auto-registered rows point
+    // at the attachment's own key, already captured above, and re-capturing
+    // them would double-write one key); asking the server keeps this test
+    // honest to the same rule the real CLI exporter follows.
+    for (const assetText of sourceTables.get("assetTexts") ?? []) {
+      const info = await sourceClient.dump.exportAssetText({
+        assetId: assetText.assetId as string,
+      });
+      if (!info.downloadUrl) continue;
+      if (!(await storage.objectExists(info.textStorageKey))) continue;
+      const buf = await storage.getObject(info.textStorageKey);
+      sourceTextBlobs.set(info.textStorageKey, buf.toString("base64"));
+    }
+
     // ── Switch to a genuinely fresh Database B + empty storage tree ──────────
     await closeDbSingleton();
     targetDir = await mkdtemp(path.join(os.tmpdir(), "busabase-dump-rt-tgt-db-"));
@@ -189,6 +206,14 @@ describe("dump domain — full demo-seed backup round trip", () => {
     }));
     if (blobRows.length > 0) {
       await importInBatches(targetClient, sessionId, "attachmentBlobs", blobRows);
+    }
+
+    const textBlobRows = [...sourceTextBlobs.entries()].map(([textStorageKey, base64]) => ({
+      textStorageKey,
+      base64,
+    }));
+    if (textBlobRows.length > 0) {
+      await importInBatches(targetClient, sessionId, "assetTextBlobs", textBlobRows);
     }
 
     for (const table of DUMP_IMPORT_ORDER) {
@@ -285,10 +310,27 @@ describe("dump domain — full demo-seed backup round trip", () => {
     }
   });
 
+  it("asset-text blob bytes are byte-identical after restore", async () => {
+    // The regression this pass was added for: `assetTexts` ROWS always
+    // round-tripped, so the restored space claimed `status: "present"` over
+    // extracted text whose object had never been captured — grep then returned
+    // zero matches for content the source could find, with no error anywhere.
+    // These keys are content-addressed by the sha256 of their own bytes, so
+    // "byte-identical" is not a nicety here: one byte of drift and the key no
+    // longer describes what lives at it.
+    expect(sourceTextBlobs.size).toBeGreaterThan(0);
+    for (const [textStorageKey, base64] of sourceTextBlobs) {
+      expect(await storage.objectExists(textStorageKey)).toBe(true);
+      const restored = await storage.getObject(textStorageKey);
+      expect(restored.toString("base64")).toBe(base64);
+    }
+  });
+
   it("importCommit reports no integrity warnings for a complete, faithful restore", () => {
-    // Every FK-less reference (fieldValues.fieldId, assets.attachmentId, blob
-    // completeness, recordLinks endpoints) resolves because the whole space was
-    // imported — a warning here means the restore left a dangling reference.
+    // Every FK-less reference (fieldValues.fieldId, assets.attachmentId,
+    // attachment + asset-text blob completeness, recordLinks endpoints)
+    // resolves because the whole space was imported — a warning here means the
+    // restore left a dangling reference.
     expect(commitWarnings).toEqual([]);
   });
 });

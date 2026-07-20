@@ -35,6 +35,7 @@ import {
   demoReviewChangeRequest,
   demoReviseOperation,
   demoSearch,
+  demoSearchNodesByName,
 } from "./logic/demo-store";
 
 // Stateless demo router (productready-style): the request boundary swaps to this
@@ -74,6 +75,7 @@ export const busabaseDemoRouter = os.router({
     // in memory already, so there's nothing to lazily bound (see
     // `demoListNodes`'s doc comment in logic/demo-store.ts).
     list: os.nodes.list.handler(() => demoListNodes()),
+    searchByName: os.nodes.searchByName.handler(({ input }) => demoSearchNodesByName(input)),
     isDescendant: os.nodes.isDescendant.handler(({ input }) => ({
       isDescendant: demoIsDescendant(input.nodeId, input.potentialAncestorId),
     })),
@@ -359,6 +361,9 @@ export const busabaseDemoRouter = os.router({
   // in-memory demo dataset doesn't have — unsupported in demo mode.
   dump: {
     exportTables: os.dump.exportTables.handler(() => {
+      throw demoUnsupported("Export space");
+    }),
+    exportAssetText: os.dump.exportAssetText.handler(() => {
       throw demoUnsupported("Export space");
     }),
     importBegin: os.dump.importBegin.handler(() => {

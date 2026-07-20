@@ -219,7 +219,7 @@ export interface BusabaseRpcConfig {
 // Reference `window` through `globalThis` with a locally-declared shape rather
 // than the ambient DOM `Window` type: this file is consumed as raw source (not
 // just built .d.ts) by workspace packages whose tsconfig has no "dom" lib
-// (e.g. packages/busabase-dump, Node-only), where the bare `window` identifier
+// (e.g. apps/busabase-cli, Node-only), where the bare `window` identifier
 // doesn't resolve at all — `globalThis` is available under every lib target.
 // A function, not a module-level const: must re-read on every call, not just
 // once at import time (tests stub it in after import; a real page's `window`

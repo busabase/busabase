@@ -1,6 +1,6 @@
 {
   "name": "busabase-cli",
-  "version": "0.9.8",
+  "version": "0.9.9",
   "description": "Command-line client for the Busabase OpenAPI REST API. Talks to a local or remote `busabase server`.",
   "license": "MIT",
   "homepage": "https://github.com/busabase/busabase/tree/main/apps/busabase-cli",
@@ -44,11 +44,13 @@
     "@zip.js/zip.js": "^2.8.20",
     "busabase-sdk": "workspace:*",
     "commander": "^14.0.0",
+    "tar-stream": "^3.1.7",
     "yaml": "^2.9.0",
     "zod": "^4.3.6"
   },
   "devDependencies": {
     "@types/node": "^24.13.2",
+    "@types/tar-stream": "^3.1.4",
     "busabase-contract": "workspace:*",
     "open-domains": "workspace:*",
     "openlib": "workspace:*",

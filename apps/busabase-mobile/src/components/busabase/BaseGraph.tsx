@@ -172,16 +172,33 @@ export function BaseGraph({ bases, width, height, onNodePress }: BaseGraphProps)
             const cx = node.x ?? 0;
             const cy = node.y ?? 0;
             const label = node.name.length > 13 ? `${node.name.slice(0, 12)}…` : node.name;
+            const press = () => onNodePress(node.slug);
             return (
-              <G key={node.id} onPress={() => onNodePress(node.slug)}>
-                {/* Outer glow ring */}
-                <Circle cx={cx} cy={cy} r={NODE_R + 5} fill={nodeColor} fillOpacity={0.1} />
+              // onPress lives on each leaf primitive, NOT on this <G> (a plain
+              // grouping wrapper here). On web, react-native-svg's renderer breaks
+              // the SVG namespace for a G's children once the G itself carries
+              // onPress/accessibility props — every Circle/Text under it silently
+              // gets a zero-size bounding box (invisible, untappable) even though
+              // its cx/cy/attributes all look correct in the DOM. Verified via
+              // getBoundingClientRect() A/B testing (git stash) during this fix.
+              <G key={node.id}>
+                {/* Outer glow ring — also the largest tap target */}
+                <Circle
+                  cx={cx}
+                  cy={cy}
+                  r={NODE_R + 5}
+                  fill={nodeColor}
+                  fillOpacity={0.1}
+                  onPress={press}
+                />
                 <Circle
                   cx={cx}
                   cy={cy}
                   r={NODE_R}
                   fill={isConnected ? nodeColor : nodeColorIsolated}
                   fillOpacity={0.9}
+                  onPress={press}
+                  accessibilityLabel={`Open ${node.name}`}
                 />
                 <SvgText
                   x={cx}
@@ -190,6 +207,7 @@ export function BaseGraph({ bases, width, height, onNodePress }: BaseGraphProps)
                   fontSize={11}
                   fontWeight="500"
                   fill={labelColor}
+                  onPress={press}
                 >
                   {label}
                 </SvgText>

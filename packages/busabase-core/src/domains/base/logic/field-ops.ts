@@ -35,6 +35,7 @@ import { fieldSchema } from "../../../logic/store";
 import { isSystemFieldType } from "../field-types";
 import { busabaseFieldValues } from "../schema";
 import { convertFieldValue } from "../utils/field-conversion";
+import { baseNotFound } from "./errors";
 import { getBase } from "./queries";
 import { resolveRelationFieldOptions } from "./relation-options";
 
@@ -48,10 +49,6 @@ export {
   restoreFieldChangeRequestInputSchema,
   updateFieldChangeRequestInputSchema,
 };
-
-/** Caller-supplied baseId doesn't resolve — a genuine "not found" client error. */
-const baseNotFound = (baseId: string) =>
-  new ORPCError("NOT_FOUND", { message: `Base not found: ${baseId}` });
 
 /** Caller-supplied fieldId doesn't resolve (or is soft-deleted) — a genuine "not found" client error. */
 const fieldNotFound = (fieldId: string) =>

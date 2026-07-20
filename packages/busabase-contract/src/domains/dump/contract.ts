@@ -1,5 +1,7 @@
 import { oc } from "@orpc/contract";
 import {
+  ExportAssetTextInputSchema,
+  ExportAssetTextVOSchema,
   ExportTablesInputSchema,
   ExportTablesVOSchema,
   ImportAbortVOSchema,
@@ -32,6 +34,17 @@ export const dumpContract = {
     })
     .input(ExportTablesInputSchema)
     .output(ExportTablesVOSchema),
+  exportAssetText: oc
+    .route({
+      method: "GET",
+      path: "/dump/export/asset-texts/{assetId}/content",
+      tags: ["Dump"],
+      summary: "Resolve the download URL for one asset's extracted-text object",
+      successDescription:
+        "A resolved download URL for the asset's DERIVED text blob (`asset-texts/blobs/sha256/…`) plus its `textStorageKey` and `textContentHash`, so a backup can archive the exact bytes and verify them. `downloadUrl` is null when the row owns no separate object (auto-registered text-kind rows point at their attachment's own key, already covered by the attachment blobs; `status: \"none\"` rows have no text at all).",
+    })
+    .input(ExportAssetTextInputSchema)
+    .output(ExportAssetTextVOSchema),
   importBegin: oc
     .route({
       method: "POST",
@@ -49,7 +62,7 @@ export const dumpContract = {
       tags: ["Dump"],
       summary: "Import a batch of raw rows into an open session",
       successDescription:
-        "Inserted rows preserving their original ids. `docBodies` is a pseudo-table ({nodeId, markdown}[]) written directly to object storage (doc bodies are not a DB row).",
+        "Inserted rows preserving their original ids. `docBodies` ({nodeId, markdown}[]), `attachmentBlobs` ({storageKey, mimeType, base64}[]) and `assetTextBlobs` ({textStorageKey, base64}[]) are pseudo-tables written directly to object storage (none of them are DB rows).",
     })
     .input(ImportTablesInputSchema)
     .output(ImportTablesVOSchema),

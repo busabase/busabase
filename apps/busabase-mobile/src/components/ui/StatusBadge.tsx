@@ -1,5 +1,12 @@
 import type { ChangeRequestStatus } from "busabase-contract/types";
-import { StyleSheet, Text, View } from "react-native";
+import { useEffect, useRef } from "react";
+import { StyleSheet, Text } from "react-native";
+import Animated, {
+  useAnimatedStyle,
+  useReducedMotion,
+  useSharedValue,
+  withTiming,
+} from "react-native-reanimated";
 import { radius, typography } from "~/theme/tokens";
 import { useTokens } from "~/theme/use-tokens";
 
@@ -21,6 +28,27 @@ export const getStatusLabel = (status: BadgeStatus) => labelByStatus[status];
 
 export function StatusBadge({ status, compact }: { status: BadgeStatus; compact?: boolean }) {
   const tokens = useTokens();
+  const reducedMotion = useReducedMotion();
+  const flip = useSharedValue(1);
+  const previousStatus = useRef(status);
+
+  // A restrained fade confirms the status actually changed (principle: "no
+  // double-tap uncertainty") without an attention-seeking animation on every
+  // list mount — only fires when `status` transitions after first render.
+  useEffect(() => {
+    if (previousStatus.current === status) {
+      return;
+    }
+    previousStatus.current = status;
+    if (reducedMotion) {
+      return;
+    }
+    flip.value = 0.4;
+    flip.value = withTiming(1, { duration: 180 });
+  }, [status, reducedMotion, flip]);
+
+  const animatedStyle = useAnimatedStyle(() => ({ opacity: flip.value }));
+
   const cha =
     status === "approved" || status === "merged" || status === "active"
       ? tokens.merged
@@ -29,15 +57,16 @@ export function StatusBadge({ status, compact }: { status: BadgeStatus; compact?
         : tokens.review;
 
   return (
-    <View
+    <Animated.View
       style={[
         styles.badge,
         compact ? styles.compact : null,
         { backgroundColor: withAlpha(cha.base, 0.12) },
+        animatedStyle,
       ]}
     >
       <Text style={[typography.caption, { color: cha.text }]}>{getStatusLabel(status)}</Text>
-    </View>
+    </Animated.View>
   );
 }
 
