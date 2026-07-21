@@ -47,6 +47,10 @@ env:
   NODE_VERSION: 24.18.0
   EXAMPLE_DIRECTORY: packages/busabase-example-nextjs-fumadocs
   DEPLOY_ENVIRONMENT: ${{ (github.event_name == 'push' || inputs.environment == 'production') && 'production' || 'preview' }}
+  BUSABASE_BASE_URL: https://demo.busabase.com
+  BUSABASE_CMS_FOLDER_ID: nodmru0gtq2tdiukii
+  BUSABASE_CMS_DEFAULT_LOCALE: en
+  BUSABASE_CMS_LOCALES: en,zh-CN
   VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
   VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
   VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
@@ -125,10 +129,16 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          cms_runtime_env=(
+            --env "BUSABASE_BASE_URL=${BUSABASE_BASE_URL}"
+            --env "BUSABASE_CMS_FOLDER_ID=${BUSABASE_CMS_FOLDER_ID}"
+            --env "BUSABASE_CMS_DEFAULT_LOCALE=${BUSABASE_CMS_DEFAULT_LOCALE}"
+            --env "BUSABASE_CMS_LOCALES=${BUSABASE_CMS_LOCALES}"
+          )
           if [ "$DEPLOY_ENVIRONMENT" = "production" ]; then
-            deployment_url=$(vercel deploy --prebuilt --prod --token="$VERCEL_TOKEN")
+            deployment_url=$(vercel deploy --prebuilt --prod "${cms_runtime_env[@]}" --token="$VERCEL_TOKEN")
           else
-            deployment_url=$(vercel deploy --prebuilt --token="$VERCEL_TOKEN")
+            deployment_url=$(vercel deploy --prebuilt "${cms_runtime_env[@]}" --token="$VERCEL_TOKEN")
           fi
           echo "url=${deployment_url}" >> "$GITHUB_OUTPUT"
 
@@ -143,4 +153,6 @@ jobs:
             echo
             echo "- Environment: **${DEPLOY_ENVIRONMENT}**"
             echo "- URL: [${DEPLOYMENT_URL}](${DEPLOYMENT_URL})"
+            echo "- CMS endpoint: [${BUSABASE_BASE_URL}](${BUSABASE_BASE_URL})"
+            echo "- CMS folder: \`${BUSABASE_CMS_FOLDER_ID}\`"
           } >> "$GITHUB_STEP_SUMMARY"
