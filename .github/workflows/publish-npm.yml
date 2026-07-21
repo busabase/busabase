@@ -2,9 +2,10 @@
 # (scripts/publish-busabase-repo.ts) PRESERVES `.github`, so it never overwrites
 # this file — edit it here.
 #
-# Publishes busabase-cli + busabase-sdk + busabase to npm with provenance, from
-# the public repo, on GitHub's official ubuntu-latest runner. It also publishes
-# short-name alias packages busa-cli + busa-sdk from the same built artifacts.
+# Publishes busabase-cli + busabase-sdk + busabase-cms + busabase to npm with
+# provenance, from the public repo, on GitHub's official ubuntu-latest runner.
+# It also publishes short-name alias packages busa-cli + busa-sdk from the same
+# built artifacts.
 # busabase depends on busabase-cli via workspace:*, so both publish with
 # `pnpm publish` (rewrites the protocol), cli first. busabase-sdk is a standalone
 # built library (its contract deps are bundled into dist), so it publishes
@@ -63,13 +64,14 @@ jobs:
       # busabase-desktop and busabase-mobile (Expo/RN); installing those here would
       # pull React Native and run their native postinstall scripts for no reason on
       # an npm publish.
-      - run: pnpm install --frozen-lockfile --filter "busabase..." --filter "busabase-cli..." --filter "busabase-sdk..."
+      - run: pnpm install --frozen-lockfile --filter "busabase..." --filter "busabase-cli..." --filter "busabase-sdk..." --filter "busabase-cms..."
 
       - name: Get versions
         id: v
         run: |
           echo "cli=$(node -p "require('./apps/busabase-cli/package.json').version")" >> "$GITHUB_OUTPUT"
           echo "sdk=$(node -p "require('./apps/busabase-sdk/package.json').version")" >> "$GITHUB_OUTPUT"
+          echo "cms=$(node -p "require('./packages/busabase-cms/package.json').version")" >> "$GITHUB_OUTPUT"
           echo "app=$(node -p "require('./apps/busabase/package.json').version")" >> "$GITHUB_OUTPUT"
 
       # busabase-sdk MUST build before busabase-cli: the CLI keeps busabase-sdk external
@@ -79,6 +81,15 @@ jobs:
         working-directory: apps/busabase-sdk
         run: |
           pnpm typecheck
+          pnpm build
+          test -f dist/index.js
+          test -f dist/index.d.ts
+
+      - name: Build and test busabase-cms
+        working-directory: packages/busabase-cms
+        run: |
+          pnpm typecheck
+          pnpm test
           pnpm build
           test -f dist/index.js
           test -f dist/index.d.ts
@@ -103,6 +114,7 @@ jobs:
         run: |
           npm view busabase-cli@${{ steps.v.outputs.cli }} version >/dev/null 2>&1 && echo "cli=true" >> "$GITHUB_OUTPUT" || echo "cli=false" >> "$GITHUB_OUTPUT"
           npm view busabase-sdk@${{ steps.v.outputs.sdk }} version >/dev/null 2>&1 && echo "sdk=true" >> "$GITHUB_OUTPUT" || echo "sdk=false" >> "$GITHUB_OUTPUT"
+          npm view busabase-cms@${{ steps.v.outputs.cms }} version >/dev/null 2>&1 && echo "cms=true" >> "$GITHUB_OUTPUT" || echo "cms=false" >> "$GITHUB_OUTPUT"
           npm view busabase@${{ steps.v.outputs.app }} version >/dev/null 2>&1 && echo "app=true" >> "$GITHUB_OUTPUT" || echo "app=false" >> "$GITHUB_OUTPUT"
           npm view busa-cli@${{ steps.v.outputs.cli }} version >/dev/null 2>&1 && echo "busa_cli=true" >> "$GITHUB_OUTPUT" || echo "busa_cli=false" >> "$GITHUB_OUTPUT"
           npm view busa-sdk@${{ steps.v.outputs.sdk }} version >/dev/null 2>&1 && echo "busa_sdk=true" >> "$GITHUB_OUTPUT" || echo "busa_sdk=false" >> "$GITHUB_OUTPUT"
@@ -115,6 +127,11 @@ jobs:
       - name: Publish busabase-sdk
         if: steps.pub.outputs.sdk != 'true'
         working-directory: apps/busabase-sdk
+        run: pnpm publish --access public --no-git-checks
+
+      - name: Publish busabase-cms
+        if: steps.pub.outputs.cms != 'true'
+        working-directory: packages/busabase-cms
         run: pnpm publish --access public --no-git-checks
 
       - name: Publish busabase
@@ -216,6 +233,7 @@ jobs:
             echo "## npm publish"
             echo "- busabase-cli@${{ steps.v.outputs.cli }} — already published: ${{ steps.pub.outputs.cli }}"
             echo "- busabase-sdk@${{ steps.v.outputs.sdk }} — already published: ${{ steps.pub.outputs.sdk }}"
+            echo "- busabase-cms@${{ steps.v.outputs.cms }} — already published: ${{ steps.pub.outputs.cms }}"
             echo "- busabase@${{ steps.v.outputs.app }} — already published: ${{ steps.pub.outputs.app }}"
             echo "- busa-cli@${{ steps.v.outputs.cli }} — already published: ${{ steps.pub.outputs.busa_cli }}"
             echo "- busa-sdk@${{ steps.v.outputs.sdk }} — already published: ${{ steps.pub.outputs.busa_sdk }}"
