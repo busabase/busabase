@@ -45,7 +45,6 @@ concurrency:
 
 env:
   NODE_VERSION: 24.18.0
-  EXAMPLE_DIRECTORY: packages/busabase-example-nextjs-fumadocs
   DEPLOY_ENVIRONMENT: ${{ (github.event_name == 'push' || inputs.environment == 'production') && 'production' || 'preview' }}
   BUSABASE_BASE_URL: https://demo.busabase.com
   BUSABASE_CMS_FOLDER_ID: nodmru0gtq2tdiukii
@@ -107,12 +106,10 @@ jobs:
 
       - name: Pull Vercel environment
         if: steps.vercel_config.outputs.ready == 'true'
-        working-directory: ${{ env.EXAMPLE_DIRECTORY }}
         run: vercel pull --yes --environment="$DEPLOY_ENVIRONMENT" --token="$VERCEL_TOKEN"
 
       - name: Build Vercel project
         if: steps.vercel_config.outputs.ready == 'true'
-        working-directory: ${{ env.EXAMPLE_DIRECTORY }}
         shell: bash
         run: |
           set -euo pipefail
@@ -125,7 +122,6 @@ jobs:
       - name: Deploy prebuilt output
         if: steps.vercel_config.outputs.ready == 'true'
         id: deploy
-        working-directory: ${{ env.EXAMPLE_DIRECTORY }}
         shell: bash
         run: |
           set -euo pipefail
