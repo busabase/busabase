@@ -1507,6 +1507,29 @@ function BusabaseDashboardContent({
   useKeyboardShortcut({ keys: "cmd+k", handler: openSearch });
   useKeyboardShortcut({ keys: "ctrl+k", handler: openSearch });
 
+  const AirAppDetail = chromeless ? undefined : getNodeDetail("airapp");
+  const keepAirAppsMounted = Boolean(AirAppDetail);
+  const activeAirappSlug = isAirappRoute ? selectedAirappSlug : null;
+  const [visitedAirappSlugs, setVisitedAirappSlugs] = useState<string[]>([]);
+
+  useEffect(() => {
+    if (!keepAirAppsMounted || !activeAirappSlug) {
+      return;
+    }
+    setVisitedAirappSlugs((current) =>
+      current.includes(activeAirappSlug) ? current : [...current, activeAirappSlug],
+    );
+  }, [activeAirappSlug, keepAirAppsMounted]);
+
+  // Include a newly-selected slug synchronously. The effect above persists it
+  // for later routes, while this derived list ensures its keyed detail tree is
+  // the first instance mounted (rather than briefly mounting a disposable
+  // active view before the effect runs).
+  const mountedAirappSlugs =
+    keepAirAppsMounted && activeAirappSlug && !visitedAirappSlugs.includes(activeAirappSlug)
+      ? [...visitedAirappSlugs, activeAirappSlug]
+      : visitedAirappSlugs;
+
   const topbarActions = useMemo(() => {
     // Record view/edit → a View/Edit switch in the titlebar (far right).
     if ((isRecordRoute || isEditRecordRoute) && activeBase && selectedRecordId) {
@@ -1714,7 +1737,7 @@ function BusabaseDashboardContent({
       ? { type: "skill", slug: selectedSkillSlug }
       : isDriveRoute
         ? { type: "drive", slug: selectedDriveSlug }
-        : isAirappRoute
+        : isAirappRoute && (!keepAirAppsMounted || !selectedAirappSlug)
           ? { type: "airapp", slug: selectedAirappSlug }
           : isFileRoute
             ? { type: "file", slug: selectedFileSlug }
@@ -1757,6 +1780,7 @@ function BusabaseDashboardContent({
     isSkillRoute,
     isDriveRoute,
     isAirappRoute,
+    keepAirAppsMounted,
     isFileRoute,
     isDocRoute,
     isFolderRoute,
@@ -1815,6 +1839,25 @@ function BusabaseDashboardContent({
     baseRecords,
   ]);
 
+  const dashboardActiveView =
+    keepAirAppsMounted && AirAppDetail ? (
+      <>
+        {!activeAirappSlug ? activeView : null}
+        {mountedAirappSlugs.map((slug) => (
+          <div
+            aria-hidden={slug !== activeAirappSlug}
+            className={slug === activeAirappSlug ? "h-full" : "hidden"}
+            data-dashboard-airapp-view={slug}
+            key={slug}
+          >
+            <AirAppDetail orpc={orpc} slug={slug} />
+          </div>
+        ))}
+      </>
+    ) : (
+      activeView
+    );
+
   // Chrome-free: no topbar, no side panel, no search dialog — just the current
   // node-detail pane (still preceded by the error banner, since that reflects
   // the current view's own state rather than app-wide navigation chrome).
@@ -1831,7 +1874,7 @@ function BusabaseDashboardContent({
           )
         ) : null}
         <div className="min-h-0 min-w-0 flex-1 overflow-hidden" data-dashboard-active-view>
-          {activeView}
+          {dashboardActiveView}
         </div>
       </div>
     );
@@ -1857,7 +1900,7 @@ function BusabaseDashboardContent({
         ) : null}
 
         <div className="min-h-0 min-w-0 flex-1 overflow-hidden" data-dashboard-active-view>
-          {activeView}
+          {dashboardActiveView}
         </div>
       </div>
       <SidePanel orpc={orpc} />

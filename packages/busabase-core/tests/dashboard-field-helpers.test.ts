@@ -15,7 +15,6 @@ import {
   getRecordFieldType,
   getRelationRecordIds,
   isRecordLongField,
-  isRecordTitleField,
   normalizeCodeLanguage,
 } from "../src/domains/dashboard/helpers/field";
 import { safeFetchableUrl, sanitizeHtml } from "../src/domains/dashboard/helpers/html";
@@ -353,26 +352,20 @@ describe("safeFetchableUrl", () => {
   });
 });
 
-// ── record title / long-field heuristics ────────────────────────────────────
+// ── record field layout ─────────────────────────────────────────────────────
 
-describe("isRecordTitleField / isRecordLongField", () => {
-  it("title-ish slugs are title fields", () => {
-    expect(isRecordTitleField(makeField({ slug: "title" }))).toBe(true);
-    expect(isRecordTitleField(makeField({ slug: "name" }))).toBe(true);
-    expect(isRecordTitleField(makeField({ slug: "status" }))).toBe(false);
-  });
-
-  it("long by type, by slug, or by value length", () => {
-    expect(isRecordLongField(makeField({ type: "markdown" }), "x")).toBe(true);
-    expect(isRecordLongField(makeField({ type: "html" }), "<p>x</p>")).toBe(true);
-    expect(isRecordLongField(makeField({ type: "code" }), "const x = 1;")).toBe(true);
-    expect(isRecordLongField(makeField({ type: "json" }), '{"ok":true}')).toBe(true);
-    expect(isRecordLongField(makeField({ type: "yaml" }), "ok: true")).toBe(true);
-    expect(isRecordLongField(makeField({ slug: "description", type: "text" }), "x")).toBe(true);
-    expect(isRecordLongField(makeField({ slug: "status", type: "text" }), "x".repeat(200))).toBe(
-      true,
-    );
-    expect(isRecordLongField(makeField({ slug: "status", type: "text" }), "short")).toBe(false);
+describe("isRecordLongField", () => {
+  it("uses only the explicit field type to select the expanded renderer", () => {
+    expect(isRecordLongField(makeField({ type: "longtext" }))).toBe(true);
+    expect(isRecordLongField(makeField({ type: "markdown" }))).toBe(true);
+    expect(isRecordLongField(makeField({ type: "html" }))).toBe(true);
+    expect(isRecordLongField(makeField({ type: "code" }))).toBe(true);
+    expect(isRecordLongField(makeField({ type: "json" }))).toBe(true);
+    expect(isRecordLongField(makeField({ type: "yaml" }))).toBe(true);
+    expect(isRecordLongField(makeField({ type: "ai_summary" }))).toBe(true);
+    expect(isRecordLongField(makeField({ slug: "description", type: "text" }))).toBe(false);
+    expect(isRecordLongField(makeField({ slug: "body", type: "text" }))).toBe(false);
+    expect(isRecordLongField(makeField({ slug: "subject", type: "text" }))).toBe(false);
   });
 });
 

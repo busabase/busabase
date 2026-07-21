@@ -14,6 +14,19 @@ test("REST OPTIONS advertises node change-request methods", async ({ request }, 
   expect(response.headers()["access-control-allow-methods"]).toContain("OPTIONS");
 });
 
+test("Install from GitHub lives in the workspace menu", async ({ page }) => {
+  await page.goto("/dashboard/local");
+  await expect(page.getByRole("link", { name: "Install from GitHub" })).toHaveCount(0);
+
+  await page.getByRole("button", { name: /Busabase.*Trusted Intelligent Database/ }).click();
+  await expect(page.getByRole("menuitem", { name: "Archive" })).toBeVisible();
+  await expect(page.getByRole("menuitem", { name: "Assets" })).toBeVisible();
+  await expect(page.getByRole("menuitem", { name: "Install from GitHub" })).toBeVisible();
+
+  await page.getByRole("menuitem", { name: "Install from GitHub" }).click();
+  await expect(page.getByRole("dialog", { name: "Install from GitHub" })).toBeVisible();
+});
+
 test("dashboard routes render the review-first seeded experience", async ({ page }) => {
   await page.goto("/dashboard/local");
   await expect(

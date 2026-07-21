@@ -59,17 +59,14 @@ interface AirAppRunnerStoreState {
   /** Starts a fresh run for `nodeId`: disposes any existing runner for that
    *  node first, then resets the entry to a clean "loading-files" state. */
   beginRun: (nodeId: string, runner: AirAppRunner, runnerKind: AirAppRunnerKind) => void;
-  setStatus: (nodeId: string, status: AirAppRunStatus) => void;
-  appendLog: (nodeId: string, chunk: string) => void;
-  setPreviewUrl: (nodeId: string, url: string) => void;
-  setError: (nodeId: string, message: string) => void;
+  setStatus: (nodeId: string, runner: AirAppRunner, status: AirAppRunStatus) => void;
+  appendLog: (nodeId: string, runner: AirAppRunner, chunk: string) => void;
+  setPreviewUrl: (nodeId: string, runner: AirAppRunner, url: string) => void;
+  setError: (nodeId: string, runner: AirAppRunner, message: string) => void;
   /** Explicit teardown: disposes the runner (if any) and removes the entry
    *  entirely. Used e.g. when the backing node is deleted. */
   disposeEntry: (nodeId: string) => void;
 }
-
-const getEntry = (entries: Record<string, AirAppRunEntry>, nodeId: string): AirAppRunEntry =>
-  entries[nodeId] ?? IDLE_ENTRY;
 
 export const useAirAppRunnerStore = create<AirAppRunnerStoreState>((set, get) => ({
   entries: {},
@@ -97,17 +94,26 @@ export const useAirAppRunnerStore = create<AirAppRunnerStoreState>((set, get) =>
     }));
   },
 
-  setStatus: (nodeId, status) =>
-    set((state) => ({
-      entries: {
-        ...state.entries,
-        [nodeId]: { ...getEntry(state.entries, nodeId), status },
-      },
-    })),
-
-  appendLog: (nodeId, chunk) =>
+  setStatus: (nodeId, runner, status) =>
     set((state) => {
-      const current = getEntry(state.entries, nodeId);
+      const current = state.entries[nodeId];
+      if (current?.runner !== runner) {
+        return state;
+      }
+      return {
+        entries: {
+          ...state.entries,
+          [nodeId]: { ...current, status },
+        },
+      };
+    }),
+
+  appendLog: (nodeId, runner, chunk) =>
+    set((state) => {
+      const current = state.entries[nodeId];
+      if (current?.runner !== runner) {
+        return state;
+      }
       const next = [...current.logLines, chunk];
       return {
         entries: {
@@ -120,21 +126,33 @@ export const useAirAppRunnerStore = create<AirAppRunnerStoreState>((set, get) =>
       };
     }),
 
-  setPreviewUrl: (nodeId, url) =>
-    set((state) => ({
-      entries: {
-        ...state.entries,
-        [nodeId]: { ...getEntry(state.entries, nodeId), previewUrl: url, status: "ready" },
-      },
-    })),
+  setPreviewUrl: (nodeId, runner, url) =>
+    set((state) => {
+      const current = state.entries[nodeId];
+      if (current?.runner !== runner) {
+        return state;
+      }
+      return {
+        entries: {
+          ...state.entries,
+          [nodeId]: { ...current, previewUrl: url, status: "ready" },
+        },
+      };
+    }),
 
-  setError: (nodeId, message) =>
-    set((state) => ({
-      entries: {
-        ...state.entries,
-        [nodeId]: { ...getEntry(state.entries, nodeId), error: message, status: "error" },
-      },
-    })),
+  setError: (nodeId, runner, message) =>
+    set((state) => {
+      const current = state.entries[nodeId];
+      if (current?.runner !== runner) {
+        return state;
+      }
+      return {
+        entries: {
+          ...state.entries,
+          [nodeId]: { ...current, error: message, status: "error" },
+        },
+      };
+    }),
 
   disposeEntry: (nodeId) => {
     get().entries[nodeId]?.runner?.dispose();

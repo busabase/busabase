@@ -344,7 +344,7 @@ checksum = "72f5acc6cb2ba439de613abc23857ec3d78374d8ed5ac84e9d11336e87da8649"
 
 [[package]]
 name = "busabase_desktop"
-version = "0.9.10"
+version = "0.9.11"
 dependencies = [
  "semver",
  "serde",

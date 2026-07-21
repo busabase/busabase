@@ -21,6 +21,16 @@ type RootTranslation = {
 		 */
 		appName: string
 	}
+	seo: {
+		/**
+		 * B​u​s​a​b​a​s​e
+		 */
+		title: string
+		/**
+		 * B​u​s​a​b​a​s​e​ ​i​s​ ​a​n​ ​o​p​e​n​-​s​o​u​r​c​e​ ​l​o​c​a​l​ ​r​e​v​i​e​w​ ​e​n​g​i​n​e​ ​f​o​r​ ​A​I​-​g​e​n​e​r​a​t​e​d​ ​d​a​t​a​ ​a​n​d​ ​c​o​n​t​e​n​t​.
+		 */
+		description: string
+	}
 	shell: {
 		/**
 		 * G​r​a​p​h​ ​V​i​e​w
@@ -884,6 +894,16 @@ export type TranslationFunctions = {
 		 * Busabase
 		 */
 		appName: () => LocalizedString
+	}
+	seo: {
+		/**
+		 * Busabase
+		 */
+		title: () => LocalizedString
+		/**
+		 * Busabase is an open-source local review engine for AI-generated data and content.
+		 */
+		description: () => LocalizedString
 	}
 	shell: {
 		/**

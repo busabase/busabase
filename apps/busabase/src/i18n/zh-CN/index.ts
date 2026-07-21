@@ -4,6 +4,11 @@ const zhCN: Translation = {
   common: {
     appName: "Busabase",
   },
+  seo: {
+    title: "Busabase 布沙知识仓 - 本地 AI 知识库与智能数据库",
+    description:
+      "Busabase（布沙知识仓）是开源、本地优先的 AI 知识库与智能数据库，结合结构化数据、知识图谱和人工审核，让 Agent 产出成为可追溯、可复用的正式知识。",
+  },
   shell: {
     graphView: "图谱视图",
     loadingDashboard: "工作台加载中...",

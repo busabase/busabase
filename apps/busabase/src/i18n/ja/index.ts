@@ -5,6 +5,11 @@ const ja: Translation = {
   common: {
     appName: "Busabase",
   },
+  seo: {
+    title: "Busabase",
+    description:
+      "Busabase is an open-source local review engine for AI-generated data and content.",
+  },
   shell: {
     graphView: "グラフビュー",
     loadingDashboard: "ダッシュボードを読み込み中...",

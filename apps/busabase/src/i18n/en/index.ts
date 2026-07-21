@@ -4,6 +4,11 @@ const en: BaseTranslation = {
   common: {
     appName: "Busabase",
   },
+  seo: {
+    title: "Busabase",
+    description:
+      "Busabase is an open-source local review engine for AI-generated data and content.",
+  },
   shell: {
     graphView: "Graph View",
     loadingDashboard: "Loading dashboard...",

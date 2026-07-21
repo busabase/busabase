@@ -1,6 +1,6 @@
 "use client";
 
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";
 import type { AirAppVO } from "busabase-contract/types";
 import { Button } from "kui/button";
@@ -48,7 +48,6 @@ export function useAirAppRunner({
   airapp: AirAppVO | null;
 }) {
   const messages = useCoreI18n();
-  const queryClient = useQueryClient();
   const nodeId = airapp?.node.id ?? null;
 
   const selectEntry = useCallback(
@@ -80,8 +79,12 @@ export function useAirAppRunner({
 
     const runner = createAirAppRunner(runnerKind, { orpc, nodeId: currentNodeId });
     store.beginRun(currentNodeId, runner, runnerKind);
-    runner.onLog((chunk) => useAirAppRunnerStore.getState().appendLog(currentNodeId, chunk));
-    runner.onReady((url) => useAirAppRunnerStore.getState().setPreviewUrl(currentNodeId, url));
+    runner.onLog((chunk) =>
+      useAirAppRunnerStore.getState().appendLog(currentNodeId, runner, chunk),
+    );
+    runner.onReady((url) =>
+      useAirAppRunnerStore.getState().setPreviewUrl(currentNodeId, runner, url),
+    );
 
     try {
       // Mount every text (utf8) file into the runner's virtual filesystem;
@@ -90,11 +93,14 @@ export function useAirAppRunner({
       // is a straightforward follow-up, not a hard limitation.
       const entries = await Promise.all(
         airapp.files.map(async (file) => {
-          const detail = await queryClient.fetchQuery(
-            orpc.airapps.readFile.queryOptions({
-              input: { nodeId: airapp.node.id, filePath: file.path },
-            }),
-          );
+          // Runner boot is an imperative lifecycle that can outlive this view.
+          // A React Query observer for the Files tab may use the same readFile
+          // key and cancel it during Strict Mode's mount cleanup, so do not join
+          // that observer-owned query here.
+          const detail = await orpc.airapps.readFile.call({
+            nodeId: currentNodeId,
+            filePath: file.path,
+          });
           return detail.encoding === "utf8" ? ([file.path, detail.content] as const) : null;
         }),
       );
@@ -109,9 +115,9 @@ export function useAirAppRunner({
       }
 
       await runner.mount(files);
-      useAirAppRunnerStore.getState().setStatus(currentNodeId, "installing");
+      useAirAppRunnerStore.getState().setStatus(currentNodeId, runner, "installing");
       await runner.install();
-      useAirAppRunnerStore.getState().setStatus(currentNodeId, "starting");
+      useAirAppRunnerStore.getState().setStatus(currentNodeId, runner, "starting");
       await runner.start();
       // status flips to "ready" from the onReady callback once the dev server
       // actually reports listening — starting a process isn't the same as it
@@ -121,10 +127,11 @@ export function useAirAppRunner({
         .getState()
         .setError(
           currentNodeId,
+          runner,
           caught instanceof Error ? caught.message : messages.airapp.runFailed,
         );
     }
-  }, [messages, airapp, orpc, queryClient]);
+  }, [messages, airapp, orpc]);
 
   // Auto-run: opening an AirApp starts it immediately — the header button is
   // then only a restart. Reads the store directly (not the rendered `status`)

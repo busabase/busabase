@@ -60,9 +60,25 @@ const sidebarLink = (page: Page, name: string) =>
 // "Ready" = the header status label says Running. The Restart button alone is
 // ambiguous (it also shows in the error state), so assert the status text.
 const expectRunning = (page: Page) =>
-  expect(page.locator("header").getByText("Running", { exact: true })).toBeVisible({
-    timeout: RUN_READY_TIMEOUT,
-  });
+  expect(
+    page
+      .locator("[data-dashboard-active-view] header:visible")
+      .getByText("Running", { exact: true }),
+  ).toBeVisible({ timeout: RUN_READY_TIMEOUT });
+
+const mainPreview = (page: Page) =>
+  page.locator('[data-dashboard-active-view] iframe[title="AirApp preview"]:visible');
+
+const mainPreviewFrame = (page: Page) =>
+  page.frameLocator('[data-dashboard-active-view] iframe[title="AirApp preview"]:visible');
+
+const sidePanel = (page: Page) => page.getByRole("region", { name: "Side panel" });
+
+const sidePanelPreview = (page: Page) =>
+  sidePanel(page).locator('iframe[title="AirApp preview"]:visible');
+
+const sidePanelPreviewFrame = (page: Page) =>
+  page.frameLocator('[aria-label="Side panel"] iframe[title="AirApp preview"]:visible');
 
 test("AirApp run panel: auto-run, restart, watermark, nav persistence, fullscreen, side panel", async ({
   page,
@@ -81,14 +97,14 @@ test("AirApp run panel: auto-run, restart, watermark, nav persistence, fullscree
     await expectRunning(page);
     await expect(page.getByRole("button", { name: "Restart" })).toBeVisible();
 
-    const iframe = page.locator('iframe[title="AirApp preview"]');
+    const iframe = mainPreview(page);
     await expect(iframe).toBeVisible();
     appASrc = (await iframe.getAttribute("src")) ?? "";
     expect(appASrc.length).toBeGreaterThan(0);
   });
 
   await test.step("watermark is gone (regression for watermark: false)", async () => {
-    const frame = page.frameLocator('iframe[title="AirApp preview"]');
+    const frame = mainPreviewFrame(page);
     const nodepodWatermarkLinks = frame.locator(
       'a[href*="github.com/ScelarOrg/Nodepod"], a[href*="github.com/R1ck404/Nodepod"]',
     );
@@ -102,13 +118,34 @@ test("AirApp run panel: auto-run, restart, watermark, nav persistence, fullscree
     // runner's (cleared) callbacks, so the run hung at "Starting dev server…"
     // forever and this assertion times out.
     await expectRunning(page);
-    const iframe = page.locator('iframe[title="AirApp preview"]');
+    const iframe = mainPreview(page);
     await expect(iframe).toBeVisible();
     appASrc = (await iframe.getAttribute("src")) ?? "";
     expect(appASrc.length).toBeGreaterThan(0);
   });
 
-  await test.step("run state survives switching away and back via client-side navigation", async () => {
+  await test.step("three hard refreshes auto-run without exposing a query cancellation error", async () => {
+    for (const refreshAttempt of [1, 2, 3]) {
+      await page.reload();
+      await expect(page.getByRole("heading", { name: appA.name })).toBeVisible();
+
+      // No Restart click after reload: every fresh page must recover to Running by itself.
+      await expectRunning(page);
+      await expect(page.getByText(/Cancell?edError/)).toHaveCount(0);
+      const iframe = mainPreview(page);
+      await expect(iframe).toBeVisible();
+      appASrc = (await iframe.getAttribute("src")) ?? "";
+      expect(appASrc.length, `refresh attempt ${refreshAttempt} preview URL`).toBeGreaterThan(0);
+    }
+  });
+
+  await test.step("iframe memory survives switching away and back via client-side navigation", async () => {
+    const counter = mainPreviewFrame(page).getByRole("button", { name: "Clicked 0 times" });
+    await counter.click();
+    await expect(
+      mainPreviewFrame(page).getByRole("button", { name: "Clicked 1 times" }),
+    ).toBeVisible();
+
     // Client-side nav (sidebar link click), NOT page.goto — a hard reload would
     // trivially "lose" the zustand run state and prove nothing about the fix.
     await sidebarLink(page, appB.name).click();
@@ -119,7 +156,7 @@ test("AirApp run panel: auto-run, restart, watermark, nav persistence, fullscree
     // at once also exercises the per-instance server-ready filtering — before
     // the proxy fix, one node's ready event landed on the other's callbacks.
     await expectRunning(page);
-    const iframeB = page.locator('iframe[title="AirApp preview"]');
+    const iframeB = mainPreview(page);
     await expect(iframeB).toBeVisible();
     const appBSrc = (await iframeB.getAttribute("src")) ?? "";
     expect(appBSrc.length).toBeGreaterThan(0);
@@ -131,9 +168,12 @@ test("AirApp run panel: auto-run, restart, watermark, nav persistence, fullscree
 
     // Still ready with ITS OWN preview — not reset to idle, not B's src.
     await expect(page.getByRole("button", { name: "Restart" })).toBeVisible();
-    const iframe = page.locator('iframe[title="AirApp preview"]');
+    const iframe = mainPreview(page);
     await expect(iframe).toBeVisible();
     await expect(iframe).toHaveAttribute("src", appASrc);
+    await expect(
+      mainPreviewFrame(page).getByRole("button", { name: "Clicked 1 times" }),
+    ).toBeVisible();
   });
 
   await test.step("fullscreen: preview fills the viewport and the floating button restores it", async () => {
@@ -150,20 +190,29 @@ test("AirApp run panel: auto-run, restart, watermark, nav persistence, fullscree
     await fullscreen.getByRole("button", { name: "Exit fullscreen" }).click();
     await expect(fullscreen).toBeHidden();
     // The underlying page is still interactive — the inline preview iframe survives.
-    await expect(page.locator('iframe[title="AirApp preview"]')).toBeVisible();
+    await expect(mainPreview(page)).toBeVisible();
   });
 
   await test.step("pin AirApp A to the side panel", async () => {
     await page.getByRole("button", { name: "Open in side panel" }).click();
     const tabA = page.locator('[role="tab"]', { hasText: appA.name });
     await expect(tabA).toBeVisible();
+
+    const counter = sidePanelPreviewFrame(page).getByRole("button", { name: "Clicked 0 times" });
+    await counter.click();
+    await expect(
+      sidePanelPreviewFrame(page).getByRole("button", { name: "Clicked 1 times" }),
+    ).toBeVisible();
+    await sidePanelPreview(page).evaluate((iframe) => {
+      iframe.setAttribute("data-e2e-iframe-identity", "pinned-airapp-a");
+    });
   });
 
   await test.step("side panel supports split, maximized, fullscreen, and restore modes", async () => {
-    const sidePanel = page.getByRole("region", { name: "Side panel" });
-    await expect(sidePanel).toHaveAttribute("data-layout", "split");
-    await expect(sidePanel).toBeVisible();
-    const splitBounds = await sidePanel.boundingBox();
+    const panel = sidePanel(page);
+    await expect(panel).toHaveAttribute("data-layout", "split");
+    await expect(panel).toBeVisible();
+    const splitBounds = await panel.boundingBox();
     const viewport = page.viewportSize();
     expect(splitBounds).not.toBeNull();
     expect(viewport).not.toBeNull();
@@ -172,7 +221,7 @@ test("AirApp run panel: auto-run, restart, watermark, nav persistence, fullscree
       viewport?.width ?? 0,
     );
 
-    const resizeHandle = sidePanel.getByRole("button", { name: "Resize side panel" });
+    const resizeHandle = panel.getByRole("button", { name: "Resize side panel" });
     const resizeBounds = await resizeHandle.boundingBox();
     expect(resizeBounds).not.toBeNull();
     if (!resizeBounds) {
@@ -188,37 +237,97 @@ test("AirApp run panel: auto-run, restart, watermark, nav persistence, fullscree
       resizeBounds.y + resizeBounds.height / 2,
     );
     await page.mouse.up();
-    await expect.poll(async () => (await sidePanel.boundingBox())?.width).toBe(500);
+    await expect.poll(async () => (await panel.boundingBox())?.width).toBe(500);
 
-    await sidePanel.getByRole("button", { name: "Maximize side panel" }).click();
-    await expect(sidePanel).toHaveAttribute("data-layout", "maximized");
-    await expect(sidePanel).toHaveCSS("position", "fixed");
+    await panel.getByRole("button", { name: "Maximize side panel" }).click();
+    await expect(panel).toHaveAttribute("data-layout", "maximized");
+    await expect(panel).toHaveCSS("position", "fixed");
 
-    await sidePanel.getByRole("button", { name: "Enter fullscreen" }).click();
+    await panel.getByRole("button", { name: "Enter fullscreen" }).click();
     const fullscreen = page.locator(`section[aria-label="${appA.name}"]`);
     await expect(fullscreen).toBeVisible();
     await fullscreen.getByRole("button", { name: "Exit fullscreen" }).click();
     await expect(fullscreen).toBeHidden();
-    await expect(sidePanel).toHaveAttribute("data-layout", "maximized");
+    await expect(panel).toHaveAttribute("data-layout", "maximized");
 
-    await sidePanel.getByRole("button", { name: "Restore side panel" }).click();
-    await expect(sidePanel).toHaveAttribute("data-layout", "split");
-    await expect.poll(async () => (await sidePanel.boundingBox())?.width).toBe(500);
+    await panel.getByRole("button", { name: "Restore side panel" }).click();
+    await expect(panel).toHaveAttribute("data-layout", "split");
+    await expect.poll(async () => (await panel.boundingBox())?.width).toBe(500);
   });
 
-  await test.step("side panel is dashboard-level-persistent across a route change to a non-AirApp view", async () => {
+  await test.step("pinned iframe memory survives main navigation and panel collapse", async () => {
+    await sidebarLink(page, appB.name).click();
+    await expect(page).toHaveURL(new RegExp(`/dashboard/local/airapp/${appB.slug}$`));
+    await expect(mainPreviewFrame(page).getByRole("heading", { name: appB.name })).toBeVisible();
+    await expectRunning(page);
+    await expect(sidePanelPreview(page)).toHaveAttribute(
+      "data-e2e-iframe-identity",
+      "pinned-airapp-a",
+    );
+    await expect(
+      sidePanelPreviewFrame(page).getByRole("button", { name: "Clicked 1 times" }),
+    ).toBeVisible();
+
+    await page.getByRole("button", { name: "Open in side panel" }).click();
+    const tabA = page.getByRole("tab", { name: appA.name });
+    const tabB = page.getByRole("tab", { name: appB.name });
+    await expect(tabB).toHaveAttribute("aria-selected", "true");
+    await sidePanelPreviewFrame(page).getByRole("button", { name: "Clicked 0 times" }).click();
+    await expect(
+      sidePanelPreviewFrame(page).getByRole("button", { name: "Clicked 1 times" }),
+    ).toBeVisible();
+
+    await tabA.click();
+    await expect(sidePanelPreview(page)).toHaveAttribute(
+      "data-e2e-iframe-identity",
+      "pinned-airapp-a",
+    );
+    await expect(
+      sidePanelPreviewFrame(page).getByRole("button", { name: "Clicked 1 times" }),
+    ).toBeVisible();
+    await tabB.click();
+    await expect(
+      sidePanelPreviewFrame(page).getByRole("button", { name: "Clicked 1 times" }),
+    ).toBeVisible();
+    await tabA.click();
+
     // "Inbox" is the pinned top nav item every Busabase host has (see
     // dashboard-shell.tsx's pinnedNav) — a real client-side route transition
     // away from any AirApp view.
     await sidebarLink(page, "Inbox").click();
     await expect(page).toHaveURL(/\/dashboard\/local\/inbox$/);
+    await expect(page.locator(`[data-dashboard-airapp-view="${appB.slug}"]`)).toBeHidden();
 
-    const tabA = page.locator('[role="tab"]', { hasText: appA.name });
     await expect(tabA).toBeVisible();
     // Main canvas is now Inbox (no AirApp view of its own), so this resolves
     // unambiguously to the side panel's still-live preview.
-    const iframe = page.locator('iframe[title="AirApp preview"]');
+    const iframe = sidePanelPreview(page);
     await expect(iframe).toBeVisible();
     await expect(iframe).toHaveAttribute("src", appASrc);
+    await expect(iframe).toHaveAttribute("data-e2e-iframe-identity", "pinned-airapp-a");
+    await expect(
+      sidePanelPreviewFrame(page).getByRole("button", { name: "Clicked 1 times" }),
+    ).toBeVisible();
+
+    await sidePanel(page).getByRole("button", { name: "Collapse side panel" }).click();
+    await expect(sidePanel(page)).toBeHidden();
+    await page.getByRole("button", { name: "Open side panel" }).click();
+    await expect(sidePanel(page)).toBeVisible();
+    await expect(sidePanelPreview(page)).toHaveAttribute(
+      "data-e2e-iframe-identity",
+      "pinned-airapp-a",
+    );
+    await expect(
+      sidePanelPreviewFrame(page).getByRole("button", { name: "Clicked 1 times" }),
+    ).toBeVisible();
+
+    await sidebarLink(page, appA.name).click();
+    await expect(page).toHaveURL(new RegExp(`/dashboard/local/airapp/${appA.slug}$`));
+    await expect(
+      mainPreviewFrame(page).getByRole("button", { name: "Clicked 1 times" }),
+    ).toBeVisible();
+    await expect(
+      sidePanelPreviewFrame(page).getByRole("button", { name: "Clicked 1 times" }),
+    ).toBeVisible();
   });
 });

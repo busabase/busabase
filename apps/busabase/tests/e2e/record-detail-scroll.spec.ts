@@ -61,13 +61,21 @@ test("Record Detail scrolls through long field content", async ({ page, request 
   };
   await expect.poll(endMarkerIsInsideViewport).toBe(false);
 
-  await scrollViewport.evaluate((element) => {
-    element.scrollTop = element.scrollHeight;
-    element.dispatchEvent(new Event("scroll"));
-  });
-
+  await endMarkerHeading.scrollIntoViewIfNeeded();
   await expect
     .poll(() => scrollViewport.evaluate((element) => element.scrollTop))
     .toBeGreaterThan(0);
   await expect.poll(endMarkerIsInsideViewport).toBe(true);
+
+  await scrollViewport.evaluate((element) => {
+    element.scrollTop = element.scrollHeight;
+    element.dispatchEvent(new Event("scroll"));
+  });
+  await expect
+    .poll(() =>
+      scrollViewport.evaluate(
+        (element) => Math.abs(element.scrollHeight - element.clientHeight - element.scrollTop) <= 1,
+      ),
+    )
+    .toBe(true);
 });

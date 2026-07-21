@@ -37,14 +37,11 @@ import {
   operationMeta,
 } from "../helpers/change-request";
 import {
-  fieldPreviewText,
   getAttachmentRefs,
   getFieldChipEntries,
-  getRecordFieldType,
   getRelationRecordIds,
   getSafeAttachmentUrl,
   isRecordLongField,
-  isRecordTitleField,
 } from "../helpers/field";
 import {
   fieldValueToString,
@@ -1022,52 +1019,50 @@ const normalizeEditorFields = (base: BaseVO, fields: Record<string, unknown>) =>
 function RecordFieldPanel({ record, records }: { record: RecordVO; records: RecordVO[] }) {
   const messages = useCoreI18n();
   const resolveIString = useIString();
-  const allFieldEntries = record.base.fields.map((field) => ({
+  const fieldEntries = record.base.fields.slice(1).map((field) => ({
     field,
     value: record.headCommit.fields[field.slug],
   }));
-  const propertyEntries = allFieldEntries.filter(
-    ({ field, value }) => !isRecordTitleField(field) && !isRecordLongField(field, value),
-  );
-  const longFieldEntries = allFieldEntries.filter(
-    ({ field, value }) => !isRecordTitleField(field) && isRecordLongField(field, value),
-  );
 
   return (
     <section className="mt-5">
-      {propertyEntries.length > 0 ? (
-        <div className="mb-4 grid gap-x-6 gap-y-3 text-sm md:grid-cols-2">
+      {fieldEntries.length > 0 ? (
+        <div className="grid gap-x-6 gap-y-3 text-sm md:grid-cols-2">
           <div className="font-medium text-muted-foreground md:col-span-2">
             {messages.recordView.properties}
           </div>
-          {propertyEntries.map(({ field, value }) => (
-            <RecordPropertyItem field={field} key={field.id} records={records} value={value} />
-          ))}
+          {fieldEntries.map(({ field, value }) =>
+            isRecordLongField(field) ? (
+              <section
+                className="mt-5 max-w-3xl md:col-span-2"
+                data-record-field-slug={field.slug}
+                key={field.id}
+              >
+                <div className="font-medium text-muted-foreground text-sm">
+                  {resolveIString(field.name)}
+                </div>
+                <div className="mt-3 text-base leading-7">
+                  <FieldValuePreview
+                    className={
+                      field.type === "html" ||
+                      field.type === "code" ||
+                      field.type === "json" ||
+                      field.type === "yaml"
+                        ? "text-sm"
+                        : "whitespace-pre-wrap text-foreground/95"
+                    }
+                    field={field}
+                    records={records}
+                    value={value}
+                  />
+                </div>
+              </section>
+            ) : (
+              <RecordPropertyItem field={field} key={field.id} records={records} value={value} />
+            ),
+          )}
         </div>
       ) : null}
-
-      {longFieldEntries.map(({ field, value }) => (
-        <section className="mt-8 max-w-3xl" key={field.id}>
-          <div className="font-medium text-muted-foreground text-sm">
-            {resolveIString(field.name)}
-          </div>
-          <div className="mt-3 text-base leading-7">
-            <FieldValuePreview
-              className={
-                field.type === "html" ||
-                field.type === "code" ||
-                field.type === "json" ||
-                field.type === "yaml"
-                  ? "text-sm"
-                  : "whitespace-pre-wrap text-foreground/95"
-              }
-              field={field}
-              records={records}
-              value={value}
-            />
-          </div>
-        </section>
-      ))}
     </section>
   );
 }
@@ -1086,7 +1081,10 @@ function RecordPropertyItem({
   if (fieldDisplayKind(field.type) === "checkbox") {
     const checked = value === true || value === "true";
     return (
-      <div className="grid min-w-0 grid-cols-[112px_minmax(0,1fr)] items-center gap-3">
+      <div
+        className="grid min-w-0 grid-cols-[112px_minmax(0,1fr)] items-center gap-3"
+        data-record-field-slug={field.slug}
+      >
         <span className="truncate text-muted-foreground">{fieldName}</span>
         <span
           className={`inline-flex h-5 w-5 items-center justify-center rounded border ${
@@ -1104,7 +1102,10 @@ function RecordPropertyItem({
   const chips = getFieldChipEntries(field, value);
   if (chips.length > 0) {
     return (
-      <div className="grid min-w-0 grid-cols-[112px_minmax(0,1fr)] items-start gap-3">
+      <div
+        className="grid min-w-0 grid-cols-[112px_minmax(0,1fr)] items-start gap-3"
+        data-record-field-slug={field.slug}
+      >
         <span className="truncate text-muted-foreground">{fieldName}</span>
         <FieldBadgeList chips={chips} />
       </div>
@@ -1112,7 +1113,10 @@ function RecordPropertyItem({
   }
 
   return (
-    <div className="grid min-w-0 grid-cols-[112px_minmax(0,1fr)] items-start gap-3">
+    <div
+      className="grid min-w-0 grid-cols-[112px_minmax(0,1fr)] items-start gap-3"
+      data-record-field-slug={field.slug}
+    >
       <span className="truncate text-muted-foreground">{fieldName}</span>
       <div className="min-w-0 truncate">
         <FieldValuePreview
@@ -1128,28 +1132,12 @@ function RecordPropertyItem({
 
 function RecordHero({ record }: { record: RecordVO }) {
   const messages = useCoreI18n();
-  const summary =
-    fieldPreviewText(
-      record.headCommit.fields.summary,
-      getRecordFieldType(record, "summary"),
-      messages,
-    ) ||
-    fieldPreviewText(
-      record.headCommit.fields.description,
-      getRecordFieldType(record, "description"),
-      messages,
-    );
 
   return (
     <div className="mt-2">
       <h1 className="max-w-4xl font-semibold text-4xl leading-tight tracking-tight">
         {getRecordTitle(record, messages)}
       </h1>
-      {summary ? (
-        <p className="mt-3 max-w-3xl text-muted-foreground text-xl leading-snug">
-          <span className="line-clamp-2">{summary}</span>
-        </p>
-      ) : null}
     </div>
   );
 }

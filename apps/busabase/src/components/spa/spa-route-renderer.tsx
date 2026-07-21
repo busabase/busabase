@@ -2,7 +2,7 @@
 
 import type { BusabaseRouteConfig as RouteConfig } from "busabase-core/dashboard/routes";
 import type { ComponentType } from "react";
-import { Route, Switch } from "wouter";
+import { matchRoute, useLocation, useRouter } from "wouter";
 
 interface SPARouteRendererProps {
   routes: RouteConfig[];
@@ -15,18 +15,11 @@ export function SPARouteRenderer({
   NotFoundComponent,
   routes,
 }: SPARouteRendererProps) {
+  const [location] = useLocation();
+  const router = useRouter();
+  const matchedRoute = routes.find((route) => matchRoute(router.parser, route.path, location)[0]);
+
   return (
-    <div className={className}>
-      <Switch>
-        {routes.map((route) => (
-          <Route key={route.path} path={route.path}>
-            {route.component}
-          </Route>
-        ))}
-        <Route>
-          <NotFoundComponent />
-        </Route>
-      </Switch>
-    </div>
+    <div className={className}>{matchedRoute ? matchedRoute.component : <NotFoundComponent />}</div>
   );
 }

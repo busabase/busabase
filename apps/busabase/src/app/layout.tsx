@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { Fraunces, Inter, Noto_Serif_SC } from "next/font/google";
 import { headers } from "next/headers";
-import { getBusabaseLocaleFromAcceptLanguage } from "~/lib/i18n";
+import { getBusabaseAppLL, getBusabaseLocaleFromAcceptLanguage } from "~/lib/i18n";
 import { Providers } from "./providers";
 import "./global.css";
 
@@ -29,13 +29,19 @@ const notoSerifSC = Noto_Serif_SC({
   preload: false,
 });
 
-export const metadata: Metadata = {
-  title: "Busabase",
-  description: "Busabase is an open-source local review engine for AI-generated data and content.",
-  icons: {
-    icon: "/icon.svg",
-  },
-};
+export async function generateMetadata(): Promise<Metadata> {
+  const headerList = await headers();
+  const locale = getBusabaseLocaleFromAcceptLanguage(headerList.get("accept-language"));
+  const LL = getBusabaseAppLL(locale);
+
+  return {
+    title: LL.seo.title(),
+    description: LL.seo.description(),
+    icons: {
+      icon: "/icon.svg",
+    },
+  };
+}
 
 interface Props {
   children: React.ReactNode;

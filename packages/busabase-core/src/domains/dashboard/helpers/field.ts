@@ -200,18 +200,8 @@ export const getAttachmentRefs = (value: unknown): AnyAttachmentRef[] => {
 export const getSafeAttachmentUrl = (item: AttachmentRef): string | null =>
   safeFetchableUrl(item.url);
 
-export const isRecordTitleField = (field: BaseFieldVO) =>
-  ["title", "name", "subject"].includes(field.slug);
-
-export const isRecordLongField = (field: BaseFieldVO, value: unknown) => {
-  if (["longtext", "markdown", "html", "code", "json", "yaml", "ai_summary"].includes(field.type)) {
-    return true;
-  }
-  if (["body", "content", "description", "summary"].includes(field.slug)) {
-    return true;
-  }
-  return fieldValueToString(value).length > 180;
-};
+export const isRecordLongField = (field: BaseFieldVO) =>
+  ["longtext", "markdown", "html", "code", "json", "yaml", "ai_summary"].includes(field.type);
 
 export const getFieldName = (changeRequest: ChangeRequestVO, fieldSlug: string) => {
   const name = changeRequest.base?.fields.find((field) => field.slug === fieldSlug)?.name;

@@ -18,7 +18,7 @@ import {
   DropdownMenuTrigger,
 } from "kui/dropdown-menu";
 import { SidebarMenu, SidebarMenuButton, SidebarMenuItem } from "kui/sidebar";
-import { Archive, ChevronsUpDown, Images, Network, Settings } from "lucide-react";
+import { Archive, ChevronsUpDown, Github, Images, Network, Settings } from "lucide-react";
 import Image from "next/image";
 import { useAddDemoParam } from "openlib/ui/dashboard";
 import type { ReactNode } from "react";
@@ -37,7 +37,7 @@ interface ProductReadyDashboardShellProps {
   nodes: NodeVO[];
   onSearchClick: () => void;
   onCreateClick: (parent?: { id: string; name: string }) => void;
-  /** Opens the "Install from GitHub" dialog — forwarded to the core shell's sidebar entry. */
+  /** Opens the "Install from GitHub" dialog from the local workspace menu. */
   onInstallClick?: () => void;
   /** oRPC query utils — forwarded to the core shell to power the sidebar "•••" → Permissions entry. */
   orpc?: BusabaseQueryUtils;
@@ -179,6 +179,12 @@ export function ProductReadyDashboardShell({
                   <Images />
                   <span>{coreMessages.nav.assets}</span>
                 </DropdownMenuItem>
+                {onInstallClick ? (
+                  <DropdownMenuItem onSelect={onInstallClick}>
+                    <Github />
+                    <span>{coreMessages.nav.installFromGithub}</span>
+                  </DropdownMenuItem>
+                ) : null}
                 <DropdownMenuItem
                   onSelect={() => navigate(addDemoParam("/graph"))}
                   className={currentPath === "/graph" ? "bg-accent" : undefined}
@@ -230,7 +236,6 @@ export function ProductReadyDashboardShell({
       nodes={nodes}
       orpc={orpc}
       onCreateClick={onCreateClick}
-      onInstallClick={onInstallClick}
       onMoveNode={onMoveNode}
       onSearchClick={onSearchClick}
       loadingNodeIds={loadingNodeIds}
