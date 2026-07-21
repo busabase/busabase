@@ -45,12 +45,12 @@ concurrency:
 
 env:
   NODE_VERSION: 24.18.0
-  EXAMPLE_DIRECTORY: packages/busabase-example-nextjs-fumadocs
   DEPLOY_ENVIRONMENT: ${{ (github.event_name == 'push' || inputs.environment == 'production') && 'production' || 'preview' }}
   BUSABASE_BASE_URL: https://demo.busabase.com
   BUSABASE_CMS_FOLDER_ID: nodmru0gtq2tdiukii
   BUSABASE_CMS_DEFAULT_LOCALE: en
   BUSABASE_CMS_LOCALES: en,zh-CN
+  NEXT_PUBLIC_SITE_URL: https://busabase-cms-example.vercel.app
   VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
   VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
   VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
@@ -97,9 +97,9 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
 
-      - name: Install example and workspace dependencies
+      - name: Install workspace dependencies
         if: steps.vercel_config.outputs.ready == 'true'
-        run: pnpm install --frozen-lockfile --filter "busabase-example-nextjs-fumadocs..."
+        run: pnpm install --frozen-lockfile
 
       - name: Install Vercel CLI
         if: steps.vercel_config.outputs.ready == 'true'
@@ -107,12 +107,10 @@ jobs:
 
       - name: Pull Vercel environment
         if: steps.vercel_config.outputs.ready == 'true'
-        working-directory: ${{ env.EXAMPLE_DIRECTORY }}
         run: vercel pull --yes --environment="$DEPLOY_ENVIRONMENT" --token="$VERCEL_TOKEN"
 
       - name: Build Vercel project
         if: steps.vercel_config.outputs.ready == 'true'
-        working-directory: ${{ env.EXAMPLE_DIRECTORY }}
         shell: bash
         run: |
           set -euo pipefail
@@ -125,7 +123,6 @@ jobs:
       - name: Deploy prebuilt output
         if: steps.vercel_config.outputs.ready == 'true'
         id: deploy
-        working-directory: ${{ env.EXAMPLE_DIRECTORY }}
         shell: bash
         run: |
           set -euo pipefail
@@ -134,6 +131,7 @@ jobs:
             --env "BUSABASE_CMS_FOLDER_ID=${BUSABASE_CMS_FOLDER_ID}"
             --env "BUSABASE_CMS_DEFAULT_LOCALE=${BUSABASE_CMS_DEFAULT_LOCALE}"
             --env "BUSABASE_CMS_LOCALES=${BUSABASE_CMS_LOCALES}"
+            --env "NEXT_PUBLIC_SITE_URL=${NEXT_PUBLIC_SITE_URL}"
           )
           if [ "$DEPLOY_ENVIRONMENT" = "production" ]; then
             deployment_url=$(vercel deploy --prebuilt --prod "${cms_runtime_env[@]}" --token="$VERCEL_TOKEN")
