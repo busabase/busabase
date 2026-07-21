@@ -97,9 +97,9 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
 
-      - name: Install example and workspace dependencies
+      - name: Install workspace dependencies
         if: steps.vercel_config.outputs.ready == 'true'
-        run: pnpm install --frozen-lockfile --filter "busabase-example-nextjs-fumadocs..."
+        run: pnpm install --frozen-lockfile
 
       - name: Install Vercel CLI
         if: steps.vercel_config.outputs.ready == 'true'
