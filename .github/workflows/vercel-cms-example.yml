@@ -50,6 +50,7 @@ env:
   BUSABASE_CMS_FOLDER_ID: nodmru0gtq2tdiukii
   BUSABASE_CMS_DEFAULT_LOCALE: en
   BUSABASE_CMS_LOCALES: en,zh-CN
+  NEXT_PUBLIC_SITE_URL: https://busabase-cms-example.vercel.app
   VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
   VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
   VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
@@ -130,6 +131,7 @@ jobs:
             --env "BUSABASE_CMS_FOLDER_ID=${BUSABASE_CMS_FOLDER_ID}"
             --env "BUSABASE_CMS_DEFAULT_LOCALE=${BUSABASE_CMS_DEFAULT_LOCALE}"
             --env "BUSABASE_CMS_LOCALES=${BUSABASE_CMS_LOCALES}"
+            --env "NEXT_PUBLIC_SITE_URL=${NEXT_PUBLIC_SITE_URL}"
           )
           if [ "$DEPLOY_ENVIRONMENT" = "production" ]; then
             deployment_url=$(vercel deploy --prebuilt --prod "${cms_runtime_env[@]}" --token="$VERCEL_TOKEN")
