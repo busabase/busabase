@@ -302,6 +302,11 @@ describe("Webhook automation domain — oRPC", () => {
       const expectedSig = createHmac("sha256", "s3cr3t").update(hit!.body).digest("hex");
       expect(hit!.signature).toBe(expectedSig);
 
+      await waitFor(async () => {
+        const deliveries = await client.webhooks.deliveries({ ruleId: rule.id, limit: 10 });
+        return deliveries.length > 0;
+      }, 2000);
+
       const deliveries = await client.webhooks.deliveries({ ruleId: rule.id, limit: 10 });
       expect(deliveries[0]?.status).toBe("success");
     });
