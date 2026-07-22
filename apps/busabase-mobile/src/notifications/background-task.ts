@@ -1,7 +1,8 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as BackgroundTask from "expo-background-task";
 import * as TaskManager from "expo-task-manager";
-import { getCloudSession, getCloudSessionToken } from "~/auth/session-store";
+import { getValidBusabaseCloudSession } from "~/auth/oauth";
+import { getCloudSessionToken } from "~/auth/session-store";
 import { checkForNewChangeRequests, NOTIFICATIONS_SUPPORTED } from "./change-request-watcher";
 import { loadNotificationSettings } from "./notification-settings";
 
@@ -41,7 +42,7 @@ async function getAuthorizationHeaders(
   spaceId?: string | null,
 ): Promise<Record<string, string>> {
   if (mode !== "cloud") return {};
-  const session = await getCloudSession();
+  const session = await getValidBusabaseCloudSession();
   const token = getCloudSessionToken(session);
   if (!token) return {};
   const headers: Record<string, string> = {

@@ -26,6 +26,16 @@ type McpServerLike = {
 };
 
 type McpRouteHandler = (request: Request) => Response | Promise<Response>;
+type AsyncMcpRouteHandler = (request: Request) => Promise<Response>;
+
+export interface McpOAuthChallengeOptions {
+  /** Canonical RFC 8707 resource identifier for the MCP endpoint. */
+  resourceUrl: string;
+  /** Minimum scopes the client must request for this MCP endpoint. */
+  scopes: string[];
+  /** Override only when metadata is not served at the RFC 9728 path-specific URI. */
+  resourceMetadataUrl?: string;
+}
 
 export type OpenApiProcedure = {
   "~orpc"?: {
@@ -94,6 +104,48 @@ type McpSession = {
 type PendingMcpSession = McpSession & {
   getSessionId: () => string;
 };
+
+const quoteAuthParam = (value: string) => `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
+
+export const getMcpProtectedResourceMetadataUrl = (resourceUrl: string) => {
+  const resource = new URL(resourceUrl);
+  const pathname = resource.pathname === "/" ? "" : resource.pathname.replace(/\/$/, "");
+  return new URL(`/.well-known/oauth-protected-resource${pathname}`, resource.origin).toString();
+};
+
+/**
+ * Add the RFC 9728 / MCP authorization challenge to authentication failures.
+ * The wrapped verifier remains responsible for deciding whether a token is
+ * missing, invalid, or lacks scope; this helper only makes that result
+ * discoverable and consistent for MCP clients.
+ */
+export const withMcpOAuthChallenge =
+  (handler: McpRouteHandler, options: McpOAuthChallengeOptions): AsyncMcpRouteHandler =>
+  async (request) => {
+    const response = await handler(request);
+    if (response.status !== 401 && response.status !== 403) return response;
+
+    const metadataUrl =
+      options.resourceMetadataUrl ?? getMcpProtectedResourceMetadataUrl(options.resourceUrl);
+    const params = [
+      `resource_metadata=${quoteAuthParam(metadataUrl)}`,
+      `scope=${quoteAuthParam(options.scopes.join(" "))}`,
+    ];
+
+    if (response.status === 403) {
+      params.unshift('error="insufficient_scope"');
+    } else if (request.headers.has("authorization")) {
+      params.unshift('error="invalid_token"');
+    }
+
+    const headers = new Headers(response.headers);
+    headers.set("www-authenticate", `Bearer ${params.join(", ")}`);
+    return new Response(response.body, {
+      status: response.status,
+      statusText: response.statusText,
+      headers,
+    });
+  };
 
 export const createMcpToolsFromOpenApiContract = <TClient>(
   options: CreateMcpToolsFromOpenApiContractOptions<TClient>,

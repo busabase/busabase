@@ -1,6 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
-import { asMcpError, registerOpenApiMcpTools } from "./index";
+import {
+  asMcpError,
+  getMcpProtectedResourceMetadataUrl,
+  registerOpenApiMcpTools,
+  withMcpOAuthChallenge,
+} from "./index";
 
 type TestToolResult = {
   content: Array<{ type: "text"; text: string }>;
@@ -278,5 +283,47 @@ describe("asMcpError", () => {
       content: [{ type: "text", text: "unavailable" }],
       isError: true,
     });
+  });
+});
+
+describe("withMcpOAuthChallenge", () => {
+  const resourceUrl = "https://example.com/api/mcp";
+
+  it("derives the path-specific protected resource metadata URL", () => {
+    expect(getMcpProtectedResourceMetadataUrl(resourceUrl)).toBe(
+      "https://example.com/.well-known/oauth-protected-resource/api/mcp",
+    );
+  });
+
+  it("advertises discovery and scope when authorization is missing", async () => {
+    const handler = withMcpOAuthChallenge(() => new Response(null, { status: 401 }), {
+      resourceUrl,
+      scopes: ["mcp"],
+    });
+    const response = await handler(new Request(resourceUrl));
+
+    expect(response.headers.get("www-authenticate")).toBe(
+      'Bearer resource_metadata="https://example.com/.well-known/oauth-protected-resource/api/mcp", scope="mcp"',
+    );
+  });
+
+  it("distinguishes invalid tokens from insufficient scope", async () => {
+    const unauthorized = withMcpOAuthChallenge(() => new Response(null, { status: 401 }), {
+      resourceUrl,
+      scopes: ["mcp"],
+    });
+    const forbidden = withMcpOAuthChallenge(() => new Response(null, { status: 403 }), {
+      resourceUrl,
+      scopes: ["mcp", "files:read"],
+    });
+
+    const invalid = await unauthorized(
+      new Request(resourceUrl, { headers: { authorization: "Bearer expired" } }),
+    );
+    const insufficient = await forbidden(new Request(resourceUrl));
+
+    expect(invalid.headers.get("www-authenticate")).toContain('error="invalid_token"');
+    expect(insufficient.headers.get("www-authenticate")).toContain('error="insufficient_scope"');
+    expect(insufficient.headers.get("www-authenticate")).toContain('scope="mcp files:read"');
   });
 });

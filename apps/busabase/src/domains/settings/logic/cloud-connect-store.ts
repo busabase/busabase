@@ -1,7 +1,7 @@
 /**
  * Cloud Connect local state — DB access for the single `busabase_cloud_connect`
  * row (this local instance's stable `tunnelId`, configured Cloud URL, and — once
- * connected — the scoped tunnel-connect credential). Every function takes `db`
+ * connected — the resource-bound OAuth token set). Every function takes `db`
  * as its first argument (server-only; funnels all access here per the domain's
  * DDD convention). No React/Next imports — safe to call from route handlers,
  * `instrumentation.node.ts`, and the relay client module alike.
@@ -74,6 +74,7 @@ export async function setCloudUrl(
 
 export interface SaveCredentialInput {
   token: string;
+  refreshToken: string;
   expiresAt: Date;
   /** The origin (scheme+host+port) this OSS server was reached at — needed to
    *  resume the relay client on a later boot, when there's no request to read
@@ -90,6 +91,7 @@ export async function saveCloudConnectCredential(
     .update(busabaseCloudConnect)
     .set({
       credentialToken: input.token,
+      credentialRefreshToken: input.refreshToken,
       credentialExpiresAt: input.expiresAt,
       ossOrigin: input.ossOrigin,
       updatedAt: new Date(),
@@ -103,6 +105,11 @@ export async function saveCloudConnectCredential(
 export async function clearCloudConnectCredential(db: Database): Promise<void> {
   await db
     .update(busabaseCloudConnect)
-    .set({ credentialToken: null, credentialExpiresAt: null, updatedAt: new Date() })
+    .set({
+      credentialToken: null,
+      credentialRefreshToken: null,
+      credentialExpiresAt: null,
+      updatedAt: new Date(),
+    })
     .where(eq(busabaseCloudConnect.id, CLOUD_CONNECT_ROW_ID));
 }

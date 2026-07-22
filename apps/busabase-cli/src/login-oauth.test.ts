@@ -8,10 +8,10 @@ import { runLogin } from "./login";
 /**
  * The OAuth PKCE loopback flow (`login --oauth`) is the security-critical, hardest-
  * to-test branch: it spins up a real localhost callback server, prints an authorize
- * URL, and exchanges the returned code for a native session token. These tests drive
+ * URL, and exchanges the returned code for a resource-bound OAuth token. These tests drive
  * it for real — `fetch` is mocked for the outbound token/verify calls, but the browser
  * redirect is simulated by hitting the loopback `/callback` with the *original* fetch,
- * so the server, PKCE state check, and token exchange all actually run.
+ * so the server, PKCE state check, and standard form-encoded token exchange all run.
  */
 
 const CLOUD = "https://busabase.com";
@@ -58,13 +58,18 @@ const findAuthorizeUrl = (): string | undefined =>
   stderr.find((line) => line.includes("/api/oauth/authorize"))?.match(/https?:\/\/\S+/)?.[0];
 
 describe("runLogin --oauth (PKCE loopback)", () => {
-  it("completes the browser flow: exchanges the code and persists the session token", async () => {
+  it("completes the browser flow: exchanges the code and persists the OAuth token set", async () => {
     let tokenBody: Record<string, unknown> = {};
     global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const request = input instanceof Request ? input : new Request(input, init);
       if (request.url.endsWith("/api/oauth/token")) {
-        tokenBody = (await request.json()) as Record<string, unknown>;
-        return jsonResponse({ token: "bss_session", expiresAt: "2099-01-01T00:00:00.000Z" });
+        expect(request.headers.get("content-type")).toContain("application/x-www-form-urlencoded");
+        tokenBody = Object.fromEntries(new URLSearchParams(await request.text()));
+        return jsonResponse({
+          access_token: "bso_session",
+          refresh_token: "bsr_refresh",
+          expires_in: 3600,
+        });
       }
       if (request.url.endsWith("/api/v1/auth")) {
         return jsonResponse({
@@ -83,7 +88,7 @@ describe("runLogin --oauth (PKCE loopback)", () => {
     const state = authorizeUrl.searchParams.get("state");
     const redirectUri = authorizeUrl.searchParams.get("redirect_uri") as string;
     expect(redirectUri).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/callback$/);
-    await originalFetch(`${redirectUri}?code=auth_code_123&state=${state}`);
+    await originalFetch(`${redirectUri}?code=auth_code_123&state=${state}&iss=${CLOUD}`);
 
     const summary = await loginPromise;
 
@@ -94,19 +99,25 @@ describe("runLogin --oauth (PKCE loopback)", () => {
     // Force re-auth so `busabase login` never silently reuses whatever
     // session the default browser already has live for a different account.
     expect(authorizeUrl.searchParams.get("prompt")).toBe("login");
+    expect(authorizeUrl.searchParams.get("client_platform")).toBeNull();
+    expect(authorizeUrl.searchParams.get("resource")).toBe(`${CLOUD}/api/v1`);
 
     expect(summary).toMatchObject({ status: "signed in", method: "oauth" });
     const env = loadDotEnvFile();
-    expect(env.BUSABASE_API_KEY).toBe("bss_session");
-    expect(env.BUSABASE_TOKEN_EXPIRES_AT).toBe("2099-01-01T00:00:00.000Z");
+    expect(env.BUSABASE_API_KEY).toBe("bso_session");
+    expect(env.BUSABASE_REFRESH_TOKEN).toBe("bsr_refresh");
     expect(env.BUSABASE_SPACE_ID).toBe("spc_1");
   });
 
-  it("persists the apiKey when the server issues a cli-consent API key instead of a session", async () => {
+  it("persists the standard delegated OAuth token", async () => {
     global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const request = input instanceof Request ? input : new Request(input, init);
       if (request.url.endsWith("/api/oauth/token")) {
-        return jsonResponse({ apiKey: "sk_abc123", prefix: "sk_", expiresAt: null });
+        return jsonResponse({
+          access_token: "bso_cli",
+          refresh_token: "bsr_cli",
+          expires_in: 3600,
+        });
       }
       if (request.url.endsWith("/api/v1/auth")) {
         return jsonResponse({
@@ -122,13 +133,13 @@ describe("runLogin --oauth (PKCE loopback)", () => {
     const authorizeUrl = new URL(await waitFor(findAuthorizeUrl));
     const state = authorizeUrl.searchParams.get("state");
     const redirectUri = authorizeUrl.searchParams.get("redirect_uri") as string;
-    await originalFetch(`${redirectUri}?code=auth_code_123&state=${state}`);
+    await originalFetch(`${redirectUri}?code=auth_code_123&state=${state}&iss=${CLOUD}`);
 
     const summary = await loginPromise;
     expect(summary).toMatchObject({ status: "signed in", method: "oauth" });
     const env = loadDotEnvFile();
-    expect(env.BUSABASE_API_KEY).toBe("sk_abc123");
-    expect(env.BUSABASE_TOKEN_EXPIRES_AT).toBeUndefined();
+    expect(env.BUSABASE_API_KEY).toBe("bso_cli");
+    expect(env.BUSABASE_REFRESH_TOKEN).toBe("bsr_cli");
   });
 
   it("rejects a callback whose state does not match the request", async () => {
@@ -142,7 +153,7 @@ describe("runLogin --oauth (PKCE loopback)", () => {
     const rejects = expect(loginPromise).rejects.toThrow(/state mismatch/i);
     const authorizeUrl = new URL(await waitFor(findAuthorizeUrl));
     const redirectUri = authorizeUrl.searchParams.get("redirect_uri") as string;
-    await originalFetch(`${redirectUri}?code=auth_code_123&state=WRONG_STATE`);
+    await originalFetch(`${redirectUri}?code=auth_code_123&state=WRONG_STATE&iss=${CLOUD}`);
 
     await rejects;
     expect(loadDotEnvFile()).not.toHaveProperty("BUSABASE_API_KEY");
@@ -162,9 +173,26 @@ describe("runLogin --oauth (PKCE loopback)", () => {
     const authorizeUrl = new URL(await waitFor(findAuthorizeUrl));
     const state = authorizeUrl.searchParams.get("state");
     const redirectUri = authorizeUrl.searchParams.get("redirect_uri") as string;
-    await originalFetch(`${redirectUri}?code=auth_code_123&state=${state}`);
+    await originalFetch(`${redirectUri}?code=auth_code_123&state=${state}&iss=${CLOUD}`);
 
     await rejects;
     expect(loadDotEnvFile()).not.toHaveProperty("BUSABASE_API_KEY");
+  });
+
+  it("rejects a callback from a different authorization-server issuer", async () => {
+    global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) =>
+      originalFetch(input as RequestInfo, init),
+    ) as typeof fetch;
+
+    const loginPromise = runLogin({ baseUrl: CLOUD, oauth: true, browser: false });
+    const rejects = expect(loginPromise).rejects.toThrow(/issuer mismatch/i);
+    const authorizeUrl = new URL(await waitFor(findAuthorizeUrl));
+    const state = authorizeUrl.searchParams.get("state");
+    const redirectUri = authorizeUrl.searchParams.get("redirect_uri") as string;
+    await originalFetch(
+      `${redirectUri}?code=auth_code_123&state=${state}&iss=https://evil.example`,
+    );
+
+    await rejects;
   });
 });

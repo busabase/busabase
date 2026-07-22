@@ -111,8 +111,8 @@ ${
     ? `
 ## Authentication
 
-All write endpoints require a Bearer token — either an API key (\`sk_…\`) or a login session
-token from \`busabase-cli login\` (\`bss_…\`). Pass it as:
+All write endpoints require a Bearer token — either an API key (\`sk_…\`) or a rotating OAuth
+access token from \`busabase-cli login --oauth\` (\`bso_…\`). Pass it as:
 
 \`\`\`bash
 -H '${authHeader}'

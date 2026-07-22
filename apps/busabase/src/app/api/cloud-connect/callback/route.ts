@@ -45,18 +45,20 @@ export async function GET(request: NextRequest) {
 
   const code = searchParams.get("code");
   const state = searchParams.get("state");
-  if (!code || !state) {
+  const issuer = searchParams.get("iss");
+  if (!code || !state || !issuer) {
     return htmlPage(FAILED_TITLE, `Missing authorization code. ${CLOSE_HINT}`, 400);
   }
 
   try {
-    const credential = await completeCloudConnectAuthorize({ code, state });
+    const credential = await completeCloudConnectAuthorize({ code, state, issuer });
     const db = await getDb();
     const row = await ensureCloudConnectRow(db);
     const ossOrigin = request.nextUrl.origin;
 
     await saveCloudConnectCredential(db, {
       token: credential.token,
+      refreshToken: credential.refreshToken,
       expiresAt: new Date(credential.expiresAt),
       ossOrigin,
     });
@@ -65,6 +67,8 @@ export async function GET(request: NextRequest) {
       cloudUrl: row.cloudUrl,
       tunnelId: credential.tunnelId,
       token: credential.token,
+      refreshToken: credential.refreshToken,
+      expiresAt: new Date(credential.expiresAt),
       ossOrigin,
     });
 

@@ -120,6 +120,39 @@ describe("busabase-cli commands", () => {
     expect(calls).toEqual([{ method: "GET", url: "http://localhost:15419/api/v1/assets" }]);
   });
 
+  it("uses a rotated OAuth access token for the command that triggered auto-refresh", async () => {
+    const configDir = join(suiteHome, ".busabase");
+    const configPath = join(configDir, ".env");
+    await mkdir(configDir, { recursive: true });
+    await writeFile(
+      configPath,
+      `BUSABASE_BASE_URL=https://busabase.com\nBUSABASE_API_KEY=bso_old\nBUSABASE_REFRESH_TOKEN=bsr_old\nBUSABASE_TOKEN_EXPIRES_AT=${new Date(Date.now() + 60_000).toISOString()}\n`,
+    );
+    const apiAuthorizationHeaders: string[] = [];
+    global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      if (request.url.endsWith("/api/oauth/token")) {
+        return jsonResponse({
+          access_token: "bso_new",
+          refresh_token: "bsr_new",
+          expires_in: 3600,
+        });
+      }
+      apiAuthorizationHeaders.push(request.headers.get("authorization") ?? "");
+      return jsonResponse([]);
+    }) as typeof fetch;
+    vi.spyOn(console, "log").mockImplementation(() => undefined);
+
+    try {
+      const exitCode = await runCli(["--output", "json", "assets", "list"]);
+      expect(exitCode).toBe(0);
+      expect(apiAuthorizationHeaders).toEqual(["Bearer bso_new"]);
+      expect(await readFile(configPath, "utf8")).toContain("BUSABASE_API_KEY=bso_new");
+    } finally {
+      await rm(configPath, { force: true });
+    }
+  });
+
   it("routes a generated mutation with a path param and JSON body", async () => {
     const calls: Array<{ body: unknown; method: string; url: string }> = [];
     global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -1197,7 +1230,7 @@ describe("busabase-cli commands", () => {
     }
   });
 
-  it("login --refresh slides the saved OAuth session forward", async () => {
+  it("login --refresh rotates the saved OAuth token set", async () => {
     const home = await mkdtemp(join(tmpdir(), "busabase-home-"));
     const originalHome = process.env.HOME;
     process.env.HOME = home;
@@ -1206,23 +1239,23 @@ describe("busabase-cli commands", () => {
     await mkdir(join(home, ".busabase"), { recursive: true });
     await writeFile(
       join(home, ".busabase", ".env"),
-      "BUSABASE_BASE_URL=http://localhost:15419\nBUSABASE_API_KEY=bss_old\nBUSABASE_TOKEN_EXPIRES_AT=2020-01-01T00:00:00.000Z\n",
+      "BUSABASE_BASE_URL=http://localhost:15419\nBUSABASE_API_KEY=bso_old\nBUSABASE_REFRESH_TOKEN=bsr_old\nBUSABASE_TOKEN_EXPIRES_AT=2020-01-01T00:00:00.000Z\n",
     );
     const calls: string[] = [];
     global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const request = input instanceof Request ? input : new Request(input, init);
       calls.push(`${request.method} ${request.url}`);
-      expect(request.headers.get("authorization")).toBe("Bearer bss_old");
-      return jsonResponse({ token: "bss_old", expiresAt: "2099-01-01T00:00:00.000Z" });
+      expect(await request.clone().text()).toContain("refresh_token=bsr_old");
+      return jsonResponse({ access_token: "bso_new", refresh_token: "bsr_new", expires_in: 3600 });
     }) as typeof fetch;
 
     try {
       const exitCode = await runCli(["login", "--refresh"]);
       expect(exitCode).toBe(0);
-      expect(calls).toEqual(["POST http://localhost:15419/api/oauth/refresh"]);
+      expect(calls).toEqual(["POST http://localhost:15419/api/oauth/token"]);
       const env = await readFile(join(home, ".busabase", ".env"), "utf8");
-      expect(env).toContain("BUSABASE_API_KEY=bss_old");
-      expect(env).toContain("BUSABASE_TOKEN_EXPIRES_AT=2099-01-01T00:00:00.000Z");
+      expect(env).toContain("BUSABASE_API_KEY=bso_new");
+      expect(env).toContain("BUSABASE_REFRESH_TOKEN=bsr_new");
     } finally {
       process.env.HOME = originalHome;
       await rm(home, { force: true, recursive: true });

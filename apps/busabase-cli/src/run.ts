@@ -417,11 +417,10 @@ function runAction(state: CliState, handler: Handler) {
   return async (_opts: OptionValues, cmd: Command): Promise<void> => {
     const opts = cmd.optsWithGlobals();
     const config = resolveConfig(opts);
+    const refreshedToken = await maybeAutoRefresh(config.baseUrl, config.apiKey);
+    if (refreshedToken) config.apiKey = refreshedToken;
     state.config = config;
     assertCredentialNotExpired(config.apiKey);
-    // Built-in auto-refresh: keep an actively-used OAuth login alive. No-op unless the
-    // saved session token is near expiry; keeps the same token, so `config` stays valid.
-    await maybeAutoRefresh(config.baseUrl, config.apiKey);
     const client = createBusabaseClient(config);
     const result = await handler(client, opts, config);
     console.log(render(result, config.output));
@@ -443,9 +442,10 @@ function runArgAction(state: CliState, handler: ArgHandler) {
   return async (arg: string, _opts: OptionValues, cmd: Command): Promise<void> => {
     const opts = cmd.optsWithGlobals();
     const config = resolveConfig(opts);
+    const refreshedToken = await maybeAutoRefresh(config.baseUrl, config.apiKey);
+    if (refreshedToken) config.apiKey = refreshedToken;
     state.config = config;
     assertCredentialNotExpired(config.apiKey);
-    await maybeAutoRefresh(config.baseUrl, config.apiKey);
     const client = createBusabaseClient(config);
     const result = await handler(arg, client, opts, config);
     console.log(render(result, config.output));
@@ -738,7 +738,7 @@ function buildProgram(state: CliState = {}): Command {
     .option("--device-code", "force device authorization and skip the method prompt")
     .option("--oauth", "legacy same-machine OAuth callback flow")
     .option("--no-browser", "print the sign-in URL instead of opening a browser")
-    .option("--refresh", "slide the saved OAuth session forward (no browser, no re-login)")
+    .option("--refresh", "rotate the saved OAuth token set (no browser, no re-login)")
     .addHelpText(
       "after",
       `
@@ -759,7 +759,7 @@ The flags below skip the menu (handy for scripts / CI):
   busabase-cli login --oauth                           # legacy same-machine callback
   busabase-cli login --api-key sk_…                    # Cloud API key (headless/CI)
   busabase-cli login --base-url http://localhost:15419 # connect to a local server (no auth)
-  busabase-cli login --refresh                         # extend the current session (auto-runs too)`,
+  busabase-cli login --refresh                         # rotate the OAuth token set (auto-runs too)`,
     )
     .action(async (_opts: OptionValues, cmd: Command) => {
       const opts = cmd.optsWithGlobals();
@@ -779,7 +779,7 @@ The flags below skip the menu (handy for scripts / CI):
     });
 
   addGlobalFlags(program.command("logout"))
-    .description("Revoke the saved OAuth session (if any) and clear ~/.busabase/.env")
+    .description("Revoke the saved OAuth token family (if any) and clear ~/.busabase/.env")
     .action(async (_opts: OptionValues, cmd: Command) => {
       const opts = cmd.optsWithGlobals();
       const config = resolveConfig(opts);

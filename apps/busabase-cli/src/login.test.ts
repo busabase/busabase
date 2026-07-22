@@ -115,24 +115,35 @@ describe("runRefresh", () => {
     expect(global.fetch).not.toHaveBeenCalled();
   });
 
-  it("slides a session token forward and stores the new expiry", async () => {
+  it("rotates an OAuth token set and stores the new expiry", async () => {
+    writeDotEnvFile({
+      BUSABASE_API_KEY: "bso_live",
+      BUSABASE_TOKEN_EXPIRES_AT: new Date(Date.now() + 60_000).toISOString(),
+      BUSABASE_REFRESH_TOKEN: "bsr_live",
+    });
     const calls: string[] = [];
     global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const request = input instanceof Request ? input : new Request(input, init);
       calls.push(`${request.method} ${request.url}`);
-      return jsonResponse({ token: "bss_live", expiresAt: "2099-01-01T00:00:00.000Z" });
+      return jsonResponse({ access_token: "bso_new", refresh_token: "bsr_new", expires_in: 3600 });
     }) as typeof fetch;
 
-    const summary = await runRefresh({ baseUrl: CLOUD, apiKey: "bss_live" });
+    const summary = await runRefresh({ baseUrl: CLOUD, apiKey: "bso_live" });
 
-    expect(calls).toEqual([`POST ${CLOUD}/api/oauth/refresh`]);
-    expect(summary).toMatchObject({ status: "refreshed", expiresAt: "2099-01-01T00:00:00.000Z" });
-    expect(loadDotEnvFile().BUSABASE_TOKEN_EXPIRES_AT).toBe("2099-01-01T00:00:00.000Z");
+    expect(calls).toEqual([`POST ${CLOUD}/api/oauth/token`]);
+    expect(summary.status).toBe("refreshed");
+    expect(loadDotEnvFile().BUSABASE_API_KEY).toBe("bso_new");
+    expect(loadDotEnvFile().BUSABASE_REFRESH_TOKEN).toBe("bsr_new");
   });
 
-  it("tells an expired session to log in again", async () => {
+  it("tells an expired OAuth authorization to log in again", async () => {
+    writeDotEnvFile({
+      BUSABASE_API_KEY: "bso_dead",
+      BUSABASE_REFRESH_TOKEN: "bsr_dead",
+      BUSABASE_TOKEN_EXPIRES_AT: "2000-01-01T00:00:00.000Z",
+    });
     global.fetch = vi.fn(async () => new Response("{}", { status: 401 })) as typeof fetch;
-    await expect(runRefresh({ baseUrl: CLOUD, apiKey: "bss_dead" })).rejects.toThrow(/expired/i);
+    await expect(runRefresh({ baseUrl: CLOUD, apiKey: "bso_dead" })).rejects.toThrow(/expired/i);
   });
 
   it("errors when there is no saved credential", async () => {
@@ -148,49 +159,50 @@ describe("maybeAutoRefresh", () => {
   });
 
   it("refreshes a file-stored session that is within the expiry window", async () => {
-    const nearExpiry = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(); // <2 days
+    const nearExpiry = new Date(Date.now() + 60 * 1000).toISOString();
     writeDotEnvFile({
       BUSABASE_BASE_URL: CLOUD,
-      BUSABASE_API_KEY: "bss_soon",
+      BUSABASE_API_KEY: "bso_soon",
       BUSABASE_TOKEN_EXPIRES_AT: nearExpiry,
+      BUSABASE_REFRESH_TOKEN: "bsr_soon",
     });
     global.fetch = vi.fn(async () =>
-      jsonResponse({ token: "bss_soon", expiresAt: "2099-02-02T00:00:00.000Z" }),
+      jsonResponse({ access_token: "bso_new", refresh_token: "bsr_new", expires_in: 3600 }),
     ) as typeof fetch;
 
-    await maybeAutoRefresh(CLOUD, "bss_soon");
+    await maybeAutoRefresh(CLOUD, "bso_soon");
 
     expect(global.fetch).toHaveBeenCalledTimes(1);
-    expect(loadDotEnvFile().BUSABASE_TOKEN_EXPIRES_AT).toBe("2099-02-02T00:00:00.000Z");
+    expect(loadDotEnvFile().BUSABASE_API_KEY).toBe("bso_new");
   });
 
   it("leaves a session with plenty of runway alone", async () => {
     const farExpiry = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
-    writeDotEnvFile({ BUSABASE_API_KEY: "bss_fresh", BUSABASE_TOKEN_EXPIRES_AT: farExpiry });
+    writeDotEnvFile({ BUSABASE_API_KEY: "bso_fresh", BUSABASE_TOKEN_EXPIRES_AT: farExpiry });
     global.fetch = vi.fn() as typeof fetch;
-    await maybeAutoRefresh(CLOUD, "bss_fresh");
+    await maybeAutoRefresh(CLOUD, "bso_fresh");
     expect(global.fetch).not.toHaveBeenCalled();
   });
 
   it("ignores a token that did not come from the config file", async () => {
     // File holds a different token ⇒ this one arrived via --api-key/env, so don't touch disk.
     writeDotEnvFile({
-      BUSABASE_API_KEY: "bss_other",
+      BUSABASE_API_KEY: "bso_other",
       BUSABASE_TOKEN_EXPIRES_AT: "2000-01-01T00:00:00.000Z",
     });
     global.fetch = vi.fn() as typeof fetch;
-    await maybeAutoRefresh(CLOUD, "bss_flag");
+    await maybeAutoRefresh(CLOUD, "bso_flag");
     expect(global.fetch).not.toHaveBeenCalled();
   });
 });
 
 describe("assertCredentialNotExpired", () => {
-  it("gives an actionable error for an expired file-stored device session", () => {
+  it("gives an actionable error for an expired file-stored OAuth token", () => {
     writeDotEnvFile({
       BUSABASE_API_KEY: "opaque-device-token",
       BUSABASE_TOKEN_EXPIRES_AT: "2000-01-01T00:00:00.000Z",
     });
-    expect(() => assertCredentialNotExpired("opaque-device-token")).toThrow(/login --device-code/);
+    expect(() => assertCredentialNotExpired("opaque-device-token")).toThrow(/busabase-cli login/);
   });
 
   it("does not classify an overriding API key using the saved session expiry", () => {
@@ -203,19 +215,28 @@ describe("assertCredentialNotExpired", () => {
 });
 
 describe("runLogout", () => {
-  it("revokes a session token server-side and clears the credential", async () => {
-    writeDotEnvFile({ BUSABASE_API_KEY: "bss_live", BUSABASE_SPACE_ID: "spc_1" });
+  it("revokes an OAuth token family server-side and clears the credential", async () => {
+    writeDotEnvFile({
+      BUSABASE_API_KEY: "bso_live",
+      BUSABASE_REFRESH_TOKEN: "bsr_live",
+      BUSABASE_TOKEN_EXPIRES_AT: new Date(Date.now() + 60_000).toISOString(),
+      BUSABASE_SPACE_ID: "spc_1",
+    });
     const calls: string[] = [];
     global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const request = input instanceof Request ? input : new Request(input, init);
       calls.push(`${request.method} ${request.url}`);
+      expect(await request.text()).toContain("token=bsr_live");
       return new Response("{}", { status: 200 });
     }) as typeof fetch;
 
-    const summary = await runLogout({ baseUrl: CLOUD, apiKey: "bss_live" });
+    const summary = await runLogout({ baseUrl: CLOUD, apiKey: "bso_live" });
 
     expect(calls).toEqual([`POST ${CLOUD}/api/oauth/revoke`]);
-    expect(summary).toMatchObject({ status: "signed out", detail: "session revoked" });
+    expect(summary).toMatchObject({
+      status: "signed out",
+      detail: "OAuth token family revoked",
+    });
     expect(loadDotEnvFile()).not.toHaveProperty("BUSABASE_API_KEY");
   });
 

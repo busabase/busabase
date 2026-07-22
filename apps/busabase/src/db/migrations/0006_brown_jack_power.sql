@@ -1,0 +1,1 @@
+ALTER TABLE "busabase_cloud_connect" ADD COLUMN "credential_refresh_token" text;

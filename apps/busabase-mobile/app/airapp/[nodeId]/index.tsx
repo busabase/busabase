@@ -6,7 +6,8 @@ import { Pressable, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { WebView } from "react-native-webview";
 import { useBusabaseOrpc } from "~/api/use-busabase-orpc";
-import { getCloudSession, getCloudSessionToken } from "~/auth/session-store";
+import { getValidBusabaseCloudSession } from "~/auth/oauth";
+import { getCloudSessionToken } from "~/auth/session-store";
 import { ConnectionGuard } from "~/components/busabase/ConnectionGuard";
 import { NativeErrorState, NativeLoadingState } from "~/components/native-screen";
 import { useConnection } from "~/connection/connection-store";
@@ -74,7 +75,7 @@ function AirAppDetailContent() {
       if (connection.mode !== "cloud") {
         return buildAirAppEmbedUrl(connection.serverUrl, connection.mode, null, nodeId);
       }
-      const session = await getCloudSession();
+      const session = await getValidBusabaseCloudSession();
       const token = getCloudSessionToken(session);
       return buildAirAppEmbedUrl(connection.serverUrl, connection.mode, token, nodeId);
     },

@@ -30,7 +30,6 @@ export const busabaseConfig = {
     extra.updateManifestUrl ??
     "https://s1.busabase.com/public/downloads/busabase-mobile/latest.json",
   oauthClientId: "busabase-mobile",
-  oauthClientPlatform: "mobile",
   oauthRedirectUri:
     process.env.EXPO_PUBLIC_BUSABASE_OAUTH_REDIRECT_URI ??
     localWebOAuthRedirectUri ??

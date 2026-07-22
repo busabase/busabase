@@ -5,8 +5,8 @@ const SESSION_KEY = "busabase-mobile.cloud-session.v1";
 
 export interface CloudSession {
   accessToken: string;
-  token?: string;
-  expiresAt?: string;
+  refreshToken: string;
+  expiresAt: string;
   user?: {
     id?: string;
     email?: string;
@@ -38,11 +38,13 @@ const storage = {
   },
 };
 
-const isUsableSession = (session: CloudSession | null | undefined): session is CloudSession => {
+export const isCloudSessionAccessTokenUsable = (
+  session: CloudSession | null | undefined,
+  minimumValidityMs = 0,
+): boolean => {
   if (!session?.accessToken) return false;
-  if (!session.expiresAt) return true;
   const expiresAt = Date.parse(session.expiresAt);
-  return Number.isNaN(expiresAt) || expiresAt > Date.now();
+  return !Number.isNaN(expiresAt) && expiresAt - Date.now() > minimumValidityMs;
 };
 
 export async function getCloudSession(): Promise<CloudSession | null> {
@@ -50,7 +52,13 @@ export async function getCloudSession(): Promise<CloudSession | null> {
   if (!raw) return null;
   try {
     const parsed = JSON.parse(raw) as CloudSession;
-    if (isUsableSession(parsed)) return parsed;
+    if (
+      parsed.accessToken?.startsWith("bso_") &&
+      parsed.refreshToken?.startsWith("bsr_") &&
+      !Number.isNaN(Date.parse(parsed.expiresAt))
+    ) {
+      return parsed;
+    }
   } catch {
     // Ignore corrupt session snapshots and clear them below.
   }
@@ -67,5 +75,5 @@ export async function clearCloudSession(): Promise<void> {
 }
 
 export function getCloudSessionToken(session: CloudSession | null | undefined): string | null {
-  return session?.accessToken ?? session?.token ?? null;
+  return session?.accessToken ?? null;
 }

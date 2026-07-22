@@ -2,16 +2,23 @@ import type { BaseFieldVO, ViewConfigVO } from "busabase-contract/types";
 import { describe, expect, it } from "vitest";
 import {
   clampViewFieldWidth,
+  clearAllViewFilters,
+  clearAllViewSorts,
   clearFirstViewFilter,
+  clearViewFilterAt,
   clearViewSort,
+  clearViewSortAt,
   getVisibleViewFieldSlugs,
   hideViewField,
   matchesViewField,
   moveViewField,
   replaceFirstViewFilter,
+  resetAllViewFieldWidths,
   resetViewFieldWidth,
   setPrimaryViewSort,
   setViewFieldWidth,
+  showAllViewFields,
+  showViewField,
 } from "./view-config";
 
 const field = { id: "fld_status", slug: "status" } as BaseFieldVO;
@@ -63,6 +70,29 @@ describe("view config quick updates", () => {
       "owner",
     ]);
     expect(hideViewField(config, field, fields).visibleFieldSlugs).toEqual(["owner", "title"]);
+    expect(
+      showViewField(hideViewField(config, field, fields), field, fields).visibleFieldSlugs,
+    ).toEqual(["owner", "title", "status"]);
+    const hidden = hideViewField(config, field, fields);
+    expect(showAllViewFields(hidden, fields).visibleFieldSlugs).toEqual([
+      "owner",
+      "title",
+      "status",
+    ]);
+    expect(showAllViewFields(config, fields)).toBe(config);
+  });
+
+  it("clears staged filter, sort, and width groups without changing unrelated config", () => {
+    expect(clearAllViewFilters(config)).toMatchObject({ filters: [], sorts: config.sorts });
+    expect(clearAllViewSorts(config)).toMatchObject({ filters: config.filters, sorts: [] });
+    expect(resetAllViewFieldWidths({ ...config, fieldWidths: { title: 220 } })).toMatchObject({
+      cardSize: "large",
+      fieldWidths: undefined,
+    });
+    expect(clearAllViewFilters({ ...config, filters: [] })).toEqual({ ...config, filters: [] });
+    expect(clearViewFilterAt(config, 1).filters).toEqual([config.filters[0], config.filters[2]]);
+    expect(clearViewSortAt(config, 0).sorts).toEqual([config.sorts[1]]);
+    expect(clearViewFilterAt(config, 99)).toBe(config);
   });
 
   it("preserves configured order and moves a field without changing global schema order", () => {

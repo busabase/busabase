@@ -21,6 +21,7 @@ import {
   AlignLeft,
   ArrowDown,
   ArrowUp,
+  ArrowUpDown,
   AtSign,
   Braces,
   CalendarDays,
@@ -91,16 +92,23 @@ import { fieldValueToString, shortIdentifier } from "../helpers/format";
 import { mergeSearchIntoHref, useHrefWithCurrentSearch } from "../helpers/link-search";
 import {
   clampViewFieldWidth,
+  clearAllViewFilters,
+  clearAllViewSorts,
   clearFirstViewFilter,
+  clearViewFilterAt,
   clearViewSort,
+  clearViewSortAt,
   getVisibleViewFieldSlugs,
   hideViewField,
   matchesViewField,
   moveViewField,
   replaceFirstViewFilter,
+  resetAllViewFieldWidths,
   resetViewFieldWidth,
   setPrimaryViewSort,
   setViewFieldWidth,
+  showAllViewFields,
+  showViewField,
 } from "../helpers/view-config";
 import type { RecordsPagination, ViewFormPayload, ViewSubmitOptions } from "../helpers/view-types";
 import { BusaBaseCalendar } from "./base-calendar";
@@ -812,6 +820,468 @@ function BusaBaseRecordRow({
   );
 }
 
+type ViewControlSection = "fields" | "filters" | "sorts";
+
+interface ViewControlPopoverProps {
+  allFields: BaseFieldVO[];
+  initialSection: ViewControlSection;
+  onSubmit: (config: ViewConfigVO, options?: ViewSubmitOptions) => Promise<void>;
+  view: ViewVO;
+}
+
+function ViewControlPopover({
+  allFields,
+  initialSection,
+  onSubmit,
+  view,
+}: ViewControlPopoverProps) {
+  const messages = useCoreI18n();
+  const resolveIString = useIString();
+  const [open, setOpen] = useState(false);
+  const [section, setSection] = useState<ViewControlSection>(initialSection);
+  const [draft, setDraft] = useState<ViewConfigVO>(view.config);
+  const [savingMode, setSavingMode] = useState<"request" | "merge" | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const visibleSlugs = getVisibleViewFieldSlugs(draft, allFields);
+  const visibleSet = new Set(visibleSlugs);
+  const hiddenCount = Math.max(0, allFields.length - visibleSlugs.length);
+  const widthCount = Object.keys(draft.fieldWidths ?? {}).filter((slug) =>
+    allFields.some((field) => field.slug === slug),
+  ).length;
+  const changed = JSON.stringify(draft) !== JSON.stringify(view.config);
+  const activeCount =
+    initialSection === "fields"
+      ? hiddenCount + widthCount
+      : initialSection === "filters"
+        ? draft.filters.length
+        : draft.sorts.length;
+  const triggerCount =
+    initialSection === "fields"
+      ? `${visibleSlugs.length}/${allFields.length}`
+      : String(activeCount);
+  const TriggerIcon =
+    initialSection === "fields" ? Columns3 : initialSection === "filters" ? Filter : ArrowUpDown;
+  const triggerLabel =
+    initialSection === "fields"
+      ? messages.base.viewFields
+      : initialSection === "filters"
+        ? messages.base.viewFilters
+        : messages.base.viewSorts;
+  const orderedFields = [
+    ...visibleSlugs
+      .map((slug) => allFields.find((field) => field.slug === slug))
+      .filter((field): field is BaseFieldVO => Boolean(field)),
+    ...allFields.filter((field) => !visibleSet.has(field.slug)),
+  ];
+
+  const setPopoverOpen = (nextOpen: boolean) => {
+    if (!nextOpen && changed) {
+      return;
+    }
+    if (nextOpen) {
+      setDraft(view.config);
+      setSection(initialSection);
+      setError(null);
+    }
+    setOpen(nextOpen);
+  };
+
+  const discardAndClose = () => {
+    setDraft(view.config);
+    setError(null);
+    setOpen(false);
+  };
+
+  const submit = async (options?: ViewSubmitOptions) => {
+    if (!changed || savingMode) {
+      return;
+    }
+    setSavingMode(options?.mergeImmediately ? "merge" : "request");
+    setError(null);
+    try {
+      await onSubmit(draft, options);
+      setOpen(false);
+    } catch (submitError) {
+      setError(
+        submitError instanceof Error ? submitError.message : messages.base.failedQuickViewUpdate,
+      );
+    } finally {
+      setSavingMode(null);
+    }
+  };
+
+  return (
+    <Popover onOpenChange={setPopoverOpen} open={open}>
+      <PopoverTrigger asChild>
+        <button
+          aria-expanded={open}
+          className={`inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md border px-2 font-medium text-xs transition-colors ${
+            activeCount > 0
+              ? "border-primary/35 bg-primary/10 text-primary hover:bg-primary/15"
+              : "border-border/70 bg-background text-muted-foreground hover:bg-accent hover:text-foreground"
+          }`}
+          data-testid={`view-control-${initialSection}`}
+          title={`${triggerLabel}: ${triggerCount}`}
+          type="button"
+        >
+          <TriggerIcon className="size-3.5" />
+          <span>{triggerLabel}</span>
+          <span className="min-w-4 rounded bg-muted/70 px-1 text-center text-[10px] leading-4 text-muted-foreground">
+            {triggerCount}
+          </span>
+        </button>
+      </PopoverTrigger>
+      <PopoverContent
+        align="start"
+        aria-label={messages.base.viewControlsTitle}
+        className="w-[calc(100vw-2rem)] max-w-96 p-0"
+        data-testid="view-controls-popover"
+        onEscapeKeyDown={(event) => {
+          if (changed) {
+            event.preventDefault();
+          }
+        }}
+        onInteractOutside={(event) => {
+          if (changed) {
+            event.preventDefault();
+          }
+        }}
+      >
+        <div className="flex items-center justify-between gap-3 border-border/60 border-b px-3 py-2.5">
+          <div>
+            <div className="font-medium text-sm">{messages.base.viewControlsTitle}</div>
+            <div className="truncate text-muted-foreground text-xs">{view.name}</div>
+          </div>
+          <button
+            aria-label={changed ? messages.base.discardViewChanges : messages.common.close}
+            className="inline-flex size-7 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+            onClick={discardAndClose}
+            title={changed ? messages.base.discardViewChanges : messages.common.close}
+            type="button"
+          >
+            <X className="size-3.5" />
+          </button>
+        </div>
+
+        <div className="grid grid-cols-3 border-border/60 border-b p-1" role="group">
+          {(
+            [
+              ["fields", messages.base.viewFields, `${visibleSlugs.length}/${allFields.length}`],
+              ["filters", messages.base.viewFilters, String(draft.filters.length)],
+              ["sorts", messages.base.viewSorts, String(draft.sorts.length)],
+            ] as const
+          ).map(([value, label, count]) => (
+            <button
+              aria-pressed={section === value}
+              className={`flex h-8 items-center justify-center gap-1.5 rounded text-xs transition-colors ${
+                section === value
+                  ? "bg-muted font-medium text-foreground"
+                  : "text-muted-foreground hover:bg-accent/60 hover:text-foreground"
+              }`}
+              key={value}
+              onClick={() => setSection(value)}
+              type="button"
+            >
+              {label}
+              <span className="text-[10px]">{count}</span>
+            </button>
+          ))}
+        </div>
+
+        <div className="max-h-96 overflow-y-auto">
+          {section === "fields" ? (
+            <div>
+              <div className="flex items-center justify-between gap-2 border-border/50 border-b px-3 py-2">
+                <span className="text-muted-foreground text-xs">
+                  {fmt(messages.base.hiddenFieldCount, { count: hiddenCount })}
+                </span>
+                <div className="flex items-center gap-1">
+                  <button
+                    className="h-7 rounded px-2 text-muted-foreground text-xs transition-colors hover:bg-accent hover:text-foreground disabled:opacity-50"
+                    disabled={hiddenCount === 0}
+                    onClick={() => setDraft((current) => showAllViewFields(current, allFields))}
+                    type="button"
+                  >
+                    {messages.base.showAllFields}
+                  </button>
+                  <button
+                    className="h-7 rounded px-2 text-muted-foreground text-xs transition-colors hover:bg-accent hover:text-foreground disabled:opacity-50"
+                    disabled={widthCount === 0}
+                    onClick={() => setDraft((current) => resetAllViewFieldWidths(current))}
+                    type="button"
+                  >
+                    {messages.base.resetAllWidths}
+                  </button>
+                </div>
+              </div>
+              <div className="divide-y divide-border/40">
+                {orderedFields.map((field) => {
+                  const isVisible = visibleSet.has(field.slug);
+                  const visibleIndex = visibleSlugs.indexOf(field.slug);
+                  const Icon = FIELD_TYPE_ICONS[field.type];
+                  const hasFilter = draft.filters.some((filter) => matchesViewField(filter, field));
+                  const hasSort = draft.sorts.some((sort) => matchesViewField(sort, field));
+                  return (
+                    <div
+                      className="flex min-h-10 items-center gap-2 px-3 py-1"
+                      data-view-field-slug={field.slug}
+                      key={field.id}
+                    >
+                      <input
+                        aria-label={fmt(messages.base.showFieldAria, {
+                          name: resolveIString(field.name),
+                        })}
+                        checked={isVisible}
+                        disabled={isVisible && visibleSlugs.length <= 1}
+                        onChange={(event) =>
+                          setDraft((current) =>
+                            event.target.checked
+                              ? showViewField(current, field, allFields)
+                              : hideViewField(current, field, allFields),
+                          )
+                        }
+                        type="checkbox"
+                      />
+                      <Icon className="size-3.5 shrink-0 text-muted-foreground" />
+                      <span className="min-w-0 flex-1 truncate text-xs">
+                        {resolveIString(field.name)}
+                      </span>
+                      {!isVisible ? (
+                        <span className="inline-flex shrink-0 items-center gap-1 text-muted-foreground text-[10px]">
+                          <EyeOff className="size-3" />
+                          {messages.base.hiddenField}
+                        </span>
+                      ) : null}
+                      {hasFilter ? (
+                        <Filter
+                          aria-label={messages.base.fieldFilterActive}
+                          className="size-3.5 shrink-0 text-primary"
+                        />
+                      ) : null}
+                      {hasSort ? (
+                        <ArrowUpDown
+                          aria-label={messages.base.fieldSortActive}
+                          className="size-3.5 shrink-0 text-primary"
+                        />
+                      ) : null}
+                      {draft.fieldWidths?.[field.slug] !== undefined ? (
+                        <button
+                          aria-label={fmt(messages.base.resetFieldWidthAria, {
+                            name: resolveIString(field.name),
+                          })}
+                          className="inline-flex size-7 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                          onClick={() =>
+                            setDraft((current) => resetViewFieldWidth(current, field.slug))
+                          }
+                          title={messages.base.resetFieldWidth}
+                          type="button"
+                        >
+                          <RotateCcw className="size-3" />
+                        </button>
+                      ) : null}
+                      <div className="flex w-14 shrink-0 items-center justify-end">
+                        <button
+                          aria-label={fmt(messages.base.moveFieldUpAria, {
+                            name: resolveIString(field.name),
+                          })}
+                          className="inline-flex size-7 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-30"
+                          disabled={!isVisible || visibleIndex <= 0}
+                          onClick={() => {
+                            const target = visibleSlugs[visibleIndex - 1];
+                            if (target) {
+                              setDraft((current) =>
+                                moveViewField(current, allFields, field.slug, target, "before"),
+                              );
+                            }
+                          }}
+                          title={messages.base.moveFieldUp}
+                          type="button"
+                        >
+                          <ArrowUp className="size-3.5" />
+                        </button>
+                        <button
+                          aria-label={fmt(messages.base.moveFieldDownAria, {
+                            name: resolveIString(field.name),
+                          })}
+                          className="inline-flex size-7 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-30"
+                          disabled={!isVisible || visibleIndex >= visibleSlugs.length - 1}
+                          onClick={() => {
+                            const target = visibleSlugs[visibleIndex + 1];
+                            if (target) {
+                              setDraft((current) =>
+                                moveViewField(current, allFields, field.slug, target, "after"),
+                              );
+                            }
+                          }}
+                          title={messages.base.moveFieldDown}
+                          type="button"
+                        >
+                          <ArrowDown className="size-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          ) : section === "filters" ? (
+            <ViewConditionsList
+              allFields={allFields}
+              conditions={draft.filters}
+              emptyLabel={messages.base.noViewFilters}
+              onClearAll={() => setDraft((current) => clearAllViewFilters(current))}
+              onClearItem={(index) => setDraft((current) => clearViewFilterAt(current, index))}
+              section="filters"
+              visibleSet={visibleSet}
+            />
+          ) : (
+            <ViewConditionsList
+              allFields={allFields}
+              conditions={draft.sorts}
+              emptyLabel={messages.base.noViewSorts}
+              onClearAll={() => setDraft((current) => clearAllViewSorts(current))}
+              onClearItem={(index) => setDraft((current) => clearViewSortAt(current, index))}
+              section="sorts"
+              visibleSet={visibleSet}
+            />
+          )}
+        </div>
+
+        <div className="flex items-center justify-between gap-3 border-border/60 border-t px-3 py-2.5">
+          <div className="min-w-0 text-xs">
+            {error ? (
+              <span className="text-destructive">{error}</span>
+            ) : changed ? (
+              <span className="text-muted-foreground">{messages.base.unsavedViewChanges}</span>
+            ) : (
+              <span className="text-muted-foreground">{messages.base.noViewChanges}</span>
+            )}
+          </div>
+          <SplitSubmitButton
+            disabled={!changed || savingMode !== null}
+            hint={messages.common.mergeImmediatelyHint}
+            isPrimaryLoading={savingMode === "request"}
+            isSecondaryLoading={savingMode === "merge"}
+            onPrimary={() => submit()}
+            onSecondary={() => submit({ mergeImmediately: true })}
+            primaryLabel={messages.base.updateViewRequest}
+            primaryLoadingLabel={messages.common.submitting}
+            secondaryLabel={messages.base.updateViewNow}
+            secondaryLoadingLabel={messages.recordView.merging}
+          />
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+interface ViewConditionsListProps {
+  allFields: BaseFieldVO[];
+  conditions: Array<
+    ViewFilterVO | { direction: "asc" | "desc"; fieldId?: string; fieldSlug: string }
+  >;
+  emptyLabel: string;
+  onClearAll: () => void;
+  onClearItem: (index: number) => void;
+  section: "filters" | "sorts";
+  visibleSet: Set<string>;
+}
+
+function ViewConditionsList({
+  allFields,
+  conditions,
+  emptyLabel,
+  onClearAll,
+  onClearItem,
+  section,
+  visibleSet,
+}: ViewConditionsListProps) {
+  const messages = useCoreI18n();
+  const resolveIString = useIString();
+
+  if (conditions.length === 0) {
+    return <div className="px-4 py-8 text-center text-muted-foreground text-xs">{emptyLabel}</div>;
+  }
+
+  return (
+    <div>
+      <div className="flex items-center justify-between border-border/50 border-b px-3 py-2">
+        <span className="text-muted-foreground text-xs">
+          {section === "filters"
+            ? fmt(messages.base.viewFilterCount, { count: conditions.length })
+            : fmt(messages.base.viewSortCount, { count: conditions.length })}
+        </span>
+        <button
+          className="h-7 rounded px-2 text-muted-foreground text-xs transition-colors hover:bg-accent hover:text-foreground"
+          onClick={onClearAll}
+          type="button"
+        >
+          {section === "filters" ? messages.base.clearAllFilters : messages.base.clearAllSorts}
+        </button>
+      </div>
+      <div className="divide-y divide-border/40">
+        {conditions.map((condition, index) => {
+          const field = allFields.find((item) =>
+            condition.fieldId ? item.id === condition.fieldId : item.slug === condition.fieldSlug,
+          );
+          const Icon = field ? FIELD_TYPE_ICONS[field.type] : Type;
+          const hidden = !field || !visibleSet.has(field.slug);
+          const filter = section === "filters" ? (condition as ViewFilterVO) : null;
+          const value =
+            filter && operatorNeedsValue(filter.operator)
+              ? field
+                ? getFieldPreviewText(field, filter.value, messages)
+                : fieldPreviewText(filter.value)
+              : null;
+          const conditionLabel = filter
+            ? messages.base.filterOperators[filter.operator]
+            : (condition as { direction: "asc" | "desc" }).direction === "asc"
+              ? messages.base.sortAscending
+              : messages.base.sortDescending;
+          return (
+            <div
+              className="flex min-h-11 items-center gap-2 px-3 py-1.5"
+              data-condition-field-slug={condition.fieldSlug}
+              key={`${condition.fieldId ?? condition.fieldSlug}-${index}`}
+            >
+              <span className="flex size-5 shrink-0 items-center justify-center rounded bg-muted/60 text-[10px] text-muted-foreground">
+                {index + 1}
+              </span>
+              <Icon className="size-3.5 shrink-0 text-muted-foreground" />
+              <span className="min-w-0 flex-1">
+                <span className="block truncate font-medium text-xs">
+                  {field ? resolveIString(field.name) : condition.fieldSlug}
+                </span>
+                <span className="block truncate text-muted-foreground text-[11px]">
+                  {conditionLabel}
+                  {value ? ` · ${value}` : ""}
+                </span>
+              </span>
+              {hidden ? (
+                <span className="inline-flex items-center gap-1 text-muted-foreground text-[10px]">
+                  <EyeOff className="size-3" />
+                  {messages.base.hiddenField}
+                </span>
+              ) : null}
+              <button
+                aria-label={fmt(messages.base.clearConditionAria, {
+                  name: field ? resolveIString(field.name) : condition.fieldSlug,
+                })}
+                className="inline-flex size-7 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                onClick={() => onClearItem(index)}
+                title={messages.base.clear}
+                type="button"
+              >
+                <X className="size-3.5" />
+              </button>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 // Stable ids + cycling widths for the loading-rows skeleton below, following the
 // same static-array convention as skeletons.tsx (deterministic, no index keys).
 const SKELETON_ROWS = [
@@ -975,6 +1445,23 @@ export function BusaBaseTable({
     }
   };
 
+  const submitViewControls = async (config: ViewConfigVO, options?: ViewSubmitOptions) => {
+    if (!activeView) {
+      return;
+    }
+    setViewActionError(null);
+    await onUpdateView(
+      activeView,
+      {
+        config,
+        description: activeView.description,
+        name: activeView.name,
+        type: activeView.type,
+      },
+      options,
+    );
+  };
+
   // Virtualize only long lists (small tables — the common case — render plainly
   // and are untouched). Rows are absolutely positioned inside a spacer; the grid
   // template + sticky first column are preserved.
@@ -1068,12 +1555,6 @@ export function BusaBaseTable({
                 plural: displayCount === 1 ? "" : "s",
               });
             })()}
-            {activeView && activeView.config.filters.length > 0
-              ? ` · ${fmt(messages.base.filterCount, {
-                  count: activeView.config.filters.length,
-                  plural: activeView.config.filters.length === 1 ? "" : "s",
-                })}`
-              : ""}
             {archivedRecords.length > 0 ? (
               <button
                 className="ml-2 underline-offset-2 hover:underline"
@@ -1129,6 +1610,34 @@ export function BusaBaseTable({
           ) : null}
         </div>
       </div>
+      {activeView ? (
+        <div
+          aria-label={messages.base.viewControlsTitle}
+          className="mb-3 flex min-w-0 items-center gap-1.5 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+          data-testid="view-control-toolbar"
+          role="toolbar"
+        >
+          {(["fields", "filters", "sorts"] as const).map((section) => (
+            <ViewControlPopover
+              allFields={allFields}
+              initialSection={section}
+              key={section}
+              onSubmit={submitViewControls}
+              view={activeView}
+            />
+          ))}
+        </div>
+      ) : base ? (
+        <div
+          className="mb-3 flex min-w-0 items-center gap-2 border-border/60 border-y py-2"
+          data-testid="view-control-toolbar-readonly"
+        >
+          <Columns3 className="size-3.5 shrink-0 text-muted-foreground" />
+          <span className="truncate text-muted-foreground text-xs">
+            {messages.base.savedViewToolbarRequired}
+          </span>
+        </div>
+      ) : null}
       {base && editingViewMode ? (
         <ViewChangeRequestDialog
           base={base}

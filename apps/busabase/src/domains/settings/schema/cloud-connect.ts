@@ -1,8 +1,7 @@
 /**
  * OSS-local Cloud Connect state — a single-row table holding this local
  * instance's stable `tunnelId`, the configured Cloud URL, and (once connected)
- * the scoped tunnel-connect credential (`tcc_…`, minted by
- * `apps/busabase-cloud`'s `client_platform=tunnel` OAuth exchange).
+ * the OAuth access and refresh tokens scoped to this tunnel resource.
  *
  * Deliberately NOT `busabase_vault_items` (Vault) — that's user-facing secrets
  * storage with a different threat model (see Local ↔ Cloud Tunnel spec,
@@ -27,8 +26,9 @@ export const busabaseCloudConnect = pgTable("busabase_cloud_connect", {
    *  connected — needed to resume the relay client (register/ws) on boot,
    *  when there is no incoming request to read it from. */
   ossOrigin: text("oss_origin"),
-  /** Scoped tunnel-connect credential (spec §5a) — null while disconnected. */
+  /** OAuth tokens for the tunnel resource — null while disconnected. */
   credentialToken: text("credential_token"),
+  credentialRefreshToken: text("credential_refresh_token"),
   credentialExpiresAt: timestamp("credential_expires_at", { mode: "date" }),
   createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { mode: "date" }).defaultNow().notNull(),

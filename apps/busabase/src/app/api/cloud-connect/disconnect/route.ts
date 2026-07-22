@@ -12,8 +12,9 @@ export async function POST() {
   const row = await getCloudConnectRow(db);
 
   await stopCloudTunnel();
-  if (row?.credentialToken) {
-    await revokeCloudConnectCredential(row.cloudUrl, row.credentialToken);
+  const tokenToRevoke = row?.credentialRefreshToken ?? row?.credentialToken;
+  if (row && tokenToRevoke) {
+    await revokeCloudConnectCredential(row.cloudUrl, tokenToRevoke);
   }
   await clearCloudConnectCredential(db);
 

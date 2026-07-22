@@ -7,8 +7,10 @@ import { useAirAppKeepAliveStore } from "../store/airapp-keepalive-store";
 
 const EMPTY_SLUGS: string[] = [];
 const AirAppKeepAliveScopeContext = createContext<string | undefined>(undefined);
+const AirAppKeepAliveActiveContext = createContext(true);
 
 export const useAirAppKeepAliveScope = () => useContext(AirAppKeepAliveScopeContext);
+export const useAirAppKeepAliveActive = () => useContext(AirAppKeepAliveActiveContext);
 
 interface AirAppKeepAliveHostProps {
   activeSlug: string | null;
@@ -62,9 +64,11 @@ export function AirAppKeepAliveHost({
           data-dashboard-airapp-view={slug}
           key={`${scopeKey}:${slug}`}
         >
-          <AirAppKeepAliveScopeContext.Provider value={scopeKey}>
-            <RenderDetail orpc={orpc} slug={slug} />
-          </AirAppKeepAliveScopeContext.Provider>
+          <AirAppKeepAliveActiveContext.Provider value={slug === activeSlug}>
+            <AirAppKeepAliveScopeContext.Provider value={scopeKey}>
+              <RenderDetail orpc={orpc} slug={slug} />
+            </AirAppKeepAliveScopeContext.Provider>
+          </AirAppKeepAliveActiveContext.Provider>
         </div>
       ))}
     </>

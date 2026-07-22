@@ -80,6 +80,43 @@ export const hideViewField = (
   visibleFieldSlugs: getVisibleViewFieldSlugs(config, fields).filter((slug) => slug !== field.slug),
 });
 
+export const showViewField = (
+  config: ViewConfigVO,
+  field: Pick<BaseFieldVO, "slug">,
+  fields: Pick<BaseFieldVO, "slug">[],
+): ViewConfigVO => {
+  const visible = getVisibleViewFieldSlugs(config, fields);
+  return visible.includes(field.slug)
+    ? config
+    : { ...config, visibleFieldSlugs: [...visible, field.slug] };
+};
+
+export const showAllViewFields = (
+  config: ViewConfigVO,
+  fields: Pick<BaseFieldVO, "slug">[],
+): ViewConfigVO => {
+  const visible = getVisibleViewFieldSlugs(config, fields);
+  const visibleSet = new Set(visible);
+  const hidden = fields.map((field) => field.slug).filter((slug) => !visibleSet.has(slug));
+  return hidden.length === 0 ? config : { ...config, visibleFieldSlugs: [...visible, ...hidden] };
+};
+
+export const clearAllViewFilters = (config: ViewConfigVO): ViewConfigVO =>
+  config.filters.length === 0 ? config : { ...config, filters: [] };
+
+export const clearAllViewSorts = (config: ViewConfigVO): ViewConfigVO =>
+  config.sorts.length === 0 ? config : { ...config, sorts: [] };
+
+export const clearViewFilterAt = (config: ViewConfigVO, index: number): ViewConfigVO =>
+  index < 0 || index >= config.filters.length
+    ? config
+    : { ...config, filters: config.filters.filter((_, itemIndex) => itemIndex !== index) };
+
+export const clearViewSortAt = (config: ViewConfigVO, index: number): ViewConfigVO =>
+  index < 0 || index >= config.sorts.length
+    ? config
+    : { ...config, sorts: config.sorts.filter((_, itemIndex) => itemIndex !== index) };
+
 export const clampViewFieldWidth = (width: number): number =>
   Math.min(VIEW_FIELD_MAX_WIDTH, Math.max(VIEW_FIELD_MIN_WIDTH, Math.round(width)));
 
@@ -106,6 +143,9 @@ export const resetViewFieldWidth = (config: ViewConfigVO, fieldSlug: string): Vi
     fieldWidths: Object.keys(fieldWidths).length > 0 ? fieldWidths : undefined,
   };
 };
+
+export const resetAllViewFieldWidths = (config: ViewConfigVO): ViewConfigVO =>
+  config.fieldWidths === undefined ? config : { ...config, fieldWidths: undefined };
 
 export const moveViewField = (
   config: ViewConfigVO,

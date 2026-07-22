@@ -18,6 +18,17 @@ const cloudBootstrap = buildSkillMarkdown("https://busabase.com", {
 });
 
 describe("buildSkillMarkdown advertises the batch/bulk/temp-ref/assets surface", () => {
+  it("documents standard OAuth access tokens without the removed session format", () => {
+    const authenticated = buildSkillMarkdown("https://busabase.com", {
+      apiKey: "bso_example",
+      mode: "cloud",
+      spaceId: "spc_x",
+    });
+    expect(authenticated).toContain("rotating OAuth\naccess token");
+    expect(authenticated).toContain("`bso_…`");
+    expect(authenticated).not.toContain("`bss_…`");
+  });
+
   it("documents the bulk record change-request endpoint", () => {
     for (const doc of [cloud, local]) {
       expect(doc).toContain("/records/bulk-change-request");

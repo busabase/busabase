@@ -9,7 +9,7 @@ import {
   useState,
 } from "react";
 import { Platform } from "react-native";
-import { revokeBusabaseCloudSession } from "~/auth/oauth";
+import { getValidBusabaseCloudSession, revokeBusabaseCloudSession } from "~/auth/oauth";
 import {
   type CloudSession,
   clearCloudSession,
@@ -86,7 +86,7 @@ export function ConnectionProvider({ children }: { children: ReactNode }) {
       AsyncStorage.getItem(STORAGE_KEY),
       AsyncStorage.getItem(RECENT_SERVER_KEY),
       AsyncStorage.getItem(SERVER_HISTORY_KEY),
-      getCloudSession(),
+      getValidBusabaseCloudSession(),
     ])
       .then(([raw, recentServerUrl, historyRaw, cloudSession]) => {
         const serverHistory = parseHistory(historyRaw);
@@ -179,7 +179,7 @@ export function ConnectionProvider({ children }: { children: ReactNode }) {
 
   const getCloudAuthorizationHeaders = useCallback(
     async (options?: { spaceId?: string | null }): Promise<Record<string, string>> => {
-      const session = await getCloudSession();
+      const session = await getValidBusabaseCloudSession();
       const token = getCloudSessionToken(session);
       if (!token) return {};
       const headers: Record<string, string> = {

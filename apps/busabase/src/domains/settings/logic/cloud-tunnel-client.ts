@@ -16,7 +16,8 @@ import { hostname } from "node:os";
 import { attachRelayClient, createFetchHandler } from "relaylib";
 import WebSocket from "ws";
 import { getDb } from "~/db";
-import { getCloudConnectRow } from "./cloud-connect-store";
+import { refreshCloudConnectCredential } from "./cloud-connect-oauth";
+import { getCloudConnectRow, saveCloudConnectCredential } from "./cloud-connect-store";
 
 export type CloudTunnelStatus =
   | "disconnected"
@@ -38,10 +39,13 @@ interface CloudTunnelState {
   cloudUrl: string | null;
   tunnelId: string | null;
   credentialToken: string | null;
+  credentialRefreshToken: string | null;
+  credentialExpiresAt: Date | null;
   ossOrigin: string | null;
   socket: WebSocket | null;
   heartbeatTimer: ReturnType<typeof setInterval> | null;
   reconnectTimer: ReturnType<typeof setTimeout> | null;
+  refreshTimer: ReturnType<typeof setTimeout> | null;
   reconnectDelayMs: number;
   /** true once `stopCloudTunnel()` is called — suppresses auto-reconnect. */
   stopped: boolean;
@@ -62,6 +66,8 @@ const HEARTBEAT_INTERVAL_MS = 15_000;
 const RECONNECT_BASE_MS = 1_000;
 const RECONNECT_MAX_MS = 30_000;
 const RECONNECT_JITTER = 0.2;
+const TOKEN_REFRESH_WINDOW_MS = 5 * 60 * 1000;
+const TOKEN_REFRESH_RETRY_MS = 30 * 1000;
 
 function getState(): CloudTunnelState {
   const g = globalThis as GlobalWithTunnelState;
@@ -72,10 +78,13 @@ function getState(): CloudTunnelState {
       cloudUrl: null,
       tunnelId: null,
       credentialToken: null,
+      credentialRefreshToken: null,
+      credentialExpiresAt: null,
       ossOrigin: null,
       socket: null,
       heartbeatTimer: null,
       reconnectTimer: null,
+      refreshTimer: null,
       reconnectDelayMs: RECONNECT_BASE_MS,
       stopped: true,
     };
@@ -93,7 +102,7 @@ export function getCloudTunnelStatus(): CloudTunnelStatusSnapshot {
   };
 }
 
-function clearTimers(state: CloudTunnelState): void {
+function clearConnectionTimers(state: CloudTunnelState): void {
   if (state.heartbeatTimer) {
     clearInterval(state.heartbeatTimer);
     state.heartbeatTimer = null;
@@ -101,6 +110,14 @@ function clearTimers(state: CloudTunnelState): void {
   if (state.reconnectTimer) {
     clearTimeout(state.reconnectTimer);
     state.reconnectTimer = null;
+  }
+}
+
+function clearAllTimers(state: CloudTunnelState): void {
+  clearConnectionTimers(state);
+  if (state.refreshTimer) {
+    clearTimeout(state.refreshTimer);
+    state.refreshTimer = null;
   }
 }
 
@@ -175,6 +192,57 @@ function scheduleReconnect(state: CloudTunnelState, reason: string): void {
   }, delay);
 }
 
+function scheduleCredentialRefresh(state: CloudTunnelState, retryDelayMs?: number): void {
+  if (state.stopped || !state.credentialExpiresAt || state.refreshTimer) return;
+  const delay =
+    retryDelayMs ??
+    Math.max(0, state.credentialExpiresAt.getTime() - Date.now() - TOKEN_REFRESH_WINDOW_MS);
+  state.refreshTimer = setTimeout(() => {
+    state.refreshTimer = null;
+    void refreshCredential(state);
+  }, delay);
+}
+
+async function refreshCredential(state: CloudTunnelState): Promise<void> {
+  if (
+    state.stopped ||
+    !state.cloudUrl ||
+    !state.tunnelId ||
+    !state.credentialRefreshToken ||
+    !state.ossOrigin
+  ) {
+    return;
+  }
+
+  try {
+    const credential = await refreshCloudConnectCredential(
+      state.cloudUrl,
+      state.credentialRefreshToken,
+      state.tunnelId,
+    );
+    if (state.stopped || credential.tunnelId !== state.tunnelId) return;
+
+    state.credentialToken = credential.token;
+    state.credentialRefreshToken = credential.refreshToken;
+    state.credentialExpiresAt = new Date(credential.expiresAt);
+
+    const db = await getDb();
+    await saveCloudConnectCredential(db, {
+      token: credential.token,
+      refreshToken: credential.refreshToken,
+      expiresAt: state.credentialExpiresAt,
+      ossOrigin: state.ossOrigin,
+    });
+    scheduleCredentialRefresh(state);
+  } catch (error) {
+    console.warn(
+      "[cloud-connect] credential refresh failed",
+      error instanceof Error ? error.message : error,
+    );
+    if (!state.stopped) scheduleCredentialRefresh(state, TOKEN_REFRESH_RETRY_MS);
+  }
+}
+
 function connectSocket(state: CloudTunnelState): void {
   if (state.stopped || !state.cloudUrl || !state.tunnelId || !state.credentialToken) return;
 
@@ -202,7 +270,7 @@ function connectSocket(state: CloudTunnelState): void {
   socket.on("close", () => {
     if (state.socket !== socket) return; // stale listener from a superseded socket
     state.socket = null;
-    clearTimers(state);
+    clearConnectionTimers(state);
     if (state.stopped) {
       state.status = "disconnected";
       return;
@@ -227,6 +295,8 @@ export interface StartCloudTunnelInput {
   cloudUrl: string;
   tunnelId: string;
   token: string;
+  refreshToken: string;
+  expiresAt: Date;
   /** This OSS server's own reachable origin, e.g. `http://localhost:15419` —
    *  where `createFetchHandler` forwards Cloud's relayed requests. */
   ossOrigin: string;
@@ -243,12 +313,14 @@ export async function startCloudTunnel(input: StartCloudTunnelInput): Promise<vo
     stale.removeAllListeners();
     stale.close();
   }
-  clearTimers(state);
+  clearAllTimers(state);
 
   state.stopped = false;
   state.cloudUrl = input.cloudUrl;
   state.tunnelId = input.tunnelId;
   state.credentialToken = input.token;
+  state.credentialRefreshToken = input.refreshToken;
+  state.credentialExpiresAt = input.expiresAt;
   state.ossOrigin = input.ossOrigin;
   state.status = "connecting";
   state.error = null;
@@ -263,13 +335,14 @@ export async function startCloudTunnel(input: StartCloudTunnelInput): Promise<vo
   }
 
   connectSocket(state);
+  scheduleCredentialRefresh(state);
 }
 
 /** Disconnect: stop reconnecting, close the socket, best-effort unregister. */
 export async function stopCloudTunnel(): Promise<void> {
   const state = getState();
   state.stopped = true;
-  clearTimers(state);
+  clearAllTimers(state);
   const socket = state.socket;
   state.socket = null;
   if (socket) {
@@ -282,21 +355,48 @@ export async function stopCloudTunnel(): Promise<void> {
 }
 
 /**
- * Resume the tunnel on server boot if a valid (non-expired) credential is
- * already stored — a working tunnel should survive an OSS server restart
- * without the user re-clicking Connect. See `~/instrumentation.node.ts`.
+ * Resume the tunnel on server boot, rotating an expired or near-expiry access
+ * token first. See `~/instrumentation.node.ts`.
  */
 export async function resumeCloudTunnelOnBoot(): Promise<void> {
   try {
     const db = await getDb();
     const row = await getCloudConnectRow(db);
-    if (!row?.credentialToken || !row.credentialExpiresAt || !row.ossOrigin) return;
-    if (row.credentialExpiresAt.getTime() <= Date.now()) return;
+    if (
+      !row?.credentialToken ||
+      !row.credentialRefreshToken ||
+      !row.credentialExpiresAt ||
+      !row.ossOrigin
+    ) {
+      return;
+    }
+
+    let token = row.credentialToken;
+    let refreshToken = row.credentialRefreshToken;
+    let expiresAt = row.credentialExpiresAt;
+    if (expiresAt.getTime() <= Date.now() + TOKEN_REFRESH_WINDOW_MS) {
+      const credential = await refreshCloudConnectCredential(
+        row.cloudUrl,
+        refreshToken,
+        row.tunnelId,
+      );
+      token = credential.token;
+      refreshToken = credential.refreshToken;
+      expiresAt = new Date(credential.expiresAt);
+      await saveCloudConnectCredential(db, {
+        token,
+        refreshToken,
+        expiresAt,
+        ossOrigin: row.ossOrigin,
+      });
+    }
 
     await startCloudTunnel({
       cloudUrl: row.cloudUrl,
       tunnelId: row.tunnelId,
-      token: row.credentialToken,
+      token,
+      refreshToken,
+      expiresAt,
       ossOrigin: row.ossOrigin,
     });
     console.log(`[cloud-connect] resumed tunnel to ${row.cloudUrl} on boot`);

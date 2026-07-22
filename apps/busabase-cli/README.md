@@ -68,8 +68,8 @@ busabase-cli login --device-code                     # Cloud/remote device sign-
 busabase-cli login --oauth                           # legacy same-machine loopback OAuth
 busabase-cli login --api-key sk_…                    # Cloud API key (headless/CI)
 busabase-cli login --base-url http://localhost:15419 # connect to a local server (no auth)
-busabase-cli login --refresh                         # slide the current OAuth session forward
-busabase-cli logout                                  # revoke the session + clear saved creds
+busabase-cli login --refresh                         # rotate the current OAuth token set
+busabase-cli logout                                  # revoke the token family + clear saved creds
 ```
 
 Device authorization uses a short-lived, opaque login session only for the hand-off. In the
@@ -77,9 +77,9 @@ browser you select an existing API key or create a new one; the waiting CLI exch
 temporary session for that key, immediately discards the session, and saves only the `sk_…`
 credential. The key secret is never rendered in the browser or printed by device login.
 
-`--refresh` applies only to legacy OAuth sessions. API keys are not refreshable; if a key expires
-or is revoked, run `busabase-cli login` again and select or create another key. Credentials are
-saved with restricted file permissions.
+`--refresh` applies only to standard OAuth token sets created by `login --oauth`. API keys are
+not refreshable; if a key expires or is revoked, run `busabase-cli login` again and select or
+create another key. Credentials are saved with restricted file permissions.
 
 ## Output modes
 

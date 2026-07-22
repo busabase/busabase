@@ -23,14 +23,13 @@ import { dotEnvPath, loadDotEnvFile, writeDotEnvFile } from "./config-file.js";
  * write `BUSABASE_BASE_URL` / `BUSABASE_API_KEY` / `BUSABASE_SPACE_ID`.
  */
 
-const CLI_CLIENT_PLATFORM = "cli";
 const OAUTH_TIMEOUT_MS = 5 * 60 * 1000;
 
-/** Env key holding the OAuth session expiry (ISO), used to drive built-in auto-refresh. */
+/** Env key holding the OAuth access-token expiry (ISO), used to drive built-in auto-refresh. */
 const EXPIRES_AT_KEY = "BUSABASE_TOKEN_EXPIRES_AT";
-const LEGACY_SESSION_TOKEN_PREFIX = "bss_";
-/** Auto-refresh a login session once it's within this window of expiry. */
-const AUTO_REFRESH_THRESHOLD_MS = 2 * 24 * 60 * 60 * 1000;
+const REFRESH_TOKEN_KEY = "BUSABASE_REFRESH_TOKEN";
+/** Auto-refresh an OAuth access token once it's within this window of expiry. */
+const AUTO_REFRESH_THRESHOLD_MS = 5 * 60 * 1000;
 
 /** Default local `busabase server` address. */
 const DEFAULT_LOCAL_URL = "http://localhost:15419";
@@ -50,7 +49,7 @@ export interface LoginOptions {
 
 export interface LogoutOptions {
   baseUrl: string;
-  /** The currently-saved credential (session token or API key), for revocation. */
+  /** The currently-saved credential (OAuth access token or API key), for revocation. */
   apiKey?: string;
 }
 
@@ -130,7 +129,7 @@ async function verifyAuth(baseUrl: string, token: string): Promise<AuthVerify> {
   });
   if (res.status === 401) {
     throw new Error(
-      `The credential was rejected (401) by ${baseUrl}. If it's an API key, check it in Dashboard → Settings → API Keys; if it's a login session, run \`busabase-cli login\` again.`,
+      `The credential was rejected (401) by ${baseUrl}. If it's an API key, check it in Dashboard → Settings → API Keys; if it's an OAuth login, run \`busabase-cli login\` again.`,
     );
   }
   if (!res.ok) {
@@ -141,11 +140,11 @@ async function verifyAuth(baseUrl: string, token: string): Promise<AuthVerify> {
 
 // ── OAuth (PKCE loopback) ─────────────────────────────────────────────────────
 
-/** Run the browser PKCE flow and return the native session token (+ its expiry). */
+/** Run the browser PKCE flow and return the OAuth access token (+ its expiry). */
 async function loopbackOauthLogin(
   baseUrl: string,
   useBrowser: boolean,
-): Promise<{ token: string; expiresAt?: string; apiKeyExpiresAt?: string }> {
+): Promise<{ token: string; refreshToken?: string; expiresAt?: string; apiKeyExpiresAt?: string }> {
   const codeVerifier = base64url(randomBytes(32));
   const codeChallenge = base64url(createHash("sha256").update(codeVerifier).digest());
   const state = base64url(randomBytes(16));
@@ -167,6 +166,7 @@ async function loopbackOauthLogin(
         const error = url.searchParams.get("error");
         const returnedState = url.searchParams.get("state");
         const returnedCode = url.searchParams.get("code");
+        const returnedIssuer = url.searchParams.get("iss");
         if (error) {
           respond("Sign-in failed", "You can close this tab and return to the terminal.");
           cleanup();
@@ -177,6 +177,20 @@ async function loopbackOauthLogin(
           respond("Sign-in failed", "State mismatch. You can close this tab and try again.");
           cleanup();
           reject(new Error("OAuth state mismatch — the callback did not match this request."));
+          return;
+        }
+        let issuerMatches = false;
+        try {
+          issuerMatches = Boolean(
+            returnedIssuer && new URL(returnedIssuer).origin === new URL(baseUrl).origin,
+          );
+        } catch {
+          issuerMatches = false;
+        }
+        if (!issuerMatches) {
+          respond("Sign-in failed", "Authorization server mismatch. Close this tab and try again.");
+          cleanup();
+          reject(new Error("OAuth authorization server issuer mismatch."));
           return;
         }
         respond("Signed in ✓", "You can close this tab and return to the terminal.");
@@ -206,7 +220,8 @@ async function loopbackOauthLogin(
         const authorizeUrl = new URL(`${baseUrl}/api/oauth/authorize`);
         authorizeUrl.searchParams.set("response_type", "code");
         authorizeUrl.searchParams.set("client_id", BUSABASE_CLI_CLIENT_ID);
-        authorizeUrl.searchParams.set("client_platform", CLI_CLIENT_PLATFORM);
+        authorizeUrl.searchParams.set("resource", `${baseUrl}/api/v1`);
+        authorizeUrl.searchParams.set("scope", "api");
         authorizeUrl.searchParams.set("code_challenge", codeChallenge);
         authorizeUrl.searchParams.set("code_challenge_method", "S256");
         authorizeUrl.searchParams.set("redirect_uri", redirect);
@@ -231,15 +246,14 @@ async function loopbackOauthLogin(
 
   const tokenRes = await fetch(`${baseUrl}/api/oauth/token`, {
     method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
       grant_type: "authorization_code",
       client_id: BUSABASE_CLI_CLIENT_ID,
-      client_platform: CLI_CLIENT_PLATFORM,
       code,
       code_verifier: codeVerifier,
       redirect_uri: redirectUri,
-      state,
+      resource: `${baseUrl}/api/v1`,
     }),
   });
   if (!tokenRes.ok) {
@@ -247,18 +261,20 @@ async function loopbackOauthLogin(
     throw new Error(`Token exchange failed (HTTP ${tokenRes.status})${text ? `: ${text}` : ""}`);
   }
   const payload = (await tokenRes.json()) as {
-    token?: string;
-    accessToken?: string;
-    apiKey?: string;
-    expiresAt?: string | null;
+    access_token?: string;
+    refresh_token?: string;
+    expires_in?: number;
   };
-  // cli-consent authorizations return a long-lived `apiKey` (sk_…) instead of a
-  // session token — same credential slot, just a different prefix at runtime.
-  const token = payload.apiKey ?? payload.token ?? payload.accessToken;
+  const token = payload.access_token;
   if (!token) throw new Error("Token exchange returned no credential.");
-  return payload.apiKey
-    ? { token, apiKeyExpiresAt: payload.expiresAt ?? undefined }
-    : { token, expiresAt: payload.expiresAt ?? undefined };
+  return {
+    token,
+    refreshToken: payload.refresh_token,
+    expiresAt:
+      typeof payload.expires_in === "number"
+        ? new Date(Date.now() + payload.expires_in * 1000).toISOString()
+        : undefined,
+  };
 }
 
 interface DeviceCodeResponse {
@@ -406,24 +422,37 @@ async function deviceLogin(
   throw new Error("The device code expired. Run `busabase-cli login` to request a new one.");
 }
 
-/** POST the current session token to `/api/oauth/refresh`; returns the slid-forward token. */
+/** Exchange a rotating refresh token for a new OAuth token set. */
 async function refreshToken(
   baseUrl: string,
-  token: string,
-): Promise<{ token: string; expiresAt?: string }> {
-  const res = await fetch(`${baseUrl}/api/oauth/refresh`, {
+  refreshToken: string,
+): Promise<{ token: string; refreshToken?: string; expiresAt?: string }> {
+  const res = await fetch(`${baseUrl}/api/oauth/token`, {
     method: "POST",
-    headers: { authorization: `Bearer ${token}` },
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      grant_type: "refresh_token",
+      refresh_token: refreshToken,
+      client_id: BUSABASE_CLI_CLIENT_ID,
+      resource: `${baseUrl}/api/v1`,
+    }),
   });
-  if (res.status === 401) throw new Error("SESSION_EXPIRED");
+  if (res.status === 400 || res.status === 401) throw new Error("SESSION_EXPIRED");
   if (!res.ok) throw new Error(`Refresh failed (HTTP ${res.status}) from ${baseUrl}.`);
   const payload = (await res.json()) as {
-    token?: string;
-    accessToken?: string;
-    expiresAt?: string;
+    access_token?: string;
+    refresh_token?: string;
+    expires_in?: number;
   };
-  // The refresh slides the same token forward; fall back to the current one just in case.
-  return { token: payload.token ?? payload.accessToken ?? token, expiresAt: payload.expiresAt };
+  if (!payload.access_token) throw new Error("Refresh response had no access token");
+  return {
+    token: payload.access_token,
+    refreshToken: payload.refresh_token,
+    expiresAt:
+      typeof payload.expires_in === "number"
+        ? new Date(Date.now() + payload.expires_in * 1000).toISOString()
+        : undefined,
+  };
 }
 
 // ── Space selection ───────────────────────────────────────────────────────────
@@ -548,9 +577,10 @@ export async function runLogin(options: LoginOptions): Promise<Record<string, st
 
   let token: string;
   // Only session expiry belongs in BUSABASE_TOKEN_EXPIRES_AT. API keys can have
-  // their own expiry, but they are never refreshable OAuth sessions.
+  // their own expiry, but they are never refreshable OAuth token sets.
   let expiresAt: string | undefined;
   let apiKeyExpiresAt: string | undefined;
+  let refreshTokenValue: string | undefined;
   if (method === "device") {
     const result = await deviceLogin(baseUrl, options.browser);
     token = result.token;
@@ -559,6 +589,7 @@ export async function runLogin(options: LoginOptions): Promise<Record<string, st
     const result = await loopbackOauthLogin(baseUrl, options.browser);
     token = result.token;
     expiresAt = result.expiresAt;
+    refreshTokenValue = result.refreshToken;
     apiKeyExpiresAt = result.apiKeyExpiresAt;
   } else {
     if (!apiKey) {
@@ -579,6 +610,7 @@ export async function runLogin(options: LoginOptions): Promise<Record<string, st
     BUSABASE_SPACE_ID: spaceId ?? null,
     // Clear any stale expiry when switching to an API key.
     [EXPIRES_AT_KEY]: expiresAt ?? null,
+    [REFRESH_TOKEN_KEY]: refreshTokenValue ?? null,
   });
 
   say("");
@@ -587,7 +619,7 @@ export async function runLogin(options: LoginOptions): Promise<Record<string, st
   return {
     status: "signed in",
     method: method === "loopback-oauth" ? "oauth" : method,
-    credentialType: method === "device" ? "api_key" : expiresAt ? "session" : "api_key",
+    credentialType: method === "device" ? "api_key" : expiresAt ? "oauth" : "api_key",
     user: verify.user?.email ?? verify.user?.name ?? verify.user?.id ?? "(unknown)",
     space: spaceId ?? "(server default)",
     createdSpace: String(Boolean(verify.createdSpace)),
@@ -599,31 +631,34 @@ export async function runLogin(options: LoginOptions): Promise<Record<string, st
 }
 
 /**
- * `busabase-cli login --refresh` — slide the saved OAuth session forward without a
+ * `busabase-cli login --refresh` — rotate the saved OAuth token set without a
  * browser. No-op for API keys (including keys with a fixed expiry) because they
- * cannot be refreshed. An already-expired session must sign in again.
+ * cannot be refreshed. An already-expired authorization must sign in again.
  */
 export async function runRefresh(options: LogoutOptions): Promise<Record<string, string>> {
   const baseUrl = normalizeBaseUrl(options.baseUrl);
   const token = options.apiKey;
   if (!token) throw new Error("Not signed in — run `busabase-cli login` first.");
   const file = loadDotEnvFile();
-  const isSavedExpiringSession =
+  const isSavedExpiringOAuthToken =
     file.BUSABASE_API_KEY === token && Boolean(file.BUSABASE_TOKEN_EXPIRES_AT);
-  if (!token.startsWith(LEGACY_SESSION_TOKEN_PREFIX) && !isSavedExpiringSession) {
+  if (!isSavedExpiringOAuthToken) {
     return {
       status: "nothing to refresh",
-      detail: "This credential is an API key and cannot be refreshed. Only OAuth sessions refresh.",
+      detail:
+        "This credential is an API key and cannot be refreshed. Only OAuth token sets refresh.",
     };
   }
 
-  let refreshed: { token: string; expiresAt?: string };
+  const savedRefreshToken = file[REFRESH_TOKEN_KEY];
+  if (!savedRefreshToken) throw new Error("OAuth refresh token is missing — sign in again.");
+  let refreshed: { token: string; refreshToken?: string; expiresAt?: string };
   try {
-    refreshed = await refreshToken(baseUrl, token);
+    refreshed = await refreshToken(baseUrl, savedRefreshToken);
   } catch (error) {
     if (error instanceof Error && error.message === "SESSION_EXPIRED") {
       throw new Error(
-        "Your login session has expired — run `busabase-cli login` to sign in again.",
+        "Your OAuth authorization has expired — run `busabase-cli login` to sign in again.",
       );
     }
     throw error;
@@ -632,8 +667,11 @@ export async function runRefresh(options: LogoutOptions): Promise<Record<string,
   writeDotEnvFile({
     BUSABASE_API_KEY: refreshed.token,
     [EXPIRES_AT_KEY]: refreshed.expiresAt ?? null,
+    [REFRESH_TOKEN_KEY]: refreshed.refreshToken ?? null,
   });
-  say(`✓ Session refreshed${refreshed.expiresAt ? ` — valid until ${refreshed.expiresAt}` : ""}`);
+  say(
+    `✓ OAuth token refreshed${refreshed.expiresAt ? ` — valid until ${refreshed.expiresAt}` : ""}`,
+  );
 
   return {
     status: "refreshed",
@@ -644,38 +682,43 @@ export async function runRefresh(options: LogoutOptions): Promise<Record<string,
 
 /**
  * Built-in auto-refresh, called before every data command. When the saved credential
- * is an OAuth session token within {@link AUTO_REFRESH_THRESHOLD_MS} of expiry, slide
- * it forward silently so an actively-used CLI never gets logged out mid-use.
+ * is an OAuth access token within {@link AUTO_REFRESH_THRESHOLD_MS} of expiry, rotate
+ * it silently so an actively-used CLI never gets logged out mid-use.
  *
- * Best-effort and side-effect-only: never throws, and only touches the file-stored
- * session (not a token supplied via `--api-key`/exported env). Because refresh keeps
- * the SAME token, the caller's in-memory credential stays valid — only the on-disk
- * expiry advances. A truly-dead session is left alone and surfaces as the command's
- * own 401 (which points the user at `login`).
+ * Best-effort: never throws, and only touches the file-stored OAuth token (not a token
+ * supplied via `--api-key`/exported env). Returns the rotated access token so the
+ * command currently being run uses the same credential that was persisted.
  */
-export async function maybeAutoRefresh(baseUrl: string, apiKey?: string): Promise<void> {
-  if (!apiKey) return;
+export async function maybeAutoRefresh(
+  baseUrl: string,
+  apiKey?: string,
+): Promise<string | undefined> {
+  if (!apiKey) return undefined;
   const file = loadDotEnvFile();
-  if (file.BUSABASE_API_KEY !== apiKey) return; // token came from a flag/env, not our file
+  if (file.BUSABASE_API_KEY !== apiKey) return undefined; // token came from a flag/env, not our file
   const expiresRaw = file[EXPIRES_AT_KEY];
-  if (!expiresRaw) return;
+  if (!expiresRaw) return undefined;
   const expiresAt = Date.parse(expiresRaw);
-  if (Number.isNaN(expiresAt)) return;
-  if (expiresAt <= Date.now()) return;
-  if (expiresAt - Date.now() > AUTO_REFRESH_THRESHOLD_MS) return;
+  if (Number.isNaN(expiresAt)) return undefined;
+  if (expiresAt - Date.now() > AUTO_REFRESH_THRESHOLD_MS) return undefined;
 
   try {
-    const refreshed = await refreshToken(normalizeBaseUrl(baseUrl), apiKey);
+    const savedRefreshToken = file[REFRESH_TOKEN_KEY];
+    if (!savedRefreshToken) return undefined;
+    const refreshed = await refreshToken(normalizeBaseUrl(baseUrl), savedRefreshToken);
     writeDotEnvFile({
       BUSABASE_API_KEY: refreshed.token,
       [EXPIRES_AT_KEY]: refreshed.expiresAt ?? null,
+      [REFRESH_TOKEN_KEY]: refreshed.refreshToken ?? null,
     });
+    return refreshed.token;
   } catch {
-    // Best effort — leave the credential as-is; a dead session shows up as a 401.
+    // Best effort — leave the credential as-is; an expired token shows up as a 401.
+    return undefined;
   }
 }
 
-/** Fail before a data command when the file-stored login session is already expired. */
+/** Fail before a data command when the file-stored OAuth access token is already expired. */
 export function assertCredentialNotExpired(apiKey?: string): void {
   if (!apiKey) return;
   const file = loadDotEnvFile();
@@ -685,30 +728,28 @@ export function assertCredentialNotExpired(apiKey?: string): void {
   const expiresAt = Date.parse(expiresRaw);
   if (!Number.isNaN(expiresAt) && expiresAt <= Date.now()) {
     throw new Error(
-      "Your saved device login has expired. Run `busabase-cli login --device-code` to authorize this CLI again.",
+      "Your saved OAuth login has expired. Run `busabase-cli login` to sign in again.",
     );
   }
 }
 
-/** Revoke a saved OAuth session (best effort) and clear the credential from disk. */
+/** Revoke a saved OAuth token family (best effort) and clear the credential from disk. */
 export async function runLogout(options: LogoutOptions): Promise<Record<string, string>> {
   const baseUrl = normalizeBaseUrl(options.baseUrl);
   const token = options.apiKey;
-  let revoked = "no session to revoke";
+  let revoked = "no OAuth token to revoke";
 
   const file = loadDotEnvFile();
-  // BUSABASE_TOKEN_EXPIRES_AT is session-only; an API key's own expiry is not stored here.
-  if (
-    token &&
-    (token.startsWith(LEGACY_SESSION_TOKEN_PREFIX) ||
-      (file.BUSABASE_API_KEY === token && file[EXPIRES_AT_KEY]))
-  ) {
+  // BUSABASE_TOKEN_EXPIRES_AT is OAuth-only; an API key's own expiry is not stored here.
+  if (token && file.BUSABASE_API_KEY === token && file[EXPIRES_AT_KEY]) {
     try {
+      const tokenToRevoke = file[REFRESH_TOKEN_KEY] ?? token;
       const res = await fetch(`${baseUrl}/api/oauth/revoke`, {
         method: "POST",
-        headers: { authorization: `Bearer ${token}` },
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({ token: tokenToRevoke }),
       });
-      revoked = res.ok ? "session revoked" : `revoke returned HTTP ${res.status}`;
+      revoked = res.ok ? "OAuth token family revoked" : `revoke returned HTTP ${res.status}`;
     } catch {
       revoked = "revoke request failed (cleared locally anyway)";
     }
@@ -716,7 +757,12 @@ export async function runLogout(options: LogoutOptions): Promise<Record<string, 
     revoked = "API key cleared locally (revoke it in the dashboard to disable it)";
   }
 
-  writeDotEnvFile({ BUSABASE_API_KEY: null, BUSABASE_SPACE_ID: null, [EXPIRES_AT_KEY]: null });
+  writeDotEnvFile({
+    BUSABASE_API_KEY: null,
+    BUSABASE_SPACE_ID: null,
+    [EXPIRES_AT_KEY]: null,
+    [REFRESH_TOKEN_KEY]: null,
+  });
   say(`✓ Cleared the saved credential from ${dotEnvPath()}`);
 
   return { status: "signed out", detail: revoked, config: dotEnvPath() };
