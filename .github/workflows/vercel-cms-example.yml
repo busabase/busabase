@@ -47,7 +47,7 @@ env:
   NODE_VERSION: 24.18.0
   DEPLOY_ENVIRONMENT: ${{ (github.event_name == 'push' || inputs.environment == 'production') && 'production' || 'preview' }}
   BUSABASE_BASE_URL: https://demo.busabase.com
-  BUSABASE_CMS_FOLDER_ID: nodmrkhwprumh5lpn8
+  BUSABASE_CMS_FOLDER_SLUG: cms
   BUSABASE_CMS_DEFAULT_LOCALE: en
   BUSABASE_CMS_LOCALES: en,zh-CN
   NEXT_PUBLIC_SITE_URL: https://busabase-cms-example.vercel.app
@@ -96,6 +96,22 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
+
+      - name: Resolve demo CMS folder
+        if: steps.vercel_config.outputs.ready == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          cms_folder_id=$(
+            curl --fail --silent --show-error "${BUSABASE_BASE_URL}/api/v1/nodes" |
+              jq --raw-output --arg slug "$BUSABASE_CMS_FOLDER_SLUG" \
+                '[.. | objects | select(.type == "folder" and .slug == $slug) | .id][0] // empty'
+          )
+          [ -n "$cms_folder_id" ] || {
+            echo "::error::CMS folder slug '${BUSABASE_CMS_FOLDER_SLUG}' was not found"
+            exit 1
+          }
+          echo "BUSABASE_CMS_FOLDER_ID=$cms_folder_id" >> "$GITHUB_ENV"
 
       - name: Install workspace dependencies
         if: steps.vercel_config.outputs.ready == 'true'
