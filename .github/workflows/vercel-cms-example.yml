@@ -47,7 +47,7 @@ env:
   NODE_VERSION: 24.18.0
   DEPLOY_ENVIRONMENT: ${{ (github.event_name == 'push' || inputs.environment == 'production') && 'production' || 'preview' }}
   BUSABASE_BASE_URL: https://demo.busabase.com
-  BUSABASE_CMS_FOLDER_ID: nodmru0gtq2tdiukii
+  BUSABASE_CMS_FOLDER_ID: nodmrkhwprumh5lpn8
   BUSABASE_CMS_DEFAULT_LOCALE: en
   BUSABASE_CMS_LOCALES: en,zh-CN
   NEXT_PUBLIC_SITE_URL: https://busabase-cms-example.vercel.app
