@@ -38,6 +38,8 @@ const createTestServer = () => {
     async listTools() {
       const result = await handlers.get("tools/list")?.({ method: "tools/list" }, {});
       return (result?.tools ?? []) as Array<{
+        _meta?: Record<string, unknown>;
+        annotations?: Record<string, unknown>;
         description?: string;
         inputSchema: {
           anyOf?: unknown[];
@@ -46,6 +48,7 @@ const createTestServer = () => {
           type: string;
         };
         name: string;
+        securitySchemes?: Array<Record<string, unknown>>;
       }>;
     },
     async callTool(name: string, args: Record<string, unknown>, extra: unknown = {}) {
@@ -170,6 +173,31 @@ describe("registerOpenApiMcpTools", () => {
     expect(result).toEqual({
       content: [{ type: "text", text: JSON.stringify({ input: { id: "thing_1" } }, null, 2) }],
     });
+  });
+
+  it("publishes annotations and mirrored security schemes", async () => {
+    const { server, listTools } = createTestServer();
+
+    registerOpenApiMcpTools({
+      server,
+      contract: testContract,
+      createClient: () => ({ things: { get: vi.fn(), ping: vi.fn() } }),
+      annotations: () => ({
+        readOnlyHint: true,
+        destructiveHint: false,
+        openWorldHint: false,
+      }),
+      securitySchemes: () => [{ type: "oauth2", scopes: ["mcp"] }],
+    });
+
+    const tool = (await listTools()).find((candidate) => candidate.name === "things_get");
+    expect(tool?.annotations).toEqual({
+      readOnlyHint: true,
+      destructiveHint: false,
+      openWorldHint: false,
+    });
+    expect(tool?.securitySchemes).toEqual([{ type: "oauth2", scopes: ["mcp"] }]);
+    expect(tool?._meta?.securitySchemes).toEqual([{ type: "oauth2", scopes: ["mcp"] }]);
   });
 
   it("removes typed additional arguments from zero-input operations", async () => {

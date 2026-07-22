@@ -5,6 +5,7 @@ import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
   type Tool,
+  type ToolAnnotations,
 } from "@modelcontextprotocol/sdk/types.js";
 import type { AnySchema } from "@orpc/contract";
 import type { JSONSchema } from "@orpc/openapi";
@@ -20,6 +21,13 @@ export type McpToolExtra = {
 };
 
 export type McpInputSchema = AnySchema;
+
+export interface McpOAuth2SecurityScheme {
+  type: "oauth2";
+  scopes: string[];
+}
+
+export type McpSecurityScheme = McpOAuth2SecurityScheme;
 
 type McpServerLike = {
   setRequestHandler: Server["setRequestHandler"];
@@ -62,7 +70,9 @@ export interface McpToolCallContext {
 
 interface OpenApiMcpToolCustomizationOptions {
   additionalInputSchema?: (tool: DiscoveredOpenApiTool) => McpInputSchema | undefined;
+  annotations?: (tool: DiscoveredOpenApiTool) => ToolAnnotations | undefined;
   description?: (tool: DiscoveredOpenApiTool, defaultDescription: string) => string;
+  securitySchemes?: (tool: DiscoveredOpenApiTool) => McpSecurityScheme[] | undefined;
 }
 
 export interface CreateMcpToolsFromOpenApiContractOptions<TClient> {
@@ -89,6 +99,7 @@ export interface CreateOpenApiMcpHandlerOptions<TClient>
   createClient: (extra: McpToolExtra, context: McpToolCallContext) => TClient;
   exclude?: (tool: DiscoveredOpenApiTool) => boolean;
   include?: (tool: DiscoveredOpenApiTool) => boolean;
+  instructions?: string;
   name?: (keyPath: string[], procedure: OpenApiProcedure) => string;
   serverInfo?: {
     name: string;
@@ -199,6 +210,8 @@ export const registerOpenApiMcpTools = <TClient>(
       ]
         .filter(Boolean)
         .join("\n\n");
+      const annotations = options.annotations?.(tool);
+      const securitySchemes = options.securitySchemes?.(tool);
 
       return [
         tool.name,
@@ -213,12 +226,15 @@ export const registerOpenApiMcpTools = <TClient>(
               ? options.description(tool, defaultDescription)
               : defaultDescription,
             inputSchema,
+            ...(annotations ? { annotations } : {}),
+            ...(securitySchemes ? { securitySchemes } : {}),
             _meta: {
               openApiPath: route?.path,
               openApiMethod: route?.method,
               orpcPath: tool.keyPath.join("."),
+              ...(securitySchemes ? { securitySchemes } : {}),
             },
-          } satisfies Tool,
+          } satisfies Tool & { securitySchemes?: McpSecurityScheme[] },
           tool,
         },
       ] as const;
@@ -380,16 +396,19 @@ export const createOpenApiMcpHandler = <TClient>(
   const createSession = async () => {
     const server = new Server(options.serverInfo ?? { name: "OpenAPI MCP", version: "0.1.0" }, {
       capabilities: { tools: {} },
+      instructions: options.instructions,
     });
     registerOpenApiMcpTools({
       server,
       additionalInputSchema: options.additionalInputSchema,
+      annotations: options.annotations,
       contract: options.contract,
       createClient: options.createClient,
       description: options.description,
       exclude: options.exclude,
       include: options.include,
       name: options.name,
+      securitySchemes: options.securitySchemes,
     });
 
     let sessionId = "";
