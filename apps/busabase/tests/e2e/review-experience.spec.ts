@@ -1,4 +1,4 @@
-import { type APIRequestContext, expect, json, test, unique } from "./_fixtures";
+import { type APIRequestContext, cmsPostFields, expect, json, test, unique } from "./_fixtures";
 
 interface BaseVO {
   id: string;
@@ -34,11 +34,10 @@ test("review -> merge -> refresh keeps user-visible lineage", async ({ page, req
   const created = await json<ChangeRequestVO>(
     await request.post(`/api/v1/bases/${blogBase.id}/change-requests`, {
       data: {
-        fields: {
+        fields: cmsPostFields({
           title,
           body: "Lineage should remain visible after merge and refresh.",
-          channel: "blog",
-        },
+        }),
         message: "Create lineage test record",
         submittedBy: "e2e-agent",
       },
@@ -70,14 +69,11 @@ test("review -> merge -> refresh keeps user-visible lineage", async ({ page, req
 test("request changes is recoverable and revision returns to review", async ({ page, request }) => {
   const blogBase = await getBlogBase(request);
   const title = unique("E2E request changes");
+  const fields = cmsPostFields({ title, body: "Initial body from an agent." });
   const created = await json<ChangeRequestVO>(
     await request.post(`/api/v1/bases/${blogBase.id}/change-requests`, {
       data: {
-        fields: {
-          title,
-          body: "Initial body from an agent.",
-          channel: "blog",
-        },
+        fields,
         message: "Create request-changes test record",
         submittedBy: "e2e-agent",
       },
@@ -99,9 +95,8 @@ test("request changes is recoverable and revision returns to review", async ({ p
     await request.post(`/api/v1/operations/${operationId}/revisions`, {
       data: {
         fields: {
-          title,
+          ...fields,
           body: "Revised body with a tighter claim and clear source discipline.",
-          channel: "blog",
         },
         message: "Agent revision",
         author: "e2e-agent",
@@ -118,11 +113,12 @@ test("request changes is recoverable and revision returns to review", async ({ p
 test("same-field merge conflict stays visible and recoverable", async ({ page, request }) => {
   const blogBase = await getBlogBase(request);
   const title = unique("E2E conflict base");
+  const fields = cmsPostFields({ title, body: "original body" });
 
   const createCr = await json<ChangeRequestVO>(
     await request.post(`/api/v1/bases/${blogBase.id}/change-requests`, {
       data: {
-        fields: { title, body: "original body", channel: "blog" },
+        fields,
         message: "Create conflict base record",
         submittedBy: "e2e-agent",
       },
@@ -141,7 +137,7 @@ test("same-field merge conflict stays visible and recoverable", async ({ page, r
   const firstUpdate = await json<ChangeRequestVO>(
     await request.put(`/api/v1/records/${recordId}/change-requests`, {
       data: {
-        fields: { title: `${title} A`, body: "original body", channel: "blog" },
+        fields: { ...fields, title: `${title} A` },
         message: "First title edit",
         author: "e2e-editor-a",
       },
@@ -150,7 +146,7 @@ test("same-field merge conflict stays visible and recoverable", async ({ page, r
   const conflictingUpdate = await json<ChangeRequestVO>(
     await request.put(`/api/v1/records/${recordId}/change-requests`, {
       data: {
-        fields: { title: `${title} B`, body: "original body", channel: "blog" },
+        fields: { ...fields, title: `${title} B` },
         message: "Second title edit",
         author: "e2e-editor-b",
       },
@@ -191,7 +187,7 @@ test("record delete request explains impact and preserves the canonical record",
   const createCr = await json<ChangeRequestVO>(
     await request.post(`/api/v1/bases/${blogBase.id}/change-requests`, {
       data: {
-        fields: { title, body: "Delete should be reviewable first.", channel: "blog" },
+        fields: cmsPostFields({ title, body: "Delete should be reviewable first." }),
         message: "Create delete request test record",
         submittedBy: "e2e-agent",
       },

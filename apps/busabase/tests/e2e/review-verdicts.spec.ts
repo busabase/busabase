@@ -1,4 +1,4 @@
-import { type APIRequestContext, expect, json, test, unique } from "./_fixtures";
+import { type APIRequestContext, cmsPostFields, expect, json, test, unique } from "./_fixtures";
 
 // The existing suite covers the Approve and "Request changes" verdicts. The
 // remaining reviewer exit is CLOSE (abandon): a change request can be closed from
@@ -39,7 +39,7 @@ const createChangeRequest = async (request: APIRequestContext, baseId: string, t
   json<ChangeRequestVO>(
     await request.post(`/api/v1/bases/${baseId}/change-requests`, {
       data: {
-        fields: { title, body: "Body for a close-verdict test.", channel: "blog" },
+        fields: cmsPostFields({ title, body: "Body for a close-verdict test." }),
         message: "Create close-verdict test record",
         submittedBy: "e2e-agent",
       },

@@ -1,4 +1,4 @@
-import { type APIResponse, test as base } from "@playwright/test";
+import { type APIResponse, test as base, expect, type Page } from "@playwright/test";
 
 // Why this file exists:
 // busabase's `/dashboard/local/*` is a force-dynamic catch-all page (`app/dashboard/[spaceId]/
@@ -46,3 +46,39 @@ export const json = async <T>(response: APIResponse): Promise<T> => {
 // repeated runs don't collide in the shared dev DB.
 export const unique = (prefix: string) =>
   `${prefix} ${Date.now()} ${Math.floor(Math.random() * 1000)}`;
+
+const slugify = (value: string) =>
+  value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+
+export const cmsPostFields = ({ body, title }: { body: string; title: string }) => {
+  const slug = slugify(title);
+  return {
+    body,
+    locale: "en",
+    path: `/blog/${slug}`,
+    "schema-version": 1,
+    slug,
+    status: "draft",
+    title,
+  };
+};
+
+export const openSettingsDialog = async (page: Page) => {
+  const trigger = page.getByRole("button", { name: /Local Busabase.*Local/ });
+  const settingsButton = page.getByRole("button", { exact: true, name: "Settings" });
+
+  await expect
+    .poll(
+      async () => {
+        if (!(await settingsButton.isVisible())) await trigger.click();
+        return settingsButton.isVisible();
+      },
+      { message: "Settings button should appear after dashboard hydration" },
+    )
+    .toBe(true);
+  await settingsButton.click();
+  await expect(page.getByRole("dialog")).toBeVisible();
+};

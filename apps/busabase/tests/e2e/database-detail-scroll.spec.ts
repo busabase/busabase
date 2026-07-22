@@ -1,5 +1,5 @@
 import type { BaseVO } from "busabase-contract/types";
-import { expect, json, test, unique } from "./_fixtures";
+import { cmsPostFields, expect, json, test, unique } from "./_fixtures";
 
 const LONG_LIST_RECORD_COUNT = 110;
 
@@ -18,10 +18,12 @@ test("Database Detail scrolls after the record table starts virtualizing", async
     await request.post(`/api/v1/bases/${blog.id}/records/bulk-change-request`, {
       data: {
         message: marker,
-        records: Array.from({ length: LONG_LIST_RECORD_COUNT }, (_, index) => ({
-          body: `${marker} body ${index}`,
-          title: `${marker} row ${index}`,
-        })),
+        records: Array.from({ length: LONG_LIST_RECORD_COUNT }, (_, index) =>
+          cmsPostFields({
+            body: `${marker} body ${index}`,
+            title: `${marker} row ${index}`,
+          }),
+        ),
         submittedBy: "playwright",
       },
     }),

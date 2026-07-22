@@ -1,5 +1,5 @@
 import type { BaseVO, ChangeRequestVO, RecordVO } from "busabase-contract/types";
-import { expect, json, test, unique } from "./_fixtures";
+import { cmsPostFields, expect, json, test, unique } from "./_fixtures";
 
 test("Record Detail scrolls through long field content", async ({ page, request }) => {
   const bases = await json<BaseVO[]>(await request.get("/api/v1/bases"));
@@ -21,7 +21,7 @@ test("Record Detail scrolls through long field content", async ({ page, request 
   const changeRequest = await json<ChangeRequestVO>(
     await request.post(`/api/v1/bases/${blog.id}/change-requests`, {
       data: {
-        fields: { body, channel: "blog", title },
+        fields: cmsPostFields({ body, title }),
         message: "Create a long record for the Record Detail scroll regression test",
         submittedBy: "playwright",
       },

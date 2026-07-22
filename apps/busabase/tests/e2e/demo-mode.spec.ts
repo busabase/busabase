@@ -37,11 +37,15 @@ test("?demo=1 serves the full seeded review queue from the shared seed", async (
   );
 });
 
-test("?demo={use-case} focuses the seed (blog excludes other bases)", async ({ request }) => {
+test("?demo={use-case} focuses the seed on the CMS blog bases", async ({ request }) => {
   const bases = await json<{ id: string; slug: string }[]>(
     await request.get("/api/v1/bases?demo=blog"),
   );
-  expect(bases.map((base) => base.slug)).toEqual(["blog"]);
+  expect(bases.map((base) => base.slug)).toEqual([
+    "blog",
+    "nextjs-fumadocs-demo-cms-categories",
+    "nextjs-fumadocs-demo-cms-tags",
+  ]);
 
   const changeRequests = await json<ChangeRequestVO[]>(
     await request.get("/api/v1/change-requests?demo=blog"),
@@ -56,10 +60,18 @@ test("?demo={use-case} focuses the seed (blog excludes other bases)", async ({ r
   // from this check rather than asserted to have blog's baseId.
   const baseScoped = changeRequests.filter((cr) => cr.baseId !== null);
   expect(baseScoped.length).toBeGreaterThan(0);
-  expect(baseScoped.every((cr) => cr.baseId === bases[0].id)).toBe(true);
+  const postsBase = bases.find((base) => base.slug === "blog");
+  expect(postsBase).toBeDefined();
+  expect(baseScoped.every((cr) => cr.baseId === postsBase?.id)).toBe(true);
 
   const records = await json<RecordVO[]>(await request.get("/api/v1/records?demo=blog"));
-  expect(records.every((record) => record.base.slug === "blog")).toBe(true);
+  expect(
+    records.every((record) =>
+      ["blog", "nextjs-fumadocs-demo-cms-categories", "nextjs-fumadocs-demo-cms-tags"].includes(
+        record.base.slug,
+      ),
+    ),
+  ).toBe(true);
 });
 
 test("demo writes are synthetic and never persist (refresh resets)", async ({ request }) => {
