@@ -14,6 +14,7 @@
 import { z } from "zod";
 import { fieldNameSchema, fieldTypeSchema } from "../base/contract/base-schemas";
 import { viewFilterOperatorSchema } from "../base/contract/view-schemas";
+import { VIEW_FIELD_MAX_WIDTH, VIEW_FIELD_MIN_WIDTH } from "../base/types";
 
 export const PACKAGE_FORMAT = "busabase-package@1";
 
@@ -250,6 +251,9 @@ export const PackageViewConfigSchema = z.object({
   filters: z.array(PackageViewFilterSchema).default([]),
   sorts: z.array(PackageViewSortSchema).default([]),
   visibleFieldSlugs: z.array(z.string()).nullable().optional(),
+  fieldWidths: z
+    .record(z.string().min(1), z.number().int().min(VIEW_FIELD_MIN_WIDTH).max(VIEW_FIELD_MAX_WIDTH))
+    .optional(),
 });
 export type PackageViewConfig = z.infer<typeof PackageViewConfigSchema>;
 

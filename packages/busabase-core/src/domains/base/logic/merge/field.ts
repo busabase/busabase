@@ -80,7 +80,7 @@ export const mergeBaseDeleteField = async (
       ),
     );
 
-  // Remove the deleted field from all view filters, sorts, and visibleFieldSlugs
+  // Remove the deleted field from all view filters, sorts, visibleFieldSlugs, and widths.
   const { busabaseViews } = await import("../../../../db/schema");
   if (item.baseId && fieldData.slug) {
     const views = await db
@@ -93,6 +93,7 @@ export const mergeBaseDeleteField = async (
         filters?: Array<{ fieldSlug: string; fieldId?: string }>;
         sorts?: Array<{ fieldSlug: string; fieldId?: string }>;
         visibleFieldSlugs?: string[];
+        fieldWidths?: Record<string, number>;
       };
       const slug = fieldData.slug;
       // Drop by stable fieldId when present (slug-reuse safe); fall back to slug
@@ -105,6 +106,9 @@ export const mergeBaseDeleteField = async (
         filters: config.filters?.filter((f) => !matchesDeleted(f)),
         sorts: config.sorts?.filter((s) => !matchesDeleted(s)),
         visibleFieldSlugs: config.visibleFieldSlugs?.filter((s) => s !== slug),
+        fieldWidths: config.fieldWidths
+          ? Object.fromEntries(Object.entries(config.fieldWidths).filter(([key]) => key !== slug))
+          : undefined,
       };
       await db
         .update(busabaseViews)

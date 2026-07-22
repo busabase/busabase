@@ -75,6 +75,8 @@ const buildFixture = (): PackageTree => ({
             config: {
               filters: [{ fieldSlug: "title", operator: "not_empty" }],
               sorts: [{ direction: "asc", fieldSlug: "title" }],
+              visibleFieldSlugs: ["products", "title"],
+              fieldWidths: { products: 192, title: 280 },
             },
           },
         ],

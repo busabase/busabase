@@ -304,6 +304,26 @@ describe("Folder-based CMS provisioning", () => {
     });
   });
 
+  it("adopts the legacy Blog Posts Base as Posts", async () => {
+    const store = createStore({ existing: true });
+    const posts = store.bases.get("base-posts");
+    const postsNode = store.nodes.find((node) => node.baseId === "base-posts");
+    if (!posts || !postsNode) throw new Error("Missing test Posts Base");
+    posts.name = "Blog Posts";
+    posts.slug = "blog";
+    postsNode.name = "Blog Posts";
+    postsNode.slug = "blog";
+
+    const cms = createBusabaseCms({ client: store.client, folderId: store.folder.id });
+    await cms.posts.list();
+
+    expect(store.create).not.toHaveBeenCalled();
+    expect(store.updateMetadata).toHaveBeenCalledWith({
+      nodeId: store.folder.id,
+      metadata: cmsMetadata("standard"),
+    });
+  });
+
   it("does not adopt or modify an unrelated Base with a similar content schema", async () => {
     const store = createStore();
     const fields: CreateBusabaseCmsBaseInput["fields"] = [

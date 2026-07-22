@@ -301,6 +301,7 @@ const toPackageView = (view: {
     filters: { fieldSlug: string; fieldId?: string; operator: string; value?: unknown }[];
     sorts: { direction: "asc" | "desc"; fieldSlug: string; fieldId?: string }[];
     visibleFieldSlugs?: string[] | null;
+    fieldWidths?: Record<string, number>;
   };
 }): PackageView => ({
   slug: view.slug,
@@ -318,6 +319,7 @@ const toPackageView = (view: {
       fieldSlug: sort.fieldSlug,
     })),
     visibleFieldSlugs: view.config.visibleFieldSlugs ?? undefined,
+    fieldWidths: view.config.fieldWidths,
   },
 });
 

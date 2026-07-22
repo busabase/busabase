@@ -80,10 +80,9 @@ test("dashboard renders the demo review queue from ?demo=1", async ({ page }) =>
   // proxy.ts turns the document's `?demo` into the `x-demo-mode` header the
   // server render reads — purely server-side, no client code or cookie.
   await page.goto("/dashboard/local/inbox?demo=1");
-  await expect(page.getByText("Busabase", { exact: true }).first()).toBeVisible();
-  await expect(
-    page.getByText("Trusted Intelligent Database", { exact: true }).first(),
-  ).toBeVisible();
+  await expect(page.getByText("Local Busabase", { exact: true }).first()).toBeVisible();
+  await expect(page.getByText("Local", { exact: true }).first()).toBeVisible();
+  await expect(page.getByText("Trusted Intelligent Database", { exact: true })).toHaveCount(0);
   await expect(page.getByRole("link", { name: /For review \d+/ })).toBeVisible();
 });
 

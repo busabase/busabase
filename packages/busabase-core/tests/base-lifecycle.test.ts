@@ -284,6 +284,28 @@ describe("Base-domain DB lifecycle — oRPC", () => {
       expect(afterUpdate.find((v) => v.slug === "lc-gallery")?.type).toBe("table");
     });
 
+    it("round-trips table field order and widths through a view change request", async () => {
+      const createCr = await client.bases.createViewChangeRequest({
+        baseId: blogBaseId,
+        slug: "lc-table-layout",
+        name: "Table layout",
+        type: "table",
+        config: {
+          filters: [],
+          sorts: [],
+          visibleFieldSlugs: ["status", "title"],
+          fieldWidths: { status: 168, title: 312 },
+        },
+      });
+      await approveAndMerge(createCr.id);
+
+      const view = (await client.bases.listViews({ baseId: blogBaseId })).find(
+        (item) => item.slug === "lc-table-layout",
+      );
+      expect(view?.config.visibleFieldSlugs).toEqual(["status", "title"]);
+      expect(view?.config.fieldWidths).toEqual({ status: 168, title: 312 });
+    });
+
     it("round-trips kanban and calendar view config through merge", async () => {
       const kanbanCr = await client.bases.createViewChangeRequest({
         baseId: blogBaseId,

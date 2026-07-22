@@ -8,16 +8,19 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "k
 import { Loader2, Maximize, Minimize, Pin, Play, RotateCcw } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { useLocation, useSearch } from "wouter";
 import { fmt, useCoreI18n } from "../../../i18n";
 import { EmptyState } from "../../dashboard/components/primitives";
 import { NodeDetailSkeleton } from "../../dashboard/components/skeletons";
 import type { SidePanelTabProps } from "../../dashboard/side-panel-registry";
 import { useSidePanelStore } from "../../dashboard/store/side-panel-store";
+import { airAppSidePanelTabId } from "../store/airapp-keepalive-store";
 import {
   type AirAppRunStatus,
   IDLE_ENTRY,
   useAirAppRunnerStore,
 } from "../store/airapp-runner-store";
+import { isAirAppFullscreenSearch, updateAirAppFullscreenSearch } from "../utils/fullscreen-query";
 import { createAirAppRunner } from "./runners/runner-factory";
 import type { AirAppRunnerKind } from "./runners/types";
 
@@ -27,18 +30,12 @@ import type { AirAppRunnerKind } from "./runners/types";
  * the AirAppDetailView level so switching between the App/Files/Logs tabs
  * never unmounts this state and never disposes a live running app.
  *
- * The actual run state lives in `useAirAppRunnerStore`, keyed by node id —
- * NOT in component-local `useState`/`useRef` — because the node-detail
- * registry (`dashboard/node-detail-registry.tsx`) always hands back the same
- * `AirAppDetailView` function reference for every airapp node, so React never
- * unmounts it when the user switches between two different airapp nodes
- * (only the `slug` prop changes). Component-local state would therefore leak
- * across nodes unless explicitly reset — and the previous implementation did
- * that reset by disposing the runner on every node-id change, which also
- * killed a still-running app the moment the user switched away and back.
- * Keying the store by node id gives every node its own independent state
- * with no disposal needed on switch; disposal now only happens via the
- * explicit `disposeEntry` action (see `NodeDeleteButton`'s `onDeleted`).
+ * The actual runner metadata lives in `useAirAppRunnerStore`, keyed by node
+ * id, while `AirAppKeepAliveHost` keeps each visited detail/iframe DOM tree
+ * mounted by slug. That separation preserves both host-side runner state and
+ * the AirApp document's own JavaScript memory when navigating between nodes.
+ * Disposal only happens through an explicit action such as successful node
+ * deletion; ordinary navigation only CSS-hides the inactive iframe.
  */
 export function useAirAppRunner({
   orpc,
@@ -172,6 +169,7 @@ interface AirAppRunControlsProps {
    *  fullscreen actions — the run/status controls only need `runner`. */
   airapp: AirAppVO | null;
   showPinToSidePanel?: boolean;
+  syncFullscreenWithUrl?: boolean;
 }
 
 /** The run control cluster shared by the AirApp detail-view header and the
@@ -182,10 +180,28 @@ export function AirAppRunControls({
   runner,
   airapp,
   showPinToSidePanel = true,
+  syncFullscreenWithUrl = false,
 }: AirAppRunControlsProps) {
   const messages = useCoreI18n();
   const { status, previewUrl, run, isBusy, runnerKind, setRunnerKind } = runner;
-  const [fullscreen, setFullscreen] = useState(false);
+  const [localFullscreen, setLocalFullscreen] = useState(false);
+  const [location, setLocation] = useLocation();
+  const currentSearch = useSearch();
+  const fullscreen = syncFullscreenWithUrl
+    ? isAirAppFullscreenSearch(currentSearch)
+    : localFullscreen;
+  const setFullscreen = useCallback(
+    (nextFullscreen: boolean) => {
+      if (!syncFullscreenWithUrl) {
+        setLocalFullscreen(nextFullscreen);
+        return;
+      }
+
+      const nextSearch = updateAirAppFullscreenSearch(currentSearch, nextFullscreen);
+      setLocation(nextSearch ? `${location}?${nextSearch}` : location, { replace: true });
+    },
+    [currentSearch, location, setLocation, syncFullscreenWithUrl],
+  );
 
   useEffect(() => {
     if (!fullscreen) {
@@ -204,7 +220,7 @@ export function AirAppRunControls({
       document.body.style.overflow = previousOverflow;
       window.removeEventListener("keydown", exitOnEscape);
     };
-  }, [fullscreen]);
+  }, [fullscreen, setFullscreen]);
 
   const statusLabel: Record<AirAppRunStatus, string> = {
     idle: messages.airapp.statusIdle,
@@ -226,7 +242,7 @@ export function AirAppRunControls({
       return;
     }
     useSidePanelStore.getState().openTab({
-      id: `airapp-${airapp.node.id}`,
+      id: airAppSidePanelTabId(airapp.node.id),
       type: "airapp-preview",
       title: airapp.node.name,
       payload: { nodeId: airapp.node.id },

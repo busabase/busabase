@@ -23,6 +23,7 @@ import type {
   ViewType,
   ViewVO,
 } from "busabase-contract/types";
+import { VIEW_FIELD_MAX_WIDTH, VIEW_FIELD_MIN_WIDTH } from "busabase-contract/types";
 import { iStringFromText } from "openlib/i18n/i-string";
 import type {
   AuditEventPO,
@@ -143,10 +144,28 @@ const KNOWN_VIEW_TYPES: readonly ViewType[] = ["table", "gallery", "kanban", "ca
 const toViewType = (raw: string): ViewType =>
   (KNOWN_VIEW_TYPES as readonly string[]).includes(raw) ? (raw as ViewType) : "table";
 
+const normalizeFieldWidths = (value: unknown): Record<string, number> | undefined => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return undefined;
+  }
+  const widths = Object.fromEntries(
+    Object.entries(value).flatMap(([slug, width]) => {
+      if (!slug || typeof width !== "number" || !Number.isFinite(width)) {
+        return [];
+      }
+      return [
+        [slug, Math.min(VIEW_FIELD_MAX_WIDTH, Math.max(VIEW_FIELD_MIN_WIDTH, Math.round(width)))],
+      ];
+    }),
+  );
+  return Object.keys(widths).length > 0 ? widths : undefined;
+};
+
 export const normalizeViewConfig = (config: ViewPO["config"] | ViewConfigVO): ViewConfigVO => ({
   filters: (config.filters ?? []) as ViewFilterVO[],
   sorts: (config.sorts ?? []) as ViewSortVO[],
   visibleFieldSlugs: config.visibleFieldSlugs,
+  fieldWidths: normalizeFieldWidths((config as ViewConfigVO).fieldWidths),
   // Per-view-type presentation config — passed through untouched for the types
   // that don't use a given field (a table ignores coverFieldSlug, etc.).
   coverFieldSlug: (config as ViewConfigVO).coverFieldSlug ?? null,

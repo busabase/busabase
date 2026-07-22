@@ -148,6 +148,7 @@ export const busabaseViews = pgTable(
         }>;
         sorts?: Array<{ direction: "asc" | "desc"; fieldSlug: string; fieldId?: string }>;
         visibleFieldSlugs?: string[] | null;
+        fieldWidths?: Record<string, number>;
       }>()
       .notNull()
       .default({}),

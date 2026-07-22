@@ -6,10 +6,9 @@ import type {
   SeedViewDef,
 } from "../seed-types";
 
-// Lives under the CMS folder (DEMO_CMS_FOLDER_NODE_ID in dataset.ts —
-// "Website content — blog articles and reviewed landing pages"). Hardcoded here
-// to avoid a circular import back into dataset.ts.
-const CMS_FOLDER_NODE_ID = "nod_cms";
+// Lives under the Marketing folder (DEMO_CONTENT_FOLDER_NODE_ID in dataset.ts).
+// Hardcoded here to avoid a circular import back into dataset.ts.
+const MARKETING_FOLDER_NODE_ID = "nod_content";
 
 export const DEMO_AGENT_INTEGRATIONS_BASE_ID = "bse_local_agent_integrations";
 export const DEMO_AGENT_INTEGRATIONS_BASE_NODE_ID = "nod_base_agent_integrations";
@@ -114,7 +113,7 @@ export const AGENT_INTEGRATIONS_BASES: SeedBaseDef[] = [
     name: "Agent Integrations",
     description:
       "Landing-page articles for every AI agent that plugs into Busabase — Codex, Cursor, Claude Code, Hermes Agent, OpenClaw, Buda AI Agent. Each row is one '<Agent> × Busabase' page describing what it can do.",
-    folderNodeId: CMS_FOLDER_NODE_ID,
+    folderNodeId: MARKETING_FOLDER_NODE_ID,
     useCases: ["agent-integrations"],
     fields: agentIntegrationFields,
   },

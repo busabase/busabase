@@ -1,7 +1,7 @@
 {
   "name": "busabase-core",
   "description": "Shared Busabase open-core protocol, local store, API helpers, and dashboard components.",
-  "version": "0.9.11",
+  "version": "0.9.12",
   "private": true,
   "type": "module",
   "exports": {
@@ -24,6 +24,10 @@
     "./logic/store": {
       "types": "./src/logic/store.ts",
       "default": "./src/logic/store.ts"
+    },
+    "./logic/node-acl": {
+      "types": "./src/logic/node-acl.ts",
+      "default": "./src/logic/node-acl.ts"
     },
     "./logic/demo-store": {
       "types": "./src/logic/demo-store.ts",
@@ -76,6 +80,10 @@
     "./domains/doc/handlers": {
       "types": "./src/domains/doc/handlers.ts",
       "default": "./src/domains/doc/handlers.ts"
+    },
+    "./domains/file-node/handlers": {
+      "types": "./src/domains/file-node/handlers.ts",
+      "default": "./src/domains/file-node/handlers.ts"
     },
     "./domains/folder/handlers": {
       "types": "./src/domains/folder/handlers.ts",

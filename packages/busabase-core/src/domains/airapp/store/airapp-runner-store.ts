@@ -6,14 +6,11 @@ import type { AirAppRunner, AirAppRunnerKind } from "../components/runners/types
 const DEFAULT_RUNNER_KIND: AirAppRunnerKind = "nodepod";
 
 /**
- * AirApp run state, keyed by node id, so it survives the node-detail registry
- * always returning the same `AirAppDetailView` function reference (see
- * `dashboard/node-detail-registry.tsx`) — React doesn't unmount that component
- * when only the `slug` prop changes, but by lifting the running-Nodepod state
- * into this store instead of component-local `useState`/`useRef`, switching
- * between two different AirApp nodes and back no longer disposes an
- * in-flight or already-running app. Disposal now only happens on an explicit
- * action (`disposeEntry`), e.g. when the node itself is deleted.
+ * AirApp runner metadata, keyed globally by node id, so each node retains its
+ * own process/log/preview state across navigation. The real detail and iframe
+ * DOM trees are independently retained by `AirAppKeepAliveHost`, keyed by
+ * workspace scope + route slug. Disposal happens only on an explicit action
+ * (`disposeEntry`), such as successful node deletion.
  */
 
 export type AirAppRunStatus =

@@ -56,7 +56,10 @@ function BusabaseList({
   return (
     <section className="flex min-h-0 flex-1 flex-col overflow-hidden">
       {toolbar ? (
-        <div className="flex items-center justify-between gap-4 border-b px-5 py-2.5">
+        <div
+          className="flex min-h-12 min-w-0 items-center justify-between gap-3 overflow-hidden border-b px-3 py-2 sm:px-5"
+          data-testid="inbox-toolbar"
+        >
           {toolbar}
         </div>
       ) : null}
@@ -369,16 +372,20 @@ function BusabaseListToolbar({
   const tabs: InboxViewKey[] = ["review", "changes", "created", "approved", "merged", "rejected"];
 
   return (
-    <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+    <nav
+      aria-label={messages.nav.inbox}
+      className="flex h-8 min-w-0 flex-1 flex-nowrap items-center gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+      data-testid="inbox-view-tabs"
+    >
       {tabs.map((tab) => {
         const active = tab === activeView;
 
         return (
           <Link
-            className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 font-medium text-xs transition-colors ${
+            className={`inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md border px-2.5 font-medium text-xs transition-colors ${
               active
-                ? "bg-background text-foreground shadow-sm"
-                : "bg-muted/25 text-muted-foreground hover:bg-accent hover:text-foreground"
+                ? "border-border/60 bg-muted/70 text-foreground"
+                : "border-transparent text-muted-foreground hover:bg-accent/60 hover:text-foreground"
             }`}
             href={tab === "review" ? "/inbox" : `/inbox?view=${tab}`}
             key={tab}
@@ -388,7 +395,7 @@ function BusabaseListToolbar({
           </Link>
         );
       })}
-    </div>
+    </nav>
   );
 }
 
@@ -420,7 +427,7 @@ function ReviewChangeRequestRow({ changeRequest }: { changeRequest: ChangeReques
             {getChangeRequestTitle(changeRequest, messages)}
           </div>
           {riskHints.length > 0 ? (
-            <span className="hidden shrink-0 rounded-full border border-amber-200 bg-amber-50 px-1.5 py-0.5 font-medium text-[11px] text-amber-800 sm:inline-flex">
+            <span className="hidden shrink-0 rounded-md border border-review/35 bg-review/10 px-1.5 py-0.5 font-medium text-[11px] text-review-strong sm:inline-flex dark:text-review-soft">
               {riskHints.join(" · ")}
             </span>
           ) : null}

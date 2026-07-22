@@ -129,7 +129,7 @@ const getDirectBaseNodes = async (source: ProvisioningSource, folderId: string) 
 const normalizeName = (value: string) => value.trim().toLocaleLowerCase();
 
 const roleAliases: Record<BusabaseCmsBaseRole, string[]> = {
-  posts: ["posts / 文章", "posts", "文章"],
+  posts: ["posts / 文章", "posts", "文章", "blog posts", "blog posts / 博客文章", "博客文章"],
   pages: ["pages / 页面", "pages", "页面"],
   categories: ["categories / 分类", "categories", "分类"],
   tags: ["tags / 标签", "tags", "标签"],
@@ -143,6 +143,7 @@ const candidateScore = (
   const name = normalizeName(node.name);
   const expectedSlug = `${folder.slug}-${role}`;
   if (roleAliases[role].includes(name)) return 100;
+  if (role === "posts" && node.slug === "blog") return 90;
   if (node.slug === expectedSlug) return 80;
   if (node.slug === `busabase-cms-${role}`) return 70;
   return 0;

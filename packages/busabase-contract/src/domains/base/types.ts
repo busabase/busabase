@@ -96,10 +96,15 @@ export type GalleryCoverFit = "cover" | "fit";
 export type GalleryCardSize = "small" | "medium" | "large";
 export type GanttScale = "week" | "month";
 
+export const VIEW_FIELD_MIN_WIDTH = 92;
+export const VIEW_FIELD_MAX_WIDTH = 640;
+
 export interface ViewConfigVO {
   filters: ViewFilterVO[];
   sorts: ViewSortVO[];
   visibleFieldSlugs?: string[] | null;
+  /** Table-only column widths in pixels, keyed by field slug. */
+  fieldWidths?: Record<string, number>;
   // Gallery-only presentation config (see view-schemas.ts).
   coverFieldSlug?: string | null;
   coverFit?: GalleryCoverFit;

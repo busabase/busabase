@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { userRefSchema } from "../../../contract/schemas";
+import { VIEW_FIELD_MAX_WIDTH, VIEW_FIELD_MIN_WIDTH } from "../types";
 
 // Base-owned view Zod schemas. Pure leaf: no kernel imports.
 
@@ -48,6 +49,9 @@ export const viewConfigSchema = z.object({
   filters: z.array(viewFilterSchema).default([]),
   sorts: z.array(viewSortSchema).default([]),
   visibleFieldSlugs: z.array(z.string()).nullable().optional(),
+  fieldWidths: z
+    .record(z.string().min(1), z.number().int().min(VIEW_FIELD_MIN_WIDTH).max(VIEW_FIELD_MAX_WIDTH))
+    .optional(),
   // ── Gallery-only presentation config (ignored by table views) ──
   // Which attachment field supplies the cover image (null = no cover).
   coverFieldSlug: z.string().nullable().optional(),

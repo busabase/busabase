@@ -28,6 +28,7 @@ import {
   AGENT_INTEGRATIONS_RECORDS,
   AGENT_INTEGRATIONS_VIEWS,
 } from "./scenarios/agent-integrations";
+import { withCmsDemoStandard } from "./scenarios/cms-demo";
 import { CROSS_FUNCTIONAL_BASES, CROSS_FUNCTIONAL_RECORDS } from "./scenarios/cross-functional";
 import {
   DIRECTORY_LISTINGS_BASES,
@@ -3132,7 +3133,7 @@ export const buildDemoDataset = (
       slug: folder.slug,
       name: folder.name,
       description: folder.description,
-      metadata: {},
+      metadata: folder.metadata ?? {},
       position: folder.position,
       createdAt: rootCreatedAt,
       updatedAt: rootCreatedAt,
@@ -3550,7 +3551,7 @@ export const buildDemoDataset = (
 };
 
 /** English default seed — used by ensureReady() to populate a fresh local workspace. */
-export const englishScenario: SeedScenario = {
+export const englishScenario: SeedScenario = withCmsDemoStandard({
   folders: DEMO_FOLDERS,
   bases: DEMO_BASES,
   records: DEMO_RECORDS,
@@ -3560,4 +3561,4 @@ export const englishScenario: SeedScenario = {
   files: enNodeTypesScenario.files,
   fileTreeNodes: enNodeTypesScenario.fileTreeNodes,
   comments: enNodeTypesScenario.comments,
-};
+});

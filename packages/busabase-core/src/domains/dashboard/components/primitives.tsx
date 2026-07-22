@@ -12,7 +12,7 @@ export function CheckboxBadge({ checked }: { checked: boolean }) {
     <span
       className={`inline-flex w-fit items-center gap-1 rounded-full border px-2 py-0.5 font-medium text-xs ${
         checked
-          ? "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-300"
+          ? "border-merged/35 bg-merged/10 text-merged-strong dark:text-merged-soft"
           : "border-border bg-muted/40 text-muted-foreground"
       }`}
     >

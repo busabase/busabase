@@ -20,19 +20,13 @@ const nameToString = (value: unknown): string => {
 };
 
 export const statusTone = (status: string) => {
-  if (status === "merged") {
-    return "border-emerald-200 bg-emerald-50 text-emerald-800";
+  if (status === "merged" || status === "approved") {
+    return "border-merged/35 bg-merged/10 text-merged-strong dark:text-merged-soft";
   }
-  if (status === "approved") {
-    return "border-teal-200 bg-teal-50 text-teal-800";
+  if (status === "conflict" || status === "rejected" || status === "abandoned") {
+    return "border-rejected/35 bg-rejected/10 text-rejected-strong dark:text-rejected-soft";
   }
-  if (status === "conflict") {
-    return "border-red-200 bg-red-50 text-red-800";
-  }
-  if (status === "rejected" || status === "abandoned") {
-    return "border-gray-200 bg-gray-50 text-gray-700";
-  }
-  return "border-amber-200 bg-amber-50 text-amber-900";
+  return "border-review/35 bg-review/10 text-review-strong dark:text-review-soft";
 };
 
 export const changeRequestStatusLabel = (status: string, messages?: CoreI18nMessages) => {

@@ -10,7 +10,11 @@ export default defineConfig({
   },
   test: {
     environment: "node",
-    include: ["tests/**/*.test.ts"],
+    include: [
+      "tests/**/*.test.ts",
+      "src/domains/dashboard/helpers/**/*.test.ts",
+      "src/domains/dashboard/components/**/*.test.tsx",
+    ],
     // DB-heavy oRPC/PGLite integration tests exceed vitest's 5s default on cold
     // CI runners (seed + change-request + merge, storage file-tree walks).
     testTimeout: 30_000,

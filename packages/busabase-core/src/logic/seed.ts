@@ -66,6 +66,9 @@ interface SeedRecordInput {
   id: string;
   baseId: string;
   commitId: string;
+  naturalKey?: {
+    fields: Record<string, string>;
+  };
   fields: Record<string, unknown>;
   message: string;
   author: string;
@@ -175,13 +178,14 @@ const seedRecordIfMissing = async (input: SeedRecordInput) => {
     .where(eq(busabaseRecords.id, input.id))
     .limit(1);
   if (existingRecord) {
+    const commitId = existingRecord.headCommitId;
     await db
       .update(busabaseCommits)
       .set({ fields: input.fields })
-      .where(eq(busabaseCommits.id, input.commitId));
+      .where(eq(busabaseCommits.id, commitId));
     await projectCommitFields({
       baseId: input.baseId,
-      commitId: input.commitId,
+      commitId,
       recordId: input.id,
       fields: input.fields,
     });
@@ -219,6 +223,61 @@ const seedRecordIfMissing = async (input: SeedRecordInput) => {
     recordId: input.id,
     fields: input.fields,
   });
+};
+
+const resolveSeedRecordIdentity = async (input: {
+  id: string;
+  baseId: string;
+  commitId: string;
+  naturalKey?: SeedRecordInput["naturalKey"];
+}) => {
+  const db = await getDb();
+  const [existingById] = await db
+    .select({ id: busabaseRecords.id, headCommitId: busabaseRecords.headCommitId })
+    .from(busabaseRecords)
+    .where(eq(busabaseRecords.id, input.id))
+    .limit(1);
+  if (existingById) {
+    return { recordId: existingById.id, commitId: existingById.headCommitId };
+  }
+  if (!input.naturalKey) {
+    return { recordId: input.id, commitId: input.commitId };
+  }
+
+  const candidates = await db
+    .select({
+      recordId: busabaseRecords.id,
+      commitId: busabaseRecords.headCommitId,
+      fields: busabaseCommits.fields,
+    })
+    .from(busabaseRecords)
+    .innerJoin(busabaseCommits, eq(busabaseCommits.id, busabaseRecords.headCommitId))
+    .where(eq(busabaseRecords.baseId, input.baseId));
+  const naturalKeyFields = Object.entries(input.naturalKey.fields);
+  const matches = candidates.filter((candidate) =>
+    naturalKeyFields.every(([fieldSlug, value]) => candidate.fields[fieldSlug] === value),
+  );
+  if (matches.length > 1) {
+    throw new Error(
+      `Seed natural key ${JSON.stringify(input.naturalKey.fields)} is not unique in Base ${input.baseId}`,
+    );
+  }
+  return matches[0]
+    ? { recordId: matches[0].recordId, commitId: matches[0].commitId }
+    : { recordId: input.id, commitId: input.commitId };
+};
+
+const remapSeedIds = (value: unknown, actualIdBySeedId: ReadonlyMap<string, string>): unknown => {
+  if (typeof value === "string") return actualIdBySeedId.get(value) ?? value;
+  if (Array.isArray(value)) {
+    return value.map((item) => remapSeedIds(item, actualIdBySeedId));
+  }
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, item]) => [key, remapSeedIds(item, actualIdBySeedId)]),
+    );
+  }
+  return value;
 };
 
 const seedChangeRequestIfMissing = async (input: SeedChangeRequestInput) => {
@@ -1087,12 +1146,26 @@ const applySeedScenario = async (scenario: SeedScenario) => {
   const existingNodeByParentSlug = new Map(
     existingNodes.map((node) => [`${node.parentId}:${node.slug}`, node]),
   );
+  const actualFolderIdBySeedId = new Map<string, string>();
+  const existingFolderMetadataBySeedId = new Map<string, Record<string, unknown>>();
 
   for (const folder of scenario.folders ?? []) {
-    const alreadyExists =
-      existingNodeById.has(folder.nodeId) ||
-      existingNodeByParentSlug.has(`${ROOT_NODE_ID}:${folder.slug}`);
-    if (!alreadyExists) {
+    const existingFolder =
+      existingNodeById.get(folder.nodeId) ??
+      existingNodeByParentSlug.get(`${ROOT_NODE_ID}:${folder.slug}`);
+    if (existingFolder) {
+      await db
+        .update(busabaseNodes)
+        .set({
+          name: folder.name,
+          description: folder.description,
+          position: folder.position,
+          updatedAt: createdAt,
+        })
+        .where(eq(busabaseNodes.id, existingFolder.id));
+      actualFolderIdBySeedId.set(folder.nodeId, existingFolder.id);
+      existingFolderMetadataBySeedId.set(folder.nodeId, existingFolder.metadata ?? {});
+    } else {
       await db.insert(busabaseNodes).values({
         id: folder.nodeId,
         parentId: ROOT_NODE_ID,
@@ -1100,28 +1173,43 @@ const applySeedScenario = async (scenario: SeedScenario) => {
         slug: folder.slug,
         name: folder.name,
         description: folder.description,
+        metadata: {},
         position: folder.position,
         createdAt,
         updatedAt: createdAt,
       });
+      actualFolderIdBySeedId.set(folder.nodeId, folder.nodeId);
+      existingFolderMetadataBySeedId.set(folder.nodeId, {});
     }
   }
 
   const existingBases = await db.select().from(busabaseBases);
+  const existingBaseById = new Map(existingBases.map((base) => [base.id, base]));
   const existingBaseBySlug = new Map(existingBases.map((base) => [base.slug, base]));
+  const actualBaseIdBySeedId = new Map<string, string>();
 
   for (const [baseIndex, base] of (scenario.bases ?? []).entries()) {
-    const folderNode =
-      existingNodeById.get(base.folderNodeId) ??
-      existingNodeByParentSlug.get(
-        `${ROOT_NODE_ID}:${scenario.folders?.find((f) => f.nodeId === base.folderNodeId)?.slug ?? ""}`,
-      );
-    const actualFolderNodeId = folderNode?.id ?? base.folderNodeId;
+    const actualFolderNodeId = actualFolderIdBySeedId.get(base.folderNodeId) ?? base.folderNodeId;
+    const existingBase = existingBaseById.get(base.id) ?? existingBaseBySlug.get(base.slug);
 
-    const baseNodeExists =
-      existingNodeById.has(base.nodeId) ||
-      existingNodeByParentSlug.has(`${actualFolderNodeId}:${base.slug}`);
-    if (!baseNodeExists) {
+    const existingBaseNode =
+      (existingBase ? existingNodeById.get(existingBase.nodeId) : undefined) ??
+      existingNodeById.get(base.nodeId) ??
+      existingNodeByParentSlug.get(`${actualFolderNodeId}:${base.slug}`);
+    const actualBaseNodeId = existingBaseNode?.id ?? base.nodeId;
+    if (existingBaseNode) {
+      await db
+        .update(busabaseNodes)
+        .set({
+          parentId: actualFolderNodeId,
+          slug: base.slug,
+          name: base.name,
+          description: base.description,
+          position: baseIndex,
+          updatedAt: createdAt,
+        })
+        .where(eq(busabaseNodes.id, existingBaseNode.id));
+    } else {
       await db.insert(busabaseNodes).values({
         id: base.nodeId,
         parentId: actualFolderNodeId,
@@ -1135,79 +1223,109 @@ const applySeedScenario = async (scenario: SeedScenario) => {
       });
     }
 
-    if (!existingBaseBySlug.has(base.slug)) {
+    if (!existingBase) {
       await db.insert(busabaseBases).values({
         id: base.id,
-        nodeId: base.nodeId,
+        nodeId: actualBaseNodeId,
         slug: base.slug,
         name: base.name,
         description: base.description,
         reviewPolicy: { kind: "single", requiredApprovals: 1 },
         createdAt,
       });
-
-      await db.insert(busabaseBaseFields).values(
-        base.fields.map((field, index) => ({
-          id: field.id,
-          baseId: base.id,
-          slug: field.slug,
-          name: iStringToText(field.name),
-          type: field.type,
-          required: field.required,
-          position: index,
-          options: "options" in field ? field.options : {},
-        })),
-      );
     } else {
-      // biome-ignore lint/style/noNonNullAssertion: guarded by existingBaseBySlug.has(base.slug) in the if-branch above
-      const existingBase = existingBaseBySlug.get(base.slug)!;
-      for (const [index, field] of base.fields.entries()) {
-        const [existingField] = await db
-          .select()
-          .from(busabaseBaseFields)
-          .where(
-            and(
-              eq(busabaseBaseFields.baseId, existingBase.id),
-              eq(busabaseBaseFields.slug, field.slug),
-            ),
-          )
-          .limit(1);
-        const fieldValues = {
-          name: iStringToText(field.name),
-          type: field.type,
-          required: field.required,
-          position: index,
-          options: "options" in field ? field.options : {},
-        };
-        if (existingField) {
-          await db
-            .update(busabaseBaseFields)
-            .set(fieldValues)
-            .where(
-              and(
-                eq(busabaseBaseFields.baseId, existingBase.id),
-                eq(busabaseBaseFields.slug, field.slug),
-              ),
-            );
-        } else {
-          await db.insert(busabaseBaseFields).values({
-            id: field.id,
-            baseId: existingBase.id,
-            slug: field.slug,
-            ...fieldValues,
-          });
-        }
+      await db
+        .update(busabaseBases)
+        .set({
+          nodeId: actualBaseNodeId,
+          slug: base.slug,
+          name: base.name,
+          description: base.description,
+        })
+        .where(eq(busabaseBases.id, existingBase.id));
+    }
+    actualBaseIdBySeedId.set(base.id, existingBase?.id ?? base.id);
+  }
+
+  // Resolve fields only after every Base identity is known, so relation field
+  // options always point at adopted production Base ids rather than seed ids.
+  for (const base of scenario.bases ?? []) {
+    const actualBaseId = actualBaseIdBySeedId.get(base.id) ?? base.id;
+    for (const [index, field] of base.fields.entries()) {
+      const [existingField] = await db
+        .select()
+        .from(busabaseBaseFields)
+        .where(
+          and(eq(busabaseBaseFields.baseId, actualBaseId), eq(busabaseBaseFields.slug, field.slug)),
+        )
+        .limit(1);
+      const seedOptions = "options" in field ? field.options : {};
+      const fieldValues = {
+        name: iStringToText(field.name),
+        type: field.type,
+        required: field.required,
+        position: index,
+        options: remapSeedIds(seedOptions, actualBaseIdBySeedId) as typeof seedOptions,
+      };
+      if (existingField) {
+        await db
+          .update(busabaseBaseFields)
+          .set(fieldValues)
+          .where(eq(busabaseBaseFields.id, existingField.id));
+      } else {
+        await db.insert(busabaseBaseFields).values({
+          id: field.id,
+          baseId: actualBaseId,
+          slug: field.slug,
+          ...fieldValues,
+        });
       }
     }
   }
 
+  // Folder CMS metadata is persisted after Base adoption so consumers receive
+  // the actual production ids even when legacy Bases used generated ids.
+  for (const folder of scenario.folders ?? []) {
+    if (!folder.metadata) continue;
+    const actualFolderId = actualFolderIdBySeedId.get(folder.nodeId);
+    if (!actualFolderId) continue;
+    const metadata = remapSeedIds(folder.metadata, actualBaseIdBySeedId) as Record<string, unknown>;
+    await db
+      .update(busabaseNodes)
+      .set({
+        metadata: { ...(existingFolderMetadataBySeedId.get(folder.nodeId) ?? {}), ...metadata },
+        updatedAt: createdAt,
+      })
+      .where(eq(busabaseNodes.id, actualFolderId));
+  }
+
+  const actualRecordIdBySeedId = new Map<string, string>();
+  const actualCommitIdBySeedCommitId = new Map<string, string>();
+  for (const record of scenario.records ?? []) {
+    const actualBaseId = actualBaseIdBySeedId.get(record.baseId) ?? record.baseId;
+    const identity = await resolveSeedRecordIdentity({
+      id: record.id,
+      baseId: actualBaseId,
+      commitId: record.commitId,
+      naturalKey: record.naturalKey,
+    });
+    actualRecordIdBySeedId.set(record.id, identity.recordId);
+    actualCommitIdBySeedCommitId.set(record.commitId, identity.commitId);
+  }
+
   for (const record of scenario.records ?? []) {
     const recordCreatedAt = minutesBefore(createdAt, record.minutesAgo);
+    const actualRecordId = actualRecordIdBySeedId.get(record.id) ?? record.id;
+    const actualCommitId = actualCommitIdBySeedCommitId.get(record.commitId) ?? record.commitId;
+    const actualBaseId = actualBaseIdBySeedId.get(record.baseId) ?? record.baseId;
     await seedRecordIfMissing({
-      id: record.id,
-      baseId: record.baseId,
-      commitId: record.commitId,
-      fields: buildRecordSeedFields(record, recordCreatedAt.toISOString()),
+      id: actualRecordId,
+      baseId: actualBaseId,
+      commitId: actualCommitId,
+      fields: remapSeedIds(
+        buildRecordSeedFields(record, recordCreatedAt.toISOString()),
+        actualRecordIdBySeedId,
+      ) as Record<string, unknown>,
       message: record.message,
       author: record.author,
       createdBy: CURRENT_USER_ID,
@@ -1218,12 +1336,12 @@ const applySeedScenario = async (scenario: SeedScenario) => {
   for (const view of scenario.views ?? []) {
     await seedViewIfMissing({
       id: view.id,
-      baseId: view.baseId,
+      baseId: actualBaseIdBySeedId.get(view.baseId) ?? view.baseId,
       slug: view.slug,
       name: view.name,
       description: view.description,
       type: view.type,
-      config: view.config,
+      config: remapSeedIds(view.config, actualRecordIdBySeedId) as ViewConfigVO,
       createdAt: minutesBefore(createdAt, view.minutesAgo),
     });
   }
@@ -1232,7 +1350,7 @@ const applySeedScenario = async (scenario: SeedScenario) => {
     const changeRequestCreatedAt = minutesBefore(createdAt, changeRequest.minutesAgo);
     await seedChangeRequestIfMissing({
       id: changeRequest.id,
-      baseId: changeRequest.baseId,
+      baseId: actualBaseIdBySeedId.get(changeRequest.baseId) ?? changeRequest.baseId,
       status: changeRequest.status,
       submittedBy: changeRequest.submittedBy,
       sourceMeta: changeRequest.sourceMeta,
@@ -1245,14 +1363,22 @@ const applySeedScenario = async (scenario: SeedScenario) => {
         id: operation.id,
         commitId: operation.commitId,
         operation: operation.operation as DbOperationKind,
-        fields: operation.fields,
+        fields: remapSeedIds(operation.fields, actualRecordIdBySeedId) as Record<string, unknown>,
         message: operation.message,
         author: operation.author,
-        targetRecordId: operation.targetRecordId,
+        targetRecordId: operation.targetRecordId
+          ? (actualRecordIdBySeedId.get(operation.targetRecordId) ?? operation.targetRecordId)
+          : operation.targetRecordId,
         targetViewId: operation.targetViewId,
-        sourceRecordId: operation.sourceRecordId,
-        sourceCommitId: operation.sourceCommitId,
-        baseCommitId: operation.baseCommitId,
+        sourceRecordId: operation.sourceRecordId
+          ? (actualRecordIdBySeedId.get(operation.sourceRecordId) ?? operation.sourceRecordId)
+          : operation.sourceRecordId,
+        sourceCommitId: operation.sourceCommitId
+          ? (actualCommitIdBySeedCommitId.get(operation.sourceCommitId) ?? operation.sourceCommitId)
+          : operation.sourceCommitId,
+        baseCommitId: operation.baseCommitId
+          ? (actualCommitIdBySeedCommitId.get(operation.baseCommitId) ?? operation.baseCommitId)
+          : operation.baseCommitId,
         deleteMode: operation.deleteMode,
       })),
     });

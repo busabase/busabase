@@ -1,18 +1,10 @@
-import {
-  ArrowRight,
-  BookOpenText,
-  Braces,
-  Database,
-  ExternalLink,
-  Files,
-  FolderTree,
-  Tags,
-} from "lucide-react";
+import { ArrowRight, BookOpenText, ExternalLink, Files, FolderTree, Tags } from "lucide-react";
 import Link from "next/link";
 
 import { EmptyState } from "@/components/empty-state";
 import {
   blogRoute,
+  getCmsFolderDashboardUrl,
   hasBusabaseConfig,
   landingRoute,
   listBlogPosts,
@@ -26,15 +18,15 @@ import {
 export const dynamic = "force-dynamic";
 
 export default async function HomePage() {
-  const [posts, pages, categories, tags] = await Promise.all([
+  const [posts, pages, categories, tags, cmsFolderDashboardUrl] = await Promise.all([
     listBlogPosts(),
     listLandingPages(),
     listCategories(),
     listTags(),
+    getCmsFolderDashboardUrl(),
   ]);
   const hasContent = posts.length > 0 || pages.length > 0;
   const busabaseBaseUrl = process.env.BUSABASE_BASE_URL?.replace(/\/+$/, "");
-  const cmsFolderId = process.env.BUSABASE_CMS_FOLDER_ID;
   const recentRecords = [
     ...posts.map((post) => ({
       ...post,
@@ -49,25 +41,15 @@ export default async function HomePage() {
     .slice(0, 6);
   const dataSourceLinks = busabaseBaseUrl
     ? [
-        {
-          label: "Busabase workspace",
-          href: busabaseBaseUrl,
-          icon: Database,
-        },
-        ...(cmsFolderId
+        ...(cmsFolderDashboardUrl
           ? [
               {
-                label: "CMS folder records",
-                href: `${busabaseBaseUrl}/api/v1/nodes?parentId=${encodeURIComponent(cmsFolderId)}&depth=1`,
+                label: "Open CMS folder",
+                href: cmsFolderDashboardUrl,
                 icon: FolderTree,
               },
             ]
           : []),
-        {
-          label: "Node tree JSON",
-          href: `${busabaseBaseUrl}/api/v1/nodes`,
-          icon: Braces,
-        },
         {
           label: "API documentation",
           href: `${busabaseBaseUrl}/api/v1/doc`,

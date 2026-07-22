@@ -142,6 +142,7 @@ export type {
   ViewType,
   ViewVO,
 } from "../domains/base/types";
+export { VIEW_FIELD_MAX_WIDTH, VIEW_FIELD_MIN_WIDTH } from "../domains/base/types";
 
 export interface CommitVO {
   id: string;

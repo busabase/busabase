@@ -39,7 +39,7 @@ export function ReviewConflictPanel({ message }: { message: string }) {
   const messages = useCoreI18n();
 
   return (
-    <div className="border-amber-200 border-b bg-amber-50 px-4 py-3 text-amber-900">
+    <div className="border-rejected/35 border-b bg-rejected/10 px-4 py-3 text-rejected-strong dark:text-rejected-soft">
       <div className="mx-auto flex max-w-6xl flex-col gap-1.5 text-sm">
         <div className="font-semibold">{messages.review.mergeNeedsReview}</div>
         <div className="leading-6">{fmt(messages.review.mergeNeedsReviewBody, { message })}</div>
@@ -83,19 +83,19 @@ export function ConflictDiffPanel({ changeRequest }: { changeRequest: ChangeRequ
     return null;
   }
   return (
-    <section className="mt-5 max-w-4xl rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-amber-900 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200">
+    <section className="mt-5 max-w-4xl rounded-lg border border-rejected/35 bg-rejected/10 px-4 py-3 text-rejected-strong dark:text-rejected-soft">
       <div className="flex items-center gap-2 font-semibold text-sm">
         <X size={15} />
         {messages.review.mergeConflictTitle}
       </div>
       {conflict && conflict.fields.length > 0 ? (
         <div className="mt-2 flex flex-wrap items-center gap-1.5 text-xs">
-          <span className="text-amber-800/80 dark:text-amber-300/80">
+          <span className="text-rejected-strong/80 dark:text-rejected-soft/80">
             {messages.review.conflictingFields}
           </span>
           {conflict.fields.map((field) => (
             <span
-              className="rounded-full border border-amber-300 bg-amber-100 px-2 py-0.5 font-medium dark:border-amber-800 dark:bg-amber-900/50"
+              className="rounded-md border border-rejected/35 bg-rejected/10 px-2 py-0.5 font-medium"
               key={field}
             >
               {field}
@@ -164,7 +164,7 @@ export function OperationReviewSection({
           </span>
         </button>
         {changedSinceReview ? (
-          <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-amber-50 px-2 py-0.5 font-medium text-[11px] text-amber-700 dark:bg-amber-950/40 dark:text-amber-300">
+          <span className="inline-flex shrink-0 items-center gap-1 rounded-md bg-review/10 px-2 py-0.5 font-medium text-[11px] text-review-strong dark:text-review-soft">
             <Sparkles size={11} />
             {messages.review.changedSinceReview}
           </span>
@@ -245,7 +245,13 @@ export function ReviewTimelineEntry({ review }: { review: ReviewVO }) {
   const approved = review.verdict === "approved";
   return (
     <div className="flex items-start gap-2.5 rounded-lg border bg-background/40 px-3 py-2.5">
-      <span className={`mt-0.5 shrink-0 ${approved ? "text-emerald-600" : "text-amber-600"}`}>
+      <span
+        className={`mt-0.5 shrink-0 ${
+          approved
+            ? "text-merged-strong dark:text-merged-soft"
+            : "text-rejected-strong dark:text-rejected-soft"
+        }`}
+      >
         {approved ? <Check size={16} /> : <X size={16} />}
       </span>
       <div className="min-w-0">
@@ -275,7 +281,7 @@ export function MergeTimelineEntry({ event }: { event: AuditEventVO }) {
 
   return (
     <div className="flex items-start gap-2.5 rounded-lg border bg-background/40 px-3 py-2.5">
-      <span className="mt-0.5 shrink-0 text-sky-600">
+      <span className="mt-0.5 shrink-0 text-merged-strong dark:text-merged-soft">
         <GitMerge size={16} />
       </span>
       <div className="min-w-0">
@@ -419,7 +425,7 @@ export function FinishReviewComposer({
   if (changeRequest.status === "conflict") {
     return (
       <div className="flex flex-col gap-2">
-        <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-amber-900 text-xs leading-5 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-300">
+        <div className="rounded-md border border-rejected/35 bg-rejected/10 px-3 py-2 text-rejected-strong text-xs leading-5 dark:text-rejected-soft">
           {messages.review.conflictComposerHint}
         </div>
         <button
@@ -465,7 +471,7 @@ export function FinishReviewComposer({
   return (
     <div className="flex flex-col gap-3">
       {changeRequest.status === "changes_requested" ? (
-        <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-amber-900 text-xs leading-5 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-300">
+        <div className="rounded-md border border-rejected/35 bg-rejected/10 px-3 py-2 text-rejected-strong text-xs leading-5 dark:text-rejected-soft">
           {messages.review.changesRequestedHint}
         </div>
       ) : null}
@@ -477,7 +483,7 @@ export function FinishReviewComposer({
             onChange={() => setVerdict("approve")}
             type="radio"
           />
-          <Check className="text-emerald-600" size={15} />
+          <Check className="text-merged-strong dark:text-merged-soft" size={15} />
           {messages.review.approve}
         </label>
         <label className="flex cursor-pointer items-center gap-2">
@@ -487,7 +493,7 @@ export function FinishReviewComposer({
             onChange={() => setVerdict("reject")}
             type="radio"
           />
-          <X className="text-amber-600" size={15} />
+          <X className="text-rejected-strong dark:text-rejected-soft" size={15} />
           {messages.review.requestChanges}
         </label>
       </div>
@@ -661,7 +667,7 @@ export function ChangeRequestReviewLayout({
               </span>
               {getChangeRequestRiskHints(changeRequest, messages).map((risk) => (
                 <span
-                  className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 font-medium text-[11px] text-amber-800"
+                  className="rounded-md border border-review/35 bg-review/10 px-2 py-0.5 font-medium text-[11px] text-review-strong dark:text-review-soft"
                   key={risk}
                 >
                   {risk}

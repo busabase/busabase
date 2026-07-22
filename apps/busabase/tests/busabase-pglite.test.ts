@@ -41,7 +41,7 @@ describe("busabase pglite integration flow", () => {
     const nodes = await store.listNodes();
     expect(nodes[0]?.type).toBe("folder");
     expect(nodes[0]?.children.some((node) => node.type === "folder")).toBe(true);
-    expect(JSON.stringify(nodes)).toContain("Blog Posts");
+    expect(JSON.stringify(nodes)).toContain('"name":"Posts"');
     expect(JSON.stringify(nodes)).toContain("AI Research Editor");
 
     const seededSkills = await skills.listSkills();
@@ -161,19 +161,25 @@ describe("busabase pglite integration flow", () => {
       ready: "checkbox",
       source_url: "url",
       status: "select",
-      tags: "multiselect",
+      legacy_tags: "multiselect",
+      tags: "relation",
     });
     expect(
       blogBase.fields
         .find((field) => field.slug === "status")
         ?.options.choices?.map((choice) => choice.id),
-    ).toEqual(["idea", "drafting", "published"]);
+    ).toEqual(["draft", "in-review", "published", "archived"]);
 
     const changeRequest = await base.createChangeRequest(blogBase.id, {
       fields: {
         title: "Busabase PGlite integration test",
         body: "This change request was created inside the PGlite logic integration test.",
         channel: "blog",
+        path: "/blog/busabase-pglite-integration-test",
+        slug: "busabase-pglite-integration-test",
+        locale: "en",
+        status: "draft",
+        "schema-version": 1,
       },
       message: "Vitest PGlite flow",
       submittedBy: "vitest",
@@ -196,6 +202,11 @@ describe("busabase pglite integration flow", () => {
         title: "Busabase PGlite integration test revised",
         body: "This change request was revised on the same operation before review.",
         channel: "blog",
+        path: "/blog/busabase-pglite-integration-test",
+        slug: "busabase-pglite-integration-test",
+        locale: "en",
+        status: "draft",
+        "schema-version": 1,
       },
       message: "Human revision",
       author: "vitest-human",
@@ -226,7 +237,7 @@ describe("busabase pglite integration flow", () => {
     expect(mergedRecord.headCommit.parentCommitId).toBe(firstCommitId);
     expect(mergedRecord.headCommit.fields.title).toBe("Busabase PGlite integration test revised");
 
-    const records = await base.listRecords({ limit: 100 });
+    const { records } = await base.listRecordsPaged({ baseId: blogBase.id, limit: 100 });
     expect(records.some((record) => record.id === mergedRecord.id)).toBe(true);
     const seededBlogRecord = records.find((record) => record.id === "rec_seed_blog_approval");
     if (!seededBlogRecord) {
@@ -236,7 +247,11 @@ describe("busabase pglite integration flow", () => {
     expect(seededBlogRecord.headCommit.fields.publish_date).toBe("2026-06-10");
     expect(seededBlogRecord.headCommit.fields.ready).toBe(true);
     expect(seededBlogRecord.headCommit.fields.status).toBe("published");
-    expect(seededBlogRecord.headCommit.fields.tags).toEqual(["agents", "policy"]);
+    expect(seededBlogRecord.headCommit.fields.legacy_tags).toEqual(["agents", "policy"]);
+    expect(seededBlogRecord.headCommit.fields.tags).toEqual([
+      "recmrufvh5a0jmw5xy",
+      "recmrufvi8y96279us",
+    ]);
     expect(seededBlogRecord.headCommit.fields.source_url).toContain("ai-agent-workflows");
     expect(seededBlogRecord.headCommit.fields.contact_email).toBe("editor@busabase.local");
     expect(seededBlogRecord.headCommit.fields.contact_phone).toBe("+1-555-0101");

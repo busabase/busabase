@@ -109,6 +109,7 @@ const serializeView = (view: PackageView): Record<string, unknown> =>
         fieldSlug: sort.fieldSlug,
       })),
       visibleFieldSlugs: view.config.visibleFieldSlugs ?? undefined,
+      fieldWidths: view.config.fieldWidths,
     }),
   });
 

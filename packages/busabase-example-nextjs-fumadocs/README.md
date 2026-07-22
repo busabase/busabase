@@ -58,6 +58,8 @@ For exact field DTOs and output VOs, see the exported Zod schemas and types in `
 
 - `src/lib/content.ts` creates one server-only cached CMS with a five-minute revalidation window.
 - The overview reads all four Bases and reports the taxonomy totals.
+- The data-source section resolves the configured Folder slug and links to its visual Busabase
+  dashboard instead of exposing the raw node API as the primary inspection surface.
 - Post routes render untrusted Markdown with `SafeMarkdown` and a generated table of contents.
 - Page routes sanitize stored HTML before using `dangerouslySetInnerHTML`.
 - `sitemap.ts` emits only validated, canonical, published Posts and Pages.

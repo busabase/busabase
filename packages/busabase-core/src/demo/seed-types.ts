@@ -14,6 +14,8 @@ export interface SeedFolderDef {
   slug: string;
   name: string;
   description: string;
+  /** Optional top-level node metadata merged into an existing seeded folder. */
+  metadata?: Record<string, unknown>;
   position: number;
 }
 
@@ -33,6 +35,10 @@ export interface SeedRecordDef {
   id: string;
   baseId: string;
   commitId: string;
+  /** Adopt an older seeded row whose generated id differs from today's deterministic id. */
+  naturalKey?: {
+    fields: Record<string, string>;
+  };
   fields: Record<string, unknown>;
   message: string;
   author: string;

@@ -20,7 +20,8 @@ import {
 import { NodePermissionsButton } from "../../dashboard/components/node-permissions-button";
 import { EmptyState } from "../../dashboard/components/primitives";
 import { FileContentSkeleton, NodeDetailSkeleton } from "../../dashboard/components/skeletons";
-import { useAirAppRunnerStore } from "../store/airapp-runner-store";
+import { disposeDeletedAirAppSession } from "../store/airapp-session-cleanup";
+import { useAirAppKeepAliveScope } from "./AirAppKeepAliveHost";
 import { AirAppRunControls, AirAppRunLogs, AirAppRunPreview, useAirAppRunner } from "./RunPanel";
 
 interface AirAppDetailViewProps {
@@ -49,6 +50,7 @@ const TAB_CONTENT_CLASS =
  */
 export function AirAppDetailView({ orpc, slug }: AirAppDetailViewProps) {
   const messages = useCoreI18n();
+  const keepAliveScopeKey = useAirAppKeepAliveScope();
   const [openPath, setOpenPath] = useState<string | null>(null);
 
   const airappQuery = useQuery({
@@ -190,7 +192,7 @@ export function AirAppDetailView({ orpc, slug }: AirAppDetailViewProps) {
           </TabsList>
 
           <div className="ml-auto flex shrink-0 items-center gap-1.5">
-            <AirAppRunControls airapp={airapp} runner={runner} />
+            <AirAppRunControls airapp={airapp} runner={runner} syncFullscreenWithUrl />
             <NodePermissionsButton
               nodeId={airapp.node.id}
               nodeName={airapp.node.name}
@@ -200,7 +202,13 @@ export function AirAppDetailView({ orpc, slug }: AirAppDetailViewProps) {
               nodeId={airapp.node.id}
               nodeName={airapp.node.name}
               nodeType="airapp"
-              onDeleted={() => useAirAppRunnerStore.getState().disposeEntry(airapp.node.id)}
+              onDeleted={() =>
+                disposeDeletedAirAppSession({
+                  keepAliveScopeKey,
+                  nodeId: airapp.node.id,
+                  routeSlug: slug ?? airapp.node.slug,
+                })
+              }
               orpc={orpc}
             />
           </div>

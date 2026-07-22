@@ -1,5 +1,6 @@
 import { CREATABLE_NODE_TYPES } from "busabase-contract/domains";
 import { fieldNameSchema } from "busabase-contract/domains/base/contract/base-schemas";
+import { VIEW_FIELD_MAX_WIDTH, VIEW_FIELD_MIN_WIDTH } from "busabase-contract/types";
 import { z } from "zod";
 
 const fieldTypeSchema = z.enum([
@@ -203,6 +204,12 @@ export const viewConfigSchema = z
     filters: z.array(viewFilterSchema).optional().default([]),
     sorts: z.array(viewSortSchema).optional().default([]),
     visibleFieldSlugs: z.array(z.string()).nullable().optional(),
+    fieldWidths: z
+      .record(
+        z.string().min(1),
+        z.number().int().min(VIEW_FIELD_MIN_WIDTH).max(VIEW_FIELD_MAX_WIDTH),
+      )
+      .optional(),
     coverFieldSlug: z.string().nullable().optional(),
     coverFit: z.enum(["cover", "fit"]).optional(),
     cardSize: z.enum(["small", "medium", "large"]).optional(),

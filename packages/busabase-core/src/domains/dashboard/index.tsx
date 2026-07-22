@@ -37,6 +37,7 @@ import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } fro
 import { toast } from "sonner";
 import { useLocation, useSearch } from "wouter";
 import { CoreI18nProvider, fmt, useCoreI18n } from "../../i18n";
+import { AirAppKeepAliveHost } from "../airapp/components/AirAppKeepAliveHost";
 import { ArchivedBasesView } from "./components/archived-bases";
 import { AssetsView } from "./components/assets";
 import { BaseDetailView, BaseSetupView, BaseTopbarActions } from "./components/base-views";
@@ -1510,25 +1511,7 @@ function BusabaseDashboardContent({
   const AirAppDetail = chromeless ? undefined : getNodeDetail("airapp");
   const keepAirAppsMounted = Boolean(AirAppDetail);
   const activeAirappSlug = isAirappRoute ? selectedAirappSlug : null;
-  const [visitedAirappSlugs, setVisitedAirappSlugs] = useState<string[]>([]);
-
-  useEffect(() => {
-    if (!keepAirAppsMounted || !activeAirappSlug) {
-      return;
-    }
-    setVisitedAirappSlugs((current) =>
-      current.includes(activeAirappSlug) ? current : [...current, activeAirappSlug],
-    );
-  }, [activeAirappSlug, keepAirAppsMounted]);
-
-  // Include a newly-selected slug synchronously. The effect above persists it
-  // for later routes, while this derived list ensures its keyed detail tree is
-  // the first instance mounted (rather than briefly mounting a disposable
-  // active view before the effect runs).
-  const mountedAirappSlugs =
-    keepAirAppsMounted && activeAirappSlug && !visitedAirappSlugs.includes(activeAirappSlug)
-      ? [...visitedAirappSlugs, activeAirappSlug]
-      : visitedAirappSlugs;
+  const airAppKeepAliveScopeKey = `${cacheSpaceKey}:${currentUserId ?? "anonymous"}`;
 
   const topbarActions = useMemo(() => {
     // Record view/edit → a View/Edit switch in the titlebar (far right).
@@ -1839,24 +1822,16 @@ function BusabaseDashboardContent({
     baseRecords,
   ]);
 
-  const dashboardActiveView =
-    keepAirAppsMounted && AirAppDetail ? (
-      <>
-        {!activeAirappSlug ? activeView : null}
-        {mountedAirappSlugs.map((slug) => (
-          <div
-            aria-hidden={slug !== activeAirappSlug}
-            className={slug === activeAirappSlug ? "h-full" : "hidden"}
-            data-dashboard-airapp-view={slug}
-            key={slug}
-          >
-            <AirAppDetail orpc={orpc} slug={slug} />
-          </div>
-        ))}
-      </>
-    ) : (
-      activeView
-    );
+  const dashboardActiveView = (
+    <AirAppKeepAliveHost
+      activeSlug={activeAirappSlug}
+      enabled={keepAirAppsMounted}
+      fallback={activeView}
+      orpc={orpc}
+      renderer={AirAppDetail}
+      scopeKey={airAppKeepAliveScopeKey}
+    />
+  );
 
   // Chrome-free: no topbar, no side panel, no search dialog — just the current
   // node-detail pane (still preceded by the error banner, since that reflects

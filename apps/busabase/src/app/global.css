@@ -44,6 +44,22 @@
   }
 }
 
+/* Review workflow colors. Keep these exact values synchronized with
+   apps/busabase-cloud/src/app/global.css and both apps' design specs. */
+@theme {
+  --color-merged: #5e8c6a;
+  --color-merged-strong: #43704f;
+  --color-merged-soft: #93c3a2;
+
+  --color-review: #c79a3e;
+  --color-review-strong: #8a6a24;
+  --color-review-soft: #dcbd7c;
+
+  --color-rejected: #b95b3f;
+  --color-rejected-strong: #9a4531;
+  --color-rejected-soft: #db9678;
+}
+
 figure.shiki > [role="region"] {
   padding-top: 0;
   padding-bottom: 0;
@@ -55,7 +71,7 @@ figure.shiki {
   border-radius: 1rem;
 }
 
-figure.shiki code {
+:where(figure.shiki) code {
   background: var(--color-fd-muted);
 }
 

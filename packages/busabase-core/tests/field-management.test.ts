@@ -16,6 +16,11 @@ const MIGRATIONS_CWD = path.resolve(__dirname, "../../../apps/busabase");
 
 type Client = ReturnType<typeof createRouterClient<typeof busabaseRouter, Record<never, never>>>;
 
+const requireFound = <T>(value: T | undefined, message: string): T => {
+  if (value === undefined) throw new Error(message);
+  return value;
+};
+
 describe("Field management — delete / update / convert", () => {
   let dataDir = "";
   let storageDir = "";
@@ -83,7 +88,13 @@ describe("Field management — delete / update / convert", () => {
       .review({ changeRequestId, verdict: "approved" })
       .then(() => client.changeRequests.merge({ changeRequestId }));
 
-  const getBase = () => client.bases.list().then((bs) => bs.find((b) => b.id === testBaseId)!);
+  const getBase = () =>
+    client.bases.list().then((bases) =>
+      requireFound(
+        bases.find((base) => base.id === testBaseId),
+        `Base not found: ${testBaseId}`,
+      ),
+    );
 
   const getFieldId = async (baseId: string, slug: string): Promise<string> => {
     const bases = await client.bases.list();
@@ -150,6 +161,7 @@ describe("Field management — delete / update / convert", () => {
           filters: [{ fieldSlug: "temp-filter-field", operator: "not_empty" }],
           sorts: [{ fieldSlug: "temp-filter-field", direction: "asc" }],
           visibleFieldSlugs: ["title", "temp-filter-field"],
+          fieldWidths: { title: 260, "temp-filter-field": 180 },
         },
       });
       await approveAndMerge(viewCr.id);
@@ -169,6 +181,7 @@ describe("Field management — delete / update / convert", () => {
       expect(view?.config.filters?.map((f) => f.fieldSlug)).not.toContain("temp-filter-field");
       expect(view?.config.sorts?.map((s) => s.fieldSlug)).not.toContain("temp-filter-field");
       expect(view?.config.visibleFieldSlugs).not.toContain("temp-filter-field");
+      expect(view?.config.fieldWidths).toEqual({ title: 260 });
     });
   });
 
@@ -327,7 +340,10 @@ describe("Field management — delete / update / convert", () => {
       });
       await approveAndMerge(cr.id);
 
-      const updated = (await client.bases.list()).find((b) => b.id === baseId)!;
+      const updated = requireFound(
+        (await client.bases.list()).find((candidate) => candidate.id === baseId),
+        `Base not found: ${baseId}`,
+      );
       const scoreField = updated.fields.find((f) => f.slug === "score");
       expect(scoreField?.type).toBe("text");
     });
@@ -362,7 +378,10 @@ describe("Field management — delete / update / convert", () => {
       });
       await approveAndMerge(cr.id);
 
-      const updated = (await client.bases.list()).find((b) => b.id === base.id)!;
+      const updated = requireFound(
+        (await client.bases.list()).find((candidate) => candidate.id === base.id),
+        `Base not found: ${base.id}`,
+      );
       expect(updated.fields.find((f) => f.slug === "status")?.type).toBe("text");
     });
 
@@ -383,7 +402,10 @@ describe("Field management — delete / update / convert", () => {
       });
       await approveAndMerge(cr.id);
 
-      const updated = (await client.bases.list()).find((b) => b.id === base.id)!;
+      const updated = requireFound(
+        (await client.bases.list()).find((candidate) => candidate.id === base.id),
+        `Base not found: ${base.id}`,
+      );
       expect(updated.fields.find((f) => f.slug === "category")?.type).toBe("select");
     });
 
@@ -432,7 +454,10 @@ describe("Field management — delete / update / convert", () => {
         fields: [{ slug: "title", name: "Title", type: "text" }],
       });
       guardrailsBaseId = base.id;
-      textFieldId = base.fields.find((f) => f.slug === "title")!.id;
+      textFieldId = requireFound(
+        base.fields.find((field) => field.slug === "title"),
+        "Title field not found on convert guardrails Base",
+      ).id;
 
       // A system-computed field, plus a relation and an attachment field, added
       // directly (not via the convert path) so we have real fields to convert
@@ -637,7 +662,10 @@ describe("Field management — delete / update / convert", () => {
       expect(cr.status).toBe("in_review");
       await approveAndMerge(cr.id);
       const updatedBases = await client.bases.list();
-      const updatedBase = updatedBases.find((b) => b.id === baseId)!;
+      const updatedBase = requireFound(
+        updatedBases.find((candidate) => candidate.id === baseId),
+        `Base not found: ${baseId}`,
+      );
       const updatedIds = updatedBase.fields.map((f) => f.id);
       expect(updatedIds).toEqual(fieldIds);
     });
@@ -665,7 +693,7 @@ describe("Field management — delete / update / convert", () => {
         fieldSlug: "title",
         valueText: "to-restore-unique",
       });
-      const record = allRecords[0]!;
+      const record = requireFound(allRecords[0], "Created restore test record was not found");
       const deleteCr = await client.records.deleteChangeRequest({
         recordId: record.id,
         deleteMode: "archive",
@@ -709,7 +737,10 @@ describe("Field management — delete / update / convert", () => {
       expect(restoreCr.status).toBe("in_review");
       await approveAndMerge(restoreCr.id);
       const bases = await client.bases.list();
-      const updatedBase = bases.find((b) => b.id === baseId)!;
+      const updatedBase = requireFound(
+        bases.find((candidate) => candidate.id === baseId),
+        `Base not found: ${baseId}`,
+      );
       const restoredField = updatedBase.fields.find((f) => f.id === fieldId);
       expect(restoredField).toBeDefined();
     });
@@ -747,7 +778,10 @@ describe("Field management — delete / update / convert", () => {
       });
       await approveAndMerge(addCr2.id);
       const bases = await client.bases.list();
-      const updatedBase = bases.find((b) => b.id === baseId)!;
+      const updatedBase = requireFound(
+        bases.find((candidate) => candidate.id === baseId),
+        `Base not found: ${baseId}`,
+      );
       const newField = updatedBase.fields.find((f) => f.slug === "reusable-slug");
       expect(newField).toBeDefined();
       expect(newField?.type).toBe("number");

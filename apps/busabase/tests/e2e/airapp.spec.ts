@@ -89,13 +89,24 @@ test("AirApp run panel: auto-run, restart, watermark, nav persistence, fullscree
 
   let appASrc = "";
 
-  await test.step("auto-run on open: no click needed -> ready -> preview iframe visible with a src", async () => {
-    await page.goto(`/dashboard/local/airapp/${appA.slug}`);
+  await test.step("shared fullscreen URL auto-runs and opens the preview without a click", async () => {
+    await page.goto(`/dashboard/local/airapp/${appA.slug}?fullscreen=1`);
     await expect(page.getByRole("heading", { name: appA.name })).toBeVisible();
 
     // No Run click — opening the detail view starts the app by itself.
     await expectRunning(page);
     await expect(page.getByRole("button", { name: "Restart" })).toBeVisible();
+
+    const fullscreen = page.locator(`section[aria-label="${appA.name}"]`);
+    await expect(fullscreen).toBeVisible();
+    await expect(fullscreen.locator('iframe[title="AirApp preview"]')).toBeVisible();
+    await expect(page).toHaveURL(
+      new RegExp(`/dashboard/local/airapp/${appA.slug}\\?fullscreen=1$`),
+    );
+
+    await fullscreen.getByRole("button", { name: "Exit fullscreen" }).click();
+    await expect(fullscreen).toBeHidden();
+    await expect(page).toHaveURL(new RegExp(`/dashboard/local/airapp/${appA.slug}$`));
 
     const iframe = mainPreview(page);
     await expect(iframe).toBeVisible();
@@ -180,6 +191,9 @@ test("AirApp run panel: auto-run, restart, watermark, nav persistence, fullscree
     await page.getByRole("button", { name: "Enter fullscreen" }).click();
     const fullscreen = page.locator(`section[aria-label="${appA.name}"]`);
     await expect(fullscreen).toBeVisible();
+    await expect(page).toHaveURL(
+      new RegExp(`/dashboard/local/airapp/${appA.slug}\\?fullscreen=1$`),
+    );
     await expect(fullscreen).toHaveCSS("position", "fixed");
     await expect(fullscreen.locator('iframe[title="AirApp preview"]')).toBeVisible();
 
@@ -187,8 +201,15 @@ test("AirApp run panel: auto-run, restart, watermark, nav persistence, fullscree
     const viewport = page.viewportSize();
     expect(bounds).toEqual({ x: 0, y: 0, width: viewport?.width, height: viewport?.height });
 
+    await page.keyboard.press("Escape");
+    await expect(fullscreen).toBeHidden();
+    await expect(page).toHaveURL(new RegExp(`/dashboard/local/airapp/${appA.slug}$`));
+
+    await page.getByRole("button", { name: "Enter fullscreen" }).click();
+    await expect(fullscreen).toBeVisible();
     await fullscreen.getByRole("button", { name: "Exit fullscreen" }).click();
     await expect(fullscreen).toBeHidden();
+    await expect(page).toHaveURL(new RegExp(`/dashboard/local/airapp/${appA.slug}$`));
     // The underlying page is still interactive — the inline preview iframe survives.
     await expect(mainPreview(page)).toBeVisible();
   });

@@ -11,6 +11,71 @@ import { expect, test } from "./_fixtures";
 const NEW_URL = "/dashboard/local/base/field-type-lab/new";
 const TITLE = "E2E field coverage row";
 
+test("shows typed, accessible headers in the Field Type Lab grid", async ({ page }) => {
+  await page.goto("/dashboard/local/base/field-type-lab");
+  await expect(page.getByRole("heading", { name: "Field Type Lab" })).toBeVisible();
+
+  const grid = page.getByTestId("base-records-grid");
+  await expect(grid).toHaveRole("grid");
+
+  const headers = grid.getByRole("columnheader");
+  const columnCount = await headers.count();
+  await expect(grid).toHaveAttribute("aria-colcount", String(columnCount));
+  await expect(grid.getByRole("row").first()).toHaveAttribute("aria-rowindex", "1");
+  await expect(grid.getByRole("gridcell").first()).toBeVisible();
+
+  const firstRecord = grid.locator("[data-record-id]").first();
+  await expect(firstRecord).toBeVisible();
+  await expect(firstRecord.locator("pre")).toHaveCount(0);
+  await expect
+    .poll(() => firstRecord.evaluate((element) => element.getBoundingClientRect().height))
+    .toBeLessThanOrEqual(52);
+
+  const horizontalScroller = grid.locator("xpath=..");
+  const firstHeader = grid.getByRole("columnheader").first();
+  const firstCell = firstRecord.locator(':scope > [role="gridcell"]').first();
+  const initialPositions = {
+    cell: await firstCell.evaluate((element) => element.getBoundingClientRect().x),
+    header: await firstHeader.evaluate((element) => element.getBoundingClientRect().x),
+  };
+  await horizontalScroller.evaluate((element) => {
+    element.scrollLeft = 1_000;
+  });
+  await expect
+    .poll(() => horizontalScroller.evaluate((element) => element.scrollLeft))
+    .toBeGreaterThan(0);
+  await expect
+    .poll(() =>
+      firstHeader.evaluate(
+        (element, initialX) => Math.abs(element.getBoundingClientRect().x - initialX),
+        initialPositions.header,
+      ),
+    )
+    .toBeLessThanOrEqual(1);
+  await expect
+    .poll(() =>
+      firstCell.evaluate(
+        (element, initialX) => Math.abs(element.getBoundingClientRect().x - initialX),
+        initialPositions.cell,
+      ),
+    )
+    .toBeLessThanOrEqual(1);
+
+  for (const field of [
+    { name: "Text - text (text)", type: "text" },
+    { name: "Markdown - markdown (markdown)", type: "markdown" },
+    { name: "JSON - json (code_json)", type: "json" },
+    { name: "Attachment - file (attachment)", type: "attachment" },
+  ]) {
+    const header = grid.getByRole("columnheader", { exact: true, name: field.name });
+    await expect(header).toHaveAttribute("title", field.name);
+    await expect(header.locator(`[data-field-type-icon="${field.type}"]`)).toHaveAttribute(
+      "aria-hidden",
+      "true",
+    );
+  }
+});
+
 test("creates a Field Type Lab record filling every editable input kind", async ({ page }) => {
   await page.goto(NEW_URL, { waitUntil: "commit" });
   await expect(page.getByText("New Field Type Lab record")).toBeVisible();

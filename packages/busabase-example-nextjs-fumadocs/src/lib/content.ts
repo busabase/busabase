@@ -1,18 +1,20 @@
 import "server-only";
 
+import { createBusabaseCmsSourceFromConfig } from "busabase-cms";
 import { createCachedBusabaseCms } from "busabase-cms/next";
 
 // A self-hosted Busabase server can be read without an API key or space header.
 const isConfigured = Boolean(process.env.BUSABASE_BASE_URL && process.env.BUSABASE_CMS_FOLDER_ID);
+const busabaseConfig = {
+  baseUrl: process.env.BUSABASE_BASE_URL,
+  apiKey: process.env.BUSABASE_API_KEY,
+  spaceId: process.env.BUSABASE_SPACE_ID,
+};
 
 const cms = isConfigured
   ? createCachedBusabaseCms(
       {
-        config: {
-          baseUrl: process.env.BUSABASE_BASE_URL,
-          apiKey: process.env.BUSABASE_API_KEY,
-          spaceId: process.env.BUSABASE_SPACE_ID,
-        },
+        config: busabaseConfig,
         folderId: process.env.BUSABASE_CMS_FOLDER_ID,
         lazyCreate: true,
         schemaProfile: "standard",
@@ -35,6 +37,24 @@ const cms = isConfigured
   : null;
 
 export const hasBusabaseConfig = isConfigured;
+
+export const getCmsFolderDashboardUrl = async () => {
+  const baseUrl = process.env.BUSABASE_BASE_URL?.replace(/\/+$/, "");
+  const folderId = process.env.BUSABASE_CMS_FOLDER_ID;
+  if (!baseUrl || !folderId) return null;
+
+  try {
+    const source = createBusabaseCmsSourceFromConfig(busabaseConfig);
+    const folder = await source.getNode?.(folderId);
+    if (!folder || folder.type !== "folder") return null;
+
+    const dashboardSpace = process.env.BUSABASE_SPACE_ID ?? "local";
+    return `${baseUrl}/dashboard/${encodeURIComponent(dashboardSpace)}/folder/${encodeURIComponent(folder.slug)}`;
+  } catch (error) {
+    console.error("[busabase-cms] Unable to resolve the CMS Folder dashboard URL", error);
+    return null;
+  }
+};
 
 export const listBlogPosts = async () => {
   if (!cms) return [];

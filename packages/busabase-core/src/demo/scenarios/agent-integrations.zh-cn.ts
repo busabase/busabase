@@ -10,8 +10,8 @@ import {
   DEMO_AGENT_INTEGRATIONS_BASE_NODE_ID,
 } from "./agent-integrations";
 
-// 与英文版同一个「CMS / 网站内容」文件夹(DEMO_CMS_FOLDER_NODE_ID),挂在其下。
-const CMS_FOLDER_NODE_ID = "nod_cms";
+// 与英文版同一个 Marketing 文件夹(DEMO_CONTENT_FOLDER_NODE_ID),挂在其下。
+const MARKETING_FOLDER_NODE_ID = "nod_content";
 
 // 字段 slug / 选项 id 与英文版保持一致,仅展示名称为中文。
 const agentIntegrationFields: SeedFieldDef[] = [
@@ -112,7 +112,7 @@ const agentIntegrationBases: SeedBaseDef[] = [
     name: "Agent 集成",
     description:
       "每个可接入 Busabase 的 AI Agent 的落地页文章——Codex、Cursor、Claude Code、Hermes Agent、OpenClaw、Buda AI Agent。每一行就是一篇「<Agent> × Busabase」落地页,讲清楚它能做什么。",
-    folderNodeId: CMS_FOLDER_NODE_ID,
+    folderNodeId: MARKETING_FOLDER_NODE_ID,
     useCases: ["agent-integrations"],
     fields: agentIntegrationFields,
   },

@@ -18,7 +18,7 @@ test("Install from GitHub lives in the workspace menu", async ({ page }) => {
   await page.goto("/dashboard/local");
   await expect(page.getByRole("link", { name: "Install from GitHub" })).toHaveCount(0);
 
-  await page.getByRole("button", { name: /Busabase.*Trusted Intelligent Database/ }).click();
+  await page.getByRole("button", { name: /Local Busabase.*Local/ }).click();
   await expect(page.getByRole("menuitem", { name: "Archive" })).toBeVisible();
   await expect(page.getByRole("menuitem", { name: "Assets" })).toBeVisible();
   await expect(page.getByRole("menuitem", { name: "Install from GitHub" })).toBeVisible();
@@ -29,13 +29,11 @@ test("Install from GitHub lives in the workspace menu", async ({ page }) => {
 
 test("dashboard routes render the review-first seeded experience", async ({ page }) => {
   await page.goto("/dashboard/local");
-  await expect(
-    page.getByRole("button", { name: /Busabase.*Trusted Intelligent Database/ }),
-  ).toBeVisible();
+  await expect(page.getByRole("button", { name: /Local Busabase.*Local/ })).toBeVisible();
   await expect(page.getByRole("link", { name: "Inbox" })).toBeVisible();
   await expect(page.getByRole("link", { name: "Activity" })).toBeVisible();
   await expect(page.getByRole("link", { exact: true, name: "Assets" })).toHaveCount(0);
-  await page.getByRole("button", { name: /Busabase.*Trusted Intelligent Database/ }).click();
+  await page.getByRole("button", { name: /Local Busabase.*Local/ }).click();
   await expect(page.getByRole("menuitem", { name: "Archive" })).toBeVisible();
   await expect(page.getByRole("menuitem", { name: "Assets" })).toBeVisible();
   await expect(page.getByRole("menuitem", { name: "Graph View" })).toBeVisible();

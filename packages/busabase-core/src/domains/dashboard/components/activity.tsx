@@ -14,19 +14,19 @@ import { formatDetailTime, formatListTime } from "../helpers/format";
 export type { ActivityEvent, ActivityEventTone } from "../helpers/activity-events";
 
 const activityAvatarTone: Record<ActivityEventTone, string> = {
-  audit: "border-slate-200 bg-slate-50 text-slate-700",
-  commit: "border-sky-200 bg-sky-50 text-sky-700",
-  change_request: "border-amber-200 bg-amber-50 text-amber-800",
-  operation: "border-violet-200 bg-violet-50 text-violet-700",
-  record: "border-emerald-200 bg-emerald-50 text-emerald-700",
+  audit: "border-border bg-muted/40 text-muted-foreground",
+  commit: "border-border bg-muted/40 text-muted-foreground",
+  change_request: "border-review/35 bg-review/10 text-review-strong dark:text-review-soft",
+  operation: "border-border bg-muted/40 text-muted-foreground",
+  record: "border-merged/35 bg-merged/10 text-merged-strong dark:text-merged-soft",
 };
 
 const activityIconTone: Record<ActivityEventTone, string> = {
-  audit: "border-slate-200 bg-background text-slate-600",
-  commit: "border-sky-200 bg-background text-sky-600",
-  change_request: "border-amber-200 bg-background text-amber-700",
-  operation: "border-violet-200 bg-background text-violet-600",
-  record: "border-emerald-200 bg-background text-emerald-600",
+  audit: "border-border bg-background text-muted-foreground",
+  commit: "border-border bg-background text-muted-foreground",
+  change_request: "border-review/35 bg-background text-review-strong dark:text-review-soft",
+  operation: "border-border bg-background text-muted-foreground",
+  record: "border-merged/35 bg-background text-merged-strong dark:text-merged-soft",
 };
 
 const activityIcons = {
