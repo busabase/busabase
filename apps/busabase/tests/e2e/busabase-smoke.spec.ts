@@ -40,7 +40,7 @@ test("dashboard routes render the review-first seeded experience", async ({ page
   await page.getByRole("menuitem", { name: "Assets" }).click();
   await expect(page).toHaveURL(/\/dashboard\/local\/assets$/);
   await page.goto("/dashboard/local");
-  // Seeded tree: CMS holds Blog Posts; Marketing holds Social Content + Newsletter.
+  // Seeded tree: CMS holds the four standard CMS Bases; Marketing also holds Agent Integrations.
   // Folders collapse by default, each with its own "Toggle" — expand per folder.
   await expect(page.getByRole("link", { exact: true, name: "CMS" })).toBeVisible();
   await expect(page.getByRole("link", { exact: true, name: "Marketing" })).toBeVisible();
@@ -48,13 +48,14 @@ test("dashboard routes render the review-first seeded experience", async ({ page
     .getByRole("listitem")
     .filter({ has: page.getByRole("link", { exact: true, name: "CMS" }) });
   await cmsFolder.getByRole("button", { name: "Toggle" }).click();
-  await expect(page.getByRole("link", { exact: true, name: "Blog Posts" })).toBeVisible();
+  await expect(page.getByRole("link", { exact: true, name: "Posts" })).toBeVisible();
   const marketingFolder = page
     .getByRole("listitem")
     .filter({ has: page.getByRole("link", { exact: true, name: "Marketing" }) });
   await marketingFolder.getByRole("button", { name: "Toggle" }).click();
   await expect(page.getByRole("link", { exact: true, name: "Social Content" })).toBeVisible();
   await expect(page.getByRole("link", { exact: true, name: "Newsletter" })).toBeVisible();
+  await expect(page.getByRole("link", { exact: true, name: "Agent Integrations" })).toBeVisible();
 
   // The inbox lists review items (count is client-rendered). Assert the structural
   // "For review N" tab rather than specific CR risk-badge previews, whose copy churns
@@ -79,7 +80,7 @@ test("dashboard routes render the review-first seeded experience", async ({ page
   ).toBeVisible();
 
   await page.goto("/dashboard/local/base/blog");
-  await expect(page.getByRole("heading", { name: "Blog Posts" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Posts" })).toBeVisible();
   await expect(page.getByRole("link", { exact: true, name: "All" })).toBeVisible();
   await expect(page.getByRole("link", { exact: true, name: "Ready to publish" })).toBeVisible();
   await expect(page.getByRole("link", { exact: true, name: "Drafts" })).toBeVisible();
@@ -89,17 +90,23 @@ test("dashboard routes render the review-first seeded experience", async ({ page
 
   await page.getByRole("link", { exact: true, name: "Ready to publish" }).click();
   await expect(page).toHaveURL(/\/dashboard\/local\/base\/blog\/ready-to-publish$/);
-  await expect(page.getByRole("heading", { name: "Blog Posts" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Posts" })).toBeVisible();
 
   await page.getByRole("link", { exact: true, name: "Drafts" }).click();
   await expect(page).toHaveURL(/\/dashboard\/local\/base\/blog\/drafts$/);
-  await expect(page.getByRole("heading", { name: "Blog Posts" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Posts" })).toBeVisible();
 
   // Create a record as a Change Request (the primary "Submit Request" action).
   await page.goto("/dashboard/local/base/blog/new");
-  await expect(page.getByText("New Blog Posts record")).toBeVisible();
-  await page.getByLabel("Title").fill("Smoke test AI market note");
-  await page.getByLabel("Body").fill("A browser smoke test creates this change request note.");
+  await expect(page.getByText("New Posts record")).toBeVisible();
+  await page.getByLabel("Title", { exact: true }).fill("Smoke test AI market note");
+  await page
+    .getByLabel("Body", { exact: true })
+    .fill("A browser smoke test creates this change request note.");
+  await page.getByLabel("Status", { exact: true }).selectOption("draft");
+  await page.getByLabel("Path", { exact: true }).fill("/blog/smoke-test-ai-market-note");
+  await page.getByLabel("Slug", { exact: true }).fill("smoke-test-ai-market-note");
+  await page.getByLabel("Locale", { exact: true }).selectOption("en");
   await page.getByRole("button", { name: "Submit Request" }).click();
   await expect(page).toHaveURL(/\/dashboard\/local\/inbox\/crq/);
   await expect(
@@ -109,9 +116,15 @@ test("dashboard routes render the review-first seeded experience", async ({ page
 
   // Create + merge in one step via the "More submit options → Submit Now" split button.
   await page.goto("/dashboard/local/base/blog/new");
-  await expect(page.getByText("New Blog Posts record")).toBeVisible();
-  await page.getByLabel("Title").fill("Smoke direct merge AI note");
-  await page.getByLabel("Body").fill("A browser smoke test creates and merges this note.");
+  await expect(page.getByText("New Posts record")).toBeVisible();
+  await page.getByLabel("Title", { exact: true }).fill("Smoke direct merge AI note");
+  await page
+    .getByLabel("Body", { exact: true })
+    .fill("A browser smoke test creates and merges this note.");
+  await page.getByLabel("Status", { exact: true }).selectOption("draft");
+  await page.getByLabel("Path", { exact: true }).fill("/blog/smoke-direct-merge-ai-note");
+  await page.getByLabel("Slug", { exact: true }).fill("smoke-direct-merge-ai-note");
+  await page.getByLabel("Locale", { exact: true }).selectOption("en");
   await page.getByRole("button", { name: "More submit options" }).click();
   await page.getByRole("button", { name: "Submit Now" }).click();
   await expect(page).toHaveURL(/\/dashboard\/local\/base\/blog\/rec/);
@@ -120,7 +133,7 @@ test("dashboard routes render the review-first seeded experience", async ({ page
 
   // Edit opens the record form; delete lives behind the record "⋯" (<details>) menu.
   await page.getByRole("link", { exact: true, name: "Edit" }).click();
-  await expect(page.getByLabel("Title")).toBeVisible();
+  await expect(page.getByLabel("Title", { exact: true })).toBeVisible();
   await page.goBack();
   await page.locator("details").filter({ hasText: "Delete change request" }).first().click();
   await page.getByRole("button", { name: "Delete & Merge" }).click();

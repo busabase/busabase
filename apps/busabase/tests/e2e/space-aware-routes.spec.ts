@@ -20,5 +20,5 @@ test("canonical local-space dashboard path renders directly", async ({ page }) =
   await page.goto("/dashboard/local/base/blog?demo=blog");
 
   await expect(page).toHaveURL(/\/dashboard\/local\/base\/blog\?demo=blog$/);
-  await expect(page.getByRole("link", { name: "Blog Posts" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Posts" })).toBeVisible();
 });

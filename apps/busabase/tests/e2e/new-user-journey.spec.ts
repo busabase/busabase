@@ -43,9 +43,9 @@ test("a new user tours the approval-first knowledge base", async ({ page }) => {
     await page.keyboard.press("Escape");
   });
 
-  await test.step("browses the Blog Posts base and its saved views", async () => {
+  await test.step("browses the Posts base and its saved views", async () => {
     await page.goto("/dashboard/local/base/blog");
-    await expect(page.getByRole("heading", { name: "Blog Posts" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Posts" })).toBeVisible();
     await expect(page.getByRole("link", { exact: true, name: "All" })).toBeVisible();
     await expect(page.getByRole("link", { exact: true, name: "Ready to publish" })).toBeVisible();
     await expect(page.getByRole("link", { exact: true, name: "Drafts" })).toBeVisible();
