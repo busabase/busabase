@@ -9,7 +9,7 @@ on:
   push:
     branches: [main]
     paths:
-      - "packages/busabase-example-nextjs-fumadocs/**"
+      - "packages/busabase-cms-nextjs-example/**"
       - "packages/busabase-cms/**"
       - "apps/busabase-sdk/**"
       - "packages/busabase-contract/**"
@@ -20,7 +20,7 @@ on:
   pull_request:
     branches: [main]
     paths:
-      - "packages/busabase-example-nextjs-fumadocs/**"
+      - "packages/busabase-cms-nextjs-example/**"
       - "packages/busabase-cms/**"
       - "apps/busabase-sdk/**"
       - "packages/busabase-contract/**"
