@@ -320,7 +320,11 @@ export const createDoc = async (
     createdAt,
     updatedAt: createdAt,
   });
-  await writeDocBody(nodeId, parsed.body || `# ${parsed.name}\n`);
+  // No synthesized `# {name}` heading here — the detail page already renders
+  // the doc's name as its own page-level <h1>; duplicating it into the body
+  // put two identically-named headings on one page (a11y/strict-mode bug).
+  // An empty body renders the dedicated "This document is empty" placeholder.
+  await writeDocBody(nodeId, parsed.body ?? "");
   await initializeNodeAcl(
     db,
     getContextSpaceId(),
@@ -428,7 +432,11 @@ export const updateDocBody = async (
 // node_create materialization for a Doc node: the node + a seeded body file.
 // `fields.body` carries a review-first `createDoc` call's initial body through
 // the pending change request (see `recordPendingNodeCreate`); the Dashboard's
-// generic node_create flow never sets it, so it keeps the synthesized default.
+// generic node_create flow never sets it, so it stays empty (no synthesized
+// `# {name}` heading — the detail page already renders the doc's name as its
+// own page-level <h1>, and duplicating it into the body put two identically-
+// named headings on one page; an empty body renders the dedicated "This
+// document is empty" placeholder instead).
 export const materializeDocNode = async (ctx: MergeCtx, args: MaterializeArgs): Promise<string> => {
   const { db, timestamp } = ctx;
   const { parentNode, fields } = args;
@@ -444,7 +452,7 @@ export const materializeDocNode = async (ctx: MergeCtx, args: MaterializeArgs): 
     createdAt: timestamp,
     updatedAt: timestamp,
   });
-  await writeDocBody(nodeId, fields.body || `# ${fields.name}\n`);
+  await writeDocBody(nodeId, (fields.body as string | undefined) ?? "");
   return nodeId;
 };
 
