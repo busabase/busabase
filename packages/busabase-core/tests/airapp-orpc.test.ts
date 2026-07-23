@@ -109,6 +109,7 @@ describe("AirApp API — oRPC integration", () => {
     const proposal = await client.airapps.create({
       slug: "review-first-airapp",
       name: "Review First AirApp",
+      autoMerge: false,
     });
 
     expect(proposal.status).toBe("in_review");

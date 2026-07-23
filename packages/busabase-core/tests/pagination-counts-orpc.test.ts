@@ -56,6 +56,7 @@ describe("Pagination & counts — oRPC integration", () => {
       baseId,
       fields: { name },
       submittedBy: "local-editor",
+      autoMerge: false,
     });
     return cr.id;
   };

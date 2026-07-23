@@ -15,6 +15,8 @@ use tauri_plugin_updater::RemoteRelease;
 
 use semver::Version;
 
+mod desktop_menu;
+
 const BUSABASE_PORT: u16 = 15419;
 
 static BUSABASE_SIDECAR_PROCESS: OnceLock<Mutex<Option<Child>>> = OnceLock::new();
@@ -365,6 +367,7 @@ fn is_busabase_healthy() -> bool {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .menu(desktop_menu::build_desktop_menu)
         .plugin(tauri_plugin_opener::init())
         // Launch-at-login support (opt-in via the in-app toggle). On macOS this
         // registers a per-user LaunchAgent; Windows uses the registry Run key and

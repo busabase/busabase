@@ -82,6 +82,7 @@ describe("Change-request review loop — oRPC", () => {
       fields: { title: "Loop test", body: "v1", channel: "blog" },
       message: "Initial",
       submittedBy: "loop-agent",
+      autoMerge: false,
     });
 
   it("publishes live events when CRs are created and reviewed", async () => {

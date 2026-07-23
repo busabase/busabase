@@ -247,11 +247,13 @@ describe("Node tree + Doc lifecycle — oRPC", () => {
         operations: [
           { kind: "create", nodeType: "folder", slug: "lc-race-folder", name: "Race A" },
         ],
+        autoMerge: false,
       });
       const crB = await client.nodes.createChangeRequest({
         operations: [
           { kind: "create", nodeType: "folder", slug: "lc-race-folder", name: "Race B" },
         ],
+        autoMerge: false,
       });
 
       await approveAndMerge(crA.id);
@@ -275,8 +277,14 @@ describe("Node tree + Doc lifecycle — oRPC", () => {
         name,
         fields: [{ slug: "title", name: "Title", type: "text" as const, required: true }],
       });
-      const crA = await client.nodes.createChangeRequest({ operations: [baseOp("Race Base A")] });
-      const crB = await client.nodes.createChangeRequest({ operations: [baseOp("Race Base B")] });
+      const crA = await client.nodes.createChangeRequest({
+        operations: [baseOp("Race Base A")],
+        autoMerge: false,
+      });
+      const crB = await client.nodes.createChangeRequest({
+        operations: [baseOp("Race Base B")],
+        autoMerge: false,
+      });
 
       await approveAndMerge(crA.id);
       await expect(approveAndMerge(crB.id)).rejects.toMatchObject({ code: "CONFLICT" });

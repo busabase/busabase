@@ -17,6 +17,11 @@
  *   13 Comments   — review comment (+@agent mention) on a CR and a record
  *   14 AirApps    — 3 example AirApp nodes (Hono works; Vite/Hono+Vite seeded
  *                   but marked known-unavailable — see the file's own docblock)
+ *   16 Visual     — Whiteboard/Workflow/HTML nodes under the "Visual Tools" folder
+ *                   (metadata-backed richNodes, same content as the DB seed)
+ *
+ * (15-cms-converge.ts is a one-off live-instance migration, invoked manually with
+ * an explicit phase argument — not part of the regular idempotent suite.)
  *
  * Usage:
  *   BUSABASE_URL=http://localhost:15419 pnpm exec tsx scripts/demo/run-all.ts
@@ -40,6 +45,7 @@ import { run as run11 } from "./11-drives";
 import { run as run12 } from "./12-files";
 import { run as run13 } from "./13-comments";
 import { run as run14 } from "./14-airapps";
+import { run as run16 } from "./16-visual-nodes";
 
 const SUITES = [
   { name: "01-folders", run: run01 },
@@ -56,6 +62,7 @@ const SUITES = [
   { name: "12-files", run: run12 },
   { name: "13-comments", run: run13 },
   { name: "14-airapps", run: run14 },
+  { name: "16-visual-nodes", run: run16 },
 ];
 
 async function main() {

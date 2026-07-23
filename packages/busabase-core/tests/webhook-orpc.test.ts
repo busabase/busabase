@@ -159,6 +159,7 @@ describe("Webhook automation domain — oRPC", () => {
       fields: { title, body: "v1", channel: "blog" },
       message: "Initial",
       submittedBy: "webhook-test",
+      autoMerge: false,
     });
     await client.changeRequests.review({ changeRequestId: cr.id, verdict: "approved" });
     await client.changeRequests.merge({ changeRequestId: cr.id });
@@ -327,6 +328,7 @@ describe("Webhook automation domain — oRPC", () => {
         fields: { title: "Needs AI", body: "v1", channel: "blog" },
         message: "Initial",
         submittedBy: "webhook-test",
+        autoMerge: false,
       });
       await client.comments.create({
         subjectType: "change_request",

@@ -31,7 +31,9 @@ import type { MaterializeArgs } from "../../logic/materialize";
 import {
   assertNodePermission,
   buildNodeVisibilityCondition,
+  hasNodePermission,
   initializeNodeAcl,
+  shouldAutoMerge,
 } from "../../logic/node-acl";
 import { assertContainerParent } from "../../logic/node-parent";
 import { ensureReady } from "../../logic/seed";
@@ -520,15 +522,15 @@ export const createFileTreeNode = async (
     .limit(1);
   const parentNode = assertContainerParent(parentNodeRow, config.type, parentNodeId);
 
-  if (parsed.autoMerge) {
-    await assertNodePermission(parentNode.id, "write");
-  }
+  // Permission-aware default: merge immediately if the actor has `write` on
+  // the parent node; otherwise (or with explicit `autoMerge: false`) propose
+  // the node as a pending node_create ChangeRequest instead.
+  const autoMerge = shouldAutoMerge(
+    parsed.autoMerge,
+    await hasNodePermission(parentNode.id, "write"),
+  );
 
-  // Review-first by default: propose the node as a pending node_create
-  // ChangeRequest instead of materializing it immediately. Callers that don't
-  // need human review (seed/migration scripts, an explicit no-review agent
-  // task) pass `autoMerge: true` to keep today's instant-create behavior.
-  if (!parsed.autoMerge) {
+  if (!autoMerge) {
     const changeRequest = await recordPendingNodeCreate({
       nodeType: config.type,
       slug: parsed.slug,

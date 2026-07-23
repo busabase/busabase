@@ -55,6 +55,7 @@ describe("search — sources scope over real HTTP (repeated query-param array)",
       baseId: base.id,
       fields: { notes: `Contains ${RECORD_MARKER} for the HTTP test.` },
       submittedBy: "test",
+      autoMerge: false,
     });
     await client.changeRequests.review({ changeRequestId: cr.id, verdict: "approved" });
     await client.changeRequests.merge({ changeRequestId: cr.id });

@@ -82,6 +82,7 @@ describe("record_update — partial-field submissions preserve untouched fields"
       fields,
       message: "Create",
       submittedBy: "agent",
+      autoMerge: false,
     });
     const merged = await approveAndMerge(cr.id);
     if (!merged.record) throw new Error("expected a created record");

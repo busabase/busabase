@@ -84,6 +84,7 @@ describe("Boundary P3 — oRPC", () => {
       fields,
       message: "Create",
       submittedBy: "agent",
+      autoMerge: false,
     });
     const merged = await approveAndMerge(cr.id);
     if (!merged.record) throw new Error("expected a created record");
@@ -166,6 +167,7 @@ describe("Boundary P3 — oRPC", () => {
       fields: { title: "has title" },
       message: "Create",
       submittedBy: "agent",
+      autoMerge: false,
     });
 
     // Make note required first (separate CR, approved + merged).
@@ -243,6 +245,7 @@ describe("Boundary P3 — oRPC", () => {
 
     const delCr = await client.nodes.createChangeRequest({
       operations: [{ kind: "delete", nodeId: base.nodeId }],
+      autoMerge: false,
     });
     await approveAndMerge(delCr.id);
 

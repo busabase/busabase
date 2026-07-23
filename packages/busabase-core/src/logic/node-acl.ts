@@ -243,6 +243,40 @@ export async function assertNodePermission(
 }
 
 /**
+ * Non-throwing sibling of `assertNodePermission`, for callers that need to
+ * make a decision (not just gate an action) based on whether an actor has a
+ * level — e.g. resolving a permission-aware `autoMerge` default. An
+ * invisible node (null level) always resolves to `false`, same as it would
+ * fail `assertNodePermission`.
+ */
+export async function hasNodePermission(
+  nodeId: string,
+  required: ApiKeyPermissionLevel,
+  inputActorId?: string,
+): Promise<boolean> {
+  const level = await getEffectiveNodeLevel(nodeId, inputActorId);
+  return level !== null && hasApiKeyLevel(level, required);
+}
+
+/**
+ * Resolves whether a create-CR call should merge immediately vs. create a
+ * pending CR, given the caller's `autoMerge` request and whether they hold
+ * `write` on the target node(s):
+ *  - `autoMerge: false` (explicit) always forces a CR, even for an actor who
+ *    could write directly — the deliberate "review me anyway" override.
+ *  - `autoMerge: true` or omitted (`undefined`) merges immediately IF the
+ *    actor has `write`; otherwise gracefully falls back to a CR (no
+ *    FORBIDDEN — the caller just gets a pending CR instead of what they may
+ *    have asked for).
+ */
+export function shouldAutoMerge(
+  requestedAutoMerge: boolean | undefined,
+  hasWritePermission: boolean,
+): boolean {
+  return requestedAutoMerge !== false && hasWritePermission;
+}
+
+/**
  * ChangeRequest-submission gate for record/base-targeted proposals: resolves
  * the base's node and requires `changeRequest` level on it. Accepts a base id
  * or slug (mirroring getBase's lookup order). Managers short-circuit before

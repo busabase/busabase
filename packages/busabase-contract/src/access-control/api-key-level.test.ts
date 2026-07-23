@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { hasApiKeyLevel, permissionLevelForSpaceRole, resolveRequiredLevel } from "./api-key-level";
+import {
+  capApiKeyLevel,
+  hasApiKeyLevel,
+  permissionLevelForSpaceRole,
+  resolveRequiredLevel,
+} from "./api-key-level";
 
 describe("hasApiKeyLevel", () => {
   it("null (legacy/unset) stored level always allows — zero behavior change for existing keys", () => {
@@ -18,6 +23,24 @@ describe("hasApiKeyLevel", () => {
     expect(hasApiKeyLevel("manage", "read")).toBe(true);
     expect(hasApiKeyLevel("manage", "manage")).toBe(true);
     expect(hasApiKeyLevel("read", "changeRequest")).toBe(false);
+  });
+});
+
+describe("capApiKeyLevel", () => {
+  it("a restricted key caps a higher space role — the owner-holds-a-changeRequest-key gap", () => {
+    expect(capApiKeyLevel("manage", "changeRequest")).toBe("changeRequest");
+    expect(capApiKeyLevel("manage", "read")).toBe("read");
+    expect(capApiKeyLevel("write", "changeRequest")).toBe("changeRequest");
+  });
+
+  it("a restricted key at or above the space role is a no-op (the role is already the binding constraint)", () => {
+    expect(capApiKeyLevel("changeRequest", "manage")).toBe("changeRequest");
+    expect(capApiKeyLevel("read", "write")).toBe("read");
+  });
+
+  it("null/undefined stored level (legacy/unset key) applies no cap", () => {
+    expect(capApiKeyLevel("manage", null)).toBe("manage");
+    expect(capApiKeyLevel("changeRequest", undefined)).toBe("changeRequest");
   });
 });
 

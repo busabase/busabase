@@ -34,9 +34,21 @@ const publicDir = join(busabaseDir, "public");
 const migrationsDir = join(busabaseDir, "src", "db", "migrations");
 const resourceDir = join(desktopDir, "src-tauri", "resources", "busabase-server");
 const macOSEntitlementsPath = join(desktopDir, "src-tauri", "Entitlements.plist");
+const buildTimePath = join(desktopDir, "src-tauri", ".build-time");
 
 const platformNodeName = process.platform === "win32" ? "node.exe" : "node";
 const macOSNativeBinaryExtensions = new Set([".dylib", ".node"]);
+
+const formatBuildTime = (date) => {
+  const pad = (value) => String(value).padStart(2, "0");
+  return [
+    date.getFullYear(),
+    pad(date.getMonth() + 1),
+    pad(date.getDate()),
+    pad(date.getHours()),
+    pad(date.getMinutes()),
+  ].join("");
+};
 
 const ensureExists = async (path, label) => {
   try {
@@ -246,6 +258,9 @@ const findServerEntry = async () => {
 };
 
 const main = async () => {
+  const buildTime = formatBuildTime(new Date());
+  await writeFile(buildTimePath, `${buildTime}\n`, "utf8");
+
   await ensureExists(join(busabaseDir, "package.json"), "Busabase app package");
   await ensureExists(process.execPath, "Node runtime");
   await ensureExists(migrationsDir, "Busabase PGlite migrations");
@@ -322,6 +337,7 @@ const main = async () => {
   const nodeStats = await stat(nodeTarget);
   console.log(
     `Prepared Busabase sidecar resource at ${relative(repoDir, resourceDir)}\n` +
+      `  build:  ${buildTime}\n` +
       `  server: ${serverRel}\n` +
       `  node:   ${platformNodeName} (${Math.round(nodeStats.size / 1024 / 1024)} MB) via ${nodeSource}\n` +
       `  pglite: ${relative(repoDir, migrationsDir)} -> ${appRel}/src/db/migrations\n` +

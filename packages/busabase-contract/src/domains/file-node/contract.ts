@@ -17,11 +17,11 @@ export const createFileNodeInputSchema = z.object({
   name: z.string().min(1),
   description: z.string().optional().default(""),
   assetId: z.string().min(1),
-  // Review-first by default: without `autoMerge: true`, this proposes the File
-  // node as a pending ChangeRequest (status "in_review") instead of creating it
-  // immediately. Pass `autoMerge: true` only for callers that don't need human
-  // review (seed/migration scripts, an explicit no-review agent task).
-  autoMerge: z.boolean().optional().default(false),
+  // Permission-aware default: omitted merges immediately if the actor has
+  // write access on the parent node, otherwise falls back to a pending
+  // ChangeRequest (status "in_review"). Pass explicit `autoMerge: false` to
+  // force review even with write access.
+  autoMerge: z.boolean().optional(),
 });
 
 export const fileContract = {

@@ -58,6 +58,7 @@ describe("Agent task queue — oRPC", () => {
       fields: { title, body: "v1", channel: "blog" },
       message: "Initial",
       submittedBy: "loop-agent",
+      autoMerge: false,
     });
 
   it("queues request-changes and @ai-mentioned CRs, and skips quiet ones", async () => {

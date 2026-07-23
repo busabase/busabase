@@ -158,11 +158,19 @@ function buildClient(raw: RawClient) {
             ...(cachedBaseCommitId ? { baseCommitId: cachedBaseCommitId } : {}),
           });
         } else {
+          // Explicit `autoMerge: false`: this helper's own `mergeImmediately`
+          // flag is what decides pending-vs-merged for the caller — force the
+          // create call itself to stay pending regardless of the ambient
+          // test context's permission level (which now, since autoMerge
+          // defaults to permission-aware, would otherwise materialize this
+          // immediately for a manager-level context and break the
+          // `mergeImmediately: false` callers expecting a pending CR back).
           cr = await raw.bases.createChangeRequest({
             baseId: rest.baseId,
             fields: rest.fields,
             submittedBy: rest.submittedBy ?? "local-producer",
             message: rest.message ?? "Create record",
+            autoMerge: false,
           });
         }
         if (mergeImmediately) {

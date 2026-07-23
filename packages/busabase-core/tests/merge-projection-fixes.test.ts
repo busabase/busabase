@@ -64,6 +64,7 @@ describe("merge projection fixes", () => {
     const createCr = await client.bases.createChangeRequest({
       baseId,
       fields: { title: "rec-1", status: "draft" },
+      autoMerge: false,
     });
     const created = await approveAndMerge(createCr.id);
     const recordId = created.record!.id;
@@ -117,6 +118,7 @@ describe("merge projection fixes", () => {
     const createCr = await client.bases.createChangeRequest({
       baseId,
       fields: { title: "r", category: "Apple" },
+      autoMerge: false,
     });
     const created = await approveAndMerge(createCr.id);
     const recordId = created.record!.id;
@@ -171,12 +173,17 @@ describe("merge projection fixes", () => {
       options: { targetBaseId: baseId },
     });
 
-    const tCr = await client.bases.createChangeRequest({ baseId, fields: { title: "T" } });
+    const tCr = await client.bases.createChangeRequest({
+      baseId,
+      fields: { title: "T" },
+      autoMerge: false,
+    });
     const tId = (await approveAndMerge(tCr.id)).record!.id;
 
     const sCr = await client.bases.createChangeRequest({
       baseId,
       fields: { title: "S", ref: [tId] },
+      autoMerge: false,
     });
     const sId = (await approveAndMerge(sCr.id)).record!.id;
 

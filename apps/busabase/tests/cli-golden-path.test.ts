@@ -121,6 +121,7 @@ describe("busabase-cli golden path (skill commands, in-process)", () => {
       }),
       "--message",
       "golden path",
+      "--require-review",
     )) as { id: string; status: string };
     expect(created.status).toBe("in_review");
     expect(created.id).toBeTruthy();
@@ -165,6 +166,7 @@ describe("busabase-cli golden path (skill commands, in-process)", () => {
       "cli-folder",
       "--name",
       "CLI Folder",
+      "--require-review",
     )) as { id: string; status: string };
     expect(created.status).toBe("in_review");
 

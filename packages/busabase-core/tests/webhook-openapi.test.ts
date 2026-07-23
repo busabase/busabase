@@ -306,6 +306,7 @@ describe("Webhook automation domain — OpenAPI (/api/v1) route round-trip", () 
     const cr = await ok("POST", `/bases/${base.id}/change-requests`, {
       fields: { title: "hello from REST" },
       submittedBy: "openapi-test",
+      autoMerge: false,
     });
     await ok("POST", `/change-requests/${cr.id}/reviews`, { verdict: "approved" });
     await ok("POST", `/change-requests/${cr.id}/merge`);

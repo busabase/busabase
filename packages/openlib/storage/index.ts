@@ -33,5 +33,6 @@ export type {
   IStorage,
   MultipartPart,
   StorageConfig,
+  StorageObjectMetadata,
   StorageProvider,
 } from "./types";

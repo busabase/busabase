@@ -813,6 +813,14 @@ The flags below skip the menu (handy for scripts / CI):
     .option("--field <slug:name:type...>", "base field, repeatable (for --type base)")
     .option("--fields-json <json|@file>", "base fields as JSON array (for --type base)")
     .option("--asset-id <id>", "backing Asset id (required for --type file)")
+    .option(
+      "--auto-merge",
+      "skip review and create the node immediately if you have write access (default: merge immediately if you have write access, otherwise propose a pending Change Request)",
+    )
+    .option(
+      "--require-review",
+      "always propose a pending Change Request, even if you have write access",
+    )
     .addHelpText(
       "after",
       `
@@ -820,7 +828,8 @@ Examples:
   busabase-cli nodes create-change-request --type folder --slug cms --name "内容管理 CMS"
   busabase-cli nodes create-change-request --type base --slug blog --name "博客文章 Blog Posts" --field title:Title:text --field body:Body:markdown
   busabase-cli nodes create-change-request --type base --slug products --name "产品目录 Products" --fields-json @fields.json
-  busabase-cli nodes create-change-request --type file --slug board-plan --name "Board Plan" --asset-id ast_123`,
+  busabase-cli nodes create-change-request --type file --slug board-plan --name "Board Plan" --asset-id ast_123
+  busabase-cli nodes create-change-request --type folder --slug cms --name "内容管理 CMS" --require-review   # always propose a Change Request`,
     )
     .action(
       runAction(state, (client, opts) => {
@@ -835,6 +844,11 @@ Examples:
         return client.nodes.createChangeRequest({
           message: (opts.message as string | undefined) ?? `Create ${nodeType} ${name}`,
           submittedBy: opts.submittedBy as string | undefined,
+          ...(opts.requireReview
+            ? { autoMerge: false }
+            : opts.autoMerge
+              ? { autoMerge: true }
+              : {}),
           operations: [
             {
               kind: "create",
@@ -948,7 +962,11 @@ Examples:
     .option("--parent-node-id <id>", "parent folder node id; omit for root")
     .option(
       "--auto-merge",
-      "skip review and create the Base immediately (default: propose a pending Change Request)",
+      "skip review and create the Base immediately if you have write access (default: merge immediately if you have write access, otherwise propose a pending Change Request)",
+    )
+    .option(
+      "--require-review",
+      "always propose a pending Change Request, even if you have write access",
     )
     .addHelpText(
       "after",
@@ -956,7 +974,8 @@ Examples:
 Examples:
   busabase-cli bases create --slug products --name "产品目录 Products" --field product_name:"Product Name":text
   busabase-cli bases create --slug products --name "产品目录 Products" --fields-json @fields.json
-  busabase-cli bases create --slug products --name "Products" --auto-merge   # skip review, create immediately`,
+  busabase-cli bases create --slug products --name "Products" --auto-merge   # skip review, create immediately
+  busabase-cli bases create --slug products --name "Products" --require-review   # always propose a Change Request`,
     )
     .action(
       runAction(state, (client, opts) =>
@@ -966,7 +985,11 @@ Examples:
           description: opts.description as string | undefined,
           parentNodeId: opts.parentNodeId as string | undefined,
           fields: parseFieldDefinitions(opts),
-          ...(opts.autoMerge ? { autoMerge: true } : {}),
+          ...(opts.requireReview
+            ? { autoMerge: false }
+            : opts.autoMerge
+              ? { autoMerge: true }
+              : {}),
         }),
       ),
     );
@@ -1053,7 +1076,11 @@ Examples:
     .option("--submitted-by <name>", "producer label")
     .option(
       "--auto-merge",
-      "skip review and create the record immediately (default: propose a pending Change Request)",
+      "skip review and create the record immediately if you have write access (default: merge immediately if you have write access, otherwise propose a pending Change Request)",
+    )
+    .option(
+      "--require-review",
+      "always propose a pending Change Request, even if you have write access",
     )
     .addHelpText(
       "after",
@@ -1061,7 +1088,8 @@ Examples:
 Examples:
   busabase-cli bases create-change-request --base-id bse_123 --fields-json '{"title":"Hello","status":"draft"}'
   busabase-cli bases create-change-request --base-id bse_123 --fields-json @record.json
-  busabase-cli bases create-change-request --base-id bse_123 --fields-json '{"title":"Hello"}' --auto-merge   # skip review, create immediately`,
+  busabase-cli bases create-change-request --base-id bse_123 --fields-json '{"title":"Hello"}' --auto-merge   # skip review, create immediately
+  busabase-cli bases create-change-request --base-id bse_123 --fields-json '{"title":"Hello"}' --require-review   # always propose a Change Request`,
     )
     .action(
       runAction(state, (client, opts) =>
@@ -1073,7 +1101,11 @@ Examples:
           >,
           message: opts.message as string | undefined,
           submittedBy: opts.submittedBy as string | undefined,
-          ...(opts.autoMerge ? { autoMerge: true } : {}),
+          ...(opts.requireReview
+            ? { autoMerge: false }
+            : opts.autoMerge
+              ? { autoMerge: true }
+              : {}),
         }),
       ),
     );
@@ -1113,7 +1145,11 @@ Examples:
     )
     .option(
       "--auto-merge",
-      "skip review and create the AirApp immediately (default: propose a pending Change Request)",
+      "skip review and create the AirApp immediately if you have write access (default: merge immediately if you have write access, otherwise propose a pending Change Request)",
+    )
+    .option(
+      "--require-review",
+      "always propose a pending Change Request, even if you have write access",
     )
     .addHelpText(
       "after",
@@ -1131,7 +1167,8 @@ mergeMode explains how --files-json combines with the AirApp's default scaffold:
 Examples:
   busabase-cli airapps create --slug hello-app --name "Hello App" --files-json @files.json
   busabase-cli airapps create --slug vite-app --name "Vite App" --files-json @files.json --merge-mode replace
-  busabase-cli airapps create --slug hello-app --name "Hello App" --files-json @files.json --auto-merge   # skip review, create immediately`,
+  busabase-cli airapps create --slug hello-app --name "Hello App" --files-json @files.json --auto-merge   # skip review, create immediately
+  busabase-cli airapps create --slug hello-app --name "Hello App" --files-json @files.json --require-review   # always propose a Change Request`,
     )
     .action(
       runAction(state, (client, opts) =>
@@ -1148,7 +1185,11 @@ Examples:
               >[0]["files"])
             : undefined,
           mergeMode: opts.mergeMode as "merge" | "replace" | undefined,
-          ...(opts.autoMerge ? { autoMerge: true } : {}),
+          ...(opts.requireReview
+            ? { autoMerge: false }
+            : opts.autoMerge
+              ? { autoMerge: true }
+              : {}),
         }),
       ),
     );

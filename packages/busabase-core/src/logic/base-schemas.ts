@@ -108,7 +108,7 @@ export const createBaseInputSchema = z.object({
   // Must mirror busabase-contract's createBaseInputSchema (same drift risk as
   // fieldOptionsSchema above) — without this, `autoMerge` from the oRPC layer's
   // contract-validated input is silently stripped by this internal re-parse.
-  autoMerge: z.boolean().optional().default(false),
+  autoMerge: z.boolean().optional(),
 });
 
 const nodeOperationInputSchema = z.discriminatedUnion("kind", [
@@ -265,7 +265,7 @@ export const createChangeRequestInputSchema = z.object({
   message: z.string().optional().default("Initial changeRequest"),
   submittedBy: z.string().optional().default("local-producer"),
   idempotencyKey: z.string().optional(),
-  autoMerge: z.boolean().optional().default(false),
+  autoMerge: z.boolean().optional(),
 });
 
 // Propose many record_create operations as ONE change request (one review, one

@@ -91,11 +91,11 @@ export const createFileTreeInputSchema = z.object({
     .array(z.union([assetFileInputSchema, textFileInputSchema]))
     .optional()
     .default([]),
-  // Review-first by default: without `autoMerge: true`, this proposes the node
-  // as a pending ChangeRequest (status "in_review") instead of creating it
-  // immediately. Pass `autoMerge: true` only for callers that don't need human
-  // review (seed/migration scripts, an explicit no-review agent task).
-  autoMerge: z.boolean().optional().default(false),
+  // Permission-aware default: omitted merges immediately if the actor has
+  // write access on the parent node, otherwise falls back to a pending
+  // ChangeRequest (status "in_review"). Pass explicit `autoMerge: false` to
+  // force review even with write access.
+  autoMerge: z.boolean().optional(),
   // "merge" (default): `files` is layered on top of the config's default seed
   // files by path — a caller supplying just a couple of extra files (e.g. a
   // Skill's own reference doc) still gets the default scaffold (SKILL.md,

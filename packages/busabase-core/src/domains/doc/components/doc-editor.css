@@ -1,0 +1,30 @@
+/* Maps Crepe's theme custom properties onto this repo's semantic CSS
+ * variables (see kui/src/styles.css) instead of the shipped theme's literal
+ * hex colors — no hardcoded values, same rule as everywhere else in the app. */
+.milkdown {
+  --crepe-color-background: hsl(var(--background));
+  --crepe-color-on-background: hsl(var(--foreground));
+  --crepe-color-surface: hsl(var(--popover));
+  --crepe-color-surface-low: hsl(var(--muted));
+  --crepe-color-on-surface: hsl(var(--popover-foreground));
+  --crepe-color-on-surface-variant: hsl(var(--muted-foreground));
+  --crepe-color-outline: hsl(var(--border));
+  --crepe-color-primary: hsl(var(--primary));
+  --crepe-color-secondary: hsl(var(--secondary));
+  --crepe-color-on-secondary: hsl(var(--secondary-foreground));
+  --crepe-color-inverse: hsl(var(--foreground));
+  --crepe-color-on-inverse: hsl(var(--background));
+  --crepe-color-inline-code: hsl(var(--primary));
+  --crepe-color-error: hsl(var(--destructive));
+  --crepe-color-hover: hsl(var(--accent));
+  --crepe-color-selected: hsl(var(--accent));
+  --crepe-color-inline-area: hsl(var(--muted));
+
+  --crepe-font-title: inherit;
+  --crepe-font-default: inherit;
+  --crepe-font-code: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+
+  background-color: transparent;
+  font-size: 15px;
+  line-height: 1.75rem;
+}

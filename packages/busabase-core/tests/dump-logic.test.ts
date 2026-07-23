@@ -175,16 +175,14 @@ describe("dump domain logic — oRPC integration", () => {
     const total = 12;
     const createdIds: string[] = [];
     for (let i = 0; i < total; i++) {
-      const cr = await inSpace(spaceId, () =>
-        client.bases.createChangeRequest({ baseId: base.id, fields: { title: `row-${i}` } }),
-      );
-      await inSpace(spaceId, () =>
-        client.changeRequests.review({ changeRequestId: cr.id, verdict: "approved" }),
-      );
       const merged = await inSpace(spaceId, () =>
-        client.changeRequests.merge({ changeRequestId: cr.id }),
+        client.bases.createChangeRequest({
+          baseId: base.id,
+          fields: { title: `row-${i}` },
+          autoMerge: true,
+        }),
       );
-      if (merged.record) createdIds.push(merged.record.id);
+      if ("materialized" in merged && merged.materialized) createdIds.push(merged.id);
     }
 
     // Force the pagination path to actually execute more than once: page size

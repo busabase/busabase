@@ -28,8 +28,9 @@ import { CURRENT_USER_ID, id, now, rootNodeIdForSpace } from "../../../logic/ker
 import { publishChangeRequestPendingReview } from "../../../logic/live-events";
 import {
   assertBaseChangeRequestPermission,
-  assertNodePermission,
+  hasNodePermission,
   initializeNodeAcl,
+  shouldAutoMerge,
 } from "../../../logic/node-acl";
 import { assertContainerParent } from "../../../logic/node-parent";
 import { ensureReady } from "../../../logic/seed";
@@ -193,15 +194,15 @@ export const createBase = async (input: z.input<typeof createBaseInputSchema>) =
     .limit(1);
   const parentNode = assertContainerParent(parentNodeRow, "base", parentNodeId);
 
-  if (parsed.autoMerge) {
-    await assertNodePermission(parentNode.id, "write");
-  }
+  // Permission-aware default: merge immediately if the actor has `write` on
+  // the parent node; otherwise (or with explicit `autoMerge: false`) propose
+  // the Base as a pending node_create ChangeRequest instead.
+  const autoMerge = shouldAutoMerge(
+    parsed.autoMerge,
+    await hasNodePermission(parentNode.id, "write"),
+  );
 
-  // Review-first by default: propose the Base as a pending node_create
-  // ChangeRequest instead of materializing it immediately. Callers that don't
-  // need human review (seed/migration scripts, an explicit no-review agent
-  // task) pass `autoMerge: true` to keep today's instant-create behavior.
-  if (!parsed.autoMerge) {
+  if (!autoMerge) {
     const changeRequest = await recordPendingNodeCreate({
       nodeType: "base",
       slug: parsed.slug,
@@ -442,11 +443,20 @@ export const createChangeRequest = async (
     throw new Error("Failed to create changeRequest");
   }
 
-  // Review-first by default (see the schema doc on `autoMerge` above). A caller
-  // that doesn't need human review approves and merges right away, so it gets
-  // the materialized record back instead of having to poll/approve/merge itself
-  // in three separate calls — matching createBase's autoMerge shortcut.
-  if (parsed.autoMerge) {
+  // Permission-aware default (see the schema doc on `autoMerge` above): merge
+  // immediately — approve + merge right away, so the caller gets the
+  // materialized record back instead of having to poll/approve/merge itself
+  // in three separate calls — if the actor has `write` on the Base's node.
+  // Node-scoped on purpose (not `reviewChangeRequest`/`mergeChangeRequest`'s
+  // own internal workspace-level check), consistent with createBase/createDoc/
+  // createFileNode/createFileTreeNode: a node-ACL-restricted actor with a
+  // globally `write`+ API key still can't auto-merge onto a node they don't
+  // have node-level write on.
+  const autoMerge = shouldAutoMerge(
+    parsed.autoMerge,
+    await hasNodePermission(base.nodeId, "write", submittedBy),
+  );
+  if (autoMerge) {
     await reviewChangeRequest(changeRequestId, { verdict: "approved" });
     const merged = await mergeChangeRequest(changeRequestId);
     if (!merged.record) {

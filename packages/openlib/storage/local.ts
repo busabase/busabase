@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { promisify } from "node:util";
-import type { IStorage, MultipartPart, StorageConfig } from "./types";
+import type { IStorage, MultipartPart, StorageConfig, StorageObjectMetadata } from "./types";
 
 const mkdir = promisify(fs.mkdir);
 const writeFile = promisify(fs.writeFile);
@@ -114,6 +114,20 @@ export class LocalStorage implements IStorage {
       return true;
     } catch {
       return false;
+    }
+  }
+
+  async getObjectMetadata(key: string): Promise<StorageObjectMetadata | null> {
+    try {
+      const result = await stat(path.join(this.rootDir, key));
+      if (!result.isFile()) return null;
+      return {
+        key,
+        size: result.size,
+        lastModified: result.mtime,
+      };
+    } catch {
+      return null;
     }
   }
 

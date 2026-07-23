@@ -274,6 +274,7 @@ describe("Assets + attachment dedup — oRPC integration", () => {
         },
         message: "add cover",
         submittedBy: "agent",
+        autoMerge: false,
       });
       await client.changeRequests.review({ changeRequestId: createCr.id, verdict: "approved" });
       const merged = await client.changeRequests.merge({ changeRequestId: createCr.id });
@@ -339,6 +340,7 @@ describe("Assets + attachment dedup — oRPC integration", () => {
         },
         message: "legacy attachment id",
         submittedBy: "agent",
+        autoMerge: false,
       });
       await client.changeRequests.review({ changeRequestId: cr.id, verdict: "approved" });
       await client.changeRequests.merge({ changeRequestId: cr.id });
@@ -349,7 +351,7 @@ describe("Assets + attachment dedup — oRPC integration", () => {
   });
 
   describe("Where-Used (Doc body embeds)", () => {
-    it("records a whole-node usage when a Doc body embeds an attachment's storageKey", async () => {
+    it("records a whole-node usage when a Doc body embeds an attachment's storageKey, and clears it when the image is removed", async () => {
       const hashD = `sha256:${"d".repeat(64)}`;
       const req = await client.assets.createUploadUrl({
         fileName: "diagram.png",
@@ -388,6 +390,18 @@ describe("Assets + attachment dedup — oRPC integration", () => {
       // Whole-node usage: no record / field.
       expect(usage?.recordId).toBeNull();
       expect(usage?.fieldSlug).toBeNull();
+
+      // Removing the embed from the body and re-merging clears the usage —
+      // syncDocAssetUsages replaces (not just adds to) the doc's whole-node rows.
+      const removeCr = await client.docs.createChangeRequest({
+        nodeId: doc.node.id,
+        body: "# Spec\n\nNo more diagram here.\n",
+      });
+      await client.changeRequests.review({ changeRequestId: removeCr.id, verdict: "approved" });
+      await client.changeRequests.merge({ changeRequestId: removeCr.id });
+
+      const after = await client.assets.get({ assetId: asset.id });
+      expect(after.usages.find((u) => u.nodeType === "doc")).toBeUndefined();
     });
   });
 
@@ -422,6 +436,7 @@ describe("Assets + attachment dedup — oRPC integration", () => {
             metadata: { assetId: confirmed.assetId },
           },
         ],
+        autoMerge: false,
       });
       expect(cr.status).toBe("in_review");
       expect(cr.primaryOperation?.operation).toBe("node_create");
@@ -474,6 +489,7 @@ describe("Assets + attachment dedup — oRPC integration", () => {
             metadata: { assetId: confirmed.assetId },
           },
         ],
+        autoMerge: false,
       });
       expect(changeRequest.status).toBe("in_review");
       await expect(callOpenApi("GET", "/files/openapi-board-plan")).rejects.toThrow(
@@ -564,6 +580,7 @@ describe("Assets + attachment dedup — oRPC integration", () => {
         },
         message: "add",
         submittedBy: "agent",
+        autoMerge: false,
       });
       await client.changeRequests.review({ changeRequestId: cr.id, verdict: "approved" });
       await client.changeRequests.merge({ changeRequestId: cr.id });

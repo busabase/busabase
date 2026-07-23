@@ -17,6 +17,8 @@ export default function ContentLayout({ children }: { children: ReactNode }) {
         { text: "Overview", url: "/" },
         { text: "Posts", url: "/blog", active: "nested-url" },
         { text: "Pages", url: "/pages", active: "nested-url" },
+        { text: "Categories", url: "/categories", active: "nested-url" },
+        { text: "Tags", url: "/tags", active: "nested-url" },
       ]}
       searchToggle={{ enabled: false }}
     >

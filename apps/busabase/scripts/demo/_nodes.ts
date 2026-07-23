@@ -24,6 +24,11 @@ export const STANDARD_DEMO_FOLDERS: DemoFolderDef[] = [
   },
   { slug: "drives", name: "Drives", description: "Reviewed file trees and runbooks." },
   { slug: "airapps", name: "AirApps", description: "Runnable workspace applications." },
+  {
+    slug: "visual-tools",
+    name: "Visual Tools",
+    description: "Whiteboards, executable process designs, mind maps, and HTML prototypes.",
+  },
 ];
 
 export interface LocatedNode {

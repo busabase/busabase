@@ -57,7 +57,7 @@ import { BaseGraphView } from "./components/graph-view";
 import { ActivityView, InboxView } from "./components/inbox";
 import { RecordDetailView, RecordEditorView, RecordTopbarActions } from "./components/record-views";
 import { SearchDialog } from "./components/search-dialog";
-import { SidePanel } from "./components/side-panel";
+import { SidePanel, SidePanelToggle } from "./components/side-panel";
 import { BaseTableSkeleton } from "./components/skeletons";
 import { SubmitPermissionProvider } from "./components/split-submit-button";
 import { BusabaseTopbarBreadcrumb } from "./components/topbar";
@@ -1877,6 +1877,7 @@ function BusabaseDashboardContent({
           <BusabaseTopbarBreadcrumb items={breadcrumbItems} />
           {titlebar.badge ? <div className="ml-1 shrink-0">{titlebar.badge}</div> : null}
           {topbarActions ? <div className="shrink-0">{topbarActions}</div> : null}
+          <SidePanelToggle />
         </div>
         {error ? (
           isConflictErrorMessage(error) ? (

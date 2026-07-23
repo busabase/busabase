@@ -6,6 +6,13 @@ export interface MultipartPart {
   etag: string;
 }
 
+export interface StorageObjectMetadata {
+  key: string;
+  size: number;
+  lastModified: Date;
+  contentType?: string;
+}
+
 /**
  * Storage provider type
  */
@@ -71,6 +78,9 @@ export interface IStorage {
    * Check if object exists
    */
   objectExists(key: string): Promise<boolean>;
+
+  /** Read object metadata without downloading its body. */
+  getObjectMetadata(key: string): Promise<StorageObjectMetadata | null>;
 
   /**
    * Delete object

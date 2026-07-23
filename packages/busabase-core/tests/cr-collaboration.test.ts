@@ -59,6 +59,7 @@ describe("Change-request collaboration — oRPC", () => {
       fields,
       message: "Create",
       submittedBy: "agent",
+      autoMerge: false,
     });
 
   const approveAndMerge = async (changeRequestId: string) => {

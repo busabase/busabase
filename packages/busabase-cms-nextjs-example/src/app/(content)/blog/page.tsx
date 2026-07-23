@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 
 import { ContentCard } from "@/components/content-card";
 import { EmptyState } from "@/components/empty-state";
-import { blogRoute, hasBusabaseConfig, listBlogPosts } from "@/lib/content";
+import { canonicalContentPath, hasBusabaseConfig, listBlogPosts } from "@/lib/content";
 
 export const dynamic = "force-dynamic";
 
@@ -29,16 +29,19 @@ export default async function BlogIndexPage() {
             .sort((a, b) =>
               (b.publishedAt ?? b.updatedAt).localeCompare(a.publishedAt ?? a.updatedAt),
             )
-            .map((post) => (
-              <ContentCard
-                key={post.id}
-                href={`/blog/${blogRoute(post.path)}`}
-                title={post.title}
-                description={post.description}
-                locale={post.locale}
-                updatedAt={post.updatedAt}
-              />
-            ))}
+            .map((post) => {
+              const href = canonicalContentPath(post.path);
+              return href ? (
+                <ContentCard
+                  key={post.id}
+                  href={href}
+                  title={post.title}
+                  description={post.description}
+                  locale={post.locale}
+                  updatedAt={post.updatedAt}
+                />
+              ) : null;
+            })}
         </section>
       )}
     </main>

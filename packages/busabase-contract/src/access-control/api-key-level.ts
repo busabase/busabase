@@ -196,6 +196,29 @@ export function hasApiKeyLevel(
 }
 
 /**
+ * Caps an actor's space-role-derived permission level at the API key's own
+ * stored restriction — the key's level is a coarse per-route gate at the
+ * transport boundary (`resolveRequiredLevel`/`hasApiKeyLevel` above); on its
+ * own it never limits what busabase-core's node-ACL logic sees for the rest
+ * of the request, so a `changeRequest`-only key issued to an agent held by a
+ * workspace owner would otherwise resolve node-level checks (e.g. the
+ * permission-aware `autoMerge` default) against the OWNER's `manage` level
+ * instead of the key's own restriction — exactly the "an over-eager agent's
+ * key can act as freely as the human who issued it" gap this file exists to
+ * close. `storedLevel == null` (legacy/unset key) applies no cap, matching
+ * `hasApiKeyLevel`'s null handling.
+ */
+export function capApiKeyLevel(
+  spaceRoleLevel: ApiKeyPermissionLevel,
+  storedLevel: ApiKeyPermissionLevel | null | undefined,
+): ApiKeyPermissionLevel {
+  if (storedLevel == null) return spaceRoleLevel;
+  return API_KEY_LEVEL_ORDER[storedLevel] < API_KEY_LEVEL_ORDER[spaceRoleLevel]
+    ? storedLevel
+    : spaceRoleLevel;
+}
+
+/**
  * Maps the cloud host's human workspace roles onto the same ordered permission
  * ladder used by API keys and node ACLs. Unknown/missing roles fail closed to
  * read-only; single-user and remote-tunnel hosts should pass `manage`

@@ -1,28 +1,75 @@
 import type { MetadataRoute } from "next";
 
-import { blogRoute, landingRoute, listBlogPosts, listLandingPages } from "@/lib/content";
+import {
+  canonicalContentPath,
+  listBlogPosts,
+  listCategories,
+  listLandingPages,
+  listTags,
+  taxonomyArchivePath,
+} from "@/lib/content";
 import { siteUrl } from "@/lib/site";
 
 export const dynamic = "force-dynamic";
 
-export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
-  const [posts, pages] = await Promise.all([listBlogPosts(), listLandingPages()]);
+interface SitemapCandidate {
+  path: string | null;
+  lastModified?: string;
+  changeFrequency: "daily" | "weekly";
+  priority: number;
+}
 
-  return [
-    { url: new URL("/", siteUrl).toString(), changeFrequency: "weekly", priority: 1 },
-    { url: new URL("/blog", siteUrl).toString(), changeFrequency: "daily", priority: 0.8 },
-    { url: new URL("/pages", siteUrl).toString(), changeFrequency: "daily", priority: 0.8 },
+export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
+  const [posts, pages, categories, tags] = await Promise.all([
+    listBlogPosts(),
+    listLandingPages(),
+    listCategories(),
+    listTags(),
+  ]);
+  const candidates: SitemapCandidate[] = [
+    { path: "/", changeFrequency: "weekly", priority: 1 },
+    { path: "/blog", changeFrequency: "daily", priority: 0.8 },
+    { path: "/pages", changeFrequency: "daily", priority: 0.8 },
+    { path: "/categories", changeFrequency: "daily", priority: 0.6 },
+    { path: "/tags", changeFrequency: "daily", priority: 0.6 },
     ...posts.map((post) => ({
-      url: new URL(`/blog/${blogRoute(post.path)}`, siteUrl).toString(),
-      lastModified: new Date(post.updatedAt),
+      path: canonicalContentPath(post.path),
+      lastModified: post.updatedAt,
       changeFrequency: "weekly" as const,
       priority: 0.7,
     })),
     ...pages.map((page) => ({
-      url: new URL(`/pages/${landingRoute(page.path)}`, siteUrl).toString(),
-      lastModified: new Date(page.updatedAt),
+      path: canonicalContentPath(page.path),
+      lastModified: page.updatedAt,
       changeFrequency: "weekly" as const,
       priority: 0.7,
     })),
+    ...categories.map((category) => ({
+      path: taxonomyArchivePath("categories", category),
+      lastModified: category.updatedAt,
+      changeFrequency: "weekly" as const,
+      priority: 0.5,
+    })),
+    ...tags.map((tag) => ({
+      path: taxonomyArchivePath("tags", tag),
+      lastModified: tag.updatedAt,
+      changeFrequency: "weekly" as const,
+      priority: 0.5,
+    })),
   ];
+  const seen = new Set<string>();
+
+  return candidates.flatMap(({ path, lastModified, ...entry }) => {
+    if (!path) return [];
+    const url = new URL(path, siteUrl).toString();
+    if (seen.has(url)) return [];
+    seen.add(url);
+    return [
+      {
+        url,
+        ...entry,
+        ...(lastModified ? { lastModified: new Date(lastModified) } : {}),
+      },
+    ];
+  });
 }

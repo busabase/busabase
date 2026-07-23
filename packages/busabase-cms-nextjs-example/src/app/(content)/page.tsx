@@ -3,10 +3,9 @@ import Link from "next/link";
 
 import { EmptyState } from "@/components/empty-state";
 import {
-  blogRoute,
+  canonicalContentPath,
   getCmsFolderDashboardUrl,
   hasBusabaseConfig,
-  landingRoute,
   listBlogPosts,
   listCategories,
   listLandingPages,
@@ -27,16 +26,9 @@ export default async function HomePage() {
   ]);
   const hasContent = posts.length > 0 || pages.length > 0;
   const busabaseBaseUrl = process.env.BUSABASE_BASE_URL?.replace(/\/+$/, "");
-  const recentRecords = [
-    ...posts.map((post) => ({
-      ...post,
-      href: `/blog/${blogRoute(post.path)}`,
-    })),
-    ...pages.map((page) => ({
-      ...page,
-      href: `/pages/${landingRoute(page.path)}`,
-    })),
-  ]
+  const recentRecords = [...posts, ...pages]
+    .map((item) => ({ ...item, href: canonicalContentPath(item.path) }))
+    .filter((item): item is typeof item & { href: string } => Boolean(item.href))
     .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
     .slice(0, 6);
   const dataSourceLinks = busabaseBaseUrl
@@ -77,12 +69,15 @@ export default async function HomePage() {
           <strong>{pages.length}</strong>
           <span>Pages</span>
         </Link>
-        <Link href="#data-source" className="summary-item">
+        <Link href="/categories" className="summary-item">
+          <FolderTree aria-hidden="true" size={22} />
+          <strong>{categories.length}</strong>
+          <span>Categories</span>
+        </Link>
+        <Link href="/tags" className="summary-item">
           <Tags aria-hidden="true" size={22} />
-          <strong>{categories.length + tags.length}</strong>
-          <span>
-            {categories.length} categories · {tags.length} tags
-          </span>
+          <strong>{tags.length}</strong>
+          <span>Tags</span>
         </Link>
       </section>
 

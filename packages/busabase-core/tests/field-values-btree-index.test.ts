@@ -96,6 +96,7 @@ describe("busabase_field_values btree index survives long field values", () => {
       baseId,
       fields: { lifebeeKey, body, html },
       message: "canary: long CJK news article",
+      autoMerge: false,
     });
     await client.changeRequests.review({ changeRequestId: cr.id, verdict: "approved" });
     const merged = await client.changeRequests.merge({ changeRequestId: cr.id });
@@ -117,6 +118,7 @@ describe("busabase_field_values btree index survives long field values", () => {
       baseId,
       fields: { lifebeeKey, body: "short body", html: "<p>short</p>" },
       message: "second canary record",
+      autoMerge: false,
     });
     await client.changeRequests.review({ changeRequestId: cr.id, verdict: "approved" });
     await client.changeRequests.merge({ changeRequestId: cr.id });
@@ -148,6 +150,7 @@ describe("busabase_field_values btree index survives long field values", () => {
       baseId,
       fields: { lifebeeKey, body: "x", html: "<p>x</p>" },
       message: "clean-error probe",
+      autoMerge: false,
     });
     await client.changeRequests.review({ changeRequestId: cr.id, verdict: "approved" });
     await client.changeRequests.merge({ changeRequestId: cr.id });

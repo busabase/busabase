@@ -11,10 +11,12 @@ import { useLocation, useSearch } from "wouter";
 import { fmt, useCoreI18n } from "../../../i18n";
 import { AirAppDetailView } from "../../airapp/components/AirAppDetailView";
 import { AirAppSidePanelPreview } from "../../airapp/components/RunPanel";
+import { DocEditor } from "../../doc/components";
+import { useDocImageUpload } from "../../doc/hooks/use-doc-image-upload";
 import { mergeSearchIntoHref } from "../helpers/link-search";
 import { useReportLoadedNode } from "../hooks/use-report-loaded-node";
 import { type NodeDetailProps, registerNodeDetail } from "../node-detail-registry";
-import { registerSidePanelTab } from "../side-panel-registry";
+import { registerSidePanelTab, type SidePanelTabProps } from "../side-panel-registry";
 import { AssetMetadataBlock, assetKindIcon, formatAssetSize } from "./assets";
 import {
   buildFileTree,
@@ -26,6 +28,7 @@ import {
   type SkillTreeNode,
 } from "./file-tree-browser";
 import { NodePermissionsButton } from "./node-permissions-button";
+import { NodePinButton, nodeSidePanelTabId } from "./node-pin-button";
 import { EmptyState } from "./primitives";
 import { FileContentSkeleton, NodeDetailSkeleton } from "./skeletons";
 import { SplitSubmitButton } from "./split-submit-button";
@@ -55,6 +58,10 @@ interface FileTreeDetailViewProps {
   namespace: FileTreeNamespace;
   nodeType: "skill" | "drive";
   onNodeLoaded?: NodeDetailProps["onNodeLoaded"];
+  /** Hides Pin/Permissions/Delete — used when rendered inside the side panel
+   *  preview (see `registerSidePanelTab` calls below), where those node-level
+   *  actions don't apply to a "glance at it while working elsewhere" view. */
+  hideActions?: boolean;
   labels: {
     notFoundTitle: string;
     notFoundBody: string;
@@ -69,6 +76,7 @@ export function FileTreeDetailView({
   namespace,
   nodeType,
   onNodeLoaded,
+  hideActions = false,
   labels,
 }: FileTreeDetailViewProps) {
   const messages = useCoreI18n();
@@ -266,19 +274,27 @@ export function FileTreeDetailView({
           </Popover>
         </div>
 
-        <div className="ml-auto flex shrink-0 items-center gap-1.5">
-          <NodePermissionsButton
-            nodeId={fileTree.node.id}
-            nodeName={fileTree.node.name}
-            orpc={orpc}
-          />
-          <NodeDeleteButton
-            nodeId={fileTree.node.id}
-            nodeName={fileTree.node.name}
-            nodeType={nodeType}
-            orpc={orpc}
-          />
-        </div>
+        {hideActions ? null : (
+          <div className="ml-auto flex shrink-0 items-center gap-1.5">
+            <NodePinButton
+              payload={{ nodeId: fileTree.node.id }}
+              tabId={nodeSidePanelTabId(nodeType, fileTree.node.id)}
+              tabType={`${nodeType}-preview`}
+              title={fileTree.node.name}
+            />
+            <NodePermissionsButton
+              nodeId={fileTree.node.id}
+              nodeName={fileTree.node.name}
+              orpc={orpc}
+            />
+            <NodeDeleteButton
+              nodeId={fileTree.node.id}
+              nodeName={fileTree.node.name}
+              nodeType={nodeType}
+              orpc={orpc}
+            />
+          </div>
+        )}
       </header>
 
       <div className="grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-[300px_minmax(0,1fr)]">
@@ -442,10 +458,16 @@ export function FileTreeDetailView({
   );
 }
 
-export function SkillDetailView({ orpc, slug, onNodeLoaded }: NodeDetailProps) {
+export function SkillDetailView({
+  orpc,
+  slug,
+  onNodeLoaded,
+  hideActions,
+}: NodeDetailProps & { hideActions?: boolean }) {
   const messages = useCoreI18n();
   return (
     <FileTreeDetailView
+      hideActions={hideActions}
       labels={{
         notFoundTitle: messages.nodeDetail.skillNotFoundTitle,
         notFoundBody: messages.nodeDetail.skillNotFoundBody,
@@ -461,10 +483,16 @@ export function SkillDetailView({ orpc, slug, onNodeLoaded }: NodeDetailProps) {
   );
 }
 
-export function DriveDetailView({ orpc, slug, onNodeLoaded }: NodeDetailProps) {
+export function DriveDetailView({
+  orpc,
+  slug,
+  onNodeLoaded,
+  hideActions,
+}: NodeDetailProps & { hideActions?: boolean }) {
   const messages = useCoreI18n();
   return (
     <FileTreeDetailView
+      hideActions={hideActions}
       labels={{
         notFoundTitle: messages.nodeDetail.driveNotFoundTitle,
         notFoundBody: messages.nodeDetail.driveNotFoundBody,
@@ -485,7 +513,24 @@ registerNodeDetail("drive", DriveDetailView);
 registerNodeDetail("airapp", AirAppDetailView);
 registerSidePanelTab("airapp-preview", AirAppSidePanelPreview);
 
-export function FileNodeDetailView({ orpc, slug, onNodeLoaded }: NodeDetailProps) {
+function SkillSidePanelPreview({ orpc, payload }: SidePanelTabProps) {
+  const { nodeId } = payload as { nodeId: string };
+  return <SkillDetailView hideActions orpc={orpc} slug={nodeId} />;
+}
+registerSidePanelTab("skill-preview", SkillSidePanelPreview);
+
+function DriveSidePanelPreview({ orpc, payload }: SidePanelTabProps) {
+  const { nodeId } = payload as { nodeId: string };
+  return <DriveDetailView hideActions orpc={orpc} slug={nodeId} />;
+}
+registerSidePanelTab("drive-preview", DriveSidePanelPreview);
+
+export function FileNodeDetailView({
+  orpc,
+  slug,
+  onNodeLoaded,
+  hideActions,
+}: NodeDetailProps & { hideActions?: boolean }) {
   const messages = useCoreI18n();
   const fileQuery = useQuery({
     ...orpc.files.get.queryOptions({ input: { nodeId: slug ?? "" } }),
@@ -578,10 +623,18 @@ export function FileNodeDetailView({ orpc, slug, onNodeLoaded }: NodeDetailProps
           </Popover>
         </div>
 
-        <div className="ml-auto flex shrink-0 items-center gap-1.5">
-          <NodePermissionsButton nodeId={node.id} nodeName={node.name} orpc={orpc} />
-          <NodeDeleteButton orpc={orpc} nodeId={node.id} nodeName={node.name} nodeType="file" />
-        </div>
+        {hideActions ? null : (
+          <div className="ml-auto flex shrink-0 items-center gap-1.5">
+            <NodePinButton
+              payload={{ nodeId: node.id }}
+              tabId={nodeSidePanelTabId("file", node.id)}
+              tabType="file-preview"
+              title={node.name}
+            />
+            <NodePermissionsButton nodeId={node.id} nodeName={node.name} orpc={orpc} />
+            <NodeDeleteButton orpc={orpc} nodeId={node.id} nodeName={node.name} nodeType="file" />
+          </div>
+        )}
       </header>
 
       <div className="min-h-0 flex-1 overflow-auto p-4 md:p-6">
@@ -607,7 +660,18 @@ export function FileNodeDetailView({ orpc, slug, onNodeLoaded }: NodeDetailProps
 
 registerNodeDetail("file", FileNodeDetailView);
 
-export function DocDetailView({ orpc, slug, onNodeLoaded }: NodeDetailProps) {
+function FileSidePanelPreview({ orpc, payload }: SidePanelTabProps) {
+  const { nodeId } = payload as { nodeId: string };
+  return <FileNodeDetailView hideActions orpc={orpc} slug={nodeId} />;
+}
+registerSidePanelTab("file-preview", FileSidePanelPreview);
+
+export function DocDetailView({
+  orpc,
+  slug,
+  onNodeLoaded,
+  hideActions = false,
+}: NodeDetailProps & { hideActions?: boolean }) {
   const messages = useCoreI18n();
   const [, rawSetLocation] = useLocation();
   const currentSearch = useSearch();
@@ -637,6 +701,7 @@ export function DocDetailView({ orpc, slug, onNodeLoaded }: NodeDetailProps) {
   const createCr = useMutation(orpc.docs.createChangeRequest.mutationOptions());
   const reviewCr = useMutation(orpc.changeRequests.review.mutationOptions());
   const mergeCr = useMutation(orpc.changeRequests.merge.mutationOptions());
+  const uploadImage = useDocImageUpload(orpc);
 
   if (!doc) {
     return docQuery.isLoading ? (
@@ -714,7 +779,7 @@ export function DocDetailView({ orpc, slug, onNodeLoaded }: NodeDetailProps) {
             <p className="mt-1 text-muted-foreground text-sm">{doc.node.description}</p>
           ) : null}
         </div>
-        {isEditing ? (
+        {hideActions ? null : isEditing ? (
           <div className="flex shrink-0 items-center gap-2">
             <button
               className="rounded-button px-3 py-1.5 text-muted-foreground text-sm hover:text-foreground disabled:opacity-40"
@@ -754,6 +819,12 @@ export function DocDetailView({ orpc, slug, onNodeLoaded }: NodeDetailProps) {
             >
               {messages.common.edit}
             </button>
+            <NodePinButton
+              payload={{ nodeId: doc.node.id }}
+              tabId={nodeSidePanelTabId("doc", doc.node.id)}
+              tabType="doc-preview"
+              title={doc.node.name}
+            />
             <NodePermissionsButton nodeId={doc.node.id} nodeName={doc.node.name} orpc={orpc} />
             <NodeDeleteButton
               nodeId={doc.node.id}
@@ -765,18 +836,15 @@ export function DocDetailView({ orpc, slug, onNodeLoaded }: NodeDetailProps) {
         )}
       </div>
       {error ? <p className="mb-3 text-destructive text-sm">{error}</p> : null}
-      {isEditing ? (
-        <textarea
-          aria-label={messages.nodeDetail.docBody}
-          className="min-h-[60vh] flex-1 resize-none border-0 bg-transparent p-0 text-[15px] text-foreground leading-7 outline-none placeholder:text-muted-foreground"
-          onChange={(event) => setDraft(event.target.value)}
-          placeholder={messages.nodeDetail.writePlaceholder}
-          value={draft}
+      {isEditing || doc.body.trim() ? (
+        <DocEditor
+          key={`${doc.node.id}:${isEditing}`}
+          className="min-h-[60vh] flex-1"
+          content={isEditing ? draft : doc.body}
+          editable={isEditing}
+          onChange={setDraft}
+          onImageUpload={uploadImage}
         />
-      ) : doc.body.trim() ? (
-        <div className="flex-1 whitespace-pre-wrap text-[15px] text-foreground leading-7">
-          {doc.body}
-        </div>
       ) : (
         <div className="flex-1 text-muted-foreground text-sm">{messages.nodeDetail.emptyDoc}</div>
       )}
@@ -786,7 +854,18 @@ export function DocDetailView({ orpc, slug, onNodeLoaded }: NodeDetailProps) {
 
 registerNodeDetail("doc", DocDetailView);
 
-export function FolderDetailView({ orpc, slug, onNodeLoaded }: NodeDetailProps) {
+function DocSidePanelPreview({ orpc, payload }: SidePanelTabProps) {
+  const { nodeId } = payload as { nodeId: string };
+  return <DocDetailView hideActions orpc={orpc} slug={nodeId} />;
+}
+registerSidePanelTab("doc-preview", DocSidePanelPreview);
+
+export function FolderDetailView({
+  orpc,
+  slug,
+  onNodeLoaded,
+  hideActions,
+}: NodeDetailProps & { hideActions?: boolean }) {
   const messages = useCoreI18n();
   const currentSearch = useSearch();
   const folderQuery = useQuery({
@@ -823,16 +902,28 @@ export function FolderDetailView({ orpc, slug, onNodeLoaded }: NodeDetailProps) 
             <p className="mt-2 text-muted-foreground text-sm">{folder.node.description}</p>
           ) : null}
         </div>
-        <div className="flex shrink-0 items-center gap-2">
-          <NodePermissionsButton nodeId={folder.node.id} nodeName={folder.node.name} orpc={orpc} />
-          <NodeDeleteButton
-            childCount={folder.children.length}
-            nodeId={folder.node.id}
-            nodeName={folder.node.name}
-            nodeType="folder"
-            orpc={orpc}
-          />
-        </div>
+        {hideActions ? null : (
+          <div className="flex shrink-0 items-center gap-2">
+            <NodePinButton
+              payload={{ nodeId: folder.node.id }}
+              tabId={nodeSidePanelTabId("folder", folder.node.id)}
+              tabType="folder-preview"
+              title={folder.node.name}
+            />
+            <NodePermissionsButton
+              nodeId={folder.node.id}
+              nodeName={folder.node.name}
+              orpc={orpc}
+            />
+            <NodeDeleteButton
+              childCount={folder.children.length}
+              nodeId={folder.node.id}
+              nodeName={folder.node.name}
+              nodeType="folder"
+              orpc={orpc}
+            />
+          </div>
+        )}
       </div>
       {folder.children.length === 0 ? (
         <EmptyState
@@ -878,3 +969,9 @@ const FOLDER_CHILD_ICONS: Record<string, typeof Folder> = {
 };
 
 registerNodeDetail("folder", FolderDetailView);
+
+function FolderSidePanelPreview({ orpc, payload }: SidePanelTabProps) {
+  const { nodeId } = payload as { nodeId: string };
+  return <FolderDetailView hideActions orpc={orpc} slug={nodeId} />;
+}
+registerSidePanelTab("folder-preview", FolderSidePanelPreview);

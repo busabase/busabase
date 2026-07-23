@@ -63,6 +63,7 @@ describe("Staleness-aware 3-way merge — oRPC", () => {
       fields: { title: "orig title", body: "orig body", channel: "blog" },
       message: "Create",
       submittedBy: "agent",
+      autoMerge: false,
     });
     const merged = await approveAndMerge(cr.id);
     if (!merged.record) {
@@ -125,6 +126,7 @@ describe("Staleness-aware 3-way merge — oRPC", () => {
       fields: { title: "race title", body: "race body", channel: "blog" },
       message: "Create",
       submittedBy: "agent",
+      autoMerge: false,
     });
     await client.changeRequests.review({ changeRequestId: cr.id, verdict: "approved" });
 

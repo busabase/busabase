@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 
 import { ContentCard } from "@/components/content-card";
 import { EmptyState } from "@/components/empty-state";
-import { hasBusabaseConfig, landingRoute, listLandingPages } from "@/lib/content";
+import { canonicalContentPath, hasBusabaseConfig, listLandingPages } from "@/lib/content";
 
 export const dynamic = "force-dynamic";
 
@@ -25,16 +25,19 @@ export default async function LandingPageIndex() {
         <EmptyState configured={hasBusabaseConfig} kind="pages" />
       ) : (
         <section className="content-grid">
-          {pages.map((page) => (
-            <ContentCard
-              key={page.id}
-              href={`/pages/${landingRoute(page.path)}`}
-              title={page.title}
-              description={page.seoDescription}
-              locale={page.locale}
-              updatedAt={page.updatedAt}
-            />
-          ))}
+          {pages.map((page) => {
+            const href = canonicalContentPath(page.path);
+            return href ? (
+              <ContentCard
+                key={page.id}
+                href={href}
+                title={page.title}
+                description={page.seoDescription}
+                locale={page.locale}
+                updatedAt={page.updatedAt}
+              />
+            ) : null;
+          })}
         </section>
       )}
     </main>

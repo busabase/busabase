@@ -283,10 +283,10 @@ export function AirAppRunControls({
       ) : null}
       {airapp && showPinToSidePanel ? (
         <Button
-          aria-label={messages.airapp.pinToSidePanel}
+          aria-label={messages.nodeDetail.pinToSidePanel}
           onClick={pinToSidePanel}
           size="icon-sm"
-          title={messages.airapp.pinToSidePanel}
+          title={messages.nodeDetail.pinToSidePanel}
           type="button"
           variant="outline"
         >

@@ -1,3 +1,4 @@
+import { useQuery } from "@tanstack/react-query";
 import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";
 import type { BaseFieldVO, BaseVO, FieldType, RecordVO, ViewVO } from "busabase-contract/types";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "kui/dialog";
@@ -16,11 +17,14 @@ import type {
   ViewFormPayload,
   ViewSubmitOptions,
 } from "../helpers/view-types";
+import { registerSidePanelTab, type SidePanelTabProps } from "../side-panel-registry";
 import { applyViewConfigToRecords, BusaBaseTable } from "./base-table";
 import { IStringNameInput } from "./i-string-input";
 import { NodeDeleteButton } from "./node-detail-views";
 import { NodePermissionsButton } from "./node-permissions-button";
+import { NodePinButton, nodeSidePanelTabId } from "./node-pin-button";
 import { EmptyState, PropertyRow, SidebarPanel } from "./primitives";
+import { NodeDetailSkeleton } from "./skeletons";
 import { SplitSubmitButton } from "./split-submit-button";
 
 export function BaseDetailView({
@@ -860,6 +864,12 @@ function BaseDetailHeader({ base, orpc }: { base: BaseVO | null; orpc: BusabaseQ
             `node.type === "base"`, so the shared NodeDeleteButton works as-is. */}
         {base ? (
           <div className="flex shrink-0 items-center gap-2">
+            <NodePinButton
+              payload={{ nodeId: base.nodeId }}
+              tabId={nodeSidePanelTabId("base", base.nodeId)}
+              tabType="base-preview"
+              title={base.name}
+            />
             <NodePermissionsButton nodeId={base.nodeId} nodeName={base.name} orpc={orpc} />
             <NodeDeleteButton
               nodeId={base.nodeId}
@@ -873,6 +883,51 @@ function BaseDetailHeader({ base, orpc }: { base: BaseVO | null; orpc: BusabaseQ
     </div>
   );
 }
+
+/**
+ * Read-only overview shown when a Base is pinned to the side panel — not the
+ * full `BaseDetailView` (that one needs a page's worth of mutation callbacks
+ * wired up from `dashboard/index.tsx`, and drag/inline-edit interactions
+ * don't fit a narrow panel anyway). Just enough to confirm "this is the right
+ * Base" at a glance, plus a link to open it properly.
+ */
+function BaseSidePanelPreview({ orpc, payload }: SidePanelTabProps) {
+  const messages = useCoreI18n();
+  const currentSearch = useSearch();
+  const { nodeId } = payload as { nodeId: string };
+  const basesQuery = useQuery(orpc.bases.list.queryOptions({}));
+  const base = basesQuery.data?.find((candidate) => candidate.nodeId === nodeId) ?? null;
+
+  if (!base) {
+    return basesQuery.isLoading ? (
+      <NodeDetailSkeleton variant="doc" />
+    ) : (
+      <EmptyState
+        body={fmt(messages.nodeDetail.baseNotFoundBody, { slug: nodeId })}
+        title={messages.nodeDetail.baseNotFoundTitle}
+      />
+    );
+  }
+
+  return (
+    <div className="flex h-full flex-col overflow-auto p-4">
+      <h2 className="truncate font-medium text-sm">{base.name}</h2>
+      {base.description ? (
+        <p className="mt-1 text-muted-foreground text-xs">{base.description}</p>
+      ) : null}
+      <dl className="mt-4 flex flex-col gap-2">
+        <PropertyRow label={messages.common.fields} value={String(base.fields.length)} />
+      </dl>
+      <Link
+        className="mt-4 inline-flex items-center justify-center rounded-md border px-3 py-1.5 text-sm hover:bg-muted"
+        href={mergeSearchIntoHref(`/base/${base.slug}`, currentSearch)}
+      >
+        {messages.nodeDetail.openFullBase}
+      </Link>
+    </div>
+  );
+}
+registerSidePanelTab("base-preview", BaseSidePanelPreview);
 
 // Top bar holds only the page-level mode switch (Records / Design). The primary
 // "New record" action lives in the records toolbar, right above the table.

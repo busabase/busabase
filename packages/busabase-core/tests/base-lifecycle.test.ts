@@ -68,6 +68,7 @@ describe("Base-domain DB lifecycle — oRPC", () => {
       fields,
       message: "Create",
       submittedBy: "agent",
+      autoMerge: false,
     });
     const merged = await approveAndMerge(cr.id);
     if (!merged.record) {

@@ -63,14 +63,22 @@ describe("node / field restore fixes", () => {
     const r1 = (
       await approveAndMerge(
         (
-          await client.bases.createChangeRequest({ baseId, fields: { title: "keep-deleted" } })
+          await client.bases.createChangeRequest({
+            baseId,
+            fields: { title: "keep-deleted" },
+            autoMerge: false,
+          })
         ).id,
       )
     ).record!.id;
     const r2 = (
       await approveAndMerge(
         (
-          await client.bases.createChangeRequest({ baseId, fields: { title: "should-return" } })
+          await client.bases.createChangeRequest({
+            baseId,
+            fields: { title: "should-return" },
+            autoMerge: false,
+          })
         ).id,
       )
     ).record!.id;
@@ -83,12 +91,22 @@ describe("node / field restore fixes", () => {
 
     // Trash the whole base node, then restore it.
     await approveAndMerge(
-      (await client.nodes.createChangeRequest({ operations: [{ kind: "delete", nodeId }] })).id,
+      (
+        await client.nodes.createChangeRequest({
+          operations: [{ kind: "delete", nodeId }],
+          autoMerge: false,
+        })
+      ).id,
     );
     expect((await client.bases.list()).some((b) => b.id === baseId)).toBe(false);
 
     await approveAndMerge(
-      (await client.nodes.createChangeRequest({ operations: [{ kind: "restore", nodeId }] })).id,
+      (
+        await client.nodes.createChangeRequest({
+          operations: [{ kind: "restore", nodeId }],
+          autoMerge: false,
+        })
+      ).id,
     );
 
     // The base is back, r2 is active again, but r1 stays deleted.

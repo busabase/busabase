@@ -3,7 +3,7 @@ import type {
   ListObjectsV2CommandOutput,
   S3Client as S3ClientType,
 } from "@aws-sdk/client-s3";
-import type { IStorage, MultipartPart, StorageConfig } from "./types";
+import type { IStorage, MultipartPart, StorageConfig, StorageObjectMetadata } from "./types";
 
 // Lazy-load the AWS SDK. The storage factory STATICALLY imports this module (for
 // parseStorageUrl + the S3Storage class), so a top-level `import "@aws-sdk/*"`
@@ -686,6 +686,31 @@ export class S3Storage implements IStorage {
       return true;
     } catch {
       return false;
+    }
+  }
+
+  async getObjectMetadata(key: string): Promise<StorageObjectMetadata | null> {
+    try {
+      const { HeadObjectCommand } = await loadS3Sdk();
+      const client = await this.getClient();
+      const response = await client.send(
+        new HeadObjectCommand({
+          Bucket: this.config.bucketName,
+          Key: key,
+        }),
+      );
+      return {
+        key,
+        size: response.ContentLength ?? 0,
+        lastModified: response.LastModified ?? new Date(0),
+        contentType: response.ContentType,
+      };
+    } catch (error: unknown) {
+      const name = (error as { name?: string }).name;
+      const status = (error as { $metadata?: { httpStatusCode?: number } }).$metadata
+        ?.httpStatusCode;
+      if (name === "NotFound" || name === "NoSuchKey" || status === 404) return null;
+      throw error;
     }
   }
 

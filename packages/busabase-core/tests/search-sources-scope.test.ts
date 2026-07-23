@@ -54,6 +54,7 @@ describe("search — sources scope", () => {
       baseId: base.id,
       fields: { notes: `Contains ${RECORD_MARKER} in a record field.` },
       submittedBy: "test",
+      autoMerge: false,
     });
     await client.changeRequests.review({ changeRequestId: recordCr.id, verdict: "approved" });
     await client.changeRequests.merge({ changeRequestId: recordCr.id });
@@ -86,6 +87,7 @@ describe("search — sources scope", () => {
           metadata: { assetId: confirmed.assetId },
         },
       ],
+      autoMerge: false,
     });
     await client.changeRequests.review({ changeRequestId: fileCr.id, verdict: "approved" });
     await client.changeRequests.merge({ changeRequestId: fileCr.id });

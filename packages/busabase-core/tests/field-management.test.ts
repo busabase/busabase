@@ -686,6 +686,7 @@ describe("Field management — delete / update / convert", () => {
       const createCr = await client.bases.createChangeRequest({
         baseId,
         fields: { title: "to-restore-unique" },
+        autoMerge: false,
       });
       await approveAndMerge(createCr.id);
       const allRecords = await client.records.search({

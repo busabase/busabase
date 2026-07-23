@@ -49,7 +49,11 @@ describe("Batch review & merge — oRPC integration", () => {
   });
 
   const proposeRecord = async (title: string): Promise<string> => {
-    const cr = await client.bases.createChangeRequest({ baseId, fields: { title } });
+    const cr = await client.bases.createChangeRequest({
+      baseId,
+      fields: { title },
+      autoMerge: false,
+    });
     return cr.id;
   };
 

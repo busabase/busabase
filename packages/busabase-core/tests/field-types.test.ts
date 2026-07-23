@@ -77,6 +77,7 @@ describe("Base field types — end-to-end", () => {
       baseId: related.id,
       fields: { title: "linked" },
       submittedBy: "agent",
+      autoMerge: false,
     });
     await client.changeRequests.review({ changeRequestId: relCr.id, verdict: "approved" });
     const relMerged = await client.changeRequests.merge({ changeRequestId: relCr.id });
@@ -142,7 +143,12 @@ describe("Base field types — end-to-end", () => {
   });
 
   const createRecord = async (fields: Record<string, unknown>, submittedBy = "agent") => {
-    const cr = await client.bases.createChangeRequest({ baseId, fields, submittedBy });
+    const cr = await client.bases.createChangeRequest({
+      baseId,
+      fields,
+      submittedBy,
+      autoMerge: false,
+    });
     await client.changeRequests.review({ changeRequestId: cr.id, verdict: "approved" });
     const merged = await client.changeRequests.merge({ changeRequestId: cr.id });
     if (!merged.record) throw new Error("expected a created record");

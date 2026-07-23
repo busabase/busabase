@@ -132,6 +132,7 @@ describe("Node-parent validation, materialized flag, and ChangeRequest safety â€
       const pending = await client.airapps.create({
         slug: "pending-airapp",
         name: "Pending AirApp",
+        autoMerge: false,
       });
       expect(pending.materialized).toBe(false);
       expect(pending.status).toBe("in_review");
@@ -165,6 +166,7 @@ describe("Node-parent validation, materialized flag, and ChangeRequest safety â€
         slug: "pending-base",
         name: "Pending Base",
         fields: [],
+        autoMerge: false,
       });
       expect(pending.materialized).toBe(false);
       expect(pending.status).toBe("in_review");
@@ -183,6 +185,7 @@ describe("Node-parent validation, materialized flag, and ChangeRequest safety â€
         slug: "pending-doc",
         name: "Pending Doc",
         body: "hi\n",
+        autoMerge: false,
       });
       expect(pending.materialized).toBe(false);
       expect(pending.status).toBe("in_review");
@@ -218,6 +221,7 @@ describe("Node-parent validation, materialized flag, and ChangeRequest safety â€
         slug: "pending-file",
         name: "Pending File",
         assetId: confirmed.assetId as string,
+        autoMerge: false,
       });
       expect(pending.materialized).toBe(false);
       expect(pending.status).toBe("in_review");
@@ -235,6 +239,7 @@ describe("Node-parent validation, materialized flag, and ChangeRequest safety â€
           baseId,
           fields: { name: "Boom Co" },
           message: "trigger boom",
+          autoMerge: false,
         });
         expect(cr.status).toBe("in_review");
 
@@ -273,12 +278,14 @@ describe("Node-parent validation, materialized flag, and ChangeRequest safety â€
         fields: { name: "Idempotent Co" },
         message: "m",
         idempotencyKey: "retry-key-1",
+        autoMerge: false,
       });
       const second = await client.bases.createChangeRequest({
         baseId,
         fields: { name: "Idempotent Co (retry payload differs, still deduped)" },
         message: "m (retry)",
         idempotencyKey: "retry-key-1",
+        autoMerge: false,
       });
       expect(second.id).toBe(first.id);
 
@@ -331,12 +338,14 @@ describe("Node-parent validation, materialized flag, and ChangeRequest safety â€
           fields: { name: "Race" },
           message: "m",
           idempotencyKey: key,
+          autoMerge: false,
         }),
         client.bases.createChangeRequest({
           baseId,
           fields: { name: "Race" },
           message: "m",
           idempotencyKey: key,
+          autoMerge: false,
         }),
       ]);
       expect(a.id).toBe(b.id);

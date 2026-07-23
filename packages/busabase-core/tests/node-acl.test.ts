@@ -52,13 +52,13 @@ describe("node ACL", () => {
       const base = await raw.bases.create({ name: "Finance", slug: "finance", autoMerge: true });
       if ("status" in base) throw new Error("expected materialized base");
       await raw.bases.createField({ baseId: base.id, name: "title", slug: "title", type: "text" });
-      const cr = await raw.bases.createChangeRequest({
+      // Manager: permission-aware default merges this immediately (no
+      // manual review/merge step needed, unlike a changeRequest-level actor).
+      await raw.bases.createChangeRequest({
         baseId: base.id,
         fields: { title: "Payroll Q3" },
         submittedBy: "alice",
       });
-      await raw.changeRequests.review({ changeRequestId: cr.id, verdict: "approved" });
-      await raw.changeRequests.merge({ changeRequestId: cr.id });
       await raw.nodes.updateVisibility({ nodeId: base.nodeId, visibility: "private" });
       return { baseId: base.id, nodeId: base.nodeId };
     });
@@ -247,22 +247,24 @@ describe("node ACL", () => {
     expect(changeRequest.status).toBe("in_review");
 
     await asMember("bob", async () => {
-      await expect(
-        raw.nodes.createChangeRequest({
-          autoMerge: true,
-          operations: [
-            { kind: "create", nodeType: "folder", slug: "blocked-now", name: "Blocked Now" },
-          ],
-        }),
-      ).rejects.toThrow(/write access/);
-      await expect(
-        raw.docs.create({
-          name: "Blocked Doc",
-          slug: "blocked-doc",
-          body: "should not materialize",
-          autoMerge: true,
-        }),
-      ).rejects.toThrow(/write access/);
+      // Explicit `autoMerge: true` without `write` access gracefully
+      // downgrades to a pending CR instead of throwing — the caller just
+      // doesn't get what they asked for, same as omitting `autoMerge`.
+      const blockedNode = await raw.nodes.createChangeRequest({
+        autoMerge: true,
+        operations: [
+          { kind: "create", nodeType: "folder", slug: "blocked-now", name: "Blocked Now" },
+        ],
+      });
+      expect(blockedNode.status).toBe("in_review");
+      const blockedDoc = await raw.docs.create({
+        name: "Blocked Doc",
+        slug: "blocked-doc",
+        body: "should not materialize",
+        autoMerge: true,
+      });
+      if (!("status" in blockedDoc)) throw new Error("expected a pending ChangeRequest");
+      expect(blockedDoc.status).toBe("in_review");
       await expect(
         raw.docs.updateBody({ nodeId: docNodeId, body: "member direct update" }),
       ).rejects.toThrow(/write access/);

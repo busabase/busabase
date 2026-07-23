@@ -457,9 +457,8 @@ const createNodeChangeRequestInputSchema = z.object({
   autoMerge: z
     .boolean()
     .optional()
-    .default(false)
     .describe(
-      "Whether to approve and merge this structural node change immediately. Defaults to false so node Change Request creation is review-first unless explicitly requested.",
+      "Whether to approve and merge this structural node change immediately. Omitted defaults to merging immediately if the actor has write access on every target node, otherwise falling back to a pending Change Request; pass explicit false to force review even with write access.",
     ),
   operations: z.array(nodeOperationInputSchema).min(1),
 });

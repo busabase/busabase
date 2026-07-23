@@ -95,6 +95,7 @@ describe("record_update — required-field validation sees the MERGED view, not 
       fields,
       message: "Create",
       submittedBy: "agent",
+      autoMerge: false,
     });
     const merged = await approveAndMerge(cr.id);
     if (!merged.record) throw new Error("expected a created record");
@@ -115,6 +116,7 @@ describe("record_update — required-field validation sees the MERGED view, not 
     const updateCr = await client.records.updateChangeRequest({
       recordId,
       fields: { title: "G1" },
+      autoMerge: false,
     });
     await approveAndMerge(updateCr.id);
 

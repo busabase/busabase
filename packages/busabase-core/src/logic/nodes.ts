@@ -30,7 +30,12 @@ import { docBodyKey } from "../domains/doc/handlers";
 import { insertAuditEvent } from "./audit";
 import { id, now, rootNodeIdForSpace } from "./kernel";
 import { publishChangeRequestPendingReview } from "./live-events";
-import { assertNodePermission, assertNodeVisible, buildNodeVisibilityCondition } from "./node-acl";
+import {
+  assertNodePermission,
+  assertNodeVisible,
+  buildNodeVisibilityCondition,
+  hasNodePermission,
+} from "./node-acl";
 import { buildNodeTree, ensureReady } from "./seed";
 import { toNodeSearchResultVO, toNodeVO } from "./vo";
 
@@ -100,7 +105,7 @@ const nodeOperationInputSchema = z.discriminatedUnion("kind", [
 export const createNodeChangeRequestInputSchema = z.object({
   message: z.string().optional().default("Update node tree"),
   submittedBy: z.string().optional().default("local-producer"),
-  autoMerge: z.boolean().optional().default(false),
+  autoMerge: z.boolean().optional(),
   operations: z.array(nodeOperationInputSchema).min(1),
 });
 
@@ -563,24 +568,40 @@ export const createNodeChangeRequest = async (
   const parsed = createNodeChangeRequestInputSchema.parse(input);
   assertValidNodeRefs(parsed.operations);
   const submittedBy = resolveActorId(parsed.submittedBy);
-  const requiredLevel = parsed.autoMerge ? "write" : "changeRequest";
 
-  // ChangeRequest-submission gate (node ACL): proposing against an existing
-  // node requires `changeRequest` level on it; creating a new node requires it
-  // on the target parent. A create op parented to a ref (a node THIS CR
-  // creates) is covered by that earlier create op's own parent check.
+  // Resolve each operation's permission-gated target node — a create op
+  // parented to an in-CR ref is skipped (covered by that earlier create op's
+  // own parent check).
+  const targetNodeIds: string[] = [];
   for (const operation of parsed.operations) {
     if (operation.kind === "create") {
       if (!operation.parentNodeRef) {
-        await assertNodePermission(
-          operation.parentNodeId ?? rootNodeIdForSpace(getContextSpaceId()),
-          requiredLevel,
-          submittedBy,
-        );
+        targetNodeIds.push(operation.parentNodeId ?? rootNodeIdForSpace(getContextSpaceId()));
       }
     } else {
-      await assertNodePermission(operation.nodeId, requiredLevel, submittedBy);
+      targetNodeIds.push(operation.nodeId);
     }
+  }
+
+  // Permission-aware default: merge immediately only if the actor has
+  // `write` on EVERY target node (all-or-nothing, same as the assertion
+  // below); explicit `autoMerge: false` always forces review regardless.
+  let autoMerge = parsed.autoMerge !== false;
+  if (autoMerge) {
+    for (const nodeId of targetNodeIds) {
+      if (!(await hasNodePermission(nodeId, "write", submittedBy))) {
+        autoMerge = false;
+        break;
+      }
+    }
+  }
+  const requiredLevel = autoMerge ? "write" : "changeRequest";
+
+  // ChangeRequest-submission gate (node ACL): proposing against an existing
+  // node requires `changeRequest` level on it; creating a new node requires it
+  // on the target parent.
+  for (const nodeId of targetNodeIds) {
+    await assertNodePermission(nodeId, requiredLevel, submittedBy);
   }
 
   const changeRequestId = id("crq");
@@ -664,9 +685,7 @@ export const createNodeChangeRequest = async (
     metadata: { operation: "node_tree_update" },
   });
 
-  if (parsed.autoMerge) {
-    // Only explicit "create now" / setup flows auto-merge; plain
-    // nodes.createChangeRequest is review-first by default.
+  if (autoMerge) {
     const { autoApproveAndMerge } = await import("./cr-lifecycle");
     const merged = await autoApproveAndMerge(changeRequestId);
     return merged.changeRequest;

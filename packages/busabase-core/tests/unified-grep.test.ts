@@ -92,7 +92,10 @@ describe("Unified Grep — POST /grep (files + docs + records)", () => {
   };
 
   const archiveNode = async (nodeId: string) => {
-    const cr = await client.nodes.createChangeRequest({ operations: [{ kind: "delete", nodeId }] });
+    const cr = await client.nodes.createChangeRequest({
+      operations: [{ kind: "delete", nodeId }],
+      autoMerge: false,
+    });
     await client.changeRequests.review({ changeRequestId: cr.id, verdict: "approved" });
     await client.changeRequests.merge({ changeRequestId: cr.id });
   };
@@ -290,7 +293,12 @@ describe("Unified Grep — POST /grep (files + docs + records)", () => {
 
     /** Create a record in `baseId` through the create → review → merge loop. */
     const createBaseRecord = async (baseId: string, fields: Record<string, unknown>) => {
-      const cr = await client.bases.createChangeRequest({ baseId, fields, submittedBy: "agent" });
+      const cr = await client.bases.createChangeRequest({
+        baseId,
+        fields,
+        submittedBy: "agent",
+        autoMerge: false,
+      });
       const merged = await approveAndMerge(cr.id);
       if (!merged.record) throw new Error("expected a created record");
       return merged.record.id;

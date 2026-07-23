@@ -71,7 +71,11 @@ describe("activity.listPaged — keyset merge parity", () => {
     await client.changeRequests.merge({ changeRequestId: cr1.id });
 
     // CR2: one more record via a single-record CR → merge (1 CR, 1 operation).
-    const cr2 = await client.bases.createChangeRequest({ baseId, fields: { name: "extra" } });
+    const cr2 = await client.bases.createChangeRequest({
+      baseId,
+      fields: { name: "extra" },
+      autoMerge: false,
+    });
     await client.changeRequests.review({ changeRequestId: cr2.id, verdict: "approved" });
     await client.changeRequests.merge({ changeRequestId: cr2.id });
 

@@ -77,6 +77,7 @@ describe("Boundary P2 — oRPC", () => {
       fields,
       message: "Create",
       submittedBy: "agent",
+      autoMerge: false,
     });
     const merged = await approveAndMerge(cr.id);
     if (!merged.record) throw new Error("expected a created record");

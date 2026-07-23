@@ -87,6 +87,7 @@ describe("Base field types — OpenAPI (/api/v1) route round-trip", () => {
     const cr = await ok("POST", `/bases/${baseId}/change-requests`, {
       fields,
       submittedBy: "agent",
+      autoMerge: false,
     });
     await ok("POST", `/change-requests/${cr.id}/reviews`, { verdict: "approved" });
     const merged = await ok("POST", `/change-requests/${cr.id}/merge`);
@@ -149,6 +150,7 @@ describe("Base field types — OpenAPI (/api/v1) route round-trip", () => {
     const relCr = await ok("POST", `/bases/${related.id}/change-requests`, {
       fields: { title: "linked" },
       submittedBy: "agent",
+      autoMerge: false,
     });
     await ok("POST", `/change-requests/${relCr.id}/reviews`, { verdict: "approved" });
     const relMerged = await ok("POST", `/change-requests/${relCr.id}/merge`);
