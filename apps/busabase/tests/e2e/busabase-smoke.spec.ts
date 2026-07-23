@@ -96,7 +96,8 @@ test("dashboard routes render the review-first seeded experience", async ({ page
   await expect(page).toHaveURL(/\/dashboard\/local\/base\/blog\/drafts$/);
   await expect(page.getByRole("heading", { name: "Posts" })).toBeVisible();
 
-  // Create a record as a Change Request (the primary "Submit Request" action).
+  // Create a record as a Change Request via "More submit options → Submit Request" —
+  // the manage-level local actor defaults to "Submit Now" (immediate) as primary.
   await page.goto("/dashboard/local/base/blog/new");
   await expect(page.getByText("New Posts record")).toBeVisible();
   await page.getByLabel("Title", { exact: true }).fill("Smoke test AI market note");
@@ -107,6 +108,7 @@ test("dashboard routes render the review-first seeded experience", async ({ page
   await page.getByLabel("Path", { exact: true }).fill("/blog/smoke-test-ai-market-note");
   await page.getByLabel("Slug", { exact: true }).fill("smoke-test-ai-market-note");
   await page.getByLabel("Locale", { exact: true }).selectOption("en");
+  await page.getByRole("button", { name: "More submit options" }).click();
   await page.getByRole("button", { name: "Submit Request" }).click();
   await expect(page).toHaveURL(/\/dashboard\/local\/inbox\/crq/);
   await expect(
@@ -114,7 +116,7 @@ test("dashboard routes render the review-first seeded experience", async ({ page
   ).toBeVisible();
   await expect(page.getByText("Waiting for your review")).toBeVisible();
 
-  // Create + merge in one step via the "More submit options → Submit Now" split button.
+  // Create + merge in one step via the primary "Submit Now" action.
   await page.goto("/dashboard/local/base/blog/new");
   await expect(page.getByText("New Posts record")).toBeVisible();
   await page.getByLabel("Title", { exact: true }).fill("Smoke direct merge AI note");
@@ -125,7 +127,6 @@ test("dashboard routes render the review-first seeded experience", async ({ page
   await page.getByLabel("Path", { exact: true }).fill("/blog/smoke-direct-merge-ai-note");
   await page.getByLabel("Slug", { exact: true }).fill("smoke-direct-merge-ai-note");
   await page.getByLabel("Locale", { exact: true }).selectOption("en");
-  await page.getByRole("button", { name: "More submit options" }).click();
   await page.getByRole("button", { name: "Submit Now" }).click();
   await expect(page).toHaveURL(/\/dashboard\/local\/base\/blog\/rec/);
   await expect(page.getByRole("heading", { name: "Smoke direct merge AI note" })).toBeVisible();

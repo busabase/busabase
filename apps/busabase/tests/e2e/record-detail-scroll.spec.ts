@@ -24,6 +24,7 @@ test("Record Detail scrolls through long field content", async ({ page, request 
         fields: cmsPostFields({ body, title }),
         message: "Create a long record for the Record Detail scroll regression test",
         submittedBy: "playwright",
+        autoMerge: false,
       },
     }),
   );

@@ -286,7 +286,12 @@ export interface BusabaseDashboardApiClient {
   ) => Promise<ChangeRequestVO>;
   createChangeRequest: (
     baseId: string,
-    payload: { fields: Record<string, unknown>; message?: string; submittedBy?: string },
+    payload: {
+      fields: Record<string, unknown>;
+      message?: string;
+      submittedBy?: string;
+      autoMerge?: boolean;
+    },
   ) => Promise<ChangeRequestVO>;
   createUpdateChangeRequest: (
     recordId: string,

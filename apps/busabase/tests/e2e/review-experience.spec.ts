@@ -40,6 +40,7 @@ test("review -> merge -> refresh keeps user-visible lineage", async ({ page, req
         }),
         message: "Create lineage test record",
         submittedBy: "e2e-agent",
+        autoMerge: false,
       },
     }),
   );
@@ -76,6 +77,7 @@ test("request changes is recoverable and revision returns to review", async ({ p
         fields,
         message: "Create request-changes test record",
         submittedBy: "e2e-agent",
+        autoMerge: false,
       },
     }),
   );
@@ -121,6 +123,7 @@ test("same-field merge conflict stays visible and recoverable", async ({ page, r
         fields,
         message: "Create conflict base record",
         submittedBy: "e2e-agent",
+        autoMerge: false,
       },
     }),
   );
@@ -190,6 +193,7 @@ test("record delete request explains impact and preserves the canonical record",
         fields: cmsPostFields({ title, body: "Delete should be reviewable first." }),
         message: "Create delete request test record",
         submittedBy: "e2e-agent",
+        autoMerge: false,
       },
     }),
   );

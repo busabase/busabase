@@ -42,6 +42,7 @@ const createChangeRequest = async (request: APIRequestContext, baseId: string, t
         fields: cmsPostFields({ title, body: "Body for a close-verdict test." }),
         message: "Create close-verdict test record",
         submittedBy: "e2e-agent",
+        autoMerge: false,
       },
     }),
   );

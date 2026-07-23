@@ -142,12 +142,16 @@ export function CreateNodeModal({
     setError(null);
     try {
       const metadata = await uploadFileNodeAsset();
+      // Explicit `autoMerge: false`: this is the dedicated "propose for review"
+      // action — it must always queue a pending CR regardless of the actor's
+      // own permission, unlike `submitAndMerge` below.
       const changeRequest = await apiClient.createNodeChangeRequest({
         message: fmt(messages.createNode.message, {
           name: trimmedName,
           type: activeType?.label ?? "item",
         }),
         operations: buildOperations(trimmedName, finalSlug, metadata),
+        autoMerge: false,
       });
       reset();
       onOpenChange(false);

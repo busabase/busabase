@@ -990,10 +990,14 @@ function BusabaseDashboardContent({
   const submitCreateRecord = useCallback(
     async (base: BaseVO, fields: Record<string, unknown>, options?: RecordSubmitOptions) => {
       setError(null);
+      // Explicit `autoMerge: false`: this call must always land as a pending CR
+      // regardless of the actor's own permission — `mergeImmediately` below is
+      // what decides whether to separately approve + merge it right away.
       const changeRequest = await client.createChangeRequest(base.id, {
         fields,
         message: fmt(messages.createNode.createRecordMessage, { base: base.name }),
         submittedBy: "local-editor",
+        autoMerge: false,
       });
       if (options?.mergeImmediately) {
         const merged = await approveAndMergeChangeRequest(changeRequest.id);

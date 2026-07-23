@@ -119,6 +119,9 @@ test("blocks creation when the required Text field is empty", async ({ page }) =
 
   // Leave the required "Text" field empty; fill an optional one so the form is not blank.
   await page.getByLabel("Number", { exact: true }).fill("7");
+  // "Submit Request" (change request) is the secondary action behind the dropdown —
+  // the manage-level local actor defaults to "Submit Now" (immediate) as primary.
+  await page.getByRole("button", { name: "More submit options" }).click();
   await page.getByRole("button", { name: "Submit Request" }).click();
 
   // Server-side validation surfaces in the error banner; we stay on the form.
@@ -130,7 +133,9 @@ test("submitting for review routes the new record to the inbox", async ({ page }
   await page.goto(NEW_URL, { waitUntil: "commit" });
   await page.getByLabel("Text", { exact: true }).fill("Review-first lab row");
 
-  // The primary action queues a change request for review rather than merging.
+  // "Submit Request" (change request) is the secondary action behind the dropdown —
+  // the manage-level local actor defaults to "Submit Now" (immediate) as primary.
+  await page.getByRole("button", { name: "More submit options" }).click();
   await page.getByRole("button", { name: "Submit Request" }).click();
 
   await expect(page).toHaveURL(/\/dashboard\/local\/inbox\/[\w-]+$/);
