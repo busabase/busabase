@@ -116,7 +116,10 @@ export function detectPort(line: string): number | null {
 }
 
 export function resolveWorkdir(nodeId: string): string {
-  const baseWorkdir = path.resolve(process.cwd(), process.env.SANDAGENT_WORKDIR || ".tmp");
+  const baseWorkdir = path.resolve(
+    /* turbopackIgnore: true */ process.cwd(),
+    process.env.SANDAGENT_WORKDIR || ".tmp",
+  );
   // Every run gets its own directory (not reused across runs) so a
   // "Run again" click never reuses a stale node_modules/dist from a
   // previous, possibly-different file set for the same AirApp node.

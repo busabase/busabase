@@ -42,6 +42,7 @@ import {
   nodePrincipalSchema,
   nodeSchema,
   nodeSearchResultSchema,
+  nodeShareSchema,
   reviewChangeRequestInputSchema,
   reviseOperationInputSchema,
   searchInputSchema,
@@ -274,6 +275,49 @@ export const busabaseContractRoutes = {
           }),
         )
         .output(z.object({ removed: z.boolean() })),
+    },
+    share: {
+      get: oc
+        .route({
+          method: "GET",
+          path: "/nodes/{nodeId}/share",
+          tags: ["Nodes", "Sharing"],
+          summary: "Read a node's public link-sharing settings",
+          successDescription:
+            "The node's public-share settings, or null when the node was never shared. The stored password is never returned — only a `hasPassword` flag.",
+        })
+        .input(z.object({ nodeId: z.string() }))
+        .output(nodeShareSchema.nullable()),
+      set: oc
+        .route({
+          method: "POST",
+          path: "/nodes/{nodeId}/share",
+          tags: ["Nodes", "Sharing"],
+          summary: "Enable or update a node's public link sharing",
+          successDescription:
+            "Turned public sharing on (or updated its capability/password/expiry) and re-materialized the effective public scope down the subtree. Requires `manage` level on the node.",
+        })
+        .input(
+          z.object({
+            nodeId: z.string(),
+            scope: z.enum(["none", "public"]),
+            capability: z.enum(["read", "submit"]).optional(),
+            password: z.string().nullable().optional(),
+            expiresAt: z.string().datetime().nullable().optional(),
+          }),
+        )
+        .output(nodeShareSchema.nullable()),
+      disable: oc
+        .route({
+          method: "DELETE",
+          path: "/nodes/{nodeId}/share",
+          tags: ["Nodes", "Sharing"],
+          summary: "Revoke a node's public link sharing",
+          successDescription:
+            "Flipped the share scope to none in place (the link is kept so re-enabling produces the same URL). Requires `manage` level on the node.",
+        })
+        .input(z.object({ nodeId: z.string() }))
+        .output(nodeShareSchema.nullable()),
     },
   },
   auditEvents: {

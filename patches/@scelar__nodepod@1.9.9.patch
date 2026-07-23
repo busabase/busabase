@@ -1,8 +1,8 @@
 diff --git a/dist/__sw__.js b/dist/__sw__.js
-index 832b6d339ef79befd5b318ac59d0b9ac2088868a..9943e759f8c952685480cfe198f699e5e74d370e 100644
+index 832b6d339ef79befd5b318ac59d0b9ac2088868a..5d3ed80074654d6c5641d164a308c7d61b79d579 100644
 --- a/dist/__sw__.js
 +++ b/dist/__sw__.js
-@@ -693,6 +693,56 @@ self.addEventListener("fetch", (event) => {
+@@ -693,6 +693,76 @@ self.addEventListener("fetch", (event) => {
      return;
    }
  
@@ -56,6 +56,35 @@ index 832b6d339ef79befd5b318ac59d0b9ac2088868a..9943e759f8c952685480cfe198f699e5
 +    return;
 +  }
 +
++  // 1.75. [busabase patch] A frame navigation initiated by a document on a
++  //      different origin targets the real host, not a Nodepod preview. A pod
++  //      can legitimately claim "/" while it is running; without this guard,
++  //      reassigning that outer iframe to a host route such as /embed/* lets
++  //      the stale root claim capture the navigation and proxy it to a pod
++  //      that is already being torn down. Explicit /__virtual__/ and
++  //      /__preview__/ URLs were handled above and remain routable.
++  const isFrameNavigation =
++    request.mode === "navigate" &&
++    (request.destination === "iframe" || request.destination === "frame");
++  const hasCrossOriginReferrer = (() => {
++    if (!request.referrer) return false;
++    try {
++      return new URL(request.referrer).origin !== self.location.origin;
++    } catch {
++      return false;
++    }
++  })();
++  if (isFrameNavigation && hasCrossOriginReferrer) return;
++
    // 2. only same-origin (and localhost-alias) URLs can belong to a pod;
    //    cross-origin (fonts, CDNs) always passes through
    const sameOrigin =
+@@ -727,1 +797,8 @@ self.addEventListener("fetch", (event) => {
++  // 3.5. [busabase patch] `/embed/*` is a real host route. Known preview
++  //      clients were handled above, so an unattributed frame navigation here
++  //      must not be recovered through a pod's broad path claim (especially
++  //      "/"). This also covers the same-origin redirect that follows the
++  //      initial cross-origin `/embed/{id}` request.
++  if (isFrameNavigation && url.pathname.startsWith("/embed/")) return;
++
+   const refUrl = (() => {

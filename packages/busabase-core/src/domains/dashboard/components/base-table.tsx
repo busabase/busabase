@@ -79,6 +79,7 @@ import {
   setViewFieldWidth,
 } from "../helpers/view-config";
 import type { RecordsPagination, ViewFormPayload, ViewSubmitOptions } from "../helpers/view-types";
+import { useIsAnonymousVisitor } from "../visitor-context";
 import { BusaBaseCalendar } from "./base-calendar";
 import { BusaBaseGallery } from "./base-gallery";
 import { BusaBaseGantt } from "./base-gantt";
@@ -750,6 +751,9 @@ export function BusaBaseTable({
     placement: "before" | "after";
     slug: string;
   } | null>(null);
+  // A public read-only visitor gets no "New record" affordance — the create
+  // route/mutation isn't on the anonymous allowlist, so it could only ever fail.
+  const isAnon = useIsAnonymousVisitor();
   const allFields = base?.fields ?? records[0]?.base.fields ?? [];
   const fields = activeView
     ? getVisibleViewFieldSlugs(activeView.config, allFields)
@@ -880,7 +884,7 @@ export function BusaBaseTable({
             );
           })}
         </nav>
-        {base ? (
+        {base && !isAnon ? (
           <button
             aria-label={messages.base.newView}
             className="inline-flex size-7 shrink-0 items-center justify-center rounded-md border border-border/70 border-dashed text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
@@ -918,7 +922,7 @@ export function BusaBaseTable({
               </button>
             ) : null}
           </span>
-          {activeView ? (
+          {activeView && !isAnon ? (
             <details className="relative">
               <summary
                 aria-label={messages.base.viewActions}
@@ -955,7 +959,7 @@ export function BusaBaseTable({
               </div>
             </details>
           ) : null}
-          {base ? (
+          {base && !isAnon ? (
             <Link
               className="inline-flex h-7 items-center gap-1.5 rounded-md bg-foreground px-2.5 font-medium text-background text-xs transition-colors hover:bg-foreground/85"
               href={mergeSearchIntoHref(`/base/${base.slug}/new`, currentSearch)}
@@ -966,7 +970,7 @@ export function BusaBaseTable({
           ) : null}
         </div>
       </div>
-      {activeView ? (
+      {activeView && !isAnon ? (
         <ViewConfigToolbar
           config={activeView.config}
           fields={allFields}

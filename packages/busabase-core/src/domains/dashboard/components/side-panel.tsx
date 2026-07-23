@@ -80,23 +80,34 @@ export function SidePanel({ orpc }: { orpc: BusabaseQueryUtils }) {
     [],
   );
 
-  if (tabs.length === 0 || !isOpen) {
+  if (tabs.length === 0) {
     return null;
   }
 
   const isMaximized = layout === "maximized";
 
+  // Collapsing (setOpen(false)) must NOT unmount this panel — its tabs (e.g. a
+  // pinned AirApp preview iframe) carry live, unrecoverable client state
+  // (Nodepod's in-browser dev server, in-page interaction state) that a
+  // remount would discard. Always render the SAME tree (same ancestor shape
+  // for every tab's Renderer) and toggle CSS visibility instead — a branch
+  // that swaps in a differently-shaped tree when collapsed would make React
+  // unmount/remount every Renderer across the toggle, defeating the point.
+  // `tabs.length === 0` above is the only real "nothing to preserve" unmount case.
   return (
     <div
+      aria-hidden={!isOpen}
       aria-label={messages.sidePanel.label}
       className={
-        isMaximized
-          ? "fixed inset-0 z-50 flex h-dvh w-full flex-col bg-background shadow-lg"
-          : "relative flex h-full min-w-0 max-w-full shrink-0 flex-col border-border/60 border-l bg-background"
+        !isOpen
+          ? "hidden"
+          : isMaximized
+            ? "fixed inset-0 z-50 flex h-dvh w-full flex-col bg-background shadow-lg"
+            : "relative flex h-full min-w-0 max-w-full shrink-0 flex-col border-border/60 border-l bg-background"
       }
       data-layout={layout}
       role="region"
-      style={isMaximized ? undefined : { width: `min(${width}px, 100vw)` }}
+      style={!isOpen || isMaximized ? undefined : { width: `min(${width}px, 100vw)` }}
     >
       {!isMaximized ? (
         <button

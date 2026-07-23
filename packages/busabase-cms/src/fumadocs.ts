@@ -152,7 +152,7 @@ export const sanitizeLandingPageHtml = (html: string): string =>
       },
     },
     transformTags: {
-      a: (tagName, attribs) => ({
+      a: (tagName: string, attribs: Record<string, string>) => ({
         tagName,
         attribs: attribs.target === "_blank" ? { ...attribs, rel: "noopener noreferrer" } : attribs,
       }),

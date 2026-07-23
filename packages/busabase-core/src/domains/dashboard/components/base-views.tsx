@@ -18,11 +18,13 @@ import type {
   ViewSubmitOptions,
 } from "../helpers/view-types";
 import { registerSidePanelTab, type SidePanelTabProps } from "../side-panel-registry";
+import { useIsAnonymousVisitor } from "../visitor-context";
 import { applyViewConfigToRecords, BusaBaseTable } from "./base-table";
 import { IStringNameInput } from "./i-string-input";
 import { NodeDeleteButton } from "./node-detail-views";
 import { NodePermissionsButton } from "./node-permissions-button";
 import { NodePinButton, nodeSidePanelTabId } from "./node-pin-button";
+import { NodeShareButton } from "./node-share-button";
 import { EmptyState, PropertyRow, SidebarPanel } from "./primitives";
 import { NodeDetailSkeleton } from "./skeletons";
 import { SplitSubmitButton } from "./split-submit-button";
@@ -849,6 +851,10 @@ export function BaseSetupView({
 
 function BaseDetailHeader({ base, orpc }: { base: BaseVO | null; orpc: BusabaseQueryUtils }) {
   const messages = useCoreI18n();
+  // A public read-only visitor gets no node-management affordances: the server
+  // refuses these mutations anyway (they aren't on the anonymous allowlist), so
+  // showing them would only offer buttons that can't work.
+  const isAnon = useIsAnonymousVisitor();
   return (
     <div className="px-6 pt-5 pb-2">
       <div className="flex items-start justify-between gap-3">
@@ -862,7 +868,7 @@ function BaseDetailHeader({ base, orpc }: { base: BaseVO | null; orpc: BusabaseQ
             detail page had no delete/archive action at all (only field/view/
             record actions existed). `mergeNodeDelete` already special-cases
             `node.type === "base"`, so the shared NodeDeleteButton works as-is. */}
-        {base ? (
+        {base && !isAnon ? (
           <div className="flex shrink-0 items-center gap-2">
             <NodePinButton
               payload={{ nodeId: base.nodeId }}
@@ -871,6 +877,15 @@ function BaseDetailHeader({ base, orpc }: { base: BaseVO | null; orpc: BusabaseQ
               title={base.name}
             />
             <NodePermissionsButton nodeId={base.nodeId} nodeName={base.name} orpc={orpc} />
+            {/* spaceId is not carried on BaseVO; NodeShareButton derives it from
+                the current /dashboard/<spaceId>/… pathname. */}
+            <NodeShareButton
+              nodeId={base.nodeId}
+              nodeName={base.name}
+              nodeSlug={base.slug}
+              nodeType="base"
+              orpc={orpc}
+            />
             <NodeDeleteButton
               nodeId={base.nodeId}
               nodeName={base.name}
@@ -940,6 +955,9 @@ export function BaseTopbarActions({
 }) {
   const messages = useCoreI18n();
   const currentSearch = useSearch();
+  // The Design tab is schema editing (add/rename fields) — a public read-only
+  // visitor has no business there and the mutations behind it are refused anyway.
+  const isAnon = useIsAnonymousVisitor();
 
   return (
     <nav className="flex rounded-md bg-muted/60 p-0.5 text-xs">
@@ -953,16 +971,18 @@ export function BaseTopbarActions({
       >
         {messages.base.recordsTab}
       </Link>
-      <Link
-        className={`rounded px-2.5 py-1.5 font-medium transition-colors ${
-          activeTab === "design"
-            ? "bg-background text-foreground shadow-sm"
-            : "text-muted-foreground hover:text-foreground"
-        }`}
-        href={mergeSearchIntoHref(`/base/${base.slug}/design`, currentSearch)}
-      >
-        {messages.base.designTab}
-      </Link>
+      {isAnon ? null : (
+        <Link
+          className={`rounded px-2.5 py-1.5 font-medium transition-colors ${
+            activeTab === "design"
+              ? "bg-background text-foreground shadow-sm"
+              : "text-muted-foreground hover:text-foreground"
+          }`}
+          href={mergeSearchIntoHref(`/base/${base.slug}/design`, currentSearch)}
+        >
+          {messages.base.designTab}
+        </Link>
+      )}
     </nav>
   );
 }

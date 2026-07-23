@@ -1,6 +1,6 @@
-import { implement, ORPCError } from "@orpc/server";
+import { enhanceRouter, implement, ORPCError, os } from "@orpc/server";
 import { busabaseContract } from "busabase-contract/contract/busabase";
-import { getContextSpaceId, resolveActorId } from "./context";
+import { getContextSpaceId, isAnonymousVisitor, resolveActorId } from "./context";
 import { getDb } from "./db";
 import { airappRouter } from "./domains/airapp/router";
 import { assetsRouter } from "./domains/assets/router";
@@ -15,14 +15,17 @@ import { skillRouter } from "./domains/skill/router";
 import { vaultRouter } from "./domains/vault/router";
 import { webhookRouter } from "./domains/webhook/router";
 import { listActivityPaged } from "./logic/activity";
+import { anonymousAccessKindFor, denyAnonymousProcedure } from "./logic/anonymous-allowlist";
 import { grepUnified } from "./logic/grep";
 import { subscribeBusabaseLiveEvents } from "./logic/live-events";
 import {
+  getPublicScopeOf,
   grantNodePrincipal,
   listNodePrincipals,
   revokeNodePrincipal,
   updateNodeVisibility,
 } from "./logic/node-acl";
+import { disableNodeShare, getNodeShare, setNodeShare } from "./logic/node-share";
 import {
   closeChangeRequest,
   countChangeRequests,
@@ -57,7 +60,33 @@ import {
 // change-request lifecycle / operations); per-domain route slices composed from the domains.
 const busabase = implement(busabaseContract);
 
-export const busabaseRouter = busabase.router({
+/**
+ * PO → VO for a node's public-share row. SECURITY: strips `passwordHash` down to
+ * a boolean `hasPassword` flag — the stored hash must never cross the wire — and
+ * serializes the dates. Returns `null` when the node was never shared.
+ */
+const toNodeShareVO = (
+  row: Awaited<ReturnType<typeof getNodeShare>>,
+): {
+  nodeId: string;
+  scope: "none" | "public";
+  capability: "read" | "submit";
+  hasPassword: boolean;
+  expiresAt: string | null;
+  updatedAt: string;
+} | null =>
+  row === null
+    ? null
+    : {
+        nodeId: row.nodeId,
+        scope: row.scope,
+        capability: row.capability,
+        hasPassword: row.passwordHash != null,
+        expiresAt: row.expiresAt ? row.expiresAt.toISOString() : null,
+        updatedAt: row.updatedAt.toISOString(),
+      };
+
+const busabaseRouterImpl = busabase.router({
   auth: {
     verify: busabase.auth.verify.handler(async () => getAuthInfo()),
   },
@@ -130,6 +159,29 @@ export const busabaseRouter = busabase.router({
         );
         return { removed: true };
       }),
+    },
+    share: {
+      get: busabase.nodes.share.get.handler(async ({ input }) =>
+        toNodeShareVO(await getNodeShare(input.nodeId)),
+      ),
+      set: busabase.nodes.share.set.handler(async ({ input }) =>
+        toNodeShareVO(
+          await setNodeShare(input.nodeId, {
+            scope: input.scope,
+            capability: input.capability,
+            password: input.password,
+            expiresAt:
+              input.expiresAt === undefined
+                ? undefined
+                : input.expiresAt === null
+                  ? null
+                  : new Date(input.expiresAt),
+          }),
+        ),
+      ),
+      disable: busabase.nodes.share.disable.handler(async ({ input }) =>
+        toNodeShareVO(await disableNodeShare(input.nodeId)),
+      ),
     },
   },
   auditEvents: {
@@ -204,4 +256,66 @@ export const busabaseRouter = busabase.router({
   },
   records: recordRouter,
   views: viewRouter,
+});
+
+/** Best-effort `nodeId` read off a not-yet-validated middleware input. */
+const readNodeId = (input: unknown): string | null => {
+  if (typeof input !== "object" || input === null) return null;
+  const value = (input as { nodeId?: unknown }).nodeId;
+  return typeof value === "string" && value.length > 0 ? value : null;
+};
+
+/**
+ * Per-procedure default-deny gate for anonymous (public-link) visitors.
+ *
+ * It is attached to EVERY procedure rather than checked once at the HTTP
+ * boundary because the oRPC batch endpoint (`/api/rpc/__batch__`) collapses
+ * many procedure calls into one request path — a path-based check there would
+ * be bypassed by simply batching the call. Middleware is the only layer every
+ * individual call provably passes through.
+ *
+ * It is a strict no-op for member requests (`isAnonymousVisitor()` is false),
+ * so member-facing behaviour is unchanged; the anonymous branch can only ever
+ * remove access, never grant it.
+ */
+const anonymousSurfaceGuard = os.middleware(async ({ next, path }, input) => {
+  // Members (and the open-source single-user host, which sets no visitorKind)
+  // keep exactly the behaviour they had before this gate existed.
+  if (!isAnonymousVisitor()) {
+    return next();
+  }
+
+  const kind = anonymousAccessKindFor(path);
+  // Default-deny: anything not on the explicit public surface — including any
+  // procedure added to the router after this file was last touched — fails
+  // closed rather than inheriting anonymous access by accident.
+  if (kind === null) {
+    denyAnonymousProcedure(path);
+  }
+
+  if (kind === "submit") {
+    // A `submit` procedure must be authorized against the TARGET NODE's own
+    // capability, not merely against "the visitor got in somehow": a node
+    // shared read-only must never accept writes. No resolvable node id means
+    // we cannot prove the capability, so we refuse.
+    const nodeId = readNodeId(input);
+    if (!nodeId || (await getPublicScopeOf(nodeId)) !== "submit") {
+      denyAnonymousProcedure(path);
+    }
+  }
+
+  return next();
+});
+
+/**
+ * The Busabase RPC surface, with the anonymous default-deny gate applied to
+ * every procedure (including the composed per-domain sub-routers).
+ *
+ * Exported already-guarded on purpose: there is no unguarded variant a host
+ * could mount by mistake.
+ */
+export const busabaseRouter = enhanceRouter(busabaseRouterImpl, {
+  errorMap: {},
+  middlewares: [anonymousSurfaceGuard],
+  dedupeLeadingMiddlewares: false,
 });

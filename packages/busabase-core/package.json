@@ -25,6 +25,10 @@
       "types": "./src/logic/store.ts",
       "default": "./src/logic/store.ts"
     },
+    "./logic/node-share": {
+      "types": "./src/logic/node-share.ts",
+      "default": "./src/logic/node-share.ts"
+    },
     "./logic/node-acl": {
       "types": "./src/logic/node-acl.ts",
       "default": "./src/logic/node-acl.ts"

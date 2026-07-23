@@ -16,9 +16,11 @@ import { Label } from "kui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "kui/select";
 import { Switch } from "kui/switch";
 import { Globe, Lock, Shield, Trash2, Users } from "lucide-react";
-import { createContext, useContext, useMemo, useState } from "react";
+import { createContext, type ReactNode, useContext, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { useCoreI18n } from "../../../i18n";
+import { useIsAnonymousVisitor } from "../visitor-context";
+import { NodeActionButton } from "./node-action-button";
 
 type NodeVisibility = "private" | "workspace" | "public";
 type PermissionLevel = "read" | "changeRequest" | "write" | "manage";
@@ -47,6 +49,18 @@ export const SpaceMembersProvider = SpaceMembersContext.Provider;
  */
 const SpaceVisibilityModeContext = createContext<SpaceVisibilityMode>("open");
 export const SpaceVisibilityModeProvider = SpaceVisibilityModeContext.Provider;
+
+/**
+ * Optional render-slot for a per-node "access requests" review section, injected
+ * by a multi-tenant host (busabase-cloud) that has a request → approve loop. The
+ * shared dialog renders whatever the host returns for the current node inside a
+ * labeled section; the open-source single-user host injects nothing (there are
+ * no permissions and thus no requests), so the section simply doesn't appear.
+ * Same "host injects, core consumes" seam as the space-members list above.
+ */
+type RenderAccessRequests = (nodeId: string) => ReactNode;
+const NodeAccessRequestsContext = createContext<RenderAccessRequests | null>(null);
+export const NodeAccessRequestsProvider = NodeAccessRequestsContext.Provider;
 
 // A minimal flattened view of the cached nodes.list tree, enough to read a
 // node's own explicit visibility and walk its ancestors for inheritance.
@@ -108,34 +122,22 @@ export function NodePermissionsButton({
   const messages = useCoreI18n();
   const t = messages.permissions;
   const [open, setOpen] = useState(false);
+  // Managing access is a manage-only action — a public read-only visitor can
+  // never use it, so self-gate here to cover every mount (base/doc/folder/file
+  // headers, sidebar menu). Hooks above run unconditionally first.
+  const isAnon = useIsAnonymousVisitor();
+  if (isAnon) {
+    return null;
+  }
 
   return (
     <>
-      {variant === "toolbar" || variant === "icon" ? (
-        <button
-          aria-label={t.title}
-          className={
-            variant === "icon"
-              ? "inline-flex size-8 shrink-0 items-center justify-center rounded-md border border-border/60 bg-background text-muted-foreground transition-colors hover:bg-accent"
-              : "inline-flex shrink-0 items-center gap-1.5 rounded-md border border-border/60 bg-background px-2.5 py-1.5 text-muted-foreground text-xs transition-colors hover:bg-accent"
-          }
-          onClick={() => setOpen(true)}
-          title={t.title}
-          type="button"
-        >
-          <Shield className="size-3.5" />
-          {variant === "toolbar" ? t.title : null}
-        </button>
-      ) : (
-        <button
-          className="flex w-full items-center gap-2 text-left"
-          onClick={() => setOpen(true)}
-          type="button"
-        >
-          <Shield className="size-4" />
-          {t.title}
-        </button>
-      )}
+      <NodeActionButton
+        icon={Shield}
+        label={t.title}
+        onClick={() => setOpen(true)}
+        variant={variant}
+      />
       {open && (
         <NodePermissionsDialog
           nodeId={nodeId}
@@ -167,6 +169,7 @@ export function NodePermissionsDialog({
   const queryClient = useQueryClient();
   const spaceMembers = useContext(SpaceMembersContext);
   const spaceMode = useContext(SpaceVisibilityModeContext);
+  const renderAccessRequests = useContext(NodeAccessRequestsContext);
 
   const principalsQuery = useQuery(orpc.nodes.principals.list.queryOptions({ input: { nodeId } }));
   const principals = principalsQuery.data ?? [];
@@ -418,6 +421,13 @@ export function NodePermissionsDialog({
                   {t.add}
                 </Button>
               </div>
+            </div>
+          )}
+
+          {/* Host-injected pending access-requests review section (cloud only). */}
+          {renderAccessRequests && (
+            <div className="space-y-3 border-border/60 border-t pt-4">
+              {renderAccessRequests(nodeId)}
             </div>
           )}
         </div>

@@ -17,6 +17,7 @@ import { toast } from "sonner";
 import { useLocation, useSearch } from "wouter";
 import { fmt, useCoreI18n } from "../../../i18n";
 import { mergeSearchIntoHref } from "../helpers/link-search";
+import { useIsAnonymousVisitor } from "../visitor-context";
 import type { SkillCodeLanguage } from "./field-preview";
 import { ConfirmActionDialog } from "./primitives";
 
@@ -59,6 +60,12 @@ export function NodeDeleteButton({
   const reviewCr = useMutation(orpc.changeRequests.review.mutationOptions());
   const mergeCr = useMutation(orpc.changeRequests.merge.mutationOptions());
   const pending = createCr.isPending || reviewCr.isPending || mergeCr.isPending;
+  // Deleting a node is manage-only; a public read-only visitor never sees it.
+  // Self-gating here covers every detail-header mount. All hooks run first.
+  const isAnon = useIsAnonymousVisitor();
+  if (isAnon) {
+    return null;
+  }
   const nodeTypeLabels: Record<string, string> = {
     doc: messages.nodeDetail.doc,
     file: messages.nodeDetail.file,

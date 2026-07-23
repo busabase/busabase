@@ -215,7 +215,7 @@ test("AirApp run panel: auto-run, restart, watermark, nav persistence, fullscree
   });
 
   await test.step("pin AirApp A to the side panel", async () => {
-    await page.getByRole("button", { name: "Open in side panel" }).click();
+    await page.getByRole("button", { name: "Pin to side panel" }).click();
     const tabA = page.locator('[role="tab"]', { hasText: appA.name });
     await expect(tabA).toBeVisible();
 
@@ -289,7 +289,7 @@ test("AirApp run panel: auto-run, restart, watermark, nav persistence, fullscree
       sidePanelPreviewFrame(page).getByRole("button", { name: "Clicked 1 times" }),
     ).toBeVisible();
 
-    await page.getByRole("button", { name: "Open in side panel" }).click();
+    await page.getByRole("button", { name: "Pin to side panel" }).click();
     const tabA = page.getByRole("tab", { name: appA.name });
     const tabB = page.getByRole("tab", { name: appB.name });
     await expect(tabB).toHaveAttribute("aria-selected", "true");

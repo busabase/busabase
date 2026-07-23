@@ -84,6 +84,11 @@ const config = {
     root: monorepoRoot,
   },
   output: "standalone",
+  // The desktop build restores src-tauri/target before building this sidecar.
+  // It is build state, not a runtime dependency, and can contain prior bundles.
+  outputFileTracingExcludes: {
+    "/*": ["../busabase-desktop/**/*"],
+  },
   devIndicators: false,
   // Opt large/native packages out of bundling so Next leaves them as plain
   // `require(...)` resolved from node_modules at runtime. Without this, Next

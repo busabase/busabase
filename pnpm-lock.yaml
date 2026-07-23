@@ -9,7 +9,7 @@ patchedDependencies:
     hash: b09ca6391bd8bbbebd3636254f0b90ca48724fd2b23dad03ab598522f3ad0127
     path: patches/@react-native-cookies__cookies@6.2.1.patch
   '@scelar/nodepod@1.9.9':
-    hash: e76644b81f8adb890514f5254c94268e971a5f80a8d7179af50c30111386ca05
+    hash: 302679c7acf38081da242ec2415d404eca3f4dea49e49e8cfdc0fd7ef003931b
     path: patches/@scelar__nodepod@1.9.9.patch
 
 importers:
@@ -52,7 +52,7 @@ importers:
         version: 1.58.2
       '@scelar/nodepod':
         specifier: ^1.9.9
-        version: 1.9.9(patch_hash=e76644b81f8adb890514f5254c94268e971a5f80a8d7179af50c30111386ca05)(next@16.2.6(@babel/core@7.29.7)(@opentelemetry/api@1.9.0)(@playwright/test@1.58.2)(babel-plugin-react-compiler@1.0.0)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(sass@1.101.0))(vite@5.4.21(@types/node@24.13.2)(less@3.13.1)(lightningcss@1.31.1)(sass@1.101.0)(stylus@0.64.0)(terser@5.49.0))
+        version: 1.9.9(patch_hash=302679c7acf38081da242ec2415d404eca3f4dea49e49e8cfdc0fd7ef003931b)(next@16.2.6(@babel/core@7.29.7)(@opentelemetry/api@1.9.0)(@playwright/test@1.58.2)(babel-plugin-react-compiler@1.0.0)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(sass@1.101.0))(vite@5.4.21(@types/node@24.13.2)(less@3.13.1)(lightningcss@1.31.1)(sass@1.101.0)(stylus@0.64.0)(terser@5.49.0))
       '@tailwindcss/postcss':
         specifier: ^4.1.17
         version: 4.1.18
@@ -598,7 +598,7 @@ importers:
         version: 1.14.6(@opentelemetry/api@1.9.0)(@orpc/contract@1.14.6(@opentelemetry/api@1.9.0))(@orpc/server@1.14.6(@opentelemetry/api@1.9.0)(ws@8.21.0(bufferutil@4.1.0)(utf-8-validate@5.0.10)))(ws@8.21.0(bufferutil@4.1.0)(utf-8-validate@5.0.10))(zod@4.4.3)
       '@scelar/nodepod':
         specifier: ^1.9.9
-        version: 1.9.9(patch_hash=e76644b81f8adb890514f5254c94268e971a5f80a8d7179af50c30111386ca05)(next@16.2.6(@babel/core@7.29.7)(@opentelemetry/api@1.9.0)(@playwright/test@1.58.2)(babel-plugin-react-compiler@1.0.0)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(sass@1.101.0))(vite@7.1.9(@types/node@24.13.2)(jiti@2.6.1)(less@3.13.1)(lightningcss@1.31.1)(sass@1.101.0)(stylus@0.64.0)(terser@5.49.0)(tsx@4.21.0)(yaml@2.9.0))
+        version: 1.9.9(patch_hash=302679c7acf38081da242ec2415d404eca3f4dea49e49e8cfdc0fd7ef003931b)(next@16.2.6(@babel/core@7.29.7)(@opentelemetry/api@1.9.0)(@playwright/test@1.58.2)(babel-plugin-react-compiler@1.0.0)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(sass@1.101.0))(vite@7.1.9(@types/node@24.13.2)(jiti@2.6.1)(less@3.13.1)(lightningcss@1.31.1)(sass@1.101.0)(stylus@0.64.0)(terser@5.49.0)(tsx@4.21.0)(yaml@2.9.0))
       '@tanstack/react-query':
         specifier: ^5.101.0
         version: 5.101.0(react@19.2.7)
@@ -16895,7 +16895,7 @@ snapshots:
   '@rollup/rollup-win32-x64-msvc@4.57.1':
     optional: true
 
-  '@scelar/nodepod@1.9.9(patch_hash=e76644b81f8adb890514f5254c94268e971a5f80a8d7179af50c30111386ca05)(next@16.2.6(@babel/core@7.29.7)(@opentelemetry/api@1.9.0)(@playwright/test@1.58.2)(babel-plugin-react-compiler@1.0.0)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(sass@1.101.0))(vite@5.4.21(@types/node@24.13.2)(less@3.13.1)(lightningcss@1.31.1)(sass@1.101.0)(stylus@0.64.0)(terser@5.49.0))':
+  '@scelar/nodepod@1.9.9(patch_hash=302679c7acf38081da242ec2415d404eca3f4dea49e49e8cfdc0fd7ef003931b)(next@16.2.6(@babel/core@7.29.7)(@opentelemetry/api@1.9.0)(@playwright/test@1.58.2)(babel-plugin-react-compiler@1.0.0)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(sass@1.101.0))(vite@5.4.21(@types/node@24.13.2)(less@3.13.1)(lightningcss@1.31.1)(sass@1.101.0)(stylus@0.64.0)(terser@5.49.0))':
     dependencies:
       '@noble/hashes': 1.8.0
       acorn: 8.17.0
@@ -16910,7 +16910,7 @@ snapshots:
       next: 16.2.6(@babel/core@7.29.7)(@opentelemetry/api@1.9.0)(@playwright/test@1.58.2)(babel-plugin-react-compiler@1.0.0)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(sass@1.101.0)
       vite: 5.4.21(@types/node@24.13.2)(less@3.13.1)(lightningcss@1.31.1)(sass@1.101.0)(stylus@0.64.0)(terser@5.49.0)
 
-  '@scelar/nodepod@1.9.9(patch_hash=e76644b81f8adb890514f5254c94268e971a5f80a8d7179af50c30111386ca05)(next@16.2.6(@babel/core@7.29.7)(@opentelemetry/api@1.9.0)(@playwright/test@1.58.2)(babel-plugin-react-compiler@1.0.0)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(sass@1.101.0))(vite@7.1.9(@types/node@24.13.2)(jiti@2.6.1)(less@3.13.1)(lightningcss@1.31.1)(sass@1.101.0)(stylus@0.64.0)(terser@5.49.0)(tsx@4.21.0)(yaml@2.9.0))':
+  '@scelar/nodepod@1.9.9(patch_hash=302679c7acf38081da242ec2415d404eca3f4dea49e49e8cfdc0fd7ef003931b)(next@16.2.6(@babel/core@7.29.7)(@opentelemetry/api@1.9.0)(@playwright/test@1.58.2)(babel-plugin-react-compiler@1.0.0)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(sass@1.101.0))(vite@7.1.9(@types/node@24.13.2)(jiti@2.6.1)(less@3.13.1)(lightningcss@1.31.1)(sass@1.101.0)(stylus@0.64.0)(terser@5.49.0)(tsx@4.21.0)(yaml@2.9.0))':
     dependencies:
       '@noble/hashes': 1.8.0
       acorn: 8.17.0

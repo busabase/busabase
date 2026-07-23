@@ -112,6 +112,18 @@ export const busabaseDemoRouter = os.router({
         throw demoUnsupported("Node permissions");
       }),
     },
+    share: {
+      // The demo dataset is stateless — nothing is ever shared, and there is no
+      // db to persist a share against. `get` returns null (truthful: unshared);
+      // the mutations are refused just like the other demo writes above.
+      get: os.nodes.share.get.handler(() => null),
+      set: os.nodes.share.set.handler(() => {
+        throw demoUnsupported("Node sharing");
+      }),
+      disable: os.nodes.share.disable.handler(() => {
+        throw demoUnsupported("Node sharing");
+      }),
+    },
   },
   auditEvents: {
     list: os.auditEvents.list.handler(() => demoListAuditEvents()),

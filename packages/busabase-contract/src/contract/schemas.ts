@@ -86,6 +86,20 @@ const nodePrincipalSchema = z.object({
   updatedAt: z.string(),
 });
 
+// Public link-sharing VO for a node. This is the orthogonal axis to node
+// principals: it decides whether an ANONYMOUS visitor may reach the node over
+// its own canonical URL, and what they may do there. SECURITY: this VO must
+// NEVER carry the stored password hash — only the derived `hasPassword` flag.
+const nodeShareSchema = z.object({
+  nodeId: z.string(),
+  scope: z.enum(["none", "public"]),
+  capability: z.enum(["read", "submit"]),
+  // Derived from `passwordHash != null` — the hash itself is never serialized.
+  hasPassword: z.boolean(),
+  expiresAt: z.string().nullable(),
+  updatedAt: z.string(),
+});
+
 // Depth-bounded tree fetch (sidebar lazy-load). `parentId` omitted/null starts
 // from the space root (same envelope `nodes.list()` always returned: a single
 // wrapped root node); an explicit `parentId` starts from that node's CHILDREN
@@ -637,6 +651,7 @@ export {
   userRefSchema,
   nodeSchema,
   nodePrincipalSchema,
+  nodeShareSchema,
   listNodesInputSchema,
   isDescendantInputSchema,
   isDescendantOutputSchema,

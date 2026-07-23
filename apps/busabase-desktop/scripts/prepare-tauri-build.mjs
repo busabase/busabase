@@ -39,15 +39,26 @@ const buildTimePath = join(desktopDir, "src-tauri", ".build-time");
 const platformNodeName = process.platform === "win32" ? "node.exe" : "node";
 const macOSNativeBinaryExtensions = new Set([".dylib", ".node"]);
 
+const isBuildTime = (value) => /^\d{12}$/.test(value);
+
 const formatBuildTime = (date) => {
   const pad = (value) => String(value).padStart(2, "0");
   return [
-    date.getFullYear(),
-    pad(date.getMonth() + 1),
-    pad(date.getDate()),
-    pad(date.getHours()),
-    pad(date.getMinutes()),
+    date.getUTCFullYear(),
+    pad(date.getUTCMonth() + 1),
+    pad(date.getUTCDate()),
+    pad(date.getUTCHours()),
+    pad(date.getUTCMinutes()),
   ].join("");
+};
+
+const resolveBuildTime = () => {
+  const configured = process.env.BUSABASE_DESKTOP_BUILD_TIME?.trim();
+  if (!configured) return formatBuildTime(new Date());
+  if (!isBuildTime(configured)) {
+    throw new Error("BUSABASE_DESKTOP_BUILD_TIME must use the 12-digit yyyyMMddHHmm format.");
+  }
+  return configured;
 };
 
 const ensureExists = async (path, label) => {
@@ -258,7 +269,7 @@ const findServerEntry = async () => {
 };
 
 const main = async () => {
-  const buildTime = formatBuildTime(new Date());
+  const buildTime = resolveBuildTime();
   await writeFile(buildTimePath, `${buildTime}\n`, "utf8");
 
   await ensureExists(join(busabaseDir, "package.json"), "Busabase app package");
@@ -281,8 +292,14 @@ const main = async () => {
     recursive: true,
     dereference: true,
     filter: (sourcePath) => {
-      const normalized = sourcePath.split("\\").join("/");
-      return !normalized.includes("/node_modules/.cache/");
+      const normalized = relative(standaloneDir, sourcePath).split("\\").join("/");
+      const isDesktopWorkspace =
+        normalized === "apps/busabase-desktop" || normalized.startsWith("apps/busabase-desktop/");
+      const isPackageCache =
+        normalized === "node_modules/.cache" ||
+        normalized.startsWith("node_modules/.cache/") ||
+        normalized.includes("/node_modules/.cache/");
+      return !isDesktopWorkspace && !isPackageCache;
     },
   });
 

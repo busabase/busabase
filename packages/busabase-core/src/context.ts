@@ -144,6 +144,23 @@ export interface BusabaseContext {
    * Unset = open (the open-source and legacy default).
    */
   restrictedVisibility?: boolean;
+  /**
+   * Who is making this request, as a *kind* rather than a set of booleans.
+   *
+   * ABSENT means "a member-ish caller" — the historical behaviour every host
+   * and test relies on today (open source injects no auth at all).
+   *
+   * `"anonymous"` is the deliberate opt-in for a request that arrived WITHOUT a
+   * signed-in user (a public link). It is not "a member with fewer
+   * permissions": it hard-downgrades every ACL signal below, regardless of what
+   * else the host put in the context. That inversion is the point — the
+   * dangerous default (`isSpaceManager` absent ⇒ manager) can no longer be
+   * reached from an anonymous request even if a future transport forgets to
+   * pass the other flags.
+   *
+   * Set it via `runWithAnonymousContext`, never by hand.
+   */
+  visitorKind?: "member" | "anonymous";
 }
 
 /** Tenant id used by the single-tenant open-source app and as a safe default. */
@@ -216,6 +233,38 @@ const getOpenSourceLocalUserLabel = (id: string, localUserName?: string | null) 
 /** Run `fn` with the given Busabase context bound for its entire async subtree. */
 export function runWithBusabaseContext<T>(ctx: BusabaseContext, fn: () => Promise<T>): Promise<T> {
   return storage.run(ctx, fn);
+}
+
+/** Actor id recorded for requests that arrived without a signed-in user. */
+export const ANONYMOUS_ACTOR_ID = "anonymous";
+
+/**
+ * Run `fn` as an ANONYMOUS visitor (a public link, no signed-in user).
+ *
+ * This is the only supported way to serve an unauthenticated request, and it
+ * exists so the downgrade cannot be forgotten: the caller supplies only the
+ * request-shaped fields, while `visitorKind` — and with it the hard `false` for
+ * manager/restricted-visibility (see `getContextIsSpaceManager`) — is pinned
+ * here and cannot be overridden by the caller.
+ *
+ * The resulting context has no member identity: writes attribute to
+ * `ANONYMOUS_ACTOR_ID`, and every node-ACL check runs as a non-manager against
+ * a restricted-visibility space.
+ */
+export function runWithAnonymousContext<T>(
+  ctx: Omit<BusabaseContext, "visitorKind" | "isSpaceManager" | "restrictedVisibility" | "actorId">,
+  fn: () => Promise<T>,
+): Promise<T> {
+  return storage.run(
+    {
+      ...ctx,
+      actorId: ANONYMOUS_ACTOR_ID,
+      visitorKind: "anonymous",
+      isSpaceManager: false,
+      restrictedVisibility: true,
+    },
+    fn,
+  );
 }
 
 /** The injected host db for the current request, or undefined in local mode. */
@@ -368,13 +417,26 @@ export function getContextChangeRequestPendingReviewHook() {
   return storage.getStore()?.onChangeRequestPendingReview;
 }
 
+/** True when this request arrived without a signed-in user (a public link). */
+export function isAnonymousVisitor(): boolean {
+  return storage.getStore()?.visitorKind === "anonymous";
+}
+
 /**
  * Whether the current actor short-circuits node-ACL checks as a space
  * owner/admin. ABSENT (open-source local mode, or any host that predates this
  * field) deliberately means `true` — no auth = no restriction — so only a
  * host that explicitly injects `false` gets enforcement.
+ *
+ * An anonymous visitor is NEVER a manager, whatever the rest of the context
+ * says. This check comes first on purpose: it makes the permissive default
+ * unreachable from a public request instead of relying on every future
+ * transport to remember to inject `isSpaceManager: false`.
  */
 export function getContextIsSpaceManager(): boolean {
+  if (isAnonymousVisitor()) {
+    return false;
+  }
   return storage.getStore()?.isSpaceManager ?? true;
 }
 
@@ -385,7 +447,14 @@ export function getContextPermissionLevel(): ApiKeyPermissionLevel {
   return context?.isSpaceManager === false ? "read" : "manage";
 }
 
-/** Whether this space hides default-visibility (NULL) nodes from non-managers. */
+/**
+ * Whether this space hides default-visibility (NULL) nodes from non-managers.
+ * Anonymous visitors always get the restricted treatment — a public link must
+ * never expose nodes that merely lack an explicit visibility.
+ */
 export function getContextRestrictedVisibility(): boolean {
+  if (isAnonymousVisitor()) {
+    return true;
+  }
   return storage.getStore()?.restrictedVisibility ?? false;
 }

@@ -12,6 +12,7 @@ pub fn build_desktop_menu(app: &AppHandle<Wry>) -> tauri::Result<Menu<Wry>> {
             &package_info.version.to_string(),
             option_env!("BUSABASE_DESKTOP_BUILD_TIME"),
         )),
+        short_version: about_short_version_without_build_number(cfg!(target_os = "macos")),
         copyright: config.bundle.copyright.clone(),
         authors: config
             .bundle
@@ -110,22 +111,41 @@ pub fn build_desktop_menu(app: &AppHandle<Wry>) -> tauri::Result<Menu<Wry>> {
 }
 
 fn format_desktop_version(version: &str, build_time: Option<&str>) -> String {
-    match build_time.map(str::trim) {
-        Some(value) if value.len() == 12 && value.bytes().all(|byte| byte.is_ascii_digit()) => {
-            format!("{version}({value})")
-        }
-        _ => version.to_string(),
+    let (base_version, version_build_time) = version.split_once('+').unwrap_or((version, ""));
+    let is_build_time =
+        |value: &&str| value.len() == 12 && value.bytes().all(|byte| byte.is_ascii_digit());
+    let displayed_build_time = build_time
+        .map(str::trim)
+        .filter(is_build_time)
+        .or_else(|| Some(version_build_time).filter(is_build_time));
+    match displayed_build_time {
+        Some(value) => format!("{base_version}({value})"),
+        _ => base_version.to_string(),
     }
+}
+
+fn about_short_version_without_build_number(is_macos: bool) -> Option<String> {
+    // AppKit needs an explicit empty value to avoid its CFBundleVersion fallback.
+    // Windows/Linux need None because muda appends non-empty short versions.
+    is_macos.then(String::new)
 }
 
 #[cfg(test)]
 mod tests {
-    use super::format_desktop_version;
+    use super::{about_short_version_without_build_number, format_desktop_version};
 
     #[test]
     fn formats_semver_with_build_time() {
         assert_eq!(
             format_desktop_version("0.9.12", Some("202607230810")),
+            "0.9.12(202607230810)"
+        );
+        assert_eq!(
+            format_desktop_version("0.9.12+202607230810", None),
+            "0.9.12(202607230810)"
+        );
+        assert_eq!(
+            format_desktop_version("0.9.12+202607230810", Some("202607230810")),
             "0.9.12(202607230810)"
         );
     }
@@ -134,5 +154,14 @@ mod tests {
     fn falls_back_to_semver_for_invalid_build_time() {
         assert_eq!(format_desktop_version("0.9.12", Some("local")), "0.9.12");
         assert_eq!(format_desktop_version("0.9.12", None), "0.9.12");
+    }
+
+    #[test]
+    fn hides_the_native_build_number_on_every_platform() {
+        assert_eq!(
+            about_short_version_without_build_number(true),
+            Some(String::new())
+        );
+        assert_eq!(about_short_version_without_build_number(false), None);
     }
 }

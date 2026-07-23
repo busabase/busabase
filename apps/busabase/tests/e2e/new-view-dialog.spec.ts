@@ -12,8 +12,10 @@ test("new view opens in a modal without navigating away from the base", async ({
   await expect(dialog.getByRole("heading", { name: "New View" })).toBeVisible();
   await expect(dialog).toContainText("Name");
   await expect(dialog.locator(":focus")).toBeVisible();
-  // "Add View Request" (change request) is the secondary action behind the dropdown —
-  // the manage-level local actor defaults to "Add View Now" (immediate) as primary.
+  await expect(dialog.getByRole("button", { name: "Add View Now" })).toBeVisible();
+  // "Add View Request" (review-first) lives behind the split-button dropdown —
+  // "Add View Now" is the primary immediate action by default; see
+  // changelog/20260722-submit-action-order-and-permissions.md.
   await dialog.getByRole("button", { name: "More submit options" }).click();
   await expect(dialog.getByRole("button", { name: "Add View Request" })).toBeVisible();
   await expect(page).toHaveURL(/\/dashboard\/local\/base\/blog\?demo=blog$/);

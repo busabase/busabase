@@ -118,6 +118,18 @@ export const busabaseNodes = pgTable(
     // real column (not in the metadata jsonb) so the visibility index below is
     // a plain btree, not a jsonb expression index.
     effectiveVisibility: text("effective_visibility").$type<"private" | "workspace" | "public">(),
+    // The SECOND, orthogonal axis: whether this node is reachable by an
+    // anonymous visitor over a public link, and what they may do. Materialized
+    // from the nearest `busabase_node_shares` row on this node's ancestor chain
+    // (self included) by `recomputeEffectivePublicScope`, so sharing a folder
+    // opens its descendants at their own URLs without a read-time tree walk.
+    //
+    // Deliberately NOT folded into `effectiveVisibility`: that axis says how
+    // wide a node is *inside the space* (private < workspace < public), and
+    // collapsing the two would make "private to most members, but reachable via
+    // a public link" inexpressible — which is a case we explicitly support.
+    // NULL = not public.
+    effectivePublicScope: text("effective_public_scope").$type<"read" | "submit">(),
     // Soft-archive marker. Set when the owning base is archived (base nodes are
     // kept, not deleted, since commits FK-restrict the base). Partial slug index
     // below frees the slug for reuse while archived.
@@ -138,8 +150,54 @@ export const busabaseNodes = pgTable(
       .where(sql`${base.archivedAt} IS NULL`),
     index("busabase_nodes_parent_position_idx").on(base.parentId, base.position),
     index("busabase_nodes_effective_visibility_idx").on(base.spaceId, base.effectiveVisibility),
+    index("busabase_nodes_effective_public_scope_idx").on(base.spaceId, base.effectivePublicScope),
   ],
 );
+
+/**
+ * Public link sharing — the orthogonal companion to `busabase_node_principals`.
+ *
+ * One row per node (`nodeId` unique): sharing is an ATTRIBUTE of the resource,
+ * not a new addressable entity, which is what lets the public link stay the
+ * node's own canonical URL. Revoking flips `scope` back to "none" IN PLACE —
+ * the row and its id survive, so re-enabling yields the same working link and
+ * members are never affected either way.
+ *
+ * Modelled on Feishu's split: the collaborator list (principals) and link
+ * sharing are independent axes, so a node can be tightly held inside the space
+ * and still be publicly linkable. `passwordHash`/`expiresAt` live here rather
+ * than on `busabase_nodes` so the hot ACL path keeps reading one small column
+ * (`effectivePublicScope`) instead of this table.
+ */
+export const busabaseNodeShares = pgTable(
+  "busabase_node_shares",
+  {
+    id: text("id").primaryKey(),
+    spaceId: spaceIdColumn(),
+    nodeId: text("node_id")
+      .notNull()
+      .unique()
+      .references(() => busabaseNodes.id, { onDelete: "cascade" }),
+    /** "none" = revoked (row kept on purpose). Feishu's org tier can slot in later. */
+    scope: text("scope").$type<"none" | "public">().notNull().default("none"),
+    /**
+     * What an anonymous visitor may do. Tops out at `submit` — opening a
+     * ChangeRequest — because approval-first means there is no public tier that
+     * writes directly. (Feishu's equivalent ceiling is "can edit".)
+     */
+    capability: text("capability").$type<"read" | "submit">().notNull().default("read"),
+    /** Hashed, never plaintext. Only meaningful while `scope = "public"`. */
+    passwordHash: text("password_hash"),
+    expiresAt: timestamp("expires_at", { mode: "date" }),
+    createdBy: text("created_by").notNull(),
+    updatedBy: text("updated_by").notNull(),
+    createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { mode: "date" }).defaultNow().notNull(),
+  },
+  (base) => [index("busabase_node_shares_space_scope_idx").on(base.spaceId, base.scope)],
+);
+
+export type NodeSharePO = typeof busabaseNodeShares.$inferSelect;
 
 /**
  * Node-level access grants — "who can do what on this node" (any node type:

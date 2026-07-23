@@ -789,7 +789,7 @@ function RichTextareaFieldEditor({
 }
 
 // Editable tag input (ai_tags): chips with remove buttons + a free-text entry.
-// Enter / comma commits a tag, Backspace on an empty field removes the last.
+// Enter / comma commits a tag; Backspace/Delete on an empty field removes the last.
 function TagFieldEditor({
   inputId,
   label,
@@ -821,14 +821,23 @@ function TagFieldEditor({
     <div className="flex min-h-9 flex-wrap items-center gap-1.5 rounded-md border border-border/70 bg-background px-2 py-1.5 transition-colors focus-within:border-primary">
       {tags.map((tag) => (
         <span
-          className="inline-flex items-center gap-1 rounded-full border border-border/60 bg-muted/60 px-2 py-0.5 text-xs"
+          className="inline-flex max-w-full items-center gap-1 rounded-full border border-border/60 bg-muted/60 px-2 py-0.5 text-xs"
           key={tag}
         >
-          {tag}
+          <span className="max-w-[14rem] truncate sm:max-w-[20rem]" title={tag}>
+            {tag}
+          </span>
           <button
             aria-label={fmt(messages.recordView.remove, { name: tag })}
             className="text-muted-foreground transition-colors hover:text-foreground"
             onClick={() => removeTag(tag)}
+            onKeyDown={(event) => {
+              if (event.key === "Backspace" || event.key === "Delete") {
+                event.preventDefault();
+                removeTag(tag);
+              }
+            }}
+            title={fmt(messages.recordView.remove, { name: tag })}
             type="button"
           >
             <X size={12} />
@@ -845,7 +854,12 @@ function TagFieldEditor({
           if (event.key === "Enter" || event.key === ",") {
             event.preventDefault();
             addTag(draft);
-          } else if (event.key === "Backspace" && draft === "" && tags.length > 0) {
+          } else if (
+            (event.key === "Backspace" || event.key === "Delete") &&
+            draft === "" &&
+            tags.length > 0
+          ) {
+            event.preventDefault();
             removeTag(tags[tags.length - 1]);
           }
         }}

@@ -78,6 +78,7 @@ import { useDashboardRoutes } from "./hooks/use-dashboard-routes";
 import { useKeyboardShortcut } from "./hooks/use-keyboard-shortcut";
 import { useBusabaseLiveSync } from "./hooks/use-live-sync";
 import { getNodeDetail, type LoadedNode } from "./node-detail-registry";
+import { type DashboardVisitorKind, DashboardVisitorProvider } from "./visitor-context";
 
 // Flattens the (already-fetched, for sidebar-tree rendering) node tree into
 // `KnownNode` cache entries — free, no new request: every `nodes.list`
@@ -153,6 +154,23 @@ interface BusabaseDashboardProps {
   emptyGuide?: ReactNode;
   /** Active UI locale (e.g. "en", "zh-CN"). Host-injected; defaults to English. */
   locale?: string;
+  /**
+   * Who this render is for. `"anonymous"` = a session-less visitor who arrived
+   * through a public share link, so the dashboard must confine itself to the
+   * ONE shared node it was given and fire only the reads on busabase-core's
+   * anonymous allowlist (`bases.get`, `bases.listViews`, `records.listPaged`,
+   * `records.get`, `docs.get`, `folders.get`, `files.get`).
+   *
+   * Every space-wide query below is switched off in that mode. That is a
+   * correctness fix, not a security one — the server refuses them either way
+   * (see `logic/anonymous-allowlist.ts`); asking anyway just yielded a page of
+   * 403s and, worse, an EMPTY base, because `activeBase` used to be looked up
+   * inside the (refused) `bases.list` result. Anonymous hosts pass the shared
+   * base in via the `bases` prop instead, which seeds the same lookup.
+   *
+   * Defaults to `"member"` so every existing consumer is untouched.
+   */
+  visitorKind?: DashboardVisitorKind;
   /** Host-resolved workspace permission; local/open-source defaults to manage. */
   submitPermissionLevel?: ApiKeyPermissionLevel;
 }
@@ -163,6 +181,7 @@ interface BusabaseDashboardProps {
 export function BusabaseDashboard({
   locale,
   provideQueryClient = true,
+  visitorKind = "member",
   submitPermissionLevel = "manage",
   ...props
 }: BusabaseDashboardProps) {
@@ -170,7 +189,12 @@ export function BusabaseDashboard({
   const content = (
     <SubmitPermissionProvider permissionLevel={submitPermissionLevel}>
       <CoreI18nProvider locale={locale}>
-        <BusabaseDashboardContent {...props} />
+        {/* Descendants (node-detail views, headers) read this to drop editing and
+            permission affordances a session-less visitor can neither use nor be
+            shown honestly. */}
+        <DashboardVisitorProvider visitorKind={visitorKind}>
+          <BusabaseDashboardContent {...props} visitorKind={visitorKind} />
+        </DashboardVisitorProvider>
       </CoreI18nProvider>
     </SubmitPermissionProvider>
   );
@@ -200,8 +224,17 @@ function BusabaseDashboardContent({
   chromeless = false,
   onSearchOpenChange,
   searchOpen,
+  visitorKind = "member",
 }: BusabaseDashboardProps) {
   const messages = useCoreI18n();
+  // An anonymous (public-link) visitor may reach ONLY the single shared node and
+  // only the reads on busabase-core's anonymous allowlist. Every space-wide query
+  // below is gated off in that mode: the server refuses them regardless (see
+  // logic/anonymous-allowlist.ts), so this is a correctness fix — firing them
+  // anyway produced a page of 403s and, because `activeBase` was looked up in the
+  // refused `bases.list` result, an empty base. The shared base is seeded via the
+  // `bases` prop instead.
+  const isAnon = visitorKind === "anonymous";
   const orpc = useMemo(
     () => createBusabaseQueryUtils(apiBasePath, apiClientOptions ?? {}, cacheSpaceKey),
     [apiBasePath, apiClientOptions, cacheSpaceKey],
@@ -239,13 +272,26 @@ function BusabaseDashboardContent({
   const changeRequestsQuery = useQuery({
     ...changeRequestsList,
     initialData: initialChangeRequests,
+    enabled: !isAnon,
   });
-  const basesQuery = useQuery({ ...basesList, initialData: initialBases });
-  const archivedBasesQuery = useQuery(archivedBasesList);
-  const archivedNodesQuery = useQuery(archivedNodesList);
-  const auditEventsQuery = useQuery({ ...auditEventsList, initialData: initialAuditEvents });
+  // For an anonymous visitor `bases.list` is off; `activeBase` resolves from the
+  // seeded `initialBases` prop (the one shared base the public host fetched via
+  // the allowlisted `bases.get`) that this query keeps as its fallback data.
+  const basesQuery = useQuery({ ...basesList, initialData: initialBases, enabled: !isAnon });
+  const archivedBasesQuery = useQuery({ ...archivedBasesList, enabled: !isAnon });
+  const archivedNodesQuery = useQuery({ ...archivedNodesList, enabled: !isAnon });
+  const auditEventsQuery = useQuery({
+    ...auditEventsList,
+    initialData: initialAuditEvents,
+    enabled: !isAnon,
+  });
   const allChangeRequests = changeRequestsQuery.data ?? [];
-  const bases = basesQuery.data ?? [];
+  // Anonymous mode reads the seeded prop directly, NOT the disabled query's
+  // cache: `basesQuery` freezes `initialData` at first mount, but the public
+  // host resolves the shared base asynchronously (`bases.get`) and passes it in
+  // a render later — reading the prop lets that update flow through so
+  // `activeBase` (and therefore the records query) actually populates.
+  const bases = isAnon ? (initialBases ?? []) : (basesQuery.data ?? []);
   const archivedBases = archivedBasesQuery.data ?? [];
   const archivedNodes = archivedNodesQuery.data ?? [];
   const auditEvents = auditEventsQuery.data ?? [];
@@ -332,6 +378,7 @@ function BusabaseDashboardContent({
     listKeys,
     orpc,
     queryClient,
+    enabled: !isAnon,
     currentUserId,
     notificationTitle: messages.shell.changeRequestPendingReviewTitle,
     notificationBody: messages.shell.changeRequestPendingReviewBody,
@@ -339,7 +386,7 @@ function BusabaseDashboardContent({
   // Deleted fields scoped to the active base (for the Design tab).
   const deletedFieldsQuery = useQuery({
     ...orpc.bases.listDeletedFields.queryOptions({ input: { baseId: activeBase?.id ?? "" } }),
-    enabled: Boolean(activeBase?.id && isBaseSetupRoute),
+    enabled: Boolean(activeBase?.id && isBaseSetupRoute) && !isAnon,
   });
   const deletedFields = deletedFieldsQuery.data ?? [];
   // Archived views/records for the active base (for restore UI in the table).
@@ -348,7 +395,9 @@ function BusabaseDashboardContent({
   );
   const archivedViewsQuery = useQuery({
     ...orpc.bases.listArchivedViews.queryOptions({ input: { baseId: activeBase?.id ?? "" } }),
-    enabled: Boolean(activeBase?.id && isBaseDetailRoute),
+    // Not on the anonymous allowlist, and a public visitor has no "restore"
+    // affordance to feed anyway.
+    enabled: Boolean(activeBase?.id && isBaseDetailRoute) && !isAnon,
   });
   const archivedViewsForBase = archivedViewsQuery.data ?? [];
   // Archived ("trash") records keyset-paginate too, so a Base with a large
@@ -363,7 +412,7 @@ function BusabaseDashboardContent({
       initialPageParam: undefined as string | undefined,
       getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
     }),
-    enabled: Boolean(activeBase?.id && isBaseDetailRoute),
+    enabled: Boolean(activeBase?.id && isBaseDetailRoute) && !isAnon,
   });
   const archivedRecordsForBase = useMemo(
     () => archivedRecordsInfiniteQuery.data?.pages.flatMap((page) => page.records) ?? [],
@@ -467,7 +516,10 @@ function BusabaseDashboardContent({
   // within a minute instead of showing a stale count indefinitely.
   const recordCountQuery = useQuery({
     ...orpc.records.count.queryOptions({ input: { baseId: activeBase?.id ?? "" } }),
-    enabled: Boolean(activeBase?.id),
+    // Kept off the anonymous surface deliberately: `records.count` with no baseId
+    // counts the whole space, so it is not allowlisted. A public base just shows
+    // its loaded rows without the "of N total" header.
+    enabled: Boolean(activeBase?.id) && !isAnon,
     refetchInterval: 60_000,
   });
   const recordsPagination = useMemo(

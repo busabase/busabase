@@ -7,13 +7,14 @@ import {
   hasApiKeyLevel,
 } from "busabase-contract/access-control/api-key-level";
 import type { AnyColumn } from "drizzle-orm";
-import { and, eq, exists, inArray, isNull, ne, or, type SQL, sql } from "drizzle-orm";
+import { and, eq, exists, inArray, isNotNull, isNull, ne, or, type SQL, sql } from "drizzle-orm";
 import {
   getContextActorId,
   getContextIsSpaceManager,
   getContextPermissionLevel,
   getContextRestrictedVisibility,
   getContextSpaceId,
+  isAnonymousVisitor,
   resolveActorId,
 } from "../context";
 import { getDb } from "../db";
@@ -52,6 +53,21 @@ export function assertWorkspacePermission(required: ApiKeyPermissionLevel): void
 
 const STRICTNESS: Record<NodeVisibility, number> = { private: 0, workspace: 1, public: 2 };
 
+/**
+ * The materialized public-share capability on one node, or null when it isn't
+ * publicly reachable. Single-column read: the ancestor walk happened at write
+ * time in `recomputeEffectivePublicScope`.
+ */
+export async function getPublicScopeOf(nodeId: string): Promise<"read" | "submit" | null> {
+  const db = await getDb();
+  const [row] = await db
+    .select({ scope: busabaseNodes.effectivePublicScope })
+    .from(busabaseNodes)
+    .where(and(eq(busabaseNodes.id, nodeId), eq(busabaseNodes.spaceId, getContextSpaceId())))
+    .limit(1);
+  return row?.scope ?? null;
+}
+
 /** The stricter of two explicit visibilities; null = "no explicit constraint". */
 const strictest = (
   a: NodeVisibility | null | undefined,
@@ -87,6 +103,14 @@ export const buildNodeVisibilityCondition = (
   db: Awaited<ReturnType<typeof getDb>>,
   inputActorId?: string,
 ): SQL | undefined => {
+  // An anonymous visitor is not a space member, so NONE of the member-facing
+  // rules below apply to them: `workspace`/`public` visibility means "every
+  // member", and `principalType: "space"` grants mean "everyone in the space".
+  // Their only way in is an explicit public share, materialized onto
+  // `effectivePublicScope` (see logic/node-share.ts).
+  if (isAnonymousVisitor()) {
+    return isNotNull(busabaseNodes.effectivePublicScope);
+  }
   if (getContextIsSpaceManager()) return undefined;
   const actorId = resolveActorId(inputActorId ?? "local-user");
 
@@ -171,6 +195,15 @@ export async function getEffectiveNodeLevel(
   nodeId: string,
   inputActorId?: string,
 ): Promise<ApiKeyPermissionLevel | null> {
+  // See buildNodeVisibilityCondition. An anonymous visitor never picks up the
+  // member-facing baseline (that path would hand them `read` on every
+  // workspace-visible node); they get exactly what the node's public share
+  // grants, and `read` for either share capability — `submit` means "may open a
+  // ChangeRequest", which the submit path authorizes separately, not a higher
+  // read level.
+  if (isAnonymousVisitor()) {
+    return (await getPublicScopeOf(nodeId)) ? "read" : null;
+  }
   if (getContextIsSpaceManager()) return "manage";
   const db = await getDb();
   const spaceId = getContextSpaceId();

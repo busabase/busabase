@@ -44,6 +44,13 @@ interface UseBusabaseLiveSyncOptions {
   orpc: BusabaseQueryUtils;
   queryClient: QueryClient;
   /**
+   * When false, no live stream is opened. Anonymous (public-link) visitors set
+   * this: `live.subscribe` is a space-wide event feed off the anonymous
+   * allowlist, and a read-only public page has nothing to keep live anyway.
+   * Defaults to true so signed-in dashboards are unaffected.
+   */
+  enabled?: boolean;
+  /**
    * The signed-in user's id, used to skip the "new change request pending
    * review" desktop Notification when the event was caused by this same user
    * (nobody wants to be notified about their own submission). Leave unset if
@@ -105,6 +112,7 @@ export function useBusabaseLiveSync({
   listKeys,
   orpc,
   queryClient,
+  enabled = true,
   currentUserId,
   notificationTitle = DEFAULT_NOTIFICATION_TITLE,
   notificationBody = DEFAULT_NOTIFICATION_BODY,
@@ -127,6 +135,9 @@ export function useBusabaseLiveSync({
   );
 
   useEffect(() => {
+    if (!enabled) {
+      return;
+    }
     let cancelled = false;
     let unsubscribe: (() => Promise<void>) | null = null;
     let abortController: AbortController | null = null;
@@ -251,6 +262,7 @@ export function useBusabaseLiveSync({
       window.removeEventListener("focus", handleFocusRefresh);
     };
   }, [
+    enabled,
     activeBaseId,
     orpc,
     queryClient,
