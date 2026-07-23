@@ -581,7 +581,11 @@ function registerGeneratedCommands(program: Command, state: CliState): void {
     proc: ContractProcedure,
   ) => {
     const { route, inputSchema } = proc["~orpc"];
-    const name = kebab(procKey);
+    // navPath[0] locates the top-level group (e.g. "nodes"); any deeper segments
+    // (e.g. "principals" in nodes.principals.list) are folded into the leaf's own
+    // name instead of a second command level, so `nodes.principals.list` becomes
+    // `busabase-cli nodes principals-list`, not a third-level subcommand.
+    const name = [...navPath.slice(1), procKey].map(kebab).join("-");
     if (parent.commands.some((c) => c.name() === name)) return; // curated command (or dup) wins
     const fields = inputFields(inputSchema);
     const leaf = parent.command(name).description(route.summary ?? `${route.method} ${route.path}`);
@@ -644,8 +648,9 @@ function registerGeneratedCommands(program: Command, state: CliState): void {
       const id = [...navPath, key].join(".");
       if (isProcedure(child)) {
         if (GENERATED_SKIP.has(id)) continue;
-        // Only single-level groups exist in the contract; guard against deeper nesting.
-        if (navPath.length > 1) continue;
+        // navPath[0] is always the top-level group; any deeper segments (nested
+        // contract groups, e.g. nodes.principals.list) are folded into the leaf
+        // name by addLeaf rather than becoming a third command level.
         const parent = navPath.length
           ? getGroup(kebab(navPath[0]), child["~orpc"].route.tags?.[0])
           : program;

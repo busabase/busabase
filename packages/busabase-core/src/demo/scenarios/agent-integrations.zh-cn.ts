@@ -369,6 +369,28 @@ const agentIntegrationViews: SeedViewDef[] = [
     minutesAgo: 58,
     useCases: ["agent-integrations"],
   },
+  {
+    id: "viw_seed_agint_gallery",
+    baseId: DEMO_AGENT_INTEGRATIONS_BASE_ID,
+    slug: "gallery",
+    name: "图库视图",
+    description: "以卡片墙展示各 Agent 的 Logo。",
+    type: "gallery",
+    config: { filters: [], sorts: [], coverFieldSlug: "logo" },
+    minutesAgo: 57,
+    useCases: ["agent-integrations"],
+  },
+  {
+    id: "viw_seed_agint_board",
+    baseId: DEMO_AGENT_INTEGRATIONS_BASE_ID,
+    slug: "board",
+    name: "分类看板",
+    description: "Agent 按类型分栏——拖动卡片可重新分类。",
+    type: "kanban",
+    config: { filters: [], sorts: [], stackByFieldSlug: "category" },
+    minutesAgo: 56,
+    useCases: ["agent-integrations"],
+  },
 ];
 
 export const agentIntegrationsZhCnScenario: SeedScenario = {

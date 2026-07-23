@@ -2,7 +2,7 @@
 
 import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";
 import { createContext, type ReactNode, useContext, useEffect } from "react";
-import type { NodeDetailRenderer } from "../../dashboard/node-detail-registry";
+import type { NodeDetailProps, NodeDetailRenderer } from "../../dashboard/node-detail-registry";
 import { useAirAppKeepAliveStore } from "../store/airapp-keepalive-store";
 
 const EMPTY_SLUGS: string[] = [];
@@ -17,6 +17,7 @@ interface AirAppKeepAliveHostProps {
   enabled?: boolean;
   fallback: ReactNode;
   orpc: BusabaseQueryUtils;
+  onNodeLoaded?: NodeDetailProps["onNodeLoaded"];
   renderer?: NodeDetailRenderer;
   scopeKey: string;
 }
@@ -30,6 +31,7 @@ export function AirAppKeepAliveHost({
   enabled = true,
   fallback,
   orpc,
+  onNodeLoaded,
   renderer: RenderDetail,
   scopeKey,
 }: AirAppKeepAliveHostProps) {
@@ -66,7 +68,11 @@ export function AirAppKeepAliveHost({
         >
           <AirAppKeepAliveActiveContext.Provider value={slug === activeSlug}>
             <AirAppKeepAliveScopeContext.Provider value={scopeKey}>
-              <RenderDetail orpc={orpc} slug={slug} />
+              <RenderDetail
+                onNodeLoaded={slug === activeSlug ? onNodeLoaded : undefined}
+                orpc={orpc}
+                slug={slug}
+              />
             </AirAppKeepAliveScopeContext.Provider>
           </AirAppKeepAliveActiveContext.Provider>
         </div>

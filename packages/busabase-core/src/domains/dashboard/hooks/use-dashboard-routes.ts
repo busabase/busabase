@@ -1,4 +1,6 @@
-import { useRoute } from "wouter";
+import { getNodeType } from "busabase-contract/domains";
+import { useMemo } from "react";
+import { useLocation, useRoute } from "wouter";
 
 /**
  * Parse the wouter route table for the dashboard SPA into a flat set of route
@@ -7,6 +9,7 @@ import { useRoute } from "wouter";
  * in the orchestrator — this hook is pure routing.
  */
 export function useDashboardRoutes() {
+  const [location] = useLocation();
   const [isArchivedRoute] = useRoute("/archived");
   const [isGraphRoute] = useRoute("/graph");
   const [isAssetDetailRoute] = useRoute("/assets/:assetId");
@@ -40,6 +43,19 @@ export function useDashboardRoutes() {
   const selectedFileSlug = isFileRoute ? (fileParams?.slug ?? null) : null;
   const selectedDocSlug = isDocRoute ? (docParams?.slug ?? null) : null;
   const selectedFolderSlug = isFolderRoute ? (folderParams?.slug ?? null) : null;
+  const nodeDetailRoute = useMemo(() => {
+    const pathname = location.split("?", 1)[0] ?? "";
+    const match = pathname.match(/^\/([^/]+)\/([^/]+)$/);
+    if (!match) return null;
+    const [, type, encodedSlug] = match;
+    const definition = getNodeType(type);
+    if (!definition?.capabilities.hasDetail || type === "base") return null;
+    try {
+      return { type, slug: decodeURIComponent(encodedSlug) };
+    } catch {
+      return { type, slug: encodedSlug };
+    }
+  }, [location]);
   const selectedChangeRequestId =
     operationParams?.changeRequestId ?? changeRequestParams?.changeRequestId ?? null;
 
@@ -74,6 +90,7 @@ export function useDashboardRoutes() {
     selectedFileSlug,
     selectedDocSlug,
     selectedFolderSlug,
+    nodeDetailRoute,
     selectedChangeRequestId,
   };
 }

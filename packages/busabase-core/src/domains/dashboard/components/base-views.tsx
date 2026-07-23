@@ -357,15 +357,20 @@ export function BaseSetupView({
               </div>
               <div className="mt-3 flex justify-end border-border/50 border-t pt-3">
                 <SplitSubmitButton
+                  changeRequestAction={{
+                    label: messages.base.requestRename,
+                    loadingLabel: messages.common.submitting,
+                    onSubmit: () => submitRename(),
+                    isLoading: isRenameSaving,
+                  }}
                   disabled={isRenameSaving}
-                  isPrimaryLoading={isRenameSaving}
-                  primaryLabel={messages.base.requestRename}
-                  primaryLoadingLabel={messages.common.submitting}
-                  secondaryLabel={messages.base.renameNow}
-                  secondaryLoadingLabel={messages.base.renaming}
-                  onPrimary={() => submitRename()}
-                  onSecondary={() => submitRename({ mergeImmediately: true })}
                   hint={messages.common.requestReviewHint}
+                  immediateAction={{
+                    label: messages.base.renameNow,
+                    loadingLabel: messages.base.renaming,
+                    onSubmit: () => submitRename({ mergeImmediately: true }),
+                    isLoading: isRenameSaving,
+                  }}
                 />
               </div>
               {renameError ? <div className="mt-2 text-red-700 text-sm">{renameError}</div> : null}
@@ -481,18 +486,22 @@ export function BaseSetupView({
                       {messages.common.cancel}
                     </button>
                     <SplitSubmitButton
+                      changeRequestAction={{
+                        label: messages.base.requestRename,
+                        loadingLabel: messages.common.submitting,
+                        onSubmit: () => editingField && submitFieldRename(editingField.id),
+                        isLoading: isFieldRenameSaving,
+                      }}
                       disabled={isFieldRenameSaving || !editingField}
-                      isPrimaryLoading={isFieldRenameSaving}
-                      primaryLabel={messages.base.requestRename}
-                      primaryLoadingLabel={messages.common.submitting}
-                      secondaryLabel={messages.base.renameNow}
-                      secondaryLoadingLabel={messages.base.renaming}
-                      onPrimary={() => editingField && submitFieldRename(editingField.id)}
-                      onSecondary={() =>
-                        editingField &&
-                        submitFieldRename(editingField.id, { mergeImmediately: true })
-                      }
                       hint={messages.common.requestReviewHint}
+                      immediateAction={{
+                        label: messages.base.renameNow,
+                        loadingLabel: messages.base.renaming,
+                        onSubmit: () =>
+                          editingField &&
+                          submitFieldRename(editingField.id, { mergeImmediately: true }),
+                        isLoading: isFieldRenameSaving,
+                      }}
                     />
                   </div>
                 </div>
@@ -691,15 +700,20 @@ export function BaseSetupView({
                         {messages.common.cancel}
                       </button>
                       <SplitSubmitButton
+                        changeRequestAction={{
+                          label: messages.base.addFieldRequest,
+                          loadingLabel: messages.common.submitting,
+                          onSubmit: () => submit(),
+                          isLoading: isSaving,
+                        }}
                         disabled={isSaving}
-                        isPrimaryLoading={isSaving}
-                        primaryLabel={messages.base.addFieldRequest}
-                        primaryLoadingLabel={messages.common.submitting}
-                        secondaryLabel={messages.base.addFieldNow}
-                        secondaryLoadingLabel={messages.base.adding}
-                        onPrimary={() => submit()}
-                        onSecondary={() => submit({ mergeImmediately: true })}
                         hint={messages.common.requestReviewHint}
+                        immediateAction={{
+                          label: messages.base.addFieldNow,
+                          loadingLabel: messages.base.adding,
+                          onSubmit: () => submit({ mergeImmediately: true }),
+                          isLoading: isSaving,
+                        }}
                       />
                     </div>
                   </div>

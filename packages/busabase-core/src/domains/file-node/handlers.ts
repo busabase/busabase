@@ -10,7 +10,11 @@ import { getDb } from "../../db";
 import { busabaseAssetUsages, busabaseNodes, type NodePO } from "../../db/schema";
 import { CURRENT_USER_ID, id, now, rootNodeIdForSpace } from "../../logic/kernel";
 import { type MaterializeArgs, registerMaterializer } from "../../logic/materialize";
-import { buildNodeVisibilityCondition, initializeNodeAcl } from "../../logic/node-acl";
+import {
+  assertNodePermission,
+  buildNodeVisibilityCondition,
+  initializeNodeAcl,
+} from "../../logic/node-acl";
 import { assertContainerParent } from "../../logic/node-parent";
 import { ensureReady } from "../../logic/seed";
 import {
@@ -146,6 +150,10 @@ export const createFileNode = async (
     .where(eq(busabaseNodes.id, parentNodeId))
     .limit(1);
   const parentNode = assertContainerParent(parentNodeRow, "file", parentNodeId);
+
+  if (parsed.autoMerge) {
+    await assertNodePermission(parentNode.id, "write");
+  }
 
   // Review-first by default: propose the File node as a pending node_create
   // ChangeRequest instead of materializing it immediately. Callers that don't

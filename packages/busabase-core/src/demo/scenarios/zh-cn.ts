@@ -17,6 +17,8 @@ const mergeScenarios = (...scenarios: SeedScenario[]): SeedScenario => ({
   changeRequests: scenarios.flatMap((s) => s.changeRequests ?? []),
   docs: scenarios.flatMap((s) => s.docs ?? []),
   files: scenarios.flatMap((s) => s.files ?? []),
+  fileTreeNodes: scenarios.flatMap((s) => s.fileTreeNodes ?? []),
+  richNodes: scenarios.flatMap((s) => s.richNodes ?? []),
   comments: scenarios.flatMap((s) => s.comments ?? []),
 });
 

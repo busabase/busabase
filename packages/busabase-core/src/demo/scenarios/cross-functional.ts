@@ -1,4 +1,4 @@
-import type { SeedBaseDef, SeedRecordDef, SeedScenario } from "../seed-types";
+import type { SeedBaseDef, SeedRecordDef, SeedScenario, SeedViewDef } from "../seed-types";
 
 /**
  * Cross-functional EN demo bases — the English twins of the zh-cn `expand` scenario,
@@ -1908,7 +1908,44 @@ seed("evals", EVALS, "dataset", [
 
 export const CROSS_FUNCTIONAL_RECORDS = recs;
 
+export const CROSS_FUNCTIONAL_VIEWS: SeedViewDef[] = [
+  {
+    id: "viw_seed_todos_board",
+    baseId: TODOS,
+    slug: "board",
+    name: "Board",
+    description: "Todos stacked by status — drag a card as work progresses.",
+    type: "kanban",
+    config: { filters: [], sorts: [], stackByFieldSlug: "status" },
+    minutesAgo: 90,
+    useCases: ["routine"],
+  },
+  {
+    id: "viw_seed_meeting_calendar",
+    baseId: MEETING,
+    slug: "calendar",
+    name: "Calendar",
+    description: "Meetings placed on the month they happened.",
+    type: "calendar",
+    config: { filters: [], sorts: [], dateFieldSlug: "date" },
+    minutesAgo: 89,
+    useCases: ["knowledge"],
+  },
+  {
+    id: "viw_seed_risks_board",
+    baseId: RISKS,
+    slug: "board",
+    name: "Board",
+    description: "Risks stacked by severity.",
+    type: "kanban",
+    config: { filters: [], sorts: [], stackByFieldSlug: "severity" },
+    minutesAgo: 88,
+    useCases: ["compliance"],
+  },
+];
+
 export const crossFunctionalScenario: SeedScenario = {
   bases: CROSS_FUNCTIONAL_BASES,
   records: CROSS_FUNCTIONAL_RECORDS,
+  views: CROSS_FUNCTIONAL_VIEWS,
 };

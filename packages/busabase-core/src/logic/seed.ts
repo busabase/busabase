@@ -35,6 +35,7 @@ import type {
   SeedDocDef,
   SeedFileDef,
   SeedFileTreeDef,
+  SeedRichNodeDef,
   SeedScenario,
 } from "../demo/seed-types";
 import { writeDocBody } from "../domains/doc/handlers";
@@ -628,6 +629,39 @@ const seedFileTreeNodesIfMissing = async (createdAt: Date, defs: SeedFileTreeDef
           message: cr.message,
           author: cr.submittedBy,
         },
+      });
+    }
+  }
+};
+
+/** Upsert metadata-backed visual nodes by their stable scenario ids. */
+const seedRichNodesIfMissing = async (createdAt: Date, defs: SeedRichNodeDef[]) => {
+  if (defs.length === 0) return;
+  const db = await getDb();
+
+  for (const def of defs) {
+    const values = {
+      parentId: def.folderNodeId,
+      type: def.nodeType,
+      slug: def.slug,
+      name: def.name,
+      description: def.description,
+      metadata: def.metadata,
+      position: def.position,
+      updatedAt: createdAt,
+    };
+    const [existingNode] = await db
+      .select({ id: busabaseNodes.id })
+      .from(busabaseNodes)
+      .where(eq(busabaseNodes.id, def.nodeId))
+      .limit(1);
+    if (existingNode) {
+      await db.update(busabaseNodes).set(values).where(eq(busabaseNodes.id, def.nodeId));
+    } else {
+      await db.insert(busabaseNodes).values({
+        id: def.nodeId,
+        ...values,
+        createdAt,
       });
     }
   }
@@ -1428,6 +1462,7 @@ export const seedScenario = async (scenario: SeedScenario) => {
   // auto-seed in ensureReady(). Together with the scenario's folders + bases
   // they make the seeded workspace cover every builtin node type.
   await seedFileTreeNodesIfMissing(now(), scenario.fileTreeNodes ?? []);
+  await seedRichNodesIfMissing(now(), scenario.richNodes ?? []);
   await seedDocNodesIfMissing(now(), scenario.docs ?? []);
   await seedFileNodesIfMissing(now(), scenario.files ?? []);
   // Drive Grep Retrieval demo fixture — binary PDF + agent-supplied text via

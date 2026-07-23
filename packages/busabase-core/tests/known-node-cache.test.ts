@@ -22,6 +22,7 @@ import {
   markVisited,
   merge,
   nodeRoutePath,
+  recordVisit,
 } from "../src/domains/dashboard/helpers/known-node-cache";
 
 class FakeLocalStorage {
@@ -120,6 +121,49 @@ describe("KnownNode cache — markVisited / listVisited", () => {
 
     const visited = listVisited();
     expect(visited.map((n) => n.id)).toEqual(["n3", "n1"]);
+  });
+
+  it("records a successfully loaded node even when it was not already cached", () => {
+    recordVisit(
+      node({
+        id: "deep-doc",
+        type: "doc",
+        name: "Deep Doc",
+        slug: "deep-doc",
+        path: "/doc/deep-doc",
+      }),
+      "2026-03-05T00:00:00.000Z",
+    );
+
+    expect(listVisited()).toEqual([
+      expect.objectContaining({
+        id: "deep-doc",
+        name: "Deep Doc",
+        lastVisitedAt: "2026-03-05T00:00:00.000Z",
+      }),
+    ]);
+  });
+
+  it("publishes revisions so React consumers refresh when Recent changes", () => {
+    const cache = createKnownNodeCache("reactive-recents:test-user");
+    cache.clear();
+    const initialSnapshot = cache.getSnapshot();
+    let notifications = 0;
+    const unsubscribe = cache.subscribe(() => {
+      notifications += 1;
+    });
+
+    cache.merge([node({ id: "n1" })]);
+    cache.markVisited("n1", "2026-03-03T00:00:00.000Z");
+
+    const updatedSnapshot = cache.getSnapshot();
+    expect(updatedSnapshot.revision).toBe(initialSnapshot.revision + 2);
+    expect(updatedSnapshot).not.toBe(initialSnapshot);
+    expect(updatedSnapshot.visited.map((entry) => entry.id)).toEqual(["n1"]);
+    expect(notifications).toBe(2);
+    unsubscribe();
+    cache.clear();
+    expect(notifications).toBe(2);
   });
 });
 

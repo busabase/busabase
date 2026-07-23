@@ -10,6 +10,7 @@ import {
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
+import type { ApiKeyPermissionLevel } from "busabase-contract/access-control/api-key-level";
 import {
   type BusabaseDashboardApiClient,
   createBusabaseRestApiClient,
@@ -50,12 +51,15 @@ import {
 } from "./helpers/change-request";
 // Side-effect import: registers the skill/doc/folder node-detail renderers.
 import "./components/node-detail-views";
+// Side-effect import: registers Whiteboard, Workflow, and HTML renderers.
+import "../rich-node/components/register";
 import { BaseGraphView } from "./components/graph-view";
 import { ActivityView, InboxView } from "./components/inbox";
 import { RecordDetailView, RecordEditorView, RecordTopbarActions } from "./components/record-views";
 import { SearchDialog } from "./components/search-dialog";
 import { SidePanel } from "./components/side-panel";
 import { BaseTableSkeleton } from "./components/skeletons";
+import { SubmitPermissionProvider } from "./components/split-submit-button";
 import { BusabaseTopbarBreadcrumb } from "./components/topbar";
 import { getRelationRecordIds } from "./helpers/field";
 import { getLocationPath, readInboxView } from "./helpers/inbox";
@@ -73,7 +77,7 @@ import { useAttachmentUpload } from "./hooks/use-attachment-upload";
 import { useDashboardRoutes } from "./hooks/use-dashboard-routes";
 import { useKeyboardShortcut } from "./hooks/use-keyboard-shortcut";
 import { useBusabaseLiveSync } from "./hooks/use-live-sync";
-import { getNodeDetail } from "./node-detail-registry";
+import { getNodeDetail, type LoadedNode } from "./node-detail-registry";
 
 // Flattens the (already-fetched, for sidebar-tree rendering) node tree into
 // `KnownNode` cache entries — free, no new request: every `nodes.list`
@@ -149,6 +153,8 @@ interface BusabaseDashboardProps {
   emptyGuide?: ReactNode;
   /** Active UI locale (e.g. "en", "zh-CN"). Host-injected; defaults to English. */
   locale?: string;
+  /** Host-resolved workspace permission; local/open-source defaults to manage. */
+  submitPermissionLevel?: ApiKeyPermissionLevel;
 }
 
 // Public entry: provides a React Query client so the whole dashboard data layer
@@ -157,13 +163,16 @@ interface BusabaseDashboardProps {
 export function BusabaseDashboard({
   locale,
   provideQueryClient = true,
+  submitPermissionLevel = "manage",
   ...props
 }: BusabaseDashboardProps) {
   const queryClient = useMemo(() => new QueryClient(), []);
   const content = (
-    <CoreI18nProvider locale={locale}>
-      <BusabaseDashboardContent {...props} />
-    </CoreI18nProvider>
+    <SubmitPermissionProvider permissionLevel={submitPermissionLevel}>
+      <CoreI18nProvider locale={locale}>
+        <BusabaseDashboardContent {...props} />
+      </CoreI18nProvider>
+    </SubmitPermissionProvider>
   );
   return provideQueryClient ? (
     <QueryClientProvider client={queryClient}>{content}</QueryClientProvider>
@@ -205,6 +214,21 @@ function BusabaseDashboardContent({
   const nodeCache = useMemo(
     () => createKnownNodeCache(`${cacheSpaceKey}:${currentUserId ?? "anonymous"}`),
     [cacheSpaceKey, currentUserId],
+  );
+  const recordLoadedNode = useCallback(
+    (node: LoadedNode) => {
+      nodeCache.recordVisit(
+        {
+          id: node.id,
+          type: node.type,
+          name: node.name,
+          slug: node.slug,
+          path: nodeRoutePath(node.type, node.slug),
+        },
+        new Date().toISOString(),
+      );
+    },
+    [nodeCache],
   );
   // Reads run through oRPC + React Query, seeded by the SSR props as initialData.
   const changeRequestsList = orpc.changeRequests.list.queryOptions({ input: {} });
@@ -289,20 +313,11 @@ function BusabaseDashboardContent({
     baseParams,
     isBaseChildRoute,
     baseChildParams,
-    isSkillRoute,
-    isDriveRoute,
     isAirappRoute,
-    isFileRoute,
-    isDocRoute,
-    isFolderRoute,
     isBaseSetupRoute,
     selectedBaseSlug,
-    selectedSkillSlug,
-    selectedDriveSlug,
     selectedAirappSlug,
-    selectedFileSlug,
-    selectedDocSlug,
-    selectedFolderSlug,
+    nodeDetailRoute,
     selectedChangeRequestId,
   } = useDashboardRoutes();
   const activeBase = useMemo(
@@ -1488,15 +1503,24 @@ function BusabaseDashboardContent({
     setSearchOpen(false);
   }, [setSearchOpen]);
 
-  // Feed the `KnownNode` quick-jump cache from every node already fetched for
-  // the sidebar tree (root eager-prefetch + lazily-expanded folders) — see
-  // apps/busabase/content/spec/search-quick-jump.md. `nodeTree` is referentially
-  // stable across unrelated re-renders (`useLazyNodeChildren`'s `mergeLazyChildren`
-  // preserves object identity for untouched subtrees), so this only actually
-  // re-merges when the tree really changed.
+  // Feed the quick-jump cache from fetched sidebar nodes without treating a
+  // mere tree load/expand as a visit. Detail renderers report successful opens.
   useEffect(() => {
     nodeCache.merge(flattenNodesForCache(nodeTree));
   }, [nodeCache, nodeTree]);
+
+  // Bases render from the already-resolved bases query rather than the generic
+  // node-detail registry, so report their successful route resolution here.
+  useEffect(() => {
+    if (locationPath.startsWith("/base/") && activeBase?.slug === selectedBaseSlug) {
+      recordLoadedNode({
+        id: activeBase.nodeId,
+        type: "base",
+        name: activeBase.name,
+        slug: activeBase.slug,
+      });
+    }
+  }, [activeBase, locationPath, recordLoadedNode, selectedBaseSlug]);
 
   // Global Cmd+K (Mac) / Ctrl+K (Windows/Linux) quick-jump shortcut — opens the
   // search dialog from anywhere in the dashboard. Registered as two separate
@@ -1716,23 +1740,22 @@ function BusabaseDashboardContent({
 
     // Node-detail routes resolve their view from the per-platform renderer registry
     // (each domain registers via registerNodeDetail) instead of a hardcoded branch.
-    const nodeDetailRoute = isSkillRoute
-      ? { type: "skill", slug: selectedSkillSlug }
-      : isDriveRoute
-        ? { type: "drive", slug: selectedDriveSlug }
-        : isAirappRoute && (!keepAirAppsMounted || !selectedAirappSlug)
-          ? { type: "airapp", slug: selectedAirappSlug }
-          : isFileRoute
-            ? { type: "file", slug: selectedFileSlug }
-            : isDocRoute
-              ? { type: "doc", slug: selectedDocSlug }
-              : isFolderRoute
-                ? { type: "folder", slug: selectedFolderSlug }
-                : null;
-    if (nodeDetailRoute) {
-      const RenderDetail = getNodeDetail(nodeDetailRoute.type);
+    const activeNodeDetailRoute =
+      nodeDetailRoute?.type === "airapp" && keepAirAppsMounted && nodeDetailRoute.slug
+        ? null
+        : nodeDetailRoute;
+    if (activeNodeDetailRoute) {
+      const RenderDetail = getNodeDetail(activeNodeDetailRoute.type);
       if (RenderDetail) {
-        return <RenderDetail orpc={orpc} slug={nodeDetailRoute.slug} />;
+        return (
+          <RenderDetail
+            key={`${activeNodeDetailRoute.type}:${activeNodeDetailRoute.slug}`}
+            nodes={nodeTree}
+            onNodeLoaded={recordLoadedNode}
+            orpc={orpc}
+            slug={activeNodeDetailRoute.slug}
+          />
+        );
       }
     }
 
@@ -1760,21 +1783,10 @@ function BusabaseDashboardContent({
     isGraphRoute,
     isOperationRoute,
     isRecordRoute,
-    isSkillRoute,
-    isDriveRoute,
-    isAirappRoute,
     keepAirAppsMounted,
-    isFileRoute,
-    isDocRoute,
-    isFolderRoute,
     nodeTree,
     orpc,
-    selectedSkillSlug,
-    selectedDriveSlug,
-    selectedAirappSlug,
-    selectedFileSlug,
-    selectedDocSlug,
-    selectedFolderSlug,
+    nodeDetailRoute,
     selectedBaseView,
     isNewRecordRoute,
     isPending,
@@ -1818,6 +1830,7 @@ function BusabaseDashboardContent({
     selectedBaseSlug,
     setLocation,
     recordsPagination,
+    recordLoadedNode,
     serverSortedView,
     baseRecords,
   ]);
@@ -1827,6 +1840,7 @@ function BusabaseDashboardContent({
       activeSlug={activeAirappSlug}
       enabled={keepAirAppsMounted}
       fallback={activeView}
+      onNodeLoaded={recordLoadedNode}
       orpc={orpc}
       renderer={AirAppDetail}
       scopeKey={airAppKeepAliveScopeKey}

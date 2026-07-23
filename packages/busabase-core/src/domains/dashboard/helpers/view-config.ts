@@ -3,6 +3,7 @@ import {
   VIEW_FIELD_MAX_WIDTH,
   VIEW_FIELD_MIN_WIDTH,
   type ViewConfigVO,
+  type ViewFilterOperator,
   type ViewFilterVO,
   type ViewSortVO,
 } from "busabase-contract/types";
@@ -116,6 +117,69 @@ export const clearViewSortAt = (config: ViewConfigVO, index: number): ViewConfig
   index < 0 || index >= config.sorts.length
     ? config
     : { ...config, sorts: config.sorts.filter((_, itemIndex) => itemIndex !== index) };
+
+export const addViewFilter = (
+  config: ViewConfigVO,
+  field: Pick<BaseFieldVO, "id" | "slug">,
+  operator: ViewFilterOperator,
+): ViewConfigVO => ({
+  ...config,
+  filters: [...config.filters, { fieldId: field.id, fieldSlug: field.slug, operator }],
+});
+
+export const updateViewFilterAt = (
+  config: ViewConfigVO,
+  index: number,
+  filter: ViewFilterVO,
+): ViewConfigVO =>
+  index < 0 || index >= config.filters.length
+    ? config
+    : {
+        ...config,
+        filters: config.filters.map((current, itemIndex) =>
+          itemIndex === index ? filter : current,
+        ),
+      };
+
+export const addViewSort = (
+  config: ViewConfigVO,
+  field: Pick<BaseFieldVO, "id" | "slug">,
+  direction: ViewSortVO["direction"] = "asc",
+): ViewConfigVO => ({
+  ...config,
+  sorts: [...config.sorts, { direction, fieldId: field.id, fieldSlug: field.slug }],
+});
+
+export const updateViewSortAt = (
+  config: ViewConfigVO,
+  index: number,
+  sort: ViewSortVO,
+): ViewConfigVO =>
+  index < 0 || index >= config.sorts.length
+    ? config
+    : {
+        ...config,
+        sorts: config.sorts.map((current, itemIndex) => (itemIndex === index ? sort : current)),
+      };
+
+export const moveViewSort = (
+  config: ViewConfigVO,
+  index: number,
+  direction: "up" | "down",
+): ViewConfigVO => {
+  const targetIndex = index + (direction === "up" ? -1 : 1);
+  if (
+    index < 0 ||
+    index >= config.sorts.length ||
+    targetIndex < 0 ||
+    targetIndex >= config.sorts.length
+  ) {
+    return config;
+  }
+  const sorts = [...config.sorts];
+  [sorts[index], sorts[targetIndex]] = [sorts[targetIndex], sorts[index]];
+  return { ...config, sorts };
+};
 
 export const clampViewFieldWidth = (width: number): number =>
   Math.min(VIEW_FIELD_MAX_WIDTH, Math.max(VIEW_FIELD_MIN_WIDTH, Math.round(width)));

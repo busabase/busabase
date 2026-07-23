@@ -13,11 +13,11 @@ receive credentials.
 Prerequisites: Node.js 24.18 or newer and pnpm.
 
 ```bash
-cp packages/busabase-example-nextjs-fumadocs/.env.example \
-  packages/busabase-example-nextjs-fumadocs/.env.local
+cp packages/busabase-cms-nextjs-example/.env.example \
+  packages/busabase-cms-nextjs-example/.env.local
 # Set BUSABASE_BASE_URL and BUSABASE_CMS_FOLDER_ID. Cloud also needs a write-capable API key and,
 # when applicable, space id.
-pnpm --filter busabase-example-nextjs-fumadocs dev
+pnpm --filter busabase-cms-nextjs-example dev
 ```
 
 Open <http://localhost:3000>. With no credentials, the application still starts and displays setup

@@ -12,7 +12,8 @@ import { fmt, useCoreI18n } from "../../../i18n";
 import { AirAppDetailView } from "../../airapp/components/AirAppDetailView";
 import { AirAppSidePanelPreview } from "../../airapp/components/RunPanel";
 import { mergeSearchIntoHref } from "../helpers/link-search";
-import { registerNodeDetail } from "../node-detail-registry";
+import { useReportLoadedNode } from "../hooks/use-report-loaded-node";
+import { type NodeDetailProps, registerNodeDetail } from "../node-detail-registry";
 import { registerSidePanelTab } from "../side-panel-registry";
 import { AssetMetadataBlock, assetKindIcon, formatAssetSize } from "./assets";
 import {
@@ -27,6 +28,7 @@ import {
 import { NodePermissionsButton } from "./node-permissions-button";
 import { EmptyState } from "./primitives";
 import { FileContentSkeleton, NodeDetailSkeleton } from "./skeletons";
+import { SplitSubmitButton } from "./split-submit-button";
 
 // Re-exported for backward compat — these building blocks moved to
 // `./file-tree-browser` so `AirAppDetailView` can reuse them without a
@@ -52,6 +54,7 @@ interface FileTreeDetailViewProps {
   slug: string | null;
   namespace: FileTreeNamespace;
   nodeType: "skill" | "drive";
+  onNodeLoaded?: NodeDetailProps["onNodeLoaded"];
   labels: {
     notFoundTitle: string;
     notFoundBody: string;
@@ -65,6 +68,7 @@ export function FileTreeDetailView({
   slug,
   namespace,
   nodeType,
+  onNodeLoaded,
   labels,
 }: FileTreeDetailViewProps) {
   const messages = useCoreI18n();
@@ -86,6 +90,7 @@ export function FileTreeDetailView({
     enabled: Boolean(slug),
   });
   const fileTree = fileTreeQuery.data ?? null;
+  useReportLoadedNode(fileTree?.node, onNodeLoaded);
 
   // Reset the open file when switching file-tree nodes.
   // biome-ignore lint/correctness/useExhaustiveDependencies: reset only on slug change
@@ -328,24 +333,23 @@ export function FileTreeDetailView({
                   >
                     {messages.common.cancel}
                   </button>
-                  <button
-                    className="rounded-md border border-border/70 bg-background px-2.5 py-1.5 text-xs transition-colors hover:bg-muted/60 disabled:cursor-not-allowed disabled:opacity-50"
+                  <SplitSubmitButton
+                    changeRequestAction={{
+                      label: messages.nodeDetail.saveAsChangeRequest,
+                      loadingLabel: messages.nodeDetail.saving,
+                      onSubmit: () => void saveFile("changeRequest"),
+                      isLoading: busy === "changeRequest",
+                    }}
                     disabled={busy !== null || draft === fileQuery.data.content}
-                    onClick={() => void saveFile("changeRequest")}
-                    type="button"
-                  >
-                    {busy === "changeRequest"
-                      ? messages.nodeDetail.saving
-                      : messages.nodeDetail.saveAsChangeRequest}
-                  </button>
-                  <button
-                    className="rounded-md bg-primary px-2.5 py-1.5 text-primary-foreground text-xs transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
-                    disabled={busy !== null || draft === fileQuery.data.content}
-                    onClick={() => void saveFile("save")}
-                    type="button"
-                  >
-                    {busy === "save" ? messages.nodeDetail.saving : messages.nodeDetail.save}
-                  </button>
+                    dropdownPosition="below"
+                    hint={messages.common.mergeImmediatelyHint}
+                    immediateAction={{
+                      label: messages.nodeDetail.save,
+                      loadingLabel: messages.nodeDetail.saving,
+                      onSubmit: () => void saveFile("save"),
+                      isLoading: busy === "save",
+                    }}
+                  />
                 </div>
               ) : (
                 <button
@@ -438,7 +442,7 @@ export function FileTreeDetailView({
   );
 }
 
-export function SkillDetailView({ orpc, slug }: { orpc: BusabaseQueryUtils; slug: string | null }) {
+export function SkillDetailView({ orpc, slug, onNodeLoaded }: NodeDetailProps) {
   const messages = useCoreI18n();
   return (
     <FileTreeDetailView
@@ -450,13 +454,14 @@ export function SkillDetailView({ orpc, slug }: { orpc: BusabaseQueryUtils; slug
       }}
       namespace={orpc.skills}
       nodeType="skill"
+      onNodeLoaded={onNodeLoaded}
       orpc={orpc}
       slug={slug}
     />
   );
 }
 
-export function DriveDetailView({ orpc, slug }: { orpc: BusabaseQueryUtils; slug: string | null }) {
+export function DriveDetailView({ orpc, slug, onNodeLoaded }: NodeDetailProps) {
   const messages = useCoreI18n();
   return (
     <FileTreeDetailView
@@ -468,6 +473,7 @@ export function DriveDetailView({ orpc, slug }: { orpc: BusabaseQueryUtils; slug
       }}
       namespace={orpc.drives}
       nodeType="drive"
+      onNodeLoaded={onNodeLoaded}
       orpc={orpc}
       slug={slug}
     />
@@ -479,19 +485,14 @@ registerNodeDetail("drive", DriveDetailView);
 registerNodeDetail("airapp", AirAppDetailView);
 registerSidePanelTab("airapp-preview", AirAppSidePanelPreview);
 
-export function FileNodeDetailView({
-  orpc,
-  slug,
-}: {
-  orpc: BusabaseQueryUtils;
-  slug: string | null;
-}) {
+export function FileNodeDetailView({ orpc, slug, onNodeLoaded }: NodeDetailProps) {
   const messages = useCoreI18n();
   const fileQuery = useQuery({
     ...orpc.files.get.queryOptions({ input: { nodeId: slug ?? "" } }),
     enabled: Boolean(slug),
   });
   const detail = fileQuery.data ?? null;
+  useReportLoadedNode(detail?.node, onNodeLoaded);
 
   if (!detail) {
     return fileQuery.isLoading ? (
@@ -606,7 +607,7 @@ export function FileNodeDetailView({
 
 registerNodeDetail("file", FileNodeDetailView);
 
-export function DocDetailView({ orpc, slug }: { orpc: BusabaseQueryUtils; slug: string | null }) {
+export function DocDetailView({ orpc, slug, onNodeLoaded }: NodeDetailProps) {
   const messages = useCoreI18n();
   const [, rawSetLocation] = useLocation();
   const currentSearch = useSearch();
@@ -619,6 +620,7 @@ export function DocDetailView({ orpc, slug }: { orpc: BusabaseQueryUtils; slug: 
     enabled: Boolean(slug),
   });
   const doc = docQuery.data ?? null;
+  useReportLoadedNode(doc?.node, onNodeLoaded);
   const [isEditing, setIsEditing] = useState(false);
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState<null | "save" | "changeRequest">(null);
@@ -725,24 +727,23 @@ export function DocDetailView({ orpc, slug }: { orpc: BusabaseQueryUtils; slug: 
             >
               {messages.common.cancel}
             </button>
-            <button
-              className="rounded-button border px-3 py-1.5 text-sm hover:bg-muted disabled:opacity-40"
+            <SplitSubmitButton
+              changeRequestAction={{
+                label: messages.nodeDetail.saveAsChangeRequest,
+                loadingLabel: messages.nodeDetail.saving,
+                onSubmit: saveAsChangeRequest,
+                isLoading: busy === "changeRequest",
+              }}
               disabled={busy !== null}
-              onClick={saveAsChangeRequest}
-              type="button"
-            >
-              {busy === "changeRequest"
-                ? messages.nodeDetail.saving
-                : messages.nodeDetail.saveAsChangeRequest}
-            </button>
-            <button
-              className="rounded-button bg-primary px-3 py-1.5 text-primary-foreground text-sm disabled:opacity-40"
-              disabled={busy !== null}
-              onClick={save}
-              type="button"
-            >
-              {busy === "save" ? messages.nodeDetail.saving : messages.nodeDetail.save}
-            </button>
+              dropdownPosition="below"
+              hint={messages.common.mergeImmediatelyHint}
+              immediateAction={{
+                label: messages.nodeDetail.save,
+                loadingLabel: messages.nodeDetail.saving,
+                onSubmit: save,
+                isLoading: busy === "save",
+              }}
+            />
           </div>
         ) : (
           <div className="flex shrink-0 items-center gap-2">
@@ -785,13 +786,7 @@ export function DocDetailView({ orpc, slug }: { orpc: BusabaseQueryUtils; slug: 
 
 registerNodeDetail("doc", DocDetailView);
 
-export function FolderDetailView({
-  orpc,
-  slug,
-}: {
-  orpc: BusabaseQueryUtils;
-  slug: string | null;
-}) {
+export function FolderDetailView({ orpc, slug, onNodeLoaded }: NodeDetailProps) {
   const messages = useCoreI18n();
   const currentSearch = useSearch();
   const folderQuery = useQuery({
@@ -799,6 +794,7 @@ export function FolderDetailView({
     enabled: Boolean(slug),
   });
   const folder = folderQuery.data ?? null;
+  useReportLoadedNode(folder?.node, onNodeLoaded);
 
   if (!folder) {
     return folderQuery.isLoading ? (

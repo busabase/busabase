@@ -42,6 +42,7 @@ describe("Busabase namespaces", () => {
     ["docs", "docs"],
     ["folders", "folders"],
     ["webhooks", "webhooks"],
+    ["embedLinks", "embed-links"],
   ] as const)("%s.list() routes through the wrapper to /%s", async (ns, segment) => {
     const { fetchImpl, requests } = okFetch();
     const bb = new Busabase({ baseUrl: "http://localhost:15419", fetch: fetchImpl });

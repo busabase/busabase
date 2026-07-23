@@ -378,6 +378,28 @@ export const AGENT_INTEGRATIONS_VIEWS: SeedViewDef[] = [
     minutesAgo: 58,
     useCases: ["agent-integrations"],
   },
+  {
+    id: "viw_seed_agint_gallery",
+    baseId: DEMO_AGENT_INTEGRATIONS_BASE_ID,
+    slug: "gallery",
+    name: "Gallery",
+    description: "Agent logos as a card wall.",
+    type: "gallery",
+    config: { filters: [], sorts: [], coverFieldSlug: "logo" },
+    minutesAgo: 57,
+    useCases: ["agent-integrations"],
+  },
+  {
+    id: "viw_seed_agint_board",
+    baseId: DEMO_AGENT_INTEGRATIONS_BASE_ID,
+    slug: "board",
+    name: "By category board",
+    description: "Agents stacked by category — drag to recategorize.",
+    type: "kanban",
+    config: { filters: [], sorts: [], stackByFieldSlug: "category" },
+    minutesAgo: 56,
+    useCases: ["agent-integrations"],
+  },
 ];
 
 export const agentIntegrationsScenario: SeedScenario = {

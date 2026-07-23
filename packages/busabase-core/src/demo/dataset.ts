@@ -29,7 +29,11 @@ import {
   AGENT_INTEGRATIONS_VIEWS,
 } from "./scenarios/agent-integrations";
 import { withCmsDemoStandard } from "./scenarios/cms-demo";
-import { CROSS_FUNCTIONAL_BASES, CROSS_FUNCTIONAL_RECORDS } from "./scenarios/cross-functional";
+import {
+  CROSS_FUNCTIONAL_BASES,
+  CROSS_FUNCTIONAL_RECORDS,
+  CROSS_FUNCTIONAL_VIEWS,
+} from "./scenarios/cross-functional";
 import {
   DIRECTORY_LISTINGS_BASES,
   DIRECTORY_LISTINGS_RECORDS,
@@ -56,6 +60,7 @@ import type {
   SeedFieldDef,
   SeedFolderDef,
   SeedRecordDef,
+  SeedRichNodeDef,
   SeedScenario,
   SeedViewDef,
 } from "./seed-types";
@@ -2466,6 +2471,7 @@ export const DEMO_VIEWS: SeedViewDef[] = [
   ...AGENT_GALLERY_VIEWS,
   ...ROADMAP_VIEWS,
   ...AGENT_INTEGRATIONS_VIEWS,
+  ...CROSS_FUNCTIONAL_VIEWS,
   ...(readmeScenario.views ?? []),
 ];
 
@@ -3123,6 +3129,12 @@ export const buildDemoDataset = (
 
   const nodes: NodeVO[] = [];
   const rootCreatedAt = iso(anchor, 220);
+  const richNodesByFolder = new Map<string, SeedRichNodeDef[]>();
+  for (const richNode of scenario.richNodes ?? []) {
+    const siblings = richNodesByFolder.get(richNode.folderNodeId) ?? [];
+    siblings.push(richNode);
+    richNodesByFolder.set(richNode.folderNodeId, siblings);
+  }
   // Group the (use-case-filtered) bases under their sidebar folder; only emit a
   // folder that actually has bases.
   const folderNodes: NodeVO[] = (scenario.folders ?? [])
@@ -3138,22 +3150,38 @@ export const buildDemoDataset = (
       createdAt: rootCreatedAt,
       updatedAt: rootCreatedAt,
       baseId: null,
-      children: bases
-        .filter((base) => base.folderNodeId === folder.nodeId)
-        .map((base, index) => ({
-          id: base.nodeId,
+      children: [
+        ...bases
+          .filter((base) => base.folderNodeId === folder.nodeId)
+          .map((base, index) => ({
+            id: base.nodeId,
+            parentId: folder.nodeId,
+            type: "base" as const,
+            slug: base.slug,
+            name: base.name,
+            description: base.description,
+            metadata: {},
+            position: index,
+            createdAt: rootCreatedAt,
+            updatedAt: rootCreatedAt,
+            baseId: base.id,
+            children: [],
+          })),
+        ...(richNodesByFolder.get(folder.nodeId) ?? []).map((richNode) => ({
+          id: richNode.nodeId,
           parentId: folder.nodeId,
-          type: "base" as const,
-          slug: base.slug,
-          name: base.name,
-          description: base.description,
-          metadata: {},
-          position: index,
+          type: richNode.nodeType,
+          slug: richNode.slug,
+          name: richNode.name,
+          description: richNode.description,
+          metadata: richNode.metadata,
+          position: richNode.position,
           createdAt: rootCreatedAt,
           updatedAt: rootCreatedAt,
-          baseId: base.id,
+          baseId: null,
           children: [],
         })),
+      ],
     }))
     .filter((folder) => folder.children.length > 0);
 
@@ -3552,7 +3580,7 @@ export const buildDemoDataset = (
 
 /** English default seed — used by ensureReady() to populate a fresh local workspace. */
 export const englishScenario: SeedScenario = withCmsDemoStandard({
-  folders: DEMO_FOLDERS,
+  folders: [...DEMO_FOLDERS, ...(enNodeTypesScenario.folders ?? [])],
   bases: DEMO_BASES,
   records: DEMO_RECORDS,
   views: DEMO_VIEWS,
@@ -3560,5 +3588,6 @@ export const englishScenario: SeedScenario = withCmsDemoStandard({
   docs: enNodeTypesScenario.docs,
   files: enNodeTypesScenario.files,
   fileTreeNodes: enNodeTypesScenario.fileTreeNodes,
+  richNodes: enNodeTypesScenario.richNodes,
   comments: enNodeTypesScenario.comments,
 });

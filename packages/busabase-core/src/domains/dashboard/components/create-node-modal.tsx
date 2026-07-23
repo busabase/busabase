@@ -1,5 +1,6 @@
 "use client";
 
+import type { ApiKeyPermissionLevel } from "busabase-contract/access-control/api-key-level";
 import type { BusabaseDashboardApiClient } from "busabase-contract/api-client";
 import { type CreatableNodeType, listNodeTypes } from "busabase-contract/domains";
 import { Button } from "kui/button";
@@ -52,6 +53,8 @@ interface CreateNodeModalProps {
   onCreated: (changeRequestId: string, mode: "change-request" | "merged") => void;
   /** When opened from a folder's "+", the new node is created inside it. */
   parent?: { id: string; name: string } | null;
+  /** Host-resolved workspace permission for this dashboard-sibling modal. */
+  submitPermissionLevel?: ApiKeyPermissionLevel;
 }
 
 export function CreateNodeModal({
@@ -60,6 +63,7 @@ export function CreateNodeModal({
   onOpenChange,
   onCreated,
   parent,
+  submitPermissionLevel = "manage",
 }: CreateNodeModalProps) {
   const messages = useCoreI18n();
   const [selectedType, setSelectedType] = useState(CREATABLE_TYPES[0]?.type ?? "base");
@@ -308,17 +312,23 @@ export function CreateNodeModal({
             {messages.common.cancel}
           </Button>
           <SplitSubmitButton
+            changeRequestAction={{
+              label: fmt(messages.createNode.createRequest, {
+                type: activeType?.label ?? "",
+              }),
+              loadingLabel: messages.createNode.creating,
+              onSubmit: submitAsChangeRequest,
+              isLoading: submitting,
+            }}
             disabled={isDisabled}
-            isPrimaryLoading={submitting}
-            primaryLabel={fmt(messages.createNode.createRequest, {
-              type: activeType?.label ?? "",
-            })}
-            primaryLoadingLabel={messages.createNode.creating}
-            secondaryLabel={messages.createNode.createNow}
-            secondaryLoadingLabel={messages.createNode.creating}
-            onPrimary={submitAsChangeRequest}
-            onSecondary={submitAndMerge}
             hint={messages.createNode.hint}
+            immediateAction={{
+              label: messages.createNode.createNow,
+              loadingLabel: messages.createNode.creating,
+              onSubmit: submitAndMerge,
+              isLoading: submitting,
+            }}
+            permissionLevel={submitPermissionLevel}
           />
         </DialogFooter>
       </DialogContent>

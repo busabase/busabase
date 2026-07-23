@@ -72,7 +72,12 @@ import {
 } from "./kernel";
 import { publishBusabaseLiveEvent } from "./live-events";
 import { getMaterializer, type MaterializeArgs, type NodeCreateFields } from "./materialize";
-import { assertNodePermission, initializeNodeAcl, recomputeSpaceNodeAcl } from "./node-acl";
+import {
+  assertNodePermission,
+  assertWorkspacePermission,
+  initializeNodeAcl,
+  recomputeSpaceNodeAcl,
+} from "./node-acl";
 import { assertContainerParent } from "./node-parent";
 import { loadNodesByIds } from "./nodes";
 import { ensureReady, loadBasesByIds } from "./seed";
@@ -320,8 +325,8 @@ const mergeNodeCreate = async (ctx: MergeCtx, item: OperationPO, headCommit: Com
   // existed at proposal time. Two ChangeRequests proposed before either
   // merges can both pass, then race to merge — without this check the
   // second hits the DB's unique(parentId, slug) index and 500s instead of
-  // returning a clean conflict. Covers all 7 node types (base/folder/doc/
-  // skill/file/drive/airapp) since they all flow through this one dispatcher.
+  // returning a clean conflict. Covers every creatable node type because they
+  // all flow through this one dispatcher.
   const [existingSibling] = await db
     .select({ id: busabaseNodes.id, name: busabaseNodes.name })
     .from(busabaseNodes)
@@ -1284,6 +1289,7 @@ export const reviewChangeRequest = async (
   changeRequestId: string,
   input: z.infer<typeof reviewInputSchema>,
 ) => {
+  assertWorkspacePermission("write");
   await ensureReady();
   const db = await getDb();
   const parsed = reviewInputSchema.parse(input);
@@ -1410,6 +1416,7 @@ export const autoApproveAndMerge = async (
   changeRequestId: string,
   reason = "Auto-merged: structural change",
 ) => {
+  assertWorkspacePermission("write");
   await ensureReady();
   const db = await getDb();
   const [changeRequest] = await db
@@ -1767,6 +1774,7 @@ export const recordPendingNodeCreate = async (args: {
 };
 
 export const closeChangeRequest = async (changeRequestId: string, reason?: string) => {
+  assertWorkspacePermission("write");
   await ensureReady();
   const db = await getDb();
   const [changeRequest] = await db
@@ -1879,6 +1887,7 @@ export const listAgentTasks = async () => {
 // ── Merge engine ──────────────────────────────────────────────────────────────
 
 export const mergeChangeRequest = async (changeRequestId: string) => {
+  assertWorkspacePermission("write");
   try {
     return await _mergeChangeRequest(changeRequestId);
   } catch (err) {

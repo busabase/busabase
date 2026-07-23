@@ -42,7 +42,7 @@ Every constructor field is optional and falls back to an environment variable:
 
 ## Two entry points
 
-**`Busabase` class** — an ergonomic wrapper with namespaced methods (`bb.bases`, `bb.records`, `bb.changeRequests`, `bb.nodes`, `bb.views`, `bb.assets`, `bb.skills`, `bb.docs`, `bb.folders`, `bb.comments`, `bb.auditEvents`, `bb.agent`, `bb.agentTasks`, `bb.search()`, `bb.health()`, `bb.me()`). Drop to `bb.client` for the raw oRPC client (e.g. `bb.client.system.meta()`).
+**`Busabase` class** — an ergonomic wrapper with namespaced methods (`bb.bases`, `bb.records`, `bb.changeRequests`, `bb.nodes`, `bb.views`, `bb.assets`, `bb.skills`, `bb.docs`, `bb.folders`, `bb.comments`, `bb.auditEvents`, `bb.agent`, `bb.agentTasks`, `bb.embedLinks`, `bb.search()`, `bb.health()`, `bb.me()`). Drop to `bb.client` for the raw oRPC client (e.g. `bb.client.system.meta()`).
 
 **`createBusabaseClient(config?)`** — returns the raw, fully-typed [oRPC](https://orpc.unnoq.com) client directly, if you'd rather not wrap it in a class:
 

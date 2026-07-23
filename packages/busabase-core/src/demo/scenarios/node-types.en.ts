@@ -11,7 +11,7 @@ import type { SeedScenario } from "../seed-types";
 // review Comments. Shipped via `pnpm db:seed:all`, on top of the scenario's
 // folders/bases/records. The zh-CN counterpart (`node-types.zh-cn.ts`) mirrors this
 // structure with different data — AirApps are English-only for now (see the
-// canvas-node changelog for why).
+// whiteboard-node changelog for why).
 //
 // AirApp content comes from `domains/airapp/demo-content` — the same catalog
 // `apps/busabase/scripts/demo/14-airapps.ts` uses to create all 10 demos via
@@ -27,6 +27,7 @@ import type { SeedScenario } from "../seed-types";
 // seed-time, scenario ordering between the two doesn't matter.
 
 const DOC_GUIDE_CR_ID = "crq_seed_doc_operating_guide";
+const RICH_NODES_FOLDER_ID = "nod_visual_tools";
 
 // ── Skill: AI Research Editor ────────────────────────────────────────────────
 // Same content that used to be hardcoded directly in seed.ts's
@@ -35,6 +36,348 @@ const DOC_GUIDE_CR_ID = "crq_seed_doc_operating_guide";
 const AI_RESEARCH_EDITOR_SKILL_MD = `---\nname: ai-research-editor\ndescription: Reviews agent research drafts for source quality before publishing.\n---\n\n# AI Research Editor\n\nUse this skill when an agent proposes AI industry analysis, newsletter copy, or social threads that need source checks before merge.\n\n## Workflow\n\n1. Read the proposed ChangeRequest operations.\n2. Check whether every factual claim has a source URL or a clear internal record reference.\n3. Flag unsupported claims before approval.\n4. Keep edits concise and preserve the author's thesis.\n`;
 
 export const enNodeTypesScenario: SeedScenario = {
+  folders: [
+    {
+      nodeId: RICH_NODES_FOLDER_ID,
+      slug: "visual-tools",
+      name: "Visual Tools",
+      description: "Whiteboards, executable process designs, mind maps, and HTML prototypes.",
+      position: 6,
+    },
+  ],
+  richNodes: [
+    {
+      nodeType: "whiteboard",
+      nodeId: "nod_whiteboard_product_launch",
+      folderNodeId: RICH_NODES_FOLDER_ID,
+      slug: "product-launch-whiteboard",
+      name: "Product Launch Whiteboard",
+      description: "A free-form launch workspace with goals, owners, and open questions.",
+      position: 0,
+      metadata: {
+        whiteboardDocument: {
+          version: 1,
+          appState: { viewBackgroundColor: "#f8fafc" },
+          elements: [
+            {
+              id: "launch-title",
+              type: "text",
+              x: 80,
+              y: 50,
+              width: 330,
+              height: 38,
+              angle: 0,
+              strokeColor: "#0f172a",
+              backgroundColor: "transparent",
+              fillStyle: "solid",
+              strokeWidth: 1,
+              strokeStyle: "solid",
+              roughness: 1,
+              opacity: 100,
+              groupIds: [],
+              frameId: null,
+              index: "a0",
+              roundness: null,
+              seed: 101,
+              version: 1,
+              versionNonce: 101,
+              isDeleted: false,
+              boundElements: null,
+              updated: 1,
+              link: null,
+              locked: false,
+              text: "Product launch whiteboard",
+              fontSize: 28,
+              fontFamily: 5,
+              textAlign: "left",
+              verticalAlign: "top",
+              containerId: null,
+              originalText: "Product launch whiteboard",
+              autoResize: true,
+              lineHeight: 1.25,
+            },
+            ...[
+              ["goal", 80, 130, "Goal\nApproval-first launch", "#dcfce7", 102],
+              ["owners", 400, 130, "Owners\nProduct · Growth · Support", "#dbeafe", 103],
+              ["risks", 80, 330, "Open questions\nPricing · onboarding · launch", "#fef3c7", 104],
+              [
+                "success",
+                400,
+                330,
+                "Success signals\nActivation · approvals · reuse",
+                "#fce7f3",
+                105,
+              ],
+            ].flatMap(([id, x, y, text, color, seed], index) => [
+              {
+                id: `${id}-box`,
+                type: "rectangle",
+                x,
+                y,
+                width: 250,
+                height: 125,
+                angle: 0,
+                strokeColor: "#475569",
+                backgroundColor: color,
+                fillStyle: "solid",
+                strokeWidth: 2,
+                strokeStyle: "solid",
+                roughness: 1,
+                opacity: 100,
+                groupIds: [],
+                frameId: null,
+                index: `a${index * 2 + 1}`,
+                roundness: { type: 3 },
+                seed,
+                version: 1,
+                versionNonce: seed,
+                isDeleted: false,
+                boundElements: null,
+                updated: 1,
+                link: null,
+                locked: false,
+              },
+              {
+                id: `${id}-text`,
+                type: "text",
+                x: Number(x) + 15,
+                y: Number(y) + 24,
+                width: 220,
+                height: 60,
+                angle: 0,
+                strokeColor: "#0f172a",
+                backgroundColor: "transparent",
+                fillStyle: "solid",
+                strokeWidth: 1,
+                strokeStyle: "solid",
+                roughness: 1,
+                opacity: 100,
+                groupIds: [],
+                frameId: null,
+                index: `a${index * 2 + 2}`,
+                roundness: null,
+                seed: Number(seed) + 10,
+                version: 1,
+                versionNonce: Number(seed) + 10,
+                isDeleted: false,
+                boundElements: null,
+                updated: 1,
+                link: null,
+                locked: false,
+                text,
+                fontSize: 16,
+                fontFamily: 5,
+                textAlign: "left",
+                verticalAlign: "top",
+                containerId: null,
+                originalText: text,
+                autoResize: true,
+                lineHeight: 1.35,
+              },
+            ]),
+          ],
+        },
+      },
+    },
+    {
+      nodeType: "workflow",
+      nodeId: "nod_workflow_lead_intake",
+      folderNodeId: RICH_NODES_FOLDER_ID,
+      slug: "lead-intake-workflow",
+      name: "Lead Intake Workflow",
+      description: "A standardized webhook-to-review flow for new qualified leads.",
+      position: 1,
+      metadata: {
+        workflowDocument: {
+          version: 2,
+          nodes: [
+            {
+              id: "new-lead",
+              kind: "trigger",
+              position: { x: 0, y: 80 },
+              label: "New lead",
+              description: "Start when a lead form is submitted.",
+              eventName: "lead.submitted",
+            },
+            {
+              id: "enrich",
+              kind: "webhook",
+              position: { x: 280, y: 80 },
+              label: "Enrich company",
+              description: "Send the lead to the enrichment webhook.",
+              method: "POST",
+              url: "https://example.com/webhooks/enrich-company",
+            },
+            {
+              id: "score",
+              kind: "function",
+              position: { x: 560, y: 80 },
+              label: "Score fit",
+              description: "Calculate ICP fit from the enriched profile.",
+              webhookRuleId: "",
+              functionName: "scoreLeadFit",
+            },
+            {
+              id: "review",
+              kind: "condition",
+              position: { x: 840, y: 80 },
+              label: "Qualified lead?",
+              description: "Branch using the score returned by the function.",
+              expression: "input.score >= 80",
+            },
+            {
+              id: "approval",
+              kind: "approval",
+              position: { x: 840, y: 260 },
+              label: "Approve outreach",
+              description: "Require a space admin to approve qualified-lead outreach.",
+              approver: "space-admin",
+            },
+            {
+              id: "wait",
+              kind: "wait",
+              position: { x: 560, y: 260 },
+              label: "Wait for CRM sync",
+              description: "Allow enrichment and CRM projections to settle.",
+              duration: 30,
+              unit: "minutes",
+            },
+            {
+              id: "create-review",
+              kind: "action",
+              position: { x: 280, y: 260 },
+              label: "Create review task",
+              description: "Create a review ChangeRequest for the account owner.",
+              actionName: "createChangeRequest",
+            },
+            {
+              id: "completed",
+              kind: "end",
+              position: { x: 0, y: 260 },
+              label: "Ready for outreach",
+              description: "The qualified lead completed the standardized flow.",
+              outcome: "approved",
+            },
+            {
+              id: "not-qualified",
+              kind: "end",
+              position: { x: 840, y: -180 },
+              label: "Archive lead",
+              description: "The lead does not meet the current qualification threshold.",
+              outcome: "not-qualified",
+            },
+          ],
+          edges: [
+            {
+              id: "lead-enrich",
+              source: "new-lead",
+              target: "enrich",
+              label: "",
+              outcome: "default",
+            },
+            {
+              id: "enrich-score",
+              source: "enrich",
+              target: "score",
+              label: "enriched",
+              outcome: "success",
+            },
+            {
+              id: "score-review",
+              source: "score",
+              target: "review",
+              label: "scored",
+              outcome: "success",
+            },
+            {
+              id: "review-approval",
+              source: "review",
+              target: "approval",
+              label: "qualified",
+              outcome: "true",
+            },
+            {
+              id: "review-archive",
+              source: "review",
+              target: "not-qualified",
+              label: "not qualified",
+              outcome: "false",
+            },
+            {
+              id: "approval-wait",
+              source: "approval",
+              target: "wait",
+              label: "approved",
+              outcome: "approved",
+            },
+            {
+              id: "wait-action",
+              source: "wait",
+              target: "create-review",
+              label: "ready",
+              outcome: "elapsed",
+            },
+            {
+              id: "action-complete",
+              source: "create-review",
+              target: "completed",
+              label: "created",
+              outcome: "success",
+            },
+          ],
+          settings: {
+            executionMode: "event",
+            concurrency: 4,
+            timeoutMs: 60000,
+            errorPolicy: "stop",
+          },
+        },
+      },
+    },
+    {
+      nodeType: "html",
+      nodeId: "nod_html_waitlist_form",
+      folderNodeId: RICH_NODES_FOLDER_ID,
+      slug: "waitlist-form-prototype",
+      name: "Waitlist Form Prototype",
+      description: "An editable HTML prototype for a compact waitlist intake form.",
+      position: 2,
+      metadata: {
+        htmlDocument: {
+          version: 1,
+          source: `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Join the Busabase waitlist</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; min-height: 100vh; display: grid; place-items: center; padding: 32px; background: #f1f5f9; color: #0f172a; font: 16px/1.5 system-ui, sans-serif; }
+    main { width: min(100%, 520px); border: 1px solid #cbd5e1; border-radius: 12px; background: white; padding: 32px; box-shadow: 0 18px 45px rgba(15, 23, 42, .08); }
+    p { color: #475569; }
+    label { display: grid; gap: 6px; margin-top: 18px; font-weight: 600; }
+    input, select, button { width: 100%; min-height: 44px; border-radius: 7px; font: inherit; }
+    input, select { border: 1px solid #94a3b8; padding: 0 12px; }
+    button { margin-top: 24px; border: 0; background: #166534; color: white; font-weight: 700; cursor: pointer; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Build trusted agent workflows</h1>
+    <p>Tell us what you want to review before an agent's output becomes canonical.</p>
+    <form onsubmit="event.preventDefault(); this.querySelector('button').textContent='You are on the list';">
+      <label>Work email <input type="email" placeholder="you@company.com" required></label>
+      <label>Primary use case <select><option>Agent knowledge base</option><option>Content operations</option><option>Data review</option></select></label>
+      <button type="submit">Request early access</button>
+    </form>
+  </main>
+</body>
+</html>`,
+        },
+      },
+    },
+  ],
   fileTreeNodes: [
     {
       nodeType: "skill",

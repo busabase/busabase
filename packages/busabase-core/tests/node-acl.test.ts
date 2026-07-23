@@ -15,6 +15,7 @@
  * default.
  */
 import { createRouterClient } from "@orpc/server";
+import type { ApiKeyPermissionLevel } from "busabase-contract/access-control/api-key-level";
 import { describe, expect, it } from "vitest";
 import { LOCAL_SPACE_ID, runWithBusabaseContext } from "../src/context";
 import { busabaseRouter } from "../src/router";
@@ -25,12 +26,17 @@ type RawClient = ReturnType<typeof createRouterClient<typeof busabaseRouter, Rec
 const asManager = <T>(actorId: string, fn: () => Promise<T>) =>
   runWithBusabaseContext({ spaceId: LOCAL_SPACE_ID, actorId, isSpaceManager: true }, fn);
 
-const asMember = <T>(actorId: string, fn: () => Promise<T>, opts: { restricted?: boolean } = {}) =>
+const asMember = <T>(
+  actorId: string,
+  fn: () => Promise<T>,
+  opts: { restricted?: boolean; permissionLevel?: ApiKeyPermissionLevel } = {},
+) =>
   runWithBusabaseContext(
     {
       spaceId: LOCAL_SPACE_ID,
       actorId,
       isSpaceManager: false,
+      permissionLevel: opts.permissionLevel ?? "changeRequest",
       restrictedVisibility: opts.restricted ?? false,
     },
     fn,
@@ -211,6 +217,87 @@ describe("node ACL", () => {
       });
       expect(cr.id).toBeTruthy();
     });
+  });
+
+  it("uses member/viewer workspace roles as the visible-node baseline and gates review/merge", async () => {
+    await seedScenario("acl-space-role-baseline");
+    const raw: RawClient = createRouterClient(busabaseRouter);
+
+    const { baseId, docNodeId } = await asManager("alice", async () => {
+      const base = await raw.bases.create({ name: "Roadmap", slug: "roadmap", autoMerge: true });
+      if ("status" in base) throw new Error("expected materialized base");
+      await raw.bases.createField({ baseId: base.id, name: "title", slug: "title", type: "text" });
+      const doc = await raw.docs.create({
+        name: "Runbook",
+        slug: "runbook",
+        body: "owner content",
+        autoMerge: true,
+      });
+      if ("status" in doc) throw new Error("expected materialized doc");
+      return { baseId: base.id, docNodeId: doc.node.id };
+    });
+
+    const changeRequest = await asMember("bob", () =>
+      raw.bases.createChangeRequest({
+        baseId,
+        fields: { title: "member proposal" },
+        submittedBy: "bob",
+      }),
+    );
+    expect(changeRequest.status).toBe("in_review");
+
+    await asMember("bob", async () => {
+      await expect(
+        raw.nodes.createChangeRequest({
+          autoMerge: true,
+          operations: [
+            { kind: "create", nodeType: "folder", slug: "blocked-now", name: "Blocked Now" },
+          ],
+        }),
+      ).rejects.toThrow(/write access/);
+      await expect(
+        raw.docs.create({
+          name: "Blocked Doc",
+          slug: "blocked-doc",
+          body: "should not materialize",
+          autoMerge: true,
+        }),
+      ).rejects.toThrow(/write access/);
+      await expect(
+        raw.docs.updateBody({ nodeId: docNodeId, body: "member direct update" }),
+      ).rejects.toThrow(/write access/);
+      await expect(
+        raw.bases.createField({
+          baseId,
+          name: "blocked now",
+          slug: "blocked-now",
+          type: "text",
+        }),
+      ).rejects.toThrow(/write access/);
+      await expect(
+        raw.changeRequests.review({
+          changeRequestId: changeRequest.id,
+          verdict: "approved",
+        }),
+      ).rejects.toThrow(/write workspace access/);
+      await expect(raw.changeRequests.merge({ changeRequestId: changeRequest.id })).rejects.toThrow(
+        /write workspace access/,
+      );
+    });
+
+    await asMember(
+      "carol",
+      async () => {
+        await expect(
+          raw.bases.createChangeRequest({
+            baseId,
+            fields: { title: "viewer proposal" },
+            submittedBy: "carol",
+          }),
+        ).rejects.toThrow(/changeRequest access/);
+      },
+      { permissionLevel: "read" },
+    );
   });
 
   it("refuses to make the workspace root private", async () => {

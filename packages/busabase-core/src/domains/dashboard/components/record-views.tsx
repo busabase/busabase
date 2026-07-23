@@ -513,20 +513,23 @@ export function RecordEditorView({
             {messages.common.cancel}
           </Link>
           <SplitSubmitButton
+            changeRequestAction={{
+              label:
+                mode === "new"
+                  ? messages.recordView.submitRequest
+                  : messages.recordView.updateRequest,
+              loadingLabel: messages.recordView.saving,
+              onSubmit: () => submit(false),
+              isLoading: saveAction === "change_request",
+            }}
             disabled={saveAction !== null}
-            isPrimaryLoading={saveAction === "change_request"}
-            isSecondaryLoading={saveAction === "merge"}
-            primaryLabel={
-              mode === "new" ? messages.recordView.submitRequest : messages.recordView.updateRequest
-            }
-            primaryLoadingLabel={messages.recordView.saving}
-            secondaryLabel={
-              mode === "new" ? messages.recordView.submitNow : messages.recordView.updateNow
-            }
-            secondaryLoadingLabel={messages.recordView.merging}
-            onPrimary={() => submit(false)}
-            onSecondary={() => submit(true)}
             hint={messages.common.mergeImmediatelyHint}
+            immediateAction={{
+              label: mode === "new" ? messages.recordView.submitNow : messages.recordView.updateNow,
+              loadingLabel: messages.recordView.merging,
+              onSubmit: () => submit(true),
+              isLoading: saveAction === "merge",
+            }}
           />
         </div>
       </section>

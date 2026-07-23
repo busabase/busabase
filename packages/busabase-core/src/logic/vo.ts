@@ -228,7 +228,7 @@ export const toNodeVO = (
  * `NodeVO` (no `description`/`metadata`/tree). `path` is the route this node
  * navigates to (`/${type}/${slug}`), the same convention `nodeHref`
  * (dashboard-shell.tsx) and `fileResultHref` (logic/search.ts) already use —
- * every one of the 7 built-in node types has `hasDetail: true`, so this is
+ * every registered built-in node type has `hasDetail: true`, so this is
  * never conditional.
  */
 export const toNodeSearchResultVO = (node: NodePO): NodeSearchResultVO => ({

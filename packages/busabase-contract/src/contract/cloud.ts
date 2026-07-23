@@ -1,6 +1,14 @@
 import { oc } from "@orpc/contract";
 import { z } from "zod";
 import { busabaseContractRoutes } from "./busabase";
+import {
+  CreatedEmbedLinkVOSchema,
+  CreateEmbedLinkInputSchema,
+  EmbedLinkVOSchema,
+  ListEmbedLinksInputSchema,
+  RevokeEmbedLinkInputSchema,
+  RevokeEmbedLinkVOSchema,
+} from "./embed-link-schemas";
 
 /**
  * Cloud public REST contract — the OSS workbench surface plus the cloud-only
@@ -72,6 +80,18 @@ const notFoundErrors = {
     data: ErrorResponseSchema,
   },
 };
+
+const embedLinksErrors = {
+  BAD_REQUEST: { status: 400, message: "Bad Request", data: ErrorResponseSchema },
+  ...authenticatedErrors,
+  FORBIDDEN: { status: 403, message: "Forbidden", data: ErrorResponseSchema },
+  ...notFoundErrors,
+};
+
+const securedRoute = (operation: Record<string, unknown>) => ({
+  ...operation,
+  security: [{ bearerAuth: [] }],
+});
 
 // Paths are relative — the shared `/api/v1` prefix is applied once on the router
 // below, exactly like the workbench routes.
@@ -169,6 +189,48 @@ const cloudExtraRoutes = {
         }),
       )
       .output(AgentTaskDetailSchema),
+  },
+  // Relative-path twin of `embedLinksContract`
+  // (apps/busabase-cloud/src/domains/embed-links/contract.ts, served at the absolute
+  // `/api/v1/embed-links` paths) — same schemas imported from `./embed-link-schemas`, just
+  // routed relative here so the shared `/api/v1` prefix below lands on the identical real path.
+  embedLinks: {
+    create: oc
+      .route({
+        method: "POST",
+        path: "/embed-links",
+        tags: ["Embed Links"],
+        summary: "Create a short-lived read-only embed link for one node",
+        successDescription: "The capability URL is returned once; only its secret hash is stored.",
+        spec: securedRoute,
+      })
+      .errors(embedLinksErrors)
+      .input(CreateEmbedLinkInputSchema)
+      .output(CreatedEmbedLinkVOSchema),
+    list: oc
+      .route({
+        method: "GET",
+        path: "/embed-links",
+        tags: ["Embed Links"],
+        summary: "List embed links the caller can manage",
+        successDescription: "Embed link metadata without capability secrets.",
+        spec: securedRoute,
+      })
+      .errors(embedLinksErrors)
+      .input(ListEmbedLinksInputSchema)
+      .output(z.array(EmbedLinkVOSchema)),
+    revoke: oc
+      .route({
+        method: "DELETE",
+        path: "/embed-links/{id}",
+        tags: ["Embed Links"],
+        summary: "Revoke an embed link",
+        successDescription: "The capability stops resolving immediately.",
+        spec: securedRoute,
+      })
+      .errors(embedLinksErrors)
+      .input(RevokeEmbedLinkInputSchema)
+      .output(RevokeEmbedLinkVOSchema),
   },
 };
 

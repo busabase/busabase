@@ -520,6 +520,10 @@ export const createFileTreeNode = async (
     .limit(1);
   const parentNode = assertContainerParent(parentNodeRow, config.type, parentNodeId);
 
+  if (parsed.autoMerge) {
+    await assertNodePermission(parentNode.id, "write");
+  }
+
   // Review-first by default: propose the node as a pending node_create
   // ChangeRequest instead of materializing it immediately. Callers that don't
   // need human review (seed/migration scripts, an explicit no-review agent

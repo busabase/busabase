@@ -194,3 +194,17 @@ export function hasApiKeyLevel(
   if (storedLevel == null) return true;
   return API_KEY_LEVEL_ORDER[storedLevel] >= API_KEY_LEVEL_ORDER[required];
 }
+
+/**
+ * Maps the cloud host's human workspace roles onto the same ordered permission
+ * ladder used by API keys and node ACLs. Unknown/missing roles fail closed to
+ * read-only; single-user and remote-tunnel hosts should pass `manage`
+ * explicitly because they do not have a cloud membership row.
+ */
+export function permissionLevelForSpaceRole(
+  role: string | null | undefined,
+): ApiKeyPermissionLevel {
+  if (role === "owner" || role === "admin") return "manage";
+  if (role === "member") return "changeRequest";
+  return "read";
+}

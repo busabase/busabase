@@ -1,5 +1,5 @@
 {
-  "name": "busabase-example-nextjs-fumadocs",
+  "name": "busabase-cms-nextjs-example",
   "version": "0.1.0",
   "private": true,
   "description": "Runnable Next.js and Fumadocs example for the four-Base Busabase CMS.",

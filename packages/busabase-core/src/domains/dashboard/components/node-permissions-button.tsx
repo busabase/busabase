@@ -101,9 +101,9 @@ export function NodePermissionsButton({
   orpc: BusabaseQueryUtils;
   nodeId: string;
   nodeName: string;
-  /** "toolbar" = the bordered pill used in node-detail headers; "menu" = a
-   *  borderless full-width row for the sidebar dropdown. */
-  variant?: "toolbar" | "menu";
+  /** "toolbar" = the bordered pill used in node-detail headers; "icon" = the
+   *  compact mobile toolbar action; "menu" = a full-width sidebar row. */
+  variant?: "toolbar" | "menu" | "icon";
 }) {
   const messages = useCoreI18n();
   const t = messages.permissions;
@@ -111,14 +111,20 @@ export function NodePermissionsButton({
 
   return (
     <>
-      {variant === "toolbar" ? (
+      {variant === "toolbar" || variant === "icon" ? (
         <button
-          className="inline-flex shrink-0 items-center gap-1.5 rounded-md border border-border/60 bg-background px-2.5 py-1.5 text-muted-foreground text-xs transition-colors hover:bg-accent"
+          aria-label={t.title}
+          className={
+            variant === "icon"
+              ? "inline-flex size-8 shrink-0 items-center justify-center rounded-md border border-border/60 bg-background text-muted-foreground transition-colors hover:bg-accent"
+              : "inline-flex shrink-0 items-center gap-1.5 rounded-md border border-border/60 bg-background px-2.5 py-1.5 text-muted-foreground text-xs transition-colors hover:bg-accent"
+          }
           onClick={() => setOpen(true)}
+          title={t.title}
           type="button"
         >
           <Shield className="size-3.5" />
-          {t.title}
+          {variant === "toolbar" ? t.title : null}
         </button>
       ) : (
         <button

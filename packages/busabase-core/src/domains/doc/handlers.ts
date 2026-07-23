@@ -283,6 +283,10 @@ export const createDoc = async (
     .limit(1);
   const parentNode = assertContainerParent(parentNodeRow, "doc", parentNodeId);
 
+  if (parsed.autoMerge) {
+    await assertNodePermission(parentNode.id, "write");
+  }
+
   // Review-first by default: propose the Doc as a pending node_create
   // ChangeRequest instead of materializing it immediately. Callers that don't
   // need human review (seed/migration scripts, an explicit no-review agent
@@ -400,6 +404,7 @@ export const updateDocBody = async (
   if (!node) {
     throw docNotFound(nodeIdOrSlug);
   }
+  await assertNodePermission(node.id, "write");
   const parsed = updateDocInputSchema.parse(input);
   assertDocBodySize(parsed.body);
   await writeDocBody(node.id, parsed.body);

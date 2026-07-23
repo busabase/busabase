@@ -138,7 +138,7 @@ const updateNodeMetadataInputSchema = z.object({
 // from `searchInputSchema`/`searchResponseSchema` below, which back the
 // heavier full-text `search` procedure (record/file body content, 5s-budgeted
 // asset scanning) — this one is a plain `ilike` over `busabaseNodes.name`/
-// `.slug` across all 7 node types, no content scan, no ranking beyond
+// `.slug` across all registered node types, no content scan, no ranking beyond
 // exact-match-first.
 const searchNodesByNameInputSchema = z.object({
   query: z.string().min(1),

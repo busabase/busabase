@@ -31,6 +31,9 @@ export class NodepodRunner implements AirAppRunner {
   private lastReadyUrl: string | null = null;
   private proxy: RequestProxy | null = null;
   private proxyListener: ((port: number, url: string) => void) | null = null;
+  private readyTimer: ReturnType<typeof setTimeout> | null = null;
+
+  constructor(private readonly previewScript?: string) {}
 
   private emitLog(line: string): void {
     for (const cb of this.logCallbacks) {
@@ -46,7 +49,7 @@ export class NodepodRunner implements AirAppRunner {
   }
 
   async mount(files: Record<string, string>): Promise<void> {
-    const { Nodepod, getProxyInstance } = await import("@scelar/nodepod");
+    const { Nodepod } = await import("@scelar/nodepod");
     this.nodepod = await Nodepod.boot({
       files,
       watermark: false,
@@ -54,6 +57,9 @@ export class NodepodRunner implements AirAppRunner {
       // overlaps the npm install instead of stalling the first build step.
       preloadEsbuild: true,
     });
+    if (this.previewScript) {
+      await this.nodepod.setPreviewScript(this.previewScript);
+    }
     // Deliberately NOT using boot's `onServerReady`: Nodepod's RequestProxy is
     // a page-lifetime singleton that captures only the FIRST boot's callback —
     // every later boot's callback is silently dropped. After the first runner
@@ -62,11 +68,16 @@ export class NodepodRunner implements AirAppRunner {
     // to the singleton's event stream instead works for every boot; `port()`
     // is scoped to this instance's id, so events from other AirApp nodes
     // running on the same page resolve to null and are ignored.
-    this.proxy = getProxyInstance();
+    this.proxy = this.nodepod.proxy;
     this.proxyListener = (port: number) => {
       const url = this.nodepod?.port(port);
       if (url) {
-        this.emitReady(url);
+        if (this.readyTimer) clearTimeout(this.readyTimer);
+        const nodepod = this.nodepod;
+        this.readyTimer = setTimeout(() => {
+          this.readyTimer = null;
+          if (this.nodepod === nodepod) this.emitReady(url);
+        }, 100);
       }
     };
     this.proxy.on("server-ready", this.proxyListener);
@@ -113,6 +124,8 @@ export class NodepodRunner implements AirAppRunner {
   }
 
   dispose(): void {
+    if (this.readyTimer) clearTimeout(this.readyTimer);
+    this.readyTimer = null;
     if (this.proxy && this.proxyListener) {
       this.proxy.off("server-ready", this.proxyListener);
     }

@@ -169,6 +169,22 @@ export interface SeedFileTreeDef {
   changeRequest?: SeedFileTreeChangeRequestDef;
 }
 
+/**
+ * A metadata-backed visual node. Whiteboard, Workflow, and HTML all
+ * persist their editor document directly in node metadata, so one definition
+ * keeps their real seed and stateless demo representation aligned.
+ */
+export interface SeedRichNodeDef {
+  nodeType: "whiteboard" | "workflow" | "html";
+  nodeId: string;
+  folderNodeId: string;
+  slug: string;
+  name: string;
+  description: string;
+  metadata: Record<string, unknown>;
+  position: number;
+}
+
 export interface SeedCommentDef {
   id: string;
   subjectType: "record" | "change_request" | "operation" | "commit";
@@ -193,6 +209,8 @@ export interface SeedScenario {
   files?: SeedFileDef[];
   /** Skill / Drive / AirApp nodes — all file-tree nodes, see `SeedFileTreeDef`. */
   fileTreeNodes?: SeedFileTreeDef[];
+  /** Whiteboard / Workflow / HTML nodes backed by node metadata. */
+  richNodes?: SeedRichNodeDef[];
   /** Review discussion threaded under the scenario's change requests / records. */
   comments?: SeedCommentDef[];
 }

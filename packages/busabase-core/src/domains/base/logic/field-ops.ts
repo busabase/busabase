@@ -30,6 +30,7 @@ import {
 } from "../../../logic/cr-lifecycle";
 import { CURRENT_USER_ID, id, now } from "../../../logic/kernel";
 import { publishChangeRequestPendingReview } from "../../../logic/live-events";
+import { assertNodePermission } from "../../../logic/node-acl";
 import { ensureReady } from "../../../logic/seed";
 import { fieldSchema } from "../../../logic/store";
 import { isSystemFieldType } from "../field-types";
@@ -69,6 +70,7 @@ export const createBaseField = async (baseId: string, input: z.infer<typeof fiel
   if (!base) {
     throw baseNotFound(baseId);
   }
+  await assertNodePermission(base.nodeId, "write");
   const parsed = fieldSchema.parse(input);
   const options = await resolveRelationFieldOptions(db, parsed.options);
   if (parsed.type === "relation" && !options.targetBaseId) {

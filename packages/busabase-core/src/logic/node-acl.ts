@@ -11,6 +11,7 @@ import { and, eq, exists, inArray, isNull, ne, or, type SQL, sql } from "drizzle
 import {
   getContextActorId,
   getContextIsSpaceManager,
+  getContextPermissionLevel,
   getContextRestrictedVisibility,
   getContextSpaceId,
   resolveActorId,
@@ -37,6 +38,17 @@ import { id, now, rootNodeIdForSpace } from "./kernel";
  */
 
 export type NodeVisibility = "private" | "workspace" | "public";
+
+/** Workspace-wide mutation gate shared by CR lifecycle and direct writes. */
+export function assertWorkspacePermission(required: ApiKeyPermissionLevel): void {
+  const level = getContextPermissionLevel();
+  if (!hasApiKeyLevel(level, required)) {
+    throw new ORPCError("FORBIDDEN", {
+      message: `Requires ${required} workspace access`,
+      data: { required, level },
+    });
+  }
+}
 
 const STRICTNESS: Record<NodeVisibility, number> = { private: 0, workspace: 1, public: 2 };
 
@@ -191,7 +203,7 @@ export async function getEffectiveNodeLevel(
     ? node.effectiveVisibility === "workspace" || node.effectiveVisibility === "public"
     : node.effectiveVisibility !== "private";
 
-  let level: ApiKeyPermissionLevel | null = defaultVisible ? "read" : null;
+  let level: ApiKeyPermissionLevel | null = defaultVisible ? getContextPermissionLevel() : null;
   for (const grant of grants) {
     if (!level || API_KEY_LEVEL_ORDER[grant.role] > API_KEY_LEVEL_ORDER[level]) {
       level = grant.role;

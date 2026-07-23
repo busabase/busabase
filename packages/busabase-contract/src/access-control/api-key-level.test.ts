@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { hasApiKeyLevel, resolveRequiredLevel } from "./api-key-level";
+import { hasApiKeyLevel, permissionLevelForSpaceRole, resolveRequiredLevel } from "./api-key-level";
 
 describe("hasApiKeyLevel", () => {
   it("null (legacy/unset) stored level always allows — zero behavior change for existing keys", () => {
@@ -18,6 +18,18 @@ describe("hasApiKeyLevel", () => {
     expect(hasApiKeyLevel("manage", "read")).toBe(true);
     expect(hasApiKeyLevel("manage", "manage")).toBe(true);
     expect(hasApiKeyLevel("read", "changeRequest")).toBe(false);
+  });
+});
+
+describe("permissionLevelForSpaceRole", () => {
+  it.each([
+    ["owner", "manage"],
+    ["admin", "manage"],
+    ["member", "changeRequest"],
+    ["viewer", "read"],
+    [undefined, "read"],
+  ] as const)("maps %s to %s", (role, expected) => {
+    expect(permissionLevelForSpaceRole(role)).toBe(expected);
   });
 });
 

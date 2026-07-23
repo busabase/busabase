@@ -2484,6 +2484,28 @@ const views: SeedViewDef[] = [
     minutesAgo: 90,
     useCases: ["config-mgmt"],
   },
+  {
+    id: "viw_seed_ops_board",
+    baseId: ids.operationsBase,
+    slug: "board",
+    name: "Board",
+    description: "Operational tasks stacked by status.",
+    type: "kanban",
+    config: { filters: [], sorts: [], stackByFieldSlug: "status" },
+    minutesAgo: 89,
+    useCases: ["operations"],
+  },
+  {
+    id: "viw_seed_compliance_calendar",
+    baseId: ids.complianceBase,
+    slug: "calendar",
+    name: "Due date calendar",
+    description: "Compliance items placed on the month they're due.",
+    type: "calendar",
+    config: { filters: [], sorts: [], dateFieldSlug: "due_date" },
+    minutesAgo: 88,
+    useCases: ["compliance"],
+  },
 ];
 
 const changeRequests: SeedChangeRequestDef[] = [

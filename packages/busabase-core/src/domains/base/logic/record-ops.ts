@@ -26,7 +26,11 @@ import {
 import { projectCommitFields } from "../../../logic/field-values";
 import { CURRENT_USER_ID, id, now, rootNodeIdForSpace } from "../../../logic/kernel";
 import { publishChangeRequestPendingReview } from "../../../logic/live-events";
-import { assertBaseChangeRequestPermission, initializeNodeAcl } from "../../../logic/node-acl";
+import {
+  assertBaseChangeRequestPermission,
+  assertNodePermission,
+  initializeNodeAcl,
+} from "../../../logic/node-acl";
 import { assertContainerParent } from "../../../logic/node-parent";
 import { ensureReady } from "../../../logic/seed";
 import {
@@ -188,6 +192,10 @@ export const createBase = async (input: z.input<typeof createBaseInputSchema>) =
     .where(eq(busabaseNodes.id, parentNodeId))
     .limit(1);
   const parentNode = assertContainerParent(parentNodeRow, "base", parentNodeId);
+
+  if (parsed.autoMerge) {
+    await assertNodePermission(parentNode.id, "write");
+  }
 
   // Review-first by default: propose the Base as a pending node_create
   // ChangeRequest instead of materializing it immediately. Callers that don't

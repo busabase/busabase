@@ -1,8 +1,8 @@
 diff --git a/dist/__sw__.js b/dist/__sw__.js
-index 832b6d339ef79befd5b318ac59d0b9ac2088868a..2a6216670d1e3bdab3761c3c530dfafa75603709 100644
+index 832b6d339ef79befd5b318ac59d0b9ac2088868a..9943e759f8c952685480cfe198f699e5e74d370e 100644
 --- a/dist/__sw__.js
 +++ b/dist/__sw__.js
-@@ -693,6 +693,35 @@ self.addEventListener("fetch", (event) => {
+@@ -693,6 +693,56 @@ self.addEventListener("fetch", (event) => {
      return;
    }
  
@@ -14,10 +14,31 @@ index 832b6d339ef79befd5b318ac59d0b9ac2088868a..2a6216670d1e3bdab3761c3c530dfafa
 +  //      genuine browser-native fetch, never routed through the virtual
 +  //      Node process, which has no access to real browser cookies.
 +  if (url.pathname.startsWith("/__busabase_api__/")) {
-+    const target = new URL(
-+      url.pathname.slice("/__busabase_api__".length) + url.search,
-+      self.location.origin,
-+    );
++    const strippedPathAndSearch = url.pathname.slice("/__busabase_api__".length) + url.search;
++    // [busabase patch] `/__busabase_api__/api/airapp-embed-bridge/*` is the
++    // AirApp Embed runtime's OWN safe relay target (airapp-embed-runtime.tsx
++    // — both its postMessage bridge and its `_status` heartbeat fetch this,
++    // always from the trusted PARENT/host page, never from inside a pod).
++    // That endpoint strips `cookie`/`authorization` server-side itself and
++    // is capability-scoped, so it is safe to forward unconditionally
++    // regardless of which pod (if any) is attributed to this request.
++    const isSafeEmbedBridgePath = strippedPathAndSearch.startsWith("/api/airapp-embed-bridge/");
++    if (!isSafeEmbedBridgePath) {
++      // Only forward the browser's real ambient session to pods booted
++      // WITHOUT a preview script — that's the authenticated Dashboard
++      // "preview my own AirApp" path. Any pod that had setPreviewScript()
++      // called on it (currently: only the public AirApp Embed runtime, see
++      // airapp-embed-runtime.tsx) must never get the viewer's real session,
++      // even via a request that bypasses the window.fetch override (e.g.
++      // raw XMLHttpRequest) — fail closed if we can't positively attribute
++      // the request to a non-embed pod.
++      const pod = clientId ? previewClients.get(clientId) : null;
++      if (!pod || previewScripts.has(pod.instanceId)) {
++        event.respondWith(new Response(null, { status: 403 }));
++        return;
++      }
++    }
++    const target = new URL(strippedPathAndSearch, self.location.origin);
 +    const bridgeFetch = (async () => {
 +      let body;
 +      if (request.method !== "GET" && request.method !== "HEAD") {

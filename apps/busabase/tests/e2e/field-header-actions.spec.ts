@@ -53,27 +53,24 @@ test("field header actions require a saved view and support keyboard quick sorti
   const titleAction = titleHeader.getByRole("button", { name: "Actions for Title" });
   await titleAction.focus();
   await page.keyboard.press("Enter");
-  await page.getByRole("button", { name: "Sort ascending" }).click();
-
-  await expect(titleHeader).toHaveAttribute("aria-sort", "ascending");
-  await expect(page).toHaveURL(new RegExp(`/base/blog/${merged.view.slug}$`));
-  await expect(page.getByRole("button", { name: "Sort ascending" })).toBeHidden();
-
-  await titleAction.click();
-  await expect(page.getByLabel("Filter operator")).toBeVisible();
-  await expect(page.getByLabel("Filter value")).toBeVisible();
-  await expect(page.getByRole("button", { name: "Apply filter" })).toBeDisabled();
-  await page.getByRole("button", { name: "Clear sort" }).click();
-  await expect(titleHeader).not.toHaveAttribute("aria-sort");
+  await page.getByTestId("header-view-sort-title").click();
+  let editor = page.getByTestId("shared-view-config-editor");
+  await expect(editor).toHaveAttribute("data-editor-source", "header");
+  await expect(editor.getByTestId("header-contextual-view-editor")).toContainText("Title");
+  const focusedSort = editor.locator('[data-focused-condition="true"]');
+  await expect(focusedSort.getByLabel("Sort 1 field")).toHaveValue(blog.fields[0].id);
+  await expect(focusedSort.getByLabel("Sort 1 field")).toBeFocused();
+  await editor.getByTestId("view-editor-discard").click();
 
   await titleAction.click();
-  await page.getByLabel("Filter value").fill("E2E long list");
-  await page.getByRole("button", { name: "Apply filter" }).click();
-  await expect(titleHeader.locator("[data-field-filter-active]")).toBeVisible();
-
-  await titleAction.click();
-  await page.getByRole("button", { name: "Clear filter" }).click();
-  await expect(titleHeader.locator("[data-field-filter-active]")).toHaveCount(0);
+  await page.getByTestId("header-view-filter-title").click();
+  editor = page.getByTestId("shared-view-config-editor");
+  await expect(editor).toHaveAttribute("data-editor-source", "header");
+  await expect(editor.getByTestId("header-contextual-view-editor")).toContainText("Title");
+  const focusedFilter = editor.locator('[data-focused-condition="true"]');
+  await expect(focusedFilter.getByLabel("Filter 1 field")).toHaveValue(blog.fields[0].id);
+  await expect(focusedFilter.getByLabel("Filter 1 field")).toBeFocused();
+  await editor.getByTestId("view-editor-discard").click();
 
   const coverHeader = page.locator('[role="columnheader"][data-field-slug="cover_image"]');
   await coverHeader.getByRole("button", { name: "Actions for Cover Image" }).click();

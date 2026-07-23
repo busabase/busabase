@@ -1,7 +1,6 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";
 import { CodeBlock } from "kui/ai-elements/code-block";
 import { FileTree } from "kui/ai-elements/file-tree";
 import { Button } from "kui/button";
@@ -20,14 +19,11 @@ import {
 import { NodePermissionsButton } from "../../dashboard/components/node-permissions-button";
 import { EmptyState } from "../../dashboard/components/primitives";
 import { FileContentSkeleton, NodeDetailSkeleton } from "../../dashboard/components/skeletons";
+import { useReportLoadedNode } from "../../dashboard/hooks/use-report-loaded-node";
+import type { NodeDetailProps } from "../../dashboard/node-detail-registry";
 import { disposeDeletedAirAppSession } from "../store/airapp-session-cleanup";
 import { useAirAppKeepAliveActive, useAirAppKeepAliveScope } from "./AirAppKeepAliveHost";
 import { AirAppRunControls, AirAppRunLogs, AirAppRunPreview, useAirAppRunner } from "./RunPanel";
-
-interface AirAppDetailViewProps {
-  orpc: BusabaseQueryUtils;
-  slug: string | null;
-}
 
 /** Keeps forceMount'd inactive tab panels out of the layout flow without
  *  unmounting them — unmounting the "App" tab would dispose the live Nodepod
@@ -48,7 +44,7 @@ const TAB_CONTENT_CLASS =
  * pending (unmerged) ChangeRequest's file snapshot is out of scope for V1
  * (see the airapp changelog's Follow-up Tasks).
  */
-export function AirAppDetailView({ orpc, slug }: AirAppDetailViewProps) {
+export function AirAppDetailView({ orpc, slug, onNodeLoaded }: NodeDetailProps) {
   const messages = useCoreI18n();
   const keepAliveScopeKey = useAirAppKeepAliveScope();
   const isKeepAliveActive = useAirAppKeepAliveActive();
@@ -59,6 +55,7 @@ export function AirAppDetailView({ orpc, slug }: AirAppDetailViewProps) {
     enabled: Boolean(slug),
   });
   const airapp = airappQuery.data ?? null;
+  useReportLoadedNode(airapp?.node, onNodeLoaded);
 
   // Reset the open file when switching airapp nodes.
   // biome-ignore lint/correctness/useExhaustiveDependencies: reset only on slug change

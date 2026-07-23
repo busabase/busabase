@@ -1,7 +1,7 @@
 {
   "name": "busabase-repo",
   "private": true,
-  "version": "0.9.12",
+  "version": "0.9.13",
   "packageManager": "pnpm@10.15.1",
   "workspaces": [
     "apps/*",
@@ -10,8 +10,8 @@
   "scripts": {
     "dev": "pnpm --filter busabase dev",
     "build": "pnpm --filter busabase build",
-    "example:dev": "pnpm --filter busabase-example-nextjs-fumadocs dev",
-    "example:build": "pnpm --filter busabase-example-nextjs-fumadocs build",
+    "example:dev": "pnpm --filter busabase-cms-nextjs-example dev",
+    "example:build": "pnpm --filter busabase-cms-nextjs-example build",
     "start": "pnpm --filter busabase start",
     "typecheck": "pnpm --filter busabase typecheck",
     "lint": "pnpm --filter busabase lint:err",
@@ -23,5 +23,11 @@
   "devDependencies": {
     "@biomejs/biome": "2.2.3",
     "tsx": "^4.20.5"
+  },
+  "pnpm": {
+    "patchedDependencies": {
+      "@react-native-cookies/cookies@6.2.1": "patches/@react-native-cookies__cookies@6.2.1.patch",
+      "@scelar/nodepod@1.9.9": "patches/@scelar__nodepod@1.9.9.patch"
+    }
   }
 }

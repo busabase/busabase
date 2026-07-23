@@ -112,6 +112,9 @@ export class Busabase {
   get webhooks(): BusabaseClient["webhooks"] {
     return this.client.webhooks;
   }
+  get embedLinks(): BusabaseClient["embedLinks"] {
+    return this.client.embedLinks;
+  }
 
   /** Full-text search across records, change requests, and Bases. */
   search(input: Parameters<BusabaseClient["search"]>[0]) {

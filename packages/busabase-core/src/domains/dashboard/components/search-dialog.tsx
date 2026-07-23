@@ -14,10 +14,15 @@ import {
   useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
 } from "react";
 import { useLocation, useSearch } from "wouter";
 import { useCoreI18n } from "../../../i18n";
-import type { KnownNode, KnownNodeCache } from "../helpers/known-node-cache";
+import {
+  fuzzyMatchKnownNodes,
+  type KnownNode,
+  type KnownNodeCache,
+} from "../helpers/known-node-cache";
 import { mergeSearchIntoHref } from "../helpers/link-search";
 import { nodeIconForType } from "../helpers/node-icons";
 import { normalizeSearchText, searchKindIcon } from "../helpers/search";
@@ -49,7 +54,7 @@ const TAB_KIND: Record<SearchTab, SearchResultKind | null> = {
 interface DisplayResult {
   /** React list key — unique across whatever's currently rendered. */
   key: string;
-  /** Raw entity id — used for `KnownNode.markVisited`; a harmless no-op for ids the cache doesn't recognize (e.g. a record/change_request from the content-search tabs). */
+  /** Raw entity id used as the stable result identity. */
   id: string;
   href: string;
   title: string;
@@ -194,7 +199,16 @@ export function SearchDialog({
   // renders. Computed unconditionally (not gated on `tab === "recent"`) so the
   // Recent tab's OWN badge count stays accurate even while a different tab is
   // active.
-  const recentLocalMatches = hasQuery ? nodeCache.fuzzyMatch(query) : nodeCache.listVisited();
+  const nodeCacheSnapshot = useSyncExternalStore(
+    nodeCache.subscribe,
+    nodeCache.getSnapshot,
+    nodeCache.getSnapshot,
+  );
+  const recentLocalMatches = useMemo(
+    () =>
+      hasQuery ? fuzzyMatchKnownNodes(nodeCacheSnapshot.all, query) : nodeCacheSnapshot.visited,
+    [hasQuery, nodeCacheSnapshot, query],
+  );
   // A cache miss (typed a query, zero local matches) falls through to the
   // cheap, name-only `nodes.searchByName` endpoint — only while the Recent
   // tab is actually the active one, so switching to a content-search tab
@@ -286,17 +300,15 @@ export function SearchDialog({
   // ONE shared selection path for BOTH keyboard Enter and mouse click (fixes
   // the bug where Enter built a synthetic anchor from the raw `href`,
   // skipping the query-string merge the mouse-click path applied): resolve
-  // the href through the same `mergeSearchIntoHref` + demo-param helpers
-  // either path used before, stamp the node as visited in the KnownNode
-  // cache (a no-op for ids the cache doesn't recognize, e.g. a record/CR from
-  // a content-search tab), then close and navigate via the SPA router.
+  // the href through the same `mergeSearchIntoHref` + demo-param helpers,
+  // close, and navigate via the SPA router. Node details report the visit only
+  // after their data loads successfully.
   const select = useCallback(
     (result: DisplayResult) => {
       onClose();
-      nodeCache.markVisited(result.id, new Date().toISOString());
       setLocation(addDemoParam(mergeSearchIntoHref(result.href, currentSearch)));
     },
-    [onClose, nodeCache, setLocation, addDemoParam, currentSearch],
+    [onClose, setLocation, addDemoParam, currentSearch],
   );
 
   const handleKeyDown = useCallback(

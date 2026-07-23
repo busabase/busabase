@@ -38,6 +38,7 @@ ENV BUILD_SHA=${BUILD_SHA}
 ENV BUILD_TIME=${BUILD_TIME}
 WORKDIR /app/apps/busabase
 RUN NODE_OPTIONS=--max-old-space-size=3072 pnpm build
+RUN pnpm db:seed:build
 
 # ---- drizzle minimal stage (for migrations only) ----
 # Next standalone never traces drizzle-kit (a CLI/dev tool), so build a tiny
@@ -78,6 +79,7 @@ COPY --from=build /app/apps/busabase/public ./apps/busabase/public
 # Postgres from an init container/job. Not needed for the pglite default.
 COPY --from=build /app/apps/busabase/drizzle.config.ts ./apps/busabase/drizzle.config.ts
 COPY --from=build /app/apps/busabase/src/db/migrations ./apps/busabase/src/db/migrations
+COPY --from=build /app/apps/busabase/dist/seed ./apps/busabase/dist/seed
 COPY --from=drizzle /drizzle-only/node_modules ./apps/busabase/node_modules
 # openlib source is needed at migrate time: drizzle.config.ts imports
 # "openlib/db" and the schema graph imports "openlib/nanoid".

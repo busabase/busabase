@@ -44,7 +44,7 @@ describe("busabase-cli commands", () => {
 
   it("documents node and terminal Change Request commands in help", () => {
     expect(HELP).toContain(
-      "nodes create-change-request --type <folder|base|skill|drive|airapp|file|doc>",
+      "nodes create-change-request --type <folder|base|skill|drive|airapp|file|doc|whiteboard|workflow|html>",
     );
     expect(HELP).toContain("--asset-id <id>");
     expect(HELP).toContain("change-requests close --change-request-id <id>");

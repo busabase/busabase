@@ -1,13 +1,16 @@
 import { getNodeType } from "busabase-contract/domains";
 import {
   AppWindow,
+  CodeXml,
   File,
   FileText,
   Folder,
   HardDrive,
   type LucideIcon,
+  PenTool,
   Sparkles,
   Table2,
+  Workflow,
 } from "lucide-react";
 
 /**
@@ -24,6 +27,9 @@ const ICON_BY_ID: Record<string, LucideIcon> = {
   "app-window": AppWindow,
   file: File,
   "file-text": FileText,
+  "pen-tool": PenTool,
+  workflow: Workflow,
+  "code-xml": CodeXml,
 };
 
 export const nodeIconForId = (iconId: string | undefined): LucideIcon =>

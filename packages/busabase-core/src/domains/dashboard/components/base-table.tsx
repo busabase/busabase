@@ -2,13 +2,11 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import type {
   BaseFieldVO,
   BaseVO,
-  FieldType,
   GalleryCardSize,
   GalleryCoverFit,
   GanttScale,
   RecordVO,
   ViewConfigVO,
-  ViewFilterOperator,
   ViewFilterVO,
   ViewType,
   ViewVO,
@@ -18,48 +16,29 @@ import { Dialog, DialogContent, DialogTitle } from "kui/dialog";
 import { Popover, PopoverContent, PopoverTrigger } from "kui/popover";
 import { Skeleton } from "kui/skeleton";
 import {
-  AlignLeft,
   ArrowDown,
   ArrowUp,
   ArrowUpDown,
-  AtSign,
-  Braces,
   CalendarDays,
   Check,
   ChevronRight,
-  CircleDot,
-  Code2,
   Columns3,
   ExternalLink,
   EyeOff,
-  FileText,
   Filter,
   GanttChart,
-  GitBranch,
-  Hash,
   LayoutGrid,
-  Link2,
-  ListChecks,
-  ListOrdered,
-  ListTree,
   LoaderCircle,
-  type LucideIcon,
-  MonitorPlay,
   MoreHorizontal,
   MoveLeft,
   MoveRight,
   Paperclip,
   PenLine,
-  Phone,
   PlaySquare,
   Plus,
   RotateCcw,
-  Sparkles,
-  SquareCheck,
   Table2,
   Trash2,
-  Type,
-  UserRound,
   X,
 } from "lucide-react";
 import { SPALink as Link } from "openlib/ui/dashboard";
@@ -92,23 +71,12 @@ import { fieldValueToString, shortIdentifier } from "../helpers/format";
 import { mergeSearchIntoHref, useHrefWithCurrentSearch } from "../helpers/link-search";
 import {
   clampViewFieldWidth,
-  clearAllViewFilters,
-  clearAllViewSorts,
-  clearFirstViewFilter,
-  clearViewFilterAt,
-  clearViewSort,
-  clearViewSortAt,
   getVisibleViewFieldSlugs,
   hideViewField,
   matchesViewField,
   moveViewField,
-  replaceFirstViewFilter,
-  resetAllViewFieldWidths,
   resetViewFieldWidth,
-  setPrimaryViewSort,
   setViewFieldWidth,
-  showAllViewFields,
-  showViewField,
 } from "../helpers/view-config";
 import type { RecordsPagination, ViewFormPayload, ViewSubmitOptions } from "../helpers/view-types";
 import { BusaBaseCalendar } from "./base-calendar";
@@ -118,6 +86,13 @@ import { BusaBaseKanban } from "./base-kanban";
 import { FieldBadge } from "./field-preview";
 import { ConfirmActionDialog } from "./primitives";
 import { SplitSubmitButton } from "./split-submit-button";
+import {
+  FIELD_TYPE_ICONS,
+  ViewConfigEditorDialog,
+  type ViewConfigEditorRequest,
+  ViewConfigToolbar,
+  ViewFieldsEditor,
+} from "./view-config-editor";
 
 // Per-view-type tab glyph (kept in one place so tabs and the type picker agree).
 function ViewTypeIcon({ type }: { type: ViewType }) {
@@ -159,53 +134,6 @@ const baseTableStatusCellClassName =
 const baseTableStatusHeaderClassName =
   "flex items-center border-border/70 border-l bg-muted px-2 font-medium md:sticky md:right-0 md:z-30";
 
-const FIELD_TYPE_ICONS: Record<FieldType, LucideIcon> = {
-  text: Type,
-  longtext: AlignLeft,
-  markdown: FileText,
-  html: Code2,
-  code: Code2,
-  json: Braces,
-  yaml: ListTree,
-  number: Hash,
-  checkbox: SquareCheck,
-  date: CalendarDays,
-  email: AtSign,
-  url: Link2,
-  embed: MonitorPlay,
-  phone: Phone,
-  select: CircleDot,
-  multiselect: ListChecks,
-  relation: GitBranch,
-  attachment: Paperclip,
-  ai_summary: Sparkles,
-  ai_tags: Sparkles,
-  created_time: CalendarDays,
-  updated_time: CalendarDays,
-  created_by: UserRound,
-  updated_by: UserRound,
-  auto_number: ListOrdered,
-};
-
-const FILTER_OPERATORS_BY_KIND = {
-  checkbox: ["is_true", "is_false", "is_empty", "not_empty"],
-  emptyOnly: ["is_empty", "not_empty"],
-  value: ["contains", "equals", "is_empty", "not_empty"],
-} as const satisfies Record<string, readonly ViewFilterOperator[]>;
-
-const getFieldFilterOperators = (type: FieldType): readonly ViewFilterOperator[] => {
-  if (type === "checkbox") {
-    return FILTER_OPERATORS_BY_KIND.checkbox;
-  }
-  if (type === "attachment" || type === "relation") {
-    return FILTER_OPERATORS_BY_KIND.emptyOnly;
-  }
-  return FILTER_OPERATORS_BY_KIND.value;
-};
-
-const operatorNeedsValue = (operator: ViewFilterOperator) =>
-  operator === "contains" || operator === "equals";
-
 function FieldColumnHeader({
   actionsDisabled,
   activeView,
@@ -226,6 +154,7 @@ function FieldColumnHeader({
   onDrop,
   onCreateView,
   onMove,
+  onOpenViewEditor,
   onQuickUpdate,
   onResizeCancel,
   onResizeCommit,
@@ -251,6 +180,7 @@ function FieldColumnHeader({
   onDrop: (sourceSlug: string, placement: "before" | "after") => void;
   onCreateView: () => void;
   onMove: (direction: "left" | "right") => void;
+  onOpenViewEditor: (section: "filters" | "sorts", fieldId: string) => void;
   onQuickUpdate: (config: ViewConfigVO) => Promise<boolean>;
   onResizeCancel: () => void;
   onResizeCommit: (width: number) => void;
@@ -263,21 +193,7 @@ function FieldColumnHeader({
   const metadata = `${name} - ${fieldLabel(field.type)} (${field.slug})`;
   const activeSort = activeView?.config.sorts.find((sort) => matchesViewField(sort, field));
   const activeFilter = activeView?.config.filters.find((filter) => matchesViewField(filter, field));
-  const filterOperators = getFieldFilterOperators(field.type);
-  const normalizedActiveOperator =
-    activeFilter &&
-    (filterOperators as readonly ViewFilterOperator[]).includes(activeFilter.operator)
-      ? activeFilter.operator
-      : filterOperators[0];
   const [open, setOpen] = useState(false);
-  const [filterOperator, setFilterOperator] =
-    useState<ViewFilterOperator>(normalizedActiveOperator);
-  const [filterValue, setFilterValue] = useState(
-    activeFilter?.value === undefined || activeFilter?.value === null
-      ? ""
-      : String(activeFilter.value),
-  );
-  const hasValidFilterValue = !operatorNeedsValue(filterOperator) || filterValue.trim().length > 0;
   const visibleFieldCount = activeView
     ? getVisibleViewFieldSlugs(activeView.config, allFields).length
     : allFields.length;
@@ -350,18 +266,6 @@ function FieldColumnHeader({
     }
   };
 
-  const setPopoverOpen = (nextOpen: boolean) => {
-    if (nextOpen) {
-      setFilterOperator(normalizedActiveOperator);
-      setFilterValue(
-        activeFilter?.value === undefined || activeFilter?.value === null
-          ? ""
-          : String(activeFilter.value),
-      );
-    }
-    setOpen(nextOpen);
-  };
-
   return (
     <div
       aria-label={metadata}
@@ -432,7 +336,7 @@ function FieldColumnHeader({
       )}
       <span className="truncate">{name}</span>
       <span className="relative ml-auto size-7 shrink-0">
-        <Popover onOpenChange={setPopoverOpen} open={open}>
+        <Popover onOpenChange={setOpen} open={open}>
           <PopoverTrigger asChild>
             <button
               aria-label={fmt(messages.base.fieldActionsAria, { name })}
@@ -532,122 +436,30 @@ function FieldColumnHeader({
                   </button>
                 </div>
                 <div className="p-2">
-                  <div className="mb-1 px-2 font-medium text-muted-foreground">
-                    {messages.base.sortField}
-                  </div>
-                  {(
-                    [
-                      ["asc", messages.base.sortAscending, ArrowUp],
-                      ["desc", messages.base.sortDescending, ArrowDown],
-                    ] as const
-                  ).map(([direction, label, SortIcon]) => (
-                    <button
-                      aria-pressed={activeSort?.direction === direction}
-                      className="flex h-8 w-full items-center gap-2 rounded px-2 text-left transition-colors hover:bg-accent disabled:opacity-50"
-                      disabled={actionsDisabled}
-                      key={direction}
-                      onClick={() =>
-                        runUpdate(setPrimaryViewSort(activeView.config, field, direction))
-                      }
-                      type="button"
-                    >
-                      <SortIcon className="size-3.5" />
-                      {label}
-                    </button>
-                  ))}
                   <button
-                    className="flex h-8 w-full items-center gap-2 rounded px-2 text-left transition-colors hover:bg-accent disabled:opacity-50"
-                    disabled={actionsDisabled || !activeSort}
-                    onClick={() => runUpdate(clearViewSort(activeView.config, field))}
+                    className="flex h-8 w-full items-center gap-2 rounded px-2 text-left transition-colors hover:bg-accent"
+                    data-testid={`header-view-filter-${field.slug}`}
+                    onClick={() => {
+                      setOpen(false);
+                      onOpenViewEditor("filters", field.id);
+                    }}
                     type="button"
                   >
-                    <X className="size-3.5" />
-                    {messages.base.clearSort}
+                    <Filter className="size-3.5" />
+                    {messages.base.editFieldFilter}
                   </button>
-                </div>
-
-                <div className="p-3">
-                  <div className="mb-2 font-medium text-muted-foreground">
-                    {messages.base.filterField}
-                  </div>
-                  <select
-                    aria-label={messages.base.filterOperator}
-                    className="h-8 w-full rounded-md border border-border/70 bg-background px-2 text-xs outline-none focus:border-primary"
-                    disabled={actionsDisabled}
-                    onChange={(event) =>
-                      setFilterOperator(event.target.value as ViewFilterOperator)
-                    }
-                    value={filterOperator}
+                  <button
+                    className="flex h-8 w-full items-center gap-2 rounded px-2 text-left transition-colors hover:bg-accent"
+                    data-testid={`header-view-sort-${field.slug}`}
+                    onClick={() => {
+                      setOpen(false);
+                      onOpenViewEditor("sorts", field.id);
+                    }}
+                    type="button"
                   >
-                    {filterOperators.map((operator) => (
-                      <option key={operator} value={operator}>
-                        {messages.base.filterOperators[operator]}
-                      </option>
-                    ))}
-                  </select>
-                  {operatorNeedsValue(filterOperator) ? (
-                    field.type === "select" || field.type === "multiselect" ? (
-                      <select
-                        aria-label={messages.base.filterValue}
-                        className="mt-2 h-8 w-full rounded-md border border-border/70 bg-background px-2 text-xs outline-none focus:border-primary"
-                        disabled={actionsDisabled}
-                        onChange={(event) => setFilterValue(event.target.value)}
-                        value={filterValue}
-                      >
-                        <option value="">{messages.base.chooseFilterValue}</option>
-                        {(field.options.choices ?? []).map((choice) => (
-                          <option key={choice.id} value={choice.id}>
-                            {choice.name}
-                          </option>
-                        ))}
-                      </select>
-                    ) : (
-                      <input
-                        aria-label={messages.base.filterValue}
-                        className="mt-2 h-8 w-full rounded-md border border-border/70 bg-background px-2 text-xs outline-none focus:border-primary"
-                        disabled={actionsDisabled}
-                        onChange={(event) => setFilterValue(event.target.value)}
-                        placeholder={messages.base.filterValue}
-                        type={
-                          field.type === "number"
-                            ? "number"
-                            : ["date", "created_time", "updated_time"].includes(field.type)
-                              ? "date"
-                              : "text"
-                        }
-                        value={filterValue}
-                      />
-                    )
-                  ) : null}
-                  <div className="mt-2 flex items-center justify-end gap-2">
-                    <button
-                      className="h-8 rounded-md border border-border/70 px-2.5 font-medium transition-colors hover:bg-accent disabled:opacity-50"
-                      disabled={actionsDisabled || !activeFilter}
-                      onClick={() => runUpdate(clearFirstViewFilter(activeView.config, field))}
-                      type="button"
-                    >
-                      {messages.base.clearFilter}
-                    </button>
-                    <button
-                      className="h-8 rounded-md bg-foreground px-2.5 font-medium text-background transition-colors hover:bg-foreground/85 disabled:opacity-50"
-                      disabled={actionsDisabled || !hasValidFilterValue}
-                      onClick={() =>
-                        runUpdate(
-                          replaceFirstViewFilter(activeView.config, field, {
-                            fieldId: field.id,
-                            fieldSlug: field.slug,
-                            operator: filterOperator,
-                            ...(operatorNeedsValue(filterOperator)
-                              ? { value: filterValue.trim() }
-                              : {}),
-                          }),
-                        )
-                      }
-                      type="button"
-                    >
-                      {messages.base.applyFilter}
-                    </button>
-                  </div>
+                    <ArrowUpDown className="size-3.5" />
+                    {messages.base.editFieldSort}
+                  </button>
                 </div>
 
                 <div className="p-2">
@@ -820,468 +632,6 @@ function BusaBaseRecordRow({
   );
 }
 
-type ViewControlSection = "fields" | "filters" | "sorts";
-
-interface ViewControlPopoverProps {
-  allFields: BaseFieldVO[];
-  initialSection: ViewControlSection;
-  onSubmit: (config: ViewConfigVO, options?: ViewSubmitOptions) => Promise<void>;
-  view: ViewVO;
-}
-
-function ViewControlPopover({
-  allFields,
-  initialSection,
-  onSubmit,
-  view,
-}: ViewControlPopoverProps) {
-  const messages = useCoreI18n();
-  const resolveIString = useIString();
-  const [open, setOpen] = useState(false);
-  const [section, setSection] = useState<ViewControlSection>(initialSection);
-  const [draft, setDraft] = useState<ViewConfigVO>(view.config);
-  const [savingMode, setSavingMode] = useState<"request" | "merge" | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const visibleSlugs = getVisibleViewFieldSlugs(draft, allFields);
-  const visibleSet = new Set(visibleSlugs);
-  const hiddenCount = Math.max(0, allFields.length - visibleSlugs.length);
-  const widthCount = Object.keys(draft.fieldWidths ?? {}).filter((slug) =>
-    allFields.some((field) => field.slug === slug),
-  ).length;
-  const changed = JSON.stringify(draft) !== JSON.stringify(view.config);
-  const activeCount =
-    initialSection === "fields"
-      ? hiddenCount + widthCount
-      : initialSection === "filters"
-        ? draft.filters.length
-        : draft.sorts.length;
-  const triggerCount =
-    initialSection === "fields"
-      ? `${visibleSlugs.length}/${allFields.length}`
-      : String(activeCount);
-  const TriggerIcon =
-    initialSection === "fields" ? Columns3 : initialSection === "filters" ? Filter : ArrowUpDown;
-  const triggerLabel =
-    initialSection === "fields"
-      ? messages.base.viewFields
-      : initialSection === "filters"
-        ? messages.base.viewFilters
-        : messages.base.viewSorts;
-  const orderedFields = [
-    ...visibleSlugs
-      .map((slug) => allFields.find((field) => field.slug === slug))
-      .filter((field): field is BaseFieldVO => Boolean(field)),
-    ...allFields.filter((field) => !visibleSet.has(field.slug)),
-  ];
-
-  const setPopoverOpen = (nextOpen: boolean) => {
-    if (!nextOpen && changed) {
-      return;
-    }
-    if (nextOpen) {
-      setDraft(view.config);
-      setSection(initialSection);
-      setError(null);
-    }
-    setOpen(nextOpen);
-  };
-
-  const discardAndClose = () => {
-    setDraft(view.config);
-    setError(null);
-    setOpen(false);
-  };
-
-  const submit = async (options?: ViewSubmitOptions) => {
-    if (!changed || savingMode) {
-      return;
-    }
-    setSavingMode(options?.mergeImmediately ? "merge" : "request");
-    setError(null);
-    try {
-      await onSubmit(draft, options);
-      setOpen(false);
-    } catch (submitError) {
-      setError(
-        submitError instanceof Error ? submitError.message : messages.base.failedQuickViewUpdate,
-      );
-    } finally {
-      setSavingMode(null);
-    }
-  };
-
-  return (
-    <Popover onOpenChange={setPopoverOpen} open={open}>
-      <PopoverTrigger asChild>
-        <button
-          aria-expanded={open}
-          className={`inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md border px-2 font-medium text-xs transition-colors ${
-            activeCount > 0
-              ? "border-primary/35 bg-primary/10 text-primary hover:bg-primary/15"
-              : "border-border/70 bg-background text-muted-foreground hover:bg-accent hover:text-foreground"
-          }`}
-          data-testid={`view-control-${initialSection}`}
-          title={`${triggerLabel}: ${triggerCount}`}
-          type="button"
-        >
-          <TriggerIcon className="size-3.5" />
-          <span>{triggerLabel}</span>
-          <span className="min-w-4 rounded bg-muted/70 px-1 text-center text-[10px] leading-4 text-muted-foreground">
-            {triggerCount}
-          </span>
-        </button>
-      </PopoverTrigger>
-      <PopoverContent
-        align="start"
-        aria-label={messages.base.viewControlsTitle}
-        className="w-[calc(100vw-2rem)] max-w-96 p-0"
-        data-testid="view-controls-popover"
-        onEscapeKeyDown={(event) => {
-          if (changed) {
-            event.preventDefault();
-          }
-        }}
-        onInteractOutside={(event) => {
-          if (changed) {
-            event.preventDefault();
-          }
-        }}
-      >
-        <div className="flex items-center justify-between gap-3 border-border/60 border-b px-3 py-2.5">
-          <div>
-            <div className="font-medium text-sm">{messages.base.viewControlsTitle}</div>
-            <div className="truncate text-muted-foreground text-xs">{view.name}</div>
-          </div>
-          <button
-            aria-label={changed ? messages.base.discardViewChanges : messages.common.close}
-            className="inline-flex size-7 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-            onClick={discardAndClose}
-            title={changed ? messages.base.discardViewChanges : messages.common.close}
-            type="button"
-          >
-            <X className="size-3.5" />
-          </button>
-        </div>
-
-        <div className="grid grid-cols-3 border-border/60 border-b p-1" role="group">
-          {(
-            [
-              ["fields", messages.base.viewFields, `${visibleSlugs.length}/${allFields.length}`],
-              ["filters", messages.base.viewFilters, String(draft.filters.length)],
-              ["sorts", messages.base.viewSorts, String(draft.sorts.length)],
-            ] as const
-          ).map(([value, label, count]) => (
-            <button
-              aria-pressed={section === value}
-              className={`flex h-8 items-center justify-center gap-1.5 rounded text-xs transition-colors ${
-                section === value
-                  ? "bg-muted font-medium text-foreground"
-                  : "text-muted-foreground hover:bg-accent/60 hover:text-foreground"
-              }`}
-              key={value}
-              onClick={() => setSection(value)}
-              type="button"
-            >
-              {label}
-              <span className="text-[10px]">{count}</span>
-            </button>
-          ))}
-        </div>
-
-        <div className="max-h-96 overflow-y-auto">
-          {section === "fields" ? (
-            <div>
-              <div className="flex items-center justify-between gap-2 border-border/50 border-b px-3 py-2">
-                <span className="text-muted-foreground text-xs">
-                  {fmt(messages.base.hiddenFieldCount, { count: hiddenCount })}
-                </span>
-                <div className="flex items-center gap-1">
-                  <button
-                    className="h-7 rounded px-2 text-muted-foreground text-xs transition-colors hover:bg-accent hover:text-foreground disabled:opacity-50"
-                    disabled={hiddenCount === 0}
-                    onClick={() => setDraft((current) => showAllViewFields(current, allFields))}
-                    type="button"
-                  >
-                    {messages.base.showAllFields}
-                  </button>
-                  <button
-                    className="h-7 rounded px-2 text-muted-foreground text-xs transition-colors hover:bg-accent hover:text-foreground disabled:opacity-50"
-                    disabled={widthCount === 0}
-                    onClick={() => setDraft((current) => resetAllViewFieldWidths(current))}
-                    type="button"
-                  >
-                    {messages.base.resetAllWidths}
-                  </button>
-                </div>
-              </div>
-              <div className="divide-y divide-border/40">
-                {orderedFields.map((field) => {
-                  const isVisible = visibleSet.has(field.slug);
-                  const visibleIndex = visibleSlugs.indexOf(field.slug);
-                  const Icon = FIELD_TYPE_ICONS[field.type];
-                  const hasFilter = draft.filters.some((filter) => matchesViewField(filter, field));
-                  const hasSort = draft.sorts.some((sort) => matchesViewField(sort, field));
-                  return (
-                    <div
-                      className="flex min-h-10 items-center gap-2 px-3 py-1"
-                      data-view-field-slug={field.slug}
-                      key={field.id}
-                    >
-                      <input
-                        aria-label={fmt(messages.base.showFieldAria, {
-                          name: resolveIString(field.name),
-                        })}
-                        checked={isVisible}
-                        disabled={isVisible && visibleSlugs.length <= 1}
-                        onChange={(event) =>
-                          setDraft((current) =>
-                            event.target.checked
-                              ? showViewField(current, field, allFields)
-                              : hideViewField(current, field, allFields),
-                          )
-                        }
-                        type="checkbox"
-                      />
-                      <Icon className="size-3.5 shrink-0 text-muted-foreground" />
-                      <span className="min-w-0 flex-1 truncate text-xs">
-                        {resolveIString(field.name)}
-                      </span>
-                      {!isVisible ? (
-                        <span className="inline-flex shrink-0 items-center gap-1 text-muted-foreground text-[10px]">
-                          <EyeOff className="size-3" />
-                          {messages.base.hiddenField}
-                        </span>
-                      ) : null}
-                      {hasFilter ? (
-                        <Filter
-                          aria-label={messages.base.fieldFilterActive}
-                          className="size-3.5 shrink-0 text-primary"
-                        />
-                      ) : null}
-                      {hasSort ? (
-                        <ArrowUpDown
-                          aria-label={messages.base.fieldSortActive}
-                          className="size-3.5 shrink-0 text-primary"
-                        />
-                      ) : null}
-                      {draft.fieldWidths?.[field.slug] !== undefined ? (
-                        <button
-                          aria-label={fmt(messages.base.resetFieldWidthAria, {
-                            name: resolveIString(field.name),
-                          })}
-                          className="inline-flex size-7 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-                          onClick={() =>
-                            setDraft((current) => resetViewFieldWidth(current, field.slug))
-                          }
-                          title={messages.base.resetFieldWidth}
-                          type="button"
-                        >
-                          <RotateCcw className="size-3" />
-                        </button>
-                      ) : null}
-                      <div className="flex w-14 shrink-0 items-center justify-end">
-                        <button
-                          aria-label={fmt(messages.base.moveFieldUpAria, {
-                            name: resolveIString(field.name),
-                          })}
-                          className="inline-flex size-7 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-30"
-                          disabled={!isVisible || visibleIndex <= 0}
-                          onClick={() => {
-                            const target = visibleSlugs[visibleIndex - 1];
-                            if (target) {
-                              setDraft((current) =>
-                                moveViewField(current, allFields, field.slug, target, "before"),
-                              );
-                            }
-                          }}
-                          title={messages.base.moveFieldUp}
-                          type="button"
-                        >
-                          <ArrowUp className="size-3.5" />
-                        </button>
-                        <button
-                          aria-label={fmt(messages.base.moveFieldDownAria, {
-                            name: resolveIString(field.name),
-                          })}
-                          className="inline-flex size-7 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-30"
-                          disabled={!isVisible || visibleIndex >= visibleSlugs.length - 1}
-                          onClick={() => {
-                            const target = visibleSlugs[visibleIndex + 1];
-                            if (target) {
-                              setDraft((current) =>
-                                moveViewField(current, allFields, field.slug, target, "after"),
-                              );
-                            }
-                          }}
-                          title={messages.base.moveFieldDown}
-                          type="button"
-                        >
-                          <ArrowDown className="size-3.5" />
-                        </button>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          ) : section === "filters" ? (
-            <ViewConditionsList
-              allFields={allFields}
-              conditions={draft.filters}
-              emptyLabel={messages.base.noViewFilters}
-              onClearAll={() => setDraft((current) => clearAllViewFilters(current))}
-              onClearItem={(index) => setDraft((current) => clearViewFilterAt(current, index))}
-              section="filters"
-              visibleSet={visibleSet}
-            />
-          ) : (
-            <ViewConditionsList
-              allFields={allFields}
-              conditions={draft.sorts}
-              emptyLabel={messages.base.noViewSorts}
-              onClearAll={() => setDraft((current) => clearAllViewSorts(current))}
-              onClearItem={(index) => setDraft((current) => clearViewSortAt(current, index))}
-              section="sorts"
-              visibleSet={visibleSet}
-            />
-          )}
-        </div>
-
-        <div className="flex items-center justify-between gap-3 border-border/60 border-t px-3 py-2.5">
-          <div className="min-w-0 text-xs">
-            {error ? (
-              <span className="text-destructive">{error}</span>
-            ) : changed ? (
-              <span className="text-muted-foreground">{messages.base.unsavedViewChanges}</span>
-            ) : (
-              <span className="text-muted-foreground">{messages.base.noViewChanges}</span>
-            )}
-          </div>
-          <SplitSubmitButton
-            disabled={!changed || savingMode !== null}
-            hint={messages.common.mergeImmediatelyHint}
-            isPrimaryLoading={savingMode === "request"}
-            isSecondaryLoading={savingMode === "merge"}
-            onPrimary={() => submit()}
-            onSecondary={() => submit({ mergeImmediately: true })}
-            primaryLabel={messages.base.updateViewRequest}
-            primaryLoadingLabel={messages.common.submitting}
-            secondaryLabel={messages.base.updateViewNow}
-            secondaryLoadingLabel={messages.recordView.merging}
-          />
-        </div>
-      </PopoverContent>
-    </Popover>
-  );
-}
-
-interface ViewConditionsListProps {
-  allFields: BaseFieldVO[];
-  conditions: Array<
-    ViewFilterVO | { direction: "asc" | "desc"; fieldId?: string; fieldSlug: string }
-  >;
-  emptyLabel: string;
-  onClearAll: () => void;
-  onClearItem: (index: number) => void;
-  section: "filters" | "sorts";
-  visibleSet: Set<string>;
-}
-
-function ViewConditionsList({
-  allFields,
-  conditions,
-  emptyLabel,
-  onClearAll,
-  onClearItem,
-  section,
-  visibleSet,
-}: ViewConditionsListProps) {
-  const messages = useCoreI18n();
-  const resolveIString = useIString();
-
-  if (conditions.length === 0) {
-    return <div className="px-4 py-8 text-center text-muted-foreground text-xs">{emptyLabel}</div>;
-  }
-
-  return (
-    <div>
-      <div className="flex items-center justify-between border-border/50 border-b px-3 py-2">
-        <span className="text-muted-foreground text-xs">
-          {section === "filters"
-            ? fmt(messages.base.viewFilterCount, { count: conditions.length })
-            : fmt(messages.base.viewSortCount, { count: conditions.length })}
-        </span>
-        <button
-          className="h-7 rounded px-2 text-muted-foreground text-xs transition-colors hover:bg-accent hover:text-foreground"
-          onClick={onClearAll}
-          type="button"
-        >
-          {section === "filters" ? messages.base.clearAllFilters : messages.base.clearAllSorts}
-        </button>
-      </div>
-      <div className="divide-y divide-border/40">
-        {conditions.map((condition, index) => {
-          const field = allFields.find((item) =>
-            condition.fieldId ? item.id === condition.fieldId : item.slug === condition.fieldSlug,
-          );
-          const Icon = field ? FIELD_TYPE_ICONS[field.type] : Type;
-          const hidden = !field || !visibleSet.has(field.slug);
-          const filter = section === "filters" ? (condition as ViewFilterVO) : null;
-          const value =
-            filter && operatorNeedsValue(filter.operator)
-              ? field
-                ? getFieldPreviewText(field, filter.value, messages)
-                : fieldPreviewText(filter.value)
-              : null;
-          const conditionLabel = filter
-            ? messages.base.filterOperators[filter.operator]
-            : (condition as { direction: "asc" | "desc" }).direction === "asc"
-              ? messages.base.sortAscending
-              : messages.base.sortDescending;
-          return (
-            <div
-              className="flex min-h-11 items-center gap-2 px-3 py-1.5"
-              data-condition-field-slug={condition.fieldSlug}
-              key={`${condition.fieldId ?? condition.fieldSlug}-${index}`}
-            >
-              <span className="flex size-5 shrink-0 items-center justify-center rounded bg-muted/60 text-[10px] text-muted-foreground">
-                {index + 1}
-              </span>
-              <Icon className="size-3.5 shrink-0 text-muted-foreground" />
-              <span className="min-w-0 flex-1">
-                <span className="block truncate font-medium text-xs">
-                  {field ? resolveIString(field.name) : condition.fieldSlug}
-                </span>
-                <span className="block truncate text-muted-foreground text-[11px]">
-                  {conditionLabel}
-                  {value ? ` · ${value}` : ""}
-                </span>
-              </span>
-              {hidden ? (
-                <span className="inline-flex items-center gap-1 text-muted-foreground text-[10px]">
-                  <EyeOff className="size-3" />
-                  {messages.base.hiddenField}
-                </span>
-              ) : null}
-              <button
-                aria-label={fmt(messages.base.clearConditionAria, {
-                  name: field ? resolveIString(field.name) : condition.fieldSlug,
-                })}
-                className="inline-flex size-7 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-                onClick={() => onClearItem(index)}
-                title={messages.base.clear}
-                type="button"
-              >
-                <X className="size-3.5" />
-              </button>
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
 // Stable ids + cycling widths for the loading-rows skeleton below, following the
 // same static-array convention as skeletons.tsx (deterministic, no index keys).
 const SKELETON_ROWS = [
@@ -1393,6 +743,7 @@ export function BusaBaseTable({
   const [restoringViewId, setRestoringViewId] = useState<string | null>(null);
   const [restoringRecordId, setRestoringRecordId] = useState<string | null>(null);
   const [quickUpdatingFieldId, setQuickUpdatingFieldId] = useState<string | null>(null);
+  const [viewEditorRequest, setViewEditorRequest] = useState<ViewConfigEditorRequest | null>(null);
   const [columnWidthDrafts, setColumnWidthDrafts] = useState<Record<string, number>>({});
   const [draggingFieldSlug, setDraggingFieldSlug] = useState<string | null>(null);
   const [dropTarget, setDropTarget] = useState<{
@@ -1569,7 +920,12 @@ export function BusaBaseTable({
           </span>
           {activeView ? (
             <details className="relative">
-              <summary className="flex h-7 w-7 cursor-pointer list-none items-center justify-center rounded-md border border-border/70 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground [&::-webkit-details-marker]:hidden">
+              <summary
+                aria-label={messages.base.viewActions}
+                className="flex h-7 w-7 cursor-pointer list-none items-center justify-center rounded-md border border-border/70 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground [&::-webkit-details-marker]:hidden"
+                data-testid="active-view-actions"
+                title={messages.base.viewActions}
+              >
                 <MoreHorizontal size={15} />
               </summary>
               <div className="absolute right-0 z-50 mt-1 w-40 rounded-md border border-border/70 bg-background p-1 shadow-md">
@@ -1611,22 +967,11 @@ export function BusaBaseTable({
         </div>
       </div>
       {activeView ? (
-        <div
-          aria-label={messages.base.viewControlsTitle}
-          className="mb-3 flex min-w-0 items-center gap-1.5 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
-          data-testid="view-control-toolbar"
-          role="toolbar"
-        >
-          {(["fields", "filters", "sorts"] as const).map((section) => (
-            <ViewControlPopover
-              allFields={allFields}
-              initialSection={section}
-              key={section}
-              onSubmit={submitViewControls}
-              view={activeView}
-            />
-          ))}
-        </div>
+        <ViewConfigToolbar
+          config={activeView.config}
+          fields={allFields}
+          onOpen={(section) => setViewEditorRequest({ section, source: "toolbar" })}
+        />
       ) : base ? (
         <div
           className="mb-3 flex min-w-0 items-center gap-2 border-border/60 border-y py-2"
@@ -1638,6 +983,13 @@ export function BusaBaseTable({
           </span>
         </div>
       ) : null}
+      <ViewConfigEditorDialog
+        fields={allFields}
+        onClose={() => setViewEditorRequest(null)}
+        onSubmit={submitViewControls}
+        request={viewEditorRequest}
+        view={activeView}
+      />
       {base && editingViewMode ? (
         <ViewChangeRequestDialog
           base={base}
@@ -1828,6 +1180,9 @@ export function BusaBaseTable({
                       ),
                     );
                   }}
+                  onOpenViewEditor={(section, focusedFieldId) =>
+                    setViewEditorRequest({ focusedFieldId, section, source: "header" })
+                  }
                   onQuickUpdate={async (config) => {
                     setQuickUpdatingFieldId(field.id);
                     return quickUpdateView(config);
@@ -2070,10 +1425,6 @@ function ViewChangeRequestForm({
 }: ViewChangeRequestFormProps) {
   const messages = useCoreI18n();
   const resolveIString = useIString();
-  const initialVisibleFieldSlugs =
-    Array.isArray(view?.config.visibleFieldSlugs) && base.fields.length
-      ? view.config.visibleFieldSlugs
-      : base.fields.map((field) => field.slug);
   const attachmentFields = base.fields.filter((field) => field.type === "attachment");
   const selectFields = base.fields.filter((field) => field.type === "select");
   const dateFields = base.fields.filter(
@@ -2083,7 +1434,9 @@ function ViewChangeRequestForm({
   const [name, setName] = useState(view?.name ?? "");
   const [slug, setSlug] = useState(view?.slug ?? "");
   const [description, setDescription] = useState(view?.description ?? "");
-  const [visibleFieldSlugs, setVisibleFieldSlugs] = useState(initialVisibleFieldSlugs);
+  const [viewConfigDraft, setViewConfigDraft] = useState<ViewConfigVO>(
+    view?.config ?? { filters: [], sorts: [] },
+  );
   const [viewType, setViewType] = useState<ViewType>(view?.type ?? "table");
   // "" means auto (first attachment field); "__none__" means explicitly no cover.
   const [coverFieldSlug, setCoverFieldSlug] = useState<string>(
@@ -2109,14 +1462,6 @@ function ViewChangeRequestForm({
     return null;
   }
 
-  const toggleField = (fieldSlug: string, checked: boolean) => {
-    setVisibleFieldSlugs((current) =>
-      checked
-        ? [...new Set([...current, fieldSlug])]
-        : current.filter((item) => item !== fieldSlug),
-    );
-  };
-
   const submit = async (options?: ViewSubmitOptions) => {
     const trimmedName = name.trim();
     const trimmedSlug = toSlug(slug);
@@ -2128,15 +1473,8 @@ function ViewChangeRequestForm({
       setFormError(messages.base.viewSlugRequired);
       return;
     }
-    const schemaFieldSlugs = base.fields.map((field) => field.slug);
-    const hasCustomFieldLayout =
-      visibleFieldSlugs.length !== schemaFieldSlugs.length ||
-      visibleFieldSlugs.some((fieldSlug, index) => fieldSlug !== schemaFieldSlugs[index]);
     const nextConfig: ViewConfigVO = {
-      filters: view?.config.filters ?? [],
-      sorts: view?.config.sorts ?? [],
-      ...(hasCustomFieldLayout ? { visibleFieldSlugs } : {}),
-      ...(view?.config.fieldWidths ? { fieldWidths: view.config.fieldWidths } : {}),
+      ...viewConfigDraft,
       // Gallery presentation config — only meaningful for gallery views.
       ...(viewType === "gallery"
         ? {
@@ -2449,46 +1787,13 @@ function ViewChangeRequestForm({
         </div>
       ) : null}
 
-      <div className="mt-3">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <div className="text-muted-foreground text-xs">
-            {fmt(messages.base.visibleFields, {
-              total: base.fields.length,
-              visible: visibleFieldSlugs.length,
-            })}
-          </div>
-          <div className="flex items-center gap-1.5">
-            <button
-              className="rounded-md border border-border/70 bg-background px-2 py-1 text-muted-foreground text-xs transition-colors hover:bg-accent hover:text-foreground"
-              onClick={() => setVisibleFieldSlugs([])}
-              type="button"
-            >
-              {messages.base.clear}
-            </button>
-            <button
-              className="rounded-md border border-border/70 bg-background px-2 py-1 text-muted-foreground text-xs transition-colors hover:bg-accent hover:text-foreground"
-              onClick={() => setVisibleFieldSlugs(base.fields.map((field) => field.slug))}
-              type="button"
-            >
-              {messages.base.selectAll}
-            </button>
-          </div>
-        </div>
-        <div className="mt-2 flex flex-wrap gap-2">
-          {base.fields.map((field) => (
-            <label
-              className="inline-flex h-7 items-center gap-1.5 rounded-full border border-border/70 bg-muted/25 px-2.5 text-xs transition-colors hover:bg-muted/45"
-              key={field.id}
-            >
-              <input
-                checked={visibleFieldSlugs.includes(field.slug)}
-                onChange={(event) => toggleField(field.slug, event.target.checked)}
-                type="checkbox"
-              />
-              <span>{resolveIString(field.name)}</span>
-            </label>
-          ))}
-        </div>
+      <div className="mt-3 border border-border/60">
+        <ViewFieldsEditor
+          config={viewConfigDraft}
+          fields={base.fields}
+          onChange={setViewConfigDraft}
+          testId={mode === "edit" ? "edit-view-shared-fields" : "new-view-shared-fields"}
+        />
       </div>
 
       <div className="mt-3 flex flex-wrap items-center justify-between gap-3 border-border/50 border-t pt-3">
@@ -2502,19 +1807,21 @@ function ViewChangeRequestForm({
             {messages.common.cancel}
           </button>
           <SplitSubmitButton
+            changeRequestAction={{
+              label:
+                mode === "create" ? messages.base.addViewRequest : messages.base.updateViewRequest,
+              loadingLabel: messages.common.submitting,
+              onSubmit: () => submit(),
+              isLoading: isSaving,
+            }}
             disabled={isSaving}
-            isPrimaryLoading={isSaving}
-            primaryLabel={
-              mode === "create" ? messages.base.addViewRequest : messages.base.updateViewRequest
-            }
-            primaryLoadingLabel={messages.common.submitting}
-            secondaryLabel={
-              mode === "create" ? messages.base.addViewNow : messages.base.updateViewNow
-            }
-            secondaryLoadingLabel={messages.recordView.merging}
-            onPrimary={() => submit()}
-            onSecondary={() => submit({ mergeImmediately: true })}
             hint={messages.common.mergeImmediatelyHint}
+            immediateAction={{
+              label: mode === "create" ? messages.base.addViewNow : messages.base.updateViewNow,
+              loadingLabel: messages.recordView.merging,
+              onSubmit: () => submit({ mergeImmediately: true }),
+              isLoading: isSaving,
+            }}
           />
         </div>
       </div>

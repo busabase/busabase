@@ -22,6 +22,7 @@ import { docNodeType } from "./doc/definition";
 import { driveNodeType } from "./drive/definition";
 import { fileNodeType } from "./file-node/definition";
 import { folderNodeType } from "./folder/definition";
+import { htmlNodeType } from "./html/definition";
 import { skillNodeType } from "./skill/definition";
 import type {
   NodeCapabilities,
@@ -29,6 +30,8 @@ import type {
   OperationDefinition,
   OperationMeta,
 } from "./types";
+import { whiteboardNodeType } from "./whiteboard/definition";
+import { workflowNodeType } from "./workflow/definition";
 
 export type {
   NodeCapabilities,
@@ -74,6 +77,9 @@ export const BUILTIN_NODE_TYPES = [
   airappNodeType,
   fileNodeType,
   docNodeType,
+  whiteboardNodeType,
+  workflowNodeType,
+  htmlNodeType,
 ] as const;
 
 for (const definition of BUILTIN_NODE_TYPES) {

@@ -1,6 +1,8 @@
 import type { BaseFieldVO, ViewConfigVO } from "busabase-contract/types";
 import { describe, expect, it } from "vitest";
 import {
+  addViewFilter,
+  addViewSort,
   clampViewFieldWidth,
   clearAllViewFilters,
   clearAllViewSorts,
@@ -12,6 +14,7 @@ import {
   hideViewField,
   matchesViewField,
   moveViewField,
+  moveViewSort,
   replaceFirstViewFilter,
   resetAllViewFieldWidths,
   resetViewFieldWidth,
@@ -19,6 +22,8 @@ import {
   setViewFieldWidth,
   showAllViewFields,
   showViewField,
+  updateViewFilterAt,
+  updateViewSortAt,
 } from "./view-config";
 
 const field = { id: "fld_status", slug: "status" } as BaseFieldVO;
@@ -93,6 +98,41 @@ describe("view config quick updates", () => {
     expect(clearViewFilterAt(config, 1).filters).toEqual([config.filters[0], config.filters[2]]);
     expect(clearViewSortAt(config, 0).sorts).toEqual([config.sorts[1]]);
     expect(clearViewFilterAt(config, 99)).toBe(config);
+  });
+
+  it("adds and edits filters while preserving unrelated config", () => {
+    const added = addViewFilter(config, field, "is_empty");
+    expect(added.filters.at(-1)).toEqual({
+      fieldId: field.id,
+      fieldSlug: field.slug,
+      operator: "is_empty",
+    });
+    expect(added.cardSize).toBe("large");
+    const replacement = {
+      fieldId: field.id,
+      fieldSlug: field.slug,
+      operator: "equals" as const,
+      value: "done",
+    };
+    expect(updateViewFilterAt(added, added.filters.length - 1, replacement).filters.at(-1)).toEqual(
+      replacement,
+    );
+    expect(updateViewFilterAt(config, 99, replacement)).toBe(config);
+  });
+
+  it("adds, edits, and reorders sort priority while preserving unrelated config", () => {
+    const added = addViewSort(config, field, "desc");
+    expect(added.sorts.at(-1)).toEqual({
+      direction: "desc",
+      fieldId: field.id,
+      fieldSlug: field.slug,
+    });
+    const replacement = { direction: "asc" as const, fieldId: field.id, fieldSlug: "next" };
+    const updated = updateViewSortAt(added, added.sorts.length - 1, replacement);
+    expect(updated.sorts.at(-1)).toEqual(replacement);
+    expect(moveViewSort(updated, updated.sorts.length - 1, "up").sorts.at(-2)).toEqual(replacement);
+    expect(moveViewSort(config, 0, "up")).toBe(config);
+    expect(updated.cardSize).toBe("large");
   });
 
   it("preserves configured order and moves a field without changing global schema order", () => {

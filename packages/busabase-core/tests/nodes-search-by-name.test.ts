@@ -2,8 +2,7 @@
  * `nodes.searchByName` — the cheap, name/slug-only lookup backing the
  * dashboard quick-jump palette's `KnownNode` cache-miss path (see
  * apps/busabase/content/spec/search-quick-jump.md). Covers:
- *  - every one of the 7 built-in node types (folder/base/skill/drive/airapp/
- *    file/doc) is findable by name, and by slug
+ *  - every built-in node type is findable by name, and by slug
  *  - exact-slug matches sort first
  *  - node-visibility ACL scoping (same pattern as node-acl.test.ts)
  *  - the demo-mode counterpart over the seeded in-memory dataset
@@ -75,6 +74,19 @@ describe("nodes.searchByName", () => {
           metadata: { assetId: confirmedAsset.assetId },
         },
         { kind: "create", nodeType: "doc", slug: "roadmap-doc", name: "Roadmap Doc" },
+        {
+          kind: "create",
+          nodeType: "whiteboard",
+          slug: "roadmap-whiteboard",
+          name: "Roadmap Whiteboard",
+        },
+        {
+          kind: "create",
+          nodeType: "workflow",
+          slug: "roadmap-workflow",
+          name: "Roadmap Workflow",
+        },
+        { kind: "create", nodeType: "html", slug: "roadmap-html", name: "Roadmap HTML" },
         { kind: "create", nodeType: "folder", slug: "unrelated", name: "Completely Unrelated" },
       ],
     });
@@ -83,7 +95,18 @@ describe("nodes.searchByName", () => {
     const byName = await raw.nodes.searchByName({ query: "Roadmap" });
     const foundTypes = new Set(byName.map((r) => r.type));
     expect(foundTypes).toEqual(
-      new Set(["folder", "base", "skill", "drive", "airapp", "file", "doc"]),
+      new Set([
+        "folder",
+        "base",
+        "skill",
+        "drive",
+        "airapp",
+        "file",
+        "doc",
+        "whiteboard",
+        "workflow",
+        "html",
+      ]),
     );
     expect(byName.some((r) => r.name === "Completely Unrelated")).toBe(false);
     // `path` mirrors the server's `/${type}/${slug}` route convention.

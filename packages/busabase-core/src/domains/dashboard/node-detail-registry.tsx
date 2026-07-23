@@ -1,4 +1,5 @@
 import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";
+import type { NodeVO } from "busabase-contract/types";
 import type { ReactNode } from "react";
 
 /**
@@ -8,9 +9,13 @@ import type { ReactNode } from "react";
  * (RN renderers are compiled in on mobile; this is the web host.)
  */
 
+export type LoadedNode = Pick<NodeVO, "id" | "type" | "name" | "slug">;
+
 export interface NodeDetailProps {
   orpc: BusabaseQueryUtils;
   slug: string | null;
+  nodes?: NodeVO[];
+  onNodeLoaded?: (node: LoadedNode) => void;
 }
 
 export type NodeDetailRenderer = (props: NodeDetailProps) => ReactNode;

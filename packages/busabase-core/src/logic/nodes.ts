@@ -7,6 +7,11 @@ import {
 } from "busabase-contract/contract/schemas";
 import { CREATABLE_NODE_TYPES } from "busabase-contract/domains";
 import { fieldNameSchema } from "busabase-contract/domains/base/contract/base-schemas";
+import {
+  HtmlDocumentSchema,
+  WhiteboardDocumentSchema,
+  WorkflowDocumentSchema,
+} from "busabase-contract/domains/rich-node/types";
 import type { NodeSearchResultVO, NodeVO } from "busabase-contract/types";
 import { and, asc, desc, eq, ilike, inArray, isNotNull, isNull, ne, or, sql } from "drizzle-orm";
 import { storage } from "openlib/storage";
@@ -359,8 +364,8 @@ export const listArchivedNodes = async (): Promise<NodeVO[]> => {
 };
 
 /**
- * Cheap name/slug-only lookup across ALL 7 node types (folder/base/skill/
- * drive/airapp/file/doc) — the backend half of the dashboard quick-jump
+ * Cheap name/slug-only lookup across all registered node types — the backend
+ * half of the dashboard quick-jump
  * palette's `KnownNode` cache-miss path (see
  * apps/busabase/content/spec/search-quick-jump.md). Deliberately NOT bolted
  * onto `searchBusabase` (logic/search.ts), which also does 5s-budgeted
@@ -558,6 +563,7 @@ export const createNodeChangeRequest = async (
   const parsed = createNodeChangeRequestInputSchema.parse(input);
   assertValidNodeRefs(parsed.operations);
   const submittedBy = resolveActorId(parsed.submittedBy);
+  const requiredLevel = parsed.autoMerge ? "write" : "changeRequest";
 
   // ChangeRequest-submission gate (node ACL): proposing against an existing
   // node requires `changeRequest` level on it; creating a new node requires it
@@ -568,12 +574,12 @@ export const createNodeChangeRequest = async (
       if (!operation.parentNodeRef) {
         await assertNodePermission(
           operation.parentNodeId ?? rootNodeIdForSpace(getContextSpaceId()),
-          "changeRequest",
+          requiredLevel,
           submittedBy,
         );
       }
     } else {
-      await assertNodePermission(operation.nodeId, "changeRequest", submittedBy);
+      await assertNodePermission(operation.nodeId, requiredLevel, submittedBy);
     }
   }
 
@@ -712,6 +718,16 @@ export const moveNode = async (input: z.input<typeof moveNodeInputSchema>) => {
   });
 };
 
+// Rich-node document keys carry structured graphs/canvases, not free-form
+// fields — an invalid write here isn't just cosmetic, it silently resets the
+// whole document to empty the next time `parseXxxDocument` reads it back.
+// Reject bad writes up front instead of persisting them.
+const RICH_NODE_DOCUMENT_SCHEMAS: Partial<Record<string, { key: string; schema: z.ZodTypeAny }>> = {
+  whiteboard: { key: "whiteboardDocument", schema: WhiteboardDocumentSchema },
+  workflow: { key: "workflowDocument", schema: WorkflowDocumentSchema },
+  html: { key: "htmlDocument", schema: HtmlDocumentSchema },
+};
+
 /** Direct, audited top-level metadata merge for SDK-managed node identities. */
 export const updateNodeMetadata = async (
   input: z.input<typeof updateNodeMetadataInputSchema>,
@@ -736,6 +752,16 @@ export const updateNodeMetadata = async (
     .limit(1);
   if (!node) {
     throw new ORPCError("NOT_FOUND", { message: `Node not found: ${parsed.nodeId}` });
+  }
+
+  const richNodeDocument = RICH_NODE_DOCUMENT_SCHEMAS[node.type];
+  if (richNodeDocument && richNodeDocument.key in parsed.metadata) {
+    const result = richNodeDocument.schema.safeParse(parsed.metadata[richNodeDocument.key]);
+    if (!result.success) {
+      throw new ORPCError("BAD_REQUEST", {
+        message: `Invalid ${richNodeDocument.key} for node ${parsed.nodeId}: ${result.error.message}`,
+      });
+    }
   }
 
   await assertNodePermission(node.id, "write", actorId);

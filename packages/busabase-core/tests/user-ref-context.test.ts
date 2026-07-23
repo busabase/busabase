@@ -1,5 +1,20 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { resolveUserRefs, runWithBusabaseContext } from "../src/context";
+import { getContextPermissionLevel, resolveUserRefs, runWithBusabaseContext } from "../src/context";
+
+describe("getContextPermissionLevel", () => {
+  it("keeps legacy manager and non-manager contexts least-privilege compatible", () => {
+    expect(runWithBusabaseContext({}, getContextPermissionLevel)).toBe("manage");
+    expect(runWithBusabaseContext({ isSpaceManager: false }, getContextPermissionLevel)).toBe(
+      "read",
+    );
+    expect(
+      runWithBusabaseContext(
+        { isSpaceManager: false, permissionLevel: "changeRequest" },
+        getContextPermissionLevel,
+      ),
+    ).toBe("changeRequest");
+  });
+});
 
 describe("resolveUserRefs", () => {
   afterEach(() => {

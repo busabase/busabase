@@ -4,6 +4,7 @@
 // (AsyncLocalStorage) and only ever imported by server code + the schema.
 
 import { AsyncLocalStorage } from "node:async_hooks";
+import type { ApiKeyPermissionLevel } from "busabase-contract/access-control/api-key-level";
 import type { UserRefVO } from "busabase-contract/types";
 import type { PgDatabase } from "drizzle-orm/pg-core";
 import { type DemoUseCase, normalizeDemoUseCase } from "./demo/use-case";
@@ -128,6 +129,12 @@ export interface BusabaseContext {
    * the host resolves the role and injects one boolean.
    */
   isSpaceManager?: boolean;
+  /**
+   * Host-computed workspace permission baseline. Cloud maps owner/admin to
+   * manage, member to changeRequest, and viewer to read. Missing means manage
+   * for backward-compatible open-source/local execution.
+   */
+  permissionLevel?: ApiKeyPermissionLevel;
   /**
    * Host-computed "this space's default content visibility is restricted"
    * signal (`spaces.nodeVisibilityMode === "restricted"` on busabase-cloud).
@@ -369,6 +376,13 @@ export function getContextChangeRequestPendingReviewHook() {
  */
 export function getContextIsSpaceManager(): boolean {
   return storage.getStore()?.isSpaceManager ?? true;
+}
+
+/** Workspace-level baseline before any node-specific grant raises access. */
+export function getContextPermissionLevel(): ApiKeyPermissionLevel {
+  const context = storage.getStore();
+  if (context?.permissionLevel) return context.permissionLevel;
+  return context?.isSpaceManager === false ? "read" : "manage";
 }
 
 /** Whether this space hides default-visibility (NULL) nodes from non-managers. */
