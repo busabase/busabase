@@ -867,6 +867,7 @@ export const dashboardZhCN: CoreI18nMessages = {
       "选择类型并命名；它会创建在“{name}”内。你可以立即合并，也可以保留为待评审变更请求。",
     description: "选择类型并命名。你可以立即合并，也可以保留为待评审变更请求。",
     nameRequired: "名称为必填。",
+    slugRequired: "请填写 slug —— 它会用在这个项目的网址里。",
     couldNotCreate: "无法创建",
     file: "文件",
     fileRequired: "请选择要上传的文件。",
@@ -911,6 +912,16 @@ export const dashboardZhCN: CoreI18nMessages = {
     openapiJsonSpec: "OpenAPI JSON 规范",
     openapi: "OpenAPI",
     mcp: "MCP",
+  },
+  agentPrompts: {
+    title: "Agent 提示词",
+    intro:
+      "复制一条提示词给你的 Agent —— 里面已经带上这个节点的定位信息，Agent 不用猜要在哪里干活。",
+    scenariosTab: "场景",
+    capabilitiesTab: "能力",
+    scenariosEmpty: "这类节点还没有精选场景，可以看「能力」标签页。",
+    copy: "复制提示词",
+    copied: "已复制",
   },
   assets: {
     title: "资产",

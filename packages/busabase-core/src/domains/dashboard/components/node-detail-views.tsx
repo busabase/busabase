@@ -24,7 +24,6 @@ import {
   collectFolderPaths,
   FILE_TREE_LANGUAGE_BY_EXTENSION,
   guessFileTreeLanguage,
-  NodeDeleteButton,
   renderFileTree,
   type SkillTreeNode,
 } from "./file-tree-browser";
@@ -42,7 +41,6 @@ export {
   collectFolderPaths,
   FILE_TREE_LANGUAGE_BY_EXTENSION,
   guessFileTreeLanguage,
-  NodeDeleteButton,
   renderFileTree,
   type SkillTreeNode,
 };
@@ -287,12 +285,6 @@ export function FileTreeDetailView({
               nodeId={fileTree.node.id}
               nodeName={fileTree.node.name}
               nodeSlug={fileTree.node.slug}
-              nodeType={nodeType}
-              orpc={orpc}
-            />
-            <NodeDeleteButton
-              nodeId={fileTree.node.id}
-              nodeName={fileTree.node.name}
               nodeType={nodeType}
               orpc={orpc}
             />
@@ -641,7 +633,6 @@ export function FileNodeDetailView({
               nodeType="file"
               orpc={orpc}
             />
-            <NodeDeleteButton orpc={orpc} nodeId={node.id} nodeName={node.name} nodeType="file" />
           </div>
         )}
       </header>
@@ -844,12 +835,6 @@ export function DocDetailView({
               nodeType="doc"
               orpc={orpc}
             />
-            <NodeDeleteButton
-              nodeId={doc.node.id}
-              nodeName={doc.node.name}
-              nodeType="doc"
-              orpc={orpc}
-            />
           </div>
         )}
       </div>
@@ -929,16 +914,10 @@ export function FolderDetailView({
               title={folder.node.name}
             />
             <NodeActionsMenu
-              nodeId={folder.node.id}
-              nodeName={folder.node.name}
-              nodeSlug={folder.node.slug}
-              nodeType="folder"
-              orpc={orpc}
-            />
-            <NodeDeleteButton
               childCount={folder.children.length}
               nodeId={folder.node.id}
               nodeName={folder.node.name}
+              nodeSlug={folder.node.slug}
               nodeType="folder"
               orpc={orpc}
             />

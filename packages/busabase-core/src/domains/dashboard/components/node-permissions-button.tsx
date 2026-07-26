@@ -290,7 +290,7 @@ export function NodePermissionsDialog({
 
   return (
     <Dialog onOpenChange={onOpenChange} open={open}>
-      <DialogContent className="max-w-lg">
+      <DialogContent className="max-w-lg" data-testid="node-permissions-dialog">
         <DialogHeader>
           <DialogTitle>{t.dialogTitle}</DialogTitle>
           <DialogDescription>{nodeName}</DialogDescription>
@@ -377,7 +377,7 @@ export function NodePermissionsDialog({
                 {!newPrincipalIsSpace &&
                   (spaceMembers.length > 0 ? (
                     <Select onValueChange={setNewPrincipalId} value={newPrincipalId}>
-                      <SelectTrigger className="h-8 flex-1">
+                      <SelectTrigger className="h-8 flex-1" data-testid="grant-member-select">
                         <SelectValue placeholder={t.selectMember} />
                       </SelectTrigger>
                       <SelectContent>
@@ -400,7 +400,7 @@ export function NodePermissionsDialog({
                   onValueChange={(value) => setNewRole(value as PermissionLevel)}
                   value={newRole}
                 >
-                  <SelectTrigger className="h-8 w-40">
+                  <SelectTrigger className="h-8 w-40" data-testid="grant-role-select">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -414,6 +414,7 @@ export function NodePermissionsDialog({
                   disabled={
                     addPrincipal.isPending || (!newPrincipalIsSpace && !newPrincipalId.trim())
                   }
+                  data-testid="grant-add-button"
                   onClick={handleAdd}
                   size="sm"
                   type="button"

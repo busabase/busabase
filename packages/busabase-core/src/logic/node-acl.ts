@@ -232,9 +232,24 @@ export async function getEffectiveNodeLevel(
       ),
     );
 
-  const defaultVisible = getContextRestrictedVisibility()
-    ? node.effectiveVisibility === "workspace" || node.effectiveVisibility === "public"
-    : node.effectiveVisibility !== "private";
+  // The workspace root is always visible to a member. It has no explicit
+  // visibility of its own, so Restricted mode would otherwise treat it as
+  // hidden and every member would get NOT_FOUND for the one node that always
+  // exists — silently losing the ability to create anything at workspace level
+  // the moment an admin flips a *visibility* switch, and reporting it as
+  // "Node not found: nod_root_<space>" (an internal id, for a node the system
+  // guarantees). The rest of the system already treats the root as special:
+  // `fetchRootNodeRows` fetches it unfiltered and `updateNodeVisibility`
+  // refuses to make it private. This brings the permission check in line.
+  //
+  // Not reachable for anonymous visitors — that branch returns above, so a
+  // public link still can't see the root.
+  const isSpaceRoot = nodeId === rootNodeIdForSpace(spaceId);
+  const defaultVisible =
+    isSpaceRoot ||
+    (getContextRestrictedVisibility()
+      ? node.effectiveVisibility === "workspace" || node.effectiveVisibility === "public"
+      : node.effectiveVisibility !== "private");
 
   let level: ApiKeyPermissionLevel | null = defaultVisible ? getContextPermissionLevel() : null;
   for (const grant of grants) {

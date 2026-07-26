@@ -888,6 +888,7 @@ export const coreMessagesEn = {
     description:
       "Pick a type and name it. Choose whether to merge immediately or keep it as a change request for review.",
     nameRequired: "Name is required.",
+    slugRequired: "Enter a slug — it's used in this item's URL.",
     couldNotCreate: "Could not create",
     file: "File",
     fileRequired: "Choose a file to upload.",
@@ -935,6 +936,16 @@ export const coreMessagesEn = {
     openapiJsonSpec: "OpenAPI JSON spec",
     openapi: "OpenAPI",
     mcp: "MCP",
+  },
+  agentPrompts: {
+    title: "Agent prompts",
+    intro:
+      "Copy a prompt into your agent — it already points at this node, so the agent doesn't have to guess where to work.",
+    scenariosTab: "Scenarios",
+    capabilitiesTab: "Capabilities",
+    scenariosEmpty: "No curated scenarios for this node type yet — see the Capabilities tab.",
+    copy: "Copy prompt",
+    copied: "Copied",
   },
   assets: {
     title: "Assets",

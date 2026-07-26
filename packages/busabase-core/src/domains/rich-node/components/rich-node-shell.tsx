@@ -9,8 +9,7 @@ import { Save } from "lucide-react";
 import type { ReactNode } from "react";
 import { useCallback, useState } from "react";
 import { fmt, useCoreI18n } from "../../../i18n";
-import { NodeDeleteButton } from "../../dashboard/components/file-tree-browser";
-import { NodePermissionsButton } from "../../dashboard/components/node-permissions-button";
+import { NodeActionsMenu } from "../../dashboard/components/node-actions-menu";
 
 export type SaveStatus = "saved" | "dirty" | "saving" | "error";
 
@@ -111,13 +110,19 @@ export function RichNodeShell({
           {error ?? statusLabel}
         </span>
         {actions}
-        <span className="hidden sm:inline-flex">
-          <NodePermissionsButton nodeId={node.id} nodeName={node.name} orpc={orpc} />
-        </span>
-        <span className="inline-flex sm:hidden">
-          <NodePermissionsButton nodeId={node.id} nodeName={node.name} orpc={orpc} variant="icon" />
-        </span>
-        <NodeDeleteButton nodeId={node.id} nodeName={node.name} nodeType={nodeType} orpc={orpc} />
+        {/* One "•••" menu instead of the Permissions + Delete button pair this
+            header used to render — same set of actions (plus Rename/Share/Agent
+            prompts, which this header never offered at all), same dialogs, and
+            it matches every other node-detail topbar. The icon-only/labelled
+            responsive split the Permissions button needed is gone with it: the
+            trigger is a fixed-size icon at every breakpoint. */}
+        <NodeActionsMenu
+          nodeId={node.id}
+          nodeName={node.name}
+          nodeSlug={node.slug}
+          nodeType={nodeType}
+          orpc={orpc}
+        />
         <Button
           aria-label={messages.richNodes.save}
           disabled={status === "saving" || status === "saved"}

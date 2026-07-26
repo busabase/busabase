@@ -13,7 +13,6 @@ import {
   buildFileTree,
   collectFolderPaths,
   guessFileTreeLanguage,
-  NodeDeleteButton,
   renderFileTree,
 } from "../../dashboard/components/file-tree-browser";
 import { NodeActionsMenu } from "../../dashboard/components/node-actions-menu";
@@ -199,12 +198,6 @@ export function AirAppDetailView({ orpc, slug, onNodeLoaded }: NodeDetailProps) 
               nodeId={airapp.node.id}
               nodeName={airapp.node.name}
               nodeSlug={airapp.node.slug}
-              nodeType="airapp"
-              orpc={orpc}
-            />
-            <NodeDeleteButton
-              nodeId={airapp.node.id}
-              nodeName={airapp.node.name}
               nodeType="airapp"
               onDeleted={() =>
                 disposeDeletedAirAppSession({

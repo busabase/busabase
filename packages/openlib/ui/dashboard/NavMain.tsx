@@ -9,6 +9,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "kui/dropdown-menu";
 import {
@@ -32,7 +33,15 @@ import {
   Plus,
   Trash2,
 } from "lucide-react";
-import { type CSSProperties, memo, type ReactNode, useMemo, useRef, useState } from "react";
+import {
+  type CSSProperties,
+  Fragment,
+  memo,
+  type ReactNode,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { useLocation, useSearch } from "wouter";
 import { SidebarTaskList } from "./SidebarTaskList";
 import { mergeSearchIntoHref, SPALink } from "./SPALink";
@@ -327,6 +336,25 @@ function NavMainComponent({
     }
   };
 
+  /**
+   * The body of a row's "•••" dropdown. Extracted because three separate rows
+   * (group header, folder, leaf) render the identical action list — keeping it
+   * in one place is what lets a change like `separatorBefore` land once instead
+   * of three times, each an opportunity to miss one.
+   */
+  const renderActionItems = (actions: NavItemAction[], itemKey: string) =>
+    actions.map((action, index) => (
+      <Fragment key={`${itemKey}:action:${action.title}`}>
+        {/* A separator above the first item would render as a stray leading
+            rule, so the flag only takes effect from the second item on. */}
+        {action.separatorBefore && index > 0 && <DropdownMenuSeparator />}
+        <DropdownMenuItem onSelect={() => handleItemAction(action)} variant={action.variant}>
+          {action.icon && <action.icon className="mr-2 size-3.5" />}
+          {action.title}
+        </DropdownMenuItem>
+      </Fragment>
+    ));
+
   // A subtree is "active" if the item itself, or ANY descendant at any depth,
   // matches the current route — used to auto-open every ancestor folder along
   // the path to the active row, regardless of nesting depth.
@@ -535,19 +563,7 @@ function NavMainComponent({
                         </button>
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="end">
-                        {item.actions.map((action) => {
-                          const ActionIcon = action.icon;
-                          return (
-                            <DropdownMenuItem
-                              key={`${itemKey}:action:${action.title}`}
-                              variant={action.variant}
-                              onSelect={() => handleItemAction(action)}
-                            >
-                              {ActionIcon && <ActionIcon className="mr-2 size-3.5" />}
-                              {action.title}
-                            </DropdownMenuItem>
-                          );
-                        })}
+                        {renderActionItems(item.actions, itemKey)}
                       </DropdownMenuContent>
                     </DropdownMenu>
                   )}
@@ -683,19 +699,7 @@ function NavMainComponent({
                 </SidebarMenuAction>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
-                {item.actions.map((action) => {
-                  const ActionIcon = action.icon;
-                  return (
-                    <DropdownMenuItem
-                      key={`${itemKey}:action:${action.title}`}
-                      variant={action.variant}
-                      onSelect={() => handleItemAction(action)}
-                    >
-                      {ActionIcon && <ActionIcon className="mr-2 size-3.5" />}
-                      {action.title}
-                    </DropdownMenuItem>
-                  );
-                })}
+                {renderActionItems(item.actions, itemKey)}
               </DropdownMenuContent>
             </DropdownMenu>
           )}
@@ -801,19 +805,7 @@ function NavMainComponent({
               </button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
-              {(item.actions ?? []).map((action) => {
-                const ActionIcon = action.icon;
-                return (
-                  <DropdownMenuItem
-                    key={`${itemKey}:action:${action.title}`}
-                    variant={action.variant}
-                    onSelect={() => handleItemAction(action)}
-                  >
-                    {ActionIcon && <ActionIcon className="mr-2 size-3.5" />}
-                    {action.title}
-                  </DropdownMenuItem>
-                );
-              })}
+              {renderActionItems(item.actions ?? [], itemKey)}
             </DropdownMenuContent>
           </DropdownMenu>
         )}

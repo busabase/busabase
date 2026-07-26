@@ -7,6 +7,13 @@ export interface NavItemAction {
   url?: string;
   onSelect?: () => void;
   variant?: "default" | "destructive";
+  /**
+   * Renders a `DropdownMenuSeparator` immediately above this item. Use to fence
+   * a destructive action (Delete) off from the ordinary ones so it can't be hit
+   * by muscle memory aimed at the item above it. Ignored on the first item of a
+   * menu (a leading rule would just be a stray line).
+   */
+  separatorBefore?: boolean;
 }
 
 export interface NavItem {

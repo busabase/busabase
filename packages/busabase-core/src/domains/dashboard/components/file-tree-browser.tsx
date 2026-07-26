@@ -2,7 +2,7 @@
 
 // Shared file-tree browsing building blocks — extracted out of node-detail-views.tsx
 // so any file-tree-backed node type (skill/drive/airapp/…) can reuse the same
-// delete button, tree builder, and tree renderer instead of duplicating them.
+// delete dialog, tree builder, and tree renderer instead of duplicating them.
 // `FileTreeDetailView` (node-detail-views.tsx) and `AirAppDetailView`
 // (../../airapp/components/AirAppDetailView.tsx) both build on top of this module.
 
@@ -10,9 +10,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";
 import type { FileTreeNodeVO } from "busabase-contract/types";
 import { FileTreeFile, FileTreeFolder } from "kui/ai-elements/file-tree";
-import { Trash2 } from "lucide-react";
 import type { ReactNode } from "react";
-import { useState } from "react";
 import { toast } from "sonner";
 import { useLocation, useSearch } from "wouter";
 import { fmt, useCoreI18n } from "../../../i18n";
@@ -22,46 +20,61 @@ import type { SkillCodeLanguage } from "./field-preview";
 import { ConfirmActionDialog } from "./primitives";
 
 /**
- * Delete action for a folder/doc/skill/drive/airapp node. Creates a `node_delete`
- * change request and approve-merges it (soft-archive → recoverable from Trash).
- * Folders warn about the cascade (their subtree is archived in one batch).
+ * The confirm-and-archive half of the delete flow, with no trigger of its own —
+ * the caller owns `open`. Split out of `NodeDeleteButton` so Delete can live as
+ * an item inside the shared "•••" menu (`NodeActionsMenu`, and the sidebar row's
+ * equivalent in `dashboard-shell.tsx`) instead of only as a standalone toolbar
+ * button. Both halves share one implementation, so the confirm copy, the folder
+ * cascade warning, and the CR-approve-merge sequence can't drift apart.
+ *
+ * Creates a `node_delete` change request and approve-merges it (soft-archive →
+ * recoverable from Trash). Folders warn about the cascade (their subtree is
+ * archived in one batch). `mergeNodeDelete` already special-cases
+ * `node.type === "base"` (archives the base + its records in lockstep), so this
+ * works unchanged with `nodeType="base"`.
  */
-/**
- * Exported so `BaseDetailView` (base-views.tsx) can reuse the exact same
- * delete-to-Trash flow for a Base's own node — `mergeNodeDelete` already
- * special-cases `node.type === "base"` (archives the base + its records in
- * lockstep), so this button works unchanged with `nodeType="base"`.
- */
-export function NodeDeleteButton({
+export function NodeDeleteDialog({
   orpc,
   nodeId,
   nodeType,
   nodeName,
   childCount = 0,
+  open,
+  onOpenChange,
   onDeleted,
+  navigateHome = true,
 }: {
   orpc: BusabaseQueryUtils;
   nodeId: string;
   nodeType: string;
   nodeName: string;
   childCount?: number;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
   /** Optional hook fired right after a successful delete (e.g. so an
    *  airapp node can tear down its live Nodepod runner instead of leaking
    *  it). No-op for node types that don't pass it. */
   onDeleted?: () => void;
+  /**
+   * Navigate to the workbench root after a successful delete. Correct for a
+   * detail page (you just archived the very node you were looking at, so the
+   * route no longer resolves), but wrong for the sidebar, where deleting some
+   * OTHER node must not yank you off the page you're working on — that caller
+   * passes `false` unless the deleted node is the one currently open.
+   */
+  navigateHome?: boolean;
 }) {
   const messages = useCoreI18n();
   const [, rawSetLocation] = useLocation();
   const currentSearch = useSearch();
   const setLocation = (to: string) => rawSetLocation(mergeSearchIntoHref(to, currentSearch));
   const queryClient = useQueryClient();
-  const [confirming, setConfirming] = useState(false);
   const createCr = useMutation(orpc.nodes.createChangeRequest.mutationOptions());
   const reviewCr = useMutation(orpc.changeRequests.review.mutationOptions());
   const mergeCr = useMutation(orpc.changeRequests.merge.mutationOptions());
   const pending = createCr.isPending || reviewCr.isPending || mergeCr.isPending;
   // Deleting a node is manage-only; a public read-only visitor never sees it.
-  // Self-gating here covers every detail-header mount. All hooks run first.
+  // Self-gating here covers every mount. All hooks run first.
   const isAnon = useIsAnonymousVisitor();
   if (isAnon) {
     return null;
@@ -96,37 +109,27 @@ export function NodeDeleteButton({
         queryKey: orpc.nodes.listArchived.queryOptions({}).queryKey,
       });
       toast.success(fmt(messages.nodeDetail.movedToTrash, { type: label }));
-      setConfirming(false);
-      setLocation("/");
+      onOpenChange(false);
+      if (navigateHome) setLocation("/");
       onDeleted?.();
     } catch (err) {
       toast.error(
         err instanceof Error ? err.message : fmt(messages.nodeDetail.failedDelete, { type: label }),
       );
-      setConfirming(false);
+      onOpenChange(false);
     }
   };
 
   return (
-    <>
-      <button
-        className="inline-flex shrink-0 items-center gap-1.5 rounded-md border border-border/60 bg-background px-2.5 py-1.5 text-muted-foreground text-xs transition-colors hover:bg-red-50 hover:text-red-700"
-        onClick={() => setConfirming(true)}
-        type="button"
-      >
-        <Trash2 className="size-3.5" />
-        {messages.nodeDetail.delete}
-      </button>
-      <ConfirmActionDialog
-        body={body}
-        confirmLabel={messages.nodeDetail.moveToTrash}
-        onCancel={() => setConfirming(false)}
-        onConfirm={handleConfirm}
-        open={confirming}
-        pending={pending}
-        title={fmt(messages.nodeDetail.deleteTitle, { type: label })}
-      />
-    </>
+    <ConfirmActionDialog
+      body={body}
+      confirmLabel={messages.nodeDetail.moveToTrash}
+      onCancel={() => onOpenChange(false)}
+      onConfirm={handleConfirm}
+      open={open}
+      pending={pending}
+      title={fmt(messages.nodeDetail.deleteTitle, { type: label })}
+    />
   );
 }
 

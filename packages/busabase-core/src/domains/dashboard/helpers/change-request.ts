@@ -80,7 +80,7 @@ export const operationOrder: OperationKind[] = [
 // Operation labels/tones come from the node-type registry (single source of truth).
 export const operationMeta = OPERATION_META;
 
-const operationLabelKeys: Record<OperationKind, keyof CoreI18nMessages["operation"]> = {
+export const operationLabelKeys: Record<OperationKind, keyof CoreI18nMessages["operation"]> = {
   drive_file_create: "driveFileCreate",
   drive_file_delete: "driveFileDelete",
   drive_file_update: "driveFileUpdate",

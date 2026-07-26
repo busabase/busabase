@@ -267,4 +267,18 @@ export const dashboardZhTW: CoreI18nMessages = {
     noPending: "全部已合併——套件已在你的空間中生效。",
     done: "完成",
   },
+  agentPrompts: {
+    title: "Agent 提示詞",
+    intro:
+      "複製一條提示詞給你的 Agent —— 裡面已經帶上這個節點的定位資訊，Agent 不用猜要在哪裡幹活。",
+    scenariosTab: "場景",
+    capabilitiesTab: "能力",
+    scenariosEmpty: "這類節點還沒有精選場景，可以看「能力」分頁。",
+    copy: "複製提示詞",
+    copied: "已複製",
+  },
+  createNode: {
+    ...dashboardZhCN.createNode,
+    slugRequired: "請填寫 slug —— 它會用在這個項目的網址裡。",
+  },
 };

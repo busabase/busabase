@@ -30,10 +30,8 @@ import { registerSidePanelTab, type SidePanelTabProps } from "../side-panel-regi
 import { useIsAnonymousVisitor } from "../visitor-context";
 import { applyViewConfigToRecords, BusaBaseTable } from "./base-table";
 import { IStringNameInput } from "./i-string-input";
-import { NodeDeleteButton } from "./node-detail-views";
-import { NodePermissionsButton } from "./node-permissions-button";
+import { NodeActionsMenu } from "./node-actions-menu";
 import { NodePinButton, nodeSidePanelTabId } from "./node-pin-button";
-import { NodeShareButton } from "./node-share-button";
 import { EmptyState, PropertyRow, SidebarPanel } from "./primitives";
 import { NodeDetailSkeleton } from "./skeletons";
 import { SplitSubmitButton } from "./split-submit-button";
@@ -69,7 +67,7 @@ export function BaseDetailView({
    * paging shows correct order without loading the whole base.
    */
   orderedRecords?: RecordVO[];
-  /** Wired through to the header's delete-to-Trash button (NodeDeleteButton). */
+  /** Wired through to the header's "•••" menu (NodeActionsMenu). */
   orpc: BusabaseQueryUtils;
   pagination?: RecordsPagination;
   base: BaseVO | null;
@@ -154,7 +152,7 @@ export function BaseSetupView({
   base: BaseVO | null;
   bases: BaseVO[];
   deletedFields?: BaseFieldVO[];
-  /** Wired through to the header's delete-to-Trash button (NodeDeleteButton). */
+  /** Wired through to the header's "•••" menu (NodeActionsMenu). */
   orpc: BusabaseQueryUtils;
   onCreateField: (
     base: BaseVO,
@@ -998,10 +996,18 @@ function BaseDetailHeader({ base, orpc }: { base: BaseVO | null; orpc: BusabaseQ
             <p className="mt-1 truncate text-muted-foreground text-xs">{base.description}</p>
           ) : null}
         </div>
-        {/* Archive-to-Trash entry point for the Base itself — previously the
-            detail page had no delete/archive action at all (only field/view/
-            record actions existed). `mergeNodeDelete` already special-cases
-            `node.type === "base"`, so the shared NodeDeleteButton works as-is. */}
+        {/* One "•••" menu, not a row of naked buttons. This header used to lay
+            Agent prompts / Permissions / Share / Delete out side by side, which
+            is four buttons of chrome above the actual Base. NodeActionsMenu
+            carries all four (it omits Rename for `nodeType === "base"` — a Base
+            renames through its Design Tab) and every other node-detail topbar
+            already uses it, so this also makes the Base page stop being the odd
+            one out. Pin stays outside: it's a stateful toggle whose pressed
+            state has to be visible at a glance, not a dialog launcher.
+            `mergeNodeDelete` already special-cases `node.type === "base"`
+            (archives the base + its records in lockstep), so Delete works here
+            unchanged. spaceId is not carried on BaseVO; the Share dialog
+            derives it from the current /dashboard/<spaceId>/… pathname. */}
         {base && !isAnon ? (
           <div className="flex shrink-0 items-center gap-2">
             <NodePinButton
@@ -1010,19 +1016,10 @@ function BaseDetailHeader({ base, orpc }: { base: BaseVO | null; orpc: BusabaseQ
               tabType="base-preview"
               title={base.name}
             />
-            <NodePermissionsButton nodeId={base.nodeId} nodeName={base.name} orpc={orpc} />
-            {/* spaceId is not carried on BaseVO; NodeShareButton derives it from
-                the current /dashboard/<spaceId>/… pathname. */}
-            <NodeShareButton
+            <NodeActionsMenu
               nodeId={base.nodeId}
               nodeName={base.name}
               nodeSlug={base.slug}
-              nodeType="base"
-              orpc={orpc}
-            />
-            <NodeDeleteButton
-              nodeId={base.nodeId}
-              nodeName={base.name}
               nodeType="base"
               orpc={orpc}
             />

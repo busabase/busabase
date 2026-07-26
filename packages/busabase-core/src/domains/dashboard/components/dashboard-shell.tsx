@@ -9,25 +9,32 @@ import {
   Activity,
   FolderOpen,
   FolderTree,
+  Globe,
   Images,
   Inbox,
   Pencil,
   Plus,
   Search,
   Shield,
+  Sparkles,
   Star,
+  Trash2,
 } from "lucide-react";
 import type { NavDropPosition, NavItemAction, NavNodeDropParams } from "openlib/ui/dashboard";
 import { DashboardLayout, type NavGroup, type NavItem, NavMain } from "openlib/ui/dashboard";
 import type { ComponentProps, ReactNode } from "react";
 import { useCallback, useMemo, useState } from "react";
 import { toast } from "sonner";
+import { useLocation } from "wouter";
 import { coreMessagesByLocale } from "../../../i18n";
 import { nodeIconForType } from "../helpers/node-icons";
 import type { MoveNodePayload } from "../hooks/use-move-node";
+import { NodeDeleteDialog } from "./file-tree-browser";
+import { NodeAgentPromptsDialog } from "./node-agent-prompts-dialog";
 import { NodeMoveDialog } from "./node-move-dialog";
 import { NodePermissionsDialog } from "./node-permissions-button";
 import { NodeRenameDialog } from "./node-rename-dialog";
+import { NodeShareDialog } from "./node-share-button";
 
 /** Stable, always-disabled query used in place of `orpc.nodes.listFavorites.queryOptions({})`
  * when a host omitted `orpc` — keeps the `useQuery` call unconditional (rules of
@@ -153,6 +160,7 @@ export function BusabaseDashboardShell({
   // The node targeted by the sidebar "•••" → Permissions action; drives the
   // one shared `NodePermissionsDialog` rendered below (only when a host wired
   // `orpc`). Same single-dialog-per-shell pattern as the node-detail toolbars.
+  const [location] = useLocation();
   const [permissionsTarget, setPermissionsTarget] = useState<{ id: string; name: string } | null>(
     null,
   );
@@ -168,6 +176,35 @@ export function BusabaseDashboardShell({
   // The node targeted by the sidebar "•••" → "Move to…" action; drives the
   // `NodeMoveDialog` rendered below (only when a host wired `onMoveNode`).
   const [moveTarget, setMoveTarget] = useState<{ id: string; name: string } | null>(null);
+  // The node targeted by the sidebar "•••" → "Agent prompts" action. Unlike
+  // Move/Rename/Permissions this needs no mutation and no host wiring — the
+  // dialog only reads the node-type registry and copies text — so it is offered
+  // unconditionally on every node type.
+  const [promptsTarget, setPromptsTarget] = useState<{
+    id: string;
+    name: string;
+    type: string;
+  } | null>(null);
+  // The node targeted by the sidebar "•••" → "Share" / "Delete" actions. Both
+  // carry more of the node than the other targets do: Share needs the slug to
+  // build the public URL and the type to label the dialog, Delete needs the
+  // type for its confirm copy and the child count so a folder warns about the
+  // subtree it will archive along with it.
+  const [shareTarget, setShareTarget] = useState<{
+    id: string;
+    name: string;
+    slug: string;
+    type: string;
+  } | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<{
+    id: string;
+    name: string;
+    type: string;
+    childCount: number;
+    /** The node's own route, captured at click time so the dialog can tell
+     *  whether deleting it strands the user on a now-dead page. */
+    href: string | null;
+  } | null>(null);
   // Flat id → NodeVO index over the REAL tree (not the display-flattened
   // NavItem tree) so drag-and-drop can check a drop target's actual type and
   // walk its true ancestor chain, regardless of how the sidebar visually
@@ -335,38 +372,68 @@ export function BusabaseDashboardShell({
   // NavItem list rendered as the Bases tree's top level today. Hoisted into
   // its own memo (rather than an inline call) so it can be reused as-is by
   // the sidebar without recomputing per render.
-  const baseNavItems = useMemo(
-    () =>
-      buildKnowledgeBaseItems(
-        nodes,
-        (node) => onCreateClick({ id: node.id, name: node.name }),
-        {
-          newLabel: nav.new,
-          openLabel: messages.common.open,
-          permissionsLabel: messages.permissions.title,
-          renameLabel: messages.rename.title,
-          favoriteAddLabel: messages.favorites.add,
-          favoriteRemoveLabel: messages.favorites.remove,
-          moveLabel: messages.move.menuLabel,
-        },
-        loadingNodeIds,
-        // Only offer the sidebar Permissions action when a host wired orpc — the
-        // dialog can't do anything without it.
-        orpc ? (node) => setPermissionsTarget({ id: node.id, name: node.name }) : undefined,
-        // Same orpc gate for the Favorites toggle action — no persistence layer
-        // to call without it.
-        orpc ? { favoriteNodeIds, onToggle: handleToggleFavorite } : undefined,
-        // Same orpc gate for the Rename action — `buildNavItem` further
-        // excludes Base nodes regardless (they keep their own rename path).
-        orpc
-          ? (node) => setRenameTarget({ id: node.id, name: node.name, slug: node.slug })
-          : undefined,
-        // Only offer "Move to…" when a host wired `onMoveNode` — the dialog
-        // can't do anything without a mutation to call.
-        onMoveNode ? (node) => setMoveTarget({ id: node.id, name: node.name }) : undefined,
-      ),
+  // Everything `buildNavItem` needs, assembled once and threaded through the
+  // whole recursive build as a single object. This used to be nine positional
+  // parameters forwarded by hand at four call sites — and a forgotten forward
+  // is invisible to TypeScript (every callback is optional), which is exactly
+  // how the Agent-prompts menu item silently failed to render on Bases-tree
+  // rows. One object means a new action is added in one place and cannot be
+  // dropped in transit.
+  const navItemContext = useMemo<NavItemContext>(
+    () => ({
+      onCreateChild: (node) => onCreateClick({ id: node.id, name: node.name }),
+      labels: {
+        newLabel: nav.new,
+        openLabel: messages.common.open,
+        permissionsLabel: messages.permissions.title,
+        renameLabel: messages.rename.title,
+        favoriteAddLabel: messages.favorites.add,
+        favoriteRemoveLabel: messages.favorites.remove,
+        moveLabel: messages.move.menuLabel,
+        agentPromptsLabel: messages.agentPrompts.title,
+        shareLabel: messages.share.title,
+        deleteLabel: messages.nodeDetail.delete,
+      },
+      loadingNodeIds,
+      // Only offer the sidebar Permissions action when a host wired orpc — the
+      // dialog can't do anything without it.
+      onOpenPermissions: orpc
+        ? (node) => setPermissionsTarget({ id: node.id, name: node.name })
+        : undefined,
+      // Same orpc gate for the Favorites toggle action — no persistence layer
+      // to call without it.
+      favoriteContext: orpc ? { favoriteNodeIds, onToggle: handleToggleFavorite } : undefined,
+      // Same orpc gate for the Rename action — `buildNavItem` further
+      // excludes Base nodes regardless (they keep their own rename path).
+      onOpenRename: orpc
+        ? (node) => setRenameTarget({ id: node.id, name: node.name, slug: node.slug })
+        : undefined,
+      // Only offer "Move to…" when a host wired `onMoveNode` — the dialog
+      // can't do anything without a mutation to call.
+      onOpenMove: onMoveNode
+        ? (node) => setMoveTarget({ id: node.id, name: node.name })
+        : undefined,
+      onOpenAgentPrompts: (node) =>
+        setPromptsTarget({ id: node.id, name: node.name, type: node.type }),
+      // Share and Delete carry the same orpc gate as Permissions/Rename: both
+      // dialogs are pure mutation surfaces (a public link toggle, a node_delete
+      // change request) with nothing to call without a wired client.
+      onOpenShare: orpc
+        ? (node) =>
+            setShareTarget({ id: node.id, name: node.name, slug: node.slug, type: node.type })
+        : undefined,
+      onOpenDelete: orpc
+        ? (node) =>
+            setDeleteTarget({
+              id: node.id,
+              name: node.name,
+              type: node.type,
+              childCount: node.children.length,
+              href: nodeHref(node),
+            })
+        : undefined,
+    }),
     [
-      nodes,
       onCreateClick,
       nav.new,
       messages.common.open,
@@ -375,12 +442,24 @@ export function BusabaseDashboardShell({
       messages.favorites.add,
       messages.favorites.remove,
       messages.move.menuLabel,
+      messages.agentPrompts.title,
+      messages.share.title,
+      messages.nodeDetail.delete,
       loadingNodeIds,
       orpc,
       favoriteNodeIds,
       handleToggleFavorite,
       onMoveNode,
     ],
+  );
+
+  // Single source of truth for "top-level after root-unwrap" — the exact
+  // NavItem list rendered as the Bases tree's top level today. Hoisted into
+  // its own memo (rather than an inline call) so it can be reused as-is by
+  // the sidebar without recomputing per render.
+  const baseNavItems = useMemo(
+    () => buildKnowledgeBaseItems(nodes, navItemContext),
+    [nodes, navItemContext],
   );
 
   // Favorites nav group: a FLAT list of the actor's favorited nodes (already
@@ -390,37 +469,8 @@ export function BusabaseDashboardShell({
   // non-expandable row. Only ever rendered non-empty (see `scrollNav` below),
   // mirroring the existing `scrollShortcutItems.length > 0` pattern.
   const favoriteNavItems = useMemo(
-    () =>
-      buildFavoriteItems(
-        favoriteNodes,
-        {
-          openLabel: messages.common.open,
-          permissionsLabel: messages.permissions.title,
-          renameLabel: messages.rename.title,
-          favoriteAddLabel: messages.favorites.add,
-          favoriteRemoveLabel: messages.favorites.remove,
-          moveLabel: messages.move.menuLabel,
-        },
-        orpc ? (node) => setPermissionsTarget({ id: node.id, name: node.name }) : undefined,
-        orpc ? { favoriteNodeIds, onToggle: handleToggleFavorite } : undefined,
-        orpc
-          ? (node) => setRenameTarget({ id: node.id, name: node.name, slug: node.slug })
-          : undefined,
-        onMoveNode ? (node) => setMoveTarget({ id: node.id, name: node.name }) : undefined,
-      ),
-    [
-      favoriteNodes,
-      messages.common.open,
-      messages.permissions.title,
-      messages.rename.title,
-      messages.favorites.add,
-      messages.favorites.remove,
-      messages.move.menuLabel,
-      orpc,
-      favoriteNodeIds,
-      handleToggleFavorite,
-      onMoveNode,
-    ],
+    () => buildFavoriteItems(favoriteNodes, navItemContext),
+    [favoriteNodes, navItemContext],
   );
 
   const scrollShortcutItems: NavItem[] = [
@@ -551,6 +601,52 @@ export function BusabaseDashboardShell({
           orpc={orpc}
         />
       )}
+      {promptsTarget && (
+        <NodeAgentPromptsDialog
+          nodeId={promptsTarget.id}
+          nodeName={promptsTarget.name}
+          nodeType={promptsTarget.type}
+          onOpenChange={(next) => {
+            if (!next) setPromptsTarget(null);
+          }}
+          open
+        />
+      )}
+      {orpc && shareTarget && (
+        <NodeShareDialog
+          nodeId={shareTarget.id}
+          nodeName={shareTarget.name}
+          nodeSlug={shareTarget.slug}
+          nodeType={shareTarget.type}
+          onOpenChange={(next) => {
+            if (!next) setShareTarget(null);
+          }}
+          open
+          orpc={orpc}
+        />
+      )}
+      {orpc && deleteTarget && (
+        <NodeDeleteDialog
+          childCount={deleteTarget.childCount}
+          /* Only bounce to the workbench root when the node being deleted is
+             the one currently open — otherwise the route you're on is about to
+             404. Deleting some OTHER node from the sidebar must leave you
+             exactly where you were; a detail page's own "•••" menu always
+             qualifies for the redirect and keeps the default. */
+          navigateHome={Boolean(
+            deleteTarget.href &&
+              (location === deleteTarget.href || location.startsWith(`${deleteTarget.href}/`)),
+          )}
+          nodeId={deleteTarget.id}
+          nodeName={deleteTarget.name}
+          nodeType={deleteTarget.type}
+          onOpenChange={(next) => {
+            if (!next) setDeleteTarget(null);
+          }}
+          open
+          orpc={orpc}
+        />
+      )}
       {onMoveNode && moveTarget && (
         <NodeMoveDialog
           node={moveTarget}
@@ -583,6 +679,9 @@ interface NavItemLabels {
   favoriteAddLabel: string;
   favoriteRemoveLabel: string;
   moveLabel: string;
+  agentPromptsLabel: string;
+  shareLabel: string;
+  deleteLabel: string;
 }
 
 /**
@@ -594,6 +693,34 @@ interface NavItemLabels {
 interface FavoriteActionContext {
   favoriteNodeIds: Set<string>;
   onToggle: (node: NodeVO) => void;
+}
+
+/**
+ * Everything the recursive nav build needs, in one object. Passed unchanged
+ * from `buildKnowledgeBaseItems`/`buildFavoriteItems` down through
+ * `buildNavItem` → `buildNavChildren` → `buildNavItem` … at every depth, so
+ * adding an action means touching `buildNavItem` alone. The previous shape —
+ * nine optional positional parameters re-listed at each forwarding site — made
+ * a dropped forward both easy to write and impossible for TypeScript to catch
+ * (a missing optional argument is just `undefined`); that is precisely how the
+ * Agent-prompts item ended up absent from Bases-tree rows while present
+ * everywhere else.
+ *
+ * Every `onOpen*` is optional and its absence removes that item from the menu —
+ * a host that never wired `orpc`/`onMoveNode` has no mutation to run, so the
+ * action would be dead UI.
+ */
+interface NavItemContext {
+  onCreateChild: (node: NodeVO) => void;
+  labels: NavItemLabels;
+  loadingNodeIds?: Set<string>;
+  onOpenPermissions?: (node: NodeVO) => void;
+  favoriteContext?: FavoriteActionContext;
+  onOpenRename?: (node: NodeVO) => void;
+  onOpenMove?: (node: NodeVO) => void;
+  onOpenAgentPrompts?: (node: NodeVO) => void;
+  onOpenShare?: (node: NodeVO) => void;
+  onOpenDelete?: (node: NodeVO) => void;
 }
 
 /**
@@ -614,16 +741,19 @@ interface FavoriteActionContext {
  * populated while a lazy per-folder fetch is in flight) drives the row's
  * loading state for exactly that case.
  */
-function buildNavItem(
-  node: NodeVO,
-  onCreateChild: (node: NodeVO) => void,
-  labels: NavItemLabels,
-  loadingNodeIds?: Set<string>,
-  onOpenPermissions?: (node: NodeVO) => void,
-  favoriteContext?: FavoriteActionContext,
-  onOpenRename?: (node: NodeVO) => void,
-  onOpenMove?: (node: NodeVO) => void,
-): NavItem[] {
+function buildNavItem(node: NodeVO, ctx: NavItemContext): NavItem[] {
+  const {
+    onCreateChild,
+    labels,
+    loadingNodeIds,
+    onOpenPermissions,
+    favoriteContext,
+    onOpenRename,
+    onOpenMove,
+    onOpenAgentPrompts,
+    onOpenShare,
+    onOpenDelete,
+  } = ctx;
   if (hasCapability(node.type, "hidden")) return [];
   const icon = nodeIconForType(node.type);
   // The "•••" Permissions action, shared by container and leaf rows so every
@@ -674,6 +804,40 @@ function buildNavItem(
         onSelect: () => onOpenMove(node),
       }
     : null;
+  // The "•••" "Agent prompts" action — opens the copy-paste prompt dialog for
+  // this node. Offered on every node type and needs no host mutation (the
+  // dialog only reads the registry and writes to the clipboard), so unlike the
+  // others it has no capability/`orpc` gate beyond the callback being wired.
+  const agentPromptsAction: NavItemAction | null = onOpenAgentPrompts
+    ? {
+        title: labels.agentPromptsLabel,
+        icon: Sparkles,
+        onSelect: () => onOpenAgentPrompts(node),
+      }
+    : null;
+  // The "•••" Share action — opens the same public-link dialog the node-detail
+  // topbars use. Gated on `node.slug` because `NodeShareDialog` builds the
+  // public URL from it; a node without one has no link to hand out.
+  const shareAction: NavItemAction | null =
+    onOpenShare && node.slug
+      ? {
+          title: labels.shareLabel,
+          icon: Globe,
+          onSelect: () => onOpenShare(node),
+        }
+      : null;
+  // The "•••" Delete action — archives to Trash (recoverable) after a confirm
+  // dialog. Rendered last, in destructive red, behind a separator, so it can't
+  // be hit by muscle memory aimed at the item above it.
+  const deleteAction: NavItemAction | null = onOpenDelete
+    ? {
+        title: labels.deleteLabel,
+        icon: Trash2,
+        onSelect: () => onOpenDelete(node),
+        variant: "destructive",
+        separatorBefore: true,
+      }
+    : null;
   if (hasCapability(node.type, "container")) {
     const url = nodeHref(node) ?? "";
     return [
@@ -682,16 +846,7 @@ function buildNavItem(
         url,
         icon,
         id: node.id,
-        items: buildNavChildren(
-          node,
-          onCreateChild,
-          labels,
-          loadingNodeIds,
-          onOpenPermissions,
-          favoriteContext,
-          onOpenRename,
-          onOpenMove,
-        ),
+        items: buildNavChildren(node, ctx),
         hasChildren: node.hasChildren ?? node.children.length > 0,
         isLoadingChildren: loadingNodeIds?.has(node.id) ?? false,
         onAddChild: () => onCreateChild(node),
@@ -702,6 +857,9 @@ function buildNavItem(
           ...(permissionsAction ? [permissionsAction] : []),
           ...(favoriteAction ? [favoriteAction] : []),
           ...(moveAction ? [moveAction] : []),
+          ...(agentPromptsAction ? [agentPromptsAction] : []),
+          ...(shareAction ? [shareAction] : []),
+          ...(deleteAction ? [deleteAction] : []),
         ],
       },
     ];
@@ -712,6 +870,9 @@ function buildNavItem(
     ...(permissionsAction ? [permissionsAction] : []),
     ...(favoriteAction ? [favoriteAction] : []),
     ...(moveAction ? [moveAction] : []),
+    ...(agentPromptsAction ? [agentPromptsAction] : []),
+    ...(shareAction ? [shareAction] : []),
+    ...(deleteAction ? [deleteAction] : []),
   ];
   return url
     ? [
@@ -734,28 +895,8 @@ function buildNavItem(
 // this naturally returns `[]` there too — the boundary's `hasChildren: true`
 // is what keeps it rendering as an (empty, expandable) folder rather than
 // collapsing into a leaf.
-function buildNavChildren(
-  node: NodeVO,
-  onCreateChild: (node: NodeVO) => void,
-  labels: NavItemLabels,
-  loadingNodeIds?: Set<string>,
-  onOpenPermissions?: (node: NodeVO) => void,
-  favoriteContext?: FavoriteActionContext,
-  onOpenRename?: (node: NodeVO) => void,
-  onOpenMove?: (node: NodeVO) => void,
-): NavItem[] {
-  return node.children.flatMap((child) =>
-    buildNavItem(
-      child,
-      onCreateChild,
-      labels,
-      loadingNodeIds,
-      onOpenPermissions,
-      favoriteContext,
-      onOpenRename,
-      onOpenMove,
-    ),
-  );
+function buildNavChildren(node: NodeVO, ctx: NavItemContext): NavItem[] {
+  return node.children.flatMap((child) => buildNavItem(child, ctx));
 }
 
 /**
@@ -764,33 +905,13 @@ function buildNavChildren(
  * any depth); other detail types are clickable rows. A single root container
  * is unwrapped.
  */
-function buildKnowledgeBaseItems(
-  nodes: NodeVO[],
-  onCreateChild: (node: NodeVO) => void,
-  labels: NavItemLabels,
-  loadingNodeIds?: Set<string>,
-  onOpenPermissions?: (node: NodeVO) => void,
-  favoriteContext?: FavoriteActionContext,
-  onOpenRename?: (node: NodeVO) => void,
-  onOpenMove?: (node: NodeVO) => void,
-): NavItem[] {
+function buildKnowledgeBaseItems(nodes: NodeVO[], ctx: NavItemContext): NavItem[] {
   const top =
     nodes.length === 1 && hasCapability(nodes[0].type, "container") && !nodes[0].baseId
       ? nodes[0].children
       : nodes;
 
-  return top.flatMap((node) =>
-    buildNavItem(
-      node,
-      onCreateChild,
-      labels,
-      loadingNodeIds,
-      onOpenPermissions,
-      favoriteContext,
-      onOpenRename,
-      onOpenMove,
-    ),
-  );
+  return top.flatMap((node) => buildNavItem(node, ctx));
 }
 
 // A favorited node's own NavItem stripped of every container-only field
@@ -821,35 +942,12 @@ function toFlatFavoriteNavItem(item: NavItem): NavItem {
  * Favorites shortcut row never offers "add child here"), then flattens away
  * any container-only fields the underlying node type might otherwise render.
  */
-function buildFavoriteItems(
-  favoriteNodes: NodeVO[],
-  labels: Pick<
-    NavItemLabels,
-    | "openLabel"
-    | "permissionsLabel"
-    | "renameLabel"
-    | "favoriteAddLabel"
-    | "favoriteRemoveLabel"
-    | "moveLabel"
-  >,
-  onOpenPermissions?: (node: NodeVO) => void,
-  favoriteContext?: FavoriteActionContext,
-  onOpenRename?: (node: NodeVO) => void,
-  onOpenMove?: (node: NodeVO) => void,
-): NavItem[] {
-  // `newLabel` (the "+ New" child-create affordance) never surfaces here — a
-  // Favorites shortcut row has no `onAddChild` — so an empty string is safe.
-  const itemLabels: NavItemLabels = { newLabel: "", ...labels };
+function buildFavoriteItems(favoriteNodes: NodeVO[], ctx: NavItemContext): NavItem[] {
+  // A Favorites shortcut row never offers "add child here" (it has no
+  // `onAddChild`), so the create callback and its `newLabel` are both stubbed
+  // out rather than threaded through — everything else is the Bases tree's
+  // exact context, which is what keeps the two menus identical.
   return favoriteNodes.flatMap((node) =>
-    buildNavItem(
-      node,
-      () => undefined,
-      itemLabels,
-      undefined,
-      onOpenPermissions,
-      favoriteContext,
-      onOpenRename,
-      onOpenMove,
-    ).map(toFlatFavoriteNavItem),
+    buildNavItem(node, { ...ctx, onCreateChild: () => undefined }).map(toFlatFavoriteNavItem),
   );
 }

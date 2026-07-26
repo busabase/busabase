@@ -881,6 +881,7 @@ export const dashboardJa: CoreI18nMessages = {
     description:
       "タイプを選んで名前を付けます。即時マージするか、レビュー用の変更リクエストとして残すかを選べます。",
     nameRequired: "名前は必須です。",
+    slugRequired: "スラッグを入力してください — このアイテムの URL に使われます。",
     couldNotCreate: "作成できませんでした",
     file: "ファイル",
     fileRequired: "アップロードするファイルを選択してください。",
@@ -928,6 +929,17 @@ export const dashboardJa: CoreI18nMessages = {
     openapiJsonSpec: "OpenAPI JSON 仕様",
     openapi: "OpenAPI",
     mcp: "MCP",
+  },
+  agentPrompts: {
+    title: "Agent プロンプト",
+    intro:
+      "プロンプトをコピーしてエージェントに渡してください。対象ノードの情報が既に含まれているので、どこで作業するか推測させずに済みます。",
+    scenariosTab: "シナリオ",
+    capabilitiesTab: "機能",
+    scenariosEmpty:
+      "このノードタイプ向けの厳選シナリオはまだありません。「機能」タブをご覧ください。",
+    copy: "プロンプトをコピー",
+    copied: "コピーしました",
   },
   assets: {
     title: "アセット",

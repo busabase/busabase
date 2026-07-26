@@ -31,12 +31,42 @@ const CREATABLE_TYPES = listNodeTypes()
     icon: nodeIconForId(definition.icon),
   }));
 
-const toSlug = (value: string) =>
-  value
-    .trim()
+/**
+ * Short, stable, ASCII-safe token derived from a string — the fallback used when
+ * a name transliterates to nothing (see `toSlug`). Deterministic on purpose: the
+ * slug field updates live as the user types, so a random suffix would churn on
+ * every keystroke. FNV-1a, base36; collisions only matter within one parent and
+ * the server already rejects duplicate slugs there.
+ */
+const hashToken = (value: string) => {
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return hash.toString(36);
+};
+
+/**
+ * Derive a URL slug from a display name.
+ *
+ * Slugs are deliberately ASCII (they're path segments, and the CLI/SDK/share
+ * links all assume it), so a name written entirely in a non-Latin script — CJK,
+ * Cyrillic, … — strips down to nothing. Falling through with an empty slug used
+ * to block creation behind a "Name is required." error, which was doubly wrong:
+ * the name was present, and the user was given no hint that the *slug* was the
+ * problem. Fall back to a stable token so those names just work; the slug field
+ * is visible and pre-filled, so it can still be overridden before submitting.
+ */
+const toSlug = (value: string, fallbackPrefix = "item") => {
+  const trimmed = value.trim();
+  const slug = trimmed
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-|-$/g, "");
+  if (slug) return slug;
+  return trimmed ? `${fallbackPrefix}-${hashToken(trimmed)}` : "";
+};
 
 const toSlugInput = (value: string) =>
   value
@@ -133,9 +163,15 @@ export function CreateNodeModal({
 
   const submitAsChangeRequest = async () => {
     const trimmedName = name.trim();
-    const finalSlug = (slugEdited ? slug : toSlug(trimmedName)).trim();
-    if (!trimmedName || !finalSlug) {
+    const finalSlug = (slugEdited ? slug : toSlug(trimmedName, selectedType)).trim();
+    if (!trimmedName) {
       setError(messages.createNode.nameRequired);
+      return;
+    }
+    // Only reachable when the user cleared the (pre-filled) slug themselves —
+    // `toSlug` always yields something for a non-empty name.
+    if (!finalSlug) {
+      setError(messages.createNode.slugRequired);
       return;
     }
     setSubmitting(true);
@@ -165,9 +201,15 @@ export function CreateNodeModal({
 
   const submitAndMerge = async () => {
     const trimmedName = name.trim();
-    const finalSlug = (slugEdited ? slug : toSlug(trimmedName)).trim();
-    if (!trimmedName || !finalSlug) {
+    const finalSlug = (slugEdited ? slug : toSlug(trimmedName, selectedType)).trim();
+    if (!trimmedName) {
       setError(messages.createNode.nameRequired);
+      return;
+    }
+    // Only reachable when the user cleared the (pre-filled) slug themselves —
+    // `toSlug` always yields something for a non-empty name.
+    if (!finalSlug) {
+      setError(messages.createNode.slugRequired);
       return;
     }
     setSubmitting(true);
@@ -252,7 +294,7 @@ export function CreateNodeModal({
               onChange={(event) => {
                 setName(event.target.value);
                 if (!slugEdited) {
-                  setSlug(toSlug(event.target.value));
+                  setSlug(toSlug(event.target.value, selectedType));
                 }
               }}
               placeholder={fmt(messages.createNode.itemNamePlaceholder, {
@@ -272,7 +314,7 @@ export function CreateNodeModal({
                   if (file && !name.trim()) {
                     setName(file.name);
                     if (!slugEdited) {
-                      setSlug(toSlug(file.name));
+                      setSlug(toSlug(file.name, selectedType));
                     }
                   }
                 }}
