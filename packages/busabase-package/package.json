@@ -13,47 +13,85 @@
   "bugs": "https://github.com/busabase/busabase/issues",
   "type": "module",
   "publishConfig": {
-    "access": "public"
+    "access": "public",
+    "exports": {
+      "./apply": {
+        "types": "./dist/apply.d.ts",
+        "default": "./dist/apply.js"
+      },
+      "./client": {
+        "types": "./dist/client.d.ts",
+        "default": "./dist/client.js"
+      },
+      "./collect": {
+        "types": "./dist/collect.d.ts",
+        "default": "./dist/collect.js"
+      },
+      "./frontmatter": {
+        "types": "./dist/frontmatter.d.ts",
+        "default": "./dist/frontmatter.js"
+      },
+      "./github": {
+        "types": "./dist/github.d.ts",
+        "default": "./dist/github.js"
+      },
+      "./layout-read": {
+        "types": "./dist/layout-read.d.ts",
+        "default": "./dist/layout-read.js"
+      },
+      "./layout-write": {
+        "types": "./dist/layout-write.d.ts",
+        "default": "./dist/layout-write.js"
+      },
+      "./plan": {
+        "types": "./dist/plan.d.ts",
+        "default": "./dist/plan.js"
+      },
+      "./tree": {
+        "types": "./dist/tree.d.ts",
+        "default": "./dist/tree.js"
+      }
+    }
   },
   "files": [
     "dist"
   ],
   "exports": {
     "./apply": {
-      "types": "./dist/apply.d.ts",
-      "default": "./dist/apply.js"
+      "types": "./src/apply.ts",
+      "default": "./src/apply.ts"
     },
     "./client": {
-      "types": "./dist/client.d.ts",
-      "default": "./dist/client.js"
+      "types": "./src/client.ts",
+      "default": "./src/client.ts"
     },
     "./collect": {
-      "types": "./dist/collect.d.ts",
-      "default": "./dist/collect.js"
+      "types": "./src/collect.ts",
+      "default": "./src/collect.ts"
     },
     "./frontmatter": {
-      "types": "./dist/frontmatter.d.ts",
-      "default": "./dist/frontmatter.js"
+      "types": "./src/frontmatter.ts",
+      "default": "./src/frontmatter.ts"
     },
     "./github": {
-      "types": "./dist/github.d.ts",
-      "default": "./dist/github.js"
+      "types": "./src/github.ts",
+      "default": "./src/github.ts"
     },
     "./layout-read": {
-      "types": "./dist/layout-read.d.ts",
-      "default": "./dist/layout-read.js"
+      "types": "./src/layout-read.ts",
+      "default": "./src/layout-read.ts"
     },
     "./layout-write": {
-      "types": "./dist/layout-write.d.ts",
-      "default": "./dist/layout-write.js"
+      "types": "./src/layout-write.ts",
+      "default": "./src/layout-write.ts"
     },
     "./plan": {
-      "types": "./dist/plan.d.ts",
-      "default": "./dist/plan.js"
+      "types": "./src/plan.ts",
+      "default": "./src/plan.ts"
     },
     "./tree": {
-      "types": "./dist/tree.d.ts",
-      "default": "./dist/tree.js"
+      "types": "./src/tree.ts",
+      "default": "./src/tree.ts"
     }
   },
   "scripts": {
