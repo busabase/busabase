@@ -1,3 +1,4 @@
+import type { Page } from "./_fixtures";
 import { expect, test } from "./_fixtures";
 
 // The workbench landing page. Inbox used to be where an unqualified visit
@@ -6,8 +7,7 @@ import { expect, test } from "./_fixtures";
 // destinations moved into the Space Selector so the resting sidebar is just
 // Home + Search + the node tree.
 
-const spaceSelector = (page: Parameters<Parameters<typeof test>[1]>[0]["page"]) =>
-  page.getByRole("button", { name: /Local Busabase.*Local/ });
+const spaceSelector = (page: Page) => page.getByRole("button", { name: /Local Busabase.*Local/ });
 
 test("an unqualified visit lands on Home, not Inbox", async ({ page }) => {
   await page.goto("/");
