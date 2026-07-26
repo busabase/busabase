@@ -20,6 +20,7 @@ export const dashboardZhTW: CoreI18nMessages = {
   },
   nav: {
     ...dashboardZhCN.nav,
+    home: "首頁",
     inbox: "收件匣",
     search: "搜尋",
     activity: "動態",
@@ -38,6 +39,7 @@ export const dashboardZhTW: CoreI18nMessages = {
   },
   routes: {
     ...dashboardZhCN.routes,
+    home: "首頁",
     inbox: "收件匣",
     operation: "操作",
     changeRequest: "變更請求",
@@ -52,6 +54,18 @@ export const dashboardZhTW: CoreI18nMessages = {
     view: "檢視",
     editRecord: "編輯記錄",
     record: "記錄",
+  },
+  home: {
+    ...dashboardZhCN.home,
+    title: "首頁",
+    pendingTitle: "等待你評審",
+    pendingCount: "{count} 筆待處理",
+    pendingViewAll: "全部評審",
+    recentTitle: "最近造訪",
+    recentEmptyBody: "你開啟過的資料庫與文件會顯示在這裡。",
+    activityTitle: "最近動態",
+    activityViewAll: "查看全部動態",
+    activityEmptyBody: "這個工作區裡發生的變更會顯示在這裡。",
   },
   inbox: {
     ...dashboardZhCN.inbox,

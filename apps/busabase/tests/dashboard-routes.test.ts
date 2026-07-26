@@ -11,14 +11,16 @@ describe("dashboard routes", () => {
     expect(buildDashboardUrl("/base/blog?view=drafts#top")).toBe(
       "/dashboard/local/base/blog?view=drafts#top",
     );
-    expect(buildDashboardUrl("/")).toBe("/dashboard/local/inbox");
+    // An unqualified dashboard URL lands on Home (the digest), not Inbox.
+    expect(buildDashboardUrl("/")).toBe("/dashboard/local/home");
+    expect(buildDashboardUrl()).toBe("/dashboard/local/home");
   });
 
   it("redirects legacy and incomplete root-host dashboard paths", () => {
-    expect(getLegacyDashboardRedirect("/dashboard")).toBe("/dashboard/local/inbox");
+    expect(getLegacyDashboardRedirect("/dashboard")).toBe("/dashboard/local/home");
     expect(getLegacyDashboardRedirect("/dashboard/inbox")).toBe("/dashboard/local/inbox");
     expect(getLegacyDashboardRedirect("/dashboard/base/blog")).toBe("/dashboard/local/base/blog");
-    expect(getLegacyDashboardRedirect("/dashboard/local")).toBe("/dashboard/local/inbox");
+    expect(getLegacyDashboardRedirect("/dashboard/local")).toBe("/dashboard/local/home");
     expect(getLegacyDashboardRedirect("/dashboard/local/inbox")).toBeNull();
   });
 });

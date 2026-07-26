@@ -1,4 +1,5 @@
 import { skipToken, useQuery } from "@tanstack/react-query";
+import { getRecordTitle } from "busabase-core/dashboard/change-request";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { List, MoreHorizontal, Plus, Settings2, Table2 } from "lucide-react-native";
 import { iStringParse } from "openlib/i18n/i-string";
@@ -21,7 +22,7 @@ import {
   NativeSegmentedControl,
 } from "~/components/native-screen";
 import { Button } from "~/components/ui/Button";
-import { getPreview, getRecordTitle } from "~/lib/busabase-display";
+import { getPreview } from "~/lib/busabase-display";
 import { formatListTime } from "~/lib/format";
 import { applyViewConfig } from "~/lib/view-config";
 import { mobile, radius, typography } from "~/theme/tokens";

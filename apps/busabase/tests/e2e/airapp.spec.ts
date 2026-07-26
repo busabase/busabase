@@ -312,15 +312,15 @@ test("AirApp run panel: auto-run, restart, watermark, nav persistence, fullscree
     ).toBeVisible();
     await tabA.click();
 
-    // "Inbox" is the pinned top nav item every Busabase host has (see
+    // "Home" is the pinned top nav item every Busabase host has (see
     // dashboard-shell.tsx's pinnedNav) — a real client-side route transition
     // away from any AirApp view.
-    await sidebarLink(page, "Inbox").click();
-    await expect(page).toHaveURL(/\/dashboard\/local\/inbox$/);
+    await sidebarLink(page, "Home").click();
+    await expect(page).toHaveURL(/\/dashboard\/local\/home$/);
     await expect(page.locator(`[data-dashboard-airapp-view="${appB.slug}"]`)).toBeHidden();
 
     await expect(tabA).toBeVisible();
-    // Main canvas is now Inbox (no AirApp view of its own), so this resolves
+    // Main canvas is now Home (no AirApp view of its own), so this resolves
     // unambiguously to the side panel's still-live preview.
     const iframe = sidePanelPreview(page);
     await expect(iframe).toBeVisible();

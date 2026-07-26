@@ -17,7 +17,8 @@ import { useSearch } from "wouter";
 import { fmt, useCoreI18n, useIString } from "../../../i18n";
 import { isRollupCompatible, LOOKUP_ROLLUPS } from "../../base/lookup/rollup";
 import { isDerivedFieldSlug } from "../helpers/change-request";
-import { createDefaultFieldOptions, fieldTypeOptions } from "../helpers/field";
+import { createDefaultFieldOptions } from "../helpers/field";
+import { fieldTypeOptions } from "../helpers/field-type-options";
 import { mergeSearchIntoHref } from "../helpers/link-search";
 import type {
   CreateBaseFieldPayload,

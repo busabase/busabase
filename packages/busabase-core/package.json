@@ -1,7 +1,7 @@
 {
   "name": "busabase-core",
   "description": "Shared Busabase open-core protocol, local store, API helpers, and dashboard components.",
-  "version": "0.9.16",
+  "version": "0.9.17",
   "private": true,
   "type": "module",
   "exports": {
@@ -160,6 +160,18 @@
     "./dashboard/node-icons": {
       "types": "./src/domains/dashboard/helpers/node-icons.ts",
       "default": "./src/domains/dashboard/helpers/node-icons.ts"
+    },
+    "./dashboard/home": {
+      "types": "./src/domains/dashboard/helpers/home.ts",
+      "default": "./src/domains/dashboard/helpers/home.ts"
+    },
+    "./dashboard/change-request": {
+      "types": "./src/domains/dashboard/helpers/change-request.ts",
+      "default": "./src/domains/dashboard/helpers/change-request.ts"
+    },
+    "./dashboard/activity-events": {
+      "types": "./src/domains/dashboard/helpers/activity-events.ts",
+      "default": "./src/domains/dashboard/helpers/activity-events.ts"
     },
     "./dashboard/routes": {
       "types": "./src/domains/dashboard/routes.tsx",

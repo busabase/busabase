@@ -253,6 +253,7 @@ export const coreMessagesEn = {
     resize: "Resize side panel",
   },
   nav: {
+    home: "Home",
     inbox: "Inbox",
     search: "Search",
     activity: "Activity",
@@ -290,6 +291,7 @@ export const coreMessagesEn = {
     changeRequestPendingReviewBody: "A new change request is waiting for your review.",
   },
   routes: {
+    home: "Home",
     inbox: "Inbox",
     operation: "Operation",
     changeRequest: "Change Request",
@@ -304,6 +306,19 @@ export const coreMessagesEn = {
     view: "View",
     editRecord: "Edit Record",
     record: "Record",
+  },
+  home: {
+    title: "Home",
+    // Pending-review card — only rendered when something is actually waiting,
+    // so an empty Inbox never greets the user with "nothing for you here".
+    pendingTitle: "Waiting for your review",
+    pendingCount: "{count} pending",
+    pendingViewAll: "Review all",
+    recentTitle: "Recently visited",
+    recentEmptyBody: "Bases and documents you open will show up here.",
+    activityTitle: "Recent activity",
+    activityViewAll: "View all activity",
+    activityEmptyBody: "Changes made across this workspace will show up here.",
   },
   inbox: {
     title: "Reviews",

@@ -1,5 +1,6 @@
 import { skipToken, useMutation, useQuery } from "@tanstack/react-query";
 import type { RecordVO } from "busabase-contract/types";
+import { getRecordTitle } from "busabase-core/dashboard/change-request";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { ArrowLeft } from "lucide-react-native";
 import { useEffect, useState } from "react";
@@ -17,7 +18,6 @@ import {
   NativeSection,
 } from "~/components/native-screen";
 import { Button } from "~/components/ui/Button";
-import { getRecordTitle } from "~/lib/busabase-display";
 import { shortId } from "~/lib/format";
 import {
   buildInitialFormValues,
@@ -82,7 +82,7 @@ function EditRecordContent() {
     if (router.canGoBack()) {
       router.back();
     } else {
-      router.replace("/drawer/inbox");
+      router.replace("/drawer/home");
     }
   };
   const discardChanges = () => {
@@ -93,7 +93,7 @@ function EditRecordContent() {
     if (router.canGoBack()) {
       router.back();
     } else {
-      router.replace("/drawer/inbox");
+      router.replace("/drawer/home");
     }
   };
 

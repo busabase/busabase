@@ -82,7 +82,7 @@ function NewRecordContent() {
     if (router.canGoBack()) {
       router.back();
     } else {
-      router.replace("/drawer/inbox");
+      router.replace("/drawer/home");
     }
   };
   const discardChanges = () => {
@@ -93,7 +93,7 @@ function NewRecordContent() {
     if (router.canGoBack()) {
       router.back();
     } else {
-      router.replace("/drawer/inbox");
+      router.replace("/drawer/home");
     }
   };
 

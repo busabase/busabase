@@ -48,7 +48,7 @@ export default function SelfHostedConnectionScreen() {
         await validateBusabaseServer(demoServerUrl);
       }
       await connectDemo();
-      router.replace("/drawer/inbox");
+      router.replace("/drawer/home");
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Could not connect to the demo server");
     } finally {
@@ -65,7 +65,7 @@ export default function SelfHostedConnectionScreen() {
       const result = await validateBusabaseServer(serverUrl);
       await connectSelfHosted(result.serverUrl);
       setValidatedUrl(result.serverUrl);
-      router.replace("/drawer/inbox");
+      router.replace("/drawer/home");
     } catch (caught) {
       setError(
         caught instanceof Error ? caught.message : "Could not connect to this Busabase server",

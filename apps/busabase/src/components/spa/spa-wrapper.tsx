@@ -29,9 +29,9 @@ export function SPAWrapper({
   basePath = getDashboardBasePath(),
   children,
   context,
-  initialPath = "/inbox",
+  initialPath = "/home",
 }: SPAWrapperProps) {
-  const [ssrPath = "/inbox", ssrSearch = ""] = initialPath.split("?");
+  const [ssrPath = "/home", ssrSearch = ""] = initialPath.split("?");
   const localSpaceForLocale = {
     ...localSpace,
     name: context?.activeSpace?.name ?? localSpace.name,

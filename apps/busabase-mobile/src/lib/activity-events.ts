@@ -1,10 +1,10 @@
 import type { AuditEventVO, ChangeRequestVO, RecordVO } from "busabase-contract/types";
 import {
   getChangeRequestScopeName,
+  getChangeRequestSummary,
   getChangeRequestTitle,
-  getOperationSummary,
   getRecordTitle,
-} from "./busabase-display";
+} from "busabase-core/dashboard/change-request";
 
 export type ActivityTone = "audit" | "change_request" | "operation" | "commit" | "record";
 
@@ -75,7 +75,7 @@ export function buildActivityEvents(
           : changeRequest.status === "approved"
             ? `Change request approved: ${getChangeRequestTitle(changeRequest)}`
             : `Change request opened: ${getChangeRequestTitle(changeRequest)}`,
-      body: `${getOperationSummary(changeRequest)} · ${getChangeRequestScopeName(changeRequest)}`,
+      body: `${getChangeRequestSummary(changeRequest)} · ${getChangeRequestScopeName(changeRequest)}`,
       tone: "change_request",
       timestamp: changeRequest.updatedAt,
       target: { kind: "change-request", id: changeRequest.id },

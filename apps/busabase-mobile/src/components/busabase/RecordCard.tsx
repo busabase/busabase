@@ -1,8 +1,9 @@
 import type { RecordVO } from "busabase-contract/types";
+import { getRecordTitle } from "busabase-core/dashboard/change-request";
 import { StyleSheet, Text, View } from "react-native";
 import { NativeRow } from "~/components/native-screen";
 import { getStatusLabel } from "~/components/ui/StatusBadge";
-import { getPreview, getRecordTitle } from "~/lib/busabase-display";
+import { getPreview } from "~/lib/busabase-display";
 import { formatListTime } from "~/lib/format";
 import { typography } from "~/theme/tokens";
 import { useTokens } from "~/theme/use-tokens";

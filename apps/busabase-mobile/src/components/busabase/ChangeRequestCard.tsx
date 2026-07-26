@@ -1,11 +1,11 @@
 import type { ChangeRequestVO } from "busabase-contract/types";
-import { Pressable, StyleSheet, Text, View } from "react-native";
 import {
   getChangeRequestMessage,
   getChangeRequestScopeName,
+  getChangeRequestSummary,
   getChangeRequestTitle,
-  getOperationSummary,
-} from "~/lib/busabase-display";
+} from "busabase-core/dashboard/change-request";
+import { Pressable, StyleSheet, Text, View } from "react-native";
 import { formatListTime } from "~/lib/format";
 import { mobile, typography } from "~/theme/tokens";
 import { useTokens } from "~/theme/use-tokens";
@@ -27,7 +27,7 @@ interface ChangeRequestCardProps {
 export function ChangeRequestCard({ changeRequest, onPress, last }: ChangeRequestCardProps) {
   const tokens = useTokens();
   const scopeName = getChangeRequestScopeName(changeRequest);
-  const operationSummary = getOperationSummary(changeRequest);
+  const operationSummary = getChangeRequestSummary(changeRequest);
   const message = getChangeRequestMessage(changeRequest);
   const title = getChangeRequestTitle(changeRequest);
   const statusLabel = getStatusLabel(changeRequest.status);

@@ -83,11 +83,8 @@ export function useI18n(): I18nContextValue {
   return value;
 }
 
-/** Interpolate `{token}` placeholders in a catalog string. */
-export function fmt(template: string, tokens: Record<string, string | number>): string {
-  return template.replace(/\{(\w+)\}/g, (match, key: string) =>
-    key in tokens ? String(tokens[key]) : match,
-  );
-}
-
 export type { Locale } from "./messages";
+// `fmt` is defined in the pure `./messages` module (react-native's Flow-typed
+// source makes this file unparseable in a node-environment test run) and
+// re-exported here so `import { fmt } from "~/i18n"` keeps working everywhere.
+export { fmt } from "./messages";

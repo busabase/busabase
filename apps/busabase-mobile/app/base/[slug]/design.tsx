@@ -170,7 +170,7 @@ function BaseDesignContent() {
       accessibilityLabel="Go back"
       hitSlop={mobile.hitSlop}
       style={[styles.backButton, { backgroundColor: tokens.primaryMuted }]}
-      onPress={() => (router.canGoBack() ? router.back() : router.replace("/drawer/inbox"))}
+      onPress={() => (router.canGoBack() ? router.back() : router.replace("/drawer/home"))}
     >
       <ArrowLeft size={22} color={tokens.foreground} />
     </Pressable>

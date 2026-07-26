@@ -244,6 +244,7 @@ export const dashboardZhCN: CoreI18nMessages = {
     resize: "调整侧边栏宽度",
   },
   nav: {
+    home: "首页",
     inbox: "收件箱",
     search: "搜索",
     activity: "动态",
@@ -278,6 +279,7 @@ export const dashboardZhCN: CoreI18nMessages = {
     changeRequestPendingReviewBody: "有新的变更请求等待你审核。",
   },
   routes: {
+    home: "首页",
     inbox: "收件箱",
     operation: "操作",
     changeRequest: "变更请求",
@@ -292,6 +294,17 @@ export const dashboardZhCN: CoreI18nMessages = {
     view: "视图",
     editRecord: "编辑记录",
     record: "记录",
+  },
+  home: {
+    title: "首页",
+    pendingTitle: "等待你评审",
+    pendingCount: "{count} 条待处理",
+    pendingViewAll: "全部评审",
+    recentTitle: "最近访问",
+    recentEmptyBody: "你打开过的数据库和文档会显示在这里。",
+    activityTitle: "最近动态",
+    activityViewAll: "查看全部动态",
+    activityEmptyBody: "这个工作区里发生的变更会显示在这里。",
   },
   inbox: {
     title: "评审",

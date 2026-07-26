@@ -7,9 +7,11 @@ import type { NodeVO } from "busabase-contract/types";
 import { Toaster } from "kui/sonner";
 import {
   Activity,
+  Archive,
   FolderOpen,
   FolderTree,
   Globe,
+  House,
   Images,
   Inbox,
   Pencil,
@@ -23,7 +25,7 @@ import {
 import type { NavDropPosition, NavItemAction, NavNodeDropParams } from "openlib/ui/dashboard";
 import { DashboardLayout, type NavGroup, type NavItem, NavMain } from "openlib/ui/dashboard";
 import type { ComponentProps, ReactNode } from "react";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { useLocation } from "wouter";
 import { coreMessagesByLocale } from "../../../i18n";
@@ -47,6 +49,52 @@ const DISABLED_FAVORITES_QUERY = {
 
 const isCoreLocale = (locale: string | undefined): locale is keyof typeof coreMessagesByLocale =>
   locale !== undefined && locale in coreMessagesByLocale;
+
+/**
+ * Top-level destinations that no longer sit permanently in the sidebar — hosts
+ * expose them in the Space Selector menu instead, so the resting sidebar is
+ * just Home + Search + the node tree.
+ *
+ * Entering one of these surfaces it as a SINGLE contextual sidebar row (never
+ * the whole set), which then *lingers* as "the last functional area you were
+ * in" — so the round trip "review an inbox item → go check a Base → back to
+ * Inbox" costs one click instead of another trip through the menu.
+ */
+type ContextualNavKey = "inbox" | "activity" | "archived" | "assets";
+
+/** Maps a wouter location onto its contextual destination, or null for everything else. */
+const contextualNavKeyForPath = (location: string): ContextualNavKey | null => {
+  const path = location.split("?")[0] ?? location;
+  if (path === "/inbox" || path.startsWith("/inbox/")) return "inbox";
+  if (path === "/activity") return "activity";
+  if (path === "/archived") return "archived";
+  if (path === "/assets" || path.startsWith("/assets/")) return "assets";
+  return null;
+};
+
+/**
+ * Where the lingering row survives a reload. Session-scoped (per tab) because
+ * it represents "what I'm working through right now", not a durable preference —
+ * a brand-new tab correctly starts back at the resting Home + Search sidebar.
+ *
+ * Component state alone is NOT enough: the shell remounts on every hard
+ * navigation (reload, opening a link in a new tab, an SSR-rendered deep link),
+ * which would drop the row exactly when someone reloads mid-review.
+ */
+const CONTEXTUAL_NAV_STORAGE_KEY = "busabase.dashboard.lastContextualNav.v1";
+
+const isContextualNavKey = (value: string | null): value is ContextualNavKey =>
+  value === "inbox" || value === "activity" || value === "archived" || value === "assets";
+
+const readStoredContextualNavKey = (): ContextualNavKey | null => {
+  try {
+    const stored = window.sessionStorage.getItem(CONTEXTUAL_NAV_STORAGE_KEY);
+    return isContextualNavKey(stored) ? stored : null;
+  } catch {
+    // Private mode / storage disabled — the row just falls back to session-only.
+    return null;
+  }
+};
 
 type DashboardLayoutProps = ComponentProps<typeof DashboardLayout>;
 
@@ -88,8 +136,6 @@ interface BusabaseDashboardShellProps {
   orpc?: BusabaseQueryUtils;
   /** Active UI locale for the sidebar nav labels (defaults to English). */
   locale?: string;
-  /** Optional top-level destinations hidden by a host that exposes them elsewhere. */
-  hiddenNavItems?: Array<"assets">;
   /**
    * Wires up sidebar drag-and-drop reordering/reparenting AND the sidebar
    * "•••" → "Move to…" dialog (see `NodeMoveDialog`) — both funnel through
@@ -151,7 +197,6 @@ export function BusabaseDashboardShell({
   chrome,
   orpc,
   locale,
-  hiddenNavItems = [],
   onMoveNode,
   loadingNodeIds,
   onExpandNode,
@@ -312,7 +357,33 @@ export function BusabaseDashboardShell({
   // The "Workspace" group label doubles as the header-action key, so reuse one value.
   const workspaceLabel = nav.workspace;
   const assetsLabel = nav.assets;
-  const hiddenNavItemSet = new Set(hiddenNavItems);
+
+  // Which functional area the contextual sidebar row points at. Seeded from the
+  // current location only — reading sessionStorage during render would diverge
+  // from the server's HTML and break hydration, so the restore happens in the
+  // mount effect below instead. (`location` is declared once at the top of the
+  // component, shared with the node-action dialogs.)
+  const activeContextualKey = contextualNavKeyForPath(location);
+  const [lastContextualKey, setLastContextualKey] = useState<ContextualNavKey | null>(
+    activeContextualKey,
+  );
+  // Restore after a hard navigation (reload / new tab / SSR deep link), which
+  // remounts the shell and would otherwise drop the row mid-review. Skipped when
+  // the current route already supplies a key — that one is newer than storage.
+  useEffect(() => {
+    if (activeContextualKey) return;
+    const stored = readStoredContextualNavKey();
+    if (stored) setLastContextualKey(stored);
+  }, [activeContextualKey]);
+  useEffect(() => {
+    if (!activeContextualKey) return;
+    setLastContextualKey(activeContextualKey);
+    try {
+      window.sessionStorage.setItem(CONTEXTUAL_NAV_STORAGE_KEY, activeContextualKey);
+    } catch {
+      // Storage unavailable — the in-memory state above still carries the row.
+    }
+  }, [activeContextualKey]);
 
   // Notion-style Favorites: the current actor's favorited nodes, kept in their
   // own TanStack Query entry (invalidated after every toggle below) — never
@@ -473,28 +544,53 @@ export function BusabaseDashboardShell({
     [favoriteNodes, navItemContext],
   );
 
-  const scrollShortcutItems: NavItem[] = [
-    { title: nav.activity, url: "/activity", icon: Activity },
-    ...(hiddenNavItemSet.has("assets")
-      ? []
-      : [{ title: assetsLabel, url: "/assets", icon: Images }]),
-  ];
-  // Pinned nav (fixed at the top, never scrolls): Inbox + Search only —
-  // everything else (Activity, Favorites, Workspace) scrolls underneath, same
-  // convention as apps/buda's own locked-header sidebar.
+  // The one transient row for the functional area last visited (see
+  // `contextualNavKeyForPath`) — at most ONE, so the sidebar never regrows into
+  // the shortcut list this design replaced. Only Inbox carries a count; the
+  // others have no equivalent "needs you" number.
+  const contextualNavItem: NavItem | null = useMemo(() => {
+    switch (lastContextualKey) {
+      case "inbox":
+        return {
+          title: nav.inbox,
+          url: "/inbox",
+          icon: Inbox,
+          badge: activeChangeRequestCount || undefined,
+        };
+      case "activity":
+        return { title: nav.activity, url: "/activity", icon: Activity };
+      case "archived":
+        return { title: nav.archive, url: "/archived", icon: Archive };
+      case "assets":
+        return { title: assetsLabel, url: "/assets", icon: Images };
+      default:
+        return null;
+    }
+  }, [
+    lastContextualKey,
+    nav.inbox,
+    nav.activity,
+    nav.archive,
+    assetsLabel,
+    activeChangeRequestCount,
+  ]);
+
+  // Pinned nav (fixed at the top, never scrolls): Home + Search only. Home is
+  // the landing page and carries the aggregate "needs your attention" badge;
+  // Inbox/Activity/Archive/Assets moved into the Space Selector menu so the
+  // resting sidebar stays at two rows plus the node tree.
   const pinnedNav: NavGroup[] = [
     {
       label: "",
       // Trim the group's bottom padding (p-2 → pb-1 = 4px) so the gap between
-      // the pinned Search row and the first scroll item (Activity) equals the
-      // 4px gap between menu items — originally these were consecutive rows, so
-      // the split must be invisible.
+      // the pinned Search row and the first scroll item equals the 4px gap
+      // between menu items — the split must be invisible.
       className: "pb-1",
       items: [
         {
-          title: nav.inbox,
-          url: "/inbox",
-          icon: Inbox,
+          title: nav.home,
+          url: "/home",
+          icon: House,
           badge: activeChangeRequestCount || undefined,
         },
         { title: nav.search, url: "", icon: Search, onClick: "search" },
@@ -502,18 +598,18 @@ export function BusabaseDashboardShell({
     },
   ];
 
-  // Scrollable nav (everything below the pinned header): optional shortcuts +
-  // Favorites (only when non-empty) + Workspace node tree.
+  // Scrollable nav (everything below the pinned header): the contextual row (when
+  // any) + Favorites (only when non-empty) + Workspace node tree.
   const scrollNav: NavGroup[] = [
-    ...(scrollShortcutItems.length > 0
+    ...(contextualNavItem
       ? [
           {
             label: "",
-            // Flush top (pt-0) so Activity sits 4px under the pinned Search row, while
+            // Flush top (pt-0) so the row sits 4px under the pinned Search row, while
             // keeping the default bottom padding (pb-2) so the gap down to the Workspace
             // section header is unchanged.
             className: "pt-0",
-            items: scrollShortcutItems,
+            items: [contextualNavItem],
           },
         ]
       : []),

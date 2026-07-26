@@ -117,14 +117,14 @@ function DocEditContent() {
       setDiscardOpen(true);
       return;
     }
-    router.canGoBack() ? router.back() : router.replace("/drawer/inbox");
+    router.canGoBack() ? router.back() : router.replace("/drawer/home");
   };
   const discardChanges = () => {
     if (saving) {
       return;
     }
     setDiscardOpen(false);
-    router.canGoBack() ? router.back() : router.replace("/drawer/inbox");
+    router.canGoBack() ? router.back() : router.replace("/drawer/home");
   };
 
   const headerLeading = (

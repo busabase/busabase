@@ -84,7 +84,7 @@ function DashboardShellSkeleton({ chromeless = false }: { chromeless?: boolean }
   );
 }
 
-export function DashboardClient({ initialPath = "/inbox", localUserName }: DashboardClientProps) {
+export function DashboardClient({ initialPath = "/home", localUserName }: DashboardClientProps) {
   const [queryClient] = useState(() => new QueryClient());
 
   return (
@@ -97,7 +97,7 @@ export function DashboardClient({ initialPath = "/inbox", localUserName }: Dashb
   );
 }
 
-function DashboardClientContent({ initialPath = "/inbox", localUserName }: DashboardClientProps) {
+function DashboardClientContent({ initialPath = "/home", localUserName }: DashboardClientProps) {
   const router = useRouter();
   const queryClient = useQueryClient();
   // `?chromeless=1` renders just the current node's detail pane with no

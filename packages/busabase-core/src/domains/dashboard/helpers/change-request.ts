@@ -8,7 +8,8 @@ import type {
   RecordVO,
 } from "busabase-contract/types";
 import { iStringParse, iStringSchema } from "openlib/i18n/i-string";
-import { type CoreI18nMessages, fmt } from "../../../i18n";
+import { fmt } from "../../../i18n/fmt";
+import type { CoreI18nMessages } from "../../../i18n/messages";
 import { fieldPreviewText } from "./field";
 import { fieldValueToString, shortIdentifier } from "./format";
 

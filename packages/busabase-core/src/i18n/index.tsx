@@ -79,12 +79,10 @@ export function useIString(): (value: iString) => string {
   return useCallback((value: iString) => iStringParse(value, locale), [locale]);
 }
 
-/** Interpolate `{token}` placeholders in a catalog string. */
-export function fmt(template: string, params: Record<string, string | number>): string {
-  return template.replace(/\{(\w+)\}/g, (_, key) =>
-    key in params ? String(params[key]) : `{${key}}`,
-  );
-}
+/** Interpolate `{token}` placeholders in a catalog string. Lives in the pure
+ * `./fmt` module so React-Native consumers of the dashboard helpers don't pull
+ * this "use client" file (and every locale catalog) into their bundle. */
+export { fmt } from "./fmt";
 
 export { coreMessagesEn };
 export type { CoreI18nMessages };

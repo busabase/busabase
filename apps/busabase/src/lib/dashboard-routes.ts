@@ -14,10 +14,11 @@ const normalizeRoutePath = (value: string): string => {
 export const getDashboardBasePath = (spaceId = LOCAL_SPACE_ID): string =>
   `/dashboard/${encodeURIComponent(spaceId)}`;
 
-export const buildDashboardUrl = (path = "/inbox", options: { spaceId?: string } = {}): string => {
+/** `/home` (the landing digest), not `/inbox`, is where an unqualified dashboard URL lands. */
+export const buildDashboardUrl = (path = "/home", options: { spaceId?: string } = {}): string => {
   const normalized = normalizeRoutePath(path);
   const basePath = getDashboardBasePath(options.spaceId);
-  return normalized === "/" ? `${basePath}/inbox` : `${basePath}${normalized}`;
+  return normalized === "/" ? `${basePath}/home` : `${basePath}${normalized}`;
 };
 
 export const getLegacyDashboardRedirect = (pathname: string): string | null => {
@@ -25,13 +26,13 @@ export const getLegacyDashboardRedirect = (pathname: string): string | null => {
   const basePath = getDashboardBasePath();
 
   if (normalized === basePath || normalized === `${basePath}/`) {
-    return `${basePath}/inbox`;
+    return `${basePath}/home`;
   }
   if (normalized.startsWith(`${basePath}/`)) {
     return null;
   }
   if (normalized === "/dashboard" || normalized === "/dashboard/") {
-    return `${basePath}/inbox`;
+    return `${basePath}/home`;
   }
   if (normalized.startsWith("/dashboard/")) {
     return `${basePath}/${normalized.slice("/dashboard/".length)}`;

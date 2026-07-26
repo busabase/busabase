@@ -1,5 +1,6 @@
 import type { UserRefVO } from "busabase-contract/types";
-import { type CoreI18nMessages, fmt } from "../../../i18n";
+import { fmt } from "../../../i18n/fmt";
+import type { CoreI18nMessages } from "../../../i18n/messages";
 
 const fieldValueToString = (value: unknown) => {
   if (value === null || value === undefined) {

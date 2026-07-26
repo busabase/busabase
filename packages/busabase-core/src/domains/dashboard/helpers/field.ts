@@ -2,14 +2,12 @@ import type { BaseFieldVO, ChangeRequestVO, FieldType, RecordVO } from "busabase
 import type { AttachmentRef } from "open-domains/attachments/types";
 import { iStringParse } from "openlib/i18n/i-string";
 import type { CoreI18nMessages } from "../../../i18n";
-import { FIELD_TYPE_ORDER } from "../../base/field-types";
 import { resolveEmbedPreview } from "../../base/utils/embed";
 import { fieldValueToString, formatNumberField, formatOpaqueUserId } from "./format";
 import { safeFetchableUrl, stripHtmlTags } from "./html";
 import type { FieldChip } from "./view-types";
 
 // Field-type picker order — sourced from the registry (single source of truth).
-export const fieldTypeOptions: FieldType[] = FIELD_TYPE_ORDER;
 
 export const createDefaultFieldOptions = (
   fieldType: FieldType,

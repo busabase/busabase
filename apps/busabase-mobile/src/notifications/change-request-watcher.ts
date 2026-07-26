@@ -1,12 +1,12 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import type { ChangeRequestVO } from "busabase-contract/types";
-import * as Notifications from "expo-notifications";
-import { Platform } from "react-native";
 import {
   getChangeRequestScopeName,
-  getOperationSummary,
-  getPrimaryTitle,
-} from "~/lib/busabase-display";
+  getChangeRequestSummary,
+} from "busabase-core/dashboard/change-request";
+import * as Notifications from "expo-notifications";
+import { Platform } from "react-native";
+import { getPrimaryTitle } from "~/lib/busabase-display";
 
 const SEEN_KEY_PREFIX = "busabase-mobile.seen-change-requests.v1:";
 const MAX_SEEN_IDS = 500;
@@ -125,7 +125,7 @@ export async function checkForNewChangeRequests(
       await Notifications.scheduleNotificationAsync({
         content: {
           title: `New change request: ${title}`,
-          body: `${getChangeRequestScopeName(changeRequest)} · ${getOperationSummary(changeRequest)} · from ${changeRequest.submittedBy}`,
+          body: `${getChangeRequestScopeName(changeRequest)} · ${getChangeRequestSummary(changeRequest)} · from ${changeRequest.submittedBy}`,
           data: { changeRequestId: changeRequest.id },
           sound: "default",
         },

@@ -245,6 +245,7 @@ export const dashboardJa: CoreI18nMessages = {
     resize: "サイドパネルの幅を変更",
   },
   nav: {
+    home: "ホーム",
     inbox: "受信トレイ",
     search: "検索",
     activity: "アクティビティ",
@@ -279,6 +280,7 @@ export const dashboardJa: CoreI18nMessages = {
     changeRequestPendingReviewBody: "レビュー待ちの新しい変更リクエストがあります。",
   },
   routes: {
+    home: "ホーム",
     inbox: "受信トレイ",
     operation: "操作",
     changeRequest: "変更リクエスト",
@@ -293,6 +295,17 @@ export const dashboardJa: CoreI18nMessages = {
     view: "ビュー",
     editRecord: "レコードを編集",
     record: "レコード",
+  },
+  home: {
+    title: "ホーム",
+    pendingTitle: "レビュー待ちの項目",
+    pendingCount: "{count} 件が保留中",
+    pendingViewAll: "すべてレビュー",
+    recentTitle: "最近アクセスした項目",
+    recentEmptyBody: "開いたベースやドキュメントがここに表示されます。",
+    activityTitle: "最近のアクティビティ",
+    activityViewAll: "すべてのアクティビティを表示",
+    activityEmptyBody: "このワークスペースで行われた変更がここに表示されます。",
   },
   inbox: {
     title: "レビュー",

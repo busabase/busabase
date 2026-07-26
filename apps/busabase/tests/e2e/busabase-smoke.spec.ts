@@ -28,18 +28,27 @@ test("Install from GitHub lives in the workspace menu", async ({ page }) => {
 });
 
 test("dashboard routes render the review-first seeded experience", async ({ page }) => {
+  // A bare `/dashboard/local` lands on Home (the digest), not Inbox.
   await page.goto("/dashboard/local");
+  await expect(page).toHaveURL(/\/dashboard\/local\/home$/);
   await expect(page.getByRole("button", { name: /Local Busabase.*Local/ })).toBeVisible();
-  await expect(page.getByRole("link", { name: "Inbox" })).toBeVisible();
-  await expect(page.getByRole("link", { name: "Activity" })).toBeVisible();
+  await expect(page.getByRole("link", { exact: true, name: "Home" })).toBeVisible();
+  // Inbox/Activity/Archive/Assets are workspace-menu destinations now, not
+  // permanent sidebar rows — the resting sidebar is Home + Search + the tree.
+  await expect(page.getByRole("link", { exact: true, name: "Inbox" })).toHaveCount(0);
+  await expect(page.getByRole("link", { exact: true, name: "Activity" })).toHaveCount(0);
   await expect(page.getByRole("link", { exact: true, name: "Assets" })).toHaveCount(0);
   await page.getByRole("button", { name: /Local Busabase.*Local/ }).click();
+  await expect(page.getByRole("menuitem", { name: "Inbox" })).toBeVisible();
+  await expect(page.getByRole("menuitem", { name: "Activity" })).toBeVisible();
   await expect(page.getByRole("menuitem", { name: "Archive" })).toBeVisible();
   await expect(page.getByRole("menuitem", { name: "Assets" })).toBeVisible();
   await expect(page.getByRole("menuitem", { name: "Graph View" })).toBeVisible();
   await page.getByRole("menuitem", { name: "Assets" }).click();
   await expect(page).toHaveURL(/\/dashboard\/local\/assets$/);
-  await page.goto("/dashboard/local");
+  // Back to the review queue explicitly — Inbox is no longer what a bare
+  // `/dashboard/local` resolves to, and the "For review N" tab below is its content.
+  await page.goto("/dashboard/local/inbox");
   // Seeded tree: CMS holds the four standard CMS Bases; Marketing also holds Agent Integrations.
   // Folders collapse by default, each with its own "Toggle" — expand per folder.
   await expect(page.getByRole("link", { exact: true, name: "CMS" })).toBeVisible();

@@ -29,14 +29,20 @@ test.use({
 });
 
 test("a new user tours the approval-first knowledge base", async ({ page }) => {
-  await test.step("lands on the dashboard — focused review nav and title menu", async () => {
+  await test.step("lands on Home — the pinned nav and the workspace menu", async () => {
     await page.goto("/");
-    await expect(page).toHaveURL(/\/dashboard\/local\/inbox/);
-    await expect(page.getByRole("link", { exact: true, name: "Inbox" })).toBeVisible();
-    await expect(page.getByRole("link", { exact: true, name: "Activity" })).toBeVisible();
+    await expect(page).toHaveURL(/\/dashboard\/local\/home/);
+    await expect(page.getByRole("link", { exact: true, name: "Home" })).toBeVisible();
+    // The resting sidebar is Home + Search + the node tree. Inbox/Activity/
+    // Archive/Assets are workspace-menu destinations now, and only reappear as
+    // a single contextual sidebar row once you're actually inside one of them.
+    await expect(page.getByRole("link", { exact: true, name: "Inbox" })).toHaveCount(0);
+    await expect(page.getByRole("link", { exact: true, name: "Activity" })).toHaveCount(0);
     await expect(page.getByRole("link", { exact: true, name: "Assets" })).toHaveCount(0);
     await expect(page.getByRole("link", { exact: true, name: "CMS" })).toBeVisible();
     await page.getByRole("button", { name: /Busabase/ }).click();
+    await expect(page.getByRole("menuitem", { name: "Inbox" })).toBeVisible();
+    await expect(page.getByRole("menuitem", { name: "Activity" })).toBeVisible();
     await expect(page.getByRole("menuitem", { name: "Archive" })).toBeVisible();
     await expect(page.getByRole("menuitem", { name: "Assets" })).toBeVisible();
     await expect(page.getByRole("menuitem", { name: "Graph View" })).toBeVisible();

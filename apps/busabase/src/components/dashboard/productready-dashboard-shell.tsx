@@ -10,7 +10,7 @@ import {
 import type { MoveNodePayload } from "busabase-core/dashboard/use-move-node";
 import { useCoreI18n } from "busabase-core/i18n";
 import { DropdownMenuItem, DropdownMenuSeparator } from "kui/dropdown-menu";
-import { Archive, Github, Images, Network } from "lucide-react";
+import { Activity, Archive, Github, Images, Inbox, Network } from "lucide-react";
 import { useAddDemoParam } from "openlib/ui/dashboard";
 import type { ReactNode } from "react";
 import { useMemo, useState } from "react";
@@ -107,8 +107,25 @@ export function ProductReadyDashboardShell({
     onNotificationClick: () => undefined,
     onSignOut: () => undefined,
     onSpaceSettingsClick: () => setSettingsDialogOpen(true),
+    // The workspace-wide destinations. Inbox/Activity live here rather than in
+    // the sidebar so the resting sidebar is just Home + Search + the node tree;
+    // opening one surfaces it as the shell's single contextual sidebar row.
     spaceSelectorExtraMenuItems: (
       <>
+        <DropdownMenuItem
+          onSelect={() => navigate(addDemoParam("/inbox"))}
+          className={currentPath.startsWith("/inbox") ? "bg-accent" : undefined}
+        >
+          <Inbox />
+          <span>{coreMessages.nav.inbox}</span>
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          onSelect={() => navigate(addDemoParam("/activity"))}
+          className={currentPath === "/activity" ? "bg-accent" : undefined}
+        >
+          <Activity />
+          <span>{coreMessages.nav.activity}</span>
+        </DropdownMenuItem>
         <DropdownMenuItem
           onSelect={() => navigate(addDemoParam("/archived"))}
           className={currentPath === "/archived" ? "bg-accent" : undefined}
@@ -155,7 +172,6 @@ export function ProductReadyDashboardShell({
       <CoreDashboardShell
         activeChangeRequestCount={activeChangeRequestCount}
         chrome={chrome}
-        hiddenNavItems={["assets"]}
         locale={locale}
         nodes={nodes}
         orpc={orpc}

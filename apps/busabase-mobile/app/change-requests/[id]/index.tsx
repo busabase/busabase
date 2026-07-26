@@ -1,5 +1,9 @@
 import { skipToken, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { ChangeRequestVO, OperationVO } from "busabase-contract/types";
+import {
+  getChangeRequestSummary,
+  getChangeRequestTitle,
+} from "busabase-core/dashboard/change-request";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import {
   ArrowLeft,
@@ -34,9 +38,7 @@ import { getStatusLabel, StatusBadge } from "~/components/ui/StatusBadge";
 import { TextInput } from "~/components/ui/TextInput";
 import {
   getChangeRequestReviewCue,
-  getChangeRequestTitle,
   getOperationStatusLabel,
-  getOperationSummary,
   operationLabels,
 } from "~/lib/busabase-display";
 import { formatDate, shortId } from "~/lib/format";
@@ -118,7 +120,7 @@ function ReviewHistorySection({ changeRequest }: { changeRequest: ChangeRequestV
 function SummarySection({ changeRequest }: { changeRequest: ChangeRequestVO }) {
   const tokens = useTokens();
   const reviewCue = getChangeRequestReviewCue(changeRequest);
-  const operationSummary = getOperationSummary(changeRequest);
+  const operationSummary = getChangeRequestSummary(changeRequest);
 
   return (
     <NativeSection title="Summary">

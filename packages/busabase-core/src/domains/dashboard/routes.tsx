@@ -33,11 +33,19 @@ export const getBusabaseDashboardRoutes = (
     }));
 
   return [
+    // `/` and `/home` are the same landing digest — Inbox is no longer the
+    // default destination, it's one of the places Home points at.
     {
       path: "/",
       component: dashboard,
-      breadcrumb: messages?.routes.inbox ?? "Inbox",
-      title: messages?.routes.inbox ?? "Inbox",
+      breadcrumb: messages?.routes.home ?? "Home",
+      title: messages?.routes.home ?? "Home",
+    },
+    {
+      path: "/home",
+      component: dashboard,
+      breadcrumb: messages?.routes.home ?? "Home",
+      title: messages?.routes.home ?? "Home",
     },
     {
       path: "/inbox",

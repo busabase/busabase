@@ -1,4 +1,3 @@
-import { skipToken, useQuery } from "@tanstack/react-query";
 import { useRouter } from "expo-router";
 import {
   CircleDot,
@@ -9,7 +8,6 @@ import {
   ShieldCheck,
 } from "lucide-react-native";
 import { useMemo } from "react";
-import { useBusabaseOrpc } from "~/api/use-busabase-orpc";
 import { ConnectionGuard } from "~/components/busabase/ConnectionGuard";
 import { DrawerScaffold } from "~/components/busabase/DrawerScaffold";
 import {
@@ -19,8 +17,9 @@ import {
   NativeRow,
   NativeSection,
 } from "~/components/native-screen";
-import { type ActivityEvent, type ActivityTone, buildActivityEvents } from "~/lib/activity-events";
+import type { ActivityEvent, ActivityTone } from "~/lib/activity-events";
 import { formatDate } from "~/lib/format";
+import { useActivityFeed } from "~/lib/use-activity-feed";
 import { useTokens } from "~/theme/use-tokens";
 
 const toneMeta: Record<ActivityTone, { label: string; icon: typeof GitPullRequest }> = {
@@ -34,24 +33,7 @@ const toneMeta: Record<ActivityTone, { label: string; icon: typeof GitPullReques
 function ActivityContent() {
   const router = useRouter();
   const tokens = useTokens();
-  const buda = useBusabaseOrpc();
-
-  const query = useQuery({
-    queryKey: buda
-      ? ["activity", buda.orpc.changeRequests.list.key({})]
-      : ["no-connection", "activity"],
-    queryFn: buda
-      ? async () => {
-          const client = buda.client;
-          const [changeRequests, records, auditEvents] = await Promise.all([
-            client.changeRequests.list({ limit: 100 }),
-            client.records.list({ limit: 100 }),
-            client.auditEvents.list({ limit: 100 }).catch(() => []),
-          ]);
-          return buildActivityEvents(changeRequests, records, auditEvents);
-        }
-      : skipToken,
-  });
+  const query = useActivityFeed();
 
   const { today, earlier } = useMemo(() => {
     const startOfDay = new Date();

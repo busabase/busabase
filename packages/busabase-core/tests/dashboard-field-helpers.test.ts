@@ -4,7 +4,6 @@ import {
   CHOICE_BADGE_CLASS,
   createDefaultFieldOptions,
   fieldPreviewText,
-  fieldTypeOptions,
   getAttachmentRefs,
   getChoiceBadgeClass,
   getChoiceLabel,
@@ -17,6 +16,7 @@ import {
   isRecordLongField,
   normalizeCodeLanguage,
 } from "../src/domains/dashboard/helpers/field";
+import { fieldTypeOptions } from "../src/domains/dashboard/helpers/field-type-options";
 import { safeFetchableUrl, sanitizeHtml } from "../src/domains/dashboard/helpers/html";
 
 import type { BaseFieldVO, ChangeRequestVO, FieldType, RecordVO } from "../src/types";

@@ -22,7 +22,7 @@ export default async function DashboardCatchAllPage({
   }
 
   const resolvedSearchParams = await searchParams;
-  const initialPath = slug?.length ? `/${slug.join("/")}` : "/inbox";
+  const initialPath = slug?.length ? `/${slug.join("/")}` : "/home";
   const query = new URLSearchParams();
 
   for (const [key, value] of Object.entries(resolvedSearchParams)) {

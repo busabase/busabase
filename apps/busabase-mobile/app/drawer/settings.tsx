@@ -92,7 +92,7 @@ function SettingsContent() {
     try {
       await connectSelfHosted(serverUrl);
       setSelectedServer(null);
-      router.replace("/drawer/inbox");
+      router.replace("/drawer/home");
     } finally {
       setSwitchingServer(null);
     }

@@ -54,6 +54,7 @@ import "./components/node-detail-views";
 // Side-effect import: registers Whiteboard, Workflow, and HTML renderers.
 import "../rich-node/components/register";
 import { BaseGraphView } from "./components/graph-view";
+import { HomeView } from "./components/home";
 import { ActivityView, InboxView } from "./components/inbox";
 import { RecordDetailView, RecordEditorView, RecordTopbarActions } from "./components/record-views";
 import { SearchDialog } from "./components/search-dialog";
@@ -725,9 +726,11 @@ function BusabaseDashboardContent({
       return { badge: null, title: messages.nav.assets };
     }
 
+    // Catch-all: name the landing page, not one particular feature page. (This
+    // used to say "Reviews" back when Inbox was where an unqualified visit landed.)
     return {
       badge: null,
-      title: messages.inbox.title,
+      title: messages.nav.home,
     };
   }, [
     activeBase,
@@ -774,6 +777,16 @@ function BusabaseDashboardContent({
             : messages.activity.changeRequest,
         },
       ];
+    }
+
+    // Home before the catch-all below, which still falls through to Inbox for
+    // every unlabelled route.
+    if (locationPath === "/" || locationPath === "/home") {
+      return [{ label: messages.nav.home }];
+    }
+
+    if (locationPath === "/inbox") {
+      return [{ label: messages.inbox.title }];
     }
 
     if (locationPath === "/activity") {
@@ -859,7 +872,8 @@ function BusabaseDashboardContent({
       return [{ label: messages.nav.workspace }, { label: activeBase?.name ?? messages.nav.base }];
     }
 
-    return [{ label: messages.inbox.title }];
+    // Catch-all, same reasoning as the page-title fallback above.
+    return [{ label: messages.nav.home }];
   }, [
     activeBase,
     activeRecord,
@@ -1694,7 +1708,20 @@ function BusabaseDashboardContent({
   ]);
 
   const activeView = useMemo(() => {
-    if (locationPath === "/" || locationPath === "/inbox") {
+    // Home is the landing page; Inbox keeps its own route but is no longer what
+    // an unqualified visit resolves to.
+    if (locationPath === "/" || locationPath === "/home") {
+      return (
+        <HomeView
+          changeRequests={allChangeRequests}
+          emptyGuide={emptyGuide}
+          nodeCache={nodeCache}
+          orpc={orpc}
+        />
+      );
+    }
+
+    if (locationPath === "/inbox") {
       return (
         <InboxView
           activeView={inboxView}
@@ -1950,6 +1977,8 @@ function BusabaseDashboardContent({
     serverSortedView,
     baseRecords,
     submitDeleteRecords,
+    allChangeRequests,
+    nodeCache,
   ]);
 
   const dashboardActiveView = (

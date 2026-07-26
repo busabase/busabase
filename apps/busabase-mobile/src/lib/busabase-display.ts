@@ -1,5 +1,6 @@
 import { OPERATION_META } from "busabase-contract/domains";
-import type { BaseFieldVO, ChangeRequestVO, OperationVO, RecordVO } from "busabase-contract/types";
+import type { BaseFieldVO, ChangeRequestVO, OperationVO } from "busabase-contract/types";
+import { getChangeRequestReviewMessage } from "busabase-core/dashboard/change-request";
 import { iStringParse } from "openlib/i18n/i-string";
 
 export interface FieldDisplayItem {
@@ -88,72 +89,6 @@ export function getPreview(fields: Record<string, unknown>, options: PreviewOpti
     : (options.fallback ?? "No preview fields yet.");
 }
 
-/** A change request now targets a base OR a node tree (folders/skills); resolve a display name. */
-export function getChangeRequestScopeName(changeRequest: ChangeRequestVO) {
-  return changeRequest.base?.name ?? changeRequest.node?.name ?? "Node tree";
-}
-
-// Commit messages the API fills in when the author didn't write one. Pure
-// boilerplate for a reviewer, so the UI hides them. Mirrors
-// packages/busabase-core/src/domains/dashboard/helpers/change-request.ts —
-// ported (not imported) because that package isn't wired into the mobile
-// Metro bundle; keep in sync if the web list adds/removes defaults.
-const DEFAULT_COMMIT_MESSAGES = new Set([
-  "Initial change request",
-  "Initial changeRequest",
-  "Update node tree",
-  "Delete record",
-  "Revise operation",
-  "Update skill",
-  "Update drive",
-  "Update doc",
-  "Create view",
-  "Update view",
-  "Delete view",
-  "Restore view",
-  "Add field",
-]);
-
-/** The author's own explanation of an operation, when it says more than a system default. */
-export function getChangeRequestMessage(changeRequest: ChangeRequestVO) {
-  const message = changeRequest.primaryOperation?.headCommit.message?.trim() ?? "";
-  return message && !DEFAULT_COMMIT_MESSAGES.has(message) ? message : "";
-}
-
-// Conventional-commit-style title, mirroring the web dashboard helper:
-// "<operation verb> <subject>" where the subject is the base's PRIMARY field
-// (first by position) value, falling back to title-ish slug guesses.
-export function getChangeRequestTitle(changeRequest: ChangeRequestVO) {
-  const operation = changeRequest.primaryOperation;
-  const fallback = `Change Request ${changeRequest.id.slice(0, 8)}`;
-  if (!operation) {
-    return fallback;
-  }
-  if (changeRequest.operationCount > 1) {
-    return `${changeRequest.operationCount} operation change request`;
-  }
-
-  const primaryField = changeRequest.base?.fields[0];
-  const primaryValue =
-    primaryField && operation.operation.startsWith("record_")
-      ? toDisplayText(
-          operation.headCommit.fields[primaryField.slug] ??
-            operation.baseFields?.[primaryField.slug],
-        )
-      : "";
-  const subject = truncate(primaryValue || getPrimaryTitle(operation.headCommit.fields, ""), 88);
-  if (!subject) {
-    return fallback;
-  }
-
-  const label = operationLabels[operation.operation];
-  return label ? `${label} ${subject}` : subject;
-}
-
-export function getRecordTitle(record: RecordVO) {
-  return getPrimaryTitle(record.headCommit.fields, `Record ${record.id.slice(0, 8)}`);
-}
-
 // Operation labels come from the shared node-type registry (single source of truth).
 export const operationLabels: Record<string, string> = Object.fromEntries(
   Object.entries(OPERATION_META).map(([kind, meta]) => [kind, meta.label]),
@@ -170,36 +105,17 @@ export function getOperationStatusLabel(status: OperationVO["status"]) {
   return operationStatusLabels[status];
 }
 
-export function getOperationSummary(changeRequest: ChangeRequestVO) {
-  const counts = new Map<string, number>();
-  for (const operation of changeRequest.operations) {
-    counts.set(operation.operation, (counts.get(operation.operation) ?? 0) + 1);
-  }
-  const parts = [...counts.entries()].map(
-    ([kind, count]) => `${count} ${(operationLabels[kind] ?? kind).toLowerCase()}`,
-  );
-  return parts.length > 0
-    ? parts.join(" · ")
-    : `${changeRequest.operationCount} item${changeRequest.operationCount === 1 ? "" : "s"}`;
-}
-
+/**
+ * Review cue for a change request. Delegates to the shared core helper for every
+ * status it knows about; `conflict` is the one case core does not special-case
+ * (web surfaces conflicts through its own banner instead), and mobile's review
+ * sheet has no such banner, so that string stays here.
+ */
 export function getChangeRequestReviewCue(changeRequest: ChangeRequestVO) {
-  if (changeRequest.status === "approved") {
-    return "Approved · ready to merge";
-  }
-  if (changeRequest.status === "changes_requested") {
-    return "Changes requested · awaiting revision";
-  }
-  if (changeRequest.status === "rejected" || changeRequest.status === "abandoned") {
-    return "Closed";
-  }
-  if (changeRequest.status === "merged") {
-    return "Merged into Base";
-  }
   if (changeRequest.status === "conflict") {
     return "Conflict · needs revision";
   }
-  return "Waiting for your review";
+  return getChangeRequestReviewMessage(changeRequest);
 }
 
 function truncate(value: string, maxLength: number) {

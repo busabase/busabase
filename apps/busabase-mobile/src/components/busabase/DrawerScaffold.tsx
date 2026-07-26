@@ -1,37 +1,24 @@
-import { skipToken, useQuery } from "@tanstack/react-query";
+import { skipToken, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { getNodeType, hasCapability } from "busabase-contract/domains";
 import type { NodeVO } from "busabase-contract/types";
+import { selectPendingChangeRequests } from "busabase-core/dashboard/home";
 import { usePathname, useRouter } from "expo-router";
-import {
-  Activity,
-  AppWindow,
-  Archive,
-  Bot,
-  FileText,
-  Folder,
-  HardDrive,
-  Images,
-  Inbox,
-  Menu,
-  Network,
-  Plus,
-  Search,
-  Settings,
-  Sparkles,
-  Table2,
-} from "lucide-react-native";
-import { type ReactNode, useCallback, useEffect, useState } from "react";
+import { House, Menu, MoreHorizontal, Plus, Search, Settings } from "lucide-react-native";
+import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 import { Modal, Platform, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useBusabaseOrpc } from "~/api/use-busabase-orpc";
 import { NativeScreen } from "~/components/native-screen";
 import { useI18n } from "~/i18n";
-import type { CoreMessages } from "~/i18n/messages";
+import { useContextualNavDestination } from "~/lib/contextual-nav";
+import { type DrawerDestination, isDrawerItemActive, isPathActive } from "~/lib/nav-destinations";
 import { flattenNodesForCache, nodeToKnownNode } from "~/search/known-node-cache";
+import { nodeIconForType } from "~/search/node-icons";
 import { getMobileNodeDestination } from "~/search/node-navigation";
 import { useKnownNodeCache } from "~/search/use-known-node-cache";
 import { mobile, radius, typography } from "~/theme/tokens";
 import { useTokens } from "~/theme/use-tokens";
 import { CreateNodeModal } from "./CreateNodeModal";
+import { NodeActionsSheet } from "./NodeActionsSheet";
 import { SpaceSelector } from "./SpaceSelector";
 
 interface DrawerScaffoldProps {
@@ -44,35 +31,19 @@ interface DrawerScaffoldProps {
   footer?: ReactNode;
 }
 
-type NavKey = keyof CoreMessages["nav"];
-type DrawerItem = {
-  key: NavKey;
-  href: string;
-  icon: typeof Inbox;
-  activePaths?: string[];
-};
-
-// Mirrors the web dashboard's primary nav (Inbox · Search · Activity · Graph View).
-const reviewItems = [
-  { key: "inbox", href: "/drawer/inbox", icon: Inbox, activePaths: ["/change-requests"] },
+// Pinned nav, mirroring the web dashboard's resting sidebar: Home (the landing
+// digest) + Search. Everything else moved into the Space Selector sheet, and at
+// most ONE of those comes back as the contextual row below.
+const pinnedItems = [
+  { key: "home", href: "/drawer/home", icon: House },
   { key: "search", href: "/drawer/search", icon: Search },
-  { key: "activity", href: "/drawer/activity", icon: Activity },
-  { key: "graph", href: "/drawer/graph", icon: Network },
-] as const satisfies ReadonlyArray<DrawerItem>;
-
-// Shared media library + trash, mirroring the web dashboard's Assets + Archived views.
-const libraryItems = [
-  { key: "records", href: "/drawer/records", icon: FileText, activePaths: ["/records"] },
-  { key: "bases", href: "/drawer/bases", icon: Table2, activePaths: ["/base"] },
-  { key: "assets", href: "/drawer/assets", icon: Images, activePaths: ["/assets"] },
-  { key: "archived", href: "/drawer/archived", icon: Archive },
-] as const satisfies ReadonlyArray<DrawerItem>;
+] as const satisfies ReadonlyArray<DrawerDestination>;
 
 const settingsItem = {
   key: "settings",
   href: "/drawer/settings",
   icon: Settings,
-} as const satisfies DrawerItem;
+} as const satisfies DrawerDestination;
 
 export function DrawerScaffold({
   title,
@@ -89,14 +60,76 @@ export function DrawerScaffold({
   const { t } = useI18n();
   const buda = useBusabaseOrpc();
   const nodeCache = useKnownNodeCache();
+  const queryClient = useQueryClient();
   const [open, setOpen] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
+  // The node whose "•••" sheet is showing — the touch stand-in for the web
+  // sidebar's hover-revealed per-node actions menu.
+  const [actionsNode, setActionsNode] = useState<NodeVO | null>(null);
+  // The single lingering row for the functional area last visited. Lives in a
+  // module-level store because this scaffold is remounted by every screen.
+  const contextualDestination = useContextualNavDestination(pathname);
 
   const nodesQuery = useQuery({
     ...(buda
       ? buda.orpc.nodes.list.queryOptions()
       : { queryKey: ["no-connection", "nodes"], queryFn: skipToken }),
     enabled: open && !!buda,
+  });
+
+  // The "N waiting for you" signal the web sidebar carries on its Home row.
+  // Gated on `open` like the node tree — the drawer is the only place it shows.
+  const changeRequestsQuery = useQuery({
+    ...(buda
+      ? buda.orpc.changeRequests.list.queryOptions({ input: {} })
+      : { queryKey: ["no-connection", "change-requests"], queryFn: skipToken }),
+    enabled: open && !!buda,
+  });
+  const pendingCount = selectPendingChangeRequests(changeRequestsQuery.data ?? []).length;
+
+  // Notion-style Favorites — the current actor's favorited nodes, in their own
+  // query entry, invalidated after every toggle exactly like the web sidebar
+  // (`dashboard-shell.tsx`). Gated on `open` like the tree above: the drawer is
+  // the only surface that renders them.
+  const favoritesQuery = useQuery({
+    ...(buda
+      ? buda.orpc.nodes.listFavorites.queryOptions()
+      : { queryKey: ["no-connection", "favorites"], queryFn: skipToken }),
+    enabled: open && !!buda,
+  });
+  const favoriteNodes = favoritesQuery.data ?? [];
+  const favoriteNodeIds = useMemo(
+    () => new Set(favoriteNodes.map((node) => node.id)),
+    [favoriteNodes],
+  );
+
+  // The space the connection is scoped to. Needed by two of the node actions —
+  // Share builds the public `/dashboard/<spaceId>/…` URL from it, and Agent
+  // prompts name it so the agent knows where to work. `auth.verify` is the one
+  // endpoint that answers this in EVERY connection mode (the open-source server
+  // returns its local space; cloud resolves the one the `x-busabase-space`
+  // header selected), unlike the cloud-only `/api/v1/auth` the Space Selector
+  // uses for its workspace list.
+  const authQuery = useQuery({
+    ...(buda
+      ? buda.orpc.auth.verify.queryOptions()
+      : { queryKey: ["no-connection", "auth"], queryFn: skipToken }),
+    enabled: open && !!buda,
+  });
+  const spaceId = authQuery.data?.space.id ?? null;
+  const spaceName = authQuery.data?.space.name ?? null;
+
+  // Plain invalidate-and-refetch, no optimistic cache write — same P0 tradeoff
+  // the web sidebar makes: the Favorites list is small and this keeps the
+  // handler honest about what the server actually stored.
+  const toggleFavoriteMutation = useMutation({
+    mutationFn: async (node: NodeVO) => {
+      if (!buda) throw new Error(t.common.notConnected);
+      return buda.client.nodes.toggleFavorite({ nodeId: node.id });
+    },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: buda?.orpc.nodes.listFavorites.key() });
+    },
   });
 
   useEffect(() => {
@@ -112,7 +145,7 @@ export function DrawerScaffold({
     !nodesQuery.data[0].baseId
       ? nodesQuery.data[0].children
       : (nodesQuery.data ?? []);
-  const knowledgeCount = countKnowledgeNodes(treeNodes);
+  const workspaceNodeCount = countTreeNodes(treeNodes);
 
   const headerLeading = (
     <Pressable
@@ -135,6 +168,7 @@ export function DrawerScaffold({
     (node: NodeVO) => {
       const destination = getMobileNodeDestination(node);
       if (destination.status === "unsupported") return;
+      setActionsNode(null);
       setOpen(false);
       void (async () => {
         await nodeCache?.merge([nodeToKnownNode(node)]);
@@ -220,57 +254,68 @@ export function DrawerScaffold({
               style={styles.drawerScroll}
               showsVerticalScrollIndicator={false}
             >
-              <View style={styles.section}>
-                <Text
-                  style={[
-                    typography.caption,
-                    styles.sectionLabel,
-                    { color: tokens.mutedForeground },
-                  ]}
-                >
-                  {t.nav.review}
-                </Text>
-                <View style={styles.navGroup}>
-                  {reviewItems.map((item) => {
-                    const active = isDrawerItemActive(pathname, item);
-                    return (
-                      <DrawerNavRow
-                        key={item.href}
-                        active={active}
-                        icon={item.icon}
-                        label={t.nav[item.key]}
-                        onPress={() => navigate(item.href)}
-                      />
-                    );
-                  })}
-                </View>
+              <View style={styles.navGroup}>
+                {pinnedItems.map((item) => (
+                  <DrawerNavRow
+                    key={item.href}
+                    active={isDrawerItemActive(pathname, item)}
+                    badge={item.key === "home" ? pendingCount : undefined}
+                    icon={item.icon}
+                    label={t.nav[item.key]}
+                    onPress={() => navigate(item.href)}
+                  />
+                ))}
+                {/* At most one — replaced, never stacked, so the drawer can't
+                    regrow into the shortcut list this design replaced. */}
+                {contextualDestination ? (
+                  <DrawerNavRow
+                    active={isDrawerItemActive(pathname, contextualDestination)}
+                    badge={contextualDestination.key === "inbox" ? pendingCount : undefined}
+                    icon={contextualDestination.icon}
+                    label={t.nav[contextualDestination.key]}
+                    onPress={() => navigate(contextualDestination.href)}
+                  />
+                ) : null}
               </View>
 
-              <View style={styles.section}>
-                <Text
-                  style={[
-                    typography.caption,
-                    styles.sectionLabel,
-                    { color: tokens.mutedForeground },
-                  ]}
-                >
-                  {t.nav.library}
-                </Text>
-                <View style={styles.navGroup}>
-                  {libraryItems.map((item) => {
-                    const active = isDrawerItemActive(pathname, item);
-                    return (
-                      <DrawerNavRow
-                        key={item.href}
-                        active={active}
-                        icon={item.icon}
-                        label={t.nav[item.key]}
-                        onPress={() => navigate(item.href)}
+              {/* An empty Favorites section is exactly the clutter this feature
+                  is meant to reduce, so it only exists once the actor has
+                  favorited at least one (still-visible, non-archived) node —
+                  same rule and same position as the web sidebar: after the
+                  contextual row, before the Workspace tree. `listFavorites`
+                  returns fully-resolved nodes, not a tree, so each row is flat
+                  (depth 0, no children) exactly like web's
+                  `toFlatFavoriteNavItem`. */}
+              {favoriteNodes.length > 0 ? (
+                <View style={styles.section}>
+                  <View style={styles.sectionHeader}>
+                    <Text
+                      style={[
+                        typography.caption,
+                        styles.sectionLabel,
+                        { color: tokens.mutedForeground },
+                      ]}
+                    >
+                      {t.nav.favorites}
+                    </Text>
+                    <Text style={[typography.small, { color: tokens.mutedForeground }]}>
+                      {favoriteNodes.length}
+                    </Text>
+                  </View>
+                  <View style={styles.navGroup}>
+                    {favoriteNodes.map((node) => (
+                      <NodeNavItem
+                        key={`favorite-${node.id}`}
+                        node={{ ...node, children: [] }}
+                        pathname={pathname}
+                        depth={0}
+                        onPress={navigateNode}
+                        onOpenActions={setActionsNode}
                       />
-                    );
-                  })}
+                    ))}
+                  </View>
                 </View>
-              </View>
+              ) : null}
 
               <View style={styles.section}>
                 <View style={styles.sectionHeader}>
@@ -281,10 +326,10 @@ export function DrawerScaffold({
                       { color: tokens.mutedForeground },
                     ]}
                   >
-                    {t.nav.knowledge}
+                    {t.nav.workspace}
                   </Text>
                   <Text style={[typography.small, { color: tokens.mutedForeground }]}>
-                    {knowledgeCount}
+                    {workspaceNodeCount}
                   </Text>
                 </View>
                 <View style={styles.navGroup}>
@@ -296,14 +341,14 @@ export function DrawerScaffold({
                         { color: tokens.mutedForeground },
                       ]}
                     >
-                      Loading knowledge
+                      {t.nav.workspaceLoading}
                     </Text>
                   ) : null}
                   {nodesQuery.error ? (
                     <Text
                       style={[typography.small, styles.sectionHint, { color: tokens.destructive }]}
                     >
-                      Could not load knowledge
+                      {t.nav.workspaceError}
                     </Text>
                   ) : null}
                   {!nodesQuery.isLoading && !nodesQuery.error && treeNodes.length === 0 ? (
@@ -314,7 +359,7 @@ export function DrawerScaffold({
                         { color: tokens.mutedForeground },
                       ]}
                     >
-                      No knowledge yet
+                      {t.nav.workspaceEmpty}
                     </Text>
                   ) : null}
                   {treeNodes.map((node) => (
@@ -324,6 +369,7 @@ export function DrawerScaffold({
                       pathname={pathname}
                       depth={0}
                       onPress={navigateNode}
+                      onOpenActions={setActionsNode}
                     />
                   ))}
                 </View>
@@ -344,6 +390,24 @@ export function DrawerScaffold({
             style={styles.edgeDismiss}
             onPress={() => setOpen(false)}
           />
+          {/* Rendered inside the drawer Modal (same as SpaceSelector's sheet)
+              so the drawer stays put behind it — a node action shouldn't cost
+              the user their place in the tree. `nodes` is the RAW tree, not
+              the unwrapped `treeNodes`: the move picker needs the real root
+              container as a destination. */}
+          {actionsNode ? (
+            <NodeActionsSheet
+              node={actionsNode}
+              nodes={nodesQuery.data ?? []}
+              canOpen={nodeNavMeta(actionsNode).tappable}
+              isFavorite={favoriteNodeIds.has(actionsNode.id)}
+              spaceId={spaceId}
+              spaceName={spaceName}
+              onClose={() => setActionsNode(null)}
+              onOpenNode={navigateNode}
+              onToggleFavorite={(node) => toggleFavoriteMutation.mutate(node)}
+            />
+          ) : null}
         </View>
       </Modal>
 
@@ -440,23 +504,41 @@ const styles = StyleSheet.create({
     height: 22,
     borderRadius: radius.full,
   },
+  navLabel: { flex: 1, minWidth: 0 },
+  navBadge: {
+    minWidth: 22,
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+    borderRadius: radius.full,
+    alignItems: "center",
+    justifyContent: "center",
+  },
   baseItem: { alignItems: "center", paddingVertical: 8 },
   baseText: { flex: 1, minWidth: 0 },
+  nodeActionsButton: {
+    width: 28,
+    alignItems: "center",
+    justifyContent: "center",
+    flexShrink: 0,
+  },
   headerActions: { flexDirection: "row", alignItems: "center", gap: 8 },
 });
 
-function countKnowledgeNodes(nodes: NodeVO[]): number {
-  return nodes.reduce((count, node) => count + 1 + countKnowledgeNodes(node.children), 0);
+function countTreeNodes(nodes: NodeVO[]): number {
+  return nodes.reduce((count, node) => count + 1 + countTreeNodes(node.children), 0);
 }
 
 function DrawerNavRow({
   active,
+  badge,
   icon: Icon,
   label,
   onPress,
 }: {
   active: boolean;
-  icon: typeof Inbox;
+  /** Count of things waiting on the actor; hidden at 0, same as the web sidebar. */
+  badge?: number;
+  icon: DrawerDestination["icon"];
   label: string;
   onPress: () => void;
 }) {
@@ -475,24 +557,22 @@ function DrawerNavRow({
       <Icon size={20} color={active ? tokens.primary : tokens.mutedForeground} />
       <Text
         numberOfLines={1}
-        style={[typography.bodyEm, { color: active ? tokens.foreground : tokens.mutedForeground }]}
+        style={[
+          typography.bodyEm,
+          styles.navLabel,
+          { color: active ? tokens.foreground : tokens.mutedForeground },
+        ]}
       >
         {label}
       </Text>
+      {badge ? (
+        <View style={[styles.navBadge, { backgroundColor: tokens.primaryMuted }]}>
+          <Text style={[typography.caption, { color: tokens.foreground }]}>{badge}</Text>
+        </View>
+      ) : null}
     </Pressable>
   );
 }
-
-// Maps the registry's platform-neutral icon ids to lucide-react-native icons.
-const NODE_ICONS: Record<string, typeof Folder> = {
-  folder: Folder,
-  table: Table2,
-  sparkles: Sparkles,
-  "file-text": FileText,
-  bot: Bot,
-  "hard-drive": HardDrive,
-  "app-window": AppWindow,
-};
 
 // Per-node-type icon, subtitle, and whether the row navigates somewhere — all
 // driven by the node-type registry (tappable = the type has a detail screen).
@@ -501,7 +581,7 @@ function nodeNavMeta(node: NodeVO) {
   const label = definition?.label ?? node.type;
   const mobileUnsupported = node.type === "file";
   return {
-    icon: NODE_ICONS[definition?.icon ?? ""] ?? FileText,
+    icon: nodeIconForType(node.type),
     subtitle: mobileUnsupported
       ? `${label} · Not viewable on mobile yet`
       : node.type === "base"
@@ -509,14 +589,6 @@ function nodeNavMeta(node: NodeVO) {
         : label,
     tappable: hasCapability(node.type, "hasDetail") && !mobileUnsupported,
   };
-}
-
-function isPathActive(pathname: string, basePath: string) {
-  return pathname === basePath || pathname.startsWith(`${basePath}/`);
-}
-
-function isDrawerItemActive(pathname: string, item: DrawerItem) {
-  return [item.href, ...(item.activePaths ?? [])].some((path) => isPathActive(pathname, path));
 }
 
 function isNodeActive(node: NodeVO, pathname: string) {
@@ -546,15 +618,24 @@ function NodeNavItem({
   pathname,
   depth,
   onPress,
+  onOpenActions,
 }: {
   node: NodeVO;
   pathname: string;
   depth: number;
   onPress: (node: NodeVO) => void;
+  /** Opens the per-node "•••" action sheet (rename / permissions / move). */
+  onOpenActions: (node: NodeVO) => void;
 }) {
   const tokens = useTokens();
+  const { t } = useI18n();
   const meta = nodeNavMeta(node);
   const active = isNodeActive(node, pathname);
+  // Node types flagged `hidden` never appear in the tree, matching the web
+  // sidebar (`buildNavItem` bails on the same capability). No type sets it
+  // today, so this exists to keep the two platforms from silently diverging
+  // the day one does.
+  if (hasCapability(node.type, "hidden")) return null;
   const Icon = meta.icon;
   const showSubtitle = depth === 0 || active;
 
@@ -594,6 +675,19 @@ function NodeNavItem({
             </Text>
           ) : null}
         </View>
+        {/* Persistent, not hover-revealed like web's "•••": there is no hover
+            on touch, and a long-press would be undiscoverable. Its own
+            Pressable nested inside the row's, so tapping the label still
+            opens the node. */}
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={`${t.nodeActions.more} — ${node.name}`}
+          hitSlop={mobile.hitSlop}
+          style={({ pressed }) => [styles.nodeActionsButton, { opacity: pressed ? 0.6 : 1 }]}
+          onPress={() => onOpenActions(node)}
+        >
+          <MoreHorizontal size={18} color={tokens.mutedForeground} />
+        </Pressable>
       </Pressable>
       {node.children.map((child) => (
         <NodeNavItem
@@ -602,6 +696,7 @@ function NodeNavItem({
           pathname={pathname}
           depth={depth + 1}
           onPress={onPress}
+          onOpenActions={onOpenActions}
         />
       ))}
     </>

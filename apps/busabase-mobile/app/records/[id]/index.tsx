@@ -1,5 +1,6 @@
 import { skipToken, useMutation, useQuery } from "@tanstack/react-query";
 import type { ChangeRequestVO } from "busabase-contract/types";
+import { getChangeRequestTitle, getRecordTitle } from "busabase-core/dashboard/change-request";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { ArrowLeft, GitPullRequest, MoreHorizontal, Pencil, Trash2 } from "lucide-react-native";
 import { useState } from "react";
@@ -21,7 +22,6 @@ import {
 } from "~/components/native-screen";
 import { Button } from "~/components/ui/Button";
 import { getStatusLabel, StatusBadge } from "~/components/ui/StatusBadge";
-import { getChangeRequestTitle, getRecordTitle } from "~/lib/busabase-display";
 import { formatDate, shortId } from "~/lib/format";
 import { mobile, radius } from "~/theme/tokens";
 import { useTokens } from "~/theme/use-tokens";

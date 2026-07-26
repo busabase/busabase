@@ -39,7 +39,7 @@ export default function ConnectionScreen() {
   }
 
   if (state.status === "connected") {
-    return <Redirect href="/drawer/inbox" />;
+    return <Redirect href="/drawer/home" />;
   }
 
   const handleCloudConnect = async () => {
@@ -48,7 +48,7 @@ export default function ConnectionScreen() {
     try {
       const session = await signInWithBusabaseCloud();
       await connectCloud(session);
-      router.replace("/drawer/inbox");
+      router.replace("/drawer/home");
     } catch (error) {
       setCloudError(error instanceof Error ? error.message : "Could not connect Busabase Cloud");
     } finally {

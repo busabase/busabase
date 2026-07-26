@@ -1,5 +1,6 @@
 import { skipToken, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { ChangeRequestVO, OperationVO } from "busabase-contract/types";
+import { getChangeRequestScopeName } from "busabase-core/dashboard/change-request";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { ArrowLeft, GitCommitHorizontal, ListChecks } from "lucide-react-native";
 import { useEffect, useState } from "react";
@@ -21,11 +22,7 @@ import {
 } from "~/components/native-screen";
 import { Button } from "~/components/ui/Button";
 import { StatusBadge } from "~/components/ui/StatusBadge";
-import {
-  getChangeRequestScopeName,
-  getOperationStatusLabel,
-  operationLabels,
-} from "~/lib/busabase-display";
+import { getOperationStatusLabel, operationLabels } from "~/lib/busabase-display";
 import { shortId } from "~/lib/format";
 import {
   buildInitialFormValues,

@@ -101,9 +101,12 @@ test("dashboard renders the demo review queue from ?demo=1", async ({ page }) =>
 test("demo use-case persists across SPA navigation (?demo=blog)", async ({ page }) => {
   // SPALink (wouter) preserves the active demo value on click, so the Referer
   // keeps `?demo=blog` and the demo router keeps serving the focused use-case.
+  // Home is the pinned sidebar SPALink (Activity moved into the workspace menu),
+  // so it's what this exercises — the mechanism under test is the link, not the
+  // destination.
   await page.goto("/dashboard/local/inbox?demo=blog");
-  const activity = page.getByRole("link", { name: "Activity" });
-  await expect(activity).toBeVisible();
-  await activity.click();
-  await expect(page).toHaveURL(/\/dashboard\/local\/activity\?demo=blog$/);
+  const home = page.getByRole("link", { exact: true, name: "Home" });
+  await expect(home).toBeVisible();
+  await home.click();
+  await expect(page).toHaveURL(/\/dashboard\/local\/home\?demo=blog$/);
 });
