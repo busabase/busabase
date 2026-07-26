@@ -128,11 +128,25 @@ const getRecordTableColumnWidth = (field: BaseFieldVO, index: number) => {
   return fieldColumnWidth(field.type);
 };
 
+// `left-0` here assumes nothing else sits to this column's left. When the
+// base-level bulk-select checkbox column is enabled, that 36px-wide column
+// renders *before* this one but was never itself sticky — so on scroll it
+// slid out of view while this column snapped to `left: 0`, a ~36px jump the
+// instant scrolling started. Both the checkbox column and this one need to be
+// sticky together, at `left-0` and `left-9` (36px) respectively, so the pair
+// moves as one frozen group with no discontinuity — see
+// `baseTableSelectionStickyCellClassName`/`baseTableSelectionStickyHeaderClassName`
+// below, and every call site's `hasSelectionColumn` handling.
 const baseTableStickyClassName =
-  "sticky left-0 z-10 border-border/70 border-r bg-background shadow-sm transition-colors group-hover:bg-muted";
+  "sticky z-10 border-border/70 border-r bg-background shadow-sm transition-colors group-hover:bg-muted";
 
-const baseTableHeaderStickyClassName =
-  "sticky left-0 z-20 border-border/70 border-r bg-muted shadow-sm";
+const baseTableHeaderStickyClassName = "sticky z-20 border-border/70 border-r bg-muted shadow-sm";
+
+/** Sticky class for the leading bulk-select checkbox cell (per row). Pairs with `baseTableStickyClassName` above — see its comment. */
+const baseTableSelectionStickyCellClassName =
+  "sticky left-0 z-10 border-border/40 border-r bg-background transition-colors group-hover:bg-muted";
+/** Sticky class for the leading bulk-select "select all" checkbox header. Pairs with `baseTableHeaderStickyClassName` above. */
+const baseTableSelectionStickyHeaderClassName = "sticky left-0 z-20 border-border/50 bg-muted";
 
 // The right-hand sticky "record status" column is disabled for live rows: every
 // record rendered there is `status: "active"` (archived ones render in their own
@@ -171,6 +185,7 @@ function FieldColumnHeader({
   onResizeCancel,
   onResizeCommit,
   onResizePreview,
+  hasSelectionColumn,
   sticky,
 }: {
   actionsDisabled: boolean;
@@ -197,6 +212,7 @@ function FieldColumnHeader({
   onResizeCancel: () => void;
   onResizeCommit: (width: number) => void;
   onResizePreview: (width: number) => void;
+  hasSelectionColumn: boolean;
   sticky: boolean;
 }) {
   const messages = useCoreI18n();
@@ -289,7 +305,9 @@ function FieldColumnHeader({
             : undefined
       }
       className={`group/header relative flex h-full min-w-0 items-center gap-1 border-border/40 border-r px-1.5 font-medium ${
-        sticky ? baseTableHeaderStickyClassName : ""
+        sticky
+          ? `${baseTableHeaderStickyClassName} ${hasSelectionColumn ? "left-9" : "left-0"}`
+          : ""
       } ${dragOver ? "ring-2 ring-inset ring-primary/60" : ""} ${dragging ? "opacity-55" : ""}`}
       data-field-slug={field.slug}
       data-field-width={customWidth}
@@ -647,7 +665,7 @@ function BusaBaseRecordRow({
     >
       {selectable ? (
         <div
-          className="flex items-center justify-center border-border/40 border-r"
+          className={`flex items-center justify-center ${baseTableSelectionStickyCellClassName}`}
           role="gridcell"
           tabIndex={-1}
         >
@@ -665,6 +683,7 @@ function BusaBaseRecordRow({
         <RecordTableCell
           currentRecordHref={currentRecordHref}
           field={field}
+          hasSelectionColumn={Boolean(selectable)}
           index={index}
           key={field.id}
           record={record}
@@ -700,7 +719,14 @@ const SKELETON_CELL_WIDTHS = ["80%", "60%", "72%", "55%", "66%"];
 // table doesn't jump when data arrives, and — unlike the page-level
 // BaseTableSkeleton — leaves the already-loaded header/view-tabs/toolbar above
 // it alone instead of replacing them with a fake shimmer.
-function BusaBaseTableRowsSkeleton({ columnTemplate }: { columnTemplate: string }) {
+function BusaBaseTableRowsSkeleton({
+  columnTemplate,
+  hasSelectionColumn,
+}: {
+  columnTemplate: string;
+  hasSelectionColumn: boolean;
+}) {
+  const stickyFieldColumnIndex = hasSelectionColumn ? 1 : 0;
   return (
     <div aria-hidden>
       {SKELETON_ROWS.map((rowId, rowIndex) => (
@@ -712,20 +738,24 @@ function BusaBaseTableRowsSkeleton({ columnTemplate }: { columnTemplate: string 
           {columnTemplate.split(" ").map((column, columnIndex) => (
             <div
               className={
-                columnIndex === 0
-                  ? baseTableStickyClassName
-                  : "flex h-full items-center border-border/40 border-r"
+                hasSelectionColumn && columnIndex === 0
+                  ? baseTableSelectionStickyCellClassName
+                  : columnIndex === stickyFieldColumnIndex
+                    ? `${baseTableStickyClassName} ${hasSelectionColumn ? "left-9" : "left-0"}`
+                    : "flex h-full items-center border-border/40 border-r"
               }
               // biome-ignore lint/suspicious/noArrayIndexKey: fixed-order grid cells, no stable id
               key={`${rowId}-${column}-${columnIndex}`}
             >
-              <Skeleton
-                className="mx-2 h-4"
-                style={{
-                  width:
-                    SKELETON_CELL_WIDTHS[(rowIndex + columnIndex) % SKELETON_CELL_WIDTHS.length],
-                }}
-              />
+              {hasSelectionColumn && columnIndex === 0 ? null : (
+                <Skeleton
+                  className="mx-2 h-4"
+                  style={{
+                    width:
+                      SKELETON_CELL_WIDTHS[(rowIndex + columnIndex) % SKELETON_CELL_WIDTHS.length],
+                  }}
+                />
+              )}
             </div>
           ))}
         </div>
@@ -1273,7 +1303,7 @@ export function BusaBaseTable({
             >
               {selectionEnabled ? (
                 <div
-                  className="flex items-center justify-center border-border/50 border-r"
+                  className={`flex items-center justify-center ${baseTableSelectionStickyHeaderClassName}`}
                   role="columnheader"
                   tabIndex={-1}
                 >
@@ -1295,6 +1325,7 @@ export function BusaBaseTable({
                   baseSlug={base?.slug ?? records[0]?.base.slug ?? ""}
                   busy={quickUpdatingFieldId === field.id}
                   field={field}
+                  hasSelectionColumn={selectionEnabled}
                   canMoveLeft={index > 0}
                   canMoveRight={index < fields.length - 1}
                   customWidth={
@@ -1411,7 +1442,10 @@ export function BusaBaseTable({
               */}
             </div>
             {pagination?.isLoading ? (
-              <BusaBaseTableRowsSkeleton columnTemplate={columnTemplate} />
+              <BusaBaseTableRowsSkeleton
+                columnTemplate={columnTemplate}
+                hasSelectionColumn={selectionEnabled}
+              />
             ) : records.length === 0 ? (
               <div role="rowgroup">
                 <div
@@ -1493,7 +1527,11 @@ export function BusaBaseTable({
                     tabIndex={-1}
                   >
                     {selectionEnabled ? (
-                      <div className="border-border/40 border-r" role="gridcell" tabIndex={-1} />
+                      <div
+                        className={baseTableSelectionStickyCellClassName}
+                        role="gridcell"
+                        tabIndex={-1}
+                      />
                     ) : null}
                     {fields.map((field, index) => (
                       <RecordTableCell
@@ -1502,6 +1540,7 @@ export function BusaBaseTable({
                           currentSearch,
                         )}
                         field={field}
+                        hasSelectionColumn={selectionEnabled}
                         index={index}
                         key={field.id}
                         record={record}
@@ -2027,6 +2066,7 @@ function ViewChangeRequestForm({
 interface RecordTableCellProps {
   currentRecordHref: string;
   field: BaseFieldVO;
+  hasSelectionColumn: boolean;
   index: number;
   record: RecordVO;
   records: RecordVO[];
@@ -2036,7 +2076,9 @@ function RecordTableCell(props: RecordTableCellProps) {
   return (
     <div
       className={`flex min-w-0 items-center overflow-hidden border-border/40 border-r px-2 ${
-        props.index === 0 ? baseTableStickyClassName : ""
+        props.index === 0
+          ? `${baseTableStickyClassName} ${props.hasSelectionColumn ? "left-9" : "left-0"}`
+          : ""
       }`}
       role="gridcell"
       tabIndex={-1}

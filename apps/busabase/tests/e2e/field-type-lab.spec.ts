@@ -32,8 +32,16 @@ test("shows typed, accessible headers in the Field Type Lab grid", async ({ page
     .toBeLessThanOrEqual(52);
 
   const horizontalScroller = grid.locator("xpath=..");
-  const firstHeader = grid.getByRole("columnheader").first();
-  const firstCell = firstRecord.locator(':scope > [role="gridcell"]').first();
+  // Not `.getByRole("columnheader").first()` / `:scope > [role="gridcell"]").first()`:
+  // the base-level bulk-select checkbox column renders its own (empty,
+  // non-sticky) columnheader/gridcell to the left of the real field columns
+  // when selection is enabled, so ".first()" grabs that instead of the actual
+  // frozen-left field column this assertion is about.
+  const firstHeader = grid.locator("[data-field-slug]").first();
+  const firstCell = firstRecord
+    .locator(':scope > [role="gridcell"]')
+    .filter({ hasNot: page.getByTestId("base-record-select") })
+    .first();
   const initialPositions = {
     cell: await firstCell.evaluate((element) => element.getBoundingClientRect().x),
     header: await firstHeader.evaluate((element) => element.getBoundingClientRect().x),
@@ -86,14 +94,19 @@ test("creates a Field Type Lab record filling every editable input kind", async 
   await expect(page.getByLabel("Auto Number")).toHaveCount(0);
 
   // text (the primary field) + textareas
-  await page.getByLabel("Text", { exact: true }).fill(TITLE);
+  // Scoped to the field's own input id, not getByLabel("Text")/getByRole("checkbox"):
+  // the Field Type Lab base also has a Whiteboard field, whose Excalidraw canvas
+  // mounts its own toolbar with aria-label="Text" (the text-drawing tool) and two
+  // checkboxes ("Library", "Keep selected tool active after drawing") — both
+  // collide with a name-less/generic query for these two field kinds specifically.
+  await page.locator("#record-field-bsf_lab_text").fill(TITLE);
   await page.getByLabel("Long Text").fill("A browser e2e fills the long text column.");
   await page.getByLabel("Markdown").fill("# heading\n\nbody");
   // number / date
   await page.getByLabel("Number", { exact: true }).fill("42");
   await page.getByLabel("Date", { exact: true }).fill("2026-06-24");
   // checkbox (the lab has exactly one)
-  await page.getByRole("checkbox").check();
+  await page.locator("#record-field-bsf_lab_checkbox").check();
   // single select — choose by its visible option label
   await page.getByLabel("Select", { exact: true }).selectOption({ label: "In review" });
   // url / email / tel
@@ -130,7 +143,9 @@ test("blocks creation when the required Text field is empty", async ({ page }) =
 
 test("submitting for review routes the new record to the inbox", async ({ page }) => {
   await page.goto(NEW_URL, { waitUntil: "commit" });
-  await page.getByLabel("Text", { exact: true }).fill("Review-first lab row");
+  // Not getByLabel("Text"): collides with the Whiteboard field's Excalidraw
+  // toolbar text tool (also aria-label="Text") — see the earlier test's comment.
+  await page.locator("#record-field-bsf_lab_text").fill("Review-first lab row");
 
   // "Submit Request" queues a change request for review rather than merging; it
   // lives behind the split-button dropdown (Submit Now is the primary action).
