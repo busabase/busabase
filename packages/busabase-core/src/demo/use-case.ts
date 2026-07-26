@@ -42,6 +42,8 @@ export const DEMO_USE_CASES = [
   "agent-integrations",
   "gallery",
   "roadmap",
+  "stock-picking",
+  "formula-lab",
 ] as const;
 
 export type DemoUseCase = (typeof DEMO_USE_CASES)[number];

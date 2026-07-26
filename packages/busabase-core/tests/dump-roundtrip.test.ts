@@ -57,17 +57,30 @@ const importInBatches = async (
   }
 };
 
-/** Every dump-eligible table, drained page by page (proves the cursor terminates too). */
+/**
+ * Every dump-eligible table, drained page by page (proves the cursor
+ * terminates too). Also records how many pages each table took — used below
+ * to assert that at least one table's demo data is large enough to actually
+ * exercise the cursor's "there's a next page" branch, not just its terminal
+ * "no more rows" branch (small tables never call `exportTables` more than
+ * once, so that branch can silently go untested even though `nextCursor`
+ * logic is present in the code).
+ */
+const exportPageCountsByTable = new Map<string, number>();
+
 const exportAllTables = async (client: Client): Promise<Map<string, Row[]>> => {
   const out = new Map<string, Row[]>();
   for (const table of DumpTableSchema.options) {
     const rows: Row[] = [];
     let cursor: string | undefined;
+    let pageCount = 0;
     do {
       const page = await client.dump.exportTables({ table, cursor, limit: EXPORT_LIMIT });
+      pageCount += 1;
       rows.push(...(page.rows as Row[]));
       cursor = page.nextCursor ?? undefined;
     } while (cursor);
+    exportPageCountsByTable.set(table, pageCount);
     out.set(table, rows);
   }
   return out;
@@ -125,6 +138,9 @@ describe("dump domain — full demo-seed backup round trip", () => {
   // Captured from the TARGET (database B) after import.
   let targetTables = new Map<string, Row[]>();
   let commitWarnings: string[] = [];
+  // Snapshot of `exportPageCountsByTable` right after the SOURCE export, before
+  // the target export below overwrites it.
+  let sourceExportPageCounts = new Map<string, number>();
 
   beforeAll(async () => {
     originalCwd = process.cwd();
@@ -152,6 +168,7 @@ describe("dump domain — full demo-seed backup round trip", () => {
     });
 
     sourceTables = await exportAllTables(sourceClient);
+    sourceExportPageCounts = new Map(exportPageCountsByTable);
 
     // Doc bodies (object storage, not a dump table) for every `doc` node.
     for (const node of sourceTables.get("nodes") ?? []) {
@@ -263,6 +280,20 @@ describe("dump domain — full demo-seed backup round trip", () => {
     expect(c.nodePrincipals).toBeGreaterThan(0);
     expect(sourceBlobs.size).toBeGreaterThan(0);
     expect(sourceDocBodies.size).toBeGreaterThan(0);
+  });
+
+  it("attachments/assets export required more than one page (cursor pagination is actually exercised)", () => {
+    // Guardrail for the cursor-pagination "there's a next page" branch itself:
+    // for years `attachments`/`assets`/`assetUsages` stayed well under
+    // `EXPORT_LIMIT` (500) rows, so `nextCursor` was always null on the first
+    // call and the loop's second iteration in `exportAllTables` (and the real
+    // CLI exporter's identical loop) never actually ran for these tables. The
+    // demo dataset's bulk attachment fixture (`seedBulkAttachmentFixtures`,
+    // 502 rows) exists specifically to make that a lie going forward.
+    expect(sourceExportPageCounts.get("attachments")).toBeGreaterThan(1);
+    expect(sourceExportPageCounts.get("assets")).toBeGreaterThan(1);
+    expect((sourceTables.get("attachments") ?? []).length).toBeGreaterThan(500);
+    expect((sourceTables.get("assets") ?? []).length).toBeGreaterThan(500);
   });
 
   it("every dump-eligible table round-trips with an identical row count", () => {

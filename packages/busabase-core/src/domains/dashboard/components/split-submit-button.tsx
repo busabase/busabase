@@ -146,7 +146,7 @@ export function SplitSubmitButton({
 
       {open ? (
         <div
-          className={`absolute right-0 z-20 min-w-max rounded-md border border-border/70 bg-popover py-1 shadow-lg ${
+          className={`absolute right-0 z-40 min-w-max rounded-md border border-border/70 bg-popover py-1 shadow-lg ${
             dropdownPosition === "below" ? "top-full mt-1.5" : "bottom-full mb-1.5"
           }`}
         >

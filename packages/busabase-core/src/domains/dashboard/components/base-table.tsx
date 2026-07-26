@@ -58,9 +58,9 @@ import { useSearch } from "wouter";
 import { fmt, useCoreI18n, useIString } from "../../../i18n";
 import { fieldColumnWidth, fieldDisplayKind, fieldLabel } from "../../base/field-types";
 import { resolveEmbedPreview } from "../../base/utils/embed";
+import { parseWhiteboardFieldValue } from "../../base/utils/whiteboard-value";
 import { getRecordTitle } from "../helpers/change-request";
 import {
-  fieldPreviewText,
   getAttachmentRefs,
   getFieldChipEntries,
   getFieldPreviewText,
@@ -78,13 +78,18 @@ import {
   resetViewFieldWidth,
   setViewFieldWidth,
 } from "../helpers/view-config";
-import type { RecordsPagination, ViewFormPayload, ViewSubmitOptions } from "../helpers/view-types";
+import type {
+  RecordSubmitOptions,
+  RecordsPagination,
+  ViewFormPayload,
+  ViewSubmitOptions,
+} from "../helpers/view-types";
 import { useIsAnonymousVisitor } from "../visitor-context";
 import { BusaBaseCalendar } from "./base-calendar";
 import { BusaBaseGallery } from "./base-gallery";
 import { BusaBaseGantt } from "./base-gantt";
 import { BusaBaseKanban } from "./base-kanban";
-import { FieldBadge } from "./field-preview";
+import { FieldBadge, WhiteboardThumbnail } from "./field-preview";
 import { ConfirmActionDialog } from "./primitives";
 import { SplitSubmitButton } from "./split-submit-button";
 import {
@@ -129,11 +134,17 @@ const baseTableStickyClassName =
 const baseTableHeaderStickyClassName =
   "sticky left-0 z-20 border-border/70 border-r bg-muted shadow-sm";
 
+// The right-hand sticky "record status" column is disabled for live rows: every
+// record rendered there is `status: "active"` (archived ones render in their own
+// block further down), so the column was a constant pill costing 112px of
+// horizontal room on every base. Archived rows keep this trailing cell — it
+// carries the "Archived" pill *and* the Restore button — so the cell class stays
+// while the column header is commented out below.
 const baseTableStatusCellClassName =
   "flex min-w-0 items-center overflow-hidden border-border/70 border-l bg-background px-2 md:sticky md:right-0 md:z-10 group-hover:bg-muted";
 
-const baseTableStatusHeaderClassName =
-  "flex items-center border-border/70 border-l bg-muted px-2 font-medium md:sticky md:right-0 md:z-30";
+// const baseTableStatusHeaderClassName =
+//   "flex items-center border-border/70 border-l bg-muted px-2 font-medium md:sticky md:right-0 md:z-30";
 
 function FieldColumnHeader({
   actionsDisabled,
@@ -524,10 +535,22 @@ export const applyViewConfigToRecords = (records: RecordVO[], config?: ViewConfi
   return [...filtered].sort((left, right) => compareRecordsByViewSort(left, right, config));
 };
 
+// Filter/sort compare against the text the user actually SEES in the cell, not
+// the raw stored value — so `getFieldPreviewText` (field-aware) rather than the
+// bare `fieldPreviewText`. Without the field def, a `select` matches its choice
+// id instead of its label (invisible in English demos where id ≈ name, broken
+// outright for a localized label), and an array-valued field — `multiselect`, or
+// a `values` lookup — stringifies to pretty-printed multi-line JSON that no
+// user-typed substring will ever match.
 const recordMatchesViewFilter = (record: RecordVO, filter: ViewFilterVO) => {
   const value = record.headCommit.fields[filter.fieldSlug];
-  const text = fieldPreviewText(value).toLowerCase();
-  const expected = fieldPreviewText(filter.value).toLowerCase();
+  const field = record.base.fields.find((item) => item.slug === filter.fieldSlug);
+  const text = getFieldPreviewText(field, value).toLowerCase();
+  // BOTH sides must go through the same formatter. `filter.value` is not always
+  // free text: for a `select`/`multiselect` the editor stores the CHOICE ID
+  // ("needs-review") while the cell displays the label ("Needs review", or 待审核
+  // once localized). Comparing a formatted cell against a raw id matches nothing.
+  const expected = getFieldPreviewText(field, filter.value).toLowerCase();
 
   if (filter.operator === "contains") {
     return text.includes(expected);
@@ -552,8 +575,10 @@ const recordMatchesViewFilter = (record: RecordVO, filter: ViewFilterVO) => {
 
 const compareRecordsByViewSort = (left: RecordVO, right: RecordVO, config: ViewConfigVO) => {
   for (const sort of config.sorts) {
-    const leftValue = fieldPreviewText(left.headCommit.fields[sort.fieldSlug]);
-    const rightValue = fieldPreviewText(right.headCommit.fields[sort.fieldSlug]);
+    const leftField = left.base.fields.find((item) => item.slug === sort.fieldSlug);
+    const rightField = right.base.fields.find((item) => item.slug === sort.fieldSlug);
+    const leftValue = getFieldPreviewText(leftField, left.headCommit.fields[sort.fieldSlug]);
+    const rightValue = getFieldPreviewText(rightField, right.headCommit.fields[sort.fieldSlug]);
     const result = leftValue.localeCompare(rightValue, undefined, {
       numeric: true,
       sensitivity: "base",
@@ -592,6 +617,9 @@ function BusaBaseRecordRow({
   relationRecords,
   rowIndex,
   style,
+  selectable,
+  selected,
+  onToggleSelected,
 }: {
   record: RecordVO;
   fields: BaseFieldVO[];
@@ -600,7 +628,11 @@ function BusaBaseRecordRow({
   relationRecords: RecordVO[];
   rowIndex: number;
   style?: CSSProperties;
+  selectable?: boolean;
+  selected?: boolean;
+  onToggleSelected?: (record: RecordVO) => void;
 }) {
+  const messages = useCoreI18n();
   const currentRecordHref = useHrefWithCurrentSearch(
     `/base/${baseSlug ?? record.base.slug}/${record.id}`,
   );
@@ -613,6 +645,22 @@ function BusaBaseRecordRow({
       style={{ gridTemplateColumns: columnTemplate, ...style }}
       tabIndex={-1}
     >
+      {selectable ? (
+        <div
+          className="flex items-center justify-center border-border/40 border-r"
+          role="gridcell"
+          tabIndex={-1}
+        >
+          <input
+            aria-label={messages.base.selectRecord}
+            checked={Boolean(selected)}
+            className="size-3.5 cursor-pointer accent-foreground"
+            data-testid="base-record-select"
+            onChange={() => onToggleSelected?.(record)}
+            type="checkbox"
+          />
+        </div>
+      ) : null}
       {fields.map((field, index) => (
         <RecordTableCell
           currentRecordHref={currentRecordHref}
@@ -623,12 +671,14 @@ function BusaBaseRecordRow({
           records={relationRecords}
         />
       ))}
+      {/* Record-status cell disabled — see baseTableStatusCellClassName above.
       <div className={baseTableStatusCellClassName} role="gridcell" tabIndex={-1}>
         <span className="inline-flex max-w-full items-center gap-1.5 truncate rounded-full bg-muted/55 px-2 py-0.5 text-muted-foreground text-xs capitalize">
           <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-current opacity-55" />
           <span className="truncate">{record.status}</span>
         </span>
       </div>
+      */}
     </div>
   );
 }
@@ -659,14 +709,12 @@ function BusaBaseTableRowsSkeleton({ columnTemplate }: { columnTemplate: string 
           key={rowId}
           style={{ gridTemplateColumns: columnTemplate }}
         >
-          {columnTemplate.split(" ").map((column, columnIndex, columns) => (
+          {columnTemplate.split(" ").map((column, columnIndex) => (
             <div
               className={
                 columnIndex === 0
                   ? baseTableStickyClassName
-                  : columnIndex === columns.length - 1
-                    ? baseTableStatusCellClassName
-                    : "flex h-full items-center border-border/40 border-r"
+                  : "flex h-full items-center border-border/40 border-r"
               }
               // biome-ignore lint/suspicious/noArrayIndexKey: fixed-order grid cells, no stable id
               key={`${rowId}-${column}-${columnIndex}`}
@@ -694,6 +742,7 @@ export function BusaBaseTable({
   base,
   onCreateView,
   onDeleteView,
+  onDeleteRecords,
   onRestoreView,
   onRestoreRecord,
   onMoveRecord,
@@ -716,6 +765,17 @@ export function BusaBaseTable({
     options?: ViewSubmitOptions,
   ) => Promise<void>;
   onDeleteView: (view: ViewVO) => Promise<void>;
+  /**
+   * Bulk delete for the multi-select toolbar. Creates one delete Change
+   * Request per selected record (there is no batch-delete backend endpoint),
+   * optionally auto-approving and merging each one. Resolves with an
+   * ok/failed tally rather than throwing so a partial failure can still be
+   * summarized instead of silently reported as a full success.
+   */
+  onDeleteRecords?: (
+    records: RecordVO[],
+    options?: RecordSubmitOptions,
+  ) => Promise<{ ok: number; failed: number }>;
   onRestoreView?: (view: ViewVO) => Promise<void>;
   onRestoreRecord?: (record: RecordVO) => Promise<void>;
   /** Kanban drag-to-move: set one field on a record and auto-merge, no navigation. */
@@ -751,6 +811,9 @@ export function BusaBaseTable({
     placement: "before" | "after";
     slug: string;
   } | null>(null);
+  const [selectedRecordIds, setSelectedRecordIds] = useState<Set<string>>(new Set());
+  const [isBulkDeleting, setIsBulkDeleting] = useState<"immediate" | "changeRequest" | null>(null);
+  const [bulkDeleteError, setBulkDeleteError] = useState<string | null>(null);
   // A public read-only visitor gets no "New record" affordance — the create
   // route/mutation isn't on the anonymous allowlist, so it could only ever fail.
   const isAnon = useIsAnonymousVisitor();
@@ -764,7 +827,17 @@ export function BusaBaseTable({
     const width = columnWidthDrafts[field.slug] ?? activeView?.config.fieldWidths?.[field.slug];
     return width === undefined ? getRecordTableColumnWidth(field, index) : `${width}px`;
   });
-  const columnTemplate = [...fieldColumns, "112px"].join(" ");
+  // Multi-select + bulk delete only make sense where there's a delete handler
+  // wired in and the visitor can actually write (an anonymous read-only
+  // visitor would only ever see the checkboxes fail).
+  const selectionEnabled = Boolean(onDeleteRecords) && !isAnon;
+  const columnTemplate = [...(selectionEnabled ? ["36px"] : []), ...fieldColumns].join(" ");
+  // Archived rows still need the trailing 112px track that the record-status
+  // column used to provide — it holds their "Archived" pill and Restore button.
+  const archivedColumnTemplate = `${columnTemplate} 112px`;
+  const selectedRecords = records.filter((record) => selectedRecordIds.has(record.id));
+  const allRecordsSelected =
+    selectionEnabled && records.length > 0 && selectedRecords.length === records.length;
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: a merged View revision invalidates transient drag/resize state.
   useEffect(() => {
@@ -772,6 +845,54 @@ export function BusaBaseTable({
     setDraggingFieldSlug(null);
     setDropTarget(null);
   }, [activeView?.id, activeView?.updatedAt]);
+
+  // Switching base/view invalidates the current selection entirely; within
+  // the same base, prune ids for records no longer in the loaded page (e.g.
+  // after a merge/refresh) instead of blowing away the whole selection.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: only base/view identity should reset selection wholesale.
+  useEffect(() => {
+    setSelectedRecordIds(new Set());
+    setBulkDeleteError(null);
+  }, [base?.id, activeView?.id]);
+
+  useEffect(() => {
+    setSelectedRecordIds((current) => {
+      if (current.size === 0) return current;
+      const recordIds = new Set(records.map((record) => record.id));
+      const next = new Set([...current].filter((id) => recordIds.has(id)));
+      return next.size === current.size ? current : next;
+    });
+  }, [records]);
+
+  const toggleRecordSelected = (record: RecordVO) => {
+    setSelectedRecordIds((current) => {
+      const next = new Set(current);
+      if (next.has(record.id)) {
+        next.delete(record.id);
+      } else {
+        next.add(record.id);
+      }
+      return next;
+    });
+  };
+
+  const toggleSelectAllRecords = () => {
+    setSelectedRecordIds(allRecordsSelected ? new Set() : new Set(records.map((r) => r.id)));
+  };
+
+  const runBulkDelete = async (mergeImmediately: boolean) => {
+    if (!onDeleteRecords || selectedRecords.length === 0) return;
+    setBulkDeleteError(null);
+    setIsBulkDeleting(mergeImmediately ? "immediate" : "changeRequest");
+    try {
+      await onDeleteRecords(selectedRecords, { mergeImmediately });
+      setSelectedRecordIds(new Set());
+    } catch (error) {
+      setBulkDeleteError(error instanceof Error ? error.message : messages.shell.operationFailed);
+    } finally {
+      setIsBulkDeleting(null);
+    }
+  };
 
   const quickUpdateView = async (config: ViewConfigVO): Promise<boolean> => {
     if (!activeView || quickUpdatingFieldId) {
@@ -1095,8 +1216,49 @@ export function BusaBaseTable({
         />
       ) : (
         <div className="overflow-x-auto pb-5">
+          {selectionEnabled && selectedRecords.length > 0 ? (
+            <div
+              className="mb-2 flex items-center gap-3 rounded-md border border-border/60 bg-muted/40 px-3 py-2 text-xs"
+              data-testid="base-bulk-toolbar"
+            >
+              <span className="font-medium text-foreground">
+                {fmt(messages.base.selectedRecordsCount, { count: selectedRecords.length })}
+              </span>
+              <button
+                className="text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+                onClick={() => setSelectedRecordIds(new Set())}
+                type="button"
+              >
+                {messages.base.clearSelection}
+              </button>
+              <div className="ml-auto">
+                <SplitSubmitButton
+                  changeRequestAction={{
+                    label: fmt(messages.base.submitDeleteRecordsRequest, {
+                      count: selectedRecords.length,
+                      plural: selectedRecords.length === 1 ? "" : "s",
+                    }),
+                    loadingLabel: messages.base.submittingDeleteRecordsRequest,
+                    isLoading: isBulkDeleting === "changeRequest",
+                    onSubmit: () => void runBulkDelete(false),
+                  }}
+                  dropdownPosition="below"
+                  hint={messages.base.bulkDeleteHint}
+                  immediateAction={{
+                    label: fmt(messages.base.deleteRecordsNow, { count: selectedRecords.length }),
+                    loadingLabel: messages.base.deletingRecordsNow,
+                    isLoading: isBulkDeleting === "immediate",
+                    onSubmit: () => void runBulkDelete(true),
+                  }}
+                />
+              </div>
+            </div>
+          ) : null}
+          {bulkDeleteError ? (
+            <div className="mb-2 text-red-700 text-xs">{bulkDeleteError}</div>
+          ) : null}
           <div
-            aria-colcount={fields.length + 1}
+            aria-colcount={fields.length + (selectionEnabled ? 1 : 0)}
             aria-rowcount={1 + records.length + (showArchivedRecords ? archivedRecords.length : 0)}
             className="w-max min-w-full border-border/50 border-l border-t"
             data-testid="base-records-grid"
@@ -1109,6 +1271,22 @@ export function BusaBaseTable({
               style={{ gridTemplateColumns: columnTemplate }}
               tabIndex={-1}
             >
+              {selectionEnabled ? (
+                <div
+                  className="flex items-center justify-center border-border/50 border-r"
+                  role="columnheader"
+                  tabIndex={-1}
+                >
+                  <input
+                    aria-label={messages.base.selectAllRecords}
+                    checked={allRecordsSelected}
+                    className="size-3.5 cursor-pointer accent-foreground"
+                    data-testid="base-select-all"
+                    onChange={toggleSelectAllRecords}
+                    type="checkbox"
+                  />
+                </div>
+              ) : null}
               {fields.map((field, index) => (
                 <FieldColumnHeader
                   actionsDisabled={quickUpdatingFieldId !== null}
@@ -1221,6 +1399,7 @@ export function BusaBaseTable({
                   sticky={index === 0}
                 />
               ))}
+              {/* Record-status column header disabled — see baseTableStatusCellClassName above.
               <div
                 aria-label={messages.base.recordStatus}
                 className={baseTableStatusHeaderClassName}
@@ -1229,6 +1408,7 @@ export function BusaBaseTable({
               >
                 {messages.base.recordStatus}
               </div>
+              */}
             </div>
             {pagination?.isLoading ? (
               <BusaBaseTableRowsSkeleton columnTemplate={columnTemplate} />
@@ -1242,10 +1422,12 @@ export function BusaBaseTable({
                   tabIndex={-1}
                 >
                   <div
-                    aria-colspan={fields.length + 1}
+                    aria-colspan={fields.length + (selectionEnabled ? 1 : 0)}
                     className="flex items-center px-2 text-muted-foreground text-sm"
                     role="gridcell"
-                    style={{ gridColumn: `span ${fields.length + 1}` }}
+                    style={{
+                      gridColumn: `span ${fields.length + (selectionEnabled ? 1 : 0)}`,
+                    }}
                     tabIndex={-1}
                   >
                     {messages.base.emptyRecords}
@@ -1267,9 +1449,12 @@ export function BusaBaseTable({
                       columnTemplate={columnTemplate}
                       fields={fields}
                       key={record.id}
+                      onToggleSelected={toggleRecordSelected}
                       record={record}
                       relationRecords={relationRecords}
                       rowIndex={virtualRow.index + 2}
+                      selectable={selectionEnabled}
+                      selected={selectedRecordIds.has(record.id)}
                       style={{
                         position: "absolute",
                         top: 0,
@@ -1288,9 +1473,12 @@ export function BusaBaseTable({
                   columnTemplate={columnTemplate}
                   fields={fields}
                   key={record.id}
+                  onToggleSelected={toggleRecordSelected}
                   record={record}
                   relationRecords={relationRecords}
                   rowIndex={index + 2}
+                  selectable={selectionEnabled}
+                  selected={selectedRecordIds.has(record.id)}
                 />
               ))
             )}
@@ -1301,9 +1489,12 @@ export function BusaBaseTable({
                     className="group grid h-12 items-stretch border-border/40 border-b bg-muted/10 text-sm opacity-60 transition-colors hover:opacity-100"
                     key={record.id}
                     role="row"
-                    style={{ gridTemplateColumns: columnTemplate }}
+                    style={{ gridTemplateColumns: archivedColumnTemplate }}
                     tabIndex={-1}
                   >
+                    {selectionEnabled ? (
+                      <div className="border-border/40 border-r" role="gridcell" tabIndex={-1} />
+                    ) : null}
                     {fields.map((field, index) => (
                       <RecordTableCell
                         currentRecordHref={mergeSearchIntoHref(
@@ -1955,6 +2146,29 @@ function RecordTableCellContent({
           </span>
         ) : null}
       </div>
+    );
+  }
+
+  if (kind === "whiteboard") {
+    const { previewSvg } = parseWhiteboardFieldValue(rawValue);
+    if (!previewSvg) {
+      return (
+        <div className="min-w-0 truncate py-1 text-muted-foreground text-sm" title="-">
+          -
+        </div>
+      );
+    }
+    return (
+      <Link
+        className="flex min-w-0 items-center py-1"
+        href={currentRecordHref}
+        title={fieldLabel(field.type)}
+      >
+        <WhiteboardThumbnail
+          className="h-8 w-14 shrink-0 [&_svg]:h-full [&_svg]:w-full [&_svg]:object-contain"
+          previewSvg={previewSvg}
+        />
+      </Link>
     );
   }
 

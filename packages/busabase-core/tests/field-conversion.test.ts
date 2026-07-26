@@ -356,6 +356,12 @@ describe("toText edge branches", () => {
   it("ai_tags → non-array value stringified", () => {
     expect(toText(99, "ai_tags")).toBe("99");
   });
+
+  it("whiteboard → short placeholder (structured, not prose)", () => {
+    expect(
+      toText({ scene: { version: 1, elements: [], appState: {} }, previewSvg: "" }, "whiteboard"),
+    ).toBe("[Whiteboard]");
+  });
 });
 
 describe("fromText edge branches", () => {
@@ -395,6 +401,13 @@ describe("fromText edge branches", () => {
 
   it("→ ai_tags: empty string → empty array", () => {
     expect(fromText("", "ai_tags")).toEqual([]);
+  });
+
+  it("→ whiteboard: can't reconstruct a scene from text — degrades to an empty scene, doesn't throw", () => {
+    expect(fromText("some CSV cell value", "whiteboard")).toEqual({
+      scene: { version: 1, elements: [], appState: {} },
+      previewSvg: "",
+    });
   });
 });
 

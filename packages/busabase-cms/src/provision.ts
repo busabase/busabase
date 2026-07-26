@@ -2,11 +2,11 @@ import { BusabaseCmsSchemaDriftError, BusabaseCmsSetupError } from "./errors";
 import {
   BUSABASE_CMS_METADATA_KEY,
   BUSABASE_CMS_ROLES,
-  BUSABASE_CMS_SCHEMA_PROFILES,
   BUSABASE_CMS_SCHEMA_VERSION,
   type BusabaseCmsBaseIds,
   type BusabaseCmsBaseRole,
   type BusabaseCmsFieldDefinition,
+  type BusabaseCmsFieldsOverride,
   type BusabaseCmsFolderMetadata,
   type BusabaseCmsSchemaProfile,
   getBusabaseCmsBaseDefinition,
@@ -18,11 +18,24 @@ import type {
   BusabaseCmsSource,
 } from "./source";
 
+/**
+ * `profile` is a caller-chosen label persisted in Folder metadata and used only for
+ * mismatch detection (see `assertMetadataProfile`) — the SDK never branches on its value.
+ * A caller using a profile other than `"standard"` must supply `fieldsOverride` to describe
+ * that profile's actual field shape, and may list `legacyOptionalFields` to grandfather in a
+ * field that predates a later required-field tightening.
+ */
+export interface BusabaseCmsSchemaConfig {
+  profile: BusabaseCmsSchemaProfile;
+  fieldsOverride?: BusabaseCmsFieldsOverride;
+  legacyOptionalFields?: Array<{ role: BusabaseCmsBaseRole; slug: string }>;
+}
+
 interface FolderResolverOptions {
   source: BusabaseCmsSource;
   folderId: string;
   lazyCreate: boolean;
-  schemaProfile: BusabaseCmsSchemaProfile;
+  schema: BusabaseCmsSchemaConfig;
 }
 
 interface ProvisioningSource extends BusabaseCmsSource {
@@ -51,10 +64,7 @@ const parseMetadata = (folder: BusabaseCmsNode): BusabaseCmsFolderMetadata | nul
 
   const rawBases = raw.bases as Record<string, unknown>;
   const profile = raw.profile === undefined ? "standard" : raw.profile;
-  if (
-    typeof profile !== "string" ||
-    !BUSABASE_CMS_SCHEMA_PROFILES.includes(profile as BusabaseCmsSchemaProfile)
-  ) {
+  if (typeof profile !== "string" || profile.length === 0) {
     throw new BusabaseCmsSchemaDriftError(
       `Folder "${folder.name}" has unsupported Busabase CMS profile metadata`,
     );
@@ -237,7 +247,7 @@ const upperBoundIsCompatible = (actual: number | undefined, expected: number | u
 
 interface FieldDriftContext {
   role: BusabaseCmsBaseRole;
-  schemaProfile: BusabaseCmsSchemaProfile;
+  schema: BusabaseCmsSchemaConfig;
   allowLegacyExisting: boolean;
 }
 
@@ -246,9 +256,9 @@ const allowsLegacyOptionalRequiredField = (
   context: FieldDriftContext,
 ) =>
   context.allowLegacyExisting &&
-  context.schemaProfile === "buda" &&
-  context.role === "pages" &&
-  expected.slug === "body";
+  (context.schema.legacyOptionalFields ?? []).some(
+    (legacy) => legacy.role === context.role && legacy.slug === expected.slug,
+  );
 
 const fieldDrift = (
   actual: BusabaseCmsField,
@@ -312,10 +322,10 @@ const preflightBaseFields = async (
   source: ProvisioningSource,
   role: BusabaseCmsBaseRole,
   baseIds: Partial<BusabaseCmsBaseIds>,
-  schemaProfile: BusabaseCmsSchemaProfile,
+  schema: BusabaseCmsSchemaConfig,
   allowLegacyExisting: boolean,
 ) => {
-  const expected = getBusabaseCmsBaseDefinition(role, baseIds, schemaProfile);
+  const expected = getBusabaseCmsBaseDefinition(role, baseIds, schema.fieldsOverride);
   const baseId = baseIds[role];
   if (!baseId) throw new BusabaseCmsSetupError(`Busabase CMS ${role} Base was not resolved`);
   const base = await source.getBaseById(baseId);
@@ -328,7 +338,7 @@ const preflightBaseFields = async (
       missing.push({ role, baseId: base.id, field });
       continue;
     }
-    const drift = fieldDrift(actual, field, { role, schemaProfile, allowLegacyExisting });
+    const drift = fieldDrift(actual, field, { role, schema, allowLegacyExisting });
     if (field.type === "relation" && !field.options.targetBaseId) {
       drift.push("target Base cannot be validated before its CMS role is resolved");
     }
@@ -344,13 +354,13 @@ const preflightBaseFields = async (
 const preflightAllFields = async (
   source: ProvisioningSource,
   baseIds: BusabaseCmsBaseIds,
-  schemaProfile: BusabaseCmsSchemaProfile,
+  schema: BusabaseCmsSchemaConfig,
   allowLegacyExisting: boolean,
 ) => {
   const missing: MissingField[] = [];
   for (const role of BUSABASE_CMS_ROLES) {
     missing.push(
-      ...(await preflightBaseFields(source, role, baseIds, schemaProfile, allowLegacyExisting)),
+      ...(await preflightBaseFields(source, role, baseIds, schema, allowLegacyExisting)),
     );
   }
   return missing;
@@ -359,17 +369,17 @@ const preflightAllFields = async (
 const preflightResolvedFields = async (
   source: ProvisioningSource,
   baseIds: Partial<BusabaseCmsBaseIds>,
-  schemaProfile: BusabaseCmsSchemaProfile,
+  schema: BusabaseCmsSchemaConfig,
 ) => {
   for (const role of BUSABASE_CMS_ROLES) {
-    if (baseIds[role]) await preflightBaseFields(source, role, baseIds, schemaProfile, true);
+    if (baseIds[role]) await preflightBaseFields(source, role, baseIds, schema, true);
   }
 };
 
 const createMissingFields = async (
   source: LazyProvisioningSource,
   missing: MissingField[],
-  schemaProfile: BusabaseCmsSchemaProfile,
+  schema: BusabaseCmsSchemaConfig,
 ) => {
   for (const { role, baseId, field } of missing) {
     try {
@@ -382,7 +392,7 @@ const createMissingFields = async (
       }
       const drift = fieldDrift(actual, field, {
         role,
-        schemaProfile,
+        schema,
         allowLegacyExisting: false,
       });
       if (drift.length > 0) {
@@ -402,7 +412,7 @@ const createMissingFields = async (
       }
       const drift = fieldDrift(actual, field, {
         role,
-        schemaProfile,
+        schema,
         allowLegacyExisting: false,
       });
       if (drift.length > 0) {
@@ -435,9 +445,9 @@ const createMissingBase = async (
   folder: BusabaseCmsNode,
   role: BusabaseCmsBaseRole,
   baseIds: Partial<BusabaseCmsBaseIds>,
-  schemaProfile: BusabaseCmsSchemaProfile,
+  schema: BusabaseCmsSchemaConfig,
 ) => {
-  const definition = getBusabaseCmsBaseDefinition(role, baseIds, schemaProfile);
+  const definition = getBusabaseCmsBaseDefinition(role, baseIds, schema.fieldsOverride);
   try {
     const created = await source.createBase({
       parentNodeId: folder.id,
@@ -465,11 +475,11 @@ const saveMetadata = async (
   source: ProvisioningSource,
   folder: BusabaseCmsNode,
   baseIds: BusabaseCmsBaseIds,
-  schemaProfile: BusabaseCmsSchemaProfile,
+  schema: BusabaseCmsSchemaConfig,
 ) => {
   const value: BusabaseCmsFolderMetadata = {
     schemaVersion: BUSABASE_CMS_SCHEMA_VERSION,
-    profile: schemaProfile,
+    profile: schema.profile,
     bases: baseIds,
   };
   try {
@@ -482,7 +492,7 @@ const saveMetadata = async (
     const concurrent = refreshed ? parseMetadata(refreshed) : null;
     if (
       concurrent &&
-      (concurrent.profile ?? "standard") === schemaProfile &&
+      (concurrent.profile ?? "standard") === schema.profile &&
       BUSABASE_CMS_ROLES.every((role) => concurrent.bases[role] === baseIds[role])
     ) {
       return;
@@ -497,16 +507,16 @@ const resolveFolderBases = async ({
   source: rawSource,
   folderId,
   lazyCreate,
-  schemaProfile,
+  schema,
 }: FolderResolverOptions): Promise<BusabaseCmsBaseIds> => {
   const source = requireProvisioningSource(rawSource);
   const folder = await getFolder(source, folderId);
   let nodes = await getDirectBaseNodes(source, folderId);
   const metadata = parseMetadata(folder);
   if (metadata) {
-    assertMetadataProfile(folder, metadata, schemaProfile);
+    assertMetadataProfile(folder, metadata, schema.profile);
     await validateMetadataBases(source, folder, nodes, metadata.bases);
-    const missing = await preflightAllFields(source, metadata.bases, schemaProfile, true);
+    const missing = await preflightAllFields(source, metadata.bases, schema, true);
     if (missing.length > 0 && !lazyCreate) {
       const first = missing[0];
       throw new BusabaseCmsSetupError(
@@ -514,8 +524,8 @@ const resolveFolderBases = async ({
       );
     }
     if (missing.length > 0) {
-      await createMissingFields(requireLazyProvisioningSource(source), missing, schemaProfile);
-      const remaining = await preflightAllFields(source, metadata.bases, schemaProfile, true);
+      await createMissingFields(requireLazyProvisioningSource(source), missing, schema);
+      const remaining = await preflightAllFields(source, metadata.bases, schema, true);
       if (remaining.length > 0) {
         throw new BusabaseCmsSetupError("Busabase did not materialize the complete CMS schema");
       }
@@ -527,7 +537,7 @@ const resolveFolderBases = async ({
   const createdRoles = new Set<BusabaseCmsBaseRole>();
   // Validate every existing Base before the first direct schema write. Missing fields are
   // collected again after all Base IDs are known, so a later drift can never leave partial fields.
-  await preflightResolvedFields(source, resolved, schemaProfile);
+  await preflightResolvedFields(source, resolved, schema);
   for (const role of BUSABASE_CMS_ROLES) {
     if (resolved[role]) continue;
     if (!lazyCreate) {
@@ -536,7 +546,7 @@ const resolveFolderBases = async ({
       );
     }
     const writable = requireLazyProvisioningSource(source);
-    const created = await createMissingBase(writable, folder, role, resolved, schemaProfile);
+    const created = await createMissingBase(writable, folder, role, resolved, schema);
     resolved[role] = created.id;
     createdRoles.add(role);
     nodes = await getDirectBaseNodes(source, folderId);
@@ -545,9 +555,9 @@ const resolveFolderBases = async ({
   const baseIds = resolved as BusabaseCmsBaseIds;
   await validateMetadataBases(source, folder, nodes, baseIds);
   for (const role of createdRoles) {
-    await preflightBaseFields(source, role, baseIds, schemaProfile, false);
+    await preflightBaseFields(source, role, baseIds, schema, false);
   }
-  const missing = await preflightAllFields(source, baseIds, schemaProfile, true);
+  const missing = await preflightAllFields(source, baseIds, schema, true);
   if (missing.length > 0 && !lazyCreate) {
     const first = missing[0];
     throw new BusabaseCmsSetupError(
@@ -555,13 +565,13 @@ const resolveFolderBases = async ({
     );
   }
   if (missing.length > 0) {
-    await createMissingFields(requireLazyProvisioningSource(source), missing, schemaProfile);
-    const remaining = await preflightAllFields(source, baseIds, schemaProfile, true);
+    await createMissingFields(requireLazyProvisioningSource(source), missing, schema);
+    const remaining = await preflightAllFields(source, baseIds, schema, true);
     if (remaining.length > 0) {
       throw new BusabaseCmsSetupError("Busabase did not materialize the complete CMS schema");
     }
   }
-  await saveMetadata(source, folder, baseIds, schemaProfile);
+  await saveMetadata(source, folder, baseIds, schema);
   return baseIds;
 };
 

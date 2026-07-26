@@ -25,7 +25,10 @@ export type BusabaseCmsFieldType =
   | "ai_tags"
   | "code"
   | "yaml"
-  | "json";
+  | "json"
+  | "formula"
+  | "lookup"
+  | "whiteboard";
 
 export interface BusabaseCmsFieldOptions {
   attachment?: {
@@ -109,6 +112,16 @@ export interface BusabaseCmsSource {
     records: BusabaseCmsRecord[];
     nextCursor: string | null;
   }>;
+  /**
+   * Point lookup by an exact field value, scoped to one Base — lets callers with a
+   * unique key per Base (a `path`, a `slug`) skip paging through every record just to
+   * find one. Optional: sources that don't implement it fall back to list+find.
+   */
+  getRecordByField?: (input: {
+    baseId: string;
+    fieldSlug: string;
+    valueText: string;
+  }) => Promise<BusabaseCmsRecord | null>;
 }
 
 export interface BusabaseCmsClient {
@@ -131,6 +144,11 @@ export interface BusabaseCmsClient {
       records: BusabaseCmsRecord[];
       nextCursor: string | null;
     }>;
+    getByField?: (input: {
+      baseId: string;
+      fieldSlug: string;
+      valueText: string;
+    }) => Promise<BusabaseCmsRecord | null>;
   };
 }
 
@@ -161,6 +179,9 @@ export const createBusabaseCmsSource = (
   createField: async (input) => client.bases.createField(input),
   updateNodeMetadata: async (input) => client.nodes.updateMetadata(input),
   listRecordsPage: async (input) => client.records.listPaged(input),
+  getRecordByField: client.records.getByField
+    ? async (input) => client.records.getByField?.(input) ?? null
+    : undefined,
 });
 
 export const createBusabaseCmsSourceFromConfig = (config?: BusabaseConfig): BusabaseCmsSource =>

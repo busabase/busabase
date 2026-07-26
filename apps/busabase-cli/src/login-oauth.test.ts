@@ -96,9 +96,7 @@ describe("runLogin --oauth (PKCE loopback)", () => {
     expect(tokenBody).toMatchObject({ grant_type: "authorization_code", code: "auth_code_123" });
     expect(String(tokenBody.code_verifier)).toBeTruthy();
     expect(authorizeUrl.searchParams.get("code_challenge_method")).toBe("S256");
-    // Force re-auth so `busabase login` never silently reuses whatever
-    // session the default browser already has live for a different account.
-    expect(authorizeUrl.searchParams.get("prompt")).toBe("login");
+    expect(authorizeUrl.searchParams.get("prompt")).toBeNull();
     expect(authorizeUrl.searchParams.get("client_platform")).toBeNull();
     expect(authorizeUrl.searchParams.get("resource")).toBe(`${CLOUD}/api/v1`);
 

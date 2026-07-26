@@ -10,6 +10,7 @@ import { driveRouter } from "./domains/drive/router";
 import { dumpRouter } from "./domains/dump/router";
 import { fileRouter } from "./domains/file-node/router";
 import { folderRouter } from "./domains/folder/router";
+import { formRouter } from "./domains/form/router";
 import { installRouter } from "./domains/install/router";
 import { skillRouter } from "./domains/skill/router";
 import { vaultRouter } from "./domains/vault/router";
@@ -210,6 +211,7 @@ const busabaseRouterImpl = busabase.router({
   files: fileRouter,
   docs: docRouter,
   folders: folderRouter,
+  forms: formRouter,
   assets: assetsRouter,
   vault: vaultRouter,
   webhooks: webhookRouter,

@@ -46,6 +46,12 @@ import {
   FINANCE_RECORDS,
   FINANCE_VIEWS,
 } from "./scenarios/finance-invoice";
+import {
+  FORMULA_LAB_BASES,
+  FORMULA_LAB_FOLDERS,
+  FORMULA_LAB_RECORDS,
+  FORMULA_LAB_VIEWS,
+} from "./scenarios/formula-functions-lab";
 import { enNodeTypesScenario } from "./scenarios/node-types.en";
 import {
   AGENT_GALLERY_BASES,
@@ -54,11 +60,18 @@ import {
 } from "./scenarios/product-gallery";
 import { ROADMAP_BASES, ROADMAP_RECORDS, ROADMAP_VIEWS } from "./scenarios/product-roadmap";
 import { readmeScenario } from "./scenarios/readme-scenarios";
+import {
+  STOCK_PICKING_BASES,
+  STOCK_PICKING_FOLDERS,
+  STOCK_PICKING_RECORDS,
+  STOCK_PICKING_VIEWS,
+} from "./scenarios/stock-picking";
 import type {
   SeedBaseDef,
   SeedChangeRequestDef,
   SeedFieldDef,
   SeedFolderDef,
+  SeedFormDef,
   SeedRecordDef,
   SeedRichNodeDef,
   SeedScenario,
@@ -118,11 +131,18 @@ export const DEMO_CRM_DEALS_BASE_NODE_ID = "nod_base_crm_deals";
 export const DEMO_DOCS_FOLDER_NODE_ID = "nod_docs";
 export const DEMO_FILES_FOLDER_NODE_ID = "nod_files";
 
-const BLOG_APPROVAL_RECORD_ID = "rec_seed_blog_approval";
+export const BLOG_APPROVAL_RECORD_ID = "rec_seed_blog_approval";
 const BLOG_APPROVAL_COMMIT_ID = "cmt_seed_blog_approval";
 const BLOG_PRIVATE_RECORD_ID = "rec_seed_blog_private";
 const BLOG_PRIVATE_COMMIT_ID = "cmt_seed_blog_private";
 const SOCIAL_THREAD_RECORD_ID = "rec_seed_social_thread";
+
+// Real binary-image fixture (see `logic/seed.ts`'s `seedImageAssetFixture` +
+// `demo/image-fixture.ts`) — wired into `BLOG_APPROVAL_RECORD_ID`'s
+// `cover_image` field below via a real `assetId`, instead of the plain string
+// `url` placeholders every other `cover_image` in this file uses.
+export const COVER_IMAGE_FIXTURE_ATTACHMENT_ID = "att_blog_cover_agents_demo_png";
+export const COVER_IMAGE_FIXTURE_ASSET_ID = "ast_blog_cover_agents_demo_png";
 const SOCIAL_THREAD_COMMIT_ID = "cmt_seed_social_thread";
 const SOCIAL_STALE_RECORD_ID = "rec_seed_social_stale";
 const SOCIAL_STALE_COMMIT_ID = "cmt_seed_social_stale";
@@ -137,6 +157,84 @@ const MEDIA_CLIP_COMMIT_ID = "cmt_seed_media_clip_review";
 const FIELD_TYPE_LAB_RECORD_ID = "rec_seed_field_type_lab";
 const FIELD_TYPE_LAB_COMMIT_ID = "cmt_seed_field_type_lab";
 const FIELD_TYPE_LAB_VIEW_ID = "viw_seed_field_type_lab_all";
+
+// `whiteboard` field demo values — a `{ scene, previewSvg }` composite (see
+// domains/base/utils/whiteboard-value.ts): `scene` is a small, valid
+// Excalidraw document (a filled rectangle + a text label) and `previewSvg` is
+// its corresponding hand-authored static SVG snapshot (seed data can't run a
+// browser to call Excalidraw's own `exportToSvg`, so this approximates what
+// that export would produce — the same static image the read-only table
+// cell / Record Detail view render).
+const fieldTypeLabWhiteboardValue = (fill: string, label: string) => ({
+  scene: {
+    version: 1,
+    elements: [
+      {
+        id: "el_seed_field_lab_wb_rect",
+        type: "rectangle",
+        x: 40,
+        y: 40,
+        width: 220,
+        height: 120,
+        angle: 0,
+        strokeColor: "#1e1e1e",
+        backgroundColor: fill,
+        fillStyle: "solid",
+        strokeWidth: 2,
+        roughness: 1,
+        opacity: 100,
+        seed: 1234567,
+        version: 1,
+        versionNonce: 1,
+        isDeleted: false,
+        groupIds: [],
+        frameId: null,
+        roundness: { type: 3 },
+        boundElements: null,
+        updated: 1,
+        link: null,
+        locked: false,
+      },
+      {
+        id: "el_seed_field_lab_wb_text",
+        type: "text",
+        x: 60,
+        y: 85,
+        width: 180,
+        height: 25,
+        angle: 0,
+        strokeColor: "#1e1e1e",
+        backgroundColor: "transparent",
+        fillStyle: "solid",
+        strokeWidth: 2,
+        roughness: 1,
+        opacity: 100,
+        seed: 7654321,
+        version: 1,
+        versionNonce: 1,
+        isDeleted: false,
+        groupIds: [],
+        frameId: null,
+        roundness: null,
+        boundElements: null,
+        updated: 1,
+        link: null,
+        locked: false,
+        text: label,
+        fontSize: 20,
+        fontFamily: 1,
+        textAlign: "left",
+        verticalAlign: "top",
+        baseline: 18,
+        containerId: null,
+        originalText: label,
+        lineHeight: 1.25,
+      },
+    ],
+    appState: { viewBackgroundColor: "#ffffff" },
+  },
+  previewSvg: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 200" width="300" height="200"><rect width="300" height="200" fill="#ffffff"/><rect x="40" y="40" width="220" height="120" rx="8" fill="${fill}" stroke="#1e1e1e" stroke-width="2"/><text x="60" y="105" font-family="sans-serif" font-size="20" fill="#1e1e1e">${label}</text></svg>`,
+});
 // CRM record ids (Companies ← Contacts, Companies ← Deals → Contacts).
 const CRM_COMPANY_ACME_ID = "rec_seed_crm_company_acme";
 const CRM_COMPANY_NORTHWIND_ID = "rec_seed_crm_company_northwind";
@@ -173,6 +271,8 @@ export const DEMO_FOLDERS: SeedFolderDef[] = [
     position: 2,
   },
   ...FINANCE_FOLDERS,
+  ...STOCK_PICKING_FOLDERS,
+  ...FORMULA_LAB_FOLDERS,
   ...(readmeScenario.folders ?? []),
   {
     nodeId: DEMO_LAB_FOLDER_NODE_ID,
@@ -527,6 +627,14 @@ const fieldTypeLabFields: SeedFieldDef[] = [
     type: "code",
     required: false,
     options: { code: { language: "typescript" } },
+  },
+  {
+    id: "bsf_lab_whiteboard",
+    slug: "whiteboard",
+    name: "Whiteboard",
+    type: "whiteboard",
+    required: false,
+    options: {},
   },
   {
     id: "bsf_lab_attachment",
@@ -973,6 +1081,8 @@ export const DEMO_BASES: SeedBaseDef[] = [
     fields: dealFields,
   },
   ...FINANCE_BASES,
+  ...STOCK_PICKING_BASES,
+  ...FORMULA_LAB_BASES,
   ...DIRECTORY_LISTINGS_BASES,
   ...AGENT_GALLERY_BASES,
   ...ROADMAP_BASES,
@@ -1855,11 +1965,12 @@ export const DEMO_RECORDS: SeedRecordDef[] = [
       title: "AI agents are moving from demos into operator workflows",
       cover_image: [
         {
-          id: "att_blog_cover_agents",
-          attachmentId: "att_blog_cover_agents",
+          id: COVER_IMAGE_FIXTURE_ASSET_ID,
+          assetId: COVER_IMAGE_FIXTURE_ASSET_ID,
+          attachmentId: COVER_IMAGE_FIXTURE_ATTACHMENT_ID,
           fileName: "ai-agents-cover.png",
           mimeType: "image/png",
-          size: 220000,
+          size: 68,
           url: "/assets/readme/scenarios/canonical-base.png",
         },
       ],
@@ -2061,6 +2172,7 @@ export const DEMO_RECORDS: SeedRecordDef[] = [
       date: "2026-06-21",
       email: "qa@busabase.local",
       html: "<section><strong>HTML preview</strong><p>Rendered safely in field previews.</p></section>",
+      whiteboard: fieldTypeLabWhiteboardValue("#a5d8ff", "Launch plan"),
       code_json:
         '{\n  "model": "gpt-5-mini",\n  "temperature": 0.3,\n  "max_tokens": 2048,\n  "stream": true\n}',
       code_yaml:
@@ -2110,6 +2222,7 @@ export const DEMO_RECORDS: SeedRecordDef[] = [
       date: "2026-06-24",
       email: "draft-review@busabase.local",
       html: "<section><strong>Draft state</strong><p>Still queued — nothing rendered here has been approved yet.</p></section>",
+      whiteboard: fieldTypeLabWhiteboardValue("#ffd8a8", "Draft sketch"),
       code_json:
         '{\n  "model": "gpt-5-mini",\n  "temperature": 0.7,\n  "max_tokens": 512,\n  "stream": false\n}',
       code_yaml:
@@ -2158,6 +2271,7 @@ export const DEMO_RECORDS: SeedRecordDef[] = [
       date: "2026-06-26",
       email: "approved@busabase.local",
       html: "<section><strong>Approved</strong><p>Merged and now part of the trusted record.</p></section>",
+      whiteboard: fieldTypeLabWhiteboardValue("#b2f2bb", "Approved layout"),
       code_json:
         '{\n  "model": "gpt-5",\n  "temperature": 0.1,\n  "max_tokens": 4096,\n  "stream": true\n}',
       code_yaml:
@@ -2366,6 +2480,8 @@ export const DEMO_RECORDS: SeedRecordDef[] = [
   ...BULK_NEWSLETTERS,
   ...BULK_MEDIA,
   ...FINANCE_RECORDS,
+  ...STOCK_PICKING_RECORDS,
+  ...FORMULA_LAB_RECORDS,
   ...DIRECTORY_LISTINGS_RECORDS,
   ...AGENT_GALLERY_RECORDS,
   ...ROADMAP_RECORDS,
@@ -2467,6 +2583,8 @@ export const DEMO_VIEWS: SeedViewDef[] = [
     useCases: ["field-types"],
   },
   ...FINANCE_VIEWS,
+  ...STOCK_PICKING_VIEWS,
+  ...FORMULA_LAB_VIEWS,
   ...DIRECTORY_LISTINGS_VIEWS,
   ...AGENT_GALLERY_VIEWS,
   ...ROADMAP_VIEWS,
@@ -3135,6 +3253,12 @@ export const buildDemoDataset = (
     siblings.push(richNode);
     richNodesByFolder.set(richNode.folderNodeId, siblings);
   }
+  const formsByFolder = new Map<string, SeedFormDef[]>();
+  for (const form of scenario.forms ?? []) {
+    const siblings = formsByFolder.get(form.folderNodeId) ?? [];
+    siblings.push(form);
+    formsByFolder.set(form.folderNodeId, siblings);
+  }
   // Group the (use-case-filtered) bases under their sidebar folder; only emit a
   // folder that actually has bases.
   const folderNodes: NodeVO[] = (scenario.folders ?? [])
@@ -3176,6 +3300,20 @@ export const buildDemoDataset = (
           description: richNode.description,
           metadata: richNode.metadata,
           position: richNode.position,
+          createdAt: rootCreatedAt,
+          updatedAt: rootCreatedAt,
+          baseId: null,
+          children: [],
+        })),
+        ...(formsByFolder.get(folder.nodeId) ?? []).map((form) => ({
+          id: form.nodeId,
+          parentId: folder.nodeId,
+          type: "form" as const,
+          slug: form.slug,
+          name: form.name,
+          description: form.description,
+          metadata: {},
+          position: form.position,
           createdAt: rootCreatedAt,
           updatedAt: rootCreatedAt,
           baseId: null,
@@ -3590,4 +3728,77 @@ export const englishScenario: SeedScenario = withCmsDemoStandard({
   fileTreeNodes: enNodeTypesScenario.fileTreeNodes,
   richNodes: enNodeTypesScenario.richNodes,
   comments: enNodeTypesScenario.comments,
+  forms: [
+    {
+      nodeId: "nod_form_guest_post",
+      folderNodeId: DEMO_CMS_FOLDER_NODE_ID,
+      slug: "guest-post-form",
+      name: "Submit a Guest Post",
+      description:
+        "An agent-authored public form. Submissions land in the Blog Posts base as a pending ChangeRequest for the editors to review — nothing is published directly.",
+      position: 9,
+      formId: "frm_guest_post",
+      targetBaseId: DEMO_BLOG_BASE_ID,
+      bindings: [
+        { inputName: "title", fieldSlug: "title", required: true, label: "Post title" },
+        { inputName: "body", fieldSlug: "body", required: true, label: "Draft" },
+      ],
+      page: {
+        theme: { brandColor: "#6d28d9" },
+        code: `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<style>
+  :root { --brand: #6d28d9; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: ui-sans-serif, system-ui, -apple-system, sans-serif; background: #faf9fd; color: #1c1917; }
+  .wrap { max-width: 560px; margin: 0 auto; padding: 40px 24px 64px; }
+  .badge { display: inline-block; font-size: 12px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--brand); background: #f1ecfd; padding: 5px 10px; border-radius: 999px; }
+  h1 { font-size: 26px; line-height: 1.2; margin: 16px 0 8px; }
+  p.lede { color: #57534e; margin: 0 0 28px; }
+  label { display: block; font-weight: 600; font-size: 14px; margin: 18px 0 6px; }
+  input, textarea { width: 100%; padding: 11px 13px; border: 1px solid #e7e5e4; border-radius: 10px; font: inherit; background: #fff; }
+  textarea { min-height: 150px; resize: vertical; }
+  input:focus, textarea:focus { outline: none; border-color: var(--brand); box-shadow: 0 0 0 3px #ede9fe; }
+  button { margin-top: 24px; width: 100%; padding: 13px; border: 0; border-radius: 10px; background: var(--brand); color: #fff; font-weight: 600; font-size: 15px; cursor: pointer; }
+  button:disabled { opacity: .6; cursor: default; }
+  .note { margin-top: 14px; font-size: 13px; color: #78716c; text-align: center; }
+  .ok { margin-top: 20px; padding: 14px; border-radius: 10px; background: #f0fdf4; border: 1px solid #bbf7d0; color: #166534; font-size: 14px; display: none; }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <span class="badge">Guest contribution</span>
+    <h1>Pitch a post for the AI Weekly</h1>
+    <p class="lede">Share a draft. Our editors review every submission before anything goes live — you'll be credited if it ships.</p>
+    <div id="f">
+      <label for="title">Post title</label>
+      <input id="title" name="title" required placeholder="e.g. What agents change about ops" />
+      <label for="body">Draft</label>
+      <textarea id="body" name="body" required placeholder="Write your pitch or full draft…"></textarea>
+      <button type="button" id="btn">Submit for review</button>
+      <p class="note">Reviewed, not published — approval-first.</p>
+    </div>
+    <div class="ok" id="ok">Thanks! Your draft is now waiting in the editors' review queue.</div>
+  </div>
+  <script>
+    // Uses the Busabase bridge (window.busa.submit) directly rather than a native
+    // <form> submit, so the submission fires exactly once. A type="button" click
+    // avoids the bridge's auto-form-collect listener double-submitting.
+    document.getElementById('btn').addEventListener('click', function () {
+      var title = document.getElementById('title').value.trim();
+      var body = document.getElementById('body').value.trim();
+      if (!title || !body) { alert('Add a title and a draft first.'); return; }
+      window.busa.submit({ title: title, body: body });
+      document.getElementById('f').style.display = 'none';
+      document.getElementById('ok').style.display = 'block';
+    });
+  </script>
+</body>
+</html>`,
+      },
+    },
+  ],
 });

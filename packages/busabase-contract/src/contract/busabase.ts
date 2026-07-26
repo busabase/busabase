@@ -14,6 +14,7 @@ import { driveContract } from "../domains/drive/contract";
 import { dumpContract } from "../domains/dump/contract";
 import { fileContract } from "../domains/file-node/contract";
 import { folderContract } from "../domains/folder/contract";
+import { formContract } from "../domains/form/contract";
 import { installContract } from "../domains/install/contract";
 import { skillContract } from "../domains/skill/contract";
 import { vaultContract } from "../domains/vault/contract";
@@ -401,6 +402,7 @@ export const busabaseContractRoutes = {
   files: fileContract,
   docs: docContract,
   folders: folderContract,
+  forms: formContract,
   assets: assetsContract,
   vault: vaultContract,
   webhooks: webhookContract,

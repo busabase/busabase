@@ -5,7 +5,18 @@ import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-quer
 import { hasCapability } from "busabase-contract/domains";
 import type { NodeVO } from "busabase-contract/types";
 import { Toaster } from "kui/sonner";
-import { Activity, FolderOpen, Images, Inbox, Plus, Search, Shield, Star } from "lucide-react";
+import {
+  Activity,
+  FolderOpen,
+  FolderTree,
+  Images,
+  Inbox,
+  Pencil,
+  Plus,
+  Search,
+  Shield,
+  Star,
+} from "lucide-react";
 import type { NavDropPosition, NavItemAction, NavNodeDropParams } from "openlib/ui/dashboard";
 import { DashboardLayout, type NavGroup, type NavItem, NavMain } from "openlib/ui/dashboard";
 import type { ComponentProps, ReactNode } from "react";
@@ -14,7 +25,9 @@ import { toast } from "sonner";
 import { coreMessagesByLocale } from "../../../i18n";
 import { nodeIconForType } from "../helpers/node-icons";
 import type { MoveNodePayload } from "../hooks/use-move-node";
+import { NodeMoveDialog } from "./node-move-dialog";
 import { NodePermissionsDialog } from "./node-permissions-button";
+import { NodeRenameDialog } from "./node-rename-dialog";
 
 /** Stable, always-disabled query used in place of `orpc.nodes.listFavorites.queryOptions({})`
  * when a host omitted `orpc` — keeps the `useQuery` call unconditional (rules of
@@ -71,12 +84,23 @@ interface BusabaseDashboardShellProps {
   /** Optional top-level destinations hidden by a host that exposes them elsewhere. */
   hiddenNavItems?: Array<"assets">;
   /**
-   * Wires up sidebar drag-and-drop reordering/reparenting. Omit to leave the
-   * tree read-only (no drag handles rendered). The host owns the actual
-   * mutation (see `useMoveNode`); this shell only translates a drop into the
-   * `{ nodeId, parentNodeId?, position? }` the `nodes.move` endpoint expects.
+   * Wires up sidebar drag-and-drop reordering/reparenting AND the sidebar
+   * "•••" → "Move to…" dialog (see `NodeMoveDialog`) — both funnel through
+   * this one callback. Omit to leave the tree read-only (no drag handles, no
+   * Move action rendered). The host owns the actual mutation (see
+   * `useMoveNode`, normally `moveNodeMutation.mutate`); this shell only
+   * translates a drop/dialog selection into the `{ nodeId, parentNodeId?,
+   * position? }` the `nodes.move` endpoint expects. The optional second
+   * argument mirrors `useMutation`'s `mutate(variables, options)` — pass it
+   * straight through (`(payload, options) => moveNodeMutation.mutate(payload,
+   * options)`) so the explicit "Move to…" dialog gets a real success/error
+   * callback; drag-and-drop ignores it (its own optimistic update + the
+   * hook's built-in error toast are feedback enough).
    */
-  onMoveNode?: (payload: MoveNodePayload) => void;
+  onMoveNode?: (
+    payload: MoveNodePayload,
+    options?: { onSuccess?: () => void; onError?: () => void },
+  ) => void;
   /**
    * Ids of nodes whose children are currently being lazy-fetched (see
    * `onExpandNode` below) — drives the folder's loading row. Omit/empty when
@@ -132,6 +156,18 @@ export function BusabaseDashboardShell({
   const [permissionsTarget, setPermissionsTarget] = useState<{ id: string; name: string } | null>(
     null,
   );
+  // The node targeted by the sidebar "•••" → Rename action; drives the one
+  // shared `NodeRenameDialog` rendered below (only when a host wired `orpc`).
+  // Same single-dialog-per-shell pattern as `permissionsTarget` above. Never
+  // set for a Base node — `buildNavItem` omits the Rename action for those.
+  const [renameTarget, setRenameTarget] = useState<{
+    id: string;
+    name: string;
+    slug: string;
+  } | null>(null);
+  // The node targeted by the sidebar "•••" → "Move to…" action; drives the
+  // `NodeMoveDialog` rendered below (only when a host wired `onMoveNode`).
+  const [moveTarget, setMoveTarget] = useState<{ id: string; name: string } | null>(null);
   // Flat id → NodeVO index over the REAL tree (not the display-flattened
   // NavItem tree) so drag-and-drop can check a drop target's actual type and
   // walk its true ancestor chain, regardless of how the sidebar visually
@@ -236,8 +272,8 @@ export function BusabaseDashboardShell({
 
   const messages = isCoreLocale(locale) ? coreMessagesByLocale[locale] : coreMessagesByLocale.en;
   const nav = messages.nav;
-  // The "Bases" group label doubles as the header-action key, so reuse one value.
-  const basesLabel = nav.bases;
+  // The "Workspace" group label doubles as the header-action key, so reuse one value.
+  const workspaceLabel = nav.workspace;
   const assetsLabel = nav.assets;
   const hiddenNavItemSet = new Set(hiddenNavItems);
 
@@ -308,8 +344,10 @@ export function BusabaseDashboardShell({
           newLabel: nav.new,
           openLabel: messages.common.open,
           permissionsLabel: messages.permissions.title,
+          renameLabel: messages.rename.title,
           favoriteAddLabel: messages.favorites.add,
           favoriteRemoveLabel: messages.favorites.remove,
+          moveLabel: messages.move.menuLabel,
         },
         loadingNodeIds,
         // Only offer the sidebar Permissions action when a host wired orpc — the
@@ -318,6 +356,14 @@ export function BusabaseDashboardShell({
         // Same orpc gate for the Favorites toggle action — no persistence layer
         // to call without it.
         orpc ? { favoriteNodeIds, onToggle: handleToggleFavorite } : undefined,
+        // Same orpc gate for the Rename action — `buildNavItem` further
+        // excludes Base nodes regardless (they keep their own rename path).
+        orpc
+          ? (node) => setRenameTarget({ id: node.id, name: node.name, slug: node.slug })
+          : undefined,
+        // Only offer "Move to…" when a host wired `onMoveNode` — the dialog
+        // can't do anything without a mutation to call.
+        onMoveNode ? (node) => setMoveTarget({ id: node.id, name: node.name }) : undefined,
       ),
     [
       nodes,
@@ -325,12 +371,15 @@ export function BusabaseDashboardShell({
       nav.new,
       messages.common.open,
       messages.permissions.title,
+      messages.rename.title,
       messages.favorites.add,
       messages.favorites.remove,
+      messages.move.menuLabel,
       loadingNodeIds,
       orpc,
       favoriteNodeIds,
       handleToggleFavorite,
+      onMoveNode,
     ],
   );
 
@@ -347,21 +396,30 @@ export function BusabaseDashboardShell({
         {
           openLabel: messages.common.open,
           permissionsLabel: messages.permissions.title,
+          renameLabel: messages.rename.title,
           favoriteAddLabel: messages.favorites.add,
           favoriteRemoveLabel: messages.favorites.remove,
+          moveLabel: messages.move.menuLabel,
         },
         orpc ? (node) => setPermissionsTarget({ id: node.id, name: node.name }) : undefined,
         orpc ? { favoriteNodeIds, onToggle: handleToggleFavorite } : undefined,
+        orpc
+          ? (node) => setRenameTarget({ id: node.id, name: node.name, slug: node.slug })
+          : undefined,
+        onMoveNode ? (node) => setMoveTarget({ id: node.id, name: node.name }) : undefined,
       ),
     [
       favoriteNodes,
       messages.common.open,
       messages.permissions.title,
+      messages.rename.title,
       messages.favorites.add,
       messages.favorites.remove,
+      messages.move.menuLabel,
       orpc,
       favoriteNodeIds,
       handleToggleFavorite,
+      onMoveNode,
     ],
   );
 
@@ -372,7 +430,7 @@ export function BusabaseDashboardShell({
       : [{ title: assetsLabel, url: "/assets", icon: Images }]),
   ];
   // Pinned nav (fixed at the top, never scrolls): Inbox + Search only —
-  // everything else (Activity, Favorites, Bases) scrolls underneath, same
+  // everything else (Activity, Favorites, Workspace) scrolls underneath, same
   // convention as apps/buda's own locked-header sidebar.
   const pinnedNav: NavGroup[] = [
     {
@@ -395,14 +453,14 @@ export function BusabaseDashboardShell({
   ];
 
   // Scrollable nav (everything below the pinned header): optional shortcuts +
-  // Favorites (only when non-empty) + Bases tree.
+  // Favorites (only when non-empty) + Workspace node tree.
   const scrollNav: NavGroup[] = [
     ...(scrollShortcutItems.length > 0
       ? [
           {
             label: "",
             // Flush top (pt-0) so Activity sits 4px under the pinned Search row, while
-            // keeping the default bottom padding (pb-2) so the gap down to the Bases
+            // keeping the default bottom padding (pb-2) so the gap down to the Workspace
             // section header is unchanged.
             className: "pt-0",
             items: scrollShortcutItems,
@@ -422,7 +480,7 @@ export function BusabaseDashboardShell({
         ]
       : []),
     {
-      label: basesLabel,
+      label: workspaceLabel,
       items: baseNavItems,
       headerAction: Plus,
       headerActionTitle: nav.new,
@@ -431,7 +489,7 @@ export function BusabaseDashboardShell({
   ];
 
   const handleHeaderActionClick = (groupLabel: string) => {
-    if (groupLabel === basesLabel) {
+    if (groupLabel === workspaceLabel) {
       onCreateClick();
     }
   };
@@ -481,6 +539,29 @@ export function BusabaseDashboardShell({
           orpc={orpc}
         />
       )}
+      {orpc && renameTarget && (
+        <NodeRenameDialog
+          nodeId={renameTarget.id}
+          nodeName={renameTarget.name}
+          nodeSlug={renameTarget.slug}
+          onOpenChange={(next) => {
+            if (!next) setRenameTarget(null);
+          }}
+          open
+          orpc={orpc}
+        />
+      )}
+      {onMoveNode && moveTarget && (
+        <NodeMoveDialog
+          node={moveTarget}
+          nodes={nodes}
+          onMoveNode={onMoveNode}
+          onOpenChange={(next) => {
+            if (!next) setMoveTarget(null);
+          }}
+          open
+        />
+      )}
     </div>
   );
 }
@@ -498,8 +579,10 @@ interface NavItemLabels {
   newLabel: string;
   openLabel: string;
   permissionsLabel: string;
+  renameLabel: string;
   favoriteAddLabel: string;
   favoriteRemoveLabel: string;
+  moveLabel: string;
 }
 
 /**
@@ -538,6 +621,8 @@ function buildNavItem(
   loadingNodeIds?: Set<string>,
   onOpenPermissions?: (node: NodeVO) => void,
   favoriteContext?: FavoriteActionContext,
+  onOpenRename?: (node: NodeVO) => void,
+  onOpenMove?: (node: NodeVO) => void,
 ): NavItem[] {
   if (hasCapability(node.type, "hidden")) return [];
   const icon = nodeIconForType(node.type);
@@ -551,6 +636,18 @@ function buildNavItem(
         onSelect: () => onOpenPermissions(node),
       }
     : null;
+  // The "•••" Rename action — same shared mechanism as Permissions/Favorite.
+  // Base nodes keep their own independent rename path (Design Tab), so the
+  // host never wires `onOpenRename` for them (see `submitRenameBase`); guard
+  // here too so a future host mistake can't double up on the "base" type.
+  const renameAction: NavItemAction | null =
+    onOpenRename && node.type !== "base"
+      ? {
+          title: labels.renameLabel,
+          icon: Pencil,
+          onSelect: () => onOpenRename(node),
+        }
+      : null;
   // The "•••" Favorites toggle — same shared mechanism, one click, same menu
   // as Open/Permissions (see apps/busabase/content/spec/sidebar-favorites.md).
   // Label reflects the node's CURRENT membership in `favoriteNodeIds`, so a
@@ -564,6 +661,17 @@ function buildNavItem(
           : labels.favoriteAddLabel,
         icon: Star,
         onSelect: () => favoriteContext.onToggle(node),
+      }
+    : null;
+  // The "•••" "Move to…" action — opens `NodeMoveDialog` for this node.
+  // Offered on every node type (unlike Rename's Base exception), since
+  // `nodes.move` is a generic node-reparenting endpoint. Only present when
+  // the host wired `onMoveNode` (no dialog without a mutation to call).
+  const moveAction: NavItemAction | null = onOpenMove
+    ? {
+        title: labels.moveLabel,
+        icon: FolderTree,
+        onSelect: () => onOpenMove(node),
       }
     : null;
   if (hasCapability(node.type, "container")) {
@@ -581,6 +689,8 @@ function buildNavItem(
           loadingNodeIds,
           onOpenPermissions,
           favoriteContext,
+          onOpenRename,
+          onOpenMove,
         ),
         hasChildren: node.hasChildren ?? node.children.length > 0,
         isLoadingChildren: loadingNodeIds?.has(node.id) ?? false,
@@ -588,16 +698,20 @@ function buildNavItem(
         addChildTitle: labels.newLabel,
         actions: [
           ...(url ? [{ title: labels.openLabel, url, icon: FolderOpen }] : []),
+          ...(renameAction ? [renameAction] : []),
           ...(permissionsAction ? [permissionsAction] : []),
           ...(favoriteAction ? [favoriteAction] : []),
+          ...(moveAction ? [moveAction] : []),
         ],
       },
     ];
   }
   const url = nodeHref(node);
   const leafActions = [
+    ...(renameAction ? [renameAction] : []),
     ...(permissionsAction ? [permissionsAction] : []),
     ...(favoriteAction ? [favoriteAction] : []),
+    ...(moveAction ? [moveAction] : []),
   ];
   return url
     ? [
@@ -627,9 +741,20 @@ function buildNavChildren(
   loadingNodeIds?: Set<string>,
   onOpenPermissions?: (node: NodeVO) => void,
   favoriteContext?: FavoriteActionContext,
+  onOpenRename?: (node: NodeVO) => void,
+  onOpenMove?: (node: NodeVO) => void,
 ): NavItem[] {
   return node.children.flatMap((child) =>
-    buildNavItem(child, onCreateChild, labels, loadingNodeIds, onOpenPermissions, favoriteContext),
+    buildNavItem(
+      child,
+      onCreateChild,
+      labels,
+      loadingNodeIds,
+      onOpenPermissions,
+      favoriteContext,
+      onOpenRename,
+      onOpenMove,
+    ),
   );
 }
 
@@ -646,6 +771,8 @@ function buildKnowledgeBaseItems(
   loadingNodeIds?: Set<string>,
   onOpenPermissions?: (node: NodeVO) => void,
   favoriteContext?: FavoriteActionContext,
+  onOpenRename?: (node: NodeVO) => void,
+  onOpenMove?: (node: NodeVO) => void,
 ): NavItem[] {
   const top =
     nodes.length === 1 && hasCapability(nodes[0].type, "container") && !nodes[0].baseId
@@ -653,7 +780,16 @@ function buildKnowledgeBaseItems(
       : nodes;
 
   return top.flatMap((node) =>
-    buildNavItem(node, onCreateChild, labels, loadingNodeIds, onOpenPermissions, favoriteContext),
+    buildNavItem(
+      node,
+      onCreateChild,
+      labels,
+      loadingNodeIds,
+      onOpenPermissions,
+      favoriteContext,
+      onOpenRename,
+      onOpenMove,
+    ),
   );
 }
 
@@ -689,10 +825,17 @@ function buildFavoriteItems(
   favoriteNodes: NodeVO[],
   labels: Pick<
     NavItemLabels,
-    "openLabel" | "permissionsLabel" | "favoriteAddLabel" | "favoriteRemoveLabel"
+    | "openLabel"
+    | "permissionsLabel"
+    | "renameLabel"
+    | "favoriteAddLabel"
+    | "favoriteRemoveLabel"
+    | "moveLabel"
   >,
   onOpenPermissions?: (node: NodeVO) => void,
   favoriteContext?: FavoriteActionContext,
+  onOpenRename?: (node: NodeVO) => void,
+  onOpenMove?: (node: NodeVO) => void,
 ): NavItem[] {
   // `newLabel` (the "+ New" child-create affordance) never surfaces here — a
   // Favorites shortcut row has no `onAddChild` — so an empty string is safe.
@@ -705,6 +848,8 @@ function buildFavoriteItems(
       undefined,
       onOpenPermissions,
       favoriteContext,
+      onOpenRename,
+      onOpenMove,
     ).map(toFlatFavoriteNavItem),
   );
 }

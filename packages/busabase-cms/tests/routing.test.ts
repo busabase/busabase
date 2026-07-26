@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildCmsCanonicalPath,
   buildCmsTaxonomyArchivePath,
+  createCmsPathHelpers,
   filterCmsPostsByTaxonomy,
   isCmsBlogPostPath,
   isCmsContentForLocale,
@@ -82,5 +83,20 @@ describe("CMS canonical routing", () => {
     expect(filterCmsPostsByTaxonomy(posts, "tags", { id: "tag-1", locale: "zh-CN" })).toEqual([
       posts[1],
     ]);
+  });
+
+  it("binds a CmsCanonicalPathOptions once into ready-to-call helpers", () => {
+    const helpers = createCmsPathHelpers(options);
+
+    expect(helpers.buildPath("en", ["blog", "hello"])).toBe("/blog/hello");
+    expect(helpers.parsePath("/zh-CN/blog/hello")).toMatchObject({ locale: "zh-CN" });
+    expect(helpers.normalizePath("//blog//hello//")).toBe("/blog/hello");
+    expect(helpers.isBlogPostPath("/blog/hello")).toBe(true);
+    expect(helpers.isForLocale({ locale: "en", path: "/blog/hello" }, "en")).toBe(true);
+    expect(helpers.isValidContent({ locale: "en", path: "/blog/hello" })).toBe(true);
+    expect(helpers.isValidContent({ locale: "zh-CN", path: "/blog/hello" })).toBe(false);
+    expect(helpers.buildTaxonomyArchivePath("tags", { locale: "zh-CN", slug: "ai" })).toBe(
+      "/zh-CN/tags/ai",
+    );
   });
 });

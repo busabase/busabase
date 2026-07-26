@@ -41,9 +41,11 @@ import {
   createDeleteChangeRequestInputSchema,
   reviseOperationInputSchema,
 } from "../../../logic/store";
-import { validateRecordFields } from "../field-rules";
+import { assertValidFormulaField, validateRecordFields } from "../field-rules";
 import type { FieldDef } from "../field-types";
+import { FormulaError } from "../formula";
 import { baseNotFound } from "./errors";
+import { resolveLookupFieldOptions } from "./field-ops";
 import { getBase } from "./queries";
 import { resolveRelationFieldOptions } from "./relation-options";
 
@@ -152,6 +154,46 @@ export const createBase = async (input: z.input<typeof createBaseInputSchema>) =
   await ensureReady();
   const db = await getDb();
   const parsed = createBaseInputSchema.parse(input);
+  // Validate every `formula` field in the INITIAL field set against each
+  // other (self-ref, unknown-ref, whole-set cycle) — createBaseField/
+  // createFieldChangeRequest/updateFieldChangeRequest validate a field added
+  // one at a time against the base's EXISTING fields, but a brand-new base's
+  // fields all arrive in this one batch with no prior existence to check
+  // against individually.
+  for (const field of parsed.fields) {
+    try {
+      assertValidFormulaField(field.type, field.slug, field.options, parsed.fields);
+    } catch (error) {
+      if (error instanceof FormulaError) {
+        throw new ORPCError("BAD_REQUEST", { message: error.message });
+      }
+      throw error;
+    }
+  }
+  // Same story for `lookup` fields in the initial set: they reference a sibling
+  // `relation` field that only exists in THIS payload, so they are validated
+  // against the payload rather than any persisted state. Relation options are
+  // resolved FIRST (targetBaseSlug → targetBaseId) because that is exactly what
+  // a lookup needs to find its target Base. The lookup TARGET Base is a
+  // different, already-existing Base — a relation field cannot be created
+  // without a resolvable targetBaseId — so it is safe to load here.
+  const relationResolvedFields = await Promise.all(
+    parsed.fields.map(async (field) => ({
+      ...field,
+      options: await resolveRelationFieldOptions(db, field.options),
+    })),
+  );
+  const resolvedFields = await Promise.all(
+    relationResolvedFields.map(async (field) => ({
+      ...field,
+      options: await resolveLookupFieldOptions(
+        field.type,
+        field.slug,
+        field.options,
+        relationResolvedFields,
+      ),
+    })),
+  );
   // Idempotent create only matches an ACTIVE base with this slug. An archived
   // base no longer owns the slug (both the base and node unique indexes are
   // partial on archivedAt), so the slug is free for a brand-new base.
@@ -244,21 +286,21 @@ export const createBase = async (input: z.input<typeof createBaseInputSchema>) =
     createdAt,
   });
   await initializeNodeAcl(db, spaceId, nodeId, parentNode.id, resolveActorId(CURRENT_USER_ID));
-  if (parsed.fields.length > 0) {
+  if (resolvedFields.length > 0) {
+    // `resolvedFields` already carries the relation- and lookup-resolved options
+    // computed (and validated) above — don't resolve a second time.
     await db.insert(busabaseBaseFields).values(
-      await Promise.all(
-        parsed.fields.map(async (field, index) => ({
-          id: id("bsf"),
-          spaceId,
-          baseId,
-          slug: field.slug,
-          name: iStringToText(field.name),
-          type: field.type,
-          required: field.required,
-          position: index,
-          options: await resolveRelationFieldOptions(db, field.options),
-        })),
-      ),
+      resolvedFields.map((field, index) => ({
+        id: id("bsf"),
+        spaceId,
+        baseId,
+        slug: field.slug,
+        name: iStringToText(field.name),
+        type: field.type,
+        required: field.required,
+        position: index,
+        options: field.options,
+      })),
     );
   }
 

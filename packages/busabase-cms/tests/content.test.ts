@@ -178,6 +178,46 @@ describe("createBusabaseCms", () => {
     await expect(cms.tags.getBySlug("nextjs")).resolves.toMatchObject({ id: "tag-1" });
   });
 
+  it("uses the source's point lookup for getByPath/getBySlug instead of listing", async () => {
+    const getBaseBySlug = vi.fn(async (slug: string) => ({ id: `base-${slug}`, slug }));
+    const listRecordsPage = vi.fn(async () => {
+      throw new Error("list should not be called when a point lookup is available");
+    });
+    const getRecordByField = vi.fn(async ({ valueText }: { valueText: string }) =>
+      valueText === "/blog/sdk-test" ? record("post-1", postFields) : null,
+    );
+    const mock = {
+      getBaseBySlug,
+      listRecordsPage,
+      getRecordByField,
+    } satisfies BusabaseCmsSource;
+    const cms = createBusabaseCms({ source: mock });
+
+    await expect(cms.posts.getByPath("/blog/sdk-test")).resolves.toMatchObject({ id: "post-1" });
+    expect(getRecordByField).toHaveBeenCalledWith({
+      baseId: `base-${DEFAULT_POSTS_BASE_SLUG}`,
+      fieldSlug: "path",
+      valueText: "/blog/sdk-test",
+    });
+    expect(listRecordsPage).not.toHaveBeenCalled();
+
+    await expect(cms.posts.getByPath("/blog/does-not-exist")).resolves.toBeNull();
+    expect(listRecordsPage).not.toHaveBeenCalled();
+  });
+
+  it("falls back to list+find when the source has no point-lookup capability", async () => {
+    const mock = source({
+      [`base-${DEFAULT_POSTS_BASE_SLUG}`]: [
+        { records: [record("post-1", postFields)], nextCursor: null },
+        { records: [record("post-1", postFields)], nextCursor: null },
+      ],
+    });
+    const cms = createBusabaseCms({ source: mock });
+
+    await expect(cms.posts.getByPath("/blog/sdk-test")).resolves.toMatchObject({ id: "post-1" });
+    await expect(cms.posts.getByPath("/blog/does-not-exist")).resolves.toBeNull();
+  });
+
   it("filters archived and unpublished Posts and Pages", async () => {
     const mock = source({
       [`base-${DEFAULT_POSTS_BASE_SLUG}`]: [

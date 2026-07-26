@@ -185,6 +185,41 @@ export interface SeedRichNodeDef {
   position: number;
 }
 
+/**
+ * A Form node plus its `busabase_forms` config. The form submits into an
+ * already-seeded Base (`targetBaseId`) as a pending, approval-first
+ * ChangeRequest, and carries an agent-authored HTML page so the demo shows the
+ * Form-as-Node feature the way it is meant to be used.
+ */
+export interface SeedFormDef {
+  nodeId: string;
+  folderNodeId: string;
+  slug: string;
+  name: string;
+  description: string;
+  position: number;
+  /** `busabase_forms` row id. */
+  formId: string;
+  /** A Base this scenario also seeds; submissions land here for review. */
+  targetBaseId: string;
+  bindings: Array<{
+    inputName: string;
+    fieldSlug: string;
+    required?: boolean;
+    label?: string;
+    help?: string;
+  }>;
+  page?: {
+    code?: string;
+    theme?: {
+      logoUrl?: string;
+      coverUrl?: string;
+      brandColor?: string;
+      hideBranding?: boolean;
+    };
+  };
+}
+
 export interface SeedCommentDef {
   id: string;
   subjectType: "record" | "change_request" | "operation" | "commit";
@@ -211,6 +246,8 @@ export interface SeedScenario {
   fileTreeNodes?: SeedFileTreeDef[];
   /** Whiteboard / Workflow / HTML nodes backed by node metadata. */
   richNodes?: SeedRichNodeDef[];
+  /** Form nodes (agent-authored pages) that submit into a Base for review. */
+  forms?: SeedFormDef[];
   /** Review discussion threaded under the scenario's change requests / records. */
   comments?: SeedCommentDef[];
 }

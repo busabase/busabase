@@ -31,6 +31,7 @@ import {
   listRecordsInputSchema,
   listRecordsResponseSchema,
   recordFieldFilterInputSchema,
+  recordFieldGetInputSchema,
   recordLinkSchema,
   recordSchema,
   restoreRecordInputSchema,
@@ -331,6 +332,17 @@ export const recordContract = {
     })
     .input(recordFieldFilterInputSchema)
     .output(z.array(recordSchema)),
+  getByField: oc
+    .route({
+      method: "GET",
+      path: "/records/by-field",
+      tags: ["Records"],
+      summary: "Get record by field value",
+      successDescription:
+        "Single canonical record whose field value exactly matches, or null when none does — a scoped point lookup (e.g. by a unique slug or path field), not a list.",
+    })
+    .input(recordFieldGetInputSchema)
+    .output(recordSchema.nullable()),
   updateChangeRequest: oc
     .route({
       method: "PUT",

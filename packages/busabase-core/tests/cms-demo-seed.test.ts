@@ -183,7 +183,7 @@ describe("standard CMS conversion of the existing Busabase demo", () => {
     for (const role of roles) {
       const base = baseById.get(CMS_DEMO_BASE_IDS[role]);
       expect(base, role).toBeDefined();
-      const expected = getBusabaseCmsBaseDefinition(role, CMS_DEMO_BASE_IDS, "standard");
+      const expected = getBusabaseCmsBaseDefinition(role, CMS_DEMO_BASE_IDS);
       for (const expectedField of expected.fields) {
         const actual = base?.fields.find((field) => field.slug === expectedField.slug);
         expect(actual, `${role}.${expectedField.slug}`).toMatchObject({

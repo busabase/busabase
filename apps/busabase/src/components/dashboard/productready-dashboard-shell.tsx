@@ -32,8 +32,11 @@ interface ProductReadyDashboardShellProps {
   onInstallClick?: () => void;
   /** oRPC query utils — forwarded to the core shell to power the sidebar "•••" → Permissions entry. */
   orpc?: BusabaseQueryUtils;
-  /** Wires up sidebar drag-and-drop; omit to leave the tree read-only. */
-  onMoveNode?: (payload: MoveNodePayload) => void;
+  /** Wires up sidebar drag-and-drop and the "Move to…" dialog; omit to leave the tree read-only. */
+  onMoveNode?: (
+    payload: MoveNodePayload,
+    options?: { onSuccess?: () => void; onError?: () => void },
+  ) => void;
   /** Resolved active locale (drives sidebar/content i18n). */
   locale: string;
   /** Saved preference shown in the switcher — `"auto"` or a concrete locale. */

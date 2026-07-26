@@ -441,6 +441,76 @@ describe("busabase-cli publish → install round trip (real demo seed, two datab
     expect(unexpected).toEqual([]);
   });
 
+  it("re-installing the same package into a second folder of an already-populated target creates genuinely new nodes, not silent no-ops", async () => {
+    // Regression for a real bug: `createFileTreeNode`'s idempotency check used
+    // to match an "already exists?" node by (spaceId, type, slug) alone, ignoring
+    // the parent folder — plan.ts's own docstring above documents node slugs as
+    // unique per PARENT, not per space, and its collision detector is scoped to
+    // the target folder accordingly. So installing this same package again under
+    // a DIFFERENT --into-folder in the SAME (now populated) target database is a
+    // legitimate, collision-free install by that rule — but before the fix, any
+    // node whose slug already existed under the first install's folder (e.g. the
+    // "ai-research-editor" skill) silently resolved to that unrelated existing
+    // node instead of being created under the new folder, while still reporting
+    // success. Caught by publishing to a real GitHub repo and installing twice by
+    // hand; this pins it down as an automated test.
+    const client = await routerClient();
+    const before = await client.nodes.list({});
+
+    // --rename is needed because base slugs collide SPACE-WIDE by design (see
+    // plan.ts's docstring) — every base in this package already exists from the
+    // first install. That is unrelated to the bug under test: node types like
+    // `skill` collide only per-PARENT, and "second-copy" is a different parent
+    // from the first install's folder, so they were never a real collision —
+    // `--rename` only touches the (expected, by-design) base collisions.
+    const secondReport = (await cli(
+      "install",
+      REPO_URL,
+      "--into-folder",
+      "second-copy",
+      "--auto-merge",
+      "--rename",
+    )) as { created: Record<string, number>; warnings: string[] };
+
+    // Real materialization happened — not a silent zero-op. `fileTreeNodes`
+    // covers skills/drives/airapps alike (see apply.ts's `applyFileTreeCreate`).
+    expect(secondReport.created.bases ?? 0).toBeGreaterThan(0);
+    expect(secondReport.created.fileTreeNodes ?? 0).toBeGreaterThan(0);
+
+    const after = await client.nodes.list({});
+    type TreeNode = { id: string; slug: string; type: string; children?: TreeNode[] };
+    const roots = (tree: unknown): TreeNode[] => {
+      const arr = tree as TreeNode[];
+      return arr.length === 1 && arr[0].children ? (arr[0].children ?? []) : arr;
+    };
+    /** First node anywhere in the tree matching (slug, type), depth-first. */
+    const findAnywhere = (nodes: TreeNode[], slug: string, type: string): TreeNode | undefined => {
+      for (const n of nodes) {
+        if (n.slug === slug && n.type === type) return n;
+        const found = findAnywhere(n.children ?? [], slug, type);
+        if (found) return found;
+      }
+      return undefined;
+    };
+    /** Same, but restricted to the subtree under a top-level folder slug. */
+    const findUnderFolder = (
+      tree: unknown,
+      folderSlug: string,
+      slug: string,
+      type: string,
+    ): TreeNode | undefined => {
+      const folder = findAnywhere(roots(tree), folderSlug, "folder");
+      return folder ? findAnywhere(folder.children ?? [], slug, type) : undefined;
+    };
+
+    const firstCopySkill = findUnderFolder(before, "skills", "ai-research-editor", "skill");
+    const secondCopySkill = findUnderFolder(after, "second-copy", "ai-research-editor", "skill");
+    expect(firstCopySkill?.id).toBeTruthy();
+    expect(secondCopySkill?.id).toBeTruthy();
+    // The whole point: a genuinely new node, not the first install's node reused.
+    expect(secondCopySkill?.id).not.toBe(firstCopySkill?.id);
+  });
+
   it("re-materializes every base, with identical fields, views and record counts", () => {
     expect([...targetBases.keys()].sort()).toEqual([...sourceBases.keys()].sort());
     for (const [slug, source] of sourceBases) {

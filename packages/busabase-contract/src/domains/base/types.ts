@@ -1,7 +1,7 @@
 // View objects owned by the base domain (structured records + views).
 import type { AttachmentRef } from "open-domains/attachments/types";
 import type { iString } from "openlib/i18n/i-string";
-import type { CommitVO, FieldType, UserRefVO } from "../../types";
+import type { CommitVO, FieldType, LookupRollup, UserRefVO } from "../../types";
 
 export interface AssetAttachmentRef extends AttachmentRef {
   attachmentId: string;
@@ -45,7 +45,18 @@ export interface BaseFieldVO {
       height?: number;
       providers?: string[];
     };
+    // Must mirror the contract's fieldOptionsSchema — see base-schemas.ts there.
+    formula?: {
+      expression: string;
+    };
     inverseFieldId?: string;
+    // Must mirror the contract's fieldOptionsSchema — see base-schemas.ts there.
+    lookup?: {
+      relationFieldSlug: string;
+      targetFieldSlug: string;
+      rollup?: LookupRollup;
+      limit?: "all" | "first";
+    };
     multiple?: boolean;
     targetBaseId?: string;
     number?: {

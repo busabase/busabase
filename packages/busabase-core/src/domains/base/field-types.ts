@@ -6,10 +6,18 @@
 // Server orchestration lives in field-rules.ts (loops over defs, calls spec.validate
 // / spec.compute). The client maps spec.input → a component. Add a field type here
 // once and every layer picks it up.
-import type { FieldType } from "busabase-contract/types";
+import type { FieldType, LookupRollup } from "busabase-contract/types";
 import { type iString, iStringParse, type LocaleType } from "openlib/i18n/i-string";
 import { parseDocument } from "yaml";
+import {
+  evaluateFormula,
+  type FieldResolver,
+  FormulaError,
+  type FormulaValue,
+  serializeFormulaResult,
+} from "./formula";
 import { validateEmbedUrl } from "./utils/embed";
+import { WhiteboardFieldValueSchema } from "./utils/whiteboard-value";
 
 /** Minimal field-definition shape both the VO and the persisted row satisfy. */
 export interface FieldDef {
@@ -36,6 +44,20 @@ export interface FieldDef {
       height?: number;
       providers?: ReadonlyArray<string>;
     };
+    formula?: {
+      expression: string;
+    };
+    lookup?: {
+      relationFieldSlug: string;
+      targetFieldSlug: string;
+      rollup?: LookupRollup;
+      limit?: "all" | "first";
+    };
+    number?: {
+      format?: "plain" | "currency";
+      currency?: string;
+      locale?: string;
+    };
   } | null;
 }
 
@@ -54,6 +76,7 @@ export type FieldInputKind =
   | "relation"
   | "attachment"
   | "tags"
+  | "whiteboard"
   | "computed";
 
 /** Context handed to a system field's value computation at merge time. */
@@ -64,6 +87,25 @@ export interface SystemComputeCtx {
   existing: Record<string, unknown>;
   slug: string;
   nextAutoNumber: (slug: string) => number | null;
+  /** This field's own definition (options, etc.) — used by `formula` to read
+   *  `def.options.formula.expression`; every other computed type ignores it. */
+  def: FieldDef;
+  /** Every field definition on the base — used by `formula` to type-coerce a
+   *  referenced sibling field's raw value; every other computed type ignores it. */
+  defs: ReadonlyArray<FieldDef>;
+  /** The record's other (non-system) field values for this write — existing
+   *  values merged with whatever the caller just supplied. Used by `formula`
+   *  to resolve `{slug}` references; every other computed type ignores it. */
+  values: Record<string, unknown>;
+  /** The record's own id — null on create (not yet assigned when compute
+   *  runs) or when no record context applies (e.g. a unit test). Used by
+   *  `formula`'s `RECORD_ID()`; every other computed type ignores it. */
+  recordId: string | null;
+  /** ISO timestamp the record was originally created — `timestampIso` on
+   *  create (this write IS the creation), the record's real original
+   *  creation time on update. Used by `formula`'s `CREATED_TIME()`; every
+   *  other computed type ignores it. */
+  recordCreatedAtIso: string | null;
 }
 
 export interface FieldTypeSpec {
@@ -84,6 +126,15 @@ export interface FieldTypeSpec {
    * a "system" field: read-only in the UI and stripped from client input.
    */
   compute?: (ctx: SystemComputeCtx) => unknown;
+  /**
+   * Server-managed like `compute`, but resolved at READ time instead of write
+   * time — so there is no `compute` hook to hang it on. Only `lookup` uses this:
+   * its value depends on OTHER records, which can change without this record
+   * ever being written, so storing it on the commit would go stale silently.
+   * Treated identically to `compute` by `isSystemFieldType` (read-only in the
+   * UI, stripped from client input, unconvertible).
+   */
+  readOnly?: boolean;
 }
 
 /**
@@ -348,6 +399,60 @@ const computeCreatedBy = (c: SystemComputeCtx) =>
 const computeAutoNumber = (c: SystemComputeCtx) =>
   c.mode === "create" ? c.nextAutoNumber(c.slug) : (c.existing[c.slug] ?? c.nextAutoNumber(c.slug));
 
+const coerceForFormula = (rawValue: unknown, type: FieldType): FormulaValue => {
+  if (rawValue === undefined || rawValue === null) return null;
+  if (type === "number") {
+    const n = typeof rawValue === "number" ? rawValue : Number(rawValue);
+    return Number.isFinite(n) ? n : null;
+  }
+  if (type === "checkbox") return Boolean(rawValue);
+  if (type === "date" || type === "created_time" || type === "updated_time") {
+    const date = new Date(rawValue as string | number);
+    return Number.isNaN(date.getTime()) ? null : date;
+  }
+  // `relation`/`multiselect` store an array of record ids / choice ids —
+  // pass through as-is so array functions (ARRAYJOIN etc.) can consume it.
+  // `attachment` stays null: its array holds ref OBJECTS, not scalars, and
+  // has no sensible formula-facing representation yet.
+  if (type === "relation" || type === "multiselect") {
+    return Array.isArray(rawValue) ? (rawValue as FormulaValue[]) : null;
+  }
+  if (
+    typeof rawValue === "string" ||
+    typeof rawValue === "number" ||
+    typeof rawValue === "boolean"
+  ) {
+    return rawValue;
+  }
+  return null;
+};
+
+const computeFormula = (c: SystemComputeCtx): FormulaValue => {
+  const expression = c.def.options?.formula?.expression;
+  if (!expression) return null;
+  const defsBySlug = new Map(c.defs.map((def) => [def.slug, def]));
+  const resolveField: FieldResolver = (slug) => {
+    const def = defsBySlug.get(slug);
+    return def ? coerceForFormula(c.values[slug], def.type) : null;
+  };
+  try {
+    const result = evaluateFormula(expression, resolveField, {
+      recordId: c.recordId,
+      createdAtIso: c.recordCreatedAtIso,
+      lastModifiedIso: c.timestampIso,
+    });
+    return serializeFormulaResult(result);
+  } catch (error) {
+    // A formula can transiently fail (e.g. a referenced field was deleted or
+    // retyped after this formula was authored) — field-ops.ts validates the
+    // expression at create/edit time, so a runtime failure here means stale
+    // schema, not bad user input on THIS write. Fail soft (null) rather than
+    // blocking every write to every OTHER field on the record.
+    if (error instanceof FormulaError) return null;
+    throw error;
+  }
+};
+
 /**
  * The field-type registry. One entry per FieldType — the `Record<FieldType, …>`
  * makes it a compile error to forget a type.
@@ -401,6 +506,19 @@ export const FIELD_TYPES: Record<FieldType, FieldTypeSpec> = {
     input: "textarea",
     columnWidth: "minmax(128px,420px)",
     validate: yamlValidator,
+  },
+  whiteboard: {
+    type: "whiteboard",
+    label: "whiteboard",
+    // A canvas widget, not a text box — the editor renders a real Excalidraw
+    // canvas; read-only surfaces (table cell + Record Detail view mode) show
+    // the value's `previewSvg` snapshot instead of mounting a live canvas.
+    input: "whiteboard",
+    columnWidth: "minmax(160px,240px)",
+    validate: (value, def) =>
+      WhiteboardFieldValueSchema.safeParse(value).success
+        ? null
+        : `${fieldDisplayName(def)} must be a whiteboard scene`,
   },
   number: {
     type: "number",
@@ -548,6 +666,21 @@ export const FIELD_TYPES: Record<FieldType, FieldTypeSpec> = {
     columnWidth: "minmax(128px,180px)",
     compute: computeAutoNumber,
   },
+  formula: {
+    type: "formula",
+    label: "formula",
+    input: "computed",
+    columnWidth: "minmax(128px,180px)",
+    compute: computeFormula,
+  },
+  lookup: {
+    type: "lookup",
+    label: "lookup",
+    input: "computed",
+    columnWidth: "minmax(128px,220px)",
+    // No `compute`: resolved at read time in hydrateRecords (see readOnly above).
+    readOnly: true,
+  },
 };
 
 /** Order fields appear in the field-type picker. */
@@ -559,9 +692,12 @@ export const FIELD_TYPE_ORDER: FieldType[] = [
   "code",
   "json",
   "yaml",
+  "whiteboard",
   "attachment",
   "relation",
+  "lookup",
   "number",
+  "formula",
   "date",
   "checkbox",
   "select",
@@ -585,7 +721,8 @@ export const fieldInputKind = (type: FieldType): FieldInputKind => FIELD_TYPES[t
 export const fieldColumnWidth = (type: FieldType): string => FIELD_TYPES[type].columnWidth;
 
 /** A field whose value the server computes — read-only in the UI, stripped from input. */
-export const isSystemFieldType = (type: FieldType): boolean => Boolean(FIELD_TYPES[type].compute);
+export const isSystemFieldType = (type: FieldType): boolean =>
+  Boolean(FIELD_TYPES[type].compute) || FIELD_TYPES[type].readOnly === true;
 
 /** AI-generated fields (manually overridable, but not user-entered on create). */
 export const isAiFieldType = (type: FieldType): boolean =>
@@ -619,6 +756,7 @@ export type FieldDisplayKind =
   | "code"
   | "embed"
   | "link"
+  | "whiteboard"
   | "plain";
 
 const DISPLAY_KIND: Partial<Record<FieldType, FieldDisplayKind>> = {
@@ -634,6 +772,7 @@ const DISPLAY_KIND: Partial<Record<FieldType, FieldDisplayKind>> = {
   // Structured text fields reuse the code display kind with pinned preview languages.
   json: "code",
   yaml: "code",
+  whiteboard: "whiteboard",
   url: "link",
   embed: "embed",
   email: "link",

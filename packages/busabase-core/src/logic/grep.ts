@@ -251,7 +251,10 @@ const loadRecordBatchData = async (
  *
  * 1. `undefined`/`null` → no content, skip.
  * 2. `attachment`/`relation` → skip (pointers/refs, not content — the
- *    referenced file's own content is the files source's job).
+ *    referenced file's own content is the files source's job). `whiteboard`
+ *    → skip too: its value is a structured { scene, previewSvg } composite,
+ *    not prose, and dumping the raw scene JSON / SVG markup into the grep
+ *    index would be noise, not a meaningful match.
  * 3. `json` → `JSON.stringify(value)`, one line (structured data, not prose).
  * 4. `string` → used AS-IS, preserving real newlines (this is what lets a
  *    multi-line longtext/markdown field's real line numbers show up).
@@ -263,7 +266,9 @@ const loadRecordBatchData = async (
  */
 const flattenFieldValue = (fieldType: FieldType, value: unknown): string | undefined => {
   if (value === undefined || value === null) return undefined;
-  if (fieldType === "attachment" || fieldType === "relation") return undefined;
+  if (fieldType === "attachment" || fieldType === "relation" || fieldType === "whiteboard") {
+    return undefined;
+  }
   if (fieldType === "json") return JSON.stringify(value);
   if (typeof value === "string") return value;
   if (typeof value === "number" || typeof value === "boolean") return String(value);

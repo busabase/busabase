@@ -6,6 +6,7 @@ import {
   DEMO_PURCHASE_ORDERS_BASE_NODE_ID,
   FINANCE_INVOICE_FIGMA_ID,
   FINANCE_INVOICE_GLOBEX_ID,
+  FINANCE_INVOICE_GLOBEX_JULY_ID,
   FINANCE_INVOICE_REVIEW_ID,
   FINANCE_PO_DESIGN_ID,
   FINANCE_PO_PLATFORM_ID,
@@ -15,6 +16,7 @@ const FINANCE_FOLDER_NODE_ID = "nod_finance";
 const PO_PLATFORM_COMMIT_ID = "cmt_seed_po_platform";
 const PO_DESIGN_COMMIT_ID = "cmt_seed_po_design";
 const INVOICE_GLOBEX_COMMIT_ID = "cmt_seed_invoice_globex_cloud";
+const INVOICE_GLOBEX_JULY_COMMIT_ID = "cmt_seed_invoice_globex_cloud_july";
 const INVOICE_FIGMA_COMMIT_ID = "cmt_seed_invoice_figma_seats";
 
 export const financeInvoiceZhCnScenario: SeedScenario = {
@@ -68,7 +70,7 @@ export const financeInvoiceZhCnScenario: SeedScenario = {
           name: "预算金额",
           type: "number",
           required: false,
-          options: {},
+          options: { number: { format: "currency", currency: "CNY", locale: "zh-CN" } },
         },
         {
           id: "bsf_po_currency",
@@ -98,6 +100,43 @@ export const financeInvoiceZhCnScenario: SeedScenario = {
               { id: "matched", name: "已匹配", color: "emerald" },
               { id: "closed", name: "已关闭", color: "slate" },
             ],
+          },
+        },
+        {
+          id: "bsf_po_invoices",
+          slug: "invoices",
+          name: "关联发票",
+          type: "relation",
+          required: false,
+          options: { multiple: true, targetBaseId: DEMO_INVOICES_BASE_ID },
+        },
+        {
+          id: "bsf_po_invoiced_total",
+          slug: "invoiced_total",
+          name: "已开票金额",
+          type: "lookup",
+          required: false,
+          options: {
+            lookup: {
+              relationFieldSlug: "invoices",
+              targetFieldSlug: "total",
+              rollup: "sum",
+            },
+            number: { format: "currency", currency: "CNY", locale: "zh-CN" },
+          },
+        },
+        {
+          id: "bsf_po_invoice_count",
+          slug: "invoice_count",
+          name: "发票张数",
+          type: "lookup",
+          required: false,
+          options: {
+            lookup: {
+              relationFieldSlug: "invoices",
+              targetFieldSlug: "invoice_number",
+              rollup: "count",
+            },
           },
         },
       ],
@@ -136,6 +175,21 @@ export const financeInvoiceZhCnScenario: SeedScenario = {
           options: { multiple: false, targetBaseId: DEMO_PURCHASE_ORDERS_BASE_ID },
         },
         {
+          id: "bsf_invoice_po_budget",
+          slug: "po_budget",
+          name: "采购预算",
+          type: "lookup",
+          required: false,
+          options: {
+            lookup: {
+              relationFieldSlug: "purchase-order",
+              targetFieldSlug: "budget",
+              rollup: "values",
+            },
+            number: { format: "currency", currency: "CNY", locale: "zh-CN" },
+          },
+        },
+        {
           id: "bsf_invoice_amount",
           slug: "amount",
           name: "金额",
@@ -157,7 +211,7 @@ export const financeInvoiceZhCnScenario: SeedScenario = {
           name: "合计",
           type: "number",
           required: false,
-          options: {},
+          options: { number: { format: "currency", currency: "CNY", locale: "zh-CN" } },
         },
         {
           id: "bsf_invoice_due_date",
@@ -253,6 +307,7 @@ export const financeInvoiceZhCnScenario: SeedScenario = {
         approved_at: "2026-05-20",
         budget: 860000,
         currency: "CNY",
+        invoices: [FINANCE_INVOICE_GLOBEX_ID, FINANCE_INVOICE_GLOBEX_JULY_ID],
         owner: "finance.ops@busabase.local",
         po_number: "PO-2026-0418",
         status: "open",
@@ -271,6 +326,7 @@ export const financeInvoiceZhCnScenario: SeedScenario = {
         approved_at: "2026-05-28",
         budget: 120000,
         currency: "CNY",
+        invoices: [FINANCE_INVOICE_FIGMA_ID],
         owner: "design.ops@busabase.local",
         po_number: "PO-2026-0472",
         status: "matched",
@@ -312,6 +368,28 @@ export const financeInvoiceZhCnScenario: SeedScenario = {
       message: "种子数据：待AP三方比对的发票",
       author: "seed-finance",
       minutesAgo: 120,
+      useCases: ["finance"],
+    },
+    {
+      id: FINANCE_INVOICE_GLOBEX_JULY_ID,
+      baseId: DEMO_INVOICES_BASE_ID,
+      commitId: INVOICE_GLOBEX_JULY_COMMIT_ID,
+      fields: {
+        amount: 36000,
+        due_date: "2026-08-05",
+        flags: ["po-match"],
+        invoice_number: "INV-GCX-2026-0703",
+        "purchase-order": [FINANCE_PO_PLATFORM_ID],
+        ready_to_pay: true,
+        review_notes: "7 月弹性扩容溢出用量，仍在采购订单余额内，无异常。",
+        status: "matched",
+        tax: 2160,
+        total: 38160,
+        vendor: "全球云服务有限公司",
+      },
+      message: "种子数据：同一采购订单下的后续云服务发票",
+      author: "seed-finance",
+      minutesAgo: 110,
       useCases: ["finance"],
     },
     {

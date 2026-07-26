@@ -32,12 +32,13 @@ const VALID_INPUT_KINDS = new Set([
   "relation",
   "attachment",
   "tags",
+  "whiteboard",
   "computed",
 ]);
 
 describe("FIELD_TYPES registry — complete & well-formed for every field type", () => {
-  it("has exactly 25 field types", () => {
-    expect(ALL_FIELD_TYPES).toHaveLength(25);
+  it("has exactly 28 field types", () => {
+    expect(ALL_FIELD_TYPES).toHaveLength(28);
   });
 
   it("structured text fields validate their syntax and reuse code display", () => {
@@ -94,12 +95,25 @@ describe("FIELD_TYPES registry — complete & well-formed for every field type",
     expect(fieldColumnWidth(type)).toBe(spec.columnWidth);
   });
 
-  it("system field types are exactly those with a compute fn", () => {
+  // "system" = server-managed, which is NOT the same as "has a compute fn":
+  // `lookup` is server-managed too, but resolved at READ time (it depends on
+  // other records), so it carries `readOnly` instead of a `compute` hook.
+  it("system field types are those with a compute fn plus the read-time ones", () => {
     for (const type of ALL_FIELD_TYPES) {
-      expect(isSystemFieldType(type)).toBe(Boolean(FIELD_TYPES[type].compute));
+      expect(isSystemFieldType(type)).toBe(
+        Boolean(FIELD_TYPES[type].compute) || FIELD_TYPES[type].readOnly === true,
+      );
     }
     expect([...SYSTEM_FIELD_TYPES].sort()).toEqual(
-      ["auto_number", "created_by", "created_time", "updated_by", "updated_time"].sort(),
+      [
+        "auto_number",
+        "created_by",
+        "created_time",
+        "formula",
+        "lookup",
+        "updated_by",
+        "updated_time",
+      ].sort(),
     );
   });
 
@@ -138,6 +152,7 @@ describe("FIELD_TYPES registry — complete & well-formed for every field type",
       "code",
       "embed",
       "link",
+      "whiteboard",
       "plain",
     ]);
     for (const type of ALL_FIELD_TYPES) {

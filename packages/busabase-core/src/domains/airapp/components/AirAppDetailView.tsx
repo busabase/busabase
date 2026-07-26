@@ -16,7 +16,7 @@ import {
   NodeDeleteButton,
   renderFileTree,
 } from "../../dashboard/components/file-tree-browser";
-import { NodePermissionsButton } from "../../dashboard/components/node-permissions-button";
+import { NodeActionsMenu } from "../../dashboard/components/node-actions-menu";
 import { EmptyState } from "../../dashboard/components/primitives";
 import { FileContentSkeleton, NodeDetailSkeleton } from "../../dashboard/components/skeletons";
 import { useReportLoadedNode } from "../../dashboard/hooks/use-report-loaded-node";
@@ -195,9 +195,11 @@ export function AirAppDetailView({ orpc, slug, onNodeLoaded }: NodeDetailProps) 
               runner={runner}
               syncFullscreenWithUrl={isKeepAliveActive}
             />
-            <NodePermissionsButton
+            <NodeActionsMenu
               nodeId={airapp.node.id}
               nodeName={airapp.node.name}
+              nodeSlug={airapp.node.slug}
+              nodeType="airapp"
               orpc={orpc}
             />
             <NodeDeleteButton

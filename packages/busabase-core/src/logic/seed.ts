@@ -7,7 +7,7 @@ import type {
   ViewConfigVO,
   ViewType,
 } from "busabase-contract/types";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, isNull } from "drizzle-orm";
 import { iStringToText } from "openlib/i18n/i-string";
 import { storage } from "openlib/storage";
 import { getContextSpaceId, LOCAL_SPACE_ID } from "../context";
@@ -22,6 +22,7 @@ import {
   busabaseChangeRequests,
   busabaseComments,
   busabaseCommits,
+  busabaseForms,
   busabaseNodes,
   type busabaseOperationKindEnum,
   busabaseOperations,
@@ -29,12 +30,19 @@ import {
   busabaseReviews,
   busabaseViews,
 } from "../db/schema";
-import { buildRecordSeedFields } from "../demo/dataset";
+import {
+  BLOG_APPROVAL_RECORD_ID,
+  buildRecordSeedFields,
+  COVER_IMAGE_FIXTURE_ASSET_ID,
+  COVER_IMAGE_FIXTURE_ATTACHMENT_ID,
+  DEMO_BLOG_BASE_NODE_ID,
+} from "../demo/dataset";
 import type {
   SeedCommentDef,
   SeedDocDef,
   SeedFileDef,
   SeedFileTreeDef,
+  SeedFormDef,
   SeedRichNodeDef,
   SeedScenario,
 } from "../demo/seed-types";
@@ -667,6 +675,56 @@ const seedRichNodesIfMissing = async (createdAt: Date, defs: SeedRichNodeDef[]) 
   }
 };
 
+const seedFormNodesIfMissing = async (createdAt: Date, defs: SeedFormDef[]) => {
+  if (defs.length === 0) return;
+  const db = await getDb();
+  const spaceId = getContextSpaceId();
+
+  for (const def of defs) {
+    const nodeValues = {
+      parentId: def.folderNodeId,
+      type: "form" as const,
+      slug: def.slug,
+      name: def.name,
+      description: def.description,
+      position: def.position,
+      updatedAt: createdAt,
+    };
+    const [existingNode] = await db
+      .select({ id: busabaseNodes.id })
+      .from(busabaseNodes)
+      .where(eq(busabaseNodes.id, def.nodeId))
+      .limit(1);
+    if (existingNode) {
+      await db.update(busabaseNodes).set(nodeValues).where(eq(busabaseNodes.id, def.nodeId));
+    } else {
+      await db.insert(busabaseNodes).values({ id: def.nodeId, ...nodeValues, createdAt });
+    }
+
+    const formValues = {
+      spaceId,
+      nodeId: def.nodeId,
+      targetBaseId: def.targetBaseId,
+      name: def.name,
+      description: def.description,
+      bindings: def.bindings,
+      page: def.page ?? {},
+      createdBy: CURRENT_USER_ID,
+      updatedAt: createdAt,
+    };
+    const [existingForm] = await db
+      .select({ id: busabaseForms.id })
+      .from(busabaseForms)
+      .where(eq(busabaseForms.id, def.formId))
+      .limit(1);
+    if (existingForm) {
+      await db.update(busabaseForms).set(formValues).where(eq(busabaseForms.id, def.formId));
+    } else {
+      await db.insert(busabaseForms).values({ id: def.formId, ...formValues, createdAt });
+    }
+  }
+};
+
 // ── Per-node-type example content (Docs, Files) + review Comments ──────────────
 // The content itself is locale-specific and lives in the scenario
 // (`scenario.docs` / `scenario.files` / `scenario.comments`), so English and
@@ -997,6 +1055,206 @@ const seedGrepDemoFixture = async (createdAt: Date) => {
   await putAssetText({ assetId: GREP_DEMO_ASSET_ID, text: GREP_DEMO_EXTRACTED_TEXT });
 };
 
+/**
+ * Real binary-image demo fixture: every other `cover_image` in `demo/dataset.ts`
+ * is a plain string `url` placeholder that never touched the attachment/asset
+ * pipeline. This seeds one real, decodable PNG through the same
+ * attachment + asset (+ where-used) writes `seedFileNodesIfMissing` performs,
+ * then wires it to `BLOG_APPROVAL_RECORD_ID`'s `cover_image` field via a real
+ * `busabase_asset_usages` row (`ownerType: "base"`) — the same row shape
+ * `assets/handlers.ts` maintains for a real merge, just written directly since
+ * this is a static seed record rather than a live Change Request merge.
+ * Idempotent (checked by fixed attachment id) so `pnpm db:seed` stays re-runnable.
+ */
+const seedImageAssetFixture = async (createdAt: Date) => {
+  const db = await getDb();
+  const spaceId = getContextSpaceId();
+
+  const [existing] = await db
+    .select({ id: attachments.id })
+    .from(attachments)
+    .where(eq(attachments.id, COVER_IMAGE_FIXTURE_ATTACHMENT_ID))
+    .limit(1);
+  if (existing) {
+    return;
+  }
+
+  const { buildMinimalPngBuffer, COVER_IMAGE_FIXTURE_FILE_NAME } = await import(
+    "../demo/image-fixture"
+  );
+  const pngBuffer = buildMinimalPngBuffer();
+  const storageKey = "files/seed/blog-cover-agents-demo.png";
+  await storage.uploadFileToKey(pngBuffer, storageKey, "image/png");
+
+  await db
+    .insert(attachments)
+    .values({
+      id: COVER_IMAGE_FIXTURE_ATTACHMENT_ID,
+      storageKey,
+      fileName: COVER_IMAGE_FIXTURE_FILE_NAME,
+      mimeType: "image/png",
+      sizeBytes: pngBuffer.length,
+      contentHash: hashBuffer(pngBuffer),
+      context: "base-field",
+      userId: CURRENT_USER_ID,
+      spaceId,
+      metadata: {},
+      createdAt,
+      updatedAt: createdAt,
+    })
+    .onConflictDoNothing();
+
+  await db
+    .insert(busabaseAssets)
+    .values({
+      id: COVER_IMAGE_FIXTURE_ASSET_ID,
+      spaceId,
+      attachmentId: COVER_IMAGE_FIXTURE_ATTACHMENT_ID,
+      name: COVER_IMAGE_FIXTURE_FILE_NAME,
+      contentKind: "binary",
+      metadata: {},
+      createdBy: CURRENT_USER_ID,
+      createdAt,
+      updatedAt: createdAt,
+    })
+    .onConflictDoNothing();
+
+  await db
+    .insert(busabaseAssetUsages)
+    .values({
+      id: id("aus"),
+      spaceId,
+      assetId: COVER_IMAGE_FIXTURE_ASSET_ID,
+      ownerType: "base",
+      nodeId: DEMO_BLOG_BASE_NODE_ID,
+      path: "",
+      recordId: BLOG_APPROVAL_RECORD_ID,
+      fieldSlug: "cover_image",
+      blockId: "",
+      metadata: {},
+      createdAt,
+      updatedAt: createdAt,
+    })
+    .onConflictDoNothing();
+};
+
+/**
+ * Row count intentionally chosen to be greater than the dump export cursor's
+ * page size (`EXPORT_LIMIT = 500` in `dump-roundtrip.test.ts` / the real CLI
+ * exporter): before this fixture, `attachments`/`assets`/`assetUsages` never
+ * exceeded ~40 rows each, so the dump export's cursor-pagination "there's a
+ * next page" branch (`export-logic.ts`'s `nextCursor = rows.length === limit
+ * ? ... : null`) was never actually taken for these three tables — only
+ * exercised for tables that already happened to be large (e.g. audit events).
+ * These rows model "a user bulk-imported a folder of small reference files" —
+ * plausible demo content, not throwaway junk — and are inserted in batches
+ * (mirroring the real importer's `IMPORT_BATCH = 200`) to stay under
+ * Postgres's per-statement bind-parameter ceiling.
+ */
+const BULK_ATTACHMENT_FIXTURE_COUNT = 502;
+const BULK_ATTACHMENT_INSERT_BATCH = 200;
+
+const chunk = <T>(items: T[], size: number): T[][] => {
+  const out: T[][] = [];
+  for (let i = 0; i < items.length; i += size) {
+    out.push(items.slice(i, i + size));
+  }
+  return out;
+};
+
+const seedBulkAttachmentFixtures = async (createdAt: Date) => {
+  ensureDefaultStorageUrl();
+  const db = await getDb();
+  const spaceId = getContextSpaceId();
+  await ensureFilesFolder(createdAt);
+
+  const [existing] = await db
+    .select({ id: attachments.id })
+    .from(attachments)
+    .where(eq(attachments.id, "att_bulk_import_000"))
+    .limit(1);
+  if (existing) {
+    return;
+  }
+
+  // One physical blob, deduped across all 502 rows — `attachments.storageKey`
+  // is documented as NOT unique for exactly this reason ("content addressing
+  // means many registry rows share one physical key"). Keeps this fixture at
+  // a single `storage.uploadFileToKey` call instead of 502 sequential ones
+  // (this seed path runs in ~40 test files; 502x that would meaningfully slow
+  // the suite for no test value — the dump export/pagination path this
+  // fixture exists to exercise only cares about row *count*, not distinct
+  // bytes per row).
+  const sharedBody = Buffer.from(
+    "Bulk-imported reference file.\nUsed only to exercise the dump export's cursor pagination.\n",
+    "utf8",
+  );
+  const sharedStorageKey = "files/seed/bulk-import/bulk-import-reference.txt";
+  await storage.uploadFileToKey(sharedBody, sharedStorageKey, "text/plain");
+  const sharedContentHash = hashBuffer(sharedBody);
+
+  const attachmentRows: (typeof attachments.$inferInsert)[] = [];
+  const assetRows: (typeof busabaseAssets.$inferInsert)[] = [];
+  const usageRows: (typeof busabaseAssetUsages.$inferInsert)[] = [];
+
+  for (let i = 0; i < BULK_ATTACHMENT_FIXTURE_COUNT; i += 1) {
+    const idx = String(i).padStart(3, "0");
+    const attachmentId = `att_bulk_import_${idx}`;
+    const assetId = `ast_bulk_import_${idx}`;
+    const fileName = `bulk-import-reference-${idx}.txt`;
+
+    attachmentRows.push({
+      id: attachmentId,
+      storageKey: sharedStorageKey,
+      fileName,
+      mimeType: "text/plain",
+      sizeBytes: sharedBody.length,
+      contentHash: sharedContentHash,
+      context: "bulk-import",
+      userId: CURRENT_USER_ID,
+      spaceId,
+      metadata: {},
+      createdAt,
+      updatedAt: createdAt,
+    });
+    assetRows.push({
+      id: assetId,
+      spaceId,
+      attachmentId,
+      name: fileName,
+      contentKind: "text",
+      metadata: {},
+      createdBy: CURRENT_USER_ID,
+      createdAt,
+      updatedAt: createdAt,
+    });
+    usageRows.push({
+      id: id("aus"),
+      spaceId,
+      assetId,
+      ownerType: "drive",
+      nodeId: FILES_FOLDER_NODE_ID,
+      path: `/bulk-import/${fileName}`,
+      recordId: "",
+      fieldSlug: "",
+      blockId: "",
+      metadata: {},
+      createdAt,
+      updatedAt: createdAt,
+    });
+  }
+
+  for (const batch of chunk(attachmentRows, BULK_ATTACHMENT_INSERT_BATCH)) {
+    await db.insert(attachments).values(batch).onConflictDoNothing();
+  }
+  for (const batch of chunk(assetRows, BULK_ATTACHMENT_INSERT_BATCH)) {
+    await db.insert(busabaseAssets).values(batch).onConflictDoNothing();
+  }
+  for (const batch of chunk(usageRows, BULK_ATTACHMENT_INSERT_BATCH)) {
+    await db.insert(busabaseAssetUsages).values(batch).onConflictDoNothing();
+  }
+};
+
 const seedCommentsIfMissing = async (createdAt: Date, comments: SeedCommentDef[]) => {
   if (comments.length === 0) {
     return;
@@ -1083,11 +1341,30 @@ export const buildNodeTree = (
   const rootParentId = options?.rootParentId ?? null;
   const forceHasChildrenIds = options?.forceHasChildrenIds;
   const baseIdByNodeId = new Map(bases.map((base) => [base.nodeId, base.id]));
+  const presentIds = new Set(nodes.map((node) => node.id));
   const childrenByParentId = new Map<string | null, NodePO[]>();
   for (const node of nodes) {
-    const siblings = childrenByParentId.get(node.parentId) ?? [];
+    // Orphan promotion: a node whose parent is NOT part of `nodes` is attached
+    // at the requested root instead of being silently dropped. `nodes` is
+    // already ACL-filtered by the caller, so a missing parent means "an
+    // ancestor is hidden from this actor" — and hiding a node the actor was
+    // explicitly granted, just because its folder is private, loses content
+    // they are entitled to see. Two real cases this covers:
+    //   1. Restricted mode: the workspace root has no explicit visibility, so
+    //      it filters out and would otherwise take the ENTIRE tree with it —
+    //      members got a blank sidebar even for content opened or granted to
+    //      them. (The lazy-expand path never had this: `fetchRootNodeRows`
+    //      fetches the root unfiltered, i.e. the root is meant to be visible.)
+    //   2. A single node granted to someone inside a private folder.
+    // `recomputeSpaceNodeAcl` already treats an out-of-set parent as a root;
+    // this brings the read path in line with it.
+    const parentKey =
+      node.parentId === rootParentId || (node.parentId !== null && presentIds.has(node.parentId))
+        ? node.parentId
+        : rootParentId;
+    const siblings = childrenByParentId.get(parentKey) ?? [];
     siblings.push(node);
-    childrenByParentId.set(node.parentId, siblings);
+    childrenByParentId.set(parentKey, siblings);
   }
 
   const sortNodes = (items: NodePO[]) =>
@@ -1463,6 +1740,8 @@ export const seedScenario = async (scenario: SeedScenario) => {
   // they make the seeded workspace cover every builtin node type.
   await seedFileTreeNodesIfMissing(now(), scenario.fileTreeNodes ?? []);
   await seedRichNodesIfMissing(now(), scenario.richNodes ?? []);
+  // Forms depend on their target Base existing, so seed them after bases/nodes.
+  await seedFormNodesIfMissing(now(), scenario.forms ?? []);
   await seedDocNodesIfMissing(now(), scenario.docs ?? []);
   await seedFileNodesIfMissing(now(), scenario.files ?? []);
   // Drive Grep Retrieval demo fixture — binary PDF + agent-supplied text via
@@ -1479,6 +1758,29 @@ export const seedScenario = async (scenario: SeedScenario) => {
       error,
     );
   }
+  // Real binary-image fixture for the Blog Posts cover_image field — see
+  // `seedImageAssetFixture`'s docstring. Isolated in its own try/catch for the
+  // same reason as the grep fixture above: a storage hiccup here must not fail
+  // seeding for scenarios unrelated to this fixture.
+  try {
+    await seedImageAssetFixture(now());
+  } catch (error) {
+    console.error(
+      "[seed] seedImageAssetFixture failed — continuing without the cover-image demo fixture:",
+      error,
+    );
+  }
+  // >500 small attachment/asset/asset-usage rows — see `seedBulkAttachmentFixtures`'s
+  // docstring for why. Isolated in its own try/catch for the same reason as
+  // the other fixtures above.
+  try {
+    await seedBulkAttachmentFixtures(now());
+  } catch (error) {
+    console.error(
+      "[seed] seedBulkAttachmentFixtures failed — continuing without the bulk attachment demo fixture:",
+      error,
+    );
+  }
   // Comments thread under the change requests above, so they must already exist.
   await seedCommentsIfMissing(now(), scenario.comments ?? []);
 };
@@ -1490,10 +1792,18 @@ export const loadBasesByIds = async (baseIds: string[]): Promise<Map<string, Bas
   }
 
   const baseRows = await db.select().from(busabaseBases).where(inArray(busabaseBases.id, baseIds));
+  // Soft-deleted fields must NOT reach the VO — `getBase` has always filtered
+  // them and this path did not, so the same Base described two different
+  // schemas depending on which query loaded it. That leaked into every
+  // `RecordVO.base.fields`: `base.fields[0]` (the primary field used by the
+  // gallery/kanban card titles and change-request summaries) could be a field
+  // the user had already deleted, and a `lookup` hopping through a deleted
+  // relation kept resolving stale values instead of going inert. Deleted fields
+  // have their own explicit endpoint (`bases.listDeletedFields`).
   const fieldRows = await db
     .select()
     .from(busabaseBaseFields)
-    .where(inArray(busabaseBaseFields.baseId, baseIds));
+    .where(and(inArray(busabaseBaseFields.baseId, baseIds), isNull(busabaseBaseFields.deletedAt)));
   return new Map(
     baseRows.map((base) => [
       base.id,

@@ -34,11 +34,38 @@ import { busabaseRouter } from "../src/router";
  *    both now accept an optional `idempotencyKey` so a retry (e.g. after that
  *    kind of false failure, or a timeout) returns the original ChangeRequest
  *    instead of creating a content-identical duplicate.
+ * 4. `createFileTreeNode`'s idempotency ("does this slug already exist") used to
+ *    match by (spaceId, type, slug) only, ignoring the target parent. Installing
+ *    a skill/airapp/etc. whose slug already existed *anywhere else* in the space
+ *    (e.g. from `busabase-cli install` re-publishing an existing package under a
+ *    new folder) silently returned the unrelated existing node instead of
+ *    creating a new one — reporting fake success while creating nothing. The
+ *    check is now scoped to (spaceId, parentNodeId, type, slug) in
+ *    `src/domains/filetree/handlers.ts`.
  */
 
 type Client = ReturnType<typeof createRouterClient<typeof busabaseRouter, Record<never, never>>>;
 
 const MIGRATIONS_CWD = path.resolve(__dirname, "../../../apps/busabase");
+
+function findInTree(
+  nodes: Array<{ id: string; slug: string; children: unknown[] }>,
+  slug: string,
+): { id: string; slug: string } | null {
+  for (const n of nodes) {
+    if (n.slug === slug) {
+      return n;
+    }
+    const found = findInTree(
+      n.children as Array<{ id: string; slug: string; children: unknown[] }>,
+      slug,
+    );
+    if (found) {
+      return found;
+    }
+  }
+  return null;
+}
 
 describe("Node-parent validation, materialized flag, and ChangeRequest safety — oRPC integration", () => {
   let dataDir = "";
@@ -389,6 +416,62 @@ describe("Node-parent validation, materialized flag, and ChangeRequest safety �
           ),
         );
       expect(rows.length).toBe(1);
+    });
+  });
+
+  describe("Fix 4 — idempotency is scoped to (parent, slug, type), not slug alone", () => {
+    it("creating the same airapp slug under two different folders creates two distinct nodes", async () => {
+      const folderACr = await client.nodes.createChangeRequest({
+        operations: [{ kind: "create", nodeType: "folder", slug: "folder-a", name: "Folder A" }],
+      });
+      await client.changeRequests.review({ changeRequestId: folderACr.id, verdict: "approved" });
+      await client.changeRequests.merge({ changeRequestId: folderACr.id });
+
+      const folderBCr = await client.nodes.createChangeRequest({
+        operations: [{ kind: "create", nodeType: "folder", slug: "folder-b", name: "Folder B" }],
+      });
+      await client.changeRequests.review({ changeRequestId: folderBCr.id, verdict: "approved" });
+      await client.changeRequests.merge({ changeRequestId: folderBCr.id });
+
+      const tree = await client.nodes.list();
+      const folderA = findInTree(
+        tree as Array<{ id: string; slug: string; children: unknown[] }>,
+        "folder-a",
+      );
+      const folderB = findInTree(
+        tree as Array<{ id: string; slug: string; children: unknown[] }>,
+        "folder-b",
+      );
+      expect(folderA).toBeTruthy();
+      expect(folderB).toBeTruthy();
+
+      const inFolderA = await client.airapps.create({
+        autoMerge: true,
+        slug: "shared-slug-airapp",
+        name: "Shared Slug AirApp (A)",
+        parentNodeId: folderA?.id,
+      });
+      const inFolderB = await client.airapps.create({
+        autoMerge: true,
+        slug: "shared-slug-airapp",
+        name: "Shared Slug AirApp (B)",
+        parentNodeId: folderB?.id,
+      });
+
+      expect(inFolderA.materialized).toBe(true);
+      expect(inFolderB.materialized).toBe(true);
+      expect(inFolderA.node.id).not.toBe(inFolderB.node.id);
+      expect(inFolderA.node.parentId).toBe(folderA?.id);
+      expect(inFolderB.node.parentId).toBe(folderB?.id);
+
+      // Same slug, same parent again: still idempotent (returns the existing node).
+      const repeatInFolderA = await client.airapps.create({
+        autoMerge: true,
+        slug: "shared-slug-airapp",
+        name: "Shared Slug AirApp (A) retry",
+        parentNodeId: folderA?.id,
+      });
+      expect(repeatInFolderA.node.id).toBe(inFolderA.node.id);
     });
   });
 });

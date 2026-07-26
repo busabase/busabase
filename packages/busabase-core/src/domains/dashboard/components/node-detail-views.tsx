@@ -13,6 +13,7 @@ import { AirAppDetailView } from "../../airapp/components/AirAppDetailView";
 import { AirAppSidePanelPreview } from "../../airapp/components/RunPanel";
 import { DocEditor } from "../../doc/components";
 import { useDocImageUpload } from "../../doc/hooks/use-doc-image-upload";
+import { FormDetailView } from "../../form/components/form-detail-view";
 import { mergeSearchIntoHref } from "../helpers/link-search";
 import { useReportLoadedNode } from "../hooks/use-report-loaded-node";
 import { type NodeDetailProps, registerNodeDetail } from "../node-detail-registry";
@@ -27,7 +28,7 @@ import {
   renderFileTree,
   type SkillTreeNode,
 } from "./file-tree-browser";
-import { NodePermissionsButton } from "./node-permissions-button";
+import { NodeActionsMenu } from "./node-actions-menu";
 import { NodePinButton, nodeSidePanelTabId } from "./node-pin-button";
 import { EmptyState } from "./primitives";
 import { FileContentSkeleton, NodeDetailSkeleton } from "./skeletons";
@@ -282,9 +283,11 @@ export function FileTreeDetailView({
               tabType={`${nodeType}-preview`}
               title={fileTree.node.name}
             />
-            <NodePermissionsButton
+            <NodeActionsMenu
               nodeId={fileTree.node.id}
               nodeName={fileTree.node.name}
+              nodeSlug={fileTree.node.slug}
+              nodeType={nodeType}
               orpc={orpc}
             />
             <NodeDeleteButton
@@ -631,7 +634,13 @@ export function FileNodeDetailView({
               tabType="file-preview"
               title={node.name}
             />
-            <NodePermissionsButton nodeId={node.id} nodeName={node.name} orpc={orpc} />
+            <NodeActionsMenu
+              nodeId={node.id}
+              nodeName={node.name}
+              nodeSlug={node.slug}
+              nodeType="file"
+              orpc={orpc}
+            />
             <NodeDeleteButton orpc={orpc} nodeId={node.id} nodeName={node.name} nodeType="file" />
           </div>
         )}
@@ -766,8 +775,11 @@ export function DocDetailView({
   };
 
   return (
+    // Left padding is wider than the right: the Milkdown block-handle (drag/+
+    // button, see doc-editor.css) renders to the left of the hovered block and
+    // needs that room, or it gets clipped by this container's own overflow-auto.
     <div
-      className="mx-auto flex h-full min-h-0 w-full min-w-0 max-w-3xl flex-col overflow-auto px-6 py-10"
+      className="mx-auto flex h-full min-h-0 w-full min-w-0 max-w-5xl flex-col overflow-auto py-10 pr-6 pl-24"
       data-dashboard-scroll="doc-detail"
     >
       <div className="mb-5 flex items-start justify-between gap-4">
@@ -825,7 +837,13 @@ export function DocDetailView({
               tabType="doc-preview"
               title={doc.node.name}
             />
-            <NodePermissionsButton nodeId={doc.node.id} nodeName={doc.node.name} orpc={orpc} />
+            <NodeActionsMenu
+              nodeId={doc.node.id}
+              nodeName={doc.node.name}
+              nodeSlug={doc.node.slug}
+              nodeType="doc"
+              orpc={orpc}
+            />
             <NodeDeleteButton
               nodeId={doc.node.id}
               nodeName={doc.node.name}
@@ -892,7 +910,7 @@ export function FolderDetailView({
 
   return (
     <div
-      className="mx-auto h-full min-h-0 w-full min-w-0 max-w-3xl overflow-auto px-6 py-8"
+      className="mx-auto h-full min-h-0 w-full min-w-0 max-w-5xl overflow-auto px-6 py-8"
       data-dashboard-scroll="folder-detail"
     >
       <div className="mb-8 flex items-start justify-between gap-4">
@@ -910,9 +928,11 @@ export function FolderDetailView({
               tabType="folder-preview"
               title={folder.node.name}
             />
-            <NodePermissionsButton
+            <NodeActionsMenu
               nodeId={folder.node.id}
               nodeName={folder.node.name}
+              nodeSlug={folder.node.slug}
+              nodeType="folder"
               orpc={orpc}
             />
             <NodeDeleteButton
@@ -969,6 +989,7 @@ const FOLDER_CHILD_ICONS: Record<string, typeof Folder> = {
 };
 
 registerNodeDetail("folder", FolderDetailView);
+registerNodeDetail("form", FormDetailView);
 
 function FolderSidePanelPreview({ orpc, payload }: SidePanelTabProps) {
   const { nodeId } = payload as { nodeId: string };

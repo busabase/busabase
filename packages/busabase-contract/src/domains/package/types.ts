@@ -12,7 +12,11 @@
  * plus sibling pure contract schemas only.
  */
 import { z } from "zod";
-import { fieldNameSchema, fieldTypeSchema } from "../base/contract/base-schemas";
+import {
+  fieldNameSchema,
+  fieldTypeSchema,
+  lookupRollupSchema,
+} from "../base/contract/base-schemas";
 import { viewFilterOperatorSchema } from "../base/contract/view-schemas";
 import { VIEW_FIELD_MAX_WIDTH, VIEW_FIELD_MIN_WIDTH } from "../base/types";
 
@@ -64,6 +68,12 @@ export const PACKAGE_COMPUTED_FIELD_TYPES: readonly string[] = [
   "created_by",
   "updated_by",
   "auto_number",
+  "formula",
+  // `lookup` is derived from OTHER records and resolved at read time, so it
+  // shows up in `headCommit.fields` like any other value — but publishing it
+  // would ship derived data as if it were authored, and install would strip it
+  // server-side anyway.
+  "lookup",
   ...PACKAGE_AI_FIELD_TYPES,
 ];
 
@@ -75,6 +85,11 @@ export const PACKAGE_COMPUTED_FIELD_TYPES: readonly string[] = [
  */
 export const PACKAGE_DEFERRED_FIELD_TYPES: readonly string[] = [
   "relation",
+  // `lookup` hops through a `relation` field on the same Base, and the server
+  // rejects a lookup whose relation sibling doesn't exist yet. Since relations
+  // are themselves deferred to pass 2, a lookup created in pass 1 would fail
+  // validation outright — it has to land in the same pass as the hop it needs.
+  "lookup",
   ...PACKAGE_AI_FIELD_TYPES,
 ];
 
@@ -204,8 +219,27 @@ export const PackageFieldOptionsSchema = z
         providers: z.array(z.string()).optional(),
       })
       .optional(),
+    /** Mirrors the API's `formula.expression` verbatim — `{slug}` references carry
+     *  over unchanged since the package format keys everything by slug already. */
+    formula: z
+      .object({
+        expression: z.string().min(1),
+      })
+      .optional(),
     /** Package-only — replaces `inverseFieldId`. */
     inverseFieldSlug: z.string().optional(),
+    /** Carried verbatim: the API's own `lookup` config is already keyed entirely
+     *  by slug (`relationFieldSlug` / `targetFieldSlug`), so it survives a
+     *  re-id'ing install with no package-only alias. The companion `number`
+     *  snapshot rides along in the `number` key above. */
+    lookup: z
+      .object({
+        relationFieldSlug: z.string().min(1),
+        targetFieldSlug: z.string().min(1),
+        rollup: lookupRollupSchema.optional(),
+        limit: z.enum(["all", "first"]).optional(),
+      })
+      .optional(),
     multiple: z.boolean().optional(),
     number: z
       .object({

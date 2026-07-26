@@ -495,7 +495,33 @@ export const createFileTreeNode = async (
   await ensureReady();
   const db = await getDb();
   const parsed = createFileTreeInputSchema.parse(input);
-  const existing = await getStorageFileTreeNode(config.type, parsed.slug);
+
+  const parentNodeId = parsed.parentNodeId ?? rootNodeIdForSpace(getContextSpaceId());
+  const [parentNodeRow] = await db
+    .select()
+    .from(busabaseNodes)
+    .where(eq(busabaseNodes.id, parentNodeId))
+    .limit(1);
+  const parentNode = assertContainerParent(parentNodeRow, config.type, parentNodeId);
+
+  // Idempotency is scoped to (parentNode, slug, type) — NOT slug alone. A
+  // slug can legitimately repeat under different parents (e.g. the same
+  // skill installed into two folders); matching on slug globally caused
+  // installs to silently no-op onto an unrelated same-slug node elsewhere
+  // in the space instead of creating a new one under the requested parent.
+  const [existing] = await db
+    .select()
+    .from(busabaseNodes)
+    .where(
+      and(
+        eq(busabaseNodes.spaceId, getContextSpaceId()),
+        eq(busabaseNodes.parentId, parentNode.id),
+        eq(busabaseNodes.type, config.type),
+        eq(busabaseNodes.slug, parsed.slug),
+        isNull(busabaseNodes.archivedAt),
+      ),
+    )
+    .limit(1);
   if (existing) {
     return { ...(await getFileTreeNode(config, existing.id)), materialized: true as const };
   }
@@ -513,14 +539,6 @@ export const createFileTreeNode = async (
   const files = gitignoreResult.kept;
   assertNoForbiddenPaths(files.map((file) => file.path));
   scanForSecrets(files);
-
-  const parentNodeId = parsed.parentNodeId ?? rootNodeIdForSpace(getContextSpaceId());
-  const [parentNodeRow] = await db
-    .select()
-    .from(busabaseNodes)
-    .where(eq(busabaseNodes.id, parentNodeId))
-    .limit(1);
-  const parentNode = assertContainerParent(parentNodeRow, config.type, parentNodeId);
 
   // Permission-aware default: merge immediately if the actor has `write` on
   // the parent node; otherwise (or with explicit `autoMerge: false`) propose

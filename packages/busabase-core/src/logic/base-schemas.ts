@@ -1,5 +1,8 @@
 import { CREATABLE_NODE_TYPES } from "busabase-contract/domains";
-import { fieldNameSchema } from "busabase-contract/domains/base/contract/base-schemas";
+import {
+  fieldNameSchema,
+  lookupRollupSchema,
+} from "busabase-contract/domains/base/contract/base-schemas";
 import { VIEW_FIELD_MAX_WIDTH, VIEW_FIELD_MIN_WIDTH } from "busabase-contract/types";
 import { z } from "zod";
 
@@ -29,6 +32,9 @@ const fieldTypeSchema = z.enum([
   "code",
   "json",
   "yaml",
+  "formula",
+  "lookup",
+  "whiteboard",
 ]);
 
 const fieldOptionsSchema = z
@@ -72,7 +78,22 @@ const fieldOptionsSchema = z
         providers: z.array(z.string()).optional(),
       })
       .optional(),
+    // Must mirror the contract's fieldOptionsSchema — see base-schemas.ts there.
+    formula: z
+      .object({
+        expression: z.string().min(1),
+      })
+      .optional(),
     inverseFieldId: z.string().optional(),
+    // Must mirror the contract's fieldOptionsSchema — see base-schemas.ts there.
+    lookup: z
+      .object({
+        relationFieldSlug: z.string().min(1),
+        targetFieldSlug: z.string().min(1),
+        rollup: lookupRollupSchema.optional(),
+        limit: z.enum(["all", "first"]).optional(),
+      })
+      .optional(),
     multiple: z.boolean().optional(),
     number: z
       .object({
@@ -301,4 +322,10 @@ export const recordFieldFilterInputSchema = z.object({
   fieldSlug: z.string().min(1),
   valueText: z.string().min(1),
   limit: z.number().int().min(1).max(100).optional().default(50),
+});
+
+export const recordFieldGetInputSchema = z.object({
+  baseId: z.string(),
+  fieldSlug: z.string().min(1),
+  valueText: z.string().min(1),
 });

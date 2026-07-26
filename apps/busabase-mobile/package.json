@@ -1,6 +1,6 @@
 {
   "name": "busabase-mobile",
-  "version": "0.9.14",
+  "version": "0.9.15",
   "main": "expo-router/entry",
   "private": true,
   "scripts": {
@@ -22,13 +22,13 @@
   },
   "dependencies": {
     "@expo-google-fonts/fraunces": "^0.4.1",
+    "@expo/metro-runtime": "56.0.18",
     "@expo/vector-icons": "^15.0.3",
     "@orpc/client": "^1.14.6",
     "@orpc/contract": "^1.14.6",
     "@orpc/tanstack-query": "1.14.6",
     "@react-native-async-storage/async-storage": "2.2.0",
     "@react-native-cookies/cookies": "^6.2.1",
-    "@react-navigation/native": "^7.1.6",
     "@tanstack/react-query": "^5.101.0",
     "@types/d3-force": "^3.0.10",
     "busabase-contract": "workspace:*",
@@ -52,8 +52,8 @@
     "expo-web-browser": "~56.0.5",
     "lucide-react-native": "^0.556.0",
     "openlib": "workspace:*",
-    "react": "19.2.3",
-    "react-dom": "19.2.3",
+    "react": "19.2.7",
+    "react-dom": "19.2.7",
     "react-native": "0.85.3",
     "react-native-gesture-handler": "~2.31.2",
     "react-native-reanimated": "~4.3.1",
@@ -68,6 +68,33 @@
     "@babel/core": "^7.25.2",
     "@types/react": "^19.2.17",
     "typescript": "^6.0.3"
+  },
+  "expo": {
+    "doctor": {
+      "reactNativeDirectoryCheck": {
+        "exclude": [
+          "@react-native-cookies/cookies"
+        ],
+        "listUnknownPackages": false
+      }
+    },
+    "install": {
+      "exclude": [
+        "expo",
+        "expo-background-task",
+        "expo-constants",
+        "expo-image-picker",
+        "expo-linking",
+        "expo-notifications",
+        "expo-router",
+        "expo-splash-screen",
+        "expo-task-manager",
+        "expo-web-browser",
+        "react-native-screens",
+        "react",
+        "react-dom"
+      ]
+    }
   },
   "appStatus": {
     "port": null,

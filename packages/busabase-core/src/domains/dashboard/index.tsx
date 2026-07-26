@@ -790,7 +790,7 @@ function BusabaseDashboardContent({
 
     if (isBaseSetupRoute) {
       return [
-        { label: messages.nav.bases },
+        { label: messages.nav.workspace },
         {
           href: activeBase ? `/base/${activeBase.slug}` : undefined,
           label: activeBase?.name ?? messages.nav.base,
@@ -801,7 +801,7 @@ function BusabaseDashboardContent({
 
     if (isNewRecordRoute) {
       return [
-        { label: messages.nav.bases },
+        { label: messages.nav.workspace },
         {
           href: activeBase ? `/base/${activeBase.slug}` : undefined,
           label: activeBase?.name ?? messages.nav.base,
@@ -812,7 +812,7 @@ function BusabaseDashboardContent({
 
     if (isEditRecordRoute) {
       return [
-        { label: messages.nav.bases },
+        { label: messages.nav.workspace },
         {
           href: activeRecord
             ? `/base/${activeRecord.base.slug}`
@@ -831,7 +831,7 @@ function BusabaseDashboardContent({
 
     if (isRecordRoute) {
       return [
-        { label: messages.nav.bases },
+        { label: messages.nav.workspace },
         {
           href: activeRecord
             ? `/base/${activeRecord.base.slug}`
@@ -846,7 +846,7 @@ function BusabaseDashboardContent({
 
     if (isBaseViewRoute) {
       return [
-        { label: messages.nav.bases },
+        { label: messages.nav.workspace },
         {
           href: activeBase ? `/base/${activeBase.slug}` : undefined,
           label: activeBase?.name ?? messages.nav.base,
@@ -856,7 +856,7 @@ function BusabaseDashboardContent({
     }
 
     if (locationPath.startsWith("/base/")) {
-      return [{ label: messages.nav.bases }, { label: activeBase?.name ?? messages.nav.base }];
+      return [{ label: messages.nav.workspace }, { label: activeBase?.name ?? messages.nav.base }];
     }
 
     return [{ label: messages.inbox.title }];
@@ -1173,6 +1173,65 @@ function BusabaseDashboardContent({
       await refresh();
     },
     [approveAndMergeChangeRequest, client, refresh, setLocation],
+  );
+
+  // Bulk delete from the table's multi-select toolbar. There is no batch
+  // delete endpoint (createBulkChangeRequest only supports batch *create*),
+  // so this loops the same single-record delete call per selected record.
+  // Deliberately serial rather than Promise.all: bulk deletes run against a
+  // local PGLite DB and write an audit-log entry per Change Request, and
+  // concurrent writes there have been flaky in other flows in this codebase
+  // — sequential is slower but safe. Each record's outcome is isolated so a
+  // failure partway through doesn't abort the rest, matching the batch
+  // Change-Request review flow above.
+  const bulkDeleteRecordsMutation = useMutation({
+    mutationFn: async (variables: { records: RecordVO[]; options?: RecordSubmitOptions }) => {
+      let ok = 0;
+      let failed = 0;
+      for (const record of variables.records) {
+        try {
+          const changeRequest = await client.createDeleteChangeRequest(record.id);
+          if (variables.options?.mergeImmediately) {
+            await approveAndMergeChangeRequest(changeRequest.id);
+          }
+          ok += 1;
+        } catch {
+          failed += 1;
+        }
+      }
+      return { ok, failed };
+    },
+    onMutate: () => setError(null),
+    onSuccess: (result, variables) => {
+      // The result tally means something different depending on the mode:
+      // with mergeImmediately the records are actually gone; without it,
+      // "ok" only counts delete Change Requests that were successfully
+      // submitted for review — the records are still present until someone
+      // approves them. Reusing one "deleted" message for both would tell the
+      // user something false happened when they only requested a review.
+      const summary = variables.options?.mergeImmediately
+        ? fmt(messages.base.bulkDeleteResult, { ok: result.ok, failed: result.failed })
+        : fmt(messages.base.bulkDeleteRequestResult, {
+            ok: result.ok,
+            failed: result.failed,
+            plural: result.ok === 1 ? "" : "s",
+          });
+      if (result.failed > 0) {
+        toast.error(summary);
+      } else {
+        toast.success(summary);
+      }
+    },
+    onError: (mutationError) =>
+      setError(
+        mutationError instanceof Error ? mutationError.message : messages.shell.operationFailed,
+      ),
+    onSettled: () => refresh(),
+  });
+  const submitDeleteRecords = useCallback(
+    (recordsToDelete: RecordVO[], options?: RecordSubmitOptions) =>
+      bulkDeleteRecordsMutation.mutateAsync({ records: recordsToDelete, options }),
+    [bulkDeleteRecordsMutation],
   );
 
   const submitCreateBaseField = useCallback(
@@ -1784,6 +1843,7 @@ function BusabaseDashboardContent({
           base={activeBase}
           onCreateView={submitCreateView}
           onDeleteView={submitDeleteView}
+          onDeleteRecords={submitDeleteRecords}
           onRestoreView={submitRestoreView}
           onRestoreRecord={submitRestoreRecord}
           onMoveRecord={submitMoveRecord}
@@ -1889,6 +1949,7 @@ function BusabaseDashboardContent({
     recordLoadedNode,
     serverSortedView,
     baseRecords,
+    submitDeleteRecords,
   ]);
 
   const dashboardActiveView = (

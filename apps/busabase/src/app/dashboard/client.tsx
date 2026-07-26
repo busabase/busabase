@@ -291,7 +291,7 @@ function DashboardClientContent({ initialPath = "/inbox", localUserName }: Dashb
             // when a host leaves it unset — so the entry point is always offered
             // here. The cloud host is where the role gate actually bites.
             onInstallClick={() => setIsInstallOpen(true)}
-            onMoveNode={(payload) => moveNodeMutation.mutate(payload)}
+            onMoveNode={(payload, options) => moveNodeMutation.mutate(payload, options)}
             locale={locale}
             languagePref={languagePref}
             onLocaleChange={changeLocale}

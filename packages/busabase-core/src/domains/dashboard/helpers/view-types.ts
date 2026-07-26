@@ -1,4 +1,4 @@
-import type { FieldType, ViewConfigVO, ViewType } from "busabase-contract/types";
+import type { FieldType, LookupRollup, ViewConfigVO, ViewType } from "busabase-contract/types";
 import type { iString } from "openlib/i18n/i-string";
 import type { ReactNode } from "react";
 
@@ -50,6 +50,12 @@ export interface CreateBaseFieldPayload {
     }>;
     code?: {
       language?: string;
+    };
+    lookup?: {
+      relationFieldSlug: string;
+      targetFieldSlug: string;
+      rollup?: LookupRollup;
+      limit?: "all" | "first";
     };
     multiple?: boolean;
     number?: {

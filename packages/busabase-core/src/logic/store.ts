@@ -14,6 +14,7 @@ export {
   deleteViewInputSchema,
   fieldSchema,
   recordFieldFilterInputSchema,
+  recordFieldGetInputSchema,
   restoreViewInputSchema,
   updateViewInputSchema,
   viewConfigSchema,

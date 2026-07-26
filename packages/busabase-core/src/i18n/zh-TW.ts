@@ -24,7 +24,7 @@ export const dashboardZhTW: CoreI18nMessages = {
     search: "搜尋",
     activity: "動態",
     archive: "封存",
-    bases: "資料庫",
+    workspace: "工作區",
     new: "新增",
     installFromGithub: "從 GitHub 安裝…",
   },

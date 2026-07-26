@@ -12,9 +12,11 @@ const labelByFieldType: Record<FieldType, string> = {
   date: "Date",
   email: "Email",
   embed: "Embed",
+  formula: "Formula",
   html: "HTML",
   json: "JSON",
   longtext: "Long text",
+  lookup: "Lookup",
   markdown: "Markdown",
   multiselect: "Multi-select",
   number: "Number",
@@ -25,6 +27,7 @@ const labelByFieldType: Record<FieldType, string> = {
   updated_by: "Updated by",
   updated_time: "Updated time",
   url: "URL",
+  whiteboard: "Whiteboard",
   yaml: "YAML",
 };
 

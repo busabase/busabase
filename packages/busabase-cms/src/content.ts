@@ -2,7 +2,11 @@ import type { BusabaseConfig } from "busabase-sdk";
 import { z } from "zod";
 import { BusabaseCmsError } from "./errors";
 import { createBusabaseCmsBaseResolver } from "./provision";
-import type { BusabaseCmsBaseRole, BusabaseCmsSchemaProfile } from "./schema";
+import type {
+  BusabaseCmsBaseRole,
+  BusabaseCmsFieldsOverride,
+  BusabaseCmsSchemaProfile,
+} from "./schema";
 import {
   type BusabaseCmsClient,
   type BusabaseCmsRecord,
@@ -50,8 +54,16 @@ export interface BusabaseCmsOptions {
   folderId?: string;
   /** Directly materialize missing CMS Bases/fields on first read. Requires folderId. */
   lazyCreate?: boolean;
-  /** Provisioning contract for the Folder. Defaults to the reusable standard CMS schema. */
+  /** Provisioning contract label for the Folder. Defaults to the reusable standard CMS schema. */
   schemaProfile?: BusabaseCmsSchemaProfile;
+  /**
+   * Reshapes the standard `posts`/`pages` field list into an app-specific contract. Required
+   * when `schemaProfile` is anything other than `"standard"` — the SDK has no field shape of
+   * its own for a custom profile label, only what this override returns.
+   */
+  fieldsOverride?: BusabaseCmsFieldsOverride;
+  /** Grandfather in a field that predates a later required-field tightening for this profile. */
+  legacyOptionalFields?: Array<{ role: BusabaseCmsBaseRole; slug: string }>;
   baseSlugs?: {
     posts?: string;
     pages?: string;
@@ -308,7 +320,11 @@ const resolveOptions = (options: BusabaseCmsOptions): ResolvedOptions => {
           source,
           folderId: options.folderId,
           lazyCreate: options.lazyCreate ?? false,
-          schemaProfile: options.schemaProfile ?? "standard",
+          schema: {
+            profile: options.schemaProfile ?? "standard",
+            fieldsOverride: options.fieldsOverride,
+            legacyOptionalFields: options.legacyOptionalFields,
+          },
         })
       : undefined,
     baseSlugs: {
@@ -323,15 +339,39 @@ const resolveOptions = (options: BusabaseCmsOptions): ResolvedOptions => {
   };
 };
 
-const listAllRecords = async (
+const resolveRoleBaseId = async (
   options: ResolvedOptions,
   role: BusabaseCmsBaseRole,
-): Promise<BusabaseCmsRecord[]> => {
+): Promise<string> => {
   const baseSlug = options.baseSlugs[role];
   const baseId = options.resolveBaseId
     ? await options.resolveBaseId(role)
     : (await options.source.getBaseBySlug(baseSlug))?.id;
   if (!baseId) throw new BusabaseCmsError(`Busabase Base "${baseSlug}" was not found`);
+  return baseId;
+};
+
+/**
+ * Point lookup by an exact field value (e.g. `path`, `slug`), scoped to one role's Base.
+ * Returns `undefined` — not `null` — when the source has no `getRecordByField` capability,
+ * so callers can tell "unsupported, fall back to list+find" apart from "supported, not found".
+ */
+const findRecordByField = async (
+  options: ResolvedOptions,
+  role: BusabaseCmsBaseRole,
+  fieldSlug: string,
+  valueText: string,
+): Promise<BusabaseCmsRecord | null | undefined> => {
+  if (!options.source.getRecordByField) return undefined;
+  const baseId = await resolveRoleBaseId(options, role);
+  return options.source.getRecordByField({ baseId, fieldSlug, valueText });
+};
+
+const listAllRecords = async (
+  options: ResolvedOptions,
+  role: BusabaseCmsBaseRole,
+): Promise<BusabaseCmsRecord[]> => {
+  const baseId = await resolveRoleBaseId(options, role);
 
   const records: BusabaseCmsRecord[] = [];
   const visitedCursors = new Set<string>();
@@ -347,7 +387,9 @@ const listAllRecords = async (
 
     if (!page.nextCursor) break;
     if (visitedCursors.has(page.nextCursor)) {
-      throw new BusabaseCmsError(`Busabase returned a repeated cursor for Base "${baseSlug}"`);
+      throw new BusabaseCmsError(
+        `Busabase returned a repeated cursor for Base "${options.baseSlugs[role]}"`,
+      );
     }
     visitedCursors.add(page.nextCursor);
     cursor = page.nextCursor;
@@ -380,6 +422,30 @@ const mapValidRecords = <T>(
     }
   });
 
+/**
+ * Resolve one record by an exact field value. Prefers the source's `getRecordByField`
+ * point lookup (a single indexed query); falls back to `list()` + client-side `.find()`
+ * when the source doesn't support it (e.g. a demo/test source).
+ */
+const getSingleByField = async <T>(
+  options: ResolvedOptions,
+  role: BusabaseCmsBaseRole,
+  fieldSlug: string,
+  valueText: string,
+  kind: CmsRecordKind,
+  mapper: (record: BusabaseCmsRecord) => T | null,
+  fallbackList: () => Promise<T[]>,
+  matches: (item: T) => boolean,
+): Promise<T | null> => {
+  const found = await findRecordByField(options, role, fieldSlug, valueText);
+  if (found !== undefined) {
+    if (!found) return null;
+    const [mapped] = mapValidRecords(options, [found], kind, mapper);
+    return mapped ?? null;
+  }
+  return (await fallbackList()).find(matches) ?? null;
+};
+
 export const createBusabaseCms = (options: BusabaseCmsOptions = {}): BusabaseCms => {
   const resolved = resolveOptions(options);
 
@@ -410,20 +476,59 @@ export const createBusabaseCms = (options: BusabaseCmsOptions = {}): BusabaseCms
   return {
     posts: {
       list: listPosts,
-      getByPath: async (path) => (await listPosts()).find((post) => post.path === path) ?? null,
+      getByPath: (path) =>
+        getSingleByField(
+          resolved,
+          "posts",
+          "path",
+          path,
+          "post",
+          mapPublishedPostRecord,
+          listPosts,
+          (post) => post.path === path,
+        ),
     },
     pages: {
       list: listPages,
-      getByPath: async (path) => (await listPages()).find((page) => page.path === path) ?? null,
+      getByPath: (path) =>
+        getSingleByField(
+          resolved,
+          "pages",
+          "path",
+          path,
+          "page",
+          mapPublishedPageRecord,
+          listPages,
+          (page) => page.path === path,
+        ),
     },
     categories: {
       list: listCategories,
-      getBySlug: async (slug) =>
-        (await listCategories()).find((category) => category.slug === slug) ?? null,
+      getBySlug: (slug) =>
+        getSingleByField(
+          resolved,
+          "categories",
+          "slug",
+          slug,
+          "category",
+          mapActiveCategoryRecord,
+          listCategories,
+          (category) => category.slug === slug,
+        ),
     },
     tags: {
       list: listTags,
-      getBySlug: async (slug) => (await listTags()).find((tag) => tag.slug === slug) ?? null,
+      getBySlug: (slug) =>
+        getSingleByField(
+          resolved,
+          "tags",
+          "slug",
+          slug,
+          "tag",
+          mapActiveTagRecord,
+          listTags,
+          (tag) => tag.slug === slug,
+        ),
     },
   };
 };

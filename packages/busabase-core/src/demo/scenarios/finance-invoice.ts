@@ -22,6 +22,8 @@ export const FINANCE_PO_SUPPORT_ID = "rec_seed_po_support";
 const FINANCE_PO_SUPPORT_COMMIT_ID = "cmt_seed_po_support";
 export const FINANCE_INVOICE_GLOBEX_ID = "rec_seed_invoice_globex_cloud";
 const FINANCE_INVOICE_GLOBEX_COMMIT_ID = "cmt_seed_invoice_globex_cloud";
+export const FINANCE_INVOICE_GLOBEX_JULY_ID = "rec_seed_invoice_globex_cloud_july";
+const FINANCE_INVOICE_GLOBEX_JULY_COMMIT_ID = "cmt_seed_invoice_globex_cloud_july";
 export const FINANCE_INVOICE_FIGMA_ID = "rec_seed_invoice_figma_seats";
 const FINANCE_INVOICE_FIGMA_COMMIT_ID = "cmt_seed_invoice_figma_seats";
 export const FINANCE_INVOICE_MARKETING_ID = "rec_seed_invoice_marketing_suite";
@@ -64,7 +66,7 @@ const purchaseOrderFields = [
     name: "Budget",
     type: "number",
     required: false,
-    options: {},
+    options: { number: { format: "currency", currency: "USD" } },
   },
   {
     id: "bsf_po_currency",
@@ -96,6 +98,50 @@ const purchaseOrderFields = [
       ],
     },
   },
+  {
+    id: "bsf_po_invoices",
+    slug: "invoices",
+    name: "Invoices",
+    type: "relation",
+    required: false,
+    options: { multiple: true, targetBaseId: DEMO_INVOICES_BASE_ID },
+  },
+  // Rollup lookup: how much has actually been billed against this PO. This is
+  // the number a finance reviewer needs and the one nobody wants to maintain by
+  // hand — it must move the moment an invoice total is edited, which is exactly
+  // why lookups resolve at read time instead of being stored on the commit.
+  {
+    id: "bsf_po_invoiced_total",
+    slug: "invoiced_total",
+    name: "Invoiced to Date",
+    type: "lookup",
+    required: false,
+    options: {
+      lookup: {
+        relationFieldSlug: "invoices",
+        targetFieldSlug: "total",
+        rollup: "sum",
+      },
+      // Snapshot of the target field's formatting — exactly what
+      // resolveLookupFieldOptions writes when this field is created through the
+      // API/UI. The seeder inserts rows directly, so it is spelled out here.
+      number: { format: "currency", currency: "USD" },
+    },
+  },
+  {
+    id: "bsf_po_invoice_count",
+    slug: "invoice_count",
+    name: "Invoices Received",
+    type: "lookup",
+    required: false,
+    options: {
+      lookup: {
+        relationFieldSlug: "invoices",
+        targetFieldSlug: "invoice_number",
+        rollup: "count",
+      },
+    },
+  },
 ] satisfies SeedBaseDef["fields"];
 
 const invoiceFields = [
@@ -123,6 +169,24 @@ const invoiceFields = [
     required: false,
     options: { multiple: false, targetBaseId: DEMO_PURCHASE_ORDERS_BASE_ID },
   },
+  // Plain (non-aggregating) lookup: pull the approved budget across from the
+  // linked PO so a reviewer can eyeball invoice-vs-budget without opening the
+  // other Base. `values` brings the linked record's value over as-is.
+  {
+    id: "bsf_invoice_po_budget",
+    slug: "po_budget",
+    name: "PO Budget",
+    type: "lookup",
+    required: false,
+    options: {
+      lookup: {
+        relationFieldSlug: "purchase-order",
+        targetFieldSlug: "budget",
+        rollup: "values",
+      },
+      number: { format: "currency", currency: "USD" },
+    },
+  },
   {
     id: "bsf_invoice_amount",
     slug: "amount",
@@ -138,7 +202,7 @@ const invoiceFields = [
     name: "Total",
     type: "number",
     required: false,
-    options: {},
+    options: { number: { format: "currency", currency: "USD" } },
   },
   {
     id: "bsf_invoice_due_date",
@@ -251,6 +315,7 @@ export const FINANCE_RECORDS: SeedRecordDef[] = [
       approved_at: "2026-05-20",
       budget: 125000,
       currency: "USD",
+      invoices: [FINANCE_INVOICE_GLOBEX_ID, FINANCE_INVOICE_GLOBEX_JULY_ID],
       owner: "finance.ops@busabase.local",
       po_number: "PO-2026-0418",
       status: "open",
@@ -269,6 +334,7 @@ export const FINANCE_RECORDS: SeedRecordDef[] = [
       approved_at: "2026-05-28",
       budget: 18000,
       currency: "USD",
+      invoices: [FINANCE_INVOICE_FIGMA_ID],
       owner: "design.ops@busabase.local",
       po_number: "PO-2026-0472",
       status: "matched",
@@ -287,6 +353,7 @@ export const FINANCE_RECORDS: SeedRecordDef[] = [
       approved_at: "2026-06-02",
       budget: 42000,
       currency: "USD",
+      invoices: [FINANCE_INVOICE_MARKETING_ID],
       owner: "marketing.ops@busabase.local",
       po_number: "PO-2026-0503",
       status: "closed",
@@ -305,6 +372,7 @@ export const FINANCE_RECORDS: SeedRecordDef[] = [
       approved_at: "2026-06-10",
       budget: 9600,
       currency: "USD",
+      invoices: [FINANCE_INVOICE_SUPPORT_ID],
       owner: "support.ops@busabase.local",
       po_number: "PO-2026-0519",
       status: "open",
@@ -348,6 +416,32 @@ export const FINANCE_RECORDS: SeedRecordDef[] = [
     message: "Seed invoice awaiting AP match review",
     author: "seed-finance",
     minutesAgo: 120,
+    useCases: ["finance"],
+  },
+  // A SECOND invoice against the same platform PO — monthly cloud billing. It
+  // exists so the PO's `invoiced_total` rollup sums more than one row: a SUM
+  // over a single linked record proves nothing.
+  {
+    id: FINANCE_INVOICE_GLOBEX_JULY_ID,
+    baseId: DEMO_INVOICES_BASE_ID,
+    commitId: FINANCE_INVOICE_GLOBEX_JULY_COMMIT_ID,
+    fields: {
+      amount: 5200,
+      due_date: "2026-08-05",
+      flags: ["po-match"],
+      invoice_number: "INV-GCX-2026-0703",
+      "purchase-order": [FINANCE_PO_PLATFORM_ID],
+      ready_to_pay: true,
+      review_notes:
+        "Overage for July burst capacity. Within the remaining PO balance, no exception raised.",
+      status: "matched",
+      tax: 416,
+      total: 5616,
+      vendor: "Globex Cloud Services",
+    },
+    message: "Seed follow-up cloud invoice for the same purchase order",
+    author: "seed-finance",
+    minutesAgo: 110,
     useCases: ["finance"],
   },
   {

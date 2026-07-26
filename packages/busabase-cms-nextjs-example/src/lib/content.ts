@@ -1,18 +1,14 @@
 import "server-only";
 
 import {
-  buildCmsCanonicalPath,
-  buildCmsTaxonomyArchivePath,
   type CategoryVO,
   type CmsTaxonomyKind,
   createBusabaseCmsSourceFromConfig,
+  createCmsPathHelpers,
   filterCmsPostsByTaxonomy,
-  isCmsBlogPostPath,
-  isCmsContentForLocale,
-  normalizeCmsPath,
   type PageVO,
   type PostVO,
-  parseCmsCanonicalPath,
+  readCmsOrFallback,
   type TagVO,
 } from "busabase-cms";
 import { createCachedBusabaseCms } from "busabase-cms/next";
@@ -27,6 +23,8 @@ export const cmsPathOptions = {
   supportedLocales: [...new Set([defaultLocale, ...configuredLocales])],
   defaultLocale,
 } as const;
+
+const cmsPathHelpers = createCmsPathHelpers(cmsPathOptions);
 
 // A self-hosted Busabase server can be read without an API key or space header.
 const isConfigured = Boolean(process.env.BUSABASE_BASE_URL && process.env.BUSABASE_CMS_FOLDER_ID);
@@ -81,81 +79,70 @@ export const getCmsFolderDashboardUrl = async () => {
   }
 };
 
-const loadCmsCollection = async <T>(
-  label: string,
-  operation: (() => Promise<T[]>) | undefined,
-): Promise<T[]> => {
-  if (!operation) return [];
-
-  try {
-    return await operation();
-  } catch (error) {
-    console.error(`[busabase-cms] Unable to load ${label}`, error);
-    return [];
-  }
-};
-
-const hasValidCanonicalPath = (item: { locale: string; path: string }) =>
-  Boolean(parseCmsCanonicalPath(item.path, cmsPathOptions)) &&
-  isCmsContentForLocale(item, item.locale, cmsPathOptions);
-
 export const listBlogPosts = async (): Promise<PostVO[]> => {
-  const posts = await loadCmsCollection("Posts", cms ? () => cms.posts.list() : undefined);
+  const posts = await readCmsOrFallback(cms ? () => cms.posts.list() : undefined, [], "list Posts");
   return posts.filter(
-    (post) => hasValidCanonicalPath(post) && isCmsBlogPostPath(post.path, cmsPathOptions),
+    (post) => cmsPathHelpers.isValidContent(post) && cmsPathHelpers.isBlogPostPath(post.path),
   );
 };
 
 export const listLandingPages = async (): Promise<PageVO[]> => {
-  const pages = await loadCmsCollection("Pages", cms ? () => cms.pages.list() : undefined);
-  return pages.filter(hasValidCanonicalPath);
+  const pages = await readCmsOrFallback(cms ? () => cms.pages.list() : undefined, [], "list Pages");
+  return pages.filter(cmsPathHelpers.isValidContent);
 };
 
 export const taxonomyArchivePath = (
   kind: CmsTaxonomyKind,
   taxonomy: { locale: string; slug: string },
-) => buildCmsTaxonomyArchivePath(kind, taxonomy, cmsPathOptions);
+) => cmsPathHelpers.buildTaxonomyArchivePath(kind, taxonomy);
 
 export const listCategories = async (): Promise<CategoryVO[]> => {
-  const categories = await loadCmsCollection(
-    "Categories",
+  const categories = await readCmsOrFallback(
     cms ? () => cms.categories.list() : undefined,
+    [],
+    "list Categories",
   );
   return categories.filter((category) => taxonomyArchivePath("categories", category));
 };
 
 export const listTags = async (): Promise<TagVO[]> => {
-  const tags = await loadCmsCollection("Tags", cms ? () => cms.tags.list() : undefined);
+  const tags = await readCmsOrFallback(cms ? () => cms.tags.list() : undefined, [], "list Tags");
   return tags.filter((tag) => taxonomyArchivePath("tags", tag));
 };
 
-export const canonicalContentPath = (path: string) => normalizeCmsPath(path);
+export const canonicalContentPath = (path: string) => cmsPathHelpers.normalizePath(path);
 
 export const buildContentPath = (locale: string, segments: readonly string[]) =>
-  buildCmsCanonicalPath(locale, segments, cmsPathOptions);
+  cmsPathHelpers.buildPath(locale, segments);
 
-export const parseContentPath = (path: string) => parseCmsCanonicalPath(path, cmsPathOptions);
+export const parseContentPath = (path: string) => cmsPathHelpers.parsePath(path);
 
 export const getBlogPostByCanonicalPath = async (path: string): Promise<PostVO | null> => {
-  const canonicalPath = normalizeCmsPath(path);
-  if (!canonicalPath || !isCmsBlogPostPath(canonicalPath, cmsPathOptions)) return null;
+  const canonicalPath = cmsPathHelpers.normalizePath(path);
+  if (!canonicalPath || !cmsPathHelpers.isBlogPostPath(canonicalPath)) return null;
 
-  return (
-    (await listBlogPosts()).find((post) => normalizeCmsPath(post.path) === canonicalPath) ?? null
+  const post = await readCmsOrFallback(
+    cms ? () => cms.posts.getByPath(canonicalPath) : undefined,
+    null,
+    "get Post",
   );
+  return post && cmsPathHelpers.isValidContent(post) ? post : null;
 };
 
 export const getLandingPageByCanonicalPath = async (path: string): Promise<PageVO | null> => {
-  const canonicalPath = normalizeCmsPath(path);
+  const canonicalPath = cmsPathHelpers.normalizePath(path);
   if (!canonicalPath) return null;
 
-  return (
-    (await listLandingPages()).find((page) => normalizeCmsPath(page.path) === canonicalPath) ?? null
+  const page = await readCmsOrFallback(
+    cms ? () => cms.pages.getByPath(canonicalPath) : undefined,
+    null,
+    "get Page",
   );
+  return page && cmsPathHelpers.isValidContent(page) ? page : null;
 };
 
 export const getLandingPageByPreviewRoute = async (route: string): Promise<PageVO | null> => {
-  const parsed = parseCmsCanonicalPath(`/${route}`, cmsPathOptions);
+  const parsed = cmsPathHelpers.parsePath(`/${route}`);
   const slug = parsed?.segments.at(-1);
   if (!parsed || !slug) return null;
 

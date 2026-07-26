@@ -22,6 +22,7 @@ import { docNodeType } from "./doc/definition";
 import { driveNodeType } from "./drive/definition";
 import { fileNodeType } from "./file-node/definition";
 import { folderNodeType } from "./folder/definition";
+import { formNodeType } from "./form/definition";
 import { htmlNodeType } from "./html/definition";
 import { skillNodeType } from "./skill/definition";
 import type {
@@ -77,6 +78,7 @@ export const BUILTIN_NODE_TYPES = [
   airappNodeType,
   fileNodeType,
   docNodeType,
+  formNodeType,
   whiteboardNodeType,
   workflowNodeType,
   htmlNodeType,

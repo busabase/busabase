@@ -1,10 +1,14 @@
+import type { NonDeletedExcalidrawElement } from "@excalidraw/excalidraw/element/types";
+import type { AppState, ExcalidrawInitialDataState } from "@excalidraw/excalidraw/types";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { BusabaseDashboardApiClient } from "busabase-contract/api-client";
+import type { WhiteboardDocument } from "busabase-contract/domains/rich-node/types";
 import type {
   AssetAttachmentRef,
   BaseFieldVO,
   BaseVO,
   ChangeRequestVO,
+  FieldType,
   RecordVO,
 } from "busabase-contract/types";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "kui/dialog";
@@ -20,15 +24,19 @@ import {
   X,
 } from "lucide-react";
 import { SPALink as Link } from "openlib/ui/dashboard";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useSearch } from "wouter";
-import { fmt, useCoreI18n, useIString } from "../../../i18n";
+import { fmt, useCoreI18n, useCoreLocale, useIString } from "../../../i18n";
 import {
   fieldDisplayKind,
   fieldInputKind,
   isHiddenOnCreate,
   isSystemFieldType,
 } from "../../base/field-types";
+import {
+  EMPTY_WHITEBOARD_FIELD_VALUE,
+  parseWhiteboardFieldValue,
+} from "../../base/utils/whiteboard-value";
 import {
   getChangeRequestTitle,
   getOperationLabel,
@@ -395,9 +403,7 @@ export function RecordEditorView({
         field.slug,
         mode === "edit" && record
           ? getEditorFieldValue(field, record.headCommit.fields[field.slug])
-          : field.type === "relation"
-            ? []
-            : "",
+          : defaultNewFieldValue(field.type),
       ]),
     ),
   );
@@ -411,9 +417,7 @@ export function RecordEditorView({
           field.slug,
           mode === "edit" && record
             ? getEditorFieldValue(field, record.headCommit.fields[field.slug])
-            : field.type === "relation"
-              ? []
-              : "",
+            : defaultNewFieldValue(field.type),
         ]),
       ),
     );
@@ -488,6 +492,7 @@ export function RecordEditorView({
               .filter((field) => mode === "edit" || !isHiddenOnCreate(field.type))
               .map((field) => (
                 <RecordFieldInput
+                  editorInstanceKey={mode === "edit" && record ? record.id : "new"}
                   field={field}
                   key={field.id}
                   onChange={(value) =>
@@ -538,12 +543,22 @@ export function RecordEditorView({
 }
 
 function RecordFieldInput({
+  editorInstanceKey,
   field,
   onChange,
   onUploadAttachment,
   records,
   value,
 }: {
+  /**
+   * Identifies which record's editor session this is ("new" for the create
+   * form, otherwise the record id) — `RecordEditorView` reuses the same
+   * component instance across records of the same base (no route-level
+   * remount on navigation), so a stateful editor like `WhiteboardFieldEditor`
+   * needs this to force its own canvas to reset when the underlying record
+   * changes instead of carrying over the previous record's scene.
+   */
+  editorInstanceKey: string;
   field: BaseFieldVO;
   onChange: (value: unknown) => void;
   onUploadAttachment?: (file: File) => Promise<AssetAttachmentRef>;
@@ -676,6 +691,12 @@ function RecordFieldInput({
           onChange={onChange}
           value={value}
         />
+      ) : kind === "whiteboard" ? (
+        <WhiteboardFieldEditor
+          editorInstanceKey={editorInstanceKey}
+          onChange={onChange}
+          value={value}
+        />
       ) : (
         // Plain inputs — the registry's input kind doubles as the HTML input type
         // (text / number / date / url / email / tel).
@@ -784,6 +805,187 @@ function RichTextareaFieldEditor({
           </div>
         </DialogContent>
       </Dialog>
+    </div>
+  );
+}
+
+type ExcalidrawModule = typeof import("@excalidraw/excalidraw");
+
+// Only the scene-relevant subset of AppState is persisted (mirrors the
+// Whiteboard NODE type's own `persistentAppState` in
+// rich-node/components/whiteboard-detail-view.tsx) — the rest (selection,
+// zoom, collaborators, …) is ephemeral editor UI state, not part of the
+// record's stored value.
+const whiteboardPersistentAppState = (appState: AppState): Record<string, unknown> => ({
+  gridSize: appState.gridSize,
+  gridStep: appState.gridStep,
+  theme: appState.theme,
+  viewBackgroundColor: appState.viewBackgroundColor,
+});
+
+// How long to wait after the user stops drawing before re-exporting the SVG
+// snapshot — exporting on every keystroke/drag would be wasteful (the SVG
+// export walks every element). This only debounces the *thumbnail* export;
+// the scene itself is pushed to the parent's field state on every change (see
+// below) so clicking Submit right after a stroke never loses that stroke.
+// Persistence itself still only ever reaches the server on the record-level
+// Submit button, exactly like every other field type.
+const WHITEBOARD_EXPORT_DEBOUNCE_MS = 500;
+
+/**
+ * Fully-editable Excalidraw canvas for the `whiteboard` field type's record
+ * edit form. Local component state only — no autosave: every change updates
+ * this field's value in the parent `RecordEditorView`'s `fields` state (via
+ * `onChange`), and that value is only ever persisted when the user clicks the
+ * record-level Submit button, same as every other field editor in this file.
+ *
+ * Read-only surfaces (table cell, Record Detail view mode) never mount this
+ * component — they render `WhiteboardFieldPreview`'s static `previewSvg`
+ * instead (see field-preview.tsx).
+ */
+function WhiteboardFieldEditor({
+  editorInstanceKey,
+  onChange,
+  value,
+}: {
+  editorInstanceKey: string;
+  onChange: (value: unknown) => void;
+  value: unknown;
+}) {
+  const messages = useCoreI18n();
+  const locale = useCoreLocale();
+  const [initialValue] = useState(() => parseWhiteboardFieldValue(value));
+  // Stable reference, computed once — `initialData` is meant to seed the
+  // canvas at mount only; an inline object literal would get a fresh identity
+  // on every re-render for no reason. (The actual infinite-loop fix is the
+  // `lastReportedSceneKeyRef` dedup check below — see its comment.)
+  const [initialData] = useState(() => ({
+    elements: initialValue.scene.elements as ExcalidrawInitialDataState["elements"],
+    appState: initialValue.scene.appState as ExcalidrawInitialDataState["appState"],
+    scrollToContent: true,
+  }));
+  const [excalidrawModule, setExcalidrawModule] = useState<ExcalidrawModule | null>(null);
+  const [editorError, setEditorError] = useState<string | null>(null);
+  const exportTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Tracks the latest scene/thumbnail across the debounce window so the
+  // delayed SVG export (below) never clobbers a scene change that happened
+  // after it was scheduled.
+  const latestSceneRef = useRef<WhiteboardDocument>(initialValue.scene);
+  const latestPreviewSvgRef = useRef<string>(initialValue.previewSvg);
+  // Excalidraw calls `onChange` from its own `componentDidUpdate` on EVERY
+  // update of its internal component — not only on genuine user edits, but
+  // also whenever its parent (this component) re-renders and Excalidraw's
+  // non-memoized child re-renders along with it. Without a real-change check,
+  // that's an unconditional loop: onChange fires -> we call the parent's
+  // onChange -> parent setState -> this component re-renders -> Excalidraw
+  // re-renders -> componentDidUpdate fires onChange again -> repeat forever
+  // (confirmed via instrumentation: `t.componentDidUpdate` in Excalidraw's own
+  // bundle appears directly in the call stack; this is not about prop
+  // identity — reproduced React error #185 even with both `initialData` and
+  // `onChange` fully stabilized). Comparing the serialized scene against the
+  // last one we actually reported breaks the cycle: a no-op update reports an
+  // identical scene, so we skip touching parent state and the cascade stops.
+  const lastReportedSceneKeyRef = useRef(JSON.stringify(initialValue.scene));
+  const onChangeRef = useRef(onChange);
+  useEffect(() => {
+    onChangeRef.current = onChange;
+  }, [onChange]);
+  const excalidrawModuleRef = useRef(excalidrawModule);
+  excalidrawModuleRef.current = excalidrawModule;
+
+  const handleExcalidrawChange = useCallback((elements: unknown, appState: AppState) => {
+    const persistableElements = (elements as NonDeletedExcalidrawElement[]).filter(
+      (element) => element.type !== "image",
+    );
+    const nextScene: WhiteboardDocument = {
+      version: 1,
+      elements: persistableElements,
+      appState: whiteboardPersistentAppState(appState),
+    };
+    const nextSceneKey = JSON.stringify(nextScene);
+    if (nextSceneKey === lastReportedSceneKeyRef.current) {
+      return;
+    }
+    lastReportedSceneKeyRef.current = nextSceneKey;
+    latestSceneRef.current = nextScene;
+    // Push the scene up immediately — this is what Submit actually reads, so
+    // it must never be stale even if the user submits within the debounce
+    // window below. The SVG thumbnail is purely cosmetic and can lag by one
+    // export cycle.
+    onChangeRef.current({ scene: nextScene, previewSvg: latestPreviewSvgRef.current });
+
+    if (exportTimerRef.current) clearTimeout(exportTimerRef.current);
+    exportTimerRef.current = setTimeout(() => {
+      void (async () => {
+        let previewSvg = "";
+        try {
+          const svg = await excalidrawModuleRef.current?.exportToSvg({
+            elements: persistableElements as unknown as readonly NonDeletedExcalidrawElement[],
+            appState,
+            files: null,
+          });
+          if (svg) previewSvg = new XMLSerializer().serializeToString(svg);
+        } catch {
+          previewSvg = "";
+        }
+        latestPreviewSvgRef.current = previewSvg;
+        // Use the latest scene at flush time (not the one captured by this
+        // closure) in case more edits landed during the debounce window —
+        // otherwise this would resurrect a stale, older scene over whatever
+        // the user drew since.
+        onChangeRef.current({ scene: latestSceneRef.current, previewSvg });
+      })();
+    }, WHITEBOARD_EXPORT_DEBOUNCE_MS);
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    Promise.all([import("@excalidraw/excalidraw"), import("@excalidraw/excalidraw/index.css")])
+      .then(([module]) => {
+        if (active) setExcalidrawModule(module);
+      })
+      .catch((caught: unknown) => {
+        if (active) {
+          setEditorError(
+            caught instanceof Error ? caught.message : messages.richNodes.whiteboardLoading,
+          );
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, [messages.richNodes.whiteboardLoading]);
+
+  useEffect(
+    () => () => {
+      if (exportTimerRef.current) clearTimeout(exportTimerRef.current);
+    },
+    [],
+  );
+
+  const Editor = excalidrawModule?.Excalidraw;
+
+  return (
+    <div className="min-w-0">
+      <div className="h-[420px] w-full overflow-hidden rounded-md border border-border/70 bg-muted/20">
+        {Editor ? (
+          <Editor
+            UIOptions={{
+              canvasActions: { loadScene: false, saveToActiveFile: false },
+              tools: { image: false },
+            }}
+            handleKeyboardGlobally={false}
+            initialData={initialData}
+            key={editorInstanceKey}
+            langCode={locale}
+            onChange={handleExcalidrawChange}
+          />
+        ) : (
+          <div className="flex h-full items-center justify-center text-muted-foreground text-sm">
+            {editorError ?? messages.richNodes.whiteboardLoading}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -983,6 +1185,13 @@ function AttachmentFieldEditor({
   );
 }
 
+/** Default value for a field that's never had a value entered — used on the create form. */
+const defaultNewFieldValue = (fieldType: FieldType): unknown => {
+  if (fieldType === "relation") return [];
+  if (fieldType === "whiteboard") return structuredClone(EMPTY_WHITEBOARD_FIELD_VALUE);
+  return "";
+};
+
 const getEditorFieldValue = (field: BaseFieldVO, value: unknown) => {
   if (field.type === "attachment") {
     return getAttachmentRefs(value);
@@ -998,6 +1207,9 @@ const getEditorFieldValue = (field: BaseFieldVO, value: unknown) => {
   }
   if (field.type === "checkbox") {
     return value === true || value === "true";
+  }
+  if (field.type === "whiteboard") {
+    return parseWhiteboardFieldValue(value);
   }
   return fieldValueToString(value);
 };
@@ -1028,6 +1240,12 @@ const normalizeEditorFields = (base: BaseVO, fields: Record<string, unknown>) =>
                 ? [value]
                 : [],
           ];
+        }
+        if (field.type === "whiteboard") {
+          // Re-validate/reshape defensively at submit time, same spirit as the
+          // other structured types above — guarantees the server always
+          // receives a well-formed { scene, previewSvg } value.
+          return [field.slug, parseWhiteboardFieldValue(value)];
         }
         return [field.slug, value ?? ""];
       }),
@@ -1064,7 +1282,8 @@ function RecordFieldPanel({ record, records }: { record: RecordVO; records: Reco
                       field.type === "html" ||
                       field.type === "code" ||
                       field.type === "json" ||
-                      field.type === "yaml"
+                      field.type === "yaml" ||
+                      field.type === "whiteboard"
                         ? "text-sm"
                         : "whitespace-pre-wrap text-foreground/95"
                     }

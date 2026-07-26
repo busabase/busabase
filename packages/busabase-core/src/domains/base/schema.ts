@@ -2,6 +2,7 @@
 // into the kernel tables (busabaseNodes / busabaseCommits / change-requests / operations);
 // those refs are lazy `() =>` thunks, so the cross-module import cycle with
 // ../../db/schema resolves safely at runtime.
+import type { LookupRollup } from "busabase-contract/types";
 import { sql } from "drizzle-orm";
 import {
   boolean,
@@ -49,6 +50,9 @@ export const busabaseFieldTypeEnum = pgEnum("busabase_field_type", [
   "code",
   "json",
   "yaml",
+  "formula",
+  "lookup",
+  "whiteboard",
 ]);
 
 export const busabaseBases = pgTable(
@@ -113,6 +117,15 @@ export const busabaseBaseFields = pgTable(
           aspectRatio?: "16:9" | "4:3" | "1:1";
           height?: number;
           providers?: string[];
+        };
+        formula?: {
+          expression: string;
+        };
+        lookup?: {
+          relationFieldSlug: string;
+          targetFieldSlug: string;
+          rollup?: LookupRollup;
+          limit?: "all" | "first";
         };
       }>()
       .notNull()

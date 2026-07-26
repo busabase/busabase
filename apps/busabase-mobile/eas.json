@@ -15,6 +15,9 @@
       "autoIncrement": true,
       "android": {
         "buildType": "apk"
+      },
+      "env": {
+        "EAS_BUILD_DISABLE_NPM_CACHE": "1"
       }
     }
   },

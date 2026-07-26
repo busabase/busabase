@@ -1,30 +1,135 @@
 /* Maps Crepe's theme custom properties onto this repo's semantic CSS
  * variables (see kui/src/styles.css) instead of the shipped theme's literal
- * hex colors — no hardcoded values, same rule as everywhere else in the app. */
+ * hex colors — no hardcoded values, same rule as everywhere else in the app.
+ *
+ * These are used bare (`var(--foreground)`), NOT wrapped in `hsl(...)`.
+ * `kui/styles.css` defines them as bare "H S% L%" triplets (meant for an
+ * `hsl()` wrapper), but every real consumer of this file (busabase,
+ * busabase-cloud) also imports `packages/openlib/shared.css`, which redefines
+ * every one of them as a complete `oklch(...)` color and — imported after
+ * kui — wins the cascade. Wrapping an already-complete color in `hsl(...)`
+ * produces invalid CSS (`hsl(oklch(...))`), which silently drops the whole
+ * declaration: this is why the slash menu, code block, and other Crepe
+ * surfaces could render with no background at all (see the doc-detail-width
+ * changelog for how that surfaced — a menu with no backdrop is invisible
+ * until it happens to overlap other content). `--color-popover: var(--popover)`
+ * in openlib/shared.css itself uses the same bare form — match it here. */
 .milkdown {
-  --crepe-color-background: hsl(var(--background));
-  --crepe-color-on-background: hsl(var(--foreground));
-  --crepe-color-surface: hsl(var(--popover));
-  --crepe-color-surface-low: hsl(var(--muted));
-  --crepe-color-on-surface: hsl(var(--popover-foreground));
-  --crepe-color-on-surface-variant: hsl(var(--muted-foreground));
-  --crepe-color-outline: hsl(var(--border));
-  --crepe-color-primary: hsl(var(--primary));
-  --crepe-color-secondary: hsl(var(--secondary));
-  --crepe-color-on-secondary: hsl(var(--secondary-foreground));
-  --crepe-color-inverse: hsl(var(--foreground));
-  --crepe-color-on-inverse: hsl(var(--background));
-  --crepe-color-inline-code: hsl(var(--primary));
-  --crepe-color-error: hsl(var(--destructive));
-  --crepe-color-hover: hsl(var(--accent));
-  --crepe-color-selected: hsl(var(--accent));
-  --crepe-color-inline-area: hsl(var(--muted));
+  --crepe-color-background: var(--background);
+  --crepe-color-on-background: var(--foreground);
+  --crepe-color-surface: var(--popover);
+  --crepe-color-surface-low: var(--muted);
+  --crepe-color-on-surface: var(--popover-foreground);
+  --crepe-color-on-surface-variant: var(--muted-foreground);
+  --crepe-color-outline: var(--border);
+  --crepe-color-primary: var(--primary);
+  --crepe-color-secondary: var(--secondary);
+  --crepe-color-on-secondary: var(--secondary-foreground);
+  --crepe-color-inverse: var(--foreground);
+  --crepe-color-on-inverse: var(--background);
+  --crepe-color-inline-code: var(--primary);
+  --crepe-color-error: var(--destructive);
+  --crepe-color-hover: var(--accent);
+  --crepe-color-selected: var(--accent);
+  --crepe-color-inline-area: var(--muted);
 
-  --crepe-font-title: inherit;
+  /* design-system.md: headings use the serif display family (Fraunces +
+   * Noto Serif SC via --font-serif), body stays on the sans family. Falls
+   * back to `inherit` if a consumer somehow doesn't define --font-serif. */
+  --crepe-font-title: var(--font-serif, inherit);
   --crepe-font-default: inherit;
   --crepe-font-code: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
 
   background-color: transparent;
   font-size: 15px;
   line-height: 1.75rem;
+}
+
+/* Crepe's shipped themes assume the editor owns the page canvas and bakes in
+ * a 60px/120px padding for that (see @milkdown/crepe/theme/common/reset.css).
+ * DocDetailView already supplies its own page padding, so left unchanged this
+ * doubles up and makes the editor's content start well to the right of the
+ * doc title above it — override to align both to the same left edge. */
+.milkdown .ProseMirror {
+  padding: 24px 0;
+}
+
+/* Crepe's shipped reset.css sizes headings for a full-page document canvas
+ * (h1 42px/50px line-height down to h6 18px, all weight 400 except a bolded
+ * h6) — oversized and under-weighted for content sitting inside a dashboard
+ * panel next to the node's own title. Rescaled to a more restrained,
+ * editor-appropriate scale in the same spirit as packages/sharelib/richeditor
+ * (this repo's other rich-text surface): smaller steps, a uniform semibold
+ * weight so hierarchy reads from size rather than weight-jumps, and
+ * margin-top scaled to roughly the same ratio Crepe used (~0.8x own
+ * font-size) so vertical rhythm stays proportional at the smaller sizes.
+ * These selectors match Crepe's own exactly and this file is imported after
+ * it (see doc-editor-crepe.tsx), so same specificity + later import wins. */
+.milkdown .ProseMirror h1 {
+  font-size: 1.875rem; /* 30px */
+  line-height: 1.3;
+  font-weight: 600;
+  margin-top: 1.5rem;
+}
+
+.milkdown .ProseMirror h2 {
+  font-size: 1.5rem; /* 24px */
+  line-height: 1.35;
+  font-weight: 600;
+  margin-top: 1.25rem;
+}
+
+.milkdown .ProseMirror h3 {
+  font-size: 1.25rem; /* 20px */
+  line-height: 1.4;
+  font-weight: 600;
+  margin-top: 1rem;
+}
+
+.milkdown .ProseMirror h4 {
+  font-size: 1.125rem; /* 18px */
+  line-height: 1.45;
+  font-weight: 600;
+  margin-top: 0.875rem;
+}
+
+.milkdown .ProseMirror h5 {
+  font-size: 1rem; /* 16px */
+  line-height: 1.5;
+  font-weight: 600;
+  margin-top: 0.75rem;
+}
+
+.milkdown .ProseMirror h6 {
+  font-size: 0.875rem; /* 14px */
+  line-height: 1.5;
+  font-weight: 600;
+  margin-top: 0.75rem;
+}
+
+/* Slightly more generous body line-height than Crepe's default 24px/16px
+ * (1.5) for comfortable long-form reading — matches the 1.6 line-height
+ * convention used elsewhere in the app's own prose content. */
+.milkdown .ProseMirror p {
+  line-height: 1.6;
+}
+
+/* Crepe's blockquote already has a left accent bar (see reset.css); give it
+ * the same italic + muted-text treatment used for quotes everywhere else in
+ * the app (e.g. the Tailwind Typography `prose` scale) instead of plain body
+ * text with just a bar next to it. */
+.milkdown .ProseMirror blockquote {
+  font-style: italic;
+  color: var(--crepe-color-on-surface-variant);
+}
+
+/* Crepe's own cursor.css wires the text cursor to `--crepe-color-outline`
+ * (`--border` here — a subtle divider color, ~92% lightness on a white
+ * background). That's a fine color for borders but a 2px cursor rendered in
+ * it is barely perceptible, which read as "no cursor at all". Give the
+ * cursor its own, higher-contrast color instead of the shared outline token;
+ * this rule needs to come after the `.milkdown { ... }` block above to win
+ * (same selector Crepe itself uses, later import wins the cascade). */
+.milkdown .ProseMirror-focused {
+  --prosemirror-virtual-cursor-color: var(--foreground);
 }

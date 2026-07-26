@@ -33,6 +33,10 @@ export const materializeBaseNode = async (
     slug: fields.slug as string,
     name: fields.name as string,
     description: fields.description ?? "",
+    // See materializeDocNode: without this, `metadata.visibility` supplied on
+    // create was silently dropped and a Base requested as "private" came out
+    // workspace-visible.
+    metadata: fields.metadata ?? {},
     position: 0,
     createdAt: timestamp,
     updatedAt: timestamp,

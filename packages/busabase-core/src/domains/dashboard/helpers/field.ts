@@ -19,6 +19,11 @@ export const createDefaultFieldOptions = (
   if (fieldType === "relation") {
     return { multiple, targetBaseId };
   }
+  if (fieldType === "lookup") {
+    // Left blank on purpose: a lookup is meaningless until the user picks the
+    // relation hop + target field, so the dialog collects those explicitly.
+    return undefined;
+  }
   if (fieldType === "select" || fieldType === "multiselect") {
     return {
       choices: [
@@ -115,6 +120,26 @@ export const getFieldPreviewText = (
   if (field.type === "number" && field.options.number?.format === "currency") {
     return formatNumberField(value, field.options.number);
   }
+  // A lookup inherits the target field's number formatting when the rollup keeps
+  // its unit (see resolveLookupFieldOptions) — so a `sum` over a currency column
+  // renders as currency, and a `count` (which drops the snapshot) does not.
+  if (field.type === "lookup") {
+    const numberOptions = field.options.number;
+    // A `values` lookup holds an array of the linked records' raw values —
+    // render it as a comma list like multiselect, not as pretty-printed JSON.
+    if (Array.isArray(value)) {
+      return value
+        .map((item) =>
+          numberOptions && typeof item === "number"
+            ? formatNumberField(item, numberOptions)
+            : fieldPreviewText(item),
+        )
+        .join(", ");
+    }
+    if (numberOptions && typeof value === "number") {
+      return formatNumberField(value, numberOptions);
+    }
+  }
   if (field.type === "embed") {
     return (
       resolveEmbedPreview(value, field)?.label ?? fieldPreviewText(value, field.type, messages)
@@ -201,7 +226,9 @@ export const getSafeAttachmentUrl = (item: AttachmentRef): string | null =>
   safeFetchableUrl(item.url);
 
 export const isRecordLongField = (field: BaseFieldVO) =>
-  ["longtext", "markdown", "html", "code", "json", "yaml", "ai_summary"].includes(field.type);
+  ["longtext", "markdown", "html", "code", "json", "yaml", "ai_summary", "whiteboard"].includes(
+    field.type,
+  );
 
 export const getFieldName = (changeRequest: ChangeRequestVO, fieldSlug: string) => {
   const name = changeRequest.base?.fields.find((field) => field.slug === fieldSlug)?.name;

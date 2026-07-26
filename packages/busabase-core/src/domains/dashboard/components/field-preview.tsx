@@ -9,6 +9,7 @@ import { useSearch } from "wouter";
 import { useCoreI18n, useIString } from "../../../i18n";
 import { fieldDisplayKind, fieldLinkPrefix } from "../../base/field-types";
 import { embedAspectRatio, embedHeight, resolveEmbedPreview } from "../../base/utils/embed";
+import { parseWhiteboardFieldValue } from "../../base/utils/whiteboard-value";
 import { getRecordTitle } from "../helpers/change-request";
 import {
   getAttachmentRefs,
@@ -20,7 +21,13 @@ import {
   getSafeAttachmentUrl,
 } from "../helpers/field";
 import { fieldValueToString, shortIdentifier } from "../helpers/format";
-import { isSafeUrl, safeFetchableUrl, sanitizeHtml, stripHtmlTags } from "../helpers/html";
+import {
+  isSafeUrl,
+  safeFetchableUrl,
+  sanitizeHtml,
+  sanitizeSvg,
+  stripHtmlTags,
+} from "../helpers/html";
 import { mergeSearchIntoHref } from "../helpers/link-search";
 import type { FieldChip } from "../helpers/view-types";
 import { CheckboxBadge } from "./primitives";
@@ -326,6 +333,55 @@ export function EmbedFieldPreview({
   );
 }
 
+/**
+ * Static SVG rendering of a whiteboard field's last-exported scene snapshot —
+ * used everywhere a whiteboard value is shown read-only (table grid cell,
+ * Record Detail view mode, the operation diff). Deliberately NOT a live
+ * Excalidraw canvas: mounting a full interactive canvas per visible row would
+ * be far too expensive, so read-only surfaces only ever show this pre-exported
+ * SVG (see `WhiteboardFieldEditor` in record-views.tsx for where it's produced).
+ *
+ * `previewSvg` is untrusted at this point even though the in-app editor only
+ * ever writes Excalidraw's own export output: the value round-trips through
+ * the same field-value API surface as any other field (busabase-cli / REST /
+ * MCP), so a non-UI client can submit any string here. Sanitize the same way
+ * `HtmlFieldPreview` sanitizes `value` below, just with an SVG-aware allowlist.
+ */
+export function WhiteboardThumbnail({
+  className = "",
+  previewSvg,
+}: {
+  className?: string;
+  previewSvg: string;
+}) {
+  if (!previewSvg) {
+    return <span className="text-muted-foreground">-</span>;
+  }
+  return (
+    <div
+      className={`overflow-hidden rounded-md border bg-background ${className}`}
+      // biome-ignore lint/security/noDangerouslySetInnerHtml: sanitizeSvg strips script/foreignObject/event-handler/href vectors via an explicit tag+attribute allowlist before this renders.
+      dangerouslySetInnerHTML={{ __html: sanitizeSvg(previewSvg) }}
+    />
+  );
+}
+
+export function WhiteboardFieldPreview({
+  className = "",
+  value,
+}: {
+  className?: string;
+  value: unknown;
+}) {
+  const { previewSvg } = parseWhiteboardFieldValue(value);
+  return (
+    <WhiteboardThumbnail
+      className={`h-72 w-full [&_svg]:h-full [&_svg]:w-full [&_svg]:object-contain ${className}`}
+      previewSvg={previewSvg}
+    />
+  );
+}
+
 export function FieldValuePreview({
   className = "",
   field,
@@ -465,6 +521,14 @@ export function FieldValuePreview({
           );
         })}
       </div>
+    );
+  }
+
+  if (kind === "whiteboard") {
+    return (
+      <MultilineFieldPreview collapsible={false} title={fieldName}>
+        <WhiteboardFieldPreview className={className} value={value} />
+      </MultilineFieldPreview>
     );
   }
 

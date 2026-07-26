@@ -250,7 +250,11 @@ export const materializeFileNode = async (ctx: MergeCtx, args: MaterializeArgs) 
     throw new Error("File node create requires metadata.assetId");
   }
   const asset = await resolveAssetFile(assetId, db);
-  const metadata = { assetId: asset.id };
+  // Normalizing `assetId` to the resolved asset is deliberate; discarding the
+  // REST of the caller's metadata was not — it silently dropped
+  // `metadata.visibility`, so a file node created as "private" came out
+  // workspace-visible. Spread first so the resolved assetId still wins.
+  const metadata = { ...(fields.metadata ?? {}), assetId: asset.id };
   const nodeId = id("nod");
   await db.insert(busabaseNodes).values({
     id: nodeId,

@@ -143,6 +143,12 @@ export const recordFieldFilterInputSchema = z.object({
   limit: z.coerce.number().int().min(1).max(100).optional().default(50),
 });
 
+export const recordFieldGetInputSchema = z.object({
+  baseId: z.string(),
+  fieldSlug: z.string().min(1),
+  valueText: z.string().min(1),
+});
+
 export const restoreRecordInputSchema = z.object({
   message: z.string().optional(),
   submittedBy: z.string().optional().default("local-editor"),

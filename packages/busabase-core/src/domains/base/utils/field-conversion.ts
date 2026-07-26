@@ -2,6 +2,7 @@
 // No DB, no React, no server-only imports — safe to use on both client and server.
 import type { FieldType } from "busabase-contract/types";
 import { isSystemFieldType } from "../field-types";
+import { EMPTY_WHITEBOARD_FIELD_VALUE } from "./whiteboard-value";
 
 export interface FieldConversionOptions {
   choices?: ReadonlyArray<{ id: string; name: string; color?: string }>;
@@ -54,6 +55,12 @@ export function toText(
     case "phone":
     case "ai_summary":
       return typeof value === "string" ? value : String(value);
+
+    // Structured scene + rendered snapshot, not prose — surface a short
+    // placeholder for search/sort/CSV-export purposes instead of dumping the
+    // raw scene JSON or SVG markup as "text".
+    case "whiteboard":
+      return "[Whiteboard]";
 
     case "number":
       return String(value);
@@ -121,6 +128,13 @@ export function fromText(
     case "yaml":
     case "ai_summary":
       return text;
+
+    // Can't meaningfully reconstruct a scene from plain text (e.g. CSV
+    // import) — degrade to a safe empty scene + blank preview rather than
+    // throwing, same as this function's other structurally-incompatible
+    // fallbacks below.
+    case "whiteboard":
+      return structuredClone(EMPTY_WHITEBOARD_FIELD_VALUE);
 
     case "email":
       return EMAIL_RE.test(text) ? text : null;

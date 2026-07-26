@@ -448,6 +448,11 @@ export const materializeDocNode = async (ctx: MergeCtx, args: MaterializeArgs): 
     slug: fields.slug as string,
     name: fields.name as string,
     description: fields.description ?? "",
+    // Carry the caller's metadata through, same as materializeGenericNode /
+    // materializeFolderNode / the file-tree materializer. Dropping it here
+    // silently discarded `metadata.visibility` — the node-ACL's only input —
+    // so a Doc created as "private" came out workspace-visible with a 200.
+    metadata: fields.metadata ?? {},
     position: 0,
     createdAt: timestamp,
     updatedAt: timestamp,

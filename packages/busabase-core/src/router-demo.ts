@@ -14,7 +14,9 @@ import {
   demoGetDoc,
   demoGetFileNode,
   demoGetFolder,
+  demoGetForm,
   demoGetRecord,
+  demoGetRecordByField,
   demoIsDescendant,
   demoListAgentTasks,
   demoListAssets,
@@ -36,6 +38,7 @@ import {
   demoReviseOperation,
   demoSearch,
   demoSearchNodesByName,
+  demoSubmitForm,
 } from "./logic/demo-store";
 
 // Stateless demo router (productready-style): the request boundary swaps to this
@@ -301,6 +304,26 @@ export const busabaseDemoRouter = os.router({
     list: os.folders.list.handler(() => demoListFolders()),
     get: os.folders.get.handler(({ input }) => demoGetFolder(input.nodeId)),
   },
+  forms: {
+    // A seeded demo Form renders its agent-authored page (read from the demo
+    // scenario). Config edits still require a persistent instance; a submit is
+    // acknowledged with a synthetic pending id so the approval-first flow reads
+    // correctly, but nothing is stored.
+    getByNode: os.forms.getByNode.handler(({ input }) => {
+      const form = demoGetForm(input.nodeId);
+      if (!form) {
+        throw new ORPCError("NOT_FOUND", { message: `Form not found: ${input.nodeId}` });
+      }
+      return form;
+    }),
+    create: os.forms.create.handler(() => {
+      throw demoUnsupported("Create form");
+    }),
+    update: os.forms.update.handler(() => {
+      throw demoUnsupported("Update form");
+    }),
+    submit: os.forms.submit.handler(() => demoSubmitForm()),
+  },
   assets: {
     createUploadUrl: os.assets.createUploadUrl.handler(() => {
       throw demoUnsupported("Upload asset");
@@ -474,6 +497,7 @@ export const busabaseDemoRouter = os.router({
     }),
     get: os.records.get.handler(({ input }) => demoGetRecord(input.recordId)),
     search: os.records.search.handler(({ input }) => demoListRecordsByFieldText(input)),
+    getByField: os.records.getByField.handler(({ input }) => demoGetRecordByField(input)),
     updateChangeRequest: os.records.updateChangeRequest.handler(({ input }) => {
       const { recordId, ...rest } = input;
       return demoCreateUpdateChangeRequest(recordId, rest);

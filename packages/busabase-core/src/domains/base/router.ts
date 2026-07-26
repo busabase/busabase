@@ -25,6 +25,7 @@ import {
   createViewChangeRequest,
   getBase,
   getRecord,
+  getRecordByField,
   listArchivedBases,
   listArchivedRecords,
   listArchivedRecordsPaged,
@@ -133,6 +134,7 @@ export const recordRouter = {
     return record;
   }),
   search: os.records.search.handler(async ({ input }) => listRecordsByFieldText(input)),
+  getByField: os.records.getByField.handler(async ({ input }) => getRecordByField(input)),
   updateChangeRequest: os.records.updateChangeRequest.handler(async ({ input }) => {
     const { recordId, ...rest } = input;
     return createUpdateChangeRequest(recordId, rest);

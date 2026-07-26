@@ -18,11 +18,16 @@ export {
   mapPublishedPostRecord,
 } from "./content";
 export { BusabaseCmsError, BusabaseCmsSchemaDriftError, BusabaseCmsSetupError } from "./errors";
+export * from "./fallback";
 export * from "./links";
+export type { BusabaseCmsSchemaConfig } from "./provision";
 export * from "./routing";
 export type {
+  BusabaseCmsBaseDefinition,
   BusabaseCmsBaseIds,
   BusabaseCmsBaseRole,
+  BusabaseCmsFieldDefinition,
+  BusabaseCmsFieldsOverride,
   BusabaseCmsFolderMetadata,
   BusabaseCmsSchemaProfile,
 } from "./schema";
@@ -31,6 +36,9 @@ export {
   BUSABASE_CMS_ROLES,
   BUSABASE_CMS_SCHEMA_PROFILES,
   BUSABASE_CMS_SCHEMA_VERSION,
+  busabaseCmsFieldI18nName,
+  getBusabaseCmsBaseDefinition,
+  replaceField,
 } from "./schema";
 export type {
   BusabaseCmsBase,

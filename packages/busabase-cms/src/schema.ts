@@ -3,11 +3,17 @@ import type { BusabaseCmsField, BusabaseCmsFieldOptions } from "./source";
 export const BUSABASE_CMS_SCHEMA_VERSION = 1;
 export const BUSABASE_CMS_METADATA_KEY = "busabaseCms";
 export const BUSABASE_CMS_ROLES = ["categories", "tags", "posts", "pages"] as const;
-export const BUSABASE_CMS_SCHEMA_PROFILES = ["standard", "buda"] as const;
+/** The only profile the SDK itself ships a field shape for. Any other non-empty string is a
+ * caller-owned profile label (see `fieldsOverride`/`legacyOptionalFields` on the provisioning
+ * options) — the SDK stores and round-trips it but never branches on its value. */
+export const BUSABASE_CMS_SCHEMA_PROFILES = ["standard"] as const;
 
 export type BusabaseCmsBaseRole = (typeof BUSABASE_CMS_ROLES)[number];
 export type BusabaseCmsBaseIds = Record<BusabaseCmsBaseRole, string>;
-export type BusabaseCmsSchemaProfile = (typeof BUSABASE_CMS_SCHEMA_PROFILES)[number];
+/** `"standard"` selects the SDK's built-in field shape. Any other label is opaque to the SDK —
+ * it's persisted as Folder metadata and used for mismatch detection, but the actual field shape
+ * for that label must be supplied by the caller via `fieldsOverride`. */
+export type BusabaseCmsSchemaProfile = "standard" | (string & {});
 
 export interface BusabaseCmsFolderMetadata {
   schemaVersion: typeof BUSABASE_CMS_SCHEMA_VERSION;
@@ -347,101 +353,30 @@ const pageFields = (): BusabaseCmsFieldDefinition[] => [
   },
 ];
 
-const replaceField = (
+export const replaceField = (
   fields: BusabaseCmsFieldDefinition[],
   slug: string,
   replacement: BusabaseCmsFieldDefinition,
 ) => fields.map((field) => (field.slug === slug ? replacement : field));
 
-const buildBudaPostFields = (baseIds: Partial<Pick<BusabaseCmsBaseIds, "categories" | "tags">>) => {
-  let fields = buildPostFields(baseIds).filter(
-    (field) => !["legacy-paths", "seo-title", "seo-description"].includes(field.slug),
-  );
-  fields = replaceField(fields, "cover-image", {
-    slug: "cover-image",
-    name: i18nName("Cover image", "封面图片"),
-    type: "text",
-    required: false,
-    options: {},
-  });
-  fields = replaceField(fields, "attachments", {
-    slug: "attachments",
-    name: i18nName("Attachments", "附件"),
-    type: "attachment",
-    required: false,
-    options: {
-      attachment: {
-        maxFiles: 10,
-        allowedMimeTypes: ["image/png", "image/jpeg", "image/webp", "image/svg+xml"],
-        maxFileSize: 10 * 1024 * 1024,
-      },
-    },
-  });
-  return [
-    ...fields,
-    {
-      slug: "keywords",
-      name: i18nName("Keywords", "关键词"),
-      type: "json",
-      required: false,
-      options: {},
-    },
-    {
-      slug: "source-path",
-      name: i18nName("Source path", "来源路径"),
-      type: "text",
-      required: false,
-      options: {},
-    },
-  ] satisfies BusabaseCmsFieldDefinition[];
-};
+export { i18nName as busabaseCmsFieldI18nName };
 
-const buildBudaPageFields = () => {
-  const fields = pageFields().filter(
-    (field) => !["template", "legacy-paths", "seo-title", "seo-description"].includes(field.slug),
-  );
-  const common = replaceField(
-    replaceField(fields, "body", {
-      slug: "body",
-      name: i18nName("Body", "正文"),
-      type: "html",
-      required: true,
-      options: {},
-    }),
-    "hero",
-    {
-      slug: "hero",
-      name: i18nName("Hero", "首屏"),
-      type: "json",
-      required: true,
-      options: {},
-    },
-  );
-  const extra = [
-    ["route", "Route", "路由", "text"],
-    ["meta-title", "Meta title", "Meta 标题", "text"],
-    ["meta-description", "Meta description", "Meta 描述", "longtext"],
-    ["problem", "Problem", "问题", "json"],
-    ["messaging", "Messaging", "文案", "json"],
-    ["use-cases", "Use cases", "使用场景", "json"],
-    ["section-copy", "Section copy", "分区文案", "json"],
-    ["final-cta", "Final CTA", "最终行动号召", "json"],
-    ["source-icp-id", "Source ICP ID", "来源 ICP ID", "text"],
-    ["source-path", "Source path", "来源路径", "text"],
-  ].map(([slug, en, zhCN, type]) => ({
-    slug: slug as string,
-    name: i18nName(en as string, zhCN as string),
-    type: type as "text" | "longtext" | "json",
-    required: false,
-    options: {},
-  })) satisfies BusabaseCmsFieldDefinition[];
-  return [...common, ...extra];
-};
+/**
+ * Lets a caller reshape the SDK's standard `posts`/`pages` field list into its own app-specific
+ * contract (e.g. a richer page-builder shape) without the SDK itself knowing that app by name.
+ * Receives the standard fields for that role plus the resolved Base ids, returns the field list
+ * to actually provision/validate against.
+ */
+export type BusabaseCmsFieldsOverride = (
+  role: "posts" | "pages",
+  standardFields: BusabaseCmsFieldDefinition[],
+  baseIds: Partial<BusabaseCmsBaseIds>,
+) => BusabaseCmsFieldDefinition[];
 
 export const getBusabaseCmsBaseDefinition = (
   role: BusabaseCmsBaseRole,
   baseIds: Partial<BusabaseCmsBaseIds> = {},
-  profile: BusabaseCmsSchemaProfile = "standard",
+  fieldsOverride?: BusabaseCmsFieldsOverride,
 ): BusabaseCmsBaseDefinition => {
   if (role === "categories" || role === "tags") {
     return {
@@ -455,17 +390,19 @@ export const getBusabaseCmsBaseDefinition = (
     };
   }
   if (role === "posts") {
+    const standard = buildPostFields(baseIds);
     return {
       role,
       name: "Posts / 文章",
       description: "Publishable Markdown posts / 可发布的 Markdown 文章",
-      fields: profile === "buda" ? buildBudaPostFields(baseIds) : buildPostFields(baseIds),
+      fields: fieldsOverride ? fieldsOverride("posts", standard, baseIds) : standard,
     };
   }
+  const standard = pageFields();
   return {
     role,
     name: "Pages / 页面",
     description: "Publishable HTML pages / 可发布的 HTML 页面",
-    fields: profile === "buda" ? buildBudaPageFields() : pageFields(),
+    fields: fieldsOverride ? fieldsOverride("pages", standard, baseIds) : standard,
   };
 };

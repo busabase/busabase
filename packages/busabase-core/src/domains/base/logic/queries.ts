@@ -37,10 +37,14 @@ import {
 import { hydrateRecord, hydrateRecords } from "../../../logic/cr-lifecycle";
 import { buildBaseVisibilityExists, buildNodeVisibilityExists } from "../../../logic/node-acl";
 import { ensureReady } from "../../../logic/seed";
-import { listInputSchema, recordFieldFilterInputSchema } from "../../../logic/store";
+import {
+  listInputSchema,
+  recordFieldFilterInputSchema,
+  recordFieldGetInputSchema,
+} from "../../../logic/store";
 import { toBaseVO, toFieldVO, toRecordLinkVO, toViewVO } from "../../../logic/vo";
 
-export { listInputSchema, recordFieldFilterInputSchema };
+export { listInputSchema, recordFieldFilterInputSchema, recordFieldGetInputSchema };
 
 export const listBases = async () => {
   await ensureReady();
@@ -524,6 +528,40 @@ export const listRecordsByFieldText = async (
       .map((recordId) => recordsById.get(recordId))
       .filter((record): record is RecordPO => Boolean(record)),
   );
+};
+
+/**
+ * Point lookup by an exact field value, scoped to one Base — the "get" counterpart to
+ * `listRecordsByFieldText`'s "search" (which returns a list, and defaults baseId to
+ * optional for cross-Base fan-out). Callers with a unique key per Base (a slug, a path)
+ * should use this instead of listing then finding client-side.
+ */
+export const getRecordByField = async (input: z.input<typeof recordFieldGetInputSchema>) => {
+  await ensureReady();
+  const db = await getDb();
+  const parsed = recordFieldGetInputSchema.parse(input);
+  const filters: SQL[] = [
+    eq(busabaseFieldValues.spaceId, getContextSpaceId()),
+    eq(busabaseFieldValues.baseId, parsed.baseId),
+    eq(busabaseFieldValues.fieldSlug, parsed.fieldSlug),
+    eq(busabaseFieldValues.valueText, parsed.valueText),
+    isNotNull(busabaseFieldValues.recordId),
+    isNull(busabaseFieldValues.deletedAt),
+  ];
+  const fieldTextVisible = buildBaseVisibilityExists(db, busabaseFieldValues.baseId);
+  if (fieldTextVisible) {
+    filters.push(fieldTextVisible);
+  }
+
+  const [projectionRow] = await db
+    .select()
+    .from(busabaseFieldValues)
+    .where(and(...filters))
+    .orderBy(desc(busabaseFieldValues.createdAt))
+    .limit(1);
+  if (!projectionRow?.recordId) return null;
+
+  return getRecord(projectionRow.recordId);
 };
 
 export const listArchivedBases = async () => {

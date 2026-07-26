@@ -59,7 +59,10 @@ const userRef = (users: UserRefMap | undefined, userId: string): UserRefVO | nul
  * search-vs-grep fidelity tradeoff. Previously 1,024.
  */
 const VALUE_TEXT_INDEX_LIMIT = 8_000;
-const JSON_LIKE_FIELD_TYPES = new Set<FieldType>(["json", "attachment", "relation"]);
+// `whiteboard` stores a structured { scene, previewSvg } composite (not
+// prose) — same treatment as json/attachment/relation: no full-text index,
+// stored verbatim in valueJson.
+const JSON_LIKE_FIELD_TYPES = new Set<FieldType>(["json", "attachment", "relation", "whiteboard"]);
 const DATE_FIELD_TYPES = new Set<FieldType>(["date", "created_time", "updated_time"]);
 
 const trimIndexText = (value: string) =>

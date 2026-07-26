@@ -23,7 +23,13 @@ export type FieldType =
   | "ai_tags"
   | "code"
   | "json"
-  | "yaml";
+  | "yaml"
+  | "formula"
+  | "lookup"
+  | "whiteboard";
+
+/** Rollup functions a `lookup` field can apply — mirrors `lookupRollupSchema`. */
+export type LookupRollup = "values" | "count" | "sum" | "average" | "min" | "max" | "concatenate";
 
 // OperationKind + NodeType are owned by the node-type registry (single source of truth).
 import type { NodeType, OperationKind } from "../domains/registry";
@@ -143,6 +149,18 @@ export type {
   ViewVO,
 } from "../domains/base/types";
 export { VIEW_FIELD_MAX_WIDTH, VIEW_FIELD_MIN_WIDTH } from "../domains/base/types";
+
+export type {
+  CreateFormDTO,
+  FormFieldBindingVO,
+  FormPageSourceVO,
+  FormShareVO,
+  FormSubmitResultVO,
+  FormThemeVO,
+  FormVO,
+  SubmitFormDTO,
+  UpdateFormDTO,
+} from "../domains/form/types";
 
 export interface CommitVO {
   id: string;

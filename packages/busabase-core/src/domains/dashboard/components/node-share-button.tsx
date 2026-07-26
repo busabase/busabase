@@ -217,7 +217,7 @@ export function NodeShareDialog({
 
   return (
     <Dialog onOpenChange={onOpenChange} open={open}>
-      <DialogContent className="max-w-lg">
+      <DialogContent className="max-w-lg" data-testid="node-share-dialog">
         <DialogHeader>
           <DialogTitle>{t.dialogTitle}</DialogTitle>
           <DialogDescription>{nodeName}</DialogDescription>
@@ -317,7 +317,12 @@ export function NodeShareDialog({
                 <div className="space-y-1.5">
                   <Label className="font-medium text-sm">{t.linkLabel}</Label>
                   <div className="flex items-center gap-2">
-                    <Input className="h-8 flex-1" readOnly value={publicUrl} />
+                    <Input
+                      className="h-8 flex-1"
+                      data-testid="node-share-public-url"
+                      readOnly
+                      value={publicUrl}
+                    />
                     <Button onClick={handleCopy} size="sm" type="button" variant="outline">
                       {copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
                       {t.copyLink}

@@ -3,11 +3,10 @@
     "name": "Busabase",
     "slug": "busabase-mobile",
     "scheme": "busabase",
-    "version": "0.9.14",
+    "version": "0.9.15",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "automatic",
-    "newArchEnabled": true,
     "ios": {
       "bundleIdentifier": "com.busabase.app",
       "supportsTablet": true,
@@ -33,7 +32,6 @@
     },
     "android": {
       "package": "com.busabase.app",
-      "edgeToEdgeEnabled": true,
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#F7F4ED"

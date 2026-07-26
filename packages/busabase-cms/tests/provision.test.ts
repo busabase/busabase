@@ -9,7 +9,30 @@ import {
   createBusabaseCms,
   createBusabaseCmsSource,
 } from "../src/index";
-import { BUSABASE_CMS_ROLES, getBusabaseCmsBaseDefinition } from "../src/schema";
+import {
+  BUSABASE_CMS_ROLES,
+  type BusabaseCmsFieldsOverride,
+  getBusabaseCmsBaseDefinition,
+  replaceField,
+} from "../src/schema";
+
+/** A synthetic custom profile, standing in for any app's own field-shape override (e.g. Buda's,
+ * which lives in apps/buda, not here) — exercises the generic override mechanism itself. */
+const customFieldsOverride: BusabaseCmsFieldsOverride = (role, standardFields) => {
+  if (role !== "pages") return standardFields;
+  return [
+    ...replaceField(standardFields, "body", {
+      slug: "body",
+      name: "Body",
+      type: "html",
+      required: true,
+      options: {},
+    }),
+    { slug: "custom-note", name: "Custom note", type: "text", required: false, options: {} },
+  ];
+};
+const customLegacyOptionalFields = [{ role: "pages" as const, slug: "body" }];
+
 import type {
   BusabaseCmsBase,
   BusabaseCmsClient,
@@ -49,7 +72,7 @@ interface StoreOptions {
   existing?: boolean;
   renamed?: boolean;
   omitField?: { role: keyof BusabaseCmsBaseIds; slug: string };
-  profile?: BusabaseCmsSchemaProfile;
+  fieldsOverride?: BusabaseCmsFieldsOverride;
   mutateCreatedField?: (field: BusabaseCmsField) => void;
 }
 
@@ -70,7 +93,7 @@ const createStore = (options: StoreOptions = {}) => {
         categories: "base-categories",
         tags: "base-tags",
       },
-      options.profile,
+      options.fieldsOverride,
     );
     const name = options.renamed ? `Renamed ${role}` : definition.name;
     const slug = options.renamed ? `custom-${role}` : `${folder.slug}-${role}`;
@@ -102,7 +125,7 @@ const createStore = (options: StoreOptions = {}) => {
   if (options.existing) {
     const ids = { categories: "base-categories", tags: "base-tags" };
     for (const role of BUSABASE_CMS_ROLES) {
-      addBase(role, getBusabaseCmsBaseDefinition(role, ids, options.profile).fields);
+      addBase(role, getBusabaseCmsBaseDefinition(role, ids, options.fieldsOverride).fields);
     }
   }
 
@@ -214,65 +237,18 @@ const addFixtureField = (
   });
 };
 
-const applyBudaLiveSchema = (store: ReturnType<typeof createStore>) => {
-  const posts = store.bases.get("base-posts");
-  if (!posts) throw new Error("Missing test Posts Base");
-  posts.fields = posts.fields.filter(
-    (field) => !["legacy-paths", "seo-title", "seo-description"].includes(field.slug),
-  );
-  const cover = getField(store, "posts", "cover-image");
-  cover.type = "text";
-  cover.options = {};
-  getField(store, "posts", "attachments").options = {
-    attachment: {
-      maxFiles: 10,
-      maxFileSize: 10 * 1024 * 1024,
-      allowedMimeTypes: ["image/png", "image/jpeg", "image/webp", "image/svg+xml"],
-    },
-  };
-  addFixtureField(store, "posts", {
-    slug: "keywords",
-    name: "Keywords",
-    type: "json",
-    required: false,
-    options: {},
-  });
-  addFixtureField(store, "posts", {
-    slug: "source-path",
-    name: "Source path",
+/** Simulates a Base that predates `customFieldsOverride` being tightened: `body` is still
+ * optional (the case `customLegacyOptionalFields` exists to tolerate), and the override's
+ * extra `custom-note` field is already present with the shape the override expects. */
+const applyCustomLiveSchema = (store: ReturnType<typeof createStore>) => {
+  getField(store, "pages", "body").required = false;
+  addFixtureField(store, "pages", {
+    slug: "custom-note",
+    name: "Custom note",
     type: "text",
     required: false,
     options: {},
   });
-
-  const pages = store.bases.get("base-pages");
-  if (!pages) throw new Error("Missing test Pages Base");
-  pages.fields = pages.fields.filter(
-    (field) => !["template", "legacy-paths", "seo-title", "seo-description"].includes(field.slug),
-  );
-  getField(store, "pages", "body").required = false;
-  getField(store, "pages", "hero").required = true;
-  const extraFields = [
-    ["route", "text"],
-    ["meta-title", "text"],
-    ["meta-description", "longtext"],
-    ["problem", "json"],
-    ["messaging", "json"],
-    ["use-cases", "json"],
-    ["section-copy", "json"],
-    ["final-cta", "json"],
-    ["source-icp-id", "text"],
-    ["source-path", "text"],
-  ] as const;
-  for (const [slug, type] of extraFields) {
-    addFixtureField(store, "pages", {
-      slug,
-      name: slug,
-      type,
-      required: false,
-      options: {},
-    });
-  }
 };
 
 describe("Folder-based CMS provisioning", () => {
@@ -417,38 +393,28 @@ describe("Folder-based CMS provisioning", () => {
     });
   });
 
-  it("creates the Buda legacy field contract when that profile is selected", async () => {
+  it("creates a caller's custom field contract when a fieldsOverride is supplied", async () => {
     const store = createStore();
     const cms = createBusabaseCms({
       client: store.client,
       folderId: store.folder.id,
       lazyCreate: true,
-      schemaProfile: "buda",
+      schemaProfile: "custom",
+      fieldsOverride: customFieldsOverride,
     });
 
     await cms.pages.list();
 
-    const postsInput = store.create.mock.calls[2]?.[0];
     const pagesInput = store.create.mock.calls[3]?.[0];
-    expect(postsInput?.fields.find((field) => field.slug === "cover-image")).toMatchObject({
+    expect(pagesInput?.fields.find((field) => field.slug === "body")?.required).toBe(true);
+    expect(pagesInput?.fields.find((field) => field.slug === "custom-note")).toMatchObject({
       type: "text",
       required: false,
-      options: {},
     });
-    expect(postsInput?.fields.find((field) => field.slug === "attachments")?.options).toEqual({
-      attachment: {
-        maxFiles: 10,
-        maxFileSize: 10 * 1024 * 1024,
-        allowedMimeTypes: ["image/png", "image/jpeg", "image/webp", "image/svg+xml"],
-      },
-    });
-    expect(pagesInput?.fields.some((field) => field.slug === "template")).toBe(false);
-    expect(pagesInput?.fields.find((field) => field.slug === "body")?.required).toBe(true);
-    expect(pagesInput?.fields.find((field) => field.slug === "hero")?.required).toBe(true);
     expect(store.folder.metadata).toEqual({
       [BUSABASE_CMS_METADATA_KEY]: {
         schemaVersion: 1,
-        profile: "buda",
+        profile: "custom",
         bases: {
           categories: "created-1",
           tags: "created-2",
@@ -582,14 +548,16 @@ describe("Folder-based CMS provisioning", () => {
     expect(store.updateMetadata).not.toHaveBeenCalled();
   });
 
-  it("adopts the exact live-shaped Buda schema without adding legacy-incompatible fields", async () => {
-    const store = createStore({ existing: true });
-    applyBudaLiveSchema(store);
+  it("adopts an exact live-shaped custom profile without adding legacy-incompatible fields", async () => {
+    const store = createStore({ existing: true, fieldsOverride: customFieldsOverride });
+    applyCustomLiveSchema(store);
     const cms = createBusabaseCms({
       client: store.client,
       folderId: store.folder.id,
       lazyCreate: true,
-      schemaProfile: "buda",
+      schemaProfile: "custom",
+      fieldsOverride: customFieldsOverride,
+      legacyOptionalFields: customLegacyOptionalFields,
     });
 
     await expect(cms.posts.list()).resolves.toEqual([]);
@@ -597,25 +565,27 @@ describe("Folder-based CMS provisioning", () => {
     expect(store.createField).not.toHaveBeenCalled();
     expect(store.updateMetadata).toHaveBeenCalledWith({
       nodeId: store.folder.id,
-      metadata: cmsMetadata("buda"),
+      metadata: cmsMetadata("custom"),
     });
 
     const restartedCms = createBusabaseCms({
       client: store.client,
       folderId: store.folder.id,
       lazyCreate: true,
-      schemaProfile: "buda",
+      schemaProfile: "custom",
+      fieldsOverride: customFieldsOverride,
+      legacyOptionalFields: customLegacyOptionalFields,
     });
     await expect(restartedCms.pages.list()).resolves.toEqual([]);
     expect(store.createField).not.toHaveBeenCalled();
     expect(store.updateMetadata).toHaveBeenCalledTimes(1);
   });
 
-  it("rejects a newly materialized optional Buda Page body", async () => {
+  it("rejects a newly materialized optional custom-profile Page body", async () => {
     const store = createStore({
       existing: true,
-      metadata: cmsMetadata("buda"),
-      profile: "buda",
+      metadata: cmsMetadata("custom"),
+      fieldsOverride: customFieldsOverride,
       omitField: { role: "pages", slug: "body" },
       mutateCreatedField: (field) => {
         if (field.slug === "body") field.required = false;
@@ -625,7 +595,9 @@ describe("Folder-based CMS provisioning", () => {
       client: store.client,
       folderId: store.folder.id,
       lazyCreate: true,
-      schemaProfile: "buda",
+      schemaProfile: "custom",
+      fieldsOverride: customFieldsOverride,
+      legacyOptionalFields: customLegacyOptionalFields,
     });
 
     await expect(cms.pages.list()).rejects.toThrow(

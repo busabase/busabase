@@ -82,21 +82,23 @@ test("field header actions require a saved view and support keyboard quick sorti
   await expect(coverHeader).toHaveCount(0);
 });
 
-test("record status is the final responsive grid column", async ({ page }) => {
+test("the grid ends on a real field column, with no record-status column", async ({ page }) => {
   await page.goto("/dashboard/local/base/field-type-lab");
   const grid = page.getByTestId("base-records-grid");
   const headers = grid.getByRole("columnheader");
-  const statusHeader = headers.last();
+  // Wait for real rows so the assertions below can't pass against the skeleton.
+  await expect(grid.getByTestId("base-record-select").first()).toBeVisible();
 
-  await expect(statusHeader).toHaveText("Record status");
-  await expect(statusHeader).toHaveAttribute("aria-label", "Record status");
+  // The right-hand sticky "record status" column is gone: every live record is
+  // `status: "active"`, so it was a constant pill eating 112px on every base.
+  await expect(grid.getByRole("columnheader", { name: "Record status" })).toHaveCount(0);
   await expect(grid.getByRole("columnheader", { name: "Commit" })).toHaveCount(0);
-  await expect
-    .poll(() => statusHeader.evaluate((element) => getComputedStyle(element).position))
-    .toBe("sticky");
 
-  await page.setViewportSize({ height: 844, width: 390 });
+  // The last column is now an ordinary field header (position:relative for its
+  // resize handle), not a right-pinned sticky one.
+  const lastHeader = headers.last();
+  await expect(lastHeader).toHaveAttribute("data-field-slug", /.+/);
   await expect
-    .poll(() => statusHeader.evaluate((element) => getComputedStyle(element).position))
-    .toBe("static");
+    .poll(() => lastHeader.evaluate((element) => getComputedStyle(element).position))
+    .not.toBe("sticky");
 });

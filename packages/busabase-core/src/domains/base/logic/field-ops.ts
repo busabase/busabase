@@ -10,7 +10,7 @@ import {
   restoreFieldChangeRequestInputSchema,
   updateFieldChangeRequestInputSchema,
 } from "busabase-contract/domains/base/contract/base-schemas";
-import type { FieldType } from "busabase-contract/types";
+import type { FieldType, LookupRollup } from "busabase-contract/types";
 import { and, asc, eq, gt, isNotNull, isNull, or, sql } from "drizzle-orm";
 import { type iString, iStringFromText, iStringToText } from "openlib/i18n/i-string";
 import type { z } from "zod";
@@ -33,7 +33,10 @@ import { publishChangeRequestPendingReview } from "../../../logic/live-events";
 import { assertNodePermission } from "../../../logic/node-acl";
 import { ensureReady } from "../../../logic/seed";
 import { fieldSchema } from "../../../logic/store";
+import { assertValidFormulaField } from "../field-rules";
 import { isSystemFieldType } from "../field-types";
+import { FormulaError } from "../formula";
+import { isRollupCompatible, rollupPreservesTargetUnit } from "../lookup/rollup";
 import { busabaseFieldValues } from "../schema";
 import { convertFieldValue } from "../utils/field-conversion";
 import { baseNotFound } from "./errors";
@@ -63,6 +66,111 @@ const conversionNotSupported = (fromType: FieldType, newType: FieldType) =>
 const relationRequiresTargetBase = () =>
   new ORPCError("BAD_REQUEST", { message: "Relation field requires a target Base" });
 
+/** field-rules.ts's `assertValidFormulaField` throws plain `FormulaError` (it's a
+ *  pure/isomorphic module, no oRPC dependency) — translate to the ORPCError
+ *  shape this domain's handlers use everywhere else. */
+const assertValidFormulaFieldOrThrow: typeof assertValidFormulaField = (...args) => {
+  try {
+    assertValidFormulaField(...args);
+  } catch (error) {
+    if (error instanceof FormulaError) {
+      throw new ORPCError("BAD_REQUEST", { message: error.message });
+    }
+    throw error;
+  }
+};
+
+/**
+ * Validate AND resolve a `lookup` field's options — the lookup-side counterpart
+ * to `resolveRelationFieldOptions` (which resolves targetBaseSlug → targetBaseId
+ * on the relation side). Returns `options` unchanged for every other field type.
+ *
+ * Validates: the relation hop exists and really is a `relation`, the target field
+ * exists on the related Base, and the chosen rollup fits the target field's type.
+ *
+ * Resolves: copies the target field's `options.number` (currency / locale) onto
+ * the lookup, so a `sum` over a currency column renders as currency. The client
+ * only ever has its OWN Base's field definitions, so without this snapshot it has
+ * no way to know the rolled-up number is money. Same denormalization bika does
+ * with `lookupTargetFieldType`; the tradeoff is it goes stale if the target field
+ * later changes currency, which is rare and cheap to fix by re-saving the field.
+ *
+ * Targeting another `lookup` is rejected outright. Vika/bika both allow nesting
+ * and both need a whole cross-table dependency graph plus cycle detection to
+ * make it safe; forbidding one hop removes that entire class of bug by
+ * construction. Chain through a `formula` field on the related Base if you need
+ * a derived value.
+ */
+export const resolveLookupFieldOptions = async <
+  TOptions extends {
+    lookup?: { relationFieldSlug?: string; targetFieldSlug?: string; rollup?: string };
+    number?: { format?: "plain" | "currency"; currency?: string; locale?: string };
+  },
+>(
+  type: FieldType,
+  slug: string,
+  options: TOptions,
+  siblingFields: ReadonlyArray<{
+    slug: string;
+    type: FieldType;
+    options?: { targetBaseId?: string } | null;
+  }>,
+): Promise<TOptions> => {
+  if (type !== "lookup") return options;
+  const config = options.lookup;
+  if (!config?.relationFieldSlug || !config.targetFieldSlug) {
+    throw new ORPCError("BAD_REQUEST", {
+      message: `Lookup field requires options.lookup.relationFieldSlug and options.lookup.targetFieldSlug: ${slug}`,
+    });
+  }
+  const relationField = siblingFields.find((field) => field.slug === config.relationFieldSlug);
+  if (!relationField || relationField.type !== "relation") {
+    throw new ORPCError("BAD_REQUEST", {
+      message: `Lookup field "${slug}" must point at a relation field on this Base — no relation field named "${config.relationFieldSlug}"`,
+    });
+  }
+  const targetBaseId = relationField.options?.targetBaseId;
+  if (!targetBaseId) {
+    throw new ORPCError("BAD_REQUEST", {
+      message: `Relation field "${config.relationFieldSlug}" has no target Base, so "${slug}" has nothing to look up`,
+    });
+  }
+  const targetBase = await getBase(targetBaseId);
+  if (!targetBase) {
+    throw new ORPCError("BAD_REQUEST", {
+      message: `Lookup target Base not found: ${targetBaseId}`,
+    });
+  }
+  const targetField = targetBase.fields.find((field) => field.slug === config.targetFieldSlug);
+  if (!targetField) {
+    throw new ORPCError("BAD_REQUEST", {
+      message: `Lookup target field "${config.targetFieldSlug}" not found on Base "${targetBase.slug}"`,
+    });
+  }
+  if (targetField.type === "lookup") {
+    throw new ORPCError("BAD_REQUEST", {
+      message: `Lookup field "${slug}" cannot target another lookup field ("${config.targetFieldSlug}") — chained lookups are not supported`,
+    });
+  }
+  const rollup = (config.rollup ?? "values") as LookupRollup;
+  if (!isRollupCompatible(rollup, targetField.type)) {
+    throw new ORPCError("BAD_REQUEST", {
+      message: `Rollup "${rollup}" needs a numeric target field, but "${config.targetFieldSlug}" is a ${targetField.type} field`,
+    });
+  }
+  const targetNumber = targetField.options?.number;
+  if (targetNumber && rollupPreservesTargetUnit(rollup)) {
+    return { ...options, number: targetNumber };
+  }
+  // Drop a formatting snapshot left over from a previous target/rollup — e.g.
+  // switching a `sum` to a `count`, where currency would now be nonsense.
+  if (options.number) {
+    const { number: _dropped, ...rest } = options;
+    return rest as TOptions;
+  }
+  return options;
+};
+
 export const createBaseField = async (baseId: string, input: z.infer<typeof fieldSchema>) => {
   await ensureReady();
   const db = await getDb();
@@ -72,10 +180,17 @@ export const createBaseField = async (baseId: string, input: z.infer<typeof fiel
   }
   await assertNodePermission(base.nodeId, "write");
   const parsed = fieldSchema.parse(input);
-  const options = await resolveRelationFieldOptions(db, parsed.options);
-  if (parsed.type === "relation" && !options.targetBaseId) {
+  const relationResolved = await resolveRelationFieldOptions(db, parsed.options);
+  if (parsed.type === "relation" && !relationResolved.targetBaseId) {
     throw relationRequiresTargetBase();
   }
+  assertValidFormulaFieldOrThrow(parsed.type, parsed.slug, relationResolved, base.fields);
+  const options = await resolveLookupFieldOptions(
+    parsed.type,
+    parsed.slug,
+    relationResolved,
+    base.fields,
+  );
   const [existing] = await db
     .select()
     .from(busabaseBaseFields)
@@ -139,10 +254,17 @@ export const createFieldChangeRequest = async (
   }
 
   const parsed = createFieldChangeRequestInputSchema.parse(input);
-  const options = await resolveRelationFieldOptions(db, parsed.options);
-  if (parsed.type === "relation" && !options.targetBaseId) {
+  const relationResolved = await resolveRelationFieldOptions(db, parsed.options);
+  if (parsed.type === "relation" && !relationResolved.targetBaseId) {
     throw relationRequiresTargetBase();
   }
+  assertValidFormulaFieldOrThrow(parsed.type, parsed.slug, relationResolved, base.fields);
+  const options = await resolveLookupFieldOptions(
+    parsed.type,
+    parsed.slug,
+    relationResolved,
+    base.fields,
+  );
   const [existing] = await db
     .select()
     .from(busabaseBaseFields)
@@ -372,10 +494,14 @@ export const createUpdateFieldChangeRequest = async (
   const operationId = id("opr");
   const commitId = id("cmt");
   const timestamp = now();
-  const options =
+  let options =
     patch.options !== undefined
       ? await resolveRelationFieldOptions(db, patch.options)
       : field.options;
+  if (patch.options !== undefined) {
+    assertValidFormulaFieldOrThrow(field.type, field.slug, options, base.fields);
+    options = await resolveLookupFieldOptions(field.type, field.slug, options, base.fields);
+  }
   const fields = {
     fieldId: field.id,
     slug: field.slug,

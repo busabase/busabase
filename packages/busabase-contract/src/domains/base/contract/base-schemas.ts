@@ -42,7 +42,23 @@ export const fieldTypeSchema = z.enum([
   "code",
   "json",
   "yaml",
+  "formula",
+  "lookup",
+  "whiteboard",
 ]);
+
+/**
+ * Rollup functions a `lookup` field can apply to the values it pulls across a
+ * relation. `values` is the plain lookup (bring the linked records' values over
+ * as-is); everything else aggregates them into a single scalar.
+ *
+ * Deliberately narrower than Airtable/Vika's ~15 — every entry here is actually
+ * implemented. A rollup that would silently degrade to a raw array is worse than
+ * one that was never offered.
+ */
+export const lookupRollupSchema = z
+  .enum(["values", "count", "sum", "average", "min", "max", "concatenate"])
+  .default("values");
 
 export const fieldOptionsSchema = z
   .object({
@@ -84,7 +100,39 @@ export const fieldOptionsSchema = z
         providers: z.array(z.string()).optional(),
       })
       .optional(),
+    // `formula` fields are server-computed (like the other computed types) from
+    // `expression` at record write time — see packages/busabase-core's
+    // domains/base/formula/ engine. `{slug}` references a sibling field, including
+    // another `formula` field (chained formulas) — a dependency graph orders
+    // computation and rejects cycles at field create/edit time.
+    formula: z
+      .object({
+        expression: z.string().min(1),
+      })
+      .optional(),
     inverseFieldId: z.string().optional(),
+    // `lookup` fields pull a field's values across a `relation` field on the same
+    // Base, optionally rolling them up into one scalar. Unlike every other computed
+    // type they are NOT stored on the commit: a lookup's value depends on OTHER
+    // records, which can change without this record ever being written, so it is
+    // resolved at read time (see busabase-core's domains/base/logic/lookup-values.ts).
+    lookup: z
+      .object({
+        relationFieldSlug: z
+          .string()
+          .min(1)
+          .describe("Slug of a `relation` field on THIS Base — the hop to follow."),
+        targetFieldSlug: z
+          .string()
+          .min(1)
+          .describe("Slug of the field on the related Base whose values are pulled over."),
+        rollup: lookupRollupSchema.optional(),
+        limit: z
+          .enum(["all", "first"])
+          .optional()
+          .describe("`first` looks at only the first linked record; default `all`."),
+      })
+      .optional(),
     multiple: z.boolean().optional(),
     // Display formatting for `number` columns (Notion-style: one number type,
     // a format option). `currency` renders via Intl.NumberFormat.

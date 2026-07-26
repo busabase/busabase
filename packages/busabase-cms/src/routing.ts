@@ -96,6 +96,39 @@ export const buildCmsTaxonomyArchivePath = (
   options: CmsCanonicalPathOptions,
 ): string | null => buildCmsCanonicalPath(taxonomy.locale, [kind, taxonomy.slug], options);
 
+/**
+ * A `CmsCanonicalPathOptions` bound once into ready-to-call helpers — every app consuming
+ * busabase-cms was hand-rolling the same `buildXPath`/`parseXPath`/`isXForLocale` wrappers
+ * around its own copy of `{ supportedLocales, defaultLocale }`. Call this once per app with
+ * its locale config and pass the result around instead of re-deriving these closures.
+ */
+export interface CmsPathHelpers {
+  readonly options: CmsCanonicalPathOptions;
+  normalizePath: (path: string) => string | null;
+  parsePath: (path: string) => CmsCanonicalPath | null;
+  buildPath: (locale: string, path: string | readonly string[]) => string | null;
+  isForLocale: (item: { locale: string; path: string }, locale: string) => boolean;
+  /** A record is valid content when its path parses AND actually belongs to its own claimed locale. */
+  isValidContent: (item: { locale: string; path: string }) => boolean;
+  isBlogPostPath: (path: string) => boolean;
+  buildTaxonomyArchivePath: (
+    kind: CmsTaxonomyKind,
+    taxonomy: { locale: string; slug: string },
+  ) => string | null;
+}
+
+export const createCmsPathHelpers = (options: CmsCanonicalPathOptions): CmsPathHelpers => ({
+  options,
+  normalizePath: normalizeCmsPath,
+  parsePath: (path) => parseCmsCanonicalPath(path, options),
+  buildPath: (locale, path) => buildCmsCanonicalPath(locale, path, options),
+  isForLocale: (item, locale) => isCmsContentForLocale(item, locale, options),
+  isValidContent: (item) => isCmsContentForLocale(item, item.locale, options),
+  isBlogPostPath: (path) => isCmsBlogPostPath(path, options),
+  buildTaxonomyArchivePath: (kind, taxonomy) =>
+    buildCmsTaxonomyArchivePath(kind, taxonomy, options),
+});
+
 /** Select Posts related to one taxonomy record without mixing locales. */
 export const filterCmsPostsByTaxonomy = <
   T extends { locale: string; categoryIds: readonly string[]; tagIds: readonly string[] },

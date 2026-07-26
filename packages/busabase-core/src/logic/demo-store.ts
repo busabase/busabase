@@ -13,6 +13,7 @@ import type {
   CommentSubjectType,
   CommentVO,
   FileNodeVO,
+  FormVO,
   NodeSearchResultVO,
   NodeVO,
   OperationKind,
@@ -50,6 +51,50 @@ const dataset = (): DemoDataset =>
 
 const nowIso = () => new Date().toISOString();
 const demoId = (prefix: string) => `${prefix}_demo_${Date.now().toString(36)}`;
+
+const currentScenario = () => (getContextDemoLocale() === "zh-CN" ? zhCnScenario : englishScenario);
+
+/**
+ * Read a seeded demo Form by its node id or slug. The stateless demo has no DB,
+ * so this maps the scenario's `SeedFormDef` straight to a `FormVO` — enough for
+ * the Form detail view to render the agent-authored page. Submissions can't
+ * persist a ChangeRequest here (see `demoSubmitForm`).
+ */
+export const demoGetForm = (nodeIdOrSlug: string): FormVO | null => {
+  const def = (currentScenario().forms ?? []).find(
+    (form) => form.nodeId === nodeIdOrSlug || form.slug === nodeIdOrSlug,
+  );
+  if (!def) {
+    return null;
+  }
+  const timestamp = nowIso();
+  return {
+    id: def.formId,
+    nodeId: def.nodeId,
+    spaceId: "local",
+    targetBaseId: def.targetBaseId,
+    name: def.name,
+    description: def.description,
+    bindings: def.bindings,
+    page: def.page ?? {},
+    share: { isPublic: false, anonymousSubmit: false },
+    submissionCount: 0,
+    status: "active",
+    createdBy: DEMO_ACTOR_ID,
+    createdAt: timestamp,
+    updatedAt: timestamp,
+  };
+};
+
+/**
+ * A demo Form submission: the stateless demo can't materialize a real pending
+ * ChangeRequest, so acknowledge the submit with a synthetic id. The page's
+ * success state still shows, so the approval-first flow reads correctly in demo.
+ */
+export const demoSubmitForm = (): { changeRequestId: string; status: "pending_review" } => ({
+  changeRequestId: demoId("cr"),
+  status: "pending_review",
+});
 
 const notFound = (what: string, id: string) =>
   new ORPCError("NOT_FOUND", { message: `${what} not found in demo: ${id}` });
@@ -187,6 +232,19 @@ export const demoListRecordsByFieldText = (input: {
     const value = record.headCommit.fields[input.fieldSlug];
     return typeof value === "string" && value.toLowerCase().includes(needle);
   });
+};
+
+export const demoGetRecordByField = (input: {
+  baseId: string;
+  fieldSlug: string;
+  valueText: string;
+}): RecordVO | null => {
+  const record = dataset().records.find((item) => {
+    if (item.baseId !== input.baseId) return false;
+    const value = item.headCommit.fields[input.fieldSlug];
+    return value === input.valueText;
+  });
+  return record ?? null;
 };
 
 export const demoListChangeRequests = (): ChangeRequestVO[] => dataset().changeRequests;

@@ -55,9 +55,19 @@ const checkOne = (
 };
 
 describe("SYSTEM_FIELD_TYPES", () => {
-  it("is exactly the five server-managed types", () => {
+  it("is exactly the seven server-managed types", () => {
     expect([...SYSTEM_FIELD_TYPES].sort()).toEqual(
-      ["auto_number", "created_by", "created_time", "updated_by", "updated_time"].sort(),
+      [
+        "auto_number",
+        "created_by",
+        "created_time",
+        "formula",
+        // Server-managed but resolved at READ time (depends on other records),
+        // so it has `readOnly` rather than a `compute` hook.
+        "lookup",
+        "updated_by",
+        "updated_time",
+      ].sort(),
     );
   });
   it("isSystemFieldType agrees with the set for every field type", () => {

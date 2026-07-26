@@ -1,6 +1,13 @@
 import { useQuery } from "@tanstack/react-query";
 import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";
-import type { BaseFieldVO, BaseVO, FieldType, RecordVO, ViewVO } from "busabase-contract/types";
+import type {
+  BaseFieldVO,
+  BaseVO,
+  FieldType,
+  LookupRollup,
+  RecordVO,
+  ViewVO,
+} from "busabase-contract/types";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "kui/dialog";
 import { Pencil, Plus, RotateCcw } from "lucide-react";
 import { type iString, iStringIsEmpty, iStringParse, iStringTrim } from "openlib/i18n/i-string";
@@ -8,11 +15,13 @@ import { SPALink as Link } from "openlib/ui/dashboard";
 import { useRef, useState } from "react";
 import { useSearch } from "wouter";
 import { fmt, useCoreI18n, useIString } from "../../../i18n";
+import { isRollupCompatible, LOOKUP_ROLLUPS } from "../../base/lookup/rollup";
 import { isDerivedFieldSlug } from "../helpers/change-request";
 import { createDefaultFieldOptions, fieldTypeOptions } from "../helpers/field";
 import { mergeSearchIntoHref } from "../helpers/link-search";
 import type {
   CreateBaseFieldPayload,
+  RecordSubmitOptions,
   RecordsPagination,
   ViewFormPayload,
   ViewSubmitOptions,
@@ -41,6 +50,7 @@ export function BaseDetailView({
   base,
   onCreateView,
   onDeleteView,
+  onDeleteRecords,
   onRestoreView,
   onRestoreRecord,
   onMoveRecord,
@@ -69,6 +79,10 @@ export function BaseDetailView({
     options?: ViewSubmitOptions,
   ) => Promise<void>;
   onDeleteView: (view: ViewVO) => Promise<void>;
+  onDeleteRecords?: (
+    records: RecordVO[],
+    options?: RecordSubmitOptions,
+  ) => Promise<{ ok: number; failed: number }>;
   onRestoreView?: (view: ViewVO) => Promise<void>;
   onRestoreRecord?: (record: RecordVO) => Promise<void>;
   onMoveRecord?: (record: RecordVO, fieldSlug: string, value: string | null) => Promise<void>;
@@ -109,6 +123,7 @@ export function BaseDetailView({
             base={base}
             onCreateView={onCreateView}
             onDeleteView={onDeleteView}
+            onDeleteRecords={onDeleteRecords}
             onRestoreView={onRestoreView}
             onRestoreRecord={onRestoreRecord}
             onMoveRecord={onMoveRecord}
@@ -172,8 +187,36 @@ export function BaseSetupView({
   const [codeLanguage, setCodeLanguage] = useState("text");
   const [numberFormat, setNumberFormat] = useState<"plain" | "currency">("plain");
   const [currencyCode, setCurrencyCode] = useState("USD");
+  // `lookup` config: which relation field to hop through, which field on the
+  // related Base to pull over, and how to roll the pulled values up.
+  const [lookupRelationSlug, setLookupRelationSlug] = useState("");
+  const [lookupTargetSlug, setLookupTargetSlug] = useState("");
+  const [lookupRollup, setLookupRollup] = useState<LookupRollup>("values");
   const [isRequired, setIsRequired] = useState(false);
   const [isMultiple, setIsMultiple] = useState(true);
+  // ── lookup field cascade (relation hop → target field → rollup) ────────────
+  // Only relation fields with a resolved target Base can be hopped through.
+  const lookupRelationFields = (base?.fields ?? []).filter(
+    (field) => field.type === "relation" && Boolean(field.options.targetBaseId),
+  );
+  const lookupTargetBase = bases.find(
+    (item) =>
+      item.id ===
+      lookupRelationFields.find((field) => field.slug === lookupRelationSlug)?.options.targetBaseId,
+  );
+  // Chained lookups are rejected server-side (see field-ops.ts's
+  // assertValidLookupField) — don't offer them here either.
+  const lookupTargetFields = (lookupTargetBase?.fields ?? []).filter(
+    (field) => field.type !== "lookup",
+  );
+  const lookupTargetType = lookupTargetFields.find(
+    (field) => field.slug === lookupTargetSlug,
+  )?.type;
+  // Numeric rollups need a numeric target; hide the ones that would be rejected
+  // rather than letting the user pick one and eat a server error.
+  const availableRollups = lookupTargetType
+    ? LOOKUP_ROLLUPS.filter((rollup) => isRollupCompatible(rollup, lookupTargetType))
+    : LOOKUP_ROLLUPS;
   const [isSaving, setIsSaving] = useState(false);
   const [isAddFieldOpen, setIsAddFieldOpen] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
@@ -226,6 +269,9 @@ export function BaseSetupView({
     setCodeLanguage("text");
     setNumberFormat("plain");
     setCurrencyCode("USD");
+    setLookupRelationSlug("");
+    setLookupTargetSlug("");
+    setLookupRollup("values");
     setIsRequired(false);
     setIsMultiple(true);
     setFormError(null);
@@ -249,6 +295,10 @@ export function BaseSetupView({
       setFormError(messages.base.relationTargetRequired);
       return;
     }
+    if (fieldType === "lookup" && (!lookupRelationSlug || !lookupTargetSlug)) {
+      setFormError(messages.base.lookupConfigRequired);
+      return;
+    }
 
     setIsSaving(true);
     setFormError(null);
@@ -261,9 +311,17 @@ export function BaseSetupView({
           options:
             fieldType === "code"
               ? { code: { language: codeLanguage || "text" } }
-              : fieldType === "number" && numberFormat === "currency"
-                ? { number: { format: "currency", currency: currencyCode.trim() || "USD" } }
-                : createDefaultFieldOptions(fieldType, targetBaseId, isMultiple),
+              : fieldType === "lookup"
+                ? {
+                    lookup: {
+                      relationFieldSlug: lookupRelationSlug,
+                      targetFieldSlug: lookupTargetSlug,
+                      rollup: lookupRollup,
+                    },
+                  }
+                : fieldType === "number" && numberFormat === "currency"
+                  ? { number: { format: "currency", currency: currencyCode.trim() || "USD" } }
+                  : createDefaultFieldOptions(fieldType, targetBaseId, isMultiple),
           required: isRequired,
           slug,
           type: fieldType,
@@ -627,6 +685,82 @@ export function BaseSetupView({
                           ))}
                         </select>
                       </label>
+                    ) : null}
+                    {fieldType === "lookup" ? (
+                      <>
+                        <label className="block">
+                          <span className="text-muted-foreground text-xs">
+                            {messages.base.lookupVia}
+                          </span>
+                          <select
+                            className="mt-1 h-8 w-full rounded-md border border-border/70 bg-background px-2.5 text-sm outline-none transition-colors focus:border-primary"
+                            data-testid="add-field-lookup-relation"
+                            onChange={(event) => {
+                              setLookupRelationSlug(event.target.value);
+                              // The target-field list is scoped to the related
+                              // Base, so a stale pick from the previous hop must go.
+                              setLookupTargetSlug("");
+                            }}
+                            value={lookupRelationSlug}
+                          >
+                            <option value="">{messages.base.lookupSelectRelation}</option>
+                            {lookupRelationFields.map((field) => (
+                              <option key={field.id} value={field.slug}>
+                                {resolveIString(field.name)}
+                              </option>
+                            ))}
+                          </select>
+                          {lookupRelationFields.length === 0 ? (
+                            <span className="mt-1 block text-muted-foreground text-[10px]">
+                              {messages.base.lookupNeedsRelationField}
+                            </span>
+                          ) : null}
+                        </label>
+                        <label className="block">
+                          <span className="text-muted-foreground text-xs">
+                            {messages.base.lookupTargetField}
+                          </span>
+                          <select
+                            className="mt-1 h-8 w-full rounded-md border border-border/70 bg-background px-2.5 text-sm outline-none transition-colors focus:border-primary"
+                            data-testid="add-field-lookup-target"
+                            disabled={!lookupRelationSlug}
+                            onChange={(event) => {
+                              setLookupTargetSlug(event.target.value);
+                              // A rollup valid for the previous target may be
+                              // invalid for this one (SUM over a text column) —
+                              // fall back to the always-valid default.
+                              setLookupRollup("values");
+                            }}
+                            value={lookupTargetSlug}
+                          >
+                            <option value="">{messages.base.lookupSelectTargetField}</option>
+                            {lookupTargetFields.map((field) => (
+                              <option key={field.id} value={field.slug}>
+                                {resolveIString(field.name)}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                        <label className="block">
+                          <span className="text-muted-foreground text-xs">
+                            {messages.base.lookupRollup}
+                          </span>
+                          <select
+                            className="mt-1 h-8 w-full rounded-md border border-border/70 bg-background px-2.5 text-sm outline-none transition-colors focus:border-primary"
+                            data-testid="add-field-lookup-rollup"
+                            onChange={(event) =>
+                              setLookupRollup(event.target.value as LookupRollup)
+                            }
+                            value={lookupRollup}
+                          >
+                            {availableRollups.map((rollup) => (
+                              <option key={rollup} value={rollup}>
+                                {rollup}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                      </>
                     ) : null}
                     {fieldType === "number" ? (
                       <label className="block">

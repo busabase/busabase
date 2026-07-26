@@ -57,6 +57,7 @@ import {
   mergeViewRestore as mergeViewRestoreBase,
   mergeViewUpdate as mergeViewUpdateBase,
 } from "../domains/base/handlers";
+import { resolveLookupValues } from "../domains/base/logic/lookup-values";
 import { mergeDocUpdate } from "../domains/doc/handlers";
 import { mergeFileTreeFile, mergeFileTreeMetadata } from "../domains/filetree/handlers";
 import { dispatchWebhookEvent } from "../domains/webhook/logic/dispatch";
@@ -953,6 +954,10 @@ export const hydrateRecords = async (records: RecordPO[]): Promise<RecordVO[]> =
     ...records.map((record) => record.createdBy),
     ...commitRows.map((commit) => commit.author),
   ]);
+  // `lookup` fields are the one computed type NOT baked into the commit — they
+  // derive from other records, so they're resolved here, on read. No-ops (and
+  // issues no queries) unless a base in this set actually has a lookup field.
+  const lookupValues = await resolveLookupValues(db, records, baseMap);
 
   return records.map((record) => {
     const base = baseMap.get(record.baseId);
@@ -960,6 +965,8 @@ export const hydrateRecords = async (records: RecordPO[]): Promise<RecordVO[]> =
     if (!base || !headCommit) {
       throw new Error(`Invalid record graph for ${record.id}`);
     }
+    const commitVO = toCommitVO(headCommit, users);
+    const lookups = lookupValues.get(record.id);
     return {
       id: record.id,
       baseId: record.baseId,
@@ -973,7 +980,7 @@ export const hydrateRecords = async (records: RecordPO[]): Promise<RecordVO[]> =
       createdAt: record.createdAt.toISOString(),
       updatedAt: record.updatedAt.toISOString(),
       base,
-      headCommit: toCommitVO(headCommit, users),
+      headCommit: lookups ? { ...commitVO, fields: { ...commitVO.fields, ...lookups } } : commitVO,
     };
   });
 };
