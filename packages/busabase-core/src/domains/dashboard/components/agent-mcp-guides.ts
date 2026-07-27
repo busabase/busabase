@@ -57,3 +57,14 @@ export function resolveMcpGuideLang(lang?: string): McpGuideLang {
 export function getMcpPanelCopy(lang?: string): McpPanelCopy {
   return PANEL_COPY[resolveMcpGuideLang(lang)];
 }
+
+/**
+ * Whether a chat app can reach this workspace at all.
+ *
+ * Desktop serves MCP on `http://localhost:15419`, which a hosted chat product cannot
+ * resolve — its servers make the request, not the user's browser. So the Agent Skills
+ * panel must not send a Desktop user to the connector: that tab would hand them a
+ * localhost URL that fails with no explanation. Cloud is reachable, so the connector
+ * really is the answer there.
+ */
+export const isWebChatReachable = (edition: McpGuideEdition): boolean => edition === "cloud";

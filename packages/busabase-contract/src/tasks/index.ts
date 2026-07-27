@@ -202,4 +202,17 @@ export const AGENT_EXCLUDED_MCP_TOOLS: readonly string[] = [
   // not a step an agent should take on its own. `busabase-cli install` keeps it.
   "install_plan_from_github",
   "install_from_github",
+  // The Vault holds API keys and other credentials, and `vault.get` returns each
+  // item's DECRYPTED `value` — `rowToVO` in busabase-core decodes it and the
+  // `access.reveal` policy is passed through untouched rather than enforced. So
+  // publishing these hands an agent every secret in the workspace, and `clear`
+  // wipes them. Busabase Cloud already withholds the whole namespace from its
+  // public contract; the self-hosted server was serving them.
+  //
+  // Credentials reach an agent the way they always have: the server injects the
+  // Vault's runtime env into the process it runs. The agent never needs to read
+  // them itself.
+  "vault_get",
+  "vault_update",
+  "vault_clear",
 ];

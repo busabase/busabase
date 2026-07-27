@@ -33,10 +33,10 @@ const createChangeRequestHelp = execFileSync(
 );
 
 const required = [
-  "nodes create-change-request --type <folder|base|skill|drive|airapp|file|doc|form|whiteboard|workflow|html>",
+  "nodes create --type <folder|base|skill|drive|airapp|file|doc|form|whiteboard|workflow|html>",
   "bases create-change-request --base-id <id>",
   "records change-requests --record-id <id>",
-  "change-requests list [--limit <n>]",
+  "change-requests list [--limit <value>]",
   "change-requests close --change-request-id <id>",
 ];
 

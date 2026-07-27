@@ -91,6 +91,15 @@ const testContract = {
       },
     },
   },
+  // Declared without `.route(...)`. oRPC still puts an empty `route` object on
+  // the procedure, so a truthiness check treats it as REST-shaped.
+  live: {
+    subscribe: {
+      "~orpc": {
+        route: {},
+      },
+    },
+  },
 };
 
 describe("registerOpenApiMcpTools", () => {
@@ -285,6 +294,24 @@ describe("registerOpenApiMcpTools", () => {
     });
     expect(invalidResult?.isError).toBe(true);
     expect(upsert).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not publish procedures declared without a route", async () => {
+    // Long-lived Event Iterators (`live.subscribe`, `airapps.runLocalNode`) omit
+    // `.route(...)`, but oRPC leaves `route: {}` behind — truthy, so they used to
+    // be published as callable REST tools. Calling one could only ever fail:
+    // there is no method or path for the client to reach.
+    const { server, listTools } = createTestServer();
+
+    registerOpenApiMcpTools({
+      server,
+      contract: testContract,
+      createClient: () => ({}),
+    });
+
+    const names = (await listTools()).map((tool) => tool.name);
+    expect(names).not.toContain("live_subscribe");
+    expect(names).toEqual(expect.arrayContaining(["things_get", "things_ping"]));
   });
 
   it("rejects duplicate contract and additional input fields", () => {

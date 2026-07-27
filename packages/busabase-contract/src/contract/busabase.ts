@@ -393,6 +393,9 @@ export const busabaseContractRoutes = {
   live: {
     // RPC-only by design: no `.route(...)`, so OpenAPI generation and MCP tool
     // discovery skip this long-lived Event Iterator while `/api/rpc` stays typed.
+    // (MCP discovery only skips it because `discoverOpenApiTools` now requires a
+    // route with a method or path — omitting `.route()` still leaves `route: {}`,
+    // which is truthy, and that used to publish this as a callable REST tool.)
     subscribe: oc.output(eventIterator(liveEventSchema)),
   },
   bases: baseContract,

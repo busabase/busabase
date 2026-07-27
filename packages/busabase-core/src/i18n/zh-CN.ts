@@ -954,6 +954,9 @@ export const dashboardZhCN: CoreI18nMessages = {
     webChatTitle: "这段提示词需要终端，而聊天应用没有。",
     webChatBody:
       "引导 skill 全是 shell 命令，最后一步还要用 npx 安装 skill 文件——网页聊天一条都跑不了。请改成把 Busabase 接成 MCP 连接器：skill 会随连接本身下发，不用粘贴任何东西。连上之后，在对话里运行 busabase_setup 提示词。",
+    webChatDesktopTitle: "聊天应用连不到这个本地工作区。",
+    webChatDesktopBody:
+      "Busabase Desktop 只监听你自己这台机器，而托管的聊天产品是从它自己的服务器发请求的——所以没有任何地址可以给它。网页聊天请改用 Busabase Cloud，或改连上面的编程 Agent。",
     webChatGoToMcp: "去配置 MCP 连接器",
     mcpGuide: "MCP + OAuth 配置指南",
     openapiIntro: "浏览或导入 Busabase REST API。可用 JSON 规范生成代码，或打开交互式文档。",

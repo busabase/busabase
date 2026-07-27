@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { AGENT_BRAND_LINKS, getMcpPanelCopy, resolveMcpGuideLang } from "./agent-mcp-guides";
+import {
+  AGENT_BRAND_LINKS,
+  getMcpPanelCopy,
+  isWebChatReachable,
+  resolveMcpGuideLang,
+} from "./agent-mcp-guides";
 
 const namesOfKind = (kind: string) =>
   AGENT_BRAND_LINKS.filter((link) => link.kind === kind).map((link) => link.name);
@@ -44,5 +49,14 @@ describe("agent brand links", () => {
     expect(resolveMcpGuideLang("fr")).toBe("en");
     expect(getMcpPanelCopy("zh-CN").fullGuide).toBe("打开各客户端的完整配置指南");
     expect(getMcpPanelCopy("fr")).toEqual(getMcpPanelCopy("en"));
+  });
+
+  it("never points a chat app at a Desktop workspace", () => {
+    // Desktop serves MCP on localhost, which a hosted chat product resolves from its own
+    // servers — so it simply cannot reach it. The Agent Skills panel uses this to decide
+    // whether to offer the connector at all; offering it on Desktop hands the user a
+    // localhost URL that fails with no explanation.
+    expect(isWebChatReachable("desktop")).toBe(false);
+    expect(isWebChatReachable("cloud")).toBe(true);
   });
 });

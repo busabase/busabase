@@ -971,6 +971,9 @@ export const dashboardJa: CoreI18nMessages = {
     webChatTitle: "このプロンプトにはターミナルが必要ですが、チャットアプリにはありません。",
     webChatBody:
       "オンボーディング skill はシェルコマンドの連続で、最後は npx による skill ファイルのインストールで終わります。ウェブチャットではどれも実行できません。代わりに Busabase を MCP コネクタとして接続してください。skill は接続自体で配信されるため、貼り付けは不要です。接続後、チャットで busabase_setup プロンプトを実行します。",
+    webChatDesktopTitle: "チャットアプリはこのローカルワークスペースに接続できません。",
+    webChatDesktopBody:
+      "Busabase Desktop は自分のマシンでのみ待ち受けており、ホスト型のチャット製品は自社サーバーからリクエストを送るため、渡せるアドレスがありません。ウェブチャットには Busabase Cloud を使うか、上記のコーディング Agent を接続してください。",
     webChatGoToMcp: "MCP コネクタを設定する",
     mcpGuide: "MCP + OAuth セットアップガイド",
     openapiIntro:

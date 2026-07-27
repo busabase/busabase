@@ -980,6 +980,9 @@ export const coreMessagesEn = {
     webChatTitle: "This prompt needs a terminal — a chat app doesn't have one.",
     webChatBody:
       "The onboarding skill is a series of shell commands, and it finishes by installing a skill file with npx. A browser chat can run none of that. Connect Busabase as an MCP connector instead: the skill travels over the connection itself, so there is nothing to paste. Once it is connected, run the busabase_setup prompt in the chat.",
+    webChatDesktopTitle: "A chat app can't reach this local workspace.",
+    webChatDesktopBody:
+      "Busabase Desktop only listens on your own machine, and a hosted chat product makes its requests from its own servers — so there is no address you can give it. Use Busabase Cloud for web chat, or connect one of the coding agents above.",
     webChatGoToMcp: "Set up the MCP connector",
     mcpGuide: "MCP + OAuth setup guide",
     openapiIntro:

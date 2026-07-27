@@ -685,7 +685,17 @@ const discoverOpenApiTools = (
     }
 
     const procedure = node as OpenApiProcedure;
-    if (procedure["~orpc"]?.route) {
+    const route = procedure["~orpc"]?.route;
+    if (route) {
+      // A procedure declared WITHOUT `.route(...)` still gets `route: {}` — an
+      // empty object, which is truthy. Treating that as REST-shaped published
+      // long-lived Event Iterators (`live.subscribe`, `airapps.runLocalNode`) as
+      // tools an agent could call, and calling one can only fail: there is no
+      // method or path for the client to reach. Require an actual route.
+      if (!route.method && !route.path) {
+        return;
+      }
+
       const tool: DiscoveredOpenApiTool = {
         contractProcedure: procedure,
         keyPath,

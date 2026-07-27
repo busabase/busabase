@@ -12,7 +12,12 @@ import {
   fmt,
   useCoreI18n,
 } from "../../../i18n";
-import { AGENT_BRAND_LINKS, type McpAgentKind, type McpGuideEdition } from "./agent-mcp-guides";
+import {
+  AGENT_BRAND_LINKS,
+  isWebChatReachable,
+  type McpAgentKind,
+  type McpGuideEdition,
+} from "./agent-mcp-guides";
 
 interface BusabaseAgentSkillButtonProps {
   /**
@@ -89,6 +94,7 @@ export function AgentIntegrationDialog({
     }
     return url.toString();
   }, [edition, origin, targetSpaceId]);
+  const webChatReachable = isWebChatReachable(edition);
   const mcpOrigin = edition === "desktop" ? "http://localhost:15419" : origin;
   const mcpUrl = `${mcpOrigin}/api/mcp`;
   const mcpGuideUrl = getMcpGuideUrl(lang);
@@ -218,21 +224,30 @@ export function AgentIntegrationDialog({
                 </>
               ) : (
                 <div className="grid gap-3 rounded-md border border-dashed p-4">
+                  {/* Sending a Desktop user to the connector would hand them the
+                      localhost URL that tab shows, which a hosted chat product can
+                      never resolve. Say why instead of offering a dead end. */}
                   <p className="text-sm font-medium text-foreground">
-                    {messages.integration.webChatTitle}
+                    {webChatReachable
+                      ? messages.integration.webChatTitle
+                      : messages.integration.webChatDesktopTitle}
                   </p>
                   <p className="text-sm text-muted-foreground">
-                    {messages.integration.webChatBody}
+                    {webChatReachable
+                      ? messages.integration.webChatBody
+                      : messages.integration.webChatDesktopBody}
                   </p>
-                  <div>
-                    <button
-                      className="inline-flex h-9 items-center gap-2 rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground hover:opacity-90"
-                      onClick={() => setTransportTab("mcp")}
-                      type="button"
-                    >
-                      {messages.integration.webChatGoToMcp}
-                    </button>
-                  </div>
+                  {webChatReachable ? (
+                    <div>
+                      <button
+                        className="inline-flex h-9 items-center gap-2 rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground hover:opacity-90"
+                        onClick={() => setTransportTab("mcp")}
+                        type="button"
+                      >
+                        {messages.integration.webChatGoToMcp}
+                      </button>
+                    </div>
+                  ) : null}
                 </div>
               )}
             </div>
