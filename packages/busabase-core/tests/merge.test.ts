@@ -82,6 +82,7 @@ describe("Staleness-aware 3-way merge — oRPC", () => {
     client.records.updateChangeRequest({
       recordId,
       fields: { title: "orig title", body: "orig body", channel: "blog", ...overrides },
+      autoMerge: false,
     });
 
   it("auto-merges change requests that touch different fields", async () => {

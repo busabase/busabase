@@ -12,6 +12,7 @@ import {
   getContextActorId,
   getContextIsSpaceManager,
   getContextPermissionLevel,
+  getContextPermissionLevelIsCeiling,
   getContextRestrictedVisibility,
   getContextSpaceId,
   isAnonymousVisitor,
@@ -255,6 +256,12 @@ export async function getEffectiveNodeLevel(
   for (const grant of grants) {
     if (!level || API_KEY_LEVEL_ORDER[grant.role] > API_KEY_LEVEL_ORDER[level]) {
       level = grant.role;
+    }
+  }
+  if (level && getContextPermissionLevelIsCeiling()) {
+    const ceiling = getContextPermissionLevel();
+    if (API_KEY_LEVEL_ORDER[level] > API_KEY_LEVEL_ORDER[ceiling]) {
+      level = ceiling;
     }
   }
   return level;

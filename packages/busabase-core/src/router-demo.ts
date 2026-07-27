@@ -500,7 +500,7 @@ export const busabaseDemoRouter = os.router({
     getByField: os.records.getByField.handler(({ input }) => demoGetRecordByField(input)),
     updateChangeRequest: os.records.updateChangeRequest.handler(({ input }) => {
       const { recordId, ...rest } = input;
-      return demoCreateUpdateChangeRequest(recordId, rest);
+      return { ...demoCreateUpdateChangeRequest(recordId, rest), materialized: false as const };
     }),
     deleteChangeRequest: os.records.deleteChangeRequest.handler(({ input }) =>
       demoCreateDeleteChangeRequest(input.recordId),

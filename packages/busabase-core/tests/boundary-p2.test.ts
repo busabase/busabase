@@ -133,10 +133,12 @@ describe("Boundary P2 — oRPC", () => {
     const crA = await client.records.updateChangeRequest({
       recordId,
       fields: { title: "t", status: "A" },
+      autoMerge: false,
     });
     const crB = await client.records.updateChangeRequest({
       recordId,
       fields: { title: "t", status: "B" },
+      autoMerge: false,
     });
 
     await approveAndMerge(crA.id);

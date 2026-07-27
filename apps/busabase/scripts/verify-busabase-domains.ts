@@ -98,7 +98,9 @@ async function main() {
     fields: { title: "Harness Record (edited)" },
     message: "verify update",
     author: "local-editor",
+    autoMerge: false,
   });
+  assert.equal(updateCr.materialized, false, "record update CR stays review-first");
   await approveAndMerge(updateCr.id);
   const updated = await getRecord(recordId as string);
   assert.equal(

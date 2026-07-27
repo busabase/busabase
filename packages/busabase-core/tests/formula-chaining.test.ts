@@ -99,6 +99,7 @@ describe("Formula chaining + dependency-graph cycle detection (real PGLite)", ()
     const updateCr = await client.records.updateChangeRequest({
       recordId: created.id,
       fields: { base_price: 200 },
+      autoMerge: false,
     });
     await approveAndMerge(updateCr.id);
     const updated = await client.records.get({ recordId: created.id });

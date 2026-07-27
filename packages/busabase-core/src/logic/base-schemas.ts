@@ -317,6 +317,10 @@ export const reviseOperationInputSchema = z.object({
   baseCommitId: z.string().optional(),
 });
 
+export const updateRecordChangeRequestInputSchema = reviseOperationInputSchema.extend({
+  autoMerge: z.boolean().optional(),
+});
+
 export const recordFieldFilterInputSchema = z.object({
   baseId: z.string().optional(),
   fieldSlug: z.string().min(1),

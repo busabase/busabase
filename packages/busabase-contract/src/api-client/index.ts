@@ -53,6 +53,10 @@ export interface BusabaseSearchOptions {
   query: string;
 }
 
+export type RecordUpdateChangeRequestResult =
+  | (RecordVO & { materialized: true })
+  | (ChangeRequestVO & { materialized: false });
+
 export interface BusabaseDashboardApiClient {
   search: (options: BusabaseSearchOptions) => Promise<SearchResponseVO>;
   listAuditEvents: (options?: BusabaseListOptions) => Promise<AuditEventVO[]>;
@@ -295,8 +299,13 @@ export interface BusabaseDashboardApiClient {
   ) => Promise<ChangeRequestVO>;
   createUpdateChangeRequest: (
     recordId: string,
-    payload: { fields: Record<string, unknown>; message?: string; author?: string },
-  ) => Promise<ChangeRequestVO>;
+    payload: {
+      fields: Record<string, unknown>;
+      message?: string;
+      author?: string;
+      autoMerge?: boolean;
+    },
+  ) => Promise<RecordUpdateChangeRequestResult>;
   createDeleteChangeRequest: (recordId: string) => Promise<ChangeRequestVO>;
   mergeChangeRequest: (
     changeRequestId: string,

@@ -189,6 +189,7 @@ describe("Change-request collaboration — oRPC", () => {
     const updateCr = await client.records.updateChangeRequest({
       recordId,
       fields: { title: "history v2", body: "b", channel: "blog" },
+      autoMerge: false,
     });
 
     const history = await client.records.listChangeRequests({ recordId });

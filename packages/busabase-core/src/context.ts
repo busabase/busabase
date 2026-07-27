@@ -136,6 +136,12 @@ export interface BusabaseContext {
    */
   permissionLevel?: ApiKeyPermissionLevel;
   /**
+   * When true, `permissionLevel` is a scoped credential ceiling, not merely
+   * the actor's workspace-role baseline. Node principal grants may expose a
+   * hidden node, but must not elevate this request above the credential.
+   */
+  permissionLevelIsCeiling?: boolean;
+  /**
    * Host-computed "this space's default content visibility is restricted"
    * signal (`spaces.nodeVisibilityMode === "restricted"` on busabase-cloud).
    * When true, nodes with NO explicit visibility anywhere in their ancestor
@@ -445,6 +451,10 @@ export function getContextPermissionLevel(): ApiKeyPermissionLevel {
   const context = storage.getStore();
   if (context?.permissionLevel) return context.permissionLevel;
   return context?.isSpaceManager === false ? "read" : "manage";
+}
+
+export function getContextPermissionLevelIsCeiling(): boolean {
+  return storage.getStore()?.permissionLevelIsCeiling === true;
 }
 
 /**

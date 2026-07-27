@@ -404,7 +404,7 @@ const SCENARIOS_BY_TYPE: Record<string, ScenarioDef[]> = {
 
 /**
  * Build every prompt available for one node, already localized and interpolated.
- * Returns both tiers; the dialog renders them as separate tabs.
+ * Returns both tiers; the dialog renders them as consecutive sidebar sections.
  */
 export function buildNodeAgentPrompts(
   context: NodePromptContext,

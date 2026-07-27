@@ -16,6 +16,7 @@ export {
   recordFieldFilterInputSchema,
   recordFieldGetInputSchema,
   restoreViewInputSchema,
+  updateRecordChangeRequestInputSchema,
   updateViewInputSchema,
   viewConfigSchema,
 } from "./base-schemas";

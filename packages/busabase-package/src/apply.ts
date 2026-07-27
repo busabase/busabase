@@ -700,7 +700,11 @@ const linkRelations = async (
       fields: { ...toCreatableFields(base.node, record.fields), ...relationValues },
       message: `Link relations for ${base.node.slug}`,
       author: options.submittedBy,
+      autoMerge: false,
     });
+    if (changeRequest.materialized) {
+      throw new Error("Relation update unexpectedly bypassed the install review flow");
+    }
     await approveAndMerge(client, changeRequest.id);
   }
 };

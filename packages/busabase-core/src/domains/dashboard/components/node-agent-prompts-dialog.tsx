@@ -1,9 +1,9 @@
 "use client";
 
-// "Agent prompts" — per-node, copy-pasteable prompts. Two tabs, matching the two
-// tiers in `helpers/node-agent-prompts`:
-//   Scenarios    — curated, task-shaped, hand-written per node type
-//   Capabilities — exhaustive, one per registered operation, auto-derived
+// "Agent prompts" — per-node, copy-pasteable prompts. The sidebar presents the
+// two tiers from `helpers/node-agent-prompts` as one continuous list:
+//   Scenarios    — a top section of curated, task-shaped prompts per node type
+//   Capabilities — exhaustive, auto-derived operations grouped by domain
 //
 // TWO entry points, and they are genuinely separate code surfaces — an item
 // added to one does NOT show up in the other:
@@ -21,13 +21,11 @@
 //                               `onOpenAgentPrompts` callback and opens this
 //                               same dialog.
 //
-// Layout mirrors `agent-skill-button.tsx` (kui Dialog + Tabs + readonly textarea
-// + transient "Copied" state) so the two agent-facing dialogs feel like one
-// feature rather than two.
+// Layout mirrors `agent-skill-button.tsx` (kui Dialog + readonly textarea +
+// transient "Copied" state) so the two agent-facing dialogs feel like one feature.
 
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "kui/dialog";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "kui/tabs";
-import { Check, Copy, Sparkles } from "lucide-react";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "kui/dialog";
+import { Check, Copy } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useCoreI18n, useCoreLocale } from "../../../i18n";
 import {
@@ -35,7 +33,43 @@ import {
   type NodePrompt,
   type NodePromptContext,
 } from "../helpers/node-agent-prompts";
-import { useIsAnonymousVisitor } from "../visitor-context";
+
+export interface PromptSection {
+  name: string;
+  items: NodePrompt[];
+}
+
+/** Build the single sidebar: curated scenarios first, then capability groups. */
+export const buildPromptSections = (
+  scenarios: NodePrompt[],
+  capabilities: NodePrompt[],
+  scenariosLabel: string,
+): PromptSection[] => {
+  const sections: PromptSection[] = [];
+  if (scenarios.length > 0) {
+    sections.push({ name: scenariosLabel, items: scenarios });
+  }
+
+  const capabilitySections = new Map<string, NodePrompt[]>();
+  for (const prompt of capabilities) {
+    const bucket = capabilitySections.get(prompt.group);
+    if (bucket) bucket.push(prompt);
+    else capabilitySections.set(prompt.group, [prompt]);
+  }
+
+  return [
+    ...sections,
+    ...[...capabilitySections.entries()].map(([name, items]) => ({ name, items })),
+  ];
+};
+
+export const resolveActivePrompt = (
+  sections: PromptSection[],
+  selected: string | null,
+): NodePrompt | undefined => {
+  const prompts = sections.flatMap((section) => section.items);
+  return prompts.find((prompt) => prompt.key === selected) ?? prompts[0];
+};
 
 /**
  * The space id used to tell the agent which space to target. Falls back to the
@@ -85,21 +119,11 @@ export function NodeAgentPromptsDialog({
     () => buildNodeAgentPrompts(context, locale, messages),
     [context, locale, messages],
   );
-
-  // Open on Scenarios when the type has any, else straight to Capabilities.
-  const defaultTab = scenarios.length > 0 ? "scenarios" : "capabilities";
-  const [tab, setTab] = useState(defaultTab);
-
-  // Selection is scoped to the visible tab: the preview must always come from the
-  // list the user is looking at. Resolving `selected` against a merged list would
-  // leave the preview stuck on the other tab's first entry after switching.
-  const visible = tab === "scenarios" ? scenarios : capabilities;
-  const active = visible.find((prompt) => prompt.key === selected) ?? visible[0];
-
-  const switchTab = (next: string) => {
-    setTab(next);
-    setSelected(null); // fall back to the new tab's own first entry
-  };
+  const sections = useMemo(
+    () => buildPromptSections(scenarios, capabilities, messages.agentPrompts.scenariosTab),
+    [scenarios, capabilities, messages.agentPrompts.scenariosTab],
+  );
+  const active = resolveActivePrompt(sections, selected);
 
   const copy = async () => {
     if (!active) return;
@@ -117,99 +141,49 @@ export function NodeAgentPromptsDialog({
             <span className="ml-2 text-sm font-normal text-muted-foreground">{nodeName}</span>
           </DialogTitle>
         </DialogHeader>
-        <p className="text-sm text-muted-foreground">{messages.agentPrompts.intro}</p>
+        <DialogDescription>{messages.agentPrompts.intro}</DialogDescription>
 
-        <Tabs value={tab} onValueChange={switchTab} className="flex min-h-0 flex-col gap-3">
-          <TabsList className="w-full">
-            <TabsTrigger value="scenarios" className="flex-1">
-              {messages.agentPrompts.scenariosTab}
-              {scenarios.length > 0 && ` (${scenarios.length})`}
-            </TabsTrigger>
-            <TabsTrigger value="capabilities" className="flex-1">
-              {messages.agentPrompts.capabilitiesTab} ({capabilities.length})
-            </TabsTrigger>
-          </TabsList>
-
-          <TabsContent value="scenarios" className="min-h-0">
-            {scenarios.length === 0 ? (
-              <p className="rounded-md border bg-muted/30 p-4 text-sm text-muted-foreground">
-                {messages.agentPrompts.scenariosEmpty}
-              </p>
-            ) : (
-              <PromptPanel
-                prompts={scenarios}
-                active={active}
-                onSelect={setSelected}
-                onCopy={copy}
-                copied={copied}
-                copyLabel={messages.agentPrompts.copy}
-                copiedLabel={messages.agentPrompts.copied}
-                grouped={false}
-              />
-            )}
-          </TabsContent>
-
-          <TabsContent value="capabilities" className="min-h-0">
-            <PromptPanel
-              prompts={capabilities}
-              active={active}
-              onSelect={setSelected}
-              onCopy={copy}
-              copied={copied}
-              copyLabel={messages.agentPrompts.copy}
-              copiedLabel={messages.agentPrompts.copied}
-              grouped
-            />
-          </TabsContent>
-        </Tabs>
+        <PromptPanel
+          sections={sections}
+          active={active}
+          onSelect={setSelected}
+          onCopy={copy}
+          copied={copied}
+          copyLabel={messages.agentPrompts.copy}
+          copiedLabel={messages.agentPrompts.copied}
+        />
       </DialogContent>
     </Dialog>
   );
 }
 
-/** List (left) + preview & copy (right). Capabilities bucket under group headings. */
+/** Sectioned list (left) + preview & copy (right). */
 function PromptPanel({
-  prompts,
+  sections,
   active,
   onSelect,
   onCopy,
   copied,
   copyLabel,
   copiedLabel,
-  grouped,
 }: {
-  prompts: NodePrompt[];
+  sections: PromptSection[];
   active?: NodePrompt;
   onSelect: (key: string) => void;
   onCopy: () => void;
   copied: boolean;
   copyLabel: string;
   copiedLabel: string;
-  grouped: boolean;
 }) {
-  // Preserve the order `buildNodeAgentPrompts` already sorted into.
-  const groups = useMemo(() => {
-    if (!grouped) return [{ name: null as string | null, items: prompts }];
-    const byName = new Map<string, NodePrompt[]>();
-    for (const prompt of prompts) {
-      const bucket = byName.get(prompt.group);
-      if (bucket) bucket.push(prompt);
-      else byName.set(prompt.group, [prompt]);
-    }
-    return [...byName.entries()].map(([name, items]) => ({ name, items }));
-  }, [prompts, grouped]);
-
   return (
     <div className="grid min-h-0 gap-3 sm:grid-cols-[minmax(0,13rem)_minmax(0,1fr)]">
-      <div className="max-h-[46vh] overflow-y-auto rounded-md border p-1">
-        {groups.map((group) => (
-          <div key={group.name ?? "_"}>
-            {group.name && (
-              <div className="px-2 pt-2 pb-1 text-xs font-medium text-muted-foreground">
-                {group.name}
-              </div>
-            )}
-            {group.items.map((prompt) => {
+      <div className="max-h-[28vh] overflow-y-auto rounded-md border p-1 sm:max-h-[46vh]">
+        {sections.map((section) => (
+          <div key={section.name}>
+            <div className="px-2 pt-2 pb-1 text-xs font-medium text-muted-foreground">
+              {section.name}
+            </div>
+            {section.items.map((prompt) => {
               const isActive = active?.key === prompt.key;
               return (
                 <button
@@ -231,7 +205,7 @@ function PromptPanel({
 
       <div className="flex min-h-0 flex-col gap-2">
         <textarea
-          className="min-h-[46vh] resize-none rounded-md border bg-muted/30 p-3 font-mono text-xs leading-relaxed text-foreground outline-none"
+          className="min-h-[24vh] resize-none rounded-md border bg-muted/30 p-3 font-mono text-xs leading-relaxed text-foreground outline-none sm:min-h-[46vh]"
           readOnly
           value={active?.body ?? ""}
         />

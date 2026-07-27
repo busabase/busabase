@@ -39,7 +39,7 @@ import {
   createBulkChangeRequestInputSchema,
   createChangeRequestInputSchema,
   createDeleteChangeRequestInputSchema,
-  reviseOperationInputSchema,
+  updateRecordChangeRequestInputSchema,
 } from "../../../logic/store";
 import { assertValidFormulaField, validateRecordFields } from "../field-rules";
 import type { FieldDef } from "../field-types";
@@ -54,7 +54,7 @@ export {
   createBulkChangeRequestInputSchema,
   createChangeRequestInputSchema,
   createDeleteChangeRequestInputSchema,
-  reviseOperationInputSchema,
+  updateRecordChangeRequestInputSchema,
 };
 
 /** Caller-supplied recordId doesn't resolve — a genuine "not found" client error. */
@@ -776,11 +776,12 @@ export const createDeleteChangeRequest = async (
 
 export const createUpdateChangeRequest = async (
   recordId: string,
-  input: z.infer<typeof reviseOperationInputSchema>,
+  input: z.infer<typeof updateRecordChangeRequestInputSchema>,
 ) => {
   await ensureReady();
   const db = await getDb();
-  const parsed = reviseOperationInputSchema.parse(input);
+  const parsed = updateRecordChangeRequestInputSchema.parse(input);
+  const submittedBy = resolveActorId(parsed.author);
   const [record] = await db
     .select()
     .from(busabaseRecords)
@@ -797,6 +798,7 @@ export const createUpdateChangeRequest = async (
   if (!base) {
     throw new Error(`Base not found: ${record.baseId}`);
   }
+  await assertBaseChangeRequestPermission(base.id, submittedBy);
   // `parsed.fields` is only the caller's partial delta — an omitted required
   // field means "leave it alone", not "this record has no value for it".
   // Validate against the MERGED view (current committed fields + delta) so the
@@ -838,7 +840,7 @@ export const createUpdateChangeRequest = async (
     id: changeRequestId,
     baseId: record.baseId,
     status: "in_review",
-    submittedBy: resolveActorId(parsed.author),
+    submittedBy,
     sourceMeta: withContextSourceMeta({}),
     reviewPolicySnapshot: base.reviewPolicy,
     mergeSummary: {},
@@ -891,14 +893,26 @@ export const createUpdateChangeRequest = async (
     spaceId: getContextSpaceId(),
     baseId: record.baseId,
     changeRequestId,
-    submittedBy: resolveActorId(parsed.author),
+    submittedBy,
   });
 
   const changeRequest = await getChangeRequest(changeRequestId);
   if (!changeRequest) {
     throw new Error("Failed to create update changeRequest");
   }
-  return changeRequest;
+  const autoMerge = shouldAutoMerge(
+    parsed.autoMerge,
+    await hasNodePermission(base.nodeId, "write", submittedBy),
+  );
+  if (autoMerge) {
+    await reviewChangeRequest(changeRequestId, { verdict: "approved" });
+    const merged = await mergeChangeRequest(changeRequestId);
+    if (!merged.record) {
+      throw new Error("Auto-merge did not produce an updated record");
+    }
+    return { ...merged.record, materialized: true as const };
+  }
+  return { ...changeRequest, materialized: false as const };
 };
 
 export const createRestoreChangeRequest = async (

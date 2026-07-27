@@ -81,6 +81,7 @@ describe("merge projection fixes", () => {
     const updateCr = await client.records.updateChangeRequest({
       recordId,
       fields: { title: "rec-1", status: "published" },
+      autoMerge: false,
     });
     await approveAndMerge(updateCr.id);
 

@@ -103,6 +103,7 @@ describe("record_update — partial-field submissions preserve untouched fields"
     const updateCr = await client.records.updateChangeRequest({
       recordId,
       fields: { title: "Renamed" },
+      autoMerge: false,
     });
     await approveAndMerge(updateCr.id);
 
@@ -115,15 +116,27 @@ describe("record_update — partial-field submissions preserve untouched fields"
   it("three sequential single-field updates each preserve everything set before them", async () => {
     const recordId = await createRecord({ title: "A0", score: 1, note: "n0" });
 
-    const cr1 = await client.records.updateChangeRequest({ recordId, fields: { title: "A1" } });
+    const cr1 = await client.records.updateChangeRequest({
+      recordId,
+      fields: { title: "A1" },
+      autoMerge: false,
+    });
     await approveAndMerge(cr1.id);
     expect(await getFields(recordId)).toMatchObject({ title: "A1", score: 1, note: "n0" });
 
-    const cr2 = await client.records.updateChangeRequest({ recordId, fields: { score: 2 } });
+    const cr2 = await client.records.updateChangeRequest({
+      recordId,
+      fields: { score: 2 },
+      autoMerge: false,
+    });
     await approveAndMerge(cr2.id);
     expect(await getFields(recordId)).toMatchObject({ title: "A1", score: 2, note: "n0" });
 
-    const cr3 = await client.records.updateChangeRequest({ recordId, fields: { note: "n1" } });
+    const cr3 = await client.records.updateChangeRequest({
+      recordId,
+      fields: { note: "n1" },
+      autoMerge: false,
+    });
     await approveAndMerge(cr3.id);
     expect(await getFields(recordId)).toMatchObject({ title: "A1", score: 2, note: "n1" });
   });
@@ -136,6 +149,7 @@ describe("record_update — partial-field submissions preserve untouched fields"
     const clearCr = await client.records.updateChangeRequest({
       recordId,
       fields: { title: "B1", score: null },
+      autoMerge: false,
     });
     await approveAndMerge(clearCr.id);
     const afterClear = await getFields(recordId);
@@ -148,6 +162,7 @@ describe("record_update — partial-field submissions preserve untouched fields"
     const omitCr = await client.records.updateChangeRequest({
       recordId,
       fields: { note: "still-here" },
+      autoMerge: false,
     });
     await approveAndMerge(omitCr.id);
     const afterOmit = await getFields(recordId);
@@ -163,10 +178,12 @@ describe("record_update — partial-field submissions preserve untouched fields"
     const crOne = await client.records.updateChangeRequest({
       recordId,
       fields: { title: "C-one" },
+      autoMerge: false,
     });
     const crTwo = await client.records.updateChangeRequest({
       recordId,
       fields: { title: "C-two" },
+      autoMerge: false,
     });
 
     await approveAndMerge(crOne.id);
@@ -186,8 +203,16 @@ describe("record_update — partial-field submissions preserve untouched fields"
     const recordId = await createRecord({ title: "D0", score: 20, note: "orig-note" });
 
     // Both proposed against the same original head, before either merges.
-    const crA = await client.records.updateChangeRequest({ recordId, fields: { title: "D-new" } });
-    const crB = await client.records.updateChangeRequest({ recordId, fields: { score: 99 } });
+    const crA = await client.records.updateChangeRequest({
+      recordId,
+      fields: { title: "D-new" },
+      autoMerge: false,
+    });
+    const crB = await client.records.updateChangeRequest({
+      recordId,
+      fields: { score: 99 },
+      autoMerge: false,
+    });
 
     await approveAndMerge(crA.id);
     // crB is now stale (record moved), but touches a disjoint field → clean auto-merge, no conflict.
@@ -217,6 +242,7 @@ describe("record_update — partial-field submissions preserve untouched fields"
       recordId,
       // `ghostField` isn't a defined slug on this base at all.
       fields: { title: "E1", ghostField: "should not break anything" },
+      autoMerge: false,
     });
     await approveAndMerge(cr.id);
 
@@ -239,7 +265,11 @@ describe("record_update — partial-field submissions preserve untouched fields"
   it("reviseOperation on a pending CR with a partial field set also preserves untouched fields", async () => {
     const recordId = await createRecord({ title: "F0", score: 40, note: "f-note" });
 
-    const cr = await client.records.updateChangeRequest({ recordId, fields: { title: "F-draft" } });
+    const cr = await client.records.updateChangeRequest({
+      recordId,
+      fields: { title: "F-draft" },
+      autoMerge: false,
+    });
     const operationId = cr.primaryOperation?.id ?? "";
     expect(operationId).not.toBe("");
 

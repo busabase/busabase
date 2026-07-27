@@ -18,6 +18,7 @@ import { createRouterClient } from "@orpc/server";
 import type { ApiKeyPermissionLevel } from "busabase-contract/access-control/api-key-level";
 import { describe, expect, it } from "vitest";
 import { LOCAL_SPACE_ID, runWithBusabaseContext } from "../src/context";
+import { getEffectiveNodeLevel } from "../src/logic/node-acl";
 import { busabaseRouter } from "../src/router";
 import { seedScenario } from "./helpers/seed-scenario";
 
@@ -29,7 +30,11 @@ const asManager = <T>(actorId: string, fn: () => Promise<T>) =>
 const asMember = <T>(
   actorId: string,
   fn: () => Promise<T>,
-  opts: { restricted?: boolean; permissionLevel?: ApiKeyPermissionLevel } = {},
+  opts: {
+    restricted?: boolean;
+    permissionLevel?: ApiKeyPermissionLevel;
+    permissionLevelIsCeiling?: boolean;
+  } = {},
 ) =>
   runWithBusabaseContext(
     {
@@ -37,12 +42,59 @@ const asMember = <T>(
       actorId,
       isSpaceManager: false,
       permissionLevel: opts.permissionLevel ?? "changeRequest",
+      permissionLevelIsCeiling: opts.permissionLevelIsCeiling,
       restrictedVisibility: opts.restricted ?? false,
     },
     fn,
   );
 
 describe("node ACL", () => {
+  it("caps direct and inherited node grants at a scoped credential's permission level", async () => {
+    await seedScenario("acl-scoped-credential-ceiling");
+    const raw: RawClient = createRouterClient(busabaseRouter);
+
+    const { folderNodeId, baseNodeId } = await asManager("alice", async () => {
+      const folder = await raw.nodes.createChangeRequest({
+        operations: [{ kind: "create", nodeType: "folder", slug: "scoped", name: "Scoped" }],
+        autoMerge: true,
+      });
+      const folderNodeId = folder.mergeSummary.mergedNodeIds?.[0];
+      if (!folderNodeId) throw new Error("Expected a materialized folder");
+      const base = await raw.bases.create({
+        parentNodeId: folderNodeId,
+        slug: "scoped-base",
+        name: "Scoped Base",
+        autoMerge: true,
+      });
+      if (!base.materialized) throw new Error("Expected a materialized Base");
+      await raw.nodes.principals.add({
+        nodeId: folderNodeId,
+        principalType: "user",
+        principalId: "bob",
+        role: "manage",
+      });
+      return { folderNodeId, baseNodeId: base.nodeId };
+    });
+
+    // A normal member session may be elevated by the direct folder grant and
+    // its materialized inherited grant on the Base.
+    await asMember("bob", async () => {
+      expect(await getEffectiveNodeLevel(folderNodeId)).toBe("manage");
+      expect(await getEffectiveNodeLevel(baseNodeId)).toBe("manage");
+    });
+
+    // The same human acting through a scoped key cannot use those grants to
+    // exceed the key's own changeRequest ceiling.
+    await asMember(
+      "bob",
+      async () => {
+        expect(await getEffectiveNodeLevel(folderNodeId)).toBe("changeRequest");
+        expect(await getEffectiveNodeLevel(baseNodeId)).toBe("changeRequest");
+      },
+      { permissionLevel: "changeRequest", permissionLevelIsCeiling: true },
+    );
+  });
+
   it("hides a private base from a non-granted member (list + direct get + search)", async () => {
     await seedScenario("acl-private-hide");
     const raw: RawClient = createRouterClient(busabaseRouter);

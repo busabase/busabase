@@ -349,10 +349,21 @@ export const recordContract = {
       path: "/records/{recordId}/change-requests",
       tags: ["Records", "Change Requests"],
       summary: "Create record update change request",
-      successDescription: "Created change request that proposes updating a canonical record.",
+      successDescription:
+        "Permission-aware by default: updates the record immediately when the actor has write access, otherwise returns a pending ChangeRequest. Pass `autoMerge: false` to force review.",
     })
-    .input(reviseOperationInputSchema.extend({ recordId: z.string() }))
-    .output(changeRequestSchema),
+    .input(
+      reviseOperationInputSchema.extend({
+        recordId: z.string(),
+        autoMerge: z.boolean().optional(),
+      }),
+    )
+    .output(
+      z.union([
+        recordSchema.extend({ materialized: z.literal(true) }),
+        changeRequestSchema.extend({ materialized: z.literal(false) }),
+      ]),
+    ),
   deleteChangeRequest: oc
     .route({
       method: "DELETE",

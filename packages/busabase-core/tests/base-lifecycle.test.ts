@@ -447,6 +447,7 @@ describe("Base-domain DB lifecycle — oRPC", () => {
         recordId,
         fields: { ...before.headCommit.fields, channel: "social" },
         message: "Move",
+        autoMerge: false,
       });
       await approveAndMerge(moveCr.id);
       const after = await client.records.get({ recordId });

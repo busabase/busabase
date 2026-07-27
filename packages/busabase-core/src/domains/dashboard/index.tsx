@@ -1093,11 +1093,15 @@ function BusabaseDashboardContent({
       setError(null);
       const changeRequest = await client.createUpdateChangeRequest(record.id, {
         author: "local-editor",
+        autoMerge: false,
         fields,
         message: fmt(messages.createNode.updateRecordMessage, {
           record: getRecordTitle(record, messages),
         }),
       });
+      if (changeRequest.materialized) {
+        throw new Error("Expected a review-first record update");
+      }
       if (options?.mergeImmediately) {
         const merged = await approveAndMergeChangeRequest(changeRequest.id);
         const mergedRecord = merged.record;
@@ -1131,11 +1135,15 @@ function BusabaseDashboardContent({
       setError(null);
       const changeRequest = await client.createUpdateChangeRequest(record.id, {
         author: "local-editor",
+        autoMerge: false,
         fields: { ...record.headCommit.fields, [fieldSlug]: value },
         message: fmt(messages.createNode.updateRecordMessage, {
           record: getRecordTitle(record, messages),
         }),
       });
+      if (changeRequest.materialized) {
+        throw new Error("Expected a review-first record move");
+      }
       await approveAndMergeChangeRequest(changeRequest.id);
       await refresh();
     },
@@ -1156,11 +1164,15 @@ function BusabaseDashboardContent({
       setError(null);
       const changeRequest = await client.createUpdateChangeRequest(record.id, {
         author: "local-editor",
+        autoMerge: false,
         fields: patch,
         message: fmt(messages.createNode.updateRecordMessage, {
           record: getRecordTitle(record, messages),
         }),
       });
+      if (changeRequest.materialized) {
+        throw new Error("Expected a review-first record patch");
+      }
       await approveAndMergeChangeRequest(changeRequest.id);
       await refresh();
     },

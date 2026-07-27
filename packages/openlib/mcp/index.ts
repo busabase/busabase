@@ -396,6 +396,9 @@ export const registerOpenApiMcpTools = <TClient>(
       return [
         tool.name,
         {
+          additionalInputKeys: new Set(Object.keys(extraSchema?.properties ?? {})),
+          additionalInputSchema: options.additionalToolsInputSchema,
+          inputSchema: tool.inputSchema,
           tool,
           definition: {
             name: tool.name,
@@ -428,8 +431,26 @@ export const registerOpenApiMcpTools = <TClient>(
       const custom = customTools.get(request.params.name);
       if (custom) {
         const rawArgs = request.params.arguments ?? {};
+        const additionalInput = custom.additionalInputSchema
+          ? await validateMcpInput(
+              custom.additionalInputSchema,
+              rawArgs,
+              custom.tool.name,
+              "additional",
+            )
+          : undefined;
+        const contextArgs = isRecord(additionalInput)
+          ? { ...rawArgs, ...additionalInput }
+          : rawArgs;
+        const operationArgs = omitKeys(rawArgs, custom.additionalInputKeys);
+        const input = await validateMcpInput(
+          custom.inputSchema,
+          operationArgs,
+          custom.tool.name,
+          "task",
+        );
         const client = options.createClient(extra as McpToolExtra, {
-          args: rawArgs,
+          args: contextArgs,
           // Custom tools have no contract procedure; the surrounding shape is
           // what host hooks (space scoping, header injection) actually read.
           tool: {
@@ -437,7 +458,7 @@ export const registerOpenApiMcpTools = <TClient>(
             keyPath: [...custom.tool.keyPath],
           } as unknown as DiscoveredOpenApiTool,
         });
-        return asMcpJson(await custom.tool.execute(client, rawArgs));
+        return asMcpJson(await custom.tool.execute(client, input));
       }
 
       const registered = tools.get(request.params.name);
@@ -558,7 +579,7 @@ const validateMcpInput = async (
   schema: McpInputSchema,
   input: unknown,
   toolName: string,
-  source: "additional" | "contract",
+  source: "additional" | "contract" | "task",
 ): Promise<unknown> => {
   const result = await schema["~standard"].validate(input);
   if (result.issues) {

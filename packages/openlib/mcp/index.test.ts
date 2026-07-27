@@ -184,6 +184,136 @@ describe("registerOpenApiMcpTools", () => {
     });
   });
 
+  it("validates and parses custom tool input before execution", async () => {
+    const { server, callTool } = createTestServer();
+    const execute = vi.fn(async (_client: unknown, input: unknown) => ({ input }));
+    const createClient = vi.fn(() => ({ marker: "client" }));
+
+    registerOpenApiMcpTools({
+      server,
+      contract: {},
+      createClient,
+      additionalTools: [
+        {
+          name: "records_list",
+          title: "List records",
+          description: "Lists records with a bounded limit",
+          inputSchema: z.object({
+            limit: z.coerce.number().int().min(1).max(100).default(20),
+            query: z.string().trim().optional(),
+          }),
+          keyPath: ["records", "list"],
+          execute,
+        },
+      ],
+    });
+
+    const result = await callTool("records_list", { query: "  active  " });
+
+    expect(createClient).toHaveBeenCalledWith(
+      {},
+      expect.objectContaining({
+        args: { query: "  active  " },
+        tool: expect.objectContaining({
+          keyPath: ["records", "list"],
+          name: "records_list",
+        }),
+      }),
+    );
+    expect(execute).toHaveBeenCalledWith({ marker: "client" }, { limit: 20, query: "active" });
+    expect(result?.isError).toBeUndefined();
+  });
+
+  it("returns invalid custom tool input as an MCP error without executing", async () => {
+    const { server, callTool } = createTestServer();
+    const execute = vi.fn();
+
+    registerOpenApiMcpTools({
+      server,
+      contract: {},
+      createClient: () => ({}),
+      additionalTools: [
+        {
+          name: "records_list",
+          title: "List records",
+          description: "Lists records with a bounded limit",
+          inputSchema: z.object({ limit: z.number().int().min(1).max(100) }),
+          keyPath: ["records", "list"],
+          execute,
+        },
+      ],
+    });
+
+    const result = await callTool("records_list", { limit: 5000 });
+
+    expect(result).toEqual(
+      expect.objectContaining({
+        isError: true,
+        content: [
+          expect.objectContaining({
+            text: expect.stringContaining("Invalid task input for MCP tool records_list"),
+          }),
+        ],
+      }),
+    );
+    expect(execute).not.toHaveBeenCalled();
+  });
+
+  it("validates custom tool context input and keeps it out of execution input", async () => {
+    const { server, callTool } = createTestServer();
+    const execute = vi.fn(async (_client: unknown, input: unknown) => ({ input }));
+    const createClient = vi.fn(() => ({}));
+
+    registerOpenApiMcpTools({
+      server,
+      contract: {},
+      createClient,
+      additionalToolsInputSchema: z.object({
+        targetSpaceId: z.string().trim().min(1),
+      }),
+      additionalTools: [
+        {
+          name: "records_get",
+          title: "Get record",
+          description: "Gets one record",
+          inputSchema: z.object({ id: z.string() }),
+          keyPath: ["records", "get"],
+          execute,
+        },
+      ],
+    });
+
+    const invalidResult = await callTool("records_get", {
+      id: "record_1",
+      targetSpaceId: "   ",
+    });
+    expect(invalidResult).toEqual(
+      expect.objectContaining({
+        isError: true,
+        content: [
+          expect.objectContaining({
+            text: expect.stringContaining("Invalid additional input for MCP tool records_get"),
+          }),
+        ],
+      }),
+    );
+    expect(createClient).not.toHaveBeenCalled();
+    expect(execute).not.toHaveBeenCalled();
+
+    const validResult = await callTool("records_get", {
+      id: "record_1",
+      targetSpaceId: "  space_1  ",
+    });
+    expect(validResult?.isError).toBeUndefined();
+    expect(createClient).toHaveBeenCalledWith(
+      {},
+      expect.objectContaining({
+        args: { id: "record_1", targetSpaceId: "space_1" },
+      }),
+    );
+    expect(execute).toHaveBeenCalledWith(expect.anything(), { id: "record_1" });
+  });
+
   it("publishes annotations and mirrored security schemes", async () => {
     const { server, listTools } = createTestServer();
 

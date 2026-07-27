@@ -155,6 +155,7 @@ function buildClient(raw: RawClient) {
             fields: rest.fields,
             author: rest.submittedBy ?? "local-producer",
             message: rest.message ?? "Update record",
+            autoMerge: false,
             ...(cachedBaseCommitId ? { baseCommitId: cachedBaseCommitId } : {}),
           });
         } else {
@@ -172,6 +173,9 @@ function buildClient(raw: RawClient) {
             message: rest.message ?? "Create record",
             autoMerge: false,
           });
+        }
+        if (cr.materialized) {
+          throw new Error("seed-scenario expected a review-first record ChangeRequest");
         }
         if (mergeImmediately) {
           const merged = await approveAndMerge(cr.id);

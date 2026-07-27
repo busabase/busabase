@@ -243,6 +243,7 @@ describe("Base field types — end-to-end", () => {
       recordId,
       fields: { f_text: "v2" },
       author: "editor-2",
+      autoMerge: false,
     });
     await client.changeRequests.review({ changeRequestId: updateCr.id, verdict: "approved" });
     await client.changeRequests.merge({ changeRequestId: updateCr.id });
@@ -326,6 +327,7 @@ describe("Base field types — end-to-end", () => {
         recordId,
         fields: updatedValues(),
         author: "editor",
+        autoMerge: false,
       });
       await client.changeRequests.review({ changeRequestId: updateCr.id, verdict: "approved" });
       await client.changeRequests.merge({ changeRequestId: updateCr.id });

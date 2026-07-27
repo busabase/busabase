@@ -4,6 +4,12 @@
     "strict": true,
     "paths": {
       "busabase-core": ["../../packages/busabase-core/src/index.ts"],
+      "busabase-core/dashboard/change-request": [
+        "../../packages/busabase-core/src/domains/dashboard/helpers/change-request.ts"
+      ],
+      "busabase-core/dashboard/home": [
+        "../../packages/busabase-core/src/domains/dashboard/helpers/home.ts"
+      ],
       "busabase-core/*": ["../../packages/busabase-core/src/*"],
       "~/*": ["./src/*"],
       "@/*": ["./*"]

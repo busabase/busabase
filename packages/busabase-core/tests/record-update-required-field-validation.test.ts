@@ -132,6 +132,7 @@ describe("record_update — required-field validation sees the MERGED view, not 
       client.records.updateChangeRequest({
         recordId,
         fields: { title: "H1", req_multi: [] },
+        autoMerge: false,
       }),
     ).rejects.toMatchObject({
       code: "BAD_REQUEST",
@@ -142,6 +143,7 @@ describe("record_update — required-field validation sees the MERGED view, not 
       client.records.updateChangeRequest({
         recordId,
         fields: { title: "H1", req_multi: null },
+        autoMerge: false,
       }),
     ).rejects.toMatchObject({
       code: "BAD_REQUEST",

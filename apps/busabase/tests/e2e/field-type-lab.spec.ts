@@ -137,7 +137,7 @@ test("blocks creation when the required Text field is empty", async ({ page }) =
   await page.getByRole("button", { name: "Submit Request" }).click();
 
   // Server-side validation surfaces in the error banner; we stay on the form.
-  await expect(page.getByText(/required/i)).toBeVisible();
+  await expect(page.getByText("Check the following fields: Text.", { exact: true })).toBeVisible();
   await expect(page).toHaveURL(/\/dashboard\/local\/base\/field-type-lab\/new$/);
 });
 
