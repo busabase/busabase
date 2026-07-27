@@ -143,6 +143,7 @@ test("same-field merge conflict stays visible and recoverable", async ({ page, r
         fields: { ...fields, title: `${title} A` },
         message: "First title edit",
         author: "e2e-editor-a",
+        autoMerge: false,
       },
     }),
   );
@@ -152,6 +153,7 @@ test("same-field merge conflict stays visible and recoverable", async ({ page, r
         fields: { ...fields, title: `${title} B` },
         message: "Second title edit",
         author: "e2e-editor-b",
+        autoMerge: false,
       },
     }),
   );
@@ -166,10 +168,11 @@ test("same-field merge conflict stays visible and recoverable", async ({ page, r
   );
 
   await page.goto(`/dashboard/local/inbox/${conflictingUpdate.id}`);
-  await page.getByRole("radio", { name: "Approve" }).check();
-  await page.getByRole("button", { exact: true, name: "Approve" }).click();
-  await expect(page.getByText("Approved · ready to merge")).toBeVisible();
-  await page.getByRole("button", { name: "Merge into Base" }).click();
+  const reviewPanel = page.getByRole("complementary");
+  await reviewPanel.getByRole("radio", { name: "Approve" }).check();
+  await reviewPanel.getByRole("button", { exact: true, name: "Approve" }).click();
+  await expect(reviewPanel.getByText("Approved · ready to merge")).toBeVisible();
+  await reviewPanel.getByRole("button", { name: "Merge into Base" }).click();
   await expect(page.getByText("Merge needs review")).toBeVisible();
   // The conflict is surfaced twice by design: the raw backend message (in the
   // ReviewConflictPanel banner) embeds "Conflicting field(s): title", and the
