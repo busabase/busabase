@@ -331,11 +331,20 @@ export const demoListAgentTasks = (): AgentTaskVO[] =>
     }));
 
 // Demo auth: a fixed demo identity (the seeded actor) owning the demo space.
+// The demo store has no ACL layer at all — every seeded node is readable — so
+// the space reports the `open` default, matching what the demo actually does.
+const DEMO_AUTH_SPACE = {
+  id: "demo",
+  name: "Demo Workspace",
+  slug: "demo",
+  plan: "demo",
+  nodeVisibilityMode: "open" as const,
+};
 export const demoGetAuthInfo = (): AuthInfo => ({
-  space: { id: "demo", name: "Demo Workspace", slug: "demo", plan: "demo" },
+  space: DEMO_AUTH_SPACE,
   user: { id: DEMO_ACTOR_ID, name: "Demo User", email: null, image: null },
   member: { userId: DEMO_ACTOR_ID, spaceId: "demo", role: "owner" },
-  spaces: [{ id: "demo", name: "Demo Workspace", slug: "demo", plan: "demo" }],
+  spaces: [DEMO_AUTH_SPACE],
 });
 
 // --- Assets (derived from the seed's attachment field values) ---------------

@@ -35,9 +35,9 @@ const POLL_INTERVAL_MS = 2000;
 // and to close it on error.
 const POPUP_FEATURES = "width=520,height=680";
 
-async function fetchStatus(): Promise<CloudConnectStatusResponse> {
+async function fetchStatus(errorMessage: string): Promise<CloudConnectStatusResponse> {
   const res = await fetch("/api/cloud-connect/status");
-  if (!res.ok) throw new Error(`Status request failed (HTTP ${res.status})`);
+  if (!res.ok) throw new Error(errorMessage);
   return (await res.json()) as CloudConnectStatusResponse;
 }
 
@@ -48,6 +48,7 @@ export function CloudConnectSettingsTab({ labels, active }: Props) {
   const [isConnecting, setIsConnecting] = useState(false);
   const [isDisconnecting, setIsDisconnecting] = useState(false);
   const hasEditedCloudUrl = useRef(false);
+  const connectFailedMessage = labels.connectFailed();
 
   useEffect(() => {
     if (!active) return;
@@ -55,7 +56,7 @@ export function CloudConnectSettingsTab({ labels, active }: Props) {
 
     const poll = async () => {
       try {
-        const next = await fetchStatus();
+        const next = await fetchStatus(connectFailedMessage);
         if (cancelled) return;
         setSnapshot(next);
         if (!hasEditedCloudUrl.current) setCloudUrlInput(next.cloudUrl);
@@ -70,7 +71,7 @@ export function CloudConnectSettingsTab({ labels, active }: Props) {
       cancelled = true;
       clearInterval(interval);
     };
-  }, [active]);
+  }, [active, connectFailedMessage]);
 
   const status = snapshot?.status ?? "disconnected";
   const isBusy = status === "connecting" || isConnecting || isDisconnecting;
@@ -115,7 +116,7 @@ export function CloudConnectSettingsTab({ labels, active }: Props) {
     try {
       const res = await fetch("/api/cloud-connect/disconnect", { method: "POST" });
       if (!res.ok) throw new Error(labels.disconnectFailed());
-      const next = await fetchStatus();
+      const next = await fetchStatus(labels.statusRefreshFailed());
       setSnapshot(next);
     } catch (error) {
       setActionError(error instanceof Error ? error.message : labels.disconnectFailed());
@@ -199,7 +200,12 @@ export function CloudConnectSettingsTab({ labels, active }: Props) {
 
       {(actionError || snapshot?.error) && status !== "connected" ? (
         <Alert variant="destructive">
-          <AlertDescription>{actionError ?? snapshot?.error}</AlertDescription>
+          <AlertDescription>
+            {actionError ??
+              (snapshot?.error
+                ? labels.statusDiagnostic({ error: snapshot.error })
+                : connectFailedMessage)}
+          </AlertDescription>
         </Alert>
       ) : null}
 

@@ -11,7 +11,7 @@ import { getLocalPreviewPort } from "./local-preview-registry";
  * busabase's session/origin. Instead the runtime emits a same-origin preview
  * URL (`/__airapp_preview__/{nodeId}/`) and this handler forwards each such
  * request to the real localhost process, streaming the response back. Being
- * same-origin is what makes the sibling `/__busabase_api__/` bridge work for
+ * same-origin is what lets a previewed app reach `/api/v1` directly under
  * Local Node the way Nodepod's Service Worker does for its in-browser engine.
  *
  * HTTP only: the data demos this exists for are plain `node:http` servers, so
@@ -79,7 +79,7 @@ export async function proxyLocalPreview(
   // resolve under `/api/airapp-preview/{nodeId}/…` — independent of whether the
   // iframe URL kept its trailing slash (Next.js normalizes `…/{nodeId}/` →
   // `…/{nodeId}`, which would otherwise drop the nodeId from relative refs).
-  // Absolute refs like `/__busabase_api__/…` are unaffected by `<base>` and
+  // Absolute refs like `/api/v1/…` are unaffected by `<base>` and
   // still hit the busabase origin root (the data bridge). Non-HTML responses
   // (the assets themselves, JSON, etc.) stream through untouched.
   if (contentType?.includes("text/html")) {

@@ -387,7 +387,14 @@ function BusabaseListToolbar({
                 ? "border-border/60 bg-muted/70 text-foreground"
                 : "border-transparent text-muted-foreground hover:bg-accent/60 hover:text-foreground"
             }`}
-            href={tab === "review" ? "/inbox" : `/inbox?view=${tab}`}
+            // Every tab must state its own `view` explicitly — including
+            // "review", which is the default. `SPALink` merges the CURRENT
+            // query string into the href (so unrelated params survive
+            // navigation), and a bare `/inbox` therefore carries the existing
+            // `?view=changes` straight back in: clicking "For review" from any
+            // other tab navigated to the URL it was already on and looked
+            // completely dead. Only a literal `view=review` overrides it.
+            href={`/inbox?view=${tab}`}
             key={tab}
           >
             <span>{inboxTabLabel(messages, tab)}</span>

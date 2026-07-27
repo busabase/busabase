@@ -13,7 +13,7 @@ const textInputClassName =
   "mt-1 h-8 w-full rounded-md border border-border/70 bg-background px-2.5 text-sm outline-none transition-colors focus:border-primary";
 
 export function IStringNameInput({
-  label = "Name",
+  label,
   onChange,
   value,
 }: {
@@ -57,7 +57,7 @@ export function IStringNameInput({
   return (
     <div className="block">
       <span className="flex items-center justify-between text-muted-foreground text-xs">
-        <span>{label}</span>
+        <span>{label ?? messages.common.name}</span>
         <button
           className={`inline-flex items-center gap-1 rounded px-1 py-0.5 transition-colors hover:text-foreground ${
             expanded || filledCount > 0 ? "text-foreground" : ""

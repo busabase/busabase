@@ -22,7 +22,13 @@ import { useReportLoadedNode } from "../../dashboard/hooks/use-report-loaded-nod
 import type { NodeDetailProps } from "../../dashboard/node-detail-registry";
 import { disposeDeletedAirAppSession } from "../store/airapp-session-cleanup";
 import { useAirAppKeepAliveActive, useAirAppKeepAliveScope } from "./AirAppKeepAliveHost";
-import { AirAppRunControls, AirAppRunLogs, AirAppRunPreview, useAirAppRunner } from "./RunPanel";
+import {
+  AirAppRunControls,
+  AirAppRunLogs,
+  AirAppRunPreview,
+  useAirAppFullscreen,
+  useAirAppRunner,
+} from "./RunPanel";
 
 /** Keeps forceMount'd inactive tab panels out of the layout flow without
  *  unmounting them — unmounting the "App" tab would dispose the live Nodepod
@@ -48,6 +54,8 @@ export function AirAppDetailView({ orpc, slug, onNodeLoaded }: NodeDetailProps) 
   const keepAliveScopeKey = useAirAppKeepAliveScope();
   const isKeepAliveActive = useAirAppKeepAliveActive();
   const [openPath, setOpenPath] = useState<string | null>(null);
+  const [selectedTab, setSelectedTab] = useState("app");
+  const fullscreenState = useAirAppFullscreen({ syncWithUrl: isKeepAliveActive });
 
   const airappQuery = useQuery({
     ...orpc.airapps.get.queryOptions({ input: { nodeId: slug ?? "" } }),
@@ -132,7 +140,14 @@ export function AirAppDetailView({ orpc, slug, onNodeLoaded }: NodeDetailProps) 
           title-block / properties / tab-row chrome, giving the app preview
           maximum vertical space. Name/description/properties moved into the
           Info popover. */}
-      <Tabs className="flex min-h-0 flex-1 flex-col" defaultValue="app">
+      {/* Controlled so entering fullscreen can force the "App" panel active:
+          inactive panels are CSS-hidden, and the preview iframe we grow to
+          fill the viewport lives inside that panel. */}
+      <Tabs
+        className="flex min-h-0 flex-1 flex-col"
+        onValueChange={setSelectedTab}
+        value={fullscreenState.fullscreen ? "app" : selectedTab}
+      >
         <header className="flex h-12 shrink-0 items-center gap-2 border-border/60 border-b px-3 md:px-4">
           <div className="flex min-w-0 items-center gap-2">
             <AppWindow className="size-4 shrink-0 text-muted-foreground" />
@@ -189,11 +204,7 @@ export function AirAppDetailView({ orpc, slug, onNodeLoaded }: NodeDetailProps) 
           </TabsList>
 
           <div className="ml-auto flex shrink-0 items-center gap-1.5">
-            <AirAppRunControls
-              airapp={airapp}
-              runner={runner}
-              syncFullscreenWithUrl={isKeepAliveActive}
-            />
+            <AirAppRunControls airapp={airapp} fullscreenState={fullscreenState} runner={runner} />
             <NodeActionsMenu
               nodeId={airapp.node.id}
               nodeName={airapp.node.name}
@@ -212,7 +223,12 @@ export function AirAppDetailView({ orpc, slug, onNodeLoaded }: NodeDetailProps) 
         </header>
 
         <TabsContent className={TAB_CONTENT_CLASS} forceMount value="app">
-          <AirAppRunPreview airapp={airapp} runner={runner} showToolbar={false} />
+          <AirAppRunPreview
+            airapp={airapp}
+            fullscreenState={fullscreenState}
+            runner={runner}
+            showToolbar={false}
+          />
         </TabsContent>
 
         <TabsContent className={TAB_CONTENT_CLASS} forceMount value="files">

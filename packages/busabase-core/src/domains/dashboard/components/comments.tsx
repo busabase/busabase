@@ -118,7 +118,7 @@ export function CommentItem({
           <UserRefButton
             fallbackId={comment.authorId}
             labelClassName="font-medium text-sm"
-            title="Comment author"
+            title={messages.identity.commentAuthor}
             user={comment.author}
           />
           {comment.mentionsAi ? <AiMentionBadge /> : null}

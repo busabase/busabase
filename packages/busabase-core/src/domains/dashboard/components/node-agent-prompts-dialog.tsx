@@ -5,22 +5,21 @@
 //   Scenarios    — curated, task-shaped, hand-written per node type
 //   Capabilities — exhaustive, one per registered operation, auto-derived
 //
-// THREE entry points, because the surfaces are genuinely not uniform — an item
-// added to one does NOT show up in the others:
-//   - `NodeActionsMenu`      → the "•••" dropdown on the Doc / Folder /
-//                              FileNode / FileTree / AirApp detail headers.
-//   - `NodeAgentPromptsButton` (below) → a standalone toolbar button, for headers
-//                              that lay out their own individual action buttons
-//                              instead of a "•••" — currently the Base header,
-//                              which browser verification showed would otherwise
-//                              have had no entry point despite being the richest
-//                              node type.
+// TWO entry points, and they are genuinely separate code surfaces — an item
+// added to one does NOT show up in the other:
+//   - `NodeActionsMenu`       → the "•••" dropdown on every node-detail topbar
+//                               (Base / Doc / Folder / FileNode / FileTree /
+//                               AirApp / rich-node). Base briefly needed its own
+//                               standalone button because its header laid out
+//                               individual action buttons instead of a "•••";
+//                               that header now uses `NodeActionsMenu` like the
+//                               rest, so the standalone button is gone.
 //   - the sidebar row's "•••" → a separate `NavItemAction[]` list assembled in
-//                              `dashboard-shell.tsx`; it renders through
-//                              `openlib/ui/dashboard`'s `NavMain`, not through
-//                              this file, so it is wired there via the
-//                              `onOpenAgentPrompts` callback and opens this same
-//                              dialog.
+//                               `dashboard-shell.tsx`; it renders through
+//                               `openlib/ui/dashboard`'s `NavMain`, not through
+//                               this file, so it is wired there via the
+//                               `onOpenAgentPrompts` callback and opens this
+//                               same dialog.
 //
 // Layout mirrors `agent-skill-button.tsx` (kui Dialog + Tabs + readonly textarea
 // + transient "Copied" state) so the two agent-facing dialogs feel like one
@@ -37,7 +36,6 @@ import {
   type NodePromptContext,
 } from "../helpers/node-agent-prompts";
 import { useIsAnonymousVisitor } from "../visitor-context";
-import { NodeActionButton } from "./node-action-button";
 
 /**
  * The space id used to tell the agent which space to target. Falls back to the
@@ -166,59 +164,6 @@ export function NodeAgentPromptsDialog({
         </Tabs>
       </DialogContent>
     </Dialog>
-  );
-}
-
-/**
- * Standalone toolbar/menu button + dialog, for the detail headers that compose
- * their own row of individual action buttons instead of going through
- * `NodeActionsMenu` — the Base header is the notable one, and it's the node type
- * with by far the richest prompt set, so it must not be left out.
- */
-export function NodeAgentPromptsButton({
-  nodeId,
-  nodeName,
-  nodeType,
-  spaceId,
-  spaceName,
-  variant = "toolbar",
-}: {
-  nodeId: string;
-  nodeName: string;
-  nodeType: string;
-  spaceId?: string;
-  spaceName?: string;
-  variant?: "toolbar" | "menu";
-}) {
-  const messages = useCoreI18n();
-  const [open, setOpen] = useState(false);
-  // Prompts describe write operations against this node; a public read-only
-  // visitor has no use for them. Self-gates like the sibling action buttons.
-  const isAnon = useIsAnonymousVisitor();
-  if (isAnon) {
-    return null;
-  }
-
-  return (
-    <>
-      <NodeActionButton
-        icon={Sparkles}
-        label={messages.agentPrompts.title}
-        onClick={() => setOpen(true)}
-        variant={variant}
-      />
-      {open && (
-        <NodeAgentPromptsDialog
-          nodeId={nodeId}
-          nodeName={nodeName}
-          nodeType={nodeType}
-          onOpenChange={setOpen}
-          open={open}
-          spaceId={spaceId}
-          spaceName={spaceName}
-        />
-      )}
-    </>
   );
 }
 

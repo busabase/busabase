@@ -10,7 +10,7 @@ import { InstallFromGithubModal } from "busabase-core/dashboard/install-from-git
 import { getBusabaseDashboardRoutes as getDashboardRoutes } from "busabase-core/dashboard/routes";
 import { useLazyNodeChildren } from "busabase-core/dashboard/use-lazy-node-children";
 import { useMoveNode } from "busabase-core/dashboard/use-move-node";
-import { CoreI18nProvider, type CoreLocale, coreMessagesByLocale } from "busabase-core/i18n";
+import { CoreI18nProvider } from "busabase-core/i18n";
 import { Skeleton } from "kui/skeleton";
 import { useRouter, useSearchParams } from "next/navigation";
 import { detectBrowserLocale, type Locale } from "openlib/i18n";
@@ -23,7 +23,7 @@ import { SPAWrapper } from "~/components/spa/spa-wrapper";
 import { getSecondarySidebarNav } from "~/config/navigation-nested";
 import { SUPPORTED_LOCALES } from "~/i18n/config";
 import { buildDashboardUrl, getDashboardBasePath } from "~/lib/dashboard-routes";
-import { getBusabaseAppLL } from "~/lib/i18n";
+import { getBusabaseAppLL, getBusabaseMessages, normalizeBusabaseAppLocale } from "~/lib/i18n";
 
 interface DashboardClientProps {
   initialPath?: string;
@@ -160,11 +160,17 @@ function DashboardClientContent({ initialPath = "/home", localUserName }: Dashbo
   useEffect(() => {
     const stored = window.localStorage.getItem("busabaseLocale");
     if (stored) {
-      setLanguagePref(stored);
+      const normalizedStored =
+        stored === "auto" ? "auto" : (normalizeBusabaseAppLocale(stored) ?? "auto");
+      setLanguagePref(normalizedStored);
+      if (normalizedStored !== stored) {
+        window.localStorage.setItem("busabaseLocale", normalizedStored);
+      }
     }
-    setDetectedLocale(detectBrowserLocale(appLocaleCodes));
+    setDetectedLocale(normalizeBusabaseAppLocale(detectBrowserLocale(appLocaleCodes)) ?? "en");
   }, [appLocaleCodes]);
-  const locale = languagePref === "auto" ? detectedLocale : languagePref;
+  const locale =
+    languagePref === "auto" ? detectedLocale : (normalizeBusabaseAppLocale(languagePref) ?? "en");
   const LL = useMemo(() => getBusabaseAppLL(locale), [locale]);
   const moveNodeMutation = useMoveNode({
     apiClient,
@@ -173,10 +179,7 @@ function DashboardClientContent({ initialPath = "/home", localUserName }: Dashbo
     invalidateQueryKey: nodesInvalidateQueryKey,
     onMoveError: LL.shell.nodeMoveFailed(),
   });
-  const coreMessages = useMemo(
-    () => coreMessagesByLocale[(locale in coreMessagesByLocale ? locale : "en") as CoreLocale],
-    [locale],
-  );
+  const coreMessages = useMemo(() => getBusabaseMessages(locale), [locale]);
   const loadErrorMessage = loadError
     ? loadError instanceof Error
       ? loadError.message
@@ -195,7 +198,7 @@ function DashboardClientContent({ initialPath = "/home", localUserName }: Dashbo
         changeRequests={changeRequests}
         embedded
         chromeless={chromeless}
-        emptyGuide={<EmptyAgentGuide lang={locale} />}
+        emptyGuide={<EmptyAgentGuide edition="desktop" lang={locale} />}
         locale={locale}
         nodes={nodes}
         provideQueryClient={false}

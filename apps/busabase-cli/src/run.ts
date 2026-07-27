@@ -1,11 +1,10 @@
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { basename, extname } from "node:path";
+import { BUSABASE_TASKS } from "busabase-contract/tasks";
 import {
   type BusabaseClient,
   type ResolvedConfig as BusabaseConfig,
-  CREATABLE_NODE_TYPES,
-  type CreatableNodeType,
   cloudContract,
   createBusabaseClient,
   DEFAULT_BASE_URL,
@@ -18,9 +17,24 @@ import {
   Option,
   type OptionValues,
 } from "commander";
+import {
+  activateLoggedInProfile,
+  runAuthConfigList,
+  runAuthConfigSet,
+  runAuthRemove,
+  runAuthStatus,
+  runAuthSwitch,
+  runSpaceList,
+  runSpaceUse,
+} from "./auth.js";
 import { runBackup, runRestore } from "./backup/commands.js";
 import { banner } from "./banner.js";
-import { loadDotEnvFile } from "./config-file.js";
+import {
+  loadConfigFile,
+  loadDotEnvFile,
+  resolveCredentialTarget,
+  setActiveCredentialTarget,
+} from "./config-file.js";
 import { type OutputFormat, render } from "./format.js";
 import {
   assertCredentialNotExpired,
@@ -30,6 +44,7 @@ import {
   runRefresh,
 } from "./login.js";
 import { runInstall, runPublish } from "./package/commands.js";
+import { registerTaskCommands } from "./task-command.js";
 
 /**
  * CLI config = the SDK's resolved client config plus the terminal-only `output`
@@ -48,17 +63,29 @@ type FieldType = NonNullable<
 type BaseFieldInput = NonNullable<
   Parameters<BusabaseClient["bases"]["create"]>[0]["fields"]
 >[number];
-type NodeCreateOperation = Extract<
-  Parameters<BusabaseClient["nodes"]["createChangeRequest"]>[0]["operations"][number],
-  { kind: "create" }
->;
+/** `output` saved in ~/.busabase/config.json, ignored unless it names a real format. */
+function configuredOutput(): OutputFormat | undefined {
+  const saved = loadConfigFile().output;
+  return saved === "text" || saved === "table" || saved === "json" ? saved : undefined;
+}
 
 /**
- * Precedence: explicit flag > exported env var > ~/.busabase/.env file > default. Reading the
+ * Precedence: explicit flag > exported env var > credential file > default. Reading the
  * file directly means `busabase-cli` works straight after onboarding without a manual `source`,
  * while an exported env var still overrides the file.
+ *
+ * Which credential file that is comes from `--config` / `--profile` (see
+ * {@link resolveCredentialTarget}); with neither, it is `~/.busabase/.env` exactly as before.
+ * Pinning the target here — ahead of the first {@link loadDotEnvFile} — means every later
+ * read *and write* in this process (including login's token rotation) lands on the same file.
  */
 function resolveConfig(opts: OptionValues): ResolvedConfig {
+  setActiveCredentialTarget(
+    resolveCredentialTarget({
+      profile: opts.profile as string | undefined,
+      config: opts.config as string | undefined,
+    }),
+  );
   const file = loadDotEnvFile();
   return {
     baseUrl:
@@ -72,7 +99,7 @@ function resolveConfig(opts: OptionValues): ResolvedConfig {
       (opts.spaceId as string | undefined) ??
       process.env.BUSABASE_SPACE_ID ??
       file.BUSABASE_SPACE_ID,
-    output: (opts.output as OutputFormat | undefined) ?? "text",
+    output: (opts.output as OutputFormat | undefined) ?? configuredOutput() ?? "text",
   };
 }
 
@@ -82,7 +109,14 @@ function resolveConfig(opts: OptionValues): ResolvedConfig {
  * leaf command, merged via `optsWithGlobals()` (leaf wins). No commander defaults here — a leaf
  * default would shadow a root-provided value, so defaults live in `resolveConfig` instead.
  */
-const GLOBAL_LONG_FLAGS = new Set(["--base-url", "--api-key", "--space-id", "--output"]);
+const GLOBAL_LONG_FLAGS = new Set([
+  "--base-url",
+  "--api-key",
+  "--space-id",
+  "--output",
+  "--profile",
+  "--config",
+]);
 
 function addGlobalFlags(cmd: Command): Command {
   return cmd
@@ -92,6 +126,8 @@ function addGlobalFlags(cmd: Command): Command {
     )
     .option("--api-key <token>", "bearer token for cloud hosts (env BUSABASE_API_KEY)")
     .option("--space-id <id>", "target Busabase space (env BUSABASE_SPACE_ID)")
+    .option("--profile <name>", "account to use for this command (env BUSABASE_PROFILE)")
+    .option("--config <path>", "read credentials from this file instead (env BUSABASE_CONFIG)")
     .addOption(
       new Option("--output <fmt>", "text | table | json (default text)").choices([
         "text",
@@ -200,14 +236,6 @@ function parseFieldDefinitions(opts: OptionValues): BaseFieldInput[] {
     throw new Error("Pass at least one --field or provide --fields-json @fields.json.");
   }
   return parseFieldSpecs(specs);
-}
-
-function parseFileNodeMetadata(opts: OptionValues): NodeCreateOperation["metadata"] {
-  const assetId = opts.assetId as string | undefined;
-  if (!assetId) {
-    throw new Error("--asset-id is required with --type file.");
-  }
-  return { assetId };
 }
 
 function parseJsonValue(raw: string, flagName: string): unknown {
@@ -586,7 +614,10 @@ function registerGeneratedCommands(program: Command, state: CliState): void {
     // name instead of a second command level, so `nodes.principals.list` becomes
     // `busabase-cli nodes principals-list`, not a third-level subcommand.
     const name = [...navPath.slice(1), procKey].map(kebab).join("-");
-    if (parent.commands.some((c) => c.name() === name)) return; // curated command (or dup) wins
+    // Curated command (or dup) wins. Aliases count: a task that renamed a command
+    // keeps the old spelling as an alias, and commander throws outright if the
+    // generated fallback then tries to register that same name.
+    if (parent.commands.some((c) => c.name() === name || c.aliases().includes(name))) return;
     const fields = inputFields(inputSchema);
     const leaf = parent.command(name).description(route.summary ?? `${route.method} ${route.path}`);
     for (const f of fields) {
@@ -711,6 +742,10 @@ const HELP_FOOTER = `
 Config is read from flags, then env vars, then ~/.busabase/.env (auto-loaded — no
 need to source it). An exported env var overrides the file.
 
+Several accounts: \`login --profile <name>\` adds one, \`auth status\` lists them,
+\`auth switch\` changes which is active. Several spaces on one account (the norm on
+Cloud): \`space list\` / \`space use\`.
+
 Docs: https://busabase.com/docs · Troubleshooting: ${DOCS_TROUBLESHOOTING}`;
 
 function buildProgram(state: CliState = {}): Command {
@@ -764,7 +799,8 @@ The flags below skip the menu (handy for scripts / CI):
   busabase-cli login --oauth                           # legacy same-machine callback
   busabase-cli login --api-key sk_…                    # Cloud API key (headless/CI)
   busabase-cli login --base-url http://localhost:15419 # connect to a local server (no auth)
-  busabase-cli login --refresh                         # rotate the OAuth token set (auto-runs too)`,
+  busabase-cli login --refresh                         # rotate the OAuth token set (auto-runs too)
+  busabase-cli login --profile work                    # add a SECOND account, then switch to it`,
     )
     .action(async (_opts: OptionValues, cmd: Command) => {
       const opts = cmd.optsWithGlobals();
@@ -780,6 +816,11 @@ The flags below skip the menu (handy for scripts / CI):
             oauth: Boolean(opts.oauth),
             browser: opts.browser !== false,
           });
+      // Only after a successful sign-in: preserve the account already on disk as
+      // `default` and make this one active. Doing it here (not before) keeps a
+      // failed login side-effect-free — no profiles/ appears out of nowhere.
+      const profile = opts.profile as string | undefined;
+      if (profile && !opts.refresh) activateLoggedInProfile(profile);
       console.log(render(summary, config.output));
     });
 
@@ -793,112 +834,113 @@ The flags below skip the menu (handy for scripts / CI):
       console.log(render(summary, config.output));
     });
 
+  const auth = program.command("auth").description("Accounts (profiles) and CLI settings");
+  const authStatus = (cmd: Command) =>
+    cmd.action(async (_opts: OptionValues, sub: Command) => {
+      const config = resolveConfig(sub.optsWithGlobals());
+      state.config = config;
+      console.log(runAuthStatus(config.output));
+    });
+  authStatus(addGlobalFlags(auth.command("status"))).description(
+    "Show every configured account, grouped by host (* = active)",
+  );
+  authStatus(addGlobalFlags(auth.command("list"))).description("Alias for `auth status`");
+
+  addGlobalFlags(auth.command("switch"))
+    .argument("[name]", "profile to activate; omit to pick (auto when only one alternative)")
+    .description("Switch the active account, and/or repoint it at another space")
+    .addHelpText(
+      "after",
+      `
+Switching rewrites ~/.busabase/.env with the chosen account, so the busabase
+skill, the docs' curl snippets and the SDK all follow along automatically.
+
+  busabase-cli auth switch                    # pick (or auto-switch when there are two)
+  busabase-cli auth switch work               # activate "work"
+  busabase-cli auth switch --space-id spc_x   # keep the account, change the space only`,
+    )
+    .action(async (name: string | undefined, _opts: OptionValues, sub: Command) => {
+      const opts = sub.optsWithGlobals();
+      const config = resolveConfig(opts);
+      state.config = config;
+      const summary = await runAuthSwitch({
+        name,
+        spaceId: opts.spaceId as string | undefined,
+      });
+      console.log(render(summary, config.output));
+    });
+
+  addGlobalFlags(auth.command("remove"))
+    .argument("<name>", "profile to delete")
+    .description("Delete a stored account (switch away from it first)")
+    .action(async (name: string, _opts: OptionValues, sub: Command) => {
+      const config = resolveConfig(sub.optsWithGlobals());
+      state.config = config;
+      console.log(render(runAuthRemove(name), config.output));
+    });
+
+  const authConfig = auth.command("config").description("CLI settings (~/.busabase/config.json)");
+  addGlobalFlags(authConfig.command("set"))
+    .argument("<key>", "setting name (currently: output)")
+    .argument("<value>", "setting value")
+    .description("Save a preference that outlives an account switch")
+    .action(async (key: string, value: string, _opts: OptionValues, sub: Command) => {
+      const config = resolveConfig(sub.optsWithGlobals());
+      state.config = config;
+      console.log(render(runAuthConfigSet(key, value), config.output));
+    });
+  addGlobalFlags(authConfig.command("list"))
+    .description("Show current settings and which account is active")
+    .action(async (_opts: OptionValues, sub: Command) => {
+      const config = resolveConfig(sub.optsWithGlobals());
+      state.config = config;
+      console.log(render(runAuthConfigList(), config.output));
+    });
+
+  const space = program
+    .command("space")
+    .description("Spaces of the active account (Cloud has several; self-hosted has one)");
+  addGlobalFlags(space.command("list"))
+    .description("List every space this account can see (* = the one commands target)")
+    .action(
+      runAction(state, async (client, _opts, config) =>
+        runSpaceList(await client.auth.verify(), config.spaceId, config.output),
+      ),
+    );
+  addGlobalFlags(space.command("use"))
+    .argument("[space]", "space id, slug or name; omit to pick from a list")
+    .description("Target another space — same account, no re-login")
+    .addHelpText(
+      "after",
+      `
+Only spaces this account belongs to can be selected, so a typo fails here rather
+than as a 403 later. The choice is stored in the active profile and mirrored to
+~/.busabase/.env, so the skill and curl snippets follow along.
+
+  busabase-cli space list             # what can I target?
+  busabase-cli space use              # pick from a list
+  busabase-cli space use VideoFactory # by name (slug and id also work)`,
+    )
+    .action(async (selector: string | undefined, _opts: OptionValues, sub: Command) => {
+      const opts = sub.optsWithGlobals();
+      const config = resolveConfig(opts);
+      const refreshedToken = await maybeAutoRefresh(config.baseUrl, config.apiKey);
+      if (refreshedToken) config.apiKey = refreshedToken;
+      state.config = config;
+      assertCredentialNotExpired(config.apiKey);
+      const client = createBusabaseClient(config);
+      const summary = await runSpaceUse({
+        auth: await client.auth.verify(),
+        targetedSpaceId: config.spaceId,
+        selector,
+      });
+      console.log(render(summary, config.output));
+    });
+
   const nodes = program.command("nodes").description("Workspace node tree");
   addGlobalFlags(nodes.command("list"))
     .description("Workspace node tree")
     .action(runAction(state, (client) => client.nodes.list()));
-  addGlobalFlags(nodes.command("create-change-request"))
-    .description("Propose a new node via a Change Request")
-    .addOption(
-      new Option(`--type <${CREATABLE_NODE_TYPES.join("|")}>`, "node type")
-        .choices(CREATABLE_NODE_TYPES)
-        .makeOptionMandatory(),
-    )
-    .requiredOption("--slug <slug>", "node slug")
-    .requiredOption("--name <name>", "node name")
-    .option("--description <text>", "optional node description")
-    .option("--parent-node-id <id>", "parent folder node id; omit for root")
-    .option("--message <text>", "reviewer-facing Change Request message")
-    .option("--submitted-by <name>", "producer label")
-    .option("--field <slug:name:type...>", "base field, repeatable (for --type base)")
-    .option("--fields-json <json|@file>", "base fields as JSON array (for --type base)")
-    .option("--asset-id <id>", "backing Asset id (required for --type file)")
-    .option(
-      "--auto-merge",
-      "skip review and create the node immediately if you have write access (default: merge immediately if you have write access, otherwise propose a pending Change Request)",
-    )
-    .option(
-      "--require-review",
-      "always propose a pending Change Request, even if you have write access",
-    )
-    .addHelpText(
-      "after",
-      `
-Examples:
-  busabase-cli nodes create-change-request --type folder --slug cms --name "内容管理 CMS"
-  busabase-cli nodes create-change-request --type base --slug blog --name "博客文章 Blog Posts" --field title:Title:text --field body:Body:markdown
-  busabase-cli nodes create-change-request --type base --slug products --name "产品目录 Products" --fields-json @fields.json
-  busabase-cli nodes create-change-request --type file --slug board-plan --name "Board Plan" --asset-id ast_123
-  busabase-cli nodes create-change-request --type folder --slug cms --name "内容管理 CMS" --require-review   # always propose a Change Request`,
-    )
-    .action(
-      runAction(state, (client, opts) => {
-        const nodeType = opts.type as CreatableNodeType;
-        const name = opts.name as string;
-        if (nodeType !== "base" && (opts.field || opts.fieldsJson)) {
-          throw new Error("--field and --fields-json are only valid with --type base.");
-        }
-        if (nodeType !== "file" && opts.assetId) {
-          throw new Error("--asset-id is only valid with --type file.");
-        }
-        return client.nodes.createChangeRequest({
-          message: (opts.message as string | undefined) ?? `Create ${nodeType} ${name}`,
-          submittedBy: opts.submittedBy as string | undefined,
-          ...(opts.requireReview
-            ? { autoMerge: false }
-            : opts.autoMerge
-              ? { autoMerge: true }
-              : {}),
-          operations: [
-            {
-              kind: "create",
-              nodeType,
-              slug: opts.slug as string,
-              name,
-              description: opts.description as string | undefined,
-              parentNodeId: opts.parentNodeId as string | undefined,
-              ...(nodeType === "base" ? { fields: parseFieldDefinitions(opts) } : {}),
-              ...(nodeType === "file" ? { metadata: parseFileNodeMetadata(opts) } : {}),
-            },
-          ],
-        });
-      }),
-    );
-
-  addGlobalFlags(nodes.command("archive"))
-    .description(
-      "Propose archiving a node via a Change Request (review-first by default) — the only way to move a node into the archived state; DELETE /nodes/{nodeId} (`nodes purge`) only permanently removes a node that is ALREADY archived",
-    )
-    .requiredOption("--node-id <id>", "node id to archive")
-    .option("--message <text>", "reviewer-facing Change Request message")
-    .option("--submitted-by <name>", "producer label")
-    .option(
-      "--auto-merge",
-      "skip review and archive immediately (default: propose a pending Change Request)",
-    )
-    .addHelpText(
-      "after",
-      `
-Examples:
-  busabase-cli nodes archive --node-id nod_123
-  busabase-cli nodes archive --node-id nod_123 --auto-merge   # skip review, archive immediately`,
-    )
-    .action(
-      runAction(state, (client, opts) =>
-        client.nodes.createChangeRequest({
-          message: (opts.message as string | undefined) ?? "Archive node",
-          submittedBy: opts.submittedBy as string | undefined,
-          autoMerge: Boolean(opts.autoMerge),
-          operations: [{ kind: "delete", nodeId: opts.nodeId as string }],
-        }),
-      ),
-    );
-
-  addGlobalFlags(nodes.command("list-archived"))
-    .description(
-      "List archived (soft-deleted) nodes — folders, Docs, Skills, etc. (the Trash view)",
-    )
-    .action(runAction(state, (client) => client.nodes.listArchived()));
 
   addGlobalFlags(nodes.command("purge"))
     .description(
@@ -952,47 +994,6 @@ Examples:
         return found;
       }),
     );
-  addGlobalFlags(bases.command("create"))
-    .description("Create a Base — review-first by default: returns a pending Change Request")
-    .requiredOption("--slug <slug>", "Base slug")
-    .requiredOption("--name <name>", "Base name")
-    .option("--field <slug:name:type...>", "field definition, repeatable")
-    .option("--fields-json <json|@file>", "field definitions as JSON array")
-    .option("--description <text>", "optional description")
-    .option("--parent-node-id <id>", "parent folder node id; omit for root")
-    .option(
-      "--auto-merge",
-      "skip review and create the Base immediately if you have write access (default: merge immediately if you have write access, otherwise propose a pending Change Request)",
-    )
-    .option(
-      "--require-review",
-      "always propose a pending Change Request, even if you have write access",
-    )
-    .addHelpText(
-      "after",
-      `
-Examples:
-  busabase-cli bases create --slug products --name "产品目录 Products" --field product_name:"Product Name":text
-  busabase-cli bases create --slug products --name "产品目录 Products" --fields-json @fields.json
-  busabase-cli bases create --slug products --name "Products" --auto-merge   # skip review, create immediately
-  busabase-cli bases create --slug products --name "Products" --require-review   # always propose a Change Request`,
-    )
-    .action(
-      runAction(state, (client, opts) =>
-        client.bases.create({
-          slug: opts.slug as string,
-          name: opts.name as string,
-          description: opts.description as string | undefined,
-          parentNodeId: opts.parentNodeId as string | undefined,
-          fields: parseFieldDefinitions(opts),
-          ...(opts.requireReview
-            ? { autoMerge: false }
-            : opts.autoMerge
-              ? { autoMerge: true }
-              : {}),
-        }),
-      ),
-    );
   addGlobalFlags(bases.command("create-field"))
     .description("Add a field to a Base")
     .requiredOption("--base-id <id>", "Base id")
@@ -1019,6 +1020,13 @@ Examples:
         }),
       ),
     );
+  // Kept hand-written despite `base_field_change_request` covering the same
+  // endpoint: this command converts attachment shortcut flags (--max-files,
+  // --allowed-mime) into the nested `patch.options` shape. That is a CLI
+  // ergonomic the task layer's flat parameter model does not express, and
+  // dropping it would make a common edit require hand-written JSON. MCP still
+  // sees only the task — an agent emitting structured arguments gains nothing
+  // from the shortcut.
   addGlobalFlags(bases.command("update-field-change-request"))
     .description("Propose updating field metadata/options via a Change Request")
     .requiredOption("--base-id <id>", "Base id")
@@ -1110,173 +1118,12 @@ Examples:
       ),
     );
 
-  const airapps = program.command("airapps").description("AirApps (sandboxed mini-apps)");
-  addGlobalFlags(airapps.command("list"))
-    .description("List AirApps in the active space")
-    .action(runAction(state, (client) => client.airapps.list()));
-  addGlobalFlags(airapps.command("get"))
-    .description("Get one AirApp by node id")
-    .requiredOption("--node-id <id>", "AirApp node id")
-    .action(
-      runAction(state, (client, opts) => client.airapps.get({ nodeId: opts.nodeId as string })),
-    );
-  addGlobalFlags(airapps.command("create"))
-    .description("Create an AirApp — review-first by default: returns a pending Change Request")
-    .requiredOption("--slug <slug>", "AirApp slug")
-    .requiredOption("--name <name>", "AirApp name")
-    .option("--description <text>", "optional description")
-    .option("--parent-node-id <id>", "parent folder node id; omit for root")
-    .addOption(
-      new Option(
-        "--visibility <private|workspace|public>",
-        "AirApp visibility (default private)",
-      ).choices(["private", "workspace", "public"]),
-    )
-    .option("--version <semver>", "AirApp version (default 0.1.0)")
-    .option(
-      "--files-json <json|@file>",
-      'files as a JSON array, or @file.json — text files {"path","content","mimeType?"} or asset-backed files {"path","assetId","displayName?","mimeType?"}',
-    )
-    .addOption(
-      new Option(
-        "--merge-mode <merge|replace>",
-        "how --files-json combines with the default scaffold (default merge)",
-      ).choices(["merge", "replace"]),
-    )
-    .option(
-      "--auto-merge",
-      "skip review and create the AirApp immediately if you have write access (default: merge immediately if you have write access, otherwise propose a pending Change Request)",
-    )
-    .option(
-      "--require-review",
-      "always propose a pending Change Request, even if you have write access",
-    )
-    .addHelpText(
-      "after",
-      `
-mergeMode explains how --files-json combines with the AirApp's default scaffold:
-  merge (default) — your files are layered on top of the default Hono-template
-                     scaffold by path; supply just a few files (e.g. one custom
-                     route) and still get the rest of the scaffold for any path
-                     you didn't provide yourself.
-  replace          — your files replace the scaffold entirely; use this when
-                     handing over a complete, self-contained project (e.g. a Vite
-                     app) so you don't end up with stray unrelated default files
-                     mixed in.
-
-Examples:
-  busabase-cli airapps create --slug hello-app --name "Hello App" --files-json @files.json
-  busabase-cli airapps create --slug vite-app --name "Vite App" --files-json @files.json --merge-mode replace
-  busabase-cli airapps create --slug hello-app --name "Hello App" --files-json @files.json --auto-merge   # skip review, create immediately
-  busabase-cli airapps create --slug hello-app --name "Hello App" --files-json @files.json --require-review   # always propose a Change Request`,
-    )
-    .action(
-      runAction(state, (client, opts) =>
-        client.airapps.create({
-          slug: opts.slug as string,
-          name: opts.name as string,
-          description: opts.description as string | undefined,
-          parentNodeId: opts.parentNodeId as string | undefined,
-          visibility: opts.visibility as "private" | "workspace" | "public" | undefined,
-          version: opts.version as string | undefined,
-          files: opts.filesJson
-            ? (parseJsonValue(opts.filesJson as string, "files-json") as Parameters<
-                BusabaseClient["airapps"]["create"]
-              >[0]["files"])
-            : undefined,
-          mergeMode: opts.mergeMode as "merge" | "replace" | undefined,
-          ...(opts.requireReview
-            ? { autoMerge: false }
-            : opts.autoMerge
-              ? { autoMerge: true }
-              : {}),
-        }),
-      ),
-    );
-  addGlobalFlags(airapps.command("files"))
-    .description("List an AirApp's files")
-    .requiredOption("--node-id <id>", "AirApp node id")
-    .action(
-      runAction(state, (client, opts) =>
-        client.airapps.listFiles({ nodeId: opts.nodeId as string }),
-      ),
-    );
-  addGlobalFlags(airapps.command("read-file"))
-    .description("Read one AirApp file's content")
-    .requiredOption("--node-id <id>", "AirApp node id")
-    .requiredOption("--path <path>", "file path within the AirApp")
-    .action(
-      runAction(state, (client, opts) =>
-        client.airapps.readFile({ nodeId: opts.nodeId as string, filePath: opts.path as string }),
-      ),
-    );
-  addGlobalFlags(airapps.command("create-change-request"))
-    .description("Propose file changes to an existing AirApp via a Change Request")
-    .requiredOption("--node-id <id>", "AirApp node id")
-    .requiredOption(
-      "--operations-json <json|@file>",
-      'file operations as a JSON array, or @file.json — "create"/"update" (text {"kind","path","content","mimeType?"} or asset-backed {"kind","path","assetId","displayName?","mimeType?"}), "delete" {"kind","path"}, or "metadata_update" {"kind","metadata":{"entryFile?","visibility?","version?"}}',
-    )
-    .option("--message <text>", "reviewer-facing Change Request message")
-    .option("--submitted-by <name>", "producer label")
-    .addHelpText(
-      "after",
-      `
-Examples:
-  busabase-cli airapps create-change-request --node-id nod_123 --operations-json @operations.json
-  busabase-cli airapps create-change-request --node-id nod_123 --operations-json '[{"kind":"update","path":"index.js","content":"..."}]' --message "Fix handler bug"`,
-    )
-    .action(
-      runAction(state, (client, opts) =>
-        client.airapps.createChangeRequest({
-          nodeId: opts.nodeId as string,
-          message: opts.message as string | undefined,
-          submittedBy: opts.submittedBy as string | undefined,
-          operations: parseJsonValue(
-            opts.operationsJson as string,
-            "operations-json",
-          ) as Parameters<BusabaseClient["airapps"]["createChangeRequest"]>[0]["operations"],
-        }),
-      ),
-    );
-
   const records = program.command("records").description("Records");
-  addGlobalFlags(records.command("list"))
-    .description("List records")
-    .option("--limit <n>", "max results (1-100)", parseLimit)
-    .option("--base-id <id>", "restrict to one Base")
-    .option("--cursor <cursor>", "opaque nextCursor from a previous page")
-    .action(
-      runAction(state, (_client, opts, config) => {
-        const query = new URLSearchParams();
-        if (opts.limit !== undefined) query.set("limit", String(opts.limit));
-        if (opts.baseId) query.set("baseId", opts.baseId as string);
-        if (opts.cursor) query.set("cursor", opts.cursor as string);
-        const qs = query.toString();
-        return rawRequest(config, "GET", `/api/v1/records/paged${qs ? `?${qs}` : ""}`);
-      }),
-    );
   addGlobalFlags(records.command("get"))
     .description("Get one record")
     .requiredOption("--record-id <id>", "record id")
     .action(
       runAction(state, (client, opts) => client.records.get({ recordId: opts.recordId as string })),
-    );
-  addGlobalFlags(records.command("by-field-text"))
-    .description("Find records by text field value")
-    .requiredOption("--field-slug <slug>", "field slug to match")
-    .requiredOption("--value-text <text>", "text value to match")
-    .option("--base-id <id>", "restrict to one Base")
-    .option("--limit <n>", "max results", parseNum)
-    .action(
-      runAction(state, (client, opts) =>
-        client.records.search({
-          fieldSlug: opts.fieldSlug as string,
-          valueText: opts.valueText as string,
-          baseId: opts.baseId as string | undefined,
-          limit: opts.limit as number | undefined,
-        }),
-      ),
     );
   addGlobalFlags(records.command("change-requests"))
     .description("Change Requests for a record")
@@ -1288,38 +1135,12 @@ Examples:
     );
 
   const changeRequests = program.command("change-requests").description("Change Requests");
-  addGlobalFlags(changeRequests.command("list"))
-    .description("List Change Requests")
-    .option("--limit <n>", "max results", parseNum)
-    .action(
-      runAction(state, (client, opts) =>
-        client.changeRequests.list({ limit: opts.limit as number | undefined }),
-      ),
-    );
   addGlobalFlags(changeRequests.command("get"))
     .description("Get a Change Request")
     .requiredOption("--change-request-id <id>", "Change Request id")
     .action(
       runAction(state, (client, opts) =>
         client.changeRequests.get({ changeRequestId: opts.changeRequestId as string }),
-      ),
-    );
-  addGlobalFlags(changeRequests.command("review"))
-    .description("Review a Change Request (rejected = request changes, not terminal)")
-    .requiredOption("--change-request-id <id>", "Change Request id")
-    .addOption(
-      new Option("--verdict <approved|rejected>", "review verdict")
-        .choices(["approved", "rejected"])
-        .makeOptionMandatory(),
-    )
-    .option("--reason <text>", "review reason")
-    .action(
-      runAction(state, (client, opts) =>
-        client.changeRequests.review({
-          changeRequestId: opts.changeRequestId as string,
-          verdict: opts.verdict as "approved" | "rejected",
-          reason: opts.reason as string | undefined,
-        }),
       ),
     );
   addGlobalFlags(changeRequests.command("close"))
@@ -1332,14 +1153,6 @@ Examples:
           changeRequestId: opts.changeRequestId as string,
           reason: opts.reason as string | undefined,
         }),
-      ),
-    );
-  addGlobalFlags(changeRequests.command("merge"))
-    .description("Merge a Change Request into its Base")
-    .requiredOption("--change-request-id <id>", "Change Request id")
-    .action(
-      runAction(state, (client, opts) =>
-        client.changeRequests.merge({ changeRequestId: opts.changeRequestId as string }),
       ),
     );
 
@@ -1665,6 +1478,17 @@ To add content to a space that is already in use, use \`busabase-cli install\` i
         );
       }),
     );
+
+  // Shared task definitions (`busabase-contract/tasks`) — the same source the MCP
+  // servers build their tools from. Runs after the curated commands above (so a
+  // hand-written command still wins a name collision) and before the generated
+  // fallback (so a task always beats the raw endpoint command).
+  registerTaskCommands(program, BUSABASE_TASKS, {
+    addGlobalFlags,
+    parseFieldSpecs,
+    parseJsonValue,
+    runAction: (handler) => runAction(state, (client, opts) => handler(client, opts)),
+  });
 
   // Fill in every remaining contract procedure as a generated command, so the CLI
   // covers the full OpenAPI surface. Runs AFTER the curated commands above so those

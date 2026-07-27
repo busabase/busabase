@@ -1,6 +1,7 @@
 import "server-only";
 
 import { ORPCError } from "@orpc/server";
+import { hasApiKeyLevel } from "busabase-contract/access-control/api-key-level";
 import { listChangeRequestsPagedInputSchema } from "busabase-contract/contract/schemas";
 import type {
   ChangeRequestVO,
@@ -12,6 +13,7 @@ import type {
 import { and, asc, desc, eq, inArray, isNull, lt, ne, or, type SQL, sql } from "drizzle-orm";
 import { z } from "zod";
 import {
+  getContextPermissionLevel,
   getContextSpaceId,
   resolveActorId,
   resolveUserRefs,
@@ -75,7 +77,7 @@ import { publishBusabaseLiveEvent } from "./live-events";
 import { getMaterializer, type MaterializeArgs, type NodeCreateFields } from "./materialize";
 import {
   assertNodePermission,
-  assertWorkspacePermission,
+  hasNodePermission,
   initializeNodeAcl,
   recomputeSpaceNodeAcl,
 } from "./node-acl";
@@ -1292,11 +1294,111 @@ export const reviseOperation = async (
   return updatedChangeRequest;
 };
 
+/**
+ * Every node a ChangeRequest touches, or `null` when any operation's target
+ * cannot be determined.
+ *
+ * `null` is not "no targets" — it means "unknown", and the approval gate below
+ * refuses on it. That distinction is the whole safety property here: guessing
+ * wrong in the permissive direction would let someone approve a change to
+ * something outside their scope.
+ *
+ * Targets live in three shapes:
+ *  - `operations.nodeId` — a node-targeted operation says so directly.
+ *  - `operations.baseId` — record/field/view operations name the Base; the node
+ *    that carries the ACL is the Base's own node.
+ *  - a pending `node_create` sets NEITHER (the node does not exist yet), so the
+ *    scope is the PARENT it would be created under, which is only in the
+ *    commit's `fields.parentNodeId`.
+ */
+const resolveChangeRequestScopeNodeIds = async (
+  changeRequestId: string,
+): Promise<string[] | null> => {
+  const db = await getDb();
+  const spaceId = getContextSpaceId();
+  const rows = await db
+    .select({
+      nodeId: busabaseOperations.nodeId,
+      baseId: busabaseOperations.baseId,
+      fields: busabaseCommits.fields,
+    })
+    .from(busabaseOperations)
+    .leftJoin(busabaseCommits, eq(busabaseCommits.id, busabaseOperations.headCommitId))
+    .where(eq(busabaseOperations.changeRequestId, changeRequestId));
+  if (rows.length === 0) return null;
+
+  const nodeIds = new Set<string>();
+  const baseIds = new Set<string>();
+  for (const row of rows) {
+    if (row.nodeId) {
+      nodeIds.add(row.nodeId);
+      continue;
+    }
+    if (row.baseId) {
+      baseIds.add(row.baseId);
+      continue;
+    }
+    const parentNodeId = (row.fields as { parentNodeId?: unknown } | null)?.parentNodeId;
+    if (typeof parentNodeId === "string" && parentNodeId) {
+      nodeIds.add(parentNodeId);
+      continue;
+    }
+    // An operation whose target we cannot name — refuse the whole CR rather
+    // than approve the part we happen to understand.
+    return null;
+  }
+
+  if (baseIds.size > 0) {
+    const baseRows = await db
+      .select({ id: busabaseBases.id, nodeId: busabaseBases.nodeId })
+      .from(busabaseBases)
+      .where(and(eq(busabaseBases.spaceId, spaceId), inArray(busabaseBases.id, [...baseIds])));
+    if (baseRows.length !== baseIds.size) return null;
+    for (const row of baseRows) nodeIds.add(row.nodeId);
+  }
+
+  return nodeIds.size > 0 ? [...nodeIds] : null;
+};
+
+/**
+ * Approval gate for a whole ChangeRequest — review, merge and close.
+ *
+ * Workspace `write` (owner/admin) passes exactly as before. Otherwise the actor
+ * must hold `write` on EVERY node the CR touches. That is what makes delegation
+ * possible: give someone `manage` on the Finance folder and they can approve
+ * proposals against Finance, without having to be a workspace admin — which
+ * previously was the only way, so "you own this folder" could not include "you
+ * approve changes to it".
+ *
+ * All-or-nothing on purpose. A CR that reaches outside the actor's scope is
+ * refused whole; it is never partially merged, because a half-applied CR is not
+ * a state the review model has any way to express.
+ */
+const assertCanApproveChangeRequest = async (changeRequestId: string): Promise<void> => {
+  if (hasApiKeyLevel(getContextPermissionLevel(), "write")) return;
+
+  const scope = await resolveChangeRequestScopeNodeIds(changeRequestId);
+  if (!scope) {
+    throw new ORPCError("FORBIDDEN", {
+      message: "Requires write workspace access",
+    });
+  }
+  for (const nodeId of scope) {
+    if (!(await hasNodePermission(nodeId, "write"))) {
+      throw new ORPCError("FORBIDDEN", {
+        message:
+          "Requires write access on every node this change request touches, or write workspace access",
+        data: { nodeId },
+      });
+    }
+  }
+};
+
 export const reviewChangeRequest = async (
   changeRequestId: string,
   input: z.infer<typeof reviewInputSchema>,
 ) => {
-  assertWorkspacePermission("write");
+  await assertCanApproveChangeRequest(changeRequestId);
   await ensureReady();
   const db = await getDb();
   const parsed = reviewInputSchema.parse(input);
@@ -1423,7 +1525,11 @@ export const autoApproveAndMerge = async (
   changeRequestId: string,
   reason = "Auto-merged: structural change",
 ) => {
-  assertWorkspacePermission("write");
+  // Same node-scoped gate as the user-facing merge. The flat workspace check
+  // that used to be here contradicted the caller: `shouldAutoMerge` says yes on
+  // the strength of node-level `write`, so a member holding a folder grant was
+  // routed into this fast path and then refused by it.
+  await assertCanApproveChangeRequest(changeRequestId);
   await ensureReady();
   const db = await getDb();
   const [changeRequest] = await db
@@ -1781,7 +1887,7 @@ export const recordPendingNodeCreate = async (args: {
 };
 
 export const closeChangeRequest = async (changeRequestId: string, reason?: string) => {
-  assertWorkspacePermission("write");
+  await assertCanApproveChangeRequest(changeRequestId);
   await ensureReady();
   const db = await getDb();
   const [changeRequest] = await db
@@ -1894,7 +2000,7 @@ export const listAgentTasks = async () => {
 // ── Merge engine ──────────────────────────────────────────────────────────────
 
 export const mergeChangeRequest = async (changeRequestId: string) => {
-  assertWorkspacePermission("write");
+  await assertCanApproveChangeRequest(changeRequestId);
   try {
     return await _mergeChangeRequest(changeRequestId);
   } catch (err) {

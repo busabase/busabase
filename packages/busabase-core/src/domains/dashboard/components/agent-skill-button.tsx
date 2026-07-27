@@ -5,20 +5,14 @@ import { SidebarMenu, SidebarMenuButton, SidebarMenuItem } from "kui/sidebar";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "kui/tabs";
 import { Check, Copy, ExternalLink, Sparkles } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import { useCoreI18n } from "../../../i18n";
-
-// Agents the SKILL.md prompt can be pasted into. Brand names — shown as quick links
-// so users can jump to whichever agent they use. Generic across all hosts.
-const AGENTS: { name: string; url: string }[] = [
-  { name: "Claude Code", url: "https://claude.com/claude-code" },
-  { name: "Codex", url: "https://openai.com/codex" },
-  { name: "Gemini CLI", url: "https://github.com/google-gemini/gemini-cli" },
-  { name: "Cursor", url: "https://cursor.com" },
-  { name: "OpenClaw", url: "https://openclaw.ai" },
-  { name: "WorkBuddy", url: "https://copilot.tencent.com/work/" },
-  { name: "Buda Agent", url: "https://buda.im" },
-  { name: "Hermes", url: "https://hermes-agent.nousresearch.com" },
-];
+import {
+  type CoreI18nMessages,
+  type CoreLocale,
+  coreMessagesByLocale,
+  fmt,
+  useCoreI18n,
+} from "../../../i18n";
+import { AGENT_BRAND_LINKS, type McpAgentKind, type McpGuideEdition } from "./agent-mcp-guides";
 
 interface BusabaseAgentSkillButtonProps {
   /**
@@ -27,6 +21,8 @@ interface BusabaseAgentSkillButtonProps {
    * matches (open-source defaults to 15419, cloud to 3060).
    */
   defaultOrigin?: string;
+  /** Selects Cloud OAuth guidance or Desktop's local no-auth guidance. */
+  edition?: McpGuideEdition;
   /** Current UI language — localizes the pasted prompt. Unknown values fall back to English. */
   lang?: string;
   /**
@@ -46,7 +42,7 @@ interface AgentIntegrationDialogProps {
    * (install + auto-detect localhost); "cloud" / omitted uses the bare /SETUP_SKILL.md
    * (API-key onboarding). Lets the host pass its selected edition through.
    */
-  edition?: "desktop" | "cloud";
+  edition?: McpGuideEdition;
   /**
    * Current UI language — localizes the pasted prompt (and its framing copy) and tells
    * the agent which language to reply in. Unknown values fall back to English.
@@ -56,6 +52,9 @@ interface AgentIntegrationDialogProps {
   targetSpaceId?: string;
 }
 
+const resolveMessages = (lang: string | undefined, fallback: CoreI18nMessages): CoreI18nMessages =>
+  lang && lang in coreMessagesByLocale ? coreMessagesByLocale[lang as CoreLocale] : fallback;
+
 /**
  * Standalone dialog with three tabs: Agent Skills, MCP, OpenAPI.
  * Shared by the sidebar button and the landing page hero.
@@ -64,19 +63,23 @@ export function AgentIntegrationDialog({
   open,
   onOpenChange,
   defaultOrigin = "http://localhost:15419",
-  edition,
+  edition = "desktop",
   lang,
   targetSpaceId,
 }: AgentIntegrationDialogProps) {
-  const messages = useCoreI18n();
+  const contextMessages = useCoreI18n();
+  const messages = resolveMessages(lang, contextMessages);
   const [origin, setOrigin] = useState(defaultOrigin);
   const [copied, setCopied] = useState<string | null>(null);
+  // Controlled so the chat-app panel can hand the user straight to the connector
+  // instead of telling them to go find another tab themselves.
+  const [transportTab, setTransportTab] = useState("skills");
+  const [skillAudience, setSkillAudience] = useState<McpAgentKind>("shell");
 
   useEffect(() => {
     setOrigin(window.location.origin);
   }, []);
 
-  const tabCopy = SKILLS_TAB_COPY[resolvePromptLang(lang)];
   const skillUrl = useMemo(() => {
     const url = new URL("/SETUP_SKILL.md", origin);
     if (edition === "desktop") {
@@ -86,7 +89,9 @@ export function AgentIntegrationDialog({
     }
     return url.toString();
   }, [edition, origin, targetSpaceId]);
-  const mcpUrl = `${origin}/api/mcp`;
+  const mcpOrigin = edition === "desktop" ? "http://localhost:15419" : origin;
+  const mcpUrl = `${mcpOrigin}/api/mcp`;
+  const mcpGuideUrl = getMcpGuideUrl(lang);
   const openApiJsonUrl = `${origin}/api/v1/openapi.json`;
   const openApiDocUrl = `${origin}/api/v1/doc`;
 
@@ -96,19 +101,28 @@ export function AgentIntegrationDialog({
   );
 
   const copy = async (text: string, key: string) => {
-    await navigator.clipboard.writeText(text);
-    setCopied(key);
+    setCopied(null);
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(key);
+    } catch {
+      setCopied("error");
+    }
     window.setTimeout(() => setCopied(null), 1800);
   };
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[85vh] gap-4 overflow-hidden sm:max-w-2xl">
+      <DialogContent className="flex max-h-[85vh] flex-col gap-4 overflow-hidden sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle>{messages.integration.title}</DialogTitle>
         </DialogHeader>
-        <Tabs defaultValue="skills" className="flex flex-col gap-3">
-          <TabsList className="w-full">
+        <Tabs
+          value={transportTab}
+          onValueChange={setTransportTab}
+          className="flex min-h-0 flex-1 flex-col gap-3"
+        >
+          <TabsList className="w-full shrink-0">
             <TabsTrigger value="skills" className="flex-1">
               {messages.integration.agentSkills}
             </TabsTrigger>
@@ -121,54 +135,113 @@ export function AgentIntegrationDialog({
           </TabsList>
 
           {/* ── Agent Skills tab ──────────────────────────────────────── */}
-          <TabsContent value="skills" className="grid gap-3">
-            <p className="text-sm text-muted-foreground">{tabCopy.intro}</p>
-            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
-              <span className="text-foreground/70">{messages.integration.worksWith}</span>
-              {AGENTS.map((agent) => (
-                <a
-                  key={agent.name}
-                  className="underline decoration-dotted underline-offset-2 hover:text-foreground"
-                  href={agent.url}
-                  rel="noreferrer"
-                  target="_blank"
-                >
-                  {agent.name}
-                </a>
-              ))}
-            </div>
-            <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-              <a
-                className="inline-flex items-center gap-1 rounded-md border px-2 py-1 hover:bg-muted"
-                href={skillUrl}
-                rel="noreferrer"
-                target="_blank"
-              >
-                <ExternalLink size={13} />
-                {skillUrl}
-              </a>
-            </div>
-            <textarea
-              className="min-h-[140px] resize-none rounded-md border bg-muted/30 p-3 font-mono text-xs leading-relaxed text-foreground outline-none"
-              readOnly
-              value={agentSkillPrompt}
-            />
-            <div className="flex justify-end">
-              <button
-                className="inline-flex h-9 items-center gap-2 rounded-md border bg-background px-3 text-sm font-medium hover:bg-muted"
-                onClick={() => copy(agentSkillPrompt, "prompt")}
-                type="button"
-              >
-                {copied === "prompt" ? <Check size={16} /> : <Copy size={16} />}
-                {copied === "prompt" ? tabCopy.copied : tabCopy.copy}
-              </button>
+          <TabsContent value="skills" className="mt-0 min-h-0 overflow-y-auto pr-1">
+            <div className="grid gap-3">
+              {/* Ask before handing anything over. The prompt below only works in an agent
+                  that can run shell commands, so serving it unconditionally is how a
+                  chat-app user ends up with an agent that claims to have run curl. */}
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-xs text-muted-foreground">
+                  {messages.integration.audienceQuestion}
+                </span>
+                <div className="inline-flex overflow-hidden rounded-md border">
+                  {(
+                    [
+                      { kind: "shell", label: messages.integration.audienceShell },
+                      { kind: "web-chat", label: messages.integration.audienceWebChat },
+                    ] satisfies { kind: McpAgentKind; label: string }[]
+                  ).map((option) => (
+                    <button
+                      aria-pressed={skillAudience === option.kind}
+                      className={`h-8 px-3 text-xs font-medium ${
+                        skillAudience === option.kind
+                          ? "bg-primary text-primary-foreground"
+                          : "bg-background text-muted-foreground hover:bg-muted"
+                      }`}
+                      key={option.kind}
+                      onClick={() => setSkillAudience(option.kind)}
+                      type="button"
+                    >
+                      {option.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                <span className="text-foreground/70">{messages.integration.worksWith}</span>
+                {AGENT_BRAND_LINKS.filter((agent) => agent.kind === skillAudience).map((agent) => (
+                  <a
+                    aria-label={fmt(messages.integration.openAgentWebsite, { agent: agent.name })}
+                    key={agent.name}
+                    className="underline decoration-dotted underline-offset-2 hover:text-foreground"
+                    href={agent.url}
+                    rel="noreferrer"
+                    target="_blank"
+                  >
+                    {agent.name}
+                  </a>
+                ))}
+              </div>
+              {skillAudience === "shell" ? (
+                <>
+                  <p className="text-sm text-muted-foreground">{messages.integration.skillIntro}</p>
+                  <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                    <a
+                      aria-label={messages.integration.openSetupSkill}
+                      className="inline-flex items-center gap-1 rounded-md border px-2 py-1 hover:bg-muted"
+                      href={skillUrl}
+                      rel="noreferrer"
+                      target="_blank"
+                    >
+                      <ExternalLink size={13} />
+                      {skillUrl}
+                    </a>
+                  </div>
+                  <textarea
+                    aria-label={messages.integration.promptLabel}
+                    className="min-h-[140px] resize-none rounded-md border bg-muted/30 p-3 font-mono text-xs leading-relaxed text-foreground outline-none"
+                    readOnly
+                    value={agentSkillPrompt}
+                  />
+                  <div className="flex justify-end">
+                    <button
+                      className="inline-flex h-9 items-center gap-2 rounded-md border bg-background px-3 text-sm font-medium hover:bg-muted"
+                      onClick={() => copy(agentSkillPrompt, "prompt")}
+                      type="button"
+                    >
+                      {copied === "prompt" ? <Check size={16} /> : <Copy size={16} />}
+                      {copied === "prompt"
+                        ? messages.integration.copied
+                        : messages.integration.copyPrompt}
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <div className="grid gap-3 rounded-md border border-dashed p-4">
+                  <p className="text-sm font-medium text-foreground">
+                    {messages.integration.webChatTitle}
+                  </p>
+                  <p className="text-sm text-muted-foreground">
+                    {messages.integration.webChatBody}
+                  </p>
+                  <div>
+                    <button
+                      className="inline-flex h-9 items-center gap-2 rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground hover:opacity-90"
+                      onClick={() => setTransportTab("mcp")}
+                      type="button"
+                    >
+                      {messages.integration.webChatGoToMcp}
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           </TabsContent>
 
           {/* ── MCP tab ───────────────────────────────────────────────── */}
-          <TabsContent value="mcp" className="grid gap-3">
-            <p className="text-sm text-muted-foreground">{messages.integration.mcpIntro}</p>
-            <div className="grid gap-2">
+          <TabsContent value="mcp" className="mt-0 min-h-0 overflow-y-auto pr-1">
+            <div className="grid gap-3">
+              <p className="text-sm text-muted-foreground">{messages.integration.mcpIntro}</p>
               <div className="grid gap-1">
                 <span className="text-xs font-medium text-foreground">
                   {messages.integration.streamableHttp}
@@ -187,71 +260,79 @@ export function AgentIntegrationDialog({
                   </button>
                 </div>
               </div>
-              <div className="grid gap-1">
-                <span className="text-xs font-medium text-foreground">SSE</span>
-                <div className="flex items-center gap-2 rounded-md border bg-muted/30 px-3 py-2">
-                  <code className="flex-1 truncate font-mono text-xs text-foreground">
-                    {mcpUrl}/sse
-                  </code>
-                  <button
-                    className="shrink-0 rounded p-1 hover:bg-muted"
-                    onClick={() => copy(`${mcpUrl}/sse`, "mcp-sse")}
-                    type="button"
-                    aria-label={messages.integration.copyUrl}
-                  >
-                    {copied === "mcp-sse" ? <Check size={14} /> : <Copy size={14} />}
-                  </button>
-                </div>
-              </div>
-            </div>
-            <p className="text-xs text-muted-foreground">{messages.integration.mcpHint}</p>
-          </TabsContent>
+              <p className="text-xs text-muted-foreground">{messages.integration.mcpHint}</p>
 
-          {/* ── OpenAPI tab ───────────────────────────────────────────── */}
-          <TabsContent value="openapi" className="grid gap-3">
-            <p className="text-sm text-muted-foreground">{messages.integration.openapiIntro}</p>
-            <div className="grid gap-2">
+              {/* Per-agent setup used to live here as a second tab strip. It was removed:
+                  the terminal clients' commands already have a section each in the full
+                  guide, and the chat-app hosts all share the same "setup" — this URL.
+                  Thirteen tabs to vary one sentence is worse than one link. */}
               <a
-                className="flex items-center justify-between rounded-md border px-3 py-2.5 text-sm hover:bg-muted"
-                href={openApiDocUrl}
+                aria-label={messages.integration.mcpGuide}
+                className="inline-flex w-fit items-center gap-1 text-xs text-primary hover:underline"
+                href={mcpGuideUrl}
                 rel="noreferrer"
                 target="_blank"
               >
-                <div className="grid gap-0.5">
-                  <span className="font-medium">{messages.integration.interactiveDocs}</span>
-                  <span className="font-mono text-xs text-muted-foreground">{openApiDocUrl}</span>
-                </div>
-                <ExternalLink size={15} className="shrink-0 text-muted-foreground" />
+                <ExternalLink size={13} />
+                {messages.integration.mcpGuide}
               </a>
-              <div className="flex items-center gap-2 rounded-md border px-3 py-2.5">
-                <div className="grid flex-1 gap-0.5">
-                  <span className="text-sm font-medium">
-                    {messages.integration.openapiJsonSpec}
-                  </span>
-                  <span className="font-mono text-xs text-muted-foreground">{openApiJsonUrl}</span>
-                </div>
-                <div className="flex shrink-0 gap-1">
-                  <a
-                    className="inline-flex h-8 items-center gap-1 rounded-md border px-2 text-xs hover:bg-muted"
-                    href={openApiJsonUrl}
-                    rel="noreferrer"
-                    target="_blank"
-                  >
-                    <ExternalLink size={13} />
-                    {messages.common.open}
-                  </a>
-                  <button
-                    className="inline-flex h-8 items-center gap-1 rounded-md border px-2 text-xs hover:bg-muted"
-                    onClick={() => copy(openApiJsonUrl, "openapi-url")}
-                    type="button"
-                  >
-                    {copied === "openapi-url" ? <Check size={13} /> : <Copy size={13} />}
-                    {messages.integration.copyUrl}
-                  </button>
+            </div>
+          </TabsContent>
+
+          {/* ── OpenAPI tab ───────────────────────────────────────────── */}
+          <TabsContent value="openapi" className="mt-0 min-h-0 overflow-y-auto pr-1">
+            <div className="grid gap-3">
+              <p className="text-sm text-muted-foreground">{messages.integration.openapiIntro}</p>
+              <div className="grid gap-2">
+                <a
+                  className="flex items-center justify-between rounded-md border px-3 py-2.5 text-sm hover:bg-muted"
+                  href={openApiDocUrl}
+                  rel="noreferrer"
+                  target="_blank"
+                >
+                  <div className="grid gap-0.5">
+                    <span className="font-medium">{messages.integration.interactiveDocs}</span>
+                    <span className="font-mono text-xs text-muted-foreground">{openApiDocUrl}</span>
+                  </div>
+                  <ExternalLink size={15} className="shrink-0 text-muted-foreground" />
+                </a>
+                <div className="flex items-center gap-2 rounded-md border px-3 py-2.5">
+                  <div className="grid flex-1 gap-0.5">
+                    <span className="text-sm font-medium">
+                      {messages.integration.openapiJsonSpec}
+                    </span>
+                    <span className="font-mono text-xs text-muted-foreground">
+                      {openApiJsonUrl}
+                    </span>
+                  </div>
+                  <div className="flex shrink-0 gap-1">
+                    <a
+                      className="inline-flex h-8 items-center gap-1 rounded-md border px-2 text-xs hover:bg-muted"
+                      href={openApiJsonUrl}
+                      rel="noreferrer"
+                      target="_blank"
+                    >
+                      <ExternalLink size={13} />
+                      {messages.common.open}
+                    </a>
+                    <button
+                      className="inline-flex h-8 items-center gap-1 rounded-md border px-2 text-xs hover:bg-muted"
+                      onClick={() => copy(openApiJsonUrl, "openapi-url")}
+                      type="button"
+                    >
+                      {copied === "openapi-url" ? <Check size={13} /> : <Copy size={13} />}
+                      {messages.integration.copyUrl}
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>
           </TabsContent>
+          {copied === "error" ? (
+            <p className="text-destructive text-xs" role="alert">
+              {messages.integration.copyFailed}
+            </p>
+          ) : null}
         </Tabs>
       </DialogContent>
     </Dialog>
@@ -264,10 +345,12 @@ export function AgentIntegrationDialog({
  */
 export function BusabaseAgentSkillButton({
   defaultOrigin = "http://localhost:15419",
+  edition = "desktop",
   lang,
   targetSpaceId,
 }: BusabaseAgentSkillButtonProps = {}) {
-  const messages = useCoreI18n();
+  const contextMessages = useCoreI18n();
+  const messages = resolveMessages(lang, contextMessages);
   const [open, setOpen] = useState(false);
 
   return (
@@ -288,6 +371,7 @@ export function BusabaseAgentSkillButton({
         open={open}
         onOpenChange={setOpen}
         defaultOrigin={defaultOrigin}
+        edition={edition}
         lang={lang}
         targetSpaceId={targetSpaceId}
       />
@@ -302,27 +386,12 @@ function resolvePromptLang(lang?: string): PromptLang {
   return lang === "zh-CN" || lang === "ja" ? lang : "en";
 }
 
-/** Skills-tab framing copy (everything around the prompt), per language. */
-const SKILLS_TAB_COPY: Record<PromptLang, { intro: string; copy: string; copied: string }> = {
-  en: {
-    intro:
-      "Copy this prompt into your agent. It points the agent at this workspace's onboarding skill (SETUP_SKILL.md), which walks it through connecting and then installs the permanent busabase skill.",
-    copy: "Copy prompt",
-    copied: "Copied",
-  },
-  "zh-CN": {
-    intro:
-      "把这段提示词复制到你的 agent。它会让 agent 指向本工作区的引导 skill(SETUP_SKILL.md)—— 带它连上,并安装常驻的 busabase skill。",
-    copy: "复制提示词",
-    copied: "已复制",
-  },
-  ja: {
-    intro:
-      "このプロンプトをエージェントにコピーしてください。ワークスペースのオンボーディング skill(SETUP_SKILL.md)に案内し、接続を導いたうえで常設の busabase skill をインストールします。",
-    copy: "プロンプトをコピー",
-    copied: "コピーしました",
-  },
-};
+function getMcpGuideUrl(lang?: string): string {
+  const locale = resolvePromptLang(lang);
+  return locale === "en"
+    ? "https://busabase.com/docs/mcp"
+    : `https://busabase.com/${locale}/docs/mcp`;
+}
 
 /**
  * The short, human-readable prompt the user pastes into their agent. Deliberately thin:
@@ -330,7 +399,11 @@ const SKILLS_TAB_COPY: Record<PromptLang, { intro: string; copy: string; copied:
  * safety rule visible, and sets the agent's reply language. Everything about HOW to
  * onboard — the welcome, what-it-is, and "ask what to manage first" — lives in SKILL.md.
  */
-function createAgentSkillPrompt(skillUrl: string, lang?: string, targetSpaceId?: string): string {
+export function createAgentSkillPrompt(
+  skillUrl: string,
+  lang?: string,
+  targetSpaceId?: string,
+): string {
   const targetLine = targetSpaceId
     ? {
         en: `\nTarget the currently selected Busabase space: ${targetSpaceId}. Use this exact ID for BUSABASE_SPACE_ID / x-busabase-space unless I explicitly choose another space.\n`,

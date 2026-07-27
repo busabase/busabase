@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { useCoreI18n } from "../../../i18n";
 
 /**
  * Renders the agent-authored form page inside a STRICT sandbox iframe.
@@ -73,6 +74,7 @@ export function FormSandboxFrame({
   onSubmit: (values: Record<string, unknown>) => void;
   height?: number;
 }) {
+  const messages = useCoreI18n();
   const frameRef = useRef<HTMLIFrameElement>(null);
 
   useEffect(() => {
@@ -95,7 +97,7 @@ export function FormSandboxFrame({
   return (
     <iframe
       className="w-full rounded-lg border border-border/60 bg-background"
-      title="Form"
+      title={messages.form.tabForm}
       sandbox="allow-scripts allow-forms"
       srcDoc={buildFormSrcDoc(page)}
       style={{ height }}

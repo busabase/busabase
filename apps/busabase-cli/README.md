@@ -24,6 +24,8 @@ npx busabase-cli health
 | `--api-key`    | `BUSABASE_API_KEY`   | _(none — local is open)_ |
 | `--space-id`   | `BUSABASE_SPACE_ID`  | _(none; multi-space Cloud calls require one)_ |
 | `--output`     | —                    | `text` (`json` for raw, `table` for aligned columns) |
+| `--profile`    | `BUSABASE_PROFILE`   | _(the active account)_   |
+| `--config`     | `BUSABASE_CONFIG`    | `~/.busabase/.env`       |
 
 Config is read from flags, then env vars, then `~/.busabase/.env` (auto-loaded —
 no need to `source` it), then the default. An exported env var overrides the file.
@@ -31,6 +33,54 @@ no need to `source` it), then the default. An exported env var overrides the fil
 The default host is the always-on Cloud, which needs credentials. For a local
 server, pass `--base-url http://localhost:15419` (or set `BUSABASE_BASE_URL`); the
 open-source server needs no auth.
+
+## Several accounts, several spaces
+
+Two different things, handled separately:
+
+- **Accounts** (profiles) — different credentials, whether on different hosts or
+  two logins on the same host. Stored one file per account.
+- **Spaces** — one account usually belongs to several spaces on Busabase Cloud (a
+  self-hosted server has exactly one). Switching between them needs no re-login.
+
+```bash
+busabase-cli login --profile work     # add a second account (and switch to it)
+busabase-cli auth status              # list accounts, grouped by host (* = active)
+busabase-cli auth switch              # pick one (auto when there's a single alternative)
+busabase-cli auth switch work         # …or name it
+busabase-cli auth remove old          # delete a stored account
+
+busabase-cli space list               # spaces this account can see (* = targeted)
+busabase-cli space use VideoFactory   # target another one — by name, slug or id
+```
+
+Nothing above exists until you create a second account. With one account there is
+still just `~/.busabase/.env`, byte for byte as before.
+
+```
+~/.busabase/
+├── .env                 credentials of the ACTIVE account (0600). Always present.
+├── config.json          (optional) settings + which account is active.
+└── profiles/            (optional) one file per account.
+    ├── default.env
+    └── work.env
+```
+
+`auth switch` rewrites `.env` from the chosen account, so the `busabase` skill, the
+docs' `curl` snippets and any SDK reading that file follow along automatically —
+they never need to know profiles exist. The `BUSABASE_PROFILE` line inside `.env`
+is there to tell you which account you got; `config.json` is what actually decides.
+
+Two shells can drive two accounts at once: `--profile`/`BUSABASE_PROFILE` reads that
+account's file directly and leaves the shared `.env` alone. `--config <path>` goes
+further and points at any file you like, ignoring profiles entirely.
+
+Settings that outlive an account switch live in `config.json`:
+
+```bash
+busabase-cli auth config set output json   # stop typing --output json
+busabase-cli auth config list
+```
 
 ## Sign in / connect
 
@@ -69,7 +119,9 @@ busabase-cli login --oauth                           # legacy same-machine loopb
 busabase-cli login --api-key sk_…                    # Cloud API key (headless/CI)
 busabase-cli login --base-url http://localhost:15419 # connect to a local server (no auth)
 busabase-cli login --refresh                         # rotate the current OAuth token set
+busabase-cli login --profile work                    # sign in as a SECOND account
 busabase-cli logout                                  # revoke the token family + clear saved creds
+busabase-cli logout --profile work                   # …just that account
 ```
 
 Device authorization uses a short-lived, opaque login session only for the hand-off. In the

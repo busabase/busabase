@@ -21,7 +21,7 @@ import type { SeedScenario } from "../seed-types";
 // installs, two of them deliberately broken) are left out of this fast
 // baseline seed. Deal Pipeline Board / Compliance Status Board read the
 // `deals` / `compliance-checklists` Bases live at Run-time via the
-// `/__busabase_api__/` bridge (see `demo-content.ts`'s docblock) — those
+// same-origin `/api/v1` surface (see `demo-content.ts`'s docblock) — those
 // Bases come from a different scenario (`cross-functional.ts`) in this same
 // `db:seed:all` pipeline, but since the read happens at Run-time rather than
 // seed-time, scenario ordering between the two doesn't matter.

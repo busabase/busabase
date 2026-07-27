@@ -609,6 +609,22 @@ const authSpaceSchema = z.object({
   name: z.string(),
   slug: z.string().nullable(),
   plan: z.string().nullable(),
+  /**
+   * The space's DEFAULT content visibility for its members — the same
+   * `spaces.nodeVisibilityMode` the cloud dashboard reads. `"open"` = a node
+   * with no explicit visibility anywhere in its ancestor chain is visible to
+   * every member; `"restricted"` = such a node is hidden from non-managers
+   * until it is explicitly opened (per-node visibility or a grant).
+   *
+   * Clients need it to describe a node's EFFECTIVE access truthfully ("everyone
+   * in this space can see this" is a lie in a restricted space) and to decide
+   * whether per-node grants are meaningful to show at all.
+   *
+   * OPTIONAL on purpose: it was added after this VO shipped, so an older server
+   * (or a host that doesn't model a space default at all) simply omits it.
+   * Treat an absent value as `"open"` — the historical behaviour.
+   */
+  nodeVisibilityMode: z.enum(["open", "restricted"]).optional(),
 });
 
 const authUserSchema = z.object({

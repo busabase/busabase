@@ -5,7 +5,7 @@ import type { AddressInfo } from "node:net";
 import { createInterface } from "node:readline/promises";
 import { BUSABASE_CLI_CLIENT_ID } from "busabase-contract/auth/device-authorization";
 import { DEFAULT_BASE_URL, normalizeBaseUrl } from "busabase-sdk";
-import { dotEnvPath, loadDotEnvFile, writeDotEnvFile } from "./config-file.js";
+import { activeCredentialPath, loadDotEnvFile, writeDotEnvFile } from "./config-file.js";
 
 /**
  * `busabase-cli login` — sign in and persist credentials to `~/.busabase/.env`, so
@@ -567,8 +567,8 @@ export async function runLogin(options: LoginOptions): Promise<Record<string, st
       [EXPIRES_AT_KEY]: null,
     });
     say(`✓ Connected to ${baseUrl} — open server, no login needed.`);
-    say(`  Saved to ${dotEnvPath()}. Try: busabase-cli bases list`);
-    return { status: "connected (no auth)", baseUrl, config: dotEnvPath() };
+    say(`  Saved to ${activeCredentialPath()}. Try: busabase-cli bases list`);
+    return { status: "connected (no auth)", baseUrl, config: activeCredentialPath() };
   }
 
   let token: string;
@@ -610,7 +610,7 @@ export async function runLogin(options: LoginOptions): Promise<Record<string, st
   });
 
   say("");
-  say(`✓ Signed in and saved to ${dotEnvPath()}`);
+  say(`✓ Signed in and saved to ${activeCredentialPath()}`);
 
   return {
     status: "signed in",
@@ -622,7 +622,7 @@ export async function runLogin(options: LoginOptions): Promise<Record<string, st
     bootstrapRequired: String(Boolean(verify.bootstrapRequired)),
     expiresAt: expiresAt ?? apiKeyExpiresAt ?? "(no expiry — API key)",
     baseUrl,
-    config: dotEnvPath(),
+    config: activeCredentialPath(),
   };
 }
 
@@ -672,7 +672,7 @@ export async function runRefresh(options: LogoutOptions): Promise<Record<string,
   return {
     status: "refreshed",
     expiresAt: refreshed.expiresAt ?? "(unknown)",
-    config: dotEnvPath(),
+    config: activeCredentialPath(),
   };
 }
 
@@ -759,7 +759,7 @@ export async function runLogout(options: LogoutOptions): Promise<Record<string, 
     [EXPIRES_AT_KEY]: null,
     [REFRESH_TOKEN_KEY]: null,
   });
-  say(`✓ Cleared the saved credential from ${dotEnvPath()}`);
+  say(`✓ Cleared the saved credential from ${activeCredentialPath()}`);
 
-  return { status: "signed out", detail: revoked, config: dotEnvPath() };
+  return { status: "signed out", detail: revoked, config: activeCredentialPath() };
 }

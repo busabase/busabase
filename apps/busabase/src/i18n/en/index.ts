@@ -158,6 +158,8 @@ const en: BaseTranslation = {
     disconnectButton: "Disconnect",
     connectFailed: "Failed to start the Cloud connect flow. Please try again.",
     disconnectFailed: "Failed to disconnect. Please try again.",
+    statusRefreshFailed: "The connection changed, but its latest status could not be loaded.",
+    statusDiagnostic: "Connection diagnostic: {error:string}",
     popupBlocked: "Your browser blocked the sign-in popup. Please allow popups and try again.",
     aboutTitle: "About Cloud Connect",
     aboutDescription:

@@ -130,8 +130,8 @@ interface BusabaseDashboardShellProps {
   /**
    * oRPC query utils, needed only to power the sidebar "•••" → Permissions
    * entry (opens the shared `NodePermissionsDialog`). Omit to leave the sidebar
-   * without a Permissions action — the node-detail toolbars carry their own
-   * `NodePermissionsButton` regardless.
+   * without a Permissions action — the node-detail topbars reach the same
+   * dialog through their own `NodeActionsMenu` regardless.
    */
   orpc?: BusabaseQueryUtils;
   /** Active UI locale for the sidebar nav labels (defaults to English). */

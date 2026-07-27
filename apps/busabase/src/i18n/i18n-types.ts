@@ -569,6 +569,15 @@ type RootTranslation = {
 		 */
 		disconnectFailed: string
 		/**
+		 * T​h​e​ ​c​o​n​n​e​c​t​i​o​n​ ​c​h​a​n​g​e​d​,​ ​b​u​t​ ​i​t​s​ ​l​a​t​e​s​t​ ​s​t​a​t​u​s​ ​c​o​u​l​d​ ​n​o​t​ ​b​e​ ​l​o​a​d​e​d​.
+		 */
+		statusRefreshFailed: string
+		/**
+		 * C​o​n​n​e​c​t​i​o​n​ ​d​i​a​g​n​o​s​t​i​c​:​ ​{​e​r​r​o​r​}
+		 * @param {string} error
+		 */
+		statusDiagnostic: RequiredParams<'error'>
+		/**
 		 * Y​o​u​r​ ​b​r​o​w​s​e​r​ ​b​l​o​c​k​e​d​ ​t​h​e​ ​s​i​g​n​-​i​n​ ​p​o​p​u​p​.​ ​P​l​e​a​s​e​ ​a​l​l​o​w​ ​p​o​p​u​p​s​ ​a​n​d​ ​t​r​y​ ​a​g​a​i​n​.
 		 */
 		popupBlocked: string
@@ -1441,6 +1450,14 @@ export type TranslationFunctions = {
 		 * Failed to disconnect. Please try again.
 		 */
 		disconnectFailed: () => LocalizedString
+		/**
+		 * The connection changed, but its latest status could not be loaded.
+		 */
+		statusRefreshFailed: () => LocalizedString
+		/**
+		 * Connection diagnostic: {error}
+		 */
+		statusDiagnostic: (arg: { error: string }) => LocalizedString
 		/**
 		 * Your browser blocked the sign-in popup. Please allow popups and try again.
 		 */

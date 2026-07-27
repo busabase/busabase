@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-labelledby="title desc">
+  <title id="title">Busabase mobile tinted icon</title>
+  <desc id="desc">A monochrome Busabase record mark for iOS tinted appearances.</desc>
+  <rect width="1024" height="1024" fill="#FFFFFF"/>
+  <rect x="226" y="242" width="572" height="148" rx="74" fill="#000000"/>
+  <rect x="226" y="438" width="430" height="148" rx="74" fill="#000000"/>
+  <rect x="226" y="634" width="572" height="148" rx="74" fill="#000000"/>
+</svg>

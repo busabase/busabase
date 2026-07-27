@@ -7,6 +7,10 @@ import { expect, test } from "./_fixtures";
 // destinations moved into the Space Selector so the resting sidebar is just
 // Home + Search + the node tree.
 
+// `Page` comes from the fixtures rather than being derived from `typeof test`:
+// `test` is overloaded, so `Parameters<...>[1]` lands on the `TestDetails`
+// overload instead of the body function, and every use of the helper then
+// degrades to `never`.
 const spaceSelector = (page: Page) => page.getByRole("button", { name: /Local Busabase.*Local/ });
 
 test("an unqualified visit lands on Home, not Inbox", async ({ page }) => {

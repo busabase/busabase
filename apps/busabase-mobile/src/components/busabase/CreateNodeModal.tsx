@@ -1,5 +1,5 @@
 import { useMutation } from "@tanstack/react-query";
-import type { CreatableNodeType } from "busabase-contract/domains";
+import { type CreatableNodeType, listNodeTypes } from "busabase-contract/domains";
 import { useState } from "react";
 import { StyleSheet, Text, View } from "react-native";
 import { useBusabaseOrpc } from "~/api/use-busabase-orpc";
@@ -22,34 +22,73 @@ const toSlug = (value: string) =>
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-|-$/g, "");
 
-const NODE_TYPES: CreatableNodeType[] = ["base", "folder", "doc", "skill", "drive"];
+/**
+ * Node types whose creation needs a platform capability this sheet does not
+ * have. `file` is creatable over the API, but the node is meaningless without
+ * an uploaded Asset behind it — web's dialog therefore ships a file input and
+ * keeps its submit button disabled until one is picked. There is no document
+ * picker here, so offering `file` could only ever produce an empty file node.
+ * A single named exception, NOT a hardcoded allowlist: everything else still
+ * comes straight from the registry.
+ */
+const UNSUPPORTED_TYPES = new Set<string>(["file"]);
+
+/**
+ * The creatable types, composed from the registry exactly like web's
+ * `create-node-modal.tsx` — registering a creatable node type makes it appear
+ * here automatically, so mobile stops silently lagging behind the registry.
+ * `hidden` types are excluded so they have no visible entry point even though
+ * they stay creatable over the API.
+ */
+const NODE_TYPES = listNodeTypes()
+  .filter(
+    (definition) =>
+      definition.capabilities.creatable &&
+      !definition.capabilities.hidden &&
+      !UNSUPPORTED_TYPES.has(definition.type),
+  )
+  .map((definition) => ({
+    type: definition.type as CreatableNodeType,
+    /** Registry label — the fallback when a locale has no name for this type. */
+    fallbackLabel: definition.label,
+  }));
+
+// Base stays the default: it is by far the most-created type on mobile, and
+// unlike web (which just takes the registry's first entry) this sheet has
+// always opened on it.
+const DEFAULT_NODE_TYPE: CreatableNodeType = "base";
 
 interface CreateNodeModalProps {
   visible: boolean;
   onClose: () => void;
   onCreated: (changeRequestId: string) => void;
+  /**
+   * When opened from a container node's "•••" sheet, the new node is created
+   * inside it (web passes the same shape from its per-folder "+"). Omitted at
+   * the space root — e.g. the drawer header's Create button and the
+   * empty-workspace guide's CTA, where root is the right destination.
+   */
+  parent?: { id: string; name: string } | null;
 }
 
-export function CreateNodeModal({ visible, onClose, onCreated }: CreateNodeModalProps) {
+export function CreateNodeModal({ visible, onClose, onCreated, parent }: CreateNodeModalProps) {
   const tokens = useTokens();
   const { t } = useI18n();
   const buda = useBusabaseOrpc();
-  const [nodeType, setNodeType] = useState<CreatableNodeType>("base");
+  const [nodeType, setNodeType] = useState<CreatableNodeType>(DEFAULT_NODE_TYPE);
   const [name, setName] = useState("");
   const [slug, setSlug] = useState("");
   const [slugEdited, setSlugEdited] = useState(false);
   const [description, setDescription] = useState("");
 
-  const typeLabel: Record<CreatableNodeType, string> = {
-    base: t.createNode.base,
-    folder: t.createNode.folder,
-    doc: t.createNode.doc,
-    skill: t.createNode.skill,
-    drive: t.createNode.drive,
-  };
+  const typeNames: Record<string, string> = t.nodeTypeNames;
+  const labelFor = (entry: (typeof NODE_TYPES)[number]) =>
+    typeNames[entry.type] ?? entry.fallbackLabel;
+  const activeEntry = NODE_TYPES.find((entry) => entry.type === nodeType);
+  const activeLabel = activeEntry ? labelFor(activeEntry) : nodeType;
 
   const reset = () => {
-    setNodeType("base");
+    setNodeType(DEFAULT_NODE_TYPE);
     setName("");
     setSlug("");
     setSlugEdited(false);
@@ -67,11 +106,14 @@ export function CreateNodeModal({ visible, onClose, onCreated }: CreateNodeModal
       const finalSlug = (slugEdited ? slug : toSlug(trimmedName)).trim();
       if (!buda || !trimmedName || !finalSlug) throw new Error(t.createNode.nameRequired);
       return buda.client.nodes.createChangeRequest({
-        message: `Create ${typeLabel[nodeType]} ${trimmedName}`,
+        message: `Create ${activeLabel} ${trimmedName}`,
         operations: [
           {
             kind: "create",
             nodeType,
+            // Omitted (not `undefined`-safe-but-present) at the root, so the
+            // server keeps its "create at space root" path.
+            ...(parent ? { parentNodeId: parent.id } : {}),
             slug: finalSlug,
             name: trimmedName,
             description: description.trim(),
@@ -94,8 +136,14 @@ export function CreateNodeModal({ visible, onClose, onCreated }: CreateNodeModal
   return (
     <NativeBottomSheet
       visible={visible}
-      title={t.createNode.title}
-      description={t.createNode.reviewNote}
+      title={fmt(t.createNode.title, {
+        suffix: parent ? fmt(t.createNode.parentSuffix, { name: parent.name }) : "",
+      })}
+      description={
+        parent
+          ? fmt(t.createNode.reviewNoteInParent, { name: parent.name })
+          : t.createNode.reviewNote
+      }
       showCloseButton
       onClose={close}
       footer={
@@ -107,7 +155,7 @@ export function CreateNodeModal({ visible, onClose, onCreated }: CreateNodeModal
             />
           ) : null}
           <Button
-            label={fmt(t.createNode.submit, { type: typeLabel[nodeType] })}
+            label={fmt(t.createNode.submit, { type: activeLabel })}
             loading={createMutation.isPending}
             disabled={name.trim().length === 0}
             fullWidth
@@ -123,7 +171,7 @@ export function CreateNodeModal({ visible, onClose, onCreated }: CreateNodeModal
       <View style={styles.fullBleedChips}>
         <NativeChipList<CreatableNodeType>
           value={nodeType}
-          options={NODE_TYPES.map((type) => ({ value: type, label: typeLabel[type] }))}
+          options={NODE_TYPES.map((entry) => ({ value: entry.type, label: labelFor(entry) }))}
           onChange={setNodeType}
         />
       </View>

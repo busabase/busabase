@@ -1,8 +1,10 @@
+import { useQueryClient } from "@tanstack/react-query";
 import Constants from "expo-constants";
 import { useRouter } from "expo-router";
 import {
   Bell,
   ChevronRight,
+  CircleCheck,
   Download,
   ExternalLink,
   Languages,
@@ -11,11 +13,15 @@ import {
   Shield,
   Sparkles,
   Trash2,
+  UserPlus,
+  UserRound,
   Vault,
   Webhook,
 } from "lucide-react-native";
 import { useState } from "react";
 import { Linking, StyleSheet, Switch, View } from "react-native";
+import { signInWithBusabaseCloud } from "~/auth/oauth";
+import { MAX_CLOUD_ACCOUNTS } from "~/auth/session-store";
 import { ConnectionGuard } from "~/components/busabase/ConnectionGuard";
 import { DrawerScaffold } from "~/components/busabase/DrawerScaffold";
 import { SpaceSelector } from "~/components/busabase/SpaceSelector";
@@ -56,9 +62,19 @@ const getDisplayVersion = () => {
 
 function SettingsContent() {
   const router = useRouter();
+  const queryClient = useQueryClient();
   const tokens = useTokens();
   const { t, preference, setPreference, options } = useI18n();
-  const { state, disconnect, connectSelfHosted, removeServerFromHistory } = useConnection();
+  const {
+    state,
+    cloudAccounts,
+    connectCloud,
+    disconnect,
+    connectSelfHosted,
+    removeCloudAccount,
+    removeServerFromHistory,
+    switchCloudAccount,
+  } = useConnection();
   const { supported, settings, permissionDenied, setEnabled, setPollInterval, openSystemSettings } =
     useNotifications();
   const {
@@ -72,6 +88,10 @@ function SettingsContent() {
   const [selectedServer, setSelectedServer] = useState<string | null>(null);
   const [disconnectSheetOpen, setDisconnectSheetOpen] = useState(false);
   const [disconnecting, setDisconnecting] = useState(false);
+  const [addingAccount, setAddingAccount] = useState(false);
+  const [switchingAccount, setSwitchingAccount] = useState<string | null>(null);
+  const [selectedAccount, setSelectedAccount] = useState<string | null>(null);
+  const [accountError, setAccountError] = useState<string | null>(null);
   const connection = state.status === "connected" ? state.connection : null;
   const otherServers = state.serverHistory.filter((url) => url !== connection?.serverUrl);
   const displayVersion = getDisplayVersion();
@@ -80,10 +100,59 @@ function SettingsContent() {
     setDisconnecting(true);
     try {
       await disconnect();
+      queryClient.clear();
       setDisconnectSheetOpen(false);
       router.replace("/");
     } finally {
       setDisconnecting(false);
+    }
+  };
+
+  const handleAddAccount = async () => {
+    setAccountError(null);
+    setAddingAccount(true);
+    try {
+      const session = await signInWithBusabaseCloud();
+      await connectCloud(session);
+      queryClient.clear();
+    } catch (error) {
+      setAccountError(error instanceof Error ? error.message : "Could not add this account.");
+    } finally {
+      setAddingAccount(false);
+    }
+  };
+
+  const handleSwitchAccount = async (accountId: string) => {
+    setAccountError(null);
+    setSwitchingAccount(accountId);
+    try {
+      await switchCloudAccount(accountId);
+      queryClient.clear();
+      setSelectedAccount(null);
+      router.replace("/drawer/inbox");
+    } catch (error) {
+      setAccountError(error instanceof Error ? error.message : "Could not switch accounts.");
+    } finally {
+      setSwitchingAccount(null);
+    }
+  };
+
+  const handleRemoveAccount = async (accountId: string) => {
+    setAccountError(null);
+    setSwitchingAccount(accountId);
+    try {
+      await removeCloudAccount(accountId);
+      queryClient.clear();
+      setSelectedAccount(null);
+      if (cloudAccounts.length === 1) {
+        router.replace("/");
+      } else {
+        router.replace("/drawer/inbox");
+      }
+    } catch (error) {
+      setAccountError(error instanceof Error ? error.message : "Could not remove this account.");
+    } finally {
+      setSwitchingAccount(null);
     }
   };
 
@@ -115,7 +184,7 @@ function SettingsContent() {
     : "No server connected";
   const disconnectHint =
     connection?.mode === "cloud"
-      ? "Signs this device out of Busabase Cloud and clears the secure session."
+      ? "Signs every saved account out of Busabase Cloud and clears secure sessions."
       : "Clears the saved URL on this device. Saved servers stay available.";
   const languageOptions = [
     { value: "auto" as LocalePreference, label: t.settings.auto },
@@ -124,6 +193,11 @@ function SettingsContent() {
       label: option.label,
     })),
   ];
+  const selectedCloudAccount = cloudAccounts.find(({ id }) => id === selectedAccount) ?? null;
+  const sortedCloudAccounts = [...cloudAccounts].sort(
+    (left, right) => Number(right.isActive) - Number(left.isActive),
+  );
+  const cloudAccountLimitReached = cloudAccounts.length >= MAX_CLOUD_ACCOUNTS;
 
   return (
     <DrawerScaffold title="Settings" subtitle="Connection and notifications">
@@ -165,6 +239,58 @@ function SettingsContent() {
           </NativeRow>
         ) : null}
       </NativeSection>
+
+      {connection?.mode === "cloud" ? (
+        <NativeSection title="Accounts" caption={`${cloudAccounts.length}/${MAX_CLOUD_ACCOUNTS}`}>
+          {sortedCloudAccounts.map((account) => {
+            const profile = account.user;
+            const title = profile?.name || profile?.email || "Saved account";
+            return (
+              <NativeRow
+                key={account.id}
+                title={title}
+                subtitle={profile?.email ?? "Busabase Cloud account"}
+                meta={
+                  switchingAccount === account.id
+                    ? "Working"
+                    : account.isActive
+                      ? "Active"
+                      : undefined
+                }
+                leading={<UserRound size={18} color={tokens.mutedForeground} />}
+                trailing={
+                  account.isActive ? <CircleCheck size={18} color={tokens.success} /> : undefined
+                }
+                disabled={switchingAccount !== null}
+                onPress={() => setSelectedAccount(account.id)}
+                last={false}
+              />
+            );
+          })}
+          <NativeRow
+            title={cloudAccountLimitReached ? "Account limit reached" : "Add another account"}
+            subtitle={
+              cloudAccountLimitReached
+                ? `This device can save up to ${MAX_CLOUD_ACCOUNTS} accounts.`
+                : "Sign in once, then switch profiles without re-entering credentials."
+            }
+            meta={addingAccount ? "Opening sign in" : undefined}
+            leading={<UserPlus size={18} color={tokens.mutedForeground} />}
+            disabled={cloudAccountLimitReached || addingAccount || switchingAccount !== null}
+            onPress={() => void handleAddAccount()}
+            last={!accountError}
+          />
+          {accountError ? (
+            <NativeRow
+              title="Account action failed"
+              subtitle={accountError}
+              destructive
+              leading={<UserRound size={18} color={tokens.destructive} />}
+              last
+            />
+          ) : null}
+        </NativeSection>
+      ) : null}
 
       {otherServers.length > 0 ? (
         <NativeSection title="Saved servers" caption={`${otherServers.length}`}>
@@ -326,6 +452,44 @@ function SettingsContent() {
           last
         />
       </NativeSection>
+
+      <NativeBottomSheet
+        visible={!!selectedCloudAccount}
+        title={selectedCloudAccount?.user?.name || "Busabase Cloud account"}
+        description={selectedCloudAccount?.user?.email ?? "Saved on this device"}
+        showCloseButton
+        onClose={() => setSelectedAccount(null)}
+        footer={
+          selectedCloudAccount ? (
+            <NativeActionBar>
+              {!selectedCloudAccount.isActive ? (
+                <Button
+                  label="Switch to this account"
+                  loading={switchingAccount === selectedCloudAccount.id}
+                  disabled={switchingAccount !== null}
+                  fullWidth
+                  onPress={() => void handleSwitchAccount(selectedCloudAccount.id)}
+                />
+              ) : null}
+              <Button
+                label="Remove from this device"
+                variant="destructive"
+                leadingIcon={<Trash2 size={18} color={tokens.destructiveForeground} />}
+                disabled={switchingAccount !== null}
+                fullWidth
+                onPress={() => void handleRemoveAccount(selectedCloudAccount.id)}
+              />
+              <Button
+                label="Cancel"
+                variant="ghost"
+                disabled={switchingAccount !== null}
+                fullWidth
+                onPress={() => setSelectedAccount(null)}
+              />
+            </NativeActionBar>
+          ) : undefined
+        }
+      />
 
       <NativeBottomSheet
         visible={!!selectedServer}

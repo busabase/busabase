@@ -21,11 +21,13 @@ import { ConfirmActionDialog } from "./primitives";
 
 /**
  * The confirm-and-archive half of the delete flow, with no trigger of its own —
- * the caller owns `open`. Split out of `NodeDeleteButton` so Delete can live as
- * an item inside the shared "•••" menu (`NodeActionsMenu`, and the sidebar row's
- * equivalent in `dashboard-shell.tsx`) instead of only as a standalone toolbar
- * button. Both halves share one implementation, so the confirm copy, the folder
- * cascade warning, and the CR-approve-merge sequence can't drift apart.
+ * the caller owns `open`. Delete used to be a standalone toolbar button sitting
+ * next to the "•••" menu; it now lives as an item *inside* that menu
+ * (`NodeActionsMenu`, and the sidebar row's equivalent in `dashboard-shell.tsx`),
+ * so the trigger and the dialog were separated and only this half remains here.
+ * Every entry point drives this one implementation, which is what keeps the
+ * confirm copy, the folder cascade warning, and the CR-approve-merge sequence
+ * from drifting apart.
  *
  * Creates a `node_delete` change request and approve-merges it (soft-archive →
  * recoverable from Trash). Folders warn about the cascade (their subtree is

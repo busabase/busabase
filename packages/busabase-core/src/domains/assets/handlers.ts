@@ -125,9 +125,13 @@ const sanitizeUploadError = (error: unknown): string => {
 const assetUploadError = (action: string, error: unknown) => {
   if (error instanceof ORPCError) return error;
   const detail = sanitizeUploadError(error);
+  // No `data: { error: … }` here. The `/api/v1` encoder already builds the
+  // envelope's `error` from `message`, so a copy in `data` added nothing — but
+  // it did route this error through the encoder's self-shaped-body branch,
+  // where `code` used to be dropped. That made a failed upload look like a bare
+  // `HTTP_500` to the SDK instead of `INTERNAL_SERVER_ERROR`.
   return new ORPCError("INTERNAL_SERVER_ERROR", {
     message: `Failed to ${action}: ${detail}`,
-    data: { error: `Failed to ${action}: ${detail}` },
   });
 };
 

@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
+  addCloudSession: vi.fn(),
   getCloudSession: vi.fn(),
   setCloudSession: vi.fn(),
 }));
@@ -25,6 +26,7 @@ vi.mock("~/connection/config", () => ({
   },
 }));
 vi.mock("./session-store", () => ({
+  addCloudSession: mocks.addCloudSession,
   getCloudSession: mocks.getCloudSession,
   setCloudSession: mocks.setCloudSession,
   isCloudSessionAccessTokenUsable: (session: { expiresAt: string } | null, minimumValidityMs = 0) =>
@@ -37,6 +39,7 @@ const originalFetch = global.fetch;
 
 describe("getValidBusabaseCloudSession", () => {
   beforeEach(() => {
+    mocks.addCloudSession.mockReset();
     mocks.getCloudSession.mockReset();
     mocks.setCloudSession.mockReset();
   });
@@ -50,6 +53,7 @@ describe("getValidBusabaseCloudSession", () => {
       accessToken: "bso_current",
       refreshToken: "bsr_current",
       expiresAt: new Date(Date.now() + 10 * 60 * 1000).toISOString(),
+      user: { id: "current", email: "current@example.com", name: "Current", image: null },
     };
     mocks.getCloudSession.mockResolvedValue(session);
     global.fetch = vi.fn() as typeof fetch;
@@ -78,6 +82,7 @@ describe("getValidBusabaseCloudSession", () => {
         access_token: "bso_new",
         refresh_token: "bsr_new",
         expires_in: 3600,
+        user: { id: "user-1", email: "user@example.com", name: "User", image: null },
       });
     }) as typeof fetch;
 
@@ -85,7 +90,11 @@ describe("getValidBusabaseCloudSession", () => {
       getValidBusabaseCloudSession(),
       getValidBusabaseCloudSession(),
     ]);
-    expect(first).toMatchObject({ accessToken: "bso_new", refreshToken: "bsr_new" });
+    expect(first).toMatchObject({
+      accessToken: "bso_new",
+      refreshToken: "bsr_new",
+      user: { id: "user-1", email: "user@example.com" },
+    });
     expect(second).toEqual(first);
     expect(global.fetch).toHaveBeenCalledTimes(1);
     expect(mocks.setCloudSession).toHaveBeenCalledWith(first);

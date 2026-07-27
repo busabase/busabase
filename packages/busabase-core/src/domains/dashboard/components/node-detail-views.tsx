@@ -398,16 +398,22 @@ export function FileTreeDetailView({
                 </p>
                 <dl className="mt-4 grid gap-2 font-mono text-xs">
                   <div className="flex gap-2">
-                    <dt className="w-16 shrink-0 text-muted-foreground">name</dt>
+                    <dt className="shrink-0 text-muted-foreground">
+                      {messages.nodeDetail.fileName}
+                    </dt>
                     <dd className="min-w-0 truncate">{fileQuery.data.displayName ?? openPath}</dd>
                   </div>
                   <div className="flex gap-2">
-                    <dt className="w-16 shrink-0 text-muted-foreground">asset</dt>
+                    <dt className="shrink-0 text-muted-foreground">
+                      {messages.nodeDetail.assetId}
+                    </dt>
                     <dd className="min-w-0 truncate">{fileQuery.data.assetId}</dd>
                   </div>
                   {fileQuery.data.assetUrl ? (
                     <div className="flex gap-2">
-                      <dt className="w-16 shrink-0 text-muted-foreground">url</dt>
+                      <dt className="shrink-0 text-muted-foreground">
+                        {messages.nodeDetail.assetUrl}
+                      </dt>
                       <dd className="min-w-0 truncate">
                         <a
                           className="text-primary underline-offset-2 hover:underline"
@@ -421,11 +427,15 @@ export function FileTreeDetailView({
                     </div>
                   ) : null}
                   <div className="flex gap-2">
-                    <dt className="w-16 shrink-0 text-muted-foreground">type</dt>
+                    <dt className="shrink-0 text-muted-foreground">
+                      {messages.nodeDetail.mediaType}
+                    </dt>
                     <dd className="min-w-0 truncate">{fileQuery.data.mimeType}</dd>
                   </div>
                   <div className="flex gap-2">
-                    <dt className="w-16 shrink-0 text-muted-foreground">hash</dt>
+                    <dt className="shrink-0 text-muted-foreground">
+                      {messages.nodeDetail.contentHash}
+                    </dt>
                     <dd className="min-w-0 truncate">{fileQuery.data.contentHash}</dd>
                   </div>
                 </dl>
@@ -553,11 +563,11 @@ export function FileNodeDetailView({
   const Icon = assetKindIcon(asset.mimeType);
   const isImage = asset.mimeType.startsWith("image/");
   const metaRows = [
-    { label: "file", value: asset.fileName },
-    { label: "type", value: asset.mimeType },
-    { label: "size", value: formatAssetSize(asset.size) },
-    { label: "asset", value: asset.id },
-    asset.contentHash ? { label: "hash", value: asset.contentHash } : null,
+    { label: messages.nodeDetail.fileName, value: asset.fileName },
+    { label: messages.nodeDetail.mediaType, value: asset.mimeType },
+    { label: messages.nodeDetail.fileSize, value: formatAssetSize(asset.size) },
+    { label: messages.nodeDetail.assetId, value: asset.id },
+    asset.contentHash ? { label: messages.nodeDetail.contentHash, value: asset.contentHash } : null,
   ].filter((row): row is { label: string; value: string } => Boolean(row));
 
   return (
@@ -600,7 +610,7 @@ export function FileNodeDetailView({
                   </div>
                 ))}
                 <div className="flex min-w-0 items-center justify-between gap-3">
-                  <dt className="shrink-0 text-muted-foreground">url</dt>
+                  <dt className="shrink-0 text-muted-foreground">{messages.nodeDetail.assetUrl}</dt>
                   <dd className="min-w-0 truncate">
                     <a
                       className="text-primary underline-offset-2 hover:underline"

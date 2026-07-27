@@ -3,12 +3,17 @@
     "name": "Busabase",
     "slug": "busabase-mobile",
     "scheme": "busabase",
-    "version": "0.9.17",
+    "version": "0.9.18",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "automatic",
     "ios": {
       "bundleIdentifier": "com.busabase.app",
+      "icon": {
+        "light": "./assets/icon.png",
+        "dark": "./assets/icon-dark.png",
+        "tinted": "./assets/icon-tinted.png"
+      },
       "supportsTablet": true,
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
@@ -34,7 +39,7 @@
       "package": "com.busabase.app",
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#F7F4ED"
+        "backgroundColor": "#171717"
       }
     },
     "web": {
@@ -50,7 +55,7 @@
           "backgroundColor": "#F7F4ED",
           "dark": {
             "image": "./assets/splash-icon-dark.png",
-            "backgroundColor": "#101820"
+            "backgroundColor": "#171717"
           }
         }
       ],

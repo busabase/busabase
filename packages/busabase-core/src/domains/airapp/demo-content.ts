@@ -98,22 +98,17 @@
  * zero-dependency (`node:http` + a static page, same execution model as #1)
  * so they also qualify for the fast baseline seed.
  *
- * Both fetch through the `/__busabase_api__/<real-path>` bridge (see
- * `changelog/20260715-airapp-busabase-api-bridge.md`), NOT a bare
- * `fetch("/api/v1/...")`. A first attempt at these two demos tried the bare
- * path and got a flat 404 from every request, including real busabase
- * routes — confirmed (via a purpose-built probe returning
- * `GUEST_SERVER_404_FOR:<path>` from the AirApp's *own* server) that
- * Nodepod's service worker claims the entire preview scope and routes every
- * same-origin fetch to the sandboxed guest process, with no passthrough to
- * the real network — same-origin alone doesn't get you there, same as that
- * changelog already found. The bridge prefix is what actually reaches the
- * real backend (with the viewer's session, since it's a genuine
- * `credentials: "include"` browser fetch outside the sandbox). Both demos'
- * `fetch()` calls run in the client-side `<script>` the guest server serves
- * (a real browser context, not the sandboxed Worker) — the only path
- * actually verified here; whether the bridge also intercepts a fetch made
- * server-side, inside the guest Node process itself, wasn't tested.
+ * Both fetch the bare `/api/v1/...` path. Nodepod's service worker otherwise
+ * claims the entire preview scope and answers every same-origin request from
+ * the sandboxed guest process — a bare fetch used to come back as a flat 404
+ * even for real busabase routes, which is why these demos once carried a
+ * reserved bridge prefix. The patched service worker now passes
+ * `/api/v1/*` straight through to the real backend instead (still a genuine
+ * browser fetch outside the sandbox, so the viewer's session authenticates
+ * it), which is what lets an AirApp's data code be identical whether it runs
+ * here or on a developer's own `npm run dev` server. Both demos' `fetch()`
+ * calls run in the client-side `<script>` the guest server serves (a real
+ * browser context, not the sandboxed Worker) — the only path verified here.
  *
  *   9. "Deal Pipeline Board"    — reads the standard demo dataset's `deals`
  *      Base (CRM folder) and renders it as a 4-column kanban (Prospecting /
@@ -134,11 +129,11 @@
  *      size (~390KB of real app content vs. a few KB per demo here). Not
  *      zero-dependency (48 real npm packages), so unlike #9-10 it's not in
  *      the fast baseline seed.
- *  12. "Workspace Data Explorer" — the canonical SDK-RPC data reader. Same
+ *  12. "Workspace Data Explorer" — the canonical SDK data reader. Same
  *      "real, live workspace data" pitch as #9-10, but where those two hit the
- *      raw REST API with bare `fetch("/__busabase_api__/api/v1/...")`, this one
- *      goes through `busabase-sdk`'s `createBusabaseRpcClient` (the fully-typed
- *      oRPC transport the dashboard's own frontend uses) to list the
+ *      raw REST API with a bare `fetch("/api/v1/...")`, this one goes through
+ *      `busabase-sdk`'s `createBusabaseClient` (the fully-typed client the CLI
+ *      and agents use against that same surface) to list the
  *      workspace's nodes (`nodes.list`) and drill into them: a Doc renders its
  *      body (`docs.get`), a Base renders its records as a table
  *      (`records.listPaged` by the base node's `baseId`), a File shows its
@@ -1083,7 +1078,7 @@ function showEmpty(message) {
 }
 
 async function loadDeals() {
-  const basesRes = await fetch("/__busabase_api__/api/v1/bases");
+  const basesRes = await fetch("/api/v1/bases");
   if (!basesRes.ok) throw new Error("GET /api/v1/bases → " + basesRes.status);
   const bases = await basesRes.json();
   const deals = bases.find((b) => b.slug === "deals");
@@ -1094,7 +1089,7 @@ async function loadDeals() {
     return;
   }
 
-  const recordsRes = await fetch("/__busabase_api__/api/v1/records/paged?baseId=" + deals.id + "&limit=100");
+  const recordsRes = await fetch("/api/v1/records/paged?baseId=" + deals.id + "&limit=100");
   if (!recordsRes.ok) throw new Error("GET /api/v1/records/paged → " + recordsRes.status);
   const { records } = await recordsRes.json();
 
@@ -1199,7 +1194,7 @@ function isOverdue(fields) {
 }
 
 async function loadChecklist() {
-  const basesRes = await fetch("/__busabase_api__/api/v1/bases");
+  const basesRes = await fetch("/api/v1/bases");
   if (!basesRes.ok) throw new Error("GET /api/v1/bases → " + basesRes.status);
   const bases = await basesRes.json();
   const checklist = bases.find((b) => b.slug === "compliance-checklists");
@@ -1210,7 +1205,7 @@ async function loadChecklist() {
     return;
   }
 
-  const recordsRes = await fetch("/__busabase_api__/api/v1/records/paged?baseId=" + checklist.id + "&limit=100");
+  const recordsRes = await fetch("/api/v1/records/paged?baseId=" + checklist.id + "&limit=100");
   if (!recordsRes.ok) throw new Error("GET /api/v1/records/paged → " + recordsRes.status);
   const { records } = await recordsRes.json();
 

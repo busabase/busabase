@@ -109,7 +109,9 @@ export function FormDetailView({ orpc, slug }: { orpc: BusabaseQueryUtils; slug:
           <p className="text-muted-foreground text-xs">{messages.form.codeReviewHint}</p>
           {hasCustomPage ? (
             <div>
-              <div className="mb-1 font-mono text-muted-foreground text-xs uppercase">page</div>
+              <div className="mb-1 font-mono text-muted-foreground text-xs uppercase">
+                {messages.form.pageSource}
+              </div>
               <pre className="max-h-[32rem] overflow-auto rounded-md border border-border/60 bg-muted/20 p-3 text-xs">
                 <code>{form.page.code}</code>
               </pre>
@@ -120,7 +122,9 @@ export function FormDetailView({ orpc, slug }: { orpc: BusabaseQueryUtils; slug:
             </div>
           )}
           <div>
-            <div className="mb-1 font-mono text-muted-foreground text-xs uppercase">bindings</div>
+            <div className="mb-1 font-mono text-muted-foreground text-xs uppercase">
+              {messages.form.fieldBindings}
+            </div>
             <pre className="max-h-64 overflow-auto rounded-md border border-border/60 bg-muted/20 p-3 text-xs">
               <code>{JSON.stringify(form.bindings, null, 2)}</code>
             </pre>

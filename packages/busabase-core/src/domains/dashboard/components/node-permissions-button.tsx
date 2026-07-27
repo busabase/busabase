@@ -19,12 +19,12 @@ import { Globe, Lock, Shield, Trash2, Users } from "lucide-react";
 import { createContext, type ReactNode, useContext, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { useCoreI18n } from "../../../i18n";
-import { useIsAnonymousVisitor } from "../visitor-context";
-import { NodeActionButton } from "./node-action-button";
 
 type NodeVisibility = "private" | "workspace" | "public";
 type PermissionLevel = "read" | "changeRequest" | "write" | "manage";
 type SpaceVisibilityMode = "open" | "restricted";
+type PrincipalType = "user" | "team" | "space";
+type MutatingPrincipalType = "user" | "space";
 
 /**
  * Optional space-member list for the grant picker, injected by a multi-tenant
@@ -96,61 +96,20 @@ const buildFlatIndex = (
 };
 
 /**
- * Node-level Permissions manager: a trigger button + dialog. Access is modeled
- * the way Google Drive / Notion do it — a node inherits its space's default
- * visibility until you explicitly **Restrict access** (make it private), at
- * which point only the granted people (+ space admins) can see it. There is no
- * separate "Workspace/Public" radio: the space-wide Open/Restricted switch
- * (Space Settings) sets the default, and this dialog only overrides one node to
- * private. Inheritance cascades down folders. One component drives every entry
- * point (sidebar "•••" menu and each node-detail toolbar), same shape as
- * `NodeDeleteButton`.
+ * Node-level Permissions manager. Access is modeled the way Google Drive /
+ * Notion do it — a node inherits its space's default visibility until you
+ * explicitly **Restrict access** (make it private), at which point only the
+ * granted people (+ space admins) can see it. There is no separate
+ * "Workspace/Public" radio: the space-wide Open/Restricted switch (Space
+ * Settings) sets the default, and this dialog only overrides one node to
+ * private. Inheritance cascades down folders.
+ *
+ * Dialog-only, with no trigger of its own: every entry point (the sidebar row's
+ * "•••" menu in `dashboard-shell.tsx`, and `NodeActionsMenu` on each node-detail
+ * topbar) is a menu item that owns `open` and renders this. The standalone
+ * `NodePermissionsButton` that used to sit in those topbars is gone — the
+ * topbars now carry a single "•••" instead of a row of naked buttons.
  */
-export function NodePermissionsButton({
-  orpc,
-  nodeId,
-  nodeName,
-  variant = "toolbar",
-}: {
-  orpc: BusabaseQueryUtils;
-  nodeId: string;
-  nodeName: string;
-  /** "toolbar" = the bordered pill used in node-detail headers; "icon" = the
-   *  compact mobile toolbar action; "menu" = a full-width sidebar row. */
-  variant?: "toolbar" | "menu" | "icon";
-}) {
-  const messages = useCoreI18n();
-  const t = messages.permissions;
-  const [open, setOpen] = useState(false);
-  // Managing access is a manage-only action — a public read-only visitor can
-  // never use it, so self-gate here to cover every mount (base/doc/folder/file
-  // headers, sidebar menu). Hooks above run unconditionally first.
-  const isAnon = useIsAnonymousVisitor();
-  if (isAnon) {
-    return null;
-  }
-
-  return (
-    <>
-      <NodeActionButton
-        icon={Shield}
-        label={t.title}
-        onClick={() => setOpen(true)}
-        variant={variant}
-      />
-      {open && (
-        <NodePermissionsDialog
-          nodeId={nodeId}
-          nodeName={nodeName}
-          onOpenChange={setOpen}
-          open={open}
-          orpc={orpc}
-        />
-      )}
-    </>
-  );
-}
-
 export function NodePermissionsDialog({
   orpc,
   nodeId,
@@ -218,6 +177,13 @@ export function NodePermissionsDialog({
   const [newPrincipalId, setNewPrincipalId] = useState("");
   const [newPrincipalIsSpace, setNewPrincipalIsSpace] = useState(false);
   const [newRole, setNewRole] = useState<PermissionLevel>("read");
+  const [roleOverrides, setRoleOverrides] = useState<Record<string, PermissionLevel>>({});
+  const [pendingPrincipalKey, setPendingPrincipalKey] = useState<string | null>(null);
+
+  const principalKey = (principalType: PrincipalType, principalId: string) =>
+    `${principalType}:${principalId}`;
+  const toMutatingPrincipalType = (principalType: PrincipalType): MutatingPrincipalType =>
+    principalType === "team" ? "user" : principalType;
 
   const invalidate = () =>
     queryClient.invalidateQueries({
@@ -259,16 +225,59 @@ export function NodePermissionsDialog({
     }
   };
 
-  const handleRemove = async (principalType: "user" | "team" | "space", principalId: string) => {
+  const handleRoleChange = async (
+    principalType: PrincipalType,
+    principalId: string,
+    nextRole: PermissionLevel,
+  ) => {
+    const key = principalKey(principalType, principalId);
+    const mutationPrincipalType = toMutatingPrincipalType(principalType);
+    setRoleOverrides((prev) => ({ ...prev, [key]: nextRole }));
+    setPendingPrincipalKey(key);
+    try {
+      await addPrincipal.mutateAsync({
+        nodeId,
+        principalType: mutationPrincipalType,
+        principalId,
+        role: nextRole,
+      });
+      await invalidate();
+      setRoleOverrides((prev) => {
+        const next = { ...prev };
+        delete next[key];
+        return next;
+      });
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : t.failed);
+      setRoleOverrides((prev) => {
+        const next = { ...prev };
+        delete next[key];
+        return next;
+      });
+    } finally {
+      setPendingPrincipalKey((current) => (current === key ? null : current));
+    }
+  };
+
+  const handleRemove = async (principalType: PrincipalType, principalId: string) => {
+    const key = principalKey(principalType, principalId);
+    setPendingPrincipalKey(key);
     try {
       await removePrincipal.mutateAsync({
         nodeId,
-        principalType: principalType === "team" ? "user" : principalType,
+        principalType: toMutatingPrincipalType(principalType),
         principalId,
       });
       await invalidate();
+      setRoleOverrides((prev) => {
+        const next = { ...prev };
+        delete next[key];
+        return next;
+      });
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t.failed);
+    } finally {
+      setPendingPrincipalKey((current) => (current === key ? null : current));
     }
   };
 
@@ -333,35 +342,67 @@ export function NodePermissionsDialog({
                 {principals.length === 0 && (
                   <p className="text-muted-foreground text-xs">{t.noGrants}</p>
                 )}
-                {principals.map((principal) => (
-                  <div
-                    className="flex items-center justify-between rounded-md border border-border/60 px-3 py-2 text-sm"
-                    key={principal.id}
-                  >
-                    <span className="flex items-center gap-2">
-                      {principal.principalType === "space" ? (
-                        <Users className="size-4 text-muted-foreground" />
-                      ) : (
-                        <Shield className="size-4 text-muted-foreground" />
-                      )}
-                      <span>
-                        {principal.principalType === "space"
-                          ? t.everyone
-                          : memberName(principal.principalId)}
-                      </span>
-                      <span className="text-muted-foreground text-xs">
-                        · {ROLE_LABELS[principal.role]}
-                      </span>
-                    </span>
-                    <button
-                      className="text-muted-foreground hover:text-red-600"
-                      onClick={() => handleRemove(principal.principalType, principal.principalId)}
-                      type="button"
+                {principals.map((principal) => {
+                  const key = principalKey(principal.principalType, principal.principalId);
+                  const isPending = pendingPrincipalKey === key;
+                  const roleValue = roleOverrides[key] ?? principal.role;
+
+                  return (
+                    <div
+                      className="flex items-center justify-between gap-3 rounded-md border border-border/60 px-3 py-2 text-sm"
+                      key={principal.id}
                     >
-                      <Trash2 className="size-3.5" />
-                    </button>
-                  </div>
-                ))}
+                      <span className="flex min-w-0 items-center gap-2">
+                        {principal.principalType === "space" ? (
+                          <Users className="size-4 shrink-0 text-muted-foreground" />
+                        ) : (
+                          <Shield className="size-4 shrink-0 text-muted-foreground" />
+                        )}
+                        <span className="truncate">
+                          {principal.principalType === "space"
+                            ? t.everyone
+                            : memberName(principal.principalId)}
+                        </span>
+                      </span>
+                      <div className="flex shrink-0 items-center gap-2">
+                        <Select
+                          onValueChange={(value) =>
+                            handleRoleChange(
+                              principal.principalType,
+                              principal.principalId,
+                              value as PermissionLevel,
+                            )
+                          }
+                          value={roleValue}
+                        >
+                          <SelectTrigger
+                            className="h-8 w-40"
+                            data-testid={`principal-role-select-${principal.id}`}
+                            disabled={isPending}
+                          >
+                            <SelectValue>{ROLE_LABELS[roleValue]}</SelectValue>
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="read">{t.roleRead}</SelectItem>
+                            <SelectItem value="changeRequest">{t.roleChangeRequest}</SelectItem>
+                            <SelectItem value="write">{t.roleWrite}</SelectItem>
+                            <SelectItem value="manage">{t.roleManage}</SelectItem>
+                          </SelectContent>
+                        </Select>
+                        <button
+                          className="text-muted-foreground hover:text-red-600"
+                          disabled={isPending}
+                          onClick={() =>
+                            handleRemove(principal.principalType, principal.principalId)
+                          }
+                          type="button"
+                        >
+                          <Trash2 className="size-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
 
               {/* Add grant */}
@@ -422,6 +463,19 @@ export function NodePermissionsDialog({
                   {t.add}
                 </Button>
               </div>
+
+              {/*
+                The four role labels have to stay short — they also render inline
+                on each existing grant row and inside a narrow select trigger —
+                so what `write`/`manage` actually convey goes here instead. It is
+                worth spelling out: those two levels carry the right to APPROVE
+                and merge proposals on this node, which is the whole point of
+                handing a folder to its owner, and nothing in a two-word label
+                tells you that.
+              */}
+              <p className="text-muted-foreground text-xs" data-testid="grant-role-hint">
+                {t.roleApprovalHint}
+              </p>
             </div>
           )}
 

@@ -92,7 +92,13 @@ export function ProductReadyDashboardShell({
       plan: LL.shell.localPlan(),
     },
     appLogo: BUSABASE_LOGO,
-    footerExtra: <BusabaseAgentSkillButton defaultOrigin="http://localhost:15419" lang={locale} />,
+    footerExtra: (
+      <BusabaseAgentSkillButton
+        defaultOrigin="http://localhost:15419"
+        edition="desktop"
+        lang={locale}
+      />
+    ),
     hideUserMenu: true,
     isLoadingSpaces: false,
     spaces: spaces.map((space) => ({

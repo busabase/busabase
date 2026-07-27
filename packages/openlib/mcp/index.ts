@@ -3,7 +3,11 @@ import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import {
   CallToolRequestSchema,
+  GetPromptRequestSchema,
+  ListPromptsRequestSchema,
+  ListResourcesRequestSchema,
   ListToolsRequestSchema,
+  ReadResourceRequestSchema,
   type Tool,
   type ToolAnnotations,
 } from "@modelcontextprotocol/sdk/types.js";
@@ -68,6 +72,109 @@ export interface McpToolCallContext {
   tool: DiscoveredOpenApiTool;
 }
 
+/**
+ * A text document the server publishes over `resources/list` + `resources/read`.
+ *
+ * Tools tell a client *what it can do*; a resource tells it *how this server expects
+ * to be used*. Hosts pull resources on demand, so a long behavioural document costs
+ * nothing until an agent actually asks for it — unlike `instructions`, which every
+ * session pays for.
+ */
+export interface McpResourceDefinition {
+  uri: string;
+  name: string;
+  title?: string;
+  description?: string;
+  /** Defaults to `text/markdown`. */
+  mimeType?: string;
+  read: (extra: McpToolExtra) => string | Promise<string>;
+}
+
+export interface McpPromptArgumentDefinition {
+  name: string;
+  description?: string;
+  required?: boolean;
+}
+
+/**
+ * A named, user-invocable prompt published over `prompts/list` + `prompts/get`.
+ * Hosts surface these as slash commands, which is the only onboarding affordance
+ * available to a chat client that cannot run a shell.
+ */
+export interface McpPromptDefinition {
+  name: string;
+  title?: string;
+  description?: string;
+  arguments?: McpPromptArgumentDefinition[];
+  get: (args: Record<string, string>, extra: McpToolExtra) => string | Promise<string>;
+}
+
+const DEFAULT_MCP_RESOURCE_MIME_TYPE = "text/markdown";
+
+/**
+ * Register `resources/*` and `prompts/*` handlers. Both are opt-in: a server that
+ * passes neither keeps exactly the tools-only capability set it had before.
+ */
+export const registerMcpDocuments = (options: {
+  server: McpServerLike;
+  resources?: readonly McpResourceDefinition[];
+  prompts?: readonly McpPromptDefinition[];
+}) => {
+  const resources = options.resources ?? [];
+  const prompts = options.prompts ?? [];
+
+  if (resources.length) {
+    const byUri = new Map(resources.map((resource) => [resource.uri, resource]));
+    options.server.setRequestHandler(ListResourcesRequestSchema, async () => ({
+      resources: resources.map(({ uri, name, title, description, mimeType }) => ({
+        uri,
+        name,
+        ...(title ? { title } : {}),
+        ...(description ? { description } : {}),
+        mimeType: mimeType ?? DEFAULT_MCP_RESOURCE_MIME_TYPE,
+      })),
+    }));
+    options.server.setRequestHandler(ReadResourceRequestSchema, async (request, extra) => {
+      const resource = byUri.get(request.params.uri);
+      if (!resource) {
+        throw new Error(`MCP resource not found: ${request.params.uri}`);
+      }
+      return {
+        contents: [
+          {
+            uri: resource.uri,
+            mimeType: resource.mimeType ?? DEFAULT_MCP_RESOURCE_MIME_TYPE,
+            text: await resource.read(extra as McpToolExtra),
+          },
+        ],
+      };
+    });
+  }
+
+  if (prompts.length) {
+    const byName = new Map(prompts.map((prompt) => [prompt.name, prompt]));
+    options.server.setRequestHandler(ListPromptsRequestSchema, async () => ({
+      prompts: prompts.map(({ name, title, description, arguments: args }) => ({
+        name,
+        ...(title ? { title } : {}),
+        ...(description ? { description } : {}),
+        ...(args?.length ? { arguments: args } : {}),
+      })),
+    }));
+    options.server.setRequestHandler(GetPromptRequestSchema, async (request, extra) => {
+      const prompt = byName.get(request.params.name);
+      if (!prompt) {
+        throw new Error(`MCP prompt not found: ${request.params.name}`);
+      }
+      const text = await prompt.get(request.params.arguments ?? {}, extra as McpToolExtra);
+      return {
+        ...(prompt.description ? { description: prompt.description } : {}),
+        messages: [{ role: "user" as const, content: { type: "text" as const, text } }],
+      };
+    });
+  }
+};
+
 interface OpenApiMcpToolCustomizationOptions {
   additionalInputSchema?: (tool: DiscoveredOpenApiTool) => McpInputSchema | undefined;
   annotations?: (tool: DiscoveredOpenApiTool) => ToolAnnotations | undefined;
@@ -91,6 +198,34 @@ export interface RegisterOpenApiMcpToolsOptions<TClient>
   exclude?: (tool: DiscoveredOpenApiTool) => boolean;
   include?: (tool: DiscoveredOpenApiTool) => boolean;
   name?: (keyPath: string[], procedure: OpenApiProcedure) => string;
+  additionalTools?: readonly McpCustomTool<TClient>[];
+  additionalToolsInputSchema?: McpInputSchema;
+}
+
+/**
+ * A tool that is not one endpoint.
+ *
+ * The contract-derived catalog is one tool per procedure, which is the right
+ * shape for an SDK and the wrong one for an agent whenever a job spans several
+ * endpoints (or wants a clearer name than the endpoint has). A custom tool
+ * carries its own schema and its own `execute`, so it can call the client more
+ * than once, or pick between endpoints, while still appearing in `tools/list`
+ * alongside everything else.
+ *
+ * `keyPath` is not used for dispatch — `execute` handles that — but is passed
+ * through in the call context so host customization hooks that key off a tool's
+ * path (space scoping, say) treat these the same as generated tools.
+ */
+export interface McpCustomTool<TClient> {
+  readonly name: string;
+  readonly title: string;
+  readonly description: string;
+  /** Zod schema for the tool's arguments. */
+  readonly inputSchema: McpInputSchema;
+  readonly keyPath: readonly string[];
+  readonly annotations?: ToolAnnotations;
+  readonly securitySchemes?: McpSecurityScheme[];
+  readonly execute: (client: TClient, input: unknown) => Promise<unknown>;
 }
 
 export interface CreateOpenApiMcpHandlerOptions<TClient>
@@ -101,6 +236,14 @@ export interface CreateOpenApiMcpHandlerOptions<TClient>
   include?: (tool: DiscoveredOpenApiTool) => boolean;
   instructions?: string;
   name?: (keyPath: string[], procedure: OpenApiProcedure) => string;
+  /** Task-level tools published alongside the contract-derived ones. */
+  additionalTools?: readonly McpCustomTool<TClient>[];
+  /** Merged into every custom tool's schema, mirroring `additionalInputSchema`. */
+  additionalToolsInputSchema?: McpInputSchema;
+  /** Opt-in `prompts/*` surface. Omit to keep the tools-only capability set. */
+  prompts?: readonly McpPromptDefinition[];
+  /** Opt-in `resources/*` surface. Omit to keep the tools-only capability set. */
+  resources?: readonly McpResourceDefinition[];
   serverInfo?: {
     name: string;
     version: string;
@@ -241,11 +384,62 @@ export const registerOpenApiMcpTools = <TClient>(
     }),
   );
 
+  // Task-level tools. Registered after the generated ones and keyed by name, so
+  // a task that supersedes an endpoint tool is expected to have had that tool
+  // excluded — this map would otherwise just shadow it silently.
+  const customTools = new Map(
+    (options.additionalTools ?? []).map((tool) => {
+      const ownSchema = convertMcpInputSchema(schemaConverter, tool.inputSchema, tool.name);
+      const extraSchema = options.additionalToolsInputSchema
+        ? convertMcpInputSchema(schemaConverter, options.additionalToolsInputSchema, tool.name)
+        : undefined;
+      return [
+        tool.name,
+        {
+          tool,
+          definition: {
+            name: tool.name,
+            title: tool.title,
+            description: tool.description,
+            inputSchema: extraSchema
+              ? mergeAdditionalInputSchema(ownSchema, extraSchema, tool.name)
+              : ownSchema,
+            ...(tool.annotations ? { annotations: tool.annotations } : {}),
+            ...(tool.securitySchemes ? { securitySchemes: tool.securitySchemes } : {}),
+            _meta: {
+              orpcPath: tool.keyPath.join("."),
+              taskTool: true,
+              ...(tool.securitySchemes ? { securitySchemes: tool.securitySchemes } : {}),
+            },
+          } satisfies Tool & { securitySchemes?: McpSecurityScheme[] },
+        },
+      ] as const;
+    }),
+  );
+
   options.server.setRequestHandler(ListToolsRequestSchema, async () => ({
-    tools: [...tools.values()].map(({ definition }) => definition),
+    tools: [
+      ...[...customTools.values()].map(({ definition }) => definition),
+      ...[...tools.values()].map(({ definition }) => definition),
+    ],
   }));
   options.server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
     try {
+      const custom = customTools.get(request.params.name);
+      if (custom) {
+        const rawArgs = request.params.arguments ?? {};
+        const client = options.createClient(extra as McpToolExtra, {
+          args: rawArgs,
+          // Custom tools have no contract procedure; the surrounding shape is
+          // what host hooks (space scoping, header injection) actually read.
+          tool: {
+            name: custom.tool.name,
+            keyPath: [...custom.tool.keyPath],
+          } as unknown as DiscoveredOpenApiTool,
+        });
+        return asMcpJson(await custom.tool.execute(client, rawArgs));
+      }
+
       const registered = tools.get(request.params.name);
       if (!registered) {
         throw new Error(`MCP tool not found: ${request.params.name}`);
@@ -395,12 +589,23 @@ export const createOpenApiMcpHandler = <TClient>(
 
   const createSession = async () => {
     const server = new Server(options.serverInfo ?? { name: "OpenAPI MCP", version: "0.1.0" }, {
-      capabilities: { tools: {} },
+      capabilities: {
+        tools: {},
+        ...(options.resources?.length ? { resources: {} } : {}),
+        ...(options.prompts?.length ? { prompts: {} } : {}),
+      },
       instructions: options.instructions,
+    });
+    registerMcpDocuments({
+      server,
+      prompts: options.prompts,
+      resources: options.resources,
     });
     registerOpenApiMcpTools({
       server,
       additionalInputSchema: options.additionalInputSchema,
+      additionalTools: options.additionalTools,
+      additionalToolsInputSchema: options.additionalToolsInputSchema,
       annotations: options.annotations,
       contract: options.contract,
       createClient: options.createClient,

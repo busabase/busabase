@@ -13,7 +13,7 @@ export type {
  *   server-side OS process (NOT OS-isolated — trust model is the local host).
  *   Its listening port IS reachable from the host, so the same-origin reverse
  *   proxy preview (`/api/airapp-preview/{nodeId}/`) and the
- *   `/__busabase_api__/` data bridge both work.
+ *   `/api/v1` same-origin data access both work.
  * - `"srt"` runs the same `npm install` + `npm run dev` lifecycle wrapped in
  *   `@anthropic-ai/sandbox-runtime`'s `SandboxManager` for real OS-level
  *   isolation (seccomp/bubblewrap on Linux, `sandbox-exec` on macOS). Isolated

@@ -3,14 +3,17 @@
 import { Bot, Database, GitPullRequest, Sparkles } from "lucide-react";
 import { useState } from "react";
 import { useCoreI18n } from "../../../i18n";
+import type { McpGuideEdition } from "./agent-mcp-guides";
 import { AgentIntegrationDialog } from "./agent-skill-button";
 
 interface EmptyAgentGuideProps {
+  /** Selects Cloud OAuth guidance or Desktop's local no-auth guidance. */
+  edition?: McpGuideEdition;
   /** Current UI language — localizes the pasted prompt in the Agent Integration dialog. */
   lang?: string;
 }
 
-export function EmptyAgentGuide({ lang }: EmptyAgentGuideProps = {}) {
+export function EmptyAgentGuide({ edition = "desktop", lang }: EmptyAgentGuideProps = {}) {
   const messages = useCoreI18n();
   const [open, setOpen] = useState(false);
   const guideItems = [
@@ -73,6 +76,7 @@ export function EmptyAgentGuide({ lang }: EmptyAgentGuideProps = {}) {
         open={open}
         onOpenChange={setOpen}
         defaultOrigin="https://busabase.com"
+        edition={edition}
         lang={lang}
       />
     </>

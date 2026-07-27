@@ -717,8 +717,29 @@ That one call tells you where things stand:
 - **Responds with \`[]\`** → installed but empty. Skip to **Step 2** to set it up.
 - **Responds with Bases already** → installed and in use. Jump to **Step 4 (ongoing use)**.
 
-Once it answers, **persist this connection to \`~/.busabase/.env\`** — the installed \`busabase\`
-skill and every future session read it from there. Local needs only the base URL (no key):
+Once it answers, **persist this connection** — the installed \`busabase\` skill and every future
+session read it from \`~/.busabase/.env\`. Local needs only the base URL (no key):
+
+\`\`\`bash
+npx busabase-cli login --base-url "${local}"
+\`\`\`
+
+Prefer that over writing the file yourself — it verifies the server is reachable and open
+before saving anything.
+
+**If this machine already has a Busabase account signed in**, that command replaces it: it is
+"connect to this instead". Keep both by giving the local one its own account instead:
+
+\`\`\`bash
+npx busabase-cli login --profile local --base-url "${local}"   # adds an account, switches to it
+npx busabase-cli auth status                                   # see them all (* = active)
+\`\`\`
+
+Never write \`~/.busabase/.env\` by hand once more than one account exists. That file is a copy
+of whichever account is active, so a raw \`>\` blanks that account's credentials — first for
+\`curl\`/SDK readers, then permanently, because the next write mirrors the truncated file back
+into the account's own \`profiles/*.env\`. Hand-writing is only for a machine with no CLI and a
+single account:
 
 \`\`\`bash
 mkdir -p ~/.busabase

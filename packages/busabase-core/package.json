@@ -1,7 +1,7 @@
 {
   "name": "busabase-core",
   "description": "Shared Busabase open-core protocol, local store, API helpers, and dashboard components.",
-  "version": "0.9.17",
+  "version": "0.9.18",
   "private": true,
   "type": "module",
   "exports": {
@@ -76,10 +76,6 @@
     "./domains/airapp/logic/local-preview-proxy": {
       "types": "./src/domains/airapp/logic/local-preview-proxy.ts",
       "default": "./src/domains/airapp/logic/local-preview-proxy.ts"
-    },
-    "./domains/airapp/logic/local-preview-bridge": {
-      "types": "./src/domains/airapp/logic/local-preview-bridge.ts",
-      "default": "./src/domains/airapp/logic/local-preview-bridge.ts"
     },
     "./domains/base/handlers": {
       "types": "./src/domains/base/handlers.ts",
@@ -189,6 +185,14 @@
       "types": "./src/openapi/spec.ts",
       "default": "./src/openapi/spec.ts"
     },
+    "./openapi/cors": {
+      "types": "./src/openapi/cors.ts",
+      "default": "./src/openapi/cors.ts"
+    },
+    "./openapi/error-envelope": {
+      "types": "./src/openapi/error-envelope.ts",
+      "default": "./src/openapi/error-envelope.ts"
+    },
     "./router": {
       "types": "./src/router.ts",
       "default": "./src/router.ts"
@@ -200,6 +204,10 @@
     "./skill-doc": {
       "types": "./src/skill-doc.ts",
       "default": "./src/skill-doc.ts"
+    },
+    "./mcp-skill": {
+      "types": "./src/mcp-skill.ts",
+      "default": "./src/mcp-skill.ts"
     },
     "./i18n": {
       "types": "./src/i18n/index.tsx",

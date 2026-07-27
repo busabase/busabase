@@ -155,6 +155,8 @@ const zhCN: Translation = {
     disconnectButton: "断开连接",
     connectFailed: "启动云端连接流程失败，请重试。",
     disconnectFailed: "断开连接失败，请重试。",
+    statusRefreshFailed: "连接状态已发生变化，但暂时无法加载最新状态。",
+    statusDiagnostic: "连接诊断：{error}",
     popupBlocked: "浏览器拦截了登录弹窗，请允许弹窗后重试。",
     aboutTitle: "关于云端连接",
     aboutDescription:

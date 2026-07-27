@@ -7,7 +7,6 @@ import { Button } from "kui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "kui/select";
 import { Loader2, Maximize, Minimize, Pin, Play, RotateCcw } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { createPortal } from "react-dom";
 import { useLocation, useSearch } from "wouter";
 import { fmt, useCoreI18n } from "../../../i18n";
 import { EmptyState } from "../../dashboard/components/primitives";
@@ -163,36 +162,35 @@ export function useAirAppRunner({
 
 export type AirAppRunnerState = ReturnType<typeof useAirAppRunner>;
 
-interface AirAppRunControlsProps {
-  runner: AirAppRunnerState;
-  /** Optional context (name/id) used by the "pin to side panel" and
-   *  fullscreen actions — the run/status controls only need `runner`. */
-  airapp: AirAppVO | null;
-  showPinToSidePanel?: boolean;
-  syncFullscreenWithUrl?: boolean;
+export interface AirAppFullscreenState {
+  fullscreen: boolean;
+  setFullscreen: (fullscreen: boolean) => void;
 }
 
-/** The run control cluster shared by the AirApp detail-view header and the
- *  side-panel toolbar. Fullscreen is a viewport surface rather than a modal:
- *  the preview fills the browser and a floating restore button returns to the
- *  exact surface it came from (detail view or side panel). */
-export function AirAppRunControls({
-  runner,
-  airapp,
-  showPinToSidePanel = true,
-  syncFullscreenWithUrl = false,
-}: AirAppRunControlsProps) {
-  const messages = useCoreI18n();
-  const { status, previewUrl, run, isBusy, runnerKind, setRunnerKind } = runner;
+/**
+ * Owns the "maximize the preview" toggle for one AirApp surface.
+ *
+ * Deliberately a piece of state shared by the toolbar (which toggles it) and
+ * the preview (which grows to fill the viewport) rather than a modal that
+ * renders its own iframe: an iframe is reloaded by the browser whenever its
+ * element is re-parented or re-created, which would throw away the running
+ * app's in-page state and re-issue every request it had already made. The one
+ * and only preview iframe therefore never moves — only its container's CSS
+ * changes.
+ */
+export function useAirAppFullscreen({
+  syncWithUrl = false,
+}: {
+  syncWithUrl?: boolean;
+} = {}): AirAppFullscreenState {
   const [localFullscreen, setLocalFullscreen] = useState(false);
   const [location, setLocation] = useLocation();
   const currentSearch = useSearch();
-  const fullscreen = syncFullscreenWithUrl
-    ? isAirAppFullscreenSearch(currentSearch)
-    : localFullscreen;
+  const fullscreen = syncWithUrl ? isAirAppFullscreenSearch(currentSearch) : localFullscreen;
+
   const setFullscreen = useCallback(
     (nextFullscreen: boolean) => {
-      if (!syncFullscreenWithUrl) {
+      if (!syncWithUrl) {
         setLocalFullscreen(nextFullscreen);
         return;
       }
@@ -200,7 +198,7 @@ export function AirAppRunControls({
       const nextSearch = updateAirAppFullscreenSearch(currentSearch, nextFullscreen);
       setLocation(nextSearch ? `${location}?${nextSearch}` : location, { replace: true });
     },
-    [currentSearch, location, setLocation, syncFullscreenWithUrl],
+    [currentSearch, location, setLocation, syncWithUrl],
   );
 
   useEffect(() => {
@@ -221,6 +219,35 @@ export function AirAppRunControls({
       window.removeEventListener("keydown", exitOnEscape);
     };
   }, [fullscreen, setFullscreen]);
+
+  return { fullscreen, setFullscreen };
+}
+
+interface AirAppRunControlsProps {
+  runner: AirAppRunnerState;
+  /** Optional context (name/id) used by the "pin to side panel" and
+   *  fullscreen actions — the run/status controls only need `runner`. */
+  airapp: AirAppVO | null;
+  showPinToSidePanel?: boolean;
+  /** Fullscreen state shared with the `AirAppRunPreview` of the same surface,
+   *  so the toggle grows the existing preview instead of opening a second one. */
+  fullscreenState: AirAppFullscreenState;
+}
+
+/** The run control cluster shared by the AirApp detail-view header and the
+ *  side-panel toolbar. Fullscreen is a viewport surface rather than a modal:
+ *  the already-running preview grows to fill the browser and a floating
+ *  restore button returns it to the exact surface it came from (detail view
+ *  or side panel). */
+export function AirAppRunControls({
+  runner,
+  airapp,
+  showPinToSidePanel = true,
+  fullscreenState,
+}: AirAppRunControlsProps) {
+  const messages = useCoreI18n();
+  const { status, previewUrl, run, isBusy, runnerKind, setRunnerKind } = runner;
+  const { fullscreen, setFullscreen } = fullscreenState;
 
   const statusLabel: Record<AirAppRunStatus, string> = {
     idle: messages.airapp.statusIdle,
@@ -293,7 +320,7 @@ export function AirAppRunControls({
           <Pin className="size-3.5" />
         </Button>
       ) : null}
-      {previewUrl ? (
+      {previewUrl && !fullscreen ? (
         <Button
           aria-label={messages.airapp.enterFullscreen}
           onClick={() => setFullscreen(true)}
@@ -321,33 +348,6 @@ export function AirAppRunControls({
         )}
         {status === "ready" || status === "error" ? messages.airapp.runAgain : messages.airapp.run}
       </Button>
-      {previewUrl && fullscreen && typeof document !== "undefined"
-        ? createPortal(
-            <section
-              aria-label={airapp?.node.name ?? messages.airapp.previewTitle}
-              className="fixed inset-0 z-[100] bg-background"
-            >
-              <Button
-                aria-label={messages.airapp.exitFullscreen}
-                className="absolute top-3 right-3 z-10 bg-background/90 shadow-lg backdrop-blur-sm"
-                onClick={() => setFullscreen(false)}
-                size="icon"
-                title={messages.airapp.exitFullscreen}
-                type="button"
-                variant="outline"
-              >
-                <Minimize className="size-4" />
-              </Button>
-              <iframe
-                className="h-full w-full border-0 bg-white"
-                sandbox="allow-same-origin allow-scripts"
-                src={previewUrl}
-                title={messages.airapp.previewTitle}
-              />
-            </section>,
-            document.body,
-          )
-        : null}
     </div>
   );
 }
@@ -362,22 +362,52 @@ interface AirAppRunPreviewProps {
    *  own compact header instead and passes `false` so the preview iframe gets
    *  every vertical pixel below it. */
   showToolbar?: boolean;
+  /** Shared with the `AirAppRunControls` of the same surface. When the surface
+   *  has no external toolbar (side panel), it is omitted and this component
+   *  owns the state for its own toolbar. */
+  fullscreenState?: AirAppFullscreenState;
 }
 
 /** "App" tab content: the live preview iframe, optionally topped by a local
- *  run toolbar (see `showToolbar`). */
-export function AirAppRunPreview({ runner, airapp, showToolbar = true }: AirAppRunPreviewProps) {
+ *  run toolbar (see `showToolbar`).
+ *
+ *  Going fullscreen only swaps this container's classes — the iframe element
+ *  underneath is never re-created or re-parented, so the running app keeps its
+ *  DOM, JS memory and already-fetched data instead of booting again. */
+export function AirAppRunPreview({
+  runner,
+  airapp,
+  showToolbar = true,
+  fullscreenState,
+}: AirAppRunPreviewProps) {
   const messages = useCoreI18n();
   const { status, previewUrl, error } = runner;
+  const ownFullscreen = useAirAppFullscreen();
+  const activeFullscreen = fullscreenState ?? ownFullscreen;
+  const { fullscreen, setFullscreen } = activeFullscreen;
 
   return (
-    <div className="flex h-full min-h-0 flex-col">
+    <section
+      aria-label={airapp?.node.name ?? messages.airapp.previewTitle}
+      className={
+        fullscreen
+          ? "fixed inset-0 z-[100] flex h-full min-h-0 flex-col bg-background"
+          : "flex h-full min-h-0 flex-col"
+      }
+      data-airapp-fullscreen={fullscreen ? "true" : "false"}
+      data-airapp-preview=""
+    >
       {showToolbar ? (
         <div className="flex min-h-11 items-center justify-between gap-2 border-border/60 border-b px-4 py-2">
           <span className="font-medium text-muted-foreground text-xs uppercase">
             {messages.airapp.runPanelTitle}
           </span>
-          <AirAppRunControls airapp={airapp} runner={runner} showPinToSidePanel={false} />
+          <AirAppRunControls
+            airapp={airapp}
+            fullscreenState={activeFullscreen}
+            runner={runner}
+            showPinToSidePanel={false}
+          />
         </div>
       ) : null}
 
@@ -387,7 +417,20 @@ export function AirAppRunPreview({ runner, airapp, showToolbar = true }: AirAppR
         </div>
       ) : null}
 
-      <div className="min-h-0 flex-1">
+      <div className="relative min-h-0 flex-1">
+        {previewUrl && fullscreen ? (
+          <Button
+            aria-label={messages.airapp.exitFullscreen}
+            className="absolute top-3 right-3 z-10 bg-background/90 shadow-lg backdrop-blur-sm"
+            onClick={() => setFullscreen(false)}
+            size="icon"
+            title={messages.airapp.exitFullscreen}
+            type="button"
+            variant="outline"
+          >
+            <Minimize className="size-4" />
+          </Button>
+        ) : null}
         {previewUrl ? (
           <iframe
             className="h-full w-full border-0 bg-white"
@@ -405,7 +448,7 @@ export function AirAppRunPreview({ runner, airapp, showToolbar = true }: AirAppR
           </div>
         )}
       </div>
-    </div>
+    </section>
   );
 }
 

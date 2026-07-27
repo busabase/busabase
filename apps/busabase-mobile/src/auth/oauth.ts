@@ -2,7 +2,9 @@ import * as Crypto from "expo-crypto";
 import * as WebBrowser from "expo-web-browser";
 import { busabaseConfig } from "~/connection/config";
 import {
+  addCloudSession,
   type CloudSession,
+  type CloudUserProfile,
   getCloudSession,
   isCloudSessionAccessTokenUsable,
   setCloudSession,
@@ -20,6 +22,7 @@ interface OAuthTokenResponse {
   access_token?: string;
   refresh_token?: string;
   expires_in?: number;
+  user?: CloudUserProfile;
 }
 
 const TOKEN_REFRESH_WINDOW_MS = 5 * 60 * 1000;
@@ -69,7 +72,10 @@ const buildAuthorizeUrl = async (): Promise<OAuthAuthorizationRequest> => {
   return { url: url.toString(), state, codeVerifier };
 };
 
-const parseTokenResponse = (json: OAuthTokenResponse): CloudSession => {
+const parseTokenResponse = (
+  json: OAuthTokenResponse,
+  fallbackUser?: CloudUserProfile,
+): CloudSession => {
   if (
     !json.access_token?.startsWith("bso_") ||
     !json.refresh_token?.startsWith("bsr_") ||
@@ -82,6 +88,7 @@ const parseTokenResponse = (json: OAuthTokenResponse): CloudSession => {
     accessToken: json.access_token,
     refreshToken: json.refresh_token,
     expiresAt: new Date(Date.now() + json.expires_in * 1000).toISOString(),
+    user: json.user ?? fallbackUser,
   };
   return session;
 };
@@ -128,7 +135,10 @@ const refreshCloudSession = async (session: CloudSession): Promise<CloudSession 
       }),
     });
     if (!response.ok) return isCloudSessionAccessTokenUsable(session) ? session : null;
-    const refreshed = parseTokenResponse((await response.json()) as OAuthTokenResponse);
+    const refreshed = parseTokenResponse(
+      (await response.json()) as OAuthTokenResponse,
+      session.user,
+    );
     await setCloudSession(refreshed);
     return refreshed;
   } catch {
@@ -139,7 +149,9 @@ const refreshCloudSession = async (session: CloudSession): Promise<CloudSession 
 export async function getValidBusabaseCloudSession(): Promise<CloudSession | null> {
   const session = await getCloudSession();
   if (!session) return null;
-  if (isCloudSessionAccessTokenUsable(session, TOKEN_REFRESH_WINDOW_MS)) return session;
+  if (session.user && isCloudSessionAccessTokenUsable(session, TOKEN_REFRESH_WINDOW_MS)) {
+    return session;
+  }
   if (!refreshPromise) {
     refreshPromise = refreshCloudSession(session).finally(() => {
       refreshPromise = null;
@@ -179,7 +191,15 @@ export async function signInWithBusabaseCloud(): Promise<CloudSession> {
     code,
     codeVerifier: request.codeVerifier,
   });
-  await setCloudSession(session);
+  try {
+    const replaced = await addCloudSession(session);
+    if (replaced && replaced.refreshToken !== session.refreshToken) {
+      await revokeBusabaseCloudSession(replaced);
+    }
+  } catch (error) {
+    await revokeBusabaseCloudSession(session);
+    throw error;
+  }
   return session;
 }
 

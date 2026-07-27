@@ -1,7 +1,8 @@
-import { getNodeType } from "busabase-contract/domains";
+import { getNodeType, hasCapability } from "busabase-contract/domains";
 import type { NodeVO } from "busabase-contract/types";
 import {
   FolderOpen,
+  FolderPlus,
   FolderTree,
   Globe,
   type LucideIcon,
@@ -34,9 +35,22 @@ interface NodeActionsSheetProps {
   /** Resolved space, for the share link and the Agent-prompt target line. */
   spaceId?: string | null;
   spaceName?: string | null;
+  /**
+   * The space's default content visibility (`auth.verify` → `space
+   * .nodeVisibilityMode`), from the same query as `spaceId`/`spaceName`. The
+   * Permissions sheet needs it to describe a node's effective access and to
+   * decide whether per-node grants are worth showing.
+   */
+  spaceVisibilityMode?: "open" | "restricted" | null;
   onClose: () => void;
   onOpenNode: (node: NodeVO) => void;
   onToggleFavorite: (node: NodeVO) => void;
+  /**
+   * Create a new node INSIDE this one — the touch equivalent of the "+" web
+   * puts on every container row (`onAddChild` in `buildNavItem`). Omitted for
+   * rows where web strips `onAddChild` too, i.e. the flat Favorites entries.
+   */
+  onCreateChild?: (node: NodeVO) => void;
 }
 
 type Mode = "menu" | "rename" | "move" | "permissions" | "agentPrompts" | "share" | "delete";
@@ -83,9 +97,11 @@ export function NodeActionsSheet({
   isFavorite,
   spaceId,
   spaceName,
+  spaceVisibilityMode,
   onClose,
   onOpenNode,
   onToggleFavorite,
+  onCreateChild,
 }: NodeActionsSheetProps) {
   const tokens = useTokens();
   const { t } = useI18n();
@@ -94,6 +110,8 @@ export function NodeActionsSheet({
   const typeLabel = getNodeType(node.type)?.label ?? node.type;
   const canRename = node.type !== "base";
   const canShare = !!node.slug;
+  // Same gate as web: only container-capable types get a create-child entry.
+  const canCreateChild = !!onCreateChild && hasCapability(node.type, "container");
 
   const actions: ActionDef[] = [
     ...(canOpen
@@ -103,6 +121,21 @@ export function NodeActionsSheet({
             label: t.nodeActions.open,
             icon: FolderOpen,
             onPress: () => onOpenNode(node),
+          },
+        ]
+      : []),
+    // Second, right under Open: web's "+" sits on the row itself, ahead of the
+    // "•••" trigger, so this keeps the same precedence. It lives in the sheet
+    // rather than as a second button on the row because a 44pt drawer row
+    // already carries a chevron and a "•••"; a third ~28pt target next to them
+    // is below the comfortable touch minimum and would crowd out the node name.
+    ...(canCreateChild && onCreateChild
+      ? [
+          {
+            key: "createChild",
+            label: t.nodeActions.createInside,
+            icon: FolderPlus,
+            onPress: () => onCreateChild(node),
           },
         ]
       : []),
@@ -218,6 +251,7 @@ export function NodeActionsSheet({
         visible={mode === "permissions"}
         node={node}
         nodes={nodes}
+        spaceVisibilityMode={spaceVisibilityMode}
         onClose={onClose}
         onBack={() => setMode("menu")}
       />

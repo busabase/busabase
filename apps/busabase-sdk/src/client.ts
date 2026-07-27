@@ -1,6 +1,5 @@
 import { createORPCClient, ORPCError } from "@orpc/client";
-import { RPCLink } from "@orpc/client/fetch";
-import { type ContractRouterClient, inferRPCMethodFromContractRouter } from "@orpc/contract";
+import type { ContractRouterClient } from "@orpc/contract";
 import { OpenAPILink } from "@orpc/openapi-client/fetch";
 import { type CloudContract, cloudContract } from "busabase-contract/contract/cloud";
 
@@ -33,8 +32,11 @@ export interface BusabaseConfig {
    */
   baseUrl?: string;
   /**
-   * Bearer token. Only Busabase Cloud requires it; a local OSS server is open.
-   * Falls back to `BUSABASE_API_KEY`.
+   * Bearer token. Falls back to `BUSABASE_API_KEY`. Omit it in the two cases
+   * where the server authenticates you some other way: a local OSS server
+   * (`apps/busabase`) is open, and a *same-origin browser* call (e.g. from an
+   * AirApp running inside Busabase) authenticates as the logged-in user via
+   * the ambient session cookie.
    */
   apiKey?: string;
   /**
@@ -142,11 +144,22 @@ const decodeBusabaseError = (
  * Config fields default from `BUSABASE_BASE_URL` / `BUSABASE_API_KEY` /
  * `BUSABASE_SPACE_ID` when omitted.
  *
+ * This is the *only* client the SDK ships. Browser code (an AirApp) and
+ * server/CLI code use the same one — they differ only in where `baseUrl` and
+ * the credential come from: an AirApp running inside Busabase passes
+ * `baseUrl: window.location.origin` and no key (the ambient session cookie
+ * authenticates it), while the same app run locally against a dev server
+ * passes that server's URL and, for Busabase Cloud, an API key.
+ *
  * @example
  * ```ts
+ * // Server / CLI, against Busabase Cloud:
  * const client = createBusabaseClient({ apiKey: process.env.BUSABASE_API_KEY });
  * const bases = await client.bases.list();
  * const record = await client.records.get({ recordId });
+ *
+ * // Browser (AirApp), same-origin — no key, the session cookie authenticates:
+ * const client = createBusabaseClient({ baseUrl: window.location.origin });
  * ```
  */
 export function createBusabaseClient(config: BusabaseConfig = {}): BusabaseClient {
@@ -163,86 +176,6 @@ export function createBusabaseClient(config: BusabaseConfig = {}): BusabaseClien
         ...(resolved.spaceId ? { "x-busabase-space": resolved.spaceId } : {}),
         ...extra,
       };
-    },
-  });
-  return createORPCClient(link);
-}
-
-/** Options for {@link createBusabaseRpcClient}. No `apiKey`/`spaceId` — this
- * transport authenticates purely via the browser's ambient session cookie. */
-export interface BusabaseRpcConfig {
-  /**
-   * Path to the internal RPC endpoint: either a full URL, or a path resolved
-   * against `window.location.origin` (browser only — there is no ambient
-   * session outside one).
-   *
-   * **The default (`/api/rpc`) only matches `apps/busabase` (the OSS app)**,
-   * which mounts busabase's procedures unnamespaced. `apps/busabase-cloud`
-   * mounts the *same* procedures under a `core` prefix instead — pass
-   * `apiBasePath: "/api/rpc/core"` there, or this client will 404 on every
-   * call. There is no single default that works for both; which one you're
-   * targeting is something the caller has to know (this SDK doesn't probe
-   * for it).
-   *
-   * From inside an AirApp running via Nodepod, prepend
-   * `/__busabase_api__` to whichever of the above applies, to route through
-   * the service-worker bridge instead of the sandboxed virtual server — e.g.
-   * `/__busabase_api__/api/rpc/core` for busabase-cloud. See
-   * apps/busabase/docs/node-types.md.
-   */
-  apiBasePath?: string;
-  /** Extra headers merged into every request. Static object or a (possibly async) factory. */
-  headers?:
-    | Record<string, string>
-    | (() => Record<string, string> | Promise<Record<string, string>>);
-  /** Custom `fetch` implementation (e.g. a proxy-aware or instrumented fetch). */
-  fetch?: typeof fetch;
-}
-
-/**
- * Build a fully-typed Busabase client over the internal RPC transport
- * (`/api/rpc`, the same one the Busabase dashboard's own frontend uses) —
- * authenticated by the current browser session's cookie, not an API key.
- * Use {@link createBusabaseClient} instead for server/CLI code holding an
- * explicit API key against the public `/api/v1` REST surface; this one is for
- * browser-context code (e.g. an AirApp) that should act as the logged-in user
- * viewing it.
- *
- * @example
- * ```ts
- * // Inside an AirApp running via Nodepod, on busabase-cloud (see apiBasePath
- * // above — apps/busabase, the OSS app, would omit the /core segment):
- * const client = createBusabaseRpcClient({ apiBasePath: "/__busabase_api__/api/rpc/core" });
- * const counts = await client.changeRequests.counts();
- * ```
- */
-// Reference `window` through `globalThis` with a locally-declared shape rather
-// than the ambient DOM `Window` type: this file is consumed as raw source (not
-// just built .d.ts) by workspace packages whose tsconfig has no "dom" lib
-// (e.g. apps/busabase-cli, Node-only), where the bare `window` identifier
-// doesn't resolve at all — `globalThis` is available under every lib target.
-// A function, not a module-level const: must re-read on every call, not just
-// once at import time (tests stub it in after import; a real page's `window`
-// doesn't change, but capturing it once is needless coupling to import order).
-const getBrowserWindow = () => (globalThis as { window?: { location: { origin: string } } }).window;
-
-export function createBusabaseRpcClient(config: BusabaseRpcConfig = {}): BusabaseClient {
-  const apiBasePath = config.apiBasePath ?? "/api/rpc";
-  const isAbsolute = /^https?:\/\//.test(apiBasePath);
-  if (!isAbsolute && typeof getBrowserWindow() === "undefined") {
-    throw new Error(
-      "createBusabaseRpcClient: apiBasePath must be an absolute URL (http:// or https://) " +
-        "outside a browser — this client authenticates via the browser's ambient session " +
-        "cookie, which only exists client-side.",
-    );
-  }
-  const link = new RPCLink({
-    method: inferRPCMethodFromContractRouter(cloudContract),
-    url: () => (isAbsolute ? apiBasePath : `${getBrowserWindow()?.location.origin}${apiBasePath}`),
-    fetch: config.fetch,
-    headers: async () => {
-      const extra = typeof config.headers === "function" ? await config.headers() : config.headers;
-      return { ...extra };
     },
   });
   return createORPCClient(link);

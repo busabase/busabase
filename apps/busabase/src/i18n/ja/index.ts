@@ -262,6 +262,8 @@ const ja: Translation = {
     disconnectButton: "接続を解除",
     connectFailed: "クラウド接続フローの開始に失敗しました。もう一度お試しください。",
     disconnectFailed: "接続の解除に失敗しました。もう一度お試しください。",
+    statusRefreshFailed: "接続状態は変更されましたが、最新の状態を読み込めませんでした。",
+    statusDiagnostic: "接続診断：{error}",
     popupBlocked:
       "ブラウザがサインインのポップアップをブロックしました。ポップアップを許可してから再試行してください。",
     aboutTitle: "クラウド接続について",

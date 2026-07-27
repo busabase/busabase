@@ -115,19 +115,35 @@ export const en = {
     purgeConfirm: 'Permanently delete "{name}"? This cannot be undone.',
   },
   createNode: {
-    title: "Create",
+    // `{suffix}` is empty at the space root and becomes `parentSuffix` when the
+    // sheet was opened from a folder — same two-part title as web's dialog.
+    title: "Create{suffix}",
+    parentSuffix: " in {name}",
     typeLabel: "Type",
     name: "Name",
     slug: "Slug",
     description: "Description (optional)",
     reviewNote: "Creates a change request for review. It appears after the request is merged.",
+    reviewNoteInParent:
+      'Creates a change request for review. It appears inside "{name}" after the request is merged.',
     submit: "Create {type}",
     nameRequired: "Name is required.",
-    base: "Base",
+  },
+  // Display names for node types, keyed by the registry's `type` id. The web
+  // dialog renders the registry's own (English) `label`; mobile translates it,
+  // so a type missing from this table falls back to that label rather than
+  // disappearing — a newly registered creatable type still shows up.
+  nodeTypeNames: {
     folder: "Folder",
-    doc: "Doc",
+    base: "Base",
     skill: "Skill",
     drive: "Drive",
+    airapp: "AirApp",
+    doc: "Doc",
+    form: "Form",
+    whiteboard: "Whiteboard",
+    workflow: "Workflow",
+    html: "HTML",
   },
   attachment: {
     add: "Add file",
@@ -142,6 +158,10 @@ export const en = {
     more: "More actions",
     sheetHint: "Manage this item",
     open: "Open",
+    // The touch stand-in for web's per-folder "+" button (`onAddChild`).
+    createInside: "New inside…",
+    expand: "Expand {name}",
+    collapse: "Collapse {name}",
     rename: "Rename",
     permissions: "Permissions",
     move: "Move to…",
@@ -295,6 +315,7 @@ export const en = {
     accessVisibleToAll: "Everyone in this space can see this",
     accessPrivate: "Private — only the people below can see this",
     accessInherited: 'Private — inherited from "{name}"',
+    accessRestrictedDefault: "Restricted — only granted members can see this",
     makePrivate: "Restrict access",
     makePrivateHint: "Only the people below (and space admins) can see this",
     inheritedLockHint: 'Already private via "{name}" — manage access there',
@@ -486,19 +507,31 @@ export const zhCN: CoreMessages = {
     purgeConfirm: "确定永久删除“{name}”？此操作无法撤销。",
   },
   createNode: {
-    title: "创建",
+    title: "创建{suffix}",
+    parentSuffix: "到 {name}",
     typeLabel: "类型",
     name: "名称",
     slug: "标识",
     description: "描述（可选）",
     reviewNote: "将创建一个待审阅的变更请求，合并后生效。",
+    reviewNoteInParent: "将创建一个待审阅的变更请求，合并后会出现在“{name}”中。",
     submit: "创建{type}",
     nameRequired: "名称不能为空。",
-    base: "数据表",
+  },
+  nodeTypeNames: {
     folder: "文件夹",
-    doc: "文档",
+    base: "数据表",
     skill: "技能",
     drive: "文件盘",
+    airapp: "AirApp",
+    doc: "文档",
+    form: "表单",
+    whiteboard: "白板",
+    // No established zh-CN node-type label exists in busabase-core's catalog for
+    // Workflow (it only translates workflow *settings*), so the English name is
+    // kept rather than inventing one — same as AirApp and HTML.
+    workflow: "Workflow",
+    html: "HTML",
   },
   attachment: {
     add: "添加文件",
@@ -511,6 +544,9 @@ export const zhCN: CoreMessages = {
     more: "更多操作",
     sheetHint: "管理此项",
     open: "打开",
+    createInside: "在此新建…",
+    expand: "展开{name}",
+    collapse: "收起{name}",
     rename: "重命名",
     permissions: "权限",
     move: "移动到…",
@@ -647,6 +683,7 @@ export const zhCN: CoreMessages = {
     accessVisibleToAll: "本空间所有成员可见",
     accessPrivate: "私有 · 仅下方成员可见",
     accessInherited: "私有 · 继承自「{name}」",
+    accessRestrictedDefault: "受限 · 仅被授权的成员可见",
     makePrivate: "限制访问",
     makePrivateHint: "仅下方成员（及空间管理员）可见",
     inheritedLockHint: "已由上级「{name}」设为私有，请在该处管理",

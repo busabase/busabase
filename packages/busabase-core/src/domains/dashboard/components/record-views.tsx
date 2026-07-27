@@ -27,6 +27,8 @@ import { SPALink as Link } from "openlib/ui/dashboard";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useSearch } from "wouter";
 import { fmt, useCoreI18n, useCoreLocale, useIString } from "../../../i18n";
+import { localizeCoreErrorMessage } from "../../../i18n/localize-error";
+import { validateRecordFields } from "../../base/field-rules";
 import {
   fieldDisplayKind,
   fieldInputKind,
@@ -89,6 +91,7 @@ export function RecordTopbarActions({
   base: BaseVO;
   recordId: string;
 }) {
+  const messages = useCoreI18n();
   const currentSearch = useSearch();
   return (
     <nav className="flex rounded-md bg-muted/60 p-0.5 text-xs">
@@ -100,7 +103,7 @@ export function RecordTopbarActions({
         }`}
         href={mergeSearchIntoHref(`/base/${base.slug}/${recordId}`, currentSearch)}
       >
-        View
+        {messages.recordView.view}
       </Link>
       <Link
         className={`rounded px-2.5 py-1.5 font-medium transition-colors ${
@@ -110,7 +113,7 @@ export function RecordTopbarActions({
         }`}
         href={mergeSearchIntoHref(`/base/${base.slug}/${recordId}/edit`, currentSearch)}
       >
-        Edit
+        {messages.recordView.edit}
       </Link>
     </nav>
   );
@@ -263,8 +266,8 @@ export function RecordDetailView({
               </summary>
               <div className="mt-2 space-y-1.5">
                 <SidebarRow label={messages.common.record} value={record.id} />
-                <SidebarRow label="Creator ID" value={record.createdBy} />
-                <SidebarRow label="Author ID" value={record.headCommit.author} />
+                <SidebarRow label={messages.recordView.creatorId} value={record.createdBy} />
+                <SidebarRow label={messages.recordView.authorId} value={record.headCommit.author} />
                 <SidebarRow
                   label={messages.recordView.head}
                   value={shortIdentifier(record.headCommitId)}
@@ -397,6 +400,7 @@ export function RecordEditorView({
   record: RecordVO | null;
 }) {
   const messages = useCoreI18n();
+  const resolveIString = useIString();
   const [fields, setFields] = useState<Record<string, unknown>>(() =>
     Object.fromEntries(
       (base?.fields ?? record?.base.fields ?? []).map((field) => [
@@ -454,6 +458,15 @@ export function RecordEditorView({
     onSubmitError(null);
     try {
       const normalizedFields = normalizeEditorFields(editorBase, fields);
+      const validationErrors = validateRecordFields(normalizedFields, editorBase.fields);
+      if (validationErrors.length > 0) {
+        const invalidFields = validationErrors
+          .map((error) => editorBase.fields.find((field) => field.slug === error.slug))
+          .filter((field): field is BaseFieldVO => Boolean(field))
+          .map((field) => resolveIString(field.name));
+        onSubmitError(fmt(messages.recordView.invalidFields, { fields: invalidFields.join(", ") }));
+        return;
+      }
       if (mode === "new") {
         await onSubmitCreate?.(editorBase, normalizedFields, { mergeImmediately });
       } else if (record) {
@@ -462,7 +475,7 @@ export function RecordEditorView({
     } catch (submitError) {
       onSubmitError(
         submitError instanceof Error
-          ? submitError.message
+          ? localizeCoreErrorMessage(messages, submitError.message)
           : messages.recordView.failedSaveChangeRequest,
       );
     } finally {
@@ -599,7 +612,7 @@ function RecordFieldInput({
               <span>·</span>
             </>
           )}
-          <span>{field.type}</span>
+          <span>{messages.fieldTypes[field.type]}</span>
         </div>
       </div>
       {kind === "computed" ? (
@@ -1498,7 +1511,7 @@ function RecordCommentsPanel({
                 <UserRefButton
                   fallbackId={comment.authorId}
                   labelClassName="font-medium text-sm"
-                  title="Comment author"
+                  title={messages.identity.commentAuthor}
                   user={comment.author}
                 />
                 <div className="text-muted-foreground text-xs">

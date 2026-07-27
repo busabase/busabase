@@ -1,6 +1,6 @@
 {
   "name": "busabase-mobile",
-  "version": "0.9.17",
+  "version": "0.9.18",
   "main": "expo-router/entry",
   "private": true,
   "scripts": {
@@ -53,8 +53,8 @@
     "expo-web-browser": "~56.0.5",
     "lucide-react-native": "^0.556.0",
     "openlib": "workspace:*",
-    "react": "19.2.7",
-    "react-dom": "19.2.7",
+    "react": "19.2.3",
+    "react-dom": "19.2.3",
     "react-native": "0.85.3",
     "react-native-gesture-handler": "~2.31.2",
     "react-native-reanimated": "~4.3.1",
@@ -71,6 +71,12 @@
     "typescript": "^6.0.3"
   },
   "expo": {
+    "autolinking": {
+      "exclude": [
+        "react",
+        "react-dom"
+      ]
+    },
     "doctor": {
       "reactNativeDirectoryCheck": {
         "exclude": [
@@ -91,9 +97,7 @@
         "expo-splash-screen",
         "expo-task-manager",
         "expo-web-browser",
-        "react-native-screens",
-        "react",
-        "react-dom"
+        "react-native-screens"
       ]
     }
   },

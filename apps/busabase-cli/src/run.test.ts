@@ -43,12 +43,16 @@ describe("busabase-cli commands", () => {
   });
 
   it("documents node and terminal Change Request commands in help", () => {
+    // Rendered from the shared task definition (`busabase-contract/tasks`), which
+    // derives the type list from CREATABLE_NODE_TYPES so it cannot drift.
     expect(HELP).toContain(
-      "nodes create-change-request --type <folder|base|skill|drive|airapp|file|doc|form|whiteboard|workflow|html>",
+      "nodes create --type <folder|base|skill|drive|airapp|file|doc|form|whiteboard|workflow|html>",
     );
-    expect(HELP).toContain("--asset-id <id>");
+    expect(HELP).toContain("--asset-id <value>");
     expect(HELP).toContain("change-requests close --change-request-id <id>");
-    expect(HELP).toContain("records list [--limit <n>] [--base-id <id>] [--cursor <cursor>]");
+    // `records list` is now `records query`, rendered from the shared task layer
+    // and always hitting the paginated endpoint.
+    expect(HELP).toContain("records query");
     expect(HELP).toContain("assets upload --file <path>");
     expect(HELP).not.toContain("attachments upload");
     expect(HELP).toContain("rejected = request changes, not terminal");
@@ -93,9 +97,10 @@ describe("busabase-cli commands", () => {
     expect(HELP).toContain("records change-requests --record-id <id>");
     expect(HELP).not.toContain("records search ");
     expect(HELP).not.toContain("records list-change-requests");
-    // airapps.listFiles is aliased by the curated `airapps files`, so the generator
-    // must NOT also emit `airapps list-files`.
-    expect(HELP).toContain("airapps files --node-id <id>");
+    // `airapps files` now comes from the shared task layer's CLI variant rather
+    // than a hand-written command (placeholders there are uniformly `<value>`),
+    // and it still has to win over the generator's `airapps list-files`.
+    expect(HELP).toContain("airapps files --node-id <value>");
     expect(HELP).not.toContain("airapps list-files");
   });
 
@@ -626,21 +631,16 @@ describe("busabase-cli commands", () => {
     ]);
 
     expect(exitCode).toBe(0);
+    // Dispatched to the Base endpoint rather than the generic tree endpoint:
+    // `POST /bases` is the only one that accepts inline field definitions.
     expect(calls).toEqual([
       expect.objectContaining({
         method: "POST",
-        url: "http://localhost:15419/api/v1/nodes/change-requests",
+        url: "http://localhost:15419/api/v1/bases",
         body: {
-          message: "Create base 内容 Content",
-          operations: [
-            {
-              fields: JSON.parse(fields),
-              kind: "create",
-              name: "内容 Content",
-              nodeType: "base",
-              slug: "content",
-            },
-          ],
+          fields: JSON.parse(fields),
+          name: "内容 Content",
+          slug: "content",
         },
       }),
     ]);
@@ -680,23 +680,18 @@ describe("busabase-cli commands", () => {
     ]);
 
     expect(exitCode).toBe(0);
+    // Dispatched to `POST /files`, which takes `assetId` as a first-class field
+    // instead of smuggling it through the generic operation's `metadata` bag.
     expect(calls).toEqual([
       expect.objectContaining({
         method: "POST",
-        url: "http://localhost:15419/api/v1/nodes/change-requests",
+        url: "http://localhost:15419/api/v1/files",
         body: {
-          message: "Create file Board Plan",
-          operations: [
-            {
-              description: "Planning PDF",
-              kind: "create",
-              metadata: { assetId: "ast_1" },
-              name: "Board Plan",
-              nodeType: "file",
-              parentNodeId: "nod_parent",
-              slug: "board-plan",
-            },
-          ],
+          assetId: "ast_1",
+          description: "Planning PDF",
+          name: "Board Plan",
+          parentNodeId: "nod_parent",
+          slug: "board-plan",
         },
       }),
     ]);
@@ -721,7 +716,7 @@ describe("busabase-cli commands", () => {
 
     expect(exitCode).toBe(1);
     expect(global.fetch).not.toHaveBeenCalled();
-    expect(error.mock.calls.join("\n")).toContain("--asset-id is required with --type file");
+    expect(error.mock.calls.join("\n")).toContain('assetId is required for type "file"');
   });
 
   it("rejects mixed shorthand and JSON field definitions", async () => {
@@ -748,7 +743,7 @@ describe("busabase-cli commands", () => {
     expect(error.mock.calls.join("\n")).toContain("Pass either --field or --fields-json");
   });
 
-  it("creates an airapp node Change Request through the node endpoint", async () => {
+  it("dispatches airapp creation to the AirApp endpoint, not the generic node endpoint", async () => {
     const calls: Array<{ body: unknown; method: string; url: string }> = [];
     global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const request = input instanceof Request ? input : new Request(input, init);
@@ -776,16 +771,14 @@ describe("busabase-cli commands", () => {
     ]);
 
     expect(exitCode).toBe(0);
+    // Dispatched to `POST /airapps`. The generic tree endpoint would also accept
+    // `nodeType: "airapp"`, but it has no `files` field — so it produces an
+    // AirApp with none of the default scaffold, which is not a usable AirApp.
     expect(calls).toEqual([
       expect.objectContaining({
         method: "POST",
-        url: "http://localhost:15419/api/v1/nodes/change-requests",
-        body: {
-          message: "Create airapp Hello App",
-          operations: [
-            { kind: "create", name: "Hello App", nodeType: "airapp", slug: "hello-app" },
-          ],
-        },
+        url: "http://localhost:15419/api/v1/airapps",
+        body: { name: "Hello App", slug: "hello-app" },
       }),
     ]);
   });
@@ -983,7 +976,7 @@ describe("busabase-cli commands", () => {
       "--output",
       "json",
       "records",
-      "list",
+      "query",
       "--base-id",
       "bse_1",
       "--limit",
@@ -1013,7 +1006,7 @@ describe("busabase-cli commands", () => {
       "--base-url",
       "http://localhost:15419",
       "records",
-      "list",
+      "query",
       "--limit",
       "101",
     ]);
@@ -1268,11 +1261,19 @@ describe("busabase-cli commands", () => {
       async () => new Response('{"error":"storage missing"}', { status: 500 }),
     ) as typeof fetch;
 
-    const exitCode = await runCli(["--base-url", "http://localhost:15419", "records", "list"]);
+    const exitCode = await runCli([
+      "--base-url",
+      "http://localhost:15419",
+      "api",
+      "--method",
+      "get",
+      "--path",
+      "/records",
+    ]);
 
     expect(exitCode).toBe(1);
-    // `records list` goes through rawFetch (outside the typed contract) — its
-    // `formatRawErrorBody` now extracts the server's `error` field instead of
+    // `api` goes through rawFetch (outside the typed contract) — its
+    // `formatRawErrorBody` extracts the server's `error` field instead of
     // dumping the raw `{"error":"..."}` JSON verbatim.
     expect(error.mock.calls.join("\n")).toContain("HTTP 500 : storage missing");
   });

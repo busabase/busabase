@@ -359,7 +359,7 @@ export function BaseSetupView({
     if (!base || !onUpdateFieldName) return;
     const name = iStringTrim(editingFieldName);
     if (iStringIsEmpty(name)) {
-      setFieldRenameError("Field name is required.");
+      setFieldRenameError(messages.base.fieldNameRequired);
       return;
     }
     setIsFieldRenameSaving(true);
@@ -368,7 +368,7 @@ export function BaseSetupView({
       await onUpdateFieldName(base, fieldId, name, options);
       resetFieldRenameForm();
     } catch (error) {
-      setFieldRenameError(error instanceof Error ? error.message : "Failed to rename field");
+      setFieldRenameError(error instanceof Error ? error.message : messages.base.failedRenameField);
     } finally {
       setIsFieldRenameSaving(false);
     }
@@ -497,7 +497,7 @@ export function BaseSetupView({
                     </div>
                     <div>
                       <span className="inline-flex max-w-full truncate rounded-full bg-muted/65 px-2 py-0.5 text-muted-foreground text-xs">
-                        {field.type}
+                        {messages.fieldTypes[field.type]}
                       </span>
                     </div>
                     <div className="text-muted-foreground text-xs">
@@ -627,7 +627,7 @@ export function BaseSetupView({
                       >
                         {fieldTypeOptions.map((type) => (
                           <option key={type} value={type}>
-                            {type}
+                            {messages.fieldTypes[type]}
                           </option>
                         ))}
                       </select>
@@ -940,7 +940,7 @@ export function BaseSetupView({
                     </div>
                     <div>
                       <span className="inline-flex max-w-full truncate rounded-full bg-muted/65 px-2 py-0.5 text-muted-foreground text-xs">
-                        {field.type}
+                        {messages.fieldTypes[field.type]}
                       </span>
                     </div>
                     <div className="flex justify-end">

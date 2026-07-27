@@ -80,6 +80,19 @@ const sidePanelPreview = (page: Page) =>
 const sidePanelPreviewFrame = (page: Page) =>
   page.frameLocator('[aria-label="Side panel"] iframe[title="AirApp preview"]:visible');
 
+// Fullscreen is the SAME preview container grown to fill the viewport — not a
+// separate overlay with its own iframe. Selecting it by the fullscreen state
+// attribute keeps that invariant honest: if a regression ever reintroduces a
+// second iframe, the `toHaveCount(1)` assertions below fail.
+const fullscreenPreview = (page: Page) => page.locator('[data-airapp-fullscreen="true"]');
+
+// Only the VISIBLE previews: `AirAppKeepAliveHost` deliberately keeps every
+// previously-visited AirApp's iframe mounted-but-display:none, so a global
+// count would legitimately exceed 1. What must never happen is two visible
+// previews of the same app — that is the duplicate-iframe bug.
+const visiblePreviewIframes = (page: Page) =>
+  page.locator('iframe[title="AirApp preview"]:visible');
+
 test("AirApp run panel: auto-run, restart, watermark, nav persistence, fullscreen, side panel", async ({
   page,
   request,
@@ -97,15 +110,17 @@ test("AirApp run panel: auto-run, restart, watermark, nav persistence, fullscree
     await expectRunning(page);
     await expect(page.getByRole("button", { name: "Restart" })).toBeVisible();
 
-    const fullscreen = page.locator(`section[aria-label="${appA.name}"]`);
+    const fullscreen = fullscreenPreview(page);
     await expect(fullscreen).toBeVisible();
     await expect(fullscreen.locator('iframe[title="AirApp preview"]')).toBeVisible();
+    // One iframe, ever — the fullscreen surface reuses the running preview.
+    await expect(visiblePreviewIframes(page)).toHaveCount(1);
     await expect(page).toHaveURL(
       new RegExp(`/dashboard/local/airapp/${appA.slug}\\?fullscreen=1$`),
     );
 
     await fullscreen.getByRole("button", { name: "Exit fullscreen" }).click();
-    await expect(fullscreen).toBeHidden();
+    await expect(fullscreen).toHaveCount(0);
     await expect(page).toHaveURL(new RegExp(`/dashboard/local/airapp/${appA.slug}$`));
 
     const iframe = mainPreview(page);
@@ -187,31 +202,72 @@ test("AirApp run panel: auto-run, restart, watermark, nav persistence, fullscree
     ).toBeVisible();
   });
 
-  await test.step("fullscreen: preview fills the viewport and the floating button restores it", async () => {
+  await test.step("fullscreen keeps the SAME running app: no reload, no lost state (regression: fullscreen used to mount a second iframe)", async () => {
+    // Tag the live iframe element so we can prove the very same DOM node — not
+    // a look-alike pointing at the same src — is what fills the viewport.
+    await mainPreview(page).evaluate((iframe) => {
+      iframe.setAttribute("data-e2e-iframe-identity", "main-airapp-a");
+    });
+    // The counter inside the app is at 1 from the navigation step above; bump
+    // it to 2 so the expected value can't be confused with a fresh boot's 0.
+    await mainPreviewFrame(page).getByRole("button", { name: "Clicked 1 times" }).click();
+    await expect(
+      mainPreviewFrame(page).getByRole("button", { name: "Clicked 2 times" }),
+    ).toBeVisible();
+
     await page.getByRole("button", { name: "Enter fullscreen" }).click();
-    const fullscreen = page.locator(`section[aria-label="${appA.name}"]`);
+    const fullscreen = fullscreenPreview(page);
     await expect(fullscreen).toBeVisible();
     await expect(page).toHaveURL(
       new RegExp(`/dashboard/local/airapp/${appA.slug}\\?fullscreen=1$`),
     );
     await expect(fullscreen).toHaveCSS("position", "fixed");
-    await expect(fullscreen.locator('iframe[title="AirApp preview"]')).toBeVisible();
 
     const bounds = await fullscreen.boundingBox();
     const viewport = page.viewportSize();
     expect(bounds).toEqual({ x: 0, y: 0, width: viewport?.width, height: viewport?.height });
 
+    // The heart of the fix: exactly one preview iframe exists, it is the very
+    // element that was already running, and the app inside never rebooted (a
+    // reload would reset the counter to "Clicked 0 times").
+    await expect(visiblePreviewIframes(page)).toHaveCount(1);
+    const fullscreenIframe = fullscreen.locator('iframe[title="AirApp preview"]');
+    await expect(fullscreenIframe).toBeVisible();
+    await expect(fullscreenIframe).toHaveAttribute("data-e2e-iframe-identity", "main-airapp-a");
+    await expect(fullscreenIframe).toHaveAttribute("src", appASrc);
+    await expect(
+      mainPreviewFrame(page).getByRole("button", { name: "Clicked 2 times" }),
+    ).toBeVisible();
+
+    // Escape exits — checked here, while focus is still in the host document.
+    // (Escape is a host-window listener, so it cannot fire once the user has
+    // clicked into the app's own iframe; the floating Exit button below is the
+    // exit path that always works. Same before and after this change.)
     await page.keyboard.press("Escape");
-    await expect(fullscreen).toBeHidden();
+    await expect(fullscreen).toHaveCount(0);
     await expect(page).toHaveURL(new RegExp(`/dashboard/local/airapp/${appA.slug}$`));
 
     await page.getByRole("button", { name: "Enter fullscreen" }).click();
     await expect(fullscreen).toBeVisible();
+
+    // The app stays interactive while fullscreen, and the Exit button still
+    // works afterwards — i.e. with focus inside the guest document.
+    await mainPreviewFrame(page).getByRole("button", { name: "Clicked 2 times" }).click();
+    await expect(
+      mainPreviewFrame(page).getByRole("button", { name: "Clicked 3 times" }),
+    ).toBeVisible();
+
     await fullscreen.getByRole("button", { name: "Exit fullscreen" }).click();
-    await expect(fullscreen).toBeHidden();
+    await expect(fullscreen).toHaveCount(0);
     await expect(page).toHaveURL(new RegExp(`/dashboard/local/airapp/${appA.slug}$`));
-    // The underlying page is still interactive — the inline preview iframe survives.
-    await expect(mainPreview(page)).toBeVisible();
+
+    // Back inline: still the same element, still the same in-page state.
+    const restored = mainPreview(page);
+    await expect(restored).toBeVisible();
+    await expect(restored).toHaveAttribute("data-e2e-iframe-identity", "main-airapp-a");
+    await expect(
+      mainPreviewFrame(page).getByRole("button", { name: "Clicked 3 times" }),
+    ).toBeVisible();
   });
 
   await test.step("pin AirApp A to the side panel", async () => {
@@ -265,10 +321,30 @@ test("AirApp run panel: auto-run, restart, watermark, nav persistence, fullscree
     await expect(panel).toHaveCSS("position", "fixed");
 
     await panel.getByRole("button", { name: "Enter fullscreen" }).click();
-    const fullscreen = page.locator(`section[aria-label="${appA.name}"]`);
+    const fullscreen = fullscreenPreview(page);
     await expect(fullscreen).toBeVisible();
+    // Fullscreen is `position: fixed`, and this is the nastiest nesting for
+    // that: the maximized side panel is itself fixed. Assert real viewport
+    // bounds, because an ancestor with transform/filter/contain would silently
+    // turn the fixed preview into a panel-sized box instead.
+    await expect(fullscreen).toHaveCSS("position", "fixed");
+    expect(await fullscreen.boundingBox()).toEqual({
+      x: 0,
+      y: 0,
+      width: page.viewportSize()?.width,
+      height: page.viewportSize()?.height,
+    });
+    // The pinned preview is the one that grew — it is still the same element,
+    // so the counter clicked in the previous step is untouched.
+    await expect(fullscreen.locator('iframe[title="AirApp preview"]')).toHaveAttribute(
+      "data-e2e-iframe-identity",
+      "pinned-airapp-a",
+    );
+    await expect(
+      sidePanelPreviewFrame(page).getByRole("button", { name: "Clicked 1 times" }),
+    ).toBeVisible();
     await fullscreen.getByRole("button", { name: "Exit fullscreen" }).click();
-    await expect(fullscreen).toBeHidden();
+    await expect(fullscreen).toHaveCount(0);
     await expect(panel).toHaveAttribute("data-layout", "maximized");
 
     await panel.getByRole("button", { name: "Restore side panel" }).click();
@@ -344,8 +420,11 @@ test("AirApp run panel: auto-run, restart, watermark, nav persistence, fullscree
 
     await sidebarLink(page, appA.name).click();
     await expect(page).toHaveURL(new RegExp(`/dashboard/local/airapp/${appA.slug}$`));
+    // 3, not 1: the fullscreen step above clicked the main preview's counter
+    // twice more and — this being the whole point of the fix — nothing since
+    // has rebooted that iframe.
     await expect(
-      mainPreviewFrame(page).getByRole("button", { name: "Clicked 1 times" }),
+      mainPreviewFrame(page).getByRole("button", { name: "Clicked 3 times" }),
     ).toBeVisible();
     await expect(
       sidePanelPreviewFrame(page).getByRole("button", { name: "Clicked 1 times" }),

@@ -1,7 +1,7 @@
 {
   "name": "busabase-contract",
   "description": "Client-safe Busabase surface: oRPC contracts (OSS + cloud), node-type kernel, VO types, and the oRPC client factories. Pure leaf — no db/logic/server deps. Consumed by busabase-cli, busabase-mobile, busabase-core, busabase, and busabase-cloud.",
-  "version": "0.9.17",
+  "version": "0.9.18",
   "private": true,
   "type": "module",
   "scripts": {
@@ -43,6 +43,10 @@
     "./contract/embed-link-schemas": {
       "types": "./src/contract/embed-link-schemas.ts",
       "default": "./src/contract/embed-link-schemas.ts"
+    },
+    "./tasks": {
+      "types": "./src/tasks/index.ts",
+      "default": "./src/tasks/index.ts"
     },
     "./types": {
       "types": "./src/types/index.ts",

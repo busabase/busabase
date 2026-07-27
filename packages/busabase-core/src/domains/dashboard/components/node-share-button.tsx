@@ -20,7 +20,6 @@ import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import { useCoreI18n } from "../../../i18n";
 import { useIsAnonymousVisitor } from "../visitor-context";
-import { NodeActionButton } from "./node-action-button";
 
 type NodeShareCapability = "read" | "submit";
 
@@ -37,68 +36,6 @@ const resolveSpaceId = (spaceId?: string): string | null => {
   const match = window.location.pathname.match(/\/dashboard\/([^/]+)/);
   return match?.[1] ?? null;
 };
-
-/**
- * Node-level public link sharing: a trigger button + dialog. The orthogonal
- * axis to `NodePermissionsButton` — that one governs which space members may see
- * a node, this one governs whether an ANONYMOUS visitor may reach it over its
- * own canonical URL, and what they may do there (view-only vs. allow
- * submissions), optionally behind a password and/or an expiry. Mirrors the
- * shape of `NodePermissionsButton`, one component per entry point.
- */
-export function NodeShareButton({
-  orpc,
-  nodeId,
-  nodeName,
-  spaceId,
-  nodeType,
-  nodeSlug,
-  variant = "toolbar",
-}: {
-  orpc: BusabaseQueryUtils;
-  nodeId: string;
-  nodeName: string;
-  /** Optional — derived from the current pathname when omitted. */
-  spaceId?: string;
-  nodeType: string;
-  nodeSlug: string;
-  variant?: "toolbar" | "menu";
-}) {
-  const messages = useCoreI18n();
-  const t = messages.share;
-  const [open, setOpen] = useState(false);
-  // Publishing a node is a manage-only action; a public read-only visitor can
-  // never perform it, so this self-gates everywhere it is mounted (base header,
-  // doc/folder/file detail headers, sidebar menu) rather than each call site
-  // having to remember the guard. Hooks above run unconditionally first.
-  const isAnon = useIsAnonymousVisitor();
-  if (isAnon) {
-    return null;
-  }
-
-  return (
-    <>
-      <NodeActionButton
-        icon={Globe}
-        label={t.title}
-        onClick={() => setOpen(true)}
-        variant={variant}
-      />
-      {open && (
-        <NodeShareDialog
-          nodeId={nodeId}
-          nodeName={nodeName}
-          nodeSlug={nodeSlug}
-          nodeType={nodeType}
-          onOpenChange={setOpen}
-          open={open}
-          orpc={orpc}
-          spaceId={spaceId}
-        />
-      )}
-    </>
-  );
-}
 
 export function NodeShareDialog({
   orpc,

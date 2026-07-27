@@ -12,9 +12,12 @@ import { Platform } from "react-native";
 import { getValidBusabaseCloudSession, revokeBusabaseCloudSession } from "~/auth/oauth";
 import {
   type CloudSession,
+  type CloudUserProfile,
   clearCloudSession,
-  getCloudSession,
+  getCloudAccounts,
   getCloudSessionToken,
+  removeCloudAccount as removeStoredCloudAccount,
+  switchCloudAccount as switchStoredCloudAccount,
 } from "~/auth/session-store";
 import { busabaseConfig } from "./config";
 import { normalizeServerUrl } from "./server-url";
@@ -52,13 +55,29 @@ interface ConnectionContextValue {
   /** Preset demo server URL, or null when not configured. */
   demoServerUrl: string | null;
   cloudServerUrl: string;
+  cloudAccounts: CloudAccountSummary[];
   getCloudAuthorizationHeaders: (options?: {
     spaceId?: string | null;
   }) => Promise<Record<string, string>>;
   selectSpace: (space: BusabaseSpace | null) => Promise<void>;
+  switchCloudAccount: (accountId: string) => Promise<void>;
+  removeCloudAccount: (accountId: string) => Promise<void>;
   disconnect: () => Promise<void>;
   removeServerFromHistory: (serverUrl: string) => Promise<void>;
 }
+
+interface CloudAccountSummary {
+  id: string;
+  isActive: boolean;
+  user?: CloudUserProfile;
+}
+
+const getCloudAccountSummaries = async (): Promise<CloudAccountSummary[]> =>
+  (await getCloudAccounts()).map(({ id, isActive, session }) => ({
+    id,
+    isActive,
+    user: session.user,
+  }));
 
 const ConnectionContext = createContext<ConnectionContextValue | null>(null);
 
@@ -74,6 +93,7 @@ function parseHistory(raw: string | null): string[] {
 }
 
 export function ConnectionProvider({ children }: { children: ReactNode }) {
+  const [cloudAccounts, setCloudAccounts] = useState<CloudAccountSummary[]>([]);
   const [state, setState] = useState<ConnectionState>({
     status: "loading",
     connection: null,
@@ -88,17 +108,25 @@ export function ConnectionProvider({ children }: { children: ReactNode }) {
       AsyncStorage.getItem(SERVER_HISTORY_KEY),
       getValidBusabaseCloudSession(),
     ])
-      .then(([raw, recentServerUrl, historyRaw, cloudSession]) => {
+      .then(async ([raw, recentServerUrl, historyRaw, cloudSession]) => {
+        setCloudAccounts(await getCloudAccountSummaries());
         const serverHistory = parseHistory(historyRaw);
         if (!raw) {
           setState({ status: "disconnected", connection: null, recentServerUrl, serverHistory });
           return;
         }
-        const connection = JSON.parse(raw) as BusabaseConnection;
+        const storedConnection = JSON.parse(raw) as BusabaseConnection;
+        const connection =
+          storedConnection.mode === "cloud" && cloudSession?.user
+            ? { ...storedConnection, cloudUser: cloudSession.user }
+            : storedConnection;
         if (connection.mode === "cloud" && !getCloudSessionToken(cloudSession)) {
           void AsyncStorage.removeItem(STORAGE_KEY);
           setState({ status: "disconnected", connection: null, recentServerUrl, serverHistory });
           return;
+        }
+        if (connection !== storedConnection) {
+          void AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(connection));
         }
         setState({
           status: "connected",
@@ -175,7 +203,74 @@ export function ConnectionProvider({ children }: { children: ReactNode }) {
       serverHistory: current.serverHistory,
     }));
     await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(connection));
+    setCloudAccounts(await getCloudAccountSummaries());
   }, []);
+
+  const switchCloudAccount = useCallback(
+    async (accountId: string) => {
+      const previousAccountId = cloudAccounts.find(({ isActive }) => isActive)?.id;
+      const storedSession = await switchStoredCloudAccount(accountId);
+      if (!storedSession) throw new Error("This saved account is no longer available.");
+      const session = await getValidBusabaseCloudSession();
+      if (!session) {
+        await removeStoredCloudAccount(accountId);
+        if (previousAccountId) await switchStoredCloudAccount(previousAccountId);
+        setCloudAccounts(await getCloudAccountSummaries());
+        throw new Error("This account session has expired. Add the account again.");
+      }
+      const connection: BusabaseConnection = {
+        mode: "cloud",
+        serverUrl: normalizeServerUrl(CLOUD_SERVER_URL),
+        connectedAt: new Date().toISOString(),
+        cloudUser: session.user,
+      };
+      setState((current) => ({
+        status: "connected",
+        connection,
+        recentServerUrl: current.recentServerUrl,
+        serverHistory: current.serverHistory,
+      }));
+      await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(connection));
+      setCloudAccounts(await getCloudAccountSummaries());
+    },
+    [cloudAccounts],
+  );
+
+  const removeCloudAccount = useCallback(
+    async (accountId: string) => {
+      const wasActive = cloudAccounts.some(
+        (account) => account.id === accountId && account.isActive,
+      );
+      const { removed, active } = await removeStoredCloudAccount(accountId);
+      if (removed) await revokeBusabaseCloudSession(removed);
+      setCloudAccounts(await getCloudAccountSummaries());
+      if (!wasActive) return;
+      if (!active) {
+        await AsyncStorage.removeItem(STORAGE_KEY);
+        setState((current) => ({
+          status: "disconnected",
+          connection: null,
+          recentServerUrl: current.recentServerUrl,
+          serverHistory: current.serverHistory,
+        }));
+        return;
+      }
+      const connection: BusabaseConnection = {
+        mode: "cloud",
+        serverUrl: normalizeServerUrl(CLOUD_SERVER_URL),
+        connectedAt: new Date().toISOString(),
+        cloudUser: active.user,
+      };
+      setState((current) => ({
+        status: "connected",
+        connection,
+        recentServerUrl: current.recentServerUrl,
+        serverHistory: current.serverHistory,
+      }));
+      await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(connection));
+    },
+    [cloudAccounts],
+  );
 
   const getCloudAuthorizationHeaders = useCallback(
     async (options?: { spaceId?: string | null }): Promise<Record<string, string>> => {
@@ -222,10 +317,11 @@ export function ConnectionProvider({ children }: { children: ReactNode }) {
   const disconnect = useCallback(async () => {
     const cloudConnection = state.status === "connected" && state.connection.mode === "cloud";
     if (cloudConnection) {
-      const session = await getCloudSession();
-      await revokeBusabaseCloudSession(session);
+      const accounts = await getCloudAccounts();
+      await Promise.all(accounts.map(({ session }) => revokeBusabaseCloudSession(session)));
       await clearCloudSession();
       await clearBrowserSessionCookies();
+      setCloudAccounts([]);
     }
     await AsyncStorage.removeItem(STORAGE_KEY);
     setState((current) => ({
@@ -256,8 +352,11 @@ export function ConnectionProvider({ children }: { children: ReactNode }) {
       connectDemo,
       demoServerUrl: DEMO_SERVER_URL,
       cloudServerUrl: CLOUD_SERVER_URL,
+      cloudAccounts,
       getCloudAuthorizationHeaders,
       selectSpace,
+      switchCloudAccount,
+      removeCloudAccount,
       disconnect,
       removeServerFromHistory,
     }),
@@ -266,8 +365,11 @@ export function ConnectionProvider({ children }: { children: ReactNode }) {
       connectSelfHosted,
       connectCloud,
       connectDemo,
+      cloudAccounts,
       getCloudAuthorizationHeaders,
       selectSpace,
+      switchCloudAccount,
+      removeCloudAccount,
       disconnect,
       removeServerFromHistory,
     ],

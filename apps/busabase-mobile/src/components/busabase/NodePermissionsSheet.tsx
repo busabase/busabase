@@ -51,6 +51,13 @@ interface NodePermissionsSheetProps {
   node: NodeVO;
   /** The RAW `nodes.list` tree — used to resolve inherited privacy. */
   nodes: NodeVO[];
+  /**
+   * The space's DEFAULT content visibility, resolved from `auth.verify` by the
+   * caller (the same query that already supplies `spaceId`/`spaceName`). Absent
+   * or unknown — an older server that predates the field — means `open`, the
+   * historical default.
+   */
+  spaceVisibilityMode?: "open" | "restricted" | null;
   onClose: () => void;
   onBack: () => void;
 }
@@ -68,16 +75,21 @@ interface NodePermissionsSheetProps {
  *    contract this app talks to has no such procedure), so granting falls back
  *    to the free-text principal-id input exactly like the open-source host, and
  *    an existing grant lists the raw user id rather than a display name;
- *  - the pending access-requests review section (a cloud-only render slot);
- *  - the space Open/Restricted visibility mode (also host-injected). Mobile
- *    assumes `open`, so the "Restricted — only granted members can see this"
- *    banner variant never shows and the grants section appears only when this
- *    node is actually private (explicitly or by inheritance).
+ *  - the pending access-requests review section (a cloud-only render slot).
+ *
+ * The space's Open/Restricted default IS honoured: web reads it from a
+ * cloud-only route and injects it through `SpaceVisibilityModeProvider`, which
+ * mobile can't reach, so it arrives instead on `auth.verify`'s space VO
+ * (`nodeVisibilityMode`) and is passed down as `spaceVisibilityMode`. The
+ * banner variant and the grants-section condition then match web exactly —
+ * without it a restricted space wrongly read "everyone in this space can see
+ * this" and hid the grants list even when grants existed.
  */
 export function NodePermissionsSheet({
   visible,
   node,
   nodes,
+  spaceVisibilityMode,
   onClose,
   onBack,
 }: NodePermissionsSheetProps) {
@@ -117,8 +129,10 @@ export function NodePermissionsSheet({
     visibilityOverride === undefined ? storedVisibility : visibilityOverride;
   const isPrivate = explicitVisibility === "private";
   const isInherited = !isPrivate && !!inheritedPrivateFrom;
+  const isRestrictedSpace = spaceVisibilityMode === "restricted";
   // Whether access is actually limited (so granting people is meaningful).
-  const isLimited = isPrivate || isInherited;
+  // Same three-way condition as web's `isLimited`.
+  const isLimited = isPrivate || isInherited || isRestrictedSpace;
 
   const [newPrincipalId, setNewPrincipalId] = useState("");
   const [newPrincipalIsSpace, setNewPrincipalIsSpace] = useState(false);
@@ -198,7 +212,9 @@ export function NodePermissionsSheet({
     ? t.permissions.accessPrivate
     : isInherited
       ? fmt(t.permissions.accessInherited, { name: inheritedPrivateFrom ?? "" })
-      : t.permissions.accessVisibleToAll;
+      : isRestrictedSpace
+        ? t.permissions.accessRestrictedDefault
+        : t.permissions.accessVisibleToAll;
 
   const actionError =
     visibilityMutation.error?.message ??

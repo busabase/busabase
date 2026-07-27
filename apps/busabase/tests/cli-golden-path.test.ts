@@ -141,7 +141,8 @@ describe("busabase-cli golden path (skill commands, in-process)", () => {
     await cli("change-requests", "merge", "--change-request-id", created.id);
 
     // 4. The merged record is now visible through the records endpoint.
-    const page = (await cli("records", "list", "--base-id", blogId, "--limit", "100")) as {
+    // `records list` is now `records query` (task layer), always paginated.
+    const page = (await cli("records", "query", "--base-id", blogId, "--limit", "100")) as {
       records: unknown[];
     };
     expect(JSON.stringify(page.records)).toContain("CLI golden path");

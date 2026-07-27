@@ -1,6 +1,8 @@
 import { OpenAPIHandler } from "@orpc/openapi/fetch";
 import { runWithBusabaseContext } from "busabase-core/context";
 import { getBusabaseOpenApiSpec } from "busabase-core/openapi";
+import { BUSABASE_API_ALLOW_HEADERS, BUSABASE_API_METHODS } from "busabase-core/openapi/cors";
+import { encodeBusabaseOpenApiError } from "busabase-core/openapi/error-envelope";
 import { busabaseRouter } from "busabase-core/router";
 import { busabaseDemoRouter } from "busabase-core/router-demo";
 import { addCorsHeaders, createCorsHeaders } from "openlib/cors";
@@ -9,26 +11,16 @@ import { readBuiltinVaultRuntimeEnv } from "~/domains/vault/logic/vault";
 import { getBusabaseAppLL, getBusabaseLocaleFromAcceptLanguage } from "~/lib/i18n";
 import { getLocalUserName } from "~/lib/local-user";
 
-const BUSABASE_API_METHODS = "GET, POST, PUT, PATCH, DELETE, OPTIONS";
-
-const encodeOpenApiError = (error: { data?: unknown; message?: string; code?: string }) => {
-  if (error.data && typeof error.data === "object" && "error" in error.data) {
-    return error.data;
-  }
-
-  return {
-    error: error.message || "Internal server error",
-    code: error.code,
-    data: error.data,
-  };
-};
-
+// Shared with busabase-cloud on purpose: both servers mount the same contract,
+// so an SDK or agent talking to either has to see the same error shape. This
+// file's own copy used to return a self-shaped `{ error, … }` body verbatim,
+// which dropped `code` — see `busabase-core/src/openapi/error-envelope.ts`.
 const openApiHandler = new OpenAPIHandler(busabaseRouter, {
-  customErrorResponseBodyEncoder: encodeOpenApiError,
+  customErrorResponseBodyEncoder: encodeBusabaseOpenApiError,
 });
 
 const demoOpenApiHandler = new OpenAPIHandler(busabaseDemoRouter, {
-  customErrorResponseBodyEncoder: encodeOpenApiError,
+  customErrorResponseBodyEncoder: encodeBusabaseOpenApiError,
 });
 
 async function handle(request: Request) {
@@ -49,7 +41,11 @@ async function handle(request: Request) {
 
 async function routeRequest(request: Request, url: URL, isDemo: boolean) {
   if (url.pathname === "/api/v1/openapi.json") {
-    return addCorsHeaders(Response.json(await getBusabaseOpenApiSpec()), BUSABASE_API_METHODS);
+    return addCorsHeaders(
+      Response.json(await getBusabaseOpenApiSpec()),
+      BUSABASE_API_METHODS,
+      BUSABASE_API_ALLOW_HEADERS,
+    );
   }
 
   if (url.pathname === "/api/v1/doc") {
@@ -62,6 +58,7 @@ async function routeRequest(request: Request, url: URL, isDemo: boolean) {
         },
       }),
       BUSABASE_API_METHODS,
+      BUSABASE_API_ALLOW_HEADERS,
     );
   }
 
@@ -70,12 +67,13 @@ async function routeRequest(request: Request, url: URL, isDemo: boolean) {
   });
 
   if (result.matched) {
-    return addCorsHeaders(result.response, BUSABASE_API_METHODS);
+    return addCorsHeaders(result.response, BUSABASE_API_METHODS, BUSABASE_API_ALLOW_HEADERS);
   }
 
   return addCorsHeaders(
     Response.json({ error: "Not found", path: url.pathname }, { status: 404 }),
     BUSABASE_API_METHODS,
+    BUSABASE_API_ALLOW_HEADERS,
   );
 }
 
@@ -87,7 +85,7 @@ export const DELETE = handle;
 export const OPTIONS = () =>
   new Response(null, {
     status: 204,
-    headers: createCorsHeaders(BUSABASE_API_METHODS),
+    headers: createCorsHeaders(BUSABASE_API_METHODS, BUSABASE_API_ALLOW_HEADERS),
   });
 
 const getSwaggerHtml = ({ lang, title }: { lang: string; title: string }) => `<!DOCTYPE html>

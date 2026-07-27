@@ -6,7 +6,7 @@ import { SPALink as Link } from "openlib/ui/dashboard";
 import { type ComponentProps, type ReactNode, useState } from "react";
 import { Streamdown, type Components as StreamdownComponents } from "streamdown";
 import { useSearch } from "wouter";
-import { useCoreI18n, useIString } from "../../../i18n";
+import { fmt, useCoreI18n, useIString } from "../../../i18n";
 import { fieldDisplayKind, fieldLinkPrefix } from "../../base/field-types";
 import { embedAspectRatio, embedHeight, resolveEmbedPreview } from "../../base/utils/embed";
 import { parseWhiteboardFieldValue } from "../../base/utils/whiteboard-value";
@@ -289,6 +289,7 @@ export function EmbedFieldPreview({
   field: BaseFieldVO;
   value: unknown;
 }) {
+  const messages = useCoreI18n();
   const preview = resolveEmbedPreview(value, field);
   if (!preview) {
     return <span className="text-muted-foreground">-</span>;
@@ -311,7 +312,7 @@ export function EmbedFieldPreview({
           referrerPolicy="strict-origin-when-cross-origin"
           sandbox="allow-forms allow-presentation allow-same-origin allow-scripts"
           src={preview.embedUrl}
-          title={`${preview.label} embed`}
+          title={fmt(messages.recordView.embedTitle, { label: preview.label })}
         />
       </div>
       <div className="mt-2 flex min-w-0 items-center justify-between gap-2 text-xs">
@@ -325,7 +326,7 @@ export function EmbedFieldPreview({
           rel="noreferrer"
           target="_blank"
         >
-          Open
+          {messages.common.open}
           <ExternalLink size={12} />
         </a>
       </div>

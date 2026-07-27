@@ -19,7 +19,7 @@ import { registerLocalPreview, unregisterLocalPreview } from "./local-preview-re
  *   the Next.js server (no srt). This is NOT OS-isolated — the trust model is
  *   the local host. Because a bare process's listening port IS host-reachable,
  *   the same-origin reverse-proxy preview (`/api/airapp-preview/{nodeId}/`) and
- *   the `/__busabase_api__/` data bridge both work — the same trust model
+ *   same-origin `/api/v1` data access both work — the same trust model
  *   buda's `LocalPreviewCapability` uses for its local runtime.
  * - `"srt"` (sandboxed): commands are wrapped for actual OS-level isolation
  *   (seccomp/bubblewrap on Linux, `sandbox-exec` on macOS) — writes are
@@ -347,7 +347,7 @@ export async function* runAirAppLocalNode(
           // `<base href>` into HTML responses, so the app's relative asset
           // links resolve under this sub-path regardless of trailing-slash
           // normalization. Same-origin is what lets the running app use the
-          // `/__busabase_api__/` data bridge.
+          // same-origin `/api/v1` data access.
           registerLocalPreview(input.nodeId, port);
           yield { type: "ready", previewUrl: `/api/airapp-preview/${input.nodeId}/` };
         }

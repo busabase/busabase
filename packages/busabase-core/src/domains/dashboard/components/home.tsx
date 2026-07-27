@@ -201,7 +201,11 @@ export function HomeView({
                 landing page exists to avoid. */}
             {pendingChangeRequests.length > 0 ? (
               <HomeSection
-                action={<HomeSectionLink href="/inbox" label={home.pendingViewAll} />}
+                // `?view=review` is spelled out because SPALink merges the
+                // current query string in: a bare `/inbox` would inherit
+                // whatever `view` the user last left behind, so "View all"
+                // under a "Waiting for your review" list could land on Merged.
+                action={<HomeSectionLink href="/inbox?view=review" label={home.pendingViewAll} />}
                 count={fmt(home.pendingCount, { count: pendingChangeRequests.length })}
                 name="pending"
                 title={home.pendingTitle}

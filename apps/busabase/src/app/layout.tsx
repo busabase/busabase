@@ -21,8 +21,14 @@ const fraunces = Fraunces({
   display: "swap",
 });
 
+// `weight: "variable"` because next/font splits CJK families into ~101
+// unicode-range subsets and emits that set once per requested weight: listing
+// 500/600/700 costs 303 @font-face rules (~279 KB of CSS) instead of 101. The
+// variable axis spans 200–900, so all three weights survive at a third of the
+// size. `preload: false` still applies — the subsets themselves stay off the
+// first-paint critical path.
 const notoSerifSC = Noto_Serif_SC({
-  weight: ["500", "600", "700"],
+  weight: "variable",
   variable: "--font-noto-serif-sc",
   display: "swap",
   // The Simplified-Chinese file is large; don't block first paint preloading it.

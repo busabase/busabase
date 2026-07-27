@@ -3,14 +3,29 @@ import { getNodeType, hasCapability } from "busabase-contract/domains";
 import type { NodeVO } from "busabase-contract/types";
 import { selectPendingChangeRequests } from "busabase-core/dashboard/home";
 import { usePathname, useRouter } from "expo-router";
-import { House, Menu, MoreHorizontal, Plus, Search, Settings } from "lucide-react-native";
+import {
+  ChevronDown,
+  ChevronRight,
+  House,
+  Menu,
+  MoreHorizontal,
+  Plus,
+  Search,
+  Settings,
+} from "lucide-react-native";
 import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 import { Modal, Platform, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useBusabaseOrpc } from "~/api/use-busabase-orpc";
 import { NativeScreen } from "~/components/native-screen";
-import { useI18n } from "~/i18n";
+import { fmt, useI18n } from "~/i18n";
 import { useContextualNavDestination } from "~/lib/contextual-nav";
 import { type DrawerDestination, isDrawerItemActive, isPathActive } from "~/lib/nav-destinations";
+import {
+  ancestorIdsOfActiveNode,
+  expandNodes,
+  toggleNodeExpanded,
+  useExpandedNodeIds,
+} from "~/lib/tree-expansion";
 import { flattenNodesForCache, nodeToKnownNode } from "~/search/known-node-cache";
 import { nodeIconForType } from "~/search/node-icons";
 import { getMobileNodeDestination } from "~/search/node-navigation";
@@ -63,9 +78,20 @@ export function DrawerScaffold({
   const queryClient = useQueryClient();
   const [open, setOpen] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
-  // The node whose "•••" sheet is showing — the touch stand-in for the web
-  // sidebar's hover-revealed per-node actions menu.
-  const [actionsNode, setActionsNode] = useState<NodeVO | null>(null);
+  // The container the Create sheet should create INSIDE, or null for the space
+  // root (the header's Create button). Mirrors web's `createParent` state.
+  const [createParent, setCreateParent] = useState<{ id: string; name: string } | null>(null);
+  // The node whose "•••" sheet is showing, plus whether that row may offer
+  // "New inside…". Favorites rows are flat (web strips their `onAddChild`), so
+  // the flag travels with the node instead of being re-derived from its type.
+  const [actionsTarget, setActionsTarget] = useState<{
+    node: NodeVO;
+    allowCreateChild: boolean;
+  } | null>(null);
+  // Which container rows are open. Module-level store, not component state:
+  // this scaffold is remounted by every screen, so React state would collapse
+  // the whole tree on every navigation. See `~/lib/tree-expansion`.
+  const expandedIds = useExpandedNodeIds();
   // The single lingering row for the functional area last visited. Lives in a
   // module-level store because this scaffold is remounted by every screen.
   const contextualDestination = useContextualNavDestination(pathname);
@@ -118,6 +144,11 @@ export function DrawerScaffold({
   });
   const spaceId = authQuery.data?.space.id ?? null;
   const spaceName = authQuery.data?.space.name ?? null;
+  // The space's Open/Restricted content default, off the SAME auth.verify
+  // response (no second request). The Permissions sheet needs it to describe a
+  // node's effective access; a server that predates the field omits it, which
+  // means `open` — the historical default.
+  const spaceVisibilityMode = authQuery.data?.space.nodeVisibilityMode ?? null;
 
   // Plain invalidate-and-refetch, no optimistic cache write — same P0 tradeoff
   // the web sidebar makes: the Favorites list is small and this keeps the
@@ -139,13 +170,23 @@ export function DrawerScaffold({
 
   // Unwrap the single root workspace folder so its contents show directly,
   // instead of a redundant "Local workspace" row (matches the web sidebar).
-  const treeNodes =
-    nodesQuery.data?.length === 1 &&
-    hasCapability(nodesQuery.data[0].type, "container") &&
-    !nodesQuery.data[0].baseId
-      ? nodesQuery.data[0].children
-      : (nodesQuery.data ?? []);
+  // Memoised so the auto-expand effect below keys off the DATA changing, not
+  // off every render producing a fresh array.
+  const treeNodes = useMemo(() => {
+    const roots = nodesQuery.data ?? [];
+    return roots.length === 1 && hasCapability(roots[0].type, "container") && !roots[0].baseId
+      ? roots[0].children
+      : roots;
+  }, [nodesQuery.data]);
   const workspaceNodeCount = countTreeNodes(treeNodes);
+
+  // Reveal where you are: open every ancestor of the active node so the tree
+  // shows your current location instead of making you re-drill each time. Only
+  // ever ADDITIVE — it never closes a folder the user closed by hand, and it
+  // no-ops (no state change, no re-render) once the chain is already open.
+  useEffect(() => {
+    expandNodes(ancestorIdsOfActiveNode(treeNodes, (node) => isNodeActive(node, pathname)));
+  }, [treeNodes, pathname]);
 
   const headerLeading = (
     <Pressable
@@ -168,7 +209,7 @@ export function DrawerScaffold({
     (node: NodeVO) => {
       const destination = getMobileNodeDestination(node);
       if (destination.status === "unsupported") return;
-      setActionsNode(null);
+      setActionsTarget(null);
       setOpen(false);
       void (async () => {
         await nodeCache?.merge([nodeToKnownNode(node)]);
@@ -230,6 +271,7 @@ export function DrawerScaffold({
                 style={[styles.createButton, { backgroundColor: tokens.primary }]}
                 onPress={() => {
                   setOpen(false);
+                  setCreateParent(null);
                   setCreateOpen(true);
                 }}
               >
@@ -309,8 +351,15 @@ export function DrawerScaffold({
                         node={{ ...node, children: [] }}
                         pathname={pathname}
                         depth={0}
+                        // Flat rows: no chevron, no "New inside…" — exactly
+                        // what web's `toFlatFavoriteNavItem` strips off.
+                        collapsible={false}
+                        expandedIds={expandedIds}
                         onPress={navigateNode}
-                        onOpenActions={setActionsNode}
+                        onToggleExpanded={toggleNodeExpanded}
+                        onOpenActions={(target) =>
+                          setActionsTarget({ node: target, allowCreateChild: false })
+                        }
                       />
                     ))}
                   </View>
@@ -368,8 +417,12 @@ export function DrawerScaffold({
                       node={node}
                       pathname={pathname}
                       depth={0}
+                      expandedIds={expandedIds}
                       onPress={navigateNode}
-                      onOpenActions={setActionsNode}
+                      onToggleExpanded={toggleNodeExpanded}
+                      onOpenActions={(target) =>
+                        setActionsTarget({ node: target, allowCreateChild: true })
+                      }
                     />
                   ))}
                 </View>
@@ -395,17 +448,31 @@ export function DrawerScaffold({
               the user their place in the tree. `nodes` is the RAW tree, not
               the unwrapped `treeNodes`: the move picker needs the real root
               container as a destination. */}
-          {actionsNode ? (
+          {actionsTarget ? (
             <NodeActionsSheet
-              node={actionsNode}
+              node={actionsTarget.node}
               nodes={nodesQuery.data ?? []}
-              canOpen={nodeNavMeta(actionsNode).tappable}
-              isFavorite={favoriteNodeIds.has(actionsNode.id)}
+              canOpen={nodeNavMeta(actionsTarget.node).tappable}
+              isFavorite={favoriteNodeIds.has(actionsTarget.node.id)}
               spaceId={spaceId}
               spaceName={spaceName}
-              onClose={() => setActionsNode(null)}
+              spaceVisibilityMode={spaceVisibilityMode}
+              onClose={() => setActionsTarget(null)}
               onOpenNode={navigateNode}
               onToggleFavorite={(node) => toggleFavoriteMutation.mutate(node)}
+              onCreateChild={
+                actionsTarget.allowCreateChild
+                  ? (node) => {
+                      // Same hand-off as the header's Create button — the
+                      // Create sheet lives OUTSIDE the drawer Modal, so the
+                      // drawer and this sheet both have to close first.
+                      setActionsTarget(null);
+                      setOpen(false);
+                      setCreateParent({ id: node.id, name: node.name });
+                      setCreateOpen(true);
+                    }
+                  : undefined
+              }
             />
           ) : null}
         </View>
@@ -413,9 +480,14 @@ export function DrawerScaffold({
 
       <CreateNodeModal
         visible={createOpen}
-        onClose={() => setCreateOpen(false)}
+        parent={createParent}
+        onClose={() => {
+          setCreateOpen(false);
+          setCreateParent(null);
+        }}
         onCreated={(changeRequestId) => {
           setCreateOpen(false);
+          setCreateParent(null);
           // Node creation is a change request; open it for review (the node appears after merge).
           router.push({ pathname: "/change-requests/[id]", params: { id: changeRequestId } });
         }}
@@ -515,6 +587,14 @@ const styles = StyleSheet.create({
   },
   baseItem: { alignItems: "center", paddingVertical: 8 },
   baseText: { flex: 1, minWidth: 0 },
+  // Fixed width shared by the chevron and its non-container spacer, so labels
+  // line up whether or not a row can be expanded.
+  nodeChevron: {
+    width: 18,
+    alignItems: "center",
+    justifyContent: "center",
+    flexShrink: 0,
+  },
   nodeActionsButton: {
     width: 28,
     alignItems: "center",
@@ -617,13 +697,21 @@ function NodeNavItem({
   node,
   pathname,
   depth,
+  expandedIds,
+  collapsible = true,
   onPress,
+  onToggleExpanded,
   onOpenActions,
 }: {
   node: NodeVO;
   pathname: string;
   depth: number;
+  /** The expansion snapshot, threaded down so the whole tree shares one read. */
+  expandedIds: ReadonlySet<string>;
+  /** False for the flat Favorites rows, which have no children to reveal. */
+  collapsible?: boolean;
   onPress: (node: NodeVO) => void;
+  onToggleExpanded: (nodeId: string) => void;
   /** Opens the per-node "•••" action sheet (rename / permissions / move). */
   onOpenActions: (node: NodeVO) => void;
 }) {
@@ -638,6 +726,12 @@ function NodeNavItem({
   if (hasCapability(node.type, "hidden")) return null;
   const Icon = meta.icon;
   const showSubtitle = depth === 0 || active;
+  // Every container gets a chevron, even an empty one — web renders the same
+  // collapsible for any container row (`item.items` is `[]`, still truthy), so
+  // the affordance doesn't blink in and out as a folder gains its first child.
+  const isContainer = collapsible && hasCapability(node.type, "container");
+  const expanded = isContainer && expandedIds.has(node.id);
+  const ChevronIcon = expanded ? ChevronDown : ChevronRight;
 
   return (
     <>
@@ -658,6 +752,26 @@ function NodeNavItem({
         <View
           style={[styles.activeMark, { backgroundColor: active ? tokens.primary : "transparent" }]}
         />
+        {/* Collapse toggle. Its own Pressable nested inside the row's, exactly
+            like the "•••" below, so tapping the chevron only opens/closes while
+            tapping the label still opens the node. Non-container rows render
+            the same-width spacer so every label in the tree stays aligned. */}
+        {isContainer ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityState={{ expanded }}
+            accessibilityLabel={fmt(expanded ? t.nodeActions.collapse : t.nodeActions.expand, {
+              name: node.name,
+            })}
+            hitSlop={mobile.hitSlop}
+            style={({ pressed }) => [styles.nodeChevron, { opacity: pressed ? 0.6 : 1 }]}
+            onPress={() => onToggleExpanded(node.id)}
+          >
+            <ChevronIcon size={16} color={active ? tokens.primary : tokens.mutedForeground} />
+          </Pressable>
+        ) : (
+          <View style={styles.nodeChevron} />
+        )}
         <Icon size={18} color={active ? tokens.primary : tokens.mutedForeground} />
         <View style={styles.baseText}>
           <Text
@@ -689,16 +803,23 @@ function NodeNavItem({
           <MoreHorizontal size={18} color={tokens.mutedForeground} />
         </Pressable>
       </Pressable>
-      {node.children.map((child) => (
-        <NodeNavItem
-          key={child.id}
-          node={child}
-          pathname={pathname}
-          depth={depth + 1}
-          onPress={onPress}
-          onOpenActions={onOpenActions}
-        />
-      ))}
+      {/* Collapsed by default, matching web: children only mount once the row
+          is expanded, so opening the drawer no longer renders the entire
+          workspace (156 rows on the demo space) up front. */}
+      {expanded
+        ? node.children.map((child) => (
+            <NodeNavItem
+              key={child.id}
+              node={child}
+              pathname={pathname}
+              depth={depth + 1}
+              expandedIds={expandedIds}
+              onPress={onPress}
+              onToggleExpanded={onToggleExpanded}
+              onOpenActions={onOpenActions}
+            />
+          ))
+        : null}
     </>
   );
 }
