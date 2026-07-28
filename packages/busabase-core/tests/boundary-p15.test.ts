@@ -26,14 +26,15 @@ describe("Boundary P15 — base archive hides records + views", () => {
       submittedBy: "alice",
       mergeImmediately: true,
     });
-    await client.bases.createViewChangeRequest({
+    await client.views.changeRequest({
+      operation: "create",
       baseId: base.id,
       name: "Grid",
       config: {},
       submittedBy: "alice",
       mergeImmediately: true,
     });
-    expect((await raw.records.list({})).some((r) => r.id === record.id)).toBe(true);
+    expect((await raw.records.list({})).records.some((r) => r.id === record.id)).toBe(true);
     expect((await raw.bases.listViews({ baseId: base.id })).length).toBe(1);
     expect((await raw.search({ query: "sales" })).results.some((x) => x.kind === "base")).toBe(
       true,
@@ -46,7 +47,7 @@ describe("Boundary P15 — base archive hides records + views", () => {
       mergeImmediately: true,
     });
 
-    expect((await raw.records.list({})).some((r) => r.id === record.id)).toBe(false);
+    expect((await raw.records.list({})).records.some((r) => r.id === record.id)).toBe(false);
     expect((await raw.bases.listViews({ baseId: base.id })).length).toBe(0);
     expect((await raw.search({ query: "sales" })).results.some((x) => x.kind === "base")).toBe(
       false,
@@ -60,7 +61,7 @@ describe("Boundary P15 — base archive hides records + views", () => {
     await raw.changeRequests.review({ changeRequestId: restoreCr.id, verdict: "approved" });
     await raw.changeRequests.merge({ changeRequestId: restoreCr.id });
 
-    expect((await raw.records.list({})).some((r) => r.id === record.id)).toBe(true);
+    expect((await raw.records.list({})).records.some((r) => r.id === record.id)).toBe(true);
     expect((await raw.bases.listViews({ baseId: base.id })).length).toBe(1);
   });
 });

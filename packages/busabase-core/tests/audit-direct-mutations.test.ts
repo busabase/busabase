@@ -53,7 +53,7 @@ describe("audit trail for direct mutations", () => {
       node: { slug: string } | null;
     }) => boolean,
   ) =>
-    (await client.changeRequests.list()).some(
+    (await client.changeRequests.list()).changeRequests.some(
       (cr) => cr.status === "merged" && cr.primaryOperation?.operation === operation && match(cr),
     );
 
@@ -89,7 +89,12 @@ describe("audit trail for direct mutations", () => {
   });
 
   it("records a merged ChangeRequest for a skill create", async () => {
-    await client.skills.create({ slug: "audit-skill", name: "Audit Skill", autoMerge: true });
+    await client.fileTrees.create({
+      type: "skill",
+      slug: "audit-skill",
+      name: "Audit Skill",
+      autoMerge: true,
+    });
     expect(await hasMergedCR("node_create", (cr) => cr.node?.slug === "audit-skill")).toBe(true);
   });
 

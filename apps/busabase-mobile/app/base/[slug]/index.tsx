@@ -43,12 +43,15 @@ function BaseDetailContent() {
 
   const basesQuery = useQuery(
     buda
-      ? buda.orpc.bases.list.queryOptions({})
+      ? buda.orpc.bases.list.queryOptions({ input: {} })
       : { queryKey: ["no-connection", "bases", "list"], queryFn: skipToken },
   );
   const recordsQuery = useQuery(
     buda
-      ? buda.orpc.records.list.queryOptions({ input: { limit: 100 } })
+      ? buda.orpc.records.list.queryOptions({
+          input: { limit: 100 },
+          select: (page) => page.records,
+        })
       : { queryKey: ["no-connection", "records", "list"], queryFn: skipToken },
   );
 

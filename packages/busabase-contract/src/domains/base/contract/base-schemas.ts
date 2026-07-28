@@ -289,3 +289,25 @@ export const restoreFieldChangeRequestInputSchema = z.object({
   message: z.string().optional(),
   submittedBy: z.string().optional().default("local-editor"),
 });
+
+/**
+ * Every field change request in one shape. These six used to be six endpoints
+ * that differed only by the verb in the middle of the path (or, for two of
+ * them, only by HTTP method on an identical path) — same `baseId`, same
+ * `changeRequest` response, same review workflow. The variation is entirely in
+ * the payload, which is what a discriminated union is for.
+ */
+// `baseId` (the path param) is repeated into every branch rather than added with
+// `.and(z.object({ baseId }))`: an intersection serializes to JSON Schema `allOf`,
+// which leaves the MCP tool with neither `properties` nor `anyOf` — i.e. an agent
+// sees a tool with no documented inputs at all.
+const withBaseId = { baseId: z.string().min(1) };
+
+export const fieldChangeRequestInputSchema = z.discriminatedUnion("operation", [
+  createFieldChangeRequestInputSchema.extend({ operation: z.literal("create"), ...withBaseId }),
+  updateFieldChangeRequestInputSchema.extend({ operation: z.literal("update"), ...withBaseId }),
+  deleteFieldChangeRequestInputSchema.extend({ operation: z.literal("delete"), ...withBaseId }),
+  convertFieldChangeRequestInputSchema.extend({ operation: z.literal("convert"), ...withBaseId }),
+  reorderFieldsChangeRequestInputSchema.extend({ operation: z.literal("reorder"), ...withBaseId }),
+  restoreFieldChangeRequestInputSchema.extend({ operation: z.literal("restore"), ...withBaseId }),
+]);

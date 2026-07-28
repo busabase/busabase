@@ -239,7 +239,8 @@ describe("Base field types — end-to-end", () => {
     const recordId = await createRecord({ f_text: "v1" });
     const before = await readFields(recordId);
 
-    const updateCr = await client.records.updateChangeRequest({
+    const updateCr = await client.records.changeRequest({
+      operation: "update",
       recordId,
       fields: { f_text: "v2" },
       author: "editor-2",
@@ -323,7 +324,8 @@ describe("Base field types — end-to-end", () => {
 
     it("persists each updated user field through the update → merge loop", async () => {
       const recordId = await createRecord(validValues());
-      const updateCr = await client.records.updateChangeRequest({
+      const updateCr = await client.records.changeRequest({
+        operation: "update",
         recordId,
         fields: updatedValues(),
         author: "editor",

@@ -74,7 +74,7 @@ export const busabaseBases = pgTable(
     archivedAt: timestamp("archived_at", { mode: "date" }),
     // Permanent-delete marker, kept in lockstep with the owning `busabase_nodes`
     // row's `deletedAt` (see purgeNode in logic/nodes.ts) so `bases.list` /
-    // `bases.listArchived` can filter without joining the node table.
+    // `bases.list({ status: "archived" })` can filter without joining the node table.
     deletedAt: timestamp("deleted_at", { mode: "date" }),
   },
   (base) => [

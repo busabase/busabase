@@ -27,7 +27,8 @@ describe("Boundary P14 — cross-tenant get-by-id is space-scoped", () => {
       submittedBy: "alice",
       mergeImmediately: true,
     });
-    await client.bases.createViewChangeRequest({
+    await client.views.changeRequest({
+      operation: "create",
       baseId: base.id,
       name: "Grid",
       config: {},
@@ -42,10 +43,14 @@ describe("Boundary P14 — cross-tenant get-by-id is space-scoped", () => {
     // From a DIFFERENT space, none of these ids resolve.
     await runWithBusabaseContext({ spaceId: OTHER }, async () => {
       await expect(
-        raw.records.deleteChangeRequest({ recordId: record.id, submittedBy: "mallory" }),
+        raw.records.changeRequest({
+          operation: "delete",
+          recordId: record.id,
+          submittedBy: "mallory",
+        }),
       ).rejects.toThrow();
       await expect(
-        raw.views.deleteChangeRequest({ viewId: view.id, submittedBy: "mallory" }),
+        raw.views.changeRequest({ operation: "delete", viewId: view.id, submittedBy: "mallory" }),
       ).rejects.toThrow();
       await expect(raw.docs.get({ nodeId: doc.node.id })).rejects.toThrow(/not found/i);
     });

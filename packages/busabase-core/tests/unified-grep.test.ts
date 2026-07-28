@@ -310,12 +310,13 @@ describe("Unified Grep — POST /grep (files + docs + records)", () => {
     };
 
     const archiveRecord = async (recordId: string) => {
-      const cr = await client.records.deleteChangeRequest({ recordId });
+      const cr = await client.records.changeRequest({ operation: "delete", recordId });
       await approveAndMerge(cr.id);
     };
 
     const deleteField = async (baseId: string, fieldId: string) => {
-      const cr = await client.bases.deleteFieldChangeRequest({
+      const cr = await client.bases.fieldChangeRequest({
+        operation: "delete",
         baseId,
         fieldId,
         submittedBy: "agent",

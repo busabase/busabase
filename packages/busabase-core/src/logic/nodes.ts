@@ -344,7 +344,7 @@ export const isDescendantOf = async (
 
 /**
  * Flat list of archived folder/doc/skill nodes for the Trash view. Base nodes are
- * excluded — an archived base is surfaced (and restored) via `bases.listArchived`.
+ * excluded — an archived base is surfaced via `bases.list({ status: "archived" })`.
  * Permanently-deleted (`deletedAt`) nodes are excluded too — once purged, an item
  * leaves the Trash for good even though its row is kept.
  */

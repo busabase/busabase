@@ -6,8 +6,8 @@
  * served markdown always points at the host that served it — no hardcoded
  * `localhost:15419`. The Agent Skill button only needs to tell an agent to read
  * `${origin}/SETUP_SKILL.md`, because this document is fully self-contained. It walks the agent
- * through connecting + seeding a first Base, then installs the permanent `busabase` skill
- * (`npx skills add busabase/skills`) for everyday use.
+ * through connecting + seeding a first Base, then installs the permanent `busabase` and
+ * `busabase-app-creator` skills for everyday use and workspace app creation.
  */
 
 /** Where a desktop install runs its local server. The bootstrap doc targets this host. */
@@ -26,8 +26,8 @@ export interface SkillMarkdownContext {
    * `"bootstrap"` — the doc is served by the discovery site (busabase.com) for an edition
    *   whose runtime host isn't reachable yet (Personal Desktop runs on localhost:15419, which
    *   doesn't exist until the user installs it). Leads with what-it-is → install → an
-   *   auto-detect probe, then ends by installing the permanent `busabase` skill (`npx skills add
-   *   busabase/skills`) for everyday use.
+   *   auto-detect probe, then ends by installing the permanent `busabase` and
+   *   `busabase-app-creator` skills for everyday use and workspace app creation.
    */
   stage?: "runtime" | "bootstrap";
   /** Cloud only: user API key for `Authorization: Bearer <key>`. */
@@ -163,8 +163,8 @@ Quick reference — every path is relative to the base URL above; worked example
 | Create record CR | \`POST /api/v1/bases/:baseId/change-requests\` | propose one record change |
 | Bulk create records CR | \`POST /api/v1/bases/:baseId/records/bulk-change-request\` | propose many records (≤1000) as ONE CR |
 | Create node CR | \`POST /api/v1/nodes/change-requests\` | propose folder / Skill structure changes (supports in-CR \`ref\`/\`parentNodeRef\`) |
-| Read Skill files | \`GET /api/v1/skills/:nodeId/files/:filePath\` | read a Skill file |
-| Create Skill file CR | \`POST /api/v1/skills/:nodeId/change-requests\` | propose a Skill file edit |
+| Read Skill files | \`GET /api/v1/file-trees/:nodeId/files/:filePath\` | read a Skill file (same route for Drives and AirApps) |
+| Create Skill file CR | \`POST /api/v1/file-trees/:nodeId/change-requests\` | propose a Skill file edit |
 | Request asset upload | \`POST /api/v1/assets/upload-urls\` | request an upload target for attachment-field files |
 | Confirm asset upload | \`POST /api/v1/assets/confirmations\` | confirm uploaded bytes and get an attachment-field ref |
 | Review (approve / request changes) | \`POST /api/v1/change-requests/:id/reviews\` | approve or request revision |
@@ -286,15 +286,15 @@ ${authLine}  -H 'content-type: application/json' \\
 Read Skill files:
 
 \`\`\`bash
-curl ${base}/api/v1/skills${H}
-curl ${base}/api/v1/skills/:nodeId/files${H}
-curl ${base}/api/v1/skills/:nodeId/files/:filePath${H}
+curl "${base}/api/v1/file-trees?type=skill"${H}
+curl ${base}/api/v1/file-trees/:nodeId/files${H}
+curl ${base}/api/v1/file-trees/:nodeId/files/:filePath${H}
 \`\`\`
 
 Create a Skill file ChangeRequest (never write Skill files directly):
 
 \`\`\`bash
-curl -X POST ${base}/api/v1/skills/:nodeId/change-requests \\
+curl -X POST ${base}/api/v1/file-trees/:nodeId/change-requests \\
 ${authLine}  -H 'content-type: application/json' \\
   --data '{
     "operations": [
@@ -864,17 +864,19 @@ until curl -fsS ${local}/api/v1/bases >/dev/null 2>&1; do sleep 2; done && echo 
     ? "(Every call carries `x-busabase-space: $BUSABASE_SPACE_ID` — the space picked in Step 0. The API key is user-scoped, so do not omit the header.)"
     : "(No `spaceId` in local mode.)";
 
-  const step4 = `## Step 4 — The last setup step: install the permanent skill
+  const step4 = `## Step 4 — The last setup step: install the permanent skills
 
-One step left before everyday use. Install the permanent **busabase** skill so any agent on this
-machine just knows how to drive this workspace every session — no re-pasting this onboarding doc:
+One step left before everyday use. Install both permanent skills so any agent on this machine can
+drive this workspace with **busabase** and create complete workspace apps with
+**busabase-app-creator** every session — no re-pasting this onboarding doc:
 
 \`\`\`bash
-npx skills add busabase/skills
+npx skills add busabase/skills --skill busabase busabase-app-creator
 \`\`\`
 
-It reads \`~/.busabase/.env\` (set up above) and is self-describing — from here **it** is your
-reference for the everyday loop and the full API, so this onboarding doc has done its job.
+The skills are self-describing. \`busabase\` reads \`~/.busabase/.env\` (set up above) and becomes
+the reference for the everyday loop and full API; \`busabase-app-creator\` builds on it when the
+user wants a complete workspace app. This onboarding doc has now done its job.
 
 ## 🎉 You're set up — congratulations!
 
@@ -884,13 +886,15 @@ once *all* of it has landed —
 
 - ✅ **connected** — the host responds (you proved it in Step 0)
 - ✅ **workspace ready** — existing Spaces were left untouched; a new Space was initialized once
-- ✅ **skill installed** — \`busabase\` is permanent, so every future session just works
+- ✅ **skills installed** — \`busabase\` and \`busabase-app-creator\` are permanent, so everyday
+  workspace work and app creation are available in future sessions
 
 Tell them so, and close the journey with the tracker fully checked — e.g.:
 
-> ✅ Connect · ✅ Initialize (new Spaces only) · ✅ Verify · ✅ Skill
-> 🎉 *You're all set — Busabase is connected, your first workspace is live, and the skill is
-> installed. From here it's everyday use: I propose, you approve, we merge.*
+> ✅ Connect · ✅ Initialize (new Spaces only) · ✅ Verify · ✅ Skills
+> 🎉 *You're all set — Busabase is connected, your first workspace is live, and both skills are
+> installed. From here it's everyday use: I propose, you approve, we merge — and I can build a
+> complete workspace app when you need one.*
 
 Normal agent work remains review-first. Only the versioned system-onboarding initializer may use
 \`autoMerge\` for starter structure and sample records.`;
@@ -903,7 +907,8 @@ description: ${description}
 # Busabase — first-run setup
 
 This document walks you (the agent) — and through you, the user — from nothing to a working,
-populated workspace, then installs the permanent \`busabase\` skill for everyday use.${ownMachine}
+populated workspace, then installs the permanent \`busabase\` and \`busabase-app-creator\` skills
+for everyday use and workspace app creation.${ownMachine}
 Work top to bottom, **in the user's language**. (You'll explain what Busabase is in Step 0's
 welcome — no need to recite it here.)
 
@@ -916,7 +921,7 @@ You are guiding the user through four milestones. Existing users skip initializa
 | 1 | 🔌 **Connect** | Step 0 + Step 1 | device login returns the selected Space |
 | 2 | 🏗️ **Initialize if required** | Step 2 + Step 3 | version-0 Space gets starter data |
 | 3 | ✅ **Verify** | Step 3 | starter records read back and marker becomes version 1 |
-| 4 | 🎓 **Skill installed** | Step 4 | \`npx skills add\` done, 🎉 |
+| 4 | 🎓 **Skills installed** | Step 4 | both skills selected by \`npx skills add\`, 🎉 |
 
 **Conduct rules — these create the step-by-step feel; follow them at every turn:**
 

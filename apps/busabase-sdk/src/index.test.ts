@@ -37,7 +37,7 @@ describe("Busabase namespaces", () => {
     ["bases", "bases"],
     ["nodes", "nodes"],
     ["changeRequests", "change-requests"],
-    ["skills", "skills"],
+    ["fileTrees", "file-trees"],
     ["files", "files"],
     ["docs", "docs"],
     ["folders", "folders"],

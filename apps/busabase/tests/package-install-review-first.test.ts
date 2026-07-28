@@ -180,7 +180,7 @@ describe("busabase-cli install without --auto-merge (real server)", () => {
     await cli("install", REPO_URL);
 
     const target = await routerClient();
-    installedBaseSlugs = (await target.bases.list()).map((b) => b.slug);
+    installedBaseSlugs = (await target.bases.list({})).map((b) => b.slug);
     // Live (merged) records in the whole target space.
     let cursor: string | undefined;
     do {
@@ -190,7 +190,7 @@ describe("busabase-cli install without --auto-merge (real server)", () => {
     } while (cursor);
     // Records proposed but awaiting review. `changeRequests.list` takes only `limit`,
     // so filter by status here.
-    const all = (await target.changeRequests.list({ limit: 100 })) as Array<{
+    const all = (await target.changeRequests.list({ limit: 100 })).changeRequests as Array<{
       status: string;
       operations?: Array<{ operation: string }>;
     }>;

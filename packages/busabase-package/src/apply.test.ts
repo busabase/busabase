@@ -64,12 +64,8 @@ const createFakeServer = (): FakeServer => {
         fieldsByBase.set(typed.baseId, fields);
         return { id: typed.baseId, fields };
       },
-      updateFieldChangeRequest: async (input: unknown) => {
-        record("bases.updateFieldChangeRequest", input);
-        return { id: `crq_${++crSeq}` };
-      },
-      createViewChangeRequest: async (input: unknown) => {
-        record("bases.createViewChangeRequest", input);
+      fieldChangeRequest: async (input: unknown) => {
+        record(`bases.fieldChangeRequest:${(input as { operation: string }).operation}`, input);
         return { id: `crq_${++crSeq}` };
       },
       createBulkChangeRequest: async (input: unknown) => {
@@ -80,8 +76,14 @@ const createFakeServer = (): FakeServer => {
       },
     },
     records: {
-      updateChangeRequest: async (input: unknown) => {
-        record("records.updateChangeRequest", input);
+      changeRequest: async (input: unknown) => {
+        record(`records.changeRequest:${(input as { operation: string }).operation}`, input);
+        return { id: `crq_${++crSeq}` };
+      },
+    },
+    views: {
+      changeRequest: async (input: unknown) => {
+        record(`views.changeRequest:${(input as { operation: string }).operation}`, input);
         return { id: `crq_${++crSeq}` };
       },
     },
@@ -246,7 +248,7 @@ describe("the five passes", () => {
       planFor([relationBase("a", "b", "link"), relationBase("b", "a", "link")]),
       { autoMerge: true },
     );
-    const patches = calls.filter((call) => call.method === "bases.updateFieldChangeRequest");
+    const patches = calls.filter((call) => call.method === "bases.fieldChangeRequest:update");
     expect(patches).toHaveLength(2);
     for (const patch of patches) {
       const options = (patch.input as { patch: { options: Record<string, unknown> } }).patch
@@ -273,7 +275,7 @@ describe("the five passes", () => {
     for (const proposedRecord of proposed) expect(proposedRecord).not.toHaveProperty("link");
 
     // Pass 5: the link is set to the newly minted id, not the package key.
-    const updates = calls.filter((call) => call.method === "records.updateChangeRequest");
+    const updates = calls.filter((call) => call.method === "records.changeRequest:update");
     expect(updates).toHaveLength(1);
     const fields = (updates[0].input as { fields: Record<string, unknown> }).fields;
     expect(fields.link).toEqual(["rec_new_2"]);
@@ -288,7 +290,7 @@ describe("the five passes", () => {
     b.records = [{ key: "k2", fields: { title: "Two" } }];
     await applyInstall(client, planFor([a, b]), { autoMerge: true });
 
-    const update = calls.find((call) => call.method === "records.updateChangeRequest");
+    const update = calls.find((call) => call.method === "records.changeRequest:update");
     const fields = (update?.input as { fields: Record<string, unknown> }).fields;
     // Sending only { link } would blank `title` — the revise commit stores exactly the
     // fields it is given.

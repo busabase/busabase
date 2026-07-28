@@ -60,7 +60,7 @@ export function NodeDeleteSheet({ visible, node, onClose, onBack }: NodeDeleteSh
     onSuccess: async () => {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: buda?.orpc.nodes.list.key() }),
-        queryClient.invalidateQueries({ queryKey: buda?.orpc.nodes.listArchived.key() }),
+        queryClient.invalidateQueries({ queryKey: buda?.orpc.nodes.list.key() }),
         // A deleted node drops out of Favorites server-side (listFavorites filters
         // archived nodes), so the drawer's Favorites section must refetch too.
         queryClient.invalidateQueries({ queryKey: buda?.orpc.nodes.listFavorites.key() }),

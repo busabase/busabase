@@ -133,7 +133,8 @@ describe("multilingual field names — end-to-end", () => {
     if (!stage) throw new Error("stage field missing");
 
     const NEW_NAME = { en: "Stage", "zh-CN": "阶段", ja: "ステージ" };
-    const cr = await client.bases.updateFieldChangeRequest({
+    const cr = await client.bases.fieldChangeRequest({
+      operation: "update",
       baseId: base.id,
       fieldId: stage.id,
       patch: { name: NEW_NAME },
@@ -141,7 +142,7 @@ describe("multilingual field names — end-to-end", () => {
     await client.changeRequests.review({ changeRequestId: cr.id, verdict: "approved" });
     await client.changeRequests.merge({ changeRequestId: cr.id });
 
-    const bases = await client.bases.list();
+    const bases = await client.bases.list({});
     const renamed = bases
       .find((item) => item.id === base.id)
       ?.fields.find((field) => field.slug === "stage");

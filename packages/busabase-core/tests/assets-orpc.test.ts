@@ -288,7 +288,10 @@ describe("Assets + attachment dedup — oRPC integration", () => {
       expect(usage?.nodeSlug).toBe("assets-wu");
 
       // Deleting the record clears its usage (replace/remove semantics).
-      const deleteCr = await client.records.deleteChangeRequest({ recordId: recordId as string });
+      const deleteCr = await client.records.changeRequest({
+        operation: "delete",
+        recordId: recordId as string,
+      });
       await client.changeRequests.review({ changeRequestId: deleteCr.id, verdict: "approved" });
       await client.changeRequests.merge({ changeRequestId: deleteCr.id });
 

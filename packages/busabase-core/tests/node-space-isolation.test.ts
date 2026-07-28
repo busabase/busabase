@@ -47,10 +47,10 @@ describe("Node listings are space-scoped — oRPC integration", () => {
 
     // Drives are file-tree nodes listed via `listFileTreeNodes` — the third P0 fix.
     await inSpace("space_a", () =>
-      client.drives.create({ autoMerge: true, slug: "drive-a", name: "Drive A" }),
+      client.fileTrees.create({ type: "drive", autoMerge: true, slug: "drive-a", name: "Drive A" }),
     );
     await inSpace("space_b", () =>
-      client.drives.create({ autoMerge: true, slug: "drive-b", name: "Drive B" }),
+      client.fileTrees.create({ type: "drive", autoMerge: true, slug: "drive-b", name: "Drive B" }),
     );
   });
 
@@ -83,8 +83,8 @@ describe("Node listings are space-scoped — oRPC integration", () => {
   });
 
   it("listFileTreeNodes (drives) returns only the active space's drives", async () => {
-    const a = await inSpace("space_a", () => client.drives.list());
-    const b = await inSpace("space_b", () => client.drives.list());
+    const a = await inSpace("space_a", () => client.fileTrees.list({ type: "drive" }));
+    const b = await inSpace("space_b", () => client.fileTrees.list({ type: "drive" }));
     const aSlugs = a.map((d) => d.node.slug);
     const bSlugs = b.map((d) => d.node.slug);
     expect(aSlugs).toContain("drive-a");

@@ -65,7 +65,8 @@ describe("Drive API — oRPC integration", () => {
   };
 
   it("creates a Drive and merges file updates with hash protection", async () => {
-    const drive = await client.drives.create({
+    const drive = await client.fileTrees.create({
+      type: "drive",
       autoMerge: true,
       slug: "team-drive",
       name: "Team Drive",
@@ -76,11 +77,13 @@ describe("Drive API — oRPC integration", () => {
       expect.arrayContaining(["README.md", "notes/today.md"]),
     );
 
-    const current = await client.drives.readFile({
+    const current = await client.fileTrees.readFile({
+      type: "drive",
       nodeId: drive.node.id,
       filePath: "notes/today.md",
     });
-    const updateCr = await client.drives.createChangeRequest({
+    const updateCr = await client.fileTrees.createChangeRequest({
+      type: "drive",
       nodeId: drive.node.id,
       operations: [
         {
@@ -94,7 +97,11 @@ describe("Drive API — oRPC integration", () => {
     expect(updateCr.primaryOperation?.operation).toBe("drive_file_update");
     await approveAndMerge(updateCr.id);
     await expect(
-      client.drives.readFile({ nodeId: drive.node.id, filePath: "notes/today.md" }),
+      client.fileTrees.readFile({
+        type: "drive",
+        nodeId: drive.node.id,
+        filePath: "notes/today.md",
+      }),
     ).resolves.toMatchObject({ content: "today\nupdated\n" });
   });
 
@@ -105,12 +112,14 @@ describe("Drive API — oRPC integration", () => {
       sizeBytes: 512,
       contentHash: `sha256:${"a".repeat(64)}`,
     });
-    const drive = await client.drives.create({
+    const drive = await client.fileTrees.create({
+      type: "drive",
       autoMerge: true,
       slug: "asset-file-drive",
       name: "Asset File Drive",
     });
-    const createCr = await client.drives.createChangeRequest({
+    const createCr = await client.fileTrees.createChangeRequest({
+      type: "drive",
       nodeId: drive.node.id,
       message: "Add product image",
       operations: [
@@ -127,7 +136,8 @@ describe("Drive API — oRPC integration", () => {
     expect(createCr.primaryOperation?.operation).toBe("drive_file_create");
     await approveAndMerge(createCr.id);
 
-    const file = await client.drives.readFile({
+    const file = await client.fileTrees.readFile({
+      type: "drive",
       nodeId: drive.node.id,
       filePath: "media/logo.png",
     });
@@ -147,7 +157,8 @@ describe("Drive API — oRPC integration", () => {
       sizeBytes: 1024,
       contentHash: `sha256:${"1".repeat(64)}`,
     });
-    const drive = await client.drives.create({
+    const drive = await client.fileTrees.create({
+      type: "drive",
       autoMerge: true,
       slug: "asset-replace-drive",
       name: "Asset Replace Drive",
@@ -162,7 +173,8 @@ describe("Drive API — oRPC integration", () => {
     });
     expect((await client.assets.list()).some((a) => a.id === replacement.assetId)).toBe(true);
 
-    const updateCr = await client.drives.createChangeRequest({
+    const updateCr = await client.fileTrees.createChangeRequest({
+      type: "drive",
       nodeId: drive.node.id,
       operations: [
         { kind: "update", path: "deck.pdf", assetId: replacement.assetId, displayName: "Deck v2" },
@@ -170,7 +182,11 @@ describe("Drive API — oRPC integration", () => {
     });
     await approveAndMerge(updateCr.id);
 
-    const file = await client.drives.readFile({ nodeId: drive.node.id, filePath: "deck.pdf" });
+    const file = await client.fileTrees.readFile({
+      type: "drive",
+      nodeId: drive.node.id,
+      filePath: "deck.pdf",
+    });
     expect(file.assetId).toBe(original.assetId);
     expect(file.displayName).toBe("Deck v2");
 
@@ -209,12 +225,13 @@ describe("Drive API — oRPC integration", () => {
       sizeBytes: 256,
       contentHash: `sha256:${"b".repeat(64)}`,
     });
-    const drive = await ok("POST", "/drives", {
+    const drive = await ok("POST", "/file-trees", {
+      type: "drive",
       autoMerge: true,
       slug: "openapi-asset-file-drive",
       name: "OpenAPI Asset File Drive",
     });
-    const legacyUpload = await call("POST", `/drives/${drive.node.id}/change-requests`, {
+    const legacyUpload = await call("POST", `/file-trees/${drive.node.id}/change-requests`, {
       message: "Legacy direct binary upload",
       operations: [
         {
@@ -227,7 +244,7 @@ describe("Drive API — oRPC integration", () => {
     });
     expect(legacyUpload.status).toBeGreaterThanOrEqual(400);
 
-    const changeRequest = await ok("POST", `/drives/${drive.node.id}/change-requests`, {
+    const changeRequest = await ok("POST", `/file-trees/${drive.node.id}/change-requests`, {
       message: "Add REST archive",
       operations: [
         {
@@ -242,7 +259,7 @@ describe("Drive API — oRPC integration", () => {
     await ok("POST", `/change-requests/${changeRequest.id}/reviews`, { verdict: "approved" });
     await ok("POST", `/change-requests/${changeRequest.id}/merge`);
 
-    const file = await ok("GET", `/drives/${drive.node.id}/files/rest/export.bin`);
+    const file = await ok("GET", `/file-trees/${drive.node.id}/files/rest/export.bin`);
     expect(file.encoding).toBe("url");
     expect(file.assetId).toBe(asset.assetId);
     expect(file.displayName).toBe("REST Export");
@@ -255,12 +272,14 @@ describe("Drive API — oRPC integration", () => {
       sizeBytes: 2048,
       contentHash: `sha256:${"c".repeat(64)}`,
     });
-    const drive = await client.drives.create({
+    const drive = await client.fileTrees.create({
+      type: "drive",
       autoMerge: true,
       slug: "asset-backed-drive",
       name: "Asset Backed Drive",
     });
-    const createCr = await client.drives.createChangeRequest({
+    const createCr = await client.fileTrees.createChangeRequest({
+      type: "drive",
       nodeId: drive.node.id,
       message: "Add customer PDF",
       operations: [
@@ -284,7 +303,7 @@ describe("Drive API — oRPC integration", () => {
       },
     });
 
-    const files = await client.drives.listFiles({ nodeId: drive.node.id });
+    const files = await client.fileTrees.listFiles({ type: "drive", nodeId: drive.node.id });
     expect(files.find((file) => file.path.startsWith(".busabase/"))).toBeUndefined();
     expect(files.find((file) => file.path === "materials/wealth-guide.pdf")).toMatchObject({
       mimeType: "application/pdf",
@@ -293,7 +312,8 @@ describe("Drive API — oRPC integration", () => {
     });
     expect(files.find((file) => file.path.endsWith(".meta"))).toBeUndefined();
 
-    const file = await client.drives.readFile({
+    const file = await client.fileTrees.readFile({
+      type: "drive",
       nodeId: drive.node.id,
       filePath: "materials/wealth-guide.pdf",
     });
@@ -351,7 +371,8 @@ describe("Drive API — oRPC integration", () => {
       sizeBytes: 1024,
       contentHash: `sha256:${"d".repeat(64)}`,
     });
-    const drive = await client.drives.create({
+    const drive = await client.fileTrees.create({
+      type: "drive",
       autoMerge: true,
       slug: "initial-asset-backed-drive",
       name: "Initial Asset Backed Drive",
@@ -382,12 +403,14 @@ describe("Drive API — oRPC integration", () => {
   });
 
   it("returns CONFLICT for stale Drive file merges", async () => {
-    const drive = await client.drives.create({
+    const drive = await client.fileTrees.create({
+      type: "drive",
       autoMerge: true,
       slug: "stale-drive",
       name: "Stale Drive",
     });
-    const staleCr = await client.drives.createChangeRequest({
+    const staleCr = await client.fileTrees.createChangeRequest({
+      type: "drive",
       nodeId: drive.node.id,
       operations: [
         {
@@ -409,14 +432,16 @@ describe("Drive API — oRPC integration", () => {
   });
 
   it("returns BAD_REQUEST for invalid Drive file paths", async () => {
-    const drive = await client.drives.create({
+    const drive = await client.fileTrees.create({
+      type: "drive",
       autoMerge: true,
       slug: "path-drive",
       name: "Path Drive",
     });
 
     await expect(
-      client.drives.createChangeRequest({
+      client.fileTrees.createChangeRequest({
+        type: "drive",
         nodeId: drive.node.id,
         operations: [{ kind: "create", path: "../escape.md", content: "nope\n" }],
       }),
@@ -424,14 +449,16 @@ describe("Drive API — oRPC integration", () => {
   });
 
   it("still exposes ORPCError instances to local callers", async () => {
-    const drive = await client.drives.create({
+    const drive = await client.fileTrees.create({
+      type: "drive",
       autoMerge: true,
       slug: "error-drive",
       name: "Error Drive",
     });
 
     await expect(
-      client.drives.createChangeRequest({
+      client.fileTrees.createChangeRequest({
+        type: "drive",
         nodeId: drive.node.id,
         operations: [{ kind: "create", path: "bad/../escape.md", content: "nope\n" }],
       }),

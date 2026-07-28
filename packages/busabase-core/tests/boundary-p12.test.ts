@@ -57,11 +57,15 @@ describe("Boundary P12 — Trash permanent delete (purge)", () => {
     const doc = await raw.docs.create({ slug: "tmp", name: "Tmp", autoMerge: true });
     if ("status" in doc) throw new Error("Expected materialized DocVO");
     await deleteNode(raw, doc.node.id);
-    expect((await raw.nodes.listArchived()).some((n) => n.id === doc.node.id)).toBe(true);
+    expect((await raw.nodes.list({ status: "archived" })).some((n) => n.id === doc.node.id)).toBe(
+      true,
+    );
 
     const res = await raw.nodes.purge({ nodeId: doc.node.id });
     expect(res.purged).toBe(true);
-    expect((await raw.nodes.listArchived()).some((n) => n.id === doc.node.id)).toBe(false);
+    expect((await raw.nodes.list({ status: "archived" })).some((n) => n.id === doc.node.id)).toBe(
+      false,
+    );
     expect((await raw.nodes.list()).some((n) => n.id === doc.node.id)).toBe(false);
 
     // A second purge attempt hits the "already permanently deleted" guard
@@ -99,15 +103,19 @@ describe("Boundary P12 — Trash permanent delete (purge)", () => {
     });
 
     await deleteNode(raw, folder?.id as string);
-    expect((await raw.bases.listArchived()).some((b) => b.id === base.id)).toBe(true);
+    expect((await raw.bases.list({ status: "archived" })).some((b) => b.id === base.id)).toBe(true);
 
     // Previously refused (FK-restrict on commits blocked a hard delete of the
     // Base row); now allowed since purge never physically deletes anything.
     const res = await raw.nodes.purge({ nodeId: folder?.id as string });
     expect(res.purged).toBe(true);
-    expect((await raw.nodes.listArchived()).some((n) => n.id === folder?.id)).toBe(false);
-    expect((await raw.bases.listArchived()).some((b) => b.id === base.id)).toBe(false);
-    expect((await raw.bases.list()).some((b) => b.id === base.id)).toBe(false);
+    expect((await raw.nodes.list({ status: "archived" })).some((n) => n.id === folder?.id)).toBe(
+      false,
+    );
+    expect((await raw.bases.list({ status: "archived" })).some((b) => b.id === base.id)).toBe(
+      false,
+    );
+    expect((await raw.bases.list({})).some((b) => b.id === base.id)).toBe(false);
   });
 
   it("Fix 4: purging a Base directly soft-deletes it and permanently blocks restore", async () => {
@@ -116,12 +124,14 @@ describe("Boundary P12 — Trash permanent delete (purge)", () => {
 
     const base = await raw.bases.create({ name: "Direct", slug: "direct-base", autoMerge: true });
     await deleteNode(raw, base.nodeId);
-    expect((await raw.bases.listArchived()).some((b) => b.id === base.id)).toBe(true);
+    expect((await raw.bases.list({ status: "archived" })).some((b) => b.id === base.id)).toBe(true);
 
     const res = await raw.nodes.purge({ nodeId: base.nodeId });
     expect(res.purged).toBe(true);
-    expect((await raw.bases.listArchived()).some((b) => b.id === base.id)).toBe(false);
-    expect((await raw.bases.list()).some((b) => b.id === base.id)).toBe(false);
+    expect((await raw.bases.list({ status: "archived" })).some((b) => b.id === base.id)).toBe(
+      false,
+    );
+    expect((await raw.bases.list({})).some((b) => b.id === base.id)).toBe(false);
 
     // A purged Base is a terminal state — restore must be rejected even though
     // it went through the archive step first (unlike a plain archived base).

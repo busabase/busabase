@@ -118,3 +118,28 @@ export const restoreViewInputSchema = z.object({
   message: z.string().optional().default("Restore view"),
   submittedBy: z.string().optional().default("local-producer"),
 });
+
+/**
+ * Every view change request in one shape. `create` is addressed by `baseId`
+ * (there is no view id yet) and the rest by `viewId` — that difference is why
+ * these used to live on two different route prefixes, but it is a property of
+ * the payload, not of the operation being performed.
+ */
+export const viewChangeRequestInputSchema = z.discriminatedUnion("operation", [
+  createViewInputSchema.extend({
+    operation: z.literal("create"),
+    baseId: z.string().min(1).describe("Base the new view belongs to."),
+  }),
+  updateViewInputSchema.extend({
+    operation: z.literal("update"),
+    viewId: z.string().min(1),
+  }),
+  deleteViewInputSchema.extend({
+    operation: z.literal("delete"),
+    viewId: z.string().min(1),
+  }),
+  restoreViewInputSchema.extend({
+    operation: z.literal("restore"),
+    viewId: z.string().min(1),
+  }),
+]);

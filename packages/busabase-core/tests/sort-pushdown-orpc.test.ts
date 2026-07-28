@@ -6,7 +6,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { busabaseRouter } from "../src/router";
 
 /**
- * Server-side SORT push-down keyset correctness. `records.listPaged` with a
+ * Server-side SORT push-down keyset correctness. `records.list` with a
  * number sort must page through the WHOLE base in the right order without
  * dropping or repeating a row across page boundaries — including the boundary
  * into the trailing NULL bucket (records with no value for the sort field) and
@@ -80,7 +80,7 @@ describe("Sort push-down keyset — oRPC integration", () => {
     const collected: Awaited<ReturnType<Client["records"]["listPaged"]>>["records"] = [];
     let cursor: string | undefined;
     for (let guard = 0; guard < 50; guard++) {
-      const page = await client.records.listPaged({
+      const page = await client.records.list({
         baseId,
         limit: 10,
         sort: { fieldSlug: "score", fieldType: "number", direction },
@@ -136,7 +136,7 @@ describe("Sort push-down keyset — oRPC integration", () => {
     const collected: string[] = [];
     let cursor: string | undefined;
     for (let guard = 0; guard < 50; guard++) {
-      const page = await client.records.listPaged({
+      const page = await client.records.list({
         baseId,
         limit: 10,
         sort: { fieldSlug: "name", fieldType: "text", direction: "asc" },

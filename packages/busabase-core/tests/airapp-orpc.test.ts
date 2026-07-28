@@ -60,7 +60,8 @@ describe("AirApp API — oRPC integration", () => {
   };
 
   it("creates an AirApp with the default runnable Hono seed project", async () => {
-    const created = await client.airapps.create({
+    const created = await client.fileTrees.create({
+      type: "airapp",
       autoMerge: true,
       slug: "hello-airapp",
       name: "Hello AirApp",
@@ -76,7 +77,8 @@ describe("AirApp API — oRPC integration", () => {
   });
 
   it("replaces the default seed files with caller-supplied files when mergeMode is replace", async () => {
-    const created = await client.airapps.create({
+    const created = await client.fileTrees.create({
+      type: "airapp",
       autoMerge: true,
       slug: "custom-airapp",
       name: "Custom AirApp",
@@ -98,7 +100,8 @@ describe("AirApp API — oRPC integration", () => {
     // (index.html/style.css/client.js) should be layered in.
     expect(created.files.map((file) => file.path).sort()).toEqual(["package.json", "server.js"]);
 
-    const serverFile = await client.airapps.readFile({
+    const serverFile = await client.fileTrees.readFile({
+      type: "airapp",
       nodeId: created.node.id,
       filePath: "server.js",
     });
@@ -106,7 +109,8 @@ describe("AirApp API — oRPC integration", () => {
   });
 
   it("proposes a pending ChangeRequest by default and only materializes the node on merge", async () => {
-    const proposal = await client.airapps.create({
+    const proposal = await client.fileTrees.create({
+      type: "airapp",
       slug: "review-first-airapp",
       name: "Review First AirApp",
       autoMerge: false,
@@ -116,47 +120,67 @@ describe("AirApp API — oRPC integration", () => {
     expect(proposal.primaryOperation?.operation).toBe("node_create");
 
     // Not yet visible via list/get — it hasn't been materialized.
-    const beforeMerge = await client.airapps.list();
+    const beforeMerge = await client.fileTrees.list({ type: "airapp" });
     expect(beforeMerge.some((airapp) => airapp.node.slug === "review-first-airapp")).toBe(false);
-    await expect(client.airapps.get({ nodeId: "review-first-airapp" })).rejects.toThrow();
+    await expect(
+      client.fileTrees.get({ type: "airapp", nodeId: "review-first-airapp" }),
+    ).rejects.toThrow();
 
     const merged = await approveAndMerge(proposal.id);
     const mergedNodeIds = merged.changeRequest.mergeSummary.mergedNodeIds;
     const newNodeId = String(Array.isArray(mergedNodeIds) ? mergedNodeIds[0] : "");
     expect(newNodeId).toMatch(/^nod/);
 
-    const afterMerge = await client.airapps.get({ nodeId: newNodeId });
+    const afterMerge = await client.fileTrees.get({ type: "airapp", nodeId: newNodeId });
     expect(afterMerge.node.slug).toBe("review-first-airapp");
     expect(afterMerge.files.map((file) => file.path).sort()).toEqual([...AIRAPP_SEED_PATHS].sort());
 
-    const listed = await client.airapps.list();
+    const listed = await client.fileTrees.list({ type: "airapp" });
     expect(listed.some((airapp) => airapp.node.slug === "review-first-airapp")).toBe(true);
   });
 
   it("gets an AirApp by node id with its full file list, and 404s an unknown one", async () => {
-    const created = await client.airapps.create({
+    const created = await client.fileTrees.create({
+      type: "airapp",
       autoMerge: true,
       slug: "gettable-airapp",
       name: "Gettable AirApp",
     });
 
-    const byId = await client.airapps.get({ nodeId: created.node.id });
+    const byId = await client.fileTrees.get({ type: "airapp", nodeId: created.node.id });
     expect(byId.node.id).toBe(created.node.id);
     expect(byId.files.map((file) => file.path).sort()).toEqual([...AIRAPP_SEED_PATHS].sort());
 
-    const bySlug = await client.airapps.get({ nodeId: "gettable-airapp" });
+    const bySlug = await client.fileTrees.get({ type: "airapp", nodeId: "gettable-airapp" });
     expect(bySlug.node.id).toBe(created.node.id);
 
-    await expect(client.airapps.get({ nodeId: "pnd_missing" })).rejects.toThrow(/AirApp not found/);
+    await expect(client.fileTrees.get({ type: "airapp", nodeId: "pnd_missing" })).rejects.toThrow(
+      /AirApp not found/,
+    );
   });
 
   it("lists AirApps for the space without leaking other node types", async () => {
-    await client.airapps.create({ autoMerge: true, slug: "list-airapp", name: "List AirApp" });
-    await client.drives.create({ autoMerge: true, slug: "list-drive", name: "List Drive" });
-    await client.skills.create({ autoMerge: true, slug: "list-skill", name: "List Skill" });
+    await client.fileTrees.create({
+      type: "airapp",
+      autoMerge: true,
+      slug: "list-airapp",
+      name: "List AirApp",
+    });
+    await client.fileTrees.create({
+      type: "drive",
+      autoMerge: true,
+      slug: "list-drive",
+      name: "List Drive",
+    });
+    await client.fileTrees.create({
+      type: "skill",
+      autoMerge: true,
+      slug: "list-skill",
+      name: "List Skill",
+    });
     await client.docs.create({ autoMerge: true, slug: "list-doc", name: "List Doc", body: "x\n" });
 
-    const airapps = await client.airapps.list();
+    const airapps = await client.fileTrees.list({ type: "airapp" });
     expect(airapps.every((airapp) => airapp.node.type === "airapp")).toBe(true);
     expect(airapps.some((airapp) => airapp.node.slug === "list-airapp")).toBe(true);
     expect(airapps.some((airapp) => airapp.node.slug === "list-drive")).toBe(false);
@@ -165,17 +189,19 @@ describe("AirApp API — oRPC integration", () => {
   });
 
   it("lists file metadata and reads full file content with utf8 encoding", async () => {
-    const created = await client.airapps.create({
+    const created = await client.fileTrees.create({
+      type: "airapp",
       autoMerge: true,
       slug: "files-airapp",
       name: "Files AirApp",
     });
 
-    const files = await client.airapps.listFiles({ nodeId: created.node.id });
+    const files = await client.fileTrees.listFiles({ type: "airapp", nodeId: created.node.id });
     expect(files.map((file) => file.path).sort()).toEqual([...AIRAPP_SEED_PATHS].sort());
     expect(files.every((file) => typeof file.name === "string" && file.name.length > 0)).toBe(true);
 
-    const packageJson = await client.airapps.readFile({
+    const packageJson = await client.fileTrees.readFile({
+      type: "airapp",
       nodeId: created.node.id,
       filePath: "package.json",
     });
@@ -186,17 +212,20 @@ describe("AirApp API — oRPC integration", () => {
   });
 
   it("creates a change request on an existing AirApp and merges a file edit", async () => {
-    const created = await client.airapps.create({
+    const created = await client.fileTrees.create({
+      type: "airapp",
       autoMerge: true,
       slug: "editable-airapp",
       name: "Editable AirApp",
     });
-    const current = await client.airapps.readFile({
+    const current = await client.fileTrees.readFile({
+      type: "airapp",
       nodeId: created.node.id,
       filePath: "client.js",
     });
 
-    const changeRequest = await client.airapps.createChangeRequest({
+    const changeRequest = await client.fileTrees.createChangeRequest({
+      type: "airapp",
       nodeId: created.node.id,
       message: "Tweak the client script",
       operations: [
@@ -212,7 +241,8 @@ describe("AirApp API — oRPC integration", () => {
     expect(changeRequest.primaryOperation?.operation).toBe("airapp_file_update");
 
     await approveAndMerge(changeRequest.id);
-    const updated = await client.airapps.readFile({
+    const updated = await client.fileTrees.readFile({
+      type: "airapp",
       nodeId: created.node.id,
       filePath: "client.js",
     });
@@ -221,7 +251,8 @@ describe("AirApp API — oRPC integration", () => {
 
   it("404s a change request against an unknown AirApp", async () => {
     await expect(
-      client.airapps.createChangeRequest({
+      client.fileTrees.createChangeRequest({
+        type: "airapp",
         nodeId: "pnd_missing",
         operations: [{ kind: "update", path: "client.js", content: "x" }],
       }),
@@ -233,14 +264,28 @@ describe("AirApp API — oRPC integration", () => {
       runWithBusabaseContext({ spaceId }, fn);
 
     const createdInA = await inSpace("space_airapp_a", () =>
-      client.airapps.create({ autoMerge: true, slug: "space-a-airapp", name: "Space A AirApp" }),
+      client.fileTrees.create({
+        type: "airapp",
+        autoMerge: true,
+        slug: "space-a-airapp",
+        name: "Space A AirApp",
+      }),
     );
     await inSpace("space_airapp_b", () =>
-      client.airapps.create({ autoMerge: true, slug: "space-b-airapp", name: "Space B AirApp" }),
+      client.fileTrees.create({
+        type: "airapp",
+        autoMerge: true,
+        slug: "space-b-airapp",
+        name: "Space B AirApp",
+      }),
     );
 
-    const listedFromA = await inSpace("space_airapp_a", () => client.airapps.list());
-    const listedFromB = await inSpace("space_airapp_b", () => client.airapps.list());
+    const listedFromA = await inSpace("space_airapp_a", () =>
+      client.fileTrees.list({ type: "airapp" }),
+    );
+    const listedFromB = await inSpace("space_airapp_b", () =>
+      client.fileTrees.list({ type: "airapp" }),
+    );
     expect(listedFromA.map((a) => a.node.slug)).toContain("space-a-airapp");
     expect(listedFromA.map((a) => a.node.slug)).not.toContain("space-b-airapp");
     expect(listedFromB.map((a) => a.node.slug)).toContain("space-b-airapp");
@@ -248,7 +293,9 @@ describe("AirApp API — oRPC integration", () => {
 
     // A node id minted in space A is not reachable from space B either.
     await expect(
-      inSpace("space_airapp_b", () => client.airapps.get({ nodeId: createdInA.node.id })),
+      inSpace("space_airapp_b", () =>
+        client.fileTrees.get({ type: "airapp", nodeId: createdInA.node.id }),
+      ),
     ).rejects.toThrow(/AirApp not found/);
   });
 });

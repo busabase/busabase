@@ -116,7 +116,8 @@ describe("Relation field target by slug — oRPC integration", () => {
       fields: [{ slug: "name", name: "Name", type: "text", required: true, options: {} }],
       autoMerge: true,
     });
-    const cr = await client.bases.createFieldChangeRequest({
+    const cr = await client.bases.fieldChangeRequest({
+      operation: "create",
       baseId: base.id,
       slug: "company",
       name: "Company",
@@ -148,7 +149,8 @@ describe("Relation field target by slug — oRPC integration", () => {
     const field = (await client.bases.get({ baseId: base.id }))?.fields.find(
       (f) => f.slug === "company",
     );
-    const cr = await client.bases.updateFieldChangeRequest({
+    const cr = await client.bases.fieldChangeRequest({
+      operation: "update",
       baseId: base.id,
       fieldId: field?.id as string,
       patch: { options: { targetBaseSlug: "companies" } },

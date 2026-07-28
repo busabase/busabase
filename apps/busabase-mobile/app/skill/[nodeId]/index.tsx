@@ -12,7 +12,7 @@ function SkillDetailContent() {
 
   const skillQuery = useQuery(
     buda && nodeId
-      ? buda.orpc.skills.get.queryOptions({ input: { nodeId } })
+      ? buda.orpc.fileTrees.get.queryOptions({ input: { nodeId, type: "skill" } })
       : { queryKey: ["no-connection", "skill", nodeId], queryFn: skipToken },
   );
 
@@ -27,11 +27,11 @@ function SkillDetailContent() {
       onRefresh={() => void skillQuery.refetch()}
       onReadFile={(filePath) => {
         if (!buda) throw new Error("Not connected");
-        return buda.client.skills.readFile({ nodeId, filePath });
+        return buda.client.fileTrees.readFile({ type: "skill", nodeId, filePath });
       }}
       onCreateChangeRequest={(input) => {
         if (!buda) throw new Error("Not connected");
-        return buda.client.skills.createChangeRequest({ nodeId, ...input });
+        return buda.client.fileTrees.createChangeRequest({ type: "skill", nodeId, ...input });
       }}
       onChangeRequestCreated={(changeRequestId) =>
         router.push({ pathname: "/change-requests/[id]", params: { id: changeRequestId } })

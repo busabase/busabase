@@ -369,7 +369,7 @@ export const resolveApiUrl = (apiBasePath: string) => {
 // Uses plain POST for every call (not `inferRPCMethodFromContractRouter`): the
 // server's /api/rpc handler is oRPC's `RPCHandler`, which is POST-only and does
 // not honor the contract's `.route({ method })` metadata, so sending the
-// contract-declared verb (e.g. PUT for records.updateChangeRequest) 405s.
+// contract-declared REST details are irrelevant here; every RPC call is POST.
 export const createBusabaseORPCClient = (
   apiBasePath = "/api/rpc",
   opts?: {
@@ -425,36 +425,40 @@ export const createBusabaseRestApiClient = (
     listNodes: () => client.nodes.list(),
     listNodeChildren: (parentId, depth) => client.nodes.list({ parentId, depth }),
     isNodeDescendant: (params) => client.nodes.isDescendant(params),
-    listArchivedNodes: () => client.nodes.listArchived(),
+    listArchivedNodes: () => client.nodes.list({ status: "archived" }),
     purgeNode: (nodeId) => client.nodes.purge({ nodeId }),
     moveNode: (payload) => client.nodes.move(payload),
     updateNodeMetadata: (nodeId, metadata) => client.nodes.updateMetadata({ nodeId, metadata }),
     toggleNodeFavorite: (nodeId) => client.nodes.toggleFavorite({ nodeId }),
     listFavoriteNodes: () => client.nodes.listFavorites(),
-    getSkill: (nodeIdOrSlug) => client.skills.get({ nodeId: nodeIdOrSlug }),
-    readSkillFile: (nodeId, filePath) => client.skills.readFile({ nodeId, filePath }),
-    getDrive: (nodeIdOrSlug) => client.drives.get({ nodeId: nodeIdOrSlug }),
-    readDriveFile: (nodeId, filePath) => client.drives.readFile({ nodeId, filePath }),
-    listChangeRequests: (options) => client.changeRequests.list(options ?? {}),
+    getSkill: (nodeIdOrSlug) => client.fileTrees.get({ nodeId: nodeIdOrSlug, type: "skill" }),
+    readSkillFile: (nodeId, filePath) =>
+      client.fileTrees.readFile({ nodeId, filePath, type: "skill" }),
+    getDrive: (nodeIdOrSlug) => client.fileTrees.get({ nodeId: nodeIdOrSlug, type: "drive" }),
+    readDriveFile: (nodeId, filePath) =>
+      client.fileTrees.readFile({ nodeId, filePath, type: "drive" }),
+    listChangeRequests: async (options) =>
+      (await client.changeRequests.list(options ?? {})).changeRequests,
     getChangeRequest: (changeRequestId) => client.changeRequests.get({ changeRequestId }),
-    listRecords: (options) => client.records.list(options ?? {}),
+    listRecords: async (options) => (await client.records.list(options ?? {})).records,
     getRecord: (recordId) => client.records.get({ recordId }),
     listRecordChangeRequests: (recordId) => client.records.listChangeRequests({ recordId }),
     searchRecords: (filter) => client.records.search(filter),
-    listBases: () => client.bases.list(),
+    listBases: () => client.bases.list({}),
     createBase: (payload) => client.bases.create(payload),
     createNodeChangeRequest: (payload) => client.nodes.createChangeRequest(payload),
-    listViews: (baseId) => client.bases.listViews({ baseId }),
+    listViews: (baseId) => client.bases.listViews({ baseId, status: "active" }),
     createBaseField: (baseId, payload) => client.bases.createField({ baseId, ...payload }),
     createFieldChangeRequest: (baseId, payload) =>
-      client.bases.createFieldChangeRequest({ baseId, ...payload }),
+      client.bases.fieldChangeRequest({ baseId, operation: "create", ...payload }),
     createUpdateFieldChangeRequest: (baseId, payload) =>
-      client.bases.updateFieldChangeRequest({ baseId, ...payload }),
+      client.bases.fieldChangeRequest({ baseId, operation: "update", ...payload }),
     createViewChangeRequest: (baseId, payload) =>
-      client.bases.createViewChangeRequest({ baseId, ...payload }),
+      client.views.changeRequest({ baseId, operation: "create", ...payload }),
     createUpdateViewChangeRequest: (viewId, payload) =>
-      client.views.updateChangeRequest({ viewId, ...payload }),
-    createDeleteViewChangeRequest: (viewId) => client.views.deleteChangeRequest({ viewId }),
+      client.views.changeRequest({ viewId, operation: "update", ...payload }),
+    createDeleteViewChangeRequest: (viewId) =>
+      client.views.changeRequest({ viewId, operation: "delete" }),
     approveChangeRequest: (changeRequestId, reason) =>
       client.changeRequests.review(
         reason
@@ -485,9 +489,18 @@ export const createBusabaseRestApiClient = (
     createChangeRequest: (baseId, payload) =>
       client.bases.createChangeRequest({ baseId, ...payload }) as Promise<ChangeRequestVO>,
     createUpdateChangeRequest: (recordId, payload) =>
-      client.records.updateChangeRequest({ recordId, ...payload }),
-    createDeleteChangeRequest: (recordId) =>
-      client.records.deleteChangeRequest({ recordId, deleteMode: "archive" }),
+      client.records.changeRequest({ recordId, operation: "update", ...payload }),
+    createDeleteChangeRequest: async (recordId) => {
+      const result = await client.records.changeRequest({
+        recordId,
+        operation: "delete",
+        deleteMode: "archive",
+      });
+      if (result.materialized) {
+        throw new Error("Record delete unexpectedly returned a materialized record");
+      }
+      return result;
+    },
     mergeChangeRequest: (changeRequestId) => client.changeRequests.merge({ changeRequestId }),
     createAssetUploadUrl: (input) => client.assets.createUploadUrl(input),
     confirmAsset: (input) => client.assets.confirm(input),
@@ -495,13 +508,23 @@ export const createBusabaseRestApiClient = (
     createRestoreBaseChangeRequest: (baseId, payload) =>
       client.bases.restoreChangeRequest({ baseId, ...payload }),
     createRestoreFieldChangeRequest: (baseId, payload) =>
-      client.bases.restoreFieldChangeRequest({ baseId, ...payload }),
-    listArchivedViews: (baseId) => client.bases.listArchivedViews({ baseId }),
-    listArchivedRecords: (baseId) => client.bases.listArchivedRecords({ baseId }),
+      client.bases.fieldChangeRequest({ baseId, operation: "restore", ...payload }),
+    listArchivedViews: (baseId) => client.bases.listViews({ baseId, status: "archived" }),
+    listArchivedRecords: async (baseId) =>
+      (await client.records.list({ baseId, status: "archived" })).records,
     createRestoreViewChangeRequest: (viewId, payload) =>
-      client.views.restoreChangeRequest({ viewId, ...payload }),
-    createRestoreRecordChangeRequest: (recordId, payload) =>
-      client.records.restoreChangeRequest({ recordId, ...payload }),
+      client.views.changeRequest({ viewId, operation: "restore", ...payload }),
+    createRestoreRecordChangeRequest: async (recordId, payload) => {
+      const result = await client.records.changeRequest({
+        recordId,
+        operation: "restore",
+        ...payload,
+      });
+      if (result.materialized) {
+        throw new Error("Record restore unexpectedly returned a materialized record");
+      }
+      return result;
+    },
     planInstallFromGithub: (input) => client.install.planFromGithub(input),
     installFromGithub: (input) => client.install.fromGithub(input),
   };

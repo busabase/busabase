@@ -1042,7 +1042,7 @@ function BaseSidePanelPreview({ orpc, payload }: SidePanelTabProps) {
   const messages = useCoreI18n();
   const currentSearch = useSearch();
   const { nodeId } = payload as { nodeId: string };
-  const basesQuery = useQuery(orpc.bases.list.queryOptions({}));
+  const basesQuery = useQuery(orpc.bases.list.queryOptions({ input: {} }));
   const base = basesQuery.data?.find((candidate) => candidate.nodeId === nodeId) ?? null;
 
   if (!base) {

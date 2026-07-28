@@ -159,7 +159,7 @@ interface BusabaseDashboardProps {
    * Who this render is for. `"anonymous"` = a session-less visitor who arrived
    * through a public share link, so the dashboard must confine itself to the
    * ONE shared node it was given and fire only the reads on busabase-core's
-   * anonymous allowlist (`bases.get`, `bases.listViews`, `records.listPaged`,
+   * anonymous allowlist (`bases.get`, `bases.listViews`, `records.list`,
    * `records.get`, `docs.get`, `folders.get`, `files.get`).
    *
    * Every space-wide query below is switched off in that mode. That is a
@@ -266,13 +266,20 @@ function BusabaseDashboardContent({
   );
   // Reads run through oRPC + React Query, seeded by the SSR props as initialData.
   const changeRequestsList = orpc.changeRequests.list.queryOptions({ input: {} });
-  const basesList = orpc.bases.list.queryOptions({});
-  const archivedBasesList = orpc.bases.listArchived.queryOptions({});
-  const archivedNodesList = orpc.nodes.listArchived.queryOptions({});
+  const basesList = orpc.bases.list.queryOptions({ input: {} });
+  const archivedBasesList = orpc.bases.list.queryOptions({ input: { status: "archived" } });
+  const archivedNodesList = orpc.nodes.list.queryOptions({ input: { status: "archived" } });
   const auditEventsList = orpc.auditEvents.list.queryOptions({ input: {} });
   const changeRequestsQuery = useQuery({
     ...changeRequestsList,
-    initialData: initialChangeRequests,
+    // The endpoint is paginated now; this screen wants the first page's rows and
+    // the SSR prop is already just that array. The cast is the pre-existing
+    // `ChangeRequestVO` vs inferred-output mismatch on `submittedByUser`'s
+    // optionality, which used to be absorbed by passing the array straight in.
+    initialData: { changeRequests: initialChangeRequests, nextCursor: null } as {
+      changeRequests: typeof initialChangeRequests;
+      nextCursor: string | null;
+    } & Awaited<ReturnType<typeof changeRequestsList.queryFn>>,
     enabled: !isAnon,
   });
   // For an anonymous visitor `bases.list` is off; `activeBase` resolves from the
@@ -286,7 +293,7 @@ function BusabaseDashboardContent({
     initialData: initialAuditEvents,
     enabled: !isAnon,
   });
-  const allChangeRequests = changeRequestsQuery.data ?? [];
+  const allChangeRequests = changeRequestsQuery.data?.changeRequests ?? [];
   // Anonymous mode reads the seeded prop directly, NOT the disabled query's
   // cache: `basesQuery` freezes `initialData` at first mount, but the public
   // host resolves the shared base asynchronously (`bases.get`) and passes it in
@@ -299,17 +306,19 @@ function BusabaseDashboardContent({
   // Stable query keys for cache writes/invalidation (orpc is memoized on apiBasePath).
   const listKeys = useMemo(
     () => ({
-      archivedBases: orpc.bases.listArchived.queryOptions({}).queryKey as QueryKey,
-      archivedNodes: orpc.nodes.listArchived.queryOptions({}).queryKey as QueryKey,
+      archivedBases: orpc.bases.list.queryOptions({ input: { status: "archived" } })
+        .queryKey as QueryKey,
+      archivedNodes: orpc.nodes.list.queryOptions({ input: { status: "archived" } })
+        .queryKey as QueryKey,
       // Partial keys (no input) so invalidation matches every paged/counted
       // query regardless of base, tab, or cursor.
       changeRequests: orpc.changeRequests.list.queryOptions({ input: {} }).queryKey as QueryKey,
-      changeRequestsPaged: orpc.changeRequests.listPaged.key() as QueryKey,
+      changeRequestsPaged: orpc.changeRequests.list.key() as QueryKey,
       changeRequestCounts: orpc.changeRequests.counts.key() as QueryKey,
       changeRequestDetail: orpc.changeRequests.get.key() as QueryKey,
-      records: orpc.records.listPaged.key() as QueryKey,
+      records: orpc.records.list.key() as QueryKey,
       recordsCount: orpc.records.count.key() as QueryKey,
-      bases: orpc.bases.list.queryOptions({}).queryKey as QueryKey,
+      bases: orpc.bases.list.queryOptions({ input: {} }).queryKey as QueryKey,
       nodes: orpc.nodes.list.queryOptions({}).queryKey as QueryKey,
       auditEvents: orpc.auditEvents.list.queryOptions({ input: {} }).queryKey as QueryKey,
       assets: orpc.assets.list.queryOptions({}).queryKey as QueryKey,
@@ -395,7 +404,9 @@ function BusabaseDashboardContent({
     activeBase?.id && locationPath.startsWith("/base/") && !isBaseSetupRoute,
   );
   const archivedViewsQuery = useQuery({
-    ...orpc.bases.listArchivedViews.queryOptions({ input: { baseId: activeBase?.id ?? "" } }),
+    ...orpc.bases.listViews.queryOptions({
+      input: { baseId: activeBase?.id ?? "", status: "archived" },
+    }),
     // Not on the anonymous allowlist, and a public visitor has no "restore"
     // affordance to feed anyway.
     enabled: Boolean(activeBase?.id && isBaseDetailRoute) && !isAnon,
@@ -404,9 +415,10 @@ function BusabaseDashboardContent({
   // Archived ("trash") records keyset-paginate too, so a Base with a large
   // soft-deleted history doesn't load it all at once when the section expands.
   const archivedRecordsInfiniteQuery = useInfiniteQuery({
-    ...orpc.bases.listArchivedRecordsPaged.infiniteOptions({
+    ...orpc.records.list.infiniteOptions({
       input: (pageParam: string | undefined) => ({
         baseId: activeBase?.id ?? "",
+        status: "archived" as const,
         cursor: pageParam,
         limit: RECORDS_PAGE_SIZE,
       }),
@@ -492,7 +504,7 @@ function BusabaseDashboardContent({
   // Records load per active base via keyset pagination ("load more"), so a base
   // with more than one page is fully reachable instead of silently capped.
   const recordsInfiniteQuery = useInfiniteQuery({
-    ...orpc.records.listPaged.infiniteOptions({
+    ...orpc.records.list.infiniteOptions({
       input: (pageParam: string | undefined) => ({
         baseId: activeBase?.id,
         cursor: pageParam,
@@ -1369,7 +1381,7 @@ function BusabaseDashboardContent({
       await approveAndMergeChangeRequest(changeRequest.id);
       await queryClient.invalidateQueries({ queryKey: listKeys.bases });
       await queryClient.invalidateQueries({
-        queryKey: orpc.bases.listArchived.queryOptions({}).queryKey,
+        queryKey: orpc.bases.list.queryOptions({ input: { status: "archived" } }).queryKey,
       });
       toast.success(messages.base.baseRestored);
       setLocation(`/base/${base.slug}`);
@@ -1399,7 +1411,7 @@ function BusabaseDashboardContent({
       });
       await approveAndMergeChangeRequest(changeRequest.id);
       await queryClient.invalidateQueries({
-        queryKey: orpc.nodes.listArchived.queryOptions({}).queryKey,
+        queryKey: orpc.nodes.list.queryOptions({ input: { status: "archived" } }).queryKey,
       });
       await queryClient.invalidateQueries({
         queryKey: orpc.nodes.list.queryOptions({}).queryKey,
@@ -1421,7 +1433,7 @@ function BusabaseDashboardContent({
       setError(null);
       await client.purgeNode(node.id);
       await queryClient.invalidateQueries({
-        queryKey: orpc.nodes.listArchived.queryOptions({}).queryKey,
+        queryKey: orpc.nodes.list.queryOptions({ input: { status: "archived" } }).queryKey,
       });
       toast.success(fmt(messages.base.nodeDeletedPermanently, { type: node.type }));
     },
@@ -1436,7 +1448,7 @@ function BusabaseDashboardContent({
       setError(null);
       await client.purgeNode(base.nodeId);
       await queryClient.invalidateQueries({
-        queryKey: orpc.bases.listArchived.queryOptions({}).queryKey,
+        queryKey: orpc.bases.list.queryOptions({ input: { status: "archived" } }).queryKey,
       });
       toast.success(fmt(messages.base.nodeDeletedPermanently, { type: "base" }));
     },
@@ -1551,8 +1563,9 @@ function BusabaseDashboardContent({
       });
       await approveAndMergeChangeRequest(changeRequest.id);
       await queryClient.invalidateQueries({
-        queryKey: orpc.bases.listArchivedViews.queryOptions({ input: { baseId: view.baseId } })
-          .queryKey,
+        queryKey: orpc.bases.listViews.queryOptions({
+          input: { baseId: view.baseId, status: "archived" },
+        }).queryKey,
       });
       await refresh();
       toast.success(messages.base.viewRestored);
@@ -1577,7 +1590,7 @@ function BusabaseDashboardContent({
       });
       await approveAndMergeChangeRequest(changeRequest.id);
       await queryClient.invalidateQueries({
-        queryKey: orpc.bases.listArchivedRecordsPaged.key(),
+        queryKey: orpc.records.list.key(),
       });
       await refresh();
       toast.success(messages.recordView.recordRestored);

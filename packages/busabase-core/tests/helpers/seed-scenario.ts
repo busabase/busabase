@@ -33,8 +33,8 @@ function buildClient(raw: RawClient) {
 
   return {
     bases: {
-      list: () => raw.bases.list(),
-      listArchived: () => raw.bases.listArchived(),
+      list: (input?: { status?: "active" | "archived" }) => raw.bases.list(input ?? {}),
+      listArchived: () => raw.bases.list({ status: "archived" }),
       get: (input: { baseId: string }) => raw.bases.get(input),
       // Test convenience default: `createBase` is review-first by default in
       // production (a pending ChangeRequest), but nearly every test in this
@@ -54,44 +54,21 @@ function buildClient(raw: RawClient) {
       },
       createField: (input: Parameters<RawClient["bases"]["createField"]>[0]) =>
         raw.bases.createField(input),
-      listViews: (input?: { baseId?: string }) => raw.bases.listViews(input ?? {}),
-      createViewChangeRequest: async (
-        input: Parameters<RawClient["bases"]["createViewChangeRequest"]>[0] & {
+      listViews: (input?: { baseId?: string; status?: "active" | "archived" }) =>
+        raw.bases.listViews({ status: "active", ...(input ?? {}) } as Parameters<
+          RawClient["bases"]["listViews"]
+        >[0]),
+      // Mirrors the contract's single field endpoint, plus this suite's
+      // `mergeImmediately` convenience (approve + merge in one call).
+      fieldChangeRequest: async (
+        input: Parameters<RawClient["bases"]["fieldChangeRequest"]>[0] & {
           mergeImmediately?: boolean;
         },
       ) => {
         const { mergeImmediately, ...rest } = input;
-        const cr = await raw.bases.createViewChangeRequest(rest);
-        if (mergeImmediately) {
-          await approveAndMerge(cr.id);
-        }
-        return cr;
-      },
-      createFieldChangeRequest: (
-        input: Parameters<RawClient["bases"]["createFieldChangeRequest"]>[0],
-      ) => raw.bases.createFieldChangeRequest(input),
-      deleteFieldChangeRequest: async (
-        input: Parameters<RawClient["bases"]["deleteFieldChangeRequest"]>[0] & {
-          mergeImmediately?: boolean;
-        },
-      ) => {
-        const { mergeImmediately, ...rest } = input;
-        const cr = await raw.bases.deleteFieldChangeRequest(rest);
-        if (mergeImmediately) {
-          await approveAndMerge(cr.id);
-        }
-        return cr;
-      },
-      updateFieldChangeRequest: (
-        input: Parameters<RawClient["bases"]["updateFieldChangeRequest"]>[0],
-      ) => raw.bases.updateFieldChangeRequest(input),
-      reorderFieldsChangeRequest: async (
-        input: Parameters<RawClient["bases"]["reorderFieldsChangeRequest"]>[0] & {
-          mergeImmediately?: boolean;
-        },
-      ) => {
-        const { mergeImmediately, ...rest } = input;
-        const cr = await raw.bases.reorderFieldsChangeRequest(rest);
+        const cr = await raw.bases.fieldChangeRequest(
+          rest as Parameters<RawClient["bases"]["fieldChangeRequest"]>[0],
+        );
         if (mergeImmediately) {
           await approveAndMerge(cr.id);
         }
@@ -117,7 +94,8 @@ function buildClient(raw: RawClient) {
       listDeletedFields: (input: { baseId: string }) => raw.bases.listDeletedFields(input),
     },
     records: {
-      list: (input?: Parameters<RawClient["records"]["list"]>[0]) => raw.records.list(input),
+      list: async (input?: Parameters<RawClient["records"]["list"]>[0]) =>
+        (await raw.records.list(input)).records,
       get: (input: Parameters<RawClient["records"]["get"]>[0]) => raw.records.get(input),
       createChangeRequest: async (input: {
         baseId: string;
@@ -150,7 +128,8 @@ function buildClient(raw: RawClient) {
           // first created) so 3-way merge conflict detection fires correctly when the
           // record has advanced since then (e.g. another CR was merged in between).
           const cachedBaseCommitId = recordBaseCommitCache.get(targetRecordId);
-          cr = await raw.records.updateChangeRequest({
+          cr = await raw.records.changeRequest({
+            operation: "update",
             recordId: targetRecordId,
             fields: rest.fields,
             author: rest.submittedBy ?? "local-producer",
@@ -192,6 +171,20 @@ function buildClient(raw: RawClient) {
         }
         return cr;
       },
+      changeRequest: async (
+        input: Parameters<RawClient["records"]["changeRequest"]>[0] & {
+          mergeImmediately?: boolean;
+        },
+      ) => {
+        const { mergeImmediately, ...rest } = input;
+        const cr = await raw.records.changeRequest(
+          rest as Parameters<RawClient["records"]["changeRequest"]>[0],
+        );
+        if (mergeImmediately) {
+          await approveAndMerge(cr.id);
+        }
+        return cr;
+      },
       createDeleteChangeRequest: async (input: {
         recordId: string;
         submittedBy?: string;
@@ -199,7 +192,8 @@ function buildClient(raw: RawClient) {
         mergeImmediately?: boolean;
       }) => {
         const { mergeImmediately, recordId, ...rest } = input;
-        const cr = await raw.records.deleteChangeRequest({
+        const cr = await raw.records.changeRequest({
+          operation: "delete",
           recordId,
           submittedBy: rest.submittedBy ?? "local-editor",
           message: rest.message,
@@ -211,9 +205,25 @@ function buildClient(raw: RawClient) {
       },
       listLinks: (input: { recordId: string }) => raw.records.listLinks(input),
     },
+    views: {
+      changeRequest: async (
+        input: Parameters<RawClient["views"]["changeRequest"]>[0] & {
+          mergeImmediately?: boolean;
+        },
+      ) => {
+        const { mergeImmediately, ...rest } = input;
+        const cr = await raw.views.changeRequest(
+          rest as Parameters<RawClient["views"]["changeRequest"]>[0],
+        );
+        if (mergeImmediately) {
+          await approveAndMerge(cr.id);
+        }
+        return cr;
+      },
+    },
     changeRequests: {
-      list: (input?: Parameters<RawClient["changeRequests"]["list"]>[0]) =>
-        raw.changeRequests.list(input),
+      list: async (input?: Parameters<RawClient["changeRequests"]["list"]>[0]) =>
+        (await raw.changeRequests.list(input)).changeRequests,
       get: (input: Parameters<RawClient["changeRequests"]["get"]>[0]) =>
         raw.changeRequests.get(input),
       approve: (input: { changeRequestId: string; reviewedBy?: string }) =>

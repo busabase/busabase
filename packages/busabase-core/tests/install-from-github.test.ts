@@ -259,13 +259,13 @@ describe("install.fromGithub — server-side install (real PGLite + synthetic zi
     expect(doc.body).toContain("Read me first.");
 
     // Base schema + records.
-    const bases = await inSpace(spaceId, () => client.bases.list());
+    const bases = await inSpace(spaceId, () => client.bases.list({}));
     const articles = bases.find((base) => base.slug === "articles");
     expect(articles).toBeTruthy();
     expect(articles?.fields.map((field) => field.slug).sort()).toEqual(["status", "title"]);
 
     const { records } = await inSpace(spaceId, () =>
-      client.records.listPaged({ baseId: articles?.id ?? "" }),
+      client.records.list({ baseId: articles?.id ?? "" }),
     );
     const titles = records
       .map((record) => record.headCommit?.fields?.title)
@@ -292,10 +292,10 @@ describe("install.fromGithub — server-side install (real PGLite + synthetic zi
     expect(result.created.records).toBe(0);
     expect(result.pendingChangeRequests).toBeGreaterThan(0);
 
-    const bases = await inSpace(spaceId, () => client.bases.list());
+    const bases = await inSpace(spaceId, () => client.bases.list({}));
     const articles = bases.find((base) => base.slug === "articles");
     const { records } = await inSpace(spaceId, () =>
-      client.records.listPaged({ baseId: articles?.id ?? "" }),
+      client.records.list({ baseId: articles?.id ?? "" }),
     );
     expect(records).toHaveLength(0);
   });

@@ -113,14 +113,16 @@ describe("busabase pglite integration flow", () => {
     const updatedSkillMd = await skills.readSkillFile(skill.node.id, "SKILL.md");
     expect(updatedSkillMd.content).toContain("Review checklist");
 
-    const seededRecords = await base.listRecords({ limit: 100 });
+    const { records: seededRecords } = await base.listRecordsPaged({ limit: 100 });
     expect(seededRecords.length).toBeGreaterThanOrEqual(5);
     expect(seededRecords.some((record) => record.base.slug === "social-content")).toBe(true);
     const seededNewsletter = seededRecords.find((record) => record.base.slug === "newsletter");
     expect(seededNewsletter?.base.fields.find((field) => field.slug === "body")?.type).toBe("html");
     expect(String(seededNewsletter?.headCommit.fields.body)).toContain("<article>");
 
-    const seededChangeRequests = await store.listChangeRequests({ limit: 100 });
+    const { changeRequests: seededChangeRequests } = await store.listChangeRequestsPaged({
+      limit: 100,
+    });
     const seededSkillChangeRequest = seededChangeRequests.find(
       (item) => item.id === "crq_seed_skill_research_editor",
     );
@@ -294,7 +296,7 @@ describe("busabase pglite integration flow", () => {
     });
     expect(comments.some((item) => item.id === comment.id)).toBe(true);
 
-    const limitedRecords = await base.listRecords({ limit: 1 });
+    const { records: limitedRecords } = await base.listRecordsPaged({ limit: 1 });
     expect(limitedRecords).toHaveLength(1);
 
     const projectedRecords = await base.listRecordsByFieldText({

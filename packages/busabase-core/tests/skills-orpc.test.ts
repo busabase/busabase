@@ -86,14 +86,15 @@ describe("Agent Skills API — oRPC integration", () => {
   };
 
   it("lists created skills with their Asset-backed file trees", async () => {
-    await client.skills.create({
+    await client.fileTrees.create({
+      type: "skill",
       autoMerge: true,
       slug: "ai-research-editor",
       name: "AI Research Editor",
       description: "Reviews agent research drafts for source quality before publishing.",
     });
 
-    const skills = await client.skills.list();
+    const skills = await client.fileTrees.list({ type: "skill" });
     const listed = skills.find((skill) => skill.node.slug === "ai-research-editor");
     expect(listed).toBeDefined();
     expect(listed?.files.map((file) => file.path)).toEqual(
@@ -105,7 +106,8 @@ describe("Agent Skills API — oRPC integration", () => {
   });
 
   it("creates a skill, seeding default SKILL.md + skill.json when none are supplied", async () => {
-    const created = await client.skills.create({
+    const created = await client.fileTrees.create({
+      type: "skill",
       autoMerge: true,
       slug: "launch-writer",
       name: "Launch Writer",
@@ -119,7 +121,8 @@ describe("Agent Skills API — oRPC integration", () => {
     const paths = created.files.map((file) => file.path);
     expect(paths).toEqual(expect.arrayContaining(["SKILL.md", "skill.json", "references/tone.md"]));
 
-    const skillMd = await client.skills.readFile({
+    const skillMd = await client.fileTrees.readFile({
+      type: "skill",
       nodeId: created.node.id,
       filePath: "SKILL.md",
     });
@@ -128,7 +131,8 @@ describe("Agent Skills API — oRPC integration", () => {
   });
 
   it("honours caller-supplied SKILL.md / skill.json instead of the defaults", async () => {
-    const created = await client.skills.create({
+    const created = await client.fileTrees.create({
+      type: "skill",
       autoMerge: true,
       slug: "custom-entry",
       name: "Custom Entry",
@@ -142,7 +146,8 @@ describe("Agent Skills API — oRPC integration", () => {
 
     expect(created.visibility).toBe("workspace");
     expect(created.version).toBe("2.0.0");
-    const skillMd = await client.skills.readFile({
+    const skillMd = await client.fileTrees.readFile({
+      type: "skill",
       nodeId: created.node.id,
       filePath: "SKILL.md",
     });
@@ -150,12 +155,14 @@ describe("Agent Skills API — oRPC integration", () => {
   });
 
   it("is idempotent on slug — re-creating returns the existing skill", async () => {
-    const first = await client.skills.create({
+    const first = await client.fileTrees.create({
+      type: "skill",
       autoMerge: true,
       slug: "dedup-skill",
       name: "Dedup Skill",
     });
-    const second = await client.skills.create({
+    const second = await client.fileTrees.create({
+      type: "skill",
       autoMerge: true,
       slug: "dedup-skill",
       name: "Different Name",
@@ -165,7 +172,8 @@ describe("Agent Skills API — oRPC integration", () => {
 
   it("rejects creation under a missing / non-folder parent", async () => {
     await expect(
-      client.skills.create({
+      client.fileTrees.create({
+        type: "skill",
         autoMerge: true,
         slug: "orphan-skill",
         name: "Orphan",
@@ -175,41 +183,55 @@ describe("Agent Skills API — oRPC integration", () => {
   });
 
   it("gets a skill by node id and by slug, and 404s an unknown one", async () => {
-    const created = await client.skills.create({
+    const created = await client.fileTrees.create({
+      type: "skill",
       autoMerge: true,
       slug: "gettable",
       name: "Gettable",
     });
-    const byId = await client.skills.get({ nodeId: created.node.id });
-    const bySlug = await client.skills.get({ nodeId: "gettable" });
+    const byId = await client.fileTrees.get({ type: "skill", nodeId: created.node.id });
+    const bySlug = await client.fileTrees.get({ type: "skill", nodeId: "gettable" });
     expect(byId.node.id).toBe(created.node.id);
     expect(bySlug.node.id).toBe(created.node.id);
 
-    await expect(client.skills.get({ nodeId: "pnd_missing" })).rejects.toThrow(/Skill not found/);
+    await expect(client.fileTrees.get({ type: "skill", nodeId: "pnd_missing" })).rejects.toThrow(
+      /Skill not found/,
+    );
   });
 
   it("lists files and reads a file, 404ing unknown skills", async () => {
-    const created = await client.skills.create({ autoMerge: true, slug: "filey", name: "Filey" });
-    const files = await client.skills.listFiles({ nodeId: created.node.id });
+    const created = await client.fileTrees.create({
+      type: "skill",
+      autoMerge: true,
+      slug: "filey",
+      name: "Filey",
+    });
+    const files = await client.fileTrees.listFiles({ type: "skill", nodeId: created.node.id });
     expect(files.some((file) => file.path === "SKILL.md")).toBe(true);
 
-    await expect(client.skills.listFiles({ nodeId: "pnd_missing" })).rejects.toThrow(
-      /Skill not found/,
-    );
     await expect(
-      client.skills.readFile({ nodeId: "pnd_missing", filePath: "SKILL.md" }),
+      client.fileTrees.listFiles({ type: "skill", nodeId: "pnd_missing" }),
+    ).rejects.toThrow(/Skill not found/);
+    await expect(
+      client.fileTrees.readFile({ type: "skill", nodeId: "pnd_missing", filePath: "SKILL.md" }),
     ).rejects.toThrow(/Skill not found/);
   });
 
   it("creates a skill change request and merges a file update", async () => {
-    const skill = await client.skills.create({
+    const skill = await client.fileTrees.create({
+      type: "skill",
       autoMerge: true,
       slug: "cr-update",
       name: "CR Update",
     });
-    const current = await client.skills.readFile({ nodeId: skill.node.id, filePath: "SKILL.md" });
+    const current = await client.fileTrees.readFile({
+      type: "skill",
+      nodeId: skill.node.id,
+      filePath: "SKILL.md",
+    });
 
-    const changeRequest = await client.skills.createChangeRequest({
+    const changeRequest = await client.fileTrees.createChangeRequest({
+      type: "skill",
       nodeId: skill.node.id,
       message: "Add review checklist",
       submittedBy: "vitest-agent",
@@ -226,7 +248,11 @@ describe("Agent Skills API — oRPC integration", () => {
     expect(changeRequest.primaryOperation?.operation).toBe("skill_file_update");
 
     await approveAndMerge(changeRequest.id);
-    const updated = await client.skills.readFile({ nodeId: skill.node.id, filePath: "SKILL.md" });
+    const updated = await client.fileTrees.readFile({
+      type: "skill",
+      nodeId: skill.node.id,
+      filePath: "SKILL.md",
+    });
     expect(updated.content).toContain("## Checklist");
   });
 
@@ -237,12 +263,14 @@ describe("Agent Skills API — oRPC integration", () => {
       sizeBytes: 8,
       contentHash: `sha256:${"e".repeat(64)}`,
     });
-    const skill = await client.skills.create({
+    const skill = await client.fileTrees.create({
+      type: "skill",
       autoMerge: true,
       slug: "asset-file-skill",
       name: "Asset File Skill",
     });
-    const changeRequest = await client.skills.createChangeRequest({
+    const changeRequest = await client.fileTrees.createChangeRequest({
+      type: "skill",
       nodeId: skill.node.id,
       message: "Add runtime fixture",
       operations: [
@@ -258,7 +286,8 @@ describe("Agent Skills API — oRPC integration", () => {
     expect(changeRequest.primaryOperation?.operation).toBe("skill_file_create");
 
     await approveAndMerge(changeRequest.id);
-    const file = await client.skills.readFile({
+    const file = await client.fileTrees.readFile({
+      type: "skill",
       nodeId: skill.node.id,
       filePath: "fixtures/runtime.wasm",
     });
@@ -301,12 +330,13 @@ describe("Agent Skills API — oRPC integration", () => {
       sizeBytes: 8,
       contentHash: `sha256:${"f".repeat(64)}`,
     });
-    const skill = await ok("POST", "/skills", {
+    const skill = await ok("POST", "/file-trees", {
+      type: "skill",
       autoMerge: true,
       slug: "openapi-asset-file-skill",
       name: "OpenAPI Asset File Skill",
     });
-    const legacyUpload = await call("POST", `/skills/${skill.node.id}/change-requests`, {
+    const legacyUpload = await call("POST", `/file-trees/${skill.node.id}/change-requests`, {
       message: "Legacy direct binary upload",
       operations: [
         {
@@ -319,7 +349,7 @@ describe("Agent Skills API — oRPC integration", () => {
     });
     expect(legacyUpload.status).toBeGreaterThanOrEqual(400);
 
-    const changeRequest = await ok("POST", `/skills/${skill.node.id}/change-requests`, {
+    const changeRequest = await ok("POST", `/file-trees/${skill.node.id}/change-requests`, {
       message: "Add REST runtime fixture",
       operations: [
         {
@@ -334,7 +364,7 @@ describe("Agent Skills API — oRPC integration", () => {
     await ok("POST", `/change-requests/${changeRequest.id}/reviews`, { verdict: "approved" });
     await ok("POST", `/change-requests/${changeRequest.id}/merge`);
 
-    const file = await ok("GET", `/skills/${skill.node.id}/files/fixtures/runtime.wasm`);
+    const file = await ok("GET", `/file-trees/${skill.node.id}/files/fixtures/runtime.wasm`);
     expect(file.encoding).toBe("url");
     expect(file.assetId).toBe(asset.assetId);
     expect(file.displayName).toBe("REST Runtime WASM");
@@ -342,44 +372,49 @@ describe("Agent Skills API — oRPC integration", () => {
   });
 
   it("merges create + delete file operations", async () => {
-    const skill = await client.skills.create({
+    const skill = await client.fileTrees.create({
+      type: "skill",
       autoMerge: true,
       slug: "cr-files",
       name: "CR Files",
     });
 
-    const createCr = await client.skills.createChangeRequest({
+    const createCr = await client.fileTrees.createChangeRequest({
+      type: "skill",
       nodeId: skill.node.id,
       operations: [{ kind: "create", path: "references/extra.md", content: "extra\n" }],
     });
     expect(createCr.primaryOperation?.operation).toBe("skill_file_create");
     await approveAndMerge(createCr.id);
     expect(
-      (await client.skills.listFiles({ nodeId: skill.node.id })).some(
+      (await client.fileTrees.listFiles({ type: "skill", nodeId: skill.node.id })).some(
         (file) => file.path === "references/extra.md",
       ),
     ).toBe(true);
 
-    const deleteCr = await client.skills.createChangeRequest({
+    const deleteCr = await client.fileTrees.createChangeRequest({
+      type: "skill",
       nodeId: skill.node.id,
       operations: [{ kind: "delete", path: "references/extra.md" }],
     });
     expect(deleteCr.primaryOperation?.operation).toBe("skill_file_delete");
     await approveAndMerge(deleteCr.id);
     expect(
-      (await client.skills.listFiles({ nodeId: skill.node.id })).some(
+      (await client.fileTrees.listFiles({ type: "skill", nodeId: skill.node.id })).some(
         (file) => file.path === "references/extra.md",
       ),
     ).toBe(false);
   });
 
   it("merges a metadata_update operation", async () => {
-    const skill = await client.skills.create({
+    const skill = await client.fileTrees.create({
+      type: "skill",
       autoMerge: true,
       slug: "cr-meta",
       name: "CR Meta",
     });
-    const metaCr = await client.skills.createChangeRequest({
+    const metaCr = await client.fileTrees.createChangeRequest({
+      type: "skill",
       nodeId: skill.node.id,
       operations: [
         { kind: "metadata_update", metadata: { version: "9.9.9", visibility: "public" } },
@@ -388,18 +423,20 @@ describe("Agent Skills API — oRPC integration", () => {
     expect(metaCr.primaryOperation?.operation).toBe("skill_metadata_update");
     await approveAndMerge(metaCr.id);
 
-    const after = await client.skills.get({ nodeId: skill.node.id });
+    const after = await client.fileTrees.get({ type: "skill", nodeId: skill.node.id });
     expect(after.version).toBe("9.9.9");
     expect(after.visibility).toBe("public");
   });
 
   it("blocks a stale file merge when baseContentHash no longer matches", async () => {
-    const skill = await client.skills.create({
+    const skill = await client.fileTrees.create({
+      type: "skill",
       autoMerge: true,
       slug: "cr-stale",
       name: "CR Stale",
     });
-    const staleCr = await client.skills.createChangeRequest({
+    const staleCr = await client.fileTrees.createChangeRequest({
+      type: "skill",
       nodeId: skill.node.id,
       operations: [
         {
@@ -422,7 +459,8 @@ describe("Agent Skills API — oRPC integration", () => {
 
   it("404s a change request against an unknown skill", async () => {
     await expect(
-      client.skills.createChangeRequest({
+      client.fileTrees.createChangeRequest({
+        type: "skill",
         nodeId: "pnd_missing",
         operations: [{ kind: "update", path: "SKILL.md", content: "x" }],
       }),
@@ -451,7 +489,7 @@ describe("Agent Skills API — oRPC integration", () => {
     const newNodeId = String(Array.isArray(mergedNodeIds) ? mergedNodeIds[0] : "");
     expect(newNodeId).toMatch(/^nod/);
 
-    const skill = await client.skills.get({ nodeId: newNodeId });
+    const skill = await client.fileTrees.get({ type: "skill", nodeId: newNodeId });
     expect(skill.node.slug).toBe("materialized-skill");
     expect(skill.files.some((file) => file.path === "SKILL.md")).toBe(true);
   });

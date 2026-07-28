@@ -38,7 +38,7 @@ describe("Base-domain DB lifecycle — oRPC", () => {
     process.env.STORAGE_URL = `local:${storageDir}?base_url=/api/test/storage`;
     client = createRouterClient(busabaseRouter);
     await seedScenario({ folders: DEMO_FOLDERS, bases: DEMO_BASES });
-    const bases = await client.bases.list();
+    const bases = await client.bases.list({});
     blogBaseId = bases.find((base) => base.slug === "blog")?.id ?? "";
     expect(blogBaseId).not.toBe("");
   });
@@ -97,7 +97,7 @@ describe("Base-domain DB lifecycle — oRPC", () => {
       // Positions are assigned by insertion order.
       expect(created.fields.map((f) => f.position)).toEqual([0, 1]);
 
-      const all = await client.bases.list();
+      const all = await client.bases.list({});
       expect(all.some((b) => b.slug === "lc-projects")).toBe(true);
     });
 
@@ -222,7 +222,8 @@ describe("Base-domain DB lifecycle — oRPC", () => {
 
     it("creates, updates, and deletes a View through merged change requests", async () => {
       // Create.
-      const createCr = await client.bases.createViewChangeRequest({
+      const createCr = await client.views.changeRequest({
+        operation: "create",
         baseId: blogBaseId,
         slug: "lc-view",
         name: "Lifecycle View",
@@ -236,7 +237,8 @@ describe("Base-domain DB lifecycle — oRPC", () => {
       const viewId = created?.id ?? "";
 
       // Update the name.
-      const updateCr = await client.views.updateChangeRequest({
+      const updateCr = await client.views.changeRequest({
+        operation: "update",
         viewId,
         name: "Renamed View",
       });
@@ -245,13 +247,14 @@ describe("Base-domain DB lifecycle — oRPC", () => {
       expect(views.find((v) => v.id === viewId)?.name).toBe("Renamed View");
 
       // Delete (archive) — drops out of the active list.
-      const deleteCr = await client.views.deleteChangeRequest({ viewId });
+      const deleteCr = await client.views.changeRequest({ operation: "delete", viewId });
       await approveAndMerge(deleteCr.id);
       expect(await activeSlugs(blogBaseId)).not.toContain("lc-view");
     });
 
     it("round-trips a gallery view type and its cover config through merge", async () => {
-      const createCr = await client.bases.createViewChangeRequest({
+      const createCr = await client.views.changeRequest({
+        operation: "create",
         baseId: blogBaseId,
         slug: "lc-gallery",
         name: "Gallery",
@@ -276,7 +279,8 @@ describe("Base-domain DB lifecycle — oRPC", () => {
       expect(gallery?.config.showFieldLabels).toBe(true);
 
       // Switching a gallery back to a table via update persists the new type.
-      const updateCr = await client.views.updateChangeRequest({
+      const updateCr = await client.views.changeRequest({
+        operation: "update",
         viewId: gallery?.id ?? "",
         type: "table",
       });
@@ -286,7 +290,8 @@ describe("Base-domain DB lifecycle — oRPC", () => {
     });
 
     it("round-trips table field order and widths through a view change request", async () => {
-      const createCr = await client.bases.createViewChangeRequest({
+      const createCr = await client.views.changeRequest({
+        operation: "create",
         baseId: blogBaseId,
         slug: "lc-table-layout",
         name: "Table layout",
@@ -308,7 +313,8 @@ describe("Base-domain DB lifecycle — oRPC", () => {
     });
 
     it("round-trips kanban and calendar view config through merge", async () => {
-      const kanbanCr = await client.bases.createViewChangeRequest({
+      const kanbanCr = await client.views.changeRequest({
+        operation: "create",
         baseId: blogBaseId,
         slug: "lc-kanban",
         name: "Board",
@@ -317,7 +323,8 @@ describe("Base-domain DB lifecycle — oRPC", () => {
       });
       await approveAndMerge(kanbanCr.id);
 
-      const calendarCr = await client.bases.createViewChangeRequest({
+      const calendarCr = await client.views.changeRequest({
+        operation: "create",
         baseId: blogBaseId,
         slug: "lc-calendar",
         name: "Calendar",
@@ -336,7 +343,8 @@ describe("Base-domain DB lifecycle — oRPC", () => {
     });
 
     it("round-trips gantt view config through merge", async () => {
-      const cr = await client.bases.createViewChangeRequest({
+      const cr = await client.views.changeRequest({
+        operation: "create",
         baseId: blogBaseId,
         slug: "lc-gantt",
         name: "Timeline",
@@ -360,14 +368,16 @@ describe("Base-domain DB lifecycle — oRPC", () => {
     });
 
     it("rejects a duplicate view slug", async () => {
-      const cr = await client.bases.createViewChangeRequest({
+      const cr = await client.views.changeRequest({
+        operation: "create",
         baseId: blogBaseId,
         slug: "lc-view-dup",
         name: "Dup",
       });
       await approveAndMerge(cr.id);
       await expect(
-        client.bases.createViewChangeRequest({
+        client.views.changeRequest({
+          operation: "create",
           baseId: blogBaseId,
           slug: "lc-view-dup",
           name: "Dup Again",
@@ -381,12 +391,14 @@ describe("Base-domain DB lifecycle — oRPC", () => {
     // both reach merge, and mergeViewCreate must catch the second one with a
     // clean CONFLICT instead of an unclassified unique-constraint 500.
     it("returns a CONFLICT (not a crash) when two view_create CRs race on the same slug", async () => {
-      const crA = await client.bases.createViewChangeRequest({
+      const crA = await client.views.changeRequest({
+        operation: "create",
         baseId: blogBaseId,
         slug: "lc-view-race",
         name: "Race A",
       });
-      const crB = await client.bases.createViewChangeRequest({
+      const crB = await client.views.changeRequest({
+        operation: "create",
         baseId: blogBaseId,
         slug: "lc-view-race",
         name: "Race B",
@@ -405,11 +417,11 @@ describe("Base-domain DB lifecycle — oRPC", () => {
 
     it("rejects update/delete of an unknown View", async () => {
       await expect(
-        client.views.updateChangeRequest({ viewId: "qvw_missing", name: "x" }),
+        client.views.changeRequest({ operation: "update", viewId: "qvw_missing", name: "x" }),
       ).rejects.toThrow(/View not found/);
-      await expect(client.views.deleteChangeRequest({ viewId: "qvw_missing" })).rejects.toThrow(
-        /View not found/,
-      );
+      await expect(
+        client.views.changeRequest({ operation: "delete", viewId: "qvw_missing" }),
+      ).rejects.toThrow(/View not found/);
     });
   });
 
@@ -422,16 +434,17 @@ describe("Base-domain DB lifecycle — oRPC", () => {
         channel: "blog",
       });
 
-      const beforeIds = (await client.records.list()).map((r) => r.id);
+      const beforeIds = (await client.records.list()).records.map((r) => r.id);
       expect(beforeIds).toContain(recordId);
 
-      const deleteCr = await client.records.deleteChangeRequest({
+      const deleteCr = await client.records.changeRequest({
+        operation: "delete",
         recordId,
         message: "Remove",
       });
       await approveAndMerge(deleteCr.id);
 
-      const afterIds = (await client.records.list()).map((r) => r.id);
+      const afterIds = (await client.records.list()).records.map((r) => r.id);
       expect(afterIds).not.toContain(recordId);
     });
 
@@ -443,7 +456,8 @@ describe("Base-domain DB lifecycle — oRPC", () => {
       });
       const before = await client.records.get({ recordId });
       // Mirror submitMoveRecord: resubmit all fields with just the stack field changed.
-      const moveCr = await client.records.updateChangeRequest({
+      const moveCr = await client.records.changeRequest({
+        operation: "update",
         recordId,
         fields: { ...before.headCommit.fields, channel: "social" },
         message: "Move",
@@ -456,18 +470,18 @@ describe("Base-domain DB lifecycle — oRPC", () => {
 
     it("refuses to delete an already-archived record", async () => {
       const recordId = await createRecord({ title: "Twice", body: "b", channel: "blog" });
-      const cr = await client.records.deleteChangeRequest({ recordId });
+      const cr = await client.records.changeRequest({ operation: "delete", recordId });
       await approveAndMerge(cr.id);
 
-      await expect(client.records.deleteChangeRequest({ recordId })).rejects.toThrow(
+      await expect(client.records.changeRequest({ operation: "delete", recordId })).rejects.toThrow(
         /already archived/,
       );
     });
 
     it("refuses to delete an unknown record", async () => {
-      await expect(client.records.deleteChangeRequest({ recordId: "qrc_missing" })).rejects.toThrow(
-        /Record not found/,
-      );
+      await expect(
+        client.records.changeRequest({ operation: "delete", recordId: "qrc_missing" }),
+      ).rejects.toThrow(/Record not found/);
     });
 
     it("finds records by exact field text and filters by Base", async () => {

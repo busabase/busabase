@@ -1,5 +1,5 @@
 /**
- * 14-airapps: create all 8 example AirApp nodes (see `busabase-core/domains/
+ * 14-airapps: create all example AirApp nodes (see `busabase-core/domains/
  * airapp/demo-content` for the full catalog and the Nodepod/Vite/Babel/SWC/
  * HyperFrames investigation behind each one) via the real REST API — the OpenAPI create
  * → approve/merge path, the same one an agent goes through, not the Run
@@ -55,11 +55,12 @@ export async function run() {
   const created: AirAppVO[] = [];
 
   for (const def of ALL_AIRAPP_DEMOS) {
-    await step(`POST /airapps — create "${def.name}" (idempotent)`, async () => {
+    await step(`POST /file-trees — create "${def.name}" (idempotent)`, async () => {
       let airapp: AirAppVO;
       try {
-        airapp = await api<AirAppVO>("POST", "/airapps", {
+        airapp = await api<AirAppVO>("POST", "/file-trees", {
           slug: def.slug,
+          type: "airapp",
           name: def.name,
           description: def.description,
           files: def.files,
@@ -74,7 +75,7 @@ export async function run() {
           mergeMode: "replace",
         });
       } catch {
-        const list = await api<AirAppVO[]>("GET", "/airapps");
+        const list = await api<AirAppVO[]>("GET", "/file-trees?type=airapp");
         const found = list.find((m) => m.node.slug === def.slug);
         assert(!!found, `AirApp "${def.slug}" missing after create failed`);
         airapp = found;
@@ -92,20 +93,20 @@ export async function run() {
     });
   }
 
-  await step("GET /airapps — all created slugs present", async () => {
-    const list = await api<AirAppVO[]>("GET", "/airapps");
+  await step("GET /file-trees?type=airapp — all created slugs present", async () => {
+    const list = await api<AirAppVO[]>("GET", "/file-trees?type=airapp");
     const slugs = new Set(list.map((m) => m.node.slug));
     for (const def of ALL_AIRAPP_DEMOS) {
-      assert(slugs.has(def.slug), `slug "${def.slug}" missing from GET /airapps`);
+      assert(slugs.has(def.slug), `slug "${def.slug}" missing from GET /file-trees?type=airapp`);
     }
   });
 
   const honoDemo = created.find((airapp) => airapp.node.slug === "demo-hono-api");
   if (honoDemo) {
-    await step("GET /airapps/{id}/files/package.json — read seeded content", async () => {
+    await step("GET /file-trees/{id}/files/package.json — read seeded content", async () => {
       const file = await api<FileContentVO>(
         "GET",
-        `/airapps/${honoDemo.node.id}/files/package.json`,
+        `/file-trees/${honoDemo.node.id}/files/package.json?type=airapp`,
       );
       assert(file.content.includes("hono-api-demo"), "unexpected package.json content");
       assert(file.contentHash.startsWith("sha256:"), "unexpected hash format");

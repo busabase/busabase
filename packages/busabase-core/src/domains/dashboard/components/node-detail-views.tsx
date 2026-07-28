@@ -45,16 +45,10 @@ export {
   type SkillTreeNode,
 };
 
-interface FileTreeNamespace {
-  createChangeRequest: BusabaseQueryUtils["skills"]["createChangeRequest"];
-  get: BusabaseQueryUtils["skills"]["get"];
-  readFile: BusabaseQueryUtils["skills"]["readFile"];
-}
-
 interface FileTreeDetailViewProps {
   orpc: BusabaseQueryUtils;
   slug: string | null;
-  namespace: FileTreeNamespace;
+  /** Also the `type` discriminator sent to the shared `/file-trees` endpoints. */
   nodeType: "skill" | "drive";
   onNodeLoaded?: NodeDetailProps["onNodeLoaded"];
   /** Hides Pin/Permissions/Delete — used when rendered inside the side panel
@@ -72,7 +66,6 @@ interface FileTreeDetailViewProps {
 export function FileTreeDetailView({
   orpc,
   slug,
-  namespace,
   nodeType,
   onNodeLoaded,
   hideActions = false,
@@ -93,7 +86,7 @@ export function FileTreeDetailView({
   const [fileActionError, setFileActionError] = useState<string | null>(null);
 
   const fileTreeQuery = useQuery({
-    ...namespace.get.queryOptions({ input: { nodeId: slug ?? "" } }),
+    ...orpc.fileTrees.get.queryOptions({ input: { nodeId: slug ?? "", type: nodeType } }),
     enabled: Boolean(slug),
   });
   const fileTree = fileTreeQuery.data ?? null;
@@ -109,12 +102,12 @@ export function FileTreeDetailView({
   }, [slug]);
 
   const fileQuery = useQuery({
-    ...namespace.readFile.queryOptions({
-      input: { nodeId: fileTree?.node.id ?? "", filePath: openPath ?? "" },
+    ...orpc.fileTrees.readFile.queryOptions({
+      input: { nodeId: fileTree?.node.id ?? "", filePath: openPath ?? "", type: nodeType },
     }),
     enabled: Boolean(fileTree && openPath),
   });
-  const createCr = useMutation(namespace.createChangeRequest.mutationOptions());
+  const createCr = useMutation(orpc.fileTrees.createChangeRequest.mutationOptions());
   const reviewCr = useMutation(orpc.changeRequests.review.mutationOptions());
   const mergeCr = useMutation(orpc.changeRequests.merge.mutationOptions());
 
@@ -172,6 +165,7 @@ export function FileTreeDetailView({
     try {
       const changeRequest = await createCr.mutateAsync({
         nodeId: fileTree.node.id,
+        type: nodeType,
         message: `Update ${openPath}`,
         operations: [
           {
@@ -189,11 +183,13 @@ export function FileTreeDetailView({
       await reviewCr.mutateAsync({ changeRequestId: changeRequest.id, verdict: "approved" });
       await mergeCr.mutateAsync({ changeRequestId: changeRequest.id });
       await queryClient.invalidateQueries({
-        queryKey: namespace.get.queryOptions({ input: { nodeId: fileTree.node.id } }).queryKey,
+        queryKey: orpc.fileTrees.get.queryOptions({
+          input: { nodeId: fileTree.node.id, type: nodeType },
+        }).queryKey,
       });
       await queryClient.invalidateQueries({
-        queryKey: namespace.readFile.queryOptions({
-          input: { nodeId: fileTree.node.id, filePath: openPath },
+        queryKey: orpc.fileTrees.readFile.queryOptions({
+          input: { nodeId: fileTree.node.id, filePath: openPath, type: nodeType },
         }).queryKey,
       });
       await Promise.all([fileTreeQuery.refetch(), fileQuery.refetch()]);
@@ -479,7 +475,6 @@ export function SkillDetailView({
         selectBody: messages.nodeDetail.selectSkillBody,
         skeletonVariant: "skill",
       }}
-      namespace={orpc.skills}
       nodeType="skill"
       onNodeLoaded={onNodeLoaded}
       orpc={orpc}
@@ -504,7 +499,6 @@ export function DriveDetailView({
         selectBody: messages.nodeDetail.selectDriveBody,
         skeletonVariant: "skill",
       }}
-      namespace={orpc.drives}
       nodeType="drive"
       onNodeLoaded={onNodeLoaded}
       orpc={orpc}

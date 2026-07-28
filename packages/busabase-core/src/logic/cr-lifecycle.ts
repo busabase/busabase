@@ -997,21 +997,6 @@ export const hydrateRecord = async (record: RecordPO): Promise<RecordVO> => {
 
 // ── CRUD ──────────────────────────────────────────────────────────────────────
 
-export const listChangeRequests = async (input?: z.input<typeof listInputSchema>) => {
-  await ensureReady();
-  const db = await getDb();
-  const parsed = listInputSchema.parse(input);
-  const changeRequestRows = await db
-    .select()
-    .from(busabaseChangeRequests)
-    .where(eq(busabaseChangeRequests.spaceId, getContextSpaceId()))
-    .orderBy(desc(busabaseChangeRequests.createdAt))
-    .limit(parsed.limit);
-  return hydrateChangeRequests(changeRequestRows, {
-    maxOperationsPerChangeRequest: LIST_MAX_OPERATIONS_PER_CHANGE_REQUEST,
-  });
-};
-
 // `|` separates the ISO timestamp (which contains colons) from the id.
 const encodeChangeRequestCursor = (createdAt: Date, changeRequestId: string): string =>
   Buffer.from(`${createdAt.toISOString()}|${changeRequestId}`, "utf8").toString("base64");

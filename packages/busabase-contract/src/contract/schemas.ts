@@ -129,6 +129,12 @@ const listNodesInputSchema = z
       .describe(
         "How many levels beneath the start point to eagerly include (default 2 once either field is set). Capped at 5.",
       ),
+    /**
+     * `active` (default) walks the live tree. `archived` returns the flat set of
+     * soft-archived nodes for the Trash view — no `parentId`/`depth` walk, since
+     * archived nodes are shown as a list, not a tree.
+     */
+    status: z.enum(["active", "archived"]).optional().default("active"),
   })
   .optional();
 
@@ -546,6 +552,15 @@ const listInputSchema = z
   .optional()
   .default({ limit: 50 });
 
+/**
+ * Active-or-archived selector for listings whose archived twin was folded in.
+ * Archived rows are the same shape as live ones — the only thing that ever
+ * differed between `/x` and `/x/archived` was this predicate.
+ */
+const listByStatusInputSchema = z.object({
+  status: z.enum(["active", "archived"]).optional().default("active"),
+});
+
 // Keyset-paginated change request listing. `status` narrows to specific
 // statuses (e.g. the inbox "rejected" tab passes ["rejected","abandoned"]);
 // `mine` narrows to change requests submitted by the acting user (the
@@ -698,6 +713,7 @@ export {
   commentSubjectInputSchema,
   createCommentInputSchema,
   listInputSchema,
+  listByStatusInputSchema,
   listChangeRequestsPagedInputSchema,
   listChangeRequestsResponseSchema,
   searchInputSchema,

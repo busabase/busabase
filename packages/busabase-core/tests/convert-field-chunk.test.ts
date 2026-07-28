@@ -63,7 +63,7 @@ describe("mergeBaseConvertField — text → select auto_create at scale", () =>
     await client.changeRequests.merge({ changeRequestId: cr.id });
 
     // Capture each record's ORIGINAL tag label before the conversion.
-    const page = await client.records.listPaged({ baseId, limit: 100 });
+    const page = await client.records.list({ baseId, limit: 100 });
     for (const record of page.records) {
       const tag = record.headCommit.fields.tag;
       if (typeof tag === "string" && tag) labelByRecordId.set(record.id, tag);
@@ -82,7 +82,8 @@ describe("mergeBaseConvertField — text → select auto_create at scale", () =>
   it("auto-creates a choice per distinct label and maps every record to its own", async () => {
     expect(labelByRecordId.size).toBe(LABELLED);
 
-    const convertCr = await client.bases.convertFieldChangeRequest({
+    const convertCr = await client.bases.fieldChangeRequest({
+      operation: "convert",
       baseId,
       fieldId: tagFieldId,
       newType: "select",
@@ -91,7 +92,7 @@ describe("mergeBaseConvertField — text → select auto_create at scale", () =>
     await client.changeRequests.review({ changeRequestId: convertCr.id, verdict: "approved" });
     await client.changeRequests.merge({ changeRequestId: convertCr.id });
 
-    const updatedBase = (await client.bases.list()).find((base) => base.id === baseId);
+    const updatedBase = (await client.bases.list({})).find((base) => base.id === baseId);
     const tagField = updatedBase?.fields.find((field) => field.slug === "tag");
     expect(tagField?.type).toBe("select");
     const choiceIdByName = new Map(
@@ -104,7 +105,7 @@ describe("mergeBaseConvertField — text → select auto_create at scale", () =>
 
     // Every record's authoritative value (commit.fields) is ITS OWN label's choice
     // id; null-valued records stay null.
-    const page = await client.records.listPaged({ baseId, limit: 100 });
+    const page = await client.records.list({ baseId, limit: 100 });
     let checkedLabelled = 0;
     let checkedNull = 0;
     for (const record of page.records) {

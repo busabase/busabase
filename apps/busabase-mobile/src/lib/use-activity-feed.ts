@@ -20,12 +20,16 @@ export function useActivityFeed() {
     queryFn: buda
       ? async () => {
           const client = buda.client;
-          const [changeRequests, records, auditEvents] = await Promise.all([
+          const [changeRequestPage, recordPage, auditEvents] = await Promise.all([
             client.changeRequests.list({ limit: 100 }),
             client.records.list({ limit: 100 }),
             client.auditEvents.list({ limit: 100 }).catch(() => []),
           ]);
-          return buildActivityEvents(changeRequests, records, auditEvents);
+          return buildActivityEvents(
+            changeRequestPage.changeRequests,
+            recordPage.records,
+            auditEvents,
+          );
         }
       : skipToken,
   });

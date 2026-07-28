@@ -711,7 +711,8 @@ describe("Drive Grep Retrieval — putText / grep / readLines", () => {
       const beforeRepoint = expectDefined(await getTextRow(pdfAssetId));
       expect(beforeRepoint.status).toBe("present");
 
-      const drive = await client.drives.create({
+      const drive = await client.fileTrees.create({
+        type: "drive",
         autoMerge: true,
         slug: "stale-repoint-drive",
         name: "Stale Repoint Drive",
@@ -724,7 +725,8 @@ describe("Drive Grep Retrieval — putText / grep / readLines", () => {
         mimeType: "application/pdf",
         hashByte: "2",
       });
-      const cr = await client.drives.createChangeRequest({
+      const cr = await client.fileTrees.createChangeRequest({
+        type: "drive",
         nodeId: drive.node.id,
         operations: [{ kind: "update", path: "contract.pdf", assetId: replacementAssetId }],
         message: "Replace contract with v2",
@@ -757,7 +759,8 @@ describe("Drive Grep Retrieval — putText / grep / readLines", () => {
     });
 
     it("auto-re-registers a text-kind asset on repoint (never stale, greppable with the new content)", async () => {
-      const drive = await client.drives.create({
+      const drive = await client.fileTrees.create({
+        type: "drive",
         autoMerge: true,
         slug: "text-repoint-drive",
         name: "Text Repoint Drive",
@@ -772,7 +775,8 @@ describe("Drive Grep Retrieval — putText / grep / readLines", () => {
       });
       expect(beforeGrep.matches).toHaveLength(1);
 
-      const cr = await client.drives.createChangeRequest({
+      const cr = await client.fileTrees.createChangeRequest({
+        type: "drive",
         nodeId: drive.node.id,
         operations: [
           { kind: "update", path: "notes.md", content: "revision two mentions BARMARKER" },
@@ -808,7 +812,8 @@ describe("Drive Grep Retrieval — putText / grep / readLines", () => {
       // never retried, even though a writer supplying real text via `putText`
       // afterward would work fine — self-heal just never got the chance to
       // notice anything needed retrying).
-      const drive = await client.drives.create({
+      const drive = await client.fileTrees.create({
+        type: "drive",
         autoMerge: true,
         slug: "text-to-binary-repoint-drive",
         name: "Text To Binary Repoint Drive",
@@ -845,7 +850,8 @@ describe("Drive Grep Retrieval — putText / grep / readLines", () => {
         hashByte: "f",
       });
 
-      const cr = await client.drives.createChangeRequest({
+      const cr = await client.fileTrees.createChangeRequest({
+        type: "drive",
         nodeId: drive.node.id,
         operations: [
           { kind: "update", path: "notes.md", assetId: binaryAssetId, mimeType: "image/png" },

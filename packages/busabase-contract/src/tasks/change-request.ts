@@ -67,12 +67,12 @@ export const changeRequestQueryTask: TaskDefinition<ChangeRequestQueryInput> = {
   ],
   execute: async (client: BusabaseTaskClient, input: ChangeRequestQueryInput) => {
     if (input.countsOnly) return client.changeRequests.counts();
-    return client.changeRequests.listPaged({
+    return client.changeRequests.list({
       ...(input.status ? { status: input.status } : {}),
       ...(input.mine !== undefined ? { mine: input.mine } : {}),
       ...(input.limit !== undefined ? { limit: input.limit } : {}),
       ...(input.cursor ? { cursor: input.cursor } : {}),
-    } as Parameters<BusabaseTaskClient["changeRequests"]["listPaged"]>[0]);
+    } as Parameters<BusabaseTaskClient["changeRequests"]["list"]>[0]);
   },
 };
 

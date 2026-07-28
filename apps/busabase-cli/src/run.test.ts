@@ -186,9 +186,9 @@ describe("busabase-cli commands", () => {
     expect(exitCode).toBe(0);
     expect(calls).toEqual([
       expect.objectContaining({
-        method: "PUT",
+        method: "POST",
         url: "http://localhost:15419/api/v1/records/rec_1/change-requests",
-        body: { fields: { title: "Updated" } },
+        body: { operation: "update", fields: { title: "Updated" } },
       }),
     ]);
   });
@@ -771,14 +771,15 @@ describe("busabase-cli commands", () => {
     ]);
 
     expect(exitCode).toBe(0);
-    // Dispatched to `POST /airapps`. The generic tree endpoint would also accept
-    // `nodeType: "airapp"`, but it has no `files` field — so it produces an
-    // AirApp with none of the default scaffold, which is not a usable AirApp.
+    // Dispatched to `POST /file-trees` with `type: "airapp"`. The generic tree
+    // endpoint would also accept `nodeType: "airapp"`, but it has no `files`
+    // field — so it produces an AirApp with none of the default scaffold, which
+    // is not a usable AirApp.
     expect(calls).toEqual([
       expect.objectContaining({
         method: "POST",
-        url: "http://localhost:15419/api/v1/airapps",
-        body: { name: "Hello App", slug: "hello-app" },
+        url: "http://localhost:15419/api/v1/file-trees",
+        body: { type: "airapp", name: "Hello App", slug: "hello-app" },
       }),
     ]);
   });
@@ -801,7 +802,9 @@ describe("busabase-cli commands", () => {
     ]);
 
     expect(exitCode).toBe(0);
-    expect(calls).toEqual([{ method: "GET", url: "http://localhost:15419/api/v1/airapps" }]);
+    expect(calls).toEqual([
+      { method: "GET", url: "http://localhost:15419/api/v1/file-trees?type=airapp" },
+    ]);
   });
 
   it("gets one AirApp by node id", async () => {
@@ -830,7 +833,9 @@ describe("busabase-cli commands", () => {
     ]);
 
     expect(exitCode).toBe(0);
-    expect(calls).toEqual([{ method: "GET", url: "http://localhost:15419/api/v1/airapps/nod_1" }]);
+    expect(calls).toEqual([
+      { method: "GET", url: "http://localhost:15419/api/v1/file-trees/nod_1?type=airapp" },
+    ]);
   });
 
   it("creates an AirApp from inline files JSON (review-first, no autoMerge)", async () => {
@@ -866,8 +871,9 @@ describe("busabase-cli commands", () => {
     expect(calls).toEqual([
       expect.objectContaining({
         method: "POST",
-        url: "http://localhost:15419/api/v1/airapps",
+        url: "http://localhost:15419/api/v1/file-trees",
         body: {
+          type: "airapp",
           slug: "hello-app",
           name: "Hello App",
           files: JSON.parse(files),
@@ -912,8 +918,9 @@ describe("busabase-cli commands", () => {
     expect(calls).toEqual([
       expect.objectContaining({
         method: "POST",
-        url: "http://localhost:15419/api/v1/airapps",
+        url: "http://localhost:15419/api/v1/file-trees",
         body: {
+          type: "airapp",
           slug: "hello-app",
           name: "Hello App",
           autoMerge: true,
@@ -957,7 +964,7 @@ describe("busabase-cli commands", () => {
     ]);
   });
 
-  it("lists records through the paged endpoint with base and cursor filters", async () => {
+  it("lists records with base and cursor filters (one always-paginated endpoint)", async () => {
     const calls: Array<{ body: unknown; method: string; url: string }> = [];
     const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
     global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -990,7 +997,7 @@ describe("busabase-cli commands", () => {
       expect.objectContaining({
         body: null,
         method: "GET",
-        url: "http://localhost:15419/api/v1/records/paged?limit=100&baseId=bse_1&cursor=cur_1",
+        url: "http://localhost:15419/api/v1/records?limit=100&baseId=bse_1&cursor=cur_1",
       }),
     ]);
     expect(JSON.parse(log.mock.calls.at(-1)?.[0] as string)).toEqual({
@@ -1130,6 +1137,7 @@ describe("busabase-cli commands", () => {
     expect(calls).toEqual([
       expect.objectContaining({
         body: {
+          operation: "update",
           fieldId: "bsf_1",
           patch: {
             options: {
@@ -1140,7 +1148,7 @@ describe("busabase-cli commands", () => {
             },
           },
         },
-        method: "PATCH",
+        method: "POST",
         url: "http://localhost:15419/api/v1/bases/bse_1/fields/change-requests",
       }),
     ]);

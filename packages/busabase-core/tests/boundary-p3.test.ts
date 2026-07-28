@@ -138,7 +138,8 @@ describe("Boundary P3 — oRPC", () => {
 
     const recordId = await createRecord(base.id, { title: "t", status: "ch_open" });
 
-    const cr = await client.bases.updateFieldChangeRequest({
+    const cr = await client.bases.fieldChangeRequest({
+      operation: "update",
       baseId: base.id,
       fieldId: statusField.id,
       patch: { options: { choices: [{ id: "ch_done", name: "Done" }] } },
@@ -171,7 +172,8 @@ describe("Boundary P3 — oRPC", () => {
     });
 
     // Make note required first (separate CR, approved + merged).
-    const reqCr = await client.bases.updateFieldChangeRequest({
+    const reqCr = await client.bases.fieldChangeRequest({
+      operation: "update",
       baseId: base.id,
       fieldId: noteField.id,
       patch: { required: true },
@@ -211,7 +213,10 @@ describe("Boundary P3 — oRPC", () => {
     expect(before.length).toBe(1);
 
     // Archive the target record.
-    const delCr = await client.records.deleteChangeRequest({ recordId: targetRecordId });
+    const delCr = await client.records.changeRequest({
+      operation: "delete",
+      recordId: targetRecordId,
+    });
     await approveAndMerge(delCr.id);
 
     const after = await listRecordLinks(sourceRecordId);
@@ -226,7 +231,8 @@ describe("Boundary P3 — oRPC", () => {
     const recordId = await createRecord(base.id, { title: "t" });
 
     await expect(
-      client.records.deleteChangeRequest({
+      client.records.changeRequest({
+        operation: "delete",
         recordId,
         // @ts-expect-error — value intentionally removed from the contract
         deleteMode: "hard_delete_after_retention",
@@ -241,7 +247,7 @@ describe("Boundary P3 — oRPC", () => {
     ]);
     await createRecord(base.id, { title: "row" });
 
-    expect((await client.bases.list()).some((b) => b.id === base.id)).toBe(true);
+    expect((await client.bases.list({})).some((b) => b.id === base.id)).toBe(true);
 
     const delCr = await client.nodes.createChangeRequest({
       operations: [{ kind: "delete", nodeId: base.nodeId }],
@@ -249,7 +255,7 @@ describe("Boundary P3 — oRPC", () => {
     });
     await approveAndMerge(delCr.id);
 
-    expect((await client.bases.list()).some((b) => b.id === base.id)).toBe(false);
+    expect((await client.bases.list({})).some((b) => b.id === base.id)).toBe(false);
 
     const { getDb } = await import("../src/db");
     const { and, eq } = await import("drizzle-orm");
@@ -267,7 +273,8 @@ describe("Boundary P3 — oRPC", () => {
     const base = await makeBase("p3-viewrestore", [
       { slug: "title", name: "Title", required: true },
     ]);
-    const viewCr = await client.bases.createViewChangeRequest({
+    const viewCr = await client.views.changeRequest({
+      operation: "create",
       baseId: base.id,
       slug: "p3-vr-view",
       name: "VR",
@@ -279,13 +286,13 @@ describe("Boundary P3 — oRPC", () => {
       (await client.bases.listViews({ baseId: base.id })).find((v) => v.slug === "p3-vr-view")?.id;
     if (!viewId) throw new Error("expected created view id");
 
-    const delCr = await client.views.deleteChangeRequest({ viewId });
+    const delCr = await client.views.changeRequest({ operation: "delete", viewId });
     await approveAndMerge(delCr.id);
     expect(
       (await client.bases.listViews({ baseId: base.id })).some((v) => v.slug === "p3-vr-view"),
     ).toBe(false);
 
-    const restoreCr = await client.views.restoreChangeRequest({ viewId });
+    const restoreCr = await client.views.changeRequest({ operation: "restore", viewId });
     await approveAndMerge(restoreCr.id);
     expect(
       (await client.bases.listViews({ baseId: base.id })).some((v) => v.slug === "p3-vr-view"),
@@ -312,10 +319,13 @@ describe("Boundary P3 — oRPC", () => {
 
     expect(await seqOf(ids[1])).toBe(2);
 
-    const delCr = await client.records.deleteChangeRequest({ recordId: ids[1] });
+    const delCr = await client.records.changeRequest({ operation: "delete", recordId: ids[1] });
     await approveAndMerge(delCr.id);
 
-    const restoreCr = await client.records.restoreChangeRequest({ recordId: ids[1] });
+    const restoreCr = await client.records.changeRequest({
+      operation: "restore",
+      recordId: ids[1],
+    });
     await approveAndMerge(restoreCr.id);
 
     expect(await seqOf(ids[1])).toBe(2);

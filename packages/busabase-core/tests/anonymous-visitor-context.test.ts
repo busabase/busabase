@@ -41,7 +41,7 @@ describe("anonymous visitor context", () => {
     process.env.STORAGE_URL = `local:${storageDir}?base_url=/api/test/storage`;
     const client = createRouterClient(busabaseRouter);
     await seedScenario({ folders: DEMO_FOLDERS, bases: DEMO_BASES });
-    const bases = await client.bases.list();
+    const bases = await client.bases.list({});
     anyNodeId = bases[0]?.nodeId ?? "";
   }, 120_000);
 

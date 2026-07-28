@@ -6,7 +6,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { busabaseRouter } from "../src/router";
 
 /**
- * `bases.listArchivedRecordsPaged` keyset-paginates the "trash" section so a Base
+ * `records.list({ status: "archived" })` keyset-paginates the "trash" section so a Base
  * with a large soft-deleted history isn't loaded all at once. This pins the
  * keyset: page through every archived record with a small page size and assert no
  * dup / no drop across boundaries, complete coverage, and newest-first order.
@@ -51,9 +51,12 @@ describe("listArchivedRecordsPaged — keyset pagination", () => {
 
     // Archive every record (soft delete) so they land in the trash section:
     // open a delete change request per record, then approve + merge it.
-    const page = await client.records.listPaged({ baseId, limit: 100 });
+    const page = await client.records.list({ baseId, limit: 100 });
     for (const record of page.records) {
-      const deleteCr = await client.records.deleteChangeRequest({ recordId: record.id });
+      const deleteCr = await client.records.changeRequest({
+        operation: "delete",
+        recordId: record.id,
+      });
       await client.changeRequests.review({ changeRequestId: deleteCr.id, verdict: "approved" });
       await client.changeRequests.merge({ changeRequestId: deleteCr.id });
     }
@@ -73,7 +76,7 @@ describe("listArchivedRecordsPaged — keyset pagination", () => {
       [];
     let cursor: string | undefined;
     for (let guard = 0; guard < 50; guard++) {
-      const page = await client.bases.listArchivedRecordsPaged({ baseId, limit, cursor });
+      const page = await client.records.list({ baseId, limit, cursor, status: "archived" });
       collected.push(...page.records);
       if (!page.nextCursor) break;
       cursor = page.nextCursor;

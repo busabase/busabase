@@ -62,7 +62,7 @@ describe("Boundary P13 — folder delete keeps Base table in lockstep", () => {
       submittedBy: "alice",
       mergeImmediately: true,
     });
-    expect((await raw.bases.list()).some((b) => b.id === base.id)).toBe(true);
+    expect((await raw.bases.list({})).some((b) => b.id === base.id)).toBe(true);
 
     // Delete the folder → its child Base must leave the active list and its
     // records must be archived (not just the base node hidden from the tree).
@@ -71,9 +71,9 @@ describe("Boundary P13 — folder delete keeps Base table in lockstep", () => {
     });
     await approveMerge(raw, delCr.id);
 
-    expect((await raw.bases.list()).some((b) => b.id === base.id)).toBe(false);
-    expect((await raw.bases.listArchived()).some((b) => b.id === base.id)).toBe(true);
-    expect((await raw.records.list({})).some((r) => r.baseId === base.id)).toBe(false);
+    expect((await raw.bases.list({})).some((b) => b.id === base.id)).toBe(false);
+    expect((await raw.bases.list({ status: "archived" })).some((b) => b.id === base.id)).toBe(true);
+    expect((await raw.records.list({})).records.some((r) => r.baseId === base.id)).toBe(false);
 
     // Restore the folder → base + records come back active.
     const resCr = await raw.nodes.createChangeRequest({
@@ -81,7 +81,7 @@ describe("Boundary P13 — folder delete keeps Base table in lockstep", () => {
     });
     await approveMerge(raw, resCr.id);
 
-    expect((await raw.bases.list()).some((b) => b.id === base.id)).toBe(true);
-    expect((await raw.records.list({})).some((r) => r.baseId === base.id)).toBe(true);
+    expect((await raw.bases.list({})).some((b) => b.id === base.id)).toBe(true);
+    expect((await raw.records.list({})).records.some((r) => r.baseId === base.id)).toBe(true);
   });
 });

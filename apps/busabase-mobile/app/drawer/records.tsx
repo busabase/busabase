@@ -16,7 +16,10 @@ function RecordsContent() {
   const buda = useBusabaseOrpc();
   const query = useQuery(
     buda
-      ? buda.orpc.records.list.queryOptions({ input: { limit: 50 } })
+      ? buda.orpc.records.list.queryOptions({
+          input: { limit: 50 },
+          select: (page) => page.records,
+        })
       : { queryKey: ["no-connection", "records", "list"], queryFn: skipToken },
   );
 

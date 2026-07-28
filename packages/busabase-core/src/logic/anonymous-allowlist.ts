@@ -18,7 +18,7 @@
 
 import { ORPCError } from "@orpc/server";
 
-/** A procedure path (`["records", "listPaged"]`) as a stable dotted key. */
+/** A procedure path (`["records", "list"]`) as a stable dotted key. */
 export const toProcedureKey = (path: readonly string[]): string => path.join(".");
 
 /**
@@ -45,7 +45,6 @@ const ANONYMOUS_READ_ALLOWLIST: ReadonlySet<string> = new Set([
   // anonymous branch.
   "bases.listViews",
   "records.list",
-  "records.listPaged",
   "records.get",
   // Public form rendering. The `form` domain does not exist in the codebase
   // yet (P1 shipped the `submit` capability, not the form surface); listed now

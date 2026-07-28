@@ -35,7 +35,7 @@ describe("Form-as-Node — submission + access gates", () => {
     client = createRouterClient(busabaseRouter);
     await seedScenario({ folders: DEMO_FOLDERS, bases: DEMO_BASES });
 
-    const bases = await client.bases.list();
+    const bases = await client.bases.list({});
     blogBaseId = bases.find((b) => b.slug === "blog")?.id ?? "";
 
     // A form node to bind the form row to.
@@ -76,14 +76,14 @@ describe("Form-as-Node — submission + access gates", () => {
       ],
     });
 
-    const before = await client.records.list();
+    const { records: before } = await client.records.list({});
     const result = await submitForm(formNodeId, {
       values: { subject: "Hello", msg: "Body text" },
     });
     expect(result.status).toBe("pending_review");
 
     // No record yet — it's pending review.
-    const after = await client.records.list();
+    const { records: after } = await client.records.list({});
     expect(after.length).toBe(before.length);
 
     // Merging the CR materializes the record with the submitted values.
@@ -92,7 +92,7 @@ describe("Form-as-Node — submission + access gates", () => {
       verdict: "approved",
     });
     await client.changeRequests.merge({ changeRequestId: result.changeRequestId });
-    const merged = await client.records.list();
+    const { records: merged } = await client.records.list({});
     expect(merged.length).toBe(before.length + 1);
     expect(
       merged.some((r) => (r.headCommit.fields as Record<string, unknown>).title === "Hello"),

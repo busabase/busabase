@@ -117,14 +117,14 @@ describe("node ACL", () => {
 
     // Manager still sees it.
     await asManager("alice", async () => {
-      expect((await raw.bases.list()).some((b) => b.id === baseId)).toBe(true);
+      expect((await raw.bases.list({})).some((b) => b.id === baseId)).toBe(true);
       expect(await raw.bases.get({ baseId })).toBeTruthy();
     });
 
     // Non-granted member (bob): base absent from list, get returns null, and a
     // record search for its content finds nothing.
     await asMember("bob", async () => {
-      expect((await raw.bases.list()).some((b) => b.id === baseId)).toBe(false);
+      expect((await raw.bases.list({})).some((b) => b.id === baseId)).toBe(false);
       expect(await raw.bases.get({ baseId })).toBeNull();
       const hits = await raw.search({ query: "Payroll" });
       expect(hits.results.some((r) => JSON.stringify(r).includes("Payroll"))).toBe(false);

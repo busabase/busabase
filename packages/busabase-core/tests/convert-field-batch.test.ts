@@ -61,7 +61,7 @@ describe("mergeBaseConvertField — batched commit rewrite keeps values per-reco
     });
     await approveAndMerge(cr.id);
 
-    const page = await client.records.listPaged({ baseId, limit: 50 });
+    const page = await client.records.list({ baseId, limit: 50 });
     for (const record of page.records) {
       const label = record.headCommit.fields.category;
       if (typeof label === "string") recordIdByLabel.set(label, record.id);
@@ -80,7 +80,8 @@ describe("mergeBaseConvertField — batched commit rewrite keeps values per-reco
   it("converts text → select giving every record its own choice id", async () => {
     expect(recordIdByLabel.size).toBe(LABELS.length);
 
-    const convertCr = await client.bases.convertFieldChangeRequest({
+    const convertCr = await client.bases.fieldChangeRequest({
+      operation: "convert",
       baseId,
       fieldId: categoryFieldId,
       newType: "select",
@@ -88,7 +89,7 @@ describe("mergeBaseConvertField — batched commit rewrite keeps values per-reco
     });
     await approveAndMerge(convertCr.id);
 
-    const updatedBase = (await client.bases.list()).find((base) => base.id === baseId);
+    const updatedBase = (await client.bases.list({})).find((base) => base.id === baseId);
     const categoryField = updatedBase?.fields.find((field) => field.slug === "category");
     expect(categoryField?.type).toBe("select");
     const choiceIdByName = new Map(

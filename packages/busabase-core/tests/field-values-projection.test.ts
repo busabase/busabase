@@ -105,7 +105,8 @@ describe("field-values projection layer", () => {
     expect(await listArchivedViews("bse_does_not_exist")).toEqual([]);
     expect(await listArchivedViews(baseId)).toEqual([]);
 
-    const viewCr = await client.bases.createViewChangeRequest({
+    const viewCr = await client.views.changeRequest({
+      operation: "create",
       baseId,
       slug: "fv-archived-view",
       name: "FV Archived View",

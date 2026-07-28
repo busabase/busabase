@@ -22,7 +22,7 @@ export interface RecordQueryInput {
   countOnly?: boolean;
 }
 
-type ListPagedInput = Parameters<BusabaseTaskClient["records"]["listPaged"]>[0];
+type ListInput = Parameters<BusabaseTaskClient["records"]["list"]>[0];
 
 export const recordQueryTask: TaskDefinition<RecordQueryInput> = {
   name: "record_query",
@@ -66,12 +66,12 @@ export const recordQueryTask: TaskDefinition<RecordQueryInput> = {
         >[0],
       );
     }
-    return client.records.listPaged({
+    return client.records.list({
       ...(input.limit !== undefined ? { limit: input.limit } : {}),
       ...(input.baseId ? { baseId: input.baseId } : {}),
       ...(input.cursor ? { cursor: input.cursor } : {}),
       ...(Array.isArray(input.filters) ? { filters: input.filters } : {}),
       ...(input.sort ? { sort: input.sort } : {}),
-    } as ListPagedInput);
+    } as ListInput);
   },
 };

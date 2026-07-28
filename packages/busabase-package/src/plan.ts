@@ -65,7 +65,7 @@ export const resolveTargetState = async (
   client: PackageClient,
   targetFolderSlug: string,
 ): Promise<TargetState> => {
-  const [nodes, bases] = await Promise.all([client.nodes.list(), client.bases.list()]);
+  const [nodes, bases] = await Promise.all([client.nodes.list({}), client.bases.list({})]);
   return {
     targetFolder: findTargetFolder(nodes as unknown as ExistingNode[], targetFolderSlug),
     existingBaseSlugs: new Set(bases.map((base) => base.slug)),

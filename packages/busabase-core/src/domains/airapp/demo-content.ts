@@ -4,7 +4,7 @@
  * same content and must not fork it:
  *
  *   - `apps/busabase/scripts/demo/14-airapps.ts` — an integration/smoke test
- *     that creates all of these via the real REST API (`POST /airapps`).
+ *     that creates all of these via the real REST API (`POST /file-trees`).
  *   - `packages/busabase-core/src/demo/scenarios/node-types.en.ts` — a
  *     lower-level seed path (direct DB writes, no HTTP) consumed by
  *     `pnpm db:seed:all` and demo mode. It only seeds the three fast,
@@ -93,7 +93,7 @@
  * not just a sandboxed toy.
  *
  * #9-10 read the workspace's own live data via the public REST API
- * (`GET /api/v1/bases`, `GET /api/v1/records/paged`) — read-only, no writes,
+ * (`GET /api/v1/bases`, `GET /api/v1/records`) — read-only, no writes,
  * so there's no risk of an AirApp corrupting real Base data. Both are
  * zero-dependency (`node:http` + a static page, same execution model as #1)
  * so they also qualify for the fast baseline seed.
@@ -136,10 +136,10 @@
  *      and agents use against that same surface) to list the
  *      workspace's nodes (`nodes.list`) and drill into them: a Doc renders its
  *      body (`docs.get`), a Base renders its records as a table
- *      (`records.listPaged` by the base node's `baseId`), a File shows its
+ *      (`records.list` by the base node's `baseId`), a File shows its
  *      asset metadata + a text preview (`files.get`), and anything else shows
- *      metadata. Auto-detects `/api/rpc/core` (busabase-cloud) vs `/api/rpc`
- *      (OSS busabase) by probing both. Like Kelly Email it has an esbuild build
+ *      metadata. It calls `/api/v1` on its own origin in both cloud and OSS.
+ *      Like Kelly Email it has an esbuild build
  *      step (the SDK + its `@orpc/client` dep + the cloud contract's zod graph
  *      bundle to a ~418KB browser script, baked in at authoring time and served
  *      as a static `client.js`), so it's likewise NOT in the fast baseline
@@ -1089,8 +1089,8 @@ async function loadDeals() {
     return;
   }
 
-  const recordsRes = await fetch("/api/v1/records/paged?baseId=" + deals.id + "&limit=100");
-  if (!recordsRes.ok) throw new Error("GET /api/v1/records/paged → " + recordsRes.status);
+  const recordsRes = await fetch("/api/v1/records?baseId=" + deals.id + "&limit=100");
+  if (!recordsRes.ok) throw new Error("GET /api/v1/records → " + recordsRes.status);
   const { records } = await recordsRes.json();
 
   for (const stage of STAGES) {
@@ -1205,8 +1205,8 @@ async function loadChecklist() {
     return;
   }
 
-  const recordsRes = await fetch("/api/v1/records/paged?baseId=" + checklist.id + "&limit=100");
-  if (!recordsRes.ok) throw new Error("GET /api/v1/records/paged → " + recordsRes.status);
+  const recordsRes = await fetch("/api/v1/records?baseId=" + checklist.id + "&limit=100");
+  if (!recordsRes.ok) throw new Error("GET /api/v1/records → " + recordsRes.status);
   const { records } = await recordsRes.json();
 
   for (const status of STATUSES) {

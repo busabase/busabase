@@ -1,6 +1,6 @@
 import { eventIterator, oc } from "@orpc/contract";
 import { z } from "zod";
-import { airappContract, airappRuntimeContract } from "../domains/airapp/contract";
+import { airappRuntimeContract } from "../domains/airapp/contract";
 import { assetsContract } from "../domains/assets/contract";
 import {
   baseContract,
@@ -10,13 +10,12 @@ import {
   viewSchema,
 } from "../domains/base/contract";
 import { docContract } from "../domains/doc/contract";
-import { driveContract } from "../domains/drive/contract";
 import { dumpContract } from "../domains/dump/contract";
 import { fileContract } from "../domains/file-node/contract";
+import { fileTreeContract } from "../domains/filetree/contract";
 import { folderContract } from "../domains/folder/contract";
 import { formContract } from "../domains/form/contract";
 import { installContract } from "../domains/install/contract";
-import { skillContract } from "../domains/skill/contract";
 import { vaultContract } from "../domains/vault/contract";
 import { webhookContract } from "../domains/webhook/contract";
 import { listActivityPagedInputSchema, listActivityResponseSchema } from "./activity-schemas";
@@ -140,15 +139,6 @@ export const busabaseContractRoutes = {
       })
       .input(isDescendantInputSchema)
       .output(isDescendantOutputSchema),
-    listArchived: oc
-      .route({
-        method: "GET",
-        path: "/nodes/archived",
-        tags: ["Nodes"],
-        summary: "List archived nodes",
-        successDescription: "Soft-archived folders, docs, and skills (for the Trash view).",
-      })
-      .output(z.array(nodeSchema)),
     createChangeRequest: oc
       .route({
         method: "POST",
@@ -399,9 +389,10 @@ export const busabaseContractRoutes = {
     subscribe: oc.output(eventIterator(liveEventSchema)),
   },
   bases: baseContract,
-  skills: skillContract,
-  drives: driveContract,
-  airapps: { ...airappContract, ...airappRuntimeContract },
+  // Skills, Drives, and AirApps share one transport surface — they differ only
+  // in seed files and entry file, which is a server-side config concern.
+  fileTrees: fileTreeContract,
+  airapps: airappRuntimeContract,
   files: fileContract,
   docs: docContract,
   folders: folderContract,
@@ -412,22 +403,14 @@ export const busabaseContractRoutes = {
   dump: dumpContract,
   install: installContract,
   changeRequests: {
+    // Always keyset-paginated — the unpaginated twin returned a bare array that
+    // silently truncated at `limit` with no way to ask for the next page.
     list: oc
       .route({
         method: "GET",
         path: "/change-requests",
         tags: ["Change Requests"],
         summary: "List change requests",
-        successDescription: "Change requests waiting for review or ready to merge.",
-      })
-      .input(listInputSchema)
-      .output(z.array(changeRequestSchema)),
-    listPaged: oc
-      .route({
-        method: "GET",
-        path: "/change-requests/paged",
-        tags: ["Change Requests"],
-        summary: "List change requests with keyset pagination",
         successDescription:
           "A page of change requests plus an opaque nextCursor (null at the end). Filter with `status` and/or `mine`.",
       })

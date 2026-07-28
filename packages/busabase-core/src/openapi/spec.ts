@@ -6,9 +6,19 @@ const openApiGenerator = new OpenAPIGenerator({
   schemaConverters: [new ZodToJsonSchemaConverter()],
 });
 
+/**
+ * A procedure with no `.route({ path })` is RPC-only by convention — long-lived
+ * Event Iterators (`live.subscribe`, `airapps.runLocalNode`) that are typed for
+ * `/api/rpc` but are not REST-shaped. Without this the generator invents a path
+ * for them from the procedure name and they surface as REST endpoints (and, in
+ * turn, as MCP tools) that no client can meaningfully call.
+ */
+const isRpcOnly = (contract: unknown) =>
+  !(contract as { "~orpc"?: { route?: { path?: string } } })?.["~orpc"]?.route?.path;
+
 export async function getBusabaseOpenApiSpec() {
   const spec = await openApiGenerator.generate(busabaseContract, {
-    exclude: (_contract, path) => path[0] === "live",
+    exclude: (contract) => isRpcOnly(contract),
     info: {
       title: "Busabase API",
       version: process.env.VERSION || "0.0.0",
@@ -40,6 +50,11 @@ export async function getBusabaseOpenApiSpec() {
         name: "Files",
         description:
           "First-class File nodes backed by Assets and created through Node Change Requests.",
+      },
+      {
+        name: "File Trees",
+        description:
+          "Skills, Drives, and AirApps — node types whose content is an Asset-backed file tree. One surface for all three, discriminated by `type`; they differ only in their seed files and entry file.",
       },
       {
         name: "Assets",

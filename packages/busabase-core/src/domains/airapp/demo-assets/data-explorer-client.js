@@ -58,7 +58,7 @@ const renderRecords = async (node) => {
     renderDetail(`<p class="loading">This Base has no materialized base id.</p>`);
     return;
   }
-  const page = await client.records.listPaged({ baseId: node.baseId, limit: 50 });
+  const page = await client.records.list({ baseId: node.baseId, limit: 50 });
   const records = page.records ?? [];
   if (!records.length) {
     renderDetail(`<h2>${escapeHtml(node.name)}</h2><p class="loading">No records yet.</p>`);

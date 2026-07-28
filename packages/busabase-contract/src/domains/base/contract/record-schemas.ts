@@ -1,7 +1,12 @@
 import { z } from "zod";
 // Records embed the kernel commit VO. This is a one-way import — the kernel
 // contract never imports record schemas — so there is no cycle and no z.lazy.
-import { commitSchema, userRefSchema } from "../../../contract/schemas";
+import {
+  commitSchema,
+  createDeleteChangeRequestInputSchema,
+  reviseOperationInputSchema,
+  userRefSchema,
+} from "../../../contract/schemas";
 import { baseSchema } from "./base-schemas";
 import { viewFilterOperatorSchema } from "./view-schemas";
 
@@ -47,27 +52,23 @@ export const listRecordsInputSchema = z
     baseId: z.string().optional(),
     /** Opaque base64 cursor for keyset pagination (createdAt-keyed, or sort-keyed when `sort` is set). */
     cursor: z.string().optional(),
+    /**
+     * `active` (default) is the live table; `archived` is the Base's trash — the
+     * same keyset pagination either way, which is why these are one endpoint
+     * rather than a `/records/archived` twin.
+     */
+    status: z.enum(["active", "archived"]).optional().default("active"),
     /** View filters for server-side push-down (superset; client still narrows). */
     filters: z.array(listRecordsFilterSchema).optional(),
     /** View sort for server-side push-down (number/date fields only). */
     sort: listRecordsSortSchema.optional(),
   })
   .optional()
-  .default({ limit: 50 });
+  .default({ limit: 50, status: "active" });
 
 export const listRecordsResponseSchema = z.object({
   records: z.array(recordSchema),
   nextCursor: z.string().nullable(),
-});
-
-// Archived ("trash") records for one Base, keyset-paginated the same way as the
-// active table (createdAt-keyed cursor) so the archived section never loads the
-// whole soft-deleted history at once. Reuses listRecordsResponseSchema.
-export const listArchivedRecordsPagedInputSchema = z.object({
-  baseId: z.string(),
-  limit: z.coerce.number().int().min(1).max(100).optional().default(50),
-  /** Opaque base64 cursor (createdAt-keyed) for keyset pagination. */
-  cursor: z.string().optional(),
 });
 
 export const countRecordsInputSchema = z
@@ -153,6 +154,25 @@ export const restoreRecordInputSchema = z.object({
   message: z.string().optional(),
   submittedBy: z.string().optional().default("local-editor"),
 });
+
+/**
+ * Every record change request in one shape. These three used to be PUT, DELETE,
+ * and a POST on a `/restore/` sub-path — three endpoints addressing the same
+ * record and returning the same change request, differing only in payload.
+ */
+// `recordId` (the path param) is repeated into every branch for the same reason
+// `baseId` is in `fieldChangeRequestInputSchema` — see the note there.
+const withRecordId = { recordId: z.string().min(1) };
+
+export const recordChangeRequestInputSchema = z.discriminatedUnion("operation", [
+  reviseOperationInputSchema.extend({
+    operation: z.literal("update"),
+    autoMerge: z.boolean().optional(),
+    ...withRecordId,
+  }),
+  createDeleteChangeRequestInputSchema.extend({ operation: z.literal("delete"), ...withRecordId }),
+  restoreRecordInputSchema.extend({ operation: z.literal("restore"), ...withRecordId }),
+]);
 
 export const recordLinkSchema = z.object({
   id: z.string(),

@@ -85,7 +85,13 @@ describe("node / field restore fixes", () => {
 
     // Delete r1 individually (archive), leave r2 active.
     await approveAndMerge(
-      (await client.records.deleteChangeRequest({ recordId: r1, deleteMode: "archive" })).id,
+      (
+        await client.records.changeRequest({
+          operation: "delete",
+          recordId: r1,
+          deleteMode: "archive",
+        })
+      ).id,
     );
     expect((await client.records.get({ recordId: r1 }))?.status).toBe("archived");
 
@@ -98,7 +104,7 @@ describe("node / field restore fixes", () => {
         })
       ).id,
     );
-    expect((await client.bases.list()).some((b) => b.id === baseId)).toBe(false);
+    expect((await client.bases.list({})).some((b) => b.id === baseId)).toBe(false);
 
     await approveAndMerge(
       (
@@ -110,7 +116,7 @@ describe("node / field restore fixes", () => {
     );
 
     // The base is back, r2 is active again, but r1 stays deleted.
-    expect((await client.bases.list()).some((b) => b.id === baseId)).toBe(true);
+    expect((await client.bases.list({})).some((b) => b.id === baseId)).toBe(true);
     expect((await client.records.get({ recordId: r2 }))?.status).toBe("active");
     expect((await client.records.get({ recordId: r1 }))?.status).toBe("archived");
   });
@@ -131,11 +137,13 @@ describe("node / field restore fixes", () => {
 
     // Delete "dup", then create a NEW active field that reuses the slug.
     await approveAndMerge(
-      (await client.bases.deleteFieldChangeRequest({ baseId, fieldId: oldDupId })).id,
+      (await client.bases.fieldChangeRequest({ operation: "delete", baseId, fieldId: oldDupId }))
+        .id,
     );
     await approveAndMerge(
       (
-        await client.bases.createFieldChangeRequest({
+        await client.bases.fieldChangeRequest({
+          operation: "create",
           baseId,
           slug: "dup",
           name: "Dup 2",
@@ -146,11 +154,15 @@ describe("node / field restore fixes", () => {
     );
 
     // Restoring the original field must fail at merge (slug now taken).
-    const restoreCr = await client.bases.restoreFieldChangeRequest({ baseId, fieldId: oldDupId });
+    const restoreCr = await client.bases.fieldChangeRequest({
+      operation: "restore",
+      baseId,
+      fieldId: oldDupId,
+    });
     await expect(approveAndMerge(restoreCr.id)).rejects.toThrow(/slug/i);
 
     // Exactly one active "dup" field remains.
-    const updated = (await client.bases.list()).find((b) => b.id === baseId)!;
+    const updated = (await client.bases.list({})).find((b) => b.id === baseId)!;
     expect(updated.fields.filter((f) => f.slug === "dup")).toHaveLength(1);
   });
 });

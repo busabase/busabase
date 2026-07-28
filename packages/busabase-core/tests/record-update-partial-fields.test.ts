@@ -100,7 +100,8 @@ describe("record_update — partial-field submissions preserve untouched fields"
     const recordId = await createRecord({ title: "X", score: 100 });
     expect(await getFields(recordId)).toMatchObject({ title: "X", score: 100 });
 
-    const updateCr = await client.records.updateChangeRequest({
+    const updateCr = await client.records.changeRequest({
+      operation: "update",
       recordId,
       fields: { title: "Renamed" },
       autoMerge: false,
@@ -116,7 +117,8 @@ describe("record_update — partial-field submissions preserve untouched fields"
   it("three sequential single-field updates each preserve everything set before them", async () => {
     const recordId = await createRecord({ title: "A0", score: 1, note: "n0" });
 
-    const cr1 = await client.records.updateChangeRequest({
+    const cr1 = await client.records.changeRequest({
+      operation: "update",
       recordId,
       fields: { title: "A1" },
       autoMerge: false,
@@ -124,7 +126,8 @@ describe("record_update — partial-field submissions preserve untouched fields"
     await approveAndMerge(cr1.id);
     expect(await getFields(recordId)).toMatchObject({ title: "A1", score: 1, note: "n0" });
 
-    const cr2 = await client.records.updateChangeRequest({
+    const cr2 = await client.records.changeRequest({
+      operation: "update",
       recordId,
       fields: { score: 2 },
       autoMerge: false,
@@ -132,7 +135,8 @@ describe("record_update — partial-field submissions preserve untouched fields"
     await approveAndMerge(cr2.id);
     expect(await getFields(recordId)).toMatchObject({ title: "A1", score: 2, note: "n0" });
 
-    const cr3 = await client.records.updateChangeRequest({
+    const cr3 = await client.records.changeRequest({
+      operation: "update",
       recordId,
       fields: { note: "n1" },
       autoMerge: false,
@@ -146,7 +150,8 @@ describe("record_update — partial-field submissions preserve untouched fields"
     const recordId = await createRecord({ title: "B0", score: 5, note: "keep-me" });
 
     // Submit fieldB (score) as explicit null → must become null.
-    const clearCr = await client.records.updateChangeRequest({
+    const clearCr = await client.records.changeRequest({
+      operation: "update",
       recordId,
       fields: { title: "B1", score: null },
       autoMerge: false,
@@ -159,7 +164,8 @@ describe("record_update — partial-field submissions preserve untouched fields"
 
     // A later update that omits score entirely must NOT resurrect or further
     // touch it — it stays null (still present as a key, still cleared).
-    const omitCr = await client.records.updateChangeRequest({
+    const omitCr = await client.records.changeRequest({
+      operation: "update",
       recordId,
       fields: { note: "still-here" },
       autoMerge: false,
@@ -175,12 +181,14 @@ describe("record_update — partial-field submissions preserve untouched fields"
   it("still reports CONFLICT when two change requests edit the SAME field concurrently", async () => {
     const recordId = await createRecord({ title: "C0", score: 10 });
 
-    const crOne = await client.records.updateChangeRequest({
+    const crOne = await client.records.changeRequest({
+      operation: "update",
       recordId,
       fields: { title: "C-one" },
       autoMerge: false,
     });
-    const crTwo = await client.records.updateChangeRequest({
+    const crTwo = await client.records.changeRequest({
+      operation: "update",
       recordId,
       fields: { title: "C-two" },
       autoMerge: false,
@@ -203,12 +211,14 @@ describe("record_update — partial-field submissions preserve untouched fields"
     const recordId = await createRecord({ title: "D0", score: 20, note: "orig-note" });
 
     // Both proposed against the same original head, before either merges.
-    const crA = await client.records.updateChangeRequest({
+    const crA = await client.records.changeRequest({
+      operation: "update",
       recordId,
       fields: { title: "D-new" },
       autoMerge: false,
     });
-    const crB = await client.records.updateChangeRequest({
+    const crB = await client.records.changeRequest({
+      operation: "update",
       recordId,
       fields: { score: 99 },
       autoMerge: false,
@@ -238,7 +248,8 @@ describe("record_update — partial-field submissions preserve untouched fields"
   it("accepts an unknown field slug without blocking the real update, and preserves untouched fields", async () => {
     const recordId = await createRecord({ title: "E0", score: 30, note: "e-note" });
 
-    const cr = await client.records.updateChangeRequest({
+    const cr = await client.records.changeRequest({
+      operation: "update",
       recordId,
       // `ghostField` isn't a defined slug on this base at all.
       fields: { title: "E1", ghostField: "should not break anything" },
@@ -265,7 +276,8 @@ describe("record_update — partial-field submissions preserve untouched fields"
   it("reviseOperation on a pending CR with a partial field set also preserves untouched fields", async () => {
     const recordId = await createRecord({ title: "F0", score: 40, note: "f-note" });
 
-    const cr = await client.records.updateChangeRequest({
+    const cr = await client.records.changeRequest({
+      operation: "update",
       recordId,
       fields: { title: "F-draft" },
       autoMerge: false,

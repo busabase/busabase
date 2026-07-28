@@ -1,7 +1,7 @@
 /**
  * 11-drives: Full Drive lifecycle — create, list, read file, CR update, approve, merge, verify.
  * Drives are pure file-tree nodes (like Skills, minus the Skill metadata), so this
- * exercises the same /drives endpoints the seeded "Team Files" Drive is built on.
+ * exercises the shared /file-trees endpoints the seeded "Team Files" Drive uses.
  */
 
 import { api, approveMerge, assert, BASE, makeRunner, type NodeTreeVO } from "./_client";
@@ -74,19 +74,20 @@ export async function run() {
   const created: DriveVO[] = [];
 
   for (const def of DEMO_DRIVES) {
-    await step(`POST /drives — create "${def.name}" (idempotent)`, async () => {
+    await step(`POST /file-trees — create "${def.name}" (idempotent)`, async () => {
       // Re-runnable: a prior run may have already created this Drive.
       let drive: DriveVO;
       try {
-        drive = await api<DriveVO>("POST", "/drives", {
+        drive = await api<DriveVO>("POST", "/file-trees", {
           ...def,
+          type: "drive",
           ...(parentNodeId ? { parentNodeId } : {}),
           // Smoke-testing the API surface, not the review-first policy — opt
           // out the same way a seed script does.
           autoMerge: true,
         });
       } catch {
-        const list = await api<DriveVO[]>("GET", "/drives");
+        const list = await api<DriveVO[]>("GET", "/file-trees?type=drive");
         const found = list.find((d) => d.node.slug === def.slug);
         assert(!!found, `Drive "${def.slug}" missing after create failed`);
         drive = found;
@@ -100,21 +101,21 @@ export async function run() {
     });
   }
 
-  // ── GET /drives ────────────────────────────────────────────────────────────
+  // ── GET /file-trees?type=drive ────────────────────────────────────────────
 
-  await step("GET /drives — all created slugs present", async () => {
-    const list = await api<DriveVO[]>("GET", "/drives");
+  await step("GET /file-trees?type=drive — all created slugs present", async () => {
+    const list = await api<DriveVO[]>("GET", "/file-trees?type=drive");
     const slugs = new Set(list.map((d) => d.node.slug));
     for (const def of DEMO_DRIVES) {
-      assert(slugs.has(def.slug), `slug "${def.slug}" missing from GET /drives`);
+      assert(slugs.has(def.slug), `slug "${def.slug}" missing from GET /file-trees?type=drive`);
     }
   });
 
-  // ── GET /drives/{id} + files ───────────────────────────────────────────────
+  // ── GET /file-trees/{id} + files ─────────────────────────────────────────
 
   if (created[0]) {
-    await step("GET /drives/{id} — detail includes README.md", async () => {
-      const drive = await api<DriveVO>("GET", `/drives/${created[0].node.id}`);
+    await step("GET /file-trees/{id} — detail includes README.md", async () => {
+      const drive = await api<DriveVO>("GET", `/file-trees/${created[0].node.id}?type=drive`);
       assert(drive.node.id === created[0].node.id, "id mismatch");
       assert(
         drive.files.some((f) => f.path === "README.md"),
@@ -122,8 +123,11 @@ export async function run() {
       );
     });
 
-    await step("GET /drives/{id}/files/README.md — read seeded content", async () => {
-      const file = await api<FileContentVO>("GET", `/drives/${created[0].node.id}/files/README.md`);
+    await step("GET /file-trees/{id}/files/README.md — read seeded content", async () => {
+      const file = await api<FileContentVO>(
+        "GET",
+        `/file-trees/${created[0].node.id}/files/README.md?type=drive`,
+      );
       assert(file.content.includes("Launch Assets"), "unexpected README content");
       assert(file.contentHash.startsWith("sha256:"), "unexpected hash format");
     });
@@ -136,12 +140,17 @@ export async function run() {
     let crId = "";
     const updatedContent = `# ${target.node.name}\n\nUpdated by 11-drives.ts via the OpenAPI change-request workflow.\n`;
 
-    await step(`POST /drives/{id}/change-requests — update README.md`, async () => {
-      const cr = await api<ChangeRequestVO>("POST", `/drives/${target.node.id}/change-requests`, {
-        message: "demo: update README via CR",
-        submittedBy: "demo-script",
-        operations: [{ kind: "update", path: "README.md", content: updatedContent }],
-      });
+    await step(`POST /file-trees/{id}/change-requests — update README.md`, async () => {
+      const cr = await api<ChangeRequestVO>(
+        "POST",
+        `/file-trees/${target.node.id}/change-requests`,
+        {
+          type: "drive",
+          message: "demo: update README via CR",
+          submittedBy: "demo-script",
+          operations: [{ kind: "update", path: "README.md", content: updatedContent }],
+        },
+      );
       assert(cr.status === "in_review", `expected in_review, got ${cr.status}`);
       crId = cr.id;
     });
@@ -155,8 +164,11 @@ export async function run() {
       );
     });
 
-    await step("GET /drives/{id}/files/README.md — verify merged content", async () => {
-      const file = await api<FileContentVO>("GET", `/drives/${target.node.id}/files/README.md`);
+    await step("GET /file-trees/{id}/files/README.md — verify merged content", async () => {
+      const file = await api<FileContentVO>(
+        "GET",
+        `/file-trees/${target.node.id}/files/README.md?type=drive`,
+      );
       assert(
         file.content.includes("11-drives.ts"),
         `expected updated README, got: ${file.content.slice(0, 80)}`,

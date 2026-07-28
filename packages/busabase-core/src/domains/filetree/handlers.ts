@@ -629,6 +629,72 @@ export const createFileTreeNode = async (
   };
 };
 
+// --- Kind registry ------------------------------------------------------------
+// The `/file-trees` transport surface is type-agnostic: callers address a node by
+// id, and the server recovers which kind it is. Kind modules register here at
+// import time so this file keeps its position at the base of the dependency graph
+// (skill/drive/airapp handlers import *from* here, never the other way round).
+
+const fileTreeKinds = new Map<string, FileTreeKindConfig>();
+
+export const registerFileTreeKind = (config: FileTreeKindConfig): void => {
+  fileTreeKinds.set(config.type, config);
+};
+
+export const listFileTreeKinds = (): FileTreeKindConfig[] => [...fileTreeKinds.values()];
+
+export const getFileTreeKind = (type: string): FileTreeKindConfig => {
+  const config = fileTreeKinds.get(type);
+  if (!config) {
+    throw new ORPCError("BAD_REQUEST", { message: `Not a file-tree node type: ${type}` });
+  }
+  return config;
+};
+
+/**
+ * Resolve which kind a `/file-trees/{nodeId}` reference points at.
+ *
+ * A node id is unambiguous — one row, one type. A slug is only unique *within* a
+ * type, so it needs the caller's `type` hint; without one we look for exactly one
+ * match across all kinds and refuse when several kinds share that slug rather
+ * than silently picking whichever sorts first.
+ */
+export const resolveFileTreeKind = async (
+  nodeIdOrSlug: string,
+  typeHint?: string,
+): Promise<FileTreeKindConfig> => {
+  if (typeHint) return getFileTreeKind(typeHint);
+
+  await ensureReady();
+  const db = await getDb();
+  const [row] = await db
+    .select({ type: busabaseNodes.type })
+    .from(busabaseNodes)
+    .where(and(eq(busabaseNodes.spaceId, getContextSpaceId()), eq(busabaseNodes.id, nodeIdOrSlug)))
+    .limit(1);
+  if (row) return getFileTreeKind(row.type);
+
+  // Not an id — treat it as a slug and require it to be unambiguous.
+  const matches = await db
+    .select({ type: busabaseNodes.type })
+    .from(busabaseNodes)
+    .where(
+      and(
+        eq(busabaseNodes.spaceId, getContextSpaceId()),
+        eq(busabaseNodes.slug, nodeIdOrSlug),
+        isNull(busabaseNodes.archivedAt),
+      ),
+    );
+  const kinds = [...new Set(matches.map((m) => m.type))].filter((t) => fileTreeKinds.has(t));
+  if (kinds.length === 1) return getFileTreeKind(kinds[0] as string);
+  if (kinds.length > 1) {
+    throw new ORPCError("BAD_REQUEST", {
+      message: `Slug "${nodeIdOrSlug}" exists as ${kinds.join(" and ")}; pass \`type\` to choose one.`,
+    });
+  }
+  throw new ORPCError("NOT_FOUND", { message: `File-tree node not found: ${nodeIdOrSlug}` });
+};
+
 export const getFileTreeNode = async (
   config: FileTreeKindConfig,
   nodeIdOrSlug: string,

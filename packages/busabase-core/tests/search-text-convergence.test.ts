@@ -186,7 +186,8 @@ describe("Search / Drive Grep Retrieval convergence", () => {
       text: "ACME Corp STALEMARKERALPHA contract version one",
     });
 
-    const drive = await client.drives.create({
+    const drive = await client.fileTrees.create({
+      type: "drive",
       autoMerge: true,
       slug: "stale-search-drive",
       name: "Stale Search Drive",
@@ -203,7 +204,8 @@ describe("Search / Drive Grep Retrieval convergence", () => {
       hashByte: "4",
     });
 
-    const cr = await client.drives.createChangeRequest({
+    const cr = await client.fileTrees.createChangeRequest({
+      type: "drive",
       nodeId: drive.node.id,
       operations: [{ kind: "update", path: "contract.pdf", assetId: replacementAssetId }],
       message: "Replace contract with v2",

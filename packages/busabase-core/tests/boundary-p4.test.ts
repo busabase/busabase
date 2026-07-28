@@ -74,7 +74,8 @@ describe("Boundary P4 — oRPC", () => {
     const withTwo = await client.bases.get({ baseId: base.id });
     const fieldB = withTwo?.fields.find((f) => f.slug === "field-b");
     if (!fieldB) throw new Error("fieldB not found");
-    await client.bases.deleteFieldChangeRequest({
+    await client.bases.fieldChangeRequest({
+      operation: "delete",
       baseId: base.id,
       fieldId: fieldB.id,
       submittedBy: "alice",
@@ -101,7 +102,8 @@ describe("Boundary P4 — oRPC", () => {
     const { client } = await seedScenario("p4-list-views");
 
     const base = await client.bases.create({ name: "Archived Base", slug: "arc-base" });
-    await client.bases.createViewChangeRequest({
+    await client.views.changeRequest({
+      operation: "create",
       baseId: base.id,
       name: "My View",
       config: {},
@@ -109,7 +111,7 @@ describe("Boundary P4 — oRPC", () => {
       mergeImmediately: true,
     });
 
-    const beforeArchive = await client.bases.list();
+    const beforeArchive = await client.bases.list({});
     const hadBase = beforeArchive.some((b) => b.id === base.id);
     expect(hadBase).toBe(true);
 
@@ -120,12 +122,12 @@ describe("Boundary P4 — oRPC", () => {
       mergeImmediately: true,
     });
 
-    const afterArchive = await client.bases.list();
+    const afterArchive = await client.bases.list({});
     const stillHasBase = afterArchive.some((b) => b.id === base.id);
     expect(stillHasBase).toBe(false);
 
     // Archived base appears in listArchived instead.
-    const archived = await client.bases.listArchived();
+    const archived = await client.bases.list({ status: "archived" });
     expect(archived.some((b) => b.id === base.id)).toBe(true);
   });
 
@@ -230,7 +232,8 @@ describe("Boundary P4 — oRPC", () => {
 
     // Attempt to reorder base A using a fieldId from base B.
     await expect(
-      client.bases.reorderFieldsChangeRequest({
+      client.bases.fieldChangeRequest({
+        operation: "reorder",
         baseId: baseA.id,
         fieldIds: [aFieldId, bFieldId],
         submittedBy: "alice",
@@ -271,7 +274,7 @@ describe("Boundary P4 — oRPC", () => {
     const base = await client.bases.create({ name: "Old Base", slug: "old-base" });
 
     // Not in archived list yet.
-    const beforeArchived = await client.bases.listArchived();
+    const beforeArchived = await client.bases.list({ status: "archived" });
     expect(beforeArchived.some((b) => b.id === base.id)).toBe(false);
 
     // Archive it.
@@ -282,8 +285,8 @@ describe("Boundary P4 — oRPC", () => {
     });
 
     // Now in archived, not in active.
-    const active = await client.bases.list();
-    const archived = await client.bases.listArchived();
+    const active = await client.bases.list({});
+    const archived = await client.bases.list({ status: "archived" });
     expect(active.some((b) => b.id === base.id)).toBe(false);
     expect(archived.some((b) => b.id === base.id)).toBe(true);
   });

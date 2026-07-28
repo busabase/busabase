@@ -134,12 +134,18 @@ function DashboardClientContent({ initialPath = "/home", localUserName }: Dashbo
     },
     [orpc],
   );
-  const basesQuery = useQuery(orpc.bases.list.queryOptions({}));
-  const changeRequestsQuery = useQuery(orpc.changeRequests.list.queryOptions({ input: {} }));
+  const basesQuery = useQuery(orpc.bases.list.queryOptions({ input: {} }));
+  // Paginated endpoint; this shell hands the first page's rows to the core dashboard.
+  const changeRequestsQuery = useQuery(
+    orpc.changeRequests.list.queryOptions({
+      input: {},
+      select: (page) => page.changeRequests,
+    }),
+  );
   const auditEventsQuery = useQuery(orpc.auditEvents.list.queryOptions({ input: {} }));
   const bases = basesQuery.data ?? [];
   const changeRequests = changeRequestsQuery.data ?? [];
-  // The core dashboard loads records itself via records.listPaged and ignores
+  // The core dashboard loads records itself via records.list and ignores
   // this prop, so we don't fetch the whole records table just to hand it over.
   const records = useMemo<never[]>(() => [], []);
   const auditEvents = auditEventsQuery.data ?? [];

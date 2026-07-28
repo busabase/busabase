@@ -106,7 +106,8 @@ describe("Node-parent validation, materialized flag, and ChangeRequest safety â€
   describe("Fix 1 â€” parent-node type validation returns a structured 422, not a 500", () => {
     it("rejects creating an AirApp under a Base node with INVALID_PARENT_NODE_TYPE / 422", async () => {
       await expect(
-        client.airapps.create({
+        client.fileTrees.create({
+          type: "airapp",
           autoMerge: true,
           slug: "under-a-base",
           name: "Under Base",
@@ -129,7 +130,8 @@ describe("Node-parent validation, materialized flag, and ChangeRequest safety â€
 
     it("still 404s a genuinely unknown parentNodeId â€” distinct from the wrong-type 422", async () => {
       await expect(
-        client.airapps.create({
+        client.fileTrees.create({
+          type: "airapp",
           autoMerge: true,
           slug: "missing-parent",
           name: "Missing Parent",
@@ -140,23 +142,25 @@ describe("Node-parent validation, materialized flag, and ChangeRequest safety â€
 
     it("documents the parentNodeId container constraint in the generated OpenAPI spec", async () => {
       const spec = await getBusabaseOpenApiSpec();
-      const airappsPath = JSON.stringify(spec.paths?.["/api/v1/airapps"] ?? {});
+      const fileTreesPath = JSON.stringify(spec.paths?.["/api/v1/file-trees"] ?? {});
       const filesPath = JSON.stringify(spec.paths?.["/api/v1/files"] ?? {});
-      expect(airappsPath).toContain("container-incapable node types");
+      expect(fileTreesPath).toContain("container-incapable node types");
       expect(filesPath).toContain("container-incapable node types");
     });
   });
 
   describe("Fix 2 â€” materialized flag on create-endpoint responses", () => {
     it("airapps.create: materialized true when autoMerge, false when review-first", async () => {
-      const created = await client.airapps.create({
+      const created = await client.fileTrees.create({
+        type: "airapp",
         autoMerge: true,
         slug: "mat-airapp",
         name: "Mat AirApp",
       });
       expect(created.materialized).toBe(true);
 
-      const pending = await client.airapps.create({
+      const pending = await client.fileTrees.create({
+        type: "airapp",
         slug: "pending-airapp",
         name: "Pending AirApp",
         autoMerge: false,
@@ -166,12 +170,14 @@ describe("Node-parent validation, materialized flag, and ChangeRequest safety â€
     });
 
     it("the idempotent existing-slug-match branch also reports materialized: true", async () => {
-      const first = await client.airapps.create({
+      const first = await client.fileTrees.create({
+        type: "airapp",
         autoMerge: true,
         slug: "dup-slug-airapp",
         name: "Dup Slug",
       });
-      const again = await client.airapps.create({
+      const again = await client.fileTrees.create({
+        type: "airapp",
         autoMerge: true,
         slug: "dup-slug-airapp",
         name: "Dup Slug",
@@ -445,13 +451,15 @@ describe("Node-parent validation, materialized flag, and ChangeRequest safety â€
       expect(folderA).toBeTruthy();
       expect(folderB).toBeTruthy();
 
-      const inFolderA = await client.airapps.create({
+      const inFolderA = await client.fileTrees.create({
+        type: "airapp",
         autoMerge: true,
         slug: "shared-slug-airapp",
         name: "Shared Slug AirApp (A)",
         parentNodeId: folderA?.id,
       });
-      const inFolderB = await client.airapps.create({
+      const inFolderB = await client.fileTrees.create({
+        type: "airapp",
         autoMerge: true,
         slug: "shared-slug-airapp",
         name: "Shared Slug AirApp (B)",
@@ -465,7 +473,8 @@ describe("Node-parent validation, materialized flag, and ChangeRequest safety â€
       expect(inFolderB.node.parentId).toBe(folderB?.id);
 
       // Same slug, same parent again: still idempotent (returns the existing node).
-      const repeatInFolderA = await client.airapps.create({
+      const repeatInFolderA = await client.fileTrees.create({
+        type: "airapp",
         autoMerge: true,
         slug: "shared-slug-airapp",
         name: "Shared Slug AirApp (A) retry",

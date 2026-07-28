@@ -6,19 +6,19 @@ import {
   fileTreeFileOperationInputSchema,
   fileTreeFileSchema,
   fileTreeNodeSchema,
-  makeFileTreeContract,
 } from "../filetree/contract";
 import type { AirAppFileVO, AirAppRunnerKind, AirAppVO } from "./types";
 
 export type { AirAppFileVO, AirAppRunnerKind, AirAppVO };
 
+// AirApps are served by the shared `/file-trees` surface (`type: "airapp"`) —
+// see `../filetree/contract`. These aliases stay because callers name the
+// schemas after the node type they are working with.
 export const airappFileSchema = fileTreeFileSchema;
 export const airappSchema = fileTreeNodeSchema;
 export const createAirAppInputSchema = createFileTreeInputSchema;
 export const airappFileOperationInputSchema = fileTreeFileOperationInputSchema;
 export const createAirAppChangeRequestInputSchema = createFileTreeChangeRequestInputSchema;
-
-export const airappContract = makeFileTreeContract("airapps", "AirApps");
 
 // --- local-node runtime (server-side execution engine) -----------------------
 // Mirrors the AirAppRunner interface's mount/install/start + onLog/onReady

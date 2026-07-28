@@ -192,7 +192,7 @@ describe("lookup fields survive the package publish/install round trip", () => {
       return applyInstall(client, plan, { autoMerge: true });
     });
 
-    const bases = await inSpace(spaceId, () => client.bases.list());
+    const bases = await inSpace(spaceId, () => client.bases.list({}));
     const orders = bases.find((base) => base.slug === "orders");
     expect(orders).toBeTruthy();
 

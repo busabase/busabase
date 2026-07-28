@@ -108,7 +108,7 @@ export function NodeDeleteDialog({
         queryKey: orpc.nodes.list.queryOptions({}).queryKey,
       });
       await queryClient.invalidateQueries({
-        queryKey: orpc.nodes.listArchived.queryOptions({}).queryKey,
+        queryKey: orpc.nodes.list.queryOptions({ input: { status: "archived" } }).queryKey,
       });
       toast.success(fmt(messages.nodeDetail.movedToTrash, { type: label }));
       onOpenChange(false);

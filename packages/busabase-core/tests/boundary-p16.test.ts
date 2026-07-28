@@ -50,7 +50,8 @@ describe("Boundary P16 — node/view merge state guards", () => {
     const raw: RawClient = createRouterClient(busabaseRouter);
 
     const base = await client.bases.create({ name: "B", slug: "b" });
-    await client.bases.createViewChangeRequest({
+    await client.views.changeRequest({
+      operation: "create",
       baseId: base.id,
       name: "Grid",
       config: {},
@@ -64,7 +65,7 @@ describe("Boundary P16 — node/view merge state guards", () => {
     // change-request boundary (the merge handler keeps a matching guard as
     // defense-in-depth, mirroring record_restore).
     await expect(
-      raw.views.restoreChangeRequest({ viewId: view.id, submittedBy: "alice" }),
+      raw.views.changeRequest({ operation: "restore", viewId: view.id, submittedBy: "alice" }),
     ).rejects.toThrow(/not archived/i);
   });
 });

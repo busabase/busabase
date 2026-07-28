@@ -59,7 +59,8 @@ describe("Upload safety (.gitignore filter + default-deny list + secret scan) â€
 
   describe("Layer 1 â€” .gitignore recognition (silent filter)", () => {
     it("silently excludes a matching .env file from a drive create, and reports which path was skipped", async () => {
-      const created = await client.drives.create({
+      const created = await client.fileTrees.create({
+        type: "drive",
         autoMerge: true,
         slug: "gitignore-drive",
         name: "Gitignore Drive",
@@ -79,7 +80,8 @@ describe("Upload safety (.gitignore filter + default-deny list + secret scan) â€
 
     it("rejects with a distinct 'nothing to upload' error when .gitignore filtering leaves nothing", async () => {
       await expect(
-        client.drives.create({
+        client.fileTrees.create({
+          type: "drive",
           autoMerge: true,
           slug: "all-gitignored-drive",
           name: "All Gitignored Drive",
@@ -99,7 +101,8 @@ describe("Upload safety (.gitignore filter + default-deny list + secret scan) â€
   describe("Layer 2 â€” built-in default-deny list (hard reject, unconditional)", () => {
     it("rejects a node_modules-shaped path with FORBIDDEN_PATH when no .gitignore is present", async () => {
       await expect(
-        client.skills.create({
+        client.fileTrees.create({
+          type: "skill",
           autoMerge: true,
           slug: "denylist-skill",
           name: "Denylist Skill",
@@ -115,14 +118,16 @@ describe("Upload safety (.gitignore filter + default-deny list + secret scan) â€
     });
 
     it("rejects a forbidden path proposed through createFileTreeChangeRequest (the update path), not just create", async () => {
-      const drive = await client.drives.create({
+      const drive = await client.fileTrees.create({
+        type: "drive",
         autoMerge: true,
         slug: "denylist-update-drive",
         name: "Denylist Update Drive",
       });
 
       await expect(
-        client.drives.createChangeRequest({
+        client.fileTrees.createChangeRequest({
+          type: "drive",
           nodeId: drive.node.id,
           message: "Sneak in an ssh key",
           operations: [{ kind: "create", path: ".ssh/id_rsa", content: "not a real key\n" }],
@@ -141,7 +146,8 @@ describe("Upload safety (.gitignore filter + default-deny list + secret scan) â€
     it("rejects a file whose content matches an AWS-key-shaped string with SECRET_DETECTED, and never echoes the matched value", async () => {
       let caught: unknown;
       try {
-        await client.skills.create({
+        await client.fileTrees.create({
+          type: "skill",
           autoMerge: true,
           slug: "secret-skill",
           name: "Secret Skill",
@@ -171,7 +177,8 @@ describe("Upload safety (.gitignore filter + default-deny list + secret scan) â€
     it("aggregates two different secret kinds across two files into one findings array (not fail-fast)", async () => {
       let caught: unknown;
       try {
-        await client.drives.create({
+        await client.fileTrees.create({
+          type: "drive",
           autoMerge: true,
           slug: "multi-secret-drive",
           name: "Multi Secret Drive",
@@ -206,7 +213,8 @@ describe("Upload safety (.gitignore filter + default-deny list + secret scan) â€
     });
 
     it("rejects secret content proposed through createFileTreeChangeRequest (the update path), not just create", async () => {
-      const skill = await client.skills.create({
+      const skill = await client.fileTrees.create({
+        type: "skill",
         autoMerge: true,
         slug: "secret-update-skill",
         name: "Secret Update Skill",
@@ -214,7 +222,8 @@ describe("Upload safety (.gitignore filter + default-deny list + secret scan) â€
 
       let caught: unknown;
       try {
-        await client.skills.createChangeRequest({
+        await client.fileTrees.createChangeRequest({
+          type: "skill",
           nodeId: skill.node.id,
           message: "Add a config file",
           operations: [{ kind: "create", path: "config.txt", content: `token=${FAKE_AWS_KEY}\n` }],
@@ -239,14 +248,16 @@ describe("Upload safety (.gitignore filter + default-deny list + secret scan) â€
       // let `normalizeFilePath` (called later, per-operation) reject it the
       // way it always has, with a clean BAD_REQUEST â€” not let the matcher's
       // own exception escape uncaught.
-      const drive = await client.drives.create({
+      const drive = await client.fileTrees.create({
+        type: "drive",
         autoMerge: true,
         slug: "traversal-drive",
         name: "Traversal Drive",
       });
 
       await expect(
-        client.drives.createChangeRequest({
+        client.fileTrees.createChangeRequest({
+          type: "drive",
           nodeId: drive.node.id,
           operations: [{ kind: "create", path: "../escape.md", content: "nope\n" }],
         }),
@@ -266,7 +277,8 @@ describe("Upload safety (.gitignore filter + default-deny list + secret scan) â€
     const overBoundaryName = "a".repeat(256);
 
     it("accepts a filename exactly at the 255-char boundary (drives.create)", async () => {
-      const created = await client.drives.create({
+      const created = await client.fileTrees.create({
+        type: "drive",
         autoMerge: true,
         slug: "boundary-filename-drive",
         name: "Boundary Filename Drive",
@@ -278,7 +290,8 @@ describe("Upload safety (.gitignore filter + default-deny list + secret scan) â€
 
     it("rejects a filename one over the 255-char boundary with a clean BAD_REQUEST, not a downstream crash", async () => {
       await expect(
-        client.drives.create({
+        client.fileTrees.create({
+          type: "drive",
           autoMerge: true,
           slug: "over-boundary-filename-drive",
           name: "Over Boundary Filename Drive",
@@ -293,7 +306,8 @@ describe("Upload safety (.gitignore filter + default-deny list + secret scan) â€
 
     it("does not reject a long intermediate folder segment â€” only the final filename segment is stored in attachments.file_name", async () => {
       const longFolder = "b".repeat(300);
-      const created = await client.drives.create({
+      const created = await client.fileTrees.create({
+        type: "drive",
         autoMerge: true,
         slug: "long-folder-short-filename-drive",
         name: "Long Folder Short Filename Drive",
@@ -315,14 +329,16 @@ describe("Upload safety (.gitignore filter + default-deny list + secret scan) â€
       // direct call to `normalizeFilePath`), proves the fix is actually wired
       // into the request path merge would have used â€” the same class of gap
       // this test suite exists to catch (see file header).
-      const skill = await client.skills.create({
+      const skill = await client.fileTrees.create({
+        type: "skill",
         autoMerge: true,
         slug: "merge-filename-length-skill",
         name: "Merge Filename Length Skill",
       });
 
       await expect(
-        client.skills.createChangeRequest({
+        client.fileTrees.createChangeRequest({
+          type: "skill",
           nodeId: skill.node.id,
           message: "Add a file with an over-long name",
           operations: [{ kind: "create", path: overBoundaryName, content: "nope\n" }],
@@ -336,7 +352,8 @@ describe("Upload safety (.gitignore filter + default-deny list + secret scan) â€
 
   describe("Regression baseline â€” a clean batch keeps working exactly as before", () => {
     it("a clean batch with no .gitignore, no forbidden paths, and no secrets succeeds unchanged (drives.create)", async () => {
-      const created = await client.drives.create({
+      const created = await client.fileTrees.create({
+        type: "drive",
         autoMerge: true,
         slug: "clean-drive",
         name: "Clean Drive",
@@ -352,7 +369,8 @@ describe("Upload safety (.gitignore filter + default-deny list + secret scan) â€
     });
 
     it("a clean batch succeeds through airapps.create specifically â€” proves the wiring reaches every domain, not just one", async () => {
-      const created = await client.airapps.create({
+      const created = await client.fileTrees.create({
+        type: "airapp",
         autoMerge: true,
         slug: "clean-airapp",
         name: "Clean AirApp",
@@ -364,7 +382,8 @@ describe("Upload safety (.gitignore filter + default-deny list + secret scan) â€
     });
 
     it("a clean batch succeeds through skills.create specifically", async () => {
-      const created = await client.skills.create({
+      const created = await client.fileTrees.create({
+        type: "skill",
         autoMerge: true,
         slug: "clean-skill",
         name: "Clean Skill",
@@ -374,13 +393,15 @@ describe("Upload safety (.gitignore filter + default-deny list + secret scan) â€
     });
 
     it("a metadata_update-only change request is unaffected (no path to check, no content to scan)", async () => {
-      const drive = await client.drives.create({
+      const drive = await client.fileTrees.create({
+        type: "drive",
         autoMerge: true,
         slug: "metadata-only-drive",
         name: "Metadata Only Drive",
       });
 
-      const cr = await client.drives.createChangeRequest({
+      const cr = await client.fileTrees.createChangeRequest({
+        type: "drive",
         nodeId: drive.node.id,
         message: "Bump version",
         operations: [{ kind: "metadata_update", metadata: { version: "0.2.0" } }],

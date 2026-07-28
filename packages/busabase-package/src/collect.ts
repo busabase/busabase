@@ -120,7 +120,9 @@ const collectNode = async (
     case "skill":
     case "airapp":
     case "drive":
-      return collectFileTree(client, source, common, options);
+      // `source.type` is `string`, so the switch narrows the field but not the
+      // object — pass the narrowed literal through explicitly.
+      return collectFileTree(client, source, source.type, common, options);
     case "file":
       return collectFile(client, source, common, options);
     default:
@@ -189,7 +191,7 @@ const collectBase = async (
 const buildIndexes = async (
   client: PackageClient,
 ): Promise<{ baseSlugById: Map<string, string>; fieldSlugById: Map<string, string> }> => {
-  const bases = await client.bases.list();
+  const bases = await client.bases.list({});
   const baseSlugById = new Map<string, string>();
   const fieldSlugById = new Map<string, string>();
   for (const base of bases) {
@@ -335,7 +337,7 @@ const collectRecords = async (
   let cursor: string | undefined;
 
   do {
-    const page = await client.records.listPaged({ baseId, limit: 100, cursor });
+    const page = await client.records.list({ baseId, limit: 100, cursor });
     for (const record of page.records) {
       if (record.status !== "active") continue;
       const values: Record<string, unknown> = {};
@@ -368,19 +370,18 @@ const collectRecords = async (
 const collectFileTree = async (
   client: PackageClient,
   source: SourceNode,
+  type: "skill" | "drive" | "airapp",
   common: NodeCommon,
   options: CollectOptions,
 ): Promise<PackageNode> => {
-  const api =
-    source.type === "skill"
-      ? client.skills
-      : source.type === "airapp"
-        ? client.airapps
-        : client.drives;
-  const listed = await api.listFiles({ nodeId: source.id });
+  const listed = await client.fileTrees.listFiles({ nodeId: source.id, type });
   const files: PackageFileEntry[] = [];
   for (const file of listed) {
-    const read = await api.readFile({ nodeId: source.id, filePath: file.path });
+    const read = await client.fileTrees.readFile({
+      nodeId: source.id,
+      filePath: file.path,
+      type,
+    });
     files.push({
       path: file.path,
       bytes:

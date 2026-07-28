@@ -12,7 +12,7 @@ function DriveDetailContent() {
 
   const driveQuery = useQuery(
     buda && nodeId
-      ? buda.orpc.drives.get.queryOptions({ input: { nodeId } })
+      ? buda.orpc.fileTrees.get.queryOptions({ input: { nodeId, type: "drive" } })
       : { queryKey: ["no-connection", "drive", nodeId], queryFn: skipToken },
   );
 
@@ -27,11 +27,11 @@ function DriveDetailContent() {
       onRefresh={() => void driveQuery.refetch()}
       onReadFile={(filePath) => {
         if (!buda) throw new Error("Not connected");
-        return buda.client.drives.readFile({ nodeId, filePath });
+        return buda.client.fileTrees.readFile({ type: "drive", nodeId, filePath });
       }}
       onCreateChangeRequest={(input) => {
         if (!buda) throw new Error("Not connected");
-        return buda.client.drives.createChangeRequest({ nodeId, ...input });
+        return buda.client.fileTrees.createChangeRequest({ type: "drive", nodeId, ...input });
       }}
       onChangeRequestCreated={(changeRequestId) =>
         router.push({ pathname: "/change-requests/[id]", params: { id: changeRequestId } })

@@ -89,7 +89,7 @@ describe("Field management — delete / update / convert", () => {
       .then(() => client.changeRequests.merge({ changeRequestId }));
 
   const getBase = () =>
-    client.bases.list().then((bases) =>
+    client.bases.list({}).then((bases) =>
       requireFound(
         bases.find((base) => base.id === testBaseId),
         `Base not found: ${testBaseId}`,
@@ -97,7 +97,7 @@ describe("Field management — delete / update / convert", () => {
     );
 
   const getFieldId = async (baseId: string, slug: string): Promise<string> => {
-    const bases = await client.bases.list();
+    const bases = await client.bases.list({});
     const b = bases.find((b) => b.id === baseId);
     if (!b) throw new Error(`Base not found: ${baseId}`);
     const field = b.fields.find((f) => f.slug === slug);
@@ -122,7 +122,8 @@ describe("Field management — delete / update / convert", () => {
 
       // Delete it via change request
       const toDeleteId = await getFieldId(testBaseId, "to-delete");
-      const cr = await client.bases.deleteFieldChangeRequest({
+      const cr = await client.bases.fieldChangeRequest({
+        operation: "delete",
         baseId: testBaseId,
         fieldId: toDeleteId,
       });
@@ -135,7 +136,8 @@ describe("Field management — delete / update / convert", () => {
 
     it("refuses to delete a system field", async () => {
       await expect(
-        client.bases.deleteFieldChangeRequest({
+        client.bases.fieldChangeRequest({
+          operation: "delete",
           baseId: testBaseId,
           fieldId: "fake-system-field-id",
         }),
@@ -152,7 +154,8 @@ describe("Field management — delete / update / convert", () => {
       });
 
       // Create a view with a filter on this field
-      const viewCr = await client.bases.createViewChangeRequest({
+      const viewCr = await client.views.changeRequest({
+        operation: "create",
         baseId: testBaseId,
         slug: "temp-view",
         name: "Temp View",
@@ -168,7 +171,8 @@ describe("Field management — delete / update / convert", () => {
 
       // Delete the field
       const tempFieldId = await getFieldId(testBaseId, "temp-filter-field");
-      const deleteCr = await client.bases.deleteFieldChangeRequest({
+      const deleteCr = await client.bases.fieldChangeRequest({
+        operation: "delete",
         baseId: testBaseId,
         fieldId: tempFieldId,
       });
@@ -190,7 +194,8 @@ describe("Field management — delete / update / convert", () => {
   describe("updateField", () => {
     it("renames a field (name only, slug stays the same)", async () => {
       const notesId = await getFieldId(testBaseId, "notes");
-      const cr = await client.bases.updateFieldChangeRequest({
+      const cr = await client.bases.fieldChangeRequest({
+        operation: "update",
         baseId: testBaseId,
         fieldId: notesId,
         patch: { name: "Remarks" },
@@ -205,7 +210,8 @@ describe("Field management — delete / update / convert", () => {
 
     it("updates required flag", async () => {
       const scoreId = await getFieldId(testBaseId, "score");
-      const cr = await client.bases.updateFieldChangeRequest({
+      const cr = await client.bases.fieldChangeRequest({
+        operation: "update",
         baseId: testBaseId,
         fieldId: scoreId,
         patch: { required: true },
@@ -218,7 +224,8 @@ describe("Field management — delete / update / convert", () => {
 
     it("adds a new choice to a select field via options patch", async () => {
       const statusId = await getFieldId(testBaseId, "status");
-      const cr = await client.bases.updateFieldChangeRequest({
+      const cr = await client.bases.fieldChangeRequest({
+        operation: "update",
         baseId: testBaseId,
         fieldId: statusId,
         patch: {
@@ -245,7 +252,8 @@ describe("Field management — delete / update / convert", () => {
       // schema itself enforces the no-type-change rule by ensuring the field type
       // remains unchanged after an update attempt with an empty patch.
       const titleId = await getFieldId(testBaseId, "title");
-      const cr = await client.bases.updateFieldChangeRequest({
+      const cr = await client.bases.fieldChangeRequest({
+        operation: "update",
         baseId: testBaseId,
         fieldId: titleId,
         patch: { name: "Title Field" },
@@ -332,7 +340,8 @@ describe("Field management — delete / update / convert", () => {
 
       // Convert score: number → text
       const scoreFieldId = base.fields.find((f) => f.slug === "score")?.id;
-      const cr = await client.bases.convertFieldChangeRequest({
+      const cr = await client.bases.fieldChangeRequest({
+        operation: "convert",
         baseId,
         fieldId: scoreFieldId,
         newType: "text",
@@ -341,7 +350,7 @@ describe("Field management — delete / update / convert", () => {
       await approveAndMerge(cr.id);
 
       const updated = requireFound(
-        (await client.bases.list()).find((candidate) => candidate.id === baseId),
+        (await client.bases.list({})).find((candidate) => candidate.id === baseId),
         `Base not found: ${baseId}`,
       );
       const scoreField = updated.fields.find((f) => f.slug === "score");
@@ -370,7 +379,8 @@ describe("Field management — delete / update / convert", () => {
       });
 
       const statusFieldId = base.fields.find((f) => f.slug === "status")?.id;
-      const cr = await client.bases.convertFieldChangeRequest({
+      const cr = await client.bases.fieldChangeRequest({
+        operation: "convert",
         baseId: base.id,
         fieldId: statusFieldId,
         newType: "text",
@@ -379,7 +389,7 @@ describe("Field management — delete / update / convert", () => {
       await approveAndMerge(cr.id);
 
       const updated = requireFound(
-        (await client.bases.list()).find((candidate) => candidate.id === base.id),
+        (await client.bases.list({})).find((candidate) => candidate.id === base.id),
         `Base not found: ${base.id}`,
       );
       expect(updated.fields.find((f) => f.slug === "status")?.type).toBe("text");
@@ -394,7 +404,8 @@ describe("Field management — delete / update / convert", () => {
       });
 
       const categoryFieldId = base.fields.find((f) => f.slug === "category")?.id;
-      const cr = await client.bases.convertFieldChangeRequest({
+      const cr = await client.bases.fieldChangeRequest({
+        operation: "convert",
         baseId: base.id,
         fieldId: categoryFieldId,
         newType: "select",
@@ -403,7 +414,7 @@ describe("Field management — delete / update / convert", () => {
       await approveAndMerge(cr.id);
 
       const updated = requireFound(
-        (await client.bases.list()).find((candidate) => candidate.id === base.id),
+        (await client.bases.list({})).find((candidate) => candidate.id === base.id),
         `Base not found: ${base.id}`,
       );
       expect(updated.fields.find((f) => f.slug === "category")?.type).toBe("select");
@@ -411,7 +422,8 @@ describe("Field management — delete / update / convert", () => {
 
     it("refuses to convert a system field", async () => {
       await expect(
-        client.bases.convertFieldChangeRequest({
+        client.bases.fieldChangeRequest({
+          operation: "convert",
           baseId: testBaseId,
           fieldId: "fake-auto-number-id",
           newType: "text",
@@ -423,7 +435,8 @@ describe("Field management — delete / update / convert", () => {
     it("refuses to convert to relation or attachment", async () => {
       const titleId = await getFieldId(testBaseId, "title");
       await expect(
-        client.bases.convertFieldChangeRequest({
+        client.bases.fieldChangeRequest({
+          operation: "convert",
           baseId: testBaseId,
           fieldId: titleId,
           newType: "relation",
@@ -508,7 +521,8 @@ describe("Field management — delete / update / convert", () => {
 
       it(`createConvertFieldChangeRequest: converting text field to "${newType}" → BAD_REQUEST`, async () => {
         await expect(
-          client.bases.convertFieldChangeRequest({
+          client.bases.fieldChangeRequest({
+            operation: "convert",
             baseId: guardrailsBaseId,
             fieldId: textFieldId,
             newType,
@@ -530,7 +544,8 @@ describe("Field management — delete / update / convert", () => {
 
     it("createConvertFieldChangeRequest: converting an existing system field → BAD_REQUEST", async () => {
       await expect(
-        client.bases.convertFieldChangeRequest({
+        client.bases.fieldChangeRequest({
+          operation: "convert",
           baseId: guardrailsBaseId,
           fieldId: systemFieldId,
           newType: "text",
@@ -551,7 +566,8 @@ describe("Field management — delete / update / convert", () => {
 
     it("createConvertFieldChangeRequest: converting a relation field → BAD_REQUEST", async () => {
       await expect(
-        client.bases.convertFieldChangeRequest({
+        client.bases.fieldChangeRequest({
+          operation: "convert",
           baseId: guardrailsBaseId,
           fieldId: relationFieldId,
           newType: "text",
@@ -572,7 +588,8 @@ describe("Field management — delete / update / convert", () => {
 
     it("createConvertFieldChangeRequest: converting an attachment field → BAD_REQUEST", async () => {
       await expect(
-        client.bases.convertFieldChangeRequest({
+        client.bases.fieldChangeRequest({
+          operation: "convert",
           baseId: guardrailsBaseId,
           fieldId: attachmentFieldId,
           newType: "text",
@@ -593,7 +610,8 @@ describe("Field management — delete / update / convert", () => {
 
     it("createConvertFieldChangeRequest: converting a text field to attachment → BAD_REQUEST", async () => {
       await expect(
-        client.bases.convertFieldChangeRequest({
+        client.bases.fieldChangeRequest({
+          operation: "convert",
           baseId: guardrailsBaseId,
           fieldId: textFieldId,
           newType: "attachment",
@@ -631,7 +649,8 @@ describe("Field management — delete / update / convert", () => {
 
     it("createFieldChangeRequest: relation field with no options → BAD_REQUEST", async () => {
       await expect(
-        client.bases.createFieldChangeRequest({
+        client.bases.fieldChangeRequest({
+          operation: "create",
           baseId: noTargetBaseId,
           slug: "linked",
           name: "Linked",
@@ -658,10 +677,10 @@ describe("Field management — delete / update / convert", () => {
       });
       const baseId = base.id;
       const fieldIds = base.fields.map((f) => f.id).reverse();
-      const cr = await client.bases.reorderFieldsChangeRequest({ baseId, fieldIds });
+      const cr = await client.bases.fieldChangeRequest({ operation: "reorder", baseId, fieldIds });
       expect(cr.status).toBe("in_review");
       await approveAndMerge(cr.id);
-      const updatedBases = await client.bases.list();
+      const updatedBases = await client.bases.list({});
       const updatedBase = requireFound(
         updatedBases.find((candidate) => candidate.id === baseId),
         `Base not found: ${baseId}`,
@@ -695,13 +714,17 @@ describe("Field management — delete / update / convert", () => {
         valueText: "to-restore-unique",
       });
       const record = requireFound(allRecords[0], "Created restore test record was not found");
-      const deleteCr = await client.records.deleteChangeRequest({
+      const deleteCr = await client.records.changeRequest({
+        operation: "delete",
         recordId: record.id,
         deleteMode: "archive",
       });
       await approveAndMerge(deleteCr.id);
       // Now restore it
-      const restoreCr = await client.records.restoreChangeRequest({ recordId: record.id });
+      const restoreCr = await client.records.changeRequest({
+        operation: "restore",
+        recordId: record.id,
+      });
       expect(restoreCr.status).toBe("in_review");
       await approveAndMerge(restoreCr.id);
       const restored = await client.records.get({ recordId: record.id });
@@ -722,7 +745,8 @@ describe("Field management — delete / update / convert", () => {
       });
       const baseId = base.id;
       // Create a field and delete it
-      const addCr = await client.bases.createFieldChangeRequest({
+      const addCr = await client.bases.fieldChangeRequest({
+        operation: "create",
         baseId,
         slug: "restorable",
         type: "text",
@@ -731,13 +755,17 @@ describe("Field management — delete / update / convert", () => {
       });
       await approveAndMerge(addCr.id);
       const fieldId = await getFieldId(baseId, "restorable");
-      const delCr = await client.bases.deleteFieldChangeRequest({ baseId, fieldId });
+      const delCr = await client.bases.fieldChangeRequest({ operation: "delete", baseId, fieldId });
       await approveAndMerge(delCr.id);
       // Now restore it
-      const restoreCr = await client.bases.restoreFieldChangeRequest({ baseId, fieldId });
+      const restoreCr = await client.bases.fieldChangeRequest({
+        operation: "restore",
+        baseId,
+        fieldId,
+      });
       expect(restoreCr.status).toBe("in_review");
       await approveAndMerge(restoreCr.id);
-      const bases = await client.bases.list();
+      const bases = await client.bases.list({});
       const updatedBase = requireFound(
         bases.find((candidate) => candidate.id === baseId),
         `Base not found: ${baseId}`,
@@ -758,7 +786,8 @@ describe("Field management — delete / update / convert", () => {
         fields: [{ slug: "title", name: "Title", type: "text", required: true }],
       });
       const baseId = base.id;
-      const addCr1 = await client.bases.createFieldChangeRequest({
+      const addCr1 = await client.bases.fieldChangeRequest({
+        operation: "create",
         baseId,
         slug: "reusable-slug",
         type: "text",
@@ -767,10 +796,11 @@ describe("Field management — delete / update / convert", () => {
       });
       await approveAndMerge(addCr1.id);
       const fieldId = await getFieldId(baseId, "reusable-slug");
-      const delCr = await client.bases.deleteFieldChangeRequest({ baseId, fieldId });
+      const delCr = await client.bases.fieldChangeRequest({ operation: "delete", baseId, fieldId });
       await approveAndMerge(delCr.id);
       // Should be able to create another field with same slug
-      const addCr2 = await client.bases.createFieldChangeRequest({
+      const addCr2 = await client.bases.fieldChangeRequest({
+        operation: "create",
         baseId,
         slug: "reusable-slug",
         type: "number",
@@ -778,7 +808,7 @@ describe("Field management — delete / update / convert", () => {
         required: false,
       });
       await approveAndMerge(addCr2.id);
-      const bases = await client.bases.list();
+      const bases = await client.bases.list({});
       const updatedBase = requireFound(
         bases.find((candidate) => candidate.id === baseId),
         `Base not found: ${baseId}`,
@@ -805,7 +835,8 @@ describe("Field management — delete / update / convert", () => {
       const baseId = base.id;
       const scoreId = base.fields.find((f) => f.slug === "score")?.id;
       // Create first convert CR (don't merge it)
-      await client.bases.convertFieldChangeRequest({
+      await client.bases.fieldChangeRequest({
+        operation: "convert",
         baseId,
         fieldId: scoreId,
         newType: "text",
@@ -813,7 +844,8 @@ describe("Field management — delete / update / convert", () => {
       });
       // Try to create another - should fail
       await expect(
-        client.bases.convertFieldChangeRequest({
+        client.bases.fieldChangeRequest({
+          operation: "convert",
           baseId,
           fieldId: scoreId,
           newType: "text",
@@ -835,13 +867,13 @@ describe("Field management — delete / update / convert", () => {
       });
       const baseId = base.id;
       // Confirm it appears before archive
-      const before = await client.bases.list();
+      const before = await client.bases.list({});
       expect(before.some((b) => b.id === baseId)).toBe(true);
       // Archive it
       const archiveCr = await client.bases.archiveChangeRequest({ baseId });
       await approveAndMerge(archiveCr.id);
       // Should no longer appear in list
-      const after = await client.bases.list();
+      const after = await client.bases.list({});
       expect(after.some((b) => b.id === baseId)).toBe(false);
     });
   });
@@ -863,7 +895,7 @@ describe("Field management — delete / update / convert", () => {
       const titleId = base.fields.find((f) => f.slug === "title")?.id;
       // Only pass one of the two fields → should throw
       await expect(
-        client.bases.reorderFieldsChangeRequest({ baseId, fieldIds: [titleId] }),
+        client.bases.fieldChangeRequest({ operation: "reorder", baseId, fieldIds: [titleId] }),
       ).rejects.toThrow();
     });
 
@@ -880,7 +912,8 @@ describe("Field management — delete / update / convert", () => {
       const baseId = base.id;
       const titleId = base.fields.find((f) => f.slug === "title")?.id;
       const scoreId = base.fields.find((f) => f.slug === "score")?.id;
-      const cr = await client.bases.reorderFieldsChangeRequest({
+      const cr = await client.bases.fieldChangeRequest({
+        operation: "reorder",
         baseId,
         fieldIds: [scoreId, titleId],
       });
@@ -904,7 +937,8 @@ describe("Field management — delete / update / convert", () => {
       const baseId = base.id;
       const scoreId = base.fields.find((f) => f.slug === "score")?.id;
       // Create a field update CR (don't merge yet)
-      const updateCr = await client.bases.updateFieldChangeRequest({
+      const updateCr = await client.bases.fieldChangeRequest({
+        operation: "update",
         baseId,
         fieldId: scoreId,
         patch: { name: "Updated Score" },

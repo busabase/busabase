@@ -80,7 +80,7 @@ describe("activity.listPaged — keyset merge parity", () => {
     await client.changeRequests.merge({ changeRequestId: cr2.id });
 
     // Read a couple records → record.viewed audit events (more feed variety).
-    const page = await client.records.listPaged({ baseId, limit: 100 });
+    const page = await client.records.list({ baseId, limit: 100 });
     for (const record of page.records.slice(0, 2)) {
       await client.records.get({ recordId: record.id });
     }
@@ -110,8 +110,8 @@ describe("activity.listPaged — keyset merge parity", () => {
   it("pages through the whole feed with no dup, no drop, newest-first", async () => {
     // Reference: the full feed built from the complete (active) VO set.
     const [changeRequests, recordsPage, auditEvents] = await Promise.all([
-      client.changeRequests.list({}),
-      client.records.listPaged({ baseId, limit: 100 }),
+      client.changeRequests.list({}).then((page) => page.changeRequests),
+      client.records.list({ baseId, limit: 100 }),
       client.auditEvents.list({}),
     ]);
     const referenceKeys = new Set(
