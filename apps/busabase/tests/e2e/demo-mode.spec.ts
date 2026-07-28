@@ -10,8 +10,18 @@ interface ChangeRequestVO {
   baseId: string | null;
 }
 
+interface ChangeRequestPageVO {
+  changeRequests: ChangeRequestVO[];
+  nextCursor: string | null;
+}
+
 interface RecordVO {
   base: { slug: string };
+}
+
+interface RecordPageVO {
+  records: RecordVO[];
+  nextCursor: string | null;
 }
 
 interface MergeResultVO {
@@ -20,7 +30,7 @@ interface MergeResultVO {
 }
 
 test("?demo=1 serves the full seeded review queue from the shared seed", async ({ request }) => {
-  const changeRequests = await json<ChangeRequestVO[]>(
+  const { changeRequests } = await json<ChangeRequestPageVO>(
     await request.get("/api/v1/change-requests?demo=1"),
   );
   const ids = changeRequests.map((cr) => cr.id);
@@ -47,7 +57,7 @@ test("?demo={use-case} focuses the seed on the CMS blog bases", async ({ request
     "nextjs-fumadocs-demo-cms-tags",
   ]);
 
-  const changeRequests = await json<ChangeRequestVO[]>(
+  const { changeRequests } = await json<ChangeRequestPageVO>(
     await request.get("/api/v1/change-requests?demo=blog"),
   );
   expect(changeRequests.length).toBeGreaterThan(0);
@@ -64,7 +74,7 @@ test("?demo={use-case} focuses the seed on the CMS blog bases", async ({ request
   expect(postsBase).toBeDefined();
   expect(baseScoped.every((cr) => cr.baseId === postsBase?.id)).toBe(true);
 
-  const records = await json<RecordVO[]>(await request.get("/api/v1/records?demo=blog"));
+  const { records } = await json<RecordPageVO>(await request.get("/api/v1/records?demo=blog"));
   expect(
     records.every((record) =>
       ["blog", "nextjs-fumadocs-demo-cms-categories", "nextjs-fumadocs-demo-cms-tags"].includes(

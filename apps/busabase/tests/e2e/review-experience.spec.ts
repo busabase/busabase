@@ -138,8 +138,9 @@ test("same-field merge conflict stays visible and recoverable", async ({ page, r
   const recordId = merged.record.id;
 
   const firstUpdate = await json<ChangeRequestVO>(
-    await request.put(`/api/v1/records/${recordId}/change-requests`, {
+    await request.post(`/api/v1/records/${recordId}/change-requests`, {
       data: {
+        operation: "update",
         fields: { ...fields, title: `${title} A` },
         message: "First title edit",
         author: "e2e-editor-a",
@@ -148,8 +149,9 @@ test("same-field merge conflict stays visible and recoverable", async ({ page, r
     }),
   );
   const conflictingUpdate = await json<ChangeRequestVO>(
-    await request.put(`/api/v1/records/${recordId}/change-requests`, {
+    await request.post(`/api/v1/records/${recordId}/change-requests`, {
       data: {
+        operation: "update",
         fields: { ...fields, title: `${title} B` },
         message: "Second title edit",
         author: "e2e-editor-b",

@@ -126,12 +126,13 @@ test("status=archived returns archived bases and nodes", async ({ request }) => 
   expect(Array.isArray(archivedNodes)).toBe(true);
 });
 
-test("GET an unknown base id is a null-safe read, not a crash", async ({ request }) => {
-  // Reading a missing base resolves to `null` with a 200 rather than throwing —
-  // the contract is null-safe for base lookups.
+test("GET an unknown base id returns the structured 404 contract", async ({ request }) => {
   const response = await request.get("/api/v1/bases/does-not-exist");
-  expect(response.status()).toBe(200);
-  expect(await response.json()).toBeNull();
+  expect(response.status()).toBe(404);
+  expect(await response.json()).toMatchObject({
+    code: "NOT_FOUND",
+    error: expect.stringContaining("Base not found"),
+  });
 });
 
 test("GET an unknown change request id returns 404, not 500", async ({ request }) => {
