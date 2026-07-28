@@ -167,7 +167,7 @@ describe("busabase-cli publish → install round trip (real demo seed, two datab
 
   const snapshotBases = async (): Promise<Map<string, BaseSnapshot>> => {
     const client = await routerClient();
-    const bases = await client.bases.list();
+    const bases = await client.bases.list({});
     const out = new Map<string, BaseSnapshot>();
     for (const base of bases) {
       const full = await client.bases.get({ baseId: base.id });
@@ -266,7 +266,8 @@ describe("busabase-cli publish → install round trip (real demo seed, two datab
     const betaLinkId = betaWithLink.fields.find((f) => f.slug === "alpha_link")?.id as string;
 
     // Close the cycle: alpha.beta_link's inverse is beta.alpha_link.
-    const cr = await client.bases.updateFieldChangeRequest({
+    const cr = await client.bases.fieldChangeRequest({
+      operation: "update",
       baseId: alphaId,
       fieldId: alphaLinkId,
       patch: { options: { multiple: true, targetBaseId: betaId, inverseFieldId: betaLinkId } },

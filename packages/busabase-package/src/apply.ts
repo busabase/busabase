@@ -148,7 +148,8 @@ export const applyInstall = async (
       }
       const patched = resolveFieldIdOptions(field, base.node.slug, fieldIds, state.warnings);
       if (!patched) continue;
-      const changeRequest = await client.bases.updateFieldChangeRequest({
+      const changeRequest = await client.bases.fieldChangeRequest({
+        operation: "update",
         baseId: base.baseId,
         fieldId,
         patch: { options: patched },
@@ -351,7 +352,8 @@ const createBase = async (
   indexFields(fieldIds, node.slug, result.fields);
 
   for (const view of node.base.views) {
-    const changeRequest = await client.bases.createViewChangeRequest({
+    const changeRequest = await client.views.changeRequest({
+      operation: "create",
       baseId: result.id,
       slug: view.slug,
       name: view.name,
@@ -394,9 +396,8 @@ const createFileTreeNode = async (
   );
   const files = uploaded.filter((entry) => entry !== undefined);
 
-  const api =
-    node.type === "skill" ? client.skills : node.type === "airapp" ? client.airapps : client.drives;
-  const result = await api.create({
+  const result = await client.fileTrees.create({
+    type: node.type,
     parentNodeId,
     slug: node.slug,
     name: node.name,
@@ -695,7 +696,8 @@ const linkRelations = async (
     // A record update REPLACES the whole field map (the revise commit stores exactly
     // the fields it is given), so the non-relation values from pass 4 must be resent
     // alongside the relations — sending only the delta would blank the record.
-    const changeRequest = await client.records.updateChangeRequest({
+    const changeRequest = await client.records.changeRequest({
+      operation: "update",
       recordId,
       fields: { ...toCreatableFields(base.node, record.fields), ...relationValues },
       message: `Link relations for ${base.node.slug}`,

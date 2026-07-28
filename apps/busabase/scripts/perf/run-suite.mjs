@@ -58,16 +58,16 @@ async function main() {
   const scenarios = [
     { label: "GET /bases (list all bases)", path: "/api/v1/bases" },
     {
-      label: "GET /records/paged (first page, no filter)",
-      path: `/api/v1/records/paged?baseId=${blogId}&limit=25`,
+      label: "GET /records (first page, no filter)",
+      path: `/api/v1/records?baseId=${blogId}&limit=25`,
     },
     {
-      label: "GET /records/paged (sorted by priority, keyset join path)",
-      path: `/api/v1/records/paged?baseId=${blogId}&limit=25&sort[fieldSlug]=priority&sort[fieldType]=number&sort[direction]=desc`,
+      label: "GET /records (sorted by priority, keyset join path)",
+      path: `/api/v1/records?baseId=${blogId}&limit=25&sort[fieldSlug]=priority&sort[fieldType]=number&sort[direction]=desc`,
     },
     {
-      label: "GET /records/paged (server-side filter push-down: channel contains 'blog')",
-      path: `/api/v1/records/paged?baseId=${blogId}&limit=25&filters[0][fieldSlug]=channel&filters[0][fieldType]=text&filters[0][operator]=contains&filters[0][value]=blog`,
+      label: "GET /records (server-side filter push-down: channel contains 'blog')",
+      path: `/api/v1/records?baseId=${blogId}&limit=25&filters[0][fieldSlug]=channel&filters[0][fieldType]=text&filters[0][operator]=contains&filters[0][value]=blog`,
     },
     { label: "GET /records/count", path: `/api/v1/records/count?baseId=${blogId}` },
     {
@@ -78,7 +78,7 @@ async function main() {
       label: "GET /search?query=zzzznotfound (global search, no-hit query)",
       path: "/api/v1/search?query=zzzznotfound",
     },
-    { label: "GET /change-requests/paged", path: "/api/v1/change-requests/paged?limit=25" },
+    { label: "GET /change-requests", path: "/api/v1/change-requests?limit=25" },
   ];
 
   const results = [];

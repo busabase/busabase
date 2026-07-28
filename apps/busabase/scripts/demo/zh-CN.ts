@@ -8,7 +8,7 @@
  *   1. Folders  — POST /nodes/change-requests (kind: create) → approve → merge
  *   2. Bases    — POST /bases
  *   3. Records  — POST /bases/{id}/change-requests → approve → merge
- *   4. Views    — POST /bases/{id}/views/change-requests → approve → merge
+ *   4. Views    — POST /views/change-requests → approve → merge
  *
  * Relation and AI-generated fields are skipped because they require post-hoc ID
  * resolution that the record_insert CR workflow doesn't support inline.
@@ -221,7 +221,9 @@ export async function run() {
     if (existingViewSlugs.get(apiBaseId)?.has(view.slug)) continue;
 
     await step(`POST views CR — view "${view.name}"`, async () => {
-      const cr = await api<{ id: string }>("POST", `/bases/${apiBaseId}/views/change-requests`, {
+      const cr = await api<{ id: string }>("POST", "/views/change-requests", {
+        operation: "create",
+        baseId: apiBaseId,
         slug: view.slug,
         name: view.name,
         description: view.description ?? "",

@@ -52,7 +52,7 @@ describe("Doc body size cap (byte-length, UTF-8-aware)", () => {
     ).rejects.toMatchObject({ code: "PAYLOAD_TOO_LARGE" });
 
     // Rejected before any CR was ever created — no pending review left behind.
-    const changeRequests = await raw.changeRequests.list({});
+    const { changeRequests } = await raw.changeRequests.list({});
     expect(
       changeRequests.some((cr) => cr.node?.id === doc.node.id && cr.status === "in_review"),
     ).toBe(false);

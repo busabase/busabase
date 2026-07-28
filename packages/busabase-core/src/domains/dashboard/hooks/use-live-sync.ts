@@ -148,10 +148,11 @@ export function useBusabaseLiveSync({
         queryKey: orpc.bases.listViews.queryOptions({ input: { baseId } }).queryKey,
       });
       void queryClient.invalidateQueries({
-        queryKey: orpc.bases.listArchivedViews.queryOptions({ input: { baseId } }).queryKey,
+        queryKey: orpc.bases.listViews.queryOptions({ input: { baseId, status: "archived" } })
+          .queryKey,
       });
       void queryClient.invalidateQueries({
-        queryKey: orpc.bases.listArchivedRecordsPaged.key(),
+        queryKey: orpc.records.list.key(),
       });
       void queryClient.invalidateQueries({
         queryKey: orpc.bases.listDeletedFields.queryOptions({ input: { baseId } }).queryKey,

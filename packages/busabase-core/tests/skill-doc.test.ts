@@ -16,6 +16,10 @@ const cloudBootstrap = buildSkillMarkdown("https://busabase.com", {
   stage: "bootstrap",
   spaceId: "spc_x",
 });
+const localBootstrap = buildSkillMarkdown("https://busabase.com", {
+  mode: "local",
+  stage: "bootstrap",
+});
 
 describe("buildSkillMarkdown advertises the batch/bulk/temp-ref/assets surface", () => {
   it("documents standard OAuth access tokens without the removed session format", () => {
@@ -77,6 +81,15 @@ describe("buildSkillMarkdown advertises the batch/bulk/temp-ref/assets surface",
 });
 
 describe("generated Cloud onboarding", () => {
+  it("installs both permanent Busabase skills explicitly", () => {
+    for (const doc of [cloudBootstrap, localBootstrap]) {
+      expect(doc).toMatch(
+        /^npx skills add busabase\/skills --skill busabase busabase-app-creator$/m,
+      );
+      expect(doc).toContain("`busabase` and `busabase-app-creator` are permanent");
+    }
+  });
+
   it("uses device authorization without exposing or requesting secrets", () => {
     expect(cloudBootstrap).toContain("login --device-code");
     expect(cloudBootstrap).toContain("selects an\nexisting API key or creates a new one");

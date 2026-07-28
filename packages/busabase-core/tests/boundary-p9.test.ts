@@ -3,7 +3,7 @@
  *
  * Non-base node deletion used to hard-delete (cascade). It now soft-archives so
  * the deletion is recoverable: archived nodes leave their listings + the tree,
- * surface in nodes.listArchived, and node_restore brings them back. Folders
+ * surface in nodes.list({ status: "archived" }), and node_restore brings them back. Folders
  * archive/restore their whole subtree as one batch; reused slugs block restore.
  */
 import { createRouterClient } from "@orpc/server";
@@ -41,12 +41,14 @@ describe("Boundary P9 — node soft-delete + restore", () => {
     await deleteNode(raw, doc.node.id);
 
     expect((await raw.docs.list()).some((d) => d.node.id === doc.node.id)).toBe(false);
-    const archived = await raw.nodes.listArchived();
+    const archived = await raw.nodes.list({ status: "archived" });
     expect(archived.some((n) => n.id === doc.node.id)).toBe(true);
 
     await restoreNode(raw, doc.node.id);
     expect((await raw.docs.list()).some((d) => d.node.id === doc.node.id)).toBe(true);
-    expect((await raw.nodes.listArchived()).some((n) => n.id === doc.node.id)).toBe(false);
+    expect((await raw.nodes.list({ status: "archived" })).some((n) => n.id === doc.node.id)).toBe(
+      false,
+    );
   });
 
   it("Fix 2: deleting a folder archives its subtree; restore brings it all back", async () => {

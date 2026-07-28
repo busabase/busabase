@@ -66,7 +66,10 @@ function InboxContent() {
   const [activeMode, setActiveMode] = useState<InboxMode>("review");
   const query = useQuery(
     buda
-      ? buda.orpc.changeRequests.list.queryOptions({ input: { limit: 100 } })
+      ? buda.orpc.changeRequests.list.queryOptions({
+          input: { limit: 100 },
+          select: (page) => page.changeRequests,
+        })
       : { queryKey: ["no-connection", "changeRequests", "list"], queryFn: skipToken },
   );
 

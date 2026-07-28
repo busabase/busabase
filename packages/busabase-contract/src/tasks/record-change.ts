@@ -58,6 +58,9 @@ export const recordChangeTask: TaskDefinition<RecordChangeInput> = {
     "busabase-cli records change-request --record-id rec_1 --operation delete",
   ],
   execute: async (client: BusabaseTaskClient, input: RecordChangeInput) => {
+    // Straight pass-through: `records.changeRequest` carries the same
+    // update/delete/restore discriminator this task exposes.
+    type RecordInput = Parameters<BusabaseTaskClient["records"]["changeRequest"]>[0];
     const common = {
       recordId: input.recordId,
       ...(input.message ? { message: input.message } : {}),
@@ -67,19 +70,19 @@ export const recordChangeTask: TaskDefinition<RecordChangeInput> = {
       if (!input.fields || typeof input.fields !== "object") {
         throw new Error('operation "update" requires `fields` (an object keyed by field slug).');
       }
-      return client.records.updateChangeRequest({
+      return client.records.changeRequest({
         ...common,
+        operation: "update",
         fields: input.fields,
-      } as Parameters<BusabaseTaskClient["records"]["updateChangeRequest"]>[0]);
+      } as RecordInput);
     }
     if (input.operation === "delete") {
-      return client.records.deleteChangeRequest({
+      return client.records.changeRequest({
         ...common,
+        operation: "delete",
         deleteMode: "archive",
-      } as Parameters<BusabaseTaskClient["records"]["deleteChangeRequest"]>[0]);
+      } as RecordInput);
     }
-    return client.records.restoreChangeRequest(
-      common as Parameters<BusabaseTaskClient["records"]["restoreChangeRequest"]>[0],
-    );
+    return client.records.changeRequest({ ...common, operation: "restore" } as RecordInput);
   },
 };

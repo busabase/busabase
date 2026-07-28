@@ -45,12 +45,12 @@ function ArchivedContent() {
 
   const basesQuery = useQuery(
     buda
-      ? buda.orpc.bases.listArchived.queryOptions({})
+      ? buda.orpc.bases.list.queryOptions({ input: { status: "archived" } })
       : { queryKey: ["no-connection", "archived-bases"], queryFn: skipToken },
   );
   const nodesQuery = useQuery(
     buda
-      ? buda.orpc.nodes.listArchived.queryOptions({})
+      ? buda.orpc.nodes.list.queryOptions({ input: { status: "archived" } })
       : { queryKey: ["no-connection", "archived-nodes"], queryFn: skipToken },
   );
 
@@ -60,8 +60,12 @@ function ArchivedContent() {
   };
 
   const invalidate = () => {
-    void queryClient.invalidateQueries({ queryKey: buda?.orpc.bases.listArchived.key({}) });
-    void queryClient.invalidateQueries({ queryKey: buda?.orpc.nodes.listArchived.key({}) });
+    void queryClient.invalidateQueries({
+      queryKey: buda?.orpc.bases.list.key({ input: { status: "archived" } }),
+    });
+    void queryClient.invalidateQueries({
+      queryKey: buda?.orpc.nodes.list.key({ input: { status: "archived" } }),
+    });
   };
 
   const restoreBase = useMutation({

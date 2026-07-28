@@ -57,7 +57,8 @@ describe("assets.editContent — string-replace edits via ChangeRequest", () => 
 
   /** Creates a Drive (autoMerge: true) with one text file, returns its mounted assetId. */
   const createMountedDriveFile = async (opts: { slug: string; path: string; content: string }) => {
-    const drive = await client.drives.create({
+    const drive = await client.fileTrees.create({
+      type: "drive",
       autoMerge: true,
       slug: opts.slug,
       name: opts.slug,
@@ -84,7 +85,8 @@ describe("assets.editContent — string-replace edits via ChangeRequest", () => 
       expect(cr.primaryOperation?.operation).toBe("drive_file_update");
 
       // Not yet merged — the mounted file is untouched.
-      const beforeMerge = await client.drives.readFile({
+      const beforeMerge = await client.fileTrees.readFile({
+        type: "drive",
         nodeId: drive.node.id,
         filePath: "notes.md",
       });
@@ -92,7 +94,8 @@ describe("assets.editContent — string-replace edits via ChangeRequest", () => 
 
       await approveAndMerge(cr.id);
 
-      const afterMerge = await client.drives.readFile({
+      const afterMerge = await client.fileTrees.readFile({
+        type: "drive",
         nodeId: drive.node.id,
         filePath: "notes.md",
       });
@@ -100,7 +103,8 @@ describe("assets.editContent — string-replace edits via ChangeRequest", () => 
     });
 
     it("dispatches to the Skill mount (not just Drive) — proves ownerType dispatch works both ways", async () => {
-      const skill = await client.skills.create({
+      const skill = await client.fileTrees.create({
+        type: "skill",
         autoMerge: true,
         slug: "edit-content-happy-skill",
         name: "Edit Content Happy Skill",
@@ -118,7 +122,8 @@ describe("assets.editContent — string-replace edits via ChangeRequest", () => 
 
       await approveAndMerge(cr.id);
 
-      const afterMerge = await client.skills.readFile({
+      const afterMerge = await client.fileTrees.readFile({
+        type: "skill",
         nodeId: skill.node.id,
         filePath: "workflow.md",
       });
@@ -138,7 +143,8 @@ describe("assets.editContent — string-replace edits via ChangeRequest", () => 
       });
       await approveAndMerge(cr.id);
 
-      const afterMerge = await client.drives.readFile({
+      const afterMerge = await client.fileTrees.readFile({
+        type: "drive",
         nodeId: drive.node.id,
         filePath: "log.txt",
       });
@@ -161,7 +167,8 @@ describe("assets.editContent — string-replace edits via ChangeRequest", () => 
       });
       await approveAndMerge(cr.id);
 
-      const afterMerge = await client.drives.readFile({
+      const afterMerge = await client.fileTrees.readFile({
+        type: "drive",
         nodeId: drive.node.id,
         filePath: "sequence.md",
       });
@@ -297,7 +304,8 @@ describe("assets.editContent — string-replace edits via ChangeRequest", () => 
 
       // Someone else changes the same file first, through the pre-existing
       // direct createChangeRequest path, and that CR merges cleanly.
-      const interveningCr = await client.drives.createChangeRequest({
+      const interveningCr = await client.fileTrees.createChangeRequest({
+        type: "drive",
         nodeId: drive.node.id,
         operations: [
           { kind: "update", path: "shared.md", content: "an entirely different revision" },

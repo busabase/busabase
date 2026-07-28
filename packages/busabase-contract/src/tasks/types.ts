@@ -10,7 +10,7 @@ import type { BusabaseContract } from "../contract/busabase";
  * Why this exists: the OpenAPI contract is endpoint-shaped, and both surfaces
  * that sit on top of it used to derive their command/tool list from it directly.
  * That is right for an SDK — one function per endpoint — and wrong for a human
- * or an agent, who thinks "create a Skill with these files", not "POST /skills
+ * or an agent, who thinks "create a Skill with these files", not "POST /file-trees
  * (but POST /nodes/change-requests if it's a Doc, and also POST /bases if it's a
  * Base)". `busabase-cli` had already hand-written that translation for 51
  * commands; every one of them was invisible to MCP, which re-derived a 137-tool
@@ -37,50 +37,30 @@ import type { BusabaseContract } from "../contract/busabase";
  */
 type FullBusabaseClient = ContractRouterClient<BusabaseContract>;
 
-/** The five operations every `makeFileTreeContract` namespace exposes. */
-type FileTreeOps = "create" | "list" | "get" | "listFiles" | "readFile" | "createChangeRequest";
-
 export type BusabaseTaskClient = {
   readonly nodes: Pick<
     FullBusabaseClient["nodes"],
-    "createChangeRequest" | "listArchived" | "principals" | "share"
+    "createChangeRequest" | "list" | "principals" | "share"
   >;
-  readonly views: Pick<
-    FullBusabaseClient["views"],
-    "updateChangeRequest" | "deleteChangeRequest" | "restoreChangeRequest"
+  readonly views: Pick<FullBusabaseClient["views"], "changeRequest">;
+  /** Skills, Drives, and AirApps all read and write through this one surface. */
+  readonly fileTrees: Pick<
+    FullBusabaseClient["fileTrees"],
+    "create" | "list" | "get" | "listFiles" | "readFile" | "createChangeRequest"
   >;
-  readonly skills: Pick<FullBusabaseClient["skills"], FileTreeOps>;
-  readonly drives: Pick<FullBusabaseClient["drives"], FileTreeOps>;
-  readonly airapps: Pick<FullBusabaseClient["airapps"], FileTreeOps>;
   readonly docs: Pick<FullBusabaseClient["docs"], "create">;
   readonly bases: Pick<
     FullBusabaseClient["bases"],
-    | "create"
-    | "createFieldChangeRequest"
-    | "updateFieldChangeRequest"
-    | "deleteFieldChangeRequest"
-    | "convertFieldChangeRequest"
-    | "reorderFieldsChangeRequest"
-    | "restoreFieldChangeRequest"
-    | "createViewChangeRequest"
-    | "listArchived"
-    | "listDeletedFields"
-    | "listArchivedViews"
-    | "listArchivedRecordsPaged"
+    "create" | "fieldChangeRequest" | "list" | "listDeletedFields" | "listViews"
   >;
   readonly files: Pick<FullBusabaseClient["files"], "create">;
   readonly records: Pick<
     FullBusabaseClient["records"],
-    | "search"
-    | "listPaged"
-    | "count"
-    | "updateChangeRequest"
-    | "deleteChangeRequest"
-    | "restoreChangeRequest"
+    "search" | "list" | "count" | "changeRequest"
   >;
   readonly changeRequests: Pick<
     FullBusabaseClient["changeRequests"],
-    "listPaged" | "counts" | "review" | "reviewMany" | "merge" | "mergeMany"
+    "list" | "counts" | "review" | "reviewMany" | "merge" | "mergeMany"
   >;
 };
 

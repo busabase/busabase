@@ -52,6 +52,16 @@ const demoUnsupported = (action: string) =>
     message: `"${action}" is disabled in the Busabase demo. Run Busabase locally to make persistent changes.`,
   });
 
+/** Keeps the demo's refusal messages verb-specific now that the field and view
+ *  change-request verbs share one handler each. */
+const fieldOperationLabel = (operation: string) =>
+  operation.charAt(0).toUpperCase() + operation.slice(1);
+
+/** Keeps the demo's refusal messages type-specific now that Skills, Drives, and
+ *  AirApps share one set of handlers. */
+const fileTreeLabel = (type: "skill" | "drive" | "airapp" | undefined) =>
+  type === "drive" ? "Drive" : type === "airapp" ? "AirApp" : "Skill";
+
 async function* subscribeDemoLiveEvents(signal?: AbortSignal) {
   while (!signal?.aborted) {
     await new Promise<void>((resolve) => {
@@ -77,12 +87,13 @@ export const busabaseDemoRouter = os.router({
     // Demo mode ignores `parentId`/`depth` — the seeded tree is always fully
     // in memory already, so there's nothing to lazily bound (see
     // `demoListNodes`'s doc comment in logic/demo-store.ts).
-    list: os.nodes.list.handler(() => demoListNodes()),
+    list: os.nodes.list.handler(({ input }) =>
+      input?.status === "archived" ? [] : demoListNodes(),
+    ),
     searchByName: os.nodes.searchByName.handler(({ input }) => demoSearchNodesByName(input)),
     isDescendant: os.nodes.isDescendant.handler(({ input }) => ({
       isDescendant: demoIsDescendant(input.nodeId, input.potentialAncestorId),
     })),
-    listArchived: os.nodes.listArchived.handler(() => []),
     createChangeRequest: os.nodes.createChangeRequest.handler(() => {
       throw demoUnsupported("Node tree change request");
     }),
@@ -161,8 +172,9 @@ export const busabaseDemoRouter = os.router({
     }),
   },
   bases: {
-    list: os.bases.list.handler(() => demoListBases()),
-    listArchived: os.bases.listArchived.handler(() => []),
+    list: os.bases.list.handler(({ input }) =>
+      input.status === "archived" ? [] : demoListBases(),
+    ),
     get: os.bases.get.handler(() => null),
     create: os.bases.create.handler(() => {
       throw demoUnsupported("Create Base");
@@ -181,27 +193,14 @@ export const busabaseDemoRouter = os.router({
     createField: os.bases.createField.handler(() => {
       throw demoUnsupported("Create Base field");
     }),
-    listViews: os.bases.listViews.handler(({ input }) => demoListViews(input.baseId)),
-    createFieldChangeRequest: os.bases.createFieldChangeRequest.handler(() => {
-      throw demoUnsupported("Create Field change request");
-    }),
-    createViewChangeRequest: os.bases.createViewChangeRequest.handler(() => {
-      throw demoUnsupported("Create View change request");
-    }),
-    deleteFieldChangeRequest: os.bases.deleteFieldChangeRequest.handler(() => {
-      throw demoUnsupported("Delete Field change request");
-    }),
-    updateFieldChangeRequest: os.bases.updateFieldChangeRequest.handler(() => {
-      throw demoUnsupported("Update Field change request");
+    listViews: os.bases.listViews.handler(({ input }) =>
+      input.status === "archived" ? [] : demoListViews(input.baseId),
+    ),
+    fieldChangeRequest: os.bases.fieldChangeRequest.handler(({ input }) => {
+      throw demoUnsupported(`${fieldOperationLabel(input.operation)} Field change request`);
     }),
     previewFieldConversion: os.bases.previewFieldConversion.handler(() => {
       throw demoUnsupported("Preview Field conversion");
-    }),
-    convertFieldChangeRequest: os.bases.convertFieldChangeRequest.handler(() => {
-      throw demoUnsupported("Convert Field change request");
-    }),
-    reorderFieldsChangeRequest: os.bases.reorderFieldsChangeRequest.handler(() => {
-      throw demoUnsupported("Reorder Fields change request");
     }),
     archiveChangeRequest: os.bases.archiveChangeRequest.handler(() => {
       throw demoUnsupported("Archive Base change request");
@@ -209,64 +208,25 @@ export const busabaseDemoRouter = os.router({
     restoreChangeRequest: os.bases.restoreChangeRequest.handler(() => {
       throw demoUnsupported("Restore Base change request");
     }),
-    restoreFieldChangeRequest: os.bases.restoreFieldChangeRequest.handler(() => {
-      throw demoUnsupported("Restore Field change request");
-    }),
     listDeletedFields: os.bases.listDeletedFields.handler(() => []),
-    listArchivedViews: os.bases.listArchivedViews.handler(() => []),
-    listArchivedRecords: os.bases.listArchivedRecords.handler(() => []),
-    listArchivedRecordsPaged: os.bases.listArchivedRecordsPaged.handler(() => ({
-      records: [],
-      nextCursor: null,
-    })),
   },
-  skills: {
-    list: os.skills.list.handler(() => []),
-    create: os.skills.create.handler(() => {
-      throw demoUnsupported("Create Skill");
+  fileTrees: {
+    list: os.fileTrees.list.handler(() => []),
+    create: os.fileTrees.create.handler(({ input }) => {
+      throw demoUnsupported(`Create ${fileTreeLabel(input.type)}`);
     }),
-    get: os.skills.get.handler(() => {
-      throw demoUnsupported("Open Skill");
+    get: os.fileTrees.get.handler(({ input }) => {
+      throw demoUnsupported(`Open ${fileTreeLabel(input.type)}`);
     }),
-    listFiles: os.skills.listFiles.handler(() => []),
-    readFile: os.skills.readFile.handler(() => {
-      throw demoUnsupported("Read Skill file");
+    listFiles: os.fileTrees.listFiles.handler(() => []),
+    readFile: os.fileTrees.readFile.handler(({ input }) => {
+      throw demoUnsupported(`Read ${fileTreeLabel(input.type)} file`);
     }),
-    createChangeRequest: os.skills.createChangeRequest.handler(() => {
-      throw demoUnsupported("Skill change request");
-    }),
-  },
-  drives: {
-    list: os.drives.list.handler(() => []),
-    create: os.drives.create.handler(() => {
-      throw demoUnsupported("Create Drive");
-    }),
-    get: os.drives.get.handler(() => {
-      throw demoUnsupported("Open Drive");
-    }),
-    listFiles: os.drives.listFiles.handler(() => []),
-    readFile: os.drives.readFile.handler(() => {
-      throw demoUnsupported("Read Drive file");
-    }),
-    createChangeRequest: os.drives.createChangeRequest.handler(() => {
-      throw demoUnsupported("Drive change request");
+    createChangeRequest: os.fileTrees.createChangeRequest.handler(({ input }) => {
+      throw demoUnsupported(`${fileTreeLabel(input.type)} change request`);
     }),
   },
   airapps: {
-    list: os.airapps.list.handler(() => []),
-    create: os.airapps.create.handler(() => {
-      throw demoUnsupported("Create AirApp");
-    }),
-    get: os.airapps.get.handler(() => {
-      throw demoUnsupported("Open AirApp");
-    }),
-    listFiles: os.airapps.listFiles.handler(() => []),
-    readFile: os.airapps.readFile.handler(() => {
-      throw demoUnsupported("Read AirApp file");
-    }),
-    createChangeRequest: os.airapps.createChangeRequest.handler(() => {
-      throw demoUnsupported("AirApp change request");
-    }),
     // Server-side process execution has no meaningful demo equivalent (no
     // filesystem/process to spawn against in the stateless demo dataset).
     runLocalNode: os.airapps.runLocalNode.handler(() => {
@@ -429,8 +389,7 @@ export const busabaseDemoRouter = os.router({
     }),
   },
   changeRequests: {
-    list: os.changeRequests.list.handler(() => demoListChangeRequests()),
-    listPaged: os.changeRequests.listPaged.handler(async ({ input }) => {
+    list: os.changeRequests.list.handler(async ({ input }) => {
       const all = await demoListChangeRequests();
       const status = input?.status ?? [];
       const mine = input?.mine ?? false;
@@ -483,9 +442,10 @@ export const busabaseDemoRouter = os.router({
     revise: os.operations.revise.handler(({ input }) => demoReviseOperation(input.operationId)),
   },
   records: {
-    list: os.records.list.handler(() => demoListRecords()),
-    listPaged: os.records.listPaged.handler(async () => ({
-      records: await demoListRecords(),
+    list: os.records.list.handler(async ({ input }) => ({
+      // The demo dataset has no archived rows, so `status: "archived"` is an
+      // empty page rather than an error.
+      records: input?.status === "archived" ? [] : await demoListRecords(),
       nextCursor: null,
     })),
     count: os.records.count.handler(async ({ input }) => {
@@ -498,30 +458,29 @@ export const busabaseDemoRouter = os.router({
     get: os.records.get.handler(({ input }) => demoGetRecord(input.recordId)),
     search: os.records.search.handler(({ input }) => demoListRecordsByFieldText(input)),
     getByField: os.records.getByField.handler(({ input }) => demoGetRecordByField(input)),
-    updateChangeRequest: os.records.updateChangeRequest.handler(({ input }) => {
-      const { recordId, ...rest } = input;
-      return { ...demoCreateUpdateChangeRequest(recordId, rest), materialized: false as const };
+    changeRequest: os.records.changeRequest.handler(({ input }) => {
+      switch (input.operation) {
+        case "update": {
+          const { recordId, operation: _op, ...rest } = input;
+          return { ...demoCreateUpdateChangeRequest(recordId, rest), materialized: false as const };
+        }
+        case "delete":
+          return {
+            ...demoCreateDeleteChangeRequest(input.recordId),
+            materialized: false as const,
+          };
+        case "restore":
+          throw demoUnsupported("Restore Record change request");
+      }
     }),
-    deleteChangeRequest: os.records.deleteChangeRequest.handler(({ input }) =>
-      demoCreateDeleteChangeRequest(input.recordId),
-    ),
     listChangeRequests: os.records.listChangeRequests.handler(({ input }) =>
       demoListRecordChangeRequests(input.recordId),
     ),
-    restoreChangeRequest: os.records.restoreChangeRequest.handler(() => {
-      throw demoUnsupported("Restore Record change request");
-    }),
     listLinks: os.records.listLinks.handler(() => []),
   },
   views: {
-    updateChangeRequest: os.views.updateChangeRequest.handler(() => {
-      throw demoUnsupported("Update View change request");
-    }),
-    deleteChangeRequest: os.views.deleteChangeRequest.handler(() => {
-      throw demoUnsupported("Delete View change request");
-    }),
-    restoreChangeRequest: os.views.restoreChangeRequest.handler(() => {
-      throw demoUnsupported("Restore View change request");
+    changeRequest: os.views.changeRequest.handler(({ input }) => {
+      throw demoUnsupported(`${fieldOperationLabel(input.operation)} View change request`);
     }),
   },
 });

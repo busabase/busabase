@@ -80,7 +80,10 @@ function HomeContent() {
 
   const changeRequestsQuery = useQuery(
     buda
-      ? buda.orpc.changeRequests.list.queryOptions({ input: { limit: 100 } })
+      ? buda.orpc.changeRequests.list.queryOptions({
+          input: { limit: 100 },
+          select: (page) => page.changeRequests,
+        })
       : { queryKey: ["no-connection", "changeRequests", "list"], queryFn: skipToken },
   );
   const activityQuery = useActivityFeed();

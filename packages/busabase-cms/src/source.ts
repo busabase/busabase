@@ -133,14 +133,23 @@ export interface BusabaseCmsClient {
     createField: (input: CreateBusabaseCmsFieldInput) => Promise<BusabaseCmsBase>;
   };
   nodes: {
-    list: (input?: { parentId?: string | null; depth?: number }) => Promise<BusabaseCmsNode[]>;
+    list: (input?: {
+      parentId?: string | null;
+      depth?: number;
+      status?: "active" | "archived";
+    }) => Promise<BusabaseCmsNode[]>;
     updateMetadata: (input: {
       nodeId: string;
       metadata: Record<string, unknown>;
     }) => Promise<BusabaseCmsNode>;
   };
   records: {
-    listPaged: (input: { baseId: string; limit: number; cursor?: string }) => Promise<{
+    list: (input: {
+      baseId: string;
+      limit: number;
+      cursor?: string;
+      status?: "active" | "archived";
+    }) => Promise<{
       records: BusabaseCmsRecord[];
       nextCursor: string | null;
     }>;
@@ -178,7 +187,7 @@ export const createBusabaseCmsSource = (
   },
   createField: async (input) => client.bases.createField(input),
   updateNodeMetadata: async (input) => client.nodes.updateMetadata(input),
-  listRecordsPage: async (input) => client.records.listPaged(input),
+  listRecordsPage: async (input) => client.records.list(input),
   getRecordByField: client.records.getByField
     ? async (input) => client.records.getByField?.(input) ?? null
     : undefined,

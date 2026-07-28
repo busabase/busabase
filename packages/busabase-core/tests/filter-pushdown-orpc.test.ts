@@ -6,7 +6,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { busabaseRouter } from "../src/router";
 
 /**
- * Server-side view-filter push-down parity. `records.listPaged` may push a
+ * Server-side view-filter push-down parity. `records.list` may push a
  * filter down to SQL as a SUPERSET (the client `applyViewConfigToRecords` stays
  * the exact authority). These tests pin the contract: a pushed filter must never
  * drop a record the client would keep (no false negatives), and non-pushable
@@ -75,7 +75,7 @@ describe("Filter push-down parity — oRPC integration", () => {
     value?: unknown;
   };
   const namesFor = async (filters: TestFilter[]): Promise<string[]> => {
-    const page = await client.records.listPaged({ baseId, limit: 100, filters });
+    const page = await client.records.list({ baseId, limit: 100, filters });
     return page.records.map((record) => String(record.headCommit.fields.name)).sort();
   };
 

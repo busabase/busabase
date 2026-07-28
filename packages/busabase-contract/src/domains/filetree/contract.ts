@@ -143,85 +143,99 @@ export const createFileTreeChangeRequestInputSchema = z.object({
   operations: z.array(fileTreeFileOperationInputSchema).min(1),
 });
 
-export const makeFileTreeContract = (routeBase: string, tag: string) => {
-  const label = tag.endsWith("s") ? tag.slice(0, -1) : tag;
-  const basePath = `/${routeBase}` as `/${string}`;
-  return {
-    list: oc
-      .route({
-        method: "GET",
-        path: basePath,
-        tags: [tag],
-        summary: `List ${label} nodes`,
-        successDescription: `${label} nodes with their Asset-backed file trees.`,
-      })
-      .output(z.array(fileTreeNodeSchema)),
-    create: oc
-      .route({
-        method: "POST",
-        path: basePath,
-        tags: [tag],
-        summary: `Create ${label} node`,
-        successDescription: `Review-first by default: a pending ChangeRequest proposing the ${label} node (\`materialized: false\`). Returns the materialized ${label} node instead (\`materialized: true\`) when \`autoMerge: true\` is passed.`,
-      })
-      .input(createFileTreeInputSchema)
-      .output(
-        z.union([
-          fileTreeNodeSchema.extend({ materialized: z.literal(true) }),
-          changeRequestSchema.extend({ materialized: z.literal(false) }),
-        ]),
-      ),
-    get: oc
-      .route({
-        method: "GET",
-        path: `${basePath}/{nodeId}` as `/${string}`,
-        tags: [tag],
-        summary: `Get ${label} node`,
-        successDescription: `${label} node detail and file tree.`,
-      })
-      .input(z.object({ nodeId: z.string() }))
-      .output(fileTreeNodeSchema),
-    listFiles: oc
-      .route({
-        method: "GET",
-        path: `${basePath}/{nodeId}/files` as `/${string}`,
-        tags: [tag],
-        summary: `List ${label} files`,
-        successDescription: `Asset-backed files mounted under the ${label} node.`,
-      })
-      .input(z.object({ nodeId: z.string() }))
-      .output(z.array(fileTreeFileSchema)),
-    readFile: oc
-      .route({
-        method: "GET",
-        path: `${basePath}/{nodeId}/files/{+filePath}` as `/${string}`,
-        tags: [tag],
-        summary: `Read ${label} file`,
-        successDescription: `${label} file content and content hash.`,
-      })
-      .input(z.object({ nodeId: z.string(), filePath: z.string() }))
-      .output(
-        z.object({
-          nodeId: z.string(),
-          path: z.string(),
-          encoding: z.enum(["utf8", "url"]),
-          content: z.string(),
-          mimeType: z.string(),
-          assetId: z.string(),
-          displayName: z.string().nullable(),
-          assetUrl: z.string().nullable(),
-          contentHash: z.string(),
-        }),
-      ),
-    createChangeRequest: oc
-      .route({
-        method: "POST",
-        path: `${basePath}/{nodeId}/change-requests` as `/${string}`,
-        tags: [tag, "Change Requests"],
-        summary: `Create ${label} change request`,
-        successDescription: `Created file-tree change request for a ${label} node.`,
-      })
-      .input(createFileTreeChangeRequestInputSchema.extend({ nodeId: z.string() }))
-      .output(changeRequestSchema),
-  };
+/** Node types whose content is an Asset-backed file tree. Every one of them is
+ *  served by the single `/file-trees` surface below — they differ only in their
+ *  seed files and entry file, which is a `FileTreeKindConfig` concern (server
+ *  side), not a transport one. */
+export const FILE_TREE_NODE_TYPES = ["skill", "drive", "airapp"] as const;
+export type FileTreeNodeType = (typeof FILE_TREE_NODE_TYPES)[number];
+export const fileTreeNodeTypeSchema = z.enum(FILE_TREE_NODE_TYPES);
+
+/** `nodeId` accepts a node id or a slug. A slug is only unique *within* a type,
+ *  so pass `type` alongside it to disambiguate; a node id needs no hint. */
+const fileTreeRefSchema = z.object({
+  nodeId: z.string(),
+  type: fileTreeNodeTypeSchema.optional(),
+});
+
+export const fileTreeContract = {
+  list: oc
+    .route({
+      method: "GET",
+      path: "/file-trees",
+      tags: ["File Trees"],
+      summary: "List file-tree nodes",
+      successDescription:
+        "Skill, Drive, and AirApp nodes with their Asset-backed file trees. Pass `type` to narrow to one kind.",
+    })
+    .input(z.object({ type: fileTreeNodeTypeSchema.optional() }))
+    .output(z.array(fileTreeNodeSchema)),
+  create: oc
+    .route({
+      method: "POST",
+      path: "/file-trees",
+      tags: ["File Trees"],
+      summary: "Create file-tree node",
+      successDescription:
+        "Review-first by default: a pending ChangeRequest proposing the node (`materialized: false`). Returns the materialized node instead (`materialized: true`) when `autoMerge: true` is passed.",
+    })
+    .input(createFileTreeInputSchema.extend({ type: fileTreeNodeTypeSchema }))
+    .output(
+      z.union([
+        fileTreeNodeSchema.extend({ materialized: z.literal(true) }),
+        changeRequestSchema.extend({ materialized: z.literal(false) }),
+      ]),
+    ),
+  get: oc
+    .route({
+      method: "GET",
+      path: "/file-trees/{nodeId}",
+      tags: ["File Trees"],
+      summary: "Get file-tree node",
+      successDescription: "File-tree node detail and its file list.",
+    })
+    .input(fileTreeRefSchema)
+    .output(fileTreeNodeSchema),
+  listFiles: oc
+    .route({
+      method: "GET",
+      path: "/file-trees/{nodeId}/files",
+      tags: ["File Trees"],
+      summary: "List file-tree files",
+      successDescription: "Asset-backed files mounted under the node.",
+    })
+    .input(fileTreeRefSchema)
+    .output(z.array(fileTreeFileSchema)),
+  readFile: oc
+    .route({
+      method: "GET",
+      path: "/file-trees/{nodeId}/files/{+filePath}",
+      tags: ["File Trees"],
+      summary: "Read file-tree file",
+      successDescription: "File content and content hash.",
+    })
+    .input(fileTreeRefSchema.extend({ filePath: z.string() }))
+    .output(
+      z.object({
+        nodeId: z.string(),
+        path: z.string(),
+        encoding: z.enum(["utf8", "url"]),
+        content: z.string(),
+        mimeType: z.string(),
+        assetId: z.string(),
+        displayName: z.string().nullable(),
+        assetUrl: z.string().nullable(),
+        contentHash: z.string(),
+      }),
+    ),
+  createChangeRequest: oc
+    .route({
+      method: "POST",
+      path: "/file-trees/{nodeId}/change-requests",
+      tags: ["File Trees", "Change Requests"],
+      summary: "Create file-tree change request",
+      successDescription: "Created file-tree change request for the node.",
+    })
+    .input(createFileTreeChangeRequestInputSchema.extend(fileTreeRefSchema.shape))
+    .output(changeRequestSchema),
 };

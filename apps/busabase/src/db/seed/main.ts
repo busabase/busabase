@@ -1,14 +1,16 @@
-import { listBases, listRecords } from "busabase-core/domains/base/handlers";
+import { listBases, listRecordsPaged } from "busabase-core/domains/base/handlers";
 import { listSkills } from "busabase-core/domains/skill/handlers";
-import { listChangeRequests } from "busabase-core/logic/store";
+import { listChangeRequestsPaged } from "busabase-core/logic/store";
 
 async function main() {
-  const [bases, changeRequests, records, skills] = await Promise.all([
+  const [bases, changeRequestPage, recordPage, skills] = await Promise.all([
     listBases(),
-    listChangeRequests({ limit: 100 }),
-    listRecords({ limit: 100 }),
+    listChangeRequestsPaged({ limit: 100 }),
+    listRecordsPaged({ limit: 100 }),
     listSkills(),
   ]);
+  const { changeRequests } = changeRequestPage;
+  const { records } = recordPage;
   const skillChangeRequests = changeRequests.filter((item) =>
     item.operations.some((operation) => operation.operation.startsWith("skill_")),
   );

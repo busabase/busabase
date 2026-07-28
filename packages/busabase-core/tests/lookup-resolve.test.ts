@@ -150,7 +150,7 @@ describe("lookup values resolved at read time", () => {
   });
 
   it("a record with no links rolls up to 0 for count and null for sum", async () => {
-    const orders = await client.bases.list().then((bases) => {
+    const orders = await client.bases.list({}).then((bases) => {
       const found = bases.find((base) => base.slug === "lk-orders");
       if (!found) throw new Error("expected lk-orders");
       return found;
@@ -191,7 +191,7 @@ describe("lookup values resolved at read time", () => {
     if ("status" in base) throw new Error("Expected materialized BaseVO");
 
     const products = await client.bases
-      .list()
+      .list({})
       .then((bases) => bases.find((item) => item.slug === "lk-products"));
     if (!products) throw new Error("expected lk-products");
     const anyProduct = await createRecord(products.id, { name: "Bolt", price: 7 });
@@ -202,7 +202,8 @@ describe("lookup values resolved at read time", () => {
     // Drop the relation field the lookup hops through.
     const relationField = base.fields.find((field) => field.slug === "items");
     if (!relationField) throw new Error("expected the relation field");
-    const deleteCr = await client.bases.deleteFieldChangeRequest({
+    const deleteCr = await client.bases.fieldChangeRequest({
+      operation: "delete",
       baseId: base.id,
       fieldId: relationField.id,
       submittedBy: "agent",

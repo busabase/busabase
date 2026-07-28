@@ -58,7 +58,8 @@ describe("File-tree replace — text-staleness hook failure is isolated from the
   });
 
   it("still commits a valid file replace even though handleAssetAttachmentRepoint throws", async () => {
-    const drive = await client.drives.create({
+    const drive = await client.fileTrees.create({
+      type: "drive",
       autoMerge: true,
       slug: "repoint-hook-isolation-drive",
       name: "Repoint Hook Isolation Drive",
@@ -66,7 +67,8 @@ describe("File-tree replace — text-staleness hook failure is isolated from the
     });
     if (!("node" in drive)) throw new Error("expected an immediate node (autoMerge: true)");
 
-    const cr = await client.drives.createChangeRequest({
+    const cr = await client.fileTrees.createChangeRequest({
+      type: "drive",
       nodeId: drive.node.id,
       operations: [
         { kind: "update", path: "notes.md", content: "revision two — the real replace" },
@@ -81,7 +83,11 @@ describe("File-tree replace — text-staleness hook failure is isolated from the
     // it did, this `await` would reject and fail the test.
     await client.changeRequests.merge({ changeRequestId: cr.id });
 
-    const file = await client.drives.readFile({ nodeId: drive.node.id, filePath: "notes.md" });
+    const file = await client.fileTrees.readFile({
+      type: "drive",
+      nodeId: drive.node.id,
+      filePath: "notes.md",
+    });
     expect(file.content).toBe("revision two — the real replace");
   });
 });

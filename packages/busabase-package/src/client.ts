@@ -26,16 +26,16 @@ import type { BusabaseContract } from "busabase-contract/contract/busabase";
  * forces a deliberate check that busabase-core's router exposes it too.
  */
 export const PACKAGE_CLIENT_SLICES = [
-  "airapps",
   "assets",
   "bases",
   "changeRequests",
   "docs",
-  "drives",
+  // Skills, Drives, and AirApps all live here now.
+  "fileTrees",
   "files",
   "nodes",
   "records",
-  "skills",
+  "views",
 ] as const;
 
 export type PackageClientSlice = (typeof PACKAGE_CLIENT_SLICES)[number];

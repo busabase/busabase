@@ -58,7 +58,7 @@ export function AirAppDetailView({ orpc, slug, onNodeLoaded }: NodeDetailProps) 
   const fullscreenState = useAirAppFullscreen({ syncWithUrl: isKeepAliveActive });
 
   const airappQuery = useQuery({
-    ...orpc.airapps.get.queryOptions({ input: { nodeId: slug ?? "" } }),
+    ...orpc.fileTrees.get.queryOptions({ input: { nodeId: slug ?? "", type: "airapp" } }),
     enabled: Boolean(slug),
   });
   const airapp = airappQuery.data ?? null;
@@ -71,8 +71,8 @@ export function AirAppDetailView({ orpc, slug, onNodeLoaded }: NodeDetailProps) 
   }, [slug]);
 
   const fileQuery = useQuery({
-    ...orpc.airapps.readFile.queryOptions({
-      input: { nodeId: airapp?.node.id ?? "", filePath: openPath ?? "" },
+    ...orpc.fileTrees.readFile.queryOptions({
+      input: { nodeId: airapp?.node.id ?? "", filePath: openPath ?? "", type: "airapp" },
     }),
     enabled: Boolean(airapp && openPath),
   });

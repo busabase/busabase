@@ -65,7 +65,7 @@ function BaseDesignContent() {
 
   const basesQuery = useQuery(
     buda
-      ? buda.orpc.bases.list.queryOptions({})
+      ? buda.orpc.bases.list.queryOptions({ input: {} })
       : { queryKey: ["no-connection", "bases", "list"], queryFn: skipToken },
   );
   const base: BaseVO | null = useMemo(
@@ -136,7 +136,8 @@ function BaseDesignContent() {
       if (!buda || !base) throw new Error("Not ready");
       const name = viewName.trim();
       if (!name) throw new Error("View name is required.");
-      return buda.client.bases.createViewChangeRequest({
+      return buda.client.views.changeRequest({
+        operation: "create",
         baseId: base.id,
         name,
         slug: toSlug(name),
@@ -153,7 +154,8 @@ function BaseDesignContent() {
   const deleteViewMutation = useMutation({
     mutationFn: async (view: ViewVO) => {
       if (!buda) throw new Error("Not connected");
-      return buda.client.views.deleteChangeRequest({
+      return buda.client.views.changeRequest({
+        operation: "delete",
         viewId: view.id,
         submittedBy: "mobile-editor",
       });

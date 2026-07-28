@@ -52,9 +52,10 @@ export async function run() {
   const created: SkillVO[] = [];
 
   for (const def of DEMO_SKILLS) {
-    await step(`POST /skills — create "${def.name}"`, async () => {
-      const skill = await api<SkillVO>("POST", "/skills", {
+    await step(`POST /file-trees — create "${def.name}"`, async () => {
+      const skill = await api<SkillVO>("POST", "/file-trees", {
         ...def,
+        type: "skill",
         ...(parentNodeId ? { parentNodeId } : {}),
         // Smoke-testing the API surface, not the review-first policy — opt out
         // the same way a seed script does.
@@ -69,33 +70,33 @@ export async function run() {
     });
   }
 
-  // ── GET /skills ───────────────────────────────────────────────────────────
+  // ── GET /file-trees?type=skill ────────────────────────────────────────────
 
-  await step("GET /skills — all created slugs present", async () => {
-    const list = await api<SkillVO[]>("GET", "/skills");
+  await step("GET /file-trees?type=skill — all created slugs present", async () => {
+    const list = await api<SkillVO[]>("GET", "/file-trees?type=skill");
     const slugs = new Set(list.map((s) => s.node.slug));
     for (const def of DEMO_SKILLS) {
-      assert(slugs.has(def.slug), `slug "${def.slug}" missing from GET /skills`);
+      assert(slugs.has(def.slug), `slug "${def.slug}" missing from GET /file-trees?type=skill`);
     }
   });
 
-  // ── GET /skills/{id} ─────────────────────────────────────────────────────
+  // ── GET /file-trees/{id} ─────────────────────────────────────────────────
 
   if (created[0]) {
-    await step("GET /skills/{id} — get skill detail", async () => {
-      const skill = await api<SkillVO>("GET", `/skills/${created[0].node.id}`);
+    await step("GET /file-trees/{id} — get skill detail", async () => {
+      const skill = await api<SkillVO>("GET", `/file-trees/${created[0].node.id}?type=skill`);
       assert(skill.node.id === created[0].node.id, "id mismatch");
       assert(skill.files.length >= 1, "expected files");
     });
   }
 
-  // ── GET /skills/{id}/files ────────────────────────────────────────────────
+  // ── GET /file-trees/{id}/files ────────────────────────────────────────────
 
   if (created[0]) {
-    await step("GET /skills/{id}/files — list files", async () => {
+    await step("GET /file-trees/{id}/files — list files", async () => {
       const files = await api<Array<{ path: string; type: string }>>(
         "GET",
-        `/skills/${created[0].node.id}/files`,
+        `/file-trees/${created[0].node.id}/files?type=skill`,
       );
       assert(Array.isArray(files), "expected array");
       assert(
@@ -109,11 +110,11 @@ export async function run() {
 
   if (created[0]) {
     await step(
-      `GET /skills/{id}/files/SKILL.md — read file from "${created[0].node.name}"`,
+      `GET /file-trees/{id}/files/SKILL.md — read file from "${created[0].node.name}"`,
       async () => {
         const file = await api<FileContentVO>(
           "GET",
-          `/skills/${created[0].node.id}/files/SKILL.md`,
+          `/file-trees/${created[0].node.id}/files/SKILL.md?type=skill`,
         );
         assert(file.content.length > 0, "empty SKILL.md content");
         assert(
@@ -134,19 +135,24 @@ export async function run() {
     const updatedContent = `# ${target.node.name}\n\nUpdated by 06-skills.ts via OpenAPI CR workflow.\n`;
 
     await step(
-      `POST /skills/{id}/change-requests — update README.md on "${target.node.name}"`,
+      `POST /file-trees/{id}/change-requests — update README.md on "${target.node.name}"`,
       async () => {
-        const cr = await api<ChangeRequestVO>("POST", `/skills/${target.node.id}/change-requests`, {
-          message: "demo: update README via CR",
-          submittedBy: "demo-script",
-          operations: [
-            {
-              kind: "create",
-              path: "README.md",
-              content: updatedContent,
-            },
-          ],
-        });
+        const cr = await api<ChangeRequestVO>(
+          "POST",
+          `/file-trees/${target.node.id}/change-requests`,
+          {
+            type: "skill",
+            message: "demo: update README via CR",
+            submittedBy: "demo-script",
+            operations: [
+              {
+                kind: "create",
+                path: "README.md",
+                content: updatedContent,
+              },
+            ],
+          },
+        );
         assert(cr.status === "in_review", `expected in_review, got ${cr.status}`);
         crId = cr.id;
       },
@@ -160,8 +166,11 @@ export async function run() {
       );
     });
 
-    await step("GET /skills/{id}/files/README.md — verify updated content", async () => {
-      const file = await api<FileContentVO>("GET", `/skills/${target.node.id}/files/README.md`);
+    await step("GET /file-trees/{id}/files/README.md — verify updated content", async () => {
+      const file = await api<FileContentVO>(
+        "GET",
+        `/file-trees/${target.node.id}/files/README.md?type=skill`,
+      );
       assert(
         file.content.includes("06-skills.ts"),
         `expected updated README, got: ${file.content.slice(0, 80)}`,
@@ -172,12 +181,17 @@ export async function run() {
 
     let metaCrId = "";
 
-    await step("POST /skills/{id}/change-requests — metadata_update (version bump)", async () => {
-      const cr = await api<ChangeRequestVO>("POST", `/skills/${target.node.id}/change-requests`, {
-        message: "demo: bump version to 4.1.0",
-        submittedBy: "demo-script",
-        operations: [{ kind: "metadata_update", metadata: { version: "4.1.0" } }],
-      });
+    await step("POST /file-trees/{id}/change-requests — metadata_update", async () => {
+      const cr = await api<ChangeRequestVO>(
+        "POST",
+        `/file-trees/${target.node.id}/change-requests`,
+        {
+          type: "skill",
+          message: "demo: bump version to 4.1.0",
+          submittedBy: "demo-script",
+          operations: [{ kind: "metadata_update", metadata: { version: "4.1.0" } }],
+        },
+      );
       assert(cr.status === "in_review", `expected in_review, got ${cr.status}`);
       metaCrId = cr.id;
     });
@@ -187,8 +201,8 @@ export async function run() {
       assert(result.changeRequest.status === "merged", "expected merged");
     });
 
-    await step("GET /skills/{id} — version updated to 4.1.0", async () => {
-      const skill = await api<SkillVO>("GET", `/skills/${target.node.id}`);
+    await step("GET /file-trees/{id} — version updated to 4.1.0", async () => {
+      const skill = await api<SkillVO>("GET", `/file-trees/${target.node.id}?type=skill`);
       assert(skill.version === "4.1.0", `expected 4.1.0, got ${skill.version}`);
     });
   }
@@ -196,8 +210,8 @@ export async function run() {
   // ── Multi-skill: create + read ─────────────────────────────────────────────
 
   if (created[1]) {
-    await step(`GET /skills/${created[1].node.slug} — lookup second skill by id`, async () => {
-      const skill = await api<SkillVO>("GET", `/skills/${created[1].node.id}`);
+    await step(`GET /file-trees/${created[1].node.slug} — lookup second skill`, async () => {
+      const skill = await api<SkillVO>("GET", `/file-trees/${created[1].node.id}?type=skill`);
       assert(skill.node.slug === created[1].node.slug, "slug mismatch");
     });
   }

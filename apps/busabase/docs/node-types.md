@@ -23,7 +23,7 @@ Drive is a pure file-tree node. It uses the same file listing, read, change-requ
 
 ## Skill
 
-Skill remains backward-compatible. Existing `/skills/*` API routes, `SkillVO`, contract schemas, and core handler exports keep the same names and shapes. The implementation now delegates to the shared file-tree kind.
+Skill, Drive, and AirApp share the `/file-trees` API. Pass `type=skill` when listing or resolving a slug; node IDs resolve their kind directly. The CLI keeps its separate `skills`, `drives`, and `airapps` command groups.
 
 ![Skill node detail view with SKILL.md and skill.json](../public/assets/docs/busabase-skill-node-detail.png)
 

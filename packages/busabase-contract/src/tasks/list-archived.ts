@@ -76,21 +76,23 @@ export const listArchivedTask: TaskDefinition<ListArchivedInput> = {
     "busabase-cli archived list --scope records --base-id bas_1 --limit 100",
   ],
   execute: async (client: BusabaseTaskClient, input: ListArchivedInput) => {
-    if (input.scope === "nodes") return client.nodes.listArchived();
-    if (input.scope === "bases") return client.bases.listArchived();
+    if (input.scope === "nodes") return client.nodes.list({ status: "archived" });
+    if (input.scope === "bases") return client.bases.list({ status: "archived" });
 
     if (!input.baseId) {
       throw new Error(`scope "${input.scope}" requires baseId.`);
     }
     if (input.scope === "fields") return client.bases.listDeletedFields({ baseId: input.baseId });
-    if (input.scope === "views") return client.bases.listArchivedViews({ baseId: input.baseId });
+    if (input.scope === "views") {
+      return client.bases.listViews({ baseId: input.baseId, status: "archived" });
+    }
 
-    // Records always use the paginated endpoint — the unpaged one truncates at a
-    // default limit with nothing marking the result as partial.
-    return client.bases.listArchivedRecordsPaged({
+    // The records listing is always keyset-paginated, archived or not.
+    return client.records.list({
       baseId: input.baseId,
+      status: "archived",
       ...(input.limit !== undefined ? { limit: input.limit } : {}),
       ...(input.cursor ? { cursor: input.cursor } : {}),
-    } as Parameters<BusabaseTaskClient["bases"]["listArchivedRecordsPaged"]>[0]);
+    } as Parameters<BusabaseTaskClient["records"]["list"]>[0]);
   },
 };

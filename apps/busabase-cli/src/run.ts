@@ -143,14 +143,6 @@ const parseNum = (value: string): number => {
   return parsed;
 };
 
-const parseLimit = (value: string): number => {
-  const parsed = parseNum(value);
-  if (!Number.isInteger(parsed) || parsed < 1 || parsed > 100) {
-    throw new InvalidArgumentError("expected an integer from 1 to 100");
-  }
-  return parsed;
-};
-
 const parsePositiveInt = (value: string): number => {
   const parsed = parseNum(value);
   if (!Number.isInteger(parsed) || parsed < 1) {
@@ -525,6 +517,8 @@ interface GenField {
   choices?: string[];
   /** This is the sole field and its JSON value IS the whole input, not a single property of it. */
   root?: boolean;
+  /** Fixed by the command name (a union discriminator) — sent, but never a flag. */
+  pinned?: string;
 }
 
 /** Peel ZodOptional/ZodDefault/ZodNullable wrappers; a default or optional wrapper means not-required. */
@@ -571,17 +565,80 @@ function classifyKind(inner: any): { kind: GenFlagKind; choices?: string[] } {
 function inputFields(inputSchema: unknown): GenField[] {
   if (inputSchema === undefined) return [];
   const { inner } = unwrapSchema(inputSchema);
-  const shape = inner?.shape ?? (inner?.def?.type === "object" ? inner.def.shape : undefined);
-  if (!shape || typeof shape !== "object") {
+  const shape = objectShape(inner);
+  if (!shape) {
     return [{ key: "input", kind: "json", required: true, root: true }];
   }
+  return fieldsFromShape(shape);
+}
+
+/** The `shape` of an object schema, or undefined for any other type. */
+function objectShape(inner: any): Record<string, any> | undefined {
+  const shape = inner?.shape ?? (inner?.def?.type === "object" ? inner.def.shape : undefined);
+  return shape && typeof shape === "object" ? (shape as Record<string, any>) : undefined;
+}
+
+function fieldsFromShape(shape: Record<string, any>): GenField[] {
   const fields: GenField[] = [];
-  for (const [key, sub] of Object.entries(shape as Record<string, any>)) {
+  for (const [key, sub] of Object.entries(shape)) {
     const { inner: unwrapped, optional } = unwrapSchema(sub);
     const { kind, choices } = classifyKind(unwrapped);
     fields.push({ key, kind, required: !optional, choices });
   }
   return fields;
+}
+
+export interface GenVariant {
+  /** The discriminator value, e.g. "update" — also the command-name prefix. */
+  value: string;
+  /** Flags for this branch, with the discriminator itself removed (the command name pins it). */
+  fields: GenField[];
+}
+
+/**
+ * Expand a discriminated-union input into one command per branch.
+ *
+ * The contract collapses verb-per-endpoint groups into a single endpoint taking
+ * `{ operation, ... }` (`records.changeRequest`, `bases.fieldChangeRequest`,
+ * `views.changeRequest`). Without this, `inputFields` would see a non-object top
+ * level and degrade the whole payload to one `--input-json` blob. Instead each
+ * branch becomes its own leaf — `records update-change-request --record-id ...`,
+ * exactly the command surface these endpoints had before they merged.
+ *
+ * Handles the union directly and wrapped in an intersection (`union.and({ baseId })`,
+ * which is how a path param is added on top of the union).
+ */
+function unionVariants(inputSchema: unknown, discriminator = "operation"): GenVariant[] | null {
+  if (inputSchema === undefined) return null;
+  const { inner } = unwrapSchema(inputSchema);
+
+  // `union.and(object)` — collect the extra object's fields to merge into every branch.
+  let unionNode = inner;
+  let extraShape: Record<string, any> = {};
+  if (inner?.def?.type === "intersection") {
+    for (const side of [inner.def.left, inner.def.right]) {
+      const { inner: sideInner } = unwrapSchema(side);
+      const shape = objectShape(sideInner);
+      if (shape) extraShape = { ...extraShape, ...shape };
+      else unionNode = sideInner;
+    }
+  }
+
+  const options = unionNode?.def?.options ?? unionNode?.options;
+  if (!Array.isArray(options) || options.length === 0) return null;
+
+  const variants: GenVariant[] = [];
+  for (const option of options) {
+    const { inner: optionInner } = unwrapSchema(option);
+    const shape = objectShape(optionInner);
+    if (!shape) return null;
+    const { inner: discInner } = unwrapSchema(shape[discriminator]);
+    const value = discInner?.def?.values?.[0] ?? discInner?.def?.value;
+    if (typeof value !== "string") return null;
+    const { [discriminator]: _pinned, ...rest } = shape;
+    variants.push({ value, fields: fieldsFromShape({ ...rest, ...extraShape }) });
+  }
+  return variants;
 }
 
 /**
@@ -593,7 +650,15 @@ const GENERATED_SKIP = new Set<string>([
   "auth.verify", // `whoami`
   "records.search", // `records by-field-text`
   "records.listChangeRequests", // `records change-requests`
-  "airapps.listFiles", // `airapps files`
+  // The `/file-trees` group is exposed by the task layer as `nodes
+  // list-file-trees` / `get-file-tree` / `files` / `read-file` /
+  // `files-change-request`, each taking `--kind` (see tasks/file-tree.ts).
+  "fileTrees.list",
+  "fileTrees.create",
+  "fileTrees.get",
+  "fileTrees.listFiles",
+  "fileTrees.readFile",
+  "fileTrees.createChangeRequest",
 ]);
 
 /** Walk `cloudContract` and register a leaf command per procedure not already covered by hand. */
@@ -613,14 +678,52 @@ function registerGeneratedCommands(program: Command, state: CliState): void {
     // (e.g. "principals" in nodes.principals.list) are folded into the leaf's own
     // name instead of a second command level, so `nodes.principals.list` becomes
     // `busabase-cli nodes principals-list`, not a third-level subcommand.
-    const name = [...navPath.slice(1), procKey].map(kebab).join("-");
+    const baseName = [...navPath.slice(1), procKey].map(kebab).join("-");
+
+    // A discriminated-union input becomes one leaf per branch (see unionVariants),
+    // so a merged verb-per-operation endpoint keeps its per-verb command surface.
+    const variants = unionVariants(inputSchema);
+    if (variants) {
+      for (const variant of variants) {
+        addOneLeaf(
+          parent,
+          navPath,
+          procKey,
+          proc,
+          `${kebab(variant.value)}-${baseName}`,
+          [
+            { key: "operation", kind: "string", required: true, pinned: variant.value },
+            ...variant.fields,
+          ],
+          // The shared summary describes the merged endpoint; say which branch this is.
+          `${route.summary ?? baseName} — operation "${variant.value}"`,
+        );
+      }
+      return;
+    }
+    addOneLeaf(parent, navPath, procKey, proc, baseName, inputFields(inputSchema));
+  };
+
+  const addOneLeaf = (
+    parent: Command,
+    navPath: string[],
+    procKey: string,
+    proc: ContractProcedure,
+    name: string,
+    fields: GenField[],
+    description?: string,
+  ) => {
+    const { route } = proc["~orpc"];
     // Curated command (or dup) wins. Aliases count: a task that renamed a command
     // keeps the old spelling as an alias, and commander throws outright if the
     // generated fallback then tries to register that same name.
     if (parent.commands.some((c) => c.name() === name || c.aliases().includes(name))) return;
-    const fields = inputFields(inputSchema);
-    const leaf = parent.command(name).description(route.summary ?? `${route.method} ${route.path}`);
+    const leaf = parent
+      .command(name)
+      .description(description ?? route.summary ?? `${route.method} ${route.path}`);
     for (const f of fields) {
+      // Pinned by the command name (the union discriminator) — no flag for it.
+      if (f.pinned !== undefined) continue;
       const flag = `--${kebab(f.key)}`;
       // A body field named like a global flag (e.g. spaceId) is served by the global flag/header.
       if (GLOBAL_LONG_FLAGS.has(flag)) continue;
@@ -653,6 +756,10 @@ function registerGeneratedCommands(program: Command, state: CliState): void {
       runAction(state, (client, opts) => {
         let input: unknown = {};
         for (const f of fields) {
+          if (f.pinned !== undefined) {
+            (input as Record<string, unknown>)[f.key] = f.pinned;
+            continue;
+          }
           if (GLOBAL_LONG_FLAGS.has(`--${kebab(f.key)}`)) continue;
           const optKey = f.kind === "json" ? `${f.key}Json` : f.key;
           const value = (opts as Record<string, unknown>)[optKey];
@@ -982,14 +1089,24 @@ Examples:
   const bases = program.command("bases").description("Bases (structured tables)");
   addGlobalFlags(bases.command("list"))
     .description("List Bases in the active space")
-    .action(runAction(state, (client) => client.bases.list()));
+    .addOption(
+      new Option("--status <active|archived>", "live Bases (default) or archived ones").choices([
+        "active",
+        "archived",
+      ]),
+    )
+    .action(
+      runAction(state, (client, opts) =>
+        client.bases.list({ status: (opts.status as "active" | "archived") ?? "active" }),
+      ),
+    );
   addGlobalFlags(bases.command("get"))
     .description("Get one Base by slug")
     .requiredOption("--slug <slug>", "Base slug")
     .action(
       runAction(state, async (client, opts) => {
         const slug = opts.slug as string;
-        const found = (await client.bases.list()).find((base) => base.slug === slug);
+        const found = (await client.bases.list({})).find((base) => base.slug === slug);
         if (!found) throw new Error(`no Base with slug "${slug}"`);
         return found;
       }),
@@ -1065,12 +1182,14 @@ Examples:
             "No field patch supplied. Pass --name, --required, --options-json, or attachment option flags.",
           );
         }
-        return client.bases.updateFieldChangeRequest({
+        return client.bases.fieldChangeRequest({
+          operation: "update",
           baseId: opts.baseId as string,
           fieldId: opts.fieldId as string,
-          patch: patch as Parameters<
-            BusabaseClient["bases"]["updateFieldChangeRequest"]
-          >[0]["patch"],
+          patch: patch as Extract<
+            Parameters<BusabaseClient["bases"]["fieldChangeRequest"]>[0],
+            { operation: "update" }
+          >["patch"],
           message: opts.message as string | undefined,
           submittedBy: opts.submittedBy as string | undefined,
         });

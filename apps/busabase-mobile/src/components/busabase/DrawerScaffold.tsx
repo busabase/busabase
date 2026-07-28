@@ -107,7 +107,10 @@ export function DrawerScaffold({
   // Gated on `open` like the node tree — the drawer is the only place it shows.
   const changeRequestsQuery = useQuery({
     ...(buda
-      ? buda.orpc.changeRequests.list.queryOptions({ input: {} })
+      ? buda.orpc.changeRequests.list.queryOptions({
+          input: {},
+          select: (page) => page.changeRequests,
+        })
       : { queryKey: ["no-connection", "change-requests"], queryFn: skipToken }),
     enabled: open && !!buda,
   });

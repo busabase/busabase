@@ -57,7 +57,7 @@ describe("Change-request review loop — oRPC", () => {
     process.env.STORAGE_URL = `local:${storageDir}?base_url=/api/test/storage`;
     client = createRouterClient(busabaseRouter);
     await seedScenario({ folders: DEMO_FOLDERS, bases: DEMO_BASES });
-    const bases = await client.bases.list();
+    const bases = await client.bases.list({});
     blogBaseId = bases.find((base) => base.slug === "blog")?.id ?? "";
     expect(blogBaseId).not.toBe("");
   });

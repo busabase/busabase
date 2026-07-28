@@ -52,7 +52,8 @@ function RecordDetailContent() {
   const deleteMutation = useMutation({
     mutationFn: async () => {
       if (!buda || !recordId) throw new Error("Not connected");
-      return buda.client.records.deleteChangeRequest({
+      return buda.client.records.changeRequest({
+        operation: "delete",
         recordId,
         message: "Delete record",
         submittedBy: "mobile-editor",

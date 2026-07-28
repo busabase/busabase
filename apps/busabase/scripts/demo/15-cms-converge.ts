@@ -87,10 +87,7 @@ const desiredRecords = (baseId: string) =>
 const getBase = (baseId: string) => api<BaseVO>("GET", `/bases/${baseId}`);
 
 const listRecords = async (baseId: string) => {
-  const page = await api<{ records: RecordVO[] }>(
-    "GET",
-    `/records/paged?baseId=${baseId}&limit=100`,
-  );
+  const page = await api<{ records: RecordVO[] }>("GET", `/records?baseId=${baseId}&limit=100`);
   return page.records;
 };
 

@@ -32,7 +32,7 @@ const demoFetch: NonNullable<ConstructorParameters<typeof RPCLink>[0]["fetch"]> 
 /**
  * Standard oRPC RPC client (POST transport). Unlike `createBusabaseORPCClient`, this
  * does NOT use `inferRPCMethodFromContractRouter`, so reads stay POST and never
- * collide with the server's GET REST matchers (e.g. /skills/:id, /search).
+ * collide with the server's GET REST matchers (e.g. /file-trees/:id, /search).
  */
 export const createBusabaseORPCClient = (
   apiBasePath = "/api/rpc",
@@ -49,7 +49,7 @@ export const createBusabaseORPCClient = (
 
 /**
  * TanStack Query utils for the Busabase contract: `orpc.records.list.queryOptions(...)`,
- * `orpc.records.updateChangeRequest.mutationOptions(...)`, `orpc.<proc>.key(...)`, etc.
+ * `orpc.records.changeRequest.mutationOptions(...)`, `orpc.<proc>.key(...)`, etc.
  *
  * `keyPrefix` prepends a segment to EVERY generated query/mutation key. The cloud
  * passes the active space id so one space's cached reads can never be served under

@@ -194,7 +194,7 @@ function InboxList({
 
   // The active tab's rows load via keyset pagination ("load more").
   const listQuery = useInfiniteQuery({
-    ...orpc.changeRequests.listPaged.infiniteOptions({
+    ...orpc.changeRequests.list.infiniteOptions({
       input: (pageParam: string | undefined) => ({
         ...tabFilter(activeView),
         cursor: pageParam,

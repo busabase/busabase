@@ -21,12 +21,9 @@ import type { BusabaseTaskClient, TaskDefinition, TaskParam } from "./types";
 const FILE_TREE_KINDS = ["skill", "drive", "airapp"] as const;
 type FileTreeKind = (typeof FILE_TREE_KINDS)[number];
 
-/** Which client namespace serves a kind. */
-const NAMESPACE: Record<FileTreeKind, "skills" | "drives" | "airapps"> = {
-  skill: "skills",
-  drive: "drives",
-  airapp: "airapps",
-};
+// `kind` is passed straight through as the contract's `type` discriminator:
+// Skills, Drives, and AirApps share the one `/file-trees` surface, so there is
+// no namespace to pick any more.
 
 const kindParam: TaskParam = {
   name: "kind",
@@ -82,7 +79,7 @@ export const nodeListTask: TaskDefinition<FileTreeListInput> = {
   params: [kindParam],
   examples: ["busabase-cli nodes list-file-trees --kind skill"],
   execute: async (client: BusabaseTaskClient, input: FileTreeListInput) =>
-    client[NAMESPACE[resolveKind(input.kind)]].list(),
+    client.fileTrees.list({ type: resolveKind(input.kind) }),
 };
 
 export interface FileTreeGetInput {
@@ -115,7 +112,7 @@ export const nodeGetTask: TaskDefinition<FileTreeGetInput> = {
   params: [kindParam, nodeIdParam],
   examples: ["busabase-cli nodes get-file-tree --kind airapp --node-id nod_123"],
   execute: async (client: BusabaseTaskClient, input: FileTreeGetInput) =>
-    client[NAMESPACE[resolveKind(input.kind)]].get({ nodeId: input.nodeId }),
+    client.fileTrees.get({ nodeId: input.nodeId, type: resolveKind(input.kind) }),
 };
 
 export const nodeListFilesTask: TaskDefinition<FileTreeGetInput> = {
@@ -143,7 +140,7 @@ export const nodeListFilesTask: TaskDefinition<FileTreeGetInput> = {
   params: [kindParam, nodeIdParam],
   examples: ["busabase-cli nodes files --kind drive --node-id nod_123"],
   execute: async (client: BusabaseTaskClient, input: FileTreeGetInput) =>
-    client[NAMESPACE[resolveKind(input.kind)]].listFiles({ nodeId: input.nodeId }),
+    client.fileTrees.listFiles({ nodeId: input.nodeId, type: resolveKind(input.kind) }),
 };
 
 export interface FileTreeReadFileInput extends FileTreeGetInput {
@@ -188,9 +185,10 @@ export const nodeReadFileTask: TaskDefinition<FileTreeReadFileInput> = {
   ],
   examples: ["busabase-cli nodes read-file --kind skill --node-id nod_123 --file-path SKILL.md"],
   execute: async (client: BusabaseTaskClient, input: FileTreeReadFileInput) =>
-    client[NAMESPACE[resolveKind(input.kind)]].readFile({
+    client.fileTrees.readFile({
       nodeId: input.nodeId,
       filePath: input.filePath,
+      type: resolveKind(input.kind),
     }),
 };
 
@@ -200,7 +198,7 @@ export interface FileTreeChangeRequestInput extends FileTreeGetInput {
   submittedBy?: string;
 }
 
-type FileTreeCrInput = Parameters<BusabaseTaskClient["skills"]["createChangeRequest"]>[0];
+type FileTreeCrInput = Parameters<BusabaseTaskClient["fileTrees"]["createChangeRequest"]>[0];
 
 export const nodeFilesChangeRequestTask: TaskDefinition<FileTreeChangeRequestInput> = {
   name: "node_files_change_request",
@@ -255,10 +253,11 @@ export const nodeFilesChangeRequestTask: TaskDefinition<FileTreeChangeRequestInp
     }
     const payload = {
       nodeId: input.nodeId,
+      type: resolveKind(input.kind),
       operations: input.operations,
       ...(input.message ? { message: input.message } : {}),
       ...(input.submittedBy ? { submittedBy: input.submittedBy } : {}),
     } as FileTreeCrInput;
-    return client[NAMESPACE[resolveKind(input.kind)]].createChangeRequest(payload);
+    return client.fileTrees.createChangeRequest(payload);
   },
 };

@@ -56,7 +56,7 @@ const MUST_STAY_DENIED = [
   "nodes.updateVisibility",
   "docs.updateBody",
   "bases.create",
-  "records.updateChangeRequest",
+  "records.changeRequest",
   "search",
   "grep",
 ];
@@ -82,7 +82,6 @@ describe("anonymous allowlist (unit)", () => {
       "nodes.list",
       "records.get",
       "records.list",
-      "records.listPaged",
     ]);
   });
 
@@ -105,7 +104,7 @@ describe("anonymous allowlist (unit)", () => {
     // Caught only by a real HTTP round-trip; the in-process test client mounts
     // at the root and never reproduces it. Keep this locked down.
     expect(anonymousAccessKindFor(["core", "nodes", "list"])).toBe("read");
-    expect(anonymousAccessKindFor(["core", "records", "listPaged"])).toBe("read");
+    expect(anonymousAccessKindFor(["core", "records", "list"])).toBe("read");
     expect(anonymousAccessKindFor(["core", "form", "submit"])).toBe("submit");
     // Denials must survive the prefix too.
     expect(anonymousAccessKindFor(["core", "vault", "get"])).toBeNull();

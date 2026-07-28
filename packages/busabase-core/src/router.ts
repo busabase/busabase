@@ -6,13 +6,12 @@ import { airappRouter } from "./domains/airapp/router";
 import { assetsRouter } from "./domains/assets/router";
 import { baseRouter, recordRouter, viewRouter } from "./domains/base/router";
 import { docRouter } from "./domains/doc/router";
-import { driveRouter } from "./domains/drive/router";
 import { dumpRouter } from "./domains/dump/router";
 import { fileRouter } from "./domains/file-node/router";
+import { fileTreeRouter } from "./domains/filetree/router";
 import { folderRouter } from "./domains/folder/router";
 import { formRouter } from "./domains/form/router";
 import { installRouter } from "./domains/install/router";
-import { skillRouter } from "./domains/skill/router";
 import { vaultRouter } from "./domains/vault/router";
 import { webhookRouter } from "./domains/webhook/router";
 import { listActivityPaged } from "./logic/activity";
@@ -39,7 +38,6 @@ import {
   listAgentTasks,
   listArchivedNodes,
   listAuditEvents,
-  listChangeRequests,
   listChangeRequestsPaged,
   listComments,
   listFavoriteNodes,
@@ -94,7 +92,9 @@ const busabaseRouterImpl = busabase.router({
   search: busabase.search.handler(async ({ input }) => searchBusabase(input)),
   grep: busabase.grep.handler(async ({ input }) => grepUnified(input)),
   nodes: {
-    list: busabase.nodes.list.handler(async ({ input }) => listNodes(input)),
+    list: busabase.nodes.list.handler(async ({ input }) =>
+      input?.status === "archived" ? listArchivedNodes() : listNodes(input),
+    ),
     searchByName: busabase.nodes.searchByName.handler(async ({ input }) =>
       searchNodesByName(input),
     ),
@@ -106,7 +106,6 @@ const busabaseRouterImpl = busabase.router({
         input.potentialAncestorId,
       ),
     })),
-    listArchived: busabase.nodes.listArchived.handler(async () => listArchivedNodes()),
     createChangeRequest: busabase.nodes.createChangeRequest.handler(async ({ input }) =>
       createNodeChangeRequest(input),
     ),
@@ -205,8 +204,7 @@ const busabaseRouterImpl = busabase.router({
     ),
   },
   bases: baseRouter,
-  skills: skillRouter,
-  drives: driveRouter,
+  fileTrees: fileTreeRouter,
   airapps: airappRouter,
   files: fileRouter,
   docs: docRouter,
@@ -218,10 +216,7 @@ const busabaseRouterImpl = busabase.router({
   dump: dumpRouter,
   install: installRouter,
   changeRequests: {
-    list: busabase.changeRequests.list.handler(async ({ input }) => listChangeRequests(input)),
-    listPaged: busabase.changeRequests.listPaged.handler(async ({ input }) =>
-      listChangeRequestsPaged(input),
-    ),
+    list: busabase.changeRequests.list.handler(async ({ input }) => listChangeRequestsPaged(input)),
     counts: busabase.changeRequests.counts.handler(async () => countChangeRequests()),
     get: busabase.changeRequests.get.handler(async ({ input }) => {
       const changeRequest = await getChangeRequest(input.changeRequestId);

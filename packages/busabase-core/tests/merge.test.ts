@@ -34,7 +34,7 @@ describe("Staleness-aware 3-way merge — oRPC", () => {
     process.env.STORAGE_URL = `local:${storageDir}?base_url=/api/test/storage`;
     client = createRouterClient(busabaseRouter);
     await seedScenario({ folders: DEMO_FOLDERS, bases: DEMO_BASES });
-    const bases = await client.bases.list();
+    const bases = await client.bases.list({});
     blogBaseId = bases.find((base) => base.slug === "blog")?.id ?? "";
   });
 
@@ -79,7 +79,8 @@ describe("Staleness-aware 3-way merge — oRPC", () => {
   // particular tests can assert 3-way merge / conflict detection in isolation
   // without also depending on the partial-submission fix.
   const proposeUpdate = (recordId: string, overrides: Record<string, unknown>) =>
-    client.records.updateChangeRequest({
+    client.records.changeRequest({
+      operation: "update",
       recordId,
       fields: { title: "orig title", body: "orig body", channel: "blog", ...overrides },
       autoMerge: false,

@@ -58,9 +58,10 @@ test("GET /api/v1/bases returns the seeded bases", async ({ request }) => {
 });
 
 test("GET /api/v1/change-requests?demo=1 serves the seeded review queue", async ({ request }) => {
-  const changeRequests = await json<ChangeRequestVO[]>(
+  const page = await json<{ changeRequests: ChangeRequestVO[]; nextCursor: string | null }>(
     await request.get("/api/v1/change-requests?demo=1"),
   );
+  const { changeRequests } = page;
   expect(changeRequests.length).toBeGreaterThan(0);
   // Every seeded CR carries a known status vocabulary.
   const statuses = new Set(changeRequests.map((cr) => cr.status));
@@ -80,7 +81,10 @@ test("GET /api/v1/change-requests?demo=1 serves the seeded review queue", async 
 test("GET /api/v1/records/search filters canonical records by field text", async ({ request }) => {
   // Discover a real (field, value) pair from a seeded demo record, then filter by it —
   // robust to whatever the seed happens to contain.
-  const records = await json<RecordVO[]>(await request.get("/api/v1/records?demo=blog"));
+  const page = await json<{ records: RecordVO[]; nextCursor: string | null }>(
+    await request.get("/api/v1/records?demo=blog"),
+  );
+  const { records } = page;
   expect(records.length).toBeGreaterThan(0);
   const sample = records.find((record) =>
     Object.values(record.headCommit.fields).some(
@@ -111,10 +115,14 @@ test("GET /api/v1/search finds seeded content across groups", async ({ request }
   expect(serialized).toContain("agent");
 });
 
-test("GET /api/v1/bases/archived and /nodes/archived return arrays", async ({ request }) => {
-  const archivedBases = await json<unknown[]>(await request.get("/api/v1/bases/archived?demo=1"));
+test("status=archived returns archived bases and nodes", async ({ request }) => {
+  const archivedBases = await json<unknown[]>(
+    await request.get("/api/v1/bases?status=archived&demo=1"),
+  );
   expect(Array.isArray(archivedBases)).toBe(true);
-  const archivedNodes = await json<unknown[]>(await request.get("/api/v1/nodes/archived?demo=1"));
+  const archivedNodes = await json<unknown[]>(
+    await request.get("/api/v1/nodes?status=archived&demo=1"),
+  );
   expect(Array.isArray(archivedNodes)).toBe(true);
 });
 

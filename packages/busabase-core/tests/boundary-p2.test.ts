@@ -90,11 +90,11 @@ describe("Boundary P2 — oRPC", () => {
 
     const archiveCr = await client.bases.archiveChangeRequest({ baseId: base.id });
     await approveAndMerge(archiveCr.id);
-    expect((await client.bases.list()).some((b) => b.id === base.id)).toBe(false);
+    expect((await client.bases.list({})).some((b) => b.id === base.id)).toBe(false);
 
     const restoreCr = await client.bases.restoreChangeRequest({ baseId: base.id });
     await approveAndMerge(restoreCr.id);
-    expect((await client.bases.list()).some((b) => b.id === base.id)).toBe(true);
+    expect((await client.bases.list({})).some((b) => b.id === base.id)).toBe(true);
   });
 
   // ── Fix 2: Required Field Addition Validation ───────────────────────────────
@@ -107,7 +107,8 @@ describe("Boundary P2 — oRPC", () => {
     const noteField = base.fields.find((f) => f.slug === "note");
     if (!noteField) throw new Error("note field missing");
 
-    const cr = await client.bases.updateFieldChangeRequest({
+    const cr = await client.bases.fieldChangeRequest({
+      operation: "update",
       baseId: base.id,
       fieldId: noteField.id,
       patch: { required: true },
@@ -130,12 +131,14 @@ describe("Boundary P2 — oRPC", () => {
     ]);
     const recordId = await createRecord(base.id, { title: "t", status: "open" });
 
-    const crA = await client.records.updateChangeRequest({
+    const crA = await client.records.changeRequest({
+      operation: "update",
       recordId,
       fields: { title: "t", status: "A" },
       autoMerge: false,
     });
-    const crB = await client.records.updateChangeRequest({
+    const crB = await client.records.changeRequest({
+      operation: "update",
       recordId,
       fields: { title: "t", status: "B" },
       autoMerge: false,
@@ -200,7 +203,8 @@ describe("Boundary P2 — oRPC", () => {
 
     const tagField = base.fields.find((f) => f.slug === "tag");
     if (!tagField) throw new Error("tag field missing");
-    const delCr = await client.bases.deleteFieldChangeRequest({
+    const delCr = await client.bases.fieldChangeRequest({
+      operation: "delete",
       baseId: base.id,
       fieldId: tagField.id,
     });
@@ -223,7 +227,8 @@ describe("Boundary P2 — oRPC", () => {
     const colorField = base.fields.find((f) => f.slug === "color");
     if (!colorField) throw new Error("color field missing");
 
-    const viewCr = await client.bases.createViewChangeRequest({
+    const viewCr = await client.views.changeRequest({
+      operation: "create",
       baseId: base.id,
       slug: "p2-vf-view",
       name: "VF",
@@ -239,14 +244,16 @@ describe("Boundary P2 — oRPC", () => {
     expect(view?.config.filters?.[0]?.fieldId).toBe(colorField.id);
 
     // Delete the field → filter referencing it is removed
-    const delCr = await client.bases.deleteFieldChangeRequest({
+    const delCr = await client.bases.fieldChangeRequest({
+      operation: "delete",
       baseId: base.id,
       fieldId: colorField.id,
     });
     await approveAndMerge(delCr.id);
 
     // Re-add a field with the same slug → new fieldId; old filter must be gone
-    const addCr = await client.bases.createFieldChangeRequest({
+    const addCr = await client.bases.fieldChangeRequest({
+      operation: "create",
       baseId: base.id,
       slug: "color",
       name: "Color2",
@@ -267,7 +274,8 @@ describe("Boundary P2 — oRPC", () => {
     const amountField = base.fields.find((f) => f.slug === "amount");
     if (!amountField) throw new Error("amount field missing");
 
-    const first = await client.bases.convertFieldChangeRequest({
+    const first = await client.bases.fieldChangeRequest({
+      operation: "convert",
       baseId: base.id,
       fieldId: amountField.id,
       newType: "number",
@@ -275,7 +283,8 @@ describe("Boundary P2 — oRPC", () => {
 
     // A second immediate attempt is rejected (active lock).
     await expect(
-      client.bases.convertFieldChangeRequest({
+      client.bases.fieldChangeRequest({
+        operation: "convert",
         baseId: base.id,
         fieldId: amountField.id,
         newType: "number",
@@ -294,7 +303,8 @@ describe("Boundary P2 — oRPC", () => {
       .where(eq(busabaseChangeRequests.id, first.id));
 
     // Now a new convert CR succeeds (stale one auto-closed).
-    const second = await client.bases.convertFieldChangeRequest({
+    const second = await client.bases.fieldChangeRequest({
+      operation: "convert",
       baseId: base.id,
       fieldId: amountField.id,
       newType: "number",
@@ -319,7 +329,7 @@ describe("Boundary P2 — oRPC", () => {
     let cursor: string | undefined;
     let pages = 0;
     for (;;) {
-      const page = await client.records.listPaged({ baseId: base.id, limit: 2, cursor });
+      const page = await client.records.list({ baseId: base.id, limit: 2, cursor });
       for (const r of page.records) seen.add(r.id);
       pages++;
       if (!page.nextCursor) break;

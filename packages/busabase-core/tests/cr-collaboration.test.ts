@@ -34,7 +34,7 @@ describe("Change-request collaboration — oRPC", () => {
     process.env.STORAGE_URL = `local:${storageDir}?base_url=/api/test/storage`;
     client = createRouterClient(busabaseRouter);
     await seedScenario({ folders: DEMO_FOLDERS, bases: DEMO_BASES });
-    const bases = await client.bases.list();
+    const bases = await client.bases.list({});
     blogBaseId = bases.find((base) => base.slug === "blog")?.id ?? "";
     expect(blogBaseId).not.toBe("");
   });
@@ -186,7 +186,8 @@ describe("Change-request collaboration — oRPC", () => {
     const merged = await approveAndMerge(cr.id);
     const recordId = merged.record?.id ?? "";
 
-    const updateCr = await client.records.updateChangeRequest({
+    const updateCr = await client.records.changeRequest({
+      operation: "update",
       recordId,
       fields: { title: "history v2", body: "b", channel: "blog" },
       autoMerge: false,

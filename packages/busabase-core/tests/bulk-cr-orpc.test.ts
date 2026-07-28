@@ -68,21 +68,21 @@ describe("Bulk record Change Request — oRPC integration", () => {
     expect(cr.operationCount).toBe(3);
 
     // Nothing is visible until the single CR merges.
-    const before = await client.records.list({ baseId, limit: 100 });
+    const { records: before } = await client.records.list({ baseId, limit: 100 });
     expect(before.length).toBe(0);
 
     await client.changeRequests.review({ changeRequestId: cr.id, verdict: "approved" });
     const merged = await client.changeRequests.merge({ changeRequestId: cr.id });
     expect(merged.changeRequest.mergeSummary.operationCount).toBe(3);
 
-    const after = await client.records.list({ baseId, limit: 100 });
+    const { records: after } = await client.records.list({ baseId, limit: 100 });
     expect(after.length).toBe(3);
     const names = after.map((r) => r.headCommit.fields.name).sort();
     expect(names).toEqual(["Acme Corp", "Globex", "Initech"]);
   });
 
   it("validates the whole batch up front — one bad record creates no change request", async () => {
-    const queueBefore = await client.changeRequests.list({ limit: 100 });
+    const { changeRequests: queueBefore } = await client.changeRequests.list({ limit: 100 });
 
     await expect(
       client.bases.createBulkChangeRequest({
@@ -92,7 +92,7 @@ describe("Bulk record Change Request — oRPC integration", () => {
       }),
     ).rejects.toThrow();
 
-    const queueAfter = await client.changeRequests.list({ limit: 100 });
+    const { changeRequests: queueAfter } = await client.changeRequests.list({ limit: 100 });
     expect(queueAfter.length).toBe(queueBefore.length);
   });
 

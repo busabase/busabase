@@ -96,7 +96,8 @@ describe("Formula chaining + dependency-graph cycle detection (real PGLite)", ()
     expect(created.headCommit.fields.price_with_markup).toBe(55);
     expect(created.headCommit.fields.price_with_tax).toBe(59.4);
 
-    const updateCr = await client.records.updateChangeRequest({
+    const updateCr = await client.records.changeRequest({
+      operation: "update",
       recordId: created.id,
       fields: { base_price: 200 },
       autoMerge: false,
@@ -115,7 +116,8 @@ describe("Formula chaining + dependency-graph cycle detection (real PGLite)", ()
     // Editing price_with_markup to reference price_with_tax (which already
     // references price_with_markup) closes a 2-field cycle.
     await expect(
-      client.bases.updateFieldChangeRequest({
+      client.bases.fieldChangeRequest({
+        operation: "update",
         baseId,
         fieldId: markupField.id,
         patch: { options: { formula: { expression: "{price_with_tax} + 1" } } },
@@ -125,7 +127,8 @@ describe("Formula chaining + dependency-graph cycle detection (real PGLite)", ()
 
   it("still rejects a self-referencing formula field", async () => {
     await expect(
-      client.bases.createFieldChangeRequest({
+      client.bases.fieldChangeRequest({
+        operation: "create",
         baseId,
         slug: "self_ref",
         name: "Self Ref",
@@ -138,7 +141,8 @@ describe("Formula chaining + dependency-graph cycle detection (real PGLite)", ()
 
   it("still rejects a formula referencing a field that doesn't exist", async () => {
     await expect(
-      client.bases.createFieldChangeRequest({
+      client.bases.fieldChangeRequest({
+        operation: "create",
         baseId,
         slug: "bad_ref",
         name: "Bad Ref",

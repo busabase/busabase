@@ -64,6 +64,15 @@ describe("resolveRequiredLevel", () => {
     expect(resolveRequiredLevel(["workbench", "assets", "createUploadUrl"], "POST")).toBe(
       "changeRequest",
     );
+    expect(resolveRequiredLevel(["workbench", "records", "changeRequest"], "POST")).toBe(
+      "changeRequest",
+    );
+    expect(resolveRequiredLevel(["workbench", "views", "changeRequest"], "POST")).toBe(
+      "changeRequest",
+    );
+    expect(resolveRequiredLevel(["workbench", "fileTrees", "createChangeRequest"], "POST")).toBe(
+      "changeRequest",
+    );
   });
 
   it("denies changeRequests.merge and bases.create at higher-than-changeRequest levels", () => {
@@ -76,6 +85,13 @@ describe("resolveRequiredLevel", () => {
     // live data directly.
     expect(hasApiKeyLevel("changeRequest", mergeLevel)).toBe(false);
     expect(hasApiKeyLevel("changeRequest", createBaseLevel)).toBe(false);
+  });
+
+  it("classifies unified file-tree creation as write", () => {
+    const level = resolveRequiredLevel(["workbench", "fileTrees", "create"], "POST");
+    expect(level).toBe("write");
+    expect(hasApiKeyLevel("changeRequest", level)).toBe(false);
+    expect(hasApiKeyLevel("write", level)).toBe(true);
   });
 
   it("classifies direct node metadata updates as write", () => {

@@ -193,7 +193,7 @@ describe("Node tree + Doc lifecycle — oRPC", () => {
         ],
       });
       expect(cr.status).toBe("merged");
-      const bases = await client.bases.list();
+      const bases = await client.bases.list({});
       expect(bases.some((b) => b.slug === "lc-node-base")).toBe(true);
     });
 
@@ -289,7 +289,7 @@ describe("Node tree + Doc lifecycle — oRPC", () => {
       await approveAndMerge(crA.id);
       await expect(approveAndMerge(crB.id)).rejects.toMatchObject({ code: "CONFLICT" });
 
-      const bases = await client.bases.list();
+      const bases = await client.bases.list({});
       const matches = bases.filter((b) => b.slug === "lc-race-base");
       expect(matches).toHaveLength(1);
       expect(matches[0]?.name).toBe("Race Base A");

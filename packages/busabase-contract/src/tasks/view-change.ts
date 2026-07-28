@@ -3,11 +3,9 @@ import type { BusabaseTaskClient, TaskDefinition } from "./types";
 /**
  * Base views: create / update / delete / restore, as one task.
  *
- * Four endpoints split across two namespaces — create lives on the Base
- * (`POST /bases/{baseId}/views/change-requests`) while the rest live on the view
- * (`/views/{viewId}/...`). That split is an artefact of which id the route needs,
- * not of what the caller is doing, and it is exactly the sort of thing a caller
- * should not have to know.
+ * The consolidated contract uses one discriminated endpoint for create, update,
+ * delete, and restore. This task keeps the same operation vocabulary while adding
+ * agent-oriented guidance and examples above the transport-level union.
  */
 
 const ACTIONS = ["create", "update", "delete", "restore"] as const;
@@ -86,6 +84,10 @@ export const viewChangeTask: TaskDefinition<ViewChangeInput> = {
     "busabase-cli views change-request --action delete --view-id viw_1",
   ],
   execute: async (client: BusabaseTaskClient, input: ViewChangeInput) => {
+    // `views.changeRequest` is itself an `operation` union now — `create` still
+    // addresses by baseId and the rest by viewId, exactly the split this task
+    // used to paper over across two route prefixes.
+    type ViewInput = Parameters<BusabaseTaskClient["views"]["changeRequest"]>[0];
     const meta = {
       ...(input.message ? { message: input.message } : {}),
       ...(input.submittedBy ? { submittedBy: input.submittedBy } : {}),
@@ -95,13 +97,14 @@ export const viewChangeTask: TaskDefinition<ViewChangeInput> = {
       if (!input.baseId || !input.name) {
         throw new Error('action "create" requires baseId and name.');
       }
-      return client.bases.createViewChangeRequest({
+      return client.views.changeRequest({
+        operation: "create",
         baseId: input.baseId,
         name: input.name,
         ...(input.type ? { type: input.type } : {}),
         ...(input.config ? { config: input.config } : {}),
         ...meta,
-      } as Parameters<BusabaseTaskClient["bases"]["createViewChangeRequest"]>[0]);
+      } as ViewInput);
     }
 
     if (!input.viewId) throw new Error(`action "${input.action}" requires viewId.`);
@@ -109,18 +112,15 @@ export const viewChangeTask: TaskDefinition<ViewChangeInput> = {
 
     if (input.action === "update") {
       if (!input.patch) throw new Error('action "update" requires patch.');
-      return client.views.updateChangeRequest({
+      return client.views.changeRequest({
+        operation: "update",
         ...target,
         ...(input.patch as Record<string, unknown>),
-      } as Parameters<BusabaseTaskClient["views"]["updateChangeRequest"]>[0]);
+      } as ViewInput);
     }
     if (input.action === "delete") {
-      return client.views.deleteChangeRequest(
-        target as Parameters<BusabaseTaskClient["views"]["deleteChangeRequest"]>[0],
-      );
+      return client.views.changeRequest({ operation: "delete", ...target } as ViewInput);
     }
-    return client.views.restoreChangeRequest(
-      target as Parameters<BusabaseTaskClient["views"]["restoreChangeRequest"]>[0],
-    );
+    return client.views.changeRequest({ operation: "restore", ...target } as ViewInput);
   },
 };

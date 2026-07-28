@@ -100,40 +100,27 @@ export const BUSABASE_TASKS: readonly TaskDefinition<any>[] = [
  *     one applies.
  */
 export const TASK_SUPERSEDED_MCP_TOOLS: readonly string[] = [
-  // -> node_create
-  "skills_create",
-  "drives_create",
-  "airapps_create",
+  // -> node_create (one call for any node type, with that type's payload)
+  "file_trees_create",
   "docs_create",
   "bases_create",
   "files_create",
   // -> record_find_by_field
   "records_search",
   // -> node_list_files_trees / node_get_file_tree / node_files_list /
-  //    node_file_read / node_files_change_request. Fifteen endpoints that
-  //    differ only in a path prefix; see `file-tree.ts`.
-  "skills_list",
-  "drives_list",
-  "airapps_list",
-  "skills_get",
-  "drives_get",
-  "airapps_get",
-  "skills_list_files",
-  "drives_list_files",
-  "airapps_list_files",
-  "skills_read_file",
-  "drives_read_file",
-  "airapps_read_file",
-  "skills_create_change_request",
-  "drives_create_change_request",
-  "airapps_create_change_request",
-  // -> record_query (always paginated; `records_list` truncates silently)
+  //    node_file_read / node_files_change_request. These were fifteen endpoints
+  //    differing only in a path prefix until the contract merged them into one
+  //    `/file-trees` group; the tasks keep the per-kind vocabulary.
+  "file_trees_list",
+  "file_trees_get",
+  "file_trees_list_files",
+  "file_trees_read_file",
+  "file_trees_create_change_request",
+  // -> record_query (always paginated, plus `countOnly`)
   "records_list",
-  "records_list_paged",
   "records_count",
   // -> change_request_query
   "change_requests_list",
-  "change_requests_list_paged",
   "change_requests_counts",
   // -> change_request_review / change_request_merge (ids array covers both
   //    the single and the batch endpoint)
@@ -141,24 +128,12 @@ export const TASK_SUPERSEDED_MCP_TOOLS: readonly string[] = [
   "change_requests_review_many",
   "change_requests_merge",
   "change_requests_merge_many",
-  // -> base_field_change_request (one `operation` instead of six tools whose
-  //    names differ only by the verb in the middle)
-  "bases_create_field_change_request",
-  "bases_update_field_change_request",
-  "bases_delete_field_change_request",
-  "bases_convert_field_change_request",
-  "bases_reorder_fields_change_request",
-  "bases_restore_field_change_request",
+  // -> base_field_change_request ("add" reads better than "create" for a field)
+  "bases_field_change_request",
   // -> record_change_request
-  "records_update_change_request",
-  "records_delete_change_request",
-  "records_restore_change_request",
-  // -> view_change_request (create lives on the Base, the rest on the view —
-  //    an artefact of which id the route needs, not of what the caller is doing)
-  "bases_create_view_change_request",
-  "views_update_change_request",
-  "views_delete_change_request",
-  "views_restore_change_request",
+  "records_change_request",
+  // -> view_change_request
+  "views_change_request",
   // -> node_permission
   "nodes_principals_list",
   "nodes_principals_add",
@@ -167,13 +142,12 @@ export const TASK_SUPERSEDED_MCP_TOOLS: readonly string[] = [
   "nodes_share_get",
   "nodes_share_set",
   "nodes_share_disable",
-  // -> list_archived
-  "nodes_list_archived",
-  "bases_list_archived",
+  // -> list_archived. Only the deleted-fields listing is fully superseded: it
+  //    has no active twin. `nodes_list` / `bases_list` / `bases_list_views` now
+  //    serve BOTH states through `?status=`, so excluding them would take the
+  //    active listing away from agents too — `list_archived` is the friendlier
+  //    wording for the archived side, not a replacement for the endpoint.
   "bases_list_deleted_fields",
-  "bases_list_archived_views",
-  "bases_list_archived_records",
-  "bases_list_archived_records_paged",
 ];
 
 /**

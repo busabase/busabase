@@ -89,11 +89,9 @@ export class Busabase {
   get assets(): BusabaseClient["assets"] {
     return this.client.assets;
   }
-  get skills(): BusabaseClient["skills"] {
-    return this.client.skills;
-  }
-  get drives(): BusabaseClient["drives"] {
-    return this.client.drives;
+  /** Skills, Drives, and AirApps — one surface, discriminated by `type`. */
+  get fileTrees(): BusabaseClient["fileTrees"] {
+    return this.client.fileTrees;
   }
   get files(): BusabaseClient["files"] {
     return this.client.files;

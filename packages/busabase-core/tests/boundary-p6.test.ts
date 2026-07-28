@@ -40,7 +40,7 @@ describe("Boundary P6 — node lifecycle", () => {
     expect(second.id).not.toBe(first.id);
     expect(second.slug).toBe("tasks");
 
-    const active = await client.bases.list();
+    const active = await client.bases.list({});
     expect(active.map((b) => b.id)).toContain(second.id);
     expect(active.map((b) => b.id)).not.toContain(first.id);
   });
@@ -84,7 +84,7 @@ describe("Boundary P6 — node lifecycle", () => {
     await raw.changeRequests.review({ changeRequestId: restoreCr.id, verdict: "approved" });
     await raw.changeRequests.merge({ changeRequestId: restoreCr.id });
 
-    const active = await client.bases.list();
+    const active = await client.bases.list({});
     expect(active.map((b) => b.id)).toContain(base.id);
 
     const [node] = await db

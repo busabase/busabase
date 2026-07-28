@@ -149,12 +149,14 @@ describe("busabase-cli golden path (skill commands, in-process)", () => {
   });
 
   it("surfaces the review queue (`busabase-cli change-requests list`)", async () => {
-    const queue = (await cli("change-requests", "list", "--limit", "100")) as Array<{
-      id: string;
-      status: string;
-    }>;
-    expect(Array.isArray(queue)).toBe(true);
-    expect(queue.length).toBeGreaterThan(0);
+    // The listing is keyset-paginated now, so the CLI prints `{ changeRequests,
+    // nextCursor }` — same shape `records list` has always returned.
+    const queue = (await cli("change-requests", "list", "--limit", "100")) as {
+      changeRequests: Array<{ id: string; status: string }>;
+      nextCursor: string | null;
+    };
+    expect(Array.isArray(queue.changeRequests)).toBe(true);
+    expect(queue.changeRequests.length).toBeGreaterThan(0);
   });
 
   it("creates a folder node Change Request through the CLI, then reviews and merges it", async () => {

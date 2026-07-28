@@ -2,7 +2,6 @@ import "server-only";
 
 import {
   countRecordsInputSchema,
-  listArchivedRecordsPagedInputSchema,
   listRecordsInputSchema,
 } from "busabase-contract/domains/base/contract/record-schemas";
 import {
@@ -151,25 +150,6 @@ export const listViews = async (baseId?: string) => {
         .then((rows) => rows.map((r) => r.view));
   const users = await resolveUserRefs(viewRows.map((view) => view.createdBy));
   return viewRows.map((view) => toViewVO(view, users));
-};
-
-export const listRecords = async (input?: z.input<typeof listInputSchema>) => {
-  await ensureReady();
-  const db = await getDb();
-  const parsed = listInputSchema.parse(input);
-  const recordRows = await db
-    .select()
-    .from(busabaseRecords)
-    .where(
-      and(
-        eq(busabaseRecords.spaceId, getContextSpaceId()),
-        eq(busabaseRecords.status, "active"),
-        buildBaseVisibilityExists(db, busabaseRecords.baseId),
-      ),
-    )
-    .orderBy(desc(busabaseRecords.createdAt))
-    .limit(parsed.limit);
-  return hydrateRecords(recordRows);
 };
 
 // `|` separates the ISO timestamp (which itself contains colons) from the id.
@@ -628,37 +608,30 @@ export const listArchivedViews = async (baseId: string) => {
   return viewRows.map((view) => toViewVO(view, users));
 };
 
-export const listArchivedRecords = async (baseId: string) => {
-  await ensureReady();
-  const db = await getDb();
-  const resolvedBase = await getBase(baseId);
-  if (!resolvedBase) {
-    return [];
-  }
-  const recordRows = await db
-    .select()
-    .from(busabaseRecords)
-    .where(and(eq(busabaseRecords.baseId, resolvedBase.id), eq(busabaseRecords.status, "archived")))
-    .orderBy(desc(busabaseRecords.createdAt));
-  return hydrateRecords(recordRows);
-};
-
 // Keyset-paginated archived records — same (createdAt, id) cursor as the active
 // table, so the "trash" section never loads the whole soft-deleted history.
-export const listArchivedRecordsPaged = async (
-  input: z.input<typeof listArchivedRecordsPagedInputSchema>,
-) => {
+/** The `status: "archived"` branch of `records.list`. `baseId` is optional here
+ *  for the same reason it is on the active listing: omitting it means the whole
+ *  space, not an error. */
+export const listArchivedRecordsPaged = async (input?: z.input<typeof listRecordsInputSchema>) => {
   await ensureReady();
   const db = await getDb();
-  const parsed = listArchivedRecordsPagedInputSchema.parse(input);
-  const resolvedBase = await getBase(parsed.baseId);
-  if (!resolvedBase) {
-    return { records: [], nextCursor: null };
-  }
+  const parsed = listRecordsInputSchema.parse(input);
   const filters: SQL[] = [
-    eq(busabaseRecords.baseId, resolvedBase.id),
+    eq(busabaseRecords.spaceId, getContextSpaceId()),
     eq(busabaseRecords.status, "archived"),
   ];
+  if (parsed.baseId) {
+    const resolvedBase = await getBase(parsed.baseId);
+    if (!resolvedBase) {
+      return { records: [], nextCursor: null };
+    }
+    filters.push(eq(busabaseRecords.baseId, resolvedBase.id));
+  }
+  const archivedVisible = buildBaseVisibilityExists(db, busabaseRecords.baseId);
+  if (archivedVisible) {
+    filters.push(archivedVisible);
+  }
   if (parsed.cursor) {
     const decoded = decodeRecordCursor(parsed.cursor);
     if (decoded) {

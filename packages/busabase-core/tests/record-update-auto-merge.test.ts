@@ -67,7 +67,8 @@ describe("record update permission-aware auto-merge", () => {
         permissionLevel: "manage",
       },
       () =>
-        client.records.updateChangeRequest({
+        client.records.changeRequest({
+          operation: "update",
           recordId: record.id,
           fields: { title: "Manage default updated" },
         }),
@@ -89,7 +90,8 @@ describe("record update permission-aware auto-merge", () => {
         permissionLevel: "manage",
       },
       () =>
-        client.records.updateChangeRequest({
+        client.records.changeRequest({
+          operation: "update",
           recordId: record.id,
           fields: { title: "Pending manager update" },
           autoMerge: false,
@@ -112,7 +114,8 @@ describe("record update permission-aware auto-merge", () => {
         permissionLevel: "changeRequest",
       },
       () =>
-        client.records.updateChangeRequest({
+        client.records.changeRequest({
+          operation: "update",
           recordId: record.id,
           fields: { title: "Pending restricted update" },
           autoMerge: true,

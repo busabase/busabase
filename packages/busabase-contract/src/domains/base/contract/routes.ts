@@ -1,48 +1,31 @@
 import { oc } from "@orpc/contract";
 import { z } from "zod";
-import {
-  changeRequestSchema,
-  createDeleteChangeRequestInputSchema,
-  listInputSchema,
-  reviseOperationInputSchema,
-} from "../../../contract/schemas";
+import { changeRequestSchema, listByStatusInputSchema } from "../../../contract/schemas";
 import {
   archiveBaseInputSchema,
   baseFieldSchema,
   baseSchema,
-  convertFieldChangeRequestInputSchema,
   createBaseFieldInputSchema,
   createBaseInputSchema,
-  createFieldChangeRequestInputSchema,
-  deleteFieldChangeRequestInputSchema,
+  fieldChangeRequestInputSchema,
   previewFieldConversionInputSchema,
   previewFieldConversionOutputSchema,
-  reorderFieldsChangeRequestInputSchema,
   restoreBaseInputSchema,
-  restoreFieldChangeRequestInputSchema,
-  updateFieldChangeRequestInputSchema,
 } from "./base-schemas";
 import {
   countRecordsInputSchema,
   countRecordsResponseSchema,
   createBulkChangeRequestInputSchema,
   createChangeRequestInputSchema,
-  listArchivedRecordsPagedInputSchema,
   listRecordsInputSchema,
   listRecordsResponseSchema,
+  recordChangeRequestInputSchema,
   recordFieldFilterInputSchema,
   recordFieldGetInputSchema,
   recordLinkSchema,
   recordSchema,
-  restoreRecordInputSchema,
 } from "./record-schemas";
-import {
-  createViewInputSchema,
-  deleteViewInputSchema,
-  restoreViewInputSchema,
-  updateViewInputSchema,
-  viewSchema,
-} from "./view-schemas";
+import { viewChangeRequestInputSchema, viewSchema } from "./view-schemas";
 
 // Base domain oRPC routes (bases / records / views); composed in contract/busabase.ts.
 export const baseContract = {
@@ -52,17 +35,10 @@ export const baseContract = {
       path: "/bases",
       tags: ["Bases"],
       summary: "List Bases",
-      successDescription: "Flat list of developer-facing Bases.",
+      successDescription:
+        "Developer-facing Bases. `status=archived` returns the archived ones instead of the active ones.",
     })
-    .output(z.array(baseSchema)),
-  listArchived: oc
-    .route({
-      method: "GET",
-      path: "/bases/archived",
-      tags: ["Bases"],
-      summary: "List archived bases",
-      successDescription: "Bases that have been archived.",
-    })
+    .input(listByStatusInputSchema)
     .output(z.array(baseSchema)),
   get: oc
     .route({
@@ -89,42 +65,12 @@ export const baseContract = {
       method: "GET",
       path: "/bases/{baseId}/views",
       tags: ["Views"],
-      summary: "List active views for a Base",
-      successDescription: "Saved table views for a Base.",
-    })
-    .input(z.object({ baseId: z.string() }))
-    .output(z.array(viewSchema)),
-  listArchivedViews: oc
-    .route({
-      method: "GET",
-      path: "/bases/{baseId}/views/archived",
-      tags: ["Views"],
-      summary: "List archived views for a Base",
-      successDescription: "Views that have been archived (soft-deleted) from a Base.",
-    })
-    .input(z.object({ baseId: z.string() }))
-    .output(z.array(viewSchema)),
-  listArchivedRecords: oc
-    .route({
-      method: "GET",
-      path: "/bases/{baseId}/records/archived",
-      tags: ["Records"],
-      summary: "List archived records for a Base",
-      successDescription: "Records that have been archived (soft-deleted) from a Base.",
-    })
-    .input(z.object({ baseId: z.string() }))
-    .output(z.array(recordSchema)),
-  listArchivedRecordsPaged: oc
-    .route({
-      method: "GET",
-      path: "/bases/{baseId}/records/archived/paged",
-      tags: ["Records"],
-      summary: "List archived records for a Base with keyset pagination",
+      summary: "List views for a Base",
       successDescription:
-        "A page of archived (soft-deleted) records plus an opaque nextCursor (null at the end).",
+        "Saved table views for a Base. `status=archived` returns the soft-deleted ones instead.",
     })
-    .input(listArchivedRecordsPagedInputSchema)
-    .output(listRecordsResponseSchema),
+    .input(listByStatusInputSchema.extend({ baseId: z.string() }))
+    .output(z.array(viewSchema)),
   create: oc
     .route({
       method: "POST",
@@ -177,46 +123,16 @@ export const baseContract = {
     })
     .input(createBaseFieldInputSchema.extend({ baseId: z.string() }))
     .output(baseSchema),
-  createFieldChangeRequest: oc
+  fieldChangeRequest: oc
     .route({
       method: "POST",
       path: "/bases/{baseId}/fields/change-requests",
       tags: ["Bases", "Change Requests"],
-      summary: "Create Add Field change request",
-      successDescription: "Created change request that proposes a new field.",
-    })
-    .input(createFieldChangeRequestInputSchema.extend({ baseId: z.string() }))
-    .output(changeRequestSchema),
-  createViewChangeRequest: oc
-    .route({
-      method: "POST",
-      path: "/bases/{baseId}/views/change-requests",
-      tags: ["Views", "Change Requests"],
-      summary: "Create View change request",
-      successDescription: "Created change request that proposes a new View.",
-    })
-    .input(createViewInputSchema.extend({ baseId: z.string() }))
-    .output(changeRequestSchema),
-  deleteFieldChangeRequest: oc
-    .route({
-      method: "DELETE",
-      path: "/bases/{baseId}/fields/change-requests",
-      tags: ["Bases", "Change Requests"],
-      summary: "Create Delete Field change request",
-      successDescription: "Created change request that soft-deletes a field.",
-    })
-    .input(deleteFieldChangeRequestInputSchema.extend({ baseId: z.string() }))
-    .output(changeRequestSchema),
-  updateFieldChangeRequest: oc
-    .route({
-      method: "PATCH",
-      path: "/bases/{baseId}/fields/change-requests",
-      tags: ["Bases", "Change Requests"],
-      summary: "Create Update Field change request",
+      summary: "Create field change request",
       successDescription:
-        "Created change request that updates field metadata (name, required, options).",
+        "Created change request proposing a field change. `operation` selects what to propose: `create`, `update`, `delete`, `convert` (change type), `reorder`, or `restore` (undo a soft delete).",
     })
-    .input(updateFieldChangeRequestInputSchema.extend({ baseId: z.string() }))
+    .input(fieldChangeRequestInputSchema)
     .output(changeRequestSchema),
   previewFieldConversion: oc
     .route({
@@ -228,26 +144,6 @@ export const baseContract = {
     })
     .input(previewFieldConversionInputSchema.extend({ baseId: z.string() }))
     .output(previewFieldConversionOutputSchema),
-  convertFieldChangeRequest: oc
-    .route({
-      method: "POST",
-      path: "/bases/{baseId}/fields/convert/change-requests",
-      tags: ["Bases", "Change Requests"],
-      summary: "Create Convert Field change request",
-      successDescription: "Created change request that converts a field to a different type.",
-    })
-    .input(convertFieldChangeRequestInputSchema.extend({ baseId: z.string() }))
-    .output(changeRequestSchema),
-  reorderFieldsChangeRequest: oc
-    .route({
-      method: "POST",
-      path: "/bases/{baseId}/fields/reorder/change-requests",
-      tags: ["Bases", "Change Requests"],
-      summary: "Reorder fields",
-      successDescription: "Created change request that reorders fields.",
-    })
-    .input(reorderFieldsChangeRequestInputSchema.extend({ baseId: z.string() }))
-    .output(changeRequestSchema),
   archiveChangeRequest: oc
     .route({
       method: "POST",
@@ -268,37 +164,21 @@ export const baseContract = {
     })
     .input(restoreBaseInputSchema.extend({ baseId: z.string() }))
     .output(changeRequestSchema),
-  restoreFieldChangeRequest: oc
-    .route({
-      method: "POST",
-      path: "/bases/{baseId}/fields/restore/change-requests",
-      tags: ["Bases", "Change Requests"],
-      summary: "Restore deleted field",
-      successDescription: "Created change request that restores a soft-deleted field.",
-    })
-    .input(restoreFieldChangeRequestInputSchema.extend({ baseId: z.string() }))
-    .output(changeRequestSchema),
 };
 
 export const recordContract = {
+  // One listing for records: always keyset-paginated, `baseId` always honoured,
+  // `status` picking live rows or the trash. The old unpaginated `/records`
+  // silently dropped `baseId` (its schema had no such field), so a caller
+  // scoping to one Base quietly got the whole space back.
   list: oc
     .route({
       method: "GET",
       path: "/records",
       tags: ["Records"],
       summary: "List records",
-      successDescription: "Canonical records created from merged change requests.",
-    })
-    .input(listInputSchema)
-    .output(z.array(recordSchema)),
-  listPaged: oc
-    .route({
-      method: "GET",
-      path: "/records/paged",
-      tags: ["Records"],
-      summary: "List records with keyset pagination",
       successDescription:
-        "A page of canonical records plus an opaque nextCursor (null at the end).",
+        "A page of canonical records plus an opaque nextCursor (null at the end). `status=archived` lists the Base's trash instead of its live rows.",
     })
     .input(listRecordsInputSchema)
     .output(listRecordsResponseSchema),
@@ -343,37 +223,22 @@ export const recordContract = {
     })
     .input(recordFieldGetInputSchema)
     .output(recordSchema.nullable()),
-  updateChangeRequest: oc
+  changeRequest: oc
     .route({
-      method: "PUT",
+      method: "POST",
       path: "/records/{recordId}/change-requests",
       tags: ["Records", "Change Requests"],
-      summary: "Create record update change request",
+      summary: "Create record change request",
       successDescription:
-        "Permission-aware by default: updates the record immediately when the actor has write access, otherwise returns a pending ChangeRequest. Pass `autoMerge: false` to force review.",
+        "Creates a record change request selected by `operation`. Updates auto-merge when the actor has write access unless `autoMerge: false`; delete and restore remain review-first.",
     })
-    .input(
-      reviseOperationInputSchema.extend({
-        recordId: z.string(),
-        autoMerge: z.boolean().optional(),
-      }),
-    )
+    .input(recordChangeRequestInputSchema)
     .output(
       z.union([
         recordSchema.extend({ materialized: z.literal(true) }),
         changeRequestSchema.extend({ materialized: z.literal(false) }),
       ]),
     ),
-  deleteChangeRequest: oc
-    .route({
-      method: "DELETE",
-      path: "/records/{recordId}/change-requests",
-      tags: ["Records", "Change Requests"],
-      summary: "Create record delete change request",
-      successDescription: "Created change request that proposes archiving or deleting a record.",
-    })
-    .input(createDeleteChangeRequestInputSchema.extend({ recordId: z.string() }))
-    .output(changeRequestSchema),
   listChangeRequests: oc
     .route({
       method: "GET",
@@ -384,16 +249,6 @@ export const recordContract = {
     })
     .input(z.object({ recordId: z.string() }))
     .output(z.array(changeRequestSchema)),
-  restoreChangeRequest: oc
-    .route({
-      method: "POST",
-      path: "/records/{recordId}/restore/change-requests",
-      tags: ["Records", "Change Requests"],
-      summary: "Create record restore change request",
-      successDescription: "Created change request that restores an archived record.",
-    })
-    .input(restoreRecordInputSchema.extend({ recordId: z.string() }))
-    .output(changeRequestSchema),
   listLinks: oc
     .route({
       method: "GET",
@@ -407,34 +262,15 @@ export const recordContract = {
 };
 
 export const viewContract = {
-  updateChangeRequest: oc
-    .route({
-      method: "PUT",
-      path: "/views/{viewId}/change-requests",
-      tags: ["Views", "Change Requests"],
-      summary: "Create View update change request",
-      successDescription: "Created change request that proposes updating a View.",
-    })
-    .input(updateViewInputSchema.extend({ viewId: z.string() }))
-    .output(changeRequestSchema),
-  deleteChangeRequest: oc
-    .route({
-      method: "DELETE",
-      path: "/views/{viewId}/change-requests",
-      tags: ["Views", "Change Requests"],
-      summary: "Create View delete change request",
-      successDescription: "Created change request that proposes archiving a View.",
-    })
-    .input(deleteViewInputSchema.extend({ viewId: z.string() }))
-    .output(changeRequestSchema),
-  restoreChangeRequest: oc
+  changeRequest: oc
     .route({
       method: "POST",
-      path: "/views/{viewId}/restore/change-requests",
+      path: "/views/change-requests",
       tags: ["Views", "Change Requests"],
-      summary: "Create View restore change request",
-      successDescription: "Created change request that restores an archived View.",
+      summary: "Create view change request",
+      successDescription:
+        "Created change request proposing a view change. `operation` selects what to propose: `create` (addressed by `baseId`), or `update` / `delete` / `restore` (addressed by `viewId`).",
     })
-    .input(restoreViewInputSchema.extend({ viewId: z.string() }))
+    .input(viewChangeRequestInputSchema)
     .output(changeRequestSchema),
 };

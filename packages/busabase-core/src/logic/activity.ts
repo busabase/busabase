@@ -155,7 +155,7 @@ export const listActivityPaged = async (
       .where(
         and(
           eq(busabaseRecords.spaceId, spaceId),
-          // Match the feed's record source (records.listPaged is active-only), so
+          // Match the feed's record source (records.list is active-only), so
           // archived records don't flood the activity feed with new events.
           eq(busabaseRecords.status, "active"),
           keysetFor("record", busabaseRecords.updatedAt, busabaseRecords.id, cursor),

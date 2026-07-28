@@ -113,7 +113,8 @@ describe("record_update — required-field validation sees the MERGED view, not 
 
     // Only touches `title` — never mentions req_multi at all. Previously 400'd
     // with "Req Multi is required" even though it already has a value.
-    const updateCr = await client.records.updateChangeRequest({
+    const updateCr = await client.records.changeRequest({
+      operation: "update",
       recordId,
       fields: { title: "G1" },
       autoMerge: false,
@@ -129,7 +130,8 @@ describe("record_update — required-field validation sees the MERGED view, not 
     const recordId = await createRecord({ title: "H0", req_multi: ["m1"] });
 
     await expect(
-      client.records.updateChangeRequest({
+      client.records.changeRequest({
+        operation: "update",
         recordId,
         fields: { title: "H1", req_multi: [] },
         autoMerge: false,
@@ -140,7 +142,8 @@ describe("record_update — required-field validation sees the MERGED view, not 
     });
 
     await expect(
-      client.records.updateChangeRequest({
+      client.records.changeRequest({
+        operation: "update",
         recordId,
         fields: { title: "H1", req_multi: null },
         autoMerge: false,

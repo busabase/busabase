@@ -31,7 +31,7 @@ const FILE_TREE_TYPES = new Set<CreatableNodeType>(["skill", "drive", "airapp"])
 
 // Input types read straight off the generated client, so a contract change
 // surfaces here as a type error rather than as a silently-dropped field.
-type FileTreeCreateInput = Parameters<BusabaseTaskClient["skills"]["create"]>[0];
+type FileTreeCreateInput = Parameters<BusabaseTaskClient["fileTrees"]["create"]>[0];
 type DocCreateInput = Parameters<BusabaseTaskClient["docs"]["create"]>[0];
 type BaseCreateInput = Parameters<BusabaseTaskClient["bases"]["create"]>[0];
 type FileCreateInput = Parameters<BusabaseTaskClient["files"]["create"]>[0];
@@ -235,8 +235,11 @@ export const nodeCreateTask: TaskDefinition<NodeCreateInput> = {
     };
 
     if (FILE_TREE_TYPES.has(type)) {
-      const payload: FileTreeCreateInput = {
+      const payload = {
         ...common,
+        // `type` is the contract's discriminator, so the narrowing has to be
+        // explicit — `FILE_TREE_TYPES.has` doesn't narrow a plain string.
+        type: type as FileTreeCreateInput["type"],
         ...(Array.isArray(input.files)
           ? { files: input.files as FileTreeCreateInput["files"] }
           : {}),
@@ -248,9 +251,7 @@ export const nodeCreateTask: TaskDefinition<NodeCreateInput> = {
           : {}),
         ...(input.version ? { version: input.version } : {}),
       };
-      if (type === "skill") return client.skills.create(payload);
-      if (type === "drive") return client.drives.create(payload);
-      return client.airapps.create(payload);
+      return client.fileTrees.create(payload as FileTreeCreateInput);
     }
 
     if (type === "doc") {

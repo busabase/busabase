@@ -8,8 +8,8 @@ import { busabaseRouter } from "../src/router";
 /**
  * Pagination + counts: the dashboard must be able to see EVERY record / change
  * request, not just the first page, and its inbox tab badges must reflect the
- * whole space (not a capped page). Exercises records.count / records.listPaged
- * and changeRequests.counts / changeRequests.listPaged through the real router.
+ * whole space (not a capped page). Exercises records.count / records.list and
+ * changeRequests.counts / changeRequests.list through the real router.
  */
 
 type Client = ReturnType<typeof createRouterClient<typeof busabaseRouter, Record<never, never>>>;
@@ -80,7 +80,7 @@ describe("Pagination & counts — oRPC integration", () => {
     const pageSizes: number[] = [];
     let cursor: string | undefined;
     for (let guard = 0; guard < 10; guard++) {
-      const page = await client.records.listPaged({ baseId, limit: 50, cursor });
+      const page = await client.records.list({ baseId, limit: 50, cursor });
       pageSizes.push(page.records.length);
       for (const record of page.records) {
         seen.add(record.id);
@@ -131,7 +131,7 @@ describe("Pagination & counts — oRPC integration", () => {
     const seen = new Set<string>();
     let cursor: string | undefined;
     for (let guard = 0; guard < 20; guard++) {
-      const page = await client.changeRequests.listPaged({
+      const page = await client.changeRequests.list({
         status: ["in_review"],
         limit: 12,
         cursor,

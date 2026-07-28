@@ -79,7 +79,7 @@ describe("Batch hydrate — per-item relation isolation", () => {
   });
 
   it("keeps each CR's base, operations and reviews to itself in one batch", async () => {
-    const page = await client.changeRequests.listPaged({ limit: 50 });
+    const page = await client.changeRequests.list({ limit: 50 });
     const byId = new Map(page.changeRequests.map((cr) => [cr.id, cr]));
 
     const crA = byId.get(crAId);
@@ -111,7 +111,7 @@ describe("Batch hydrate — per-item relation isolation", () => {
     await client.changeRequests.review({ changeRequestId: crAId, verdict: "approved" });
     await client.changeRequests.merge({ changeRequestId: crAId });
 
-    const page = await client.records.listPaged({ baseId: baseAId, limit: 50 });
+    const page = await client.records.list({ baseId: baseAId, limit: 50 });
     expect(page.records).toHaveLength(3);
     const names = page.records.map((record) => record.headCommit.fields.name).sort();
     expect(names).toEqual(["a1", "a2", "a3"]);

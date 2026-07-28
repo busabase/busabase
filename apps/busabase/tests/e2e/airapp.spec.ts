@@ -47,8 +47,8 @@ const createAirApp = async (request: APIRequestContext, namePrefix: string) => {
   const name = unique(namePrefix);
   const slug = slugify(name);
   const created = await json<AirAppNodeVO>(
-    await request.post("/api/v1/airapps", {
-      data: { autoMerge: true, slug, name },
+    await request.post("/api/v1/file-trees", {
+      data: { type: "airapp", autoMerge: true, slug, name },
     }),
   );
   return { name, slug, nodeId: created.node.id };

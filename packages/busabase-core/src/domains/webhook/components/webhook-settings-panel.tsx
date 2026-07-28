@@ -350,7 +350,7 @@ export function WebhookSettingsPanel({
   );
   const rulesQueryOptions = useMemo(() => orpc.webhooks.list.queryOptions({}), [orpc]);
   const rulesQuery = useQuery({ ...rulesQueryOptions, enabled: active });
-  const basesQuery = useQuery({ ...orpc.bases.list.queryOptions({}), enabled: active });
+  const basesQuery = useQuery({ ...orpc.bases.list.queryOptions({ input: {} }), enabled: active });
   const deliveriesQuery = useQuery({
     ...orpc.webhooks.deliveries.queryOptions({
       input: { ruleId: expandedRuleId ?? "", limit: 10 },

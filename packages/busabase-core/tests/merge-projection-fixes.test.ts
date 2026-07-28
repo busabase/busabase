@@ -78,7 +78,8 @@ describe("merge projection fixes", () => {
     expect(byDraft.map((r) => r.id)).toContain(recordId);
 
     // Update the record: status draft → published.
-    const updateCr = await client.records.updateChangeRequest({
+    const updateCr = await client.records.changeRequest({
+      operation: "update",
       recordId,
       fields: { title: "rec-1", status: "published" },
       autoMerge: false,
@@ -125,7 +126,8 @@ describe("merge projection fixes", () => {
     const recordId = created.record!.id;
 
     // Convert category text → select with auto_create.
-    const convertCr = await client.bases.convertFieldChangeRequest({
+    const convertCr = await client.bases.fieldChangeRequest({
+      operation: "convert",
       baseId,
       fieldId: categoryFieldId,
       newType: "select",
@@ -134,7 +136,7 @@ describe("merge projection fixes", () => {
     await approveAndMerge(convertCr.id);
 
     // A choice named "Apple" was auto-created.
-    const updatedBase = (await client.bases.list()).find((b) => b.id === baseId)!;
+    const updatedBase = (await client.bases.list({})).find((b) => b.id === baseId)!;
     const categoryField = updatedBase.fields.find((f) => f.slug === "category")!;
     expect(categoryField.type).toBe("select");
     const appleChoice = categoryField.options?.choices?.find((c) => c.name === "Apple");
@@ -192,7 +194,8 @@ describe("merge projection fixes", () => {
     expect(linkedBefore.map((l) => l.targetRecordId)).toContain(tId);
 
     // Archive T → its inbound link from S is soft-deleted.
-    const deleteCr = await client.records.deleteChangeRequest({
+    const deleteCr = await client.records.changeRequest({
+      operation: "delete",
       recordId: tId,
       deleteMode: "archive",
     });
@@ -201,7 +204,7 @@ describe("merge projection fixes", () => {
     expect(linkedWhileArchived.map((l) => l.targetRecordId)).not.toContain(tId);
 
     // Restore T → the link comes back.
-    const restoreCr = await client.records.restoreChangeRequest({ recordId: tId });
+    const restoreCr = await client.records.changeRequest({ operation: "restore", recordId: tId });
     await approveAndMerge(restoreCr.id);
     const linkedAfter = await client.records.listLinks({ recordId: sId });
     expect(linkedAfter.map((l) => l.targetRecordId)).toContain(tId);

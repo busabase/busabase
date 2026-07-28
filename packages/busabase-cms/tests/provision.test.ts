@@ -194,7 +194,7 @@ const createStore = (options: StoreOptions = {}) => {
       updateMetadata,
     },
     records: {
-      listPaged: vi.fn(async () => ({ records: [], nextCursor: null })),
+      list: vi.fn(async () => ({ records: [], nextCursor: null })),
     },
   };
 
@@ -258,7 +258,7 @@ describe("Folder-based CMS provisioning", () => {
 
     await cms.posts.list();
 
-    expect(store.client.records.listPaged).toHaveBeenCalledWith({
+    expect(store.client.records.list).toHaveBeenCalledWith({
       baseId: "base-posts",
       limit: 100,
       cursor: undefined,
@@ -691,7 +691,7 @@ describe("Folder-based CMS provisioning", () => {
 
     await cms.categories.list();
 
-    expect(store.client.records.listPaged).toHaveBeenCalledWith(
+    expect(store.client.records.list).toHaveBeenCalledWith(
       expect.objectContaining({ baseId: "base-categories" }),
     );
     expect(store.create).not.toHaveBeenCalled();

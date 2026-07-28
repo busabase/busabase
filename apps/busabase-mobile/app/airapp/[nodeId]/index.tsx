@@ -50,7 +50,7 @@ function AirAppDetailContent() {
   const params = useLocalSearchParams<{ nodeId?: string }>();
   // Node tree taps pass the real node id; search results pass its slug (see
   // app/drawer/search.tsx and app/drive|skill/[nodeId] for the same
-  // convention) — the backend's `airapps.get`/dashboard route resolve both.
+  // convention) — the backend's `fileTrees.get`/dashboard route resolve both.
   const nodeId = typeof params.nodeId === "string" ? params.nodeId : "";
   const router = useRouter();
   const tokens = useTokens();
@@ -63,7 +63,7 @@ function AirAppDetailContent() {
 
   const airappQuery = useQuery(
     buda && nodeId
-      ? buda.orpc.airapps.get.queryOptions({ input: { nodeId } })
+      ? buda.orpc.fileTrees.get.queryOptions({ input: { nodeId, type: "airapp" } })
       : { queryKey: ["no-connection", "airapp", nodeId], queryFn: skipToken },
   );
   const airapp = airappQuery.data ?? null;

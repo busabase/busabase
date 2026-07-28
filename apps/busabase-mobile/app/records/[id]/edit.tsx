@@ -56,7 +56,8 @@ function EditRecordContent() {
   const submitMutation = useMutation({
     mutationFn: async () => {
       if (!buda || !record) throw new Error("Not ready");
-      return buda.client.records.updateChangeRequest({
+      return buda.client.records.changeRequest({
+        operation: "update",
         recordId: record.id,
         fields: normalizeFormValues(record.base.fields, values),
         message: `Update ${getRecordTitle(record)}`,

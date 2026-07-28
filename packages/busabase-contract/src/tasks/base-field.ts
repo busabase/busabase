@@ -152,51 +152,61 @@ export const baseFieldChangeTask: TaskDefinition<BaseFieldChangeInput> = {
   ],
   execute: async (client: BusabaseTaskClient, input: BaseFieldChangeInput) => {
     assertRequired(input);
+    // The contract endpoint is itself an `operation` discriminated union now, so
+    // this is a straight pass-through: the task's job here is the vocabulary
+    // ("add" reads better than "create" for a field) and the guidance, not the
+    // fan-out it used to do across six endpoints.
     const common = {
       baseId: input.baseId,
       ...(input.message ? { message: input.message } : {}),
       ...(input.submittedBy ? { submittedBy: input.submittedBy } : {}),
     };
-    const bases = client.bases;
+    type FieldInput = Parameters<BusabaseTaskClient["bases"]["fieldChangeRequest"]>[0];
 
     switch (input.operation) {
       case "add":
-        return bases.createFieldChangeRequest({
+        return client.bases.fieldChangeRequest({
           ...common,
+          operation: "create",
           slug: input.slug,
           name: input.name,
           ...(input.fieldType ? { type: input.fieldType } : {}),
           ...(input.required !== undefined ? { required: input.required } : {}),
           ...(input.options ? { options: input.options } : {}),
-        } as Parameters<BusabaseTaskClient["bases"]["createFieldChangeRequest"]>[0]);
+        } as FieldInput);
       case "update":
-        return bases.updateFieldChangeRequest({
+        return client.bases.fieldChangeRequest({
           ...common,
+          operation: "update",
           fieldId: input.fieldId,
           patch: input.patch,
-        } as Parameters<BusabaseTaskClient["bases"]["updateFieldChangeRequest"]>[0]);
+        } as FieldInput);
       case "delete":
-        return bases.deleteFieldChangeRequest({
+        return client.bases.fieldChangeRequest({
           ...common,
+          operation: "delete",
           fieldId: input.fieldId,
-        } as Parameters<BusabaseTaskClient["bases"]["deleteFieldChangeRequest"]>[0]);
+        } as FieldInput);
       case "convert":
-        return bases.convertFieldChangeRequest({
+        return client.bases.fieldChangeRequest({
           ...common,
+          operation: "convert",
           fieldId: input.fieldId,
           newType: input.newType,
           ...(input.selectChoiceMode ? { selectChoiceMode: input.selectChoiceMode } : {}),
-        } as Parameters<BusabaseTaskClient["bases"]["convertFieldChangeRequest"]>[0]);
+        } as FieldInput);
       case "reorder":
-        return bases.reorderFieldsChangeRequest({
+        return client.bases.fieldChangeRequest({
           ...common,
+          operation: "reorder",
           fieldIds: input.fieldIds,
-        } as Parameters<BusabaseTaskClient["bases"]["reorderFieldsChangeRequest"]>[0]);
+        } as FieldInput);
       default:
-        return bases.restoreFieldChangeRequest({
+        return client.bases.fieldChangeRequest({
           ...common,
+          operation: "restore",
           fieldId: input.fieldId,
-        } as Parameters<BusabaseTaskClient["bases"]["restoreFieldChangeRequest"]>[0]);
+        } as FieldInput);
     }
   },
 };

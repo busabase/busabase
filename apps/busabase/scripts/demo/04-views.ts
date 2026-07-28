@@ -49,33 +49,32 @@ export async function run() {
 
   // ── Create a new view via CR ────────────────────────────────────────────────
 
-  await step(
-    "POST /bases/{id}/views/change-requests — create 'Demo High Priority' view",
-    async () => {
-      // Unique per run: an archived view keeps holding its (baseId, slug) slot until
-      // the partial-index migration is applied, so re-using a fixed slug would collide.
-      // A fresh throwaway slug each run tests the full create→update→delete lifecycle.
-      viewSlug = `demo-high-priority-${Date.now()}`;
-      const cr = await api<ChangeRequestVO>("POST", `/bases/${blogBase.id}/views/change-requests`, {
-        slug: viewSlug,
-        name: "Demo High Priority",
-        description: "Demo-script view filtering high-priority drafts.",
-        config: {
-          filters: [
-            { fieldSlug: "status", operator: "equals", value: "drafting" },
-            { fieldSlug: "ready", operator: "is_true" },
-          ],
-          sorts: [{ fieldSlug: "priority", direction: "asc" }],
-        },
-        message: "demo: create high-priority view",
-        submittedBy: "demo-script",
-      });
-      assert(cr.status === "in_review", `expected in_review, got ${cr.status}`);
+  await step("POST /views/change-requests — create 'Demo High Priority' view", async () => {
+    // Unique per run: an archived view keeps holding its (baseId, slug) slot until
+    // the partial-index migration is applied, so re-using a fixed slug would collide.
+    // A fresh throwaway slug each run tests the full create→update→delete lifecycle.
+    viewSlug = `demo-high-priority-${Date.now()}`;
+    const cr = await api<ChangeRequestVO>("POST", "/views/change-requests", {
+      operation: "create",
+      baseId: blogBase.id,
+      slug: viewSlug,
+      name: "Demo High Priority",
+      description: "Demo-script view filtering high-priority drafts.",
+      config: {
+        filters: [
+          { fieldSlug: "status", operator: "equals", value: "drafting" },
+          { fieldSlug: "ready", operator: "is_true" },
+        ],
+        sorts: [{ fieldSlug: "priority", direction: "asc" }],
+      },
+      message: "demo: create high-priority view",
+      submittedBy: "demo-script",
+    });
+    assert(cr.status === "in_review", `expected in_review, got ${cr.status}`);
 
-      const result = await approveMerge(cr.id);
-      assert(result.changeRequest.status === "merged", "expected merged");
-    },
-  );
+    const result = await approveMerge(cr.id);
+    assert(result.changeRequest.status === "merged", "expected merged");
+  });
 
   await step("GET /bases/{id}/views — demo view appears after merge", async () => {
     const views = await api<ViewVO[]>("GET", `/bases/${blogBase.id}/views`);
@@ -87,9 +86,11 @@ export async function run() {
 
   // ── Update the view ────────────────────────────────────────────────────────
 
-  await step("PUT /views/{id}/change-requests — update view config", async () => {
+  await step("POST /views/change-requests — update view config", async () => {
     if (!viewId) return;
-    const cr = await api<ChangeRequestVO>("PUT", `/views/${viewId}/change-requests`, {
+    const cr = await api<ChangeRequestVO>("POST", "/views/change-requests", {
+      operation: "update",
+      viewId,
       name: "Demo High Priority (updated)",
       config: {
         filters: [
@@ -127,9 +128,11 @@ export async function run() {
 
   // ── Delete the demo view ──────────────────────────────────────────────────
 
-  await step("DELETE /views/{id}/change-requests — delete demo view", async () => {
+  await step("POST /views/change-requests — delete demo view", async () => {
     if (!viewId) return;
-    const cr = await api<ChangeRequestVO>("DELETE", `/views/${viewId}/change-requests`, {
+    const cr = await api<ChangeRequestVO>("POST", "/views/change-requests", {
+      operation: "delete",
+      viewId,
       message: "demo: clean up demo view",
     });
     assert(cr.status === "in_review", `expected in_review, got ${cr.status}`);

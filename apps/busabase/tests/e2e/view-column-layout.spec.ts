@@ -13,8 +13,10 @@ test("saved view column drag and resize persist through change requests", async 
   const initialSlugs = blog.fields.slice(0, 3).map((field) => field.slug);
   const viewSlug = `column-layout-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
   const createRequest = await json<ChangeRequestVO>(
-    await request.post(`/api/v1/bases/${blog.id}/views/change-requests`, {
+    await request.post("/api/v1/views/change-requests", {
       data: {
+        operation: "create",
+        baseId: blog.id,
         config: { filters: [], sorts: [], visibleFieldSlugs: initialSlugs },
         name: "Column layout",
         slug: viewSlug,
@@ -48,7 +50,7 @@ test("saved view column drag and resize persist through change requests", async 
       return;
     }
     const url = browserRequest.url();
-    if (url.includes("/api/rpc/views/updateChangeRequest")) {
+    if (url.includes("/api/rpc/views/changeRequest")) {
       workflowRequests.update += 1;
     } else if (url.includes("/api/rpc/changeRequests/review")) {
       workflowRequests.review += 1;

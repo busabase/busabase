@@ -14,8 +14,10 @@ test("staged view controls recover a hidden conditioned field with one update CR
   const hiddenField = blog.fields[2];
   const viewSlug = `view-controls-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
   const createRequest = await json<ChangeRequestVO>(
-    await request.post(`/api/v1/bases/${blog.id}/views/change-requests`, {
+    await request.post("/api/v1/views/change-requests", {
       data: {
+        operation: "create",
+        baseId: blog.id,
         config: {
           cardSize: "large",
           fieldWidths: { [visibleFields[0].slug]: 220 },
@@ -69,7 +71,7 @@ test("staged view controls recover a hidden conditioned field with one update CR
       return;
     }
     const url = browserRequest.url();
-    if (url.includes("/api/rpc/views/updateChangeRequest")) {
+    if (url.includes("/api/rpc/views/changeRequest")) {
       workflowRequests.update += 1;
     } else if (url.includes("/api/rpc/changeRequests/review")) {
       workflowRequests.review += 1;
@@ -181,8 +183,10 @@ test("edit view reuses the shared fields editor and preserves unrelated config",
   const hiddenField = blog.fields[2];
   const viewSlug = `edit-view-fields-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
   const createRequest = await json<ChangeRequestVO>(
-    await request.post(`/api/v1/bases/${blog.id}/views/change-requests`, {
+    await request.post("/api/v1/views/change-requests", {
       data: {
+        operation: "create",
+        baseId: blog.id,
         config: {
           cardSize: "large",
           fieldWidths: { [visibleFields[0].slug]: 240 },
@@ -239,7 +243,7 @@ test("edit view reuses the shared fields editor and preserves unrelated config",
       return;
     }
     const url = browserRequest.url();
-    if (url.includes("/api/rpc/views/updateChangeRequest")) {
+    if (url.includes("/api/rpc/views/changeRequest")) {
       workflowRequests.update += 1;
     } else if (url.includes("/api/rpc/changeRequests/review")) {
       workflowRequests.review += 1;

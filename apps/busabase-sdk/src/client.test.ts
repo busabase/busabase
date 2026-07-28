@@ -103,7 +103,7 @@ describe("createBusabaseClient request assembly", () => {
       baseUrl: "http://localhost:15419/api/v1",
       fetch: fetchImpl,
     });
-    await client.bases.list();
+    await client.bases.list({});
     expect(requests).toHaveLength(1);
     expect(requests[0]?.url).toBe("http://localhost:15419/api/v1/bases");
   });
@@ -116,7 +116,7 @@ describe("createBusabaseClient request assembly", () => {
       spaceId: "spc_42",
       fetch: fetchImpl,
     });
-    await client.bases.list();
+    await client.bases.list({});
     expect(requests[0]?.headers.get("authorization")).toBe("Bearer sk_secret");
     expect(requests[0]?.headers.get("x-busabase-space")).toBe("spc_42");
   });
@@ -124,7 +124,7 @@ describe("createBusabaseClient request assembly", () => {
   it("sends no auth header for an open local server", async () => {
     const { fetchImpl, requests } = captureFetch();
     const client = createBusabaseClient({ baseUrl: "http://localhost:15419", fetch: fetchImpl });
-    await client.bases.list();
+    await client.bases.list({});
     expect(requests[0]?.headers.get("authorization")).toBeNull();
     expect(requests[0]?.headers.get("x-busabase-space")).toBeNull();
   });
@@ -137,7 +137,7 @@ describe("createBusabaseClient request assembly", () => {
       headers: { "x-trace-id": "abc", authorization: "Bearer override" },
       fetch: fetchImpl,
     });
-    await client.bases.list();
+    await client.bases.list({});
     expect(requests[0]?.headers.get("x-trace-id")).toBe("abc");
     expect(requests[0]?.headers.get("authorization")).toBe("Bearer override");
   });
@@ -149,7 +149,7 @@ describe("createBusabaseClient request assembly", () => {
       headers: async () => ({ "x-dynamic": "live" }),
       fetch: fetchImpl,
     });
-    await client.bases.list();
+    await client.bases.list({});
     expect(requests[0]?.headers.get("x-dynamic")).toBe("live");
   });
 
@@ -288,7 +288,7 @@ describe("createBusabaseClient error decoding", () => {
       }),
     });
 
-    await expect(client.bases.list()).rejects.toThrow(
+    await expect(client.bases.list({})).rejects.toThrow(
       "ChangeRequest must be approved before merge",
     );
   });
@@ -305,7 +305,7 @@ describe("createBusabaseClient error decoding", () => {
       }),
     });
 
-    await expect(client.bases.list()).rejects.toThrow(
+    await expect(client.bases.list({})).rejects.toThrow(
       /Input validation failed.*fields\.score: Expected number, received string/,
     );
   });
@@ -316,6 +316,6 @@ describe("createBusabaseClient error decoding", () => {
       fetch: errorFetch(500, "Internal Server Error", { unexpected: "shape" }),
     });
 
-    await expect(client.bases.list()).rejects.toThrow();
+    await expect(client.bases.list({})).rejects.toThrow();
   });
 });

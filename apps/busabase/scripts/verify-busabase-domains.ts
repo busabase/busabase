@@ -28,7 +28,7 @@ import {
   createViewChangeRequest,
   getBase,
   getRecord,
-  listRecords,
+  listRecordsPaged,
   listViews,
 } from "busabase-core/domains/base/handlers";
 import {
@@ -357,7 +357,7 @@ async function main() {
   assert.equal(deleted?.status, "archived", "record_delete archived the record");
   ok("record_delete merged");
 
-  const records = await listRecords({});
+  const { records } = await listRecordsPaged({});
   console.log(
     `\n✅ verify-busabase-domains: all ${step} operation-kind checks passed (${records.length} active records).`,
   );

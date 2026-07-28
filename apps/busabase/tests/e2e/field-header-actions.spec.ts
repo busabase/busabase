@@ -13,8 +13,10 @@ test("field header actions require a saved view and support keyboard quick sorti
 
   const viewSlug = `field-header-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
   const createViewRequest = await json<ChangeRequestVO>(
-    await request.post(`/api/v1/bases/${blog.id}/views/change-requests`, {
+    await request.post("/api/v1/views/change-requests", {
       data: {
+        operation: "create",
+        baseId: blog.id,
         config: { filters: [], sorts: [] },
         name: "Field header actions",
         slug: viewSlug,

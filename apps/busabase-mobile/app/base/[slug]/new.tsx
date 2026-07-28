@@ -35,7 +35,7 @@ function NewRecordContent() {
 
   const basesQuery = useQuery(
     buda
-      ? buda.orpc.bases.list.queryOptions({})
+      ? buda.orpc.bases.list.queryOptions({ input: {} })
       : { queryKey: ["no-connection", "bases", "list"], queryFn: skipToken },
   );
   const base: BaseVO | null = useMemo(

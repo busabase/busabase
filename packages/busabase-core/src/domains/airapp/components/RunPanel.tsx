@@ -93,9 +93,10 @@ export function useAirAppRunner({
           // A React Query observer for the Files tab may use the same readFile
           // key and cancel it during Strict Mode's mount cleanup, so do not join
           // that observer-owned query here.
-          const detail = await orpc.airapps.readFile.call({
+          const detail = await orpc.fileTrees.readFile.call({
             nodeId: currentNodeId,
             filePath: file.path,
+            type: "airapp",
           });
           return detail.encoding === "utf8" ? ([file.path, detail.content] as const) : null;
         }),
@@ -492,7 +493,7 @@ export function AirAppSidePanelPreview({ orpc, payload }: SidePanelTabProps) {
   const { nodeId } = payload as { nodeId: string };
 
   const airappQuery = useQuery({
-    ...orpc.airapps.get.queryOptions({ input: { nodeId } }),
+    ...orpc.fileTrees.get.queryOptions({ input: { nodeId, type: "airapp" } }),
     enabled: Boolean(nodeId),
   });
   const airapp = airappQuery.data ?? null;
