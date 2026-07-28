@@ -1,10 +1,27 @@
 import { describe, expect, it } from "vitest";
+import { busabaseContractRoutes } from "../contract/busabase";
 import {
+  apiKeyPermissionsSchema,
   capApiKeyLevel,
+  createApiKeyPermissionsSchema,
   hasApiKeyLevel,
+  PROCEDURE_PERMISSION_POLICY,
+  parseBusabaseRelayPermissionLevel,
   permissionLevelForSpaceRole,
+  resolveProcedurePermissionPolicy,
   resolveRequiredLevel,
 } from "./api-key-level";
+
+describe("parseBusabaseRelayPermissionLevel", () => {
+  it("accepts only the four permission levels", () => {
+    expect(parseBusabaseRelayPermissionLevel("read")).toBe("read");
+    expect(parseBusabaseRelayPermissionLevel("changeRequest")).toBe("changeRequest");
+    expect(parseBusabaseRelayPermissionLevel("write")).toBe("write");
+    expect(parseBusabaseRelayPermissionLevel("manage")).toBe("manage");
+    expect(parseBusabaseRelayPermissionLevel("owner")).toBeNull();
+    expect(parseBusabaseRelayPermissionLevel(null)).toBeNull();
+  });
+});
 
 describe("hasApiKeyLevel", () => {
   it("null (legacy/unset) stored level always allows — zero behavior change for existing keys", () => {
@@ -112,9 +129,8 @@ describe("resolveRequiredLevel", () => {
     expect(resolveRequiredLevel(["workbench", "live", "subscribe"], undefined)).toBe("manage");
   });
 
-  it("an unclassified GET path defaults to read (always allowed)", () => {
-    expect(resolveRequiredLevel(["workbench", "someFutureDomain", "list"], "GET")).toBe("read");
-    expect(hasApiKeyLevel("read", "read")).toBe(true);
+  it("an unclassified GET path also fails closed to manage", () => {
+    expect(resolveRequiredLevel(["workbench", "someFutureDomain", "list"], "GET")).toBe("manage");
   });
 
   it("strips the 'workbench' mount-key prefix seen at runtime, and also accepts a bare path", () => {
@@ -127,5 +143,44 @@ describe("resolveRequiredLevel", () => {
     // prose) but is force-classified to manage either way.
     expect(resolveRequiredLevel(["workbench", "dump", "exportTables"], "POST")).toBe("manage");
     expect(resolveRequiredLevel(["workbench", "nodes", "purge"], "DELETE")).toBe("manage");
+  });
+});
+
+describe("procedure permission policy", () => {
+  it("is exhaustive for every current Busabase contract procedure", () => {
+    const paths: string[] = [];
+    const visit = (value: unknown, parent: string[] = []) => {
+      if (!value || typeof value !== "object") return;
+      for (const [key, child] of Object.entries(value)) {
+        const path = [...parent, key];
+        if (child && typeof child === "object" && "~orpc" in child) {
+          paths.push(path.join("."));
+        } else {
+          visit(child, path);
+        }
+      }
+    };
+    visit(busabaseContractRoutes);
+    expect(Object.keys(PROCEDURE_PERMISSION_POLICY).sort()).toEqual(paths.sort());
+  });
+
+  it("classifies known method mismatches by semantics", () => {
+    expect(resolveProcedurePermissionPolicy(["grep"])).toEqual({ level: "read", scope: "node" });
+    expect(resolveProcedurePermissionPolicy(["assets", "grep"])).toEqual({
+      level: "read",
+      scope: "node",
+    });
+    expect(resolveProcedurePermissionPolicy(["forms", "submit"]).level).toBe("changeRequest");
+    expect(resolveProcedurePermissionPolicy(["bases", "createField"]).level).toBe("write");
+    expect(resolveProcedurePermissionPolicy(["webhooks", "list"])).toEqual({
+      level: "manage",
+      scope: "workspace",
+    });
+  });
+
+  it("rejects nodeScope on creation while preserving legacy read parsing", () => {
+    const legacy = { level: "read" as const, nodeScope: ["nod_private"] };
+    expect(apiKeyPermissionsSchema.safeParse(legacy).success).toBe(true);
+    expect(createApiKeyPermissionsSchema.safeParse(legacy).success).toBe(false);
   });
 });

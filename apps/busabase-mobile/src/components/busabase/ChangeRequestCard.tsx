@@ -1,6 +1,5 @@
 import type { ChangeRequestVO } from "busabase-contract/types";
 import {
-  getChangeRequestMessage,
   getChangeRequestScopeName,
   getChangeRequestSummary,
   getChangeRequestTitle,
@@ -21,14 +20,12 @@ interface ChangeRequestCardProps {
 // (packages/busabase-core/src/domains/dashboard/components/inbox.tsx):
 // status carries color via the dot ONLY (no visible text on it) and carries
 // its label ONLY as plain text at the end of the metadata line — never both
-// at once as a colored chip, which reads as redundant. The optional second
-// line is the author's own commit message, not a synthesized field preview,
-// and is omitted entirely when there isn't one (matching web).
+// at once as a colored chip, which reads as redundant. Mobile keeps this to
+// two scan lines: object title, then scope / operation / status / time.
 export function ChangeRequestCard({ changeRequest, onPress, last }: ChangeRequestCardProps) {
   const tokens = useTokens();
   const scopeName = getChangeRequestScopeName(changeRequest);
   const operationSummary = getChangeRequestSummary(changeRequest);
-  const message = getChangeRequestMessage(changeRequest);
   const title = getChangeRequestTitle(changeRequest);
   const statusLabel = getStatusLabel(changeRequest.status);
   const statusColor =
@@ -61,14 +58,6 @@ export function ChangeRequestCard({ changeRequest, onPress, last }: ChangeReques
           {title}
         </Text>
       </View>
-      {message ? (
-        <Text
-          numberOfLines={1}
-          style={[typography.small, styles.messageText, { color: tokens.mutedForeground }]}
-        >
-          {message}
-        </Text>
-      ) : null}
       <Text
         numberOfLines={1}
         style={[typography.caption, styles.metaText, { color: tokens.mutedForeground }]}
@@ -97,6 +86,5 @@ const styles = StyleSheet.create({
     borderRadius: 999,
   },
   titleText: { flex: 1, minWidth: 0 },
-  messageText: { paddingLeft: 16 },
   metaText: { paddingLeft: 16 },
 });

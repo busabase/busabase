@@ -32,6 +32,20 @@ const fallbackStatus: BusabaseSidecarStatus = {
 
 const isTauri = () =>
   typeof window !== "undefined" && "__TAURI_INTERNALS__" in (window as unknown as object);
+const CHECK_TIMEOUT_MS = 15_000;
+const DOWNLOAD_INSTALL_TIMEOUT_MS = 15 * 60 * 1000;
+
+type BusabaseUpdateStatus =
+  | "idle"
+  | "checking"
+  | "available"
+  | "downloading"
+  | "installed"
+  | "error";
+type BusabaseUpdateDownloadEvent =
+  | { event: "Started"; data: { contentLength?: number } }
+  | { event: "Progress"; data: { chunkLength: number } }
+  | { event: "Finished" };
 
 // The sidecar serves the full Busabase web app. We embed its /dashboard in an
 // iframe so the window shows the exact same UI as a browser on the local sidecar
@@ -46,16 +60,22 @@ export default function Page() {
   const [failed, setFailed] = useState(false);
   const [update, setUpdate] = useState<{
     version: string;
-    downloadAndInstall: () => Promise<void>;
+    downloadAndInstall: (
+      onEvent?: (event: BusabaseUpdateDownloadEvent) => void,
+      options?: { timeout?: number },
+    ) => Promise<void>;
   } | null>(null);
-  const [updateStatus, setUpdateStatus] = useState<
-    "idle" | "checking" | "available" | "downloading" | "installed" | "error"
-  >("idle");
+  const [updateStatus, setUpdateStatus] = useState<BusabaseUpdateStatus>("idle");
   const [updateMessage, setUpdateMessage] = useState<string | null>(null);
   const startedRef = useRef(false);
   const updateFoundRef = useRef(false);
+  const updateStatusRef = useRef<BusabaseUpdateStatus>("idle");
 
   const canUseTauriCommands = isTauri();
+
+  useEffect(() => {
+    updateStatusRef.current = updateStatus;
+  }, [updateStatus]);
 
   const reveal = useCallback((status: BusabaseSidecarStatus) => {
     setAppUrl((current) => current ?? dashboardUrl(status));
@@ -114,32 +134,44 @@ export default function Page() {
     return () => window.clearInterval(timer);
   }, [appUrl, canUseTauriCommands, reveal]);
 
-  const checkForUpdate = useCallback(async () => {
-    if (!canUseTauriCommands || updateFoundRef.current) {
-      return;
-    }
-
-    setUpdateStatus("checking");
-    setUpdateMessage(null);
-    try {
-      const { check } = await import("@tauri-apps/plugin-updater");
-      const available = await check();
-      if (!available) {
-        setUpdateStatus("idle");
+  const checkForUpdate = useCallback(
+    async (options?: { showError?: boolean }) => {
+      if (!canUseTauriCommands || (updateFoundRef.current && updateStatusRef.current !== "error")) {
         return;
       }
 
-      updateFoundRef.current = true;
-      setUpdate({
-        version: available.version,
-        downloadAndInstall: () => available.downloadAndInstall(),
-      });
-      setUpdateStatus("available");
-    } catch (error) {
-      console.error("[busabase-desktop] Update check failed", error);
-      setUpdateStatus("idle");
-    }
-  }, [canUseTauriCommands]);
+      setUpdateStatus("checking");
+      setUpdateMessage(null);
+      try {
+        const { check } = await import("@tauri-apps/plugin-updater");
+        const available = await check({ timeout: CHECK_TIMEOUT_MS });
+        if (!available) {
+          updateFoundRef.current = false;
+          setUpdate(null);
+          setUpdateStatus("idle");
+          return;
+        }
+
+        updateFoundRef.current = true;
+        setUpdate({
+          version: available.version,
+          downloadAndInstall: () => available.downloadAndInstall(),
+        });
+        setUpdateStatus("available");
+      } catch (error) {
+        console.error("[busabase-desktop] Update check failed", error);
+        updateFoundRef.current = false;
+        setUpdate(null);
+        setUpdateStatus(options?.showError ? "error" : "idle");
+        setUpdateMessage(
+          options?.showError
+            ? "Update check failed. Try again after reopening Busabase Desktop."
+            : null,
+        );
+      }
+    },
+    [canUseTauriCommands],
+  );
 
   useEffect(() => {
     if (!canUseTauriCommands) {
@@ -164,22 +196,63 @@ export default function Page() {
 
   const installUpdate = useCallback(async () => {
     if (!update) {
+      await checkForUpdate({ showError: true });
       return;
     }
 
     setUpdateStatus("downloading");
     setUpdateMessage("Downloading and installing update…");
     try {
-      await update.downloadAndInstall();
+      try {
+        await invoke("stop_busabase_sidecar");
+      } catch (stopError) {
+        console.warn("[busabase-desktop] Could not stop sidecar before update", stopError);
+      }
+
+      let downloadedBytes = 0;
+      let contentLength: number | undefined;
+      let lastLoggedPercent = -1;
+
+      await update.downloadAndInstall(
+        (event) => {
+          if (event.event === "Started") {
+            downloadedBytes = 0;
+            contentLength = event.data.contentLength;
+            console.info("[busabase-desktop] Update download started", { contentLength });
+            return;
+          }
+
+          if (event.event === "Progress") {
+            downloadedBytes += event.data.chunkLength;
+            if (!contentLength) return;
+
+            const percent = Math.floor((downloadedBytes / contentLength) * 100);
+            if (percent >= lastLoggedPercent + 10 || percent === 100) {
+              lastLoggedPercent = percent;
+              console.info("[busabase-desktop] Update download progress", {
+                downloadedBytes,
+                contentLength,
+                percent,
+              });
+            }
+            return;
+          }
+
+          console.info("[busabase-desktop] Update download finished");
+        },
+        { timeout: DOWNLOAD_INSTALL_TIMEOUT_MS },
+      );
       setUpdateStatus("installed");
       setUpdateMessage("Restarting Busabase Desktop…");
       await invoke("request_desktop_restart");
     } catch (error) {
       console.error("[busabase-desktop] Update install failed", error);
+      updateFoundRef.current = false;
+      setUpdate(null);
       setUpdateStatus("error");
-      setUpdateMessage("Update failed. Try again after restarting Busabase Desktop.");
+      setUpdateMessage("Update failed. Retry, or reopen Busabase Desktop and check again.");
     }
-  }, [update]);
+  }, [checkForUpdate, update]);
 
   const showUpdateControl =
     updateStatus === "available" ||
@@ -215,7 +288,7 @@ export default function Page() {
       >
         {updateStatus === "available" ? (
           <Download aria-hidden="true" />
-        ) : updateStatus === "installed" ? (
+        ) : updateStatus === "installed" || updateStatus === "error" ? (
           <RotateCcw aria-hidden="true" />
         ) : (
           <RefreshCw className="desktop-update-button-spin" aria-hidden="true" />

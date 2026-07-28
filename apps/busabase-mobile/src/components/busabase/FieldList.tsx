@@ -12,6 +12,7 @@ interface FieldListProps {
   definitions?: BaseFieldVO[];
   /** Highlight values as proposed (new) values in a change request diff. */
   highlight?: boolean;
+  interactive?: boolean;
   limitToDefinitions?: boolean;
   variant?: "rows" | "compact" | "grouped";
 }
@@ -20,6 +21,7 @@ export function FieldList({
   fields,
   definitions = [],
   highlight,
+  interactive = true,
   limitToDefinitions,
   variant = "rows",
 }: FieldListProps) {
@@ -60,7 +62,12 @@ export function FieldList({
                 {label}
               </Text>
               <View style={styles.compactValue}>
-                <FieldValue field={field} value={fields[slug]} highlight={highlight} />
+                <FieldValue
+                  field={field}
+                  value={fields[slug]}
+                  highlight={highlight}
+                  interactive={interactive}
+                />
               </View>
             </View>
           );
@@ -107,7 +114,12 @@ export function FieldList({
                   </Text>
                 ) : null}
               </View>
-              <FieldValue field={field} value={fields[slug]} highlight={highlight} />
+              <FieldValue
+                field={field}
+                value={fields[slug]}
+                highlight={highlight}
+                interactive={interactive}
+              />
             </View>
           );
         })}
@@ -129,7 +141,12 @@ export function FieldList({
             last={index === items.length - 1}
             meta={highlight ? "Proposed" : undefined}
           >
-            <FieldValue field={field} value={fields[slug]} highlight={highlight} />
+            <FieldValue
+              field={field}
+              value={fields[slug]}
+              highlight={highlight}
+              interactive={interactive}
+            />
           </NativeRow>
         );
       })}

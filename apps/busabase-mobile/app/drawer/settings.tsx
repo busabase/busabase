@@ -200,7 +200,7 @@ function SettingsContent() {
   const cloudAccountLimitReached = cloudAccounts.length >= MAX_CLOUD_ACCOUNTS;
 
   return (
-    <DrawerScaffold title="Settings" subtitle="Connection and notifications">
+    <DrawerScaffold title="Settings">
       <NativeSection title="Connection">
         <NativeRow
           title={connectionLabel}
@@ -210,7 +210,6 @@ function SettingsContent() {
         />
         <NativeRow
           title="Connect another server"
-          subtitle="Validate a different self-hosted Busabase URL."
           leading={<Server size={18} color={tokens.mutedForeground} />}
           trailing={<ChevronRight size={18} color={tokens.mutedForeground} />}
           onPress={() =>
@@ -225,11 +224,6 @@ function SettingsContent() {
         {connection?.mode === "cloud" ? (
           <NativeRow
             title="Workspace"
-            subtitle={
-              connection.cloudUser?.email
-                ? `Signed in as ${connection.cloudUser.email}`
-                : "Choose the active Busabase Cloud space"
-            }
             leading={<Server size={18} color={tokens.mutedForeground} />}
             last
           >
@@ -270,9 +264,7 @@ function SettingsContent() {
           <NativeRow
             title={cloudAccountLimitReached ? "Account limit reached" : "Add another account"}
             subtitle={
-              cloudAccountLimitReached
-                ? `This device can save up to ${MAX_CLOUD_ACCOUNTS} accounts.`
-                : "Sign in once, then switch profiles without re-entering credentials."
+              cloudAccountLimitReached ? `Up to ${MAX_CLOUD_ACCOUNTS} accounts.` : undefined
             }
             meta={addingAccount ? "Opening sign in" : undefined}
             leading={<UserPlus size={18} color={tokens.mutedForeground} />}
@@ -298,7 +290,6 @@ function SettingsContent() {
             <NativeRow
               key={serverUrl}
               title={serverUrl}
-              subtitle="Saved self-hosted server"
               meta={switchingServer === serverUrl ? "Switching" : undefined}
               leading={<Server size={18} color={tokens.mutedForeground} />}
               onPress={() => setSelectedServer(serverUrl)}
@@ -308,10 +299,9 @@ function SettingsContent() {
         </NativeSection>
       ) : null}
 
-      <NativeSection title="Language">
+      <NativeSection title="Preferences">
         <NativeRow
           title={t.settings.language}
-          subtitle={t.settings.languageHint}
           leading={<Languages size={18} color={tokens.mutedForeground} />}
           last
         >
@@ -332,8 +322,8 @@ function SettingsContent() {
             !isFeatureEnabled("notifications")
               ? "Disabled for this review build."
               : supported
-                ? "Notify when review work arrives. Background checks run on the system schedule."
-                : "Available only in the iOS and Android app."
+                ? undefined
+                : "Available on iOS and Android."
           }
           leading={<Bell size={18} color={tokens.mutedForeground} />}
           trailing={
@@ -358,7 +348,7 @@ function SettingsContent() {
           />
         ) : null}
         {settings.enabled ? (
-          <NativeRow title="Check every" subtitle="Foreground polling interval" last>
+          <NativeRow title="Check every" last>
             <View style={styles.fullBleedChips}>
               <NativeChipList
                 value={String(settings.pollIntervalSec)}
@@ -379,13 +369,11 @@ function SettingsContent() {
       <NativeSection title="Automation">
         <NativeRow
           title="Vault"
-          subtitle="Manage secrets and variables used at runtime."
           leading={<Vault size={18} color={tokens.mutedForeground} />}
           onPress={() => router.push("/drawer/settings/vault")}
         />
         <NativeRow
           title="Webhook Rules"
-          subtitle="Automation rules triggered by workspace events."
           leading={<Webhook size={18} color={tokens.mutedForeground} />}
           onPress={() => router.push("/drawer/settings/webhook")}
           last
@@ -396,7 +384,6 @@ function SettingsContent() {
         <NativeSection title="Agent">
           <NativeRow
             title="Agent Skill setup"
-            subtitle="Let an AI agent read bases and submit change requests."
             leading={<Sparkles size={18} color={tokens.mutedForeground} />}
             onPress={() => void Linking.openURL(AGENT_SKILL_URL)}
             last
@@ -407,7 +394,6 @@ function SettingsContent() {
       <NativeSection title="About">
         <NativeRow
           title="Busabase"
-          subtitle="Mobile companion app"
           meta={displayVersion}
           leading={<Shield size={18} color={tokens.mutedForeground} />}
         />
@@ -418,7 +404,7 @@ function SettingsContent() {
               ? "Could not check the latest version."
               : decision?.latestVersion
                 ? `Latest version v${decision.latestVersion}`
-                : "Read the latest release policy."
+                : undefined
           }
           meta={checking ? "Checking" : undefined}
           leading={<Download size={16} color={tokens.mutedForeground} />}

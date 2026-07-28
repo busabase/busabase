@@ -1,5 +1,4 @@
 import { skipToken, useQuery } from "@tanstack/react-query";
-import { getNodeType } from "busabase-contract/domains";
 import {
   HOME_ACTIVITY_PREVIEW_COUNT,
   HOME_PENDING_PREVIEW_COUNT,
@@ -9,6 +8,7 @@ import {
 } from "busabase-core/dashboard/home";
 import { useRouter } from "expo-router";
 import {
+  ChevronRight,
   CircleDot,
   FileText,
   GitCommitHorizontal,
@@ -16,29 +16,24 @@ import {
   ListChecks,
   ShieldCheck,
 } from "lucide-react-native";
-import { useEffect, useMemo, useState } from "react";
-import { StyleSheet, Text, View } from "react-native";
+import { type ReactNode, useEffect, useMemo, useState } from "react";
+import { Pressable, StyleSheet, Text, View } from "react-native";
 import { useBusabaseOrpc } from "~/api/use-busabase-orpc";
 import { ChangeRequestCard } from "~/components/busabase/ChangeRequestCard";
 import { ConnectionGuard } from "~/components/busabase/ConnectionGuard";
 import { CreateNodeModal } from "~/components/busabase/CreateNodeModal";
 import { DrawerScaffold } from "~/components/busabase/DrawerScaffold";
 import { EmptyWorkspaceGuide } from "~/components/busabase/EmptyWorkspaceGuide";
-import {
-  NativeErrorState,
-  NativeLoadingState,
-  NativeRow,
-  NativeSection,
-} from "~/components/native-screen";
+import { NativeErrorState, NativeLoadingState, NativeRow } from "~/components/native-screen";
 import { fmt, useI18n } from "~/i18n";
 import type { ActivityEvent, ActivityTone } from "~/lib/activity-events";
-import { formatDate } from "~/lib/format";
+import { formatListTime } from "~/lib/format";
 import { useActivityFeed } from "~/lib/use-activity-feed";
 import type { KnownNode } from "~/search/known-node-cache";
 import { nodeIconForType } from "~/search/node-icons";
 import { getMobileNodeDestination } from "~/search/node-navigation";
 import { useKnownNodeCache } from "~/search/use-known-node-cache";
-import { typography } from "~/theme/tokens";
+import { mobile, radius, spacing, typography } from "~/theme/tokens";
 import { useTokens } from "~/theme/use-tokens";
 
 const toneIcons: Record<ActivityTone, typeof GitPullRequest> = {
@@ -56,6 +51,59 @@ function HomeHint({ children }: { children: string }) {
   return (
     <View style={[styles.hint, { borderColor: tokens.border }]}>
       <Text style={[typography.small, { color: tokens.mutedForeground }]}>{children}</Text>
+    </View>
+  );
+}
+
+function HomeSection({
+  actionLabel,
+  caption,
+  children,
+  onAction,
+  title,
+}: {
+  actionLabel?: string;
+  caption?: string;
+  children: ReactNode;
+  onAction?: () => void;
+  title: string;
+}) {
+  const tokens = useTokens();
+
+  return (
+    <View style={styles.homeSection}>
+      <View style={styles.sectionHeader}>
+        <View style={styles.sectionHeading}>
+          <Text
+            numberOfLines={1}
+            style={[typography.small, styles.sectionTitle, { color: tokens.mutedForeground }]}
+          >
+            {title}
+          </Text>
+          {caption ? (
+            <Text style={[styles.sectionCaption, { color: tokens.mutedForeground }]}>
+              {caption}
+            </Text>
+          ) : null}
+        </View>
+        {actionLabel && onAction ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={actionLabel}
+            hitSlop={mobile.hitSlop}
+            style={({ pressed }) => [styles.sectionAction, { opacity: pressed ? 0.6 : 1 }]}
+            onPress={onAction}
+          >
+            <Text
+              style={[typography.small, styles.sectionActionLabel, { color: tokens.foreground }]}
+            >
+              {actionLabel}
+            </Text>
+            <ChevronRight size={14} color={tokens.mutedForeground} />
+          </Pressable>
+        ) : null}
+      </View>
+      {children}
     </View>
   );
 }
@@ -86,7 +134,7 @@ function HomeContent() {
         })
       : { queryKey: ["no-connection", "changeRequests", "list"], queryFn: skipToken },
   );
-  const activityQuery = useActivityFeed();
+  const activityQuery = useActivityFeed(HOME_ACTIVITY_PREVIEW_COUNT);
 
   const pending = useMemo(
     () => selectPendingChangeRequests(changeRequestsQuery.data ?? []),
@@ -119,6 +167,13 @@ function HomeContent() {
   }, [nodeCache]);
 
   const activityEvents = (activityQuery.data ?? []).slice(0, HOME_ACTIVITY_PREVIEW_COUNT);
+  const recentRows = useMemo(() => {
+    const rows: KnownNode[][] = [];
+    for (let index = 0; index < recent.length; index += 2) {
+      rows.push(recent.slice(index, index + 2));
+    }
+    return rows;
+  }, [recent]);
 
   // A brand-new workspace gets the onboarding guide rather than three empty shells.
   const isEverythingEmpty = isHomeDigestEmpty({
@@ -138,6 +193,11 @@ function HomeContent() {
   const openEvent = (event: ActivityEvent) => {
     if (event.target.kind === "change-request") {
       router.push({ pathname: "/change-requests/[id]", params: { id: event.target.id } });
+    } else if (event.target.kind === "operation") {
+      router.push({
+        pathname: "/change-requests/[id]/operations/[operationId]",
+        params: { id: event.target.changeRequestId, operationId: event.target.operationId },
+      });
     } else if (event.target.kind === "record") {
       router.push({ pathname: "/records/[id]", params: { id: event.target.id } });
     }
@@ -151,7 +211,6 @@ function HomeContent() {
   return (
     <DrawerScaffold
       title={t.home.title}
-      subtitle={t.home.subtitle}
       refreshing={changeRequestsQuery.isRefetching || activityQuery.isRefetching}
       onRefresh={refetchAll}
     >
@@ -165,85 +224,115 @@ function HomeContent() {
       {isEverythingEmpty ? (
         <EmptyWorkspaceGuide onCreate={() => setCreateOpen(true)} />
       ) : (
-        <>
+        <View style={styles.homeDigest}>
           {/* Only rendered when something is genuinely waiting — an empty
               "Waiting for your review" card is exactly the cold greeting this
               landing screen exists to avoid. */}
           {pending.length > 0 ? (
-            <NativeSection
+            <HomeSection
               title={t.home.pendingTitle}
               caption={fmt(t.home.pendingCount, { count: pending.length })}
+              actionLabel={t.home.pendingViewAll}
+              onAction={() => router.push("/drawer/inbox")}
             >
-              {pending.slice(0, HOME_PENDING_PREVIEW_COUNT).map((changeRequest) => (
-                <ChangeRequestCard
-                  key={changeRequest.id}
-                  changeRequest={changeRequest}
-                  onPress={() =>
-                    router.push({
-                      pathname: "/change-requests/[id]",
-                      params: { id: changeRequest.id },
-                    })
-                  }
-                />
-              ))}
-              <NativeRow
-                title={t.home.pendingViewAll}
-                onPress={() => router.replace("/drawer/inbox")}
-                last
-              />
-            </NativeSection>
+              <View
+                style={[
+                  styles.listGroup,
+                  { backgroundColor: tokens.card, borderColor: tokens.border },
+                ]}
+              >
+                {pending.slice(0, HOME_PENDING_PREVIEW_COUNT).map((changeRequest, index, items) => (
+                  <ChangeRequestCard
+                    key={changeRequest.id}
+                    changeRequest={changeRequest}
+                    last={index === items.length - 1}
+                    onPress={() =>
+                      router.push({
+                        pathname: "/change-requests/[id]",
+                        params: { id: changeRequest.id },
+                      })
+                    }
+                  />
+                ))}
+              </View>
+            </HomeSection>
           ) : null}
 
-          <NativeSection title={t.home.recentTitle}>
+          <HomeSection title={t.home.recentTitle}>
             {recent.length > 0 ? (
-              recent.map((node, index) => {
-                const Icon = nodeIconForType(node.type);
-                return (
-                  <NativeRow
-                    key={node.id}
-                    title={node.name}
-                    subtitle={getNodeType(node.type)?.label ?? node.type}
-                    leading={<Icon size={18} color={tokens.mutedForeground} />}
-                    onPress={() => openNode(node)}
-                    last={index === recent.length - 1}
-                  />
-                );
-              })
+              <View style={styles.recentGrid}>
+                {recentRows.map((row) => (
+                  <View key={row[0]?.id} style={styles.recentRow}>
+                    {row.map((node) => {
+                      const Icon = nodeIconForType(node.type);
+                      return (
+                        <Pressable
+                          key={node.id}
+                          accessibilityRole="button"
+                          accessibilityLabel={node.name}
+                          style={({ pressed }) => [
+                            styles.recentCard,
+                            { backgroundColor: tokens.card, borderColor: tokens.border },
+                            { opacity: pressed ? 0.68 : 1 },
+                          ]}
+                          onPress={() => openNode(node)}
+                        >
+                          <Icon size={17} color={tokens.mutedForeground} />
+                          <Text
+                            numberOfLines={1}
+                            style={[
+                              typography.small,
+                              styles.recentTitle,
+                              { color: tokens.foreground },
+                            ]}
+                          >
+                            {node.name}
+                          </Text>
+                        </Pressable>
+                      );
+                    })}
+                    {row.length === 1 ? <View style={styles.recentSpacer} /> : null}
+                  </View>
+                ))}
+              </View>
             ) : (
               <HomeHint>{t.home.recentEmptyBody}</HomeHint>
             )}
-          </NativeSection>
+          </HomeSection>
 
-          <NativeSection title={t.home.activityTitle}>
+          <HomeSection
+            title={t.home.activityTitle}
+            actionLabel={t.home.activityViewAll}
+            onAction={() => router.push("/drawer/activity")}
+          >
             {activityQuery.isPending ? (
               <NativeLoadingState label={t.common.loading} />
             ) : activityEvents.length > 0 ? (
-              <>
+              <View
+                style={[
+                  styles.listGroup,
+                  { backgroundColor: tokens.card, borderColor: tokens.border },
+                ]}
+              >
                 {activityEvents.map((event, index) => {
                   const Icon = toneIcons[event.tone] ?? CircleDot;
                   return (
                     <NativeRow
                       key={event.id}
                       title={event.title}
-                      subtitle={event.body}
-                      meta={formatDate(event.timestamp)}
+                      meta={formatListTime(event.timestamp)}
                       leading={<Icon size={18} color={tokens.mutedForeground} />}
                       onPress={event.target.kind === "none" ? undefined : () => openEvent(event)}
                       last={index === activityEvents.length - 1}
                     />
                   );
                 })}
-                <NativeRow
-                  title={t.home.activityViewAll}
-                  onPress={() => router.replace("/drawer/activity")}
-                  last
-                />
-              </>
+              </View>
             ) : (
               <HomeHint>{t.home.activityEmptyBody}</HomeHint>
             )}
-          </NativeSection>
-        </>
+          </HomeSection>
+        </View>
       )}
       <CreateNodeModal
         visible={createOpen}
@@ -268,11 +357,62 @@ export default function HomeScreen() {
 }
 
 const styles = StyleSheet.create({
+  homeDigest: {
+    marginHorizontal: spacing[5],
+    paddingTop: spacing[4],
+    gap: spacing[6],
+  },
+  homeSection: { gap: spacing[2] },
+  sectionHeader: {
+    minHeight: 24,
+    paddingHorizontal: spacing[1],
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: spacing[3],
+  },
+  sectionHeading: {
+    minWidth: 0,
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "baseline",
+    gap: spacing[2],
+  },
+  sectionTitle: { flexShrink: 1, fontWeight: "500" },
+  sectionCaption: { flexShrink: 0, fontSize: 11, lineHeight: 14 },
+  sectionAction: {
+    minHeight: 32,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing[1],
+    paddingLeft: spacing[2],
+  },
+  sectionActionLabel: { fontWeight: "500" },
+  listGroup: {
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: radius.md,
+    overflow: "hidden",
+  },
+  recentGrid: { gap: spacing[2] },
+  recentRow: { flexDirection: "row", gap: spacing[2] },
+  recentCard: {
+    minWidth: 0,
+    minHeight: 48,
+    flex: 1,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: radius.md,
+    paddingHorizontal: spacing[3],
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing[2],
+  },
+  recentSpacer: { flex: 1 },
+  recentTitle: { flex: 1, minWidth: 0, fontWeight: "500" },
   hint: {
     borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: 10,
+    borderRadius: radius.md,
     borderStyle: "dashed",
-    paddingHorizontal: 12,
-    paddingVertical: 12,
+    paddingHorizontal: spacing[3],
+    paddingVertical: spacing[3],
   },
 });

@@ -9,10 +9,15 @@ import type {
   UpdateFormDTO,
 } from "busabase-contract/types";
 import { and, eq, or } from "drizzle-orm";
-import { getContextSpaceId, resolveActorId } from "../../../context";
+import { getContextSpaceId, isAnonymousVisitor, resolveActorId } from "../../../context";
 import { getDb } from "../../../db";
-import { busabaseForms, busabaseNodes } from "../../../db/schema";
+import { busabaseBases, busabaseForms, busabaseNodes } from "../../../db/schema";
 import { id, now } from "../../../logic/kernel";
+import {
+  assertNodePermission,
+  buildNodeVisibilityCondition,
+  hasNodePermission,
+} from "../../../logic/node-acl";
 import { ensureReady } from "../../../logic/seed";
 import { createChangeRequest } from "../../base/logic/record-ops";
 import type { FormPO } from "../schema";
@@ -50,6 +55,7 @@ export const getFormByNodeId = async (nodeIdOrSlug: string): Promise<FormVO | nu
   await ensureReady();
   const db = await getDb();
   const spaceId = getContextSpaceId();
+  const visible = buildNodeVisibilityCondition(db);
   const [row] = await db
     .select({ form: busabaseForms })
     .from(busabaseForms)
@@ -57,16 +63,37 @@ export const getFormByNodeId = async (nodeIdOrSlug: string): Promise<FormVO | nu
     .where(
       and(
         eq(busabaseForms.spaceId, spaceId),
+        eq(busabaseNodes.spaceId, spaceId),
         or(eq(busabaseForms.nodeId, nodeIdOrSlug), eq(busabaseNodes.slug, nodeIdOrSlug)),
+        visible,
       ),
     )
     .limit(1);
-  return row ? toFormVO(row.form) : null;
+  if (!row) return null;
+  const [targetBase] = await db
+    .select({ nodeId: busabaseBases.nodeId })
+    .from(busabaseBases)
+    .where(and(eq(busabaseBases.id, row.form.targetBaseId), eq(busabaseBases.spaceId, spaceId)))
+    .limit(1);
+  if (!targetBase || !(await hasNodePermission(targetBase.nodeId, "read"))) return null;
+  return toFormVO(row.form);
 };
 
 export const createForm = async (input: CreateFormDTO): Promise<FormVO> => {
   await ensureReady();
+  await assertNodePermission(input.nodeId, "manage");
   const db = await getDb();
+  const [targetBase] = await db
+    .select({ nodeId: busabaseBases.nodeId })
+    .from(busabaseBases)
+    .where(
+      and(eq(busabaseBases.id, input.targetBaseId), eq(busabaseBases.spaceId, getContextSpaceId())),
+    )
+    .limit(1);
+  if (!targetBase) {
+    throw new ORPCError("NOT_FOUND", { message: `Base not found: ${input.targetBaseId}` });
+  }
+  await assertNodePermission(targetBase.nodeId, "manage");
   const timestamp = now();
   const formId = id("fom");
   await db.insert(busabaseForms).values({
@@ -95,6 +122,7 @@ export const createForm = async (input: CreateFormDTO): Promise<FormVO> => {
 /** Owner-managed config edit (bindings/page/share/name) — NOT a ChangeRequest. */
 export const updateForm = async (nodeId: string, input: UpdateFormDTO): Promise<FormVO> => {
   await ensureReady();
+  await assertNodePermission(nodeId, "manage");
   const db = await getDb();
   const [existing] = await db
     .select()
@@ -144,6 +172,9 @@ export const submitForm = async (
   const form = await getFormByNodeId(nodeId);
   if (!form) {
     throw formNotFound(nodeId);
+  }
+  if (!isAnonymousVisitor()) {
+    await assertNodePermission(form.nodeId, "changeRequest");
   }
 
   // ── Access gate (§5.1 of the spec) ──

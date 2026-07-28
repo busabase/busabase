@@ -1,5 +1,5 @@
 import { skipToken, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { getNodeType, hasCapability } from "busabase-contract/domains";
+import { hasCapability } from "busabase-contract/domains";
 import type { NodeVO } from "busabase-contract/types";
 import { selectPendingChangeRequests } from "busabase-core/dashboard/home";
 import { usePathname, useRouter } from "expo-router";
@@ -47,7 +47,7 @@ interface DrawerScaffoldProps {
 }
 
 // Pinned nav, mirroring the web dashboard's resting sidebar: Home (the landing
-// digest) + Search. Everything else moved into the Space Selector sheet, and at
+// digest) + Search. Everything else moved into the Space Selector menu, and at
 // most ONE of those comes back as the contextual row below.
 const pinnedItems = [
   { key: "home", href: "/drawer/home", icon: House },
@@ -79,7 +79,7 @@ export function DrawerScaffold({
   const [open, setOpen] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
   // The container the Create sheet should create INSIDE, or null for the space
-  // root (the header's Create button). Mirrors web's `createParent` state.
+  // root (the Workspace group's Create action). Mirrors web's `createParent` state.
   const [createParent, setCreateParent] = useState<{ id: string; name: string } | null>(null);
   // The node whose "•••" sheet is showing, plus whether that row may offer
   // "New inside…". Favorites rows are flat (web strips their `onAddChild`), so
@@ -181,8 +181,6 @@ export function DrawerScaffold({
       ? roots[0].children
       : roots;
   }, [nodesQuery.data]);
-  const workspaceNodeCount = countTreeNodes(treeNodes);
-
   // Reveal where you are: open every ancestor of the active node so the tree
   // shows your current location instead of making you re-drill each time. Only
   // ever ADDITIVE — it never closes a folder the user closed by hand, and it
@@ -257,41 +255,8 @@ export function DrawerScaffold({
               },
             ]}
           >
-            <View style={[styles.drawerHeader, { borderColor: tokens.border }]}>
-              <View style={styles.drawerTitle}>
-                <Text style={[typography.h2, { color: tokens.foreground }]}>Busabase</Text>
-                <Text
-                  numberOfLines={1}
-                  style={[typography.small, { color: tokens.mutedForeground }]}
-                >
-                  Review workspace
-                </Text>
-              </View>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel={t.nav.create}
-                hitSlop={mobile.hitSlop}
-                style={[styles.createButton, { backgroundColor: tokens.primary }]}
-                onPress={() => {
-                  setOpen(false);
-                  setCreateParent(null);
-                  setCreateOpen(true);
-                }}
-              >
-                <Plus size={18} color={tokens.primaryForeground} />
-                <Text
-                  style={[
-                    typography.small,
-                    styles.createLabel,
-                    { color: tokens.primaryForeground },
-                  ]}
-                >
-                  {t.nav.create}
-                </Text>
-              </Pressable>
-            </View>
-            <View style={styles.spaceWrap}>
-              <SpaceSelector />
+            <View style={[styles.spaceWrap, { borderColor: tokens.border }]}>
+              <SpaceSelector presentation="popover" onDismissContainer={() => setOpen(false)} />
             </View>
 
             <ScrollView
@@ -380,9 +345,22 @@ export function DrawerScaffold({
                   >
                     {t.nav.workspace}
                   </Text>
-                  <Text style={[typography.small, { color: tokens.mutedForeground }]}>
-                    {workspaceNodeCount}
-                  </Text>
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={t.nav.create}
+                    hitSlop={mobile.hitSlop}
+                    style={({ pressed }) => [
+                      styles.workspaceCreateButton,
+                      { opacity: pressed ? 0.6 : 1 },
+                    ]}
+                    onPress={() => {
+                      setOpen(false);
+                      setCreateParent(null);
+                      setCreateOpen(true);
+                    }}
+                  >
+                    <Plus size={16} color={tokens.mutedForeground} />
+                  </Pressable>
                 </View>
                 <View style={styles.navGroup}>
                   {nodesQuery.isLoading ? (
@@ -446,7 +424,7 @@ export function DrawerScaffold({
             style={styles.edgeDismiss}
             onPress={() => setOpen(false)}
           />
-          {/* Rendered inside the drawer Modal (same as SpaceSelector's sheet)
+          {/* Rendered inside the drawer Modal (alongside the workspace menu)
               so the drawer stays put behind it — a node action shouldn't cost
               the user their place in the tree. `nodes` is the RAW tree, not
               the unwrapped `treeNodes`: the move picker needs the real root
@@ -466,7 +444,7 @@ export function DrawerScaffold({
               onCreateChild={
                 actionsTarget.allowCreateChild
                   ? (node) => {
-                      // Same hand-off as the header's Create button — the
+                      // Same hand-off as the Workspace group's Create action:
                       // Create sheet lives OUTSIDE the drawer Modal, so the
                       // drawer and this sheet both have to close first.
                       setActionsTarget(null);
@@ -525,30 +503,14 @@ const styles = StyleSheet.create({
       },
     }),
   },
-  drawerHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: 12,
-    paddingHorizontal: 18,
-    paddingBottom: 16,
+  spaceWrap: {
+    zIndex: 20,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
-  drawerTitle: { flex: 1, gap: 1, minWidth: 0 },
-  createButton: {
-    minWidth: 88,
-    height: 36,
-    borderRadius: radius.full,
-    alignItems: "center",
-    justifyContent: "center",
-    flexDirection: "row",
-    gap: 6,
-    paddingHorizontal: 12,
-  },
-  createLabel: { flexShrink: 1 },
-  spaceWrap: { paddingHorizontal: 18, paddingTop: 14 },
   drawerScroll: { flex: 1 },
-  drawerBody: { gap: 18, paddingHorizontal: 10, paddingTop: 18, paddingBottom: 20 },
+  drawerBody: { gap: 18, paddingHorizontal: 10, paddingTop: 8, paddingBottom: 20 },
   drawerFooter: {
     borderTopWidth: StyleSheet.hairlineWidth,
     paddingHorizontal: 10,
@@ -562,6 +524,13 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "space-between",
     paddingHorizontal: 8,
+  },
+  workspaceCreateButton: {
+    width: 28,
+    height: 28,
+    marginVertical: -6,
+    alignItems: "center",
+    justifyContent: "center",
   },
   sectionLabel: { textTransform: "uppercase" },
   sectionHint: { paddingHorizontal: 12, paddingVertical: 8 },
@@ -589,6 +558,13 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   baseItem: { alignItems: "center", paddingVertical: 8 },
+  nodeMain: {
+    flex: 1,
+    minWidth: 0,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 9,
+  },
   baseText: { flex: 1, minWidth: 0 },
   // Fixed width shared by the chevron and its non-container spacer, so labels
   // line up whether or not a row can be expanded.
@@ -606,10 +582,6 @@ const styles = StyleSheet.create({
   },
   headerActions: { flexDirection: "row", alignItems: "center", gap: 8 },
 });
-
-function countTreeNodes(nodes: NodeVO[]): number {
-  return nodes.reduce((count, node) => count + 1 + countTreeNodes(node.children), 0);
-}
 
 function DrawerNavRow({
   active,
@@ -657,19 +629,11 @@ function DrawerNavRow({
   );
 }
 
-// Per-node-type icon, subtitle, and whether the row navigates somewhere — all
-// driven by the node-type registry (tappable = the type has a detail screen).
+// Per-node-type icon and whether the row navigates somewhere.
 function nodeNavMeta(node: NodeVO) {
-  const definition = getNodeType(node.type);
-  const label = definition?.label ?? node.type;
   const mobileUnsupported = node.type === "file";
   return {
     icon: nodeIconForType(node.type),
-    subtitle: mobileUnsupported
-      ? `${label} · Not viewable on mobile yet`
-      : node.type === "base"
-        ? `${label} · ${node.slug}`
-        : label,
     tappable: hasCapability(node.type, "hasDetail") && !mobileUnsupported,
   };
 }
@@ -728,7 +692,6 @@ function NodeNavItem({
   // the day one does.
   if (hasCapability(node.type, "hidden")) return null;
   const Icon = meta.icon;
-  const showSubtitle = depth === 0 || active;
   // Every container gets a chevron, even an empty one — web renders the same
   // collapsible for any container row (`item.items` is `[]`, still truthy), so
   // the affordance doesn't blink in and out as a folder gains its first child.
@@ -738,10 +701,7 @@ function NodeNavItem({
 
   return (
     <>
-      <Pressable
-        accessibilityRole={meta.tappable ? "button" : undefined}
-        accessibilityLabel={meta.tappable ? `Open ${node.name}` : undefined}
-        disabled={!meta.tappable}
+      <View
         style={[
           styles.navItem,
           styles.baseItem,
@@ -750,15 +710,11 @@ function NodeNavItem({
             paddingLeft: 8 + depth * 12,
           },
         ]}
-        onPress={() => onPress(node)}
       >
         <View
           style={[styles.activeMark, { backgroundColor: active ? tokens.primary : "transparent" }]}
         />
-        {/* Collapse toggle. Its own Pressable nested inside the row's, exactly
-            like the "•••" below, so tapping the chevron only opens/closes while
-            tapping the label still opens the node. Non-container rows render
-            the same-width spacer so every label in the tree stays aligned. */}
+        {/* Independent sibling targets avoid nested buttons on React Native Web. */}
         {isContainer ? (
           <Pressable
             accessibilityRole="button"
@@ -775,27 +731,41 @@ function NodeNavItem({
         ) : (
           <View style={styles.nodeChevron} />
         )}
-        <Icon size={18} color={active ? tokens.primary : tokens.mutedForeground} />
-        <View style={styles.baseText}>
-          <Text
-            numberOfLines={1}
-            style={[
-              meta.tappable ? typography.bodyEm : typography.body,
-              { color: active ? tokens.foreground : tokens.mutedForeground },
-            ]}
+        {meta.tappable ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={`Open ${node.name}`}
+            style={({ pressed }) => [styles.nodeMain, { opacity: pressed ? 0.6 : 1 }]}
+            onPress={() => onPress(node)}
           >
-            {node.name}
-          </Text>
-          {showSubtitle ? (
-            <Text numberOfLines={1} style={[typography.caption, { color: tokens.mutedForeground }]}>
-              {meta.subtitle}
+            <Icon size={18} color={active ? tokens.primary : tokens.mutedForeground} />
+            <Text
+              numberOfLines={1}
+              style={[
+                typography.bodyEm,
+                styles.baseText,
+                { color: active ? tokens.foreground : tokens.mutedForeground },
+              ]}
+            >
+              {node.name}
             </Text>
-          ) : null}
-        </View>
-        {/* Persistent, not hover-revealed like web's "•••": there is no hover
-            on touch, and a long-press would be undiscoverable. Its own
-            Pressable nested inside the row's, so tapping the label still
-            opens the node. */}
+          </Pressable>
+        ) : (
+          <View style={styles.nodeMain}>
+            <Icon size={18} color={active ? tokens.primary : tokens.mutedForeground} />
+            <Text
+              numberOfLines={1}
+              style={[
+                typography.body,
+                styles.baseText,
+                { color: active ? tokens.foreground : tokens.mutedForeground },
+              ]}
+            >
+              {node.name}
+            </Text>
+          </View>
+        )}
+        {/* Persistent because touch has no hover affordance. */}
         <Pressable
           accessibilityRole="button"
           accessibilityLabel={`${t.nodeActions.more} — ${node.name}`}
@@ -805,7 +775,7 @@ function NodeNavItem({
         >
           <MoreHorizontal size={18} color={tokens.mutedForeground} />
         </Pressable>
-      </Pressable>
+      </View>
       {/* Collapsed by default, matching web: children only mount once the row
           is expanded, so opening the drawer no longer renders the entire
           workspace (156 rows on the demo space) up front. */}

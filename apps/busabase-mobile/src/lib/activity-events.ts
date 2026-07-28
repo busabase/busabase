@@ -1,8 +1,16 @@
-import type { AuditEventVO, ChangeRequestVO, RecordVO } from "busabase-contract/types";
+import type {
+  ActivityItemVO,
+  AuditEventVO,
+  ChangeRequestVO,
+  RecordVO,
+} from "busabase-contract/types";
 import {
   getChangeRequestScopeName,
   getChangeRequestSummary,
   getChangeRequestTitle,
+  getOperationImpact,
+  getOperationLabel,
+  getOperationTitle,
   getRecordTitle,
 } from "busabase-core/dashboard/change-request";
 
@@ -17,6 +25,7 @@ export interface ActivityEvent {
   /** Deep-link target inside the app (expo-router pathname + params). */
   target:
     | { kind: "change-request"; id: string }
+    | { kind: "operation"; changeRequestId: string; operationId: string }
     | { kind: "record"; id: string }
     | { kind: "none" };
 }
@@ -56,6 +65,72 @@ const getAuditEventTitle = (event: AuditEventVO): string => {
       return "Change request merged";
   }
 };
+
+/** Convert one server-paginated descriptor into the mobile timeline shape. */
+export function buildActivityEventFromItem(item: ActivityItemVO): ActivityEvent | null {
+  if (item.kind === "change_request") {
+    const changeRequest = item.changeRequest;
+    return {
+      id: `changeRequest:${changeRequest.id}`,
+      title:
+        changeRequest.status === "merged"
+          ? `Change request merged: ${getChangeRequestTitle(changeRequest)}`
+          : changeRequest.status === "approved"
+            ? `Change request approved: ${getChangeRequestTitle(changeRequest)}`
+            : `Change request opened: ${getChangeRequestTitle(changeRequest)}`,
+      body: `${getChangeRequestSummary(changeRequest)} · ${getChangeRequestScopeName(changeRequest)}`,
+      tone: "change_request",
+      timestamp: item.timestamp,
+      target: { kind: "change-request", id: changeRequest.id },
+    };
+  }
+
+  if (item.kind === "operation") {
+    const operation = item.changeRequest.operations.find(({ id }) => id === item.operationId);
+    if (!operation) return null;
+    return {
+      id: `operation:${operation.id}`,
+      title: getOperationTitle(operation, item.changeRequest.base),
+      body: `${getOperationLabel(operation)} · ${getOperationImpact(operation)}`,
+      tone: operation.status === "pending" ? "operation" : "commit",
+      timestamp: item.timestamp,
+      target: {
+        kind: "operation",
+        changeRequestId: item.changeRequest.id,
+        operationId: operation.id,
+      },
+    };
+  }
+
+  if (item.kind === "record") {
+    const record = item.record;
+    return {
+      id: `record:${record.id}`,
+      title:
+        record.status === "archived"
+          ? `Record archived: ${getRecordTitle(record)}`
+          : `Record updated: ${getRecordTitle(record)}`,
+      body: `${record.base.name} · commit ${shortId(record.headCommitId)}`,
+      tone: "record",
+      timestamp: item.timestamp,
+      target: { kind: "record", id: record.id },
+    };
+  }
+
+  const event = item.auditEvent;
+  return {
+    id: `audit:${event.id}`,
+    title: getAuditEventTitle(event),
+    body: `${event.actorId} · ${auditActionLabel[event.action] ?? event.action}`,
+    tone: "audit",
+    timestamp: item.timestamp,
+    target: event.recordId
+      ? { kind: "record", id: event.recordId }
+      : event.changeRequestId
+        ? { kind: "change-request", id: event.changeRequestId }
+        : { kind: "none" },
+  };
+}
 
 /**
  * Mirrors the web dashboard's buildActivityEvents: merge change request, record,

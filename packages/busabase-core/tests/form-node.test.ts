@@ -3,8 +3,14 @@ import os from "node:os";
 import path from "node:path";
 import { createRouterClient } from "@orpc/server";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { LOCAL_SPACE_ID, runWithBusabaseContext } from "../src/context";
 import { DEMO_BASES, DEMO_FOLDERS } from "../src/demo/dataset";
-import { createForm, submitForm, updateForm } from "../src/domains/form/logic/form-ops";
+import {
+  createForm,
+  getFormByNodeId,
+  submitForm,
+  updateForm,
+} from "../src/domains/form/logic/form-ops";
 import { seedScenario } from "../src/logic/seed";
 import { busabaseRouter } from "../src/router";
 
@@ -129,5 +135,22 @@ describe("Form-as-Node — submission + access gates", () => {
     await expect(
       submitForm(formNodeId, { values: { subject: "over", msg: "limit" } }, { isAnonymous: true }),
     ).rejects.toThrow(/submission limit/i);
+  });
+
+  it("hides form configuration when its target Base is not visible", async () => {
+    const target = await client.bases.get({ baseId: blogBaseId });
+    if (!target) throw new Error("expected target Base");
+    await client.nodes.updateVisibility({ nodeId: target.nodeId, visibility: "private" });
+
+    const hidden = await runWithBusabaseContext(
+      {
+        spaceId: LOCAL_SPACE_ID,
+        actorId: "form-reader",
+        isSpaceManager: false,
+        permissionLevel: "read",
+      },
+      () => getFormByNodeId(formNodeId),
+    );
+    expect(hidden).toBeNull();
   });
 });

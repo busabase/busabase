@@ -154,7 +154,17 @@ describe("mobile node navigation", () => {
       pathname: "/base/[slug]",
       params: { slug: "roadmap" },
     });
-    for (const type of ["folder", "skill", "drive", "airapp", "doc"] as const) {
+    for (const type of [
+      "folder",
+      "skill",
+      "drive",
+      "airapp",
+      "doc",
+      "form",
+      "whiteboard",
+      "workflow",
+      "html",
+    ] as const) {
       expect(getMobileNodeDestination(node(`${type}-id`, { type }))).toEqual({
         status: "ready",
         pathname: `/${type}/[nodeId]`,

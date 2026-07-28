@@ -50,7 +50,10 @@ const targetRecordNotFound = (recordId: string | null) =>
   new ORPCError("NOT_FOUND", { message: `Target record not found: ${recordId}` });
 
 export const loadBaseFieldDefs = (db: MergeCtx["db"], baseId: string): Promise<BaseFieldPO[]> =>
-  db.select().from(busabaseBaseFields).where(eq(busabaseBaseFields.baseId, baseId));
+  db
+    .select()
+    .from(busabaseBaseFields)
+    .where(and(eq(busabaseBaseFields.baseId, baseId), isNull(busabaseBaseFields.deletedAt)));
 
 const nextAutoNumber = async (
   db: MergeCtx["db"],

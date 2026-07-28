@@ -71,6 +71,13 @@ async function* subscribeDemoLiveEvents(signal?: AbortSignal) {
 }
 
 const shouldEmitDemoLiveEvent = () => false;
+const DEMO_ACTIVITY_CURSOR_PREFIX = "demo-activity:";
+
+const getDemoActivityOffset = (cursor?: string) => {
+  if (!cursor?.startsWith(DEMO_ACTIVITY_CURSOR_PREFIX)) return 0;
+  const offset = Number.parseInt(cursor.slice(DEMO_ACTIVITY_CURSOR_PREFIX.length), 10);
+  return Number.isSafeInteger(offset) && offset >= 0 ? offset : 0;
+};
 
 export const busabaseDemoRouter = os.router({
   auth: {
@@ -152,8 +159,13 @@ export const busabaseDemoRouter = os.router({
       ]);
       const all = buildActivityItemsFromVOs(changeRequests, records, auditEvents);
       const limit = input?.limit ?? 50;
-      // Demo data is small: return the newest page, no cursor.
-      return { items: all.slice(0, limit), nextCursor: null };
+      const offset = getDemoActivityOffset(input?.cursor);
+      const items = all.slice(offset, offset + limit);
+      const nextOffset = offset + items.length;
+      return {
+        items,
+        nextCursor: nextOffset < all.length ? `${DEMO_ACTIVITY_CURSOR_PREFIX}${nextOffset}` : null,
+      };
     }),
   },
   comments: {
@@ -175,7 +187,15 @@ export const busabaseDemoRouter = os.router({
     list: os.bases.list.handler(({ input }) =>
       input.status === "archived" ? [] : demoListBases(),
     ),
-    get: os.bases.get.handler(() => null),
+    get: os.bases.get.handler(({ input }) => {
+      const base = demoListBases().find(
+        (candidate) => candidate.id === input.baseId || candidate.slug === input.baseId,
+      );
+      if (!base) {
+        throw new ORPCError("NOT_FOUND", { message: `Base not found: ${input.baseId}` });
+      }
+      return base;
+    }),
     create: os.bases.create.handler(() => {
       throw demoUnsupported("Create Base");
     }),

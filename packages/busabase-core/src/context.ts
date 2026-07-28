@@ -136,6 +136,12 @@ export interface BusabaseContext {
    */
   permissionLevel?: ApiKeyPermissionLevel;
   /**
+   * Optional credential ceiling, independent from the human workspace
+   * baseline. A node grant may raise a member above their workspace baseline,
+   * but never above this API-key level.
+   */
+  credentialPermissionCeiling?: ApiKeyPermissionLevel;
+  /**
    * When true, `permissionLevel` is a scoped credential ceiling, not merely
    * the actor's workspace-role baseline. Node principal grants may expose a
    * hidden node, but must not elevate this request above the credential.
@@ -455,6 +461,10 @@ export function getContextPermissionLevel(): ApiKeyPermissionLevel {
 
 export function getContextPermissionLevelIsCeiling(): boolean {
   return storage.getStore()?.permissionLevelIsCeiling === true;
+}
+
+export function getContextCredentialPermissionCeiling(): ApiKeyPermissionLevel | undefined {
+  return storage.getStore()?.credentialPermissionCeiling;
 }
 
 /**

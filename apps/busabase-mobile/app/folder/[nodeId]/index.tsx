@@ -13,6 +13,7 @@ import {
   NativeRow,
   NativeSection,
 } from "~/components/native-screen";
+import { getMobileNodeDestination } from "~/search/node-navigation";
 import { useTokens } from "~/theme/use-tokens";
 
 type FolderChild = NodeVO;
@@ -41,17 +42,9 @@ function FolderDetailContent() {
   const folder = folderQuery.data ?? null;
 
   const openChild = (child: FolderChild) => {
-    if (child.type === "base") {
-      router.push({ pathname: "/base/[slug]", params: { slug: child.slug } });
-    } else if (child.type === "skill") {
-      router.push({ pathname: "/skill/[nodeId]", params: { nodeId: child.id } });
-    } else if (child.type === "drive") {
-      router.push({ pathname: "/drive/[nodeId]", params: { nodeId: child.id } });
-    } else if (child.type === "doc") {
-      router.push({ pathname: "/doc/[nodeId]", params: { nodeId: child.id } });
-    } else if (child.type === "folder") {
-      router.push({ pathname: "/folder/[nodeId]", params: { nodeId: child.id } });
-    }
+    const destination = getMobileNodeDestination(child);
+    if (destination.status === "unsupported") return;
+    router.push({ pathname: destination.pathname, params: destination.params } as never);
   };
 
   const getChildMeta = (child: FolderChild) => {

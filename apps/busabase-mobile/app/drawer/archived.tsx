@@ -165,7 +165,6 @@ function ArchivedContent() {
   return (
     <DrawerScaffold
       title={t.archived.title}
-      subtitle={t.archived.subtitle}
       refreshing={basesQuery.isRefetching || nodesQuery.isRefetching}
       onRefresh={refresh}
     >

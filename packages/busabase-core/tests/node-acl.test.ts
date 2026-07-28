@@ -34,6 +34,7 @@ const asMember = <T>(
     restricted?: boolean;
     permissionLevel?: ApiKeyPermissionLevel;
     permissionLevelIsCeiling?: boolean;
+    credentialPermissionCeiling?: ApiKeyPermissionLevel;
   } = {},
 ) =>
   runWithBusabaseContext(
@@ -43,12 +44,48 @@ const asMember = <T>(
       isSpaceManager: false,
       permissionLevel: opts.permissionLevel ?? "changeRequest",
       permissionLevelIsCeiling: opts.permissionLevelIsCeiling,
+      credentialPermissionCeiling: opts.credentialPermissionCeiling,
       restrictedVisibility: opts.restricted ?? false,
     },
     fn,
   );
 
 describe("node ACL", () => {
+  it("separates manager visibility from an API-key action ceiling and rejects cross-space ids", async () => {
+    await seedScenario("acl-manager-credential-ceiling");
+    const raw: RawClient = createRouterClient(busabaseRouter);
+    const { baseId, nodeId } = await asManager("alice", async () => {
+      const base = await raw.bases.create({ name: "Private", slug: "private", autoMerge: true });
+      if ("status" in base) throw new Error("expected materialized base");
+      await raw.nodes.updateVisibility({ nodeId: base.nodeId, visibility: "private" });
+      return { baseId: base.id, nodeId: base.nodeId };
+    });
+
+    await runWithBusabaseContext(
+      {
+        spaceId: LOCAL_SPACE_ID,
+        actorId: "admin-reader",
+        isSpaceManager: true,
+        permissionLevel: "manage",
+        credentialPermissionCeiling: "read",
+      },
+      async () => {
+        expect(await getEffectiveNodeLevel(nodeId)).toBe("read");
+        expect(await raw.bases.get({ baseId })).toBeTruthy();
+        await expect(
+          raw.nodes.updateMetadata({ nodeId, metadata: { name: "Nope" } }),
+        ).rejects.toThrow();
+      },
+    );
+
+    await runWithBusabaseContext(
+      { spaceId: "another-space", actorId: "admin-reader", isSpaceManager: true },
+      async () => {
+        expect(await getEffectiveNodeLevel(nodeId)).toBeNull();
+      },
+    );
+  });
+
   it("caps direct and inherited node grants at a scoped credential's permission level", async () => {
     await seedScenario("acl-scoped-credential-ceiling");
     const raw: RawClient = createRouterClient(busabaseRouter);
@@ -121,11 +158,11 @@ describe("node ACL", () => {
       expect(await raw.bases.get({ baseId })).toBeTruthy();
     });
 
-    // Non-granted member (bob): base absent from list, get returns null, and a
+    // Non-granted member (bob): base absent from list, get returns NOT_FOUND, and a
     // record search for its content finds nothing.
     await asMember("bob", async () => {
       expect((await raw.bases.list({})).some((b) => b.id === baseId)).toBe(false);
-      expect(await raw.bases.get({ baseId })).toBeNull();
+      await expect(raw.bases.get({ baseId })).rejects.toMatchObject({ code: "NOT_FOUND" });
       const hits = await raw.search({ query: "Payroll" });
       expect(hits.results.some((r) => JSON.stringify(r).includes("Payroll"))).toBe(false);
     });
@@ -181,7 +218,7 @@ describe("node ACL", () => {
     // The base itself was never explicitly set private, but its parent folder
     // is — so a non-granted member can't see it (effectiveVisibility inherited).
     await asMember("bob", async () => {
-      expect(await raw.bases.get({ baseId })).toBeNull();
+      await expect(raw.bases.get({ baseId })).rejects.toMatchObject({ code: "NOT_FOUND" });
     });
     await asManager("alice", async () => {
       expect(await raw.bases.get({ baseId })).toBeTruthy();
@@ -206,7 +243,7 @@ describe("node ACL", () => {
     await asMember(
       "bob",
       async () => {
-        expect(await raw.bases.get({ baseId })).toBeNull();
+        await expect(raw.bases.get({ baseId })).rejects.toMatchObject({ code: "NOT_FOUND" });
       },
       { restricted: true },
     );

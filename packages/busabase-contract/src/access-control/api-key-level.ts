@@ -30,6 +30,19 @@ export const API_KEY_LEVEL_ORDER: Record<ApiKeyPermissionLevel, number> = {
 };
 
 /**
+ * Internal relay metadata set by Busabase Cloud after authenticating a public
+ * API caller. User-supplied copies are stripped before Cloud injects its own
+ * value, so OSS can safely apply the credential ceiling without receiving the
+ * Cloud API key itself.
+ */
+export const BUSABASE_RELAY_PERMISSION_LEVEL_HEADER = "x-busabase-relay-permission-level";
+
+export const parseBusabaseRelayPermissionLevel = (
+  value: string | null | undefined,
+): ApiKeyPermissionLevel | null =>
+  API_KEY_LEVELS.includes(value as ApiKeyPermissionLevel) ? (value as ApiKeyPermissionLevel) : null;
+
+/**
  * Storage envelope written into the existing (already-migrated, currently
  * unused) `permissions` text column on Better Auth's `apikeys` table as
  * `JSON.stringify(...)`, and `JSON.parse`'d back on read — see
@@ -47,6 +60,7 @@ export const API_KEY_LEVEL_ORDER: Record<ApiKeyPermissionLevel, number> = {
  * rows written by this phase's UI (`nodeScope` absent = unrestricted, today's
  * behavior either way).
  */
+/** Stored/read shape. `nodeScope` is accepted only for legacy forward-compatible reads. */
 export const apiKeyPermissionsSchema = z
   .object({
     level: z.enum(["read", "changeRequest", "write", "manage"]),
@@ -56,12 +70,26 @@ export const apiKeyPermissionsSchema = z
 
 export type ApiKeyPermissions = z.infer<typeof apiKeyPermissionsSchema>;
 
+/** Public creation shape: nodeScope is intentionally rejected until it is enforced. */
+export const createApiKeyPermissionsSchema = z
+  .object({
+    level: z.enum(["read", "changeRequest", "write", "manage"]),
+  })
+  .strict()
+  .nullable();
+
+export interface ProcedurePermissionPolicy {
+  level: ApiKeyPermissionLevel;
+  /** Workspace policies also require the human's workspace role to meet `level`. */
+  scope: "workspace" | "node";
+}
+
 /**
- * Explicit path → level table for every procedure whose required level is
- * NOT the safe-by-default outcome (`resolveRequiredLevel`: a GET route
- * defaults to `read`; every other route method — and a procedure with no
- * `.route()` at all, e.g. `live.subscribe` — defaults to `manage`,
- * fail-closed). Keyed by the procedure's dotted path *relative to
+ * Explicit path → level+scope table for every current procedure. Nothing is
+ * inferred from HTTP method: POST grep/preview routes can be reads, while GET
+ * Webhook/Vault configuration routes are manage. Any unknown path defaults to
+ * workspace manage, and the parity test prevents contract additions from
+ * remaining unknown in reviewed code. Keyed by the dotted path *relative to
  * `busabaseRouter`* (e.g. `"bases.create"`, `"changeRequests.merge"`) — see
  * `resolveRequiredLevel` for why the real oRPC `path` seen at runtime carries
  * a leading `"workbench"` mount-key segment that must be stripped first.
@@ -69,74 +97,158 @@ export type ApiKeyPermissions = z.infer<typeof apiKeyPermissionsSchema>;
  * Enumerated against the real `packages/busabase-core/src/router.ts` +
  * every `packages/busabase-contract/src/domains/*​/contract.ts` route
  * definition (not guessed) — see the implementation report for the full
- * cross-check, including two known deviations from the original design
- * table:
+ * cross-check, including known method/semantics deviations:
  *   - `dump.exportTables` is a POST route in the real contract (the design
  *     doc's prose called it a GET) — already force-classified to `manage`
  *     below either way, so this doesn't change behavior, just the reasoning.
- *   - The top-level `grep` and `assets.grep` routes are POST (chosen for
- *     their request body, not because they mutate anything) and are NOT
- *     listed here, so they fail closed to `manage` via the default rule
- *     rather than being guessed into an unlisted `read` override — flagged
- *     as a follow-up in the report, not resolved by invention.
+ *   - The top-level `grep` and `assets.grep` routes are POST because they take
+ *     request bodies, but are explicitly classified as node-scoped reads.
  */
-export const PROCEDURE_LEVEL_OVERRIDES: Record<string, ApiKeyPermissionLevel> = {
+const node = (level: ApiKeyPermissionLevel): ProcedurePermissionPolicy => ({
+  level,
+  scope: "node",
+});
+const workspace = (level: ApiKeyPermissionLevel): ProcedurePermissionPolicy => ({
+  level,
+  scope: "workspace",
+});
+
+/**
+ * Exhaustive policy for the current Busabase contract. A contract-parity test
+ * fails when a procedure is added without an explicit decision here.
+ */
+export const PROCEDURE_PERMISSION_POLICY: Record<string, ProcedurePermissionPolicy> = {
+  "auth.verify": workspace("read"),
+  search: node("read"),
+  grep: node("read"),
+  "nodes.list": node("read"),
+  "nodes.searchByName": node("read"),
+  "nodes.isDescendant": node("read"),
   // ---- changeRequest: the full proposal-lifecycle family (never touches live
   // data), plus amending a still-pending proposal, plus uploading/writing an
   // asset for use inside a not-yet-merged proposal (deliberate inclusion). ----
-  "nodes.createChangeRequest": "changeRequest",
-  "operations.revise": "changeRequest",
-  "bases.createChangeRequest": "changeRequest",
-  "bases.createBulkChangeRequest": "changeRequest",
-  "bases.createFieldChangeRequest": "changeRequest",
-  "bases.deleteFieldChangeRequest": "changeRequest",
-  "bases.updateFieldChangeRequest": "changeRequest",
-  "bases.convertFieldChangeRequest": "changeRequest",
-  "bases.reorderFieldsChangeRequest": "changeRequest",
-  "bases.archiveChangeRequest": "changeRequest",
-  "bases.restoreChangeRequest": "changeRequest",
-  "bases.restoreFieldChangeRequest": "changeRequest",
-  "records.changeRequest": "changeRequest",
-  "views.changeRequest": "changeRequest",
-  "docs.createChangeRequest": "changeRequest",
-  "fileTrees.createChangeRequest": "changeRequest",
-  "assets.createUploadUrl": "changeRequest",
-  "assets.confirm": "changeRequest",
-  "assets.putText": "changeRequest",
-  "assets.createTextUploadUrl": "changeRequest",
+  "nodes.createChangeRequest": node("changeRequest"),
+  "operations.revise": node("changeRequest"),
+  "bases.createChangeRequest": node("changeRequest"),
+  "bases.createBulkChangeRequest": node("changeRequest"),
+  "bases.fieldChangeRequest": node("changeRequest"),
+  "bases.archiveChangeRequest": node("changeRequest"),
+  "bases.restoreChangeRequest": node("changeRequest"),
+  "records.changeRequest": node("changeRequest"),
+  "views.changeRequest": node("changeRequest"),
+  "docs.createChangeRequest": node("changeRequest"),
+  "fileTrees.createChangeRequest": node("changeRequest"),
+  "assets.createUploadUrl": workspace("changeRequest"),
+  "assets.confirm": workspace("changeRequest"),
+  "assets.putText": node("write"),
+  "assets.createTextUploadUrl": node("write"),
 
   // ---- write: applying/rejecting a proposal (including self-merge — the
   // reported gap), plus every direct-write mutation that bypasses the CR flow. ----
-  "changeRequests.review": "write",
-  "changeRequests.reviewMany": "write",
-  "changeRequests.merge": "write",
-  "changeRequests.mergeMany": "write",
-  "changeRequests.close": "write",
-  "bases.create": "write",
-  "docs.create": "write",
-  "docs.updateBody": "write",
-  "fileTrees.create": "write",
-  "files.create": "write",
-  "nodes.move": "write",
-  "nodes.updateMetadata": "write",
-  "comments.create": "write",
-  "auditEvents.create": "write",
-  "assets.updateMetadata": "write",
-  "assets.delete": "write",
-  "assets.editContent": "write",
+  "changeRequests.review": node("write"),
+  "changeRequests.reviewMany": node("write"),
+  "changeRequests.merge": node("write"),
+  "changeRequests.mergeMany": node("write"),
+  "changeRequests.close": node("write"),
+  "bases.create": node("write"),
+  "bases.createField": node("write"),
+  "docs.create": node("write"),
+  "docs.updateBody": node("write"),
+  "fileTrees.create": node("write"),
+  "files.create": node("write"),
+  "nodes.move": node("write"),
+  "nodes.updateMetadata": node("write"),
+  "nodes.toggleFavorite": node("write"),
+  "comments.create": node("write"),
+  "auditEvents.create": workspace("write"),
+  "assets.updateMetadata": node("write"),
+  "assets.delete": node("write"),
+  "assets.editContent": node("write"),
 
   // ---- manage: automation config, bulk export/import, hard delete. ----
-  "webhooks.create": "manage",
-  "webhooks.update": "manage",
-  "webhooks.delete": "manage",
-  "webhooks.testFire": "manage",
-  "dump.exportTables": "manage",
-  "dump.importBegin": "manage",
-  "dump.importTables": "manage",
-  "dump.importCommit": "manage",
-  "dump.importAbort": "manage",
-  "nodes.purge": "manage",
+  "webhooks.list": workspace("manage"),
+  "webhooks.get": workspace("manage"),
+  "webhooks.create": workspace("manage"),
+  "webhooks.update": workspace("manage"),
+  "webhooks.delete": workspace("manage"),
+  "webhooks.deliveries": workspace("manage"),
+  "webhooks.testFire": workspace("manage"),
+  "vault.get": workspace("manage"),
+  "vault.update": workspace("manage"),
+  "vault.clear": workspace("manage"),
+  "dump.exportTables": workspace("manage"),
+  "dump.exportAssetText": workspace("manage"),
+  "dump.importBegin": workspace("manage"),
+  "dump.importTables": workspace("manage"),
+  "dump.importCommit": workspace("manage"),
+  "dump.importAbort": workspace("manage"),
+  "nodes.purge": node("manage"),
+  "nodes.updateVisibility": node("manage"),
+  "nodes.principals.list": node("manage"),
+  "nodes.principals.add": node("manage"),
+  "nodes.principals.remove": node("manage"),
+  "nodes.share.get": node("manage"),
+  "nodes.share.set": node("manage"),
+  "nodes.share.disable": node("manage"),
+
+  "nodes.listFavorites": node("read"),
+  "auditEvents.list": node("read"),
+  "activity.listPaged": node("read"),
+  "comments.list": node("read"),
+  "agent.listTasks": node("read"),
+  // The SSE payload is space-wide and not yet per-event node filtered.
+  "live.subscribe": workspace("manage"),
+
+  "bases.list": node("read"),
+  "bases.get": node("read"),
+  "bases.listDeletedFields": node("read"),
+  "bases.listViews": node("read"),
+  "bases.previewFieldConversion": node("read"),
+
+  "fileTrees.list": node("read"),
+  "fileTrees.get": node("read"),
+  "fileTrees.listFiles": node("read"),
+  "fileTrees.readFile": node("read"),
+  "airapps.runLocalNode": node("write"),
+  "files.list": node("read"),
+  "files.get": node("read"),
+  "docs.list": node("read"),
+  "docs.get": node("read"),
+  "docs.readLines": node("read"),
+  "folders.list": node("read"),
+  "folders.get": node("read"),
+
+  "forms.getByNode": node("read"),
+  "forms.create": node("manage"),
+  "forms.update": node("manage"),
+  "forms.submit": node("changeRequest"),
+
+  "assets.list": node("read"),
+  "assets.get": node("read"),
+  "assets.download": node("read"),
+  "assets.grep": node("read"),
+  "assets.readTextLines": node("read"),
+
+  "install.planFromGithub": workspace("read"),
+  "install.fromGithub": workspace("manage"),
+
+  "changeRequests.list": node("read"),
+  "changeRequests.counts": node("read"),
+  "changeRequests.get": node("read"),
+
+  "records.list": node("read"),
+  "records.count": node("read"),
+  "records.get": node("read"),
+  "records.search": node("read"),
+  "records.getByField": node("read"),
+  "records.listChangeRequests": node("read"),
+  "records.listLinks": node("read"),
 };
+
+/** Backward-compatible level-only export used by older tests/callers. */
+export const PROCEDURE_LEVEL_OVERRIDES: Record<string, ApiKeyPermissionLevel> = Object.fromEntries(
+  Object.entries(PROCEDURE_PERMISSION_POLICY).map(([path, policy]) => [path, policy.level]),
+);
 
 /**
  * `workbenchProcedure.router(busabaseRouter)` is later spread into the
@@ -155,21 +267,25 @@ const normalizePath = (path: readonly string[]): string[] =>
   path[0] === "workbench" ? path.slice(1) : [...path];
 
 /**
- * Fail-closed classification: an explicit override always wins; otherwise a
- * `GET` route is read-only (`read`, always allowed); every other route
- * method — including `undefined` for a procedure with no `.route()` at all —
- * defaults to the highest tier (`manage`), so a forgotten-to-classify new
- * mutation requires the highest tier until someone consciously downgrades it,
- * never silently granting broad access.
+ * Backward-compatible level-only resolver. HTTP method is deliberately ignored:
+ * known paths use the explicit semantic policy and unknown paths fail closed to
+ * manage regardless of whether they happen to be GET, POST, or RPC-only.
  */
 export function resolveRequiredLevel(
   path: readonly string[],
-  routeMethod: string | undefined,
+  _routeMethod: string | undefined,
 ): ApiKeyPermissionLevel {
   const key = normalizePath(path).join(".");
   const override = PROCEDURE_LEVEL_OVERRIDES[key];
   if (override) return override;
-  return routeMethod === "GET" ? "read" : "manage";
+  return "manage";
+}
+
+export function resolveProcedurePermissionPolicy(
+  path: readonly string[],
+): ProcedurePermissionPolicy {
+  const key = normalizePath(path).join(".");
+  return PROCEDURE_PERMISSION_POLICY[key] ?? workspace("manage");
 }
 
 /**

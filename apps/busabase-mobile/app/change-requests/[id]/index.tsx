@@ -9,6 +9,7 @@ import {
   ArrowLeft,
   Check,
   CheckCheck,
+  ChevronRight,
   GitCommitHorizontal,
   GitMerge,
   History,
@@ -74,8 +75,18 @@ function OperationRow({
         />
       }
       destructive={isDelete}
+      trailing={
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={`Open operation ${index + 1}`}
+          hitSlop={mobile.hitSlop}
+          style={styles.operationOpen}
+          onPress={onPress}
+        >
+          <ChevronRight size={18} color={tokens.mutedForeground} />
+        </Pressable>
+      }
       last={last}
-      onPress={onPress}
     >
       <View style={styles.operationFields}>
         <FieldList fields={operation.headCommit.fields} highlight variant="compact" />
@@ -92,7 +103,6 @@ function ReviewHistorySection({ changeRequest }: { changeRequest: ChangeRequestV
       {changeRequest.reviews.length === 0 ? (
         <NativeRow
           title="No reviews yet"
-          subtitle="Approvals and requested changes will appear here."
           leading={<History size={18} color={tokens.mutedForeground} />}
           last
         />
@@ -153,7 +163,7 @@ function OperationsSection({
   return (
     <NativeSection title="Operations" caption={`${operations.length}`}>
       {operations.length === 0 ? (
-        <NativeRow title="No operations" subtitle="This change request has no operations." last />
+        <NativeRow title="No operations" last />
       ) : (
         operations.map((operation, index) => (
           <OperationRow
@@ -547,6 +557,12 @@ const styles = StyleSheet.create({
   },
   operationFields: {
     marginTop: 6,
+  },
+  operationOpen: {
+    width: 44,
+    height: 44,
+    alignItems: "center",
+    justifyContent: "center",
   },
   reasonInput: { minHeight: 94, paddingTop: 12 },
 });

@@ -966,7 +966,7 @@ export const createRestoreFieldChangeRequest = async (
     throw fieldNotFound(fieldId);
   }
   if (!field.deletedAt) {
-    throw new Error(`Field is not deleted: ${fieldId}`);
+    throw new ORPCError("CONFLICT", { message: `Field is not deleted: ${fieldId}` });
   }
 
   const changeRequestId = id("crq");

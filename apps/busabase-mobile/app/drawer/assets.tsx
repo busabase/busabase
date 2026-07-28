@@ -38,7 +38,6 @@ function AssetsContent() {
   return (
     <DrawerScaffold
       title={t.assets.title}
-      subtitle={t.assets.subtitle}
       refreshing={assetsQuery.isRefetching}
       onRefresh={() => void assetsQuery.refetch()}
     >

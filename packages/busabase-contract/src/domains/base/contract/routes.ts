@@ -46,10 +46,11 @@ export const baseContract = {
       path: "/bases/{baseId}",
       tags: ["Bases"],
       summary: "Get Base",
-      successDescription: "Single Base by id or slug.",
+      successDescription:
+        "Single Base by id or slug, or 404 when it does not exist or is not visible.",
     })
     .input(z.object({ baseId: z.string() }))
-    .output(baseSchema.nullable()),
+    .output(baseSchema),
   listDeletedFields: oc
     .route({
       method: "GET",

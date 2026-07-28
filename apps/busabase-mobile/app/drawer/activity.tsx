@@ -11,34 +11,38 @@ import { useMemo } from "react";
 import { ConnectionGuard } from "~/components/busabase/ConnectionGuard";
 import { DrawerScaffold } from "~/components/busabase/DrawerScaffold";
 import {
+  NativeActionBar,
   NativeEmptyState,
   NativeErrorState,
   NativeLoadingState,
   NativeRow,
   NativeSection,
 } from "~/components/native-screen";
+import { Button } from "~/components/ui/Button";
 import type { ActivityEvent, ActivityTone } from "~/lib/activity-events";
-import { formatDate } from "~/lib/format";
-import { useActivityFeed } from "~/lib/use-activity-feed";
+import { formatListTime } from "~/lib/format";
+import { useInfiniteActivityFeed } from "~/lib/use-activity-feed";
 import { useTokens } from "~/theme/use-tokens";
 
-const toneMeta: Record<ActivityTone, { label: string; icon: typeof GitPullRequest }> = {
-  audit: { label: "Audit", icon: ShieldCheck },
-  change_request: { label: "Change request", icon: GitPullRequest },
-  operation: { label: "Operation", icon: ListChecks },
-  commit: { label: "Commit", icon: GitCommitHorizontal },
-  record: { label: "Record", icon: FileText },
+const ACTIVITY_PAGE_SIZE = 40;
+
+const toneIcons: Record<ActivityTone, typeof GitPullRequest> = {
+  audit: ShieldCheck,
+  change_request: GitPullRequest,
+  operation: ListChecks,
+  commit: GitCommitHorizontal,
+  record: FileText,
 };
 
 function ActivityContent() {
   const router = useRouter();
   const tokens = useTokens();
-  const query = useActivityFeed();
+  const query = useInfiniteActivityFeed(ACTIVITY_PAGE_SIZE);
 
   const { today, earlier } = useMemo(() => {
     const startOfDay = new Date();
     startOfDay.setHours(0, 0, 0, 0);
-    const events = query.data ?? [];
+    const events = query.data?.pages.flatMap((page) => page.events) ?? [];
     return {
       today: events.filter((event) => new Date(event.timestamp) >= startOfDay),
       earlier: events.filter((event) => new Date(event.timestamp) < startOfDay),
@@ -48,20 +52,23 @@ function ActivityContent() {
   const openEvent = (event: ActivityEvent) => {
     if (event.target.kind === "change-request") {
       router.push({ pathname: "/change-requests/[id]", params: { id: event.target.id } });
+    } else if (event.target.kind === "operation") {
+      router.push({
+        pathname: "/change-requests/[id]/operations/[operationId]",
+        params: { id: event.target.changeRequestId, operationId: event.target.operationId },
+      });
     } else if (event.target.kind === "record") {
       router.push({ pathname: "/records/[id]", params: { id: event.target.id } });
     }
   };
 
   const renderRow = (event: ActivityEvent, index: number, total: number) => {
-    const meta = toneMeta[event.tone] ?? { label: "Activity", icon: CircleDot };
-    const Icon = meta.icon;
+    const Icon = toneIcons[event.tone] ?? CircleDot;
     return (
       <NativeRow
         key={event.id}
         title={event.title}
-        subtitle={event.body}
-        meta={formatDate(event.timestamp)}
+        meta={formatListTime(event.timestamp)}
         leading={<Icon size={18} color={tokens.mutedForeground} />}
         onPress={event.target.kind === "none" ? undefined : () => openEvent(event)}
         last={index === total - 1}
@@ -72,7 +79,6 @@ function ActivityContent() {
   return (
     <DrawerScaffold
       title="Activity"
-      subtitle="Review, merge, and audit events"
       refreshing={query.isRefetching}
       onRefresh={() => void query.refetch()}
     >
@@ -80,11 +86,8 @@ function ActivityContent() {
       {query.error ? (
         <NativeErrorState message={query.error.message} onRetry={() => void query.refetch()} />
       ) : null}
-      {!query.isLoading && !query.error && (query.data?.length ?? 0) === 0 ? (
-        <NativeEmptyState
-          title="No activity yet"
-          description="Change requests, merges, records, and audit events will appear here."
-        />
+      {!query.isLoading && !query.error && today.length === 0 && earlier.length === 0 ? (
+        <NativeEmptyState title="No activity yet" />
       ) : null}
       {today.length > 0 ? (
         <NativeSection title="Today" caption={`${today.length}`}>
@@ -95,6 +98,17 @@ function ActivityContent() {
         <NativeSection title="Earlier" caption={`${earlier.length}`}>
           {earlier.map((event, index) => renderRow(event, index, earlier.length))}
         </NativeSection>
+      ) : null}
+      {!query.isLoading && !query.error && query.hasNextPage ? (
+        <NativeActionBar>
+          <Button
+            label="Load older activity"
+            variant="secondary"
+            loading={query.isFetchingNextPage}
+            fullWidth
+            onPress={() => void query.fetchNextPage()}
+          />
+        </NativeActionBar>
       ) : null}
     </DrawerScaffold>
   );

@@ -58,6 +58,7 @@ import {
   deleteAssetRow,
   replaceAssetUsageRows,
   resolveAssetFile,
+  resolveAssetFileForMaterialization,
 } from "../assets/handlers";
 import { handleAssetAttachmentRepoint } from "../assets/logic/asset-texts-logic";
 import type { AssetUsageOwnerType } from "../assets/schema/assets";
@@ -106,6 +107,12 @@ const fileTreeFileNotFound = (config: FileTreeKindConfig, path: string) =>
   new ORPCError("NOT_FOUND", { message: `${config.label} file not found: ${path}` });
 
 const labelForType = (type: string) => `${type.slice(0, 1).toUpperCase()}${type.slice(1)}`;
+
+const isUniqueViolation = (error: unknown): boolean => {
+  const directCode = (error as { code?: unknown } | null | undefined)?.code;
+  if (directCode === "23505") return true;
+  return (error as { cause?: { code?: unknown } } | null | undefined)?.cause?.code === "23505";
+};
 
 const operationKindForInput = (
   type: string,
@@ -326,7 +333,7 @@ const upsertFileAssetAtPath = async (
   const existing = await findMountedAsset(node, path, tx);
 
   if (input.assetId) {
-    const incoming = await resolveAssetFile(input.assetId, tx);
+    const incoming = await resolveAssetFileForMaterialization(input.assetId, tx);
     if (existing) {
       const attachmentChanged = existing.attachmentId !== incoming.attachmentId;
       await tx
@@ -504,11 +511,13 @@ export const createFileTreeNode = async (
     .limit(1);
   const parentNode = assertContainerParent(parentNodeRow, config.type, parentNodeId);
 
-  // Idempotency is scoped to (parentNode, slug, type) — NOT slug alone. A
+  // Idempotency is scoped to (parentNode, slug) — NOT slug alone. A
   // slug can legitimately repeat under different parents (e.g. the same
   // skill installed into two folders); matching on slug globally caused
   // installs to silently no-op onto an unrelated same-slug node elsewhere
   // in the space instead of creating a new one under the requested parent.
+  // Within one parent the DB uniqueness rule spans every node type, so a
+  // different-type sibling is a conflict rather than an idempotent retry.
   const [existing] = await db
     .select()
     .from(busabaseNodes)
@@ -516,13 +525,17 @@ export const createFileTreeNode = async (
       and(
         eq(busabaseNodes.spaceId, getContextSpaceId()),
         eq(busabaseNodes.parentId, parentNode.id),
-        eq(busabaseNodes.type, config.type),
         eq(busabaseNodes.slug, parsed.slug),
         isNull(busabaseNodes.archivedAt),
       ),
     )
     .limit(1);
   if (existing) {
+    if (existing.type !== config.type) {
+      throw new ORPCError("CONFLICT", {
+        message: `Cannot create ${labelLower(config)} "${parsed.slug}": an active ${existing.type} with that slug already exists in this location.`,
+      });
+    }
     return { ...(await getFileTreeNode(config, existing.id)), materialized: true as const };
   }
 
@@ -567,22 +580,51 @@ export const createFileTreeNode = async (
 
   const nodeId = id("nod");
   const createdAt = now();
-  await db.insert(busabaseNodes).values({
-    id: nodeId,
-    parentId: parentNode.id,
-    type: config.type,
-    slug: parsed.slug,
-    name: parsed.name,
-    description: parsed.description,
-    metadata: {
-      entryFile: config.entryFile,
-      visibility: parsed.visibility,
-      version: parsed.version,
-    },
-    position: 0,
-    createdAt,
-    updatedAt: createdAt,
-  });
+  try {
+    await db.insert(busabaseNodes).values({
+      id: nodeId,
+      parentId: parentNode.id,
+      type: config.type,
+      slug: parsed.slug,
+      name: parsed.name,
+      description: parsed.description,
+      metadata: {
+        entryFile: config.entryFile,
+        visibility: parsed.visibility,
+        version: parsed.version,
+      },
+      position: 0,
+      createdAt,
+      updatedAt: createdAt,
+    });
+  } catch (error) {
+    if (isUniqueViolation(error)) {
+      const [concurrentSibling] = await db
+        .select()
+        .from(busabaseNodes)
+        .where(
+          and(
+            eq(busabaseNodes.spaceId, getContextSpaceId()),
+            eq(busabaseNodes.parentId, parentNode.id),
+            eq(busabaseNodes.slug, parsed.slug),
+            isNull(busabaseNodes.archivedAt),
+          ),
+        )
+        .limit(1);
+      if (concurrentSibling?.type === config.type) {
+        return {
+          ...(await getFileTreeNode(config, concurrentSibling.id)),
+          materialized: true as const,
+        };
+      }
+      if (concurrentSibling) {
+        throw new ORPCError("CONFLICT", {
+          message: `Cannot create ${labelLower(config)} "${parsed.slug}": an active ${concurrentSibling.type} with that slug already exists in this location.`,
+        });
+      }
+    }
+    throw error;
+  }
 
   await initializeNodeAcl(
     db,

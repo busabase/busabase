@@ -1,8 +1,8 @@
 import { skipToken, useQuery } from "@tanstack/react-query";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { ArrowLeft } from "lucide-react-native";
+import { ArrowLeft, ExternalLink } from "lucide-react-native";
 import { useRef, useState } from "react";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { Linking, Platform, Pressable, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { WebView } from "react-native-webview";
 import { useBusabaseOrpc } from "~/api/use-busabase-orpc";
@@ -10,6 +10,7 @@ import { getValidBusabaseCloudSession } from "~/auth/oauth";
 import { getCloudSessionToken } from "~/auth/session-store";
 import { ConnectionGuard } from "~/components/busabase/ConnectionGuard";
 import { NativeErrorState, NativeLoadingState } from "~/components/native-screen";
+import { Button } from "~/components/ui/Button";
 import { useConnection } from "~/connection/connection-store";
 import { mobile, radius, typography } from "~/theme/tokens";
 import { useTokens } from "~/theme/use-tokens";
@@ -128,6 +129,14 @@ function AirAppDetailContent() {
           />
         ) : preparingUrl || !embedUrl ? (
           <NativeLoadingState label="Loading AirApp" />
+        ) : Platform.OS === "web" ? (
+          <View style={styles.webLaunch}>
+            <Button
+              label="Open AirApp"
+              leadingIcon={<ExternalLink size={18} color={tokens.primaryForeground} />}
+              onPress={() => void Linking.openURL(embedUrl)}
+            />
+          </View>
         ) : (
           <WebView
             ref={webviewRef}
@@ -184,5 +193,6 @@ const styles = StyleSheet.create({
   },
   titleBlock: { flex: 1, minWidth: 0, gap: 1 },
   webviewWrap: { flex: 1 },
+  webLaunch: { flex: 1, alignItems: "center", justifyContent: "center", padding: 24 },
   webview: { flex: 1 },
 });

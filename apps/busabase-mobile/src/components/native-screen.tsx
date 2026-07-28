@@ -112,7 +112,7 @@ export function NativeEmptyState({
   onAction,
 }: {
   title: string;
-  description: string;
+  description?: string;
   actionLabel?: string;
   onAction?: () => void;
 }) {
@@ -120,9 +120,11 @@ export function NativeEmptyState({
   return (
     <View style={styles.statePanel}>
       <Text style={[typography.h2, styles.stateTitle, { color: tokens.foreground }]}>{title}</Text>
-      <Text style={[typography.body, styles.stateBody, { color: tokens.mutedForeground }]}>
-        {description}
-      </Text>
+      {description ? (
+        <Text style={[typography.body, styles.stateBody, { color: tokens.mutedForeground }]}>
+          {description}
+        </Text>
+      ) : null}
       {actionLabel && onAction ? (
         <Button label={actionLabel} variant="secondary" onPress={onAction} />
       ) : null}
@@ -494,7 +496,7 @@ export function NativeRow({
           ) : null}
         </View>
         {subtitle ? (
-          <Text numberOfLines={2} style={[typography.small, { color: tokens.mutedForeground }]}>
+          <Text numberOfLines={1} style={[typography.small, { color: tokens.mutedForeground }]}>
             {subtitle}
           </Text>
         ) : null}

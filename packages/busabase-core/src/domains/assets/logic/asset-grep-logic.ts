@@ -40,7 +40,7 @@ import {
   type SQL,
   sql,
 } from "drizzle-orm";
-import { getContextSpaceId } from "../../../context";
+import { getContextSpaceId, resolveActorId } from "../../../context";
 import { getDb } from "../../../db";
 import {
   attachments,
@@ -48,7 +48,7 @@ import {
   busabaseAssetUsages,
   busabaseNodes,
 } from "../../../db/schema";
-import { buildNodeVisibilityCondition } from "../../../logic/node-acl";
+import { buildNodeVisibilityCondition, hasWorkspacePermission } from "../../../logic/node-acl";
 import { ensureReady } from "../../../logic/seed";
 import {
   compileGrepPattern,
@@ -56,6 +56,7 @@ import {
   scanLines,
 } from "../../../logic/text-scan-core";
 import { type AssetTextPO, busabaseAssetTexts } from "../schema/asset-texts";
+import { assertAssetPermission } from "./asset-permissions";
 import { autoRegisterAssetText, loadAssetTextRows } from "./asset-texts-logic";
 import { readObjectInChunks } from "./object-stream";
 import { openAssetTextSource } from "./text-cache";
@@ -125,28 +126,43 @@ const resolveCandidateAssets = async (
   if (scope?.mimeTypes?.length) {
     conditions.push(inArray(attachments.mimeType, scope.mimeTypes));
   }
-  // Node ACL: assets have no node of their own — their visibility derives
-  // from where they're mounted. An asset with NO node-linked usage stays
-  // searchable (space-level blob, unchanged); an asset whose only mounts are
-  // hidden nodes is excluded, in the candidate SQL (never post-filtered — the
-  // grep coverage stats come from this set).
+  // Node ACL: assets have no node of their own, so mounted visibility derives
+  // from their usages. Unmounted staging assets are visible only to their
+  // creator or a workspace writer.
   const visibleNode = buildNodeVisibilityCondition(db);
+  const stagedByActor = eq(busabaseAssets.createdBy, resolveActorId("local-producer"));
+  const anyNodeUsage = db
+    .select({ one: sql`1` })
+    .from(busabaseAssetUsages)
+    .where(
+      and(
+        eq(busabaseAssetUsages.assetId, busabaseAssets.id),
+        eq(busabaseAssetUsages.spaceId, spaceId),
+        isNotNull(busabaseAssetUsages.nodeId),
+      ),
+    );
   if (visibleNode) {
-    const anyNodeUsage = db
-      .select({ one: sql`1` })
-      .from(busabaseAssetUsages)
-      .where(
-        and(
-          eq(busabaseAssetUsages.assetId, busabaseAssets.id),
-          isNotNull(busabaseAssetUsages.nodeId),
-        ),
-      );
     const visibleNodeUsage = db
       .select({ one: sql`1` })
       .from(busabaseAssetUsages)
       .innerJoin(busabaseNodes, eq(busabaseAssetUsages.nodeId, busabaseNodes.id))
-      .where(and(eq(busabaseAssetUsages.assetId, busabaseAssets.id), visibleNode));
-    conditions.push(or(notExists(anyNodeUsage), exists(visibleNodeUsage)) as SQL);
+      .where(
+        and(
+          eq(busabaseAssetUsages.assetId, busabaseAssets.id),
+          eq(busabaseAssetUsages.spaceId, spaceId),
+          eq(busabaseNodes.spaceId, spaceId),
+          visibleNode,
+        ),
+      );
+    conditions.push(
+      (hasWorkspacePermission("write")
+        ? or(notExists(anyNodeUsage), exists(visibleNodeUsage))
+        : or(exists(visibleNodeUsage), and(notExists(anyNodeUsage), stagedByActor))) as SQL,
+    );
+  } else if (!hasWorkspacePermission("write")) {
+    // A manager retains visibility of every mounted node. A scoped read key
+    // may additionally inspect only the manager's own unmounted staging assets.
+    conditions.push(or(exists(anyNodeUsage), and(notExists(anyNodeUsage), stagedByActor)) as SQL);
   }
   const rows = await db
     .select({
@@ -172,6 +188,7 @@ const resolveCandidateAssets = async (
     .where(
       and(
         eq(busabaseAssetUsages.spaceId, spaceId),
+        eq(busabaseNodes.spaceId, spaceId),
         inArray(busabaseAssetUsages.ownerType, ["drive", "skill"]),
         like(busabaseAssetUsages.path, `${scope.drivePath}%`),
         isNull(busabaseNodes.archivedAt),
@@ -197,8 +214,14 @@ const loadDisplayInfo = async (
       metadata: busabaseAssetUsages.metadata,
     })
     .from(busabaseAssetUsages)
+    .innerJoin(busabaseNodes, eq(busabaseAssetUsages.nodeId, busabaseNodes.id))
     .where(
-      and(eq(busabaseAssetUsages.spaceId, spaceId), inArray(busabaseAssetUsages.assetId, assetIds)),
+      and(
+        eq(busabaseAssetUsages.spaceId, spaceId),
+        eq(busabaseNodes.spaceId, spaceId),
+        inArray(busabaseAssetUsages.assetId, assetIds),
+        buildNodeVisibilityCondition(db),
+      ),
     );
   for (const row of rows) {
     if (map.has(row.assetId)) continue; // first usage wins — good enough for display purposes
@@ -648,6 +671,7 @@ const computeAndPersistCheckpoints = async (db: Db, row: AssetTextPO): Promise<A
 
 export const readAssetTextLines = async (input: ReadTextLinesInput): Promise<ReadLinesVO> => {
   await ensureReady();
+  await assertAssetPermission(input.assetId, "read");
   const db = await getDb();
   const spaceId = getContextSpaceId();
 

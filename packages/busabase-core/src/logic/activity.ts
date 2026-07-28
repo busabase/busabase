@@ -22,6 +22,7 @@ import {
   busabaseOperations,
   busabaseRecords,
 } from "../db/schema";
+import { type AuditSubjectRef, assertAuditSubjectPermission, isAuditVisibilityMiss } from "./audit";
 import { ensureReady } from "./seed";
 import { toAuditEventVO } from "./vo";
 
@@ -50,7 +51,7 @@ const KIND_ORDER = {
 } as const;
 type ActivityKind = keyof typeof KIND_ORDER;
 
-interface RawEvent {
+interface RawEvent extends AuditSubjectRef {
   ts: Date;
   kind: ActivityKind;
   id: string;
@@ -112,111 +113,212 @@ export const listActivityPaged = async (
   const parsed = listActivityPagedInputSchema.parse(input);
   const limit = parsed.limit;
   const spaceId = getContextSpaceId();
-  const cursor = parsed.cursor ? decodeActivityCursor(parsed.cursor) : null;
+  const initialCursor = parsed.cursor ? decodeActivityCursor(parsed.cursor) : null;
+  const batchSize = limit + 1;
 
-  // Each source: its own keyset + `ORDER BY ts DESC, id DESC LIMIT limit+1`. The
-  // global top (limit+1) events are within the top (limit+1) of each source, so
-  // this window is sufficient to build the page and detect a next page.
-  const [crRows, opRows, recordRows, auditRows] = await Promise.all([
-    db
-      .select({ ts: busabaseChangeRequests.updatedAt, id: busabaseChangeRequests.id })
-      .from(busabaseChangeRequests)
-      .where(
-        and(
-          eq(busabaseChangeRequests.spaceId, spaceId),
-          keysetFor(
-            "change_request",
-            busabaseChangeRequests.updatedAt,
-            busabaseChangeRequests.id,
-            cursor,
+  const fetchWindow = async (cursor: typeof initialCursor) => {
+    const [crRows, opRows, recordRows, auditRows] = await Promise.all([
+      db
+        .select({ ts: busabaseChangeRequests.updatedAt, id: busabaseChangeRequests.id })
+        .from(busabaseChangeRequests)
+        .where(
+          and(
+            eq(busabaseChangeRequests.spaceId, spaceId),
+            keysetFor(
+              "change_request",
+              busabaseChangeRequests.updatedAt,
+              busabaseChangeRequests.id,
+              cursor,
+            ),
           ),
-        ),
-      )
-      .orderBy(desc(busabaseChangeRequests.updatedAt), desc(busabaseChangeRequests.id))
-      .limit(limit + 1),
-    db
-      .select({
-        ts: busabaseOperations.updatedAt,
-        id: busabaseOperations.id,
-        changeRequestId: busabaseOperations.changeRequestId,
-      })
-      .from(busabaseOperations)
-      .where(
-        and(
-          eq(busabaseOperations.spaceId, spaceId),
-          keysetFor("operation", busabaseOperations.updatedAt, busabaseOperations.id, cursor),
-        ),
-      )
-      .orderBy(desc(busabaseOperations.updatedAt), desc(busabaseOperations.id))
-      .limit(limit + 1),
-    db
-      .select({ ts: busabaseRecords.updatedAt, id: busabaseRecords.id })
-      .from(busabaseRecords)
-      .where(
-        and(
-          eq(busabaseRecords.spaceId, spaceId),
-          // Match the feed's record source (records.list is active-only), so
-          // archived records don't flood the activity feed with new events.
-          eq(busabaseRecords.status, "active"),
-          keysetFor("record", busabaseRecords.updatedAt, busabaseRecords.id, cursor),
-        ),
-      )
-      .orderBy(desc(busabaseRecords.updatedAt), desc(busabaseRecords.id))
-      .limit(limit + 1),
-    db
-      .select({
-        ts: busabaseAuditEvents.createdAt,
-        id: busabaseAuditEvents.id,
-        recordId: busabaseAuditEvents.recordId,
-      })
-      .from(busabaseAuditEvents)
-      .where(
-        and(
-          eq(busabaseAuditEvents.spaceId, spaceId),
-          keysetFor("audit", busabaseAuditEvents.createdAt, busabaseAuditEvents.id, cursor),
-        ),
-      )
-      .orderBy(desc(busabaseAuditEvents.createdAt), desc(busabaseAuditEvents.id))
-      .limit(limit + 1),
-  ]);
+        )
+        .orderBy(desc(busabaseChangeRequests.updatedAt), desc(busabaseChangeRequests.id))
+        .limit(batchSize),
+      db
+        .select({
+          ts: busabaseOperations.updatedAt,
+          id: busabaseOperations.id,
+          changeRequestId: busabaseOperations.changeRequestId,
+        })
+        .from(busabaseOperations)
+        .where(
+          and(
+            eq(busabaseOperations.spaceId, spaceId),
+            keysetFor("operation", busabaseOperations.updatedAt, busabaseOperations.id, cursor),
+          ),
+        )
+        .orderBy(desc(busabaseOperations.updatedAt), desc(busabaseOperations.id))
+        .limit(batchSize),
+      db
+        .select({ ts: busabaseRecords.updatedAt, id: busabaseRecords.id })
+        .from(busabaseRecords)
+        .where(
+          and(
+            eq(busabaseRecords.spaceId, spaceId),
+            // Match the feed's record source (records.list is active-only), so
+            // archived records don't flood the activity feed with new events.
+            eq(busabaseRecords.status, "active"),
+            keysetFor("record", busabaseRecords.updatedAt, busabaseRecords.id, cursor),
+          ),
+        )
+        .orderBy(desc(busabaseRecords.updatedAt), desc(busabaseRecords.id))
+        .limit(batchSize),
+      db
+        .select({
+          ts: busabaseAuditEvents.createdAt,
+          id: busabaseAuditEvents.id,
+          baseId: busabaseAuditEvents.baseId,
+          recordId: busabaseAuditEvents.recordId,
+          changeRequestId: busabaseAuditEvents.changeRequestId,
+          operationId: busabaseAuditEvents.operationId,
+          commitId: busabaseAuditEvents.commitId,
+        })
+        .from(busabaseAuditEvents)
+        .where(
+          and(
+            eq(busabaseAuditEvents.spaceId, spaceId),
+            keysetFor("audit", busabaseAuditEvents.createdAt, busabaseAuditEvents.id, cursor),
+          ),
+        )
+        .orderBy(desc(busabaseAuditEvents.createdAt), desc(busabaseAuditEvents.id))
+        .limit(batchSize),
+    ]);
+    const events: RawEvent[] = [
+      ...crRows.map((row) => ({
+        ts: row.ts,
+        kind: "change_request" as const,
+        id: row.id,
+        changeRequestId: row.id,
+        recordId: null,
+        operationId: null,
+      })),
+      ...opRows.map((row) => ({
+        ts: row.ts,
+        kind: "operation" as const,
+        id: row.id,
+        changeRequestId: row.changeRequestId,
+        operationId: row.id,
+        recordId: null,
+      })),
+      ...recordRows.map((row) => ({
+        ts: row.ts,
+        kind: "record" as const,
+        id: row.id,
+        changeRequestId: null,
+        recordId: row.id,
+        operationId: null,
+      })),
+      ...auditRows.map((row) => ({
+        ts: row.ts,
+        kind: "audit" as const,
+        id: row.id,
+        recordId: row.recordId,
+        baseId: row.baseId,
+        changeRequestId: row.changeRequestId,
+        operationId: row.operationId,
+        commitId: row.commitId,
+      })),
+    ];
+    const continuation: RawEvent[] = [];
+    const lastCr = crRows.length === batchSize ? crRows.at(-1) : undefined;
+    if (lastCr) {
+      continuation.push({
+        ts: lastCr.ts,
+        kind: "change_request",
+        id: lastCr.id,
+        changeRequestId: lastCr.id,
+        recordId: null,
+      });
+    }
+    const lastOperation = opRows.length === batchSize ? opRows.at(-1) : undefined;
+    if (lastOperation) {
+      continuation.push({
+        ts: lastOperation.ts,
+        kind: "operation",
+        id: lastOperation.id,
+        changeRequestId: lastOperation.changeRequestId,
+        operationId: lastOperation.id,
+        recordId: null,
+      });
+    }
+    const lastRecord = recordRows.length === batchSize ? recordRows.at(-1) : undefined;
+    if (lastRecord) {
+      continuation.push({
+        ts: lastRecord.ts,
+        kind: "record",
+        id: lastRecord.id,
+        changeRequestId: null,
+        recordId: lastRecord.id,
+      });
+    }
+    const lastAudit = auditRows.length === batchSize ? auditRows.at(-1) : undefined;
+    if (lastAudit) {
+      continuation.push({
+        ts: lastAudit.ts,
+        kind: "audit",
+        id: lastAudit.id,
+        baseId: lastAudit.baseId,
+        recordId: lastAudit.recordId,
+        changeRequestId: lastAudit.changeRequestId,
+        operationId: lastAudit.operationId,
+        commitId: lastAudit.commitId,
+      });
+    }
+    return { events, continuation };
+  };
 
-  // Concatenate per-source (each already SQL-ordered) then STABLE-sort by
-  // (ts DESC, kind DESC). Same (ts, kind) rows all come from one source and keep
-  // their SQL order, so the id tiebreak is never compared here.
-  const merged: RawEvent[] = [
-    ...crRows.map((row) => ({
-      ts: row.ts,
-      kind: "change_request" as const,
-      id: row.id,
-      changeRequestId: row.id,
-      recordId: null,
-    })),
-    ...opRows.map((row) => ({
-      ts: row.ts,
-      kind: "operation" as const,
-      id: row.id,
-      changeRequestId: row.changeRequestId,
-      recordId: null,
-    })),
-    ...recordRows.map((row) => ({
-      ts: row.ts,
-      kind: "record" as const,
-      id: row.id,
-      changeRequestId: null,
-      recordId: row.id,
-    })),
-    ...auditRows.map((row) => ({
-      ts: row.ts,
-      kind: "audit" as const,
-      id: row.id,
-      changeRequestId: null,
-      recordId: row.recordId,
-    })),
-  ];
-  merged.sort((a, b) => b.ts.getTime() - a.ts.getTime() || KIND_ORDER[b.kind] - KIND_ORDER[a.kind]);
+  const compareEvents = (a: RawEvent, b: RawEvent) =>
+    b.ts.getTime() - a.ts.getTime() || KIND_ORDER[b.kind] - KIND_ORDER[a.kind];
+  const visibleByKey = new Map<string, RawEvent>();
+  let cursor = initialCursor;
+  let continuationBoundary: RawEvent | null = null;
+  for (;;) {
+    const window = await fetchWindow(cursor);
+    const unseen = window.events.filter((event) => !visibleByKey.has(`${event.kind}:${event.id}`));
+    const visibility = await Promise.all(
+      unseen.map(async (event) => {
+        try {
+          await assertAuditSubjectPermission(event, "read");
+          return true;
+        } catch (error) {
+          if (isAuditVisibilityMiss(error)) return false;
+          throw error;
+        }
+      }),
+    );
+    unseen.forEach((event, index) => {
+      if (visibility[index]) visibleByKey.set(`${event.kind}:${event.id}`, event);
+    });
+    continuationBoundary = window.continuation.sort(compareEvents)[0] ?? null;
+    const visibleSoFar = [...visibleByKey.values()].sort(compareEvents);
+    const threshold = visibleSoFar[limit];
+    // Equal timestamp+kind remains conservative: continue one more SQL window
+    // rather than comparing ids in JS with a potentially different collation.
+    if (
+      !continuationBoundary ||
+      (threshold && compareEvents(threshold, continuationBoundary) < 0)
+    ) {
+      break;
+    }
+    const next = {
+      ts: continuationBoundary.ts,
+      kind: continuationBoundary.kind,
+      id: continuationBoundary.id,
+    };
+    if (
+      cursor &&
+      cursor.ts.getTime() === next.ts.getTime() &&
+      cursor.kind === next.kind &&
+      cursor.id === next.id
+    ) {
+      break;
+    }
+    cursor = next;
+  }
 
-  const hasMore = merged.length > limit;
-  const page = merged.slice(0, limit);
+  const visible = [...visibleByKey.values()].sort(compareEvents);
+  const hasMore = visible.length > limit;
+  const page = visible.slice(0, limit);
   const last = page[page.length - 1];
   const nextCursor = hasMore && last ? encodeActivityCursor(last.ts, last.kind, last.id) : null;
 

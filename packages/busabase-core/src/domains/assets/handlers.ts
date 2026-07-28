@@ -7,7 +7,7 @@ import type {
   AssetUsageVO,
   AssetVO,
 } from "busabase-contract/domains/assets/types";
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import {
   confirmUpload,
   deleteAttachmentSafely,
@@ -20,8 +20,10 @@ import { db, getDb } from "../../db";
 import { attachments, busabaseBaseFields, busabaseBases, busabaseNodes } from "../../db/schema";
 import { insertAuditEvent } from "../../logic/audit";
 import { id } from "../../logic/kernel";
+import { hasNodePermission, hasWorkspacePermission } from "../../logic/node-acl";
 import { ensureReady } from "../../logic/seed";
 import { dispatchWebhookEvent } from "../webhook/logic/dispatch";
+import { assertAssetPermission } from "./logic/asset-permissions";
 import {
   autoRegisterAssetText,
   deriveAssetTextStatus,
@@ -41,6 +43,7 @@ interface AssetRow {
   name: string;
   contentKind: AssetContentKind;
   metadata: Record<string, unknown>;
+  createdBy: string;
   createdAt: Date;
   storageKey: string;
   fileName: string;
@@ -105,6 +108,7 @@ const assetRowColumns = {
   name: busabaseAssets.name,
   contentKind: busabaseAssets.contentKind,
   metadata: busabaseAssets.metadata,
+  createdBy: busabaseAssets.createdBy,
   createdAt: busabaseAssets.createdAt,
   storageKey: attachments.storageKey,
   fileName: attachments.fileName,
@@ -288,23 +292,57 @@ export const listAssets = async (): Promise<AssetVO[]> => {
     .where(eq(busabaseAssets.spaceId, spaceId))
     .orderBy(desc(busabaseAssets.createdAt));
 
-  const counts: { assetId: string; count: number }[] = await db
-    .select({
-      assetId: busabaseAssetUsages.assetId,
-      count: sql<number>`count(*)::int`,
-    })
-    .from(busabaseAssetUsages)
-    .where(eq(busabaseAssetUsages.spaceId, spaceId))
-    .groupBy(busabaseAssetUsages.assetId);
-  const countByAsset = new Map(counts.map((c) => [c.assetId, c.count]));
-
-  return rows.map((row) => toAssetVO(row, countByAsset.get(row.id) ?? 0));
+  const visibleRows: AssetVO[] = [];
+  const usages =
+    rows.length > 0
+      ? await db
+          .select({ assetId: busabaseAssetUsages.assetId, nodeId: busabaseAssetUsages.nodeId })
+          .from(busabaseAssetUsages)
+          .where(
+            and(
+              eq(busabaseAssetUsages.spaceId, spaceId),
+              inArray(
+                busabaseAssetUsages.assetId,
+                rows.map((row) => row.id),
+              ),
+            ),
+          )
+      : [];
+  const visibleNodeEntries = await Promise.all(
+    [...new Set(usages.map((usage) => usage.nodeId))].map(
+      async (nodeId) => [nodeId, await hasNodePermission(nodeId, "read", undefined, db)] as const,
+    ),
+  );
+  const visibleNodeIds = new Set(
+    visibleNodeEntries.filter(([, visible]) => visible).map(([nodeId]) => nodeId),
+  );
+  const usageByAsset = new Map<string, typeof usages>();
+  for (const usage of usages) {
+    const list = usageByAsset.get(usage.assetId) ?? [];
+    list.push(usage);
+    usageByAsset.set(usage.assetId, list);
+  }
+  for (const row of rows) {
+    const assetUsages = usageByAsset.get(row.id) ?? [];
+    const visibleUsageCount = assetUsages.filter((usage) =>
+      visibleNodeIds.has(usage.nodeId),
+    ).length;
+    if (
+      visibleUsageCount > 0 ||
+      (assetUsages.length === 0 &&
+        (hasWorkspacePermission("write") || row.createdBy === resolveActorId("local-producer")))
+    ) {
+      visibleRows.push(toAssetVO(row, visibleUsageCount));
+    }
+  }
+  return visibleRows;
 };
 
 export const getAsset = async (assetId: string): Promise<AssetDetailVO> => {
   await ensureReady();
   const db = await getDb();
   const spaceId = getContextSpaceId();
+  const visibleNodeIds = await assertAssetPermission(assetId, "read");
 
   const [row] = await db
     .select(assetRowColumns)
@@ -332,7 +370,15 @@ export const getAsset = async (assetId: string): Promise<AssetDetailVO> => {
     })
     .from(busabaseAssetUsages)
     .innerJoin(busabaseNodes, eq(busabaseAssetUsages.nodeId, busabaseNodes.id))
-    .where(eq(busabaseAssetUsages.assetId, assetId))
+    .where(
+      and(
+        eq(busabaseAssetUsages.assetId, assetId),
+        eq(busabaseAssetUsages.spaceId, spaceId),
+        visibleNodeIds.size > 0
+          ? inArray(busabaseAssetUsages.nodeId, [...visibleNodeIds])
+          : sql`false`,
+      ),
+    )
     .orderBy(desc(busabaseAssetUsages.createdAt));
 
   const usages: AssetUsageVO[] = usageRows.map((u) => ({
@@ -362,6 +408,7 @@ export const downloadAsset = async (assetId: string): Promise<AssetDownloadVO> =
   await ensureReady();
   const db = await getDb();
   const spaceId = getContextSpaceId();
+  await assertAssetPermission(assetId, "read", db);
 
   const [row] = await db
     .select(assetRowColumns)
@@ -384,13 +431,15 @@ export const downloadAsset = async (assetId: string): Promise<AssetDownloadVO> =
   };
 };
 
-export const resolveAssetFile = async (
+const resolveAssetFileInternal = async (
   assetId: string,
   tx?: Awaited<ReturnType<typeof getDb>>,
+  authorize = true,
 ): Promise<ResolvedAssetFile> => {
   await ensureReady();
   const db = tx ?? (await getDb());
   const spaceId = getContextSpaceId();
+  if (authorize) await assertAssetPermission(assetId, "read", db);
 
   const [row] = await db
     .select(assetRowColumns)
@@ -418,12 +467,24 @@ export const resolveAssetFile = async (
   };
 };
 
+export const resolveAssetFile = async (
+  assetId: string,
+  tx?: Awaited<ReturnType<typeof getDb>>,
+): Promise<ResolvedAssetFile> => resolveAssetFileInternal(assetId, tx);
+
+/** Merge/materializer-only resolver after the owning CR/node gate has passed. */
+export const resolveAssetFileForMaterialization = async (
+  assetId: string,
+  tx: Awaited<ReturnType<typeof getDb>>,
+): Promise<ResolvedAssetFile> => resolveAssetFileInternal(assetId, tx, false);
+
 export const updateAssetMetadata = async (
   input: UpdateAssetMetadataInput,
 ): Promise<AssetDetailVO> => {
   await ensureReady();
   const db = await getDb();
   const spaceId = getContextSpaceId();
+  await assertAssetPermission(input.assetId, "write");
   const [asset] = await db
     .select({ id: busabaseAssets.id, metadata: busabaseAssets.metadata })
     .from(busabaseAssets)
@@ -521,6 +582,7 @@ export const deleteAssetRow = async (
 };
 
 export const deleteAsset = async (assetId: string): Promise<{ deleted: boolean }> => {
+  await assertAssetPermission(assetId, "write");
   const result = await deleteAssetRow(assetId);
   if (!result.deleted) {
     throw assetNotFound(assetId);

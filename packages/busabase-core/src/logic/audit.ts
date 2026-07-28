@@ -5,6 +5,7 @@ import type { CommentSubjectType } from "busabase-contract/types";
 import { and, asc, desc, eq } from "drizzle-orm";
 import { z } from "zod";
 import {
+  getContextIsSpaceManager,
   getContextSourceProvenance,
   getContextSpaceId,
   resolveActorId,
@@ -14,6 +15,7 @@ import {
 import { getDb } from "../db";
 import {
   busabaseAuditEvents,
+  busabaseBases,
   busabaseChangeRequests,
   busabaseComments,
   busabaseCommits,
@@ -21,6 +23,7 @@ import {
   busabaseRecords,
 } from "../db/schema";
 import { CURRENT_USER_ID, id, listInputSchema, now } from "./kernel";
+import { assertNodePermission, assertWorkspacePermission } from "./node-acl";
 import { toAuditEventVO, toCommentVO } from "./vo";
 
 // ── Schemas ───────────────────────────────────────────────────────────────────
@@ -219,10 +222,97 @@ const resolveCommentSubject = async (
   };
 };
 
+export interface AuditSubjectRef {
+  baseId?: string | null;
+  recordId?: string | null;
+  changeRequestId?: string | null;
+  operationId?: string | null;
+  commitId?: string | null;
+}
+
+export const isAuditVisibilityMiss = (error: unknown): boolean =>
+  error instanceof ORPCError && (error.code === "NOT_FOUND" || error.code === "FORBIDDEN");
+
+/** Resolve an audit/comment subject to its ACL-owning node without leaking IDs. */
+export const assertAuditSubjectPermission = async (
+  subject: AuditSubjectRef,
+  required: "read" | "changeRequest" | "write" | "manage",
+): Promise<void> => {
+  const db = await getDb();
+  const spaceId = getContextSpaceId();
+  if (
+    !subject.baseId &&
+    !subject.recordId &&
+    !subject.changeRequestId &&
+    !subject.operationId &&
+    !subject.commitId
+  ) {
+    if (required === "read") {
+      if (!getContextIsSpaceManager()) {
+        throw new ORPCError("FORBIDDEN", { message: "Requires manage workspace access" });
+      }
+      return;
+    }
+    assertWorkspacePermission(required);
+    return;
+  }
+  if (subject.changeRequestId) {
+    const { assertChangeRequestPermission } = await import("./cr-lifecycle");
+    await assertChangeRequestPermission(subject.changeRequestId, required);
+    return;
+  }
+  if (subject.operationId || subject.commitId) {
+    const commitId = subject.commitId;
+    const [operation] = subject.operationId
+      ? await db
+          .select({ changeRequestId: busabaseOperations.changeRequestId })
+          .from(busabaseOperations)
+          .where(
+            and(
+              eq(busabaseOperations.id, subject.operationId),
+              eq(busabaseOperations.spaceId, spaceId),
+            ),
+          )
+          .limit(1)
+      : commitId
+        ? await db
+            .select({ changeRequestId: busabaseOperations.changeRequestId })
+            .from(busabaseCommits)
+            .innerJoin(busabaseOperations, eq(busabaseOperations.id, busabaseCommits.operationId))
+            .where(and(eq(busabaseCommits.id, commitId), eq(busabaseCommits.spaceId, spaceId)))
+            .limit(1)
+        : [];
+    if (!operation) {
+      throw commentSubjectNotFound("Subject", subject.operationId ?? commitId ?? "unknown");
+    }
+    const { assertChangeRequestPermission } = await import("./cr-lifecycle");
+    await assertChangeRequestPermission(operation.changeRequestId, required);
+    return;
+  }
+  const [base] = subject.recordId
+    ? await db
+        .select({ nodeId: busabaseBases.nodeId })
+        .from(busabaseRecords)
+        .innerJoin(busabaseBases, eq(busabaseBases.id, busabaseRecords.baseId))
+        .where(and(eq(busabaseRecords.id, subject.recordId), eq(busabaseRecords.spaceId, spaceId)))
+        .limit(1)
+    : subject.baseId
+      ? await db
+          .select({ nodeId: busabaseBases.nodeId })
+          .from(busabaseBases)
+          .where(and(eq(busabaseBases.id, subject.baseId), eq(busabaseBases.spaceId, spaceId)))
+          .limit(1)
+      : [];
+  if (!base)
+    throw commentSubjectNotFound("Subject", subject.recordId ?? subject.baseId ?? "unknown");
+  await assertNodePermission(base.nodeId, required);
+};
+
 export const createAuditEvent = async (input: z.infer<typeof auditEventInputSchema>) => {
   const { ensureReady } = await import("./seed");
   await ensureReady();
   const db = await getDb();
+  await assertAuditSubjectPermission(input, "write");
   return insertAuditEvent(db, input);
 };
 
@@ -231,12 +321,33 @@ export const listAuditEvents = async (input?: z.input<typeof listInputSchema>) =
   await ensureReady();
   const db = await getDb();
   const parsed = listInputSchema.parse(input);
-  const events = await db
-    .select()
-    .from(busabaseAuditEvents)
-    .where(eq(busabaseAuditEvents.spaceId, getContextSpaceId()))
-    .orderBy(desc(busabaseAuditEvents.createdAt))
-    .limit(parsed.limit);
+  const events: (typeof busabaseAuditEvents.$inferSelect)[] = [];
+  const batchSize = Math.max(parsed.limit, 20);
+  let offset = 0;
+  for (;;) {
+    const candidates = await db
+      .select()
+      .from(busabaseAuditEvents)
+      .where(eq(busabaseAuditEvents.spaceId, getContextSpaceId()))
+      .orderBy(desc(busabaseAuditEvents.createdAt), desc(busabaseAuditEvents.id))
+      .limit(batchSize)
+      .offset(offset);
+    const visibility = await Promise.all(
+      candidates.map(async (event) => {
+        try {
+          await assertAuditSubjectPermission(event, "read");
+          return true;
+        } catch (error) {
+          if (isAuditVisibilityMiss(error)) return false;
+          throw error;
+        }
+      }),
+    );
+    events.push(...candidates.filter((_, index) => visibility[index]));
+    if (events.length >= parsed.limit || candidates.length < batchSize) break;
+    offset += candidates.length;
+  }
+  events.splice(parsed.limit);
   const users = await resolveUserRefs(events.map((event) => event.actorId));
   return events.map((event) => toAuditEventVO(event, users));
 };
@@ -246,6 +357,13 @@ export const listComments = async (input: z.infer<typeof commentSubjectInputSche
   await ensureReady();
   const db = await getDb();
   const parsed = commentSubjectInputSchema.parse(input);
+  const subjectLinks = await resolveCommentSubject(
+    db,
+    parsed.subjectType,
+    parsed.subjectId,
+    getContextSpaceId(),
+  );
+  await assertAuditSubjectPermission(subjectLinks, "read");
   const comments = await db
     .select()
     .from(busabaseComments)
@@ -272,6 +390,7 @@ export const createComment = async (input: z.infer<typeof createCommentInputSche
     parsed.subjectId,
     getContextSpaceId(),
   );
+  await assertAuditSubjectPermission(subjectLinks, "write");
   const timestamp = now();
   const [comment] = await db
     .insert(busabaseComments)

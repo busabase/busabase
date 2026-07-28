@@ -188,6 +188,7 @@ describe("runAirAppLocalNode — srt fail-open sandboxing-unsupported warning pa
     vi.resetModules();
     vi.doUnmock("@anthropic-ai/sandbox-runtime");
     vi.doUnmock("node:child_process");
+    vi.doUnmock("../src/logic/node-acl");
   });
 
   it("surfaces a 'sandboxing' warning log as the first event and still proceeds with the run", async () => {
@@ -221,6 +222,9 @@ describe("runAirAppLocalNode — srt fail-open sandboxing-unsupported warning pa
         }, 0);
         return child;
       }),
+    }));
+    vi.doMock("../src/logic/node-acl", () => ({
+      assertNodePermission: vi.fn(async () => undefined),
     }));
 
     const { runAirAppLocalNode } = await import("../src/domains/airapp/logic/local-node-runtime");

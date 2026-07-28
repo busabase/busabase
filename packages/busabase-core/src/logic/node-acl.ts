@@ -10,6 +10,7 @@ import type { AnyColumn } from "drizzle-orm";
 import { and, eq, exists, inArray, isNotNull, isNull, ne, or, type SQL, sql } from "drizzle-orm";
 import {
   getContextActorId,
+  getContextCredentialPermissionCeiling,
   getContextIsSpaceManager,
   getContextPermissionLevel,
   getContextPermissionLevelIsCeiling,
@@ -44,12 +45,24 @@ export type NodeVisibility = "private" | "workspace" | "public";
 /** Workspace-wide mutation gate shared by CR lifecycle and direct writes. */
 export function assertWorkspacePermission(required: ApiKeyPermissionLevel): void {
   const level = getContextPermissionLevel();
-  if (!hasApiKeyLevel(level, required)) {
+  const credentialCeiling = getContextCredentialPermissionCeiling();
+  if (
+    !hasApiKeyLevel(level, required) ||
+    (credentialCeiling !== undefined && !hasApiKeyLevel(credentialCeiling, required))
+  ) {
     throw new ORPCError("FORBIDDEN", {
       message: `Requires ${required} workspace access`,
       data: { required, level },
     });
   }
+}
+
+export function hasWorkspacePermission(required: ApiKeyPermissionLevel): boolean {
+  const level = getContextPermissionLevel();
+  const ceiling = getContextCredentialPermissionCeiling();
+  return (
+    hasApiKeyLevel(level, required) && (ceiling === undefined || hasApiKeyLevel(ceiling, required))
+  );
 }
 
 const STRICTNESS: Record<NodeVisibility, number> = { private: 0, workspace: 1, public: 2 };
@@ -195,6 +208,7 @@ export const buildBaseVisibilityExists = (
 export async function getEffectiveNodeLevel(
   nodeId: string,
   inputActorId?: string,
+  inputDb?: Awaited<ReturnType<typeof getDb>>,
 ): Promise<ApiKeyPermissionLevel | null> {
   // See buildNodeVisibilityCondition. An anonymous visitor never picks up the
   // member-facing baseline (that path would hand them `read` on every
@@ -205,8 +219,7 @@ export async function getEffectiveNodeLevel(
   if (isAnonymousVisitor()) {
     return (await getPublicScopeOf(nodeId)) ? "read" : null;
   }
-  if (getContextIsSpaceManager()) return "manage";
-  const db = await getDb();
+  const db = inputDb ?? (await getDb());
   const spaceId = getContextSpaceId();
   const actorId = resolveActorId(inputActorId ?? "local-user");
 
@@ -216,6 +229,13 @@ export async function getEffectiveNodeLevel(
     .where(and(eq(busabaseNodes.id, nodeId), eq(busabaseNodes.spaceId, spaceId)))
     .limit(1);
   if (!node) return null;
+
+  // Managers bypass node visibility/grant rules, but only after proving the
+  // node belongs to this request's space. Otherwise a guessed cross-space id
+  // would receive a positive permission level without a tenant check.
+  if (getContextIsSpaceManager()) {
+    return getContextCredentialPermissionCeiling() ?? "manage";
+  }
 
   const grants = await db
     .select({ role: busabaseNodePrincipals.role })
@@ -258,8 +278,8 @@ export async function getEffectiveNodeLevel(
       level = grant.role;
     }
   }
-  if (level && getContextPermissionLevelIsCeiling()) {
-    const ceiling = getContextPermissionLevel();
+  if (level && (getContextPermissionLevelIsCeiling() || getContextCredentialPermissionCeiling())) {
+    const ceiling = getContextCredentialPermissionCeiling() ?? getContextPermissionLevel();
     if (API_KEY_LEVEL_ORDER[level] > API_KEY_LEVEL_ORDER[ceiling]) {
       level = ceiling;
     }
@@ -268,8 +288,12 @@ export async function getEffectiveNodeLevel(
 }
 
 /** Read gate: NOT_FOUND (never FORBIDDEN) when the actor can't see the node. */
-export async function assertNodeVisible(nodeId: string, inputActorId?: string): Promise<void> {
-  const level = await getEffectiveNodeLevel(nodeId, inputActorId);
+export async function assertNodeVisible(
+  nodeId: string,
+  inputActorId?: string,
+  inputDb?: Awaited<ReturnType<typeof getDb>>,
+): Promise<void> {
+  const level = await getEffectiveNodeLevel(nodeId, inputActorId, inputDb);
   if (level === null) {
     throw new ORPCError("NOT_FOUND", { message: `Node not found: ${nodeId}` });
   }
@@ -284,8 +308,9 @@ export async function assertNodePermission(
   nodeId: string,
   required: ApiKeyPermissionLevel,
   inputActorId?: string,
+  inputDb?: Awaited<ReturnType<typeof getDb>>,
 ): Promise<void> {
-  const level = await getEffectiveNodeLevel(nodeId, inputActorId);
+  const level = await getEffectiveNodeLevel(nodeId, inputActorId, inputDb);
   if (level === null) {
     throw new ORPCError("NOT_FOUND", { message: `Node not found: ${nodeId}` });
   }
@@ -308,8 +333,9 @@ export async function hasNodePermission(
   nodeId: string,
   required: ApiKeyPermissionLevel,
   inputActorId?: string,
+  inputDb?: Awaited<ReturnType<typeof getDb>>,
 ): Promise<boolean> {
-  const level = await getEffectiveNodeLevel(nodeId, inputActorId);
+  const level = await getEffectiveNodeLevel(nodeId, inputActorId, inputDb);
   return level !== null && hasApiKeyLevel(level, required);
 }
 
@@ -334,14 +360,13 @@ export function shouldAutoMerge(
 /**
  * ChangeRequest-submission gate for record/base-targeted proposals: resolves
  * the base's node and requires `changeRequest` level on it. Accepts a base id
- * or slug (mirroring getBase's lookup order). Managers short-circuit before
- * any query.
+ * or slug (mirroring getBase's lookup order). The lookup is always space-scoped,
+ * including for managers, and assertNodePermission applies any credential ceiling.
  */
 export async function assertBaseChangeRequestPermission(
   baseIdOrSlug: string,
   inputActorId?: string,
 ): Promise<void> {
-  if (getContextIsSpaceManager()) return;
   const db = await getDb();
   const spaceId = getContextSpaceId();
   const [base] = await db

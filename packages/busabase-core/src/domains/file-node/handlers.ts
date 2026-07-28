@@ -25,7 +25,7 @@ import {
   recordPendingNodeCreate,
   toNodeVO,
 } from "../../logic/store";
-import { resolveAssetFile } from "../assets/handlers";
+import { resolveAssetFile, resolveAssetFileForMaterialization } from "../assets/handlers";
 import { getAssetTextStatus } from "../assets/logic/asset-texts-logic";
 
 const getString = (value: unknown) => (typeof value === "string" ? value : null);
@@ -249,7 +249,7 @@ export const materializeFileNode = async (ctx: MergeCtx, args: MaterializeArgs) 
   if (!assetId) {
     throw new Error("File node create requires metadata.assetId");
   }
-  const asset = await resolveAssetFile(assetId, db);
+  const asset = await resolveAssetFileForMaterialization(assetId, db);
   // Normalizing `assetId` to the resolved asset is deliberate; discarding the
   // REST of the caller's metadata was not — it silently dropped
   // `metadata.visibility`, so a file node created as "private" came out

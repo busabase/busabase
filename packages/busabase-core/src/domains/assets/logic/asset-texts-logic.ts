@@ -29,6 +29,7 @@ import { insertAuditEvent } from "../../../logic/audit";
 import { id } from "../../../logic/kernel";
 import { ensureReady } from "../../../logic/seed";
 import { type AssetTextPO, type AssetTextStatus, busabaseAssetTexts } from "../schema/asset-texts";
+import { assertAssetPermission } from "./asset-permissions";
 import { readObjectInChunks } from "./object-stream";
 import { scanTextBuffer, TextStreamScanner } from "./text-scan";
 
@@ -348,6 +349,7 @@ const emptyTextFields = (writtenBy: string): UpsertFields => ({
  */
 export const putAssetText = async (input: PutTextInput): Promise<AssetTextVO> => {
   await ensureReady();
+  await assertAssetPermission(input.assetId, "write");
   const db = await getDb();
   const spaceId = getContextSpaceId();
 
@@ -508,6 +510,7 @@ export const createAssetTextUploadUrl = async (
   input: CreateTextUploadUrlInput,
 ): Promise<CreateTextUploadUrlVO> => {
   await ensureReady();
+  await assertAssetPermission(input.assetId, "write");
   const db = await getDb();
   const spaceId = getContextSpaceId();
 

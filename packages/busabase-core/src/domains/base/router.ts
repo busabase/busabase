@@ -45,7 +45,13 @@ export const baseRouter = {
   list: os.bases.list.handler(async ({ input }) =>
     input.status === "archived" ? listArchivedBases() : listBases(),
   ),
-  get: os.bases.get.handler(async ({ input }) => getBase(input.baseId)),
+  get: os.bases.get.handler(async ({ input }) => {
+    const base = await getBase(input.baseId);
+    if (!base) {
+      throw new ORPCError("NOT_FOUND", { message: `Base not found: ${input.baseId}` });
+    }
+    return base;
+  }),
   create: os.bases.create.handler(async ({ input }) => createBase(input)),
   createChangeRequest: os.bases.createChangeRequest.handler(async ({ input }) => {
     const { baseId, ...rest } = input;

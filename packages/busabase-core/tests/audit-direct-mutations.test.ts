@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { createRouterClient } from "@orpc/server";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { LOCAL_SPACE_ID, runWithBusabaseContext } from "../src/context";
 import { DEMO_BASES, DEMO_FOLDERS } from "../src/demo/dataset";
 import { seedScenario } from "../src/logic/store";
 import { busabaseRouter } from "../src/router";
@@ -123,5 +124,16 @@ describe("audit trail for direct mutations", () => {
     const purge = events.find((e) => e.action === "node.purged");
     expect(purge).toBeDefined();
     expect((purge?.metadata as { nodeId?: string })?.nodeId).toBe(folderId);
+
+    const memberEvents = await runWithBusabaseContext(
+      {
+        spaceId: LOCAL_SPACE_ID,
+        actorId: "audit-reader",
+        isSpaceManager: false,
+        permissionLevel: "read",
+      },
+      () => client.auditEvents.list({ limit: 100 }),
+    );
+    expect(memberEvents.some((event) => event.action === "node.purged")).toBe(false);
   });
 });

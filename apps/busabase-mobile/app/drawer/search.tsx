@@ -15,7 +15,7 @@ import {
   Table2,
 } from "lucide-react-native";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { StyleSheet, Text, View } from "react-native";
+import { StyleSheet, View } from "react-native";
 import { useBusabaseOrpc } from "~/api/use-busabase-orpc";
 import { ConnectionGuard } from "~/components/busabase/ConnectionGuard";
 import { DrawerScaffold } from "~/components/busabase/DrawerScaffold";
@@ -36,7 +36,6 @@ import {
 } from "~/search/known-node-cache";
 import { getMobileNodeDestination } from "~/search/node-navigation";
 import { useKnownNodeCache } from "~/search/use-known-node-cache";
-import { typography } from "~/theme/tokens";
 import { useTokens } from "~/theme/use-tokens";
 
 const kindMeta: Record<SearchResultVO["kind"], { label: string; icon: typeof FileText }> = {
@@ -302,13 +301,13 @@ function SearchContent() {
   const resultCount = tab === "recent" ? recentResults.length : contentResults.length;
 
   return (
-    <DrawerScaffold title="Search" subtitle="Recent nodes and workspace content">
+    <DrawerScaffold title="Search">
       <View style={styles.searchBox}>
         <TextInput
-          label="Search"
+          accessibilityLabel="Search workspace"
           value={query}
           autoFocus
-          placeholder="Search nodes, records, change requests, and files"
+          placeholder="Search workspace"
           returnKeyType="search"
           onChangeText={setQuery}
         />
@@ -324,15 +323,10 @@ function SearchContent() {
         </View>
       ) : null}
 
-      <NativeSection title={tab === "recent" ? "Recent" : hasQuery ? "Results" : "Search"}>
+      <NativeSection title={tab === "recent" ? undefined : hasQuery ? "Results" : undefined}>
         {searching && resultCount === 0 ? (
           <NativeRow
             title="Searching"
-            subtitle={
-              tab === "recent"
-                ? "Looking for nodes by name."
-                : "Looking across records, change requests, Bases, and files."
-            }
             leading={<Search size={18} color={tokens.mutedForeground} />}
             last
           />
@@ -340,15 +334,6 @@ function SearchContent() {
         {!searching && resultCount === 0 && !displayedError ? (
           <NativeRow
             title={tab === "recent" && !hasQuery ? "No recent nodes" : "No matches"}
-            subtitle={
-              tab === "recent" && !hasQuery
-                ? "Nodes you open will appear here."
-                : tab === "recent"
-                  ? "Try another node name or switch tabs for full-text search."
-                  : hasQuery
-                    ? "Try a title, field value, or another tab."
-                    : "Enter a query to search workspace content."
-            }
             leading={<Search size={18} color={tokens.mutedForeground} />}
             last
           />
@@ -382,16 +367,7 @@ function SearchContent() {
                   leading={<Icon size={18} color={tokens.mutedForeground} />}
                   onPress={() => void openResult(result)}
                   last={index === contentResults.length - 1}
-                >
-                  {result.eyebrow && result.body ? (
-                    <Text
-                      numberOfLines={1}
-                      style={[typography.caption, { color: tokens.mutedForeground }]}
-                    >
-                      {result.eyebrow}
-                    </Text>
-                  ) : null}
-                </NativeRow>
+                />
               );
             })}
       </NativeSection>

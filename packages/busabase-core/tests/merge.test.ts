@@ -117,6 +117,47 @@ describe("Staleness-aware 3-way merge — oRPC", () => {
     );
   });
 
+  it("ignores a required field deleted after a record change request was created", async () => {
+    const base = await client.bases.create({
+      slug: "deleted-required-field",
+      name: "Deleted Required Field",
+      fields: [{ slug: "title", name: "Title", type: "text", required: true }],
+      autoMerge: true,
+    });
+    const recordCr = await client.bases.createChangeRequest({
+      baseId: base.id,
+      fields: { title: "Created before the schema changed" },
+      autoMerge: false,
+    });
+
+    const addHeroCr = await client.bases.fieldChangeRequest({
+      operation: "create",
+      baseId: base.id,
+      slug: "hero",
+      name: "Hero",
+      type: "json",
+      required: true,
+    });
+    await approveAndMerge(addHeroCr.id);
+    const currentBase = (await client.bases.list({})).find((item) => item.id === base.id);
+    const heroFieldId = currentBase?.fields.find((field) => field.slug === "hero")?.id;
+    if (!heroFieldId) {
+      throw new Error("expected the required hero field to exist before deletion");
+    }
+
+    const deleteHeroCr = await client.bases.fieldChangeRequest({
+      operation: "delete",
+      baseId: base.id,
+      fieldId: heroFieldId,
+    });
+    await approveAndMerge(deleteHeroCr.id);
+
+    const merged = await approveAndMerge(recordCr.id);
+    expect(merged.record?.headCommit.fields).toEqual({
+      title: "Created before the schema changed",
+    });
+  });
+
   // Regression test for a real TOCTOU race: two near-simultaneous merge calls for
   // the same approved CR (e.g. a client retry after a timeout, or a double-click)
   // both read status="approved" before either commits. Without a DB-level guard,

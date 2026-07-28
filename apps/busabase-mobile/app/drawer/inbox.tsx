@@ -37,19 +37,10 @@ const matchesMode = (changeRequest: ChangeRequestVO, mode: InboxMode): boolean =
   }
 };
 
-const emptyCopy: Record<InboxMode, { title: string; description: string }> = {
-  review: {
-    title: "Inbox is clear",
-    description: "New change requests submitted to the connected Busabase server will appear here.",
-  },
-  mine: {
-    title: "Nothing created yet",
-    description: "Change requests you submit from this device show up here.",
-  },
-  done: {
-    title: "No completed reviews",
-    description: "Merged and rejected change requests will appear here.",
-  },
+const emptyCopy: Record<InboxMode, string> = {
+  review: "Inbox is clear",
+  mine: "Nothing created yet",
+  done: "No completed reviews",
 };
 
 const isRecentChangeRequest = (changeRequest: ChangeRequestVO) => {
@@ -160,7 +151,6 @@ function InboxContent() {
   return (
     <DrawerScaffold
       title="Inbox"
-      subtitle="Change requests from connected agents"
       refreshing={query.isRefetching}
       onRefresh={() => void query.refetch()}
     >
@@ -181,10 +171,7 @@ function InboxContent() {
         <NativeErrorState message={query.error.message} onRetry={() => void query.refetch()} />
       ) : null}
       {!query.isLoading && !query.error && visible.length === 0 ? (
-        <NativeEmptyState
-          title={emptyCopy[activeMode].title}
-          description={emptyCopy[activeMode].description}
-        />
+        <NativeEmptyState title={emptyCopy[activeMode]} />
       ) : null}
       {showGroups
         ? (groups ?? []).map(renderGroup)

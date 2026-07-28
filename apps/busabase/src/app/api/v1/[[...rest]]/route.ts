@@ -10,6 +10,7 @@ import { resolveDemoMode } from "openlib/ui/dashboard/demo";
 import { readBuiltinVaultRuntimeEnv } from "~/domains/vault/logic/vault";
 import { getBusabaseAppLL, getBusabaseLocaleFromAcceptLanguage } from "~/lib/i18n";
 import { getLocalUserName } from "~/lib/local-user";
+import { resolveRelayPermissionContext } from "~/lib/relay-permission";
 
 // Shared with busabase-cloud on purpose: both servers mount the same contract,
 // so an SDK or agent talking to either has to see the same error shape. This
@@ -36,7 +37,14 @@ async function handle(request: Request) {
   }
 
   const vaultRuntimeEnv = await readBuiltinVaultRuntimeEnv();
-  return runWithBusabaseContext({ vaultRuntimeEnv, localUserName: getLocalUserName() }, run);
+  return runWithBusabaseContext(
+    {
+      vaultRuntimeEnv,
+      localUserName: getLocalUserName(),
+      ...resolveRelayPermissionContext(request.headers),
+    },
+    run,
+  );
 }
 
 async function routeRequest(request: Request, url: URL, isDemo: boolean) {

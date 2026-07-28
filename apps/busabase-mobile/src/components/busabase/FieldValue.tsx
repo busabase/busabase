@@ -29,6 +29,8 @@ interface FieldValueProps {
   value: unknown;
   /** Render the value as a proposed (new) value — used in change request diffs. */
   highlight?: boolean;
+  /** Disable nested controls when the value is rendered inside a tappable row. */
+  interactive?: boolean;
 }
 
 function getChipLabels(field: BaseFieldVO | undefined, value: unknown): string[] {
@@ -69,12 +71,12 @@ function getLinkHref(field: BaseFieldVO | undefined, value: unknown): string | n
   return null;
 }
 
-export function FieldValue({ field, value, highlight }: FieldValueProps) {
+export function FieldValue({ field, value, highlight, interactive = true }: FieldValueProps) {
   const tokens = useTokens();
   const [expanded, setExpanded] = useState(false);
 
   if (field?.type === "attachment") {
-    return <AttachmentValue value={value} />;
+    return <AttachmentValue value={value} interactive={interactive} />;
   }
 
   if (field?.type === "checkbox") {
@@ -104,6 +106,13 @@ export function FieldValue({ field, value, highlight }: FieldValueProps) {
 
   const href = getLinkHref(field, value);
   if (href) {
+    if (!interactive) {
+      return (
+        <Text numberOfLines={1} style={[typography.body, { color: tokens.foreground }]}>
+          {String(value)}
+        </Text>
+      );
+    }
     return (
       <Pressable
         accessibilityRole="link"
@@ -136,7 +145,7 @@ export function FieldValue({ field, value, highlight }: FieldValueProps) {
     </Text>
   );
 
-  if (!isLong) {
+  if (!isLong || !interactive) {
     return valueText;
   }
 
@@ -155,7 +164,7 @@ export function FieldValue({ field, value, highlight }: FieldValueProps) {
 }
 
 /** Renders an `attachment` field value: image thumbnails + tappable file chips. */
-function AttachmentValue({ value }: { value: unknown }) {
+function AttachmentValue({ value, interactive }: { value: unknown; interactive: boolean }) {
   const tokens = useTokens();
   const { state } = useConnection();
   const [selectedRef, setSelectedRef] = useState<AssetAttachmentRef | null>(null);
@@ -178,42 +187,67 @@ function AttachmentValue({ value }: { value: unknown }) {
         {images.length > 0 ? (
           <View style={styles.attachmentImages}>
             {images.map((ref) => (
-              <Pressable
-                key={ref.id}
-                accessibilityRole="imagebutton"
-                accessibilityLabel={`View ${getAttachmentKindLabel(ref)} ${ref.fileName}`}
-                onPress={() => setSelectedRef(ref)}
-              >
-                <Image
-                  source={{ uri: resolveAttachmentUrl(serverUrl, ref.url) }}
-                  resizeMode="cover"
-                  style={[styles.attachmentThumb, { borderColor: tokens.border }]}
-                />
-              </Pressable>
+              <View key={ref.id}>
+                {interactive ? (
+                  <Pressable
+                    accessibilityRole="imagebutton"
+                    accessibilityLabel={`View ${getAttachmentKindLabel(ref)} ${ref.fileName}`}
+                    onPress={() => setSelectedRef(ref)}
+                  >
+                    <Image
+                      source={{ uri: resolveAttachmentUrl(serverUrl, ref.url) }}
+                      resizeMode="cover"
+                      style={[styles.attachmentThumb, { borderColor: tokens.border }]}
+                    />
+                  </Pressable>
+                ) : (
+                  <Image
+                    source={{ uri: resolveAttachmentUrl(serverUrl, ref.url) }}
+                    resizeMode="cover"
+                    style={[styles.attachmentThumb, { borderColor: tokens.border }]}
+                  />
+                )}
+              </View>
             ))}
           </View>
         ) : null}
         {others.length > 0 ? (
           <View style={styles.attachmentRows}>
             {others.map((ref) => (
-              <Pressable
+              <View
                 key={ref.id}
-                accessibilityRole="button"
-                accessibilityLabel={`View ${getAttachmentKindLabel(ref)} ${ref.fileName}`}
                 style={[
                   styles.fileRow,
                   { backgroundColor: tokens.surface, borderColor: tokens.border },
                 ]}
-                onPress={() => setSelectedRef(ref)}
               >
-                <FileText size={14} color={tokens.primary} />
-                <Text
-                  numberOfLines={1}
-                  style={[typography.small, styles.fileName, { color: tokens.primary }]}
-                >
-                  {ref.fileName}
-                </Text>
-              </Pressable>
+                {interactive ? (
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={`View ${getAttachmentKindLabel(ref)} ${ref.fileName}`}
+                    style={styles.fileAction}
+                    onPress={() => setSelectedRef(ref)}
+                  >
+                    <FileText size={14} color={tokens.primary} />
+                    <Text
+                      numberOfLines={1}
+                      style={[typography.small, styles.fileName, { color: tokens.primary }]}
+                    >
+                      {ref.fileName}
+                    </Text>
+                  </Pressable>
+                ) : (
+                  <>
+                    <FileText size={14} color={tokens.mutedForeground} />
+                    <Text
+                      numberOfLines={1}
+                      style={[typography.small, styles.fileName, { color: tokens.foreground }]}
+                    >
+                      {ref.fileName}
+                    </Text>
+                  </>
+                )}
+              </View>
             ))}
           </View>
         ) : null}
@@ -280,6 +314,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: 7,
   },
+  fileAction: { flex: 1, minWidth: 0, flexDirection: "row", alignItems: "center", gap: 6 },
   fileName: { flex: 1, minWidth: 0 },
   attachmentPreview: { width: "100%", height: 220, borderRadius: radius.md },
   chips: { flexDirection: "row", flexWrap: "wrap", gap: 6 },

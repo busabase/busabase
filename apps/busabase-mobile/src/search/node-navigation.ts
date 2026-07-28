@@ -10,6 +10,18 @@ export type MobileNodeDestination =
   | { status: "ready"; pathname: string; params: Record<string, string> }
   | { status: "unsupported"; message: string };
 
+const NODE_DETAIL_PATHS: Readonly<Partial<Record<NodeType, string>>> = {
+  airapp: "/airapp/[nodeId]",
+  doc: "/doc/[nodeId]",
+  drive: "/drive/[nodeId]",
+  folder: "/folder/[nodeId]",
+  form: "/form/[nodeId]",
+  html: "/html/[nodeId]",
+  skill: "/skill/[nodeId]",
+  whiteboard: "/whiteboard/[nodeId]",
+  workflow: "/workflow/[nodeId]",
+};
+
 export const getMobileNodeDestination = (node: NavigableNode): MobileNodeDestination => {
   if (node.type === "file") {
     return {
@@ -20,9 +32,16 @@ export const getMobileNodeDestination = (node: NavigableNode): MobileNodeDestina
   if (node.type === "base") {
     return { status: "ready", pathname: "/base/[slug]", params: { slug: node.slug } };
   }
+  const pathname = NODE_DETAIL_PATHS[node.type];
+  if (!pathname) {
+    return {
+      status: "unsupported",
+      message: `${node.type} nodes aren't viewable on mobile yet.`,
+    };
+  }
   return {
     status: "ready",
-    pathname: `/${node.type}/[nodeId]`,
+    pathname,
     params: { nodeId: node.id },
   };
 };

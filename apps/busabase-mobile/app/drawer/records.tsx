@@ -26,7 +26,6 @@ function RecordsContent() {
   return (
     <DrawerScaffold
       title="Records"
-      subtitle="Read-only merged records"
       refreshing={query.isRefetching}
       onRefresh={() => void query.refetch()}
     >
@@ -35,10 +34,7 @@ function RecordsContent() {
         <NativeErrorState message={query.error.message} onRetry={() => void query.refetch()} />
       ) : null}
       {!query.isLoading && !query.error && query.data?.length === 0 ? (
-        <NativeEmptyState
-          title="No records yet"
-          description="Approved and merged Busabase records will appear here."
-        />
+        <NativeEmptyState title="No records yet" />
       ) : null}
       {query.data && query.data.length > 0 ? (
         <NativeSection title="Records" caption={`${query.data.length}`}>

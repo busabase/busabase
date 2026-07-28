@@ -1,7 +1,6 @@
 import "server-only";
 
 import { ORPCError } from "@orpc/server";
-import { hasApiKeyLevel } from "busabase-contract/access-control/api-key-level";
 import { listChangeRequestsPagedInputSchema } from "busabase-contract/contract/schemas";
 import type {
   ChangeRequestVO,
@@ -10,10 +9,10 @@ import type {
   RecordVO,
   ReviewVO,
 } from "busabase-contract/types";
-import { and, asc, desc, eq, inArray, isNull, lt, ne, or, type SQL, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, lt, ne, or, type SQL } from "drizzle-orm";
 import { z } from "zod";
 import {
-  getContextPermissionLevel,
+  getContextIsSpaceManager,
   getContextSpaceId,
   resolveActorId,
   resolveUserRefs,
@@ -77,7 +76,9 @@ import { publishBusabaseLiveEvent } from "./live-events";
 import { getMaterializer, type MaterializeArgs, type NodeCreateFields } from "./materialize";
 import {
   assertNodePermission,
+  buildNodeVisibilityCondition,
   hasNodePermission,
+  hasWorkspacePermission,
   initializeNodeAcl,
   recomputeSpaceNodeAcl,
 } from "./node-acl";
@@ -997,6 +998,28 @@ export const hydrateRecord = async (record: RecordPO): Promise<RecordVO> => {
 
 // ── CRUD ──────────────────────────────────────────────────────────────────────
 
+const loadVisibleChangeRequestWindow = async (
+  filters: SQL[],
+  requiredCount: number,
+): Promise<ChangeRequestPO[]> => {
+  const db = await getDb();
+  const batchSize = Math.max(requiredCount, 20);
+  const visible: ChangeRequestPO[] = [];
+  let offset = 0;
+  for (;;) {
+    const candidates = await db
+      .select()
+      .from(busabaseChangeRequests)
+      .where(and(...filters))
+      .orderBy(desc(busabaseChangeRequests.createdAt), desc(busabaseChangeRequests.id))
+      .limit(batchSize)
+      .offset(offset);
+    visible.push(...(await filterVisibleChangeRequestRows(candidates)));
+    if (visible.length >= requiredCount || candidates.length < batchSize) break;
+    offset += candidates.length;
+  }
+  return visible.slice(0, requiredCount);
+};
 // `|` separates the ISO timestamp (which contains colons) from the id.
 const encodeChangeRequestCursor = (createdAt: Date, changeRequestId: string): string =>
   Buffer.from(`${createdAt.toISOString()}|${changeRequestId}`, "utf8").toString("base64");
@@ -1040,7 +1063,6 @@ export const listChangeRequestsPaged = async (
   input?: z.input<typeof listChangeRequestsPagedInputSchema>,
 ) => {
   await ensureReady();
-  const db = await getDb();
   const parsed = listChangeRequestsPagedInputSchema.parse(input);
   const filters: SQL[] = [eq(busabaseChangeRequests.spaceId, getContextSpaceId())];
   if (parsed.status && parsed.status.length > 0) {
@@ -1064,12 +1086,7 @@ export const listChangeRequestsPaged = async (
     }
   }
 
-  const rows = await db
-    .select()
-    .from(busabaseChangeRequests)
-    .where(and(...filters))
-    .orderBy(desc(busabaseChangeRequests.createdAt), desc(busabaseChangeRequests.id))
-    .limit(parsed.limit + 1);
+  const rows = await loadVisibleChangeRequestWindow(filters, parsed.limit + 1);
 
   const hasMore = rows.length > parsed.limit;
   const pageRows = hasMore ? rows.slice(0, parsed.limit) : rows;
@@ -1091,30 +1108,31 @@ export const countChangeRequests = async () => {
   await ensureReady();
   const db = await getDb();
   const spaceId = getContextSpaceId();
-  const byStatus = await db
-    .select({
-      status: busabaseChangeRequests.status,
-      count: sql<number>`count(*)::int`,
-    })
-    .from(busabaseChangeRequests)
-    .where(eq(busabaseChangeRequests.spaceId, spaceId))
-    .groupBy(busabaseChangeRequests.status);
-  const statusCount = new Map(byStatus.map((row) => [row.status, row.count]));
-
-  const [createdRow] = await db
-    .select({ count: sql<number>`count(*)::int` })
-    .from(busabaseChangeRequests)
-    .where(
-      and(
-        eq(busabaseChangeRequests.spaceId, spaceId),
-        eq(busabaseChangeRequests.submittedBy, mineActorId()),
-      ),
-    );
+  const statusCount = new Map<string, number>();
+  let created = 0;
+  let offset = 0;
+  const batchSize = 100;
+  for (;;) {
+    const rows = await db
+      .select()
+      .from(busabaseChangeRequests)
+      .where(eq(busabaseChangeRequests.spaceId, spaceId))
+      .orderBy(desc(busabaseChangeRequests.createdAt), desc(busabaseChangeRequests.id))
+      .limit(batchSize)
+      .offset(offset);
+    const visibleRows = await filterVisibleChangeRequestRows(rows);
+    for (const row of visibleRows) {
+      statusCount.set(row.status, (statusCount.get(row.status) ?? 0) + 1);
+      if (row.submittedBy === mineActorId()) created += 1;
+    }
+    if (rows.length < batchSize) break;
+    offset += rows.length;
+  }
 
   return {
     review: statusCount.get("in_review") ?? 0,
     changes: statusCount.get("changes_requested") ?? 0,
-    created: createdRow?.count ?? 0,
+    created,
     approved: statusCount.get("approved") ?? 0,
     merged: statusCount.get("merged") ?? 0,
     rejected: (statusCount.get("rejected") ?? 0) + (statusCount.get("abandoned") ?? 0),
@@ -1134,12 +1152,22 @@ export const getChangeRequest = async (changeRequestId: string) => {
       ),
     )
     .limit(1);
-  return changeRequest ? hydrateChangeRequest(changeRequest) : null;
+  if (!changeRequest || !(await canViewChangeRequest(changeRequest.id))) return null;
+  return hydrateChangeRequest(changeRequest);
 };
 
 export const listRecordChangeRequests = async (recordId: string) => {
   await ensureReady();
   const db = await getDb();
+  const spaceId = getContextSpaceId();
+  const [recordScope] = await db
+    .select({ nodeId: busabaseBases.nodeId })
+    .from(busabaseRecords)
+    .innerJoin(busabaseBases, eq(busabaseBases.id, busabaseRecords.baseId))
+    .where(and(eq(busabaseRecords.id, recordId), eq(busabaseRecords.spaceId, spaceId)))
+    .limit(1);
+  if (!recordScope) return [];
+  await assertNodePermission(recordScope.nodeId, "read");
   const operationRows = await db
     .select({
       changeRequestId: busabaseOperations.changeRequestId,
@@ -1147,10 +1175,13 @@ export const listRecordChangeRequests = async (recordId: string) => {
     })
     .from(busabaseOperations)
     .where(
-      or(
-        eq(busabaseOperations.mergedRecordId, recordId),
-        eq(busabaseOperations.targetRecordId, recordId),
-        eq(busabaseOperations.sourceRecordId, recordId),
+      and(
+        eq(busabaseOperations.spaceId, spaceId),
+        or(
+          eq(busabaseOperations.mergedRecordId, recordId),
+          eq(busabaseOperations.targetRecordId, recordId),
+          eq(busabaseOperations.sourceRecordId, recordId),
+        ),
       ),
     )
     .orderBy(desc(busabaseOperations.updatedAt));
@@ -1164,9 +1195,15 @@ export const listRecordChangeRequests = async (recordId: string) => {
   const changeRequestRows = await db
     .select()
     .from(busabaseChangeRequests)
-    .where(inArray(busabaseChangeRequests.id, changeRequestIds));
+    .where(
+      and(
+        eq(busabaseChangeRequests.spaceId, spaceId),
+        inArray(busabaseChangeRequests.id, changeRequestIds),
+      ),
+    );
+  const visibleRows = await filterVisibleChangeRequestRows(changeRequestRows);
   const changeRequestsById = new Map(
-    changeRequestRows.map((changeRequest) => [changeRequest.id, changeRequest]),
+    visibleRows.map((changeRequest) => [changeRequest.id, changeRequest]),
   );
   return hydrateChangeRequests(
     changeRequestIds
@@ -1185,7 +1222,12 @@ export const reviseOperation = async (
   const [operation] = await db
     .select()
     .from(busabaseOperations)
-    .where(eq(busabaseOperations.id, operationId))
+    .where(
+      and(
+        eq(busabaseOperations.id, operationId),
+        eq(busabaseOperations.spaceId, getContextSpaceId()),
+      ),
+    )
     .limit(1);
   if (!operation) {
     throw operationNotFound(operationId);
@@ -1194,11 +1236,17 @@ export const reviseOperation = async (
   const [changeRequest] = await db
     .select()
     .from(busabaseChangeRequests)
-    .where(eq(busabaseChangeRequests.id, operation.changeRequestId))
+    .where(
+      and(
+        eq(busabaseChangeRequests.id, operation.changeRequestId),
+        eq(busabaseChangeRequests.spaceId, getContextSpaceId()),
+      ),
+    )
     .limit(1);
   if (!changeRequest) {
-    throw new Error(`ChangeRequest not found: ${operation.changeRequestId}`);
+    throw changeRequestNotFound(operation.changeRequestId);
   }
+  await assertChangeRequestPermission(changeRequest.id, "changeRequest");
   // `conflict` is revisable: re-authoring is the escape hatch out of a 3-way
   // merge conflict (the revise re-baselines the op below so the next merge is clean).
   if (
@@ -1236,7 +1284,12 @@ export const reviseOperation = async (
     const [targetRecord] = await db
       .select({ headCommitId: busabaseRecords.headCommitId })
       .from(busabaseRecords)
-      .where(eq(busabaseRecords.id, operation.targetRecordId))
+      .where(
+        and(
+          eq(busabaseRecords.id, operation.targetRecordId),
+          eq(busabaseRecords.spaceId, getContextSpaceId()),
+        ),
+      )
       .limit(1);
     rebaselineCommitId = targetRecord?.headCommitId;
   }
@@ -1301,19 +1354,39 @@ const resolveChangeRequestScopeNodeIds = async (
 ): Promise<string[] | null> => {
   const db = await getDb();
   const spaceId = getContextSpaceId();
+  const [changeRequest] = await db
+    .select({ id: busabaseChangeRequests.id })
+    .from(busabaseChangeRequests)
+    .where(
+      and(
+        eq(busabaseChangeRequests.id, changeRequestId),
+        eq(busabaseChangeRequests.spaceId, spaceId),
+      ),
+    )
+    .limit(1);
+  if (!changeRequest) return null;
   const rows = await db
     .select({
       nodeId: busabaseOperations.nodeId,
       baseId: busabaseOperations.baseId,
       fields: busabaseCommits.fields,
+      operation: busabaseOperations.operation,
+      position: busabaseOperations.position,
     })
     .from(busabaseOperations)
     .leftJoin(busabaseCommits, eq(busabaseCommits.id, busabaseOperations.headCommitId))
-    .where(eq(busabaseOperations.changeRequestId, changeRequestId));
+    .where(
+      and(
+        eq(busabaseOperations.changeRequestId, changeRequestId),
+        eq(busabaseOperations.spaceId, spaceId),
+      ),
+    )
+    .orderBy(asc(busabaseOperations.position));
   if (rows.length === 0) return null;
 
   const nodeIds = new Set<string>();
   const baseIds = new Set<string>();
+  const declaredRefs = new Set<string>();
   for (const row of rows) {
     if (row.nodeId) {
       nodeIds.add(row.nodeId);
@@ -1323,14 +1396,23 @@ const resolveChangeRequestScopeNodeIds = async (
       baseIds.add(row.baseId);
       continue;
     }
-    const parentNodeId = (row.fields as { parentNodeId?: unknown } | null)?.parentNodeId;
+    const fields = row.fields as {
+      parentNodeId?: unknown;
+      parentNodeRef?: unknown;
+      ref?: unknown;
+    } | null;
+    const parentNodeId = fields?.parentNodeId;
     if (typeof parentNodeId === "string" && parentNodeId) {
       nodeIds.add(parentNodeId);
-      continue;
+    } else if (typeof fields?.parentNodeRef === "string" && fields.parentNodeRef) {
+      if (!declaredRefs.has(fields.parentNodeRef)) return null;
+    } else if (row.operation === "node_create") {
+      // A top-level pending create is authorized against the workspace root.
+      nodeIds.add(rootNodeIdForSpace(spaceId));
+    } else {
+      return null;
     }
-    // An operation whose target we cannot name — refuse the whole CR rather
-    // than approve the part we happen to understand.
-    return null;
+    if (typeof fields?.ref === "string" && fields.ref) declaredRefs.add(fields.ref);
   }
 
   if (baseIds.size > 0) {
@@ -1343,6 +1425,145 @@ const resolveChangeRequestScopeNodeIds = async (
   }
 
   return nodeIds.size > 0 ? [...nodeIds] : null;
+};
+
+const canViewChangeRequest = async (changeRequestId: string): Promise<boolean> => {
+  if (getContextIsSpaceManager()) return true;
+  const scope = await resolveChangeRequestScopeNodeIds(changeRequestId);
+  if (!scope) return false;
+  for (const nodeId of scope) {
+    if (!(await hasNodePermission(nodeId, "read"))) return false;
+  }
+  return true;
+};
+
+const filterVisibleChangeRequestRows = async <T extends ChangeRequestPO>(
+  rows: T[],
+): Promise<T[]> => {
+  if (rows.length === 0 || getContextIsSpaceManager()) return rows;
+  const db = await getDb();
+  const changeRequestIds = rows.map((row) => row.id);
+  const operations = await db
+    .select({
+      changeRequestId: busabaseOperations.changeRequestId,
+      nodeId: busabaseOperations.nodeId,
+      baseId: busabaseOperations.baseId,
+      fields: busabaseCommits.fields,
+      operation: busabaseOperations.operation,
+      position: busabaseOperations.position,
+    })
+    .from(busabaseOperations)
+    .leftJoin(busabaseCommits, eq(busabaseCommits.id, busabaseOperations.headCommitId))
+    .where(
+      and(
+        eq(busabaseOperations.spaceId, getContextSpaceId()),
+        inArray(busabaseOperations.changeRequestId, changeRequestIds),
+      ),
+    )
+    .orderBy(asc(busabaseOperations.changeRequestId), asc(busabaseOperations.position));
+  const baseIds = [
+    ...new Set(operations.flatMap((operation) => (operation.baseId ? [operation.baseId] : []))),
+  ];
+  const baseRows =
+    baseIds.length > 0
+      ? await db
+          .select({ id: busabaseBases.id, nodeId: busabaseBases.nodeId })
+          .from(busabaseBases)
+          .where(
+            and(eq(busabaseBases.spaceId, getContextSpaceId()), inArray(busabaseBases.id, baseIds)),
+          )
+      : [];
+  const baseNodeById = new Map(baseRows.map((base) => [base.id, base.nodeId]));
+  const scopes = new Map<string, Set<string>>();
+  const unresolved = new Set<string>();
+  const refsByChangeRequest = new Map<string, Set<string>>();
+  for (const operation of operations) {
+    const scope = scopes.get(operation.changeRequestId) ?? new Set<string>();
+    const refs = refsByChangeRequest.get(operation.changeRequestId) ?? new Set<string>();
+    const fields = operation.fields as {
+      parentNodeId?: unknown;
+      parentNodeRef?: unknown;
+      ref?: unknown;
+    } | null;
+    const parentNodeId = fields?.parentNodeId;
+    const nodeId =
+      operation.nodeId ??
+      (operation.baseId ? baseNodeById.get(operation.baseId) : undefined) ??
+      (typeof parentNodeId === "string" ? parentNodeId : undefined);
+    if (nodeId) scope.add(nodeId);
+    else if (typeof fields?.parentNodeRef === "string" && refs.has(fields.parentNodeRef)) {
+      // The earlier declaration's existing parent already anchors this new subtree.
+    } else if (
+      operation.operation === "node_create" &&
+      !operation.nodeId &&
+      !operation.baseId &&
+      !fields?.parentNodeRef
+    ) {
+      scope.add(rootNodeIdForSpace(getContextSpaceId()));
+    } else unresolved.add(operation.changeRequestId);
+    if (typeof fields?.ref === "string" && fields.ref) refs.add(fields.ref);
+    scopes.set(operation.changeRequestId, scope);
+    refsByChangeRequest.set(operation.changeRequestId, refs);
+  }
+  const allNodeIds = [...new Set([...scopes.values()].flatMap((scope) => [...scope]))];
+  const visibleNodeIds =
+    allNodeIds.length > 0
+      ? new Set(
+          (
+            await db
+              .select({ id: busabaseNodes.id })
+              .from(busabaseNodes)
+              .where(
+                and(
+                  eq(busabaseNodes.spaceId, getContextSpaceId()),
+                  inArray(busabaseNodes.id, allNodeIds),
+                  buildNodeVisibilityCondition(db),
+                ),
+              )
+          ).map((node) => node.id),
+        )
+      : new Set<string>();
+  return rows.filter((row) => {
+    const scope = scopes.get(row.id);
+    return (
+      !unresolved.has(row.id) &&
+      scope !== undefined &&
+      scope.size > 0 &&
+      [...scope].every((nodeId) => visibleNodeIds.has(nodeId))
+    );
+  });
+};
+
+export const assertChangeRequestPermission = async (
+  changeRequestId: string,
+  required: "read" | "changeRequest" | "write" | "manage",
+): Promise<void> => {
+  const db = await getDb();
+  const [changeRequest] = await db
+    .select({ id: busabaseChangeRequests.id })
+    .from(busabaseChangeRequests)
+    .where(
+      and(
+        eq(busabaseChangeRequests.id, changeRequestId),
+        eq(busabaseChangeRequests.spaceId, getContextSpaceId()),
+      ),
+    )
+    .limit(1);
+  if (!changeRequest) throw changeRequestNotFound(changeRequestId);
+  const scope = await resolveChangeRequestScopeNodeIds(changeRequestId);
+  if (!scope) throw changeRequestNotFound(changeRequestId);
+  for (const nodeId of scope) {
+    try {
+      await assertNodePermission(nodeId, required);
+    } catch (error) {
+      if (error instanceof ORPCError && error.code === "FORBIDDEN") {
+        throw new ORPCError("FORBIDDEN", {
+          message: `Requires ${required} workspace access or ${required} access on every target node`,
+        });
+      }
+      throw error;
+    }
+  }
 };
 
 /**
@@ -1360,23 +1581,8 @@ const resolveChangeRequestScopeNodeIds = async (
  * a state the review model has any way to express.
  */
 const assertCanApproveChangeRequest = async (changeRequestId: string): Promise<void> => {
-  if (hasApiKeyLevel(getContextPermissionLevel(), "write")) return;
-
-  const scope = await resolveChangeRequestScopeNodeIds(changeRequestId);
-  if (!scope) {
-    throw new ORPCError("FORBIDDEN", {
-      message: "Requires write workspace access",
-    });
-  }
-  for (const nodeId of scope) {
-    if (!(await hasNodePermission(nodeId, "write"))) {
-      throw new ORPCError("FORBIDDEN", {
-        message:
-          "Requires write access on every node this change request touches, or write workspace access",
-        data: { nodeId },
-      });
-    }
-  }
+  if (hasWorkspacePermission("write")) return;
+  await assertChangeRequestPermission(changeRequestId, "write");
 };
 
 export const reviewChangeRequest = async (
@@ -1390,7 +1596,12 @@ export const reviewChangeRequest = async (
   const [changeRequest] = await db
     .select()
     .from(busabaseChangeRequests)
-    .where(eq(busabaseChangeRequests.id, changeRequestId))
+    .where(
+      and(
+        eq(busabaseChangeRequests.id, changeRequestId),
+        eq(busabaseChangeRequests.spaceId, getContextSpaceId()),
+      ),
+    )
     .limit(1);
   if (!changeRequest) {
     throw changeRequestNotFound(changeRequestId);
@@ -1520,7 +1731,12 @@ export const autoApproveAndMerge = async (
   const [changeRequest] = await db
     .select()
     .from(busabaseChangeRequests)
-    .where(eq(busabaseChangeRequests.id, changeRequestId))
+    .where(
+      and(
+        eq(busabaseChangeRequests.id, changeRequestId),
+        eq(busabaseChangeRequests.spaceId, getContextSpaceId()),
+      ),
+    )
     .limit(1);
   if (!changeRequest) {
     throw changeRequestNotFound(changeRequestId);
@@ -1916,7 +2132,7 @@ export const listAgentTasks = async () => {
   await ensureReady();
   const db = await getDb();
   const spaceId = getContextSpaceId();
-  const openChangeRequests = await db
+  const candidateChangeRequests = await db
     .select()
     .from(busabaseChangeRequests)
     .where(
@@ -1926,6 +2142,7 @@ export const listAgentTasks = async () => {
       ),
     )
     .orderBy(asc(busabaseChangeRequests.createdAt));
+  const openChangeRequests = await filterVisibleChangeRequestRows(candidateChangeRequests);
   if (openChangeRequests.length === 0) {
     return [];
   }

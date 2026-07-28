@@ -931,7 +931,7 @@ export const createRestoreChangeRequest = async (
     throw recordNotFound(recordId);
   }
   if (record.status !== "archived") {
-    throw new Error(`Record is not archived: ${recordId}`);
+    throw new ORPCError("CONFLICT", { message: `Record is not archived: ${recordId}` });
   }
 
   const [headCommit] = await db

@@ -83,6 +83,10 @@ function BaseDetailContent() {
     }
     return allFields;
   }, [base?.fields, activeView]);
+  const previewFields = useMemo(() => {
+    const primaryFieldId = base?.fields[0]?.id;
+    return visibleFields.filter((field) => field.id !== primaryFieldId);
+  }, [base?.fields, visibleFields]);
 
   const refresh = () => {
     void basesQuery.refetch();
@@ -197,16 +201,17 @@ function BaseDetailContent() {
                   >
                     <FieldList
                       fields={record.headCommit.fields}
-                      definitions={visibleFields.slice(0, 3)}
+                      definitions={previewFields.slice(0, 3)}
                       limitToDefinitions
                       variant="compact"
+                      interactive={false}
                     />
                   </NativeRow>
                 );
               })}
             </NativeSection>
           ) : (
-            <NativeSection title="Table" caption={`${visibleFields.length} fields`}>
+            <NativeSection title="Table" caption={`${previewFields.length} fields`}>
               <ScrollView
                 horizontal
                 showsHorizontalScrollIndicator
@@ -224,7 +229,7 @@ function BaseDetailContent() {
                     >
                       TITLE
                     </Text>
-                    {visibleFields.map((field) => (
+                    {previewFields.map((field) => (
                       <Text
                         key={field.id}
                         numberOfLines={1}
@@ -253,9 +258,13 @@ function BaseDetailContent() {
                       >
                         {getRecordTitle(record)}
                       </Text>
-                      {visibleFields.map((field) => (
+                      {previewFields.map((field) => (
                         <View key={field.id} style={styles.cell}>
-                          <FieldValue field={field} value={record.headCommit.fields[field.slug]} />
+                          <FieldValue
+                            field={field}
+                            value={record.headCommit.fields[field.slug]}
+                            interactive={false}
+                          />
                         </View>
                       ))}
                     </Pressable>

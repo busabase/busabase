@@ -7,6 +7,7 @@ import net from "node:net";
 import path from "node:path";
 import { SandboxManager, type SandboxRuntimeConfig } from "@anthropic-ai/sandbox-runtime";
 import type { AirAppRuntimeEvent } from "busabase-contract/domains/airapp/contract";
+import { assertNodePermission } from "../../../logic/node-acl";
 import { registerLocalPreview, unregisterLocalPreview } from "./local-preview-registry";
 
 /**
@@ -269,6 +270,7 @@ export async function* runAirAppLocalNode(
   input: { nodeId: string; files: Record<string, string>; engine: "local-node" | "srt" },
   signal?: AbortSignal,
 ): AsyncGenerator<AirAppRuntimeEvent> {
+  await assertNodePermission(input.nodeId, "write");
   const workdir = resolveWorkdir(input.nodeId);
   const sandboxed = input.engine === "srt";
 

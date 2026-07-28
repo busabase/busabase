@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { createRouterClient } from "@orpc/server";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { LOCAL_SPACE_ID, runWithBusabaseContext } from "../src/context";
 import { buildActivityItemsFromVOs } from "../src/logic/activity";
 import { busabaseRouter } from "../src/router";
 
@@ -147,5 +148,41 @@ describe("activity.listPaged — keyset merge parity", () => {
     const small = (await pageAll(3)).map(keyOf);
     // Same events in the same order, whether one page or many.
     expect(small).toEqual(big);
+  });
+
+  it("continues past a newest window containing only hidden-node events", async () => {
+    await client.bases.createChangeRequest({
+      baseId,
+      fields: { name: "visible-before-hidden" },
+      autoMerge: true,
+    });
+    const privateBase = await client.bases.create({
+      slug: "private-feed",
+      name: "Private Feed",
+      fields: [{ slug: "name", name: "Name", type: "text" }],
+      autoMerge: true,
+    });
+    if (!privateBase.materialized) throw new Error("expected materialized private base");
+    await client.nodes.updateVisibility({ nodeId: privateBase.nodeId, visibility: "private" });
+    for (let index = 0; index < 4; index++) {
+      await client.bases.createChangeRequest({
+        baseId: privateBase.id,
+        fields: { name: `hidden-${index}` },
+        autoMerge: true,
+      });
+    }
+
+    const page = await runWithBusabaseContext(
+      {
+        spaceId: LOCAL_SPACE_ID,
+        actorId: "feed-member",
+        isSpaceManager: false,
+        permissionLevel: "read",
+      },
+      () => client.activity.listPaged({ limit: 2 }),
+    );
+    expect(page.items.length).toBe(2);
+    expect(JSON.stringify(page.items)).not.toContain("hidden-");
+    expect(JSON.stringify(page.items)).not.toContain(privateBase.id);
   });
 });

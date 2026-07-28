@@ -7,6 +7,7 @@ import { eq } from "drizzle-orm";
 import { deleteAttachmentSafely } from "open-domains/attachments/logic";
 import { storage } from "openlib/storage";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { LOCAL_SPACE_ID, runWithBusabaseContext } from "../src/context";
 import { getDb } from "../src/db";
 import { attachments, busabaseAssets } from "../src/db/schema";
 import { busabaseRouter } from "../src/router";
@@ -193,6 +194,92 @@ describe("Assets + attachment dedup — oRPC integration", () => {
   });
 
   describe("asset library (ensureAsset on confirm)", () => {
+    it("lets an uploader propose an unmounted asset and a different reviewer materialize it", async () => {
+      const confirmed = await runWithBusabaseContext(
+        {
+          spaceId: LOCAL_SPACE_ID,
+          actorId: "asset-uploader",
+          isSpaceManager: false,
+          permissionLevel: "changeRequest",
+          credentialPermissionCeiling: "changeRequest",
+        },
+        async () => {
+          const upload = await client.assets.createUploadUrl({
+            fileName: "review-me.txt",
+            mimeType: "text/plain",
+            sizeBytes: 9,
+          });
+          return client.assets.confirm({
+            storageKey: upload.storageKey,
+            fileName: "review-me.txt",
+            mimeType: "text/plain",
+            sizeBytes: 9,
+          });
+        },
+      );
+
+      await runWithBusabaseContext(
+        {
+          spaceId: LOCAL_SPACE_ID,
+          actorId: "asset-uploader",
+          isSpaceManager: false,
+          permissionLevel: "changeRequest",
+          credentialPermissionCeiling: "changeRequest",
+        },
+        async () => {
+          expect((await client.assets.get({ assetId: confirmed.assetId })).asset.id).toBe(
+            confirmed.assetId,
+          );
+        },
+      );
+      await runWithBusabaseContext(
+        {
+          spaceId: LOCAL_SPACE_ID,
+          actorId: "asset-stranger",
+          isSpaceManager: false,
+          permissionLevel: "read",
+        },
+        async () => {
+          await expect(client.assets.get({ assetId: confirmed.assetId })).rejects.toMatchObject({
+            code: "NOT_FOUND",
+          });
+          expect((await client.assets.list()).some((asset) => asset.id === confirmed.assetId)).toBe(
+            false,
+          );
+        },
+      );
+
+      const pending = await runWithBusabaseContext(
+        {
+          spaceId: LOCAL_SPACE_ID,
+          actorId: "asset-uploader",
+          isSpaceManager: false,
+          permissionLevel: "changeRequest",
+          credentialPermissionCeiling: "changeRequest",
+        },
+        () =>
+          client.files.create({
+            slug: "review-me",
+            name: "Review Me",
+            assetId: confirmed.assetId,
+            autoMerge: false,
+          }),
+      );
+      if (pending.materialized) throw new Error("expected pending file ChangeRequest");
+
+      await runWithBusabaseContext(
+        { spaceId: LOCAL_SPACE_ID, actorId: "asset-reviewer", isSpaceManager: true },
+        async () => {
+          await client.changeRequests.review({
+            changeRequestId: pending.id,
+            verdict: "approved",
+          });
+          const merged = await client.changeRequests.merge({ changeRequestId: pending.id });
+          expect(merged.changeRequest.status).toBe("merged");
+        },
+      );
+    });
+
     it("surfaces each confirmed upload as a logical asset while attachments dedupe by content", async () => {
       const list = await client.assets.list();
       expect(list.map((a) => a.name)).toContain("logo.png");
