@@ -8,9 +8,8 @@ import "server-only";
  * resolves scope, dispatches to per-source adapters, and merges results
  * under one shared pattern + budget.
  *
- * - Files adapter: delegates to the EXISTING, unmodified `grepAssets` — zero
- *   behavior change to `assets.grep` (concurrency pool, optional `rg`
- *   acceleration, cache, self-heal — all reused as-is).
+ * - Files adapter: delegates to the existing `grepAssets` engine, preserving
+ *   concurrency, optional `rg` acceleration, cache, self-heal, and coverage.
  * - Docs adapter: lists non-archived Doc nodes, reads each body, and scans
  *   it through the same source-neutral `scanLines` core the files adapter's
  *   `scanLinesForMatches` wraps — "one pattern language everywhere" (spec's

@@ -24,7 +24,7 @@ import { formatListTime } from "~/lib/format";
 import { useInfiniteActivityFeed } from "~/lib/use-activity-feed";
 import { useTokens } from "~/theme/use-tokens";
 
-const ACTIVITY_PAGE_SIZE = 40;
+const ACTIVITY_PAGE_SIZE = 25;
 
 const toneIcons: Record<ActivityTone, typeof GitPullRequest> = {
   audit: ShieldCheck,

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -33,6 +33,7 @@ const createChangeRequestHelp = execFileSync(
 );
 
 const required = [
+  "export -o, --out-dir <dir> [--name <name>] [--dry-run]",
   "nodes create --type <folder|base|skill|drive|airapp|file|doc|form|whiteboard|workflow|html>",
   "bases create-change-request --base-id <id>",
   "records change-requests --record-id <id>",
@@ -41,6 +42,7 @@ const required = [
 ];
 
 const forbidden = [
+  "publish -o, --out-dir <dir>",
   "nodes create-draft",
   "bases create-draft",
   "records drafts",
@@ -65,6 +67,17 @@ if (missing.length || stale.length) {
     ]
       .filter(Boolean)
       .join("\n\n"),
+  );
+}
+
+const retiredPublish = spawnSync(process.execPath, [cliPath, "publish"], {
+  cwd: root,
+  encoding: "utf8",
+});
+const retiredPublishOutput = `${retiredPublish.stdout}\n${retiredPublish.stderr}`;
+if (retiredPublish.status === 0 || !retiredPublishOutput.includes("unknown command 'publish'")) {
+  throw new Error(
+    "The retired `publish` command must fail as unknown; only `export` may expose the package export workflow.",
   );
 }
 

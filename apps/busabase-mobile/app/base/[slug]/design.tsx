@@ -196,6 +196,7 @@ function BaseDesignContent() {
   return (
     <NativeScreen
       title={`${base.name} design`}
+      titleNumberOfLines={2}
       subtitle={`${base.fields.length} fields`}
       headerLeading={headerLeading}
     >
@@ -210,7 +211,6 @@ function BaseDesignContent() {
         ))}
         <NativeRow
           title="Add field"
-          subtitle="Create a field on this Base."
           leading={<Plus size={18} color={tokens.mutedForeground} />}
           onPress={() => {
             addFieldMutation.reset();
@@ -225,7 +225,6 @@ function BaseDesignContent() {
           <NativeRow
             key={view.id}
             title={view.name}
-            subtitle="Saved view"
             onPress={() => {
               deleteViewMutation.reset();
               setViewPendingDelete(view);
@@ -234,7 +233,6 @@ function BaseDesignContent() {
         ))}
         <NativeRow
           title="New view"
-          subtitle="Create a view change request."
           leading={<Plus size={18} color={tokens.mutedForeground} />}
           onPress={() => {
             createViewMutation.reset();
@@ -247,7 +245,6 @@ function BaseDesignContent() {
       <NativeBottomSheet
         visible={fieldSheetOpen && !choicePendingRemove}
         title="Add field"
-        description="Configure a new field and add it directly to this Base."
         showCloseButton
         maxHeight="88%"
         onClose={() => setFieldSheetOpen(false)}
@@ -340,6 +337,7 @@ function BaseDesignContent() {
           <View style={styles.requiredRow}>
             <Text style={[typography.body, { color: tokens.foreground }]}>Required</Text>
             <Switch
+              accessibilityLabel="Required"
               value={required}
               trackColor={{ true: tokens.primary }}
               onValueChange={setRequired}
@@ -351,7 +349,6 @@ function BaseDesignContent() {
       <NativeBottomSheet
         visible={viewSheetOpen}
         title="New view"
-        description="Create a change request for a saved Base view."
         showCloseButton
         onClose={() => setViewSheetOpen(false)}
         footer={

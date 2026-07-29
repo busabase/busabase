@@ -18,10 +18,12 @@ import {
   createBulkChangeRequestInputSchema,
   createChangeRequestInputSchema,
   listRecordsInputSchema,
+  listRecordsPageInputSchema,
+  listRecordsPageResponseSchema,
   listRecordsResponseSchema,
   recordChangeRequestInputSchema,
   recordFieldFilterInputSchema,
-  recordFieldGetInputSchema,
+  recordGetInputSchema,
   recordLinkSchema,
   recordSchema,
 } from "./record-schemas";
@@ -183,6 +185,17 @@ export const recordContract = {
     })
     .input(listRecordsInputSchema)
     .output(listRecordsResponseSchema),
+  listPage: oc
+    .route({
+      method: "GET",
+      path: "/records/page",
+      tags: ["Records"],
+      summary: "List a numbered record page",
+      successDescription:
+        "A random-access page of active records. When viewId is supplied, the saved view is authoritatively filtered and sorted before total and page slicing are calculated.",
+    })
+    .input(listRecordsPageInputSchema)
+    .output(listRecordsPageResponseSchema),
   count: oc
     .route({
       method: "GET",
@@ -196,12 +209,18 @@ export const recordContract = {
   get: oc
     .route({
       method: "GET",
-      path: "/records/{recordId}",
+      path: "/records/get",
       tags: ["Records"],
       summary: "Get record",
-      successDescription: "Canonical record detail.",
+      description:
+        "Provide exactly one selector: recordId alone, or the complete baseId + fieldSlug + valueText tuple. Other combinations return 400.",
+      successDescription: "One canonical record selected by id or exact field value.",
     })
-    .input(z.object({ recordId: z.string() }))
+    .errors({
+      BAD_REQUEST: { status: 400, message: "Exactly one record selector is required" },
+      NOT_FOUND: { status: 404, message: "Record not found" },
+    })
+    .input(recordGetInputSchema)
     .output(recordSchema),
   search: oc
     .route({
@@ -213,17 +232,6 @@ export const recordContract = {
     })
     .input(recordFieldFilterInputSchema)
     .output(z.array(recordSchema)),
-  getByField: oc
-    .route({
-      method: "GET",
-      path: "/records/by-field",
-      tags: ["Records"],
-      summary: "Get record by field value",
-      successDescription:
-        "Single canonical record whose field value exactly matches, or null when none does — a scoped point lookup (e.g. by a unique slug or path field), not a list.",
-    })
-    .input(recordFieldGetInputSchema)
-    .output(recordSchema.nullable()),
   changeRequest: oc
     .route({
       method: "POST",

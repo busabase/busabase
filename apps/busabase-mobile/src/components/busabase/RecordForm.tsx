@@ -1,7 +1,14 @@
 import type { AssetAttachmentRef, BaseFieldVO } from "busabase-contract/types";
 import * as DocumentPicker from "expo-document-picker";
 import * as ImagePicker from "expo-image-picker";
-import { FileText, ImagePlus, Paperclip, Trash2 } from "lucide-react-native";
+import {
+  ChevronDown,
+  ChevronUp,
+  FileText,
+  ImagePlus,
+  Paperclip,
+  Trash2,
+} from "lucide-react-native";
 import { iStringParse } from "openlib/i18n/i-string";
 import { useState } from "react";
 import { ActivityIndicator, Image, Pressable, StyleSheet, Switch, Text, View } from "react-native";
@@ -10,7 +17,6 @@ import { useConnection } from "~/connection/connection-store";
 import { useI18n } from "~/i18n";
 import { getAttachmentKindLabel, isImageRef, resolveAttachmentUrl } from "~/lib/attachment";
 import { type PickedFile, uploadAttachment } from "~/lib/attachment-upload";
-import { getFieldTypeLabel } from "~/lib/field-type-label";
 import { formatBytes } from "~/lib/format";
 import { isEditableField, type RecordFormValue } from "~/lib/record-form";
 import { radius, typography } from "~/theme/tokens";
@@ -32,6 +38,7 @@ interface RecordFormProps {
 }
 
 const MULTILINE_TYPES = new Set(["longtext", "markdown", "html"]);
+const INITIAL_FIELD_COUNT = 8;
 
 function ChoiceChips({
   choices,
@@ -91,34 +98,20 @@ function FieldRow({
     styles.field,
     !last && { borderBottomWidth: StyleSheet.hairlineWidth, borderColor: tokens.border },
   ];
-  const meta = (
-    <View style={styles.meta}>
-      <Text style={[typography.bodyEm, { color: tokens.foreground }]}>
-        {iStringParse(field.name)}
-        {field.required ? <Text style={{ color: tokens.destructive }}> *</Text> : null}
-      </Text>
-      <Text style={[typography.caption, { color: tokens.mutedForeground }]}>
-        {getFieldTypeLabel(field.type)}
-      </Text>
-    </View>
+  const fieldLabel = iStringParse(field.name);
+  const label = (
+    <Text style={[typography.bodyEm, { color: tokens.foreground }]}>
+      {fieldLabel}
+      {field.required ? <Text style={{ color: tokens.destructive }}> *</Text> : null}
+    </Text>
   );
-
-  if (!isEditableField(field)) {
-    return (
-      <View style={rowStyle}>
-        {meta}
-        <Text style={[typography.small, { color: tokens.mutedForeground }]}>
-          Managed by the server — edit on web if needed.
-        </Text>
-      </View>
-    );
-  }
 
   if (field.type === "checkbox") {
     return (
       <View style={[...rowStyle, styles.checkboxRow]}>
-        {meta}
+        {label}
         <Switch
+          accessibilityLabel={fieldLabel}
           value={value === true}
           trackColor={{ true: tokens.primary }}
           onValueChange={(next) => onChange(next)}
@@ -135,7 +128,7 @@ function FieldRow({
       : [];
     return (
       <View style={rowStyle}>
-        {meta}
+        {label}
         <AttachmentFieldEditor field={field} refs={refs} onChange={(next) => onChange(next)} />
       </View>
     );
@@ -151,7 +144,7 @@ function FieldRow({
     const multiple = field.type === "multiselect";
     return (
       <View style={rowStyle}>
-        {meta}
+        {label}
         <ChoiceChips
           choices={choices}
           selected={selected}
@@ -184,8 +177,9 @@ function FieldRow({
 
   return (
     <View style={rowStyle}>
-      {meta}
+      {label}
       <TextInput
+        accessibilityLabel={fieldLabel}
         value={typeof value === "string" ? value : ""}
         multiline={multiline}
         keyboardType={keyboardType}
@@ -419,17 +413,40 @@ function AttachmentFieldEditor({
 }
 
 export function RecordForm({ fields, values, onChange }: RecordFormProps) {
+  const tokens = useTokens();
+  const [expanded, setExpanded] = useState(false);
+  const editableFields = fields.filter(isEditableField);
+  const initialFields = editableFields.filter(
+    (field, index) => index < INITIAL_FIELD_COUNT || field.required,
+  );
+  const hiddenCount = editableFields.length - initialFields.length;
+  const visibleFields = expanded ? editableFields : initialFields;
+
   return (
     <View>
-      {fields.map((field, index) => (
+      {visibleFields.map((field, index) => (
         <FieldRow
           key={field.id}
           field={field}
           value={values[field.slug] ?? ""}
           onChange={(next) => onChange(field.slug, next)}
-          last={index === fields.length - 1}
+          last={index === visibleFields.length - 1 && hiddenCount === 0}
         />
       ))}
+      {hiddenCount > 0 ? (
+        <NativeRow
+          title={expanded ? "Show fewer fields" : `Show ${hiddenCount} more fields`}
+          leading={
+            expanded ? (
+              <ChevronUp size={18} color={tokens.mutedForeground} />
+            ) : (
+              <ChevronDown size={18} color={tokens.mutedForeground} />
+            )
+          }
+          last
+          onPress={() => setExpanded((current) => !current)}
+        />
+      ) : null}
     </View>
   );
 }
@@ -440,7 +457,6 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     gap: 8,
   },
-  meta: { gap: 2 },
   checkboxRow: {
     flexDirection: "row",
     alignItems: "center",

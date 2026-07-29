@@ -2,9 +2,11 @@ import { forwardRef } from "react";
 import {
   TextInput as RNTextInput,
   type TextInputProps as RNTextInputProps,
+  type StyleProp,
   StyleSheet,
   Text,
   View,
+  type ViewStyle,
 } from "react-native";
 import { mobile, radius, spacing, typography } from "~/theme/tokens";
 import { useTokens } from "~/theme/use-tokens";
@@ -12,22 +14,25 @@ import { useTokens } from "~/theme/use-tokens";
 interface TextInputProps extends RNTextInputProps {
   label?: string;
   error?: string;
+  containerStyle?: StyleProp<ViewStyle>;
 }
 
 export const TextInput = forwardRef<RNTextInput, TextInputProps>(function TextInput(
-  { label, error, style, ...rest },
+  { label, error, style, containerStyle, accessibilityLabel, placeholder, ...rest },
   ref,
 ) {
   const tokens = useTokens();
   return (
-    <View style={styles.field}>
+    <View style={[styles.field, containerStyle]}>
       {label ? (
         <Text style={[typography.small, { color: tokens.mutedForeground }]}>{label}</Text>
       ) : null}
       <RNTextInput
         ref={ref}
+        accessibilityLabel={accessibilityLabel ?? label ?? placeholder}
         autoCapitalize="none"
         autoCorrect={false}
+        placeholder={placeholder}
         placeholderTextColor={tokens.mutedForeground}
         style={[
           styles.input,

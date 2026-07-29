@@ -124,6 +124,7 @@ function VaultSettingsContent() {
   const { t } = useI18n();
   const buda = useBusabaseOrpc();
   const [rows, setRows] = useState<VaultRow[]>([]);
+  const [savedItems, setSavedItems] = useState<VaultItemInput[]>([]);
   const [hydrated, setHydrated] = useState(false);
   const [showSecrets, setShowSecrets] = useState(false);
   const [draft, setDraft] = useState<{ row: VaultRow; isNew: boolean } | null>(null);
@@ -137,7 +138,9 @@ function VaultSettingsContent() {
 
   useEffect(() => {
     if (vaultQuery.data && !hydrated) {
-      setRows(settingsToRows(vaultQuery.data));
+      const nextRows = settingsToRows(vaultQuery.data);
+      setRows(nextRows);
+      setSavedItems(rowsToItems(nextRows));
       setHydrated(true);
     }
   }, [vaultQuery.data, hydrated]);
@@ -147,7 +150,11 @@ function VaultSettingsContent() {
       if (!buda) throw new Error("Not connected");
       return buda.client.vault.update({ items });
     },
-    onSuccess: (data) => setRows(settingsToRows(data)),
+    onSuccess: (data) => {
+      const nextRows = settingsToRows(data);
+      setRows(nextRows);
+      setSavedItems(rowsToItems(nextRows));
+    },
   });
 
   const clearMutation = useMutation({
@@ -157,12 +164,14 @@ function VaultSettingsContent() {
     },
     onSuccess: () => {
       setRows([]);
+      setSavedItems([]);
       setClearConfirmOpen(false);
     },
   });
 
   const secrets = rows.filter((row) => row.kind === "secret");
   const variables = rows.filter((row) => row.kind === "variable");
+  const hasChanges = JSON.stringify(rowsToItems(rows)) !== JSON.stringify(savedItems);
 
   const openCreate = (kind: VaultItemKind) => setDraft({ row: makeRow(kind), isNew: true });
   const openEdit = (row: VaultRow) => setDraft({ row, isNew: false });
@@ -209,12 +218,11 @@ function VaultSettingsContent() {
   return (
     <NativeScreen
       title="Vault"
-      subtitle="Secrets & variables"
       headerLeading={headerLeading}
       refreshing={vaultQuery.isRefetching}
       onRefresh={() => void vaultQuery.refetch()}
       footer={
-        !vaultQuery.isLoading && !vaultQuery.error ? (
+        !vaultQuery.isLoading && !vaultQuery.error && (hasChanges || updateMutation.error) ? (
           <NativeActionBar>
             {updateMutation.error ? (
               <NativeInlineError
@@ -225,6 +233,7 @@ function VaultSettingsContent() {
             <Button
               label={updateMutation.isPending ? "Saving..." : "Save changes"}
               loading={updateMutation.isPending}
+              disabled={updateMutation.isPending || !hasChanges}
               fullWidth
               leadingIcon={<Save size={18} color={tokens.primaryForeground} />}
               onPress={() => updateMutation.mutate(rowsToItems(rows))}
@@ -244,31 +253,27 @@ function VaultSettingsContent() {
       {!vaultQuery.isLoading && !vaultQuery.error ? (
         <>
           <NativeSection title="Secrets" caption={`${secrets.length}`}>
-            <NativeRow
-              title="Reveal values"
-              subtitle="Show plaintext secret values on this device."
-              leading={
-                showSecrets ? (
-                  <Eye size={18} color={tokens.mutedForeground} />
-                ) : (
-                  <EyeOff size={18} color={tokens.mutedForeground} />
-                )
-              }
-              trailing={
-                <Switch
-                  accessibilityLabel="Reveal secret values"
-                  value={showSecrets}
-                  trackColor={{ true: tokens.primary }}
-                  onValueChange={setShowSecrets}
-                />
-              }
-            />
-            {secrets.length === 0 ? (
+            {secrets.length > 0 ? (
               <NativeRow
-                title="No secrets yet"
-                subtitle="API keys, tokens, and passwords used by skills and functions."
+                title="Reveal values"
+                leading={
+                  showSecrets ? (
+                    <Eye size={18} color={tokens.mutedForeground} />
+                  ) : (
+                    <EyeOff size={18} color={tokens.mutedForeground} />
+                  )
+                }
+                trailing={
+                  <Switch
+                    accessibilityLabel="Reveal secret values"
+                    value={showSecrets}
+                    trackColor={{ true: tokens.primary }}
+                    onValueChange={setShowSecrets}
+                  />
+                }
               />
             ) : null}
+            {secrets.length === 0 ? <NativeRow title="No secrets" /> : null}
             {secrets.map((row) => (
               <NativeRow
                 key={row.id}
@@ -288,12 +293,7 @@ function VaultSettingsContent() {
           </NativeSection>
 
           <NativeSection title="Variables" caption={`${variables.length}`}>
-            {variables.length === 0 ? (
-              <NativeRow
-                title="No variables yet"
-                subtitle="Non-secret config values used by skills and functions."
-              />
-            ) : null}
+            {variables.length === 0 ? <NativeRow title="No variables" /> : null}
             {variables.map((row) => (
               <NativeRow
                 key={row.id}
@@ -312,16 +312,17 @@ function VaultSettingsContent() {
             />
           </NativeSection>
 
-          <NativeSection title="Danger zone">
-            <NativeRow
-              title="Clear vault"
-              subtitle="Remove all secrets and variables stored on this server."
-              destructive
-              leading={<Trash2 size={18} color={tokens.destructive} />}
-              onPress={() => setClearConfirmOpen(true)}
-              last
-            />
-          </NativeSection>
+          {rows.length > 0 ? (
+            <NativeSection title="Danger zone">
+              <NativeRow
+                title="Clear vault"
+                destructive
+                leading={<Trash2 size={18} color={tokens.destructive} />}
+                onPress={() => setClearConfirmOpen(true)}
+                last
+              />
+            </NativeSection>
+          ) : null}
         </>
       ) : null}
 
@@ -356,7 +357,6 @@ function VaultSettingsContent() {
                   onPress={removeDraft}
                 />
               ) : null}
-              <Button label={t.common.cancel} variant="ghost" fullWidth onPress={closeDraft} />
             </NativeActionBar>
           ) : undefined
         }

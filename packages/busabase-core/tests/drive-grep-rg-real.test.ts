@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { createRouterClient } from "@orpc/server";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { grepFiles } from "./helpers/grep-files";
 
 /**
  * Drive Grep Retrieval P1 — real `rg` (ripgrep) acceleration coverage.
@@ -108,7 +109,7 @@ describe.skipIf(!rgAvailable)("Drive Grep Retrieval — rg-accelerated grep (rea
       text: "before line\nERROR: disk full\nafter line",
     });
 
-    const result = await client.assets.grep({ pattern: "ERROR", scope: { assetIds: [assetId] } });
+    const result = await grepFiles(client, { pattern: "ERROR", scope: { assetIds: [assetId] } });
 
     expect(rgSearchCalls().length).toBeGreaterThanOrEqual(1);
     expect(result.matches).toHaveLength(1);
@@ -124,7 +125,7 @@ describe.skipIf(!rgAvailable)("Drive Grep Retrieval — rg-accelerated grep (rea
     const { assetId } = await uploadAsset({ fileName: "rg-cjk.log", hashByte: "2" });
     await client.assets.putText({ assetId, text: "你好世界，ACME公司在此" });
 
-    const result = await client.assets.grep({ pattern: "ACME", scope: { assetIds: [assetId] } });
+    const result = await grepFiles(client, { pattern: "ACME", scope: { assetIds: [assetId] } });
 
     expect(rgSearchCalls().length).toBeGreaterThanOrEqual(1);
     expect(result.matches).toHaveLength(1);
@@ -137,14 +138,14 @@ describe.skipIf(!rgAvailable)("Drive Grep Retrieval — rg-accelerated grep (rea
     const { assetId } = await uploadAsset({ fileName: "rg-case.log", hashByte: "3" });
     await client.assets.putText({ assetId, text: "Order-2024 shipped\norder-2025 pending" });
 
-    const caseSensitive = await client.assets.grep({
+    const caseSensitive = await grepFiles(client, {
       pattern: "order",
       scope: { assetIds: [assetId] },
     });
     expect(caseSensitive.matches).toHaveLength(1);
     expect(caseSensitive.matches[0]?.line).toBe(2);
 
-    const caseInsensitive = await client.assets.grep({
+    const caseInsensitive = await grepFiles(client, {
       pattern: "order",
       flags: "i",
       scope: { assetIds: [assetId] },
@@ -158,7 +159,7 @@ describe.skipIf(!rgAvailable)("Drive Grep Retrieval — rg-accelerated grep (rea
     const text = Array.from({ length: 20 }, (_, i) => `hit number ${i}`).join("\n");
     await client.assets.putText({ assetId, text });
 
-    const result = await client.assets.grep({
+    const result = await grepFiles(client, {
       pattern: "hit",
       scope: { assetIds: [assetId] },
       maxMatches: 5,
@@ -176,7 +177,7 @@ describe.skipIf(!rgAvailable)("Drive Grep Retrieval — rg-accelerated grep (rea
       text: "before line 1\nbefore line 2\nERROR: disk full\nafter line 1\nafter line 2",
     });
 
-    const result = await client.assets.grep({
+    const result = await grepFiles(client, {
       pattern: "ERROR",
       scope: { assetIds: [assetId] },
       contextLines: 2,

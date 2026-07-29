@@ -1,7 +1,7 @@
 /**
  * Package domain — the `busabase-package@1` on-disk format (pure zod, client-safe).
  *
- * This is the *distribution* format (`busabase-cli publish` → a git repo →
+ * This is the *distribution* format (`busabase-cli export` → a git repo →
  * `busabase-cli install`), deliberately NOT the `.bbdump` backup format: it
  * carries human-readable VO content (real `.md`, real files, slug-keyed records)
  * and has no slot at all for ids, history, permissions, vault items or webhook
@@ -59,7 +59,7 @@ export const PACKAGE_AI_FIELD_TYPES = ["ai_summary", "ai_tags"] as const;
 
 /**
  * Field types whose VALUES the server computes — the field *definitions* are
- * published, the values are not. Install ignores them if a hand-authored repo
+ * exported, the values are not. Install ignores them if a hand-authored repo
  * includes them anyway.
  */
 export const PACKAGE_COMPUTED_FIELD_TYPES: readonly string[] = [
@@ -70,7 +70,7 @@ export const PACKAGE_COMPUTED_FIELD_TYPES: readonly string[] = [
   "auto_number",
   "formula",
   // `lookup` is derived from OTHER records and resolved at read time, so it
-  // shows up in `headCommit.fields` like any other value — but publishing it
+  // shows up in `headCommit.fields` like any other value — but exporting it
   // would ship derived data as if it were authored, and install would strip it
   // server-side anyway.
   "lookup",
@@ -322,8 +322,8 @@ export type PackageBase = z.infer<typeof PackageBaseSchema>;
 // ── Records — `records.ndjson` ───────────────────────────────────────────────
 
 /**
- * One record per line. `key` is a package-local stable identifier (publish uses the
- * SOURCE record id: stable across re-publishes → clean git diffs, unique
+ * One record per line. `key` is a package-local stable identifier (export uses the
+ * SOURCE record id: stable across re-exports → clean git diffs, unique
  * package-wide, and meaningless to the target — install always mints new ids).
  *
  * `fields` is slug-keyed. Relation values are arrays of record `key`s (possibly

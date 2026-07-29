@@ -164,6 +164,7 @@ describe("mobile node navigation", () => {
       "whiteboard",
       "workflow",
       "html",
+      "file",
     ] as const) {
       expect(getMobileNodeDestination(node(`${type}-id`, { type }))).toEqual({
         status: "ready",
@@ -171,12 +172,5 @@ describe("mobile node navigation", () => {
         params: { nodeId: `${type}-id` },
       });
     }
-  });
-
-  it("does not create a route for standalone files", () => {
-    expect(getMobileNodeDestination(node("file-id", { type: "file" }))).toEqual({
-      status: "unsupported",
-      message: "Standalone files aren't viewable on mobile yet.",
-    });
   });
 });

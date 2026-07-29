@@ -60,7 +60,7 @@ export const DRAWER_DESTINATIONS = [
   { key: "inbox", href: "/drawer/inbox", icon: Inbox, activePaths: ["/change-requests"] },
   { key: "activity", href: "/drawer/activity", icon: Activity },
   { key: "archived", href: "/drawer/archived", icon: Archive },
-  { key: "assets", href: "/drawer/assets", icon: Images, activePaths: ["/assets"] },
+  { key: "assets", href: "/drawer/assets", icon: Images, activePaths: ["/asset"] },
   { key: "installFromGithub", action: "installFromGithub", icon: Github },
   { key: "records", href: "/drawer/records", icon: FileText, activePaths: ["/records"] },
   { key: "bases", href: "/drawer/bases", icon: Table2, activePaths: ["/base"] },

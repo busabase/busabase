@@ -12,6 +12,7 @@ export default defineConfig({
     environment: "node",
     include: [
       "tests/**/*.test.ts",
+      "src/domains/base/utils/**/*.test.ts",
       "src/domains/dashboard/helpers/**/*.test.ts",
       "src/domains/dashboard/components/**/*.test.tsx",
     ],

@@ -82,6 +82,7 @@ describe("anonymous allowlist (unit)", () => {
       "nodes.list",
       "records.get",
       "records.list",
+      "records.listPage",
     ]);
   });
 
@@ -105,6 +106,7 @@ describe("anonymous allowlist (unit)", () => {
     // at the root and never reproduces it. Keep this locked down.
     expect(anonymousAccessKindFor(["core", "nodes", "list"])).toBe("read");
     expect(anonymousAccessKindFor(["core", "records", "list"])).toBe("read");
+    expect(anonymousAccessKindFor(["core", "records", "listPage"])).toBe("read");
     expect(anonymousAccessKindFor(["core", "form", "submit"])).toBe("submit");
     // Denials must survive the prefix too.
     expect(anonymousAccessKindFor(["core", "vault", "get"])).toBeNull();

@@ -117,6 +117,7 @@ function GalleryCard({
       className={`group flex flex-col overflow-hidden rounded-lg border border-border/60 bg-background shadow-sm transition-shadow hover:shadow-md ${
         faded ? "opacity-60 hover:opacity-100" : ""
       }`}
+      data-record-id={record.id}
     >
       <Link
         className="block aspect-[3/2] w-full overflow-hidden bg-muted/30"
@@ -208,13 +209,16 @@ export function BusaBaseGallery({
 
   if (records.length === 0 && !(showArchivedRecords && archivedRecords.length > 0)) {
     return (
-      <div className="px-2 py-6 text-muted-foreground text-sm">{messages.base.emptyRecords}</div>
+      <div className="px-2 py-6 text-muted-foreground text-sm" data-testid="base-gallery">
+        {messages.base.emptyRecords}
+      </div>
     );
   }
 
   return (
     <div
       className="grid gap-3 pb-5"
+      data-testid="base-gallery"
       style={{ gridTemplateColumns: `repeat(auto-fill, minmax(${CARD_MIN_WIDTH[cardSize]}, 1fr))` }}
     >
       {records.map((record) => (

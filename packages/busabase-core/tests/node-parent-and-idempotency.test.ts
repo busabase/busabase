@@ -37,7 +37,7 @@ import { busabaseRouter } from "../src/router";
  * 4. `createFileTreeNode`'s idempotency ("does this slug already exist") used to
  *    match by (spaceId, type, slug) only, ignoring the target parent. Installing
  *    a skill/airapp/etc. whose slug already existed *anywhere else* in the space
- *    (e.g. from `busabase-cli install` re-publishing an existing package under a
+ *    (e.g. from `busabase-cli install` re-installing an existing package under a
  *    new folder) silently returned the unrelated existing node instead of
  *    creating a new one — reporting fake success while creating nothing. The
  *    check is now scoped to (spaceId, parentNodeId, type, slug) in

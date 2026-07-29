@@ -13,6 +13,7 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import Svg, { Rect } from "react-native-svg";
 import { signInWithBusabaseCloud } from "~/auth/oauth";
+import { RotatingHeroHeadline } from "~/components/busabase/RotatingHeroHeadline";
 import { NativeInlineError } from "~/components/native-screen";
 import { Button } from "~/components/ui/Button";
 import { useConnection } from "~/connection/connection-store";
@@ -115,16 +116,7 @@ export default function ConnectionScreen() {
             >
               Busabase
             </Text>
-            <Text
-              style={[
-                typography.h1,
-                styles.headline,
-                isCompact ? styles.headlineCompact : null,
-                { color: tokens.foreground },
-              ]}
-            >
-              Database for your agents.
-            </Text>
+            <RotatingHeroHeadline compact={isCompact} />
             <Text style={[typography.body, styles.subtitle, { color: tokens.mutedForeground }]}>
               Turn agent chaos into one database you can actually use.
             </Text>
@@ -243,8 +235,6 @@ const styles = StyleSheet.create({
     letterSpacing: 0,
   },
   wordmarkCompact: { marginTop: spacing[3], fontSize: 26, lineHeight: 32 },
-  headline: { marginTop: spacing[6], textAlign: "center" },
-  headlineCompact: { marginTop: spacing[4] },
   subtitle: { marginTop: spacing[3], maxWidth: 310, textAlign: "center" },
   actionArea: { gap: spacing[3] },
   textActions: {

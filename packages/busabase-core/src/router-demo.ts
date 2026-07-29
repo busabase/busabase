@@ -1,5 +1,6 @@
 import { implement, ORPCError } from "@orpc/server";
 import { busabaseContract } from "busabase-contract/contract/busabase";
+import { applyViewConfigToRecords } from "./domains/base/utils/view-records";
 import { buildActivityItemsFromVOs } from "./logic/activity";
 import {
   demoCloseChangeRequest,
@@ -10,9 +11,11 @@ import {
   demoCreateUpdateChangeRequest,
   demoGetAsset,
   demoGetAuthInfo,
+  demoGetBase,
   demoGetChangeRequest,
   demoGetDoc,
   demoGetFileNode,
+  demoGetFileTree,
   demoGetFolder,
   demoGetForm,
   demoGetRecord,
@@ -26,6 +29,7 @@ import {
   demoListComments,
   demoListDocs,
   demoListFileNodes,
+  demoListFileTrees,
   demoListFolders,
   demoListNodes,
   demoListRecordChangeRequests,
@@ -34,6 +38,7 @@ import {
   demoListViews,
   demoMergeChangeRequest,
   demoReadDocLines,
+  demoReadFileTreeFile,
   demoReviewChangeRequest,
   demoReviseOperation,
   demoSearch,
@@ -72,10 +77,23 @@ async function* subscribeDemoLiveEvents(signal?: AbortSignal) {
 
 const shouldEmitDemoLiveEvent = () => false;
 const DEMO_ACTIVITY_CURSOR_PREFIX = "demo-activity:";
+const DEMO_RECORD_CURSOR_PREFIX = "demo-record:";
 
 const getDemoActivityOffset = (cursor?: string) => {
   if (!cursor?.startsWith(DEMO_ACTIVITY_CURSOR_PREFIX)) return 0;
   const offset = Number.parseInt(cursor.slice(DEMO_ACTIVITY_CURSOR_PREFIX.length), 10);
+  return Number.isSafeInteger(offset) && offset >= 0 ? offset : 0;
+};
+
+const getDemoRecordOffset = (cursor?: string) => {
+  if (!cursor) return 0;
+  const prefix = cursor.startsWith(DEMO_RECORD_CURSOR_PREFIX)
+    ? DEMO_RECORD_CURSOR_PREFIX
+    : cursor.startsWith("legacy:")
+      ? "legacy:"
+      : null;
+  if (!prefix) return 0;
+  const offset = Number.parseInt(cursor.slice(prefix.length), 10);
   return Number.isSafeInteger(offset) && offset >= 0 ? offset : 0;
 };
 
@@ -84,9 +102,8 @@ export const busabaseDemoRouter = os.router({
     verify: os.auth.verify.handler(() => demoGetAuthInfo()),
   },
   search: os.search.handler(({ input }) => demoSearch(input)),
-  // Unified Grep (P2a) needs real per-source storage (Drive text slots +
-  // Doc bodies) the stateless in-memory demo dataset doesn't have — same
-  // boundary `assets.grep`/`assets.editContent` already draw below.
+  // Unified Grep needs real per-source storage (Drive text slots + Doc bodies)
+  // the stateless in-memory demo dataset doesn't have.
   grep: os.grep.handler(() => {
     throw demoUnsupported("Unified grep");
   }),
@@ -231,17 +248,17 @@ export const busabaseDemoRouter = os.router({
     listDeletedFields: os.bases.listDeletedFields.handler(() => []),
   },
   fileTrees: {
-    list: os.fileTrees.list.handler(() => []),
+    list: os.fileTrees.list.handler(({ input }) => demoListFileTrees(input.type)),
     create: os.fileTrees.create.handler(({ input }) => {
       throw demoUnsupported(`Create ${fileTreeLabel(input.type)}`);
     }),
-    get: os.fileTrees.get.handler(({ input }) => {
-      throw demoUnsupported(`Open ${fileTreeLabel(input.type)}`);
-    }),
-    listFiles: os.fileTrees.listFiles.handler(() => []),
-    readFile: os.fileTrees.readFile.handler(({ input }) => {
-      throw demoUnsupported(`Read ${fileTreeLabel(input.type)} file`);
-    }),
+    get: os.fileTrees.get.handler(({ input }) => demoGetFileTree(input.nodeId, input.type)),
+    listFiles: os.fileTrees.listFiles.handler(
+      ({ input }) => demoGetFileTree(input.nodeId, input.type).files,
+    ),
+    readFile: os.fileTrees.readFile.handler(({ input }) =>
+      demoReadFileTreeFile(input.nodeId, input.filePath, input.type),
+    ),
     createChangeRequest: os.fileTrees.createChangeRequest.handler(({ input }) => {
       throw demoUnsupported(`${fileTreeLabel(input.type)} change request`);
     }),
@@ -330,9 +347,6 @@ export const busabaseDemoRouter = os.router({
     }),
     createTextUploadUrl: os.assets.createTextUploadUrl.handler(() => {
       throw demoUnsupported("Write asset text");
-    }),
-    grep: os.assets.grep.handler(() => {
-      throw demoUnsupported("Grep assets");
     }),
     readTextLines: os.assets.readTextLines.handler(() => {
       throw demoUnsupported("Read asset text lines");
@@ -462,12 +476,40 @@ export const busabaseDemoRouter = os.router({
     revise: os.operations.revise.handler(({ input }) => demoReviseOperation(input.operationId)),
   },
   records: {
-    list: os.records.list.handler(async ({ input }) => ({
-      // The demo dataset has no archived rows, so `status: "archived"` is an
-      // empty page rather than an error.
-      records: input?.status === "archived" ? [] : await demoListRecords(),
-      nextCursor: null,
-    })),
+    list: os.records.list.handler(async ({ input }) => {
+      if (input.status === "archived") return { records: [], nextCursor: null };
+      const all = await demoListRecords({ baseId: input.baseId });
+      const offset = getDemoRecordOffset(input.cursor);
+      const nextOffset = offset + input.limit;
+      return {
+        records: all.slice(offset, nextOffset),
+        nextCursor: nextOffset < all.length ? `${DEMO_RECORD_CURSOR_PREFIX}${nextOffset}` : null,
+      };
+    }),
+    listPage: os.records.listPage.handler(async ({ input }) => {
+      const base = demoGetBase(input.baseId);
+      const view = input.viewId
+        ? demoListViews(base.id).find((item) => item.id === input.viewId)
+        : undefined;
+      if (input.viewId && !view) {
+        throw new ORPCError("NOT_FOUND", { message: `View not found: ${input.viewId}` });
+      }
+      const ordered = applyViewConfigToRecords(
+        await demoListRecords({ baseId: base.id }),
+        view?.config,
+      );
+      const total = ordered.length;
+      const totalPages = Math.ceil(total / input.pageSize);
+      const page = totalPages === 0 ? 1 : Math.min(input.page, totalPages);
+      const offset = (page - 1) * input.pageSize;
+      return {
+        records: ordered.slice(offset, offset + input.pageSize),
+        total,
+        totalPages,
+        page,
+        pageSize: input.pageSize,
+      };
+    }),
     count: os.records.count.handler(async ({ input }) => {
       const all = await demoListRecords();
       const total = input?.baseId
@@ -475,9 +517,15 @@ export const busabaseDemoRouter = os.router({
         : all.length;
       return { total };
     }),
-    get: os.records.get.handler(({ input }) => demoGetRecord(input.recordId)),
+    get: os.records.get.handler(({ input }) => {
+      const record =
+        "recordId" in input ? demoGetRecord(input.recordId) : demoGetRecordByField(input);
+      if (!record) {
+        throw new ORPCError("NOT_FOUND", { message: "Record not found" });
+      }
+      return record;
+    }),
     search: os.records.search.handler(({ input }) => demoListRecordsByFieldText(input)),
-    getByField: os.records.getByField.handler(({ input }) => demoGetRecordByField(input)),
     changeRequest: os.records.changeRequest.handler(({ input }) => {
       switch (input.operation) {
         case "update": {

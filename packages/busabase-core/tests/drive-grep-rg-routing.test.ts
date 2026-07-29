@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { createRouterClient } from "@orpc/server";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { grepFiles } from "./helpers/grep-files";
 
 /**
  * Drive Grep Retrieval P1 — proves the single most important correctness
@@ -117,7 +118,7 @@ describe("Drive Grep Retrieval — rg routing (mocked rg, deterministic regardle
     // `regex.exec`) — two lines, so two matches.
     await client.assets.putText({ assetId, text: "needle123 and more\nneedle456 and more" });
 
-    const result = await client.assets.grep({
+    const result = await grepFiles(client, {
       pattern: "needle\\d+", // "\\" + "d" is not itself a metachar, but "\\" is — regex, not literal.
       scope: { assetIds: [assetId] },
     });
@@ -130,7 +131,7 @@ describe("Drive Grep Retrieval — rg routing (mocked rg, deterministic regardle
     const { assetId } = await uploadAsset({ fileName: "literal-route.log", hashByte: "2" });
     await client.assets.putText({ assetId, text: "literal-needle here" });
 
-    await client.assets.grep({
+    await grepFiles(client, {
       pattern: "literal-needle",
       scope: { assetIds: [assetId] },
     });
@@ -142,7 +143,7 @@ describe("Drive Grep Retrieval — rg routing (mocked rg, deterministic regardle
     const { assetId } = await uploadAsset({ fileName: "literal-context-route.log", hashByte: "3" });
     await client.assets.putText({ assetId, text: "literal-needle here" });
 
-    const result = await client.assets.grep({
+    const result = await grepFiles(client, {
       pattern: "literal-needle",
       scope: { assetIds: [assetId] },
       contextLines: 1,

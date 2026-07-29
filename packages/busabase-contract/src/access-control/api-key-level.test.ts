@@ -166,10 +166,7 @@ describe("procedure permission policy", () => {
 
   it("classifies known method mismatches by semantics", () => {
     expect(resolveProcedurePermissionPolicy(["grep"])).toEqual({ level: "read", scope: "node" });
-    expect(resolveProcedurePermissionPolicy(["assets", "grep"])).toEqual({
-      level: "read",
-      scope: "node",
-    });
+    expect(resolveRequiredLevel(["workbench", "grep"], "POST")).toBe("read");
     expect(resolveProcedurePermissionPolicy(["forms", "submit"]).level).toBe("changeRequest");
     expect(resolveProcedurePermissionPolicy(["bases", "createField"]).level).toBe("write");
     expect(resolveProcedurePermissionPolicy(["webhooks", "list"])).toEqual({

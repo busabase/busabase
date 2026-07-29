@@ -14,6 +14,7 @@ const NODE_DETAIL_PATHS: Readonly<Partial<Record<NodeType, string>>> = {
   airapp: "/airapp/[nodeId]",
   doc: "/doc/[nodeId]",
   drive: "/drive/[nodeId]",
+  file: "/file/[nodeId]",
   folder: "/folder/[nodeId]",
   form: "/form/[nodeId]",
   html: "/html/[nodeId]",
@@ -23,12 +24,6 @@ const NODE_DETAIL_PATHS: Readonly<Partial<Record<NodeType, string>>> = {
 };
 
 export const getMobileNodeDestination = (node: NavigableNode): MobileNodeDestination => {
-  if (node.type === "file") {
-    return {
-      status: "unsupported",
-      message: "Standalone files aren't viewable on mobile yet.",
-    };
-  }
   if (node.type === "base") {
     return { status: "ready", pathname: "/base/[slug]", params: { slug: node.slug } };
   }
@@ -44,4 +39,14 @@ export const getMobileNodeDestination = (node: NavigableNode): MobileNodeDestina
     pathname,
     params: { nodeId: node.id },
   };
+};
+
+export const isMobileNodePathActive = (node: NavigableNode, pathname: string): boolean => {
+  const destination = getMobileNodeDestination(node);
+  if (destination.status === "unsupported") return false;
+  const path =
+    destination.pathname === "/base/[slug]"
+      ? `/base/${destination.params.slug}`
+      : destination.pathname.replace("[nodeId]", destination.params.nodeId ?? "");
+  return pathname === path || pathname.startsWith(`${path}/`);
 };

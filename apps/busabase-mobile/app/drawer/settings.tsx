@@ -35,7 +35,6 @@ import {
 import { Button } from "~/components/ui/Button";
 import { useConnection } from "~/connection/connection-store";
 import { type LocalePreference, useI18n } from "~/i18n";
-import { formatDate } from "~/lib/format";
 import { useNotifications } from "~/notifications/notification-provider";
 import type { NotificationSettings } from "~/notifications/notification-settings";
 import { useTokens } from "~/theme/use-tokens";
@@ -205,7 +204,6 @@ function SettingsContent() {
         <NativeRow
           title={connectionLabel}
           subtitle={connection?.serverUrl ?? "Connect a Busabase server to review changes here."}
-          meta={connection ? formatDate(connection.connectedAt) : undefined}
           leading={<Server size={18} color={tokens.mutedForeground} />}
         />
         <NativeRow
@@ -315,56 +313,54 @@ function SettingsContent() {
         </NativeRow>
       </NativeSection>
 
-      <NativeSection title="Notifications">
-        <NativeRow
-          title="New change requests"
-          subtitle={
-            !isFeatureEnabled("notifications")
-              ? "Disabled for this review build."
-              : supported
-                ? undefined
-                : "Available on iOS and Android."
-          }
-          leading={<Bell size={18} color={tokens.mutedForeground} />}
-          trailing={
-            <Switch
-              accessibilityLabel="Notify about new change requests"
-              value={isFeatureEnabled("notifications") && supported && settings.enabled}
-              disabled={!supported || !isFeatureEnabled("notifications")}
-              trackColor={{ true: tokens.primary }}
-              onValueChange={(value) => void setEnabled(value)}
-            />
-          }
-          last={!permissionDenied && !settings.enabled}
-        />
-        {permissionDenied ? (
+      {supported || permissionDenied || settings.enabled ? (
+        <NativeSection title="Notifications">
           <NativeRow
-            title="Open system settings"
-            subtitle="Notifications are turned off for this app in system settings."
-            destructive
-            leading={<Bell size={18} color={tokens.destructive} />}
-            onPress={openSystemSettings}
-            last={!settings.enabled}
-          />
-        ) : null}
-        {settings.enabled ? (
-          <NativeRow title="Check every" last>
-            <View style={styles.fullBleedChips}>
-              <NativeChipList
-                value={String(settings.pollIntervalSec)}
-                options={intervalOptions.map((option) => ({
-                  value: String(option.value),
-                  label: option.label,
-                }))}
-                onChange={(value) => {
-                  const next = Number(value) as NotificationSettings["pollIntervalSec"];
-                  void setPollInterval(next);
-                }}
+            title="New change requests"
+            subtitle={
+              !isFeatureEnabled("notifications") ? "Disabled for this review build." : undefined
+            }
+            leading={<Bell size={18} color={tokens.mutedForeground} />}
+            trailing={
+              <Switch
+                accessibilityLabel="Notify about new change requests"
+                value={isFeatureEnabled("notifications") && supported && settings.enabled}
+                disabled={!supported || !isFeatureEnabled("notifications")}
+                trackColor={{ true: tokens.primary }}
+                onValueChange={(value) => void setEnabled(value)}
               />
-            </View>
-          </NativeRow>
-        ) : null}
-      </NativeSection>
+            }
+            last={!permissionDenied && !settings.enabled}
+          />
+          {permissionDenied ? (
+            <NativeRow
+              title="Open system settings"
+              subtitle="Notifications are turned off for this app in system settings."
+              destructive
+              leading={<Bell size={18} color={tokens.destructive} />}
+              onPress={openSystemSettings}
+              last={!settings.enabled}
+            />
+          ) : null}
+          {settings.enabled ? (
+            <NativeRow title="Check every" last>
+              <View style={styles.fullBleedChips}>
+                <NativeChipList
+                  value={String(settings.pollIntervalSec)}
+                  options={intervalOptions.map((option) => ({
+                    value: String(option.value),
+                    label: option.label,
+                  }))}
+                  onChange={(value) => {
+                    const next = Number(value) as NotificationSettings["pollIntervalSec"];
+                    void setPollInterval(next);
+                  }}
+                />
+              </View>
+            </NativeRow>
+          ) : null}
+        </NativeSection>
+      ) : null}
 
       <NativeSection title="Automation">
         <NativeRow

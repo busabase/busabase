@@ -2,7 +2,15 @@ import { skipToken, useMutation, useQuery } from "@tanstack/react-query";
 import type { ChangeRequestVO } from "busabase-contract/types";
 import { getChangeRequestTitle, getRecordTitle } from "busabase-core/dashboard/change-request";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { ArrowLeft, GitPullRequest, MoreHorizontal, Pencil, Trash2 } from "lucide-react-native";
+import {
+  ArrowLeft,
+  ChevronDown,
+  ChevronUp,
+  GitPullRequest,
+  MoreHorizontal,
+  Pencil,
+  Trash2,
+} from "lucide-react-native";
 import { useState } from "react";
 import { Pressable, StyleSheet } from "react-native";
 import { useBusabaseOrpc } from "~/api/use-busabase-orpc";
@@ -34,6 +42,7 @@ function RecordDetailContent() {
   const recordId = typeof params.id === "string" ? params.id : "";
   const [actionsSheetOpen, setActionsSheetOpen] = useState(false);
   const [deleteSheetOpen, setDeleteSheetOpen] = useState(false);
+  const [fieldsExpanded, setFieldsExpanded] = useState(false);
 
   const recordQuery = useQuery(
     buda && recordId
@@ -79,7 +88,7 @@ function RecordDetailContent() {
 
   if (recordQuery.isLoading) {
     return (
-      <NativeScreen title="Record" subtitle="Loading record" headerLeading={headerLeading}>
+      <NativeScreen title="Record" headerLeading={headerLeading}>
         <NativeLoadingState label="Loading record" />
       </NativeScreen>
     );
@@ -107,9 +116,21 @@ function RecordDetailContent() {
     );
   }
 
+  const primaryFieldSlug = record.base.fields[0]?.slug;
+  const detailFields = Object.fromEntries(
+    Object.entries(record.headCommit.fields).filter(([slug]) => slug !== primaryFieldSlug),
+  );
+  const detailDefinitions = record.base.fields.slice(1);
+  const initialDefinitions = detailDefinitions.filter(
+    (field, index) => index < 7 || field.required,
+  );
+  const hiddenFieldCount = detailDefinitions.length - initialDefinitions.length;
+  const visibleDefinitions = fieldsExpanded ? detailDefinitions : initialDefinitions;
+
   return (
     <NativeScreen
       title={getRecordTitle(record)}
+      titleNumberOfLines={2}
       subtitle={`${record.base.name} · ${formatDate(record.updatedAt)}`}
       headerLeading={headerLeading}
       headerAction={
@@ -147,24 +168,37 @@ function RecordDetailContent() {
         <NativeRow
           title={getStatusLabel(record.status)}
           subtitle={`Commit ${shortId(record.headCommitId)} · by ${record.createdBy}`}
-          trailing={<StatusBadge status={record.status} />}
           last
         />
       </NativeSection>
 
       <NativeSection title="Fields">
         <FieldList
-          fields={record.headCommit.fields}
-          definitions={record.base.fields}
+          fields={detailFields}
+          definitions={visibleDefinitions}
+          limitToDefinitions
           variant="grouped"
         />
+        {hiddenFieldCount > 0 ? (
+          <NativeRow
+            title={fieldsExpanded ? "Show fewer fields" : `Show ${hiddenFieldCount} more fields`}
+            leading={
+              fieldsExpanded ? (
+                <ChevronUp size={18} color={tokens.mutedForeground} />
+              ) : (
+                <ChevronDown size={18} color={tokens.mutedForeground} />
+              )
+            }
+            last
+            onPress={() => setFieldsExpanded((current) => !current)}
+          />
+        ) : null}
       </NativeSection>
 
       <NativeSection title="Review history" caption={`${history.length}`}>
         {history.length === 0 ? (
           <NativeRow
-            title="No change requests yet"
-            subtitle="Edits to this record will appear here as review history."
+            title="No change requests"
             leading={<GitPullRequest size={18} color={tokens.mutedForeground} />}
             last
           />
@@ -192,21 +226,10 @@ function RecordDetailContent() {
       <NativeBottomSheet
         visible={actionsSheetOpen}
         title="Record actions"
-        description="Manage this record without crowding the reading view."
         showCloseButton
         onClose={() => setActionsSheetOpen(false)}
         footer={
           <NativeActionBar>
-            <Button
-              label="Edit record"
-              variant="secondary"
-              fullWidth
-              leadingIcon={<Pencil size={18} color={tokens.foreground} />}
-              onPress={() => {
-                setActionsSheetOpen(false);
-                router.push({ pathname: "/records/[id]/edit", params: { id: record.id } });
-              }}
-            />
             <Button
               label="Create delete change request"
               variant="destructive"
@@ -217,13 +240,6 @@ function RecordDetailContent() {
                 setActionsSheetOpen(false);
                 setDeleteSheetOpen(true);
               }}
-            />
-            <Button
-              label="Close"
-              variant="ghost"
-              disabled={deleteMutation.isPending}
-              fullWidth
-              onPress={() => setActionsSheetOpen(false)}
             />
           </NativeActionBar>
         }
@@ -284,7 +300,7 @@ const styles = StyleSheet.create({
   moreButton: {
     width: 36,
     height: 36,
-    borderRadius: radius.full,
+    borderRadius: radius.md,
     alignItems: "center",
     justifyContent: "center",
   },

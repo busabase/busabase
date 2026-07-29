@@ -94,26 +94,12 @@ export function FieldList({
                 },
               ]}
             >
-              <View style={styles.groupedLabelLine}>
-                <Text
-                  numberOfLines={1}
-                  style={[
-                    typography.caption,
-                    styles.groupedLabel,
-                    { color: tokens.mutedForeground },
-                  ]}
-                >
-                  {label}
-                </Text>
-                {field ? (
-                  <Text
-                    numberOfLines={1}
-                    style={[typography.caption, { color: tokens.mutedForeground }]}
-                  >
-                    {getFieldTypeLabel(field.type)}
-                  </Text>
-                ) : null}
-              </View>
+              <Text
+                numberOfLines={1}
+                style={[typography.caption, styles.groupedLabel, { color: tokens.mutedForeground }]}
+              >
+                {label}
+              </Text>
               <FieldValue
                 field={field}
                 value={fields[slug]}
@@ -160,11 +146,5 @@ const styles = StyleSheet.create({
   compactLabel: { textTransform: "uppercase" },
   compactValue: { minWidth: 0 },
   groupedRow: { paddingHorizontal: 14, paddingVertical: 10, gap: 6 },
-  groupedLabelLine: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: 10,
-  },
-  groupedLabel: { flex: 1, minWidth: 0, textTransform: "uppercase" },
+  groupedLabel: { minWidth: 0, textTransform: "uppercase" },
 });

@@ -2,6 +2,9 @@ import { createORPCClient, ORPCError } from "@orpc/client";
 import type { ContractRouterClient } from "@orpc/contract";
 import { OpenAPILink } from "@orpc/openapi-client/fetch";
 import { type CloudContract, cloudContract } from "busabase-contract/contract/cloud";
+import { normalizeBaseUrl } from "./url.js";
+
+export { normalizeBaseUrl };
 
 /**
  * The fully-typed Busabase client. Built over the *cloud* contract, which is a
@@ -73,15 +76,6 @@ const env = (key: string): string | undefined => {
   const value = process.env[key];
   return value && value.length > 0 ? value : undefined;
 };
-
-/**
- * Normalise a user-supplied base URL to the server root. The contract already
- * carries the `/api/v1` prefix (`OpenAPILink` appends it), so accept either form
- * (`http://host` or `http://host/api/v1`) and strip the suffix if present.
- */
-export function normalizeBaseUrl(raw: string): string {
-  return raw.replace(/\/+$/, "").replace(/\/api\/v1$/, "");
-}
 
 /** Fill in missing config fields from environment variables and defaults. */
 export function resolveConfig(config: BusabaseConfig = {}): ResolvedConfig {

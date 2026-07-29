@@ -14,9 +14,17 @@ import {
 } from "../../../i18n";
 import {
   AGENT_BRAND_LINKS,
+  createMcpAgentGuides,
+  createMcpEndpoint,
+  getDefaultCloudMcpBaseUrl,
+  isSameMcpOrigin,
+  isValidMcpBaseUrl,
   isWebChatReachable,
+  LOCAL_MCP_BASE_URL,
   type McpAgentKind,
+  type McpConnectionMode,
   type McpGuideEdition,
+  normalizeMcpBaseUrl,
 } from "./agent-mcp-guides";
 
 interface BusabaseAgentSkillButtonProps {
@@ -80,9 +88,19 @@ export function AgentIntegrationDialog({
   // instead of telling them to go find another tab themselves.
   const [transportTab, setTransportTab] = useState("skills");
   const [skillAudience, setSkillAudience] = useState<McpAgentKind>("shell");
+  const [mcpMode, setMcpMode] = useState<McpConnectionMode>("local");
+  const [mcpBaseUrls, setMcpBaseUrls] = useState<Record<McpConnectionMode, string>>({
+    local: LOCAL_MCP_BASE_URL,
+    cloud: getDefaultCloudMcpBaseUrl(defaultOrigin),
+  });
 
   useEffect(() => {
-    setOrigin(window.location.origin);
+    const browserOrigin = window.location.origin;
+    setOrigin(browserOrigin);
+    setMcpBaseUrls((current) => ({
+      ...current,
+      cloud: getDefaultCloudMcpBaseUrl(browserOrigin),
+    }));
   }, []);
 
   const skillUrl = useMemo(() => {
@@ -95,8 +113,17 @@ export function AgentIntegrationDialog({
     return url.toString();
   }, [edition, origin, targetSpaceId]);
   const webChatReachable = isWebChatReachable(edition);
-  const mcpOrigin = edition === "desktop" ? "http://localhost:15419" : origin;
-  const mcpUrl = `${mcpOrigin}/api/mcp`;
+  const mcpBaseUrl = mcpBaseUrls[mcpMode];
+  const mcpBaseUrlFallback =
+    mcpMode === "local" ? LOCAL_MCP_BASE_URL : getDefaultCloudMcpBaseUrl(origin);
+  const mcpBaseUrlIsValid = isValidMcpBaseUrl(mcpBaseUrl);
+  const mcpUrl = mcpBaseUrlIsValid
+    ? createMcpEndpoint(mcpBaseUrl, mcpBaseUrlFallback)
+    : "<BASE_URL>/api/mcp";
+  const guideTargetSpaceId =
+    mcpMode === "cloud" && edition === "cloud" && isSameMcpOrigin(mcpBaseUrl, origin)
+      ? targetSpaceId
+      : undefined;
   const mcpGuideUrl = getMcpGuideUrl(lang);
   const openApiJsonUrl = `${origin}/api/v1/openapi.json`;
   const openApiDocUrl = `${origin}/api/v1/doc`;
@@ -105,6 +132,26 @@ export function AgentIntegrationDialog({
     () => createAgentSkillPrompt(skillUrl, lang, targetSpaceId),
     [skillUrl, lang, targetSpaceId],
   );
+  const mcpAgentGuides = useMemo(
+    () => createMcpAgentGuides({ mode: mcpMode, lang, mcpUrl, targetSpaceId: guideTargetSpaceId }),
+    [guideTargetSpaceId, lang, mcpMode, mcpUrl],
+  );
+
+  const selectMcpMode = (mode: McpConnectionMode) => {
+    setCopied(null);
+    setMcpMode(mode);
+  };
+
+  const updateMcpBaseUrl = (value: string) => {
+    setMcpBaseUrls((current) => ({ ...current, [mcpMode]: value }));
+  };
+
+  const normalizeActiveMcpBaseUrl = () => {
+    const normalized = normalizeMcpBaseUrl(mcpBaseUrl, "");
+    if (!normalized) return;
+    const fallback = mcpMode === "local" ? LOCAL_MCP_BASE_URL : getDefaultCloudMcpBaseUrl(origin);
+    updateMcpBaseUrl(normalizeMcpBaseUrl(normalized, fallback));
+  };
 
   const copy = async (text: string, key: string) => {
     setCopied(null);
@@ -241,7 +288,10 @@ export function AgentIntegrationDialog({
                     <div>
                       <button
                         className="inline-flex h-9 items-center gap-2 rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground hover:opacity-90"
-                        onClick={() => setTransportTab("mcp")}
+                        onClick={() => {
+                          selectMcpMode("cloud");
+                          setTransportTab("mcp");
+                        }}
                         type="button"
                       >
                         {messages.integration.webChatGoToMcp}
@@ -257,6 +307,66 @@ export function AgentIntegrationDialog({
           <TabsContent value="mcp" className="mt-0 min-h-0 overflow-y-auto pr-1">
             <div className="grid gap-3">
               <p className="text-sm text-muted-foreground">{messages.integration.mcpIntro}</p>
+              <div className="grid items-end gap-3 sm:grid-cols-[auto_minmax(0,1fr)]">
+                <div className="grid gap-1">
+                  <span className="text-xs font-medium text-foreground">
+                    {messages.integration.mcpConnectionMode}
+                  </span>
+                  <div
+                    aria-label={messages.integration.mcpConnectionMode}
+                    className="inline-flex h-9 overflow-hidden rounded-md border bg-muted/30"
+                    role="group"
+                  >
+                    {(
+                      [
+                        { mode: "local", label: messages.integration.local },
+                        { mode: "cloud", label: messages.integration.cloud },
+                      ] satisfies { mode: McpConnectionMode; label: string }[]
+                    ).map((option) => (
+                      <button
+                        aria-pressed={mcpMode === option.mode}
+                        className={`min-w-20 px-3 text-xs font-medium ${
+                          mcpMode === option.mode
+                            ? "bg-primary text-primary-foreground"
+                            : "text-muted-foreground hover:bg-muted"
+                        }`}
+                        key={option.mode}
+                        onClick={() => selectMcpMode(option.mode)}
+                        type="button"
+                      >
+                        {option.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <label className="grid min-w-0 gap-1">
+                  <span className="text-xs font-medium text-foreground">
+                    {messages.integration.baseUrl}
+                  </span>
+                  <input
+                    aria-label={messages.integration.baseUrl}
+                    aria-invalid={!mcpBaseUrlIsValid}
+                    aria-describedby={
+                      mcpBaseUrlIsValid ? undefined : "agent-integration-mcp-base-url-error"
+                    }
+                    className="h-9 min-w-0 rounded-md border bg-background px-3 font-mono text-xs text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    onBlur={normalizeActiveMcpBaseUrl}
+                    onChange={(event) => updateMcpBaseUrl(event.target.value)}
+                    spellCheck={false}
+                    type="url"
+                    value={mcpBaseUrl}
+                  />
+                  {!mcpBaseUrlIsValid ? (
+                    <span
+                      className="text-xs text-destructive"
+                      id="agent-integration-mcp-base-url-error"
+                      role="alert"
+                    >
+                      {messages.integration.invalidBaseUrl}
+                    </span>
+                  ) : null}
+                </label>
+              </div>
               <div className="grid gap-1">
                 <span className="text-xs font-medium text-foreground">
                   {messages.integration.streamableHttp}
@@ -266,7 +376,8 @@ export function AgentIntegrationDialog({
                     {mcpUrl}
                   </code>
                   <button
-                    className="shrink-0 rounded p-1 hover:bg-muted"
+                    className="shrink-0 rounded p-1 hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
+                    disabled={!mcpBaseUrlIsValid}
                     onClick={() => copy(mcpUrl, "mcp-http")}
                     type="button"
                     aria-label={messages.integration.copyUrl}
@@ -275,22 +386,92 @@ export function AgentIntegrationDialog({
                   </button>
                 </div>
               </div>
-              <p className="text-xs text-muted-foreground">{messages.integration.mcpHint}</p>
+              <p className="text-xs text-muted-foreground">
+                {mcpMode === "local"
+                  ? messages.integration.mcpLocalHint
+                  : messages.integration.mcpCloudHint}
+              </p>
 
-              {/* Per-agent setup used to live here as a second tab strip. It was removed:
-                  the terminal clients' commands already have a section each in the full
-                  guide, and the chat-app hosts all share the same "setup" — this URL.
-                  Thirteen tabs to vary one sentence is worse than one link. */}
-              <a
-                aria-label={messages.integration.mcpGuide}
-                className="inline-flex w-fit items-center gap-1 text-xs text-primary hover:underline"
-                href={mcpGuideUrl}
-                rel="noreferrer"
-                target="_blank"
-              >
-                <ExternalLink size={13} />
-                {messages.integration.mcpGuide}
-              </a>
+              <Tabs defaultValue="codex" className="grid min-h-0 gap-3">
+                <div className="w-full overflow-x-auto pb-1">
+                  <TabsList
+                    aria-label={messages.integration.chooseAgent}
+                    className="h-10 min-w-max justify-start"
+                  >
+                    {mcpAgentGuides.map((guide) => (
+                      <TabsTrigger className="shrink-0" key={guide.id} value={guide.id}>
+                        {guide.name}
+                      </TabsTrigger>
+                    ))}
+                  </TabsList>
+                </div>
+
+                {mcpAgentGuides.map((guide) => {
+                  const copyKey = `mcp-setup-${guide.id}`;
+                  return (
+                    <TabsContent className="mt-0 grid gap-3" key={guide.id} value={guide.id}>
+                      <section className="grid gap-2" aria-labelledby={`${guide.id}-setup-title`}>
+                        <div className="flex items-center justify-between gap-2">
+                          <h3
+                            className="text-xs font-medium text-foreground"
+                            id={`${guide.id}-setup-title`}
+                          >
+                            {messages.integration.quickSetup}
+                          </h3>
+                          <button
+                            aria-label={`${messages.integration.copySetup}: ${guide.name}`}
+                            className="inline-flex h-8 shrink-0 items-center gap-1 rounded-md border bg-background px-2 text-xs font-medium hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
+                            disabled={!mcpBaseUrlIsValid}
+                            onClick={() => copy(guide.setup, copyKey)}
+                            type="button"
+                          >
+                            {copied === copyKey ? <Check size={13} /> : <Copy size={13} />}
+                            {copied === copyKey
+                              ? messages.integration.copied
+                              : messages.integration.copySetup}
+                          </button>
+                        </div>
+                        <pre
+                          className="max-h-44 overflow-auto whitespace-pre-wrap break-words rounded-md border bg-muted/30 p-3 font-mono text-xs leading-relaxed text-foreground"
+                          data-format={guide.format}
+                        >
+                          {guide.setup}
+                        </pre>
+                      </section>
+
+                      <div className="grid gap-3 border-t pt-3 sm:grid-cols-2">
+                        <section className="grid content-start gap-1">
+                          <h3 className="text-xs font-medium text-foreground">
+                            {messages.integration.connect}
+                          </h3>
+                          <p className="text-xs leading-relaxed text-muted-foreground">
+                            {guide.connection}
+                          </p>
+                        </section>
+                        <section className="grid content-start gap-1">
+                          <h3 className="text-xs font-medium text-foreground">
+                            {messages.integration.verify}
+                          </h3>
+                          <p className="text-xs leading-relaxed text-muted-foreground">
+                            {guide.verification}
+                          </p>
+                        </section>
+                      </div>
+
+                      <a
+                        aria-label={`${guide.name}: ${messages.integration.openFullGuide}`}
+                        className="inline-flex w-fit items-center gap-1 text-xs text-primary hover:underline"
+                        href={`${mcpGuideUrl}#${guide.docAnchor}`}
+                        rel="noreferrer"
+                        target="_blank"
+                      >
+                        <ExternalLink size={13} />
+                        {guide.name}: {messages.integration.openFullGuide}
+                      </a>
+                    </TabsContent>
+                  );
+                })}
+              </Tabs>
             </div>
           </TabsContent>
 

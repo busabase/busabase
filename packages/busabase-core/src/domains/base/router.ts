@@ -33,6 +33,7 @@ import {
   listDeletedFields,
   listRecordLinks,
   listRecordsByFieldText,
+  listRecordsPage,
   listRecordsPaged,
   listViews,
   previewFieldConversion,
@@ -137,16 +138,21 @@ export const recordRouter = {
   list: os.records.list.handler(async ({ input }) =>
     input?.status === "archived" ? listArchivedRecordsPaged(input) : listRecordsPaged(input),
   ),
+  listPage: os.records.listPage.handler(async ({ input }) => listRecordsPage(input)),
   count: os.records.count.handler(async ({ input }) => countRecords(input)),
   get: os.records.get.handler(async ({ input }) => {
-    const record = await getRecord(input.recordId);
+    const record =
+      "recordId" in input ? await getRecord(input.recordId) : await getRecordByField(input);
     if (!record) {
-      throw new ORPCError("NOT_FOUND", { message: `Record not found: ${input.recordId}` });
+      const selector =
+        "recordId" in input
+          ? input.recordId
+          : `${input.baseId}/${input.fieldSlug}=${input.valueText}`;
+      throw new ORPCError("NOT_FOUND", { message: `Record not found: ${selector}` });
     }
     return record;
   }),
   search: os.records.search.handler(async ({ input }) => listRecordsByFieldText(input)),
-  getByField: os.records.getByField.handler(async ({ input }) => getRecordByField(input)),
   changeRequest: os.records.changeRequest.handler(async ({ input }) => {
     switch (input.operation) {
       case "update": {

@@ -958,8 +958,8 @@ const GREP_DEMO_STORAGE_KEY = "files/seed/grep-demo-invoice.pdf";
  * Idempotent (checked by fixed node id) so `pnpm db:seed` stays re-runnable.
  * Together with `seedFileNodesIfMissing`'s text-kind files (auto-registered,
  * no writer needed), this makes the demo dataset immediately greppable end to
- * end: `assets.grep({ pattern: "ACME Corp" })` finds a hit in this fixture,
- * and `assets.grep({ pattern: "signups" })` finds one in a plain CSV/text File.
+ * end: `grep({ pattern: "ACME Corp", sources: ["files"] })` finds a hit in
+ * this fixture, and the same call for `signups` finds a plain CSV/text File.
  */
 const seedGrepDemoFixture = async (createdAt: Date) => {
   ensureDefaultStorageUrl();

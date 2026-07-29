@@ -171,7 +171,9 @@ export const normalizeViewConfig = (config: ViewPO["config"] | ViewConfigVO): Vi
   fieldWidths: normalizeFieldWidths((config as ViewConfigVO).fieldWidths),
   // Per-view-type presentation config — passed through untouched for the types
   // that don't use a given field (a table ignores coverFieldSlug, etc.).
-  coverFieldSlug: (config as ViewConfigVO).coverFieldSlug ?? null,
+  // `undefined` means Auto (first attachment field), while `null` explicitly
+  // disables covers. Preserve that distinction across the API boundary.
+  coverFieldSlug: (config as ViewConfigVO).coverFieldSlug,
   coverFit: (config as ViewConfigVO).coverFit,
   cardSize: (config as ViewConfigVO).cardSize,
   showFieldLabels: (config as ViewConfigVO).showFieldLabels,

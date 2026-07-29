@@ -5,9 +5,8 @@ import { getBusabaseOpenApiSpec } from "../src/openapi/spec";
  * Permanent regression coverage for the Unified Grep (P2a) OpenAPI surface —
  * the top-level `POST /grep` route declared in
  * packages/busabase-contract/src/contract/busabase.ts (nothing to change
- * there — this test only verifies the generator faithfully turns that
- * declaration into a public /api/v1 spec, mirroring
- * `openapi-drive-grep-routes.test.ts`'s pattern for `assets.grep`). See
+ * there — this test verifies the generator faithfully turns that declaration
+ * into the only public grep operation in the /api/v1 spec. See
  * apps/busabase/content/spec/unified-grep.md.
  */
 
@@ -28,6 +27,11 @@ describe("Busabase OpenAPI Unified Grep route", () => {
     const pathItem = paths["/api/v1/grep"];
     expect(pathItem, "missing OpenAPI path /api/v1/grep").toBeDefined();
     expect(pathItem?.post, "missing POST /api/v1/grep").toBeDefined();
+  });
+
+  it("does not expose the superseded POST /api/v1/assets/grep operation", async () => {
+    const spec = await getBusabaseOpenApiSpec();
+    expect(spec.paths?.["/api/v1/assets/grep"]).toBeUndefined();
   });
 
   it("tags the route with a non-empty summary", async () => {

@@ -6,10 +6,10 @@
  * rather than inside a single domain's contract: `grep` composes multiple
  * domains (files, Docs, Base records), so its schemas belong at the same
  * level as `search`'s, not inside `domains/assets/` or `domains/base/`.
- * `assets.grep` (files-only specialist) keeps its own separate schemas in
- * `domains/assets/types.ts`, unchanged — this file intentionally reuses only
- * its numeric default/cap constants (same budget language), never its type
- * names (which would collide: `GrepMatchVO` vs `UnifiedGrepMatchVO`, etc.).
+ * The internal files scanner and SDK compatibility adapter keep files-only
+ * schemas in `domains/assets/types.ts`. This file intentionally reuses only
+ * their numeric default/cap constants (same budget language), never their
+ * type names (which would collide: `GrepMatchVO` vs `UnifiedGrepMatchVO`).
  *
  * Pure zod — no logic/db imports (client-safe: pulled into the browser
  * bundle and the RN oRPC client's type graph).
@@ -31,7 +31,7 @@ import {
 export const GrepSourceSchema = z.enum(["files", "docs", "records"]);
 export type GrepSource = z.infer<typeof GrepSourceSchema>;
 
-/** Files scope — identical shape to `assets.grep`'s `GrepScopeSchema` (same semantics, kept separate to avoid a cross-contract type dependency). */
+/** Files scope — identical shape to the internal files scanner's `GrepScopeSchema`. */
 export const UnifiedGrepFilesScopeSchema = z.object({
   assetIds: z.array(z.string()).optional(),
   /** Drive/Skill mounted path prefix (matches `busabase_asset_usages.path`). */
@@ -67,7 +67,7 @@ export type UnifiedGrepScope = z.infer<typeof UnifiedGrepScopeSchema>;
 
 export const UnifiedGrepInputSchema = z.object({
   pattern: z.string().min(1),
-  /** JS RegExp flags, e.g. `"i"` for case-insensitive — same language as `assets.grep`. */
+  /** JS RegExp flags, e.g. `"i"` for case-insensitive. */
   flags: z.string().optional().default(""),
   /** Which sources to scan. Omitted = all three (`files`, `docs`, `records`). */
   sources: z.array(GrepSourceSchema).optional(),
@@ -88,6 +88,9 @@ export const UnifiedGrepInputSchema = z.object({
     .optional()
     .default(GREP_DEFAULT_CONTEXT_LINES),
 });
+/** Caller input before Zod applies grep defaults. */
+export type UnifiedGrepInputDTO = z.input<typeof UnifiedGrepInputSchema>;
+/** Parsed input consumed by unified grep logic. */
 export type UnifiedGrepInput = z.infer<typeof UnifiedGrepInputSchema>;
 
 /** Fields every source's match carries — real 1-based line/column, so a caller can read exactly around it. */
@@ -137,7 +140,7 @@ export const UnifiedGrepMatchVOSchema = z.discriminatedUnion("source", [
 ]);
 export type UnifiedGrepMatchVO = z.infer<typeof UnifiedGrepMatchVOSchema>;
 
-/** Files coverage — identical semantics to `assets.grep`'s `GrepResultVOSchema` coverage fields. */
+/** Honest files coverage preserved from the original files-only scanner. */
 export const UnifiedGrepFilesCoverageSchema = z.object({
   scanned: z.number().int().nonnegative(),
   missing: z.array(z.string()),

@@ -14,22 +14,22 @@ const reportProgress = (message: string): void => {
 };
 
 /**
- * Deliberately not implemented: a state-level export is a *published package*,
- * which `publish` already writes as a readable, diffable directory. The two
- * formats stay separate because a backup carries audit events, comments,
- * reviews and ACLs that a package must never leak.
+ * Deliberately not implemented: `export` already writes the portable current-state
+ * representation as a readable, diffable directory. The two formats stay separate
+ * because a backup carries audit events, comments, reviews and ACLs that a package
+ * must never leak.
  */
 const STATE_ONLY_BACKUP_MESSAGE = [
   "--state-only backup is not implemented, and will not be — it is superseded by",
-  "`busabase-cli publish`, which writes the same state-level content as a readable,",
+  "`busabase-cli export`, which writes the same state-level content as a readable,",
   "diffable directory you can push to GitHub:",
   "",
-  "  busabase-cli publish <node-slug> -o ./my-package",
+  "  busabase-cli export <node-slug> -o ./my-package",
   "  busabase-cli install https://github.com/<you>/<repo>",
   "",
   "`busabase-cli backup` stays the full-fidelity backup path (raw rows, original ids,",
   "history) — run it without --state-only. The two formats are deliberately separate:",
-  "a backup carries the audit events, comments, reviews and ACLs that a published",
+  "a backup carries the audit events, comments, reviews and ACLs that an exported",
   "package must never leak.",
 ].join("\n");
 

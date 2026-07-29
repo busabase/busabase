@@ -59,13 +59,19 @@ function WhiteboardPreview({ node }: { node: NodeVO }) {
   const labels = document.elements
     .map(whiteboardText)
     .filter((label): label is { id: string; text: string } => !!label);
+  const [boardTitle, ...notes] = labels;
 
   return (
-    <>
-      <NativeSection title="Canvas" caption={`${document.elements.length} elements`}>
-        {labels.length > 0 ? (
-          <View style={styles.canvasGrid}>
-            {labels.map((label) => (
+    <NativeSection title="Canvas" caption={`${document.elements.length} elements`}>
+      {labels.length > 0 ? (
+        <View style={styles.canvasGrid}>
+          {boardTitle ? (
+            <Text selectable style={[typography.h3, { color: tokens.foreground }]}>
+              {boardTitle.text}
+            </Text>
+          ) : null}
+          <View style={styles.canvasNotes}>
+            {notes.map((label) => (
               <View
                 key={label.id}
                 style={[
@@ -79,22 +85,11 @@ function WhiteboardPreview({ node }: { node: NodeVO }) {
               </View>
             ))}
           </View>
-        ) : (
-          <NativeEmptyState
-            title="Empty whiteboard"
-            description="This canvas does not contain any text elements yet."
-          />
-        )}
-      </NativeSection>
-      <NativeSection title="Details">
-        <NativeRow
-          title="Mode"
-          subtitle="Read-only mobile review"
-          leading={<Eye size={18} color={tokens.mutedForeground} />}
-        />
-        <NativeRow title="Format" subtitle={`Whiteboard document v${document.version}`} last />
-      </NativeSection>
-    </>
+        </View>
+      ) : (
+        <NativeEmptyState title="Empty whiteboard" />
+      )}
+    </NativeSection>
   );
 }
 
@@ -135,29 +130,28 @@ function WorkflowPreview({ node }: { node: NodeVO }) {
   );
 
   return (
-    <>
-      <NativeSection title="Flow" caption={`${document.nodes.length} steps`}>
-        {document.nodes.map((step, index) => {
-          const Icon = workflowIcon(step.kind);
-          return (
-            <NativeRow
-              key={step.id}
-              title={step.label}
-              subtitle={step.description || workflowNodeMeta(step)}
-              meta={step.kind}
-              leading={<Icon size={18} color={tokens.mutedForeground} />}
-              last={index === document.nodes.length - 1}
-            />
-          );
-        })}
-      </NativeSection>
-      <NativeSection title="Run settings">
-        <NativeRow title="Mode" subtitle={document.settings.executionMode} />
-        <NativeRow title="Concurrency" subtitle={String(document.settings.concurrency)} />
-        <NativeRow title="Timeout" subtitle={`${document.settings.timeoutMs / 1000}s`} />
-        <NativeRow title="On error" subtitle={document.settings.errorPolicy} last />
-      </NativeSection>
-    </>
+    <NativeSection
+      title="Flow"
+      caption={`${document.nodes.length} · ${document.settings.executionMode}`}
+    >
+      {document.nodes.map((step, index) => {
+        const Icon = workflowIcon(step.kind);
+        return (
+          <NativeRow
+            key={step.id}
+            title={step.label}
+            subtitle={step.description || workflowNodeMeta(step)}
+            meta={`${index + 1}`}
+            leading={
+              <View style={[styles.workflowMarker, { backgroundColor: tokens.primaryMuted }]}>
+                <Icon size={16} color={tokens.foreground} />
+              </View>
+            }
+            last={index === document.nodes.length - 1}
+          />
+        );
+      })}
+    </NativeSection>
   );
 }
 
@@ -181,7 +175,7 @@ function HtmlPreview({ node }: { node: NodeVO }) {
           ]}
         />
       </View>
-      <NativeSection title={tab === "preview" ? "Page" : "HTML"}>
+      <NativeSection title={tab === "preview" ? "Page" : "HTML"} style={styles.htmlSection}>
         {tab === "preview" ? (
           <View style={[styles.webviewWrap, { borderColor: tokens.border }]}>
             {Platform.OS === "web" ? (
@@ -241,7 +235,9 @@ function RichNodeDetailContent({ type }: RichNodeDetailScreenProps) {
   return (
     <DrawerScaffold
       title={validNode?.name ?? TYPE_LABELS[type]}
-      subtitle={validNode?.description || TYPE_LABELS[type]}
+      titleNumberOfLines={2}
+      subtitle={validNode?.description || undefined}
+      contentContainerStyle={type === "html" ? styles.htmlScreen : undefined}
       refreshing={nodesQuery.isRefetching}
       onRefresh={() => void nodesQuery.refetch()}
     >
@@ -253,10 +249,7 @@ function RichNodeDetailContent({ type }: RichNodeDetailScreenProps) {
         />
       ) : null}
       {!nodesQuery.isLoading && !nodesQuery.error && !validNode ? (
-        <NativeEmptyState
-          title={`${TYPE_LABELS[type]} not found`}
-          description="This node is not available in the current workspace."
-        />
+        <NativeEmptyState title={`${TYPE_LABELS[type]} not found`} />
       ) : null}
       {validNode && type === "whiteboard" ? <WhiteboardPreview node={validNode} /> : null}
       {validNode && type === "workflow" ? <WorkflowPreview node={validNode} /> : null}
@@ -275,17 +268,31 @@ export function RichNodeDetailScreen(props: RichNodeDetailScreenProps) {
 
 const styles = StyleSheet.create({
   canvasGrid: { paddingHorizontal: spacing[5], paddingVertical: spacing[4], gap: spacing[3] },
+  canvasNotes: { flexDirection: "row", flexWrap: "wrap", gap: spacing[3] },
   canvasNote: {
-    minHeight: 72,
+    minWidth: 132,
+    minHeight: 92,
+    flexBasis: "46%",
+    flexGrow: 1,
     justifyContent: "center",
     borderWidth: StyleSheet.hairlineWidth,
     borderRadius: radius.md,
     paddingHorizontal: spacing[4],
     paddingVertical: spacing[3],
   },
+  workflowMarker: {
+    width: 28,
+    height: 28,
+    borderRadius: radius.md,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  htmlScreen: { flexGrow: 1 },
+  htmlSection: { flex: 1 },
   segmentWrap: { paddingHorizontal: spacing[5], paddingTop: spacing[4] },
   webviewWrap: {
-    height: 520,
+    flex: 1,
+    minHeight: 420,
     marginHorizontal: spacing[5],
     marginVertical: spacing[4],
     borderWidth: StyleSheet.hairlineWidth,
@@ -293,6 +300,8 @@ const styles = StyleSheet.create({
     overflow: "hidden",
   },
   sourceWrap: {
+    flex: 1,
+    minHeight: 420,
     marginHorizontal: spacing[5],
     marginVertical: spacing[4],
     borderRadius: radius.md,

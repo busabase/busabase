@@ -9,7 +9,6 @@ import {
   ArrowLeft,
   Check,
   CheckCheck,
-  ChevronRight,
   GitCommitHorizontal,
   GitMerge,
   History,
@@ -18,11 +17,10 @@ import {
   XCircle,
 } from "lucide-react-native";
 import { useState } from "react";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { Pressable, StyleSheet, Text } from "react-native";
 import { useBusabaseOrpc } from "~/api/use-busabase-orpc";
 import { CommentsSection } from "~/components/busabase/CommentsSection";
 import { ConnectionGuard } from "~/components/busabase/ConnectionGuard";
-import { FieldList } from "~/components/busabase/FieldList";
 import {
   NativeActionBar,
   NativeBottomSheet,
@@ -75,23 +73,9 @@ function OperationRow({
         />
       }
       destructive={isDelete}
-      trailing={
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={`Open operation ${index + 1}`}
-          hitSlop={mobile.hitSlop}
-          style={styles.operationOpen}
-          onPress={onPress}
-        >
-          <ChevronRight size={18} color={tokens.mutedForeground} />
-        </Pressable>
-      }
+      onPress={onPress}
       last={last}
-    >
-      <View style={styles.operationFields}>
-        <FieldList fields={operation.headCommit.fields} highlight variant="compact" />
-      </View>
-    </NativeRow>
+    />
   );
 }
 
@@ -249,11 +233,7 @@ function ChangeRequestDetailContent() {
 
   if (crQuery.isLoading) {
     return (
-      <NativeScreen
-        title="Change Request"
-        subtitle="Loading review detail"
-        headerLeading={headerLeading}
-      >
+      <NativeScreen title="Change Request" headerLeading={headerLeading}>
         <NativeLoadingState label="Loading change request" />
       </NativeScreen>
     );
@@ -335,6 +315,7 @@ function ChangeRequestDetailContent() {
   return (
     <NativeScreen
       title={getChangeRequestTitle(changeRequest)}
+      titleNumberOfLines={2}
       subtitle={`${scopeName} · ${formatDate(changeRequest.updatedAt)}`}
       headerLeading={headerLeading}
       footer={footer}
@@ -354,7 +335,6 @@ function ChangeRequestDetailContent() {
       <NativeBottomSheet
         visible={rejectSheetVisible}
         title="Request changes"
-        description="Tell the submitter or agent what needs to change before this can be approved."
         showCloseButton
         onClose={closeRejectSheet}
         footer={
@@ -382,13 +362,6 @@ function ChangeRequestDetailContent() {
                   },
                 )
               }
-            />
-            <Button
-              label="Cancel"
-              variant="ghost"
-              disabled={reviewMutation.isPending}
-              fullWidth
-              onPress={closeRejectSheet}
             />
           </NativeActionBar>
         }
@@ -486,7 +459,6 @@ function ReviewActionBar({
           <NativeBottomSheet
             visible={optionsOpen}
             title="Review options"
-            description="Approve without merging, or send the change request back for revision."
             showCloseButton
             onClose={() => setOptionsOpen(false)}
             footer={
@@ -512,13 +484,6 @@ function ReviewActionBar({
                     setOptionsOpen(false);
                     onRequestChanges();
                   }}
-                />
-                <Button
-                  label="Close"
-                  variant="ghost"
-                  disabled={anyPending}
-                  fullWidth
-                  onPress={() => setOptionsOpen(false)}
                 />
               </NativeActionBar>
             }
@@ -552,15 +517,6 @@ const styles = StyleSheet.create({
     width: 44,
     height: 44,
     borderRadius: radius.md,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  operationFields: {
-    marginTop: 6,
-  },
-  operationOpen: {
-    width: 44,
-    height: 44,
     alignItems: "center",
     justifyContent: "center",
   },

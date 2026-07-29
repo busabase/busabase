@@ -15,11 +15,11 @@ import { busabaseRouter } from "../src/router";
  * | records adapter) code path a caller hits. See
  * apps/busabase/content/spec/unified-grep.md.
  *
- * The pre-existing `assets.grep` suite (drive-grep-retrieval.test.ts,
+ * The pre-existing files grep suite (drive-grep-retrieval.test.ts,
  * drive-grep-concurrency.test.ts, drive-grep-rg-routing.test.ts,
  * drive-grep-rg-real.test.ts, grep-pattern-guard.test.ts,
  * grep-literal-pattern.test.ts) is the regression gate for this feature and
- * is intentionally NOT modified by this change — see this PR's report.
+ * now reaches this public route through a files-only test adapter.
  *
  * Records tests share this file's DB/client with the P2a files+docs tests
  * above (same convention: scope narrowly by explicit ids —
@@ -243,30 +243,32 @@ describe("Unified Grep — POST /grep (files + docs + records)", () => {
     expect(result.coverage.docs.scanned + result.coverage.docs.notReached).toBe(nodeIds.length);
   });
 
-  it("regex parity: unified grep's files source returns byte-identical matches to assets.grep", async () => {
+  it("files-only grep exposes file matches and the complete honest files coverage block", async () => {
     const assetId = await seedFile({
       fileName: "parity.log",
       hashByte: "3",
       text: "call 555-1234 or 555-5678 today",
     });
 
-    const legacy = await client.assets.grep({
-      pattern: "\\d{3}-\\d{4}",
-      scope: { assetIds: [assetId] },
-    });
-    const unified = await client.grep({
+    const result = await client.grep({
       pattern: "\\d{3}-\\d{4}",
       sources: ["files"],
       scope: { files: { assetIds: [assetId] } },
     });
 
-    expect(unified.matches).toHaveLength(legacy.matches.length);
-    const stripped = unified.matches.map((match) => {
-      if (match.source !== "files") throw new Error("expected a files match");
-      const { source: _source, ...rest } = match;
-      return rest;
+    expect(result.matches).toHaveLength(1);
+    expect(result.matches.every((match) => match.source === "files")).toBe(true);
+    expect(result.coverage.files).toEqual({
+      scanned: 1,
+      missing: [],
+      stale: [],
+      unsearchable: 0,
+      errored: [],
+      notReached: 0,
     });
-    expect(stripped).toEqual(legacy.matches);
+    expect(result.coverage.docs).toEqual({ scanned: 0, errored: [], notReached: 0 });
+    expect(result.coverage.records).toEqual({ scanned: 0, errored: [], notReached: 0 });
+    expect(result.truncated).toBe(false);
   });
 
   describe("records adapter (P2b)", () => {

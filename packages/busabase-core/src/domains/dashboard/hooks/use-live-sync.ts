@@ -39,6 +39,7 @@ interface UseBusabaseLiveSyncOptions {
     changeRequestCounts: QueryKey;
     nodes: QueryKey;
     records: QueryKey;
+    recordsPage: QueryKey;
     recordsCount: QueryKey;
   };
   orpc: BusabaseQueryUtils;
@@ -129,6 +130,7 @@ export function useBusabaseLiveSync({
       listKeys.changeRequestCounts,
       listKeys.nodes,
       listKeys.records,
+      listKeys.recordsPage,
       listKeys.recordsCount,
       listKeys,
     ],
@@ -155,6 +157,9 @@ export function useBusabaseLiveSync({
         queryKey: orpc.records.list.key(),
       });
       void queryClient.invalidateQueries({
+        queryKey: orpc.records.listPage.key(),
+      });
+      void queryClient.invalidateQueries({
         queryKey: orpc.bases.listDeletedFields.queryOptions({ input: { baseId } }).queryKey,
       });
     };
@@ -165,6 +170,7 @@ export function useBusabaseLiveSync({
       void queryClient.invalidateQueries({ queryKey: stableListKeys.bases });
       void queryClient.invalidateQueries({ queryKey: stableListKeys.archivedBases });
       void queryClient.invalidateQueries({ queryKey: stableListKeys.records });
+      void queryClient.invalidateQueries({ queryKey: stableListKeys.recordsPage });
       void queryClient.invalidateQueries({ queryKey: stableListKeys.recordsCount });
       void queryClient.invalidateQueries({ queryKey: stableListKeys.changeRequests });
       void queryClient.invalidateQueries({ queryKey: stableListKeys.changeRequestsPaged });
@@ -197,6 +203,7 @@ export function useBusabaseLiveSync({
 
       if (event.recordIds.length > 0 || event.viewIds.length > 0 || event.baseId) {
         void queryClient.invalidateQueries({ queryKey: stableListKeys.records });
+        void queryClient.invalidateQueries({ queryKey: stableListKeys.recordsPage });
         void queryClient.invalidateQueries({ queryKey: stableListKeys.recordsCount });
         void queryClient.invalidateQueries({ queryKey: stableListKeys.bases });
         void queryClient.invalidateQueries({ queryKey: stableListKeys.archivedBases });

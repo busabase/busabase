@@ -7,18 +7,23 @@ import { BaseCard } from "~/components/busabase/BaseCard";
 import { ConnectionGuard } from "~/components/busabase/ConnectionGuard";
 import { DrawerScaffold } from "~/components/busabase/DrawerScaffold";
 import {
+  NativeActionBar,
   NativeEmptyState,
   NativeErrorState,
   NativeLoadingState,
   NativeSection,
 } from "~/components/native-screen";
+import { Button } from "~/components/ui/Button";
 import { TextInput } from "~/components/ui/TextInput";
 import { spacing } from "~/theme/tokens";
+
+const BASE_BATCH_SIZE = 30;
 
 function BasesContent() {
   const router = useRouter();
   const buda = useBusabaseOrpc();
   const [search, setSearch] = useState("");
+  const [visibleCount, setVisibleCount] = useState(BASE_BATCH_SIZE);
   const query = useQuery(
     buda
       ? buda.orpc.bases.list.queryOptions({ input: {} })
@@ -36,10 +41,12 @@ function BasesContent() {
     );
   }, [bases, search]);
   const hasSearch = search.trim().length > 0;
+  const visibleBases = hasSearch ? filteredBases : filteredBases.slice(0, visibleCount);
 
   return (
     <DrawerScaffold
       title="Bases"
+      subtitle={bases.length > 0 ? `${bases.length} bases` : undefined}
       refreshing={query.isRefetching}
       onRefresh={() => void query.refetch()}
     >
@@ -62,20 +69,27 @@ function BasesContent() {
       {!query.isLoading && !query.error && bases.length > 0 && filteredBases.length === 0 ? (
         <NativeEmptyState title="No matching bases" />
       ) : null}
-      {filteredBases.length > 0 ? (
-        <NativeSection
-          title="Bases"
-          caption={hasSearch ? `${filteredBases.length} of ${bases.length}` : `${bases.length}`}
-        >
-          {filteredBases.map((base, index) => (
+      {visibleBases.length > 0 ? (
+        <NativeSection>
+          {visibleBases.map((base, index) => (
             <BaseCard
               key={base.id}
               base={base}
-              last={index === filteredBases.length - 1}
+              last={index === visibleBases.length - 1}
               onPress={() => router.push({ pathname: "/base/[slug]", params: { slug: base.slug } })}
             />
           ))}
         </NativeSection>
+      ) : null}
+      {!hasSearch && visibleCount < bases.length ? (
+        <NativeActionBar>
+          <Button
+            label="Load more"
+            variant="secondary"
+            fullWidth
+            onPress={() => setVisibleCount((count) => count + BASE_BATCH_SIZE)}
+          />
+        </NativeActionBar>
       ) : null}
     </DrawerScaffold>
   );

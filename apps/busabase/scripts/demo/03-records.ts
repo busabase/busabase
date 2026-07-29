@@ -94,8 +94,8 @@ export async function run() {
       recordId = (result.record as RecordVO).id;
     });
 
-    await step("GET /records/{id} — read the created record", async () => {
-      const rec = await api<RecordVO>("GET", `/records/${recordId}`);
+    await step("GET /records/get — read the created record", async () => {
+      const rec = await api<RecordVO>("GET", `/records/get?recordId=${recordId}`);
       assert(rec.id === recordId, "id mismatch");
       assert(rec.status === "active", `expected active, got ${rec.status}`);
     });
@@ -120,8 +120,8 @@ export async function run() {
       assert(result.changeRequest.status === "merged", "expected merged");
     });
 
-    await step("GET /records/{id} — verify update applied", async () => {
-      const rec = await api<RecordVO>("GET", `/records/${recordId}`);
+    await step("GET /records/get — verify update applied", async () => {
+      const rec = await api<RecordVO>("GET", `/records/get?recordId=${recordId}`);
       assert(String(rec.headCommit.fields.title).includes("(updated)"), "title not updated");
     });
 
@@ -136,8 +136,8 @@ export async function run() {
       assert(result.changeRequest.status === "merged", "expected merged");
     });
 
-    await step("GET /records/{id} — record now archived", async () => {
-      const rec = await api<RecordVO>("GET", `/records/${recordId}`);
+    await step("GET /records/get — record now archived", async () => {
+      const rec = await api<RecordVO>("GET", `/records/get?recordId=${recordId}`);
       assert(rec.status === "archived", `expected archived, got ${rec.status}`);
     });
   }

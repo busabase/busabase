@@ -34,6 +34,7 @@ import type {
   SkillReadFileVO,
   SkillVO,
   ViewConfigVO,
+  ViewType,
   ViewVO,
 } from "../types";
 
@@ -262,6 +263,7 @@ export interface BusabaseDashboardApiClient {
       name: string;
       slug: string;
       submittedBy?: string;
+      type?: ViewType;
     },
   ) => Promise<ChangeRequestVO>;
   createUpdateViewChangeRequest: (
@@ -272,6 +274,7 @@ export interface BusabaseDashboardApiClient {
       message?: string;
       name?: string;
       submittedBy?: string;
+      type?: ViewType;
     },
   ) => Promise<ChangeRequestVO>;
   createDeleteViewChangeRequest: (viewId: string) => Promise<ChangeRequestVO>;

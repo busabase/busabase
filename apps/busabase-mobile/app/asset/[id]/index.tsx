@@ -22,7 +22,7 @@ import { Button } from "~/components/ui/Button";
 import { useConnection } from "~/connection/connection-store";
 import { useI18n } from "~/i18n";
 import { getAttachmentKindLabel, isImageRef, resolveAttachmentUrl } from "~/lib/attachment";
-import { formatBytes, shortId } from "~/lib/format";
+import { formatBytes } from "~/lib/format";
 import { mobile, radius, typography } from "~/theme/tokens";
 import { useTokens } from "~/theme/use-tokens";
 
@@ -91,7 +91,7 @@ function AssetDetailContent() {
             onRetry={() => void detailQuery.refetch()}
           />
         ) : (
-          <NativeEmptyState title={t.assets.notFound} description={t.assets.notFound} />
+          <NativeEmptyState title={t.assets.notFound} />
         )}
       </NativeScreen>
     );
@@ -124,7 +124,8 @@ function AssetDetailContent() {
   return (
     <NativeScreen
       title={asset.name}
-      subtitle={asset.fileName}
+      titleNumberOfLines={2}
+      subtitle={`${assetKindLabel} · ${formatBytes(asset.size)}`}
       headerLeading={headerLeading}
       headerAction={
         <Pressable
@@ -153,18 +154,6 @@ function AssetDetailContent() {
             </Pressable>
           )}
         </View>
-      </NativeSection>
-
-      <NativeSection title={t.assets.info}>
-        <NativeRow title={t.assets.type} subtitle={assetKindLabel} meta={asset.mimeType} />
-        <NativeRow
-          title={t.assets.size}
-          subtitle={formatBytes(asset.size)}
-          last={!asset.contentHash}
-        />
-        {asset.contentHash ? (
-          <NativeRow title={t.assets.contentHash} subtitle={shortId(asset.contentHash)} last />
-        ) : null}
       </NativeSection>
 
       <NativeSection title={t.assets.whereUsed} caption={`${usages.length}`}>

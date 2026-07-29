@@ -545,21 +545,53 @@ const mergeAdditionalInputSchema = (
     }
   }
 
+  const contractWithAdditionalProperties = addPropertiesToComposedObjectBranches(
+    contractSchema,
+    additionalSchema.properties ?? {},
+  ) as Tool["inputSchema"];
+
   return {
-    ...contractSchema,
+    ...contractWithAdditionalProperties,
     type: "object",
     properties: {
-      ...contractSchema.properties,
+      ...contractWithAdditionalProperties.properties,
       ...additionalSchema.properties,
     },
     required: uniqueStrings([
-      ...(contractSchema.required ?? []),
+      ...(contractWithAdditionalProperties.required ?? []),
       ...(additionalSchema.required ?? []),
     ]),
   };
 };
 
 const hasSchemaEntries = (value: unknown): boolean => Array.isArray(value) && value.length > 0;
+
+type ObjectJsonSchema = Exclude<JSONSchema, boolean>;
+
+const addPropertiesToComposedObjectBranches = (
+  schema: ObjectJsonSchema,
+  properties: NonNullable<ObjectJsonSchema["properties"]>,
+): ObjectJsonSchema => {
+  const mergeBranch = (branch: JSONSchema): JSONSchema => {
+    if (!branch || typeof branch !== "object") return branch;
+    const merged = addPropertiesToComposedObjectBranches(branch, properties);
+
+    const isObjectBranch =
+      merged.type === "object" ||
+      merged.properties !== undefined ||
+      merged.additionalProperties !== undefined;
+    return isObjectBranch
+      ? { ...merged, properties: { ...merged.properties, ...properties } }
+      : merged;
+  };
+
+  return {
+    ...schema,
+    ...(schema.anyOf ? { anyOf: schema.anyOf.map(mergeBranch) } : {}),
+    ...(schema.oneOf ? { oneOf: schema.oneOf.map(mergeBranch) } : {}),
+    ...(schema.allOf ? { allOf: schema.allOf.map(mergeBranch) } : {}),
+  };
+};
 
 const collectJsonSchemaPropertyNames = (schema: JSONSchema): Set<string> => {
   if (!schema || typeof schema !== "object") return new Set();

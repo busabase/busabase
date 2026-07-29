@@ -3,6 +3,11 @@ import "server-only";
 import { ORPCError } from "@orpc/server";
 import type { AuthInfo } from "busabase-contract/contract/schemas";
 import type { AssetDetailVO, AssetUsageVO, AssetVO } from "busabase-contract/domains/assets/types";
+import type {
+  FileTreeFileVO,
+  FileTreeNodeVO,
+  FileTreeReadFileVO,
+} from "busabase-contract/domains/filetree/types";
 import type { FolderVO } from "busabase-contract/domains/folder/types";
 import type {
   AgentTaskVO,
@@ -209,7 +214,8 @@ export const demoListViews = (baseId?: string): ViewVO[] => {
   return baseId ? views.filter((view) => view.baseId === baseId) : views;
 };
 
-export const demoListRecords = (): RecordVO[] => dataset().records;
+export const demoListRecords = (input: { baseId?: string } = {}): RecordVO[] =>
+  dataset().records.filter((record) => !input.baseId || record.baseId === input.baseId);
 
 export const demoGetRecord = (recordId: string): RecordVO => {
   const record = dataset().records.find((item) => item.id === recordId);
@@ -289,8 +295,8 @@ export const demoGetDoc = (nodeIdOrSlug: string): DemoDocVO => {
   return doc;
 };
 
-// Unlike `assets.readTextLines`/`assets.grep` (demoUnsupported below — no real
-// per-asset object storage backs the stateless demo dataset), a Doc's `body`
+// Unlike `assets.readTextLines`/top-level `grep` (demoUnsupported below — no
+// real per-asset object storage backs the stateless demo dataset), a Doc's `body`
 // is already a full in-memory string on `DemoDocVO` (same as `demoGetDoc`
 // already relies on) — no checkpoints/storage needed, so this is a real,
 // working demo implementation, not `demoUnsupported`. Reuses the exact same
@@ -315,6 +321,111 @@ export const demoGetFileNode = (nodeIdOrSlug: string): FileNodeVO => {
     throw notFound("File", nodeIdOrSlug);
   }
   return file;
+};
+
+const flattenNodes = (nodes: NodeVO[]): NodeVO[] =>
+  nodes.flatMap((node) => [node, ...flattenNodes(node.children)]);
+
+const getDemoFileTreeDef = (nodeIdOrSlug: string, type?: "skill" | "drive" | "airapp") => {
+  const def = dataset().fileTreeNodes.find(
+    (item) =>
+      (!type || item.nodeType === type) &&
+      (item.nodeId === nodeIdOrSlug || item.slug === nodeIdOrSlug),
+  );
+  if (!def) throw notFound("File tree", nodeIdOrSlug);
+  return def;
+};
+
+const getDemoMimeType = (path: string) => {
+  const extension = path.split(".").at(-1)?.toLowerCase();
+  if (extension === "md" || extension === "mdx") return "text/markdown";
+  if (extension === "json") return "application/json";
+  if (extension === "csv") return "text/csv";
+  if (extension === "html") return "text/html";
+  if (extension === "css") return "text/css";
+  if (["js", "jsx", "ts", "tsx"].includes(extension ?? "")) return "text/plain";
+  return "text/plain";
+};
+
+const demoFileAssetId = (nodeId: string, path: string) =>
+  `ast_demo_${nodeId}_${path.replace(/[^a-zA-Z0-9]+/g, "_")}`;
+
+const demoContentHash = (content: string) => {
+  let hash = 2166136261;
+  for (const character of content) {
+    hash ^= character.codePointAt(0) ?? 0;
+    hash = Math.imul(hash, 16777619);
+  }
+  return `demo-${(hash >>> 0).toString(16).padStart(8, "0")}`;
+};
+
+const toDemoFileTreeFile = (
+  nodeId: string,
+  updatedAt: string,
+  file: { path: string; content: string },
+): FileTreeFileVO => ({
+  path: file.path,
+  name: file.path.split("/").at(-1) ?? file.path,
+  size: new TextEncoder().encode(file.content).byteLength,
+  updatedAt,
+  mimeType: getDemoMimeType(file.path),
+  assetId: demoFileAssetId(nodeId, file.path),
+  displayName: null,
+});
+
+const getDemoEntryFile = (type: "skill" | "drive" | "airapp", paths: string[]) => {
+  const preferred =
+    type === "skill"
+      ? ["SKILL.md"]
+      : type === "drive"
+        ? ["README.md"]
+        : ["package.json", "server.ts", "server.js", "index.html"];
+  return preferred.find((path) => paths.includes(path)) ?? paths[0] ?? "";
+};
+
+export const demoGetFileTree = (
+  nodeIdOrSlug: string,
+  type?: "skill" | "drive" | "airapp",
+): FileTreeNodeVO => {
+  const def = getDemoFileTreeDef(nodeIdOrSlug, type);
+  const node = flattenNodes(dataset().nodes).find((item) => item.id === def.nodeId);
+  if (!node) throw notFound("File tree node", def.nodeId);
+  return {
+    node,
+    entryFile: getDemoEntryFile(
+      def.nodeType,
+      def.files.map((file) => file.path),
+    ),
+    visibility: "workspace",
+    version: "0.1.0",
+    files: def.files.map((file) => toDemoFileTreeFile(def.nodeId, node.updatedAt, file)),
+  };
+};
+
+export const demoListFileTrees = (type?: "skill" | "drive" | "airapp"): FileTreeNodeVO[] =>
+  dataset()
+    .fileTreeNodes.filter((def) => !type || def.nodeType === type)
+    .map((def) => demoGetFileTree(def.nodeId, def.nodeType));
+
+export const demoReadFileTreeFile = (
+  nodeIdOrSlug: string,
+  filePath: string,
+  type?: "skill" | "drive" | "airapp",
+): FileTreeReadFileVO => {
+  const def = getDemoFileTreeDef(nodeIdOrSlug, type);
+  const file = def.files.find((item) => item.path === filePath);
+  if (!file) throw notFound("File", filePath);
+  return {
+    nodeId: def.nodeId,
+    path: file.path,
+    encoding: "utf8",
+    content: file.content,
+    mimeType: getDemoMimeType(file.path),
+    assetId: demoFileAssetId(def.nodeId, file.path),
+    displayName: null,
+    assetUrl: null,
+    contentHash: demoContentHash(file.content),
+  };
 };
 
 // No agent tasks in the demo dataset; the review surface treats empty as "no

@@ -72,8 +72,7 @@ interface ActionDef {
  *
  * ORDER AND GATING MIRROR `buildNavItem` EXACTLY, item for item:
  *  1. **Open** — only when the node has a detail screen (web builds this from
- *     `nodeHref`, which is null for detail-less types; the mobile drawer
- *     additionally treats `file` as not viewable yet, and passes that in).
+ *     `nodeHref`, which is null for detail-less types).
  *  2. **Rename** — every type EXCEPT `base`. Bases rename through their own
  *     Design tab, so web never wires `onOpenRename` for them.
  *  3. **Permissions** — every type.

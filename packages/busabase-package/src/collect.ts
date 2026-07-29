@@ -1,5 +1,5 @@
 /**
- * `publish`'s read half: a space subtree → the in-memory package tree, entirely via
+ * `export`'s read half: a space subtree → the in-memory package tree, entirely via
  * the public read API. The inverse of `apply`.
  *
  * Rewrites the three id-bearing option keys back to slug references, drops everything
@@ -25,7 +25,7 @@ import {
   sortNodes,
 } from "./tree";
 
-/** The subset of `nodes.list`'s output publish walks. */
+/** The subset of `nodes.list`'s output export walks. */
 interface SourceNode {
   id: string;
   slug: string;
@@ -42,7 +42,7 @@ export interface CollectOptions {
   manifest: PackageManifest;
   warn: (message: string) => void;
   /**
-   * The server we're publishing from. Load-bearing for asset downloads: a local
+   * The server we're exporting from. Load-bearing for asset downloads: a local
    * (non-S3) server hands back a ROOT-RELATIVE download url (e.g.
    * `/api/dev/attachment/…`), meant to be fetched same-origin by a browser. The
    * CLI runs out-of-process, so it must resolve that against the host itself —
@@ -52,7 +52,7 @@ export interface CollectOptions {
   baseUrl: string;
 }
 
-/** Find the subtree to publish by node slug or id. */
+/** Find the subtree to export by node slug or id. */
 export const findSourceNode = (nodes: readonly SourceNode[], slugOrId: string): SourceNode => {
   const stack = [...nodes];
   while (stack.length > 0) {
@@ -100,7 +100,7 @@ const collectNode = async (
     slug: source.slug,
     name: source.name,
     description: source.description ?? "",
-    // `publish` always writes position, so round trips preserve sibling order exactly.
+    // `export` always writes position, so round trips preserve sibling order exactly.
     position: source.position,
   };
 
@@ -143,7 +143,7 @@ const collectBase = async (
   const base = await client.bases.get({ baseId });
   if (!base) {
     throw new Error(
-      `Base node "${source.slug}" has no Base behind it (looked up ${baseId}). The space may be mid-migration; re-run publish.`,
+      `Base node "${source.slug}" has no Base behind it (looked up ${baseId}). The space may be mid-migration; re-run export.`,
     );
   }
   const views = await client.bases.listViews({ baseId: base.id });
@@ -244,7 +244,7 @@ const toPackageField = (
     const targetSlug = context.baseSlugById.get(targetBaseId);
     if (!targetSlug) {
       throw new Error(
-        `Field "${context.baseSlug}.${field.slug}" relates to a Base that no longer exists (${targetBaseId}). Fix the field before publishing.`,
+        `Field "${context.baseSlug}.${field.slug}" relates to a Base that no longer exists (${targetBaseId}). Fix the field before exporting.`,
       );
     }
     options.targetBaseSlug = targetSlug;
@@ -352,7 +352,7 @@ const collectRecords = async (
         if (value === null || value === undefined) continue;
         values[slug] = value;
       }
-      // `publish` keys on the SOURCE record id: stable across re-publishes (clean git
+      // `export` keys on the SOURCE record id: stable across re-exports (clean git
       // diffs), unique package-wide, and meaningless to the target.
       records.push({ key: record.id, fields: values });
     }
@@ -436,7 +436,7 @@ const downloadBytes = async (
 /**
  * §12: a package must be self-contained. A relation whose target base isn't in the
  * package, or a relation value pointing at a record that isn't, would install as a
- * dangling reference — so publish fails naming the field and the external base rather
+ * dangling reference — so export fails naming the field and the external base rather
  * than emitting it.
  */
 const assertSelfContained = (tree: PackageTree, options: CollectOptions): void => {
@@ -455,7 +455,7 @@ const assertSelfContained = (tree: PackageTree, options: CollectOptions): void =
       if (field.type !== "relation" || !targetBaseSlug) continue;
       if (!packagedBaseSlugs.has(targetBaseSlug)) {
         throw new Error(
-          `Field "${node.slug}.${field.slug}" relates to Base "${targetBaseSlug}", which is outside the subtree being published. A package must be self-contained — publish a subtree that includes both Bases, or remove the field.`,
+          `Field "${node.slug}.${field.slug}" relates to Base "${targetBaseSlug}", which is outside the subtree being exported. A package must be self-contained — export a subtree that includes both Bases, or remove the field.`,
         );
       }
     }
@@ -472,7 +472,7 @@ const assertSelfContained = (tree: PackageTree, options: CollectOptions): void =
     }
     if (dangling > 0) {
       options.warn(
-        `Base "${node.slug}" has ${dangling} relation value(s) pointing at records outside the published subtree — they were dropped.`,
+        `Base "${node.slug}" has ${dangling} relation value(s) pointing at records outside the exported subtree — they were dropped.`,
       );
     }
   }

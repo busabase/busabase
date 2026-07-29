@@ -1,6 +1,6 @@
 import { skipToken, useMutation, useQuery } from "@tanstack/react-query";
 import { useLocalSearchParams } from "expo-router";
-import { CheckCircle2, ClipboardList, Globe, Lock, Send } from "lucide-react-native";
+import { CheckCircle2, Send } from "lucide-react-native";
 import { useMemo, useState } from "react";
 import { StyleSheet, Text, View } from "react-native";
 import { useBusabaseOrpc } from "~/api/use-busabase-orpc";
@@ -12,7 +12,6 @@ import {
   NativeErrorState,
   NativeInlineError,
   NativeLoadingState,
-  NativeRow,
   NativeSection,
 } from "~/components/native-screen";
 import { Button } from "~/components/ui/Button";
@@ -49,12 +48,6 @@ function FormNodeDetailContent() {
       ) ?? false,
     [form?.bindings, values],
   );
-  const visibility = form?.share.isPublic
-    ? form.share.anonymousSubmit
-      ? "Public · anonymous"
-      : "Public · sign-in required"
-    : "Private";
-
   const submit = () => {
     if (!buda || !form || missingRequired) return;
     submitMutation.mutate({ nodeId, values });
@@ -63,7 +56,6 @@ function FormNodeDetailContent() {
   return (
     <DrawerScaffold
       title={form?.name ?? "Form"}
-      subtitle={form?.description || "Approval-first form"}
       refreshing={formQuery.isRefetching}
       onRefresh={() => void formQuery.refetch()}
       footer={
@@ -89,7 +81,7 @@ function FormNodeDetailContent() {
         />
       ) : null}
       {!formQuery.isLoading && !formQuery.error && !form ? (
-        <NativeEmptyState title="Form not configured" description="This node has no active form." />
+        <NativeEmptyState title="Form not configured" />
       ) : null}
 
       {form && submitMutation.isSuccess ? (
@@ -97,67 +89,42 @@ function FormNodeDetailContent() {
           <CheckCircle2 size={36} color={tokens.merged.text} />
           <Text style={[typography.h2, { color: tokens.foreground }]}>Submitted for review</Text>
           <Text style={[typography.small, styles.center, { color: tokens.mutedForeground }]}>
-            Change request {submitMutation.data.changeRequestId} is waiting for approval.
+            Your response is waiting for approval.
           </Text>
         </View>
       ) : null}
 
       {form && !submitMutation.isSuccess ? (
-        <>
-          <NativeSection title="Form">
-            <NativeRow
-              title={form.name}
-              subtitle={`${form.bindings.length} fields`}
-              leading={<ClipboardList size={18} color={tokens.mutedForeground} />}
-            />
-            <NativeRow
-              title="Access"
-              subtitle={visibility}
-              leading={
-                form.share.isPublic ? (
-                  <Globe size={18} color={tokens.mutedForeground} />
-                ) : (
-                  <Lock size={18} color={tokens.mutedForeground} />
-                )
-              }
-            />
-            <NativeRow title="Submissions" subtitle={String(form.submissionCount)} last />
-          </NativeSection>
-
-          {form.bindings.length > 0 ? (
-            <NativeSection title="Fields" caption={`${form.bindings.length}`}>
-              <View style={styles.fields}>
-                {form.bindings.map((binding) => (
-                  <View key={binding.inputName} style={styles.fieldWrap}>
-                    <TextInput
-                      label={`${binding.label ?? binding.fieldSlug}${binding.required ? " *" : ""}`}
-                      value={values[binding.inputName] ?? ""}
-                      onChangeText={(value) =>
-                        setValues((current) => ({ ...current, [binding.inputName]: value }))
-                      }
-                    />
-                    {binding.help ? (
-                      <Text style={[typography.small, { color: tokens.mutedForeground }]}>
-                        {binding.help}
-                      </Text>
-                    ) : null}
-                  </View>
-                ))}
-                {submitMutation.error ? (
-                  <NativeInlineError
-                    message={submitMutation.error.message}
-                    onReset={() => submitMutation.reset()}
+        form.bindings.length > 0 ? (
+          <NativeSection title="Fields" caption={`${form.bindings.length}`}>
+            <View style={styles.fields}>
+              {form.bindings.map((binding) => (
+                <View key={binding.inputName} style={styles.fieldWrap}>
+                  <TextInput
+                    label={`${binding.label ?? binding.fieldSlug}${binding.required ? " *" : ""}`}
+                    value={values[binding.inputName] ?? ""}
+                    onChangeText={(value) =>
+                      setValues((current) => ({ ...current, [binding.inputName]: value }))
+                    }
                   />
-                ) : null}
-              </View>
-            </NativeSection>
-          ) : (
-            <NativeEmptyState
-              title="No fields"
-              description="This form does not have any field bindings yet."
-            />
-          )}
-        </>
+                  {binding.help ? (
+                    <Text style={[typography.small, { color: tokens.mutedForeground }]}>
+                      {binding.help}
+                    </Text>
+                  ) : null}
+                </View>
+              ))}
+              {submitMutation.error ? (
+                <NativeInlineError
+                  message={submitMutation.error.message}
+                  onReset={() => submitMutation.reset()}
+                />
+              ) : null}
+            </View>
+          </NativeSection>
+        ) : (
+          <NativeEmptyState title="No fields" />
+        )
       ) : null}
     </DrawerScaffold>
   );

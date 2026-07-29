@@ -55,8 +55,9 @@ describe("self-hosted MCP catalog", () => {
         "records_get",
         "change_requests_get",
         "docs_read_lines",
-        "assets_grep",
       ]),
     );
+    expect(publishedToolNames()).not.toContain("assets_grep");
+    expect(publishedToolNames()).not.toContain("records_get_by_field");
   });
 });

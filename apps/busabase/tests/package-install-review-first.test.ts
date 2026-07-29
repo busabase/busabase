@@ -172,7 +172,7 @@ describe("busabase-cli install without --auto-merge (real server)", () => {
       await client.changeRequests.merge({ changeRequestId: cr.id });
     }
 
-    await cli("publish", "kb", "-o", outDir);
+    await cli("export", "kb", "-o", outDir);
     zipball = await zipDirectory(outDir, "review-first-package-main");
 
     // ── Target: a fresh, empty database; install WITHOUT --auto-merge ────────

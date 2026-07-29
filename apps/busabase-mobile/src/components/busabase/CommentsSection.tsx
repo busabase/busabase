@@ -90,13 +90,11 @@ export function CommentsSection({ subjectType, subjectId }: CommentsSectionProps
         {commentsQuery.isLoading ? (
           <NativeRow
             title="Loading comments"
-            subtitle="Fetching discussion"
             leading={<MessageCircle size={18} color={tokens.mutedForeground} />}
           />
         ) : comments.length === 0 ? (
           <NativeRow
-            title="No comments yet"
-            subtitle="Add a note for reviewers or mention @ai."
+            title="No comments"
             leading={<MessageCircle size={18} color={tokens.mutedForeground} />}
           />
         ) : (
@@ -112,7 +110,6 @@ export function CommentsSection({ subjectType, subjectId }: CommentsSectionProps
         )}
         <NativeRow
           title="Add comment"
-          subtitle="Mention @ai to ask the agent for help."
           leading={<MessageCircle size={18} color={tokens.mutedForeground} />}
           onPress={() => {
             postMutation.reset();
@@ -125,7 +122,6 @@ export function CommentsSection({ subjectType, subjectId }: CommentsSectionProps
       <NativeBottomSheet
         visible={composerOpen && !discardOpen}
         title="Add comment"
-        description="Leave a note for reviewers, or mention @ai to involve the agent."
         showCloseButton
         onClose={closeComposer}
         footer={

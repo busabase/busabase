@@ -105,7 +105,7 @@ rather than guessing.
 | Structure: folders, Bases, Docs, Skills | \`nodes_list\` |
 | Tables in this workspace | \`bases_list\`, \`bases_get\` |
 | Records in one Base | \`record_query\` (pass \`baseId\`; \`limit\` <= 100, page with the cursor; \`countOnly\` for just a total) |
-| Find anything by pattern | \`grep\` (files + Docs + records, one call), \`assets_grep\` (files only, fuller coverage report) |
+| Find anything by pattern | \`grep\` (all sources, or pass \`sources: ["files"]\` for files-only with full files coverage) |
 | Find anything by relevance | \`search\` |
 | Look up records by an exact field value | \`record_find_by_field\` (one named field, not a search) |
 | Read exact lines instead of whole documents | \`docs_read_lines\`, \`assets_read_text_lines\` |

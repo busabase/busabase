@@ -1,92 +1,14 @@
 import type { BaseVO } from "busabase-contract/types";
-import { forceCenter, forceCollide, forceLink, forceManyBody, forceSimulation } from "d3-force";
-import { iStringParse } from "openlib/i18n/i-string";
 import { useMemo } from "react";
-import { StyleSheet, Text, View } from "react-native";
+import { Pressable, StyleSheet, Text, View } from "react-native";
 import Svg, { Circle, Defs, G, Line, Marker, Path, Text as SvgText } from "react-native-svg";
+import { buildBaseGraphLayout } from "~/lib/base-graph-layout";
 import { typography } from "~/theme/tokens";
 import { useTokens } from "~/theme/use-tokens";
 
 const NODE_R = 18;
 const ARROW_SIZE = 6;
-
-interface SimNode {
-  id: string;
-  name: string;
-  slug: string;
-  x?: number;
-  y?: number;
-}
-
-interface ResolvedLink {
-  source: SimNode;
-  target: SimNode;
-  fieldName: string;
-}
-
-function buildLayout(
-  bases: BaseVO[],
-  width: number,
-  height: number,
-): { nodes: SimNode[]; links: ResolvedLink[]; edgeCount: number } {
-  if (bases.length === 0) return { nodes: [], links: [], edgeCount: 0 };
-
-  const cx = width / 2;
-  const cy = height / 2;
-
-  const nodes: SimNode[] = bases.map((b, i) => ({
-    id: b.id,
-    name: b.name,
-    slug: b.slug,
-    // Spread initial positions around center to avoid degenerate start
-    x: cx + Math.cos((2 * Math.PI * i) / bases.length) * 80,
-    y: cy + Math.sin((2 * Math.PI * i) / bases.length) * 80,
-  }));
-
-  const baseIds = new Set(bases.map((b) => b.id));
-  // d3-force mutates these link objects: source/target become node refs after tick
-  const rawLinks: Array<{ source: string | SimNode; target: string | SimNode; fieldName: string }> =
-    [];
-  for (const base of bases) {
-    for (const field of base.fields) {
-      if (
-        field.type === "relation" &&
-        field.options.targetBaseId &&
-        baseIds.has(field.options.targetBaseId)
-      ) {
-        rawLinks.push({
-          source: base.id,
-          target: field.options.targetBaseId,
-          fieldName: iStringParse(field.name),
-        });
-      }
-    }
-  }
-
-  const sim = forceSimulation(nodes)
-    .force(
-      "link",
-      forceLink<SimNode, (typeof rawLinks)[0]>(rawLinks)
-        .id((d) => d.id)
-        .distance(120),
-    )
-    .force("charge", forceManyBody().strength(-320))
-    .force("center", forceCenter(cx, cy))
-    .force("collide", forceCollide(NODE_R + 18))
-    .stop();
-  sim.tick(350);
-
-  // Clamp positions to canvas bounds
-  const pad = NODE_R + 30;
-  for (const node of nodes) {
-    node.x = Math.max(pad, Math.min(width - pad, node.x ?? cx));
-    node.y = Math.max(pad, Math.min(height - pad, node.y ?? cy));
-  }
-
-  // After tick, rawLinks[i].source / .target are SimNode objects (d3 resolved them)
-  const links = (rawLinks as unknown as ResolvedLink[]).filter((l) => l.source && l.target);
-  return { nodes, links, edgeCount: links.length };
-}
+const NODE_HIT_SIZE = 48;
 
 interface BaseGraphProps {
   bases: BaseVO[];
@@ -98,7 +20,7 @@ interface BaseGraphProps {
 export function BaseGraph({ bases, width, height, onNodePress }: BaseGraphProps) {
   const tokens = useTokens();
   const { nodes, links, edgeCount } = useMemo(
-    () => buildLayout(bases, width, height),
+    () => buildBaseGraphLayout(bases, width, height),
     [bases, width, height],
   );
 
@@ -145,10 +67,10 @@ export function BaseGraph({ bases, width, height, onNodePress }: BaseGraphProps)
 
           {/* Edges */}
           {links.map((link) => {
-            const sx = link.source.x ?? 0;
-            const sy = link.source.y ?? 0;
-            const tx = link.target.x ?? 0;
-            const ty = link.target.y ?? 0;
+            const sx = link.source.x;
+            const sy = link.source.y;
+            const tx = link.target.x;
+            const ty = link.target.y;
             return (
               <Line
                 key={`${link.source.id}-${link.target.id}-${link.fieldName}`}
@@ -169,36 +91,18 @@ export function BaseGraph({ bases, width, height, onNodePress }: BaseGraphProps)
             const isConnected = links.some(
               (l) => l.source.id === node.id || l.target.id === node.id,
             );
-            const cx = node.x ?? 0;
-            const cy = node.y ?? 0;
+            const cx = node.x;
+            const cy = node.y;
             const label = node.name.length > 13 ? `${node.name.slice(0, 12)}…` : node.name;
-            const press = () => onNodePress(node.slug);
             return (
-              // onPress lives on each leaf primitive, NOT on this <G> (a plain
-              // grouping wrapper here). On web, react-native-svg's renderer breaks
-              // the SVG namespace for a G's children once the G itself carries
-              // onPress/accessibility props — every Circle/Text under it silently
-              // gets a zero-size bounding box (invisible, untappable) even though
-              // its cx/cy/attributes all look correct in the DOM. Verified via
-              // getBoundingClientRect() A/B testing (git stash) during this fix.
               <G key={node.id}>
-                {/* Outer glow ring — also the largest tap target */}
-                <Circle
-                  cx={cx}
-                  cy={cy}
-                  r={NODE_R + 5}
-                  fill={nodeColor}
-                  fillOpacity={0.1}
-                  onPress={press}
-                />
+                <Circle cx={cx} cy={cy} r={NODE_R + 5} fill={nodeColor} fillOpacity={0.1} />
                 <Circle
                   cx={cx}
                   cy={cy}
                   r={NODE_R}
                   fill={isConnected ? nodeColor : nodeColorIsolated}
                   fillOpacity={0.9}
-                  onPress={press}
-                  accessibilityLabel={`Open ${node.name}`}
                 />
                 <SvgText
                   x={cx}
@@ -207,7 +111,6 @@ export function BaseGraph({ bases, width, height, onNodePress }: BaseGraphProps)
                   fontSize={11}
                   fontWeight="500"
                   fill={labelColor}
-                  onPress={press}
                 >
                   {label}
                 </SvgText>
@@ -217,14 +120,22 @@ export function BaseGraph({ bases, width, height, onNodePress }: BaseGraphProps)
         </Svg>
       )}
 
-      {/* Hint */}
-      {bases.length > 0 ? (
-        <View style={styles.hint}>
-          <Text style={[typography.caption, { color: tokens.mutedForeground }]}>
-            Tap a node to open
-          </Text>
-        </View>
-      ) : null}
+      {nodes.map((node) => (
+        <Pressable
+          key={node.id}
+          accessibilityLabel={`Open ${node.name}`}
+          accessibilityRole="button"
+          hitSlop={4}
+          style={[
+            styles.nodeHit,
+            {
+              left: node.x - NODE_HIT_SIZE / 2,
+              top: node.y - NODE_HIT_SIZE / 2,
+            },
+          ]}
+          onPress={() => onNodePress(node.slug)}
+        />
+      ))}
     </View>
   );
 }
@@ -247,11 +158,12 @@ const styles = StyleSheet.create({
     height: 8,
     borderRadius: 4,
   },
-  hint: {
+  nodeHit: {
     position: "absolute",
-    bottom: 14,
-    right: 16,
-    zIndex: 10,
+    width: NODE_HIT_SIZE,
+    height: NODE_HIT_SIZE,
+    borderRadius: NODE_HIT_SIZE / 2,
+    zIndex: 2,
   },
   empty: {
     flex: 1,

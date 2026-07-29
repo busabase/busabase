@@ -17,7 +17,7 @@ import {
 import { Button } from "~/components/ui/Button";
 import { TextInput } from "~/components/ui/TextInput";
 import { useI18n } from "~/i18n";
-import { mobile, radius } from "~/theme/tokens";
+import { mobile, radius, spacing } from "~/theme/tokens";
 import { useTokens } from "~/theme/use-tokens";
 
 const SUBMITTED_BY = "mobile-editor";
@@ -147,14 +147,24 @@ function DocEditContent() {
 
   if (docQuery.isLoading) {
     return (
-      <NativeScreen title={title} subtitle={t.common.edit} headerLeading={headerLeading}>
+      <NativeScreen
+        title={title}
+        titleNumberOfLines={2}
+        subtitle={t.common.edit}
+        headerLeading={headerLeading}
+      >
         <NativeLoadingState label={t.common.loading} />
       </NativeScreen>
     );
   }
   if (docQuery.error) {
     return (
-      <NativeScreen title={title} subtitle={t.common.edit} headerLeading={headerLeading}>
+      <NativeScreen
+        title={title}
+        titleNumberOfLines={2}
+        subtitle={t.common.edit}
+        headerLeading={headerLeading}
+      >
         <NativeErrorState
           message={docQuery.error.message}
           onRetry={() => void docQuery.refetch()}
@@ -166,8 +176,10 @@ function DocEditContent() {
   return (
     <NativeScreen
       title={title}
+      titleNumberOfLines={2}
       subtitle={t.common.edit}
       headerLeading={headerLeading}
+      contentContainerStyle={styles.screenContent}
       footer={
         <NativeActionBar>
           {actionError ? (
@@ -190,12 +202,17 @@ function DocEditContent() {
         </NativeActionBar>
       }
     >
-      <NativeSection title="Body" caption={unchanged ? "Saved" : changeSummary}>
+      <NativeSection
+        title="Body"
+        caption={unchanged ? "Saved" : changeSummary}
+        style={styles.editorSection}
+      >
         <View style={styles.editorWrap}>
           <TextInput
             value={body}
             multiline
             textAlignVertical="top"
+            containerStyle={styles.editorField}
             style={styles.editor}
             onChangeText={setBody}
           />
@@ -293,9 +310,13 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  editorWrap: { paddingHorizontal: 14, paddingVertical: 12 },
+  screenContent: { flexGrow: 1, paddingBottom: spacing[3] },
+  editorSection: { flex: 1 },
+  editorWrap: { flex: 1, paddingHorizontal: 14, paddingVertical: 12 },
+  editorField: { flex: 1 },
   sheetBody: { paddingTop: 4 },
   editor: {
+    flex: 1,
     minHeight: 280,
     paddingTop: 12,
     fontFamily: Platform.select({ ios: "Menlo", android: "monospace", default: "monospace" }),

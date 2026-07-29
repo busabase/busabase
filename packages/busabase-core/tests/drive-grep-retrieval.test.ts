@@ -9,6 +9,7 @@ import { getDb } from "../src/db";
 import { attachments, busabaseAssets, busabaseAssetUsages, busabaseNodes } from "../src/db/schema";
 import { busabaseAssetTexts } from "../src/domains/assets/schema/asset-texts";
 import { busabaseRouter } from "../src/router";
+import { grepFiles } from "./helpers/grep-files";
 
 /**
  * Drive Grep Retrieval integration coverage — driven through the real oRPC
@@ -138,7 +139,7 @@ describe("Drive Grep Retrieval — putText / grep / readLines", () => {
       const row = expectDefined(await getTextRow(assetId));
       expect(row.status).toBe("none");
 
-      const grep = await client.assets.grep({
+      const grep = await grepFiles(client, {
         pattern: "anything",
         scope: { assetIds: [assetId] },
       });
@@ -335,7 +336,7 @@ describe("Drive Grep Retrieval — putText / grep / readLines", () => {
 
       expect(await getTextRow(assetId)).toBeUndefined();
 
-      const grep = await client.assets.grep({
+      const grep = await grepFiles(client, {
         pattern: "SelfHealMarkerXYZ",
         scope: { assetIds: [assetId] },
       });
@@ -365,7 +366,7 @@ describe("Drive Grep Retrieval — putText / grep / readLines", () => {
       ];
       await client.assets.putText({ assetId, text: lines.join("\n") });
 
-      const result = await client.assets.grep({
+      const result = await grepFiles(client, {
         pattern: "ERROR",
         scope: { assetIds: [assetId] },
         contextLines: 2,
@@ -387,14 +388,14 @@ describe("Drive Grep Retrieval — putText / grep / readLines", () => {
       });
       await client.assets.putText({ assetId, text: "Order-2024 shipped\norder-2025 pending" });
 
-      const caseSensitive = await client.assets.grep({
+      const caseSensitive = await grepFiles(client, {
         pattern: "^order-\\d+",
         scope: { assetIds: [assetId] },
       });
       expect(caseSensitive.matches).toHaveLength(1);
       expect(caseSensitive.matches[0]?.line).toBe(2);
 
-      const caseInsensitive = await client.assets.grep({
+      const caseInsensitive = await grepFiles(client, {
         pattern: "^order-\\d+",
         flags: "i",
         scope: { assetIds: [assetId] },
@@ -411,7 +412,7 @@ describe("Drive Grep Retrieval — putText / grep / readLines", () => {
       // "你好" (2 chars) then the match starts at char index 2 (0-based) → column 3.
       await client.assets.putText({ assetId, text: "你好世界，ACME公司在此" });
 
-      const result = await client.assets.grep({ pattern: "ACME", scope: { assetIds: [assetId] } });
+      const result = await grepFiles(client, { pattern: "ACME", scope: { assetIds: [assetId] } });
       expect(result.matches).toHaveLength(1);
       const match = expectDefined(result.matches[0]);
       expect(match.line).toBe(1);
@@ -427,7 +428,7 @@ describe("Drive Grep Retrieval — putText / grep / readLines", () => {
       const text = Array.from({ length: 20 }, (_, i) => `hit number ${i}`).join("\n");
       await client.assets.putText({ assetId, text });
 
-      const result = await client.assets.grep({
+      const result = await grepFiles(client, {
         pattern: "hit",
         scope: { assetIds: [assetId] },
         maxMatches: 5,
@@ -445,7 +446,7 @@ describe("Drive Grep Retrieval — putText / grep / readLines", () => {
       const longLine = `${"x".repeat(1000)}NEEDLE${"y".repeat(70_000)}`;
       await client.assets.putText({ assetId, text: longLine });
 
-      const result = await client.assets.grep({
+      const result = await grepFiles(client, {
         pattern: "NEEDLE",
         scope: { assetIds: [assetId] },
       });
@@ -474,7 +475,7 @@ describe("Drive Grep Retrieval — putText / grep / readLines", () => {
         .set({ textStorageKey: "asset-texts/blobs/sha256/zz/does-not-exist.txt" })
         .where(eq(busabaseAssetTexts.assetId, assetId));
 
-      const result = await client.assets.grep({
+      const result = await grepFiles(client, {
         pattern: "needle",
         scope: { assetIds: [assetId] },
       });
@@ -523,7 +524,7 @@ describe("Drive Grep Retrieval — putText / grep / readLines", () => {
         metadata: {},
       });
 
-      const result = await client.assets.grep({
+      const result = await grepFiles(client, {
         pattern: "Umbrella",
         scope: { assetIds: [assetId] },
       });
@@ -537,7 +538,7 @@ describe("Drive Grep Retrieval — putText / grep / readLines", () => {
         mimeType: "application/pdf",
         hashByte: "5",
       });
-      const result = await client.assets.grep({
+      const result = await grepFiles(client, {
         pattern: "anything",
         scope: { assetIds: [assetId] },
       });
@@ -562,7 +563,7 @@ describe("Drive Grep Retrieval — putText / grep / readLines", () => {
       const previous = process.env.BUSABASE_GREP_TIMEOUT_MS;
       process.env.BUSABASE_GREP_TIMEOUT_MS = "0";
       try {
-        const result = await client.assets.grep({
+        const result = await grepFiles(client, {
           pattern: "needle",
           scope: { assetIds: [a1, a2] },
         });
@@ -658,7 +659,7 @@ describe("Drive Grep Retrieval — putText / grep / readLines", () => {
       );
       await client.assets.putText({ assetId, text: lines.join("\n") });
 
-      const grep = await client.assets.grep({
+      const grep = await grepFiles(client, {
         pattern: "NEEDLE-HERE",
         scope: { assetIds: [assetId] },
       });
@@ -740,7 +741,7 @@ describe("Drive Grep Retrieval — putText / grep / readLines", () => {
       const afterRepoint = expectDefined(await getTextRow(pdfAssetId));
       expect(afterRepoint.status).toBe("stale");
 
-      const grep = await client.assets.grep({
+      const grep = await grepFiles(client, {
         pattern: "ACME",
         scope: { assetIds: [pdfAssetId] },
       });
@@ -751,7 +752,7 @@ describe("Drive Grep Retrieval — putText / grep / readLines", () => {
       await client.assets.putText({ assetId: pdfAssetId, text: "ACME Corp contract version two" });
       const rewritten = expectDefined(await getTextRow(pdfAssetId));
       expect(rewritten.status).toBe("present");
-      const grepAfterRewrite = await client.assets.grep({
+      const grepAfterRewrite = await grepFiles(client, {
         pattern: "version two",
         scope: { assetIds: [pdfAssetId] },
       });
@@ -769,7 +770,7 @@ describe("Drive Grep Retrieval — putText / grep / readLines", () => {
       if (!("node" in drive)) throw new Error("expected an immediate node (autoMerge: true)");
       const mountedAssetId = expectDefined(drive.files.find((f) => f.path === "notes.md")).assetId;
 
-      const beforeGrep = await client.assets.grep({
+      const beforeGrep = await grepFiles(client, {
         pattern: "FOOMARKER",
         scope: { assetIds: [mountedAssetId] },
       });
@@ -791,13 +792,13 @@ describe("Drive Grep Retrieval — putText / grep / readLines", () => {
       expect(row.status).toBe("present"); // never stale for a pure text-kind row
       expect(row.writtenBy).toBe("auto");
 
-      const oldGrep = await client.assets.grep({
+      const oldGrep = await grepFiles(client, {
         pattern: "FOOMARKER",
         scope: { assetIds: [mountedAssetId] },
       });
       expect(oldGrep.matches).toHaveLength(0);
 
-      const newGrep = await client.assets.grep({
+      const newGrep = await grepFiles(client, {
         pattern: "BARMARKER",
         scope: { assetIds: [mountedAssetId] },
       });
@@ -825,7 +826,7 @@ describe("Drive Grep Retrieval — putText / grep / readLines", () => {
       // A content-created text file gets its `busabase_asset_texts` row via
       // lazy self-heal (same as the "auto-re-registers" test above) — trigger
       // it with a grep before asserting on the row.
-      const selfHealGrep = await client.assets.grep({
+      const selfHealGrep = await grepFiles(client, {
         pattern: "FOOMARKER",
         scope: { assetIds: [mountedAssetId] },
       });
@@ -865,7 +866,7 @@ describe("Drive Grep Retrieval — putText / grep / readLines", () => {
       // Reverted to "missing" (no row) — NOT stuck as `stale` forever.
       expect(await getTextRow(mountedAssetId)).toBeUndefined();
 
-      const grep = await client.assets.grep({
+      const grep = await grepFiles(client, {
         pattern: "anything",
         scope: { assetIds: [mountedAssetId] },
       });

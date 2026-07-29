@@ -53,6 +53,9 @@ describe("busabase-cli commands", () => {
     // `records list` is now `records query`, rendered from the shared task layer
     // and always hitting the paginated endpoint.
     expect(HELP).toContain("records query");
+    expect(HELP).toContain(
+      "records get-by-field --base-id <id> --field-slug <slug> --value-text <value>",
+    );
     expect(HELP).toContain("assets upload --file <path>");
     expect(HELP).not.toContain("attachments upload");
     expect(HELP).toContain("rejected = request changes, not terminal");
@@ -123,6 +126,45 @@ describe("busabase-cli commands", () => {
 
     expect(exitCode).toBe(0);
     expect(calls).toEqual([{ method: "GET", url: "http://localhost:15419/api/v1/assets" }]);
+  });
+
+  it("keeps records get-by-field on the canonical get route with nullable output", async () => {
+    const calls: Request[] = [];
+    global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      calls.push(request);
+      return new Response(JSON.stringify({ error: "Record not found", code: "NOT_FOUND" }), {
+        status: 404,
+        headers: { "content-type": "application/json" },
+      });
+    }) as typeof fetch;
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+
+    const exitCode = await runCli([
+      "--base-url",
+      "http://localhost:15419",
+      "--output",
+      "json",
+      "records",
+      "get-by-field",
+      "--base-id",
+      "bse_1",
+      "--field-slug",
+      "slug",
+      "--value-text",
+      "missing value",
+    ]);
+
+    expect(exitCode).toBe(0);
+    expect(log).toHaveBeenCalledWith("null");
+    expect(calls).toHaveLength(1);
+    const url = new URL(calls[0]?.url ?? "");
+    expect(url.pathname).toBe("/api/v1/records/get");
+    expect(Object.fromEntries(url.searchParams)).toEqual({
+      baseId: "bse_1",
+      fieldSlug: "slug",
+      valueText: "missing value",
+    });
   });
 
   it("uses a rotated OAuth access token for the command that triggered auto-refresh", async () => {
@@ -1553,12 +1595,18 @@ describe("busabase-cli commands", () => {
         });
         return jsonResponse({
           matches: [],
-          filesScanned: 0,
-          missing: [],
-          stale: [],
-          unsearchable: 0,
-          errored: [],
-          notReached: 0,
+          coverage: {
+            files: {
+              scanned: 0,
+              missing: [],
+              stale: [],
+              unsearchable: 0,
+              errored: [],
+              notReached: 0,
+            },
+            docs: { scanned: 0, errored: [], notReached: 0 },
+            records: { scanned: 0, errored: [], notReached: 0 },
+          },
           truncated: false,
         });
       }) as typeof fetch;
@@ -1578,8 +1626,8 @@ describe("busabase-cli commands", () => {
       expect(calls).toEqual([
         expect.objectContaining({
           method: "POST",
-          url: "http://localhost:15419/api/v1/assets/grep",
-          body: { pattern: "foo" },
+          url: "http://localhost:15419/api/v1/grep",
+          body: { pattern: "foo", sources: ["files"] },
         }),
       ]);
     });
@@ -1595,12 +1643,18 @@ describe("busabase-cli commands", () => {
         });
         return jsonResponse({
           matches: [],
-          filesScanned: 0,
-          missing: [],
-          stale: [],
-          unsearchable: 0,
-          errored: [],
-          notReached: 0,
+          coverage: {
+            files: {
+              scanned: 0,
+              missing: [],
+              stale: [],
+              unsearchable: 0,
+              errored: [],
+              notReached: 0,
+            },
+            docs: { scanned: 0, errored: [], notReached: 0 },
+            records: { scanned: 0, errored: [], notReached: 0 },
+          },
           truncated: false,
         });
       }) as typeof fetch;
@@ -1634,14 +1688,17 @@ describe("busabase-cli commands", () => {
       expect(calls).toEqual([
         expect.objectContaining({
           method: "POST",
-          url: "http://localhost:15419/api/v1/assets/grep",
+          url: "http://localhost:15419/api/v1/grep",
           body: {
             pattern: "foo",
             flags: "i",
+            sources: ["files"],
             scope: {
-              assetIds: ["a1", "a2"],
-              drivePath: "/docs",
-              mimeTypes: ["application/pdf", "text/plain"],
+              files: {
+                assetIds: ["a1", "a2"],
+                drivePath: "/docs",
+                mimeTypes: ["application/pdf", "text/plain"],
+              },
             },
             maxMatches: 50,
             contextLines: 3,

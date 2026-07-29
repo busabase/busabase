@@ -18,7 +18,7 @@ import { runWithBusabaseContext } from "../src/context";
 import { busabaseRouter } from "../src/router";
 
 /**
- * A `lookup` field has to survive publish → install intact. Three distinct ways
+ * A `lookup` field has to survive export → install intact. Three distinct ways
  * it could silently not:
  *
  *  1. `PackageFieldOptionsSchema` is a plain zod object, so an unlisted key is
@@ -28,7 +28,7 @@ import { busabaseRouter } from "../src/router";
  *     are deferred to install pass 2. A lookup created in pass 1 fails server
  *     validation because its hop doesn't exist yet.
  *  3. Lookup VALUES are read-time-derived and ride along in `headCommit.fields`,
- *     so an exporter that doesn't know they're computed publishes derived data
+ *     so an exporter that doesn't know they're computed exports derived data
  *     as if a human had authored it.
  *
  * Harness convention copied from install-router-client-seam.test.ts.
@@ -112,7 +112,7 @@ const lookupTree = (packageName: string): PackageTree => ({
   ],
 });
 
-describe("lookup fields survive the package publish/install round trip", () => {
+describe("lookup fields survive the package export/install round trip", () => {
   let dataDir = "";
   let storageDir = "";
   let originalCwd = "";

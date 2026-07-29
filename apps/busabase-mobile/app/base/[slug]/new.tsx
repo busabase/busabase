@@ -19,6 +19,7 @@ import {
 import { Button } from "~/components/ui/Button";
 import {
   buildInitialFormValues,
+  isEditableField,
   normalizeFormValues,
   type RecordFormValue,
   recordFormValuesEqual,
@@ -71,6 +72,7 @@ function NewRecordContent() {
   });
 
   const hasChanges = base ? !recordFormValuesEqual(base.fields, initialValues, values) : false;
+  const editableFieldCount = base?.fields.filter(isEditableField).length ?? 0;
   const closeForm = () => {
     if (submitMutation.isPending) {
       return;
@@ -127,8 +129,8 @@ function NewRecordContent() {
 
   return (
     <NativeScreen
-      title={`New ${base.name}`}
-      subtitle="Creates a change request for review"
+      title="New record"
+      subtitle={base.name}
       headerLeading={headerLeading}
       footer={
         <NativeActionBar>
@@ -148,7 +150,7 @@ function NewRecordContent() {
         </NativeActionBar>
       }
     >
-      <NativeSection title="Fields" caption={`${base.fields.length}`}>
+      <NativeSection title="Fields" caption={`${editableFieldCount}`}>
         <RecordForm
           fields={base.fields}
           values={values}

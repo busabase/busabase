@@ -149,6 +149,23 @@
   pre {
     @apply overflow-x-auto rounded-lg border bg-muted p-4;
   }
+
+  /* Fumadocs already frames and scrolls fenced code through figure.shiki.
+     Reset the generic prose styles on its inner nodes to avoid a second box. */
+  figure.shiki > [role="region"] > pre {
+    overflow: visible;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    padding: 0;
+  }
+
+  figure.shiki > [role="region"] > pre > code {
+    border-radius: 0;
+    background: transparent;
+    padding: 0;
+    font-size: inherit;
+  }
 }
 
 /* ==========================================

@@ -3,15 +3,7 @@ import type { AuthInfo } from "busabase-contract/contract/schemas";
 import { usePathname, useRouter } from "expo-router";
 import { Check, ChevronsUpDown, Database, RefreshCw, Settings, X } from "lucide-react-native";
 import { useState } from "react";
-import {
-  Platform,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  useWindowDimensions,
-  View,
-} from "react-native";
+import { Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from "react-native";
 import { useConnection } from "~/connection/connection-store";
 import type { BusabaseSpace } from "~/connection/types";
 import { useI18n } from "~/i18n";
@@ -37,7 +29,7 @@ interface SpaceSelectorProps {
 
 /**
  * The Space Selector menu, mirroring the web dashboard's: it holds BOTH the
- * top-level destinations (Inbox · Activity · Archived · Assets · Records ·
+ * top-level destinations (Inbox · Activity · Trash · Assets · Records ·
  * Bases · Graph View) and — on Busabase Cloud — the workspace switcher.
  *
  * The trigger and menu render in EVERY connection mode. Only the
@@ -300,7 +292,6 @@ export function SpaceSelector({
                 backgroundColor: tokens.surface,
                 borderColor: tokens.border,
                 maxHeight: Math.min(Math.max(height - 128, 360), 620),
-                shadowColor: tokens.shadow,
               },
             ]}
           >
@@ -444,15 +435,6 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
     borderRadius: radius.lg,
     overflow: "hidden",
-    ...Platform.select({
-      web: { boxShadow: "0 14px 36px rgba(0, 0, 0, 0.16)" },
-      default: {
-        shadowOpacity: 0.16,
-        shadowRadius: 18,
-        shadowOffset: { width: 0, height: 10 },
-        elevation: 18,
-      },
-    }),
   },
   popoverHeader: {
     padding: 12,

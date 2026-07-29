@@ -258,7 +258,7 @@ describe("Doc & Folder domains — oRPC integration", () => {
 
 // `readLines` is a pure read backed entirely by the seed dataset's in-memory
 // `DemoDocVO.body` (same as `docs.get` already relies on in demo mode) — no
-// real storage needed, unlike `assets.readTextLines`/`assets.grep`, which stay
+// real storage needed, unlike `assets.readTextLines`/top-level `grep`, which stay
 // `demoUnsupported` for lack of per-asset object storage in the stateless demo
 // dataset (see `router-demo.ts`). No existing test file exercises
 // `busabaseDemoRouter` yet, so this is a self-contained, DB/storage-free

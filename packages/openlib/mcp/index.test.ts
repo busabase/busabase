@@ -405,6 +405,18 @@ describe("registerOpenApiMcpTools", () => {
     expect(upsertSchema?.type).toBe("object");
     expect(upsertSchema?.anyOf).toHaveLength(2);
     expect(upsertSchema?.properties).toEqual({ tenantId: { type: "string" } });
+    expect(upsertSchema?.anyOf).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          properties: expect.objectContaining({ tenantId: { type: "string" } }),
+        }),
+      ]),
+    );
+    expect(
+      (upsertSchema?.anyOf as Array<{ properties?: Record<string, unknown> }> | undefined)?.every(
+        (branch) => branch.properties?.tenantId !== undefined,
+      ),
+    ).toBe(true);
 
     const validResult = await callTool("things_upsert", {
       kind: "http",

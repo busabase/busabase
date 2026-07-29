@@ -92,3 +92,34 @@ export function recordFormValuesEqual(
     JSON.stringify(normalizeFormValues(fields, right))
   );
 }
+
+const stableStringify = (value: unknown): string => {
+  if (value === null || value === undefined) {
+    return "null";
+  }
+  if (typeof value !== "object") {
+    return JSON.stringify(value);
+  }
+  if (Array.isArray(value)) {
+    return `[${value.map(stableStringify).join(",")}]`;
+  }
+  const record = value as Record<string, unknown>;
+  return `{${Object.keys(record)
+    .sort()
+    .map((key) => `${JSON.stringify(key)}:${stableStringify(record[key])}`)
+    .join(",")}}`;
+};
+
+export function getChangedFieldValues(
+  baseFields: Record<string, unknown> | null,
+  proposedFields: Record<string, unknown>,
+): Record<string, unknown> {
+  return Object.fromEntries(
+    Object.entries(proposedFields).filter(([slug, value]) => {
+      if (value === undefined) {
+        return false;
+      }
+      return baseFields === null || stableStringify(baseFields[slug]) !== stableStringify(value);
+    }),
+  );
+}

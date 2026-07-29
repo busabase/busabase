@@ -1,12 +1,15 @@
 import "server-only";
 
+import { ORPCError } from "@orpc/server";
 import {
   countRecordsInputSchema,
   listRecordsInputSchema,
+  listRecordsPageInputSchema,
 } from "busabase-contract/domains/base/contract/record-schemas";
 import {
   and,
   asc,
+  count,
   desc,
   eq,
   exists,
@@ -41,7 +44,14 @@ import {
   recordFieldFilterInputSchema,
   recordFieldGetInputSchema,
 } from "../../../logic/store";
-import { toBaseVO, toFieldVO, toRecordLinkVO, toViewVO } from "../../../logic/vo";
+import {
+  normalizeViewConfig,
+  toBaseVO,
+  toFieldVO,
+  toRecordLinkVO,
+  toViewVO,
+} from "../../../logic/vo";
+import { applyViewConfigToRecords } from "../utils/view-records";
 
 export { listInputSchema, recordFieldFilterInputSchema, recordFieldGetInputSchema };
 
@@ -396,6 +406,106 @@ export const listRecordsPaged = async (input?: z.input<typeof listRecordsInputSc
 
   const records = await hydrateRecords(pageRows);
   return { records, nextCursor };
+};
+
+/**
+ * Random-access pagination for Table/Gallery views. Saved-view filtering and
+ * sorting is deliberately authoritative here: the complete visible candidate
+ * set is hydrated first, then filtered/sorted, and only then sliced. This keeps
+ * totals and every page correct for complex fields that cannot be expressed by
+ * the field-value SQL projection yet.
+ */
+export const listRecordsPage = async (input: z.input<typeof listRecordsPageInputSchema>) => {
+  await ensureReady();
+  const db = await getDb();
+  const parsed = listRecordsPageInputSchema.parse(input);
+  const base = await getBase(parsed.baseId);
+  if (!base) {
+    throw new ORPCError("NOT_FOUND", { message: `Base not found: ${parsed.baseId}` });
+  }
+
+  let viewConfig: ReturnType<typeof normalizeViewConfig> | undefined;
+  if (parsed.viewId) {
+    const [view] = await db
+      .select()
+      .from(busabaseViews)
+      .where(
+        and(
+          eq(busabaseViews.id, parsed.viewId),
+          eq(busabaseViews.baseId, base.id),
+          eq(busabaseViews.spaceId, getContextSpaceId()),
+          eq(busabaseViews.status, "active"),
+        ),
+      )
+      .limit(1);
+    if (!view) {
+      throw new ORPCError("NOT_FOUND", { message: `View not found: ${parsed.viewId}` });
+    }
+    viewConfig = normalizeViewConfig(view.config);
+  }
+
+  const recordFilters: SQL[] = [
+    eq(busabaseRecords.spaceId, getContextSpaceId()),
+    eq(busabaseRecords.baseId, base.id),
+    eq(busabaseRecords.status, "active"),
+  ];
+  const pageVisible = buildBaseVisibilityExists(db, busabaseRecords.baseId);
+  if (pageVisible) {
+    recordFilters.push(pageVisible);
+  }
+  const needsExactViewEvaluation = Boolean(
+    viewConfig && (viewConfig.filters.length > 0 || viewConfig.sorts.length > 0),
+  );
+
+  // The ordinary All view and presentation-only saved views can use true SQL
+  // random access: count once, then hydrate only the requested page.
+  if (!needsExactViewEvaluation) {
+    const [countRow] = await db
+      .select({ value: count() })
+      .from(busabaseRecords)
+      .where(and(...recordFilters));
+    const total = countRow?.value ?? 0;
+    const totalPages = Math.ceil(total / parsed.pageSize);
+    const page = totalPages === 0 ? 1 : Math.min(parsed.page, totalPages);
+    const offset = (page - 1) * parsed.pageSize;
+    const rows = await db
+      .select()
+      .from(busabaseRecords)
+      .where(and(...recordFilters))
+      .orderBy(desc(busabaseRecords.createdAt), desc(busabaseRecords.id))
+      .limit(parsed.pageSize)
+      .offset(offset);
+    return {
+      records: await hydrateRecords(rows),
+      total,
+      totalPages,
+      page,
+      pageSize: parsed.pageSize,
+    };
+  }
+
+  // Complex saved views remain exact even when their field semantics cannot be
+  // represented by the projection table: hydrate the complete visible Base,
+  // evaluate the view, then return only the requested slice to the client.
+  const candidateRows = await db
+    .select()
+    .from(busabaseRecords)
+    .where(and(...recordFilters))
+    .orderBy(desc(busabaseRecords.createdAt), desc(busabaseRecords.id));
+  const candidates = await hydrateRecords(candidateRows);
+  const ordered = applyViewConfigToRecords(candidates, viewConfig);
+  const total = ordered.length;
+  const totalPages = Math.ceil(total / parsed.pageSize);
+  const page = totalPages === 0 ? 1 : Math.min(parsed.page, totalPages);
+  const offset = (page - 1) * parsed.pageSize;
+
+  return {
+    records: ordered.slice(offset, offset + parsed.pageSize),
+    total,
+    totalPages,
+    page,
+    pageSize: parsed.pageSize,
+  };
 };
 
 /**

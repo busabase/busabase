@@ -6,7 +6,7 @@ import { BlobReader, BlobWriter, ZipWriter } from "@zip.js/zip.js";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 /**
- * `busabase-cli publish` → `busabase-cli install` round trip, driven through the
+ * `busabase-cli export` → `busabase-cli install` round trip, driven through the
  * REAL CLI against a REAL router (CLI → busabase-sdk → oRPC → busabase-core →
  * PGlite), with `fetch` redirected in-process — the same harness convention as
  * `cli-golden-path.test.ts`, extended to also serve a synthetic GitHub zipball
@@ -16,7 +16,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
  * The round trip crosses two DATABASES, not two spaces: OSS busabase is
  * single-space (the `/api/v1` route runs `runWithBusabaseContext` with no
  * spaceId, so `getContextSpaceId()` is always `LOCAL_SPACE_ID`), and base slugs
- * are unique per space — so publishing and re-installing into the same database
+ * are unique per space — so exporting and re-installing into the same database
  * would collide by construction. Source = the seeded demo DB; target = a
  * second, previously-empty PGlite DB + storage tree (same singleton-reset
  * pattern as `packages/busabase-core/tests/dump-roundtrip.test.ts`).
@@ -90,10 +90,10 @@ const readDirRecursive = async (dir: string): Promise<Map<string, Buffer>> => {
   return out;
 };
 
-describe("busabase-cli publish → install round trip (real demo seed, two databases)", () => {
+describe("busabase-cli export → install round trip (real demo seed, two databases)", () => {
   const dirs: string[] = [];
-  let publishDir = "";
-  let publishDir2 = "";
+  let exportDir = "";
+  let exportDir2 = "";
   let homeDir = "";
   let zipball: Buffer = Buffer.alloc(0);
   let currentStorageDir = "";
@@ -105,7 +105,8 @@ describe("busabase-cli publish → install round trip (real demo seed, two datab
   let targetBases = new Map<string, BaseSnapshot>();
   let sourceDocs = new Map<string, string>();
   let targetDocs = new Map<string, string>();
-  let publishedFiles = new Map<string, Buffer>();
+  let exportedFiles = new Map<string, Buffer>();
+  let exportReport: { exported: boolean; files: string[] } | undefined;
   let installReport: { created: Record<string, number>; warnings: string[] } | undefined;
   let rootSlug = "";
 
@@ -157,7 +158,7 @@ describe("busabase-cli publish → install round trip (real demo seed, two datab
    * Observation goes through an in-process router client, not the CLI: the CLI is
    * the thing under test, and its read commands carry their own ergonomics (a
    * 100-row `records list` cap, slug-vs-id flags) that would silently weaken the
-   * parity assertions. publish/install below still run as the real CLI.
+   * parity assertions. export/install below still run as the real CLI.
    */
   const routerClient = async () => {
     const { createRouterClient } = await import("@orpc/server");
@@ -209,7 +210,7 @@ describe("busabase-cli publish → install round trip (real demo seed, two datab
    * fail here, because a cycle has no valid topological order.
    *
    * Built through the same public API an author would use, and seeded into the
-   * source space before publish, so the round trip below covers it for free.
+   * source space before export, so the round trip below covers it for free.
    */
   const seedCyclicRelationFixture = async (): Promise<void> => {
     const client = await routerClient();
@@ -297,8 +298,8 @@ describe("busabase-cli publish → install round trip (real demo seed, two datab
     originalCwd = process.cwd();
     for (const k of ENV_KEYS) savedEnv[k] = process.env[k];
     homeDir = await mkTmp("home");
-    publishDir = await mkTmp("out");
-    publishDir2 = await mkTmp("out2");
+    exportDir = await mkTmp("out");
+    exportDir2 = await mkTmp("out2");
     delete process.env.BUSABASE_API_KEY;
     delete process.env.BUSABASE_BASE_URL;
     delete process.env.BUSABASE_SPACE_ID;
@@ -350,16 +351,16 @@ describe("busabase-cli publish → install round trip (real demo seed, two datab
     sourceBases = await snapshotBases();
     sourceDocs = await snapshotDocs();
 
-    // ── Publish the whole workspace root ──────────────────────────────────
+    // ── Export the whole workspace root ───────────────────────────────────
     // The root is the only guaranteed self-contained subtree: the demo's
-    // relations cross folders (blog→social, lab→blog), so publishing any single
+    // relations cross folders (blog→social, lab→blog), so exporting any single
     // folder would (correctly) fail the §6.5 self-containment rule.
-    await cli("publish", rootSlug, "-o", publishDir);
-    publishedFiles = await readDirRecursive(publishDir);
-    // Second publish into a separate dir — determinism check (§6.6).
-    await cli("publish", rootSlug, "-o", publishDir2);
+    exportReport = (await cli("export", rootSlug, "-o", exportDir)) as typeof exportReport;
+    exportedFiles = await readDirRecursive(exportDir);
+    // Second export into a separate dir — determinism check (§6.6).
+    await cli("export", rootSlug, "-o", exportDir2);
 
-    zipball = await zipDirectory(publishDir, "demo-package-main");
+    zipball = await zipDirectory(exportDir, "demo-package-main");
 
     // ── Target database: genuinely empty ──────────────────────────────────
     await useDatabase(await mkTmp("tgt-db"), await mkTmp("tgt-st"));
@@ -381,22 +382,24 @@ describe("busabase-cli publish → install round trip (real demo seed, two datab
     for (const dir of dirs) await rm(dir, { recursive: true, force: true });
   });
 
-  // ── publish ────────────────────────────────────────────────────────────
-  it("publishes a manifest plus a human-readable content tree", () => {
-    const paths = [...publishedFiles.keys()];
+  // ── export ─────────────────────────────────────────────────────────────
+  it("exports a manifest plus a human-readable content tree", () => {
+    expect(exportReport?.exported).toBe(true);
+    expect(exportReport?.files).toContain("busabase.json");
+    const paths = [...exportedFiles.keys()];
     expect(paths).toContain("busabase.json");
     // Real files, not an opaque archive — the whole point of the format.
     expect(paths.some((p) => p.startsWith("content/") && p.endsWith(".md"))).toBe(true);
     expect(paths.some((p) => p.endsWith("/base.json"))).toBe(true);
     expect(paths.some((p) => p.endsWith("/records.ndjson"))).toBe(true);
-    const manifest = JSON.parse(publishedFiles.get("busabase.json")?.toString("utf8") ?? "{}");
+    const manifest = JSON.parse(exportedFiles.get("busabase.json")?.toString("utf8") ?? "{}");
     expect(manifest.format).toBe("busabase-package@1");
   });
 
-  it("is deterministic — publishing an unchanged space twice is byte-identical", async () => {
-    const second = await readDirRecursive(publishDir2);
-    expect([...second.keys()].sort()).toEqual([...publishedFiles.keys()].sort());
-    for (const [rel, bytes] of publishedFiles) {
+  it("is deterministic — exporting an unchanged space twice is byte-identical", async () => {
+    const second = await readDirRecursive(exportDir2);
+    expect([...second.keys()].sort()).toEqual([...exportedFiles.keys()].sort());
+    for (const [rel, bytes] of exportedFiles) {
       expect({ rel, sha: bytes.toString("base64") }).toEqual({
         rel,
         sha: second.get(rel)?.toString("base64"),
@@ -405,7 +408,7 @@ describe("busabase-cli publish → install round trip (real demo seed, two datab
   });
 
   it("rewrites the three id-bearing field options into portable slug references", () => {
-    const baseJsonFiles = [...publishedFiles.entries()].filter(([p]) => p.endsWith("/base.json"));
+    const baseJsonFiles = [...exportedFiles.entries()].filter(([p]) => p.endsWith("/base.json"));
     expect(baseJsonFiles.length).toBeGreaterThan(0);
     const all = baseJsonFiles.map(([, b]) => JSON.parse(b.toString("utf8")));
     const fields = all.flatMap((base) => base.fields as Array<Record<string, never>>);
@@ -453,7 +456,7 @@ describe("busabase-cli publish → install round trip (real demo seed, two datab
     // node whose slug already existed under the first install's folder (e.g. the
     // "ai-research-editor" skill) silently resolved to that unrelated existing
     // node instead of being created under the new folder, while still reporting
-    // success. Caught by publishing to a real GitHub repo and installing twice by
+    // success. Caught by exporting to a real GitHub repo and installing twice by
     // hand; this pins it down as an automated test.
     const client = await routerClient();
     const before = await client.nodes.list({});
@@ -620,7 +623,7 @@ describe("busabase-cli publish → install round trip (real demo seed, two datab
     expect(alphaLink?.options.inverseFieldSlug).toBeUndefined();
   });
 
-  it("restores every published doc's body, modulo the format's documented normalization", () => {
+  it("restores every exported doc's body, modulo the format's documented normalization", () => {
     expect(sourceDocs.size).toBeGreaterThan(0);
     // Superset, not equality: `ensureReady()` auto-seeds its own starter doc into
     // any fresh space before install runs, so the target legitimately carries one

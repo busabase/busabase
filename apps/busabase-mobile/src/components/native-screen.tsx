@@ -9,6 +9,7 @@ import {
   Pressable,
   RefreshControl,
   ScrollView,
+  type StyleProp,
   StyleSheet,
   Text,
   View,
@@ -21,6 +22,7 @@ import { Button } from "./ui/Button";
 
 interface NativeScreenProps {
   title: string;
+  titleNumberOfLines?: 1 | 2;
   subtitle?: string;
   children: ReactNode;
   refreshing?: boolean;
@@ -28,10 +30,12 @@ interface NativeScreenProps {
   headerLeading?: ReactNode;
   headerAction?: ReactNode;
   footer?: ReactNode;
+  contentContainerStyle?: StyleProp<ViewStyle>;
 }
 
 export function NativeScreen({
   title,
+  titleNumberOfLines = 1,
   subtitle,
   children,
   refreshing,
@@ -39,6 +43,7 @@ export function NativeScreen({
   headerLeading,
   headerAction,
   footer,
+  contentContainerStyle,
 }: NativeScreenProps) {
   const tokens = useTokens();
 
@@ -51,7 +56,11 @@ export function NativeScreen({
       >
         <ScrollView
           style={styles.scroll}
-          contentContainerStyle={[styles.content, footer ? styles.contentWithFooter : null]}
+          contentContainerStyle={[
+            styles.content,
+            footer ? styles.contentWithFooter : null,
+            contentContainerStyle,
+          ]}
           keyboardShouldPersistTaps="handled"
           refreshControl={
             onRefresh ? (
@@ -66,7 +75,10 @@ export function NativeScreen({
           <View style={[styles.header, { borderColor: tokens.border }]}>
             {headerLeading ? <View style={styles.headerLeading}>{headerLeading}</View> : null}
             <View style={styles.titleBlock}>
-              <Text numberOfLines={1} style={[typography.h1, { color: tokens.foreground }]}>
+              <Text
+                numberOfLines={titleNumberOfLines}
+                style={[typography.h1, { color: tokens.foreground }]}
+              >
                 {title}
               </Text>
               {subtitle ? (
@@ -541,7 +553,9 @@ const styles = StyleSheet.create({
   safe: { flex: 1 },
   scroll: { flex: 1 },
   content: { paddingBottom: 36 },
-  contentWithFooter: { paddingBottom: 132 },
+  // The footer is a normal flex sibling, not an overlay. Reserving a second
+  // footer-height here created a large blank strip on short detail screens.
+  contentWithFooter: { paddingBottom: spacing[4] },
   header: {
     paddingHorizontal: spacing[5],
     paddingTop: Platform.select({ ios: 8, android: 12, default: 10 }),

@@ -31,7 +31,6 @@ export const lightTokens = {
   overlay: "rgba(0, 0, 0, 0.32)",
   scrim: "rgba(0, 0, 0, 0.22)",
   handle: "rgba(120, 120, 120, 0.34)",
-  shadow: "#000000",
 };
 
 export type Tokens = typeof lightTokens;
@@ -58,7 +57,6 @@ export const darkTokens: Tokens = {
   overlay: "rgba(0, 0, 0, 0.5)",
   scrim: "rgba(0, 0, 0, 0.4)",
   handle: "rgba(160, 160, 160, 0.34)",
-  shadow: "#000000",
 };
 
 // Serif family names come from @expo-google-fonts/fraunces (loaded via

@@ -10,7 +10,7 @@ import {
   updateAssetMetadata,
 } from "./handlers";
 import { editAssetContent } from "./logic/asset-edit-content-logic";
-import { grepAssets, readAssetTextLines } from "./logic/asset-grep-logic";
+import { readAssetTextLines } from "./logic/asset-grep-logic";
 import { createAssetTextUploadUrl, putAssetText } from "./logic/asset-texts-logic";
 
 // Assets domain oRPC handler slice; aggregated into the kernel router (router.ts).
@@ -31,7 +31,6 @@ export const assetsRouter = {
   createTextUploadUrl: os.assets.createTextUploadUrl.handler(async ({ input }) =>
     createAssetTextUploadUrl(input),
   ),
-  grep: os.assets.grep.handler(async ({ input }) => grepAssets(input)),
   readTextLines: os.assets.readTextLines.handler(async ({ input }) => readAssetTextLines(input)),
   // Edit an asset's REAL mounted file content via ChangeRequest — see
   // asset-edit-content-logic.ts. Distinct from putText (disposable derived text).

@@ -71,6 +71,21 @@ export const listRecordsResponseSchema = z.object({
   nextCursor: z.string().nullable(),
 });
 
+export const listRecordsPageInputSchema = z.object({
+  baseId: z.string().min(1),
+  viewId: z.string().min(1).optional(),
+  page: z.coerce.number().int().min(1).optional().default(1),
+  pageSize: z.coerce.number().int().min(1).max(100).optional().default(50),
+});
+
+export const listRecordsPageResponseSchema = z.object({
+  records: z.array(recordSchema),
+  total: z.number().int().nonnegative(),
+  totalPages: z.number().int().nonnegative(),
+  page: z.number().int().min(1),
+  pageSize: z.number().int().min(1).max(100),
+});
+
 export const countRecordsInputSchema = z
   .object({
     baseId: z.string().optional(),
@@ -145,10 +160,34 @@ export const recordFieldFilterInputSchema = z.object({
 });
 
 export const recordFieldGetInputSchema = z.object({
-  baseId: z.string(),
-  fieldSlug: z.string().min(1),
-  valueText: z.string().min(1),
+  baseId: z.string().describe("Field selector: Base id. Requires fieldSlug and valueText."),
+  fieldSlug: z
+    .string()
+    .min(1)
+    .describe("Field selector: exact field slug. Requires baseId and valueText."),
+  valueText: z
+    .string()
+    .min(1)
+    .describe("Field selector: exact text value. Requires baseId and fieldSlug."),
 });
+
+/**
+ * A record get is always a single-row lookup, addressed either by its canonical
+ * id or by one exact field value within a Base. Strict branches make this a
+ * real XOR at runtime: callers cannot send both selector shapes and have Zod
+ * silently discard the extra keys.
+ */
+export const recordGetInputSchema = z.union([
+  z
+    .object({
+      recordId: z
+        .string()
+        .min(1)
+        .describe("Record id selector. Use alone; do not combine with field selector fields."),
+    })
+    .strict(),
+  recordFieldGetInputSchema.strict(),
+]);
 
 export const restoreRecordInputSchema = z.object({
   message: z.string().optional(),

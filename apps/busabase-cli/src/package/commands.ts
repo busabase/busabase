@@ -1,5 +1,5 @@
 /**
- * `install` and `publish` — the terminal-facing halves of the `busabase-package@1`
+ * `install` and `export` — the terminal-facing halves of the `busabase-package@1`
  * format. Thin orchestration: fetch/read → plan → apply, and collect → render → write.
  */
 import { readFile } from "node:fs/promises";
@@ -114,7 +114,7 @@ const renderInstallReport = (
   return lines.join("\n");
 };
 
-export interface PublishCommandOptions {
+export interface ExportCommandOptions {
   outDir: string;
   name?: string;
   dryRun?: boolean;
@@ -123,10 +123,10 @@ export interface PublishCommandOptions {
   baseUrl: string;
 }
 
-export const runPublish = async (
+export const runExport = async (
   client: BusabaseClient,
   nodeSlugOrId: string,
-  options: PublishCommandOptions,
+  options: ExportCommandOptions,
 ): Promise<unknown> => {
   const nodes = await client.nodes.list();
   const source = findSourceNode(nodes as never, nodeSlugOrId);
@@ -142,25 +142,25 @@ export const runPublish = async (
 
   const files = renderPackageTree(tree);
   if (!options.dryRun) {
-    // Clean first: a re-publish must not leave a deleted node's files behind, or the
+    // Clean first: a re-export must not leave a deleted node's files behind, or the
     // git diff would stop reflecting the space.
     await writePackageFiles(files, options.outDir, { clean: true });
   }
 
   if (options.json) {
     return {
-      published: !options.dryRun,
+      exported: !options.dryRun,
       package: manifest.name,
       outDir: options.outDir,
       files: [...files.keys()].sort(),
       warnings,
     };
   }
-  return renderPublishReport(options, manifest, files, warnings);
+  return renderExportReport(options, manifest, files, warnings);
 };
 
 /**
- * Reuse an existing `busabase.json` so a re-publish preserves the author's metadata
+ * Reuse an existing `busabase.json` so a re-export preserves the author's metadata
  * (version, license, tags) instead of resetting it. `--name` wins; otherwise fall back
  * to the node's own name.
  */
@@ -191,8 +191,8 @@ const readExistingManifest = async (outDir: string): Promise<PackageManifest | u
   }
 };
 
-const renderPublishReport = (
-  options: PublishCommandOptions,
+const renderExportReport = (
+  options: ExportCommandOptions,
   manifest: PackageManifest,
   files: Map<string, Buffer>,
   warnings: string[],
@@ -211,7 +211,7 @@ const renderPublishReport = (
   }
   if (!options.dryRun) {
     lines.push("");
-    lines.push("Now publish it to GitHub:");
+    lines.push("Now push it to GitHub:");
     lines.push(`  cd ${options.outDir}`);
     lines.push(
       '  git init && git add . && git commit -m "Add ${name} package"'.replace(

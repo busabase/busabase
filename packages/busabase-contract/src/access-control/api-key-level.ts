@@ -101,8 +101,8 @@ export interface ProcedurePermissionPolicy {
  *   - `dump.exportTables` is a POST route in the real contract (the design
  *     doc's prose called it a GET) — already force-classified to `manage`
  *     below either way, so this doesn't change behavior, just the reasoning.
- *   - The top-level `grep` and `assets.grep` routes are POST because they take
- *     request bodies, but are explicitly classified as node-scoped reads.
+ *   - The top-level `grep` route is POST because it takes a request body, but
+ *     is explicitly classified as a node-scoped read.
  */
 const node = (level: ApiKeyPermissionLevel): ProcedurePermissionPolicy => ({
   level,
@@ -226,7 +226,6 @@ export const PROCEDURE_PERMISSION_POLICY: Record<string, ProcedurePermissionPoli
   "assets.list": node("read"),
   "assets.get": node("read"),
   "assets.download": node("read"),
-  "assets.grep": node("read"),
   "assets.readTextLines": node("read"),
 
   "install.planFromGithub": workspace("read"),
@@ -237,10 +236,10 @@ export const PROCEDURE_PERMISSION_POLICY: Record<string, ProcedurePermissionPoli
   "changeRequests.get": node("read"),
 
   "records.list": node("read"),
+  "records.listPage": node("read"),
   "records.count": node("read"),
   "records.get": node("read"),
   "records.search": node("read"),
-  "records.getByField": node("read"),
   "records.listChangeRequests": node("read"),
   "records.listLinks": node("read"),
 };

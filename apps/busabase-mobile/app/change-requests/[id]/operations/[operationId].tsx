@@ -2,7 +2,7 @@ import { skipToken, useMutation, useQuery, useQueryClient } from "@tanstack/reac
 import type { ChangeRequestVO, OperationVO } from "busabase-contract/types";
 import { getChangeRequestScopeName } from "busabase-core/dashboard/change-request";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { ArrowLeft, GitCommitHorizontal, ListChecks } from "lucide-react-native";
+import { ArrowLeft, GitCommitHorizontal } from "lucide-react-native";
 import { useEffect, useState } from "react";
 import { Pressable, ScrollView, StyleSheet } from "react-native";
 import { useBusabaseOrpc } from "~/api/use-busabase-orpc";
@@ -26,6 +26,7 @@ import { getOperationStatusLabel, operationLabels } from "~/lib/busabase-display
 import { shortId } from "~/lib/format";
 import {
   buildInitialFormValues,
+  getChangedFieldValues,
   normalizeFormValues,
   type RecordFormValue,
 } from "~/lib/record-form";
@@ -35,27 +36,20 @@ import { useTokens } from "~/theme/use-tokens";
 function OperationSummarySection({
   changeRequest,
   operation,
-  label,
 }: {
   changeRequest: ChangeRequestVO;
   operation: OperationVO;
-  label: string;
 }) {
   const tokens = useTokens();
 
   return (
     <NativeSection title="Summary">
       <NativeRow
-        title={label}
-        subtitle={`${getOperationStatusLabel(operation.status)} · position ${operation.position + 1}`}
-        leading={<ListChecks size={18} color={tokens.mutedForeground} />}
-        trailing={<StatusBadge status={changeRequest.status} />}
-      />
-      <NativeRow
-        title="Head commit"
-        subtitle={operation.headCommit.message || "No commit message"}
+        title={operation.headCommit.message || "No commit message"}
+        subtitle={`${getOperationStatusLabel(operation.status)} · Operation ${operation.position + 1}`}
         meta={shortId(operation.headCommitId)}
         leading={<GitCommitHorizontal size={18} color={tokens.mutedForeground} />}
+        trailing={<StatusBadge status={changeRequest.status} />}
         last
       />
     </NativeSection>
@@ -142,6 +136,7 @@ function OperationDetailContent() {
   }
 
   const label = operationLabels[operation.operation] ?? operation.operation;
+  const changedFields = getChangedFieldValues(operation.baseFields, operation.headCommit.fields);
   const footer =
     changeRequest.status === "in_review" ? (
       <NativeActionBar>
@@ -165,12 +160,13 @@ function OperationDetailContent() {
       headerLeading={headerLeading}
       footer={footer}
     >
-      <OperationSummarySection changeRequest={changeRequest} operation={operation} label={label} />
-      <NativeSection title="Proposed fields">
+      <OperationSummarySection changeRequest={changeRequest} operation={operation} />
+      <NativeSection title="Changes">
         <FieldList
-          fields={operation.headCommit.fields}
+          fields={changedFields}
           definitions={changeRequest.base?.fields ?? []}
           highlight
+          variant="grouped"
         />
       </NativeSection>
 
@@ -178,7 +174,6 @@ function OperationDetailContent() {
       <NativeBottomSheet
         visible={revisionOpen}
         title="Revise operation"
-        description="Adjust the proposed fields and submit a new operation revision."
         showCloseButton
         maxHeight="88%"
         onClose={() => setRevisionOpen(false)}
@@ -195,13 +190,6 @@ function OperationDetailContent() {
               loading={reviseMutation.isPending}
               fullWidth
               onPress={() => reviseMutation.mutate()}
-            />
-            <Button
-              label="Cancel"
-              variant="ghost"
-              disabled={reviseMutation.isPending}
-              fullWidth
-              onPress={() => setRevisionOpen(false)}
             />
           </NativeActionBar>
         }

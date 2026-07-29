@@ -19,15 +19,17 @@ export interface RecordSubmitOptions {
 
 // Table pagination controls threaded from the dashboard down to BusaBaseTable.
 export interface RecordsPagination {
-  /** Whole-base total, or null while the count query is loading. */
-  total: number | null;
-  /** Records loaded into the client so far (across fetched pages). */
-  loaded: number;
-  hasMore: boolean;
-  isLoadingMore: boolean;
-  /** True while the first page of records for the active base is still in flight. */
+  page: number;
+  pageSize: 25 | 50 | 100;
+  total: number;
+  totalPages: number;
   isLoading: boolean;
-  loadMore: () => void;
+  isFetching?: boolean;
+  error?: string | null;
+  onPageChange: (page: number) => void;
+  onPageSizeChange: (pageSize: 25 | 50 | 100) => void;
+  onRetry?: () => void;
+  getPageHref?: (page: number) => string;
 }
 
 export interface ViewSubmitOptions {

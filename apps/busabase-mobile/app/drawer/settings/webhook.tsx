@@ -336,7 +336,6 @@ function WebhookSettingsContent() {
   return (
     <NativeScreen
       title="Webhook Rules"
-      subtitle="Automation triggered by events"
       headerLeading={headerLeading}
       refreshing={rulesQuery.isRefetching}
       onRefresh={() => void rulesQuery.refetch()}
@@ -350,13 +349,8 @@ function WebhookSettingsContent() {
       ) : null}
 
       {!rulesQuery.isLoading && !rulesQuery.error ? (
-        <NativeSection title="Automation rules" caption={`${rules.length}`}>
-          {rules.length === 0 ? (
-            <NativeRow
-              title="No rules yet"
-              subtitle="Create a rule to react to record, AI, or asset events."
-            />
-          ) : null}
+        <NativeSection title="Rules" caption={`${rules.length}`}>
+          {rules.length === 0 ? <NativeRow title="No rules" /> : null}
           {rules.map((rule) => (
             <NativeRow
               key={rule.id}
@@ -428,7 +422,6 @@ function WebhookSettingsContent() {
                 leadingIcon={<Trash2 size={18} color={tokens.destructiveForeground} />}
                 onPress={() => setConfirmDeleteRuleId(manageRule.id)}
               />
-              <Button label={t.common.close} variant="ghost" onPress={closeManage} />
             </NativeActionBar>
           ) : undefined
         }
@@ -548,13 +541,6 @@ function WebhookSettingsContent() {
               fullWidth
               leadingIcon={<Save size={18} color={tokens.primaryForeground} />}
               onPress={saveForm}
-            />
-            <Button
-              label={t.common.cancel}
-              variant="ghost"
-              disabled={saving}
-              fullWidth
-              onPress={closeForm}
             />
           </NativeActionBar>
         }

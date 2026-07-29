@@ -45,6 +45,7 @@ const ANONYMOUS_READ_ALLOWLIST: ReadonlySet<string> = new Set([
   // anonymous branch.
   "bases.listViews",
   "records.list",
+  "records.listPage",
   "records.get",
   // Public form rendering. The `form` domain does not exist in the codebase
   // yet (P1 shipped the `submit` capability, not the form surface); listed now

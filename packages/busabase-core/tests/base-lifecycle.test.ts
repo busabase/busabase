@@ -507,6 +507,30 @@ describe("Base-domain DB lifecycle — oRPC", () => {
       expect(misses).toEqual([]);
     });
 
+    it("gets one record by exact field value and returns 404 on a miss", async () => {
+      const uniqueTitle = "Lifecycle Point Lookup 7714";
+      const recordId = await createRecord({
+        title: uniqueTitle,
+        body: "body",
+        channel: "blog",
+      });
+
+      const found = await client.records.get({
+        baseId: blogBaseId,
+        fieldSlug: "title",
+        valueText: uniqueTitle,
+      });
+      expect(found.id).toBe(recordId);
+
+      await expect(
+        client.records.get({
+          baseId: blogBaseId,
+          fieldSlug: "title",
+          valueText: "definitely-not-present-7714",
+        }),
+      ).rejects.toThrow(/Record not found/);
+    });
+
     it("throws when getting a non-existent record", async () => {
       await expect(client.records.get({ recordId: "qrc_nope" })).rejects.toThrow(
         /Record not found/,

@@ -8,6 +8,8 @@ import {
   cloudContract,
   createBusabaseClient,
   DEFAULT_BASE_URL,
+  getRecordByField,
+  grepAssets,
   normalizeBaseUrl,
 } from "busabase-sdk";
 import {
@@ -43,7 +45,7 @@ import {
   runLogout,
   runRefresh,
 } from "./login.js";
-import { runInstall, runPublish } from "./package/commands.js";
+import { runExport, runInstall } from "./package/commands.js";
 import { registerTaskCommands } from "./task-command.js";
 
 /**
@@ -1244,6 +1246,20 @@ Examples:
     .action(
       runAction(state, (client, opts) => client.records.get({ recordId: opts.recordId as string })),
     );
+  addGlobalFlags(records.command("get-by-field"))
+    .description("Get one record by an exact field value")
+    .requiredOption("--base-id <id>", "Base id")
+    .requiredOption("--field-slug <slug>", "field slug")
+    .requiredOption("--value-text <value>", "exact field value")
+    .action(
+      runAction(state, (client, opts) =>
+        getRecordByField(client, {
+          baseId: opts.baseId as string,
+          fieldSlug: opts.fieldSlug as string,
+          valueText: opts.valueText as string,
+        }),
+      ),
+    );
   addGlobalFlags(records.command("change-requests"))
     .description("Change Requests for a record")
     .requiredOption("--record-id <id>", "record id")
@@ -1396,7 +1412,7 @@ Examples:
     .option("--context-lines <n>", "lines of before/after context (default 0, cap 10)", parseNum)
     .action(
       runAction(state, (client, opts) =>
-        client.assets.grep({
+        grepAssets(client, {
           pattern: opts.pattern as string,
           flags: opts.flags as string | undefined,
           scope:
@@ -1475,25 +1491,25 @@ field with nothing linked yet does not trigger this.`,
       ),
     );
 
-  addGlobalFlags(program.command("publish"))
+  addGlobalFlags(program.command("export"))
     .description("Export a node subtree as a Busabase package directory you can push to GitHub")
-    .argument("<node-slug-or-id>", "the folder/node to publish")
+    .argument("<node-slug-or-id>", "the folder/node to export")
     .requiredOption("-o, --out-dir <dir>", "output directory for the package")
     .option("--name <name>", "package name (default: reuse busabase.json, else the node slug)")
     .option("--dry-run", "list the files that would be written and write nothing")
     .addHelpText(
       "after",
       `
-Output is deterministic: publishing twice from an unchanged space produces
+Output is deterministic: exporting twice from an unchanged space produces
 byte-identical files, so a GitHub diff shows exactly what changed.
 
 Examples:
-  busabase-cli publish support-kb -o ./support-kb-template
-  busabase-cli publish support-kb -o ./support-kb-template --name "Support KB" --dry-run`,
+  busabase-cli export support-kb -o ./support-kb-template
+  busabase-cli export support-kb -o ./support-kb-template --name "Support KB" --dry-run`,
     )
     .action(
       runArgAction(state, (nodeSlugOrId, client, opts, config) =>
-        runPublish(client, nodeSlugOrId, {
+        runExport(client, nodeSlugOrId, {
           outDir: opts.outDir as string,
           name: opts.name as string | undefined,
           dryRun: Boolean(opts.dryRun),
@@ -1510,7 +1526,7 @@ Examples:
       "--no-history",
       "full-fidelity rows, but omit the history tables (commits, change requests, operations, comments, reviews, audit events)",
     )
-    .option("--state-only", "superseded by `busabase-cli publish` — see the error text")
+    .option("--state-only", "superseded by `busabase-cli export` — see the error text")
     .addHelpText(
       "after",
       `
@@ -1523,7 +1539,7 @@ Examples:
   busabase-cli backup -o ./backups/acme-2026-07-19.bbdump
   busabase-cli backup --no-history                           # smaller: current state only
 
-To hand content to someone else rather than back it up, use \`busabase-cli publish\`,
+To hand content to someone else rather than back it up, use \`busabase-cli export\`,
 which writes a readable, diffable package directory you can push to GitHub.`,
     )
     .action(

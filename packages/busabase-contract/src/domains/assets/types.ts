@@ -114,7 +114,7 @@ export const CreateTextUploadUrlVOSchema = z.object({
 });
 export type CreateTextUploadUrlVO = z.infer<typeof CreateTextUploadUrlVOSchema>;
 
-/** `POST /assets/grep` scope — narrow the candidate set before scanning. */
+/** Files-only grep scope used by the shared scanner and SDK compatibility adapter. */
 export const GrepScopeSchema = z.object({
   assetIds: z.array(z.string()).optional(),
   /** Drive/Skill mounted path prefix (matches `busabase_asset_usages.path`). */
@@ -128,6 +128,7 @@ export const GREP_HARD_MAX_MATCHES = 1000;
 export const GREP_DEFAULT_CONTEXT_LINES = 0;
 export const GREP_MAX_CONTEXT_LINES = 10;
 
+/** Files-only grep input used internally and by the SDK's `assets.grep` convenience adapter. */
 export const GrepInputSchema = z.object({
   pattern: z.string().min(1),
   /** JS RegExp flags, e.g. `"i"` for case-insensitive. `g`/`y` are ignored (grep always scans every match per line). */
@@ -148,6 +149,9 @@ export const GrepInputSchema = z.object({
     .optional()
     .default(GREP_DEFAULT_CONTEXT_LINES),
 });
+/** Caller input before Zod applies defaults. */
+export type GrepInputDTO = z.input<typeof GrepInputSchema>;
+/** Parsed input consumed by the files scanner. */
 export type GrepInput = z.infer<typeof GrepInputSchema>;
 
 /** One match — real line/column numbers (1-based), so a caller can `readLines` right around it. */

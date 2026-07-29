@@ -159,6 +159,7 @@ busabase-cli bases update-field-change-request --base-id bse_123 --field-id bsf_
 busabase-cli bases create-change-request --base-id bse_123 --fields-json '{"title":"Hello"}'
 busabase-cli bases create-change-request --base-id bse_123 --fields-json @record.json
 busabase-cli records list --base-id bse_123 --limit 20 --output json
+busabase-cli records get-by-field --base-id bse_123 --field-slug slug --value-text hello
 busabase-cli records by-field-text --field-slug status --value-text open
 busabase-cli assets upload --file ./cover.png --context record-field --output json
 busabase-cli change-requests list

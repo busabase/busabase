@@ -16,8 +16,6 @@ import {
   CreateTextUploadUrlInputSchema,
   CreateTextUploadUrlVOSchema,
   EditAssetContentInputSchema,
-  GrepInputSchema,
-  GrepResultVOSchema,
   PutTextInputSchema,
   ReadLinesVOSchema,
   ReadTextLinesInputSchema,
@@ -133,17 +131,6 @@ export const assetsContract = {
     })
     .input(CreateTextUploadUrlInputSchema)
     .output(CreateTextUploadUrlVOSchema),
-  grep: oc
-    .route({
-      method: "POST",
-      path: "/assets/grep",
-      tags: ["Assets"],
-      summary: "Search every text-bearing asset in scope",
-      successDescription:
-        "Streaming regex/literal matches with real file + line + column numbers and context, across every asset with text — any size, no 256KB cap. Honest coverage: missing/stale/unsearchable/errored name assets that were not (fully or successfully) searched, notReached counts present assets the scan never got to, and truncated flags a capped response.",
-    })
-    .input(GrepInputSchema)
-    .output(GrepResultVOSchema),
   readTextLines: oc
     .route({
       method: "GET",

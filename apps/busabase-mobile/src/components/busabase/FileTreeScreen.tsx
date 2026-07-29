@@ -10,7 +10,7 @@ import {
   Trash2,
 } from "lucide-react-native";
 import { useState } from "react";
-import { Platform, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Platform, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { DrawerScaffold } from "~/components/busabase/DrawerScaffold";
 import {
   NativeActionBar,
@@ -27,7 +27,7 @@ import { Button } from "~/components/ui/Button";
 import { TextInput } from "~/components/ui/TextInput";
 import { getAttachmentKindLabel } from "~/lib/attachment";
 import { formatBytes } from "~/lib/format";
-import { radius, typography } from "~/theme/tokens";
+import { mobile, radius, typography } from "~/theme/tokens";
 import { useTokens } from "~/theme/use-tokens";
 
 const SUBMITTED_BY = "mobile-editor";
@@ -532,9 +532,25 @@ export function FileTreeScreen({
   return (
     <DrawerScaffold
       title={fileTree?.node.name ?? title}
-      subtitle={fileTree ? `${itemSummary} · ${currentFolderLabel}` : entityLabel}
+      titleNumberOfLines={2}
+      subtitle={
+        fileTree ? `${itemSummary} · ${getVisibilityLabel(fileTree.visibility)}` : entityLabel
+      }
       refreshing={refreshing}
       onRefresh={onRefresh}
+      headerAction={
+        fileTree ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={`Edit ${entityLabel.toLowerCase()} settings`}
+            hitSlop={mobile.hitSlop}
+            style={[styles.settingsButton, { backgroundColor: tokens.primaryMuted }]}
+            onPress={startMetadataEdit}
+          >
+            <Settings2 size={20} color={tokens.foreground} />
+          </Pressable>
+        ) : undefined
+      }
       footer={
         fileTree ? (
           <NativeActionBar>
@@ -552,94 +568,22 @@ export function FileTreeScreen({
       {loading ? <NativeLoadingState label={`Loading ${entityLabel.toLowerCase()}`} /> : null}
       {error ? <NativeErrorState message={error.message} onRetry={onRefresh} /> : null}
       {!loading && !error && !fileTree ? (
-        <NativeEmptyState
-          title={`${entityLabel} not found`}
-          description={`This ${entityLabel.toLowerCase()} is not available.`}
-        />
+        <NativeEmptyState title={`${entityLabel} not found`} />
       ) : null}
 
       {fileTree ? (
         <>
-          <NativeSection title="Overview" caption={getVisibilityLabel(fileTree.visibility)}>
-            <View style={[styles.overviewIntro, { borderColor: tokens.border }]}>
-              <View style={styles.overviewTitleBlock}>
-                <Text numberOfLines={1} style={[typography.bodyEm, { color: tokens.foreground }]}>
-                  {fileTree.node.name}
-                </Text>
-                <Text
-                  numberOfLines={2}
-                  style={[typography.small, { color: tokens.mutedForeground }]}
-                >
-                  {fileTree.node.description || `${entityLabel} file tree`}
-                </Text>
-              </View>
-              <View style={[styles.visibilityPill, { backgroundColor: tokens.muted }]}>
-                <Text style={[typography.caption, { color: tokens.mutedForeground }]}>
-                  {getVisibilityLabel(fileTree.visibility)}
-                </Text>
-              </View>
-            </View>
-            <View style={[styles.statsStrip, { borderColor: tokens.border }]}>
-              <View style={styles.statItem}>
-                <Text style={[typography.caption, { color: tokens.mutedForeground }]}>Files</Text>
-                <Text style={[typography.bodyEm, { color: tokens.foreground }]}>
-                  {fileCount.toLocaleString()}
-                </Text>
-              </View>
-              <View style={styles.statItem}>
-                <Text style={[typography.caption, { color: tokens.mutedForeground }]}>Folders</Text>
-                <Text style={[typography.bodyEm, { color: tokens.foreground }]}>
-                  {folderCount.toLocaleString()}
-                </Text>
-              </View>
-              <View style={styles.statItem}>
-                <Text style={[typography.caption, { color: tokens.mutedForeground }]}>Version</Text>
-                <Text
-                  numberOfLines={1}
-                  style={[typography.bodyEm, styles.statValue, { color: tokens.foreground }]}
-                >
-                  {fileTree.version ? `v${fileTree.version}` : "Draft"}
-                </Text>
-              </View>
-            </View>
-            <NativeRow title="Entry file" subtitle={fileTree.entryFile || "Not set"} />
-            <NativeRow
-              title="Edit settings"
-              subtitle="Create a change request for visibility, version, or entry file."
-              leading={<Settings2 size={18} color={tokens.mutedForeground} />}
-              last
-              onPress={startMetadataEdit}
-            />
-          </NativeSection>
-
-          <NativeSection title="Files" caption={currentFolderLabel}>
-            <NativeRow
-              title={currentFolder ? currentFolderLabel : "Current folder"}
-              subtitle={
-                currentFolder
-                  ? `Back to ${getParentFolder(currentFolder) || "Root"}`
-                  : `Root · ${formatItemCount(visibleFiles.length)}`
-              }
-              leading={
-                currentFolder ? (
-                  <ArrowUp size={18} color={tokens.mutedForeground} />
-                ) : (
-                  <Folder size={18} color={tokens.mutedForeground} />
-                )
-              }
-              onPress={
-                currentFolder ? () => setCurrentFolder(getParentFolder(currentFolder)) : undefined
-              }
-              last={visibleFiles.length === 0}
-            />
+          <NativeSection title={currentFolderLabel} caption={formatItemCount(visibleFiles.length)}>
+            {currentFolder ? (
+              <NativeRow
+                title={getParentFolder(currentFolder) || "Root"}
+                leading={<ArrowUp size={18} color={tokens.mutedForeground} />}
+                onPress={() => setCurrentFolder(getParentFolder(currentFolder))}
+              />
+            ) : null}
             {visibleFiles.length === 0 ? (
               <NativeRow
                 title={files.length === 0 ? "No files" : "Empty folder"}
-                subtitle={
-                  files.length === 0
-                    ? `This ${entityLabel.toLowerCase()} has no files yet.`
-                    : "No files in this folder."
-                }
                 leading={<FileText size={18} color={tokens.mutedForeground} />}
                 last
               />
@@ -998,32 +942,13 @@ export function FileTreeScreen({
 
 const styles = StyleSheet.create({
   errorWrap: { marginHorizontal: 20, marginTop: 12 },
-  overviewIntro: {
-    minHeight: 58,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    flexDirection: "row",
-    alignItems: "flex-start",
-    justifyContent: "space-between",
-    gap: 12,
-    borderBottomWidth: StyleSheet.hairlineWidth,
+  settingsButton: {
+    width: 36,
+    height: 36,
+    borderRadius: radius.md,
+    alignItems: "center",
+    justifyContent: "center",
   },
-  overviewTitleBlock: { flex: 1, minWidth: 0, gap: 3 },
-  visibilityPill: {
-    borderRadius: radius.full,
-    paddingHorizontal: 9,
-    paddingVertical: 5,
-  },
-  statsStrip: {
-    minHeight: 52,
-    paddingHorizontal: 14,
-    paddingVertical: 9,
-    flexDirection: "row",
-    gap: 12,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-  },
-  statItem: { flex: 1, minWidth: 0, gap: 2 },
-  statValue: { minWidth: 0 },
   modalBody: { marginHorizontal: -2 },
   modalBodyContent: { paddingBottom: 12, gap: 12 },
   previewBody: {

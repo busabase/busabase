@@ -1,7 +1,7 @@
 /**
  * Layout writer: the in-memory tree → a repo directory (§6.1), deterministically
- * (§6.6). "Clean diffs" is a feature: for an unchanged space, `publish` twice must
- * produce byte-identical output, so re-publishing after one record edit diffs as
+ * (§6.6). "Clean diffs" is a feature: for an unchanged space, `export` twice must
+ * produce byte-identical output, so re-exporting after one record edit diffs as
  * exactly one changed NDJSON line.
  *
  * Determinism rules, all enforced here:
@@ -262,7 +262,7 @@ const renderNode = (node: PackageNode, dir: string, files: PackageFiles): void =
 // ── Files → disk ─────────────────────────────────────────────────────────────
 
 export interface WritePackageOptions {
-  /** Remove an existing `content/` + manifest first, so a re-publish never leaves stale files. */
+  /** Remove an existing `content/` + manifest first, so a re-export never leaves stale files. */
   clean?: boolean;
 }
 
@@ -283,7 +283,7 @@ export const writePackageFiles = async (
   }
 };
 
-/** Render + write in one step — what `publish` calls. */
+/** Render + write in one step — what `export` calls. */
 export const writePackageTree = async (
   tree: PackageTree,
   outDir: string,

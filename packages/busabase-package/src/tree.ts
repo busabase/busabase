@@ -28,7 +28,7 @@ interface PackageNodeCommon {
   slug: string;
   name: string;
   description: string;
-  /** Sibling order. Absent → alphabetical by slug. `publish` always writes it. */
+  /** Sibling order. Absent → alphabetical by slug. `export` always writes it. */
   position: number | undefined;
 }
 
@@ -108,7 +108,7 @@ const UNSAFE_PATH_CHARS = /[/\\:*?"<>|]/;
 
 /**
  * Safety for paths *inside* a file-tree node, which are carried verbatim and are
- * NOT slugs. Applied on publish, because these become real files in a git repo.
+ * NOT slugs. Applied on export, because these become real files in a git repo.
  */
 export const assertSafeFilePath = (filePath: string, context: string): void => {
   for (const segment of filePath.split("/")) {

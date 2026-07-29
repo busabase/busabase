@@ -96,7 +96,7 @@ describe("Base field types — OpenAPI (/api/v1) route round-trip", () => {
   };
 
   const readFields = async (recordId: string): Promise<Record<string, unknown>> => {
-    const record = await ok("GET", `/records/${recordId}`);
+    const record = await ok("GET", `/records/get?recordId=${recordId}`);
     return record.headCommit.fields;
   };
 
@@ -322,5 +322,33 @@ describe("Base field types — OpenAPI (/api/v1) route round-trip", () => {
     );
     expect(Array.isArray(hits)).toBe(true);
     expect(hits.some((r: any) => r.id === recordId)).toBe(true);
+  });
+
+  it("GET /records/get supports the exact field selector and 404s on a miss", async () => {
+    const marker = "openapi-point-lookup-8842";
+    const recordId = await createRecord({ f_text: marker });
+    const found = await ok(
+      "GET",
+      `/records/get?baseId=${baseId}&fieldSlug=f_text&valueText=${marker}`,
+    );
+    expect(found.id).toBe(recordId);
+
+    const missing = await call(
+      "GET",
+      `/records/get?baseId=${baseId}&fieldSlug=f_text&valueText=missing-8842`,
+    );
+    expect(missing.status).toBe(404);
+  });
+
+  it("GET /records/get requires exactly one selector shape", async () => {
+    expect((await call("GET", "/records/get")).status).toBe(400);
+    expect(
+      (
+        await call(
+          "GET",
+          `/records/get?recordId=rec_x&baseId=${baseId}&fieldSlug=f_text&valueText=x`,
+        )
+      ).status,
+    ).toBe(400);
   });
 });

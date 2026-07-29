@@ -14,7 +14,17 @@ import {
   Settings,
 } from "lucide-react-native";
 import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
-import { Modal, Platform, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import {
+  Modal,
+  Platform,
+  Pressable,
+  ScrollView,
+  type StyleProp,
+  StyleSheet,
+  Text,
+  View,
+  type ViewStyle,
+} from "react-native";
 import { useBusabaseOrpc } from "~/api/use-busabase-orpc";
 import { NativeScreen } from "~/components/native-screen";
 import { fmt, useI18n } from "~/i18n";
@@ -28,7 +38,7 @@ import {
 } from "~/lib/tree-expansion";
 import { flattenNodesForCache, nodeToKnownNode } from "~/search/known-node-cache";
 import { nodeIconForType } from "~/search/node-icons";
-import { getMobileNodeDestination } from "~/search/node-navigation";
+import { getMobileNodeDestination, isMobileNodePathActive } from "~/search/node-navigation";
 import { useKnownNodeCache } from "~/search/use-known-node-cache";
 import { mobile, radius, typography } from "~/theme/tokens";
 import { useTokens } from "~/theme/use-tokens";
@@ -38,12 +48,14 @@ import { SpaceSelector } from "./SpaceSelector";
 
 interface DrawerScaffoldProps {
   title: string;
+  titleNumberOfLines?: 1 | 2;
   subtitle?: string;
   children: ReactNode;
   refreshing?: boolean;
   onRefresh?: () => void;
   headerAction?: ReactNode;
   footer?: ReactNode;
+  contentContainerStyle?: StyleProp<ViewStyle>;
 }
 
 // Pinned nav, mirroring the web dashboard's resting sidebar: Home (the landing
@@ -62,12 +74,14 @@ const settingsItem = {
 
 export function DrawerScaffold({
   title,
+  titleNumberOfLines,
   subtitle,
   children,
   refreshing,
   onRefresh,
   headerAction,
   footer,
+  contentContainerStyle,
 }: DrawerScaffoldProps) {
   const router = useRouter();
   const pathname = usePathname();
@@ -225,21 +239,14 @@ export function DrawerScaffold({
     <>
       <NativeScreen
         title={title}
+        titleNumberOfLines={titleNumberOfLines}
         subtitle={subtitle}
         refreshing={refreshing}
         onRefresh={onRefresh}
         headerLeading={headerLeading}
-        headerAction={
-          headerAction ? (
-            <View style={styles.headerActions}>
-              <SpaceSelector compact />
-              {headerAction}
-            </View>
-          ) : (
-            <SpaceSelector compact />
-          )
-        }
+        headerAction={headerAction}
         footer={footer}
+        contentContainerStyle={contentContainerStyle}
       >
         {children}
       </NativeScreen>
@@ -481,7 +488,7 @@ const styles = StyleSheet.create({
   menuButton: {
     width: 44,
     height: 44,
-    borderRadius: radius.full,
+    borderRadius: radius.md,
     alignItems: "center",
     justifyContent: "center",
   },
@@ -492,16 +499,6 @@ const styles = StyleSheet.create({
     maxWidth: "82%",
     paddingTop: Platform.select({ ios: 58, android: 38, default: 48 }),
     borderRightWidth: StyleSheet.hairlineWidth,
-    ...Platform.select({
-      web: { boxShadow: "8px 0 24px rgba(0, 0, 0, 0.12)" },
-      default: {
-        shadowColor: "#000",
-        shadowOpacity: 0.12,
-        shadowRadius: 16,
-        shadowOffset: { width: 8, height: 0 },
-        elevation: 12,
-      },
-    }),
   },
   spaceWrap: {
     zIndex: 20,
@@ -580,7 +577,6 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     flexShrink: 0,
   },
-  headerActions: { flexDirection: "row", alignItems: "center", gap: 8 },
 });
 
 function DrawerNavRow({
@@ -631,34 +627,13 @@ function DrawerNavRow({
 
 // Per-node-type icon and whether the row navigates somewhere.
 function nodeNavMeta(node: NodeVO) {
-  const mobileUnsupported = node.type === "file";
   return {
     icon: nodeIconForType(node.type),
-    tappable: hasCapability(node.type, "hasDetail") && !mobileUnsupported,
+    tappable: hasCapability(node.type, "hasDetail"),
   };
 }
 
-function isNodeActive(node: NodeVO, pathname: string) {
-  if (node.type === "base") {
-    return isPathActive(pathname, `/base/${node.slug}`);
-  }
-  if (node.type === "skill") {
-    return isPathActive(pathname, `/skill/${node.id}`);
-  }
-  if (node.type === "drive") {
-    return isPathActive(pathname, `/drive/${node.id}`);
-  }
-  if (node.type === "airapp") {
-    return isPathActive(pathname, `/airapp/${node.id}`);
-  }
-  if (node.type === "doc") {
-    return isPathActive(pathname, `/doc/${node.id}`);
-  }
-  if (node.type === "folder") {
-    return isPathActive(pathname, `/folder/${node.id}`);
-  }
-  return false;
-}
+const isNodeActive = (node: NodeVO, pathname: string) => isMobileNodePathActive(node, pathname);
 
 function NodeNavItem({
   node,

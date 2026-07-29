@@ -66,6 +66,7 @@ import { getRelationRecordIds } from "./helpers/field";
 import { getLocationPath, readInboxView } from "./helpers/inbox";
 import { createKnownNodeCache, type KnownNode, nodeRoutePath } from "./helpers/known-node-cache";
 import { mergeSearchIntoHref } from "./helpers/link-search";
+import { readRecordPagination, writeRecordPagination } from "./helpers/record-pagination-url";
 import { isConflictErrorMessage } from "./helpers/search";
 import type {
   BusabaseBreadcrumbItem,
@@ -317,6 +318,7 @@ function BusabaseDashboardContent({
       changeRequestCounts: orpc.changeRequests.counts.key() as QueryKey,
       changeRequestDetail: orpc.changeRequests.get.key() as QueryKey,
       records: orpc.records.list.key() as QueryKey,
+      recordsPage: orpc.records.listPage.key() as QueryKey,
       recordsCount: orpc.records.count.key() as QueryKey,
       bases: orpc.bases.list.queryOptions({ input: {} }).queryKey as QueryKey,
       nodes: orpc.nodes.list.queryOptions({}).queryKey as QueryKey,
@@ -466,6 +468,42 @@ function BusabaseDashboardContent({
     }
     return baseViews.find((view) => view.slug === childId || view.id === childId) ?? null;
   }, [baseChildParams?.childId, baseViews]);
+  const recordPaginationUrl = useMemo(() => readRecordPagination(search), [search]);
+  const usesPagePagination =
+    selectedBaseView === null ||
+    selectedBaseView.type === "table" ||
+    selectedBaseView.type === "gallery";
+  const setRecordPaginationUrl = useCallback(
+    (page: number, pageSize = recordPaginationUrl.pageSize, replace = false) => {
+      const nextSearch = writeRecordPagination(search, { page, pageSize });
+      rawSetLocation(`${locationPath}${nextSearch ? `?${nextSearch}` : ""}`, { replace });
+    },
+    [locationPath, rawSetLocation, recordPaginationUrl.pageSize, search],
+  );
+  // Preserve a deep-linked page on first load, but reset when the user moves to
+  // another Base or saved view. The unrelated query parameters are retained by
+  // writeRecordPagination (notably demo and cloud space selection).
+  const paginationScope = `${activeBase?.id ?? ""}:${baseChildParams?.childId ?? "all"}`;
+  const previousPaginationScope = useRef<string | null>(null);
+  useEffect(() => {
+    if (!activeBase?.id) return;
+    if (previousPaginationScope.current === null) {
+      previousPaginationScope.current = paginationScope;
+      return;
+    }
+    if (previousPaginationScope.current !== paginationScope) {
+      previousPaginationScope.current = paginationScope;
+      if (recordPaginationUrl.page !== 1) {
+        setRecordPaginationUrl(1, recordPaginationUrl.pageSize, true);
+      }
+    }
+  }, [
+    activeBase?.id,
+    paginationScope,
+    recordPaginationUrl.page,
+    recordPaginationUrl.pageSize,
+    setRecordPaginationUrl,
+  ]);
   // Carry the active view's filters (tagged with each field's type) to the server
   // for best-effort push-down; the client filter below stays the exact authority.
   const activeViewFilters = useMemo(() => {
@@ -501,8 +539,8 @@ function BusabaseDashboardContent({
     return { fieldSlug: sort.fieldSlug, fieldType, direction: sort.direction };
   }, [selectedBaseView, activeBase?.fields]);
   const serverSortedView = Boolean(activeViewSort);
-  // Records load per active base via keyset pagination ("load more"), so a base
-  // with more than one page is fully reachable instead of silently capped.
+  // Board/timeline views still need their entire candidate set. Keep their
+  // cursor query isolated from the random-access Table/Gallery query below.
   const recordsInfiniteQuery = useInfiniteQuery({
     ...orpc.records.list.infiniteOptions({
       input: (pageParam: string | undefined) => ({
@@ -515,56 +553,88 @@ function BusabaseDashboardContent({
       initialPageParam: undefined as string | undefined,
       getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
     }),
-    enabled: Boolean(activeBase?.id),
+    enabled: Boolean(activeBase?.id) && !usesPagePagination,
   });
-  const baseRecords = useMemo(
-    () => recordsInfiniteQuery.data?.pages.flatMap((page) => page.records) ?? [],
-    [recordsInfiniteQuery.data],
-  );
-  // Whole-base total for the table header ("N of total"), decoupled from paging.
-  // `refetchInterval` is a low-frequency second line of defense alongside the
-  // live-sync SSE stream + focus/visibility refresh (use-live-sync.ts): if a
-  // merge lands from another tab/CLI/agent while this tab's SSE connection
-  // has gone silently stale and it never regains focus, this still converges
-  // within a minute instead of showing a stale count indefinitely.
-  const recordCountQuery = useQuery({
-    ...orpc.records.count.queryOptions({ input: { baseId: activeBase?.id ?? "" } }),
-    // Kept off the anonymous surface deliberately: `records.count` with no baseId
-    // counts the whole space, so it is not allowlisted. A public base just shows
-    // its loaded rows without the "of N total" header.
-    enabled: Boolean(activeBase?.id) && !isAnon,
-    refetchInterval: 60_000,
-  });
-  const recordsPagination = useMemo(
-    () => ({
-      total: recordCountQuery.data?.total ?? null,
-      loaded: baseRecords.length,
-      hasMore: recordsInfiniteQuery.hasNextPage,
-      isLoadingMore: recordsInfiniteQuery.isFetchingNextPage,
-      isLoading: recordsInfiniteQuery.isLoading,
-      loadMore: () => {
-        void recordsInfiniteQuery.fetchNextPage();
+  const recordsPageQuery = useQuery({
+    ...orpc.records.listPage.queryOptions({
+      input: {
+        baseId: activeBase?.id ?? "",
+        viewId: selectedBaseView?.id,
+        page: recordPaginationUrl.page,
+        pageSize: recordPaginationUrl.pageSize,
       },
     }),
-    [
-      recordCountQuery.data?.total,
-      baseRecords.length,
-      recordsInfiniteQuery.hasNextPage,
-      recordsInfiniteQuery.isFetchingNextPage,
-      recordsInfiniteQuery.isLoading,
-      recordsInfiniteQuery.fetchNextPage,
-    ],
+    enabled: Boolean(activeBase?.id) && usesPagePagination,
+    placeholderData: (previousData, previousQuery) => {
+      const previousInput = (
+        previousQuery?.queryKey[1] as { input?: { baseId?: string; viewId?: string } } | undefined
+      )?.input;
+      return previousInput?.baseId === activeBase?.id &&
+        previousInput?.viewId === selectedBaseView?.id
+        ? previousData
+        : undefined;
+    },
+  });
+  const baseRecords = useMemo(
+    () =>
+      usesPagePagination
+        ? (recordsPageQuery.data?.records ?? [])
+        : (recordsInfiniteQuery.data?.pages.flatMap((page) => page.records) ?? []),
+    [recordsInfiniteQuery.data, recordsPageQuery.data?.records, usesPagePagination],
   );
+  const recordsPagination = useMemo(() => {
+    if (!usesPagePagination) return undefined;
+    const pageData = recordsPageQuery.data;
+    const changePage = (page: number) => {
+      setRecordPaginationUrl(page);
+      document.querySelector<HTMLElement>("[data-base-detail-scroll]")?.scrollTo({ top: 0 });
+    };
+    return {
+      page: pageData?.page ?? recordPaginationUrl.page,
+      pageSize: recordPaginationUrl.pageSize,
+      total: pageData?.total ?? 0,
+      totalPages: pageData?.totalPages ?? 0,
+      isLoading: recordsPageQuery.isLoading,
+      isFetching: recordsPageQuery.isFetching,
+      error: recordsPageQuery.error
+        ? recordsPageQuery.error instanceof Error
+          ? recordsPageQuery.error.message
+          : messages.shell.operationFailed
+        : null,
+      onPageChange: changePage,
+      onPageSizeChange: (pageSize: 25 | 50 | 100) => {
+        setRecordPaginationUrl(1, pageSize, true);
+        document.querySelector<HTMLElement>("[data-base-detail-scroll]")?.scrollTo({ top: 0 });
+      },
+      onRetry: () => {
+        void recordsPageQuery.refetch();
+      },
+      getPageHref: (page: number) => {
+        const nextSearch = writeRecordPagination(search, {
+          page,
+          pageSize: recordPaginationUrl.pageSize,
+        });
+        return `${locationPath}${nextSearch ? `?${nextSearch}` : ""}`;
+      },
+    };
+  }, [
+    locationPath,
+    messages.shell.operationFailed,
+    recordPaginationUrl.page,
+    recordPaginationUrl.pageSize,
+    recordsPageQuery.data,
+    recordsPageQuery.error,
+    recordsPageQuery.isFetching,
+    recordsPageQuery.isLoading,
+    recordsPageQuery.refetch,
+    search,
+    setRecordPaginationUrl,
+    usesPagePagination,
+  ]);
   const isBaseViewRoute = Boolean(isBaseChildRoute && selectedBaseView);
-  // View filters/sorts are applied client-side over the loaded pages, so a view
-  // with a filter or sort is only correct once every page is in — UNLESS the sort
-  // was pushed to the server (serverSortedView), which orders + paginates for us.
-  // So auto-load-all only when the view still needs client-side filter/sort.
-  const viewNeedsAllRecords = Boolean(
-    selectedBaseView &&
-      !serverSortedView &&
-      (selectedBaseView.config.filters.length > 0 || selectedBaseView.config.sorts.length > 0),
-  );
+  // Kanban/Calendar/Gantt operate on the whole set. Their existing cursor API
+  // remains the sequential traversal path and is drained in the background.
+  const viewNeedsAllRecords = Boolean(selectedBaseView && !usesPagePagination);
   useEffect(() => {
     if (
       viewNeedsAllRecords &&
@@ -578,6 +648,24 @@ function BusabaseDashboardContent({
     recordsInfiniteQuery.hasNextPage,
     recordsInfiniteQuery.isFetchingNextPage,
     recordsInfiniteQuery.fetchNextPage,
+  ]);
+  // A record deletion can make the current page disappear. Converge to the new
+  // last page rather than leaving an empty, out-of-range table.
+  useEffect(() => {
+    const totalPages = recordsPageQuery.data?.totalPages;
+    if (
+      usesPagePagination &&
+      totalPages !== undefined &&
+      recordPaginationUrl.page > Math.max(1, totalPages)
+    ) {
+      setRecordPaginationUrl(Math.max(1, totalPages), recordPaginationUrl.pageSize, true);
+    }
+  }, [
+    recordPaginationUrl.page,
+    recordPaginationUrl.pageSize,
+    recordsPageQuery.data?.totalPages,
+    setRecordPaginationUrl,
+    usesPagePagination,
   ]);
   const isRecordRoute = Boolean(isBaseChildRoute && !selectedBaseView && !isBaseSetupRoute);
   const selectedRecordId =
@@ -911,6 +999,7 @@ function BusabaseDashboardContent({
       queryClient.invalidateQueries({ queryKey: listKeys.changeRequestCounts }),
       queryClient.invalidateQueries({ queryKey: listKeys.changeRequestDetail }),
       queryClient.invalidateQueries({ queryKey: listKeys.records }),
+      queryClient.invalidateQueries({ queryKey: listKeys.recordsPage }),
       queryClient.invalidateQueries({ queryKey: listKeys.recordsCount }),
       queryClient.invalidateQueries({ queryKey: listKeys.bases }),
       queryClient.invalidateQueries({ queryKey: listKeys.auditEvents }),
@@ -1489,6 +1578,7 @@ function BusabaseDashboardContent({
         name: payload.name,
         slug: payload.slug,
         submittedBy: payload.submittedBy ?? "local-editor",
+        type: payload.type,
       });
       if (options?.mergeImmediately) {
         const merged = await approveAndMergeChangeRequest(changeRequest.id);
@@ -1520,6 +1610,7 @@ function BusabaseDashboardContent({
           fmt(messages.base.updateViewMessage, { view: payload.name || view.name }),
         name: payload.name,
         submittedBy: payload.submittedBy ?? "local-editor",
+        type: payload.type,
       });
       if (options?.mergeImmediately) {
         const merged = await approveAndMergeChangeRequest(changeRequest.id);
@@ -1889,7 +1980,7 @@ function BusabaseDashboardContent({
           archivedRecords={archivedRecordsForBase}
           archivedPagination={archivedRecordsPagination}
           records={records}
-          orderedRecords={serverSortedView ? baseRecords : undefined}
+          orderedRecords={usesPagePagination || serverSortedView ? baseRecords : undefined}
           orpc={orpc}
           pagination={recordsPagination}
           base={activeBase}
@@ -2000,6 +2091,7 @@ function BusabaseDashboardContent({
     recordsPagination,
     recordLoadedNode,
     serverSortedView,
+    usesPagePagination,
     baseRecords,
     submitDeleteRecords,
     allChangeRequests,

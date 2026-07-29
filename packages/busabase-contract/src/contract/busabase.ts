@@ -89,11 +89,9 @@ export const busabaseContractRoutes = {
     })
     .input(searchInputSchema)
     .output(searchResponseSchema),
-  // Unified Grep (P2a files+docs, P2b records) — top-level, cross-source
-  // superset of `assets.grep`. See apps/busabase/content/spec/unified-grep.md.
-  // Composes `logic/grep.ts`; `assets.grep` (files-only specialist) is
-  // unchanged and stays the dedicated endpoint for its fuller
-  // missing/stale/unsearchable reporting.
+  // Unified Grep (P2a files+docs, P2b records) — the single public pattern
+  // search endpoint. Files-only callers use `sources: ["files"]` and retain
+  // the full missing/stale/unsearchable coverage block.
   grep: oc
     .route({
       method: "POST",
@@ -573,6 +571,7 @@ export {
   UnifiedGrepFileMatchVOSchema,
   UnifiedGrepFilesCoverageSchema,
   UnifiedGrepFilesScopeSchema,
+  type UnifiedGrepInputDTO,
   UnifiedGrepInputSchema,
   UnifiedGrepMatchVOSchema,
   UnifiedGrepRecordMatchVOSchema,

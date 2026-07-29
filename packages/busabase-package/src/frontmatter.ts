@@ -2,7 +2,7 @@
  * YAML frontmatter for doc nodes (§6.3): `name`, `description?`, `position?` above
  * the markdown body.
  *
- * Writing is deterministic (§6.6): a fixed key order and LF endings, so re-publishing
+ * Writing is deterministic (§6.6): a fixed key order and LF endings, so re-exporting
  * an unchanged doc is byte-identical.
  */
 import { parse, stringify } from "yaml";
@@ -18,10 +18,10 @@ export interface ParsedFrontmatter {
  * The canonical on-disk body: LF endings, no leading or trailing blank lines. Applied
  * on both read and write so the round trip is a fixed point — without it, the blank
  * line the writer puts after the closing `---` and the file's trailing newline would
- * accumulate into the body on every publish→install→publish cycle.
+ * accumulate into the body on every export→install→export cycle.
  *
  * Leading/trailing blank lines around a doc body are therefore normalized away on the
- * first publish; internal blank lines are untouched.
+ * first export; internal blank lines are untouched.
  */
 export const normalizeDocBody = (body: string): string =>
   body.replaceAll("\r\n", "\n").replace(/^\n+/, "").replace(/\n+$/, "");
@@ -63,7 +63,7 @@ export interface DocFrontmatterFields {
 /** Serialize a doc to `---\n<frontmatter>\n---\n<body>` with a trailing newline. */
 export const serializeDoc = (fields: DocFrontmatterFields, body: string): string => {
   // Fixed key order — determinism. `description`/`position` are omitted when empty
-  // so an unchanged doc round-trips to the same bytes it was published from.
+  // so an unchanged doc round-trips to the same bytes it was exported from.
   const data: Record<string, unknown> = { name: fields.name };
   if (fields.description) data.description = fields.description;
   if (fields.position !== undefined) data.position = fields.position;

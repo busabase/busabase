@@ -15,7 +15,6 @@ import {
   NativeInlineError,
   NativeLoadingState,
   NativeScreen,
-  NativeSection,
 } from "~/components/native-screen";
 import { Button } from "~/components/ui/Button";
 import { shortId } from "~/lib/format";
@@ -128,8 +127,8 @@ function EditRecordContent() {
 
   return (
     <NativeScreen
-      title={`Edit ${getRecordTitle(record)}`}
-      subtitle="Proposes an update change request"
+      title="Edit record"
+      subtitle={record.base.name}
       headerLeading={headerLeading}
       footer={
         <NativeActionBar>
@@ -149,15 +148,13 @@ function EditRecordContent() {
         </NativeActionBar>
       }
     >
-      <NativeSection title="Fields" caption={record.base.name}>
-        <RecordForm
-          fields={record.base.fields}
-          values={values}
-          onChange={(fieldSlug, value) =>
-            setValues((current) => ({ ...current, [fieldSlug]: value }))
-          }
-        />
-      </NativeSection>
+      <RecordForm
+        fields={record.base.fields}
+        values={values}
+        onChange={(fieldSlug, value) =>
+          setValues((current) => ({ ...current, [fieldSlug]: value }))
+        }
+      />
       <NativeBottomSheet
         visible={discardOpen}
         title="Discard changes?"

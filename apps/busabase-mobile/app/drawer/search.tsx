@@ -2,18 +2,7 @@ import { skipToken, useQuery } from "@tanstack/react-query";
 import { getNodeType, NODE_TYPES, type NodeType } from "busabase-contract/domains";
 import type { NodeSearchResultVO, SearchResultKind, SearchResultVO } from "busabase-contract/types";
 import { useRouter } from "expo-router";
-import {
-  AppWindow,
-  Bot,
-  File,
-  FileText,
-  Folder,
-  GitPullRequest,
-  HardDrive,
-  Search,
-  Sparkles,
-  Table2,
-} from "lucide-react-native";
+import { AppWindow, File, FileText, GitPullRequest, Search, Table2 } from "lucide-react-native";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { StyleSheet, View } from "react-native";
 import { useBusabaseOrpc } from "~/api/use-busabase-orpc";
@@ -34,8 +23,10 @@ import {
   type KnownNodeCache,
   nodeSearchResultToKnownNode,
 } from "~/search/known-node-cache";
+import { nodeIconForType } from "~/search/node-icons";
 import { getMobileNodeDestination } from "~/search/node-navigation";
 import { useKnownNodeCache } from "~/search/use-known-node-cache";
+import { spacing } from "~/theme/tokens";
 import { useTokens } from "~/theme/use-tokens";
 
 const kindMeta: Record<SearchResultVO["kind"], { label: string; icon: typeof FileText }> = {
@@ -48,17 +39,6 @@ const kindMeta: Record<SearchResultVO["kind"], { label: string; icon: typeof Fil
 const filePrefixMeta: Record<string, { label: string; icon: typeof FileText }> = {
   doc: { label: "Doc", icon: FileText },
   airapp: { label: "AirApp", icon: AppWindow },
-};
-
-const nodeIcons: Record<string, typeof FileText> = {
-  folder: Folder,
-  base: Table2,
-  skill: Sparkles,
-  drive: HardDrive,
-  airapp: AppWindow,
-  file: File,
-  doc: FileText,
-  bot: Bot,
 };
 
 const getResultMeta = (result: SearchResultVO) => {
@@ -275,7 +255,7 @@ function SearchContent() {
             setError("This search result's node is no longer available.");
           }
         } else if (kind === "assets" && slug) {
-          router.push({ pathname: "/assets/[id]", params: { id: slug } });
+          router.push({ pathname: "/asset/[id]", params: { id: slug } });
         } else {
           router.push("/drawer/assets");
         }
@@ -341,13 +321,12 @@ function SearchContent() {
         {tab === "recent"
           ? recentResults.map((node, index) => {
               const definition = getNodeType(node.type);
-              const Icon = nodeIcons[node.type] ?? FileText;
-              const unsupported = node.type === "file";
+              const Icon = nodeIconForType(node.type);
               return (
                 <NativeRow
                   key={node.id}
                   title={node.name}
-                  subtitle={unsupported ? "Not viewable on mobile yet" : node.slug}
+                  subtitle={node.slug}
                   meta={definition?.label ?? node.type}
                   leading={<Icon size={18} color={tokens.mutedForeground} />}
                   onPress={() => void openKnownNode(node)}
@@ -397,8 +376,8 @@ export default function SearchScreen() {
 }
 
 const styles = StyleSheet.create({
-  searchBox: { marginHorizontal: 20, marginBottom: 8 },
-  tabsWrap: { marginBottom: 8 },
-  message: { marginHorizontal: 20, marginBottom: 8 },
-  loadMore: { marginHorizontal: 20, marginTop: 4 },
+  searchBox: { marginHorizontal: spacing[5], marginBottom: spacing[2] },
+  tabsWrap: { marginBottom: spacing[2] },
+  message: { marginHorizontal: spacing[5], marginBottom: spacing[2] },
+  loadMore: { marginHorizontal: spacing[5], marginTop: spacing[1] },
 });

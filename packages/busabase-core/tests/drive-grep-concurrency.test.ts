@@ -4,6 +4,7 @@ import path from "node:path";
 import { createRouterClient } from "@orpc/server";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { busabaseRouter } from "../src/router";
+import { grepFiles } from "./helpers/grep-files";
 
 /**
  * Drive Grep Retrieval P1 — concurrency-pool coverage. Mirrors the harness in
@@ -109,7 +110,7 @@ describe("Drive Grep Retrieval — concurrency pool (BUSABASE_GREP_CONCURRENCY)"
       await client.assets.putText({ assetId: assetIds[i], text });
     }
 
-    const result = await client.assets.grep({
+    const result = await grepFiles(client, {
       pattern: "needle-match-\\d",
       scope: { assetIds },
       maxMatches: 100,
@@ -143,7 +144,7 @@ describe("Drive Grep Retrieval — concurrency pool (BUSABASE_GREP_CONCURRENCY)"
     }
 
     const maxMatches = 3; // far below candidateCount, with concurrency > 1
-    const result = await client.assets.grep({
+    const result = await grepFiles(client, {
       pattern: "budget-needle-\\d",
       scope: { assetIds },
       maxMatches,

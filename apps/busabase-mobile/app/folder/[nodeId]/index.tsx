@@ -56,10 +56,7 @@ function FolderDetailContent() {
   };
 
   return (
-    <DrawerScaffold
-      subtitle={folder ? `${folder.children.length} items` : "Folder"}
-      title={folder?.node.name ?? "Folder"}
-    >
+    <DrawerScaffold title={folder?.node.name ?? "Folder"}>
       {folderQuery.isLoading ? <NativeLoadingState label="Loading folder" /> : null}
       {folderQuery.error ? (
         <NativeErrorState
@@ -75,14 +72,15 @@ function FolderDetailContent() {
         folder.children.length === 0 ? (
           <NativeEmptyState description="This folder has no items yet." title="Empty folder" />
         ) : (
-          <NativeSection title="Items" caption={`${folder.children.length}`}>
+          <NativeSection
+            title={`${folder.children.length} ${folder.children.length === 1 ? "item" : "items"}`}
+          >
             {folder.children.map((child, index) => {
               const { Icon, label } = getChildMeta(child);
               return (
                 <NativeRow
                   key={child.id}
                   title={child.name}
-                  subtitle={child.description || child.slug}
                   meta={label}
                   leading={<Icon size={18} color={tokens.mutedForeground} />}
                   last={index === folder.children.length - 1}

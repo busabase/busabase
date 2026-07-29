@@ -3,7 +3,7 @@ import { getBusabaseOpenApiSpec } from "../src/openapi/spec";
 
 /**
  * Permanent regression coverage for the Drive Grep Retrieval OpenAPI surface.
- * The 4 routes below are declared in packages/busabase-contract/src/domains/assets/contract.ts
+ * The 3 routes below are declared in packages/busabase-contract/src/domains/assets/contract.ts
  * (nothing to change there — this test only verifies the generator faithfully
  * turns those declarations into a public /api/v1 spec). See
  * apps/busabase/content/spec/drive-grep-retrieval.md for the feature design.
@@ -26,12 +26,11 @@ const DRIVE_GREP_ROUTES: Array<{
 }> = [
   { path: "/api/v1/assets/{assetId}/text", method: "put", hasRequestBody: true },
   { path: "/api/v1/assets/text/upload-urls", method: "post", hasRequestBody: true },
-  { path: "/api/v1/assets/grep", method: "post", hasRequestBody: true },
   { path: "/api/v1/assets/{assetId}/text/lines", method: "get", hasRequestBody: false },
 ];
 
 describe("Busabase OpenAPI Drive Grep Retrieval routes", () => {
-  it("exposes putText, createTextUploadUrl, grep, and readTextLines at the expected paths and HTTP methods", async () => {
+  it("exposes putText, createTextUploadUrl, and readTextLines at the expected paths and HTTP methods", async () => {
     const spec = await getBusabaseOpenApiSpec();
     const paths = (spec.paths ?? {}) as Record<string, OpenApiPathItem>;
 

@@ -596,7 +596,7 @@ const toCreatableFields = (
     if (!type) continue;
     if (type === "relation") continue;
     if (PACKAGE_COMPUTED_FIELD_TYPES.includes(type)) continue;
-    if (type === "attachment") continue; // §6.4: attachment values are not published in v1.
+    if (type === "attachment") continue; // §6.4: attachment values are not exported in v1.
     result[slug] = value;
   }
   return result;

@@ -1,3 +1,4 @@
+import { type BusabaseAssetsClient, grepAssets } from "./asset-grep.js";
 import {
   type BusabaseClient,
   type BusabaseConfig,
@@ -5,6 +6,7 @@ import {
   type ResolvedConfig,
   resolveConfig,
 } from "./client.js";
+import { type BusabaseRecordsClient, getRecordByField } from "./record-get.js";
 
 // The cloud contract, exported as both a value and a type. The value lets tooling
 // introspect the procedure tree (e.g. busabase-cli auto-generates one command per
@@ -17,6 +19,12 @@ export { CREATABLE_NODE_TYPES } from "busabase-contract/domains";
 // depending on the internal workspace `busabase-contract` package.
 export type * from "busabase-contract/types";
 export {
+  type BusabaseAssetsClient,
+  grepAssets,
+  toFilesOnlyGrepResult,
+  toUnifiedFilesGrepInput,
+} from "./asset-grep.js";
+export {
   type BusabaseClient,
   type BusabaseConfig,
   createBusabaseClient,
@@ -25,7 +33,11 @@ export {
   type ResolvedConfig,
   resolveConfig,
 } from "./client.js";
-
+export {
+  type BusabaseRecordsClient,
+  getRecordByField,
+  type RecordByFieldInput,
+} from "./record-get.js";
 /**
  * Ergonomic entry point to the Busabase API — a thin, fully-typed wrapper around
  * {@link createBusabaseClient}. Prefer this when you want a single object with
@@ -62,8 +74,15 @@ export class Busabase {
   get bases(): BusabaseClient["bases"] {
     return this.client.bases;
   }
-  get records(): BusabaseClient["records"] {
-    return this.client.records;
+  get records(): BusabaseRecordsClient {
+    const getByField = (input: Parameters<BusabaseRecordsClient["getByField"]>[0]) =>
+      getRecordByField(this.client, input);
+    return new Proxy(this.client.records, {
+      get(target, property, receiver) {
+        if (property === "getByField") return getByField;
+        return Reflect.get(target, property, receiver);
+      },
+    }) as BusabaseRecordsClient;
   }
   get views(): BusabaseClient["views"] {
     return this.client.views;
@@ -86,8 +105,15 @@ export class Busabase {
   get agent(): BusabaseClient["agent"] {
     return this.client.agent;
   }
-  get assets(): BusabaseClient["assets"] {
-    return this.client.assets;
+  get assets(): BusabaseAssetsClient {
+    const filesOnlyGrep = (input: Parameters<BusabaseAssetsClient["grep"]>[0]) =>
+      grepAssets(this.client, input);
+    return new Proxy(this.client.assets, {
+      get(target, property, receiver) {
+        if (property === "grep") return filesOnlyGrep;
+        return Reflect.get(target, property, receiver);
+      },
+    }) as BusabaseAssetsClient;
   }
   /** Skills, Drives, and AirApps — one surface, discriminated by `type`. */
   get fileTrees(): BusabaseClient["fileTrees"] {
@@ -122,10 +148,8 @@ export class Busabase {
    * source (Drive/Skill files, Doc bodies, and Base records — records read
    * the canonical `headCommit.fields`, never the truncated search
    * projection), with a shared `maxMatches`/deadline budget and per-source
-   * honest coverage. Use this when the answer could live anywhere; use
-   * `client.assets.grep` directly instead when you specifically only care
-   * about files and want its fuller `missing`/`stale`/`unsearchable`
-   * file-only reporting.
+   * honest coverage. `bb.assets.grep` remains available as a files-only SDK
+   * convenience and delegates here with `sources: ["files"]`.
    */
   grep(input: Parameters<BusabaseClient["grep"]>[0]) {
     return this.client.grep(input);

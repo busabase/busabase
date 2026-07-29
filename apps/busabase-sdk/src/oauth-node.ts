@@ -1,0 +1,223 @@
+import { randomUUID } from "node:crypto";
+import { chmodSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { dirname, join } from "node:path";
+import {
+  BUSABASE_AIRAPP_CLIENT_ID,
+  BusabaseOAuthError,
+  type BusabaseOAuthTokenSet,
+  refreshBusabaseOAuthToken,
+  revokeBusabaseOAuthToken,
+} from "./oauth.js";
+import { normalizeBaseUrl } from "./url.js";
+
+const STORE_VERSION = 1;
+const APP_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
+const REFRESH_WINDOW_MS = 60_000;
+const refreshesByCredentialPath = new Map<string, Promise<BusabaseAirAppOAuthCredential>>();
+
+export interface BusabaseAirAppOAuthCredential {
+  version: 1;
+  appId: string;
+  baseUrl: string;
+  clientId: string;
+  accessToken: string;
+  refreshToken: string;
+  expiresAt: string;
+  scope: string[];
+  tokenType: string;
+}
+
+export interface BusabaseAirAppCredentialStoreOptions {
+  /** Override only for tests or an explicitly isolated installation. */
+  rootDir?: string;
+}
+
+const assertAppId = (appId: string) => {
+  if (!APP_ID_RE.test(appId)) {
+    throw new BusabaseOAuthError(
+      "invalid_airapp_id",
+      "AirApp id must use letters, digits, dot, dash, or underscore",
+    );
+  }
+  return appId;
+};
+
+const storeRoot = (options: BusabaseAirAppCredentialStoreOptions = {}) =>
+  options.rootDir ?? join(homedir(), ".busabase");
+
+/** Directory containing one owner-only OAuth registration per local AirApp. */
+export const busabaseAirAppCredentialsDir = (options: BusabaseAirAppCredentialStoreOptions = {}) =>
+  join(storeRoot(options), "airapps");
+
+export const busabaseAirAppCredentialPath = (
+  appId: string,
+  options: BusabaseAirAppCredentialStoreOptions = {},
+) => join(busabaseAirAppCredentialsDir(options), `${assertAppId(appId)}.json`);
+
+const normalizeOrigin = (raw: string) => {
+  const url = new URL(normalizeBaseUrl(raw));
+  if (url.username || url.password || url.search || url.hash) {
+    throw new BusabaseOAuthError("invalid_base_url", "Busabase base URL must be an origin");
+  }
+  return url.origin;
+};
+
+const parseCredential = (raw: string, expectedAppId: string): BusabaseAirAppOAuthCredential => {
+  let value: unknown;
+  try {
+    value = JSON.parse(raw);
+  } catch {
+    throw new BusabaseOAuthError("invalid_local_credential", "AirApp OAuth credential is invalid");
+  }
+  const item = value as Partial<BusabaseAirAppOAuthCredential>;
+  if (
+    item.version !== STORE_VERSION ||
+    item.appId !== expectedAppId ||
+    typeof item.baseUrl !== "string" ||
+    typeof item.clientId !== "string" ||
+    typeof item.accessToken !== "string" ||
+    typeof item.refreshToken !== "string" ||
+    typeof item.expiresAt !== "string" ||
+    !Array.isArray(item.scope) ||
+    item.scope.some((scope) => typeof scope !== "string") ||
+    typeof item.tokenType !== "string"
+  ) {
+    throw new BusabaseOAuthError("invalid_local_credential", "AirApp OAuth credential is invalid");
+  }
+  return item as BusabaseAirAppOAuthCredential;
+};
+
+export function loadBusabaseAirAppOAuthCredential(
+  appId: string,
+  options: BusabaseAirAppCredentialStoreOptions = {},
+): BusabaseAirAppOAuthCredential | null {
+  const path = busabaseAirAppCredentialPath(appId, options);
+  try {
+    return parseCredential(readFileSync(path, "utf8"), appId);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw error;
+  }
+}
+
+export function storeBusabaseAirAppOAuthCredential(
+  input: {
+    appId: string;
+    baseUrl: string;
+    tokenSet: BusabaseOAuthTokenSet;
+    clientId?: string;
+  },
+  options: BusabaseAirAppCredentialStoreOptions = {},
+): BusabaseAirAppOAuthCredential {
+  if (!input.tokenSet.refreshToken) {
+    throw new BusabaseOAuthError(
+      "missing_refresh_token",
+      "A refresh token is required for a persistent local AirApp login",
+    );
+  }
+  const credential: BusabaseAirAppOAuthCredential = {
+    version: STORE_VERSION,
+    appId: assertAppId(input.appId),
+    baseUrl: normalizeOrigin(input.baseUrl),
+    clientId: input.clientId ?? BUSABASE_AIRAPP_CLIENT_ID,
+    accessToken: input.tokenSet.accessToken,
+    refreshToken: input.tokenSet.refreshToken,
+    expiresAt: input.tokenSet.expiresAt,
+    scope: input.tokenSet.scope,
+    tokenType: input.tokenSet.tokenType,
+  };
+  const path = busabaseAirAppCredentialPath(input.appId, options);
+  const directory = dirname(path);
+  mkdirSync(directory, { recursive: true, mode: 0o700 });
+  try {
+    chmodSync(directory, 0o700);
+  } catch {
+    // Best effort on filesystems without POSIX modes.
+  }
+  const temporaryPath = `${path}.${randomUUID()}.tmp`;
+  writeFileSync(temporaryPath, `${JSON.stringify(credential, null, 2)}\n`, { mode: 0o600 });
+  try {
+    chmodSync(temporaryPath, 0o600);
+  } catch {
+    // Best effort on filesystems without POSIX modes.
+  }
+  renameSync(temporaryPath, path);
+  return credential;
+}
+
+/** Load a valid access token, rotating and persisting the token set when needed. */
+export async function getBusabaseAirAppAccessToken(
+  appId: string,
+  options: BusabaseAirAppCredentialStoreOptions = {},
+  fetchImpl: typeof fetch = fetch,
+): Promise<BusabaseAirAppOAuthCredential | null> {
+  const credential = loadBusabaseAirAppOAuthCredential(appId, options);
+  if (!credential) return null;
+  const expiresAt = Date.parse(credential.expiresAt);
+  if (Number.isFinite(expiresAt) && expiresAt > Date.now() + REFRESH_WINDOW_MS) return credential;
+
+  const credentialPath = busabaseAirAppCredentialPath(appId, options);
+  const activeRefresh = refreshesByCredentialPath.get(credentialPath);
+  if (activeRefresh) return activeRefresh;
+
+  const refresh = (async () => {
+    const tokenSet = await refreshBusabaseOAuthToken(
+      {
+        baseUrl: credential.baseUrl,
+        refreshToken: credential.refreshToken,
+        clientId: credential.clientId,
+      },
+      fetchImpl,
+    );
+    return storeBusabaseAirAppOAuthCredential(
+      {
+        appId,
+        baseUrl: credential.baseUrl,
+        clientId: credential.clientId,
+        tokenSet: {
+          ...tokenSet,
+          refreshToken: tokenSet.refreshToken ?? credential.refreshToken,
+        },
+      },
+      options,
+    );
+  })();
+
+  refreshesByCredentialPath.set(credentialPath, refresh);
+  try {
+    return await refresh;
+  } finally {
+    if (refreshesByCredentialPath.get(credentialPath) === refresh) {
+      refreshesByCredentialPath.delete(credentialPath);
+    }
+  }
+}
+
+export function clearBusabaseAirAppOAuthCredential(
+  appId: string,
+  options: BusabaseAirAppCredentialStoreOptions = {},
+): void {
+  rmSync(busabaseAirAppCredentialPath(appId, options), { force: true });
+}
+
+export async function revokeBusabaseAirAppOAuthCredential(
+  appId: string,
+  options: BusabaseAirAppCredentialStoreOptions = {},
+  fetchImpl: typeof fetch = fetch,
+): Promise<void> {
+  const credential = loadBusabaseAirAppOAuthCredential(appId, options);
+  if (!credential) return;
+  try {
+    await revokeBusabaseOAuthToken(
+      {
+        baseUrl: credential.baseUrl,
+        token: credential.refreshToken,
+        clientId: credential.clientId,
+      },
+      fetchImpl,
+    );
+  } finally {
+    clearBusabaseAirAppOAuthCredential(appId, options);
+  }
+}

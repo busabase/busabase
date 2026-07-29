@@ -102,6 +102,59 @@ describe("Busabase namespaces", () => {
     expect(pathname).toBe("/api/v1/assets/ast_1/metadata");
     expect(pathname).not.toContain("/attachments/");
   });
+
+  it("routes both record selectors through the canonical /records/get operation", async () => {
+    const requests: Request[] = [];
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      requests.push(request);
+      return new Response(JSON.stringify({ id: "rec_1" }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }) as unknown as typeof fetch;
+    const bb = new Busabase({ baseUrl: "http://localhost:15419", fetch: fetchImpl });
+
+    expect((await bb.records.get({ recordId: "rec_1" })).id).toBe("rec_1");
+    expect(
+      (
+        await bb.records.getByField({
+          baseId: "bse_1",
+          fieldSlug: "slug",
+          valueText: "hello world",
+        })
+      )?.id,
+    ).toBe("rec_1");
+
+    expect(
+      requests.map((request) => {
+        const url = new URL(request.url);
+        return [url.pathname, Object.fromEntries(url.searchParams)];
+      }),
+    ).toEqual([
+      ["/api/v1/records/get", { recordId: "rec_1" }],
+      ["/api/v1/records/get", { baseId: "bse_1", fieldSlug: "slug", valueText: "hello world" }],
+    ]);
+  });
+
+  it("keeps records.getByField nullable on 404 and propagates other failures", async () => {
+    const statusQueue = [404, 500];
+    const fetchImpl = vi.fn(async () => {
+      const status = statusQueue.shift() ?? 500;
+      return new Response(
+        JSON.stringify({
+          error: status === 404 ? "Record not found" : "Server failed",
+          code: status === 404 ? "NOT_FOUND" : "INTERNAL_SERVER_ERROR",
+        }),
+        { status, headers: { "content-type": "application/json" } },
+      );
+    }) as unknown as typeof fetch;
+    const bb = new Busabase({ baseUrl: "http://localhost:15419", fetch: fetchImpl });
+    const input = { baseId: "bse_1", fieldSlug: "slug", valueText: "missing" };
+
+    await expect(bb.records.getByField(input)).resolves.toBeNull();
+    await expect(bb.records.getByField(input)).rejects.toThrow(/Server failed/);
+  });
 });
 
 describe("Busabase.putText", () => {
@@ -301,19 +354,72 @@ describe("Busabase.grep() (Unified Grep) routes through the typed client", () =>
   });
 });
 
-describe("Busabase.assets.grep / readTextLines route through the typed client with zero wrapper code", () => {
-  // No SDK wrapper exists for these two — they're reached directly via
-  // `bb.assets.<method>`. That's by design (see index.ts), but it also means a
-  // contract/router typo could silently break them with nothing else catching it.
-  it("assets.grep() posts to /assets/grep", async () => {
-    const { fetchImpl, requests } = okFetch();
+describe("Busabase.assets.grep / readTextLines convenience", () => {
+  it("assets.grep() posts files-only input to /grep and preserves its legacy output shape", async () => {
+    const requests: Request[] = [];
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      requests.push(request);
+      return new Response(
+        JSON.stringify({
+          matches: [
+            {
+              source: "files",
+              assetId: "ast_1",
+              fileName: "todo.txt",
+              drivePath: "notes/todo.txt",
+              line: 2,
+              column: 1,
+              text: "TODO",
+              before: [],
+              after: [],
+            },
+          ],
+          coverage: {
+            files: {
+              scanned: 1,
+              missing: ["ast_missing"],
+              stale: [],
+              unsearchable: 0,
+              errored: [],
+              notReached: 0,
+            },
+            docs: { scanned: 0, errored: [], notReached: 0 },
+            records: { scanned: 0, errored: [], notReached: 0 },
+          },
+          truncated: false,
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    }) as unknown as typeof fetch;
     const bb = new Busabase({ baseUrl: "http://localhost:15419", fetch: fetchImpl });
 
-    await bb.assets.grep({ pattern: "TODO" });
+    const result = await bb.assets.grep({ pattern: "TODO" });
 
     expect(requests[0]?.method).toBe("POST");
-    expect(new URL(requests[0]?.url ?? "").pathname).toBe("/api/v1/assets/grep");
-    expect(await requests[0]?.clone().json()).toEqual({ pattern: "TODO" });
+    expect(new URL(requests[0]?.url ?? "").pathname).toBe("/api/v1/grep");
+    expect(await requests[0]?.clone().json()).toEqual({ pattern: "TODO", sources: ["files"] });
+    expect(result).toEqual({
+      matches: [
+        {
+          assetId: "ast_1",
+          fileName: "todo.txt",
+          drivePath: "notes/todo.txt",
+          line: 2,
+          column: 1,
+          text: "TODO",
+          before: [],
+          after: [],
+        },
+      ],
+      filesScanned: 1,
+      missing: ["ast_missing"],
+      stale: [],
+      unsearchable: 0,
+      errored: [],
+      notReached: 0,
+      truncated: false,
+    });
   });
 
   it("assets.readTextLines() gets /assets/{assetId}/text/lines with the range as query params", async () => {

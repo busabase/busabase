@@ -142,8 +142,17 @@ test("GET an unknown change request id returns 404, not 500", async ({ request }
 });
 
 test("GET an unknown record id returns 404, not 500", async ({ request }) => {
-  const response = await request.get("/api/v1/records/does-not-exist");
+  const response = await request.get("/api/v1/records/get?recordId=does-not-exist");
   expect(response.status()).toBe(404);
+});
+
+test("retired record get paths are not public routes", async ({ request }) => {
+  expect((await request.get("/api/v1/records/does-not-exist")).status()).toBe(404);
+  expect(
+    (
+      await request.get("/api/v1/records/by-field?baseId=bse_x&fieldSlug=slug&valueText=missing")
+    ).status(),
+  ).toBe(404);
 });
 
 test("POST a change request with an invalid body is rejected as a client error", async ({

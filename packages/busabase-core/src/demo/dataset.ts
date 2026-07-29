@@ -70,6 +70,7 @@ import type {
   SeedBaseDef,
   SeedChangeRequestDef,
   SeedFieldDef,
+  SeedFileTreeDef,
   SeedFolderDef,
   SeedFormDef,
   SeedRecordDef,
@@ -3191,6 +3192,7 @@ export interface DemoDataset {
   auditEvents: AuditEventVO[];
   docs: DemoDocVO[];
   files: FileNodeVO[];
+  fileTreeNodes: SeedFileTreeDef[];
   comments: CommentVO[];
 }
 
@@ -3388,6 +3390,78 @@ export const buildDemoDataset = (
       baseId: null,
       children: fileNodes,
     });
+  }
+
+  const fileTreeFolderConfig: Record<
+    SeedFileTreeDef["nodeType"],
+    {
+      id: string;
+      slug: string;
+      name: string;
+      description: string;
+      position: number;
+      entryFile: string;
+    }
+  > = {
+    skill: {
+      id: "nod_skills",
+      slug: "skills",
+      name: "Agent Skills",
+      description: "Versioned Skill folders that agents can read and update through review.",
+      position: 1,
+      entryFile: "SKILL.md",
+    },
+    drive: {
+      id: "nod_drives",
+      slug: "drives",
+      name: "Drives",
+      description: "Pure file-tree Drives managed through review.",
+      position: 2,
+      entryFile: "README.md",
+    },
+    airapp: {
+      id: "nod_airapps",
+      slug: "airapps",
+      name: "AirApps",
+      description: "Runnable AirApp projects managed through review.",
+      position: 5,
+      entryFile: "package.json",
+    },
+  };
+  for (const type of ["skill", "drive", "airapp"] as const) {
+    const config = fileTreeFolderConfig[type];
+    const children: NodeVO[] = (scenario.fileTreeNodes ?? [])
+      .filter((def) => def.nodeType === type)
+      .map((def) => ({
+        id: def.nodeId,
+        parentId: config.id,
+        type,
+        slug: def.slug,
+        name: def.name,
+        description: def.description,
+        metadata: { entryFile: config.entryFile, visibility: "workspace", version: "0.1.0" },
+        position: def.position,
+        createdAt: rootCreatedAt,
+        updatedAt: rootCreatedAt,
+        baseId: null,
+        children: [],
+      }));
+    if (children.length > 0) {
+      folderNodes.push({
+        id: config.id,
+        parentId: DEMO_ROOT_NODE_ID,
+        type: "folder",
+        slug: config.slug,
+        name: config.name,
+        description: config.description,
+        metadata: {},
+        position: config.position,
+        createdAt: rootCreatedAt,
+        updatedAt: rootCreatedAt,
+        baseId: null,
+        children,
+      });
+    }
   }
 
   nodes.push({
@@ -3712,6 +3786,7 @@ export const buildDemoDataset = (
     auditEvents,
     docs,
     files,
+    fileTreeNodes: scenario.fileTreeNodes ?? [],
     comments,
   };
 };

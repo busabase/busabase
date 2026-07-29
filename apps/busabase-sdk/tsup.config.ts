@@ -11,7 +11,7 @@ import { defineConfig } from "tsup";
 // declarations so external TypeScript consumers get full autocomplete over the
 // bundled VO/DTO graph.
 export default defineConfig({
-  entry: { index: "src/index.ts" },
+  entry: { index: "src/index.ts", oauth: "src/oauth.ts", "oauth-node": "src/oauth-node.ts" },
   format: ["esm"],
   target: "node20",
   platform: "neutral",

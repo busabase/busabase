@@ -7,7 +7,6 @@ import type {
   GanttScale,
   RecordVO,
   ViewConfigVO,
-  ViewFilterVO,
   ViewType,
   ViewVO,
 } from "busabase-contract/types";
@@ -91,6 +90,7 @@ import { BusaBaseGantt } from "./base-gantt";
 import { BusaBaseKanban } from "./base-kanban";
 import { FieldBadge, WhiteboardThumbnail } from "./field-preview";
 import { ConfirmActionDialog } from "./primitives";
+import { RecordsPaginationBar } from "./records-pagination-bar";
 import { SplitSubmitButton } from "./split-submit-button";
 import {
   FIELD_TYPE_ICONS,
@@ -542,71 +542,7 @@ function FieldColumnHeader({
   );
 }
 
-export const applyViewConfigToRecords = (records: RecordVO[], config?: ViewConfigVO) => {
-  if (!config) {
-    return records;
-  }
-
-  const filtered = records.filter((record) =>
-    config.filters.every((filter) => recordMatchesViewFilter(record, filter)),
-  );
-  return [...filtered].sort((left, right) => compareRecordsByViewSort(left, right, config));
-};
-
-// Filter/sort compare against the text the user actually SEES in the cell, not
-// the raw stored value — so `getFieldPreviewText` (field-aware) rather than the
-// bare `fieldPreviewText`. Without the field def, a `select` matches its choice
-// id instead of its label (invisible in English demos where id ≈ name, broken
-// outright for a localized label), and an array-valued field — `multiselect`, or
-// a `values` lookup — stringifies to pretty-printed multi-line JSON that no
-// user-typed substring will ever match.
-const recordMatchesViewFilter = (record: RecordVO, filter: ViewFilterVO) => {
-  const value = record.headCommit.fields[filter.fieldSlug];
-  const field = record.base.fields.find((item) => item.slug === filter.fieldSlug);
-  const text = getFieldPreviewText(field, value).toLowerCase();
-  // BOTH sides must go through the same formatter. `filter.value` is not always
-  // free text: for a `select`/`multiselect` the editor stores the CHOICE ID
-  // ("needs-review") while the cell displays the label ("Needs review", or 待审核
-  // once localized). Comparing a formatted cell against a raw id matches nothing.
-  const expected = getFieldPreviewText(field, filter.value).toLowerCase();
-
-  if (filter.operator === "contains") {
-    return text.includes(expected);
-  }
-  if (filter.operator === "equals") {
-    return text === expected;
-  }
-  if (filter.operator === "not_empty") {
-    return text.length > 0 && text !== "-";
-  }
-  if (filter.operator === "is_empty") {
-    return text.length === 0 || text === "-";
-  }
-  if (filter.operator === "is_true") {
-    return value === true || value === "true";
-  }
-  if (filter.operator === "is_false") {
-    return value === false || value === "false" || value === null || value === undefined;
-  }
-  return true;
-};
-
-const compareRecordsByViewSort = (left: RecordVO, right: RecordVO, config: ViewConfigVO) => {
-  for (const sort of config.sorts) {
-    const leftField = left.base.fields.find((item) => item.slug === sort.fieldSlug);
-    const rightField = right.base.fields.find((item) => item.slug === sort.fieldSlug);
-    const leftValue = getFieldPreviewText(leftField, left.headCommit.fields[sort.fieldSlug]);
-    const rightValue = getFieldPreviewText(rightField, right.headCommit.fields[sort.fieldSlug]);
-    const result = leftValue.localeCompare(rightValue, undefined, {
-      numeric: true,
-      sensitivity: "base",
-    });
-    if (result !== 0) {
-      return sort.direction === "asc" ? result : -result;
-    }
-  }
-  return new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime();
-};
+export { applyViewConfigToRecords } from "../../base/utils/view-records";
 
 const toSlug = (value: string) =>
   value
@@ -1050,12 +986,7 @@ export function BusaBaseTable({
         <div className="flex flex-shrink-0 items-center gap-2">
           <span className="text-muted-foreground text-xs">
             {(() => {
-              // With a view filter active, records.length is the filtered rows
-              // shown; without one, show the true whole-base total (so the header
-              // reports "240 records", not the page size) once the count loads.
-              const hasFilter = Boolean(activeView && activeView.config.filters.length > 0);
-              const displayCount =
-                !hasFilter && pagination?.total != null ? pagination.total : records.length;
+              const displayCount = pagination?.total ?? records.length;
               return fmt(messages.base.recordCount, {
                 count: displayCount,
                 plural: displayCount === 1 ? "" : "s",
@@ -1588,23 +1519,7 @@ export function BusaBaseTable({
           </div>
         </div>
       )}
-      {pagination?.hasMore ? (
-        <div className="flex items-center justify-center pt-3">
-          <button
-            className="inline-flex h-8 items-center gap-2 rounded-md border border-border/70 px-3 font-medium text-muted-foreground text-xs transition-colors hover:bg-accent hover:text-foreground disabled:opacity-60"
-            disabled={pagination.isLoadingMore}
-            onClick={() => pagination.loadMore()}
-            type="button"
-          >
-            {pagination.isLoadingMore ? messages.common.loading : messages.search.loadMore}
-            {pagination.total != null ? (
-              <span className="text-muted-foreground/70">
-                {pagination.loaded} / {pagination.total}
-              </span>
-            ) : null}
-          </button>
-        </div>
-      ) : null}
+      {pagination ? <RecordsPaginationBar className="mt-3" {...pagination} /> : null}
     </div>
   );
 }

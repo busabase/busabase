@@ -362,11 +362,12 @@ their text once via \`putText\` — run your own extractor, then hand the result
 
 \`\`\`bash
 # Search every text-bearing asset in a Space (real file + line + column numbers):
-curl -X POST ${base}/api/v1/assets/grep \\
+curl -X POST ${base}/api/v1/grep \\
 ${authLine}  -H 'content-type: application/json' \\
-  --data '{"pattern": "Termination", "scope": {"drivePath": "contracts/"}, "contextLines": 2}'
-# → { matches: [{ assetId, fileName, drivePath, line, column, text, before, after }],
-#     filesScanned, missing: [assetId, ...], stale: [...], unsearchable, truncated }
+  --data '{"pattern": "Termination", "sources": ["files"], "scope": {"files": {"drivePath": "contracts/"}}, "contextLines": 2}'
+# → { matches: [{ source: "files", assetId, fileName, drivePath, line, column, text, before, after }],
+#     coverage: { files: { scanned, missing: [assetId, ...], stale: [...],
+#                          unsearchable, errored, notReached }, docs: {...}, records: {...} }, truncated }
 # \`missing\` names binary assets with no text yet — extract-and-supply them, don't assume
 # full coverage. \`stale\` names assets whose text was derived from a since-replaced file.
 
@@ -382,10 +383,10 @@ npx busabase-cli assets put-text --asset-id :assetId --none
 # goes through POST /assets/text/upload-urls → PUT bytes → putText({storageKey})).
 \`\`\`
 
-Search EVERYTHING in a Space — files AND Doc bodies AND Base records — in one call. Use this
-(not \`assets/grep\` above) when the answer could live anywhere; use \`assets/grep\` instead when
-you specifically only care about files and want its fuller \`missing\`/\`stale\`/\`unsearchable\`
-file-only reporting. Same pattern language (regex, guarded against catastrophic backtracking),
+Search EVERYTHING in a Space — files AND Doc bodies AND Base records — through the same endpoint.
+Omit \`sources\` for all three, or pass \`sources: ["files"]\` for files-only searching with the
+same full \`missing\`/\`stale\`/\`unsearchable\` coverage. Same pattern language (regex, guarded
+against catastrophic backtracking),
 same \`maxMatches\`/\`contextLines\` semantics — files are scanned first, then Docs, then whatever
 budget remains goes to records, so a low \`maxMatches\` always drops the records tail first, never
 files/Docs. Records are read from the CANONICAL record commit (\`headCommit.fields\`), never the
@@ -417,7 +418,7 @@ ${authLine}  -H 'content-type: application/json' \\
 \`\`\`
 
 After a grep match with \`source: "docs"\`, read just the lines around it instead of the whole
-Doc body (\`docs/:nodeId\` returns the ENTIRE body) — the same \`assets/grep\` →
+Doc body (\`docs/:nodeId\` returns the ENTIRE body) — the same files grep →
 \`assets/:assetId/text/lines\` follow-up loop above, for Docs:
 
 \`\`\`bash

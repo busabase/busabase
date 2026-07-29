@@ -1,4 +1,4 @@
-import { skipToken, useQuery } from "@tanstack/react-query";
+import { skipToken, useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { getRecordTitle } from "busabase-core/dashboard/change-request";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { List, MoreHorizontal, Plus, Settings2, Table2 } from "lucide-react-native";
@@ -8,7 +8,6 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useBusabaseOrpc } from "~/api/use-busabase-orpc";
 import { ConnectionGuard } from "~/components/busabase/ConnectionGuard";
 import { DrawerScaffold } from "~/components/busabase/DrawerScaffold";
-import { FieldList } from "~/components/busabase/FieldList";
 import { FieldValue } from "~/components/busabase/FieldValue";
 import {
   NativeActionBar,
@@ -24,6 +23,11 @@ import {
 import { Button } from "~/components/ui/Button";
 import { getPreview } from "~/lib/busabase-display";
 import { formatListTime } from "~/lib/format";
+import {
+  normalizeRecordsPage,
+  RECORDS_PAGE_SIZE,
+  scopeRecordsPageToBase,
+} from "~/lib/record-pagination";
 import { applyViewConfig } from "~/lib/view-config";
 import { mobile, radius, typography } from "~/theme/tokens";
 import { useTokens } from "~/theme/use-tokens";
@@ -46,19 +50,31 @@ function BaseDetailContent() {
       ? buda.orpc.bases.list.queryOptions({ input: {} })
       : { queryKey: ["no-connection", "bases", "list"], queryFn: skipToken },
   );
-  const recordsQuery = useQuery(
-    buda
-      ? buda.orpc.records.list.queryOptions({
-          input: { limit: 100 },
-          select: (page) => page.records,
-        })
-      : { queryKey: ["no-connection", "records", "list"], queryFn: skipToken },
-  );
-
   const base = useMemo(
     () => basesQuery.data?.find((item) => item.slug === slug) ?? null,
     [basesQuery.data, slug],
   );
+
+  const recordsQuery = useInfiniteQuery({
+    queryKey: ["base-records", buda?.serverUrl, buda?.spaceScope, base?.id, RECORDS_PAGE_SIZE],
+    queryFn:
+      buda && base
+        ? async ({ pageParam }) =>
+            normalizeRecordsPage(
+              scopeRecordsPageToBase(
+                await buda.client.records.list({
+                  baseId: base.id,
+                  cursor: pageParam,
+                  limit: RECORDS_PAGE_SIZE,
+                }),
+                base.id,
+              ),
+              pageParam,
+            )
+        : skipToken,
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
+  });
 
   const viewsQuery = useQuery(
     buda && base
@@ -69,7 +85,10 @@ function BaseDetailContent() {
   const activeView = views.find((view) => view.id === activeViewId) ?? null;
 
   const records = useMemo(() => {
-    const baseRecords = recordsQuery.data?.filter((record) => record.baseId === base?.id) ?? [];
+    const baseRecords =
+      recordsQuery.data?.pages
+        .flatMap((page) => page.records)
+        .filter((record) => record.baseId === base?.id) ?? [];
     return applyViewConfig(baseRecords, activeView?.config);
   }, [recordsQuery.data, base?.id, activeView]);
 
@@ -94,13 +113,12 @@ function BaseDetailContent() {
     void viewsQuery.refetch();
   };
 
-  const loading = basesQuery.isLoading || recordsQuery.isLoading;
+  const loading = basesQuery.isLoading || (Boolean(base) && recordsQuery.isPending);
   const error = basesQuery.error ?? recordsQuery.error;
 
   return (
     <DrawerScaffold
       title={base?.name ?? "Base"}
-      subtitle={base ? `${records.length} records · ${base.fields.length} fields` : slug}
       refreshing={basesQuery.isRefetching || recordsQuery.isRefetching}
       onRefresh={refresh}
       headerAction={
@@ -138,14 +156,6 @@ function BaseDetailContent() {
       ) : null}
       {base ? (
         <>
-          <NativeSection title="Info">
-            <NativeRow
-              title={base.description ? "Description" : "Base"}
-              subtitle={base.description || base.slug}
-            />
-            <NativeRow title="Fields" subtitle={`${base.fields.length} configured fields`} last />
-          </NativeSection>
-
           {views.length > 0 ? (
             <NativeChipList
               value={activeViewId}
@@ -174,10 +184,7 @@ function BaseDetailContent() {
           />
 
           {records.length === 0 ? (
-            <NativeEmptyState
-              title="No records"
-              description="Merged records for this base will show here."
-            />
+            <NativeEmptyState title="No records" />
           ) : displayMode === "list" ? (
             <NativeSection title="Records" caption={`${records.length}`}>
               {records.map((record, index) => {
@@ -198,15 +205,7 @@ function BaseDetailContent() {
                     onPress={() =>
                       router.push({ pathname: "/records/[id]", params: { id: record.id } })
                     }
-                  >
-                    <FieldList
-                      fields={record.headCommit.fields}
-                      definitions={previewFields.slice(0, 3)}
-                      limitToDefinitions
-                      variant="compact"
-                      interactive={false}
-                    />
-                  </NativeRow>
+                  />
                 );
               })}
             </NativeSection>
@@ -274,10 +273,21 @@ function BaseDetailContent() {
             </NativeSection>
           )}
 
+          {recordsQuery.hasNextPage ? (
+            <NativeActionBar>
+              <Button
+                label="Load more records"
+                variant="secondary"
+                loading={recordsQuery.isFetchingNextPage}
+                fullWidth
+                onPress={() => void recordsQuery.fetchNextPage()}
+              />
+            </NativeActionBar>
+          ) : null}
+
           <NativeBottomSheet
             visible={actionsOpen}
             title="Base actions"
-            description="Manage this base without crowding the record list."
             showCloseButton
             onClose={() => setActionsOpen(false)}
             footer={
@@ -291,12 +301,6 @@ function BaseDetailContent() {
                     setActionsOpen(false);
                     router.push({ pathname: "/base/[slug]/design", params: { slug: base.slug } });
                   }}
-                />
-                <Button
-                  label="Close"
-                  variant="ghost"
-                  fullWidth
-                  onPress={() => setActionsOpen(false)}
                 />
               </NativeActionBar>
             }
@@ -319,7 +323,7 @@ const styles = StyleSheet.create({
   moreButton: {
     width: 36,
     height: 36,
-    borderRadius: radius.full,
+    borderRadius: radius.md,
     alignItems: "center",
     justifyContent: "center",
   },
