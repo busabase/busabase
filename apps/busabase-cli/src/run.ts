@@ -655,12 +655,17 @@ const GENERATED_SKIP = new Set<string>([
   // The `/file-trees` group is exposed by the task layer as `nodes
   // list-file-trees` / `get-file-tree` / `files` / `read-file` /
   // `files-change-request`, each taking `--kind` (see tasks/file-tree.ts).
-  "fileTrees.list",
+  // `fileTrees.list`/`fileTrees.get` are absent because the procedures are: the
+  // two tasks that used to call them now call `nodes.list({ types })` /
+  // `nodes.get`, so there is nothing left for the generator to skip.
   "fileTrees.create",
-  "fileTrees.get",
   "fileTrees.listFiles",
   "fileTrees.readFile",
   "fileTrees.createChangeRequest",
+  // `nodes get` is the curated `docs|files|folders get` facade's underlying
+  // route, but it stays generated too: it is the ONE command that reads a node
+  // of any type without knowing the type first, which is the whole point of the
+  // consolidation.
 ]);
 
 /** Walk `cloudContract` and register a leaf command per procedure not already covered by hand. */
@@ -1613,6 +1618,64 @@ To add content to a space that is already in use, use \`busabase-cli install\` i
         );
       }),
     );
+
+  // `docs list|get`, `files list|get`, `folders list|get` — the names people
+  // already type, kept alive on top of the unified Node surface.
+  //
+  // `GET /docs`, `/files`, `/folders` and their `/{nodeId}` gets are retired, so
+  // without these the three commands would simply vanish from the CLI. Each one
+  // is still exactly ONE request — `/nodes?types=<type>` or `/nodes/{nodeId}` —
+  // and nothing here fans out a request per row to reconstruct the old payload.
+  //
+  // `get` returns what it always did (plus the `type` discriminator the union
+  // carries). `list` is the honest part of the change: it prints lightweight
+  // summaries, because the retired lists hydrated every row (a full Doc body
+  // each, a resolved Asset each, a children query per folder) and that is the
+  // cost the consolidation removed. The description says so, so a reader learns
+  // it from `--help` instead of from a missing field at runtime.
+  for (const facade of [
+    {
+      group: "docs",
+      type: "doc" as const,
+      label: "Doc",
+      detail: "body included",
+      omitted: "no bodies",
+    },
+    {
+      group: "files",
+      type: "file" as const,
+      label: "File",
+      detail: "backing Asset included",
+      omitted: "no Asset detail",
+    },
+    {
+      group: "folders",
+      type: "folder" as const,
+      label: "Folder",
+      detail: "direct children included",
+      omitted: "no children",
+    },
+  ]) {
+    const group =
+      program.commands.find((c) => c.name() === facade.group) ??
+      program.command(facade.group).description(`${facade.label} nodes`);
+    addGlobalFlags(group.command("list"))
+      .description(`List ${facade.label} nodes — summaries only (${facade.omitted})`)
+      .addHelpText(
+        "after",
+        `\nOpenAPI: GET /nodes?types=${facade.type}\n  Follow up with \`${facade.group} get --node-id <id>\` for one node's full detail.`,
+      )
+      .action(runAction(state, (client) => client.nodes.list({ types: [facade.type] })));
+    addGlobalFlags(group.command("get"))
+      .description(`Get one ${facade.label} node (${facade.detail})`)
+      .requiredOption("--node-id <id>", `${facade.label} node id, or a slug unique to this type`)
+      .addHelpText("after", `\nOpenAPI: GET /nodes/{nodeId}?type=${facade.type}`)
+      .action(
+        runAction(state, (client, opts) =>
+          client.nodes.get({ nodeId: opts.nodeId as string, type: facade.type }),
+        ),
+      );
+  }
 
   // Shared task definitions (`busabase-contract/tasks`) — the same source the MCP
   // servers build their tools from. Runs after the curated commands above (so a

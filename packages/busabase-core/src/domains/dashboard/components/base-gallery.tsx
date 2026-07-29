@@ -10,6 +10,7 @@ import { ImageOff, Paperclip, RotateCcw } from "lucide-react";
 import { SPALink as Link } from "openlib/ui/dashboard";
 import { useSearch } from "wouter";
 import { useCoreI18n, useIString } from "../../../i18n";
+import { getPrimaryField } from "../../base/utils/primary-field";
 import { getRecordTitle } from "../helpers/change-request";
 import { getAttachmentRefs, getFieldPreviewText, getSafeAttachmentUrl } from "../helpers/field";
 import { mergeSearchIntoHref } from "../helpers/link-search";
@@ -86,7 +87,7 @@ function GalleryCard({
   const title = getRecordTitle(record, messages);
   const coverUrl = firstImageUrl(record, coverField);
   // The primary field is the card title — don't repeat it in the body.
-  const primaryFieldSlug = record.base.fields[0]?.slug;
+  const primaryFieldSlug = getPrimaryField(record.base)?.slug;
   const bodyFields = fields.filter(
     (field) => field.slug !== primaryFieldSlug && field.slug !== coverField?.slug,
   );

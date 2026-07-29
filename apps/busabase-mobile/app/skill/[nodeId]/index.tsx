@@ -3,6 +3,7 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import { useBusabaseOrpc } from "~/api/use-busabase-orpc";
 import { ConnectionGuard } from "~/components/busabase/ConnectionGuard";
 import { FileTreeScreen } from "~/components/busabase/FileTreeScreen";
+import { asNodeDetail } from "~/lib/node-detail";
 
 function SkillDetailContent() {
   const params = useLocalSearchParams<{ nodeId?: string }>();
@@ -12,15 +13,19 @@ function SkillDetailContent() {
 
   const skillQuery = useQuery(
     buda && nodeId
-      ? buda.orpc.fileTrees.get.queryOptions({ input: { nodeId, type: "skill" } })
+      ? buda.orpc.nodes.get.queryOptions({ input: { nodeId, type: "skill" } })
       : { queryKey: ["no-connection", "skill", nodeId], queryFn: skipToken },
   );
+  // `nodes.get` answers for every node type; narrowing to `skill` means a slug
+  // that resolved to some other type renders FileTreeScreen's not-found state
+  // instead of an empty file list wearing this Skill's chrome.
+  const skill = asNodeDetail(skillQuery.data, "skill");
 
   return (
     <FileTreeScreen
       title="Skill"
       entityLabel="Skill"
-      fileTree={skillQuery.data ?? null}
+      fileTree={skill}
       loading={skillQuery.isLoading}
       error={skillQuery.error ?? null}
       refreshing={skillQuery.isRefetching}

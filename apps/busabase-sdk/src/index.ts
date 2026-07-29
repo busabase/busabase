@@ -152,6 +152,20 @@ export class Busabase {
   get operations(): BusabaseClient["operations"] {
     return this.client.operations;
   }
+  /**
+   * The workspace node surface, and the single entry point for reading ONE node
+   * of any type: `bb.nodes.get({ nodeId })` returns a `NodeDetailVO`
+   * discriminated by `type` (`folder` carries `children`, `doc` a `body`, `file`
+   * its `asset`, `skill`/`drive`/`airapp` their `files`). It replaced the four
+   * typed gets (`docs`/`files`/`folders`/`fileTrees`), so a caller holding an id
+   * no longer has to know the node's type before it can read it.
+   *
+   * `bb.nodes.list({ types })` is the matching list: a flat array of lightweight
+   * summaries for just those types. Without `types` it still returns the full
+   * workspace tree.
+   *
+   * There is no `bb.folders` any more — folders are `type: "folder"` here.
+   */
   get nodes(): BusabaseClient["nodes"] {
     return this.client.nodes;
   }
@@ -174,18 +188,37 @@ export class Busabase {
       },
     }) as BusabaseAssetsClient;
   }
-  /** Skills, Drives, and AirApps — one surface, discriminated by `type`. */
+  /**
+   * Skills, Drives, and AirApps — one surface, discriminated by `type`.
+   *
+   * Creation and per-file reads/writes live here. Listing them and reading one
+   * node's detail moved to the unified Node surface:
+   * `bb.nodes.list({ types: ["skill", "drive", "airapp"] })` and
+   * `bb.nodes.get({ nodeId, type })`.
+   */
   get fileTrees(): BusabaseClient["fileTrees"] {
     return this.client.fileTrees;
   }
+  /**
+   * File nodes. `create` only — list with `bb.nodes.list({ types: ["file"] })`
+   * and read one (backing Asset included) with `bb.nodes.get({ nodeId })`.
+   */
   get files(): BusabaseClient["files"] {
     return this.client.files;
   }
+  /**
+   * Docs. Create / read a line range / update the body / open a Change Request.
+   * List with `bb.nodes.list({ types: ["doc"] })` and read one (body included)
+   * with `bb.nodes.get({ nodeId })`.
+   *
+   * There is deliberately no `bb.docs.list()` shim. The retired `GET /docs`
+   * returned every Doc *with its body*; the one-call replacement returns
+   * lightweight summaries, and the only way to keep the old shape would be a
+   * detail request per Doc. An SDK convenience that quietly turns one call into
+   * N is worse than a compile error that points at `bb.nodes`.
+   */
   get docs(): BusabaseClient["docs"] {
     return this.client.docs;
-  }
-  get folders(): BusabaseClient["folders"] {
-    return this.client.folders;
   }
   get agentTasks(): BusabaseClient["agentTasks"] {
     return this.client.agentTasks;

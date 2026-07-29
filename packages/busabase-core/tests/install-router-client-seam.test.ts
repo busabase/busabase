@@ -112,7 +112,7 @@ describe("busabase-package apply driven by an in-process router client", () => {
     expect(guides?.children?.map((node) => node.slug)).toContain("getting-started");
 
     const doc = await inSpace(spaceId, () =>
-      client.docs.get({ nodeId: guides?.children?.[0]?.id ?? "" }),
+      client.nodes.get({ nodeId: guides?.children?.[0]?.id ?? "", type: "doc" }),
     );
     expect(doc.body).toContain("Hello from the package.");
   });

@@ -1,4 +1,3 @@
-import { oc } from "@orpc/contract";
 import { z } from "zod";
 import { nodeSchema } from "../../contract/schemas";
 
@@ -9,25 +8,10 @@ export const folderSchema = z.object({
   children: z.array(nodeSchema),
 });
 
-// Folder domain oRPC routes; composed into the root contract in contract/busabase.ts.
-export const folderContract = {
-  list: oc
-    .route({
-      method: "GET",
-      path: "/folders",
-      tags: ["Folders"],
-      summary: "List Folder nodes",
-      successDescription: "Folder nodes with their direct children.",
-    })
-    .output(z.array(folderSchema)),
-  get: oc
-    .route({
-      method: "GET",
-      path: "/folders/{nodeId}",
-      tags: ["Folders"],
-      summary: "Get Folder node",
-      successDescription: "Folder node and its direct children.",
-    })
-    .input(z.object({ nodeId: z.string() }))
-    .output(folderSchema),
-};
+// The Folder domain has no transport surface of its own any more. `GET /folders`
+// and `GET /folders/{nodeId}` were retired in favour of the unified Node
+// surface: list folders with `GET /nodes?types=folder` (lightweight summaries —
+// the old list ran a children query and hydration per folder) and read one with
+// `GET /nodes/{nodeId}`, which returns this exact `folderSchema` payload under
+// `type: "folder"`. The schema stays here because it is still the folder
+// variant of `NodeDetailVOSchema`.

@@ -47,7 +47,13 @@ import { useCallback, useMemo, useState } from "react";
 import { useCoreI18n } from "../../../i18n";
 import { useReportLoadedNode } from "../../dashboard/hooks/use-report-loaded-node";
 import type { NodeDetailProps } from "../../dashboard/node-detail-registry";
-import { findNode, RichNodeNotFound, RichNodeShell, useNodeMetadataSave } from "./rich-node-shell";
+import {
+  findNode,
+  RichNodeNotFound,
+  RichNodeShell,
+  useNodeMetadataSave,
+  useServerDocumentSync,
+} from "./rich-node-shell";
 
 type WorkflowNodeKind = WorkflowNode["kind"];
 interface WorkflowNodeFields {
@@ -254,6 +260,36 @@ function GraphEditor({ node, orpc }: GraphEditorProps) {
     workflowDocument.settings,
   );
   const { error, markDirty, save, status } = useNodeMetadataSave(orpc, node, "workflowDocument");
+  // React Flow's `useNodesState`/`useEdgesState` (and `workflowSettings`) are
+  // seeded from the server document only at mount, so a workflow edited
+  // elsewhere — another tab, an agent's OpenAPI write — used to stay stale on
+  // screen until a full page reload.
+  useServerDocumentSync({
+    apply: (document: WorkflowDocument) => {
+      setNodes(
+        document.nodes.map((workflowNode) => ({
+          id: workflowNode.id,
+          type: "workflowStep" as const,
+          position: workflowNode.position,
+          data: workflowNodeData(workflowNode),
+        })),
+      );
+      setEdges(toWorkflowEdges(document.edges));
+      setWorkflowSettings(document.settings);
+      // Selections can point at steps/edges the incoming document dropped.
+      setSelectedId(document.nodes[0]?.id ?? null);
+      setSelectedEdgeId(null);
+    },
+    getLocalDocument: () => ({
+      version: 2 as const,
+      nodes: nodes.map(persistedWorkflowNode),
+      edges: persistedWorkflowEdges(edges),
+      settings: workflowSettings,
+    }),
+    node,
+    serverDocument: workflowDocument,
+    status,
+  });
   const selectedNode = nodes.find((entry) => entry.id === selectedId) ?? null;
   const selectedEdge = edges.find((entry) => entry.id === selectedEdgeId) ?? null;
 

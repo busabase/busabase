@@ -57,6 +57,7 @@ import { useSearch } from "wouter";
 import { fmt, useCoreI18n, useIString } from "../../../i18n";
 import { fieldColumnWidth, fieldDisplayKind, fieldLabel } from "../../base/field-types";
 import { resolveEmbedPreview } from "../../base/utils/embed";
+import { getPrimaryField } from "../../base/utils/primary-field";
 import { parseWhiteboardFieldValue } from "../../base/utils/whiteboard-value";
 import { getRecordTitle } from "../helpers/change-request";
 import {
@@ -69,6 +70,7 @@ import {
 import { fieldValueToString, shortIdentifier } from "../helpers/format";
 import { mergeSearchIntoHref, useHrefWithCurrentSearch } from "../helpers/link-search";
 import {
+  canonicalizeViewFieldConfig,
   clampViewFieldWidth,
   getVisibleViewFieldSlugs,
   hideViewField,
@@ -167,6 +169,7 @@ function FieldColumnHeader({
   baseSlug,
   busy,
   field,
+  isPrimary,
   canMoveLeft,
   canMoveRight,
   customWidth,
@@ -199,6 +202,7 @@ function FieldColumnHeader({
   dragOver: boolean;
   dragging: boolean;
   field: BaseFieldVO;
+  isPrimary: boolean;
   name: string;
   onDragEnd: () => void;
   onDragLeave: () => void;
@@ -335,7 +339,7 @@ function FieldColumnHeader({
       tabIndex={-1}
       title={metadata}
     >
-      {activeView ? (
+      {activeView && !isPrimary ? (
         <button
           aria-label={fmt(messages.base.dragFieldAria, { name })}
           className="hidden size-5 shrink-0 cursor-grab items-center justify-center rounded text-muted-foreground/60 hover:bg-accent hover:text-foreground active:cursor-grabbing disabled:cursor-not-allowed disabled:opacity-35 md:inline-flex"
@@ -493,16 +497,18 @@ function FieldColumnHeader({
                 </div>
 
                 <div className="p-2">
-                  <button
-                    className="flex h-8 w-full items-center gap-2 rounded px-2 text-left transition-colors hover:bg-accent disabled:opacity-50"
-                    disabled={actionsDisabled || visibleFieldCount <= 1}
-                    onClick={() => runUpdate(hideViewField(activeView.config, field, allFields))}
-                    title={visibleFieldCount <= 1 ? messages.base.cannotHideLastField : undefined}
-                    type="button"
-                  >
-                    <EyeOff className="size-3.5" />
-                    {messages.base.hideField}
-                  </button>
+                  {!isPrimary ? (
+                    <button
+                      className="flex h-8 w-full items-center gap-2 rounded px-2 text-left transition-colors hover:bg-accent disabled:opacity-50"
+                      disabled={actionsDisabled || visibleFieldCount <= 1}
+                      onClick={() => runUpdate(hideViewField(activeView.config, field, allFields))}
+                      title={visibleFieldCount <= 1 ? messages.base.cannotHideLastField : undefined}
+                      type="button"
+                    >
+                      <EyeOff className="size-3.5" />
+                      {messages.base.hideField}
+                    </button>
+                  ) : null}
                   <Link
                     className="flex h-8 w-full items-center gap-2 rounded px-2 transition-colors hover:bg-accent"
                     href={mergeSearchIntoHref(`/base/${baseSlug}/design`, currentSearch)}
@@ -784,6 +790,7 @@ export function BusaBaseTable({
   // route/mutation isn't on the anonymous allowlist, so it could only ever fail.
   const isAnon = useIsAnonymousVisitor();
   const allFields = base?.fields ?? records[0]?.base.fields ?? [];
+  const primaryField = getPrimaryField({ fields: allFields });
   const fields = activeView
     ? getVisibleViewFieldSlugs(activeView.config, allFields)
         .map((slug) => allFields.find((field) => field.slug === slug))
@@ -869,7 +876,7 @@ export function BusaBaseTable({
       await onUpdateView(
         activeView,
         {
-          config,
+          config: canonicalizeViewFieldConfig(config, allFields),
           description: activeView.description,
           name: activeView.name,
           type: activeView.type,
@@ -895,7 +902,7 @@ export function BusaBaseTable({
     await onUpdateView(
       activeView,
       {
-        config,
+        config: canonicalizeViewFieldConfig(config, allFields),
         description: activeView.description,
         name: activeView.name,
         type: activeView.type,
@@ -1256,9 +1263,12 @@ export function BusaBaseTable({
                   baseSlug={base?.slug ?? records[0]?.base.slug ?? ""}
                   busy={quickUpdatingFieldId === field.id}
                   field={field}
+                  isPrimary={field.id === primaryField?.id}
                   hasSelectionColumn={selectionEnabled}
-                  canMoveLeft={index > 0}
-                  canMoveRight={index < fields.length - 1}
+                  canMoveLeft={
+                    field.id !== primaryField?.id && (primaryField ? index > 1 : index > 0)
+                  }
+                  canMoveRight={field.id !== primaryField?.id && index < fields.length - 1}
                   customWidth={
                     columnWidthDrafts[field.slug] ?? activeView?.config.fieldWidths?.[field.slug]
                   }
@@ -1277,6 +1287,10 @@ export function BusaBaseTable({
                   }}
                   onDragOver={(placement) => {
                     if (draggingFieldSlug && draggingFieldSlug !== field.slug) {
+                      if (field.id === primaryField?.id && placement === "before") {
+                        setDropTarget(null);
+                        return;
+                      }
                       setDropTarget({ placement, slug: field.slug });
                     }
                   }}
@@ -1288,7 +1302,12 @@ export function BusaBaseTable({
                     const sourceSlug = draggedSlug || draggingFieldSlug;
                     setDraggingFieldSlug(null);
                     setDropTarget(null);
-                    if (!activeView || !sourceSlug || sourceSlug === field.slug) {
+                    if (
+                      !activeView ||
+                      !sourceSlug ||
+                      sourceSlug === field.slug ||
+                      (field.id === primaryField?.id && placement === "before")
+                    ) {
                       return;
                     }
                     setQuickUpdatingFieldId(
@@ -1622,37 +1641,40 @@ function ViewChangeRequestForm({
       setFormError(messages.base.viewSlugRequired);
       return;
     }
-    const nextConfig: ViewConfigVO = {
-      ...viewConfigDraft,
-      // Gallery presentation config — only meaningful for gallery views.
-      ...(viewType === "gallery"
-        ? {
-            coverFieldSlug:
-              coverFieldSlug === "__none__"
-                ? null
-                : coverFieldSlug === ""
-                  ? undefined
-                  : coverFieldSlug,
-            coverFit,
-            cardSize,
-            showFieldLabels,
-          }
-        : {}),
-      // Kanban / calendar config — "" means auto-pick the first field of the type.
-      ...(viewType === "kanban"
-        ? { stackByFieldSlug: stackByFieldSlug === "" ? undefined : stackByFieldSlug }
-        : {}),
-      ...(viewType === "calendar"
-        ? { dateFieldSlug: dateFieldSlug === "" ? undefined : dateFieldSlug }
-        : {}),
-      ...(viewType === "gantt"
-        ? {
-            startFieldSlug: startFieldSlug === "" ? undefined : startFieldSlug,
-            endFieldSlug: endFieldSlug === "" ? undefined : endFieldSlug,
-            ganttScale,
-          }
-        : {}),
-    };
+    const nextConfig = canonicalizeViewFieldConfig(
+      {
+        ...viewConfigDraft,
+        // Gallery presentation config — only meaningful for gallery views.
+        ...(viewType === "gallery"
+          ? {
+              coverFieldSlug:
+                coverFieldSlug === "__none__"
+                  ? null
+                  : coverFieldSlug === ""
+                    ? undefined
+                    : coverFieldSlug,
+              coverFit,
+              cardSize,
+              showFieldLabels,
+            }
+          : {}),
+        // Kanban / calendar config — "" means auto-pick the first field of the type.
+        ...(viewType === "kanban"
+          ? { stackByFieldSlug: stackByFieldSlug === "" ? undefined : stackByFieldSlug }
+          : {}),
+        ...(viewType === "calendar"
+          ? { dateFieldSlug: dateFieldSlug === "" ? undefined : dateFieldSlug }
+          : {}),
+        ...(viewType === "gantt"
+          ? {
+              startFieldSlug: startFieldSlug === "" ? undefined : startFieldSlug,
+              endFieldSlug: endFieldSlug === "" ? undefined : endFieldSlug,
+              ganttScale,
+            }
+          : {}),
+      },
+      base.fields,
+    );
 
     setIsSaving(true);
     setFormError(null);

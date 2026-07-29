@@ -1,6 +1,7 @@
 /**
- * 04-views: View lifecycle — create CR → approve → merge → update → delete.
- * Uses the blog base (seeded by DEMO_BASES) and exercises all 3 view operations.
+ * 04-views: View lifecycle — create CR → approve → merge → update → delete, plus
+ * the one-call `autoMerge` branch. Uses the blog base (seeded by DEMO_BASES) and
+ * exercises all 3 view operations on both branches of the `materialized` union.
  */
 
 import { api, approveMerge, assert, BASE, makeRunner } from "./_client";
@@ -69,6 +70,9 @@ export async function run() {
       },
       message: "demo: create high-priority view",
       submittedBy: "demo-script",
+      // Pin the review-first branch — this step asserts the pending CR that a
+      // write-capable actor would otherwise have had merged already.
+      autoMerge: false,
     });
     assert(cr.status === "in_review", `expected in_review, got ${cr.status}`);
 
@@ -101,6 +105,9 @@ export async function run() {
         sorts: [],
       },
       message: "demo: tighten filter",
+      // Pin the review-first branch — this step asserts the pending CR that a
+      // write-capable actor would otherwise have had merged already.
+      autoMerge: false,
     });
     assert(cr.status === "in_review", `expected in_review, got ${cr.status}`);
 
@@ -134,6 +141,9 @@ export async function run() {
       operation: "delete",
       viewId,
       message: "demo: clean up demo view",
+      // Pin the review-first branch — this step asserts the pending CR that a
+      // write-capable actor would otherwise have had merged already.
+      autoMerge: false,
     });
     assert(cr.status === "in_review", `expected in_review, got ${cr.status}`);
 
@@ -146,6 +156,41 @@ export async function run() {
     const views = await api<ViewVO[]>("GET", `/bases/${blogBase.id}/views`);
     const v = views.find((v) => v.id === viewId);
     assert(!v || v.status === "archived", `demo view should be archived`);
+  });
+
+  // ── autoMerge: create + delete a view in one call each ────────────────────
+
+  await step("POST /views/change-requests — autoMerge creates the view outright", async () => {
+    const autoSlug = `demo-auto-merged-${Date.now()}`;
+    const view = await api<ViewVO & { materialized?: boolean }>("POST", "/views/change-requests", {
+      operation: "create",
+      baseId: blogBase.id,
+      slug: autoSlug,
+      name: "Demo Auto Merged",
+      description: "Demo-script view created without a review round-trip.",
+      config: { filters: [], sorts: [] },
+      message: "demo: create view with autoMerge",
+      submittedBy: "demo-script",
+      autoMerge: true,
+    });
+    assert(view.materialized === true, "expected the materialized branch");
+    assert(view.status === "active", `expected active, got ${view.status}`);
+    assert(view.slug === autoSlug, `expected slug ${autoSlug}, got ${view.slug}`);
+
+    const views = await api<ViewVO[]>("GET", `/bases/${blogBase.id}/views`);
+    assert(
+      views.some((v) => v.slug === autoSlug && v.status === "active"),
+      "auto-merged view should be listed as active with no separate merge call",
+    );
+
+    // Clean up in one call too, exercising autoMerge on the delete branch.
+    const deleted = await api<ViewVO & { materialized?: boolean }>(
+      "POST",
+      "/views/change-requests",
+      { operation: "delete", viewId: view.id, message: "demo: clean up", autoMerge: true },
+    );
+    assert(deleted.materialized === true, "expected the materialized branch on delete");
+    assert(deleted.status === "archived", `expected archived, got ${deleted.status}`);
   });
 
   return summary();

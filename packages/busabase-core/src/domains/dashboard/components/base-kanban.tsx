@@ -3,6 +3,7 @@ import { SPALink as Link } from "openlib/ui/dashboard";
 import { useState } from "react";
 import { useSearch } from "wouter";
 import { useCoreI18n, useIString } from "../../../i18n";
+import { getPrimaryField } from "../../base/utils/primary-field";
 import { getRecordTitle } from "../helpers/change-request";
 import { getFieldPreviewText } from "../helpers/field";
 import { mergeSearchIntoHref } from "../helpers/link-search";
@@ -58,7 +59,7 @@ function KanbanCard({
   const resolveIString = useIString();
   const currentSearch = useSearch();
   const title = getRecordTitle(record, messages);
-  const primaryFieldSlug = record.base.fields[0]?.slug;
+  const primaryFieldSlug = getPrimaryField(record.base)?.slug;
   const bodyFields = fields.filter(
     (field) => field.slug !== primaryFieldSlug && field.slug !== stackFieldSlug,
   );

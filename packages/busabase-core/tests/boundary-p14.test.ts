@@ -52,12 +52,14 @@ describe("Boundary P14 — cross-tenant get-by-id is space-scoped", () => {
       await expect(
         raw.views.changeRequest({ operation: "delete", viewId: view.id, submittedBy: "mallory" }),
       ).rejects.toThrow();
-      await expect(raw.docs.get({ nodeId: doc.node.id })).rejects.toThrow(/not found/i);
+      await expect(raw.nodes.get({ nodeId: doc.node.id, type: "doc" })).rejects.toThrow(
+        /not found/i,
+      );
     });
 
     // Sanity: the owning space still resolves them fine.
     await runWithBusabaseContext({ spaceId: LOCAL_SPACE_ID }, async () => {
-      const fetched = await raw.docs.get({ nodeId: doc.node.id });
+      const fetched = await raw.nodes.get({ nodeId: doc.node.id, type: "doc" });
       expect(fetched.node.id).toBe(doc.node.id);
     });
   });

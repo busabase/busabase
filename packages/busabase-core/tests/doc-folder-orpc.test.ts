@@ -56,8 +56,8 @@ describe("Doc & Folder domains — oRPC integration", () => {
     expect(doc.node.slug).toBe("runbook");
     expect(doc.body).toContain("Step one.");
 
-    const docs = await client.docs.list();
-    expect(docs.some((d) => d.node.slug === "runbook")).toBe(true);
+    const docs = await client.nodes.list({ types: ["doc"] });
+    expect(docs.some((d) => d.slug === "runbook")).toBe(true);
   });
 
   it("is idempotent on slug — a second create returns the existing doc", async () => {
@@ -80,9 +80,9 @@ describe("Doc & Folder domains — oRPC integration", () => {
 
   it("gets a doc by slug and rejects an unknown one", async () => {
     await client.docs.create({ autoMerge: true, slug: "faq", name: "FAQ", body: "Q&A\n" });
-    const doc = await client.docs.get({ nodeId: "faq" });
+    const doc = await client.nodes.get({ nodeId: "faq", type: "doc" });
     expect(doc.body).toContain("Q&A");
-    await expect(client.docs.get({ nodeId: "does-not-exist" })).rejects.toThrow();
+    await expect(client.nodes.get({ nodeId: "does-not-exist", type: "doc" })).rejects.toThrow();
   });
 
   it("runs the approval-first doc edit: change request → review → merge writes the body", async () => {
@@ -97,12 +97,14 @@ describe("Doc & Folder domains — oRPC integration", () => {
     expect(cr.status).toBe("in_review");
 
     // Body is unchanged until the change request merges.
-    expect((await client.docs.get({ nodeId: "guide" })).body).toBe("draft\n");
+    expect((await client.nodes.get({ nodeId: "guide", type: "doc" })).body).toBe("draft\n");
 
     await client.changeRequests.review({ changeRequestIds: [cr.id], verdict: "approved" });
     await client.changeRequests.merge({ changeRequestIds: [cr.id] });
 
-    expect((await client.docs.get({ nodeId: "guide" })).body).toContain("Approved content.");
+    expect((await client.nodes.get({ nodeId: "guide", type: "doc" })).body).toContain(
+      "Approved content.",
+    );
   });
 
   it("lists folders and resolves a folder's children, rejecting an unknown folder", async () => {
@@ -115,15 +117,15 @@ describe("Doc & Folder domains — oRPC integration", () => {
       body: "hi\n",
     });
 
-    const folders = await client.folders.list();
+    const folders = await client.nodes.list({ types: ["folder"] });
     expect(folders.length).toBeGreaterThan(0);
-    const rootId = folders[0]?.node.id as string;
+    const rootId = folders[0]?.id as string;
 
-    const root = await client.folders.get({ nodeId: rootId });
+    const root = await client.nodes.get({ nodeId: rootId, type: "folder" });
     expect(root.node.id).toBe(rootId);
     expect(root.children.some((child) => child.slug === "nested-note")).toBe(true);
 
-    await expect(client.folders.get({ nodeId: "no-such-folder" })).rejects.toThrow();
+    await expect(client.nodes.get({ nodeId: "no-such-folder", type: "folder" })).rejects.toThrow();
   });
 
   // The Doc-domain equivalent of `assets.readTextLines` (see
@@ -257,7 +259,7 @@ describe("Doc & Folder domains — oRPC integration", () => {
 });
 
 // `readLines` is a pure read backed entirely by the seed dataset's in-memory
-// `DemoDocVO.body` (same as `docs.get` already relies on in demo mode) — no
+// `DemoDocVO.body` (same as `nodes.get` already relies on in demo mode) — no
 // real storage needed, unlike `assets.readTextLines`/top-level `grep`, which stay
 // `demoUnsupported` for lack of per-asset object storage in the stateless demo
 // dataset (see `router-demo.ts`). No existing test file exercises
@@ -281,5 +283,46 @@ describe("Doc domain — readLines (demo mode)", () => {
     await expect(
       demoClient.docs.readLines({ nodeId: "does-not-exist", startLine: 1, endLine: 5 }),
     ).rejects.toMatchObject({ code: "NOT_FOUND" });
+  });
+});
+
+/**
+ * Demo mode has to move in lockstep with the real store: if the demo router
+ * kept serving `docs.get`/`folders.get` while the real server did not, the demo
+ * would be the one place a retired route still appeared to work.
+ */
+describe("unified Node surface (demo mode)", () => {
+  const demoClient = createRouterClient(busabaseDemoRouter);
+
+  it("serves the same discriminated detail the real store does", async () => {
+    const doc = await demoClient.nodes.get({ nodeId: "agent-operating-guide" });
+    expect(doc.type).toBe("doc");
+    if (doc.type !== "doc") throw new Error("expected a doc");
+    expect(doc.body).toContain("# Agent Operating Guide");
+
+    const skill = await demoClient.nodes.get({ nodeId: "nod_skill_ai_research_editor" });
+    expect(skill.type).toBe("skill");
+    if (skill.type !== "skill") throw new Error("expected a skill");
+    expect(skill.files.length).toBeGreaterThan(0);
+  });
+
+  it("serves flat lightweight summaries for a type filter", async () => {
+    const docs = await demoClient.nodes.list({ types: ["doc"] });
+    expect(docs.length).toBeGreaterThan(0);
+    expect(docs.every((node) => node.type === "doc")).toBe(true);
+    expect(docs.every((node) => node.children.length === 0)).toBe(true);
+    expect(docs[0]).not.toHaveProperty("body");
+  });
+
+  it("still returns the full tree when no type filter is given", async () => {
+    const tree = await demoClient.nodes.list();
+    expect(tree.length).toBeGreaterThan(0);
+    expect(tree[0]?.children.length).toBeGreaterThan(0);
+  });
+
+  it("404s an unknown node id", async () => {
+    await expect(demoClient.nodes.get({ nodeId: "does-not-exist" })).rejects.toMatchObject({
+      code: "NOT_FOUND",
+    });
   });
 });

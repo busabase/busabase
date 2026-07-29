@@ -188,6 +188,50 @@ describe("busabase-cli golden path (skill commands, in-process)", () => {
     expect(JSON.stringify(tree)).toContain("CLI Folder");
   });
 
+  // Views gained `autoMerge` here; assert BOTH flags reach the endpoint through
+  // the task layer. `--require-review` matters on its own: a CLI boolean is
+  // presence-only, so `--auto-merge` alone could never express "force review",
+  // which is why the task carries the same two-flag shape as `node_create`.
+  it("creates a view in one call, and still defers with --require-review", async () => {
+    const bases = (await cli("bases", "list")) as Array<{ id: string; slug: string }>;
+    const blogId = bases.find((b) => b.slug === "blog")?.id as string;
+
+    const merged = (await cli(
+      "views",
+      "change-request",
+      "--action",
+      "create",
+      "--base-id",
+      blogId,
+      "--name",
+      "CLI Auto Merged",
+      "--auto-merge",
+    )) as { materialized?: boolean; slug?: string; status?: string };
+    expect(merged.materialized).toBe(true);
+    expect(merged.status).toBe("active");
+
+    // Listed as active with no separate review/merge call at all.
+    const views = (await cli("bases", "list-views", "--base-id", blogId)) as Array<{
+      slug: string;
+      status: string;
+    }>;
+    expect(views.some((v) => v.slug === merged.slug && v.status === "active")).toBe(true);
+
+    const proposed = (await cli(
+      "views",
+      "change-request",
+      "--action",
+      "create",
+      "--base-id",
+      blogId,
+      "--name",
+      "CLI Review Please",
+      "--require-review",
+    )) as { materialized?: boolean; status?: string };
+    expect(proposed.materialized).toBe(false);
+    expect(proposed.status).toBe("in_review");
+  });
+
   it("runs full-text search (`busabase-cli search`)", async () => {
     const result = (await cli("search", "--query", "AI", "--limit", "5")) as {
       results: unknown[];

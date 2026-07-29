@@ -284,7 +284,7 @@ ${authLine}  -H 'content-type: application/json' \\
 Read Skill files:
 
 \`\`\`bash
-curl "${base}/api/v1/file-trees?type=skill"${H}
+curl "${base}/api/v1/nodes?types=skill"${H}
 curl ${base}/api/v1/file-trees/:nodeId/files${H}
 curl ${base}/api/v1/file-trees/:nodeId/files/:filePath${H}
 \`\`\`
@@ -1057,6 +1057,23 @@ ${authLine}  -H 'content-type: application/json' \\
 
 The response carries the new Base's \`id\` (e.g. \`bse_...\`) — use it below. For an HTML CMS,
 create a **Pages** base the same way with an \`html_body\` field of \`"type": "html"\`.
+
+Views are structure too, so they carry \`"autoMerge": true\` like everything above — a starter
+Base whose views are stuck in the review queue looks half-built to the user:
+
+\`\`\`bash
+curl -X POST "${api}/api/v1/views/change-requests" \\
+${authLine}  -H 'content-type: application/json' \\
+  --data '{
+    "operation": "create",
+    "baseId": "<BASE_ID>",
+    "name": "Ready to publish",
+    "type": "table",
+    "autoMerge": true,
+    "config": { "filters": [{ "fieldSlug": "status", "operator": "equals", "value": "ready" }],
+                "sorts": [] }
+  }'
+\`\`\`
 
 > **Always leave the workspace with more than one node.** A brand-new space holding a single empty
 > Base renders as an empty screen — there's nothing for the user to see. So before seeding, give it

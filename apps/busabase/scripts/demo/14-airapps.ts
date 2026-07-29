@@ -23,14 +23,26 @@ interface NodeVO {
   slug: string;
   name: string;
   type: string;
+  children?: NodeVO[];
 }
 
+/** What `POST /file-trees` returns (no `type` discriminator on the envelope). */
 interface AirAppVO {
   node: NodeVO;
   entryFile: string;
   visibility: string;
   version: string;
   files: Array<{ path: string; name: string }>;
+}
+
+/**
+ * The `type: "airapp"` variant of `NodeDetailVO` from `GET /nodes/{nodeId}`.
+ * `GET /file-trees` / `GET /file-trees/{nodeId}` were retired by the unified
+ * Node surface; `GET /nodes?types=airapp` lists FLAT lightweight summaries and
+ * this is what opening one returns.
+ */
+interface AirAppDetailVO extends AirAppVO {
+  type: "airapp";
 }
 
 interface FileContentVO {
@@ -75,10 +87,12 @@ export async function run() {
           mergeMode: "replace",
         });
       } catch {
-        const list = await api<AirAppVO[]>("GET", "/file-trees?type=airapp");
-        const found = list.find((m) => m.node.slug === def.slug);
+        // The summary list has no `files`, and the file-count assertion below
+        // needs them — find it in the summary, then open it.
+        const list = await api<NodeVO[]>("GET", "/nodes?types=airapp");
+        const found = list.find((m) => m.slug === def.slug);
         assert(!!found, `AirApp "${def.slug}" missing after create failed`);
-        airapp = found;
+        airapp = await api<AirAppDetailVO>("GET", `/nodes/${found.id}?type=airapp`);
       }
       assert(airapp.node.slug === def.slug, `slug mismatch: ${airapp.node.slug}`);
       assert(airapp.node.type === "airapp", `expected type=airapp, got ${airapp.node.type}`);
@@ -93,12 +107,21 @@ export async function run() {
     });
   }
 
-  await step("GET /file-trees?type=airapp — all created slugs present", async () => {
-    const list = await api<AirAppVO[]>("GET", "/file-trees?type=airapp");
-    const slugs = new Set(list.map((m) => m.node.slug));
+  await step("GET /nodes?types=airapp — all created slugs present", async () => {
+    const list = await api<NodeVO[]>("GET", "/nodes?types=airapp");
+    assert(
+      list.every((m) => m.type === "airapp"),
+      "expected only airapp nodes",
+    );
+    const slugs = new Set(list.map((m) => m.slug));
     for (const def of ALL_AIRAPP_DEMOS) {
-      assert(slugs.has(def.slug), `slug "${def.slug}" missing from GET /file-trees?type=airapp`);
+      assert(slugs.has(def.slug), `slug "${def.slug}" missing from GET /nodes?types=airapp`);
     }
+    // The reason this replaced `GET /file-trees`: no per-node file inventory.
+    assert(
+      list.every((m) => !("files" in m)),
+      "summary list must not hydrate file inventories",
+    );
   });
 
   const honoDemo = created.find((airapp) => airapp.node.slug === "demo-hono-api");

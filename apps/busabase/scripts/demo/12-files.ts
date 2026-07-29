@@ -4,6 +4,12 @@
  *
  * Mirrors the real uploader (busabase-core use-attachment-upload):
  *   POST /assets/upload-urls → push bytes (dev relay) → POST /assets/confirmations → POST /files
+ *
+ * `GET /files` and `GET /files/{nodeId}` were retired by the unified Node
+ * surface: list File nodes with `GET /nodes?types=file` (FLAT lightweight
+ * summaries — the retired list resolved a full AssetVO per row) and read one
+ * with `GET /nodes/{nodeId}`, whose `type: "file"` variant is the exact old
+ * `FileNodeVO` plus a `type` discriminator. `POST /files` is untouched.
  */
 
 import { api, assert, BASE, makeRunner, type NodeTreeVO } from "./_client";
@@ -14,6 +20,7 @@ interface NodeVO {
   slug: string;
   name: string;
   type: string;
+  children?: NodeVO[];
 }
 
 interface UploadUrlVO {
@@ -41,9 +48,15 @@ interface AssetVO {
   url: string;
 }
 
+/** What `POST /files` returns (no `type` discriminator on the envelope). */
 interface FileNodeVO {
   node: NodeVO;
   asset: AssetVO;
+}
+
+/** The `type: "file"` variant of `NodeDetailVO` from `GET /nodes/{nodeId}`. */
+interface FileNodeDetailVO extends FileNodeVO {
+  type: "file";
 }
 
 const CONTEXT = "file-node-demo";
@@ -106,14 +119,16 @@ export async function run() {
   for (const def of DEMO_FILES) {
     await step(`POST /files — upload + create "${def.name}" (idempotent)`, async () => {
       // Skip the upload entirely if this File node already exists (re-runnable,
-      // and avoids leaving orphan Assets behind on repeat runs).
-      const existing = await api<FileNodeVO[]>("GET", "/files");
-      const already = existing.find((f) => f.node.slug === def.slug);
+      // and avoids leaving orphan Assets behind on repeat runs). The summary
+      // list carries no `asset`, and the detail step below needs one, so open
+      // the match once it is found rather than reusing a thin row.
+      const existing = await api<NodeVO[]>("GET", "/nodes?types=file");
+      const already = existing.find((f) => f.slug === def.slug);
       if (already) {
         if (needsMove(nodes, def.slug, "files")) {
           await moveNodeToFolder(def.slug, "files", nodes);
         }
-        created.push(already);
+        created.push(await api<FileNodeDetailVO>("GET", `/nodes/${already.id}`));
         return;
       }
 
@@ -159,21 +174,31 @@ export async function run() {
     });
   }
 
-  // ── GET /files ─────────────────────────────────────────────────────────────
+  // ── GET /nodes?types=file ──────────────────────────────────────────────────
 
-  await step("GET /files — all created slugs present", async () => {
-    const list = await api<FileNodeVO[]>("GET", "/files");
-    const slugs = new Set(list.map((f) => f.node.slug));
+  await step("GET /nodes?types=file — all created slugs present", async () => {
+    const list = await api<NodeVO[]>("GET", "/nodes?types=file");
+    assert(
+      list.every((f) => f.type === "file"),
+      "expected only file nodes",
+    );
+    const slugs = new Set(list.map((f) => f.slug));
     for (const def of DEMO_FILES) {
-      assert(slugs.has(def.slug), `slug "${def.slug}" missing from GET /files`);
+      assert(slugs.has(def.slug), `slug "${def.slug}" missing from GET /nodes?types=file`);
     }
+    // The reason this replaced `GET /files`: no AssetVO resolved per row.
+    assert(
+      list.every((f) => !("asset" in f)),
+      "summary list must not hydrate backing Assets",
+    );
   });
 
-  // ── GET /files/{id} — File node detail + backing Asset ─────────────────────
+  // ── GET /nodes/{id} — File node detail + backing Asset ─────────────────────
 
   if (created[0]) {
-    await step("GET /files/{id} — detail includes backing Asset", async () => {
-      const file = await api<FileNodeVO>("GET", `/files/${created[0].node.id}`);
+    await step("GET /nodes/{id} — detail includes backing Asset", async () => {
+      const file = await api<FileNodeDetailVO>("GET", `/nodes/${created[0].node.id}`);
+      assert(file.type === "file", `expected type=file, got ${file.type}`);
       assert(file.node.id === created[0].node.id, "id mismatch");
       assert(file.asset.size > 0, "expected non-empty asset size");
       assert(typeof file.asset.url === "string", "expected asset url");

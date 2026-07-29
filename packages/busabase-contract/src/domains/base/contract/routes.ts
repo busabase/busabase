@@ -278,8 +278,13 @@ export const viewContract = {
       tags: ["Views", "Change Requests"],
       summary: "Create view change request",
       successDescription:
-        "Created change request proposing a view change. `operation` selects what to propose: `create` (addressed by `baseId`), or `update` / `delete` / `restore` (addressed by `viewId`).",
+        "Proposes a view change. `operation` selects what to propose: `create` (addressed by `baseId`), or `update` / `delete` / `restore` (addressed by `viewId`). Review-first when the actor lacks write access or passes `autoMerge: false` — a pending ChangeRequest (`materialized: false`). Otherwise the change is approved and merged in the same call and the materialized View comes back instead (`materialized: true`).",
     })
     .input(viewChangeRequestInputSchema)
-    .output(changeRequestSchema),
+    .output(
+      z.union([
+        viewSchema.extend({ materialized: z.literal(true) }),
+        changeRequestSchema.extend({ materialized: z.literal(false) }),
+      ]),
+    ),
 };

@@ -16,8 +16,8 @@ import {
   demoGetDoc,
   demoGetFileNode,
   demoGetFileTree,
-  demoGetFolder,
   demoGetForm,
+  demoGetNodeDetail,
   demoGetRecord,
   demoGetRecordByField,
   demoIsDescendant,
@@ -27,10 +27,7 @@ import {
   demoListBases,
   demoListChangeRequests,
   demoListComments,
-  demoListDocs,
-  demoListFileNodes,
-  demoListFileTrees,
-  demoListFolders,
+  demoListNodeSummaries,
   demoListNodes,
   demoListRecordChangeRequests,
   demoListRecords,
@@ -120,9 +117,16 @@ export const busabaseDemoRouter = os.router({
     // Demo mode ignores `parentId`/`depth` — the seeded tree is always fully
     // in memory already, so there's nothing to lazily bound (see
     // `demoListNodes`'s doc comment in logic/demo-store.ts).
-    list: os.nodes.list.handler(({ input }) =>
-      input?.status === "archived" ? [] : demoListNodes(),
-    ),
+    list: os.nodes.list.handler(({ input }) => {
+      // `types` gets the same flat summary projection the real store serves —
+      // the demo dataset must not be the one place where the consolidated API
+      // behaves differently.
+      if (input?.types && input.types.length > 0) {
+        return input.status === "archived" ? [] : demoListNodeSummaries(input.types);
+      }
+      return input?.status === "archived" ? [] : demoListNodes();
+    }),
+    get: os.nodes.get.handler(({ input }) => demoGetNodeDetail(input.nodeId, input.type)),
     searchByName: os.nodes.searchByName.handler(({ input }) => demoSearchNodesByName(input)),
     isDescendant: os.nodes.isDescendant.handler(({ input }) => ({
       isDescendant: demoIsDescendant(input.nodeId, input.potentialAncestorId),
@@ -257,11 +261,9 @@ export const busabaseDemoRouter = os.router({
     listDeletedFields: os.bases.listDeletedFields.handler(() => []),
   },
   fileTrees: {
-    list: os.fileTrees.list.handler(({ input }) => demoListFileTrees(input.type)),
     create: os.fileTrees.create.handler(({ input }) => {
       throw demoUnsupported(`Create ${fileTreeLabel(input.type)}`);
     }),
-    get: os.fileTrees.get.handler(({ input }) => demoGetFileTree(input.nodeId, input.type)),
     listFiles: os.fileTrees.listFiles.handler(
       ({ input }) => demoGetFileTree(input.nodeId, input.type).files,
     ),
@@ -280,20 +282,16 @@ export const busabaseDemoRouter = os.router({
     }),
   },
   files: {
-    list: os.files.list.handler(() => demoListFileNodes()),
     create: os.files.create.handler(() => {
       throw demoUnsupported("Create File");
     }),
-    get: os.files.get.handler(({ input }) => demoGetFileNode(input.nodeId)),
   },
   docs: {
-    list: os.docs.list.handler(() => demoListDocs()),
     create: os.docs.create.handler(() => {
       throw demoUnsupported("Create Doc");
     }),
-    get: os.docs.get.handler(({ input }) => demoGetDoc(input.nodeId)),
     // The Doc body is already fully in memory on the demo dataset (same as
-    // `get` above relies on), so — unlike `assets.readTextLines` below, which
+    // `nodes.get` relies on), so — unlike `assets.readTextLines` below, which
     // needs real per-asset storage the demo dataset doesn't have —
     // `readLines` gets a real, working demo implementation.
     readLines: os.docs.readLines.handler(({ input }) =>
@@ -305,10 +303,6 @@ export const busabaseDemoRouter = os.router({
     createChangeRequest: os.docs.createChangeRequest.handler(() => {
       throw demoUnsupported("Doc change request");
     }),
-  },
-  folders: {
-    list: os.folders.list.handler(() => demoListFolders()),
-    get: os.folders.get.handler(({ input }) => demoGetFolder(input.nodeId)),
   },
   forms: {
     // A seeded demo Form renders its agent-authored page (read from the demo

@@ -17,6 +17,7 @@ import {
 import { Button } from "~/components/ui/Button";
 import { useI18n } from "~/i18n";
 import { formatDate } from "~/lib/format";
+import { asNodeDetail } from "~/lib/node-detail";
 import { typography } from "~/theme/tokens";
 import { useTokens } from "~/theme/use-tokens";
 
@@ -45,10 +46,14 @@ function DocDetailContent() {
 
   const docQuery = useQuery(
     buda && nodeId
-      ? buda.orpc.docs.get.queryOptions({ input: { nodeId } })
+      ? buda.orpc.nodes.get.queryOptions({ input: { nodeId, type: "doc" } })
       : { queryKey: ["no-connection", "doc", nodeId], queryFn: skipToken },
   );
-  const doc = docQuery.data ?? null;
+  // `nodes.get` answers for every node type, so narrow before reading `.body`.
+  // A `nodeId` that is really a slug shared with another type resolves to that
+  // other type's detail here; `asNodeDetail` turns that into the same
+  // "Doc not found" empty state below rather than a blank body.
+  const doc = asNodeDetail(docQuery.data, "doc");
   const bodyStats = doc ? getDocBodyStats(doc.body) : null;
   const isLongBody = (bodyStats?.lineCount ?? 0) > COLLAPSED_BODY_LINES;
 

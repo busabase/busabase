@@ -10,7 +10,9 @@ describe("Busabase OpenAPI asset upload routes", () => {
     expect(paths).toContain("/api/v1/assets/confirmations");
     expect(paths).toContain("/api/v1/assets/{assetId}/metadata");
     expect(paths).toContain("/api/v1/files");
-    expect(paths).toContain("/api/v1/files/{nodeId}");
+    // Reading one File node moved to the unified Node detail route.
+    expect(paths).not.toContain("/api/v1/files/{nodeId}");
+    expect(paths).toContain("/api/v1/nodes/{nodeId}");
     expect(paths.filter((path) => path.startsWith("/api/v1/attachments"))).toEqual([]);
   });
 

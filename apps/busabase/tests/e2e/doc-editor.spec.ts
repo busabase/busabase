@@ -44,9 +44,20 @@ const saveAndExitEditMode = async (page: Page) => {
   await expect(page.getByRole("button", { name: "Edit" })).toBeVisible({ timeout: 30_000 });
 };
 
+/** What `POST /api/v1/docs` returns. */
 interface DocNodeVO {
   node: { id: string; slug: string; name: string };
   body: string;
+}
+
+/**
+ * The `type: "doc"` variant of `NodeDetailVO` from `GET /api/v1/nodes/{nodeId}`.
+ * `GET /api/v1/docs/{nodeId}` was retired by the unified Node surface; the
+ * payload is unchanged apart from the added `type` discriminator, and `nodeId`
+ * still accepts a slug (`type=doc` disambiguates it).
+ */
+interface DocNodeDetailVO extends DocNodeVO {
+  type: "doc";
 }
 
 const slugify = (value: string) =>
@@ -67,7 +78,7 @@ const createDoc = async (request: APIRequestContext, namePrefix: string, body = 
 };
 
 const getDocBody = async (request: APIRequestContext, slug: string) =>
-  (await json<DocNodeVO>(await request.get(`/api/v1/docs/${slug}`))).body;
+  (await json<DocNodeDetailVO>(await request.get(`/api/v1/nodes/${slug}?type=doc`))).body;
 
 test("headings H1-H6 and inline marks (bold/italic/strikethrough)", async ({ page, request }) => {
   const { slug } = await createDoc(request, "E2E doc headings");

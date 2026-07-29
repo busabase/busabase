@@ -135,9 +135,9 @@
  *      `busabase-sdk`'s `createBusabaseClient` (the fully-typed client the CLI
  *      and agents use against that same surface) to list the
  *      workspace's nodes (`nodes.list`) and drill into them: a Doc renders its
- *      body (`docs.get`), a Base renders its records as a table
+ *      body (`nodes.get` with `type: "doc"`), a Base renders its records as a table
  *      (`records.list` by the base node's `baseId`), a File shows its
- *      asset metadata + a text preview (`files.get`), and anything else shows
+ *      asset metadata + a text preview (`nodes.get` with `type: "file"`), and anything else shows
  *      metadata. It calls `/api/v1` on its own origin in both cloud and OSS.
  *      Like Kelly Email it has an esbuild build
  *      step (the SDK + its `@orpc/client` dep + the cloud contract's zod graph

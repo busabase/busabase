@@ -415,7 +415,11 @@ export const putAssetText = async (input: PutTextInput): Promise<AssetTextVO> =>
     scanResult = scanTextBuffer(inlineBytes);
   } else {
     const storageKey = input.storageKey as string;
-    if (!storageKey.startsWith(`${TEXT_TEMP_PREFIX}/`)) {
+    // Reject `..` segments as well as a wrong prefix: the local storage adapter
+    // resolves a key with plain `path.join(rootDir, key)`, so a prefix-only test
+    // would be trivially defeated by `asset-texts/pending/../../attachments/x.bin`.
+    // Mirrors `isAttachmentStorageKey` on the binary side.
+    if (!storageKey.startsWith(`${TEXT_TEMP_PREFIX}/`) || storageKey.split("/").includes("..")) {
       throw new ORPCError("BAD_REQUEST", {
         message: `storageKey must be a pending text upload under ${TEXT_TEMP_PREFIX}/ (from createTextUploadUrl).`,
       });

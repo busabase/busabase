@@ -2,9 +2,12 @@ import type { BaseFieldVO, ChangeRequestVO, OperationVO } from "busabase-contrac
 
 export interface FieldOrderDiffModel {
   afterIds: string[];
+  afterPrimaryId: string | undefined;
   beforeIds: string[];
+  beforePrimaryId: string | undefined;
   fieldsById: Map<string, BaseFieldVO>;
   movedIds: Set<string>;
+  primaryChanged: boolean;
 }
 
 export const fieldOrderIds = (operation: OperationVO): string[] =>
@@ -31,5 +34,18 @@ export const getFieldOrderDiffModel = (
   const beforePositionById = new Map(beforeIds.map((id, index) => [id, index]));
   const movedIds = new Set(afterIds.filter((id, index) => beforePositionById.get(id) !== index));
 
-  return { afterIds, beforeIds, fieldsById, movedIds };
+  const beforePrimaryId = beforeIds[0];
+  const afterPrimaryId = afterIds[0];
+
+  return {
+    afterIds,
+    afterPrimaryId,
+    beforeIds,
+    beforePrimaryId,
+    fieldsById,
+    movedIds,
+    primaryChanged: Boolean(
+      beforePrimaryId && afterPrimaryId && beforePrimaryId !== afterPrimaryId,
+    ),
+  };
 };

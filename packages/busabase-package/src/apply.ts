@@ -352,7 +352,7 @@ const createBase = async (
   indexFields(fieldIds, node.slug, result.fields);
 
   for (const view of node.base.views) {
-    const changeRequest = await client.views.changeRequest({
+    const created = await client.views.changeRequest({
       operation: "create",
       baseId: result.id,
       slug: view.slug,
@@ -360,8 +360,17 @@ const createBase = async (
       description: view.description,
       config: view.config,
       submittedBy: options.submittedBy,
+      // Structure, exactly like the Base above — so ask for it outright instead
+      // of proposing it and immediately approving+merging our own proposal,
+      // which is what this loop used to do only because the endpoint had no
+      // `autoMerge`.
+      autoMerge: true,
     });
-    await approveAndMerge(client, changeRequest.id);
+    if (!created.materialized) {
+      throw new Error(
+        `View "${view.slug}" was requested immediately but the server returned a pending change request; install cannot leave a Base's views behind in review.`,
+      );
+    }
     state.created.views++;
   }
 };

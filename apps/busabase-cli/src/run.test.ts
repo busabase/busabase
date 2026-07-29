@@ -107,6 +107,65 @@ describe("busabase-cli commands", () => {
     expect(HELP).not.toContain("airapps list-files");
   });
 
+  it("keeps docs/files/folders list+get, and says list is now summaries only", () => {
+    // `GET /docs`, `/files`, `/folders` and their `/{nodeId}` gets are retired.
+    // The commands people already type survive as a curated facade over the
+    // unified Node surface rather than disappearing from the CLI.
+    for (const group of ["docs", "files", "folders"]) {
+      expect(HELP).toContain(`${group} list`);
+      expect(HELP).toContain(`${group} get --node-id <id>`);
+    }
+    // The one real behaviour change is stated in `--help`, not discovered at
+    // runtime by a caller reading a field that is no longer populated.
+    expect(HELP).toContain("List Doc nodes — summaries only (no bodies)");
+    expect(HELP).toContain("List File nodes — summaries only (no Asset detail)");
+    expect(HELP).toContain("List Folder nodes — summaries only (no children)");
+    // Same story for the file-tree kinds, which the task layer renders.
+    expect(HELP).toContain("List Skill nodes (summaries;");
+    expect(HELP).not.toContain("with their file trees");
+  });
+
+  it("serves docs/files/folders list+get from /nodes with exactly one request each", async () => {
+    const calls: Array<{ method: string; url: string }> = [];
+    global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      calls.push({ method: request.method, url: request.url });
+      return jsonResponse([]);
+    }) as typeof fetch;
+
+    for (const [group, type] of [
+      ["docs", "doc"],
+      ["files", "file"],
+      ["folders", "folder"],
+    ] as const) {
+      expect(
+        await runCli(["--base-url", "http://localhost:15419", "--output", "json", group, "list"]),
+      ).toBe(0);
+      expect(
+        await runCli([
+          "--base-url",
+          "http://localhost:15419",
+          "--output",
+          "json",
+          group,
+          "get",
+          "--node-id",
+          "nod_1",
+        ]),
+      ).toBe(0);
+      expect(calls).toEqual([
+        {
+          method: "GET",
+          url: `http://localhost:15419/api/v1/nodes?types%5B0%5D=${type}`,
+        },
+        { method: "GET", url: `http://localhost:15419/api/v1/nodes/nod_1?type=${type}` },
+      ]);
+      // One request per command — a facade that fanned out a detail call per
+      // listed row to rebuild the retired payload would show up right here.
+      calls.length = 0;
+    }
+  });
+
   it("routes a generated GET command to the right method and path", async () => {
     const calls: Array<{ method: string; url: string }> = [];
     global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -826,7 +885,7 @@ describe("busabase-cli commands", () => {
     ]);
   });
 
-  it("lists AirApps through the airapps endpoint", async () => {
+  it("lists AirApps through the unified node list, keeping the `airapps list` name", async () => {
     const calls: Array<{ method: string; url: string }> = [];
     global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const request = input instanceof Request ? input : new Request(input, init);
@@ -844,17 +903,20 @@ describe("busabase-cli commands", () => {
     ]);
 
     expect(exitCode).toBe(0);
+    // `GET /file-trees` is retired; one filtered call to the unified node list
+    // replaces it. The command name users already type is unchanged.
     expect(calls).toEqual([
-      { method: "GET", url: "http://localhost:15419/api/v1/file-trees?type=airapp" },
+      { method: "GET", url: "http://localhost:15419/api/v1/nodes?types%5B0%5D=airapp" },
     ]);
   });
 
-  it("gets one AirApp by node id", async () => {
+  it("gets one AirApp by node id through the unified node detail route", async () => {
     const calls: Array<{ method: string; url: string }> = [];
     global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const request = input instanceof Request ? input : new Request(input, init);
       calls.push({ method: request.method, url: request.url });
       return jsonResponse({
+        type: "airapp",
         node: { id: "nod_1" },
         entryFile: "package.json",
         visibility: "private",
@@ -875,8 +937,11 @@ describe("busabase-cli commands", () => {
     ]);
 
     expect(exitCode).toBe(0);
+    // `GET /file-trees/{nodeId}` is retired. `type` is now a disambiguation hint
+    // for a slug rather than a route selector, and the payload comes back under
+    // the `airapp` branch of the discriminated NodeDetailVO.
     expect(calls).toEqual([
-      { method: "GET", url: "http://localhost:15419/api/v1/file-trees/nod_1?type=airapp" },
+      { method: "GET", url: "http://localhost:15419/api/v1/nodes/nod_1?type=airapp" },
     ]);
   });
 

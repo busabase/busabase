@@ -9,6 +9,7 @@ import {
   anonymousAccessKindFor,
   anonymousAllowlistSnapshot,
   isAnonymousProcedureAllowed,
+  isAnonymousReadableNodeType,
 } from "../src/logic/anonymous-allowlist";
 import { setNodeShare } from "../src/logic/node-share";
 import { seedScenario } from "../src/logic/seed";
@@ -55,6 +56,13 @@ const MUST_STAY_DENIED = [
   "nodes.purge",
   "nodes.updateVisibility",
   "docs.updateBody",
+  // The four retired typed gets. They no longer exist as procedures at all —
+  // asserting they are denied keeps a re-added alias from quietly inheriting
+  // anonymous access from this file's history.
+  "docs.get",
+  "files.get",
+  "folders.get",
+  "fileTrees.get",
   "bases.create",
   "records.changeRequest",
   "search",
@@ -75,15 +83,41 @@ describe("anonymous allowlist (unit)", () => {
     expect(anonymousAllowlistSnapshot().read).toEqual([
       "bases.get",
       "bases.listViews",
-      "docs.get",
-      "files.get",
-      "folders.get",
       "form.getByNode",
+      // `docs.get` / `files.get` / `folders.get` collapsed into this one route.
+      "nodes.get",
       "nodes.list",
       "records.get",
       "records.list",
       "records.listPage",
     ]);
+  });
+
+  /**
+   * The distinction that used to be carried by WHICH procedure was allowlisted:
+   * `folders.get` / `docs.get` / `files.get` were public, `fileTrees.get`
+   * deliberately was not — a public share must never become a way to read a
+   * Skill/Drive/AirApp's source. One merged procedure cannot express that, so
+   * the boundary moved onto the resolved node type. If this list ever grows a
+   * file-tree type, that protection is gone.
+   */
+  it("keeps Skills, Drives, and AirApps off the anonymous node-type surface", () => {
+    expect(anonymousAllowlistSnapshot().nodeTypes).toEqual(["base", "doc", "file", "folder"]);
+    for (const type of ["skill", "drive", "airapp"]) {
+      expect(isAnonymousReadableNodeType(type), `${type} must stay non-anonymous`).toBe(false);
+    }
+    for (const type of ["folder", "doc", "file", "base"]) {
+      expect(isAnonymousReadableNodeType(type), `${type} must stay anonymous-readable`).toBe(true);
+    }
+  });
+
+  it("fails closed on a node type nobody has decided about", () => {
+    // A late `registerNodeType()` plugin type must not inherit public access.
+    expect(isAnonymousReadableNodeType("brand-new-plugin-type")).toBe(false);
+    // Registered-but-undecided built-ins are refused for the same reason.
+    for (const type of ["form", "whiteboard", "workflow", "html"]) {
+      expect(isAnonymousReadableNodeType(type)).toBe(false);
+    }
   });
 
   it("classifies form.submit as submit-only, never as read", () => {

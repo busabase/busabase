@@ -8,6 +8,7 @@ import { Label } from "kui/label";
 import { CloudOff, Loader2, RefreshCw, ShieldCheck } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { TranslationFunctions } from "~/i18n/i18n-types";
+import { openExternalViaDesktopShell } from "../utils/desktop-shell";
 
 export type CloudConnectSettingsLabels = TranslationFunctions["cloudConnect"];
 
@@ -45,6 +46,8 @@ export function CloudConnectSettingsTab({ labels, active }: Props) {
   const [snapshot, setSnapshot] = useState<CloudConnectStatusResponse | null>(null);
   const [cloudUrlInput, setCloudUrlInput] = useState("");
   const [actionError, setActionError] = useState<string | null>(null);
+  /** Desktop shell path: sign-in continues in the OS browser, not in an in-app popup. */
+  const [handedOffToBrowser, setHandedOffToBrowser] = useState(false);
   const [isConnecting, setIsConnecting] = useState(false);
   const [isDisconnecting, setIsDisconnecting] = useState(false);
   const hasEditedCloudUrl = useRef(false);
@@ -78,17 +81,18 @@ export function CloudConnectSettingsTab({ labels, active }: Props) {
 
   const handleConnect = async () => {
     setActionError(null);
+    setHandedOffToBrowser(false);
     setIsConnecting(true);
     // Open the popup synchronously, still within the click gesture — opening it only after
     // the `await fetch` below resolves loses the "direct result of a user gesture" status
     // browsers require and gets silently blocked (esp. Safari). Navigate it once we know
     // the authorize URL instead of opening it with a URL up front.
+    //
+    // A `null` here is NOT necessarily a blocked popup: inside the Busabase Desktop shell
+    // the Tauri webview implements no `window.open()` at all and always returns `null`, so
+    // we first offer the URL to the shell (which opens the OS browser) and only report
+    // "popup blocked" when nothing took it. See `../utils/desktop-shell`.
     const popup = window.open("", "busabase-cloud-connect", POPUP_FEATURES);
-    if (!popup) {
-      setActionError(labels.popupBlocked());
-      setIsConnecting(false);
-      return;
-    }
     try {
       const res = await fetch("/api/cloud-connect/connect", {
         method: "POST",
@@ -99,11 +103,21 @@ export function CloudConnectSettingsTab({ labels, active }: Props) {
       if (!res.ok || !body.authorizeUrl) {
         throw new Error(body.error ?? labels.connectFailed());
       }
-      popup.location.href = body.authorizeUrl;
+      if (popup) {
+        popup.location.href = body.authorizeUrl;
+      } else {
+        const outcome = await openExternalViaDesktopShell(body.authorizeUrl);
+        if (outcome === "failed") throw new Error(labels.connectFailed());
+        if (outcome === "unavailable") {
+          setActionError(labels.popupBlocked());
+          return;
+        }
+        setHandedOffToBrowser(true);
+      }
       hasEditedCloudUrl.current = false;
       setSnapshot((current) => (current ? { ...current, status: "connecting" } : current));
     } catch (error) {
-      popup.close();
+      popup?.close();
       setActionError(error instanceof Error ? error.message : labels.connectFailed());
     } finally {
       setIsConnecting(false);
@@ -112,6 +126,7 @@ export function CloudConnectSettingsTab({ labels, active }: Props) {
 
   const handleDisconnect = async () => {
     setActionError(null);
+    setHandedOffToBrowser(false);
     setIsDisconnecting(true);
     try {
       const res = await fetch("/api/cloud-connect/disconnect", { method: "POST" });
@@ -206,6 +221,12 @@ export function CloudConnectSettingsTab({ labels, active }: Props) {
                 ? labels.statusDiagnostic({ error: snapshot.error })
                 : connectFailedMessage)}
           </AlertDescription>
+        </Alert>
+      ) : null}
+
+      {handedOffToBrowser && status !== "connected" ? (
+        <Alert>
+          <AlertDescription>{labels.signInInBrowser()}</AlertDescription>
         </Alert>
       ) : null}
 

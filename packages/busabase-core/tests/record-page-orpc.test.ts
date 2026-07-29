@@ -72,6 +72,7 @@ describe("records.listPage - oRPC integration", () => {
         filters: [{ fieldSlug: "status", operator: "equals", value: "needs-review" }],
         sorts: [{ fieldSlug: "name", direction: "desc" }],
       },
+      autoMerge: false, // review-first: this test approves + merges the CR by hand
     });
     await client.changeRequests.review({ changeRequestIds: [viewCr.id], verdict: "approved" });
     const merged = await client.changeRequests.merge({ changeRequestIds: [viewCr.id] });

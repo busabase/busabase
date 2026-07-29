@@ -18,9 +18,17 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useCoreI18n, useCoreLocale } from "../../../i18n";
 import { useReportLoadedNode } from "../../dashboard/hooks/use-report-loaded-node";
 import type { NodeDetailProps } from "../../dashboard/node-detail-registry";
-import { findNode, RichNodeNotFound, RichNodeShell, useNodeMetadataSave } from "./rich-node-shell";
+import {
+  findNode,
+  RichNodeNotFound,
+  RichNodeShell,
+  useNodeMetadataSave,
+  useServerDocumentSync,
+} from "./rich-node-shell";
 
-type ExcalidrawComponent = typeof import("@excalidraw/excalidraw").Excalidraw;
+type ExcalidrawModule = typeof import("@excalidraw/excalidraw");
+/** `updateScene` takes a slightly fuller AppState than `initialData` does. */
+type UpdateScenePayload = Parameters<ExcalidrawImperativeAPI["updateScene"]>[0];
 
 const persistentAppState = (appState: AppState): Record<string, unknown> => ({
   gridSize: appState.gridSize,
@@ -53,7 +61,10 @@ export function WhiteboardDetailView({
   const sceneRef = useRef<WhiteboardDocument>(initialScene);
   const savedSceneRef = useRef(JSON.stringify(initialScene));
   const sceneInitializedRef = useRef(false);
-  const [Editor, setEditor] = useState<ExcalidrawComponent | null>(null);
+  // The whole module, not just the component: `restoreElements` below is what
+  // makes an externally-written scene safe to hand to `updateScene`.
+  const [excalidraw, setExcalidraw] = useState<ExcalidrawModule | null>(null);
+  const Editor = excalidraw?.Excalidraw ?? null;
   const [editorApi, setEditorApi] = useState<ExcalidrawImperativeAPI | null>(null);
   const [editorError, setEditorError] = useState<string | null>(null);
   const { error, markDirty, save, status } = useNodeMetadataSave(orpc, node, "whiteboardDocument");
@@ -62,7 +73,7 @@ export function WhiteboardDetailView({
     let active = true;
     import("@excalidraw/excalidraw")
       .then((module) => {
-        if (active) setEditor(() => module.Excalidraw);
+        if (active) setExcalidraw(module);
       })
       .catch((caught: unknown) => {
         if (active) {
@@ -76,11 +87,52 @@ export function WhiteboardDetailView({
     };
   }, [messages.richNodes.whiteboardLoading]);
 
-  useEffect(() => {
-    sceneRef.current = initialScene;
-    savedSceneRef.current = JSON.stringify(initialScene);
-    sceneInitializedRef.current = false;
-  }, [initialScene]);
+  // Excalidraw is uncontrolled — `initialData` below is read once, at mount —
+  // so a scene that changed on the server (another tab, an agent's OpenAPI
+  // `PATCH /nodes/{nodeId}/metadata`) has to be pushed in explicitly via
+  // `updateScene`. `useServerDocumentSync` owns the "is this safe to apply"
+  // decision; here we only re-baseline the local refs alongside it so the next
+  // `onChange` doesn't immediately read as dirty against the old scene.
+  useServerDocumentSync({
+    apply: (scene: WhiteboardDocument) => {
+      sceneRef.current = scene;
+      savedSceneRef.current = JSON.stringify(scene);
+      sceneInitializedRef.current = false;
+      if (!editorApi || !excalidraw) return;
+      editorApi.updateScene({
+        appState: scene.appState as UpdateScenePayload["appState"],
+        // `initialData` is normalized by Excalidraw itself at mount, but
+        // `updateScene` takes elements verbatim — so a scene written through
+        // the API with only the fields a human would bother typing
+        // (`{id,type,x,y,width,height}`) has to be restored to full elements
+        // here. Skipping this doesn't just look wrong, it corrupts the
+        // viewport: verified live, the missing numeric props made
+        // `scrollToContent` compute NaN and the zoom indicator read "NaN%".
+        elements: excalidraw.restoreElements(
+          scene.elements as ExcalidrawInitialDataState["elements"],
+          null,
+        ) as UpdateScenePayload["elements"],
+      });
+      // Re-fit the viewport onto the incoming drawing. `updateScene` swaps the
+      // elements but leaves the scroll/zoom fitted to what USED to be on the
+      // canvas, so without this the update lands off-screen and reads as "the
+      // whiteboard just went blank" — verified: the canvas showed only
+      // Excalidraw's own "Scroll back to content" button.
+      if (scene.elements.length > 0) {
+        requestAnimationFrame(() => {
+          editorApi.scrollToContent(undefined, {
+            animate: false,
+            fitToViewport: true,
+            viewportZoomFactor: 0.82,
+          });
+        });
+      }
+    },
+    getLocalDocument: () => sceneRef.current,
+    node,
+    serverDocument: initialScene,
+    status,
+  });
 
   useEffect(() => {
     if (!editorApi || initialScene.elements.length === 0) return;

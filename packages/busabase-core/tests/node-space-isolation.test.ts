@@ -7,7 +7,7 @@ import { runWithBusabaseContext } from "../src/context";
 import { busabaseRouter } from "../src/router";
 
 /**
- * Node listings (`listDocs` / `listFolders` / `listFileTreeNodes`) must be scoped
+ * Node listings (now one `nodes.list({ types })` surface) must be scoped
  * to the active space — they used to filter only by node type + archivedAt, which
  * in the multi-tenant cloud would return one space's docs/folders/files under
  * another. This pins that a node created in space A is never visible from space B.
@@ -63,30 +63,30 @@ describe("Node listings are space-scoped — oRPC integration", () => {
     }
   });
 
-  it("listDocs returns only the active space's docs", async () => {
-    const a = await inSpace("space_a", () => client.docs.list());
-    const b = await inSpace("space_b", () => client.docs.list());
-    expect(a.map((d) => d.node.slug)).toEqual(["doc-a"]);
-    expect(b.map((d) => d.node.slug)).toEqual(["doc-b"]);
+  it('nodes.list({ types: ["doc"] }) returns only the active space\'s docs', async () => {
+    const a = await inSpace("space_a", () => client.nodes.list({ types: ["doc"] }));
+    const b = await inSpace("space_b", () => client.nodes.list({ types: ["doc"] }));
+    expect(a.map((d) => d.slug)).toEqual(["doc-a"]);
+    expect(b.map((d) => d.slug)).toEqual(["doc-b"]);
   });
 
-  it("listFolders returns only the active space's folders (disjoint across spaces)", async () => {
-    const a = await inSpace("space_a", () => client.folders.list());
-    const b = await inSpace("space_b", () => client.folders.list());
+  it('nodes.list({ types: ["folder"] }) returns only the active space\'s folders (disjoint across spaces)', async () => {
+    const a = await inSpace("space_a", () => client.nodes.list({ types: ["folder"] }));
+    const b = await inSpace("space_b", () => client.nodes.list({ types: ["folder"] }));
     expect(a.length).toBeGreaterThan(0);
     expect(b.length).toBeGreaterThan(0);
-    const aIds = new Set(a.map((f) => f.node.id));
-    const bIds = new Set(b.map((f) => f.node.id));
+    const aIds = new Set(a.map((f) => f.id));
+    const bIds = new Set(b.map((f) => f.id));
     // No folder id leaks across spaces.
-    expect(a.some((f) => bIds.has(f.node.id))).toBe(false);
-    expect(b.some((f) => aIds.has(f.node.id))).toBe(false);
+    expect(a.some((f) => bIds.has(f.id))).toBe(false);
+    expect(b.some((f) => aIds.has(f.id))).toBe(false);
   });
 
-  it("listFileTreeNodes (drives) returns only the active space's drives", async () => {
-    const a = await inSpace("space_a", () => client.fileTrees.list({ type: "drive" }));
-    const b = await inSpace("space_b", () => client.fileTrees.list({ type: "drive" }));
-    const aSlugs = a.map((d) => d.node.slug);
-    const bSlugs = b.map((d) => d.node.slug);
+  it('nodes.list({ types: ["drive"] }) returns only the active space\'s drives', async () => {
+    const a = await inSpace("space_a", () => client.nodes.list({ types: ["drive"] }));
+    const b = await inSpace("space_b", () => client.nodes.list({ types: ["drive"] }));
+    const aSlugs = a.map((d) => d.slug);
+    const bSlugs = b.map((d) => d.slug);
     expect(aSlugs).toContain("drive-a");
     expect(aSlugs).not.toContain("drive-b");
     expect(bSlugs).toContain("drive-b");

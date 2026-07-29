@@ -72,7 +72,17 @@ The Node-only helper writes `~/.busabase/airapps/<app-id>.json` with an owner-on
 
 ## Data client entry points
 
-**`Busabase` class** — an ergonomic wrapper with namespaced methods (`bb.bases`, `bb.records`, `bb.changeRequests`, `bb.nodes`, `bb.views`, `bb.assets`, `bb.skills`, `bb.docs`, `bb.folders`, `bb.comments`, `bb.auditEvents`, `bb.agent`, `bb.agentTasks`, `bb.embedLinks`, `bb.search()`, `bb.health()`, `bb.me()`). Drop to `bb.client` for the raw oRPC client (e.g. `bb.client.system.meta()`).
+**`Busabase` class** — an ergonomic wrapper with namespaced methods (`bb.bases`, `bb.records`, `bb.changeRequests`, `bb.nodes`, `bb.views`, `bb.assets`, `bb.fileTrees`, `bb.files`, `bb.docs`, `bb.comments`, `bb.auditEvents`, `bb.agent`, `bb.agentTasks`, `bb.embedLinks`, `bb.search()`, `bb.grep()`, `bb.health()`, `bb.me()`). Drop to `bb.client` for the raw oRPC client (e.g. `bb.client.system.meta()`).
+
+Reading or listing nodes goes through `bb.nodes`, whatever the node's type:
+
+```ts
+const docs = await bb.nodes.list({ types: ["doc"] }); // flat summaries, one call
+const detail = await bb.nodes.get({ nodeId }); // discriminated by `detail.type`
+if (detail.type === "doc") console.log(detail.body);
+```
+
+`bb.nodes.get` replaced the per-type gets (`docs.get` / `files.get` / `folders.get` / `fileTrees.get`), so a caller holding an id no longer has to discover the node's type before it can read it — and there is no `bb.folders` namespace any more (a folder is `type: "folder"`). `bb.docs` / `bb.files` / `bb.fileTrees` remain for the operations that are genuinely type-specific: creating a node, reading a Doc line range, updating a Doc body, and listing/reading a Skill-, Drive-, or AirApp file.
 
 **`createBusabaseClient(config?)`** — returns the raw, fully-typed [oRPC](https://orpc.unnoq.com) client directly, if you'd rather not wrap it in a class:
 

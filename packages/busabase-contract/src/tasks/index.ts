@@ -111,8 +111,13 @@ export const TASK_SUPERSEDED_MCP_TOOLS: readonly string[] = [
   //    node_file_read / node_files_change_request. These were fifteen endpoints
   //    differing only in a path prefix until the contract merged them into one
   //    `/file-trees` group; the tasks keep the per-kind vocabulary.
-  "file_trees_list",
-  "file_trees_get",
+  //
+  //    `file_trees_list` / `file_trees_get` are NOT listed any more — those two
+  //    routes no longer exist at all (the unified Node surface serves them), so
+  //    naming them here would suppress nothing. Same for `docs_get`/`docs_list`/
+  //    `files_get`/`files_list`/`folders_get`/`folders_list`: they were never
+  //    listed and their endpoints are now gone too. `nodes_get` and `nodes_list`
+  //    stay published — they are the replacements, not duplicates of a task.
   "file_trees_list_files",
   "file_trees_read_file",
   "file_trees_create_change_request",

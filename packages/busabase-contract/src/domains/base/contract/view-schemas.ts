@@ -86,6 +86,20 @@ export const viewSchema = z.object({
   updatedAt: z.string(),
 });
 
+// Permission-aware default, identical to `createBase` / `createDoc` /
+// `createFileTreeNode` / the record endpoints: omitted merges immediately when
+// the actor has `write` on the Base's node, otherwise falls back to a pending
+// ChangeRequest (status "in_review"). Pass explicit `autoMerge: false` to force
+// review even with write access — that is what the dashboard and the mobile app
+// do, because their "propose for review" affordance must queue a CR regardless
+// of who is clicking it.
+const autoMergeSchema = z
+  .boolean()
+  .optional()
+  .describe(
+    "Whether to approve and merge this view change immediately. Omitted defaults to merging immediately if the actor has write access on the Base's node, otherwise falling back to a pending Change Request; pass explicit false to force review even with write access.",
+  );
+
 export const createViewInputSchema = z.object({
   config: viewConfigSchema.optional().default({ filters: [], sorts: [] }),
   description: z.string().optional().default(""),
@@ -98,6 +112,7 @@ export const createViewInputSchema = z.object({
     .regex(/^[a-z0-9-]+$/)
     .optional(),
   submittedBy: z.string().optional().default("local-producer"),
+  autoMerge: autoMergeSchema,
 });
 
 export const updateViewInputSchema = z.object({
@@ -107,16 +122,19 @@ export const updateViewInputSchema = z.object({
   name: z.string().min(1).optional(),
   type: viewTypeSchema.optional(),
   submittedBy: z.string().optional().default("local-producer"),
+  autoMerge: autoMergeSchema,
 });
 
 export const deleteViewInputSchema = z.object({
   message: z.string().optional().default("Delete view"),
   submittedBy: z.string().optional().default("local-producer"),
+  autoMerge: autoMergeSchema,
 });
 
 export const restoreViewInputSchema = z.object({
   message: z.string().optional().default("Restore view"),
   submittedBy: z.string().optional().default("local-producer"),
+  autoMerge: autoMergeSchema,
 });
 
 /**

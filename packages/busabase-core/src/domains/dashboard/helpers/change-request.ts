@@ -10,6 +10,7 @@ import type {
 import { iStringParse, iStringSchema } from "openlib/i18n/i-string";
 import { fmt } from "../../../i18n/fmt";
 import type { CoreI18nMessages } from "../../../i18n/messages";
+import { getPrimaryField } from "../../base/utils/primary-field";
 import { fieldPreviewText } from "./field";
 import { fieldValueToString, shortIdentifier } from "./format";
 
@@ -220,7 +221,7 @@ export const getOperationTargetLabel = (operation: OperationVO, messages?: CoreI
 };
 
 // Human-readable subject of an operation. For record operations the subject is
-// the value of the base's PRIMARY field (first by position — same convention as
+// the value of the base's PRIMARY field (lowest position — same convention as
 // getRecordTitle), read from the head commit or, for updates/deletes that don't
 // touch it, from the "before" values. Falls back to a title/name/subject slug
 // guess (views and nodes carry their name there) or the skill file path.
@@ -231,7 +232,7 @@ export const getOperationSubject = (
   messages?: CoreI18nMessages,
 ) => {
   if (base && operation.operation.startsWith("record_")) {
-    const primaryField = base.fields[0];
+    const primaryField = getPrimaryField(base);
     if (primaryField) {
       const subject =
         fieldPreviewText(
@@ -323,11 +324,10 @@ export const getRecordTitle = (
     return messages?.common.record ?? "Record";
   }
 
-  // The record title is the value of the base's PRIMARY field (its first field
-  // by position — the Airtable/Baserow convention), not a hard-coded
-  // title/name/subject guess. So a base whose first field is `name`, `title`,
+  // The record title is the value of the Base's lowest-position field, not a
+  // hard-coded title/name/subject guess. So a Base whose primary field is `name`, `title`,
   // or anything else displays correctly, and relation chips show that value.
-  const primaryField = record.base.fields[0];
+  const primaryField = getPrimaryField(record.base);
   const primary = primaryField
     ? fieldPreviewText(record.headCommit.fields[primaryField.slug], primaryField.type, messages)
     : "";

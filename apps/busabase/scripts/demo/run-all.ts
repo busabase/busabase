@@ -2,7 +2,7 @@
  * run-all: Run the full Busabase OpenAPI demo suite in sequence.
  *
  * Each script exercises a domain's full CRUD + CR lifecycle:
- *   01 Folders    — GET /folders, /nodes (read the seeded tree)
+ *   01 Folders    — GET /nodes (tree) + GET /nodes?types=folder (read the seeded tree)
  *   02 Bases      — POST /bases (idempotent), GET /bases, add fields
  *   03 Records    — create → approve → merge → update → delete
  *   04 Views      — create → update → delete via CR workflow

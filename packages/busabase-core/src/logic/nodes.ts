@@ -29,7 +29,7 @@ import {
 import { docBodyKey } from "../domains/doc/handlers";
 import { insertAuditEvent } from "./audit";
 import { id, now, rootNodeIdForSpace } from "./kernel";
-import { publishChangeRequestPendingReview } from "./live-events";
+import { publishChangeRequestPendingReview, publishNodeMetadataUpdated } from "./live-events";
 import {
   assertNodePermission,
   assertNodeVisible,
@@ -304,6 +304,72 @@ export const listNodes = async (input?: ListNodesInput): Promise<NodeVO[]> => {
   }
 
   return listNodesBounded(db, spaceId, input.parentId ?? null, input.depth);
+};
+
+/**
+ * `nodes.list({ types })` — a FLAT list of lightweight node summaries for the
+ * requested types. This is what replaced `GET /docs`, `/files`, `/folders`, and
+ * `/file-trees`.
+ *
+ * The point of it is the payload, not the path. All four retired listings were
+ * N+1 by construction: `listDocs` read every Doc body out of object storage,
+ * `listFileNodes` resolved a full AssetVO (and a text-status join) per row,
+ * `listFolders` ran a children query plus hydration per folder, and
+ * `listFileTreeNodes` built a complete file inventory per node. "Show me the
+ * Docs in this workspace" should not download every Doc.
+ *
+ * So: ONE ACL-scoped query over the node rows, plus one batched Base lookup so
+ * a `base` row still reports its `baseId`. No per-row fan-out, and `children`
+ * is always `[]` — a caller that wants a node's contents opens it with
+ * `nodes.get`.
+ */
+export const listNodeSummaries = async (
+  types: readonly string[],
+  status: "active" | "archived" = "active",
+): Promise<NodeVO[]> => {
+  await ensureReady();
+  const db = await getDb();
+  const spaceId = getContextSpaceId();
+
+  const rows = await db
+    .select()
+    .from(busabaseNodes)
+    .where(
+      and(
+        eq(busabaseNodes.spaceId, spaceId),
+        inArray(busabaseNodes.type, [...types]),
+        // Same active/archived predicate the tree and Trash listings use, so a
+        // type filter never quietly changes which lifecycle state you get.
+        status === "archived"
+          ? and(isNotNull(busabaseNodes.archivedAt), isNull(busabaseNodes.deletedAt))
+          : isNull(busabaseNodes.archivedAt),
+        buildNodeVisibilityCondition(db),
+      ),
+    )
+    .orderBy(asc(busabaseNodes.position), asc(busabaseNodes.createdAt));
+
+  if (rows.length === 0) return [];
+
+  // One extra query, not one per row: Base nodes carry their `baseId` in a
+  // sibling table and a summary that omitted it would be wrong, not merely thin.
+  const baseRows = types.includes("base")
+    ? await db
+        .select({ id: busabaseBases.id, nodeId: busabaseBases.nodeId })
+        .from(busabaseBases)
+        .where(
+          inArray(
+            busabaseBases.nodeId,
+            rows.map((row) => row.id),
+          ),
+        )
+    : [];
+  const baseIdByNodeId = new Map(baseRows.map((base) => [base.nodeId, base.id]));
+
+  // `children: []` / `hasChildren: false` — the same flat shape
+  // `listArchivedNodes` returns. This projection makes no claim about the
+  // subtree; a caller that needs one uses the tree mode (`parentId`/`depth`) or
+  // opens the node with `nodes.get` (a folder's detail carries its children).
+  return rows.map((row) => toNodeVO(row, baseIdByNodeId.get(row.id) ?? null, [], false));
 };
 
 /**
@@ -827,6 +893,17 @@ export const updateNodeMetadata = async (
       nodeId: updatedNode.id,
       updatedKeys: Object.keys(parsed.metadata).sort(),
     },
+  });
+
+  // Tell every connected dashboard the node changed. This is the only node
+  // write with no change request behind it, so it was also the only one that
+  // produced no realtime signal — leaving open whiteboard/workflow/HTML
+  // editors showing a stale document (see publishNodeMetadataUpdated).
+  await publishNodeMetadataUpdated({
+    spaceId,
+    nodeId: updatedNode.id,
+    actorId,
+    baseId: base?.id ?? null,
   });
 
   return toNodeVO(updatedNode, base?.id ?? null);

@@ -7,6 +7,7 @@ import { storage } from "openlib/storage";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { getDb } from "../src/db";
 import { attachments, busabaseAssets, busabaseAssetUsages, busabaseNodes } from "../src/db/schema";
+import { TEXT_TEMP_PREFIX } from "../src/domains/assets/logic/asset-texts-logic";
 import { busabaseAssetTexts } from "../src/domains/assets/schema/asset-texts";
 import { busabaseRouter } from "../src/router";
 import { grepFiles } from "./helpers/grep-files";
@@ -230,6 +231,31 @@ describe("Drive Grep Retrieval — putText / grep / readLines", () => {
       await expect(
         client.assets.putText({ assetId, storageKey: "attachments/blobs/sha256/aa/x.txt" }),
       ).rejects.toThrow();
+    });
+
+    // The local storage adapter resolves keys with a plain `path.join`, so a
+    // prefix-only guard is defeated by climbing back out of the pending prefix.
+    // The target here is a REAL object that was just uploaded, so the traversal
+    // would genuinely succeed if only the prefix were checked — and the assertion
+    // matches the guard's own wording, not the "failed to read" message that a
+    // missing object would produce either way.
+    it("rejects a pending-prefixed storageKey that escapes via `..` onto a real object", async () => {
+      // Binary mimeType on purpose: a text-kind asset would auto-register a row
+      // on confirm, which would mask what this test is actually asserting.
+      const { assetId } = await uploadAsset({
+        fileName: "traversal.pdf",
+        mimeType: "application/pdf",
+        hashByte: "8",
+      });
+      // A real, readable object OUTSIDE the pending namespace.
+      const victimKey = "attachments/blobs/sha256/zz/victim-target.txt";
+      await storage.uploadFileToKey(Buffer.from("readable bytes", "utf8"), victimKey, "text/plain");
+      await expect(storage.getObject(victimKey)).resolves.toBeInstanceOf(Buffer);
+
+      await expect(
+        client.assets.putText({ assetId, storageKey: `${TEXT_TEMP_PREFIX}/../../${victimKey}` }),
+      ).rejects.toThrow(/storageKey must be a pending text upload/i);
+      expect(await getTextRow(assetId)).toBeUndefined();
     });
   });
 

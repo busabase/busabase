@@ -27,6 +27,7 @@ import {
   loadAssetTextRows,
 } from "../domains/assets/logic/asset-texts-logic";
 import { openAssetTextSource } from "../domains/assets/logic/text-cache";
+import { getPrimaryField } from "../domains/base/utils/primary-field";
 import { hydrateChangeRequest, hydrateRecord } from "./cr-lifecycle";
 import {
   buildBaseVisibilityExists,
@@ -66,7 +67,7 @@ export const searchInputSchema = z.object({
 });
 
 export const recordPrimaryText = (record: RecordVO): string => {
-  const primarySlug = record.base.fields[0]?.slug;
+  const primarySlug = getPrimaryField(record.base)?.slug;
   return (primarySlug ? String(record.headCommit.fields[primarySlug] ?? "") : "") || record.id;
 };
 

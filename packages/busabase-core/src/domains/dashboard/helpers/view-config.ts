@@ -7,6 +7,9 @@ import {
   type ViewFilterVO,
   type ViewSortVO,
 } from "busabase-contract/types";
+import { getPrimaryField } from "../../base/utils/primary-field";
+
+type ViewFieldIdentity = Pick<BaseFieldVO, "position" | "slug">;
 
 export const matchesViewField = (
   item: { fieldId?: string; fieldSlug: string },
@@ -63,43 +66,72 @@ export const clearFirstViewFilter = (
 
 export const getVisibleViewFieldSlugs = (
   config: ViewConfigVO,
-  fields: Pick<BaseFieldVO, "slug">[],
+  fields: ViewFieldIdentity[],
 ): string[] => {
+  const primarySlug = getPrimaryField({ fields })?.slug;
   if (!Array.isArray(config.visibleFieldSlugs)) {
-    return fields.map((field) => field.slug);
+    const slugs = fields.map((field) => field.slug);
+    return primarySlug ? [primarySlug, ...slugs.filter((slug) => slug !== primarySlug)] : slugs;
   }
   const known = new Set(fields.map((field) => field.slug));
-  return [...new Set(config.visibleFieldSlugs)].filter((slug) => known.has(slug));
+  const configured = [...new Set(config.visibleFieldSlugs)].filter(
+    (slug) => known.has(slug) && slug !== primarySlug,
+  );
+  return primarySlug ? [primarySlug, ...configured] : configured;
+};
+
+export const canonicalizeViewFieldConfig = (
+  config: ViewConfigVO,
+  fields: ViewFieldIdentity[],
+): ViewConfigVO => {
+  // `undefined` means "follow the Base schema", including fields added later.
+  // Keep that live-default semantic instead of persisting today's full field list.
+  if (!Array.isArray(config.visibleFieldSlugs)) return config;
+  const visibleFieldSlugs = getVisibleViewFieldSlugs(config, fields);
+  return config.visibleFieldSlugs.length === visibleFieldSlugs.length &&
+    config.visibleFieldSlugs.every((slug, index) => slug === visibleFieldSlugs[index])
+    ? config
+    : { ...config, visibleFieldSlugs };
 };
 
 export const hideViewField = (
   config: ViewConfigVO,
   field: Pick<BaseFieldVO, "slug">,
-  fields: Pick<BaseFieldVO, "slug">[],
-): ViewConfigVO => ({
-  ...config,
-  visibleFieldSlugs: getVisibleViewFieldSlugs(config, fields).filter((slug) => slug !== field.slug),
-});
+  fields: ViewFieldIdentity[],
+): ViewConfigVO => {
+  const canonical = canonicalizeViewFieldConfig(config, fields);
+  if (getPrimaryField({ fields })?.slug === field.slug) return canonical;
+  return {
+    ...canonical,
+    visibleFieldSlugs: getVisibleViewFieldSlugs(canonical, fields).filter(
+      (slug) => slug !== field.slug,
+    ),
+  };
+};
 
 export const showViewField = (
   config: ViewConfigVO,
   field: Pick<BaseFieldVO, "slug">,
-  fields: Pick<BaseFieldVO, "slug">[],
+  fields: ViewFieldIdentity[],
 ): ViewConfigVO => {
-  const visible = getVisibleViewFieldSlugs(config, fields);
+  const canonical = canonicalizeViewFieldConfig(config, fields);
+  const visible = getVisibleViewFieldSlugs(canonical, fields);
   return visible.includes(field.slug)
-    ? config
-    : { ...config, visibleFieldSlugs: [...visible, field.slug] };
+    ? canonical
+    : { ...canonical, visibleFieldSlugs: [...visible, field.slug] };
 };
 
 export const showAllViewFields = (
   config: ViewConfigVO,
-  fields: Pick<BaseFieldVO, "slug">[],
+  fields: ViewFieldIdentity[],
 ): ViewConfigVO => {
-  const visible = getVisibleViewFieldSlugs(config, fields);
+  const canonical = canonicalizeViewFieldConfig(config, fields);
+  const visible = getVisibleViewFieldSlugs(canonical, fields);
   const visibleSet = new Set(visible);
   const hidden = fields.map((field) => field.slug).filter((slug) => !visibleSet.has(slug));
-  return hidden.length === 0 ? config : { ...config, visibleFieldSlugs: [...visible, ...hidden] };
+  return hidden.length === 0
+    ? canonical
+    : { ...canonical, visibleFieldSlugs: [...visible, ...hidden] };
 };
 
 export const clearAllViewFilters = (config: ViewConfigVO): ViewConfigVO =>
@@ -213,14 +245,18 @@ export const resetAllViewFieldWidths = (config: ViewConfigVO): ViewConfigVO =>
 
 export const moveViewField = (
   config: ViewConfigVO,
-  fields: Pick<BaseFieldVO, "slug">[],
+  fields: ViewFieldIdentity[],
   sourceSlug: string,
   targetSlug: string,
   placement: "before" | "after",
 ): ViewConfigVO => {
   const current = getVisibleViewFieldSlugs(config, fields);
+  const primarySlug = getPrimaryField({ fields })?.slug;
   if (sourceSlug === targetSlug || !current.includes(sourceSlug) || !current.includes(targetSlug)) {
-    return config;
+    return canonicalizeViewFieldConfig(config, fields);
+  }
+  if (sourceSlug === primarySlug || (targetSlug === primarySlug && placement === "before")) {
+    return canonicalizeViewFieldConfig(config, fields);
   }
   const withoutSource = current.filter((slug) => slug !== sourceSlug);
   const targetIndex = withoutSource.indexOf(targetSlug);

@@ -110,6 +110,7 @@ describe("field-values projection layer", () => {
       baseId,
       slug: "fv-archived-view",
       name: "FV Archived View",
+      autoMerge: false, // review-first: this test approves + merges the CR by hand
     });
     await client.changeRequests.review({ changeRequestIds: [viewCr.id], verdict: "approved" });
     await client.changeRequests.merge({ changeRequestIds: [viewCr.id] });

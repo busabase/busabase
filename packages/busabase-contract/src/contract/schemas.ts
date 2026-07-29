@@ -135,6 +135,36 @@ const listNodesInputSchema = z
      * archived nodes are shown as a list, not a tree.
      */
     status: z.enum(["active", "archived"]).optional().default("active"),
+    /**
+     * Narrow to specific node types and return a FLAT list of lightweight node
+     * summaries (`children: []`) instead of walking the tree. This is what
+     * replaced the four retired narrow listings (`GET /docs`, `/files`,
+     * `/folders`, `/file-trees`); file-trees are selected with their real
+     * discriminators `skill` / `drive` / `airapp`, since there is no synthetic
+     * "file-tree" node type.
+     *
+     * Omitting `types` leaves every existing caller on exactly today's
+     * behaviour (full tree, or a `parentId`/`depth`-bounded walk, or the
+     * archived flat list) — the two modes never interfere.
+     *
+     * NOTE — no `projection` parameter, deliberately. The consolidation roadmap
+     * sketched `?projection=summary`, but it also rules out adding
+     * `projection=detail` in this batch (the retired detail lists were the
+     * N+1 payloads this change exists to remove). That would leave a parameter
+     * with exactly one legal value, which is noise in OpenAPI/MCP/CLI rather
+     * than a decision a caller gets to make. Detail is `GET /nodes/{nodeId}`.
+     *
+     * A GET query param that occurs exactly once (`?types=doc`) arrives as a
+     * bare string, not a 1-element array — only a REPEATED occurrence
+     * (`?types=doc&types=file`) becomes an array. Accept both and normalize.
+     */
+    types: z
+      .union([z.array(z.enum(NODE_TYPES)), z.enum(NODE_TYPES)])
+      .transform((value) => (Array.isArray(value) ? value : [value]))
+      .optional()
+      .describe(
+        "Return a flat list of lightweight summaries for these node types instead of the tree. Read one node's full detail with GET /nodes/{nodeId}.",
+      ),
   })
   .optional();
 
@@ -332,10 +362,18 @@ const liveEventSchema = z.object({
     // `use-live-sync.ts` to pop a desktop Notification, and by
     // busabase-cloud's host hook to persist an inbox notification row.
     "change_request.pending_review",
+    // A node's metadata was written directly, outside the change-request flow
+    // (`PATCH /api/v1/nodes/{nodeId}/metadata` — agents, the SDK, an MCP tool,
+    // and every rich-node editor's own Save). Carries the touched node in
+    // `nodeIds` so open dashboards refetch the node tree instead of showing a
+    // stale whiteboard/workflow/HTML document until the next reload.
+    "node.metadata_updated",
   ]),
   spaceId: z.string(),
   actorId: z.string(),
-  changeRequestId: z.string(),
+  // Null for events that aren't about a change request at all
+  // (`node.metadata_updated`), which is every direct, auto-audited write.
+  changeRequestId: z.string().nullable(),
   baseId: z.string().nullable(),
   nodeIds: z.array(z.string()),
   recordIds: z.array(z.string()),

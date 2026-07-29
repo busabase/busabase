@@ -158,9 +158,10 @@ const zhCN: Translation = {
     statusRefreshFailed: "连接状态已发生变化，但暂时无法加载最新状态。",
     statusDiagnostic: "连接诊断：{error}",
     popupBlocked: "浏览器拦截了登录弹窗，请允许弹窗后重试。",
+    signInInBrowser: "已在浏览器中打开 Busabase Cloud 登录页，完成登录后本页会自动连接。",
     aboutTitle: "关于云端连接",
     aboutDescription:
-      "登录会在弹窗中打开 Busabase Cloud，并生成一个仅作用于此隧道的凭证——不是你完整的云端账号会话。断开连接会撤销该凭证。",
+      "登录会在弹窗（桌面版则在浏览器）中打开 Busabase Cloud，并生成一个仅作用于此隧道的凭证——不是你完整的云端账号会话。断开连接会撤销该凭证。",
   },
   marketing: {
     rootDescription: "Busabase 的开源本地评审引擎。",

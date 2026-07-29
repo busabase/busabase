@@ -13,10 +13,12 @@ interface NodeVO {
   children?: NodeVO[];
 }
 
-interface FolderVO {
-  node: NodeVO;
-  children: NodeVO[];
-}
+/**
+ * `GET /folders` was retired by the unified Node surface — the folder listing
+ * here is `GET /nodes?types=folder`, a FLAT list of lightweight `NodeVO`
+ * summaries rather than the old `{ node, children }` envelopes.
+ */
+const listFolders = () => api<NodeVO[]>("GET", "/nodes?types=folder");
 
 /** GET /nodes returns a tree (roots with nested children); flatten it for lookups. */
 function flattenNodes(tree: NodeVO[]): NodeVO[] {
@@ -70,6 +72,7 @@ export async function run() {
     const cr = await api<ChangeRequestVO>("POST", "/nodes/change-requests", {
       message: "demo: create temp folder",
       submittedBy: "demo-script",
+      autoMerge: false,
       operations: [
         {
           kind: "create",
@@ -87,11 +90,11 @@ export async function run() {
     assert(result.changeRequest.status === "merged", "expected merged");
   });
 
-  await step("GET /folders — demo folder visible after create+merge", async () => {
-    const folders = await api<FolderVO[]>("GET", "/folders");
-    const f = folders.find((f) => f.node.slug === demoFolderSlug);
+  await step("GET /nodes?types=folder — demo folder visible after create+merge", async () => {
+    const folders = await listFolders();
+    const f = folders.find((f) => f.slug === demoFolderSlug);
     assert(!!f, `folder "${demoFolderSlug}" not found after create`);
-    demoFolderNodeId = f.node.id;
+    demoFolderNodeId = f.id;
   });
 
   // ── Rename the folder ─────────────────────────────────────────────────────
@@ -101,6 +104,7 @@ export async function run() {
     const cr = await api<ChangeRequestVO>("POST", "/nodes/change-requests", {
       message: "demo: rename folder",
       submittedBy: "demo-script",
+      autoMerge: false,
       operations: [
         {
           kind: "rename",
@@ -117,23 +121,20 @@ export async function run() {
     assert(result.changeRequest.status === "merged", "expected merged");
   });
 
-  await step("GET /folders — renamed folder has updated slug", async () => {
+  await step("GET /nodes?types=folder — renamed folder has updated slug", async () => {
     if (!demoFolderNodeId) return;
-    const folders = await api<FolderVO[]>("GET", "/folders");
-    const f = folders.find((f) => f.node.id === demoFolderNodeId);
+    const folders = await listFolders();
+    const f = folders.find((f) => f.id === demoFolderNodeId);
     assert(!!f, "renamed folder not found by id");
-    assert(
-      f.node.slug === "demo-temp-folder-renamed",
-      `expected renamed slug, got "${f.node.slug}"`,
-    );
+    assert(f.slug === "demo-temp-folder-renamed", `expected renamed slug, got "${f.slug}"`);
   });
 
   // ── Move the folder under Content ─────────────────────────────────────────
 
   await step("POST /nodes/change-requests — move folder (kind: move)", async () => {
     if (!demoFolderNodeId) return;
-    const folders = await api<FolderVO[]>("GET", "/folders");
-    const contentFolder = folders.find((f) => f.node.slug === "content");
+    const folders = await listFolders();
+    const contentFolder = folders.find((f) => f.slug === "content");
     if (!contentFolder) {
       process.stdout.write("     ⚠️  Content folder not found — skipping move\n");
       return;
@@ -142,11 +143,12 @@ export async function run() {
     const cr = await api<ChangeRequestVO>("POST", "/nodes/change-requests", {
       message: "demo: move folder under Content",
       submittedBy: "demo-script",
+      autoMerge: false,
       operations: [
         {
           kind: "move",
           nodeId: demoFolderNodeId,
-          parentNodeId: contentFolder.node.id,
+          parentNodeId: contentFolder.id,
           position: 99,
         },
       ],
@@ -164,6 +166,7 @@ export async function run() {
     const cr = await api<ChangeRequestVO>("POST", "/nodes/change-requests", {
       message: "demo: delete temp folder",
       submittedBy: "demo-script",
+      autoMerge: false,
       operations: [{ kind: "delete", nodeId: demoFolderNodeId }],
     });
     assert(cr.status === "in_review", `expected in_review, got ${cr.status}`);
@@ -192,6 +195,7 @@ export async function run() {
       const cr = await api<ChangeRequestVO>("POST", "/nodes/change-requests", {
         message: "demo: create a base via node CR",
         submittedBy: "demo-script",
+        autoMerge: false,
         operations: [
           {
             kind: "create",

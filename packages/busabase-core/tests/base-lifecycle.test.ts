@@ -227,12 +227,23 @@ describe("Base-domain DB lifecycle — oRPC", () => {
 
   // ── Views: create → review → merge → update → delete ──────────────────────
   describe("view change-request lifecycle", () => {
+    // Every proposal in this block pins the review-first branch: the endpoint
+    // auto-merges by default for a write-capable actor, and this block's whole
+    // subject is the propose -> approve -> merge lifecycle (the TOCTOU race test
+    // below literally needs two CRs pending at once).
+    const proposeView = async (input: Parameters<Client["views"]["changeRequest"]>[0]) => {
+      const result = await client.views.changeRequest({ ...input, autoMerge: false });
+      if (result.materialized) {
+        throw new Error("Expected autoMerge: false to yield a pending change request");
+      }
+      return result;
+    };
     const activeSlugs = async (baseId: string) =>
       (await client.bases.listViews({ baseId })).map((v) => v.slug);
 
     it("creates, updates, and deletes a View through merged change requests", async () => {
       // Create.
-      const createCr = await client.views.changeRequest({
+      const createCr = await proposeView({
         operation: "create",
         baseId: blogBaseId,
         slug: "lc-view",
@@ -247,7 +258,7 @@ describe("Base-domain DB lifecycle — oRPC", () => {
       const viewId = created?.id ?? "";
 
       // Update the name.
-      const updateCr = await client.views.changeRequest({
+      const updateCr = await proposeView({
         operation: "update",
         viewId,
         name: "Renamed View",
@@ -257,13 +268,13 @@ describe("Base-domain DB lifecycle — oRPC", () => {
       expect(views.find((v) => v.id === viewId)?.name).toBe("Renamed View");
 
       // Delete (archive) — drops out of the active list.
-      const deleteCr = await client.views.changeRequest({ operation: "delete", viewId });
+      const deleteCr = await proposeView({ operation: "delete", viewId });
       await approveAndMerge(deleteCr.id);
       expect(await activeSlugs(blogBaseId)).not.toContain("lc-view");
     });
 
     it("round-trips a gallery view type and its cover config through merge", async () => {
-      const createCr = await client.views.changeRequest({
+      const createCr = await proposeView({
         operation: "create",
         baseId: blogBaseId,
         slug: "lc-gallery",
@@ -289,7 +300,7 @@ describe("Base-domain DB lifecycle — oRPC", () => {
       expect(gallery?.config.showFieldLabels).toBe(true);
 
       // Switching a gallery back to a table via update persists the new type.
-      const updateCr = await client.views.changeRequest({
+      const updateCr = await proposeView({
         operation: "update",
         viewId: gallery?.id ?? "",
         type: "table",
@@ -300,7 +311,7 @@ describe("Base-domain DB lifecycle — oRPC", () => {
     });
 
     it("round-trips table field order and widths through a view change request", async () => {
-      const createCr = await client.views.changeRequest({
+      const createCr = await proposeView({
         operation: "create",
         baseId: blogBaseId,
         slug: "lc-table-layout",
@@ -323,7 +334,7 @@ describe("Base-domain DB lifecycle — oRPC", () => {
     });
 
     it("round-trips kanban and calendar view config through merge", async () => {
-      const kanbanCr = await client.views.changeRequest({
+      const kanbanCr = await proposeView({
         operation: "create",
         baseId: blogBaseId,
         slug: "lc-kanban",
@@ -333,7 +344,7 @@ describe("Base-domain DB lifecycle — oRPC", () => {
       });
       await approveAndMerge(kanbanCr.id);
 
-      const calendarCr = await client.views.changeRequest({
+      const calendarCr = await proposeView({
         operation: "create",
         baseId: blogBaseId,
         slug: "lc-calendar",
@@ -353,7 +364,7 @@ describe("Base-domain DB lifecycle — oRPC", () => {
     });
 
     it("round-trips gantt view config through merge", async () => {
-      const cr = await client.views.changeRequest({
+      const cr = await proposeView({
         operation: "create",
         baseId: blogBaseId,
         slug: "lc-gantt",
@@ -378,7 +389,7 @@ describe("Base-domain DB lifecycle — oRPC", () => {
     });
 
     it("rejects a duplicate view slug", async () => {
-      const cr = await client.views.changeRequest({
+      const cr = await proposeView({
         operation: "create",
         baseId: blogBaseId,
         slug: "lc-view-dup",
@@ -401,13 +412,13 @@ describe("Base-domain DB lifecycle — oRPC", () => {
     // both reach merge, and mergeViewCreate must catch the second one with a
     // clean CONFLICT instead of an unclassified unique-constraint 500.
     it("returns a CONFLICT (not a crash) when two view_create CRs race on the same slug", async () => {
-      const crA = await client.views.changeRequest({
+      const crA = await proposeView({
         operation: "create",
         baseId: blogBaseId,
         slug: "lc-view-race",
         name: "Race A",
       });
-      const crB = await client.views.changeRequest({
+      const crB = await proposeView({
         operation: "create",
         baseId: blogBaseId,
         slug: "lc-view-race",

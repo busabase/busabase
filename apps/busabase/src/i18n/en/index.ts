@@ -161,9 +161,11 @@ const en: BaseTranslation = {
     statusRefreshFailed: "The connection changed, but its latest status could not be loaded.",
     statusDiagnostic: "Connection diagnostic: {error:string}",
     popupBlocked: "Your browser blocked the sign-in popup. Please allow popups and try again.",
+    signInInBrowser:
+      "Busabase Cloud sign-in opened in your browser. Finish there and this page will connect automatically.",
     aboutTitle: "About Cloud Connect",
     aboutDescription:
-      "Signing in opens Busabase Cloud in a popup and mints a credential scoped only to this tunnel — not your full Cloud account session. Disconnecting revokes it.",
+      "Signing in opens Busabase Cloud in a popup (or your browser, in the desktop app) and mints a credential scoped only to this tunnel — not your full Cloud account session. Disconnecting revokes it.",
   },
   marketing: {
     rootDescription: "Open-source local review engine for Busabase.",

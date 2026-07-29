@@ -21,6 +21,9 @@ test("field header actions require a saved view and support keyboard quick sorti
         name: "Field header actions",
         slug: viewSlug,
         submittedBy: "playwright",
+        // Pin the review-first branch: this spec asserts the propose -> approve -> merge
+        // workflow, which the endpoint would otherwise skip for a write-capable actor.
+        autoMerge: false,
       },
     }),
   );

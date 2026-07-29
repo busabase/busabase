@@ -151,13 +151,15 @@ describe("dump domain logic — oRPC integration", () => {
     // The `nodes` warning ("no nodes imported") must NOT fire — we did import nodes.
     expect(commit.warnings.some((w) => /no nodes were imported/i.test(w))).toBe(false);
 
-    const restoredDoc = await inSpace(targetSpace, () => client.docs.get({ nodeId }));
+    const restoredDoc = await inSpace(targetSpace, () => client.nodes.get({ nodeId, type: "doc" }));
     expect(restoredDoc?.body).toBe("# hello\n\nbody text\n");
     // The `nodes` insert only succeeds at all if `coerceDateColumns` correctly
     // turned the ISO-string createdAt/updatedAt back into real Date values
     // before the drizzle insert (Postgres rejects a string in a timestamp
     // column outright) — reaching here proves that path works.
-    const restoredNodes = await inSpace(targetSpace, () => client.folders.list());
+    const restoredNodes = await inSpace(targetSpace, () =>
+      client.nodes.list({ types: ["folder"] }),
+    );
     expect(Array.isArray(restoredNodes)).toBe(true);
   });
 

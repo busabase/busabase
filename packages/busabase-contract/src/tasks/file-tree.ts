@@ -1,21 +1,20 @@
 import type { BusabaseTaskClient, TaskDefinition, TaskParam } from "./types";
 
 /**
- * Skills, Drives and AirApps are the same thing with different labels: all three
- * are built from `makeFileTreeContract`, so `list`/`get`/`listFiles`/`readFile`/
- * `createChangeRequest` are byte-identical in shape across them — 15 endpoints
- * that differ only in a path prefix.
+ * Skills, Drives and AirApps are the same thing with different labels:
+ * `list`/`get`/`listFiles`/`readFile`/`createChangeRequest` are byte-identical
+ * in shape across them — 15 endpoints that differ only in a path prefix.
  *
  * Published one-per-endpoint, that is 15 tools an agent has to tell apart, and
  * the difference between `skills_read_file` and `drives_read_file` is not a
  * difference in what you are doing. These five tasks take the node kind as a
  * parameter instead.
  *
- * Note this covers the three FILE-TREE types only. Docs, Bases, Folders and
- * Files have their own `get`/`list` endpoints with genuinely different payloads
- * (a Base carries fields and views; a Doc carries a body), so folding them in
- * here would mean a union return type that hides real differences rather than
- * an incidental one. They keep their own tools.
+ * Two of them now delegate to the unified Node surface rather than a file-tree
+ * route: `node_list_files_trees` -> `nodes.list({ types })` and
+ * `node_get_file_tree` -> `nodes.get`. The task vocabulary is unchanged, which
+ * is the whole point of this layer — the CLI keeps `skills list`, `drives get`
+ * and friends while the transport underneath consolidates.
  */
 
 const FILE_TREE_KINDS = ["skill", "drive", "airapp"] as const;
@@ -58,28 +57,30 @@ export const nodeListTask: TaskDefinition<FileTreeListInput> = {
     {
       path: ["skills", "list"],
       preset: { kind: "skill" },
-      summary: "List Skill nodes with their file trees",
+      summary: "List Skill nodes (summaries; use `skills get` for one node's files)",
     },
     {
       path: ["drives", "list"],
       preset: { kind: "drive" },
-      summary: "List Drive nodes with their file trees",
+      summary: "List Drive nodes (summaries; use `drives get` for one node's files)",
     },
     {
       path: ["airapps", "list"],
       preset: { kind: "airapp" },
-      summary: "List AirApp nodes with their file trees",
+      summary: "List AirApp nodes (summaries; use `airapps get` for one node's files)",
     },
   ],
-  summary: "List Skill, Drive, or AirApp nodes with their file trees",
+  summary: "List Skill, Drive, or AirApp nodes",
   guidance:
-    "Returns every node of the given kind together with its Asset-backed file list. " +
+    "Returns a lightweight summary row for every node of the given kind — id, name, slug, " +
+    "type, and metadata, but NOT the node's file list. Follow up with `node_get_file_tree` " +
+    "for one node's files, or `node_files_list` for just the file inventory. " +
     "For the workspace tree across all node types, use `nodes_list` instead.",
   annotations: { readOnly: true, destructive: false },
   params: [kindParam],
   examples: ["busabase-cli nodes list-file-trees --kind skill"],
   execute: async (client: BusabaseTaskClient, input: FileTreeListInput) =>
-    client.fileTrees.list({ type: resolveKind(input.kind) }),
+    client.nodes.list({ types: [resolveKind(input.kind)] }),
 };
 
 export interface FileTreeGetInput {
@@ -111,8 +112,11 @@ export const nodeGetTask: TaskDefinition<FileTreeGetInput> = {
   annotations: { readOnly: true, destructive: false },
   params: [kindParam, nodeIdParam],
   examples: ["busabase-cli nodes get-file-tree --kind airapp --node-id nod_123"],
+  // Reads through the unified Node detail route. The payload is unchanged apart
+  // from the `type` discriminator the union carries, so a caller still gets
+  // `{ node, entryFile, visibility, version, files }`.
   execute: async (client: BusabaseTaskClient, input: FileTreeGetInput) =>
-    client.fileTrees.get({ nodeId: input.nodeId, type: resolveKind(input.kind) }),
+    client.nodes.get({ nodeId: input.nodeId, type: resolveKind(input.kind) }),
 };
 
 export const nodeListFilesTask: TaskDefinition<FileTreeGetInput> = {
@@ -224,7 +228,10 @@ export const nodeFilesChangeRequestTask: TaskDefinition<FileTreeChangeRequestInp
   guidance:
     "Approval-first: this proposes a ChangeRequest for a human to review, it does not write directly. " +
     "Each operation is one of create / update / delete / metadata_update. " +
-    "Include `baseContentHash` (from `node_file_read`) on an update so a concurrent edit is caught.",
+    "Include `baseContentHash` (from `node_file_read`) on an update so a concurrent edit is caught. " +
+    // Same trap as `node_create`'s `files`, one edit later: an AirApp is run with `npm run dev`,
+    // so rewriting its package.json without that script breaks a previously working app.
+    'For kind "airapp", keep the project runnable by `npm run dev` — editing package.json must leave a "dev" script starting a plain Node server, not a bundler dev server.',
   annotations: { readOnly: false, destructive: false },
   params: [
     kindParam,

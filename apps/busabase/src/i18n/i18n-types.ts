@@ -582,11 +582,15 @@ type RootTranslation = {
 		 */
 		popupBlocked: string
 		/**
+		 * B​u​s​a​b​a​s​e​ ​C​l​o​u​d​ ​s​i​g​n​-​i​n​ ​o​p​e​n​e​d​ ​i​n​ ​y​o​u​r​ ​b​r​o​w​s​e​r​.​ ​F​i​n​i​s​h​ ​t​h​e​r​e​ ​a​n​d​ ​t​h​i​s​ ​p​a​g​e​ ​w​i​l​l​ ​c​o​n​n​e​c​t​ ​a​u​t​o​m​a​t​i​c​a​l​l​y​.
+		 */
+		signInInBrowser: string
+		/**
 		 * A​b​o​u​t​ ​C​l​o​u​d​ ​C​o​n​n​e​c​t
 		 */
 		aboutTitle: string
 		/**
-		 * S​i​g​n​i​n​g​ ​i​n​ ​o​p​e​n​s​ ​B​u​s​a​b​a​s​e​ ​C​l​o​u​d​ ​i​n​ ​a​ ​p​o​p​u​p​ ​a​n​d​ ​m​i​n​t​s​ ​a​ ​c​r​e​d​e​n​t​i​a​l​ ​s​c​o​p​e​d​ ​o​n​l​y​ ​t​o​ ​t​h​i​s​ ​t​u​n​n​e​l​ ​—​ ​n​o​t​ ​y​o​u​r​ ​f​u​l​l​ ​C​l​o​u​d​ ​a​c​c​o​u​n​t​ ​s​e​s​s​i​o​n​.​ ​D​i​s​c​o​n​n​e​c​t​i​n​g​ ​r​e​v​o​k​e​s​ ​i​t​.
+		 * S​i​g​n​i​n​g​ ​i​n​ ​o​p​e​n​s​ ​B​u​s​a​b​a​s​e​ ​C​l​o​u​d​ ​i​n​ ​a​ ​p​o​p​u​p​ ​(​o​r​ ​y​o​u​r​ ​b​r​o​w​s​e​r​,​ ​i​n​ ​t​h​e​ ​d​e​s​k​t​o​p​ ​a​p​p​)​ ​a​n​d​ ​m​i​n​t​s​ ​a​ ​c​r​e​d​e​n​t​i​a​l​ ​s​c​o​p​e​d​ ​o​n​l​y​ ​t​o​ ​t​h​i​s​ ​t​u​n​n​e​l​ ​—​ ​n​o​t​ ​y​o​u​r​ ​f​u​l​l​ ​C​l​o​u​d​ ​a​c​c​o​u​n​t​ ​s​e​s​s​i​o​n​.​ ​D​i​s​c​o​n​n​e​c​t​i​n​g​ ​r​e​v​o​k​e​s​ ​i​t​.
 		 */
 		aboutDescription: string
 	}
@@ -1463,11 +1467,15 @@ export type TranslationFunctions = {
 		 */
 		popupBlocked: () => LocalizedString
 		/**
+		 * Busabase Cloud sign-in opened in your browser. Finish there and this page will connect automatically.
+		 */
+		signInInBrowser: () => LocalizedString
+		/**
 		 * About Cloud Connect
 		 */
 		aboutTitle: () => LocalizedString
 		/**
-		 * Signing in opens Busabase Cloud in a popup and mints a credential scoped only to this tunnel — not your full Cloud account session. Disconnecting revokes it.
+		 * Signing in opens Busabase Cloud in a popup (or your browser, in the desktop app) and mints a credential scoped only to this tunnel — not your full Cloud account session. Disconnecting revokes it.
 		 */
 		aboutDescription: () => LocalizedString
 	}

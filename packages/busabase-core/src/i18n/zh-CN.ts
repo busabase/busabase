@@ -681,6 +681,21 @@ export const dashboardZhCN: CoreI18nMessages = {
     baseNotFoundTitle: "未找到数据库",
     baseNotFoundBody: "请求的数据库不存在。",
     baseInfo: "数据库信息",
+    recordTitle: "记录标题",
+    recordTitleBaseTooltip:
+      "用于在搜索、关联、记录详情页和所有视图中识别记录。表格视图始终将此字段固定在第一列。",
+    recordTitleViewTooltip:
+      "此 Base 的记录标题始终可见并固定在第一位。如需更换，请前往 Base Design。",
+    setAsRecordTitle: "设为记录标题",
+    setRecordTitleTitle: "设置记录标题字段？",
+    setRecordTitleDescription:
+      "将“{field}”用作此数据库中每条记录的标题。这会影响搜索结果、关联、记录详情页和卡片标题。",
+    requestSetRecordTitle: "请求更改标题",
+    setRecordTitleNow: "立即更改标题",
+    settingRecordTitle: "正在更改标题…",
+    recordTitleUpdated: "记录标题字段已更新",
+    recordTitleRequestSubmitted: "记录标题更改请求已提交",
+    setRecordTitleMessage: "将记录标题字段设为 {field}",
     requestRename: "请求重命名",
     renameNow: "立即重命名",
     renaming: "重命名中...",
@@ -842,6 +857,7 @@ export const dashboardZhCN: CoreI18nMessages = {
     unknownField: "未知字段",
     fieldOrderUnavailable: "此操作的字段顺序数据不可用。",
     fieldOrder: "字段顺序",
+    recordTitleChange: "记录标题：{before} → {after}",
     movedCount: "移动了 {count} 个",
   },
   graph: {

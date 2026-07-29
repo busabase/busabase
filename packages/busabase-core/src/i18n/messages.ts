@@ -698,6 +698,21 @@ export const coreMessagesEn = {
     baseNotFoundTitle: "Base not found",
     baseNotFoundBody: "The requested Base does not exist.",
     baseInfo: "Base Info",
+    recordTitle: "Record title",
+    recordTitleBaseTooltip:
+      "Identifies records in search, relationships, record pages, and every view. Table views always keep this field first.",
+    recordTitleViewTooltip:
+      "This Base record title is always visible and fixed first. Change it in Base Design.",
+    setAsRecordTitle: "Set as record title",
+    setRecordTitleTitle: "Set record title field?",
+    setRecordTitleDescription:
+      'Use "{field}" as the title for every record in this Base. This changes search results, relationships, record pages, and card titles.',
+    requestSetRecordTitle: "Request title change",
+    setRecordTitleNow: "Change title now",
+    settingRecordTitle: "Changing title…",
+    recordTitleUpdated: "Record title field updated",
+    recordTitleRequestSubmitted: "Record title change request submitted",
+    setRecordTitleMessage: "Set record title field to {field}",
     requestRename: "Request Rename",
     renameNow: "Rename Now",
     renaming: "Renaming...",
@@ -863,6 +878,7 @@ export const coreMessagesEn = {
     unknownField: "Unknown field",
     fieldOrderUnavailable: "Field order data is unavailable for this operation.",
     fieldOrder: "Field order",
+    recordTitleChange: "Record title: {before} → {after}",
     movedCount: "{count} moved",
   },
   graph: {

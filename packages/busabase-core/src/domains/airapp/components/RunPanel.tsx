@@ -11,6 +11,7 @@ import { useLocation, useSearch } from "wouter";
 import { fmt, useCoreI18n } from "../../../i18n";
 import { EmptyState } from "../../dashboard/components/primitives";
 import { NodeDetailSkeleton } from "../../dashboard/components/skeletons";
+import { asNodeDetail } from "../../dashboard/helpers/node-detail";
 import type { SidePanelTabProps } from "../../dashboard/side-panel-registry";
 import { useSidePanelStore } from "../../dashboard/store/side-panel-store";
 import { airAppSidePanelTabId } from "../store/airapp-keepalive-store";
@@ -493,10 +494,11 @@ export function AirAppSidePanelPreview({ orpc, payload }: SidePanelTabProps) {
   const { nodeId } = payload as { nodeId: string };
 
   const airappQuery = useQuery({
-    ...orpc.fileTrees.get.queryOptions({ input: { nodeId, type: "airapp" } }),
+    ...orpc.nodes.get.queryOptions({ input: { nodeId, type: "airapp" } }),
     enabled: Boolean(nodeId),
   });
-  const airapp = airappQuery.data ?? null;
+  // `nodes.get` is one route for every node type, so narrow to the AirApp branch.
+  const airapp = asNodeDetail(airappQuery.data, "airapp");
   const runner = useAirAppRunner({ orpc, airapp });
 
   if (!airapp) {

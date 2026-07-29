@@ -219,9 +219,20 @@ function buildClient(raw: RawClient) {
         },
       ) => {
         const { mergeImmediately, ...rest } = input;
-        const cr = await raw.views.changeRequest(
-          rest as Parameters<RawClient["views"]["changeRequest"]>[0],
-        );
+        // Pin the review-first branch. The endpoint's own permission-aware
+        // default would auto-merge for these write-capable test actors and hand
+        // back a materialized ViewVO, but this helper's contract — and every
+        // caller's `mergeImmediately` flag — is "always give me the CR, and
+        // approve+merge it only if I asked". Callers that want to exercise the
+        // one-call auto-merge branch should use the raw client directly.
+        const result = await raw.views.changeRequest({
+          ...rest,
+          autoMerge: false,
+        } as Parameters<RawClient["views"]["changeRequest"]>[0]);
+        if (result.materialized) {
+          throw new Error("views.changeRequest ignored autoMerge: false and materialized the view");
+        }
+        const cr = result;
         if (mergeImmediately) {
           await approveAndMerge(cr.id);
         }

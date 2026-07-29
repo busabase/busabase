@@ -319,7 +319,16 @@ describe("busabase pglite integration flow", () => {
       name: "Agent Posts",
       slug: "agent-posts",
       submittedBy: "vitest-agent",
+      // Pin the review-first branch: these assertions walk the CR through
+      // approve + merge explicitly, which the endpoint would otherwise have
+      // already done for this write-capable actor.
+      autoMerge: false,
     });
+    if (viewChangeRequest.materialized) {
+      throw new Error(
+        "Expected a pending ChangeRequest (autoMerge: false), got a materialized view",
+      );
+    }
     expect(viewChangeRequest.primaryOperation?.operation).toBe("view_create");
     await store.reviewChangeRequest(viewChangeRequest.id, { verdict: "approved" });
     const mergedViewChangeRequest = await store.mergeChangeRequest(viewChangeRequest.id);
@@ -333,6 +342,10 @@ describe("busabase pglite integration flow", () => {
       name: "Default Fields",
       slug: "default-fields",
       submittedBy: "vitest-agent",
+      // Pin the review-first branch: these assertions walk the CR through
+      // approve + merge explicitly, which the endpoint would otherwise have
+      // already done for this write-capable actor.
+      autoMerge: false,
     });
     await store.reviewChangeRequest(defaultFieldsViewChangeRequest.id, { verdict: "approved" });
     const mergedDefaultFieldsView = await store.mergeChangeRequest(
@@ -349,6 +362,10 @@ describe("busabase pglite integration flow", () => {
       name: "No Fields",
       slug: "no-fields",
       submittedBy: "vitest-agent",
+      // Pin the review-first branch: these assertions walk the CR through
+      // approve + merge explicitly, which the endpoint would otherwise have
+      // already done for this write-capable actor.
+      autoMerge: false,
     });
     await store.reviewChangeRequest(noFieldsViewChangeRequest.id, { verdict: "approved" });
     const mergedNoFieldsView = await store.mergeChangeRequest(noFieldsViewChangeRequest.id);
@@ -362,6 +379,61 @@ describe("busabase pglite integration flow", () => {
     expect(mergedViews.find((view) => view.slug === "no-fields")?.config.visibleFieldSlugs).toEqual(
       [],
     );
+
+    // autoMerge: the whole create -> approve -> merge round-trip above collapses
+    // into one call for an actor with write access, and the View comes back
+    // materialized instead of a pending ChangeRequest. Views were the only
+    // structural node type without this, which left an agent building starter
+    // structure with its Bases merged and its Views stuck in the review queue.
+    const autoMergedView = await base.createViewChangeRequest(blogBase.id, {
+      config: { filters: [], sorts: [] },
+      name: "Auto Merged",
+      slug: "auto-merged",
+      submittedBy: "vitest-agent",
+      autoMerge: true,
+    });
+    if (!autoMergedView.materialized) {
+      throw new Error("Expected createViewChangeRequest({ autoMerge: true }) to return a ViewVO");
+    }
+    expect(autoMergedView.slug).toBe("auto-merged");
+    expect(autoMergedView.status).toBe("active");
+    // Listed as active with no separate review/merge call at all.
+    expect(
+      (await base.listViews(blogBase.id)).some(
+        (view) => view.slug === "auto-merged" && view.status === "active",
+      ),
+    ).toBe(true);
+
+    // ...and the same one-call shape on update and delete.
+    const autoUpdatedView = await base.createUpdateViewChangeRequest(autoMergedView.id, {
+      name: "Auto Merged (renamed)",
+      submittedBy: "vitest-agent",
+      autoMerge: true,
+    });
+    if (!autoUpdatedView.materialized) {
+      throw new Error("Expected the update branch to return a materialized ViewVO");
+    }
+    expect(autoUpdatedView.name).toBe("Auto Merged (renamed)");
+
+    const autoDeletedView = await base.createDeleteViewChangeRequest(autoMergedView.id, {
+      submittedBy: "vitest-agent",
+      autoMerge: true,
+    });
+    if (!autoDeletedView.materialized) {
+      throw new Error("Expected the delete branch to return a materialized ViewVO");
+    }
+    expect(autoDeletedView.status).toBe("archived");
+
+    // Restore closes the loop, and an explicit `autoMerge: false` still forces
+    // review even though this actor could have merged it.
+    const restoreForReview = await base.createRestoreViewChangeRequest(autoMergedView.id, {
+      submittedBy: "vitest-agent",
+      autoMerge: false,
+    });
+    if (restoreForReview.materialized) {
+      throw new Error("Expected autoMerge: false to force a pending ChangeRequest on restore");
+    }
+    expect(restoreForReview.status).toBe("in_review");
 
     await store.createAuditEvent({
       action: "record.viewed",

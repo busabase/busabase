@@ -45,6 +45,9 @@ test("staged view controls recover a hidden conditioned field with one update CR
         name: "View control recovery",
         slug: viewSlug,
         submittedBy: "playwright",
+        // Pin the review-first branch: this spec asserts the propose -> approve -> merge
+        // workflow, which the endpoint would otherwise skip for a write-capable actor.
+        autoMerge: false,
       },
     }),
   );
@@ -197,6 +200,9 @@ test("edit view reuses the shared fields editor and preserves unrelated config",
         name: "Edit view shared fields",
         slug: viewSlug,
         submittedBy: "playwright",
+        // Pin the review-first branch: this spec asserts the propose -> approve -> merge
+        // workflow, which the endpoint would otherwise skip for a write-capable actor.
+        autoMerge: false,
       },
     }),
   );

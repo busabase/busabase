@@ -18,6 +18,7 @@ import {
 import { NodeActionsMenu } from "../../dashboard/components/node-actions-menu";
 import { EmptyState } from "../../dashboard/components/primitives";
 import { FileContentSkeleton, NodeDetailSkeleton } from "../../dashboard/components/skeletons";
+import { asNodeDetail } from "../../dashboard/helpers/node-detail";
 import { useReportLoadedNode } from "../../dashboard/hooks/use-report-loaded-node";
 import type { NodeDetailProps } from "../../dashboard/node-detail-registry";
 import { disposeDeletedAirAppSession } from "../store/airapp-session-cleanup";
@@ -58,10 +59,11 @@ export function AirAppDetailView({ orpc, slug, onNodeLoaded }: NodeDetailProps) 
   const fullscreenState = useAirAppFullscreen({ syncWithUrl: isKeepAliveActive });
 
   const airappQuery = useQuery({
-    ...orpc.fileTrees.get.queryOptions({ input: { nodeId: slug ?? "", type: "airapp" } }),
+    ...orpc.nodes.get.queryOptions({ input: { nodeId: slug ?? "", type: "airapp" } }),
     enabled: Boolean(slug),
   });
-  const airapp = airappQuery.data ?? null;
+  // `nodes.get` is one route for every node type, so narrow to the AirApp branch.
+  const airapp = asNodeDetail(airappQuery.data, "airapp");
   useReportLoadedNode(airapp?.node, onNodeLoaded);
 
   // Reset the open file when switching airapp nodes.

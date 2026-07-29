@@ -286,8 +286,10 @@ describe("busabase-cli export → install round trip (real demo seed, two databa
       const page = await client.dump.exportTables({ table: "nodes", cursor, limit: 500 });
       for (const node of page.rows as Array<{ id: string; slug: string; type: string }>) {
         if (node.type !== "doc") continue;
-        const doc = await client.docs.get({ nodeId: node.id });
-        acc.set(node.slug, doc?.body ?? "");
+        // `docs.get` was retired by the unified Node surface; `nodes.get`
+        // returns the same Doc payload under the `type: "doc"` variant.
+        const doc = await client.nodes.get({ nodeId: node.id, type: "doc" });
+        acc.set(node.slug, doc.type === "doc" ? doc.body : "");
       }
       cursor = page.nextCursor ?? undefined;
     } while (cursor);

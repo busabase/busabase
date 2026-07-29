@@ -44,7 +44,49 @@ describe("Busabase OpenAPI record get route", () => {
     expect(spec.paths?.["/api/v1/change-requests/{changeRequestId}/merge"]).toBeUndefined();
   });
 
-  it("keeps the compressed public API at 103 operations", async () => {
+  it("no longer publishes any of the four retired typed list/get pairs", async () => {
+    const spec = await getBusabaseOpenApiSpec();
+    for (const path of [
+      "/api/v1/docs",
+      "/api/v1/docs/{nodeId}",
+      "/api/v1/files/{nodeId}",
+      "/api/v1/folders",
+      "/api/v1/folders/{nodeId}",
+      "/api/v1/file-trees/{nodeId}",
+    ]) {
+      expect(spec.paths?.[path]?.get, `${path} GET must be gone`).toBeUndefined();
+    }
+    // `/api/v1/files` and `/api/v1/file-trees` still exist — as POST-only
+    // creation routes. Only their GET twin was retired.
+    expect(spec.paths?.["/api/v1/files"]?.get).toBeUndefined();
+    expect(spec.paths?.["/api/v1/files"]?.post).toBeDefined();
+    expect(spec.paths?.["/api/v1/file-trees"]?.get).toBeUndefined();
+    expect(spec.paths?.["/api/v1/file-trees"]?.post).toBeDefined();
+  });
+
+  it("serves all four through one unified Node detail route", async () => {
+    const spec = await getBusabaseOpenApiSpec();
+    const operation = spec.paths?.["/api/v1/nodes/{nodeId}"]?.get;
+    expect(operation).toBeDefined();
+    const parameterNames = (operation?.parameters ?? [])
+      .filter(
+        (parameter): parameter is Exclude<typeof parameter, { $ref: string }> =>
+          !("$ref" in parameter),
+      )
+      .map((parameter) => parameter.name)
+      .sort();
+    expect(parameterNames).toEqual(["nodeId", "type"]);
+  });
+
+  it("keeps the literal /nodes GET routes as their own operations", async () => {
+    // They share a prefix with the new `/nodes/{nodeId}` template; if either
+    // were swallowed by it, quick-jump and favorites would silently 404.
+    const spec = await getBusabaseOpenApiSpec();
+    expect(spec.paths?.["/api/v1/nodes/search"]?.get).toBeDefined();
+    expect(spec.paths?.["/api/v1/nodes/favorites"]?.get).toBeDefined();
+  });
+
+  it("keeps the compressed public API at 96 operations", async () => {
     const spec = await getBusabaseOpenApiSpec();
     const operationCount = Object.values(spec.paths ?? {}).reduce(
       (count, pathItem) =>
@@ -55,7 +97,9 @@ describe("Busabase OpenAPI record get route", () => {
       0,
     );
     // Numbered pagination raised the merged develop baseline from 104 to 105;
-    // consolidating four CR action operations into two brings it to 103.
-    expect(operationCount).toBe(103);
+    // consolidating four CR action operations into two brought it to 103.
+    // Unified Node detail retired four typed gets and added one (-3 -> 100);
+    // unified Node summary lists retired the four typed lists (-4 -> 96).
+    expect(operationCount).toBe(96);
   });
 });

@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   addViewFilter,
   addViewSort,
+  canonicalizeViewFieldConfig,
   clampViewFieldWidth,
   clearAllViewFilters,
   clearAllViewSorts,
@@ -27,7 +28,11 @@ import {
 } from "./view-config";
 
 const field = { id: "fld_status", slug: "status" } as BaseFieldVO;
-const fields = [{ slug: "title" }, { slug: "status" }, { slug: "owner" }] as BaseFieldVO[];
+const fields = [
+  { position: 0, slug: "title" },
+  { position: 1, slug: "status" },
+  { position: 2, slug: "owner" },
+] as BaseFieldVO[];
 const config: ViewConfigVO = {
   filters: [
     { fieldSlug: "owner", operator: "equals", value: "kelly" },
@@ -74,17 +79,21 @@ describe("view config quick updates", () => {
       "status",
       "owner",
     ]);
-    expect(hideViewField(config, field, fields).visibleFieldSlugs).toEqual(["owner", "title"]);
+    expect(hideViewField(config, field, fields).visibleFieldSlugs).toEqual(["title", "owner"]);
     expect(
       showViewField(hideViewField(config, field, fields), field, fields).visibleFieldSlugs,
-    ).toEqual(["owner", "title", "status"]);
+    ).toEqual(["title", "owner", "status"]);
     const hidden = hideViewField(config, field, fields);
     expect(showAllViewFields(hidden, fields).visibleFieldSlugs).toEqual([
-      "owner",
       "title",
+      "owner",
       "status",
     ]);
-    expect(showAllViewFields(config, fields)).toBe(config);
+    expect(showAllViewFields(config, fields).visibleFieldSlugs).toEqual([
+      "title",
+      "owner",
+      "status",
+    ]);
   });
 
   it("clears staged filter, sort, and width groups without changing unrelated config", () => {
@@ -136,21 +145,56 @@ describe("view config quick updates", () => {
   });
 
   it("preserves configured order and moves a field without changing global schema order", () => {
-    expect(getVisibleViewFieldSlugs(config, fields)).toEqual(["owner", "title", "status"]);
+    expect(getVisibleViewFieldSlugs(config, fields)).toEqual(["title", "owner", "status"]);
     const next = moveViewField(config, fields, "owner", "status", "after");
     expect(next.visibleFieldSlugs).toEqual(["title", "status", "owner"]);
     expect(fields.map((item) => item.slug)).toEqual(["title", "status", "owner"]);
     expect(moveViewField(config, fields, "owner", "title", "before").visibleFieldSlugs).toEqual([
-      "owner",
       "title",
+      "owner",
       "status",
     ]);
     expect(moveViewField(config, fields, "status", "owner", "before").visibleFieldSlugs).toEqual([
+      "title",
       "status",
       "owner",
-      "title",
     ]);
-    expect(moveViewField(config, fields, "missing", "owner", "before")).toBe(config);
+    expect(moveViewField(config, fields, "missing", "owner", "before").visibleFieldSlugs).toEqual([
+      "title",
+      "owner",
+      "status",
+    ]);
+  });
+
+  it("keeps the record title visible and first across malformed view updates", () => {
+    const hiddenPrimary = { ...config, visibleFieldSlugs: ["owner", "status"] };
+    expect(getVisibleViewFieldSlugs(hiddenPrimary, fields)).toEqual(["title", "owner", "status"]);
+    expect(canonicalizeViewFieldConfig(hiddenPrimary, fields).visibleFieldSlugs).toEqual([
+      "title",
+      "owner",
+      "status",
+    ]);
+    expect(hideViewField(config, fields[0], fields).visibleFieldSlugs).toEqual([
+      "title",
+      "owner",
+      "status",
+    ]);
+    expect(moveViewField(config, fields, "title", "status", "after").visibleFieldSlugs).toEqual([
+      "title",
+      "owner",
+      "status",
+    ]);
+    expect(moveViewField(config, fields, "owner", "title", "before").visibleFieldSlugs).toEqual([
+      "title",
+      "owner",
+      "status",
+    ]);
+  });
+
+  it("keeps undefined visibility live so fields added later remain visible", () => {
+    const liveConfig = { ...config, visibleFieldSlugs: undefined };
+    expect(canonicalizeViewFieldConfig(liveConfig, fields)).toBe(liveConfig);
+    expect(getVisibleViewFieldSlugs(liveConfig, fields)).toEqual(["title", "status", "owner"]);
   });
 
   it("drops unknown and duplicate configured slugs without reordering known fields", () => {
@@ -159,7 +203,7 @@ describe("view config quick updates", () => {
         { ...config, visibleFieldSlugs: ["owner", "missing", "owner", "title"] },
         fields,
       ),
-    ).toEqual(["owner", "title"]);
+    ).toEqual(["title", "owner"]);
   });
 
   it("normalizes and stores per-view field widths", () => {

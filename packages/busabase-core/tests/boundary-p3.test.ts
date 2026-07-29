@@ -285,6 +285,7 @@ describe("Boundary P3 — oRPC", () => {
       slug: "p3-vr-view",
       name: "VR",
       config: { filters: [], sorts: [] },
+      autoMerge: false, // review-first: this test walks each CR through approve + merge
     });
     const mergedView = await approveAndMerge(viewCr.id);
     const viewId =
@@ -292,13 +293,21 @@ describe("Boundary P3 — oRPC", () => {
       (await client.bases.listViews({ baseId: base.id })).find((v) => v.slug === "p3-vr-view")?.id;
     if (!viewId) throw new Error("expected created view id");
 
-    const delCr = await client.views.changeRequest({ operation: "delete", viewId });
+    const delCr = await client.views.changeRequest({
+      operation: "delete",
+      viewId,
+      autoMerge: false,
+    });
     await approveAndMerge(delCr.id);
     expect(
       (await client.bases.listViews({ baseId: base.id })).some((v) => v.slug === "p3-vr-view"),
     ).toBe(false);
 
-    const restoreCr = await client.views.changeRequest({ operation: "restore", viewId });
+    const restoreCr = await client.views.changeRequest({
+      operation: "restore",
+      viewId,
+      autoMerge: false,
+    });
     await approveAndMerge(restoreCr.id);
     expect(
       (await client.bases.listViews({ baseId: base.id })).some((v) => v.slug === "p3-vr-view"),

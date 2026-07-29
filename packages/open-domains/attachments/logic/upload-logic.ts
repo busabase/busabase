@@ -16,6 +16,23 @@ import type { attachments } from "../schema/attachments";
 /** Max upload size (25MB). Any MIME type is accepted. */
 export const MAX_FILE_SIZE = 25 * 1024 * 1024;
 
+/**
+ * Root of the BINARY attachment namespace — the only namespace `requestUploadUrl`
+ * ever mints keys under (both the content-addressed `attachments/blobs/sha256/…`
+ * shape and the legacy per-owner `attachments/{userId}/{context}/…` fallback), and
+ * therefore the only namespace `confirmUpload` is allowed to finalize.
+ *
+ * Storage holds other, disjoint namespaces written through their OWN, differently
+ * privileged endpoints — notably `asset-texts/pending/…` and
+ * `asset-texts/blobs/sha256/…` (busabase-core's Drive text slots, mintable with
+ * only per-asset write permission). Without this prefix check a caller could take
+ * a key minted by a cheap endpoint and register it as an attachment through the
+ * more privileged confirm endpoint, i.e. cross the namespaces. Mirrors the
+ * symmetric guard on the text side (`putAssetText`, which rejects anything outside
+ * `asset-texts/pending/`).
+ */
+export const ATTACHMENT_KEY_PREFIX = "attachments";
+
 const UPLOAD_EXPIRES_IN = 3600;
 
 export interface RequestUploadUrlInput {
@@ -52,7 +69,19 @@ function contentAddressedKey(contentHash: string, fileName: string): string {
   // local adapter; harmless on S3/R2). Keep the extension so direct-serve + the dev
   // proxy infer the right Content-Type (mime is also in the registry row).
   const shard = hashHex.slice(0, 2);
-  return `attachments/blobs/sha256/${shard}/${hashHex}${ext ? `.${ext}` : ""}`;
+  return `${ATTACHMENT_KEY_PREFIX}/blobs/sha256/${shard}/${hashHex}${ext ? `.${ext}` : ""}`;
+}
+
+/**
+ * Is this key inside the binary attachment namespace this module owns?
+ *
+ * Rejects `..` segments as well as a wrong prefix: the local storage adapter
+ * resolves a key with plain `path.join(rootDir, key)`, so a prefix-only test would
+ * be trivially defeated by `attachments/../asset-texts/pending/x.txt`.
+ */
+function isAttachmentStorageKey(storageKey: string): boolean {
+  if (!storageKey.startsWith(`${ATTACHMENT_KEY_PREFIX}/`)) return false;
+  return !storageKey.split("/").includes("..");
 }
 
 /**
@@ -137,7 +166,7 @@ export async function requestUploadUrl(
   const context = input.context || "general";
   const storageKey = input.contentHash
     ? contentAddressedKey(input.contentHash, input.fileName)
-    : `attachments/${userId}/${context}/${generateNanoID()}${ext ? `.${ext}` : ""}`;
+    : `${ATTACHMENT_KEY_PREFIX}/${userId}/${context}/${generateNanoID()}${ext ? `.${ext}` : ""}`;
 
   // The storage adapter returns the right target: an s3/r2/minio presign for a
   // direct browser→bucket PUT, or the local dev relay URL carrying ?key=. Either
@@ -183,6 +212,18 @@ export async function confirmUpload(
   db: any, // host passes its own differently-typed drizzle client
   attachmentsTable: typeof attachments,
 ): Promise<ConfirmUploadResult> {
+  // Namespace guard: `confirmUpload` finalizes an upload that `requestUploadUrl`
+  // started, so the key must live in the binary attachment namespace that function
+  // mints into. Anything else — most concretely a text-slot key from the far
+  // cheaper `createTextUploadUrl` (`asset-texts/pending/…`) — is a caller crossing
+  // namespaces, not a legitimate confirm. Checked before the dedup short-circuit
+  // so a bad key is rejected outright rather than silently ignored.
+  if (!isAttachmentStorageKey(input.storageKey)) {
+    throw new ORPCError("BAD_REQUEST", {
+      message: `storageKey must be an attachment upload under ${ATTACHMENT_KEY_PREFIX}/ (from createUploadUrl).`,
+    });
+  }
+
   // Safety-net dedup: if the same content was registered concurrently (or the
   // host didn't wire request-time dedup), reuse the existing row instead of
   // inserting a duplicate registry entry.

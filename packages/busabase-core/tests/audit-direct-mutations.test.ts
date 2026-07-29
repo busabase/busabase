@@ -101,7 +101,7 @@ describe("audit trail for direct mutations", () => {
 
   it("audits permanent node purge", async () => {
     const folderBySlug = async (slug: string) =>
-      (await client.folders.list()).find((f) => f.node.slug === slug);
+      (await client.nodes.list({ types: ["folder"] })).find((f) => f.slug === slug);
 
     // Explicit auto-merge keeps this audit setup compact.
     await client.nodes.createChangeRequest({
@@ -112,7 +112,7 @@ describe("audit trail for direct mutations", () => {
     if (!folder) {
       throw new Error("Expected audit-purge folder to exist");
     }
-    const folderId = folder.node.id;
+    const folderId = folder.id;
     // Archive it (delete), then permanently purge.
     await client.nodes.createChangeRequest({
       autoMerge: true,

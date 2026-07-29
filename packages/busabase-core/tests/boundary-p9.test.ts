@@ -40,12 +40,14 @@ describe("Boundary P9 — node soft-delete + restore", () => {
     if ("status" in doc) throw new Error("Expected materialized DocVO");
     await deleteNode(raw, doc.node.id);
 
-    expect((await raw.docs.list()).some((d) => d.node.id === doc.node.id)).toBe(false);
+    expect((await raw.nodes.list({ types: ["doc"] })).some((d) => d.id === doc.node.id)).toBe(
+      false,
+    );
     const archived = await raw.nodes.list({ status: "archived" });
     expect(archived.some((n) => n.id === doc.node.id)).toBe(true);
 
     await restoreNode(raw, doc.node.id);
-    expect((await raw.docs.list()).some((d) => d.node.id === doc.node.id)).toBe(true);
+    expect((await raw.nodes.list({ types: ["doc"] })).some((d) => d.id === doc.node.id)).toBe(true);
     expect((await raw.nodes.list({ status: "archived" })).some((n) => n.id === doc.node.id)).toBe(
       false,
     );
@@ -74,12 +76,16 @@ describe("Boundary P9 — node soft-delete + restore", () => {
 
     // Both the folder and its child doc leave the tree + doc listing.
     expect(flatten(await raw.nodes.list())).not.toContain("team");
-    expect((await raw.docs.list()).some((d) => d.node.id === childDoc.node.id)).toBe(false);
+    expect((await raw.nodes.list({ types: ["doc"] })).some((d) => d.id === childDoc.node.id)).toBe(
+      false,
+    );
 
     // Restoring the folder restores the whole batch (folder + child doc).
     await restoreNode(raw, folder?.id as string);
     expect(flatten(await raw.nodes.list())).toContain("team");
-    expect((await raw.docs.list()).some((d) => d.node.id === childDoc.node.id)).toBe(true);
+    expect((await raw.nodes.list({ types: ["doc"] })).some((d) => d.id === childDoc.node.id)).toBe(
+      true,
+    );
   });
 
   it("Fix 3: an archived node's slug is reusable; restoring it then conflicts", async () => {

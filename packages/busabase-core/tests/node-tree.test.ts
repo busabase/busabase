@@ -78,12 +78,14 @@ describe("Node tree + Doc lifecycle — oRPC", () => {
       expect(created.body).toBe("# Hello\n");
 
       // Read by slug and by node id.
-      const bySlug = await client.docs.get({ nodeId: "lc-doc" });
-      const byId = await client.docs.get({ nodeId: created.node.id });
+      const bySlug = await client.nodes.get({ nodeId: "lc-doc", type: "doc" });
+      const byId = await client.nodes.get({ nodeId: created.node.id, type: "doc" });
       expect(bySlug.node.id).toBe(created.node.id);
       expect(byId.node.slug).toBe("lc-doc");
 
-      expect((await client.docs.list()).some((d) => d.node.slug === "lc-doc")).toBe(true);
+      expect((await client.nodes.list({ types: ["doc"] })).some((d) => d.slug === "lc-doc")).toBe(
+        true,
+      );
 
       const updated = await client.docs.updateBody({
         nodeId: created.node.id,
@@ -117,7 +119,9 @@ describe("Node tree + Doc lifecycle — oRPC", () => {
           name: "X",
         }),
       ).rejects.toThrow(/Parent node not found/);
-      await expect(client.docs.get({ nodeId: "pnd_missing" })).rejects.toThrow(/Doc not found/);
+      await expect(client.nodes.get({ nodeId: "pnd_missing", type: "doc" })).rejects.toThrow(
+        /Node not found/,
+      );
     });
 
     it("updates a Doc body through a merged change request", async () => {
@@ -132,25 +136,27 @@ describe("Node tree + Doc lifecycle — oRPC", () => {
         body: "v2 via change request",
       });
       await approveAndMerge(cr.id);
-      expect((await client.docs.get({ nodeId: doc.node.id })).body).toBe("v2 via change request");
+      expect((await client.nodes.get({ nodeId: doc.node.id, type: "doc" })).body).toBe(
+        "v2 via change request",
+      );
     });
   });
 
   // ── Folders (read) ────────────────────────────────────────────────────────
   describe("folders", () => {
     it("lists seeded folders and reads one with its children", async () => {
-      const folders = await client.folders.list();
+      const folders = await client.nodes.list({ types: ["folder"] });
       expect(folders.length).toBeGreaterThan(0);
 
       // The seeded "cms" folder holds the Blog + Pages Bases as children.
-      const cms = await client.folders.get({ nodeId: "cms" });
+      const cms = await client.nodes.get({ nodeId: "cms", type: "folder" });
       expect(cms.node.slug).toBe("cms");
       expect(cms.children.some((c) => c.slug === "blog")).toBe(true);
     });
 
     it("throws for an unknown folder", async () => {
-      await expect(client.folders.get({ nodeId: "pnd_missing" })).rejects.toThrow(
-        /Folder not found/,
+      await expect(client.nodes.get({ nodeId: "pnd_missing", type: "folder" })).rejects.toThrow(
+        /Node not found/,
       );
     });
   });
@@ -158,7 +164,7 @@ describe("Node tree + Doc lifecycle — oRPC", () => {
   // ── Node-tree change requests (create → rename → delete) ───────────────────
   describe("node change requests", () => {
     const folderSlug = async (slug: string) =>
-      (await client.folders.list()).find((f) => f.node.slug === slug);
+      (await client.nodes.list({ types: ["folder"] })).find((f) => f.slug === slug);
 
     it("creates, renames, and deletes a folder through auto-merged node CRs", async () => {
       // Structural node CRs auto-merge: the returned CR is already `merged`, so
@@ -170,7 +176,7 @@ describe("Node tree + Doc lifecycle — oRPC", () => {
       expect(createCr.status).toBe("merged");
       const created = await folderSlug("lc-tree");
       expect(created).toBeDefined();
-      const nodeId = created?.node.id ?? "";
+      const nodeId = created?.id ?? "";
 
       // Rename.
       const renameCr = await client.nodes.createChangeRequest({
@@ -178,7 +184,7 @@ describe("Node tree + Doc lifecycle — oRPC", () => {
         operations: [{ kind: "rename", nodeId, name: "Tree Renamed" }],
       });
       expect(renameCr.status).toBe("merged");
-      expect((await folderSlug("lc-tree"))?.node.name).toBe("Tree Renamed");
+      expect((await folderSlug("lc-tree"))?.name).toBe("Tree Renamed");
 
       // Delete.
       const deleteCr = await client.nodes.createChangeRequest({
@@ -214,7 +220,7 @@ describe("Node tree + Doc lifecycle — oRPC", () => {
         operations: [{ kind: "create", nodeType: "folder", slug: "lc-movable", name: "Movable" }],
       });
       expect(movableCr.status).toBe("merged");
-      const movableId = (await folderSlug("lc-movable"))?.node.id ?? "";
+      const movableId = (await folderSlug("lc-movable"))?.id ?? "";
       expect(movableId).not.toBe("");
 
       // One CR: create a destination folder (ref "dest") + move Movable under it.
@@ -235,9 +241,9 @@ describe("Node tree + Doc lifecycle — oRPC", () => {
       });
       expect(combo.status).toBe("merged");
 
-      const archiveId = (await folderSlug("lc-archive"))?.node.id;
+      const archiveId = (await folderSlug("lc-archive"))?.id;
       expect(archiveId).toBeDefined();
-      expect((await folderSlug("lc-movable"))?.node.parentId).toBe(archiveId);
+      expect((await folderSlug("lc-movable"))?.parentId).toBe(archiveId);
     });
 
     it("rejects a move that references an undeclared parentNodeRef", async () => {
@@ -273,7 +279,7 @@ describe("Node tree + Doc lifecycle — oRPC", () => {
       // exactly one folder with this slug exists, and it's Race A.
       const race = await folderSlug("lc-race-folder");
       expect(race).toBeDefined();
-      expect(race?.node.name).toBe("Race A");
+      expect(race?.name).toBe("Race A");
     });
 
     // Same race, but through a nodeType:"base" node CR — a SEPARATE code path

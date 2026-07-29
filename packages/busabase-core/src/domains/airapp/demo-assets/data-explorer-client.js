@@ -82,12 +82,12 @@ const renderRecords = async (node) => {
 };
 
 const renderDoc = async (node) => {
-  const doc = await client.docs.get({ nodeId: node.id });
+  const doc = await client.nodes.get({ nodeId: node.id, type: "doc" });
   renderDetail(`<h2>${escapeHtml(node.name)}</h2><pre>${escapeHtml(doc.body ?? "(empty)")}</pre>`);
 };
 
 const renderFile = async (node) => {
-  const file = await client.files.get({ nodeId: node.id });
+  const file = await client.nodes.get({ nodeId: node.id, type: "file" });
   const asset = file.asset ?? {};
   renderDetail(
     `<h2>${escapeHtml(node.name)}</h2>` +

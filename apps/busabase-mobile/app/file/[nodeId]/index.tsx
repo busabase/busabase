@@ -5,10 +5,16 @@ import { Image, Linking, Pressable, StyleSheet, Text, View } from "react-native"
 import { useBusabaseOrpc } from "~/api/use-busabase-orpc";
 import { ConnectionGuard } from "~/components/busabase/ConnectionGuard";
 import { DrawerScaffold } from "~/components/busabase/DrawerScaffold";
-import { NativeErrorState, NativeLoadingState, NativeSection } from "~/components/native-screen";
+import {
+  NativeEmptyState,
+  NativeErrorState,
+  NativeLoadingState,
+  NativeSection,
+} from "~/components/native-screen";
 import { useConnection } from "~/connection/connection-store";
 import { getAttachmentKindLabel, isImageRef, resolveAttachmentUrl } from "~/lib/attachment";
 import { formatBytes } from "~/lib/format";
+import { asNodeDetail } from "~/lib/node-detail";
 import { typography } from "~/theme/tokens";
 import { useTokens } from "~/theme/use-tokens";
 
@@ -21,11 +27,13 @@ function FileNodeContent() {
   const serverUrl = state.status === "connected" ? state.connection.serverUrl : null;
   const fileQuery = useQuery(
     buda && nodeId
-      ? buda.orpc.files.get.queryOptions({ input: { nodeId } })
+      ? buda.orpc.nodes.get.queryOptions({ input: { nodeId, type: "file" } })
       : { queryKey: ["no-connection", "file", nodeId], queryFn: skipToken },
   );
-  const file = fileQuery.data;
+  // `nodes.get` answers for every node type, so narrow before reading `.asset`.
+  const file = asNodeDetail(fileQuery.data, "file");
   const asset = file?.asset;
+  const notFound = !fileQuery.isLoading && !fileQuery.error && !file;
   const assetUrl = asset ? resolveAttachmentUrl(serverUrl, asset.url) : "";
 
   return (
@@ -42,6 +50,9 @@ function FileNodeContent() {
           message={fileQuery.error.message}
           onRetry={() => void fileQuery.refetch()}
         />
+      ) : null}
+      {notFound ? (
+        <NativeEmptyState description="This file is not available." title="File not found" />
       ) : null}
       {asset ? (
         <NativeSection title="Preview" caption={asset.fileName}>

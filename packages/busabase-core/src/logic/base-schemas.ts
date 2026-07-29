@@ -244,6 +244,10 @@ export const viewConfigSchema = z
   .optional()
   .default({ filters: [], sorts: [] });
 
+// All four must mirror busabase-contract's view input schemas (same drift risk
+// noted on createBaseInputSchema's `autoMerge` below) — without `autoMerge`
+// here too, it would be silently stripped by this internal re-parse even though
+// the oRPC layer's contract validated and passed it through.
 export const createViewInputSchema = z.object({
   config: viewConfigSchema,
   description: z.string().optional().default(""),
@@ -256,6 +260,7 @@ export const createViewInputSchema = z.object({
     .optional(),
   submittedBy: z.string().optional().default("local-producer"),
   type: viewTypeSchema.optional().default("table"),
+  autoMerge: z.boolean().optional(),
 });
 
 export const updateViewInputSchema = z.object({
@@ -265,16 +270,19 @@ export const updateViewInputSchema = z.object({
   name: z.string().min(1).optional(),
   submittedBy: z.string().optional().default("local-producer"),
   type: viewTypeSchema.optional(),
+  autoMerge: z.boolean().optional(),
 });
 
 export const deleteViewInputSchema = z.object({
   message: z.string().optional().default("Delete view"),
   submittedBy: z.string().optional().default("local-producer"),
+  autoMerge: z.boolean().optional(),
 });
 
 export const restoreViewInputSchema = z.object({
   message: z.string().optional().default("Restore view"),
   submittedBy: z.string().optional().default("local-producer"),
+  autoMerge: z.boolean().optional(),
 });
 
 // Must mirror busabase-contract's createChangeRequestInputSchema (same drift

@@ -56,4 +56,67 @@ describe("relay permission ceiling over the real OSS OpenAPI boundary", () => {
     expect(serialized).not.toContain("relay-pending-folder");
     expect(serialized).toContain("relay-merged-folder");
   });
+
+  // Views gained `autoMerge` after node/base/record did, so re-assert the same
+  // ceiling on them: the flag is a "don't force review if I'm allowed" request,
+  // never a permission override. A changeRequest-level key that passes
+  // `autoMerge: true` must still land in review.
+  it("holds the same autoMerge ceiling on views", async () => {
+    const baseResponse = await route.POST(
+      new Request("http://localhost/api/v1/bases", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-busabase-relay-permission-level": "manage",
+        },
+        body: JSON.stringify({
+          slug: "relay-view-base",
+          name: "Relay View Base",
+          autoMerge: true,
+          fields: [{ slug: "title", name: "Title", type: "text", required: true }],
+        }),
+      }),
+    );
+    expect(baseResponse.status).toBe(200);
+    const base = await baseResponse.json();
+    expect(base.materialized).toBe(true);
+    const baseId = base.id;
+
+    const createView = async (permissionLevel: "changeRequest" | "manage", slug: string) => {
+      const response = await route.POST(
+        new Request("http://localhost/api/v1/views/change-requests", {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "x-busabase-relay-permission-level": permissionLevel,
+          },
+          body: JSON.stringify({
+            operation: "create",
+            baseId,
+            name: slug,
+            slug,
+            autoMerge: true,
+            submittedBy: "relay-test",
+          }),
+        }),
+      );
+      expect(response.status).toBe(200);
+      return response.json();
+    };
+
+    const pending = await createView("changeRequest", "relay-pending-view");
+    expect(pending.materialized).toBe(false);
+    expect(pending.status).toBe("in_review");
+
+    const merged = await createView("manage", "relay-merged-view");
+    expect(merged.materialized).toBe(true);
+    expect(merged.status).toBe("active");
+
+    const views = await (
+      await route.GET(new Request(`http://localhost/api/v1/bases/${baseId}/views`))
+    ).json();
+    const slugs = views.map((view: { slug: string }) => view.slug);
+    expect(slugs).not.toContain("relay-pending-view");
+    expect(slugs).toContain("relay-merged-view");
+  });
 });

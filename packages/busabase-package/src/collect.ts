@@ -112,7 +112,13 @@ const collectNode = async (
         children: await collectNodes(client, source.children ?? [], options),
       };
     case "doc": {
-      const doc = await client.docs.get({ nodeId: source.id });
+      // Reads through the unified Node detail route (`docs.get` is retired). The
+      // `type` hint narrows the discriminated union straight to the doc branch,
+      // which carries the same `body` the typed get returned.
+      const doc = await client.nodes.get({ nodeId: source.id, type: "doc" });
+      if (doc.type !== "doc") {
+        throw new Error(`Expected a doc node for "${source.slug}", got "${doc.type}".`);
+      }
       return { ...common, type: "doc", body: doc.body };
     }
     case "base":
@@ -403,7 +409,12 @@ const collectFile = async (
   common: NodeCommon,
   options: CollectOptions,
 ): Promise<PackageNode | undefined> => {
-  const fileNode = await client.files.get({ nodeId: source.id });
+  // Reads through the unified Node detail route (`files.get` is retired); the
+  // `file` branch carries the same backing `asset`.
+  const fileNode = await client.nodes.get({ nodeId: source.id, type: "file" });
+  if (fileNode.type !== "file") {
+    throw new Error(`Expected a file node for "${source.slug}", got "${fileNode.type}".`);
+  }
   const asset = fileNode.asset;
   if (!asset?.url) {
     options.warn(`Skipped file node "${source.slug}": it has no downloadable asset.`);

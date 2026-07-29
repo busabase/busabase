@@ -39,10 +39,10 @@ describe("demo mobile read surfaces", () => {
   });
 
   it("lists and reads seeded Skill and Drive files", async () => {
-    const skills = await client.fileTrees.list({ type: "skill" });
-    const drives = await client.fileTrees.list({ type: "drive" });
-    expect(skills[0]?.node.id).toBe("nod_skill_ai_research_editor");
-    expect(drives[0]?.node.id).toBe("nod_drive_team_files");
+    const skills = await client.nodes.list({ types: ["skill"] });
+    const drives = await client.nodes.list({ types: ["drive"] });
+    expect(skills[0]?.id).toBe("nod_skill_ai_research_editor");
+    expect(drives[0]?.id).toBe("nod_drive_team_files");
 
     const file = await client.fileTrees.readFile({
       type: "drive",
@@ -55,9 +55,9 @@ describe("demo mobile read surfaces", () => {
   });
 
   it("exposes seeded AirApps to mobile detail screens", async () => {
-    const airapps = await client.fileTrees.list({ type: "airapp" });
+    const airapps = await client.nodes.list({ types: ["airapp"] });
     expect(airapps.length).toBeGreaterThanOrEqual(5);
-    expect(airapps.every((airapp) => airapp.node.type === "airapp")).toBe(true);
+    expect(airapps.every((airapp) => airapp.type === "airapp")).toBe(true);
   });
 
   it("keeps demo review/merge batched and preserves per-item NOT_FOUND errors", async () => {

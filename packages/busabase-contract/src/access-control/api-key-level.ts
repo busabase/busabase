@@ -122,6 +122,10 @@ export const PROCEDURE_PERMISSION_POLICY: Record<string, ProcedurePermissionPoli
   search: node("read"),
   grep: node("read"),
   "nodes.list": node("read"),
+  // The unified typed-detail read that replaced `docs.get` / `files.get` /
+  // `folders.get` / `fileTrees.get`. Still a plain node-scoped read: the
+  // per-node ACL inside busabase-core decides which nodes resolve at all.
+  "nodes.get": node("read"),
   "nodes.searchByName": node("read"),
   "nodes.isDescendant": node("read"),
   // ---- changeRequest: the full proposal-lifecycle family (never touches live
@@ -203,18 +207,10 @@ export const PROCEDURE_PERMISSION_POLICY: Record<string, ProcedurePermissionPoli
   "bases.listViews": node("read"),
   "bases.previewFieldConversion": node("read"),
 
-  "fileTrees.list": node("read"),
-  "fileTrees.get": node("read"),
   "fileTrees.listFiles": node("read"),
   "fileTrees.readFile": node("read"),
   "airapps.runLocalNode": node("write"),
-  "files.list": node("read"),
-  "files.get": node("read"),
-  "docs.list": node("read"),
-  "docs.get": node("read"),
   "docs.readLines": node("read"),
-  "folders.list": node("read"),
-  "folders.get": node("read"),
 
   "forms.getByNode": node("read"),
   "forms.create": node("manage"),

@@ -8,6 +8,7 @@ import { ConnectionGuard } from "~/components/busabase/ConnectionGuard";
 import {
   NativeActionBar,
   NativeBottomSheet,
+  NativeEmptyState,
   NativeErrorState,
   NativeInlineError,
   NativeLoadingState,
@@ -17,6 +18,7 @@ import {
 import { Button } from "~/components/ui/Button";
 import { TextInput } from "~/components/ui/TextInput";
 import { useI18n } from "~/i18n";
+import { asNodeDetail } from "~/lib/node-detail";
 import { mobile, radius, spacing } from "~/theme/tokens";
 import { useTokens } from "~/theme/use-tokens";
 
@@ -61,20 +63,24 @@ function DocEditContent() {
 
   const docQuery = useQuery(
     buda && nodeId
-      ? buda.orpc.docs.get.queryOptions({ input: { nodeId } })
+      ? buda.orpc.nodes.get.queryOptions({ input: { nodeId, type: "doc" } })
       : { queryKey: ["no-connection", "doc", nodeId], queryFn: skipToken },
   );
+  // `nodes.get` answers for every node type, so narrow before reading `.body`.
+  // A non-Doc result (a slug shared with another type) must NOT open an editor
+  // seeded with an empty body that a Save would then write over the Doc.
+  const doc = asNodeDetail(docQuery.data, "doc");
 
   useEffect(() => {
-    if (docQuery.data && !hydrated) {
-      setBody(docQuery.data.body);
-      setChangeMessage(`Update ${docQuery.data.node.name}`);
+    if (doc && !hydrated) {
+      setBody(doc.body);
+      setChangeMessage(`Update ${doc.node.name}`);
       setHydrated(true);
     }
-  }, [docQuery.data, hydrated]);
+  }, [doc, hydrated]);
 
-  const title = docQuery.data?.node.name ?? "Doc";
-  const originalBody = docQuery.data?.body ?? "";
+  const title = doc?.node.name ?? "Doc";
+  const originalBody = doc?.body ?? "";
   const unchanged = originalBody === body;
   const changeSummary = getBodyChangeSummary(originalBody, body);
   const defaultChangeMessage = title === "Doc" ? "Update doc" : `Update ${title}`;
@@ -169,6 +175,20 @@ function DocEditContent() {
           message={docQuery.error.message}
           onRetry={() => void docQuery.refetch()}
         />
+      </NativeScreen>
+    );
+  }
+  if (!doc) {
+    // Settled, no error, but not a Doc (or nothing at all) — show the same empty
+    // state the read screen shows instead of an editor over a body we never read.
+    return (
+      <NativeScreen
+        title={title}
+        titleNumberOfLines={2}
+        subtitle={t.common.edit}
+        headerLeading={headerLeading}
+      >
+        <NativeEmptyState description="This doc is not available." title="Doc not found" />
       </NativeScreen>
     );
   }

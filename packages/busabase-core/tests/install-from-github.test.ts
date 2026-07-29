@@ -255,7 +255,9 @@ describe("install.fromGithub — server-side install (real PGLite + synthetic zi
 
     // Doc bodies.
     const gettingStarted = installed?.children?.find((node) => node.slug === "getting-started");
-    const doc = await inSpace(spaceId, () => client.docs.get({ nodeId: gettingStarted?.id ?? "" }));
+    const doc = await inSpace(spaceId, () =>
+      client.nodes.get({ nodeId: gettingStarted?.id ?? "", type: "doc" }),
+    );
     expect(doc.body).toContain("Read me first.");
 
     // Base schema + records.

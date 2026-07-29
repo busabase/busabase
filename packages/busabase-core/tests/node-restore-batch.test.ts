@@ -57,7 +57,7 @@ describe("node restore subtree scope (#B)", () => {
       });
 
   const folderBySlug = async (slug: string) =>
-    (await client.folders.list()).find((f) => f.node.slug === slug);
+    (await client.nodes.list({ types: ["folder"] })).find((f) => f.slug === slug);
 
   it("restoring one node from a multi-delete CR leaves the others deleted", async () => {
     // Two unrelated folders.
@@ -75,8 +75,8 @@ describe("node restore subtree scope (#B)", () => {
         })
       ).id,
     );
-    const fId = (await folderBySlug("batch-f"))!.node.id;
-    const gId = (await folderBySlug("batch-g"))!.node.id;
+    const fId = (await folderBySlug("batch-f"))!.id;
+    const gId = (await folderBySlug("batch-g"))!.id;
 
     // Delete BOTH in a single change request → both archived at the same merge timestamp.
     await approveAndMerge(
@@ -112,7 +112,7 @@ describe("node restore subtree scope (#B)", () => {
         })
       ).id,
     );
-    const pId = (await folderBySlug("batch-parent"))!.node.id;
+    const pId = (await folderBySlug("batch-parent"))!.id;
     await approveAndMerge(
       (
         await client.nodes.createChangeRequest({

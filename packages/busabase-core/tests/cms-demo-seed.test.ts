@@ -288,7 +288,7 @@ describe("standard CMS conversion of the existing Busabase demo", () => {
     });
 
     it("adopts production ids, moves taxonomy Bases, and remains idempotent", async () => {
-      const folder = await client.folders.get({ nodeId: PRODUCTION_IDS.folder });
+      const folder = await client.nodes.get({ nodeId: PRODUCTION_IDS.folder, type: "folder" });
       expect(folder.node.metadata).toMatchObject({
         busabaseCms: {
           bases: PRODUCTION_IDS.bases,
@@ -300,12 +300,18 @@ describe("standard CMS conversion of the existing Busabase demo", () => {
         Object.values(PRODUCTION_IDS.bases).sort(),
       );
 
-      const marketingFolder = await client.folders.get({ nodeId: DEMO_CONTENT_FOLDER_NODE_ID });
+      const marketingFolder = await client.nodes.get({
+        nodeId: DEMO_CONTENT_FOLDER_NODE_ID,
+        type: "folder",
+      });
       expect(marketingFolder.children.map((child) => child.baseId)).toContain(
         CMS_DEMO_AGENT_INTEGRATIONS_BASE_ID,
       );
 
-      const duplicateFolder = await client.folders.get({ nodeId: PRODUCTION_IDS.duplicateFolder });
+      const duplicateFolder = await client.nodes.get({
+        nodeId: PRODUCTION_IDS.duplicateFolder,
+        type: "folder",
+      });
       expect(duplicateFolder.children).toHaveLength(0);
 
       const db = await getDb();

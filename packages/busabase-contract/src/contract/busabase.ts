@@ -13,13 +13,13 @@ import { docContract } from "../domains/doc/contract";
 import { dumpContract } from "../domains/dump/contract";
 import { fileContract } from "../domains/file-node/contract";
 import { fileTreeContract } from "../domains/filetree/contract";
-import { folderContract } from "../domains/folder/contract";
 import { formContract } from "../domains/form/contract";
 import { installContract } from "../domains/install/contract";
 import { vaultContract } from "../domains/vault/contract";
 import { webhookContract } from "../domains/webhook/contract";
 import { listActivityPagedInputSchema, listActivityResponseSchema } from "./activity-schemas";
 import { UnifiedGrepInputSchema, UnifiedGrepResultVOSchema } from "./grep-schemas";
+import { getNodeInputSchema, NodeDetailVOSchema } from "./node-detail-schemas";
 import {
   agentTaskSchema,
   auditEventSchema,
@@ -135,9 +135,9 @@ export const busabaseContractRoutes = {
         method: "GET",
         path: "/nodes",
         tags: ["Nodes"],
-        summary: "List node tree",
+        summary: "List nodes (workspace tree, or a flat summary list by type)",
         successDescription:
-          "Workspace node tree including folders, Bases, files, and agents. With no `parentId`/`depth`, returns the FULL tree (legacy behavior, still what every non-sidebar caller gets). Passing `parentId` and/or `depth` switches to a depth-bounded fetch: `parentId` omitted/null starts from the space root and returns it wrapped exactly like the legacy call (just depth-limited); an explicit `parentId` returns that node's children directly, ready to merge into its `NodeVO.children` for a sidebar's lazy per-folder expand. See `NodeVO.hasChildren` for how a depth boundary is surfaced.",
+          "Workspace node tree including folders, Bases, files, and agents. With no `parentId`/`depth`, returns the FULL tree (legacy behavior, still what every non-sidebar caller gets). Passing `parentId` and/or `depth` switches to a depth-bounded fetch: `parentId` omitted/null starts from the space root and returns it wrapped exactly like the legacy call (just depth-limited); an explicit `parentId` returns that node's children directly, ready to merge into its `NodeVO.children` for a sidebar's lazy per-folder expand. See `NodeVO.hasChildren` for how a depth boundary is surfaced. Passing `types` instead returns a FLAT, ACL-filtered list of lightweight summaries (`children: []`) for just those node types — this is what replaced `GET /docs`, `/files`, `/folders`, and `/file-trees`, and it deliberately hydrates nothing heavy (no Doc bodies, backing Assets, folder children, or file inventories). Open one item with `GET /nodes/{nodeId}`.",
       })
       .input(listNodesInputSchema)
       .output(z.array(nodeSchema)),
@@ -243,6 +243,25 @@ export const busabaseContractRoutes = {
           "The acting user's favorited nodes, newest-favorited first, filtered through the same archived/deleted/visibility rules as the main tree — a favorited node that's later archived, purged, or (cloud) hidden from this actor silently drops out rather than erroring.",
       })
       .output(z.array(nodeSchema)),
+    // Registered LAST among the `/nodes/...` GETs on purpose. `GET /nodes/search`
+    // and `GET /nodes/favorites` are literal paths that now share a prefix with
+    // this template. The oRPC OpenAPI matcher is a rou3 radix trie, which
+    // prefers a static segment over a param segment independently of insertion
+    // order — but keeping the literals declared first means the source order
+    // matches the resolution order, so nobody has to know that to read this
+    // file. `tests/openapi-node-routes.test.ts` proves the literals still win
+    // against a real handler rather than resolving as `nodeId: "search"`.
+    get: oc
+      .route({
+        method: "GET",
+        path: "/nodes/{nodeId}",
+        tags: ["Nodes"],
+        summary: "Get one node's typed detail",
+        successDescription:
+          "The node's full detail, discriminated by its `type`. One entry point for every node type, so a caller holding an id never has to discover the type first: `folder` carries its direct `children`, `doc` its storage-backed `body`, `file` its backing `asset`, and `skill`/`drive`/`airapp` their Asset-backed `files`. Types with no richer detail yet (`base`, `form`, `whiteboard`, `workflow`, `html`) return just `node`. `nodeId` accepts an id or a slug; pass `type` when a slug exists under more than one type. Archived nodes are not returned (404), matching the typed gets this replaced.",
+      })
+      .input(getNodeInputSchema)
+      .output(NodeDetailVOSchema),
     principals: {
       list: oc
         .route({
@@ -419,7 +438,9 @@ export const busabaseContractRoutes = {
   airapps: airappRuntimeContract,
   files: fileContract,
   docs: docContract,
-  folders: folderContract,
+  // No `folders` key: the Folder domain's only two operations were `GET /folders`
+  // and `GET /folders/{nodeId}`, both now served by the unified Node surface
+  // (`nodes.list({ types: ["folder"] })` / `nodes.get`).
   forms: formContract,
   assets: assetsContract,
   vault: vaultContract,
@@ -580,6 +601,11 @@ export {
   UnifiedGrepResultVOSchema,
   UnifiedGrepScopeSchema,
 } from "./grep-schemas";
+export {
+  getNodeInputSchema,
+  type NodeDetailVO,
+  NodeDetailVOSchema,
+} from "./node-detail-schemas";
 export {
   auditEventSchema,
   authInfoSchema,

@@ -224,23 +224,10 @@ export const getFileNodeDetail = async (nodeIdOrSlug: string): Promise<FileNodeV
   return toFileNodeVO(node);
 };
 
-export const listFileNodes = async (): Promise<FileNodeVO[]> => {
-  await ensureReady();
-  const db = await getDb();
-  const nodes = await db
-    .select()
-    .from(busabaseNodes)
-    .where(
-      and(
-        eq(busabaseNodes.type, "file"),
-        eq(busabaseNodes.spaceId, getContextSpaceId()),
-        isNull(busabaseNodes.archivedAt),
-        buildNodeVisibilityCondition(db),
-      ),
-    )
-    .orderBy(asc(busabaseNodes.position), asc(busabaseNodes.createdAt));
-  return Promise.all(nodes.map(toFileNodeVO));
-};
+// `listFileNodes` is gone with `GET /files`. It resolved a full AssetVO (plus a
+// text-status lookup) PER row to answer "which File nodes exist" — the N+1 the
+// unified summary list (`logic/nodes.ts`'s `listNodeSummaries`) exists to
+// remove. `getFileNodeDetail` above still resolves the Asset for one node.
 
 export const materializeFileNode = async (ctx: MergeCtx, args: MaterializeArgs) => {
   const { db, timestamp } = ctx;

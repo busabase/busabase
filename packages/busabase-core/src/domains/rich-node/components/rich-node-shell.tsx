@@ -7,9 +7,10 @@ import { Button } from "kui/button";
 import type { LucideIcon } from "lucide-react";
 import { Save } from "lucide-react";
 import type { ReactNode } from "react";
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { fmt, useCoreI18n } from "../../../i18n";
 import { NodeActionsMenu } from "../../dashboard/components/node-actions-menu";
+import { stableStringify } from "../utils/stable-json";
 
 export type SaveStatus = "saved" | "dirty" | "saving" | "error";
 
@@ -61,6 +62,76 @@ export function useNodeMetadataSave(
   );
 
   return { error, markDirty, save, status };
+}
+
+interface ServerDocumentSyncOptions<TDocument> {
+  /** Push the server's document into the editor (setState, `updateScene`, …). */
+  apply: (document: TDocument) => void;
+  /** The document as the editor currently holds it, in the same shape as `serverDocument`. */
+  getLocalDocument: () => unknown;
+  node: NodeVO | null;
+  /** The document as it currently exists on the server (parsed from `node.metadata`). */
+  serverDocument: TDocument;
+  status: SaveStatus;
+}
+
+/**
+ * Keep an open rich-node editor in step with the server when the document
+ * changes underneath it — another browser tab, another member, an agent
+ * calling `PATCH /api/v1/nodes/{nodeId}/metadata`, or an MCP tool.
+ *
+ * Every rich-node editor (whiteboard/workflow/HTML) seeds its state from
+ * `node.metadata` exactly ONCE, at mount: Excalidraw is uncontrolled and reads
+ * `initialData` only when it mounts, and the workflow/HTML editors pass their
+ * parsed document straight into `useState`/`useNodesState` initializers. So a
+ * refetched node tree updated the React Query cache and the canvas kept
+ * showing the stale drawing — the change was invisible until a full page
+ * reload. This hook closes that gap.
+ *
+ * Three guards, each earning its place:
+ *  - `status === "saved"`: local unsaved work always wins. A background
+ *    refetch must never overwrite something the user is still drawing.
+ *  - `updatedAt` must be strictly newer than the last version we synced. This
+ *    covers the window right after a save, where the mutation has committed but
+ *    the tree query still holds the pre-save node — without it, that stale copy
+ *    would be applied straight back over the just-saved work.
+ *  - the incoming document must differ from what the editor already holds
+ *    (compared with `stableStringify`, since jsonb reorders keys). Re-applying
+ *    an identical document would needlessly reset selection and undo history.
+ */
+export function useServerDocumentSync<TDocument>({
+  apply,
+  getLocalDocument,
+  node,
+  serverDocument,
+  status,
+}: ServerDocumentSyncOptions<TDocument>) {
+  const applyRef = useRef(apply);
+  applyRef.current = apply;
+  const getLocalDocumentRef = useRef(getLocalDocument);
+  getLocalDocumentRef.current = getLocalDocument;
+
+  const nodeId = node?.id ?? null;
+  const updatedAt = node?.updatedAt ?? null;
+  const syncedNodeIdRef = useRef(nodeId);
+  // ISO-8601 UTC strings compare correctly lexicographically, so no Date parse.
+  const syncedUpdatedAtRef = useRef<string | null>(updatedAt);
+  if (syncedNodeIdRef.current !== nodeId) {
+    // A different node behind the same mounted editor: nothing has been synced
+    // for it yet, so let the content check below decide (its `updatedAt` may
+    // well be OLDER than the previous node's).
+    syncedNodeIdRef.current = nodeId;
+    syncedUpdatedAtRef.current = null;
+  }
+
+  useEffect(() => {
+    if (!updatedAt || status !== "saved") return;
+    const syncedUpdatedAt = syncedUpdatedAtRef.current;
+    if (syncedUpdatedAt !== null && updatedAt <= syncedUpdatedAt) return;
+    syncedUpdatedAtRef.current = updatedAt;
+    if (stableStringify(serverDocument) === stableStringify(getLocalDocumentRef.current())) return;
+    applyRef.current(serverDocument);
+  }, [serverDocument, status, updatedAt]);
 }
 
 interface RichNodeShellProps {

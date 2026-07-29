@@ -154,6 +154,85 @@ describe("Assets + attachment dedup — oRPC integration", () => {
       expect(c2.assetId).not.toBe(c1.assetId);
     });
 
+    /**
+     * Namespace crossing — the symmetric counterpart of the `putText` guard in
+     * `drive-grep-retrieval.test.ts` ("only rejects a storageKey outside the
+     * pending prefix", which proves an `attachments/…` key can't be bound as
+     * text). This proves the other direction: an `asset-texts/…` key can't be
+     * registered as a binary attachment.
+     *
+     * It matters because the two endpoints are NOT equally privileged:
+     * `assets.createTextUploadUrl` needs only per-asset write, while
+     * `assets.confirm` sits at workspace-level changeRequest. Without the guard
+     * the cheap endpoint mints a writable key that the privileged endpoint then
+     * blesses as an attachment.
+     */
+    it("rejects a text-namespace storageKey while a normal binary confirm still succeeds", async () => {
+      const hash = `sha256:${"3".repeat(64)}`;
+      const req = await client.assets.createUploadUrl({
+        fileName: "namespace.png",
+        mimeType: "image/png",
+        sizeBytes: 42,
+        contentHash: hash,
+      });
+      // Control: the binary path a real client walks still works end to end.
+      const confirmed = await client.assets.confirm({
+        storageKey: req.storageKey,
+        fileName: "namespace.png",
+        mimeType: "image/png",
+        sizeBytes: 42,
+        contentHash: hash,
+      });
+      expect(confirmed.attachmentId).toBeTruthy();
+      expect(confirmed.assetId).toBeTruthy();
+      expect(confirmed.storageKey).toBe(req.storageKey);
+
+      // A REAL key minted by the cheap text endpoint, not a hand-written string.
+      const textUpload = await client.assets.createTextUploadUrl({
+        assetId: expectDefined(confirmed.assetId),
+        sizeBytes: 42,
+      });
+      expect(textUpload.storageKey).toMatch(/^asset-texts\/pending\//);
+
+      await expect(
+        client.assets.confirm({
+          storageKey: textUpload.storageKey,
+          fileName: "stolen.png",
+          mimeType: "image/png",
+          sizeBytes: 42,
+        }),
+      ).rejects.toThrow(/attachments\//);
+
+      // The hand-written shape from the spec, for good measure.
+      await expect(
+        client.assets.confirm({
+          storageKey: "asset-texts/pending/x.txt",
+          fileName: "stolen.png",
+          mimeType: "image/png",
+          sizeBytes: 42,
+        }),
+      ).rejects.toThrow(/attachments\//);
+
+      // Prefix-only checks are defeated by traversal: the local storage adapter
+      // resolves keys with a bare `path.join(root, key)`.
+      await expect(
+        client.assets.confirm({
+          storageKey: "attachments/../asset-texts/pending/x.txt",
+          fileName: "stolen.png",
+          mimeType: "image/png",
+          sizeBytes: 42,
+        }),
+      ).rejects.toThrow(/attachments\//);
+
+      // Nothing was registered for any of the rejected keys.
+      const db = await getDb();
+      const stolen = await db
+        .select({ id: attachments.id })
+        .from(attachments)
+        .where(eq(attachments.fileName, "stolen.png"));
+      expect(stolen).toHaveLength(0);
+    });
+
     it("falls back to the legacy per-owner key when no hash is supplied", async () => {
       const req = await client.assets.createUploadUrl({
         fileName: "nohash.png",
@@ -532,12 +611,14 @@ describe("Assets + attachment dedup — oRPC integration", () => {
       });
       expect(cr.status).toBe("in_review");
       expect(cr.primaryOperation?.operation).toBe("node_create");
-      await expect(client.files.get({ nodeId: "board-plan" })).rejects.toThrow(/File not found/);
+      await expect(client.nodes.get({ nodeId: "board-plan", type: "file" })).rejects.toThrow(
+        /Node not found/,
+      );
       await client.changeRequests.review({ changeRequestIds: [cr.id], verdict: "approved" });
       const merged = await client.changeRequests.merge({ changeRequestIds: [cr.id] });
       expect(merged.results[0]).toMatchObject({ ok: true, status: "merged" });
 
-      const file = await client.files.get({ nodeId: "board-plan" });
+      const file = await client.nodes.get({ nodeId: "board-plan", type: "file" });
       expect(file.node.type).toBe("file");
       expect(file.asset.id).toBe(confirmed.assetId);
       expect(file.asset.fileName).toBe("board-plan.pdf");
@@ -584,8 +665,8 @@ describe("Assets + attachment dedup — oRPC integration", () => {
         autoMerge: false,
       });
       expect(changeRequest.status).toBe("in_review");
-      await expect(callOpenApi("GET", "/files/openapi-board-plan")).rejects.toThrow(
-        /File not found/,
+      await expect(callOpenApi("GET", "/nodes/openapi-board-plan?type=file")).rejects.toThrow(
+        /Node not found/,
       );
       await callOpenApi("POST", "/change-requests/reviews", {
         changeRequestIds: [changeRequest.id],
@@ -596,7 +677,8 @@ describe("Assets + attachment dedup — oRPC integration", () => {
       });
       expect(merged.results[0]).toMatchObject({ ok: true, status: "merged" });
 
-      const file = await callOpenApi("GET", "/files/openapi-board-plan");
+      const file = await callOpenApi("GET", "/nodes/openapi-board-plan?type=file");
+      expect(file.type).toBe("file");
       expect(file.node.type).toBe("file");
       expect(file.node.slug).toBe("openapi-board-plan");
       expect(file.asset.id).toBe(confirmed.assetId);

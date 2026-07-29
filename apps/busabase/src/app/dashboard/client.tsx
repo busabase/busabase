@@ -30,6 +30,14 @@ interface DashboardClientProps {
   localUserName?: string | null;
 }
 
+/**
+ * React Query cache-key prefix shared by this client's own oRPC utils and
+ * BusabaseDashboard's (`cacheSpaceKey`). Self-hosted Busabase serves exactly
+ * one space, so the value is a constant — matching busabase-core's own default
+ * — but both halves must derive from THIS constant, not each rely on a default.
+ */
+const CACHE_SPACE_KEY = "local";
+
 const DASHBOARD_SKELETON_NAV_ITEMS = [
   { id: "shell-nav-1", width: "70%" },
   { id: "shell-nav-2", width: "55%" },
@@ -110,7 +118,17 @@ function DashboardClientContent({ initialPath = "/home", localUserName }: Dashbo
   const [isInstallOpen, setIsInstallOpen] = useState(false);
   const [createParent, setCreateParent] = useState<{ id: string; name: string } | null>(null);
   const apiClient = useMemo(() => createBusabaseRestApiClient("/api/v1"), []);
-  const orpc = useMemo(() => createBusabaseQueryUtils("/api/rpc"), []);
+  // The SAME key prefix BusabaseDashboard uses for its own queries (its
+  // `cacheSpaceKey` prop, passed explicitly below so the two can't drift
+  // again). This app is single-tenant, so the value is a constant — but it
+  // still has to MATCH: React Query keys are compared structurally, and this
+  // client used to build unprefixed `[["nodes","list"], …]` keys while the
+  // dashboard invalidated prefixed `[["local","nodes","list"], …]` ones. Every
+  // node invalidation the core fires — the live-sync SSE handler, the rename
+  // dialog, a rich-node save — silently missed the very tree query the sidebar
+  // and every node-detail view read from. busabase-cloud always passed its
+  // space id to both; only this app had the halves out of step.
+  const orpc = useMemo(() => createBusabaseQueryUtils("/api/rpc", {}, CACHE_SPACE_KEY), []);
   // Depth-bounded eager prefetch: root + 2 levels beneath it, matching the
   // server's own default (see DEFAULT_NODE_LIST_DEPTH in
   // packages/busabase-core/src/logic/nodes.ts). Anything deeper is loaded
@@ -201,6 +219,7 @@ function DashboardClientContent({ initialPath = "/home", localUserName }: Dashbo
         apiClient={apiClient}
         apiBasePath="/api/rpc"
         auditEvents={auditEvents}
+        cacheSpaceKey={CACHE_SPACE_KEY}
         changeRequests={changeRequests}
         embedded
         chromeless={chromeless}

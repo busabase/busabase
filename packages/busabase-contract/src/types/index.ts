@@ -274,6 +274,10 @@ export interface ChangeRequestCountsVO {
 
 // Activity-feed descriptor (discriminated union) — inferred from its zod schema.
 export type { ActivityItemVO } from "../contract/activity-schemas";
+// The discriminated output of the unified `nodes.get` — one typed detail for
+// every node type, replacing the retired per-type get VOs' role as an API
+// return type. The per-type VOs below are still each variant's payload.
+export type { NodeDetailVO } from "../contract/node-detail-schemas";
 // AirApp-domain VOs live in the airapp domain; re-exported here for the public barrel.
 export type { AirAppFileVO, AirAppReadFileVO, AirAppVO } from "../domains/airapp/types";
 export type {

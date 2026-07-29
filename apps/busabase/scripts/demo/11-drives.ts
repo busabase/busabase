@@ -2,6 +2,12 @@
  * 11-drives: Full Drive lifecycle — create, list, read file, CR update, approve, merge, verify.
  * Drives are pure file-tree nodes (like Skills, minus the Skill metadata), so this
  * exercises the shared /file-trees endpoints the seeded "Team Files" Drive uses.
+ *
+ * `GET /file-trees` and `GET /file-trees/{nodeId}` were retired by the unified
+ * Node surface: list Drives with `GET /nodes?types=drive` (FLAT lightweight
+ * summaries) and read one with `GET /nodes/{nodeId}` (`type: "drive"` variant
+ * of `NodeDetailVO` — the exact old VO plus a discriminator). The create, file
+ * read, and change-request routes under `/file-trees` are untouched.
  */
 
 import { api, approveMerge, assert, BASE, makeRunner, type NodeTreeVO } from "./_client";
@@ -12,14 +18,21 @@ interface NodeVO {
   slug: string;
   name: string;
   type: string;
+  children?: NodeVO[];
 }
 
+/** What `POST /file-trees` returns (no `type` discriminator on the envelope). */
 interface DriveVO {
   node: NodeVO;
   entryFile: string;
   visibility: string;
   version: string;
   files: Array<{ path: string; name: string }>;
+}
+
+/** The `type: "drive"` variant of `NodeDetailVO` from `GET /nodes/{nodeId}`. */
+interface DriveDetailVO extends DriveVO {
+  type: "drive";
 }
 
 interface FileContentVO {
@@ -87,10 +100,12 @@ export async function run() {
           autoMerge: true,
         });
       } catch {
-        const list = await api<DriveVO[]>("GET", "/file-trees?type=drive");
-        const found = list.find((d) => d.node.slug === def.slug);
+        // The summary list has no `files`/`version`, and the rest of this suite
+        // needs the full Drive — so find it in the summary, then open it.
+        const list = await api<NodeVO[]>("GET", "/nodes?types=drive");
+        const found = list.find((d) => d.slug === def.slug);
         assert(!!found, `Drive "${def.slug}" missing after create failed`);
-        drive = found;
+        drive = await api<DriveDetailVO>("GET", `/nodes/${found.id}?type=drive`);
       }
       assert(drive.node.slug === def.slug, `slug mismatch: ${drive.node.slug}`);
       assert(drive.node.type === "drive", `expected type=drive, got ${drive.node.type}`);
@@ -101,21 +116,31 @@ export async function run() {
     });
   }
 
-  // ── GET /file-trees?type=drive ────────────────────────────────────────────
+  // ── GET /nodes?types=drive ────────────────────────────────────────────────
 
-  await step("GET /file-trees?type=drive — all created slugs present", async () => {
-    const list = await api<DriveVO[]>("GET", "/file-trees?type=drive");
-    const slugs = new Set(list.map((d) => d.node.slug));
+  await step("GET /nodes?types=drive — all created slugs present", async () => {
+    const list = await api<NodeVO[]>("GET", "/nodes?types=drive");
+    assert(
+      list.every((d) => d.type === "drive"),
+      "expected only drive nodes",
+    );
+    const slugs = new Set(list.map((d) => d.slug));
     for (const def of DEMO_DRIVES) {
-      assert(slugs.has(def.slug), `slug "${def.slug}" missing from GET /file-trees?type=drive`);
+      assert(slugs.has(def.slug), `slug "${def.slug}" missing from GET /nodes?types=drive`);
     }
+    // The reason this replaced `GET /file-trees`: no per-node file inventory.
+    assert(
+      list.every((d) => !("files" in d)),
+      "summary list must not hydrate file inventories",
+    );
   });
 
-  // ── GET /file-trees/{id} + files ─────────────────────────────────────────
+  // ── GET /nodes/{id} + files ──────────────────────────────────────────────
 
   if (created[0]) {
-    await step("GET /file-trees/{id} — detail includes README.md", async () => {
-      const drive = await api<DriveVO>("GET", `/file-trees/${created[0].node.id}?type=drive`);
+    await step("GET /nodes/{id} — detail includes README.md", async () => {
+      const drive = await api<DriveDetailVO>("GET", `/nodes/${created[0].node.id}?type=drive`);
+      assert(drive.type === "drive", `expected type=drive, got ${drive.type}`);
       assert(drive.node.id === created[0].node.id, "id mismatch");
       assert(
         drive.files.some((f) => f.path === "README.md"),

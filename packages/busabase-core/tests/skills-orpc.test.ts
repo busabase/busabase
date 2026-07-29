@@ -101,15 +101,23 @@ describe("Agent Skills API — oRPC integration", () => {
       description: "Reviews agent research drafts for source quality before publishing.",
     });
 
-    const skills = await client.fileTrees.list({ type: "skill" });
-    const listed = skills.find((skill) => skill.node.slug === "ai-research-editor");
+    // The unified list is a SUMMARY projection: node rows only, no per-node
+    // file inventory (that N+1 is exactly what this consolidation removed).
+    const skills = await client.nodes.list({ types: ["skill"] });
+    const listed = skills.find((skill) => skill.slug === "ai-research-editor");
     expect(listed).toBeDefined();
-    expect(listed?.files.map((file) => file.path)).toEqual(
+    expect(listed).not.toHaveProperty("files");
+    expect(listed?.children).toEqual([]);
+
+    // The detail — files, entry file, visibility, version — comes from opening it.
+    const detail = await client.nodes.get({ nodeId: "ai-research-editor", type: "skill" });
+    expect(detail.type).toBe("skill");
+    expect(detail.files.map((file) => file.path)).toEqual(
       expect.arrayContaining(["SKILL.md", "skill.json"]),
     );
-    expect(listed?.entryFile).toBe("SKILL.md");
-    expect(listed?.visibility).toBeDefined();
-    expect(listed?.version).toBeDefined();
+    expect(detail.entryFile).toBe("SKILL.md");
+    expect(detail.visibility).toBeDefined();
+    expect(detail.version).toBeDefined();
   });
 
   it("creates a skill, seeding default SKILL.md + skill.json when none are supplied", async () => {
@@ -196,13 +204,13 @@ describe("Agent Skills API — oRPC integration", () => {
       slug: "gettable",
       name: "Gettable",
     });
-    const byId = await client.fileTrees.get({ type: "skill", nodeId: created.node.id });
-    const bySlug = await client.fileTrees.get({ type: "skill", nodeId: "gettable" });
+    const byId = await client.nodes.get({ nodeId: created.node.id, type: "skill" });
+    const bySlug = await client.nodes.get({ nodeId: "gettable", type: "skill" });
     expect(byId.node.id).toBe(created.node.id);
     expect(bySlug.node.id).toBe(created.node.id);
 
-    await expect(client.fileTrees.get({ type: "skill", nodeId: "pnd_missing" })).rejects.toThrow(
-      /Skill not found/,
+    await expect(client.nodes.get({ nodeId: "pnd_missing", type: "skill" })).rejects.toThrow(
+      /Node not found/,
     );
   });
 
@@ -433,7 +441,7 @@ describe("Agent Skills API — oRPC integration", () => {
     expect(metaCr.primaryOperation?.operation).toBe("skill_metadata_update");
     await approveAndMerge(metaCr.id);
 
-    const after = await client.fileTrees.get({ type: "skill", nodeId: skill.node.id });
+    const after = await client.nodes.get({ nodeId: skill.node.id, type: "skill" });
     expect(after.version).toBe("9.9.9");
     expect(after.visibility).toBe("public");
   });
@@ -501,7 +509,7 @@ describe("Agent Skills API — oRPC integration", () => {
     const newNodeId = String(Array.isArray(mergedNodeIds) ? mergedNodeIds[0] : "");
     expect(newNodeId).toMatch(/^nod/);
 
-    const skill = await client.fileTrees.get({ type: "skill", nodeId: newNodeId });
+    const skill = await client.nodes.get({ nodeId: newNodeId, type: "skill" });
     expect(skill.node.slug).toBe("materialized-skill");
     expect(skill.files.some((file) => file.path === "SKILL.md")).toBe(true);
   });

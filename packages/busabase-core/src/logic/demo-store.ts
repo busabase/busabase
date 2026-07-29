@@ -1,6 +1,7 @@
 import "server-only";
 
 import { ORPCError } from "@orpc/server";
+import type { NodeDetailVO } from "busabase-contract/contract/node-detail-schemas";
 import type { AuthInfo } from "busabase-contract/contract/schemas";
 import type { AssetDetailVO, AssetUsageVO, AssetVO } from "busabase-contract/domains/assets/types";
 import type {
@@ -8,7 +9,6 @@ import type {
   FileTreeNodeVO,
   FileTreeReadFileVO,
 } from "busabase-contract/domains/filetree/types";
-import type { FolderVO } from "busabase-contract/domains/folder/types";
 import type {
   AgentTaskVO,
   AuditEventVO,
@@ -38,6 +38,7 @@ import {
   englishScenario,
 } from "../demo/dataset";
 import { zhCnScenario } from "../demo/scenarios/zh-cn";
+import { getPrimaryField } from "../domains/base/utils/primary-field";
 import { type DocLinesResult, sliceDocLinesRange, splitDocLines } from "../domains/doc/handlers";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -182,22 +183,12 @@ export const demoSearchNodesByName = (input: {
     }));
 };
 
-// Folder nodes live one level under the synthetic root node; each already carries
-// its base children, so a FolderVO is just { node, children }.
-const demoFolderNodes = (): NodeVO[] => dataset().nodes[0]?.children ?? [];
-
-export const demoListFolders = (): FolderVO[] =>
-  demoFolderNodes().map((node) => ({ node, children: node.children ?? [] }));
-
-export const demoGetFolder = (nodeIdOrSlug: string): FolderVO => {
-  const node = demoFolderNodes().find(
-    (folder) => folder.id === nodeIdOrSlug || folder.slug === nodeIdOrSlug,
-  );
-  if (!node) {
-    throw notFound("Folder", nodeIdOrSlug);
-  }
-  return { node, children: node.children ?? [] };
-};
+// `demoListFolders` / `demoGetFolder` are gone with `GET /folders` and
+// `GET /folders/{nodeId}`. Folders are listed through
+// `nodes.list({ types: ["folder"] })` and read through `nodes.get`, both of
+// which work off the seeded tree directly — see `demoListNodeSummaries` /
+// `demoGetNodeDetail` below. The old lookup only ever searched the tree's
+// FIRST level, so nested demo folders now resolve where they used to 404.
 
 export const demoListBases = () => dataset().bases;
 
@@ -283,7 +274,8 @@ export const demoListComments = (input: {
     (comment) => comment.subjectType === input.subjectType && comment.subjectId === input.subjectId,
   );
 
-export const demoListDocs = (): DemoDocVO[] => dataset().docs;
+// `demoListDocs` is gone with `GET /docs`; Docs are listed through
+// `nodes.list({ types: ["doc"] })`, which returns summaries and no bodies.
 
 export const demoGetDoc = (nodeIdOrSlug: string): DemoDocVO => {
   const doc = dataset().docs.find(
@@ -311,7 +303,8 @@ export const demoReadDocLines = (
   return sliceDocLinesRange(splitDocLines(doc.body), startLine, endLine);
 };
 
-export const demoListFileNodes = (): FileNodeVO[] => dataset().files;
+// `demoListFileNodes` is gone with `GET /files`; File nodes are listed through
+// `nodes.list({ types: ["file"] })`, which returns summaries and no Assets.
 
 export const demoGetFileNode = (nodeIdOrSlug: string): FileNodeVO => {
   const file = dataset().files.find(
@@ -402,10 +395,9 @@ export const demoGetFileTree = (
   };
 };
 
-export const demoListFileTrees = (type?: "skill" | "drive" | "airapp"): FileTreeNodeVO[] =>
-  dataset()
-    .fileTreeNodes.filter((def) => !type || def.nodeType === type)
-    .map((def) => demoGetFileTree(def.nodeId, def.nodeType));
+// `demoListFileTrees` is gone with `GET /file-trees`; Skills/Drives/AirApps are
+// listed through `nodes.list({ types: ["skill", "drive", "airapp"] })`, which
+// returns summaries and no file inventories.
 
 export const demoReadFileTreeFile = (
   nodeIdOrSlug: string,
@@ -426,6 +418,79 @@ export const demoReadFileTreeFile = (
     assetUrl: null,
     contentHash: demoContentHash(file.content),
   };
+};
+
+// ── Unified Node surface (nodes.list({ types }) / nodes.get) ─────────────────
+// The demo has to serve the SAME consolidated shape as the real store, or the
+// demo becomes the one place where a client can get away with calling a route
+// that no longer exists.
+
+/**
+ * Demo counterpart to `listNodeSummaries`. The seeded tree is already fully in
+ * memory, so this is a flat filter over it — but it deliberately returns the
+ * same lightweight shape (`children: []`) the real store returns, rather than
+ * the nested tree, so a client cannot accidentally depend on demo-only depth.
+ */
+export const demoListNodeSummaries = (types: readonly string[]): NodeVO[] =>
+  flattenNodes(dataset().nodes)
+    .filter((node) => types.includes(node.type))
+    .map((node) => ({ ...node, children: [], hasChildren: false }));
+
+/**
+ * Demo counterpart to `getNodeDetail`. Same discriminated union, same
+ * ambiguous-slug refusal, same fail-closed behaviour for a type with no demo
+ * detail builder.
+ */
+export const demoGetNodeDetail = (nodeIdOrSlug: string, type?: string): NodeDetailVO => {
+  const matches = flattenNodes(dataset().nodes).filter(
+    (item) =>
+      (!type || item.type === type) && (item.id === nodeIdOrSlug || item.slug === nodeIdOrSlug),
+  );
+  const node = matches.find((item) => item.id === nodeIdOrSlug) ?? matches[0];
+  if (!node) throw notFound("Node", nodeIdOrSlug);
+  // Only a SLUG can be ambiguous — an id matched exactly above.
+  if (node.id !== nodeIdOrSlug) {
+    const slugTypes = [...new Set(matches.map((item) => item.type))];
+    if (slugTypes.length > 1) {
+      throw new ORPCError("BAD_REQUEST", {
+        message: `Slug "${nodeIdOrSlug}" exists as ${slugTypes.join(" and ")}; pass \`type\` to choose one.`,
+      });
+    }
+  }
+
+  const nodeType: string = node.type;
+  switch (node.type) {
+    // Built straight off the seeded tree rather than via a folders-only lookup,
+    // so a NESTED demo folder resolves the same way a top-level one does.
+    case "folder":
+      return { type: "folder", node, children: node.children ?? [] };
+    case "doc":
+      return { type: "doc", ...demoGetDoc(node.id) };
+    case "file":
+      return { type: "file", ...demoGetFileNode(node.id) };
+    case "skill":
+    case "drive":
+    case "airapp": {
+      const fileTree = demoGetFileTree(node.id, node.type);
+      return {
+        type: node.type,
+        ...fileTree,
+        skippedGitignorePaths: fileTree.skippedGitignorePaths ?? [],
+      };
+    }
+    case "base":
+    case "form":
+    case "whiteboard":
+    case "workflow":
+    case "html":
+      return { type: node.type, node };
+  }
+  // Unreachable for a registered built-in type (the switch above is exhaustive
+  // over `NodeType`), but a late `registerNodeType()` plugin can reach it — and
+  // it must fail closed rather than return a mis-discriminated VO.
+  throw new ORPCError("NOT_IMPLEMENTED", {
+    message: `No detail is available for node type "${nodeType}"`,
+  });
 };
 
 // No agent tasks in the demo dataset; the review surface treats empty as "no
@@ -606,9 +671,10 @@ export const demoSearch = (input: {
         .map((record) => ({
           id: record.id,
           kind: "record",
-          // Title = base's primary (first) field value — same convention as store.ts.
+          // Title = the Base's lowest-position field value, matching the canonical store.
           title:
-            String(record.headCommit.fields[record.base.fields[0]?.slug ?? ""] ?? "") || record.id,
+            String(record.headCommit.fields[getPrimaryField(record.base)?.slug ?? ""] ?? "") ||
+            record.id,
           body: String(record.headCommit.fields.body ?? record.headCommit.fields.description ?? ""),
           eyebrow: `${record.base.name} · canonical record`,
           href: `/base/${record.base.slug}/${record.id}`,

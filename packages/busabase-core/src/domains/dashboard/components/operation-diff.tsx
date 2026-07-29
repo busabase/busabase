@@ -447,10 +447,15 @@ export function FieldOrderDiff({
   operation: OperationVO;
 }) {
   const messages = useCoreI18n();
-  const { afterIds, beforeIds, fieldsById, movedIds } = getFieldOrderDiffModel(
-    changeRequest,
-    operation,
-  );
+  const {
+    afterIds,
+    afterPrimaryId,
+    beforeIds,
+    beforePrimaryId,
+    fieldsById,
+    movedIds,
+    primaryChanged,
+  } = getFieldOrderDiffModel(changeRequest, operation);
 
   if (beforeIds.length === 0 || afterIds.length === 0) {
     return (
@@ -462,6 +467,14 @@ export function FieldOrderDiff({
 
   return (
     <div className="mt-3 rounded-lg border bg-background/40 p-3">
+      {primaryChanged && beforePrimaryId && afterPrimaryId ? (
+        <div className="mb-3 rounded-md border border-primary/25 bg-primary/5 px-3 py-2 font-medium text-sm">
+          {fmt(messages.operationDiff.recordTitleChange, {
+            before: iStringParse(fieldsById.get(beforePrimaryId)?.name ?? beforePrimaryId),
+            after: iStringParse(fieldsById.get(afterPrimaryId)?.name ?? afterPrimaryId),
+          })}
+        </div>
+      ) : null}
       <div className="mb-3 flex items-center justify-between gap-3">
         <div className="font-medium text-sm">{messages.operationDiff.fieldOrder}</div>
         <span className="shrink-0 rounded-md border border-review/35 bg-review/10 px-2 py-0.5 font-medium text-[11px] text-review-strong dark:text-review-soft">

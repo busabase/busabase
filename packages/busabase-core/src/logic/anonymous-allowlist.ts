@@ -34,11 +34,18 @@ const ANONYMOUS_READ_ALLOWLIST: ReadonlySet<string> = new Set([
   // The node tree itself — already filtered by `buildNodeVisibilityCondition`,
   // whose anonymous branch matches only nodes with a non-null public scope.
   "nodes.list",
-  // Single-node detail reads. Each asserts node visibility, which for an
-  // anonymous visitor resolves through `getPublicScopeOf`.
-  "folders.get",
-  "files.get",
-  "docs.get",
+  // The unified single-node detail read (it replaced `folders.get`,
+  // `files.get`, and `docs.get`). It asserts node visibility, which for an
+  // anonymous visitor resolves through the public-scope branch of
+  // `buildNodeVisibilityCondition`.
+  //
+  // Reachability alone is NOT the whole gate here: merging four procedures into
+  // one collapsed a distinction this list used to make by procedure name —
+  // `fileTrees.get` was deliberately absent, so a public link could never be
+  // used to read a Skill/Drive/AirApp's source. `ANONYMOUS_READABLE_NODE_TYPES`
+  // below carries that boundary, and `logic/node-detail.ts` enforces it on the
+  // RESOLVED node type before any hydration happens.
+  "nodes.get",
   "bases.get",
   // A base's views and rows are reachable only via a base the visitor could
   // already `bases.get`; the base-visibility EXISTS clause carries the same
@@ -63,6 +70,49 @@ const ANONYMOUS_SUBMIT_ALLOWLIST: ReadonlySet<string> = new Set([
   // advance so it cannot land as an unguarded mutation.
   "form.submit",
 ]);
+
+/**
+ * Node types an anonymous (public-link) visitor may read through `nodes.get`.
+ *
+ * An ALLOWLIST, not a denylist of the three file-tree types, for the same
+ * reason `ANONYMOUS_READ_ALLOWLIST` is one: a node type registered later —
+ * including one a build-time plugin adds via `registerNodeType()` — must fail
+ * closed rather than inherit anonymous access because nobody remembered to deny
+ * it. Opening a type up has to be a deliberate edit here.
+ *
+ * What is in and why:
+ *   - `folder` / `doc` / `file` — exactly the three that `folders.get`,
+ *     `docs.get`, and `files.get` served anonymously before the merge.
+ *   - `base`   — already reachable anonymously via `bases.get`; withholding the
+ *     strictly smaller node row from `nodes.get` would be arbitrary.
+ *
+ * What is deliberately out:
+ *   - `skill` / `drive` / `airapp` — `fileTrees.get` was never on the anonymous
+ *     allowlist. A public share must not become a way to read an agent's source.
+ *   - `form` / `whiteboard` / `workflow` / `html` — no anonymous surface exists
+ *     for them yet; when one does, it lands as a deliberate addition here.
+ */
+const ANONYMOUS_READABLE_NODE_TYPES: ReadonlySet<string> = new Set([
+  "folder",
+  "doc",
+  "file",
+  "base",
+]);
+
+/** Whether an anonymous visitor may read this node type's detail at all. */
+export const isAnonymousReadableNodeType = (type: string): boolean =>
+  ANONYMOUS_READABLE_NODE_TYPES.has(type);
+
+/**
+ * Refuse a node type that is off the anonymous surface. Same FORBIDDEN code and
+ * wording shape as `denyAnonymousProcedure` (see its note on why not 401), and
+ * deliberately says nothing about whether the node exists.
+ */
+export const denyAnonymousNodeType = (type: string): never => {
+  throw new ORPCError("FORBIDDEN", {
+    message: `Not available to anonymous visitors: nodes of type "${type}"`,
+  });
+};
 
 export type AnonymousAccessKind = "read" | "submit";
 
@@ -118,7 +168,9 @@ export const denyAnonymousProcedure = (path: readonly string[]): never => {
 export const anonymousAllowlistSnapshot = (): {
   read: string[];
   submit: string[];
+  nodeTypes: string[];
 } => ({
   read: [...ANONYMOUS_READ_ALLOWLIST].sort(),
   submit: [...ANONYMOUS_SUBMIT_ALLOWLIST].sort(),
+  nodeTypes: [...ANONYMOUS_READABLE_NODE_TYPES].sort(),
 });

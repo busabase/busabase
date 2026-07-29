@@ -15,6 +15,7 @@ import { DocEditor } from "../../doc/components";
 import { useDocImageUpload } from "../../doc/hooks/use-doc-image-upload";
 import { FormDetailView } from "../../form/components/form-detail-view";
 import { mergeSearchIntoHref } from "../helpers/link-search";
+import { asNodeDetail } from "../helpers/node-detail";
 import { useReportLoadedNode } from "../hooks/use-report-loaded-node";
 import { type NodeDetailProps, registerNodeDetail } from "../node-detail-registry";
 import { registerSidePanelTab, type SidePanelTabProps } from "../side-panel-registry";
@@ -86,10 +87,11 @@ export function FileTreeDetailView({
   const [fileActionError, setFileActionError] = useState<string | null>(null);
 
   const fileTreeQuery = useQuery({
-    ...orpc.fileTrees.get.queryOptions({ input: { nodeId: slug ?? "", type: nodeType } }),
+    ...orpc.nodes.get.queryOptions({ input: { nodeId: slug ?? "", type: nodeType } }),
     enabled: Boolean(slug),
   });
-  const fileTree = fileTreeQuery.data ?? null;
+  // `nodes.get` is one route for every node type, so narrow to this view's branch.
+  const fileTree = asNodeDetail(fileTreeQuery.data, nodeType);
   useReportLoadedNode(fileTree?.node, onNodeLoaded);
 
   // Reset the open file when switching file-tree nodes.
@@ -183,7 +185,7 @@ export function FileTreeDetailView({
       await reviewCr.mutateAsync({ changeRequestIds: [changeRequest.id], verdict: "approved" });
       await mergeCr.mutateAsync({ changeRequestIds: [changeRequest.id] });
       await queryClient.invalidateQueries({
-        queryKey: orpc.fileTrees.get.queryOptions({
+        queryKey: orpc.nodes.get.queryOptions({
           input: { nodeId: fileTree.node.id, type: nodeType },
         }).queryKey,
       });
@@ -532,10 +534,10 @@ export function FileNodeDetailView({
 }: NodeDetailProps & { hideActions?: boolean }) {
   const messages = useCoreI18n();
   const fileQuery = useQuery({
-    ...orpc.files.get.queryOptions({ input: { nodeId: slug ?? "" } }),
+    ...orpc.nodes.get.queryOptions({ input: { nodeId: slug ?? "", type: "file" } }),
     enabled: Boolean(slug),
   });
-  const detail = fileQuery.data ?? null;
+  const detail = asNodeDetail(fileQuery.data, "file");
   useReportLoadedNode(detail?.node, onNodeLoaded);
 
   if (!detail) {
@@ -684,10 +686,10 @@ export function DocDetailView({
     [rawSetLocation, currentSearch],
   );
   const docQuery = useQuery({
-    ...orpc.docs.get.queryOptions({ input: { nodeId: slug ?? "" } }),
+    ...orpc.nodes.get.queryOptions({ input: { nodeId: slug ?? "", type: "doc" } }),
     enabled: Boolean(slug),
   });
-  const doc = docQuery.data ?? null;
+  const doc = asNodeDetail(docQuery.data, "doc");
   useReportLoadedNode(doc?.node, onNodeLoaded);
   const [isEditing, setIsEditing] = useState(false);
   const [draft, setDraft] = useState("");
@@ -876,10 +878,10 @@ export function FolderDetailView({
   const messages = useCoreI18n();
   const currentSearch = useSearch();
   const folderQuery = useQuery({
-    ...orpc.folders.get.queryOptions({ input: { nodeId: slug ?? "" } }),
+    ...orpc.nodes.get.queryOptions({ input: { nodeId: slug ?? "", type: "folder" } }),
     enabled: Boolean(slug),
   });
-  const folder = folderQuery.data ?? null;
+  const folder = asNodeDetail(folderQuery.data, "folder");
   useReportLoadedNode(folder?.node, onNodeLoaded);
 
   if (!folder) {

@@ -24,16 +24,12 @@ export const createFileNodeInputSchema = z.object({
   autoMerge: z.boolean().optional(),
 });
 
+// `list` and `get` are deliberately absent: `GET /files` and
+// `GET /files/{nodeId}` were retired in favour of the unified Node surface.
+// List File nodes with `GET /nodes?types=file` (lightweight summaries — the old
+// list resolved a full AssetVO per row) and read one with `GET /nodes/{nodeId}`,
+// which returns the same `FileNodeVOSchema` payload under `type: "file"`.
 export const fileContract = {
-  list: oc
-    .route({
-      method: "GET",
-      path: "/files",
-      tags: ["Files"],
-      summary: "List File nodes",
-      successDescription: "Workspace File nodes with their backing Asset metadata.",
-    })
-    .output(z.array(FileNodeVOSchema)),
   create: oc
     .route({
       method: "POST",
@@ -50,14 +46,4 @@ export const fileContract = {
         changeRequestSchema.extend({ materialized: z.literal(false) }),
       ]),
     ),
-  get: oc
-    .route({
-      method: "GET",
-      path: "/files/{nodeId}",
-      tags: ["Files"],
-      summary: "Get File node",
-      successDescription: "File node detail and backing Asset metadata.",
-    })
-    .input(z.object({ nodeId: z.string() }))
-    .output(FileNodeVOSchema),
 };

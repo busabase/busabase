@@ -48,6 +48,9 @@ test("Table and Gallery can jump between numbered record pages", async ({ page, 
         config: { filters: [], sorts: [] },
         message: marker,
         submittedBy: "playwright",
+        // Pin the review-first branch: this spec asserts the propose -> approve -> merge
+        // workflow, which the endpoint would otherwise skip for a write-capable actor.
+        autoMerge: false,
       },
     }),
   );

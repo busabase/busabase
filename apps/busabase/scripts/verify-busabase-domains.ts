@@ -118,6 +118,9 @@ async function main() {
     config: { filters: [], sorts: [] },
     message: "verify view create",
     submittedBy: "local-editor",
+    // Pin the review-first branch: this harness asserts the propose -> approve
+    // -> merge path, which the endpoint now skips by default for a write-capable actor.
+    autoMerge: false,
   });
   const viewMerge = await approveAndMerge(viewCreateCr.id);
   const viewId = viewMerge.view?.id;
@@ -128,6 +131,9 @@ async function main() {
     name: "Ready (renamed)",
     message: "verify view update",
     submittedBy: "local-editor",
+    // Pin the review-first branch: this harness asserts the propose -> approve
+    // -> merge path, which the endpoint now skips by default for a write-capable actor.
+    autoMerge: false,
   });
   await approveAndMerge(viewUpdateCr.id);
   const viewsAfterUpdate = await listViews(base.id);
@@ -140,6 +146,9 @@ async function main() {
   const viewDeleteCr = await createDeleteViewChangeRequest(viewId as string, {
     message: "verify view delete",
     submittedBy: "local-editor",
+    // Pin the review-first branch: this harness asserts the propose -> approve
+    // -> merge path, which the endpoint now skips by default for a write-capable actor.
+    autoMerge: false,
   });
   await approveAndMerge(viewDeleteCr.id);
   const viewsAfterDelete = await listViews(base.id);

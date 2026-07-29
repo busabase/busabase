@@ -158,18 +158,13 @@ const fileTreeRefSchema = z.object({
   type: fileTreeNodeTypeSchema.optional(),
 });
 
+// `list` and `get` are deliberately absent: `GET /file-trees` and
+// `GET /file-trees/{nodeId}` were retired in favour of the unified Node surface.
+// List file-tree nodes with `GET /nodes?types=skill&types=drive&types=airapp`
+// (lightweight summaries — the old list built a full file inventory per node)
+// and read one with `GET /nodes/{nodeId}`, which returns the same
+// `fileTreeNodeSchema` payload under `type: "skill" | "drive" | "airapp"`.
 export const fileTreeContract = {
-  list: oc
-    .route({
-      method: "GET",
-      path: "/file-trees",
-      tags: ["File Trees"],
-      summary: "List file-tree nodes",
-      successDescription:
-        "Skill, Drive, and AirApp nodes with their Asset-backed file trees. Pass `type` to narrow to one kind.",
-    })
-    .input(z.object({ type: fileTreeNodeTypeSchema.optional() }))
-    .output(z.array(fileTreeNodeSchema)),
   create: oc
     .route({
       method: "POST",
@@ -186,16 +181,6 @@ export const fileTreeContract = {
         changeRequestSchema.extend({ materialized: z.literal(false) }),
       ]),
     ),
-  get: oc
-    .route({
-      method: "GET",
-      path: "/file-trees/{nodeId}",
-      tags: ["File Trees"],
-      summary: "Get file-tree node",
-      successDescription: "File-tree node detail and its file list.",
-    })
-    .input(fileTreeRefSchema)
-    .output(fileTreeNodeSchema),
   listFiles: oc
     .route({
       method: "GET",

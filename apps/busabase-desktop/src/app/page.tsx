@@ -54,6 +54,13 @@ type BusabaseUpdateDownloadEvent =
 const dashboardUrl = (status: BusabaseSidecarStatus) =>
   `${status.localUrl || fallbackStatus.localUrl}/dashboard`;
 
+// The Tauri webview implements no `window.open()` — it returns `null` unconditionally,
+// so any in-app flow the sidecar would normally run in a popup (Cloud Connect sign-in)
+// asks us instead to hand the URL to the OS default browser. Kept in sync with
+// `apps/busabase/src/domains/settings/utils/desktop-shell.ts`.
+const OPEN_EXTERNAL_REQUEST = "busabase-desktop:open-external";
+const OPEN_EXTERNAL_RESULT = "busabase-desktop:open-external:result";
+
 export default function Page() {
   const [appUrl, setAppUrl] = useState<string | null>(null);
   const [message, setMessage] = useState("Starting local Busabase…");
@@ -68,6 +75,7 @@ export default function Page() {
   const [updateStatus, setUpdateStatus] = useState<BusabaseUpdateStatus>("idle");
   const [updateMessage, setUpdateMessage] = useState<string | null>(null);
   const startedRef = useRef(false);
+  const frameRef = useRef<HTMLIFrameElement | null>(null);
   const updateFoundRef = useRef(false);
   const updateStatusRef = useRef<BusabaseUpdateStatus>("idle");
 
@@ -133,6 +141,46 @@ export default function Page() {
     }, 1500);
     return () => window.clearInterval(timer);
   }, [appUrl, canUseTauriCommands, reveal]);
+
+  // Serve the embedded sidecar's "open this URL outside the webview" requests.
+  useEffect(() => {
+    if (!appUrl) {
+      return;
+    }
+    const sidecarOrigin = new URL(appUrl).origin;
+
+    const onMessage = (event: MessageEvent) => {
+      if (event.origin !== sidecarOrigin || event.source !== frameRef.current?.contentWindow) {
+        return;
+      }
+      const data = event.data as { type?: unknown; requestId?: unknown; url?: unknown } | null;
+      if (!data || data.type !== OPEN_EXTERNAL_REQUEST || typeof data.url !== "string") {
+        return;
+      }
+      const requestId = typeof data.requestId === "string" ? data.requestId : null;
+      const source = event.source as Window;
+
+      void (async () => {
+        let ok = false;
+        try {
+          const target = new URL(data.url as string);
+          // Only ever hand http(s) to the OS — never `file:`, `tauri:` or a custom scheme.
+          if (target.protocol !== "http:" && target.protocol !== "https:") {
+            throw new Error(`Refusing to open ${target.protocol} URL externally`);
+          }
+          const { openUrl } = await import("@tauri-apps/plugin-opener");
+          await openUrl(target.toString());
+          ok = true;
+        } catch (error) {
+          console.error("[busabase-desktop] Could not open URL externally", error);
+        }
+        source.postMessage({ type: OPEN_EXTERNAL_RESULT, requestId, ok }, sidecarOrigin);
+      })();
+    };
+
+    window.addEventListener("message", onMessage);
+    return () => window.removeEventListener("message", onMessage);
+  }, [appUrl]);
 
   const checkForUpdate = useCallback(
     async (options?: { showError?: boolean }) => {
@@ -314,6 +362,7 @@ export default function Page() {
       <div className="desktop-window-body">
         {appUrl ? (
           <iframe
+            ref={frameRef}
             title="Busabase"
             src={appUrl}
             className="busabase-frame"

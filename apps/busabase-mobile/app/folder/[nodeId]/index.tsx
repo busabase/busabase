@@ -13,6 +13,7 @@ import {
   NativeRow,
   NativeSection,
 } from "~/components/native-screen";
+import { asNodeDetail } from "~/lib/node-detail";
 import { getMobileNodeDestination } from "~/search/node-navigation";
 import { useTokens } from "~/theme/use-tokens";
 
@@ -36,10 +37,12 @@ function FolderDetailContent() {
 
   const folderQuery = useQuery(
     buda && nodeId
-      ? buda.orpc.folders.get.queryOptions({ input: { nodeId } })
+      ? buda.orpc.nodes.get.queryOptions({ input: { nodeId, type: "folder" } })
       : { queryKey: ["no-connection", "folder", nodeId], queryFn: skipToken },
   );
-  const folder = folderQuery.data ?? null;
+  // `nodes.get` answers for every node type, so narrow before reading
+  // `.children`; a non-Folder result falls through to "Folder not found".
+  const folder = asNodeDetail(folderQuery.data, "folder");
 
   const openChild = (child: FolderChild) => {
     const destination = getMobileNodeDestination(child);

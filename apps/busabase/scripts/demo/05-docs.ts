@@ -1,6 +1,15 @@
 /**
  * 05-docs: Doc lifecycle — create, direct body update, CR-based update.
- * POST /docs → GET /docs → POST /docs/{id}/body → POST /docs/{id}/change-requests → approve → merge
+ * POST /docs → GET /nodes?types=doc → PUT /docs/{id}/body
+ *   → POST /docs/{id}/change-requests → approve → merge
+ *
+ * `GET /docs` and `GET /docs/{nodeId}` were retired by the unified Node
+ * surface. Listing Docs is now `GET /nodes?types=doc`, which returns FLAT
+ * lightweight summaries and deliberately does NOT carry `body` (the retired
+ * list read every Doc's body out of object storage). Reading one Doc — body
+ * included — is `GET /nodes/{nodeId}`, whose `type: "doc"` variant is the exact
+ * old `DocVO` plus a `type` discriminator. `POST /docs`, `PUT /docs/{id}/body`,
+ * and `POST /docs/{id}/change-requests` are untouched.
  */
 
 import { api, approveMerge, assert, BASE, makeRunner } from "./_client";
@@ -11,12 +20,19 @@ interface NodeVO {
   slug: string;
   name: string;
   type: string;
+  children?: NodeVO[];
 }
 
+/** What `POST /docs` and `PUT /docs/{id}/body` return (no `type` discriminator). */
 interface DocVO {
   node: NodeVO;
   storagePrefix: string;
   body: string;
+}
+
+/** The `type: "doc"` variant of `NodeDetailVO` from `GET /nodes/{nodeId}`. */
+interface DocDetailVO extends DocVO {
+  type: "doc";
 }
 
 interface ChangeRequestVO {
@@ -66,7 +82,9 @@ export async function run() {
           autoMerge: true,
         });
       } catch {
-        doc = await api<DocVO>("GET", `/docs/${def.slug}`);
+        // Slug lookup still works — `nodeId` accepts an id OR a slug; `type`
+        // disambiguates a slug that exists under more than one node type.
+        doc = await api<DocDetailVO>("GET", `/nodes/${def.slug}?type=doc`);
       }
       assert(doc.node.slug === def.slug, `slug mismatch: ${doc.node.slug}`);
       assert(doc.node.type === "doc", `expected type=doc, got ${doc.node.type}`);
@@ -79,20 +97,30 @@ export async function run() {
 
   // ── List docs ─────────────────────────────────────────────────────────────
 
-  await step("GET /docs — all demo doc slugs present", async () => {
-    const docs = await api<DocVO[]>("GET", "/docs");
+  await step("GET /nodes?types=doc — all demo doc slugs present", async () => {
+    const docs = await api<NodeVO[]>("GET", "/nodes?types=doc");
     assert(Array.isArray(docs), "expected array");
-    const slugs = new Set(docs.map((d) => d.node.slug));
+    assert(
+      docs.every((d) => d.type === "doc"),
+      "expected only doc nodes",
+    );
+    const slugs = new Set(docs.map((d) => d.slug));
     for (const def of DEMO_DOCS) {
-      assert(slugs.has(def.slug), `slug "${def.slug}" not found in /docs`);
+      assert(slugs.has(def.slug), `slug "${def.slug}" not found in /nodes?types=doc`);
     }
+    // The reason this replaced `GET /docs`: the summary must not carry bodies.
+    assert(
+      docs.every((d) => !("body" in d)),
+      "summary list must not hydrate Doc bodies",
+    );
   });
 
-  // ── GET /docs/{id} ────────────────────────────────────────────────────────
+  // ── GET /nodes/{id} ───────────────────────────────────────────────────────
 
-  await step("GET /docs/{id} — doc detail includes body", async () => {
+  await step("GET /nodes/{id} — doc detail includes body", async () => {
     if (!docId) return;
-    const doc = await api<DocVO>("GET", `/docs/${docId}`);
+    const doc = await api<DocDetailVO>("GET", `/nodes/${docId}`);
+    assert(doc.type === "doc", `expected type=doc, got ${doc.type}`);
     assert(doc.node.id === docId, "id mismatch");
     assert(typeof doc.body === "string", "expected body string");
     assert(doc.body.includes("Engineering Notes"), "expected body content");
@@ -110,9 +138,9 @@ export async function run() {
     assert(doc.body.includes("Updated directly"), "body not updated");
   });
 
-  await step("GET /docs/{id} — verify direct body update persisted", async () => {
+  await step("GET /nodes/{id} — verify direct body update persisted", async () => {
     if (!docId) return;
-    const doc = await api<DocVO>("GET", `/docs/${docId}`);
+    const doc = await api<DocDetailVO>("GET", `/nodes/${docId}`);
     assert(doc.body.includes("Updated directly"), "expected updated body");
   });
 
@@ -142,19 +170,20 @@ export async function run() {
     );
   });
 
-  await step("GET /docs/{id} — verify CR body after merge", async () => {
+  await step("GET /nodes/{id} — verify CR body after merge", async () => {
     if (!docId) return;
-    const doc = await api<DocVO>("GET", `/docs/${docId}`);
+    const doc = await api<DocDetailVO>("GET", `/nodes/${docId}`);
     assert(
       doc.body.includes("approval workflow"),
       `expected CR body, got: ${doc.body.slice(0, 80)}`,
     );
   });
 
-  // ── GET /docs by slug ─────────────────────────────────────────────────────
+  // ── GET /nodes by slug ────────────────────────────────────────────────────
 
-  await step("GET /docs/{slug} — lookup by slug works", async () => {
-    const doc = await api<DocVO>("GET", `/docs/${DEMO_DOCS[1].slug}`);
+  await step("GET /nodes/{slug}?type=doc — lookup by slug works", async () => {
+    const doc = await api<DocDetailVO>("GET", `/nodes/${DEMO_DOCS[1].slug}?type=doc`);
+    assert(doc.type === "doc", `expected type=doc, got ${doc.type}`);
     assert(doc.node.slug === DEMO_DOCS[1].slug, "slug lookup failed");
   });
 

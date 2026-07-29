@@ -9,7 +9,6 @@ import { docRouter } from "./domains/doc/router";
 import { dumpRouter } from "./domains/dump/router";
 import { fileRouter } from "./domains/file-node/router";
 import { fileTreeRouter } from "./domains/filetree/router";
-import { folderRouter } from "./domains/folder/router";
 import { formRouter } from "./domains/form/router";
 import { installRouter } from "./domains/install/router";
 import { vaultRouter } from "./domains/vault/router";
@@ -25,6 +24,7 @@ import {
   revokeNodePrincipal,
   updateNodeVisibility,
 } from "./logic/node-acl";
+import { getNodeDetail } from "./logic/node-detail";
 import { disableNodeShare, getNodeShare, setNodeShare } from "./logic/node-share";
 import {
   closeChangeRequest,
@@ -41,6 +41,7 @@ import {
   listChangeRequestsPaged,
   listComments,
   listFavoriteNodes,
+  listNodeSummaries,
   listNodes,
   mergeChangeRequests,
   moveNode,
@@ -90,9 +91,16 @@ const busabaseRouterImpl = busabase.router({
   search: busabase.search.handler(async ({ input }) => searchBusabase(input)),
   grep: busabase.grep.handler(async ({ input }) => grepUnified(input)),
   nodes: {
-    list: busabase.nodes.list.handler(async ({ input }) =>
-      input?.status === "archived" ? listArchivedNodes() : listNodes(input),
-    ),
+    list: busabase.nodes.list.handler(async ({ input }) => {
+      // `types` opts into the flat summary projection that replaced the four
+      // narrow listings. Absent, every existing caller keeps exactly the tree /
+      // bounded-tree / archived behaviour it had before this parameter existed.
+      if (input?.types && input.types.length > 0) {
+        return listNodeSummaries(input.types, input.status ?? "active");
+      }
+      return input?.status === "archived" ? listArchivedNodes() : listNodes(input);
+    }),
+    get: busabase.nodes.get.handler(async ({ input }) => getNodeDetail(input.nodeId, input.type)),
     searchByName: busabase.nodes.searchByName.handler(async ({ input }) =>
       searchNodesByName(input),
     ),
@@ -206,7 +214,6 @@ const busabaseRouterImpl = busabase.router({
   airapps: airappRouter,
   files: fileRouter,
   docs: docRouter,
-  folders: folderRouter,
   forms: formRouter,
   assets: assetsRouter,
   vault: vaultRouter,

@@ -9,9 +9,10 @@ import { useBusabaseOrpc } from "~/api/use-busabase-orpc";
 import { getValidBusabaseCloudSession } from "~/auth/oauth";
 import { getCloudSessionToken } from "~/auth/session-store";
 import { ConnectionGuard } from "~/components/busabase/ConnectionGuard";
-import { NativeErrorState, NativeLoadingState } from "~/components/native-screen";
+import { NativeEmptyState, NativeErrorState, NativeLoadingState } from "~/components/native-screen";
 import { Button } from "~/components/ui/Button";
 import { useConnection } from "~/connection/connection-store";
+import { asNodeDetail } from "~/lib/node-detail";
 import { mobile, radius, typography } from "~/theme/tokens";
 import { useTokens } from "~/theme/use-tokens";
 
@@ -51,7 +52,7 @@ function AirAppDetailContent() {
   const params = useLocalSearchParams<{ nodeId?: string }>();
   // Node tree taps pass the real node id; search results pass its slug (see
   // app/drawer/search.tsx and app/drive|skill/[nodeId] for the same
-  // convention) — the backend's `fileTrees.get`/dashboard route resolve both.
+  // convention) — the backend's `nodes.get`/dashboard route resolve both.
   const nodeId = typeof params.nodeId === "string" ? params.nodeId : "";
   const router = useRouter();
   const tokens = useTokens();
@@ -64,10 +65,14 @@ function AirAppDetailContent() {
 
   const airappQuery = useQuery(
     buda && nodeId
-      ? buda.orpc.fileTrees.get.queryOptions({ input: { nodeId, type: "airapp" } })
+      ? buda.orpc.nodes.get.queryOptions({ input: { nodeId, type: "airapp" } })
       : { queryKey: ["no-connection", "airapp", nodeId], queryFn: skipToken },
   );
-  const airapp = airappQuery.data ?? null;
+  // `nodes.get` answers for every node type, so narrow to `airapp`. A slug that
+  // resolved to something else must not hand its name to this header and then
+  // embed `/dashboard/airapp/{slug}` for a node that is not an AirApp.
+  const airapp = asNodeDetail(airappQuery.data, "airapp");
+  const notAnAirApp = !airappQuery.isLoading && !airappQuery.error && !airapp;
 
   const embedUrlQuery = useQuery({
     queryKey: ["airapp-embed-url", connection?.serverUrl, connection?.mode, nodeId, reloadToken],
@@ -120,7 +125,9 @@ function AirAppDetailContent() {
       </View>
 
       <View style={styles.webviewWrap}>
-        {webviewError ? (
+        {notAnAirApp ? (
+          <NativeEmptyState description="This AirApp is not available." title="AirApp not found" />
+        ) : webviewError ? (
           <NativeErrorState message={webviewError} onRetry={retry} />
         ) : noSession ? (
           <NativeErrorState

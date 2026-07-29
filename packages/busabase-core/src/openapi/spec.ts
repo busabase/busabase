@@ -44,17 +44,17 @@ export async function getBusabaseOpenApiSpec() {
       {
         name: "Nodes",
         description:
-          "Workspace tree endpoints for folders, Bases, files, agents, and future node types.",
+          "The workspace tree and the one typed read for any node in it. `GET /nodes` returns the tree, or a flat summary list when you pass `types`; `GET /nodes/{nodeId}` returns one node's full detail discriminated by its `type` (folder children, Doc body, File asset, file-tree files). This is where listing and opening Folders, Docs, Files, Skills, Drives, and AirApps all happen — the Docs/Files/File Trees tags below cover only what is specific to those types.",
       },
       {
         name: "Files",
         description:
-          "First-class File nodes backed by Assets and created through Node Change Requests.",
+          "Creating File nodes backed by Assets, through Node Change Requests. List and read them through the Nodes tag (`GET /nodes?types=file`, `GET /nodes/{nodeId}`).",
       },
       {
         name: "File Trees",
         description:
-          "Skills, Drives, and AirApps — node types whose content is an Asset-backed file tree. One surface for all three, discriminated by `type`; they differ only in their seed files and entry file.",
+          "Skills, Drives, and AirApps — node types whose content is an Asset-backed file tree. One surface for all three, discriminated by `type`; they differ only in their seed files and entry file. This tag covers creating them and working with the files INSIDE one; listing them and reading one node's detail is under the Nodes tag (`GET /nodes?types=skill`, `GET /nodes/{nodeId}`).",
       },
       {
         name: "Assets",

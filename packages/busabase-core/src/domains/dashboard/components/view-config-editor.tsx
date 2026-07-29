@@ -44,6 +44,7 @@ import {
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { fmt, useCoreI18n, useIString } from "../../../i18n";
+import { getPrimaryField } from "../../base/utils/primary-field";
 import {
   addViewFilter,
   addViewSort,
@@ -64,6 +65,7 @@ import {
   updateViewSortAt,
 } from "../helpers/view-config";
 import type { ViewSubmitOptions } from "../helpers/view-types";
+import { RecordTitleBadge } from "./record-title-badge";
 import { SplitSubmitButton } from "./split-submit-button";
 
 export type ViewConfigEditorSection = "fields" | "filters" | "sorts";
@@ -221,6 +223,7 @@ export function ViewFieldsEditor({ config, fields, onChange, testId }: ViewField
       .filter((field): field is BaseFieldVO => Boolean(field)),
     ...fields.filter((field) => !visibleSet.has(field.slug)),
   ];
+  const primaryField = getPrimaryField({ fields });
 
   return (
     <div data-testid={testId}>
@@ -249,6 +252,7 @@ export function ViewFieldsEditor({ config, fields, onChange, testId }: ViewField
       </div>
       <div className="divide-y divide-border/40">
         {orderedFields.map((field) => {
+          const isPrimary = field.id === primaryField?.id;
           const isVisible = visibleSet.has(field.slug);
           const visibleIndex = visibleSlugs.indexOf(field.slug);
           const hasFilter = config.filters.some((filter) => matchesViewField(filter, field));
@@ -262,7 +266,7 @@ export function ViewFieldsEditor({ config, fields, onChange, testId }: ViewField
               <input
                 aria-label={fmt(messages.base.showFieldAria, { name: resolveIString(field.name) })}
                 checked={isVisible}
-                disabled={isVisible && visibleSlugs.length <= 1}
+                disabled={isPrimary || (isVisible && visibleSlugs.length <= 1)}
                 onChange={(event) =>
                   onChange(
                     event.target.checked
@@ -273,7 +277,14 @@ export function ViewFieldsEditor({ config, fields, onChange, testId }: ViewField
                 type="checkbox"
               />
               <FieldTypeIcon className="size-3.5 shrink-0 text-muted-foreground" field={field} />
-              <span className="min-w-0 flex-1 truncate text-xs">{resolveIString(field.name)}</span>
+              <span className="min-w-0 truncate text-xs">{resolveIString(field.name)}</span>
+              {isPrimary ? (
+                <RecordTitleBadge
+                  testId={`view-record-title-${field.id}`}
+                  tooltip={messages.base.recordTitleViewTooltip}
+                />
+              ) : null}
+              <span className="min-w-0 flex-1" />
               {!isVisible ? (
                 <span className="inline-flex shrink-0 items-center gap-1 text-muted-foreground text-[10px]">
                   <EyeOff className="size-3" />
@@ -311,7 +322,9 @@ export function ViewFieldsEditor({ config, fields, onChange, testId }: ViewField
                     name: resolveIString(field.name),
                   })}
                   className="inline-flex size-7 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-30"
-                  disabled={!isVisible || visibleIndex <= 0}
+                  disabled={
+                    isPrimary || !isVisible || visibleIndex <= (primaryField === null ? 0 : 1)
+                  }
                   onClick={() => {
                     const target = visibleSlugs[visibleIndex - 1];
                     if (target) {
@@ -328,7 +341,7 @@ export function ViewFieldsEditor({ config, fields, onChange, testId }: ViewField
                     name: resolveIString(field.name),
                   })}
                   className="inline-flex size-7 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-30"
-                  disabled={!isVisible || visibleIndex >= visibleSlugs.length - 1}
+                  disabled={isPrimary || !isVisible || visibleIndex >= visibleSlugs.length - 1}
                   onClick={() => {
                     const target = visibleSlugs[visibleIndex + 1];
                     if (target) {

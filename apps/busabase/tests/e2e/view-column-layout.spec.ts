@@ -17,10 +17,17 @@ test("saved view column drag and resize persist through change requests", async 
       data: {
         operation: "create",
         baseId: blog.id,
-        config: { filters: [], sorts: [], visibleFieldSlugs: initialSlugs },
+        config: {
+          filters: [],
+          sorts: [],
+          visibleFieldSlugs: [initialSlugs[1], initialSlugs[2], initialSlugs[0]],
+        },
         name: "Column layout",
         slug: viewSlug,
         submittedBy: "playwright",
+        // Pin the review-first branch: this spec asserts the propose -> approve -> merge
+        // workflow, which the endpoint would otherwise skip for a write-capable actor.
+        autoMerge: false,
       },
     }),
   );
@@ -66,11 +73,20 @@ test("saved view column drag and resize persist through change requests", async 
         ),
       );
   await expect.poll(fieldSlugs).toEqual(initialSlugs);
+  await expect(page.getByTestId(`field-drag-handle-${initialSlugs[0]}`)).toHaveCount(0);
+  await page.getByTestId(`field-header-actions-${initialSlugs[0]}`).click();
+  await expect(page.getByRole("button", { name: "Move left" })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Move right" })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Hide field" })).toHaveCount(0);
+  await page.keyboard.press("Escape");
+  await page.getByTestId(`field-header-actions-${initialSlugs[1]}`).click();
+  await expect(page.getByRole("button", { name: "Move left" })).toBeDisabled();
+  await page.keyboard.press("Escape");
 
   await page
-    .getByTestId(`field-drag-handle-${initialSlugs[0]}`)
+    .getByTestId(`field-drag-handle-${initialSlugs[1]}`)
     .dragTo(grid.locator(`[data-field-slug="${initialSlugs[2]}"]`));
-  const reorderedSlugs = [initialSlugs[1], initialSlugs[2], initialSlugs[0]];
+  const reorderedSlugs = [initialSlugs[0], initialSlugs[2], initialSlugs[1]];
   await expect.poll(fieldSlugs).toEqual(reorderedSlugs);
 
   const resizedSlug = reorderedSlugs[0];

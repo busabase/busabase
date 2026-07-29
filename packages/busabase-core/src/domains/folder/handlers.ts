@@ -77,23 +77,10 @@ export const getFolder = async (nodeIdOrSlug: string): Promise<FolderVO> => {
   return toFolderVO(folderNode);
 };
 
-export const listFolders = async (): Promise<FolderVO[]> => {
-  await ensureReady();
-  const db = await getDb();
-  const folders = await db
-    .select()
-    .from(busabaseNodes)
-    .where(
-      and(
-        eq(busabaseNodes.spaceId, getContextSpaceId()),
-        eq(busabaseNodes.type, "folder"),
-        isNull(busabaseNodes.archivedAt),
-        buildNodeVisibilityCondition(db),
-      ),
-    )
-    .orderBy(asc(busabaseNodes.position), asc(busabaseNodes.createdAt));
-  return Promise.all(folders.map(toFolderVO));
-};
+// `listFolders` is gone with `GET /folders`. It ran a children query plus a
+// hydration pass PER folder to answer "which folders exist" — the N+1 the
+// unified summary list (`logic/nodes.ts`'s `listNodeSummaries`) exists to
+// remove. `getFolder` below still hydrates children for one folder at a time.
 
 // node_create materialization for a Folder node: just the generic node row. Folder
 // registers it explicitly (rather than relying on the kernel fallback) so the kernel

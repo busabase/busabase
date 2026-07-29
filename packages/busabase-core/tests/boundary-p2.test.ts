@@ -241,6 +241,7 @@ describe("Boundary P2 — oRPC", () => {
         filters: [{ fieldSlug: "color", operator: "equals", value: "red" }],
         sorts: [],
       },
+      autoMerge: false, // review-first: this test walks the CR through approve + merge
     });
     await approveAndMerge(viewCr.id);
 

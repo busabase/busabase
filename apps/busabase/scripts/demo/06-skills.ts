@@ -1,6 +1,14 @@
 /**
  * 06-skills: Full skill lifecycle — create, list, read file, CR update, approve, merge, verify.
  * Migrated from scripts/demo-skills.ts; uses DEMO_SKILLS from _data.ts.
+ *
+ * `GET /file-trees` and `GET /file-trees/{nodeId}` were retired by the unified
+ * Node surface. Skills are listed with `GET /nodes?types=skill` (FLAT
+ * lightweight summaries — the retired list built a full file inventory per
+ * node) and read with `GET /nodes/{nodeId}`, whose `type: "skill"` variant is
+ * the exact old file-tree VO plus a `type` discriminator. `POST /file-trees`,
+ * `GET /file-trees/{id}/files`, `/files/{+filePath}`, and
+ * `/change-requests` are untouched.
  */
 
 import { api, approveMerge, assert, BASE, makeRunner, type NodeTreeVO } from "./_client";
@@ -12,13 +20,20 @@ interface NodeVO {
   slug: string;
   name: string;
   type: string;
+  children?: NodeVO[];
 }
 
+/** What `POST /file-trees` returns (no `type` discriminator on the envelope). */
 interface SkillVO {
   node: NodeVO;
   files: Array<{ path: string; type: string }>;
   version: string;
   visibility: string;
+}
+
+/** The `type: "skill"` variant of `NodeDetailVO` from `GET /nodes/{nodeId}`. */
+interface SkillDetailVO extends SkillVO {
+  type: "skill";
 }
 
 interface FileContentVO {
@@ -70,21 +85,31 @@ export async function run() {
     });
   }
 
-  // ── GET /file-trees?type=skill ────────────────────────────────────────────
+  // ── GET /nodes?types=skill ────────────────────────────────────────────────
 
-  await step("GET /file-trees?type=skill — all created slugs present", async () => {
-    const list = await api<SkillVO[]>("GET", "/file-trees?type=skill");
-    const slugs = new Set(list.map((s) => s.node.slug));
+  await step("GET /nodes?types=skill — all created slugs present", async () => {
+    const list = await api<NodeVO[]>("GET", "/nodes?types=skill");
+    assert(
+      list.every((s) => s.type === "skill"),
+      "expected only skill nodes",
+    );
+    const slugs = new Set(list.map((s) => s.slug));
     for (const def of DEMO_SKILLS) {
-      assert(slugs.has(def.slug), `slug "${def.slug}" missing from GET /file-trees?type=skill`);
+      assert(slugs.has(def.slug), `slug "${def.slug}" missing from GET /nodes?types=skill`);
     }
+    // The reason this replaced `GET /file-trees`: no per-node file inventory.
+    assert(
+      list.every((s) => !("files" in s)),
+      "summary list must not hydrate file inventories",
+    );
   });
 
-  // ── GET /file-trees/{id} ─────────────────────────────────────────────────
+  // ── GET /nodes/{id} ──────────────────────────────────────────────────────
 
   if (created[0]) {
-    await step("GET /file-trees/{id} — get skill detail", async () => {
-      const skill = await api<SkillVO>("GET", `/file-trees/${created[0].node.id}?type=skill`);
+    await step("GET /nodes/{id} — get skill detail", async () => {
+      const skill = await api<SkillDetailVO>("GET", `/nodes/${created[0].node.id}?type=skill`);
+      assert(skill.type === "skill", `expected type=skill, got ${skill.type}`);
       assert(skill.node.id === created[0].node.id, "id mismatch");
       assert(skill.files.length >= 1, "expected files");
     });
@@ -201,8 +226,8 @@ export async function run() {
       assert(result.changeRequest.status === "merged", "expected merged");
     });
 
-    await step("GET /file-trees/{id} — version updated to 4.1.0", async () => {
-      const skill = await api<SkillVO>("GET", `/file-trees/${target.node.id}?type=skill`);
+    await step("GET /nodes/{id} — version updated to 4.1.0", async () => {
+      const skill = await api<SkillDetailVO>("GET", `/nodes/${target.node.id}?type=skill`);
       assert(skill.version === "4.1.0", `expected 4.1.0, got ${skill.version}`);
     });
   }
@@ -210,8 +235,8 @@ export async function run() {
   // ── Multi-skill: create + read ─────────────────────────────────────────────
 
   if (created[1]) {
-    await step(`GET /file-trees/${created[1].node.slug} — lookup second skill`, async () => {
-      const skill = await api<SkillVO>("GET", `/file-trees/${created[1].node.id}?type=skill`);
+    await step(`GET /nodes/${created[1].node.slug} — lookup second skill`, async () => {
+      const skill = await api<SkillDetailVO>("GET", `/nodes/${created[1].node.id}?type=skill`);
       assert(skill.node.slug === created[1].node.slug, "slug mismatch");
     });
   }

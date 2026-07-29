@@ -39,6 +39,7 @@ import { FormulaError } from "../formula";
 import { isRollupCompatible, rollupPreservesTargetUnit } from "../lookup/rollup";
 import { busabaseFieldValues } from "../schema";
 import { convertFieldValue } from "../utils/field-conversion";
+import { isPrimaryField, PRIMARY_FIELD_DELETE_MESSAGE } from "../utils/primary-field";
 import { baseNotFound } from "./errors";
 import { getBase } from "./queries";
 import { resolveRelationFieldOptions } from "./relation-options";
@@ -385,6 +386,9 @@ export const createDeleteFieldChangeRequest = async (
   }
   if (isSystemFieldType(field.type)) {
     throw new Error(`Cannot delete system field: ${field.slug}`);
+  }
+  if (isPrimaryField(base, field.id)) {
+    throw new ORPCError("BAD_REQUEST", { message: PRIMARY_FIELD_DELETE_MESSAGE });
   }
 
   const changeRequestId = id("crq");

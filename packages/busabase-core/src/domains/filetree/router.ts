@@ -1,42 +1,30 @@
 import { implement } from "@orpc/server";
 import { busabaseContract } from "busabase-contract/contract/busabase";
-import { airappFileTreeConfig } from "../airapp/handlers";
-import { driveFileTreeConfig } from "../drive/logic/config";
-import { skillFileTreeConfig } from "../skill/handlers";
 import {
   createFileTreeChangeRequest,
   createFileTreeNode,
-  getFileTreeNode,
   listFileTreeFiles,
   listFileTreeKinds,
-  listFileTreeNodes,
   readFileTreeFile,
-  registerFileTreeKind,
   resolveFileTreeKind,
 } from "./handlers";
-
-// The kinds served by `/file-trees`. Registered here rather than as an import
-// side effect in each kind module so the set is readable in one place.
-registerFileTreeKind(skillFileTreeConfig);
-registerFileTreeKind(driveFileTreeConfig);
-registerFileTreeKind(airappFileTreeConfig);
+// Registers skill/drive/airapp as file-tree kinds (side-effect import).
+import "./kinds";
 
 // File-tree domain oRPC handler slice; aggregated into the kernel router (router.ts).
+//
+// `list` and `get` are gone: `GET /file-trees` and `GET /file-trees/{nodeId}`
+// were folded into the unified Node surface (`nodes.list({ types })` /
+// `nodes.get`). The underlying `listFileTreeNodes` / `getFileTreeNode` logic is
+// unchanged and still called — by the Node detail dispatcher and by the kind
+// facades in domains/skill|drive|airapp.
 const os = implement(busabaseContract);
 
 export const fileTreeRouter = {
-  list: os.fileTrees.list.handler(async ({ input }) => {
-    const kinds = input.type ? [resolveKindByType(input.type)] : listFileTreeKinds();
-    const perKind = await Promise.all(kinds.map((config) => listFileTreeNodes(config)));
-    return perKind.flat();
-  }),
   create: os.fileTrees.create.handler(async ({ input }) => {
     const { type, ...rest } = input;
     return createFileTreeNode(resolveKindByType(type), rest);
   }),
-  get: os.fileTrees.get.handler(async ({ input }) =>
-    getFileTreeNode(await resolveFileTreeKind(input.nodeId, input.type), input.nodeId),
-  ),
   listFiles: os.fileTrees.listFiles.handler(async ({ input }) =>
     listFileTreeFiles(await resolveFileTreeKind(input.nodeId, input.type), input.nodeId),
   ),

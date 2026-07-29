@@ -383,23 +383,10 @@ export const readDocLines = async (
   return sliceDocLinesRange(splitDocLines(body), startLine, endLine);
 };
 
-export const listDocs = async (): Promise<DocVO[]> => {
-  await ensureReady();
-  const db = await getDb();
-  const nodes = await db
-    .select()
-    .from(busabaseNodes)
-    .where(
-      and(
-        eq(busabaseNodes.spaceId, getContextSpaceId()),
-        eq(busabaseNodes.type, "doc"),
-        isNull(busabaseNodes.archivedAt),
-        buildNodeVisibilityCondition(db),
-      ),
-    )
-    .orderBy(asc(busabaseNodes.position), asc(busabaseNodes.createdAt));
-  return Promise.all(nodes.map(toDocVO));
-};
+// `listDocs` is gone with `GET /docs`. It read EVERY Doc's body out of object
+// storage to answer "which Docs exist" — the N+1 the unified summary list
+// (`logic/nodes.ts`'s `listNodeSummaries`) exists to remove. `getDoc` below is
+// still the one place a Doc body is hydrated, one Doc at a time.
 
 export const updateDocBody = async (
   nodeIdOrSlug: string,

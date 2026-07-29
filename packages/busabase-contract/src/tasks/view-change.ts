@@ -21,14 +21,32 @@ export interface ViewChangeInput {
   patch?: unknown;
   message?: string;
   submittedBy?: string;
+  autoMerge?: boolean;
+  requireReview?: boolean;
 }
+
+/**
+ * `autoMerge` is tri-state — unset (permission-aware default), forced on, forced
+ * off — but a CLI boolean flag is presence-only, so `--auto-merge` alone could
+ * never express "forced off". Same two-flag shape as `node_create`.
+ */
+const mergeIntent = (input: ViewChangeInput): { autoMerge?: boolean } => {
+  if (input.requireReview) return { autoMerge: false };
+  if (input.autoMerge) return { autoMerge: true };
+  return {};
+};
 
 export const viewChangeTask: TaskDefinition<ViewChangeInput> = {
   name: "view_change_request",
   cliPath: ["views", "change-request"],
   summary: "Propose a Base view change (create / update / delete / restore)",
   guidance:
-    "Approval-first: proposes a ChangeRequest, it does not change the view directly. " +
+    "Review is permission-aware, decided server-side: the change merges immediately when your key " +
+    "has write access on the Base's node and lands as a pending ChangeRequest otherwise — check the " +
+    "response's `materialized` field to see which happened. Pass requireReview to always propose " +
+    "instead of merging. Views are structure, not content — when you are building starter structure " +
+    "(a Base plus the views that make it usable) let it merge so the workspace is not left half-built " +
+    "behind a review queue, exactly as you would for `node_create` and `POST /bases`. " +
     "`create` needs the BASE id; update / delete / restore need the VIEW id — the endpoint split " +
     "follows whichever id identifies the target, which this task handles for you.",
   annotations: { readOnly: false, destructive: false },
@@ -78,9 +96,21 @@ export const viewChangeTask: TaskDefinition<ViewChangeInput> = {
     },
     { name: "message", kind: "string", description: "Explanation for the reviewer." },
     { name: "submittedBy", kind: "string", description: "Producer label recorded on the change." },
+    {
+      name: "autoMerge",
+      kind: "boolean",
+      description:
+        "Skip review and apply the change immediately if you have write access. Not a permission override — a changeRequest-level key still gets a pending CR. Default is permission-aware: merge when you can, otherwise propose.",
+    },
+    {
+      name: "requireReview",
+      kind: "boolean",
+      description: "Always propose a pending ChangeRequest, even with write access.",
+    },
   ],
   examples: [
     'busabase-cli views change-request --action create --base-id bas_1 --name "Published" --type table',
+    'busabase-cli views change-request --action create --base-id bas_1 --name "Published" --require-review',
     "busabase-cli views change-request --action delete --view-id viw_1",
   ],
   execute: async (client: BusabaseTaskClient, input: ViewChangeInput) => {
@@ -91,6 +121,9 @@ export const viewChangeTask: TaskDefinition<ViewChangeInput> = {
     const meta = {
       ...(input.message ? { message: input.message } : {}),
       ...(input.submittedBy ? { submittedBy: input.submittedBy } : {}),
+      // Tri-state, like node_create's: omitted keeps the endpoint's
+      // permission-aware default, explicit true/false forces the branch.
+      ...mergeIntent(input),
     };
 
     if (input.action === "create") {

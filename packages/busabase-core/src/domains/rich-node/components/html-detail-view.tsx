@@ -1,7 +1,7 @@
 "use client";
 
 import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";
-import { parseHtmlDocument } from "busabase-contract/domains/rich-node/types";
+import { type HtmlDocument, parseHtmlDocument } from "busabase-contract/domains/rich-node/types";
 import type { NodeVO } from "busabase-contract/types";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "kui/tabs";
 import { CodeXml, Eye, FileCode2 } from "lucide-react";
@@ -9,7 +9,13 @@ import { useMemo, useState } from "react";
 import { useCoreI18n } from "../../../i18n";
 import { useReportLoadedNode } from "../../dashboard/hooks/use-report-loaded-node";
 import type { NodeDetailProps } from "../../dashboard/node-detail-registry";
-import { findNode, RichNodeNotFound, RichNodeShell, useNodeMetadataSave } from "./rich-node-shell";
+import {
+  findNode,
+  RichNodeNotFound,
+  RichNodeShell,
+  useNodeMetadataSave,
+  useServerDocumentSync,
+} from "./rich-node-shell";
 
 interface HtmlDetailViewProps {
   nodes?: NodeVO[];
@@ -28,6 +34,16 @@ export function HtmlDetailView({ nodes, orpc, slug, onNodeLoaded }: HtmlDetailVi
   );
   const [source, setSource] = useState(initialDocument.source);
   const { error, markDirty, save, status } = useNodeMetadataSave(orpc, node, "htmlDocument");
+  // `source` is seeded from the server exactly once (the `useState` initializer
+  // above), so an edit made elsewhere — another tab, an agent's OpenAPI write —
+  // stayed invisible in this textarea until a full page reload.
+  useServerDocumentSync({
+    apply: (document: HtmlDocument) => setSource(document.source),
+    getLocalDocument: () => ({ version: 1 as const, source }),
+    node,
+    serverDocument: initialDocument,
+    status,
+  });
 
   if (!node) return <RichNodeNotFound type="HTML" />;
 

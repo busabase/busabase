@@ -173,7 +173,7 @@ describe("dump domain — full demo-seed backup round trip", () => {
     // Doc bodies (object storage, not a dump table) for every `doc` node.
     for (const node of sourceTables.get("nodes") ?? []) {
       if (node.type !== "doc") continue;
-      const doc = await sourceClient.docs.get({ nodeId: node.id });
+      const doc = await sourceClient.nodes.get({ nodeId: node.id, type: "doc" });
       sourceDocBodies.set(node.id, doc?.body ?? "");
     }
 
@@ -327,7 +327,7 @@ describe("dump domain — full demo-seed backup round trip", () => {
     const targetClient = createRouterClient(busabaseRouter);
     expect(sourceDocBodies.size).toBeGreaterThan(0);
     for (const [nodeId, body] of sourceDocBodies) {
-      const restored = await targetClient.docs.get({ nodeId });
+      const restored = await targetClient.nodes.get({ nodeId, type: "doc" });
       expect(restored?.body).toBe(body);
     }
   });

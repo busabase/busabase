@@ -180,7 +180,14 @@ export const nodeCreateTask: TaskDefinition<NodeCreateInput> = {
       appliesWhen: { param: "type", values: ["skill", "drive", "airapp"] },
       kind: "json",
       description:
-        'Seed files for a Skill/Drive/AirApp: [{"path":"SKILL.md","content":"..."}]. Layered over the default scaffold unless mergeMode is "replace".',
+        'Seed files for a Skill/Drive/AirApp: [{"path":"SKILL.md","content":"..."}]. Layered over the default scaffold unless mergeMode is "replace" — a path you supply REPLACES the scaffold\'s file at that path. ' +
+        // Every AirApp run is `npm install` + `npm run dev` (both engines), so a package.json
+        // that overwrites the scaffold's without a `dev` script turns a working default into an
+        // app that dies on `Missing script: "dev"` before rendering anything. An agent writing
+        // this argument may never have read the airapp resource, so the constraint is restated
+        // where the mistake is actually made.
+        'For --type airapp the project MUST be runnable by `npm run dev`: give package.json a "dev" script running a plain Node server (`node server.js`, Hono or node:http). ' +
+        "A bundler dev server (Vite/webpack/Next) and any native-binary dependency CANNOT boot in the AirApp runtime, and browser files must need no build step.",
     },
     {
       name: "mergeMode",

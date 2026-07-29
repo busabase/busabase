@@ -686,6 +686,21 @@ export const dashboardJa: CoreI18nMessages = {
     baseNotFoundTitle: "ベースが見つかりません",
     baseNotFoundBody: "要求されたベースは存在しません。",
     baseInfo: "ベース情報",
+    recordTitle: "レコードタイトル",
+    recordTitleBaseTooltip:
+      "検索、リレーション、レコードページ、すべてのビューでレコードを識別するために使われます。テーブルビューでは常にこのフィールドが先頭に固定されます。",
+    recordTitleViewTooltip:
+      "このベースのレコードタイトルは常に表示され、先頭に固定されます。変更するにはベースデザインを開いてください。",
+    setAsRecordTitle: "レコードタイトルに設定",
+    setRecordTitleTitle: "レコードタイトルフィールドを設定しますか？",
+    setRecordTitleDescription:
+      "「{field}」をこのベース内のすべてのレコードのタイトルとして使用します。検索結果、リレーション、レコードページ、カードタイトルに反映されます。",
+    requestSetRecordTitle: "タイトル変更をリクエスト",
+    setRecordTitleNow: "今すぐタイトルを変更",
+    settingRecordTitle: "タイトルを変更中…",
+    recordTitleUpdated: "レコードタイトルフィールドを更新しました",
+    recordTitleRequestSubmitted: "レコードタイトル変更リクエストを送信しました",
+    setRecordTitleMessage: "レコードタイトルフィールドを {field} に設定",
     requestRename: "名前変更をリクエスト",
     renameNow: "今すぐ名前変更",
     renaming: "名前変更中...",
@@ -853,6 +868,7 @@ export const dashboardJa: CoreI18nMessages = {
     unknownField: "不明なフィールド",
     fieldOrderUnavailable: "この操作ではフィールド順序データを利用できません。",
     fieldOrder: "フィールド順序",
+    recordTitleChange: "レコードタイトル: {before} → {after}",
     movedCount: "{count} 件移動",
   },
   graph: {

@@ -130,10 +130,10 @@ describe("AirApp API — oRPC integration", () => {
     expect(proposal.primaryOperation?.operation).toBe("node_create");
 
     // Not yet visible via list/get — it hasn't been materialized.
-    const beforeMerge = await client.fileTrees.list({ type: "airapp" });
-    expect(beforeMerge.some((airapp) => airapp.node.slug === "review-first-airapp")).toBe(false);
+    const beforeMerge = await client.nodes.list({ types: ["airapp"] });
+    expect(beforeMerge.some((airapp) => airapp.slug === "review-first-airapp")).toBe(false);
     await expect(
-      client.fileTrees.get({ type: "airapp", nodeId: "review-first-airapp" }),
+      client.nodes.get({ nodeId: "review-first-airapp", type: "airapp" }),
     ).rejects.toThrow();
 
     const merged = await approveAndMerge(proposal.id);
@@ -141,12 +141,12 @@ describe("AirApp API — oRPC integration", () => {
     const newNodeId = String(Array.isArray(mergedNodeIds) ? mergedNodeIds[0] : "");
     expect(newNodeId).toMatch(/^nod/);
 
-    const afterMerge = await client.fileTrees.get({ type: "airapp", nodeId: newNodeId });
+    const afterMerge = await client.nodes.get({ nodeId: newNodeId, type: "airapp" });
     expect(afterMerge.node.slug).toBe("review-first-airapp");
     expect(afterMerge.files.map((file) => file.path).sort()).toEqual([...AIRAPP_SEED_PATHS].sort());
 
-    const listed = await client.fileTrees.list({ type: "airapp" });
-    expect(listed.some((airapp) => airapp.node.slug === "review-first-airapp")).toBe(true);
+    const listed = await client.nodes.list({ types: ["airapp"] });
+    expect(listed.some((airapp) => airapp.slug === "review-first-airapp")).toBe(true);
   });
 
   it("gets an AirApp by node id with its full file list, and 404s an unknown one", async () => {
@@ -157,15 +157,15 @@ describe("AirApp API — oRPC integration", () => {
       name: "Gettable AirApp",
     });
 
-    const byId = await client.fileTrees.get({ type: "airapp", nodeId: created.node.id });
+    const byId = await client.nodes.get({ nodeId: created.node.id, type: "airapp" });
     expect(byId.node.id).toBe(created.node.id);
     expect(byId.files.map((file) => file.path).sort()).toEqual([...AIRAPP_SEED_PATHS].sort());
 
-    const bySlug = await client.fileTrees.get({ type: "airapp", nodeId: "gettable-airapp" });
+    const bySlug = await client.nodes.get({ nodeId: "gettable-airapp", type: "airapp" });
     expect(bySlug.node.id).toBe(created.node.id);
 
-    await expect(client.fileTrees.get({ type: "airapp", nodeId: "pnd_missing" })).rejects.toThrow(
-      /AirApp not found/,
+    await expect(client.nodes.get({ nodeId: "pnd_missing", type: "airapp" })).rejects.toThrow(
+      /Node not found/,
     );
   });
 
@@ -190,12 +190,12 @@ describe("AirApp API — oRPC integration", () => {
     });
     await client.docs.create({ autoMerge: true, slug: "list-doc", name: "List Doc", body: "x\n" });
 
-    const airapps = await client.fileTrees.list({ type: "airapp" });
-    expect(airapps.every((airapp) => airapp.node.type === "airapp")).toBe(true);
-    expect(airapps.some((airapp) => airapp.node.slug === "list-airapp")).toBe(true);
-    expect(airapps.some((airapp) => airapp.node.slug === "list-drive")).toBe(false);
-    expect(airapps.some((airapp) => airapp.node.slug === "list-skill")).toBe(false);
-    expect(airapps.some((airapp) => airapp.node.slug === "list-doc")).toBe(false);
+    const airapps = await client.nodes.list({ types: ["airapp"] });
+    expect(airapps.every((airapp) => airapp.type === "airapp")).toBe(true);
+    expect(airapps.some((airapp) => airapp.slug === "list-airapp")).toBe(true);
+    expect(airapps.some((airapp) => airapp.slug === "list-drive")).toBe(false);
+    expect(airapps.some((airapp) => airapp.slug === "list-skill")).toBe(false);
+    expect(airapps.some((airapp) => airapp.slug === "list-doc")).toBe(false);
   });
 
   it("lists file metadata and reads full file content with utf8 encoding", async () => {
@@ -291,21 +291,21 @@ describe("AirApp API — oRPC integration", () => {
     );
 
     const listedFromA = await inSpace("space_airapp_a", () =>
-      client.fileTrees.list({ type: "airapp" }),
+      client.nodes.list({ types: ["airapp"] }),
     );
     const listedFromB = await inSpace("space_airapp_b", () =>
-      client.fileTrees.list({ type: "airapp" }),
+      client.nodes.list({ types: ["airapp"] }),
     );
-    expect(listedFromA.map((a) => a.node.slug)).toContain("space-a-airapp");
-    expect(listedFromA.map((a) => a.node.slug)).not.toContain("space-b-airapp");
-    expect(listedFromB.map((a) => a.node.slug)).toContain("space-b-airapp");
-    expect(listedFromB.map((a) => a.node.slug)).not.toContain("space-a-airapp");
+    expect(listedFromA.map((a) => a.slug)).toContain("space-a-airapp");
+    expect(listedFromA.map((a) => a.slug)).not.toContain("space-b-airapp");
+    expect(listedFromB.map((a) => a.slug)).toContain("space-b-airapp");
+    expect(listedFromB.map((a) => a.slug)).not.toContain("space-a-airapp");
 
     // A node id minted in space A is not reachable from space B either.
     await expect(
       inSpace("space_airapp_b", () =>
-        client.fileTrees.get({ type: "airapp", nodeId: createdInA.node.id }),
+        client.nodes.get({ nodeId: createdInA.node.id, type: "airapp" }),
       ),
-    ).rejects.toThrow(/AirApp not found/);
+    ).rejects.toThrow(/Node not found/);
   });
 });

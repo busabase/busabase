@@ -12,9 +12,14 @@ import {
   busabaseViews,
 } from "../../../db/schema";
 import { insertAuditEvent } from "../../../logic/audit";
-import { getChangeRequest } from "../../../logic/cr-lifecycle";
+import {
+  getChangeRequest,
+  mergeChangeRequest,
+  reviewChangeRequest,
+} from "../../../logic/cr-lifecycle";
 import { id, now } from "../../../logic/kernel";
 import { publishChangeRequestPendingReview } from "../../../logic/live-events";
+import { hasNodePermission, shouldAutoMerge } from "../../../logic/node-acl";
 import { ensureReady } from "../../../logic/seed";
 import {
   createViewInputSchema,
@@ -36,6 +41,46 @@ export {
 /** Caller-supplied viewId doesn't resolve (or isn't active) — a genuine "not found" client error. */
 const viewNotFound = (viewId: string) =>
   new ORPCError("NOT_FOUND", { message: `View not found: ${viewId}` });
+
+/**
+ * Shared tail for all four view proposals: read the change request back and,
+ * when the actor may auto-merge, approve + merge it in the same call so the
+ * caller gets the materialized View instead of having to poll/approve/merge
+ * itself in three separate calls.
+ *
+ * Node-scoped on purpose (not `reviewChangeRequest`/`mergeChangeRequest`'s own
+ * internal workspace-level check), consistent with createBase / createDoc /
+ * createFileNode / createFileTreeNode / the record endpoints: an actor
+ * restricted by node ACL still can't auto-merge onto a Base they don't hold
+ * node-level `write` on.
+ */
+const finalizeViewChangeRequest = async (args: {
+  changeRequestId: string;
+  baseNodeId: string;
+  requestedAutoMerge: boolean | undefined;
+  submittedBy: string;
+  label: string;
+}) => {
+  const changeRequest = await getChangeRequest(args.changeRequestId);
+  if (!changeRequest) {
+    throw new Error(`Failed to create view ${args.label} change request`);
+  }
+
+  const autoMerge = shouldAutoMerge(
+    args.requestedAutoMerge,
+    await hasNodePermission(args.baseNodeId, "write", args.submittedBy),
+  );
+  if (!autoMerge) {
+    return { ...changeRequest, materialized: false as const };
+  }
+
+  await reviewChangeRequest(args.changeRequestId, { verdict: "approved" });
+  const merged = await mergeChangeRequest(args.changeRequestId);
+  if (!merged.view) {
+    throw new Error(`Auto-merge did not produce a view (${args.label})`);
+  }
+  return { ...merged.view, materialized: true as const };
+};
 
 export const createViewChangeRequest = async (
   baseId: string,
@@ -135,11 +180,13 @@ export const createViewChangeRequest = async (
     submittedBy: resolveActorId(parsed.submittedBy),
   });
 
-  const changeRequest = await getChangeRequest(changeRequestId);
-  if (!changeRequest) {
-    throw new Error("Failed to create view change request");
-  }
-  return changeRequest;
+  return finalizeViewChangeRequest({
+    changeRequestId,
+    baseNodeId: base.nodeId,
+    requestedAutoMerge: parsed.autoMerge,
+    submittedBy: parsed.submittedBy,
+    label: "create",
+  });
 };
 
 export const createUpdateViewChangeRequest = async (
@@ -237,11 +284,13 @@ export const createUpdateViewChangeRequest = async (
     submittedBy: resolveActorId(parsed.submittedBy),
   });
 
-  const changeRequest = await getChangeRequest(changeRequestId);
-  if (!changeRequest) {
-    throw new Error("Failed to create view update change request");
-  }
-  return changeRequest;
+  return finalizeViewChangeRequest({
+    changeRequestId,
+    baseNodeId: base.nodeId,
+    requestedAutoMerge: parsed.autoMerge,
+    submittedBy: parsed.submittedBy,
+    label: "update",
+  });
 };
 
 export const createDeleteViewChangeRequest = async (
@@ -337,11 +386,13 @@ export const createDeleteViewChangeRequest = async (
     submittedBy: resolveActorId(parsed.submittedBy),
   });
 
-  const changeRequest = await getChangeRequest(changeRequestId);
-  if (!changeRequest) {
-    throw new Error("Failed to create view delete change request");
-  }
-  return changeRequest;
+  return finalizeViewChangeRequest({
+    changeRequestId,
+    baseNodeId: base.nodeId,
+    requestedAutoMerge: parsed.autoMerge,
+    submittedBy: parsed.submittedBy,
+    label: "delete",
+  });
 };
 
 export const createRestoreViewChangeRequest = async (
@@ -440,9 +491,11 @@ export const createRestoreViewChangeRequest = async (
     submittedBy: resolveActorId(parsed.submittedBy),
   });
 
-  const changeRequest = await getChangeRequest(changeRequestId);
-  if (!changeRequest) {
-    throw new Error("Failed to create view restore change request");
-  }
-  return changeRequest;
+  return finalizeViewChangeRequest({
+    changeRequestId,
+    baseNodeId: base.nodeId,
+    requestedAutoMerge: parsed.autoMerge,
+    submittedBy: parsed.submittedBy,
+    label: "restore",
+  });
 };

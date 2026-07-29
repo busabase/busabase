@@ -476,7 +476,12 @@ export async function recomputeSpaceNodeAcl(
   const wantKey = (
     nodeId: string,
     row: { principalType: string; principalId: string; sourceNodeId: string },
-  ) => `${nodeId} ${row.principalType} ${row.principalId} ${row.sourceNodeId}`;
+    // `\0` (escaped, not a raw NUL byte in this file): a separator that cannot
+    // appear inside any id, so the composite key is collision-free. Written as an
+    // escape because a literal NUL makes every byte-oriented tool - grep, git
+    // grep, file(1), review diffs - classify this whole source file as binary and
+    // silently skip it.
+  ) => `${nodeId}\0${row.principalType}\0${row.principalId}\0${row.sourceNodeId}`;
 
   // Desired inherited rows: walk each direct grant's source subtree.
   const desired = new Map<string, { nodeId: string; source: (typeof principalRows)[number] }>();

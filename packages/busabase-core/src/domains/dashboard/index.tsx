@@ -39,6 +39,7 @@ import { toast } from "sonner";
 import { useLocation, useSearch } from "wouter";
 import { CoreI18nProvider, fmt, useCoreI18n } from "../../i18n";
 import { AirAppKeepAliveHost } from "../airapp/components/AirAppKeepAliveHost";
+import { getPrimaryField } from "../base/utils/primary-field";
 import { ArchivedBasesView } from "./components/archived-bases";
 import { AssetsView } from "./components/assets";
 import { BaseDetailView, BaseSetupView, BaseTopbarActions } from "./components/base-views";
@@ -161,7 +162,7 @@ interface BusabaseDashboardProps {
    * through a public share link, so the dashboard must confine itself to the
    * ONE shared node it was given and fire only the reads on busabase-core's
    * anonymous allowlist (`bases.get`, `bases.listViews`, `records.list`,
-   * `records.get`, `docs.get`, `folders.get`, `files.get`).
+   * `records.get`, `nodes.get`).
    *
    * Every space-wide query below is switched off in that mode. That is a
    * correctness fix, not a security one — the server refuses them either way
@@ -1422,6 +1423,47 @@ function BusabaseDashboardContent({
     ],
   );
 
+  const submitSetPrimaryField = useCallback(
+    async (base: BaseVO, fieldId: string, options?: { mergeImmediately?: boolean }) => {
+      setError(null);
+      const field = base.fields.find((candidate) => candidate.id === fieldId);
+      if (!field || getPrimaryField(base)?.id === fieldId) return;
+      const fieldIds = [
+        fieldId,
+        ...base.fields
+          .slice()
+          .sort((left, right) => left.position - right.position)
+          .filter((candidate) => candidate.id !== fieldId)
+          .map((candidate) => candidate.id),
+      ];
+      const changeRequest = await client.createReorderFieldsChangeRequest(base.id, {
+        fieldIds,
+        message: fmt(messages.base.setRecordTitleMessage, {
+          field: iStringParse(field.name),
+        }),
+        submittedBy: "local-editor",
+      });
+      if (options?.mergeImmediately) {
+        await approveAndMergeChangeRequest(changeRequest.id);
+        await refresh();
+        toast.success(messages.base.recordTitleUpdated);
+        return;
+      }
+      await refresh();
+      toast.success(messages.base.recordTitleRequestSubmitted);
+      setLocation(`/inbox/${changeRequest.id}`);
+    },
+    [
+      approveAndMergeChangeRequest,
+      client,
+      messages.base.recordTitleRequestSubmitted,
+      messages.base.recordTitleUpdated,
+      messages.base.setRecordTitleMessage,
+      refresh,
+      setLocation,
+    ],
+  );
+
   const submitRenameBase = useCallback(
     async (
       base: BaseVO,
@@ -1914,6 +1956,7 @@ function BusabaseDashboardContent({
           onCreateField={submitCreateBaseField}
           onRenameBase={submitRenameBase}
           onRestoreField={submitRestoreField}
+          onSetPrimaryField={submitSetPrimaryField}
           onUpdateFieldName={submitUpdateFieldName}
         />
       );
@@ -2070,6 +2113,7 @@ function BusabaseDashboardContent({
     submitPurgeNode,
     submitPurgeBase,
     submitRestoreField,
+    submitSetPrimaryField,
     submitRestoreView,
     submitRestoreRecord,
     submitMoveRecord,

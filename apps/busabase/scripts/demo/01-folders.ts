@@ -1,6 +1,12 @@
 /**
- * 01-folders: GET /folders + GET /nodes
+ * 01-folders: GET /nodes (tree) + GET /nodes?types=folder (flat summaries)
  * Verifies the seeded folder tree is visible via the API.
+ *
+ * `GET /folders` and `GET /folders/{nodeId}` were retired by the unified Node
+ * surface: list folders with `GET /nodes?types=folder` (a FLAT list of
+ * lightweight `NodeVO` summaries — the retired list hydrated every folder's
+ * children) and read one folder's detail, children included, with
+ * `GET /nodes/{nodeId}` (`type: "folder"` variant of `NodeDetailVO`).
  */
 
 import { api, approveMerge, assert, BASE, makeRunner } from "./_client";
@@ -15,7 +21,9 @@ interface NodeVO {
   children?: NodeVO[];
 }
 
-interface FolderVO {
+/** `GET /nodes/{nodeId}` for a folder node. */
+interface FolderDetailVO {
+  type: "folder";
   node: NodeVO;
   children: NodeVO[];
 }
@@ -25,7 +33,7 @@ export async function run() {
   console.log(`\n📁  Folders  →  ${BASE}\n`);
 
   let nodes: NodeVO[] = [];
-  let folders: FolderVO[] = [];
+  let folders: NodeVO[] = [];
 
   await step("GET /nodes returns a node list", async () => {
     nodes = await api<NodeVO[]>("GET", "/nodes");
@@ -38,10 +46,19 @@ export async function run() {
     assert(!!root, "root folder not found in /nodes");
   });
 
-  await step("GET /folders returns folder list", async () => {
-    folders = await api<FolderVO[]>("GET", "/folders");
+  await step("GET /nodes?types=folder returns a flat folder summary list", async () => {
+    folders = await api<NodeVO[]>("GET", "/nodes?types=folder");
     assert(Array.isArray(folders), "expected array");
     assert(folders.length > 0, `expected folders, got ${folders.length}`);
+    assert(
+      folders.every((f) => f.type === "folder"),
+      "expected only folder nodes",
+    );
+    // The whole point of the summary projection: no hydrated children.
+    assert(
+      folders.every((f) => (f.children ?? []).length === 0),
+      "summary list must not hydrate folder children",
+    );
   });
 
   // Self-seed: ensure each demo category folder exists. Older demo instances were
@@ -52,7 +69,7 @@ export async function run() {
     if (!root) return;
     let created = 0;
     for (const def of STANDARD_DEMO_FOLDERS) {
-      if (folders.some((f) => f.node.slug === def.slug)) continue;
+      if (folders.some((f) => f.slug === def.slug)) continue;
       const cr = await api<{ id: string }>("POST", "/nodes/change-requests", {
         message: `demo: ensure folder ${def.slug}`,
         submittedBy: "demo-script",
@@ -71,22 +88,23 @@ export async function run() {
       created++;
     }
     // Refresh so the assertions below see any newly-created folders.
-    folders = await api<FolderVO[]>("GET", "/folders");
+    folders = await api<NodeVO[]>("GET", "/nodes?types=folder");
     process.stdout.write(`     info: created ${created} missing folder(s)\n`);
   });
 
   // Verify each DEMO_FOLDER slug appears (seeded by store.ts — same data source)
   for (const def of DEMO_FOLDERS) {
-    await step(`GET /folders — seeded folder "${def.name}" present`, async () => {
-      const found = folders.find((f) => f.node.slug === def.slug);
+    await step(`GET /nodes?types=folder — seeded folder "${def.name}" present`, async () => {
+      const found = folders.find((f) => f.slug === def.slug);
       assert(!!found, `folder slug "${def.slug}" not found`);
     });
   }
 
-  await step("GET /folders/{nodeId} — Content folder has children", async () => {
-    const contentFolder = folders.find((f) => f.node.slug === "content");
+  await step("GET /nodes/{nodeId} — Content folder has children", async () => {
+    const contentFolder = folders.find((f) => f.slug === "content");
     if (!contentFolder) return; // skip if not seeded yet
-    const detail = await api<FolderVO>("GET", `/folders/${contentFolder.node.id}`);
+    const detail = await api<FolderDetailVO>("GET", `/nodes/${contentFolder.id}`);
+    assert(detail.type === "folder", `expected type=folder, got ${detail.type}`);
     assert(detail.node.slug === "content", "slug mismatch");
     assert(Array.isArray(detail.children), "children must be array");
   });

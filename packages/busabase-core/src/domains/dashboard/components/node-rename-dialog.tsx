@@ -43,8 +43,8 @@ export function NodeRenameDialog({
   nodeName: string;
   /**
    * The node's route slug (e.g. `live-race-folder`), if the caller has it.
-   * Every detail-page query (`folders.get`/`docs.get`/`files.get`/
-   * `skills.get`/`drives.get`/`airapp.get`) is keyed by the ROUTE SLUG, not
+   * Every detail-page query (`nodes.get`, once per detail view) is keyed by
+   * the ROUTE SLUG, not
    * the database node id — despite the input field literally being named
    * `nodeId` in each of those queries' `input: { nodeId: slug }` call sites
    * (`node-detail-views.tsx`/`AirAppDetailView.tsx`). This dialog's own
@@ -74,9 +74,9 @@ export function NodeRenameDialog({
   // Invalidates BOTH the sidebar's whole-tree query (`nodes.list`, which
   // carries no `nodeId`/`slug` in its own key — it's the one query every
   // rename MUST refresh regardless) AND every detail-page query that happens
-  // to be keyed by this node's id OR slug — `folders.get`/`docs.get`/
-  // `files.get`/`skills.get`/`drives.get`/`airapp.get`, one per node type,
-  // each living in its own domain and each shaped differently. A generic
+  // to be keyed by this node's id OR slug — every detail view now calls the
+  // one `nodes.get` route, but each passes its own `{ nodeId, type }` input, so
+  // the cache still holds a separate key per view. A generic
   // predicate over every cached query key covers all of them in one place
   // without this dialog needing to know which query each caller happens to
   // be reading from (or growing an `onRenamed` per-caller wiring requirement

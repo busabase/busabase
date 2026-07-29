@@ -104,5 +104,8 @@ describe("operation diff field reorder model", () => {
     expect(model.afterIds).toEqual(["fld_slug", "fld_title", "fld_body"]);
     expect([...model.movedIds].sort()).toEqual(["fld_slug", "fld_title"]);
     expect(model.fieldsById.get("fld_slug")?.slug).toBe("slug");
+    expect(model.beforePrimaryId).toBe("fld_title");
+    expect(model.afterPrimaryId).toBe("fld_slug");
+    expect(model.primaryChanged).toBe(true);
   });
 });

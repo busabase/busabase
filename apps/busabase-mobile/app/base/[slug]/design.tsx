@@ -141,12 +141,17 @@ function BaseDesignContent() {
       if (!buda || !base) throw new Error("Not ready");
       const name = viewName.trim();
       if (!name) throw new Error("View name is required.");
+      // Explicit `autoMerge: false`: this screen routes to the change-request
+      // detail on success, so it must always queue a pending CR regardless of
+      // the actor's own write access — same reasoning as the web dashboard's
+      // view/record submit handlers.
       return buda.client.views.changeRequest({
         operation: "create",
         baseId: base.id,
         name,
         slug: toSlug(name),
         submittedBy: "mobile-editor",
+        autoMerge: false,
       });
     },
     onSuccess: (changeRequest) => {
@@ -163,6 +168,7 @@ function BaseDesignContent() {
         operation: "delete",
         viewId: view.id,
         submittedBy: "mobile-editor",
+        autoMerge: false,
       });
     },
     onSuccess: (changeRequest) => {

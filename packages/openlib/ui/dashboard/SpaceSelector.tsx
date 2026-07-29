@@ -14,7 +14,9 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "kui/to
 import { cn } from "kui/utils";
 import {
   Check,
+  ChevronDown,
   ChevronsUpDown,
+  ChevronUp,
   Cloud,
   Focus,
   Monitor,
@@ -123,7 +125,7 @@ export interface SpaceSelectorProps {
   compact?: boolean;
   /** App logo image URL to use instead of Lucide icon */
   appLogo?: string;
-  /** Optional workspace-level actions rendered before the spaces list. */
+  /** Optional secondary workspace actions rendered after the primary Space actions. */
   extraMenuItems?: React.ReactNode;
 }
 
@@ -161,9 +163,47 @@ export function SpaceSelector({
 
   // Control dropdown open state
   const [isOpen, setIsOpen] = React.useState(false);
+  const [scrollRegion, setScrollRegion] = React.useState<HTMLDivElement | null>(null);
+  const scrollContentRef = React.useRef<HTMLDivElement>(null);
+  const activeSpaceItemRef = React.useRef<HTMLDivElement>(null);
+  const [canScrollUp, setCanScrollUp] = React.useState(false);
+  const [canScrollDown, setCanScrollDown] = React.useState(false);
 
   const currentSpace = activeSpace || internalActiveSpace;
   const logoSrc = currentSpace?.logo || appLogo;
+
+  const updateScrollAffordances = React.useCallback(() => {
+    if (!scrollRegion) return;
+
+    const overflow = scrollRegion.scrollHeight - scrollRegion.clientHeight;
+    setCanScrollUp(overflow > 1 && scrollRegion.scrollTop > 1);
+    setCanScrollDown(overflow > 1 && scrollRegion.scrollTop < overflow - 1);
+  }, [scrollRegion]);
+
+  React.useLayoutEffect(() => {
+    if (!isOpen) return;
+
+    if (!scrollRegion) return;
+
+    const frame = window.requestAnimationFrame(() => {
+      activeSpaceItemRef.current?.scrollIntoView?.({ block: "nearest" });
+      updateScrollAffordances();
+    });
+    const resizeObserver =
+      typeof ResizeObserver === "undefined"
+        ? undefined
+        : new ResizeObserver(updateScrollAffordances);
+
+    resizeObserver?.observe(scrollRegion);
+    if (scrollContentRef.current) resizeObserver?.observe(scrollContentRef.current);
+    window.addEventListener("resize", updateScrollAffordances);
+
+    return () => {
+      window.cancelAnimationFrame(frame);
+      resizeObserver?.disconnect();
+      window.removeEventListener("resize", updateScrollAffordances);
+    };
+  }, [isOpen, scrollRegion, updateScrollAffordances]);
 
   const handleSpaceChange = (space: (typeof spaces)[0]) => {
     setInternalActiveSpace(space);
@@ -264,7 +304,7 @@ export function SpaceSelector({
             </SidebarMenuButton>
           </DropdownMenuTrigger>
           <DropdownMenuContent
-            className="flex max-h-[min(32rem,var(--radix-dropdown-menu-content-available-height))] w-96 min-w-96 max-w-96 flex-col overflow-hidden rounded-lg p-0"
+            className="flex max-h-[min(40rem,var(--radix-dropdown-menu-content-available-height))] w-96 min-w-96 max-w-96 flex-col overflow-hidden rounded-lg p-0"
             align="start"
             side={isMobile ? "bottom" : "right"}
             sideOffset={4}
@@ -346,66 +386,96 @@ export function SpaceSelector({
               )}
             </div>
 
-            {extraMenuItems && (
-              <>
-                <DropdownMenuSeparator className="my-0 shrink-0" />
-                <div className="shrink-0 p-1">{extraMenuItems}</div>
-              </>
-            )}
-
             <DropdownMenuSeparator className="my-0 shrink-0" />
 
-            {/* Spaces List */}
-            <div className="min-h-0 flex-1 overscroll-contain overflow-y-auto p-1">
-              <DropdownMenuLabel className="px-2 py-1.5 text-muted-foreground text-xs">
-                {labels.spaces}
-              </DropdownMenuLabel>
-              {spaces.map((space) => {
-                const isActive = space.id === currentSpace.id;
-                return (
-                  <DropdownMenuItem
-                    key={space.id || space.name}
-                    onClick={() => handleSpaceChange(space)}
-                    className={cn(
-                      "min-w-0 w-full cursor-pointer items-center gap-2 p-2",
-                      isRemoteSpaceOffline(space) && "opacity-60 grayscale",
-                    )}
-                  >
-                    <AvatarLogo src={space.logo} fallback={space.name[0]} size="xs" />
-                    <div className="flex min-w-0 flex-1 items-center gap-2">
-                      <span
-                        className="flex min-w-0 items-center gap-1.5 truncate"
-                        title={space.name}
-                      >
-                        <span className="truncate">{space.name}</span>
-                        <SpaceTypeBadge space={space} show={hasRemoteSpace} />
-                      </span>
-                      <span
-                        className={`inline-flex shrink-0 rounded-md px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wide ${getPlanBadgeStyle(space.plan ?? "free")}`}
-                      >
-                        {space.plan ?? "Free"}
-                      </span>
-                    </div>
-                    {isActive && <Check className="size-4 shrink-0 text-muted-foreground" />}
-                  </DropdownMenuItem>
-                );
-              })}
-            </div>
-
-            {/* Add Space */}
-            {onAddSpace && (
-              <>
-                <DropdownMenuSeparator className="my-0 shrink-0" />
-                <div className="shrink-0 p-1">
-                  <DropdownMenuItem className="cursor-pointer gap-2 p-2" onClick={handleAddSpace}>
-                    <div className="flex size-6 items-center justify-center rounded-md border bg-background">
-                      <Plus className="size-4" />
-                    </div>
-                    <span className="text-muted-foreground">{labels.addSpace}</span>
-                  </DropdownMenuItem>
+            {/* Scrollable primary actions and workspace destinations */}
+            <div className="relative flex min-h-0 flex-1 overflow-hidden">
+              {canScrollUp && (
+                <div
+                  aria-hidden="true"
+                  data-space-scroll-affordance="top"
+                  className="pointer-events-none absolute inset-x-0 top-0 z-10 flex h-8 items-start justify-center bg-popover/90 pt-0.5 shadow-sm"
+                >
+                  <ChevronUp className="size-4 text-muted-foreground" />
                 </div>
-              </>
-            )}
+              )}
+              <div
+                ref={setScrollRegion}
+                data-space-scroll-region="true"
+                onScroll={updateScrollAffordances}
+                className="min-h-0 flex-1 overscroll-contain overflow-y-auto p-1 [scrollbar-gutter:stable]"
+              >
+                <div ref={scrollContentRef}>
+                  <DropdownMenuLabel className="px-2 py-1.5 text-muted-foreground text-xs">
+                    {labels.spaces} · {spaces.length}
+                  </DropdownMenuLabel>
+                  {spaces.map((space) => {
+                    const isActive = space.id === currentSpace.id;
+                    return (
+                      <DropdownMenuItem
+                        ref={isActive ? activeSpaceItemRef : undefined}
+                        key={space.id || space.name}
+                        onClick={() => handleSpaceChange(space)}
+                        className={cn(
+                          "min-w-0 w-full cursor-pointer items-center gap-2 p-2",
+                          isRemoteSpaceOffline(space) && "opacity-60 grayscale",
+                        )}
+                      >
+                        <AvatarLogo src={space.logo} fallback={space.name[0]} size="xs" />
+                        <div className="flex min-w-0 flex-1 items-center gap-2">
+                          <span
+                            className="flex min-w-0 items-center gap-1.5 truncate"
+                            title={space.name}
+                          >
+                            <span className="truncate">{space.name}</span>
+                            <SpaceTypeBadge space={space} show={hasRemoteSpace} />
+                          </span>
+                          <span
+                            className={`inline-flex shrink-0 rounded-md px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wide ${getPlanBadgeStyle(space.plan ?? "free")}`}
+                          >
+                            {space.plan ?? "Free"}
+                          </span>
+                        </div>
+                        {isActive && <Check className="size-4 shrink-0 text-muted-foreground" />}
+                      </DropdownMenuItem>
+                    );
+                  })}
+
+                  {onAddSpace && (
+                    <>
+                      <DropdownMenuSeparator className="my-0" />
+                      <div className="p-1">
+                        <DropdownMenuItem
+                          className="cursor-pointer gap-2 p-2"
+                          onClick={handleAddSpace}
+                        >
+                          <div className="flex size-6 items-center justify-center rounded-md border bg-background">
+                            <Plus className="size-4" />
+                          </div>
+                          <span className="text-muted-foreground">{labels.addSpace}</span>
+                        </DropdownMenuItem>
+                      </div>
+                    </>
+                  )}
+
+                  {extraMenuItems && (
+                    <>
+                      <DropdownMenuSeparator className="my-0" />
+                      <div className="p-1">{extraMenuItems}</div>
+                    </>
+                  )}
+                </div>
+              </div>
+              {canScrollDown && (
+                <div
+                  aria-hidden="true"
+                  data-space-scroll-affordance="bottom"
+                  className="pointer-events-none absolute inset-x-0 bottom-0 z-10 flex h-8 items-end justify-center bg-popover/90 pb-0.5 shadow-sm"
+                >
+                  <ChevronDown className="size-4 text-muted-foreground" />
+                </div>
+              )}
+            </div>
           </DropdownMenuContent>
         </DropdownMenu>
       </SidebarMenuItem>

@@ -75,6 +75,43 @@ export const publishChangeRequestPendingReview = async (
   }
 };
 
+/**
+ * Fire after a node's metadata is written directly — `updateNodeMetadata`, the
+ * one node write that bypasses the change-request flow entirely (agents and the
+ * SDK calling `PATCH /api/v1/nodes/{nodeId}/metadata`, and every rich-node
+ * editor's Save button). Without this, such a write produced NO realtime signal
+ * at all: other tabs kept rendering the previous whiteboard/workflow/HTML
+ * document until their next window-focus refetch or a full page reload.
+ *
+ * `nodeIds` carrying the touched node is what makes `use-live-sync.ts`
+ * invalidate the node-tree queries; `changeRequestId` is null because there is
+ * no change request behind this event.
+ */
+export const publishNodeMetadataUpdated = async (args: {
+  spaceId: string;
+  nodeId: string;
+  actorId: string;
+  baseId: string | null;
+}): Promise<void> => {
+  try {
+    await publishBusabaseLiveEvent({
+      kind: "node.metadata_updated",
+      spaceId: args.spaceId,
+      actorId: args.actorId,
+      changeRequestId: null,
+      baseId: args.baseId,
+      nodeIds: [args.nodeId],
+      recordIds: [],
+      viewIds: [],
+      operationCount: 0,
+    });
+  } catch {
+    // Best-effort, exactly like `publishChangeRequestPendingReview` above: the
+    // metadata write has already committed, and a Redis hiccup (cloud) or a
+    // throwing subscriber (local) must never turn a successful save into an error.
+  }
+};
+
 export async function* subscribeBusabaseLiveEvents(
   spaceId: string,
   signal?: AbortSignal,

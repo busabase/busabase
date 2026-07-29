@@ -9,13 +9,14 @@ import type {
   ViewVO,
 } from "busabase-contract/types";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "kui/dialog";
-import { Pencil, Plus, RotateCcw } from "lucide-react";
+import { Pencil, Plus, RotateCcw, Star } from "lucide-react";
 import { type iString, iStringIsEmpty, iStringParse, iStringTrim } from "openlib/i18n/i-string";
 import { SPALink as Link } from "openlib/ui/dashboard";
 import { useRef, useState } from "react";
 import { useSearch } from "wouter";
 import { fmt, useCoreI18n, useIString } from "../../../i18n";
 import { isRollupCompatible, LOOKUP_ROLLUPS } from "../../base/lookup/rollup";
+import { getPrimaryField } from "../../base/utils/primary-field";
 import { isDerivedFieldSlug } from "../helpers/change-request";
 import { createDefaultFieldOptions } from "../helpers/field";
 import { fieldTypeOptions } from "../helpers/field-type-options";
@@ -34,6 +35,7 @@ import { IStringNameInput } from "./i-string-input";
 import { NodeActionsMenu } from "./node-actions-menu";
 import { NodePinButton, nodeSidePanelTabId } from "./node-pin-button";
 import { EmptyState, PropertyRow, SidebarPanel } from "./primitives";
+import { RecordTitleBadge } from "./record-title-badge";
 import { NodeDetailSkeleton } from "./skeletons";
 import { SplitSubmitButton } from "./split-submit-button";
 
@@ -148,6 +150,7 @@ export function BaseSetupView({
   onCreateField,
   onRenameBase,
   onRestoreField,
+  onSetPrimaryField,
   onUpdateFieldName,
 }: {
   base: BaseVO | null;
@@ -166,6 +169,11 @@ export function BaseSetupView({
     options?: { mergeImmediately?: boolean },
   ) => Promise<void>;
   onRestoreField?: (base: BaseVO, fieldId: string) => Promise<void>;
+  onSetPrimaryField?: (
+    base: BaseVO,
+    fieldId: string,
+    options?: { mergeImmediately?: boolean },
+  ) => Promise<void>;
   onUpdateFieldName?: (
     base: BaseVO,
     fieldId: string,
@@ -229,6 +237,9 @@ export function BaseSetupView({
   const [editingFieldName, setEditingFieldName] = useState<iString>("");
   const [isFieldRenameSaving, setIsFieldRenameSaving] = useState(false);
   const [fieldRenameError, setFieldRenameError] = useState<string | null>(null);
+  const [recordTitleFieldId, setRecordTitleFieldId] = useState<string | null>(null);
+  const [isRecordTitleSaving, setIsRecordTitleSaving] = useState(false);
+  const [recordTitleError, setRecordTitleError] = useState<string | null>(null);
 
   if (!base) {
     return (
@@ -384,7 +395,23 @@ export function BaseSetupView({
     }
   };
 
+  const submitRecordTitle = async (fieldId: string, options?: { mergeImmediately?: boolean }) => {
+    if (!onSetPrimaryField) return;
+    setIsRecordTitleSaving(true);
+    setRecordTitleError(null);
+    try {
+      await onSetPrimaryField(base, fieldId, options);
+      setRecordTitleFieldId(null);
+    } catch (error) {
+      setRecordTitleError(error instanceof Error ? error.message : messages.shell.operationFailed);
+    } finally {
+      setIsRecordTitleSaving(false);
+    }
+  };
+
   const editingField = base.fields.find((field) => field.id === editingFieldId) ?? null;
+  const primaryField = getPrimaryField(base);
+  const recordTitleField = base.fields.find((field) => field.id === recordTitleFieldId) ?? null;
 
   return (
     <div
@@ -459,7 +486,7 @@ export function BaseSetupView({
                   </button>
                 </div>
               </div>
-              <div className="grid grid-cols-[minmax(0,1fr)_120px_84px_64px] gap-3 border-border/50 border-b px-2 py-2 text-muted-foreground text-xs">
+              <div className="hidden grid-cols-[minmax(0,1fr)_120px_84px_64px] gap-3 border-border/50 border-b px-2 py-2 text-muted-foreground text-xs sm:grid">
                 <div>{messages.common.name}</div>
                 <div>{messages.base.type}</div>
                 <div>{messages.base.required}</div>
@@ -467,22 +494,35 @@ export function BaseSetupView({
               </div>
               {base.fields.map((field) => (
                 <div className="border-border/40 border-b" key={field.id}>
-                  <div className="group grid min-h-12 grid-cols-[minmax(0,1fr)_120px_84px_64px] items-center gap-3 rounded-md px-2 py-2 text-sm transition-colors hover:bg-muted/35">
+                  <div className="group grid min-h-12 grid-cols-1 items-center gap-3 rounded-md px-2 py-2 text-sm transition-colors hover:bg-muted/35 sm:grid-cols-[minmax(0,1fr)_120px_84px_64px]">
                     <div className="flex min-w-0 items-center gap-1.5">
                       <div className="min-w-0">
-                        <div className="truncate font-medium">{resolveIString(field.name)}</div>
+                        <div className="flex min-w-0 items-center gap-2">
+                          <div className="truncate font-medium">{resolveIString(field.name)}</div>
+                          {field.id === primaryField?.id ? (
+                            <RecordTitleBadge
+                              testId={`record-title-${field.id}`}
+                              tooltip={messages.base.recordTitleBaseTooltip}
+                            />
+                          ) : null}
+                        </div>
                         {isDerivedFieldSlug(resolveIString(field.name), field.slug) ? null : (
                           <div className="mt-0.5 truncate font-mono text-muted-foreground text-xs">
                             {field.slug}
                           </div>
                         )}
+                        <div className="mt-1 text-muted-foreground text-xs sm:hidden">
+                          {messages.fieldTypes[field.type]} ·{" "}
+                          {field.required ? messages.base.required : "-"} · {messages.base.order}{" "}
+                          {field.position}
+                        </div>
                       </div>
                       {onUpdateFieldName ? (
                         <button
                           aria-label={fmt(messages.base.renameFieldAria, {
                             name: resolveIString(field.name),
                           })}
-                          className="shrink-0 rounded p-1 text-muted-foreground opacity-0 transition-opacity hover:text-foreground focus:opacity-100 group-hover:opacity-100"
+                          className="shrink-0 rounded p-1 text-muted-foreground opacity-100 transition-opacity hover:text-foreground sm:opacity-0 sm:focus:opacity-100 sm:group-hover:opacity-100"
                           onClick={() => {
                             setEditingFieldId(field.id);
                             setEditingFieldName(field.name);
@@ -494,20 +534,102 @@ export function BaseSetupView({
                           <Pencil size={12} />
                         </button>
                       ) : null}
+                      {onSetPrimaryField && field.id !== primaryField?.id ? (
+                        <button
+                          aria-label={fmt(messages.base.setAsRecordTitle, {
+                            field: resolveIString(field.name),
+                          })}
+                          className="shrink-0 rounded p-1 text-muted-foreground transition-colors hover:bg-primary/5 hover:text-primary"
+                          data-testid={`set-record-title-${field.id}`}
+                          onClick={() => {
+                            setRecordTitleFieldId(field.id);
+                            setRecordTitleError(null);
+                          }}
+                          title={messages.base.setAsRecordTitle}
+                          type="button"
+                        >
+                          <Star size={13} />
+                        </button>
+                      ) : null}
                     </div>
-                    <div>
+                    <div className="hidden sm:block">
                       <span className="inline-flex max-w-full truncate rounded-full bg-muted/65 px-2 py-0.5 text-muted-foreground text-xs">
                         {messages.fieldTypes[field.type]}
                       </span>
                     </div>
-                    <div className="text-muted-foreground text-xs">
+                    <div className="hidden text-muted-foreground text-xs sm:block">
                       {field.required ? messages.base.required : "-"}
                     </div>
-                    <div className="font-mono text-muted-foreground text-xs">{field.position}</div>
+                    <div className="hidden font-mono text-muted-foreground text-xs sm:block">
+                      {field.position}
+                    </div>
                   </div>
                 </div>
               ))}
             </div>
+
+            <Dialog
+              onOpenChange={(open) => {
+                if (!open && !isRecordTitleSaving) {
+                  setRecordTitleFieldId(null);
+                  setRecordTitleError(null);
+                }
+              }}
+              open={Boolean(recordTitleField)}
+            >
+              <DialogContent
+                className="w-[calc(100%-2rem)] max-w-lg p-0"
+                onEscapeKeyDown={(event) => {
+                  if (isRecordTitleSaving) event.preventDefault();
+                }}
+                onPointerDownOutside={(event) => {
+                  if (isRecordTitleSaving) event.preventDefault();
+                }}
+                showCloseButton={!isRecordTitleSaving}
+              >
+                <DialogHeader className="border-border/60 border-b px-5 py-4 pr-12 text-left">
+                  <DialogTitle>{messages.base.setRecordTitleTitle}</DialogTitle>
+                  <DialogDescription>
+                    {fmt(messages.base.setRecordTitleDescription, {
+                      field: recordTitleField ? resolveIString(recordTitleField.name) : "",
+                    })}
+                  </DialogDescription>
+                </DialogHeader>
+                <div className="px-5 py-4">
+                  {recordTitleError ? (
+                    <div className="mb-3 text-destructive text-sm">{recordTitleError}</div>
+                  ) : null}
+                  <div className="flex flex-wrap items-center justify-end gap-3">
+                    <button
+                      className="rounded-md border border-border/70 bg-background px-3 py-1.5 font-medium text-xs transition-colors hover:bg-accent disabled:opacity-50"
+                      disabled={isRecordTitleSaving}
+                      onClick={() => setRecordTitleFieldId(null)}
+                      type="button"
+                    >
+                      {messages.common.cancel}
+                    </button>
+                    <SplitSubmitButton
+                      changeRequestAction={{
+                        label: messages.base.requestSetRecordTitle,
+                        loadingLabel: messages.common.submitting,
+                        onSubmit: () => recordTitleField && submitRecordTitle(recordTitleField.id),
+                        isLoading: isRecordTitleSaving,
+                      }}
+                      disabled={isRecordTitleSaving}
+                      hint={messages.common.mergeImmediatelyHint}
+                      immediateAction={{
+                        label: messages.base.setRecordTitleNow,
+                        loadingLabel: messages.base.settingRecordTitle,
+                        onSubmit: () =>
+                          recordTitleField &&
+                          submitRecordTitle(recordTitleField.id, { mergeImmediately: true }),
+                        isLoading: isRecordTitleSaving,
+                      }}
+                    />
+                  </div>
+                </div>
+              </DialogContent>
+            </Dialog>
 
             <Dialog
               onOpenChange={(open) => {

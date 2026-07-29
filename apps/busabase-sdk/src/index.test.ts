@@ -37,10 +37,6 @@ describe("Busabase namespaces", () => {
     ["bases", "bases"],
     ["nodes", "nodes"],
     ["changeRequests", "change-requests"],
-    ["fileTrees", "file-trees"],
-    ["files", "files"],
-    ["docs", "docs"],
-    ["folders", "folders"],
     ["webhooks", "webhooks"],
     ["embedLinks", "embed-links"],
   ] as const)("%s.list() routes through the wrapper to /%s", async (ns, segment) => {
@@ -48,6 +44,45 @@ describe("Busabase namespaces", () => {
     const bb = new Busabase({ baseUrl: "http://localhost:15419", fetch: fetchImpl });
     await (bb[ns] as { list: () => Promise<unknown> }).list();
     expect(new URL(requests[0]?.url ?? "").pathname).toContain(segment);
+  });
+
+  // `docs`/`files`/`fileTrees` kept their namespaces but lost `list`/`get`, and
+  // `folders` lost its whole namespace — all four are served by `bb.nodes` now.
+  // The SDK deliberately ships no shim for them: the retired lists returned
+  // fully hydrated payloads (Doc bodies, backing Assets, folder children, file
+  // inventories) that the one-call replacement does not, and faking that shape
+  // would mean a detail request per row.
+  it("has no folders namespace and no per-type list/get shims", async () => {
+    const { fetchImpl } = okFetch();
+    const bb = new Busabase({ baseUrl: "http://localhost:15419", fetch: fetchImpl });
+    expect("folders" in bb).toBe(false);
+    for (const ns of ["docs", "files", "fileTrees"] as const) {
+      for (const proc of ["list", "get"] as const) {
+        const call = (bb[ns] as unknown as Record<string, (input: unknown) => Promise<unknown>>)[
+          proc
+        ];
+        // Reaching a route that no longer exists fails loudly at the link, which
+        // is the point: no shim quietly re-implements it with N detail calls.
+        await expect(call({ nodeId: "nod_1" })).rejects.toThrow(
+          `expect a contract procedure at ${ns}.${proc}`,
+        );
+      }
+    }
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("lists and reads any node type through the unified bb.nodes surface", async () => {
+    const { fetchImpl, requests } = okFetch();
+    const bb = new Busabase({ baseUrl: "http://localhost:15419", fetch: fetchImpl });
+
+    await bb.nodes.list({ types: ["doc", "folder"] });
+    await bb.nodes.get({ nodeId: "nod_1" });
+
+    expect(requests.map((r) => new URL(r.url).pathname)).toEqual([
+      "/api/v1/nodes",
+      "/api/v1/nodes/nod_1",
+    ]);
+    expect(new URL(requests[0]?.url ?? "").search).toContain("doc");
   });
 
   it("routes asset upload helpers through /assets, not /attachments", async () => {

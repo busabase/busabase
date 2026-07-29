@@ -116,6 +116,59 @@ describe("Field management — delete / update / convert", () => {
   // ── deleteField ─────────────────────────────────────────────────────────────
 
   describe("deleteField", () => {
+    it("rejects deleting the current record title field", async () => {
+      const base = await client.bases.create({
+        autoMerge: true,
+        slug: "delete-primary-field-test",
+        name: "Delete Primary Field Test",
+        fields: [
+          { slug: "title", name: "Title", type: "text" },
+          { slug: "notes", name: "Notes", type: "longtext" },
+        ],
+      });
+
+      await expect(
+        client.bases.fieldChangeRequest({
+          operation: "delete",
+          baseId: base.id,
+          fieldId: base.fields[0].id,
+        }),
+      ).rejects.toMatchObject({
+        code: "BAD_REQUEST",
+        message: "Set another record title field before deleting this one.",
+      });
+    });
+
+    it("rejects merging a delete request if its field became the record title", async () => {
+      const base = await client.bases.create({
+        autoMerge: true,
+        slug: "stale-delete-primary-field-test",
+        name: "Stale Delete Primary Field Test",
+        fields: [
+          { slug: "title", name: "Title", type: "text" },
+          { slug: "notes", name: "Notes", type: "longtext" },
+        ],
+      });
+      const [title, notes] = base.fields;
+      if (!title || !notes) throw new Error("Expected two fields");
+      const deleteRequest = await client.bases.fieldChangeRequest({
+        operation: "delete",
+        baseId: base.id,
+        fieldId: notes.id,
+      });
+      const reorderRequest = await client.bases.fieldChangeRequest({
+        operation: "reorder",
+        baseId: base.id,
+        fieldIds: [notes.id, title.id],
+      });
+      await approveAndMerge(reorderRequest.id);
+
+      await expect(approveAndMerge(deleteRequest.id)).rejects.toMatchObject({
+        code: "BAD_REQUEST",
+        message: "Set another record title field before deleting this one.",
+      });
+    });
+
     it("soft-deletes a field: field disappears from base but values are retained in DB", async () => {
       // Add a throwaway field
       await client.bases.createField({
@@ -174,6 +227,7 @@ describe("Field management — delete / update / convert", () => {
           visibleFieldSlugs: ["title", "temp-filter-field"],
           fieldWidths: { title: 260, "temp-filter-field": 180 },
         },
+        autoMerge: false, // review-first: this test approves + merges the CR by hand
       });
       await approveAndMerge(viewCr.id);
 

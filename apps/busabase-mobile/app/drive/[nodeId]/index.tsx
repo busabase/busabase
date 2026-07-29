@@ -3,6 +3,7 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import { useBusabaseOrpc } from "~/api/use-busabase-orpc";
 import { ConnectionGuard } from "~/components/busabase/ConnectionGuard";
 import { FileTreeScreen } from "~/components/busabase/FileTreeScreen";
+import { asNodeDetail } from "~/lib/node-detail";
 
 function DriveDetailContent() {
   const params = useLocalSearchParams<{ nodeId?: string }>();
@@ -12,15 +13,19 @@ function DriveDetailContent() {
 
   const driveQuery = useQuery(
     buda && nodeId
-      ? buda.orpc.fileTrees.get.queryOptions({ input: { nodeId, type: "drive" } })
+      ? buda.orpc.nodes.get.queryOptions({ input: { nodeId, type: "drive" } })
       : { queryKey: ["no-connection", "drive", nodeId], queryFn: skipToken },
   );
+  // `nodes.get` answers for every node type; narrowing to `drive` means a slug
+  // that resolved to some other type renders FileTreeScreen's not-found state
+  // instead of an empty file list wearing this Drive's chrome.
+  const drive = asNodeDetail(driveQuery.data, "drive");
 
   return (
     <FileTreeScreen
       title="Drive"
       entityLabel="Drive"
-      fileTree={driveQuery.data ?? null}
+      fileTree={drive}
       loading={driveQuery.isLoading}
       error={driveQuery.error ?? null}
       refreshing={driveQuery.isRefetching}

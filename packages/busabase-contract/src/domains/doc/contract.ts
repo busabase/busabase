@@ -50,16 +50,13 @@ export const createDocChangeRequestInputSchema = z.object({
 });
 
 // Doc domain oRPC routes; composed into the root contract in contract/busabase.ts.
+//
+// `list` and `get` are deliberately absent: `GET /docs` and `GET /docs/{nodeId}`
+// were retired in favour of the unified Node surface. List Docs with
+// `GET /nodes?types=doc` (lightweight summaries — the old list downloaded every
+// Doc body) and read one with `GET /nodes/{nodeId}`, which returns the same
+// `docSchema` payload under `type: "doc"`.
 export const docContract = {
-  list: oc
-    .route({
-      method: "GET",
-      path: "/docs",
-      tags: ["Docs"],
-      summary: "List Doc nodes",
-      successDescription: "Doc nodes with their storage-backed bodies.",
-    })
-    .output(z.array(docSchema)),
   create: oc
     .route({
       method: "POST",
@@ -76,16 +73,6 @@ export const docContract = {
         changeRequestSchema.extend({ materialized: z.literal(false) }),
       ]),
     ),
-  get: oc
-    .route({
-      method: "GET",
-      path: "/docs/{nodeId}",
-      tags: ["Docs"],
-      summary: "Get Doc node",
-      successDescription: "Doc node detail and body.",
-    })
-    .input(z.object({ nodeId: z.string() }))
-    .output(docSchema),
   readLines: oc
     .route({
       method: "GET",
@@ -93,7 +80,7 @@ export const docContract = {
       tags: ["Docs"],
       summary: "Read an exact line range from a Doc body",
       successDescription:
-        "Lines [startLine, endLine] (range capped at 2000 lines / ~2MB response) sliced from the Doc's full body — Docs are KB-scale, so the whole body is read in memory; no byte-range/checkpoint machinery like assets.readTextLines uses for potentially multi-GB files. The Doc-domain follow-up to a Unified Grep match with `source: \"docs\"`, so an agent can read just the lines around a match instead of `get`'s entire body.",
+        "Lines [startLine, endLine] (range capped at 2000 lines / ~2MB response) sliced from the Doc's full body — Docs are KB-scale, so the whole body is read in memory; no byte-range/checkpoint machinery like assets.readTextLines uses for potentially multi-GB files. The Doc-domain follow-up to a Unified Grep match with `source: \"docs\"`, so an agent can read just the lines around a match instead of `nodes.get`'s entire body.",
     })
     .input(ReadDocLinesInputSchema)
     .output(ReadLinesVOSchema),

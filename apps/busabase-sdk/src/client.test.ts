@@ -234,7 +234,7 @@ describe("createBusabaseClient request assembly", () => {
     });
   });
 
-  it("routes FileNode lookups through /files/{nodeId}", async () => {
+  it("routes FileNode lookups through the unified /nodes/{nodeId}", async () => {
     const requests: Request[] = [];
     const fetchImpl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const request = input instanceof Request ? input : new Request(input, init);
@@ -249,11 +249,36 @@ describe("createBusabaseClient request assembly", () => {
       fetch: fetchImpl,
     });
 
-    await client.files.get({ nodeId: "board-plan" });
+    // `files.get` / `GET /files/{nodeId}` is retired: a File node is read the
+    // same way every other node type is, and `type` only disambiguates a slug.
+    await client.nodes.get({ nodeId: "board-plan", type: "file" });
 
     expect(requests).toHaveLength(1);
     expect(requests[0]?.method).toBe("GET");
-    expect(requests[0]?.url).toBe("http://localhost:15419/api/v1/files/board-plan");
+    expect(requests[0]?.url).toBe("http://localhost:15419/api/v1/nodes/board-plan?type=file");
+  });
+
+  it("lists one node type through /nodes?types=…, not a per-type list route", async () => {
+    const requests: Request[] = [];
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      requests.push(request);
+      return new Response(JSON.stringify([]), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }) as unknown as typeof fetch;
+    const client = createBusabaseClient({
+      baseUrl: "http://localhost:15419",
+      fetch: fetchImpl,
+    });
+
+    await client.nodes.list({ types: ["doc"] });
+
+    expect(requests).toHaveLength(1);
+    const url = new URL(requests[0]?.url ?? "");
+    expect(url.pathname).toBe("/api/v1/nodes");
+    expect(url.search).toContain("doc");
   });
 });
 

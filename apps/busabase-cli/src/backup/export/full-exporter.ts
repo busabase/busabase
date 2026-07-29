@@ -76,14 +76,24 @@ export async function exportFull(options: FullExportOptions): Promise<Manifest> 
     log(`exported ${table}: ${rows.length} rows`);
   }
 
-  // Doc bodies — one markdown entry per `doc` node, read via the public docs.get
-  // endpoint (doc bodies live in object storage, not a dump-eligible DB table).
+  // Doc bodies — one markdown entry per `doc` node, read via the public
+  // `nodes.get` endpoint (doc bodies live in object storage, not a
+  // dump-eligible DB table). This was `docs.get` until the typed per-type gets
+  // were folded into the unified Node surface; the payload is the same, reached
+  // by `type: "doc"`. It stays one request per Doc because a backup genuinely
+  // needs every body — there is no list endpoint that returns them in bulk, and
+  // pretending otherwise would silently drop content from the archive.
   const docNodes = (tableRows.nodes ?? []).filter((n) => n.type === "doc");
   let docBodyCount = 0;
   for (const node of docNodes) {
     const nodeId = node.id as string;
-    const doc = await client.docs.get({ nodeId });
-    await writer.addBuffer(`docs/${nodeId}.md`, doc.body ?? "");
+    const detail = await client.nodes.get({ nodeId, type: "doc" });
+    if (detail.type !== "doc") {
+      // The server resolves `type: "doc"`, so this can only fire if the contract
+      // and the server drift. Fail loudly rather than archiving an empty body.
+      throw new Error(`Expected a doc node for ${nodeId}, got "${detail.type}"`);
+    }
+    await writer.addBuffer(`docs/${nodeId}.md`, detail.body ?? "");
     docBodyCount += 1;
   }
   log(`exported ${docBodyCount} doc bodies`);

@@ -40,13 +40,17 @@ type FullBusabaseClient = ContractRouterClient<BusabaseContract>;
 export type BusabaseTaskClient = {
   readonly nodes: Pick<
     FullBusabaseClient["nodes"],
-    "createChangeRequest" | "list" | "principals" | "share"
+    "createChangeRequest" | "list" | "get" | "principals" | "share"
   >;
   readonly views: Pick<FullBusabaseClient["views"], "changeRequest">;
-  /** Skills, Drives, and AirApps all read and write through this one surface. */
+  /**
+   * Skills, Drives, and AirApps all write and read their FILES through this one
+   * surface. Listing them, and reading one node's detail, moved to the unified
+   * Node surface (`nodes.list({ types })` / `nodes.get`).
+   */
   readonly fileTrees: Pick<
     FullBusabaseClient["fileTrees"],
-    "create" | "list" | "get" | "listFiles" | "readFile" | "createChangeRequest"
+    "create" | "listFiles" | "readFile" | "createChangeRequest"
   >;
   readonly docs: Pick<FullBusabaseClient["docs"], "create">;
   readonly bases: Pick<

@@ -10,6 +10,7 @@ import type {
 } from "open-domains/attachments/types";
 import type { iString } from "openlib/i18n/i-string";
 import { type BusabaseContract, busabaseContract } from "../contract/busabase";
+import type { NodeDetailVO } from "../contract/node-detail-schemas";
 import type {
   InstallFromGithubDTO,
   InstallPlanFromGithubDTO,
@@ -255,6 +256,21 @@ export interface BusabaseDashboardApiClient {
       submittedBy?: string;
     },
   ) => Promise<ChangeRequestVO>;
+  createReorderFieldsChangeRequest: (
+    baseId: string,
+    payload: {
+      fieldIds: string[];
+      message?: string;
+      submittedBy?: string;
+    },
+  ) => Promise<ChangeRequestVO>;
+  // `autoMerge` is typed `false`, not `boolean`, on purpose: these three facade
+  // methods promise a plain ChangeRequestVO, and that promise is only honest on
+  // the review-first branch of the endpoint's `materialized` union. Dashboard
+  // callers pass an explicit `false` (their "propose for review" affordance must
+  // queue a CR regardless of the actor's own permission) and then approve+merge
+  // separately; a caller that actually wants the one-call auto-merge should use
+  // the oRPC client's `views.changeRequest` directly and narrow the union.
   createViewChangeRequest: (
     baseId: string,
     payload: {
@@ -265,6 +281,7 @@ export interface BusabaseDashboardApiClient {
       slug: string;
       submittedBy?: string;
       type?: ViewType;
+      autoMerge?: false;
     },
   ) => Promise<ChangeRequestVO>;
   createUpdateViewChangeRequest: (
@@ -276,6 +293,7 @@ export interface BusabaseDashboardApiClient {
       name?: string;
       submittedBy?: string;
       type?: ViewType;
+      autoMerge?: false;
     },
   ) => Promise<ChangeRequestVO>;
   createDeleteViewChangeRequest: (viewId: string) => Promise<ChangeRequestVO>;
@@ -333,7 +351,7 @@ export interface BusabaseDashboardApiClient {
   listArchivedRecords: (baseId: string) => Promise<RecordVO[]>;
   createRestoreViewChangeRequest: (
     viewId: string,
-    payload: { submittedBy?: string; message?: string },
+    payload: { submittedBy?: string; message?: string; autoMerge?: false },
   ) => Promise<ChangeRequestVO>;
   createRestoreRecordChangeRequest: (
     recordId: string,
@@ -406,6 +424,24 @@ export const createBusabaseOpenApiClient = (options: {
   return createORPCClient(link);
 };
 
+/**
+ * Narrows a discriminated `NodeDetailVO` back to the file-tree branch this
+ * facade's `getSkill`/`getDrive` promise. The server already refuses a
+ * mismatched `type`, so this only ever fires if the two drift apart — and when
+ * it does it must be a clear error, never a silently mis-shaped object handed
+ * to a caller that will read `.files` off it.
+ */
+const assertFileTreeDetail = <T extends "skill" | "drive">(
+  detail: { type: string },
+  expected: T,
+  nodeIdOrSlug: string,
+): Extract<NodeDetailVO, { type: T }> => {
+  if (detail.type !== expected) {
+    throw new Error(`Expected a ${expected} node, got "${detail.type}": ${nodeIdOrSlug}`);
+  }
+  return detail as Extract<NodeDetailVO, { type: T }>;
+};
+
 const batchItemError = (result: { error?: string; code?: string; data?: unknown } | undefined) =>
   Object.assign(new Error(result?.error ?? "Change request action returned no result"), {
     ...(result?.code ? { code: result.code } : {}),
@@ -441,10 +477,19 @@ export const createBusabaseRestApiClient = (
     updateNodeMetadata: (nodeId, metadata) => client.nodes.updateMetadata({ nodeId, metadata }),
     toggleNodeFavorite: (nodeId) => client.nodes.toggleFavorite({ nodeId }),
     listFavoriteNodes: () => client.nodes.listFavorites(),
-    getSkill: (nodeIdOrSlug) => client.fileTrees.get({ nodeId: nodeIdOrSlug, type: "skill" }),
+    // Reads through the unified Node detail route (`fileTrees.get` is retired).
+    // The `type` hint both disambiguates a slug and narrows the discriminated
+    // NodeDetailVO back to the file-tree shape this facade promises.
+    getSkill: async (nodeIdOrSlug) => {
+      const detail = await client.nodes.get({ nodeId: nodeIdOrSlug, type: "skill" });
+      return assertFileTreeDetail(detail, "skill", nodeIdOrSlug);
+    },
     readSkillFile: (nodeId, filePath) =>
       client.fileTrees.readFile({ nodeId, filePath, type: "skill" }),
-    getDrive: (nodeIdOrSlug) => client.fileTrees.get({ nodeId: nodeIdOrSlug, type: "drive" }),
+    getDrive: async (nodeIdOrSlug) => {
+      const detail = await client.nodes.get({ nodeId: nodeIdOrSlug, type: "drive" });
+      return assertFileTreeDetail(detail, "drive", nodeIdOrSlug);
+    },
     readDriveFile: (nodeId, filePath) =>
       client.fileTrees.readFile({ nodeId, filePath, type: "drive" }),
     listChangeRequests: async (options) =>
@@ -463,12 +508,36 @@ export const createBusabaseRestApiClient = (
       client.bases.fieldChangeRequest({ baseId, operation: "create", ...payload }),
     createUpdateFieldChangeRequest: (baseId, payload) =>
       client.bases.fieldChangeRequest({ baseId, operation: "update", ...payload }),
+    createReorderFieldsChangeRequest: (baseId, payload) =>
+      client.bases.fieldChangeRequest({ baseId, operation: "reorder", ...payload }),
+    // `autoMerge: false` is pinned here (and on restore below), not merely
+    // defaulted: the endpoint's permission-aware default would auto-merge for a
+    // write-capable actor and hand back a materialized ViewVO, which is not what
+    // this facade's `Promise<ChangeRequestVO>` signature — nor its dashboard
+    // callers, which route the user to `/inbox/{cr.id}` — expect. A payload
+    // `autoMerge` can only be `false`, so the spread cannot widen it back.
+    // The cast narrows the endpoint's `materialized` union to the review-first
+    // branch that the pinned flag guarantees at runtime.
     createViewChangeRequest: (baseId, payload) =>
-      client.views.changeRequest({ baseId, operation: "create", ...payload }),
+      client.views.changeRequest({
+        baseId,
+        operation: "create",
+        ...payload,
+        autoMerge: false,
+      }) as Promise<ChangeRequestVO>,
     createUpdateViewChangeRequest: (viewId, payload) =>
-      client.views.changeRequest({ viewId, operation: "update", ...payload }),
+      client.views.changeRequest({
+        viewId,
+        operation: "update",
+        ...payload,
+        autoMerge: false,
+      }) as Promise<ChangeRequestVO>,
     createDeleteViewChangeRequest: (viewId) =>
-      client.views.changeRequest({ viewId, operation: "delete" }),
+      client.views.changeRequest({
+        viewId,
+        operation: "delete",
+        autoMerge: false,
+      }) as Promise<ChangeRequestVO>,
     approveChangeRequest: async (changeRequestId, reason) => {
       const { results } = await client.changeRequests.review(
         reason
@@ -545,7 +614,12 @@ export const createBusabaseRestApiClient = (
     listArchivedRecords: async (baseId) =>
       (await client.records.list({ baseId, status: "archived" })).records,
     createRestoreViewChangeRequest: (viewId, payload) =>
-      client.views.changeRequest({ viewId, operation: "restore", ...payload }),
+      client.views.changeRequest({
+        viewId,
+        operation: "restore",
+        ...payload,
+        autoMerge: false,
+      }) as Promise<ChangeRequestVO>,
     createRestoreRecordChangeRequest: async (recordId, payload) => {
       const result = await client.records.changeRequest({
         recordId,

@@ -48,11 +48,13 @@ export async function run() {
 
   for (const folder of zhCnScenario.folders ?? []) {
     await step(`POST /nodes/change-requests — folder "${folder.name}"`, async () => {
-      // Idempotent: skip if already present
-      const existing = await api<Array<{ node: { id: string; slug: string } }>>("GET", "/folders");
-      const found = existing.find((f) => f.node.slug === folder.slug);
+      // Idempotent: skip if already present. `GET /folders` was retired by the
+      // unified Node surface — `GET /nodes?types=folder` returns a FLAT list of
+      // lightweight node summaries, which is all this lookup ever needed.
+      const existing = await api<Array<{ id: string; slug: string }>>("GET", "/nodes?types=folder");
+      const found = existing.find((f) => f.slug === folder.slug);
       if (found) {
-        folderNodeMap.set(folder.nodeId, found.node.id);
+        folderNodeMap.set(folder.nodeId, found.id);
         return;
       }
 
@@ -73,9 +75,9 @@ export async function run() {
       await approveMerge(cr.id);
 
       // Re-fetch to get the API-assigned node ID
-      const updated = await api<Array<{ node: { id: string; slug: string } }>>("GET", "/folders");
-      const created = updated.find((f) => f.node.slug === folder.slug);
-      if (created) folderNodeMap.set(folder.nodeId, created.node.id);
+      const updated = await api<Array<{ id: string; slug: string }>>("GET", "/nodes?types=folder");
+      const created = updated.find((f) => f.slug === folder.slug);
+      if (created) folderNodeMap.set(folder.nodeId, created.id);
     });
   }
 
@@ -230,6 +232,10 @@ export async function run() {
         config: view.config,
         message: `seed: 创建视图 ${view.name}`,
         submittedBy: "seed-zh-cn",
+        // Pin the review-first branch: this seed walks each view through an
+        // explicit approve + merge, which the endpoint would otherwise have
+        // already done for a write-capable actor.
+        autoMerge: false,
       });
       await approveMerge(cr.id);
     });
