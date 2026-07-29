@@ -137,6 +137,7 @@ export default function SelfHostedConnectionScreen() {
           </Text>
 
           <TextInput
+            accessibilityLabel="Busabase server URL"
             value={serverUrl}
             keyboardType="url"
             returnKeyType="go"

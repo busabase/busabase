@@ -64,7 +64,7 @@ describe("Agent task queue — oRPC", () => {
   it("queues request-changes and @ai-mentioned CRs, and skips quiet ones", async () => {
     const requested = await openCr("Needs changes");
     await client.changeRequests.review({
-      changeRequestId: requested.id,
+      changeRequestIds: [requested.id],
       verdict: "rejected",
       reason: "Tighten the intro. @ai",
     });
@@ -100,7 +100,7 @@ describe("Agent task queue — oRPC", () => {
     const cr = await openCr("Revise me");
     const operationId = cr.primaryOperation?.id ?? "";
     await client.changeRequests.review({
-      changeRequestId: cr.id,
+      changeRequestIds: [cr.id],
       verdict: "rejected",
       reason: "Fix it",
     });

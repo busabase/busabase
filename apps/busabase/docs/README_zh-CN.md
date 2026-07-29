@@ -310,8 +310,10 @@ CHANGE_REQUEST_ID=$(curl -s -X POST \
 echo "Review: http://localhost:15419/dashboard/local/inbox/$CHANGE_REQUEST_ID"
 
 # 4. 人工批准后可选的自动化操作。
-curl -s -X POST "http://localhost:15419/api/v1/change-requests/$CHANGE_REQUEST_ID/merge" \
-  | jq '.record.id, .record.headCommit.fields.title'
+curl -s -X POST "http://localhost:15419/api/v1/change-requests/merge" \
+  -H 'content-type: application/json' \
+  --data "{\"changeRequestIds\":[\"$CHANGE_REQUEST_ID\"]}" \
+  | jq '.results[0].record.id, .results[0].record.headCommit.fields.title'
 curl -s "http://localhost:15419/api/v1/records?baseId=$BLOG_BASE_ID" \
   | jq '.[].headCommit.fields.title'
 ```

@@ -131,7 +131,7 @@ export type { AttachmentRef } from "open-domains/attachments/types";
 export type { AssetAttachmentRef } from "../domains/base/types";
 
 // Base-domain VOs live in the base domain; re-exported here for the public barrel.
-import type { BaseVO } from "../domains/base/types";
+import type { BaseVO, RecordVO, ViewVO } from "../domains/base/types";
 
 export type {
   BaseFieldVO,
@@ -228,15 +228,38 @@ export interface ChangeRequestVO {
   reviews: ReviewVO[];
 }
 
-// Per-item outcome from the batch review/merge endpoints. Failures are isolated:
-// a bad id records `ok: false` + `error` and the rest still process.
-export interface ChangeRequestBatchResultVO {
-  results: Array<{
-    changeRequestId: string;
-    ok: boolean;
-    status?: string;
-    error?: string;
-  }>;
+export interface ChangeRequestBatchFailureVO {
+  changeRequestId: string;
+  ok: false;
+  error: string;
+  code?: string;
+  data?: unknown;
+}
+
+export interface ChangeRequestReviewBatchResultVO {
+  results: Array<
+    | {
+        changeRequestId: string;
+        ok: true;
+        status: string;
+        changeRequest: ChangeRequestVO;
+      }
+    | ChangeRequestBatchFailureVO
+  >;
+}
+
+export interface ChangeRequestMergeBatchResultVO {
+  results: Array<
+    | {
+        changeRequestId: string;
+        ok: true;
+        status: string;
+        changeRequest: ChangeRequestVO;
+        record: RecordVO | null;
+        view: ViewVO | null;
+      }
+    | ChangeRequestBatchFailureVO
+  >;
 }
 
 // Whole-space inbox tab counts (not a capped page) — one number per inbox tab.

@@ -1,5 +1,5 @@
-import type { BaseVO, ChangeRequestVO, RecordVO } from "busabase-contract/types";
-import { cmsPostFields, expect, json, test, unique } from "./_fixtures";
+import type { BaseVO, ChangeRequestVO } from "busabase-contract/types";
+import { cmsPostFields, expect, json, mergeOne, reviewOne, test, unique } from "./_fixtures";
 
 test("Record Detail scrolls through long field content", async ({ page, request }) => {
   const bases = await json<BaseVO[]>(await request.get("/api/v1/bases"));
@@ -28,14 +28,9 @@ test("Record Detail scrolls through long field content", async ({ page, request 
       },
     }),
   );
-  await json(
-    await request.post(`/api/v1/change-requests/${changeRequest.id}/reviews`, {
-      data: { verdict: "approved" },
-    }),
-  );
-  const merged = await json<{ record: RecordVO }>(
-    await request.post(`/api/v1/change-requests/${changeRequest.id}/merge`, { data: {} }),
-  );
+  await reviewOne(request, changeRequest.id, "approved");
+  const merged = await mergeOne(request, changeRequest.id);
+  if (!merged.record) throw new Error("Expected create merge to return a record");
 
   await page.goto(`/dashboard/base/blog/${merged.record.id}`);
   const scrollViewport = page.locator("[data-record-detail-scroll]");

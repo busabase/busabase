@@ -274,8 +274,8 @@ describe("busabase-cli export → install round trip (real demo seed, two databa
       patch: { options: { multiple: true, targetBaseId: betaId, inverseFieldId: betaLinkId } },
       message: "Close the A↔B inverse cycle",
     });
-    await client.changeRequests.review({ changeRequestId: cr.id, verdict: "approved" });
-    await client.changeRequests.merge({ changeRequestId: cr.id });
+    await client.changeRequests.review({ changeRequestIds: [cr.id], verdict: "approved" });
+    await client.changeRequests.merge({ changeRequestIds: [cr.id] });
   };
 
   const snapshotDocs = async (): Promise<Map<string, string>> => {

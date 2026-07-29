@@ -101,8 +101,11 @@ export function NodeRenameDialog({
         operations: [{ kind: "rename", nodeId, name: trimmed }],
       });
       if (options?.mergeImmediately) {
-        await reviewCr.mutateAsync({ changeRequestId: changeRequest.id, verdict: "approved" });
-        await mergeCr.mutateAsync({ changeRequestId: changeRequest.id });
+        await reviewCr.mutateAsync({
+          changeRequestIds: [changeRequest.id],
+          verdict: "approved",
+        });
+        await mergeCr.mutateAsync({ changeRequestIds: [changeRequest.id] });
         await invalidateNodes();
         toast.success(t.renamed);
         onRenamed?.(trimmed);

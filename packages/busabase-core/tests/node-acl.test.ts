@@ -365,15 +365,21 @@ describe("node ACL", () => {
           type: "text",
         }),
       ).rejects.toThrow(/write access/);
-      await expect(
-        raw.changeRequests.review({
-          changeRequestId: changeRequest.id,
-          verdict: "approved",
-        }),
-      ).rejects.toThrow(/write workspace access/);
-      await expect(raw.changeRequests.merge({ changeRequestId: changeRequest.id })).rejects.toThrow(
-        /write workspace access/,
-      );
+      const reviewResult = await raw.changeRequests.review({
+        changeRequestIds: [changeRequest.id],
+        verdict: "approved",
+      });
+      expect(reviewResult.results[0]).toMatchObject({
+        ok: false,
+        error: expect.stringMatching(/write workspace access/),
+      });
+      const mergeResult = await raw.changeRequests.merge({
+        changeRequestIds: [changeRequest.id],
+      });
+      expect(mergeResult.results[0]).toMatchObject({
+        ok: false,
+        error: expect.stringMatching(/write workspace access/),
+      });
     });
 
     await asMember(

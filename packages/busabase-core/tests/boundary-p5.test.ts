@@ -45,9 +45,11 @@ describe("Boundary P5 — oRPC", () => {
 
     // Merging the stale update CR must be rejected by the merge-time guard.
     await client.changeRequests.approve({ changeRequestId: updateCr.id });
-    await expect(client.changeRequests.merge({ changeRequestId: updateCr.id })).rejects.toThrow(
-      /archived record/i,
-    );
+    const mergeResult = await client.changeRequests.merge({ changeRequestIds: [updateCr.id] });
+    expect(mergeResult.results[0]).toMatchObject({
+      ok: false,
+      error: expect.stringMatching(/archived record/i),
+    });
   });
 
   // ── P0 #3: comment subject resolution is space-scoped ─────────────────────

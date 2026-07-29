@@ -81,8 +81,8 @@ describe("Boundary P6 — node lifecycle", () => {
       baseId: base.id,
       submittedBy: "alice",
     });
-    await raw.changeRequests.review({ changeRequestId: restoreCr.id, verdict: "approved" });
-    await raw.changeRequests.merge({ changeRequestId: restoreCr.id });
+    await raw.changeRequests.review({ changeRequestIds: [restoreCr.id], verdict: "approved" });
+    await raw.changeRequests.merge({ changeRequestIds: [restoreCr.id] });
 
     const active = await client.bases.list({});
     expect(active.map((b) => b.id)).toContain(base.id);
@@ -114,9 +114,11 @@ describe("Boundary P6 — node lifecycle", () => {
       baseId: first.id,
       submittedBy: "alice",
     });
-    await raw.changeRequests.review({ changeRequestId: restoreCr.id, verdict: "approved" });
-    await expect(raw.changeRequests.merge({ changeRequestId: restoreCr.id })).rejects.toThrow(
-      /slug .* is now used|Rename it first/i,
-    );
+    await raw.changeRequests.review({ changeRequestIds: [restoreCr.id], verdict: "approved" });
+    const mergeResult = await raw.changeRequests.merge({ changeRequestIds: [restoreCr.id] });
+    expect(mergeResult.results[0]).toMatchObject({
+      ok: false,
+      error: expect.stringMatching(/slug .* is now used|Rename it first/i),
+    });
   });
 });

@@ -151,6 +151,7 @@ export function CommentsSection({ subjectType, subjectId }: CommentsSectionProps
         }
       >
         <TextInput
+          accessibilityLabel="Comment"
           value={body}
           multiline
           style={styles.input}

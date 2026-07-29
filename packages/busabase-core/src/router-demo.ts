@@ -57,6 +57,15 @@ const demoUnsupported = (action: string) =>
     message: `"${action}" is disabled in the Busabase demo. Run Busabase locally to make persistent changes.`,
   });
 
+const demoBatchFailure = (changeRequestId: string, error: unknown) => ({
+  changeRequestId,
+  ok: false as const,
+  error: error instanceof Error ? error.message : String(error),
+  ...(error instanceof ORPCError
+    ? { code: error.code, ...(error.data === undefined ? {} : { data: error.data }) }
+    : {}),
+});
+
 /** Keeps the demo's refusal messages verb-specific now that the field and view
  *  change-request verbs share one handler each. */
 const fieldOperationLabel = (operation: string) =>
@@ -456,20 +465,42 @@ export const busabaseDemoRouter = os.router({
     }),
     get: os.changeRequests.get.handler(({ input }) => demoGetChangeRequest(input.changeRequestId)),
     review: os.changeRequests.review.handler(({ input }) => {
-      const { changeRequestId, ...rest } = input;
-      return demoReviewChangeRequest(changeRequestId, rest);
-    }),
-    reviewMany: os.changeRequests.reviewMany.handler(() => {
-      throw demoUnsupported("Review many change requests");
+      const { changeRequestIds, ...review } = input;
+      return {
+        results: changeRequestIds.map((changeRequestId) => {
+          try {
+            const changeRequest = demoReviewChangeRequest(changeRequestId, review);
+            return {
+              changeRequestId,
+              ok: true as const,
+              status: changeRequest.status,
+              changeRequest,
+            };
+          } catch (error) {
+            return demoBatchFailure(changeRequestId, error);
+          }
+        }),
+      };
     }),
     close: os.changeRequests.close.handler(({ input }) =>
       demoCloseChangeRequest(input.changeRequestId, input.reason),
     ),
-    merge: os.changeRequests.merge.handler(({ input }) =>
-      demoMergeChangeRequest(input.changeRequestId),
-    ),
-    mergeMany: os.changeRequests.mergeMany.handler(() => {
-      throw demoUnsupported("Merge many change requests");
+    merge: os.changeRequests.merge.handler(({ input }) => {
+      return {
+        results: input.changeRequestIds.map((changeRequestId) => {
+          try {
+            const merged = demoMergeChangeRequest(changeRequestId);
+            return {
+              changeRequestId,
+              ok: true as const,
+              status: merged.changeRequest.status,
+              ...merged,
+            };
+          } catch (error) {
+            return demoBatchFailure(changeRequestId, error);
+          }
+        }),
+      };
     }),
   },
   operations: {

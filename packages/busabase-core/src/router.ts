@@ -42,11 +42,9 @@ import {
   listComments,
   listFavoriteNodes,
   listNodes,
-  mergeChangeRequest,
   mergeChangeRequests,
   moveNode,
   purgeNode,
-  reviewChangeRequest,
   reviewChangeRequests,
   reviseOperation,
   searchBusabase,
@@ -228,10 +226,6 @@ const busabaseRouterImpl = busabase.router({
       return changeRequest;
     }),
     review: busabase.changeRequests.review.handler(async ({ input }) => {
-      const { changeRequestId, ...rest } = input;
-      return reviewChangeRequest(changeRequestId, rest);
-    }),
-    reviewMany: busabase.changeRequests.reviewMany.handler(async ({ input }) => {
       const { changeRequestIds, ...rest } = input;
       return reviewChangeRequests(changeRequestIds, rest);
     }),
@@ -239,9 +233,6 @@ const busabaseRouterImpl = busabase.router({
       closeChangeRequest(input.changeRequestId, input.reason),
     ),
     merge: busabase.changeRequests.merge.handler(async ({ input }) =>
-      mergeChangeRequest(input.changeRequestId),
-    ),
-    mergeMany: busabase.changeRequests.mergeMany.handler(async ({ input }) =>
       mergeChangeRequests(input.changeRequestIds),
     ),
   },

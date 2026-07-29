@@ -70,8 +70,8 @@ describe("Pagination & counts — oRPC integration", () => {
       records,
       message: "Import 120",
     });
-    await client.changeRequests.review({ changeRequestId: cr.id, verdict: "approved" });
-    await client.changeRequests.merge({ changeRequestId: cr.id });
+    await client.changeRequests.review({ changeRequestIds: [cr.id], verdict: "approved" });
+    await client.changeRequests.merge({ changeRequestIds: [cr.id] });
 
     const { total } = await client.records.count({ baseId });
     expect(total).toBe(120);
@@ -99,10 +99,10 @@ describe("Pagination & counts — oRPC integration", () => {
     const b = await proposeRecord("B"); // approved → merged
     const c = await proposeRecord("C"); // review "rejected" == request changes
     const d = await proposeRecord("D"); // closed → terminal rejected
-    await client.changeRequests.review({ changeRequestId: b, verdict: "approved" });
+    await client.changeRequests.review({ changeRequestIds: [b], verdict: "approved" });
     // A "rejected" review verdict requests changes (status: changes_requested);
     // terminal rejection is a close.
-    await client.changeRequests.review({ changeRequestId: c, verdict: "rejected" });
+    await client.changeRequests.review({ changeRequestIds: [c], verdict: "rejected" });
     await client.changeRequests.close({ changeRequestId: d });
 
     const after = await client.changeRequests.counts();
@@ -113,7 +113,7 @@ describe("Pagination & counts — oRPC integration", () => {
     // `created` is scoped to the acting user (local editor) — a, b, c, d count.
     expect(after.created).toBe(before.created + 4);
 
-    await client.changeRequests.merge({ changeRequestId: b });
+    await client.changeRequests.merge({ changeRequestIds: [b] });
     const merged = await client.changeRequests.counts();
     expect(merged.approved).toBe(before.approved);
     expect(merged.merged).toBe(before.merged + 1);

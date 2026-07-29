@@ -118,8 +118,8 @@ describe("Search / Drive Grep Retrieval convergence", () => {
         },
       ],
     });
-    await client.changeRequests.review({ changeRequestId: cr.id, verdict: "approved" });
-    await client.changeRequests.merge({ changeRequestId: cr.id });
+    await client.changeRequests.review({ changeRequestIds: [cr.id], verdict: "approved" });
+    await client.changeRequests.merge({ changeRequestIds: [cr.id] });
   };
 
   const getTextRow = async (assetId: string) => {
@@ -211,8 +211,8 @@ describe("Search / Drive Grep Retrieval convergence", () => {
       message: "Replace contract with v2",
       submittedBy: "agent",
     });
-    await client.changeRequests.review({ changeRequestId: cr.id, verdict: "approved" });
-    await client.changeRequests.merge({ changeRequestId: cr.id });
+    await client.changeRequests.review({ changeRequestIds: [cr.id], verdict: "approved" });
+    await client.changeRequests.merge({ changeRequestIds: [cr.id] });
 
     const staleRow = expectDefined(await getTextRow(pdfAssetId));
     expect(staleRow.status).toBe("stale");

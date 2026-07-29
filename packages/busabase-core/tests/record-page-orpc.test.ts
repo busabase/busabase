@@ -60,8 +60,8 @@ describe("records.listPage - oRPC integration", () => {
       records,
       message: "Seed numbered pagination",
     });
-    await client.changeRequests.review({ changeRequestId: bulk.id, verdict: "approved" });
-    await client.changeRequests.merge({ changeRequestId: bulk.id });
+    await client.changeRequests.review({ changeRequestIds: [bulk.id], verdict: "approved" });
+    await client.changeRequests.merge({ changeRequestIds: [bulk.id] });
 
     const viewCr = await client.views.changeRequest({
       operation: "create",
@@ -73,9 +73,11 @@ describe("records.listPage - oRPC integration", () => {
         sorts: [{ fieldSlug: "name", direction: "desc" }],
       },
     });
-    await client.changeRequests.review({ changeRequestId: viewCr.id, verdict: "approved" });
-    const merged = await client.changeRequests.merge({ changeRequestId: viewCr.id });
-    filteredViewId = merged.view?.id ?? "";
+    await client.changeRequests.review({ changeRequestIds: [viewCr.id], verdict: "approved" });
+    const merged = await client.changeRequests.merge({ changeRequestIds: [viewCr.id] });
+    const mergeResult = merged.results[0];
+    if (!mergeResult?.ok) throw new Error(mergeResult?.error ?? "Merge returned no result");
+    filteredViewId = mergeResult.view?.id ?? "";
   });
 
   afterAll(async () => {

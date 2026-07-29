@@ -1,5 +1,5 @@
-import type { BaseVO, ChangeRequestVO, ViewVO } from "busabase-contract/types";
-import { expect, json, test } from "./_fixtures";
+import type { BaseVO, ChangeRequestVO } from "busabase-contract/types";
+import { expect, json, mergeOne, reviewOne, test } from "./_fixtures";
 
 test("field header actions require a saved view and support keyboard quick sorting", async ({
   page,
@@ -24,14 +24,8 @@ test("field header actions require a saved view and support keyboard quick sorti
       },
     }),
   );
-  await json(
-    await request.post(`/api/v1/change-requests/${createViewRequest.id}/reviews`, {
-      data: { verdict: "approved" },
-    }),
-  );
-  const merged = await json<{ view: ViewVO | null }>(
-    await request.post(`/api/v1/change-requests/${createViewRequest.id}/merge`, { data: {} }),
-  );
+  await reviewOne(request, createViewRequest.id, "approved");
+  const merged = await mergeOne(request, createViewRequest.id);
   if (!merged.view) {
     throw new Error("Expected the field header actions saved view to be merged");
   }

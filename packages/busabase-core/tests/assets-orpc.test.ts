@@ -271,11 +271,11 @@ describe("Assets + attachment dedup — oRPC integration", () => {
         { spaceId: LOCAL_SPACE_ID, actorId: "asset-reviewer", isSpaceManager: true },
         async () => {
           await client.changeRequests.review({
-            changeRequestId: pending.id,
+            changeRequestIds: [pending.id],
             verdict: "approved",
           });
-          const merged = await client.changeRequests.merge({ changeRequestId: pending.id });
-          expect(merged.changeRequest.status).toBe("merged");
+          const merged = await client.changeRequests.merge({ changeRequestIds: [pending.id] });
+          expect(merged.results[0]).toMatchObject({ ok: true, status: "merged" });
         },
       );
     });
@@ -363,9 +363,11 @@ describe("Assets + attachment dedup — oRPC integration", () => {
         submittedBy: "agent",
         autoMerge: false,
       });
-      await client.changeRequests.review({ changeRequestId: createCr.id, verdict: "approved" });
-      const merged = await client.changeRequests.merge({ changeRequestId: createCr.id });
-      const recordId = merged.record?.id;
+      await client.changeRequests.review({ changeRequestIds: [createCr.id], verdict: "approved" });
+      const merged = await client.changeRequests.merge({ changeRequestIds: [createCr.id] });
+      const mergeResult = merged.results[0];
+      if (!mergeResult?.ok) throw new Error(mergeResult?.error ?? "Merge returned no result");
+      const recordId = mergeResult.record?.id;
       expect(recordId).toBeTruthy();
 
       const detail = await client.assets.get({ assetId: asset.id });
@@ -379,8 +381,8 @@ describe("Assets + attachment dedup — oRPC integration", () => {
         operation: "delete",
         recordId: recordId as string,
       });
-      await client.changeRequests.review({ changeRequestId: deleteCr.id, verdict: "approved" });
-      await client.changeRequests.merge({ changeRequestId: deleteCr.id });
+      await client.changeRequests.review({ changeRequestIds: [deleteCr.id], verdict: "approved" });
+      await client.changeRequests.merge({ changeRequestIds: [deleteCr.id] });
 
       const after = await client.assets.get({ assetId: asset.id });
       expect(after.usages.find((u) => u.nodeSlug === "assets-wu")).toBeUndefined();
@@ -432,8 +434,8 @@ describe("Assets + attachment dedup — oRPC integration", () => {
         submittedBy: "agent",
         autoMerge: false,
       });
-      await client.changeRequests.review({ changeRequestId: cr.id, verdict: "approved" });
-      await client.changeRequests.merge({ changeRequestId: cr.id });
+      await client.changeRequests.review({ changeRequestIds: [cr.id], verdict: "approved" });
+      await client.changeRequests.merge({ changeRequestIds: [cr.id] });
 
       const detail = await client.assets.get({ assetId: asset.id });
       expect(detail.usages.some((u) => u.nodeSlug === "legacy-attachment-ref")).toBe(true);
@@ -470,8 +472,8 @@ describe("Assets + attachment dedup — oRPC integration", () => {
         nodeId: doc.node.id,
         body: `# Spec\n\n![diagram](${asset.url})\n`,
       });
-      await client.changeRequests.review({ changeRequestId: cr.id, verdict: "approved" });
-      await client.changeRequests.merge({ changeRequestId: cr.id });
+      await client.changeRequests.review({ changeRequestIds: [cr.id], verdict: "approved" });
+      await client.changeRequests.merge({ changeRequestIds: [cr.id] });
 
       const detail = await client.assets.get({ assetId: asset.id });
       const usage = detail.usages.find((u) => u.nodeType === "doc");
@@ -487,8 +489,8 @@ describe("Assets + attachment dedup — oRPC integration", () => {
         nodeId: doc.node.id,
         body: "# Spec\n\nNo more diagram here.\n",
       });
-      await client.changeRequests.review({ changeRequestId: removeCr.id, verdict: "approved" });
-      await client.changeRequests.merge({ changeRequestId: removeCr.id });
+      await client.changeRequests.review({ changeRequestIds: [removeCr.id], verdict: "approved" });
+      await client.changeRequests.merge({ changeRequestIds: [removeCr.id] });
 
       const after = await client.assets.get({ assetId: asset.id });
       expect(after.usages.find((u) => u.nodeType === "doc")).toBeUndefined();
@@ -531,9 +533,9 @@ describe("Assets + attachment dedup — oRPC integration", () => {
       expect(cr.status).toBe("in_review");
       expect(cr.primaryOperation?.operation).toBe("node_create");
       await expect(client.files.get({ nodeId: "board-plan" })).rejects.toThrow(/File not found/);
-      await client.changeRequests.review({ changeRequestId: cr.id, verdict: "approved" });
-      const merged = await client.changeRequests.merge({ changeRequestId: cr.id });
-      expect(merged.changeRequest.status).toBe("merged");
+      await client.changeRequests.review({ changeRequestIds: [cr.id], verdict: "approved" });
+      const merged = await client.changeRequests.merge({ changeRequestIds: [cr.id] });
+      expect(merged.results[0]).toMatchObject({ ok: true, status: "merged" });
 
       const file = await client.files.get({ nodeId: "board-plan" });
       expect(file.node.type).toBe("file");
@@ -585,11 +587,14 @@ describe("Assets + attachment dedup — oRPC integration", () => {
       await expect(callOpenApi("GET", "/files/openapi-board-plan")).rejects.toThrow(
         /File not found/,
       );
-      await callOpenApi("POST", `/change-requests/${changeRequest.id}/reviews`, {
+      await callOpenApi("POST", "/change-requests/reviews", {
+        changeRequestIds: [changeRequest.id],
         verdict: "approved",
       });
-      const merged = await callOpenApi("POST", `/change-requests/${changeRequest.id}/merge`);
-      expect(merged.changeRequest.status).toBe("merged");
+      const merged = await callOpenApi("POST", "/change-requests/merge", {
+        changeRequestIds: [changeRequest.id],
+      });
+      expect(merged.results[0]).toMatchObject({ ok: true, status: "merged" });
 
       const file = await callOpenApi("GET", "/files/openapi-board-plan");
       expect(file.node.type).toBe("file");
@@ -672,8 +677,8 @@ describe("Assets + attachment dedup — oRPC integration", () => {
         submittedBy: "agent",
         autoMerge: false,
       });
-      await client.changeRequests.review({ changeRequestId: cr.id, verdict: "approved" });
-      await client.changeRequests.merge({ changeRequestId: cr.id });
+      await client.changeRequests.review({ changeRequestIds: [cr.id], verdict: "approved" });
+      await client.changeRequests.merge({ changeRequestIds: [cr.id] });
 
       await expect(client.assets.delete({ assetId: asset.id })).rejects.toThrow(/still referenced/);
     });

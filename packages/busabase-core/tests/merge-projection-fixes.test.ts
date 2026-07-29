@@ -45,8 +45,16 @@ describe("merge projection fixes", () => {
 
   const approveAndMerge = (changeRequestId: string) =>
     client.changeRequests
-      .review({ changeRequestId, verdict: "approved" })
-      .then(() => client.changeRequests.merge({ changeRequestId }));
+      .review({ changeRequestIds: [changeRequestId], verdict: "approved" })
+      .then(() => client.changeRequests.merge({ changeRequestIds: [changeRequestId] }))
+      .then(({ results: [result] }) => {
+        if (!result?.ok)
+          throw Object.assign(
+            new Error(result?.error ?? "Change request merge returned no result"),
+            { code: result?.code, data: result?.data },
+          );
+        return result;
+      });
 
   // ── #1: record update fully replaces its projection ────────────────────────
   it("record search does not return stale values after an update (#1)", async () => {

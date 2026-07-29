@@ -60,7 +60,7 @@ export type BusabaseTaskClient = {
   >;
   readonly changeRequests: Pick<
     FullBusabaseClient["changeRequests"],
-    "list" | "counts" | "review" | "reviewMany" | "merge" | "mergeMany"
+    "list" | "counts" | "review" | "merge"
   >;
 };
 

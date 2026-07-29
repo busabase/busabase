@@ -167,11 +167,9 @@ Quick reference — every path is relative to the base URL above; worked example
 | Create Skill file CR | \`POST /api/v1/file-trees/:nodeId/change-requests\` | propose a Skill file edit |
 | Request asset upload | \`POST /api/v1/assets/upload-urls\` | request an upload target for attachment-field files |
 | Confirm asset upload | \`POST /api/v1/assets/confirmations\` | confirm uploaded bytes and get an attachment-field ref |
-| Review (approve / request changes) | \`POST /api/v1/change-requests/:id/reviews\` | approve or request revision |
-| Review many | \`POST /api/v1/change-requests/reviews\` | approve/reject many CRs in one call |
+| Review | \`POST /api/v1/change-requests/reviews\` | approve/reject one or many CRs |
 | Close / abandon ChangeRequest | \`POST /api/v1/change-requests/:id/close\` | terminally close a bad proposal |
-| Merge | \`POST /api/v1/change-requests/:id/merge\` | apply an approved CR |
-| Merge many | \`POST /api/v1/change-requests/merge\` | merge many approved CRs in one call |
+| Merge | \`POST /api/v1/change-requests/merge\` | merge one or many approved CRs |
 | Read records | \`GET /api/v1/records\` | merged canonical records |
 | Agent work queue | \`GET /api/v1/agent/tasks\` | CRs awaiting your revision |
 | Revise an operation | \`POST /api/v1/operations/:operationId/revisions\` | answer requested changes |
@@ -429,17 +427,17 @@ curl "${base}/api/v1/docs/:nodeId/lines?startLine=118&endLine=122"${H}
 Approve a ChangeRequest:
 
 \`\`\`bash
-curl -X POST ${base}/api/v1/change-requests/:changeRequestId/reviews \\
+curl -X POST ${base}/api/v1/change-requests/reviews \\
 ${authLine}  -H 'content-type: application/json' \\
-  --data '{"verdict":"approved"}'
+  --data '{"changeRequestIds":[":changeRequestId"],"verdict":"approved"}'
 \`\`\`
 
 Request changes on a ChangeRequest (non-terminal; the agent should revise it):
 
 \`\`\`bash
-curl -X POST ${base}/api/v1/change-requests/:changeRequestId/reviews \\
+curl -X POST ${base}/api/v1/change-requests/reviews \\
 ${authLine}  -H 'content-type: application/json' \\
-  --data '{"verdict":"rejected","reason":"Needs revision"}'
+  --data '{"changeRequestIds":[":changeRequestId"],"verdict":"rejected","reason":"Needs revision"}'
 \`\`\`
 
 Close / abandon a bad ChangeRequest (terminal; use this for cleanup):
@@ -453,7 +451,9 @@ ${authLine}  -H 'content-type: application/json' \\
 Merge an approved ChangeRequest:
 
 \`\`\`bash
-curl -X POST ${base}/api/v1/change-requests/:changeRequestId/merge${H}
+curl -X POST ${base}/api/v1/change-requests/merge \\
+${authLine}  -H 'content-type: application/json' \\
+  --data '{"changeRequestIds":[":changeRequestId"]}'
 \`\`\`
 
 Review or merge MANY ChangeRequests in one call (for "approve/merge all of these" —
@@ -465,7 +465,7 @@ curl -X POST ${base}/api/v1/change-requests/reviews \\
 ${authLine}  -H 'content-type: application/json' \\
   --data '{ "changeRequestIds": ["crq_1", "crq_2", "crq_3"], "verdict": "approved" }'
 
-# Merge several at once → { "results": [{ "changeRequestId", "ok", "status?", "error?" }] }
+# Merge several at once → { "results": [{ "changeRequestId", "ok", ...payload/error }] }
 curl -X POST ${base}/api/v1/change-requests/merge \\
 ${authLine}  -H 'content-type: application/json' \\
   --data '{ "changeRequestIds": ["crq_1", "crq_2", "crq_3"] }'

@@ -89,10 +89,14 @@ describe("Base field types — OpenAPI (/api/v1) route round-trip", () => {
       submittedBy: "agent",
       autoMerge: false,
     });
-    await ok("POST", `/change-requests/${cr.id}/reviews`, { verdict: "approved" });
-    const merged = await ok("POST", `/change-requests/${cr.id}/merge`);
-    if (!merged.record?.id) throw new Error("expected a merged record");
-    return merged.record.id;
+    await ok("POST", "/change-requests/reviews", {
+      changeRequestIds: [cr.id],
+      verdict: "approved",
+    });
+    const merged = await ok("POST", "/change-requests/merge", { changeRequestIds: [cr.id] });
+    const mergeResult = merged.results[0];
+    if (!mergeResult?.ok || !mergeResult.record?.id) throw new Error("expected a merged record");
+    return mergeResult.record.id;
   };
 
   const readFields = async (recordId: string): Promise<Record<string, unknown>> => {
@@ -152,9 +156,15 @@ describe("Base field types — OpenAPI (/api/v1) route round-trip", () => {
       submittedBy: "agent",
       autoMerge: false,
     });
-    await ok("POST", `/change-requests/${relCr.id}/reviews`, { verdict: "approved" });
-    const relMerged = await ok("POST", `/change-requests/${relCr.id}/merge`);
-    relatedRecordId = relMerged.record?.id ?? "";
+    await ok("POST", "/change-requests/reviews", {
+      changeRequestIds: [relCr.id],
+      verdict: "approved",
+    });
+    const relMerged = await ok("POST", "/change-requests/merge", {
+      changeRequestIds: [relCr.id],
+    });
+    const relMergeResult = relMerged.results[0];
+    relatedRecordId = relMergeResult?.ok ? (relMergeResult.record?.id ?? "") : "";
 
     const base = await ok("POST", "/bases", {
       slug: "ftapi-everything",

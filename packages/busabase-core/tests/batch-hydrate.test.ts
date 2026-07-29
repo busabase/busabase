@@ -66,7 +66,7 @@ describe("Batch hydrate — per-item relation isolation", () => {
     crBId = crB.id;
 
     // Review only CR B, so review grouping must not leak onto CR A.
-    await client.changeRequests.review({ changeRequestId: crBId, verdict: "approved" });
+    await client.changeRequests.review({ changeRequestIds: [crBId], verdict: "approved" });
   });
 
   afterAll(async () => {
@@ -108,8 +108,8 @@ describe("Batch hydrate — per-item relation isolation", () => {
 
   it("batch-hydrates a base's records with the correct per-record fields", async () => {
     // Merge CR A so its records exist, then list them (hydrateRecords batch path).
-    await client.changeRequests.review({ changeRequestId: crAId, verdict: "approved" });
-    await client.changeRequests.merge({ changeRequestId: crAId });
+    await client.changeRequests.review({ changeRequestIds: [crAId], verdict: "approved" });
+    await client.changeRequests.merge({ changeRequestIds: [crAId] });
 
     const page = await client.records.list({ baseId: baseAId, limit: 50 });
     expect(page.records).toHaveLength(3);

@@ -102,8 +102,8 @@ export function NodeDeleteDialog({
   const handleConfirm = async () => {
     try {
       const cr = await createCr.mutateAsync({ operations: [{ kind: "delete", nodeId }] });
-      await reviewCr.mutateAsync({ changeRequestId: cr.id, verdict: "approved" });
-      await mergeCr.mutateAsync({ changeRequestId: cr.id });
+      await reviewCr.mutateAsync({ changeRequestIds: [cr.id], verdict: "approved" });
+      await mergeCr.mutateAsync({ changeRequestIds: [cr.id] });
       await queryClient.invalidateQueries({
         queryKey: orpc.nodes.list.queryOptions({}).queryKey,
       });

@@ -21,8 +21,8 @@ import { seedScenario } from "./helpers/seed-scenario";
 type RawClient = ReturnType<typeof createRouterClient<typeof busabaseRouter, Record<never, never>>>;
 
 async function approveMerge(raw: RawClient, changeRequestId: string) {
-  await raw.changeRequests.review({ changeRequestId, verdict: "approved" });
-  await raw.changeRequests.merge({ changeRequestId });
+  await raw.changeRequests.review({ changeRequestIds: [changeRequestId], verdict: "approved" });
+  await raw.changeRequests.merge({ changeRequestIds: [changeRequestId] });
 }
 
 async function deleteNode(raw: RawClient, nodeId: string) {

@@ -99,8 +99,8 @@ describe("Doc & Folder domains — oRPC integration", () => {
     // Body is unchanged until the change request merges.
     expect((await client.docs.get({ nodeId: "guide" })).body).toBe("draft\n");
 
-    await client.changeRequests.review({ changeRequestId: cr.id, verdict: "approved" });
-    await client.changeRequests.merge({ changeRequestId: cr.id });
+    await client.changeRequests.review({ changeRequestIds: [cr.id], verdict: "approved" });
+    await client.changeRequests.merge({ changeRequestIds: [cr.id] });
 
     expect((await client.docs.get({ nodeId: "guide" })).body).toContain("Approved content.");
   });

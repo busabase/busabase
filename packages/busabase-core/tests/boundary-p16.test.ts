@@ -14,8 +14,15 @@ import { seedScenario } from "./helpers/seed-scenario";
 type RawClient = ReturnType<typeof createRouterClient<typeof busabaseRouter, Record<never, never>>>;
 
 async function approveMerge(raw: RawClient, changeRequestId: string) {
-  await raw.changeRequests.review({ changeRequestId, verdict: "approved" });
-  return raw.changeRequests.merge({ changeRequestId });
+  await raw.changeRequests.review({ changeRequestIds: [changeRequestId], verdict: "approved" });
+  const [result] = (await raw.changeRequests.merge({ changeRequestIds: [changeRequestId] }))
+    .results;
+  if (!result?.ok)
+    throw Object.assign(new Error(result?.error ?? "Change request merge returned no result"), {
+      code: result?.code,
+      data: result?.data,
+    });
+  return result;
 }
 
 describe("Boundary P16 — node/view merge state guards", () => {

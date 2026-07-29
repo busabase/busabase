@@ -94,10 +94,10 @@ describe("Form-as-Node — submission + access gates", () => {
 
     // Merging the CR materializes the record with the submitted values.
     await client.changeRequests.review({
-      changeRequestId: result.changeRequestId,
+      changeRequestIds: [result.changeRequestId],
       verdict: "approved",
     });
-    await client.changeRequests.merge({ changeRequestId: result.changeRequestId });
+    await client.changeRequests.merge({ changeRequestIds: [result.changeRequestId] });
     const { records: merged } = await client.records.list({});
     expect(merged.length).toBe(before.length + 1);
     expect(

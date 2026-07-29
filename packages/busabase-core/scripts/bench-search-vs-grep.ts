@@ -154,8 +154,8 @@ async function main() {
         message: `Bench seed batch ${start}-${start + count}`,
         submittedBy: "bench-script",
       });
-      await client.changeRequests.review({ changeRequestId: cr.id, verdict: "approved" });
-      await client.changeRequests.merge({ changeRequestId: cr.id });
+      await client.changeRequests.review({ changeRequestIds: [cr.id], verdict: "approved" });
+      await client.changeRequests.merge({ changeRequestIds: [cr.id] });
       created += count;
     }
     if (!needlePlaced) throw new Error("Needle record was never seeded");

@@ -1,3 +1,4 @@
+import type { ChangeRequestVO, RecordVO, ViewVO } from "busabase-contract/types";
 import { type BusabaseAssetsClient, grepAssets } from "./asset-grep.js";
 import {
   type BusabaseClient,
@@ -7,6 +8,30 @@ import {
   resolveConfig,
 } from "./client.js";
 import { type BusabaseRecordsClient, getRecordByField } from "./record-get.js";
+
+type RawChangeRequestsClient = BusabaseClient["changeRequests"];
+type ReviewBatchInput = Parameters<RawChangeRequestsClient["review"]>[0];
+type MergeBatchInput = Parameters<RawChangeRequestsClient["merge"]>[0];
+
+interface ChangeRequestActionClient {
+  review(
+    input: Omit<ReviewBatchInput, "changeRequestIds"> & { changeRequestId: string },
+  ): Promise<ChangeRequestVO>;
+  review(input: ReviewBatchInput): ReturnType<RawChangeRequestsClient["review"]>;
+  merge(input: {
+    changeRequestId: string;
+  }): Promise<{ changeRequest: ChangeRequestVO; record: RecordVO | null; view: ViewVO | null }>;
+  merge(input: MergeBatchInput): ReturnType<RawChangeRequestsClient["merge"]>;
+}
+
+export type BusabaseChangeRequestsClient = Omit<RawChangeRequestsClient, "review" | "merge"> &
+  ChangeRequestActionClient;
+
+const batchItemError = (result: { error?: string; code?: string; data?: unknown } | undefined) =>
+  Object.assign(new Error(result?.error ?? "Change request action returned no result"), {
+    ...(result?.code ? { code: result.code } : {}),
+    ...(result?.data === undefined ? {} : { data: result.data }),
+  });
 
 // The cloud contract, exported as both a value and a type. The value lets tooling
 // introspect the procedure tree (e.g. busabase-cli auto-generates one command per
@@ -87,8 +112,42 @@ export class Busabase {
   get views(): BusabaseClient["views"] {
     return this.client.views;
   }
-  get changeRequests(): BusabaseClient["changeRequests"] {
-    return this.client.changeRequests;
+  get changeRequests(): BusabaseChangeRequestsClient {
+    const review = async (
+      input:
+        | ReviewBatchInput
+        | (Omit<ReviewBatchInput, "changeRequestIds"> & { changeRequestId: string }),
+    ) => {
+      if ("changeRequestIds" in input) return this.client.changeRequests.review(input);
+      const { changeRequestId, ...reviewInput } = input;
+      const { results } = await this.client.changeRequests.review({
+        ...reviewInput,
+        changeRequestIds: [changeRequestId],
+      });
+      const result = results[0];
+      if (!result?.ok) throw batchItemError(result);
+      return result.changeRequest;
+    };
+    const merge = async (input: MergeBatchInput | { changeRequestId: string }) => {
+      if ("changeRequestIds" in input) return this.client.changeRequests.merge(input);
+      const { results } = await this.client.changeRequests.merge({
+        changeRequestIds: [input.changeRequestId],
+      });
+      const result = results[0];
+      if (!result?.ok) throw batchItemError(result);
+      return {
+        changeRequest: result.changeRequest,
+        record: result.record,
+        view: result.view,
+      };
+    };
+    return new Proxy(this.client.changeRequests, {
+      get(target, property, receiver) {
+        if (property === "review") return review;
+        if (property === "merge") return merge;
+        return Reflect.get(target, property, receiver);
+      },
+    }) as BusabaseChangeRequestsClient;
   }
   get operations(): BusabaseClient["operations"] {
     return this.client.operations;

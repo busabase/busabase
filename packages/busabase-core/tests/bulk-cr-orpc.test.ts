@@ -71,9 +71,11 @@ describe("Bulk record Change Request — oRPC integration", () => {
     const { records: before } = await client.records.list({ baseId, limit: 100 });
     expect(before.length).toBe(0);
 
-    await client.changeRequests.review({ changeRequestId: cr.id, verdict: "approved" });
-    const merged = await client.changeRequests.merge({ changeRequestId: cr.id });
-    expect(merged.changeRequest.mergeSummary.operationCount).toBe(3);
+    await client.changeRequests.review({ changeRequestIds: [cr.id], verdict: "approved" });
+    const merged = await client.changeRequests.merge({ changeRequestIds: [cr.id] });
+    const mergeResult = merged.results[0];
+    if (!mergeResult?.ok) throw new Error(mergeResult?.error ?? "Merge returned no result");
+    expect(mergeResult.changeRequest.mergeSummary.operationCount).toBe(3);
 
     const { records: after } = await client.records.list({ baseId, limit: 100 });
     expect(after.length).toBe(3);

@@ -12,6 +12,8 @@ import type {
 import { useRouter } from "expo-router";
 import {
   ArrowLeft,
+  Check,
+  ChevronDown,
   Pencil,
   Plus,
   Save,
@@ -20,7 +22,7 @@ import {
   Zap,
 } from "lucide-react-native";
 import { useState } from "react";
-import { Pressable, StyleSheet, Switch, Text, View } from "react-native";
+import { Pressable, ScrollView, StyleSheet, Switch, Text, View } from "react-native";
 import { useBusabaseOrpc } from "~/api/use-busabase-orpc";
 import { ConnectionGuard } from "~/components/busabase/ConnectionGuard";
 import {
@@ -59,6 +61,20 @@ interface WebhookFormState {
   code: string;
   timeoutMs: number;
   enabled: boolean;
+}
+
+interface CompactSelectOption<T extends string> {
+  value: T;
+  label: string;
+}
+
+interface CompactSelectFieldProps<T extends string> {
+  label: string;
+  value: T;
+  options: CompactSelectOption<T>[];
+  expanded: boolean;
+  onToggle: () => void;
+  onChange: (value: T) => void;
 }
 
 const emptyForm = (): WebhookFormState => ({
@@ -173,6 +189,80 @@ function ruleMeta(rule: WebhookRuleVO): string {
   return `${statusLabel(rule.lastStatus)} · ${formatListTime(rule.lastTriggeredAt)}`;
 }
 
+function CompactSelectField<T extends string>({
+  label,
+  value,
+  options,
+  expanded,
+  onToggle,
+  onChange,
+}: CompactSelectFieldProps<T>) {
+  const tokens = useTokens();
+  const selectedLabel = options.find((option) => option.value === value)?.label ?? value;
+
+  return (
+    <>
+      <Text style={[typography.small, { color: tokens.mutedForeground }]}>{label}</Text>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={`${label}: ${selectedLabel}`}
+        accessibilityState={{ expanded }}
+        style={({ pressed }) => [
+          styles.selectTrigger,
+          {
+            backgroundColor: tokens.muted,
+            borderColor: expanded ? tokens.primary : tokens.border,
+            opacity: pressed ? 0.72 : 1,
+          },
+        ]}
+        onPress={onToggle}
+      >
+        <Text
+          numberOfLines={1}
+          style={[typography.body, styles.selectValue, { color: tokens.foreground }]}
+        >
+          {selectedLabel}
+        </Text>
+        <ChevronDown size={18} color={tokens.mutedForeground} />
+      </Pressable>
+      {expanded ? (
+        <ScrollView
+          nestedScrollEnabled
+          style={[styles.selectOptions, { borderColor: tokens.border }]}
+        >
+          {options.map((option) => {
+            const selected = option.value === value;
+            return (
+              <Pressable
+                key={option.value}
+                accessibilityRole="radio"
+                accessibilityState={{ selected }}
+                style={({ pressed }) => [
+                  styles.selectOption,
+                  {
+                    backgroundColor: selected ? tokens.primaryMuted : tokens.surface,
+                    borderColor: tokens.border,
+                    opacity: pressed ? 0.72 : 1,
+                  },
+                ]}
+                onPress={() => onChange(option.value)}
+              >
+                <Text
+                  numberOfLines={1}
+                  style={[typography.body, styles.selectValue, { color: tokens.foreground }]}
+                >
+                  {option.label}
+                </Text>
+                {selected ? <Check size={17} color={tokens.foreground} /> : null}
+              </Pressable>
+            );
+          })}
+        </ScrollView>
+      ) : null}
+    </>
+  );
+}
+
 function WebhookSettingsContent() {
   const router = useRouter();
   const tokens = useTokens();
@@ -182,6 +272,7 @@ function WebhookSettingsContent() {
 
   const [formOpen, setFormOpen] = useState(false);
   const [form, setForm] = useState<WebhookFormState>(emptyForm());
+  const [openPicker, setOpenPicker] = useState<"event" | "base" | null>(null);
   const [manageRuleId, setManageRuleId] = useState<string | null>(null);
   const [confirmDeleteRuleId, setConfirmDeleteRuleId] = useState<string | null>(null);
   const [testFireMessage, setTestFireMessage] = useState<string | null>(null);
@@ -210,16 +301,19 @@ function WebhookSettingsContent() {
     void queryClient.invalidateQueries({ queryKey: buda?.orpc.webhooks.list.key() });
 
   const closeForm = () => {
+    setOpenPicker(null);
     setFormOpen(false);
     setForm(emptyForm());
   };
 
   const openCreateForm = () => {
+    setOpenPicker(null);
     setForm(emptyForm());
     setFormOpen(true);
   };
 
   const openEditForm = (rule: WebhookRuleVO) => {
+    setOpenPicker(null);
     setForm(ruleToForm(rule));
     setManageRuleId(null);
     setFormOpen(true);
@@ -305,6 +399,10 @@ function WebhookSettingsContent() {
 
   const saving = createMutation.isPending || updateMutation.isPending;
   const formError = createMutation.error ?? updateMutation.error;
+  const baseOptions = [
+    { value: ALL_BASES_VALUE, label: "All bases" },
+    ...bases.map((base) => ({ value: base.id, label: base.name })),
+  ];
 
   const saveForm = () => {
     if (form.id) {
@@ -521,6 +619,7 @@ function WebhookSettingsContent() {
       <NativeBottomSheet
         visible={formOpen}
         title={form.id ? "Edit rule" : "New rule"}
+        maxHeight="90%"
         showCloseButton
         onClose={closeForm}
         footer={
@@ -545,7 +644,12 @@ function WebhookSettingsContent() {
           </NativeActionBar>
         }
       >
-        <View style={styles.formBody}>
+        <ScrollView
+          style={styles.formScroll}
+          contentContainerStyle={styles.formBody}
+          keyboardShouldPersistTaps="handled"
+          nestedScrollEnabled
+        >
           <TextInput
             label="Name"
             placeholder="Notify on new records"
@@ -553,26 +657,29 @@ function WebhookSettingsContent() {
             onChangeText={(value) => setForm((current) => ({ ...current, name: value }))}
           />
 
-          <Text style={[typography.small, { color: tokens.mutedForeground }]}>Event</Text>
-          <View style={styles.fullBleedChips}>
-            <NativeChipList<WebhookEventType>
-              value={form.eventType}
-              options={EVENT_TYPE_OPTIONS}
-              onChange={(eventType) => setForm((current) => ({ ...current, eventType }))}
-            />
-          </View>
+          <CompactSelectField
+            label="Event"
+            value={form.eventType}
+            options={EVENT_TYPE_OPTIONS}
+            expanded={openPicker === "event"}
+            onToggle={() => setOpenPicker((current) => (current === "event" ? null : "event"))}
+            onChange={(eventType) => {
+              setForm((current) => ({ ...current, eventType }));
+              setOpenPicker(null);
+            }}
+          />
 
-          <Text style={[typography.small, { color: tokens.mutedForeground }]}>Applies to</Text>
-          <View style={styles.fullBleedChips}>
-            <NativeChipList<string>
-              value={form.baseId}
-              options={[
-                { value: ALL_BASES_VALUE, label: "All bases" },
-                ...bases.map((base) => ({ value: base.id, label: base.name })),
-              ]}
-              onChange={(baseId) => setForm((current) => ({ ...current, baseId }))}
-            />
-          </View>
+          <CompactSelectField
+            label="Applies to"
+            value={form.baseId}
+            options={baseOptions}
+            expanded={openPicker === "base"}
+            onToggle={() => setOpenPicker((current) => (current === "base" ? null : "base"))}
+            onChange={(baseId) => {
+              setForm((current) => ({ ...current, baseId }));
+              setOpenPicker(null);
+            }}
+          />
 
           <Text style={[typography.small, { color: tokens.mutedForeground }]}>Action</Text>
           <View style={styles.fullBleedChips}>
@@ -633,7 +740,7 @@ function WebhookSettingsContent() {
               onValueChange={(value) => setForm((current) => ({ ...current, enabled: value }))}
             />
           </View>
-        </View>
+        </ScrollView>
       </NativeBottomSheet>
     </NativeScreen>
   );
@@ -656,7 +763,31 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   fullBleedChips: { marginHorizontal: -20 },
+  formScroll: { flexGrow: 0 },
   formBody: { gap: 12 },
+  selectTrigger: {
+    minHeight: mobile.minTouchTarget,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: radius.md,
+    paddingHorizontal: 14,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  selectValue: { flex: 1, minWidth: 0 },
+  selectOptions: {
+    maxHeight: 220,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: radius.md,
+  },
+  selectOption: {
+    minHeight: mobile.minTouchTarget,
+    paddingHorizontal: 14,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
   manageBody: { gap: 8 },
   sectionLabel: { textTransform: "uppercase" },
   switchRow: {

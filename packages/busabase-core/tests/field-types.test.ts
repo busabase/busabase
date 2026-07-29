@@ -79,9 +79,11 @@ describe("Base field types — end-to-end", () => {
       submittedBy: "agent",
       autoMerge: false,
     });
-    await client.changeRequests.review({ changeRequestId: relCr.id, verdict: "approved" });
-    const relMerged = await client.changeRequests.merge({ changeRequestId: relCr.id });
-    relatedRecordId = relMerged.record?.id ?? "";
+    await client.changeRequests.review({ changeRequestIds: [relCr.id], verdict: "approved" });
+    const relMerged = await client.changeRequests.merge({ changeRequestIds: [relCr.id] });
+    const relMergeResult = relMerged.results[0];
+    if (!relMergeResult?.ok) throw new Error(relMergeResult?.error ?? "Merge returned no result");
+    relatedRecordId = relMergeResult.record?.id ?? "";
 
     // The base under test: one field per type.
     const base = await client.bases.create({
@@ -149,10 +151,11 @@ describe("Base field types — end-to-end", () => {
       submittedBy,
       autoMerge: false,
     });
-    await client.changeRequests.review({ changeRequestId: cr.id, verdict: "approved" });
-    const merged = await client.changeRequests.merge({ changeRequestId: cr.id });
-    if (!merged.record) throw new Error("expected a created record");
-    return merged.record.id;
+    await client.changeRequests.review({ changeRequestIds: [cr.id], verdict: "approved" });
+    const merged = await client.changeRequests.merge({ changeRequestIds: [cr.id] });
+    const mergeResult = merged.results[0];
+    if (!mergeResult?.ok || !mergeResult.record) throw new Error("expected a created record");
+    return mergeResult.record.id;
   };
 
   const readFields = async (recordId: string): Promise<Record<string, unknown>> => {
@@ -246,8 +249,8 @@ describe("Base field types — end-to-end", () => {
       author: "editor-2",
       autoMerge: false,
     });
-    await client.changeRequests.review({ changeRequestId: updateCr.id, verdict: "approved" });
-    await client.changeRequests.merge({ changeRequestId: updateCr.id });
+    await client.changeRequests.review({ changeRequestIds: [updateCr.id], verdict: "approved" });
+    await client.changeRequests.merge({ changeRequestIds: [updateCr.id] });
     const after = await readFields(recordId);
 
     expect(after.f_text).toBe("v2"); // user edit applied
@@ -331,8 +334,8 @@ describe("Base field types — end-to-end", () => {
         author: "editor",
         autoMerge: false,
       });
-      await client.changeRequests.review({ changeRequestId: updateCr.id, verdict: "approved" });
-      await client.changeRequests.merge({ changeRequestId: updateCr.id });
+      await client.changeRequests.review({ changeRequestIds: [updateCr.id], verdict: "approved" });
+      await client.changeRequests.merge({ changeRequestIds: [updateCr.id] });
 
       const stored = await readFields(recordId);
       for (const [slug, value] of Object.entries(updatedValues())) {

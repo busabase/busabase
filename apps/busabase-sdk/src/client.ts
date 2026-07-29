@@ -14,7 +14,7 @@ export { normalizeBaseUrl };
  * pointed at busabase.com with an API key.
  *
  * Namespaced by domain — e.g. `client.bases.list()`, `client.records.get({ recordId })`,
- * `client.changeRequests.merge({ changeRequestId })`, `client.system.health()`.
+ * `client.changeRequests.merge({ changeRequestIds })`, `client.system.health()`.
  */
 export type BusabaseClient = ContractRouterClient<CloudContract>;
 

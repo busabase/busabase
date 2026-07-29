@@ -32,7 +32,7 @@ async function makeConflict(client: Awaited<ReturnType<typeof seedScenario>>["cl
     submittedBy: "alice",
   });
   await client.changeRequests.approve({ changeRequestId: cr1.id });
-  await client.changeRequests.merge({ changeRequestId: cr1.id });
+  await client.changeRequests.merge({ changeRequestIds: [cr1.id] });
   const cr2 = await client.records.createChangeRequest({
     baseId: base.id,
     targetRecordId: record.id,
@@ -40,7 +40,8 @@ async function makeConflict(client: Awaited<ReturnType<typeof seedScenario>>["cl
     submittedBy: "bob",
   });
   await client.changeRequests.approve({ changeRequestId: cr2.id });
-  await expect(client.changeRequests.merge({ changeRequestId: cr2.id })).rejects.toThrow();
+  const mergeResult = await client.changeRequests.merge({ changeRequestIds: [cr2.id] });
+  expect(mergeResult.results[0]).toMatchObject({ code: "CONFLICT", ok: false });
   return { base, record, cr2Id: cr2.id };
 }
 
@@ -75,8 +76,8 @@ describe("Boundary P7 — conflict-CR escape hatch", () => {
     expect(revised.mergeSummary).toEqual({});
 
     // Re-approve + merge now succeeds.
-    await raw.changeRequests.review({ changeRequestId: cr2Id, verdict: "approved" });
-    await raw.changeRequests.merge({ changeRequestId: cr2Id });
+    await raw.changeRequests.review({ changeRequestIds: [cr2Id], verdict: "approved" });
+    await raw.changeRequests.merge({ changeRequestIds: [cr2Id] });
 
     const merged = await client.changeRequests.get({ changeRequestId: cr2Id });
     expect(merged?.status).toBe("merged");

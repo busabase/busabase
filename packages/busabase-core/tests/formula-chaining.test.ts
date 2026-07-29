@@ -27,8 +27,16 @@ describe("Formula chaining + dependency-graph cycle detection (real PGLite)", ()
 
   const approveAndMerge = async (changeRequestId: string) =>
     client.changeRequests
-      .review({ changeRequestId, verdict: "approved" })
-      .then(() => client.changeRequests.merge({ changeRequestId }));
+      .review({ changeRequestIds: [changeRequestId], verdict: "approved" })
+      .then(() => client.changeRequests.merge({ changeRequestIds: [changeRequestId] }))
+      .then(({ results: [result] }) => {
+        if (!result?.ok)
+          throw Object.assign(
+            new Error(result?.error ?? "Change request merge returned no result"),
+            { code: result?.code, data: result?.data },
+          );
+        return result;
+      });
 
   beforeAll(async () => {
     originalCwd = process.cwd();

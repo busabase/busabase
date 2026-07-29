@@ -1,5 +1,5 @@
 import type { BaseVO, ChangeRequestVO, ViewVO } from "busabase-contract/types";
-import { expect, json, test } from "./_fixtures";
+import { expect, json, mergeOne, reviewOne, test } from "./_fixtures";
 
 test("saved view column drag and resize persist through change requests", async ({
   page,
@@ -24,14 +24,8 @@ test("saved view column drag and resize persist through change requests", async 
       },
     }),
   );
-  await json(
-    await request.post(`/api/v1/change-requests/${createRequest.id}/reviews`, {
-      data: { verdict: "approved" },
-    }),
-  );
-  const merged = await json<{ view: ViewVO | null }>(
-    await request.post(`/api/v1/change-requests/${createRequest.id}/merge`, { data: {} }),
-  );
+  await reviewOne(request, createRequest.id, "approved");
+  const merged = await mergeOne(request, createRequest.id);
   if (!merged.view) {
     throw new Error("Expected the column layout view to be merged");
   }

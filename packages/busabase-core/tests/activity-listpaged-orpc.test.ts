@@ -68,8 +68,8 @@ describe("activity.listPaged — keyset merge parity", () => {
       records: Array.from({ length: 6 }, (_, i) => ({ name: `r${i}`, score: i })),
       message: "seed",
     });
-    await client.changeRequests.review({ changeRequestId: cr1.id, verdict: "approved" });
-    await client.changeRequests.merge({ changeRequestId: cr1.id });
+    await client.changeRequests.review({ changeRequestIds: [cr1.id], verdict: "approved" });
+    await client.changeRequests.merge({ changeRequestIds: [cr1.id] });
 
     // CR2: one more record via a single-record CR → merge (1 CR, 1 operation).
     const cr2 = await client.bases.createChangeRequest({
@@ -77,8 +77,8 @@ describe("activity.listPaged — keyset merge parity", () => {
       fields: { name: "extra" },
       autoMerge: false,
     });
-    await client.changeRequests.review({ changeRequestId: cr2.id, verdict: "approved" });
-    await client.changeRequests.merge({ changeRequestId: cr2.id });
+    await client.changeRequests.review({ changeRequestIds: [cr2.id], verdict: "approved" });
+    await client.changeRequests.merge({ changeRequestIds: [cr2.id] });
 
     // Read a couple records → record.viewed audit events (more feed variety).
     const page = await client.records.list({ baseId, limit: 100 });

@@ -58,8 +58,8 @@ describe("Boundary P15 — base archive hides records + views", () => {
       baseId: base.id,
       submittedBy: "alice",
     });
-    await raw.changeRequests.review({ changeRequestId: restoreCr.id, verdict: "approved" });
-    await raw.changeRequests.merge({ changeRequestId: restoreCr.id });
+    await raw.changeRequests.review({ changeRequestIds: [restoreCr.id], verdict: "approved" });
+    await raw.changeRequests.merge({ changeRequestIds: [restoreCr.id] });
 
     expect((await raw.records.list({})).records.some((r) => r.id === record.id)).toBe(true);
     expect((await raw.bases.listViews({ baseId: base.id })).length).toBe(1);

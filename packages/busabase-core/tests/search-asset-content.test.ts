@@ -64,8 +64,8 @@ describe("Asset-backed file search — content vs metadata", () => {
         },
       ],
     });
-    await client.changeRequests.review({ changeRequestId: cr.id, verdict: "approved" });
-    await client.changeRequests.merge({ changeRequestId: cr.id });
+    await client.changeRequests.review({ changeRequestIds: [cr.id], verdict: "approved" });
+    await client.changeRequests.merge({ changeRequestIds: [cr.id] });
   });
 
   afterAll(async () => {

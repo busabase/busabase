@@ -53,8 +53,18 @@ describe("Staleness-aware 3-way merge — oRPC", () => {
   });
 
   const approveAndMerge = async (changeRequestId: string) => {
-    await client.changeRequests.review({ changeRequestId, verdict: "approved" });
-    return client.changeRequests.merge({ changeRequestId });
+    await client.changeRequests.review({
+      changeRequestIds: [changeRequestId],
+      verdict: "approved",
+    });
+    const [result] = (await client.changeRequests.merge({ changeRequestIds: [changeRequestId] }))
+      .results;
+    if (!result?.ok)
+      throw Object.assign(new Error(result?.error ?? "Change request merge returned no result"), {
+        code: result?.code,
+        data: result?.data,
+      });
+    return result;
   };
 
   const createRecord = async () => {
@@ -109,12 +119,14 @@ describe("Staleness-aware 3-way merge — oRPC", () => {
     await approveAndMerge(titleCrC.id);
     // D also changed `title`, from the same base → genuine conflict.
     await client.changeRequests.review({
-      changeRequestId: titleCrD.id,
+      changeRequestIds: [titleCrD.id],
       verdict: "approved",
     });
-    await expect(client.changeRequests.merge({ changeRequestId: titleCrD.id })).rejects.toThrow(
-      /Conflicting field.*title/,
-    );
+    const mergeResult = await client.changeRequests.merge({ changeRequestIds: [titleCrD.id] });
+    expect(mergeResult.results[0]).toMatchObject({
+      ok: false,
+      error: expect.stringMatching(/Conflicting field.*title/),
+    });
   });
 
   it("ignores a required field deleted after a record change request was created", async () => {
@@ -171,34 +183,25 @@ describe("Staleness-aware 3-way merge — oRPC", () => {
       submittedBy: "agent",
       autoMerge: false,
     });
-    await client.changeRequests.review({ changeRequestId: cr.id, verdict: "approved" });
+    await client.changeRequests.review({ changeRequestIds: [cr.id], verdict: "approved" });
 
     const results = await Promise.allSettled([
-      client.changeRequests.merge({ changeRequestId: cr.id }),
-      client.changeRequests.merge({ changeRequestId: cr.id }),
+      client.changeRequests.merge({ changeRequestIds: [cr.id] }),
+      client.changeRequests.merge({ changeRequestIds: [cr.id] }),
     ]);
 
-    const fulfilled = results.filter(
-      (
-        result,
-      ): result is PromiseFulfilledResult<
-        Awaited<ReturnType<typeof client.changeRequests.merge>>
-      > => result.status === "fulfilled",
+    expect(results.every((result) => result.status === "fulfilled")).toBe(true);
+    const items = results.flatMap((result) =>
+      result.status === "fulfilled" ? result.value.results : [],
     );
-    const rejected = results.filter(
-      (result): result is PromiseRejectedResult => result.status === "rejected",
-    );
-
-    // Exactly one caller wins the race and gets a real merge result back.
-    expect(fulfilled).toHaveLength(1);
-    expect(fulfilled[0]?.value.record).toBeTruthy();
-
-    // The other caller loses the race with a clear, distinct error — not a
-    // record-content merge conflict (no field diff), just "someone else already
-    // claimed this merge".
-    expect(rejected).toHaveLength(1);
-    expect(String(rejected[0]?.reason)).toMatch(/already being merged|already processed/i);
-    expect(String(rejected[0]?.reason)).not.toMatch(/Conflicting field/);
+    expect(items.filter((item) => item.ok)).toHaveLength(1);
+    expect(items.find((item) => item.ok && item.record)?.record).toBeTruthy();
+    const failed = items.find((item) => !item.ok);
+    expect(failed?.ok).toBe(false);
+    if (failed?.ok === false) {
+      expect(failed.error).toMatch(/already being merged|already processed/i);
+      expect(failed.error).not.toMatch(/Conflicting field/);
+    }
 
     // The CR ends up in a clean terminal state — merged, not stuck in "conflict"
     // with an empty payload (the corruption this regression test guards against).

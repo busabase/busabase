@@ -1,6 +1,7 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { OpenAPIHandler } from "@orpc/openapi/fetch";
 import { createRouterClient } from "@orpc/server";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { busabaseRouter } from "../src/router";
@@ -59,7 +60,7 @@ describe("Batch review & merge — oRPC integration", () => {
 
   it("approves many change requests in one call", async () => {
     const ids = await Promise.all([proposeRecord("A"), proposeRecord("B"), proposeRecord("C")]);
-    const { results } = await client.changeRequests.reviewMany({
+    const { results } = await client.changeRequests.review({
       changeRequestIds: ids,
       verdict: "approved",
     });
@@ -69,9 +70,9 @@ describe("Batch review & merge — oRPC integration", () => {
 
   it("merges many change requests in one call, then all records exist", async () => {
     const ids = await Promise.all([proposeRecord("D"), proposeRecord("E")]);
-    await client.changeRequests.reviewMany({ changeRequestIds: ids, verdict: "approved" });
+    await client.changeRequests.review({ changeRequestIds: ids, verdict: "approved" });
 
-    const { results } = await client.changeRequests.mergeMany({ changeRequestIds: ids });
+    const { results } = await client.changeRequests.merge({ changeRequestIds: ids });
     expect(results.map((r) => r.ok)).toEqual([true, true]);
 
     const { records } = await client.records.list({ baseId, limit: 100 });
@@ -81,7 +82,7 @@ describe("Batch review & merge — oRPC integration", () => {
 
   it("isolates failures — a bad id is reported, valid ids still process", async () => {
     const goodId = await proposeRecord("Good");
-    const { results } = await client.changeRequests.reviewMany({
+    const { results } = await client.changeRequests.review({
       changeRequestIds: [goodId, "crq_does_not_exist"],
       verdict: "approved",
     });
@@ -90,10 +91,35 @@ describe("Batch review & merge — oRPC integration", () => {
     expect(byId.crq_does_not_exist?.ok).toBe(false);
     expect(byId.crq_does_not_exist?.error).toMatch(/not found/i);
     // The valid one really was approved despite the sibling failure.
-    await client.changeRequests.merge({ changeRequestId: goodId });
+    const merged = await client.changeRequests.merge({ changeRequestIds: [goodId] });
+    expect(merged.results[0]).toMatchObject({ ok: true, changeRequestId: goodId });
   });
 
   it("rejects an empty batch (min 1)", async () => {
-    await expect(client.changeRequests.mergeMany({ changeRequestIds: [] })).rejects.toThrow();
+    await expect(client.changeRequests.merge({ changeRequestIds: [] })).rejects.toThrow();
+  });
+
+  it("rejects batches larger than 100", async () => {
+    await expect(
+      client.changeRequests.review({
+        changeRequestIds: Array.from({ length: 101 }, (_, index) => `crq_${index}`),
+        verdict: "approved",
+      }),
+    ).rejects.toThrow();
+  });
+
+  it("does not match the retired single-id OpenAPI paths (the HTTP route returns 404)", async () => {
+    const handler = new OpenAPIHandler(busabaseRouter);
+    for (const suffix of ["reviews", "merge"]) {
+      const result = await handler.handle(
+        new Request(`http://localhost/api/v1/change-requests/crq_retired/${suffix}`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(suffix === "reviews" ? { verdict: "approved" } : {}),
+        }),
+        { context: {} },
+      );
+      expect(result.matched).toBe(false);
+    }
   });
 });

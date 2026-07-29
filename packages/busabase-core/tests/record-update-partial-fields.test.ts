@@ -72,8 +72,18 @@ describe("record_update — partial-field submissions preserve untouched fields"
   });
 
   const approveAndMerge = async (changeRequestId: string) => {
-    await client.changeRequests.review({ changeRequestId, verdict: "approved" });
-    return client.changeRequests.merge({ changeRequestId });
+    await client.changeRequests.review({
+      changeRequestIds: [changeRequestId],
+      verdict: "approved",
+    });
+    const [result] = (await client.changeRequests.merge({ changeRequestIds: [changeRequestId] }))
+      .results;
+    if (!result?.ok)
+      throw Object.assign(new Error(result?.error ?? "Change request merge returned no result"), {
+        code: result?.code,
+        data: result?.data,
+      });
+    return result;
   };
 
   const createRecord = async (fields: Record<string, unknown>) => {
@@ -197,10 +207,12 @@ describe("record_update — partial-field submissions preserve untouched fields"
     await approveAndMerge(crOne.id);
     expect((await getFields(recordId)).title).toBe("C-one");
 
-    await client.changeRequests.review({ changeRequestId: crTwo.id, verdict: "approved" });
-    await expect(client.changeRequests.merge({ changeRequestId: crTwo.id })).rejects.toMatchObject({
+    await client.changeRequests.review({ changeRequestIds: [crTwo.id], verdict: "approved" });
+    const conflictResult = await client.changeRequests.merge({ changeRequestIds: [crTwo.id] });
+    expect(conflictResult.results[0]).toMatchObject({
       code: "CONFLICT",
-      message: expect.stringContaining("title"),
+      ok: false,
+      error: expect.stringContaining("title"),
     });
     // The conflicting merge must not have applied — field stays at CR one's value.
     expect((await getFields(recordId)).title).toBe("C-one");
@@ -226,9 +238,11 @@ describe("record_update — partial-field submissions preserve untouched fields"
 
     await approveAndMerge(crA.id);
     // crB is now stale (record moved), but touches a disjoint field → clean auto-merge, no conflict.
-    await client.changeRequests.review({ changeRequestId: crB.id, verdict: "approved" });
-    const mergedB = await client.changeRequests.merge({ changeRequestId: crB.id });
-    expect(mergedB.record?.headCommit.fields).toMatchObject({
+    await client.changeRequests.review({ changeRequestIds: [crB.id], verdict: "approved" });
+    const mergedB = await client.changeRequests.merge({ changeRequestIds: [crB.id] });
+    const mergeResult = mergedB.results[0];
+    if (!mergeResult?.ok) throw new Error(mergeResult?.error ?? "Merge returned no result");
+    expect(mergeResult.record?.headCommit.fields).toMatchObject({
       title: "D-new",
       score: 99,
       note: "orig-note",
@@ -286,7 +300,7 @@ describe("record_update — partial-field submissions preserve untouched fields"
     expect(operationId).not.toBe("");
 
     await client.changeRequests.review({
-      changeRequestId: cr.id,
+      changeRequestIds: [cr.id],
       verdict: "rejected",
       reason: "needs a different title",
     });

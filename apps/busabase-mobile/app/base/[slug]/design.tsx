@@ -1,7 +1,7 @@
 import { skipToken, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { BaseVO, FieldType, ViewVO } from "busabase-contract/types";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { ArrowLeft, Plus, Trash2 } from "lucide-react-native";
+import { ArrowLeft, Check, ChevronDown, Plus, Trash2 } from "lucide-react-native";
 import { iStringParse } from "openlib/i18n/i-string";
 import { useMemo, useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Switch, Text, View } from "react-native";
@@ -10,7 +10,6 @@ import { ConnectionGuard } from "~/components/busabase/ConnectionGuard";
 import {
   NativeActionBar,
   NativeBottomSheet,
-  NativeChipList,
   NativeEmptyState,
   NativeInlineError,
   NativeLoadingState,
@@ -87,9 +86,15 @@ function BaseDesignContent() {
   const [choiceDraft, setChoiceDraft] = useState("");
   const [viewName, setViewName] = useState("");
   const [fieldSheetOpen, setFieldSheetOpen] = useState(false);
+  const [fieldTypePickerOpen, setFieldTypePickerOpen] = useState(false);
   const [viewSheetOpen, setViewSheetOpen] = useState(false);
   const [viewPendingDelete, setViewPendingDelete] = useState<ViewVO | null>(null);
   const [choicePendingRemove, setChoicePendingRemove] = useState<string | null>(null);
+
+  const closeFieldSheet = () => {
+    setFieldTypePickerOpen(false);
+    setFieldSheetOpen(false);
+  };
 
   const addChoice = () => {
     const value = choiceDraft.trim();
@@ -126,7 +131,7 @@ function BaseDesignContent() {
       setChoices([]);
       setChoiceDraft("");
       setChoicePendingRemove(null);
-      setFieldSheetOpen(false);
+      closeFieldSheet();
       void queryClient.invalidateQueries({ queryKey: buda?.orpc.bases.list.key({}) });
     },
   });
@@ -214,6 +219,7 @@ function BaseDesignContent() {
           leading={<Plus size={18} color={tokens.mutedForeground} />}
           onPress={() => {
             addFieldMutation.reset();
+            setFieldTypePickerOpen(false);
             setFieldSheetOpen(true);
           }}
           last
@@ -247,7 +253,7 @@ function BaseDesignContent() {
         title="Add field"
         showCloseButton
         maxHeight="88%"
-        onClose={() => setFieldSheetOpen(false)}
+        onClose={closeFieldSheet}
         footer={
           <NativeActionBar>
             {addFieldMutation.error ? (
@@ -267,7 +273,7 @@ function BaseDesignContent() {
               variant="ghost"
               disabled={addFieldMutation.isPending}
               fullWidth
-              onPress={() => setFieldSheetOpen(false)}
+              onPress={closeFieldSheet}
             />
           </NativeActionBar>
         }
@@ -293,13 +299,65 @@ function BaseDesignContent() {
             onChangeText={(value) => setFieldSlug(toSlug(value))}
           />
           <Text style={[typography.small, { color: tokens.mutedForeground }]}>Type</Text>
-          <View style={styles.sheetFullBleed}>
-            <NativeChipList
-              value={fieldType}
-              options={FIELD_TYPES.map((type) => ({ value: type, label: getFieldTypeLabel(type) }))}
-              onChange={setFieldType}
-            />
-          </View>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={`Type: ${getFieldTypeLabel(fieldType)}`}
+            accessibilityState={{ expanded: fieldTypePickerOpen }}
+            style={({ pressed }) => [
+              styles.selectTrigger,
+              {
+                backgroundColor: tokens.muted,
+                borderColor: fieldTypePickerOpen ? tokens.primary : tokens.border,
+                opacity: pressed ? 0.72 : 1,
+              },
+            ]}
+            onPress={() => setFieldTypePickerOpen((open) => !open)}
+          >
+            <Text
+              numberOfLines={1}
+              style={[typography.body, styles.selectValue, { color: tokens.foreground }]}
+            >
+              {getFieldTypeLabel(fieldType)}
+            </Text>
+            <ChevronDown size={18} color={tokens.mutedForeground} />
+          </Pressable>
+          {fieldTypePickerOpen ? (
+            <ScrollView
+              nestedScrollEnabled
+              style={[styles.selectOptions, { borderColor: tokens.border }]}
+            >
+              {FIELD_TYPES.map((type) => {
+                const selected = type === fieldType;
+                return (
+                  <Pressable
+                    key={type}
+                    accessibilityRole="radio"
+                    accessibilityState={{ selected }}
+                    style={({ pressed }) => [
+                      styles.selectOption,
+                      {
+                        backgroundColor: selected ? tokens.primaryMuted : tokens.surface,
+                        borderColor: tokens.border,
+                        opacity: pressed ? 0.72 : 1,
+                      },
+                    ]}
+                    onPress={() => {
+                      setFieldType(type);
+                      setFieldTypePickerOpen(false);
+                    }}
+                  >
+                    <Text
+                      numberOfLines={1}
+                      style={[typography.body, styles.selectValue, { color: tokens.foreground }]}
+                    >
+                      {getFieldTypeLabel(type)}
+                    </Text>
+                    {selected ? <Check size={17} color={tokens.foreground} /> : null}
+                  </Pressable>
+                );
+              })}
+            </ScrollView>
+          ) : null}
           {CHOICE_TYPES.has(fieldType) ? (
             <View style={styles.choices}>
               <Text style={[typography.small, { color: tokens.mutedForeground }]}>Choices</Text>
@@ -478,7 +536,29 @@ const styles = StyleSheet.create({
   },
   sheetScroll: { maxHeight: 460 },
   sheetForm: { gap: 12, paddingBottom: 8 },
-  sheetFullBleed: { marginHorizontal: -20 },
+  selectTrigger: {
+    minHeight: mobile.minTouchTarget,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: radius.md,
+    paddingHorizontal: 14,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  selectValue: { flex: 1, minWidth: 0 },
+  selectOptions: {
+    maxHeight: 220,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: radius.md,
+  },
+  selectOption: {
+    minHeight: mobile.minTouchTarget,
+    paddingHorizontal: 14,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
   chips: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   chip: {
     borderWidth: StyleSheet.hairlineWidth,

@@ -1,4 +1,11 @@
-import { type APIResponse, test as base, expect, type Page } from "@playwright/test";
+import {
+  type APIRequestContext,
+  type APIResponse,
+  test as base,
+  expect,
+  type Page,
+} from "@playwright/test";
+import type { ChangeRequestVO, RecordVO, ViewVO } from "busabase-contract/types";
 
 // Why this file exists:
 // busabase's `/dashboard/local/*` is a force-dynamic catch-all page (`app/dashboard/[spaceId]/
@@ -40,6 +47,57 @@ export const json = async <T>(response: APIResponse): Promise<T> => {
     throw new Error(`${response.status()} ${await response.text()}`);
   }
   return response.json() as Promise<T>;
+};
+
+type ChangeRequestFailure = { changeRequestId: string; ok: false; error: string };
+
+export const reviewOne = async (
+  request: APIRequestContext,
+  changeRequestId: string,
+  verdict: "approved" | "rejected",
+  reason?: string,
+): Promise<ChangeRequestVO> => {
+  const response = await json<{
+    results: Array<
+      { changeRequestId: string; ok: true; changeRequest: ChangeRequestVO } | ChangeRequestFailure
+    >;
+  }>(
+    await request.post("/api/v1/change-requests/reviews", {
+      data: { changeRequestIds: [changeRequestId], verdict, ...(reason ? { reason } : {}) },
+    }),
+  );
+  const result = response.results[0];
+  if (!result?.ok) throw new Error(result?.error ?? "Change request review returned no result");
+  return result.changeRequest;
+};
+
+export const mergeOne = async (
+  request: APIRequestContext,
+  changeRequestId: string,
+): Promise<{ changeRequest: ChangeRequestVO; record: RecordVO | null; view: ViewVO | null }> => {
+  const response = await json<{
+    results: Array<
+      | {
+          changeRequestId: string;
+          ok: true;
+          changeRequest: ChangeRequestVO;
+          record: RecordVO | null;
+          view: ViewVO | null;
+        }
+      | ChangeRequestFailure
+    >;
+  }>(
+    await request.post("/api/v1/change-requests/merge", {
+      data: { changeRequestIds: [changeRequestId] },
+    }),
+  );
+  const result = response.results[0];
+  if (!result?.ok) throw new Error(result?.error ?? "Change request merge returned no result");
+  return {
+    changeRequest: result.changeRequest,
+    record: result.record,
+    view: result.view,
+  };
 };
 
 // Unique-ish suffix for titles created by the write specs, so records/CRs from

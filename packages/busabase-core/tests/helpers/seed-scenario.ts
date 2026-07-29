@@ -27,8 +27,15 @@ function buildClient(raw: RawClient) {
   const recordBaseCommitCache = new Map<string, string>();
 
   const approveAndMerge = async (changeRequestId: string) => {
-    await raw.changeRequests.review({ changeRequestId, verdict: "approved" });
-    return raw.changeRequests.merge({ changeRequestId });
+    await raw.changeRequests.review({ changeRequestIds: [changeRequestId], verdict: "approved" });
+    const [result] = (await raw.changeRequests.merge({ changeRequestIds: [changeRequestId] }))
+      .results;
+    if (!result?.ok)
+      throw Object.assign(new Error(result?.error ?? "Change request merge returned no result"), {
+        code: result?.code,
+        data: result?.data,
+      });
+    return result;
   };
 
   return {
@@ -227,7 +234,10 @@ function buildClient(raw: RawClient) {
       get: (input: Parameters<RawClient["changeRequests"]["get"]>[0]) =>
         raw.changeRequests.get(input),
       approve: (input: { changeRequestId: string; reviewedBy?: string }) =>
-        raw.changeRequests.review({ changeRequestId: input.changeRequestId, verdict: "approved" }),
+        raw.changeRequests.review({
+          changeRequestIds: [input.changeRequestId],
+          verdict: "approved",
+        }),
       merge: (input: Parameters<RawClient["changeRequests"]["merge"]>[0]) =>
         raw.changeRequests.merge(input),
     },

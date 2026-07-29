@@ -59,8 +59,8 @@ describe("mergeBaseConvertField — text → select auto_create at scale", () =>
       ...Array.from({ length: NULLS }, (_, i) => ({ name: `n${i}` })),
     ];
     const cr = await client.bases.createBulkChangeRequest({ baseId, records, message: "seed" });
-    await client.changeRequests.review({ changeRequestId: cr.id, verdict: "approved" });
-    await client.changeRequests.merge({ changeRequestId: cr.id });
+    await client.changeRequests.review({ changeRequestIds: [cr.id], verdict: "approved" });
+    await client.changeRequests.merge({ changeRequestIds: [cr.id] });
 
     // Capture each record's ORIGINAL tag label before the conversion.
     const page = await client.records.list({ baseId, limit: 100 });
@@ -89,8 +89,8 @@ describe("mergeBaseConvertField — text → select auto_create at scale", () =>
       newType: "select",
       selectChoiceMode: "auto_create",
     });
-    await client.changeRequests.review({ changeRequestId: convertCr.id, verdict: "approved" });
-    await client.changeRequests.merge({ changeRequestId: convertCr.id });
+    await client.changeRequests.review({ changeRequestIds: [convertCr.id], verdict: "approved" });
+    await client.changeRequests.merge({ changeRequestIds: [convertCr.id] });
 
     const updatedBase = (await client.bases.list({})).find((base) => base.id === baseId);
     const tagField = updatedBase?.fields.find((field) => field.slug === "tag");

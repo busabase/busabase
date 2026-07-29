@@ -46,8 +46,16 @@ describe("node / field restore fixes", () => {
 
   const approveAndMerge = (changeRequestId: string) =>
     client.changeRequests
-      .review({ changeRequestId, verdict: "approved" })
-      .then(() => client.changeRequests.merge({ changeRequestId }));
+      .review({ changeRequestIds: [changeRequestId], verdict: "approved" })
+      .then(() => client.changeRequests.merge({ changeRequestIds: [changeRequestId] }))
+      .then(({ results: [result] }) => {
+        if (!result?.ok)
+          throw Object.assign(
+            new Error(result?.error ?? "Change request merge returned no result"),
+            { code: result?.code, data: result?.data },
+          );
+        return result;
+      });
 
   // ── A: node trash/restore preserves individually-deleted records ───────────
   it("restoring a trashed base does not resurrect a record deleted individually (#A)", async () => {

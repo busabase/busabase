@@ -106,13 +106,16 @@ describe("Change-request review loop — oRPC", () => {
       expect(pendingReviewEvent.changeRequestId).toBe(cr.id);
 
       const reviewedEventPromise = nextLiveEvent(iterator);
-      const reviewed = await client.changeRequests.review({
-        changeRequestId: cr.id,
+      const reviewedResult = await client.changeRequests.review({
+        changeRequestIds: [cr.id],
         verdict: "rejected",
         reason: "Needs another pass",
       });
+      const reviewed = reviewedResult.results[0];
+      expect(reviewed?.ok).toBe(true);
+      if (!reviewed?.ok) throw new Error(reviewed?.error ?? "Review returned no result");
       const reviewedEvent = await reviewedEventPromise;
-      expect(reviewed.status).toBe("changes_requested");
+      expect(reviewed.changeRequest.status).toBe("changes_requested");
       expect(reviewedEvent.kind).toBe("change_request.reviewed");
       expect(reviewedEvent.changeRequestId).toBe(cr.id);
       expect(reviewedEvent.baseId).toBe(blogBaseId);
@@ -129,14 +132,16 @@ describe("Change-request review loop — oRPC", () => {
     const operationId = cr.primaryOperation?.id ?? "";
     expect(operationId).not.toBe("");
 
-    const reviewed = await client.changeRequests.review({
-      changeRequestId: cr.id,
+    const reviewedResult = await client.changeRequests.review({
+      changeRequestIds: [cr.id],
       verdict: "rejected",
       reason: "Tighten the intro. @ai",
     });
     // "request changes" → soft, revisable state — NOT rejected.
-    expect(reviewed.status).toBe("changes_requested");
-    expect(reviewed.reviews.at(-1)?.reason).toContain("Tighten");
+    const reviewed = reviewedResult.results[0];
+    if (!reviewed?.ok) throw new Error(reviewed?.error ?? "Review returned no result");
+    expect(reviewed.changeRequest.status).toBe("changes_requested");
+    expect(reviewed.changeRequest.reviews.at(-1)?.reason).toContain("Tighten");
 
     // The agent responds by revising → CR returns to the reviewer's queue.
     const revised = await client.operations.revise({
@@ -147,12 +152,12 @@ describe("Change-request review loop — oRPC", () => {
 
     // Re-review → approve → merge.
     const approved = await client.changeRequests.review({
-      changeRequestId: cr.id,
+      changeRequestIds: [cr.id],
       verdict: "approved",
     });
-    expect(approved.status).toBe("approved");
-    const merged = await client.changeRequests.merge({ changeRequestId: cr.id });
-    expect(merged.changeRequest.status).toBe("merged");
+    expect(approved.results[0]).toMatchObject({ ok: true, status: "approved" });
+    const merged = await client.changeRequests.merge({ changeRequestIds: [cr.id] });
+    expect(merged.results[0]).toMatchObject({ ok: true, status: "merged" });
   });
 
   it("close is terminal and blocks further revision", async () => {

@@ -63,16 +63,28 @@ describe("Change-request collaboration — oRPC", () => {
     });
 
   const approveAndMerge = async (changeRequestId: string) => {
-    await client.changeRequests.review({ changeRequestId, verdict: "approved" });
-    return client.changeRequests.merge({ changeRequestId });
+    await client.changeRequests.review({
+      changeRequestIds: [changeRequestId],
+      verdict: "approved",
+    });
+    const [result] = (await client.changeRequests.merge({ changeRequestIds: [changeRequestId] }))
+      .results;
+    if (!result?.ok)
+      throw Object.assign(new Error(result?.error ?? "Change request merge returned no result"), {
+        code: result?.code,
+        data: result?.data,
+      });
+    return result;
   };
 
   it("reports merge-before-approval as a conflict instead of an internal error", async () => {
     const cr = await createCr({ title: "not approved yet", body: "b", channel: "blog" });
 
-    await expect(client.changeRequests.merge({ changeRequestId: cr.id })).rejects.toMatchObject({
+    const mergeResult = await client.changeRequests.merge({ changeRequestIds: [cr.id] });
+    expect(mergeResult.results[0]).toMatchObject({
       code: "CONFLICT",
-      message: "ChangeRequest must be approved before merge",
+      ok: false,
+      error: "ChangeRequest must be approved before merge",
     });
   });
 
@@ -83,22 +95,27 @@ describe("Change-request collaboration — oRPC", () => {
       await approveAndMerge(cr.id);
 
       const reviewed = await client.changeRequests.review({
-        changeRequestId: cr.id,
+        changeRequestIds: [cr.id],
         verdict: "approved",
       });
-      expect(reviewed.status).toBe("merged");
-      expect(reviewed.reviews).toHaveLength(1);
+      const reviewResult = reviewed.results[0];
+      if (!reviewResult?.ok) throw new Error(reviewResult?.error ?? "Review returned no result");
+      expect(reviewResult.changeRequest.status).toBe("merged");
+      expect(reviewResult.changeRequest.reviews).toHaveLength(1);
     });
 
     it("rejecting an already-merged CR throws instead of silently no-op'ing", async () => {
       const cr = await createCr({ title: "reject after merge", body: "b", channel: "blog" });
       await approveAndMerge(cr.id);
 
-      await expect(
-        client.changeRequests.review({ changeRequestId: cr.id, verdict: "rejected" }),
-      ).rejects.toMatchObject({
+      const reviewResult = await client.changeRequests.review({
+        changeRequestIds: [cr.id],
+        verdict: "rejected",
+      });
+      expect(reviewResult.results[0]).toMatchObject({
         code: "CONFLICT",
-        message: expect.stringContaining("already been merged"),
+        ok: false,
+        error: expect.stringContaining("already been merged"),
       });
 
       // The CR must stay exactly as merged — no phantom review recorded, no
@@ -118,11 +135,11 @@ describe("Change-request collaboration — oRPC", () => {
 
       // Reviewer requests changes (a non-terminal "rejected" verdict).
       const reviewed = await client.changeRequests.review({
-        changeRequestId: cr.id,
+        changeRequestIds: [cr.id],
         verdict: "rejected",
         reason: "needs polish",
       });
-      expect(reviewed.status).toBe("changes_requested");
+      expect(reviewed.results[0]).toMatchObject({ ok: true, status: "changes_requested" });
 
       // Agent revises → the CR returns to in_review with the new field values.
       const revised = await client.operations.revise({

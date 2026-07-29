@@ -45,8 +45,16 @@ describe("node restore subtree scope (#B)", () => {
 
   const approveAndMerge = (changeRequestId: string) =>
     client.changeRequests
-      .review({ changeRequestId, verdict: "approved" })
-      .then(() => client.changeRequests.merge({ changeRequestId }));
+      .review({ changeRequestIds: [changeRequestId], verdict: "approved" })
+      .then(() => client.changeRequests.merge({ changeRequestIds: [changeRequestId] }))
+      .then(({ results: [result] }) => {
+        if (!result?.ok)
+          throw Object.assign(
+            new Error(result?.error ?? "Change request merge returned no result"),
+            { code: result?.code, data: result?.data },
+          );
+        return result;
+      });
 
   const folderBySlug = async (slug: string) =>
     (await client.folders.list()).find((f) => f.node.slug === slug);

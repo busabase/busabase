@@ -722,8 +722,32 @@ const toKeyArray = (value: unknown): string[] => {
 
 /** Merging requires an `approved` status, so every auto-merge is review-then-merge. */
 const approveAndMerge = async (client: PackageClient, changeRequestId: string) => {
-  await client.changeRequests.review({ changeRequestId, verdict: "approved" });
-  return client.changeRequests.merge({ changeRequestId });
+  const reviewed = await client.changeRequests.review({
+    changeRequestIds: [changeRequestId],
+    verdict: "approved",
+  });
+  const reviewResult = reviewed.results[0];
+  if (!reviewResult?.ok) {
+    throw Object.assign(
+      new Error(reviewResult?.error ?? "Change request review returned no result"),
+      {
+        code: reviewResult?.code,
+        data: reviewResult?.data,
+      },
+    );
+  }
+  const merged = await client.changeRequests.merge({ changeRequestIds: [changeRequestId] });
+  const mergeResult = merged.results[0];
+  if (!mergeResult?.ok) {
+    throw Object.assign(
+      new Error(mergeResult?.error ?? "Change request merge returned no result"),
+      {
+        code: mergeResult?.code,
+        data: mergeResult?.data,
+      },
+    );
+  }
+  return mergeResult;
 };
 
 export const __testing = { collectBaseNodes };

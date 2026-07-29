@@ -180,8 +180,8 @@ export function FileTreeDetailView({
         setLocation(`/inbox/${changeRequest.id}`);
         return;
       }
-      await reviewCr.mutateAsync({ changeRequestId: changeRequest.id, verdict: "approved" });
-      await mergeCr.mutateAsync({ changeRequestId: changeRequest.id });
+      await reviewCr.mutateAsync({ changeRequestIds: [changeRequest.id], verdict: "approved" });
+      await mergeCr.mutateAsync({ changeRequestIds: [changeRequest.id] });
       await queryClient.invalidateQueries({
         queryKey: orpc.fileTrees.get.queryOptions({
           input: { nodeId: fileTree.node.id, type: nodeType },
@@ -738,10 +738,10 @@ export function DocDetailView({
         body: draft,
       });
       await reviewCr.mutateAsync({
-        changeRequestId: changeRequest.id,
+        changeRequestIds: [changeRequest.id],
         verdict: "approved",
       });
-      await mergeCr.mutateAsync({ changeRequestId: changeRequest.id });
+      await mergeCr.mutateAsync({ changeRequestIds: [changeRequest.id] });
       await docQuery.refetch();
       setIsEditing(false);
     } catch (caught) {

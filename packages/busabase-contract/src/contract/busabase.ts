@@ -51,17 +51,43 @@ import {
   updateNodeMetadataInputSchema,
 } from "./schemas";
 
-// Per-item outcome for the batch review/merge endpoints. Failures are isolated:
-// one bad change request records an `error` and the rest still process, so an agent
-// acting on "just merge them all" gets a full report instead of an abort.
-const changeRequestBatchResultSchema = z.object({
+const changeRequestBatchFailureSchema = z.object({
+  changeRequestId: z.string(),
+  ok: z.literal(false),
+  error: z.string(),
+  code: z.string().optional(),
+  data: z.unknown().optional(),
+});
+
+// Per-item outcomes carry the full successful value so higher-level clients can
+// preserve their ergonomic single-item methods while the raw API stays batched.
+const changeRequestReviewBatchResultSchema = z.object({
   results: z.array(
-    z.object({
-      changeRequestId: z.string(),
-      ok: z.boolean(),
-      status: z.string().optional(),
-      error: z.string().optional(),
-    }),
+    z.discriminatedUnion("ok", [
+      z.object({
+        changeRequestId: z.string(),
+        ok: z.literal(true),
+        status: z.string(),
+        changeRequest: changeRequestSchema,
+      }),
+      changeRequestBatchFailureSchema,
+    ]),
+  ),
+});
+
+const changeRequestMergeBatchResultSchema = z.object({
+  results: z.array(
+    z.discriminatedUnion("ok", [
+      z.object({
+        changeRequestId: z.string(),
+        ok: z.literal(true),
+        status: z.string(),
+        changeRequest: changeRequestSchema,
+        record: recordSchema.nullable(),
+        view: viewSchema.nullable(),
+      }),
+      changeRequestBatchFailureSchema,
+    ]),
   ),
 });
 
@@ -437,19 +463,9 @@ export const busabaseContractRoutes = {
     review: oc
       .route({
         method: "POST",
-        path: "/change-requests/{changeRequestId}/reviews",
-        tags: ["Change Requests"],
-        summary: "Review change request",
-        successDescription: "Reviewed change request.",
-      })
-      .input(reviewChangeRequestInputSchema.extend({ changeRequestId: z.string() }))
-      .output(changeRequestSchema),
-    reviewMany: oc
-      .route({
-        method: "POST",
         path: "/change-requests/reviews",
         tags: ["Change Requests"],
-        summary: "Review many change requests",
+        summary: "Review change requests",
         successDescription:
           "Per-change-request review results (failures isolated — one bad id does not abort the rest).",
       })
@@ -458,7 +474,7 @@ export const busabaseContractRoutes = {
           changeRequestIds: z.array(z.string()).min(1).max(100),
         }),
       )
-      .output(changeRequestBatchResultSchema),
+      .output(changeRequestReviewBatchResultSchema),
     close: oc
       .route({
         method: "POST",
@@ -472,30 +488,14 @@ export const busabaseContractRoutes = {
     merge: oc
       .route({
         method: "POST",
-        path: "/change-requests/{changeRequestId}/merge",
-        tags: ["Change Requests"],
-        summary: "Merge change request into Base",
-        successDescription: "Merged change request and canonical record.",
-      })
-      .input(z.object({ changeRequestId: z.string() }))
-      .output(
-        z.object({
-          changeRequest: changeRequestSchema,
-          record: recordSchema.nullable(),
-          view: viewSchema.nullable(),
-        }),
-      ),
-    mergeMany: oc
-      .route({
-        method: "POST",
         path: "/change-requests/merge",
         tags: ["Change Requests"],
-        summary: "Merge many change requests",
+        summary: "Merge change requests",
         successDescription:
           "Per-change-request merge results (each merged in its own transaction; failures isolated).",
       })
       .input(z.object({ changeRequestIds: z.array(z.string()).min(1).max(100) }))
-      .output(changeRequestBatchResultSchema),
+      .output(changeRequestMergeBatchResultSchema),
   },
   operations: {
     revise: oc

@@ -51,8 +51,18 @@ describe("assets.editContent — string-replace edits via ChangeRequest", () => 
   });
 
   const approveAndMerge = async (changeRequestId: string) => {
-    await client.changeRequests.review({ changeRequestId, verdict: "approved" });
-    return client.changeRequests.merge({ changeRequestId });
+    await client.changeRequests.review({
+      changeRequestIds: [changeRequestId],
+      verdict: "approved",
+    });
+    const [result] = (await client.changeRequests.merge({ changeRequestIds: [changeRequestId] }))
+      .results;
+    if (!result?.ok)
+      throw Object.assign(new Error(result?.error ?? "Change request merge returned no result"), {
+        code: result?.code,
+        data: result?.data,
+      });
+    return result;
   };
 
   /** Creates a Drive (autoMerge: true) with one text file, returns its mounted assetId. */
@@ -319,12 +329,13 @@ describe("assets.editContent — string-replace edits via ChangeRequest", () => 
       // exactly like drives-orpc.test.ts's "returns CONFLICT for stale Drive
       // file merges" case, proving no new/duplicate conflict logic was added.
       await client.changeRequests.review({
-        changeRequestId: editContentCr.id,
+        changeRequestIds: [editContentCr.id],
         verdict: "approved",
       });
-      await expect(
-        client.changeRequests.merge({ changeRequestId: editContentCr.id }),
-      ).rejects.toMatchObject({ code: "CONFLICT" });
+      const mergeResult = await client.changeRequests.merge({
+        changeRequestIds: [editContentCr.id],
+      });
+      expect(mergeResult.results[0]).toMatchObject({ code: "CONFLICT", ok: false });
     });
   });
 });

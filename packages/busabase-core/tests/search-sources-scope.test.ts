@@ -56,8 +56,8 @@ describe("search — sources scope", () => {
       submittedBy: "test",
       autoMerge: false,
     });
-    await client.changeRequests.review({ changeRequestId: recordCr.id, verdict: "approved" });
-    await client.changeRequests.merge({ changeRequestId: recordCr.id });
+    await client.changeRequests.review({ changeRequestIds: [recordCr.id], verdict: "approved" });
+    await client.changeRequests.merge({ changeRequestIds: [recordCr.id] });
 
     // Files source: a marker living only in a mounted file's content.
     const hash = `sha256:${"d".repeat(64)}`;
@@ -89,8 +89,8 @@ describe("search — sources scope", () => {
       ],
       autoMerge: false,
     });
-    await client.changeRequests.review({ changeRequestId: fileCr.id, verdict: "approved" });
-    await client.changeRequests.merge({ changeRequestId: fileCr.id });
+    await client.changeRequests.review({ changeRequestIds: [fileCr.id], verdict: "approved" });
+    await client.changeRequests.merge({ changeRequestIds: [fileCr.id] });
 
     // Names source: a marker living only in a Base's own name.
     const namedBase = await client.bases.create({

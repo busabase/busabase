@@ -67,10 +67,10 @@ export function NodeRenameSheet({ visible, node, onClose, onBack }: NodeRenameSh
       });
       if (mergeImmediately) {
         await buda.client.changeRequests.review({
-          changeRequestId: changeRequest.id,
+          changeRequestIds: [changeRequest.id],
           verdict: "approved",
         });
-        await buda.client.changeRequests.merge({ changeRequestId: changeRequest.id });
+        await buda.client.changeRequests.merge({ changeRequestIds: [changeRequest.id] });
       }
       return { changeRequest, merged: mergeImmediately };
     },

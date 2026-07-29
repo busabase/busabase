@@ -48,8 +48,18 @@ describe("Boundary P3 — oRPC", () => {
   });
 
   const approveAndMerge = async (changeRequestId: string) => {
-    await client.changeRequests.review({ changeRequestId, verdict: "approved" });
-    return client.changeRequests.merge({ changeRequestId });
+    await client.changeRequests.review({
+      changeRequestIds: [changeRequestId],
+      verdict: "approved",
+    });
+    const [result] = (await client.changeRequests.merge({ changeRequestIds: [changeRequestId] }))
+      .results;
+    if (!result?.ok)
+      throw Object.assign(new Error(result?.error ?? "Change request merge returned no result"), {
+        code: result?.code,
+        data: result?.data,
+      });
+    return result;
   };
 
   const makeBase = async (
@@ -144,13 +154,10 @@ describe("Boundary P3 — oRPC", () => {
       fieldId: statusField.id,
       patch: { options: { choices: [{ id: "ch_done", name: "Done" }] } },
     });
-    await client.changeRequests.review({ changeRequestId: cr.id, verdict: "approved" });
-    await expect(client.changeRequests.merge({ changeRequestId: cr.id })).rejects.toMatchObject({
-      code: "BAD_REQUEST",
-    });
-    await client.changeRequests.merge({ changeRequestId: cr.id }).catch((err) => {
-      expect(JSON.stringify(err.data ?? {})).toContain(recordId);
-    });
+    await client.changeRequests.review({ changeRequestIds: [cr.id], verdict: "approved" });
+    const choiceResult = await client.changeRequests.merge({ changeRequestIds: [cr.id] });
+    expect(choiceResult.results[0]).toMatchObject({ code: "BAD_REQUEST", ok: false });
+    expect(JSON.stringify(choiceResult.results[0])).toContain(recordId);
   });
 
   // ── Fix 3: merge re-validates required against current schema ───────────────
@@ -181,10 +188,9 @@ describe("Boundary P3 — oRPC", () => {
     await approveAndMerge(reqCr.id);
 
     // Now merging the record CR must fail — note is required but absent.
-    await client.changeRequests.review({ changeRequestId: recCr.id, verdict: "approved" });
-    await expect(client.changeRequests.merge({ changeRequestId: recCr.id })).rejects.toMatchObject({
-      code: "BAD_REQUEST",
-    });
+    await client.changeRequests.review({ changeRequestIds: [recCr.id], verdict: "approved" });
+    const requiredResult = await client.changeRequests.merge({ changeRequestIds: [recCr.id] });
+    expect(requiredResult.results[0]).toMatchObject({ code: "BAD_REQUEST", ok: false });
   });
 
   // ── Fix 4: record links cleaned when target archived ────────────────────────

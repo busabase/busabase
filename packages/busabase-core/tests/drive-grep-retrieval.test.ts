@@ -733,8 +733,8 @@ describe("Drive Grep Retrieval — putText / grep / readLines", () => {
         message: "Replace contract with v2",
         submittedBy: "agent",
       });
-      await client.changeRequests.review({ changeRequestId: cr.id, verdict: "approved" });
-      await client.changeRequests.merge({ changeRequestId: cr.id });
+      await client.changeRequests.review({ changeRequestIds: [cr.id], verdict: "approved" });
+      await client.changeRequests.merge({ changeRequestIds: [cr.id] });
 
       // The mounted asset id at that path is stable (pdfAssetId) — only its
       // attachmentId repoints. Its OLD derived text is now stale.
@@ -785,8 +785,8 @@ describe("Drive Grep Retrieval — putText / grep / readLines", () => {
         message: "Rewrite notes",
         submittedBy: "agent",
       });
-      await client.changeRequests.review({ changeRequestId: cr.id, verdict: "approved" });
-      await client.changeRequests.merge({ changeRequestId: cr.id });
+      await client.changeRequests.review({ changeRequestIds: [cr.id], verdict: "approved" });
+      await client.changeRequests.merge({ changeRequestIds: [cr.id] });
 
       const row = expectDefined(await getTextRow(mountedAssetId));
       expect(row.status).toBe("present"); // never stale for a pure text-kind row
@@ -860,8 +860,8 @@ describe("Drive Grep Retrieval — putText / grep / readLines", () => {
         message: "Replace notes with a binary file",
         submittedBy: "agent",
       });
-      await client.changeRequests.review({ changeRequestId: cr.id, verdict: "approved" });
-      await client.changeRequests.merge({ changeRequestId: cr.id });
+      await client.changeRequests.review({ changeRequestIds: [cr.id], verdict: "approved" });
+      await client.changeRequests.merge({ changeRequestIds: [cr.id] });
 
       // Reverted to "missing" (no row) — NOT stuck as `stale` forever.
       expect(await getTextRow(mountedAssetId)).toBeUndefined();

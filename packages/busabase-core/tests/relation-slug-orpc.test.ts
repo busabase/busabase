@@ -66,8 +66,11 @@ describe("Relation field target by slug — oRPC integration", () => {
   });
 
   const approveMerge = async (changeRequestId: string) => {
-    await client.changeRequests.review({ changeRequestId, verdict: "approved" });
-    await client.changeRequests.merge({ changeRequestId });
+    await client.changeRequests.review({
+      changeRequestIds: [changeRequestId],
+      verdict: "approved",
+    });
+    await client.changeRequests.merge({ changeRequestIds: [changeRequestId] });
   };
 
   it("resolves the slug on a direct add-field (bases.createField)", async () => {

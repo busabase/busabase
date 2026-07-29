@@ -96,20 +96,39 @@ const createFakeServer = (): FakeServer => {
     changeRequests: {
       review: async (input: unknown) => {
         record("changeRequests.review", input);
-        return {};
+        const [changeRequestId] = (input as { changeRequestIds: string[] }).changeRequestIds;
+        return {
+          results: [
+            {
+              changeRequestId,
+              ok: true as const,
+              status: "approved",
+              changeRequest: { id: changeRequestId, status: "approved" },
+            },
+          ],
+        };
       },
       merge: async (input: unknown) => {
         record("changeRequests.merge", input);
-        const { changeRequestId } = input as { changeRequestId: string };
+        const [changeRequestId] = (input as { changeRequestIds: string[] }).changeRequestIds;
         const size = bulkSizes.get(changeRequestId) ?? 0;
         return {
-          changeRequest: {
-            operations: Array.from({ length: size }, (_, index) => ({
-              operation: "record_create",
-              position: index,
-              mergedRecordId: `rec_new_${++recordSeq}`,
-            })),
-          },
+          results: [
+            {
+              changeRequestId,
+              ok: true as const,
+              status: "merged",
+              changeRequest: {
+                operations: Array.from({ length: size }, (_, index) => ({
+                  operation: "record_create",
+                  position: index,
+                  mergedRecordId: `rec_new_${++recordSeq}`,
+                })),
+              },
+              record: null,
+              view: null,
+            },
+          ],
         };
       },
     },

@@ -56,12 +56,19 @@ export function findFolderByName(nodes: NodeTreeVO[], name: string): NodeTreeVO 
 
 /** Approve + merge a change request. Returns the merge result. */
 export async function approveMerge(crId: string) {
-  await api("POST", `/change-requests/${crId}/reviews`, { verdict: "approved" });
-  return api<{ changeRequest: { id: string; status: string }; record: unknown; view: unknown }>(
-    "POST",
-    `/change-requests/${crId}/merge`,
-    {},
-  );
+  await api("POST", "/change-requests/reviews", {
+    changeRequestIds: [crId],
+    verdict: "approved",
+  });
+  const merged = await api<{
+    results: Array<
+      | { ok: true; changeRequest: { id: string; status: string }; record: unknown; view: unknown }
+      | { ok: false; error: string }
+    >;
+  }>("POST", "/change-requests/merge", { changeRequestIds: [crId] });
+  const result = merged.results[0];
+  if (!result?.ok) throw new Error(result?.error ?? "Change request merge returned no result");
+  return result;
 }
 
 export function makeRunner(suiteName: string) {

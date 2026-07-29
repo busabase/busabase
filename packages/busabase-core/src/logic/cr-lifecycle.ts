@@ -8,6 +8,7 @@ import type {
   OperationVO,
   RecordVO,
   ReviewVO,
+  ViewVO,
 } from "busabase-contract/types";
 import { and, asc, desc, eq, inArray, isNull, lt, ne, or, type SQL } from "drizzle-orm";
 import { z } from "zod";
@@ -2771,12 +2772,38 @@ const _mergeChangeRequest = async (changeRequestId: string) => {
   };
 };
 
-export interface BatchChangeRequestResult {
-  results: Array<{ changeRequestId: string; ok: boolean; status?: string; error?: string }>;
+export interface BatchReviewChangeRequestResult {
+  results: Array<
+    | { changeRequestId: string; ok: true; status: string; changeRequest: ChangeRequestVO }
+    | { changeRequestId: string; ok: false; error: string; code?: string; data?: unknown }
+  >;
+}
+
+export interface BatchMergeChangeRequestResult {
+  results: Array<
+    | {
+        changeRequestId: string;
+        ok: true;
+        status: string;
+        changeRequest: ChangeRequestVO;
+        record: RecordVO | null;
+        view: ViewVO | null;
+      }
+    | { changeRequestId: string; ok: false; error: string; code?: string; data?: unknown }
+  >;
 }
 
 const errorMessage = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);
+
+const batchFailure = (changeRequestId: string, error: unknown) => ({
+  changeRequestId,
+  ok: false as const,
+  error: errorMessage(error),
+  ...(error instanceof ORPCError
+    ? { code: error.code, ...(error.data === undefined ? {} : { data: error.data }) }
+    : {}),
+});
 
 /**
  * Review many change requests with the same verdict in one call (for an agent
@@ -2787,14 +2814,19 @@ const errorMessage = (error: unknown): string =>
 export const reviewChangeRequests = async (
   changeRequestIds: string[],
   input: z.infer<typeof reviewInputSchema>,
-): Promise<BatchChangeRequestResult> => {
-  const results: BatchChangeRequestResult["results"] = [];
+): Promise<BatchReviewChangeRequestResult> => {
+  const results: BatchReviewChangeRequestResult["results"] = [];
   for (const changeRequestId of changeRequestIds) {
     try {
       const changeRequest = await reviewChangeRequest(changeRequestId, input);
-      results.push({ changeRequestId, ok: true, status: changeRequest.status });
+      results.push({
+        changeRequestId,
+        ok: true,
+        status: changeRequest.status,
+        changeRequest,
+      });
     } catch (error) {
-      results.push({ changeRequestId, ok: false, error: errorMessage(error) });
+      results.push(batchFailure(changeRequestId, error));
     }
   }
   return { results };
@@ -2808,14 +2840,21 @@ export const reviewChangeRequests = async (
  */
 export const mergeChangeRequests = async (
   changeRequestIds: string[],
-): Promise<BatchChangeRequestResult> => {
-  const results: BatchChangeRequestResult["results"] = [];
+): Promise<BatchMergeChangeRequestResult> => {
+  const results: BatchMergeChangeRequestResult["results"] = [];
   for (const changeRequestId of changeRequestIds) {
     try {
       const merged = await mergeChangeRequest(changeRequestId);
-      results.push({ changeRequestId, ok: true, status: merged.changeRequest.status });
+      results.push({
+        changeRequestId,
+        ok: true,
+        status: merged.changeRequest.status,
+        changeRequest: merged.changeRequest,
+        record: merged.record,
+        view: merged.view,
+      });
     } catch (error) {
-      results.push({ changeRequestId, ok: false, error: errorMessage(error) });
+      results.push(batchFailure(changeRequestId, error));
     }
   }
   return { results };

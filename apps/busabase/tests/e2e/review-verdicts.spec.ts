@@ -1,4 +1,12 @@
-import { type APIRequestContext, cmsPostFields, expect, json, test, unique } from "./_fixtures";
+import {
+  type APIRequestContext,
+  cmsPostFields,
+  expect,
+  json,
+  reviewOne,
+  test,
+  unique,
+} from "./_fixtures";
 
 // The existing suite covers the Approve and "Request changes" verdicts. The
 // remaining reviewer exit is CLOSE (abandon): a change request can be closed from
@@ -79,11 +87,7 @@ test("closing an approved change request abandons it instead of merging", async 
   const created = await createChangeRequest(request, blog.id, title);
 
   // Approve over the API so the composer is in its "ready to merge" state.
-  await json<ChangeRequestVO>(
-    await request.post(`/api/v1/change-requests/${created.id}/reviews`, {
-      data: { verdict: "approved" },
-    }),
-  );
+  await reviewOne(request, created.id, "approved");
 
   await page.goto(`/dashboard/local/inbox/${created.id}`, NAV);
   await expect(page.getByText("Approved · ready to merge")).toBeVisible({

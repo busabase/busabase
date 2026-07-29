@@ -85,9 +85,15 @@ test("?demo={use-case} focuses the seed on the CMS blog bases", async ({ request
 });
 
 test("demo writes are synthetic and never persist (refresh resets)", async ({ request }) => {
-  const merge = await json<MergeResultVO>(
-    await request.post("/api/v1/change-requests/crq_seed_newsletter_approved/merge?demo=1"),
+  const mergeResponse = await json<{
+    results: Array<({ ok: true } & MergeResultVO) | { ok: false; error: string }>;
+  }>(
+    await request.post("/api/v1/change-requests/merge?demo=1", {
+      data: { changeRequestIds: ["crq_seed_newsletter_approved"] },
+    }),
   );
+  const merge = mergeResponse.results[0];
+  if (!merge?.ok) throw new Error(merge?.error ?? "Demo merge returned no result");
   expect(merge.changeRequest.status).toBe("merged");
   expect(merge.record).not.toBeNull();
 

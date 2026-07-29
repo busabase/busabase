@@ -430,14 +430,14 @@ describe("Node-parent validation, materialized flag, and ChangeRequest safety â€
       const folderACr = await client.nodes.createChangeRequest({
         operations: [{ kind: "create", nodeType: "folder", slug: "folder-a", name: "Folder A" }],
       });
-      await client.changeRequests.review({ changeRequestId: folderACr.id, verdict: "approved" });
-      await client.changeRequests.merge({ changeRequestId: folderACr.id });
+      await client.changeRequests.review({ changeRequestIds: [folderACr.id], verdict: "approved" });
+      await client.changeRequests.merge({ changeRequestIds: [folderACr.id] });
 
       const folderBCr = await client.nodes.createChangeRequest({
         operations: [{ kind: "create", nodeType: "folder", slug: "folder-b", name: "Folder B" }],
       });
-      await client.changeRequests.review({ changeRequestId: folderBCr.id, verdict: "approved" });
-      await client.changeRequests.merge({ changeRequestId: folderBCr.id });
+      await client.changeRequests.review({ changeRequestIds: [folderBCr.id], verdict: "approved" });
+      await client.changeRequests.merge({ changeRequestIds: [folderBCr.id] });
 
       const tree = await client.nodes.list();
       const folderA = findInTree(

@@ -84,8 +84,15 @@ async function main() {
       message: `Perf seed batch ${start}-${start + count}`,
       submittedBy: "perf-seed-script",
     });
-    await api("POST", `/change-requests/${cr.id}/reviews`, { verdict: "approved" });
-    await api("POST", `/change-requests/${cr.id}/merge`, {});
+    const review = await api("POST", "/change-requests/reviews", {
+      changeRequestIds: [cr.id],
+      verdict: "approved",
+    });
+    if (!review.results?.[0]?.ok) throw new Error(review.results?.[0]?.error ?? "Review failed");
+    const merge = await api("POST", "/change-requests/merge", {
+      changeRequestIds: [cr.id],
+    });
+    if (!merge.results?.[0]?.ok) throw new Error(merge.results?.[0]?.error ?? "Merge failed");
     created += count;
     const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
     console.log(

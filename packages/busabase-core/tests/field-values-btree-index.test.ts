@@ -98,15 +98,16 @@ describe("busabase_field_values btree index survives long field values", () => {
       message: "canary: long CJK news article",
       autoMerge: false,
     });
-    await client.changeRequests.review({ changeRequestId: cr.id, verdict: "approved" });
-    const merged = await client.changeRequests.merge({ changeRequestId: cr.id });
+    await client.changeRequests.review({ changeRequestIds: [cr.id], verdict: "approved" });
+    const merged = await client.changeRequests.merge({ changeRequestIds: [cr.id] });
+    const mergeResult = merged.results[0];
 
-    if (!merged.record) {
+    if (!mergeResult?.ok || !mergeResult.record) {
       throw new Error("Expected merge to return a record");
     }
-    expect(merged.changeRequest.status).toBe("merged");
+    expect(mergeResult.changeRequest.status).toBe("merged");
 
-    const record = await client.records.get({ recordId: merged.record.id });
+    const record = await client.records.get({ recordId: mergeResult.record.id });
     expect(record?.headCommit.fields.lifebeeKey).toBe(lifebeeKey);
     expect(record?.headCommit.fields.body).toBe(body);
     expect(record?.headCommit.fields.html).toBe(html);
@@ -120,8 +121,8 @@ describe("busabase_field_values btree index survives long field values", () => {
       message: "second canary record",
       autoMerge: false,
     });
-    await client.changeRequests.review({ changeRequestId: cr.id, verdict: "approved" });
-    await client.changeRequests.merge({ changeRequestId: cr.id });
+    await client.changeRequests.review({ changeRequestIds: [cr.id], verdict: "approved" });
+    await client.changeRequests.merge({ changeRequestIds: [cr.id] });
 
     const hits = await client.records.search({
       baseId,
@@ -152,8 +153,8 @@ describe("busabase_field_values btree index survives long field values", () => {
       message: "clean-error probe",
       autoMerge: false,
     });
-    await client.changeRequests.review({ changeRequestId: cr.id, verdict: "approved" });
-    await client.changeRequests.merge({ changeRequestId: cr.id });
+    await client.changeRequests.review({ changeRequestIds: [cr.id], verdict: "approved" });
+    await client.changeRequests.merge({ changeRequestIds: [cr.id] });
 
     const before = await client.records.search({
       baseId,
@@ -165,14 +166,13 @@ describe("busabase_field_values btree index survives long field values", () => {
     // Re-merging an already-merged CR is idempotent by design (see
     // cr-lifecycle.ts), so assert on a genuinely invalid merge instead: an
     // unknown changeRequestId must surface a clean NOT_FOUND, not a raw error.
-    let caught: unknown;
-    try {
-      await client.changeRequests.merge({ changeRequestId: "crq_does_not_exist" });
-    } catch (error) {
-      caught = error;
-    }
-    expect(caught).toBeInstanceOf(Error);
-    const message = (caught as Error).message;
+    const failed = await client.changeRequests.merge({
+      changeRequestIds: ["crq_does_not_exist"],
+    });
+    const failure = failed.results[0];
+    expect(failure).toMatchObject({ code: "NOT_FOUND", ok: false });
+    if (failure?.ok !== false) throw new Error("Expected merge to fail");
+    const message = failure.error;
     expect(message).not.toMatch(/INSERT INTO|SELECT .* FROM|btree|value_text/i);
     expect(message.length).toBeLessThan(200);
 

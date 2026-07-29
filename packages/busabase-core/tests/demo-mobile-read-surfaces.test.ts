@@ -59,4 +59,19 @@ describe("demo mobile read surfaces", () => {
     expect(airapps.length).toBeGreaterThanOrEqual(5);
     expect(airapps.every((airapp) => airapp.node.type === "airapp")).toBe(true);
   });
+
+  it("keeps demo review/merge batched and preserves per-item NOT_FOUND errors", async () => {
+    const review = await client.changeRequests.review({
+      changeRequestIds: ["crq_seed_newsletter_approved", "crq_missing"],
+      verdict: "approved",
+    });
+    expect(review.results[0]).toMatchObject({ ok: true, status: "approved" });
+    expect(review.results[1]).toMatchObject({ ok: false, code: "NOT_FOUND" });
+
+    const merge = await client.changeRequests.merge({
+      changeRequestIds: ["crq_seed_newsletter_approved", "crq_missing"],
+    });
+    expect(merge.results[0]).toMatchObject({ ok: true, status: "merged" });
+    expect(merge.results[1]).toMatchObject({ ok: false, code: "NOT_FOUND" });
+  });
 });

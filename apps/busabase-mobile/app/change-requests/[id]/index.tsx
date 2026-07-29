@@ -189,7 +189,11 @@ function ChangeRequestDetailContent() {
   const reviewMutation = useMutation({
     mutationFn: async ({ verdict, reason }: { verdict: ReviewVerdict; reason?: string }) => {
       if (!buda) throw new Error("Not connected");
-      return buda.client.changeRequests.review({ changeRequestId, verdict, reason });
+      return buda.client.changeRequests.review({
+        changeRequestIds: [changeRequestId],
+        verdict,
+        reason,
+      });
     },
     onSuccess: () => void invalidateCR(),
   });
@@ -197,7 +201,7 @@ function ChangeRequestDetailContent() {
   const mergeMutation = useMutation({
     mutationFn: async () => {
       if (!buda) throw new Error("Not connected");
-      return buda.client.changeRequests.merge({ changeRequestId });
+      return buda.client.changeRequests.merge({ changeRequestIds: [changeRequestId] });
     },
     onSuccess: () => void invalidateCR(),
   });
@@ -205,8 +209,11 @@ function ChangeRequestDetailContent() {
   const approveMergeMutation = useMutation({
     mutationFn: async () => {
       if (!buda) throw new Error("Not connected");
-      await buda.client.changeRequests.review({ changeRequestId, verdict: "approved" });
-      return buda.client.changeRequests.merge({ changeRequestId });
+      await buda.client.changeRequests.review({
+        changeRequestIds: [changeRequestId],
+        verdict: "approved",
+      });
+      return buda.client.changeRequests.merge({ changeRequestIds: [changeRequestId] });
     },
     onSuccess: () => void invalidateCR(),
   });

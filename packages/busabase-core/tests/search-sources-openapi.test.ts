@@ -57,8 +57,8 @@ describe("search — sources scope over real HTTP (repeated query-param array)",
       submittedBy: "test",
       autoMerge: false,
     });
-    await client.changeRequests.review({ changeRequestId: cr.id, verdict: "approved" });
-    await client.changeRequests.merge({ changeRequestId: cr.id });
+    await client.changeRequests.review({ changeRequestIds: [cr.id], verdict: "approved" });
+    await client.changeRequests.merge({ changeRequestIds: [cr.id] });
   });
 
   afterAll(async () => {

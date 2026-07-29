@@ -1,4 +1,13 @@
-import { type APIRequestContext, cmsPostFields, expect, json, test, unique } from "./_fixtures";
+import {
+  type APIRequestContext,
+  cmsPostFields,
+  expect,
+  json,
+  mergeOne,
+  reviewOne,
+  test,
+  unique,
+} from "./_fixtures";
 
 interface BaseVO {
   id: string;
@@ -127,14 +136,9 @@ test("same-field merge conflict stays visible and recoverable", async ({ page, r
       },
     }),
   );
-  await json<ChangeRequestVO>(
-    await request.post(`/api/v1/change-requests/${createCr.id}/reviews`, {
-      data: { verdict: "approved" },
-    }),
-  );
-  const merged = await json<{ record: RecordVO }>(
-    await request.post(`/api/v1/change-requests/${createCr.id}/merge`, { data: {} }),
-  );
+  await reviewOne(request, createCr.id, "approved");
+  const merged = await mergeOne(request, createCr.id);
+  if (!merged.record) throw new Error("Expected create merge to return a record");
   const recordId = merged.record.id;
 
   const firstUpdate = await json<ChangeRequestVO>(
@@ -160,14 +164,8 @@ test("same-field merge conflict stays visible and recoverable", async ({ page, r
     }),
   );
 
-  await json<ChangeRequestVO>(
-    await request.post(`/api/v1/change-requests/${firstUpdate.id}/reviews`, {
-      data: { verdict: "approved" },
-    }),
-  );
-  await json<{ record: RecordVO }>(
-    await request.post(`/api/v1/change-requests/${firstUpdate.id}/merge`, { data: {} }),
-  );
+  await reviewOne(request, firstUpdate.id, "approved");
+  await mergeOne(request, firstUpdate.id);
 
   await page.goto(`/dashboard/local/inbox/${conflictingUpdate.id}`);
   const reviewPanel = page.getByRole("complementary");
@@ -202,14 +200,9 @@ test("record delete request explains impact and preserves the canonical record",
       },
     }),
   );
-  await json<ChangeRequestVO>(
-    await request.post(`/api/v1/change-requests/${createCr.id}/reviews`, {
-      data: { verdict: "approved" },
-    }),
-  );
-  const merged = await json<{ record: RecordVO }>(
-    await request.post(`/api/v1/change-requests/${createCr.id}/merge`, { data: {} }),
-  );
+  await reviewOne(request, createCr.id, "approved");
+  const merged = await mergeOne(request, createCr.id);
+  if (!merged.record) throw new Error("Expected create merge to return a record");
 
   await page.goto(`/dashboard/local/base/blog/${merged.record.id}`);
   await expect(page.getByRole("heading", { name: title })).toBeVisible();

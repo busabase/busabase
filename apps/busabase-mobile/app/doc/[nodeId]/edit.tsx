@@ -209,6 +209,7 @@ function DocEditContent() {
       >
         <View style={styles.editorWrap}>
           <TextInput
+            accessibilityLabel="Document body"
             value={body}
             multiline
             textAlignVertical="top"

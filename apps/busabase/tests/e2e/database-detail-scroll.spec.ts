@@ -1,5 +1,5 @@
 import type { BaseVO, ChangeRequestVO } from "busabase-contract/types";
-import { expect, json, test, unique } from "./_fixtures";
+import { expect, json, mergeOne, reviewOne, test, unique } from "./_fixtures";
 
 const LONG_LIST_RECORD_COUNT = 110;
 
@@ -33,12 +33,8 @@ test("Table and Gallery can jump between numbered record pages", async ({ page, 
       },
     }),
   );
-  await json(
-    await request.post(`/api/v1/change-requests/${changeRequest.id}/reviews`, {
-      data: { verdict: "approved" },
-    }),
-  );
-  await json(await request.post(`/api/v1/change-requests/${changeRequest.id}/merge`, { data: {} }));
+  await reviewOne(request, changeRequest.id, "approved");
+  await mergeOne(request, changeRequest.id);
 
   const gallerySlug = `e2e-pagination-gallery-${Date.now()}`;
   const galleryChangeRequest = await json<ChangeRequestVO>(
@@ -55,14 +51,8 @@ test("Table and Gallery can jump between numbered record pages", async ({ page, 
       },
     }),
   );
-  await json(
-    await request.post(`/api/v1/change-requests/${galleryChangeRequest.id}/reviews`, {
-      data: { verdict: "approved" },
-    }),
-  );
-  await json(
-    await request.post(`/api/v1/change-requests/${galleryChangeRequest.id}/merge`, { data: {} }),
-  );
+  await reviewOne(request, galleryChangeRequest.id, "approved");
+  await mergeOne(request, galleryChangeRequest.id);
 
   const firstPage = await json<{
     page: number;

@@ -31,7 +31,20 @@ describe("Busabase OpenAPI record get route", () => {
     expect(spec.paths?.["/api/v1/records/by-field"]).toBeUndefined();
   });
 
-  it("keeps the compressed public API at 104 operations", async () => {
+  it("keeps numbered record pagination in the public contract", async () => {
+    const spec = await getBusabaseOpenApiSpec();
+    expect(spec.paths?.["/api/v1/records/page"]?.get).toBeDefined();
+  });
+
+  it("publishes only the two canonical change-request action paths", async () => {
+    const spec = await getBusabaseOpenApiSpec();
+    expect(spec.paths?.["/api/v1/change-requests/reviews"]?.post).toBeDefined();
+    expect(spec.paths?.["/api/v1/change-requests/merge"]?.post).toBeDefined();
+    expect(spec.paths?.["/api/v1/change-requests/{changeRequestId}/reviews"]).toBeUndefined();
+    expect(spec.paths?.["/api/v1/change-requests/{changeRequestId}/merge"]).toBeUndefined();
+  });
+
+  it("keeps the compressed public API at 103 operations", async () => {
     const spec = await getBusabaseOpenApiSpec();
     const operationCount = Object.values(spec.paths ?? {}).reduce(
       (count, pathItem) =>
@@ -41,6 +54,8 @@ describe("Busabase OpenAPI record get route", () => {
         ).length,
       0,
     );
-    expect(operationCount).toBe(104);
+    // Numbered pagination raised the merged develop baseline from 104 to 105;
+    // consolidating four CR action operations into two brings it to 103.
+    expect(operationCount).toBe(103);
   });
 });

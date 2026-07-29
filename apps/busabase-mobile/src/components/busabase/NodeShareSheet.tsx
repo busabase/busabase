@@ -166,6 +166,7 @@ export function NodeShareSheet({ visible, node, spaceId, onClose, onBack }: Node
             </Text>
           </View>
           <Switch
+            accessibilityLabel={t.share.shareToWeb}
             value={isPublic}
             disabled={busy || shareQuery.isLoading}
             trackColor={{ false: tokens.muted, true: tokens.primary }}

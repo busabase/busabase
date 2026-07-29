@@ -76,12 +76,12 @@ describe("File-tree replace — text-staleness hook failure is isolated from the
       message: "Replace notes",
       submittedBy: "agent",
     });
-    await client.changeRequests.review({ changeRequestId: cr.id, verdict: "approved" });
+    await client.changeRequests.review({ changeRequestIds: [cr.id], verdict: "approved" });
 
     // The merge must NOT throw — a failure inside the (mocked-to-throw)
     // staleness hook must never abort this otherwise-valid file replace. If
     // it did, this `await` would reject and fail the test.
-    await client.changeRequests.merge({ changeRequestId: cr.id });
+    await client.changeRequests.merge({ changeRequestIds: [cr.id] });
 
     const file = await client.fileTrees.readFile({
       type: "drive",

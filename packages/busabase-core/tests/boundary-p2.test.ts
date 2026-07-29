@@ -48,8 +48,18 @@ describe("Boundary P2 — oRPC", () => {
   });
 
   const approveAndMerge = async (changeRequestId: string) => {
-    await client.changeRequests.review({ changeRequestId, verdict: "approved" });
-    return client.changeRequests.merge({ changeRequestId });
+    await client.changeRequests.review({
+      changeRequestIds: [changeRequestId],
+      verdict: "approved",
+    });
+    const [result] = (await client.changeRequests.merge({ changeRequestIds: [changeRequestId] }))
+      .results;
+    if (!result?.ok)
+      throw Object.assign(new Error(result?.error ?? "Change request merge returned no result"), {
+        code: result?.code,
+        data: result?.data,
+      });
+    return result;
   };
 
   const makeBase = async (
@@ -113,14 +123,10 @@ describe("Boundary P2 — oRPC", () => {
       fieldId: noteField.id,
       patch: { required: true },
     });
-    await client.changeRequests.review({ changeRequestId: cr.id, verdict: "approved" });
-    await expect(client.changeRequests.merge({ changeRequestId: cr.id })).rejects.toMatchObject({
-      code: "BAD_REQUEST",
-    });
-    // recordId is surfaced in the error data
-    await client.changeRequests.merge({ changeRequestId: cr.id }).catch((err) => {
-      expect(JSON.stringify(err.data ?? {})).toContain(recordId);
-    });
+    await client.changeRequests.review({ changeRequestIds: [cr.id], verdict: "approved" });
+    const requiredResult = await client.changeRequests.merge({ changeRequestIds: [cr.id] });
+    expect(requiredResult.results[0]).toMatchObject({ code: "BAD_REQUEST", ok: false });
+    expect(JSON.stringify(requiredResult.results[0])).toContain(recordId);
   });
 
   // ── Fix 3: Concurrent CR Conflict = explicit CONFLICT ───────────────────────
@@ -145,10 +151,9 @@ describe("Boundary P2 — oRPC", () => {
     });
 
     await approveAndMerge(crA.id);
-    await client.changeRequests.review({ changeRequestId: crB.id, verdict: "approved" });
-    await expect(client.changeRequests.merge({ changeRequestId: crB.id })).rejects.toMatchObject({
-      code: "CONFLICT",
-    });
+    await client.changeRequests.review({ changeRequestIds: [crB.id], verdict: "approved" });
+    const conflictResult = await client.changeRequests.merge({ changeRequestIds: [crB.id] });
+    expect(conflictResult.results[0]).toMatchObject({ code: "CONFLICT", ok: false });
   });
 
   // ── Fix 4: Relation Target Archived ─────────────────────────────────────────

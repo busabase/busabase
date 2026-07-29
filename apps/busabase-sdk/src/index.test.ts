@@ -155,6 +155,84 @@ describe("Busabase namespaces", () => {
     await expect(bb.records.getByField(input)).resolves.toBeNull();
     await expect(bb.records.getByField(input)).rejects.toThrow(/Server failed/);
   });
+
+  it("preserves per-item error code and data in the single merge convenience", async () => {
+    const requests: Request[] = [];
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      requests.push(request);
+      return new Response(
+        JSON.stringify({
+          results: [
+            {
+              changeRequestId: "crq_1",
+              ok: false,
+              error: "Merge conflict",
+              code: "CONFLICT",
+              data: { conflictingFields: ["title"] },
+            },
+          ],
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    }) as unknown as typeof fetch;
+    const bb = new Busabase({ baseUrl: "http://localhost:15419", fetch: fetchImpl });
+
+    const error = await bb.changeRequests
+      .merge({ changeRequestId: "crq_1" })
+      .catch((reason) => reason);
+
+    expect(error).toMatchObject({
+      message: "Merge conflict",
+      code: "CONFLICT",
+      data: { conflictingFields: ["title"] },
+    });
+    expect(new URL(requests[0]?.url ?? "").pathname).toBe("/api/v1/change-requests/merge");
+    expect(await requests[0]?.clone().json()).toEqual({ changeRequestIds: ["crq_1"] });
+  });
+
+  it("unwraps complete single review/merge payloads while batch calls keep results", async () => {
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      const pathname = new URL(request.url).pathname;
+      const body = (await request.clone().json()) as { changeRequestIds: string[] };
+      const changeRequest = { id: body.changeRequestIds[0], status: "approved", reviews: [] };
+      const success = pathname.endsWith("/merge")
+        ? {
+            changeRequestId: changeRequest.id,
+            ok: true,
+            status: "merged",
+            changeRequest: { ...changeRequest, status: "merged" },
+            record: { id: "rec_1" },
+            view: null,
+          }
+        : { changeRequestId: changeRequest.id, ok: true, status: "approved", changeRequest };
+      return new Response(JSON.stringify({ results: [success] }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }) as unknown as typeof fetch;
+    const bb = new Busabase({ baseUrl: "http://localhost:15419", fetch: fetchImpl });
+
+    const reviewed = await bb.changeRequests.review({
+      changeRequestId: "crq_single",
+      verdict: "approved",
+    });
+    expect(reviewed).toMatchObject({ id: "crq_single", status: "approved" });
+
+    const merged = await bb.changeRequests.merge({ changeRequestId: "crq_single" });
+    expect(merged).toMatchObject({
+      changeRequest: { id: "crq_single", status: "merged" },
+      record: { id: "rec_1" },
+      view: null,
+    });
+
+    const batch = await bb.changeRequests.review({
+      changeRequestIds: ["crq_batch"],
+      verdict: "approved",
+    });
+    expect(batch.results[0]).toMatchObject({ changeRequestId: "crq_batch", ok: true });
+  });
 });
 
 describe("Busabase.putText", () => {

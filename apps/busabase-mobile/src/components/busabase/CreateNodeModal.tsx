@@ -1,17 +1,13 @@
 import { useMutation } from "@tanstack/react-query";
 import { type CreatableNodeType, listNodeTypes } from "busabase-contract/domains";
 import { useState } from "react";
-import { StyleSheet, Text, View } from "react-native";
+import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useBusabaseOrpc } from "~/api/use-busabase-orpc";
 import { fmt, useI18n } from "~/i18n";
-import { typography } from "~/theme/tokens";
+import { nodeIconForType } from "~/search/node-icons";
+import { radius, typography } from "~/theme/tokens";
 import { useTokens } from "~/theme/use-tokens";
-import {
-  NativeActionBar,
-  NativeBottomSheet,
-  NativeChipList,
-  NativeInlineError,
-} from "../native-screen";
+import { NativeActionBar, NativeBottomSheet, NativeInlineError } from "../native-screen";
 import { Button } from "../ui/Button";
 import { TextInput } from "../ui/TextInput";
 
@@ -145,6 +141,7 @@ export function CreateNodeModal({ visible, onClose, onCreated, parent }: CreateN
           : t.createNode.reviewNote
       }
       showCloseButton
+      maxHeight="90%"
       onClose={close}
       footer={
         <NativeActionBar>
@@ -165,45 +162,89 @@ export function CreateNodeModal({ visible, onClose, onCreated, parent }: CreateN
         </NativeActionBar>
       }
     >
-      <Text style={[typography.small, { color: tokens.mutedForeground }]}>
-        {t.createNode.typeLabel}
-      </Text>
-      <View style={styles.fullBleedChips}>
-        <NativeChipList<CreatableNodeType>
-          value={nodeType}
-          options={NODE_TYPES.map((entry) => ({ value: entry.type, label: labelFor(entry) }))}
-          onChange={setNodeType}
-        />
-      </View>
+      <ScrollView
+        style={styles.formScroll}
+        contentContainerStyle={styles.form}
+        keyboardShouldPersistTaps="handled"
+      >
+        <Text style={[typography.small, { color: tokens.mutedForeground }]}>
+          {t.createNode.typeLabel}
+        </Text>
+        <View style={styles.typeGrid}>
+          {NODE_TYPES.map((entry) => {
+            const selected = entry.type === nodeType;
+            const Icon = nodeIconForType(entry.type);
+            return (
+              <Pressable
+                key={entry.type}
+                accessibilityRole="button"
+                accessibilityState={{ selected }}
+                style={({ pressed }) => [
+                  styles.typeOption,
+                  {
+                    backgroundColor: selected ? tokens.primaryMuted : tokens.surface,
+                    borderColor: selected ? tokens.primary : tokens.border,
+                    opacity: pressed ? 0.72 : 1,
+                  },
+                ]}
+                onPress={() => setNodeType(entry.type)}
+              >
+                <Icon size={20} color={selected ? tokens.foreground : tokens.mutedForeground} />
+                <Text
+                  numberOfLines={1}
+                  style={[
+                    typography.small,
+                    { color: selected ? tokens.foreground : tokens.mutedForeground },
+                  ]}
+                >
+                  {labelFor(entry)}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
 
-      <TextInput
-        label={t.createNode.name}
-        value={name}
-        autoFocus
-        onChangeText={(value) => {
-          setName(value);
-          if (!slugEdited) {
+        <TextInput
+          label={t.createNode.name}
+          value={name}
+          onChangeText={(value) => {
+            setName(value);
+            if (!slugEdited) {
+              setSlug(toSlug(value));
+            }
+          }}
+        />
+        <TextInput
+          label={t.createNode.slug}
+          value={slug}
+          onChangeText={(value) => {
+            setSlugEdited(true);
             setSlug(toSlug(value));
-          }
-        }}
-      />
-      <TextInput
-        label={t.createNode.slug}
-        value={slug}
-        onChangeText={(value) => {
-          setSlugEdited(true);
-          setSlug(toSlug(value));
-        }}
-      />
-      <TextInput
-        label={t.createNode.description}
-        value={description}
-        onChangeText={setDescription}
-      />
+          }}
+        />
+        <TextInput
+          label={t.createNode.description}
+          value={description}
+          onChangeText={setDescription}
+        />
+      </ScrollView>
     </NativeBottomSheet>
   );
 }
 
 const styles = StyleSheet.create({
-  fullBleedChips: { marginHorizontal: -20 },
+  formScroll: { flexGrow: 0 },
+  form: { gap: 12, paddingBottom: 4 },
+  typeGrid: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  typeOption: {
+    width: "48.5%",
+    minHeight: 60,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: radius.md,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+  },
 });

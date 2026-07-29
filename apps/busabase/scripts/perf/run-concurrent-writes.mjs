@@ -48,13 +48,16 @@ async function worker(id, blogId, stats, deadline) {
       continue;
     }
     const crId = create.json.id;
-    const review = await api("POST", `/change-requests/${crId}/reviews`, { verdict: "approved" });
-    if (!review.ok) {
+    const review = await api("POST", "/change-requests/reviews", {
+      changeRequestIds: [crId],
+      verdict: "approved",
+    });
+    if (!review.ok || review.json?.results?.[0]?.ok !== true) {
       stats.errors.push({ stage: "review", status: review.status, body: review.json });
       continue;
     }
-    const merge = await api("POST", `/change-requests/${crId}/merge`, {});
-    if (!merge.ok) {
+    const merge = await api("POST", "/change-requests/merge", { changeRequestIds: [crId] });
+    if (!merge.ok || merge.json?.results?.[0]?.ok !== true) {
       stats.errors.push({ stage: "merge", status: merge.status, body: merge.json });
       continue;
     }

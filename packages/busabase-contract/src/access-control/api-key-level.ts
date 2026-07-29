@@ -146,9 +146,7 @@ export const PROCEDURE_PERMISSION_POLICY: Record<string, ProcedurePermissionPoli
   // ---- write: applying/rejecting a proposal (including self-merge — the
   // reported gap), plus every direct-write mutation that bypasses the CR flow. ----
   "changeRequests.review": node("write"),
-  "changeRequests.reviewMany": node("write"),
   "changeRequests.merge": node("write"),
-  "changeRequests.mergeMany": node("write"),
   "changeRequests.close": node("write"),
   "bases.create": node("write"),
   "bases.createField": node("write"),

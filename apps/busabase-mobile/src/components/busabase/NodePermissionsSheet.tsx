@@ -280,6 +280,7 @@ export function NodePermissionsSheet({
             </Text>
           </View>
           <Switch
+            accessibilityLabel={t.permissions.makePrivate}
             value={isPrivate}
             disabled={isInherited || visibilityMutation.isPending}
             trackColor={{ false: tokens.muted, true: tokens.primary }}
@@ -349,6 +350,7 @@ export function NodePermissionsSheet({
                   {t.permissions.grantEveryone}
                 </Text>
                 <Switch
+                  accessibilityLabel={t.permissions.grantEveryone}
                   value={newPrincipalIsSpace}
                   trackColor={{ false: tokens.muted, true: tokens.primary }}
                   thumbColor={tokens.surface}

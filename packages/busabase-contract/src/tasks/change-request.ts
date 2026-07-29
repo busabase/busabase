@@ -11,9 +11,8 @@ import type { BusabaseTaskClient, TaskDefinition } from "./types";
  *    stops at a default limit — a distinction about pagination mechanics, not
  *    about intent.
  *
- * 2. `review`/`reviewMany` and `merge`/`mergeMany` are the same operation on
- *    one item versus several. Taking an array of ids covers both, and one id is
- *    just an array of length one.
+ * 2. `review` and `merge` each take an array of ids, so one canonical operation
+ *    covers both single-item and multi-item actions.
  *
  * `close` and `get` keep their own endpoint tools: `close` is genuinely a
  * different decision from approve/reject, and `get` is a plain fetch.
@@ -22,6 +21,12 @@ import type { BusabaseTaskClient, TaskDefinition } from "./types";
 const REVIEW_GUIDANCE =
   "This records a HUMAN decision. Never call it unless the user explicitly asked for this specific verdict on these specific change requests. " +
   "Summarising a change request for the user is not permission to approve it.";
+
+const singleItemError = (result: { error?: string; code?: string; data?: unknown } | undefined) =>
+  Object.assign(new Error(result?.error ?? "Change request action returned no result"), {
+    ...(result?.code ? { code: result.code } : {}),
+    ...(result?.data === undefined ? {} : { data: result.data }),
+  });
 
 export interface ChangeRequestQueryInput {
   status?: string;
@@ -122,21 +127,15 @@ export const changeRequestReviewTask: TaskDefinition<ChangeRequestReviewInput> =
       throw new Error("changeRequestIds must contain at least one id.");
     }
     const verdict = input.verdict as "approved" | "rejected";
-    // One id still goes through the single endpoint: it returns the change
-    // request itself, where the batch endpoint returns per-item results. Callers
-    // acting on one thing get the more useful shape.
-    if (ids.length === 1) {
-      return client.changeRequests.review({
-        changeRequestId: ids[0],
-        verdict,
-        ...(input.reason ? { reason: input.reason } : {}),
-      });
-    }
-    return client.changeRequests.reviewMany({
+    const response = await client.changeRequests.review({
       changeRequestIds: ids,
       verdict,
       ...(input.reason ? { reason: input.reason } : {}),
     });
+    if (ids.length !== 1) return response;
+    const result = response.results[0];
+    if (!result?.ok) throw singleItemError(result);
+    return result.changeRequest;
   },
 };
 
@@ -168,7 +167,14 @@ export const changeRequestMergeTask: TaskDefinition<ChangeRequestMergeInput> = {
     if (!Array.isArray(ids) || ids.length === 0) {
       throw new Error("changeRequestIds must contain at least one id.");
     }
-    if (ids.length === 1) return client.changeRequests.merge({ changeRequestId: ids[0] });
-    return client.changeRequests.mergeMany({ changeRequestIds: ids });
+    const response = await client.changeRequests.merge({ changeRequestIds: ids });
+    if (ids.length !== 1) return response;
+    const result = response.results[0];
+    if (!result?.ok) throw singleItemError(result);
+    return {
+      changeRequest: result.changeRequest,
+      record: result.record,
+      view: result.view,
+    };
   },
 };

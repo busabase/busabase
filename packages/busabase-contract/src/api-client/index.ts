@@ -22,7 +22,8 @@ import type {
   AssetDetailVO,
   AuditEventVO,
   BaseVO,
-  ChangeRequestBatchResultVO,
+  ChangeRequestMergeBatchResultVO,
+  ChangeRequestReviewBatchResultVO,
   ChangeRequestVO,
   CommentSubjectType,
   CommentVO,
@@ -285,8 +286,8 @@ export interface BusabaseDashboardApiClient {
     changeRequestIds: string[],
     verdict: "approved" | "rejected",
     reason?: string,
-  ) => Promise<ChangeRequestBatchResultVO>;
-  mergeChangeRequestsMany: (changeRequestIds: string[]) => Promise<ChangeRequestBatchResultVO>;
+  ) => Promise<ChangeRequestReviewBatchResultVO>;
+  mergeChangeRequestsMany: (changeRequestIds: string[]) => Promise<ChangeRequestMergeBatchResultVO>;
   reviseOperation: (
     operationId: string,
     payload: { fields: Record<string, unknown>; message?: string; author?: string },
@@ -405,6 +406,12 @@ export const createBusabaseOpenApiClient = (options: {
   return createORPCClient(link);
 };
 
+const batchItemError = (result: { error?: string; code?: string; data?: unknown } | undefined) =>
+  Object.assign(new Error(result?.error ?? "Change request action returned no result"), {
+    ...(result?.code ? { code: result.code } : {}),
+    ...(result?.data === undefined ? {} : { data: result.data }),
+  });
+
 export const createBusabaseRestApiClient = (
   apiBasePath = "/api/v1",
   opts?: {
@@ -462,26 +469,37 @@ export const createBusabaseRestApiClient = (
       client.views.changeRequest({ viewId, operation: "update", ...payload }),
     createDeleteViewChangeRequest: (viewId) =>
       client.views.changeRequest({ viewId, operation: "delete" }),
-    approveChangeRequest: (changeRequestId, reason) =>
-      client.changeRequests.review(
+    approveChangeRequest: async (changeRequestId, reason) => {
+      const { results } = await client.changeRequests.review(
         reason
-          ? { changeRequestId, reason, verdict: "approved" }
-          : { changeRequestId, verdict: "approved" },
-      ),
-    rejectChangeRequest: (changeRequestId, reason = "Requested changes from Busabase dashboard") =>
-      client.changeRequests.review({
-        changeRequestId,
+          ? { changeRequestIds: [changeRequestId], reason, verdict: "approved" }
+          : { changeRequestIds: [changeRequestId], verdict: "approved" },
+      );
+      const result = results[0];
+      if (!result?.ok) throw batchItemError(result);
+      return result.changeRequest;
+    },
+    rejectChangeRequest: async (
+      changeRequestId,
+      reason = "Requested changes from Busabase dashboard",
+    ) => {
+      const { results } = await client.changeRequests.review({
+        changeRequestIds: [changeRequestId],
         reason,
         verdict: "rejected",
-      }),
+      });
+      const result = results[0];
+      if (!result?.ok) throw batchItemError(result);
+      return result.changeRequest;
+    },
     closeChangeRequest: (changeRequestId, reason) =>
       client.changeRequests.close(reason ? { changeRequestId, reason } : { changeRequestId }),
     reviewChangeRequestsMany: (changeRequestIds, verdict, reason) =>
-      client.changeRequests.reviewMany(
+      client.changeRequests.review(
         reason ? { changeRequestIds, verdict, reason } : { changeRequestIds, verdict },
       ),
     mergeChangeRequestsMany: (changeRequestIds) =>
-      client.changeRequests.mergeMany({ changeRequestIds }),
+      client.changeRequests.merge({ changeRequestIds }),
     reviseOperation: (operationId, payload) =>
       client.operations.revise({ operationId, ...payload }),
     // This facade's payload never sets `autoMerge`, so the call always takes the
@@ -504,7 +522,18 @@ export const createBusabaseRestApiClient = (
       }
       return result;
     },
-    mergeChangeRequest: (changeRequestId) => client.changeRequests.merge({ changeRequestId }),
+    mergeChangeRequest: async (changeRequestId) => {
+      const { results } = await client.changeRequests.merge({
+        changeRequestIds: [changeRequestId],
+      });
+      const result = results[0];
+      if (!result?.ok) throw batchItemError(result);
+      return {
+        changeRequest: result.changeRequest,
+        record: result.record,
+        view: result.view,
+      };
+    },
     createAssetUploadUrl: (input) => client.assets.createUploadUrl(input),
     confirmAsset: (input) => client.assets.confirm(input),
     updateAssetMetadata: (input) => client.assets.updateMetadata(input),

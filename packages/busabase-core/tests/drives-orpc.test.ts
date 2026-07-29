@@ -43,8 +43,18 @@ describe("Drive API — oRPC integration", () => {
   });
 
   const approveAndMerge = async (changeRequestId: string) => {
-    await client.changeRequests.review({ changeRequestId, verdict: "approved" });
-    return client.changeRequests.merge({ changeRequestId });
+    await client.changeRequests.review({
+      changeRequestIds: [changeRequestId],
+      verdict: "approved",
+    });
+    const [result] = (await client.changeRequests.merge({ changeRequestIds: [changeRequestId] }))
+      .results;
+    if (!result?.ok)
+      throw Object.assign(new Error(result?.error ?? "Change request merge returned no result"), {
+        code: result?.code,
+        data: result?.data,
+      });
+    return result;
   };
 
   const createAsset = async (input: {
@@ -256,8 +266,11 @@ describe("Drive API — oRPC integration", () => {
         },
       ],
     });
-    await ok("POST", `/change-requests/${changeRequest.id}/reviews`, { verdict: "approved" });
-    await ok("POST", `/change-requests/${changeRequest.id}/merge`);
+    await ok("POST", "/change-requests/reviews", {
+      changeRequestIds: [changeRequest.id],
+      verdict: "approved",
+    });
+    await ok("POST", "/change-requests/merge", { changeRequestIds: [changeRequest.id] });
 
     const file = await ok("GET", `/file-trees/${drive.node.id}/files/rest/export.bin`);
     expect(file.encoding).toBe("url");
@@ -422,12 +435,12 @@ describe("Drive API — oRPC integration", () => {
         },
       ],
     });
-    await client.changeRequests.review({ changeRequestId: staleCr.id, verdict: "approved" });
+    await client.changeRequests.review({ changeRequestIds: [staleCr.id], verdict: "approved" });
 
-    await expect(
-      client.changeRequests.merge({ changeRequestId: staleCr.id }),
-    ).rejects.toMatchObject({
-      code: "CONFLICT",
+    const mergeResult = await client.changeRequests.merge({ changeRequestIds: [staleCr.id] });
+    expect(mergeResult.results[0]).toMatchObject({
+      ok: false,
+      error: expect.stringMatching(/Drive file changed before merge/),
     });
   });
 

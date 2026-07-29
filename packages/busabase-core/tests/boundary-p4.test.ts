@@ -159,7 +159,7 @@ describe("Boundary P4 — oRPC", () => {
     });
     // Merge first CR → record headCommitId advances.
     await client.changeRequests.approve({ changeRequestId: cr1.id, reviewedBy: "admin" });
-    await client.changeRequests.merge({ changeRequestId: cr1.id });
+    await client.changeRequests.merge({ changeRequestIds: [cr1.id] });
 
     // Second CR also edits score (created before merge, now stale).
     const cr2 = await client.records.createChangeRequest({
@@ -172,7 +172,8 @@ describe("Boundary P4 — oRPC", () => {
     await client.changeRequests.approve({ changeRequestId: cr2.id, reviewedBy: "admin" });
 
     // Merging cr2 should fail with a conflict — and the CR status becomes "conflict".
-    await expect(client.changeRequests.merge({ changeRequestId: cr2.id })).rejects.toThrow();
+    const mergeResult = await client.changeRequests.merge({ changeRequestIds: [cr2.id] });
+    expect(mergeResult.results[0]).toMatchObject({ code: "CONFLICT", ok: false });
 
     const conflicted = await client.changeRequests.get({ changeRequestId: cr2.id });
     expect(conflicted?.status).toBe("conflict");

@@ -308,8 +308,11 @@ describe("Webhook automation domain — OpenAPI (/api/v1) route round-trip", () 
       submittedBy: "openapi-test",
       autoMerge: false,
     });
-    await ok("POST", `/change-requests/${cr.id}/reviews`, { verdict: "approved" });
-    await ok("POST", `/change-requests/${cr.id}/merge`);
+    await ok("POST", "/change-requests/reviews", {
+      changeRequestIds: [cr.id],
+      verdict: "approved",
+    });
+    await ok("POST", "/change-requests/merge", { changeRequestIds: [cr.id] });
 
     await waitFor(() => received.some((hit) => hit.path === "/live-dispatch"), 2000);
     const hit = received.find((h) => h.path === "/live-dispatch");

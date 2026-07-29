@@ -168,8 +168,8 @@ describe("busabase-cli install without --auto-merge (real server)", () => {
         submittedBy: "fixture",
         autoMerge: false,
       });
-      await client.changeRequests.review({ changeRequestId: cr.id, verdict: "approved" });
-      await client.changeRequests.merge({ changeRequestId: cr.id });
+      await client.changeRequests.review({ changeRequestIds: [cr.id], verdict: "approved" });
+      await client.changeRequests.merge({ changeRequestIds: [cr.id] });
     }
 
     await cli("export", "kb", "-o", outDir);

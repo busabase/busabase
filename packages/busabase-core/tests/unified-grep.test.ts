@@ -96,8 +96,8 @@ describe("Unified Grep — POST /grep (files + docs + records)", () => {
       operations: [{ kind: "delete", nodeId }],
       autoMerge: false,
     });
-    await client.changeRequests.review({ changeRequestId: cr.id, verdict: "approved" });
-    await client.changeRequests.merge({ changeRequestId: cr.id });
+    await client.changeRequests.review({ changeRequestIds: [cr.id], verdict: "approved" });
+    await client.changeRequests.merge({ changeRequestIds: [cr.id] });
   };
 
   it("finds a cross-source hit: one match from files, one from docs, files ordered before docs", async () => {
@@ -273,8 +273,18 @@ describe("Unified Grep — POST /grep (files + docs + records)", () => {
 
   describe("records adapter (P2b)", () => {
     const approveAndMerge = async (changeRequestId: string) => {
-      await client.changeRequests.review({ changeRequestId, verdict: "approved" });
-      return client.changeRequests.merge({ changeRequestId });
+      await client.changeRequests.review({
+        changeRequestIds: [changeRequestId],
+        verdict: "approved",
+      });
+      const [result] = (await client.changeRequests.merge({ changeRequestIds: [changeRequestId] }))
+        .results;
+      if (!result?.ok)
+        throw Object.assign(new Error(result?.error ?? "Change request merge returned no result"), {
+          code: result?.code,
+          data: result?.data,
+        });
+      return result;
     };
 
     /** Create+auto-merge a Base, returning its materialized BaseVO. */

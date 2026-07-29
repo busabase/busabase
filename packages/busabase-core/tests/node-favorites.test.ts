@@ -40,8 +40,8 @@ const asMember = <T>(actorId: string, fn: () => Promise<T>, opts: { restricted?:
   );
 
 async function approveMerge(raw: RawClient, changeRequestId: string) {
-  await raw.changeRequests.review({ changeRequestId, verdict: "approved" });
-  await raw.changeRequests.merge({ changeRequestId });
+  await raw.changeRequests.review({ changeRequestIds: [changeRequestId], verdict: "approved" });
+  await raw.changeRequests.merge({ changeRequestIds: [changeRequestId] });
 }
 
 async function archiveNode(raw: RawClient, nodeId: string) {

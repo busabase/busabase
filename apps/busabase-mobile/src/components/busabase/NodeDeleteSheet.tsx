@@ -52,10 +52,10 @@ export function NodeDeleteSheet({ visible, node, onClose, onBack }: NodeDeleteSh
         operations: [{ kind: "delete", nodeId: node.id }],
       });
       await buda.client.changeRequests.review({
-        changeRequestId: changeRequest.id,
+        changeRequestIds: [changeRequest.id],
         verdict: "approved",
       });
-      await buda.client.changeRequests.merge({ changeRequestId: changeRequest.id });
+      await buda.client.changeRequests.merge({ changeRequestIds: [changeRequest.id] });
     },
     onSuccess: async () => {
       await Promise.all([

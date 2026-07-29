@@ -46,8 +46,8 @@ describe("listArchivedRecordsPaged — keyset pagination", () => {
       records: Array.from({ length: TOTAL }, (_, i) => ({ name: `r${i}` })),
       message: "seed",
     });
-    await client.changeRequests.review({ changeRequestId: cr.id, verdict: "approved" });
-    await client.changeRequests.merge({ changeRequestId: cr.id });
+    await client.changeRequests.review({ changeRequestIds: [cr.id], verdict: "approved" });
+    await client.changeRequests.merge({ changeRequestIds: [cr.id] });
 
     // Archive every record (soft delete) so they land in the trash section:
     // open a delete change request per record, then approve + merge it.
@@ -57,8 +57,8 @@ describe("listArchivedRecordsPaged — keyset pagination", () => {
         operation: "delete",
         recordId: record.id,
       });
-      await client.changeRequests.review({ changeRequestId: deleteCr.id, verdict: "approved" });
-      await client.changeRequests.merge({ changeRequestId: deleteCr.id });
+      await client.changeRequests.review({ changeRequestIds: [deleteCr.id], verdict: "approved" });
+      await client.changeRequests.merge({ changeRequestIds: [deleteCr.id] });
     }
   });
 

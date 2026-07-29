@@ -111,8 +111,8 @@ describe("field-values projection layer", () => {
       slug: "fv-archived-view",
       name: "FV Archived View",
     });
-    await client.changeRequests.review({ changeRequestId: viewCr.id, verdict: "approved" });
-    await client.changeRequests.merge({ changeRequestId: viewCr.id });
+    await client.changeRequests.review({ changeRequestIds: [viewCr.id], verdict: "approved" });
+    await client.changeRequests.merge({ changeRequestIds: [viewCr.id] });
     const views = await client.bases.listViews({ baseId });
     const view = views.find((item) => item.slug === "fv-archived-view");
     expect(view).toBeDefined();
