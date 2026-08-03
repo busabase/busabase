@@ -135,9 +135,9 @@ describe("Boundary P12 — Trash permanent delete (purge)", () => {
 
     // A purged Base is a terminal state — restore must be rejected even though
     // it went through the archive step first (unlike a plain archived base).
-    await expect(raw.bases.restoreChangeRequest({ baseId: base.id })).rejects.toThrow(
-      /permanently deleted/i,
-    );
+    await expect(
+      raw.bases.lifecycleChangeRequest({ operation: "restore", baseId: base.id }),
+    ).rejects.toThrow(/permanently deleted/i);
   });
 
   it("Fix 5: purging a Doc frees its body object in storage — but soft-delete (archive) alone does not", async () => {

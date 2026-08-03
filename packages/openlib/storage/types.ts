@@ -37,6 +37,19 @@ export interface StorageConfig {
   // Local specific
   localRoot?: string; // Directory to store files (default: .uploads)
   localBaseUrl?: string; // Base URL for serving local files (default: /uploads)
+  /**
+   * Root-relative URL of the host app's upload relay — what
+   * `LocalStorage.generateUploadPresignedUrl()` hands back in place of the
+   * presigned PUT target S3 would give. The storage key rides in `?key=`.
+   *
+   * Mirrors `localBaseUrl` (read side) for the write side, so an app that
+   * mounts the relay somewhere other than `/api/dev/upload` (e.g. a
+   * self-hosted production build serving local disk from `/api/storage`) can
+   * say so in `STORAGE_URL` instead of being pinned to a dev-only path.
+   *
+   * Default: `/api/dev/upload`.
+   */
+  localUploadUrl?: string;
 }
 
 /**

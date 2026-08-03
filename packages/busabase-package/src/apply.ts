@@ -441,7 +441,8 @@ class UploadTargetUnsupportedError extends Error {}
  *
  * A host backed by S3/R2/MinIO returns an absolute presigned url and this works.
  * A host on the local filesystem adapter has no presigned url to give, so it
- * returns a root-relative `/api/dev/upload` sentinel that expects the caller to
+ * returns a root-relative upload-relay sentinel (`/api/storage/upload` on
+ * self-hosted Busabase) that expects the caller to
  * know it means "POST multipart here instead" — dev-environment knowledge that
  * does not belong in a client. We deliberately do NOT special-case it: clients
  * should only ever follow the url the API hands them. Binary uploads against

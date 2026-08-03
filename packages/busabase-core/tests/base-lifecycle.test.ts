@@ -494,9 +494,15 @@ describe("Base-domain DB lifecycle — oRPC", () => {
       const cr = await client.records.changeRequest({ operation: "delete", recordId });
       await approveAndMerge(cr.id);
 
-      await expect(client.records.changeRequest({ operation: "delete", recordId })).rejects.toThrow(
-        /already archived/,
-      );
+      // The code matters as much as the message: this guard used to throw a bare
+      // Error, which the transport turned into a 500 with the message swallowed.
+      // Asserting only the message passes either way.
+      await expect(
+        client.records.changeRequest({ operation: "delete", recordId }),
+      ).rejects.toMatchObject({
+        code: "CONFLICT",
+        message: expect.stringMatching(/already archived/),
+      });
     });
 
     it("refuses to delete an unknown record", async () => {

@@ -102,10 +102,49 @@ describe("operation diff field reorder model", () => {
     expect(isFieldReorderOperation(operation)).toBe(true);
     expect(model.beforeIds).toEqual(["fld_title", "fld_slug", "fld_body"]);
     expect(model.afterIds).toEqual(["fld_slug", "fld_title", "fld_body"]);
+    // "title" and "slug" swapped relative order (an inversion) — both moved.
+    // "body" stayed after both of them in either order, so it's unmoved.
     expect([...model.movedIds].sort()).toEqual(["fld_slug", "fld_title"]);
     expect(model.fieldsById.get("fld_slug")?.slug).toBe("slug");
     expect(model.beforePrimaryId).toBe("fld_title");
     expect(model.afterPrimaryId).toBe("fld_slug");
     expect(model.primaryChanged).toBe(true);
+  });
+
+  it("marks only the promoted field as moved when it jumps from back to front (set as record title)", () => {
+    const fields = [
+      makeField("fld_a", "a", 0),
+      makeField("fld_b", "b", 1),
+      makeField("fld_c", "c", 2),
+      makeField("fld_d", "d", 3),
+      makeField("fld_e", "e", 4),
+    ];
+    // Mirrors submitSetPrimaryField: promote "e" to the front, everyone else
+    // keeps their existing relative order.
+    const operation = makeOperation(["fld_e", "fld_a", "fld_b", "fld_c", "fld_d"]);
+    const changeRequest = makeChangeRequest(fields, operation);
+
+    const model = getFieldOrderDiffModel(changeRequest, operation);
+
+    expect(model.beforeIds).toEqual(["fld_a", "fld_b", "fld_c", "fld_d", "fld_e"]);
+    expect(model.afterIds).toEqual(["fld_e", "fld_a", "fld_b", "fld_c", "fld_d"]);
+    expect([...model.movedIds].sort()).toEqual(["fld_e"]);
+  });
+
+  it("marks exactly the two fields in a genuine pairwise swap as moved", () => {
+    const fields = [
+      makeField("fld_a", "a", 0),
+      makeField("fld_b", "b", 1),
+      makeField("fld_c", "c", 2),
+      makeField("fld_d", "d", 3),
+    ];
+    const operation = makeOperation(["fld_a", "fld_c", "fld_b", "fld_d"]);
+    const changeRequest = makeChangeRequest(fields, operation);
+
+    const model = getFieldOrderDiffModel(changeRequest, operation);
+
+    expect(model.beforeIds).toEqual(["fld_a", "fld_b", "fld_c", "fld_d"]);
+    expect(model.afterIds).toEqual(["fld_a", "fld_c", "fld_b", "fld_d"]);
+    expect([...model.movedIds].sort()).toEqual(["fld_b", "fld_c"]);
   });
 });

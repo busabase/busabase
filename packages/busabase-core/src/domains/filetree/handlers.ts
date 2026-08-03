@@ -25,6 +25,7 @@ import {
   type NodePO,
   type OperationPO,
 } from "../../db/schema";
+import { assertAirAppRunnable } from "../../logic/airapp-runnable";
 import { CURRENT_USER_ID, hashBuffer, id, now, rootNodeIdForSpace } from "../../logic/kernel";
 import { publishChangeRequestPendingReview } from "../../logic/live-events";
 import type { MaterializeArgs } from "../../logic/materialize";
@@ -148,11 +149,18 @@ const normalizeUsagePath = (filePath: string) => normalizeFilePath(filePath);
  * Skill's own reference doc) still gets the rest of the default scaffold
  * (SKILL.md, skill.json, ...) for any path they didn't provide themselves.
  * "replace": `providedFiles` (when non-empty) replaces the defaults
- * entirely — for a caller handing over a complete, different-shaped project
- * (e.g. an AirApp seeded with a Vite project instead of the default Hono
- * template) who does not want unrelated default files with unrelated
- * content mixed in. Only ever falls back to the config's defaults alone
- * when the caller provided no files at all.
+ * entirely — for a caller handing over a complete, self-contained project
+ * who does not want unrelated default files with unrelated content mixed
+ * in. Only ever falls back to the config's defaults alone when the caller
+ * provided no files at all.
+ *
+ * NOTE: this used to give "an AirApp seeded with a Vite project instead of
+ * the default Hono template" as the motivating example. That example was
+ * never achievable — Vite cannot boot under Nodepod at all (see the seed
+ * comment in `../airapp/handlers.ts`), so such a node installs and then
+ * dies on `npm run dev`. `assertAirAppRunnable` now rejects it outright at
+ * both write paths. "replace" remains useful for any other complete
+ * project shape; it just cannot be a bundler-based one.
  */
 const resolveSeedFiles = (
   config: FileTreeKindConfig,
@@ -552,6 +560,9 @@ export const createFileTreeNode = async (
   const files = gitignoreResult.kept;
   assertNoForbiddenPaths(files.map((file) => file.path));
   scanForSecrets(files);
+  // Only meaningful for `airapp`; a no-op for skill/drive. Checks the `package.json` in THIS
+  // payload — a caller sending none is relying on the scaffold's (correct) one.
+  assertAirAppRunnable(config.type, files);
 
   // Permission-aware default: merge immediately if the actor has `write` on
   // the parent node; otherwise (or with explicit `autoMerge: false`) propose
@@ -877,6 +888,13 @@ export const createFileTreeChangeRequest = async (
   }
   assertNoForbiddenPaths(gitignoreResult.kept.map((operation) => operation.path));
   scanForSecrets(gitignoreResult.kept);
+  // A change request carries only a delta, so this checks a `package.json` the edit actually
+  // rewrites (or deletes) — an edit to some other file is none of its business.
+  assertAirAppRunnable(config.type, gitignoreResult.kept, {
+    deletedPaths: gitignoreResult.kept
+      .filter((operation) => operation.kind === "delete")
+      .map((operation) => operation.path),
+  });
   const keptOperations = new Set(gitignoreResult.kept);
   const operations = parsed.operations.filter(
     (operation) => !hasPath(operation) || keptOperations.has(operation),

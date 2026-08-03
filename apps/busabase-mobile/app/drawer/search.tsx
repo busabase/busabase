@@ -1,16 +1,15 @@
 import { skipToken, useQuery } from "@tanstack/react-query";
-import { getNodeType, NODE_TYPES, type NodeType } from "busabase-contract/domains";
+import { NODE_TYPES, type NodeType } from "busabase-contract/domains";
 import type { NodeSearchResultVO, SearchResultKind, SearchResultVO } from "busabase-contract/types";
 import { useRouter } from "expo-router";
 import { AppWindow, File, FileText, GitPullRequest, Search, Table2 } from "lucide-react-native";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { StyleSheet, View } from "react-native";
+import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useBusabaseOrpc } from "~/api/use-busabase-orpc";
 import { ConnectionGuard } from "~/components/busabase/ConnectionGuard";
 import { DrawerScaffold } from "~/components/busabase/DrawerScaffold";
 import {
   NativeActionBar,
-  NativeChipList,
   NativeInlineError,
   NativeRow,
   NativeSection,
@@ -26,7 +25,7 @@ import {
 import { nodeIconForType } from "~/search/node-icons";
 import { getMobileNodeDestination } from "~/search/node-navigation";
 import { useKnownNodeCache } from "~/search/use-known-node-cache";
-import { spacing } from "~/theme/tokens";
+import { mobile, radius, spacing, typography } from "~/theme/tokens";
 import { useTokens } from "~/theme/use-tokens";
 
 const kindMeta: Record<SearchResultVO["kind"], { label: string; icon: typeof FileText }> = {
@@ -200,7 +199,6 @@ function SearchContent() {
       }),
     [allResults, recentResults.length],
   );
-
   const openKnownNode = useCallback(
     async (node: KnownNode) => {
       const destination = getMobileNodeDestination(node);
@@ -293,9 +291,46 @@ function SearchContent() {
         />
       </View>
 
-      <View style={styles.tabsWrap}>
-        <NativeChipList value={tab} options={tabOptions} onChange={setTab} />
-      </View>
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        style={[styles.tabs, { borderColor: tokens.border }]}
+        contentContainerStyle={styles.tabsContent}
+      >
+        {tabOptions.map((option) => {
+          const selected = option.value === tab;
+          return (
+            <Pressable
+              key={option.value}
+              accessibilityRole="tab"
+              accessibilityState={{ selected }}
+              style={({ pressed }) => [
+                styles.tab,
+                {
+                  backgroundColor: selected ? tokens.primaryMuted : "transparent",
+                  opacity: pressed ? 0.68 : 1,
+                },
+              ]}
+              onPress={() => setTab(option.value)}
+            >
+              <Text
+                style={[
+                  typography.small,
+                  styles.tabLabel,
+                  { color: selected ? tokens.foreground : tokens.mutedForeground },
+                ]}
+              >
+                {option.label}
+              </Text>
+              {option.meta !== undefined ? (
+                <Text style={[typography.caption, { color: tokens.mutedForeground }]}>
+                  {option.meta}
+                </Text>
+              ) : null}
+            </Pressable>
+          );
+        })}
+      </ScrollView>
 
       {displayedError ? (
         <View style={styles.message}>
@@ -320,14 +355,12 @@ function SearchContent() {
         ) : null}
         {tab === "recent"
           ? recentResults.map((node, index) => {
-              const definition = getNodeType(node.type);
               const Icon = nodeIconForType(node.type);
               return (
                 <NativeRow
                   key={node.id}
                   title={node.name}
-                  subtitle={node.slug}
-                  meta={definition?.label ?? node.type}
+                  meta={node.slug}
                   leading={<Icon size={18} color={tokens.mutedForeground} />}
                   onPress={() => void openKnownNode(node)}
                   last={index === recentResults.length - 1}
@@ -341,8 +374,7 @@ function SearchContent() {
                 <NativeRow
                   key={`${result.kind}-${result.id}`}
                   title={result.title}
-                  subtitle={result.body || result.eyebrow || meta.label}
-                  meta={meta.label}
+                  meta={result.eyebrow || undefined}
                   leading={<Icon size={18} color={tokens.mutedForeground} />}
                   onPress={() => void openResult(result)}
                   last={index === contentResults.length - 1}
@@ -377,7 +409,27 @@ export default function SearchScreen() {
 
 const styles = StyleSheet.create({
   searchBox: { marginHorizontal: spacing[5], marginBottom: spacing[2] },
-  tabsWrap: { marginBottom: spacing[2] },
+  tabs: {
+    flexGrow: 0,
+    marginBottom: spacing[2],
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  tabsContent: {
+    minHeight: mobile.minTouchTarget,
+    paddingHorizontal: spacing[5],
+    paddingBottom: spacing[2],
+    gap: spacing[1],
+  },
+  tab: {
+    minHeight: 32,
+    paddingHorizontal: spacing[3],
+    borderRadius: radius.md,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: spacing[1],
+  },
+  tabLabel: { fontWeight: "600" },
   message: { marginHorizontal: spacing[5], marginBottom: spacing[2] },
   loadMore: { marginHorizontal: spacing[5], marginTop: spacing[1] },
 });

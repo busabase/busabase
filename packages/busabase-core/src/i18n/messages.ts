@@ -262,6 +262,8 @@ export const coreMessagesEn = {
     open: "Open side panel",
     collapse: "Collapse side panel",
     closeTab: "Close tab",
+    closeOtherTabs: "Close other tabs",
+    closeAllTabs: "Close all tabs",
     maximize: "Maximize side panel",
     restore: "Restore side panel",
     resize: "Resize side panel",

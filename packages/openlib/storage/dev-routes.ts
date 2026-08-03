@@ -2,8 +2,11 @@ import { storage } from "./factory";
 import type { IStorage } from "./types";
 
 /**
- * Shared factories for the per-app dev-only storage route handlers
- * (`/api/dev/upload` and `/api/dev/attachment/[...key]`).
+ * Shared factories for the per-app storage route handlers, named for their
+ * usual mount points (`/api/dev/upload` and `/api/dev/attachment/[...key]`)
+ * where they are gated to development by default. The handlers themselves are
+ * transport-generic and can also back a real production route on a non-dev
+ * path — see `gateProduction` below.
  *
  * These are framework-agnostic: they use the standard web `Request`/`Response`
  * types and native `fetch`, so `openlib` does NOT depend on `next` or `axios`.
@@ -46,6 +49,19 @@ const CACHE_CONTROL = "public, max-age=31536000, immutable";
 export interface CreateDevUploadRouteOptions {
   /**
    * Gate the route behind a production check (returns 404 in production).
+   *
+   * Anything mounted under `/api/dev/` MUST keep the default: that path prefix
+   * means "development only, 404 in production", with no exceptions. This
+   * option exists solely for mounting the factory on a NON-dev path — the
+   * handler itself is transport-generic, so an app that genuinely serves
+   * local-disk storage in production can reuse it at a real route (e.g.
+   * `apps/busabase/src/app/api/storage/upload`) instead of reimplementing it.
+   *
+   * A caller that passes `false` MUST validate the storage key itself before it
+   * reaches the adapter: these handlers pass it straight to
+   * `path.join(rootDir, key)`, so an un-gated route without a key guard is an
+   * arbitrary-file read/write. See `apps/busabase/src/lib/storage-key.ts`.
+   *
    * @default true
    */
   gateProduction?: boolean;
@@ -145,6 +161,19 @@ export function createDevUploadRoute(opts?: CreateDevUploadRouteOptions): {
 export interface CreateDevAttachmentRouteOptions {
   /**
    * Gate the route behind a production check (returns 404 in production).
+   *
+   * Anything mounted under `/api/dev/` MUST keep the default: that path prefix
+   * means "development only, 404 in production", with no exceptions. This
+   * option exists solely for mounting the factory on a NON-dev path — the
+   * handler itself is transport-generic, so an app that genuinely serves
+   * local-disk storage in production can reuse it at a real route (e.g.
+   * `apps/busabase/src/app/api/storage/[...key]`) instead of reimplementing it.
+   *
+   * A caller that passes `false` MUST validate the storage key itself before it
+   * reaches the adapter: these handlers pass it straight to
+   * `path.join(rootDir, key)`, so an un-gated route without a key guard is an
+   * arbitrary-file read/write. See `apps/busabase/src/lib/storage-key.ts`.
+   *
    * @default true
    */
   gateProduction?: boolean;

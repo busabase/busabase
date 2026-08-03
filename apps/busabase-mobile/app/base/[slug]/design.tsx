@@ -7,6 +7,7 @@ import { useMemo, useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Switch, Text, View } from "react-native";
 import { useBusabaseOrpc } from "~/api/use-busabase-orpc";
 import { ConnectionGuard } from "~/components/busabase/ConnectionGuard";
+import { DrawerScaffold } from "~/components/busabase/DrawerScaffold";
 import {
   NativeActionBar,
   NativeBottomSheet,
@@ -14,7 +15,6 @@ import {
   NativeInlineError,
   NativeLoadingState,
   NativeRow,
-  NativeScreen,
   NativeSection,
 } from "~/components/native-screen";
 import { Button } from "~/components/ui/Button";
@@ -191,21 +191,21 @@ function BaseDesignContent() {
 
   if (basesQuery.isLoading) {
     return (
-      <NativeScreen title="Base design" subtitle={slug} headerLeading={headerLeading}>
+      <DrawerScaffold title="Base design" subtitle={slug} headerLeading={headerLeading}>
         <NativeLoadingState label="Loading base" />
-      </NativeScreen>
+      </DrawerScaffold>
     );
   }
   if (!base) {
     return (
-      <NativeScreen title="Base design" subtitle={slug} headerLeading={headerLeading}>
+      <DrawerScaffold title="Base design" subtitle={slug} headerLeading={headerLeading}>
         <NativeEmptyState title="Base not found" description="This base is not available." />
-      </NativeScreen>
+      </DrawerScaffold>
     );
   }
 
   return (
-    <NativeScreen
+    <DrawerScaffold
       title={`${base.name} design`}
       titleNumberOfLines={2}
       subtitle={`${base.fields.length} fields`}
@@ -520,7 +520,7 @@ function BaseDesignContent() {
           </NativeActionBar>
         }
       />
-    </NativeScreen>
+    </DrawerScaffold>
   );
 }
 

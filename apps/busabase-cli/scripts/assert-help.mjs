@@ -23,6 +23,18 @@ const binHelp = execFileSync(process.execPath, [binPath, "--help"], {
   cwd: root,
   encoding: "utf8",
 });
+const directVersion = execFileSync(process.execPath, [cliPath, "--version"], {
+  cwd: root,
+  encoding: "utf8",
+});
+const delegatedVersion = execFileSync(process.execPath, [binPath], {
+  cwd: root,
+  encoding: "utf8",
+  env: {
+    ...process.env,
+    BUSABASE_CLI_DELEGATED_ARGV: JSON.stringify(["--version"]),
+  },
+});
 const createChangeRequestHelp = execFileSync(
   process.execPath,
   [cliPath, "bases", "create-change-request", "--help"],
@@ -57,6 +69,10 @@ const forbidden = [
 const combinedHelp = `${help}\n${binHelp}`;
 const missing = required.filter((text) => !combinedHelp.includes(text));
 const stale = forbidden.filter((text) => combinedHelp.includes(text));
+
+if (delegatedVersion !== directVersion) {
+  throw new Error("busabase-cli delegated wrapper does not match the direct CLI entrypoint.");
+}
 
 if (missing.length || stale.length) {
   throw new Error(

@@ -36,7 +36,7 @@ No simulator required — `busabase-mobile` runs on web, driven headless:
 1. Seed + run the backend on `:15419`:
    `cd apps/busabase && pnpm db:seed:all && PORT=15419 pnpm dev`
    (needs a `.env` with `PG_DATABASE_URL="pglite://.data/busabase"` +
-   `STORAGE_URL="local:.data/busabase-storage?base_url=/api/dev/attachment"`).
+   `STORAGE_URL="local:.data/busabase-storage?base_url=/api/storage&upload_url=/api/storage/upload"`).
 2. Run the app on web: `cd apps/busabase-mobile && npx expo start --web --port 8082`.
 3. Drive it with Playwright at an iPhone viewport (393×852, deviceScaleFactor 3),
    launching Chromium with `--disable-web-security` (the web page on `:8082`

@@ -1,7 +1,10 @@
 import "server-only";
 
 import { ORPCError } from "@orpc/server";
-import { listChangeRequestsPagedInputSchema } from "busabase-contract/contract/schemas";
+import {
+  listChangeRequestsPagedInputSchema,
+  listChangeRequestsPageInputSchema,
+} from "busabase-contract/contract/schemas";
 import type {
   ChangeRequestVO,
   CommentVO,
@@ -10,7 +13,21 @@ import type {
   ReviewVO,
   ViewVO,
 } from "busabase-contract/types";
-import { and, asc, desc, eq, inArray, isNull, lt, ne, or, type SQL } from "drizzle-orm";
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  getTableColumns,
+  inArray,
+  isNull,
+  lt,
+  lte,
+  ne,
+  or,
+  type SQL,
+  sql,
+} from "drizzle-orm";
 import { z } from "zod";
 import {
   getContextIsSpaceManager,
@@ -21,6 +38,7 @@ import {
 } from "../context";
 import { getDb } from "../db";
 import type {
+  BaseFieldPO,
   BusabaseNodeType,
   ChangeRequestPO,
   CommitPO,
@@ -62,9 +80,9 @@ import {
 import { resolveLookupValues } from "../domains/base/logic/lookup-values";
 import { mergeDocUpdate } from "../domains/doc/handlers";
 import { mergeFileTreeFile, mergeFileTreeMetadata } from "../domains/filetree/handlers";
-import { dispatchWebhookEvent } from "../domains/webhook/logic/dispatch";
+import { dispatchWebhookEvent, hasWebhookRuleFor } from "../domains/webhook/logic/dispatch";
 import { insertAuditEvent } from "./audit";
-import { projectCommitFields } from "./field-values";
+import { projectCommitFields, refreshRecordQueryStatistics } from "./field-values";
 import {
   CURRENT_USER_ID,
   id,
@@ -183,7 +201,45 @@ export interface MergeCtx {
   // Auto-merged record fields (operationId → merged fields), set when a record
   // moved since the change request's base and a 3-way field merge resolved it.
   resolvedRecordFields: Map<string, Record<string, unknown>>;
+  // baseId → the base's live field definitions, memoised for the duration of ONE
+  // merge. Every merged record used to re-read this identical row set four times
+  // (compute → validate → project → asset-usage sync), so a 1,000-record bulk
+  // import issued 4,000 copies of the same query. Any operation in this same
+  // change request that alters the schema (add/delete/update/convert/reorder/
+  // restore field) MUST call `invalidateBaseFieldDefs` — a CR is allowed to
+  // change a field and write records in one unit, and those records have to see
+  // the new schema.
+  fieldDefsByBaseId: Map<string, BaseFieldPO[]>;
 }
+
+/**
+ * How many merged records it takes to make refreshing planner statistics worth
+ * it. Crossing this means the tables no longer look the way the planner thinks
+ * they do — see `refreshRecordQueryStatistics` for the cliff that causes.
+ */
+const BULK_MERGE_ANALYZE_THRESHOLD = 200;
+
+/**
+ * Records merged per space since statistics were last refreshed.
+ *
+ * Counted ACROSS merges, not per merge. Testing a single merge against the
+ * threshold only catches "one big import" and misses the equally common shape
+ * of an agent or script importing 100 rows at a time until a Base holds tens of
+ * thousands — where no individual merge is ever "bulk", so statistics would
+ * never be refreshed at all and the cliff stays. Accumulating means 2×100
+ * triggers the same refresh one 200 does.
+ *
+ * Process-local by design: it is a heuristic for when to spend an ANALYZE, not
+ * bookkeeping that has to survive a restart. A restart just means the next
+ * refresh happens a little later.
+ */
+const recordsMergedSinceAnalyze = new Map<string, number>();
+
+/** Drop the memoised field definitions for a base after a schema operation. */
+export const invalidateBaseFieldDefs = (ctx: MergeCtx, baseId: string | null | undefined) => {
+  if (baseId) ctx.fieldDefsByBaseId.delete(baseId);
+  else ctx.fieldDefsByBaseId.clear();
+};
 
 /**
  * DB-level TOCTOU guard: atomically claim this CR for merging by flipping
@@ -746,35 +802,77 @@ export const hydrateChangeRequests = async (
     ),
   ]);
 
-  // Every operation across all CRs in one query; grouped per CR preserving
-  // (position, createdAt) order.
-  const itemRows = await db
-    .select()
-    .from(busabaseOperations)
-    .where(inArray(busabaseOperations.changeRequestId, changeRequestIds))
-    .orderBy(asc(busabaseOperations.position), asc(busabaseOperations.createdAt));
-  const operationsByCr = new Map<string, OperationPO[]>();
-  for (const item of itemRows) {
-    const list = operationsByCr.get(item.changeRequestId);
+  // Only the *embedded* `operations` VOs are capped — a bulk change request (up
+  // to 1000 record proposals in ONE CR, see createBulkChangeRequestInputSchema)
+  // would otherwise force every list request to hydrate + transfer full field
+  // diffs for every proposed record. Callers that need every operation (the
+  // single-CR detail view, `/agent/tasks`) omit `maxOperationsPerChangeRequest`.
+  const maxOps = options?.maxOperationsPerChangeRequest;
+
+  // The cap is applied in SQL, not after the fact. Reading every operation and
+  // then slicing meant a 50-row page containing a few bulk imports pulled tens
+  // of thousands of rows out of the database to display five of them each.
+  // `operationCount` still has to be the TRUE total (the UI renders "N 个操作"),
+  // so it comes from a grouped count rather than from the truncated rows.
+  const rankedOperations =
+    maxOps === undefined
+      ? null
+      : db.$with("ranked_operations").as(
+          db
+            .select({
+              ...getTableColumns(busabaseOperations),
+              rowNumber:
+                sql<number>`row_number() over (partition by ${busabaseOperations.changeRequestId} order by ${busabaseOperations.position} asc, ${busabaseOperations.createdAt} asc)`.as(
+                  "row_number",
+                ),
+            })
+            .from(busabaseOperations)
+            .where(inArray(busabaseOperations.changeRequestId, changeRequestIds)),
+        );
+
+  const hydratedItemRows: OperationPO[] = rankedOperations
+    ? ((await db
+        .with(rankedOperations)
+        .select()
+        .from(rankedOperations)
+        .where(lte(rankedOperations.rowNumber, maxOps as number))
+        .orderBy(
+          asc(rankedOperations.changeRequestId),
+          asc(rankedOperations.position),
+          asc(rankedOperations.createdAt),
+        )) as unknown as OperationPO[])
+    : await db
+        .select()
+        .from(busabaseOperations)
+        .where(inArray(busabaseOperations.changeRequestId, changeRequestIds))
+        .orderBy(asc(busabaseOperations.position), asc(busabaseOperations.createdAt));
+
+  const hydratedOperationsByCr = new Map<string, OperationPO[]>();
+  for (const item of hydratedItemRows) {
+    const list = hydratedOperationsByCr.get(item.changeRequestId);
     if (list) {
       list.push(item);
     } else {
-      operationsByCr.set(item.changeRequestId, [item]);
+      hydratedOperationsByCr.set(item.changeRequestId, [item]);
     }
   }
 
-  // `operationCount` below always reflects the true total from `operationsByCr`.
-  // Only the *embedded* `operations` VOs are capped here — a bulk-change-request
-  // (up to 1000 record proposals in ONE CR, see createBulkChangeRequestInputSchema)
-  // would otherwise force every list request to hydrate + transfer full field
-  // diffs for every proposed record. Callers that need every operation (the
-  // single-CR detail view, `/agent/tasks`) simply omit `maxOperationsPerChangeRequest`.
-  const maxOps = options?.maxOperationsPerChangeRequest;
-  const hydratedOperationsByCr =
-    maxOps === undefined
-      ? operationsByCr
-      : new Map([...operationsByCr].map(([crId, ops]) => [crId, ops.slice(0, maxOps)]));
-  const hydratedItemRows = [...hydratedOperationsByCr.values()].flat();
+  // True per-CR totals. When nothing was capped the rows we already have ARE the
+  // total, so this costs no extra query on the detail path.
+  const operationCountByCr = new Map<string, number>();
+  if (maxOps === undefined) {
+    for (const [crId, ops] of hydratedOperationsByCr) operationCountByCr.set(crId, ops.length);
+  } else {
+    const countRows = await db
+      .select({
+        changeRequestId: busabaseOperations.changeRequestId,
+        count: sql<number>`count(*)::int`,
+      })
+      .from(busabaseOperations)
+      .where(inArray(busabaseOperations.changeRequestId, changeRequestIds))
+      .groupBy(busabaseOperations.changeRequestId);
+    for (const row of countRows) operationCountByCr.set(row.changeRequestId, row.count);
+  }
 
   // Head commits + record base-commits in one query — scoped to the operations
   // actually being hydrated, so a capped list doesn't still pay to fetch (and
@@ -898,7 +996,7 @@ export const hydrateChangeRequests = async (
       node,
       operations,
       primaryOperation: operations[0] ?? null,
-      operationCount: operationsByCr.get(changeRequest.id)?.length ?? 0,
+      operationCount: operationCountByCr.get(changeRequest.id) ?? 0,
       reviews: (reviewsByCr.get(changeRequest.id) ?? []).map((review) => {
         const reviewVO = toReviewVO(review, users);
         // `visibleOperationHeads` (one entry per operation the reviewer saw) is
@@ -1101,21 +1199,127 @@ export const listChangeRequestsPaged = async (
 };
 
 /**
+ * Random-access (numbered) change request paging — the same filters as
+ * `listChangeRequestsPaged`, but addressed by page number and carrying the total
+ * across the whole filter. Backs the inbox's paginator, which reuses the Base
+ * table's paginator component.
+ *
+ * Only the requested page is hydrated. The visibility filter still has to run
+ * per row for a non-manager, so for them the offset walk is approximate in the
+ * same way the keyset listing already is; a space manager (who sees everything)
+ * gets an exact COUNT + OFFSET.
+ */
+export const listChangeRequestsPage = async (
+  input?: z.input<typeof listChangeRequestsPageInputSchema>,
+) => {
+  await ensureReady();
+  const db = await getDb();
+  const parsed = listChangeRequestsPageInputSchema.parse(input);
+  const filters: SQL[] = [eq(busabaseChangeRequests.spaceId, getContextSpaceId())];
+  if (parsed.status && parsed.status.length > 0) {
+    filters.push(inArray(busabaseChangeRequests.status, parsed.status));
+  }
+  if (parsed.mine) {
+    filters.push(eq(busabaseChangeRequests.submittedBy, mineActorId()));
+  }
+
+  const [countRow] = await db
+    .select({ value: sql<number>`count(*)::int` })
+    .from(busabaseChangeRequests)
+    .where(and(...filters));
+  const total = countRow?.value ?? 0;
+  const totalPages = Math.ceil(total / parsed.pageSize);
+  const page = totalPages === 0 ? 1 : Math.min(parsed.page, totalPages);
+  const offset = (page - 1) * parsed.pageSize;
+
+  const rows = await db
+    .select()
+    .from(busabaseChangeRequests)
+    .where(and(...filters))
+    .orderBy(desc(busabaseChangeRequests.createdAt), desc(busabaseChangeRequests.id))
+    .limit(parsed.pageSize)
+    .offset(offset);
+  const visible = await filterVisibleChangeRequestRows(rows);
+
+  return {
+    changeRequests: await hydrateChangeRequests(visible, {
+      maxOperationsPerChangeRequest: LIST_MAX_OPERATIONS_PER_CHANGE_REQUEST,
+    }),
+    total,
+    totalPages,
+    page,
+    pageSize: parsed.pageSize,
+  };
+};
+
+/** Shape the inbox tab badges expect, built from a status → count tally. */
+const toInboxCounts = (statusCount: Map<string, number>, created: number) => ({
+  review: statusCount.get("in_review") ?? 0,
+  changes: statusCount.get("changes_requested") ?? 0,
+  created,
+  approved: statusCount.get("approved") ?? 0,
+  merged: statusCount.get("merged") ?? 0,
+  rejected: (statusCount.get("rejected") ?? 0) + (statusCount.get("abandoned") ?? 0),
+});
+
+/**
  * Whole-space inbox tab counts. One grouped query by status plus a scoped count
  * for the "created" tab — so the badges are correct regardless of how many
  * change requests exist (the client used to compute these from a capped page).
+ *
+ * The inbox re-requests this on EVERY tab switch, so it has to stay cheap as a
+ * space accumulates change requests. It previously walked the entire table in
+ * 100-row `SELECT *` pages — dragging every row's `mergeSummary` jsonb into JS
+ * purely to increment a counter — which on a 3,295-change-request space cost
+ * 268ms and 99MB of peak heap per switch, and grew from there.
  */
 export const countChangeRequests = async () => {
   await ensureReady();
   const db = await getDb();
   const spaceId = getContextSpaceId();
+
+  // A space manager sees every change request, so the badges are a pure
+  // aggregate: let the database do the counting and transfer six numbers
+  // instead of the whole table.
+  if (getContextIsSpaceManager()) {
+    const statusRows = await db
+      .select({
+        status: busabaseChangeRequests.status,
+        count: sql<number>`count(*)::int`,
+      })
+      .from(busabaseChangeRequests)
+      .where(eq(busabaseChangeRequests.spaceId, spaceId))
+      .groupBy(busabaseChangeRequests.status);
+    const [mineRow] = await db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(busabaseChangeRequests)
+      .where(
+        and(
+          eq(busabaseChangeRequests.spaceId, spaceId),
+          eq(busabaseChangeRequests.submittedBy, mineActorId()),
+        ),
+      );
+    return toInboxCounts(
+      new Map(statusRows.map((row) => [row.status, row.count])),
+      mineRow?.count ?? 0,
+    );
+  }
+
+  // Non-managers: whether a change request is visible depends on the node scope
+  // its operations resolve to, which cannot be expressed as a SQL aggregate — so
+  // the walk stays. It now reads only the three columns the tally actually uses,
+  // instead of whole rows.
   const statusCount = new Map<string, number>();
   let created = 0;
   let offset = 0;
   const batchSize = 100;
   for (;;) {
     const rows = await db
-      .select()
+      .select({
+        id: busabaseChangeRequests.id,
+        status: busabaseChangeRequests.status,
+        submittedBy: busabaseChangeRequests.submittedBy,
+      })
       .from(busabaseChangeRequests)
       .where(eq(busabaseChangeRequests.spaceId, spaceId))
       .orderBy(desc(busabaseChangeRequests.createdAt), desc(busabaseChangeRequests.id))
@@ -1130,14 +1334,7 @@ export const countChangeRequests = async () => {
     offset += rows.length;
   }
 
-  return {
-    review: statusCount.get("in_review") ?? 0,
-    changes: statusCount.get("changes_requested") ?? 0,
-    created,
-    approved: statusCount.get("approved") ?? 0,
-    merged: statusCount.get("merged") ?? 0,
-    rejected: (statusCount.get("rejected") ?? 0) + (statusCount.get("abandoned") ?? 0),
-  };
+  return toInboxCounts(statusCount, created);
 };
 
 export const getChangeRequest = async (changeRequestId: string) => {
@@ -1438,7 +1635,10 @@ const canViewChangeRequest = async (changeRequestId: string): Promise<boolean> =
   return true;
 };
 
-const filterVisibleChangeRequestRows = async <T extends ChangeRequestPO>(
+// Constrained to `{ id }` rather than the full ChangeRequestPO on purpose: the
+// body only ever reads `row.id`, and callers that are merely tallying should be
+// free to select three columns instead of paying for whole rows.
+const filterVisibleChangeRequestRows = async <T extends { id: string }>(
   rows: T[],
 ): Promise<T[]> => {
   if (rows.length === 0 || getContextIsSpaceManager()) return rows;
@@ -2330,6 +2530,7 @@ const _mergeChangeRequest = async (changeRequestId: string) => {
         mergedViewIds: [],
         nodeRefs: new Map(),
         resolvedRecordFields: new Map(),
+        fieldDefsByBaseId: new Map(),
       };
       for (const item of operationKinds) {
         const headCommit = headCommitsById.get(item.headCommitId);
@@ -2602,6 +2803,7 @@ const _mergeChangeRequest = async (changeRequestId: string) => {
       mergedViewIds: [],
       nodeRefs: new Map(),
       resolvedRecordFields,
+      fieldDefsByBaseId: new Map(),
     };
     for (const item of operationKinds) {
       const headCommit = headCommitsById.get(item.headCommitId);
@@ -2665,6 +2867,15 @@ const _mergeChangeRequest = async (changeRequestId: string) => {
         default:
           break;
       }
+
+      // Every `base_*` operation can change the Base's field set, so drop the
+      // memoised definitions here rather than inside each handler — a CR is
+      // allowed to add a field and then write records to it in one unit, and
+      // centralising the invalidation means a future operation kind cannot
+      // silently inherit a stale cache.
+      if (item.operation.startsWith("base_")) {
+        invalidateBaseFieldDefs(ctx, item.baseId);
+      }
     }
 
     // status/mergedAt were already flipped by the guarded claim UPDATE above;
@@ -2683,6 +2894,23 @@ const _mergeChangeRequest = async (changeRequestId: string) => {
     mergedRecordIds.push(...ctx.mergedRecordIds);
     mergedViewIds.push(...ctx.mergedViewIds);
   });
+
+  // An import changes the shape of these tables enough that the planner's old
+  // statistics stop describing them — and the very next thing a user does after
+  // importing is open the table they just filled. See
+  // refreshRecordQueryStatistics for the measured cliff this avoids. Counted
+  // cumulatively so a drip-feed import (100 rows at a time) reaches the same
+  // threshold a single bulk merge does; a one-record edit still costs nothing.
+  if (mergedRecordIds.length > 0) {
+    const analyzeSpaceId = getContextSpaceId();
+    const pending = (recordsMergedSinceAnalyze.get(analyzeSpaceId) ?? 0) + mergedRecordIds.length;
+    if (pending >= BULK_MERGE_ANALYZE_THRESHOLD) {
+      recordsMergedSinceAnalyze.set(analyzeSpaceId, 0);
+      await refreshRecordQueryStatistics(db);
+    } else {
+      recordsMergedSinceAnalyze.set(analyzeSpaceId, pending);
+    }
+  }
 
   await insertAuditEvent(db, {
     action: "change_request.merged",
@@ -2712,30 +2940,45 @@ const _mergeChangeRequest = async (changeRequestId: string) => {
   // must never block or fail the merge response.
   if (newlyCreatedRecordIds.length > 0) {
     const webhookSpaceId = getContextSpaceId();
-    const newlyCreatedRecordRows = await db
-      .select()
-      .from(busabaseRecords)
-      .where(
-        and(
-          inArray(busabaseRecords.id, newlyCreatedRecordIds),
-          eq(busabaseRecords.spaceId, webhookSpaceId),
-        ),
-      );
-    for (const recordRow of newlyCreatedRecordRows) {
-      void hydrateRecord(recordRow)
-        .then((recordVO) =>
-          dispatchWebhookEvent(db, {
-            spaceId: webhookSpaceId,
-            baseId: changeRequest.baseId,
-            eventType: "record.created",
-            payload: {
-              recordId: recordVO.id,
+    // Ask ONCE whether anything is listening before paying to hydrate. This used
+    // to hydrate every new record (4+ queries each) and then discover, inside
+    // dispatchWebhookEvent, that no rule matched — so importing 1,000 records
+    // fired thousands of pointless queries in an unbounded burst right as the
+    // next batch started merging. Almost every local Base has no webhook rule at
+    // all, which makes this the difference between "free" and "the dominant cost
+    // of a bulk import".
+    const hasListener = await hasWebhookRuleFor(db, {
+      spaceId: webhookSpaceId,
+      baseId: changeRequest.baseId,
+      eventType: "record.created",
+    });
+    if (hasListener) {
+      const newlyCreatedRecordRows = await db
+        .select()
+        .from(busabaseRecords)
+        .where(
+          and(
+            inArray(busabaseRecords.id, newlyCreatedRecordIds),
+            eq(busabaseRecords.spaceId, webhookSpaceId),
+          ),
+        );
+      // Batch-hydrate (one query set for the whole import) rather than N+1.
+      void hydrateRecords(newlyCreatedRecordRows)
+        .then(async (recordVOs) => {
+          for (const recordVO of recordVOs) {
+            await dispatchWebhookEvent(db, {
+              spaceId: webhookSpaceId,
               baseId: changeRequest.baseId,
-              changeRequestId: changeRequest.id,
-              fields: recordVO.headCommit.fields,
-            },
-          }),
-        )
+              eventType: "record.created",
+              payload: {
+                recordId: recordVO.id,
+                baseId: changeRequest.baseId,
+                changeRequestId: changeRequest.id,
+                fields: recordVO.headCommit.fields,
+              },
+            });
+          }
+        })
         .catch((error) => {
           console.error("[busabase] record.created webhook dispatch failed", error);
         });

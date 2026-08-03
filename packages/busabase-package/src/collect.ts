@@ -44,7 +44,7 @@ export interface CollectOptions {
   /**
    * The server we're exporting from. Load-bearing for asset downloads: a local
    * (non-S3) server hands back a ROOT-RELATIVE download url (e.g.
-   * `/api/dev/attachment/…`), meant to be fetched same-origin by a browser. The
+   * `/api/storage/…`), meant to be fetched same-origin by a browser. The
    * CLI runs out-of-process, so it must resolve that against the host itself —
    * a bare `fetch("/api/…")` throws "Failed to parse URL" in Node. (The same
    * trap `busabase-dump`'s exporter hit and documents.)

@@ -21,6 +21,7 @@ import {
   useAirAppRunnerStore,
 } from "../store/airapp-runner-store";
 import { isAirAppFullscreenSearch, updateAirAppFullscreenSearch } from "../utils/fullscreen-query";
+import { AIRAPP_PREVIEW_IFRAME_SANDBOX } from "../utils/preview-sandbox";
 import { createAirAppRunner } from "./runners/runner-factory";
 import type { AirAppRunnerKind } from "./runners/types";
 
@@ -436,7 +437,7 @@ export function AirAppRunPreview({
         {previewUrl ? (
           <iframe
             className="h-full w-full border-0 bg-white"
-            sandbox="allow-same-origin allow-scripts"
+            sandbox={AIRAPP_PREVIEW_IFRAME_SANDBOX}
             src={previewUrl}
             title={messages.airapp.previewTitle}
           />

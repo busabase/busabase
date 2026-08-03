@@ -932,7 +932,7 @@ describe("Field management — delete / update / convert", () => {
       const before = await client.bases.list({});
       expect(before.some((b) => b.id === baseId)).toBe(true);
       // Archive it
-      const archiveCr = await client.bases.archiveChangeRequest({ baseId });
+      const archiveCr = await client.bases.lifecycleChangeRequest({ operation: "archive", baseId });
       await approveAndMerge(archiveCr.id);
       // Should no longer appear in list
       const after = await client.bases.list({});
@@ -1006,7 +1006,7 @@ describe("Field management — delete / update / convert", () => {
         patch: { name: "Updated Score" },
       });
       // Archive the base
-      const archiveCr = await client.bases.archiveChangeRequest({ baseId });
+      const archiveCr = await client.bases.lifecycleChangeRequest({ operation: "archive", baseId });
       await approveAndMerge(archiveCr.id);
       // Now try to merge the field update CR → should throw
       await expect(approveAndMerge(updateCr.id)).rejects.toThrow();

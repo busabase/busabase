@@ -188,6 +188,56 @@ describe("busabase-cli golden path (skill commands, in-process)", () => {
     expect(JSON.stringify(tree)).toContain("CLI Folder");
   });
 
+  // `records_change_request`'s endpoint has supported permission-aware auto-merge
+  // on `update` since #5712, but the task that supersedes it never exposed the
+  // flag — and `records_change_request` is in TASK_SUPERSEDED_MCP_TOOLS, so the
+  // task is an MCP client's ONLY route to a record update. The capability was
+  // unreachable, not merely undocumented. Both branches asserted here.
+  it("updates a record in one call with --auto-merge, and still defers with --require-review", async () => {
+    const bases = (await cli("bases", "list")) as Array<{ id: string; slug: string }>;
+    const blogId = bases.find((b) => b.slug === "blog")?.id as string;
+    const page = (await cli("records", "query", "--base-id", blogId, "--limit", "1")) as {
+      records: Array<{ id: string }>;
+    };
+    const recordId = page.records[0]?.id as string;
+    expect(recordId).toBeTruthy();
+
+    const merged = (await cli(
+      "records",
+      "change-request",
+      "--record-id",
+      recordId,
+      "--operation",
+      "update",
+      "--fields-json",
+      JSON.stringify({ status: "published" }),
+      "--auto-merge",
+    )) as { materialized?: boolean; id: string };
+    expect(merged.materialized).toBe(true);
+
+    // The new value is canonical immediately — no review/merge call in between.
+    const after = (await cli("records", "get", "--record-id", recordId)) as {
+      headCommit: { fields: Record<string, unknown> };
+    };
+    expect(after.headCommit.fields.status).toBe("published");
+
+    // The opposite flag must still be reachable: a CLI boolean is presence-only,
+    // so `--auto-merge` alone could never express "force review".
+    const proposed = (await cli(
+      "records",
+      "change-request",
+      "--record-id",
+      recordId,
+      "--operation",
+      "update",
+      "--fields-json",
+      JSON.stringify({ status: "draft" }),
+      "--require-review",
+    )) as { materialized?: boolean; status?: string };
+    expect(proposed.materialized).toBe(false);
+    expect(proposed.status).toBe("in_review");
+  });
+
   // Views gained `autoMerge` here; assert BOTH flags reach the endpoint through
   // the task layer. `--require-review` matters on its own: a CLI boolean is
   // presence-only, so `--auto-merge` alone could never express "force review",

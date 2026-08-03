@@ -139,7 +139,7 @@ export function FormNodeDetailScreen() {
 }
 
 const styles = StyleSheet.create({
-  fields: { paddingHorizontal: spacing[5], paddingVertical: spacing[4], gap: spacing[4] },
+  fields: { paddingVertical: spacing[4], gap: spacing[4] },
   fieldWrap: { gap: spacing[1] },
   submitted: {
     alignItems: "center",

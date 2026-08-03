@@ -20,10 +20,12 @@ const readdir = promisify(fs.readdir);
 export class LocalStorage implements IStorage {
   private rootDir: string;
   private baseUrl: string;
+  private uploadUrl: string;
 
   constructor(config: StorageConfig) {
     this.rootDir = config.localRoot || path.join(process.cwd(), ".uploads");
     this.baseUrl = config.localBaseUrl || "/uploads";
+    this.uploadUrl = config.localUploadUrl || "/api/dev/upload";
 
     // Ensure root directory exists
     if (!fs.existsSync(this.rootDir)) {
@@ -89,8 +91,12 @@ export class LocalStorage implements IStorage {
    * Generate presigned URL for uploading file
    *
    * Local storage has no browser-direct PUT target the way S3 does, so we return
-   * the host app's dev relay (`openlib/storage/dev-routes` PUT handler) as the
-   * upload URL. The key travels in the query string.
+   * the host app's upload relay (`openlib/storage/dev-routes` PUT handler) as
+   * the upload URL. The key travels in the query string.
+   *
+   * Where that relay is mounted is configuration (`upload_url` on `STORAGE_URL`
+   * → `config.localUploadUrl`), the write-side mirror of `base_url`. Defaults to
+   * `/api/dev/upload` for apps that only use local storage in development.
    */
   async generateUploadPresignedUrl(
     key: string,
@@ -101,7 +107,7 @@ export class LocalStorage implements IStorage {
     // talking to (ordinary URL resolution — no dev-specific knowledge) and PUTs
     // the raw bytes to it exactly as it would an S3 presigned URL. The storage
     // key rides in the query string because the URL is all the client has.
-    return `/api/dev/upload?key=${encodeURIComponent(key)}`;
+    return `${this.uploadUrl.replace(/\/$/, "")}?key=${encodeURIComponent(key)}`;
   }
 
   /**

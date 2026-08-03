@@ -98,13 +98,35 @@ describe("Boundary P2 — oRPC", () => {
   it("Fix 1: archives a base then restores it back into bases.list", async () => {
     const base = await makeBase("p2-restore", [{ slug: "title", name: "Title", required: true }]);
 
-    const archiveCr = await client.bases.archiveChangeRequest({ baseId: base.id });
+    const archiveCr = await client.bases.lifecycleChangeRequest({
+      operation: "archive",
+      baseId: base.id,
+    });
     await approveAndMerge(archiveCr.id);
     expect((await client.bases.list({})).some((b) => b.id === base.id)).toBe(false);
 
-    const restoreCr = await client.bases.restoreChangeRequest({ baseId: base.id });
+    const restoreCr = await client.bases.lifecycleChangeRequest({
+      operation: "restore",
+      baseId: base.id,
+    });
     await approveAndMerge(restoreCr.id);
     expect((await client.bases.list({})).some((b) => b.id === base.id)).toBe(true);
+  });
+
+  // Restoring a Base that was never archived is a caller mistake, not a server
+  // fault. This guard used to throw a bare Error, so the API answered 500 with
+  // the message swallowed — asserting the code is what keeps it a 409.
+  it("Fix 1b: restoring a base that is not archived is a CONFLICT, not a 500", async () => {
+    const base = await makeBase("p2-not-archived", [
+      { slug: "title", name: "Title", required: true },
+    ]);
+
+    await expect(
+      client.bases.lifecycleChangeRequest({ operation: "restore", baseId: base.id }),
+    ).rejects.toMatchObject({
+      code: "CONFLICT",
+      message: expect.stringMatching(/is not archived/),
+    });
   });
 
   // ── Fix 2: Required Field Addition Validation ───────────────────────────────
@@ -178,7 +200,10 @@ describe("Boundary P2 — oRPC", () => {
     if ("status" in baseA) throw new Error("Expected materialized BaseVO");
     const targetRecordId = await createRecord(baseB.id, { title: "target" });
 
-    const archiveCr = await client.bases.archiveChangeRequest({ baseId: baseB.id });
+    const archiveCr = await client.bases.lifecycleChangeRequest({
+      operation: "archive",
+      baseId: baseB.id,
+    });
     await approveAndMerge(archiveCr.id);
 
     await expect(

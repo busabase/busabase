@@ -67,6 +67,9 @@ const isRangeNotSatisfiableError = (error: unknown): boolean => {
  *
  * // Local Storage
  * parseStorageUrl("local:///path/to/uploads?base_url=/uploads")
+ *
+ * // Local Storage, relay mounted off the dev path (self-hosted production build)
+ * parseStorageUrl("local:///data/storage?base_url=/api/storage&upload_url=/api/storage/upload")
  * ```
  */
 export const parseStorageUrl = (url: string): StorageConfig => {
@@ -93,12 +96,17 @@ export const parseStorageUrl = (url: string): StorageConfig => {
     // searchParams = options
     const localRoot = urlObj.pathname;
     const localBaseUrl = urlObj.searchParams.get("base_url") || "/uploads";
+    // Write-side counterpart of `base_url`: where the host app mounts the
+    // upload relay that `generateUploadPresignedUrl()` points clients at.
+    // Defaults to the historical dev path so existing STORAGE_URLs are unchanged.
+    const localUploadUrl = urlObj.searchParams.get("upload_url") || "/api/dev/upload";
 
     return {
       provider: "local",
       bucketName: "local", // Dummy value for type compatibility, not used by local provider directly
       localRoot,
       localBaseUrl,
+      localUploadUrl,
     };
   }
 

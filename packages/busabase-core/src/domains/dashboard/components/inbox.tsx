@@ -2,8 +2,8 @@ import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";
 import type { ChangeRequestStatus, ChangeRequestVO } from "busabase-contract/types";
 import { SPALink as Link } from "openlib/ui/dashboard";
-import { type ReactNode, useMemo, useState } from "react";
-import { fmt, useCoreI18n } from "../../../i18n";
+import { type ReactNode, useEffect, useMemo, useState } from "react";
+import { fmt, useCoreI18n, useCoreLocale } from "../../../i18n";
 import { type ActivityEvent, buildActivityEventFromItem } from "../helpers/activity-events";
 import {
   changeRequestStatusLabel,
@@ -21,15 +21,14 @@ import { useHrefWithCurrentSearch } from "../helpers/link-search";
 import type { BusabaseListGroup } from "../helpers/view-types";
 import { ActivityRow } from "./activity";
 import { EmptyState } from "./primitives";
+import { type RecordPageSize, RecordsPaginationBar } from "./records-pagination-bar";
 import { InboxListSkeleton } from "./skeletons";
 
 function BusabaseList({
   empty,
   groups,
   toolbar,
-  hasMore,
-  isLoadingMore,
-  onLoadMore,
+  pagination,
   isLoading,
   isError,
   onRetry,
@@ -38,9 +37,8 @@ function BusabaseList({
   empty: ReactNode;
   groups: BusabaseListGroup[];
   toolbar?: ReactNode;
-  hasMore?: boolean;
-  isLoadingMore?: boolean;
-  onLoadMore?: () => void;
+  /** Rendered in a sticky footer under the list — the shared paginator bar. */
+  pagination?: ReactNode;
   /** True while the first page is still in flight — renders a skeleton, never the empty state (a "0 rows" empty state is otherwise indistinguishable from "still loading"). */
   isLoading?: boolean;
   /** True when the page query failed — renders a retry prompt instead of silently falling back to the empty state. */
@@ -99,19 +97,8 @@ function BusabaseList({
         ) : (
           empty
         )}
-        {!isLoading && !isError && hasMore ? (
-          <div className="flex items-center justify-center pt-4">
-            <button
-              className="inline-flex h-8 items-center rounded-md border border-border/70 px-3 font-medium text-muted-foreground text-xs transition-colors hover:bg-accent hover:text-foreground disabled:opacity-60"
-              disabled={isLoadingMore}
-              onClick={() => onLoadMore?.()}
-              type="button"
-            >
-              {isLoadingMore ? messages.common.loading : messages.search.loadMore}
-            </button>
-          </div>
-        ) : null}
       </div>
+      {pagination ? <div className="border-t px-3 py-2 sm:px-5">{pagination}</div> : null}
     </section>
   );
 }
@@ -192,20 +179,27 @@ function InboxList({
     review: counts?.review ?? 0,
   };
 
-  // The active tab's rows load via keyset pagination ("load more").
-  const listQuery = useInfiniteQuery({
-    ...orpc.changeRequests.list.infiniteOptions({
-      input: (pageParam: string | undefined) => ({
-        ...tabFilter(activeView),
-        cursor: pageParam,
-        limit: INBOX_PAGE_SIZE,
-      }),
-      initialPageParam: undefined as string | undefined,
-      getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
+  // Numbered paging, sharing the Base table's paginator. "Load more" was fine
+  // for a handful of pending items, but a reviewer working a tab that holds
+  // thousands (a merged/closed history) could only reach page 30 by clicking 29
+  // times, and had no idea how many pages there even were.
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState<RecordPageSize>(INBOX_PAGE_SIZE);
+  // Switching tabs restarts at page 1 — page 7 of "for review" means nothing in
+  // "merged", and silently landing on it would look like data loss.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: reset on tab change only
+  useEffect(() => {
+    setPage(1);
+    setSelectedIds(new Set());
+  }, [activeView]);
+
+  const listQuery = useQuery(
+    orpc.changeRequests.listPage.queryOptions({
+      input: { ...tabFilter(activeView), page, pageSize },
     }),
-  });
+  );
   const activeChangeRequests = useMemo(
-    () => listQuery.data?.pages.flatMap((page) => page.changeRequests) ?? [],
+    () => listQuery.data?.changeRequests ?? [],
     [listQuery.data],
   );
 
@@ -279,11 +273,24 @@ function InboxList({
         />
       }
       groups={groups}
-      hasMore={listQuery.hasNextPage}
-      isLoadingMore={listQuery.isFetchingNextPage}
-      onLoadMore={() => {
-        void listQuery.fetchNextPage();
-      }}
+      pagination={
+        <RecordsPaginationBar
+          isFetching={listQuery.isFetching}
+          isLoading={listQuery.isLoading}
+          onPageChange={setPage}
+          onPageSizeChange={(next) => {
+            setPageSize(next);
+            setPage(1);
+          }}
+          onRetry={() => {
+            void listQuery.refetch();
+          }}
+          page={listQuery.data?.page ?? page}
+          pageSize={pageSize}
+          total={listQuery.data?.total ?? 0}
+          totalPages={listQuery.data?.totalPages ?? 0}
+        />
+      }
       isLoading={listQuery.isLoading}
       isError={listQuery.isError}
       errorBody={listQuery.error instanceof Error ? listQuery.error.message : undefined}
@@ -408,7 +415,8 @@ function BusabaseListToolbar({
 
 function ReviewChangeRequestRow({ changeRequest }: { changeRequest: ChangeRequestVO }) {
   const messages = useCoreI18n();
-  const updatedAt = formatListTime(changeRequest.updatedAt);
+  const locale = useCoreLocale();
+  const updatedAt = formatListTime(changeRequest.updatedAt, locale);
   const riskHints = getChangeRequestRiskHints(changeRequest, messages);
   const statusLabel = changeRequestStatusLabel(changeRequest.status, messages);
   const message = getChangeRequestMessage(changeRequest);
@@ -458,7 +466,10 @@ function ReviewChangeRequestRow({ changeRequest }: { changeRequest: ChangeReques
         <span className="hidden min-w-0 truncate md:block">
           {getChangeRequestSummary(changeRequest, messages)}
         </span>
-        <span className="shrink-0 font-mono text-[11px] transition-colors group-hover:text-foreground">
+        <span
+          className="shrink-0 font-mono text-[11px] transition-colors group-hover:text-foreground"
+          data-testid="change-request-updated-at"
+        >
           {updatedAt}
         </span>
       </div>

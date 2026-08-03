@@ -15,7 +15,7 @@ import {
   View,
   type ViewStyle,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { mobile, radius, spacing, typography } from "~/theme/tokens";
 import { useTokens } from "~/theme/use-tokens";
 import { Button } from "./ui/Button";
@@ -367,6 +367,7 @@ export function NativeBottomSheet({
   children,
 }: NativeBottomSheetProps) {
   const tokens = useTokens();
+  const insets = useSafeAreaInsets();
 
   return (
     <Modal animationType="slide" transparent visible={visible} onRequestClose={onClose}>
@@ -384,6 +385,12 @@ export function NativeBottomSheet({
           style={[
             styles.sheet,
             { backgroundColor: tokens.surface },
+            {
+              paddingBottom: Platform.select({
+                web: spacing[6],
+                default: spacing[4] + insets.bottom,
+              }),
+            },
             maxHeight ? { maxHeight } : null,
           ]}
         >

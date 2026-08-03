@@ -4,7 +4,10 @@ import { AGENT_EXCLUDED_MCP_TOOLS, TASK_SUPERSEDED_MCP_TOOLS } from "busabase-co
 import { runWithBusabaseContext } from "busabase-core/context";
 import {
   BUSABASE_MCP_AIRAPP_URI,
+  BUSABASE_MCP_SKILL_URI,
+  BUSABASE_SELF_HOSTED_MCP_INSTRUCTIONS,
   buildBusabaseMcpAirAppSkill,
+  buildBusabaseMcpSkill,
   busabaseMcpGuideTool,
 } from "busabase-core/mcp-skill";
 import { createOpenApiMcpHandler } from "openlib/mcp";
@@ -21,10 +24,14 @@ const openApiMcpHandler = createOpenApiMcpHandler({
   // Task-level tools shared with busabase-cli and busabase-cloud, plus the guide tool — the
   // only surface that reaches a client which surfaces neither `resources/*` nor `prompts/*`.
   //
-  // Only the deployment-neutral topic is published here: `workspace`, `setup` and `create-app`
-  // all instruct the agent to pass `targetSpaceId`, which only Cloud's handler accepts. Same
-  // reason the `busabase://skill` resource is not mirrored below.
-  additionalTools: [busabaseMcpGuideTool(["airapp"]), ...busabaseLocalMcpTaskTools()],
+  // Both reference guides, built with space targeting OFF — this server has one local workspace
+  // and no `targetSpaceId` argument, so Cloud's wording would teach a parameter it rejects.
+  // The two walkthroughs stay Cloud-only: they are guided onboarding written around choosing a
+  // space, which is not a step that exists here.
+  additionalTools: [
+    busabaseMcpGuideTool(["workspace", "airapp"], { spaceTargeting: false }),
+    ...busabaseLocalMcpTaskTools(),
+  ],
   contract: busabaseContract,
   createClient: () =>
     createBusabaseOpenApiClient({
@@ -34,16 +41,24 @@ const openApiMcpHandler = createOpenApiMcpHandler({
   // spellings, and the endpoint one is the worse of the two (creating a Skill
   // through it silently omits the default scaffold).
   exclude: (tool) => withheldFromMcp.has(tool.name),
-  // The AirApp runtime contract is the one document that is identical on both deployments: it
-  // teaches `npm run dev`, the no-bundler rule, and `/api/v1` on the app's own origin, none of
-  // which differ self-hosted. Without it an MCP client building an app here scaffolds a Vite
-  // project that cannot boot, exactly as it does against Cloud.
-  //
-  // Cloud's `busabase://skill` resource and its two prompts are deliberately NOT mirrored: they
-  // instruct the agent to pass `targetSpaceId`, which only Cloud's handler accepts (it adds
-  // `BUSABASE_MCP_TARGET_SPACE_SCHEMA` via `additionalToolsInputSchema`). Publishing them here
-  // would teach an argument this server rejects. A self-hosted variant is its own change.
+  // This server returned NO instructions at all until now, so its agents received none of the
+  // approval-first rules — nothing but the API's own permissions stopped one from merging its
+  // own proposal or filing a change request titled `cmtmr1th34`. Cloud's document could not be
+  // reused verbatim (it teaches `targetSpaceId`, which this server does not accept), so it is
+  // the same source built with space targeting off.
+  instructions: BUSABASE_SELF_HOSTED_MCP_INSTRUCTIONS,
+  // The two reference documents, for clients that support `resources/*`. The two prompts stay
+  // Cloud-only — they are guided onboarding built around picking a space.
   resources: [
+    {
+      uri: BUSABASE_MCP_SKILL_URI,
+      name: "busabase-skill",
+      title: "Busabase agent skill",
+      description:
+        "The full approval-first workflow: everyday tools, proposing structure, field types, starter blueprints, the revision loop, error handling, and the untrusted-content rules.",
+      mimeType: "text/markdown",
+      read: () => buildBusabaseMcpSkill({ spaceTargeting: false }),
+    },
     {
       uri: BUSABASE_MCP_AIRAPP_URI,
       name: "busabase-airapp",

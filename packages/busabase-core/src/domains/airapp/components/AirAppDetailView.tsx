@@ -19,6 +19,7 @@ import { NodeActionsMenu } from "../../dashboard/components/node-actions-menu";
 import { EmptyState } from "../../dashboard/components/primitives";
 import { FileContentSkeleton, NodeDetailSkeleton } from "../../dashboard/components/skeletons";
 import { asNodeDetail } from "../../dashboard/helpers/node-detail";
+import { useRegisterTopbarNodeActions } from "../../dashboard/hooks/use-register-topbar-node-actions";
 import { useReportLoadedNode } from "../../dashboard/hooks/use-report-loaded-node";
 import type { NodeDetailProps } from "../../dashboard/node-detail-registry";
 import { disposeDeletedAirAppSession } from "../store/airapp-session-cleanup";
@@ -110,6 +111,34 @@ export function AirAppDetailView({ orpc, slug, onNodeLoaded }: NodeDetailProps) 
   // Always called (before the early-return below) so hook order stays stable
   // across renders; the hook itself is a no-op while `airapp` is null.
   const runner = useAirAppRunner({ orpc, airapp });
+
+  // `enabled: isKeepAliveActive` matters here specifically because
+  // `AirAppKeepAliveHost` keeps every visited AirApp's detail view mounted
+  // (CSS-hidden) after the user navigates away, so a backgrounded instance
+  // must stop re-registering its actions once it's no longer the visible
+  // one, or it would keep clobbering whatever page the user is actually on.
+  useRegisterTopbarNodeActions(
+    airapp ? (
+      <>
+        <AirAppRunControls airapp={airapp} fullscreenState={fullscreenState} runner={runner} />
+        <NodeActionsMenu
+          nodeId={airapp.node.id}
+          nodeName={airapp.node.name}
+          nodeSlug={airapp.node.slug}
+          nodeType="airapp"
+          onDeleted={() =>
+            disposeDeletedAirAppSession({
+              keepAliveScopeKey,
+              nodeId: airapp.node.id,
+              routeSlug: slug ?? airapp.node.slug,
+            })
+          }
+          orpc={orpc}
+        />
+      </>
+    ) : null,
+    isKeepAliveActive,
+  );
 
   if (!airapp) {
     return airappQuery.isLoading ? (
@@ -204,24 +233,6 @@ export function AirAppDetailView({ orpc, slug, onNodeLoaded }: NodeDetailProps) 
               {messages.airapp.tabLogs}
             </TabsTrigger>
           </TabsList>
-
-          <div className="ml-auto flex shrink-0 items-center gap-1.5">
-            <AirAppRunControls airapp={airapp} fullscreenState={fullscreenState} runner={runner} />
-            <NodeActionsMenu
-              nodeId={airapp.node.id}
-              nodeName={airapp.node.name}
-              nodeSlug={airapp.node.slug}
-              nodeType="airapp"
-              onDeleted={() =>
-                disposeDeletedAirAppSession({
-                  keepAliveScopeKey,
-                  nodeId: airapp.node.id,
-                  routeSlug: slug ?? airapp.node.slug,
-                })
-              }
-              orpc={orpc}
-            />
-          </div>
         </header>
 
         <TabsContent className={TAB_CONTENT_CLASS} forceMount value="app">

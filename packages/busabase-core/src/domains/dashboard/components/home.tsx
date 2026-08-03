@@ -6,7 +6,7 @@ import type { ChangeRequestVO } from "busabase-contract/types";
 import { ChevronRight } from "lucide-react";
 import { SPALink as Link } from "openlib/ui/dashboard";
 import { type ReactNode, useMemo, useSyncExternalStore } from "react";
-import { fmt, useCoreI18n } from "../../../i18n";
+import { fmt, useCoreI18n, useCoreLocale } from "../../../i18n";
 import { type ActivityEvent, buildActivityEventFromItem } from "../helpers/activity-events";
 import {
   getChangeRequestScopeName,
@@ -85,6 +85,7 @@ function HomeSectionHint({ children }: { children: ReactNode }) {
 
 function PendingReviewRow({ changeRequest }: { changeRequest: ChangeRequestVO }) {
   const messages = useCoreI18n();
+  const locale = useCoreLocale();
   const href = useHrefWithCurrentSearch(`/inbox/${changeRequest.id}`);
 
   return (
@@ -103,7 +104,7 @@ function PendingReviewRow({ changeRequest }: { changeRequest: ChangeRequestVO })
         {getChangeRequestScopeName(changeRequest, messages)}
       </span>
       <span className="shrink-0 font-mono text-[11px] text-muted-foreground transition-colors group-hover:text-foreground">
-        {formatListTime(changeRequest.updatedAt)}
+        {formatListTime(changeRequest.updatedAt, locale)}
       </span>
     </Link>
   );

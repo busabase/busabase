@@ -30,7 +30,7 @@ const assertMergedFieldsValid = async (
   baseId: string,
   fields: Record<string, unknown>,
 ) => {
-  const defs = await loadBaseFieldDefs(ctx.db, baseId);
+  const defs = await loadBaseFieldDefsCached(ctx, baseId);
   const errors = validateRecordFields(fields, defs);
   if (errors.length > 0) {
     const first = errors[0];
@@ -54,6 +54,24 @@ export const loadBaseFieldDefs = (db: MergeCtx["db"], baseId: string): Promise<B
     .select()
     .from(busabaseBaseFields)
     .where(and(eq(busabaseBaseFields.baseId, baseId), isNull(busabaseBaseFields.deletedAt)));
+
+/**
+ * `loadBaseFieldDefs` memoised for the lifetime of one merge. The field set is
+ * identical for every record in a bulk change request, and re-reading it per
+ * record is what made a 1,000-record import issue thousands of duplicate
+ * queries. Schema operations inside the same CR call `invalidateBaseFieldDefs`,
+ * so a CR that adds a field and then writes records still sees the new field.
+ */
+export const loadBaseFieldDefsCached = async (
+  ctx: MergeCtx,
+  baseId: string,
+): Promise<BaseFieldPO[]> => {
+  const cached = ctx.fieldDefsByBaseId.get(baseId);
+  if (cached) return cached;
+  const defs = await loadBaseFieldDefs(ctx.db, baseId);
+  ctx.fieldDefsByBaseId.set(baseId, defs);
+  return defs;
+};
 
 const nextAutoNumber = async (
   db: MergeCtx["db"],
@@ -84,7 +102,7 @@ export const applyComputedRecordFields = async (
     recordCreatedAtIso?: string | null;
   },
 ): Promise<Record<string, unknown>> => {
-  const defs = await loadBaseFieldDefs(ctx.db, args.baseId);
+  const defs = await loadBaseFieldDefsCached(ctx, args.baseId);
   const autoNumbers = new Map<string, number>();
   if (args.mode === "create") {
     for (const def of defs) {
@@ -160,6 +178,8 @@ export const mergeRecordCreate = async (ctx: MergeCtx, item: OperationPO, headCo
     recordId,
     fields,
     tx: db,
+    fieldDefs: await loadBaseFieldDefsCached(ctx, baseId),
+    isNewRecord: true,
   });
   await syncRecordAssetUsages(baseId, recordId, headCommit.fields, db);
   await db
@@ -238,6 +258,7 @@ export const mergeRecordUpdate = async (ctx: MergeCtx, item: OperationPO, headCo
     recordId: targetRecord.id,
     fields,
     tx: db,
+    fieldDefs: await loadBaseFieldDefsCached(ctx, baseId),
   });
   await syncRecordAssetUsages(baseId, targetRecord.id, fields, db);
   await db

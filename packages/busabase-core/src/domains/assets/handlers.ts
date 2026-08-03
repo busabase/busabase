@@ -727,6 +727,24 @@ export const syncRecordAssetUsages = async (
 ): Promise<void> => {
   const db = tx ?? (await getDb());
 
+  // A Base with no attachment field — live OR soft-deleted — can never own an
+  // asset-usage row, so there is nothing to add and nothing stale to clear.
+  // Checking this FIRST keeps the common case (Bases that hold no files at all)
+  // at one query instead of three per merged record, which on a bulk import is
+  // a large share of the write cost. Deleted fields are deliberately still
+  // counted here (no `deletedAt IS NULL` filter, as before): a since-deleted
+  // attachment field's usage rows must still get cleared by the DELETE below.
+  const fieldRows = await db
+    .select({ slug: busabaseBaseFields.slug, type: busabaseBaseFields.type })
+    .from(busabaseBaseFields)
+    .where(eq(busabaseBaseFields.baseId, baseId));
+  const attachmentSlugs = new Set(
+    fieldRows.filter((f) => f.type === "attachment").map((f) => f.slug),
+  );
+  if (attachmentSlugs.size === 0) {
+    return;
+  }
+
   const [base] = await db
     .select({ nodeId: busabaseBases.nodeId })
     .from(busabaseBases)
@@ -735,14 +753,6 @@ export const syncRecordAssetUsages = async (
   if (!base) {
     return;
   }
-
-  const fieldRows = await db
-    .select({ slug: busabaseBaseFields.slug, type: busabaseBaseFields.type })
-    .from(busabaseBaseFields)
-    .where(eq(busabaseBaseFields.baseId, baseId));
-  const attachmentSlugs = new Set(
-    fieldRows.filter((f) => f.type === "attachment").map((f) => f.slug),
-  );
 
   const rows: {
     id: string;

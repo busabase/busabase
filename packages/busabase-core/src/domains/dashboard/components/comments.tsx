@@ -3,8 +3,8 @@ import type { BusabaseDashboardApiClient } from "busabase-contract/api-client";
 import type { CommentSubjectType, CommentVO } from "busabase-contract/types";
 import { Reply, Sparkles } from "lucide-react";
 import { Fragment, useRef, useState } from "react";
-import { fmt, useCoreI18n } from "../../../i18n";
-import { formatUserRefLabel } from "../helpers/format";
+import { fmt, useCoreI18n, useCoreLocale } from "../../../i18n";
+import { formatFullTime, formatUserRefLabel } from "../helpers/format";
 import { UserAvatar, UserRefButton } from "./identity";
 
 export const parseMentionsAi = (text: string) => /(^|\s)@ai\b/i.test(text);
@@ -105,6 +105,7 @@ export function CommentItem({
   onQuoteReply: (comment: CommentVO) => void;
 }) {
   const messages = useCoreI18n();
+  const locale = useCoreLocale();
 
   return (
     <div className="group flex gap-2.5 border-border/40 border-b py-3 last:border-b-0">
@@ -123,7 +124,7 @@ export function CommentItem({
           />
           {comment.mentionsAi ? <AiMentionBadge /> : null}
           <span className="text-muted-foreground text-xs">
-            {new Date(comment.createdAt).toLocaleString()}
+            {formatFullTime(comment.createdAt, locale)}
           </span>
           <button
             className="ml-auto inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] text-muted-foreground opacity-0 transition-opacity hover:bg-muted/60 hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100"

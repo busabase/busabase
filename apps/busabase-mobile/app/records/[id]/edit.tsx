@@ -7,6 +7,7 @@ import { useEffect, useState } from "react";
 import { Pressable, StyleSheet } from "react-native";
 import { useBusabaseOrpc } from "~/api/use-busabase-orpc";
 import { ConnectionGuard } from "~/components/busabase/ConnectionGuard";
+import { DrawerScaffold } from "~/components/busabase/DrawerScaffold";
 import { RecordForm } from "~/components/busabase/RecordForm";
 import {
   NativeActionBar,
@@ -14,7 +15,6 @@ import {
   NativeEmptyState,
   NativeInlineError,
   NativeLoadingState,
-  NativeScreen,
 } from "~/components/native-screen";
 import { Button } from "~/components/ui/Button";
 import { shortId } from "~/lib/format";
@@ -111,22 +111,30 @@ function EditRecordContent() {
 
   if (recordQuery.isLoading) {
     return (
-      <NativeScreen title="Edit record" subtitle={shortId(recordId)} headerLeading={headerLeading}>
+      <DrawerScaffold
+        title="Edit record"
+        subtitle={shortId(recordId)}
+        headerLeading={headerLeading}
+      >
         <NativeLoadingState label="Loading record" />
-      </NativeScreen>
+      </DrawerScaffold>
     );
   }
 
   if (!record) {
     return (
-      <NativeScreen title="Edit record" subtitle={shortId(recordId)} headerLeading={headerLeading}>
+      <DrawerScaffold
+        title="Edit record"
+        subtitle={shortId(recordId)}
+        headerLeading={headerLeading}
+      >
         <NativeEmptyState title="Record not found" description="This record is not available." />
-      </NativeScreen>
+      </DrawerScaffold>
     );
   }
 
   return (
-    <NativeScreen
+    <DrawerScaffold
       title="Edit record"
       subtitle={record.base.name}
       headerLeading={headerLeading}
@@ -180,7 +188,7 @@ function EditRecordContent() {
           </NativeActionBar>
         }
       />
-    </NativeScreen>
+    </DrawerScaffold>
   );
 }
 

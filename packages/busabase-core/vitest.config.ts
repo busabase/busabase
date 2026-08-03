@@ -10,12 +10,15 @@ export default defineConfig({
   },
   test: {
     environment: "node",
+    // An allowlist, so a co-located test under a directory not named here is silently never
+    // run — it looks green because it never executed. Add the directory when you add the test.
     include: [
       "tests/**/*.test.ts",
       "src/domains/base/utils/**/*.test.ts",
       "src/domains/dashboard/helpers/**/*.test.ts",
       "src/domains/dashboard/components/**/*.test.tsx",
       "src/domains/rich-node/utils/**/*.test.ts",
+      "src/logic/**/*.test.ts",
     ],
     // DB-heavy oRPC/PGLite integration tests exceed vitest's 5s default on cold
     // CI runners (seed + change-request + merge, storage file-tree walks).

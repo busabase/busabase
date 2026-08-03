@@ -47,7 +47,7 @@ function BusabaseMark({ color, cutout, size }: BusabaseMarkProps) {
 export default function ConnectionScreen() {
   const router = useRouter();
   const tokens = useTokens();
-  const { height } = useWindowDimensions();
+  const { width, height } = useWindowDimensions();
   const { connectCloud, connectDemo, demoServerUrl, state } = useConnection();
   const { isFeatureEnabled } = useMobileUpdate();
   const [cloudLoading, setCloudLoading] = useState(false);
@@ -92,6 +92,7 @@ export default function ConnectionScreen() {
   const demoEnabled = !!demoServerUrl && isFeatureEnabled("demoServer");
   const actionsDisabled = isPreparing || cloudLoading || demoLoading;
   const isCompact = height < 720;
+  const isShortLandscape = height < 480 && width > height;
 
   return (
     <SafeAreaView style={[styles.safe, { backgroundColor: tokens.background }]}>
@@ -101,25 +102,34 @@ export default function ConnectionScreen() {
         showsVerticalScrollIndicator={false}
       >
         <View style={styles.cover}>
-          <View style={[styles.brandStage, isCompact ? styles.brandStageCompact : null]}>
+          <View
+            style={[
+              styles.brandStage,
+              isCompact ? styles.brandStageCompact : null,
+              isShortLandscape ? styles.brandStageShort : null,
+            ]}
+          >
             <BusabaseMark
               color={tokens.primary}
               cutout={tokens.primaryForeground}
-              size={isCompact ? 88 : 112}
+              size={isShortLandscape ? 64 : isCompact ? 88 : 112}
             />
             <Text
               style={[
                 styles.wordmark,
                 isCompact ? styles.wordmarkCompact : null,
+                isShortLandscape ? styles.wordmarkShort : null,
                 { color: tokens.foreground },
               ]}
             >
               Busabase
             </Text>
-            <RotatingHeroHeadline compact={isCompact} />
-            <Text style={[typography.body, styles.subtitle, { color: tokens.mutedForeground }]}>
-              Turn agent chaos into one database you can actually use.
-            </Text>
+            <RotatingHeroHeadline compact={isCompact} short={isShortLandscape} />
+            {isShortLandscape ? null : (
+              <Text style={[typography.body, styles.subtitle, { color: tokens.mutedForeground }]}>
+                Turn agent chaos into one database you can actually use.
+              </Text>
+            )}
           </View>
 
           <View style={styles.actionArea}>
@@ -227,6 +237,7 @@ const styles = StyleSheet.create({
     paddingBottom: spacing[8],
   },
   brandStageCompact: { minHeight: 370, paddingTop: spacing[4], paddingBottom: spacing[4] },
+  brandStageShort: { minHeight: 0, paddingTop: spacing[2], paddingBottom: spacing[2] },
   wordmark: {
     marginTop: spacing[5],
     fontSize: 30,
@@ -235,6 +246,7 @@ const styles = StyleSheet.create({
     letterSpacing: 0,
   },
   wordmarkCompact: { marginTop: spacing[3], fontSize: 26, lineHeight: 32 },
+  wordmarkShort: { marginTop: spacing[2], fontSize: 22, lineHeight: 28 },
   subtitle: { marginTop: spacing[3], maxWidth: 310, textAlign: "center" },
   actionArea: { gap: spacing[3] },
   textActions: {

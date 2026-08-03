@@ -80,6 +80,10 @@ const airAppSecurityHeaders = [
 const config = {
   reactStrictMode: true,
   reactCompiler: true,
+  experimental: {
+    // Prevent header-based RSC responses from sharing a URL cache key with HTML.
+    validateRSCRequestHeaders: true,
+  },
   turbopack: {
     root: monorepoRoot,
   },

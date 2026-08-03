@@ -1,9 +1,9 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import type { AuthInfo } from "busabase-contract/contract/schemas";
 import { usePathname, useRouter } from "expo-router";
 import { Check, ChevronsUpDown, Database, RefreshCw, Settings, X } from "lucide-react-native";
 import { useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from "react-native";
+import { createCloudSpacesClient } from "~/api/cloud-spaces";
 import { useConnection } from "~/connection/connection-store";
 import type { BusabaseSpace } from "~/connection/types";
 import { useI18n } from "~/i18n";
@@ -58,47 +58,33 @@ export function SpaceSelector({
   const selectedSpace = connection?.selectedSpace ?? null;
   const isCloud = connection?.mode === "cloud";
 
-  const authQuery = useQuery({
-    queryKey: ["space-selector", connection?.serverUrl],
-    // Never fires outside Busabase Cloud: /api/v1/auth's space list is a
-    // cloud-only concept, and a self-hosted server would just 404.
+  const spacesQuery = useQuery({
+    queryKey: ["space-selector", connection?.serverUrl, connection?.cloudUser?.id],
+    // Never fires outside Busabase Cloud: spaces.list belongs to the Cloud
+    // router, and a self-hosted server does not expose it.
     enabled: isCloud,
     queryFn: async () => {
       if (!connection?.serverUrl) {
         throw new Error("No Busabase Cloud connection");
       }
-      const response = await fetch(`${connection.serverUrl.replace(/\/+$/, "")}/api/v1/auth`, {
-        headers: {
-          Accept: "application/json",
-          ...(await getCloudAuthorizationHeaders({ spaceId: null })),
-        },
-      });
-      if (!response.ok) {
-        throw new Error(`Server responded ${response.status}`);
-      }
-      return (await response.json()) as AuthInfo;
+      const client = createCloudSpacesClient(connection.serverUrl, () =>
+        getCloudAuthorizationHeaders({ spaceId: null }),
+      );
+      return client.spaces.list();
     },
   });
 
-  const authInfo = isCloud ? (authQuery.data as AuthInfo | undefined) : undefined;
-  const spaces = authInfo?.spaces ?? [];
-  const activeSpace =
-    selectedSpace ??
-    (authInfo?.space
-      ? {
-          id: authInfo.space.id,
-          name: authInfo.space.name,
-          slug: authInfo.space.slug,
-          plan: authInfo.space.plan,
-        }
-      : null);
-  const isLoadingSpaces = isCloud && authQuery.isLoading;
-  const isFetchingSpaces = isCloud && authQuery.isFetching;
+  const spaces = spacesQuery.data ?? [];
+  const activeSpace = selectedSpace ?? spaces[0] ?? null;
+  const isLoadingSpaces = isCloud && spacesQuery.isLoading;
+  const isFetchingSpaces = isCloud && spacesQuery.isFetching;
 
   const staticWorkspaceName =
-    connection?.mode === "demo" ? "Demo workspace" : "Self-hosted workspace";
+    connection?.mode === "demo"
+      ? t.workspaceSelector.demoWorkspace
+      : t.workspaceSelector.selfHostedWorkspace;
   const triggerTitle = isCloud
-    ? (activeSpace?.name ?? (isLoadingSpaces ? "Loading workspace" : t.nav.workspace))
+    ? (activeSpace?.name ?? (isLoadingSpaces ? t.nav.workspaceLoading : t.nav.workspace))
     : (activeSpace?.name ?? staticWorkspaceName);
   const triggerSubtitle = isCloud
     ? spaces.length > 1
@@ -160,11 +146,11 @@ export function SpaceSelector({
     <>
       {isCloud ? (
         <>
-          {authQuery.error ? (
+          {spacesQuery.error ? (
             <View style={styles.inlineErrorWrap}>
               <NativeInlineError
-                message="Could not load workspaces."
-                onReset={() => void authQuery.refetch()}
+                message={t.workspaceSelector.loadError}
+                onReset={() => void spacesQuery.refetch()}
               />
             </View>
           ) : null}
@@ -174,8 +160,12 @@ export function SpaceSelector({
           >
             {spaces.length === 0 ? (
               <NativeRow
-                title={isLoadingSpaces ? "Loading workspaces" : "No workspaces"}
-                subtitle={isLoadingSpaces ? undefined : "Refresh or reconnect to Busabase Cloud."}
+                title={
+                  isLoadingSpaces
+                    ? t.workspaceSelector.loadingWorkspaces
+                    : t.workspaceSelector.noWorkspaces
+                }
+                subtitle={isLoadingSpaces ? undefined : t.workspaceSelector.reconnectHint}
                 last
               />
             ) : (
@@ -219,12 +209,12 @@ export function SpaceSelector({
 
   const refreshWorkspaces = isCloud ? (
     <Button
-      label={isFetchingSpaces ? "Refreshing..." : "Refresh workspaces"}
+      label={isFetchingSpaces ? t.workspaceSelector.refreshing : t.workspaceSelector.refresh}
       variant="secondary"
       loading={isFetchingSpaces}
       fullWidth
       leadingIcon={<RefreshCw size={18} color={tokens.foreground} />}
-      onPress={() => void authQuery.refetch()}
+      onPress={() => void spacesQuery.refetch()}
     />
   ) : null;
 
@@ -313,7 +303,7 @@ export function SpaceSelector({
                 </View>
                 <Pressable
                   accessibilityRole="button"
-                  accessibilityLabel="Close workspace menu"
+                  accessibilityLabel={t.workspaceSelector.closeMenu}
                   hitSlop={mobile.hitSlop}
                   style={styles.iconButton}
                   onPress={() => setOpen(false)}

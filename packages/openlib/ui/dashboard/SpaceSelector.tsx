@@ -69,6 +69,27 @@ function SpaceTypeBadge({ space, show }: { space: Space; show: boolean }) {
   );
 }
 
+/**
+ * The line under the space name. Defaults to the uppercase plan badge; a space
+ * that carries a `description` (white-label hosts) renders that as plain muted
+ * text instead, since a sentence does not belong in a badge. Additive — spaces
+ * with no `description` render exactly as before.
+ */
+function SpaceSubtitle({ space, badgeClassName }: { space: Space; badgeClassName: string }) {
+  if (space.description) {
+    return (
+      <span className="truncate text-xs text-muted-foreground opacity-70" title={space.description}>
+        {space.description}
+      </span>
+    );
+  }
+  return (
+    <span className={`${badgeClassName} ${getPlanBadgeStyle(space.plan ?? "free")}`}>
+      {space.plan ?? "Free"}
+    </span>
+  );
+}
+
 // Helper to get plan badge styles based on plan type
 // Minimal, refined design with subtle borders - Studio-Grade aesthetic
 const getPlanBadgeStyle = (plan: string) => {
@@ -256,11 +277,10 @@ export function SpaceSelector({
                 {currentSpace.name}
                 <SpaceTypeBadge space={currentSpace} show={hasRemoteSpace} />
               </span>
-              <span
-                className={`inline-flex w-fit rounded-md px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${getPlanBadgeStyle(currentSpace.plan ?? "free")}`}
-              >
-                {currentSpace.plan ?? "Free"}
-              </span>
+              <SpaceSubtitle
+                space={currentSpace}
+                badgeClassName="inline-flex w-fit rounded-md px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide"
+              />
             </div>
           </SidebarMenuButton>
         </SidebarMenuItem>
@@ -294,11 +314,10 @@ export function SpaceSelector({
                   {currentSpace.name}
                   <SpaceTypeBadge space={currentSpace} show={hasRemoteSpace} />
                 </span>
-                <span
-                  className={`inline-flex w-fit rounded-md px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide ${getPlanBadgeStyle(currentSpace.plan ?? "free")}`}
-                >
-                  {currentSpace.plan ?? "Free"}
-                </span>
+                <SpaceSubtitle
+                  space={currentSpace}
+                  badgeClassName="inline-flex w-fit rounded-md px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide"
+                />
               </div>
               <ChevronsUpDown className="ml-auto shrink-0 group-data-[collapsible=icon]:hidden" />
             </SidebarMenuButton>

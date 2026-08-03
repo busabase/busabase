@@ -1,9 +1,15 @@
+import type { ChildProcess } from "node:child_process";
+import { EventEmitter } from "node:events";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { loadDotEnvFile } from "./config-file";
 import { runLogin, runLogout, runRefresh } from "./login";
+
+const { spawnMock } = vi.hoisted(() => ({ spawnMock: vi.fn() }));
+
+vi.mock("node:child_process", () => ({ spawn: spawnMock }));
 
 const CLOUD = "https://busabase.com";
 const ACCESS_TOKEN = "opaque-device-session-secret";
@@ -18,6 +24,7 @@ const jsonResponse = (body: unknown, status = 200) =>
 
 beforeEach(async () => {
   vi.useFakeTimers();
+  spawnMock.mockReset();
   originalHome = process.env.HOME;
   home = await mkdtemp(join(tmpdir(), "busabase-device-"));
   process.env.HOME = home;
@@ -37,6 +44,68 @@ afterEach(async () => {
 });
 
 describe("runLogin --device-code", () => {
+  it("continues authorization when the browser opener is unavailable", async () => {
+    const browserProcess = Object.assign(new EventEmitter(), {
+      unref: vi.fn(),
+    }) as unknown as ChildProcess;
+    spawnMock.mockReturnValue(browserProcess);
+
+    global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      if (request.url.endsWith("/api/auth/device/code")) {
+        return jsonResponse({
+          device_code: "private-device-code",
+          user_code: "ABCD2345",
+          verification_uri: `${CLOUD}/device`,
+          verification_uri_complete: `${CLOUD}/device?user_code=ABCD2345`,
+          expires_in: 60,
+          interval: 1,
+        });
+      }
+      if (request.url.endsWith("/api/auth/device/token")) {
+        return jsonResponse({ access_token: ACCESS_TOKEN, expires_in: 3600 });
+      }
+      if (request.url.endsWith("/api/v1/device/finalize")) {
+        return jsonResponse({
+          apiKey: API_KEY,
+          apiKeyId: "apk_1",
+          expiresAt: null,
+          credentialType: "api_key",
+        });
+      }
+      if (request.url.endsWith("/api/v1/auth")) {
+        return jsonResponse({
+          user: { id: "usr_1", email: "dev@example.com" },
+          space: { id: "spc_1", name: "Space One" },
+          spaces: [{ id: "spc_1", name: "Space One" }],
+        });
+      }
+      throw new Error(`Unexpected request: ${request.url}`);
+    }) as typeof fetch;
+
+    const login = runLogin({ baseUrl: CLOUD, deviceCode: true, browser: true });
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(spawnMock).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.arrayContaining([`${CLOUD}/device?user_code=ABCD2345`]),
+      expect.objectContaining({ detached: true }),
+    );
+    expect(() =>
+      browserProcess.emit(
+        "error",
+        Object.assign(new Error("spawn xdg-open ENOENT"), { code: "ENOENT" }),
+      ),
+    ).not.toThrow();
+
+    await vi.advanceTimersByTimeAsync(1_000);
+    await expect(login).resolves.toMatchObject({ status: "signed in", method: "device" });
+    expect(loadDotEnvFile().BUSABASE_API_KEY).toBe(API_KEY);
+    expect(stderr.join("\n")).toContain(
+      "Could not open a browser automatically. Open the URL above manually.",
+    );
+  });
+
   it("uses the temporary session only to finalize and persists the selected API key", async () => {
     let tokenPolls = 0;
     global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {

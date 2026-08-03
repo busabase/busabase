@@ -252,6 +252,8 @@ export const dashboardZhCN: CoreI18nMessages = {
     open: "展开侧边栏",
     collapse: "收起侧边栏",
     closeTab: "关闭标签页",
+    closeOtherTabs: "关闭其他标签页",
+    closeAllTabs: "关闭所有标签页",
     maximize: "放大侧边栏",
     restore: "恢复侧边栏",
     resize: "调整侧边栏宽度",

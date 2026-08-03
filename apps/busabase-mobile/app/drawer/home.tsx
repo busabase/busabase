@@ -56,14 +56,14 @@ function HomeHint({ children }: { children: string }) {
 }
 
 function HomeSection({
+  actionAccessibilityLabel,
   actionLabel,
-  caption,
   children,
   onAction,
   title,
 }: {
+  actionAccessibilityLabel?: string;
   actionLabel?: string;
-  caption?: string;
   children: ReactNode;
   onAction?: () => void;
   title: string;
@@ -73,23 +73,16 @@ function HomeSection({
   return (
     <View style={styles.homeSection}>
       <View style={styles.sectionHeader}>
-        <View style={styles.sectionHeading}>
-          <Text
-            numberOfLines={1}
-            style={[typography.small, styles.sectionTitle, { color: tokens.mutedForeground }]}
-          >
-            {title}
-          </Text>
-          {caption ? (
-            <Text style={[styles.sectionCaption, { color: tokens.mutedForeground }]}>
-              {caption}
-            </Text>
-          ) : null}
-        </View>
+        <Text
+          numberOfLines={1}
+          style={[typography.small, styles.sectionTitle, { color: tokens.mutedForeground }]}
+        >
+          {title}
+        </Text>
         {actionLabel && onAction ? (
           <Pressable
             accessibilityRole="button"
-            accessibilityLabel={actionLabel}
+            accessibilityLabel={actionAccessibilityLabel ?? actionLabel}
             hitSlop={mobile.hitSlop}
             style={({ pressed }) => [styles.sectionAction, { opacity: pressed ? 0.6 : 1 }]}
             onPress={onAction}
@@ -231,8 +224,8 @@ function HomeContent() {
           {pending.length > 0 ? (
             <HomeSection
               title={t.home.pendingTitle}
-              caption={fmt(t.home.pendingCount, { count: pending.length })}
-              actionLabel={t.home.pendingViewAll}
+              actionLabel={fmt(t.home.pendingCount, { count: pending.length })}
+              actionAccessibilityLabel={t.home.pendingViewAll}
               onAction={() => router.push("/drawer/inbox")}
             >
               <View
@@ -371,15 +364,7 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     gap: spacing[3],
   },
-  sectionHeading: {
-    minWidth: 0,
-    flex: 1,
-    flexDirection: "row",
-    alignItems: "baseline",
-    gap: spacing[2],
-  },
-  sectionTitle: { flexShrink: 1, fontWeight: "500" },
-  sectionCaption: { flexShrink: 0, fontSize: 11, lineHeight: 14 },
+  sectionTitle: { flex: 1, minWidth: 0, fontWeight: "500" },
   sectionAction: {
     minHeight: 32,
     flexDirection: "row",

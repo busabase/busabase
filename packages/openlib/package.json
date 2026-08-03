@@ -57,6 +57,10 @@
       "types": "./ui/avatar-logo.tsx",
       "default": "./ui/avatar-logo.tsx"
     },
+    "./ui/avatar-upload": {
+      "types": "./ui/avatar-upload.tsx",
+      "default": "./ui/avatar-upload.tsx"
+    },
     "./utils/time": {
       "types": "./utils/time.ts",
       "default": "./utils/time.ts"
@@ -98,6 +102,7 @@
     "nanoid": "^5.1.5",
     "negotiator": "^0.6.3",
     "nprogress": "^0.2.0",
+    "react-easy-crop": "^5.5.6",
     "redis": "^5.10.0",
     "zod": "^4.3.6"
   },

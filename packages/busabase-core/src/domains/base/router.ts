@@ -124,13 +124,14 @@ export const baseRouter = {
     const { baseId, fieldId, newType } = input;
     return previewFieldConversion(baseId, fieldId, newType);
   }),
-  archiveChangeRequest: os.bases.archiveChangeRequest.handler(async ({ input }) => {
+  lifecycleChangeRequest: os.bases.lifecycleChangeRequest.handler(async ({ input }) => {
     const { baseId, submittedBy, message } = input;
-    return createArchiveBaseChangeRequest(baseId, submittedBy, message);
-  }),
-  restoreChangeRequest: os.bases.restoreChangeRequest.handler(async ({ input }) => {
-    const { baseId, submittedBy, message } = input;
-    return createRestoreBaseChangeRequest(baseId, submittedBy, message);
+    switch (input.operation) {
+      case "archive":
+        return createArchiveBaseChangeRequest(baseId, submittedBy, message);
+      case "restore":
+        return createRestoreBaseChangeRequest(baseId, submittedBy, message);
+    }
   }),
 };
 

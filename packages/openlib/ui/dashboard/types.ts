@@ -140,6 +140,13 @@ export interface Space {
   name: string;
   logo: LucideIcon | string; // Support both icon components and custom image URLs
   plan?: string;
+  /**
+   * Optional one-line subtitle rendered UNDER the space name, in place of the
+   * uppercase plan badge. Strictly additive: a space without `description`
+   * renders byte-for-byte as it always has (plan badge). Used by white-label
+   * hosts that replace the plan badge with a product tagline.
+   */
+  description?: string;
   id?: string;
   /**
    * Discriminates persisted workspace/developer spaces and synthetic remote

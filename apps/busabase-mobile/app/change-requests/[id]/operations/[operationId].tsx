@@ -8,6 +8,7 @@ import { Pressable, ScrollView, StyleSheet } from "react-native";
 import { useBusabaseOrpc } from "~/api/use-busabase-orpc";
 import { CommentsSection } from "~/components/busabase/CommentsSection";
 import { ConnectionGuard } from "~/components/busabase/ConnectionGuard";
+import { DrawerScaffold } from "~/components/busabase/DrawerScaffold";
 import { FieldList } from "~/components/busabase/FieldList";
 import { RecordForm } from "~/components/busabase/RecordForm";
 import {
@@ -17,11 +18,9 @@ import {
   NativeInlineError,
   NativeLoadingState,
   NativeRow,
-  NativeScreen,
   NativeSection,
 } from "~/components/native-screen";
 import { Button } from "~/components/ui/Button";
-import { StatusBadge } from "~/components/ui/StatusBadge";
 import { getOperationStatusLabel, operationLabels } from "~/lib/busabase-display";
 import { shortId } from "~/lib/format";
 import {
@@ -33,13 +32,7 @@ import {
 import { mobile, radius } from "~/theme/tokens";
 import { useTokens } from "~/theme/use-tokens";
 
-function OperationSummarySection({
-  changeRequest,
-  operation,
-}: {
-  changeRequest: ChangeRequestVO;
-  operation: OperationVO;
-}) {
+function OperationSummarySection({ operation }: { operation: OperationVO }) {
   const tokens = useTokens();
 
   return (
@@ -47,9 +40,7 @@ function OperationSummarySection({
       <NativeRow
         title={operation.headCommit.message || "No commit message"}
         subtitle={`${getOperationStatusLabel(operation.status)} · Operation ${operation.position + 1}`}
-        meta={shortId(operation.headCommitId)}
         leading={<GitCommitHorizontal size={18} color={tokens.mutedForeground} />}
-        trailing={<StatusBadge status={changeRequest.status} />}
         last
       />
     </NativeSection>
@@ -118,20 +109,28 @@ function OperationDetailContent() {
 
   if (crQuery.isLoading) {
     return (
-      <NativeScreen title="Operation" subtitle={shortId(operationId)} headerLeading={headerLeading}>
+      <DrawerScaffold
+        title="Operation"
+        subtitle={shortId(operationId)}
+        headerLeading={headerLeading}
+      >
         <NativeLoadingState label="Loading operation" />
-      </NativeScreen>
+      </DrawerScaffold>
     );
   }
 
   if (!changeRequest || !operation) {
     return (
-      <NativeScreen title="Operation" subtitle={shortId(operationId)} headerLeading={headerLeading}>
+      <DrawerScaffold
+        title="Operation"
+        subtitle={shortId(operationId)}
+        headerLeading={headerLeading}
+      >
         <NativeEmptyState
           title="Operation not found"
           description="This operation is not available."
         />
-      </NativeScreen>
+      </DrawerScaffold>
     );
   }
 
@@ -154,13 +153,13 @@ function OperationDetailContent() {
     ) : undefined;
 
   return (
-    <NativeScreen
+    <DrawerScaffold
       title={label}
       subtitle={`${getChangeRequestScopeName(changeRequest)} · ${shortId(operation.headCommitId)}`}
       headerLeading={headerLeading}
       footer={footer}
     >
-      <OperationSummarySection changeRequest={changeRequest} operation={operation} />
+      <OperationSummarySection operation={operation} />
       <NativeSection title="Changes">
         <FieldList
           fields={changedFields}
@@ -206,7 +205,7 @@ function OperationDetailContent() {
           />
         </ScrollView>
       </NativeBottomSheet>
-    </NativeScreen>
+    </DrawerScaffold>
   );
 }
 

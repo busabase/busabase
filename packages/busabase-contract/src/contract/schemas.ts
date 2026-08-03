@@ -45,6 +45,18 @@ export interface NodeOutput {
   hasChildren?: boolean;
 }
 
+/**
+ * Node metadata keys that mean the same thing on EVERY node type — the ones
+ * `nodeSchema.metadata` declares explicitly below. Everything else in a node's
+ * metadata is free-form and type-specific (a whiteboard's `whiteboardDocument`,
+ * busabase-cms's `busabaseCms` mapping on a folder, …).
+ *
+ * Exported because `updateNodeMetadata` needs exactly this set to decide which
+ * keys are always acceptable on a typed node; keeping one list means the
+ * allowlist can't drift away from what the schema actually documents.
+ */
+export const NODE_COMMON_METADATA_KEYS = ["entryFile", "visibility", "version", "assetId"] as const;
+
 const nodeSchema: z.ZodType<NodeOutput> = z.lazy(() =>
   z.object({
     id: z.string(),
@@ -619,6 +631,28 @@ const listChangeRequestsResponseSchema = z.object({
   nextCursor: z.string().nullable(),
 });
 
+// Random-access (numbered) change request paging, mirroring records.listPage.
+// The inbox uses this so a reviewer can jump to a page of a 2,000-change-request
+// tab instead of clicking "load more" until they get there; the same filters as
+// the keyset listing apply.
+const listChangeRequestsPageInputSchema = z
+  .object({
+    page: z.coerce.number().int().min(1).optional().default(1),
+    pageSize: z.coerce.number().int().min(1).max(100).optional().default(50),
+    status: z.array(changeRequestStatusSchema).optional(),
+    mine: z.boolean().optional(),
+  })
+  .optional()
+  .default({ page: 1, pageSize: 50 });
+
+const listChangeRequestsPageResponseSchema = z.object({
+  changeRequests: z.array(changeRequestSchema),
+  total: z.number().int().nonnegative(),
+  totalPages: z.number().int().nonnegative(),
+  page: z.number().int().min(1),
+  pageSize: z.number().int().min(1).max(100),
+});
+
 // Server-side inbox tab counts. Computed over the whole space (not a capped
 // page) so the tab badges are correct regardless of how many change requests
 // exist. `created` is scoped to the acting user.
@@ -754,5 +788,7 @@ export {
   listByStatusInputSchema,
   listChangeRequestsPagedInputSchema,
   listChangeRequestsResponseSchema,
+  listChangeRequestsPageInputSchema,
+  listChangeRequestsPageResponseSchema,
   searchInputSchema,
 };

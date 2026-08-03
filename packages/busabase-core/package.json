@@ -1,7 +1,7 @@
 {
   "name": "busabase-core",
   "description": "Shared Busabase open-core protocol, local store, API helpers, and dashboard components.",
-  "version": "0.11.0",
+  "version": "0.11.2",
   "private": true,
   "type": "module",
   "exports": {
@@ -73,6 +73,10 @@
       "types": "./src/domains/airapp/components/runners/nodepod-runner.ts",
       "default": "./src/domains/airapp/components/runners/nodepod-runner.ts"
     },
+    "./domains/airapp/preview-sandbox": {
+      "types": "./src/domains/airapp/utils/preview-sandbox.ts",
+      "default": "./src/domains/airapp/utils/preview-sandbox.ts"
+    },
     "./domains/airapp/logic/local-preview-proxy": {
       "types": "./src/domains/airapp/logic/local-preview-proxy.ts",
       "default": "./src/domains/airapp/logic/local-preview-proxy.ts"
@@ -88,6 +92,10 @@
     "./domains/doc/components": {
       "types": "./src/domains/doc/components/index.ts",
       "default": "./src/domains/doc/components/index.ts"
+    },
+    "./domains/attachments/logic": {
+      "types": "./src/domains/attachments/logic/attachments-logic.ts",
+      "default": "./src/domains/attachments/logic/attachments-logic.ts"
     },
     "./domains/file-node/handlers": {
       "types": "./src/domains/file-node/handlers.ts",
@@ -235,6 +243,7 @@
     "busabase-package": "workspace:*",
     "drizzle-orm": "^0.45.1",
     "elkjs": "^0.9.3",
+    "framer-motion": "^12.33.0",
     "ignore": "^7.0.5",
     "kui": "workspace:*",
     "lucide-react": "^0.556.0",
@@ -263,6 +272,10 @@
     "coverage:badge": "vitest run --coverage --coverage.include='src/logic/**' --coverage.include='src/domains/**' --coverage.exclude='src/domains/dashboard/**' --coverage.exclude='**/*.test.ts' --coverage.exclude='**/types/**' --coverage.reporter=json-summary --coverage.reporter=text-summary && node scripts/coverage-badge.mjs",
     "typecheck": "tsc --noEmit",
     "bench:grep": "NODE_OPTIONS=--conditions=react-server tsx scripts/bench-grep.ts",
-    "bench:search-vs-grep": "NODE_OPTIONS=--conditions=react-server tsx scripts/bench-search-vs-grep.ts"
+    "bench:search-vs-grep": "NODE_OPTIONS=--conditions=react-server tsx scripts/bench-search-vs-grep.ts",
+    "bench:records": "NODE_OPTIONS='--conditions=react-server --expose-gc --max-old-space-size=4096' tsx scripts/bench-records.ts",
+    "bench:explain": "NODE_OPTIONS='--conditions=react-server' tsx scripts/bench-explain.ts",
+    "bench:records:pg": "BENCH_ENGINE=postgres NODE_OPTIONS='--conditions=react-server --expose-gc --max-old-space-size=4096' tsx scripts/bench-records.ts",
+    "bench:inbox": "NODE_OPTIONS='--conditions=react-server --expose-gc --max-old-space-size=4096' tsx scripts/bench-inbox.ts"
   }
 }

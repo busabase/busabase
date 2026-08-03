@@ -20,6 +20,7 @@ import { useEffect, useState } from "react";
 import { Pressable, StyleSheet, Switch, Text, View } from "react-native";
 import { useBusabaseOrpc } from "~/api/use-busabase-orpc";
 import { ConnectionGuard } from "~/components/busabase/ConnectionGuard";
+import { DrawerScaffold } from "~/components/busabase/DrawerScaffold";
 import {
   NativeActionBar,
   NativeBottomSheet,
@@ -28,7 +29,6 @@ import {
   NativeInlineError,
   NativeLoadingState,
   NativeRow,
-  NativeScreen,
   NativeSection,
 } from "~/components/native-screen";
 import { Button } from "~/components/ui/Button";
@@ -216,7 +216,7 @@ function VaultSettingsContent() {
   );
 
   return (
-    <NativeScreen
+    <DrawerScaffold
       title="Vault"
       headerLeading={headerLeading}
       refreshing={vaultQuery.isRefetching}
@@ -436,7 +436,7 @@ function VaultSettingsContent() {
           </NativeActionBar>
         }
       />
-    </NativeScreen>
+    </DrawerScaffold>
   );
 }
 

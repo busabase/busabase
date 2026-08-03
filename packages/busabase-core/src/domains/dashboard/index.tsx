@@ -62,7 +62,7 @@ import { SearchDialog } from "./components/search-dialog";
 import { SidePanel, SidePanelToggle } from "./components/side-panel";
 import { BaseTableSkeleton } from "./components/skeletons";
 import { SubmitPermissionProvider } from "./components/split-submit-button";
-import { BusabaseTopbarBreadcrumb } from "./components/topbar";
+import { BusabaseTopbarBreadcrumb, TopbarNodeActionsSlot } from "./components/topbar";
 import { getRelationRecordIds } from "./helpers/field";
 import { getLocationPath, readInboxView } from "./helpers/inbox";
 import { createKnownNodeCache, type KnownNode, nodeRoutePath } from "./helpers/known-node-cache";
@@ -2184,6 +2184,7 @@ function BusabaseDashboardContent({
           <BusabaseTopbarBreadcrumb items={breadcrumbItems} />
           {titlebar.badge ? <div className="ml-1 shrink-0">{titlebar.badge}</div> : null}
           {topbarActions ? <div className="shrink-0">{topbarActions}</div> : null}
+          <TopbarNodeActionsSlot />
           <SidePanelToggle />
         </div>
         {error ? (

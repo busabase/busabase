@@ -18,14 +18,31 @@ export interface RecordChangeInput {
   fields?: unknown;
   message?: string;
   submittedBy?: string;
+  autoMerge?: boolean;
+  requireReview?: boolean;
 }
+
+/**
+ * `autoMerge` is tri-state — unset (permission-aware default), forced on, forced
+ * off — but a CLI boolean flag is presence-only, so `--auto-merge` alone could
+ * never express "forced off". Same two-flag shape as `node_create`.
+ */
+const mergeIntent = (input: RecordChangeInput): { autoMerge?: boolean } => {
+  if (input.requireReview) return { autoMerge: false };
+  if (input.autoMerge) return { autoMerge: true };
+  return {};
+};
 
 export const recordChangeTask: TaskDefinition<RecordChangeInput> = {
   name: "record_change_request",
   cliPath: ["records", "change-request"],
   summary: "Propose a change to an existing record (update / delete / restore)",
   guidance:
-    "Approval-first: proposes a ChangeRequest for a human, it does not write directly. " +
+    "Review is permission-aware, decided server-side: `update` merges immediately when your key " +
+    "has write access on the Base's node and lands as a pending ChangeRequest otherwise — check the " +
+    "response's `materialized` field to see which happened. Pass explicit `autoMerge: false` to " +
+    "force review even when you could write directly. `delete` and `restore` are always review-first " +
+    "regardless of permission, by design. " +
     "`delete` ARCHIVES the record — it is reversible with `restore`, not an erase. " +
     "For update, `fields` is keyed by field slug and only needs the fields you are changing; " +
     "if you set the Base's PRIMARY (first) field, keep it a short human-readable title.",
@@ -52,9 +69,24 @@ export const recordChangeTask: TaskDefinition<RecordChangeInput> = {
         'Explanation for the reviewer — imperative verb + what + why, e.g. "Update deal stage to qualified — demo booked".',
     },
     { name: "submittedBy", kind: "string", description: "Producer label recorded on the change." },
+    {
+      name: "autoMerge",
+      kind: "boolean",
+      appliesWhen: { param: "operation", values: ["update"] },
+      description:
+        "Skip review and apply the update immediately if you have write access. Not a permission override — a changeRequest-level key still gets a pending CR. Default is permission-aware: merge when you can, otherwise propose.",
+    },
+    {
+      name: "requireReview",
+      kind: "boolean",
+      appliesWhen: { param: "operation", values: ["update"] },
+      description:
+        "Always propose a pending ChangeRequest for this update, even with write access. delete/restore are review-first regardless.",
+    },
   ],
   examples: [
     'busabase-cli records change-request --record-id rec_1 --operation update --fields-json \'{"status":"published"}\'',
+    'busabase-cli records change-request --record-id rec_1 --operation update --fields-json \'{"status":"published"}\' --require-review',
     "busabase-cli records change-request --record-id rec_1 --operation delete",
   ],
   execute: async (client: BusabaseTaskClient, input: RecordChangeInput) => {
@@ -74,6 +106,9 @@ export const recordChangeTask: TaskDefinition<RecordChangeInput> = {
         ...common,
         operation: "update",
         fields: input.fields,
+        // Only `update` carries the merge intent — the endpoint's delete/restore
+        // branches have no `autoMerge` in their schema at all, by design.
+        ...mergeIntent(input),
       } as RecordInput);
     }
     if (input.operation === "delete") {

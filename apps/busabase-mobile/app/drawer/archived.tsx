@@ -71,7 +71,11 @@ function ArchivedContent() {
   const restoreBase = useMutation({
     mutationFn: async (base: BaseVO) => {
       if (!buda) throw new Error("Not connected");
-      return buda.client.bases.restoreChangeRequest({ baseId: base.id, submittedBy: SUBMITTED_BY });
+      return buda.client.bases.lifecycleChangeRequest({
+        operation: "restore",
+        baseId: base.id,
+        submittedBy: SUBMITTED_BY,
+      });
     },
     onSuccess: (changeRequest) => {
       setPendingAction(null);

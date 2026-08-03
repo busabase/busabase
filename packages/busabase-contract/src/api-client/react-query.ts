@@ -1,5 +1,6 @@
 import { createORPCClient } from "@orpc/client";
 import { RPCLink } from "@orpc/client/fetch";
+import { BatchLinkPlugin } from "@orpc/client/plugins";
 import type { ContractRouterClient } from "@orpc/contract";
 import { createTanstackQueryUtils } from "@orpc/tanstack-query";
 import { type BusabaseContract, busabaseContract } from "../contract/busabase";
@@ -30,6 +31,41 @@ const demoFetch: NonNullable<ConstructorParameters<typeof RPCLink>[0]["fetch"]> 
 };
 
 /**
+ * Procedures that must NEVER be folded into a batch request.
+ *
+ * `live.subscribe` is an Event Iterator — a long-lived SSE stream. A batch is
+ * one HTTP request that completes when all its members complete, so batching a
+ * stream would hold the whole batch open for the lifetime of the subscription
+ * and stall every sibling call in it.
+ */
+const UNBATCHABLE_PROCEDURES = new Set(["live.subscribe"]);
+
+const isBatchable = (path: readonly string[]): boolean =>
+  !UNBATCHABLE_PROCEDURES.has(path.join("."));
+
+/**
+ * Collapse the burst of parallel queries a dashboard route fires into a single
+ * `/api/rpc/__batch__` round trip.
+ *
+ * This is not just about saving round trips. Every separate HTTP request
+ * independently re-resolves the session (`auth.api.getSession`) and the space
+ * ACL before reaching its procedure, and on a single-connection database those
+ * repeated lookups serialise. Measured on the cloud inbox, which fired ~15
+ * unbatched calls: the per-request auth phase climbed 17ms → 74ms across the
+ * burst while every actual query stayed at 1–10ms, and the last response landed
+ * ~800ms after the first. One batched request pays that boundary cost once.
+ *
+ * The server side already accepts this: `/api/rpc` mounts `BatchHandlerPlugin`,
+ * which splits the batch back into individual calls — each still running its own
+ * per-procedure auth middleware, so batching grants no authority a separate call
+ * would not have had.
+ */
+const batchPlugin = () =>
+  new BatchLinkPlugin({
+    groups: [{ condition: ({ path }) => isBatchable(path), context: {} }],
+  });
+
+/**
  * Standard oRPC RPC client (POST transport). Unlike `createBusabaseORPCClient`, this
  * does NOT use `inferRPCMethodFromContractRouter`, so reads stay POST and never
  * collide with the server's GET REST matchers (e.g. /file-trees/:id, /search).
@@ -43,6 +79,7 @@ export const createBusabaseORPCClient = (
     headers: async () =>
       (typeof opts.headers === "function" ? await opts.headers() : opts.headers) ?? {},
     ...(opts.demo ? { fetch: demoFetch } : {}),
+    plugins: [batchPlugin()],
   });
   return createORPCClient<BusabaseORPCClient>(link);
 };

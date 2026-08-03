@@ -88,7 +88,8 @@ function buildClient(raw: RawClient) {
         mergeImmediately?: boolean;
       }) => {
         const { mergeImmediately, ...rest } = input;
-        const cr = await raw.bases.archiveChangeRequest({
+        const cr = await raw.bases.lifecycleChangeRequest({
+          operation: "archive",
           baseId: rest.baseId,
           submittedBy: rest.submittedBy ?? "local-editor",
           message: rest.message,

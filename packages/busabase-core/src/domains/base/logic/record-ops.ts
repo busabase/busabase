@@ -679,7 +679,9 @@ export const createDeleteChangeRequest = async (
     throw recordNotFound(recordId);
   }
   if (record.status === "archived") {
-    throw new Error(`Record is already archived: ${recordId}`);
+    throw new ORPCError("CONFLICT", {
+      message: `Record is already archived: ${recordId}`,
+    });
   }
 
   const [headCommit] = await db
@@ -688,7 +690,11 @@ export const createDeleteChangeRequest = async (
     .where(eq(busabaseCommits.id, record.headCommitId))
     .limit(1);
   if (!headCommit) {
-    throw new Error(`Record head commit not found: ${record.headCommitId}`);
+    // Deliberately a 5xx: a record row pointing at a commit that does not exist
+    // is a broken invariant, not a request the caller can correct.
+    throw new ORPCError("INTERNAL_SERVER_ERROR", {
+      message: `Record head commit not found: ${record.headCommitId}`,
+    });
   }
 
   const changeRequestId = id("crq");
@@ -791,12 +797,14 @@ export const createUpdateChangeRequest = async (
     throw recordNotFound(recordId);
   }
   if (record.status === "archived") {
-    throw new Error(`Record is already archived: ${recordId}`);
+    throw new ORPCError("CONFLICT", {
+      message: `Record is already archived: ${recordId}`,
+    });
   }
 
   const base = await getBase(record.baseId);
   if (!base) {
-    throw new Error(`Base not found: ${record.baseId}`);
+    throw baseNotFound(record.baseId);
   }
   await assertBaseChangeRequestPermission(base.id, submittedBy);
   // `parsed.fields` is only the caller's partial delta — an omitted required
@@ -940,12 +948,16 @@ export const createRestoreChangeRequest = async (
     .where(eq(busabaseCommits.id, record.headCommitId))
     .limit(1);
   if (!headCommit) {
-    throw new Error(`Record head commit not found: ${record.headCommitId}`);
+    // Deliberately a 5xx: a record row pointing at a commit that does not exist
+    // is a broken invariant, not a request the caller can correct.
+    throw new ORPCError("INTERNAL_SERVER_ERROR", {
+      message: `Record head commit not found: ${record.headCommitId}`,
+    });
   }
 
   const base = await getBase(record.baseId);
   if (!base) {
-    throw new Error(`Base not found: ${record.baseId}`);
+    throw baseNotFound(record.baseId);
   }
 
   const changeRequestId = id("crq");
@@ -1152,7 +1164,9 @@ export const createRestoreBaseChangeRequest = async (
     });
   }
   if (!baseRow.archivedAt) {
-    throw new Error(`Base is not archived: ${baseId}`);
+    throw new ORPCError("CONFLICT", {
+      message: `Base is not archived: ${baseId}`,
+    });
   }
 
   const changeRequestId = id("crq");

@@ -21,6 +21,7 @@ import { Pressable, StyleSheet, Text } from "react-native";
 import { useBusabaseOrpc } from "~/api/use-busabase-orpc";
 import { CommentsSection } from "~/components/busabase/CommentsSection";
 import { ConnectionGuard } from "~/components/busabase/ConnectionGuard";
+import { DrawerScaffold } from "~/components/busabase/DrawerScaffold";
 import {
   NativeActionBar,
   NativeBottomSheet,
@@ -29,7 +30,6 @@ import {
   NativeInlineError,
   NativeLoadingState,
   NativeRow,
-  NativeScreen,
   NativeSection,
 } from "~/components/native-screen";
 import { Button } from "~/components/ui/Button";
@@ -240,27 +240,27 @@ function ChangeRequestDetailContent() {
 
   if (crQuery.isLoading) {
     return (
-      <NativeScreen title="Change Request" headerLeading={headerLeading}>
+      <DrawerScaffold title="Change Request" headerLeading={headerLeading}>
         <NativeLoadingState label="Loading change request" />
-      </NativeScreen>
+      </DrawerScaffold>
     );
   }
 
   if (crQuery.error && !changeRequest) {
     return (
-      <NativeScreen
+      <DrawerScaffold
         title="Change Request"
         subtitle={shortId(changeRequestId)}
         headerLeading={headerLeading}
       >
         <NativeErrorState message={crQuery.error.message} onRetry={() => void crQuery.refetch()} />
-      </NativeScreen>
+      </DrawerScaffold>
     );
   }
 
   if (!changeRequest) {
     return (
-      <NativeScreen
+      <DrawerScaffold
         title="Change Request"
         subtitle={shortId(changeRequestId)}
         headerLeading={headerLeading}
@@ -269,7 +269,7 @@ function ChangeRequestDetailContent() {
           title="Change Request not found"
           description="This change request is no longer available."
         />
-      </NativeScreen>
+      </DrawerScaffold>
     );
   }
 
@@ -320,7 +320,7 @@ function ChangeRequestDetailContent() {
     ) : undefined;
 
   return (
-    <NativeScreen
+    <DrawerScaffold
       title={getChangeRequestTitle(changeRequest)}
       titleNumberOfLines={2}
       subtitle={`${scopeName} · ${formatDate(changeRequest.updatedAt)}`}
@@ -408,7 +408,7 @@ function ChangeRequestDetailContent() {
           </NativeActionBar>
         }
       />
-    </NativeScreen>
+    </DrawerScaffold>
   );
 }
 
