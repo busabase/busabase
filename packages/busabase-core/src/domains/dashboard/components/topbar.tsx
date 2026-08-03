@@ -10,6 +10,7 @@ import { SPALink as Link } from "openlib/ui/dashboard";
 import { Fragment } from "react";
 import { useCoreI18n } from "../../../i18n";
 import type { BusabaseBreadcrumbItem } from "../helpers/view-types";
+import { useTopbarNodeActionsStore } from "../store/topbar-node-actions-store";
 
 export function BusabaseTopbarBreadcrumb({ items }: { items: BusabaseBreadcrumbItem[] }) {
   const messages = useCoreI18n();
@@ -48,4 +49,24 @@ export function BusabaseTopbarBreadcrumb({ items }: { items: BusabaseBreadcrumbI
       </BreadcrumbList>
     </Breadcrumb>
   );
+}
+
+/**
+ * Renders whatever node-detail action cluster (Edit-if-Doc + Pin + "..."
+ * menu) the currently visible node-detail view registered via
+ * `useRegisterTopbarNodeActions`. Kept as its own component (rather than
+ * reading the store directly in `dashboard/index.tsx`) so a registration
+ * change only re-renders this small slot, not the whole dashboard shell.
+ *
+ * Deliberately separate from the older, unrelated `topbarActions` slot next
+ * to it in `index.tsx` (`RecordTopbarActions` / `BaseTopbarActions`, a
+ * page-level tab switcher) — this one is additive, for the per-node action
+ * cluster only.
+ */
+export function TopbarNodeActionsSlot() {
+  const actions = useTopbarNodeActionsStore((state) => state.actions);
+  if (!actions) {
+    return null;
+  }
+  return <div className="flex shrink-0 items-center gap-1.5">{actions}</div>;
 }

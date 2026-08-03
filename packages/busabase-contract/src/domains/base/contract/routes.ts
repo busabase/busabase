@@ -2,15 +2,14 @@ import { oc } from "@orpc/contract";
 import { z } from "zod";
 import { changeRequestSchema, listByStatusInputSchema } from "../../../contract/schemas";
 import {
-  archiveBaseInputSchema,
   baseFieldSchema,
+  baseLifecycleChangeRequestInputSchema,
   baseSchema,
   createBaseFieldInputSchema,
   createBaseInputSchema,
   fieldChangeRequestInputSchema,
   previewFieldConversionInputSchema,
   previewFieldConversionOutputSchema,
-  restoreBaseInputSchema,
 } from "./base-schemas";
 import {
   countRecordsInputSchema,
@@ -147,25 +146,16 @@ export const baseContract = {
     })
     .input(previewFieldConversionInputSchema.extend({ baseId: z.string() }))
     .output(previewFieldConversionOutputSchema),
-  archiveChangeRequest: oc
+  lifecycleChangeRequest: oc
     .route({
       method: "POST",
-      path: "/bases/{baseId}/archive/change-requests",
+      path: "/bases/{baseId}/lifecycle/change-requests",
       tags: ["Bases", "Change Requests"],
-      summary: "Archive base",
-      successDescription: "Created change request that archives a base.",
+      summary: "Create Base lifecycle change request",
+      successDescription:
+        "Created change request that moves a Base between its lifecycle states. `operation` selects the direction: `archive` (soft-delete a live Base) or `restore` (bring an archived Base back).",
     })
-    .input(archiveBaseInputSchema.extend({ baseId: z.string() }))
-    .output(changeRequestSchema),
-  restoreChangeRequest: oc
-    .route({
-      method: "POST",
-      path: "/bases/{baseId}/restore/change-requests",
-      tags: ["Bases", "Change Requests"],
-      summary: "Restore base",
-      successDescription: "Created change request that restores an archived base.",
-    })
-    .input(restoreBaseInputSchema.extend({ baseId: z.string() }))
+    .input(baseLifecycleChangeRequestInputSchema)
     .output(changeRequestSchema),
 };
 

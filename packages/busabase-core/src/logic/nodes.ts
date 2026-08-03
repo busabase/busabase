@@ -2,6 +2,7 @@ import "server-only";
 
 import { ORPCError } from "@orpc/server";
 import {
+  NODE_COMMON_METADATA_KEYS,
   searchNodesByNameInputSchema,
   updateNodeMetadataInputSchema,
 } from "busabase-contract/contract/schemas";
@@ -633,6 +634,19 @@ export const createNodeChangeRequest = async (
   const db = await getDb();
   const parsed = createNodeChangeRequestInputSchema.parse(input);
   assertValidNodeRefs(parsed.operations);
+  // Same metadata rules as the direct PATCH path, applied at submission time so
+  // a bad document/key never reaches a change request someone then has to
+  // review and merge. Creating a whiteboard used to skip validation entirely:
+  // a malformed `whiteboardDocument` merged fine and then read back as an empty
+  // canvas, and a misspelled key was accepted and never rendered.
+  for (const operation of parsed.operations) {
+    if (operation.kind !== "create") continue;
+    assertValidNodeMetadata(
+      operation.nodeType,
+      operation.metadata,
+      `new ${operation.nodeType} node "${operation.slug}"`,
+    );
+  }
   const submittedBy = resolveActorId(parsed.submittedBy);
 
   // Resolve each operation's permission-gated target node — a create op
@@ -813,6 +827,61 @@ const RICH_NODE_DOCUMENT_SCHEMAS: Partial<Record<string, { key: string; schema: 
   html: { key: "htmlDocument", schema: HtmlDocumentSchema },
 };
 
+/**
+ * Validate a metadata patch/seed against the node type it is being written to.
+ * Shared by BOTH write paths — `updateNodeMetadata` (direct PATCH) and
+ * `createNodeChangeRequest`'s create operations — so "the API rejects it" never
+ * depends on which door you came through.
+ *
+ * Two rules, and only for the three node types that own a structured document:
+ *
+ *  1. The document key's VALUE must parse. An invalid document isn't merely
+ *     cosmetic: `parseXxxDocument` falls back to an EMPTY document on failure,
+ *     so a bad write silently blanks the whiteboard/workflow/HTML the next time
+ *     anyone opens it.
+ *  2. Every other key must be one the node type actually reads. Metadata is
+ *     free-form by design across the product (busabase-cms stores its Base-id
+ *     mapping under `busabaseCms` on a FOLDER node, and that must keep working),
+ *     so this deliberately applies to typed rich nodes ONLY. On those, an
+ *     unrecognized key is a mistake with no upside: `metadata.scene` or
+ *     `metadata.elements` used to return 200, write a key nobody ever reads, and
+ *     leave the canvas unchanged — indistinguishable from "the API is broken".
+ *     The error names the key the caller almost certainly meant.
+ *
+ * Non-rich node types (folder/doc/skill/airapp/file/base/form/…) are untouched:
+ * they keep accepting any metadata key, exactly as before.
+ */
+const assertValidNodeMetadata = (
+  nodeType: string,
+  metadata: Record<string, unknown>,
+  nodeLabel: string,
+): void => {
+  const richNodeDocument = RICH_NODE_DOCUMENT_SCHEMAS[nodeType];
+  if (!richNodeDocument) return;
+
+  if (richNodeDocument.key in metadata) {
+    const result = richNodeDocument.schema.safeParse(metadata[richNodeDocument.key]);
+    if (!result.success) {
+      throw new ORPCError("BAD_REQUEST", {
+        message: `Invalid ${richNodeDocument.key} for ${nodeLabel}: ${result.error.message}`,
+      });
+    }
+  }
+
+  const allowedKeys = new Set<string>([richNodeDocument.key, ...NODE_COMMON_METADATA_KEYS]);
+  const unknownKeys = Object.keys(metadata)
+    .filter((key) => !allowedKeys.has(key))
+    .sort();
+  if (unknownKeys.length > 0) {
+    throw new ORPCError("BAD_REQUEST", {
+      message:
+        `Unknown metadata key${unknownKeys.length > 1 ? "s" : ""} for ${nodeLabel}: ` +
+        `${unknownKeys.join(", ")}. A ${nodeType} node stores its content under ` +
+        `"${richNodeDocument.key}"; allowed keys are ${[...allowedKeys].sort().join(", ")}.`,
+    });
+  }
+};
+
 /** Direct, audited top-level metadata merge for SDK-managed node identities. */
 export const updateNodeMetadata = async (
   input: z.input<typeof updateNodeMetadataInputSchema>,
@@ -839,15 +908,7 @@ export const updateNodeMetadata = async (
     throw new ORPCError("NOT_FOUND", { message: `Node not found: ${parsed.nodeId}` });
   }
 
-  const richNodeDocument = RICH_NODE_DOCUMENT_SCHEMAS[node.type];
-  if (richNodeDocument && richNodeDocument.key in parsed.metadata) {
-    const result = richNodeDocument.schema.safeParse(parsed.metadata[richNodeDocument.key]);
-    if (!result.success) {
-      throw new ORPCError("BAD_REQUEST", {
-        message: `Invalid ${richNodeDocument.key} for node ${parsed.nodeId}: ${result.error.message}`,
-      });
-    }
-  }
+  assertValidNodeMetadata(node.type, parsed.metadata, `node ${parsed.nodeId}`);
 
   await assertNodePermission(node.id, "write", actorId);
   const timestamp = now();

@@ -46,6 +46,16 @@ const CACHE_CONTROL = "public, max-age=31536000, immutable";
 export interface CreateDevUploadRouteOptions {
   /**
    * Gate the route behind a production check (returns 404 in production).
+   *
+   * Keep the default for any app whose production deployment serves objects
+   * from S3/R2 — there this route is only a dev convenience. Pass `false` ONLY
+   * for a self-hosted app that ships a production build over local-disk
+   * storage, where this route is the actual data path rather than a shortcut
+   * (`apps/busabase`, `apps/buda`). Such a caller MUST validate the storage key
+   * itself before it reaches the adapter: these handlers pass it straight to
+   * `path.join(rootDir, key)`, so an un-gated route without a key guard is an
+   * arbitrary-file read/write. See `apps/busabase/src/lib/storage-key.ts`.
+   *
    * @default true
    */
   gateProduction?: boolean;
@@ -145,6 +155,16 @@ export function createDevUploadRoute(opts?: CreateDevUploadRouteOptions): {
 export interface CreateDevAttachmentRouteOptions {
   /**
    * Gate the route behind a production check (returns 404 in production).
+   *
+   * Keep the default for any app whose production deployment serves objects
+   * from S3/R2 — there this route is only a dev convenience. Pass `false` ONLY
+   * for a self-hosted app that ships a production build over local-disk
+   * storage, where this route is the actual data path rather than a shortcut
+   * (`apps/busabase`, `apps/buda`). Such a caller MUST validate the storage key
+   * itself before it reaches the adapter: these handlers pass it straight to
+   * `path.join(rootDir, key)`, so an un-gated route without a key guard is an
+   * arbitrary-file read/write. See `apps/busabase/src/lib/storage-key.ts`.
+   *
    * @default true
    */
   gateProduction?: boolean;

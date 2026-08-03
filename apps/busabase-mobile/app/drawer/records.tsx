@@ -46,18 +46,9 @@ function RecordsContent() {
       `${getRecordTitle(record)} ${record.base.name}`.toLocaleLowerCase().includes(needle),
     );
   }, [records, search]);
-  const hasSearch = search.trim().length > 0;
-
   return (
     <DrawerScaffold
       title="Records"
-      subtitle={
-        records.length > 0
-          ? hasSearch
-            ? `${filteredRecords.length} of ${records.length}`
-            : `${records.length} loaded`
-          : undefined
-      }
       refreshing={query.isRefetching}
       onRefresh={() => void query.refetch()}
     >

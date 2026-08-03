@@ -14,12 +14,13 @@ import { type iString, iStringIsEmpty, iStringParse, iStringTrim } from "openlib
 import { SPALink as Link } from "openlib/ui/dashboard";
 import { useRef, useState } from "react";
 import { useSearch } from "wouter";
-import { fmt, useCoreI18n, useIString } from "../../../i18n";
+import { fmt, useCoreI18n, useCoreLocale, useIString } from "../../../i18n";
 import { isRollupCompatible, LOOKUP_ROLLUPS } from "../../base/lookup/rollup";
 import { getPrimaryField } from "../../base/utils/primary-field";
 import { isDerivedFieldSlug } from "../helpers/change-request";
 import { createDefaultFieldOptions } from "../helpers/field";
 import { fieldTypeOptions } from "../helpers/field-type-options";
+import { formatFullTime } from "../helpers/format";
 import { mergeSearchIntoHref } from "../helpers/link-search";
 import type {
   CreateBaseFieldPayload,
@@ -28,6 +29,7 @@ import type {
   ViewFormPayload,
   ViewSubmitOptions,
 } from "../helpers/view-types";
+import { useRegisterTopbarNodeActions } from "../hooks/use-register-topbar-node-actions";
 import { registerSidePanelTab, type SidePanelTabProps } from "../side-panel-registry";
 import { useIsAnonymousVisitor } from "../visitor-context";
 import { applyViewConfigToRecords, BusaBaseTable } from "./base-table";
@@ -182,6 +184,7 @@ export function BaseSetupView({
   ) => Promise<void>;
 }) {
   const messages = useCoreI18n();
+  const locale = useCoreLocale();
   const resolveIString = useIString();
   const [baseName, setBaseName] = useState(base?.name ?? "");
   const [baseDescription, setBaseDescription] = useState(base?.description ?? "");
@@ -1094,7 +1097,7 @@ export function BaseSetupView({
               />
               <PropertyRow
                 label={messages.common.created}
-                value={new Date(base.createdAt).toLocaleString()}
+                value={formatFullTime(base.createdAt, locale)}
               />
             </SidebarPanel>
           </aside>
@@ -1110,6 +1113,40 @@ function BaseDetailHeader({ base, orpc }: { base: BaseVO | null; orpc: BusabaseQ
   // refuses these mutations anyway (they aren't on the anonymous allowlist), so
   // showing them would only offer buttons that can't work.
   const isAnon = useIsAnonymousVisitor();
+  // One "•••" menu, not a row of naked buttons. This header used to lay
+  // Agent prompts / Permissions / Share / Delete out side by side, which
+  // is four buttons of chrome above the actual Base. NodeActionsMenu
+  // carries all four (it omits Rename for `nodeType === "base"` — a Base
+  // renames through its Design Tab) and every other node-detail topbar
+  // already uses it, so this also makes the Base page stop being the odd
+  // one out. Pin stays outside: it's a stateful toggle whose pressed
+  // state has to be visible at a glance, not a dialog launcher.
+  // `mergeNodeDelete` already special-cases `node.type === "base"`
+  // (archives the base + its records in lockstep), so Delete works here
+  // unchanged. spaceId is not carried on BaseVO; the Share dialog
+  // derives it from the current /dashboard/<spaceId>/… pathname.
+  // Registered into the shared topbar (see `useRegisterTopbarNodeActions`)
+  // instead of rendered in this in-page header, like every other node-detail
+  // view's action cluster.
+  useRegisterTopbarNodeActions(
+    base && !isAnon ? (
+      <>
+        <NodePinButton
+          payload={{ nodeId: base.nodeId }}
+          tabId={nodeSidePanelTabId("base", base.nodeId)}
+          tabType="base-preview"
+          title={base.name}
+        />
+        <NodeActionsMenu
+          nodeId={base.nodeId}
+          nodeName={base.name}
+          nodeSlug={base.slug}
+          nodeType="base"
+          orpc={orpc}
+        />
+      </>
+    ) : null,
+  );
   return (
     <div className="px-6 pt-5 pb-2">
       <div className="flex items-start justify-between gap-3">
@@ -1119,35 +1156,6 @@ function BaseDetailHeader({ base, orpc }: { base: BaseVO | null; orpc: BusabaseQ
             <p className="mt-1 truncate text-muted-foreground text-xs">{base.description}</p>
           ) : null}
         </div>
-        {/* One "•••" menu, not a row of naked buttons. This header used to lay
-            Agent prompts / Permissions / Share / Delete out side by side, which
-            is four buttons of chrome above the actual Base. NodeActionsMenu
-            carries all four (it omits Rename for `nodeType === "base"` — a Base
-            renames through its Design Tab) and every other node-detail topbar
-            already uses it, so this also makes the Base page stop being the odd
-            one out. Pin stays outside: it's a stateful toggle whose pressed
-            state has to be visible at a glance, not a dialog launcher.
-            `mergeNodeDelete` already special-cases `node.type === "base"`
-            (archives the base + its records in lockstep), so Delete works here
-            unchanged. spaceId is not carried on BaseVO; the Share dialog
-            derives it from the current /dashboard/<spaceId>/… pathname. */}
-        {base && !isAnon ? (
-          <div className="flex shrink-0 items-center gap-2">
-            <NodePinButton
-              payload={{ nodeId: base.nodeId }}
-              tabId={nodeSidePanelTabId("base", base.nodeId)}
-              tabType="base-preview"
-              title={base.name}
-            />
-            <NodeActionsMenu
-              nodeId={base.nodeId}
-              nodeName={base.name}
-              nodeSlug={base.slug}
-              nodeType="base"
-              orpc={orpc}
-            />
-          </div>
-        ) : null}
       </div>
     </div>
   );

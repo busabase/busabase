@@ -6,6 +6,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Pressable, StyleSheet } from "react-native";
 import { useBusabaseOrpc } from "~/api/use-busabase-orpc";
 import { ConnectionGuard } from "~/components/busabase/ConnectionGuard";
+import { DrawerScaffold } from "~/components/busabase/DrawerScaffold";
 import { RecordForm } from "~/components/busabase/RecordForm";
 import {
   NativeActionBar,
@@ -13,7 +14,6 @@ import {
   NativeEmptyState,
   NativeInlineError,
   NativeLoadingState,
-  NativeScreen,
   NativeSection,
 } from "~/components/native-screen";
 import { Button } from "~/components/ui/Button";
@@ -113,22 +113,22 @@ function NewRecordContent() {
 
   if (basesQuery.isLoading) {
     return (
-      <NativeScreen title="New record" subtitle={slug} headerLeading={headerLeading}>
+      <DrawerScaffold title="New record" subtitle={slug} headerLeading={headerLeading}>
         <NativeLoadingState label="Loading base" />
-      </NativeScreen>
+      </DrawerScaffold>
     );
   }
 
   if (!base) {
     return (
-      <NativeScreen title="New record" subtitle={slug} headerLeading={headerLeading}>
+      <DrawerScaffold title="New record" subtitle={slug} headerLeading={headerLeading}>
         <NativeEmptyState title="Base not found" description="This base is not available." />
-      </NativeScreen>
+      </DrawerScaffold>
     );
   }
 
   return (
-    <NativeScreen
+    <DrawerScaffold
       title="New record"
       subtitle={base.name}
       headerLeading={headerLeading}
@@ -184,7 +184,7 @@ function NewRecordContent() {
           </NativeActionBar>
         }
       />
-    </NativeScreen>
+    </DrawerScaffold>
   );
 }
 

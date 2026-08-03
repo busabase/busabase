@@ -10,7 +10,7 @@
  * See `./middleware.ts` for the analogous i18n proxy middleware helpers.
  */
 
-import { transformPathToLocale } from "./middleware";
+import { setLanguageCookie, transformPathToLocale } from "./middleware";
 
 export interface CanonicalUrlConfig<T extends string> {
   /** Default locale whose URL prefix is hidden (e.g. 'en') */
@@ -30,6 +30,36 @@ export interface CanonicalUrlHelpers {
   getCanonicalUrl(baseUrl: string, pathname: string): string;
   /** Rewrite a pathname to target a different locale, replacing any existing locale prefix. */
   buildLocalizedPath(pathname: string, nextLocale: string): string;
+  /**
+   * Path to navigate to when the user picks `nextLocale` in a language selector,
+   * with the language cookie persisted as a side effect. See `switchLocalePath`.
+   */
+  switchLocalePath(pathname: string, nextLocale: string): string;
+}
+
+/**
+ * Resolve the path a language selector should navigate to, and persist the
+ * choice in the language cookie.
+ *
+ * The cookie write is not bookkeeping — it is what makes switching *back to the
+ * default locale* work at all. The default locale's URL carries no prefix
+ * (`/zh-CN/home` -> `/home`), so on the next request `createI18nProxy` has only
+ * the cookie to go on: a stale `zh-CN` cookie makes it redirect straight back to
+ * `/zh-CN/home` and the selector looks dead. Switching *to* a non-default locale
+ * survives without this only because the `/zh-CN` prefix re-syncs the cookie
+ * server-side.
+ *
+ * Client-only side effect: `setLanguageCookie` no-ops where `document` is
+ * undefined, so this stays safe to call from shared code.
+ */
+export function switchLocalePath<T extends string>(
+  pathname: string,
+  nextLocale: string,
+  supportedLocales: readonly T[],
+  defaultLocale: T,
+): string {
+  setLanguageCookie(nextLocale);
+  return transformPathToLocale(pathname, nextLocale as T, supportedLocales, defaultLocale);
 }
 
 /**
@@ -81,5 +111,7 @@ export function createCanonicalUrlHelpers<T extends string>(
     canonicalizeDefaultLocalePath,
     getCanonicalUrl,
     buildLocalizedPath,
+    switchLocalePath: (pathname: string, nextLocale: string) =>
+      switchLocalePath(pathname, nextLocale, supportedLocales, defaultLocale),
   };
 }

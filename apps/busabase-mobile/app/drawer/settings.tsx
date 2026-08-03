@@ -3,6 +3,7 @@ import Constants from "expo-constants";
 import { useRouter } from "expo-router";
 import {
   Bell,
+  Check,
   ChevronRight,
   CircleCheck,
   Download,
@@ -19,7 +20,7 @@ import {
   Webhook,
 } from "lucide-react-native";
 import { useState } from "react";
-import { Linking, StyleSheet, Switch, View } from "react-native";
+import { Linking, Pressable, ScrollView, StyleSheet, Switch, Text, View } from "react-native";
 import { signInWithBusabaseCloud } from "~/auth/oauth";
 import { MAX_CLOUD_ACCOUNTS } from "~/auth/session-store";
 import { ConnectionGuard } from "~/components/busabase/ConnectionGuard";
@@ -34,9 +35,10 @@ import {
 } from "~/components/native-screen";
 import { Button } from "~/components/ui/Button";
 import { useConnection } from "~/connection/connection-store";
-import { type LocalePreference, useI18n } from "~/i18n";
+import { fmt, type LocalePreference, useI18n } from "~/i18n";
 import { useNotifications } from "~/notifications/notification-provider";
 import type { NotificationSettings } from "~/notifications/notification-settings";
+import { mobile, radius, spacing, typography } from "~/theme/tokens";
 import { useTokens } from "~/theme/use-tokens";
 import { useMobileUpdate } from "~/updates/mobile-update-provider";
 
@@ -86,6 +88,7 @@ function SettingsContent() {
   const [switchingServer, setSwitchingServer] = useState<string | null>(null);
   const [selectedServer, setSelectedServer] = useState<string | null>(null);
   const [disconnectSheetOpen, setDisconnectSheetOpen] = useState(false);
+  const [languagePickerOpen, setLanguagePickerOpen] = useState(false);
   const [disconnecting, setDisconnecting] = useState(false);
   const [addingAccount, setAddingAccount] = useState(false);
   const [switchingAccount, setSwitchingAccount] = useState<string | null>(null);
@@ -115,7 +118,7 @@ function SettingsContent() {
       await connectCloud(session);
       queryClient.clear();
     } catch (error) {
-      setAccountError(error instanceof Error ? error.message : "Could not add this account.");
+      setAccountError(error instanceof Error ? error.message : t.settings.addAccountFailed);
     } finally {
       setAddingAccount(false);
     }
@@ -130,7 +133,7 @@ function SettingsContent() {
       setSelectedAccount(null);
       router.replace("/drawer/inbox");
     } catch (error) {
-      setAccountError(error instanceof Error ? error.message : "Could not switch accounts.");
+      setAccountError(error instanceof Error ? error.message : t.settings.switchAccountFailed);
     } finally {
       setSwitchingAccount(null);
     }
@@ -149,7 +152,7 @@ function SettingsContent() {
         router.replace("/drawer/inbox");
       }
     } catch (error) {
-      setAccountError(error instanceof Error ? error.message : "Could not remove this account.");
+      setAccountError(error instanceof Error ? error.message : t.settings.removeAccountFailed);
     } finally {
       setSwitchingAccount(null);
     }
@@ -178,13 +181,11 @@ function SettingsContent() {
     ? connection.mode === "cloud"
       ? "Busabase Cloud"
       : connection.mode === "demo"
-        ? "Demo workspace"
-        : "Self-hosted server"
-    : "No server connected";
+        ? t.settings.demoWorkspace
+        : t.settings.selfHostedServer
+    : t.settings.noServerConnected;
   const disconnectHint =
-    connection?.mode === "cloud"
-      ? "Signs every saved account out of Busabase Cloud and clears secure sessions."
-      : "Clears the saved URL on this device. Saved servers stay available.";
+    connection?.mode === "cloud" ? t.settings.cloudDisconnectHint : t.settings.localDisconnectHint;
   const languageOptions = [
     { value: "auto" as LocalePreference, label: t.settings.auto },
     ...options.map((option) => ({
@@ -192,6 +193,8 @@ function SettingsContent() {
       label: option.label,
     })),
   ];
+  const selectedLanguageLabel =
+    languageOptions.find((option) => option.value === preference)?.label ?? t.settings.auto;
   const selectedCloudAccount = cloudAccounts.find(({ id }) => id === selectedAccount) ?? null;
   const sortedCloudAccounts = [...cloudAccounts].sort(
     (left, right) => Number(right.isActive) - Number(left.isActive),
@@ -199,15 +202,15 @@ function SettingsContent() {
   const cloudAccountLimitReached = cloudAccounts.length >= MAX_CLOUD_ACCOUNTS;
 
   return (
-    <DrawerScaffold title="Settings">
-      <NativeSection title="Connection">
+    <DrawerScaffold title={t.settings.title}>
+      <NativeSection title={t.settings.connection}>
         <NativeRow
           title={connectionLabel}
-          subtitle={connection?.serverUrl ?? "Connect a Busabase server to review changes here."}
+          subtitle={connection?.serverUrl ?? t.settings.connectServerHint}
           leading={<Server size={18} color={tokens.mutedForeground} />}
         />
         <NativeRow
-          title="Connect another server"
+          title={t.settings.connectAnotherServer}
           leading={<Server size={18} color={tokens.mutedForeground} />}
           trailing={<ChevronRight size={18} color={tokens.mutedForeground} />}
           onPress={() =>
@@ -221,7 +224,7 @@ function SettingsContent() {
         />
         {connection?.mode === "cloud" ? (
           <NativeRow
-            title="Workspace"
+            title={t.settings.workspace}
             leading={<Server size={18} color={tokens.mutedForeground} />}
             last
           >
@@ -233,20 +236,23 @@ function SettingsContent() {
       </NativeSection>
 
       {connection?.mode === "cloud" ? (
-        <NativeSection title="Accounts" caption={`${cloudAccounts.length}/${MAX_CLOUD_ACCOUNTS}`}>
+        <NativeSection
+          title={t.settings.accounts}
+          caption={`${cloudAccounts.length}/${MAX_CLOUD_ACCOUNTS}`}
+        >
           {sortedCloudAccounts.map((account) => {
             const profile = account.user;
-            const title = profile?.name || profile?.email || "Saved account";
+            const title = profile?.name || profile?.email || t.settings.savedAccount;
             return (
               <NativeRow
                 key={account.id}
                 title={title}
-                subtitle={profile?.email ?? "Busabase Cloud account"}
+                subtitle={profile?.email ?? t.settings.cloudAccount}
                 meta={
                   switchingAccount === account.id
-                    ? "Working"
+                    ? t.settings.working
                     : account.isActive
-                      ? "Active"
+                      ? t.settings.active
                       : undefined
                 }
                 leading={<UserRound size={18} color={tokens.mutedForeground} />}
@@ -260,11 +266,17 @@ function SettingsContent() {
             );
           })}
           <NativeRow
-            title={cloudAccountLimitReached ? "Account limit reached" : "Add another account"}
-            subtitle={
-              cloudAccountLimitReached ? `Up to ${MAX_CLOUD_ACCOUNTS} accounts.` : undefined
+            title={
+              cloudAccountLimitReached
+                ? t.settings.accountLimitReached
+                : t.settings.addAnotherAccount
             }
-            meta={addingAccount ? "Opening sign in" : undefined}
+            subtitle={
+              cloudAccountLimitReached
+                ? fmt(t.settings.accountLimit, { count: MAX_CLOUD_ACCOUNTS })
+                : undefined
+            }
+            meta={addingAccount ? t.settings.openingSignIn : undefined}
             leading={<UserPlus size={18} color={tokens.mutedForeground} />}
             disabled={cloudAccountLimitReached || addingAccount || switchingAccount !== null}
             onPress={() => void handleAddAccount()}
@@ -272,7 +284,7 @@ function SettingsContent() {
           />
           {accountError ? (
             <NativeRow
-              title="Account action failed"
+              title={t.settings.accountActionFailed}
               subtitle={accountError}
               destructive
               leading={<UserRound size={18} color={tokens.destructive} />}
@@ -283,12 +295,12 @@ function SettingsContent() {
       ) : null}
 
       {otherServers.length > 0 ? (
-        <NativeSection title="Saved servers" caption={`${otherServers.length}`}>
+        <NativeSection title={t.settings.savedServers} caption={`${otherServers.length}`}>
           {otherServers.map((serverUrl, index) => (
             <NativeRow
               key={serverUrl}
               title={serverUrl}
-              meta={switchingServer === serverUrl ? "Switching" : undefined}
+              meta={switchingServer === serverUrl ? t.settings.switching : undefined}
               leading={<Server size={18} color={tokens.mutedForeground} />}
               onPress={() => setSelectedServer(serverUrl)}
               last={index === otherServers.length - 1}
@@ -297,33 +309,78 @@ function SettingsContent() {
         </NativeSection>
       ) : null}
 
-      <NativeSection title="Preferences">
+      <NativeSection title={t.settings.preferences}>
         <NativeRow
           title={t.settings.language}
+          meta={selectedLanguageLabel}
           leading={<Languages size={18} color={tokens.mutedForeground} />}
+          trailing={<ChevronRight size={18} color={tokens.mutedForeground} />}
+          onPress={() => setLanguagePickerOpen(true)}
           last
-        >
-          <View style={styles.fullBleedChips}>
-            <NativeChipList<LocalePreference>
-              value={preference}
-              options={languageOptions}
-              onChange={setPreference}
-            />
-          </View>
-        </NativeRow>
+        />
       </NativeSection>
 
+      <NativeBottomSheet
+        visible={languagePickerOpen}
+        title={t.settings.language}
+        showCloseButton
+        onClose={() => setLanguagePickerOpen(false)}
+      >
+        <ScrollView
+          nestedScrollEnabled
+          style={[styles.languageOptions, { borderColor: tokens.border }]}
+        >
+          {languageOptions.map((option, index) => {
+            const selected = option.value === preference;
+            return (
+              <Pressable
+                key={option.value}
+                accessibilityRole="radio"
+                accessibilityState={{ selected }}
+                style={({ pressed }) => [
+                  styles.languageOption,
+                  index < languageOptions.length - 1
+                    ? { borderBottomWidth: StyleSheet.hairlineWidth }
+                    : null,
+                  {
+                    backgroundColor: selected ? tokens.primaryMuted : tokens.surface,
+                    borderColor: tokens.border,
+                    opacity: pressed ? 0.72 : 1,
+                  },
+                ]}
+                onPress={() => {
+                  setPreference(option.value);
+                  setLanguagePickerOpen(false);
+                }}
+              >
+                <Text
+                  numberOfLines={1}
+                  style={[
+                    typography.body,
+                    styles.languageOptionLabel,
+                    { color: tokens.foreground },
+                  ]}
+                >
+                  {option.label}
+                </Text>
+                {selected ? <Check size={17} color={tokens.foreground} /> : null}
+              </Pressable>
+            );
+          })}
+        </ScrollView>
+      </NativeBottomSheet>
+
       {supported || permissionDenied || settings.enabled ? (
-        <NativeSection title="Notifications">
+        <NativeSection title={t.settings.notifications}>
           <NativeRow
-            title="New change requests"
+            title={t.settings.newChangeRequests}
             subtitle={
-              !isFeatureEnabled("notifications") ? "Disabled for this review build." : undefined
+              !isFeatureEnabled("notifications") ? t.settings.disabledReviewBuild : undefined
             }
             leading={<Bell size={18} color={tokens.mutedForeground} />}
             trailing={
               <Switch
-                accessibilityLabel="Notify about new change requests"
+                accessibilityLabel={t.settings.notifyAccessibility}
                 value={isFeatureEnabled("notifications") && supported && settings.enabled}
                 disabled={!supported || !isFeatureEnabled("notifications")}
                 trackColor={{ true: tokens.primary }}
@@ -334,8 +391,8 @@ function SettingsContent() {
           />
           {permissionDenied ? (
             <NativeRow
-              title="Open system settings"
-              subtitle="Notifications are turned off for this app in system settings."
+              title={t.settings.openSystemSettings}
+              subtitle={t.settings.notificationsOff}
               destructive
               leading={<Bell size={18} color={tokens.destructive} />}
               onPress={openSystemSettings}
@@ -343,7 +400,7 @@ function SettingsContent() {
             />
           ) : null}
           {settings.enabled ? (
-            <NativeRow title="Check every" last>
+            <NativeRow title={t.settings.checkEvery} last>
               <View style={styles.fullBleedChips}>
                 <NativeChipList
                   value={String(settings.pollIntervalSec)}
@@ -362,14 +419,14 @@ function SettingsContent() {
         </NativeSection>
       ) : null}
 
-      <NativeSection title="Automation">
+      <NativeSection title={t.settings.automation}>
         <NativeRow
-          title="Vault"
+          title={t.settings.vault}
           leading={<Vault size={18} color={tokens.mutedForeground} />}
           onPress={() => router.push("/drawer/settings/vault")}
         />
         <NativeRow
-          title="Webhook Rules"
+          title={t.settings.webhookRules}
           leading={<Webhook size={18} color={tokens.mutedForeground} />}
           onPress={() => router.push("/drawer/settings/webhook")}
           last
@@ -377,9 +434,9 @@ function SettingsContent() {
       </NativeSection>
 
       {connection && isFeatureEnabled("externalAgentManifest") ? (
-        <NativeSection title="Agent">
+        <NativeSection title={t.settings.agent}>
           <NativeRow
-            title="Agent Skill setup"
+            title={t.settings.agentSkillSetup}
             leading={<Sparkles size={18} color={tokens.mutedForeground} />}
             onPress={() => void Linking.openURL(AGENT_SKILL_URL)}
             last
@@ -387,46 +444,46 @@ function SettingsContent() {
         </NativeSection>
       ) : null}
 
-      <NativeSection title="About">
+      <NativeSection title={t.settings.about}>
         <NativeRow
           title="Busabase"
           meta={displayVersion}
           leading={<Shield size={18} color={tokens.mutedForeground} />}
         />
         <NativeRow
-          title="Check for updates"
+          title={t.settings.checkForUpdates}
           subtitle={
             updateError
-              ? "Could not check the latest version."
+              ? t.settings.updateCheckFailed
               : decision?.latestVersion
-                ? `Latest version v${decision.latestVersion}`
+                ? fmt(t.settings.latestVersion, { version: decision.latestVersion })
                 : undefined
           }
-          meta={checking ? "Checking" : undefined}
+          meta={checking ? t.settings.checking : undefined}
           leading={<Download size={16} color={tokens.mutedForeground} />}
           onPress={() => void checkForUpdates({ manual: true })}
         />
         <NativeRow
-          title="Privacy Policy"
+          title={t.settings.privacyPolicy}
           leading={<ExternalLink size={16} color={tokens.mutedForeground} />}
           onPress={() => void Linking.openURL("https://busabase.com/privacy-policy")}
         />
         <NativeRow
-          title="Terms of Service"
+          title={t.settings.termsOfService}
           leading={<ExternalLink size={16} color={tokens.mutedForeground} />}
           onPress={() => void Linking.openURL(TERMS_URL)}
         />
         <NativeRow
-          title="Support"
+          title={t.settings.support}
           leading={<ExternalLink size={16} color={tokens.mutedForeground} />}
           onPress={() => void Linking.openURL(SUPPORT_URL)}
           last
         />
       </NativeSection>
 
-      <NativeSection title="Danger zone">
+      <NativeSection title={t.settings.dangerZone}>
         <NativeRow
-          title="Disconnect this device"
+          title={t.settings.disconnectDevice}
           subtitle={disconnectHint}
           destructive
           leading={<LogOut size={18} color={tokens.destructive} />}
@@ -437,8 +494,8 @@ function SettingsContent() {
 
       <NativeBottomSheet
         visible={!!selectedCloudAccount}
-        title={selectedCloudAccount?.user?.name || "Busabase Cloud account"}
-        description={selectedCloudAccount?.user?.email ?? "Saved on this device"}
+        title={selectedCloudAccount?.user?.name || t.settings.cloudAccount}
+        description={selectedCloudAccount?.user?.email ?? t.settings.savedOnDevice}
         showCloseButton
         onClose={() => setSelectedAccount(null)}
         footer={
@@ -446,7 +503,7 @@ function SettingsContent() {
             <NativeActionBar>
               {!selectedCloudAccount.isActive ? (
                 <Button
-                  label="Switch to this account"
+                  label={t.settings.switchToAccount}
                   loading={switchingAccount === selectedCloudAccount.id}
                   disabled={switchingAccount !== null}
                   fullWidth
@@ -454,7 +511,7 @@ function SettingsContent() {
                 />
               ) : null}
               <Button
-                label="Remove from this device"
+                label={t.settings.removeFromDevice}
                 variant="destructive"
                 leadingIcon={<Trash2 size={18} color={tokens.destructiveForeground} />}
                 disabled={switchingAccount !== null}
@@ -462,7 +519,7 @@ function SettingsContent() {
                 onPress={() => void handleRemoveAccount(selectedCloudAccount.id)}
               />
               <Button
-                label="Cancel"
+                label={t.common.cancel}
                 variant="ghost"
                 disabled={switchingAccount !== null}
                 fullWidth
@@ -475,14 +532,14 @@ function SettingsContent() {
 
       <NativeBottomSheet
         visible={!!selectedServer}
-        title="Saved server"
+        title={t.settings.savedServer}
         description={selectedServer ?? undefined}
         showCloseButton
         onClose={() => setSelectedServer(null)}
         footer={
           <NativeActionBar>
             <Button
-              label="Switch to this server"
+              label={t.settings.switchToServer}
               loading={selectedServer ? switchingServer === selectedServer : false}
               disabled={!selectedServer || switchingServer !== null}
               fullWidth
@@ -493,14 +550,14 @@ function SettingsContent() {
               }}
             />
             <Button
-              label="Remove from saved servers"
+              label={t.settings.removeSavedServer}
               variant="destructive"
               leadingIcon={<Trash2 size={18} color={tokens.destructiveForeground} />}
               fullWidth
               onPress={() => void handleRemoveSavedServer()}
             />
             <Button
-              label="Cancel"
+              label={t.common.cancel}
               variant="ghost"
               disabled={switchingServer !== null}
               fullWidth
@@ -512,21 +569,21 @@ function SettingsContent() {
 
       <NativeBottomSheet
         visible={disconnectSheetOpen}
-        title="Disconnect this device?"
+        title={t.settings.disconnectTitle}
         description={disconnectHint}
         showCloseButton
         onClose={() => setDisconnectSheetOpen(false)}
         footer={
           <NativeActionBar>
             <Button
-              label="Disconnect"
+              label={t.settings.disconnect}
               variant="destructive"
               loading={disconnecting}
               fullWidth
               onPress={() => void handleDisconnect()}
             />
             <Button
-              label="Cancel"
+              label={t.common.cancel}
               variant="ghost"
               disabled={disconnecting}
               fullWidth
@@ -550,4 +607,17 @@ export default function SettingsScreen() {
 const styles = StyleSheet.create({
   rowControl: { paddingTop: 8 },
   fullBleedChips: { marginHorizontal: -14, paddingTop: 8 },
+  languageOptions: {
+    maxHeight: 240,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: radius.md,
+  },
+  languageOption: {
+    minHeight: mobile.minTouchTarget,
+    paddingHorizontal: spacing[3],
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing[3],
+  },
+  languageOptionLabel: { flex: 1, minWidth: 0 },
 });

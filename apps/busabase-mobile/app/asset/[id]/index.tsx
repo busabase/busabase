@@ -7,6 +7,7 @@ import { useState } from "react";
 import { Image, Linking, Pressable, StyleSheet, Text, View } from "react-native";
 import { useBusabaseOrpc } from "~/api/use-busabase-orpc";
 import { ConnectionGuard } from "~/components/busabase/ConnectionGuard";
+import { DrawerScaffold } from "~/components/busabase/DrawerScaffold";
 import {
   NativeActionBar,
   NativeBottomSheet,
@@ -15,7 +16,6 @@ import {
   NativeInlineError,
   NativeLoadingState,
   NativeRow,
-  NativeScreen,
   NativeSection,
 } from "~/components/native-screen";
 import { Button } from "~/components/ui/Button";
@@ -77,14 +77,14 @@ function AssetDetailContent() {
 
   if (detailQuery.isLoading) {
     return (
-      <NativeScreen title={t.assets.title} headerLeading={headerLeading}>
+      <DrawerScaffold title={t.assets.title} headerLeading={headerLeading}>
         <NativeLoadingState label={t.common.loading} />
-      </NativeScreen>
+      </DrawerScaffold>
     );
   }
   if (detailQuery.error || !detailQuery.data) {
     return (
-      <NativeScreen title={t.assets.title} headerLeading={headerLeading}>
+      <DrawerScaffold title={t.assets.title} headerLeading={headerLeading}>
         {detailQuery.error ? (
           <NativeErrorState
             message={detailQuery.error.message}
@@ -93,7 +93,7 @@ function AssetDetailContent() {
         ) : (
           <NativeEmptyState title={t.assets.notFound} />
         )}
-      </NativeScreen>
+      </DrawerScaffold>
     );
   }
 
@@ -122,7 +122,7 @@ function AssetDetailContent() {
   };
 
   return (
-    <NativeScreen
+    <DrawerScaffold
       title={asset.name}
       titleNumberOfLines={2}
       subtitle={`${assetKindLabel} · ${formatBytes(asset.size)}`}
@@ -140,7 +140,13 @@ function AssetDetailContent() {
       }
     >
       <NativeSection title={t.assets.preview}>
-        <View style={[styles.preview, { backgroundColor: tokens.muted }]}>
+        <View
+          style={[
+            styles.preview,
+            isImageRef(asset) ? styles.imagePreview : styles.filePreview,
+            { backgroundColor: tokens.muted },
+          ]}
+        >
           {isImageRef(asset) ? (
             <Image source={{ uri: url }} resizeMode="contain" style={styles.previewImage} />
           ) : (
@@ -249,7 +255,7 @@ function AssetDetailContent() {
           </NativeActionBar>
         }
       />
-    </NativeScreen>
+    </DrawerScaffold>
   );
 }
 
@@ -277,11 +283,12 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   preview: {
-    height: 220,
     overflow: "hidden",
     alignItems: "center",
     justifyContent: "center",
   },
+  imagePreview: { height: 220 },
+  filePreview: { minHeight: 112 },
   previewImage: { width: "100%", height: "100%" },
   previewFile: { alignItems: "center", gap: 8 },
 });

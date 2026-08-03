@@ -156,6 +156,112 @@ type RootTranslation = {
 		 * C​l​o​u​d​ ​C​o​n​n​e​c​t
 		 */
 		cloudConnectTab: string
+		/**
+		 * B​r​a​n​d​i​n​g
+		 */
+		brandingTab: string
+	}
+	appBranding: {
+		/**
+		 * B​r​a​n​d​i​n​g
+		 */
+		title: string
+		/**
+		 * W​h​i​t​e​-​l​a​b​e​l​ ​t​h​i​s​ ​i​n​s​t​a​n​c​e​ ​—​ ​t​h​e​ ​n​a​m​e​,​ ​t​a​g​l​i​n​e​ ​a​n​d​ ​l​o​g​o​ ​i​n​ ​t​h​e​ ​s​i​d​e​b​a​r​'​s​ ​t​o​p​-​l​e​f​t​ ​c​o​r​n​e​r​ ​a​n​d​ ​t​h​e​ ​b​r​o​w​s​e​r​ ​t​a​b​ ​t​i​t​l​e​.
+		 */
+		description: string
+		/**
+		 * P​r​o​d​u​c​t​ ​n​a​m​e
+		 */
+		nameLabel: string
+		/**
+		 * T​a​g​l​i​n​e
+		 */
+		descriptionLabel: string
+		/**
+		 * L​o​g​o
+		 */
+		logoLabel: string
+		/**
+		 * L​o​g​o​ ​p​r​e​v​i​e​w
+		 */
+		logoPreviewAlt: string
+		/**
+		 * U​p​l​o​a​d​ ​i​m​a​g​e
+		 */
+		logoUploadButton: string
+		/**
+		 * U​p​l​o​a​d​i​n​g​…
+		 */
+		logoUploading: string
+		/**
+		 * R​e​m​o​v​e
+		 */
+		logoRemoveButton: string
+		/**
+		 * P​N​G​,​ ​S​V​G​ ​o​r​ ​J​P​G​,​ ​u​p​ ​t​o​ ​2​ ​M​B​.​ ​S​q​u​a​r​e​ ​i​m​a​g​e​s​ ​l​o​o​k​ ​b​e​s​t​.
+		 */
+		logoUploadHint: string
+		/**
+		 * L​o​g​o​ ​U​R​L
+		 */
+		logoUrlLabel: string
+		/**
+		 * O​r​ ​p​o​i​n​t​ ​a​t​ ​a​ ​l​o​g​o​ ​y​o​u​ ​h​o​s​t​ ​y​o​u​r​s​e​l​f​:​ ​a​n​ ​a​b​s​o​l​u​t​e​ ​U​R​L​,​ ​o​r​ ​a​ ​p​a​t​h​ ​s​e​r​v​e​d​ ​b​y​ ​t​h​i​s​ ​i​n​s​t​a​n​c​e​ ​s​u​c​h​ ​a​s​ ​/​i​c​o​n​.​s​v​g​.
+		 */
+		logoUrlHint: string
+		/**
+		 * T​h​a​t​ ​f​i​l​e​ ​i​s​n​'​t​ ​a​n​ ​i​m​a​g​e​.​ ​P​l​e​a​s​e​ ​c​h​o​o​s​e​ ​a​ ​P​N​G​,​ ​S​V​G​ ​o​r​ ​J​P​G​.
+		 */
+		logoNotAnImage: string
+		/**
+		 * T​h​a​t​ ​i​m​a​g​e​ ​i​s​ ​l​a​r​g​e​r​ ​t​h​a​n​ ​2​ ​M​B​.​ ​P​l​e​a​s​e​ ​c​h​o​o​s​e​ ​a​ ​s​m​a​l​l​e​r​ ​f​i​l​e​.
+		 */
+		logoTooLarge: string
+		/**
+		 * C​o​u​l​d​n​'​t​ ​u​p​l​o​a​d​ ​t​h​e​ ​i​m​a​g​e​.​ ​P​l​e​a​s​e​ ​t​r​y​ ​a​g​a​i​n​.
+		 */
+		logoUploadFailed: string
+		/**
+		 * C​r​o​p​ ​l​o​g​o
+		 */
+		logoCropTitle: string
+		/**
+		 * D​r​a​g​ ​t​o​ ​r​e​p​o​s​i​t​i​o​n​,​ ​s​c​r​o​l​l​ ​t​o​ ​z​o​o​m​.​ ​O​n​l​y​ ​t​h​e​ ​v​i​s​i​b​l​e​ ​a​r​e​a​ ​i​s​ ​s​a​v​e​d​.
+		 */
+		logoCropHint: string
+		/**
+		 * C​a​n​c​e​l
+		 */
+		logoCropCancel: string
+		/**
+		 * U​s​e​ ​t​h​i​s​ ​i​m​a​g​e
+		 */
+		logoCropConfirm: string
+		/**
+		 * S​a​v​e
+		 */
+		saveButton: string
+		/**
+		 * R​e​s​e​t​ ​t​o​ ​d​e​f​a​u​l​t
+		 */
+		resetButton: string
+		/**
+		 * B​r​a​n​d​i​n​g​ ​s​a​v​e​d​.
+		 */
+		saved: string
+		/**
+		 * C​o​u​l​d​n​'​t​ ​s​a​v​e​ ​t​h​e​ ​b​r​a​n​d​i​n​g​.​ ​P​l​e​a​s​e​ ​t​r​y​ ​a​g​a​i​n​.
+		 */
+		saveFailed: string
+		/**
+		 * A​b​o​u​t​ ​b​r​a​n​d​i​n​g
+		 */
+		aboutTitle: string
+		/**
+		 * L​e​a​v​e​ ​a​ ​f​i​e​l​d​ ​e​m​p​t​y​ ​t​o​ ​f​a​l​l​ ​b​a​c​k​ ​t​o​ ​t​h​e​ ​b​u​i​l​t​-​i​n​ ​d​e​f​a​u​l​t​.​ ​B​r​a​n​d​i​n​g​ ​i​s​ ​s​t​o​r​e​d​ ​i​n​ ​t​h​i​s​ ​i​n​s​t​a​n​c​e​'​s​ ​d​a​t​a​b​a​s​e​,​ ​s​o​ ​i​t​ ​s​u​r​v​i​v​e​s​ ​r​e​s​t​a​r​t​s​ ​a​n​d​ ​a​p​p​l​i​e​s​ ​o​n​ ​B​u​s​a​b​a​s​e​ ​D​e​s​k​t​o​p​ ​t​o​o​.
+		 */
+		aboutDescription: string
 	}
 	vaultSettings: {
 		/**
@@ -1043,6 +1149,112 @@ export type TranslationFunctions = {
 		 * Cloud Connect
 		 */
 		cloudConnectTab: () => LocalizedString
+		/**
+		 * Branding
+		 */
+		brandingTab: () => LocalizedString
+	}
+	appBranding: {
+		/**
+		 * Branding
+		 */
+		title: () => LocalizedString
+		/**
+		 * White-label this instance — the name, tagline and logo in the sidebar's top-left corner and the browser tab title.
+		 */
+		description: () => LocalizedString
+		/**
+		 * Product name
+		 */
+		nameLabel: () => LocalizedString
+		/**
+		 * Tagline
+		 */
+		descriptionLabel: () => LocalizedString
+		/**
+		 * Logo
+		 */
+		logoLabel: () => LocalizedString
+		/**
+		 * Logo preview
+		 */
+		logoPreviewAlt: () => LocalizedString
+		/**
+		 * Upload image
+		 */
+		logoUploadButton: () => LocalizedString
+		/**
+		 * Uploading…
+		 */
+		logoUploading: () => LocalizedString
+		/**
+		 * Remove
+		 */
+		logoRemoveButton: () => LocalizedString
+		/**
+		 * PNG, SVG or JPG, up to 2 MB. Square images look best.
+		 */
+		logoUploadHint: () => LocalizedString
+		/**
+		 * Logo URL
+		 */
+		logoUrlLabel: () => LocalizedString
+		/**
+		 * Or point at a logo you host yourself: an absolute URL, or a path served by this instance such as /icon.svg.
+		 */
+		logoUrlHint: () => LocalizedString
+		/**
+		 * That file isn't an image. Please choose a PNG, SVG or JPG.
+		 */
+		logoNotAnImage: () => LocalizedString
+		/**
+		 * That image is larger than 2 MB. Please choose a smaller file.
+		 */
+		logoTooLarge: () => LocalizedString
+		/**
+		 * Couldn't upload the image. Please try again.
+		 */
+		logoUploadFailed: () => LocalizedString
+		/**
+		 * Crop logo
+		 */
+		logoCropTitle: () => LocalizedString
+		/**
+		 * Drag to reposition, scroll to zoom. Only the visible area is saved.
+		 */
+		logoCropHint: () => LocalizedString
+		/**
+		 * Cancel
+		 */
+		logoCropCancel: () => LocalizedString
+		/**
+		 * Use this image
+		 */
+		logoCropConfirm: () => LocalizedString
+		/**
+		 * Save
+		 */
+		saveButton: () => LocalizedString
+		/**
+		 * Reset to default
+		 */
+		resetButton: () => LocalizedString
+		/**
+		 * Branding saved.
+		 */
+		saved: () => LocalizedString
+		/**
+		 * Couldn't save the branding. Please try again.
+		 */
+		saveFailed: () => LocalizedString
+		/**
+		 * About branding
+		 */
+		aboutTitle: () => LocalizedString
+		/**
+		 * Leave a field empty to fall back to the built-in default. Branding is stored in this instance's database, so it survives restarts and applies on Busabase Desktop too.
+		 */
+		aboutDescription: () => LocalizedString
 	}
 	vaultSettings: {
 		/**

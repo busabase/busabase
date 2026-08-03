@@ -79,16 +79,54 @@ export const BUSABASE_MCP_CREATE_APP_PROMPT_NAME = "busabase_create_app";
 export const BUSABASE_MCP_GUIDE_TOOL_NAME = "busabase_guide";
 
 /**
- * Session-level instructions. Every rule here is one an agent must not get wrong even if
- * it never reads anything else; everything explanatory lives in the resource instead.
+ * What differs between the two deployments. Everything else in these documents is identical,
+ * so they are ONE source with a flag rather than two files that drift.
+ *
+ * `spaceTargeting` is the whole difference. Busabase Cloud's API key belongs to a *user* who
+ * may be in several spaces, so its handler adds a `targetSpaceId` argument to every tool
+ * (`BUSABASE_MCP_TARGET_SPACE_SCHEMA` via `additionalToolsInputSchema`) and the agent has to
+ * pick one. The self-hosted server has a single local workspace and no such argument — telling
+ * its agent to pass `targetSpaceId` would teach a parameter that server rejects.
+ *
+ * `guideTopics` exists for the same reason: the "More" section must name only the topics that
+ * deployment's `busabase_guide` actually serves, or the instructions send an agent after a
+ * guide it cannot get.
  */
-export const BUSABASE_MCP_INSTRUCTIONS = `Busabase is an approval-first knowledge base. You never write canonical data directly: you propose a change, a human reviews it, and only then does it merge. A wrong edit stays a harmless proposal until someone says yes.
+export interface BusabaseMcpDocOptions {
+  /** Cloud: an API key spans several spaces. Self-hosted: one local workspace, no argument. */
+  readonly spaceTargeting?: boolean;
+  /** Topics this deployment's guide tool publishes. */
+  readonly guideTopics?: readonly string[];
+}
 
-## Start every session
+const SPACE_TARGETING_SECTION = `## Start every session
 
 1. Call \`auth_verify\` before anything else. It returns the current user, the target space, and every space they belong to.
 2. If it returns more than one space, ask the user which one — list them by name, never guess, never assume the default. Pass the chosen id as \`targetSpaceId\` on every later call.
-3. If it returns exactly one space, use it and don't ask.
+3. If it returns exactly one space, use it and don't ask.`;
+
+const SINGLE_WORKSPACE_SECTION = `## Start every session
+
+1. Call \`auth_verify\` before anything else. It returns the current user and workspace.
+2. This server hosts ONE local workspace, so there is nothing to choose and no space argument to pass. Every tool already acts on it.`;
+
+const GUIDE_TOPIC_BLURBS: Record<string, string> = {
+  workspace: "full workflow, field types, blueprints, the revision loop",
+  airapp: "the AirApp runtime contract",
+  setup: "build a brand-new workspace",
+  "create-app": "build an AirApp",
+};
+
+/**
+ * Session-level instructions. Every rule here is one an agent must not get wrong even if
+ * it never reads anything else; everything explanatory lives in the resource instead.
+ */
+export const buildBusabaseMcpInstructions = ({
+  spaceTargeting = true,
+  guideTopics = ["workspace", "airapp", "setup", "create-app"],
+}: BusabaseMcpDocOptions = {}): string => `Busabase is an approval-first knowledge base. You never write canonical data directly: you propose a change, a human reviews it, and only then does it merge. A wrong edit stays a harmless proposal until someone says yes.
+
+${spaceTargeting ? SPACE_TARGETING_SECTION : SINGLE_WORKSPACE_SECTION}
 
 ## The one rule
 
@@ -131,15 +169,40 @@ An **AirApp** is a workspace node holding a small Node.js project that Busabase 
 
 ## More
 
-\`${BUSABASE_MCP_GUIDE_TOOL_NAME}\` is the one way to reach everything below, and it works in every client: topics \`workspace\` (full workflow, field types, blueprints, the revision loop), \`airapp\`, \`setup\` (build a brand-new workspace), \`create-app\`.
+\`${BUSABASE_MCP_GUIDE_TOOL_NAME}\` is the one way to reach everything below, and it works in every client: ${guideTopics.map((topic) => `\`${topic}\` (${GUIDE_TOPIC_BLURBS[topic] ?? topic})`).join(", ")}.
 
-If your client supports resources and prompts, the same content is also at the \`${BUSABASE_MCP_SKILL_URI}\` and \`${BUSABASE_MCP_AIRAPP_URI}\` resources, and as the \`${BUSABASE_MCP_SETUP_PROMPT_NAME}\` and \`${BUSABASE_MCP_CREATE_APP_PROMPT_NAME}\` prompts (which your host may show as slash commands).`;
+If your client supports resources, the same reference content is also at the \`${BUSABASE_MCP_SKILL_URI}\` and \`${BUSABASE_MCP_AIRAPP_URI}\` resources.${
+  // Named only where they are actually published. The walkthroughs are Cloud-only, and naming a
+  // prompt a server does not serve sends an agent after something it cannot get.
+  guideTopics.includes("setup") || guideTopics.includes("create-app")
+    ? ` If it supports prompts, they are also the \`${BUSABASE_MCP_SETUP_PROMPT_NAME}\` and \`${BUSABASE_MCP_CREATE_APP_PROMPT_NAME}\` prompts (which your host may show as slash commands).`
+    : ""
+}`;
+
+/** Busabase Cloud: an API key spans several spaces, so the agent has to target one. */
+export const BUSABASE_MCP_INSTRUCTIONS = buildBusabaseMcpInstructions();
+
+/**
+ * The self-hosted server, which until now returned NO instructions at all — its agents received
+ * none of the approval-first rules, so nothing but the API's own permissions stopped an agent
+ * from merging its own proposal or filing a change request titled `cmtmr1th34`.
+ *
+ * Cloud's document could not simply be reused: it instructs the agent to pass `targetSpaceId`,
+ * an argument this server does not accept (verified against its live catalog — 79 tools, none
+ * with that field). Same source, space targeting off.
+ */
+export const BUSABASE_SELF_HOSTED_MCP_INSTRUCTIONS = buildBusabaseMcpInstructions({
+  spaceTargeting: false,
+  guideTopics: ["workspace", "airapp"],
+});
 
 /**
  * Long-form skill, served as the `busabase://skill` resource. Everything an agent needs
  * that is too expensive to put in per-session instructions.
  */
-export const buildBusabaseMcpSkill = (): string => `# Busabase — the full agent skill (MCP)
+export const buildBusabaseMcpSkill = ({
+  spaceTargeting = true,
+}: BusabaseMcpDocOptions = {}): string => `# Busabase — the full agent skill (MCP)
 
 Busabase is an approval-first knowledge base for AI-generated content. An ordinary table or
 wiki makes an AI edit canonical the moment it happens. Here it becomes a **ChangeRequest** a
@@ -150,13 +213,20 @@ People run content pipelines (drafts reviewed before publish), CRMs an agent enr
 human approves, compliance checklists with a full audit trail, and private knowledge bases an
 agent can read but only a human can change.
 
-## Space targeting
+${
+  spaceTargeting
+    ? `## Space targeting
 
 An API key belongs to the **user**, not to a space — it works across every space the user is a
 member of. \`auth_verify\` returns \`space\` (the current target) and \`spaces\` (all of them).
 Pass \`targetSpaceId\` on every space-scoped call once you know the target. A space you are not
 a member of fails with 403; an ambiguous call with several spaces and no target fails with 400
-rather than guessing.
+rather than guessing.`
+    : `## One workspace
+
+This server hosts a single local workspace. There is no space to choose and no space argument
+to pass — every tool already acts on it. \`auth_verify\` confirms the current user and workspace.`
+}
 
 ## Everyday tools
 
@@ -242,7 +312,7 @@ Read the server's message and surface it verbatim — don't paraphrase or guess.
 
 | Status | Meaning | Next step |
 | --- | --- | --- |
-| 400 | Invalid request, or an ambiguous space | fix per the message; set \`targetSpaceId\`; do not blind-retry |
+| 400 | Invalid request${spaceTargeting ? ", or an ambiguous space" : ""} | fix per the message${spaceTargeting ? "; set \\`targetSpaceId\\`" : ""}; do not blind-retry |
 | 401 | Missing or invalid credential | re-authenticate through the host's connector settings |
 | 403 | Not permitted in this space | confirm the space and permissions |
 | 404 | Base / change request / record not found | re-list to get a valid id |
@@ -708,13 +778,19 @@ interface GuideDefinition {
   readonly build: () => string;
 }
 
-export const BUSABASE_MCP_GUIDES: Record<string, GuideDefinition> = {
+/**
+ * Built per deployment, because the `workspace` guide's space-targeting section differs. The
+ * other three are identical either way — only `workspace` mentions `targetSpaceId` at all.
+ */
+const buildGuides = ({
+  spaceTargeting = true,
+}: BusabaseMcpDocOptions = {}): Record<string, GuideDefinition> => ({
   workspace: {
     title: "Busabase — the full agent skill",
     kind: "reference",
     summary:
       "The approval-first workflow: everyday tools, proposing structure, field types, starter blueprints, the revision loop, errors, and the untrusted-content rules.",
-    build: buildBusabaseMcpSkill,
+    build: () => buildBusabaseMcpSkill({ spaceTargeting }),
   },
   airapp: {
     title: "Busabase AirApps — building one over MCP",
@@ -737,7 +813,9 @@ export const BUSABASE_MCP_GUIDES: Record<string, GuideDefinition> = {
       "Guided AirApp creation, from the idea through one reviewable change request. Needs no terminal.",
     build: buildBusabaseMcpCreateAppPrompt,
   },
-};
+});
+
+export const BUSABASE_MCP_GUIDES: Record<string, GuideDefinition> = buildGuides();
 
 export const BUSABASE_MCP_GUIDE_TOPICS = Object.keys(BUSABASE_MCP_GUIDES);
 
@@ -746,11 +824,14 @@ export const BUSABASE_MCP_GUIDE_TOPICS = Object.keys(BUSABASE_MCP_GUIDES);
  * actually serves and says outright when reading is not optional. An agent that skips the
  * AirApp guide writes a package.json with no `dev` script, and the app dies before rendering.
  */
-const guideToolDescription = (topics: readonly string[]): string =>
+const guideToolDescription = (
+  topics: readonly string[],
+  guides: Record<string, GuideDefinition>,
+): string =>
   [
     "Read a Busabase guide. Call this BEFORE doing unfamiliar work — it carries the conventions this workspace expects, which no tool schema can express on its own.",
     "",
-    ...topics.map((topic) => `- \`${topic}\` — ${BUSABASE_MCP_GUIDES[topic]?.summary ?? ""}`),
+    ...topics.map((topic) => `- \`${topic}\` — ${guides[topic]?.summary ?? ""}`),
     ...(topics.includes("airapp")
       ? [
           "",
@@ -763,16 +844,19 @@ const guideToolDescription = (topics: readonly string[]): string =>
  * Static content, so the client argument is ignored — `TClient` stays generic only so this
  * composes with whatever client the host handler is already built around.
  *
- * `topics` exists because the set is NOT the same on every deployment: `workspace`, `setup` and
- * `create-app` all tell the agent to pass `targetSpaceId`, an argument only Cloud's handler
- * accepts. The self-hosted server publishes just `airapp`, which names no Cloud-only argument.
- * Passing an unknown topic here is a programming error, so it throws at construction rather
- * than silently publishing a tool whose enum and description disagree with what it serves.
+ * `topics` exists because the set is NOT the same on every deployment: the two walkthroughs are
+ * written around Cloud's space model, so the self-hosted server publishes only the two
+ * references. `options.spaceTargeting` additionally rewrites the `workspace` guide, which is the
+ * one document whose body mentions `targetSpaceId` — an argument the self-hosted server does not
+ * accept. Passing an unknown topic here is a programming error, so it throws at construction
+ * rather than silently publishing a tool whose enum and description disagree with what it serves.
  */
 export const busabaseMcpGuideTool = <TClient>(
   topics: readonly string[] = BUSABASE_MCP_GUIDE_TOPICS,
+  options: BusabaseMcpDocOptions = {},
 ): McpCustomTool<TClient> => {
-  const unknown = topics.filter((topic) => !BUSABASE_MCP_GUIDES[topic]);
+  const guides = buildGuides(options);
+  const unknown = topics.filter((topic) => !guides[topic]);
   if (unknown.length > 0) {
     throw new Error(`Unknown Busabase guide topic(s): ${unknown.join(", ")}`);
   }
@@ -780,7 +864,7 @@ export const busabaseMcpGuideTool = <TClient>(
   return {
     name: BUSABASE_MCP_GUIDE_TOOL_NAME,
     title: "Read a Busabase guide",
-    description: guideToolDescription(topics),
+    description: guideToolDescription(topics, guides),
     inputSchema: z.object({
       topic: z.enum(topics as [string, ...string[]]).describe("Which guide to read."),
     }),
@@ -789,7 +873,7 @@ export const busabaseMcpGuideTool = <TClient>(
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
     execute: async (_client, input) => {
       const topic = (input as { topic?: string } | undefined)?.topic;
-      const guide = topic && topics.includes(topic) ? BUSABASE_MCP_GUIDES[topic] : undefined;
+      const guide = topic && topics.includes(topic) ? guides[topic] : undefined;
       if (!guide) {
         // Listing the valid topics beats a bare "not found": the agent can retry in one step
         // instead of guessing a second time.

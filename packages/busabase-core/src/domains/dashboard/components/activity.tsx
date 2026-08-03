@@ -8,6 +8,7 @@ import {
   PencilLine,
 } from "lucide-react";
 import { SPALink as Link } from "openlib/ui/dashboard";
+import { useCoreLocale } from "../../../i18n";
 import type { ActivityEvent, ActivityEventTone } from "../helpers/activity-events";
 import { formatDetailTime, formatListTime } from "../helpers/format";
 
@@ -89,6 +90,8 @@ function ActivityProvenanceByline({ event }: { event: ActivityEvent }) {
 }
 
 export function ActivityRow({ event }: { event: ActivityEvent }) {
+  const locale = useCoreLocale();
+
   return (
     <Link
       className="group block rounded-md px-2 text-sm transition-colors hover:bg-accent/25 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
@@ -113,7 +116,7 @@ export function ActivityRow({ event }: { event: ActivityEvent }) {
               </div>
             </div>
             <div className="flex shrink-0 items-center gap-1 pt-0.5 font-mono text-muted-foreground text-xs">
-              <span>{formatListTime(event.timestamp)}</span>
+              <span>{formatListTime(event.timestamp, locale)}</span>
               <ChevronRight
                 aria-hidden="true"
                 className="shrink-0 transition-colors group-hover:text-foreground"
@@ -135,7 +138,7 @@ export function ActivityRow({ event }: { event: ActivityEvent }) {
                 <span aria-hidden="true">·</span>
               </>
             ) : null}
-            <span className="font-mono">{formatDetailTime(event.timestamp)}</span>
+            <span className="font-mono">{formatDetailTime(event.timestamp, locale)}</span>
           </div>
         </div>
       </div>

@@ -84,7 +84,7 @@ function FolderDetailContent() {
                 <NativeRow
                   key={child.id}
                   title={child.name}
-                  meta={label}
+                  subtitle={label}
                   leading={<Icon size={18} color={tokens.mutedForeground} />}
                   last={index === folder.children.length - 1}
                   onPress={() => openChild(child)}

@@ -1,11 +1,8 @@
 #!/usr/bin/env node
 import { existsSync } from "node:fs";
-import { dirname, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
 
-const here = dirname(fileURLToPath(import.meta.url));
-const pkgRoot = resolve(here, "..");
-const builtCli = resolve(pkgRoot, "dist/cli.js");
+const builtCli = new URL("../dist/cli.js", import.meta.url);
+const programmaticEntry = new URL("../dist/index.js", import.meta.url);
 const delegatedArgvJson = process.env.BUSABASE_CLI_DELEGATED_ARGV;
 
 if (!existsSync(builtCli)) {
@@ -22,14 +19,14 @@ if (!existsSync(builtCli)) {
 try {
   if (delegatedArgvJson) {
     delete process.env.BUSABASE_CLI_DELEGATED_ARGV;
-    const { runCli } = await import(resolve(pkgRoot, "dist/index.js"));
+    const { runCli } = await import(programmaticEntry.href);
     const delegatedArgv = JSON.parse(delegatedArgvJson);
     if (!Array.isArray(delegatedArgv) || delegatedArgv.some((arg) => typeof arg !== "string")) {
       throw new Error("BUSABASE_CLI_DELEGATED_ARGV must be a JSON string array.");
     }
     process.exit(await runCli(delegatedArgv));
   }
-  await import(builtCli);
+  await import(builtCli.href);
 } catch (error) {
   const message = error instanceof Error ? error.message : String(error);
   if (message.includes("busabase-sdk") && message.includes("dist/index.js")) {

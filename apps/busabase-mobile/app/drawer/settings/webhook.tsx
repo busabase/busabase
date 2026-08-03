@@ -25,6 +25,7 @@ import { useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Switch, Text, View } from "react-native";
 import { useBusabaseOrpc } from "~/api/use-busabase-orpc";
 import { ConnectionGuard } from "~/components/busabase/ConnectionGuard";
+import { DrawerScaffold } from "~/components/busabase/DrawerScaffold";
 import {
   NativeActionBar,
   NativeActionItem,
@@ -35,7 +36,6 @@ import {
   NativeInlineError,
   NativeLoadingState,
   NativeRow,
-  NativeScreen,
   NativeSection,
 } from "~/components/native-screen";
 import { Button } from "~/components/ui/Button";
@@ -432,7 +432,7 @@ function WebhookSettingsContent() {
     : null;
 
   return (
-    <NativeScreen
+    <DrawerScaffold
       title="Webhook Rules"
       headerLeading={headerLeading}
       refreshing={rulesQuery.isRefetching}
@@ -742,7 +742,7 @@ function WebhookSettingsContent() {
           </View>
         </ScrollView>
       </NativeBottomSheet>
-    </NativeScreen>
+    </DrawerScaffold>
   );
 }
 

@@ -48,7 +48,7 @@ import type {
 } from "../demo/seed-types";
 import { writeDocBody } from "../domains/doc/handlers";
 import { writeFileTreeTextFile } from "../domains/filetree/handlers";
-import { projectCommitFields } from "./field-values";
+import { projectCommitFields, refreshRecordQueryStatistics } from "./field-values";
 import {
   CURRENT_USER_ID,
   hashBuffer,
@@ -1783,6 +1783,11 @@ export const seedScenario = async (scenario: SeedScenario) => {
   }
   // Comments thread under the change requests above, so they must already exist.
   await seedCommentsIfMissing(now(), scenario.comments ?? []);
+  // Seeding is a bulk load straight into the tables, bypassing the merge path
+  // that would normally refresh statistics — and on a fresh local database this
+  // IS the population step, so without it the planner's very first estimates
+  // describe an empty workspace. See `refreshRecordQueryStatistics`.
+  await refreshRecordQueryStatistics(await getDb());
 };
 
 export const loadBasesByIds = async (baseIds: string[]): Promise<Map<string, BaseVO>> => {

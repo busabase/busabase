@@ -147,9 +147,32 @@ export const getViewFieldPreviewText = (field: BaseFieldVO | undefined, value: u
   return previewText(value, field.type);
 };
 
-const recordMatchesViewFilter = (record: RecordVO, filter: ViewFilterVO): boolean => {
-  const value = record.headCommit.fields[filter.fieldSlug];
-  const field = record.base.fields.find((item) => item.slug === filter.fieldSlug);
+/**
+ * The minimum a record must expose for the authoritative view filter/sort below.
+ * `RecordVO` satisfies it, and so does a cheap `{id, updatedAt, fields}` row read
+ * straight from the commit table — which is what lets a big Base evaluate a
+ * saved view without hydrating every record into a full VO first.
+ */
+export interface ViewEvaluableRecord {
+  id: string;
+  updatedAt: string;
+  fields: Record<string, unknown>;
+}
+
+/** Adapt a RecordVO to the evaluable shape (lookup values already merged in). */
+export const toViewEvaluableRecord = (record: RecordVO): ViewEvaluableRecord => ({
+  id: record.id,
+  updatedAt: record.updatedAt,
+  fields: record.headCommit.fields,
+});
+
+const recordMatchesViewFilter = (
+  record: ViewEvaluableRecord,
+  fields: ReadonlyArray<BaseFieldVO>,
+  filter: ViewFilterVO,
+): boolean => {
+  const value = record.fields[filter.fieldSlug];
+  const field = fields.find((item) => item.slug === filter.fieldSlug);
   const text = getViewFieldPreviewText(field, value).toLowerCase();
   const expected = getViewFieldPreviewText(field, filter.value).toLowerCase();
 
@@ -165,15 +188,15 @@ const recordMatchesViewFilter = (record: RecordVO, filter: ViewFilterVO): boolea
 };
 
 const compareRecordsByViewSort = (
-  left: RecordVO,
-  right: RecordVO,
+  left: ViewEvaluableRecord,
+  right: ViewEvaluableRecord,
+  fields: ReadonlyArray<BaseFieldVO>,
   config: ViewConfigVO,
 ): number => {
   for (const sort of config.sorts) {
-    const leftField = left.base.fields.find((field) => field.slug === sort.fieldSlug);
-    const rightField = right.base.fields.find((field) => field.slug === sort.fieldSlug);
-    const leftValue = getViewFieldPreviewText(leftField, left.headCommit.fields[sort.fieldSlug]);
-    const rightValue = getViewFieldPreviewText(rightField, right.headCommit.fields[sort.fieldSlug]);
+    const field = fields.find((item) => item.slug === sort.fieldSlug);
+    const leftValue = getViewFieldPreviewText(field, left.fields[sort.fieldSlug]);
+    const rightValue = getViewFieldPreviewText(field, right.fields[sort.fieldSlug]);
     const result = leftValue.localeCompare(rightValue, undefined, {
       numeric: true,
       sensitivity: "base",
@@ -195,7 +218,38 @@ export const applyViewConfigToRecords = (
     return records;
   }
   const filtered = records.filter((record) =>
-    config.filters.every((filter) => recordMatchesViewFilter(record, filter)),
+    config.filters.every((filter) =>
+      recordMatchesViewFilter(toViewEvaluableRecord(record), record.base.fields, filter),
+    ),
   );
-  return [...filtered].sort((left, right) => compareRecordsByViewSort(left, right, config));
+  return [...filtered].sort((left, right) =>
+    compareRecordsByViewSort(
+      toViewEvaluableRecord(left),
+      toViewEvaluableRecord(right),
+      left.base.fields,
+      config,
+    ),
+  );
+};
+
+/**
+ * The same filter + sort as `applyViewConfigToRecords`, over rows that have not
+ * been hydrated into VOs. This is deliberately the SAME two functions, not a
+ * parallel reimplementation — a second copy of view semantics that drifted from
+ * the first would silently show a different record set on one code path.
+ */
+export const applyViewConfigToEvaluableRecords = <T extends ViewEvaluableRecord>(
+  records: T[],
+  baseFields: ReadonlyArray<BaseFieldVO>,
+  config?: ViewConfigVO,
+): T[] => {
+  if (!config) {
+    return records;
+  }
+  const filtered = records.filter((record) =>
+    config.filters.every((filter) => recordMatchesViewFilter(record, baseFields, filter)),
+  );
+  return [...filtered].sort((left, right) =>
+    compareRecordsByViewSort(left, right, baseFields, config),
+  );
 };

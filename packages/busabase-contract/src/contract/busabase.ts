@@ -34,6 +34,8 @@ import {
   isDescendantInputSchema,
   isDescendantOutputSchema,
   listChangeRequestsPagedInputSchema,
+  listChangeRequestsPageInputSchema,
+  listChangeRequestsPageResponseSchema,
   listChangeRequestsResponseSchema,
   listInputSchema,
   listNodesInputSchema,
@@ -461,6 +463,20 @@ export const busabaseContractRoutes = {
       })
       .input(listChangeRequestsPagedInputSchema)
       .output(listChangeRequestsResponseSchema),
+    // Numbered paging alongside the cursor listing, mirroring records.listPage.
+    // Keyset is right for "keep scrolling"; a reviewer working a 2,000-item tab
+    // needs to jump to page 30 and to see how many pages there are at all.
+    listPage: oc
+      .route({
+        method: "GET",
+        path: "/change-requests/page",
+        tags: ["Change Requests"],
+        summary: "List a numbered change request page",
+        successDescription:
+          "A random-access page of change requests plus the total across the whole filter. Same `status` / `mine` filters as the cursor listing.",
+      })
+      .input(listChangeRequestsPageInputSchema)
+      .output(listChangeRequestsPageResponseSchema),
     counts: oc
       .route({
         method: "GET",

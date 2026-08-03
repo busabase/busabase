@@ -2,6 +2,7 @@ import type { AssetAttachmentRef, BaseFieldVO } from "busabase-contract/types";
 import * as DocumentPicker from "expo-document-picker";
 import * as ImagePicker from "expo-image-picker";
 import {
+  Check,
   ChevronDown,
   ChevronUp,
   FileText,
@@ -11,7 +12,16 @@ import {
 } from "lucide-react-native";
 import { iStringParse } from "openlib/i18n/i-string";
 import { useState } from "react";
-import { ActivityIndicator, Image, Pressable, StyleSheet, Switch, Text, View } from "react-native";
+import {
+  ActivityIndicator,
+  Image,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Switch,
+  Text,
+  View,
+} from "react-native";
 import { useBusabaseOrpc } from "~/api/use-busabase-orpc";
 import { useConnection } from "~/connection/connection-store";
 import { useI18n } from "~/i18n";
@@ -21,13 +31,7 @@ import { formatBytes } from "~/lib/format";
 import { isEditableField, type RecordFormValue } from "~/lib/record-form";
 import { radius, typography } from "~/theme/tokens";
 import { useTokens } from "~/theme/use-tokens";
-import {
-  NativeActionBar,
-  NativeBottomSheet,
-  NativeChipList,
-  NativeInlineError,
-  NativeRow,
-} from "../native-screen";
+import { NativeActionBar, NativeBottomSheet, NativeInlineError, NativeRow } from "../native-screen";
 import { Button } from "../ui/Button";
 import { TextInput } from "../ui/TextInput";
 
@@ -40,45 +44,161 @@ interface RecordFormProps {
 const MULTILINE_TYPES = new Set(["longtext", "markdown", "html"]);
 const INITIAL_FIELD_COUNT = 8;
 
-function ChoiceChips({
+function ChoicePicker({
+  label,
+  required,
   choices,
   selected,
   multiple,
   onToggle,
+  onClear,
 }: {
+  label: string;
+  required: boolean;
   choices: NonNullable<BaseFieldVO["options"]["choices"]>;
   selected: string[];
   multiple: boolean;
   onToggle: (id: string) => void;
+  onClear: () => void;
 }) {
-  const options = choices.map((choice) => ({ value: choice.id, label: choice.name }));
-  const selectedValue = selected[0] ?? null;
+  const tokens = useTokens();
+  const [open, setOpen] = useState(false);
+  const selectedChoices = choices.filter((choice) => selected.includes(choice.id));
+  const summary =
+    selectedChoices.length === 0
+      ? multiple
+        ? "Select options"
+        : "Select an option"
+      : selectedChoices.length === 1
+        ? selectedChoices[0]?.name
+        : `${selectedChoices.length} selected`;
 
-  if (multiple) {
-    return (
-      <View style={styles.choiceFullBleed}>
-        <NativeChipList<string | null>
-          value={null}
-          selectedValues={selected}
-          options={options}
-          onChange={(id) => {
-            if (id) onToggle(id);
-          }}
-        />
-      </View>
-    );
-  }
+  const clear = () => {
+    onClear();
+    setOpen(false);
+  };
 
   return (
-    <View style={styles.choiceFullBleed}>
-      <NativeChipList<string | null>
-        value={selectedValue}
-        options={options}
-        onChange={(id) => {
-          if (id) onToggle(id);
-        }}
-      />
-    </View>
+    <>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={`${label}: ${summary}`}
+        accessibilityState={{ disabled: choices.length === 0, expanded: open }}
+        disabled={choices.length === 0}
+        style={({ pressed }) => [
+          styles.choiceTrigger,
+          {
+            backgroundColor: tokens.muted,
+            borderColor: open ? tokens.primary : tokens.border,
+            opacity: choices.length === 0 ? 0.52 : pressed ? 0.72 : 1,
+          },
+        ]}
+        onPress={() => setOpen(true)}
+      >
+        <Text
+          numberOfLines={1}
+          style={[typography.body, styles.choiceValue, { color: tokens.foreground }]}
+        >
+          {choices.length === 0 ? "No options" : summary}
+        </Text>
+        <ChevronDown size={18} color={tokens.mutedForeground} />
+      </Pressable>
+
+      <NativeBottomSheet
+        visible={open}
+        title={label}
+        showCloseButton
+        maxHeight="85%"
+        onClose={() => setOpen(false)}
+        footer={
+          multiple || (!required && selected.length > 0) ? (
+            <NativeActionBar>
+              {multiple ? <Button label="Done" fullWidth onPress={() => setOpen(false)} /> : null}
+              {!required && selected.length > 0 ? (
+                <Button label="Clear selection" variant="ghost" fullWidth onPress={clear} />
+              ) : null}
+            </NativeActionBar>
+          ) : undefined
+        }
+      >
+        <ScrollView
+          nestedScrollEnabled
+          style={[styles.choiceOptions, { borderColor: tokens.border }]}
+        >
+          {choices.map((choice, index) => {
+            const isSelected = selected.includes(choice.id);
+            return (
+              <Pressable
+                key={choice.id}
+                accessibilityRole={multiple ? "checkbox" : "radio"}
+                accessibilityState={multiple ? { checked: isSelected } : { selected: isSelected }}
+                style={({ pressed }) => [
+                  styles.choiceOption,
+                  index < choices.length - 1 && {
+                    borderBottomWidth: StyleSheet.hairlineWidth,
+                    borderColor: tokens.border,
+                  },
+                  {
+                    backgroundColor: isSelected ? tokens.primaryMuted : tokens.surface,
+                    opacity: pressed ? 0.72 : 1,
+                  },
+                ]}
+                onPress={() => {
+                  onToggle(choice.id);
+                  if (!multiple) setOpen(false);
+                }}
+              >
+                <Text
+                  numberOfLines={2}
+                  style={[typography.body, styles.choiceValue, { color: tokens.foreground }]}
+                >
+                  {choice.name}
+                </Text>
+                {isSelected ? <Check size={18} color={tokens.foreground} /> : null}
+              </Pressable>
+            );
+          })}
+        </ScrollView>
+      </NativeBottomSheet>
+    </>
+  );
+}
+
+function ChoiceField({
+  field,
+  value,
+  onChange,
+}: {
+  field: BaseFieldVO;
+  value: RecordFormValue;
+  onChange: (value: RecordFormValue) => void;
+}) {
+  const choices = field.options.choices ?? [];
+  const selected = Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === "string")
+    : value
+      ? [String(value)]
+      : [];
+  const multiple = field.type === "multiselect";
+
+  return (
+    <ChoicePicker
+      label={iStringParse(field.name)}
+      required={field.required}
+      choices={choices}
+      selected={selected}
+      multiple={multiple}
+      onToggle={(id) => {
+        if (multiple) {
+          onChange(
+            selected.includes(id) ? selected.filter((item) => item !== id) : [...selected, id],
+          );
+        } else {
+          onChange(id);
+        }
+      }}
+      onClear={() => onChange(multiple ? [] : "")}
+    />
   );
 }
 
@@ -135,30 +255,10 @@ function FieldRow({
   }
 
   if (field.type === "select" || field.type === "multiselect") {
-    const choices = field.options.choices ?? [];
-    const selected = Array.isArray(value)
-      ? value.filter((item): item is string => typeof item === "string")
-      : value
-        ? [String(value)]
-        : [];
-    const multiple = field.type === "multiselect";
     return (
       <View style={rowStyle}>
         {label}
-        <ChoiceChips
-          choices={choices}
-          selected={selected}
-          multiple={multiple}
-          onToggle={(id) => {
-            if (multiple) {
-              onChange(
-                selected.includes(id) ? selected.filter((s) => s !== id) : [...selected, id],
-              );
-            } else {
-              onChange(selected[0] === id ? "" : id);
-            }
-          }}
-        />
+        <ChoiceField field={field} value={value} onChange={onChange} />
       </View>
     );
   }
@@ -477,5 +577,28 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
   },
   attachmentSheetRows: { gap: 8 },
-  choiceFullBleed: { marginHorizontal: -14 },
+  choiceTrigger: {
+    minHeight: 44,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: radius.md,
+    paddingHorizontal: 14,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  choiceValue: { flex: 1, minWidth: 0 },
+  choiceOptions: {
+    maxHeight: 360,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: radius.md,
+    overflow: "hidden",
+  },
+  choiceOption: {
+    minHeight: 48,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
 });

@@ -31,6 +31,7 @@ import type { RecordPO } from "../../../db/schema";
 import {
   busabaseBaseFields,
   busabaseBases,
+  busabaseCommits,
   busabaseFieldValues,
   busabaseRecordLinks,
   busabaseRecords,
@@ -51,7 +52,7 @@ import {
   toRecordLinkVO,
   toViewVO,
 } from "../../../logic/vo";
-import { applyViewConfigToRecords } from "../utils/view-records";
+import { applyViewConfigToEvaluableRecords, applyViewConfigToRecords } from "../utils/view-records";
 
 export { listInputSchema, recordFieldFilterInputSchema, recordFieldGetInputSchema };
 
@@ -361,6 +362,13 @@ export const listRecordsPaged = async (input?: z.input<typeof listRecordsInputSc
       .leftJoin(
         busabaseFieldValues,
         and(
+          // Do NOT add a base_id predicate here. It looks like it should help
+          // (there is a (base_id, field_slug) index) but it makes the planner
+          // choose that index for the inner scan and filter record_id
+          // afterwards — 20,000 rows per outer record. Measured on a 10k Base:
+          // 7.8s without it, 214s with it. The right access path is by
+          // record_id, which busabase_field_values_record_field_idx serves
+          // exactly; see the note on that index in domains/base/schema.ts.
           eq(busabaseFieldValues.recordId, busabaseRecords.id),
           eq(busabaseFieldValues.fieldSlug, parsed.sort.fieldSlug),
           isNull(busabaseFieldValues.deletedAt),
@@ -485,8 +493,73 @@ export const listRecordsPage = async (input: z.input<typeof listRecordsPageInput
   }
 
   // Complex saved views remain exact even when their field semantics cannot be
-  // represented by the projection table: hydrate the complete visible Base,
-  // evaluate the view, then return only the requested slice to the client.
+  // represented by the projection table: the whole visible Base is evaluated,
+  // then only the requested slice is returned.
+  //
+  // The evaluation deliberately does NOT hydrate first. Filtering and sorting
+  // read only a record's field values, its id and its updatedAt — so the
+  // candidate set is read as `(id, updatedAt, commit.fields)` rows, and just the
+  // ~pageSize records that survive into the page are hydrated into VOs. On a
+  // 10k-record Base that is the difference between building 10,000 VOs (with
+  // their bases, commits, users and lookups) and building 50.
+  //
+  // One exception keeps the old whole-Base path: a `lookup` field's value is not
+  // in the commit — it is derived from other records at hydration time — so a
+  // view that filters or sorts BY a lookup field can only be evaluated after
+  // hydration. Rather than half-resolve it, that case falls through unchanged.
+  const viewFieldSlugs = new Set([
+    ...(viewConfig?.filters ?? []).map((filter) => filter.fieldSlug),
+    ...(viewConfig?.sorts ?? []).map((sort) => sort.fieldSlug),
+  ]);
+  const dependsOnLookup = base.fields.some(
+    (field) => field.type === "lookup" && viewFieldSlugs.has(field.slug),
+  );
+
+  if (!dependsOnLookup) {
+    const candidateRows = await db
+      .select({
+        id: busabaseRecords.id,
+        updatedAt: busabaseRecords.updatedAt,
+        fields: busabaseCommits.fields,
+      })
+      .from(busabaseRecords)
+      .innerJoin(busabaseCommits, eq(busabaseCommits.id, busabaseRecords.headCommitId))
+      .where(and(...recordFilters))
+      .orderBy(desc(busabaseRecords.createdAt), desc(busabaseRecords.id));
+    const ordered = applyViewConfigToEvaluableRecords(
+      candidateRows.map((row) => ({
+        id: row.id,
+        updatedAt: row.updatedAt.toISOString(),
+        fields: (row.fields ?? {}) as Record<string, unknown>,
+      })),
+      base.fields,
+      viewConfig,
+    );
+    const total = ordered.length;
+    const totalPages = Math.ceil(total / parsed.pageSize);
+    const page = totalPages === 0 ? 1 : Math.min(parsed.page, totalPages);
+    const offset = (page - 1) * parsed.pageSize;
+    const pageIds = ordered.slice(offset, offset + parsed.pageSize).map((row) => row.id);
+    // Hydrate only the page, then restore the order the view decided (the
+    // WHERE ... IN read comes back in whatever order the engine likes).
+    const pageRecords = pageIds.length
+      ? await hydrateRecords(
+          await db.select().from(busabaseRecords).where(inArray(busabaseRecords.id, pageIds)),
+        )
+      : [];
+    const byId = new Map(pageRecords.map((record) => [record.id, record]));
+    return {
+      records: pageIds.flatMap((recordId) => {
+        const record = byId.get(recordId);
+        return record ? [record] : [];
+      }),
+      total,
+      totalPages,
+      page,
+      pageSize: parsed.pageSize,
+    };
+  }
+
   const candidateRows = await db
     .select()
     .from(busabaseRecords)
@@ -683,6 +756,26 @@ export const listArchivedBases = async () => {
       fieldRows.filter((field) => field.baseId === base.id),
     ),
   );
+};
+
+/**
+ * The active (non-deleted) field with the lowest `position` for a base — the
+ * "who is the record title" rule evaluated at the db layer (no VO available
+ * yet at merge time). MUST stay semantically equivalent to `getPrimaryField()`
+ * in `../utils/primary-field.ts` (same "lowest position, first-inserted wins
+ * ties" rule) — keep the two in sync if that rule ever changes.
+ */
+export const getPrimaryFieldIdFromDb = async (
+  db: Awaited<ReturnType<typeof getDb>>,
+  baseId: string,
+): Promise<string | null> => {
+  const [primaryField] = await db
+    .select({ id: busabaseBaseFields.id })
+    .from(busabaseBaseFields)
+    .where(and(eq(busabaseBaseFields.baseId, baseId), isNull(busabaseBaseFields.deletedAt)))
+    .orderBy(asc(busabaseBaseFields.position))
+    .limit(1);
+  return primaryField?.id ?? null;
 };
 
 export const listDeletedFields = async (baseId: string) => {

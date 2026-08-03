@@ -8,6 +8,7 @@ import { busabaseBaseFields, busabaseBases, busabaseOperations } from "../../../
 import type { MergeCtx } from "../../../../logic/cr-lifecycle";
 import { id, requireBaseId } from "../../../../logic/kernel";
 import { PRIMARY_FIELD_DELETE_MESSAGE } from "../../utils/primary-field";
+import { getPrimaryFieldIdFromDb } from "../queries";
 
 export const mergeBaseAddField = async (ctx: MergeCtx, item: OperationPO, headCommit: CommitPO) => {
   const { db, timestamp } = ctx;
@@ -65,13 +66,8 @@ export const mergeBaseDeleteField = async (
     throw new Error(`base_delete_field commit missing fieldId: ${item.id}`);
   }
   const baseId = requireBaseId(item.baseId, item.operation);
-  const [primaryField] = await db
-    .select({ id: busabaseBaseFields.id })
-    .from(busabaseBaseFields)
-    .where(and(eq(busabaseBaseFields.baseId, baseId), isNull(busabaseBaseFields.deletedAt)))
-    .orderBy(asc(busabaseBaseFields.position))
-    .limit(1);
-  if (primaryField?.id === fieldData.fieldId) {
+  const primaryFieldId = await getPrimaryFieldIdFromDb(db, baseId);
+  if (primaryFieldId === fieldData.fieldId) {
     const { ORPCError } = await import("@orpc/server");
     throw new ORPCError("BAD_REQUEST", { message: PRIMARY_FIELD_DELETE_MESSAGE });
   }

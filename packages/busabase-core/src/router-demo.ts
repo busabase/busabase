@@ -63,9 +63,9 @@ const demoBatchFailure = (changeRequestId: string, error: unknown) => ({
     : {}),
 });
 
-/** Keeps the demo's refusal messages verb-specific now that the field and view
- *  change-request verbs share one handler each. */
-const fieldOperationLabel = (operation: string) =>
+/** Keeps the demo's refusal messages verb-specific now that the Base lifecycle,
+ *  field, and view change-request verbs share one handler each. */
+const operationLabel = (operation: string) =>
   operation.charAt(0).toUpperCase() + operation.slice(1);
 
 /** Keeps the demo's refusal messages type-specific now that Skills, Drives, and
@@ -247,16 +247,13 @@ export const busabaseDemoRouter = os.router({
       input.status === "archived" ? [] : demoListViews(input.baseId),
     ),
     fieldChangeRequest: os.bases.fieldChangeRequest.handler(({ input }) => {
-      throw demoUnsupported(`${fieldOperationLabel(input.operation)} Field change request`);
+      throw demoUnsupported(`${operationLabel(input.operation)} Field change request`);
     }),
     previewFieldConversion: os.bases.previewFieldConversion.handler(() => {
       throw demoUnsupported("Preview Field conversion");
     }),
-    archiveChangeRequest: os.bases.archiveChangeRequest.handler(() => {
-      throw demoUnsupported("Archive Base change request");
-    }),
-    restoreChangeRequest: os.bases.restoreChangeRequest.handler(() => {
-      throw demoUnsupported("Restore Base change request");
+    lifecycleChangeRequest: os.bases.lifecycleChangeRequest.handler(({ input }) => {
+      throw demoUnsupported(`${operationLabel(input.operation)} Base change request`);
     }),
     listDeletedFields: os.bases.listDeletedFields.handler(() => []),
   },
@@ -441,6 +438,32 @@ export const busabaseDemoRouter = os.router({
       });
       return { changeRequests, nextCursor: null };
     }),
+    listPage: os.changeRequests.listPage.handler(async ({ input }) => {
+      const all = await demoListChangeRequests();
+      const status = input?.status ?? [];
+      const mine = input?.mine ?? false;
+      const matching = all.filter((changeRequest) => {
+        if (status.length > 0 && !status.includes(changeRequest.status)) {
+          return false;
+        }
+        if (mine && changeRequest.submittedBy !== "local-editor") {
+          return false;
+        }
+        return true;
+      });
+      const pageSize = input?.pageSize ?? 50;
+      const total = matching.length;
+      const totalPages = Math.ceil(total / pageSize);
+      const page = totalPages === 0 ? 1 : Math.min(input?.page ?? 1, totalPages);
+      const offset = (page - 1) * pageSize;
+      return {
+        changeRequests: matching.slice(offset, offset + pageSize),
+        total,
+        totalPages,
+        page,
+        pageSize,
+      };
+    }),
     counts: os.changeRequests.counts.handler(async () => {
       const all = await demoListChangeRequests();
       const countBy = (predicate: (changeRequest: (typeof all)[number]) => boolean) =>
@@ -573,7 +596,7 @@ export const busabaseDemoRouter = os.router({
   },
   views: {
     changeRequest: os.views.changeRequest.handler(({ input }) => {
-      throw demoUnsupported(`${fieldOperationLabel(input.operation)} View change request`);
+      throw demoUnsupported(`${operationLabel(input.operation)} View change request`);
     }),
   },
 });

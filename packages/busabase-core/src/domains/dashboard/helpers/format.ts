@@ -36,19 +36,22 @@ const formatNumberField = (
 
 const shortIdentifier = (value: string | null | undefined) => value?.slice(0, 10) ?? "none";
 
-const formatListTime = (value: string) =>
-  new Date(value).toLocaleDateString(undefined, {
+const formatListTime = (value: string, locale: Intl.LocalesArgument) =>
+  new Date(value).toLocaleDateString(locale, {
     month: "short",
     day: "numeric",
   });
 
-const formatDetailTime = (value: string) =>
-  new Date(value).toLocaleString(undefined, {
+const formatDetailTime = (value: string, locale: Intl.LocalesArgument) =>
+  new Date(value).toLocaleString(locale, {
     month: "short",
     day: "numeric",
     hour: "numeric",
     minute: "2-digit",
   });
+
+const formatFullTime = (value: string, locale: Intl.LocalesArgument) =>
+  new Date(value).toLocaleString(locale);
 
 const formatAttachmentSize = (bytes: number) => {
   if (!Number.isFinite(bytes) || bytes <= 0) {
@@ -150,6 +153,7 @@ export {
   shortIdentifier,
   formatListTime,
   formatDetailTime,
+  formatFullTime,
   formatAttachmentSize,
   KNOWN_ACTOR_LABELS,
   formatOpaqueUserId,

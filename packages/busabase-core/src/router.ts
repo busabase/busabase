@@ -38,6 +38,7 @@ import {
   listAgentTasks,
   listArchivedNodes,
   listAuditEvents,
+  listChangeRequestsPage,
   listChangeRequestsPaged,
   listComments,
   listFavoriteNodes,
@@ -222,6 +223,9 @@ const busabaseRouterImpl = busabase.router({
   install: installRouter,
   changeRequests: {
     list: busabase.changeRequests.list.handler(async ({ input }) => listChangeRequestsPaged(input)),
+    listPage: busabase.changeRequests.listPage.handler(async ({ input }) =>
+      listChangeRequestsPage(input),
+    ),
     counts: busabase.changeRequests.counts.handler(async () => countChangeRequests()),
     get: busabase.changeRequests.get.handler(async ({ input }) => {
       const changeRequest = await getChangeRequest(input.changeRequestId);

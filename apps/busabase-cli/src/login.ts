@@ -116,10 +116,15 @@ function openBrowser(url: string): void {
       : platform === "win32"
         ? ["cmd", ["/c", "start", "", url]]
         : ["xdg-open", [url]];
+  const reportFailure = (): void => {
+    say("Could not open a browser automatically. Open the URL above manually.");
+  };
   try {
-    spawn(command, args as string[], { stdio: "ignore", detached: true }).unref();
+    const child = spawn(command, args as string[], { stdio: "ignore", detached: true });
+    child.once("error", reportFailure);
+    child.unref();
   } catch {
-    // Non-fatal — the URL is always printed too, so the user can open it manually.
+    reportFailure();
   }
 }
 

@@ -56,7 +56,13 @@ function FileNodeContent() {
       ) : null}
       {asset ? (
         <NativeSection title="Preview" caption={asset.fileName}>
-          <View style={[styles.preview, { backgroundColor: tokens.muted }]}>
+          <View
+            style={[
+              styles.preview,
+              isImageRef(asset) ? styles.imagePreview : styles.filePreview,
+              { backgroundColor: tokens.muted },
+            ]}
+          >
             {isImageRef(asset) ? (
               <Image source={{ uri: assetUrl }} resizeMode="contain" style={styles.previewImage} />
             ) : (
@@ -79,11 +85,12 @@ function FileNodeContent() {
 
 const styles = StyleSheet.create({
   preview: {
-    height: 220,
     overflow: "hidden",
     alignItems: "center",
     justifyContent: "center",
   },
+  imagePreview: { height: 220 },
+  filePreview: { minHeight: 112 },
   previewImage: { width: "100%", height: "100%" },
   previewFile: { alignItems: "center", gap: 8 },
 });

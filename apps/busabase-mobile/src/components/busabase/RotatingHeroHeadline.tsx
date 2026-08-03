@@ -18,9 +18,13 @@ const DELETE_MS = 28;
 
 interface RotatingHeroHeadlineProps {
   compact?: boolean;
+  short?: boolean;
 }
 
-export function RotatingHeroHeadline({ compact = false }: RotatingHeroHeadlineProps) {
+export function RotatingHeroHeadline({
+  compact = false,
+  short = false,
+}: RotatingHeroHeadlineProps) {
   const tokens = useTokens();
   const reducedMotion = useReducedMotion();
   const [nounIndex, setNounIndex] = useState(0);
@@ -77,7 +81,11 @@ export function RotatingHeroHeadline({ compact = false }: RotatingHeroHeadlinePr
     <View
       accessible
       accessibilityLabel="Database, Knowledge Base, Apps Warehouse, and Skills Manager for your agents."
-      style={[styles.container, compact ? styles.containerCompact : null]}
+      style={[
+        styles.container,
+        compact ? styles.containerCompact : null,
+        short ? styles.containerShort : null,
+      ]}
     >
       <Text accessible={false} style={[typography.h1, styles.headline]}>
         <Text style={{ color: tokens.foreground }}>{typedNoun}</Text>
@@ -97,5 +105,6 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   containerCompact: { marginTop: spacing[4] },
+  containerShort: { minHeight: typography.h1.lineHeight, marginTop: spacing[2] },
   headline: { textAlign: "center" },
 });

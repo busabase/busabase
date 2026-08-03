@@ -46,7 +46,6 @@ function BasesContent() {
   return (
     <DrawerScaffold
       title="Bases"
-      subtitle={bases.length > 0 ? `${bases.length} bases` : undefined}
       refreshing={query.isRefetching}
       onRefresh={() => void query.refetch()}
     >

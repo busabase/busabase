@@ -311,3 +311,15 @@ export const fieldChangeRequestInputSchema = z.discriminatedUnion("operation", [
   reorderFieldsChangeRequestInputSchema.extend({ operation: z.literal("reorder"), ...withBaseId }),
   restoreFieldChangeRequestInputSchema.extend({ operation: z.literal("restore"), ...withBaseId }),
 ]);
+
+/**
+ * Moving a Base between its lifecycle states, in one shape. Archive and restore
+ * used to be two endpoints whose only difference was the verb in the middle of
+ * the path — byte-identical payloads, the same `changeRequest` response, the
+ * same API-key level. The variation is which direction the Base is moving,
+ * which is what the discriminant carries.
+ */
+export const baseLifecycleChangeRequestInputSchema = z.discriminatedUnion("operation", [
+  archiveBaseInputSchema.extend({ operation: z.literal("archive"), ...withBaseId }),
+  restoreBaseInputSchema.extend({ operation: z.literal("restore"), ...withBaseId }),
+]);

@@ -77,7 +77,8 @@ describe("Boundary P6 — node lifecycle", () => {
     });
 
     // Restore via the restore-change-request path (approve + merge).
-    const restoreCr = await raw.bases.restoreChangeRequest({
+    const restoreCr = await raw.bases.lifecycleChangeRequest({
+      operation: "restore",
       baseId: base.id,
       submittedBy: "alice",
     });
@@ -110,7 +111,8 @@ describe("Boundary P6 — node lifecycle", () => {
     await client.bases.create({ name: "Dup v2", slug: "dup" });
 
     // Now restoring the original must fail (slug is taken).
-    const restoreCr = await raw.bases.restoreChangeRequest({
+    const restoreCr = await raw.bases.lifecycleChangeRequest({
+      operation: "restore",
       baseId: first.id,
       submittedBy: "alice",
     });

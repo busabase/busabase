@@ -230,8 +230,8 @@ const archiveBase = async (baseId: string, label: string) => {
   if (!active.some((base) => base.id === baseId)) return;
   const changeRequest = await api<{ id: string; status: string }>(
     "POST",
-    `/bases/${baseId}/archive/change-requests`,
-    { message: `Archive duplicate CMS ${label}`, submittedBy: SUBMITTED_BY },
+    `/bases/${baseId}/lifecycle/change-requests`,
+    { operation: "archive", message: `Archive duplicate CMS ${label}`, submittedBy: SUBMITTED_BY },
   );
   assert(changeRequest.status === "in_review", `expected in_review archiving ${label}`);
   await approveMerge(changeRequest.id);

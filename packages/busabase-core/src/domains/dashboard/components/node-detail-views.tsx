@@ -16,6 +16,7 @@ import { useDocImageUpload } from "../../doc/hooks/use-doc-image-upload";
 import { FormDetailView } from "../../form/components/form-detail-view";
 import { mergeSearchIntoHref } from "../helpers/link-search";
 import { asNodeDetail } from "../helpers/node-detail";
+import { useRegisterTopbarNodeActions } from "../hooks/use-register-topbar-node-actions";
 import { useReportLoadedNode } from "../hooks/use-report-loaded-node";
 import { type NodeDetailProps, registerNodeDetail } from "../node-detail-registry";
 import { registerSidePanelTab, type SidePanelTabProps } from "../side-panel-registry";
@@ -93,6 +94,29 @@ export function FileTreeDetailView({
   // `nodes.get` is one route for every node type, so narrow to this view's branch.
   const fileTree = asNodeDetail(fileTreeQuery.data, nodeType);
   useReportLoadedNode(fileTree?.node, onNodeLoaded);
+  // `enabled: !hideActions` keeps the side-panel preview instance of this
+  // same component (rendered with `hideActions`) from ever touching the
+  // shared topbar slot that the real page's instance owns.
+  useRegisterTopbarNodeActions(
+    fileTree ? (
+      <>
+        <NodePinButton
+          payload={{ nodeId: fileTree.node.id }}
+          tabId={nodeSidePanelTabId(nodeType, fileTree.node.id)}
+          tabType={`${nodeType}-preview`}
+          title={fileTree.node.name}
+        />
+        <NodeActionsMenu
+          nodeId={fileTree.node.id}
+          nodeName={fileTree.node.name}
+          nodeSlug={fileTree.node.slug}
+          nodeType={nodeType}
+          orpc={orpc}
+        />
+      </>
+    ) : null,
+    !hideActions,
+  );
 
   // Reset the open file when switching file-tree nodes.
   // biome-ignore lint/correctness/useExhaustiveDependencies: reset only on slug change
@@ -270,24 +294,6 @@ export function FileTreeDetailView({
             </PopoverContent>
           </Popover>
         </div>
-
-        {hideActions ? null : (
-          <div className="ml-auto flex shrink-0 items-center gap-1.5">
-            <NodePinButton
-              payload={{ nodeId: fileTree.node.id }}
-              tabId={nodeSidePanelTabId(nodeType, fileTree.node.id)}
-              tabType={`${nodeType}-preview`}
-              title={fileTree.node.name}
-            />
-            <NodeActionsMenu
-              nodeId={fileTree.node.id}
-              nodeName={fileTree.node.name}
-              nodeSlug={fileTree.node.slug}
-              nodeType={nodeType}
-              orpc={orpc}
-            />
-          </div>
-        )}
       </header>
 
       <div className="grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-[300px_minmax(0,1fr)]">
@@ -539,6 +545,26 @@ export function FileNodeDetailView({
   });
   const detail = asNodeDetail(fileQuery.data, "file");
   useReportLoadedNode(detail?.node, onNodeLoaded);
+  useRegisterTopbarNodeActions(
+    detail ? (
+      <>
+        <NodePinButton
+          payload={{ nodeId: detail.node.id }}
+          tabId={nodeSidePanelTabId("file", detail.node.id)}
+          tabType="file-preview"
+          title={detail.node.name}
+        />
+        <NodeActionsMenu
+          nodeId={detail.node.id}
+          nodeName={detail.node.name}
+          nodeSlug={detail.node.slug}
+          nodeType="file"
+          orpc={orpc}
+        />
+      </>
+    ) : null,
+    !hideActions,
+  );
 
   if (!detail) {
     return fileQuery.isLoading ? (
@@ -623,24 +649,6 @@ export function FileNodeDetailView({
             </PopoverContent>
           </Popover>
         </div>
-
-        {hideActions ? null : (
-          <div className="ml-auto flex shrink-0 items-center gap-1.5">
-            <NodePinButton
-              payload={{ nodeId: node.id }}
-              tabId={nodeSidePanelTabId("file", node.id)}
-              tabType="file-preview"
-              title={node.name}
-            />
-            <NodeActionsMenu
-              nodeId={node.id}
-              nodeName={node.name}
-              nodeSlug={node.slug}
-              nodeType="file"
-              orpc={orpc}
-            />
-          </div>
-        )}
       </header>
 
       <div className="min-h-0 flex-1 overflow-auto p-4 md:p-6">
@@ -696,6 +704,41 @@ export function DocDetailView({
   const [busy, setBusy] = useState<null | "save" | "changeRequest">(null);
   const [error, setError] = useState<string | null>(null);
 
+  // Registered only while NOT editing — mirrors the original ternary where
+  // entering edit mode replaced Edit/Pin/Actions with Cancel/Save controls
+  // (those stay rendered in-page, right next to the editor; see below).
+  useRegisterTopbarNodeActions(
+    !isEditing && doc ? (
+      <>
+        <button
+          className="rounded-button border px-3 py-1.5 text-sm hover:bg-muted"
+          onClick={() => {
+            setDraft(doc.body);
+            setError(null);
+            setIsEditing(true);
+          }}
+          type="button"
+        >
+          {messages.common.edit}
+        </button>
+        <NodePinButton
+          payload={{ nodeId: doc.node.id }}
+          tabId={nodeSidePanelTabId("doc", doc.node.id)}
+          tabType="doc-preview"
+          title={doc.node.name}
+        />
+        <NodeActionsMenu
+          nodeId={doc.node.id}
+          nodeName={doc.node.name}
+          nodeSlug={doc.node.slug}
+          nodeType="doc"
+          orpc={orpc}
+        />
+      </>
+    ) : null,
+    !hideActions,
+  );
+
   // Default to read-only; reset to view mode when switching docs.
   // biome-ignore lint/correctness/useExhaustiveDependencies: reset only on slug change
   useEffect(() => {
@@ -723,12 +766,6 @@ export function DocDetailView({
       />
     );
   }
-
-  const startEditing = () => {
-    setDraft(doc.body);
-    setError(null);
-    setIsEditing(true);
-  };
 
   // Direct Save: propose + approve + merge in one go (mirrors a Base "Save & Merge").
   const save = async () => {
@@ -788,7 +825,7 @@ export function DocDetailView({
             <p className="mt-1 text-muted-foreground text-sm">{doc.node.description}</p>
           ) : null}
         </div>
-        {hideActions ? null : isEditing ? (
+        {!hideActions && isEditing ? (
           <div className="flex shrink-0 items-center gap-2">
             <button
               className="rounded-button px-3 py-1.5 text-muted-foreground text-sm hover:text-foreground disabled:opacity-40"
@@ -819,30 +856,7 @@ export function DocDetailView({
               }}
             />
           </div>
-        ) : (
-          <div className="flex shrink-0 items-center gap-2">
-            <button
-              className="rounded-button border px-3 py-1.5 text-sm hover:bg-muted"
-              onClick={startEditing}
-              type="button"
-            >
-              {messages.common.edit}
-            </button>
-            <NodePinButton
-              payload={{ nodeId: doc.node.id }}
-              tabId={nodeSidePanelTabId("doc", doc.node.id)}
-              tabType="doc-preview"
-              title={doc.node.name}
-            />
-            <NodeActionsMenu
-              nodeId={doc.node.id}
-              nodeName={doc.node.name}
-              nodeSlug={doc.node.slug}
-              nodeType="doc"
-              orpc={orpc}
-            />
-          </div>
-        )}
+        ) : null}
       </div>
       {error ? <p className="mb-3 text-destructive text-sm">{error}</p> : null}
       {isEditing || doc.body.trim() ? (
@@ -883,6 +897,27 @@ export function FolderDetailView({
   });
   const folder = asNodeDetail(folderQuery.data, "folder");
   useReportLoadedNode(folder?.node, onNodeLoaded);
+  useRegisterTopbarNodeActions(
+    folder ? (
+      <>
+        <NodePinButton
+          payload={{ nodeId: folder.node.id }}
+          tabId={nodeSidePanelTabId("folder", folder.node.id)}
+          tabType="folder-preview"
+          title={folder.node.name}
+        />
+        <NodeActionsMenu
+          childCount={folder.children.length}
+          nodeId={folder.node.id}
+          nodeName={folder.node.name}
+          nodeSlug={folder.node.slug}
+          nodeType="folder"
+          orpc={orpc}
+        />
+      </>
+    ) : null,
+    !hideActions,
+  );
 
   if (!folder) {
     return folderQuery.isLoading ? (
@@ -911,24 +946,6 @@ export function FolderDetailView({
             <p className="mt-2 text-muted-foreground text-sm">{folder.node.description}</p>
           ) : null}
         </div>
-        {hideActions ? null : (
-          <div className="flex shrink-0 items-center gap-2">
-            <NodePinButton
-              payload={{ nodeId: folder.node.id }}
-              tabId={nodeSidePanelTabId("folder", folder.node.id)}
-              tabType="folder-preview"
-              title={folder.node.name}
-            />
-            <NodeActionsMenu
-              childCount={folder.children.length}
-              nodeId={folder.node.id}
-              nodeName={folder.node.name}
-              nodeSlug={folder.node.slug}
-              nodeType="folder"
-              orpc={orpc}
-            />
-          </div>
-        )}
       </div>
       {folder.children.length === 0 ? (
         <EmptyState

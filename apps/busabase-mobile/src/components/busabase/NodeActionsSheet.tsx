@@ -13,7 +13,7 @@ import {
   Trash2,
 } from "lucide-react-native";
 import { useState } from "react";
-import { StyleSheet, View } from "react-native";
+import { ScrollView, StyleSheet, View } from "react-native";
 import { NativeBottomSheet, NativeRow } from "~/components/native-screen";
 import { useI18n } from "~/i18n";
 import { useTokens } from "~/theme/use-tokens";
@@ -204,7 +204,11 @@ export function NodeActionsSheet({
         maxHeight="86%"
         onClose={onClose}
       >
-        <View style={styles.menu}>
+        <ScrollView
+          style={styles.menuScroll}
+          contentContainerStyle={styles.menu}
+          showsVerticalScrollIndicator={false}
+        >
           {actions.map((action, index) => (
             <View
               key={action.key}
@@ -228,7 +232,7 @@ export function NodeActionsSheet({
               />
             </View>
           ))}
-        </View>
+        </ScrollView>
       </NativeBottomSheet>
 
       {canRename ? (
@@ -284,6 +288,7 @@ export function NodeActionsSheet({
 const styles = StyleSheet.create({
   // NativeRow carries its own horizontal padding; pull it back level with the
   // sheet's title so the action labels line up under it.
-  menu: { marginHorizontal: -14 },
+  menuScroll: { flexShrink: 1, marginHorizontal: -14 },
+  menu: { paddingBottom: 2 },
   destructiveBlock: { marginTop: 10 },
 });

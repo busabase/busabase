@@ -54,7 +54,8 @@ describe("Boundary P15 — base archive hides records + views", () => {
     );
 
     // Restore the base → records + views come back.
-    const restoreCr = await raw.bases.restoreChangeRequest({
+    const restoreCr = await raw.bases.lifecycleChangeRequest({
+      operation: "restore",
       baseId: base.id,
       submittedBy: "alice",
     });

@@ -55,7 +55,12 @@ import {
 } from "react";
 import { useSearch } from "wouter";
 import { fmt, useCoreI18n, useIString } from "../../../i18n";
-import { fieldColumnWidth, fieldDisplayKind, fieldLabel } from "../../base/field-types";
+import {
+  fieldColumnWidth,
+  fieldDisplayKind,
+  fieldLabel,
+  fieldLinkPrefix,
+} from "../../base/field-types";
 import { resolveEmbedPreview } from "../../base/utils/embed";
 import { getPrimaryField } from "../../base/utils/primary-field";
 import { parseWhiteboardFieldValue } from "../../base/utils/whiteboard-value";
@@ -2192,6 +2197,35 @@ function RecordTableCellContent({
           );
         })}
       </div>
+    );
+  }
+
+  if (kind === "link") {
+    const value = fieldValueToString(rawValue).trim();
+    if (!value) {
+      return (
+        <Link
+          className="flex min-w-0 items-center py-1 text-muted-foreground"
+          href={currentRecordHref}
+          title="-"
+        >
+          -
+        </Link>
+      );
+    }
+    const prefix = fieldLinkPrefix(field.type);
+    const external = prefix === "";
+    return (
+      <a
+        className="flex min-w-0 items-center gap-1.5 py-1 text-primary underline-offset-2 hover:underline"
+        href={`${prefix}${value}`}
+        rel={external ? "noreferrer" : undefined}
+        target={external ? "_blank" : undefined}
+        title={value}
+      >
+        <span className="min-w-0 truncate">{value}</span>
+        {external ? <ExternalLink className="shrink-0" size={12} /> : null}
+      </a>
     );
   }
 

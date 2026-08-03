@@ -2,8 +2,10 @@
 
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "kui/dialog";
 import type { LucideIcon } from "lucide-react";
-import { Check, Cloud, Languages, Vault, Webhook } from "lucide-react";
+import { Check, Cloud, Languages, Palette, Vault, Webhook } from "lucide-react";
 import { useEffect, useState } from "react";
+import type { AppBrandingSettingsLabels } from "~/domains/settings/components/app-branding-settings-tab";
+import { AppBrandingSettingsTab } from "~/domains/settings/components/app-branding-settings-tab";
 import type { CloudConnectSettingsLabels } from "~/domains/settings/components/cloud-connect-settings-tab";
 import { CloudConnectSettingsTab } from "~/domains/settings/components/cloud-connect-settings-tab";
 import type { VaultSettingsLabels } from "~/domains/vault/components/vault-settings-tab";
@@ -20,13 +22,16 @@ interface LanguageOption {
   nativeName: string;
 }
 
-type SettingsTab = "language" | "vault" | "webhook" | "cloudConnect";
+type SettingsTab = "language" | "branding" | "vault" | "webhook" | "cloudConnect";
 
 interface Props {
   labels: SettingsDialogLabels;
   vaultLabels: VaultSettingsLabels;
   webhookLabels: WebhookSettingsLabels;
   cloudConnectLabels: CloudConnectSettingsLabels;
+  brandingLabels: AppBrandingSettingsLabels;
+  /** Built-in branding defaults, shown as placeholders in the Branding tab. */
+  brandingDefaults: { name: string; description: string; logoUrl: string };
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
   languageOptions: LanguageOption[];
@@ -72,6 +77,8 @@ export function SettingsDialog({
   vaultLabels,
   webhookLabels,
   cloudConnectLabels,
+  brandingLabels,
+  brandingDefaults,
   open,
   onOpenChange,
   languageOptions,
@@ -90,6 +97,7 @@ export function SettingsDialog({
 
   const tabs: { id: SettingsTab; icon: LucideIcon; label: string }[] = [
     { id: "language", icon: Languages, label: labels.languageTab() },
+    { id: "branding", icon: Palette, label: labels.brandingTab() },
     { id: "vault", icon: Vault, label: labels.vaultTab() },
     { id: "webhook", icon: Webhook, label: labels.webhookTab() },
     { id: "cloudConnect", icon: Cloud, label: labels.cloudConnectTab() },
@@ -124,6 +132,13 @@ export function SettingsDialog({
                 languageOptions={languageOptions}
                 languagePref={languagePref}
                 onLocaleChange={onLocaleChange}
+              />
+            ) : null}
+            {activeTab === "branding" ? (
+              <AppBrandingSettingsTab
+                labels={brandingLabels}
+                active={activeTab === "branding"}
+                defaults={brandingDefaults}
               />
             ) : null}
             {activeTab === "vault" ? (

@@ -22,14 +22,17 @@ import {
   type StyleProp,
   StyleSheet,
   Text,
+  useWindowDimensions,
   View,
   type ViewStyle,
 } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useBusabaseOrpc } from "~/api/use-busabase-orpc";
 import { NativeScreen } from "~/components/native-screen";
 import { fmt, useI18n } from "~/i18n";
 import { useContextualNavDestination } from "~/lib/contextual-nav";
 import { type DrawerDestination, isDrawerItemActive, isPathActive } from "~/lib/nav-destinations";
+import { getAppNavigationLayout } from "~/lib/responsive-layout";
 import {
   ancestorIdsOfActiveNode,
   expandNodes,
@@ -40,7 +43,7 @@ import { flattenNodesForCache, nodeToKnownNode } from "~/search/known-node-cache
 import { nodeIconForType } from "~/search/node-icons";
 import { getMobileNodeDestination, isMobileNodePathActive } from "~/search/node-navigation";
 import { useKnownNodeCache } from "~/search/use-known-node-cache";
-import { mobile, radius, typography } from "~/theme/tokens";
+import { mobile, radius, spacing, typography } from "~/theme/tokens";
 import { useTokens } from "~/theme/use-tokens";
 import { CreateNodeModal } from "./CreateNodeModal";
 import { NodeActionsSheet } from "./NodeActionsSheet";
@@ -53,6 +56,7 @@ interface DrawerScaffoldProps {
   children: ReactNode;
   refreshing?: boolean;
   onRefresh?: () => void;
+  headerLeading?: ReactNode;
   headerAction?: ReactNode;
   footer?: ReactNode;
   contentContainerStyle?: StyleProp<ViewStyle>;
@@ -79,6 +83,7 @@ export function DrawerScaffold({
   children,
   refreshing,
   onRefresh,
+  headerLeading: customHeaderLeading,
   headerAction,
   footer,
   contentContainerStyle,
@@ -86,12 +91,16 @@ export function DrawerScaffold({
   const router = useRouter();
   const pathname = usePathname();
   const tokens = useTokens();
+  const insets = useSafeAreaInsets();
+  const [open, setOpen] = useState(false);
+  const [createOpen, setCreateOpen] = useState(false);
+  const { width: windowWidth, height: windowHeight } = useWindowDimensions();
+  const navigationLayout = getAppNavigationLayout(windowWidth, windowHeight);
+  const sidebarVisible = open || navigationLayout.persistentSidebar;
   const { t } = useI18n();
   const buda = useBusabaseOrpc();
   const nodeCache = useKnownNodeCache();
   const queryClient = useQueryClient();
-  const [open, setOpen] = useState(false);
-  const [createOpen, setCreateOpen] = useState(false);
   // The container the Create sheet should create INSIDE, or null for the space
   // root (the Workspace group's Create action). Mirrors web's `createParent` state.
   const [createParent, setCreateParent] = useState<{ id: string; name: string } | null>(null);
@@ -114,11 +123,12 @@ export function DrawerScaffold({
     ...(buda
       ? buda.orpc.nodes.list.queryOptions()
       : { queryKey: ["no-connection", "nodes"], queryFn: skipToken }),
-    enabled: open && !!buda,
+    enabled: sidebarVisible && !!buda,
   });
 
   // The "N waiting for you" signal the web sidebar carries on its Home row.
-  // Gated on `open` like the node tree — the drawer is the only place it shows.
+  // Gated on sidebar visibility like the node tree — compact screens do not
+  // fetch sidebar-only data until the user opens the drawer.
   const changeRequestsQuery = useQuery({
     ...(buda
       ? buda.orpc.changeRequests.list.queryOptions({
@@ -126,19 +136,19 @@ export function DrawerScaffold({
           select: (page) => page.changeRequests,
         })
       : { queryKey: ["no-connection", "change-requests"], queryFn: skipToken }),
-    enabled: open && !!buda,
+    enabled: sidebarVisible && !!buda,
   });
   const pendingCount = selectPendingChangeRequests(changeRequestsQuery.data ?? []).length;
 
   // Notion-style Favorites — the current actor's favorited nodes, in their own
   // query entry, invalidated after every toggle exactly like the web sidebar
-  // (`dashboard-shell.tsx`). Gated on `open` like the tree above: the drawer is
-  // the only surface that renders them.
+  // (`dashboard-shell.tsx`). Gated like the tree above: compact screens do not
+  // fetch favorites until the user opens the drawer.
   const favoritesQuery = useQuery({
     ...(buda
       ? buda.orpc.nodes.listFavorites.queryOptions()
       : { queryKey: ["no-connection", "favorites"], queryFn: skipToken }),
-    enabled: open && !!buda,
+    enabled: sidebarVisible && !!buda,
   });
   const favoriteNodes = favoritesQuery.data ?? [];
   const favoriteNodeIds = useMemo(
@@ -157,7 +167,7 @@ export function DrawerScaffold({
     ...(buda
       ? buda.orpc.auth.verify.queryOptions()
       : { queryKey: ["no-connection", "auth"], queryFn: skipToken }),
-    enabled: open && !!buda,
+    enabled: sidebarVisible && !!buda,
   });
   const spaceId = authQuery.data?.space.id ?? null;
   const spaceName = authQuery.data?.space.name ?? null;
@@ -203,6 +213,10 @@ export function DrawerScaffold({
     expandNodes(ancestorIdsOfActiveNode(treeNodes, (node) => isNodeActive(node, pathname)));
   }, [treeNodes, pathname]);
 
+  useEffect(() => {
+    if (navigationLayout.persistentSidebar) setOpen(false);
+  }, [navigationLayout.persistentSidebar]);
+
   const headerLeading = (
     <Pressable
       accessibilityRole="button"
@@ -235,67 +249,84 @@ export function DrawerScaffold({
     [nodeCache, router],
   );
 
-  return (
-    <>
-      <NativeScreen
-        title={title}
-        titleNumberOfLines={titleNumberOfLines}
-        subtitle={subtitle}
-        refreshing={refreshing}
-        onRefresh={onRefresh}
-        headerLeading={headerLeading}
-        headerAction={headerAction}
-        footer={footer}
-        contentContainerStyle={contentContainerStyle}
+  const nodeActionsSheet = actionsTarget ? (
+    <NodeActionsSheet
+      node={actionsTarget.node}
+      nodes={nodesQuery.data ?? []}
+      canOpen={nodeNavMeta(actionsTarget.node).tappable}
+      isFavorite={favoriteNodeIds.has(actionsTarget.node.id)}
+      spaceId={spaceId}
+      spaceName={spaceName}
+      spaceVisibilityMode={spaceVisibilityMode}
+      onClose={() => setActionsTarget(null)}
+      onOpenNode={navigateNode}
+      onToggleFavorite={(node) => toggleFavoriteMutation.mutate(node)}
+      onCreateChild={
+        actionsTarget.allowCreateChild
+          ? (node) => {
+              setActionsTarget(null);
+              setOpen(false);
+              setCreateParent({ id: node.id, name: node.name });
+              setCreateOpen(true);
+            }
+          : undefined
+      }
+    />
+  ) : null;
+
+  const drawerPanel = (
+    <View
+      style={[
+        styles.drawer,
+        navigationLayout.persistentSidebar ? null : styles.compactDrawer,
+        {
+          width: navigationLayout.persistentSidebar
+            ? navigationLayout.sidebarWidth
+            : mobile.drawerWidth,
+          backgroundColor: tokens.surface,
+          borderColor: tokens.border,
+          paddingTop: Platform.select({
+            web: navigationLayout.persistentSidebar ? 0 : mobile.headerHeight,
+            default: insets.top,
+          }),
+          paddingBottom: Platform.select({ web: 0, default: insets.bottom }),
+        },
+      ]}
+    >
+      <View style={[styles.spaceWrap, { borderColor: tokens.border }]}>
+        <SpaceSelector presentation="popover" onDismissContainer={() => setOpen(false)} />
+      </View>
+
+      <ScrollView
+        contentContainerStyle={styles.drawerBody}
+        style={styles.drawerScroll}
+        showsVerticalScrollIndicator={false}
       >
-        {children}
-      </NativeScreen>
-
-      <Modal animationType="fade" transparent visible={open} onRequestClose={() => setOpen(false)}>
-        <View style={[styles.modal, { backgroundColor: tokens.scrim }]}>
-          <View
-            style={[
-              styles.drawer,
-              {
-                backgroundColor: tokens.surface,
-                borderColor: tokens.border,
-              },
-            ]}
-          >
-            <View style={[styles.spaceWrap, { borderColor: tokens.border }]}>
-              <SpaceSelector presentation="popover" onDismissContainer={() => setOpen(false)} />
-            </View>
-
-            <ScrollView
-              contentContainerStyle={styles.drawerBody}
-              style={styles.drawerScroll}
-              showsVerticalScrollIndicator={false}
-            >
-              <View style={styles.navGroup}>
-                {pinnedItems.map((item) => (
-                  <DrawerNavRow
-                    key={item.href}
-                    active={isDrawerItemActive(pathname, item)}
-                    badge={item.key === "home" ? pendingCount : undefined}
-                    icon={item.icon}
-                    label={t.nav[item.key]}
-                    onPress={() => navigate(item.href)}
-                  />
-                ))}
-                {/* At most one — replaced, never stacked, so the drawer can't
+        <View style={styles.navGroup}>
+          {pinnedItems.map((item) => (
+            <DrawerNavRow
+              key={item.href}
+              active={isDrawerItemActive(pathname, item)}
+              badge={item.key === "home" ? pendingCount : undefined}
+              icon={item.icon}
+              label={t.nav[item.key]}
+              onPress={() => navigate(item.href)}
+            />
+          ))}
+          {/* At most one — replaced, never stacked, so the drawer can't
                     regrow into the shortcut list this design replaced. */}
-                {contextualDestination ? (
-                  <DrawerNavRow
-                    active={isDrawerItemActive(pathname, contextualDestination)}
-                    badge={contextualDestination.key === "inbox" ? pendingCount : undefined}
-                    icon={contextualDestination.icon}
-                    label={t.nav[contextualDestination.key]}
-                    onPress={() => navigate(contextualDestination.href)}
-                  />
-                ) : null}
-              </View>
+          {contextualDestination ? (
+            <DrawerNavRow
+              active={isDrawerItemActive(pathname, contextualDestination)}
+              badge={contextualDestination.key === "inbox" ? pendingCount : undefined}
+              icon={contextualDestination.icon}
+              label={t.nav[contextualDestination.key]}
+              onPress={() => navigate(contextualDestination.href)}
+            />
+          ) : null}
+        </View>
 
-              {/* An empty Favorites section is exactly the clutter this feature
+        {/* An empty Favorites section is exactly the clutter this feature
                   is meant to reduce, so it only exists once the actor has
                   favorited at least one (still-visible, non-archived) node —
                   same rule and same position as the web sidebar: after the
@@ -303,168 +334,157 @@ export function DrawerScaffold({
                   returns fully-resolved nodes, not a tree, so each row is flat
                   (depth 0, no children) exactly like web's
                   `toFlatFavoriteNavItem`. */}
-              {favoriteNodes.length > 0 ? (
-                <View style={styles.section}>
-                  <View style={styles.sectionHeader}>
-                    <Text
-                      style={[
-                        typography.caption,
-                        styles.sectionLabel,
-                        { color: tokens.mutedForeground },
-                      ]}
-                    >
-                      {t.nav.favorites}
-                    </Text>
-                    <Text style={[typography.small, { color: tokens.mutedForeground }]}>
-                      {favoriteNodes.length}
-                    </Text>
-                  </View>
-                  <View style={styles.navGroup}>
-                    {favoriteNodes.map((node) => (
-                      <NodeNavItem
-                        key={`favorite-${node.id}`}
-                        node={{ ...node, children: [] }}
-                        pathname={pathname}
-                        depth={0}
-                        // Flat rows: no chevron, no "New inside…" — exactly
-                        // what web's `toFlatFavoriteNavItem` strips off.
-                        collapsible={false}
-                        expandedIds={expandedIds}
-                        onPress={navigateNode}
-                        onToggleExpanded={toggleNodeExpanded}
-                        onOpenActions={(target) =>
-                          setActionsTarget({ node: target, allowCreateChild: false })
-                        }
-                      />
-                    ))}
-                  </View>
-                </View>
-              ) : null}
-
-              <View style={styles.section}>
-                <View style={styles.sectionHeader}>
-                  <Text
-                    style={[
-                      typography.caption,
-                      styles.sectionLabel,
-                      { color: tokens.mutedForeground },
-                    ]}
-                  >
-                    {t.nav.workspace}
-                  </Text>
-                  <Pressable
-                    accessibilityRole="button"
-                    accessibilityLabel={t.nav.create}
-                    hitSlop={mobile.hitSlop}
-                    style={({ pressed }) => [
-                      styles.workspaceCreateButton,
-                      { opacity: pressed ? 0.6 : 1 },
-                    ]}
-                    onPress={() => {
-                      setOpen(false);
-                      setCreateParent(null);
-                      setCreateOpen(true);
-                    }}
-                  >
-                    <Plus size={16} color={tokens.mutedForeground} />
-                  </Pressable>
-                </View>
-                <View style={styles.navGroup}>
-                  {nodesQuery.isLoading ? (
-                    <Text
-                      style={[
-                        typography.small,
-                        styles.sectionHint,
-                        { color: tokens.mutedForeground },
-                      ]}
-                    >
-                      {t.nav.workspaceLoading}
-                    </Text>
-                  ) : null}
-                  {nodesQuery.error ? (
-                    <Text
-                      style={[typography.small, styles.sectionHint, { color: tokens.destructive }]}
-                    >
-                      {t.nav.workspaceError}
-                    </Text>
-                  ) : null}
-                  {!nodesQuery.isLoading && !nodesQuery.error && treeNodes.length === 0 ? (
-                    <Text
-                      style={[
-                        typography.small,
-                        styles.sectionHint,
-                        { color: tokens.mutedForeground },
-                      ]}
-                    >
-                      {t.nav.workspaceEmpty}
-                    </Text>
-                  ) : null}
-                  {treeNodes.map((node) => (
-                    <NodeNavItem
-                      key={node.id}
-                      node={node}
-                      pathname={pathname}
-                      depth={0}
-                      expandedIds={expandedIds}
-                      onPress={navigateNode}
-                      onToggleExpanded={toggleNodeExpanded}
-                      onOpenActions={(target) =>
-                        setActionsTarget({ node: target, allowCreateChild: true })
-                      }
-                    />
-                  ))}
-                </View>
-              </View>
-            </ScrollView>
-            <View style={[styles.drawerFooter, { borderColor: tokens.border }]}>
-              <DrawerNavRow
-                active={isPathActive(pathname, settingsItem.href)}
-                icon={settingsItem.icon}
-                label={t.nav.settings}
-                onPress={() => navigate(settingsItem.href)}
-              />
+        {favoriteNodes.length > 0 ? (
+          <View style={styles.section}>
+            <View style={styles.sectionHeader}>
+              <Text
+                style={[typography.caption, styles.sectionLabel, { color: tokens.mutedForeground }]}
+              >
+                {t.nav.favorites}
+              </Text>
+              <Text style={[typography.small, { color: tokens.mutedForeground }]}>
+                {favoriteNodes.length}
+              </Text>
+            </View>
+            <View style={styles.navGroup}>
+              {favoriteNodes.map((node) => (
+                <NodeNavItem
+                  key={`favorite-${node.id}`}
+                  node={{ ...node, children: [] }}
+                  pathname={pathname}
+                  depth={0}
+                  // Flat rows: no chevron, no "New inside…" — exactly
+                  // what web's `toFlatFavoriteNavItem` strips off.
+                  collapsible={false}
+                  expandedIds={expandedIds}
+                  onPress={navigateNode}
+                  onToggleExpanded={toggleNodeExpanded}
+                  onOpenActions={(target) =>
+                    setActionsTarget({ node: target, allowCreateChild: false })
+                  }
+                />
+              ))}
             </View>
           </View>
+        ) : null}
+
+        <View style={styles.section}>
+          <View style={styles.sectionHeader}>
+            <Text
+              style={[typography.caption, styles.sectionLabel, { color: tokens.mutedForeground }]}
+            >
+              {t.nav.workspace}
+            </Text>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={t.nav.create}
+              hitSlop={mobile.hitSlop}
+              style={({ pressed }) => [
+                styles.workspaceCreateButton,
+                { opacity: pressed ? 0.6 : 1 },
+              ]}
+              onPress={() => {
+                setOpen(false);
+                setCreateParent(null);
+                setCreateOpen(true);
+              }}
+            >
+              <Plus size={16} color={tokens.mutedForeground} />
+            </Pressable>
+          </View>
+          <View style={styles.navGroup}>
+            {nodesQuery.isLoading ? (
+              <Text
+                style={[typography.small, styles.sectionHint, { color: tokens.mutedForeground }]}
+              >
+                {t.nav.workspaceLoading}
+              </Text>
+            ) : null}
+            {nodesQuery.error ? (
+              <Text style={[typography.small, styles.sectionHint, { color: tokens.destructive }]}>
+                {t.nav.workspaceError}
+              </Text>
+            ) : null}
+            {!nodesQuery.isLoading && !nodesQuery.error && treeNodes.length === 0 ? (
+              <Text
+                style={[typography.small, styles.sectionHint, { color: tokens.mutedForeground }]}
+              >
+                {t.nav.workspaceEmpty}
+              </Text>
+            ) : null}
+            {treeNodes.map((node) => (
+              <NodeNavItem
+                key={node.id}
+                node={node}
+                pathname={pathname}
+                depth={0}
+                expandedIds={expandedIds}
+                onPress={navigateNode}
+                onToggleExpanded={toggleNodeExpanded}
+                onOpenActions={(target) =>
+                  setActionsTarget({ node: target, allowCreateChild: true })
+                }
+              />
+            ))}
+          </View>
+        </View>
+      </ScrollView>
+      <View style={[styles.drawerFooter, { borderColor: tokens.border }]}>
+        <DrawerNavRow
+          active={isPathActive(pathname, settingsItem.href)}
+          icon={settingsItem.icon}
+          label={t.nav.settings}
+          onPress={() => navigate(settingsItem.href)}
+        />
+      </View>
+    </View>
+  );
+
+  return (
+    <>
+      <View style={styles.scaffold}>
+        {navigationLayout.persistentSidebar ? drawerPanel : null}
+        <View style={styles.contentPane}>
+          <NativeScreen
+            title={title}
+            titleNumberOfLines={titleNumberOfLines}
+            subtitle={subtitle}
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            headerLeading={
+              customHeaderLeading ??
+              (navigationLayout.persistentSidebar ? undefined : headerLeading)
+            }
+            headerAction={headerAction}
+            footer={footer}
+            contentContainerStyle={contentContainerStyle}
+          >
+            {children}
+          </NativeScreen>
+        </View>
+      </View>
+
+      <Modal
+        animationType="fade"
+        transparent
+        visible={open && !navigationLayout.persistentSidebar}
+        onRequestClose={() => setOpen(false)}
+      >
+        <View style={[styles.modal, { backgroundColor: tokens.scrim }]}>
+          {drawerPanel}
           <Pressable
             accessibilityLabel="Close navigation drawer"
             accessibilityRole="button"
             style={styles.edgeDismiss}
             onPress={() => setOpen(false)}
           />
-          {/* Rendered inside the drawer Modal (alongside the workspace menu)
-              so the drawer stays put behind it — a node action shouldn't cost
-              the user their place in the tree. `nodes` is the RAW tree, not
-              the unwrapped `treeNodes`: the move picker needs the real root
-              container as a destination. */}
-          {actionsTarget ? (
-            <NodeActionsSheet
-              node={actionsTarget.node}
-              nodes={nodesQuery.data ?? []}
-              canOpen={nodeNavMeta(actionsTarget.node).tappable}
-              isFavorite={favoriteNodeIds.has(actionsTarget.node.id)}
-              spaceId={spaceId}
-              spaceName={spaceName}
-              spaceVisibilityMode={spaceVisibilityMode}
-              onClose={() => setActionsTarget(null)}
-              onOpenNode={navigateNode}
-              onToggleFavorite={(node) => toggleFavoriteMutation.mutate(node)}
-              onCreateChild={
-                actionsTarget.allowCreateChild
-                  ? (node) => {
-                      // Same hand-off as the Workspace group's Create action:
-                      // Create sheet lives OUTSIDE the drawer Modal, so the
-                      // drawer and this sheet both have to close first.
-                      setActionsTarget(null);
-                      setOpen(false);
-                      setCreateParent({ id: node.id, name: node.name });
-                      setCreateOpen(true);
-                    }
-                  : undefined
-              }
-            />
-          ) : null}
+          {/* Keep phone actions in the drawer portal so the drawer stays behind
+              the sheet. Tablet actions render beside the persistent shell. */}
+          {navigationLayout.persistentSidebar ? null : nodeActionsSheet}
         </View>
       </Modal>
+
+      {navigationLayout.persistentSidebar ? nodeActionsSheet : null}
 
       <CreateNodeModal
         visible={createOpen}
@@ -485,6 +505,8 @@ export function DrawerScaffold({
 }
 
 const styles = StyleSheet.create({
+  scaffold: { flex: 1, flexDirection: "row" },
+  contentPane: { flex: 1, minWidth: 0 },
   menuButton: {
     width: 44,
     height: 44,
@@ -495,11 +517,9 @@ const styles = StyleSheet.create({
   modal: { flex: 1, flexDirection: "row" },
   edgeDismiss: { flex: 1 },
   drawer: {
-    width: mobile.drawerWidth,
-    maxWidth: "82%",
-    paddingTop: Platform.select({ ios: 58, android: 38, default: 48 }),
     borderRightWidth: StyleSheet.hairlineWidth,
   },
+  compactDrawer: { maxWidth: "82%" },
   spaceWrap: {
     zIndex: 20,
     paddingHorizontal: 10,
@@ -512,7 +532,7 @@ const styles = StyleSheet.create({
     borderTopWidth: StyleSheet.hairlineWidth,
     paddingHorizontal: 10,
     paddingTop: 10,
-    paddingBottom: Platform.select({ ios: 22, android: 14, default: 14 }),
+    paddingBottom: Platform.select({ web: spacing[4], default: spacing[2] }),
   },
   navGroup: { gap: 2 },
   section: { gap: 7 },

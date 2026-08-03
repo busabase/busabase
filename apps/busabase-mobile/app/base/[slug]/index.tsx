@@ -1,7 +1,15 @@
 import { skipToken, useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { getRecordTitle } from "busabase-core/dashboard/change-request";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { List, MoreHorizontal, Plus, Settings2, Table2 } from "lucide-react-native";
+import {
+  Check,
+  ChevronDown,
+  List,
+  MoreHorizontal,
+  Plus,
+  Settings2,
+  Table2,
+} from "lucide-react-native";
 import { iStringParse } from "openlib/i18n/i-string";
 import { useMemo, useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
@@ -12,7 +20,6 @@ import { FieldValue } from "~/components/busabase/FieldValue";
 import {
   NativeActionBar,
   NativeBottomSheet,
-  NativeChipList,
   NativeEmptyState,
   NativeErrorState,
   NativeLoadingState,
@@ -29,7 +36,7 @@ import {
   scopeRecordsPageToBase,
 } from "~/lib/record-pagination";
 import { applyViewConfig } from "~/lib/view-config";
-import { mobile, radius, typography } from "~/theme/tokens";
+import { mobile, radius, spacing, typography } from "~/theme/tokens";
 import { useTokens } from "~/theme/use-tokens";
 
 const FIRST_COLUMN_WIDTH = 180;
@@ -42,6 +49,7 @@ function BaseDetailContent() {
   const tokens = useTokens();
   const buda = useBusabaseOrpc();
   const [activeViewId, setActiveViewId] = useState<string | null>(null);
+  const [viewPickerOpen, setViewPickerOpen] = useState(false);
   const [displayMode, setDisplayMode] = useState<"list" | "table">("list");
   const [actionsOpen, setActionsOpen] = useState(false);
 
@@ -83,6 +91,8 @@ function BaseDetailContent() {
   );
   const views = viewsQuery.data ?? [];
   const activeView = views.find((view) => view.id === activeViewId) ?? null;
+  const selectedViewId = activeView?.id ?? null;
+  const selectedViewLabel = activeView?.name ?? "All";
 
   const records = useMemo(() => {
     const baseRecords =
@@ -157,13 +167,28 @@ function BaseDetailContent() {
       {base ? (
         <>
           {views.length > 0 ? (
-            <NativeChipList
-              value={activeViewId}
-              options={[{ value: null as string | null, label: "All" }].concat(
-                views.map((view) => ({ value: view.id, label: view.name })),
-              )}
-              onChange={setActiveViewId}
-            />
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={`View: ${selectedViewLabel}`}
+              accessibilityState={{ expanded: viewPickerOpen }}
+              style={({ pressed }) => [
+                styles.viewTrigger,
+                {
+                  backgroundColor: tokens.surface,
+                  borderColor: viewPickerOpen ? tokens.primary : tokens.border,
+                  opacity: pressed ? 0.72 : 1,
+                },
+              ]}
+              onPress={() => setViewPickerOpen(true)}
+            >
+              <View style={styles.viewTriggerText}>
+                <Text style={[typography.caption, { color: tokens.mutedForeground }]}>VIEW</Text>
+                <Text numberOfLines={1} style={[typography.bodyEm, { color: tokens.foreground }]}>
+                  {selectedViewLabel}
+                </Text>
+              </View>
+              <ChevronDown size={18} color={tokens.mutedForeground} />
+            </Pressable>
           ) : null}
 
           <NativeSegmentedControl
@@ -286,6 +311,59 @@ function BaseDetailContent() {
           ) : null}
 
           <NativeBottomSheet
+            visible={viewPickerOpen}
+            title="View"
+            showCloseButton
+            maxHeight="80%"
+            onClose={() => setViewPickerOpen(false)}
+          >
+            <ScrollView
+              nestedScrollEnabled
+              style={[styles.viewOptions, { borderColor: tokens.border }]}
+            >
+              {[{ id: null as string | null, name: "All" }, ...views].map(
+                (view, index, options) => {
+                  const selected = view.id === selectedViewId;
+                  return (
+                    <Pressable
+                      key={view.id ?? "all"}
+                      accessibilityRole="radio"
+                      accessibilityState={{ selected }}
+                      style={({ pressed }) => [
+                        styles.viewOption,
+                        index < options.length - 1
+                          ? { borderBottomWidth: StyleSheet.hairlineWidth }
+                          : null,
+                        {
+                          backgroundColor: selected ? tokens.primaryMuted : tokens.surface,
+                          borderColor: tokens.border,
+                          opacity: pressed ? 0.72 : 1,
+                        },
+                      ]}
+                      onPress={() => {
+                        setActiveViewId(view.id);
+                        setViewPickerOpen(false);
+                      }}
+                    >
+                      <Text
+                        numberOfLines={1}
+                        style={[
+                          typography.body,
+                          styles.viewOptionLabel,
+                          { color: tokens.foreground },
+                        ]}
+                      >
+                        {view.name}
+                      </Text>
+                      {selected ? <Check size={17} color={tokens.foreground} /> : null}
+                    </Pressable>
+                  );
+                },
+              )}
+            </ScrollView>
+          </NativeBottomSheet>
+
+          <NativeBottomSheet
             visible={actionsOpen}
             title="Base actions"
             showCloseButton
@@ -327,6 +405,32 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
+  viewTrigger: {
+    minHeight: mobile.minTouchTarget,
+    marginHorizontal: spacing[5],
+    marginTop: spacing[3],
+    marginBottom: spacing[2],
+    paddingHorizontal: spacing[3],
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: radius.md,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing[3],
+  },
+  viewTriggerText: { flex: 1, minWidth: 0 },
+  viewOptions: {
+    maxHeight: 320,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: radius.md,
+  },
+  viewOption: {
+    minHeight: mobile.minTouchTarget,
+    paddingHorizontal: spacing[3],
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing[3],
+  },
+  viewOptionLabel: { flex: 1, minWidth: 0 },
   tableScroll: { flexGrow: 0 },
   tableContent: { paddingLeft: 14 },
   tableHeader: {

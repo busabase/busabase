@@ -86,6 +86,13 @@ describe("Busabase OpenAPI record get route", () => {
     expect(spec.paths?.["/api/v1/nodes/favorites"]?.get).toBeDefined();
   });
 
+  it("serves Base archive and restore through one lifecycle path", async () => {
+    const spec = await getBusabaseOpenApiSpec();
+    expect(spec.paths?.["/api/v1/bases/{baseId}/lifecycle/change-requests"]?.post).toBeDefined();
+    expect(spec.paths?.["/api/v1/bases/{baseId}/archive/change-requests"]).toBeUndefined();
+    expect(spec.paths?.["/api/v1/bases/{baseId}/restore/change-requests"]).toBeUndefined();
+  });
+
   it("keeps the compressed public API at 96 operations", async () => {
     const spec = await getBusabaseOpenApiSpec();
     const operationCount = Object.values(spec.paths ?? {}).reduce(
@@ -100,6 +107,10 @@ describe("Busabase OpenAPI record get route", () => {
     // consolidating four CR action operations into two brought it to 103.
     // Unified Node detail retired four typed gets and added one (-3 -> 100);
     // unified Node summary lists retired the four typed lists (-4 -> 96).
+    // Collapsing Base archive + restore into one lifecycle operation (-1 -> 95).
+    // Numbered change request paging for the inbox (+1 -> 96) — the cursor
+    // listing stays, since "keep scrolling" and "jump to page 30 of 45" are
+    // different jobs and the inbox needs both.
     expect(operationCount).toBe(96);
   });
 });

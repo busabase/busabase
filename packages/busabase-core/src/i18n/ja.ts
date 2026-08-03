@@ -254,6 +254,8 @@ export const dashboardJa: CoreI18nMessages = {
     open: "サイドパネルを開く",
     collapse: "サイドパネルを閉じる",
     closeTab: "タブを閉じる",
+    closeOtherTabs: "他のタブを閉じる",
+    closeAllTabs: "すべてのタブを閉じる",
     maximize: "サイドパネルを最大化",
     restore: "サイドパネルを元に戻す",
     resize: "サイドパネルの幅を変更",

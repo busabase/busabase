@@ -267,7 +267,7 @@ export function RichNodeDetailScreen(props: RichNodeDetailScreenProps) {
 }
 
 const styles = StyleSheet.create({
-  canvasGrid: { paddingHorizontal: spacing[5], paddingVertical: spacing[4], gap: spacing[3] },
+  canvasGrid: { paddingVertical: spacing[4], gap: spacing[3] },
   canvasNotes: { flexDirection: "row", flexWrap: "wrap", gap: spacing[3] },
   canvasNote: {
     minWidth: 132,
@@ -289,11 +289,10 @@ const styles = StyleSheet.create({
   },
   htmlScreen: { flexGrow: 1 },
   htmlSection: { flex: 1 },
-  segmentWrap: { paddingHorizontal: spacing[5], paddingTop: spacing[4] },
+  segmentWrap: { paddingTop: spacing[4] },
   webviewWrap: {
     flex: 1,
     minHeight: 420,
-    marginHorizontal: spacing[5],
     marginVertical: spacing[4],
     borderWidth: StyleSheet.hairlineWidth,
     borderRadius: radius.md,
@@ -302,7 +301,6 @@ const styles = StyleSheet.create({
   sourceWrap: {
     flex: 1,
     minHeight: 420,
-    marginHorizontal: spacing[5],
     marginVertical: spacing[4],
     borderRadius: radius.md,
     padding: spacing[4],

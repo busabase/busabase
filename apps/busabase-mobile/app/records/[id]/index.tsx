@@ -16,6 +16,7 @@ import { Pressable, StyleSheet } from "react-native";
 import { useBusabaseOrpc } from "~/api/use-busabase-orpc";
 import { CommentsSection } from "~/components/busabase/CommentsSection";
 import { ConnectionGuard } from "~/components/busabase/ConnectionGuard";
+import { DrawerScaffold } from "~/components/busabase/DrawerScaffold";
 import { FieldList } from "~/components/busabase/FieldList";
 import {
   NativeActionBar,
@@ -25,7 +26,6 @@ import {
   NativeInlineError,
   NativeLoadingState,
   NativeRow,
-  NativeScreen,
   NativeSection,
 } from "~/components/native-screen";
 import { Button } from "~/components/ui/Button";
@@ -88,31 +88,31 @@ function RecordDetailContent() {
 
   if (recordQuery.isLoading) {
     return (
-      <NativeScreen title="Record" headerLeading={headerLeading}>
+      <DrawerScaffold title="Record" headerLeading={headerLeading}>
         <NativeLoadingState label="Loading record" />
-      </NativeScreen>
+      </DrawerScaffold>
     );
   }
 
   if (recordQuery.error && !record) {
     return (
-      <NativeScreen title="Record" subtitle={shortId(recordId)} headerLeading={headerLeading}>
+      <DrawerScaffold title="Record" subtitle={shortId(recordId)} headerLeading={headerLeading}>
         <NativeErrorState
           message={recordQuery.error.message}
           onRetry={() => void recordQuery.refetch()}
         />
-      </NativeScreen>
+      </DrawerScaffold>
     );
   }
 
   if (!record) {
     return (
-      <NativeScreen title="Record" subtitle={shortId(recordId)} headerLeading={headerLeading}>
+      <DrawerScaffold title="Record" subtitle={shortId(recordId)} headerLeading={headerLeading}>
         <NativeEmptyState
           title="Record not found"
           description="This canonical record is no longer available."
         />
-      </NativeScreen>
+      </DrawerScaffold>
     );
   }
 
@@ -128,7 +128,7 @@ function RecordDetailContent() {
   const visibleDefinitions = fieldsExpanded ? detailDefinitions : initialDefinitions;
 
   return (
-    <NativeScreen
+    <DrawerScaffold
       title={getRecordTitle(record)}
       titleNumberOfLines={2}
       subtitle={`${record.base.name} · ${formatDate(record.updatedAt)}`}
@@ -277,7 +277,7 @@ function RecordDetailContent() {
           </NativeActionBar>
         }
       />
-    </NativeScreen>
+    </DrawerScaffold>
   );
 }
 

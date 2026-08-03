@@ -57,6 +57,7 @@ import {
   fieldValueToString,
   formatAttachmentSize,
   formatDetailTime,
+  formatFullTime,
   formatUserRefLabel,
   shortIdentifier,
 } from "../helpers/format";
@@ -131,6 +132,7 @@ export function RecordDetailView({
   record: RecordVO | null;
 }) {
   const messages = useCoreI18n();
+  const locale = useCoreLocale();
   const currentSearch = useSearch();
   const [panelOpen, setPanelOpen] = useState(true);
   const [deleteAction, setDeleteAction] = useState<"change_request" | "merge" | null>(null);
@@ -255,7 +257,7 @@ export function RecordDetailView({
             />
             <SidebarRow
               label={messages.common.updated}
-              value={formatDetailTime(record.updatedAt)}
+              value={formatDetailTime(record.updatedAt, locale)}
             />
             <details
               aria-label={messages.recordView.technicalIds}
@@ -1399,6 +1401,7 @@ function RecordChangeRequestHistoryRow({
   recordId: string;
 }) {
   const messages = useCoreI18n();
+  const locale = useCoreLocale();
   const href = useHrefWithCurrentSearch(`/inbox/${changeRequest.id}`);
   const relatedOperations = changeRequest.operations.filter(
     (operation) =>
@@ -1420,7 +1423,7 @@ function RecordChangeRequestHistoryRow({
           <div className="mt-1 text-muted-foreground text-xs">
             {formatUserRefLabel(changeRequest.submittedByUser, changeRequest.submittedBy, messages)}
             {" · "}
-            {new Date(changeRequest.updatedAt).toLocaleString()}
+            {formatFullTime(changeRequest.updatedAt, locale)}
           </div>
         </div>
         <StatusBadge status={changeRequest.status} />
@@ -1447,6 +1450,7 @@ function RecordCommentsPanel({
   record: RecordVO;
 }) {
   const messages = useCoreI18n();
+  const locale = useCoreLocale();
   const queryClient = useQueryClient();
   // Shares the canonical comments key (subjectType, subjectId) with
   // `SubjectCommentThread`, so the two readers stay in sync.
@@ -1515,7 +1519,7 @@ function RecordCommentsPanel({
                   user={comment.author}
                 />
                 <div className="text-muted-foreground text-xs">
-                  {new Date(comment.createdAt).toLocaleString()}
+                  {formatFullTime(comment.createdAt, locale)}
                 </div>
               </div>
               <div className="mt-2 whitespace-pre-wrap break-words text-sm leading-6">

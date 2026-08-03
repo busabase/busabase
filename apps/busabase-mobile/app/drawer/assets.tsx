@@ -45,7 +45,6 @@ function AssetsContent() {
   return (
     <DrawerScaffold
       title={t.assets.title}
-      subtitle={assets.length > 0 ? `${assets.length} assets` : undefined}
       refreshing={assetsQuery.isRefetching}
       onRefresh={() => void assetsQuery.refetch()}
     >

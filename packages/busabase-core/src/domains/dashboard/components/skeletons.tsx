@@ -1,4 +1,4 @@
-import { Skeleton } from "kui/skeleton";
+import { ShimmerSkeleton as Skeleton } from "./shimmer-skeleton";
 
 /**
  * Loading placeholders for the workbench detail panes. These replace the old
@@ -9,6 +9,10 @@ import { Skeleton } from "kui/skeleton";
  * Row/cell shapes are described by static arrays with stable string ids (used as
  * React keys) and preset widths, so the skeletons are deterministic and don't
  * key off the array index.
+ *
+ * Uses the animated gradient-sweep `ShimmerSkeleton` (aliased to `Skeleton`
+ * here to keep this file's markup unchanged) instead of kui's flat
+ * `animate-pulse` `Skeleton` — see `shimmer-skeleton.tsx`.
  */
 
 const SKILL_TREE_ROWS = [

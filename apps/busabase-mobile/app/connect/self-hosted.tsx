@@ -1,11 +1,11 @@
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { ArrowLeft, CheckCircle, Server, Sparkles } from "lucide-react-native";
+import { ArrowLeft, Check, CheckCircle, ChevronDown, Server, Sparkles } from "lucide-react-native";
 import { useState } from "react";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { validateBusabaseServer } from "~/api/server-health";
 import {
   NativeActionBar,
-  NativeChipList,
+  NativeBottomSheet,
   NativeInlineError,
   NativeRow,
   NativeScreen,
@@ -32,10 +32,8 @@ export default function SelfHostedConnectionScreen() {
   const [loading, setLoading] = useState(false);
   const [demoLoading, setDemoLoading] = useState(false);
   const [validatedUrl, setValidatedUrl] = useState<string | null>(null);
-  const serverOptions = [...new Set([...state.serverHistory, ...urlExamples])].map((example) => ({
-    value: example,
-    label: example,
-  }));
+  const [serverPickerOpen, setServerPickerOpen] = useState(false);
+  const serverOptions = [...new Set([...state.serverHistory, ...urlExamples])];
 
   // One tap into the preset hosted demo — no server setup, no login. This is what
   // App Review uses; new users can try Busabase instantly.
@@ -90,7 +88,6 @@ export default function SelfHostedConnectionScreen() {
   return (
     <NativeScreen
       title="Connect to Busabase"
-      subtitle="Try the demo, or connect your own server"
       headerLeading={headerLeading}
       footer={
         <NativeActionBar>
@@ -109,7 +106,7 @@ export default function SelfHostedConnectionScreen() {
         <NativeSection title="Demo">
           <NativeRow
             title="Try the demo workspace"
-            subtitle="No server setup or login. Explore seeded review flows."
+            subtitle="No setup or sign-in."
             leading={<Sparkles size={18} color={tokens.mutedForeground} />}
             trailing={
               <Button
@@ -124,7 +121,7 @@ export default function SelfHostedConnectionScreen() {
         </NativeSection>
       ) : null}
 
-      <NativeSection title="Server" caption="/api/health">
+      <NativeSection title="Server">
         <View style={styles.formRow}>
           <View style={styles.formHeader}>
             <Server size={18} color={tokens.mutedForeground} />
@@ -132,10 +129,6 @@ export default function SelfHostedConnectionScreen() {
               Busabase server URL
             </Text>
           </View>
-          <Text style={[typography.small, { color: tokens.mutedForeground }]}>
-            The app validates the server before saving it on this device.
-          </Text>
-
           <TextInput
             accessibilityLabel="Busabase server URL"
             value={serverUrl}
@@ -146,13 +139,76 @@ export default function SelfHostedConnectionScreen() {
             onSubmitEditing={handleConnect}
           />
 
-          <View style={styles.fullBleedChips}>
-            <NativeChipList<string>
-              value={serverUrl}
-              options={serverOptions}
-              onChange={setServerUrl}
-            />
-          </View>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Choose a saved server"
+            accessibilityState={{ expanded: serverPickerOpen }}
+            style={({ pressed }) => [
+              styles.serverPickerTrigger,
+              {
+                backgroundColor: tokens.surface,
+                borderColor: tokens.border,
+                opacity: pressed ? 0.72 : 1,
+              },
+            ]}
+            onPress={() => setServerPickerOpen(true)}
+          >
+            <Text style={[typography.body, styles.serverPickerLabel, { color: tokens.foreground }]}>
+              Saved servers
+            </Text>
+            <ChevronDown size={18} color={tokens.mutedForeground} />
+          </Pressable>
+
+          <NativeBottomSheet
+            visible={serverPickerOpen}
+            title="Saved servers"
+            showCloseButton
+            maxHeight="80%"
+            onClose={() => setServerPickerOpen(false)}
+          >
+            <ScrollView
+              nestedScrollEnabled
+              style={[styles.serverOptions, { borderColor: tokens.border }]}
+            >
+              {serverOptions.map((option, index) => {
+                const selected = option === serverUrl;
+                return (
+                  <Pressable
+                    key={option}
+                    accessibilityRole="radio"
+                    accessibilityState={{ selected }}
+                    style={({ pressed }) => [
+                      styles.serverOption,
+                      index < serverOptions.length - 1 && {
+                        borderBottomWidth: StyleSheet.hairlineWidth,
+                        borderColor: tokens.border,
+                      },
+                      {
+                        backgroundColor: selected ? tokens.primaryMuted : tokens.surface,
+                        opacity: pressed ? 0.72 : 1,
+                      },
+                    ]}
+                    onPress={() => {
+                      setServerUrl(option);
+                      setServerPickerOpen(false);
+                    }}
+                  >
+                    <Text
+                      numberOfLines={2}
+                      style={[
+                        typography.body,
+                        styles.serverPickerLabel,
+                        { color: tokens.foreground },
+                      ]}
+                    >
+                      {option}
+                    </Text>
+                    {selected ? <Check size={18} color={tokens.foreground} /> : null}
+                  </Pressable>
+                );
+              })}
+            </ScrollView>
+          </NativeBottomSheet>
 
           {validatedUrl ? (
             <View style={styles.validated}>
@@ -178,6 +234,29 @@ const styles = StyleSheet.create({
   },
   formRow: { paddingHorizontal: 14, paddingVertical: 12, gap: 10 },
   formHeader: { flexDirection: "row", alignItems: "center", gap: 10 },
-  fullBleedChips: { marginHorizontal: -14 },
+  serverPickerTrigger: {
+    minHeight: 44,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: radius.md,
+    paddingHorizontal: 14,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  serverPickerLabel: { flex: 1, minWidth: 0 },
+  serverOptions: {
+    maxHeight: 360,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: radius.md,
+    overflow: "hidden",
+  },
+  serverOption: {
+    minHeight: 48,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
   validated: { flexDirection: "row", alignItems: "center", gap: 8 },
 });

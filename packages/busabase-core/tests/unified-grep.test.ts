@@ -317,7 +317,11 @@ describe("Unified Grep — POST /grep (files + docs + records)", () => {
     };
 
     const archiveBase = async (baseId: string) => {
-      const cr = await client.bases.archiveChangeRequest({ baseId, submittedBy: "agent" });
+      const cr = await client.bases.lifecycleChangeRequest({
+        operation: "archive",
+        baseId,
+        submittedBy: "agent",
+      });
       await approveAndMerge(cr.id);
     };
 

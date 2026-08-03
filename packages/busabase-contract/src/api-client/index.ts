@@ -607,7 +607,7 @@ export const createBusabaseRestApiClient = (
     confirmAsset: (input) => client.assets.confirm(input),
     updateAssetMetadata: (input) => client.assets.updateMetadata(input),
     createRestoreBaseChangeRequest: (baseId, payload) =>
-      client.bases.restoreChangeRequest({ baseId, ...payload }),
+      client.bases.lifecycleChangeRequest({ baseId, operation: "restore", ...payload }),
     createRestoreFieldChangeRequest: (baseId, payload) =>
       client.bases.fieldChangeRequest({ baseId, operation: "restore", ...payload }),
     listArchivedViews: (baseId) => client.bases.listViews({ baseId, status: "archived" }),

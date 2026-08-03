@@ -136,8 +136,7 @@ export const PROCEDURE_PERMISSION_POLICY: Record<string, ProcedurePermissionPoli
   "bases.createChangeRequest": node("changeRequest"),
   "bases.createBulkChangeRequest": node("changeRequest"),
   "bases.fieldChangeRequest": node("changeRequest"),
-  "bases.archiveChangeRequest": node("changeRequest"),
-  "bases.restoreChangeRequest": node("changeRequest"),
+  "bases.lifecycleChangeRequest": node("changeRequest"),
   "records.changeRequest": node("changeRequest"),
   "views.changeRequest": node("changeRequest"),
   "docs.createChangeRequest": node("changeRequest"),
@@ -226,6 +225,10 @@ export const PROCEDURE_PERMISSION_POLICY: Record<string, ProcedurePermissionPoli
   "install.fromGithub": workspace("manage"),
 
   "changeRequests.list": node("read"),
+  // Same data as `list`, addressed by page number instead of cursor — so it must
+  // sit at the same level. A read-level gap here would let a numbered page
+  // return change requests the cursor listing would have refused.
+  "changeRequests.listPage": node("read"),
   "changeRequests.counts": node("read"),
   "changeRequests.get": node("read"),
 

@@ -1,11 +1,11 @@
 import { useMutation } from "@tanstack/react-query";
 import { type CreatableNodeType, listNodeTypes } from "busabase-contract/domains";
 import { useState } from "react";
-import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Pressable, ScrollView, StyleSheet, Text } from "react-native";
 import { useBusabaseOrpc } from "~/api/use-busabase-orpc";
 import { fmt, useI18n } from "~/i18n";
 import { nodeIconForType } from "~/search/node-icons";
-import { radius, typography } from "~/theme/tokens";
+import { radius, spacing, typography } from "~/theme/tokens";
 import { useTokens } from "~/theme/use-tokens";
 import { NativeActionBar, NativeBottomSheet, NativeInlineError } from "../native-screen";
 import { Button } from "../ui/Button";
@@ -170,7 +170,12 @@ export function CreateNodeModal({ visible, onClose, onCreated, parent }: CreateN
         <Text style={[typography.small, { color: tokens.mutedForeground }]}>
           {t.createNode.typeLabel}
         </Text>
-        <View style={styles.typeGrid}>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          style={styles.typeScroll}
+          contentContainerStyle={styles.typeRow}
+        >
           {NODE_TYPES.map((entry) => {
             const selected = entry.type === nodeType;
             const Icon = nodeIconForType(entry.type);
@@ -189,7 +194,7 @@ export function CreateNodeModal({ visible, onClose, onCreated, parent }: CreateN
                 ]}
                 onPress={() => setNodeType(entry.type)}
               >
-                <Icon size={20} color={selected ? tokens.foreground : tokens.mutedForeground} />
+                <Icon size={17} color={selected ? tokens.foreground : tokens.mutedForeground} />
                 <Text
                   numberOfLines={1}
                   style={[
@@ -202,7 +207,7 @@ export function CreateNodeModal({ visible, onClose, onCreated, parent }: CreateN
               </Pressable>
             );
           })}
-        </View>
+        </ScrollView>
 
         <TextInput
           label={t.createNode.name}
@@ -235,16 +240,17 @@ export function CreateNodeModal({ visible, onClose, onCreated, parent }: CreateN
 const styles = StyleSheet.create({
   formScroll: { flexGrow: 0 },
   form: { gap: 12, paddingBottom: 4 },
-  typeGrid: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  typeScroll: { flexGrow: 0, marginHorizontal: -spacing[5] },
+  typeRow: { paddingHorizontal: spacing[5], gap: 8 },
   typeOption: {
-    width: "48.5%",
-    minHeight: 60,
+    minHeight: 40,
     borderWidth: StyleSheet.hairlineWidth,
     borderRadius: radius.md,
     alignItems: "center",
     justifyContent: "center",
+    flexDirection: "row",
     gap: 6,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
   },
 });

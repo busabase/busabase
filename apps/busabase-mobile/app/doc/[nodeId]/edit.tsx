@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { Platform, Pressable, StyleSheet, View } from "react-native";
 import { useBusabaseOrpc } from "~/api/use-busabase-orpc";
 import { ConnectionGuard } from "~/components/busabase/ConnectionGuard";
+import { DrawerScaffold } from "~/components/busabase/DrawerScaffold";
 import {
   NativeActionBar,
   NativeBottomSheet,
@@ -12,7 +13,6 @@ import {
   NativeErrorState,
   NativeInlineError,
   NativeLoadingState,
-  NativeScreen,
   NativeSection,
 } from "~/components/native-screen";
 import { Button } from "~/components/ui/Button";
@@ -153,19 +153,19 @@ function DocEditContent() {
 
   if (docQuery.isLoading) {
     return (
-      <NativeScreen
+      <DrawerScaffold
         title={title}
         titleNumberOfLines={2}
         subtitle={t.common.edit}
         headerLeading={headerLeading}
       >
         <NativeLoadingState label={t.common.loading} />
-      </NativeScreen>
+      </DrawerScaffold>
     );
   }
   if (docQuery.error) {
     return (
-      <NativeScreen
+      <DrawerScaffold
         title={title}
         titleNumberOfLines={2}
         subtitle={t.common.edit}
@@ -175,26 +175,26 @@ function DocEditContent() {
           message={docQuery.error.message}
           onRetry={() => void docQuery.refetch()}
         />
-      </NativeScreen>
+      </DrawerScaffold>
     );
   }
   if (!doc) {
     // Settled, no error, but not a Doc (or nothing at all) — show the same empty
     // state the read screen shows instead of an editor over a body we never read.
     return (
-      <NativeScreen
+      <DrawerScaffold
         title={title}
         titleNumberOfLines={2}
         subtitle={t.common.edit}
         headerLeading={headerLeading}
       >
         <NativeEmptyState description="This doc is not available." title="Doc not found" />
-      </NativeScreen>
+      </DrawerScaffold>
     );
   }
 
   return (
-    <NativeScreen
+    <DrawerScaffold
       title={title}
       titleNumberOfLines={2}
       subtitle={t.common.edit}
@@ -311,7 +311,7 @@ function DocEditContent() {
           </NativeActionBar>
         }
       />
-    </NativeScreen>
+    </DrawerScaffold>
   );
 }
 

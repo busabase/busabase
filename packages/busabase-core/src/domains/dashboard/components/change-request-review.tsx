@@ -3,7 +3,7 @@ import type { AuditEventVO, ChangeRequestVO, OperationVO, ReviewVO } from "busab
 import { Check, ChevronRight, GitMerge, Sparkles, X } from "lucide-react";
 import { SPALink as Link } from "openlib/ui/dashboard";
 import { Fragment, useEffect, useMemo, useState } from "react";
-import { fmt, useCoreI18n } from "../../../i18n";
+import { fmt, useCoreI18n, useCoreLocale } from "../../../i18n";
 import {
   changeRequestStatusLabel,
   getChangeRequestBrief,
@@ -242,6 +242,7 @@ export function OperationReviewList({
 
 export function ReviewTimelineEntry({ review }: { review: ReviewVO }) {
   const messages = useCoreI18n();
+  const locale = useCoreLocale();
   const approved = review.verdict === "approved";
   return (
     <div className="flex items-start gap-2.5 rounded-lg border bg-background/40 px-3 py-2.5">
@@ -263,7 +264,7 @@ export function ReviewTimelineEntry({ review }: { review: ReviewVO }) {
           />{" "}
           {approved ? messages.review.approvedChangeRequest : messages.review.requestedChanges}
           <span className="ml-2 text-muted-foreground text-xs">
-            {formatDetailTime(review.createdAt)}
+            {formatDetailTime(review.createdAt, locale)}
           </span>
         </div>
         {review.reason ? (
@@ -278,6 +279,7 @@ export function ReviewTimelineEntry({ review }: { review: ReviewVO }) {
 
 export function MergeTimelineEntry({ event }: { event: AuditEventVO }) {
   const messages = useCoreI18n();
+  const locale = useCoreLocale();
 
   return (
     <div className="flex items-start gap-2.5 rounded-lg border bg-background/40 px-3 py-2.5">
@@ -293,7 +295,7 @@ export function MergeTimelineEntry({ event }: { event: AuditEventVO }) {
           />{" "}
           {messages.review.mergedThisChangeRequest}
           <span className="ml-2 text-muted-foreground text-xs">
-            {formatDetailTime(event.createdAt)}
+            {formatDetailTime(event.createdAt, locale)}
           </span>
         </div>
       </div>
@@ -603,6 +605,7 @@ export function ChangeRequestReviewLayout({
   onReject: (changeRequestId: string, reason?: string) => void;
 }) {
   const messages = useCoreI18n();
+  const locale = useCoreLocale();
   const approvedReview = useMemo(
     () =>
       changeRequest.reviews
@@ -656,7 +659,7 @@ export function ChangeRequestReviewLayout({
               <span>{getChangeRequestScopeName(changeRequest, messages)}</span>
             )}
             <span>·</span>
-            <span>{formatDetailTime(changeRequest.createdAt)}</span>
+            <span>{formatDetailTime(changeRequest.createdAt, locale)}</span>
           </div>
           <div className="mt-5 max-w-4xl rounded-lg border bg-background/60 px-4 py-3">
             <div className="flex flex-wrap items-center gap-2">
@@ -730,7 +733,9 @@ export function ChangeRequestReviewLayout({
                       user={approvedReview.reviewer}
                     />
                     <span className="shrink-0">·</span>
-                    <span className="shrink-0">{formatDetailTime(approvedReview.createdAt)}</span>
+                    <span className="shrink-0">
+                      {formatDetailTime(approvedReview.createdAt, locale)}
+                    </span>
                   </span>
                 }
               />
@@ -747,18 +752,20 @@ export function ChangeRequestReviewLayout({
                       user={mergeEvent.actor}
                     />
                     <span className="shrink-0">·</span>
-                    <span className="shrink-0">{formatDetailTime(mergeEvent.createdAt)}</span>
+                    <span className="shrink-0">
+                      {formatDetailTime(mergeEvent.createdAt, locale)}
+                    </span>
                   </span>
                 }
               />
             ) : null}
             <SidebarRow
               label={messages.common.created}
-              value={formatDetailTime(changeRequest.createdAt)}
+              value={formatDetailTime(changeRequest.createdAt, locale)}
             />
             <SidebarRow
               label={messages.common.updated}
-              value={formatDetailTime(changeRequest.updatedAt)}
+              value={formatDetailTime(changeRequest.updatedAt, locale)}
             />
           </SidebarPanel>
         </BusabaseSidePanel>

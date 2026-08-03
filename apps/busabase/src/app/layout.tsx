@@ -1,6 +1,11 @@
 import type { Metadata } from "next";
 import { Fraunces, Inter, Noto_Serif_SC } from "next/font/google";
 import { headers } from "next/headers";
+import { getDb } from "~/db";
+import {
+  EMPTY_APP_BRANDING,
+  getAppBrandingSafe,
+} from "~/domains/settings/logic/app-branding-store";
 import { getBusabaseAppLL, getBusabaseLocaleFromAcceptLanguage } from "~/lib/i18n";
 import { Providers } from "./providers";
 import "./global.css";
@@ -40,11 +45,25 @@ export async function generateMetadata(): Promise<Metadata> {
   const locale = getBusabaseLocaleFromAcceptLanguage(headerList.get("accept-language"));
   const LL = getBusabaseAppLL(locale);
 
+  // The root layout's metadata is already per-request (it reads `headers()`),
+  // so the white-label name can simply be read from the DB here — no
+  // client-side `document.title` hack needed, and the branded title is present
+  // in the very first HTML byte (and in the busabase-desktop window title).
+  // `getAppBrandingSafe` swallows a missing/unmigrated DB so a cold first boot
+  // still renders the stock title instead of erroring the whole page.
+  const branding = await (async () => {
+    try {
+      return await getAppBrandingSafe(await getDb());
+    } catch {
+      return EMPTY_APP_BRANDING;
+    }
+  })();
+
   return {
-    title: LL.seo.title(),
-    description: LL.seo.description(),
+    title: branding.name || LL.seo.title(),
+    description: branding.description || LL.seo.description(),
     icons: {
-      icon: "/icon.svg",
+      icon: branding.logoUrl || "/icon.svg",
     },
   };
 }

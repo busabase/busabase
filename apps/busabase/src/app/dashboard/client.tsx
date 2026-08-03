@@ -16,7 +16,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { detectBrowserLocale, type Locale } from "openlib/i18n";
 import { addDemoParam } from "openlib/ui/dashboard";
 import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
-import { ProductReadyDashboardShell } from "~/components/dashboard/productready-dashboard-shell";
+import { BusabaseDashboardShell } from "~/components/dashboard/busabase-dashboard-shell";
 import { DashboardNotFound } from "~/components/spa/not-found";
 import { SPARouteRenderer } from "~/components/spa/spa-route-renderer";
 import { SPAWrapper } from "~/components/spa/spa-wrapper";
@@ -303,7 +303,7 @@ function DashboardClientContent({ initialPath = "/home", localUserName }: Dashbo
             {routedContent}
           </div>
         ) : (
-          <ProductReadyDashboardShell
+          <BusabaseDashboardShell
             activeChangeRequestCount={
               changeRequests.filter((changeRequest) => changeRequest.status === "in_review").length
             }
@@ -328,7 +328,7 @@ function DashboardClientContent({ initialPath = "/home", localUserName }: Dashbo
             checkIsDescendant={checkIsDescendant}
           >
             {routedContent}
-          </ProductReadyDashboardShell>
+          </BusabaseDashboardShell>
         )}
         <CreateNodeModal
           apiClient={apiClient}

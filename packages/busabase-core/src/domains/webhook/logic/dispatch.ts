@@ -294,6 +294,44 @@ export const dispatchOneRule = async (
  * `notifyAgentOfChangeRequest` mechanism this generalizes — just now with a
  * persisted delivery-log row instead of silence.
  */
+/** The rule-matching predicate shared by dispatch and the cheap pre-check. */
+const matchingRulesWhere = (args: {
+  spaceId: string;
+  baseId: string | null;
+  eventType: WebhookEventType;
+}) =>
+  and(
+    eq(busabaseWebhookRules.spaceId, args.spaceId),
+    eq(busabaseWebhookRules.eventType, args.eventType),
+    eq(busabaseWebhookRules.enabled, true),
+    args.baseId
+      ? or(isNull(busabaseWebhookRules.baseId), eq(busabaseWebhookRules.baseId, args.baseId))
+      : isNull(busabaseWebhookRules.baseId),
+  );
+
+/**
+ * Is anything listening for this event? Callers that must do expensive work to
+ * BUILD a payload (a bulk merge hydrating every new record) ask this first, so
+ * the overwhelmingly common "no webhook rules configured" case costs one query
+ * for the whole batch instead of a full payload build per item.
+ */
+export const hasWebhookRuleFor = async (
+  db: BusabaseDatabase,
+  args: { spaceId: string; baseId: string | null; eventType: WebhookEventType },
+): Promise<boolean> => {
+  try {
+    const rows = await db
+      .select({ id: busabaseWebhookRules.id })
+      .from(busabaseWebhookRules)
+      .where(matchingRulesWhere(args))
+      .limit(1);
+    return rows.length > 0;
+  } catch (error) {
+    console.error("[busabase] hasWebhookRuleFor failed unexpectedly", error);
+    return false;
+  }
+};
+
 export const dispatchWebhookEvent = async (
   db: BusabaseDatabase,
   args: {
@@ -304,19 +342,7 @@ export const dispatchWebhookEvent = async (
   },
 ): Promise<void> => {
   try {
-    const rules = await db
-      .select()
-      .from(busabaseWebhookRules)
-      .where(
-        and(
-          eq(busabaseWebhookRules.spaceId, args.spaceId),
-          eq(busabaseWebhookRules.eventType, args.eventType),
-          eq(busabaseWebhookRules.enabled, true),
-          args.baseId
-            ? or(isNull(busabaseWebhookRules.baseId), eq(busabaseWebhookRules.baseId, args.baseId))
-            : isNull(busabaseWebhookRules.baseId),
-        ),
-      );
+    const rules = await db.select().from(busabaseWebhookRules).where(matchingRulesWhere(args));
 
     if (rules.length === 0) return;
 

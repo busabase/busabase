@@ -17,12 +17,13 @@ import { useMemo, useState } from "react";
 import { useLocation } from "wouter";
 import { useSPA } from "~/components/spa/spa-context";
 import { SettingsDialog } from "~/domains/settings/components/settings-dialog";
+import { useAppBranding } from "~/domains/settings/hooks/use-app-branding";
 import { getLanguageOptions } from "~/i18n/config";
 import { getBusabaseAppLL } from "~/lib/i18n";
 
 const BUSABASE_LOGO = "/icon.svg";
 
-interface ProductReadyDashboardShellProps {
+interface BusabaseDashboardShellProps {
   children: ReactNode;
   activeChangeRequestCount: number;
   nodes: NodeVO[];
@@ -56,7 +57,7 @@ interface ProductReadyDashboardShellProps {
  * shared Space Selector so workspace identity and plan read exactly like Cloud;
  * only account and multi-workspace actions are inert.
  */
-export function ProductReadyDashboardShell({
+export function BusabaseDashboardShell({
   activeChangeRequestCount,
   children,
   nodes,
@@ -71,7 +72,7 @@ export function ProductReadyDashboardShell({
   loadingNodeIds,
   onExpandNode,
   checkIsDescendant,
-}: ProductReadyDashboardShellProps) {
+}: BusabaseDashboardShellProps) {
   const { activeSpace, spaces, unreadCount, user } = useSPA();
   const [location, navigate] = useLocation();
   const addDemoParam = useAddDemoParam();
@@ -79,19 +80,38 @@ export function ProductReadyDashboardShell({
   const coreMessages = useCoreI18n();
   const [settingsDialogOpen, setSettingsDialogOpen] = useState(false);
   const currentPath = location.split("?")[0];
+  const branding = useAppBranding();
   const languageOptions = useMemo(
     () => getLanguageOptions(locale === "zh-CN" || locale === "ja" ? locale : "en"),
     [locale],
   );
 
+  // Built-in defaults — also what the Branding settings tab shows as placeholders.
+  const brandingDefaults = {
+    name: LL.shell.localSpaceName(),
+    description: LL.shell.approvalFirstKb(),
+    logoUrl: BUSABASE_LOGO,
+  };
+  // A white-labelled instance overrides the top-left slot's name/description/logo.
+  // Everything else (the workspace dropdown with Inbox/Activity/Settings/…) is
+  // deliberately left intact, so nothing becomes unreachable after branding.
+  const brandedLogo = branding?.logoUrl || BUSABASE_LOGO;
+  const brandedName = branding?.name || activeSpace.name;
+  const brandedDescription = branding?.description
+    ? branding.description
+    : branding?.name || branding?.logoUrl
+      ? brandingDefaults.description
+      : undefined;
+
   const chrome: BusabaseDashboardChrome = {
     activeSpace: {
       id: activeSpace.id,
-      logo: BUSABASE_LOGO,
-      name: activeSpace.name,
+      logo: brandedLogo,
+      name: brandedName,
       plan: LL.shell.localPlan(),
+      description: brandedDescription,
     },
-    appLogo: BUSABASE_LOGO,
+    appLogo: brandedLogo,
     footerExtra: (
       <BusabaseAgentSkillButton
         defaultOrigin="http://localhost:15419"
@@ -103,8 +123,8 @@ export function ProductReadyDashboardShell({
     isLoadingSpaces: false,
     spaces: spaces.map((space) => ({
       id: space.id,
-      logo: BUSABASE_LOGO,
-      name: space.name,
+      logo: brandedLogo,
+      name: space.id === activeSpace.id ? brandedName : space.name,
       plan: LL.shell.localPlan(),
     })),
     unreadCount,
@@ -195,6 +215,8 @@ export function ProductReadyDashboardShell({
         vaultLabels={LL.vaultSettings}
         webhookLabels={LL.webhookSettings}
         cloudConnectLabels={LL.cloudConnect}
+        brandingLabels={LL.appBranding}
+        brandingDefaults={brandingDefaults}
         open={settingsDialogOpen}
         onOpenChange={setSettingsDialogOpen}
         languageOptions={languageOptions}
