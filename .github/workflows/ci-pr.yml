@@ -1,0 +1,51 @@
+# Pull-request pipeline. Merging a PR into `main` is what publishes to npm
+# (publish-npm.yml), so this is the gate that stands in front of a release —
+# not a formality that runs beside it.
+#
+# `ci-ok` is the ONLY required status check on `main`. Requiring the individual
+# jobs instead would mean editing branch protection every time a job is added or
+# renamed, and — more importantly — it would deadlock the badge commit below.
+#
+# `paths-ignore` pairs with ci-badge.yml: a commit that only touches
+# coverage.svg skips this workflow and is waved through there instead. GitHub
+# never reports a required check for a workflow skipped by a path filter, so a
+# same-named `ci-ok` job has to exist on the other side or such a PR would sit
+# "Expected — waiting for status" forever.
+#
+# Owned by this open-source repo (busabase/busabase). The kapps sync
+# (scripts/publish-busabase-repo.ts) PRESERVES `.github`, so it never overwrites
+# this file — edit it here.
+name: CI (pull request)
+
+on:
+  pull_request:
+    branches: [main]
+    paths-ignore:
+      - "apps/busabase/public/assets/readme/coverage.svg"
+
+concurrency:
+  group: ci-pr-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    uses: ./.github/workflows/ci-checks.yml
+    # The coverage job commits the refreshed badge onto release/* branches.
+    permissions:
+      contents: write
+    secrets: inherit
+
+  ci-ok:
+    name: ci-ok
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    needs: [checks]
+    # `always()` so a failed dependency still reports a (failing) result rather
+    # than leaving the required check unreported and the PR stuck.
+    if: always()
+    steps:
+      - name: Fail unless every check succeeded
+        run: |
+          result='${{ needs.checks.result }}'
+          echo "checks: $result"
+          [ "$result" = "success" ]

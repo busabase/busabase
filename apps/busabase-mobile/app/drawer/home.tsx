@@ -204,6 +204,7 @@ function HomeContent() {
   return (
     <DrawerScaffold
       title={t.home.title}
+      contentWidth="readable"
       refreshing={changeRequestsQuery.isRefetching || activityQuery.isRefetching}
       onRefresh={refetchAll}
     >

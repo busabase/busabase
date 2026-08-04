@@ -3,7 +3,7 @@
     "name": "Busabase",
     "slug": "busabase-mobile",
     "scheme": "busabase",
-    "version": "0.11.3",
+    "version": "0.11.4",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "automatic",
@@ -52,10 +52,10 @@
         {
           "image": "./assets/splash-icon.png",
           "imageWidth": 160,
-          "backgroundColor": "#F7F4ED",
+          "backgroundColor": "#F1F3F3",
           "dark": {
             "image": "./assets/splash-icon-dark.png",
-            "backgroundColor": "#171717"
+            "backgroundColor": "#0A0A0A"
           }
         }
       ],

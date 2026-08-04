@@ -418,10 +418,33 @@ fn is_busabase_healthy() -> bool {
     response.starts_with("HTTP/1.1 200") || response.starts_with("HTTP/1.0 200")
 }
 
+/// Bring the main window back to the foreground.
+///
+/// Both entry points below need this: a deep link can arrive while the window
+/// is minimized (OAuth in the OS browser) or while a second launch is being
+/// folded into this instance.
+fn focus_main_window(app: &AppHandle) {
+    let Some(window) = app.get_webview_window("main") else {
+        return;
+    };
+    let _ = window.unminimize();
+    let _ = window.show();
+    let _ = window.set_focus();
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .menu(desktop_menu::build_desktop_menu)
+        // MUST be the first plugin registered (upstream requirement). Without it
+        // a `busabase://` deep link on Linux/Windows starts a *second* copy of
+        // the app instead of reaching the running one — the sidecar port would
+        // already be taken and the user would see a broken duplicate window.
+        // The `deep-link` feature makes it forward the URL to the plugin below.
+        .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+            focus_main_window(app);
+        }))
+        .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_opener::init())
         // Launch-at-login support (opt-in via the in-app toggle). On macOS this
         // registers a per-user LaunchAgent; Windows uses the registry Run key and
@@ -435,6 +458,27 @@ pub fn run() {
                 .default_version_comparator(should_update_busabase_desktop)
                 .build(),
         )
+        .setup(|app| {
+            use tauri_plugin_deep_link::DeepLinkExt;
+
+            // Packaged installs get the `busabase://` association from the
+            // bundle manifest (Info.plist / .desktop / registry). A dev run or
+            // a plain `cargo run` has no bundle, so register at runtime —
+            // supported on Linux and Windows only.
+            #[cfg(any(target_os = "linux", target_os = "windows"))]
+            if let Err(error) = app.deep_link().register_all() {
+                eprintln!("[busabase-desktop] Could not register busabase:// scheme: {error}");
+            }
+
+            // The JS side (`src/app/page.tsx`) reads the URL and refreshes the
+            // embedded app; the window raise has to happen natively.
+            let handle = app.handle().clone();
+            app.deep_link().on_open_url(move |_event| {
+                focus_main_window(&handle);
+            });
+
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             busabase_sidecar_status,
             request_desktop_restart,

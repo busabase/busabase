@@ -1,29 +1,27 @@
 import { Platform } from "react-native";
 
-// Mirrors the busabase web dashboard, which inherits openlib/KUI's neutral
-// (shadcn/Linear) OKLCH theme converted to sRGB hex: a monochrome grayscale
-// scale with a near-black primary, subtle gray borders, and white cards on a
-// faintly tinted background. Color is reserved for semantic status — the
-// merged/review/rejected trio below (the 茶 Cha palette) plus destructive —
-// there is no brand accent. Canonical source: packages/openlib/shared.css +
-// apps/busabase-cloud/content/spec/design-system.md.
+// Mirrors the Busabase web dashboard's cool micro-cement workbench theme.
+// Brand assets intentionally keep their Graphite/Paper colors; these tokens
+// describe product UI. Color is reserved for semantic review status.
+// Canonical source: apps/busabase/src/app/global.css + content/spec/design-system.md.
 export const lightTokens = {
-  background: "#F8F8F7",
-  surface: "#FFFFFF",
-  card: "#FFFFFF",
-  foreground: "#0A0A0A",
-  mutedForeground: "#6F6F6F",
-  muted: "#F1F1F0",
-  border: "#E1E1DF",
-  primary: "#171717",
-  primaryForeground: "#FAFAFA",
-  primaryMuted: "#ECECEA",
+  background: "#F1F3F3",
+  surface: "#F9FAFA",
+  card: "#F9FAFA",
+  sidebar: "#EDEFEF",
+  foreground: "#161818",
+  mutedForeground: "#6F7373",
+  muted: "#E6E9E9",
+  border: "#D6DADA",
+  primary: "#161818",
+  primaryForeground: "#F1F3F3",
+  primaryMuted: "#E6E9E9",
   destructive: "#EF4444",
   destructiveForeground: "#FAFAFA",
   // 茶 (Cha) semantic status palette — the only chromatic colors in the
   // product. "text" is the on-light emphasis variant (-strong).
-  merged: { base: "#5E8C6A", text: "#43704F" },
-  review: { base: "#C79A3E", text: "#8A6A24" },
+  merged: { base: "#5E8C6A", text: "#406C4C" },
+  review: { base: "#C79A3E", text: "#7F6221" },
   rejected: { base: "#B95B3F", text: "#9A4531" },
   // Kept for non-CR contexts (network/misc warnings) — not part of Cha.
   success: "#16A34A",
@@ -39,6 +37,7 @@ export const darkTokens: Tokens = {
   background: "#0A0A0A",
   surface: "#171717",
   card: "#171717",
+  sidebar: "#171717",
   foreground: "#FAFAFA",
   mutedForeground: "#A3A3A3",
   muted: "#262626",
@@ -99,10 +98,10 @@ export const typography = {
 } as const;
 
 export const radius = {
-  sm: 6,
-  md: 8,
-  lg: 10,
-  xl: 14,
+  sm: 0,
+  md: 2,
+  lg: 4,
+  xl: 8,
   full: 999,
 } as const;
 

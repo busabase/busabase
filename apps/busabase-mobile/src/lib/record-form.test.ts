@@ -1,5 +1,30 @@
+import type { BaseFieldVO } from "busabase-contract/types";
 import { describe, expect, it } from "vitest";
-import { getChangedFieldValues } from "./record-form";
+import { getChangedFieldValues, isCompactRecordFormField } from "./record-form";
+
+const field = (type: BaseFieldVO["type"]): BaseFieldVO =>
+  ({
+    id: `field-${type}`,
+    baseId: "base-1",
+    slug: type,
+    name: type,
+    type,
+    required: false,
+    position: 0,
+    options: {},
+  }) satisfies BaseFieldVO;
+
+describe("isCompactRecordFormField", () => {
+  it("uses paired columns only for short editor controls", () => {
+    expect(isCompactRecordFormField(field("number"))).toBe(true);
+    expect(isCompactRecordFormField(field("date"))).toBe(true);
+    expect(isCompactRecordFormField(field("checkbox"))).toBe(true);
+    expect(isCompactRecordFormField(field("select"))).toBe(true);
+    expect(isCompactRecordFormField(field("markdown"))).toBe(false);
+    expect(isCompactRecordFormField(field("attachment"))).toBe(false);
+    expect(isCompactRecordFormField(field("url"))).toBe(false);
+  });
+});
 
 describe("getChangedFieldValues", () => {
   it("keeps only added and changed values", () => {

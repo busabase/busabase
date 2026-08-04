@@ -1,0 +1,31 @@
+# Post-merge pipeline on `main`.
+#
+# Releases are gated by ci-pr.yml before they land, so this is confirmation
+# rather than the gate: it catches anything that only shows up once a change is
+# actually on `main`, and it is where the benchmark runs (too slow to make every
+# pull request wait on it).
+#
+# It does NOT gate publish-npm.yml or docker.yml — those trigger on the same
+# push and run alongside this. That is exactly why the pull-request gate has to
+# be the real one.
+#
+# Owned by this open-source repo (busabase/busabase). The kapps sync
+# (scripts/publish-busabase-repo.ts) PRESERVES `.github`, so it never overwrites
+# this file — edit it here.
+name: CI (main)
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-main-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    uses: ./.github/workflows/ci-checks.yml
+    with:
+      run-benchmark: true
+    secrets: inherit

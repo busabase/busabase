@@ -434,6 +434,7 @@ function WebhookSettingsContent() {
   return (
     <DrawerScaffold
       title="Webhook Rules"
+      contentWidth="readable"
       headerLeading={headerLeading}
       refreshing={rulesQuery.isRefetching}
       onRefresh={() => void rulesQuery.refetch()}

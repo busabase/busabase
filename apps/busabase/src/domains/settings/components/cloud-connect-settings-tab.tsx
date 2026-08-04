@@ -8,7 +8,7 @@ import { Label } from "kui/label";
 import { CloudOff, Loader2, RefreshCw, ShieldCheck } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { TranslationFunctions } from "~/i18n/i18n-types";
-import { openExternalViaDesktopShell } from "../utils/desktop-shell";
+import { isDesktopCloudConnectReturn, openExternalViaDesktopShell } from "../utils/desktop-shell";
 
 export type CloudConnectSettingsLabels = TranslationFunctions["cloudConnect"];
 
@@ -76,6 +76,25 @@ export function CloudConnectSettingsTab({ labels, active }: Props) {
     };
   }, [active, connectFailedMessage]);
 
+  // Desktop shell path: the OS browser finished sign-in and deep linked back
+  // into `apps/busabase-desktop`, which raised its window and forwarded the
+  // result here. Refresh right away rather than making the user watch a stale
+  // "waiting in your browser" state until the next 2s poll tick.
+  useEffect(() => {
+    const onMessage = (event: MessageEvent) => {
+      if (!isDesktopCloudConnectReturn(event)) return;
+      setHandedOffToBrowser(false);
+      void fetchStatus(connectFailedMessage)
+        .then(setSnapshot)
+        .catch(() => {
+          // Transient — the regular poll will catch up.
+        });
+    };
+
+    window.addEventListener("message", onMessage);
+    return () => window.removeEventListener("message", onMessage);
+  }, [connectFailedMessage]);
+
   const status = snapshot?.status ?? "disconnected";
   const isBusy = status === "connecting" || isConnecting || isDisconnecting;
 
@@ -97,7 +116,11 @@ export function CloudConnectSettingsTab({ labels, active }: Props) {
       const res = await fetch("/api/cloud-connect/connect", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ cloudUrl: cloudUrlInput }),
+        // No popup means sign-in will happen outside this page — in the desktop
+        // shell, in the OS browser. Tell the server now, while the pending flow
+        // is created, so its callback page can deep link the user back to the
+        // desktop window instead of asking them to close an uncloseable tab.
+        body: JSON.stringify({ cloudUrl: cloudUrlInput, returnToDesktop: popup === null }),
       });
       const body = (await res.json()) as { authorizeUrl?: string; error?: string };
       if (!res.ok || !body.authorizeUrl) {

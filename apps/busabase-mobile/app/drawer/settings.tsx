@@ -202,7 +202,7 @@ function SettingsContent() {
   const cloudAccountLimitReached = cloudAccounts.length >= MAX_CLOUD_ACCOUNTS;
 
   return (
-    <DrawerScaffold title={t.settings.title}>
+    <DrawerScaffold title={t.settings.title} contentWidth="readable">
       <NativeSection title={t.settings.connection}>
         <NativeRow
           title={connectionLabel}

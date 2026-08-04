@@ -28,6 +28,12 @@ interface PendingFlow {
   redirectUri: string;
   tunnelId: string;
   createdAt: number;
+  /**
+   * Set when the flow was started from inside the Busabase Desktop shell, so
+   * the callback page knows to hand the user back via the `busabase://` deep
+   * link instead of telling them to close a tab they cannot close.
+   */
+  returnToDesktop: boolean;
 }
 
 type GlobalWithPendingFlows = typeof globalThis & {
@@ -66,6 +72,8 @@ export interface BeginConnectInput {
   cloudUrl: string;
   tunnelId: string;
   redirectUri: string;
+  /** See {@link PendingFlow.returnToDesktop}. Defaults to `false` (browser tab). */
+  returnToDesktop?: boolean;
 }
 
 /** Build the authorize URL + persist the PKCE verifier under a fresh `state`. */
@@ -82,6 +90,7 @@ export function beginCloudConnectAuthorize(input: BeginConnectInput): { authoriz
     redirectUri: input.redirectUri,
     tunnelId: input.tunnelId,
     createdAt: Date.now(),
+    returnToDesktop: input.returnToDesktop === true,
   });
 
   const authorizeUrl = new URL("/api/oauth/authorize", input.cloudUrl);
@@ -102,6 +111,17 @@ export function beginCloudConnectAuthorize(input: BeginConnectInput): { authoriz
   authorizeUrl.searchParams.set("prompt", "login");
 
   return { authorizeUrl: authorizeUrl.toString() };
+}
+
+/**
+ * Was this flow started from the Busabase Desktop shell? Non-consuming, so the
+ * callback route can ask before {@link completeCloudConnectAuthorize} deletes
+ * the pending flow — and can still ask on the `?error=` path, where there is no
+ * code to exchange at all.
+ */
+export function isDesktopCloudConnectFlow(state: string | null | undefined): boolean {
+  if (!state) return false;
+  return getPendingFlows().get(state)?.returnToDesktop === true;
 }
 
 /** Exchange the callback's `code` for a scoped tunnel-connect credential. */

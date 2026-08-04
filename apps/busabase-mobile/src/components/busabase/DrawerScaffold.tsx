@@ -60,7 +60,10 @@ interface DrawerScaffoldProps {
   headerAction?: ReactNode;
   footer?: ReactNode;
   contentContainerStyle?: StyleProp<ViewStyle>;
+  contentWidth?: "full" | "readable";
 }
+
+const READABLE_CONTENT_MAX_WIDTH = 768;
 
 // Pinned nav, mirroring the web dashboard's resting sidebar: Home (the landing
 // digest) + Search. Everything else moved into the Space Selector menu, and at
@@ -87,6 +90,7 @@ export function DrawerScaffold({
   headerAction,
   footer,
   contentContainerStyle,
+  contentWidth = "full",
 }: DrawerScaffoldProps) {
   const router = useRouter();
   const pathname = usePathname();
@@ -283,7 +287,7 @@ export function DrawerScaffold({
           width: navigationLayout.persistentSidebar
             ? navigationLayout.sidebarWidth
             : mobile.drawerWidth,
-          backgroundColor: tokens.surface,
+          backgroundColor: tokens.sidebar,
           borderColor: tokens.border,
           paddingTop: Platform.select({
             web: navigationLayout.persistentSidebar ? 0 : mobile.headerHeight,
@@ -458,6 +462,10 @@ export function DrawerScaffold({
             headerAction={headerAction}
             footer={footer}
             contentContainerStyle={contentContainerStyle}
+            bodyContainerStyle={contentWidth === "readable" ? styles.readableContent : undefined}
+            footerContentContainerStyle={
+              contentWidth === "readable" ? styles.readableContent : undefined
+            }
           >
             {children}
           </NativeScreen>
@@ -507,6 +515,11 @@ export function DrawerScaffold({
 const styles = StyleSheet.create({
   scaffold: { flex: 1, flexDirection: "row" },
   contentPane: { flex: 1, minWidth: 0 },
+  readableContent: {
+    width: "100%",
+    maxWidth: READABLE_CONTENT_MAX_WIDTH,
+    alignSelf: "center",
+  },
   menuButton: {
     width: 44,
     height: 44,

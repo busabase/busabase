@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Busabase Desktop",
-  "version": "0.11.3",
+  "version": "0.11.4",
   "identifier": "com.busabase.app",
   "build": {
     "beforeDevCommand": "pnpm dev",
@@ -52,6 +52,11 @@
     }
   },
   "plugins": {
+    "deep-link": {
+      "desktop": {
+        "schemes": ["busabase"]
+      }
+    },
     "updater": {
       "pubkey": "",
       "endpoints": ["https://s1.busabase.com/public/downloads/busabase-desktop/latest.json"]

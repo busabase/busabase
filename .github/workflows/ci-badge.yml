@@ -1,0 +1,50 @@
+# Companion to ci-pr.yml for badge-only commits.
+#
+# The coverage job in ci-checks.yml regenerates coverage.svg on release/*
+# branches and commits it, which makes that commit the PR's new HEAD. Branch
+# protection evaluates required checks against HEAD, so without something
+# reporting `ci-ok` there, the PR would wait forever for a status that a
+# path-filtered workflow never produces.
+#
+# Re-running the full suite for an SVG would just burn ~10 minutes to reconfirm
+# what the previous commit already proved, so this waves it through instead. The
+# job name must stay exactly `ci-ok` — that string is the required check.
+#
+# The `paths` here and the `paths-ignore` in ci-pr.yml are complementary: every
+# commit must match exactly one of them. Change one and change the other.
+#
+# Owned by this open-source repo (busabase/busabase). The kapps sync
+# (scripts/publish-busabase-repo.ts) PRESERVES `.github`, so it never overwrites
+# this file — edit it here.
+name: CI (badge only)
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "apps/busabase/public/assets/readme/coverage.svg"
+
+concurrency:
+  group: ci-badge-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ci-ok:
+    name: ci-ok
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Confirm nothing but the coverage badge changed
+        # Defence in depth: `paths` already scoped this workflow to the badge,
+        # but that filter looks at the whole push. Diffing against the base
+        # makes sure no code slipped through on a badge-labelled commit.
+        run: |
+          git fetch --depth=1 origin '${{ github.base_ref }}'
+          changed=$(git diff --name-only "origin/${{ github.base_ref }}...HEAD")
+          echo "$changed"
+          unexpected=$(echo "$changed" | grep -v '^apps/busabase/public/assets/readme/coverage.svg$' || true)
+          if [ -n "$unexpected" ]; then
+            echo "::error::Not a badge-only pull request; refusing to wave it through."
+            exit 1
+          fi
