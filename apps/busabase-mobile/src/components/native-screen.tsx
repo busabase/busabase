@@ -12,10 +12,12 @@ import {
   type StyleProp,
   StyleSheet,
   Text,
+  useWindowDimensions,
   View,
   type ViewStyle,
 } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
+import { getAppNavigationLayout } from "~/lib/responsive-layout";
 import { mobile, radius, spacing, typography } from "~/theme/tokens";
 import { useTokens } from "~/theme/use-tokens";
 import { Button } from "./ui/Button";
@@ -31,6 +33,8 @@ interface NativeScreenProps {
   headerAction?: ReactNode;
   footer?: ReactNode;
   contentContainerStyle?: StyleProp<ViewStyle>;
+  bodyContainerStyle?: StyleProp<ViewStyle>;
+  footerContentContainerStyle?: StyleProp<ViewStyle>;
 }
 
 export function NativeScreen({
@@ -44,6 +48,8 @@ export function NativeScreen({
   headerAction,
   footer,
   contentContainerStyle,
+  bodyContainerStyle,
+  footerContentContainerStyle,
 }: NativeScreenProps) {
   const tokens = useTokens();
 
@@ -92,14 +98,18 @@ export function NativeScreen({
             </View>
             {headerAction ? <View style={styles.headerAction}>{headerAction}</View> : null}
           </View>
-          {children}
+          {bodyContainerStyle ? <View style={bodyContainerStyle}>{children}</View> : children}
         </ScrollView>
         {footer ? (
           <SafeAreaView
             edges={["bottom"]}
             style={[styles.footer, { backgroundColor: tokens.surface, borderColor: tokens.border }]}
           >
-            {footer}
+            {footerContentContainerStyle ? (
+              <View style={footerContentContainerStyle}>{footer}</View>
+            ) : (
+              footer
+            )}
           </SafeAreaView>
         ) : null}
       </KeyboardAvoidingView>
@@ -368,11 +378,22 @@ export function NativeBottomSheet({
 }: NativeBottomSheetProps) {
   const tokens = useTokens();
   const insets = useSafeAreaInsets();
+  const { width, height } = useWindowDimensions();
+  const regularPresentation = getAppNavigationLayout(width, height).persistentSidebar;
 
   return (
-    <Modal animationType="slide" transparent visible={visible} onRequestClose={onClose}>
+    <Modal
+      animationType={regularPresentation ? "fade" : "slide"}
+      transparent
+      visible={visible}
+      onRequestClose={onClose}
+    >
       <KeyboardAvoidingView
-        style={[styles.sheetScrim, { backgroundColor: tokens.overlay }]}
+        style={[
+          styles.sheetScrim,
+          regularPresentation ? styles.sheetScrimRegular : null,
+          { backgroundColor: tokens.overlay },
+        ]}
         behavior={Platform.select({ ios: "padding", default: undefined })}
       >
         <Pressable
@@ -384,6 +405,7 @@ export function NativeBottomSheet({
         <View
           style={[
             styles.sheet,
+            regularPresentation ? styles.sheetRegular : null,
             { backgroundColor: tokens.surface },
             {
               paddingBottom: Platform.select({
@@ -394,7 +416,9 @@ export function NativeBottomSheet({
             maxHeight ? { maxHeight } : null,
           ]}
         >
-          <View style={[styles.sheetHandle, { backgroundColor: tokens.handle }]} />
+          {regularPresentation ? null : (
+            <View style={[styles.sheetHandle, { backgroundColor: tokens.handle }]} />
+          )}
           {showCloseButton ? (
             <View style={styles.sheetTitleRow}>
               {title ? (
@@ -607,7 +631,12 @@ const styles = StyleSheet.create({
   },
   inlineErrorText: { flex: 1, minWidth: 0 },
   sheetScrim: { flex: 1, justifyContent: "flex-end" },
-  sheetDismiss: { flex: 1 },
+  sheetScrimRegular: {
+    justifyContent: "center",
+    paddingHorizontal: spacing[8],
+    paddingVertical: spacing[6],
+  },
+  sheetDismiss: { position: "absolute", top: 0, right: 0, bottom: 0, left: 0 },
   sheet: {
     borderTopLeftRadius: radius.xl,
     borderTopRightRadius: radius.xl,
@@ -615,6 +644,13 @@ const styles = StyleSheet.create({
     paddingTop: 10,
     paddingBottom: spacing[6],
     gap: spacing[3],
+  },
+  sheetRegular: {
+    width: "100%",
+    maxWidth: 720,
+    alignSelf: "center",
+    borderBottomLeftRadius: radius.xl,
+    borderBottomRightRadius: radius.xl,
   },
   sheetHandle: {
     alignSelf: "center",

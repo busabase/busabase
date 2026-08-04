@@ -218,6 +218,7 @@ function VaultSettingsContent() {
   return (
     <DrawerScaffold
       title="Vault"
+      contentWidth="readable"
       headerLeading={headerLeading}
       refreshing={vaultQuery.isRefetching}
       onRefresh={() => void vaultQuery.refetch()}

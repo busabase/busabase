@@ -5,6 +5,7 @@ import { AlertTriangle, Download, Loader2, RefreshCw, RotateCcw } from "lucide-r
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AutostartToggle } from "../components/autostart-toggle";
 import { DesktopTitlebar } from "../components/desktop-titlebar";
+import { CLOUD_CONNECT_RETURNED, parseCloudConnectReturn } from "../lib/deep-link";
 
 interface BusabaseSidecarStatus {
   running: boolean;
@@ -60,6 +61,8 @@ const dashboardUrl = (status: BusabaseSidecarStatus) =>
 // `apps/busabase/src/domains/settings/utils/desktop-shell.ts`.
 const OPEN_EXTERNAL_REQUEST = "busabase-desktop:open-external";
 const OPEN_EXTERNAL_RESULT = "busabase-desktop:open-external:result";
+
+// …and the return leg — see `../lib/deep-link`.
 
 export default function Page() {
   const [appUrl, setAppUrl] = useState<string | null>(null);
@@ -181,6 +184,56 @@ export default function Page() {
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);
   }, [appUrl]);
+
+  // Deep link return leg: `busabase://desktop/cloud-connect?status=…` arrives
+  // after the user finished Cloud Connect sign-in in the OS browser. Rust has
+  // already raised the window by the time we get here (see
+  // `src-tauri/src/lib.rs`); our job is to tell the embedded Settings tab so it
+  // stops showing "continue in your browser" and refreshes right away.
+  useEffect(() => {
+    if (!appUrl || !canUseTauriCommands) {
+      return;
+    }
+    const sidecarOrigin = new URL(appUrl).origin;
+    let unlisten: (() => void) | undefined;
+    let cancelled = false;
+
+    const handle = (rawUrl: string) => {
+      const status = parseCloudConnectReturn(rawUrl);
+      if (!status) return;
+      frameRef.current?.contentWindow?.postMessage(
+        { type: CLOUD_CONNECT_RETURNED, status },
+        sidecarOrigin,
+      );
+    };
+
+    void (async () => {
+      try {
+        const { getCurrent, onOpenUrl } = await import("@tauri-apps/plugin-deep-link");
+        // Cold start: the app was launched *by* the deep link, so the event
+        // already fired before this listener existed.
+        const initial = await getCurrent();
+        if (cancelled) return;
+        for (const url of initial ?? []) handle(url);
+
+        const dispose = await onOpenUrl((urls) => {
+          for (const url of urls) handle(url);
+        });
+        if (cancelled) {
+          dispose();
+          return;
+        }
+        unlisten = dispose;
+      } catch (error) {
+        console.error("[busabase-desktop] Could not subscribe to deep links", error);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
+  }, [appUrl, canUseTauriCommands]);
 
   const checkForUpdate = useCallback(
     async (options?: { showError?: boolean }) => {

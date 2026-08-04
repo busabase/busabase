@@ -21,7 +21,10 @@ function normalizeCloudUrl(value: string): string | null {
  * so this Settings tab stays mounted and can poll `/status` for the result.
  */
 export async function POST(request: NextRequest) {
-  const body = (await request.json().catch(() => ({}))) as { cloudUrl?: unknown };
+  const body = (await request.json().catch(() => ({}))) as {
+    cloudUrl?: unknown;
+    returnToDesktop?: unknown;
+  };
   const db = await getDb();
   const row = await ensureCloudConnectRow(db);
 
@@ -39,6 +42,10 @@ export async function POST(request: NextRequest) {
     cloudUrl,
     tunnelId: row.tunnelId,
     redirectUri,
+    // The caller could not open an in-app popup, which inside the Busabase
+    // Desktop shell means the OS browser will run the sign-in — so the callback
+    // page has to deep link the user back. See `../../../domains/settings/utils/desktop-shell`.
+    returnToDesktop: body.returnToDesktop === true,
   });
 
   return NextResponse.json({ authorizeUrl });

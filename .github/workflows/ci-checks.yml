@@ -1,22 +1,20 @@
+# Reusable check suite shared by ci-pr.yml (pull requests) and ci-main.yml
+# (post-merge on main). Has no triggers of its own — callers own those, so the
+# PR and main pipelines can diverge (benchmark, badge commits) without either
+# file duplicating ~200 lines of job definitions.
+#
 # Owned by this open-source repo (busabase/busabase). The kapps sync
 # (scripts/publish-busabase-repo.ts) PRESERVES `.github`, so it never overwrites
-# this file — edit it here.
-#
-# Lint + typecheck + unit/integration tests + coverage badge + e2e on every push
-# to main and every pull request. Benchmark only runs on push to main (it needs a
-# real built+seeded server and is too slow/noisy to gate external PRs on).
-name: CI
+# these files — edit them here.
+name: CI checks
 
 on:
-  push:
-    branches: [main]
-  pull_request:
-    branches: [main]
-  workflow_dispatch:
-
-concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  workflow_call:
+    inputs:
+      run-benchmark:
+        description: Run the benchmark job (slow; post-merge only).
+        type: boolean
+        default: false
 
 env:
   NODE_VERSION: 24.18.0
@@ -95,7 +93,12 @@ jobs:
     permissions:
       contents: write
     steps:
+      # On `pull_request` the default checkout is a detached merge ref, which
+      # cannot be pushed back to. Check out the PR's head branch so the badge
+      # commit lands on the release branch and merges with it.
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref || github.ref_name }}
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
@@ -108,8 +111,14 @@ jobs:
           pct=$(node -p "require('./packages/busabase-core/coverage/coverage-summary.json').total.lines.pct")
           echo "## Coverage (busabase-core: logic/ + domains/)" >> "$GITHUB_STEP_SUMMARY"
           echo "Lines: **${pct}%**" >> "$GITHUB_STEP_SUMMARY"
-      - name: Commit updated badge (push to main only)
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+      # Releases arrive as a pull request (scripts/publish-busabase-repo.ts --pr),
+      # so the badge is refreshed on the release branch and merges as part of the
+      # release commit. Committing on `main` instead put a
+      # `chore: update coverage badge` bot commit after every single release --
+      # 26 of main's first 144 commits -- carrying no information the release
+      # commit could not have carried itself.
+      - name: Commit updated badge (release pull requests only)
+        if: github.event_name == 'pull_request' && startsWith(github.head_ref, 'release/')
         run: |
           if git diff --quiet -- apps/busabase/public/assets/readme/coverage.svg; then
             echo "Badge unchanged, nothing to commit."
@@ -118,7 +127,12 @@ jobs:
           git config user.name "busabase-bot"
           git config user.email "bot@busabase.com"
           git add apps/busabase/public/assets/readme/coverage.svg
-          git commit -m "chore: update coverage badge [skip ci]"
+          # No [skip ci]: this commit becomes the PR's HEAD, and branch
+          # protection evaluates required checks against HEAD. Skipping CI here
+          # would leave every required check "expected but never reported" and
+          # auto-merge would wait forever. The re-run is bounded -- the badge is
+          # unchanged the second time, so the guard above exits early.
+          git commit -m "chore: update coverage badge"
           git push
 
   e2e:
@@ -156,7 +170,7 @@ jobs:
   benchmark:
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: inputs.run-benchmark
     needs: [lint, typecheck, test]
     steps:
       - uses: actions/checkout@v4

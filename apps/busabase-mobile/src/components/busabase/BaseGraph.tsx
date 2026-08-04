@@ -1,4 +1,5 @@
 import type { BaseVO } from "busabase-contract/types";
+import { Network } from "lucide-react-native";
 import { useMemo } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import Svg, { Circle, Defs, G, Line, Marker, Path, Text as SvgText } from "react-native-svg";
@@ -35,7 +36,7 @@ export function BaseGraph({ bases, width, height, onNodePress }: BaseGraphProps)
     <View style={[styles.container, { width, height, backgroundColor: tokens.background }]}>
       {/* Header badge */}
       <View style={styles.badge}>
-        <View style={[styles.dot, { backgroundColor: nodeColor }]} />
+        <Network size={15} color={nodeColor} />
         <Text style={[typography.caption, { color: labelColor }]}>
           {bases.length} bases · {edgeCount} relations
         </Text>
@@ -110,6 +111,7 @@ export function BaseGraph({ bases, width, height, onNodePress }: BaseGraphProps)
                   textAnchor="middle"
                   fontSize={11}
                   fontWeight="500"
+                  fontFamily="System"
                   fill={labelColor}
                 >
                   {label}
@@ -152,11 +154,6 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 6,
-  },
-  dot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
   },
   nodeHit: {
     position: "absolute",

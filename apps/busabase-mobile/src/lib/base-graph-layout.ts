@@ -30,8 +30,8 @@ export interface BaseGraphLayout {
 
 const HEADER_CLEARANCE = 56;
 const FOOTER_CLEARANCE = 28;
-const MIN_NODE_COLUMN_WIDTH = 132;
-const MIN_NODE_ROW_HEIGHT = 112;
+const MIN_NODE_COLUMN_WIDTH = 84;
+const MIN_NODE_ROW_HEIGHT = 82;
 
 export interface BaseGraphGrid {
   columns: number;
@@ -39,10 +39,32 @@ export interface BaseGraphGrid {
   minHeight: number;
 }
 
-// Desktop can keep the compact square-ish graph. On a phone, cap the number
-// of columns by the readable node width and let the normal page scroll own the
-// extra height. This avoids opening a 7-column canvas with five columns hidden
-// offscreen and no obvious spatial anchor.
+export interface BaseGraphRelationSummary {
+  edgeCount: number;
+  relationCountByBaseId: Map<string, number>;
+}
+
+export const summarizeBaseGraphRelations = (bases: BaseVO[]): BaseGraphRelationSummary => {
+  const baseIds = new Set(bases.map((base) => base.id));
+  const relationCountByBaseId = new Map(bases.map((base) => [base.id, 0]));
+  let edgeCount = 0;
+
+  for (const base of bases) {
+    for (const field of base.fields) {
+      const targetBaseId = field.options.targetBaseId;
+      if (field.type !== "relation" || !targetBaseId || !baseIds.has(targetBaseId)) continue;
+
+      edgeCount += 1;
+      relationCountByBaseId.set(base.id, (relationCountByBaseId.get(base.id) ?? 0) + 1);
+      relationCountByBaseId.set(targetBaseId, (relationCountByBaseId.get(targetBaseId) ?? 0) + 1);
+    }
+  }
+
+  return { edgeCount, relationCountByBaseId };
+};
+
+// The canvas is used on regular-width layouts. Fit dense iPad workspaces into
+// a compact grid while keeping enough room for the node and its short label.
 export const getBaseGraphGrid = (nodeCount: number, width: number): BaseGraphGrid => {
   const idealColumns = Math.max(1, Math.ceil(Math.sqrt(nodeCount)));
   const readableColumns = Math.max(1, Math.floor(width / MIN_NODE_COLUMN_WIDTH));

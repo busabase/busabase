@@ -20,6 +20,7 @@ import {
   StyleSheet,
   Switch,
   Text,
+  useWindowDimensions,
   View,
 } from "react-native";
 import { useBusabaseOrpc } from "~/api/use-busabase-orpc";
@@ -28,7 +29,8 @@ import { useI18n } from "~/i18n";
 import { getAttachmentKindLabel, isImageRef, resolveAttachmentUrl } from "~/lib/attachment";
 import { type PickedFile, uploadAttachment } from "~/lib/attachment-upload";
 import { formatBytes } from "~/lib/format";
-import { isEditableField, type RecordFormValue } from "~/lib/record-form";
+import { isCompactRecordFormField, isEditableField, type RecordFormValue } from "~/lib/record-form";
+import { getAppNavigationLayout } from "~/lib/responsive-layout";
 import { radius, typography } from "~/theme/tokens";
 import { useTokens } from "~/theme/use-tokens";
 import { NativeActionBar, NativeBottomSheet, NativeInlineError, NativeRow } from "../native-screen";
@@ -207,15 +209,22 @@ function FieldRow({
   value,
   onChange,
   last,
+  layout,
 }: {
   field: BaseFieldVO;
   value: RecordFormValue;
   onChange: (value: RecordFormValue) => void;
   last: boolean;
+  layout?: "full" | "left" | "right";
 }) {
   const tokens = useTokens();
   const rowStyle = [
     styles.field,
+    layout === "full" ? styles.fieldFull : null,
+    layout === "left" || layout === "right" ? styles.fieldHalf : null,
+    layout === "left"
+      ? { borderRightWidth: StyleSheet.hairlineWidth, borderColor: tokens.border }
+      : null,
     !last && { borderBottomWidth: StyleSheet.hairlineWidth, borderColor: tokens.border },
   ];
   const fieldLabel = iStringParse(field.name);
@@ -514,6 +523,7 @@ function AttachmentFieldEditor({
 
 export function RecordForm({ fields, values, onChange }: RecordFormProps) {
   const tokens = useTokens();
+  const { width, height } = useWindowDimensions();
   const [expanded, setExpanded] = useState(false);
   const editableFields = fields.filter(isEditableField);
   const initialFields = editableFields.filter(
@@ -521,18 +531,35 @@ export function RecordForm({ fields, values, onChange }: RecordFormProps) {
   );
   const hiddenCount = editableFields.length - initialFields.length;
   const visibleFields = expanded ? editableFields : initialFields;
+  const navigationLayout = getAppNavigationLayout(width, height);
+  const contentWidth = width - navigationLayout.sidebarWidth;
+  const useRegularGrid = navigationLayout.persistentSidebar && contentWidth >= 640;
+  let compactColumn = 0;
+  const layoutFields = visibleFields.map((field) => {
+    if (!useRegularGrid || !isCompactRecordFormField(field)) {
+      compactColumn = 0;
+      return { field, layout: useRegularGrid ? ("full" as const) : undefined };
+    }
+
+    const layout = compactColumn % 2 === 0 ? ("left" as const) : ("right" as const);
+    compactColumn += 1;
+    return { field, layout };
+  });
 
   return (
     <View>
-      {visibleFields.map((field, index) => (
-        <FieldRow
-          key={field.id}
-          field={field}
-          value={values[field.slug] ?? ""}
-          onChange={(next) => onChange(field.slug, next)}
-          last={index === visibleFields.length - 1 && hiddenCount === 0}
-        />
-      ))}
+      <View style={useRegularGrid ? styles.fieldGrid : undefined}>
+        {layoutFields.map(({ field, layout }, index) => (
+          <FieldRow
+            key={field.id}
+            field={field}
+            value={values[field.slug] ?? ""}
+            onChange={(next) => onChange(field.slug, next)}
+            last={index === visibleFields.length - 1 && hiddenCount === 0}
+            layout={layout}
+          />
+        ))}
+      </View>
       {hiddenCount > 0 ? (
         <NativeRow
           title={expanded ? "Show fewer fields" : `Show ${hiddenCount} more fields`}
@@ -552,11 +579,14 @@ export function RecordForm({ fields, values, onChange }: RecordFormProps) {
 }
 
 const styles = StyleSheet.create({
+  fieldGrid: { flexDirection: "row", flexWrap: "wrap" },
   field: {
     paddingHorizontal: 14,
     paddingVertical: 12,
     gap: 8,
   },
+  fieldFull: { width: "100%" },
+  fieldHalf: { width: "50%" },
   checkboxRow: {
     flexDirection: "row",
     alignItems: "center",

@@ -22,6 +22,70 @@ export const DESKTOP_OPEN_EXTERNAL_REQUEST = "busabase-desktop:open-external";
 export const DESKTOP_OPEN_EXTERNAL_RESULT = "busabase-desktop:open-external:result";
 
 /**
+ * Deep link the OAuth callback page uses to hand the user back to the desktop
+ * app once sign-in finished in the OS browser.
+ *
+ * Why a *second* hop instead of making this the OAuth `redirect_uri`: Cloud
+ * only whitelists loopback redirect URIs for the `tunnel` client kind (see
+ * `isAllowedOAuthRedirectUri` in `apps/busabase-cloud`), so the authorization
+ * code must keep landing on `http://localhost:<port>/api/cloud-connect/callback`.
+ * That page then navigates the browser to this custom scheme, which the OS
+ * hands to `apps/busabase-desktop` — no OAuth secret ever travels over it, only
+ * a success/failure marker. The desktop app raises its window and tells the
+ * embedded Settings tab to refresh immediately.
+ *
+ * The path is deliberately NOT `busabase://oauth/callback` — that one belongs
+ * to `apps/busabase-mobile`'s own OAuth flow and is whitelisted by Cloud as a
+ * real redirect URI. Keeping them distinct means neither can be mistaken for
+ * the other.
+ *
+ * Kept in sync with `apps/busabase-desktop/src/app/page.tsx` and
+ * `apps/busabase-desktop/src-tauri/tauri.conf.json`.
+ */
+export const DESKTOP_DEEP_LINK_SCHEME = "busabase";
+export const DESKTOP_CLOUD_CONNECT_RETURN_PATH = "desktop/cloud-connect";
+
+export type DesktopCloudConnectReturnStatus = "ok" | "error";
+
+/** `busabase://desktop/cloud-connect?status=ok` */
+export function buildDesktopCloudConnectReturnUrl(status: DesktopCloudConnectReturnStatus): string {
+  return `${DESKTOP_DEEP_LINK_SCHEME}://${DESKTOP_CLOUD_CONNECT_RETURN_PATH}?status=${status}`;
+}
+
+/**
+ * Posted by the desktop shell into the embedded sidecar iframe when the deep
+ * link above arrives, so the Settings tab reflects the result on the next tick
+ * instead of waiting out its 2s status poll.
+ */
+export const DESKTOP_CLOUD_CONNECT_RETURNED = "busabase-desktop:cloud-connect-returned";
+
+export interface DesktopCloudConnectReturnedMessage {
+  type: typeof DESKTOP_CLOUD_CONNECT_RETURNED;
+  status: DesktopCloudConnectReturnStatus;
+}
+
+/**
+ * Should this `message` event be treated as the desktop shell reporting a
+ * finished Cloud Connect sign-in?
+ *
+ * Only the frame that embedded us may say so. The origin itself cannot be
+ * pinned — see {@link REQUEST_TARGET_ORIGIN} for why the shell's origin is not
+ * knowable from here — so this gates on the source frame, the same way
+ * {@link openExternalViaDesktopShell} gates the reply it waits for.
+ */
+export function isDesktopCloudConnectReturn(
+  event: Pick<MessageEvent, "data" | "source">,
+  win: Window | undefined = typeof window === "undefined" ? undefined : window,
+): DesktopCloudConnectReturnStatus | null {
+  const parent = win?.parent;
+  if (!win || !parent || parent === win) return null;
+  if (event.source !== parent) return null;
+  const data = event.data as Partial<DesktopCloudConnectReturnedMessage> | null | undefined;
+  if (!data || data.type !== DESKTOP_CLOUD_CONNECT_RETURNED) return null;
+  return data.status === "ok" || data.status === "error" ? data.status : null;
+}
+
+/**
  * The request goes to `*` because the shell's own origin is not knowable from
  * here: Tauri serves the host page from `tauri://localhost` (Linux/macOS),
  * `http(s)://tauri.localhost` (Windows) or the dev-server origin under

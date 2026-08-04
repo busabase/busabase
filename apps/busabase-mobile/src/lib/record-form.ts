@@ -20,9 +20,24 @@ const EDITABLE_TYPES: ReadonlySet<FieldType> = new Set<FieldType>([
   "attachment",
 ]);
 
+const COMPACT_EDITOR_TYPES: ReadonlySet<FieldType> = new Set<FieldType>([
+  "number",
+  "date",
+  "checkbox",
+  "select",
+  "multiselect",
+  "email",
+  "phone",
+]);
+
 /** System / computed field types the form shows read-only (server fills them). */
 export function isEditableField(field: BaseFieldVO): boolean {
   return EDITABLE_TYPES.has(field.type);
+}
+
+/** Short controls that can share a row in a regular-width record editor. */
+export function isCompactRecordFormField(field: BaseFieldVO): boolean {
+  return COMPACT_EDITOR_TYPES.has(field.type);
 }
 
 export type RecordFormValue = string | boolean | string[] | AssetAttachmentRef[];
