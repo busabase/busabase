@@ -401,6 +401,7 @@ describe("Upload safety (.gitignore filter + default-deny list + secret scan) â€
       });
 
       const cr = await client.fileTrees.createChangeRequest({
+        autoMerge: false, // review-first: this test drives approve + merge itself
         type: "drive",
         nodeId: drive.node.id,
         message: "Bump version",

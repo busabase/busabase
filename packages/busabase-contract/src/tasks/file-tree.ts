@@ -200,7 +200,23 @@ export interface FileTreeChangeRequestInput extends FileTreeGetInput {
   operations: unknown;
   message?: string;
   submittedBy?: string;
+  autoMerge?: boolean;
+  requireReview?: boolean;
 }
+
+/**
+ * `autoMerge` is tri-state — unset (permission-aware default), forced on, forced
+ * off — but a CLI boolean flag is presence-only, so `--auto-merge` alone could
+ * never express "forced off". Same two-flag shape as `node_create`.
+ *
+ * A batch containing a `delete` is review-first server-side no matter what this
+ * sends, so don't imply otherwise in the flag's description.
+ */
+const mergeIntent = (input: FileTreeChangeRequestInput): { autoMerge?: boolean } => {
+  if (input.requireReview) return { autoMerge: false };
+  if (input.autoMerge) return { autoMerge: true };
+  return {};
+};
 
 type FileTreeCrInput = Parameters<BusabaseTaskClient["fileTrees"]["createChangeRequest"]>[0];
 
@@ -226,7 +242,11 @@ export const nodeFilesChangeRequestTask: TaskDefinition<FileTreeChangeRequestInp
   ],
   summary: "Propose file changes inside a Skill, Drive, or AirApp node",
   guidance:
-    "Approval-first: this proposes a ChangeRequest for a human to review, it does not write directly. " +
+    "Review is permission-aware, decided server-side: the change merges immediately when your key " +
+    "has write access on the node and lands as a pending ChangeRequest otherwise — check the " +
+    "response's `status`. Pass requireReview to always propose instead. A batch containing a " +
+    "`delete` is ALWAYS review-first regardless of permission, by design — deleting a mounted file " +
+    "destroys content, and a batch is never partially merged. " +
     "Each operation is one of create / update / delete / metadata_update. " +
     "Include `baseContentHash` (from `node_file_read`) on an update so a concurrent edit is caught. " +
     // Same trap as `node_create`'s `files`, one edit later: an AirApp is run with `npm run dev`,
@@ -250,9 +270,21 @@ export const nodeFilesChangeRequestTask: TaskDefinition<FileTreeChangeRequestInp
         'Explanation for the reviewer. Conventional-commit style, e.g. "Rewrite README quickstart for the new auth flow".',
     },
     { name: "submittedBy", kind: "string", description: "Producer label recorded on the change." },
+    {
+      name: "autoMerge",
+      kind: "boolean",
+      description:
+        "Skip review and apply the file changes immediately if you have write access. Not a permission override, and ignored for a batch containing a delete. Default is permission-aware: merge when you can, otherwise propose.",
+    },
+    {
+      name: "requireReview",
+      kind: "boolean",
+      description: "Always propose a pending ChangeRequest, even with write access.",
+    },
   ],
   examples: [
     'busabase-cli nodes files-change-request --kind skill --node-id nod_123 --operations-json \'[{"kind":"update","path":"SKILL.md","content":"# Hi"}]\'',
+    "busabase-cli nodes files-change-request --kind skill --node-id nod_123 --operations-json @ops.json --require-review",
   ],
   execute: async (client: BusabaseTaskClient, input: FileTreeChangeRequestInput) => {
     if (!Array.isArray(input.operations) || input.operations.length === 0) {
@@ -264,6 +296,7 @@ export const nodeFilesChangeRequestTask: TaskDefinition<FileTreeChangeRequestInp
       operations: input.operations,
       ...(input.message ? { message: input.message } : {}),
       ...(input.submittedBy ? { submittedBy: input.submittedBy } : {}),
+      ...mergeIntent(input),
     } as FileTreeCrInput;
     return client.fileTrees.createChangeRequest(payload);
   },

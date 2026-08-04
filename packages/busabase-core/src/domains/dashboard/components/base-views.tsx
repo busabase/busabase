@@ -431,7 +431,7 @@ export function BaseSetupView({
                 <label className="block">
                   <span className="text-muted-foreground text-xs">{messages.common.name}</span>
                   <input
-                    className="mt-1 h-8 w-full rounded-md border border-border/70 bg-background px-2.5 text-sm outline-none transition-colors focus:border-primary"
+                    className="mt-1 h-8 w-full rounded-md border border-border/70 bg-card px-2.5 text-sm outline-none transition-colors focus:border-primary"
                     onChange={(event) => setBaseName(event.target.value)}
                     value={baseName}
                   />
@@ -441,7 +441,7 @@ export function BaseSetupView({
                     {messages.common.description}
                   </span>
                   <textarea
-                    className="mt-1 w-full rounded-md border border-border/70 bg-background px-2.5 py-1.5 text-sm outline-none transition-colors focus:border-primary resize-none"
+                    className="mt-1 w-full rounded-md border border-border/70 bg-card px-2.5 py-1.5 text-sm outline-none transition-colors focus:border-primary resize-none"
                     onChange={(event) => setBaseDescription(event.target.value)}
                     rows={2}
                     value={baseDescription}
@@ -473,11 +473,11 @@ export function BaseSetupView({
               <div className="mb-2 flex flex-wrap items-end justify-between gap-3">
                 <div className="font-semibold text-sm">{messages.common.fields}</div>
                 <div className="flex flex-wrap items-center justify-end gap-2">
-                  <span className="rounded-full bg-muted/55 px-2.5 py-1 text-muted-foreground text-xs">
+                  <span className="rounded-md bg-muted/55 px-2.5 py-1 text-muted-foreground text-xs">
                     {fmt(messages.base.fieldsCount, { count: base.fields.length })}
                   </span>
                   <button
-                    className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border/70 bg-background px-2.5 font-medium text-xs transition-colors hover:bg-accent"
+                    className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border/70 bg-card px-2.5 font-medium text-xs transition-colors hover:bg-accent"
                     onClick={() => {
                       resetAddFieldForm();
                       setIsAddFieldOpen(true);
@@ -556,7 +556,7 @@ export function BaseSetupView({
                       ) : null}
                     </div>
                     <div className="hidden sm:block">
-                      <span className="inline-flex max-w-full truncate rounded-full bg-muted/65 px-2 py-0.5 text-muted-foreground text-xs">
+                      <span className="inline-flex max-w-full truncate rounded-md bg-muted/65 px-2 py-0.5 text-muted-foreground text-xs">
                         {messages.fieldTypes[field.type]}
                       </span>
                     </div>
@@ -604,7 +604,7 @@ export function BaseSetupView({
                   ) : null}
                   <div className="flex flex-wrap items-center justify-end gap-3">
                     <button
-                      className="rounded-md border border-border/70 bg-background px-3 py-1.5 font-medium text-xs transition-colors hover:bg-accent disabled:opacity-50"
+                      className="rounded-md border border-border/70 bg-card px-3 py-1.5 font-medium text-xs transition-colors hover:bg-accent disabled:opacity-50"
                       disabled={isRecordTitleSaving}
                       onClick={() => setRecordTitleFieldId(null)}
                       type="button"
@@ -666,7 +666,7 @@ export function BaseSetupView({
                   ) : null}
                   <div className="mt-4 flex flex-wrap items-center justify-end gap-3 border-border/50 border-t pt-4">
                     <button
-                      className="rounded-md border border-border/70 bg-background px-3 py-1.5 font-medium text-xs transition-colors hover:bg-accent disabled:opacity-50"
+                      className="rounded-md border border-border/70 bg-card px-3 py-1.5 font-medium text-xs transition-colors hover:bg-accent disabled:opacity-50"
                       disabled={isFieldRenameSaving}
                       onClick={closeFieldRenameDialog}
                       type="button"
@@ -738,7 +738,7 @@ export function BaseSetupView({
                     <label className="block">
                       <span className="text-muted-foreground text-xs">{messages.common.slug}</span>
                       <input
-                        className="mt-1 h-8 w-full rounded-md border border-border/70 bg-background px-2.5 font-mono text-sm outline-none transition-colors focus:border-primary"
+                        className="mt-1 h-8 w-full rounded-md border border-border/70 bg-card px-2.5 font-mono text-sm outline-none transition-colors focus:border-primary"
                         onChange={(event) => setFieldSlug(event.target.value)}
                         value={fieldSlug}
                       />
@@ -746,7 +746,7 @@ export function BaseSetupView({
                     <label className="block">
                       <span className="text-muted-foreground text-xs">{messages.base.type}</span>
                       <select
-                        className="mt-1 h-8 w-full rounded-md border border-border/70 bg-background px-2.5 text-sm outline-none transition-colors focus:border-primary"
+                        className="mt-1 h-8 w-full rounded-md border border-border/70 bg-card px-2.5 text-sm outline-none transition-colors focus:border-primary"
                         onChange={(event) => setFieldType(event.target.value as FieldType)}
                         value={fieldType}
                       >
@@ -763,7 +763,7 @@ export function BaseSetupView({
                           {messages.base.language}
                         </span>
                         <select
-                          className="mt-1 h-8 w-full rounded-md border border-border/70 bg-background px-2.5 font-mono text-sm outline-none transition-colors focus:border-primary"
+                          className="mt-1 h-8 w-full rounded-md border border-border/70 bg-card px-2.5 font-mono text-sm outline-none transition-colors focus:border-primary"
                           onChange={(event) => setCodeLanguage(event.target.value)}
                           value={codeLanguage}
                         >
@@ -797,7 +797,7 @@ export function BaseSetupView({
                           {messages.base.targetBase}
                         </span>
                         <select
-                          className="mt-1 h-8 w-full rounded-md border border-border/70 bg-background px-2.5 text-sm outline-none transition-colors focus:border-primary"
+                          className="mt-1 h-8 w-full rounded-md border border-border/70 bg-card px-2.5 text-sm outline-none transition-colors focus:border-primary"
                           onChange={(event) => setTargetBaseId(event.target.value)}
                           value={targetBaseId}
                         >
@@ -817,7 +817,7 @@ export function BaseSetupView({
                             {messages.base.lookupVia}
                           </span>
                           <select
-                            className="mt-1 h-8 w-full rounded-md border border-border/70 bg-background px-2.5 text-sm outline-none transition-colors focus:border-primary"
+                            className="mt-1 h-8 w-full rounded-md border border-border/70 bg-card px-2.5 text-sm outline-none transition-colors focus:border-primary"
                             data-testid="add-field-lookup-relation"
                             onChange={(event) => {
                               setLookupRelationSlug(event.target.value);
@@ -845,7 +845,7 @@ export function BaseSetupView({
                             {messages.base.lookupTargetField}
                           </span>
                           <select
-                            className="mt-1 h-8 w-full rounded-md border border-border/70 bg-background px-2.5 text-sm outline-none transition-colors focus:border-primary"
+                            className="mt-1 h-8 w-full rounded-md border border-border/70 bg-card px-2.5 text-sm outline-none transition-colors focus:border-primary"
                             data-testid="add-field-lookup-target"
                             disabled={!lookupRelationSlug}
                             onChange={(event) => {
@@ -870,7 +870,7 @@ export function BaseSetupView({
                             {messages.base.lookupRollup}
                           </span>
                           <select
-                            className="mt-1 h-8 w-full rounded-md border border-border/70 bg-background px-2.5 text-sm outline-none transition-colors focus:border-primary"
+                            className="mt-1 h-8 w-full rounded-md border border-border/70 bg-card px-2.5 text-sm outline-none transition-colors focus:border-primary"
                             data-testid="add-field-lookup-rollup"
                             onChange={(event) =>
                               setLookupRollup(event.target.value as LookupRollup)
@@ -892,7 +892,7 @@ export function BaseSetupView({
                           {messages.base.format}
                         </span>
                         <select
-                          className="mt-1 h-8 w-full rounded-md border border-border/70 bg-background px-2.5 text-sm outline-none transition-colors focus:border-primary"
+                          className="mt-1 h-8 w-full rounded-md border border-border/70 bg-card px-2.5 text-sm outline-none transition-colors focus:border-primary"
                           onChange={(event) =>
                             setNumberFormat(event.target.value as "plain" | "currency")
                           }
@@ -909,7 +909,7 @@ export function BaseSetupView({
                           {messages.base.currency}
                         </span>
                         <select
-                          className="mt-1 h-8 w-full rounded-md border border-border/70 bg-background px-2.5 text-sm outline-none transition-colors focus:border-primary"
+                          className="mt-1 h-8 w-full rounded-md border border-border/70 bg-card px-2.5 text-sm outline-none transition-colors focus:border-primary"
                           onChange={(event) => setCurrencyCode(event.target.value)}
                           value={currencyCode}
                         >
@@ -956,7 +956,7 @@ export function BaseSetupView({
                     </div>
                     <div className="flex flex-wrap items-center justify-end gap-3">
                       <button
-                        className="rounded-md border border-border/70 bg-background px-3 py-1.5 font-medium text-xs transition-colors hover:bg-accent disabled:opacity-50"
+                        className="rounded-md border border-border/70 bg-card px-3 py-1.5 font-medium text-xs transition-colors hover:bg-accent disabled:opacity-50"
                         disabled={isSaving}
                         onClick={closeAddFieldDialog}
                         type="button"
@@ -1041,7 +1041,7 @@ export function BaseSetupView({
               <div>
                 <div className="mb-2 flex flex-wrap items-end justify-between gap-3">
                   <div className="font-semibold text-sm">{messages.base.deletedFields}</div>
-                  <span className="rounded-full bg-muted/55 px-2.5 py-1 text-muted-foreground text-xs">
+                  <span className="rounded-md bg-muted/55 px-2.5 py-1 text-muted-foreground text-xs">
                     {fmt(messages.base.deletedCount, { count: deletedFields.length })}
                   </span>
                 </div>
@@ -1064,13 +1064,13 @@ export function BaseSetupView({
                       </div>
                     </div>
                     <div>
-                      <span className="inline-flex max-w-full truncate rounded-full bg-muted/65 px-2 py-0.5 text-muted-foreground text-xs">
+                      <span className="inline-flex max-w-full truncate rounded-md bg-muted/65 px-2 py-0.5 text-muted-foreground text-xs">
                         {messages.fieldTypes[field.type]}
                       </span>
                     </div>
                     <div className="flex justify-end">
                       <button
-                        className="inline-flex items-center gap-1 rounded border border-border/60 bg-background px-2 py-1 text-xs transition-colors hover:bg-accent disabled:opacity-50"
+                        className="inline-flex items-center gap-1 rounded border border-border/60 bg-card px-2 py-1 text-xs transition-colors hover:bg-accent disabled:opacity-50"
                         disabled={restoringFieldId === field.id || !onRestoreField}
                         onClick={() => handleRestoreField(field.id)}
                         type="button"
@@ -1226,7 +1226,7 @@ export function BaseTopbarActions({
       <Link
         className={`rounded px-2.5 py-1.5 font-medium transition-colors ${
           activeTab === "records"
-            ? "bg-background text-foreground shadow-sm"
+            ? "bg-card text-foreground"
             : "text-muted-foreground hover:text-foreground"
         }`}
         href={mergeSearchIntoHref(`/base/${base.slug}`, currentSearch)}
@@ -1237,7 +1237,7 @@ export function BaseTopbarActions({
         <Link
           className={`rounded px-2.5 py-1.5 font-medium transition-colors ${
             activeTab === "design"
-              ? "bg-background text-foreground shadow-sm"
+              ? "bg-card text-foreground"
               : "text-muted-foreground hover:text-foreground"
           }`}
           href={mergeSearchIntoHref(`/base/${base.slug}/design`, currentSearch)}

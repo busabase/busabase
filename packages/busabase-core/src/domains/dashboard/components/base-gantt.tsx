@@ -203,7 +203,7 @@ export function BusaBaseGantt({
             <button
               className={`rounded px-2 py-0.5 font-medium transition-colors ${
                 scale === option
-                  ? "bg-background text-foreground shadow-sm"
+                  ? "bg-card text-foreground"
                   : "text-muted-foreground hover:text-foreground"
               }`}
               key={option}

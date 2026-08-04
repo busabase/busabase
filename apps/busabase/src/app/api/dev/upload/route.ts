@@ -4,40 +4,27 @@ import { invalidStorageKeyResponse, isSafeStorageKey } from "~/lib/storage-key";
 export const dynamic = "force-dynamic";
 
 /**
- * Server-side upload relay.
- * Client sends the file, the server writes it to the configured storage adapter.
- * Avoids presigned-URL signature / CORS issues.
+ * Development-only upload relay: the client sends a file, the server writes it
+ * to the configured storage adapter, avoiding presigned-URL signature / CORS
+ * issues.
  *
- * Thin wrapper over openlib `createDevUploadRoute` (shared across apps), with
- * two busabase-specific behaviors:
+ * Thin wrapper over openlib's shared `createDevUploadRoute`, keeping its default
+ * production gate — `/api/dev/*` means "development only, 404 in production" in
+ * every app, no exceptions. Busabase's *production* storage relay lives at
+ * `/api/storage/upload`, which is what self-hosted deployments point
+ * `STORAGE_URL`'s `upload_url=` at.
  *
- * - **No production gate** (same as `apps/buda`). Self-hosted Busabase runs a
- *   *production* build (`busabase server`), and this relay is the only way
- *   local storage receives bytes — with the default gate on, every upload
- *   (Base file fields, Doc images, the sidebar logo) 404s outside `next dev`.
- * - **Key guard.** Because the gate is off, the storage key is validated before
- *   it ever reaches `path.join(rootDir, key)` in the local adapter, so a
- *   traversal key can't be used to write outside the storage root.
- *
- * `gateProduction: false` is the EXCEPTION, not the norm: openlib defaults it
- * to `true` and the hosted apps keep that default, because there this relay is
- * a dev convenience (production uploads go straight to S3/R2 via a presigned
- * URL). Self-hosted Busabase is the opposite case — its normal deployment is a
- * production build over local-disk storage, where this relay is the only path
- * bytes have.
- *
- * What that costs: the relay is unauthenticated, so an instance exposed to a
- * network lets anyone write objects into the storage root (bounded by the key
- * guard and the caller's own size policy, but not by any identity check). That
- * matches the app's existing posture — `/api/rpc` has no auth either — but it
- * is a deliberate trade. See the sibling `/api/dev/attachment` route.
+ * The key guard stays on even though the gate makes traversal unreachable in
+ * production: the handler passes the key straight to `path.join(rootDir, key)`,
+ * and a dev process is still a process worth not letting write outside its
+ * storage root.
  */
-const base = createDevUploadRoute({ gateProduction: false });
+const base = createDevUploadRoute();
 
 export const POST = async (req: Request): Promise<Response> => {
-  // The legacy multipart path. `useS3Uploader` (and therefore the logo upload)
-  // uses PUT; this branch stays for older callers. A body that isn't multipart
-  // is left to the shared handler, which answers with its own 400.
+  // The legacy multipart path. `useS3Uploader` uses PUT; this branch stays for
+  // older callers. A body that isn't multipart is left to the shared handler,
+  // which answers with its own 400.
   try {
     const storageKey = (await req.clone().formData()).get("storageKey");
     if (typeof storageKey === "string" && !isSafeStorageKey(storageKey)) {

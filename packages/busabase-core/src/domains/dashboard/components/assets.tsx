@@ -86,7 +86,7 @@ export function AssetTextStatusChip({ status }: { status: AssetTextStatus }) {
 
   return (
     <span
-      className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 font-medium text-[11px] ${config.className}`}
+      className={`inline-flex items-center gap-1 rounded-md border px-2 py-0.5 font-medium text-[11px] ${config.className}`}
       title={config.hint}
     >
       <config.Icon className="size-3" />
@@ -110,7 +110,7 @@ export function AssetMetadataBlock({
       <div className="mb-2 flex items-center justify-between gap-2">
         <h2 className="font-medium text-sm">{messages.assets.metadata}</h2>
         {hasAssetMetadata(metadata) ? (
-          <span className="rounded-full border bg-muted px-2 py-0.5 text-muted-foreground text-[10px] uppercase">
+          <span className="rounded-md border bg-muted px-2 py-0.5 text-muted-foreground text-[10px] uppercase">
             {messages.assets.metadataJson}
           </span>
         ) : null}
@@ -124,7 +124,7 @@ export function AssetMetadataBlock({
   );
 
   return framed ? (
-    <div className="rounded-xl border bg-background p-4">{content}</div>
+    <div className="rounded-xl border bg-card p-4">{content}</div>
   ) : (
     <div className="mt-3 border-t pt-3">{content}</div>
   );
@@ -198,7 +198,7 @@ export function AssetTextPreviewPanel({
   const isBusy = textLinesQuery.isFetching;
 
   return (
-    <div className="rounded-xl border bg-background p-4">
+    <div className="rounded-xl border bg-card p-4">
       <button
         className="flex w-full items-center gap-1.5 text-left font-medium text-sm"
         onClick={() => setIsExpanded((current) => !current)}
@@ -241,7 +241,7 @@ export function AssetTextPreviewPanel({
           <div className="mt-2 flex items-center gap-2">
             {!isBusy && hasMore ? (
               <button
-                className="rounded-md border bg-background px-2.5 py-1 text-xs hover:bg-muted"
+                className="rounded-md border bg-card px-2.5 py-1 text-xs hover:bg-muted"
                 onClick={() =>
                   setRange({
                     startLine: loadedThrough + 1,
@@ -277,12 +277,12 @@ export function AssetsHeader({ count, unusedCount = 0 }: { count: number; unused
       <ImageIcon className="size-5 text-muted-foreground" />
       <h1 className="font-semibold text-xl">{messages.assets.title}</h1>
       {count > 0 ? (
-        <span className="rounded-full border bg-muted px-2 py-0.5 text-muted-foreground text-xs">
+        <span className="rounded-md border bg-muted px-2 py-0.5 text-muted-foreground text-xs">
           {count}
         </span>
       ) : null}
       {unusedCount > 0 ? (
-        <span className="rounded-full border border-destructive/40 px-2 py-0.5 text-destructive text-xs">
+        <span className="rounded-md border border-destructive/40 px-2 py-0.5 text-destructive text-xs">
           {fmt(messages.assets.unusedBadge, { count: unusedCount })}
         </span>
       ) : null}
@@ -342,7 +342,7 @@ function AssetLibrarySkeleton() {
       </div>
       <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-8">
         {ASSET_CARD_SKELETON_IDS.map((id) => (
-          <div className="flex flex-col overflow-hidden rounded-lg border bg-background" key={id}>
+          <div className="flex flex-col overflow-hidden rounded-lg border bg-card" key={id}>
             <Skeleton className="aspect-square w-full rounded-none" />
             <div className="flex flex-col gap-1.5 p-2">
               <Skeleton className="h-4 w-4/5" />
@@ -427,7 +427,7 @@ export function AssetLibraryView({
             const isImage = asset.mimeType.startsWith("image/");
             return (
               <button
-                className="group flex flex-col overflow-hidden rounded-lg border bg-background text-left transition-colors hover:border-foreground/30"
+                className="group flex flex-col overflow-hidden rounded-lg border bg-card text-left transition-colors hover:border-foreground/30"
                 key={asset.id}
                 onClick={() => onOpenAsset(asset.id)}
                 type="button"
@@ -444,12 +444,12 @@ export function AssetLibraryView({
                     <Icon className="size-10 text-muted-foreground" />
                   )}
                   {asset.usageCount > 0 ? (
-                    <span className="absolute top-1.5 right-1.5 rounded-full bg-foreground/80 px-1.5 py-0.5 font-medium text-[10px] text-background">
+                    <span className="absolute top-1.5 right-1.5 rounded-md bg-foreground/80 px-1.5 py-0.5 font-medium text-[10px] text-background">
                       {asset.usageCount}×
                     </span>
                   ) : null}
                   {hasAssetMetadata(asset.metadata) ? (
-                    <span className="absolute bottom-1.5 left-1.5 rounded-full bg-background/90 px-1.5 py-0.5 font-medium text-[10px] text-foreground uppercase shadow-sm">
+                    <span className="absolute bottom-1.5 left-1.5 rounded-md bg-background/90 px-1.5 py-0.5 font-medium text-[10px] text-foreground uppercase shadow-sm">
                       {messages.assets.metadataBadge}
                     </span>
                   ) : null}
@@ -610,7 +610,7 @@ export function AssetSearchableTextPanel({
     isBusy || (mode === "paste" ? text.length === 0 || pasteTooLarge : file === null);
 
   return (
-    <div className="rounded-xl border bg-background p-4">
+    <div className="rounded-xl border bg-card p-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
           <h2 className="font-medium text-sm">{messages.assets.searchableText}</h2>
@@ -631,7 +631,7 @@ export function AssetSearchableTextPanel({
         </button>
         {status !== "none" ? (
           <button
-            className="rounded-md border bg-background px-2.5 py-1.5 text-muted-foreground text-xs hover:bg-muted hover:text-foreground"
+            className="rounded-md border bg-card px-2.5 py-1.5 text-muted-foreground text-xs hover:bg-muted hover:text-foreground"
             onClick={() => setConfirmNone(true)}
             type="button"
           >
@@ -664,9 +664,7 @@ export function AssetSearchableTextPanel({
               <button
                 aria-selected={mode === writeMode}
                 className={`flex-1 rounded-sm px-3 py-1.5 font-medium text-sm ${
-                  mode === writeMode
-                    ? "bg-background text-foreground shadow-sm"
-                    : "text-muted-foreground"
+                  mode === writeMode ? "bg-card text-foreground" : "text-muted-foreground"
                 }`}
                 disabled={isBusy}
                 key={writeMode}
@@ -688,7 +686,7 @@ export function AssetSearchableTextPanel({
                 {messages.assets.textPasteLabel}
               </label>
               <textarea
-                className="mt-2 min-h-48 w-full resize-y rounded-md border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
+                className="mt-2 min-h-48 w-full resize-y rounded-md border bg-card px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
                 disabled={isBusy}
                 id="asset-searchable-text"
                 onChange={(event) => setText(event.target.value)}
@@ -745,7 +743,7 @@ export function AssetSearchableTextPanel({
 
           <DialogFooter>
             <button
-              className="rounded-md border bg-background px-3 py-1.5 font-medium text-sm hover:bg-muted"
+              className="rounded-md border bg-card px-3 py-1.5 font-medium text-sm hover:bg-muted"
               disabled={isBusy}
               onClick={() => setOpen(false)}
               type="button"
@@ -805,12 +803,12 @@ function AssetDetailSkeleton() {
       <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_340px] xl:grid-cols-[minmax(0,1fr)_380px]">
         <Skeleton className="min-h-[240px] w-full rounded-xl" />
         <div className="flex flex-col gap-4">
-          <div className="rounded-xl border bg-background p-4">
+          <div className="rounded-xl border bg-card p-4">
             <Skeleton className="h-5 w-3/4" />
             <div className="mt-2 flex flex-wrap gap-1.5">
-              <Skeleton className="h-5 w-16 rounded-full" />
-              <Skeleton className="h-5 w-20 rounded-full" />
-              <Skeleton className="h-5 w-12 rounded-full" />
+              <Skeleton className="h-5 w-16 rounded-md" />
+              <Skeleton className="h-5 w-20 rounded-md" />
+              <Skeleton className="h-5 w-12 rounded-md" />
             </div>
           </div>
           <Skeleton className="h-24 w-full rounded-xl" />
@@ -903,12 +901,12 @@ export function AssetDetailView({
         </div>
 
         <div className="flex flex-col gap-4">
-          <div className="rounded-xl border bg-background p-4">
+          <div className="rounded-xl border bg-card p-4">
             <h1 className="break-words font-semibold text-lg">{asset.name}</h1>
             <div className="mt-2 flex flex-wrap items-center gap-1.5">
               {metaChips.map((chip) => (
                 <span
-                  className="rounded-full border bg-muted px-2 py-0.5 text-muted-foreground text-xs"
+                  className="rounded-md border bg-muted px-2 py-0.5 text-muted-foreground text-xs"
                   key={chip}
                 >
                   {chip}
@@ -965,7 +963,7 @@ export function AssetDetailView({
 
           <AssetMetadataBlock framed metadata={asset.metadata} />
 
-          <div className="rounded-xl border bg-background p-4">
+          <div className="rounded-xl border bg-card p-4">
             <h2 className="mb-2 font-medium text-sm">{messages.assets.whereUsed}</h2>
             {usages.length === 0 ? (
               <p className="text-muted-foreground text-sm">{messages.assets.notReferenced}</p>

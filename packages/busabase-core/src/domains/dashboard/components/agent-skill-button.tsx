@@ -258,7 +258,7 @@ export function AgentIntegrationDialog({
                   />
                   <div className="flex justify-end">
                     <button
-                      className="inline-flex h-9 items-center gap-2 rounded-md border bg-background px-3 text-sm font-medium hover:bg-muted"
+                      className="inline-flex h-9 items-center gap-2 rounded-md border bg-card px-3 text-sm font-medium hover:bg-muted"
                       onClick={() => copy(agentSkillPrompt, "prompt")}
                       type="button"
                     >
@@ -349,7 +349,7 @@ export function AgentIntegrationDialog({
                     aria-describedby={
                       mcpBaseUrlIsValid ? undefined : "agent-integration-mcp-base-url-error"
                     }
-                    className="h-9 min-w-0 rounded-md border bg-background px-3 font-mono text-xs text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    className="h-9 min-w-0 rounded-md border bg-card px-3 font-mono text-xs text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
                     onBlur={normalizeActiveMcpBaseUrl}
                     onChange={(event) => updateMcpBaseUrl(event.target.value)}
                     spellCheck={false}
@@ -420,7 +420,7 @@ export function AgentIntegrationDialog({
                           </h3>
                           <button
                             aria-label={`${messages.integration.copySetup}: ${guide.name}`}
-                            className="inline-flex h-8 shrink-0 items-center gap-1 rounded-md border bg-background px-2 text-xs font-medium hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
+                            className="inline-flex h-8 shrink-0 items-center gap-1 rounded-md border bg-card px-2 text-xs font-medium hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
                             disabled={!mcpBaseUrlIsValid}
                             onClick={() => copy(guide.setup, copyKey)}
                             type="button"

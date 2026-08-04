@@ -13,7 +13,7 @@ describe("review status semantic tones", () => {
   ])("routes %s through the %s token family", (status, token) => {
     const classes = statusTone(status);
     expect(classes).toContain(`border-${token}/35`);
-    expect(classes).toContain(`bg-${token}/10`);
+    expect(classes).toContain(`bg-${token}/17`);
     expect(classes).toContain(`text-${token}-strong`);
     expect(classes).toContain(`dark:text-${token}-soft`);
     expect(classes).not.toMatch(/(?:amber|emerald|teal|gray)-/);

@@ -4,6 +4,7 @@
  * `/assets` library and the "where-used" panel render.
  */
 import { z } from "zod";
+import { autoMergeNotAccepted } from "../../contract/auto-merge";
 
 /**
  * Derived text-slot status for an Asset (Drive Grep Retrieval). `missing` is
@@ -251,6 +252,9 @@ export const EditAssetContentInputSchema = z.object({
       'Explanation shown to the human reviewer. Write a conventional-commit style subject — imperative verb + what + why, e.g. "Fix typo in setup instructions".',
     ),
   submittedBy: z.string().optional().default("agent"),
+  autoMerge: autoMergeNotAccepted(
+    "editContent rewrites the real mounted file bytes, so it always requires review. Omit the flag.",
+  ),
 });
 export type EditAssetContentInput = z.infer<typeof EditAssetContentInputSchema>;
 

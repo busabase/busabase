@@ -113,6 +113,9 @@ describe("Boundary P6 — node lifecycle", () => {
     // Now restoring the original must fail (slug is taken).
     const restoreCr = await raw.bases.lifecycleChangeRequest({
       operation: "restore",
+      // review-first: this test asserts the guard that fires at MERGE time, so the
+      // proposal must stay pending instead of being merged inside this same call.
+      autoMerge: false,
       baseId: first.id,
       submittedBy: "alice",
     });

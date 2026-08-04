@@ -25,6 +25,11 @@ test("Table and Gallery can jump between numbered record pages", async ({ page, 
     await request.post(`/api/v1/bases/${base.id}/records/bulk-change-request`, {
       data: {
         message: marker,
+        // Pinned for the same reason the view CR below is: this spec drives the
+        // propose -> approve -> merge path, and `autoMerge` is permission-aware
+        // when omitted. Without this the review/merge calls become no-ops that
+        // still return 200, so the spec would pass while testing nothing.
+        autoMerge: false,
         records: Array.from({ length: LONG_LIST_RECORD_COUNT }, (_, index) => ({
           body: `${marker} body ${index}`,
           title: `${marker} row ${index}`,

@@ -15,7 +15,7 @@
  */
 
 import { ALL_AIRAPP_DEMOS } from "busabase-core/domains/airapp/demo-content";
-import { api, assert, BASE, makeRunner, type NodeTreeVO } from "./_client";
+import { ApiError, api, assert, BASE, makeRunner, type NodeTreeVO } from "./_client";
 import { findFolderBySlug, moveNodeToFolder, needsMove } from "./_nodes";
 
 interface NodeVO {
@@ -52,6 +52,22 @@ interface FileContentVO {
   contentHash: string;
 }
 
+/** The `dev` script a demo's own `package.json` ships, or "" if it has none. */
+function devScriptOf(def: { files: ReadonlyArray<{ path: string; content?: string }> }): string {
+  const pkg = def.files.find((f) => f.path === "package.json");
+  if (!pkg?.content) return "";
+  try {
+    return (JSON.parse(pkg.content) as { scripts?: { dev?: string } }).scripts?.dev ?? "";
+  } catch {
+    return "";
+  }
+}
+
+/** The command the server named in an AIRAPP_NOT_RUNNABLE rejection, e.g. `vite`. */
+function rejectedCommand(err: ApiError): string | undefined {
+  return /starts `([^`]+)`/.exec(err.body)?.[1];
+}
+
 export async function run() {
   const { step, summary } = makeRunner("14-airapps");
   console.log(`\n📱  AirApps  →  ${BASE}\n`);
@@ -65,6 +81,8 @@ export async function run() {
   });
 
   const created: AirAppVO[] = [];
+  /** Demos the server refuses to store at all — see the AIRAPP_NOT_RUNNABLE branch. */
+  const rejected = new Set<string>();
 
   for (const def of ALL_AIRAPP_DEMOS) {
     await step(`POST /file-trees — create "${def.name}" (idempotent)`, async () => {
@@ -86,12 +104,30 @@ export async function run() {
           // unrelated Vite project.
           mergeMode: "replace",
         });
-      } catch {
-        // The summary list has no `files`, and the file-count assertion below
-        // needs them — find it in the summary, then open it.
+      } catch (err) {
+        // An AirApp whose `dev` script starts a bundler is refused on write: Vite and
+        // friends cannot boot under Nodepod, so storing one would only move the failure
+        // to Run time. Some demos in this catalog are exactly that, and asserting the
+        // refusal is the real coverage — silently treating it as "already exists" is
+        // what hid the 422 behind a phantom "missing after create failed".
+        if (err instanceof ApiError && err.code === "AIRAPP_NOT_RUNNABLE") {
+          const command = rejectedCommand(err);
+          assert(err.status === 422, `expected 422, got ${err.status}`);
+          assert(!!command, `rejection did not name the offending command: ${err.body}`);
+          assert(
+            devScriptOf(def).includes(command),
+            `server rejected \`${command}\` but "${def.slug}" runs \`${devScriptOf(def)}\``,
+          );
+          rejected.add(def.slug);
+          return;
+        }
+        // Anything else: this may just be a re-run over a node a previous run created.
+        // The summary list has no `files`, and the file-count assertion below needs
+        // them — find it in the summary, then open it. If it genuinely isn't there,
+        // rethrow the ORIGINAL error rather than inventing a misleading one.
         const list = await api<NodeVO[]>("GET", "/nodes?types=airapp");
         const found = list.find((m) => m.slug === def.slug);
-        assert(!!found, `AirApp "${def.slug}" missing after create failed`);
+        if (!found) throw err;
         airapp = await api<AirAppDetailVO>("GET", `/nodes/${found.id}?type=airapp`);
       }
       assert(airapp.node.slug === def.slug, `slug mismatch: ${airapp.node.slug}`);
@@ -115,6 +151,12 @@ export async function run() {
     );
     const slugs = new Set(list.map((m) => m.slug));
     for (const def of ALL_AIRAPP_DEMOS) {
+      // A demo refused as not-runnable was never stored, by design — assert it is
+      // absent rather than skipping it, so a silent partial write would still fail.
+      if (rejected.has(def.slug)) {
+        assert(!slugs.has(def.slug), `rejected AirApp "${def.slug}" was stored anyway`);
+        continue;
+      }
       assert(slugs.has(def.slug), `slug "${def.slug}" missing from GET /nodes?types=airapp`);
     }
     // The reason this replaced `GET /file-trees`: no per-node file inventory.

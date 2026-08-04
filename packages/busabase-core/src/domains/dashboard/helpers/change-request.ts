@@ -21,14 +21,46 @@ const nameToString = (value: unknown): string => {
   return parsed.success ? iStringParse(parsed.data) : fieldValueToString(value);
 };
 
+/**
+ * Chip / pill styling for a change-request status.
+ *
+ * The fill is 17%. It used to be 10%, which was tuned against the old pure-white
+ * ground; on the cool-cement ground the chips read as barely-there smudges. 17%
+ * is the ceiling — measured on #F1F3F3, the `-strong` text colours hold WCAG AA
+ * up to 17% and break at 20%:
+ *
+ *   fill      8%     10%    12%    15%    17%    20%
+ *   merged    5.01   4.91   4.81   4.66   4.53   4.40 ✗
+ *   review    4.84   4.75   4.67   4.59   4.51   4.39 ✗
+ *   rejected  5.25   5.11   4.99   4.80   4.67   4.52
+ *
+ * Do not raise it past 17% without re-solving `--color-*-strong` in both apps'
+ * global.css. See apps/busabase-cloud/content/spec/wabi-sabi-visual-direction.md §12.
+ */
 export const statusTone = (status: string) => {
   if (status === "merged" || status === "approved") {
-    return "border-merged/35 bg-merged/10 text-merged-strong dark:text-merged-soft";
+    return "border-merged/35 bg-merged/17 text-merged-strong dark:text-merged-soft";
   }
   if (status === "conflict" || status === "rejected" || status === "abandoned") {
-    return "border-rejected/35 bg-rejected/10 text-rejected-strong dark:text-rejected-soft";
+    return "border-rejected/35 bg-rejected/17 text-rejected-strong dark:text-rejected-soft";
   }
-  return "border-review/35 bg-review/10 text-review-strong dark:text-review-soft";
+  return "border-review/35 bg-review/17 text-review-strong dark:text-review-soft";
+};
+
+/**
+ * Solid state colour for the 3px rail on the left edge of a review-queue row.
+ *
+ * This is what actually gives a dense list its colour rhythm: the eye scans the
+ * left edge instead of hunting for the chip on the right of every row. Returns
+ * the bare token (no opacity) — the rail is small enough that a tint would
+ * disappear against the ground.
+ */
+export const statusAccent = (status: string) => {
+  if (status === "merged" || status === "approved") return "bg-merged";
+  if (status === "conflict" || status === "rejected" || status === "abandoned") {
+    return "bg-rejected";
+  }
+  return "bg-review";
 };
 
 export const changeRequestStatusLabel = (status: string, messages?: CoreI18nMessages) => {

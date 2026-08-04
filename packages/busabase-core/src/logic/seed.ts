@@ -467,11 +467,12 @@ const seedNodeChangeRequestIfMissing = async (input: SeedNodeChangeRequestInput)
 };
 
 const ensureDefaultStorageUrl = () => {
-  // `/api/dev/attachment` is the route that actually serves local files
-  // (apps/busabase/src/app/api/dev/attachment/[...key]); there is no
-  // `/api/storage` route. Launchers (CLI / desktop / Docker) set STORAGE_URL
-  // explicitly; this is only the last-resort fallback for a bare dev process.
-  process.env.STORAGE_URL ??= `local://${process.cwd()}/.data/busabase-storage?base_url=/api/dev/attachment`;
+  // `/api/storage` is the route pair that actually serves and receives local
+  // files in every build (apps/busabase/src/app/api/storage/[...key] for reads,
+  // /api/storage/upload for writes) — unlike `/api/dev/*`, which 404s in
+  // production. Launchers (CLI / desktop / Docker) set STORAGE_URL explicitly;
+  // this is only the last-resort fallback for a bare dev process.
+  process.env.STORAGE_URL ??= `local://${process.cwd()}/.data/busabase-storage?base_url=/api/storage&upload_url=/api/storage/upload`;
 };
 
 const DOCS_FOLDER_NODE_ID = "nod_docs";

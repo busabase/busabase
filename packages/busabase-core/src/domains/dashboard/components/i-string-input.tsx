@@ -10,7 +10,7 @@ import { useState } from "react";
 import { type CoreLocale, coreLocaleOptions, useCoreI18n, useCoreLocale } from "../../../i18n";
 
 const textInputClassName =
-  "mt-1 h-8 w-full rounded-md border border-border/70 bg-background px-2.5 text-sm outline-none transition-colors focus:border-primary";
+  "mt-1 h-8 w-full rounded-md border border-border/70 bg-card px-2.5 text-sm outline-none transition-colors focus:border-primary";
 
 export function IStringNameInput({
   label,

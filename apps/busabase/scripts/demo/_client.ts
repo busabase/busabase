@@ -11,6 +11,32 @@ export interface StepResult {
   error?: string;
 }
 
+/**
+ * A non-2xx response, carrying the parts a caller needs to tell failure modes apart.
+ *
+ * Scripts used to catch a bare `Error` and could only re-test by string-matching, so
+ * they tended to `catch {}` and assume "already exists" — which turned a precise 422
+ * into a phantom "missing after create failed". Keep `message` identical to the old
+ * format so console output is unchanged; add `status` / `code` for the branches.
+ */
+export class ApiError extends Error {
+  readonly status: number;
+  readonly code?: string;
+  readonly body: string;
+
+  constructor(method: string, path: string, status: number, body: string) {
+    super(`${method} /api/v1${path} → HTTP ${status}\n  ${body}`);
+    this.name = "ApiError";
+    this.status = status;
+    this.body = body;
+    try {
+      this.code = (JSON.parse(body) as { code?: string }).code;
+    } catch {
+      this.code = undefined;
+    }
+  }
+}
+
 export async function api<T = unknown>(method: string, path: string, body?: unknown): Promise<T> {
   const res = await fetch(`${BASE}/api/v1${path}`, {
     method,
@@ -19,7 +45,7 @@ export async function api<T = unknown>(method: string, path: string, body?: unkn
   });
   if (!res.ok) {
     const text = await res.text().catch(() => "(no body)");
-    throw new Error(`${method} /api/v1${path} → HTTP ${res.status}\n  ${text}`);
+    throw new ApiError(method, path, res.status, text);
   }
   return res.json() as T;
 }

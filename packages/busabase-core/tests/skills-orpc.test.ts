@@ -246,6 +246,7 @@ describe("Agent Skills API — oRPC integration", () => {
     });
 
     const changeRequest = await client.fileTrees.createChangeRequest({
+      autoMerge: false, // review-first: this test drives approve + merge itself
       type: "skill",
       nodeId: skill.node.id,
       message: "Add review checklist",
@@ -454,6 +455,8 @@ describe("Agent Skills API — oRPC integration", () => {
       name: "CR Stale",
     });
     const staleCr = await client.fileTrees.createChangeRequest({
+      // review-first: this test asserts the guard that fires at MERGE time.
+      autoMerge: false,
       type: "skill",
       nodeId: skill.node.id,
       operations: [

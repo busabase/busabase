@@ -49,7 +49,7 @@ export const shouldCollapsePreview = (field: BaseFieldVO | undefined, value: unk
 export function FieldBadge({ chip }: { chip: FieldChip }) {
   return (
     <span
-      className={`inline-flex max-w-full items-center truncate rounded-full border px-2 py-0.5 font-medium text-xs ${getChoiceBadgeClass(chip.color)}`}
+      className={`inline-flex max-w-full items-center truncate rounded-md border px-2 py-0.5 font-medium text-xs ${getChoiceBadgeClass(chip.color)}`}
       title={chip.label}
     >
       {chip.label}
@@ -183,7 +183,7 @@ function SourceTogglePreview({
             <button
               className={`rounded px-2 py-0.5 transition-colors ${
                 mode === m
-                  ? "bg-background text-foreground shadow-sm"
+                  ? "bg-card text-foreground"
                   : "text-muted-foreground hover:text-foreground"
               }`}
               key={m}
@@ -360,7 +360,7 @@ export function WhiteboardThumbnail({
   }
   return (
     <div
-      className={`overflow-hidden rounded-md border bg-background ${className}`}
+      className={`overflow-hidden rounded-md border bg-card ${className}`}
       // biome-ignore lint/security/noDangerouslySetInnerHtml: sanitizeSvg strips script/foreignObject/event-handler/href vectors via an explicit tag+attribute allowlist before this renders.
       dangerouslySetInnerHTML={{ __html: sanitizeSvg(previewSvg) }}
     />
@@ -455,7 +455,7 @@ export function FieldValuePreview({
             {others.map((item) => {
               const safeUrl = getSafeAttachmentUrl(item);
               const className =
-                "inline-flex max-w-64 items-center gap-1.5 truncate rounded-full border bg-background px-2 py-0.5 text-xs";
+                "inline-flex max-w-64 items-center gap-1.5 truncate rounded-md border bg-card px-2 py-0.5 text-xs";
               const children = (
                 <>
                   {fileIcon(item.mimeType)}
@@ -501,8 +501,7 @@ export function FieldValuePreview({
           const label = linkedRecord
             ? getRecordTitle(linkedRecord, messages)
             : shortIdentifier(recordId);
-          const chipClassName =
-            "max-w-64 truncate rounded-full border bg-background px-2 py-0.5 text-xs";
+          const chipClassName = "max-w-64 truncate rounded-md border bg-card px-2 py-0.5 text-xs";
           return linkedRecord ? (
             <Link
               className={`${chipClassName} text-primary transition-colors hover:border-primary/40 hover:bg-primary/5 hover:underline`}

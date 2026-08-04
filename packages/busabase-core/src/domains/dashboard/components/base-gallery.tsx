@@ -115,7 +115,7 @@ function GalleryCard({
 
   return (
     <div
-      className={`group flex flex-col overflow-hidden rounded-lg border border-border/60 bg-background shadow-sm transition-shadow hover:shadow-md ${
+      className={`group flex flex-col overflow-hidden rounded-lg border border-border/60 bg-card transition-shadow hover:shadow-md ${
         faded ? "opacity-60 hover:opacity-100" : ""
       }`}
       data-record-id={record.id}
@@ -165,7 +165,7 @@ function GalleryCard({
         })}
         {faded && onRestore ? (
           <button
-            className="mt-1 inline-flex w-fit items-center gap-1 rounded border border-border/60 bg-background px-2 py-0.5 text-xs transition-colors hover:bg-accent"
+            className="mt-1 inline-flex w-fit items-center gap-1 rounded border border-border/60 bg-card px-2 py-0.5 text-xs transition-colors hover:bg-accent"
             onClick={onRestore}
             type="button"
           >

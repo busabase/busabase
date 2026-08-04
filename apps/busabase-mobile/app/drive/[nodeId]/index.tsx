@@ -36,7 +36,14 @@ function DriveDetailContent() {
       }}
       onCreateChangeRequest={(input) => {
         if (!buda) throw new Error("Not connected");
-        return buda.client.fileTrees.createChangeRequest({ type: "drive", nodeId, ...input });
+        // The screen promises "the file changes only after review and merge" and then
+        // navigates to the ChangeRequest, so review is not optional here.
+        return buda.client.fileTrees.createChangeRequest({
+          type: "drive",
+          nodeId,
+          autoMerge: false,
+          ...input,
+        });
       }}
       onChangeRequestCreated={(changeRequestId) =>
         router.push({ pathname: "/change-requests/[id]", params: { id: changeRequestId } })

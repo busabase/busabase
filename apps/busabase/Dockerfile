@@ -67,7 +67,7 @@ ENV NODE_ENV=production \
     # Override either URL (e.g. point at external Postgres / S3) at run time.
     BUSABASE_DATA_DIR=/data \
     PG_DATABASE_URL=pglite:///data/pgdata \
-    STORAGE_URL=local:/data/storage?base_url=/api/dev/attachment
+    STORAGE_URL="local:/data/storage?base_url=/api/storage&upload_url=/api/storage/upload"
 WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates && rm -rf /var/lib/apt/lists/*
 

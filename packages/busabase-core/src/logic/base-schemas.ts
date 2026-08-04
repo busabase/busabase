@@ -308,6 +308,7 @@ export const createBulkChangeRequestInputSchema = z.object({
   message: z.string().optional().default("Bulk create records"),
   submittedBy: z.string().optional().default("local-producer"),
   idempotencyKey: z.string().optional(),
+  autoMerge: z.boolean().optional(),
 });
 
 export const createDeleteChangeRequestInputSchema = z.object({

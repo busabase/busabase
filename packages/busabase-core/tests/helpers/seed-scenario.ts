@@ -73,9 +73,15 @@ function buildClient(raw: RawClient) {
         },
       ) => {
         const { mergeImmediately, ...rest } = input;
-        const cr = await raw.bases.fieldChangeRequest(
-          rest as Parameters<RawClient["bases"]["fieldChangeRequest"]>[0],
-        );
+        // Pin the review-first branch, same reasoning as `views.changeRequest`
+        // below: the endpoint's permission-aware default would merge for these
+        // write-capable test actors, but this helper's contract — and every
+        // caller's `mergeImmediately` flag — is "always give me the CR, and
+        // approve+merge it only if I asked".
+        const cr = await raw.bases.fieldChangeRequest({
+          ...rest,
+          autoMerge: false,
+        } as Parameters<RawClient["bases"]["fieldChangeRequest"]>[0]);
         if (mergeImmediately) {
           await approveAndMerge(cr.id);
         }

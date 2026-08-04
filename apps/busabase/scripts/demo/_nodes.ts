@@ -55,8 +55,19 @@ export const findFolderBySlug = (nodes: NodeTreeVO[], slug: string) =>
 export const folderSlugForSeedNodeId = (seedNodeId: string) =>
   STANDARD_DEMO_FOLDERS.find((folder) => folder.seedNodeId === seedNodeId)?.slug;
 
+/**
+ * Find the node to move. Excludes folders on purpose: a slug is only unique
+ * WITHIN a node type, and the demo dataset really does ship a folder and a Base
+ * that share one — `formula-lab` is both. Matching any type made the folder win,
+ * so the move asked to reparent that folder into itself and the API answered
+ * "Cannot move a node into itself." Callers here always mean the content node.
+ */
+function findMovableBySlug(nodes: NodeTreeVO[], nodeSlug: string) {
+  return findNode(nodes, (node) => node.slug === nodeSlug && node.type !== "folder");
+}
+
 export function needsMove(nodes: NodeTreeVO[], nodeSlug: string, folderSlug: string): boolean {
-  const target = findNode(nodes, (node) => node.slug === nodeSlug);
+  const target = findMovableBySlug(nodes, nodeSlug);
   const folder = findFolderBySlug(nodes, folderSlug);
   return !!target && !!folder && target.parentId !== folder.node.id;
 }
@@ -67,11 +78,14 @@ export async function moveNodeToFolder(
   knownNodes?: NodeTreeVO[],
 ): Promise<boolean> {
   const nodes = knownNodes ?? (await api<NodeTreeVO[]>("GET", "/nodes"));
-  const target = findNode(nodes, (node) => node.slug === nodeSlug);
+  const target = findMovableBySlug(nodes, nodeSlug);
   const folder = findFolderBySlug(nodes, folderSlug);
   if (!target) throw new Error(`node slug "${nodeSlug}" not found`);
   if (!folder) throw new Error(`folder slug "${folderSlug}" not found`);
   if (target.parentId === folder.node.id) return false;
+  // Belt and braces for the slug-collision case above: never ask the API to
+  // reparent a node into itself, whatever the lookup returned.
+  if (target.node.id === folder.node.id) return false;
 
   const cr = await api<{ id: string }>("POST", "/nodes/change-requests", {
     message: `demo: move ${nodeSlug} into ${folderSlug}`,

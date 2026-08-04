@@ -47,7 +47,8 @@ export const BRANDING_LOGO_MAX_BYTES = 2 * 1024 * 1024;
  * Accepted logo types, mapped to the extension the stored object gets.
  *
  * Deliberately an allowlist rather than a `image/*` prefix test: the download
- * route (`/api/dev/attachment/[...key]`) infers `Content-Type` from the key's
+ * route (`/api/storage/[...key]` on self-hosted Busabase) infers `Content-Type`
+ * from the key's
  * extension, so a type it cannot map would be served as
  * `application/octet-stream` and render as a broken image. These five are
  * exactly the image types that route knows.
@@ -210,7 +211,7 @@ export interface DeleteBrandingLogoResult {
  *    asset upload endpoints, so an asset could carry `context: "branding"`.
  * 2. **Only URLs we minted.** Rather than parsing the URL back into a storage
  *    key — the public URL shape differs per adapter (`/uploads/<key>`, the dev
- *    proxy `/api/dev/attachment/<key>`, a CDN base in production) and a parser
+ *    local relay `/api/storage/<key>`, a CDN base in production) and a parser
  *    would have to know all of them — this compares FORWARDS against what the
  *    adapter itself would mint for each candidate row. An operator's externally
  *    hosted logo, or the built-in `/icon.svg`, is not the public URL of any

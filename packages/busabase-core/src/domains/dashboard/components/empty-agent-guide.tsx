@@ -33,7 +33,7 @@ export function EmptyAgentGuide({ edition = "desktop", lang }: EmptyAgentGuidePr
 
   return (
     <>
-      <div className="mx-auto max-w-xl rounded-lg border bg-background p-4 text-left shadow-sm">
+      <div className="mx-auto max-w-xl rounded-lg border bg-card p-4 text-left">
         <div className="flex items-start gap-3">
           <div className="mt-0.5 grid size-9 shrink-0 place-items-center rounded-md bg-primary/10 text-primary">
             <Sparkles size={18} />

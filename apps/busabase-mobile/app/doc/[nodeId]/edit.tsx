@@ -96,6 +96,11 @@ function DocEditContent() {
         body,
         message: changeMessage.trim() || defaultChangeMessage,
         submittedBy: SUBMITTED_BY,
+        // This is the "Save as change request" button, sitting next to a separate
+        // "Direct save". `autoMerge` is permission-aware when omitted, so without
+        // this the two buttons do the same thing for any write-capable user and
+        // the screen then navigates to an already-merged ChangeRequest.
+        autoMerge: false,
       });
     },
     onSuccess: (changeRequest) =>

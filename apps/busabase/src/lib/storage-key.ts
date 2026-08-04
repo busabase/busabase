@@ -1,15 +1,17 @@
 /**
- * Storage-key safety guard for the app's `/api/dev/upload` and
- * `/api/dev/attachment/[...key]` routes.
+ * Storage-key safety guard for the app's storage routes: the production pair
+ * `/api/storage/[...key]` + `/api/storage/upload`, and their development-only
+ * counterparts `/api/dev/attachment/[...key]` + `/api/dev/upload`.
  *
- * Those routes are un-gated in production for this app (self-hosted
- * `busabase server` runs a production build, and every locally stored
- * attachment — including the sidebar logo — is served through them). The
+ * The `/api/storage` routes are un-gated (self-hosted `busabase server` runs a
+ * production build, and every locally stored attachment — including the sidebar
+ * logo — is served through them), so the guard is load-bearing there. The
  * openlib handlers hand the key straight to the storage adapter, whose local
  * implementation does `path.join(rootDir, key)`. Without a guard, a key like
  * `../../etc/passwd` (which survives as a single percent-encoded path segment)
  * would escape the storage root — an arbitrary-file read on the download route
- * and an arbitrary-file write on the upload route.
+ * and an arbitrary-file write on the upload route. The `/api/dev` routes 404 in
+ * production, but keep the guard so a dev process is bounded too.
  *
  * Pure and isomorphic: no db, no node APIs.
  */

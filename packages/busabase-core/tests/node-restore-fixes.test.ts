@@ -163,6 +163,9 @@ describe("node / field restore fixes", () => {
 
     // Restoring the original field must fail at merge (slug now taken).
     const restoreCr = await client.bases.fieldChangeRequest({
+      // review-first: this test asserts the guard that fires at MERGE time, so the
+      // proposal must stay pending instead of being merged inside this same call.
+      autoMerge: false,
       operation: "restore",
       baseId,
       fieldId: oldDupId,

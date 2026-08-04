@@ -1,5 +1,6 @@
 import { ORPCError } from "@orpc/server";
 import { RPCHandler } from "@orpc/server/fetch";
+import { BatchHandlerPlugin } from "@orpc/server/plugins";
 import { runWithBusabaseContext } from "busabase-core/context";
 import { busabaseRouter } from "busabase-core/router";
 import { busabaseDemoRouter } from "busabase-core/router-demo";
@@ -8,8 +9,10 @@ import { resolveDemoMode } from "openlib/ui/dashboard/demo";
 import { readBuiltinVaultRuntimeEnv } from "~/domains/vault/logic/vault";
 import { getLocalUserName } from "~/lib/local-user";
 
-const handler = new RPCHandler(busabaseRouter);
-const demoHandler = new RPCHandler(busabaseDemoRouter);
+// BatchHandlerPlugin serves the batch requests emitted by the shared
+// BatchLinkPlugin. Both routers use the same transport in normal and demo mode.
+const handler = new RPCHandler(busabaseRouter, { plugins: [new BatchHandlerPlugin()] });
+const demoHandler = new RPCHandler(busabaseDemoRouter, { plugins: [new BatchHandlerPlugin()] });
 const BUSABASE_RPC_METHODS = "GET, POST, OPTIONS";
 
 async function handle(request: Request) {

@@ -283,11 +283,24 @@ export const assertAuditSubjectPermission = async (
             .limit(1)
         : [];
     if (!operation) {
-      throw commentSubjectNotFound("Subject", subject.operationId ?? commitId ?? "unknown");
+      // No owning operation. For a RECORD subject that is normal, not missing:
+      // the seeder writes commits directly with no operation row, so every
+      // seeded record used to be un-commentable and the error named its commit
+      // id ("Subject not found: cmt_…") for a record that plainly exists. Fall
+      // through to the record -> Base -> node scoping below, which is the same
+      // permission the record's own reads and writes already go through — the
+      // CR lookup is a narrowing convenience, not the authority.
+      //
+      // Only for records: an operation/commit subject with no operation really is
+      // dangling, and there is nothing else to scope it by.
+      if (!subject.recordId) {
+        throw commentSubjectNotFound("Subject", subject.operationId ?? commitId ?? "unknown");
+      }
+    } else {
+      const { assertChangeRequestPermission } = await import("./cr-lifecycle");
+      await assertChangeRequestPermission(operation.changeRequestId, required);
+      return;
     }
-    const { assertChangeRequestPermission } = await import("./cr-lifecycle");
-    await assertChangeRequestPermission(operation.changeRequestId, required);
-    return;
   }
   const [base] = subject.recordId
     ? await db

@@ -36,7 +36,14 @@ function SkillDetailContent() {
       }}
       onCreateChangeRequest={(input) => {
         if (!buda) throw new Error("Not connected");
-        return buda.client.fileTrees.createChangeRequest({ type: "skill", nodeId, ...input });
+        // The screen promises "the file changes only after review and merge" and then
+        // navigates to the ChangeRequest, so review is not optional here.
+        return buda.client.fileTrees.createChangeRequest({
+          type: "skill",
+          nodeId,
+          autoMerge: false,
+          ...input,
+        });
       }}
       onChangeRequestCreated={(changeRequestId) =>
         router.push({ pathname: "/change-requests/[id]", params: { id: changeRequestId } })

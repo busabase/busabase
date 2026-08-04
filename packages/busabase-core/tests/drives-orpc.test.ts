@@ -423,6 +423,9 @@ describe("Drive API — oRPC integration", () => {
       name: "Stale Drive",
     });
     const staleCr = await client.fileTrees.createChangeRequest({
+      // review-first: this test asserts the stale-hash CONFLICT that fires at MERGE
+      // time, so the proposal must stay pending instead of merging in this same call.
+      autoMerge: false,
       type: "drive",
       nodeId: drive.node.id,
       operations: [

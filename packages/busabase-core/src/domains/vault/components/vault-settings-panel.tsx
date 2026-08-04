@@ -19,7 +19,7 @@ function VaultRowsSkeleton() {
   return (
     <div className="space-y-3" aria-hidden>
       {VAULT_ROW_SKELETON_IDS.map((id) => (
-        <div key={id} className="rounded-md border bg-background p-3">
+        <div key={id} className="rounded-md border bg-card p-3">
           <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1.25fr)_2.5rem]">
             <div className="space-y-1.5">
               <Skeleton className="h-3 w-16" />
@@ -163,10 +163,10 @@ export function VaultSettingsPanel({
 
   const inputClassName = isBoxed
     ? "font-mono text-sm"
-    : "border-border/50 bg-muted/20 shadow-none transition-colors focus-visible:bg-background font-mono text-sm";
+    : "border-border/50 bg-muted/20 shadow-none transition-colors focus-visible:bg-card font-mono text-sm";
   const descriptionInputClassName = isBoxed
     ? "text-sm"
-    : "border-border/50 bg-muted/20 shadow-none transition-colors focus-visible:bg-background text-sm";
+    : "border-border/50 bg-muted/20 shadow-none transition-colors focus-visible:bg-card text-sm";
 
   const renderRows = (kind: VaultItemKind) => {
     if (emptyState) return emptyState;
@@ -209,7 +209,7 @@ export function VaultSettingsPanel({
             key={row.id}
             className={
               isBoxed
-                ? "rounded-md border bg-background p-3"
+                ? "rounded-md border bg-card p-3"
                 : "group px-3 py-3 transition-colors hover:bg-muted/20"
             }
           >

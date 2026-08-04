@@ -106,6 +106,11 @@ describe("busabase pglite integration flow", () => {
         },
       ],
       submittedBy: "vitest-agent",
+      // The point of this block is that the file changes *through review*, not
+      // that it ends up changed. `autoMerge` is permission-aware when omitted and
+      // this harness has full local access, which would turn the review and merge
+      // calls below into no-ops while the content assertion still passed.
+      autoMerge: false,
     });
     expect(skillChangeRequest.primaryOperation?.operation).toBe("skill_file_update");
     await store.reviewChangeRequest(skillChangeRequest.id, { verdict: "approved" });

@@ -56,21 +56,33 @@ const viewNotFound = (viewId: string) =>
  */
 const finalizeViewChangeRequest = async (args: {
   changeRequestId: string;
+  baseId: string;
   baseNodeId: string;
   requestedAutoMerge: boolean | undefined;
   submittedBy: string;
   label: string;
 }) => {
-  const changeRequest = await getChangeRequest(args.changeRequestId);
-  if (!changeRequest) {
-    throw new Error(`Failed to create view ${args.label} change request`);
-  }
-
   const autoMerge = shouldAutoMerge(
     args.requestedAutoMerge,
     await hasNodePermission(args.baseNodeId, "write", args.submittedBy),
   );
+
   if (!autoMerge) {
+    // Emitted HERE, not at the call sites: a CR that is about to be auto-merged
+    // never becomes reviewable, so announcing it as pending review pings a human
+    // about work that vanishes microseconds later. Publishing before deciding
+    // (which is what the four callers used to do) produced exactly that phantom
+    // notification.
+    await publishChangeRequestPendingReview({
+      spaceId: getContextSpaceId(),
+      baseId: args.baseId,
+      changeRequestId: args.changeRequestId,
+      submittedBy: resolveActorId(args.submittedBy),
+    });
+    const changeRequest = await getChangeRequest(args.changeRequestId);
+    if (!changeRequest) {
+      throw new Error(`Failed to create view ${args.label} change request`);
+    }
     return { ...changeRequest, materialized: false as const };
   }
 
@@ -173,15 +185,9 @@ export const createViewChangeRequest = async (
     operationId,
     metadata: { operation: "view_create", viewSlug: parsed.slug },
   });
-  await publishChangeRequestPendingReview({
-    spaceId: getContextSpaceId(),
-    baseId: base.id,
-    changeRequestId,
-    submittedBy: resolveActorId(parsed.submittedBy),
-  });
-
   return finalizeViewChangeRequest({
     changeRequestId,
+    baseId: base.id,
     baseNodeId: base.nodeId,
     requestedAutoMerge: parsed.autoMerge,
     submittedBy: parsed.submittedBy,
@@ -277,15 +283,9 @@ export const createUpdateViewChangeRequest = async (
     operationId,
     metadata: { operation: "view_update", viewId: view.id },
   });
-  await publishChangeRequestPendingReview({
-    spaceId: getContextSpaceId(),
-    baseId: view.baseId,
-    changeRequestId,
-    submittedBy: resolveActorId(parsed.submittedBy),
-  });
-
   return finalizeViewChangeRequest({
     changeRequestId,
+    baseId: base.id,
     baseNodeId: base.nodeId,
     requestedAutoMerge: parsed.autoMerge,
     submittedBy: parsed.submittedBy,
@@ -379,15 +379,9 @@ export const createDeleteViewChangeRequest = async (
     operationId,
     metadata: { operation: "view_delete", viewId: view.id },
   });
-  await publishChangeRequestPendingReview({
-    spaceId: getContextSpaceId(),
-    baseId: view.baseId,
-    changeRequestId,
-    submittedBy: resolveActorId(parsed.submittedBy),
-  });
-
   return finalizeViewChangeRequest({
     changeRequestId,
+    baseId: base.id,
     baseNodeId: base.nodeId,
     requestedAutoMerge: parsed.autoMerge,
     submittedBy: parsed.submittedBy,
@@ -484,15 +478,9 @@ export const createRestoreViewChangeRequest = async (
     operationId,
     metadata: { operation: "view_restore", viewId: view.id },
   });
-  await publishChangeRequestPendingReview({
-    spaceId: getContextSpaceId(),
-    baseId: view.baseId,
-    changeRequestId,
-    submittedBy: resolveActorId(parsed.submittedBy),
-  });
-
   return finalizeViewChangeRequest({
     changeRequestId,
+    baseId: base.id,
     baseNodeId: base.nodeId,
     requestedAutoMerge: parsed.autoMerge,
     submittedBy: parsed.submittedBy,

@@ -106,6 +106,7 @@ import {
   ViewConfigToolbar,
   ViewFieldsEditor,
 } from "./view-config-editor";
+import { ACTIVE_VIEW_CONTROL_CLASS_NAME } from "./view-control-styles";
 
 // Per-view-type tab glyph (kept in one place so tabs and the type picker agree).
 function ViewTypeIcon({ type }: { type: ViewType }) {
@@ -639,7 +640,7 @@ function BusaBaseRecordRow({
       ))}
       {/* Record-status cell disabled — see baseTableStatusCellClassName above.
       <div className={baseTableStatusCellClassName} role="gridcell" tabIndex={-1}>
-        <span className="inline-flex max-w-full items-center gap-1.5 truncate rounded-full bg-muted/55 px-2 py-0.5 text-muted-foreground text-xs capitalize">
+        <span className="inline-flex max-w-full items-center gap-1.5 truncate rounded-md bg-muted/55 px-2 py-0.5 text-muted-foreground text-xs capitalize">
           <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-current opacity-55" />
           <span className="truncate">{record.status}</span>
         </span>
@@ -921,6 +922,7 @@ export function BusaBaseTable({
   // template + sticky first column are preserved.
   const shouldVirtualize = records.length > VIRTUALIZE_ROW_THRESHOLD;
   const tableRootRef = useRef<HTMLDivElement>(null);
+  const viewTabsRef = useRef<HTMLElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const [listScrollMargin, setListScrollMargin] = useState(0);
   const getScrollElement = useCallback(() => scrollElementRef.current, [scrollElementRef]);
@@ -945,58 +947,82 @@ export function BusaBaseTable({
     scrollMargin: listScrollMargin,
   });
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: route changes must reveal the newly active tab.
+  useEffect(() => {
+    viewTabsRef.current
+      ?.querySelector<HTMLElement>('[aria-current="page"]')
+      ?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }, [activeView?.id, base?.id]);
+
   return (
-    <div ref={tableRootRef}>
-      <div className="mb-3 flex min-w-0 items-center justify-between gap-3">
-        <nav
-          aria-label={messages.recordView.view}
-          className="flex h-8 min-w-0 flex-1 flex-nowrap items-center gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
-          data-testid="base-view-tabs"
+    <div className="@container/base-toolbar" ref={tableRootRef}>
+      <div
+        className="mb-3 flex min-w-0 flex-col gap-2 @3xl/base-toolbar:flex-row @3xl/base-toolbar:items-center @3xl/base-toolbar:gap-3"
+        data-testid="base-toolbar-layout"
+      >
+        <div
+          className="order-2 flex min-w-0 items-center gap-1 @3xl/base-toolbar:order-1 @3xl/base-toolbar:flex-1"
+          data-testid="base-view-navigation"
         >
-          {base ? (
-            <Link
-              className={`inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md border px-2.5 font-medium text-xs transition-colors ${
-                activeView
-                  ? "border-transparent text-muted-foreground hover:bg-accent/60 hover:text-foreground"
-                  : "border-border/60 bg-muted/70 text-foreground"
-              }`}
-              href={mergeSearchIntoHref(`/base/${base.slug}`, currentSearch)}
-            >
-              {messages.base.all}
-            </Link>
-          ) : null}
-          {views.map((view) => {
-            const active = view.id === activeView?.id;
-            return (
-              <Link
-                className={`inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md border px-2.5 font-medium text-xs transition-colors ${
-                  active
-                    ? "border-border/60 bg-muted/70 text-foreground"
-                    : "border-transparent text-muted-foreground hover:bg-accent/60 hover:text-foreground"
-                }`}
-                href={mergeSearchIntoHref(`/base/${base?.slug ?? ""}/${view.slug}`, currentSearch)}
-                key={view.id}
-              >
-                <ViewTypeIcon type={view.type} />
-                {view.name}
-              </Link>
-            );
-          })}
-        </nav>
-        {base && !isAnon ? (
-          <button
-            aria-label={messages.base.newView}
-            className="inline-flex size-7 shrink-0 items-center justify-center rounded-md border border-border/70 border-dashed text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-            data-testid="base-new-view-button"
-            onClick={() => setEditingViewMode("create")}
-            title={messages.base.newView}
-            type="button"
+          <nav
+            aria-label={messages.recordView.view}
+            className="flex h-8 min-w-0 flex-1 flex-nowrap items-center gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+            data-testid="base-view-tabs"
+            ref={viewTabsRef}
           >
-            <Plus size={13} />
-          </button>
-        ) : null}
-        <div className="flex flex-shrink-0 items-center gap-2">
-          <span className="text-muted-foreground text-xs">
+            {base ? (
+              <Link
+                aria-current={activeView ? undefined : "page"}
+                className={`inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md border px-2.5 font-medium text-xs transition-colors ${
+                  activeView
+                    ? "border-transparent text-muted-foreground hover:bg-accent/60 hover:text-foreground"
+                    : ACTIVE_VIEW_CONTROL_CLASS_NAME
+                }`}
+                href={mergeSearchIntoHref(`/base/${base.slug}`, currentSearch)}
+              >
+                {messages.base.all}
+              </Link>
+            ) : null}
+            {views.map((view) => {
+              const active = view.id === activeView?.id;
+              return (
+                <Link
+                  aria-current={active ? "page" : undefined}
+                  className={`inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md border px-2.5 font-medium text-xs transition-colors ${
+                    active
+                      ? ACTIVE_VIEW_CONTROL_CLASS_NAME
+                      : "border-transparent text-muted-foreground hover:bg-accent/60 hover:text-foreground"
+                  }`}
+                  href={mergeSearchIntoHref(
+                    `/base/${base?.slug ?? ""}/${view.slug}`,
+                    currentSearch,
+                  )}
+                  key={view.id}
+                >
+                  <ViewTypeIcon type={view.type} />
+                  {view.name}
+                </Link>
+              );
+            })}
+          </nav>
+          {base && !isAnon ? (
+            <button
+              aria-label={messages.base.newView}
+              className="inline-flex size-7 shrink-0 items-center justify-center rounded-md border border-border/70 border-dashed text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+              data-testid="base-new-view-button"
+              onClick={() => setEditingViewMode("create")}
+              title={messages.base.newView}
+              type="button"
+            >
+              <Plus size={13} />
+            </button>
+          ) : null}
+        </div>
+        <div
+          className="order-1 flex h-8 min-w-0 items-center justify-between gap-2 @3xl/base-toolbar:order-2 @3xl/base-toolbar:shrink-0 @3xl/base-toolbar:justify-start"
+          data-testid="base-record-actions"
+        >
+          <span className="min-w-0 flex-1 truncate text-muted-foreground text-xs @3xl/base-toolbar:flex-none">
             {(() => {
               const displayCount = pagination?.total ?? records.length;
               return fmt(messages.base.recordCount, {
@@ -1016,52 +1042,54 @@ export function BusaBaseTable({
               </button>
             ) : null}
           </span>
-          {activeView && !isAnon ? (
-            <details className="relative">
-              <summary
-                aria-label={messages.base.viewActions}
-                className="flex h-7 w-7 cursor-pointer list-none items-center justify-center rounded-md border border-border/70 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground [&::-webkit-details-marker]:hidden"
-                data-testid="active-view-actions"
-                title={messages.base.viewActions}
+          <div className="flex shrink-0 items-center gap-2">
+            {activeView && !isAnon ? (
+              <details className="relative">
+                <summary
+                  aria-label={messages.base.viewActions}
+                  className="flex h-7 w-7 cursor-pointer list-none items-center justify-center rounded-md border border-border/70 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground [&::-webkit-details-marker]:hidden"
+                  data-testid="active-view-actions"
+                  title={messages.base.viewActions}
+                >
+                  <MoreHorizontal size={15} />
+                </summary>
+                <div className="absolute right-0 z-50 mt-1 w-40 rounded-md border border-border/70 bg-card p-1 shadow-md">
+                  <button
+                    className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left font-medium text-foreground text-xs transition-colors hover:bg-accent"
+                    onClick={(event) => {
+                      setEditingViewMode("edit");
+                      event.currentTarget.closest("details")?.removeAttribute("open");
+                    }}
+                    type="button"
+                  >
+                    <PenLine size={13} />
+                    {messages.base.editView}
+                  </button>
+                  <button
+                    className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left font-medium text-red-700 text-xs transition-colors hover:bg-red-50 disabled:opacity-60"
+                    disabled={isDeletingView}
+                    onClick={(event) => {
+                      setConfirmDeleteView(activeView);
+                      event.currentTarget.closest("details")?.removeAttribute("open");
+                    }}
+                    type="button"
+                  >
+                    <Trash2 size={13} />
+                    {isDeletingView ? messages.common.deleting : messages.base.deleteView}
+                  </button>
+                </div>
+              </details>
+            ) : null}
+            {base && !isAnon ? (
+              <Link
+                className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md bg-foreground px-2.5 font-medium text-background text-xs transition-colors hover:bg-foreground/85"
+                href={mergeSearchIntoHref(`/base/${base.slug}/new`, currentSearch)}
               >
-                <MoreHorizontal size={15} />
-              </summary>
-              <div className="absolute right-0 z-50 mt-1 w-40 rounded-md border border-border/70 bg-background p-1 shadow-md">
-                <button
-                  className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left font-medium text-foreground text-xs transition-colors hover:bg-accent"
-                  onClick={(event) => {
-                    setEditingViewMode("edit");
-                    event.currentTarget.closest("details")?.removeAttribute("open");
-                  }}
-                  type="button"
-                >
-                  <PenLine size={13} />
-                  {messages.base.editView}
-                </button>
-                <button
-                  className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left font-medium text-red-700 text-xs transition-colors hover:bg-red-50 disabled:opacity-60"
-                  disabled={isDeletingView}
-                  onClick={(event) => {
-                    setConfirmDeleteView(activeView);
-                    event.currentTarget.closest("details")?.removeAttribute("open");
-                  }}
-                  type="button"
-                >
-                  <Trash2 size={13} />
-                  {isDeletingView ? messages.common.deleting : messages.base.deleteView}
-                </button>
-              </div>
-            </details>
-          ) : null}
-          {base && !isAnon ? (
-            <Link
-              className="inline-flex h-7 items-center gap-1.5 rounded-md bg-foreground px-2.5 font-medium text-background text-xs transition-colors hover:bg-foreground/85"
-              href={mergeSearchIntoHref(`/base/${base.slug}/new`, currentSearch)}
-            >
-              <Plus size={13} />
-              {messages.base.newRecord}
-            </Link>
-          ) : null}
+                <Plus size={13} />
+                {messages.base.newRecord}
+              </Link>
+            ) : null}
+          </div>
         </div>
       </div>
       {activeView && !isAnon ? (
@@ -1140,7 +1168,7 @@ export function BusaBaseTable({
                 <span className="text-muted-foreground">{view.name}</span>
                 {onRestoreView ? (
                   <button
-                    className="inline-flex items-center gap-1 rounded border border-border/60 bg-background px-2 py-1 text-xs transition-colors hover:bg-accent disabled:opacity-50"
+                    className="inline-flex items-center gap-1 rounded border border-border/60 bg-card px-2 py-1 text-xs transition-colors hover:bg-accent disabled:opacity-50"
                     disabled={restoringViewId === view.id}
                     onClick={() => {
                       setRestoringViewId(view.id);
@@ -1503,14 +1531,14 @@ export function BusaBaseTable({
                       />
                     ))}
                     <div className={baseTableStatusCellClassName} role="gridcell" tabIndex={-1}>
-                      <span className="inline-flex min-w-0 items-center gap-1.5 truncate rounded-full bg-muted/55 px-2 py-0.5 text-muted-foreground text-xs">
+                      <span className="inline-flex min-w-0 items-center gap-1.5 truncate rounded-md bg-muted/55 px-2 py-0.5 text-muted-foreground text-xs">
                         <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-current opacity-55" />
                         <span className="truncate">{messages.common.archived}</span>
                       </span>
                       {onRestoreRecord ? (
                         <button
                           aria-label={messages.common.restore}
-                          className="ml-auto inline-flex size-7 shrink-0 items-center justify-center rounded border border-border/60 bg-background transition-colors hover:bg-accent disabled:opacity-50"
+                          className="ml-auto inline-flex size-7 shrink-0 items-center justify-center rounded border border-border/60 bg-card transition-colors hover:bg-accent disabled:opacity-50"
                           disabled={restoringRecordId === record.id}
                           onClick={() => {
                             setRestoringRecordId(record.id);
@@ -1736,7 +1764,7 @@ function ViewChangeRequestForm({
         <label className="block">
           <span className="text-muted-foreground text-xs">{messages.common.name}</span>
           <input
-            className="mt-1 h-8 w-full rounded-md border border-border/70 bg-background px-2.5 text-sm outline-none transition-colors focus:border-primary"
+            className="mt-1 h-8 w-full rounded-md border border-border/70 bg-card px-2.5 text-sm outline-none transition-colors focus:border-primary"
             onChange={(event) => {
               setName(event.target.value);
               if (mode === "create" && !slug) {
@@ -1749,7 +1777,7 @@ function ViewChangeRequestForm({
         <label className="block">
           <span className="text-muted-foreground text-xs">{messages.common.slug}</span>
           <input
-            className="mt-1 h-8 w-full rounded-md border border-border/70 bg-background px-2.5 font-mono text-sm outline-none transition-colors focus:border-primary disabled:bg-muted/40 disabled:text-muted-foreground"
+            className="mt-1 h-8 w-full rounded-md border border-border/70 bg-card px-2.5 font-mono text-sm outline-none transition-colors focus:border-primary disabled:bg-muted/40 disabled:text-muted-foreground"
             disabled={mode === "edit"}
             onChange={(event) => setSlug(toSlugInput(event.target.value))}
             value={slug}
@@ -1758,7 +1786,7 @@ function ViewChangeRequestForm({
         <label className="block md:col-span-2">
           <span className="text-muted-foreground text-xs">{messages.common.description}</span>
           <textarea
-            className="mt-1 min-h-16 w-full resize-y rounded-md border border-border/70 bg-background px-2.5 py-2 text-sm outline-none transition-colors focus:border-primary"
+            className="mt-1 min-h-16 w-full resize-y rounded-md border border-border/70 bg-card px-2.5 py-2 text-sm outline-none transition-colors focus:border-primary"
             onChange={(event) => setDescription(event.target.value)}
             value={description}
           />
@@ -1801,7 +1829,7 @@ function ViewChangeRequestForm({
               className={`inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 font-medium text-xs transition-colors ${
                 viewType === option.value
                   ? "border-primary bg-primary/10 text-foreground"
-                  : "border-border/70 bg-background text-muted-foreground hover:bg-accent hover:text-foreground"
+                  : "border-border/70 bg-card text-muted-foreground hover:bg-accent hover:text-foreground"
               }`}
               key={option.value}
               onClick={() => setViewType(option.value)}
@@ -1819,7 +1847,7 @@ function ViewChangeRequestForm({
           <label className="block">
             <span className="text-muted-foreground text-xs">{messages.base.coverField}</span>
             <select
-              className="mt-1 h-8 w-full rounded-md border border-border/70 bg-background px-2.5 text-sm outline-none transition-colors focus:border-primary"
+              className="mt-1 h-8 w-full rounded-md border border-border/70 bg-card px-2.5 text-sm outline-none transition-colors focus:border-primary"
               onChange={(event) => setCoverFieldSlug(event.target.value)}
               value={coverFieldSlug}
             >
@@ -1835,7 +1863,7 @@ function ViewChangeRequestForm({
           <label className="block">
             <span className="text-muted-foreground text-xs">{messages.base.coverFit}</span>
             <select
-              className="mt-1 h-8 w-full rounded-md border border-border/70 bg-background px-2.5 text-sm outline-none transition-colors focus:border-primary"
+              className="mt-1 h-8 w-full rounded-md border border-border/70 bg-card px-2.5 text-sm outline-none transition-colors focus:border-primary"
               onChange={(event) => setCoverFit(event.target.value as GalleryCoverFit)}
               value={coverFit}
             >
@@ -1846,7 +1874,7 @@ function ViewChangeRequestForm({
           <label className="block">
             <span className="text-muted-foreground text-xs">{messages.base.cardSize}</span>
             <select
-              className="mt-1 h-8 w-full rounded-md border border-border/70 bg-background px-2.5 text-sm outline-none transition-colors focus:border-primary"
+              className="mt-1 h-8 w-full rounded-md border border-border/70 bg-card px-2.5 text-sm outline-none transition-colors focus:border-primary"
               onChange={(event) => setCardSize(event.target.value as GalleryCardSize)}
               value={cardSize}
             >
@@ -1871,7 +1899,7 @@ function ViewChangeRequestForm({
           <label className="block md:max-w-xs">
             <span className="text-muted-foreground text-xs">{messages.base.stackByField}</span>
             <select
-              className="mt-1 h-8 w-full rounded-md border border-border/70 bg-background px-2.5 text-sm outline-none transition-colors focus:border-primary"
+              className="mt-1 h-8 w-full rounded-md border border-border/70 bg-card px-2.5 text-sm outline-none transition-colors focus:border-primary"
               onChange={(event) => setStackByFieldSlug(event.target.value)}
               value={stackByFieldSlug}
             >
@@ -1894,7 +1922,7 @@ function ViewChangeRequestForm({
           <label className="block md:max-w-xs">
             <span className="text-muted-foreground text-xs">{messages.base.dateField}</span>
             <select
-              className="mt-1 h-8 w-full rounded-md border border-border/70 bg-background px-2.5 text-sm outline-none transition-colors focus:border-primary"
+              className="mt-1 h-8 w-full rounded-md border border-border/70 bg-card px-2.5 text-sm outline-none transition-colors focus:border-primary"
               onChange={(event) => setDateFieldSlug(event.target.value)}
               value={dateFieldSlug}
             >
@@ -1917,7 +1945,7 @@ function ViewChangeRequestForm({
           <label className="block">
             <span className="text-muted-foreground text-xs">{messages.base.ganttStartField}</span>
             <select
-              className="mt-1 h-8 w-full rounded-md border border-border/70 bg-background px-2.5 text-sm outline-none transition-colors focus:border-primary"
+              className="mt-1 h-8 w-full rounded-md border border-border/70 bg-card px-2.5 text-sm outline-none transition-colors focus:border-primary"
               onChange={(event) => setStartFieldSlug(event.target.value)}
               value={startFieldSlug}
             >
@@ -1932,7 +1960,7 @@ function ViewChangeRequestForm({
           <label className="block">
             <span className="text-muted-foreground text-xs">{messages.base.ganttEndField}</span>
             <select
-              className="mt-1 h-8 w-full rounded-md border border-border/70 bg-background px-2.5 text-sm outline-none transition-colors focus:border-primary"
+              className="mt-1 h-8 w-full rounded-md border border-border/70 bg-card px-2.5 text-sm outline-none transition-colors focus:border-primary"
               onChange={(event) => setEndFieldSlug(event.target.value)}
               value={endFieldSlug}
             >
@@ -1947,7 +1975,7 @@ function ViewChangeRequestForm({
           <label className="block">
             <span className="text-muted-foreground text-xs">{messages.base.ganttScale}</span>
             <select
-              className="mt-1 h-8 w-full rounded-md border border-border/70 bg-background px-2.5 text-sm outline-none transition-colors focus:border-primary"
+              className="mt-1 h-8 w-full rounded-md border border-border/70 bg-card px-2.5 text-sm outline-none transition-colors focus:border-primary"
               onChange={(event) => setGanttScale(event.target.value as GanttScale)}
               value={ganttScale}
             >
@@ -1976,7 +2004,7 @@ function ViewChangeRequestForm({
         {formError ? <div className="text-red-700 text-sm">{formError}</div> : <div />}
         <div className="flex items-center gap-2">
           <button
-            className="rounded-md border border-border/70 bg-background px-3 py-1.5 font-medium text-xs transition-colors hover:bg-accent"
+            className="rounded-md border border-border/70 bg-card px-3 py-1.5 font-medium text-xs transition-colors hover:bg-accent"
             onClick={onCancel}
             type="button"
           >
@@ -2075,7 +2103,7 @@ function RecordTableCellContent({
           <FieldBadge chip={chip} key={`${chip.label}:${chipIndex}`} />
         ))}
         {chips.length > 3 ? (
-          <span className="rounded-full bg-muted/50 px-2 py-0.5 text-muted-foreground text-xs">
+          <span className="rounded-md bg-muted/50 px-2 py-0.5 text-muted-foreground text-xs">
             +{chips.length - 3}
           </span>
         ) : null}
@@ -2117,7 +2145,7 @@ function RecordTableCellContent({
         })}
         {tableOthers.slice(0, Math.max(0, 3 - tableImages.length)).map((item) => (
           <span
-            className="inline-flex max-w-full items-center gap-1 truncate rounded-full bg-muted/70 px-2 py-0.5 text-foreground text-xs"
+            className="inline-flex max-w-full items-center gap-1 truncate rounded-md bg-muted/70 px-2 py-0.5 text-foreground text-xs"
             key={item.id}
           >
             <Paperclip className="shrink-0" size={11} />
@@ -2125,7 +2153,7 @@ function RecordTableCellContent({
           </span>
         ))}
         {attachments.length > 3 ? (
-          <span className="rounded-full bg-muted/50 px-2 py-0.5 text-muted-foreground text-xs">
+          <span className="rounded-md bg-muted/50 px-2 py-0.5 text-muted-foreground text-xs">
             +{attachments.length - 3}
           </span>
         ) : null}
@@ -2173,7 +2201,7 @@ function RecordTableCellContent({
           const label = linkedRecord
             ? getRecordTitle(linkedRecord, messages)
             : shortIdentifier(recordId);
-          const chipClassName = "max-w-full truncate rounded-full bg-muted/70 px-2 py-0.5 text-xs";
+          const chipClassName = "max-w-full truncate rounded-md bg-muted/70 px-2 py-0.5 text-xs";
           return linkedRecord ? (
             <Link
               className={`${chipClassName} text-primary transition-colors hover:bg-primary/10 hover:underline`}

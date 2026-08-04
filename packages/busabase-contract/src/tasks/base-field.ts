@@ -38,7 +38,28 @@ export interface BaseFieldChangeInput {
   fieldIds?: string[];
   message?: string;
   submittedBy?: string;
+  autoMerge?: boolean;
+  requireReview?: boolean;
 }
+
+/**
+ * `autoMerge` is tri-state — unset (permission-aware default), forced on, forced
+ * off — but a CLI boolean flag is presence-only, so `--auto-merge` alone could
+ * never express "forced off". Same two-flag shape as `node_create`.
+ *
+ * Forwarded for EVERY operation, including `delete` and `convert` which do not
+ * accept it. That is deliberate: those two branches reject the flag server-side
+ * with a message saying why and what to do instead, and a caller who passed it
+ * needs to see that. Filtering it out here would make the task quietly swallow
+ * the flag — reproducing, for the CLI and MCP callers who are this layer's whole
+ * audience, the exact silent-drop failure the server-side rejection exists to
+ * end. `params.appliesWhen` still documents which operations accept it.
+ */
+const mergeIntent = (input: BaseFieldChangeInput): { autoMerge?: boolean } => {
+  if (input.requireReview) return { autoMerge: false };
+  if (input.autoMerge) return { autoMerge: true };
+  return {};
+};
 
 /** Which arguments each operation cannot work without. */
 const REQUIRED_BY_OPERATION: Record<FieldOperation, readonly string[]> = {
@@ -65,7 +86,11 @@ export const baseFieldChangeTask: TaskDefinition<BaseFieldChangeInput> = {
   cliPath: ["bases", "field-change-request"],
   summary: "Propose a Base schema change (add / update / delete / convert / reorder / restore)",
   guidance:
-    "Approval-first: proposes a ChangeRequest, it does not alter the schema directly. " +
+    "Review is permission-aware for add / update / reorder / restore, decided server-side: the " +
+    "change merges immediately when your key has write access on the Base's node and lands as a " +
+    "pending ChangeRequest otherwise — check the response's `status`. Pass requireReview to always " +
+    "propose instead. `delete` and `convert` are ALWAYS review-first regardless of permission, by " +
+    "design: delete soft-deletes the field's stored values with it, and convert can drop values. " +
     "Pick `operation` first, then supply only that operation's arguments — " +
     "add needs slug+name; update needs fieldId+patch; delete/restore need fieldId; " +
     "convert needs fieldId+newType; reorder needs the complete fieldIds order. " +
@@ -144,6 +169,20 @@ export const baseFieldChangeTask: TaskDefinition<BaseFieldChangeInput> = {
     },
     { name: "message", kind: "string", description: "Explanation for the reviewer." },
     { name: "submittedBy", kind: "string", description: "Producer label recorded on the change." },
+    {
+      name: "autoMerge",
+      kind: "boolean",
+      appliesWhen: { param: "operation", values: ["add", "update", "reorder", "restore"] },
+      description:
+        "Skip review and apply the schema change immediately if you have write access. Not a permission override — a changeRequest-level key still gets a pending CR. Default is permission-aware: merge when you can, otherwise propose.",
+    },
+    {
+      name: "requireReview",
+      kind: "boolean",
+      appliesWhen: { param: "operation", values: ["add", "update", "reorder", "restore"] },
+      description:
+        "Always propose a pending ChangeRequest, even with write access. delete and convert are review-first regardless.",
+    },
   ],
   examples: [
     "busabase-cli bases field-change-request --base-id bas_1 --operation add --slug status --name Status --field-type select",
@@ -160,6 +199,7 @@ export const baseFieldChangeTask: TaskDefinition<BaseFieldChangeInput> = {
       baseId: input.baseId,
       ...(input.message ? { message: input.message } : {}),
       ...(input.submittedBy ? { submittedBy: input.submittedBy } : {}),
+      ...mergeIntent(input),
     };
     type FieldInput = Parameters<BusabaseTaskClient["bases"]["fieldChangeRequest"]>[0];
 

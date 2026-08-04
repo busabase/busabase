@@ -34,7 +34,7 @@ export function CommentAvatar({ ai, authorId }: { ai?: boolean; authorId: string
 
 export function AiMentionBadge() {
   return (
-    <span className="inline-flex items-center gap-1 rounded-full bg-violet-100 px-1.5 py-0.5 font-medium text-[10px] text-violet-700 dark:bg-violet-950/50 dark:text-violet-300">
+    <span className="inline-flex items-center gap-1 rounded-md bg-violet-100 px-1.5 py-0.5 font-medium text-[10px] text-violet-700 dark:bg-violet-950/50 dark:text-violet-300">
       <Sparkles size={10} />
       @ai
     </span>
@@ -231,7 +231,7 @@ export function SubjectCommentThread({
       <div className="mt-2 rounded-md border border-border/70 bg-background/55 p-2.5">
         <textarea
           aria-label={messages.comments.addComment}
-          className="min-h-16 w-full resize-y rounded-md border border-border/70 bg-background px-2.5 py-2 text-sm leading-6 outline-none transition-colors focus:border-primary"
+          className="min-h-16 w-full resize-y rounded-md border border-border/70 bg-card px-2.5 py-2 text-sm leading-6 outline-none transition-colors focus:border-primary"
           onChange={(event) => setBody(event.target.value)}
           placeholder={placeholder ?? messages.comments.placeholder}
           ref={composerRef}

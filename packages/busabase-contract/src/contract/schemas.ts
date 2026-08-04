@@ -13,6 +13,7 @@ import {
   type NodeType,
   OPERATION_KINDS,
 } from "../domains/registry";
+import { autoMergeNotAccepted } from "./auto-merge";
 
 export interface NodeOutput {
   id: string;
@@ -560,6 +561,9 @@ const createDeleteChangeRequestInputSchema = z.object({
   // Only "archive" is supported — hard delete after retention was never
   // implemented, so the API no longer accepts it (breaking change).
   deleteMode: z.enum(["archive"]).optional().default("archive"),
+  autoMerge: autoMergeNotAccepted(
+    "archiving a record removes user content from every listing, so it always requires review. Omit the flag.",
+  ),
 });
 
 const reviseOperationInputSchema = z.object({

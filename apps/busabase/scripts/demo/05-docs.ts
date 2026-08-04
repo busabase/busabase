@@ -156,6 +156,10 @@ export async function run() {
       body: crBody,
       message: "demo: update engineering notes via CR",
       submittedBy: "demo-script",
+      // This step demonstrates the review-first flow, so it must ask for review
+      // explicitly: `autoMerge` is permission-aware when omitted, and the demo
+      // script runs with write access, which would merge immediately.
+      autoMerge: false,
     });
     assert(cr.status === "in_review", `expected in_review, got ${cr.status}`);
     crId = cr.id;

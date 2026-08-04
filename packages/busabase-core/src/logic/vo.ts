@@ -58,7 +58,7 @@ const userRef = (users: UserRefMap | undefined, userId: string): UserRefVO | nul
  * apps/busabase-cloud/content/spec/grep-retrieval-strategy.md for the full
  * search-vs-grep fidelity tradeoff. Previously 1,024.
  */
-const VALUE_TEXT_INDEX_LIMIT = 8_000;
+export const VALUE_TEXT_INDEX_LIMIT = 8_000;
 // `whiteboard` stores a structured { scene, previewSvg } composite (not
 // prose) — same treatment as json/attachment/relation: no full-text index,
 // stored verbatim in valueJson.

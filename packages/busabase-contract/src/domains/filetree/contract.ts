@@ -141,6 +141,18 @@ export const createFileTreeChangeRequestInputSchema = z.object({
     ),
   submittedBy: z.string().optional().default("local-producer"),
   operations: z.array(fileTreeFileOperationInputSchema).min(1),
+  // Honoured only when EVERY operation in the batch is non-destructive
+  // (create / update / metadata_update). A batch containing a `delete` stays
+  // review-first no matter what this says, because deleting a mounted file
+  // destroys content — the same line that keeps record `delete` review-only.
+  // Server-side enforcement lives in the filetree handler, not here: the check
+  // is over the operations array, which a per-field schema cannot express.
+  autoMerge: z
+    .boolean()
+    .optional()
+    .describe(
+      "Whether to approve and merge these file changes immediately. Omitted defaults to merging immediately if the actor has write access on the node, otherwise falling back to a pending Change Request; pass explicit false to force review even with write access. IGNORED when any operation is a delete — those batches always require review.",
+    ),
 });
 
 /** Node types whose content is an Asset-backed file tree. Every one of them is

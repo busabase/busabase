@@ -67,6 +67,7 @@ import {
 import type { ViewSubmitOptions } from "../helpers/view-types";
 import { RecordTitleBadge } from "./record-title-badge";
 import { SplitSubmitButton } from "./split-submit-button";
+import { ACTIVE_VIEW_CONTROL_CLASS_NAME } from "./view-control-styles";
 
 export type ViewConfigEditorSection = "fields" | "filters" | "sorts";
 export type ViewConfigEditorSource = "header" | "toolbar";
@@ -181,8 +182,8 @@ export function ViewConfigToolbar({ config, fields, onOpen }: ViewConfigToolbarP
         <button
           className={`inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md border px-2 font-medium text-xs transition-colors ${
             item.active
-              ? "border-primary/35 bg-primary/10 text-primary hover:bg-primary/15"
-              : "border-border/70 bg-background text-muted-foreground hover:bg-accent hover:text-foreground"
+              ? `${ACTIVE_VIEW_CONTROL_CLASS_NAME} hover:bg-muted`
+              : "border-border/70 bg-card text-muted-foreground hover:bg-accent hover:text-foreground"
           }`}
           data-testid={`view-control-${item.section}`}
           key={item.section}
@@ -674,7 +675,7 @@ function ViewFiltersEditor({ config, fields, focusedFieldId, onChange }: Section
                   </span>
                   <select
                     aria-label={fmt(messages.base.filterFieldAt, { index: index + 1 })}
-                    className="h-8 w-full rounded-md border border-border/70 bg-background px-2 text-xs"
+                    className="h-8 w-full rounded-md border border-border/70 bg-card px-2 text-xs"
                     onChange={(event) => {
                       const nextField = fields.find((item) => item.id === event.target.value);
                       if (nextField) {
@@ -704,7 +705,7 @@ function ViewFiltersEditor({ config, fields, focusedFieldId, onChange }: Section
                 </label>
                 <select
                   aria-label={fmt(messages.base.filterOperatorAt, { index: index + 1 })}
-                  className="h-8 w-full rounded-md border border-border/70 bg-background px-2 text-xs"
+                  className="h-8 w-full rounded-md border border-border/70 bg-card px-2 text-xs"
                   onChange={(event) => {
                     const nextOperator = event.target.value as ViewFilterOperator;
                     onChange(
@@ -780,7 +781,7 @@ function FilterValueControl({
     return (
       <select
         aria-label={label}
-        className="h-8 w-full rounded-md border border-border/70 bg-background px-2 text-xs"
+        className="h-8 w-full rounded-md border border-border/70 bg-card px-2 text-xs"
         onChange={(event) => onChange(event.target.value)}
         value={value === undefined || value === null ? "" : String(value)}
       >
@@ -796,7 +797,7 @@ function FilterValueControl({
   return (
     <input
       aria-label={label}
-      className="h-8 w-full rounded-md border border-border/70 bg-background px-2 text-xs"
+      className="h-8 w-full rounded-md border border-border/70 bg-card px-2 text-xs"
       onChange={(event) => onChange(event.target.value)}
       placeholder={messages.base.filterValue}
       type={
@@ -872,7 +873,7 @@ function ViewSortsEditor({ config, fields, focusedFieldId, onChange }: SectionEd
                 <div className="min-w-0">
                   <select
                     aria-label={fmt(messages.base.sortFieldAt, { index: index + 1 })}
-                    className="h-8 w-full min-w-0 rounded-md border border-border/70 bg-background px-2 text-xs"
+                    className="h-8 w-full min-w-0 rounded-md border border-border/70 bg-card px-2 text-xs"
                     onChange={(event) => {
                       const nextField = fields.find((item) => item.id === event.target.value);
                       if (nextField) {
@@ -902,7 +903,7 @@ function ViewSortsEditor({ config, fields, focusedFieldId, onChange }: SectionEd
                 </div>
                 <select
                   aria-label={fmt(messages.base.sortDirectionAt, { index: index + 1 })}
-                  className="h-8 min-w-0 rounded-md border border-border/70 bg-background px-2 text-xs"
+                  className="h-8 min-w-0 rounded-md border border-border/70 bg-card px-2 text-xs"
                   onChange={(event) =>
                     onChange(
                       updateViewSortAt(config, index, {

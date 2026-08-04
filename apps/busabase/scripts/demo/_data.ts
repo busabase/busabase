@@ -58,7 +58,17 @@ export function toApiBase(b: SeedBaseDef, parentNodeId: string) {
     description: b.description,
     parentNodeId,
     fields: b.fields
-      .filter((f) => !["relation", "ai_summary", "ai_tags", "created_time"].includes(f.type))
+      // `lookup` is filtered alongside `relation`, not by accident: a lookup is
+      // validated against the relation field it names, and relations are deferred
+      // here (they need a target Base that may not exist yet — the same reason
+      // busabase-package's install defers both). Keeping the lookup while dropping
+      // its relation makes the payload genuinely invalid, and the API correctly
+      // rejected it with "must point at a relation field on this Base". The seed
+      // path writes rows directly without that validation, which is why the demo
+      // scripts are the only thing that ever surfaced it.
+      .filter(
+        (f) => !["relation", "lookup", "ai_summary", "ai_tags", "created_time"].includes(f.type),
+      )
       .slice(0, 8)
       .map(toApiField),
     // This walkthrough asserts on the materialized Base immediately after POST

@@ -25,7 +25,7 @@ const SHORT_TEXT_MAX = 200;
 /**
  * A logo URL, which may be an uploaded asset URL rather than something typed by
  * hand. The upload pipeline mints content-addressed keys — e.g.
- * `/api/dev/attachment/attachments/blobs/sha256/ab/<64 hex>.png` (~110 chars)
+ * `/api/storage/attachments/blobs/sha256/ab/<64 hex>.png` (~100 chars)
  * — and an externally hosted logo behind a CDN with a signature can be longer
  * still. 2048 is the conventional practical URL ceiling: generous, still bounded.
  */

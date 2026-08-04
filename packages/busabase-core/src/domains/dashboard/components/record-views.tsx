@@ -99,7 +99,7 @@ export function RecordTopbarActions({
       <Link
         className={`rounded px-2.5 py-1.5 font-medium transition-colors ${
           activeTab === "view"
-            ? "bg-background text-foreground shadow-sm"
+            ? "bg-card text-foreground"
             : "text-muted-foreground hover:text-foreground"
         }`}
         href={mergeSearchIntoHref(`/base/${base.slug}/${recordId}`, currentSearch)}
@@ -109,7 +109,7 @@ export function RecordTopbarActions({
       <Link
         className={`rounded px-2.5 py-1.5 font-medium transition-colors ${
           activeTab === "edit"
-            ? "bg-background text-foreground shadow-sm"
+            ? "bg-card text-foreground"
             : "text-muted-foreground hover:text-foreground"
         }`}
         href={mergeSearchIntoHref(`/base/${base.slug}/${recordId}/edit`, currentSearch)}
@@ -179,7 +179,7 @@ export function RecordDetailView({
           <summary className="flex size-8 cursor-pointer list-none items-center justify-center rounded-md border border-border/70 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground [&::-webkit-details-marker]:hidden">
             <MoreHorizontal size={16} />
           </summary>
-          <div className="absolute right-0 z-50 mt-1 w-48 rounded-md border border-border/70 bg-background p-1 shadow-md">
+          <div className="absolute right-0 z-50 mt-1 w-48 rounded-md border border-border/70 bg-card p-1 shadow-md">
             <button
               className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left font-medium text-red-700 text-sm transition-colors hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
               disabled={deleteAction !== null}
@@ -304,7 +304,7 @@ export function RecordDetailView({
             quiet
             title={messages.recordView.reviewHistory}
             action={
-              <span className="rounded-full bg-muted/55 px-2 py-0.5 text-muted-foreground text-xs">
+              <span className="rounded-md bg-muted/55 px-2 py-0.5 text-muted-foreground text-xs">
                 {isHistoryLoading ? "…" : historyChangeRequests.length}
               </span>
             }
@@ -523,7 +523,7 @@ export function RecordEditorView({
 
         <div className="sticky bottom-0 mt-4 flex flex-wrap items-center justify-between gap-3 border-border/50 border-t bg-background/95 py-3 backdrop-blur">
           <Link
-            className="rounded-md border border-border/70 bg-background px-3 py-1.5 font-medium text-xs transition-colors hover:bg-accent"
+            className="rounded-md border border-border/70 bg-card px-3 py-1.5 font-medium text-xs transition-colors hover:bg-accent"
             href={
               mode === "edit" && record
                 ? `/base/${record.base.slug}/${record.id}`
@@ -637,7 +637,7 @@ function RecordFieldInput({
       ) : kind === "relation" ? (
         <select
           aria-label={fieldName}
-          className="min-h-9 w-full rounded-md border border-border/70 bg-background px-2.5 py-1.5 text-sm outline-none transition-colors focus:border-primary"
+          className="min-h-9 w-full rounded-md border border-border/70 bg-card px-2.5 py-1.5 text-sm outline-none transition-colors focus:border-primary"
           id={inputId}
           multiple={field.options.multiple ?? true}
           onChange={(event) => {
@@ -657,7 +657,7 @@ function RecordFieldInput({
       ) : kind === "select" ? (
         <select
           aria-label={fieldName}
-          className="h-9 w-full rounded-md border border-border/70 bg-background px-2.5 py-1.5 text-sm outline-none transition-colors focus:border-primary"
+          className="h-9 w-full rounded-md border border-border/70 bg-card px-2.5 py-1.5 text-sm outline-none transition-colors focus:border-primary"
           id={inputId}
           onChange={(event) => onChange(event.target.value)}
           value={fieldValueToString(value)}
@@ -672,7 +672,7 @@ function RecordFieldInput({
       ) : kind === "multiselect" ? (
         <select
           aria-label={fieldName}
-          className="min-h-9 w-full rounded-md border border-border/70 bg-background px-2.5 py-1.5 text-sm outline-none transition-colors focus:border-primary"
+          className="min-h-9 w-full rounded-md border border-border/70 bg-card px-2.5 py-1.5 text-sm outline-none transition-colors focus:border-primary"
           id={inputId}
           multiple
           onChange={(event) =>
@@ -717,7 +717,7 @@ function RecordFieldInput({
         // (text / number / date / url / email / tel).
         <input
           aria-label={fieldName}
-          className="h-9 w-full rounded-md border border-border/70 bg-background px-2.5 py-1.5 text-sm outline-none transition-colors focus:border-primary"
+          className="h-9 w-full rounded-md border border-border/70 bg-card px-2.5 py-1.5 text-sm outline-none transition-colors focus:border-primary"
           id={inputId}
           type={kind}
           onChange={(event) => onChange(event.target.value)}
@@ -751,7 +751,7 @@ function RichTextareaFieldEditor({
   const textarea = (className = "min-h-28", withId = true) => (
     <textarea
       aria-label={label}
-      className={`${className} w-full resize-y rounded-md border border-border/70 bg-background px-2.5 py-2 font-mono text-sm leading-6 outline-none transition-colors focus:border-primary`}
+      className={`${className} w-full resize-y rounded-md border border-border/70 bg-card px-2.5 py-2 font-mono text-sm leading-6 outline-none transition-colors focus:border-primary`}
       id={withId ? inputId : undefined}
       onChange={(event) => onChange(event.target.value)}
       spellCheck={!isCodeLike}
@@ -762,14 +762,14 @@ function RichTextareaFieldEditor({
   const preview = () => {
     if (field.type === "markdown") {
       return (
-        <div className="min-h-28 rounded-md border border-border/70 bg-background px-2.5 py-2">
+        <div className="min-h-28 rounded-md border border-border/70 bg-card px-2.5 py-2">
           <MarkdownFieldPreview value={text} />
         </div>
       );
     }
     if (field.type === "html") {
       return (
-        <div className="min-h-28 rounded-md border border-border/70 bg-background px-2.5 py-2">
+        <div className="min-h-28 rounded-md border border-border/70 bg-card px-2.5 py-2">
           <HtmlFieldPreview value={text} />
         </div>
       );
@@ -787,7 +787,7 @@ function RichTextareaFieldEditor({
               className={`inline-flex h-7 items-center gap-1 rounded-md border px-2 text-xs transition-colors ${
                 previewOpen
                   ? "border-primary/40 bg-primary/10 text-primary"
-                  : "border-border/70 bg-background text-muted-foreground hover:bg-accent hover:text-foreground"
+                  : "border-border/70 bg-card text-muted-foreground hover:bg-accent hover:text-foreground"
               }`}
               onClick={() => setPreviewOpen((current) => !current)}
               type="button"
@@ -798,7 +798,7 @@ function RichTextareaFieldEditor({
           ) : null}
           <button
             aria-label={messages.recordView.expandFullscreen}
-            className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-border/70 bg-background text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+            className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-border/70 bg-card text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
             onClick={() => setFullscreenOpen(true)}
             title={messages.recordView.expandFullscreen}
             type="button"
@@ -1035,10 +1035,10 @@ function TagFieldEditor({
   const removeTag = (tag: string) => onChange(tags.filter((item) => item !== tag));
 
   return (
-    <div className="flex min-h-9 flex-wrap items-center gap-1.5 rounded-md border border-border/70 bg-background px-2 py-1.5 transition-colors focus-within:border-primary">
+    <div className="flex min-h-9 flex-wrap items-center gap-1.5 rounded-md border border-border/70 bg-card px-2 py-1.5 transition-colors focus-within:border-primary">
       {tags.map((tag) => (
         <span
-          className="inline-flex max-w-full items-center gap-1 rounded-full border border-border/60 bg-muted/60 px-2 py-0.5 text-xs"
+          className="inline-flex max-w-full items-center gap-1 rounded-md border border-border/60 bg-muted/60 px-2 py-0.5 text-xs"
           key={tag}
         >
           <span className="max-w-[14rem] truncate sm:max-w-[20rem]" title={tag}>
@@ -1133,7 +1133,7 @@ function AttachmentFieldEditor({
   return (
     <div className="grid gap-2">
       <label
-        className="inline-flex w-fit cursor-pointer items-center gap-1.5 rounded-md border border-border/70 border-dashed bg-background px-3 py-1.5 text-sm transition-colors hover:bg-accent"
+        className="inline-flex w-fit cursor-pointer items-center gap-1.5 rounded-md border border-border/70 border-dashed bg-card px-3 py-1.5 text-sm transition-colors hover:bg-accent"
         htmlFor={inputId}
       >
         <Paperclip size={14} />
@@ -1431,7 +1431,7 @@ function RecordChangeRequestHistoryRow({
       <div className="mt-2 flex flex-wrap gap-2">
         {relatedOperations.map((operation) => (
           <span
-            className={`rounded-full px-2 py-0.5 text-xs ${operationMeta[operation.operation].tone}`}
+            className={`rounded-md px-2 py-0.5 text-xs ${operationMeta[operation.operation].tone}`}
             key={operation.id}
           >
             {getOperationLabel(operation, messages)} · {shortIdentifier(operation.headCommitId)}
@@ -1493,7 +1493,7 @@ function RecordCommentsPanel({
     <section className="mt-6">
       <div className="flex items-center justify-between gap-3">
         <div className="font-semibold text-sm">{messages.comments.comments}</div>
-        <span className="rounded-full bg-muted/55 px-2.5 py-1 text-muted-foreground text-xs">
+        <span className="rounded-md bg-muted/55 px-2.5 py-1 text-muted-foreground text-xs">
           {isLoading ? messages.common.loadingPlain : `${comments.length}`}
         </span>
       </div>
@@ -1537,7 +1537,7 @@ function RecordCommentsPanel({
       <div className="mt-3 rounded-md border border-border/70 bg-background/55 p-3">
         <textarea
           aria-label={messages.comments.addComment}
-          className="min-h-20 w-full resize-y rounded-md border border-border/70 bg-background px-2.5 py-2 text-sm leading-6 outline-none transition-colors focus:border-primary"
+          className="min-h-20 w-full resize-y rounded-md border border-border/70 bg-card px-2.5 py-2 text-sm leading-6 outline-none transition-colors focus:border-primary"
           onChange={(event) => setBody(event.target.value)}
           placeholder={messages.comments.addComment}
           value={body}

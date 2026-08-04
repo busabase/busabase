@@ -89,6 +89,7 @@ describe("Doc & Folder domains — oRPC integration", () => {
     await client.docs.create({ autoMerge: true, slug: "guide", name: "Guide", body: "draft\n" });
 
     const cr = await client.docs.createChangeRequest({
+      autoMerge: false, // review-first: this test drives approve + merge itself
       nodeId: "guide",
       body: "# Guide\n\nApproved content.\n",
       message: "Publish the guide",

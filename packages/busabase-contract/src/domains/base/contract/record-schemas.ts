@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { autoMergeNotAccepted } from "../../../contract/auto-merge";
 // Records embed the kernel commit VO. This is a one-way import — the kernel
 // contract never imports record schemas — so there is no cycle and no z.lazy.
 import {
@@ -86,12 +87,45 @@ export const listRecordsPageResponseSchema = z.object({
   pageSize: z.number().int().min(1).max(100),
 });
 
-export const countRecordsInputSchema = z
+const countRecordsShapeSchema = z
   .object({
     baseId: z.string().optional(),
+    /**
+     * Count only the rows a saved View would display (the View's filters
+     * applied; its sort is ignored — a count doesn't need an order). A View
+     * belongs to exactly one Base, so this requires `baseId`.
+     */
+    viewId: z.string().optional(),
+    /**
+     * Ad-hoc filter conditions — same shape `records.list`'s `filters` uses —
+     * for composing a condition set without a saved View (e.g. an AirApp
+     * summary tile like "main-branch PRs"). Combined with the View's own
+     * filters (AND) when `viewId` is also given. Requires `baseId`: a field
+     * slug is only unambiguous within one Base, and proving a filter exact
+     * (see `countRecords`) requires that Base's real field definitions —
+     * never the caller-supplied `fieldType` hint, which elsewhere is only a
+     * pushdown hint and isn't trustworthy enough for an exact count.
+     */
+    filters: z.array(listRecordsFilterSchema).optional(),
   })
-  .optional()
-  .default({});
+  .superRefine((value, ctx) => {
+    if (value.viewId && !value.baseId) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["baseId"],
+        message: "baseId is required when viewId is given",
+      });
+    }
+    if (value.filters?.length && !value.baseId) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["baseId"],
+        message: "baseId is required when filters is given",
+      });
+    }
+  });
+
+export const countRecordsInputSchema = countRecordsShapeSchema.optional().default({});
 
 export const countRecordsResponseSchema = z.object({
   /** Total active records in the space (optionally scoped to a base). */
@@ -150,6 +184,12 @@ export const createBulkChangeRequestInputSchema = z.object({
     .describe(
       "Optional client-supplied key that dedupes retries. Scoped per base + submitter: calling this endpoint again with the SAME idempotencyKey returns the bulk change request created by the first call instead of creating a duplicate. Omit for normal one-shot calls; only set it when you might retry.",
     ),
+  // Same permission-aware tri-state as the single-record endpoint above. N record
+  // CREATES are purely additive, so there is nothing here the review gate is
+  // protecting — and until now the published skill doc told agents to send N
+  // separate single-record calls precisely because this one could not merge,
+  // which is slower and produces N change requests instead of one.
+  autoMerge: z.boolean().optional(),
 });
 
 export const recordFieldFilterInputSchema = z.object({
@@ -192,6 +232,9 @@ export const recordGetInputSchema = z.union([
 export const restoreRecordInputSchema = z.object({
   message: z.string().optional(),
   submittedBy: z.string().optional().default("local-editor"),
+  autoMerge: autoMergeNotAccepted(
+    "restoring a record brings archived content back into every listing, so it always requires review. Omit the flag.",
+  ),
 });
 
 /**

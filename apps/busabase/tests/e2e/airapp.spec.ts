@@ -57,13 +57,13 @@ const createAirApp = async (request: APIRequestContext, namePrefix: string) => {
 const sidebarLink = (page: Page, name: string) =>
   page.locator('[data-sidebar="sidebar"]').getByRole("link", { name, exact: true });
 
-// "Ready" = the header status label says Running. The Restart button alone is
-// ambiguous (it also shows in the error state), so assert the status text.
-const expectRunning = (page: Page) =>
+// Check the selected node's state rather than its toolbar position or localized
+// label. The same node can also be rendered in the side panel, hence `.first()`.
+const expectRunning = (page: Page, nodeId: string) =>
   expect(
     page
-      .locator("[data-dashboard-active-view] header:visible")
-      .getByText("Running", { exact: true }),
+      .locator(`[data-airapp-node-id="${nodeId}"][data-airapp-run-status="ready"]:visible`)
+      .first(),
   ).toBeVisible({ timeout: RUN_READY_TIMEOUT });
 
 const mainPreview = (page: Page) =>
@@ -107,7 +107,7 @@ test("AirApp run panel: auto-run, restart, watermark, nav persistence, fullscree
     await expect(page.getByRole("heading", { name: appA.name })).toBeVisible();
 
     // No Run click — opening the detail view starts the app by itself.
-    await expectRunning(page);
+    await expectRunning(page, appA.nodeId);
     await expect(page.getByRole("button", { name: "Restart" })).toBeVisible();
 
     const fullscreen = fullscreenPreview(page);
@@ -143,7 +143,7 @@ test("AirApp run panel: auto-run, restart, watermark, nav persistence, fullscree
     // the new boot's server-ready event was delivered to the disposed
     // runner's (cleared) callbacks, so the run hung at "Starting dev server…"
     // forever and this assertion times out.
-    await expectRunning(page);
+    await expectRunning(page, appA.nodeId);
     const iframe = mainPreview(page);
     await expect(iframe).toBeVisible();
     appASrc = (await iframe.getAttribute("src")) ?? "";
@@ -156,7 +156,7 @@ test("AirApp run panel: auto-run, restart, watermark, nav persistence, fullscree
       await expect(page.getByRole("heading", { name: appA.name })).toBeVisible();
 
       // No Restart click after reload: every fresh page must recover to Running by itself.
-      await expectRunning(page);
+      await expectRunning(page, appA.nodeId);
       await expect(page.getByText(/Cancell?edError/)).toHaveCount(0);
       const iframe = mainPreview(page);
       await expect(iframe).toBeVisible();
@@ -181,7 +181,7 @@ test("AirApp run panel: auto-run, restart, watermark, nav persistence, fullscree
     // install restores from the IndexedDB snapshot cache. Both A and B running
     // at once also exercises the per-instance server-ready filtering — before
     // the proxy fix, one node's ready event landed on the other's callbacks.
-    await expectRunning(page);
+    await expectRunning(page, appB.nodeId);
     const iframeB = mainPreview(page);
     await expect(iframeB).toBeVisible();
     const appBSrc = (await iframeB.getAttribute("src")) ?? "";
@@ -356,7 +356,7 @@ test("AirApp run panel: auto-run, restart, watermark, nav persistence, fullscree
     await sidebarLink(page, appB.name).click();
     await expect(page).toHaveURL(new RegExp(`/dashboard/local/airapp/${appB.slug}$`));
     await expect(mainPreviewFrame(page).getByRole("heading", { name: appB.name })).toBeVisible();
-    await expectRunning(page);
+    await expectRunning(page, appB.nodeId);
     await expect(sidePanelPreview(page)).toHaveAttribute(
       "data-e2e-iframe-identity",
       "pinned-airapp-a",

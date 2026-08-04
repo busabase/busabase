@@ -54,13 +54,44 @@ test("mobile Inbox views stay in one bounded, horizontally scrollable row", asyn
   await expectSingleLineScroller(page.getByTestId("inbox-view-tabs"));
 });
 
-test("mobile Base views stay in one horizontally scrollable row", async ({ page }) => {
+test("mobile Base separates record actions from horizontally scrollable views", async ({
+  page,
+}) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/dashboard/local/base/blog?demo=1");
 
   await expect(page.getByRole("link", { exact: true, name: "Ready to publish" })).toBeVisible({
     timeout: RENDER_TIMEOUT,
   });
+  const toolbar = page.getByTestId("base-toolbar-layout");
+  const recordActions = page.getByTestId("base-record-actions");
+  const viewNavigation = page.getByTestId("base-view-navigation");
+  const [toolbarBox, actionsBox, navigationBox] = await Promise.all([
+    toolbar.boundingBox(),
+    recordActions.boundingBox(),
+    viewNavigation.boundingBox(),
+  ]);
+  expect(toolbarBox?.height).toBeLessThanOrEqual(72);
+  expect(actionsBox).not.toBeNull();
+  expect(navigationBox).not.toBeNull();
+  expect((actionsBox?.y ?? 0) + (actionsBox?.height ?? 0)).toBeLessThanOrEqual(
+    (navigationBox?.y ?? 0) + 1,
+  );
+  await expect(page.getByRole("link", { name: "New record" })).toBeVisible();
   await expectSingleLineScroller(page.getByTestId("base-view-tabs"));
   await expect(page.getByTestId("base-new-view-button")).toBeVisible();
+});
+
+test("desktop Base keeps views and record actions on one row", async ({ page }) => {
+  await page.setViewportSize({ width: 1360, height: 960 });
+  await page.goto("/dashboard/local/base/blog?demo=1");
+
+  await expect(page.getByTestId("base-toolbar-layout")).toBeVisible({ timeout: RENDER_TIMEOUT });
+  const [actionsBox, navigationBox] = await Promise.all([
+    page.getByTestId("base-record-actions").boundingBox(),
+    page.getByTestId("base-view-navigation").boundingBox(),
+  ]);
+  expect(actionsBox).not.toBeNull();
+  expect(navigationBox).not.toBeNull();
+  expect(Math.abs((actionsBox?.y ?? 0) - (navigationBox?.y ?? 0))).toBeLessThanOrEqual(1);
 });

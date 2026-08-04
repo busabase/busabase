@@ -91,7 +91,7 @@ import {
   requireBaseId,
   rootNodeIdForSpace,
 } from "./kernel";
-import { publishBusabaseLiveEvent } from "./live-events";
+import { publishBusabaseLiveEvent, publishChangeRequestPendingReview } from "./live-events";
 import { getMaterializer, type MaterializeArgs, type NodeCreateFields } from "./materialize";
 import {
   assertNodePermission,
@@ -100,6 +100,7 @@ import {
   hasWorkspacePermission,
   initializeNodeAcl,
   recomputeSpaceNodeAcl,
+  shouldAutoMerge,
 } from "./node-acl";
 import { assertContainerParent } from "./node-parent";
 import { loadNodesByIds } from "./nodes";
@@ -777,6 +778,43 @@ export const notifyAgentOfChangeRequest = (changeRequestId: string, trigger: Age
  * of the per-CR fan-out `hydrateChangeRequest` would do in a `.map()`. Output is
  * identical to calling the singular on each row — this is a pure N+1 fix.
  */
+/**
+ * Largest a single field VALUE may be in a LIST response, in serialized bytes.
+ *
+ * `LIST_MAX_OPERATIONS_PER_CHANGE_REQUEST` caps how MANY operations a row
+ * carries; this caps how BIG each one is, which turned out to matter far more.
+ * A change request that creates an AirApp stores the app's whole source tree
+ * inline in its commit fields (`initialFiles`), so an inbox page of 41 such rows
+ * was measured at 5.2 MB on production — 1.1s of pure download, dwarfing the
+ * ~350ms the server spent producing it.
+ *
+ * A list row never renders these values: it reads `title` / `name` / `subject` /
+ * `nodeType` and the Base's primary field, and its risk-hint scan looks at field
+ * KEYS only. So the key is kept (callers can still see the field exists) and the
+ * value is replaced with a self-describing marker. The single-change-request
+ * detail view omits `maxOperationsPerChangeRequest` and is untouched.
+ */
+export const LIST_MAX_FIELD_VALUE_BYTES = 4_096;
+
+/** Replace values too large to belong in a list row; leaves small ones as-is. */
+const capFieldValues = (fields: Record<string, unknown>): Record<string, unknown> => {
+  let capped: Record<string, unknown> | null = null;
+  for (const [key, value] of Object.entries(fields)) {
+    // Numbers, booleans, null and short strings can never be the problem, and
+    // skipping them avoids serialising every field of every row just to measure.
+    if (value === null || value === undefined) continue;
+    if (typeof value !== "object" && typeof value !== "string") continue;
+    if (typeof value === "string" && value.length <= LIST_MAX_FIELD_VALUE_BYTES) continue;
+
+    const size = JSON.stringify(value)?.length ?? 0;
+    if (size <= LIST_MAX_FIELD_VALUE_BYTES) continue;
+    capped ??= { ...fields };
+    capped[key] = `[${size} bytes omitted from the list view — open the change request to view]`;
+  }
+  // Same object back when nothing was oversized, so the common case allocates nothing.
+  return capped ?? fields;
+};
+
 export const hydrateChangeRequests = async (
   changeRequests: ChangeRequestPO[],
   options?: { maxOperationsPerChangeRequest?: number },
@@ -961,7 +999,12 @@ export const hydrateChangeRequests = async (
         if (!commit) {
           throw new Error(`Invalid operation graph for ${item.id}`);
         }
-        return toOperationVO(item, commit, resolveBaseFields(item), users);
+        const operationVO = toOperationVO(item, commit, resolveBaseFields(item), users);
+        if (maxOps === undefined) return operationVO;
+        const fields = capFieldValues(operationVO.headCommit.fields);
+        return fields === operationVO.headCommit.fields
+          ? operationVO
+          : { ...operationVO, headCommit: { ...operationVO.headCommit, fields } };
       },
     );
     const base = changeRequest.baseId ? (baseMap.get(changeRequest.baseId) ?? null) : null;
@@ -1992,6 +2035,72 @@ export const autoApproveAndMerge = async (
   });
 
   return mergeChangeRequest(changeRequest.id);
+};
+
+/**
+ * Shared tail for every "propose a ChangeRequest" logic function: decide, then
+ * either merge it now or leave it for a human — and emit the pending-review
+ * signal ONLY on the review-first branch.
+ *
+ * That last part is the reason this is a helper rather than four copies. A
+ * caller that publishes the notification before deciding pings a reviewer's
+ * inbox about a change request that is merged microseconds later and never
+ * becomes reviewable — a phantom notification. Routing every caller through
+ * here makes that ordering impossible to get wrong.
+ *
+ * The permission check is node-scoped on purpose (not `mergeChangeRequest`'s own
+ * workspace-level check): an actor restricted by node ACL must not auto-merge
+ * onto a node they only hold `changeRequest` on, even with a broadly-scoped key.
+ */
+export const finalizeChangeRequest = async (args: {
+  changeRequestId: string;
+  /** Node whose `write` level gates the auto-merge (usually the Base's node). */
+  nodeId: string;
+  /** Tri-state: unset = permission-aware, true = merge if allowed, false = force review. */
+  requestedAutoMerge: boolean | undefined;
+  submittedBy: string;
+  /** Base the change request belongs to, for the pending-review event. */
+  baseId: string | null;
+  /** Used only in the "should never happen" error message. */
+  label: string;
+  /**
+   * Which merge path to take. `structural` uses `autoApproveAndMerge`, whose F2
+   * safety net refuses any CR carrying a `record_*` operation. A CR that DOES
+   * carry record operations (the bulk record endpoint) must therefore say
+   * `content` and go through review+merge — exactly the pair the single-record
+   * endpoint has always used. Getting this wrong is loud, not silent: the
+   * structural path throws "Refusing to auto-merge a content (record) change
+   * request" rather than quietly merging.
+   */
+  kind: "structural" | "content";
+}): Promise<ChangeRequestVO> => {
+  const autoMerge = shouldAutoMerge(
+    args.requestedAutoMerge,
+    await hasNodePermission(args.nodeId, "write", args.submittedBy),
+  );
+
+  if (autoMerge) {
+    if (args.kind === "content") {
+      await reviewChangeRequest(args.changeRequestId, { verdict: "approved" });
+      const merged = await mergeChangeRequest(args.changeRequestId);
+      return merged.changeRequest;
+    }
+    const merged = await autoApproveAndMerge(args.changeRequestId);
+    return merged.changeRequest;
+  }
+
+  await publishChangeRequestPendingReview({
+    spaceId: getContextSpaceId(),
+    baseId: args.baseId,
+    changeRequestId: args.changeRequestId,
+    submittedBy: resolveActorId(args.submittedBy),
+  });
+
+  const changeRequest = await getChangeRequest(args.changeRequestId);
+  if (!changeRequest) {
+    throw new Error(`Failed to create ${args.label} change request`);
+  }
+  return changeRequest;
 };
 
 /**

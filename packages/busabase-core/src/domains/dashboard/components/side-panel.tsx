@@ -234,7 +234,7 @@ export function SidePanel({ orpc }: { orpc: BusabaseQueryUtils }) {
         >
           <span
             className={cn(
-              "absolute left-1/2 h-10 w-1 -translate-x-1/2 rounded-full bg-border opacity-0 transition-all duration-150 group-hover:h-14 group-hover:bg-primary/50 group-hover:opacity-100",
+              "absolute left-1/2 h-10 w-1 -translate-x-1/2 rounded-md bg-border opacity-0 transition-all duration-150 group-hover:h-14 group-hover:bg-primary/50 group-hover:opacity-100",
               isResizing && "h-16 bg-primary/60 opacity-100",
             )}
           />

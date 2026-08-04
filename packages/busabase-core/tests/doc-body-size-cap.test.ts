@@ -74,7 +74,13 @@ describe("Doc body size cap (byte-length, UTF-8-aware)", () => {
     const updated = await raw.docs.updateBody({ nodeId: doc.node.id, body: `${normalBody}more\n` });
     expect(updated.body).toBe(`${normalBody}more\n`);
 
-    const cr = await raw.docs.createChangeRequest({ nodeId: doc.node.id, body: normalBody });
+    const cr = await raw.docs.createChangeRequest({
+      nodeId: doc.node.id,
+      body: normalBody,
+      // review-first: this assertion is about the CR path accepting the body,
+      // not about whether it merges.
+      autoMerge: false,
+    });
     expect(cr.status).toBe("in_review");
   });
 });

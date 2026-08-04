@@ -74,13 +74,26 @@ export async function run() {
   let recordId = "";
   if (blogBase) {
     await step("POST /bases/{id}/change-requests — create throwaway record", async () => {
+      // Every REQUIRED field on the blog base, not just title+body: the base has
+      // gained required `status`/`path`/`slug`/`locale`/`schema-version` since this
+      // step was written, so a two-field payload is a 400 and every step below it
+      // was cascading off an empty recordId.
+      const stamp = Date.now();
       const cr = await api<ChangeRequestVO>("POST", `/bases/${blogBase.id}/change-requests`, {
         fields: {
-          title: `CR lifecycle smoke test ${Date.now()}`,
+          title: `CR lifecycle smoke test ${stamp}`,
           body: "Throwaway record exercising the create→update→delete CR flow.",
+          status: "draft",
+          path: `/blog/cr-lifecycle-smoke-${stamp}`,
+          slug: `cr-lifecycle-smoke-${stamp}`,
+          locale: "en",
+          "schema-version": 1,
         },
         message: "demo: lifecycle smoke test",
         submittedBy: "demo-script",
+        // The assertion below is `in_review`, and this endpoint's permission-aware
+        // default would merge immediately for this write-capable script.
+        autoMerge: false,
       });
       assert(cr.id.startsWith("crq"), `unexpected CR id: ${cr.id}`);
       assert(cr.status === "in_review", `expected in_review, got ${cr.status}`);
@@ -105,15 +118,28 @@ export async function run() {
       assert(Array.isArray(crs) && crs.length >= 1, "expected CR history");
     });
 
-    await step("PUT /records/{id}/change-requests — update (full required set)", async () => {
+    await step("POST /records/{id}/change-requests — update (full required set)", async () => {
+      // The update / delete / restore trio used to be PUT, DELETE and a POST on a
+      // `/restore/` sub-path; they are one POST with an `operation` discriminator
+      // now. This step still used the removed PUT verb and had been 404ing since.
       // An update CR validates the full required field set — blog's `body` is required.
-      const cr = await api<ChangeRequestVO>("PUT", `/records/${recordId}/change-requests`, {
+      const stamp = Date.now();
+      const cr = await api<ChangeRequestVO>("POST", `/records/${recordId}/change-requests`, {
+        operation: "update",
         fields: {
-          title: `CR lifecycle smoke test (updated) ${Date.now()}`,
+          title: `CR lifecycle smoke test (updated) ${stamp}`,
           body: "Updated via the change-request workflow.",
+          status: "draft",
+          path: `/blog/cr-lifecycle-smoke-updated-${stamp}`,
+          slug: `cr-lifecycle-smoke-updated-${stamp}`,
+          locale: "en",
+          "schema-version": 1,
         },
         message: "demo: update title",
         author: "demo-script",
+        // `operation: "update"` is the one record branch that takes autoMerge, and
+        // this step asserts the pending CR before merging it itself.
+        autoMerge: false,
       });
       assert(cr.status === "in_review", `expected in_review, got ${cr.status}`);
       const result = await approveMerge(cr.id);
@@ -125,8 +151,12 @@ export async function run() {
       assert(String(rec.headCommit.fields.title).includes("(updated)"), "title not updated");
     });
 
-    await step("DELETE /records/{id}/change-requests — delete (archive)", async () => {
-      const cr = await api<ChangeRequestVO>("DELETE", `/records/${recordId}/change-requests`, {
+    await step("POST /records/{id}/change-requests — delete (archive)", async () => {
+      // Same consolidation as the update above: the old DELETE verb is gone.
+      // `delete` deliberately has no `autoMerge` — archiving user content always
+      // requires review — so nothing to pin here.
+      const cr = await api<ChangeRequestVO>("POST", `/records/${recordId}/change-requests`, {
+        operation: "delete",
         message: "demo: clean up smoke-test record",
         submittedBy: "demo-script",
         deleteMode: "archive",
@@ -144,9 +174,16 @@ export async function run() {
 
   // ── List + search smoke checks ──
 
-  await step("GET /records — list returns array", async () => {
-    const records = await api<RecordVO[]>("GET", "/records");
-    assert(Array.isArray(records), "expected array");
+  await step("GET /records — list is a keyset page", async () => {
+    // `/records` is keyset-paginated: `{ records, nextCursor }`, not a bare array.
+    // This step asserted `Array.isArray` on the envelope and had been red ever
+    // since the endpoint gained pagination.
+    const page = await api<{ records: RecordVO[]; nextCursor: string | null }>("GET", "/records");
+    assert(Array.isArray(page.records), "expected a records array on the page");
+    assert(
+      page.nextCursor === null || typeof page.nextCursor === "string",
+      "expected nextCursor to be a string or null",
+    );
   });
 
   if (blogBase) {

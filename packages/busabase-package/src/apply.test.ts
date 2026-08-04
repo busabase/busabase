@@ -66,7 +66,10 @@ const createFakeServer = (): FakeServer => {
       },
       fieldChangeRequest: async (input: unknown) => {
         record(`bases.fieldChangeRequest:${(input as { operation: string }).operation}`, input);
-        return { id: `crq_${++crSeq}` };
+        // `status` matters now: pass 3 asks for the field patch with
+        // `autoMerge: true` and refuses to continue unless it really came back
+        // merged, so a stub without a status would look like a failed wiring.
+        return { id: `crq_${++crSeq}`, status: "merged" };
       },
       createBulkChangeRequest: async (input: unknown) => {
         record("bases.createBulkChangeRequest", input);

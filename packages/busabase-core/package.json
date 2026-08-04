@@ -1,7 +1,7 @@
 {
   "name": "busabase-core",
   "description": "Shared Busabase open-core protocol, local store, API helpers, and dashboard components.",
-  "version": "0.11.2",
+  "version": "0.11.3",
   "private": true,
   "type": "module",
   "exports": {
@@ -76,6 +76,10 @@
     "./domains/airapp/preview-sandbox": {
       "types": "./src/domains/airapp/utils/preview-sandbox.ts",
       "default": "./src/domains/airapp/utils/preview-sandbox.ts"
+    },
+    "./domains/airapp/nodepod-service-worker": {
+      "types": "./src/domains/airapp/utils/nodepod-service-worker.ts",
+      "default": "./src/domains/airapp/utils/nodepod-service-worker.ts"
     },
     "./domains/airapp/logic/local-preview-proxy": {
       "types": "./src/domains/airapp/logic/local-preview-proxy.ts",

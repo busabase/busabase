@@ -12,7 +12,7 @@ export function CheckboxBadge({ checked }: { checked: boolean }) {
     <span
       className={`inline-flex w-fit items-center gap-1 rounded-full border px-2 py-0.5 font-medium text-xs ${
         checked
-          ? "border-merged/35 bg-merged/10 text-merged-strong dark:text-merged-soft"
+          ? "border-merged/35 bg-merged/17 text-merged-strong dark:text-merged-soft"
           : "border-border bg-muted/40 text-muted-foreground"
       }`}
     >
@@ -82,7 +82,7 @@ export function SidebarPanel({
       className={
         quiet
           ? "min-w-0 border-border/60 border-t pt-4"
-          : "min-w-0 rounded-lg border border-border/60 bg-background/70 p-4 shadow-sm shadow-black/[0.025]"
+          : "min-w-0 rounded-lg border border-border/60 bg-background/70 p-4"
       }
     >
       <div className={`flex items-center justify-between gap-3 ${quiet ? "mb-3" : "mb-4"}`}>
@@ -139,12 +139,12 @@ export function ConfirmActionDialog({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/70 px-4 backdrop-blur-sm">
-      <section className="w-full max-w-sm rounded-lg border bg-background p-4 shadow-xl">
+      <section className="w-full max-w-sm rounded-lg border bg-card p-4 shadow-xl">
         <div className="font-semibold text-base">{title}</div>
         <p className="mt-2 text-muted-foreground text-sm leading-6">{body}</p>
         <div className="mt-4 flex justify-end gap-2">
           <button
-            className="rounded-md border border-border/70 bg-background px-3 py-1.5 font-medium text-sm transition-colors hover:bg-accent"
+            className="rounded-md border border-border/70 bg-card px-3 py-1.5 font-medium text-sm transition-colors hover:bg-accent"
             disabled={pending}
             onClick={onCancel}
             type="button"
@@ -196,7 +196,7 @@ export function StatusBadge({ status }: { status: string }) {
 
   return (
     <span
-      className={`shrink-0 rounded-full border px-2.5 py-1 font-medium text-xs ${statusTone(status)}`}
+      className={`shrink-0 rounded-md border px-2.5 py-1 font-medium text-xs ${statusTone(status)}`}
     >
       {changeRequestStatusLabel(status, messages)}
     </span>
@@ -215,7 +215,7 @@ export function EmptyState({
   return (
     <div className="grid min-h-[460px] place-items-center p-10 text-center">
       <div>
-        <div className="mx-auto grid size-14 place-items-center rounded-xl border bg-background">
+        <div className="mx-auto grid size-14 place-items-center rounded-xl border bg-card">
           <PenLine size={24} />
         </div>
         <h2 className="mt-4 font-semibold text-2xl">{title}</h2>

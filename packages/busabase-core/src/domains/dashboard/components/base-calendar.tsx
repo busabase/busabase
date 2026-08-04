@@ -123,7 +123,7 @@ export function BusaBaseCalendar({
         </button>
         <div className="font-semibold text-sm">{monthLabel}</div>
         <button
-          className="ml-1 rounded-md border border-border/70 bg-background px-2 py-1 text-muted-foreground text-xs transition-colors hover:bg-accent hover:text-foreground"
+          className="ml-1 rounded-md border border-border/70 bg-card px-2 py-1 text-muted-foreground text-xs transition-colors hover:bg-accent hover:text-foreground"
           onClick={() => setCursor({ year: today.getFullYear(), month: today.getMonth() })}
           type="button"
         >

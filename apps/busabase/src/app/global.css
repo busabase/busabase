@@ -23,10 +23,95 @@
   --font-geist-sans:
     var(--font-inter), ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   --font-sora: var(--font-serif);
+}
 
-  --color-fd-card: oklch(0.992 0.004 88);
-  --color-fd-border: oklch(0.93 0.004 80);
-  --color-fd-muted: oklch(0.96 0.005 82);
+/* ── 侘寂 / 微水泥 neutral ground ─────────────────────────────────────────────
+   Replaces the pure-white, 0%-saturation neutrals with the "冷水泥" (cool
+   cement) ground decided in content/spec/wabi-sabi-visual-direction.md (§12).
+
+   Why a hue at all: pure #FFF is fatiguing over the long review sessions this
+   product is built for. Why *cool* (hue 177) rather than the warmer cement
+   options: it is the only candidate whose CIE Lab b* is negative (−0.24), i.e.
+   it reads as decisively not-yellow. Chroma stays ≤6% — the ground is still
+   black-white-grey, with the Cha states below as the only real color.
+
+   ⚠️ TWO DIFFERENT TOKEN FORMATS ARE IN PLAY. Get this wrong and the color
+   silently falls back to transparent — the page still renders, just white.
+
+     packages/kui        --background: 0 0% 100%      consumed as hsl(var(--x))
+     packages/openlib    --background: oklch(1 0 0)   consumed as var(--x)
+
+   `openlib/shared.css` is imported AFTER `kui/styles.css` (see the top of this
+   file), so **openlib wins** — its `@theme inline` maps `--color-background:
+   var(--background)` and its `@layer base` paints `body { background-color:
+   var(--background) }`. The shadcn-style tokens below must therefore be
+   **complete color values**, not HSL triplets.
+
+   The sidebar tokens are the exception: openlib maps them as
+   `--color-sidebar: hsl(var(--sidebar))`, so those must stay **bare HSL
+   triplets**. Both formats appear below on purpose.
+
+   ⚠️ SCOPING: these live on `:root:not(.dark)`, not plain `:root`. openlib
+   declares its dark values on `.dark`, which has the SAME specificity as
+   `:root` — so a plain `:root` here (source-ordered after openlib) would
+   silently win in dark mode too and flatten it to the light palette.
+   `:not(.dark)` raises specificity to (0,2,0) and keeps dark mode on
+   openlib's values, which this pass deliberately does not touch.
+   `--radius` is theme-independent and stays on plain `:root` below.
+
+   Keep in sync with apps/busabase/src/app/global.css — the two files must stay
+   byte-identical for these tokens. */
+:root:not(.dark) {
+  --background: #f1f3f3;
+  --foreground: #161818; /* 墨黑, not pure black */
+  --card: #f9fafa; /* lifts by lightness, not by shadow */
+  --card-foreground: #161818;
+  --popover: #f9fafa;
+  --popover-foreground: #161818;
+  --primary: #161818;
+  --primary-foreground: #f1f3f3;
+  --secondary: #e6e9e9;
+  --secondary-foreground: #161818;
+  --muted: #e6e9e9;
+  --muted-foreground: #6f7373;
+  --accent: #e6e9e9;
+  --accent-foreground: #161818;
+  --border: #d6dada;
+  --input: #d6dada;
+  --ring: #161818;
+
+  /* Fumadocs surfaces (docs routes, the OpenAPI reference, shiki code blocks).
+     Fumadocs ships its own neutral scale that ignores the tokens above, so the
+     docs would otherwise sit on a whiter ground than the rest of the app. */
+  --color-fd-card: oklch(0.982 0.004 195);
+  --color-fd-border: oklch(0.875 0.005 195);
+  --color-fd-muted: oklch(0.933 0.005 195);
+}
+
+/* Radius is theme-independent, so it stays on plain `:root`.
+   Controls read at rounded-md = 2px, containers at rounded-lg = 4px.
+   Both kui and openlib derive the scale from this single value:
+     sm = radius-4 = 0px | md = radius-2 = 2px | lg = 4px | xl = 8px
+   0px on `rounded-sm` is intentional — the direction is architectural.
+   (openlib's default is 0.625rem = 10px.) */
+:root {
+  --radius: 4px;
+}
+
+/* Sidebar — BARE HSL TRIPLETS (see the format note above; these are consumed as
+   `hsl(var(--sidebar))`). The upstream defaults are blue-grey (hue 220–240),
+   not neutral, and visibly clash with the cool-cement ground.
+   The decimals are solved so hsl() round-trips to the exact hex; rounding
+   drifts the color (`177 5% 91%` renders #E7E9E9, not #E6E9E9). */
+:root:not(.dark) {
+  --sidebar: 177 3.9% 93.3%; /* #EDEFEF */
+  --sidebar-foreground: 177 1.9% 24.1%; /* #3C3F3F */
+  --sidebar-primary: 177 2.7% 9%; /* #161818 */
+  --sidebar-primary-foreground: 177 5.7% 94.9%; /* #F1F3F3 */
+  --sidebar-accent: 177 4.6% 90.8%; /* #E6E9E9 */
+  --sidebar-accent-foreground: 177 2.7% 9%;
+  --sidebar-border: 177 4.4% 84.7%; /* #D6DADA */
+  --sidebar-ring: 177 2.7% 9%; /* was a saturated blue */
 }
 
 @layer base {
@@ -45,18 +130,39 @@
 }
 
 /* Review workflow colors. Keep these exact values synchronized with
-   apps/busabase-cloud/src/app/global.css and both apps' design specs. */
+   apps/busabase-cloud/src/app/global.css and both apps' design specs.
+
+   The `-strong` values were re-solved for the cool-cement ground. The old ones
+   were tuned for a pure-white ground and fall below WCAG AA here (review 4.12,
+   merged 4.37 at 12% fill). Measured on #F1F3F3 after this change — safe across
+   every fill actually in use:
+
+     fill    8%     10%    12%    15%    17%*   20%
+     merged  5.01   4.91   4.81   4.66   4.53   4.40 ✗
+     review  4.84   4.75   4.67   4.59   4.51   4.39 ✗
+     reject  5.25   5.11   4.99   4.80   4.67   4.52
+     (* the fill the shipped chips use — see `statusTone()` in
+        packages/busabase-core/src/domains/dashboard/helpers/change-request.ts)
+
+   17% is the ceiling: AA holds there and breaks at 20%. Do not raise the fill
+   without re-solving the `-strong` values above.
+
+   Lower fills that are NOT chips stay where they are on purpose: `/5` surface
+   tints sit behind body text, `/50` decorative dots carry no text at all.
+
+   If you change the ground OR the fill percentage, re-run the contrast check —
+   both inputs move these numbers. */
 @theme {
   --color-merged: #5e8c6a;
-  --color-merged-strong: #43704f;
+  --color-merged-strong: #406c4c; /* was #43704F (white ground @12%) */
   --color-merged-soft: #93c3a2;
 
   --color-review: #c79a3e;
-  --color-review-strong: #8a6a24;
+  --color-review-strong: #7f6221; /* was #8A6A24 (white ground @12%) */
   --color-review-soft: #dcbd7c;
 
   --color-rejected: #b95b3f;
-  --color-rejected-strong: #9a4531;
+  --color-rejected-strong: #9a4531; /* unchanged — still 4.67 */
   --color-rejected-soft: #db9678;
 }
 

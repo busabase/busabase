@@ -253,23 +253,33 @@ function parseJsonValue(raw: string, flagName: string): unknown {
  * `path: message`) instead of the raw JSON blob. Falls back to the raw text for
  * any non-JSON / unrecognized body so nothing is ever silently dropped.
  */
+/**
+ * Render a validation error's per-issue detail as `path: message`.
+ *
+ * Load-bearing, not cosmetic: a schema that refuses a field explains WHY in the
+ * issue message (e.g. "`autoMerge` is not accepted here: deleting a field
+ * soft-deletes its stored values with it… Omit the flag."). Without this the
+ * caller sees only the generic envelope "Input validation failed" and is no
+ * better off than when the field was silently dropped.
+ */
+function formatIssues(issues: unknown): string | undefined {
+  if (!Array.isArray(issues) || issues.length === 0) return undefined;
+  return issues
+    .map((issue) => {
+      if (!issue || typeof issue !== "object") return String(issue);
+      const { path, message } = issue as { path?: unknown; message?: unknown };
+      const pathLabel = Array.isArray(path) && path.length > 0 ? path.join(".") : undefined;
+      return pathLabel ? `${pathLabel}: ${message}` : String(message ?? issue);
+    })
+    .join("; ");
+}
+
 function formatRawErrorBody(status: number, statusText: string, text: string): string {
   try {
     const parsed = JSON.parse(text) as { error?: unknown; data?: unknown };
     if (typeof parsed.error === "string") {
-      const issues = (parsed.data as { issues?: unknown } | undefined)?.issues;
-      let message = parsed.error;
-      if (Array.isArray(issues) && issues.length > 0) {
-        const details = issues
-          .map((issue) => {
-            if (!issue || typeof issue !== "object") return String(issue);
-            const { path, message: issueMessage } = issue as { path?: unknown; message?: unknown };
-            const pathLabel = Array.isArray(path) ? path.join(".") : undefined;
-            return pathLabel ? `${pathLabel}: ${issueMessage}` : String(issueMessage ?? issue);
-          })
-          .join("; ");
-        message = `${message} — ${details}`;
-      }
+      const details = formatIssues((parsed.data as { issues?: unknown } | undefined)?.issues);
+      const message = details ? `${parsed.error} — ${details}` : parsed.error;
       return `HTTP ${status} ${statusText}: ${message}`;
     }
   } catch {
@@ -1755,7 +1765,13 @@ export const HELP = renderedHelp();
  */
 export function explainError(error: unknown, config: ResolvedConfig): string {
   const base = config.baseUrl;
-  const msg = error instanceof Error ? error.message : String(error);
+  const rawMessage = error instanceof Error ? error.message : String(error);
+  // A thrown ORPCError carries its validation detail on `.data.issues`, which the
+  // raw-fetch path already renders. Do it here too — otherwise a schema refusal
+  // reaches the user as the bare envelope ("Input validation failed") and the
+  // reason it went to the trouble of explaining is dropped on the floor.
+  const issueDetail = formatIssues((error as { data?: { issues?: unknown } }).data?.issues);
+  const msg = issueDetail ? `${rawMessage} — ${issueDetail}` : rawMessage;
   const status = (error as { status?: number }).status;
   const lower = msg.toLowerCase();
 

@@ -66,7 +66,7 @@ export function UserDetailDialog({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/70 px-4 backdrop-blur-sm">
-      <section className="w-full max-w-sm rounded-lg border bg-background p-4 shadow-xl">
+      <section className="w-full max-w-sm rounded-lg border bg-card p-4 shadow-xl">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
             <div className="text-muted-foreground text-xs uppercase tracking-wide">

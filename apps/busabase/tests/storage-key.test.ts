@@ -2,12 +2,12 @@ import { describe, expect, it } from "vitest";
 import { isSafeStorageKey } from "~/lib/storage-key";
 
 /**
- * `/api/dev/upload` and `/api/dev/attachment/[...key]` are un-gated in
- * production for this app (self-hosted Busabase runs a production build and
- * serves every local attachment through them). The openlib handlers hand the
- * key straight to the storage adapter, which does `path.join(rootDir, key)` —
- * so this guard is what stops a traversal key from reading or writing outside
- * the storage root. These assertions are that safety property, not style.
+ * `/api/storage/upload` and `/api/storage/[...key]` are un-gated production
+ * routes for this app (self-hosted Busabase runs a production build and serves
+ * every local attachment through them). The openlib handlers hand the key
+ * straight to the storage adapter, which does `path.join(rootDir, key)` — so
+ * this guard is what stops a traversal key from reading or writing outside the
+ * storage root. These assertions are that safety property, not style.
  */
 describe("isSafeStorageKey", () => {
   it("accepts the keys the asset pipeline actually mints", () => {

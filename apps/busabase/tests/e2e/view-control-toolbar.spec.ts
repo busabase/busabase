@@ -83,6 +83,27 @@ test("staged view controls recover a hidden conditioned field with one update CR
   await expect(page.getByTestId("view-control-filters")).toContainText("1");
   await expect(page.getByTestId("view-control-sorts")).toContainText("2");
 
+  const activeViewTab = page.getByTestId("base-view-tabs").locator('[aria-current="page"]');
+  await expect(activeViewTab).toHaveCount(1);
+  const readControlSurface = (testId: string) =>
+    page.getByTestId(testId).evaluate((element) => {
+      const style = window.getComputedStyle(element);
+      return {
+        backgroundColor: style.backgroundColor,
+        borderColor: style.borderTopColor,
+      };
+    });
+  const activeViewSurface = await activeViewTab.evaluate((element) => {
+    const style = window.getComputedStyle(element);
+    return {
+      backgroundColor: style.backgroundColor,
+      borderColor: style.borderTopColor,
+    };
+  });
+  expect(await readControlSurface("view-control-fields")).toEqual(activeViewSurface);
+  expect(await readControlSurface("view-control-filters")).toEqual(activeViewSurface);
+  expect(await readControlSurface("view-control-sorts")).toEqual(activeViewSurface);
+
   await page.getByTestId("view-control-filters").click();
   const panel = page.getByTestId("shared-view-config-editor");
   await expect(panel).toHaveAttribute("data-editor-source", "toolbar");

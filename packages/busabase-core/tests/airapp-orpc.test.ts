@@ -235,6 +235,7 @@ describe("AirApp API — oRPC integration", () => {
     });
 
     const changeRequest = await client.fileTrees.createChangeRequest({
+      autoMerge: false, // review-first: this test drives approve + merge itself
       type: "airapp",
       nodeId: created.node.id,
       message: "Tweak the client script",

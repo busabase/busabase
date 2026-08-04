@@ -72,7 +72,13 @@ function AirAppDetailContent() {
   // resolved to something else must not hand its name to this header and then
   // embed `/dashboard/airapp/{slug}` for a node that is not an AirApp.
   const airapp = asNodeDetail(airappQuery.data, "airapp");
-  const notAnAirApp = !airappQuery.isLoading && !airappQuery.error && !airapp;
+  // Two ways this id can fail to be an AirApp, and BOTH have to land here:
+  // `nodes.get` answers 404 when the `type` hint contradicts the stored node, so
+  // the wrong-type case arrives as an ERROR, not as data of another shape. Only
+  // checking the latter left the error case falling through to the embed UI —
+  // an empty page with a live "Open AirApp" button pointing at a node that is
+  // not an AirApp, under a header that still said "AirApp".
+  const notAnAirApp = !airappQuery.isLoading && (Boolean(airappQuery.error) || !airapp);
 
   const embedUrlQuery = useQuery({
     queryKey: ["airapp-embed-url", connection?.serverUrl, connection?.mode, nodeId, reloadToken],

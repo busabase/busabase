@@ -167,7 +167,7 @@ async function startServer(argv) {
   process.env.HOSTNAME = host;
   // pglite + local storage persist here so data survives restarts regardless of cwd.
   process.env.PG_DATABASE_URL ??= `pglite://${pgDir}`;
-  process.env.STORAGE_URL ??= `local:${storageDir}?base_url=/api/dev/attachment`;
+  process.env.STORAGE_URL ??= `local:${storageDir}?base_url=/api/storage&upload_url=/api/storage/upload`;
   process.env.NODE_ENV ??= "production";
 
   const entry = findServerEntry();

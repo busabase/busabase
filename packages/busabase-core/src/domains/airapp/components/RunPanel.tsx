@@ -280,7 +280,11 @@ export function AirAppRunControls({
   };
 
   return (
-    <div className="flex items-center gap-1.5">
+    <div
+      className="flex items-center gap-1.5"
+      data-airapp-node-id={airapp?.node.id}
+      data-airapp-run-status={status}
+    >
       <span className="hidden text-muted-foreground/70 text-xs sm:inline">
         {statusLabel[status]}
       </span>

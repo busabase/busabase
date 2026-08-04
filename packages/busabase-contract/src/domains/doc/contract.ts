@@ -47,6 +47,11 @@ export const createDocChangeRequestInputSchema = z.object({
       'Explanation shown to the human reviewer. Write a conventional-commit style subject — imperative verb + what + why, e.g. "Add rollback steps to the deploy runbook".',
     ),
   submittedBy: z.string().optional().default("local-producer"),
+  // A Doc body update is the Doc-domain twin of a record `update`, which has taken
+  // the permission-aware default since #5712 — and this node type already has a
+  // direct-write bypass (`PUT /docs/{nodeId}/body`), so review-first here was never
+  // an actual guarantee, just a slower path to the same place.
+  autoMerge: z.boolean().optional(),
 });
 
 // Doc domain oRPC routes; composed into the root contract in contract/busabase.ts.

@@ -63,6 +63,8 @@ describe("Bulk record Change Request — oRPC integration", () => {
       baseId,
       records,
       message: "Import 3 leads",
+      // review-first: this test asserts the single pending CR, then merges it itself.
+      autoMerge: false,
     });
     expect(cr.status).toBe("in_review");
     expect(cr.operationCount).toBe(3);

@@ -155,8 +155,17 @@ export const applyInstall = async (
         patch: { options: patched },
         message: `Wire up ${base.node.slug}.${field.slug} references`,
         submittedBy: options.submittedBy,
+        // Field wiring is STRUCTURE, like the Base and its views above — ask for it
+        // outright rather than proposing it and immediately approving our own
+        // proposal, which is what this used to do only because the endpoint had no
+        // `autoMerge`.
+        autoMerge: true,
       });
-      await approveAndMerge(client, changeRequest.id);
+      if (changeRequest.status !== "merged") {
+        throw new Error(
+          `Field reference wiring for ${base.node.slug}.${field.slug} was requested immediately but came back "${changeRequest.status}"; install cannot leave a Base's relation fields unwired.`,
+        );
+      }
     }
   }
 
@@ -441,7 +450,8 @@ class UploadTargetUnsupportedError extends Error {}
  *
  * A host backed by S3/R2/MinIO returns an absolute presigned url and this works.
  * A host on the local filesystem adapter has no presigned url to give, so it
- * returns a root-relative `/api/dev/upload` sentinel that expects the caller to
+ * returns a root-relative upload-relay sentinel (`/api/storage/upload` on
+ * self-hosted Busabase) that expects the caller to
  * know it means "POST multipart here instead" — dev-environment knowledge that
  * does not belong in a client. We deliberately do NOT special-case it: clients
  * should only ever follow the url the API hands them. Binary uploads against
@@ -628,6 +638,12 @@ const createRecords = async (
       message: `Install ${batch.length} record(s) into ${base.node.slug}`,
       submittedBy: options.submittedBy,
       idempotencyKey: batchIdempotencyKey(plan.tree.manifest.name, batch[0].key),
+      // Forwarded explicitly, load-bearing: `--auto-merge` is the ONLY thing that
+      // decides whether an install's records go live, and that promise is what the
+      // review-first install is. Leaving this to the endpoint's permission-aware
+      // default would silently merge a review-first install's records for any
+      // write-capable installer.
+      autoMerge: options.autoMerge,
     });
 
     // Records are CONTENT — the thing a reviewer actually wants to see — so without

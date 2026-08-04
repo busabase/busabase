@@ -262,6 +262,10 @@ async function main() {
     body: "# Hello\n\nVia change request.\n",
     message: "verify doc CR",
     submittedBy: "local-editor",
+    // `autoMerge` is permission-aware when omitted, and this harness runs with
+    // full local access — without an explicit false it would merge on create
+    // and the review-first assertion below would fail.
+    autoMerge: false,
   });
   assert.equal(docCr.status, "in_review", "doc CR starts in review");
   await approveAndMerge(docCr.id);

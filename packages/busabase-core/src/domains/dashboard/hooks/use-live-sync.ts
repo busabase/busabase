@@ -6,6 +6,7 @@ import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-quer
 import type { liveEventSchema } from "busabase-contract/contract/busabase";
 import { useEffect, useMemo } from "react";
 import type { z } from "zod";
+import { createWorkspaceRevalidationGate } from "../helpers/workspace-revalidation";
 
 type BusabaseLiveEvent = z.infer<typeof liveEventSchema>;
 
@@ -144,6 +145,8 @@ export function useBusabaseLiveSync({
     let unsubscribe: (() => Promise<void>) | null = null;
     let abortController: AbortController | null = null;
     let retryTimer: ReturnType<typeof setTimeout> | null = null;
+    // When a whole-workspace re-validation is warranted — see the helper.
+    const revalidationGate = createWorkspaceRevalidationGate();
 
     const invalidateBaseScope = (baseId: string) => {
       void queryClient.invalidateQueries({
@@ -218,9 +221,15 @@ export function useBusabaseLiveSync({
         return;
       }
 
-      // Redis pub/sub does not retain history. Refresh on every reconnect so a
-      // temporarily disconnected tab still converges to the latest workspace state.
-      invalidateWorkspace();
+      // Redis pub/sub does not retain history, so a tab that was disconnected
+      // has to re-validate on RECONNECT. The FIRST connect is different: the
+      // page just finished loading this exact data, so invalidating it there
+      // threw the whole workspace away and re-fetched it immediately —
+      // measured on production, that meant re-downloading the change request
+      // list (6 MB before #6044) milliseconds after it first arrived.
+      if (revalidationGate.onStreamConnected()) {
+        invalidateWorkspace();
+      }
       const controller = new AbortController();
       abortController = controller;
       unsubscribe = consumeEventIterator(
@@ -250,12 +259,21 @@ export function useBusabaseLiveSync({
     // wasn't listening). Re-validate the whole workspace whenever the tab
     // becomes visible/focused again, so the user never has to notice a stale
     // Records/Inbox view and manually reload.
+    // `focus` and `visibilitychange` BOTH fire when a browser tab is returned
+    // to, so an un-throttled handler re-validated the entire workspace twice
+    // for one user action. Reconnect storms compound the same way: a stream
+    // that drops and retries every 3s otherwise means a full workspace refetch
+    // every 3s on a workspace where nothing changed.
     const handleVisibilityRefresh = () => {
-      if (document.visibilityState === "visible") {
+      if (document.visibilityState === "visible" && revalidationGate.onUserReturned()) {
         invalidateWorkspace();
       }
     };
-    const handleFocusRefresh = () => invalidateWorkspace();
+    const handleFocusRefresh = () => {
+      if (revalidationGate.onUserReturned()) {
+        invalidateWorkspace();
+      }
+    };
     document.addEventListener("visibilitychange", handleVisibilityRefresh);
     window.addEventListener("focus", handleFocusRefresh);
 

@@ -39,6 +39,7 @@ import {
 import { assertContainerParent } from "../../logic/node-parent";
 import { ensureReady } from "../../logic/seed";
 import {
+  finalizeChangeRequest,
   getChangeRequest,
   insertAuditEvent,
   loadNodesByIds,
@@ -1007,18 +1008,36 @@ export const createFileTreeChangeRequest = async (
     changeRequestId,
     metadata: { operation: `${config.type}_update`, nodeId: node.id },
   });
-  await publishChangeRequestPendingReview({
-    spaceId: getContextSpaceId(),
-    baseId: null,
-    changeRequestId,
-    submittedBy: resolveActorId(parsed.submittedBy),
-  });
-
-  const changeRequest = await getChangeRequest(changeRequestId);
-  if (!changeRequest) {
-    throw new Error(`Failed to create ${labelLower(config)} change request`);
+  // Destructive operations stay in front of a human no matter what the caller
+  // asked for: deleting a mounted file destroys content, which is the same line
+  // that keeps record `delete` review-only. `autoMerge` is honoured only when the
+  // WHOLE batch is create / update / metadata_update — a mixed batch is not
+  // partially merged, because a half-applied CR is not a state the review model
+  // can express (same all-or-nothing reasoning as the node-tree endpoint).
+  //
+  // Rejected loudly rather than quietly downgraded: silently ignoring a flag the
+  // caller passed is the exact failure mode this whole rollout exists to fix (an
+  // agent cannot tell "ignored" from "the server decided review"). Unlike the
+  // schema-level refusals, this one cannot live in the schema — it is a property
+  // of the operations array, not of a single field.
+  const hasDestructiveOperation = parsed.operations.some(
+    (operation) => operation.kind === "delete",
+  );
+  if (hasDestructiveOperation && parsed.autoMerge === true) {
+    throw new ORPCError("BAD_REQUEST", {
+      message:
+        "`autoMerge` is not accepted for a batch containing a delete: removing a mounted file destroys content, so the whole batch requires review. Split the deletes into their own change request, or omit the flag.",
+    });
   }
-  return changeRequest;
+  return finalizeChangeRequest({
+    changeRequestId,
+    nodeId: node.id,
+    requestedAutoMerge: hasDestructiveOperation ? false : parsed.autoMerge,
+    submittedBy: parsed.submittedBy,
+    baseId: null,
+    label: labelLower(config),
+    kind: "structural",
+  });
 };
 
 const readCurrentContentHash = async (

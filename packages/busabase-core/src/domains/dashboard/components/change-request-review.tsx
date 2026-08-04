@@ -39,7 +39,7 @@ export function ReviewConflictPanel({ message }: { message: string }) {
   const messages = useCoreI18n();
 
   return (
-    <div className="border-rejected/35 border-b bg-rejected/10 px-4 py-3 text-rejected-strong dark:text-rejected-soft">
+    <div className="border-rejected/35 border-b bg-rejected/17 px-4 py-3 text-rejected-strong dark:text-rejected-soft">
       <div className="mx-auto flex max-w-6xl flex-col gap-1.5 text-sm">
         <div className="font-semibold">{messages.review.mergeNeedsReview}</div>
         <div className="leading-6">{fmt(messages.review.mergeNeedsReviewBody, { message })}</div>
@@ -83,7 +83,7 @@ export function ConflictDiffPanel({ changeRequest }: { changeRequest: ChangeRequ
     return null;
   }
   return (
-    <section className="mt-5 max-w-4xl rounded-lg border border-rejected/35 bg-rejected/10 px-4 py-3 text-rejected-strong dark:text-rejected-soft">
+    <section className="mt-5 max-w-4xl rounded-lg border border-rejected/35 bg-rejected/17 px-4 py-3 text-rejected-strong dark:text-rejected-soft">
       <div className="flex items-center gap-2 font-semibold text-sm">
         <X size={15} />
         {messages.review.mergeConflictTitle}
@@ -95,7 +95,7 @@ export function ConflictDiffPanel({ changeRequest }: { changeRequest: ChangeRequ
           </span>
           {conflict.fields.map((field) => (
             <span
-              className="rounded-md border border-rejected/35 bg-rejected/10 px-2 py-0.5 font-medium"
+              className="rounded-md border border-rejected/35 bg-rejected/17 px-2 py-0.5 font-medium"
               key={field}
             >
               {field}
@@ -156,7 +156,7 @@ export function OperationReviewSection({
             className={`shrink-0 text-muted-foreground transition-transform ${open ? "rotate-90" : ""}`}
             size={16}
           />
-          <span className={`shrink-0 rounded-full border px-2 py-0.5 text-xs ${meta.tone}`}>
+          <span className={`shrink-0 rounded-md border px-2 py-0.5 text-xs ${meta.tone}`}>
             {operation.position + 1}. {getOperationLabel(operation, messages)}
           </span>
           <span className="min-w-0 truncate font-medium text-sm">
@@ -164,7 +164,7 @@ export function OperationReviewSection({
           </span>
         </button>
         {changedSinceReview ? (
-          <span className="inline-flex shrink-0 items-center gap-1 rounded-md bg-review/10 px-2 py-0.5 font-medium text-[11px] text-review-strong dark:text-review-soft">
+          <span className="inline-flex shrink-0 items-center gap-1 rounded-md bg-review/17 px-2 py-0.5 font-medium text-[11px] text-review-strong dark:text-review-soft">
             <Sparkles size={11} />
             {messages.review.changedSinceReview}
           </span>
@@ -427,7 +427,7 @@ export function FinishReviewComposer({
   if (changeRequest.status === "conflict") {
     return (
       <div className="flex flex-col gap-2">
-        <div className="rounded-md border border-rejected/35 bg-rejected/10 px-3 py-2 text-rejected-strong text-xs leading-5 dark:text-rejected-soft">
+        <div className="rounded-md border border-rejected/35 bg-rejected/17 px-3 py-2 text-rejected-strong text-xs leading-5 dark:text-rejected-soft">
           {messages.review.conflictComposerHint}
         </div>
         <button
@@ -473,7 +473,7 @@ export function FinishReviewComposer({
   return (
     <div className="flex flex-col gap-3">
       {changeRequest.status === "changes_requested" ? (
-        <div className="rounded-md border border-rejected/35 bg-rejected/10 px-3 py-2 text-rejected-strong text-xs leading-5 dark:text-rejected-soft">
+        <div className="rounded-md border border-rejected/35 bg-rejected/17 px-3 py-2 text-rejected-strong text-xs leading-5 dark:text-rejected-soft">
           {messages.review.changesRequestedHint}
         </div>
       ) : null}
@@ -501,7 +501,7 @@ export function FinishReviewComposer({
       </div>
       <textarea
         aria-label={messages.review.reviewSummary}
-        className="min-h-20 w-full resize-y rounded-md border border-border/70 bg-background px-2.5 py-2 text-sm leading-6 outline-none transition-colors focus:border-primary"
+        className="min-h-20 w-full resize-y rounded-md border border-border/70 bg-card px-2.5 py-2 text-sm leading-6 outline-none transition-colors focus:border-primary"
         onChange={(event) => setSummary(event.target.value)}
         placeholder={
           verdict === "reject"
@@ -664,13 +664,13 @@ export function ChangeRequestReviewLayout({
           <div className="mt-5 max-w-4xl rounded-lg border bg-background/60 px-4 py-3">
             <div className="flex flex-wrap items-center gap-2">
               <span
-                className={`rounded-full border px-2 py-0.5 font-medium text-xs ${statusTone(changeRequest.status)}`}
+                className={`rounded-md border px-2 py-0.5 font-medium text-xs ${statusTone(changeRequest.status)}`}
               >
                 {changeRequestStatusLabel(changeRequest.status, messages)}
               </span>
               {getChangeRequestRiskHints(changeRequest, messages).map((risk) => (
                 <span
-                  className="rounded-md border border-review/35 bg-review/10 px-2 py-0.5 font-medium text-[11px] text-review-strong dark:text-review-soft"
+                  className="rounded-md border border-review/35 bg-review/17 px-2 py-0.5 font-medium text-[11px] text-review-strong dark:text-review-soft"
                   key={risk}
                 >
                   {risk}

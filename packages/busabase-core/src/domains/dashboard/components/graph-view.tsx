@@ -421,7 +421,7 @@ function GraphInner({ bases, nodes: nodeTree }: BaseGraphViewProps) {
       <div className="pointer-events-none absolute left-4 top-3 z-10 flex items-center gap-2">
         <Network className="size-4 text-primary" />
         <span className="text-sm font-medium text-muted-foreground">{messages.nav.graph}</span>
-        <span className="rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">
+        <span className="rounded-md bg-muted px-2 py-0.5 text-xs text-muted-foreground">
           {fmt(messages.graph.summary, { bases: bases.length, relations: relationCount })}
           {folderCount > 0 ? fmt(messages.graph.foldersSuffix, { folders: folderCount }) : ""}
         </span>

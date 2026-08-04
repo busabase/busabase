@@ -546,7 +546,7 @@ function GraphEditor({ node, orpc }: GraphEditorProps) {
               <label className="grid gap-1.5 text-muted-foreground text-xs">
                 {messages.richNodes.type}
                 <select
-                  className="h-9 border border-input bg-background px-3 text-foreground text-sm"
+                  className="h-9 border border-input bg-card px-3 text-foreground text-sm"
                   onChange={(event) =>
                     updateSelected({ kind: event.target.value as WorkflowNodeKind })
                   }
@@ -579,7 +579,7 @@ function GraphEditor({ node, orpc }: GraphEditorProps) {
                   <label className="grid gap-1.5 text-muted-foreground text-xs">
                     {messages.richNodes.method}
                     <select
-                      className="h-9 border border-input bg-background px-3 text-foreground text-sm"
+                      className="h-9 border border-input bg-card px-3 text-foreground text-sm"
                       onChange={(event) =>
                         updateSelected({
                           method: event.target.value as WorkflowNodeFields["method"],
@@ -685,7 +685,7 @@ function GraphEditor({ node, orpc }: GraphEditorProps) {
                   <label className="grid gap-1.5 text-muted-foreground text-xs">
                     {messages.richNodes.unit}
                     <select
-                      className="h-9 border border-input bg-background px-2 text-foreground text-sm"
+                      className="h-9 border border-input bg-card px-2 text-foreground text-sm"
                       onChange={(event) =>
                         updateSelected({
                           unit: event.target.value as WorkflowNodeFields["unit"],
@@ -751,7 +751,7 @@ function GraphEditor({ node, orpc }: GraphEditorProps) {
             <label className="grid gap-1.5 text-muted-foreground text-xs">
               {messages.richNodes.executionMode}
               <select
-                className="h-9 border border-input bg-background px-3 text-foreground text-sm"
+                className="h-9 border border-input bg-card px-3 text-foreground text-sm"
                 onChange={(event) =>
                   updateWorkflowSettings({
                     executionMode: event.target.value === "event" ? "event" : "manual",
@@ -766,7 +766,7 @@ function GraphEditor({ node, orpc }: GraphEditorProps) {
             <label className="grid gap-1.5 text-muted-foreground text-xs">
               {messages.richNodes.errorPolicy}
               <select
-                className="h-9 border border-input bg-background px-3 text-foreground text-sm"
+                className="h-9 border border-input bg-card px-3 text-foreground text-sm"
                 onChange={(event) =>
                   updateWorkflowSettings({
                     errorPolicy: event.target.value === "continue" ? "continue" : "stop",

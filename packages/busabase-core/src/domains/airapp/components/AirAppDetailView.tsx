@@ -252,7 +252,7 @@ export function AirAppDetailView({ orpc, slug, onNodeLoaded }: NodeDetailProps) 
                   <div className="font-medium text-muted-foreground text-xs uppercase">
                     {messages.nodeDetail.files}
                   </div>
-                  <div className="rounded-md border border-border/70 bg-background px-1.5 py-0.5 font-mono text-muted-foreground text-[11px]">
+                  <div className="rounded-md border border-border/70 bg-card px-1.5 py-0.5 font-mono text-muted-foreground text-[11px]">
                     {fileCount}
                   </div>
                 </div>

@@ -759,7 +759,7 @@ function BusabaseDashboardContent({
     if (isOperationRoute) {
       return {
         badge: selectedChangeRequest ? (
-          <span className="rounded-full border bg-muted/30 px-2.5 py-1 text-muted-foreground text-xs">
+          <span className="rounded-md border bg-muted/30 px-2.5 py-1 text-muted-foreground text-xs">
             {selectedOperation
               ? `${selectedOperation.position + 1} / ${selectedChangeRequest.operationCount}`
               : messages.activity.operation}

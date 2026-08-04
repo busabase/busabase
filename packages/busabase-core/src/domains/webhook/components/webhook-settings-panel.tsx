@@ -273,15 +273,15 @@ function WebhookRulesSkeleton() {
   return (
     <div className="space-y-3" aria-hidden>
       {WEBHOOK_RULE_ROW_SKELETON_IDS.map((id) => (
-        <div key={id} className="rounded-md border bg-background p-3">
+        <div key={id} className="rounded-md border bg-card p-3">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="flex min-w-0 flex-wrap items-center gap-2">
               <Skeleton className="h-4 w-32" />
-              <Skeleton className="h-5 w-20 rounded-full" />
-              <Skeleton className="h-5 w-16 rounded-full" />
+              <Skeleton className="h-5 w-20 rounded-md" />
+              <Skeleton className="h-5 w-16 rounded-md" />
             </div>
             <div className="flex shrink-0 items-center gap-2">
-              <Skeleton className="h-5 w-9 rounded-full" />
+              <Skeleton className="h-5 w-9 rounded-md" />
               <Skeleton className="h-8 w-8 rounded-md" />
               <Skeleton className="h-8 w-8 rounded-md" />
               <Skeleton className="h-8 w-8 rounded-md" />
@@ -306,7 +306,7 @@ function WebhookDeliveriesSkeleton() {
       {WEBHOOK_DELIVERY_ROW_SKELETON_IDS.map((id) => (
         <div key={id} className="rounded-md border bg-muted/10 p-2">
           <div className="flex items-center gap-2">
-            <Skeleton className="h-4 w-16 rounded-full" />
+            <Skeleton className="h-4 w-16 rounded-md" />
             <Skeleton className="h-3 w-8" />
             <Skeleton className="ml-auto h-3 w-14" />
           </div>
@@ -492,7 +492,7 @@ export function WebhookSettingsPanel({
   const renderRuleRow = (rule: WebhookRuleVO) => {
     const expanded = expandedRuleId === rule.id;
     return (
-      <div key={rule.id} className="rounded-md border bg-background p-3">
+      <div key={rule.id} className="rounded-md border bg-card p-3">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="flex min-w-0 flex-wrap items-center gap-2">
             <span className="truncate text-sm font-medium">{rule.name}</span>
@@ -580,7 +580,7 @@ export function WebhookSettingsPanel({
   const bases: BaseVO[] = basesQuery.data ?? [];
 
   const renderForm = () => (
-    <div className="space-y-4 rounded-md border bg-background p-3">
+    <div className="space-y-4 rounded-md border bg-card p-3">
       <div className="space-y-1.5">
         <Label htmlFor="webhook-name">{labels.nameLabel()}</Label>
         <Input

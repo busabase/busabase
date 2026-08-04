@@ -26,9 +26,17 @@ export async function run() {
 
   // ── List all CRs ──────────────────────────────────────────────────────────
 
-  await step("GET /change-requests — returns array", async () => {
-    crs = await api<ChangeRequestVO[]>("GET", "/change-requests");
-    assert(Array.isArray(crs), "expected array");
+  await step("GET /change-requests — returns a keyset page", async () => {
+    // `/change-requests` is keyset-paginated: `{ changeRequests, nextCursor }`.
+    // This step asserted `Array.isArray` on the envelope, so `crs` stayed the
+    // envelope object and every step below it failed with "crs is not iterable".
+    const page = await api<{ changeRequests: ChangeRequestVO[]; nextCursor: string | null }>(
+      "GET",
+      "/change-requests",
+    );
+    assert(Array.isArray(page.changeRequests), "expected a changeRequests array on the page");
+    crs = page.changeRequests;
+    assert(crs.length > 0, "expected at least one seeded change request");
   });
 
   await step("GET /change-requests — all have valid status", async () => {
@@ -58,10 +66,22 @@ export async function run() {
 
   if (blogBase) {
     await step("POST /bases/{id}/change-requests — create CR to close", async () => {
+      // Same two reasons as 03-records' throwaway record: all REQUIRED fields, and
+      // an explicit `autoMerge: false` because the assertion below is `in_review`.
+      const stamp = Date.now();
       const cr = await api<ChangeRequestVO>("POST", `/bases/${blogBase.id}/change-requests`, {
-        fields: { title: "[demo] CR to be closed", body: "This CR will be closed." },
+        fields: {
+          title: "[demo] CR to be closed",
+          body: "This CR will be closed.",
+          status: "draft",
+          path: `/blog/demo-cr-to-close-${stamp}`,
+          slug: `demo-cr-to-close-${stamp}`,
+          locale: "en",
+          "schema-version": 1,
+        },
         message: "demo: create CR for close test",
         submittedBy: "demo-script",
+        autoMerge: false,
       });
       assert(cr.status === "in_review", `expected in_review, got ${cr.status}`);
       closeCrId = cr.id;

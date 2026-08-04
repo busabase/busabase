@@ -17,6 +17,7 @@ import {
 } from "../../../db/schema";
 import { insertAuditEvent } from "../../../logic/audit";
 import {
+  finalizeChangeRequest,
   getChangeRequest,
   mergeChangeRequest,
   recordMergedNodeCreate,
@@ -649,18 +650,16 @@ export const createBulkChangeRequest = async (
     // Best-effort — an audit-log write failure must never fail change-request
     // creation; the CR/operation/commit rows above are already durably committed.
   }
-  await publishChangeRequestPendingReview({
-    spaceId: getContextSpaceId(),
-    baseId: base.id,
+  return finalizeChangeRequest({
     changeRequestId,
+    nodeId: base.nodeId,
+    requestedAutoMerge: parsed.autoMerge,
     submittedBy,
+    baseId: base.id,
+    label: "bulk record",
+    // record_create operations — must not take the structural fast path.
+    kind: "content",
   });
-
-  const changeRequest = await getChangeRequest(changeRequestId);
-  if (!changeRequest) {
-    throw new Error("Failed to create bulk changeRequest");
-  }
-  return changeRequest;
 };
 
 export const createDeleteChangeRequest = async (
@@ -1130,6 +1129,7 @@ export const createRestoreBaseChangeRequest = async (
   baseId: string,
   submittedBy = "local-editor",
   message?: string,
+  autoMerge?: boolean,
 ) => {
   await ensureReady();
   const db = await getDb();
@@ -1232,16 +1232,13 @@ export const createRestoreBaseChangeRequest = async (
     commitId,
     metadata: { operation: "base_restore" },
   });
-  await publishChangeRequestPendingReview({
-    spaceId: getContextSpaceId(),
-    baseId: baseRow.id,
+  return finalizeChangeRequest({
     changeRequestId,
-    submittedBy: resolveActorId(submittedBy),
+    nodeId: baseRow.nodeId,
+    requestedAutoMerge: autoMerge,
+    submittedBy,
+    baseId: baseRow.id,
+    label: "restore base",
+    kind: "structural",
   });
-
-  const changeRequest = await getChangeRequest(changeRequestId);
-  if (!changeRequest) {
-    throw new Error("Failed to create restore base change request");
-  }
-  return changeRequest;
 };

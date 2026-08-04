@@ -461,7 +461,7 @@ export function SearchDialog({
                   </div>
                   {!isRecentTab && response?.hasMore && tab !== "change_requests" ? (
                     <button
-                      className="mt-3 rounded-lg border bg-background px-3 py-2 font-medium text-sm transition-colors hover:bg-accent/40 disabled:opacity-60"
+                      className="mt-3 rounded-lg border bg-card px-3 py-2 font-medium text-sm transition-colors hover:bg-accent/40 disabled:opacity-60"
                       disabled={isSearching}
                       onClick={loadMore}
                       type="button"

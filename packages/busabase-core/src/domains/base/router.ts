@@ -87,6 +87,7 @@ export const baseRouter = {
           input.patch,
           input.submittedBy,
           input.message,
+          input.autoMerge,
         );
       case "delete":
         return createDeleteFieldChangeRequest(
@@ -110,6 +111,7 @@ export const baseRouter = {
           input.fieldIds,
           input.submittedBy,
           input.message,
+          input.autoMerge,
         );
       case "restore":
         return createRestoreFieldChangeRequest(
@@ -117,6 +119,7 @@ export const baseRouter = {
           input.fieldId,
           input.submittedBy,
           input.message,
+          input.autoMerge,
         );
     }
   }),
@@ -130,7 +133,7 @@ export const baseRouter = {
       case "archive":
         return createArchiveBaseChangeRequest(baseId, submittedBy, message);
       case "restore":
-        return createRestoreBaseChangeRequest(baseId, submittedBy, message);
+        return createRestoreBaseChangeRequest(baseId, submittedBy, message, input.autoMerge);
     }
   }),
 };

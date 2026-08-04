@@ -96,7 +96,7 @@ export function FormSandboxFrame({
 
   return (
     <iframe
-      className="w-full rounded-lg border border-border/60 bg-background"
+      className="w-full rounded-lg border border-border/60 bg-card"
       title={messages.form.tabForm}
       sandbox="allow-scripts allow-forms"
       srcDoc={buildFormSrcDoc(page)}

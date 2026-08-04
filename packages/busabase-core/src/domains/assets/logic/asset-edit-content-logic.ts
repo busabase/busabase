@@ -171,6 +171,13 @@ export const editAssetContent = async (input: EditAssetContentInput): Promise<Ch
   const changeRequestInput = {
     message: input.message,
     submittedBy: input.submittedBy,
+    // Explicit `false`, load-bearing: `editContent` is documented as never
+    // auto-merged (see its contract `successDescription`) because it rewrites the
+    // real mounted file bytes. It reaches that guarantee by delegating to the
+    // file-tree CR pipeline, so once that pipeline gained a permission-aware
+    // `autoMerge` default, inheriting the default would have silently revoked this
+    // endpoint's promise for any write-capable caller. Pin it here instead.
+    autoMerge: false as const,
     operations: [
       {
         kind: "update" as const,

@@ -22,14 +22,27 @@ export async function run() {
   const createdBases: Map<string, BaseVO> = new Map();
   const nodes = await api<NodeTreeVO[]>("GET", "/nodes");
 
-  // Create each base from DEMO_BASES via POST /bases (idempotent by slug)
+  // Create each base from DEMO_BASES via POST /bases (idempotent by slug).
+  //
+  // Genuinely idempotent — read first, POST only what is missing. `POST /bases`
+  // rejects a slug that already carries a DIFFERENT name (409, by design: it is
+  // how you find out you are about to collide with someone else's Base), and
+  // seed scenarios legitimately rename a seeded Base: the CMS scenario renames
+  // `blog` to "Posts" on purpose, while DEMO_BASES still calls it "Blog Posts".
+  // A blind POST turns any such rename into a red demo run, which is what this
+  // step used to do.
+  const existingBySlug = new Map(
+    (await api<BaseVO[]>("GET", "/bases")).map((base) => [base.slug, base]),
+  );
   for (const def of DEMO_BASES) {
     await step(`POST /bases — create/idempotent "${def.name}"`, async () => {
       const folderSlug = folderSlugForSeedNodeId(def.folderNodeId);
       assert(!!folderSlug, `no demo folder mapping for seed node "${def.folderNodeId}"`);
       const folder = findFolderBySlug(nodes, folderSlug);
       assert(!!folder, `folder slug "${folderSlug}" not found`);
-      const base = await api<BaseVO>("POST", "/bases", toApiBase(def, folder.node.id));
+      const base =
+        existingBySlug.get(def.slug) ??
+        (await api<BaseVO>("POST", "/bases", toApiBase(def, folder.node.id)));
       assert(base.slug === def.slug, `slug mismatch: ${base.slug} ≠ ${def.slug}`);
       assert(base.fields.length > 0, "base has no fields");
       if (needsMove(nodes, def.slug, folderSlug)) {

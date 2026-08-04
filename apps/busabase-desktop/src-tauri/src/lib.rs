@@ -348,7 +348,7 @@ fn build_sidecar_command(app: &AppHandle, data_dir: &Path) -> Result<Command, St
 
     let pg_url = format!("pglite://{}", pg_dir.to_string_lossy());
     let storage_url = format!(
-        "local:{}?base_url=/api/dev/attachment",
+        "local:{}?base_url=/api/storage&upload_url=/api/storage/upload",
         storage_dir.to_string_lossy()
     );
 

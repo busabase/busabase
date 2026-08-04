@@ -39,7 +39,7 @@ function TrashRow({
       <div className="ml-4 flex shrink-0 items-center gap-2">
         {onPurge ? (
           <button
-            className="inline-flex items-center gap-1.5 rounded-md border border-border/60 bg-background px-3 py-1.5 text-muted-foreground text-xs transition-colors hover:bg-red-50 hover:text-red-700 disabled:opacity-50"
+            className="inline-flex items-center gap-1.5 rounded-md border border-border/60 bg-card px-3 py-1.5 text-muted-foreground text-xs transition-colors hover:bg-red-50 hover:text-red-700 disabled:opacity-50"
             disabled={restoring}
             onClick={onPurge}
             type="button"
@@ -49,7 +49,7 @@ function TrashRow({
           </button>
         ) : null}
         <button
-          className="inline-flex items-center gap-1.5 rounded-md border border-border/60 bg-background px-3 py-1.5 text-xs transition-colors hover:bg-accent disabled:opacity-50"
+          className="inline-flex items-center gap-1.5 rounded-md border border-border/60 bg-card px-3 py-1.5 text-xs transition-colors hover:bg-accent disabled:opacity-50"
           disabled={restoring}
           onClick={onRestore}
           type="button"

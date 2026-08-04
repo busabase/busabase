@@ -303,7 +303,7 @@ export function FileTreeDetailView({
               <div className="font-medium text-muted-foreground text-xs uppercase">
                 {messages.nodeDetail.files}
               </div>
-              <div className="rounded-md border border-border/70 bg-background px-1.5 py-0.5 font-mono text-muted-foreground text-[11px]">
+              <div className="rounded-md border border-border/70 bg-card px-1.5 py-0.5 font-mono text-muted-foreground text-[11px]">
                 {fileCount}
               </div>
             </div>
@@ -368,7 +368,7 @@ export function FileTreeDetailView({
                 </div>
               ) : (
                 <button
-                  className="w-fit shrink-0 rounded-md border border-border/70 bg-background px-2.5 py-1.5 text-xs transition-colors hover:bg-muted/60"
+                  className="w-fit shrink-0 rounded-md border border-border/70 bg-card px-2.5 py-1.5 text-xs transition-colors hover:bg-muted/60"
                   onClick={startEditingFile}
                   type="button"
                 >

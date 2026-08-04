@@ -192,7 +192,11 @@ export const recordContract = {
       path: "/records/count",
       tags: ["Records"],
       summary: "Count records",
-      successDescription: "Total active records in the space, optionally scoped to a base.",
+      description:
+        "A real SQL COUNT — always the exact total, never a partial or capped number, so it's safe to render as a canonical figure (e.g. a dashboard summary tile). " +
+        "Plain `baseId` scoping is always cheap. Adding `viewId` and/or `filters` is exact too — provably-exact conditions (e.g. text equals/contains, not_empty/is_empty, checkbox is_true/is_false) stay a cheap SQL COUNT; everything else falls back to evaluating every matching row server-side, which is exact but not free on a large Base. Both `viewId` and `filters` require `baseId`.",
+      successDescription:
+        "Total active records matching the scope: the whole space, one Base, a saved View, an ad-hoc filter set, or a combination.",
     })
     .input(countRecordsInputSchema)
     .output(countRecordsResponseSchema),

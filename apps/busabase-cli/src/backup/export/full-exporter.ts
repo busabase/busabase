@@ -121,7 +121,7 @@ export async function exportFull(options: FullExportOptions): Promise<Manifest> 
       if (!attachment) throw new Error("no matching attachments row (orphaned asset)");
       const download = await client.assets.download({ assetId });
       // A local (non-S3) server returns a root-relative `downloadUrl` (e.g.
-      // `/api/dev/attachment/...`) meant to be fetched same-origin from the
+      // `/api/storage/...`) meant to be fetched same-origin from the
       // browser. `busabase-cli backup` runs out-of-process, so it must resolve
       // that against the configured server host itself — found live against a real
       // seeded server (a bare `fetch("/api/...")` throws "Failed to parse

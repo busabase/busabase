@@ -63,7 +63,7 @@ export function getAttachmentKindLabel(ref: { mimeType?: string; fileName?: stri
 
 /**
  * Resolve a possibly-relative attachment/asset URL against the connected server.
- * The self-hosted server returns dev-route paths like `/api/dev/attachment/...`;
+ * The self-hosted server returns root-relative paths like `/api/storage/...`;
  * on mobile we must prefix them with the server origin to load the bytes.
  */
 export function resolveAttachmentUrl(serverUrl: string | null, url: string): string {

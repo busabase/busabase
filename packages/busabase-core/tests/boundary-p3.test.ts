@@ -149,6 +149,8 @@ describe("Boundary P3 — oRPC", () => {
     const recordId = await createRecord(base.id, { title: "t", status: "ch_open" });
 
     const cr = await client.bases.fieldChangeRequest({
+      // review-first: this test asserts the guard that fires at MERGE time.
+      autoMerge: false,
       operation: "update",
       baseId: base.id,
       fieldId: statusField.id,

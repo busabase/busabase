@@ -169,6 +169,9 @@ export async function run() {
             type: "skill",
             message: "demo: update README via CR",
             submittedBy: "demo-script",
+            // Review-first demo step: `autoMerge` is permission-aware when omitted
+            // and this script has write access, so review must be asked for.
+            autoMerge: false,
             operations: [
               {
                 kind: "create",
@@ -214,6 +217,9 @@ export async function run() {
           type: "skill",
           message: "demo: bump version to 4.1.0",
           submittedBy: "demo-script",
+          // Review-first demo step: `autoMerge` is permission-aware when omitted and
+          // this script has write access, so review must be requested explicitly.
+          autoMerge: false,
           operations: [{ kind: "metadata_update", metadata: { version: "4.1.0" } }],
         },
       );

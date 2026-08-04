@@ -13,6 +13,7 @@ import {
   getChangeRequestScopeName,
   getChangeRequestSummary,
   getChangeRequestTitle,
+  statusAccent,
   statusTone,
 } from "../helpers/change-request";
 import { formatListTime, formatUserRefLabel } from "../helpers/format";
@@ -429,9 +430,17 @@ function ReviewChangeRequestRow({ changeRequest }: { changeRequest: ChangeReques
 
   return (
     <Link
-      className="group grid min-h-14 items-center gap-2 px-3 py-2.5 transition-colors hover:bg-accent/25 md:grid-cols-[minmax(0,1fr)_220px]"
+      className="group relative grid min-h-14 items-center gap-2 py-2.5 pr-3 pl-5 transition-colors hover:bg-accent/25 md:grid-cols-[minmax(0,1fr)_220px]"
       href={href}
     >
+      {/* 3px status rail on the left edge. In a queue this dense, scanning the
+          left edge for the green/gold/red rhythm is far faster than reading the
+          chip at the end of each row. Inset vertically so consecutive rows read
+          as separate marks rather than one continuous stripe. */}
+      <span
+        aria-hidden="true"
+        className={`absolute top-2 bottom-2 left-0 w-[3px] rounded-sm ${statusAccent(changeRequest.status)}`}
+      />
       <div className="min-w-0">
         <div className="flex min-w-0 items-center gap-2">
           <span
@@ -442,7 +451,7 @@ function ReviewChangeRequestRow({ changeRequest }: { changeRequest: ChangeReques
             {getChangeRequestTitle(changeRequest, messages)}
           </div>
           {riskHints.length > 0 ? (
-            <span className="hidden shrink-0 rounded-md border border-review/35 bg-review/10 px-1.5 py-0.5 font-medium text-[11px] text-review-strong sm:inline-flex dark:text-review-soft">
+            <span className="hidden shrink-0 rounded-md border border-review/35 bg-review/17 px-1.5 py-0.5 font-medium text-[11px] text-review-strong sm:inline-flex dark:text-review-soft">
               {riskHints.join(" · ")}
             </span>
           ) : null}

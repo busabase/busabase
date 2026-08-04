@@ -173,6 +173,9 @@ export async function run() {
           type: "drive",
           message: "demo: update README via CR",
           submittedBy: "demo-script",
+          // Review-first demo step: `autoMerge` is permission-aware when omitted and
+          // this script has write access, so review must be requested explicitly.
+          autoMerge: false,
           operations: [{ kind: "update", path: "README.md", content: updatedContent }],
         },
       );

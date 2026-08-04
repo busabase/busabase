@@ -140,6 +140,8 @@ describe("Boundary P2 — oRPC", () => {
     if (!noteField) throw new Error("note field missing");
 
     const cr = await client.bases.fieldChangeRequest({
+      // review-first: this test asserts the guard that fires at MERGE time.
+      autoMerge: false,
       operation: "update",
       baseId: base.id,
       fieldId: noteField.id,

@@ -293,7 +293,10 @@ test("image block uploads a file as a real Asset, and deleting it removes both",
   const image = editor.locator("img[data-type='image-block']");
   await expect(image).toBeVisible();
   const src = await image.getAttribute("src");
-  expect(src).toMatch(/^\/api\/dev\/attachment\//);
+  // Local storage is served from the production `/api/storage` route, not the
+  // dev-only `/api/dev/attachment` one — see `STORAGE_URL`'s `base_url=` in
+  // `.env.example`, which this suite copies verbatim.
+  expect(src).toMatch(/^\/api\/storage\//);
 
   await saveAndExitEditMode(page);
   const savedBody = await getDocBody(request, slug);

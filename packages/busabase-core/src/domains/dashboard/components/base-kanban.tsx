@@ -192,7 +192,7 @@ export function BusaBaseKanban({
                 className={`h-2 w-2 shrink-0 rounded-full ${COLOR_DOT[column.color ?? "slate"] ?? COLOR_DOT.slate}`}
               />
               <span className="truncate font-medium text-foreground text-sm">{column.name}</span>
-              <span className="ml-auto rounded-full bg-muted/60 px-1.5 text-muted-foreground text-xs">
+              <span className="ml-auto rounded-md bg-muted/60 px-1.5 text-muted-foreground text-xs">
                 {columnRecords.length}
               </span>
             </div>

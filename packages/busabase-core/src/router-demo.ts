@@ -559,11 +559,28 @@ export const busabaseDemoRouter = os.router({
       };
     }),
     count: os.records.count.handler(async ({ input }) => {
-      const all = await demoListRecords();
-      const total = input?.baseId
-        ? all.filter((record) => record.baseId === input.baseId).length
-        : all.length;
-      return { total };
+      // Demo mode has no SQL to push down to — the whole space is already an
+      // in-memory VO array, so counting a viewId/filters combination is just
+      // the same `applyViewConfigToRecords` real mode falls back to, run over
+      // every candidate. Kept exact in lockstep with the real handler so demo
+      // mode never shows a different total than a real Base would.
+      const all = await demoListRecords({ baseId: input?.baseId });
+      if (!input?.viewId && !input?.filters?.length) {
+        return { total: all.length };
+      }
+      const base = input.baseId ? demoGetBase(input.baseId) : undefined;
+      const view = input.viewId
+        ? demoListViews(base?.id).find((item) => item.id === input.viewId)
+        : undefined;
+      if (input.viewId && !view) {
+        throw new ORPCError("NOT_FOUND", { message: `View not found: ${input.viewId}` });
+      }
+      const viewFilters = view?.config.filters ?? [];
+      const matched = applyViewConfigToRecords(all, {
+        filters: [...viewFilters, ...(input.filters ?? [])],
+        sorts: [],
+      });
+      return { total: matched.length };
     }),
     get: os.records.get.handler(({ input }) => {
       const record =

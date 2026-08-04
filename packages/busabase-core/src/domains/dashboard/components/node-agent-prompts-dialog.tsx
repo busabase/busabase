@@ -211,7 +211,7 @@ function PromptPanel({
         />
         <div className="flex justify-end">
           <button
-            className="inline-flex h-9 items-center gap-2 rounded-md border bg-background px-3 text-sm font-medium hover:bg-muted"
+            className="inline-flex h-9 items-center gap-2 rounded-md border bg-card px-3 text-sm font-medium hover:bg-muted"
             onClick={onCopy}
             type="button"
           >

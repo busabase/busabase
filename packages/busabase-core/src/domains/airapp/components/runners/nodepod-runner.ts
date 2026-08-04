@@ -1,4 +1,5 @@
 import type { Nodepod as NodepodInstance, NodepodProcess, RequestProxy } from "@scelar/nodepod";
+import { beginPodHeartbeat, ensureRegistered } from "../../utils/nodepod-service-worker";
 import type { AirAppRunner } from "./types";
 
 /**
@@ -32,6 +33,7 @@ export class NodepodRunner implements AirAppRunner {
   private proxy: RequestProxy | null = null;
   private proxyListener: ((port: number, url: string) => void) | null = null;
   private readyTimer: ReturnType<typeof setTimeout> | null = null;
+  private stopHeartbeat: (() => void) | null = null;
 
   constructor(private readonly previewScript?: string) {}
 
@@ -50,6 +52,15 @@ export class NodepodRunner implements AirAppRunner {
 
   async mount(files: Record<string, string>): Promise<void> {
     const { Nodepod } = await import("@scelar/nodepod");
+    // Nodepod's own SW registration lives behind a page-lifetime `swReady`
+    // flag on its RequestProxy singleton, so it is skipped entirely if the
+    // page already booted a pod once. A marketing-route visit in between may
+    // have released the registration (see utils/nodepod-service-worker.ts) —
+    // put it back before booting, and mark the pod alive so no other tab
+    // releases it from under this run.
+    await ensureRegistered();
+    this.stopHeartbeat?.();
+    this.stopHeartbeat = beginPodHeartbeat();
     this.nodepod = await Nodepod.boot({
       files,
       watermark: false,
@@ -124,6 +135,8 @@ export class NodepodRunner implements AirAppRunner {
   }
 
   dispose(): void {
+    this.stopHeartbeat?.();
+    this.stopHeartbeat = null;
     if (this.readyTimer) clearTimeout(this.readyTimer);
     this.readyTimer = null;
     if (this.proxy && this.proxyListener) {

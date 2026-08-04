@@ -1,5 +1,6 @@
 import { iStringRecordSchema } from "openlib/i18n/i-string";
 import { z } from "zod";
+import { autoMergeNotAccepted } from "../../../contract/auto-merge";
 
 // Base-owned field + base Zod schemas. Pure leaf: imports nothing from the kernel
 // contract, so the kernel can embed `baseSchema` eagerly with no import cycle.
@@ -226,15 +227,41 @@ export const createBaseFieldInputSchema = z.object({
   options: fieldOptionsSchema.optional().default({}),
 });
 
+/**
+ * Permission-aware default, same tri-state as `createBase` / the record and view
+ * endpoints: omitted merges immediately when the actor has `write` on the Base's
+ * node, otherwise falls back to a pending ChangeRequest. Explicit `false` forces
+ * review even with write access.
+ *
+ * Deliberately NOT on the `delete` and `convert` branches below. The line this
+ * codebase already draws — record `update` auto-merges, record `delete`/`restore`
+ * never do, and `assets.editContent` never does — is about whether CONTENT data
+ * is at stake, not about the verb. Adding, renaming, reordering, or un-deleting a
+ * field touches only the schema; deleting one soft-deletes its stored values with
+ * it, and converting one can drop values outright (which is why
+ * `previewFieldConversion` exists as a dry run). Those two stay in front of a
+ * human.
+ */
+const fieldAutoMergeSchema = z
+  .boolean()
+  .optional()
+  .describe(
+    "Whether to approve and merge this field change immediately. Omitted defaults to merging immediately if the actor has write access on the Base's node, otherwise falling back to a pending Change Request; pass explicit false to force review even with write access. Not accepted by the delete and convert operations, which always require review.",
+  );
+
 export const createFieldChangeRequestInputSchema = createBaseFieldInputSchema.extend({
   message: z.string().optional().default("Add field"),
   submittedBy: z.string().optional().default("local-editor"),
+  autoMerge: fieldAutoMergeSchema,
 });
 
 export const deleteFieldChangeRequestInputSchema = z.object({
   fieldId: z.string().min(1),
   message: z.string().optional(),
   submittedBy: z.string().optional().default("local-editor"),
+  autoMerge: autoMergeNotAccepted(
+    "deleting a field soft-deletes its stored values with it, so it always requires review. Omit the flag.",
+  ),
 });
 
 export const updateFieldChangeRequestInputSchema = z.object({
@@ -246,6 +273,7 @@ export const updateFieldChangeRequestInputSchema = z.object({
   }),
   message: z.string().optional(),
   submittedBy: z.string().optional().default("local-editor"),
+  autoMerge: fieldAutoMergeSchema,
 });
 
 export const previewFieldConversionInputSchema = z.object({
@@ -266,28 +294,42 @@ export const convertFieldChangeRequestInputSchema = z.object({
   selectChoiceMode: z.enum(["auto_create", "null_on_missing"]).default("null_on_missing"),
   message: z.string().optional(),
   submittedBy: z.string().optional().default("local-editor"),
+  autoMerge: autoMergeNotAccepted(
+    "converting a field's type can drop values, so it always requires review. Run previewFieldConversion first to see what would change, then omit the flag.",
+  ),
 });
 
 export const reorderFieldsChangeRequestInputSchema = z.object({
   fieldIds: z.array(z.string()).min(1),
   message: z.string().optional(),
   submittedBy: z.string().optional().default("local-editor"),
+  autoMerge: fieldAutoMergeSchema,
 });
 
 export const archiveBaseInputSchema = z.object({
   message: z.string().optional(),
   submittedBy: z.string().optional().default("local-editor"),
+  autoMerge: autoMergeNotAccepted(
+    "archiving a Base removes it and every record in it from every listing at once, so it always requires review. Omit the flag.",
+  ),
 });
 
 export const restoreBaseInputSchema = z.object({
   message: z.string().optional(),
   submittedBy: z.string().optional().default("local-editor"),
+  // Restoring an archived Base is the undo of a destructive act — nothing is at
+  // risk, so it takes the same permission-aware default as everything else.
+  // `archiveBaseInputSchema` above deliberately has no `autoMerge`: archiving
+  // takes a whole Base and every record in it out of every listing at once,
+  // which is strictly larger than the record `delete` that is already review-only.
+  autoMerge: z.boolean().optional(),
 });
 
 export const restoreFieldChangeRequestInputSchema = z.object({
   fieldId: z.string().min(1),
   message: z.string().optional(),
   submittedBy: z.string().optional().default("local-editor"),
+  autoMerge: fieldAutoMergeSchema,
 });
 
 /**

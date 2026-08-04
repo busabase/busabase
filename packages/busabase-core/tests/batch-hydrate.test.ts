@@ -56,12 +56,16 @@ describe("Batch hydrate — per-item relation isolation", () => {
       baseId: baseAId,
       records: [{ name: "a1" }, { name: "a2" }, { name: "a3" }],
       message: "alpha seed",
+      // review-first: the comment above says "Left in review" — that is the fixture.
+      autoMerge: false,
     });
     crAId = crA.id;
     const crB = await client.bases.createBulkChangeRequest({
       baseId: baseBId,
       records: [{ title: "b1" }, { title: "b2" }],
       message: "beta seed",
+      // review-first: the comment above says "Left in review" — that is the fixture.
+      autoMerge: false,
     });
     crBId = crB.id;
 

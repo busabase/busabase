@@ -38,6 +38,36 @@ describe("demo mobile read surfaces", () => {
     expect(statuses).toEqual(statuses.filter((status) => status === expectedStatus));
   });
 
+  it("counts records in demo mode, including viewId/filters — kept in lockstep with real mode", async () => {
+    const plain = await client.records.count({ baseId: "bse_local_blog" });
+    const all = await client.records.list({ baseId: "bse_local_blog", limit: 100 });
+    expect(all.nextCursor).toBeNull(); // sanity: this IS the whole base, not a partial page
+    expect(plain.total).toBe(all.records.length);
+
+    const views = await client.bases.listViews({ baseId: "bse_local_blog" });
+    const view = views.find((item) => item.id === "viw_seed_blog_drafts");
+    const expectedStatus = view?.config.filters[0]?.value;
+    const expectedCount = all.records.filter(
+      (record) => record.headCommit.fields.status === expectedStatus,
+    ).length;
+
+    const viaView = await client.records.count({
+      baseId: "bse_local_blog",
+      viewId: "viw_seed_blog_drafts",
+    });
+    expect(viaView.total).toBe(expectedCount);
+
+    const viaFilters = await client.records.count({
+      baseId: "bse_local_blog",
+      filters: [{ fieldSlug: "status", operator: "equals", value: expectedStatus }],
+    });
+    expect(viaFilters.total).toBe(expectedCount);
+
+    await expect(
+      client.records.count({ baseId: "bse_local_blog", viewId: "viw_does_not_exist" }),
+    ).rejects.toThrow();
+  });
+
   it("lists and reads seeded Skill and Drive files", async () => {
     const skills = await client.nodes.list({ types: ["skill"] });
     const drives = await client.nodes.list({ types: ["drive"] });

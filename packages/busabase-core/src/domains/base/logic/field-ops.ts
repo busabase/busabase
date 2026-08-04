@@ -25,6 +25,7 @@ import {
 import { insertAuditEvent } from "../../../logic/audit";
 import {
   closeChangeRequest,
+  finalizeChangeRequest,
   getChangeRequest,
   recordMergedOperation,
 } from "../../../logic/cr-lifecycle";
@@ -347,18 +348,15 @@ export const createFieldChangeRequest = async (
     operationId,
     metadata: { operation: "base_add_field", fieldSlug: parsed.slug },
   });
-  await publishChangeRequestPendingReview({
-    spaceId: getContextSpaceId(),
-    baseId: base.id,
+  return finalizeChangeRequest({
     changeRequestId,
-    submittedBy: resolveActorId(parsed.submittedBy),
+    nodeId: base.nodeId,
+    requestedAutoMerge: parsed.autoMerge,
+    submittedBy: parsed.submittedBy,
+    baseId: base.id,
+    label: "field create",
+    kind: "structural",
   });
-
-  const changeRequest = await getChangeRequest(changeRequestId);
-  if (!changeRequest) {
-    throw new Error("Failed to create field change request");
-  }
-  return changeRequest;
 };
 
 export const createDeleteFieldChangeRequest = async (
@@ -478,6 +476,7 @@ export const createUpdateFieldChangeRequest = async (
   patch: { name?: iString; required?: boolean; options?: Record<string, unknown> },
   submittedBy = "local-editor",
   message?: string,
+  autoMerge?: boolean,
 ) => {
   await ensureReady();
   const db = await getDb();
@@ -569,18 +568,15 @@ export const createUpdateFieldChangeRequest = async (
     operationId,
     metadata: { operation: "base_update_field", fieldSlug: field.slug },
   });
-  await publishChangeRequestPendingReview({
-    spaceId: getContextSpaceId(),
-    baseId: base.id,
+  return finalizeChangeRequest({
     changeRequestId,
-    submittedBy: resolveActorId(submittedBy),
+    nodeId: base.nodeId,
+    requestedAutoMerge: autoMerge,
+    submittedBy: submittedBy,
+    baseId: base.id,
+    label: "field update",
+    kind: "structural",
   });
-
-  const changeRequest = await getChangeRequest(changeRequestId);
-  if (!changeRequest) {
-    throw new Error("Failed to create update field change request");
-  }
-  return changeRequest;
 };
 
 // Bound the field-value scan so a large base can't OOM the preview: process
@@ -858,6 +854,7 @@ export const createReorderFieldsChangeRequest = async (
   fieldIds: string[],
   submittedBy = "local-editor",
   message?: string,
+  autoMerge?: boolean,
 ) => {
   await ensureReady();
   const db = await getDb();
@@ -935,18 +932,15 @@ export const createReorderFieldsChangeRequest = async (
     operationId,
     metadata: { operation: "base_reorder_fields" },
   });
-  await publishChangeRequestPendingReview({
-    spaceId: getContextSpaceId(),
-    baseId: base.id,
+  return finalizeChangeRequest({
     changeRequestId,
-    submittedBy: resolveActorId(submittedBy),
+    nodeId: base.nodeId,
+    requestedAutoMerge: autoMerge,
+    submittedBy: submittedBy,
+    baseId: base.id,
+    label: "reorder fields",
+    kind: "structural",
   });
-
-  const changeRequest = await getChangeRequest(changeRequestId);
-  if (!changeRequest) {
-    throw new Error("Failed to create reorder fields change request");
-  }
-  return changeRequest;
 };
 
 export const createRestoreFieldChangeRequest = async (
@@ -954,6 +948,7 @@ export const createRestoreFieldChangeRequest = async (
   fieldId: string,
   submittedBy = "local-editor",
   message?: string,
+  autoMerge?: boolean,
 ) => {
   await ensureReady();
   const db = await getDb();
@@ -1040,16 +1035,13 @@ export const createRestoreFieldChangeRequest = async (
     operationId,
     metadata: { operation: "base_restore_field", fieldSlug: field.slug },
   });
-  await publishChangeRequestPendingReview({
-    spaceId: getContextSpaceId(),
-    baseId: base.id,
+  return finalizeChangeRequest({
     changeRequestId,
-    submittedBy: resolveActorId(submittedBy),
+    nodeId: base.nodeId,
+    requestedAutoMerge: autoMerge,
+    submittedBy: submittedBy,
+    baseId: base.id,
+    label: "restore field",
+    kind: "structural",
   });
-
-  const changeRequest = await getChangeRequest(changeRequestId);
-  if (!changeRequest) {
-    throw new Error("Failed to create restore field change request");
-  }
-  return changeRequest;
 };

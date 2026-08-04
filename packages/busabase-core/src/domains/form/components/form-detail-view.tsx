@@ -67,7 +67,7 @@ export function FormDetailView({ orpc, slug }: { orpc: BusabaseQueryUtils; slug:
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <div className="flex min-w-0 items-center gap-2">
           <h1 className="truncate font-semibold text-lg">{form.name}</h1>
-          <span className="inline-flex items-center gap-1 rounded-full bg-muted/60 px-2 py-0.5 text-muted-foreground text-xs">
+          <span className="inline-flex items-center gap-1 rounded-md bg-muted/60 px-2 py-0.5 text-muted-foreground text-xs">
             {form.share.isPublic ? <Globe size={11} /> : <Lock size={11} />}
             {form.share.isPublic
               ? form.share.anonymousSubmit
@@ -80,7 +80,7 @@ export function FormDetailView({ orpc, slug }: { orpc: BusabaseQueryUtils; slug:
           <button
             className={`inline-flex items-center gap-1 rounded px-2.5 py-1 font-medium transition-colors ${
               tab === "form"
-                ? "bg-background text-foreground shadow-sm"
+                ? "bg-card text-foreground"
                 : "text-muted-foreground hover:text-foreground"
             }`}
             onClick={() => setTab("form")}
@@ -92,7 +92,7 @@ export function FormDetailView({ orpc, slug }: { orpc: BusabaseQueryUtils; slug:
           <button
             className={`inline-flex items-center gap-1 rounded px-2.5 py-1 font-medium transition-colors ${
               tab === "code"
-                ? "bg-background text-foreground shadow-sm"
+                ? "bg-card text-foreground"
                 : "text-muted-foreground hover:text-foreground"
             }`}
             onClick={() => setTab("code")}
@@ -164,7 +164,7 @@ export function FormDetailView({ orpc, slug }: { orpc: BusabaseQueryUtils; slug:
                   <span className="mt-0.5 block text-muted-foreground text-xs">{binding.help}</span>
                 ) : null}
                 <input
-                  className="mt-1.5 h-9 w-full rounded-md border border-border/70 bg-background px-3 text-sm outline-none transition-colors focus:border-primary"
+                  className="mt-1.5 h-9 w-full rounded-md border border-border/70 bg-card px-3 text-sm outline-none transition-colors focus:border-primary"
                   data-input-name={binding.inputName}
                   onChange={(event) =>
                     setValues((current) => ({

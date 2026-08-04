@@ -17,17 +17,17 @@ export type { ActivityEvent, ActivityEventTone } from "../helpers/activity-event
 const activityAvatarTone: Record<ActivityEventTone, string> = {
   audit: "border-border bg-muted/40 text-muted-foreground",
   commit: "border-border bg-muted/40 text-muted-foreground",
-  change_request: "border-review/35 bg-review/10 text-review-strong dark:text-review-soft",
+  change_request: "border-review/35 bg-review/17 text-review-strong dark:text-review-soft",
   operation: "border-border bg-muted/40 text-muted-foreground",
-  record: "border-merged/35 bg-merged/10 text-merged-strong dark:text-merged-soft",
+  record: "border-merged/35 bg-merged/17 text-merged-strong dark:text-merged-soft",
 };
 
 const activityIconTone: Record<ActivityEventTone, string> = {
-  audit: "border-border bg-background text-muted-foreground",
-  commit: "border-border bg-background text-muted-foreground",
-  change_request: "border-review/35 bg-background text-review-strong dark:text-review-soft",
-  operation: "border-border bg-background text-muted-foreground",
-  record: "border-merged/35 bg-background text-merged-strong dark:text-merged-soft",
+  audit: "border-border bg-card text-muted-foreground",
+  commit: "border-border bg-card text-muted-foreground",
+  change_request: "border-review/35 bg-card text-review-strong dark:text-review-soft",
+  operation: "border-border bg-card text-muted-foreground",
+  record: "border-merged/35 bg-card text-merged-strong dark:text-merged-soft",
 };
 
 const activityIcons = {

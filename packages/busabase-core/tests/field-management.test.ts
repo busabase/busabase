@@ -712,6 +712,7 @@ describe("Field management — delete / update / convert", () => {
     it("createFieldChangeRequest: relation field with no options → BAD_REQUEST", async () => {
       await expect(
         client.bases.fieldChangeRequest({
+          autoMerge: false, // review-first: this test drives approve + merge itself
           operation: "create",
           baseId: noTargetBaseId,
           slug: "linked",
@@ -739,7 +740,13 @@ describe("Field management — delete / update / convert", () => {
       });
       const baseId = base.id;
       const fieldIds = base.fields.map((f) => f.id).reverse();
-      const cr = await client.bases.fieldChangeRequest({ operation: "reorder", baseId, fieldIds });
+      const cr = await client.bases.fieldChangeRequest({
+        operation: "reorder",
+        baseId,
+        fieldIds,
+        // review-first: this test asserts the pending CR, then merges it itself.
+        autoMerge: false,
+      });
       expect(cr.status).toBe("in_review");
       await approveAndMerge(cr.id);
       const updatedBases = await client.bases.list({});
@@ -821,6 +828,7 @@ describe("Field management — delete / update / convert", () => {
       await approveAndMerge(delCr.id);
       // Now restore it
       const restoreCr = await client.bases.fieldChangeRequest({
+        autoMerge: false, // review-first: this test drives approve + merge itself
         operation: "restore",
         baseId,
         fieldId,
@@ -975,6 +983,7 @@ describe("Field management — delete / update / convert", () => {
       const titleId = base.fields.find((f) => f.slug === "title")?.id;
       const scoreId = base.fields.find((f) => f.slug === "score")?.id;
       const cr = await client.bases.fieldChangeRequest({
+        autoMerge: false, // review-first: this test drives approve + merge itself
         operation: "reorder",
         baseId,
         fieldIds: [scoreId, titleId],
@@ -1000,6 +1009,7 @@ describe("Field management — delete / update / convert", () => {
       const scoreId = base.fields.find((f) => f.slug === "score")?.id;
       // Create a field update CR (don't merge yet)
       const updateCr = await client.bases.fieldChangeRequest({
+        autoMerge: false, // review-first: this test drives approve + merge itself
         operation: "update",
         baseId,
         fieldId: scoreId,

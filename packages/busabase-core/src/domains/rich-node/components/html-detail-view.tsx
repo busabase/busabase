@@ -84,7 +84,7 @@ export function HtmlDetailView({ nodes, orpc, slug, onNodeLoaded }: HtmlDetailVi
         </TabsContent>
         <TabsContent className="m-0 min-h-0 flex-1 bg-muted/20 p-3" value="preview">
           <iframe
-            className="h-full w-full border border-border bg-background"
+            className="h-full w-full border border-border bg-card"
             sandbox="allow-forms allow-modals allow-scripts"
             srcDoc={source}
             title={`${node.name} preview`}

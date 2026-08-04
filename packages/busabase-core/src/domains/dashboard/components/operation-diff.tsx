@@ -270,13 +270,13 @@ export function ChangeStatusBadge({
 }) {
   if (status === "added") {
     return (
-      <span className="inline-flex w-fit rounded-md border border-merged/35 bg-merged/10 px-2 py-0.5 font-medium text-[11px] text-merged-strong dark:text-merged-soft">
+      <span className="inline-flex w-fit rounded-md border border-merged/35 bg-merged/17 px-2 py-0.5 font-medium text-[11px] text-merged-strong dark:text-merged-soft">
         {messages.operationDiff.added}
       </span>
     );
   }
   return (
-    <span className="inline-flex w-fit rounded-md border border-review/35 bg-review/10 px-2 py-0.5 font-medium text-[11px] text-review-strong dark:text-review-soft">
+    <span className="inline-flex w-fit rounded-md border border-review/35 bg-review/17 px-2 py-0.5 font-medium text-[11px] text-review-strong dark:text-review-soft">
       {messages.operationDiff.changed}
     </span>
   );
@@ -301,13 +301,13 @@ export function FieldValueDiff({
   if (isLongTextValue(change.afterValue) || isLongTextValue(change.beforeValue)) {
     return (
       <div className="flex flex-col gap-2">
-        <div className="rounded-md border border-rejected/35 bg-rejected/10 px-3 py-2 text-muted-foreground text-sm line-through">
+        <div className="rounded-md border border-rejected/35 bg-rejected/17 px-3 py-2 text-muted-foreground text-sm line-through">
           <div className="mb-1 font-medium text-[11px] text-rejected-strong no-underline dark:text-rejected-soft">
             {messages.operationDiff.before}
           </div>
           <FieldValuePreview field={field} value={change.beforeValue} />
         </div>
-        <div className="rounded-md border border-merged/35 bg-merged/10 px-3 py-2 text-sm">
+        <div className="rounded-md border border-merged/35 bg-merged/17 px-3 py-2 text-sm">
           <div className="mb-1 font-medium text-[11px] text-merged-strong dark:text-merged-soft">
             {messages.operationDiff.after}
           </div>
@@ -318,11 +318,11 @@ export function FieldValueDiff({
   }
   return (
     <div className="flex flex-wrap items-center gap-2 text-sm">
-      <span className="rounded-md bg-rejected/10 px-2 py-0.5 text-rejected-strong line-through dark:text-rejected-soft">
+      <span className="rounded-md bg-rejected/17 px-2 py-0.5 text-rejected-strong line-through dark:text-rejected-soft">
         <FieldValuePreview field={field} value={change.beforeValue} />
       </span>
       <ArrowRight className="shrink-0 text-muted-foreground" size={14} />
-      <span className="rounded-md bg-merged/10 px-2 py-0.5 text-merged-strong dark:text-merged-soft">
+      <span className="rounded-md bg-merged/17 px-2 py-0.5 text-merged-strong dark:text-merged-soft">
         <FieldValuePreview field={field} value={change.afterValue} />
       </span>
     </div>
@@ -391,7 +391,7 @@ function FieldOrderRow({
   return (
     <li
       className={`grid grid-cols-[2rem_minmax(0,1fr)] gap-2 rounded-md border px-2.5 py-2 text-sm ${
-        moved ? "border-review/35 bg-review/10" : "border-transparent bg-muted/25"
+        moved ? "border-review/35 bg-review/17" : "border-transparent bg-muted/25"
       }`}
     >
       <span className="text-right font-mono text-muted-foreground tabular-nums">{index + 1}</span>
@@ -477,7 +477,7 @@ export function FieldOrderDiff({
       ) : null}
       <div className="mb-3 flex items-center justify-between gap-3">
         <div className="font-medium text-sm">{messages.operationDiff.fieldOrder}</div>
-        <span className="shrink-0 rounded-md border border-review/35 bg-review/10 px-2 py-0.5 font-medium text-[11px] text-review-strong dark:text-review-soft">
+        <span className="shrink-0 rounded-md border border-review/35 bg-review/17 px-2 py-0.5 font-medium text-[11px] text-review-strong dark:text-review-soft">
           {fmt(messages.operationDiff.movedCount, { count: movedIds.size })}
         </span>
       </div>

@@ -36,6 +36,7 @@ import {
 import { assertContainerParent } from "../../logic/node-parent";
 import { ensureReady } from "../../logic/seed";
 import {
+  finalizeChangeRequest,
   getChangeRequest,
   insertAuditEvent,
   loadNodesByIds,
@@ -532,18 +533,15 @@ export const createDocChangeRequest = async (
     changeRequestId,
     metadata: { operation: "doc_update", nodeId: node.id },
   });
-  await publishChangeRequestPendingReview({
-    spaceId: getContextSpaceId(),
-    baseId: null,
+  return finalizeChangeRequest({
     changeRequestId,
-    submittedBy: resolveActorId(parsed.submittedBy),
+    nodeId: node.id,
+    requestedAutoMerge: parsed.autoMerge,
+    submittedBy: parsed.submittedBy,
+    baseId: null,
+    label: "doc",
+    kind: "structural",
   });
-
-  const changeRequest = await getChangeRequest(changeRequestId);
-  if (!changeRequest) {
-    throw new Error("Failed to create doc change request");
-  }
-  return changeRequest;
 };
 
 // node-targeted merge handler for doc_update: write the proposed body to storage.
