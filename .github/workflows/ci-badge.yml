@@ -39,9 +39,17 @@ jobs:
         # Defence in depth: `paths` already scoped this workflow to the badge,
         # but that filter looks at the whole push. Diffing against the base
         # makes sure no code slipped through on a badge-labelled commit.
+        #
+        # Diff against the PR's exact base SHA with a plain two-dot diff, not
+        # `origin/<base_ref>...HEAD`. actions/checkout@v4 leaves both sides
+        # shallow (depth 1, no shared ancestor commit), so a three-dot diff
+        # — which needs a merge-base — fails with "no merge base" on any real
+        # release branch (more than one commit ahead of main). A two-dot diff
+        # just compares the two trees directly and needs no shared history,
+        # so fetching the single base commit by SHA is enough.
         run: |
-          git fetch --depth=1 origin '${{ github.base_ref }}'
-          changed=$(git diff --name-only "origin/${{ github.base_ref }}...HEAD")
+          git fetch --depth=1 origin '${{ github.event.pull_request.base.sha }}'
+          changed=$(git diff --name-only '${{ github.event.pull_request.base.sha }}' HEAD)
           echo "$changed"
           unexpected=$(echo "$changed" | grep -v '^apps/busabase/public/assets/readme/coverage.svg$' || true)
           if [ -n "$unexpected" ]; then
