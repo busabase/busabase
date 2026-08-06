@@ -51,11 +51,15 @@ interface AgentIntegrationDialogProps {
   onOpenChange: (open: boolean) => void;
   defaultOrigin?: string;
   /**
-   * Which edition's onboarding skill to point at. "desktop" adds ?edition=desktop
-   * (install + auto-detect localhost); "cloud" / omitted uses the bare /SETUP_SKILL.md
-   * (API-key onboarding). Lets the host pass its selected edition through.
+   * Which edition to record as the onboarding preference. Both editions are explicit in the URL;
+   * an unconfirmed discovery link still asks the user to choose inside the agent conversation.
    */
   edition?: McpGuideEdition;
+  /**
+   * Skip the edition dispatcher for authoritative Dashboard/local-app entry points. Homepage
+   * discovery links leave this false so their edition toggle remains only a preference.
+   */
+  editionConfirmed?: boolean;
   /**
    * Current UI language — localizes the pasted prompt (and its framing copy) and tells
    * the agent which language to reply in. Unknown values fall back to English.
@@ -68,6 +72,23 @@ interface AgentIntegrationDialogProps {
 const resolveMessages = (lang: string | undefined, fallback: CoreI18nMessages): CoreI18nMessages =>
   lang && lang in coreMessagesByLocale ? coreMessagesByLocale[lang as CoreLocale] : fallback;
 
+export function createSetupSkillUrl(
+  origin: string,
+  edition: McpGuideEdition,
+  editionConfirmed = false,
+  targetSpaceId?: string,
+): string {
+  const url = new URL("/SETUP_SKILL.md", origin);
+  url.searchParams.set("edition", edition);
+  if (editionConfirmed) {
+    url.searchParams.set("editionConfirmed", "1");
+  }
+  if (edition === "cloud" && targetSpaceId) {
+    url.searchParams.set("space", targetSpaceId);
+  }
+  return url.toString();
+}
+
 /**
  * Standalone dialog with three tabs: Agent Skills, MCP, OpenAPI.
  * Shared by the sidebar button and the landing page hero.
@@ -77,6 +98,7 @@ export function AgentIntegrationDialog({
   onOpenChange,
   defaultOrigin = "http://localhost:15419",
   edition = "desktop",
+  editionConfirmed = false,
   lang,
   targetSpaceId,
 }: AgentIntegrationDialogProps) {
@@ -103,15 +125,10 @@ export function AgentIntegrationDialog({
     }));
   }, []);
 
-  const skillUrl = useMemo(() => {
-    const url = new URL("/SETUP_SKILL.md", origin);
-    if (edition === "desktop") {
-      url.searchParams.set("edition", "desktop");
-    } else if (targetSpaceId) {
-      url.searchParams.set("space", targetSpaceId);
-    }
-    return url.toString();
-  }, [edition, origin, targetSpaceId]);
+  const skillUrl = useMemo(
+    () => createSetupSkillUrl(origin, edition, editionConfirmed, targetSpaceId),
+    [edition, editionConfirmed, origin, targetSpaceId],
+  );
   const webChatReachable = isWebChatReachable(edition);
   const mcpBaseUrl = mcpBaseUrls[mcpMode];
   const mcpBaseUrlFallback =
@@ -568,6 +585,7 @@ export function BusabaseAgentSkillButton({
         onOpenChange={setOpen}
         defaultOrigin={defaultOrigin}
         edition={edition}
+        editionConfirmed
         lang={lang}
         targetSpaceId={targetSpaceId}
       />

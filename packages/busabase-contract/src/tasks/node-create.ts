@@ -209,6 +209,12 @@ export const nodeCreateTask: TaskDefinition<NodeCreateInput> = {
       kind: "string",
       appliesWhen: { param: "type", values: ["skill", "drive", "airapp"] },
       description: "Skill/Drive/AirApp only. Defaults to 0.1.0.",
+      // A bare `--version` collides with the CLI's own root `-v, --version`
+      // flag: commander resolves that flag at the root command regardless of
+      // where it appears in argv, so `nodes create --version 0.4.0` silently
+      // printed the CLI's package version instead of setting the app's
+      // version. `--app-version` sidesteps the collision outright.
+      cliFlag: "--app-version",
     },
     {
       name: "autoMerge",

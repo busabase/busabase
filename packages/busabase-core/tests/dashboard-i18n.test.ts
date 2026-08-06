@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { FIELD_TYPE_ORDER } from "../src/domains/base/field-types";
-import { createAgentSkillPrompt } from "../src/domains/dashboard/components/agent-skill-button";
+import {
+  createAgentSkillPrompt,
+  createSetupSkillUrl,
+} from "../src/domains/dashboard/components/agent-skill-button";
 import { coreMessagesByLocale, coreMessagesEn } from "../src/i18n";
 
 describe("shared dashboard translations", () => {
@@ -42,5 +45,22 @@ describe("Agent setup prompt", () => {
     expect(prompt).toContain("space_123");
     expect(prompt).toContain("x-busabase-space");
     expect(prompt).toContain("请用简体中文回复我");
+  });
+
+  it("builds explicit preference and confirmed setup URLs", () => {
+    const homepageCloud = new URL(createSetupSkillUrl("https://busabase.com", "cloud", false));
+    const dashboardCloud = new URL(
+      createSetupSkillUrl("https://busabase.com", "cloud", true, "space_123"),
+    );
+    const dashboardDesktop = new URL(
+      createSetupSkillUrl("https://busabase.com", "desktop", true, "must_not_leak"),
+    );
+
+    expect(homepageCloud.searchParams.get("edition")).toBe("cloud");
+    expect(homepageCloud.searchParams.has("editionConfirmed")).toBe(false);
+    expect(dashboardCloud.searchParams.get("editionConfirmed")).toBe("1");
+    expect(dashboardCloud.searchParams.get("space")).toBe("space_123");
+    expect(dashboardDesktop.searchParams.get("editionConfirmed")).toBe("1");
+    expect(dashboardDesktop.searchParams.has("space")).toBe(false);
   });
 });

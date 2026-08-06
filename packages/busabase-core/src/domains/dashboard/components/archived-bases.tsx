@@ -34,12 +34,12 @@ function TrashRow({
           <div className="mt-0.5 truncate text-muted-foreground text-xs">{description}</div>
         ) : null}
         <div className="mt-0.5 font-mono text-muted-foreground text-xs">{meta}</div>
-        {error ? <div className="mt-1 text-red-600 text-xs">{error}</div> : null}
+        {error ? <div className="mt-1 text-rejected-strong text-xs">{error}</div> : null}
       </div>
       <div className="ml-4 flex shrink-0 items-center gap-2">
         {onPurge ? (
           <button
-            className="inline-flex items-center gap-1.5 rounded-md border border-border/60 bg-card px-3 py-1.5 text-muted-foreground text-xs transition-colors hover:bg-red-50 hover:text-red-700 disabled:opacity-50"
+            className="inline-flex items-center gap-1.5 rounded-md border border-border/60 bg-card px-3 py-1.5 text-muted-foreground text-xs transition-colors hover:bg-rejected/17 hover:text-rejected-strong disabled:opacity-50"
             disabled={restoring}
             onClick={onPurge}
             type="button"

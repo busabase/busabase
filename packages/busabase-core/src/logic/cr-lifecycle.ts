@@ -83,14 +83,7 @@ import { mergeFileTreeFile, mergeFileTreeMetadata } from "../domains/filetree/ha
 import { dispatchWebhookEvent, hasWebhookRuleFor } from "../domains/webhook/logic/dispatch";
 import { insertAuditEvent } from "./audit";
 import { projectCommitFields, refreshRecordQueryStatistics } from "./field-values";
-import {
-  CURRENT_USER_ID,
-  id,
-  listInputSchema,
-  now,
-  requireBaseId,
-  rootNodeIdForSpace,
-} from "./kernel";
+import { CURRENT_USER_ID, id, listInputSchema, now, rootNodeIdForSpace } from "./kernel";
 import { publishBusabaseLiveEvent, publishChangeRequestPendingReview } from "./live-events";
 import { getMaterializer, type MaterializeArgs, type NodeCreateFields } from "./materialize";
 import {
@@ -1549,13 +1542,20 @@ export const reviseOperation = async (
     .set({ status: "in_review", mergeSummary: {}, updatedAt: timestamp })
     .where(eq(busabaseChangeRequests.id, operation.changeRequestId));
 
-  await projectCommitFields({
-    baseId: requireBaseId(operation.baseId, "reviseOperation"),
-    commitId,
-    changeRequestId: operation.changeRequestId,
-    operationId: operation.id,
-    fields: parsed.fields,
-  });
+  // Field-value projection only applies to Base-scoped operations (record
+  // create/update, base field changes) — a file-tree/structural operation
+  // (Skill/Drive/AirApp file, node move, ...) has `baseId: null` and never had
+  // field values projected on creation either (see filetree/handlers.ts),
+  // so there is nothing to re-project when one of those is revised.
+  if (operation.baseId) {
+    await projectCommitFields({
+      baseId: operation.baseId,
+      commitId,
+      changeRequestId: operation.changeRequestId,
+      operationId: operation.id,
+      fields: parsed.fields,
+    });
+  }
   await insertAuditEvent(db, {
     action: "change_request.updated",
     actorId: parsed.author,
@@ -2695,7 +2695,13 @@ const _mergeChangeRequest = async (changeRequestId: string) => {
       await tx
         .update(busabaseChangeRequests)
         .set({
-          mergeSummary: { mergedNodeIds: [...new Set(ctx.mergedNodeIds)] },
+          // `operationCount` mirrors the base/record merge summary shape (see the
+          // base-targeted branch below) so callers can read it off `mergeSummary`
+          // the same way regardless of which kind of Change Request they merged.
+          mergeSummary: {
+            mergedNodeIds: [...new Set(ctx.mergedNodeIds)],
+            operationCount: operationKinds.length,
+          },
           updatedAt: timestamp,
         })
         .where(eq(busabaseChangeRequests.id, changeRequest.id));

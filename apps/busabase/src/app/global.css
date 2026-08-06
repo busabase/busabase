@@ -164,6 +164,16 @@
   --color-rejected: #b95b3f;
   --color-rejected-strong: #9a4531; /* unchanged — still 4.67 */
   --color-rejected-soft: #db9678;
+
+  /* Customer-facing 4th color (2026-08-04) — marks AI-authored content
+     (comments, mentions) in busabase-core's shared dashboard. This is the
+     ONE exception to "3 states only": busabase's whole premise is AI agents
+     create data and humans review it, so marking AI-authorship is core
+     product semantics, not decoration. Keep in sync with
+     apps/busabase-cloud/src/app/global.css. */
+  --color-ai: #705496;
+  --color-ai-strong: #684d8f; /* 6.59 vs card, 5.64 vs muted */
+  --color-ai-soft: #a792c4;
 }
 
 figure.shiki > [role="region"] {

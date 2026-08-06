@@ -1,17 +1,17 @@
 /**
- * Storage-key safety guard for the app's storage routes: the production pair
- * `/api/storage/[...key]` + `/api/storage/upload`, and their development-only
- * counterparts `/api/dev/attachment/[...key]` + `/api/dev/upload`.
+ * Storage-key safety guard, applied by every route `dev-routes.ts` builds.
  *
- * The `/api/storage` routes are un-gated (self-hosted `busabase server` runs a
- * production build, and every locally stored attachment — including the sidebar
- * logo — is served through them), so the guard is load-bearing there. The
- * openlib handlers hand the key straight to the storage adapter, whose local
- * implementation does `path.join(rootDir, key)`. Without a guard, a key like
- * `../../etc/passwd` (which survives as a single percent-encoded path segment)
- * would escape the storage root — an arbitrary-file read on the download route
- * and an arbitrary-file write on the upload route. The `/api/dev` routes 404 in
- * production, but keep the guard so a dev process is bounded too.
+ * Those handlers hand the caller's key straight to the storage adapter, and the
+ * local adapter does `path.join(rootDir, key)`. A key like `../../etc/passwd`
+ * (which survives routing as a single percent-encoded segment) therefore
+ * escapes the storage root: an arbitrary-file read on a download route, an
+ * arbitrary-file WRITE on an upload route.
+ *
+ * This lives in openlib, and the factories run it by default, because the
+ * alternative did not work: the option to drop the production gate carried a
+ * doc-comment telling each caller to validate keys itself, and of the two apps
+ * that took the option only one did. A security property that every caller must
+ * remember to re-implement is a property the library does not have.
  *
  * Pure and isomorphic: no db, no node APIs.
  */

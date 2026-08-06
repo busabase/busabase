@@ -21,6 +21,21 @@ export const fileTreeFileSchema = z.object({
   displayName: z.string().nullable(),
 });
 
+/**
+ * The optimistic-concurrency baseline: the file's content hash as of when the
+ * caller last read it. Must match the server's stored hash format exactly
+ * (`hashText`/`hashBuffer` in busabase-core's kernel), or the merge-time
+ * comparison always mismatches — a bare hex digest (no `sha256:` prefix) is
+ * the most common mistake and reads as "file changed" even when it hasn't.
+ */
+const baseContentHashSchema = z
+  .string()
+  .regex(/^sha256:[a-f0-9]{64}$/, "must be sha256:<64 lowercase hex characters>")
+  .optional()
+  .describe(
+    "Optimistic-concurrency baseline hash of the file's current content, formatted exactly as `sha256:<64 lowercase hex characters>` (matches the `contentHash` on the file's backing Asset). Omit to skip the conflict check.",
+  );
+
 const assetFileInputSchema = z
   .object({
     path: z.string().min(1),
@@ -45,7 +60,7 @@ const assetFileOperationInputSchema = z
     assetId: z.string().min(1),
     displayName: z.string().optional(),
     mimeType: z.string().optional(),
-    baseContentHash: z.string().optional(),
+    baseContentHash: baseContentHashSchema,
   })
   .strict();
 
@@ -55,7 +70,7 @@ const textFileOperationInputSchema = z
     path: z.string().min(1),
     content: z.string(),
     mimeType: z.string().optional(),
-    baseContentHash: z.string().optional(),
+    baseContentHash: baseContentHashSchema,
   })
   .strict();
 
@@ -114,7 +129,7 @@ export const fileTreeFileOperationInputSchema = z.union([
     .object({
       kind: z.literal("delete"),
       path: z.string().min(1),
-      baseContentHash: z.string().optional(),
+      baseContentHash: baseContentHashSchema,
     })
     .strict(),
   z

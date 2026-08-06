@@ -36,6 +36,19 @@ describe("Busabase theme parity", () => {
     expect(darkTokens.rejected.text).toBe("#DB9678");
   });
 
+  it("matches Web AI, destructive, and dark surface semantics", async () => {
+    const { darkTokens, lightTokens } = await getTokens();
+    expect(lightTokens.ai).toEqual({ base: "#705496", text: "#684D8F", fill: "#7054962B" });
+    expect(darkTokens.ai).toEqual({ base: "#705496", text: "#A792C4", fill: "#7054962B" });
+    expect(lightTokens.destructive).toBe("#E7000B");
+    expect(darkTokens).toMatchObject({
+      sidebar: "#18181B",
+      border: "rgba(255, 255, 255, 0.1)",
+      primary: "#E5E5E5",
+      destructive: "#FF6467",
+    });
+  });
+
   it("uses the architectural Web radius scale", async () => {
     const { radius } = await getTokens();
     expect(radius).toEqual({ sm: 0, md: 2, lg: 4, xl: 8, full: 999 });

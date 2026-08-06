@@ -154,7 +154,7 @@ export function ConfirmActionDialog({
           <button
             className={`rounded-md px-3 py-1.5 font-medium text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${
               destructive
-                ? "bg-red-600 text-white hover:bg-red-700"
+                ? "bg-rejected-strong text-background hover:bg-rejected-strong/90"
                 : "bg-foreground text-background hover:bg-foreground/85"
             }`}
             disabled={pending}

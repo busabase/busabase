@@ -13,6 +13,11 @@
  *   5. Relation values       relation targets that don't exist yet are SILENTLY DROPPED
  *                            server-side, so values written in pass 4 would vanish.
  *
+ * Pass 1 opens with one preparatory step that is not a pass of its own: the Doc
+ * images the package carries are uploaded first, because every one of them comes
+ * back with a NEW host-local asset id and the Doc bodies that reference the old
+ * ids are written during the very same walk. See {@link uploadDocAssets}.
+ *
  * Structure vs content, and what `--auto-merge` actually decides: folders, Bases,
  * their fields and their views are STRUCTURE and are always created immediately —
  * a pending Base has no id, and without an id there is nowhere to put a view, a
@@ -32,12 +37,14 @@ import {
   type PackageFieldOptions,
 } from "busabase-contract/domains/package/types";
 import type { PackageClient } from "./client";
+import { reportUnresolvableDocAssets, rewriteDocAssetIds } from "./doc-asset-refs";
 import type { InstallPlan } from "./plan";
 import {
   collectBaseNodes,
   guessMimeType,
   isTextMimeType,
   type PackageBaseNode,
+  type PackageDocAsset,
   type PackageFileTreeNode,
   type PackageNode,
 } from "./tree";
@@ -50,6 +57,19 @@ export interface ApplyOptions {
   submittedBy?: string;
   /** Progress reporting; `install` prints these as the passes run. */
   onProgress?: (message: string) => void;
+  /**
+   * Origin of the server `client` talks to, used to resolve a ROOT-RELATIVE
+   * upload url into something an out-of-process caller can PUT to.
+   *
+   * A host on local-disk storage has no presigned target to hand out, so
+   * `createUploadUrl` answers with its own relay path (`/api/storage/upload?key=…`)
+   * — fine for its web UI, meaningless to a CLI, which is why an unresolvable one
+   * makes the upload skip with a warning. The exporter already resolves the
+   * mirror-image case (`new URL(downloadUrl, sourceHost)` in busabase-cli's
+   * full-exporter); this is the same move on the write side, and without it a
+   * default self-hosted target silently installs every package minus its bytes.
+   */
+  serverUrl?: string;
 }
 
 export interface ApplyResult {
@@ -93,6 +113,18 @@ export const applyInstall = async (
   const progress = options.onProgress ?? (() => {});
 
   // ── Pass 1: structure ──────────────────────────────────────────────────────
+  // Doc images first, before a single Doc is created. A Doc body references its
+  // images by asset id, this host is about to mint NEW ids for those bytes, and
+  // a Doc cannot be created twice — so the id map has to be complete before the
+  // tree walk starts, not discovered during it. Uploading here (rather than
+  // lazily, per doc) also carries an image shared by three Docs exactly once.
+  const docAssetIds = await uploadDocAssets(
+    client,
+    plan.tree.assets ?? [],
+    state,
+    progress,
+    options.serverUrl,
+  );
   progress("Pass 1/5: creating the node tree…");
   state.targetFolderNodeId = await createFolderNode(client, {
     parentNodeId: undefined,
@@ -110,6 +142,7 @@ export const applyInstall = async (
     state,
     bases,
     fieldIds,
+    docAssetIds,
   );
 
   // ── Pass 2: relation + AI fields ───────────────────────────────────────────
@@ -202,6 +235,49 @@ export const applyInstall = async (
 
 // ── Pass 1 helpers ───────────────────────────────────────────────────────────
 
+/**
+ * Re-create the package's carried Doc images on THIS host and return the
+ * old id → new id map the Doc bodies are rewritten through.
+ *
+ * Runs before anything else in pass 1. A host that cannot take uploads from a
+ * client at all (see {@link uploadAsset}) costs this image and nothing more: it
+ * stays out of the map, so the body keeps its original reference and the doc is
+ * warned about by name — the same outcome as a package that never carried the
+ * image. Any other upload failure still fails the install, exactly as it does
+ * for a `file` node's bytes.
+ */
+const uploadDocAssets = async (
+  client: PackageClient,
+  assets: readonly PackageDocAsset[],
+  state: ApplyResult,
+  progress: (message: string) => void,
+  serverUrl?: string,
+): Promise<Map<string, string>> => {
+  const idMap = new Map<string, string>();
+  if (assets.length === 0) return idMap;
+
+  progress(`Pass 1/5: uploading ${assets.length} doc image(s)…`);
+  for (const asset of assets) {
+    try {
+      // `context: "doc"` matches what the Doc editor's own uploader records, so
+      // an installed image is indistinguishable in the Asset library from one
+      // pasted into the editor here.
+      const uploaded = await uploadAsset(
+        client,
+        asset.fileName,
+        asset.mimeType,
+        asset.bytes,
+        "doc",
+        serverUrl,
+      );
+      idMap.set(asset.assetId, uploaded.assetId);
+    } catch (error) {
+      state.warnings.push(asSkippableUpload(error, asset.fileName));
+    }
+  }
+  return idMap;
+};
+
 const createStructure = async (
   client: PackageClient,
   nodes: readonly PackageNode[],
@@ -210,6 +286,7 @@ const createStructure = async (
   state: ApplyResult,
   bases: BaseContext[],
   fieldIds: FieldIdIndex,
+  docAssetIds: ReadonlyMap<string, string>,
 ): Promise<void> => {
   for (const node of nodes) {
     switch (node.type) {
@@ -222,16 +299,40 @@ const createStructure = async (
           submittedBy: options.submittedBy,
         });
         state.created.folders++;
-        await createStructure(client, node.children, nodeId, options, state, bases, fieldIds);
+        await createStructure(
+          client,
+          node.children,
+          nodeId,
+          options,
+          state,
+          bases,
+          fieldIds,
+          docAssetIds,
+        );
         break;
       }
       case "doc": {
+        // Doc bodies reference embedded images by asset id, and asset ids are
+        // host-local: the bytes the package carried were re-uploaded above and
+        // came back with brand-new ids, so the body has to be re-pointed at them
+        // before it is stored. Written once, at create time — the body is
+        // immutable content the moment the doc (or its change request) exists.
+        //
+        // Anything still unmapped is an image the package did not carry or this
+        // host refused; it is left byte-for-byte alone and named out loud,
+        // because a rewrite cannot invent bytes.
+        const warning = reportUnresolvableDocAssets(
+          node.slug,
+          node.body,
+          new Set(docAssetIds.keys()),
+        );
+        if (warning) state.warnings.push(warning);
         const result = await client.docs.create({
           parentNodeId,
           slug: node.slug,
           name: node.name,
           description: node.description,
-          body: node.body,
+          body: rewriteDocAssetIds(node.body, docAssetIds),
           autoMerge: options.autoMerge,
         });
         if (result.materialized) state.created.docs++;
@@ -251,7 +352,14 @@ const createStructure = async (
       case "file": {
         let asset: { assetId: string };
         try {
-          asset = await uploadAsset(client, node.fileName, node.mimeType, node.bytes);
+          asset = await uploadAsset(
+            client,
+            node.fileName,
+            node.mimeType,
+            node.bytes,
+            undefined,
+            options.serverUrl,
+          );
         } catch (error) {
           // A file node IS its bytes — with no asset there is nothing to create,
           // so skip the node itself rather than making an empty one.
@@ -403,6 +511,8 @@ const createFileTreeNode = async (
           entry.path.split("/").at(-1) ?? entry.path,
           mimeType,
           entry.bytes,
+          undefined,
+          options.serverUrl,
         );
         return { path: entry.path, assetId: asset.assetId, mimeType };
       } catch (error) {
@@ -445,32 +555,58 @@ const createFileTreeNode = async (
 class UploadTargetUnsupportedError extends Error {}
 
 /**
+ * Finish addressing whatever `createUploadUrl` handed back.
+ *
+ * Absolute (presigned S3/R2) urls pass through untouched. A root-relative relay
+ * path is resolved against the host this client is talking to; with no host to
+ * resolve against it stays unusable and the caller skips the upload.
+ */
+const resolveUploadUrl = (uploadUrl: string, serverUrl?: string): string => {
+  if (/^https?:\/\//.test(uploadUrl)) return uploadUrl;
+  if (serverUrl) {
+    try {
+      return new URL(uploadUrl, serverUrl).toString();
+    } catch {
+      // fall through to the skip below — a malformed serverUrl is not worth
+      // failing an otherwise-fine install over
+    }
+  }
+  throw new UploadTargetUnsupportedError(
+    `this server issued a root-relative upload url (${uploadUrl}) and no server origin was supplied to resolve it against`,
+  );
+};
+
+/**
  * Upload bytes and return the asset id, through the normal assets API only:
  * `createUploadUrl` → PUT the bytes to the returned url → `confirm`.
  *
- * A host backed by S3/R2/MinIO returns an absolute presigned url and this works.
- * A host on the local filesystem adapter has no presigned url to give, so it
- * returns a root-relative upload-relay sentinel (`/api/storage/upload` on
- * self-hosted Busabase) that expects the caller to
- * know it means "POST multipart here instead" — dev-environment knowledge that
- * does not belong in a client. We deliberately do NOT special-case it: clients
- * should only ever follow the url the API hands them. Binary uploads against
- * such a host are reported as skipped until the upload contract is unified
- * server-side (tracked separately; the browser uploader's `isDevUpload` branch
- * in open-domains/share-domains has the same problem).
+ * A host backed by S3/R2/MinIO returns an absolute presigned url and this works
+ * as-is. A host on local-disk storage has no presigned target, so it answers
+ * with its own relay path — root-relative, because the browser it was designed
+ * for resolves that against the page it is already on. An out-of-process caller
+ * cannot, so `serverUrl` (the origin this client talks to) is used to resolve
+ * it, exactly as busabase-cli's exporter resolves a root-relative DOWNLOAD url
+ * against the source host. We still follow the url the API hands us; we only
+ * finish addressing it.
+ *
+ * Without a `serverUrl` a root-relative url is still unusable, and the upload is
+ * reported as skipped rather than failing the whole install.
  */
 const uploadAsset = async (
   client: PackageClient,
   fileName: string,
   mimeType: string,
   bytes: Buffer,
+  /** Mirrors what the equivalent in-app uploader records — `"doc"` for a Doc image. */
+  context = "record-field",
+  serverUrl?: string,
 ): Promise<{ assetId: string }> => {
   const contentHash = `sha256:${createHash("sha256").update(bytes).digest("hex")}`;
   const requested = await client.assets.createUploadUrl({
     fileName,
     mimeType,
     sizeBytes: bytes.byteLength,
-    context: "record-field",
+    context,
     contentHash,
   });
 
@@ -482,13 +618,9 @@ const uploadAsset = async (
     return { assetId };
   }
 
-  if (!/^https?:\/\//.test(requested.uploadUrl)) {
-    throw new UploadTargetUnsupportedError(
-      `this server issued a non-absolute upload url (${requested.uploadUrl}), which only its own web UI knows how to use`,
-    );
-  }
+  const uploadUrl = resolveUploadUrl(requested.uploadUrl, serverUrl);
 
-  const uploaded = await fetch(requested.uploadUrl, {
+  const uploaded = await fetch(uploadUrl, {
     method: "PUT",
     body: new Uint8Array(bytes),
     headers: { "content-type": mimeType },
@@ -502,7 +634,7 @@ const uploadAsset = async (
     fileName,
     mimeType,
     sizeBytes: bytes.byteLength,
-    context: "record-field",
+    context,
     contentHash,
   });
   const assetId = confirmed.assetId ?? confirmed.attachmentId;

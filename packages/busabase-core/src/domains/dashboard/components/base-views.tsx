@@ -466,7 +466,9 @@ export function BaseSetupView({
                   }}
                 />
               </div>
-              {renameError ? <div className="mt-2 text-red-700 text-sm">{renameError}</div> : null}
+              {renameError ? (
+                <div className="mt-2 text-rejected-strong text-sm">{renameError}</div>
+              ) : null}
             </div>
 
             <div data-base-fields>
@@ -662,7 +664,7 @@ export function BaseSetupView({
                 <div className="min-h-0 overflow-y-auto px-5 py-4">
                   <IStringNameInput onChange={setEditingFieldName} value={editingFieldName} />
                   {fieldRenameError ? (
-                    <div className="mt-3 text-red-700 text-sm">{fieldRenameError}</div>
+                    <div className="mt-3 text-rejected-strong text-sm">{fieldRenameError}</div>
                   ) : null}
                   <div className="mt-4 flex flex-wrap items-center justify-end gap-3 border-border/50 border-t pt-4">
                     <button
@@ -982,23 +984,23 @@ export function BaseSetupView({
                     </div>
                   </div>
                   {formError ? (
-                    <div className="mt-2 rounded-md border border-red-200 bg-red-50 p-3">
-                      <div className="text-red-700 text-sm">{formError}</div>
+                    <div className="mt-2 rounded-md border border-rejected/35 bg-rejected/17 p-3">
+                      <div className="text-rejected-strong text-sm">{formError}</div>
                       {formErrorDetail?.recordIds && formErrorDetail.recordIds.length > 0 ? (
                         <div className="mt-2">
-                          <div className="mb-1 text-red-600 text-xs font-medium">
+                          <div className="mb-1 text-rejected-strong text-xs font-medium">
                             {fmt(messages.base.recordsMissingValue, {
                               count: formErrorDetail.recordIds.length,
                             })}
                           </div>
                           <div className="space-y-0.5">
                             {formErrorDetail.recordIds.slice(0, 8).map((rid) => (
-                              <div key={rid} className="font-mono text-red-600 text-xs">
+                              <div key={rid} className="font-mono text-rejected-strong text-xs">
                                 {rid}
                               </div>
                             ))}
                             {formErrorDetail.recordIds.length > 8 ? (
-                              <div className="text-red-500 text-xs">
+                              <div className="text-rejected-strong text-xs">
                                 {fmt(messages.base.andMore, {
                                   count: formErrorDetail.recordIds.length - 8,
                                 })}
@@ -1010,19 +1012,19 @@ export function BaseSetupView({
                       {formErrorDetail?.affectedRecordIds &&
                       formErrorDetail.affectedRecordIds.length > 0 ? (
                         <div className="mt-2">
-                          <div className="mb-1 text-red-600 text-xs font-medium">
+                          <div className="mb-1 text-rejected-strong text-xs font-medium">
                             {fmt(messages.base.recordsReferencingRemovedChoices, {
                               count: formErrorDetail.affectedRecordIds.length,
                             })}
                           </div>
                           <div className="space-y-0.5">
                             {formErrorDetail.affectedRecordIds.slice(0, 8).map((rid) => (
-                              <div key={rid} className="font-mono text-red-600 text-xs">
+                              <div key={rid} className="font-mono text-rejected-strong text-xs">
                                 {rid}
                               </div>
                             ))}
                             {formErrorDetail.affectedRecordIds.length > 8 ? (
-                              <div className="text-red-500 text-xs">
+                              <div className="text-rejected-strong text-xs">
                                 {fmt(messages.base.andMore, {
                                   count: formErrorDetail.affectedRecordIds.length - 8,
                                 })}

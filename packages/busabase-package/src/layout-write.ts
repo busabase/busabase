@@ -14,6 +14,8 @@
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import {
+  PACKAGE_ASSET_META_SUFFIX,
+  PACKAGE_ASSETS_DIRNAME,
   PACKAGE_BASE_FILENAME,
   PACKAGE_CONTENT_DIRNAME,
   PACKAGE_FOLDER_META_FILENAME,
@@ -27,12 +29,14 @@ import {
   type PackageRecordLine,
   type PackageView,
 } from "busabase-contract/domains/package/types";
+import { docAssetBytesPath } from "./doc-asset-refs";
 import { serializeDoc } from "./frontmatter";
 import {
   assertNoReservedNames,
   assertNoSiblingCaseCollisions,
   assertSafeFilePath,
   assertSafeNodeSlug,
+  type PackageDocAsset,
   type PackageNode,
   type PackageTree,
   sortNodes,
@@ -142,7 +146,39 @@ export const renderPackageTree = (tree: PackageTree): PackageFiles => {
   const files: PackageFiles = new Map();
   files.set(PACKAGE_MANIFEST_FILENAME, serializeManifest(tree.manifest));
   renderNodes(tree.nodes, `${PACKAGE_CONTENT_DIRNAME}/`, files);
+  renderDocAssets(tree.assets ?? [], files);
   return files;
+};
+
+/**
+ * `assets/<assetId><ext>` + its `.asset.json` sidecar, for every image the Docs
+ * embed. Deduped by asset id (one image in three Docs is one pair of files) and
+ * emitted in a fixed order, so a re-export of an unchanged space is still
+ * byte-identical (§6.6).
+ */
+const renderDocAssets = (assets: readonly PackageDocAsset[], files: PackageFiles): void => {
+  const byId = new Map<string, PackageDocAsset>();
+  for (const asset of assets) if (!byId.has(asset.assetId)) byId.set(asset.assetId, asset);
+
+  for (const asset of [...byId.values()].sort((a, b) => a.assetId.localeCompare(b.assetId, "en"))) {
+    const bytesPath = docAssetBytesPath(asset);
+    // The id is generated (`ast` + base36) and the extension comes from a stored
+    // file name, so this normally passes — it is here because a hand-built tree
+    // must not be able to write outside `assets/`.
+    assertSafeFilePath(bytesPath, `doc asset "${asset.assetId}"`);
+    files.set(bytesPath, asset.bytes);
+    files.set(
+      `${bytesPath}${PACKAGE_ASSET_META_SUFFIX}`,
+      toJsonFile(
+        compact({
+          assetId: asset.assetId,
+          fileName: asset.fileName,
+          mimeType: asset.mimeType,
+          contentHash: asset.contentHash,
+        }),
+      ),
+    );
+  }
 };
 
 const renderNodes = (nodes: readonly PackageNode[], dir: string, files: PackageFiles): void => {
@@ -262,7 +298,12 @@ const renderNode = (node: PackageNode, dir: string, files: PackageFiles): void =
 // ── Files → disk ─────────────────────────────────────────────────────────────
 
 export interface WritePackageOptions {
-  /** Remove an existing `content/` + manifest first, so a re-export never leaves stale files. */
+  /**
+   * Remove an existing `content/`, `assets/` and manifest first, so a re-export
+   * never leaves stale files. `assets/` is in that list for the same reason
+   * `content/` is: an image deleted from a Doc must stop being shipped, or the
+   * package would keep growing and the git diff would stop reflecting the space.
+   */
   clean?: boolean;
 }
 
@@ -274,6 +315,7 @@ export const writePackageFiles = async (
 ): Promise<void> => {
   if (options.clean) {
     await rm(join(outDir, PACKAGE_CONTENT_DIRNAME), { recursive: true, force: true });
+    await rm(join(outDir, PACKAGE_ASSETS_DIRNAME), { recursive: true, force: true });
     await rm(join(outDir, PACKAGE_MANIFEST_FILENAME), { force: true });
   }
   for (const [filePath, bytes] of [...files].sort(([a], [b]) => a.localeCompare(b, "en"))) {

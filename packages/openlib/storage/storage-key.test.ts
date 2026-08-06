@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isSafeStorageKey } from "~/lib/storage-key";
+import { isSafeStorageKey } from "./storage-key";
 
 /**
  * `/api/storage/upload` and `/api/storage/[...key]` are un-gated production

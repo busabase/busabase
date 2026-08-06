@@ -924,7 +924,11 @@ The flags below skip the menu (handy for scripts / CI):
   busabase-cli login --api-key sk_…                    # Cloud API key (headless/CI)
   busabase-cli login --base-url http://localhost:15419 # connect to a local server (no auth)
   busabase-cli login --refresh                         # rotate the OAuth token set (auto-runs too)
-  busabase-cli login --profile work                    # add a SECOND account, then switch to it`,
+  busabase-cli login --profile work                    # add a SECOND account, then switch to it
+
+Login never blocks on a Space question, interactive or not: with more than one Space it always
+accepts the server-resolved default (the one you were most recently active in) and prints the
+full list — switch anytime with \`busabase-cli space use <id>\`.`,
     )
     .action(async (_opts: OptionValues, cmd: Command) => {
       const opts = cmd.optsWithGlobals();
@@ -1502,6 +1506,7 @@ field with nothing linked yet does not trigger this.`,
           rename: Boolean(opts.rename),
           json: config.output === "json",
           githubToken: process.env.GITHUB_TOKEN,
+          serverUrl: config.baseUrl,
         }),
       ),
     );

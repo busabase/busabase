@@ -7,9 +7,12 @@ import { eq } from "drizzle-orm";
 import { deleteAttachmentSafely } from "open-domains/attachments/logic";
 import { storage } from "openlib/storage";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { LOCAL_SPACE_ID, runWithBusabaseContext } from "../src/context";
+import { LOCAL_SPACE_ID, runWithAnonymousContext, runWithBusabaseContext } from "../src/context";
 import { getDb } from "../src/db";
 import { attachments, busabaseAssets } from "../src/db/schema";
+import { resolveAssetContent } from "../src/domains/assets/logic/asset-content-logic";
+import { buildAssetContentUrl } from "../src/domains/assets/utils/asset-content-url";
+import { setNodeShare } from "../src/logic/node-share";
 import { busabaseRouter } from "../src/router";
 
 /**
@@ -86,6 +89,36 @@ describe("Assets + attachment dedup — oRPC integration", () => {
       );
     }
     return payload;
+  };
+
+  /** Upload a distinct 1-file asset and return its Asset library entry. */
+  const uploadAsset = async (fileName: string, contentHash: string) => {
+    const req = await client.assets.createUploadUrl({
+      fileName,
+      mimeType: "image/png",
+      sizeBytes: 99,
+      contentHash,
+    });
+    await client.assets.confirm({
+      storageKey: req.storageKey,
+      fileName,
+      mimeType: "image/png",
+      sizeBytes: 99,
+      contentHash,
+    });
+    return expectDefined((await client.assets.list()).find((a) => a.contentHash === contentHash));
+  };
+
+  /** Create a Doc, then MERGE a body embedding `assetId` (the merge is what syncs usages). */
+  const embedInDoc = async (slug: string, name: string, assetId: string) => {
+    const doc = await client.docs.create({ autoMerge: true, slug, name, body: "# start" });
+    const cr = await client.docs.createChangeRequest({
+      nodeId: doc.node.id,
+      body: `# ${name}\n\n![](${buildAssetContentUrl(assetId)})\n`,
+    });
+    await client.changeRequests.review({ changeRequestIds: [cr.id], verdict: "approved" });
+    await client.changeRequests.merge({ changeRequestIds: [cr.id] });
+    return doc.node.id;
   };
 
   describe("content-addressed key + dedup", () => {
@@ -573,6 +606,117 @@ describe("Assets + attachment dedup — oRPC integration", () => {
 
       const after = await client.assets.get({ assetId: asset.id });
       expect(after.usages.find((u) => u.nodeType === "doc")).toBeUndefined();
+    });
+
+    it("records a usage for the stable /api/assets/{id}/raw form the editor writes today", async () => {
+      const asset = await uploadAsset("stable-ref.png", `sha256:${"0c".repeat(32)}`);
+      const doc = await client.docs.create({
+        autoMerge: true,
+        slug: "wu-doc-stable",
+        name: "WU Doc Stable",
+        body: "# start",
+      });
+
+      const cr = await client.docs.createChangeRequest({
+        nodeId: doc.node.id,
+        // Exactly what `useDocImageUpload` -> Crepe serializes: no storageKey
+        // anywhere in the body, so the legacy `includes(storageKey)` branch
+        // cannot be what finds this.
+        body: `# Spec\n\n![1.00](${buildAssetContentUrl(asset.id)})\n`,
+      });
+      expect(cr.id).toBeTruthy();
+      await client.changeRequests.review({ changeRequestIds: [cr.id], verdict: "approved" });
+      await client.changeRequests.merge({ changeRequestIds: [cr.id] });
+
+      const detail = await client.assets.get({ assetId: asset.id });
+      const usage = detail.usages.find((u) => u.nodeSlug === "wu-doc-stable");
+      expect(usage).toBeDefined();
+      expect(usage?.nodeType).toBe("doc");
+      expect(usage?.recordId).toBeNull();
+      expect(usage?.fieldSlug).toBeNull();
+
+      // Same replace semantics as the legacy branch: drop the embed, lose the usage.
+      const removeCr = await client.docs.createChangeRequest({
+        nodeId: doc.node.id,
+        body: "# Spec\n\nNo more diagram here.\n",
+      });
+      await client.changeRequests.review({ changeRequestIds: [removeCr.id], verdict: "approved" });
+      await client.changeRequests.merge({ changeRequestIds: [removeCr.id] });
+      const after = await client.assets.get({ assetId: asset.id });
+      expect(after.usages.find((u) => u.nodeSlug === "wu-doc-stable")).toBeUndefined();
+    });
+
+    it("indexes BOTH forms in one body, and ignores an id that names no asset", async () => {
+      const legacy = await uploadAsset("mixed-legacy.png", `sha256:${"0d".repeat(32)}`);
+      const stable = await uploadAsset("mixed-stable.png", `sha256:${"0e".repeat(32)}`);
+      const doc = await client.docs.create({
+        autoMerge: true,
+        slug: "wu-doc-mixed",
+        name: "WU Doc Mixed",
+        body: "# start",
+      });
+
+      const cr = await client.docs.createChangeRequest({
+        nodeId: doc.node.id,
+        body:
+          `![old](${legacy.url})\n\n![new](${buildAssetContentUrl(stable.id)})\n\n` +
+          // A hand-written / stale id must not mint a usage row: the parse is
+          // followed by an existence check scoped to this space.
+          "![ghost](/api/assets/astdoesnotexist/raw)\n",
+      });
+      await client.changeRequests.review({ changeRequestIds: [cr.id], verdict: "approved" });
+      await client.changeRequests.merge({ changeRequestIds: [cr.id] });
+
+      for (const asset of [legacy, stable]) {
+        const detail = await client.assets.get({ assetId: asset.id });
+        expect(detail.usages.some((u) => u.nodeSlug === "wu-doc-mixed")).toBe(true);
+      }
+      await expect(client.assets.get({ assetId: "astdoesnotexist" })).rejects.toMatchObject({
+        code: "NOT_FOUND",
+      });
+    });
+  });
+
+  describe("Raw asset content (the /api/assets/{id}/raw route's gate)", () => {
+    it("resolves a live storage URL for a caller who can see the asset", async () => {
+      const asset = await uploadAsset("raw-owner.png", `sha256:${"0f".repeat(32)}`);
+      const content = await resolveAssetContent(asset.id);
+      expect(content.assetId).toBe(asset.id);
+      expect(content.fileName).toBe("raw-owner.png");
+      expect(content.mimeType).toBe("image/png");
+      // Resolved at read time from the CURRENT storage config, never persisted.
+      expect(content.url).toContain("/api/test/storage/");
+    });
+
+    it("404s (NOT_FOUND) for an unknown asset instead of throwing something a route would 500 on", async () => {
+      await expect(resolveAssetContent("astnope")).rejects.toMatchObject({ code: "NOT_FOUND" });
+    });
+
+    /**
+     * The ACL risk this whole change turns on. A Doc-embedded image used to be
+     * fetched from the unauthenticated storage route, so a public Doc's images
+     * always loaded. Now they go through the asset ACL — which must still say
+     * yes for the anonymous visitor a public share creates, and no otherwise.
+     */
+    it("lets an anonymous visitor read an image embedded in a PUBLICLY SHARED doc, and refuses one that is not shared", async () => {
+      const shared = await uploadAsset("public-pixel.png", `sha256:${"1a".repeat(32)}`);
+      const secret = await uploadAsset("private-pixel.png", `sha256:${"1b".repeat(32)}`);
+
+      // The usage row is what carries authority, and it is written by the Doc
+      // MERGE (syncDocAssetUsages) — so go through the real create-then-merge
+      // path rather than seeding a body at create time.
+      const publicDocId = await embedInDoc("anon-public-doc", "Anon Public Doc", shared.id);
+      await embedInDoc("anon-private-doc", "Anon Private Doc", secret.id);
+      await runWithBusabaseContext({}, () =>
+        setNodeShare(publicDocId, { scope: "public", capability: "read" }),
+      );
+
+      await runWithAnonymousContext({}, async () => {
+        const content = await resolveAssetContent(shared.id);
+        expect(content.fileName).toBe("public-pixel.png");
+
+        await expect(resolveAssetContent(secret.id)).rejects.toMatchObject({ code: "NOT_FOUND" });
+      });
     });
   });
 

@@ -25,7 +25,8 @@ const buildFixture = (): PackageTree => ({
       name: "Getting Started",
       description: "Read me first",
       position: 0,
-      body: "# Hello\n\nSome body text.",
+      // The image is referenced by ASSET id; its bytes ride along in `assets` below.
+      body: "# Hello\n\n![Diagram](/api/assets/astfixture1/raw)\n\nSome body text.",
     },
     {
       type: "folder",
@@ -157,6 +158,15 @@ const buildFixture = (): PackageTree => ({
       bytes: Buffer.from([0x25, 0x50, 0x44, 0x46]),
     },
   ],
+  assets: [
+    {
+      assetId: "astfixture1",
+      fileName: "architecture diagram.png",
+      mimeType: "image/png",
+      contentHash: "sha256:abc",
+      bytes: Buffer.from([0x89, 0x50, 0x4e, 0x47]),
+    },
+  ],
 });
 
 /**
@@ -166,6 +176,7 @@ const buildFixture = (): PackageTree => ({
  */
 const canonicalize = (tree: PackageTree): PackageTree => ({
   ...tree,
+  assets: tree.assets ?? [],
   nodes: tree.nodes.map(function sort(node): PackageTree["nodes"][number] {
     if (node.type === "base") {
       return {
@@ -198,6 +209,10 @@ describe("layout round trip", () => {
   it("produces the §6.1 layout", () => {
     const files = renderPackageTree(buildFixture());
     expect([...files.keys()].sort()).toEqual([
+      // A Doc's inline image: bytes named by asset id, metadata in the sidecar,
+      // OUTSIDE `content/` so it does not install as a `file` node of its own.
+      "assets/astfixture1.png",
+      "assets/astfixture1.png.asset.json",
       "busabase.json",
       "content/brand-assets/_node.json",
       "content/brand-assets/logo.png",
@@ -214,6 +229,62 @@ describe("layout round trip", () => {
       "content/vendors/base.json",
       "content/vendors/records.ndjson",
     ]);
+  });
+});
+
+describe("carried doc assets", () => {
+  it("writes the sidecar the target needs to re-create the asset", () => {
+    const files = renderPackageTree(buildFixture());
+    const sidecar = JSON.parse(
+      files.get("assets/astfixture1.png.asset.json")?.toString("utf8") ?? "{}",
+    );
+    // The SOURCE asset id is the load-bearing field: the doc bodies reference it,
+    // and install maps it to the new id the target mints.
+    expect(sidecar).toEqual({
+      assetId: "astfixture1",
+      fileName: "architecture diagram.png",
+      mimeType: "image/png",
+      contentHash: "sha256:abc",
+    });
+    // Bytes are carried verbatim, not re-encoded.
+    expect([...(files.get("assets/astfixture1.png") ?? [])]).toEqual([0x89, 0x50, 0x4e, 0x47]);
+  });
+
+  it("carries an image embedded in several docs exactly once", () => {
+    const tree = buildFixture();
+    const second = tree.nodes[1];
+    if (second.type !== "folder") throw new Error("fixture changed");
+    const faq = second.children[0];
+    if (faq.type !== "doc") throw new Error("fixture changed");
+    faq.body = "See ![](/api/assets/astfixture1/raw)";
+    // Duplicated in the input the way a naive collector would produce it.
+    tree.assets = [...(tree.assets ?? []), ...(tree.assets ?? [])];
+
+    const files = renderPackageTree(tree);
+    expect([...files.keys()].filter((path) => path.startsWith("assets/"))).toEqual([
+      "assets/astfixture1.png",
+      "assets/astfixture1.png.asset.json",
+    ]);
+  });
+
+  it("refuses a package whose sidecar promises bytes it does not ship", () => {
+    const files = renderPackageTree(buildFixture());
+    files.delete("assets/astfixture1.png");
+    expect(() => readPackageTree(files)).toThrow(/bytes are missing/i);
+  });
+
+  it("ignores a stray file in assets/ that declares no sidecar", () => {
+    const files = renderPackageTree(buildFixture());
+    files.set("assets/README.txt", Buffer.from("not an asset", "utf8"));
+    expect(readPackageTree(files).assets?.map((asset) => asset.assetId)).toEqual(["astfixture1"]);
+  });
+
+  it("reads a package that carries no assets at all (the old shape still installs)", () => {
+    const files: PackageFiles = new Map([
+      ["busabase.json", text(JSON.stringify({ format: PACKAGE_FORMAT, name: "p" }))],
+      ["content/faq.md", text("body")],
+    ]);
+    expect(readPackageTree(files).assets).toEqual([]);
   });
 });
 

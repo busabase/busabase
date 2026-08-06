@@ -23,6 +23,7 @@ import { id } from "../../logic/kernel";
 import { hasNodePermission, hasWorkspacePermission } from "../../logic/node-acl";
 import { ensureReady } from "../../logic/seed";
 import { dispatchWebhookEvent } from "../webhook/logic/dispatch";
+import { resolveAssetContent } from "./logic/asset-content-logic";
 import { assertAssetPermission } from "./logic/asset-permissions";
 import {
   autoRegisterAssetText,
@@ -36,6 +37,7 @@ import {
   busabaseAssets,
   busabaseAssetUsages,
 } from "./schema/assets";
+import { extractAssetContentIds } from "./utils/asset-content-url";
 
 interface AssetRow {
   id: string;
@@ -405,29 +407,18 @@ export const getAsset = async (assetId: string): Promise<AssetDetailVO> => {
  * time-bounded signed URL instead of a static one, with no caller changes.
  */
 export const downloadAsset = async (assetId: string): Promise<AssetDownloadVO> => {
-  await ensureReady();
-  const db = await getDb();
-  const spaceId = getContextSpaceId();
-  await assertAssetPermission(assetId, "read", db);
-
-  const [row] = await db
-    .select(assetRowColumns)
-    .from(busabaseAssets)
-    .innerJoin(attachments, eq(busabaseAssets.attachmentId, attachments.id))
-    .leftJoin(busabaseAssetTexts, withAssetTextJoin)
-    .where(and(eq(busabaseAssets.id, assetId), eq(busabaseAssets.spaceId, spaceId)))
-    .limit(1);
-  if (!row) {
-    throw assetNotFound(assetId);
-  }
-
+  // The ACL + location resolution itself lives in `logic/asset-content-logic.ts`
+  // so the app-level raw-bytes route (`/api/assets/{assetId}/raw`, which 302s
+  // instead of returning JSON) shares this exact gate rather than reimplementing
+  // it. This handler is now purely the VO shaping for the JSON surface.
+  const content = await resolveAssetContent(assetId);
   return {
-    assetId: row.id,
-    downloadUrl: storage.getPublicUrl(row.storageKey),
-    fileName: row.fileName,
-    mimeType: row.mimeType,
-    size: row.sizeBytes,
-    contentHash: row.contentHash,
+    assetId: content.assetId,
+    downloadUrl: content.url,
+    fileName: content.fileName,
+    mimeType: content.mimeType,
+    size: content.sizeBytes,
+    contentHash: content.contentHash,
   };
 };
 
@@ -815,11 +806,26 @@ export const removeRecordAssetUsages = async (
 };
 
 /**
- * Reconcile the where-used index for a Doc node from its markdown body: an
- * attachment is "used" by a Doc when its storageKey appears in the body (the key
- * is embedded in any public/proxy URL the editor inserts). Whole-node usage, so
- * `recordId`/`fieldSlug` are "". Replace semantics — re-merging the Doc refreshes
- * its usages, and removing an embed drops the usage. Called from the Doc merge.
+ * Reconcile the where-used index for a Doc node from its markdown body.
+ * Whole-node usage, so `recordId`/`fieldSlug` are "". Replace semantics —
+ * re-merging the Doc refreshes its usages, and removing an embed drops the
+ * usage. Called from the Doc merge.
+ *
+ * Two reference forms are recognized, and BOTH must stay:
+ *
+ *  1. **Stable content URLs** (`/api/assets/{assetId}/raw`) — what the editor
+ *     writes today. The id is right there in the body, so this is one indexed
+ *     `IN (…)` lookup with no scanning. The lookup is not a formality: it also
+ *     proves the id names a real asset *in this space*, so a hand-typed or
+ *     cross-space id can never mint a usage row.
+ *
+ *  2. **Legacy storage URLs** (`body.includes(storageKey)`) — bodies written
+ *     before the switch, and every immutable `busabase_commits.fields.body`
+ *     ever recorded, still carry the resolved storage path. Dropping this
+ *     branch would silently orphan those assets (usage count → 0, so the
+ *     library would happily offer to delete bytes a published Doc still shows).
+ *     History is append-only and is never migrated, so this branch is
+ *     permanent, not a deprecation window.
  */
 export const syncDocAssetUsages = async (
   nodeId: string,
@@ -828,19 +834,6 @@ export const syncDocAssetUsages = async (
 ): Promise<void> => {
   const db = tx ?? (await getDb());
   const spaceId = getContextSpaceId();
-
-  // Robust-but-O(space attachments): scan every attachment and test body.includes.
-  // Doc merges are infrequent so this is fine for now; if a space grows to many
-  // thousands of attachments, switch to extracting candidate storageKeys from the
-  // body (e.g. /attachments\/[^\s")']+/) and querying only those.
-  const candidates: { id: string; storageKey: string; fileName: string }[] = await db
-    .select({
-      id: attachments.id,
-      storageKey: attachments.storageKey,
-      fileName: attachments.fileName,
-    })
-    .from(attachments)
-    .where(eq(attachments.spaceId, spaceId));
 
   const rows: {
     id: string;
@@ -853,10 +846,44 @@ export const syncDocAssetUsages = async (
     path?: string;
     metadata?: Record<string, unknown>;
   }[] = [];
+  // A body may reference the same asset in both forms (an old embed plus a
+  // re-uploaded one); the unique index would reject the second row anyway, but
+  // dedupe here so the insert stays clean.
+  const seen = new Set<string>();
+  const addUsage = (assetId: string) => {
+    if (seen.has(assetId)) return;
+    seen.add(assetId);
+    rows.push({ id: id("aus"), assetId, ownerType: "doc", nodeId, recordId: "", fieldSlug: "" });
+  };
+
+  // Form 1 — asset ids parsed straight out of the body, then existence-checked.
+  const referencedAssetIds = extractAssetContentIds(body);
+  if (referencedAssetIds.length > 0) {
+    const known = await db
+      .select({ id: busabaseAssets.id })
+      .from(busabaseAssets)
+      .where(
+        and(eq(busabaseAssets.spaceId, spaceId), inArray(busabaseAssets.id, referencedAssetIds)),
+      );
+    for (const asset of known) addUsage(asset.id);
+  }
+
+  // Form 2 — legacy: robust-but-O(space attachments) scan, `body.includes`.
+  // Doc merges are infrequent so this is fine for now; if a space grows to many
+  // thousands of attachments, switch to extracting candidate storageKeys from the
+  // body (e.g. /attachments\/[^\s")']+/) and querying only those.
+  const candidates: { id: string; storageKey: string; fileName: string }[] = await db
+    .select({
+      id: attachments.id,
+      storageKey: attachments.storageKey,
+      fileName: attachments.fileName,
+    })
+    .from(attachments)
+    .where(eq(attachments.spaceId, spaceId));
+
   for (const att of candidates) {
     if (att.storageKey && body.includes(att.storageKey)) {
-      const assetId = await ensureAsset(att.id, att.fileName, tx);
-      rows.push({ id: id("aus"), assetId, ownerType: "doc", nodeId, recordId: "", fieldSlug: "" });
+      addUsage(await ensureAsset(att.id, att.fileName, tx));
     }
   }
 

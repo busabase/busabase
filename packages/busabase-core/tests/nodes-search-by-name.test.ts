@@ -7,6 +7,7 @@
  *  - node-visibility ACL scoping (same pattern as node-acl.test.ts)
  *  - the demo-mode counterpart over the seeded in-memory dataset
  */
+import { OpenAPIHandler } from "@orpc/openapi/fetch";
 import { createRouterClient } from "@orpc/server";
 import { storage } from "openlib/storage";
 import { describe, expect, it } from "vitest";
@@ -14,6 +15,8 @@ import { LOCAL_SPACE_ID, runWithBusabaseContext } from "../src/context";
 import { busabaseRouter } from "../src/router";
 import { busabaseDemoRouter } from "../src/router-demo";
 import { seedScenario } from "./helpers/seed-scenario";
+
+const API = "http://busabase.test/api/v1";
 
 type RawClient = ReturnType<typeof createRouterClient<typeof busabaseRouter, Record<never, never>>>;
 
@@ -215,6 +218,34 @@ describe("nodes.searchByName", () => {
     const raw: RawClient = createRouterClient(busabaseRouter);
     const results = await raw.nodes.searchByName({ query: "   " });
     expect(results).toEqual([]);
+  });
+
+  it("accepts ?limit= as a real GET query string, not just an in-process number", async () => {
+    // `createRouterClient` above calls the procedure in-process with a real JS
+    // number for `limit` — it never exercises the HTTP query-string decode path,
+    // so it can't catch a schema that only works for in-process callers. `limit`
+    // over HTTP arrives as the STRING "20"; a plain `z.number()` (rather than
+    // `z.coerce.number()`) rejected every real `GET /nodes/search?limit=` call
+    // with "expected number, received string".
+    await seedScenario("search-by-name-limit-query-string");
+    const raw: RawClient = createRouterClient(busabaseRouter);
+    await raw.nodes.createChangeRequest({
+      autoMerge: true,
+      message: "Seed enough matches for --limit to matter",
+      operations: [
+        { kind: "create", nodeType: "base", slug: "quota-one", name: "Quota One" },
+        { kind: "create", nodeType: "base", slug: "quota-two", name: "Quota Two" },
+        { kind: "create", nodeType: "base", slug: "quota-three", name: "Quota Three" },
+      ],
+    });
+
+    const handler = new OpenAPIHandler(busabaseRouter);
+    const request = new Request(`${API}/nodes/search?query=Quota&limit=2`);
+    const result = await handler.handle(request, { context: {} });
+    if (!result.matched) throw new Error("no OpenAPI route matched GET /nodes/search");
+    expect(result.response.status).toBe(200);
+    const body = (await result.response.json()) as unknown[];
+    expect(body).toHaveLength(2);
   });
 });
 

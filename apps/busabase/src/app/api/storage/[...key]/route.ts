@@ -1,5 +1,4 @@
 import { createDevAttachmentRoute } from "openlib/storage/dev-routes";
-import { invalidStorageKeyResponse, isSafeStorageKey } from "~/lib/storage-key";
 
 export const dynamic = "force-dynamic";
 
@@ -34,15 +33,4 @@ export const dynamic = "force-dynamic";
  * either. An instance on an untrusted network should sit behind an
  * authenticating reverse proxy, or use S3/R2 so this route is never reached.
  */
-const base = createDevAttachmentRoute({ gateProduction: false });
-
-export const GET = async (
-  req: Request,
-  ctx: { params: Promise<{ key: string[] }> },
-): Promise<Response> => {
-  const { key: keyParts } = await ctx.params;
-  if (!keyParts || keyParts.length === 0 || !isSafeStorageKey(keyParts.join("/"))) {
-    return invalidStorageKeyResponse();
-  }
-  return base.GET(req, ctx);
-};
+export const { GET } = createDevAttachmentRoute({ gateProduction: false });

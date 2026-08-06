@@ -1,7 +1,7 @@
 {
   "name": "busabase-core",
   "description": "Shared Busabase open-core protocol, local store, API helpers, and dashboard components.",
-  "version": "0.11.4",
+  "version": "0.13.0",
   "private": true,
   "type": "module",
   "exports": {
@@ -84,6 +84,14 @@
     "./domains/airapp/logic/local-preview-proxy": {
       "types": "./src/domains/airapp/logic/local-preview-proxy.ts",
       "default": "./src/domains/airapp/logic/local-preview-proxy.ts"
+    },
+    "./domains/assets/asset-content-logic": {
+      "types": "./src/domains/assets/logic/asset-content-logic.ts",
+      "default": "./src/domains/assets/logic/asset-content-logic.ts"
+    },
+    "./domains/assets/asset-content-url": {
+      "types": "./src/domains/assets/utils/asset-content-url.ts",
+      "default": "./src/domains/assets/utils/asset-content-url.ts"
     },
     "./domains/base/handlers": {
       "types": "./src/domains/base/handlers.ts",
@@ -184,6 +192,10 @@
     "./dashboard/routes": {
       "types": "./src/domains/dashboard/routes.tsx",
       "default": "./src/domains/dashboard/routes.tsx"
+    },
+    "./dashboard/route-renderer": {
+      "types": "./src/domains/dashboard/components/dashboard-route-renderer.tsx",
+      "default": "./src/domains/dashboard/components/dashboard-route-renderer.tsx"
     },
     "./dashboard/use-move-node": {
       "types": "./src/domains/dashboard/hooks/use-move-node.ts",

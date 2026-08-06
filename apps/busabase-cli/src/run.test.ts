@@ -66,6 +66,19 @@ describe("busabase-cli commands", () => {
     expect(HELP).not.toContain("--content-hash <hash>");
   });
 
+  it("documents the default-space login policy for agents", async () => {
+    const output: string[] = [];
+    vi.spyOn(process.stdout, "write").mockImplementation((chunk: unknown) => {
+      output.push(String(chunk));
+      return true;
+    });
+
+    expect(await runCli(["login", "--help"])).toBe(0);
+    expect(output.join("")).not.toContain("--use-default-space");
+    expect(output.join("")).toMatch(/never blocks on a Space question/);
+    expect(output.join("")).toContain("busabase-cli space use <id>");
+  });
+
   it("generates commands for the full OpenAPI surface (previously uncovered domains)", () => {
     // Record write/delete — the biggest gap the generator fills.
     expect(HELP).toContain("records update-change-request");
@@ -881,6 +894,49 @@ describe("busabase-cli commands", () => {
         method: "POST",
         url: "http://localhost:15419/api/v1/file-trees",
         body: { type: "airapp", name: "Hello App", slug: "hello-app" },
+      }),
+    ]);
+  });
+
+  it("passes --app-version through instead of colliding with the CLI's own --version", async () => {
+    const calls: Array<{ body: unknown; method: string; url: string }> = [];
+    global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      calls.push({
+        body: request.body ? await requestBody(request) : null,
+        method: request.method,
+        url: request.url,
+      });
+      return jsonResponse({ id: "crq_1", status: "in_review" });
+    }) as typeof fetch;
+
+    const exitCode = await runCli([
+      "--base-url",
+      "http://localhost:15419",
+      "--output",
+      "json",
+      "nodes",
+      "create-change-request",
+      "--type",
+      "airapp",
+      "--slug",
+      "hello-app",
+      "--name",
+      "Hello App",
+      "--app-version",
+      "0.4.0",
+    ]);
+
+    // A bare `--version` flag on this command previously collided with the
+    // root CLI's own `-v, --version` — commander printed the CLI's package
+    // version and exited 0 without ever reaching the AirApp create request.
+    // `--app-version` must reach the request body untouched.
+    expect(exitCode).toBe(0);
+    expect(calls).toEqual([
+      expect.objectContaining({
+        method: "POST",
+        url: "http://localhost:15419/api/v1/file-trees",
+        body: { type: "airapp", name: "Hello App", slug: "hello-app", version: "0.4.0" },
       }),
     ]);
   });

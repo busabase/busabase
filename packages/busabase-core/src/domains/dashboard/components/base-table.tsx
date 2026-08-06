@@ -1066,7 +1066,7 @@ export function BusaBaseTable({
                     {messages.base.editView}
                   </button>
                   <button
-                    className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left font-medium text-red-700 text-xs transition-colors hover:bg-red-50 disabled:opacity-60"
+                    className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left font-medium text-rejected-strong text-xs transition-colors hover:bg-rejected/17 disabled:opacity-60"
                     disabled={isDeletingView}
                     onClick={(event) => {
                       setConfirmDeleteView(activeView);
@@ -1127,7 +1127,9 @@ export function BusaBaseTable({
           view={editingViewMode === "edit" ? activeView : null}
         />
       ) : null}
-      {viewActionError ? <div className="mb-3 text-red-700 text-sm">{viewActionError}</div> : null}
+      {viewActionError ? (
+        <div className="mb-3 text-rejected-strong text-sm">{viewActionError}</div>
+      ) : null}
       <ConfirmActionDialog
         body={
           confirmDeleteView
@@ -1256,7 +1258,7 @@ export function BusaBaseTable({
             </div>
           ) : null}
           {bulkDeleteError ? (
-            <div className="mb-2 text-red-700 text-xs">{bulkDeleteError}</div>
+            <div className="mb-2 text-rejected-strong text-xs">{bulkDeleteError}</div>
           ) : null}
           <div
             aria-colcount={fields.length + (selectionEnabled ? 1 : 0)}
@@ -1912,7 +1914,7 @@ function ViewChangeRequestForm({
             </select>
           </label>
           {selectFields.length === 0 ? (
-            <div className="mt-2 text-amber-700 text-xs">{messages.base.kanbanNoSelect}</div>
+            <div className="mt-2 text-review-strong text-xs">{messages.base.kanbanNoSelect}</div>
           ) : null}
         </div>
       ) : null}
@@ -1935,7 +1937,7 @@ function ViewChangeRequestForm({
             </select>
           </label>
           {dateFields.length === 0 ? (
-            <div className="mt-2 text-amber-700 text-xs">{messages.base.calendarNoDate}</div>
+            <div className="mt-2 text-review-strong text-xs">{messages.base.calendarNoDate}</div>
           ) : null}
         </div>
       ) : null}
@@ -1984,7 +1986,7 @@ function ViewChangeRequestForm({
             </select>
           </label>
           {dateFields.length < 2 ? (
-            <div className="mt-1 text-amber-700 text-xs md:col-span-3">
+            <div className="mt-1 text-review-strong text-xs md:col-span-3">
               {messages.base.ganttNoDates}
             </div>
           ) : null}
@@ -2001,7 +2003,7 @@ function ViewChangeRequestForm({
       </div>
 
       <div className="mt-3 flex flex-wrap items-center justify-between gap-3 border-border/50 border-t pt-3">
-        {formError ? <div className="text-red-700 text-sm">{formError}</div> : <div />}
+        {formError ? <div className="text-rejected-strong text-sm">{formError}</div> : <div />}
         <div className="flex items-center gap-2">
           <button
             className="rounded-md border border-border/70 bg-card px-3 py-1.5 font-medium text-xs transition-colors hover:bg-accent"

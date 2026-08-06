@@ -1,5 +1,4 @@
 import { createDevAttachmentRoute } from "openlib/storage/dev-routes";
-import { invalidStorageKeyResponse, isSafeStorageKey } from "~/lib/storage-key";
 
 export const dynamic = "force-dynamic";
 
@@ -19,15 +18,4 @@ export const dynamic = "force-dynamic";
  * `path.join(rootDir, key)`, and a dev process is still a process worth not
  * letting read outside its storage root.
  */
-const base = createDevAttachmentRoute();
-
-export const GET = async (
-  req: Request,
-  ctx: { params: Promise<{ key: string[] }> },
-): Promise<Response> => {
-  const { key: keyParts } = await ctx.params;
-  if (!keyParts || keyParts.length === 0 || !isSafeStorageKey(keyParts.join("/"))) {
-    return invalidStorageKeyResponse();
-  }
-  return base.GET(req, ctx);
-};
+export const { GET } = createDevAttachmentRoute();

@@ -1,5 +1,5 @@
 import { PACKAGE_FORMAT } from "busabase-contract/domains/package/types";
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { applyInstall, batchIdempotencyKey, RECORD_BATCH_SIZE, toApiFieldOptions } from "./apply";
 import type { PackageClient } from "./client";
 import { buildInstallPlan } from "./plan";
@@ -33,8 +33,32 @@ const createFakeServer = (): FakeServer => {
   const bulkSizes = new Map<string, number>();
 
   const record = (method: string, input: unknown) => calls.push({ method, input });
+  let assetSeq = 0;
 
   const client = {
+    assets: {
+      // The real endpoint hands back a presigned URL; the harness stubs `fetch`
+      // for the PUT (see stubUploadFetch) so the whole three-step upload runs.
+      createUploadUrl: async (input: unknown) => {
+        record("assets.createUploadUrl", input);
+        return {
+          uploadUrl: "https://storage.example/put",
+          storageKey: `key_${assetSeq + 1}`,
+          publicUrl: "https://storage.example/get",
+          expiresIn: 900,
+        };
+      },
+      confirm: async (input: unknown) => {
+        record("assets.confirm", input);
+        return {
+          success: true as const,
+          attachmentId: `att_${++assetSeq}`,
+          assetId: `ast_new_${assetSeq}`,
+          storageKey: `key_${assetSeq}`,
+          publicUrl: "https://storage.example/get",
+        };
+      },
+    },
     nodes: {
       list: async () => [],
       createChangeRequest: async (input: unknown) => {
@@ -169,9 +193,13 @@ const relationBase = (
   records: [],
 });
 
-const planFor = (nodes: PackageTree["nodes"]) =>
+const planFor = (nodes: PackageTree["nodes"], assets?: PackageTree["assets"]) =>
   buildInstallPlan(
-    { manifest: { format: PACKAGE_FORMAT, name: "my-package", description: "", tags: [] }, nodes },
+    {
+      manifest: { format: PACKAGE_FORMAT, name: "my-package", description: "", tags: [] },
+      nodes,
+      assets,
+    },
     { targetFolder: undefined, existingBaseSlugs: new Set() },
   );
 
@@ -475,6 +503,147 @@ describe("the five passes", () => {
     const result = await applyInstall(client, plan, { autoMerge: true });
     expect(calls.some((call) => call.method === "changeRequests.merge")).toBe(true);
     expect(result.created.records).toBe(1);
+  });
+});
+
+describe("doc images the package carries", () => {
+  /** The PUT of the bytes to the presigned url — the one step that is not an oRPC call. */
+  const stubUploadFetch = () => {
+    const put = vi.fn(async () => new Response(null, { status: 200 }));
+    vi.stubGlobal("fetch", put);
+    return put;
+  };
+
+  const docNode = (body: string): PackageTree["nodes"][number] => ({
+    type: "doc",
+    slug: "spec",
+    name: "Spec",
+    description: "",
+    position: 0,
+    body,
+  });
+
+  const pngAsset = (assetId: string) => ({
+    assetId,
+    fileName: "diagram.png",
+    mimeType: "image/png",
+    contentHash: "sha256:abc",
+    bytes: Buffer.from([0x89, 0x50, 0x4e, 0x47]),
+  });
+
+  beforeEach(() => stubUploadFetch());
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("uploads the bytes and rewrites the body to the NEW asset id", async () => {
+    const { calls, client } = createFakeServer();
+    const plan = planFor([docNode("# Spec\n\n![](/api/assets/astold/raw)")], [pngAsset("astold")]);
+    const result = await applyInstall(client, plan, { autoMerge: true });
+
+    const created = calls.find((call) => call.method === "docs.create");
+    const body = (created?.input as { body: string }).body;
+    // The old id is host-local and does not exist here; the new one does.
+    expect(body).toContain("/api/assets/ast_new_1/raw");
+    expect(body).not.toContain("astold");
+    expect(result.warnings).toEqual([]);
+  });
+
+  it("uploads before creating the doc — the map has to exist when the body is written", async () => {
+    const { calls, client } = createFakeServer();
+    await applyInstall(
+      client,
+      planFor([docNode("![](/api/assets/astold/raw)")], [pngAsset("astold")]),
+      { autoMerge: true },
+    );
+    const methods = calls.map((call) => call.method);
+    expect(methods.indexOf("assets.confirm")).toBeLessThan(methods.indexOf("docs.create"));
+  });
+
+  it("records the image under the same upload context the Doc editor uses", async () => {
+    const { calls, client } = createFakeServer();
+    await applyInstall(
+      client,
+      planFor([docNode("![](/api/assets/astold/raw)")], [pngAsset("astold")]),
+      { autoMerge: true },
+    );
+    expect(
+      (calls.find((c) => c.method === "assets.confirm")?.input as { context: string }).context,
+    ).toBe("doc");
+  });
+
+  it("carries an image shared by two docs once, and rewrites both", async () => {
+    const { calls, client } = createFakeServer();
+    const plan = planFor(
+      [
+        docNode("![](/api/assets/astold/raw)"),
+        { ...docNode("![](/api/assets/astold/raw)"), slug: "other", name: "Other", position: 1 },
+      ],
+      [pngAsset("astold")],
+    );
+    await applyInstall(client, plan, { autoMerge: true });
+
+    expect(calls.filter((call) => call.method === "assets.confirm")).toHaveLength(1);
+    for (const call of calls.filter((call) => call.method === "docs.create")) {
+      expect((call.input as { body: string }).body).toContain("/api/assets/ast_new_1/raw");
+    }
+  });
+
+  it("leaves a reference the package did not carry alone, and warns naming it", async () => {
+    const { calls, client } = createFakeServer();
+    const plan = planFor(
+      [docNode("![carried](/api/assets/astold/raw) ![missing](/api/assets/astgone/raw)")],
+      [pngAsset("astold")],
+    );
+    const result = await applyInstall(client, plan, { autoMerge: true });
+
+    const body = (calls.find((call) => call.method === "docs.create")?.input as { body: string })
+      .body;
+    // A partial map must never corrupt what it does not know about.
+    expect(body).toContain("/api/assets/ast_new_1/raw");
+    expect(body).toContain("/api/assets/astgone/raw");
+    expect(result.warnings).toHaveLength(1);
+    expect(result.warnings[0]).toContain("astgone");
+    expect(result.warnings[0]).not.toContain("astold");
+  });
+
+  it("says nothing about a doc whose every image was carried", async () => {
+    const { client } = createFakeServer();
+    const result = await applyInstall(
+      client,
+      planFor([docNode("![](/api/assets/astold/raw)")], [pngAsset("astold")]),
+      { autoMerge: true },
+    );
+    expect(result.warnings).toEqual([]);
+  });
+
+  it("still warns for a package from an older exporter that carries no assets at all", async () => {
+    const { client } = createFakeServer();
+    const result = await applyInstall(client, planFor([docNode("![](/api/assets/astold/raw)")]), {
+      autoMerge: true,
+    });
+    expect(result.warnings[0]).toContain("astold");
+  });
+
+  it("skips the image (not the install) when the host cannot take a client upload", async () => {
+    const { calls, client } = createFakeServer();
+    // A local-disk host answers with a root-relative relay sentinel only its own
+    // web UI understands — see uploadAsset.
+    const original = client.assets.createUploadUrl;
+    client.assets.createUploadUrl = (async (input: unknown) => {
+      const result = (await original(input as never)) as { uploadUrl: string };
+      return { ...result, uploadUrl: "/api/storage/upload" };
+    }) as typeof client.assets.createUploadUrl;
+
+    const result = await applyInstall(
+      client,
+      planFor([docNode("![](/api/assets/astold/raw)")], [pngAsset("astold")]),
+      { autoMerge: true },
+    );
+
+    // The doc still installs, with its original reference and two warnings: the
+    // skipped upload, and the image the doc is therefore missing.
+    expect(calls.some((call) => call.method === "docs.create")).toBe(true);
+    expect(result.warnings.join("\n")).toContain("diagram.png");
+    expect(result.warnings.join("\n")).toContain("astold");
   });
 });
 

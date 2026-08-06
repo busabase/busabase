@@ -68,7 +68,11 @@ describe("runLogin", () => {
     expect(env.BUSABASE_BASE_URL).toBe(CLOUD);
   });
 
-  it("requires --space-id for non-interactive login with multiple spaces", async () => {
+  it("uses the server-resolved default space even with an available TTY (no interactive prompt)", async () => {
+    const stdinTTY = Object.getOwnPropertyDescriptor(process.stdin, "isTTY");
+    const stdoutTTY = Object.getOwnPropertyDescriptor(process.stdout, "isTTY");
+    Object.defineProperty(process.stdin, "isTTY", { configurable: true, value: true });
+    Object.defineProperty(process.stdout, "isTTY", { configurable: true, value: true });
     global.fetch = vi.fn(async () =>
       jsonResponse({
         user: { id: "usr_1", email: "dev@example.com" },
@@ -80,10 +84,51 @@ describe("runLogin", () => {
       }),
     ) as typeof fetch;
 
-    await expect(runLogin({ baseUrl: CLOUD, apiKey: "sk_test", browser: false })).rejects.toThrow(
-      /--space-id/,
-    );
-    expect(loadDotEnvFile()).not.toHaveProperty("BUSABASE_SPACE_ID");
+    try {
+      const summary = await runLogin({
+        baseUrl: CLOUD,
+        apiKey: "sk_test",
+        browser: false,
+      });
+
+      expect(summary).toMatchObject({
+        status: "signed in",
+        space: "spc_1",
+        availableSpaces: "Space One [spc_1], Space Two [spc_2]",
+      });
+      expect(loadDotEnvFile().BUSABASE_SPACE_ID).toBe("spc_1");
+      expect(vi.mocked(process.stderr.write).mock.calls.flat().join(" ")).not.toContain(
+        "Which space should this CLI target?",
+      );
+    } finally {
+      if (stdinTTY) Object.defineProperty(process.stdin, "isTTY", stdinTTY);
+      else Reflect.deleteProperty(process.stdin, "isTTY");
+      if (stdoutTTY) Object.defineProperty(process.stdout, "isTTY", stdoutTTY);
+      else Reflect.deleteProperty(process.stdout, "isTTY");
+    }
+  });
+
+  it("still honors an explicit --space-id override with multiple spaces", async () => {
+    global.fetch = vi.fn(async () =>
+      jsonResponse({
+        user: { id: "usr_1", email: "dev@example.com" },
+        space: { id: "spc_1", name: "Space One" },
+        spaces: [
+          { id: "spc_1", name: "Space One" },
+          { id: "spc_2", name: "Space Two" },
+        ],
+      }),
+    ) as typeof fetch;
+
+    const summary = await runLogin({
+      baseUrl: CLOUD,
+      apiKey: "sk_test",
+      spaceId: "spc_2",
+      browser: false,
+    });
+
+    expect(summary).toMatchObject({ status: "signed in", space: "spc_2" });
+    expect(loadDotEnvFile().BUSABASE_SPACE_ID).toBe("spc_2");
   });
 
   it("connects to an open local server without a token", async () => {

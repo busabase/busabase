@@ -108,7 +108,7 @@ How should this CLI connect?
 - **1 (local)** just saves `BUSABASE_BASE_URL` — the open-source `busabase server` needs
   no account. (It checks the server is reachable and actually open first.)
 - **2–5** obtain an `sk_…` API key (selected or created during browser consent, or pasted), verify it against
-  `/api/v1/auth`, pick your space, and save everything.
+  `/api/v1/auth`, and save everything.
 
 Flags skip the menu (for scripts / CI):
 
@@ -128,6 +128,12 @@ Device authorization uses a short-lived, opaque login session only for the hand-
 browser you select an existing API key or create a new one; the waiting CLI exchanges the
 temporary session for that key, immediately discards the session, and saves only the `sk_…`
 credential. The key secret is never rendered in the browser or printed by device login.
+
+Login never asks which Space to use — interactive and non-interactive callers get the same
+treatment. It always accepts the server-resolved default (the account's most recently active
+Space) and, when the account belongs to more than one, prints the full list and reminds you
+to switch with `busabase-cli space use <id>` if the default isn't the one you wanted. An
+explicit `--space-id` always wins over the default.
 
 `--refresh` applies only to standard OAuth token sets created by `login --oauth`. API keys are
 not refreshable; if a key expires or is revoked, run `busabase-cli login` again and select or

@@ -44,6 +44,13 @@ export interface RequestUploadUrlResult {
   duplicate?: boolean;
   /** Existing attachment id — present only when `duplicate` is true. */
   attachmentId?: string;
+  /**
+   * Logical file id, for hosts that layer an asset library over attachments
+   * (busabase). Attachment rows dedupe by content hash; an asset id does not,
+   * so it is the stable handle for "this file, in this place". Optional — a
+   * host without an asset library simply never sets it.
+   */
+  assetId?: string;
 }
 
 export interface ConfirmUploadInput<TMetadata = unknown> {
@@ -61,6 +68,8 @@ export interface ConfirmUploadInput<TMetadata = unknown> {
 export interface ConfirmUploadResult {
   publicUrl: string;
   attachmentId: string;
+  /** See `RequestUploadUrlResult.assetId`. */
+  assetId?: string;
 }
 
 export interface UseS3UploaderProps<TMetadata = unknown> {
@@ -122,21 +131,24 @@ export function useS3Uploader<TMetadata = unknown>({
     [],
   );
 
-  const uploadFile = async (file: File): Promise<{ publicUrl: string; attachmentId: string }> => {
+  const uploadFile = async (
+    file: File,
+  ): Promise<{ publicUrl: string; attachmentId: string; assetId?: string }> => {
     setIsUploading(true);
     setUploadProgress({ fileName: file.name, percent: 0, loaded: 0, total: file.size });
 
     try {
       const contentHash = await sha256Hex(file);
 
-      const { uploadUrl, storageKey, publicUrl, duplicate, attachmentId } = await requestUploadUrl({
-        fileName: file.name,
-        mimeType: file.type,
-        sizeBytes: file.size,
-        context: options.context,
-        spaceId: options.spaceId,
-        contentHash,
-      });
+      const { uploadUrl, storageKey, publicUrl, duplicate, attachmentId, assetId } =
+        await requestUploadUrl({
+          fileName: file.name,
+          mimeType: file.type,
+          sizeBytes: file.size,
+          context: options.context,
+          spaceId: options.spaceId,
+          contentHash,
+        });
 
       // Dedup hit: identical bytes already stored — reuse it, no upload/confirm.
       if (duplicate && attachmentId) {
@@ -146,7 +158,7 @@ export function useS3Uploader<TMetadata = unknown>({
           loaded: file.size,
           total: file.size,
         });
-        return { publicUrl, attachmentId };
+        return { publicUrl, attachmentId, assetId };
       }
 
       // One uniform path: PUT the raw bytes to whatever URL the server handed us
@@ -172,7 +184,11 @@ export function useS3Uploader<TMetadata = unknown>({
         contentHash,
       });
 
-      return { publicUrl: result.publicUrl, attachmentId: result.attachmentId };
+      return {
+        publicUrl: result.publicUrl,
+        attachmentId: result.attachmentId,
+        assetId: result.assetId,
+      };
     } finally {
       setIsUploading(false);
       setUploadProgress(null);

@@ -77,6 +77,7 @@ export function EmptyAgentGuide({ edition = "desktop", lang }: EmptyAgentGuidePr
         onOpenChange={setOpen}
         defaultOrigin="https://busabase.com"
         edition={edition}
+        editionConfirmed
         lang={lang}
       />
     </>

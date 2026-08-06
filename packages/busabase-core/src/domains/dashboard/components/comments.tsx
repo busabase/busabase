@@ -22,9 +22,7 @@ export function CommentAvatar({ ai, authorId }: { ai?: boolean; authorId: string
   return (
     <div
       className={`flex size-7 shrink-0 items-center justify-center rounded-full font-medium text-[11px] ${
-        ai
-          ? "bg-violet-100 text-violet-700 dark:bg-violet-950/50 dark:text-violet-300"
-          : "bg-muted text-muted-foreground"
+        ai ? "bg-ai/17 text-ai-strong dark:text-ai-soft" : "bg-muted text-muted-foreground"
       }`}
     >
       {ai ? <Sparkles size={13} /> : getAuthorInitials(authorId)}
@@ -34,7 +32,7 @@ export function CommentAvatar({ ai, authorId }: { ai?: boolean; authorId: string
 
 export function AiMentionBadge() {
   return (
-    <span className="inline-flex items-center gap-1 rounded-md bg-violet-100 px-1.5 py-0.5 font-medium text-[10px] text-violet-700 dark:bg-violet-950/50 dark:text-violet-300">
+    <span className="inline-flex items-center gap-1 rounded-md bg-ai/17 px-1.5 py-0.5 font-medium text-[10px] text-ai-strong dark:text-ai-soft">
       <Sparkles size={10} />
       @ai
     </span>
@@ -46,7 +44,7 @@ export function renderInlineBody(text: string) {
   return text.split(/(@ai\b)/gi).map((part, index) =>
     /^@ai$/i.test(part) ? (
       <span
-        className="font-medium text-violet-700 dark:text-violet-300"
+        className="font-medium text-ai-strong dark:text-ai-soft"
         // biome-ignore lint/suspicious/noArrayIndexKey: inline text fragments have no stable id
         key={index}
       >
@@ -223,7 +221,7 @@ export function SubjectCommentThread({
       )}
 
       {error ? (
-        <div className="mt-2 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-red-800 text-sm">
+        <div className="mt-2 rounded-md border border-rejected/35 bg-rejected/17 px-3 py-2 text-rejected-strong text-sm">
           {error}
         </div>
       ) : null}
@@ -239,7 +237,7 @@ export function SubjectCommentThread({
         />
         <div className="mt-2 flex items-center justify-between gap-2">
           {mentionsAi ? (
-            <span className="inline-flex items-center gap-1 text-[11px] text-violet-700 dark:text-violet-300">
+            <span className="inline-flex items-center gap-1 text-[11px] text-ai-strong dark:text-ai-soft">
               <Sparkles size={11} />
               {messages.comments.agentWillRevise}
             </span>

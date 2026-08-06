@@ -36,6 +36,13 @@ export interface InstallCommandOptions {
   rename?: boolean;
   json: boolean;
   githubToken?: string;
+  /**
+   * Origin of the server being installed into. A host on local-disk storage
+   * hands back a root-relative upload url, which only means something to a
+   * browser already on that origin — without this the CLI skips every binary
+   * (file nodes AND doc images) and installs the package minus its bytes.
+   */
+  serverUrl?: string;
 }
 
 export const runInstall = async (
@@ -73,6 +80,7 @@ export const runInstall = async (
     autoMerge: Boolean(options.autoMerge),
     submittedBy: `busabase-cli install (${tree.manifest.name})`,
     onProgress: reportProgress,
+    serverUrl: options.serverUrl,
   });
 
   if (options.json) return { installed: true, ...result };

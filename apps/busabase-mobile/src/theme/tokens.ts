@@ -16,13 +16,16 @@ export const lightTokens = {
   primary: "#161818",
   primaryForeground: "#F1F3F3",
   primaryMuted: "#E6E9E9",
-  destructive: "#EF4444",
+  destructive: "#E7000B",
   destructiveForeground: "#FAFAFA",
   // 茶 (Cha) semantic status palette — the only chromatic colors in the
   // product. "text" is the on-light emphasis variant (-strong).
   merged: { base: "#5E8C6A", text: "#406C4C" },
   review: { base: "#C79A3E", text: "#7F6221" },
   rejected: { base: "#B95B3F", text: "#9A4531" },
+  // AI-authored comments are the single non-review semantic color used by Web.
+  // `fill` is the canonical base at 17% opacity (`bg-ai/17`).
+  ai: { base: "#705496", text: "#684D8F", fill: "#7054962B" },
   // Kept for non-CR contexts (network/misc warnings) — not part of Cha.
   success: "#16A34A",
   warning: "#D97706",
@@ -37,20 +40,21 @@ export const darkTokens: Tokens = {
   background: "#0A0A0A",
   surface: "#171717",
   card: "#171717",
-  sidebar: "#171717",
+  sidebar: "#18181B",
   foreground: "#FAFAFA",
   mutedForeground: "#A3A3A3",
   muted: "#262626",
-  border: "#262626",
-  primary: "#FAFAFA",
+  border: "rgba(255, 255, 255, 0.1)",
+  primary: "#E5E5E5",
   primaryForeground: "#171717",
   primaryMuted: "#262626",
-  destructive: "#EF4444",
+  destructive: "#FF6467",
   destructiveForeground: "#FAFAFA",
   // "text" is the on-dark emphasis variant (-soft).
   merged: { base: "#5E8C6A", text: "#93C3A2" },
   review: { base: "#C79A3E", text: "#DCBD7C" },
   rejected: { base: "#B95B3F", text: "#DB9678" },
+  ai: { base: "#705496", text: "#A792C4", fill: "#7054962B" },
   success: "#4ADE80",
   warning: "#FBBF24",
   overlay: "rgba(0, 0, 0, 0.5)",

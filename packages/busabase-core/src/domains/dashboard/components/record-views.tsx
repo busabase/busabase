@@ -181,7 +181,7 @@ export function RecordDetailView({
           </summary>
           <div className="absolute right-0 z-50 mt-1 w-48 rounded-md border border-border/70 bg-card p-1 shadow-md">
             <button
-              className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left font-medium text-red-700 text-sm transition-colors hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
+              className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left font-medium text-rejected-strong text-sm transition-colors hover:bg-rejected/17 disabled:cursor-not-allowed disabled:opacity-60"
               disabled={deleteAction !== null}
               onClick={(event) => {
                 setConfirmDeleteAction("change_request");
@@ -195,7 +195,7 @@ export function RecordDetailView({
                 : messages.recordView.deleteChangeRequest}
             </button>
             <button
-              className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left font-medium text-red-700 text-sm transition-colors hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
+              className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left font-medium text-rejected-strong text-sm transition-colors hover:bg-rejected/17 disabled:cursor-not-allowed disabled:opacity-60"
               disabled={deleteAction !== null}
               onClick={(event) => {
                 setConfirmDeleteAction("merge");
@@ -310,7 +310,7 @@ export function RecordDetailView({
             }
           >
             {historyError ? (
-              <div className="rounded-md border border-red-200 bg-red-50 px-2.5 py-2 text-red-800 text-xs">
+              <div className="rounded-md border border-rejected/35 bg-rejected/17 px-2.5 py-2 text-rejected-strong text-xs">
                 {historyError}
               </div>
             ) : historyChangeRequests.length > 0 ? (
@@ -1499,7 +1499,7 @@ function RecordCommentsPanel({
       </div>
 
       {error ? (
-        <div className="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-red-800 text-sm">
+        <div className="mt-3 rounded-lg border border-rejected/35 bg-rejected/17 px-3 py-2 text-rejected-strong text-sm">
           {error}
         </div>
       ) : null}
