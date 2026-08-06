@@ -425,6 +425,29 @@ describe("Agent Skills API — oRPC integration", () => {
     ).toBe(false);
   });
 
+  it("reports operationCount on a node-targeted merge, matching the base/record merge summary shape", async () => {
+    const skill = await client.fileTrees.create({
+      type: "skill",
+      autoMerge: true,
+      slug: "cr-summary",
+      name: "CR Summary",
+    });
+    const changeRequest = await client.fileTrees.createChangeRequest({
+      autoMerge: false,
+      type: "skill",
+      nodeId: skill.node.id,
+      operations: [
+        { kind: "create", path: "references/one.md", content: "one\n" },
+        { kind: "create", path: "references/two.md", content: "two\n" },
+      ],
+    });
+    const result = await approveAndMerge(changeRequest.id);
+    // Base/record-targeted merges have always reported `operationCount` in
+    // `mergeSummary` (see the base-targeted branch of `mergeChangeRequests`);
+    // node-targeted merges (file-tree/AirApp/Doc/structural) used to omit it.
+    expect(result.changeRequest.mergeSummary).toMatchObject({ operationCount: 2 });
+  });
+
   it("merges a metadata_update operation", async () => {
     const skill = await client.fileTrees.create({
       type: "skill",
@@ -445,6 +468,42 @@ describe("Agent Skills API — oRPC integration", () => {
     const after = await client.nodes.get({ nodeId: skill.node.id, type: "skill" });
     expect(after.version).toBe("9.9.9");
     expect(after.visibility).toBe("public");
+  });
+
+  it("rejects a malformed baseContentHash before it ever reaches the merge-time conflict check", async () => {
+    const skill = await client.fileTrees.create({
+      type: "skill",
+      autoMerge: true,
+      slug: "cr-bad-hash-format",
+      name: "CR Bad Hash Format",
+    });
+    // A bare hex digest (no `sha256:` prefix) is the exact mistake the
+    // OpenAPI contract didn't previously catch — it fell through to the
+    // merge-time comparison and always mismatched, misreported as "file
+    // changed before merge" instead of "malformed hash".
+    let caught: { message?: string; data?: { issues?: unknown[] } } | undefined;
+    try {
+      await client.fileTrees.createChangeRequest({
+        type: "skill",
+        nodeId: skill.node.id,
+        operations: [
+          {
+            kind: "update",
+            path: "SKILL.md",
+            content: "rewritten\n",
+            baseContentHash: "0".repeat(64),
+          },
+        ],
+      });
+    } catch (error) {
+      caught = error as typeof caught;
+    }
+    expect(caught?.data?.issues).toEqual([
+      expect.objectContaining({
+        path: ["operations", 0, "baseContentHash"],
+        message: expect.stringContaining("sha256"),
+      }),
+    ]);
   });
 
   it("blocks a stale file merge when baseContentHash no longer matches", async () => {

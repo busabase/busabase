@@ -1,5 +1,4 @@
 import { createDevUploadRoute } from "openlib/storage/dev-routes";
-import { invalidStorageKeyResponse, isSafeStorageKey } from "~/lib/storage-key";
 
 export const dynamic = "force-dynamic";
 
@@ -24,9 +23,10 @@ export const dynamic = "force-dynamic";
  * Renaming the shared export would touch all 11 apps that consume it, so it
  * stays as-is.
  *
- * **Key guard.** Because there is no gate, the storage key is validated before
- * it reaches `path.join(rootDir, key)` in the local adapter — otherwise a
- * traversal key would be an arbitrary-file write.
+ * **Key guard.** A traversal key would be an arbitrary-file write here, since
+ * there is no gate in front. This route used to re-implement that check; the
+ * factory now applies `openlib/storage/storage-key` on every request instead,
+ * so the guarantee no longer depends on each mount remembering to.
  *
  * The relay is unauthenticated, so an instance exposed to a network lets anyone
  * write objects into the storage root (bounded by the key guard and the caller's
@@ -34,27 +34,4 @@ export const dynamic = "force-dynamic";
  * existing posture — `/api/rpc` has no auth either — but it is a deliberate
  * trade. See the sibling `/api/storage/[...key]` read route.
  */
-const base = createDevUploadRoute({ gateProduction: false });
-
-export const POST = async (req: Request): Promise<Response> => {
-  // The legacy multipart path. `useS3Uploader` (and therefore the logo upload)
-  // uses PUT; this branch stays for older callers. A body that isn't multipart
-  // is left to the shared handler, which answers with its own 400.
-  try {
-    const storageKey = (await req.clone().formData()).get("storageKey");
-    if (typeof storageKey === "string" && !isSafeStorageKey(storageKey)) {
-      return invalidStorageKeyResponse();
-    }
-  } catch {
-    // fall through — the shared handler re-reads and reports the real error
-  }
-  return base.POST(req);
-};
-
-export const PUT = async (req: Request): Promise<Response> => {
-  const key = new URL(req.url).searchParams.get("key");
-  if (key !== null && !isSafeStorageKey(key)) {
-    return invalidStorageKeyResponse();
-  }
-  return base.PUT(req);
-};
+export const { POST, PUT } = createDevUploadRoute({ gateProduction: false });

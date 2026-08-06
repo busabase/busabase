@@ -11,14 +11,18 @@ function resolveOrigin(request: Request): string {
 }
 
 /**
- * Serves the local Desktop onboarding at `/SETUP_SKILL.md` (mode "local", stage "bootstrap"):
- * welcome → connect → seed a first Base → install the permanent `busabase` and
+ * Serves the local Desktop onboarding at `/SETUP_SKILL.md` (mode "local", confirmed bootstrap):
+ * connect → seed a first Base → install the permanent `busabase` and
  * `busabase-app-creator` skills. The full, ongoing API surface lives in those installed skills +
  * `/api/v1/openapi.json`, not here — so this URL is purely the one-time setup doc the pasted
  * prompt points at.
  */
 export async function GET(request: Request) {
-  const content = buildSkillMarkdown(resolveOrigin(request), { mode: "local", stage: "bootstrap" });
+  const content = buildSkillMarkdown(resolveOrigin(request), {
+    mode: "local",
+    stage: "bootstrap",
+    editionConfirmed: true,
+  });
 
   return new Response(content, {
     headers: {

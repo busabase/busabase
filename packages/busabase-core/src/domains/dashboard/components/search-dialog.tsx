@@ -438,7 +438,7 @@ export function SearchDialog({
           {isRecentTab || hasQuery ? (
             <div>
               {visibleError ? (
-                <div className="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-red-800 text-sm">
+                <div className="mb-3 rounded-lg border border-rejected/35 bg-rejected/17 px-3 py-2 text-rejected-strong text-sm">
                   {visibleError}
                 </div>
               ) : null}

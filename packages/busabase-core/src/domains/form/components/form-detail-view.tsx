@@ -52,7 +52,7 @@ export function FormDetailView({ orpc, slug }: { orpc: BusabaseQueryUtils; slug:
 
   const submittedPanel = (
     <div className="px-6 py-16 text-center">
-      <CheckCircle2 className="mx-auto text-emerald-600" size={40} />
+      <CheckCircle2 className="mx-auto text-merged" size={40} />
       <div className="mt-3 font-semibold text-base">{messages.form.submitted}</div>
       <p className="mt-2 text-muted-foreground text-sm">{messages.form.pendingReview}</p>
       <p className="mt-1 font-mono text-muted-foreground/70 text-xs">
@@ -137,7 +137,7 @@ export function FormDetailView({ orpc, slug }: { orpc: BusabaseQueryUtils; slug:
           <FormSandboxFrame onSubmit={doSubmit} page={form.page} />
           <p className="mt-2 text-muted-foreground text-xs">{messages.form.sandboxHint}</p>
           {submit.isError ? (
-            <div className="mt-3 rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-rose-700 text-sm">
+            <div className="mt-3 rounded-md border border-rejected/35 bg-rejected/17 px-3 py-2 text-rejected-strong text-sm">
               {submit.error instanceof Error ? submit.error.message : messages.form.submitFailed}
             </div>
           ) : null}
@@ -158,7 +158,7 @@ export function FormDetailView({ orpc, slug }: { orpc: BusabaseQueryUtils; slug:
               <label className="block" key={binding.inputName}>
                 <span className="font-medium text-foreground text-sm">
                   {binding.label ?? binding.fieldSlug}
-                  {binding.required ? <span className="ml-0.5 text-rose-600">*</span> : null}
+                  {binding.required ? <span className="ml-0.5 text-rejected-strong">*</span> : null}
                 </span>
                 {binding.help ? (
                   <span className="mt-0.5 block text-muted-foreground text-xs">{binding.help}</span>
@@ -178,7 +178,7 @@ export function FormDetailView({ orpc, slug }: { orpc: BusabaseQueryUtils; slug:
             ))}
           </div>
           {submit.isError ? (
-            <div className="mt-4 rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-rose-700 text-sm">
+            <div className="mt-4 rounded-md border border-rejected/35 bg-rejected/17 px-3 py-2 text-rejected-strong text-sm">
               {submit.error instanceof Error ? submit.error.message : messages.form.submitFailed}
             </div>
           ) : null}

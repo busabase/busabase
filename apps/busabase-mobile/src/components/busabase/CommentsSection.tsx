@@ -1,8 +1,8 @@
 import { skipToken, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { CommentSubjectType } from "busabase-contract/types";
-import { MessageCircle, Send } from "lucide-react-native";
+import { MessageCircle, Send, Sparkles } from "lucide-react-native";
 import { useState } from "react";
-import { StyleSheet, Text } from "react-native";
+import { StyleSheet, Text, View } from "react-native";
 import { useBusabaseOrpc } from "~/api/use-busabase-orpc";
 import {
   NativeActionBar,
@@ -12,7 +12,7 @@ import {
   NativeSection,
 } from "~/components/native-screen";
 import { formatDate } from "~/lib/format";
-import { typography } from "~/theme/tokens";
+import { radius, typography } from "~/theme/tokens";
 import { useTokens } from "~/theme/use-tokens";
 import { Button } from "../ui/Button";
 import { TextInput } from "../ui/TextInput";
@@ -98,15 +98,27 @@ export function CommentsSection({ subjectType, subjectId }: CommentsSectionProps
             leading={<MessageCircle size={18} color={tokens.mutedForeground} />}
           />
         ) : (
-          comments.map((comment) => (
-            <NativeRow
-              key={comment.id}
-              title={comment.authorId}
-              meta={formatDate(comment.createdAt)}
-            >
-              <Text style={[typography.body, { color: tokens.foreground }]}>{comment.body}</Text>
-            </NativeRow>
-          ))
+          comments.map((comment) => {
+            const mentionsAi = comment.mentionsAi;
+            return (
+              <NativeRow
+                key={comment.id}
+                title={comment.authorId}
+                meta={formatDate(comment.createdAt)}
+                leading={
+                  mentionsAi ? (
+                    <View style={[styles.aiAvatar, { backgroundColor: tokens.ai.fill }]}>
+                      <Sparkles size={13} color={tokens.ai.text} />
+                    </View>
+                  ) : undefined
+                }
+              >
+                <Text style={[typography.body, { color: tokens.foreground }]}>
+                  {renderAiMentions(comment.body, tokens.ai.text)}
+                </Text>
+              </NativeRow>
+            );
+          })
         )}
         <NativeRow
           title="Add comment"
@@ -190,5 +202,27 @@ export function CommentsSection({ subjectType, subjectId }: CommentsSectionProps
 }
 
 const styles = StyleSheet.create({
+  aiAvatar: {
+    width: 28,
+    height: 28,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: radius.full,
+  },
   input: { minHeight: 80, paddingTop: 12 },
 });
+
+function renderAiMentions(body: string, color: string) {
+  let offset = 0;
+  return body.split(/(@ai\b)/gi).map((part) => {
+    const start = offset;
+    offset += part.length;
+    return /^@ai$/i.test(part) ? (
+      <Text key={`${start}:${part}`} style={{ color, fontWeight: "600" }}>
+        {part}
+      </Text>
+    ) : (
+      part
+    );
+  });
+}

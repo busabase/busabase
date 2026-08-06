@@ -390,7 +390,7 @@ export function NodePermissionsDialog({
                           </SelectContent>
                         </Select>
                         <button
-                          className="text-muted-foreground hover:text-red-600"
+                          className="text-muted-foreground hover:text-rejected-strong"
                           disabled={isPending}
                           onClick={() =>
                             handleRemove(principal.principalType, principal.principalId)

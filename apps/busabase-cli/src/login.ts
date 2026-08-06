@@ -458,29 +458,25 @@ async function refreshToken(
 
 // ── Space selection ───────────────────────────────────────────────────────────
 
-async function pickSpaceId(verify: AuthVerify, preselected?: string): Promise<string | undefined> {
+/**
+ * Login never blocks on a Space question — interactive and non-interactive callers
+ * get identical treatment. The server already resolves the best default (the
+ * account's most recently active Space; see `resolveRecentSpaceIdForUser` on the
+ * Cloud side), so the CLI just accepts it and tells the caller what else is
+ * available, human or agent, so it can switch with `busabase-cli space use <id>`
+ * without an extra round-trip through a terminal prompt that a script or an
+ * agent's pseudo-TTY shell might never be able to answer.
+ */
+function pickSpaceId(verify: AuthVerify, preselected?: string): string | undefined {
   if (preselected) return preselected;
   const spaces = verify.spaces ?? [];
-  if (spaces.length <= 1) return verify.space?.id ?? spaces[0]?.id;
-  if (!isInteractive()) {
-    const choices = spaces.map((space) => `${space.name} [${space.id}]`).join(", ");
-    throw new Error(
-      `You belong to ${spaces.length} spaces; pass --space-id <id> to choose one. Available spaces: ${choices}`,
-    );
-  }
-  say("");
-  say("Which space should this CLI target?");
-  spaces.forEach((space, index) => {
-    const marker = space.id === verify.space?.id ? " (default)" : "";
-    say(`  ${index + 1}. ${space.name}${marker}  [${space.id}]`);
-  });
-  const answer = await ask(`Choose 1-${spaces.length} (Enter for default): `);
-  if (!answer) return verify.space?.id ?? spaces[0]?.id;
-  const choice = Number(answer);
-  if (Number.isInteger(choice) && choice >= 1 && choice <= spaces.length) {
-    return spaces[choice - 1]?.id;
-  }
-  throw new Error("Not a valid space choice. Re-run login and choose one of the listed spaces.");
+  const fallback = verify.space?.id ?? spaces[0]?.id;
+  if (spaces.length <= 1) return fallback;
+  const choices = spaces.map((space) => `${space.name} [${space.id}]`).join(", ");
+  say(
+    `Note: this account belongs to ${spaces.length} spaces; defaulted to "${verify.space?.name ?? spaces[0]?.name}". Run \`busabase-cli space use <id>\` to switch. Available: ${choices}`,
+  );
+  return fallback;
 }
 
 // ── Entry points ──────────────────────────────────────────────────────────────
@@ -603,7 +599,7 @@ export async function runLogin(options: LoginOptions): Promise<Record<string, st
 
   say("Verifying…");
   const verify = await verifyAuth(baseUrl, token);
-  const spaceId = await pickSpaceId(verify, options.spaceId);
+  const spaceId = pickSpaceId(verify, options.spaceId);
 
   writeDotEnvFile({
     BUSABASE_BASE_URL: baseUrl,
@@ -623,6 +619,9 @@ export async function runLogin(options: LoginOptions): Promise<Record<string, st
     credentialType: method === "device" ? "api_key" : expiresAt ? "oauth" : "api_key",
     user: verify.user?.email ?? verify.user?.name ?? verify.user?.id ?? "(unknown)",
     space: spaceId ?? "(server default)",
+    // Surfaced so a non-interactive caller (typically an agent) can see whether the
+    // fallback default is the space it actually wants, and switch with `space use <id>`.
+    availableSpaces: (verify.spaces ?? []).map((space) => `${space.name} [${space.id}]`).join(", "),
     createdSpace: String(Boolean(verify.createdSpace)),
     bootstrapRequired: String(Boolean(verify.bootstrapRequired)),
     expiresAt: expiresAt ?? apiKeyExpiresAt ?? "(no expiry — API key)",

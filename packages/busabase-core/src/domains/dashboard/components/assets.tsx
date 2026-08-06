@@ -79,8 +79,7 @@ export function AssetTextStatusChip({ status }: { status: AssetTextStatus }) {
       Icon: AlertTriangle,
       label: messages.assets.textStatusStale,
       hint: messages.assets.textStatusStaleHint,
-      className:
-        "border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-300",
+      className: "border-review/35 bg-review/17 text-review-strong dark:text-review-soft",
     },
   }[status];
 
@@ -213,7 +212,7 @@ export function AssetTextPreviewPanel({
       {isExpanded ? (
         <div className="mt-3 border-t pt-3">
           {textStatus === "stale" ? (
-            <p className="mb-2 rounded-md border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-amber-800 text-xs dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-300">
+            <p className="mb-2 rounded-md border border-review/35 bg-review/17 px-2.5 py-1.5 text-review-strong text-xs dark:text-review-soft">
               {messages.assets.textPreviewStaleWarning}
             </p>
           ) : null}

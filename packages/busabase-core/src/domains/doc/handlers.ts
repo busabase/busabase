@@ -326,6 +326,12 @@ export const createDoc = async (
   // put two identically-named headings on one page (a11y/strict-mode bug).
   // An empty body renders the dedicated "This document is empty" placeholder.
   await writeDocBody(nodeId, parsed.body ?? "");
+  // A Doc created WITH a body can already embed images (a package install writes
+  // the whole body on create, and so does any API caller), and the usage row is
+  // what makes those images readable: `resolveAssetContent` grants a read only
+  // through a usage the caller can see. Indexing on update alone left a
+  // create-time body's images invisible to anyone the asset ACL applies to.
+  await syncDocAssetUsages(nodeId, parsed.body ?? "");
   await initializeNodeAcl(
     db,
     getContextSpaceId(),
@@ -402,6 +408,12 @@ export const updateDocBody = async (
   const parsed = updateDocInputSchema.parse(input);
   assertDocBodySize(parsed.body);
   await writeDocBody(node.id, parsed.body);
+  // Same reason as `materializeDocNode` / `mergeDocUpdate`: an embedded image's
+  // asset ACL is usage-backed (`assertAssetPermission`), so a body saved through
+  // THIS direct-write path — not just the reviewed change-request path — must
+  // register its usages here too, or an image pasted through this endpoint would
+  // be unreadable the moment anyone but its uploader opened the Doc.
+  await syncDocAssetUsages(node.id, parsed.body);
   // Record the body edit as an auto-merged doc_update ChangeRequest (audit +
   // history + rollback), replacing the old bespoke `doc.updated` audit action —
   // the same doc_update op shape the reviewed `createDocChangeRequest` path uses.
@@ -445,7 +457,14 @@ export const materializeDocNode = async (ctx: MergeCtx, args: MaterializeArgs): 
     createdAt: timestamp,
     updatedAt: timestamp,
   });
-  await writeDocBody(nodeId, (fields.body as string | undefined) ?? "");
+  const body = (fields.body as string | undefined) ?? "";
+  await writeDocBody(nodeId, body);
+  // Same reason as the immediate-create path above: a review-first `createDoc`
+  // carries its initial body through the pending change request, so the Doc's
+  // images exist from its very first merge and must be indexed there. `ctx.db`
+  // is the merge transaction — re-acquiring `getDb()` inside it would deadlock
+  // the single pglite connection.
+  await syncDocAssetUsages(nodeId, body, ctx.db);
   return nodeId;
 };
 

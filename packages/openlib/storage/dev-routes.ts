@@ -1,4 +1,5 @@
 import { storage } from "./factory";
+import { invalidStorageKeyResponse, isSafeStorageKey } from "./storage-key";
 import type { IStorage } from "./types";
 
 /**
@@ -57,10 +58,12 @@ export interface CreateDevUploadRouteOptions {
    * local-disk storage in production can reuse it at a real route (e.g.
    * `apps/busabase/src/app/api/storage/upload`) instead of reimplementing it.
    *
-   * A caller that passes `false` MUST validate the storage key itself before it
-   * reaches the adapter: these handlers pass it straight to
-   * `path.join(rootDir, key)`, so an un-gated route without a key guard is an
-   * arbitrary-file read/write. See `apps/busabase/src/lib/storage-key.ts`.
+   * Note the gate is not what keeps a traversal key (`../../etc/passwd`) from
+   * reaching `path.join(rootDir, key)` — `./storage-key` is, and these handlers
+   * apply it on every request, gated or not. That used to be the caller's job,
+   * documented right here; of the two apps that dropped the gate, one did it and
+   * one did not, which is how `apps/buda` ended up serving an unauthenticated
+   * arbitrary-path write in production.
    *
    * @default true
    */
@@ -105,6 +108,9 @@ export function createDevUploadRoute(opts?: CreateDevUploadRouteOptions): {
       if (!file || !storageKey) {
         return new Response("Missing file or storageKey", { status: 400 });
       }
+      if (!isSafeStorageKey(storageKey)) {
+        return invalidStorageKeyResponse();
+      }
 
       const buffer = Buffer.from(await file.arrayBuffer());
 
@@ -136,6 +142,9 @@ export function createDevUploadRoute(opts?: CreateDevUploadRouteOptions): {
 
       if (!key) {
         return new Response("Missing key", { status: 400 });
+      }
+      if (!isSafeStorageKey(key)) {
+        return invalidStorageKeyResponse();
       }
 
       const mimeType = req.headers.get("content-type") || "application/octet-stream";
@@ -169,10 +178,12 @@ export interface CreateDevAttachmentRouteOptions {
    * local-disk storage in production can reuse it at a real route (e.g.
    * `apps/busabase/src/app/api/storage/[...key]`) instead of reimplementing it.
    *
-   * A caller that passes `false` MUST validate the storage key itself before it
-   * reaches the adapter: these handlers pass it straight to
-   * `path.join(rootDir, key)`, so an un-gated route without a key guard is an
-   * arbitrary-file read/write. See `apps/busabase/src/lib/storage-key.ts`.
+   * Note the gate is not what keeps a traversal key (`../../etc/passwd`) from
+   * reaching `path.join(rootDir, key)` — `./storage-key` is, and these handlers
+   * apply it on every request, gated or not. That used to be the caller's job,
+   * documented right here; of the two apps that dropped the gate, one did it and
+   * one did not, which is how `apps/buda` ended up serving an unauthenticated
+   * arbitrary-path write in production.
    *
    * @default true
    */
@@ -215,6 +226,9 @@ export function createDevAttachmentRoute(opts?: CreateDevAttachmentRouteOptions)
       }
 
       const key = keyParts.join("/");
+      if (!isSafeStorageKey(key)) {
+        return invalidStorageKeyResponse();
+      }
       const publicBaseUrl = process.env.STORAGE_PUBLIC_BASE_URL;
 
       if (publicBaseUrl) {

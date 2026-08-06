@@ -26,12 +26,31 @@ export const PACKAGE_FORMAT = "busabase-package@1";
 
 export const PACKAGE_MANIFEST_FILENAME = "busabase.json";
 export const PACKAGE_CONTENT_DIRNAME = "content";
+/**
+ * Sibling of `content/`, holding the asset bytes Doc bodies reference
+ * (`![](/api/assets/{assetId}/raw)`).
+ *
+ * It cannot live under `content/`: everything there is interpreted as a node, so
+ * an image dropped beside a `.md` would install as a `file` node of its own —
+ * a visible junk node next to the Doc, not the Doc's inline image. `assets/` is
+ * addressed by asset id instead of by tree position, which is also what lets one
+ * image referenced by three Docs be carried once.
+ */
+export const PACKAGE_ASSETS_DIRNAME = "assets";
 export const PACKAGE_NODE_META_FILENAME = "_node.json";
 export const PACKAGE_FOLDER_META_FILENAME = "_folder.json";
 export const PACKAGE_BASE_FILENAME = "base.json";
 export const PACKAGE_RECORDS_FILENAME = "records.ndjson";
 /** Sidecar suffix for a `file` node: `quarterly-report.pdf.node.json`. */
 export const PACKAGE_NODE_META_SUFFIX = ".node.json";
+/**
+ * Sidecar suffix for a carried Doc asset: `assets/astm3k9x2.png` +
+ * `assets/astm3k9x2.png.asset.json`. Same "bytes plus a JSON sidecar next to
+ * them" shape a `file` node already uses — the sidecar carries what the bytes
+ * cannot (the SOURCE asset id the Doc bodies reference, the original file name,
+ * the mime type, the content hash).
+ */
+export const PACKAGE_ASSET_META_SUFFIX = ".asset.json";
 
 /**
  * Names the format interprets, so they cannot double as a node's own content at a
@@ -151,6 +170,25 @@ export type PackageFolderMeta = z.infer<typeof PackageFolderMetaSchema>;
 /** `<filename>.node.json` — optional display metadata for a `file` node. */
 export const PackageFileNodeMetaSchema = PackageFolderMetaSchema;
 export type PackageFileNodeMeta = z.infer<typeof PackageFileNodeMetaSchema>;
+
+/**
+ * `assets/<file>.asset.json` — the sidecar for one carried Doc asset.
+ *
+ * `assetId` is the id on the host the package was exported FROM, and it is the
+ * whole point of the file: Doc bodies in `content/` reference that id, install
+ * mints a brand-new one on the target, and the old→new map is what lets the
+ * bodies be rewritten. Without it the bytes would be unattributable and the
+ * images would install dead.
+ */
+export const PackageDocAssetMetaSchema = z.object({
+  assetId: z.string().min(1),
+  /** The asset's original name, restored on the target so its library entry reads the same. */
+  fileName: z.string().min(1),
+  mimeType: z.string().min(1),
+  /** `sha256:<hex>` when the source host had one — lets the target dedupe instead of re-storing. */
+  contentHash: z.string().optional(),
+});
+export type PackageDocAssetMeta = z.infer<typeof PackageDocAssetMetaSchema>;
 
 /** YAML frontmatter of a `*.md` doc node. */
 export const PackageDocFrontmatterSchema = z.object({

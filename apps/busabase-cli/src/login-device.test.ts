@@ -83,7 +83,11 @@ describe("runLogin --device-code", () => {
       throw new Error(`Unexpected request: ${request.url}`);
     }) as typeof fetch;
 
-    const login = runLogin({ baseUrl: CLOUD, deviceCode: true, browser: true });
+    const login = runLogin({
+      baseUrl: CLOUD,
+      deviceCode: true,
+      browser: true,
+    });
     await vi.advanceTimersByTimeAsync(0);
 
     expect(spawnMock).toHaveBeenCalledWith(

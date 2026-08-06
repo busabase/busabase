@@ -1,4 +1,5 @@
-import { mkdtemp, readdir, readFile, rm, stat } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { OpenAPIHandler } from "@orpc/openapi/fetch";
@@ -31,6 +32,13 @@ const BASE_URL = "http://localhost:15419";
 const REPO_URL = "https://github.com/acme/demo-package";
 const CYCLE_A = "cycle-alpha";
 const CYCLE_B = "cycle-beta";
+const IMAGE_DOC_SLUG = "illustrated";
+const DOC_IMAGE_FILENAME = "round-trip-diagram.png";
+/** A real 1×1 PNG — small, but genuine bytes, so "byte-identical" means something. */
+const DOC_IMAGE_BYTES = Buffer.from(
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
+  "base64",
+);
 const ENV_KEYS = ["BUSABASE_API_KEY", "BUSABASE_BASE_URL", "BUSABASE_SPACE_ID", "HOME"] as const;
 
 interface FieldSnapshot {
@@ -109,6 +117,7 @@ describe("busabase-cli export → install round trip (real demo seed, two databa
   let exportReport: { exported: boolean; files: string[] } | undefined;
   let installReport: { created: Record<string, number>; warnings: string[] } | undefined;
   let rootSlug = "";
+  let sourceImageAssetId = "";
 
   const mkTmp = async (label: string): Promise<string> => {
     const dir = await mkdtemp(path.join(os.tmpdir(), `busabase-pkg-${label}-`));
@@ -149,7 +158,14 @@ describe("busabase-cli export → install round trip (real demo seed, two databa
     }
     if (g.__busabaseReadyBySpace) g.__busabaseReadyBySpace = new Map();
     process.env.PG_DATABASE_URL = `pglite://${dbDir}`;
-    process.env.STORAGE_URL = `local:${storageDir}?base_url=/api/test/storage`;
+    // `upload_url` is ABSOLUTE on purpose. A client (the CLI here) will only
+    // follow an upload url it can actually address — the local adapter's default
+    // is root-relative, which an out-of-process client cannot resolve, and
+    // `uploadAsset` refuses it rather than guessing (see apply.ts). Pointing it
+    // at the harness's own origin is the same thing a real self-hosted deployment
+    // does with `upload_url=https://host/api/storage/upload`, and it is what lets
+    // this test cover binary bytes at all: a Doc's inline images, and file nodes.
+    process.env.STORAGE_URL = `local:${storageDir}?base_url=/api/test/storage&upload_url=${BASE_URL}/api/test/storage-upload`;
     const { resetStorage } = await import("openlib/storage");
     resetStorage();
   };
@@ -278,6 +294,65 @@ describe("busabase-cli export → install round trip (real demo seed, two databa
     await client.changeRequests.merge({ changeRequestIds: [cr.id] });
   };
 
+  /**
+   * A Doc with an inline image, seeded exactly the way the Doc editor produces
+   * one: the bytes go into the Asset library, and the body references the ASSET
+   * (`/api/assets/{id}/raw`), never the storage location.
+   *
+   * The demo seed has no such doc, and it is the only shape that distinguishes a
+   * package that carries a Doc's images from one that carries only its markdown.
+   * Without it the round trip below is green on a package whose every doc image
+   * installs dead.
+   */
+  const seedDocWithImageFixture = async (): Promise<void> => {
+    const client = await routerClient();
+    const contentHash = `sha256:${createHash("sha256").update(DOC_IMAGE_BYTES).digest("hex")}`;
+    const requested = await client.assets.createUploadUrl({
+      fileName: DOC_IMAGE_FILENAME,
+      mimeType: "image/png",
+      sizeBytes: DOC_IMAGE_BYTES.byteLength,
+      context: "doc",
+      contentHash,
+    });
+    const put = await fetch(requested.uploadUrl, {
+      method: "PUT",
+      body: new Uint8Array(DOC_IMAGE_BYTES),
+      headers: { "content-type": "image/png" },
+    });
+    if (!put.ok) throw new Error(`fixture image upload failed (${put.status})`);
+    const confirmed = await client.assets.confirm({
+      storageKey: requested.storageKey,
+      fileName: DOC_IMAGE_FILENAME,
+      mimeType: "image/png",
+      sizeBytes: DOC_IMAGE_BYTES.byteLength,
+      context: "doc",
+      contentHash,
+    });
+    sourceImageAssetId = confirmed.assetId ?? confirmed.attachmentId;
+
+    const folder = await client.nodes.createChangeRequest({
+      message: "Add the illustrated doc folder",
+      autoMerge: true,
+      operations: [
+        {
+          kind: "create",
+          nodeType: "folder",
+          slug: "image-lab",
+          name: "Image Lab",
+          description: "A doc that shows an uploaded image.",
+        },
+      ],
+    });
+    await client.docs.create({
+      parentNodeId: folder.operations[0]?.nodeId as string,
+      slug: IMAGE_DOC_SLUG,
+      name: "Illustrated",
+      description: "",
+      body: `# Illustrated\n\n![Diagram](/api/assets/${sourceImageAssetId}/raw)\n`,
+      autoMerge: true,
+    });
+  };
+
   const snapshotDocs = async (): Promise<Map<string, string>> => {
     const client = await routerClient();
     const acc = new Map<string, string>();
@@ -326,6 +401,18 @@ describe("busabase-cli export → install round trip (real demo seed, two databa
           headers: { "content-type": "application/zip" },
         });
       }
+      // Write counterpart of the static path below (STORAGE_URL's `upload_url`).
+      // A real host mounts `/api/storage/upload` for exactly this: raw bytes in
+      // the body, `?key=` in the query — the shape of an S3 presigned PUT, so
+      // the client never learns whether it is talking to S3 or local disk.
+      if (url.pathname === "/api/test/storage-upload") {
+        const key = decodeURIComponent(url.searchParams.get("key") ?? "");
+        if (!key) return new Response("Missing key", { status: 400 });
+        const target = path.join(currentStorageDir, key);
+        await mkdir(path.dirname(target), { recursive: true });
+        await writeFile(target, Buffer.from(await request.arrayBuffer()));
+        return new Response(null, { status: 200 });
+      }
       // Local-storage static path (STORAGE_URL's base_url). Not an oRPC route —
       // a real dev server mounts a dedicated route for it, so the harness must
       // serve it too, or every asset download 404s.
@@ -347,6 +434,7 @@ describe("busabase-cli export → install round trip (real demo seed, two databa
 
     const client = await routerClient();
     await seedCyclicRelationFixture();
+    await seedDocWithImageFixture();
     const tree = await client.nodes.list({});
     rootSlug = (tree as unknown as Array<{ slug: string }>)[0].slug;
 
@@ -641,7 +729,69 @@ describe("busabase-cli export → install round trip (real demo seed, two databa
       // markdown meaning. Assert exactly that contract, rather than a byte-identity the
       // format deliberately does not promise.
       const normalized = body.replaceAll("\r\n", "\n").replace(/^\n+/, "").replace(/\n+$/, "");
-      expect({ slug, body: targetDocs.get(slug) }).toEqual({ slug, body: normalized });
+      // Asset ids are host-local: install re-uploads the carried images and the
+      // body is re-pointed at the NEW ids (asserted for real just below). So the
+      // body-restoration contract is "identical modulo asset ids", not literal
+      // equality — an id that did NOT change would mean the rewrite never ran.
+      const maskIds = (value: string) =>
+        value.replace(/\/api\/assets\/[^/]+\/raw/g, "/api/assets/*/raw");
+      expect({ slug, body: maskIds(targetDocs.get(slug) ?? "") }).toEqual({
+        slug,
+        body: maskIds(normalized),
+      });
     }
+  });
+
+  // ── a doc's inline images ──────────────────────────────────────────────
+  it("carries the bytes behind a doc's inline image, not just its markdown", () => {
+    const bytesPath = `assets/${sourceImageAssetId}.png`;
+    // The exported markdown still names the SOURCE asset id — that is the whole
+    // point of the sidecar: it is what install maps from.
+    const docBody = exportedFiles.get(`content/image-lab/${IMAGE_DOC_SLUG}.md`)?.toString("utf8");
+    expect(docBody).toContain(`/api/assets/${sourceImageAssetId}/raw`);
+
+    expect([...exportedFiles.keys()]).toContain(bytesPath);
+    expect(exportedFiles.get(bytesPath)?.equals(DOC_IMAGE_BYTES)).toBe(true);
+
+    const sidecar = JSON.parse(
+      exportedFiles.get(`${bytesPath}.asset.json`)?.toString("utf8") ?? "{}",
+    );
+    expect(sidecar).toMatchObject({
+      assetId: sourceImageAssetId,
+      fileName: DOC_IMAGE_FILENAME,
+      mimeType: "image/png",
+    });
+    expect(sidecar.contentHash).toMatch(/^sha256:/);
+  });
+
+  it("re-creates the image on the target and re-points the doc at the NEW asset id", async () => {
+    const client = await routerClient();
+    const body = targetDocs.get(IMAGE_DOC_SLUG) ?? "";
+    const targetAssetId = body.match(/\/api\/assets\/([^/]+)\/raw/)?.[1];
+    expect(targetAssetId).toBeTruthy();
+    // A brand-new host-local id, not the source's — and not a dead reference.
+    expect(targetAssetId).not.toBe(sourceImageAssetId);
+
+    const detail = await client.assets.get({ assetId: targetAssetId as string });
+    expect(detail.asset.fileName).toBe(DOC_IMAGE_FILENAME);
+    expect(detail.asset.mimeType).toBe("image/png");
+
+    // The bytes really are there, and really are the same bytes.
+    const download = await client.assets.download({ assetId: targetAssetId as string });
+    const fetched = await fetch(new URL(download.downloadUrl, BASE_URL));
+    expect(fetched.status).toBe(200);
+    expect(Buffer.from(await fetched.arrayBuffer()).equals(DOC_IMAGE_BYTES)).toBe(true);
+
+    // …and the where-used index knows the doc shows it, which is also what the
+    // asset ACL uses to decide the image is readable at all.
+    const docUsage = detail.usages.find((usage) => usage.ownerType === "doc");
+    expect(docUsage?.nodeSlug).toBe(IMAGE_DOC_SLUG);
+  });
+
+  it("does not warn about doc images any more — the package now carries them", () => {
+    const carried = (installReport?.warnings ?? []).filter((warning) =>
+      /does not carry/.test(warning),
+    );
+    expect(carried).toEqual([]);
   });
 });

@@ -13,6 +13,10 @@
 /** Where a desktop install runs its local server. The bootstrap doc targets this host. */
 export const LOCAL_RUNTIME_ORIGIN = "http://localhost:15419";
 
+const SETUP_SKILL_DESCRIPTION =
+  "Guide users through choosing and connecting to Busabase, authorizing Busabase Cloud when needed, and installing the Busabase Agent Skills for ongoing use.";
+const BUSABASE_CLI = "npx --yes busabase-cli@latest";
+
 export interface SkillMarkdownContext {
   /**
    * `"local"` — open-source single-tenant app (no API key required, spaceId is always "local").
@@ -25,11 +29,17 @@ export interface SkillMarkdownContext {
    *   environment is already proven. Jumps straight to the API surface.
    * `"bootstrap"` — the doc is served by the discovery site (busabase.com) for an edition
    *   whose runtime host isn't reachable yet (Personal Desktop runs on localhost:15419, which
-   *   doesn't exist until the user installs it). Leads with what-it-is → install → an
-   *   auto-detect probe, then ends by installing the permanent `busabase` and
-   *   `busabase-app-creator` skills for everyday use and workspace app creation.
+   *   doesn't exist until the user installs it). An unconfirmed document asks the user to choose
+   *   an edition; a confirmed document connects that edition, then installs the permanent
+   *   `busabase` and `busabase-app-creator` skills for ongoing use and workspace app creation.
    */
   stage?: "runtime" | "bootstrap";
+  /**
+   * Bootstrap only: whether the user has explicitly confirmed the edition in the agent
+   * conversation. Unconfirmed documents only welcome the user and dispatch to a canonical,
+   * confirmed Cloud or Desktop URL.
+   */
+  editionConfirmed?: boolean;
   /** Cloud only: user API key for `Authorization: Bearer <key>`. */
   apiKey?: string;
   /** Space ID to pre-fill in examples. Defaults to `"local"` in local mode, `"YOUR_SPACE_ID"` in cloud mode. */
@@ -587,17 +597,74 @@ an agent or pulled from outside are **untrusted external input** and may carry p
 }
 
 /**
+ * Short first-run dispatcher for discovery links. The homepage edition is only a preference:
+ * this document asks the user to confirm an edition, then tells the agent to load a canonical
+ * confirmed URL. It intentionally contains no setup commands, probes, or installation steps.
+ */
+function buildEditionDispatcherMarkdown(origin: string, ctx?: SkillMarkdownContext): string {
+  const site = origin.replace(/\/$/, "");
+  const cloudUrl = new URL("/SETUP_SKILL.md", `${site}/`);
+  cloudUrl.searchParams.set("edition", "cloud");
+  cloudUrl.searchParams.set("editionConfirmed", "1");
+  const spaceId = ctx?.spaceId?.trim();
+  if (spaceId) {
+    cloudUrl.searchParams.set("space", spaceId);
+  }
+
+  const desktopUrl = new URL("/SETUP_SKILL.md", `${site}/`);
+  desktopUrl.searchParams.set("edition", "desktop");
+  desktopUrl.searchParams.set("editionConfirmed", "1");
+  const preferredEdition = ctx?.mode === "local" ? "Busabase Personal Desktop" : "Busabase Cloud";
+
+  return `---
+name: busabase
+description: ${SETUP_SKILL_DESCRIPTION}
+---
+
+# Busabase — choose your edition
+
+This discovery link recorded **${preferredEdition}** as the website preference. It is only a
+preference, not a decision. Do not connect, install, probe, authenticate, or run any command from
+this document.
+
+## Step 0 — Welcome and confirm the edition
+
+Your first reply must follow the model below in the user's language. Adapt it naturally, but do not
+run commands, probe a server, or claim Busabase is already connected. Ask no additional questions.
+
+> 👋 Welcome! This is **Busabase** (${site}) — an approval-first workspace for working safely
+> with AI agents. Your data lives in **Bases**, and I never change it directly: every change becomes
+> a **ChangeRequest** that you review before it reaches the real data. A wrong move stays a harmless
+> proposal until you approve it.
+>
+> Before I connect, which edition would you like to use?
+>
+> **A. Busabase Cloud** — No local setup and works across devices; requires account sign-in.
+> **B. Busabase Personal Desktop** — Data stays on this computer; requires a local app or server.
+
+After the user answers, always fetch and read the matching canonical document below, even when the
+answer matches the website preference:
+
+- **A / Cloud:** ${cloudUrl.toString()}
+- **B / Personal Desktop:** ${desktopUrl.toString()}
+
+The canonical document carries \`editionConfirmed=1\`, so it skips this choice and starts with the
+edition-specific connection workflow. Stop using this dispatcher as soon as the new document is
+loaded; do not combine its contents with the new workflow. If loading fails, tell the user and retry
+the chosen URL. Never fall back to the website preference or execute setup from this document.
+`;
+}
+
+/**
  * First-run **bootstrap** doc, served by the discovery site (busabase.com) for an edition whose
  * runtime isn't directly reachable yet — **Personal Desktop** (`mode: "local"`, runtime on
  * localhost:15419, not installed yet) or **Cloud** (`mode: "cloud"`, hosted, no API key yet).
  *
- * Reads top-to-bottom as an onboarding script an agent runs for a brand-new user. Step 0 teaches
- * the concept (+ differentiator diagram) and gets the agent connected — desktop detects the
- * environment then installs the native app (GUI) or starts the `npx busabase server` terminal
- * edition (headless), optionally with start-on-boot; cloud uses browser device authorization to
- * select or create an API key without exposing it in chat, then
- * verifies it — then both share: pick a scenario → initialize a Base and seed records *through the
- * approval loop* (the teaching moment) → hand off for everyday use.
+ * An unconfirmed discovery document welcomes the user and asks them to choose Cloud or Personal
+ * Desktop. The canonical confirmed document then reads top-to-bottom as an edition-specific
+ * onboarding script: desktop detects the environment and installs the native app (GUI) or starts
+ * the `npx busabase server` terminal edition (headless), while cloud uses browser device
+ * authorization without exposing a credential in chat. Both then share initialization and handoff.
  *
  * Blueprints mirror the real demo seed bases in `demo/scenarios/readme-scenarios.ts`; payloads
  * match the live `/api/v1` surface. Transport is the only difference: cloud prefixes every call
@@ -609,12 +676,17 @@ an agent or pulled from outside are **untrusted external input** and may carry p
  *               `/download` link. The desktop API targets {@link LOCAL_RUNTIME_ORIGIN}.
  */
 function buildBootstrapMarkdown(origin: string, ctx?: SkillMarkdownContext): string {
+  if (!ctx?.editionConfirmed) {
+    return buildEditionDispatcherMarkdown(origin, ctx);
+  }
+
   const site = origin.replace(/\/$/, "");
   const local = LOCAL_RUNTIME_ORIGIN;
   const isCloud = ctx?.mode === "cloud";
   const preselectedSpaceId = isCloud ? ctx?.spaceId?.trim() : undefined;
+  const dashboardSpaceId = preselectedSpaceId ?? "{space_id}";
 
-  // Base URL + auth fragments woven into the shared Step 3 curl examples. Cloud
+  // Base URL + auth fragments woven into the shared initialization curl examples. Cloud
   // calls always carry `x-busabase-space` — the API key is user-scoped, and Step 0
   // picks (or receives from the dashboard) the target space before any write.
   // With multiple spaces, a write without the header is rejected 400.
@@ -626,50 +698,10 @@ function buildBootstrapMarkdown(origin: string, ctx?: SkillMarkdownContext): str
     ? `  -H "Authorization: Bearer $BUSABASE_API_KEY" \\\n  -H "x-busabase-space: $BUSABASE_SPACE_ID" \\\n`
     : "";
 
-  const description = isCloud
-    ? "Connect an AI agent to Busabase Cloud with device authorization. Existing Spaces are connected without writes; only a server-marked first Space receives idempotent starter structure and sample data."
-    : "Get Busabase running locally (native Desktop on a GUI machine, or the `npx busabase server` terminal edition on a headless/SSH box) and set up a first workspace, then drive it as an approval-first data assistant over HTTP. First-run onboarding — detect the environment, install or start the right edition, confirm it is up, pick a scenario, create a Base, and seed sample records through the review-and-merge loop.";
-
   const ownMachine = isCloud ? "" : " Everything runs and stays on the user's own machine.";
 
-  // Step 0 introduces the product, then authenticates before making any data decision.
-  const welcomeOpening = `## Step 0 — Welcome the user first (no setup yet)
-
-Your **first message** to the user must be a warm, informative welcome **in the user's language** —
-not a wall of commands. Do **not** run any curl, install, or probe yet. Follow this five-beat
-shape and adapt the wording naturally:
-
-1. **Welcome & introduce** — greet them and introduce **Busabase** properly: what it is (an
-   *approval-first* workspace for working safely with AI agents) and its official site —
-   **${site}** — so they know where the product lives. Do **not** say it's already connected,
-   hooked up, or that you're working inside it — nothing is installed or connected yet; that's
-   what the next steps do. This beat is a pure introduction.
-2. **This is** — explain the core loop in a line or two: data lives in **Bases** (typed tables);
-   agents never edit them directly — every change is proposed as a **ChangeRequest**, the user
-   reviews and approves it, and only then is it merged into the real data.
-3. **Why it matters** — unlike a normal table, wiki, or Notion where an AI edit is instantly live,
-   here a wrong move stays a harmless proposal until they say yes. They keep control.
-4. **Together we can** — connect their existing Space without changing it, or initialize a
-   server-marked first Space with useful starter data.
-5. **Connect before asking about data.** Existing users finish after selecting a Space; only a
-   genuinely new Space needs a starter-scenario choice.
-
-Model opening — translate into their language and keep this voice:
-
-> 👋 Welcome! This is **Busabase** (${site}) — an *approval-first* workspace built for working
-> safely with AI agents. Your data lives in **Bases** (typed tables), and I never edit them
-> directly: every change I make is a **ChangeRequest** that you review — approve it and it merges,
-> reject it and it vanishes. A wrong move stays a harmless proposal until you say yes.
-> I'll connect securely first. If you already have a Space, I will only connect to it and leave
-> its structure and records untouched. If this is your first Space, I can initialize a small
-> starter workspace automatically.
-
-Conduct **everything** below in the user's language, then proceed directly to connection.`;
-
   const step0 = isCloud
-    ? `${welcomeOpening}
-
-### Then get connected
+    ? `## Step 0 — Connect to Busabase Cloud
 
 Busabase Cloud is hosted — nothing to install. Use RFC 8628 device authorization: it works on a
 local machine, over SSH, and in a container because the browser can be on any computer or phone.
@@ -677,7 +709,7 @@ The CLI saves the selected API key without printing it. Never ask the user to pa
 and never print or display \`~/.busabase/.env\`.
 
 \`\`\`bash
-npm exec -y --package busabase-cli@latest -- busabase-cli login --device-code${preselectedSpaceId ? ` --space-id ${preselectedSpaceId}` : ""}
+${BUSABASE_CLI} login --device-code --base-url ${site}${preselectedSpaceId ? ` --space-id ${preselectedSpaceId}` : ""}
 \`\`\`
 The terminal shows a short code and a verification URL, then waits. The user signs in, selects an
 existing API key or creates a new one, and approves in any browser. The browser never receives the
@@ -685,27 +717,41 @@ key secret; the waiting CLI receives and saves it through a one-time exchange. O
 prints a safe summary containing the selected Space plus
 \`createdSpace\` and \`bootstrapRequired\`; it never prints the credential.
 
+${
+  preselectedSpaceId
+    ? `The dashboard-supplied \`--space-id\` targets that Space explicitly, so login does not need a terminal
+Space selection.`
+    : `Login never blocks on a terminal Space selection, even if the agent's shell allocates a TTY: if the
+account belongs to more than one Space, it always accepts the server-resolved default (the one the
+user was most recently active in).`
+} The summary also includes
+\`availableSpaces\` (a list of every Space the account belongs to). Always tell the user which Space
+was selected (name + id) and, if it belongs to more than one, that they can say so and you'll switch
+with \`${BUSABASE_CLI} space use <id>\` — don't silently proceed to Step 1 on the default without
+surfacing this.
+
 \`\`\`bash
-set -a; . ~/.busabase/.env; set +a
-npm exec -y --package busabase-cli@latest -- busabase-cli whoami --output json
+${BUSABASE_CLI} whoami --output json
 \`\`\`
 
 Branch only on the server-owned state, never on whether a Space happens to be empty:
 
 ${preselectedSpaceId ? `- **Dashboard Space supplied (\`${preselectedSpaceId}\`)** → lock this as the target: never create or switch Spaces. Preselection does not decide whether initialization is required; continue by checking \`bootstrapRequired\`.` : ""}
 - **\`bootstrapRequired: false\`** → existing user/Space, including a preselected empty Space with no
-  bootstrap marker. Connect only and jump to Step 4 with zero structure or record writes.
+  bootstrap marker. Connect only and jump to Step 3 with zero structure or record writes.
 - **\`bootstrapRequired: true\`** → the selected Space was auto-created for this user and still carries
-  the persistent version-0 bootstrap marker. Ask the Step 2 scenario question, then initialize this
+  the persistent version-0 bootstrap marker. Ask the Step 1 scenario question, then initialize this
   Space even when the dashboard preselected it.
 
 An empty existing Space has no marker and is therefore connect-only. A retry after interrupted
-initialization still has the version-0 marker and safely resumes Step 3.`
-    : `${welcomeOpening}
+initialization still has the version-0 marker and safely resumes Step 2.
 
-### Then get connected
+If the code expires or authorization fails, explain what happened; if the user still wants to
+continue, rerun the same login command above once.`
+    : `## Step 0 — Connect to Busabase Personal Desktop
 
-Everything runs locally — no account, no API key. Once the user has answered, check whether the
+Everything runs locally — no account, no API key. The user has already confirmed this edition, so
+check whether the
 local app is already running (no authentication is needed locally):
 
 \`\`\`bash
@@ -722,7 +768,7 @@ Once it answers, **persist this connection** — the installed \`busabase\` skil
 session read it from \`~/.busabase/.env\`. Local needs only the base URL (no key):
 
 \`\`\`bash
-npx busabase-cli login --base-url "${local}"
+${BUSABASE_CLI} login --base-url "${local}"
 \`\`\`
 
 Prefer that over writing the file yourself — it verifies the server is reachable and open
@@ -732,8 +778,8 @@ before saving anything.
 "connect to this instead". Keep both by giving the local one its own account instead:
 
 \`\`\`bash
-npx busabase-cli login --profile local --base-url "${local}"   # adds an account, switches to it
-npx busabase-cli auth status                                   # see them all (* = active)
+${BUSABASE_CLI} login --profile local --base-url "${local}"   # adds an account, switches to it
+${BUSABASE_CLI} auth status                                   # see them all (* = active)
 \`\`\`
 
 Never write \`~/.busabase/.env\` by hand once more than one account exists. That file is a copy
@@ -748,12 +794,8 @@ printf 'BUSABASE_BASE_URL=%s\\n' "${local}" > ~/.busabase/.env
 \`\`\``;
 
   const step1 = isCloud
-    ? `## Step 1 — Device sign-in recovery
-
-Step 0 already runs the supported sign-in path. If authorization is denied or the code expires,
-run \`busabase-cli login --device-code\` again. If polling reports a network error, restore
-connectivity and retry. Never request, echo, inspect, or paste a credential in chat.`
-    : `## Step 1 — Install & start (pick the edition that fits this machine)
+    ? ""
+    : `## Step 1 — Install & start (pick the execution mode that fits this machine)
 
 Don't default to the GUI download — **first detect the environment**, because a headless / SSH /
 container box can't open a \`.dmg\`, but it can run the terminal server directly:
@@ -832,25 +874,6 @@ question, since some users would rather not install anything:
 If they have no preference, go with **A (Desktop)**. If they pick **B**, follow **Path A** above
 instead.
 
-### Path C — Cloud (only if the user explicitly asks for it)
-
-Don't offer Cloud proactively here — this walkthrough defaults to a local install. But if the user
-says they specifically want the hosted Cloud edition, support it instead of redirecting them to
-install anything:
-
-Use the same device sign-in as the Cloud setup. It works from this local/headless environment while
-the user approves in any browser, and saves the credential without exposing it:
-
-\`\`\`bash
-npm exec -y --package busabase-cli@latest -- busabase-cli login --device-code --base-url "${site}"${preselectedSpaceId ? ` --space-id ${preselectedSpaceId}` : ""}
-set -a; . ~/.busabase/.env; set +a
-\`\`\`
-
-For the rest of this walkthrough (Steps 2-4 below), every \`${local}\` call becomes
-   \`$BUSABASE_BASE_URL\` with \`-H "Authorization: Bearer $BUSABASE_API_KEY"\` and
-   \`-H "x-busabase-space: $BUSABASE_SPACE_ID"\` added — there is no local server to install
-   or start, so skip straight to Step 2 once the key verifies.
-
 **Desktop:** send the user to \`${site}/download\` — **macOS** \`.dmg\` (Apple Silicon / Intel),
 **Windows** \`.msi\`, **Linux** \`.AppImage\`. In plain words: download, install, and launch
 **Busabase** — it starts a local workspace automatically, no account. (You launch it yourself; to
@@ -865,7 +888,7 @@ until curl -fsS ${local}/api/v1/bases >/dev/null 2>&1; do sleep 2; done && echo 
     ? "(Every call carries `x-busabase-space: $BUSABASE_SPACE_ID` — the space picked in Step 0. The API key is user-scoped, so do not omit the header.)"
     : "(No `spaceId` in local mode.)";
 
-  const step4 = `## Step 4 — The last setup step: install the permanent skills
+  const step4 = `## Step ${isCloud ? 3 : 4} — The last setup step: install the permanent skills
 
 One step left before everyday use. Install both permanent skills so any agent on this machine can
 drive this workspace with **busabase** and create complete workspace apps with
@@ -896,13 +919,29 @@ Tell them so, and close the journey with the tracker fully checked — e.g.:
 > 🎉 *You're all set — Busabase is connected, your first workspace is live, and both skills are
 > installed. From here it's everyday use: I propose, you approve, we merge — and I can build a
 > complete workspace app when you need one.*
+${
+  isCloud
+    ? `
+Finish the congratulations with a clickable Markdown link labeled **Open Busabase Dashboard**.
+${
+  preselectedSpaceId
+    ? `Step 0 locked the Space ID used below; before replying, verify login confirmed that same Space.`
+    : `Replace \`{space_id}\` with the real Space ID that Step 0 confirmed and saved as
+\`BUSABASE_SPACE_ID\` before replying.`
+}
+Never show \`$BUSABASE_SPACE_ID\`, \`{space_id}\`, \`YOUR_SPACE_ID\`, or any other placeholder
+literally to the user. The user's final line must be:
+
+> 🔗 [Open Busabase Dashboard](${site}/dashboard/${dashboardSpaceId}/home)`
+    : ""
+}
 
 Normal agent work remains review-first. Only the versioned system-onboarding initializer may use
 \`autoMerge\` for starter structure and sample records.`;
 
   return `---
 name: busabase
-description: ${description}
+description: ${SETUP_SKILL_DESCRIPTION}
 ---
 
 # Busabase — first-run setup
@@ -910,8 +949,9 @@ description: ${description}
 This document walks you (the agent) — and through you, the user — from nothing to a working,
 populated workspace, then installs the permanent \`busabase\` and \`busabase-app-creator\` skills
 for everyday use and workspace app creation.${ownMachine}
-Work top to bottom, **in the user's language**. (You'll explain what Busabase is in Step 0's
-welcome — no need to recite it here.)
+The user already confirmed this edition in the preceding dispatcher (or entered through an
+authoritative Dashboard/local-app link). Work top to bottom, **in the user's language**, starting
+with connection. Do not welcome them again and do not ask them to choose an edition again.
 
 ## The journey at a glance — and how to run it
 
@@ -919,10 +959,10 @@ You are guiding the user through four milestones. Existing users skip initializa
 
 | # | Milestone | Covered by | Done when |
 | - | --------- | ---------- | --------- |
-| 1 | 🔌 **Connect** | Step 0 + Step 1 | device login returns the selected Space |
-| 2 | 🏗️ **Initialize if required** | Step 2 + Step 3 | version-0 Space gets starter data |
-| 3 | ✅ **Verify** | Step 3 | starter records read back and marker becomes version 1 |
-| 4 | 🎓 **Skills installed** | Step 4 | both skills selected by \`npx skills add\`, 🎉 |
+| 1 | 🔌 **Connect** | ${isCloud ? "Step 0" : "Step 0 + Step 1"} | ${isCloud ? "device login returns the selected Space" : "the local API responds and the connection is saved"} |
+| 2 | 🏗️ **Initialize if required** | ${isCloud ? "Step 1 + Step 2" : "Step 2 + Step 3"} | version-0 Space gets starter data |
+| 3 | ✅ **Verify** | Step ${isCloud ? 2 : 3} | starter records read back and marker becomes version 1 |
+| 4 | 🎓 **Skills installed** | Step ${isCloud ? 3 : 4} | both skills selected by \`npx skills add\`, 🎉 |
 
 **Conduct rules — these create the step-by-step feel; follow them at every turn:**
 
@@ -941,7 +981,7 @@ You are guiding the user through four milestones. Existing users skip initializa
   translate results into plain language. Only show a command when the user must run it (e.g.
   completing device authorization in the browser).
 - **Small numbered sub-plans for anything multi-part.** When a milestone has several moves (e.g.
-  Step 3: inspect → create → seed → verify), tell the user the mini-plan first ("three quick
+  Step ${isCloud ? 2 : 3}: inspect → create → seed → verify), tell the user the mini-plan first ("three quick
   things: …"), then tick through it.
 
 Here is the first move.
@@ -950,11 +990,12 @@ ${step0}
 
 ${step1}
 
-## Step 2 — Choose a starter only for a new Space
+## Step ${isCloud ? 1 : 2} — Choose a starter only for a new Space
 
-Enter this step whenever Step 0 returned \`bootstrapRequired: true\`, including when the dashboard
-preselected the target Space. Ask one low-cost question. If the user says "just go ahead", use Knowledge Base.
-Existing users never see this question and receive zero data writes:
+Enter this step when Cloud Step 0 returned \`bootstrapRequired: true\` (including a dashboard-
+preselected Space), or when Personal Desktop Step 0 returned an empty Base list. Ask one low-cost
+question. If the user says "just go ahead", use Knowledge Base. Existing users never see this
+question and receive zero data writes:
 
 | # | Blueprint | Good for |
 | - | --------- | -------- |
@@ -987,7 +1028,7 @@ types (\`auto_number\`, \`created_time\`, \`ai_summary\`, \`ai_tags\`, …).
   (email), \`stage\` (select: lead/qualified/customer/churned), \`notes\` (longtext), \`last_touch\`
   (date).
 
-## Step 3 — Initialize automatically and idempotently
+## Step ${isCloud ? 2 : 3} — Initialize automatically and idempotently
 
 This is a deliberate exception to the everyday approval loop. The user already chose a starter
 for a server-marked new Space, so create its small example structure and records directly. Do not

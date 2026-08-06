@@ -3,7 +3,8 @@
  * the public read API. The inverse of `apply`.
  *
  * Rewrites the three id-bearing option keys back to slug references, drops everything
- * the format has no slot for (ids, history, permissions), and enforces the format's
+ * the format has no slot for (ids, history, permissions), carries the bytes behind
+ * every Doc's inline images (see {@link collectDocAssets}), and enforces the format's
  * self-containment rule: a relation may not leave the package.
  */
 
@@ -17,12 +18,15 @@ import {
   type PackageView,
 } from "busabase-contract/domains/package/types";
 import type { PackageClient } from "./client";
+import { collectDocAssetIds, reportUnresolvableDocAssets } from "./doc-asset-refs";
 import {
   guessMimeType,
+  type PackageDocAsset,
   type PackageFileEntry,
   type PackageNode,
   type PackageTree,
   sortNodes,
+  walkNodes,
 } from "./tree";
 
 /** The subset of `nodes.list`'s output export walks. */
@@ -73,9 +77,56 @@ export const collectPackageTree = async (
 ): Promise<PackageTree> => {
   const children = root.children ?? [];
   const nodes = await collectNodes(client, children, options);
-  const tree: PackageTree = { manifest: { ...options.manifest, format: PACKAGE_FORMAT }, nodes };
+  const tree: PackageTree = {
+    manifest: { ...options.manifest, format: PACKAGE_FORMAT },
+    nodes,
+    assets: await collectDocAssets(client, nodes, options),
+  };
   assertSelfContained(tree, options);
   return tree;
+};
+
+/**
+ * The bytes behind every `![](/api/assets/{id}/raw)` in every exported Doc.
+ *
+ * A Doc's images are the one part of a Doc that is not in its markdown, and
+ * before this they were simply left behind: the body travelled, the bytes did
+ * not, and the install produced a Doc full of dead links. Carrying them is what
+ * makes a Doc portable at all.
+ *
+ * Downloaded through `assets.download`, which is the same gate the Doc's own
+ * reader goes through (a Doc-embedded image has a `doc` usage, so it is exactly
+ * as readable as the Doc) and which hands back the metadata the target needs to
+ * re-create the asset: name, mime type, content hash.
+ *
+ * One unreadable image never fails the export — see {@link assertSelfContained}.
+ */
+const collectDocAssets = async (
+  client: PackageClient,
+  nodes: readonly PackageNode[],
+  options: CollectOptions,
+): Promise<PackageDocAsset[]> => {
+  const assets: PackageDocAsset[] = [];
+  for (const assetId of collectDocAssetIds(nodes)) {
+    try {
+      const detail = await client.assets.download({ assetId });
+      assets.push({
+        assetId,
+        fileName: detail.fileName,
+        mimeType: detail.mimeType,
+        contentHash: detail.contentHash ?? undefined,
+        // See CollectOptions.baseUrl — a local server's download url is root-relative.
+        bytes: await downloadBytes(detail.downloadUrl, detail.fileName, options),
+      });
+    } catch (error) {
+      // Deleted, or unreadable by whoever is exporting. Name it and carry on:
+      // the doc, and every image that DID download, still ship.
+      options.warn(
+        `Could not read the image ${assetId} embedded in a doc (${error instanceof Error ? error.message : String(error)}). The package ships without it.`,
+      );
+    }
+  }
+  return assets;
 };
 
 const collectNodes = async (
@@ -449,9 +500,36 @@ const downloadBytes = async (
  * package, or a relation value pointing at a record that isn't, would install as a
  * dangling reference — so export fails naming the field and the external base rather
  * than emitting it.
+ *
+ * A Doc referencing an image the package does not carry breaks the same rule, and
+ * is checked here too — but as a WARNING, not an error, and the asymmetry is
+ * deliberate:
+ *
+ *   • An out-of-package relation is a CORRECTNESS hazard the exporter can always
+ *     fix: base slugs are unique per space, so on the target the relation would
+ *     silently bind to whatever base happens to own that slug — someone else's
+ *     data, wired up wrong, with no error. Refusing is the only safe answer, and
+ *     "export a subtree that includes both Bases" is a remedy the user has.
+ *   • A missing Doc image is a DEGRADATION with no remedy at export time. It gets
+ *     here only when the bytes could not be read at all (the asset was deleted,
+ *     or the exporter cannot see it) — retrying the export changes nothing.
+ *     Failing would mean one dead image in one doc makes the entire workspace
+ *     unexportable, which trades a broken image for a broken export. Nothing
+ *     installs wrong because of it: the reference simply stays unresolved, and
+ *     `apply` says so again on the target.
+ *
+ * So the rule the format actually enforces is: never ship a reference that would
+ * resolve to the WRONG thing; do warn about one that resolves to nothing.
  */
 const assertSelfContained = (tree: PackageTree, options: CollectOptions): void => {
-  const baseNodes = [...walk(tree.nodes)].filter((node) => node.type === "base");
+  const carriedAssetIds = new Set((tree.assets ?? []).map((asset) => asset.assetId));
+  for (const node of walkNodes(tree.nodes)) {
+    if (node.type !== "doc") continue;
+    const warning = reportUnresolvableDocAssets(node.slug, node.body, carriedAssetIds);
+    if (warning) options.warn(warning);
+  }
+
+  const baseNodes = [...walkNodes(tree.nodes)].filter((node) => node.type === "base");
   const packagedBaseSlugs = new Set(baseNodes.map((node) => node.slug));
   const packagedRecordKeys = new Set(
     baseNodes.flatMap((node) =>
@@ -486,12 +564,5 @@ const assertSelfContained = (tree: PackageTree, options: CollectOptions): void =
         `Base "${node.slug}" has ${dangling} relation value(s) pointing at records outside the exported subtree — they were dropped.`,
       );
     }
-  }
-};
-
-const walk = function* (nodes: readonly PackageNode[]): Generator<PackageNode> {
-  for (const node of nodes) {
-    yield node;
-    if (node.type === "folder") yield* walk(node.children);
   }
 };

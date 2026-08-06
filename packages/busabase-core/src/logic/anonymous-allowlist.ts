@@ -14,6 +14,22 @@
  * (`/api/rpc/__batch__`), which arrives as ONE request path but fans out into
  * many procedure calls. This list is therefore consulted from per-procedure
  * oRPC middleware, so every call — batched or not — passes through it.
+ *
+ * SCOPE — this list governs oRPC PROCEDURES ONLY. A host may also expose a
+ * non-RPC anonymous surface as a plain route handler, which never reaches this
+ * middleware and so can never be gated from here. One exists today, and an
+ * audit of "what can a logged-out visitor reach" has to read it too:
+ *
+ *   `GET /api/assets/{assetId}/raw` — an asset's bytes, in
+ *   `apps/busabase/src/app/api/assets/…` and
+ *   `apps/busabase-cloud/src/app/api/assets/…`. It is not listed here (an entry
+ *   would be inert, and the nearest procedure — `assets.download` — is a wider
+ *   surface than the route). It is safe for the reason this list exists: it
+ *   performs exactly one read, through `resolveAssetContent` →
+ *   `assertAssetPermission(id, "read")`, which is usage-backed and therefore
+ *   node-ACL'd — an anonymous visitor reaches an image only as far as the Doc
+ *   embedding it is publicly shared. Any FUTURE non-RPC anonymous route must
+ *   clear the same bar and be recorded here.
  */
 
 import { ORPCError } from "@orpc/server";

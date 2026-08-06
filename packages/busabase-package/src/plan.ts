@@ -331,6 +331,10 @@ export const countTree = (tree: PackageTree): PlanCounts => {
         break;
     }
   }
+  // Doc images are real files in the package and real uploads on install, so the
+  // file-count cap has to see them — a package could otherwise carry 5000 images
+  // under a cap that only counted nodes.
+  counts.files += (tree.assets ?? []).length;
   return counts;
 };
 

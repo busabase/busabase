@@ -136,6 +136,22 @@ export const installFromGithub = async (input: InstallFromGithubDTO): Promise<In
   const result = await applyInstall(client, plan, {
     autoMerge,
     submittedBy: `install ${source.owner}/${source.repo} (${plan.tree.manifest.name})`,
+    // `applyInstall` needs an origin to resolve a root-relative upload url
+    // against (the shape a local-disk `STORAGE_URL` hands out — see its
+    // `serverUrl` doc). `createInProcessClient()` above skips HTTP entirely for
+    // every oRPC call, but an uploaded asset's bytes still go over a real
+    // `fetch()` PUT, so this one path needs a real address to loop back to. The
+    // process IS that server, listening on `PORT` when it is set — Docker, the
+    // desktop sidecar, and `busabase-cli`'s launcher all set it explicitly.
+    //
+    // This router is shared by both hosts (`busabase-core`'s kernel), so it
+    // cannot default to either app's dev port when `PORT` is unset — busabase's
+    // is 15419, busabase-cloud's is Next's own default 3000, and guessing wrong
+    // would silently misdirect the other host. `PORT` unset only happens in a
+    // bare `pnpm dev` inner loop anyway, never in a real distribution, and cloud
+    // production never reaches this branch at all (S3 hands back an absolute
+    // presigned url, which `resolveUploadUrl` uses as-is).
+    serverUrl: process.env.PORT ? `http://localhost:${process.env.PORT}` : undefined,
   });
 
   return {

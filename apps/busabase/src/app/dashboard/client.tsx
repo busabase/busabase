@@ -7,6 +7,7 @@ import { BusabaseDashboard } from "busabase-core/dashboard";
 import { CreateNodeModal } from "busabase-core/dashboard/create-node-modal";
 import { EmptyAgentGuide } from "busabase-core/dashboard/empty-agent-guide";
 import { InstallFromGithubModal } from "busabase-core/dashboard/install-from-github-modal";
+import { BusabaseDashboardRouteRenderer } from "busabase-core/dashboard/route-renderer";
 import { getBusabaseDashboardRoutes as getDashboardRoutes } from "busabase-core/dashboard/routes";
 import { useLazyNodeChildren } from "busabase-core/dashboard/use-lazy-node-children";
 import { useMoveNode } from "busabase-core/dashboard/use-move-node";
@@ -18,7 +19,7 @@ import { addDemoParam } from "openlib/ui/dashboard";
 import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { BusabaseDashboardShell } from "~/components/dashboard/busabase-dashboard-shell";
 import { DashboardNotFound } from "~/components/spa/not-found";
-import { SPARouteRenderer } from "~/components/spa/spa-route-renderer";
+
 import { SPAWrapper } from "~/components/spa/spa-wrapper";
 import { getSecondarySidebarNav } from "~/config/navigation-nested";
 import { SUPPORTED_LOCALES } from "~/i18n/config";
@@ -261,7 +262,7 @@ function DashboardClientContent({ initialPath = "/home", localUserName }: Dashbo
   ) : isLoadingDashboardData ? (
     <DashboardShellSkeleton chromeless={chromeless} />
   ) : (
-    <SPARouteRenderer
+    <BusabaseDashboardRouteRenderer
       NotFoundComponent={DashboardNotFound}
       className="flex min-h-0 flex-1 flex-col"
       routes={routes}

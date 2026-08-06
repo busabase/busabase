@@ -68,10 +68,38 @@ export type PackageNode =
   | PackageFileTreeNode
   | PackageFileNode;
 
+/**
+ * One image a Doc body embeds, carried with the package so it survives the move
+ * to another host.
+ *
+ * A Doc is exported as its markdown body, and that body references images by
+ * ASSET (`![](/api/assets/{assetId}/raw)`). Asset ids are host-local, so the
+ * bytes have to travel too — and they cannot travel as `file` nodes (that would
+ * add junk nodes beside the Doc) or inside a node's subtree (a single image may
+ * be referenced by several Docs). They travel package-wide, keyed by the SOURCE
+ * asset id, which is exactly what install needs to build its old→new id map.
+ */
+export interface PackageDocAsset {
+  /** The id on the host this was exported from — what the Doc bodies reference. */
+  assetId: string;
+  /** Original file name, e.g. `architecture.png`. */
+  fileName: string;
+  mimeType: string;
+  /** `sha256:<hex>` when the source host reported one. */
+  contentHash?: string;
+  bytes: Buffer;
+}
+
 export interface PackageTree {
   manifest: PackageManifest;
   /** Top-level nodes under `content/`. */
   nodes: PackageNode[];
+  /**
+   * Bytes for the images the `content/` Docs embed, deduped by source asset id.
+   * Optional because a package with no Doc images carries none — an absent
+   * `assets/` directory and an empty one mean the same thing.
+   */
+  assets?: PackageDocAsset[];
 }
 
 // ── Validation (§6.3) ────────────────────────────────────────────────────────

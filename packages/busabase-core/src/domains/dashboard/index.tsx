@@ -2164,7 +2164,7 @@ function BusabaseDashboardContent({
           isConflictErrorMessage(error) ? (
             <ReviewConflictPanel message={error} />
           ) : (
-            <div className="border-red-200 border-b bg-red-50 px-4 py-2 text-red-800 text-sm">
+            <div className="border-rejected/35 border-b bg-rejected/17 px-4 py-2 text-rejected-strong text-sm">
               {error}
             </div>
           )
@@ -2191,7 +2191,7 @@ function BusabaseDashboardContent({
           isConflictErrorMessage(error) ? (
             <ReviewConflictPanel message={error} />
           ) : (
-            <div className="border-red-200 border-b bg-red-50 px-4 py-2 text-red-800 text-sm">
+            <div className="border-rejected/35 border-b bg-rejected/17 px-4 py-2 text-rejected-strong text-sm">
               {error}
             </div>
           )

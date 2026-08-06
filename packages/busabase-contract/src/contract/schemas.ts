@@ -205,7 +205,11 @@ const updateNodeMetadataInputSchema = z.object({
 // exact-match-first.
 const searchNodesByNameInputSchema = z.object({
   query: z.string().min(1),
-  limit: z.number().int().min(1).max(50).optional().default(20),
+  // GET route — query params arrive as strings, and oRPC's OpenAPI handler
+  // does not coerce them. A bare `z.number()` here rejected every real
+  // `?limit=` call with "expected number, received string"; every other
+  // limit/page field on a GET route in this file already uses `z.coerce`.
+  limit: z.coerce.number().int().min(1).max(50).optional().default(20),
 });
 
 const nodeSearchResultSchema = z.object({

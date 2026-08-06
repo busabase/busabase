@@ -110,33 +110,45 @@ test("bullet, ordered, and task lists — checkbox toggle persists", async ({ pa
   await page.goto(`/dashboard/local/doc/${slug}`);
   const editor = await enterEditMode(page);
 
-  // Markdown shortcuts race if fired without letting each transaction settle (a
-  // leading "1. " right after exiting a bullet list can merge into the previous
-  // item's text instead of starting a new ordered list — this reproduced
-  // intermittently even with a 150ms pause, so waiting for the exited-list's
-  // trailing empty paragraph to actually become a direct child of `.ProseMirror`
-  // is the reliable signal, not a fixed timeout).
+  // Markdown shortcuts race with unpaced typing. `keyboard.type()` defaults to
+  // zero delay, so the whole line can arrive inside one input event and the
+  // rule that turns "1. " into a list either fires against text that already
+  // moved on, or fires late and swallows the wrong span — the observed failure
+  // was an <ol> whose only text was "1.", with "ordered a" nowhere in it.
+  // Fixed pauses only make that rarer (this test already had 200ms ones and
+  // still failed roughly one run in three).
+  //
+  // So: pace the keystrokes, and never type a list's CONTENT until the list
+  // element the marker was supposed to create actually exists. That turns the
+  // ordering guarantee into a web-first assertion instead of a bet on timing.
+  const type = (text: string) => page.keyboard.type(text, { delay: 15 });
   const typeLine = async (text: string) => {
-    await page.keyboard.type(text);
-    await page.waitForTimeout(200);
+    await type(text);
     await page.keyboard.press("Enter");
-    await page.waitForTimeout(200);
+  };
+  /** Type the marker, wait for the list it creates, then type the item text. */
+  const startList = async (marker: string, listSelector: string, text: string) => {
+    await type(marker);
+    await expect(editor.locator(listSelector).last()).toBeVisible();
+    await typeLine(text);
   };
   const exitList = async () => {
     await page.keyboard.press("Enter"); // empty item exits the list
     await expect(editor.locator("> p").last()).toBeVisible();
-    await page.waitForTimeout(200);
   };
 
-  await typeLine("- bullet a");
+  await startList("- ", "ul", "bullet a");
   await typeLine("bullet b");
   await exitList();
 
-  await typeLine("1. ordered a");
+  await startList("1. ", "ol", "ordered a");
   await typeLine("ordered b");
   await exitList();
 
-  await typeLine("- [ ] task a");
+  // A task item is a bullet item Milkdown decorates with its own checkbox icon
+  // (there is no native <input>), so the marker's effect to wait for is that
+  // icon appearing — see the toggle assertions below.
+  await startList("- [ ] ", ".milkdown-icon.label", "task a");
   await typeLine("task b");
   await page.keyboard.press("Enter");
 
@@ -293,10 +305,15 @@ test("image block uploads a file as a real Asset, and deleting it removes both",
   const image = editor.locator("img[data-type='image-block']");
   await expect(image).toBeVisible();
   const src = await image.getAttribute("src");
-  // Local storage is served from the production `/api/storage` route, not the
-  // dev-only `/api/dev/attachment` one — see `STORAGE_URL`'s `base_url=` in
-  // `.env.example`, which this suite copies verbatim.
-  expect(src).toMatch(/^\/api\/storage\//);
+  // The invariant that matters is that the body references the ASSET, not a
+  // storage location. This assertion has now chased the storage route twice —
+  // `/api/dev/attachment/`, then `/api/storage/` — which is exactly the coupling
+  // being removed: a body that names a location is wrong the moment the location
+  // moves. It names an asset id instead, and the location is resolved per request
+  // (see packages/busabase-core/src/domains/assets/utils/asset-content-url.ts).
+  // `/api/storage/` is still where the bytes come from — one redirect later, which
+  // the round-trip assertion below follows.
+  expect(src).toMatch(/^\/api\/assets\/[A-Za-z0-9_-]+\/raw$/);
 
   await saveAndExitEditMode(page);
   const savedBody = await getDocBody(request, slug);
@@ -305,6 +322,25 @@ test("image block uploads a file as a real Asset, and deleting it removes both",
   // `![](url)` shape.
   expect(savedBody).toContain(src);
   expect(savedBody).toMatch(/!\[[^\]]*\]\(.*\)/);
+  // No storage path may leak into durable user content.
+  expect(savedBody).not.toContain("/api/dev/attachment/");
+  expect(savedBody).not.toContain("/api/storage/");
+
+  // The stable URL must actually serve the bytes: a 302 to wherever storage
+  // currently is, and the redirect chain ends on the uploaded PNG.
+  const redirect = await request.get(src as string, { maxRedirects: 0 });
+  expect(redirect.status()).toBe(302);
+  const followed = await request.get(src as string);
+  expect(followed.status()).toBe(200);
+  expect(Buffer.from(await followed.body()).equals(Buffer.from(pngBase64, "base64"))).toBe(true);
+
+  // The embed registers a where-used entry, so the Asset library knows the Doc
+  // still shows it (this is what protects the bytes from being GC'd/deleted).
+  const assetId = (src as string).split("/")[3];
+  const assetDetail = await json<{ usages: { nodeType: string; nodeSlug: string }[] }>(
+    await request.get(`/api/v1/assets/${assetId}`),
+  );
+  expect(assetDetail.usages.some((u) => u.nodeType === "doc" && u.nodeSlug === slug)).toBe(true);
 
   await page.getByRole("button", { name: "Edit" }).click();
   await expect(page.getByRole("button", { name: "Save Now" })).toBeVisible();

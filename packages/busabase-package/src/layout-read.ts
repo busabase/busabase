@@ -8,8 +8,13 @@
  *   3. any other directory          → folder (optional `_folder.json`)
  *   4. `*.md`                       → doc (YAML frontmatter + body)
  *   5. any other file               → file node (optional `<name>.node.json`)
+ *
+ * Outside `content/`, the optional `assets/` directory carries the bytes for the
+ * images the Docs embed — see {@link readDocAssets}. Nothing in there is a node.
  */
 import {
+  PACKAGE_ASSET_META_SUFFIX,
+  PACKAGE_ASSETS_DIRNAME,
   PACKAGE_BASE_FILENAME,
   PACKAGE_CONTENT_DIRNAME,
   PACKAGE_FOLDER_META_FILENAME,
@@ -20,6 +25,7 @@ import {
   PACKAGE_NODE_META_SUFFIX,
   PACKAGE_RECORDS_FILENAME,
   PackageBaseSchema,
+  PackageDocAssetMetaSchema,
   PackageDocFrontmatterSchema,
   PackageFileNodeMetaSchema,
   PackageFileTreeNodeMetaSchema,
@@ -35,6 +41,7 @@ import {
   assertSafeNodeSlug,
   guessMimeType,
   humanizeSlug,
+  type PackageDocAsset,
   type PackageDocNode,
   type PackageFileEntry,
   type PackageNode,
@@ -132,7 +139,36 @@ export const readPackageTree = (
 
   const contentDir = `${root}${PACKAGE_CONTENT_DIRNAME}/`;
   const nodes = readNodes(files, contentDir);
-  return { manifest, nodes };
+  return { manifest, nodes, assets: readDocAssets(files, root) };
+};
+
+/**
+ * `assets/` — the bytes for the images the Docs embed. Driven off the sidecars,
+ * not off the byte files: the sidecar is what carries the source asset id, so a
+ * stray file with no `.asset.json` beside it is simply not an asset this package
+ * declares, and is ignored rather than guessed at.
+ *
+ * A sidecar whose bytes are missing IS an error — the package promises an image
+ * it cannot deliver, and installing it would produce exactly the dead-link Doc
+ * this whole mechanism exists to prevent. That is a corrupt archive (a partial
+ * checkout, a mangled zip), not a content decision the author made.
+ */
+const readDocAssets = (files: PackageFiles, root: string): PackageDocAsset[] => {
+  const dir = `${root}${PACKAGE_ASSETS_DIRNAME}/`;
+  const assets: PackageDocAsset[] = [];
+  for (const filePath of [...files.keys()].sort()) {
+    if (!filePath.startsWith(dir) || !filePath.endsWith(PACKAGE_ASSET_META_SUFFIX)) continue;
+    const meta = zodParse(PackageDocAssetMetaSchema, parseJsonFile(files, filePath), filePath);
+    const bytesPath = filePath.slice(0, -PACKAGE_ASSET_META_SUFFIX.length);
+    const bytes = files.get(bytesPath);
+    if (!bytes) {
+      throw new Error(
+        `${filePath} describes asset "${meta.assetId}" but its bytes are missing (expected ${bytesPath}). The package is incomplete — nothing was installed.`,
+      );
+    }
+    assets.push({ ...meta, bytes });
+  }
+  return assets;
 };
 
 /**
