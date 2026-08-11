@@ -1,0 +1,106 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 860" font-family="Inter, Helvetica, Arial, sans-serif">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#8A8A8A"/>
+    </marker>
+    <style>
+      .card { fill: #FFFFFF; stroke: #E5E5E5; stroke-width: 1.5; rx: 12; }
+      .card-muted { fill: #F5F5F5; stroke: #E5E5E5; stroke-width: 1.5; rx: 12; }
+      .card-dark { fill: #171717; stroke: #171717; stroke-width: 1.5; rx: 12; }
+      .card-line { fill: #FFFFFF; stroke: #D9D9D9; stroke-width: 1.5; stroke-dasharray: 4 3; rx: 14; }
+      .title { font-size: 16px; font-weight: 700; fill: #0A0A0A; }
+      .title-inv { font-size: 15px; font-weight: 700; fill: #FAFAFA; }
+      .sub { font-size: 11px; fill: #737373; }
+      .sub-inv { font-size: 11px; fill: #D4D4D4; }
+      .group-title { font-size: 12.5px; font-weight: 700; fill: #525252; letter-spacing: 0.04em; text-transform: uppercase; }
+      .edge { stroke: #C7C7C7; stroke-width: 1.5; fill: none; marker-end: url(#arrow); }
+      .edge-label { font-size: 10.5px; fill: #737373; }
+      .pill { fill: #FFFFFF; stroke: #E5E5E5; stroke-width: 1.2; rx: 8; }
+      .pill-text { font-size: 11px; fill: #171717; font-weight: 600; }
+      .pill-sub { font-size: 9.5px; fill: #A3A3A3; }
+      .badge { fill: #F0F0F0; stroke: #D9D9D9; stroke-width: 1; rx: 6; }
+      .badge-text { font-size: 10px; fill: #404040; font-weight: 700; }
+    </style>
+  </defs>
+
+  <rect width="1200" height="860" fill="#FFFFFF"/>
+
+  <text x="30" y="34" class="title">Busabase — Architecture</text>
+  <rect x="290" y="16" width="150" height="22" class="badge"/>
+  <text x="365" y="32" text-anchor="middle" class="badge-text">OPEN SOURCE · SELF-HOSTED</text>
+  <text x="30" y="56" class="sub">Local-first "review database" — single-tenant, no login, driven by external AI agents over OpenAPI/oRPC</text>
+
+  <!-- Clients -->
+  <rect x="30" y="90" width="1140" height="90" class="card-line"/>
+  <text x="600" y="114" text-anchor="middle" class="group-title">Clients</text>
+
+  <rect x="50" y="128" width="200" height="40" class="pill"/><text x="150" y="152" text-anchor="middle" class="pill-text">Web Dashboard</text>
+  <rect x="266" y="128" width="200" height="40" class="pill"/><text x="366" y="152" text-anchor="middle" class="pill-text">busabase-cli</text>
+  <rect x="482" y="128" width="200" height="40" class="pill"/><text x="582" y="152" text-anchor="middle" class="pill-text">Desktop (Tauri)</text>
+  <rect x="698" y="128" width="200" height="40" class="pill"/><text x="798" y="152" text-anchor="middle" class="pill-text">Mobile</text>
+  <rect x="914" y="128" width="236" height="40" class="pill"/><text x="1032" y="152" text-anchor="middle" class="pill-text">External AI Agent (Claude Code, Cursor…)</text>
+
+  <!-- App shell -->
+  <rect x="30" y="210" width="1140" height="110" class="card-muted"/>
+  <text x="600" y="234" text-anchor="middle" class="group-title">apps/busabase — Next.js App Router (thin shell)</text>
+
+  <rect x="50" y="250" width="270" height="50" class="pill"/>
+  <text x="185" y="270" text-anchor="middle" class="pill-text">settings · vault · webhook</text>
+  <text x="185" y="286" text-anchor="middle" class="pill-sub">only app-level domains</text>
+
+  <rect x="335" y="250" width="270" height="50" class="pill"/>
+  <text x="470" y="270" text-anchor="middle" class="pill-text">Fixed local actor</text>
+  <text x="470" y="286" text-anchor="middle" class="pill-sub">no auth gateway, no space concept</text>
+
+  <rect x="620" y="250" width="270" height="50" class="pill"/>
+  <text x="755" y="270" text-anchor="middle" class="pill-text">OpenAPI / oRPC surface</text>
+  <text x="755" y="286" text-anchor="middle" class="pill-sub">what CLI + agents call</text>
+
+  <rect x="905" y="250" width="245" height="50" class="pill"/>
+  <text x="1027" y="270" text-anchor="middle" class="pill-text">workspace: "local"</text>
+  <text x="1027" y="286" text-anchor="middle" class="pill-sub">/dashboard/local/inbox</text>
+
+  <!-- Shared engine -->
+  <rect x="30" y="350" width="1140" height="260" class="card"/>
+  <text x="600" y="374" text-anchor="middle" class="group-title">busabase-core — shared engine (also used by busabase-cloud)</text>
+
+  <text x="50" y="398" class="sub" font-weight="700">Review primitives (human-in-the-loop)</text>
+  <rect x="50" y="408" width="1120" height="40" class="pill"/>
+  <text x="610" y="432" text-anchor="middle" class="pill-text">Nodes · Commits · Change Requests · Operations · Reviews · Comments · Audit Events</text>
+
+  <text x="50" y="470" class="sub" font-weight="700">Content domains</text>
+  <rect x="50" y="480" width="170" height="46" class="pill"/><text x="135" y="500" text-anchor="middle" class="pill-text">base</text><text x="135" y="516" text-anchor="middle" class="pill-sub">tables/fields/records/views</text>
+  <rect x="230" y="480" width="170" height="46" class="pill"/><text x="315" y="500" text-anchor="middle" class="pill-text">assets</text><text x="315" y="516" text-anchor="middle" class="pill-sub">assets · usages · text</text>
+  <rect x="410" y="480" width="170" height="46" class="pill"/><text x="495" y="500" text-anchor="middle" class="pill-text">doc / rich-node</text><text x="495" y="516" text-anchor="middle" class="pill-sub">documents</text>
+  <rect x="590" y="480" width="170" height="46" class="pill"/><text x="675" y="500" text-anchor="middle" class="pill-text">drive / folder / filetree</text><text x="675" y="516" text-anchor="middle" class="pill-sub">file hierarchy</text>
+  <rect x="770" y="480" width="170" height="46" class="pill"/><text x="855" y="500" text-anchor="middle" class="pill-text">form</text><text x="855" y="516" text-anchor="middle" class="pill-sub">structured intake</text>
+  <rect x="950" y="480" width="220" height="46" class="pill"/><text x="1060" y="500" text-anchor="middle" class="pill-text">airapp / skill / install</text><text x="1060" y="516" text-anchor="middle" class="pill-sub">extensibility</text>
+
+  <text x="50" y="550" class="sub">Context threaded via AsyncLocalStorage: { db, actorId, spaceId } — OSS never sets it, so every</text>
+  <text x="50" y="566" class="sub">getter falls back to local-mode defaults (ANONYMOUS_ACTOR_ID, "local-user", LOCAL_SPACE_ID)</text>
+  <text x="50" y="588" class="sub" font-weight="700">→ single-tenant by construction, no spaceId column on any table.</text>
+
+  <!-- Storage -->
+  <rect x="30" y="630" width="560" height="130" class="card-dark"/>
+  <text x="310" y="658" text-anchor="middle" class="title-inv">Drizzle ORM</text>
+  <text x="310" y="682" text-anchor="middle" class="sub-inv">PGlite (embedded, default) — zero setup</text>
+  <text x="310" y="700" text-anchor="middle" class="sub-inv">or external PostgreSQL via PG_DATABASE_URL</text>
+  <text x="310" y="722" text-anchor="middle" class="sub-inv">Local filesystem storage (default) or S3 via STORAGE_URL</text>
+
+  <!-- Distribution -->
+  <rect x="610" y="630" width="560" height="130" class="card"/>
+  <text x="890" y="658" text-anchor="middle" class="title">Distribution</text>
+  <text x="890" y="682" text-anchor="middle" class="sub">npx busabase server · Docker (busabase/busabase) · from source</text>
+  <text x="890" y="700" text-anchor="middle" class="sub">Data root ~/.busabase/data/{pgdata,storage} — shared across all run modes</text>
+  <text x="890" y="722" text-anchor="middle" class="sub">Health check: /api/health · no Redis/queue dependency</text>
+
+  <!-- Footer -->
+  <rect x="30" y="790" width="1140" height="46" class="card-muted"/>
+  <text x="600" y="818" text-anchor="middle" class="sub" font-weight="700">MIT licensed · same engine as Busabase Cloud, just never given a tenant to scope by</text>
+
+  <!-- Edges -->
+  <path class="edge" d="M600,180 L600,206"/>
+  <path class="edge" d="M600,320 L600,346"/>
+  <path class="edge" d="M310,610 L310,626"/>
+  <path class="edge" d="M890,610 L890,626"/>
+</svg>

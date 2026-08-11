@@ -83,7 +83,7 @@ describe("anonymous allowlist (unit)", () => {
     expect(anonymousAllowlistSnapshot().read).toEqual([
       "bases.get",
       "bases.listViews",
-      "form.getByNode",
+      "forms.getByNode",
       // `docs.get` / `files.get` / `folders.get` collapsed into this one route.
       "nodes.get",
       "nodes.list",
@@ -120,8 +120,8 @@ describe("anonymous allowlist (unit)", () => {
     }
   });
 
-  it("classifies form.submit as submit-only, never as read", () => {
-    expect(anonymousAccessKindFor(["form", "submit"])).toBe("submit");
+  it("classifies forms.submit as submit-only, never as read", () => {
+    expect(anonymousAccessKindFor(["forms", "submit"])).toBe("submit");
     expect(anonymousAccessKindFor(["nodes", "list"])).toBe("read");
   });
 
@@ -141,7 +141,7 @@ describe("anonymous allowlist (unit)", () => {
     expect(anonymousAccessKindFor(["core", "nodes", "list"])).toBe("read");
     expect(anonymousAccessKindFor(["core", "records", "list"])).toBe("read");
     expect(anonymousAccessKindFor(["core", "records", "listPage"])).toBe("read");
-    expect(anonymousAccessKindFor(["core", "form", "submit"])).toBe("submit");
+    expect(anonymousAccessKindFor(["core", "forms", "submit"])).toBe("submit");
     // Denials must survive the prefix too.
     expect(anonymousAccessKindFor(["core", "vault", "get"])).toBeNull();
     expect(anonymousAccessKindFor(["core", "dump", "exportTables"])).toBeNull();

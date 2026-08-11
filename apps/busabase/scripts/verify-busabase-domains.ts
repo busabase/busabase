@@ -282,23 +282,36 @@ async function main() {
   });
   await approveAndMerge(docNodeCr.id);
   const materializedDoc = await getDoc("probe-node-doc");
-  assert.match(materializedDoc.body, /Probe Node Doc/, "node_create doc materializer seeded body");
+  // Deliberately EMPTY, not a synthesized `# {name}` heading: the detail page
+  // already renders the node's name as the page-level <h1>, so seeding one into
+  // the body produced two identically-named headings (see the comment on
+  // `materializeDocNode`). Asserting the empty body is what guards that choice.
+  assert.equal(materializedDoc.body, "", "node_create doc materializer leaves the body empty");
+  assert.equal(materializedDoc.node.name, "Probe Node Doc", "node_create doc carried the name");
   ok("node_create (doc) materializer merged");
 
-  // --- review-first DEFAULT: createBase/createDoc/createSkill(createFileTreeNode)
-  // without `autoMerge` must propose a PENDING ChangeRequest, not materialize
-  // anything — the fix this harness exists to guard against a regression on.
+  // --- review-first PATH: createBase/createDoc/createSkill(createFileTreeNode)
+  // with an explicit `autoMerge: false` must propose a PENDING ChangeRequest and
+  // materialize nothing until it merges.
+  //
+  // This block used to assert the same of the DEFAULT (omitting the flag). That
+  // is no longer true: `shouldAutoMerge` is permission-aware, and this harness
+  // always holds write access because the open-source host runs with full local
+  // access. Asking for review explicitly is what a review-first caller does.
   const pendingBaseCr = await createBase({
     slug: "review-first-probe-base",
     name: "Review First Probe Base",
     description: "",
     fields: [{ slug: "title", name: "Title", type: "text", required: true, options: {} }],
+    autoMerge: false,
   });
   if (!("status" in pendingBaseCr)) {
-    throw new Error("Expected createBase() with no autoMerge to return a pending ChangeRequestVO");
+    throw new Error(
+      "Expected createBase({ autoMerge: false }) to return a pending ChangeRequestVO",
+    );
   }
-  assert.equal(pendingBaseCr.status, "in_review", "createBase() defaults to a pending CR");
-  assert.equal(pendingBaseCr.node, null, "createBase() default path materializes nothing yet");
+  assert.equal(pendingBaseCr.status, "in_review", "createBase({ autoMerge: false }) stays pending");
+  assert.equal(pendingBaseCr.node, null, "the review-first path materializes nothing yet");
   const baseBeforeMerge = await getBase("review-first-probe-base");
   assert.equal(baseBeforeMerge, null, "the Base does not exist before the pending CR is merged");
   await approveAndMerge(pendingBaseCr.id);
@@ -309,18 +322,21 @@ async function main() {
   // Doc/Skill checks below.
   const mergedBase = await getBase("review-first-probe-base");
   assert.ok(mergedBase, "approving + merging the pending CR materializes the Base");
-  ok("createBase() review-first default (pending CR → approve+merge materializes)");
+  ok(
+    "createBase({ autoMerge: false }) review-first path (pending CR → approve+merge materializes)",
+  );
 
   const pendingDocCr = await createDoc({
     slug: "review-first-probe-doc",
     name: "Review First Probe Doc",
     body: "# Custom initial body\n",
+    autoMerge: false,
   });
   if (!("status" in pendingDocCr)) {
-    throw new Error("Expected createDoc() with no autoMerge to return a pending ChangeRequestVO");
+    throw new Error("Expected createDoc({ autoMerge: false }) to return a pending ChangeRequestVO");
   }
-  assert.equal(pendingDocCr.status, "in_review", "createDoc() defaults to a pending CR");
-  assert.equal(pendingDocCr.node, null, "createDoc() default path materializes nothing yet");
+  assert.equal(pendingDocCr.status, "in_review", "createDoc({ autoMerge: false }) stays pending");
+  assert.equal(pendingDocCr.node, null, "the review-first path materializes nothing yet");
   await approveAndMerge(pendingDocCr.id);
   const mergedDoc = await getDoc("review-first-probe-doc");
   assert.match(
@@ -329,7 +345,7 @@ async function main() {
     "merging the pending Doc CR carries the custom initial body through (not the synthesized default header)",
   );
   ok(
-    "createDoc() review-first default (pending CR carries custom body → approve+merge materializes)",
+    "createDoc({ autoMerge: false }) review-first path (pending CR carries custom body → approve+merge materializes)",
   );
 
   const pendingSkillCr = await createSkill({
@@ -339,12 +355,19 @@ async function main() {
     visibility: "private",
     version: "0.1.0",
     files: [{ path: "notes.md", content: "custom initial file\n" }],
+    autoMerge: false,
   });
   if (!("status" in pendingSkillCr)) {
-    throw new Error("Expected createSkill() with no autoMerge to return a pending ChangeRequestVO");
+    throw new Error(
+      "Expected createSkill({ autoMerge: false }) to return a pending ChangeRequestVO",
+    );
   }
-  assert.equal(pendingSkillCr.status, "in_review", "createSkill() defaults to a pending CR");
-  assert.equal(pendingSkillCr.node, null, "createSkill() default path materializes nothing yet");
+  assert.equal(
+    pendingSkillCr.status,
+    "in_review",
+    "createSkill({ autoMerge: false }) stays pending",
+  );
+  assert.equal(pendingSkillCr.node, null, "the review-first path materializes nothing yet");
   await approveAndMerge(pendingSkillCr.id);
   const mergedSkill = await getSkill("review-first-probe-skill");
   assert.ok(
@@ -356,7 +379,7 @@ async function main() {
     "merging the pending Skill CR carries the custom initial file through (createFileTreeNode's initialFiles)",
   );
   ok(
-    "createSkill()/createFileTreeNode() review-first default (pending CR carries custom files → approve+merge materializes)",
+    "createSkill({ autoMerge: false }) review-first path (pending CR carries custom files → approve+merge materializes)",
   );
 
   // --- record_delete (last; archives the record) ---------------------------

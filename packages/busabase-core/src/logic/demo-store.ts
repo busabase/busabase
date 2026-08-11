@@ -74,6 +74,8 @@ export const demoGetForm = (nodeIdOrSlug: string): FormVO | null => {
     return null;
   }
   const timestamp = nowIso();
+  const targetBase = (currentScenario().bases ?? []).find((base) => base.id === def.targetBaseId);
+  const fieldsBySlug = new Map((targetBase?.fields ?? []).map((field) => [field.slug, field]));
   return {
     id: def.formId,
     nodeId: def.nodeId,
@@ -82,6 +84,22 @@ export const demoGetForm = (nodeIdOrSlug: string): FormVO | null => {
     name: def.name,
     description: def.description,
     bindings: def.bindings,
+    boundFields: def.bindings.flatMap((binding) => {
+      const field = fieldsBySlug.get(binding.fieldSlug);
+      return field
+        ? [
+            {
+              slug: field.slug,
+              name: field.name,
+              type: field.type,
+              choices: (field.options.choices ?? []).map((choice) => ({
+                id: choice.id,
+                name: choice.name,
+              })),
+            },
+          ]
+        : [];
+    }),
     page: def.page ?? {},
     share: { isPublic: false, anonymousSubmit: false },
     submissionCount: 0,

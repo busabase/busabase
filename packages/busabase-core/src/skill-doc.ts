@@ -703,51 +703,71 @@ function buildBootstrapMarkdown(origin: string, ctx?: SkillMarkdownContext): str
   const step0 = isCloud
     ? `## Step 0 — Connect to Busabase Cloud
 
-Busabase Cloud is hosted — nothing to install. Use RFC 8628 device authorization: it works on a
-local machine, over SSH, and in a container because the browser can be on any computer or phone.
-The CLI saves the selected API key without printing it. Never ask the user to paste a secret in chat,
-and never print or display \`~/.busabase/.env\`.
+${
+  preselectedSpaceId
+    ? `One move: sign in. The dashboard already chose the Space, so there is nothing to confirm
+afterwards.`
+    : `Two moves: sign in, then confirm the Space you landed in.
+
+### 0a. Sign in`
+}
+
+Busabase Cloud is hosted — nothing to install. Device authorization works on a local machine, over
+SSH, and in a container because the browser can be on any computer or phone. Run this once; it never
+blocks on a terminal prompt:
 
 \`\`\`bash
 ${BUSABASE_CLI} login --device-code --base-url ${site}${preselectedSpaceId ? ` --space-id ${preselectedSpaceId}` : ""}
 \`\`\`
+
 The terminal shows a short code and a verification URL, then waits. The user signs in, selects an
 existing API key or creates a new one, and approves in any browser. The browser never receives the
-key secret; the waiting CLI receives and saves it through a one-time exchange. On success the CLI
-prints a safe summary containing the selected Space plus
-\`createdSpace\` and \`bootstrapRequired\`; it never prints the credential.
+key secret; the waiting CLI receives and saves it through a one-time exchange. Never ask the user to
+paste a secret in chat, and never print or display \`~/.busabase/.env\` — on success the CLI prints a
+safe summary containing the selected Space, \`availableSpaces\`, \`createdSpace\` and
+\`bootstrapRequired\`; it never prints the credential.
 
-${
-  preselectedSpaceId
-    ? `The dashboard-supplied \`--space-id\` targets that Space explicitly, so login does not need a terminal
-Space selection.`
-    : `Login never blocks on a terminal Space selection, even if the agent's shell allocates a TTY: if the
-account belongs to more than one Space, it always accepts the server-resolved default (the one the
-user was most recently active in).`
-} The summary also includes
-\`availableSpaces\` (a list of every Space the account belongs to). Always tell the user which Space
-was selected (name + id) and, if it belongs to more than one, that they can say so and you'll switch
-with \`${BUSABASE_CLI} space use <id>\` — don't silently proceed to Step 1 on the default without
-surfacing this.
+If the code expires or authorization fails, explain what happened; if the user still wants to
+continue, rerun the same login command above once.
 
-\`\`\`bash
-${BUSABASE_CLI} whoami --output json
-\`\`\`
+${preselectedSpaceId ? `The dashboard supplied \`--space-id ${preselectedSpaceId}\` — lock it as the target: never create or\nswitch Spaces, and never ask the user to pick one. Preselection only fixes *which* Space; it does not\ndecide whether that Space needs initializing, so read \`bootstrapRequired\` below regardless.\n\n` : ""}Branch on the summary's \`bootstrapRequired\` alone, never on whether a Space happens to be empty:
 
-Branch only on the server-owned state, never on whether a Space happens to be empty:
-
-${preselectedSpaceId ? `- **Dashboard Space supplied (\`${preselectedSpaceId}\`)** → lock this as the target: never create or switch Spaces. Preselection does not decide whether initialization is required; continue by checking \`bootstrapRequired\`.` : ""}
 - **\`bootstrapRequired: false\`** → existing user/Space, including a preselected empty Space with no
   bootstrap marker. Connect only and jump to Step 3 with zero structure or record writes.
 - **\`bootstrapRequired: true\`** → the selected Space was auto-created for this user and still carries
   the persistent version-0 bootstrap marker. Ask the Step 1 scenario question, then initialize this
   Space even when the dashboard preselected it.
 
-An empty existing Space has no marker and is therefore connect-only. A retry after interrupted
-initialization still has the version-0 marker and safely resumes Step 2.
+Two edge cases fall out of that same rule: an empty *existing* Space has no marker and is therefore
+connect-only, not a trigger to initialize; and a retry after interrupted initialization still has the
+version-0 marker and safely resumes Step 2.
+${
+  preselectedSpaceId
+    ? ""
+    : `
+### 0b. Confirm the target Space
 
-If the code expires or authorization fails, explain what happened; if the user still wants to
-continue, rerun the same login command above once.`
+Login never asks which Space to use: it takes the server default (the Space the user was most
+recently active in) and lists the rest in \`availableSpaces\`. The user has not seen that choice yet.
+
+Always tell the user which Space was selected (name + id). Then, by \`availableSpaces\` length:
+
+- **One** → nothing to choose. Continue with the \`bootstrapRequired\` branch from 0a.
+- **More than one** → ask once, a lettered choice in the user's language: \`A\` keeps the current
+  Space, then one letter per remaining entry. Offer Spaces, never commands — switching is your job,
+  so never tell the user to run anything.
+
+  > 📂 You're in **{space.name}** (the Space you used most recently). Keep it, or switch?
+  > **A.** Keep **{space.name}**   **B.** {otherSpace1.name}   **C.** {otherSpace2.name}
+
+  On a switch, run both and re-decide the 0a branch from the new \`bootstrapRequired\` — the old one
+  belonged to the previous Space:
+
+  \`\`\`bash
+  ${BUSABASE_CLI} space use <id>
+  ${BUSABASE_CLI} whoami --output json
+  \`\`\``
+}`
     : `## Step 0 — Connect to Busabase Personal Desktop
 
 Everything runs locally — no account, no API key. The user has already confirmed this edition, so

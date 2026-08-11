@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { createRouterClient } from "@orpc/server";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { LOCAL_SPACE_ID, runWithBusabaseContext } from "../src/context";
+import { LOCAL_SPACE_ID, runWithAnonymousContext, runWithBusabaseContext } from "../src/context";
 import { DEMO_BASES, DEMO_FOLDERS } from "../src/demo/dataset";
 import {
   createForm,
@@ -11,6 +11,7 @@ import {
   submitForm,
   updateForm,
 } from "../src/domains/form/logic/form-ops";
+import { getPublicScopeOf } from "../src/logic/node-acl";
 import { seedScenario } from "../src/logic/seed";
 import { busabaseRouter } from "../src/router";
 
@@ -30,6 +31,7 @@ describe("Form-as-Node — submission + access gates", () => {
   let client: ReturnType<typeof createRouterClient<typeof busabaseRouter, Record<never, never>>>;
   let blogBaseId = "";
   let formNodeId = "";
+  let publicFormNodeId = "";
 
   beforeAll(async () => {
     originalCwd = process.cwd();
@@ -47,7 +49,15 @@ describe("Form-as-Node — submission + access gates", () => {
     // A form node to bind the form row to.
     await client.nodes.createChangeRequest({
       autoMerge: true,
-      operations: [{ kind: "create", nodeType: "form", slug: "t-form", name: "T Form" }],
+      operations: [
+        { kind: "create", nodeType: "form", slug: "t-form", name: "T Form" },
+        {
+          kind: "create",
+          nodeType: "form",
+          slug: "t-public-form",
+          name: "T Public Form",
+        },
+      ],
     });
     const nodes = await client.nodes.list({});
     const flat: Array<{ id: string; slug: string; type: string; children?: unknown[] }> = [];
@@ -62,6 +72,17 @@ describe("Form-as-Node — submission + access gates", () => {
     };
     walk(nodes as unknown[]);
     formNodeId = flat.find((n) => n.slug === "t-form" && n.type === "form")?.id ?? "";
+    publicFormNodeId = flat.find((n) => n.slug === "t-public-form" && n.type === "form")?.id ?? "";
+
+    await createForm({
+      nodeId: publicFormNodeId,
+      targetBaseId: blogBaseId,
+      name: "T Public Form",
+      bindings: [
+        { inputName: "subject", fieldSlug: "title", required: true },
+        { inputName: "msg", fieldSlug: "body", required: true },
+      ],
+    });
   }, 120_000);
 
   afterAll(async () => {
@@ -135,6 +156,131 @@ describe("Form-as-Node — submission + access gates", () => {
     await expect(
       submitForm(formNodeId, { values: { subject: "over", msg: "limit" } }, { isAnonymous: true }),
     ).rejects.toThrow(/submission limit/i);
+  });
+
+  it("submits through the anonymous Router without exposing the target Base", async () => {
+    expect(publicFormNodeId).not.toBe("");
+    const target = await client.bases.get({ baseId: blogBaseId });
+    if (!target) throw new Error("expected target Base");
+
+    await client.nodes.share.set({
+      nodeId: publicFormNodeId,
+      scope: "public",
+      capability: "submit",
+    });
+    await updateForm(publicFormNodeId, {
+      share: { isPublic: true, anonymousSubmit: false },
+    });
+
+    await runWithAnonymousContext({}, async () => {
+      const publicForm = await client.forms.getByNode({ nodeId: publicFormNodeId });
+      expect(publicForm).toMatchObject({ nodeId: publicFormNodeId });
+      expect(publicForm?.boundFields).toEqual([
+        expect.objectContaining({ slug: "title", type: "text" }),
+        expect.objectContaining({ slug: "body", type: "markdown" }),
+      ]);
+      await expect(
+        client.forms.submit({
+          nodeId: publicFormNodeId,
+          values: { subject: "Login required", msg: "Should be rejected" },
+        }),
+      ).rejects.toThrow(/sign-in/i);
+    });
+
+    await updateForm(publicFormNodeId, {
+      share: { isPublic: true, anonymousSubmit: true },
+    });
+    await client.nodes.share.set({
+      nodeId: publicFormNodeId,
+      scope: "public",
+      capability: "read",
+    });
+    await runWithAnonymousContext({}, async () => {
+      await expect(
+        client.forms.submit({
+          nodeId: publicFormNodeId,
+          values: { subject: "Read only", msg: "Should be rejected" },
+        }),
+      ).rejects.toThrow(/anonymous/i);
+    });
+
+    await client.nodes.share.set({
+      nodeId: publicFormNodeId,
+      scope: "public",
+      capability: "submit",
+    });
+    const { records: before } = await client.records.list({});
+    const submission = await runWithAnonymousContext({}, () =>
+      client.forms.submit({
+        nodeId: publicFormNodeId,
+        values: { subject: "Public submission", msg: "Pending review" },
+      }),
+    );
+    expect(submission.status).toBe("pending_review");
+
+    const { records: after } = await client.records.list({});
+    expect(after).toHaveLength(before.length);
+    expect(await getPublicScopeOf(target.nodeId)).toBeNull();
+    await runWithAnonymousContext({}, async () => {
+      await expect(client.bases.get({ baseId: blogBaseId })).rejects.toThrow(/not found/i);
+    });
+  });
+
+  it("accepts an anonymous submission that names the form by node SLUG", async () => {
+    // The public link is `/<nodeType>/<node slug>` and the dashboard route
+    // passes that URL segment straight through as `nodeId` — so the slug, not
+    // the id, is what every real visitor sends. Every other anonymous test here
+    // uses the id, which is how an id-only capability gate shipped looking fine.
+    const slug = "t-public-form";
+    await client.nodes.share.set({
+      nodeId: publicFormNodeId,
+      scope: "public",
+      capability: "submit",
+    });
+    await updateForm(publicFormNodeId, { share: { isPublic: true, anonymousSubmit: true } });
+
+    const { records: before } = await client.records.list({});
+    const submission = await runWithAnonymousContext({}, async () => {
+      await expect(client.forms.getByNode({ nodeId: slug })).resolves.toMatchObject({
+        nodeId: publicFormNodeId,
+      });
+      return client.forms.submit({
+        nodeId: slug,
+        values: { subject: "Slug submission", msg: "Pending review" },
+      });
+    });
+    expect(submission.status).toBe("pending_review");
+    const { records: after } = await client.records.list({});
+    expect(after).toHaveLength(before.length);
+
+    // A read-only share still refuses the slug path, at BOTH layers: the router
+    // guard (reachability) and the handler's own check on the resolved node id.
+    await client.nodes.share.set({
+      nodeId: publicFormNodeId,
+      scope: "public",
+      capability: "read",
+    });
+    await runWithAnonymousContext({}, async () => {
+      await expect(
+        client.forms.submit({
+          nodeId: slug,
+          values: { subject: "Read only", msg: "Should be rejected" },
+        }),
+      ).rejects.toThrow(/anonymous|read-only/i);
+      await expect(
+        submitForm(
+          slug,
+          { values: { subject: "Read only", msg: "Rejected" } },
+          { isAnonymous: true },
+        ),
+      ).rejects.toThrow(/read-only/i);
+    });
+
+    await client.nodes.share.set({
+      nodeId: publicFormNodeId,
+      scope: "public",
+      capability: "submit",
+    });
   });
 
   it("hides form configuration when its target Base is not visible", async () => {

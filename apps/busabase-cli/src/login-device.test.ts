@@ -241,6 +241,51 @@ describe("runLogin --device-code", () => {
     expect(loadDotEnvFile()).not.toHaveProperty("BUSABASE_API_KEY");
   });
 
+  it("reassures the user after several pending polls instead of looking frozen", async () => {
+    let tokenPolls = 0;
+    global.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = input.toString();
+      if (url.endsWith("/api/auth/device/code")) {
+        return jsonResponse({
+          device_code: "private-device-code",
+          user_code: "ABCD2345",
+          verification_uri: `${CLOUD}/device`,
+          expires_in: 60,
+          interval: 1,
+        });
+      }
+      if (url.endsWith("/api/auth/device/token")) {
+        tokenPolls += 1;
+        return tokenPolls <= 5
+          ? jsonResponse({ error: "authorization_pending", error_description: "Pending" }, 400)
+          : jsonResponse({ access_token: ACCESS_TOKEN, expires_in: 3600 });
+      }
+      if (url.endsWith("/api/v1/device/finalize")) {
+        return jsonResponse({
+          apiKey: API_KEY,
+          apiKeyId: "apk_1",
+          expiresAt: null,
+          credentialType: "api_key",
+        });
+      }
+      if (url.endsWith("/api/v1/auth")) {
+        return jsonResponse({
+          user: { id: "usr_1", email: "dev@example.com" },
+          space: { id: "spc_1", name: "Space One" },
+          spaces: [{ id: "spc_1", name: "Space One" }],
+        });
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    }) as typeof fetch;
+
+    const login = runLogin({ baseUrl: CLOUD, deviceCode: true, browser: false });
+    await vi.advanceTimersByTimeAsync(6_000);
+    await expect(login).resolves.toMatchObject({ status: "signed in" });
+    expect(stderr.join("\n")).toContain(
+      "Still waiting… if you already approved in the browser, this can take a few extra seconds to register",
+    );
+  });
+
   it("fails clearly after repeated polling network errors", async () => {
     global.fetch = vi.fn(async (input: RequestInfo | URL) => {
       const url = input.toString();

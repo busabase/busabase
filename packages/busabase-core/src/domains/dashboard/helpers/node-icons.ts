@@ -5,6 +5,7 @@ import {
   File,
   FileText,
   Folder,
+  Form,
   HardDrive,
   type LucideIcon,
   PenTool,
@@ -21,6 +22,7 @@ import {
  */
 const ICON_BY_ID: Record<string, LucideIcon> = {
   folder: Folder,
+  form: Form,
   table: Table2,
   sparkles: Sparkles,
   "hard-drive": HardDrive,

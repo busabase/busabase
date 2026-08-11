@@ -54,6 +54,7 @@
       "!**/dist",
       "!**/build",
       "!**/coverage",
+      "!**/evals/**/results",
       "!**/pnpm-lock.yaml",
       "!**/storybook-static",
       "!**/prisma-client",

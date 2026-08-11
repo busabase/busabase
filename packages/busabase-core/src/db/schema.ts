@@ -485,6 +485,7 @@ export const busabaseAuditEvents = pgTable(
     createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
   },
   (base) => [
+    index("busabase_audit_events_space_created_id_idx").on(base.spaceId, base.createdAt, base.id),
     index("busabase_audit_events_action_created_idx").on(base.action, base.createdAt),
     index("busabase_audit_events_record_created_idx").on(base.recordId, base.createdAt),
     index("busabase_audit_events_base_created_idx").on(base.baseId, base.createdAt),

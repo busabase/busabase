@@ -127,11 +127,9 @@ describe("generated Cloud onboarding", () => {
         .split("\n")
         .find((line) => line.startsWith("npx --yes busabase-cli@latest login ")),
     ).toBe("npx --yes busabase-cli@latest login --device-code --base-url https://busabase.com");
+    expect(cloudWithoutPreselectedSpace).toContain("Login never asks which Space to use");
     expect(cloudWithoutPreselectedSpace).toContain(
-      "Login never blocks on a terminal Space selection, even if the agent's shell allocates a TTY",
-    );
-    expect(cloudWithoutPreselectedSpace).toContain(
-      "it always accepts the server-resolved default (the one the\nuser was most recently active in)",
+      "it takes the server default (the Space the user was most\nrecently active in)",
     );
     expect(cloudBootstrap).not.toContain("--use-default-space");
     expect(localBootstrap).not.toContain("--use-default-space");
@@ -153,12 +151,38 @@ describe("generated Cloud onboarding", () => {
 
     expect(cloudWithoutPreselectedSpace).toContain("availableSpaces");
     expect(cloudWithoutPreselectedSpace).toContain(
-      "Always tell the user which Space\nwas selected (name + id)",
+      "Always tell the user which Space was selected (name + id)",
     );
     expect(cloudWithoutPreselectedSpace).toContain("busabase-cli@latest space use <id>");
     expect(cloudWithoutPreselectedSpace).not.toContain(
       "if the selected Space is not the\none intended, switch with",
     );
+  });
+
+  it("asks the user to confirm the Space only when the account has more than one", () => {
+    const cloudWithoutPreselectedSpace = buildSkillMarkdown("https://busabase.com", {
+      mode: "cloud",
+      stage: "bootstrap",
+      editionConfirmed: true,
+    });
+
+    expect(cloudWithoutPreselectedSpace).toContain("### 0b. Confirm the target Space");
+    expect(cloudWithoutPreselectedSpace).toContain(
+      "- **One** → nothing to choose. Continue with the `bootstrapRequired` branch from 0a.",
+    );
+    expect(cloudWithoutPreselectedSpace).toContain(
+      "- **More than one** → ask once, a lettered choice in the user's language",
+    );
+    // `space use <id>` is the agent's own mechanism, never an instruction handed to the user.
+    expect(cloudWithoutPreselectedSpace).toContain(
+      "Offer Spaces, never commands — switching is your job,\n  so never tell the user to run anything",
+    );
+    expect(cloudWithoutPreselectedSpace).toContain(
+      "re-decide the 0a branch from the new `bootstrapRequired`",
+    );
+    // A dashboard-preselected Space is locked, so there is no confirmation question at all.
+    expect(cloudBootstrap).not.toContain("### 0b. Confirm the target Space");
+    expect(cloudBootstrap).toContain("never ask the user to pick one");
   });
 
   it("uses the cross-platform CLI runner for every connection-stage command", () => {
@@ -171,7 +195,6 @@ describe("generated Cloud onboarding", () => {
 
     expect(cloudCliLines).toEqual([
       "npx --yes busabase-cli@latest login --device-code --base-url https://busabase.com --space-id spc_x",
-      "npx --yes busabase-cli@latest whoami --output json",
     ]);
     expect(desktopCliLines).toEqual([
       'npx --yes busabase-cli@latest login --base-url "http://localhost:15419"',
@@ -194,9 +217,11 @@ describe("generated Cloud onboarding", () => {
   });
 
   it("uses a dashboard-selected Space as a locked target, not as proof it is existing", () => {
-    expect(cloudBootstrap).toContain("Dashboard Space supplied (`spc_x`)");
     expect(cloudBootstrap).toContain(
-      "Preselection does not decide whether initialization is required",
+      "The dashboard supplied `--space-id spc_x` — lock it as the target",
+    );
+    expect(cloudBootstrap).toContain(
+      "Preselection only fixes *which* Space; it does not\ndecide whether that Space needs initializing",
     );
     expect(cloudBootstrap).toContain("including a preselected empty Space with no");
     expect(cloudBootstrap).toContain(

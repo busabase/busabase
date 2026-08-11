@@ -279,6 +279,67 @@ export function runWithAnonymousContext<T>(
   );
 }
 
+/**
+ * Run `fn` as a MEMBER — a signed-in session, or an API key (whose ceiling
+ * rides along as `credentialPermissionCeiling`; see the field's own doc
+ * comment for why a read-only key issued to an admin still sees what that
+ * admin can see, and is capped only on what it can DO).
+ *
+ * Unlike `runWithAnonymousContext` / `runWithEmbedContext`, a member's ACL
+ * signals are not pinned here — they are host-resolved from the actor's real
+ * workspace role and supplied by the caller. What this factory pins is
+ * `visitorKind`: it is never set, so a member request can never carry the
+ * anonymous downgrade by accident. Its value is a single named, documented
+ * construction point for the caller kind that today's twelve call sites hand-
+ * assemble independently (see caller-kinds-and-permission-context.md).
+ */
+export function runWithMemberContext<T>(
+  ctx: Omit<BusabaseContext, "visitorKind">,
+  fn: () => Promise<T>,
+): Promise<T> {
+  return storage.run(ctx, fn);
+}
+
+/**
+ * Run `fn` as an EMBED visitor — an anonymous holder of an Embed Link (an
+ * AirApp embed, or a generic node embed).
+ *
+ * Distinct from `runWithAnonymousContext` ("guest"): a guest's authority
+ * comes from the NODE being explicitly publicly shared; an embed visitor's
+ * authority comes from possessing the LINK, and V1 links carry Space-scoped
+ * read (see caller-kinds-and-permission-context.md §5).
+ *
+ * `actorId` is supplied by the caller and is deliberately the link's
+ * CREATOR, not an anonymous sentinel — kept for attribution and for their
+ * own node-principal grants (§9.2 of the same doc), never for privilege
+ * LEVEL, which is why the two pins below cannot be overridden by the caller:
+ *
+ * - `isSpaceManager: false` — the creator is typically an owner/admin, and a
+ *   manager short-circuits every node-ACL check to full access; without this
+ *   pin every private node in the Space would be listed and readable through
+ *   the link. This was PR #5948's bug (there, for the AirApp bridge only).
+ * - `credentialPermissionCeiling: "read"` — the capability is a read-only
+ *   credential, so no node-principal grant can raise this request above
+ *   `read` even where the creator personally holds `manage`.
+ *
+ * Both are needed: the ceiling alone still leaves the manager bypass in the
+ * visibility SQL, and `isSpaceManager: false` alone still lets an explicit
+ * `manage` grant through.
+ */
+export function runWithEmbedContext<T>(
+  ctx: Omit<BusabaseContext, "isSpaceManager" | "credentialPermissionCeiling">,
+  fn: () => Promise<T>,
+): Promise<T> {
+  return storage.run(
+    {
+      ...ctx,
+      isSpaceManager: false,
+      credentialPermissionCeiling: "read",
+    },
+    fn,
+  );
+}
+
 /** The injected host db for the current request, or undefined in local mode. */
 export function getContextDb(): BusabaseDatabase | undefined {
   return storage.getStore()?.db;

@@ -152,6 +152,7 @@ export { VIEW_FIELD_MAX_WIDTH, VIEW_FIELD_MIN_WIDTH } from "../domains/base/type
 
 export type {
   CreateFormDTO,
+  FormBoundFieldVO,
   FormFieldBindingVO,
   FormPageSourceVO,
   FormShareVO,

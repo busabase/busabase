@@ -12,7 +12,7 @@ import type { NodeTypeDefinition } from "../types";
 export const formNodeType = {
   type: "form",
   label: "Form",
-  icon: "clipboard-list",
+  icon: "form",
   capabilities: { hasDetail: true, creatable: true },
   operations: [],
 } as const satisfies NodeTypeDefinition;

@@ -8,18 +8,24 @@ import type {
   SubmitFormDTO,
   UpdateFormDTO,
 } from "busabase-contract/types";
-import { and, eq, or } from "drizzle-orm";
+import { and, eq, inArray, isNull, or } from "drizzle-orm";
 import { getContextSpaceId, isAnonymousVisitor, resolveActorId } from "../../../context";
 import { getDb } from "../../../db";
-import { busabaseBases, busabaseForms, busabaseNodes } from "../../../db/schema";
+import {
+  busabaseBaseFields,
+  busabaseBases,
+  busabaseForms,
+  busabaseNodes,
+} from "../../../db/schema";
 import { id, now } from "../../../logic/kernel";
 import {
   assertNodePermission,
   buildNodeVisibilityCondition,
+  getPublicScopeOf,
   hasNodePermission,
 } from "../../../logic/node-acl";
 import { ensureReady } from "../../../logic/seed";
-import { createChangeRequest } from "../../base/logic/record-ops";
+import { createFormSubmissionChangeRequest } from "../../base/logic/record-ops";
 import type { FormPO } from "../schema";
 
 const formNotFound = (nodeId: string) =>
@@ -38,6 +44,7 @@ const toFormVO = (po: FormPO): FormVO => ({
   name: po.name,
   description: po.description,
   bindings: po.bindings ?? [],
+  boundFields: [],
   page: po.page ?? {},
   share: { ...DEFAULT_SHARE, ...(po.share ?? {}) },
   submissionCount: po.submissionCount ?? 0,
@@ -70,13 +77,60 @@ export const getFormByNodeId = async (nodeIdOrSlug: string): Promise<FormVO | nu
     )
     .limit(1);
   if (!row) return null;
+  const form = toFormVO(row.form);
+  if (isAnonymousVisitor() && !form.share.isPublic) return null;
   const [targetBase] = await db
     .select({ nodeId: busabaseBases.nodeId })
     .from(busabaseBases)
     .where(and(eq(busabaseBases.id, row.form.targetBaseId), eq(busabaseBases.spaceId, spaceId)))
     .limit(1);
-  if (!targetBase || !(await hasNodePermission(targetBase.nodeId, "read"))) return null;
-  return toFormVO(row.form);
+  if (!targetBase) return null;
+  // A public Form is the disclosure boundary: visitors may render its curated
+  // page and bindings without gaining read access to the private target Base.
+  // Members still need normal Base visibility so a Form cannot reveal a Base
+  // that has been hidden from them.
+  if (!isAnonymousVisitor() && !(await hasNodePermission(targetBase.nodeId, "read"))) return null;
+
+  const boundSlugs = [...new Set(form.bindings.map((binding) => binding.fieldSlug))];
+  const boundFieldRows =
+    boundSlugs.length === 0
+      ? []
+      : await db
+          .select({
+            slug: busabaseBaseFields.slug,
+            name: busabaseBaseFields.name,
+            type: busabaseBaseFields.type,
+            options: busabaseBaseFields.options,
+          })
+          .from(busabaseBaseFields)
+          .where(
+            and(
+              eq(busabaseBaseFields.baseId, form.targetBaseId),
+              inArray(busabaseBaseFields.slug, boundSlugs),
+              isNull(busabaseBaseFields.deletedAt),
+            ),
+          );
+  const fieldsBySlug = new Map(boundFieldRows.map((field) => [field.slug, field]));
+
+  return {
+    ...form,
+    boundFields: form.bindings.flatMap((binding) => {
+      const field = fieldsBySlug.get(binding.fieldSlug);
+      return field
+        ? [
+            {
+              slug: field.slug,
+              name: field.name,
+              type: field.type,
+              choices: (field.options.choices ?? []).map((choice) => ({
+                id: choice.id,
+                name: choice.name,
+              })),
+            },
+          ]
+        : [];
+    }),
+  };
 };
 
 export const createForm = async (input: CreateFormDTO): Promise<FormVO> => {
@@ -187,6 +241,21 @@ export const submitForm = async (
     }
   }
 
+  // Authoritative read/submit capability check, on the node this submission
+  // actually resolved to. The router's anonymous guard runs first, but it only
+  // has the caller's ref — which for a public link is a node SLUG, and slugs
+  // are unique per parent, not per space. Re-checking the resolved id here is
+  // what makes that approximation safe: a read-only share cannot borrow a
+  // same-slug sibling's `submit` capability.
+  //
+  // Keyed on the CONTEXT (`isAnonymousVisitor`), not on the `caller` hint: a
+  // public-link visitor is a property of the request the host pinned, so a
+  // transport that forgets to pass `isAnonymous` cannot bypass this — which is
+  // exactly how the anonymous path broke before.
+  if (isAnonymousVisitor() && (await getPublicScopeOf(form.nodeId)) !== "submit") {
+    throw new ORPCError("FORBIDDEN", { message: "This form's public link is read-only." });
+  }
+
   // ── Server-side submit limit ──
   if (form.share.submitLimit != null && form.submissionCount >= form.share.submitLimit) {
     throw new ORPCError("TOO_MANY_REQUESTS", {
@@ -220,7 +289,7 @@ export const submitForm = async (
     });
   }
 
-  const changeRequest = await createChangeRequest(form.targetBaseId, {
+  const changeRequest = await createFormSubmissionChangeRequest(form.nodeId, form.targetBaseId, {
     fields,
     message: `Form submission: ${form.name}`,
     submittedBy: caller.isAnonymous ? ANONYMOUS_SUBMITTER : "local-producer",

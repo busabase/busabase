@@ -251,8 +251,13 @@ function BusabaseDashboardContent({
     () => createKnownNodeCache(`${cacheSpaceKey}:${currentUserId ?? "anonymous"}`),
     [cacheSpaceKey, currentUserId],
   );
+  const [loadedDetailNode, setLoadedDetailNode] = useState<{
+    node: LoadedNode;
+    scopeKey: string;
+  } | null>(null);
   const recordLoadedNode = useCallback(
     (node: LoadedNode) => {
+      setLoadedDetailNode({ node, scopeKey: cacheSpaceKey });
       nodeCache.recordVisit(
         {
           id: node.id,
@@ -264,7 +269,7 @@ function BusabaseDashboardContent({
         new Date().toISOString(),
       );
     },
-    [nodeCache],
+    [cacheSpaceKey, nodeCache],
   );
   // Reads run through oRPC + React Query, seeded by the SSR props as initialData.
   const changeRequestsList = orpc.changeRequests.list.queryOptions({ input: {} });
@@ -379,6 +384,19 @@ function BusabaseDashboardContent({
     nodeDetailRoute,
     selectedChangeRequestId,
   } = useDashboardRoutes();
+  const activeDetailNode = useMemo(() => {
+    if (!nodeDetailRoute) return null;
+    const treeNode = flattenNodesForCache(nodeTree).find(
+      (node) => node.type === nodeDetailRoute.type && node.slug === nodeDetailRoute.slug,
+    );
+    if (treeNode) return treeNode;
+    const loadedNode = loadedDetailNode?.node;
+    return loadedDetailNode?.scopeKey === cacheSpaceKey &&
+      loadedNode?.type === nodeDetailRoute.type &&
+      loadedNode.slug === nodeDetailRoute.slug
+      ? loadedNode
+      : null;
+  }, [cacheSpaceKey, loadedDetailNode, nodeDetailRoute, nodeTree]);
   const activeBase = useMemo(
     () =>
       selectedBaseSlug
@@ -902,6 +920,13 @@ function BusabaseDashboardContent({
       return [{ href: "/assets", label: messages.nav.assets }, { label: messages.nav.assets }];
     }
 
+    if (nodeDetailRoute?.type === "form") {
+      return [
+        { label: messages.nav.workspace },
+        { label: activeDetailNode?.name ?? messages.form.tabForm },
+      ];
+    }
+
     if (isBaseSetupRoute) {
       return [
         { label: messages.nav.workspace },
@@ -977,6 +1002,7 @@ function BusabaseDashboardContent({
     return [{ label: messages.nav.home }];
   }, [
     activeBase,
+    activeDetailNode,
     activeRecord,
     isBaseSetupRoute,
     isChangeRequestRoute,
@@ -987,6 +1013,7 @@ function BusabaseDashboardContent({
     isBaseViewRoute,
     isRecordRoute,
     locationPath,
+    nodeDetailRoute,
     selectedBaseView,
     selectedChangeRequest,
     selectedOperation,

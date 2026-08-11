@@ -151,11 +151,21 @@ describe("activity.listPaged — keyset merge parity", () => {
   });
 
   it("continues past a newest window containing only hidden-node events", async () => {
-    await client.bases.createChangeRequest({
-      baseId,
-      fields: { name: "visible-before-hidden" },
-      autoMerge: true,
-    });
+    const createAndMergeChangeRequest = async (targetBaseId: string, name: string) => {
+      const changeRequest = await client.bases.createChangeRequest({
+        baseId: targetBaseId,
+        fields: { name },
+        autoMerge: false,
+      });
+      if (changeRequest.materialized) throw new Error("expected pending change request");
+      await client.changeRequests.review({
+        changeRequestIds: [changeRequest.id],
+        verdict: "approved",
+      });
+      await client.changeRequests.merge({ changeRequestIds: [changeRequest.id] });
+      return changeRequest;
+    };
+    const visibleChangeRequest = await createAndMergeChangeRequest(baseId, "visible-before-hidden");
     const privateBase = await client.bases.create({
       slug: "private-feed",
       name: "Private Feed",
@@ -164,25 +174,41 @@ describe("activity.listPaged — keyset merge parity", () => {
     });
     if (!privateBase.materialized) throw new Error("expected materialized private base");
     await client.nodes.updateVisibility({ nodeId: privateBase.nodeId, visibility: "private" });
+    const hiddenChangeRequestIds: string[] = [];
     for (let index = 0; index < 4; index++) {
-      await client.bases.createChangeRequest({
-        baseId: privateBase.id,
-        fields: { name: `hidden-${index}` },
-        autoMerge: true,
-      });
+      const hiddenChangeRequest = await createAndMergeChangeRequest(
+        privateBase.id,
+        `hidden-${index}`,
+      );
+      hiddenChangeRequestIds.push(hiddenChangeRequest.id);
     }
 
-    const page = await runWithBusabaseContext(
+    const { auditEvents, page } = await runWithBusabaseContext(
       {
         spaceId: LOCAL_SPACE_ID,
         actorId: "feed-member",
         isSpaceManager: false,
         permissionLevel: "read",
       },
-      () => client.activity.listPaged({ limit: 2 }),
+      async () => {
+        const [page, auditEvents] = await Promise.all([
+          client.activity.listPaged({ limit: 2 }),
+          client.auditEvents.list({ limit: 100 }),
+        ]);
+        return { auditEvents, page };
+      },
     );
     expect(page.items.length).toBe(2);
     expect(JSON.stringify(page.items)).not.toContain("hidden-");
     expect(JSON.stringify(page.items)).not.toContain(privateBase.id);
+    expect(auditEvents.some((event) => event.changeRequestId === visibleChangeRequest.id)).toBe(
+      true,
+    );
+    expect(
+      auditEvents.some(
+        (event) =>
+          event.changeRequestId !== null && hiddenChangeRequestIds.includes(event.changeRequestId),
+      ),
+    ).toBe(false);
   });
 });

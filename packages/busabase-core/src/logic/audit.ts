@@ -2,7 +2,7 @@ import "server-only";
 
 import { ORPCError } from "@orpc/server";
 import type { CommentSubjectType } from "busabase-contract/types";
-import { and, asc, desc, eq } from "drizzle-orm";
+import { and, asc, desc, eq, inArray } from "drizzle-orm";
 import { z } from "zod";
 import {
   getContextIsSpaceManager,
@@ -329,6 +329,30 @@ export const createAuditEvent = async (input: z.infer<typeof auditEventInputSche
   return insertAuditEvent(db, input);
 };
 
+const listVisibleChangeRequestIds = async (
+  candidates: (typeof busabaseAuditEvents.$inferSelect)[],
+): Promise<Set<string>> => {
+  const changeRequestIds = [
+    ...new Set(
+      candidates.flatMap((event) => (event.changeRequestId ? [event.changeRequestId] : [])),
+    ),
+  ];
+  if (changeRequestIds.length === 0) return new Set();
+
+  const db = await getDb();
+  const rows = await db
+    .select({ id: busabaseChangeRequests.id })
+    .from(busabaseChangeRequests)
+    .where(
+      and(
+        eq(busabaseChangeRequests.spaceId, getContextSpaceId()),
+        inArray(busabaseChangeRequests.id, changeRequestIds),
+      ),
+    );
+  const { filterVisibleChangeRequestRows } = await import("./cr-lifecycle");
+  return new Set((await filterVisibleChangeRequestRows(rows)).map((row) => row.id));
+};
+
 export const listAuditEvents = async (input?: z.input<typeof listInputSchema>) => {
   const { ensureReady } = await import("./seed");
   await ensureReady();
@@ -345,8 +369,12 @@ export const listAuditEvents = async (input?: z.input<typeof listInputSchema>) =
       .orderBy(desc(busabaseAuditEvents.createdAt), desc(busabaseAuditEvents.id))
       .limit(batchSize)
       .offset(offset);
+    const visibleChangeRequestIds = await listVisibleChangeRequestIds(candidates);
     const visibility = await Promise.all(
       candidates.map(async (event) => {
+        if (event.changeRequestId) {
+          return visibleChangeRequestIds.has(event.changeRequestId);
+        }
         try {
           await assertAuditSubjectPermission(event, "read");
           return true;
@@ -392,7 +420,10 @@ export const listComments = async (input: z.infer<typeof commentSubjectInputSche
   return comments.map((comment) => toCommentVO(comment, users));
 };
 
-export const createComment = async (input: z.infer<typeof createCommentInputSchema>) => {
+// `z.input`, not `z.infer`: `mentionsAi` has `.optional().default(false)`, so the
+// inferred OUTPUT type makes it required while callers legitimately omit it.
+// `.parse()` below fills the default in. Matches `createDoc`/`createBase`.
+export const createComment = async (input: z.input<typeof createCommentInputSchema>) => {
   const { ensureReady } = await import("./seed");
   await ensureReady();
   const db = await getDb();

@@ -11,6 +11,7 @@ import {
   busabaseBases,
   busabaseChangeRequests,
   busabaseCommits,
+  busabaseForms,
   busabaseNodes,
   busabaseOperations,
   busabaseRecords,
@@ -19,6 +20,7 @@ import { insertAuditEvent } from "../../../logic/audit";
 import {
   finalizeChangeRequest,
   getChangeRequest,
+  hydrateChangeRequest,
   mergeChangeRequest,
   recordMergedNodeCreate,
   recordPendingNodeCreate,
@@ -42,6 +44,7 @@ import {
   createDeleteChangeRequestInputSchema,
   updateRecordChangeRequestInputSchema,
 } from "../../../logic/store";
+import { toBaseVO } from "../../../logic/vo";
 import { assertValidFormulaField, validateRecordFields } from "../field-rules";
 import type { FieldDef } from "../field-types";
 import { FormulaError } from "../formula";
@@ -325,22 +328,84 @@ export const createBase = async (input: z.input<typeof createBaseInputSchema>) =
   return { ...base, materialized: true as const };
 };
 
-export const createChangeRequest = async (
+type CreateChangeRequestInput = z.input<typeof createChangeRequestInputSchema>;
+
+type CreateChangeRequestAuthorization = { kind: "base" } | { kind: "form"; formNodeId: string };
+
+/**
+ * Resolve the private Base behind an already-authorized Form submission.
+ * The Form-to-Base relationship is checked again here so this narrow entry
+ * point cannot be used to target an arbitrary Base.
+ */
+const getFormSubmissionBase = async (formNodeId: string, baseId: string) => {
+  const db = await getDb();
+  const spaceId = getContextSpaceId();
+  const [row] = await db
+    .select({ base: busabaseBases })
+    .from(busabaseBases)
+    .innerJoin(
+      busabaseForms,
+      and(eq(busabaseForms.targetBaseId, busabaseBases.id), eq(busabaseForms.nodeId, formNodeId)),
+    )
+    .where(
+      and(
+        eq(busabaseBases.id, baseId),
+        eq(busabaseBases.spaceId, spaceId),
+        eq(busabaseForms.spaceId, spaceId),
+        eq(busabaseForms.status, "active"),
+        isNull(busabaseBases.archivedAt),
+        isNull(busabaseBases.deletedAt),
+      ),
+    )
+    .limit(1);
+  if (!row) return null;
+
+  const fields = await db
+    .select()
+    .from(busabaseBaseFields)
+    .where(and(eq(busabaseBaseFields.baseId, row.base.id), isNull(busabaseBaseFields.deletedAt)));
+  return toBaseVO(row.base, fields);
+};
+
+/** Load a CR just created through the Form-authorized path without widening
+ * the normal CR read surface to the private target Base. */
+const getFormSubmissionChangeRequest = async (changeRequestId: string) => {
+  const db = await getDb();
+  const [changeRequest] = await db
+    .select()
+    .from(busabaseChangeRequests)
+    .where(
+      and(
+        eq(busabaseChangeRequests.id, changeRequestId),
+        eq(busabaseChangeRequests.spaceId, getContextSpaceId()),
+      ),
+    )
+    .limit(1);
+  return changeRequest ? hydrateChangeRequest(changeRequest) : null;
+};
+
+const createChangeRequestInternal = async (
   baseId: string,
   // `z.input` (not `z.infer`/output) — matches createBase/createDoc/
   // createFileNode/createFileTreeNode: callers may omit any field with a
   // schema default (e.g. `autoMerge`), since `.parse()` below fills it in.
-  input: z.input<typeof createChangeRequestInputSchema>,
+  input: CreateChangeRequestInput,
+  authorization: CreateChangeRequestAuthorization,
 ) => {
   await ensureReady();
   const db = await getDb();
-  const base = await getBase(baseId);
+  const base =
+    authorization.kind === "form"
+      ? await getFormSubmissionBase(authorization.formNodeId, baseId)
+      : await getBase(baseId);
   if (!base) {
     throw baseNotFound(baseId);
   }
   // ChangeRequest-submission gate (node ACL): read-level visibility (getBase
   // above) is not enough to propose — requires `changeRequest` level.
-  await assertBaseChangeRequestPermission(base.id);
+  if (authorization.kind === "base") {
+    await assertBaseChangeRequestPermission(base.id);
+  }
 
   const parsed = createChangeRequestInputSchema.parse(input);
   assertValidRecordFields(parsed.fields, base.fields);
@@ -360,7 +425,10 @@ export const createChangeRequest = async (
       parsed.idempotencyKey,
     );
     if (existingId) {
-      const existing = await getChangeRequest(existingId);
+      const existing =
+        authorization.kind === "form"
+          ? await getFormSubmissionChangeRequest(existingId)
+          : await getChangeRequest(existingId);
       if (existing) {
         // Retry returns whatever the first call produced, as-is (merged or
         // still pending) — always the ChangeRequestVO shape, never re-derived
@@ -405,7 +473,10 @@ export const createChangeRequest = async (
         parsed.idempotencyKey,
       );
       if (existingId) {
-        const existing = await getChangeRequest(existingId);
+        const existing =
+          authorization.kind === "form"
+            ? await getFormSubmissionChangeRequest(existingId)
+            : await getChangeRequest(existingId);
         if (existing) {
           return { ...existing, materialized: false as const };
         }
@@ -481,7 +552,10 @@ export const createChangeRequest = async (
     submittedBy,
   });
 
-  const changeRequest = await getChangeRequest(changeRequestId);
+  const changeRequest =
+    authorization.kind === "form"
+      ? await getFormSubmissionChangeRequest(changeRequestId)
+      : await getChangeRequest(changeRequestId);
   if (!changeRequest) {
     throw new Error("Failed to create changeRequest");
   }
@@ -509,6 +583,22 @@ export const createChangeRequest = async (
   }
   return { ...changeRequest, materialized: false as const };
 };
+
+/** Normal Base mutation entry: visibility + changeRequest permission required. */
+export const createChangeRequest = async (baseId: string, input: CreateChangeRequestInput) =>
+  createChangeRequestInternal(baseId, input, { kind: "base" });
+
+/**
+ * Form-only proposal entry. Form logic must authorize the Form before calling;
+ * this function verifies the active Form still targets the Base, then creates
+ * a pending proposal without exposing or sharing that Base with the visitor.
+ */
+export const createFormSubmissionChangeRequest = async (
+  formNodeId: string,
+  baseId: string,
+  input: CreateChangeRequestInput,
+) =>
+  createChangeRequestInternal(baseId, { ...input, autoMerge: false }, { kind: "form", formNodeId });
 
 /**
  * Propose many record creates as ONE change request: a single CR with N

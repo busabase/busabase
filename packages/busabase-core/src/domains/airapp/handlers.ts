@@ -207,6 +207,15 @@ export const createAirAppChangeRequest = (
   input: z.input<typeof createAirAppChangeRequestInputSchema>,
 ) => createFileTreeChangeRequest(airappFileTreeConfig, nodeIdOrSlug, input);
 
-export const materializeAirAppNode = makeMaterializer(airappFileTreeConfig);
+// Built on first use, not at module evaluation: `makeMaterializer` comes from
+// filetree/handlers, and calling it here would make this module's evaluation
+// order relative to that one load-bearing (see logic/materialize.ts).
+let materializeAirAppNodeImpl: ReturnType<typeof makeMaterializer> | undefined;
+export const materializeAirAppNode: ReturnType<typeof makeMaterializer> = (ctx, args) => {
+  if (!materializeAirAppNodeImpl) {
+    materializeAirAppNodeImpl = makeMaterializer(airappFileTreeConfig);
+  }
+  return materializeAirAppNodeImpl(ctx, args);
+};
 
 registerMaterializer("airapp", materializeAirAppNode);
