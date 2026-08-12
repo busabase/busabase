@@ -68,7 +68,7 @@ So `@scelar/nodepod` is patched (`patches/@scelar__nodepod@1.9.9.patch`, applied
 import { createBusabaseClient } from "busabase-sdk";
 
 // Same origin: no apiKey, the ambient session authenticates. Works identically
-// on apps/busabase and apps/busabase-cloud — /api/v1 is stable across both.
+// self-hosted and on Busabase Cloud — /api/v1 is stable across both.
 const client = createBusabaseClient({ baseUrl: window.location.origin });
 const counts = await client.changeRequests.counts();
 ```
