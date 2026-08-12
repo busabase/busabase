@@ -4,8 +4,8 @@ import { Platform } from "react-native";
  * Copy text to the system clipboard, returning whether it actually landed there.
  *
  * Deliberately dependency-free. `expo-clipboard` is NOT a dependency of this app
- * (it is only hoisted into the workspace root by apps/buda-mobile and
- * apps/inpomo-mobile), and importing a phantom dependency would build fine here
+ * (it may only be present at the workspace root, hoisted there by some other
+ * package), and importing a phantom dependency would build fine here
  * while failing to autolink in a real native build. So:
  *
  *  - **web** (Expo web / RN-web, the surface the share link and Agent prompts are
