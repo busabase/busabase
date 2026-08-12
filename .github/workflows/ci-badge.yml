@@ -10,8 +10,16 @@
 # what the previous commit already proved, so this waves it through instead. The
 # job name must stay exactly `ci-ok` — that string is the required check.
 #
-# The `paths` here and the `paths-ignore` in ci-pr.yml are complementary: every
-# commit must match exactly one of them. Change one and change the other.
+# Triggered on `push`, NOT `pull_request`. GitHub's `paths`/`paths-ignore`
+# filters for `pull_request` events match against the PR's *cumulative* diff
+# against its base branch, not the commits introduced by a given push. Once
+# the coverage job's bot commit lands once, coverage.svg stays part of that
+# cumulative diff for the rest of the PR's life, so a `pull_request`-triggered
+# version of this workflow (and `ci-pr.yml`'s paths-ignore) would keep
+# re-matching — and, worse, this workflow's own defence-in-depth check would
+# then fail every later push, since none of those pushes are themselves
+# badge-only. `push` path filters look only at the commits in that specific
+# push, which is what "was this commit a badge-only commit" actually needs.
 #
 # Owned by this open-source repo (busabase/busabase). The kapps sync
 # (scripts/publish-busabase-repo.ts) PRESERVES `.github`, so it never overwrites
@@ -19,8 +27,8 @@
 name: CI (badge only)
 
 on:
-  pull_request:
-    branches: [main]
+  push:
+    branches: ["release/**"]
     paths:
       - "apps/busabase/public/assets/readme/coverage.svg"
 
@@ -35,30 +43,16 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
       - name: Confirm nothing but the coverage badge changed
-        # Defence in depth: `paths` already scoped this workflow to the badge,
-        # but that filter looks at the whole push. Diffing makes sure no code
-        # slipped through disguised as a badge-labelled commit.
-        #
-        # Diff against the PREVIOUS head of this push (`github.event.before`),
-        # not the PR's base SHA. A real release branch is never badge-only
-        # relative to main — it carries the actual release diff — so comparing
-        # against base would fail this check on every release, exactly the
-        # case ci-pr.yml's coverage job creates when it commits the refreshed
-        # badge onto a release/* branch. What must be badge-only is this one
-        # push, not the whole PR; `before` is only present on `synchronize`,
-        # so fall back to `base.sha` for a PR that opens with just the badge.
-        #
-        # Plain two-dot diff, not `before...HEAD`. actions/checkout@v4 leaves
-        # both sides shallow (depth 1, no shared ancestor commit), so a
-        # three-dot diff — which needs a merge-base — fails with "no merge
-        # base". A two-dot diff just compares the two trees directly and
-        # needs no shared history, so fetching the single base commit by SHA
-        # is enough.
+        # Defence in depth: `paths` already scoped this workflow to pushes
+        # that touch the badge, but that filter looks at the whole push (all
+        # commits it contains). Diffing against the push's previous head
+        # (`github.event.before`) makes sure no code slipped through
+        # disguised as a badge-labelled push.
         run: |
-          base='${{ github.event.before || github.event.pull_request.base.sha }}'
-          git fetch --depth=1 origin "$base"
-          changed=$(git diff --name-only "$base" HEAD)
+          changed=$(git diff --name-only '${{ github.event.before }}' HEAD)
           echo "$changed"
           unexpected=$(echo "$changed" | grep -v '^apps/busabase/public/assets/readme/coverage.svg$' || true)
           if [ -n "$unexpected" ]; then
