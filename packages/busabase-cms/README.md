@@ -1,5 +1,11 @@
 # busabase-cms
 
+> **This is an npm SDK package, not a hosted system.** You install it into your own Next.js app —
+> `"busabase-cms": "workspace:*"` inside this monorepo, or the published `busabase-cms` package
+> from npm outside it — and call its functions from your own server code. It is not a standalone
+> service, product, or thing you deploy on its own; it's a client library that talks to a Busabase
+> workspace you already run or have access to.
+
 Typed CMS adapters for the standard Busabase **Posts**, **Pages**, **Categories**, and **Tags**
 Bases. The core API is framework-neutral; optional entry points add Next.js caching and safe
 Fumadocs rendering.
