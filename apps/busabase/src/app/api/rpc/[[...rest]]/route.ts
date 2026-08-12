@@ -1,7 +1,7 @@
 import { ORPCError } from "@orpc/server";
 import { RPCHandler } from "@orpc/server/fetch";
 import { BatchHandlerPlugin } from "@orpc/server/plugins";
-import { runWithBusabaseContext } from "busabase-core/context";
+import { runWithBusabaseContext, runWithLocalContext } from "busabase-core/context";
 import { busabaseRouter } from "busabase-core/router";
 import { busabaseDemoRouter } from "busabase-core/router-demo";
 import { addCorsHeaders, createCorsHeaders } from "openlib/cors";
@@ -38,10 +38,7 @@ async function handle(request: Request) {
     }
 
     const vaultRuntimeEnv = await readBuiltinVaultRuntimeEnv();
-    return await runWithBusabaseContext(
-      { vaultRuntimeEnv, localUserName: getLocalUserName() },
-      run,
-    );
+    return await runWithLocalContext({ vaultRuntimeEnv, localUserName: getLocalUserName() }, run);
   } catch (error) {
     if (error instanceof ORPCError) {
       return addCorsHeaders(

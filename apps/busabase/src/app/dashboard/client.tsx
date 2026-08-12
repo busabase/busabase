@@ -177,7 +177,7 @@ function DashboardClientContent({ initialPath = "/home", localUserName }: Dashbo
     auditEventsQuery.isPending;
   // Local single-tenant app: persist the chosen UI language preference in
   // localStorage. The default is "auto" — follow the browser language, the same
-  // way apps/busabase-cloud does via `detectBrowserLocale`. A concrete choice
+  // way Busabase Cloud does via `detectBrowserLocale`. A concrete choice
   // (e.g. "zh-CN") overrides it. The cloud app injects its `[lang]` locale instead.
   const [languagePref, setLanguagePref] = useState("auto");
   const [detectedLocale, setDetectedLocale] = useState<string>("en");

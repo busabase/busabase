@@ -26,8 +26,8 @@ export const DESKTOP_OPEN_EXTERNAL_RESULT = "busabase-desktop:open-external:resu
  * app once sign-in finished in the OS browser.
  *
  * Why a *second* hop instead of making this the OAuth `redirect_uri`: Cloud
- * only whitelists loopback redirect URIs for the `tunnel` client kind (see
- * `isAllowedOAuthRedirectUri` in `apps/busabase-cloud`), so the authorization
+ * only whitelists loopback redirect URIs for the `tunnel` client kind, so the
+ * authorization
  * code must keep landing on `http://localhost:<port>/api/cloud-connect/callback`.
  * That page then navigates the browser to this custom scheme, which the OS
  * hands to `apps/busabase-desktop` — no OAuth secret ever travels over it, only

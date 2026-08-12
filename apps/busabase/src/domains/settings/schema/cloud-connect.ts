@@ -8,7 +8,7 @@
  * OSS-side notes). This table is app-local instance config, not a domain
  * concept shared with `busabase-core` (so it's registered only via
  * `apps/busabase/src/db/schema.ts`, not `packages/busabase-core`'s schema —
- * `apps/busabase-cloud` never runs this migration/table).
+ * Busabase Cloud never runs this migration/table).
  */
 
 import { pgTable, text, timestamp } from "drizzle-orm/pg-core";

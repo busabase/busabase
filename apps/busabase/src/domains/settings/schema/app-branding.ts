@@ -5,7 +5,7 @@
  *
  * Like `cloud-connect.ts`, this is app-local instance config rather than a
  * domain concept shared with `busabase-core`, so it is registered only via
- * `apps/busabase/src/db/schema.ts` — `apps/busabase-cloud` never runs this
+ * `apps/busabase/src/db/schema.ts` — Busabase Cloud never runs this
  * migration/table. Persisting it in the DB (rather than an env var or
  * localStorage) is what makes it survive on busabase-desktop.
  *
@@ -20,7 +20,7 @@ export const APP_BRANDING_ROW_ID = "local";
 /**
  * Named without an `oss_` marker, matching its only sibling of this kind:
  * `busabase_cloud_connect` is also app-local and also absent from
- * `apps/busabase-cloud`. What keeps either table from being mistaken for a
+ * Busabase Cloud. What keeps either table from being mistaken for a
  * shared one is that neither is defined in `busabase-core` — the cloud app
  * cannot import them even by accident, since it only registers core's schema.
  */
