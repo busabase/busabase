@@ -1858,6 +1858,7 @@ function BusabaseDashboardContent({
         <RecordTopbarActions
           activeTab={isEditRecordRoute ? "edit" : "view"}
           base={activeBase}
+          record={activeRecord}
           recordId={selectedRecordId}
         />
       );
@@ -1882,6 +1883,7 @@ function BusabaseDashboardContent({
     );
   }, [
     activeBase,
+    activeRecord,
     baseParams?.slug,
     isBaseDesignRoute,
     isBaseSetupRoute,

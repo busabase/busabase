@@ -35,6 +35,7 @@ import { useIsAnonymousVisitor } from "../visitor-context";
 import { applyViewConfigToRecords, BusaBaseTable } from "./base-table";
 import { IStringNameInput } from "./i-string-input";
 import { NodeActionsMenu } from "./node-actions-menu";
+import { NodeAgentPromptsButton } from "./node-agent-prompts-button";
 import { NodePinButton, nodeSidePanelTabId } from "./node-pin-button";
 import { EmptyState, PropertyRow, SidebarPanel } from "./primitives";
 import { RecordTitleBadge } from "./record-title-badge";
@@ -1133,6 +1134,7 @@ function BaseDetailHeader({ base, orpc }: { base: BaseVO | null; orpc: BusabaseQ
   useRegisterTopbarNodeActions(
     base && !isAnon ? (
       <>
+        <NodeAgentPromptsButton nodeId={base.nodeId} nodeName={base.name} nodeType="base" />
         <NodePinButton
           payload={{ nodeId: base.nodeId }}
           tabId={nodeSidePanelTabId("base", base.nodeId)}

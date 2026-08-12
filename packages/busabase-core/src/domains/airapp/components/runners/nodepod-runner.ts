@@ -1,4 +1,5 @@
 import type { Nodepod as NodepodInstance, NodepodProcess, RequestProxy } from "@scelar/nodepod";
+import { type AirAppHostedRuntime, airAppRuntimeEnv } from "../../utils/airapp-runtime-env";
 import { beginPodHeartbeat, ensureRegistered } from "../../utils/nodepod-service-worker";
 import type { AirAppRunner } from "./types";
 
@@ -35,7 +36,17 @@ export class NodepodRunner implements AirAppRunner {
   private readyTimer: ReturnType<typeof setTimeout> | null = null;
   private stopHeartbeat: (() => void) | null = null;
 
-  constructor(private readonly previewScript?: string) {}
+  /**
+   * `runtimeKind` is what the running app sees in `BUSABASE_AIRAPP_RUNTIME` —
+   * the same in-browser engine backs both the dashboard preview (`"nodepod"`)
+   * and the public embed (`"embed"`), and an app may legitimately behave
+   * differently in the two (the embed relays `/api/v1` through a
+   * capability-scoped, read-only route rather than the viewer's session).
+   */
+  constructor(
+    private readonly previewScript?: string,
+    private readonly runtimeKind: AirAppHostedRuntime = "nodepod",
+  ) {}
 
   private emitLog(line: string): void {
     for (const cb of this.logCallbacks) {
@@ -63,6 +74,11 @@ export class NodepodRunner implements AirAppRunner {
     this.stopHeartbeat = beginPodHeartbeat();
     this.nodepod = await Nodepod.boot({
       files,
+      // Pod-level env (used by Nodepod's terminal shell). The dev server gets
+      // it via `spawn`'s own options below — verified against the published
+      // bundle, whose `spawn()` passes `opts.env` straight through and does
+      // NOT merge the boot env into spawned processes.
+      env: airAppRuntimeEnv(this.runtimeKind),
       watermark: false,
       // Start fetching + compiling esbuild-wasm (~10MB) during boot so it
       // overlaps the npm install instead of stalling the first build step.
@@ -116,7 +132,11 @@ export class NodepodRunner implements AirAppRunner {
       throw new Error("NodepodRunner: mount() must be called before start()");
     }
     this.emitLog("$ npm run dev\n");
-    const proc = await nodepod.spawn("npm", ["run", "dev"]);
+    // This env is the app's only trustworthy answer to "am I Busabase-hosted?"
+    // — see `utils/airapp-runtime-env.ts` for why hostname sniffing can't be.
+    const proc = await nodepod.spawn("npm", ["run", "dev"], {
+      env: airAppRuntimeEnv(this.runtimeKind),
+    });
     this.devProcess = proc;
     proc.on("output", (chunk: string) => this.emitLog(chunk));
     proc.on("error", (chunk: string) => this.emitLog(chunk));

@@ -68,6 +68,37 @@ export function NodeShareDialog({
   const setShare = useMutation(orpc.nodes.share.set.mutationOptions());
   const disableShare = useMutation(orpc.nodes.share.disable.mutationOptions());
 
+  // A Form carries a SECOND, form-specific gate next to the node's public
+  // capability: `form.share.anonymousSubmit`. The server has always enforced it
+  // (`submitForm` rejects an anonymous caller when it is false — see
+  // form-ops.ts), but nothing in the UI could ever turn it off, so "public link,
+  // but only signed-in people may submit" was reachable through the API alone.
+  // Only fetched for Form nodes; every other type ignores this entirely.
+  const isForm = nodeType === "form";
+  const formQuery = useQuery({
+    ...orpc.forms.getByNode.queryOptions({ input: { nodeId } }),
+    enabled: isForm && open,
+    retry: false,
+  });
+  const form = formQuery.data ?? null;
+  const updateForm = useMutation(orpc.forms.update.mutationOptions());
+
+  const handleRequireSignIn = async (requireSignIn: boolean) => {
+    if (!form) return;
+    try {
+      await updateForm.mutateAsync({
+        nodeId,
+        share: { ...form.share, anonymousSubmit: !requireSignIn },
+      });
+      await queryClient.invalidateQueries({
+        queryKey: orpc.forms.getByNode.queryOptions({ input: { nodeId } }).queryKey,
+      });
+      toast.success(t.updated);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : t.failed);
+    }
+  };
+
   // Local drafts for the optional fields — a new password is only sent when the
   // user typed one (empty box = leave the stored password untouched); expiry is
   // a datetime-local string converted to ISO on submit.
@@ -201,6 +232,24 @@ export function NodeShareDialog({
                   </SelectContent>
                 </Select>
               </div>
+
+              {/* Only meaningful once the link may submit at all — on a
+                  view-only link there is nothing to require a sign-in for. */}
+              {isForm && form && (share?.capability ?? "read") === "submit" && (
+                <div className="flex items-start justify-between gap-3">
+                  <Label className="flex flex-col gap-1" htmlFor="node-share-require-signin">
+                    <span className="font-medium text-sm">{t.requireSignInLabel}</span>
+                    <span className="text-muted-foreground text-xs">{t.requireSignInHint}</span>
+                  </Label>
+                  <Switch
+                    checked={!form.share.anonymousSubmit}
+                    data-testid="node-share-require-signin"
+                    disabled={busy || updateForm.isPending}
+                    id="node-share-require-signin"
+                    onCheckedChange={handleRequireSignIn}
+                  />
+                </div>
+              )}
 
               {/* Password — the value is never displayed; only a "set" state. */}
               <div className="space-y-1.5">

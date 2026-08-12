@@ -1246,15 +1246,51 @@ export const listChangeRequestsPaged = async (
 };
 
 /**
+ * Every change request matching `filters` that the caller may actually see,
+ * newest first, as `{id}` only.
+ *
+ * The visibility rule depends on the node scope a change request's operations
+ * resolve to, which is not expressible as a SQL predicate — so for a non-manager
+ * the rows have to be walked and filtered in JS. This walks in batches and
+ * selects a single column, the same shape `countChangeRequests` uses for the tab
+ * badges, so both surfaces answer from the identical row set.
+ */
+const listVisibleChangeRequestIds = async (filters: SQL[]): Promise<{ id: string }[]> => {
+  const db = await getDb();
+  const visible: { id: string }[] = [];
+  const batchSize = 200;
+  let offset = 0;
+  for (;;) {
+    const rows = await db
+      .select({ id: busabaseChangeRequests.id })
+      .from(busabaseChangeRequests)
+      .where(and(...filters))
+      .orderBy(desc(busabaseChangeRequests.createdAt), desc(busabaseChangeRequests.id))
+      .limit(batchSize)
+      .offset(offset);
+    visible.push(...(await filterVisibleChangeRequestRows(rows)));
+    if (rows.length < batchSize) break;
+    offset += rows.length;
+  }
+  return visible;
+};
+
+/**
  * Random-access (numbered) change request paging — the same filters as
  * `listChangeRequestsPaged`, but addressed by page number and carrying the total
  * across the whole filter. Backs the inbox's paginator, which reuses the Base
  * table's paginator component.
  *
- * Only the requested page is hydrated. The visibility filter still has to run
- * per row for a non-manager, so for them the offset walk is approximate in the
- * same way the keyset listing already is; a space manager (who sees everything)
- * gets an exact COUNT + OFFSET.
+ * `total` counts only what the caller may SEE, so the paginator agrees with the
+ * tab badge above it (`countChangeRequests`). It used to be a bare `count(*)`
+ * with the visibility filter applied only to the already-sliced page: a reviewer
+ * without space-manage on a busy space saw "502" on the tab, a much larger total
+ * under the list, and pages that rendered a handful of rows — or none at all —
+ * because most of the OFFSET window belonged to nodes they cannot read.
+ *
+ * A space manager sees every change request, so their path stays the cheap
+ * exact `COUNT` + `OFFSET`; only the non-manager path pays for the walk, which
+ * is the same walk the tab badges on the very same screen already do.
  */
 export const listChangeRequestsPage = async (
   input?: z.input<typeof listChangeRequestsPageInputSchema>,
@@ -1270,26 +1306,49 @@ export const listChangeRequestsPage = async (
     filters.push(eq(busabaseChangeRequests.submittedBy, mineActorId()));
   }
 
-  const [countRow] = await db
-    .select({ value: sql<number>`count(*)::int` })
-    .from(busabaseChangeRequests)
-    .where(and(...filters));
+  const isManager = getContextIsSpaceManager();
+  const visibleIds = isManager ? null : await listVisibleChangeRequestIds(filters);
+
+  const [countRow] = isManager
+    ? await db
+        .select({ value: sql<number>`count(*)::int` })
+        .from(busabaseChangeRequests)
+        .where(and(...filters))
+    : [{ value: visibleIds?.length ?? 0 }];
   const total = countRow?.value ?? 0;
   const totalPages = Math.ceil(total / parsed.pageSize);
   const page = totalPages === 0 ? 1 : Math.min(parsed.page, totalPages);
   const offset = (page - 1) * parsed.pageSize;
 
-  const rows = await db
-    .select()
-    .from(busabaseChangeRequests)
-    .where(and(...filters))
-    .orderBy(desc(busabaseChangeRequests.createdAt), desc(busabaseChangeRequests.id))
-    .limit(parsed.pageSize)
-    .offset(offset);
-  const visible = await filterVisibleChangeRequestRows(rows);
+  // Manager: slice in SQL. Non-manager: the visible id order is already the
+  // sort order, so slice it and re-read just that page's rows.
+  let pageRows: ChangeRequestPO[];
+  if (visibleIds) {
+    const pageIds = visibleIds.slice(offset, offset + parsed.pageSize).map((row) => row.id);
+    const unordered =
+      pageIds.length > 0
+        ? await db
+            .select()
+            .from(busabaseChangeRequests)
+            .where(and(...filters, inArray(busabaseChangeRequests.id, pageIds)))
+        : [];
+    const byId = new Map(unordered.map((row) => [row.id, row]));
+    pageRows = pageIds.flatMap((id) => {
+      const row = byId.get(id);
+      return row ? [row] : [];
+    });
+  } else {
+    pageRows = await db
+      .select()
+      .from(busabaseChangeRequests)
+      .where(and(...filters))
+      .orderBy(desc(busabaseChangeRequests.createdAt), desc(busabaseChangeRequests.id))
+      .limit(parsed.pageSize)
+      .offset(offset);
+  }
 
   return {
-    changeRequests: await hydrateChangeRequests(visible, {
+    changeRequests: await hydrateChangeRequests(pageRows, {
       maxOperationsPerChangeRequest: LIST_MAX_OPERATIONS_PER_CHANGE_REQUEST,
     }),
     total,

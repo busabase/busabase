@@ -3,7 +3,7 @@ import "server-only";
 import { randomBytes, scrypt, timingSafeEqual } from "node:crypto";
 import { promisify } from "node:util";
 import { ORPCError } from "@orpc/server";
-import { and, eq, inArray, isNotNull, isNull } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, isNull, or } from "drizzle-orm";
 import { getContextSpaceId, resolveActorId } from "../context";
 import { getDb } from "../db";
 import { busabaseNodeShares, busabaseNodes } from "../db/schema";
@@ -100,20 +100,34 @@ export async function recomputeEffectivePublicScope(rootNodeId: string): Promise
       scope: busabaseNodeShares.scope,
       capability: busabaseNodeShares.capability,
       expiresAt: busabaseNodeShares.expiresAt,
+      passwordHash: busabaseNodeShares.passwordHash,
     })
     .from(busabaseNodeShares)
     .where(eq(busabaseNodeShares.spaceId, spaceId));
 
   const parentOf = new Map(nodes.map((n) => [n.id, n.parentId]));
-  const liveShareOf = new Map<string, NodeShareCapability>();
+  const liveShareOf = new Map<string, { capability: NodeShareCapability; hasPassword: boolean }>();
   for (const share of shares) {
     if (isShareLive(share)) {
-      liveShareOf.set(share.nodeId, share.capability);
+      liveShareOf.set(share.nodeId, {
+        capability: share.capability,
+        hasPassword: share.passwordHash != null,
+      });
     }
   }
 
-  /** Nearest live share walking up from `nodeId`, or null. */
-  const resolve = (nodeId: string): NodeShareCapability | null => {
+  /**
+   * Nearest live share walking up from `nodeId`, or null.
+   *
+   * The password rides along with the capability rather than being resolved
+   * separately, because both answers must come from the SAME share row: a
+   * password on a farther ancestor must not lock a node that a nearer,
+   * password-free share re-opened, which is the same "nearer wins" rule the
+   * capability already follows.
+   */
+  const resolve = (
+    nodeId: string,
+  ): { capability: NodeShareCapability; hasPassword: boolean } | null => {
     let cursor: string | null = nodeId;
     const guard = new Set<string>();
     while (cursor && !guard.has(cursor)) {
@@ -144,18 +158,26 @@ export async function recomputeEffectivePublicScope(rootNodeId: string): Promise
     stack.push(...(childrenOf.get(nodeId) ?? []));
   }
 
-  const byScope = new Map<NodeShareCapability | null, string[]>();
+  // Bucketed by the (scope, requiresPassword) PAIR so each distinct outcome is
+  // one UPDATE, the same way the scope-only version was.
+  const byOutcome = new Map<string, { nodeIds: string[]; resolved: ReturnType<typeof resolve> }>();
   for (const nodeId of subtree) {
-    const scope = resolve(nodeId);
-    const bucket = byScope.get(scope) ?? [];
-    bucket.push(nodeId);
-    byScope.set(scope, bucket);
+    const resolved = resolve(nodeId);
+    const key = `${resolved?.capability ?? "none"}:${resolved?.hasPassword ? "pw" : "open"}`;
+    const bucket = byOutcome.get(key) ?? { nodeIds: [], resolved };
+    bucket.nodeIds.push(nodeId);
+    byOutcome.set(key, bucket);
   }
-  for (const [scope, nodeIds] of byScope) {
+  for (const { nodeIds, resolved } of byOutcome.values()) {
     if (nodeIds.length === 0) continue;
     await db
       .update(busabaseNodes)
-      .set({ effectivePublicScope: scope })
+      .set({
+        effectivePublicScope: resolved?.capability ?? null,
+        // A node that isn't public at all can't be password-locked; keeping the
+        // flag false there means the ACL predicate never has to special-case it.
+        effectivePublicRequiresPassword: resolved ? resolved.hasPassword : false,
+      })
       .where(and(eq(busabaseNodes.spaceId, spaceId), inArray(busabaseNodes.id, nodeIds)));
   }
 }
@@ -166,6 +188,15 @@ export interface PubliclySharedNode {
   slug: string;
   type: string;
   name: string;
+  /**
+   * The link is password-protected. Resolution deliberately still SUCCEEDS in
+   * this case — a challenge page has to know the node exists in order to ask
+   * for the password. Nothing is readable until `unlockPublicShare` succeeds
+   * and the host puts the id on the request context: every actual data read
+   * goes through `getPublicScopeOf` / `buildNodeVisibilityCondition`, both of
+   * which treat a locked node as absent.
+   */
+  requiresPassword: boolean;
 }
 
 /**
@@ -197,6 +228,7 @@ export async function findPubliclySharedNode(
       slug: busabaseNodes.slug,
       type: busabaseNodes.type,
       name: busabaseNodes.name,
+      requiresPassword: busabaseNodes.effectivePublicRequiresPassword,
     })
     .from(busabaseNodes)
     .where(
@@ -209,7 +241,91 @@ export async function findPubliclySharedNode(
       ),
     )
     .limit(1);
-  return row ? { id: row.id, slug: row.slug, type: row.type, name: row.name ?? row.slug } : null;
+  return row
+    ? {
+        id: row.id,
+        slug: row.slug,
+        type: row.type,
+        name: row.name ?? row.slug,
+        requiresPassword: row.requiresPassword,
+      }
+    : null;
+}
+
+/**
+ * The live share row that actually gates `nodeId` — its own, or the nearest one
+ * up the ancestor chain. Mirrors `recomputeEffectivePublicScope`'s `resolve`,
+ * but for a single node at request time, so the password check consults the very
+ * same share that opened the node.
+ *
+ * Deliberately does NOT go through `getNodeShare`: that one asserts `read` on
+ * the node, which an anonymous visitor standing in front of the password prompt
+ * does not have — that is the whole point of the prompt.
+ */
+const resolveGatingShare = async (nodeId: string) => {
+  const db = await getDb();
+  const spaceId = getContextSpaceId();
+  let cursor: string | null = nodeId;
+  const guard = new Set<string>();
+  while (cursor && !guard.has(cursor)) {
+    guard.add(cursor);
+    const [share] = await db
+      .select()
+      .from(busabaseNodeShares)
+      .where(and(eq(busabaseNodeShares.nodeId, cursor), eq(busabaseNodeShares.spaceId, spaceId)))
+      .limit(1);
+    if (share && isShareLive(share)) return share;
+    const [node]: { parentId: string | null }[] = await db
+      .select({ parentId: busabaseNodes.parentId })
+      .from(busabaseNodes)
+      .where(and(eq(busabaseNodes.id, cursor), eq(busabaseNodes.spaceId, spaceId)))
+      .limit(1);
+    cursor = node?.parentId ?? null;
+  }
+  return null;
+};
+
+/**
+ * Check a plaintext share password against the share gating a public node.
+ *
+ * Returns the node id on success — the host stores that (in a signed cookie, in
+ * busabase-cloud's case) and replays it as `unlockedShareNodeIds` on subsequent
+ * requests. Returns null for a wrong password, an unknown node, and a node that
+ * isn't publicly shared at all, so a failed attempt can't be used to enumerate
+ * which of those it was.
+ *
+ * A node with no password on its gating share unlocks trivially: callers may
+ * treat "unlock succeeded" as the single condition to proceed, without
+ * branching on whether a password was required.
+ *
+ * NOT rate-limited here. Throttling belongs at the host's HTTP edge, where the
+ * client IP lives; this function has no notion of a caller identity to key on.
+ */
+export async function unlockPublicShare(
+  nodeIdOrSlug: string,
+  password: string,
+): Promise<{ nodeId: string } | null> {
+  const db = await getDb();
+  const spaceId = getContextSpaceId();
+  const [node] = await db
+    .select({ id: busabaseNodes.id })
+    .from(busabaseNodes)
+    .where(
+      and(
+        eq(busabaseNodes.spaceId, spaceId),
+        or(eq(busabaseNodes.id, nodeIdOrSlug), eq(busabaseNodes.slug, nodeIdOrSlug)),
+        isNull(busabaseNodes.archivedAt),
+        isNull(busabaseNodes.deletedAt),
+        isNotNull(busabaseNodes.effectivePublicScope),
+      ),
+    )
+    .limit(1);
+  if (!node) return null;
+
+  const share = await resolveGatingShare(node.id);
+  if (!share) return null;
+  if (!share.passwordHash) return { nodeId: node.id };
+  return (await verifySharePassword(password, share.passwordHash)) ? { nodeId: node.id } : null;
 }
 
 /**

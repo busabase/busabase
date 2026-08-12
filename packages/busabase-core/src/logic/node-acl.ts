@@ -16,6 +16,7 @@ import {
   getContextPermissionLevelIsCeiling,
   getContextRestrictedVisibility,
   getContextSpaceId,
+  getContextUnlockedShareNodeIds,
   isAnonymousVisitor,
   resolveActorId,
 } from "../context";
@@ -75,12 +76,33 @@ const STRICTNESS: Record<NodeVisibility, number> = { private: 0, workspace: 1, p
 export async function getPublicScopeOf(nodeId: string): Promise<"read" | "submit" | null> {
   const db = await getDb();
   const [row] = await db
-    .select({ scope: busabaseNodes.effectivePublicScope })
+    .select({
+      scope: busabaseNodes.effectivePublicScope,
+      requiresPassword: busabaseNodes.effectivePublicRequiresPassword,
+    })
     .from(busabaseNodes)
     .where(and(eq(busabaseNodes.id, nodeId), eq(busabaseNodes.spaceId, getContextSpaceId())))
     .limit(1);
-  return row?.scope ?? null;
+  if (!row?.scope) return null;
+  if (row.requiresPassword && !getContextUnlockedShareNodeIds().includes(nodeId)) return null;
+  return row.scope;
 }
+
+/**
+ * SQL half of the share-password gate: a publicly shared node is reachable only
+ * when it carries no password, or when this request has already proven it.
+ *
+ * The stored hash never enters this predicate — `effective_public_requires_
+ * password` is the materialized "is a password in the way?" bit, and the proof
+ * itself arrives as a host-verified id list on the context. Splitting it that
+ * way is what keeps the hot read path a single-column test.
+ */
+const buildShareUnlockedCondition = (): SQL => {
+  const unlocked = getContextUnlockedShareNodeIds();
+  const noPassword = eq(busabaseNodes.effectivePublicRequiresPassword, false);
+  if (unlocked.length === 0) return noPassword;
+  return or(noPassword, inArray(busabaseNodes.id, [...unlocked])) as SQL;
+};
 
 /**
  * The same capability read, for a node REFERENCE that may be an id OR a node
@@ -117,6 +139,10 @@ export async function getPublicScopeOfNodeRef(
         eq(busabaseNodes.slug, nodeIdOrSlug),
         eq(busabaseNodes.spaceId, getContextSpaceId()),
         isNotNull(busabaseNodes.effectivePublicScope),
+        // A password-protected candidate contributes nothing until this request
+        // has proven it — same rule as the id branch above, so a slug can never
+        // be the cheaper way past a password.
+        buildShareUnlockedCondition(),
         // The slug uniqueness index only covers live rows; archived/deleted
         // nodes must not resurrect a link either.
         isNull(busabaseNodes.archivedAt),
@@ -168,7 +194,7 @@ export const buildNodeVisibilityCondition = (
   // Their only way in is an explicit public share, materialized onto
   // `effectivePublicScope` (see logic/node-share.ts).
   if (isAnonymousVisitor()) {
-    return isNotNull(busabaseNodes.effectivePublicScope);
+    return and(isNotNull(busabaseNodes.effectivePublicScope), buildShareUnlockedCondition()) as SQL;
   }
   if (getContextIsSpaceManager()) return undefined;
   const actorId = resolveActorId(inputActorId ?? "local-user");

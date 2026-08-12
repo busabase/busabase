@@ -296,6 +296,11 @@ export const dashboardZhTW: CoreI18nMessages = {
     copy: "複製提示詞",
     copied: "已複製",
   },
+  share: {
+    ...dashboardZhCN.share,
+    requireSignInLabel: "需登入後才能提交",
+    requireSignInHint: "任何拿到連結的人都能開啟表單，但只有登入後的訪客才能提交。",
+  },
   permissions: {
     title: "權限",
     dialogTitle: "權限",

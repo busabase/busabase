@@ -8,6 +8,7 @@ import path from "node:path";
 import { SandboxManager, type SandboxRuntimeConfig } from "@anthropic-ai/sandbox-runtime";
 import type { AirAppRuntimeEvent } from "busabase-contract/domains/airapp/contract";
 import { assertNodePermission } from "../../../logic/node-acl";
+import { airAppRuntimeEnv } from "../utils/airapp-runtime-env";
 import { registerLocalPreview, unregisterLocalPreview } from "./local-preview-registry";
 
 /**
@@ -279,9 +280,15 @@ export async function* runAirAppLocalNode(
   // `process.env.PORT` and log the actual port, so `detectPort` picks it up for
   // registration + the reverse proxy. srt network-isolates each run's :3000, so
   // it keeps the current behavior (no PORT injection).
-  const extraEnv: Record<string, string> | undefined = sandboxed
-    ? undefined
-    : { PORT: String(await findFreePort()) };
+  //
+  // `airAppRuntimeEnv` goes to BOTH engines: it is how the app learns it is
+  // Busabase-hosted rather than standalone, and under this engine the app is
+  // reverse-proxied onto a sub-path of busabase's origin — an environment no
+  // hostname test can classify correctly. See `utils/airapp-runtime-env.ts`.
+  const extraEnv: Record<string, string> = {
+    ...airAppRuntimeEnv(input.engine),
+    ...(sandboxed ? {} : { PORT: String(await findFreePort()) }),
+  };
 
   // See the file-level doc comment: SandboxManager is a process-wide
   // singleton, so for the srt engine the whole initialize -> run -> reset

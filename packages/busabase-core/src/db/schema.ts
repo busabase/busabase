@@ -130,6 +130,15 @@ export const busabaseNodes = pgTable(
     // a public link" inexpressible — which is a case we explicitly support.
     // NULL = not public.
     effectivePublicScope: text("effective_public_scope").$type<"read" | "submit">(),
+    // Whether the share that opened this node (the same nearest-live-share the
+    // scope above resolves to) carries a password. Materialized on the node for
+    // the same reason the scope is: the read gate is a single SQL predicate over
+    // this table and cannot walk ancestors. The hash itself stays on
+    // `busabase_node_shares` — this is only the "is a password in the way?" bit
+    // the ACL needs, never the secret.
+    effectivePublicRequiresPassword: boolean("effective_public_requires_password")
+      .notNull()
+      .default(false),
     // Soft-archive marker. Set when the owning base is archived (base nodes are
     // kept, not deleted, since commits FK-restrict the base). Partial slug index
     // below frees the slug for reuse while archived.

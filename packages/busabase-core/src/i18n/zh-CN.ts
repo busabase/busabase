@@ -183,6 +183,8 @@ export const dashboardZhCN: CoreI18nMessages = {
     capabilityLabel: "访客可以做什么",
     capabilityRead: "仅查看",
     capabilitySubmit: "允许提交",
+    requireSignInLabel: "需登录后才能提交",
+    requireSignInHint: "任何拿到链接的人都能打开表单，但只有登录后的访客才能提交。",
     passwordLabel: "密码",
     passwordHint: "留空表示不设密码",
     passwordPlaceholder: "设置密码",

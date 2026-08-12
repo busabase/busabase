@@ -44,6 +44,7 @@ import {
   type SkillTreeNode,
 } from "./file-tree-browser";
 import { NodeActionsMenu } from "./node-actions-menu";
+import { NodeAgentPromptsButton } from "./node-agent-prompts-button";
 import { NodePinButton, nodeSidePanelTabId } from "./node-pin-button";
 import { NodeShareDialog } from "./node-share-button";
 import { EmptyState } from "./primitives";
@@ -115,6 +116,11 @@ export function FileTreeDetailView({
   useRegisterTopbarNodeActions(
     fileTree ? (
       <>
+        <NodeAgentPromptsButton
+          nodeId={fileTree.node.id}
+          nodeName={fileTree.node.name}
+          nodeType={nodeType}
+        />
         <NodePinButton
           payload={{ nodeId: fileTree.node.id }}
           tabId={nodeSidePanelTabId(nodeType, fileTree.node.id)}
@@ -563,6 +569,11 @@ export function FileNodeDetailView({
   useRegisterTopbarNodeActions(
     detail ? (
       <>
+        <NodeAgentPromptsButton
+          nodeId={detail.node.id}
+          nodeName={detail.node.name}
+          nodeType="file"
+        />
         <NodePinButton
           payload={{ nodeId: detail.node.id }}
           tabId={nodeSidePanelTabId("file", detail.node.id)}
@@ -736,6 +747,7 @@ export function DocDetailView({
         >
           {messages.common.edit}
         </button>
+        <NodeAgentPromptsButton nodeId={doc.node.id} nodeName={doc.node.name} nodeType="doc" />
         <NodePinButton
           payload={{ nodeId: doc.node.id }}
           tabId={nodeSidePanelTabId("doc", doc.node.id)}
@@ -915,6 +927,11 @@ export function FolderDetailView({
   useRegisterTopbarNodeActions(
     folder ? (
       <>
+        <NodeAgentPromptsButton
+          nodeId={folder.node.id}
+          nodeName={folder.node.name}
+          nodeType="folder"
+        />
         <NodePinButton
           payload={{ nodeId: folder.node.id }}
           tabId={nodeSidePanelTabId("folder", folder.node.id)}
@@ -1103,14 +1120,46 @@ function FormNodeDetailView({ nodes = [], onNodeLoaded, orpc, slug }: NodeDetail
   const form = formQuery.data ?? null;
   useReportLoadedNode(node, onNodeLoaded);
 
+  // Form used to register ONLY the Share button — no Agent prompts, no Pin, no
+  // "•••" (so no Rename / Permissions / Delete either), which made it the one
+  // node type whose header didn't match any other. It is also the type that
+  // needs Agent prompts most: the page is agent-authored HTML and there is no
+  // GUI form builder, so without this button there is no discoverable way to
+  // change a form's layout at all.
   useRegisterTopbarNodeActions(
-    node && form && !isAnonymous ? <FormShareButton form={form} node={node} orpc={orpc} /> : null,
+    node && !isAnonymous ? (
+      <>
+        <NodeAgentPromptsButton nodeId={node.id} nodeName={node.name} nodeType="form" />
+        <NodePinButton
+          payload={{ nodeId: node.id }}
+          tabId={nodeSidePanelTabId("form", node.id)}
+          tabType="form-preview"
+          title={node.name}
+        />
+        {form ? <FormShareButton form={form} node={node} orpc={orpc} /> : null}
+        <NodeActionsMenu
+          nodeId={node.id}
+          nodeName={node.name}
+          nodeSlug={node.slug}
+          nodeType="form"
+          orpc={orpc}
+        />
+      </>
+    ) : null,
   );
 
   return <FormDetailView orpc={orpc} slug={slug} />;
 }
 
 registerNodeDetail("form", FormNodeDetailView);
+
+// Backs the Pin button the Form header now has; `getFormByNodeId` accepts an id
+// or a slug, so the pinned payload's node id resolves the same form the page does.
+function FormSidePanelPreview({ orpc, payload }: SidePanelTabProps) {
+  const { nodeId } = payload as { nodeId: string };
+  return <FormDetailView orpc={orpc} slug={nodeId} />;
+}
+registerSidePanelTab("form-preview", FormSidePanelPreview);
 
 function FolderSidePanelPreview({ orpc, payload }: SidePanelTabProps) {
   const { nodeId } = payload as { nodeId: string };

@@ -33,13 +33,17 @@ describe("busabase /api/v1 error envelope", () => {
     const encoded = encodeBusabaseOpenApiError(
       new ORPCError("FORBIDDEN", {
         message: "Not a member of the requested space",
-        data: { error: "Not a member of the requested space (x-busabase-space)" },
+        data: {
+          error: "Not a member of the requested space (x-busabase-space)",
+          reason: "SPACE_NOT_ALLOWED",
+        },
       }),
     );
 
     expect(encoded).toMatchObject({
       code: "FORBIDDEN",
       error: "Not a member of the requested space (x-busabase-space)",
+      reason: "SPACE_NOT_ALLOWED",
     });
   });
 
