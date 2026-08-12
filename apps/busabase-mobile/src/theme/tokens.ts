@@ -3,7 +3,7 @@ import { Platform } from "react-native";
 // Mirrors the Busabase web dashboard's cool micro-cement workbench theme.
 // Brand assets intentionally keep their Graphite/Paper colors; these tokens
 // describe product UI. Color is reserved for semantic review status.
-// Canonical source: apps/busabase/src/app/global.css + content/spec/design-system.md.
+// Canonical source: apps/busabase/src/app/global.css.
 export const lightTokens = {
   background: "#F1F3F3",
   surface: "#F9FAFA",

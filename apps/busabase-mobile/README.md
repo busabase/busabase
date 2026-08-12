@@ -6,8 +6,6 @@ loop: Inbox with status tabs, change request review with field-level diffs
 (Approve / Approve & Merge / Request changes / Merge), record detail with comments and review
 history, Base tables with saved views, and local notifications when new change requests arrive.
 
-See `content/spec/product-design.md` for the product plan and architecture decisions.
-
 ## Development
 
 ```bash
