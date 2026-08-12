@@ -26,6 +26,11 @@ export interface BusabaseAirAppOAuthCredential {
   expiresAt: string;
   scope: string[];
   tokenType: string;
+  /** Validated target for this local AirApp. Tokens remain user-scoped. */
+  selectedSpace?: {
+    id: string;
+    name: string;
+  };
 }
 
 export interface BusabaseAirAppCredentialStoreOptions {
@@ -85,6 +90,15 @@ const parseCredential = (raw: string, expectedAppId: string): BusabaseAirAppOAut
   ) {
     throw new BusabaseOAuthError("invalid_local_credential", "AirApp OAuth credential is invalid");
   }
+  if (
+    item.selectedSpace !== undefined &&
+    (typeof item.selectedSpace !== "object" ||
+      item.selectedSpace === null ||
+      typeof item.selectedSpace.id !== "string" ||
+      typeof item.selectedSpace.name !== "string")
+  ) {
+    throw new BusabaseOAuthError("invalid_local_credential", "AirApp OAuth credential is invalid");
+  }
   return item as BusabaseAirAppOAuthCredential;
 };
 
@@ -107,6 +121,7 @@ export function storeBusabaseAirAppOAuthCredential(
     baseUrl: string;
     tokenSet: BusabaseOAuthTokenSet;
     clientId?: string;
+    selectedSpace?: BusabaseAirAppOAuthCredential["selectedSpace"];
   },
   options: BusabaseAirAppCredentialStoreOptions = {},
 ): BusabaseAirAppOAuthCredential {
@@ -126,6 +141,7 @@ export function storeBusabaseAirAppOAuthCredential(
     expiresAt: input.tokenSet.expiresAt,
     scope: input.tokenSet.scope,
     tokenType: input.tokenSet.tokenType,
+    ...(input.selectedSpace ? { selectedSpace: input.selectedSpace } : {}),
   };
   const path = busabaseAirAppCredentialPath(input.appId, options);
   const directory = dirname(path);
@@ -179,6 +195,7 @@ export async function getBusabaseAirAppAccessToken(
           ...tokenSet,
           refreshToken: tokenSet.refreshToken ?? credential.refreshToken,
         },
+        selectedSpace: credential.selectedSpace,
       },
       options,
     );
@@ -192,6 +209,35 @@ export async function getBusabaseAirAppAccessToken(
       refreshesByCredentialPath.delete(credentialPath);
     }
   }
+}
+
+/** Persist a Space only after the caller has verified membership through `/api/v1/auth`. */
+export function storeBusabaseAirAppSelectedSpace(
+  appId: string,
+  selectedSpace: { id: string; name: string } | null,
+  options: BusabaseAirAppCredentialStoreOptions = {},
+): BusabaseAirAppOAuthCredential {
+  const credential = loadBusabaseAirAppOAuthCredential(appId, options);
+  if (!credential) {
+    throw new BusabaseOAuthError(
+      "missing_local_credential",
+      "Connect this local AirApp before selecting a Space",
+    );
+  }
+  const next: BusabaseAirAppOAuthCredential = {
+    ...credential,
+    ...(selectedSpace ? { selectedSpace } : { selectedSpace: undefined }),
+  };
+  const path = busabaseAirAppCredentialPath(appId, options);
+  const temporaryPath = `${path}.${randomUUID()}.tmp`;
+  writeFileSync(temporaryPath, `${JSON.stringify(next, null, 2)}\n`, { mode: 0o600 });
+  try {
+    chmodSync(temporaryPath, 0o600);
+  } catch {
+    // Best effort on filesystems without POSIX modes.
+  }
+  renameSync(temporaryPath, path);
+  return next;
 }
 
 export function clearBusabaseAirAppOAuthCredential(
