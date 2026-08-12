@@ -20,6 +20,8 @@ describe("shared dashboard translations", () => {
     expect(coreMessagesByLocale["zh-CN"].integration.copyPrompt).toBe("复制提示词");
     expect(coreMessagesByLocale.ja.integration.copyFailed).toContain("コピー");
     expect(coreMessagesEn.integration.promptLabel).toBe("Agent onboarding prompt");
+    expect(coreMessagesByLocale["zh-CN"].integration.plugin).toBe("插件");
+    expect(coreMessagesEn.integration.pluginIntro).toContain("coding agent");
   });
 
   it("localizes file metadata and form source labels", () => {

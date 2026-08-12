@@ -8,9 +8,8 @@ bika's Formula engine (`~/Documents/bika/projects/bika/packages/bika-types` +
 checklist-by-checklist; check items off as they land (with the commit/PR
 that landed them) so progress survives context resets.
 
-Prerequisite (already shipped): `changelog/20260724-busabase-formula-field-type.md`
-/ PR #5767 — the MVP engine (lexer/parser/AST/interpreter, ~20 functions,
-`{slug}` references, no chaining, plain floats).
+Prerequisite (already shipped): the MVP engine (lexer/parser/AST/interpreter,
+~20 functions, `{slug}` references, no chaining, plain floats).
 
 ## Architecture decisions (locked — implemented as written below)
 

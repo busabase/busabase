@@ -44,6 +44,15 @@ interface BusabaseAgentSkillButtonProps {
    * `x-busabase-space` instead of discovering/guessing a default.
    */
   targetSpaceId?: string;
+  /** Host-owned plugin destinations, shared with its public navigation. */
+  pluginItems?: readonly AgentIntegrationPluginItem[];
+}
+
+export interface AgentIntegrationPluginItem {
+  title: string;
+  description: string;
+  href: string;
+  icon: string;
 }
 
 interface AgentIntegrationDialogProps {
@@ -67,6 +76,8 @@ interface AgentIntegrationDialogProps {
   lang?: string;
   /** Cloud only: currently selected Busabase space id. */
   targetSpaceId?: string;
+  /** Host-owned plugin destinations, shared with its public navigation. */
+  pluginItems?: readonly AgentIntegrationPluginItem[];
 }
 
 const resolveMessages = (lang: string | undefined, fallback: CoreI18nMessages): CoreI18nMessages =>
@@ -90,8 +101,8 @@ export function createSetupSkillUrl(
 }
 
 /**
- * Standalone dialog with three tabs: Agent Skills, MCP, OpenAPI.
- * Shared by the sidebar button and the landing page hero.
+ * Standalone integration dialog shared by the sidebar button and landing page hero.
+ * Hosts may add a Plugin tab by providing their public plugin catalog.
  */
 export function AgentIntegrationDialog({
   open,
@@ -101,6 +112,7 @@ export function AgentIntegrationDialog({
   editionConfirmed = false,
   lang,
   targetSpaceId,
+  pluginItems = [],
 }: AgentIntegrationDialogProps) {
   const contextMessages = useCoreI18n();
   const messages = resolveMessages(lang, contextMessages);
@@ -196,6 +208,11 @@ export function AgentIntegrationDialog({
             <TabsTrigger value="skills" className="flex-1">
               {messages.integration.agentSkills}
             </TabsTrigger>
+            {pluginItems.length > 0 ? (
+              <TabsTrigger value="plugin" className="flex-1">
+                {messages.integration.plugin}
+              </TabsTrigger>
+            ) : null}
             <TabsTrigger value="mcp" className="flex-1">
               MCP
             </TabsTrigger>
@@ -319,6 +336,45 @@ export function AgentIntegrationDialog({
               )}
             </div>
           </TabsContent>
+
+          {pluginItems.length > 0 ? (
+            <TabsContent value="plugin" className="mt-0 min-h-0 overflow-y-auto pr-1">
+              <div className="grid gap-3">
+                <p className="text-sm text-muted-foreground">{messages.integration.pluginIntro}</p>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  {pluginItems.map((item) => (
+                    <a
+                      className="group flex min-h-24 items-center gap-3 rounded-md border bg-card p-4 transition-colors hover:bg-muted/60"
+                      href={item.href}
+                      key={item.href}
+                    >
+                      <span className="flex size-11 shrink-0 items-center justify-center rounded-md border bg-background">
+                        <img
+                          alt=""
+                          className="size-7 object-contain"
+                          height={28}
+                          src={item.icon}
+                          width={28}
+                        />
+                      </span>
+                      <span className="min-w-0 flex-1">
+                        <span className="flex items-center gap-1.5 text-sm font-medium text-foreground">
+                          {item.title}
+                          <ExternalLink
+                            aria-hidden="true"
+                            className="size-3.5 text-muted-foreground transition-colors group-hover:text-foreground"
+                          />
+                        </span>
+                        <span className="mt-1 block text-xs leading-5 text-muted-foreground">
+                          {item.description}
+                        </span>
+                      </span>
+                    </a>
+                  ))}
+                </div>
+              </div>
+            </TabsContent>
+          ) : null}
 
           {/* ── MCP tab ───────────────────────────────────────────────── */}
           <TabsContent value="mcp" className="mt-0 min-h-0 overflow-y-auto pr-1">
@@ -554,13 +610,14 @@ export function AgentIntegrationDialog({
 
 /**
  * Sidebar footer button + integration panel shared by every Busabase host.
- * Opens a dialog with three tabs: Agent Skills, MCP, OpenAPI.
+ * Opens the shared Agent Integration dialog.
  */
 export function BusabaseAgentSkillButton({
   defaultOrigin = "http://localhost:15419",
   edition = "desktop",
   lang,
   targetSpaceId,
+  pluginItems,
 }: BusabaseAgentSkillButtonProps = {}) {
   const contextMessages = useCoreI18n();
   const messages = resolveMessages(lang, contextMessages);
@@ -588,6 +645,7 @@ export function BusabaseAgentSkillButton({
         editionConfirmed
         lang={lang}
         targetSpaceId={targetSpaceId}
+        pluginItems={pluginItems}
       />
     </>
   );

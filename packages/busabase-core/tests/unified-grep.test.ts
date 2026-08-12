@@ -12,8 +12,7 @@ import { busabaseRouter } from "../src/router";
  * through the real oRPC router (mirrors `drive-grep-retrieval.test.ts`'s
  * harness: real temp PGLite DB + real local storage) so these tests
  * exercise the exact `grep` → `logic/grep.ts` → (`grepAssets` | docs adapter
- * | records adapter) code path a caller hits. See
- * apps/busabase/content/spec/unified-grep.md.
+ * | records adapter) code path a caller hits.
  *
  * The pre-existing files grep suite (drive-grep-retrieval.test.ts,
  * drive-grep-concurrency.test.ts, drive-grep-rg-routing.test.ts,

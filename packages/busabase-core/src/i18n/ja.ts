@@ -232,6 +232,9 @@ export const dashboardJa: CoreI18nMessages = {
     engineSrtHint: "OSサンドボックス · 分離、ライブプレビューなし",
   },
   form: {
+    alreadyExists:
+      "このノードにはフォームが既にあります。新規作成せず、既存のフォームを更新してください。",
+    invalidCursor: "フォームのページリンクが無効です。更新してもう一度お試しください。",
     submitted: "送信しました",
     pendingReview: "送信内容はレビューに送られました。",
     submitFailed: "送信に失敗しました",
@@ -979,6 +982,8 @@ export const dashboardJa: CoreI18nMessages = {
   integration: {
     title: "エージェント連携",
     agentSkills: "Agent Skills",
+    plugin: "プラグイン",
+    pluginIntro: "現在使用しているコーディングエージェントに Busabase プラグインを導入します。",
     worksWith: "対応",
     skillIntro:
       "このプロンプトをエージェントにコピーしてください。このワークスペースのオンボーディングスキル（SETUP_SKILL.md）を開き、接続手順を案内して常設の Busabase スキルをインストールします。",

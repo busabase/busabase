@@ -12,7 +12,7 @@ import {
  * Auth verification info for the current request. In the open-source app there
  * are no user/member tables — every request runs as the single local owner of
  * the `local` space — so this synthesizes that local identity from the context
- * defaults. The cloud host (`apps/busabase-cloud`) overrides this handler on its
+ * defaults. The Busabase Cloud host overrides this handler on its
  * PUBLIC REST surface (`/api/v1/auth`) to return the real space/user/member
  * resolved from the verified user API key.
  *

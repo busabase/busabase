@@ -51,7 +51,7 @@
  *
  * Verified end-to-end: local Busabase instance, clicked Run, confirmed the
  * bundled server boots and the real onboarding UI renders in the preview
- * iframe — see `apps/busabase/content/changelog/20260716-kelly-email-airapp-port.md`.
+ * iframe.
  */
 
 import type { AirAppDemoDef } from "./demo-content";

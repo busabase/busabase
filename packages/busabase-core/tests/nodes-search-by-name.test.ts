@@ -1,7 +1,6 @@
 /**
  * `nodes.searchByName` — the cheap, name/slug-only lookup backing the
- * dashboard quick-jump palette's `KnownNode` cache-miss path (see
- * apps/busabase/content/spec/search-quick-jump.md). Covers:
+ * dashboard quick-jump palette's `KnownNode` cache-miss path. Covers:
  *  - every built-in node type is findable by name, and by slug
  *  - exact-slug matches sort first
  *  - node-visibility ACL scoping (same pattern as node-acl.test.ts)

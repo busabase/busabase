@@ -6,8 +6,8 @@
  * be able to self-merge its own proposal into production.
  *
  * Pure zod/TS, no db/react import — importable from both the backend
- * enforcement point (`apps/busabase-cloud/src/domains/openapi/router.ts`,
- * `workbenchProcedure`) and the frontend `kui/select` (api-keys settings UI).
+ * enforcement point (the host's `workbenchProcedure` middleware) and the
+ * frontend `kui/select` (api-keys settings UI).
  */
 
 import { z } from "zod";
@@ -45,9 +45,8 @@ export const parseBusabaseRelayPermissionLevel = (
 /**
  * Storage envelope written into the existing (already-migrated, currently
  * unused) `permissions` text column on Better Auth's `apikeys` table as
- * `JSON.stringify(...)`, and `JSON.parse`'d back on read — see
- * `apps/busabase-cloud/src/domains/api-keys/logic/api-keys-logic.ts` and
- * `logic/api-key-auth.ts`. `null` (the column's default) means "no
+ * `JSON.stringify(...)`, and `JSON.parse`'d back on read by the host's API-key
+ * issue/authenticate logic. `null` (the column's default) means "no
  * restriction" — full access, identical to every key issued before this
  * feature existed.
  *
@@ -211,6 +210,7 @@ export const PROCEDURE_PERMISSION_POLICY: Record<string, ProcedurePermissionPoli
   "airapps.runLocalNode": node("write"),
   "docs.readLines": node("read"),
 
+  "forms.list": node("read"),
   "forms.getByNode": node("read"),
   "forms.create": node("manage"),
   "forms.update": node("manage"),
@@ -248,8 +248,7 @@ export const PROCEDURE_LEVEL_OVERRIDES: Record<string, ApiKeyPermissionLevel> = 
 
 /**
  * `workbenchProcedure.router(busabaseRouter)` is later spread into the
- * `workbench` key of the served router
- * (`apps/busabase-cloud/src/domains/openapi/router.ts`), and oRPC resolves
+ * `workbench` key of the router the host actually serves, and oRPC resolves
  * `path` against the FULL served router tree, not the sub-router the
  * middleware was attached to — confirmed empirically against both
  * `OpenAPIHandler` and `RPCHandler` (the two handlers actually used in

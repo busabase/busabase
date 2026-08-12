@@ -5,8 +5,7 @@ import { cn } from "kui/utils";
 import type { HTMLAttributes } from "react";
 
 /**
- * busabase-core's equivalent of apps/buda's `ShimmerSkeleton`
- * (`apps/buda/src/components/ui/shimmer-skeleton.tsx`): a static placeholder
+ * A static placeholder
  * block with an animated gradient sweep, used in `skeletons.tsx` in place of
  * kui's flat `animate-pulse` `Skeleton` for the side-panel tab content
  * loading states (`NodeDetailSkeleton`, `FileContentSkeleton`,

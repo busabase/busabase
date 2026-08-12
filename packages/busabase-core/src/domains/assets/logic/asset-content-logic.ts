@@ -33,7 +33,7 @@ export interface AssetContentLocation {
  * **Why a multi-tenant host needs this, and why it is not a hole.** Every other
  * busabase-core read runs INSIDE a space context and filters by it; this one
  * deliberately runs before any context exists, because on a multi-tenant host
- * (`apps/busabase-cloud`) the space is not known yet. A `/api/assets/{id}/raw`
+ * (Busabase Cloud) the space is not known yet. A `/api/assets/{id}/raw`
  * request arrives as a plain browser `<img>` fetch: no `x-busabase-space`
  * header, no referrer worth trusting, nothing but a globally unique asset id.
  * The host has to learn WHICH tenant context to enter before it can ask the ACL

@@ -31,8 +31,7 @@ import { registerLocalPreview, unregisterLocalPreview } from "./local-preview-re
  *   limitation — the `ready`/preview events still fire; the iframe just won't
  *   load).
  *
- * Workdir setup mirrors `apps/buda`'s
- * `agent/logic/runtime/local-agent-runtime-adapter.ts` `createSandbox()`
+ * Workdir setup mirrors Buda's local agent runtime adapter
  * (same `SANDAGENT_WORKDIR` env var, same `path.resolve(process.cwd(), ...)`
  * pattern) rather than inventing a new convention. Unlike `NodepodRunner` (a
  * virtual, in-browser filesystem + process), both engines spawn a real

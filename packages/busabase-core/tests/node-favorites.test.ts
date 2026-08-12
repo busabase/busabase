@@ -11,8 +11,6 @@
  *    silent no-op;
  *  - demo mode never persists (`toggleFavorite` throws, `listFavorites`
  *    returns an empty array), matching every other demo-mode node handler.
- *
- * See apps/busabase/content/spec/sidebar-favorites.md for the full design.
  */
 import { createRouterClient } from "@orpc/server";
 import { and, eq } from "drizzle-orm";

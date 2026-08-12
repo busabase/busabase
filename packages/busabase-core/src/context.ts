@@ -14,7 +14,7 @@ import { type DemoUseCase, normalizeDemoUseCase } from "./demo/use-case";
  *
  * busabase-core is single-tenant by construction (a module-singleton `db`, no
  * `spaceId` on any table, a hard-coded local actor). To let a multi-tenant host
- * (`apps/busabase-cloud`) reuse the SAME logic without rewriting ~100 function
+ * (Busabase Cloud) reuse the SAME logic without rewriting ~100 function
  * signatures, we thread `{ db, actorId, spaceId }` through an
  * `AsyncLocalStorage`:
  *
@@ -108,7 +108,7 @@ export interface BusabaseContext {
   /**
    * Host hook: invoked (best-effort, errors swallowed by the caller) whenever a
    * change request freshly enters human review, so a multi-tenant host
-   * (`apps/busabase-cloud`) can persist an inbox notification for whoever should
+   * (Busabase Cloud) can persist an inbox notification for whoever should
    * review it. The open-source host leaves this undefined — its reviewers get
    * the ephemeral desktop Notification via the live SSE event instead (see
    * `publishChangeRequestPendingReview` in `logic/live-events.ts`).
@@ -291,7 +291,7 @@ export function runWithAnonymousContext<T>(
  * `visitorKind`: it is never set, so a member request can never carry the
  * anonymous downgrade by accident. Its value is a single named, documented
  * construction point for the caller kind that today's twelve call sites hand-
- * assemble independently (see caller-kinds-and-permission-context.md).
+ * assemble independently.
  */
 export function runWithMemberContext<T>(
   ctx: Omit<BusabaseContext, "visitorKind">,
@@ -307,11 +307,11 @@ export function runWithMemberContext<T>(
  * Distinct from `runWithAnonymousContext` ("guest"): a guest's authority
  * comes from the NODE being explicitly publicly shared; an embed visitor's
  * authority comes from possessing the LINK, and V1 links carry Space-scoped
- * read (see caller-kinds-and-permission-context.md §5).
+ * read.
  *
  * `actorId` is supplied by the caller and is deliberately the link's
  * CREATOR, not an anonymous sentinel — kept for attribution and for their
- * own node-principal grants (§9.2 of the same doc), never for privilege
+ * own node-principal grants, never for privilege
  * LEVEL, which is why the two pins below cannot be overridden by the caller:
  *
  * - `isSpaceManager: false` — the creator is typically an owner/admin, and a
@@ -338,6 +338,37 @@ export function runWithEmbedContext<T>(
     },
     fn,
   );
+}
+
+/**
+ * Run `fn` as the OSS single-user host — the LOCAL kind.
+ *
+ * Unlike every other kind, "sets nothing" is a valid, deliberate configuration
+ * here: `apps/busabase` has no auth to resolve, so the permissive
+ * absent-value defaults (see `BusabaseContext`'s per-signal docs) ARE the
+ * intended behaviour — full local access, no restriction. That is exactly why
+ * this kind is worth naming: as long as "sets nothing" stays a valid,
+ * meaningful configuration, absence can never be made a compile error (the
+ * property every other kind gets once raw construction is unreachable) —
+ * naming it is what turns "a transport forgot to pick a kind" into "a
+ * transport explicitly chose local," which is the whole point.
+ *
+ * `aclOverride` exists for exactly one case: the Local ↔ Cloud Tunnel relay,
+ * where a Cloud-issued API-key ceiling forwarded into the local host must
+ * still apply (`resolveRelayPermissionContext`). A direct local call passes
+ * nothing here and keeps the permissive local default.
+ */
+export function runWithLocalContext<T>(
+  ctx: Pick<BusabaseContext, "vaultRuntimeEnv" | "localUserName"> & {
+    aclOverride?: Pick<
+      BusabaseContext,
+      "isSpaceManager" | "permissionLevel" | "permissionLevelIsCeiling"
+    >;
+  },
+  fn: () => Promise<T>,
+): Promise<T> {
+  const { aclOverride, ...rest } = ctx;
+  return storage.run({ ...rest, ...aclOverride }, fn);
 }
 
 /** The injected host db for the current request, or undefined in local mode. */

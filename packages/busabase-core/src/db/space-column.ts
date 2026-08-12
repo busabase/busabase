@@ -8,7 +8,7 @@ import { getContextSpaceId } from "../context";
  * `AsyncLocalStorage` (see `../context`) at insert time, so EVERY ORM insert is
  * auto-tagged with the current space without touching a single insert site:
  * - `apps/busabase` (open source) never binds a context → `LOCAL_SPACE_ID`.
- * - `apps/busabase-cloud` runs handlers inside `runWithBusabaseContext({ spaceId })`
+ * - Busabase Cloud runs handlers inside `runWithBusabaseContext({ spaceId })`
  *   → the authenticated user's active space.
  *
  * Read queries still filter by `getContextSpaceId()` explicitly (a default can

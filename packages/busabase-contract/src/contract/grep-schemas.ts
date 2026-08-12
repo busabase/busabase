@@ -1,6 +1,6 @@
 /**
  * Unified Grep (P2a files+docs, P2b records) — top-level, domain-agnostic
- * schemas for `POST /grep`. See apps/busabase/content/spec/unified-grep.md.
+ * schemas for `POST /grep`.
  *
  * Mirrors how `search`'s schemas live top-level in `contract/schemas.ts`
  * rather than inside a single domain's contract: `grep` composes multiple

@@ -26,7 +26,7 @@ export const assetsRouter = {
   updateMetadata: os.assets.updateMetadata.handler(async ({ input }) => updateAssetMetadata(input)),
   delete: os.assets.delete.handler(async ({ input }) => deleteAsset(input.assetId)),
   download: os.assets.download.handler(async ({ input }) => downloadAsset(input.assetId)),
-  // Drive Grep Retrieval — see apps/busabase/content/spec/drive-grep-retrieval.md
+  // Drive Grep Retrieval
   putText: os.assets.putText.handler(async ({ input }) => putAssetText(input)),
   createTextUploadUrl: os.assets.createTextUploadUrl.handler(async ({ input }) =>
     createAssetTextUploadUrl(input),

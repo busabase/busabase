@@ -3,7 +3,7 @@ import "server-only";
 /**
  * Drive Grep Retrieval — `grep` (streaming regex/literal scan across every
  * text-bearing asset in scope) and `readLines` (exact byte-range reads via
- * checkpoints). See apps/busabase/content/spec/drive-grep-retrieval.md.
+ * checkpoints).
  *
  * grep never uses an index — it brute-scans the (cached) text objects, same
  * philosophy as ripgrep. Honest coverage: every candidate asset is accounted

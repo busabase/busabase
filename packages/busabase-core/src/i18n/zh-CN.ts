@@ -231,6 +231,8 @@ export const dashboardZhCN: CoreI18nMessages = {
     engineSrtHint: "系统级沙箱 · 隔离，无实时预览",
   },
   form: {
+    alreadyExists: "这个节点已经存在表单，请更新现有表单，不要重复创建。",
+    invalidCursor: "表单分页链接无效，请刷新后重试。",
     submitted: "已提交",
     pendingReview: "你的提交已进入审核。",
     submitFailed: "提交失败",
@@ -964,6 +966,8 @@ export const dashboardZhCN: CoreI18nMessages = {
   integration: {
     title: "代理集成",
     agentSkills: "代理技能",
+    plugin: "插件",
+    pluginIntro: "为你正在使用的编程代理安装 Busabase 插件。",
     worksWith: "适用于",
     skillIntro:
       "把这段提示词复制到你的代理中。它会让代理打开此工作区的引导技能（SETUP_SKILL.md），按步骤完成连接并安装常驻的 Busabase 技能。",

@@ -58,7 +58,7 @@ export const DEFAULT_SIDE_PANEL_WIDTH = 420;
 export const MIN_SIDE_PANEL_WIDTH = 320;
 export const MAX_SIDE_PANEL_WIDTH = 760;
 /** Drag past (MIN - this) on release auto-closes the panel instead of
- *  clamping back to the minimum width — mirrors apps/buda's collapse-by-drag. */
+ *  clamping back to the minimum width (collapse-by-drag). */
 export const SIDE_PANEL_RESIZE_CLOSE_THRESHOLD = 48;
 
 export const clampSidePanelWidth = (width: number) =>

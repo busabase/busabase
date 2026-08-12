@@ -5,8 +5,7 @@ import { NODE_TYPES, type NodeType } from "busabase-contract/domains";
  * ever shown the user — sidebar tree loads, `nodes.searchByName` hits, and
  * successfully loaded details. Backs the Search dialog's "Recent" tab: an empty query
  * shows visited nodes, a typed query fuzzy-matches this cache instantly
- * before ever falling through to the network. See
- * `apps/busabase/content/spec/search-quick-jump.md` for the full design.
+ * before ever falling through to the network.
  *
  * A plain module-level singleton with an observable snapshot facade — consumers
  * call `merge`/`recordVisit`/`list`/`fuzzyMatch`

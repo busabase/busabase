@@ -7,7 +7,7 @@ import type { NodeTypeDefinition } from "../types";
  * target Base (so the submitting act reuses the base's `record_create` op, not a
  * form-specific one). The form's own config (bindings/page/share) is owner-
  * managed and edited directly, so this node contributes no CR operations of its
- * own for now. See apps/busabase/content/spec/form-as-node.md.
+ * own for now.
  */
 export const formNodeType = {
   type: "form",

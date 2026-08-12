@@ -4,11 +4,24 @@ import {
   CreateFormInputSchema,
   FormSubmitResultSchema,
   FormVOSchema,
+  ListFormsInputSchema,
+  ListFormsVOSchema,
   SubmitFormInputSchema,
   UpdateFormInputSchema,
 } from "./types";
 
 export const formContract = {
+  list: oc
+    .route({
+      method: "GET",
+      path: "/forms",
+      tags: ["Forms"],
+      summary: "List forms bound to a Base",
+      successDescription:
+        "A newest-first page of forms with a stable opaque cursor (null at the end).",
+    })
+    .input(ListFormsInputSchema)
+    .output(ListFormsVOSchema),
   getByNode: oc
     .route({
       method: "GET",

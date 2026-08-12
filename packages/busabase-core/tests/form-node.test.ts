@@ -1,16 +1,21 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { OpenAPIHandler } from "@orpc/openapi/fetch";
 import { createRouterClient } from "@orpc/server";
+import { eq, inArray } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { LOCAL_SPACE_ID, runWithAnonymousContext, runWithBusabaseContext } from "../src/context";
+import { getDb } from "../src/db";
 import { DEMO_BASES, DEMO_FOLDERS } from "../src/demo/dataset";
 import {
   createForm,
   getFormByNodeId,
+  listForms,
   submitForm,
   updateForm,
 } from "../src/domains/form/logic/form-ops";
+import { busabaseForms } from "../src/domains/form/schema";
 import { getPublicScopeOf } from "../src/logic/node-acl";
 import { seedScenario } from "../src/logic/seed";
 import { busabaseRouter } from "../src/router";
@@ -29,9 +34,13 @@ describe("Form-as-Node — submission + access gates", () => {
   let storageDir = "";
   let originalCwd = "";
   let client: ReturnType<typeof createRouterClient<typeof busabaseRouter, Record<never, never>>>;
+  let openApiHandler: OpenAPIHandler<Record<never, never>>;
   let blogBaseId = "";
   let formNodeId = "";
   let publicFormNodeId = "";
+  let listFormNodeIds: string[] = [];
+  const listFormIds: string[] = [];
+  let openApiFormNodeId = "";
 
   beforeAll(async () => {
     originalCwd = process.cwd();
@@ -41,6 +50,7 @@ describe("Form-as-Node — submission + access gates", () => {
     process.env.PG_DATABASE_URL = `pglite://${dataDir}`;
     process.env.STORAGE_URL = `local:${storageDir}?base_url=/api/test/storage`;
     client = createRouterClient(busabaseRouter);
+    openApiHandler = new OpenAPIHandler(busabaseRouter);
     await seedScenario({ folders: DEMO_FOLDERS, bases: DEMO_BASES });
 
     const bases = await client.bases.list({});
@@ -56,6 +66,15 @@ describe("Form-as-Node — submission + access gates", () => {
           nodeType: "form",
           slug: "t-public-form",
           name: "T Public Form",
+        },
+        { kind: "create", nodeType: "form", slug: "t-list-form-a", name: "List Form A" },
+        { kind: "create", nodeType: "form", slug: "t-list-form-b", name: "List Form B" },
+        { kind: "create", nodeType: "form", slug: "t-list-form-c", name: "List Form C" },
+        {
+          kind: "create",
+          nodeType: "form",
+          slug: "t-openapi-form",
+          name: "OpenAPI Form",
         },
       ],
     });
@@ -73,6 +92,11 @@ describe("Form-as-Node — submission + access gates", () => {
     walk(nodes as unknown[]);
     formNodeId = flat.find((n) => n.slug === "t-form" && n.type === "form")?.id ?? "";
     publicFormNodeId = flat.find((n) => n.slug === "t-public-form" && n.type === "form")?.id ?? "";
+    listFormNodeIds = flat
+      .filter((n) => n.slug.startsWith("t-list-form-") && n.type === "form")
+      .map((n) => n.id);
+    openApiFormNodeId =
+      flat.find((n) => n.slug === "t-openapi-form" && n.type === "form")?.id ?? "";
 
     await createForm({
       nodeId: publicFormNodeId,
@@ -83,6 +107,20 @@ describe("Form-as-Node — submission + access gates", () => {
         { inputName: "msg", fieldSlug: "body", required: true },
       ],
     });
+    for (const [index, nodeId] of listFormNodeIds.entries()) {
+      const created = await createForm({
+        nodeId,
+        targetBaseId: blogBaseId,
+        name: `List Form ${index + 1}`,
+        share: { isPublic: true, anonymousSubmit: false },
+      });
+      expect(created.share.anonymousSubmit).toBe(false);
+      listFormIds.push(created.id);
+    }
+    await (await getDb())
+      .update(busabaseForms)
+      .set({ createdAt: new Date("2099-01-01T00:00:00.000Z") })
+      .where(inArray(busabaseForms.nodeId, listFormNodeIds));
   }, 120_000);
 
   afterAll(async () => {
@@ -124,6 +162,83 @@ describe("Form-as-Node — submission + access gates", () => {
     expect(
       merged.some((r) => (r.headCommit.fields as Record<string, unknown>).title === "Hello"),
     ).toBe(true);
+  });
+
+  it("allows multiple forms for one Base and returns stable cursor pages", async () => {
+    expect(listFormNodeIds).toHaveLength(3);
+    const expectedIds = [...listFormIds].sort((left, right) => right.localeCompare(left));
+
+    const first = await client.forms.list({ targetBaseId: blogBaseId, limit: 2 });
+    expect(first.forms.map((form) => form.id)).toEqual(expectedIds.slice(0, 2));
+    expect(first.forms.every((form) => form.targetBaseId === blogBaseId)).toBe(true);
+    expect(first.nextCursor).not.toBeNull();
+
+    const second = await listForms({
+      targetBaseId: blogBaseId,
+      limit: 2,
+      cursor: first.nextCursor ?? undefined,
+    });
+    expect(second.forms[0]?.id).toBe(expectedIds[2]);
+    expect(new Set([...first.forms, ...second.forms].map((form) => form.id)).size).toBe(
+      first.forms.length + second.forms.length,
+    );
+  });
+
+  it("returns anonymousSubmit=false from the real POST /api/v1/forms route", async () => {
+    const result = await openApiHandler.handle(
+      new Request("http://busabase.test/api/v1/forms", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          nodeId: openApiFormNodeId,
+          targetBaseId: blogBaseId,
+          name: "OpenAPI Form",
+          bindings: [{ inputName: "subject", fieldSlug: "title", required: true }],
+          share: { isPublic: true, anonymousSubmit: false },
+        }),
+      }),
+      { context: {} },
+    );
+    if (!result.matched) throw new Error("POST /api/v1/forms did not match the OpenAPI router");
+
+    expect(result.response.status).toBe(200);
+    const body = (await result.response.json()) as {
+      nodeId: string;
+      share: { anonymousSubmit: boolean; isPublic: boolean };
+    };
+    expect(body).toMatchObject({
+      nodeId: openApiFormNodeId,
+      share: { isPublic: true, anonymousSubmit: false },
+    });
+  });
+
+  it("rejects an invalid form cursor instead of repeating the first page", async () => {
+    await expect(
+      client.forms.list({ targetBaseId: blogBaseId, cursor: "not-a-valid-cursor" }),
+    ).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      data: { errorCode: "INVALID_FORM_CURSOR" },
+    });
+  });
+
+  it("rejects duplicate form creation with a structured conflict", async () => {
+    await expect(
+      createForm({
+        nodeId: listFormNodeIds[0] ?? "",
+        targetBaseId: blogBaseId,
+        name: "Duplicate form",
+        share: { isPublic: true, anonymousSubmit: true },
+      }),
+    ).rejects.toMatchObject({
+      code: "CONFLICT",
+      data: { errorCode: "FORM_ALREADY_EXISTS", nodeId: listFormNodeIds[0] },
+    });
+
+    const [row] = await (await getDb())
+      .select({ anonymousSubmit: busabaseForms.share })
+      .from(busabaseForms)
+      .where(eq(busabaseForms.nodeId, listFormNodeIds[0] ?? ""));
+    expect(row?.anonymousSubmit.anonymousSubmit).toBe(false);
   });
 
   it("rejects a required field that the page did not fill", async () => {

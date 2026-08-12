@@ -2,8 +2,7 @@
 // slot" for an Asset. Postgres keeps only the pointer (storage key), the
 // content hash used both for storage addressing and local-cache keying, and a
 // small line-checkpoint index; the actual text bytes always live in object
-// storage (never in this table). See
-// `apps/busabase/content/spec/drive-grep-retrieval.md` for the full design.
+// storage (never in this table).
 //
 // 0..1 row per Asset. Text-kind assets (CSV/log/md/json/…) get a row that
 // points at their OWN attachment bytes (`writtenBy: "auto"`, no bytes

@@ -2,7 +2,7 @@ import "server-only";
 
 /**
  * Unified Grep (P2a files+docs, P2b records) — the top-level composition
- * entry point for `POST /grep`. See apps/busabase/content/spec/unified-grep.md.
+ * entry point for `POST /grep`.
  * Mirrors `logic/search.ts`'s shape: a top-level, cross-domain `logic/` file
  * (NOT owned by `domains/assets/`, `domains/doc/`, or `domains/base/`) that
  * resolves scope, dispatches to per-source adapters, and merges results

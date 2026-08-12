@@ -27,7 +27,7 @@ Busabase's promise to its users is **"nothing becomes true without a trace, and 
 
 ## 3. User-perceived failure modes (what must NOT regress)
 
-- **F1 — "I called `createBase` and didn't get my base back."** The 5 VO-returning functions (`createBase`, `createBaseField`, `createDoc`, `updateDocBody`, `createSkill`) MUST keep returning the same VO synchronously. Callers: `domains/*/router.ts`, `apps/busabase-cloud/src/db/seed/seed-workbench.ts`, `apps/busabase/tests/busabase-pglite.test.ts`, `apps/busabase/scripts/verify-busabase-domains.ts`.
+- **F1 — "I called `createBase` and didn't get my base back."** The 5 VO-returning functions (`createBase`, `createBaseField`, `createDoc`, `updateDocBody`, `createSkill`) MUST keep returning the same VO synchronously. Callers: `domains/*/router.ts`, `apps/busabase/tests/busabase-pglite.test.ts`, `apps/busabase/scripts/verify-busabase-domains.ts`, plus the Busabase Cloud host's workbench seed.
 - **F2 — "My content got merged without me."** No record/content path may become auto-merge. Auto-merge is gated to structural op kinds only.
 - **F3 — "Creating a folder then moving into it still needs two round-trips."** The original complaint. Must be fixable in one CR (temp-id).
 - **F4 — "The base created via a CR looks different from before."** The CR/materializer path must produce byte-identical node + base + field rows to today's direct `createBase`.

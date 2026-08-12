@@ -4,7 +4,7 @@
 // component lives here, but each host app generates its own typesafe-i18n `LL`,
 // so the host injects the active locale via `CoreI18nProvider` and the
 // dashboard reads strings with `useCoreI18n()`. The `Core*` names are deliberate:
-// in apps/busabase-cloud this provider sits alongside the cloud app's own i18n
+// in Busabase Cloud this provider sits alongside the cloud app's own i18n
 // context (`useI18nContext`), so the shared-package source stays obvious.
 // Hosts can also import `coreMessagesEn` / `coreMessagesByLocale`
 // into their own typesafe-i18n catalogs to manage these strings.
@@ -16,7 +16,7 @@ import { type CoreI18nMessages, coreMessagesEn } from "./messages";
 import { dashboardZhCN } from "./zh-CN";
 import { dashboardZhTW } from "./zh-TW";
 
-// Locale set: a superset of apps/busabase-cloud (en, zh-CN, ja) that also ships
+// Locale set: a superset of Busabase Cloud's (en, zh-CN, ja) that also ships
 // Traditional Chinese (zh-TW). A host that resolves an unsupported locale falls
 // back to English.
 export type CoreLocale = "en" | "zh-CN" | "zh-TW" | "ja";

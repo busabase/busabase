@@ -2,15 +2,14 @@ import { z } from "zod";
 
 /**
  * Embed Links CRUD (create/list/revoke) DTO + VO schemas — the single source of truth for
- * both the real absolute-path OpenAPI surface (`apps/busabase-cloud/src/domains/embed-links/contract.ts`,
- * `/api/v1/embed-links`) and the relative-path twin registered in `cloudContract` below (the
+ * both the real absolute-path OpenAPI surface the Busabase Cloud host serves at
+ * `/api/v1/embed-links` and the relative-path twin registered in `cloudContract` below (the
  * CLI/SDK client's contract, `/embed-links` + the shared `/api/v1` prefix). Two independent route
  * declarations, one shared schema set — same pattern as `system`/`users`/`agentTasks` in `cloud.ts`.
  *
  * Runtime/internal embed schemas that are NOT part of this CLI/SDK CRUD surface (node-detail
- * rendering for the embed viewer, AirApp embed runtime files, etc.) stay local to
- * `apps/busabase-cloud/src/domains/embed-links/types/embed-links.ts` — only the shapes `create` /
- * `list` / `revoke` actually send or return live here.
+ * rendering for the embed viewer, AirApp embed runtime files, etc.) stay private to that host —
+ * only the shapes `create` / `list` / `revoke` actually send or return live here.
  */
 
 export const EMBED_LINK_DEFAULT_MINUTES = 15;

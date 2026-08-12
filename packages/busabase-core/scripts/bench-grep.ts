@@ -8,8 +8,7 @@
  * (`createRouterClient(busabaseRouter)`), the same harness
  * `tests/drive-grep-*.test.ts` / `tests/unified-grep.test.ts` already use.
  *
- * Acceptance target (P1 roadmap row, preserved in git history at
- * `82e895867c:apps/busabase/content/spec/drive-grep-retrieval.md`):
+ * Acceptance target from the Drive Grep Retrieval P1 roadmap:
  *   "Warm grep of a 100 MB-text Space < 1 s"
  *
  * Usage:

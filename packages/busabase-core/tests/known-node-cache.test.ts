@@ -6,8 +6,7 @@
  * each test, which is enough to exercise the module's own try/catch-wrapped
  * read/write path exactly as a browser host would.
  *
- * Covers the Failure Scenario Matrix rows from
- * apps/busabase/content/spec/search-quick-jump.md: merge-overwrites-stale-
+ * Covers the quick-jump cache's failure scenarios: merge-overwrites-stale-
  * fields-but-preserves-lastVisitedAt, LRU eviction protecting visited entries,
  * and `localStorage` throwing never crashing the cache.
  */

@@ -5,10 +5,12 @@ import type {
   CreateFormDTO,
   FormShareVO,
   FormVO,
+  ListFormsDTO,
+  ListFormsVO,
   SubmitFormDTO,
   UpdateFormDTO,
 } from "busabase-contract/types";
-import { and, eq, inArray, isNull, or } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, lt, or, type SQL } from "drizzle-orm";
 import { getContextSpaceId, isAnonymousVisitor, resolveActorId } from "../../../context";
 import { getDb } from "../../../db";
 import {
@@ -33,6 +35,12 @@ const formNotFound = (nodeId: string) =>
 
 const DEFAULT_SHARE: FormShareVO = { isPublic: false, anonymousSubmit: false };
 
+export const FORM_ALREADY_EXISTS_ERROR_CODE = "FORM_ALREADY_EXISTS";
+export const FORM_ALREADY_EXISTS_MESSAGE =
+  "A form already exists for this node. Use the update form endpoint instead.";
+export const INVALID_FORM_CURSOR_ERROR_CODE = "INVALID_FORM_CURSOR";
+export const INVALID_FORM_CURSOR_MESSAGE = "The form cursor is invalid.";
+
 /** Identity recorded for submissions that came in without a signed-in user. */
 const ANONYMOUS_SUBMITTER = "anonymous";
 
@@ -53,6 +61,84 @@ const toFormVO = (po: FormPO): FormVO => ({
   createdAt: po.createdAt.toISOString(),
   updatedAt: po.updatedAt.toISOString(),
 });
+
+const formAlreadyExists = (nodeId: string) =>
+  new ORPCError("CONFLICT", {
+    message: FORM_ALREADY_EXISTS_MESSAGE,
+    data: { errorCode: FORM_ALREADY_EXISTS_ERROR_CODE, nodeId },
+  });
+
+const encodeFormCursor = (createdAt: Date, formId: string): string =>
+  Buffer.from(`${createdAt.toISOString()}|${formId}`, "utf8").toString("base64");
+
+const decodeFormCursor = (cursor: string): { createdAt: Date; id: string } | null => {
+  try {
+    const decoded = Buffer.from(cursor, "base64").toString("utf8");
+    const separator = decoded.indexOf("|");
+    if (separator < 0) return null;
+    const createdAt = new Date(decoded.slice(0, separator));
+    const id = decoded.slice(separator + 1);
+    if (Number.isNaN(createdAt.getTime()) || !id) return null;
+    return { createdAt, id };
+  } catch {
+    return null;
+  }
+};
+
+export const listForms = async (input: ListFormsDTO): Promise<ListFormsVO> => {
+  await ensureReady();
+  const db = await getDb();
+  const spaceId = getContextSpaceId();
+  const [targetBase] = await db
+    .select({ nodeId: busabaseBases.nodeId })
+    .from(busabaseBases)
+    .where(and(eq(busabaseBases.id, input.targetBaseId), eq(busabaseBases.spaceId, spaceId)))
+    .limit(1);
+  if (!targetBase) {
+    throw new ORPCError("NOT_FOUND", { message: `Base not found: ${input.targetBaseId}` });
+  }
+  await assertNodePermission(targetBase.nodeId, "read");
+
+  const visible = buildNodeVisibilityCondition(db);
+  const filters: SQL[] = [
+    eq(busabaseForms.spaceId, spaceId),
+    eq(busabaseForms.targetBaseId, input.targetBaseId),
+    eq(busabaseForms.status, "active"),
+    eq(busabaseNodes.spaceId, spaceId),
+    ...(visible ? [visible] : []),
+  ];
+  if (input.cursor) {
+    const cursor = decodeFormCursor(input.cursor);
+    if (!cursor) {
+      throw new ORPCError("BAD_REQUEST", {
+        message: INVALID_FORM_CURSOR_MESSAGE,
+        data: { errorCode: INVALID_FORM_CURSOR_ERROR_CODE },
+      });
+    }
+    filters.push(
+      or(
+        lt(busabaseForms.createdAt, cursor.createdAt),
+        and(eq(busabaseForms.createdAt, cursor.createdAt), lt(busabaseForms.id, cursor.id)),
+      ) as SQL,
+    );
+  }
+
+  const limit = input.limit ?? 50;
+  const rows = await db
+    .select({ form: busabaseForms })
+    .from(busabaseForms)
+    .innerJoin(busabaseNodes, eq(busabaseNodes.id, busabaseForms.nodeId))
+    .where(and(...filters))
+    .orderBy(desc(busabaseForms.createdAt), desc(busabaseForms.id))
+    .limit(limit + 1);
+  const hasMore = rows.length > limit;
+  const page = hasMore ? rows.slice(0, limit) : rows;
+  const last = page[page.length - 1]?.form;
+  return {
+    forms: page.map((row) => toFormVO(row.form)),
+    nextCursor: hasMore && last ? encodeFormCursor(last.createdAt, last.id) : null,
+  };
+};
 
 /**
  * Load an active form by its node id OR the node's slug (the detail route passes
@@ -75,6 +161,7 @@ export const getFormByNodeId = async (nodeIdOrSlug: string): Promise<FormVO | nu
         visible,
       ),
     )
+    .orderBy(desc(busabaseForms.createdAt), desc(busabaseForms.id))
     .limit(1);
   if (!row) return null;
   const form = toFormVO(row.form);
@@ -148,29 +235,41 @@ export const createForm = async (input: CreateFormDTO): Promise<FormVO> => {
     throw new ORPCError("NOT_FOUND", { message: `Base not found: ${input.targetBaseId}` });
   }
   await assertNodePermission(targetBase.nodeId, "manage");
+  const [existing] = await db
+    .select({ id: busabaseForms.id })
+    .from(busabaseForms)
+    .where(
+      and(eq(busabaseForms.nodeId, input.nodeId), eq(busabaseForms.spaceId, getContextSpaceId())),
+    )
+    .limit(1);
+  if (existing) {
+    throw formAlreadyExists(input.nodeId);
+  }
   const timestamp = now();
   const formId = id("fom");
-  await db.insert(busabaseForms).values({
-    id: formId,
-    spaceId: getContextSpaceId(),
-    nodeId: input.nodeId,
-    targetBaseId: input.targetBaseId,
-    name: input.name,
-    description: input.description ?? "",
-    bindings: input.bindings ?? [],
-    page: input.page ?? {},
-    share: { ...DEFAULT_SHARE, ...(input.share ?? {}) },
-    status: "active",
-    createdBy: resolveActorId("local-producer"),
-    archivedAt: null,
-    createdAt: timestamp,
-    updatedAt: timestamp,
-  });
-  const created = await getFormByNodeId(input.nodeId);
+  const [created] = await db
+    .insert(busabaseForms)
+    .values({
+      id: formId,
+      spaceId: getContextSpaceId(),
+      nodeId: input.nodeId,
+      targetBaseId: input.targetBaseId,
+      name: input.name,
+      description: input.description ?? "",
+      bindings: input.bindings ?? [],
+      page: input.page ?? {},
+      share: { ...DEFAULT_SHARE, ...(input.share ?? {}) },
+      status: "active",
+      createdBy: resolveActorId("local-producer"),
+      archivedAt: null,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    })
+    .returning();
   if (!created) {
     throw new Error("Failed to create form");
   }
-  return created;
+  return toFormVO(created);
 };
 
 /** Owner-managed config edit (bindings/page/share/name) — NOT a ChangeRequest. */
@@ -182,11 +281,12 @@ export const updateForm = async (nodeId: string, input: UpdateFormDTO): Promise<
     .select()
     .from(busabaseForms)
     .where(and(eq(busabaseForms.nodeId, nodeId), eq(busabaseForms.spaceId, getContextSpaceId())))
+    .orderBy(desc(busabaseForms.createdAt), desc(busabaseForms.id))
     .limit(1);
   if (!existing || existing.status !== "active") {
     throw formNotFound(nodeId);
   }
-  await db
+  const [updated] = await db
     .update(busabaseForms)
     .set({
       name: input.name ?? existing.name,
@@ -196,12 +296,12 @@ export const updateForm = async (nodeId: string, input: UpdateFormDTO): Promise<
       share: input.share ? { ...DEFAULT_SHARE, ...input.share } : existing.share,
       updatedAt: now(),
     })
-    .where(eq(busabaseForms.id, existing.id));
-  const updated = await getFormByNodeId(nodeId);
+    .where(eq(busabaseForms.id, existing.id))
+    .returning();
   if (!updated) {
     throw formNotFound(nodeId);
   }
-  return updated;
+  return toFormVO(updated);
 };
 
 /**

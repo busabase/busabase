@@ -1,5 +1,5 @@
 // Shared dashboard string catalog — the "sub" i18n strings owned by busabase-core
-// and reused by every host (apps/busabase, apps/busabase-cloud).
+// and reused by every host (apps/busabase, Busabase Cloud).
 //
 // `coreMessagesEn` is the source of truth; every other locale must match its shape
 // (enforced by the `CoreI18nMessages` type). Strings use `{token}` placeholders
@@ -240,6 +240,9 @@ export const coreMessagesEn = {
     engineSrtHint: "OS-sandboxed · isolated, no live preview",
   },
   form: {
+    alreadyExists:
+      "A form already exists for this node. Update the existing form instead of creating another one.",
+    invalidCursor: "This form page link is invalid. Refresh and try again.",
     submitted: "Submitted",
     pendingReview: "Your submission was sent for review.",
     submitFailed: "Submission failed",
@@ -988,6 +991,8 @@ export const coreMessagesEn = {
   integration: {
     title: "Agent Integration",
     agentSkills: "Agent Skills",
+    plugin: "Plugin",
+    pluginIntro: "Install the Busabase plugin for the coding agent you already use.",
     worksWith: "Works with",
     skillIntro:
       "Copy this prompt into your agent. It points the agent at this workspace's onboarding skill (SETUP_SKILL.md), which walks it through connecting and then installs the permanent Busabase skill.",

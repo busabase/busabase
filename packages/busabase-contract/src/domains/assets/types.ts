@@ -63,7 +63,6 @@ export const AssetDetailVOSchema = z.object({
 export type AssetDetailVO = z.infer<typeof AssetDetailVOSchema>;
 
 // ── Drive Grep Retrieval ──────────────────────────────────────────────────────
-// See apps/busabase/content/spec/drive-grep-retrieval.md for the full design.
 // Busabase stores, indexes, and searches text; it never generates it — every
 // Asset gets a *text* slot (not "extract"/"extractedText") filled either
 // automatically (text-kind files point at their own bytes) or by an external

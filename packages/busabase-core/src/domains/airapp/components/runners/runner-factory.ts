@@ -8,9 +8,8 @@ import type { AirAppRunner, AirAppRunnerKind } from "./types";
 /**
  * Picks/instantiates an `AirAppRunner` for the given engine kind — the single
  * call site `RunPanel.tsx`'s `useAirAppRunner()` should use instead of
- * constructing `NodepodRunner`/`LocalNodeRunner` directly, mirroring
- * `apps/buda`'s `agent/logic/runtime/agent-runtime-operations.ts`
- * `openAgentRuntime()` factory for the same "pick an adapter by kind" shape.
+ * constructing `NodepodRunner`/`LocalNodeRunner` directly — the same
+ * "pick an adapter by kind" factory shape Buda's agent runtime uses.
  */
 export function createAirAppRunner(
   kind: AirAppRunnerKind,

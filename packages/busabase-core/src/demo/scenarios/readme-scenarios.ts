@@ -1014,7 +1014,7 @@ const records: SeedRecordDef[] = [
     commitId: "cmt_seed_know_onboarding",
     fields: {
       title: "New team member onboarding checklist",
-      body: "## Day 1\n- Install Busabase Desktop\n- Clone kapps repo\n- Run `make db && make db-migrate && make db-seed`\n\n## Week 1\n- Read SKILL.md\n- Review open change requests in Inbox",
+      body: "## Day 1\n- Install Busabase Desktop\n- Clone the busabase repo and run `pnpm install`\n- Start the local server with `pnpm --filter busabase dev`\n\n## Week 1\n- Read SKILL.md\n- Review open change requests in Inbox",
       sensitivity: "public",
       source_url: "https://busabase.local/docs/onboarding",
       tags: ["source"],
