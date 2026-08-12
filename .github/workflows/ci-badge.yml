@@ -37,22 +37,31 @@ jobs:
       - uses: actions/checkout@v4
       - name: Confirm nothing but the coverage badge changed
         # Defence in depth: `paths` already scoped this workflow to the badge,
-        # but that filter looks at the whole push. Diffing against the base
-        # makes sure no code slipped through on a badge-labelled commit.
+        # but that filter looks at the whole push. Diffing makes sure no code
+        # slipped through disguised as a badge-labelled commit.
         #
-        # Diff against the PR's exact base SHA with a plain two-dot diff, not
-        # `origin/<base_ref>...HEAD`. actions/checkout@v4 leaves both sides
-        # shallow (depth 1, no shared ancestor commit), so a three-dot diff
-        # — which needs a merge-base — fails with "no merge base" on any real
-        # release branch (more than one commit ahead of main). A two-dot diff
-        # just compares the two trees directly and needs no shared history,
-        # so fetching the single base commit by SHA is enough.
+        # Diff against the PREVIOUS head of this push (`github.event.before`),
+        # not the PR's base SHA. A real release branch is never badge-only
+        # relative to main — it carries the actual release diff — so comparing
+        # against base would fail this check on every release, exactly the
+        # case ci-pr.yml's coverage job creates when it commits the refreshed
+        # badge onto a release/* branch. What must be badge-only is this one
+        # push, not the whole PR; `before` is only present on `synchronize`,
+        # so fall back to `base.sha` for a PR that opens with just the badge.
+        #
+        # Plain two-dot diff, not `before...HEAD`. actions/checkout@v4 leaves
+        # both sides shallow (depth 1, no shared ancestor commit), so a
+        # three-dot diff — which needs a merge-base — fails with "no merge
+        # base". A two-dot diff just compares the two trees directly and
+        # needs no shared history, so fetching the single base commit by SHA
+        # is enough.
         run: |
-          git fetch --depth=1 origin '${{ github.event.pull_request.base.sha }}'
-          changed=$(git diff --name-only '${{ github.event.pull_request.base.sha }}' HEAD)
+          base='${{ github.event.before || github.event.pull_request.base.sha }}'
+          git fetch --depth=1 origin "$base"
+          changed=$(git diff --name-only "$base" HEAD)
           echo "$changed"
           unexpected=$(echo "$changed" | grep -v '^apps/busabase/public/assets/readme/coverage.svg$' || true)
           if [ -n "$unexpected" ]; then
-            echo "::error::Not a badge-only pull request; refusing to wave it through."
+            echo "::error::Not a badge-only push; refusing to wave it through."
             exit 1
           fi
