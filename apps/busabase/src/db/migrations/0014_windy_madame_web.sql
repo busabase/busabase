@@ -1,0 +1,1 @@
+ALTER TABLE "busabase_nodes" ADD COLUMN "effective_public_requires_password" boolean DEFAULT false NOT NULL;
