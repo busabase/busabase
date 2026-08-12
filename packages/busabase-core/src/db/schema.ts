@@ -263,10 +263,9 @@ export const busabaseNodePrincipals = pgTable(
 );
 
 /**
- * Per-actor node favorites (Notion-style "⭐ Favorites") — modeled on
- * `apps/mcpsdk/src/db/schema/favorites.ts`'s `(packageId, createdBy)`
- * composite-unique pattern, adapted to `(nodeId, actorId)` plus this schema's
- * existing `spaceIdColumn()` tenant convention. A row is purely additive
+ * Per-actor node favorites (Notion-style "⭐ Favorites") — a
+ * `(nodeId, actorId)` composite-unique row plus this schema's existing
+ * `spaceIdColumn()` tenant convention. A row is purely additive
  * (never moves/hides the node from its real tree position); read paths join
  * back to `busabaseNodes` and apply the same archived/deleted/visibility
  * filtering the tree already uses, so a favorited node that's later archived,
@@ -503,7 +502,7 @@ export type ReviewPO = typeof busabaseReviews.$inferSelect;
 export type AuditEventPO = typeof busabaseAuditEvents.$inferSelect;
 
 // Attachments table — shared, auth-agnostic (lives in open-domains; consumed by
-// both apps/busabase and apps/busabase-cloud).
+// both apps/busabase and Busabase Cloud).
 export * from "open-domains/attachments/schema";
 // Assets domain: Drive Grep Retrieval text slot (0..1 row per Asset).
 export * from "../domains/assets/schema/asset-texts";

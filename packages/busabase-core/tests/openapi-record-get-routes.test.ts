@@ -111,6 +111,7 @@ describe("Busabase OpenAPI record get route", () => {
     // Numbered change request paging for the inbox (+1 -> 96) — the cursor
     // listing stays, since "keep scrolling" and "jump to page 30 of 45" are
     // different jobs and the inbox needs both.
-    expect(operationCount).toBe(96);
+    // Anonymous form submit endpoint added (+1 -> 97).
+    expect(operationCount).toBe(97);
   });
 });

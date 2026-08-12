@@ -1,6 +1,6 @@
 // Drizzle table owned by the form domain. A form is a node bound to a target
 // Base; a submission produces an approval-first record-create ChangeRequest on
-// that Base (see apps/busabase/content/spec/form-as-node.md). FK refs use lazy
+// that Base. FK refs use lazy
 // `() =>` thunks so the import cycle with ../../db/schema resolves at runtime.
 import { index, integer, jsonb, pgTable, text, timestamp } from "drizzle-orm/pg-core";
 import { busabaseNodes } from "../../db/schema";

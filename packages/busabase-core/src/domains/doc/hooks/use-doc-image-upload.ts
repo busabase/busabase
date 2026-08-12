@@ -8,9 +8,9 @@ import { buildAssetContentUrl } from "../../assets/utils/asset-content-url";
 /**
  * Wires image paste/upload in the Doc editor to busabase's own Asset library
  * (`assets.createUploadUrl`/`assets.confirm` — space-scoped, mints a real
- * `busabase_assets` row) rather than a plain attachment. Mirrors
- * `apps/busabase-cloud/src/hooks/upload/upload-to-s3.ts`'s `useMutation` +
- * `useS3Uploader` pairing.
+ * `busabase_assets` row) rather than a plain attachment. Mirrors the
+ * `useMutation` + `useS3Uploader` pairing Busabase Cloud uses for its own
+ * S3 uploads.
  *
  * **Returns the asset's stable content URL, not the resolved storage URL.**
  * Whatever this returns is what Milkdown/Crepe serializes into the saved

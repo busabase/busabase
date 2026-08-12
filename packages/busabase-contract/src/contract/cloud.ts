@@ -190,9 +190,9 @@ const cloudExtraRoutes = {
       )
       .output(AgentTaskDetailSchema),
   },
-  // Relative-path twin of `embedLinksContract`
-  // (apps/busabase-cloud/src/domains/embed-links/contract.ts, served at the absolute
-  // `/api/v1/embed-links` paths) — same schemas imported from `./embed-link-schemas`, just
+  // Relative-path twin of the `embedLinksContract` the Busabase Cloud host
+  // serves at the absolute `/api/v1/embed-links` paths — same schemas
+  // imported from `./embed-link-schemas`, just
   // routed relative here so the shared `/api/v1` prefix below lands on the identical real path.
   embedLinks: {
     create: oc

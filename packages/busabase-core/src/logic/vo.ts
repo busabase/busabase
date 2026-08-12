@@ -54,9 +54,10 @@ const userRef = (users: UserRefMap | undefined, userId: string): UserRefVO | nul
  * real long-field content while keeping the GIN indexes reasonably sized.
  * `grep`'s records adapter (Unified Grep P2b, `logic/grep.ts`) reads
  * `headCommit.fields` directly — genuinely untruncated, no ceiling at all —
- * for exactly the cases this projection still can't reach; see
- * apps/busabase-cloud/content/spec/grep-retrieval-strategy.md for the full
- * search-vs-grep fidelity tradeoff. Previously 1,024.
+ * for exactly the cases this projection still can't reach. That split — a
+ * bounded, indexed projection for ranked `search` and an unbounded, unindexed
+ * scan for `grep` — is the deliberate search-vs-grep fidelity tradeoff.
+ * Previously 1,024.
  */
 export const VALUE_TEXT_INDEX_LIMIT = 8_000;
 // `whiteboard` stores a structured { scene, previewSvg } composite (not

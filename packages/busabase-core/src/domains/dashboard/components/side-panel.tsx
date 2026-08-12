@@ -30,10 +30,8 @@ import {
  *
  * Once the panel is actually open, this button unmounts entirely — `SidePanel`
  * renders its own equivalent "Collapse" control in its header, and showing
- * both at once would be a redundant duplicate control. Mirrors apps/buda's
- * `agent-workbench-layout.tsx`, where `canvasHeaderPanelControls` hides via
- * `{!isSidePanelVisible && ...}` once the in-panel `sidePanelTrailingControls`
- * toggle takes over the same role.
+ * both at once would be a redundant duplicate control: the topbar control
+ * hides once the in-panel "Collapse" control takes over the same role.
  */
 export function SidePanelToggle() {
   const messages = useCoreI18n();
@@ -99,8 +97,7 @@ export function SidePanel({ orpc }: { orpc: BusabaseQueryUtils }) {
   const draggedTabIdRef = useRef<string | null>(null);
   const [dragOverTabId, setDragOverTabId] = useState<string | null>(null);
   // Suppressed during drag-resize and maximize/restore so those feel 1:1 /
-  // instant instead of fighting the open-close transition (mirrors
-  // apps/buda's `animateTransitions` technique in agent-workbench-layout.tsx).
+  // instant instead of fighting the open-close transition.
   const [animateTransitions, setAnimateTransitions] = useState(true);
 
   const commitResizeFrame = useCallback(() => {

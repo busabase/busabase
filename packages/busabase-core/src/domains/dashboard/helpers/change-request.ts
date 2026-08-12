@@ -35,7 +35,7 @@ const nameToString = (value: unknown): string => {
  *   rejected  5.25   5.11   4.99   4.80   4.67   4.52
  *
  * Do not raise it past 17% without re-solving `--color-*-strong` in both apps'
- * global.css. See apps/busabase-cloud/content/spec/wabi-sabi-visual-direction.md §12.
+ * global.css.
  */
 export const statusTone = (status: string) => {
   if (status === "merged" || status === "approved") {

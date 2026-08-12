@@ -438,8 +438,7 @@ export const listArchivedNodes = async (): Promise<NodeVO[]> => {
 /**
  * Cheap name/slug-only lookup across all registered node types — the backend
  * half of the dashboard quick-jump
- * palette's `KnownNode` cache-miss path (see
- * apps/busabase/content/spec/search-quick-jump.md). Deliberately NOT bolted
+ * palette's `KnownNode` cache-miss path. Deliberately NOT bolted
  * onto `searchBusabase` (logic/search.ts), which also does 5s-budgeted
  * asset-body scanning and full-text ranking — the wrong cost profile for
  * "find a node by the name I already know." Just a plain `ilike` on

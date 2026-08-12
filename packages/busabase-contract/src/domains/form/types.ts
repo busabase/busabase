@@ -1,5 +1,4 @@
 // Form-as-Node DTO/VO schemas. Pure zod leaf — no db, no server imports.
-// See apps/busabase/content/spec/form-as-node.md.
 import { z } from "zod";
 import { fieldNameSchema, fieldTypeSchema } from "../base/contract/base-schemas";
 
@@ -90,6 +89,20 @@ export const FormVOSchema = z.object({
   updatedAt: z.string(),
 });
 export type FormVO = z.infer<typeof FormVOSchema>;
+
+export const ListFormsInputSchema = z.object({
+  targetBaseId: z.string().min(1),
+  limit: z.coerce.number().int().min(1).max(100).optional().default(50),
+  /** Opaque createdAt/id keyset cursor. */
+  cursor: z.string().optional(),
+});
+export type ListFormsDTO = z.infer<typeof ListFormsInputSchema>;
+
+export const ListFormsVOSchema = z.object({
+  forms: z.array(FormVOSchema),
+  nextCursor: z.string().nullable(),
+});
+export type ListFormsVO = z.infer<typeof ListFormsVOSchema>;
 
 // ── DTO inputs ────────────────────────────────────────────────────────────
 

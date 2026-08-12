@@ -6,8 +6,7 @@ import { getBusabaseOpenApiSpec } from "../src/openapi/spec";
  * the top-level `POST /grep` route declared in
  * packages/busabase-contract/src/contract/busabase.ts (nothing to change
  * there — this test verifies the generator faithfully turns that declaration
- * into the only public grep operation in the /api/v1 spec. See
- * apps/busabase/content/spec/unified-grep.md.
+ * into the only public grep operation in the /api/v1 spec).
  */
 
 type OpenApiOperation = {

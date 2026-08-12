@@ -1,8 +1,7 @@
 import "server-only";
 
 /**
- * Source-neutral scanner core for Unified Grep (see
- * apps/busabase/content/spec/unified-grep.md, P2a). Extracted verbatim (same
+ * Source-neutral scanner core for Unified Grep (P2a). Extracted verbatim (same
  * behavior, no semantic change) from `domains/assets/logic/asset-grep-logic.ts`'s
  * `compileGrepPattern` + `scanLinesForMatches`, which the Drive Grep Retrieval
  * (P0/P1) spec built as a source-agnostic pattern compiler + per-line scanner

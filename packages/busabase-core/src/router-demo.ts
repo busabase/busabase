@@ -43,7 +43,7 @@ import {
   demoSubmitForm,
 } from "./logic/demo-store";
 
-// Stateless demo router (productready-style): the request boundary swaps to this
+// Stateless demo router: the request boundary swaps to this
 // when `?demo` is present. It implements the SAME `busabaseContract` as the real
 // `busabaseRouter`, but every handler reads the shared seed (`demo/dataset.ts`)
 // and writes are synthetic + non-persistent. It never touches the db.
@@ -306,6 +306,9 @@ export const busabaseDemoRouter = os.router({
     // scenario). Config edits still require a persistent instance; a submit is
     // acknowledged with a synthetic pending id so the approval-first flow reads
     // correctly, but nothing is stored.
+    list: os.forms.list.handler(() => {
+      throw demoUnsupported("List forms");
+    }),
     getByNode: os.forms.getByNode.handler(({ input }) => {
       const form = demoGetForm(input.nodeId);
       if (!form) {

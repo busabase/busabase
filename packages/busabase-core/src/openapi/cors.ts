@@ -1,6 +1,6 @@
 /**
  * CORS settings for the public `/api/v1` surface, shared by `apps/busabase` and
- * `apps/busabase-cloud` so the two deployments can't drift on what a browser
+ * Busabase Cloud so the two deployments can't drift on what a browser
  * client is allowed to send.
  *
  * The headers below are the ones `busabase-sdk` puts on a request. Without

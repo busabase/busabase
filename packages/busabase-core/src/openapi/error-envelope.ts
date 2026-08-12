@@ -15,9 +15,8 @@
  *   has a whole branch to render those issues that could never fire, and an
  *   agent has nothing to self-correct from.
  *
- * `tests/openapi-error-envelope.test.ts` pins the shape here;
- * `apps/busabase-cloud/tests/openapi-error-envelope.test.ts` pins it again over
- * a real HTTP round-trip.
+ * `tests/openapi-error-envelope.test.ts` pins the shape here; each host pins it
+ * again over a real HTTP round-trip.
  */
 export const encodeBusabaseOpenApiError = (error: {
   data?: unknown;

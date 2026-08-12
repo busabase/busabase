@@ -864,7 +864,7 @@ export const readmeScenariosZhCnScenario: SeedScenario = {
       commitId: "cmt_seed_know_onboarding",
       fields: {
         title: "新成员入职清单",
-        body: "## 第一天\n- 安装 Busabase Desktop\n- 克隆 kapps 仓库\n- 运行 `make db && make db-migrate && make db-seed`\n\n## 第一周\n- 阅读 SKILL.md\n- 查阅收件箱中的待审批变更请求",
+        body: "## 第一天\n- 安装 Busabase Desktop\n- 克隆 busabase 仓库并运行 `pnpm install`\n- 运行 `pnpm --filter busabase dev` 启动本地服务\n\n## 第一周\n- 阅读 SKILL.md\n- 查阅收件箱中的待审批变更请求",
         sensitivity: "public",
         source_url: "https://busabase.local/docs/onboarding",
         tags: ["source"],

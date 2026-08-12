@@ -3,14 +3,13 @@ import { describe, expect, it } from "vitest";
 import { encodeBusabaseOpenApiError } from "../src/openapi/error-envelope";
 
 /**
- * Both servers (`apps/busabase` and `apps/busabase-cloud`) mount the same
- * contract, so an SDK or agent talking to either one has to see the same error
- * shape. They had drifted — each app carried its own copy of this encoder, and
- * the open-source one returned a self-shaped body verbatim, dropping `code`.
+ * The self-hosted server and Busabase Cloud mount the same contract, so an SDK
+ * or agent talking to either one has to see the same error shape. They had
+ * drifted — each host carried its own copy of this encoder, and the
+ * self-hosted one returned a self-shaped body verbatim, dropping `code`.
  *
- * These are shape assertions on the shared function. The end-to-end proof that
- * a real HTTP response carries the shape lives in
- * `apps/busabase-cloud/tests/openapi-error-envelope.test.ts`.
+ * These are shape assertions on the shared function; each host additionally
+ * pins the shape end-to-end over a real HTTP response.
  */
 describe("busabase /api/v1 error envelope", () => {
   it("carries code and data alongside the message", () => {

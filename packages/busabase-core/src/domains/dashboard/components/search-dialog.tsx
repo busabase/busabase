@@ -30,9 +30,8 @@ import { EmptyState } from "./primitives";
 
 // "Recent" replaces the old static-tiles "Bases" landing tab — it's a
 // keyboard-first quick-jump over every node the dashboard has ever shown the
-// user (see apps/busabase/content/spec/search-quick-jump.md), not a
-// full-text-content search. It's selected by default whenever the dialog
-// opens.
+// user, not a full-text-content search. It's selected by default whenever the
+// dialog opens.
 type SearchTab = "recent" | "all" | "records" | "files" | "change_requests";
 const SEARCH_TABS: SearchTab[] = ["recent", "all", "records", "files", "change_requests"];
 const TAB_KIND: Record<SearchTab, SearchResultKind | null> = {

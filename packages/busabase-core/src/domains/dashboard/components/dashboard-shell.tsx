@@ -877,7 +877,7 @@ function buildNavItem(node: NodeVO, ctx: NavItemContext): NavItem[] {
         }
       : null;
   // The "•••" Favorites toggle — same shared mechanism, one click, same menu
-  // as Open/Permissions (see apps/busabase/content/spec/sidebar-favorites.md).
+  // as Open/Permissions.
   // Label reflects the node's CURRENT membership in `favoriteNodeIds`, so a
   // freshly-favorited row immediately reads "Remove from Favorites" the next
   // time this menu opens (driven by the `nodes.listFavorites` query, refetched

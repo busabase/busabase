@@ -196,8 +196,7 @@ const updateNodeMetadataInputSchema = z.object({
 });
 
 // Cheap name/slug-only node lookup — the backend half of the dashboard's
-// quick-jump `KnownNode` cache-miss path (see
-// apps/busabase/content/spec/search-quick-jump.md). Deliberately separate
+// quick-jump `KnownNode` cache-miss path. Deliberately separate
 // from `searchInputSchema`/`searchResponseSchema` below, which back the
 // heavier full-text `search` procedure (record/file body content, 5s-budgeted
 // asset scanning) — this one is a plain `ilike` over `busabaseNodes.name`/

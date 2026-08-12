@@ -3,10 +3,9 @@
 /**
  * Keyboard Shortcuts Hook
  *
- * Ports `apps/buda/src/components/keyboard-shortcuts/use-keyboard-shortcuts.ts`
- * into busabase-core (per the search-quick-jump spec: busabase-core has no
- * dependency relationship with buda-core/apps/buda and shouldn't gain one just
- * for a single small hook — see `apps/busabase/content/spec/search-quick-jump.md`).
+ * A local port of the equivalent hook from a sibling product, re-implemented
+ * here rather than shared: busabase-core has no dependency relationship with
+ * that codebase and shouldn't gain one just for a single small hook.
  * Deliberately kept byte-for-byte equivalent in behavior: parses a `"cmd+k"`-style
  * modifier string, ignores keydowns while focus is inside an
  * `<input>`/`<textarea>`/`contentEditable` element, and registers a single

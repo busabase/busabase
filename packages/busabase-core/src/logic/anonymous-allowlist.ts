@@ -21,8 +21,8 @@
  * audit of "what can a logged-out visitor reach" has to read it too:
  *
  *   `GET /api/assets/{assetId}/raw` — an asset's bytes, in
- *   `apps/busabase/src/app/api/assets/…` and
- *   `apps/busabase-cloud/src/app/api/assets/…`. It is not listed here (an entry
+ *   `apps/busabase/src/app/api/assets/…` (and its counterpart on Busabase
+ *   Cloud). It is not listed here (an entry
  *   would be inert, and the nearest procedure — `assets.download` — is a wider
  *   surface than the route). It is safe for the reason this list exists: it
  *   performs exactly one read, through `resolveAssetContent` →

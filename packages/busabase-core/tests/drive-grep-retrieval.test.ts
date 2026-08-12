@@ -16,7 +16,6 @@ import { grepFiles } from "./helpers/grep-files";
  * Drive Grep Retrieval integration coverage — driven through the real oRPC
  * router (mirrors `assets-orpc.test.ts`'s harness) so tests exercise the
  * exact request → confirm/putText → grep/readLines code paths a caller hits.
- * See apps/busabase/content/spec/drive-grep-retrieval.md.
  */
 
 type Client = ReturnType<typeof createRouterClient<typeof busabaseRouter, Record<never, never>>>;

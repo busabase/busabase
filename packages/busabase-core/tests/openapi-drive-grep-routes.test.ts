@@ -5,8 +5,7 @@ import { getBusabaseOpenApiSpec } from "../src/openapi/spec";
  * Permanent regression coverage for the Drive Grep Retrieval OpenAPI surface.
  * The 3 routes below are declared in packages/busabase-contract/src/domains/assets/contract.ts
  * (nothing to change there — this test only verifies the generator faithfully
- * turns those declarations into a public /api/v1 spec). See
- * apps/busabase/content/spec/drive-grep-retrieval.md for the feature design.
+ * turns those declarations into a public /api/v1 spec).
  */
 
 type OpenApiOperation = {

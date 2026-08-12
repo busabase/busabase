@@ -10,9 +10,8 @@ import { busabaseRouter } from "../src/router";
  * `search`'s new `sources` scope parameter (`records`/`files`/`names`) —
  * before this, EVERY call ran the full pipeline (records ranking query +
  * file body scan + base/field-name matching) regardless of what the caller
- * actually cared about. See apps/busabase/content/spec/unified-grep.md's
- * "Search vs Grep" section for the measured cost of that (a "files" query
- * paying the full records-ranking cost when records coexist in the space).
+ * actually cared about — a "files" query paid the full records-ranking cost
+ * whenever records coexisted in the space.
  *
  * Seeds one marker per source so a query for any single marker only ever
  * matches its own source, then proves `sources` narrows results to exactly

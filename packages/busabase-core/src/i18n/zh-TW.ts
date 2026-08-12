@@ -29,6 +29,11 @@ export const dashboardZhTW: CoreI18nMessages = {
     new: "新增",
     installFromGithub: "從 GitHub 安裝…",
   },
+  form: {
+    ...dashboardZhCN.form,
+    alreadyExists: "此節點已經存在表單。請更新現有表單，不要重複建立。",
+    invalidCursor: "表單分頁連結無效，請重新整理後再試。",
+  },
   shell: {
     ...dashboardZhCN.shell,
     failedToLoadDashboard: "載入工作台資料失敗",

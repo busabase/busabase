@@ -33,7 +33,7 @@
   --crepe-color-selected: var(--accent);
   --crepe-color-inline-area: var(--muted);
 
-  /* design-system.md: headings use the serif display family (Fraunces +
+  /* Per the design system: headings use the serif display family (Fraunces +
    * Noto Serif SC via --font-serif), body stays on the sans family. Falls
    * back to `inherit` if a consumer somehow doesn't define --font-serif. */
   --crepe-font-title: var(--font-serif, inherit);
@@ -58,8 +58,7 @@
  * (h1 42px/50px line-height down to h6 18px, all weight 400 except a bolded
  * h6) — oversized and under-weighted for content sitting inside a dashboard
  * panel next to the node's own title. Rescaled to a more restrained,
- * editor-appropriate scale in the same spirit as packages/sharelib/richeditor
- * (this repo's other rich-text surface): smaller steps, a uniform semibold
+ * editor-appropriate scale: smaller steps, a uniform semibold
  * weight so hierarchy reads from size rather than weight-jumps, and
  * margin-top scaled to roughly the same ratio Crepe used (~0.8x own
  * font-size) so vertical rhythm stays proportional at the smaller sizes.

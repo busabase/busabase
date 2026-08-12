@@ -28,7 +28,7 @@ import type {
   ViewVO,
 } from "busabase-contract/types";
 import { SidebarTrigger } from "kui/sidebar";
-// Demo-aware navigation (same helpers as apps/productready & apps/buda):
+// Demo-aware navigation (the shared `openlib/ui/dashboard` helpers):
 // `SPALink` appends `?demo=1` on <Link> clicks; `useAddDemoParam` wraps
 // programmatic `setLocation` targets — together they keep the demo across all
 // navigation (the proxy reads `?demo` via Referer and keeps serving the demo router).
@@ -345,10 +345,10 @@ function BusabaseDashboardContent({
   const [error, setError] = useState<string | null>(null);
   const [location, rawSetLocation] = useLocation();
   const search = useSearch();
-  // Wrap every programmatic navigation so it keeps `?demo` in demo mode (the
-  // productready/buda pattern, applied once at the source instead of per call
+  // Wrap every programmatic navigation so it keeps `?demo` in demo mode
+  // (applied once at the source instead of per call
   // site) AND carries forward the rest of the current query string — e.g.
-  // busabase-cloud's `?space=tnl_…` selecting a connected Local ↔ Cloud
+  // Busabase Cloud's `?space=tnl_…` selecting a connected Local ↔ Cloud
   // Tunnel remote space, which a bare `setLocation(`/inbox/${id}`)` would
   // otherwise silently drop, bouncing the host app back to its default space.
   const addDemoParam = useAddDemoParam();

@@ -3,7 +3,6 @@ import "server-only";
 /**
  * Drive Grep Retrieval — text-slot writes (`putText`), auto-registration,
  * lazy self-heal, staleness on repoint, and reference-counted GC.
- * See apps/busabase/content/spec/drive-grep-retrieval.md for the full design.
  *
  * Busabase stores, indexes, and searches text; it never generates it. Text
  * always arrives either automatically (text-kind files point at their own

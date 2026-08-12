@@ -52,8 +52,7 @@ export const searchInputSchema = z.object({
    * means all three, matching every caller before this parameter existed.
    * `search()` has no way to skip the expensive records-ranking query
    * otherwise — it always ran regardless of what content type a caller
-   * actually cared about (see apps/busabase/content/spec/unified-grep.md's
-   * "Search vs Grep" section for the measured cost of that).
+   * actually cared about.
    *
    * A GET query param that occurs exactly once (`?sources=records`) arrives
    * as a bare string, not a 1-element array — only a REPEATED occurrence

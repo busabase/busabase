@@ -10,7 +10,7 @@
  * bytes the sidebar renders.
  *
  * So they are stored as plain `attachments` rows instead, the same way
- * `apps/busabase-cloud` stores a space logo. This module reuses the shared
+ * Busabase Cloud stores a space logo. This module reuses the shared
  * `open-domains/attachments` upload logic (size policy, key minting, registry
  * insert) — it adds only the server-side branding policy on top.
  */

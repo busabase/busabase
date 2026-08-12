@@ -80,8 +80,7 @@ export interface UserRefVO {
 }
 
 /**
- * Cheap, name/slug-only match from `nodes.searchByName` (see
- * `apps/busabase/content/spec/search-quick-jump.md`) — deliberately a much
+ * Cheap, name/slug-only match from `nodes.searchByName` — deliberately a much
  * smaller projection than `NodeVO` (no `description`/`metadata`/tree shape):
  * this backs the dashboard's instant quick-jump palette, not the sidebar tree
  * or a node's own detail view. `path` is the route this node navigates to
@@ -159,6 +158,8 @@ export type {
   FormSubmitResultVO,
   FormThemeVO,
   FormVO,
+  ListFormsDTO,
+  ListFormsVO,
   SubmitFormDTO,
   UpdateFormDTO,
 } from "../domains/form/types";

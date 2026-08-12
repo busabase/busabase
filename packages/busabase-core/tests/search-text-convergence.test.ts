@@ -14,7 +14,6 @@ import { busabaseRouter } from "../src/router";
  * now reads through the same `busabase_asset_texts` + streaming-cache
  * infrastructure `grep` uses (`asset-grep-logic.ts`), instead of its own
  * separate `storage.getObject` + in-memory-buffer + 256KB-cap mechanism.
- * See apps/busabase/content/spec/drive-grep-retrieval.md.
  *
  * These tests pin the direct consequences of that convergence:
  *  1. the 256KB cap is genuinely gone (a large text file is now searchable)

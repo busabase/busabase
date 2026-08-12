@@ -4,7 +4,7 @@ import { useCoreI18n } from "../../../i18n";
 /**
  * Renders the agent-authored form page inside a STRICT sandbox iframe.
  *
- * Security boundary (see apps/busabase/content/spec/form-as-node.md §6):
+ * Security boundary:
  * - `sandbox="allow-scripts allow-forms"` WITHOUT `allow-same-origin` → the
  *   frame gets an opaque origin, so the agent's code cannot reach the host's
  *   cookies, storage or DOM. (AirApp's preview uses allow-same-origin; a form is
