@@ -184,6 +184,9 @@ export const dashboardJa: CoreI18nMessages = {
     capabilityLabel: "訪問者ができること",
     capabilityRead: "閲覧のみ",
     capabilitySubmit: "送信を許可",
+    requireSignInLabel: "送信にサインインを必須にする",
+    requireSignInHint:
+      "リンクを知っていれば誰でもフォームを開けますが、送信できるのはサインイン済みの訪問者だけです。",
     passwordLabel: "パスワード",
     passwordHint: "空欄の場合はパスワードなし",
     passwordPlaceholder: "パスワードを設定",

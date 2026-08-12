@@ -192,6 +192,9 @@ export const coreMessagesEn = {
     capabilityLabel: "What visitors can do",
     capabilityRead: "View only",
     capabilitySubmit: "Allow submissions",
+    requireSignInLabel: "Require sign-in to submit",
+    requireSignInHint:
+      "Anyone with the link can still open the form; only signed-in visitors can submit it.",
     passwordLabel: "Password",
     passwordHint: "Leave empty for no password",
     passwordPlaceholder: "Set a password",

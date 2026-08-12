@@ -16,6 +16,7 @@ import {
   renderFileTree,
 } from "../../dashboard/components/file-tree-browser";
 import { NodeActionsMenu } from "../../dashboard/components/node-actions-menu";
+import { NodeAgentPromptsButton } from "../../dashboard/components/node-agent-prompts-button";
 import { EmptyState } from "../../dashboard/components/primitives";
 import { FileContentSkeleton, NodeDetailSkeleton } from "../../dashboard/components/skeletons";
 import { asNodeDetail } from "../../dashboard/helpers/node-detail";
@@ -121,6 +122,11 @@ export function AirAppDetailView({ orpc, slug, onNodeLoaded }: NodeDetailProps) 
     airapp ? (
       <>
         <AirAppRunControls airapp={airapp} fullscreenState={fullscreenState} runner={runner} />
+        <NodeAgentPromptsButton
+          nodeId={airapp.node.id}
+          nodeName={airapp.node.name}
+          nodeType="airapp"
+        />
         <NodeActionsMenu
           nodeId={airapp.node.id}
           nodeName={airapp.node.name}
