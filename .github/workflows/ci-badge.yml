@@ -20,10 +20,6 @@
 # then fail every later push, since none of those pushes are themselves
 # badge-only. `push` path filters look only at the commits in that specific
 # push, which is what "was this commit a badge-only commit" actually needs.
-#
-# Owned by this open-source repo (busabase/busabase). The kapps sync
-# (scripts/publish-busabase-repo.ts) PRESERVES `.github`, so it never overwrites
-# this file — edit it here.
 name: CI (badge only)
 
 on:

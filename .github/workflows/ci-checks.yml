@@ -2,10 +2,6 @@
 # (post-merge on main). Has no triggers of its own — callers own those, so the
 # PR and main pipelines can diverge (benchmark, badge commits) without either
 # file duplicating ~200 lines of job definitions.
-#
-# Owned by this open-source repo (busabase/busabase). The kapps sync
-# (scripts/publish-busabase-repo.ts) PRESERVES `.github`, so it never overwrites
-# these files — edit them here.
 name: CI checks
 
 on:
@@ -111,9 +107,9 @@ jobs:
           pct=$(node -p "require('./packages/busabase-core/coverage/coverage-summary.json').total.lines.pct")
           echo "## Coverage (busabase-core: logic/ + domains/)" >> "$GITHUB_STEP_SUMMARY"
           echo "Lines: **${pct}%**" >> "$GITHUB_STEP_SUMMARY"
-      # Releases arrive as a pull request (scripts/publish-busabase-repo.ts --pr),
-      # so the badge is refreshed on the release branch and merges as part of the
-      # release commit. Committing on `main` instead put a
+      # Releases arrive as a pull request from a `release/*` branch, so the badge
+      # is refreshed on that branch and merges as part of the release commit.
+      # Committing on `main` instead put a
       # `chore: update coverage badge` bot commit after every single release --
       # 26 of main's first 144 commits -- carrying no information the release
       # commit could not have carried itself.

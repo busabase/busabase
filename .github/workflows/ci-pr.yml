@@ -15,10 +15,6 @@
 # match the PR's cumulative diff against `main`, not a single push, so once a
 # release branch has any real changes this condition never re-triggers a skip
 # — which is correct: every later push should get the full suite.
-#
-# Owned by this open-source repo (busabase/busabase). The kapps sync
-# (scripts/publish-busabase-repo.ts) PRESERVES `.github`, so it never overwrites
-# this file — edit it here.
 name: CI (pull request)
 
 on:

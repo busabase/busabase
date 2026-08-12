@@ -8,10 +8,6 @@
 # It does NOT gate publish-npm.yml or docker.yml — those trigger on the same
 # push and run alongside this. That is exactly why the pull-request gate has to
 # be the real one.
-#
-# Owned by this open-source repo (busabase/busabase). The kapps sync
-# (scripts/publish-busabase-repo.ts) PRESERVES `.github`, so it never overwrites
-# this file — edit it here.
 name: CI (main)
 
 on:
