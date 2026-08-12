@@ -9,7 +9,7 @@
 export async function register() {
   if (process.env.NEXT_RUNTIME === "nodejs") {
     // Separate node file so this only ever runs once, on the real Node
-    // runtime (matches apps/busabase-cloud's instrumentation.ts pattern).
+    // runtime (the standard Next.js instrumentation pattern).
     await import("./instrumentation.node");
   }
 }

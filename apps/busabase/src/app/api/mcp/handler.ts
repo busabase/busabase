@@ -1,7 +1,7 @@
 import { createBusabaseOpenApiClient } from "busabase-contract/api-client";
 import { busabaseContract } from "busabase-contract/contract/busabase";
 import { AGENT_EXCLUDED_MCP_TOOLS, TASK_SUPERSEDED_MCP_TOOLS } from "busabase-contract/tasks";
-import { runWithBusabaseContext } from "busabase-core/context";
+import { runWithLocalContext } from "busabase-core/context";
 import {
   BUSABASE_MCP_AIRAPP_URI,
   BUSABASE_MCP_SKILL_URI,
@@ -74,7 +74,7 @@ const openApiMcpHandler = createOpenApiMcpHandler({
 
 export const mcpHandler = async (request: Request) => {
   const vaultRuntimeEnv = await readBuiltinVaultRuntimeEnv();
-  return runWithBusabaseContext({ vaultRuntimeEnv, localUserName: getLocalUserName() }, async () =>
+  return runWithLocalContext({ vaultRuntimeEnv, localUserName: getLocalUserName() }, async () =>
     openApiMcpHandler(request),
   );
 };

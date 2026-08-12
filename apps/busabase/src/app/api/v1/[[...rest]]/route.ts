@@ -1,5 +1,5 @@
 import { OpenAPIHandler } from "@orpc/openapi/fetch";
-import { runWithBusabaseContext } from "busabase-core/context";
+import { runWithBusabaseContext, runWithLocalContext } from "busabase-core/context";
 import { getBusabaseOpenApiSpec } from "busabase-core/openapi";
 import { BUSABASE_API_ALLOW_HEADERS, BUSABASE_API_METHODS } from "busabase-core/openapi/cors";
 import { encodeBusabaseOpenApiError } from "busabase-core/openapi/error-envelope";
@@ -37,11 +37,11 @@ async function handle(request: Request) {
   }
 
   const vaultRuntimeEnv = await readBuiltinVaultRuntimeEnv();
-  return runWithBusabaseContext(
+  return runWithLocalContext(
     {
       vaultRuntimeEnv,
       localUserName: getLocalUserName(),
-      ...resolveRelayPermissionContext(request.headers),
+      aclOverride: resolveRelayPermissionContext(request.headers),
     },
     run,
   );

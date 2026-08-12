@@ -26,8 +26,8 @@
 }
 
 /* ── 侘寂 / 微水泥 neutral ground ─────────────────────────────────────────────
-   Replaces the pure-white, 0%-saturation neutrals with the "冷水泥" (cool
-   cement) ground decided in content/spec/wabi-sabi-visual-direction.md (§12).
+   Replaces the pure-white, 0%-saturation neutrals with a "冷水泥" (cool
+   cement) ground.
 
    Why a hue at all: pure #FFF is fatiguing over the long review sessions this
    product is built for. Why *cool* (hue 177) rather than the warmer cement
@@ -130,7 +130,7 @@
 }
 
 /* Review workflow colors. Keep these exact values synchronized with
-   apps/busabase-cloud/src/app/global.css and both apps' design specs.
+   Busabase Cloud's own global.css and both apps' design specs.
 
    The `-strong` values were re-solved for the cool-cement ground. The old ones
    were tuned for a pure-white ground and fall below WCAG AA here (review 4.12,
@@ -170,7 +170,7 @@
      ONE exception to "3 states only": busabase's whole premise is AI agents
      create data and humans review it, so marking AI-authorship is core
      product semantics, not decoration. Keep in sync with
-     apps/busabase-cloud/src/app/global.css. */
+     Busabase Cloud's own global.css. */
   --color-ai: #705496;
   --color-ai-strong: #684d8f; /* 6.59 vs card, 5.64 vs muted */
   --color-ai-soft: #a792c4;

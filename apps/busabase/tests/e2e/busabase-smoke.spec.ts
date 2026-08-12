@@ -107,8 +107,7 @@ test("dashboard routes render the review-first seeded experience", async ({ page
 
   // Create a record as a Change Request (the "Submit Request" action, which lives
   // behind the split button's "More submit options" dropdown — "Submit Now" is the
-  // primary immediate-merge action by default; see
-  // changelog/20260722-submit-action-order-and-permissions.md).
+  // primary immediate-merge action by default).
   await page.goto("/dashboard/local/base/blog/new");
   await expect(page.getByText("New Posts record")).toBeVisible();
   await page.getByLabel("Title", { exact: true }).fill("Smoke test AI market note");

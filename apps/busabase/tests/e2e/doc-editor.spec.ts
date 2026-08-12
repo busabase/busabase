@@ -12,7 +12,7 @@ test.describe.configure({ mode: "serial" });
 // components/doc-editor*.tsx, added 2026-07-23) — markdown-shortcut block conversion,
 // the slash menu, the text-selection toolbar (bold/italic/link), image-as-Asset
 // upload + deletion, and the title/body alignment fix that came out of manually
-// reviewing this editor (see changelog/20260723-busabase-doc-detail-width.md).
+// reviewing this editor.
 //
 // Docs are created via the REST API (autoMerge: true) rather than through the UI's
 // "New" flow — same reasoning as review-experience.spec.ts / airapp.spec.ts: the UI
@@ -369,7 +369,7 @@ test("doc title and body share the same left edge, and the block handle isn't cl
   // Regression test for the 2026-07-23 fix: Crepe's shipped theme bakes in its
   // own horizontal padding on `.ProseMirror`, which — stacked on top of
   // DocDetailView's own page padding — pushed the doc body to the right of the
-  // title above it (see changelog/20260723-busabase-doc-detail-width.md).
+  // title above it.
   expect(paragraphBox.x).toBeCloseTo(titleBox.x, 0);
 
   const editor = await enterEditMode(page);

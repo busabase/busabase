@@ -5,7 +5,7 @@
 //   public/assets/readme/busabase-hero-ja.webp     (ja)
 // by capturing the LIVE busabase-cloud homepage hero — a self-contained
 // GSAP/React animation that cycles Change Request → Base table → Graph while an
-// AI agent "drives" the workspace (apps/busabase-cloud/src/app/[lang]/(home)).
+// AI agent "drives" the workspace.
 //
 // The hero is fully localized, so we capture one WebP per locale and point each
 // README at its own language.

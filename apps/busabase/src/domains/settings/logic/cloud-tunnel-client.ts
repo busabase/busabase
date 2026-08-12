@@ -1,15 +1,12 @@
 /**
  * In-process Cloud tunnel relay client — the OSS half of the Local ↔ Cloud
  * Tunnel connect handshake (spec §5a, §8). Runs as a background module inside
- * OSS's own Next.js server process — NOT a separate CLI/daemon like
- * `apps/buda-connector` (deliberate scope reduction: OSS is one process
- * already, per the main spec's §4 non-goals).
+ * OSS's own Next.js server process — NOT a separate CLI/daemon (deliberate
+ * scope reduction: OSS is one process already, per the main spec's §4
+ * non-goals).
  *
  * Transport is `relaylib` (`attachRelayClient` + `createFetchHandler`) — the
- * same package `apps/busabase-cloud` already depends on. Reconnect/backoff
- * shape is mirrored from `apps/buda-connector/src/relay.ts` (that module's
- * protocol is hand-rolled and NOT reused; only the backoff strategy is worth
- * copying).
+ * same package Busabase Cloud already depends on.
  */
 import "server-only";
 import { hostname } from "node:os";
@@ -55,12 +52,11 @@ type GlobalWithTunnelState = typeof globalThis & {
   __busabaseCloudTunnelState?: CloudTunnelState;
 };
 
-// Heartbeat well under Cloud's stale threshold (see
-// apps/busabase-cloud/src/domains/tunnel/logic/tunnel-registry.ts's
-// STALE_AFTER_MS = 30_000 / OFFLINE_AFTER_MS = 120_000) so a healthy tunnel
-// never flickers to "stale" between beats.
+// Heartbeat well under Cloud's stale threshold (Busabase Cloud marks a tunnel
+// stale after 30s and offline after 120s) so a healthy tunnel never flickers
+// to "stale" between beats.
 const HEARTBEAT_INTERVAL_MS = 15_000;
-// Reconnect backoff: mirrors apps/buda-connector/src/relay.ts's shape — start
+// Reconnect backoff — start
 // low, double on failure, cap at 30s, reset on success, ±20% jitter so a
 // restart doesn't thunder the server at the exact same instant.
 const RECONNECT_BASE_MS = 1_000;

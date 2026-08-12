@@ -10,7 +10,7 @@ import { getBusabaseAppLL, getBusabaseLocaleFromAcceptLanguage } from "~/lib/i18
 import { Providers } from "./providers";
 import "./global.css";
 
-// Typography (see apps/busabase-cloud/content/spec/design-system.md): serif DISPLAY family for
+// Typography: serif DISPLAY family for
 // headings (Fraunces for Latin, Noto Serif SC for CJK), Inter for body/UI.
 // Each font exposes a CSS variable consumed by global.css.
 const inter = Inter({

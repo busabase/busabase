@@ -48,10 +48,9 @@ export async function proxy(request: NextRequest) {
 
   // Nodepod (AirApp node's in-browser Run panel, via busabase-core's
   // dashboard) needs its service worker reachable at `/__sw__.js` on this
-  // app's own origin. Unified with apps/busabase-cloud's approach (compose
-  // nodepodProxy into the app's existing proxy.ts) rather than a separate
-  // `app/__sw__.js/route.ts` — see the airapp changelog for why both forms
-  // work and why this one was chosen for consistency across the two apps.
+  // app's own origin. Composed into the app's existing proxy.ts rather than
+  // added as a separate `app/__sw__.js/route.ts`: both forms work, and this
+  // one keeps the self-hosted app and Busabase Cloud consistent.
   const nodepodResponse = await nodepodProxy(request);
   if (nodepodResponse) return nodepodResponse;
 
