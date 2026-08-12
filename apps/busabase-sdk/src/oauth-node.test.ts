@@ -10,6 +10,7 @@ import {
   loadBusabaseAirAppOAuthCredential,
   revokeBusabaseAirAppOAuthCredential,
   storeBusabaseAirAppOAuthCredential,
+  storeBusabaseAirAppSelectedSpace,
 } from "./oauth-node.js";
 
 const APP_ID = "kelly-invest-stock";
@@ -82,6 +83,38 @@ describe("local AirApp OAuth credentials", () => {
     expect(loadBusabaseAirAppOAuthCredential(APP_ID, { rootDir })).toMatchObject({
       accessToken: "bso_rotated",
       refreshToken: "bsr_rotated",
+    });
+  });
+
+  it("persists a validated Space and preserves it across token rotation", async () => {
+    storeBusabaseAirAppOAuthCredential(
+      {
+        appId: APP_ID,
+        baseUrl: "https://busabase.com",
+        tokenSet: tokenSet(new Date(Date.now() - 1_000).toISOString()),
+      },
+      { rootDir },
+    );
+    storeBusabaseAirAppSelectedSpace(APP_ID, { id: "spc_1", name: "Acme" }, { rootDir });
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            access_token: "bso_rotated",
+            refresh_token: "bsr_rotated",
+            expires_in: 3600,
+            scope: "api",
+            token_type: "Bearer",
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        ),
+    );
+
+    await getBusabaseAirAppAccessToken(APP_ID, { rootDir }, fetchMock as unknown as typeof fetch);
+
+    expect(loadBusabaseAirAppOAuthCredential(APP_ID, { rootDir })?.selectedSpace).toEqual({
+      id: "spc_1",
+      name: "Acme",
     });
   });
 

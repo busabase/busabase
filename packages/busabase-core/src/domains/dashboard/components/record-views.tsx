@@ -20,6 +20,7 @@ import {
   Maximize2,
   MoreHorizontal,
   Paperclip,
+  Sparkles,
   Trash2,
   X,
 } from "lucide-react";
@@ -63,6 +64,7 @@ import {
 } from "../helpers/format";
 import { mergeSearchIntoHref, useHrefWithCurrentSearch } from "../helpers/link-search";
 import type { RecordSubmitOptions } from "../helpers/view-types";
+import { useIsAnonymousVisitor } from "../visitor-context";
 import {
   FieldBadgeList,
   FieldValuePreview,
@@ -70,6 +72,8 @@ import {
   MarkdownFieldPreview,
 } from "./field-preview";
 import { UserRefButton } from "./identity";
+import { NodeAgentPromptsButton } from "./node-agent-prompts-button";
+import { NodeAgentPromptsDialog } from "./node-agent-prompts-dialog";
 import {
   BusabaseSidePanel,
   ConfirmActionDialog,
@@ -86,37 +90,56 @@ import { SplitSubmitButton } from "./split-submit-button";
 export function RecordTopbarActions({
   activeTab,
   base,
+  record,
   recordId,
 }: {
   activeTab: "view" | "edit";
   base: BaseVO;
+  /** Only used to title the Agent prompts dialog; the prompt itself is keyed on
+   *  `recordId`, which is always known even before the record has loaded. */
+  record?: RecordVO | null;
   recordId: string;
 }) {
   const messages = useCoreI18n();
   const currentSearch = useSearch();
   return (
-    <nav className="flex rounded-md bg-muted/60 p-0.5 text-xs">
-      <Link
-        className={`rounded px-2.5 py-1.5 font-medium transition-colors ${
-          activeTab === "view"
-            ? "bg-card text-foreground"
-            : "text-muted-foreground hover:text-foreground"
-        }`}
-        href={mergeSearchIntoHref(`/base/${base.slug}/${recordId}`, currentSearch)}
-      >
-        {messages.recordView.view}
-      </Link>
-      <Link
-        className={`rounded px-2.5 py-1.5 font-medium transition-colors ${
-          activeTab === "edit"
-            ? "bg-card text-foreground"
-            : "text-muted-foreground hover:text-foreground"
-        }`}
-        href={mergeSearchIntoHref(`/base/${base.slug}/${recordId}/edit`, currentSearch)}
-      >
-        {messages.recordView.edit}
-      </Link>
-    </nav>
+    <div className="flex items-center gap-2">
+      {/* Record-scoped Agent prompts. The View/Edit switch next to it is the
+          record's whole toolbar, so this is the only place a per-record "ask my
+          agent to fix THIS row" entry point can live. */}
+      <NodeAgentPromptsButton
+        nodeId={base.nodeId}
+        nodeName={base.name}
+        nodeType="base"
+        scope={{
+          kind: "record",
+          recordId,
+          recordTitle: record ? getRecordTitle(record, messages) : undefined,
+        }}
+      />
+      <nav className="flex rounded-md bg-muted/60 p-0.5 text-xs">
+        <Link
+          className={`rounded px-2.5 py-1.5 font-medium transition-colors ${
+            activeTab === "view"
+              ? "bg-card text-foreground"
+              : "text-muted-foreground hover:text-foreground"
+          }`}
+          href={mergeSearchIntoHref(`/base/${base.slug}/${recordId}`, currentSearch)}
+        >
+          {messages.recordView.view}
+        </Link>
+        <Link
+          className={`rounded px-2.5 py-1.5 font-medium transition-colors ${
+            activeTab === "edit"
+              ? "bg-card text-foreground"
+              : "text-muted-foreground hover:text-foreground"
+          }`}
+          href={mergeSearchIntoHref(`/base/${base.slug}/${recordId}/edit`, currentSearch)}
+        >
+          {messages.recordView.edit}
+        </Link>
+      </nav>
+    </div>
   );
 }
 
@@ -1284,12 +1307,13 @@ function RecordFieldPanel({ record, records }: { record: RecordVO; records: Reco
           {fieldEntries.map(({ field, value }) =>
             isRecordLongField(field) ? (
               <section
-                className="mt-5 max-w-3xl md:col-span-2"
+                className="group/prop mt-5 max-w-3xl md:col-span-2"
                 data-record-field-slug={field.slug}
                 key={field.id}
               >
-                <div className="font-medium text-muted-foreground text-sm">
-                  {resolveIString(field.name)}
+                <div className="flex items-center gap-1 font-medium text-muted-foreground text-sm">
+                  <span className="truncate">{resolveIString(field.name)}</span>
+                  <CellAgentPromptsButton field={field} record={record} />
                 </div>
                 <div className="mt-3 text-base leading-7">
                   <FieldValuePreview
@@ -1309,7 +1333,13 @@ function RecordFieldPanel({ record, records }: { record: RecordVO; records: Reco
                 </div>
               </section>
             ) : (
-              <RecordPropertyItem field={field} key={field.id} records={records} value={value} />
+              <RecordPropertyItem
+                field={field}
+                key={field.id}
+                record={record}
+                records={records}
+                value={value}
+              />
             ),
           )}
         </div>
@@ -1318,12 +1348,71 @@ function RecordFieldPanel({ record, records }: { record: RecordVO; records: Reco
   );
 }
 
+/**
+ * "Ask my agent about THIS value" — one per property row on the record page.
+ *
+ * The narrowest of the three Agent-prompt entry points, and the one the others
+ * cannot express: the column menu means "this field on every record", the
+ * topbar button means "every field of this record", and neither says "this
+ * cell". Pointing at a single value on screen is exactly how people describe
+ * the change they want, so the entry point lives where the value is.
+ *
+ * Hidden until the row is hovered or the button is focused: a Base can carry
+ * dozens of properties, and a permanently visible icon on each turns the panel
+ * into a wall of sparkles. `focus-visible` keeps it keyboard-reachable — the
+ * button is always in the tab order, only its paint is conditional.
+ */
+function CellAgentPromptsButton({ field, record }: { field: BaseFieldVO; record: RecordVO }) {
+  const messages = useCoreI18n();
+  const resolveIString = useIString();
+  const [open, setOpen] = useState(false);
+  const isAnon = useIsAnonymousVisitor();
+  if (isAnon) {
+    return null;
+  }
+
+  const fieldName = resolveIString(field.name);
+  return (
+    <>
+      <button
+        aria-label={`${messages.agentPrompts.title} · ${fieldName}`}
+        className="inline-flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground/70 opacity-0 transition-opacity hover:bg-accent hover:text-foreground focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring group-hover/prop:opacity-100"
+        data-testid={`cell-agent-prompts-${field.slug}`}
+        onClick={() => setOpen(true)}
+        title={messages.agentPrompts.title}
+        type="button"
+      >
+        <Sparkles className="size-3" />
+      </button>
+      {open && (
+        <NodeAgentPromptsDialog
+          nodeId={record.base.nodeId}
+          nodeName={record.base.name}
+          nodeType="base"
+          onOpenChange={setOpen}
+          open={open}
+          scope={{
+            fieldName,
+            fieldSlug: field.slug,
+            fieldType: field.type,
+            kind: "cell",
+            recordId: record.id,
+            recordTitle: getRecordTitle(record, messages),
+          }}
+        />
+      )}
+    </>
+  );
+}
+
 function RecordPropertyItem({
   field,
+  record,
   records,
   value,
 }: {
   field: BaseFieldVO;
+  record: RecordVO;
   records: RecordVO[];
   value: unknown;
 }) {
@@ -1333,10 +1422,13 @@ function RecordPropertyItem({
     const checked = value === true || value === "true";
     return (
       <div
-        className="grid min-w-0 grid-cols-[112px_minmax(0,1fr)] items-center gap-3"
+        className="group/prop grid min-w-0 grid-cols-[112px_minmax(0,1fr)] items-center gap-3"
         data-record-field-slug={field.slug}
       >
-        <span className="truncate text-muted-foreground">{fieldName}</span>
+        <span className="flex min-w-0 items-center gap-1">
+          <span className="truncate text-muted-foreground">{fieldName}</span>
+          <CellAgentPromptsButton field={field} record={record} />
+        </span>
         <span
           className={`inline-flex h-5 w-5 items-center justify-center rounded border ${
             checked
@@ -1354,10 +1446,13 @@ function RecordPropertyItem({
   if (chips.length > 0) {
     return (
       <div
-        className="grid min-w-0 grid-cols-[112px_minmax(0,1fr)] items-start gap-3"
+        className="group/prop grid min-w-0 grid-cols-[112px_minmax(0,1fr)] items-start gap-3"
         data-record-field-slug={field.slug}
       >
-        <span className="truncate text-muted-foreground">{fieldName}</span>
+        <span className="flex min-w-0 items-center gap-1">
+          <span className="truncate text-muted-foreground">{fieldName}</span>
+          <CellAgentPromptsButton field={field} record={record} />
+        </span>
         <FieldBadgeList chips={chips} />
       </div>
     );
@@ -1365,10 +1460,13 @@ function RecordPropertyItem({
 
   return (
     <div
-      className="grid min-w-0 grid-cols-[112px_minmax(0,1fr)] items-start gap-3"
+      className="group/prop grid min-w-0 grid-cols-[112px_minmax(0,1fr)] items-start gap-3"
       data-record-field-slug={field.slug}
     >
-      <span className="truncate text-muted-foreground">{fieldName}</span>
+      <span className="flex min-w-0 items-center gap-1">
+        <span className="truncate text-muted-foreground">{fieldName}</span>
+        <CellAgentPromptsButton field={field} record={record} />
+      </span>
       <div className="min-w-0 truncate">
         <FieldValuePreview
           className="inline text-sm leading-5"

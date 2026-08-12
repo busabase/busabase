@@ -173,6 +173,20 @@ export interface BusabaseContext {
    * Set it via `runWithAnonymousContext`, never by hand.
    */
   visitorKind?: "member" | "anonymous";
+  /**
+   * Node ids this anonymous request has proven the SHARE PASSWORD for.
+   *
+   * A password-protected public link is invisible to an anonymous visitor until
+   * the node's id shows up here (see `buildNodeVisibilityCondition` and
+   * `getPublicScopeOf`). The host is responsible for deciding what counts as
+   * proof — busabase-cloud verifies a signed unlock cookie — and hands the
+   * resulting ids in per request; the core never trusts a client-supplied list.
+   *
+   * Meaningless for a member: a space member reaches a node through the node
+   * ACL, and a link password has never gated members (they aren't using the
+   * link). Only the anonymous branches read it.
+   */
+  unlockedShareNodeIds?: readonly string[];
 }
 
 /** Tenant id used by the single-tenant open-source app and as a safe default. */
@@ -524,6 +538,18 @@ export function getContextChangeRequestPendingReviewHook() {
 /** True when this request arrived without a signed-in user (a public link). */
 export function isAnonymousVisitor(): boolean {
   return storage.getStore()?.visitorKind === "anonymous";
+}
+
+/**
+ * Node ids whose share password this ANONYMOUS request has already satisfied.
+ *
+ * Empty for a member, and empty for an anonymous request that supplied no proof
+ * — which is the fail-closed default: a password-protected node stays invisible
+ * until the host puts its id in here.
+ */
+export function getContextUnlockedShareNodeIds(): readonly string[] {
+  if (!isAnonymousVisitor()) return [];
+  return storage.getStore()?.unlockedShareNodeIds ?? [];
 }
 
 /**

@@ -27,12 +27,42 @@ import { operationLabelKeys } from "./change-request";
 
 export type PromptTier = "scenario" | "capability";
 
+/**
+ * What inside the node the prompts are about.
+ *
+ * The dialog is the same one at every level — what changes is the target line
+ * (so the agent knows it is being pointed at ONE column or ONE record, not the
+ * whole table) and which slice of the prompt set is worth showing there. A
+ * column-level prompt listing "create a view" would just be noise.
+ */
+export type NodePromptScope =
+  | { kind: "node" }
+  | { kind: "field"; fieldName: string; fieldSlug: string; fieldType?: string }
+  | { kind: "record"; recordId: string; recordTitle?: string }
+  /**
+   * ONE cell — this record's value for this field. Not the same as `field`
+   * (that one means the column across every record) nor `record` (that one
+   * means every field of this row); it is their intersection, and it is what
+   * someone means when they point at a value on the record page and say "make
+   * the agent change THIS".
+   */
+  | {
+      kind: "cell";
+      recordId: string;
+      recordTitle?: string;
+      fieldName: string;
+      fieldSlug: string;
+      fieldType?: string;
+    };
+
 export interface NodePromptContext {
   nodeType: string;
   nodeName: string;
   nodeId: string;
   spaceName?: string;
   spaceId?: string;
+  /** Defaults to the whole node. */
+  scope?: NodePromptScope;
 }
 
 export interface NodePrompt {
@@ -67,6 +97,107 @@ const TARGET_LINE: Record<CoreLocale, (c: NodePromptContext, typeLabel: string) 
     `対象：Busabase の ${typeLabel}「${c.nodeName}」（nodeId: ${c.nodeId}）` +
     (c.spaceId ? `、スペース「${c.spaceName ?? c.spaceId}」（spaceId: ${c.spaceId}）内` : "") +
     "。",
+};
+
+type ScopeOf<K extends NodePromptScope["kind"]> = Extract<NodePromptScope, { kind: K }>;
+
+/**
+ * Appended to the target line when the prompt is about one column, one record or
+ * one cell rather than the whole node. Kept as a separate sentence (instead of
+ * folded into `TARGET_LINE`) so both halves stay readable and the node-level
+ * wording is byte-identical to what it has always been.
+ *
+ * Every one of these is phrased as a FENCE ("leave every other … alone"), not
+ * just a pointer. Naming the target tells the agent where to start; the fence is
+ * what stops a "clean up this value" from turning into a sweep of the column.
+ */
+
+/** One builder per narrowing scope. `node` adds nothing, so it has no entry. */
+interface ScopeLineBuilders {
+  field: (scope: ScopeOf<"field">) => string;
+  record: (scope: ScopeOf<"record">) => string;
+  cell: (scope: ScopeOf<"cell">) => string;
+}
+
+const SCOPE_LINES: Record<CoreLocale, ScopeLineBuilders> = {
+  en: {
+    field: (s) =>
+      ` Work on ONE field only: "${s.fieldName}" (fieldSlug: ${s.fieldSlug}${
+        s.fieldType ? `, type: ${s.fieldType}` : ""
+      }). Leave every other field alone.`,
+    record: (s) =>
+      ` Work on ONE record only: ${s.recordTitle ? `"${s.recordTitle}" ` : ""}(recordId: ${
+        s.recordId
+      }). Leave every other record alone.`,
+    cell: (s) =>
+      ` Work on ONE value only: the "${s.fieldName}" field (fieldSlug: ${s.fieldSlug}${
+        s.fieldType ? `, type: ${s.fieldType}` : ""
+      }) of the record ${s.recordTitle ? `"${s.recordTitle}" ` : ""}(recordId: ${
+        s.recordId
+      }). Do not touch any other field of this record, and do not touch this field on any other record.`,
+  },
+  "zh-CN": {
+    field: (s) =>
+      ` 只处理其中一个字段：「${s.fieldName}」（fieldSlug: ${s.fieldSlug}${
+        s.fieldType ? `，类型：${s.fieldType}` : ""
+      }），其他字段一律不要动。`,
+    record: (s) =>
+      ` 只处理其中一条记录：${s.recordTitle ? `「${s.recordTitle}」` : ""}（recordId: ${
+        s.recordId
+      }），其他记录一律不要动。`,
+    cell: (s) =>
+      ` 只处理其中一个值：记录 ${s.recordTitle ? `「${s.recordTitle}」` : ""}（recordId: ${
+        s.recordId
+      }）的「${s.fieldName}」字段（fieldSlug: ${s.fieldSlug}${
+        s.fieldType ? `，类型：${s.fieldType}` : ""
+      }）。这条记录的其他字段不要动，其他记录的这个字段也不要动。`,
+  },
+  "zh-TW": {
+    field: (s) =>
+      ` 只處理其中一個欄位：「${s.fieldName}」（fieldSlug: ${s.fieldSlug}${
+        s.fieldType ? `，型別：${s.fieldType}` : ""
+      }），其他欄位一律不要動。`,
+    record: (s) =>
+      ` 只處理其中一筆記錄：${s.recordTitle ? `「${s.recordTitle}」` : ""}（recordId: ${
+        s.recordId
+      }），其他記錄一律不要動。`,
+    cell: (s) =>
+      ` 只處理其中一個值：記錄 ${s.recordTitle ? `「${s.recordTitle}」` : ""}（recordId: ${
+        s.recordId
+      }）的「${s.fieldName}」欄位（fieldSlug: ${s.fieldSlug}${
+        s.fieldType ? `，型別：${s.fieldType}` : ""
+      }）。這筆記錄的其他欄位不要動，其他記錄的這個欄位也不要動。`,
+  },
+  ja: {
+    field: (s) =>
+      ` 対象はフィールド 1 つだけです：「${s.fieldName}」（fieldSlug: ${s.fieldSlug}${
+        s.fieldType ? `、型：${s.fieldType}` : ""
+      }）。他のフィールドには触れないでください。`,
+    record: (s) =>
+      ` 対象はレコード 1 件だけです：${s.recordTitle ? `「${s.recordTitle}」` : ""}（recordId: ${
+        s.recordId
+      }）。他のレコードには触れないでください。`,
+    cell: (s) =>
+      ` 対象は値 1 つだけです：レコード ${s.recordTitle ? `「${s.recordTitle}」` : ""}（recordId: ${
+        s.recordId
+      }）の「${s.fieldName}」フィールド（fieldSlug: ${s.fieldSlug}${
+        s.fieldType ? `、型：${s.fieldType}` : ""
+      }）。このレコードの他のフィールドにも、他のレコードのこのフィールドにも触れないでください。`,
+  },
+};
+
+const scopeLine = (locale: CoreLocale, scope: NodePromptScope): string => {
+  const builders = SCOPE_LINES[locale];
+  switch (scope.kind) {
+    case "field":
+      return builders.field(scope);
+    case "record":
+      return builders.record(scope);
+    case "cell":
+      return builders.cell(scope);
+    default:
+      return "";
+  }
 };
 
 /**
@@ -392,13 +523,293 @@ const AIRAPP_SCENARIOS: ScenarioDef[] = [
   },
 ];
 
+/**
+ * Form is the node type that needs these MOST, and it used to be the one type
+ * with none: a Form's page is authored by an agent as a single HTML document
+ * (see `form-detail-view.tsx`) and there is deliberately no drag-and-drop
+ * builder, so "ask your agent" is not one way to edit a form — it is the only
+ * way. Falling through to the capability list alone told a user which
+ * operations exist without ever saying "you can just ask for a different
+ * layout".
+ */
+const FORM_SCENARIOS: ScenarioDef[] = [
+  {
+    key: "form-customize-page",
+    label: {
+      en: "Redesign this form's page",
+      "zh-CN": "帮我定制这个表单",
+      "zh-TW": "幫我定制這個表單",
+      ja: "このフォームのページを作り直す",
+    },
+    body: {
+      en: (t) =>
+        `${t}\n\nRead the form's current page source and its field bindings first. Then redesign the page the way I describe next — layout, wording, grouping, and validation hints. Keep every existing field binding working unless I explicitly ask you to change one, and show me the new page before submitting it.`,
+      "zh-CN": (t) =>
+        `${t}\n\n请先读这个表单当前的页面源码和字段绑定，然后按我接下来的描述重新设计这个页面——排版、文案、分组、填写提示。除非我明确要求，否则所有已有的字段绑定都要保持可用；提交前先把新页面给我看。`,
+      "zh-TW": (t) =>
+        `${t}\n\n請先讀這個表單目前的頁面原始碼和欄位綁定，然後按我接下來的描述重新設計這個頁面——排版、文案、分組、填寫提示。除非我明確要求，否則所有既有的欄位綁定都要保持可用；提交前先把新頁面給我看。`,
+      ja: (t) =>
+        `${t}\n\nまずこのフォームの現在のページソースとフィールドバインディングを読んでください。そのうえで、次に説明する内容に沿ってページを作り直してください——レイアウト、文言、グルーピング、入力ヒント。私が明示的に頼まない限り既存のバインディングはすべて動くまま保ち、提出前に新しいページを見せてください。`,
+    },
+  },
+  {
+    key: "form-bindings",
+    label: {
+      en: "Change which fields it collects",
+      "zh-CN": "改这个表单收集哪些字段",
+      "zh-TW": "改這個表單收集哪些欄位",
+      ja: "収集するフィールドを変える",
+    },
+    body: {
+      en: (t) =>
+        `${t}\n\nShow me which fields of the target base this form currently writes to, and which of the base's fields it ignores. Then adjust the bindings as I describe — added fields need a matching input on the page, and a removed one must not leave an orphaned input behind.`,
+      "zh-CN": (t) =>
+        `${t}\n\n请先告诉我这个表单目前写入目标数据表的哪些字段、又漏掉了哪些字段。然后按我的描述调整绑定——新增的字段要在页面上配一个对应的输入框，删掉的字段不能在页面上留下没人接收的输入框。`,
+      "zh-TW": (t) =>
+        `${t}\n\n請先告訴我這個表單目前寫入目標資料表的哪些欄位、又漏掉了哪些欄位。然後按我的描述調整綁定——新增的欄位要在頁面上配一個對應的輸入框，刪掉的欄位不能在頁面上留下沒人接收的輸入框。`,
+      ja: (t) =>
+        `${t}\n\nこのフォームが対象ベースのどのフィールドに書き込んでいて、どのフィールドを無視しているかを先に教えてください。そのうえで私の説明に沿ってバインディングを調整してください——追加したフィールドにはページ上の入力欄が必要で、削除したフィールドの入力欄を孤立させたまま残してはいけません。`,
+    },
+  },
+  {
+    key: "form-review-submissions",
+    label: {
+      en: "Review the pending submissions",
+      "zh-CN": "审阅待处理的表单提交",
+      "zh-TW": "審閱待處理的表單提交",
+      ja: "保留中の送信を確認",
+    },
+    body: {
+      en: (t) =>
+        `${t}\n\nEvery submission of this form arrives as a pending ChangeRequest rather than a direct write. Go through the ones still awaiting review, summarize what each one wants to add, and flag anything that looks like spam, a duplicate, or a filled-in field that contradicts the rest. Recommend accept/reject per submission — I make the call, you don't merge.`,
+      "zh-CN": (t) =>
+        `${t}\n\n这个表单的每一次提交都是一条待审批的 ChangeRequest，不是直接写库。请把还没审的逐条过一遍，总结每条想新增什么，并标出疑似垃圾提交、重复提交、或者字段之间自相矛盾的内容。逐条给出通过/驳回的建议——由我拍板，你不要合并。`,
+      "zh-TW": (t) =>
+        `${t}\n\n這個表單的每一次提交都是一筆待審批的 ChangeRequest，不是直接寫庫。請把還沒審的逐筆過一遍，總結每筆想新增什麼，並標出疑似垃圾提交、重複提交、或者欄位之間自相矛盾的內容。逐筆給出通過/駁回的建議——由我拍板，你不要合併。`,
+      ja: (t) =>
+        `${t}\n\nこのフォームへの送信は直接書き込みではなく、すべて未承認の ChangeRequest として届きます。まだレビューされていないものを一つずつ確認し、それぞれが何を追加しようとしているか要約し、スパム・重複・他の項目と矛盾する入力を指摘してください。承認/却下の推奨を件ごとに出してください——判断は私がします。マージはしないでください。`,
+    },
+  },
+];
+
 const SCENARIOS_BY_TYPE: Record<string, ScenarioDef[]> = {
   base: BASE_SCENARIOS,
   doc: DOC_SCENARIOS,
   drive: DRIVE_SCENARIOS,
   skill: SKILL_SCENARIOS,
   airapp: AIRAPP_SCENARIOS,
+  form: FORM_SCENARIOS,
 };
+
+/**
+ * Scenarios for a single COLUMN. Independent of node type — only a Base has
+ * fields, and these are what people actually ask an agent to do to one.
+ */
+const FIELD_SCENARIOS: ScenarioDef[] = [
+  {
+    key: "field-clean-values",
+    label: {
+      en: "Clean up this column's values",
+      "zh-CN": "清洗这一列的值",
+      "zh-TW": "清洗這一欄的值",
+      ja: "この列の値を整える",
+    },
+    body: {
+      en: (t) =>
+        `${t}\n\nRead this column across all records and normalize it: consistent casing, spacing, units and formatting, obvious typos fixed. List the changes you intend to make, grouped by the kind of problem, before writing anything.`,
+      "zh-CN": (t) =>
+        `${t}\n\n请通读所有记录里这一列的值并做归一化：大小写、空格、单位、格式统一，明显的错别字修掉。写入之前先按问题类型分组，列出你打算做的改动。`,
+      "zh-TW": (t) =>
+        `${t}\n\n請通讀所有記錄裡這一欄的值並做歸一化：大小寫、空格、單位、格式統一，明顯的錯字修掉。寫入之前先按問題類型分組，列出你打算做的改動。`,
+      ja: (t) =>
+        `${t}\n\n全レコードのこの列を読み、表記を統一してください：大文字小文字・空白・単位・書式の統一、明らかな誤字の修正。書き込む前に、問題の種類ごとにまとめて変更予定を提示してください。`,
+    },
+  },
+  {
+    key: "field-fill-blanks",
+    label: {
+      en: "Fill in the blanks",
+      "zh-CN": "补全这一列的空值",
+      "zh-TW": "補全這一欄的空值",
+      ja: "空欄を埋める",
+    },
+    body: {
+      en: (t) =>
+        `${t}\n\nFind the records where this field is empty. For each one, work out a value from the record's OTHER fields and tell me where you got it. If a record doesn't have enough information, leave it empty and say so — do not guess.`,
+      "zh-CN": (t) =>
+        `${t}\n\n请找出这个字段为空的记录。对每一条，从该记录的其他字段推出一个值，并说明你的依据。如果某条记录信息不足，就留空并告诉我——不要猜。`,
+      "zh-TW": (t) =>
+        `${t}\n\n請找出這個欄位為空的記錄。對每一筆，從該記錄的其他欄位推出一個值，並說明你的依據。如果某筆記錄資訊不足，就留空並告訴我——不要猜。`,
+      ja: (t) =>
+        `${t}\n\nこのフィールドが空のレコードを探してください。各レコードについて、他のフィールドから値を導き、その根拠を示してください。情報が足りないレコードは空のままにして、その旨を伝えてください——推測はしないでください。`,
+    },
+  },
+  {
+    key: "field-audit",
+    label: {
+      en: "Audit this column for bad data",
+      "zh-CN": "检查这一列有没有脏数据",
+      "zh-TW": "檢查這一欄有沒有髒資料",
+      ja: "この列の異常値を洗い出す",
+    },
+    body: {
+      en: (t) =>
+        `${t}\n\nGo through this column and report what looks wrong: values that don't fit the field's type or intent, outliers, duplicates that should be one value, and anything that reads like a placeholder. Read-only — report first, change nothing.`,
+      "zh-CN": (t) =>
+        `${t}\n\n请过一遍这一列，报告看起来不对的地方：不符合字段类型或用途的值、异常值、本该是同一个值的重复写法、以及看起来像占位符的内容。只读——先出报告，什么都别改。`,
+      "zh-TW": (t) =>
+        `${t}\n\n請過一遍這一欄，報告看起來不對的地方：不符合欄位型別或用途的值、異常值、本該是同一個值的重複寫法、以及看起來像佔位符的內容。唯讀——先出報告，什麼都別改。`,
+      ja: (t) =>
+        `${t}\n\nこの列を一通り確認し、おかしいと思われる箇所を報告してください：フィールドの型や意図に合わない値、外れ値、本来は同一であるべき表記ゆれ、プレースホルダーに見えるもの。読み取り専用——まず報告し、何も変更しないでください。`,
+    },
+  },
+  {
+    key: "field-redesign",
+    label: {
+      en: "Change this column's type or options",
+      "zh-CN": "改这一列的类型或选项",
+      "zh-TW": "改這一欄的型別或選項",
+      ja: "この列の型・選択肢を変える",
+    },
+    body: {
+      en: (t) =>
+        `${t}\n\nI want to change how this field is defined — its type, its options, or whether it's required. Read the values that are already in it, tell me what would be lost or need converting, and wait for my go-ahead before changing the schema.`,
+      "zh-CN": (t) =>
+        `${t}\n\n我想改这个字段的定义——类型、选项、或者是否必填。请先读现有的值，告诉我改了之后哪些数据会丢失或需要转换，等我点头再动表结构。`,
+      "zh-TW": (t) =>
+        `${t}\n\n我想改這個欄位的定義——型別、選項、或者是否必填。請先讀現有的值，告訴我改了之後哪些資料會遺失或需要轉換，等我點頭再動表結構。`,
+      ja: (t) =>
+        `${t}\n\nこのフィールドの定義——型、選択肢、必須かどうか——を変更したいです。既存の値を読み、変更によって失われるもの・変換が必要なものを教えてください。スキーマの変更は私の承認を待ってから行ってください。`,
+    },
+  },
+];
+
+/**
+ * Scenarios for a single CELL, opened from a property row on the record page.
+ *
+ * Deliberately the narrowest set in the file: someone who clicked the icon next
+ * to one value wants that value changed, explained, or derived — not a sweep.
+ */
+const CELL_SCENARIOS: ScenarioDef[] = [
+  {
+    key: "cell-rewrite",
+    label: {
+      en: "Rewrite this value",
+      "zh-CN": "改写这一格的值",
+      "zh-TW": "改寫這一格的值",
+      ja: "この値を書き直す",
+    },
+    body: {
+      en: (t) =>
+        `${t}\n\nRead the current value, then rewrite it the way I describe next. Show me the old and the new value side by side before submitting, and don't change the meaning unless I asked you to.`,
+      "zh-CN": (t) =>
+        `${t}\n\n先读当前的值，然后按我接下来的要求改写它。提交前把旧值和新值并排给我看；除非我明确要求，不要改变原意。`,
+      "zh-TW": (t) =>
+        `${t}\n\n先讀目前的值，然後按我接下來的要求改寫它。提交前把舊值和新值並排給我看；除非我明確要求，不要改變原意。`,
+      ja: (t) =>
+        `${t}\n\n現在の値を読んだうえで、次に伝える要件どおりに書き直してください。提出前に旧値と新値を並べて見せ、依頼がない限り意味を変えないでください。`,
+    },
+  },
+  {
+    key: "cell-derive",
+    label: {
+      en: "Fill it in from the other fields",
+      "zh-CN": "根据其它字段推出这一格",
+      "zh-TW": "根據其他欄位推出這一格",
+      ja: "他のフィールドから埋める",
+    },
+    body: {
+      en: (t) =>
+        `${t}\n\nWork out what this value should be from the record's OTHER fields. Tell me which fields you used and how you got there. If the record doesn't carry enough information, say so and leave it as it is — do not guess.`,
+      "zh-CN": (t) =>
+        `${t}\n\n请根据这条记录的其他字段推算这一格应该是什么，并说明你用了哪些字段、怎么推出来的。如果记录里的信息不足以推断，就直说并保持原样——不要猜。`,
+      "zh-TW": (t) =>
+        `${t}\n\n請根據這筆記錄的其他欄位推算這一格應該是什麼，並說明你用了哪些欄位、怎麼推出來的。如果記錄裡的資訊不足以推斷，就直說並保持原樣——不要猜。`,
+      ja: (t) =>
+        `${t}\n\nこのレコードの他のフィールドから、この値がどうあるべきかを導いてください。使ったフィールドと導出の筋道を示すこと。情報が足りなければその旨を伝え、値はそのままにしてください——推測は不要です。`,
+    },
+  },
+  {
+    key: "cell-explain",
+    label: {
+      en: "Explain this value",
+      "zh-CN": "解释这一格为什么是这样",
+      "zh-TW": "解釋這一格為什麼是這樣",
+      ja: "この値の理由を説明",
+    },
+    body: {
+      en: (t) =>
+        `${t}\n\nTell me what this value means, when and by whom it last changed, and whether it is consistent with the rest of the record and with the same field on comparable records. Read-only — change nothing.`,
+      "zh-CN": (t) =>
+        `${t}\n\n请告诉我这个值是什么意思、最近一次是谁在什么时候改的，以及它跟这条记录的其他字段、跟同类记录的这个字段比是否自洽。只读——什么都不要改。`,
+      "zh-TW": (t) =>
+        `${t}\n\n請告訴我這個值是什麼意思、最近一次是誰在什麼時候改的，以及它跟這筆記錄的其他欄位、跟同類記錄的這個欄位比是否自洽。唯讀——什麼都不要改。`,
+      ja: (t) =>
+        `${t}\n\nこの値の意味、最後に誰がいつ変更したか、そしてレコード内の他の項目や同種レコードの同じフィールドと整合しているかを教えてください。読み取り専用——何も変更しないでください。`,
+    },
+  },
+];
+
+/** Scenarios for a single RECORD, opened from the record detail view. */
+const RECORD_SCENARIOS: ScenarioDef[] = [
+  {
+    key: "record-complete",
+    label: {
+      en: "Complete this record",
+      "zh-CN": "补全这条记录",
+      "zh-TW": "補全這筆記錄",
+      ja: "このレコードを補完",
+    },
+    body: {
+      en: (t) =>
+        `${t}\n\nRead every field on this record and the base's field schema. Fill in what's missing or clearly incomplete, using the record's existing content and anything I give you next. Say where each new value came from, and leave anything you'd have to guess at empty.`,
+      "zh-CN": (t) =>
+        `${t}\n\n请读这条记录的每一个字段以及这张表的字段结构，把缺失或明显没写完的地方补上——依据是这条记录已有的内容，以及我接下来给你的信息。每个新填的值都说明来源；需要靠猜的就留空。`,
+      "zh-TW": (t) =>
+        `${t}\n\n請讀這筆記錄的每一個欄位以及這張表的欄位結構，把缺失或明顯沒寫完的地方補上——依據是這筆記錄已有的內容，以及我接下來給你的資訊。每個新填的值都說明來源；需要靠猜的就留空。`,
+      ja: (t) =>
+        `${t}\n\nこのレコードの全フィールドとベースのフィールド構成を読んでください。既存の内容と、私が次に渡す情報をもとに、欠けている・明らかに書きかけの箇所を埋めてください。各値の根拠を示し、推測が必要なものは空のままにしてください。`,
+    },
+  },
+  {
+    key: "record-rewrite",
+    label: {
+      en: "Rewrite this record's content",
+      "zh-CN": "改写这条记录的内容",
+      "zh-TW": "改寫這筆記錄的內容",
+      ja: "このレコードの内容を書き直す",
+    },
+    body: {
+      en: (t) =>
+        `${t}\n\nRewrite the text fields on this record the way I describe next — tone, length, or structure. Keep the facts identical; if you think a fact is wrong, say so instead of silently changing it.`,
+      "zh-CN": (t) =>
+        `${t}\n\n请按我接下来的要求改写这条记录的文本字段——语气、长度或结构。事实内容必须保持不变；如果你觉得某个事实有问题，说出来，不要悄悄改掉。`,
+      "zh-TW": (t) =>
+        `${t}\n\n請按我接下來的要求改寫這筆記錄的文字欄位——語氣、長度或結構。事實內容必須保持不變；如果你覺得某個事實有問題，說出來，不要悄悄改掉。`,
+      ja: (t) =>
+        `${t}\n\nこのレコードのテキストフィールドを、次に伝える要件（トーン・長さ・構成）に沿って書き直してください。事実関係は変えないこと。事実がおかしいと思ったら、黙って直さずに指摘してください。`,
+    },
+  },
+  {
+    key: "record-explain",
+    label: {
+      en: "Explain this record to me",
+      "zh-CN": "给我讲讲这条记录",
+      "zh-TW": "給我講講這筆記錄",
+      ja: "このレコードを説明して",
+    },
+    body: {
+      en: (t) =>
+        `${t}\n\nRead this record and its change history, then explain it to me in plain language: what it represents, what changed most recently and why, and anything inconsistent with the rest of the table. Read-only — don't modify it.`,
+      "zh-CN": (t) =>
+        `${t}\n\n请读这条记录以及它的变更历史，然后用大白话讲给我听：它代表什么、最近改了什么、为什么改，以及有没有和表里其他记录不一致的地方。只读——不要改动它。`,
+      "zh-TW": (t) =>
+        `${t}\n\n請讀這筆記錄以及它的變更歷史，然後用白話講給我聽：它代表什麼、最近改了什麼、為什麼改，以及有沒有和表裡其他記錄不一致的地方。唯讀——不要改動它。`,
+      ja: (t) =>
+        `${t}\n\nこのレコードと変更履歴を読み、平易な言葉で説明してください：何を表しているか、直近で何がなぜ変わったか、テーブル内の他のレコードと食い違う点はないか。読み取り専用——変更しないでください。`,
+    },
+  },
+];
 
 // ── Assembly ──────────────────────────────────────────────────────────────────
 
@@ -413,11 +824,19 @@ export function buildNodeAgentPrompts(
 ): { scenarios: NodePrompt[]; capabilities: NodePrompt[] } {
   const definition = getNodeType(context.nodeType);
   const typeLabel = definition?.label ?? context.nodeType;
-  const target = TARGET_LINE[locale](context, typeLabel);
+  const scope = context.scope ?? { kind: "node" };
+  const target = TARGET_LINE[locale](context, typeLabel) + scopeLine(locale, scope);
   const footer = FOOTER[locale];
   const groupLabels = GROUP_LABELS[locale];
 
-  const scenarios: NodePrompt[] = (SCENARIOS_BY_TYPE[context.nodeType] ?? []).map((scenario) => ({
+  const SCENARIOS_BY_SCOPE: Partial<Record<NodePromptScope["kind"], ScenarioDef[]>> = {
+    field: FIELD_SCENARIOS,
+    record: RECORD_SCENARIOS,
+    cell: CELL_SCENARIOS,
+  };
+  const scenarioDefs = SCENARIOS_BY_SCOPE[scope.kind] ?? SCENARIOS_BY_TYPE[context.nodeType] ?? [];
+
+  const scenarios: NodePrompt[] = scenarioDefs.map((scenario) => ({
     key: scenario.key,
     tier: "scenario",
     label: scenario.label[locale],
@@ -426,10 +845,23 @@ export function buildNodeAgentPrompts(
   }));
 
   // Type-specific operations first, then the generic node_* tree ops every type has.
+  // A narrowed dialog drops the node-tree operations entirely (moving or renaming
+  // the whole Base is not a thing you do "to this column") and keeps only what can
+  // actually act on the scoped target:
+  //   field  → the column itself, plus the record ops that write values into it
+  //   record → the record ops
+  //   cell   → updating a value is the ONLY operation that fits; creating or
+  //            deleting a record is a different scope wearing the same word.
+  const scopeAllows: Partial<Record<NodePromptScope["kind"], (kind: string) => boolean>> = {
+    field: (kind) => groupOf(kind) === "field" || groupOf(kind) === "record",
+    record: (kind) => groupOf(kind) === "record",
+    cell: (kind) => kind === "record_update",
+  };
+  const allows = scopeAllows[scope.kind];
   const kinds = [
     ...(definition?.operations ?? []).map((operation) => operation.kind),
-    ...GENERIC_NODE_OPERATION_KINDS,
-  ];
+    ...(allows ? [] : GENERIC_NODE_OPERATION_KINDS),
+  ].filter((kind) => !allows || allows(kind));
 
   const capabilities: NodePrompt[] = kinds.map((kind) => {
     const labelKey = operationLabelKeys[kind as keyof typeof operationLabelKeys];

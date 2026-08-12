@@ -1,5 +1,5 @@
 /**
- * Shared styles for all apps in the monorepo
+ * Shared styles for every app in this workspace
  * Common theme variables, base styles, and component utilities
  * Import this in your app's global.css after tailwindcss and kui imports
  */

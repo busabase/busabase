@@ -10,6 +10,7 @@ import type { ReactNode } from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { fmt, useCoreI18n } from "../../../i18n";
 import { NodeActionsMenu } from "../../dashboard/components/node-actions-menu";
+import { NodeAgentPromptsButton } from "../../dashboard/components/node-agent-prompts-button";
 import { stableStringify } from "../utils/stable-json";
 
 export type SaveStatus = "saved" | "dirty" | "saving" | "error";
@@ -181,12 +182,14 @@ export function RichNodeShell({
           {error ?? statusLabel}
         </span>
         {actions}
+        <NodeAgentPromptsButton nodeId={node.id} nodeName={node.name} nodeType={nodeType} />
         {/* One "•••" menu instead of the Permissions + Delete button pair this
-            header used to render — same set of actions (plus Rename/Share/Agent
-            prompts, which this header never offered at all), same dialogs, and
-            it matches every other node-detail topbar. The icon-only/labelled
+            header used to render — same set of actions (plus Rename/Share,
+            which this header never offered at all), same dialogs, and it
+            matches every other node-detail topbar. The icon-only/labelled
             responsive split the Permissions button needed is gone with it: the
-            trigger is a fixed-size icon at every breakpoint. */}
+            trigger is a fixed-size icon at every breakpoint. Agent prompts sits
+            outside as its own button (see `NodeAgentPromptsButton`). */}
         <NodeActionsMenu
           nodeId={node.id}
           nodeName={node.name}

@@ -151,14 +151,16 @@ curl ${base}/api/v1/auth${HAuthOnly}
 \`\`\`
 
    \`space\` is the space this request targeted; \`spaces\` is every space the user
-   belongs to.
+   belongs to. This auth-discovery call is the one intentional exception that omits
+   \`x-busabase-space\`.
 2. If \`spaces\` has exactly one entry, use it — **don't ask**. Only when it has more
    than one entry and the user hasn't already named one, **ask the user which space
    to use** — list the spaces by name and let them pick. Never guess, and never
    assume the default is the one they mean.
 3. Send the chosen ID as \`x-busabase-space\` on **every** call. The examples below
    already carry it (current target: \`${spaceId}\`). A space you're not a member of
-   returns 403; a missing header with multiple spaces returns 400.`
+   returns 403 with \`data.reason: SPACE_NOT_ALLOWED\`; a missing header with multiple
+   spaces returns 400 with \`data.reason: SPACE_SELECTION_REQUIRED\`.`
 }
 
 ## API Surface
@@ -504,8 +506,8 @@ connect to \`${base}/api/mcp\` (Streamable HTTP) — the most context-efficient 
 
 ## Status codes & errors
 
-Responses are JSON. On any non-2xx, read \`error.message\` and surface it verbatim — don't
-paraphrase or guess.
+Responses are JSON. On any non-2xx, read the human \`error\` plus stable \`data.reason\` when
+present; surface the message and branch on the reason instead of matching error text.
 
 | Status | Meaning | Next step |
 | --- | --- | --- |

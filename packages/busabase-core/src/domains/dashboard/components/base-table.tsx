@@ -36,6 +36,7 @@ import {
   PlaySquare,
   Plus,
   RotateCcw,
+  Sparkles,
   Table2,
   Trash2,
   X,
@@ -96,6 +97,7 @@ import { BusaBaseGallery } from "./base-gallery";
 import { BusaBaseGantt } from "./base-gantt";
 import { BusaBaseKanban } from "./base-kanban";
 import { FieldBadge, WhiteboardThumbnail } from "./field-preview";
+import { NodeAgentPromptsDialog } from "./node-agent-prompts-dialog";
 import { ConfirmActionDialog } from "./primitives";
 import { RecordsPaginationBar } from "./records-pagination-bar";
 import { SplitSubmitButton } from "./split-submit-button";
@@ -172,6 +174,8 @@ function FieldColumnHeader({
   actionsDisabled,
   activeView,
   allFields,
+  baseName,
+  baseNodeId,
   baseSlug,
   busy,
   field,
@@ -200,6 +204,10 @@ function FieldColumnHeader({
   actionsDisabled: boolean;
   activeView: ViewVO | null;
   allFields: BaseFieldVO[];
+  /** Node identity of the Base this column belongs to — the Agent prompts
+   *  dialog names the node so the agent can locate the column. */
+  baseName: string;
+  baseNodeId: string;
   baseSlug: string;
   busy: boolean;
   canMoveLeft: boolean;
@@ -232,6 +240,8 @@ function FieldColumnHeader({
   const activeSort = activeView?.config.sorts.find((sort) => matchesViewField(sort, field));
   const activeFilter = activeView?.config.filters.find((filter) => matchesViewField(filter, field));
   const [open, setOpen] = useState(false);
+  const [promptsOpen, setPromptsOpen] = useState(false);
+  const isAnonVisitor = useIsAnonymousVisitor();
   const visibleFieldCount = activeView
     ? getVisibleViewFieldSlugs(activeView.config, allFields).length
     : allFields.length;
@@ -526,9 +536,43 @@ function FieldColumnHeader({
                 </div>
               </div>
             )}
+            {/* Outside the activeView branch on purpose: asking an agent to work
+                on this column doesn't depend on a saved view existing, so it is
+                the one item that is present in both states of this popover. */}
+            {isAnonVisitor ? null : (
+              <div className="border-border/60 border-t p-2 text-xs">
+                <button
+                  className="flex h-8 w-full items-center gap-2 rounded px-2 text-left transition-colors hover:bg-accent"
+                  data-testid={`field-agent-prompts-${field.slug}`}
+                  onClick={() => {
+                    setOpen(false);
+                    setPromptsOpen(true);
+                  }}
+                  type="button"
+                >
+                  <Sparkles className="size-3.5" />
+                  {messages.agentPrompts.title}
+                </button>
+              </div>
+            )}
           </PopoverContent>
         </Popover>
       </span>
+      {promptsOpen && (
+        <NodeAgentPromptsDialog
+          nodeId={baseNodeId}
+          nodeName={baseName}
+          nodeType="base"
+          onOpenChange={setPromptsOpen}
+          open={promptsOpen}
+          scope={{
+            fieldName: name,
+            fieldSlug: field.slug,
+            fieldType: field.type,
+            kind: "field",
+          }}
+        />
+      )}
       {activeView ? (
         <button
           aria-keyshortcuts="ArrowLeft ArrowRight"
@@ -1295,6 +1339,8 @@ export function BusaBaseTable({
                   actionsDisabled={quickUpdatingFieldId !== null}
                   activeView={activeView}
                   allFields={allFields}
+                  baseName={base?.name ?? records[0]?.base.name ?? ""}
+                  baseNodeId={base?.nodeId ?? records[0]?.base.nodeId ?? ""}
                   baseSlug={base?.slug ?? records[0]?.base.slug ?? ""}
                   busy={quickUpdatingFieldId === field.id}
                   field={field}

@@ -25,6 +25,13 @@
 // is unchanged; the separator + red text keep the item from being hit by
 // muscle memory aimed at the row above it.
 //
+// Agent prompts is the deliberate exception to that "keep the toolbar to one
+// trigger" rule, and it no longer appears here: it is now its own toolbar
+// button (`NodeAgentPromptsButton`). For node types with no GUI editor — Form
+// most of all — asking your agent IS the edit path, so hiding its entry point
+// behind an unlabelled "•••" hid the product. It is in exactly one place per
+// toolbar; do not re-add a duplicate item to this menu.
+//
 // Favorites isn't included here — that action depends on the sidebar's own
 // `nodes.listFavorites` cache + toggle context, which isn't naturally
 // available to a lone detail page, and Favorites was never part of the
@@ -39,12 +46,11 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "kui/dropdown-menu";
-import { Globe, MoreHorizontal, Pencil, Shield, Sparkles, Trash2 } from "lucide-react";
+import { Globe, MoreHorizontal, Pencil, Shield, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { useCoreI18n } from "../../../i18n";
 import { useIsAnonymousVisitor } from "../visitor-context";
 import { NodeDeleteDialog } from "./file-tree-browser";
-import { NodeAgentPromptsDialog } from "./node-agent-prompts-dialog";
 import { NodePermissionsDialog } from "./node-permissions-button";
 import { NodeRenameDialog } from "./node-rename-dialog";
 import { NodeShareDialog } from "./node-share-button";
@@ -86,7 +92,6 @@ export function NodeActionsMenu({
   const [renameOpen, setRenameOpen] = useState(false);
   const [permissionsOpen, setPermissionsOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
-  const [promptsOpen, setPromptsOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   // Every action in this menu is a write/manage action — a public read-only
   // visitor never sees the trigger at all, same self-gate every individual
@@ -134,10 +139,6 @@ export function NodeActionsMenu({
               {messages.share.title}
             </DropdownMenuItem>
           )}
-          <DropdownMenuItem onSelect={() => setPromptsOpen(true)}>
-            <Sparkles className="mr-2 size-3.5" />
-            {messages.agentPrompts.title}
-          </DropdownMenuItem>
           <DropdownMenuSeparator />
           <DropdownMenuItem onSelect={() => setDeleteOpen(true)} variant="destructive">
             <Trash2 className="mr-2 size-3.5" />
@@ -163,15 +164,6 @@ export function NodeActionsMenu({
           onOpenChange={setPermissionsOpen}
           open={permissionsOpen}
           orpc={orpc}
-        />
-      )}
-      {promptsOpen && (
-        <NodeAgentPromptsDialog
-          nodeId={nodeId}
-          nodeName={nodeName}
-          nodeType={nodeType}
-          onOpenChange={setPromptsOpen}
-          open={promptsOpen}
         />
       )}
       {deleteOpen && (

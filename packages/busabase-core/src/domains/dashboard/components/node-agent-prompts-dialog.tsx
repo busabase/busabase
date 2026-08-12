@@ -32,6 +32,7 @@ import {
   buildNodeAgentPrompts,
   type NodePrompt,
   type NodePromptContext,
+  type NodePromptScope,
 } from "../helpers/node-agent-prompts";
 
 export interface PromptSection {
@@ -82,6 +83,16 @@ const resolveSpaceId = (spaceId?: string): string | undefined => {
   return window.location.pathname.split("/").filter(Boolean)[1];
 };
 
+/** What the dialog header names: the node, or the column/record/cell inside it. */
+const scopeSubject = (nodeName: string, scope?: NodePromptScope): string => {
+  if (scope?.kind === "field") return `${nodeName} · ${scope.fieldName}`;
+  if (scope?.kind === "record") return `${nodeName} · ${scope.recordTitle ?? scope.recordId}`;
+  if (scope?.kind === "cell") {
+    return `${nodeName} · ${scope.recordTitle ?? scope.recordId} · ${scope.fieldName}`;
+  }
+  return nodeName;
+};
+
 export function NodeAgentPromptsDialog({
   open,
   onOpenChange,
@@ -90,6 +101,7 @@ export function NodeAgentPromptsDialog({
   nodeType,
   spaceId,
   spaceName,
+  scope,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -98,6 +110,8 @@ export function NodeAgentPromptsDialog({
   nodeType: string;
   spaceId?: string;
   spaceName?: string;
+  /** Narrows the prompts to one column or one record. Omit for the whole node. */
+  scope?: NodePromptScope;
 }) {
   const messages = useCoreI18n();
   const locale = useCoreLocale();
@@ -111,8 +125,8 @@ export function NodeAgentPromptsDialog({
   }, [spaceId]);
 
   const context: NodePromptContext = useMemo(
-    () => ({ nodeType, nodeName, nodeId, spaceId: resolvedSpaceId, spaceName }),
-    [nodeType, nodeName, nodeId, resolvedSpaceId, spaceName],
+    () => ({ nodeType, nodeName, nodeId, spaceId: resolvedSpaceId, spaceName, scope }),
+    [nodeType, nodeName, nodeId, resolvedSpaceId, spaceName, scope],
   );
 
   const { scenarios, capabilities } = useMemo(
@@ -138,7 +152,9 @@ export function NodeAgentPromptsDialog({
         <DialogHeader>
           <DialogTitle>
             {messages.agentPrompts.title}
-            <span className="ml-2 text-sm font-normal text-muted-foreground">{nodeName}</span>
+            <span className="ml-2 text-sm font-normal text-muted-foreground">
+              {scopeSubject(nodeName, scope)}
+            </span>
           </DialogTitle>
         </DialogHeader>
         <DialogDescription>{messages.agentPrompts.intro}</DialogDescription>
