@@ -21,10 +21,14 @@ Use this option when Busabase is running on the same computer as Claude Code.
 
 ### 1. Start Busabase
 
-Launch the desktop app, or start the local server from the kapps repository:
+Launch the desktop app, or start the local server from a clone of this repository:
 
 ```bash
-pnpm --dir apps/busabase dev
+git clone https://github.com/busabase/busabase.git
+cd busabase
+pnpm install
+cp apps/busabase/.env.example apps/busabase/.env
+pnpm --filter busabase dev
 ```
 
 Confirm that the onboarding skill is available:
@@ -65,8 +69,8 @@ Use Busabase to list my Bases and summarize what each one contains.
 
 ## Option B: Busabase Cloud plugin
 
-Use this option when your workspace is hosted on Busabase Cloud. The plugin package introduced by
-[`ranglang/busabase-skills#7`](https://github.com/ranglang/busabase-skills/pull/7) bundles:
+Use this option when your workspace is hosted on Busabase Cloud. The official Claude Code plugin from
+[`busabase/skills`](https://github.com/busabase/skills) bundles:
 
 - `busabase` for searching workspace knowledge and proposing reviewable changes;
 - `busabase-app-creator` for creating or maintaining complete workspace apps;
@@ -88,7 +92,7 @@ If Claude Code is installed but outdated, run `claude update` before continuing.
 Run these commands in order:
 
 ```bash
-claude plugin marketplace add https://github.com/ranglang/busabase-skills.git#main
+claude plugin marketplace add https://github.com/busabase/skills.git#main
 claude plugin install busabase@busabase
 ```
 
@@ -225,5 +229,4 @@ Start a new conversation after an update so Claude Code reloads the skills and M
 ---
 
 See also: [Bring Your Own Agent](./bring-your-agent.md) ·
-[Busabase skill source](https://github.com/busabase/skills) ·
-[Claude Code plugin package PR](https://github.com/ranglang/busabase-skills/pull/7)
+[Official Busabase Claude Code plugin](https://github.com/busabase/skills)
