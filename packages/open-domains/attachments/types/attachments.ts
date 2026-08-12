@@ -3,7 +3,7 @@
  * of truth). `schema/` is reserved for DB (PO); DTO/VO live here.
  *
  * Kernel-generic: `metadata` is an open record (apps layer their own typed
- * metadata on top — e.g. `apps/busabase-cloud`'s `AttachmentType` enum).
+ * metadata on top — e.g. Busabase Cloud's `AttachmentType` enum).
  */
 
 import { z } from "zod";

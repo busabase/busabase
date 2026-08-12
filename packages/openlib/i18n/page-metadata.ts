@@ -57,7 +57,7 @@ export interface PageMetadata {
 }
 
 export interface PageAlternatesConfig<T extends string> {
-  /** App's absolute base URL, e.g. "https://productready.dev" (no trailing slash) */
+  /** App's absolute base URL, e.g. "https://example.com" (no trailing slash) */
   baseUrl: string;
   /** Default locale whose URL prefix is hidden (e.g. 'en') */
   defaultLocale: T;
@@ -125,8 +125,8 @@ export interface GeneratePageMetadataOptions {
 export interface PageMetadataHelpers extends PageAlternatesHelpers {
   /**
    * Generate OpenGraph/Twitter/alternates metadata for a page. Signature-
-   * compatible with the per-app `generatePageMetadata` helpers this replaces
-   * (productready/sandock/busabase-cloud/previewfile `lib/metadata-helper.ts`)
+   * compatible with the per-app `lib/metadata-helper.ts` `generatePageMetadata`
+   * helpers this replaces
    * — apps instantiate this once with their own config and re-export the
    * result verbatim, so existing call sites need no changes.
    */

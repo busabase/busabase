@@ -1,4 +1,4 @@
-# Sharelib Storage
+# Openlib Storage
 
 共享的 S3 存储模块，支持 MinIO、AWS S3、Cloudflare R2 等 S3 兼容存储服务。
 
@@ -6,7 +6,7 @@
 
 ```bash
 # 在你的 app 中添加依赖
-pnpm add sharelib@workspace:*
+pnpm add openlib@workspace:*
 ```
 
 ## 🚀 快速开始
@@ -34,7 +34,7 @@ STORAGE_DSN="r2://accesskey:secretkey@account.r2.cloudflarestorage.com/mybucket"
 ### 2. 使用便捷函数
 
 ```typescript
-import { uploadFileToS3, getFileAccessUrl } from 'sharelib/storage';
+import { uploadFileToS3, getFileAccessUrl } from 'openlib/storage';
 
 // 上传文件
 const { key, uri } = await uploadFileToS3(
@@ -51,7 +51,7 @@ const accessUrl = await getFileAccessUrl(uri, 3600);
 ### 3. 使用类实例（推荐）
 
 ```typescript
-import { S3Storage } from 'sharelib/storage';
+import { S3Storage } from 'openlib/storage';
 
 // 自动从 STORAGE_DSN 读取配置
 const storage = new S3Storage();
@@ -312,9 +312,9 @@ S3_AUTO_CREATE_BUCKET=true
 
 如果你的 app 之前使用本地 `storage.ts`，迁移步骤：
 
-1. **安装 sharelib**
+1. **安装 openlib**
    ```bash
-   pnpm add sharelib@workspace:*
+   pnpm add openlib@workspace:*
    ```
 
 2. **更新环境变量**
@@ -332,7 +332,7 @@ S3_AUTO_CREATE_BUCKET=true
    import { uploadFileToS3 } from '@/server/storage';
 
    // 新代码
-   import { uploadFileToS3 } from 'sharelib/storage';
+   import { uploadFileToS3 } from 'openlib/storage';
    ```
 
 4. **更新返回值**
@@ -352,14 +352,14 @@ S3_AUTO_CREATE_BUCKET=true
 4. **或者创建兼容层**
    ```typescript
    // src/server/storage.ts
-   export * from 'sharelib/storage';
+   export * from 'openlib/storage';
    ```
 
 ## 🧪 测试
 
 ```typescript
 import { describe, it, expect } from 'vitest';
-import { S3Storage } from 'sharelib/storage';
+import { S3Storage } from 'openlib/storage';
 
 describe('S3Storage', () => {
   const storage = new S3Storage(process.env.STORAGE_URL!);
@@ -383,13 +383,13 @@ describe('S3Storage', () => {
 
 ## 📄 许可证
 
-Internal use only. Not published to npm.
+MIT。本包随主仓库一同发布，不单独发布到 npm。
 
 ## 🤝 贡献
 
-请在 monorepo 根目录提交 PR。
+欢迎提交 PR。
 
 ---
 
-**维护者**: vikadata/kapps team  
+**维护者**: Busabase 团队  
 **更新日期**: 2025-10-02

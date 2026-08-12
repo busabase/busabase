@@ -3,7 +3,7 @@
  *
  * Pure leaf: imports only zod (via `./types`) — never logic / db / drizzle.
  * Mounted into the kernel contract by busabase-core, and re-implemented standalone
- * by `apps/busabase-cloud` (with its own billing-aware handlers + auth middleware).
+ * by Busabase Cloud (with its own billing-aware handlers + auth middleware).
  */
 
 import { oc } from "@orpc/contract";

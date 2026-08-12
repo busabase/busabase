@@ -1,6 +1,6 @@
 {
   "name": "relaylib",
-  "description": "Reusable reverse-WebSocket relay tunnel transport. Memory hub now; Redis cross-instance hub later. Extracted from apps/buda connector relay.",
+  "description": "Reusable reverse-WebSocket relay tunnel transport. Memory hub now; Redis cross-instance hub later. Extracted from Buda's connector relay.",
   "version": "0.0.1",
   "private": true,
   "type": "module",
