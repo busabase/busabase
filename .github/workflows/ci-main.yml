@@ -26,6 +26,11 @@ concurrency:
 jobs:
   checks:
     uses: ./.github/workflows/ci-checks.yml
+    # The coverage job commits the refreshed badge; without granting it here,
+    # GitHub rejects the whole run at startup (startup_failure, zero jobs)
+    # rather than just failing that one job — every push to main has hit this.
+    permissions:
+      contents: write
     with:
       run-benchmark: true
     secrets: inherit
