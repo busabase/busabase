@@ -16,8 +16,8 @@ import {
   replaceField,
 } from "../src/schema";
 
-/** A synthetic custom profile, standing in for any app's own field-shape override (e.g. Buda's,
- * which lives in apps/buda, not here) — exercises the generic override mechanism itself. */
+/** A synthetic custom profile, standing in for any consuming app's own field-shape override
+ * (which lives in that app, not here) — exercises the generic override mechanism itself. */
 const customFieldsOverride: BusabaseCmsFieldsOverride = (role, standardFields) => {
   if (role !== "pages") return standardFields;
   return [
