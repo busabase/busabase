@@ -77,6 +77,17 @@ import {
   mergeViewRestore as mergeViewRestoreBase,
   mergeViewUpdate as mergeViewUpdateBase,
 } from "../domains/base/handlers";
+// Side-effect imports: each registers a `node_create` materializer at import
+// time (logic/materialize.ts). Merging is the only place they are read, so the
+// merge kernel is what has to guarantee they are loaded — leaving it to whoever
+// else happened to import them meant `node_create` for a Skill/Drive/AirApp
+// silently fell back to the generic materializer and produced a node with zero
+// files. Safe to import in any order: each builds its materializer on first use.
+import "../domains/airapp/handlers";
+import "../domains/drive/handlers";
+import "../domains/file-node/handlers";
+import "../domains/folder/handlers";
+import "../domains/skill/handlers";
 import { resolveLookupValues } from "../domains/base/logic/lookup-values";
 import { mergeDocUpdate } from "../domains/doc/handlers";
 import { mergeFileTreeFile, mergeFileTreeMetadata } from "../domains/filetree/handlers";
@@ -1681,7 +1692,7 @@ const canViewChangeRequest = async (changeRequestId: string): Promise<boolean> =
 // Constrained to `{ id }` rather than the full ChangeRequestPO on purpose: the
 // body only ever reads `row.id`, and callers that are merely tallying should be
 // free to select three columns instead of paying for whole rows.
-const filterVisibleChangeRequestRows = async <T extends { id: string }>(
+export const filterVisibleChangeRequestRows = async <T extends { id: string }>(
   rows: T[],
 ): Promise<T[]> => {
   if (rows.length === 0 || getContextIsSpaceManager()) return rows;

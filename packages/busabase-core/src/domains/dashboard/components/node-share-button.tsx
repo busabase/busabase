@@ -5,6 +5,7 @@ import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-quer
 import { Button } from "kui/button";
 import {
   Dialog,
+  DialogClose,
   DialogContent,
   DialogDescription,
   DialogFooter,
@@ -15,7 +16,7 @@ import { Input } from "kui/input";
 import { Label } from "kui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "kui/select";
 import { Switch } from "kui/switch";
-import { Check, Copy, Globe } from "lucide-react";
+import { Check, Copy, Globe, X } from "lucide-react";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import { useCoreI18n } from "../../../i18n";
@@ -154,7 +155,14 @@ export function NodeShareDialog({
 
   return (
     <Dialog onOpenChange={onOpenChange} open={open}>
-      <DialogContent className="max-w-lg" data-testid="node-share-dialog">
+      <DialogContent className="max-w-lg" data-testid="node-share-dialog" showCloseButton={false}>
+        <DialogClose
+          aria-label={t.close}
+          className="absolute right-4 top-4 rounded-sm opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:pointer-events-none data-[state=open]:bg-accent data-[state=open]:text-muted-foreground"
+        >
+          <X aria-hidden="true" className="h-4 w-4" />
+          <span className="sr-only">{t.close}</span>
+        </DialogClose>
         <DialogHeader>
           <DialogTitle>{t.dialogTitle}</DialogTitle>
           <DialogDescription>{nodeName}</DialogDescription>

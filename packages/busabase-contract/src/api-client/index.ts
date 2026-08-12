@@ -398,12 +398,15 @@ export const createBusabaseORPCClient = (
     headers?:
       | Record<string, string>
       | (() => Record<string, string> | Promise<Record<string, string>>);
+    /** Optional transport override for host-specific response handling. */
+    fetch?: NonNullable<ConstructorParameters<typeof RPCLink>[0]["fetch"]>;
   },
 ): ContractRouterClient<BusabaseContract> => {
   const link = new RPCLink({
     url: resolveApiUrl(apiBasePath),
     headers: async () =>
       (typeof opts?.headers === "function" ? await opts.headers() : opts?.headers) ?? {},
+    ...(opts?.fetch ? { fetch: opts.fetch } : {}),
   });
 
   return createORPCClient(link);
@@ -454,6 +457,8 @@ export const createBusabaseRestApiClient = (
     headers?:
       | Record<string, string>
       | (() => Record<string, string> | Promise<Record<string, string>>);
+    /** Optional transport override for host-specific response handling. */
+    fetch?: NonNullable<ConstructorParameters<typeof RPCLink>[0]["fetch"]>;
   },
 ): BusabaseDashboardApiClient => {
   const rpcPath = apiBasePath.endsWith("/v1")

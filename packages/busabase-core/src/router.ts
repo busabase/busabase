@@ -18,7 +18,7 @@ import { anonymousAccessKindFor, denyAnonymousProcedure } from "./logic/anonymou
 import { grepUnified } from "./logic/grep";
 import { subscribeBusabaseLiveEvents } from "./logic/live-events";
 import {
-  getPublicScopeOf,
+  getPublicScopeOfNodeRef,
   grantNodePrincipal,
   listNodePrincipals,
   revokeNodePrincipal,
@@ -295,10 +295,13 @@ const anonymousSurfaceGuard = os.middleware(async ({ next, path }, input) => {
   if (kind === "submit") {
     // A `submit` procedure must be authorized against the TARGET NODE's own
     // capability, not merely against "the visitor got in somehow": a node
-    // shared read-only must never accept writes. No resolvable node id means
-    // we cannot prove the capability, so we refuse.
-    const nodeId = readNodeId(input);
-    if (!nodeId || (await getPublicScopeOf(nodeId)) !== "submit") {
+    // shared read-only must never accept writes. No resolvable node ref means
+    // we cannot prove the capability, so we refuse. The ref may be an id or a
+    // node slug (a public link carries the slug), and slug resolution is
+    // approximate by nature — the handler re-checks the capability on the node
+    // it actually resolved. See `getPublicScopeOfNodeRef`.
+    const nodeRef = readNodeId(input);
+    if (!nodeRef || (await getPublicScopeOfNodeRef(nodeRef)) !== "submit") {
       denyAnonymousProcedure(path);
     }
   }

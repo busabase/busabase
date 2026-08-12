@@ -70,10 +70,9 @@ const ANONYMOUS_READ_ALLOWLIST: ReadonlySet<string> = new Set([
   "records.list",
   "records.listPage",
   "records.get",
-  // Public form rendering. The `form` domain does not exist in the codebase
-  // yet (P1 shipped the `submit` capability, not the form surface); listed now
-  // so the read half lands correctly the moment it does.
-  "form.getByNode",
+  // Public form rendering. The form logic still enforces the Form's own share
+  // settings; this entry only makes the node-scoped procedure reachable.
+  "forms.getByNode",
 ]);
 
 /**
@@ -81,11 +80,7 @@ const ANONYMOUS_READ_ALLOWLIST: ReadonlySet<string> = new Set([
  * scope is exactly `"submit"`. A `"read"` share must never reach these — that
  * is the entire difference between the two capabilities.
  */
-const ANONYMOUS_SUBMIT_ALLOWLIST: ReadonlySet<string> = new Set([
-  // See the note on `form.getByNode`: not yet implemented, gated correctly in
-  // advance so it cannot land as an unguarded mutation.
-  "form.submit",
-]);
+const ANONYMOUS_SUBMIT_ALLOWLIST: ReadonlySet<string> = new Set(["forms.submit"]);
 
 /**
  * Node types an anonymous (public-link) visitor may read through `nodes.get`.

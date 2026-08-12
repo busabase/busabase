@@ -346,6 +346,13 @@ async function deviceLogin(
   const deadline = Date.now() + expiresInSeconds * 1000;
   let intervalSeconds = Math.max(1, code.interval ?? 5);
   let consecutiveNetworkFailures = 0;
+  // The CLI's poll and the browser's approve are independent requests with no session
+  // affinity; a just-approved code can briefly still read back as pending. Purely
+  // cosmetic — the loop already keeps retrying regardless — but without this the CLI
+  // looks frozen right after someone approves in the browser, which reads as "stuck".
+  let pendingPollCount = 0;
+  let reassuredAfterApprovalHint = false;
+  const REASSURE_AFTER_POLLS = 4; // ~20s at the default 5s interval
 
   while (Date.now() < deadline) {
     await delay(intervalSeconds * 1000);
@@ -405,6 +412,13 @@ async function deviceLogin(
 
     switch (payload.error) {
       case "authorization_pending":
+        pendingPollCount += 1;
+        if (pendingPollCount >= REASSURE_AFTER_POLLS && !reassuredAfterApprovalHint) {
+          reassuredAfterApprovalHint = true;
+          say(
+            "Still waiting… if you already approved in the browser, this can take a few extra seconds to register — no need to retry.",
+          );
+        }
         continue;
       case "slow_down":
         intervalSeconds += 5;

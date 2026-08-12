@@ -1,12 +1,25 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";
+import type { FormVO, NodeVO } from "busabase-contract/types";
 import { CodeBlock } from "kui/ai-elements/code-block";
 import { FileTree } from "kui/ai-elements/file-tree";
 import { Button } from "kui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "kui/popover";
-import { AppWindow, File, FileText, Folder, HardDrive, Info, Sparkles, Table2 } from "lucide-react";
+import {
+  AppWindow,
+  File,
+  FileText,
+  Folder,
+  Form,
+  HardDrive,
+  Info,
+  Share2,
+  Sparkles,
+  Table2,
+} from "lucide-react";
 import { SPALink as Link } from "openlib/ui/dashboard";
 import { type ComponentProps, useCallback, useEffect, useMemo, useState } from "react";
+import { toast } from "sonner";
 import { useLocation, useSearch } from "wouter";
 import { fmt, useCoreI18n } from "../../../i18n";
 import { AirAppDetailView } from "../../airapp/components/AirAppDetailView";
@@ -20,6 +33,7 @@ import { useRegisterTopbarNodeActions } from "../hooks/use-register-topbar-node-
 import { useReportLoadedNode } from "../hooks/use-report-loaded-node";
 import { type NodeDetailProps, registerNodeDetail } from "../node-detail-registry";
 import { registerSidePanelTab, type SidePanelTabProps } from "../side-panel-registry";
+import { useIsAnonymousVisitor } from "../visitor-context";
 import { AssetMetadataBlock, assetKindIcon, formatAssetSize } from "./assets";
 import {
   buildFileTree,
@@ -31,6 +45,7 @@ import {
 } from "./file-tree-browser";
 import { NodeActionsMenu } from "./node-actions-menu";
 import { NodePinButton, nodeSidePanelTabId } from "./node-pin-button";
+import { NodeShareDialog } from "./node-share-button";
 import { EmptyState } from "./primitives";
 import { FileContentSkeleton, NodeDetailSkeleton } from "./skeletons";
 import { SplitSubmitButton } from "./split-submit-button";
@@ -982,6 +997,7 @@ export function FolderDetailView({
 
 const FOLDER_CHILD_ICONS: Record<string, typeof Folder> = {
   folder: Folder,
+  form: Form,
   base: Table2,
   doc: FileText,
   file: File,
@@ -991,7 +1007,110 @@ const FOLDER_CHILD_ICONS: Record<string, typeof Folder> = {
 };
 
 registerNodeDetail("folder", FolderDetailView);
-registerNodeDetail("form", FormDetailView);
+const findNodeBySlug = (nodes: NodeVO[], type: string, slug: string): NodeVO | null => {
+  for (const node of nodes) {
+    if (node.type === type && node.slug === slug) return node;
+    const match = findNodeBySlug(node.children, type, slug);
+    if (match) return match;
+  }
+  return null;
+};
+
+function FormShareButton({
+  form,
+  node,
+  orpc,
+}: {
+  form: FormVO;
+  node: NodeVO;
+  orpc: BusabaseQueryUtils;
+}) {
+  const messages = useCoreI18n();
+  const queryClient = useQueryClient();
+  const [open, setOpen] = useState(false);
+  const nodeShareQuery = useQuery(
+    orpc.nodes.share.get.queryOptions({ input: { nodeId: node.id } }),
+  );
+  const updateForm = useMutation(orpc.forms.update.mutationOptions());
+  const setNodeShare = useMutation(orpc.nodes.share.set.mutationOptions());
+  const busy = updateForm.isPending || setNodeShare.isPending;
+
+  const openShare = async () => {
+    try {
+      const creatingPublicForm = !form.share.isPublic;
+      if (creatingPublicForm) {
+        await updateForm.mutateAsync({
+          nodeId: node.id,
+          share: { ...form.share, isPublic: true, anonymousSubmit: true },
+        });
+      }
+      if (creatingPublicForm || nodeShareQuery.data?.scope !== "public") {
+        await setNodeShare.mutateAsync({ nodeId: node.id, scope: "public", capability: "submit" });
+      }
+      await Promise.all([
+        queryClient.invalidateQueries({
+          queryKey: orpc.forms.getByNode.queryOptions({ input: { nodeId: node.slug } }).queryKey,
+        }),
+        queryClient.invalidateQueries({
+          queryKey: orpc.nodes.share.get.queryOptions({ input: { nodeId: node.id } }).queryKey,
+        }),
+      ]);
+      setOpen(true);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : messages.share.failed);
+    }
+  };
+
+  return (
+    <>
+      <Button
+        className="h-8 gap-1.5"
+        disabled={busy}
+        onClick={openShare}
+        size="sm"
+        variant="outline"
+      >
+        <Share2 className="size-3.5" />
+        {messages.share.title}
+      </Button>
+      <NodeShareDialog
+        nodeId={node.id}
+        nodeName={node.name}
+        nodeSlug={node.slug}
+        nodeType="form"
+        onOpenChange={setOpen}
+        open={open}
+        orpc={orpc}
+      />
+    </>
+  );
+}
+
+function FormNodeDetailView({ nodes = [], onNodeLoaded, orpc, slug }: NodeDetailProps) {
+  const isAnonymous = useIsAnonymousVisitor();
+  const nodeQuery = useQuery({
+    ...orpc.nodes.get.queryOptions({ input: { nodeId: slug ?? "", type: "form" } }),
+    enabled: Boolean(slug && !isAnonymous),
+    retry: false,
+  });
+  const nodeDetail = asNodeDetail(nodeQuery.data, "form");
+  const node = nodeDetail?.node ?? (slug ? findNodeBySlug(nodes, "form", slug) : null);
+  const formQuery = useQuery({
+    ...orpc.forms.getByNode.queryOptions({ input: { nodeId: slug ?? "" } }),
+    enabled: Boolean(slug),
+    retry: false,
+  });
+  const form = formQuery.data ?? null;
+  useReportLoadedNode(node, onNodeLoaded);
+
+  useRegisterTopbarNodeActions(
+    node && form && !isAnonymous ? <FormShareButton form={form} node={node} orpc={orpc} /> : null,
+  );
+
+  return <FormDetailView orpc={orpc} slug={slug} />;
+}
+
+registerNodeDetail("form", FormNodeDetailView);
 
 function FolderSidePanelPreview({ orpc, payload }: SidePanelTabProps) {
   const { nodeId } = payload as { nodeId: string };

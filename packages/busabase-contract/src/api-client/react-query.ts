@@ -18,17 +18,20 @@ export interface BusabaseClientOptions {
   headers?:
     | Record<string, string>
     | (() => Record<string, string> | Promise<Record<string, string>>);
+  /** Optional transport override for host-specific response handling. */
+  fetch?: NonNullable<ConstructorParameters<typeof RPCLink>[0]["fetch"]>;
 }
 
 // RPCLink fetch interceptor that appends `?demo=1` to each outgoing request URL.
-const demoFetch: NonNullable<ConstructorParameters<typeof RPCLink>[0]["fetch"]> = (
-  request,
-  init,
-) => {
-  const url = new URL(request.url);
-  url.searchParams.set("demo", "1");
-  return globalThis.fetch(new Request(url.toString(), request), init);
-};
+const createDemoFetch =
+  (
+    fetchImpl: NonNullable<ConstructorParameters<typeof RPCLink>[0]["fetch"]>,
+  ): NonNullable<ConstructorParameters<typeof RPCLink>[0]["fetch"]> =>
+  (request, init, path, input, options) => {
+    const url = new URL(request.url);
+    url.searchParams.set("demo", "1");
+    return fetchImpl(new Request(url.toString(), request), init, path, input, options);
+  };
 
 /**
  * Procedures that must NEVER be folded into a batch request.
@@ -74,11 +77,16 @@ export const createBusabaseORPCClient = (
   apiBasePath = "/api/rpc",
   opts: BusabaseClientOptions = {},
 ): BusabaseORPCClient => {
+  const fetchImpl = opts.fetch ?? globalThis.fetch;
   const link = new RPCLink({
     url: resolveApiUrl(apiBasePath),
     headers: async () =>
       (typeof opts.headers === "function" ? await opts.headers() : opts.headers) ?? {},
-    ...(opts.demo ? { fetch: demoFetch } : {}),
+    ...(opts.demo
+      ? { fetch: createDemoFetch(fetchImpl) }
+      : opts.fetch
+        ? { fetch: opts.fetch }
+        : {}),
     plugins: [batchPlugin()],
   });
   return createORPCClient<BusabaseORPCClient>(link);

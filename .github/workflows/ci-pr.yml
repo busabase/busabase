@@ -6,11 +6,15 @@
 # jobs instead would mean editing branch protection every time a job is added or
 # renamed, and — more importantly — it would deadlock the badge commit below.
 #
-# `paths-ignore` pairs with ci-badge.yml: a commit that only touches
-# coverage.svg skips this workflow and is waved through there instead. GitHub
+# `paths-ignore` pairs with ci-badge.yml: a PR that is *only* the coverage
+# badge (nothing else in its diff against `main`) skips this workflow and is
+# waved through by ci-badge.yml's `push`-triggered version instead. GitHub
 # never reports a required check for a workflow skipped by a path filter, so a
 # same-named `ci-ok` job has to exist on the other side or such a PR would sit
-# "Expected — waiting for status" forever.
+# "Expected — waiting for status" forever. Note `pull_request` path filters
+# match the PR's cumulative diff against `main`, not a single push, so once a
+# release branch has any real changes this condition never re-triggers a skip
+# — which is correct: every later push should get the full suite.
 #
 # Owned by this open-source repo (busabase/busabase). The kapps sync
 # (scripts/publish-busabase-repo.ts) PRESERVES `.github`, so it never overwrites

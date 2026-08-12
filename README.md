@@ -131,7 +131,10 @@ Follow its onboarding to set me up, and never merge a ChangeRequest without my a
 
 </details>
 
-**→** [Bring Your Own Agent](./apps/busabase/docs/bring-your-agent.md) — the full flow, then
+**→** [Claude Code Guide](./apps/busabase/docs/claude-code.md) — install the local skill or Cloud plugin, verify
+the connection, and start with safe approval-first prompts.
+
+**→** [Bring Your Own Agent](./apps/busabase/docs/bring-your-agent.md) — the agent-neutral flow, then
 `npx skills add busabase/skills` installs a permanent skill so you never re-paste it.
 
 ### Where your data lives
@@ -412,10 +415,8 @@ CHANGE_REQUEST_ID=$(curl -s -X POST \
 echo "Review: http://localhost:15419/dashboard/local/inbox/$CHANGE_REQUEST_ID"
 
 # 4. Optional automation after a human approves: merge and read canonical records.
-curl -s -X POST "http://localhost:15419/api/v1/change-requests/merge" \
-  -H 'content-type: application/json' \
-  --data "{\"changeRequestIds\":[\"$CHANGE_REQUEST_ID\"]}" \
-  | jq '.results[0].record.id, .results[0].record.headCommit.fields.title'
+curl -s -X POST "http://localhost:15419/api/v1/change-requests/$CHANGE_REQUEST_ID/merge" \
+  | jq '.record.id, .record.headCommit.fields.title'
 curl -s "http://localhost:15419/api/v1/records?baseId=$BLOG_BASE_ID" \
   | jq '.[].headCommit.fields.title'
 ```
@@ -474,6 +475,22 @@ Use it when:
 - data should remain local, but certain approved records or endpoints should be reachable
 
 This is different from cloud-first tools like Notion or Airtable. Busabase can let data remain distributed with the people or teams who own it, while still offering controlled API access, review, automation, and audit trails.
+
+## Architecture
+
+<div align="center">
+  <img src="public/architecture-diagram.svg" alt="Busabase architecture diagram" width="100%">
+</div>
+
+Busabase's app package (`apps/busabase`) is a thin Next.js shell — it only owns `settings`,
+`vault`, and `webhook`. Everything else (the review primitives: Nodes, Commits, Change
+Requests, Operations, Reviews, Comments, Audit Events; and the content domains: base,
+assets, doc, drive, form, airapp/skill) lives in the shared `busabase-core` package, which
+is also what [Busabase Cloud](https://busabase.com) runs. `busabase-core` threads
+`{ db, actorId, spaceId }` through `AsyncLocalStorage` so the same engine can be reused by a
+multi-tenant host — but the open-source app never sets that context, so every getter falls
+back to local-mode defaults and there is no `spaceId` column on any table. That's what makes
+this edition single-tenant, local-only, and login-free by construction, not by omission.
 
 ## Open-Source Shape
 

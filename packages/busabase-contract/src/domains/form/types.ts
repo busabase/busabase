@@ -1,6 +1,7 @@
 // Form-as-Node DTO/VO schemas. Pure zod leaf — no db, no server imports.
 // See apps/busabase/content/spec/form-as-node.md.
 import { z } from "zod";
+import { fieldNameSchema, fieldTypeSchema } from "../base/contract/base-schemas";
 
 /**
  * One input-to-field mapping. `inputName` is the name the agent-authored page
@@ -16,6 +17,25 @@ export const FormFieldBindingSchema = z.object({
   help: z.string().optional(),
 });
 export type FormFieldBindingVO = z.infer<typeof FormFieldBindingSchema>;
+
+/**
+ * Client-safe control metadata for one bound Base field. Public Forms expose
+ * only these curated fields, never the target Base or its records.
+ */
+export const FormBoundFieldSchema = z.object({
+  slug: z.string(),
+  name: fieldNameSchema,
+  type: fieldTypeSchema,
+  choices: z
+    .array(
+      z.object({
+        id: z.string(),
+        name: z.string(),
+      }),
+    )
+    .default([]),
+});
+export type FormBoundFieldVO = z.infer<typeof FormBoundFieldSchema>;
 
 /** Optional theme tokens layered over the agent-authored page. */
 export const FormThemeSchema = z.object({
@@ -59,6 +79,7 @@ export const FormVOSchema = z.object({
   name: z.string(),
   description: z.string(),
   bindings: z.array(FormFieldBindingSchema),
+  boundFields: z.array(FormBoundFieldSchema).default([]),
   page: FormPageSourceSchema,
   share: FormShareSchema,
   /** Accepted submissions so far — backs server-side `share.submitLimit`. */

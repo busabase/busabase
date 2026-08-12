@@ -91,6 +91,15 @@ export const mergeSkillMetadata = async (
     throw error;
   }
 };
-export const materializeSkillNode = makeMaterializer(skillFileTreeConfig);
+// Built on first use, not at module evaluation: `makeMaterializer` comes from
+// filetree/handlers, and calling it here would make this module's evaluation
+// order relative to that one load-bearing (see logic/materialize.ts).
+let materializeSkillNodeImpl: ReturnType<typeof makeMaterializer> | undefined;
+export const materializeSkillNode: ReturnType<typeof makeMaterializer> = (ctx, args) => {
+  if (!materializeSkillNodeImpl) {
+    materializeSkillNodeImpl = makeMaterializer(skillFileTreeConfig);
+  }
+  return materializeSkillNodeImpl(ctx, args);
+};
 
 registerMaterializer("skill", materializeSkillNode);

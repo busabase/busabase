@@ -28,7 +28,7 @@ import type { ComponentProps, ReactNode } from "react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { useLocation } from "wouter";
-import { coreMessagesByLocale } from "../../../i18n";
+import { CoreI18nProvider, coreMessagesByLocale } from "../../../i18n";
 import { nodeIconForType } from "../helpers/node-icons";
 import type { MoveNodePayload } from "../hooks/use-move-node";
 import { NodeDeleteDialog } from "./file-tree-browser";
@@ -646,115 +646,117 @@ export function BusabaseDashboardShell({
   };
 
   return (
-    <div data-busabase-dashboard-layout className="h-full min-h-0">
-      <Toaster position="top-right" />
-      <DashboardLayout
-        {...chrome}
-        className="h-full min-h-0"
-        defaultOpen
-        navMain={pinnedNav}
-        sidebarExtra={
-          <div className="flex min-h-0 flex-1 flex-col overflow-y-auto overflow-x-hidden group-data-[collapsible=icon]:overflow-hidden">
-            <NavMain
-              items={scrollNav}
-              onHeaderActionClick={handleHeaderActionClick}
-              onNavItemAction={handleNavItemAction}
-              onNodeDrop={onMoveNode ? handleNodeDrop : undefined}
-              isDropAllowed={onMoveNode ? isDropAllowed : undefined}
-              onExpand={onExpandNode ? (item) => item.id && onExpandNode(item.id) : undefined}
-            />
-          </div>
-        }
-        onHeaderActionClick={handleHeaderActionClick}
-        onNavItemAction={handleNavItemAction}
-        headerClassName="!h-0 !min-h-0 overflow-hidden border-0"
-        hideSidebarTrigger
-        pageClassName="gap-0 p-0"
-        sidebarClassName="h-full"
-      >
-        {children}
-      </DashboardLayout>
-      {orpc && permissionsTarget && (
-        <NodePermissionsDialog
-          nodeId={permissionsTarget.id}
-          nodeName={permissionsTarget.name}
-          onOpenChange={(next) => {
-            if (!next) setPermissionsTarget(null);
-          }}
-          open
-          orpc={orpc}
-        />
-      )}
-      {orpc && renameTarget && (
-        <NodeRenameDialog
-          nodeId={renameTarget.id}
-          nodeName={renameTarget.name}
-          nodeSlug={renameTarget.slug}
-          onOpenChange={(next) => {
-            if (!next) setRenameTarget(null);
-          }}
-          open
-          orpc={orpc}
-        />
-      )}
-      {promptsTarget && (
-        <NodeAgentPromptsDialog
-          nodeId={promptsTarget.id}
-          nodeName={promptsTarget.name}
-          nodeType={promptsTarget.type}
-          onOpenChange={(next) => {
-            if (!next) setPromptsTarget(null);
-          }}
-          open
-        />
-      )}
-      {orpc && shareTarget && (
-        <NodeShareDialog
-          nodeId={shareTarget.id}
-          nodeName={shareTarget.name}
-          nodeSlug={shareTarget.slug}
-          nodeType={shareTarget.type}
-          onOpenChange={(next) => {
-            if (!next) setShareTarget(null);
-          }}
-          open
-          orpc={orpc}
-        />
-      )}
-      {orpc && deleteTarget && (
-        <NodeDeleteDialog
-          childCount={deleteTarget.childCount}
-          /* Only bounce to the workbench root when the node being deleted is
-             the one currently open — otherwise the route you're on is about to
-             404. Deleting some OTHER node from the sidebar must leave you
-             exactly where you were; a detail page's own "•••" menu always
-             qualifies for the redirect and keeps the default. */
-          navigateHome={Boolean(
-            deleteTarget.href &&
-              (location === deleteTarget.href || location.startsWith(`${deleteTarget.href}/`)),
-          )}
-          nodeId={deleteTarget.id}
-          nodeName={deleteTarget.name}
-          nodeType={deleteTarget.type}
-          onOpenChange={(next) => {
-            if (!next) setDeleteTarget(null);
-          }}
-          open
-          orpc={orpc}
-        />
-      )}
-      {onMoveNode && moveTarget && (
-        <NodeMoveDialog
-          node={moveTarget}
-          nodes={nodes}
-          onMoveNode={onMoveNode}
-          onOpenChange={(next) => {
-            if (!next) setMoveTarget(null);
-          }}
-          open
-        />
-      )}
-    </div>
+    <CoreI18nProvider locale={locale}>
+      <div data-busabase-dashboard-layout className="h-full min-h-0">
+        <Toaster position="top-right" />
+        <DashboardLayout
+          {...chrome}
+          className="h-full min-h-0"
+          defaultOpen
+          navMain={pinnedNav}
+          sidebarExtra={
+            <div className="flex min-h-0 flex-1 flex-col overflow-y-auto overflow-x-hidden group-data-[collapsible=icon]:overflow-hidden">
+              <NavMain
+                items={scrollNav}
+                onHeaderActionClick={handleHeaderActionClick}
+                onNavItemAction={handleNavItemAction}
+                onNodeDrop={onMoveNode ? handleNodeDrop : undefined}
+                isDropAllowed={onMoveNode ? isDropAllowed : undefined}
+                onExpand={onExpandNode ? (item) => item.id && onExpandNode(item.id) : undefined}
+              />
+            </div>
+          }
+          onHeaderActionClick={handleHeaderActionClick}
+          onNavItemAction={handleNavItemAction}
+          headerClassName="!h-0 !min-h-0 overflow-hidden border-0"
+          hideSidebarTrigger
+          pageClassName="gap-0 p-0"
+          sidebarClassName="h-full"
+        >
+          {children}
+        </DashboardLayout>
+        {orpc && permissionsTarget && (
+          <NodePermissionsDialog
+            nodeId={permissionsTarget.id}
+            nodeName={permissionsTarget.name}
+            onOpenChange={(next) => {
+              if (!next) setPermissionsTarget(null);
+            }}
+            open
+            orpc={orpc}
+          />
+        )}
+        {orpc && renameTarget && (
+          <NodeRenameDialog
+            nodeId={renameTarget.id}
+            nodeName={renameTarget.name}
+            nodeSlug={renameTarget.slug}
+            onOpenChange={(next) => {
+              if (!next) setRenameTarget(null);
+            }}
+            open
+            orpc={orpc}
+          />
+        )}
+        {promptsTarget && (
+          <NodeAgentPromptsDialog
+            nodeId={promptsTarget.id}
+            nodeName={promptsTarget.name}
+            nodeType={promptsTarget.type}
+            onOpenChange={(next) => {
+              if (!next) setPromptsTarget(null);
+            }}
+            open
+          />
+        )}
+        {orpc && shareTarget && (
+          <NodeShareDialog
+            nodeId={shareTarget.id}
+            nodeName={shareTarget.name}
+            nodeSlug={shareTarget.slug}
+            nodeType={shareTarget.type}
+            onOpenChange={(next) => {
+              if (!next) setShareTarget(null);
+            }}
+            open
+            orpc={orpc}
+          />
+        )}
+        {orpc && deleteTarget && (
+          <NodeDeleteDialog
+            childCount={deleteTarget.childCount}
+            /* Only bounce to the workbench root when the node being deleted is
+               the one currently open — otherwise the route you're on is about to
+               404. Deleting some OTHER node from the sidebar must leave you
+               exactly where you were; a detail page's own "•••" menu always
+               qualifies for the redirect and keeps the default. */
+            navigateHome={Boolean(
+              deleteTarget.href &&
+                (location === deleteTarget.href || location.startsWith(`${deleteTarget.href}/`)),
+            )}
+            nodeId={deleteTarget.id}
+            nodeName={deleteTarget.name}
+            nodeType={deleteTarget.type}
+            onOpenChange={(next) => {
+              if (!next) setDeleteTarget(null);
+            }}
+            open
+            orpc={orpc}
+          />
+        )}
+        {onMoveNode && moveTarget && (
+          <NodeMoveDialog
+            node={moveTarget}
+            nodes={nodes}
+            onMoveNode={onMoveNode}
+            onOpenChange={(next) => {
+              if (!next) setMoveTarget(null);
+            }}
+            open
+          />
+        )}
+      </div>
+    </CoreI18nProvider>
   );
 }
 

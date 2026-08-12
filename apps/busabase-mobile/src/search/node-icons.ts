@@ -3,11 +3,11 @@ import { getNodeType } from "busabase-contract/domains";
 import {
   AppWindow,
   Bot,
-  ClipboardList,
   CodeXml,
   File,
   FileText,
   Folder,
+  Form,
   HardDrive,
   PenTool,
   Sparkles,
@@ -27,10 +27,10 @@ const NODE_ICONS: Record<string, typeof Folder> = {
   "hard-drive": HardDrive,
   "app-window": AppWindow,
   // The remaining registry icon ids. Without these the types they belong to
-  // (File, Form, Whiteboard, Workflow, HTML) all fell through to the FileText
+  // (File, Whiteboard, Workflow, HTML) all fell through to the FileText
   // fallback and looked identical in the tree and the create sheet.
   file: File,
-  "clipboard-list": ClipboardList,
+  form: Form,
   "pen-tool": PenTool,
   workflow: Workflow,
   "code-xml": CodeXml,

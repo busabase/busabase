@@ -1,5 +1,6 @@
 import { implement, ORPCError } from "@orpc/server";
 import { busabaseContract } from "busabase-contract/contract/busabase";
+import { isAnonymousVisitor } from "../../context";
 import { createForm, getFormByNodeId, submitForm, updateForm } from "./logic/form-ops";
 
 const os = implement(busabaseContract);
@@ -19,9 +20,6 @@ export const formRouter = {
   }),
   submit: os.forms.submit.handler(async ({ input }) => {
     const { nodeId, ...rest } = input;
-    // Dashboard/internal RPC is always an authenticated space member; the
-    // anonymous path arrives through the public surface (which passes
-    // `isAnonymous`) — see spec §5.1 / §7.
-    return submitForm(nodeId, rest, { isAnonymous: false });
+    return submitForm(nodeId, rest, { isAnonymous: isAnonymousVisitor() });
   }),
 };

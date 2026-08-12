@@ -39,6 +39,15 @@ export const createDriveChangeRequest = (
   input: z.input<typeof createDriveChangeRequestInputSchema>,
 ) => createFileTreeChangeRequest(driveFileTreeConfig, nodeIdOrSlug, input);
 
-export const materializeDriveNode = makeMaterializer(driveFileTreeConfig);
+// Built on first use, not at module evaluation: `makeMaterializer` comes from
+// filetree/handlers, and calling it here would make this module's evaluation
+// order relative to that one load-bearing (see logic/materialize.ts).
+let materializeDriveNodeImpl: ReturnType<typeof makeMaterializer> | undefined;
+export const materializeDriveNode: ReturnType<typeof makeMaterializer> = (ctx, args) => {
+  if (!materializeDriveNodeImpl) {
+    materializeDriveNodeImpl = makeMaterializer(driveFileTreeConfig);
+  }
+  return materializeDriveNodeImpl(ctx, args);
+};
 
 registerMaterializer("drive", materializeDriveNode);

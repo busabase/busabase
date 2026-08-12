@@ -82,6 +82,51 @@ export async function getPublicScopeOf(nodeId: string): Promise<"read" | "submit
   return row?.scope ?? null;
 }
 
+/**
+ * The same capability read, for a node REFERENCE that may be an id OR a node
+ * slug.
+ *
+ * Why this exists next to `getPublicScopeOf`: the public surface passes
+ * user-visible refs around. A shared link is `/<nodeType>/<node slug>` and the
+ * detail route hands that slug straight through as the procedure's `nodeId`
+ * (which is why `getFormByNodeId` resolves either form) — so the slug, not the
+ * id, is what every real visitor sends. An id-only capability lookup fails
+ * closed on all of them: a public page that renders and then refuses to accept
+ * anything. Not a leak, but dead all the same.
+ *
+ * Slug matching is deliberately APPROXIMATE. Node slugs are unique per PARENT
+ * (`busabase_nodes_parent_slug_uniq`), not per space, so one ref can name
+ * several nodes; this returns the widest capability among the publicly shared
+ * candidates. That makes it a *reachability* answer and nothing more — the
+ * authoritative check belongs on the resolved node id inside the handler (see
+ * `submitForm`), which is the node the write will actually touch.
+ */
+export async function getPublicScopeOfNodeRef(
+  nodeIdOrSlug: string,
+): Promise<"read" | "submit" | null> {
+  // An id match is unambiguous, so it wins.
+  const byId = await getPublicScopeOf(nodeIdOrSlug);
+  if (byId) return byId;
+
+  const db = await getDb();
+  const rows = await db
+    .select({ scope: busabaseNodes.effectivePublicScope })
+    .from(busabaseNodes)
+    .where(
+      and(
+        eq(busabaseNodes.slug, nodeIdOrSlug),
+        eq(busabaseNodes.spaceId, getContextSpaceId()),
+        isNotNull(busabaseNodes.effectivePublicScope),
+        // The slug uniqueness index only covers live rows; archived/deleted
+        // nodes must not resurrect a link either.
+        isNull(busabaseNodes.archivedAt),
+        isNull(busabaseNodes.deletedAt),
+      ),
+    );
+  if (rows.some((row) => row.scope === "submit")) return "submit";
+  return rows.some((row) => row.scope === "read") ? "read" : null;
+}
+
 /** The stricter of two explicit visibilities; null = "no explicit constraint". */
 const strictest = (
   a: NodeVisibility | null | undefined,
