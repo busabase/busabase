@@ -1,14 +1,14 @@
-# Managed by kapps scripts/publish-busabase-repo.ts — edit the template there,
-# not in this repo (the open-source sync overwrites it).
-#
 # Builds the Busabase image from apps/busabase/Dockerfile and pushes multi-arch
 # (amd64 + arm64) to GHCR and Docker Hub, on GitHub's official ubuntu-latest
-# runner. After publishing, it can dispatch the private deploy workflow.
+# runner. After publishing, it can dispatch a downstream deploy workflow.
 #
 # Required secrets: DOCKERHUB_TOKEN (a Docker Hub access token for the `busabase`
 # org with push rights). GHCR uses the built-in GITHUB_TOKEN.
-# Required for deploy dispatch: CR_PAT, DEPLOY_REPOSITORY (for example,
-# vikadata/ops-manager), and DEPLOY_EVENT_TYPE (for example, deploy-bika).
+# Optional, for the deploy dispatch: CR_PAT (a token that may dispatch to the
+# target repository), DEPLOY_REPOSITORY (the `owner/name` to dispatch to) and
+# DEPLOY_EVENT_TYPE (the `repository_dispatch` event type to send). All three
+# are read as secrets; if any is unset the dispatch step no-ops and the build
+# still succeeds, so a fork needs none of them.
 name: Docker
 
 on:

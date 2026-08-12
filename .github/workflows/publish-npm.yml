@@ -1,7 +1,3 @@
-# Owned by this open-source repo (busabase/busabase). The kapps sync
-# (scripts/publish-busabase-repo.ts) PRESERVES `.github`, so it never overwrites
-# this file — edit it here.
-#
 # Publishes busabase-package + busabase-cli + busabase-sdk + busabase-cms + busabase to npm with
 # provenance, from the public repo, on GitHub's official ubuntu-latest runner.
 # It also publishes short-name alias packages busa-cli + busa-sdk from the same

@@ -1,6 +1,3 @@
-# Owned by this open-source repo (busabase/busabase). The kapps publish script
-# preserves `.github`, so future source syncs do not overwrite this workflow.
-#
 # Required repository secrets: VERCEL_TOKEN, VERCEL_ORG_ID, and
 # VERCEL_PROJECT_ID.
 name: Deploy Busabase CMS example to Vercel
