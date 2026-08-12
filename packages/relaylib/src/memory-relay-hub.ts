@@ -25,7 +25,7 @@ export type MemoryRelayHubOptions = {
 
 /**
  * Single-process relay hub backed by an in-memory map of tunnel id -> socket.
- * This is the transport extracted from apps/buda's connector relay; a
+ * This is the transport extracted from Buda's connector relay; a
  * Redis-backed hub satisfying {@link RelayHub} can span instances later.
  */
 export function createMemoryRelayHub(options: MemoryRelayHubOptions = {}): RelayHub {

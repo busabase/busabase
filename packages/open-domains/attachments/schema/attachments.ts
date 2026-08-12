@@ -1,13 +1,12 @@
 /**
- * Attachments schema (open-domains) — auth-agnostic copy of
- * `share-domains/attachments`.
+ * Attachments schema (open-domains) — auth-agnostic.
  *
- * Identical columns/indexes, but WITHOUT the `users`/`organizations` foreign
- * keys: `userId`/`spaceId` are plain text (apps write a real id, or a local
- * sentinel like "local" for single-tenant OSS apps). This lets open-source app
- * kernels (busabase-core, future buda-core) own the `attachments` table without
- * dragging in the enterprise auth schema. `apps/busabase-cloud` switches to this
- * table too (its migration just drops the two FK constraints).
+ * WITHOUT the `users`/`organizations` foreign keys an enterprise auth schema
+ * would add: `userId`/`spaceId` are plain text (apps write a real id, or a
+ * local sentinel like "local" for single-tenant OSS apps). This lets
+ * open-source app kernels own the `attachments` table without dragging in
+ * that auth schema. Busabase Cloud uses this table too (its migration just
+ * drops the two FK constraints).
  */
 
 import { index, integer, jsonb, pgTable, text, timestamp, varchar } from "drizzle-orm/pg-core";

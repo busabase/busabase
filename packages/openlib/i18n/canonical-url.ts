@@ -2,10 +2,9 @@
  * Canonical URL / localized-path helpers for marketing pages.
  *
  * Parameterized by each app's `defaultLocale`/`supportedLocales` instead of a
- * hardcoded app config, so a single implementation can be shared. This mirrors
- * (and is the shared home for) the per-app `lib/i18n/canonical-url.ts` files
- * (sandock, busabase-cloud, previewfile, productready), which should delegate
- * here rather than reimplementing this logic.
+ * hardcoded app config, so a single implementation can be shared. This is the
+ * shared home for what used to be a per-app `lib/i18n/canonical-url.ts`; apps
+ * should delegate here rather than reimplementing this logic.
  *
  * See `./middleware.ts` for the analogous i18n proxy middleware helpers.
  */

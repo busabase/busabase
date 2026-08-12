@@ -1,7 +1,7 @@
 # relaylib
 
-Reusable **reverse-WebSocket relay tunnel** transport, extracted from
-`apps/buda`'s connector relay.
+Reusable **reverse-WebSocket relay tunnel** transport, extracted from Buda's
+connector relay.
 
 A private daemon (keyed by an opaque string id) holds a persistent WebSocket to
 a **relay hub**. The hub turns a `request(id, { method, path, ... })` call into

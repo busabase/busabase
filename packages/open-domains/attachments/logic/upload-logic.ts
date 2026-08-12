@@ -1,7 +1,7 @@
 /**
  * Attachments upload logic (open-domains) — auth-agnostic, transport-neutral.
  *
- * Copy of `share-domains/attachments/logic` but: any MIME type allowed, 25MB
+ * Any MIME type allowed, 25MB
  * cap, and throws `ORPCError` (all consumers are oRPC). Pure `(input, userId,
  * db, table)` — no auth/billing/context coupling. Hosts pass their own db,
  * userId (real id or "local"), and the `attachments` table instance.

@@ -1,7 +1,6 @@
 /**
  * Core S3 upload hook (open-domains) — decoupled from transport; accepts the
- * request/confirm API functions as props. Copy of
- * `share-domains/attachments/hooks`.
+ * request/confirm API functions as props.
  */
 
 import { useCallback, useState } from "react";

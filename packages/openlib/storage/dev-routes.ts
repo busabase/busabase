@@ -22,8 +22,8 @@ const notAvailableInProduction = () => new Response("Not available in production
 
 /**
  * Extension → MIME map used by the storage-adapter download branch.
- * This is the UNION of the maps that previously lived inline in
- * busabase / busabase-cloud / buda / inpomo / productready.
+ * This is the UNION of the maps that previously lived inline in each
+ * consuming app.
  */
 const MIME_TYPES: Record<string, string> = {
   csv: "text/csv",
@@ -62,7 +62,7 @@ export interface CreateDevUploadRouteOptions {
    * reaching `path.join(rootDir, key)` — `./storage-key` is, and these handlers
    * apply it on every request, gated or not. That used to be the caller's job,
    * documented right here; of the two apps that dropped the gate, one did it and
-   * one did not, which is how `apps/buda` ended up serving an unauthenticated
+   * one did not, which is how one of them ended up serving an unauthenticated
    * arbitrary-path write in production.
    *
    * @default true
@@ -182,7 +182,7 @@ export interface CreateDevAttachmentRouteOptions {
    * reaching `path.join(rootDir, key)` — `./storage-key` is, and these handlers
    * apply it on every request, gated or not. That used to be the caller's job,
    * documented right here; of the two apps that dropped the gate, one did it and
-   * one did not, which is how `apps/buda` ended up serving an unauthenticated
+   * one did not, which is how one of them ended up serving an unauthenticated
    * arbitrary-path write in production.
    *
    * @default true
@@ -202,8 +202,7 @@ export interface CreateDevAttachmentRouteOptions {
  *   toolsdk.ai), using native `fetch` instead of axios.
  * - **Storage adapter** (when unset): `storage.getObject(key)` and infer the
  *   `Content-Type` from the file extension. Mirrors the former
- *   `storage.getObject` apps (busabase / busabase-cloud / buda / inpomo /
- *   productready).
+ *   `storage.getObject` apps.
  */
 export function createDevAttachmentRoute(opts?: CreateDevAttachmentRouteOptions): {
   GET: (req: Request, ctx: { params: Promise<{ key: string[] }> }) => Promise<Response>;

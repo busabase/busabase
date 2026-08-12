@@ -2,9 +2,9 @@
  * GitHub source for `busabase-cli install`: parse a repo URL, fetch the ref's
  * zipball, and extract it into memory.
  *
- * Ported from buda's `apps/buda/src/domains/skills/logic/github-skill-importer.ts`
- * (buda stays as-is; a shared package is warranted only once the Phase-2 server
- * consumer actually exists). Three deliberate divergences from that original:
+ * Ported from Buda's GitHub skill importer (Buda stays as-is; a shared package
+ * is warranted only once the Phase-2 server consumer actually exists). Three
+ * deliberate divergences from that original:
  *
  * 1. **Host is parsed, not pattern-matched.** buda's regex matches `github.com/…`
  *    anywhere in the string, so `https://evil.example/github.com/o/r` passes. This
