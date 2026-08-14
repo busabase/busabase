@@ -1,0 +1,296 @@
+/**
+ * Default styling for the AirApp connect gate (`busabase-sdk/airapp-gate`).
+ *
+ * Ported from the stylesheet 62 App-in-Skills carried as a byte-identical copy,
+ * minus the rules left over from the retired setup-gate (secret rows, ready
+ * pills, prompt blocks) that the gate never rendered.
+ *
+ * Every value an app is likely to want to change is a custom property, so an
+ * app themes the gate by overriding these on `:root` instead of forking the
+ * file — that is the whole reason this can live in the SDK without dictating
+ * anyone's design system.
+ *
+ *   :root { --bb-gate-accent: #7c3aed; --bb-gate-radius: 14px; }
+ *
+ * Load it however the app loads CSS:
+ *   <link rel="stylesheet" href="./vendor/airapp-gate.css">
+ */
+
+:root {
+  --bb-gate-accent: #1570ef;
+  --bb-gate-accent-contrast: #fff;
+  --bb-gate-accent-wash: #f5f9ff;
+  --bb-gate-surface: #fff;
+  --bb-gate-surface-muted: #f9fafb;
+  --bb-gate-text: #17202a;
+  --bb-gate-text-strong: #101828;
+  --bb-gate-text-muted: #667085;
+  --bb-gate-text-label: #344054;
+  --bb-gate-border: #d0d5dd;
+  --bb-gate-border-subtle: #eaecf0;
+  --bb-gate-danger: #b42318;
+  --bb-gate-scrim: color-mix(in srgb, #101828 72%, transparent);
+  --bb-gate-radius: 8px;
+  --bb-gate-radius-inner: 6px;
+  --bb-gate-font: Inter, ui-sans-serif, system-ui, sans-serif;
+}
+
+html.bb-gate-active,
+html.bb-gate-active body {
+  overflow: hidden;
+}
+
+.bb-gate-overlay {
+  position: fixed;
+  inset: 0;
+  /* Below the max z-index so an app's own toast/portal layer can still sit on
+     top if it deliberately opts to. */
+  z-index: 2147483000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: var(--bb-gate-scrim);
+  font-family: var(--bb-gate-font);
+  color: var(--bb-gate-text);
+}
+
+.bb-gate-panel {
+  width: min(720px, 100%);
+  max-height: min(760px, calc(100vh - 48px));
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  overflow: hidden;
+  background: var(--bb-gate-surface);
+  border: 1px solid var(--bb-gate-border);
+  border-radius: var(--bb-gate-radius);
+  box-shadow: 0 24px 64px rgb(16 24 40 / 28%);
+}
+
+.bb-gate-head {
+  display: flex;
+  gap: 24px;
+  align-items: start;
+  justify-content: space-between;
+  padding: 22px 24px 18px;
+  border-bottom: 1px solid var(--bb-gate-border-subtle);
+}
+
+.bb-gate-head h1 {
+  margin: 0;
+  font-size: 22px;
+  line-height: 1.25;
+  letter-spacing: 0;
+}
+
+.bb-gate-head p {
+  margin: 6px 0 0;
+  color: var(--bb-gate-text-muted);
+  font-size: 14px;
+}
+
+.bb-gate-body {
+  overflow: auto;
+  padding: 20px 24px;
+}
+
+.bb-gate-body h2 {
+  margin: 0 0 12px;
+  font-size: 14px;
+  letter-spacing: 0;
+}
+
+.bb-gate-server-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.bb-gate-server-card {
+  min-height: 104px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 16px;
+  text-align: left;
+  color: var(--bb-gate-text-label);
+  background: var(--bb-gate-surface);
+  border: 1px solid var(--bb-gate-border);
+  border-radius: 7px;
+  cursor: pointer;
+}
+
+.bb-gate-server-card:hover {
+  border-color: var(--bb-gate-text-muted);
+}
+
+.bb-gate-server-card.is-selected {
+  border-color: var(--bb-gate-accent);
+  box-shadow: inset 0 0 0 1px var(--bb-gate-accent);
+  background: var(--bb-gate-accent-wash);
+}
+
+.bb-gate-server-card input {
+  flex: none;
+  margin: 0;
+}
+
+.bb-gate-server-card > span {
+  display: grid;
+  gap: 2px;
+}
+
+.bb-gate-server-card strong {
+  font-size: 15px;
+}
+
+.bb-gate-server-card span span {
+  color: var(--bb-gate-text-muted);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.bb-gate-custom-url {
+  display: grid;
+  gap: 6px;
+  margin-top: 16px;
+  padding: 16px;
+  border: 1px solid var(--bb-gate-border-subtle);
+  border-radius: 7px;
+  background: var(--bb-gate-surface-muted);
+  color: var(--bb-gate-text-label);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.bb-gate-custom-url[hidden] {
+  display: none;
+}
+
+.bb-gate-custom-url input {
+  min-width: 0;
+  min-height: 38px;
+  padding: 8px 10px;
+  color: var(--bb-gate-text-strong);
+  background: var(--bb-gate-surface);
+  border: 1px solid var(--bb-gate-border);
+  border-radius: var(--bb-gate-radius-inner);
+  font: inherit;
+  font-weight: 400;
+}
+
+.bb-gate-space-select {
+  display: grid;
+  gap: 6px;
+  margin-top: 14px;
+  color: var(--bb-gate-text-label);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.bb-gate-space-select select {
+  min-height: 38px;
+  padding: 8px 10px;
+  color: var(--bb-gate-text-strong);
+  background: var(--bb-gate-surface);
+  border: 1px solid var(--bb-gate-border);
+  border-radius: var(--bb-gate-radius-inner);
+  font: inherit;
+  font-weight: 400;
+}
+
+.bb-gate-error {
+  color: var(--bb-gate-danger);
+  font-size: 13px;
+}
+
+.bb-gate-note {
+  color: var(--bb-gate-text-muted);
+}
+
+.bb-gate-link {
+  color: var(--bb-gate-accent);
+  font-size: 13px;
+  font-weight: 650;
+  text-decoration: none;
+}
+
+.bb-gate-link:hover {
+  text-decoration: underline;
+}
+
+.bb-gate-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 24px;
+  border-top: 1px solid var(--bb-gate-border-subtle);
+  background: var(--bb-gate-surface);
+}
+
+.bb-gate-footer button {
+  min-height: 38px;
+  padding: 0 14px;
+  color: var(--bb-gate-text-label);
+  background: var(--bb-gate-surface);
+  border: 1px solid var(--bb-gate-border);
+  border-radius: var(--bb-gate-radius-inner);
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.bb-gate-footer .bb-gate-primary {
+  color: var(--bb-gate-accent-contrast);
+  background: var(--bb-gate-accent);
+  border-color: var(--bb-gate-accent);
+}
+
+.bb-gate-footer button:disabled {
+  opacity: 0.55;
+  cursor: wait;
+}
+
+@media (max-width: 600px) {
+  .bb-gate-overlay {
+    align-items: stretch;
+    padding: 0;
+  }
+
+  .bb-gate-panel {
+    width: 100%;
+    max-height: 100vh;
+    border: 0;
+    border-radius: 0;
+  }
+
+  .bb-gate-head {
+    padding: 18px 16px 14px;
+  }
+
+  .bb-gate-head h1 {
+    font-size: 19px;
+  }
+
+  .bb-gate-head p {
+    font-size: 13px;
+  }
+
+  .bb-gate-body {
+    padding: 16px;
+  }
+
+  .bb-gate-server-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .bb-gate-footer {
+    padding: 12px 16px;
+  }
+
+  .bb-gate-footer button {
+    min-width: 0;
+    flex: 1;
+    padding-inline: 8px;
+  }
+}

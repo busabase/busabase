@@ -60,12 +60,42 @@ export const busabaseAirAppCredentialPath = (
   options: BusabaseAirAppCredentialStoreOptions = {},
 ) => join(busabaseAirAppCredentialsDir(options), `${assertAppId(appId)}.json`);
 
+/**
+ * Dynamically registered public client ids, keyed by `${baseUrl}|${redirectUri}`.
+ *
+ * Kept out of the credential file because registration happens before any token exists, and the
+ * mapping must outlive both the process and a logout — re-registering on every restart would
+ * churn server-side client records and burn the registration rate limit.
+ */
+export const busabaseAirAppDynamicClientsPath = (
+  appId: string,
+  options: BusabaseAirAppCredentialStoreOptions = {},
+) => join(busabaseAirAppCredentialsDir(options), `${assertAppId(appId)}.clients.json`);
+
 const normalizeOrigin = (raw: string) => {
   const url = new URL(normalizeBaseUrl(raw));
   if (url.username || url.password || url.search || url.hash) {
     throw new BusabaseOAuthError("invalid_base_url", "Busabase base URL must be an origin");
   }
   return url.origin;
+};
+
+const writeOwnerOnlyJson = (path: string, value: unknown) => {
+  const directory = dirname(path);
+  mkdirSync(directory, { recursive: true, mode: 0o700 });
+  try {
+    chmodSync(directory, 0o700);
+  } catch {
+    // Best effort on filesystems without POSIX modes.
+  }
+  const temporaryPath = `${path}.${randomUUID()}.tmp`;
+  writeFileSync(temporaryPath, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 });
+  try {
+    chmodSync(temporaryPath, 0o600);
+  } catch {
+    // Best effort on filesystems without POSIX modes.
+  }
+  renameSync(temporaryPath, path);
 };
 
 const parseCredential = (raw: string, expectedAppId: string): BusabaseAirAppOAuthCredential => {
@@ -143,23 +173,79 @@ export function storeBusabaseAirAppOAuthCredential(
     tokenType: input.tokenSet.tokenType,
     ...(input.selectedSpace ? { selectedSpace: input.selectedSpace } : {}),
   };
-  const path = busabaseAirAppCredentialPath(input.appId, options);
-  const directory = dirname(path);
-  mkdirSync(directory, { recursive: true, mode: 0o700 });
-  try {
-    chmodSync(directory, 0o700);
-  } catch {
-    // Best effort on filesystems without POSIX modes.
-  }
-  const temporaryPath = `${path}.${randomUUID()}.tmp`;
-  writeFileSync(temporaryPath, `${JSON.stringify(credential, null, 2)}\n`, { mode: 0o600 });
-  try {
-    chmodSync(temporaryPath, 0o600);
-  } catch {
-    // Best effort on filesystems without POSIX modes.
-  }
-  renameSync(temporaryPath, path);
+  writeOwnerOnlyJson(busabaseAirAppCredentialPath(input.appId, options), credential);
   return credential;
+}
+
+interface BusabaseAirAppDynamicClientRegistry {
+  version: 1;
+  appId: string;
+  clients: Record<string, string>;
+}
+
+/** Bounded so a long-lived AirApp that moves between preview origins cannot grow without limit. */
+const MAX_DYNAMIC_CLIENTS = 32;
+
+const dynamicClientKey = (baseUrl: string, redirectUri: string) =>
+  `${normalizeOrigin(baseUrl)}|${new URL(redirectUri).toString()}`;
+
+const loadDynamicClientRegistry = (
+  appId: string,
+  options: BusabaseAirAppCredentialStoreOptions,
+): BusabaseAirAppDynamicClientRegistry => {
+  const empty: BusabaseAirAppDynamicClientRegistry = {
+    version: STORE_VERSION,
+    appId: assertAppId(appId),
+    clients: {},
+  };
+  let raw: string;
+  try {
+    raw = readFileSync(busabaseAirAppDynamicClientsPath(appId, options), "utf8");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return empty;
+    throw error;
+  }
+  try {
+    const value = JSON.parse(raw) as Partial<BusabaseAirAppDynamicClientRegistry>;
+    if (
+      value.version !== STORE_VERSION ||
+      value.appId !== appId ||
+      typeof value.clients !== "object" ||
+      value.clients === null
+    ) {
+      return empty;
+    }
+    const clients = Object.fromEntries(
+      Object.entries(value.clients).filter(([, clientId]) => typeof clientId === "string"),
+    );
+    return { ...empty, clients };
+  } catch {
+    // A corrupt registry only costs one re-registration; never fail the connect flow over it.
+    return empty;
+  }
+};
+
+/** Reuse a previously registered public client for this exact origin and callback. */
+export function loadBusabaseAirAppDynamicClientId(
+  input: { appId: string; baseUrl: string; redirectUri: string },
+  options: BusabaseAirAppCredentialStoreOptions = {},
+): string | null {
+  const registry = loadDynamicClientRegistry(input.appId, options);
+  return registry.clients[dynamicClientKey(input.baseUrl, input.redirectUri)] ?? null;
+}
+
+export function storeBusabaseAirAppDynamicClientId(
+  input: { appId: string; baseUrl: string; redirectUri: string; clientId: string },
+  options: BusabaseAirAppCredentialStoreOptions = {},
+): void {
+  const registry = loadDynamicClientRegistry(input.appId, options);
+  const key = dynamicClientKey(input.baseUrl, input.redirectUri);
+  delete registry.clients[key];
+  const entries = [...Object.entries(registry.clients), [key, input.clientId] as const];
+  writeOwnerOnlyJson(busabaseAirAppDynamicClientsPath(input.appId, options), {
+    ...registry,
+    clients: Object.fromEntries(entries.slice(-MAX_DYNAMIC_CLIENTS)),
+  });
 }
 
 /** Load a valid access token, rotating and persisting the token set when needed. */
@@ -228,15 +314,7 @@ export function storeBusabaseAirAppSelectedSpace(
     ...credential,
     ...(selectedSpace ? { selectedSpace } : { selectedSpace: undefined }),
   };
-  const path = busabaseAirAppCredentialPath(appId, options);
-  const temporaryPath = `${path}.${randomUUID()}.tmp`;
-  writeFileSync(temporaryPath, `${JSON.stringify(next, null, 2)}\n`, { mode: 0o600 });
-  try {
-    chmodSync(temporaryPath, 0o600);
-  } catch {
-    // Best effort on filesystems without POSIX modes.
-  }
-  renameSync(temporaryPath, path);
+  writeOwnerOnlyJson(busabaseAirAppCredentialPath(appId, options), next);
   return next;
 }
 

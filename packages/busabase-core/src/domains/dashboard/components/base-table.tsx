@@ -191,7 +191,6 @@ function FieldColumnHeader({
   onDragOver,
   onDragStart,
   onDrop,
-  onCreateView,
   onMove,
   onOpenViewEditor,
   onQuickUpdate,
@@ -223,7 +222,6 @@ function FieldColumnHeader({
   onDragOver: (placement: "before" | "after") => void;
   onDragStart: () => void;
   onDrop: (sourceSlug: string, placement: "before" | "after") => void;
-  onCreateView: () => void;
   onMove: (direction: "left" | "right") => void;
   onOpenViewEditor: (section: "filters" | "sorts", fieldId: string) => void;
   onQuickUpdate: (config: ViewConfigVO) => Promise<boolean>;
@@ -427,17 +425,15 @@ function FieldColumnHeader({
                 <p className="text-muted-foreground text-xs leading-5">
                   {messages.base.savedViewRequired}
                 </p>
-                <button
+                <Link
                   className="mt-3 inline-flex h-8 w-full items-center justify-center gap-1.5 rounded-md bg-foreground px-3 font-medium text-background text-xs transition-colors hover:bg-foreground/85"
-                  onClick={() => {
-                    setOpen(false);
-                    onCreateView();
-                  }}
-                  type="button"
+                  data-testid={`header-edit-field-${field.slug}`}
+                  href={mergeSearchIntoHref(`/base/${baseSlug}/design`, currentSearch)}
+                  onClick={() => setOpen(false)}
                 >
-                  <Plus className="size-3.5" />
-                  {messages.base.newView}
-                </button>
+                  <PenLine className="size-3.5" />
+                  {messages.base.editField}
+                </Link>
               </div>
             ) : (
               <div className="divide-y divide-border/60 text-xs">
@@ -527,6 +523,7 @@ function FieldColumnHeader({
                   ) : null}
                   <Link
                     className="flex h-8 w-full items-center gap-2 rounded px-2 transition-colors hover:bg-accent"
+                    data-testid={`header-edit-field-${field.slug}`}
                     href={mergeSearchIntoHref(`/base/${baseSlug}/design`, currentSearch)}
                     onClick={() => setOpen(false)}
                   >
@@ -1404,7 +1401,6 @@ export function BusaBaseTable({
                       ),
                     );
                   }}
-                  onCreateView={() => setEditingViewMode("create")}
                   onMove={(direction) => {
                     if (!activeView) {
                       return;

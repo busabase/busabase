@@ -1,5 +1,5 @@
 use std::{
-    fs,
+    fs::{self, OpenOptions},
     io::{Read, Write},
     net::{TcpStream, ToSocketAddrs},
     path::{Path, PathBuf},
@@ -18,6 +18,12 @@ use semver::Version;
 mod desktop_menu;
 
 const BUSABASE_PORT: u16 = 15419;
+const SIDECAR_START_TIMEOUT: Duration = Duration::from_secs(60);
+const SIDECAR_LOG_FILE: &str = "sidecar.log";
+const SIDECAR_LOG_SUMMARY_CHARS: usize = 2000;
+
+#[cfg(windows)]
+const CREATE_NO_WINDOW: u32 = 0x08000000;
 
 static BUSABASE_SIDECAR_PROCESS: OnceLock<Mutex<Option<Child>>> = OnceLock::new();
 
@@ -133,10 +139,31 @@ fn start_busabase_sidecar(app: AppHandle) -> Result<BusabaseSidecarStatus, Strin
         return build_status(&app, None);
     }
 
+    if is_busabase_port_open() {
+        return build_status(
+            &app,
+            Some(format!(
+                "Port {BUSABASE_PORT} is already in use, but it is not serving Busabase. Close the process using that port, then retry."
+            )),
+        );
+    }
+
     let data_dir = busabase_data_dir(&app)?;
     fs::create_dir_all(&data_dir).map_err(|error| error.to_string())?;
 
-    let mut command = build_sidecar_command(&app, &data_dir)?;
+    let log_path = data_dir.join(SIDECAR_LOG_FILE);
+    let log = OpenOptions::new()
+        .create(true)
+        .truncate(true)
+        .write(true)
+        .open(&log_path)
+        .map_err(|error| {
+            format!(
+                "Could not create sidecar log at {}: {error}",
+                log_path.display()
+            )
+        })?;
+    let mut command = build_sidecar_command(&app, &data_dir, log)?;
 
     let child = command
         .spawn()
@@ -148,16 +175,20 @@ fn start_busabase_sidecar(app: AppHandle) -> Result<BusabaseSidecarStatus, Strin
         *guard = Some(child);
     }
 
-    let started = wait_for_health(Duration::from_secs(60));
-    let message = (!started).then(|| {
-        "Busabase sidecar was started, but /api/health did not become ready within 60 seconds."
-            .to_string()
-    });
-    build_status(&app, message)
+    let error = wait_for_sidecar(&data_dir, SIDECAR_START_TIMEOUT).err();
+    if error.is_some() {
+        let _ = stop_busabase_sidecar_process();
+    }
+    build_status(&app, error)
 }
 
 #[tauri::command]
 fn stop_busabase_sidecar(app: AppHandle) -> Result<BusabaseSidecarStatus, String> {
+    stop_busabase_sidecar_process()?;
+    build_status(&app, None)
+}
+
+fn stop_busabase_sidecar_process() -> Result<(), String> {
     let mut guard = sidecar_process()
         .lock()
         .map_err(|error| error.to_string())?;
@@ -165,8 +196,7 @@ fn stop_busabase_sidecar(app: AppHandle) -> Result<BusabaseSidecarStatus, String
         let _ = child.kill();
         let _ = child.wait();
     }
-    drop(guard);
-    build_status(&app, None)
+    Ok(())
 }
 
 #[tauri::command]
@@ -312,14 +342,21 @@ fn find_workspace_root(start: &Path) -> Option<PathBuf> {
 struct SidecarEntry {
     server: String,
     node: String,
+    launcher: Option<String>,
+}
+
+struct BundledSidecarCommand {
+    executable: PathBuf,
+    args: Vec<PathBuf>,
+    current_dir: Option<PathBuf>,
 }
 
 /// Locate the packaged standalone sidecar (apps/busabase `output: "standalone"`
-/// build + bundled node) inside the app's resource directory. Returns
-/// `(node_executable, server_js, app_dir)` when present. This is the production
-/// launch path; in `tauri dev` without a prepared bundle it returns `None` and
-/// the caller falls back to the workspace dev server.
-fn resolve_bundled_sidecar(app: &AppHandle) -> Option<(PathBuf, PathBuf, PathBuf)> {
+/// build + bundled node) inside the app's resource directory. Windows launches
+/// through the bundled `.cmd` wrapper, matching Buda Desktop; other platforms
+/// execute Node directly. In `tauri dev` without a prepared bundle this returns
+/// `None` and the caller falls back to the workspace dev server.
+fn resolve_bundled_sidecar(app: &AppHandle) -> Option<BundledSidecarCommand> {
     let resource_dir = app.path().resource_dir().ok()?;
     let root = resource_dir.join("busabase-server");
     let entry: SidecarEntry =
@@ -328,8 +365,22 @@ fn resolve_bundled_sidecar(app: &AppHandle) -> Option<(PathBuf, PathBuf, PathBuf
     let server = root.join(&entry.server);
     let node = root.join(&entry.node);
     if server.exists() && node.exists() {
-        let app_dir = server.parent().map(Path::to_path_buf).unwrap_or(root);
-        Some((node, server, app_dir))
+        let app_dir = server.parent()?.to_path_buf();
+        let server_arg = server.strip_prefix(&app_dir).ok()?.to_path_buf();
+        if cfg!(windows) {
+            let launcher = root.join(entry.launcher?);
+            return launcher.is_file().then_some(BundledSidecarCommand {
+                executable: launcher,
+                args: vec![],
+                current_dir: None,
+            });
+        }
+
+        Some(BundledSidecarCommand {
+            executable: node,
+            args: vec![server_arg],
+            current_dir: Some(app_dir),
+        })
     } else {
         None
     }
@@ -340,7 +391,11 @@ fn resolve_bundled_sidecar(app: &AppHandle) -> Option<(PathBuf, PathBuf, PathBuf
 /// Production: launches the bundled standalone `node server.js`. Dev fallback:
 /// `pnpm --filter busabase dev` from the workspace root. Both receive a local
 /// pglite database and local filesystem storage rooted under the app data dir.
-fn build_sidecar_command(app: &AppHandle, data_dir: &Path) -> Result<Command, String> {
+fn build_sidecar_command(
+    app: &AppHandle,
+    data_dir: &Path,
+    log: fs::File,
+) -> Result<Command, String> {
     let pg_dir = data_dir.join("pgdata");
     let storage_dir = data_dir.join("storage");
     fs::create_dir_all(&pg_dir).map_err(|error| error.to_string())?;
@@ -352,11 +407,13 @@ fn build_sidecar_command(app: &AppHandle, data_dir: &Path) -> Result<Command, St
         storage_dir.to_string_lossy()
     );
 
-    let mut command = if let Some((node, server, app_dir)) = resolve_bundled_sidecar(app) {
-        let mut command = Command::new(node);
+    let mut command = if let Some(sidecar) = resolve_bundled_sidecar(app) {
+        let mut command = Command::new(sidecar.executable);
+        command.args(sidecar.args);
+        if let Some(current_dir) = sidecar.current_dir {
+            command.current_dir(current_dir);
+        }
         command
-            .arg(server)
-            .current_dir(app_dir)
             .env("HOSTNAME", "127.0.0.1")
             .env("NODE_ENV", "production");
         command
@@ -376,21 +433,110 @@ fn build_sidecar_command(app: &AppHandle, data_dir: &Path) -> Result<Command, St
         .env("PG_DATABASE_URL", pg_url)
         .env("STORAGE_URL", storage_url)
         .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null());
+        .stdout(Stdio::from(log.try_clone().map_err(|error| {
+            format!("Could not clone sidecar log handle: {error}")
+        })?))
+        .stderr(Stdio::from(log));
+    hide_child_console_window(&mut command);
 
     Ok(command)
 }
 
-fn wait_for_health(timeout: Duration) -> bool {
+fn hide_child_console_window(command: &mut Command) {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+
+    #[cfg(not(windows))]
+    {
+        let _ = command;
+    }
+}
+
+fn wait_for_sidecar(data_dir: &Path, timeout: Duration) -> Result<(), String> {
     let deadline = Instant::now() + timeout;
     while Instant::now() < deadline {
         if is_busabase_healthy() {
-            return true;
+            return Ok(());
+        }
+
+        let exit_status = {
+            let mut guard = sidecar_process()
+                .lock()
+                .map_err(|error| error.to_string())?;
+            let status = guard
+                .as_mut()
+                .map(|child| child.try_wait())
+                .transpose()
+                .map_err(|error| error.to_string())?
+                .flatten();
+            if status.is_some() {
+                *guard = None;
+            }
+            status
+        };
+        if let Some(status) = exit_status {
+            return Err(sidecar_start_error(
+                &format!("exited with {status}"),
+                data_dir,
+            ));
         }
         thread::sleep(Duration::from_millis(500));
     }
-    false
+    Err(sidecar_start_error(
+        &format!(
+            "did not become healthy within {} seconds",
+            timeout.as_secs()
+        ),
+        data_dir,
+    ))
+}
+
+fn sidecar_start_error(reason: &str, data_dir: &Path) -> String {
+    let log_path = data_dir.join(SIDECAR_LOG_FILE);
+    let summary = fs::read_to_string(&log_path)
+        .ok()
+        .map(|contents| tail_chars(contents.trim(), SIDECAR_LOG_SUMMARY_CHARS))
+        .filter(|contents| !contents.is_empty());
+    match summary {
+        Some(summary) => format!(
+            "Busabase sidecar {reason}. Last log output: {summary} (full log: {})",
+            log_path.display()
+        ),
+        None => format!(
+            "Busabase sidecar {reason}. No output was captured; see {}.",
+            log_path.display()
+        ),
+    }
+}
+
+fn tail_chars(value: &str, limit: usize) -> String {
+    let count = value.chars().count();
+    value.chars().skip(count.saturating_sub(limit)).collect()
+}
+
+#[cfg(test)]
+mod sidecar_tests {
+    use super::tail_chars;
+
+    #[test]
+    fn keeps_the_end_of_sidecar_logs_on_character_boundaries() {
+        assert_eq!(tail_chars("startup failed", 6), "failed");
+        assert_eq!(tail_chars("错误: port busy", 9), "port busy");
+        assert_eq!(tail_chars("short", 20), "short");
+    }
+}
+
+fn is_busabase_port_open() -> bool {
+    TcpStream::connect_timeout(
+        &format!("127.0.0.1:{BUSABASE_PORT}")
+            .parse()
+            .expect("Busabase loopback address must be valid"),
+        Duration::from_millis(300),
+    )
+    .is_ok()
 }
 
 fn is_busabase_healthy() -> bool {
@@ -434,8 +580,11 @@ fn focus_main_window(app: &AppHandle) {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    let app = tauri::Builder::default()
         .menu(desktop_menu::build_desktop_menu)
+        .on_menu_event(|app, event| {
+            desktop_menu::emit_desktop_menu_action(app, event.id().as_ref());
+        })
         // MUST be the first plugin registered (upstream requirement). Without it
         // a `busabase://` deep link on Linux/Windows starts a *second* copy of
         // the app instead of reaching the running one — the sidecar port would
@@ -461,6 +610,14 @@ pub fn run() {
         .setup(|app| {
             use tauri_plugin_deep_link::DeepLinkExt;
 
+            // Windows/Linux use the custom titlebar rendered by the frontend.
+            // Removing native decorations also removes the duplicate File/Edit
+            // menu row while macOS keeps its native application menu.
+            #[cfg(not(target_os = "macos"))]
+            if let Some(window) = app.get_webview_window("main") {
+                window.set_decorations(false)?;
+            }
+
             // Packaged installs get the `busabase://` association from the
             // bundle manifest (Info.plist / .desktop / registry). A dev run or
             // a plain `cargo run` has no bundle, so register at runtime —
@@ -485,6 +642,12 @@ pub fn run() {
             start_busabase_sidecar,
             stop_busabase_sidecar
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running Busabase Desktop");
+        .build(tauri::generate_context!())
+        .expect("error while building Busabase Desktop");
+
+    app.run(|_app, event| {
+        if matches!(event, tauri::RunEvent::Exit) {
+            let _ = stop_busabase_sidecar_process();
+        }
+    });
 }

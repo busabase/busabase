@@ -1,6 +1,28 @@
+use serde::Serialize;
 use tauri::{
-    menu::{AboutMetadata, Menu, PredefinedMenuItem, Submenu, HELP_SUBMENU_ID, WINDOW_SUBMENU_ID},
-    AppHandle, Wry,
+    menu::{
+        AboutMetadata, Menu, MenuItem, PredefinedMenuItem, Submenu, HELP_SUBMENU_ID,
+        WINDOW_SUBMENU_ID,
+    },
+    AppHandle, Emitter, Wry,
+};
+
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct DesktopMenuPayload {
+    pub action: &'static str,
+}
+
+#[derive(Clone, Copy)]
+struct DesktopMenuAction {
+    id: &'static str,
+    label: &'static str,
+}
+
+const DESKTOP_MENU_EVENT: &str = "busabase://desktop-menu-action";
+const CHECK_FOR_UPDATES: DesktopMenuAction = DesktopMenuAction {
+    id: "check_for_updates",
+    label: "Check for Updates...",
 };
 
 pub fn build_desktop_menu(app: &AppHandle<Wry>) -> tauri::Result<Menu<Wry>> {
@@ -21,6 +43,7 @@ pub fn build_desktop_menu(app: &AppHandle<Wry>) -> tauri::Result<Menu<Wry>> {
             .map(|publisher| vec![publisher]),
         ..Default::default()
     };
+    let check_for_updates = custom_item(app, CHECK_FOR_UPDATES)?;
 
     let window_menu = Submenu::with_id_and_items(
         app,
@@ -43,6 +66,10 @@ pub fn build_desktop_menu(app: &AppHandle<Wry>) -> tauri::Result<Menu<Wry>> {
         true,
         &[
             #[cfg(not(target_os = "macos"))]
+            &check_for_updates,
+            #[cfg(not(target_os = "macos"))]
+            &PredefinedMenuItem::separator(app)?,
+            #[cfg(not(target_os = "macos"))]
             &PredefinedMenuItem::about(app, None, Some(about_metadata.clone()))?,
         ],
     )?;
@@ -57,6 +84,8 @@ pub fn build_desktop_menu(app: &AppHandle<Wry>) -> tauri::Result<Menu<Wry>> {
                 true,
                 &[
                     &PredefinedMenuItem::about(app, None, Some(about_metadata))?,
+                    &PredefinedMenuItem::separator(app)?,
+                    &check_for_updates,
                     &PredefinedMenuItem::separator(app)?,
                     &PredefinedMenuItem::services(app, None)?,
                     &PredefinedMenuItem::separator(app)?,
@@ -110,6 +139,20 @@ pub fn build_desktop_menu(app: &AppHandle<Wry>) -> tauri::Result<Menu<Wry>> {
     )
 }
 
+pub fn emit_desktop_menu_action(app: &AppHandle<Wry>, id: &str) {
+    if let Some(action) = desktop_menu_action(id) {
+        let _ = app.emit(DESKTOP_MENU_EVENT, DesktopMenuPayload { action });
+    }
+}
+
+fn custom_item(app: &AppHandle<Wry>, action: DesktopMenuAction) -> tauri::Result<MenuItem<Wry>> {
+    MenuItem::with_id(app, action.id, action.label, true, None::<&str>)
+}
+
+fn desktop_menu_action(id: &str) -> Option<&'static str> {
+    (id == CHECK_FOR_UPDATES.id).then_some(CHECK_FOR_UPDATES.id)
+}
+
 fn format_desktop_version(version: &str, build_time: Option<&str>) -> String {
     let (base_version, version_build_time) = version.split_once('+').unwrap_or((version, ""));
     let is_build_time =
@@ -132,7 +175,19 @@ fn about_short_version_without_build_number(is_macos: bool) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{about_short_version_without_build_number, format_desktop_version};
+    use super::{
+        about_short_version_without_build_number, desktop_menu_action, format_desktop_version,
+        CHECK_FOR_UPDATES,
+    };
+
+    #[test]
+    fn maps_only_the_supported_custom_menu_action() {
+        assert_eq!(
+            desktop_menu_action(CHECK_FOR_UPDATES.id),
+            Some("check_for_updates")
+        );
+        assert_eq!(desktop_menu_action("about"), None);
+    }
 
     #[test]
     fn formats_semver_with_build_time() {

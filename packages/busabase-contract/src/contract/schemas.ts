@@ -55,6 +55,13 @@ export interface NodeOutput {
  * Exported because `updateNodeMetadata` needs exactly this set to decide which
  * keys are always acceptable on a typed node; keeping one list means the
  * allowlist can't drift away from what the schema actually documents.
+ *
+ * Being on this list means "a node of any type may CARRY this key", not "any
+ * endpoint may write it". `visibility` in particular is readable here but is
+ * refused by the metadata PATCH endpoint — it is access control, and only
+ * `nodes.updateVisibility` re-materializes the `effectiveVisibility` column the
+ * ACL actually enforces. Node CREATION does carry it correctly (see
+ * `initializeNodeAcl`), which is why it stays on the list.
  */
 export const NODE_COMMON_METADATA_KEYS = ["entryFile", "visibility", "version", "assetId"] as const;
 

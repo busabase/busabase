@@ -55,6 +55,13 @@ const createCodeChallenge = async (verifier: string) => {
 
 const normalizeOrigin = (value: string) => new URL(value).origin;
 
+/**
+ * No `prompt=login`. Busabase Cloud now shows an OAuth confirmation screen for
+ * native clients, and that screen carries the account switcher — the signed-in
+ * user is named up front and can be changed (or a new account added) without
+ * re-entering credentials. Forcing a full sign-in here would make every
+ * ordinary connect re-type a password to reach the same confirmation step.
+ */
 const buildAuthorizeUrl = async (): Promise<OAuthAuthorizationRequest> => {
   const state = randomBase64Url(24);
   const codeVerifier = randomBase64Url(48);
@@ -68,7 +75,6 @@ const buildAuthorizeUrl = async (): Promise<OAuthAuthorizationRequest> => {
   url.searchParams.set("redirect_uri", busabaseConfig.oauthRedirectUri);
   url.searchParams.set("response_type", "code");
   url.searchParams.set("state", state);
-  url.searchParams.set("prompt", "login");
   return { url: url.toString(), state, codeVerifier };
 };
 

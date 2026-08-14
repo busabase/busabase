@@ -224,6 +224,18 @@ export const PROCEDURE_PERMISSION_POLICY: Record<string, ProcedurePermissionPoli
   "install.planFromGithub": workspace("read"),
   "install.fromGithub": workspace("manage"),
 
+  // ---- agents: spawning/driving an external ACP agent (Claude Code, Codex,
+  // …) is arbitrary local code execution, not scoped to any one node — every
+  // procedure in this family sits at the ceiling, same tier as vault/webhooks.
+  "agents.catalog": workspace("manage"),
+  "agents.sessions.list": workspace("manage"),
+  "agents.sessions.create": workspace("manage"),
+  "agents.sessions.prompt": workspace("manage"),
+  "agents.sessions.cancel": workspace("manage"),
+  "agents.sessions.close": workspace("manage"),
+  "agents.sessions.subscribe": workspace("manage"),
+  "agents.sessions.respondToPermission": workspace("manage"),
+
   "changeRequests.list": node("read"),
   // Same data as `list`, addressed by page number instead of cursor — so it must
   // sit at the same level. A read-level gap here would let a numbered page

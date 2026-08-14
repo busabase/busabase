@@ -3,12 +3,11 @@
  *
  * Two deliberately different tiers (see `PromptTier`):
  *
- * - **capability** — machine-shaped and *exhaustive*: one entry per operation the
- *   node type registers, derived straight from the node-type registry. The body is
- *   a single per-locale template filled with the already-translated operation label
- *   (`messages.operation.*`), so a new node type — including a build-time plugin
- *   one — gets a complete, translated prompt set for free, and the list can never
- *   drift from what the system can actually do.
+ * - **capability** — grouped by what the prompt acts on (Content, Records, Fields,
+ *   etc.). Most entries are derived straight from the node-type registry; a small
+ *   set of type-specific, curated helpers can sit alongside those operations when
+ *   the registry has no matching operation, such as reading a Doc without changing
+ *   it.
  *
  * - **scenario** — human-shaped and *curated*: task-level things people actually
  *   ask for ("import a batch of data", "design the schema for me"), which usually
@@ -201,16 +200,22 @@ const scopeLine = (locale: CoreLocale, scope: NodePromptScope): string => {
 };
 
 /**
- * The approval rule + reply language, appended to every prompt. Busabase is
- * approval-first: an agent must never merge on its own, so this is repeated on
- * each prompt rather than assumed — a pasted prompt is often the only context
- * the agent gets.
+ * Mutating prompts retain Busabase's approval-first rule. Reply-language
+ * guidance is separate because read-only prompts need it without accidentally
+ * asking the agent to create a change.
  */
-const FOOTER: Record<CoreLocale, string> = {
-  en: "Submit the change as a ChangeRequest and never merge it without my approval. Reply to me in English.",
-  "zh-CN": "以 ChangeRequest 提交改动，未经我批准绝不要合并。请用简体中文回复我。",
-  "zh-TW": "以 ChangeRequest 提交變更，未經我核准絕不要合併。請用繁體中文回覆我。",
-  ja: "変更は ChangeRequest として提出し、私の承認なしに絶対にマージしないでください。日本語で返信してください。",
+const APPROVAL_POLICY: Record<CoreLocale, string> = {
+  en: "Submit the change as a ChangeRequest and never merge it without my approval.",
+  "zh-CN": "以 ChangeRequest 提交改动，未经我批准绝不要合并。",
+  "zh-TW": "以 ChangeRequest 提交變更，未經我核准絕不要合併。",
+  ja: "変更は ChangeRequest として提出し、私の承認なしに絶対にマージしないでください。",
+};
+
+const REPLY_LANGUAGE: Record<CoreLocale, string> = {
+  en: "Reply to me in English.",
+  "zh-CN": "请用简体中文回复我。",
+  "zh-TW": "請用繁體中文回覆我。",
+  ja: "日本語で返信してください。",
 };
 
 /** Capability tier: one template per locale, filled with the translated op label. */
@@ -290,16 +295,18 @@ const GROUP_ORDER: GroupKey[] = ["record", "field", "view", "content", "other", 
  * curated prompt genuinely beats the mechanical capability list are listed;
  * everything else falls through to the capability tier alone.
  *
- * `body` receives the already-built target line so every scenario stays
+ * `body` receives the already-built target line so every curated prompt stays
  * consistent about how it names the node.
  */
-interface ScenarioDef {
+interface PromptDef {
   key: string;
+  /** Defaults to `change` so a new prompt cannot silently bypass approval. */
+  intent?: "read-only" | "change";
   label: Record<CoreLocale, string>;
   body: Record<CoreLocale, (target: string) => string>;
 }
 
-const BASE_SCENARIOS: ScenarioDef[] = [
+const BASE_SCENARIOS: PromptDef[] = [
   {
     key: "base-bulk-import",
     label: {
@@ -359,6 +366,7 @@ const BASE_SCENARIOS: ScenarioDef[] = [
   },
   {
     key: "base-summarize",
+    intent: "read-only",
     label: {
       en: "Summarize and report",
       "zh-CN": "汇总分析并出报告",
@@ -378,7 +386,28 @@ const BASE_SCENARIOS: ScenarioDef[] = [
   },
 ];
 
-const DOC_SCENARIOS: ScenarioDef[] = [
+const DOC_READ_PROMPT: PromptDef = {
+  key: "doc-read",
+  intent: "read-only",
+  label: {
+    en: "Read doc",
+    "zh-CN": "读取文档",
+    "zh-TW": "讀取文件",
+    ja: "文書を読む",
+  },
+  body: {
+    en: (t) =>
+      `${t}\n\nRead this document's current content in full and keep it in context for my next request. This is a read-only task: do not modify the document, create a ChangeRequest, or merge anything. After reading it, briefly confirm that you are ready.`,
+    "zh-CN": (t) =>
+      `${t}\n\n请完整读取这篇文档的当前内容，并将它保留为我下一步要求的上下文。这是只读任务：不要修改文档，不要创建 ChangeRequest，也不要合并任何内容。读完后，简短确认你已经准备好。`,
+    "zh-TW": (t) =>
+      `${t}\n\n請完整讀取這篇文件的目前內容，並將它保留為我下一步要求的上下文。這是唯讀任務：不要修改文件，不要建立 ChangeRequest，也不要合併任何內容。讀完後，簡短確認你已經準備好。`,
+    ja: (t) =>
+      `${t}\n\nこの文書の現在の内容をすべて読み、次の依頼のためにコンテキストとして保持してください。これは読み取り専用のタスクです。文書を変更したり、ChangeRequest を作成したり、何かをマージしたりしないでください。読み終えたら、準備ができたことを簡潔に確認してください。`,
+  },
+};
+
+const DOC_SCENARIOS: PromptDef[] = [
   {
     key: "doc-draft",
     label: {
@@ -419,7 +448,7 @@ const DOC_SCENARIOS: ScenarioDef[] = [
   },
 ];
 
-const DRIVE_SCENARIOS: ScenarioDef[] = [
+const DRIVE_SCENARIOS: PromptDef[] = [
   {
     key: "drive-organize",
     label: {
@@ -441,6 +470,7 @@ const DRIVE_SCENARIOS: ScenarioDef[] = [
   },
   {
     key: "drive-summarize",
+    intent: "read-only",
     label: {
       en: "Summarize the contents",
       "zh-CN": "总结文件内容",
@@ -460,7 +490,7 @@ const DRIVE_SCENARIOS: ScenarioDef[] = [
   },
 ];
 
-const SKILL_SCENARIOS: ScenarioDef[] = [
+const SKILL_SCENARIOS: PromptDef[] = [
   {
     key: "skill-improve",
     label: {
@@ -482,7 +512,7 @@ const SKILL_SCENARIOS: ScenarioDef[] = [
   },
 ];
 
-const AIRAPP_SCENARIOS: ScenarioDef[] = [
+const AIRAPP_SCENARIOS: PromptDef[] = [
   {
     key: "airapp-add-feature",
     label: {
@@ -532,7 +562,7 @@ const AIRAPP_SCENARIOS: ScenarioDef[] = [
  * operations exist without ever saying "you can just ask for a different
  * layout".
  */
-const FORM_SCENARIOS: ScenarioDef[] = [
+const FORM_SCENARIOS: PromptDef[] = [
   {
     key: "form-customize-page",
     label: {
@@ -592,7 +622,7 @@ const FORM_SCENARIOS: ScenarioDef[] = [
   },
 ];
 
-const SCENARIOS_BY_TYPE: Record<string, ScenarioDef[]> = {
+const SCENARIOS_BY_TYPE: Record<string, PromptDef[]> = {
   base: BASE_SCENARIOS,
   doc: DOC_SCENARIOS,
   drive: DRIVE_SCENARIOS,
@@ -601,11 +631,16 @@ const SCENARIOS_BY_TYPE: Record<string, ScenarioDef[]> = {
   form: FORM_SCENARIOS,
 };
 
+/** Curated prompts that belong in a capability group rather than Scenarios. */
+const CONTENT_PROMPTS_BY_TYPE: Partial<Record<string, PromptDef[]>> = {
+  doc: [DOC_READ_PROMPT],
+};
+
 /**
  * Scenarios for a single COLUMN. Independent of node type — only a Base has
  * fields, and these are what people actually ask an agent to do to one.
  */
-const FIELD_SCENARIOS: ScenarioDef[] = [
+const FIELD_SCENARIOS: PromptDef[] = [
   {
     key: "field-clean-values",
     label: {
@@ -646,6 +681,7 @@ const FIELD_SCENARIOS: ScenarioDef[] = [
   },
   {
     key: "field-audit",
+    intent: "read-only",
     label: {
       en: "Audit this column for bad data",
       "zh-CN": "检查这一列有没有脏数据",
@@ -690,7 +726,7 @@ const FIELD_SCENARIOS: ScenarioDef[] = [
  * Deliberately the narrowest set in the file: someone who clicked the icon next
  * to one value wants that value changed, explained, or derived — not a sweep.
  */
-const CELL_SCENARIOS: ScenarioDef[] = [
+const CELL_SCENARIOS: PromptDef[] = [
   {
     key: "cell-rewrite",
     label: {
@@ -731,6 +767,7 @@ const CELL_SCENARIOS: ScenarioDef[] = [
   },
   {
     key: "cell-explain",
+    intent: "read-only",
     label: {
       en: "Explain this value",
       "zh-CN": "解释这一格为什么是这样",
@@ -751,7 +788,7 @@ const CELL_SCENARIOS: ScenarioDef[] = [
 ];
 
 /** Scenarios for a single RECORD, opened from the record detail view. */
-const RECORD_SCENARIOS: ScenarioDef[] = [
+const RECORD_SCENARIOS: PromptDef[] = [
   {
     key: "record-complete",
     label: {
@@ -792,6 +829,7 @@ const RECORD_SCENARIOS: ScenarioDef[] = [
   },
   {
     key: "record-explain",
+    intent: "read-only",
     label: {
       en: "Explain this record to me",
       "zh-CN": "给我讲讲这条记录",
@@ -826,23 +864,34 @@ export function buildNodeAgentPrompts(
   const typeLabel = definition?.label ?? context.nodeType;
   const scope = context.scope ?? { kind: "node" };
   const target = TARGET_LINE[locale](context, typeLabel) + scopeLine(locale, scope);
-  const footer = FOOTER[locale];
   const groupLabels = GROUP_LABELS[locale];
 
-  const SCENARIOS_BY_SCOPE: Partial<Record<NodePromptScope["kind"], ScenarioDef[]>> = {
+  const SCENARIOS_BY_SCOPE: Partial<Record<NodePromptScope["kind"], PromptDef[]>> = {
     field: FIELD_SCENARIOS,
     record: RECORD_SCENARIOS,
     cell: CELL_SCENARIOS,
   };
   const scenarioDefs = SCENARIOS_BY_SCOPE[scope.kind] ?? SCENARIOS_BY_TYPE[context.nodeType] ?? [];
 
-  const scenarios: NodePrompt[] = scenarioDefs.map((scenario) => ({
-    key: scenario.key,
-    tier: "scenario",
-    label: scenario.label[locale],
-    group: groupLabels.content,
-    body: `${scenario.body[locale](target)}\n\n${footer}`,
-  }));
+  const buildCuratedPrompt = (prompt: PromptDef, tier: PromptTier, group: string): NodePrompt => {
+    const intent = prompt.intent ?? "change";
+    const footer =
+      intent === "read-only"
+        ? REPLY_LANGUAGE[locale]
+        : `${APPROVAL_POLICY[locale]} ${REPLY_LANGUAGE[locale]}`;
+
+    return {
+      key: prompt.key,
+      tier,
+      label: prompt.label[locale],
+      group,
+      body: `${prompt.body[locale](target)}\n\n${footer}`,
+    };
+  };
+
+  const scenarios = scenarioDefs.map((scenario) =>
+    buildCuratedPrompt(scenario, "scenario", groupLabels.content),
+  );
 
   // Type-specific operations first, then the generic node_* tree ops every type has.
   // A narrowed dialog drops the node-tree operations entirely (moving or renaming
@@ -863,23 +912,32 @@ export function buildNodeAgentPrompts(
     ...(allows ? [] : GENERIC_NODE_OPERATION_KINDS),
   ].filter((kind) => !allows || allows(kind));
 
-  const capabilities: NodePrompt[] = kinds.map((kind) => {
-    const labelKey = operationLabelKeys[kind as keyof typeof operationLabelKeys];
-    // A plugin type's operation may not have an i18n entry yet — fall back to the
-    // registry's own English label rather than rendering an empty row.
-    const opLabel =
-      (labelKey ? messages.operation[labelKey] : undefined) ??
-      definition?.operations.find((operation) => operation.kind === kind)?.label ??
-      kind;
-    const group = groupOf(kind);
-    return {
-      key: kind,
-      tier: "capability",
-      label: opLabel,
-      group: groupLabels[group],
-      body: `${CAPABILITY_TEMPLATE[locale](target, opLabel)}\n\n${footer}`,
-    };
-  });
+  const curatedContentPrompts =
+    scope.kind === "node" ? (CONTENT_PROMPTS_BY_TYPE[context.nodeType] ?? []) : [];
+  const capabilities: NodePrompt[] = [
+    ...curatedContentPrompts.map((prompt) =>
+      buildCuratedPrompt(prompt, "capability", groupLabels.content),
+    ),
+    ...kinds.map((kind): NodePrompt => {
+      const labelKey = operationLabelKeys[kind as keyof typeof operationLabelKeys];
+      // A plugin type's operation may not have an i18n entry yet — fall back to the
+      // registry's own English label rather than rendering an empty row.
+      const opLabel =
+        (labelKey ? messages.operation[labelKey] : undefined) ??
+        definition?.operations.find((operation) => operation.kind === kind)?.label ??
+        kind;
+      const group = groupOf(kind);
+      return {
+        key: kind,
+        tier: "capability",
+        label: opLabel,
+        group: groupLabels[group],
+        body: `${CAPABILITY_TEMPLATE[locale](target, opLabel)}\n\n${APPROVAL_POLICY[locale]} ${
+          REPLY_LANGUAGE[locale]
+        }`,
+      };
+    }),
+  ];
 
   // Stable, readable ordering: group by bucket in GROUP_ORDER, preserving each
   // bucket's registry order inside it.

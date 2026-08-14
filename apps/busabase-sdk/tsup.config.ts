@@ -1,3 +1,4 @@
+import { copyFile, mkdir } from "node:fs/promises";
 import { resolve } from "node:path";
 import { defineConfig } from "tsup";
 
@@ -16,6 +17,8 @@ export default defineConfig({
     oauth: "src/oauth.ts",
     "oauth-node": "src/oauth-node.ts",
     "airapp-node": "src/airapp-node.ts",
+    airapp: "src/airapp.ts",
+    "airapp-gate": "src/airapp-gate.ts",
   },
   format: ["esm"],
   target: "node20",
@@ -29,6 +32,13 @@ export default defineConfig({
   dts: { resolve: true },
   treeshake: true,
   noExternal: [/^busabase-contract/, /^open-domains/, /^openlib/],
+  // The gate's default stylesheet is plain CSS with no build step of its own —
+  // copy it beside the JS so `busabase-sdk/airapp-gate.css` resolves under the
+  // same dist-only `files` allowlist as everything else.
+  async onSuccess() {
+    await mkdir("dist", { recursive: true });
+    await copyFile("src/airapp-gate.css", "dist/airapp-gate.css");
+  },
   esbuildOptions(options) {
     // Bundled workspace packages import each other through package export paths.
     // Resolve bare imports from known workspace symlink locations so esbuild can

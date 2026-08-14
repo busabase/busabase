@@ -55,9 +55,43 @@ export interface AgentIntegrationPluginItem {
   icon: string;
 }
 
-interface AgentIntegrationDialogProps {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
+export function AgentIntegrationPluginCards({
+  items,
+}: {
+  items: readonly AgentIntegrationPluginItem[];
+}) {
+  return (
+    <div className="grid gap-3 sm:grid-cols-2">
+      {items.map((item) => (
+        <a
+          className="group flex min-h-24 items-center gap-3 rounded-md border bg-card p-4 transition-colors hover:bg-muted/60"
+          href={item.href}
+          key={item.href}
+          rel="noopener noreferrer"
+          target="_blank"
+        >
+          <span className="flex size-11 shrink-0 items-center justify-center rounded-md border bg-background">
+            <img alt="" className="size-7 object-contain" height={28} src={item.icon} width={28} />
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="flex items-center gap-1.5 text-sm font-medium text-foreground">
+              {item.title}
+              <ExternalLink
+                aria-hidden="true"
+                className="size-3.5 text-muted-foreground transition-colors group-hover:text-foreground"
+              />
+            </span>
+            <span className="mt-1 block text-xs leading-5 text-muted-foreground">
+              {item.description}
+            </span>
+          </span>
+        </a>
+      ))}
+    </div>
+  );
+}
+
+export interface AgentIntegrationContentProps {
   defaultOrigin?: string;
   /**
    * Which edition to record as the onboarding preference. Both editions are explicit in the URL;
@@ -80,6 +114,11 @@ interface AgentIntegrationDialogProps {
   pluginItems?: readonly AgentIntegrationPluginItem[];
 }
 
+interface AgentIntegrationDialogProps extends AgentIntegrationContentProps {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}
+
 const resolveMessages = (lang: string | undefined, fallback: CoreI18nMessages): CoreI18nMessages =>
   lang && lang in coreMessagesByLocale ? coreMessagesByLocale[lang as CoreLocale] : fallback;
 
@@ -100,20 +139,15 @@ export function createSetupSkillUrl(
   return url.toString();
 }
 
-/**
- * Standalone integration dialog shared by the sidebar button and landing page hero.
- * Hosts may add a Plugin tab by providing their public plugin catalog.
- */
-export function AgentIntegrationDialog({
-  open,
-  onOpenChange,
+/** Shared Agent Integration UI without modal chrome, for dialogs and inline surfaces. */
+export function AgentIntegrationContent({
   defaultOrigin = "http://localhost:15419",
   edition = "desktop",
   editionConfirmed = false,
   lang,
   targetSpaceId,
   pluginItems = [],
-}: AgentIntegrationDialogProps) {
+}: AgentIntegrationContentProps) {
   const contextMessages = useCoreI18n();
   const messages = resolveMessages(lang, contextMessages);
   const [origin, setOrigin] = useState(defaultOrigin);
@@ -194,415 +228,396 @@ export function AgentIntegrationDialog({
   };
 
   return (
+    <Tabs
+      value={transportTab}
+      onValueChange={setTransportTab}
+      className="flex min-h-0 flex-1 flex-col gap-3"
+    >
+      <TabsList className="w-full shrink-0">
+        <TabsTrigger value="skills" className="flex-1">
+          {messages.integration.agentSkills}
+        </TabsTrigger>
+        {pluginItems.length > 0 ? (
+          <TabsTrigger value="plugin" className="flex-1">
+            {messages.integration.plugin}
+          </TabsTrigger>
+        ) : null}
+        <TabsTrigger value="mcp" className="flex-1">
+          MCP
+        </TabsTrigger>
+        <TabsTrigger value="openapi" className="flex-1">
+          {messages.integration.openapi}
+        </TabsTrigger>
+      </TabsList>
+
+      {/* ── Agent Skills tab ──────────────────────────────────────── */}
+      <TabsContent value="skills" className="mt-0 min-h-0 overflow-y-auto pr-1">
+        <div className="grid gap-3">
+          {/* Ask before handing anything over. The prompt below only works in an agent
+                  that can run shell commands, so serving it unconditionally is how a
+                  chat-app user ends up with an agent that claims to have run curl. */}
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-xs text-muted-foreground">
+              {messages.integration.audienceQuestion}
+            </span>
+            <div className="inline-flex overflow-hidden rounded-md border">
+              {(
+                [
+                  { kind: "shell", label: messages.integration.audienceShell },
+                  { kind: "web-chat", label: messages.integration.audienceWebChat },
+                ] satisfies { kind: McpAgentKind; label: string }[]
+              ).map((option) => (
+                <button
+                  aria-pressed={skillAudience === option.kind}
+                  className={`h-8 px-3 text-xs font-medium ${
+                    skillAudience === option.kind
+                      ? "bg-primary text-primary-foreground"
+                      : "bg-background text-muted-foreground hover:bg-muted"
+                  }`}
+                  key={option.kind}
+                  onClick={() => setSkillAudience(option.kind)}
+                  type="button"
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+            <span className="text-foreground/70">{messages.integration.worksWith}</span>
+            {AGENT_BRAND_LINKS.filter((agent) => agent.kind === skillAudience).map((agent) => (
+              <a
+                aria-label={fmt(messages.integration.openAgentWebsite, { agent: agent.name })}
+                key={agent.name}
+                className="underline decoration-dotted underline-offset-2 hover:text-foreground"
+                href={agent.url}
+                rel="noreferrer"
+                target="_blank"
+              >
+                {agent.name}
+              </a>
+            ))}
+          </div>
+          {skillAudience === "shell" ? (
+            <>
+              <p className="text-sm text-muted-foreground">{messages.integration.skillIntro}</p>
+              <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                <a
+                  aria-label={messages.integration.openSetupSkill}
+                  className="inline-flex items-center gap-1 rounded-md border px-2 py-1 hover:bg-muted"
+                  href={skillUrl}
+                  rel="noreferrer"
+                  target="_blank"
+                >
+                  <ExternalLink size={13} />
+                  {skillUrl}
+                </a>
+              </div>
+              <textarea
+                aria-label={messages.integration.promptLabel}
+                className="min-h-[140px] resize-none rounded-md border bg-muted/30 p-3 font-mono text-xs leading-relaxed text-foreground outline-none"
+                readOnly
+                value={agentSkillPrompt}
+              />
+              <div className="flex justify-end">
+                <button
+                  className="inline-flex h-9 items-center gap-2 rounded-md border bg-card px-3 text-sm font-medium hover:bg-muted"
+                  onClick={() => copy(agentSkillPrompt, "prompt")}
+                  type="button"
+                >
+                  {copied === "prompt" ? <Check size={16} /> : <Copy size={16} />}
+                  {copied === "prompt"
+                    ? messages.integration.copied
+                    : messages.integration.copyPrompt}
+                </button>
+              </div>
+            </>
+          ) : (
+            <div className="grid gap-3 rounded-md border border-dashed p-4">
+              {/* Sending a Desktop user to the connector would hand them the
+                      localhost URL that tab shows, which a hosted chat product can
+                      never resolve. Say why instead of offering a dead end. */}
+              <p className="text-sm font-medium text-foreground">
+                {webChatReachable
+                  ? messages.integration.webChatTitle
+                  : messages.integration.webChatDesktopTitle}
+              </p>
+              <p className="text-sm text-muted-foreground">
+                {webChatReachable
+                  ? messages.integration.webChatBody
+                  : messages.integration.webChatDesktopBody}
+              </p>
+              {webChatReachable ? (
+                <div>
+                  <button
+                    className="inline-flex h-9 items-center gap-2 rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground hover:opacity-90"
+                    onClick={() => {
+                      selectMcpMode("cloud");
+                      setTransportTab("mcp");
+                    }}
+                    type="button"
+                  >
+                    {messages.integration.webChatGoToMcp}
+                  </button>
+                </div>
+              ) : null}
+            </div>
+          )}
+        </div>
+      </TabsContent>
+
+      {pluginItems.length > 0 ? (
+        <TabsContent value="plugin" className="mt-0 min-h-0 overflow-y-auto pr-1">
+          <div className="grid gap-3">
+            <p className="text-sm text-muted-foreground">{messages.integration.pluginIntro}</p>
+            <AgentIntegrationPluginCards items={pluginItems} />
+          </div>
+        </TabsContent>
+      ) : null}
+
+      {/* ── MCP tab ───────────────────────────────────────────────── */}
+      <TabsContent value="mcp" className="mt-0 min-h-0 overflow-y-auto pr-1">
+        <div className="grid gap-3">
+          <p className="text-sm text-muted-foreground">{messages.integration.mcpIntro}</p>
+          <div className="grid items-end gap-3 sm:grid-cols-[auto_minmax(0,1fr)]">
+            <div className="grid gap-1">
+              <span className="text-xs font-medium text-foreground">
+                {messages.integration.mcpConnectionMode}
+              </span>
+              <div
+                aria-label={messages.integration.mcpConnectionMode}
+                className="inline-flex h-9 overflow-hidden rounded-md border bg-muted/30"
+                role="group"
+              >
+                {(
+                  [
+                    { mode: "local", label: messages.integration.local },
+                    { mode: "cloud", label: messages.integration.cloud },
+                  ] satisfies { mode: McpConnectionMode; label: string }[]
+                ).map((option) => (
+                  <button
+                    aria-pressed={mcpMode === option.mode}
+                    className={`min-w-20 px-3 text-xs font-medium ${
+                      mcpMode === option.mode
+                        ? "bg-primary text-primary-foreground"
+                        : "text-muted-foreground hover:bg-muted"
+                    }`}
+                    key={option.mode}
+                    onClick={() => selectMcpMode(option.mode)}
+                    type="button"
+                  >
+                    {option.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <label className="grid min-w-0 gap-1">
+              <span className="text-xs font-medium text-foreground">
+                {messages.integration.baseUrl}
+              </span>
+              <input
+                aria-label={messages.integration.baseUrl}
+                aria-invalid={!mcpBaseUrlIsValid}
+                aria-describedby={
+                  mcpBaseUrlIsValid ? undefined : "agent-integration-mcp-base-url-error"
+                }
+                className="h-9 min-w-0 rounded-md border bg-card px-3 font-mono text-xs text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                onBlur={normalizeActiveMcpBaseUrl}
+                onChange={(event) => updateMcpBaseUrl(event.target.value)}
+                spellCheck={false}
+                type="url"
+                value={mcpBaseUrl}
+              />
+              {!mcpBaseUrlIsValid ? (
+                <span
+                  className="text-xs text-destructive"
+                  id="agent-integration-mcp-base-url-error"
+                  role="alert"
+                >
+                  {messages.integration.invalidBaseUrl}
+                </span>
+              ) : null}
+            </label>
+          </div>
+          <div className="grid gap-1">
+            <span className="text-xs font-medium text-foreground">
+              {messages.integration.streamableHttp}
+            </span>
+            <div className="flex items-center gap-2 rounded-md border bg-muted/30 px-3 py-2">
+              <code className="flex-1 truncate font-mono text-xs text-foreground">{mcpUrl}</code>
+              <button
+                className="shrink-0 rounded p-1 hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
+                disabled={!mcpBaseUrlIsValid}
+                onClick={() => copy(mcpUrl, "mcp-http")}
+                type="button"
+                aria-label={messages.integration.copyUrl}
+              >
+                {copied === "mcp-http" ? <Check size={14} /> : <Copy size={14} />}
+              </button>
+            </div>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            {mcpMode === "local"
+              ? messages.integration.mcpLocalHint
+              : messages.integration.mcpCloudHint}
+          </p>
+
+          <Tabs defaultValue="codex" className="grid min-h-0 gap-3">
+            <div className="w-full overflow-x-auto pb-1">
+              <TabsList
+                aria-label={messages.integration.chooseAgent}
+                className="h-10 min-w-max justify-start"
+              >
+                {mcpAgentGuides.map((guide) => (
+                  <TabsTrigger className="shrink-0" key={guide.id} value={guide.id}>
+                    {guide.name}
+                  </TabsTrigger>
+                ))}
+              </TabsList>
+            </div>
+
+            {mcpAgentGuides.map((guide) => {
+              const copyKey = `mcp-setup-${guide.id}`;
+              return (
+                <TabsContent className="mt-0 grid gap-3" key={guide.id} value={guide.id}>
+                  <section className="grid gap-2" aria-labelledby={`${guide.id}-setup-title`}>
+                    <div className="flex items-center justify-between gap-2">
+                      <h3
+                        className="text-xs font-medium text-foreground"
+                        id={`${guide.id}-setup-title`}
+                      >
+                        {messages.integration.quickSetup}
+                      </h3>
+                      <button
+                        aria-label={`${messages.integration.copySetup}: ${guide.name}`}
+                        className="inline-flex h-8 shrink-0 items-center gap-1 rounded-md border bg-card px-2 text-xs font-medium hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
+                        disabled={!mcpBaseUrlIsValid}
+                        onClick={() => copy(guide.setup, copyKey)}
+                        type="button"
+                      >
+                        {copied === copyKey ? <Check size={13} /> : <Copy size={13} />}
+                        {copied === copyKey
+                          ? messages.integration.copied
+                          : messages.integration.copySetup}
+                      </button>
+                    </div>
+                    <pre
+                      className="max-h-44 overflow-auto whitespace-pre-wrap break-words rounded-md border bg-muted/30 p-3 font-mono text-xs leading-relaxed text-foreground"
+                      data-format={guide.format}
+                    >
+                      {guide.setup}
+                    </pre>
+                  </section>
+
+                  <div className="grid gap-3 border-t pt-3 sm:grid-cols-2">
+                    <section className="grid content-start gap-1">
+                      <h3 className="text-xs font-medium text-foreground">
+                        {messages.integration.connect}
+                      </h3>
+                      <p className="text-xs leading-relaxed text-muted-foreground">
+                        {guide.connection}
+                      </p>
+                    </section>
+                    <section className="grid content-start gap-1">
+                      <h3 className="text-xs font-medium text-foreground">
+                        {messages.integration.verify}
+                      </h3>
+                      <p className="text-xs leading-relaxed text-muted-foreground">
+                        {guide.verification}
+                      </p>
+                    </section>
+                  </div>
+
+                  <a
+                    aria-label={`${guide.name}: ${messages.integration.openFullGuide}`}
+                    className="inline-flex w-fit items-center gap-1 text-xs text-primary hover:underline"
+                    href={`${mcpGuideUrl}#${guide.docAnchor}`}
+                    rel="noreferrer"
+                    target="_blank"
+                  >
+                    <ExternalLink size={13} />
+                    {guide.name}: {messages.integration.openFullGuide}
+                  </a>
+                </TabsContent>
+              );
+            })}
+          </Tabs>
+        </div>
+      </TabsContent>
+
+      {/* ── OpenAPI tab ───────────────────────────────────────────── */}
+      <TabsContent value="openapi" className="mt-0 min-h-0 overflow-y-auto pr-1">
+        <div className="grid gap-3">
+          <p className="text-sm text-muted-foreground">{messages.integration.openapiIntro}</p>
+          <div className="grid gap-2">
+            <a
+              className="flex items-center justify-between rounded-md border px-3 py-2.5 text-sm hover:bg-muted"
+              href={openApiDocUrl}
+              rel="noreferrer"
+              target="_blank"
+            >
+              <div className="grid gap-0.5">
+                <span className="font-medium">{messages.integration.interactiveDocs}</span>
+                <span className="font-mono text-xs text-muted-foreground">{openApiDocUrl}</span>
+              </div>
+              <ExternalLink size={15} className="shrink-0 text-muted-foreground" />
+            </a>
+            <div className="flex items-center gap-2 rounded-md border px-3 py-2.5">
+              <div className="grid flex-1 gap-0.5">
+                <span className="text-sm font-medium">{messages.integration.openapiJsonSpec}</span>
+                <span className="font-mono text-xs text-muted-foreground">{openApiJsonUrl}</span>
+              </div>
+              <div className="flex shrink-0 gap-1">
+                <a
+                  className="inline-flex h-8 items-center gap-1 rounded-md border px-2 text-xs hover:bg-muted"
+                  href={openApiJsonUrl}
+                  rel="noreferrer"
+                  target="_blank"
+                >
+                  <ExternalLink size={13} />
+                  {messages.common.open}
+                </a>
+                <button
+                  className="inline-flex h-8 items-center gap-1 rounded-md border px-2 text-xs hover:bg-muted"
+                  onClick={() => copy(openApiJsonUrl, "openapi-url")}
+                  type="button"
+                >
+                  {copied === "openapi-url" ? <Check size={13} /> : <Copy size={13} />}
+                  {messages.integration.copyUrl}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </TabsContent>
+      {copied === "error" ? (
+        <p className="text-destructive text-xs" role="alert">
+          {messages.integration.copyFailed}
+        </p>
+      ) : null}
+    </Tabs>
+  );
+}
+
+/**
+ * Standalone integration dialog shared by the sidebar button and landing page hero.
+ * Hosts may add a Plugin tab by providing their public plugin catalog.
+ */
+export function AgentIntegrationDialog({
+  open,
+  onOpenChange,
+  ...contentProps
+}: AgentIntegrationDialogProps) {
+  const contextMessages = useCoreI18n();
+  const messages = resolveMessages(contentProps.lang, contextMessages);
+
+  return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="flex max-h-[85vh] flex-col gap-4 overflow-hidden sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle>{messages.integration.title}</DialogTitle>
         </DialogHeader>
-        <Tabs
-          value={transportTab}
-          onValueChange={setTransportTab}
-          className="flex min-h-0 flex-1 flex-col gap-3"
-        >
-          <TabsList className="w-full shrink-0">
-            <TabsTrigger value="skills" className="flex-1">
-              {messages.integration.agentSkills}
-            </TabsTrigger>
-            {pluginItems.length > 0 ? (
-              <TabsTrigger value="plugin" className="flex-1">
-                {messages.integration.plugin}
-              </TabsTrigger>
-            ) : null}
-            <TabsTrigger value="mcp" className="flex-1">
-              MCP
-            </TabsTrigger>
-            <TabsTrigger value="openapi" className="flex-1">
-              {messages.integration.openapi}
-            </TabsTrigger>
-          </TabsList>
-
-          {/* ── Agent Skills tab ──────────────────────────────────────── */}
-          <TabsContent value="skills" className="mt-0 min-h-0 overflow-y-auto pr-1">
-            <div className="grid gap-3">
-              {/* Ask before handing anything over. The prompt below only works in an agent
-                  that can run shell commands, so serving it unconditionally is how a
-                  chat-app user ends up with an agent that claims to have run curl. */}
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="text-xs text-muted-foreground">
-                  {messages.integration.audienceQuestion}
-                </span>
-                <div className="inline-flex overflow-hidden rounded-md border">
-                  {(
-                    [
-                      { kind: "shell", label: messages.integration.audienceShell },
-                      { kind: "web-chat", label: messages.integration.audienceWebChat },
-                    ] satisfies { kind: McpAgentKind; label: string }[]
-                  ).map((option) => (
-                    <button
-                      aria-pressed={skillAudience === option.kind}
-                      className={`h-8 px-3 text-xs font-medium ${
-                        skillAudience === option.kind
-                          ? "bg-primary text-primary-foreground"
-                          : "bg-background text-muted-foreground hover:bg-muted"
-                      }`}
-                      key={option.kind}
-                      onClick={() => setSkillAudience(option.kind)}
-                      type="button"
-                    >
-                      {option.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
-                <span className="text-foreground/70">{messages.integration.worksWith}</span>
-                {AGENT_BRAND_LINKS.filter((agent) => agent.kind === skillAudience).map((agent) => (
-                  <a
-                    aria-label={fmt(messages.integration.openAgentWebsite, { agent: agent.name })}
-                    key={agent.name}
-                    className="underline decoration-dotted underline-offset-2 hover:text-foreground"
-                    href={agent.url}
-                    rel="noreferrer"
-                    target="_blank"
-                  >
-                    {agent.name}
-                  </a>
-                ))}
-              </div>
-              {skillAudience === "shell" ? (
-                <>
-                  <p className="text-sm text-muted-foreground">{messages.integration.skillIntro}</p>
-                  <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                    <a
-                      aria-label={messages.integration.openSetupSkill}
-                      className="inline-flex items-center gap-1 rounded-md border px-2 py-1 hover:bg-muted"
-                      href={skillUrl}
-                      rel="noreferrer"
-                      target="_blank"
-                    >
-                      <ExternalLink size={13} />
-                      {skillUrl}
-                    </a>
-                  </div>
-                  <textarea
-                    aria-label={messages.integration.promptLabel}
-                    className="min-h-[140px] resize-none rounded-md border bg-muted/30 p-3 font-mono text-xs leading-relaxed text-foreground outline-none"
-                    readOnly
-                    value={agentSkillPrompt}
-                  />
-                  <div className="flex justify-end">
-                    <button
-                      className="inline-flex h-9 items-center gap-2 rounded-md border bg-card px-3 text-sm font-medium hover:bg-muted"
-                      onClick={() => copy(agentSkillPrompt, "prompt")}
-                      type="button"
-                    >
-                      {copied === "prompt" ? <Check size={16} /> : <Copy size={16} />}
-                      {copied === "prompt"
-                        ? messages.integration.copied
-                        : messages.integration.copyPrompt}
-                    </button>
-                  </div>
-                </>
-              ) : (
-                <div className="grid gap-3 rounded-md border border-dashed p-4">
-                  {/* Sending a Desktop user to the connector would hand them the
-                      localhost URL that tab shows, which a hosted chat product can
-                      never resolve. Say why instead of offering a dead end. */}
-                  <p className="text-sm font-medium text-foreground">
-                    {webChatReachable
-                      ? messages.integration.webChatTitle
-                      : messages.integration.webChatDesktopTitle}
-                  </p>
-                  <p className="text-sm text-muted-foreground">
-                    {webChatReachable
-                      ? messages.integration.webChatBody
-                      : messages.integration.webChatDesktopBody}
-                  </p>
-                  {webChatReachable ? (
-                    <div>
-                      <button
-                        className="inline-flex h-9 items-center gap-2 rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground hover:opacity-90"
-                        onClick={() => {
-                          selectMcpMode("cloud");
-                          setTransportTab("mcp");
-                        }}
-                        type="button"
-                      >
-                        {messages.integration.webChatGoToMcp}
-                      </button>
-                    </div>
-                  ) : null}
-                </div>
-              )}
-            </div>
-          </TabsContent>
-
-          {pluginItems.length > 0 ? (
-            <TabsContent value="plugin" className="mt-0 min-h-0 overflow-y-auto pr-1">
-              <div className="grid gap-3">
-                <p className="text-sm text-muted-foreground">{messages.integration.pluginIntro}</p>
-                <div className="grid gap-3 sm:grid-cols-2">
-                  {pluginItems.map((item) => (
-                    <a
-                      className="group flex min-h-24 items-center gap-3 rounded-md border bg-card p-4 transition-colors hover:bg-muted/60"
-                      href={item.href}
-                      key={item.href}
-                    >
-                      <span className="flex size-11 shrink-0 items-center justify-center rounded-md border bg-background">
-                        <img
-                          alt=""
-                          className="size-7 object-contain"
-                          height={28}
-                          src={item.icon}
-                          width={28}
-                        />
-                      </span>
-                      <span className="min-w-0 flex-1">
-                        <span className="flex items-center gap-1.5 text-sm font-medium text-foreground">
-                          {item.title}
-                          <ExternalLink
-                            aria-hidden="true"
-                            className="size-3.5 text-muted-foreground transition-colors group-hover:text-foreground"
-                          />
-                        </span>
-                        <span className="mt-1 block text-xs leading-5 text-muted-foreground">
-                          {item.description}
-                        </span>
-                      </span>
-                    </a>
-                  ))}
-                </div>
-              </div>
-            </TabsContent>
-          ) : null}
-
-          {/* ── MCP tab ───────────────────────────────────────────────── */}
-          <TabsContent value="mcp" className="mt-0 min-h-0 overflow-y-auto pr-1">
-            <div className="grid gap-3">
-              <p className="text-sm text-muted-foreground">{messages.integration.mcpIntro}</p>
-              <div className="grid items-end gap-3 sm:grid-cols-[auto_minmax(0,1fr)]">
-                <div className="grid gap-1">
-                  <span className="text-xs font-medium text-foreground">
-                    {messages.integration.mcpConnectionMode}
-                  </span>
-                  <div
-                    aria-label={messages.integration.mcpConnectionMode}
-                    className="inline-flex h-9 overflow-hidden rounded-md border bg-muted/30"
-                    role="group"
-                  >
-                    {(
-                      [
-                        { mode: "local", label: messages.integration.local },
-                        { mode: "cloud", label: messages.integration.cloud },
-                      ] satisfies { mode: McpConnectionMode; label: string }[]
-                    ).map((option) => (
-                      <button
-                        aria-pressed={mcpMode === option.mode}
-                        className={`min-w-20 px-3 text-xs font-medium ${
-                          mcpMode === option.mode
-                            ? "bg-primary text-primary-foreground"
-                            : "text-muted-foreground hover:bg-muted"
-                        }`}
-                        key={option.mode}
-                        onClick={() => selectMcpMode(option.mode)}
-                        type="button"
-                      >
-                        {option.label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-                <label className="grid min-w-0 gap-1">
-                  <span className="text-xs font-medium text-foreground">
-                    {messages.integration.baseUrl}
-                  </span>
-                  <input
-                    aria-label={messages.integration.baseUrl}
-                    aria-invalid={!mcpBaseUrlIsValid}
-                    aria-describedby={
-                      mcpBaseUrlIsValid ? undefined : "agent-integration-mcp-base-url-error"
-                    }
-                    className="h-9 min-w-0 rounded-md border bg-card px-3 font-mono text-xs text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                    onBlur={normalizeActiveMcpBaseUrl}
-                    onChange={(event) => updateMcpBaseUrl(event.target.value)}
-                    spellCheck={false}
-                    type="url"
-                    value={mcpBaseUrl}
-                  />
-                  {!mcpBaseUrlIsValid ? (
-                    <span
-                      className="text-xs text-destructive"
-                      id="agent-integration-mcp-base-url-error"
-                      role="alert"
-                    >
-                      {messages.integration.invalidBaseUrl}
-                    </span>
-                  ) : null}
-                </label>
-              </div>
-              <div className="grid gap-1">
-                <span className="text-xs font-medium text-foreground">
-                  {messages.integration.streamableHttp}
-                </span>
-                <div className="flex items-center gap-2 rounded-md border bg-muted/30 px-3 py-2">
-                  <code className="flex-1 truncate font-mono text-xs text-foreground">
-                    {mcpUrl}
-                  </code>
-                  <button
-                    className="shrink-0 rounded p-1 hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
-                    disabled={!mcpBaseUrlIsValid}
-                    onClick={() => copy(mcpUrl, "mcp-http")}
-                    type="button"
-                    aria-label={messages.integration.copyUrl}
-                  >
-                    {copied === "mcp-http" ? <Check size={14} /> : <Copy size={14} />}
-                  </button>
-                </div>
-              </div>
-              <p className="text-xs text-muted-foreground">
-                {mcpMode === "local"
-                  ? messages.integration.mcpLocalHint
-                  : messages.integration.mcpCloudHint}
-              </p>
-
-              <Tabs defaultValue="codex" className="grid min-h-0 gap-3">
-                <div className="w-full overflow-x-auto pb-1">
-                  <TabsList
-                    aria-label={messages.integration.chooseAgent}
-                    className="h-10 min-w-max justify-start"
-                  >
-                    {mcpAgentGuides.map((guide) => (
-                      <TabsTrigger className="shrink-0" key={guide.id} value={guide.id}>
-                        {guide.name}
-                      </TabsTrigger>
-                    ))}
-                  </TabsList>
-                </div>
-
-                {mcpAgentGuides.map((guide) => {
-                  const copyKey = `mcp-setup-${guide.id}`;
-                  return (
-                    <TabsContent className="mt-0 grid gap-3" key={guide.id} value={guide.id}>
-                      <section className="grid gap-2" aria-labelledby={`${guide.id}-setup-title`}>
-                        <div className="flex items-center justify-between gap-2">
-                          <h3
-                            className="text-xs font-medium text-foreground"
-                            id={`${guide.id}-setup-title`}
-                          >
-                            {messages.integration.quickSetup}
-                          </h3>
-                          <button
-                            aria-label={`${messages.integration.copySetup}: ${guide.name}`}
-                            className="inline-flex h-8 shrink-0 items-center gap-1 rounded-md border bg-card px-2 text-xs font-medium hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
-                            disabled={!mcpBaseUrlIsValid}
-                            onClick={() => copy(guide.setup, copyKey)}
-                            type="button"
-                          >
-                            {copied === copyKey ? <Check size={13} /> : <Copy size={13} />}
-                            {copied === copyKey
-                              ? messages.integration.copied
-                              : messages.integration.copySetup}
-                          </button>
-                        </div>
-                        <pre
-                          className="max-h-44 overflow-auto whitespace-pre-wrap break-words rounded-md border bg-muted/30 p-3 font-mono text-xs leading-relaxed text-foreground"
-                          data-format={guide.format}
-                        >
-                          {guide.setup}
-                        </pre>
-                      </section>
-
-                      <div className="grid gap-3 border-t pt-3 sm:grid-cols-2">
-                        <section className="grid content-start gap-1">
-                          <h3 className="text-xs font-medium text-foreground">
-                            {messages.integration.connect}
-                          </h3>
-                          <p className="text-xs leading-relaxed text-muted-foreground">
-                            {guide.connection}
-                          </p>
-                        </section>
-                        <section className="grid content-start gap-1">
-                          <h3 className="text-xs font-medium text-foreground">
-                            {messages.integration.verify}
-                          </h3>
-                          <p className="text-xs leading-relaxed text-muted-foreground">
-                            {guide.verification}
-                          </p>
-                        </section>
-                      </div>
-
-                      <a
-                        aria-label={`${guide.name}: ${messages.integration.openFullGuide}`}
-                        className="inline-flex w-fit items-center gap-1 text-xs text-primary hover:underline"
-                        href={`${mcpGuideUrl}#${guide.docAnchor}`}
-                        rel="noreferrer"
-                        target="_blank"
-                      >
-                        <ExternalLink size={13} />
-                        {guide.name}: {messages.integration.openFullGuide}
-                      </a>
-                    </TabsContent>
-                  );
-                })}
-              </Tabs>
-            </div>
-          </TabsContent>
-
-          {/* ── OpenAPI tab ───────────────────────────────────────────── */}
-          <TabsContent value="openapi" className="mt-0 min-h-0 overflow-y-auto pr-1">
-            <div className="grid gap-3">
-              <p className="text-sm text-muted-foreground">{messages.integration.openapiIntro}</p>
-              <div className="grid gap-2">
-                <a
-                  className="flex items-center justify-between rounded-md border px-3 py-2.5 text-sm hover:bg-muted"
-                  href={openApiDocUrl}
-                  rel="noreferrer"
-                  target="_blank"
-                >
-                  <div className="grid gap-0.5">
-                    <span className="font-medium">{messages.integration.interactiveDocs}</span>
-                    <span className="font-mono text-xs text-muted-foreground">{openApiDocUrl}</span>
-                  </div>
-                  <ExternalLink size={15} className="shrink-0 text-muted-foreground" />
-                </a>
-                <div className="flex items-center gap-2 rounded-md border px-3 py-2.5">
-                  <div className="grid flex-1 gap-0.5">
-                    <span className="text-sm font-medium">
-                      {messages.integration.openapiJsonSpec}
-                    </span>
-                    <span className="font-mono text-xs text-muted-foreground">
-                      {openApiJsonUrl}
-                    </span>
-                  </div>
-                  <div className="flex shrink-0 gap-1">
-                    <a
-                      className="inline-flex h-8 items-center gap-1 rounded-md border px-2 text-xs hover:bg-muted"
-                      href={openApiJsonUrl}
-                      rel="noreferrer"
-                      target="_blank"
-                    >
-                      <ExternalLink size={13} />
-                      {messages.common.open}
-                    </a>
-                    <button
-                      className="inline-flex h-8 items-center gap-1 rounded-md border px-2 text-xs hover:bg-muted"
-                      onClick={() => copy(openApiJsonUrl, "openapi-url")}
-                      type="button"
-                    >
-                      {copied === "openapi-url" ? <Check size={13} /> : <Copy size={13} />}
-                      {messages.integration.copyUrl}
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </TabsContent>
-          {copied === "error" ? (
-            <p className="text-destructive text-xs" role="alert">
-              {messages.integration.copyFailed}
-            </p>
-          ) : null}
-        </Tabs>
+        <AgentIntegrationContent {...contentProps} />
       </DialogContent>
     </Dialog>
   );

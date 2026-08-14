@@ -8,6 +8,7 @@ import { Toaster } from "kui/sonner";
 import {
   Activity,
   Archive,
+  Bot,
   FolderOpen,
   FolderTree,
   Globe,
@@ -60,7 +61,7 @@ const isCoreLocale = (locale: string | undefined): locale is keyof typeof coreMe
  * in" — so the round trip "review an inbox item → go check a Base → back to
  * Inbox" costs one click instead of another trip through the menu.
  */
-type ContextualNavKey = "inbox" | "activity" | "archived" | "assets";
+type ContextualNavKey = "inbox" | "activity" | "archived" | "assets" | "agents";
 
 /** Maps a wouter location onto its contextual destination, or null for everything else. */
 const contextualNavKeyForPath = (location: string): ContextualNavKey | null => {
@@ -69,6 +70,7 @@ const contextualNavKeyForPath = (location: string): ContextualNavKey | null => {
   if (path === "/activity") return "activity";
   if (path === "/archived") return "archived";
   if (path === "/assets" || path.startsWith("/assets/")) return "assets";
+  if (path === "/agents" || path.startsWith("/agents/")) return "agents";
   return null;
 };
 
@@ -84,7 +86,11 @@ const contextualNavKeyForPath = (location: string): ContextualNavKey | null => {
 const CONTEXTUAL_NAV_STORAGE_KEY = "busabase.dashboard.lastContextualNav.v1";
 
 const isContextualNavKey = (value: string | null): value is ContextualNavKey =>
-  value === "inbox" || value === "activity" || value === "archived" || value === "assets";
+  value === "inbox" ||
+  value === "activity" ||
+  value === "archived" ||
+  value === "assets" ||
+  value === "agents";
 
 const readStoredContextualNavKey = (): ContextualNavKey | null => {
   try {
@@ -563,6 +569,8 @@ export function BusabaseDashboardShell({
         return { title: nav.archive, url: "/archived", icon: Archive };
       case "assets":
         return { title: assetsLabel, url: "/assets", icon: Images };
+      case "agents":
+        return { title: "Agents", url: "/agents", icon: Bot };
       default:
         return null;
     }

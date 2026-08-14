@@ -6,10 +6,68 @@ import {
   exchangeBusabaseOAuthCode,
   parseBusabaseOAuthCallback,
   refreshBusabaseOAuthToken,
+  registerBusabaseAirAppOAuthClient,
   revokeBusabaseOAuthToken,
 } from "./oauth.js";
 
 describe("Busabase OAuth", () => {
+  it("registers an exact public AirApp callback", async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body));
+      expect(body).toEqual({
+        client_name: "example-airapp",
+        client_kind: "airapp",
+        scope: "api",
+        redirect_uris: ["https://preview.example/auth/callback"],
+        grant_types: ["authorization_code", "refresh_token"],
+        response_types: ["code"],
+        token_endpoint_auth_method: "none",
+      });
+      return Response.json(
+        {
+          client_id: "mcp_client_dynamic",
+          redirect_uris: body.redirect_uris,
+          scope: "api",
+        },
+        { status: 201 },
+      );
+    });
+    await expect(
+      registerBusabaseAirAppOAuthClient(
+        {
+          appId: "example-airapp",
+          baseUrl: "https://busabase.com",
+          redirectUri: "https://preview.example/auth/callback",
+        },
+        fetchMock as unknown as typeof fetch,
+      ),
+    ).resolves.toEqual({
+      clientId: "mcp_client_dynamic",
+      redirectUri: "https://preview.example/auth/callback",
+    });
+  });
+
+  it("names the version skew when a server ignores the AirApp registration", async () => {
+    // A server that predates AirApp support answers 201 with an `mcp` client and no scope.
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body));
+      return Response.json(
+        { client_id: "mcp_client_dynamic", redirect_uris: body.redirect_uris },
+        { status: 201 },
+      );
+    });
+    await expect(
+      registerBusabaseAirAppOAuthClient(
+        {
+          appId: "example-airapp",
+          baseUrl: "https://busabase.com",
+          redirectUri: "https://preview.example/auth/callback",
+        },
+        fetchMock as unknown as typeof fetch,
+      ),
+    ).rejects.toMatchObject({ code: "unsupported_airapp_registration" });
+  });
+
   it("builds a PKCE request for the local app client", async () => {
     const request = await createBusabaseOAuthRequest({
       baseUrl: "https://busabase.com/api/v1/",
