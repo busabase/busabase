@@ -6,6 +6,7 @@ import type { ReactNode } from "react";
 import rehypeSanitize from "rehype-sanitize";
 import remarkGfm from "remark-gfm";
 import sanitizeHtml from "sanitize-html";
+import type { PageVO } from "./types";
 
 const safeMarkdownRenderer = createMarkdownRenderer({
   remarkPlugins: [remarkGfm, remarkHeading],
@@ -158,3 +159,13 @@ export const sanitizeLandingPageHtml = (html: string): string =>
       }),
     },
   });
+
+/**
+ * Sanitize a CMS Page's stored body for injection. Lives here, next to the sanitizer it wraps,
+ * rather than in `busabase-cms/integration`: `sanitizeLandingPageHtml` drags in remark, rehype
+ * and sanitize-html, and only the component that actually injects the HTML should pay for that.
+ *
+ * Call this immediately before injecting — the sanitize step must never move up to the caller.
+ */
+export const getSanitizedCmsPageBody = (page: Pick<PageVO, "body">): string =>
+  sanitizeLandingPageHtml(page.body);

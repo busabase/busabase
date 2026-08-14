@@ -105,3 +105,41 @@ const safeHtml = sanitizeLandingPageHtml(page.body);
 
 Stored content is always treated as untrusted. `SafeMarkdown` does not execute MDX or pass raw HTML,
 and Page HTML must be sanitized before rendering.
+
+## Next.js integration layer
+
+`busabase-cms/integration` is the batteries-included glue between this SDK and a Next.js app:
+the `BUSABASE_CMS_*` env gate, the memoized cached client with a collision-proof cache key, the
+Post / Page / taxonomy reads with degrade-safe fallbacks, cross-locale Post resolution, and Page
+metadata generation. Bind it once per app.
+
+```ts
+import { createCmsIntegration } from "busabase-cms/integration";
+
+export const cms = createCmsIntegration({
+  appLabel: "ProductReady",           // only used in degrade-safe warning logs
+  cacheNamespace: "productready",     // unique per app: cache key prefix + revalidateTag namespace
+  supportedLocales: ["en", "zh-CN", "ja"],
+  defaultLocale: "en",
+  schemaProfile: "productready",
+  baseSlugs: {
+    posts: "productready-blog-posts",
+    pages: "productready-landing-pages",
+    categories: "productready-categories",
+    tags: "productready-tags",
+  },
+});
+
+// Reads degrade to bundled content instead of throwing; with the env vars unset they make no
+// network attempt at all.
+const posts = await cms.listBusabaseBlogPostsOrFallback();
+```
+
+It reads `BUSABASE_CMS_BASE_URL`, `BUSABASE_CMS_API_KEY` and `BUSABASE_CMS_SPACE_ID` (all three
+required — a partial configuration counts as "off"), plus the optional `BUSABASE_CMS_FOLDER_ID`
+and the four `BUSABASE_CMS_{POSTS,PAGES,CATEGORIES,TAGS}_BASE_SLUG` per-deploy overrides.
+
+`createCmsPostResolver` adds the "CMS Post → bundled MDX → English fallback" cascade for
+`/blog/[...slug]` routes, and `createCmsPageHelpers` resolves a Page plus its metadata. The Page
+body sanitizer stays in `busabase-cms/fumadocs` (`getSanitizedCmsPageBody`) so that consumers of
+`busabase-cms/integration` do not pull remark/rehype/sanitize-html into their bundle.

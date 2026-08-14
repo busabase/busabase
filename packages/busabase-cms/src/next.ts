@@ -42,11 +42,25 @@ export const resolveBusabaseCmsCacheKeyPrefix = (
       "createCachedBusabaseCms requires cache.keyPrefix when the target space cannot be represented without secrets",
     );
   }
+  const schemaProfile = options.schemaProfile ?? "standard";
   return [
     "busabase-cms",
     config.baseUrl,
     config.spaceId ?? "default-space",
-    ...(options.folderId ? [options.folderId, options.schemaProfile ?? "standard"] : []),
+    // With a Folder id the Folder itself is the content identity — the four Bases live inside
+    // it, so the slugs add nothing. WITHOUT one, the Base slugs ARE the only thing that
+    // distinguishes two apps reading different Bases out of the same host + space; leaving them
+    // out of the key made those apps silently share cache entries (cross-app contamination).
+    ...(options.folderId
+      ? [options.folderId, schemaProfile]
+      : [
+          "no-folder",
+          schemaProfile,
+          options.baseSlugs?.posts ?? DEFAULT_POSTS_BASE_SLUG,
+          options.baseSlugs?.pages ?? DEFAULT_PAGES_BASE_SLUG,
+          options.baseSlugs?.categories ?? DEFAULT_CATEGORIES_BASE_SLUG,
+          options.baseSlugs?.tags ?? DEFAULT_TAGS_BASE_SLUG,
+        ]),
   ];
 };
 

@@ -21,7 +21,80 @@ describe("Next.js cache isolation", () => {
         },
         {},
       ),
-    ).toEqual(["busabase-cms", "https://example.busabase.com", "space-a"]);
+    ).toEqual([
+      "busabase-cms",
+      "https://example.busabase.com",
+      "space-a",
+      "no-folder",
+      "standard",
+      "busabase-cms-posts",
+      "busabase-cms-pages",
+      "busabase-cms-categories",
+      "busabase-cms-tags",
+    ]);
+  });
+
+  // Regression: the default key used to stop after host + space when no Folder id was set, so
+  // two apps on the same Busabase host + space reading DIFFERENT Bases via different
+  // `baseSlugs` shared every cache entry — one app served the other app's Posts and Pages.
+  it("isolates folder-less instances that read different Bases in the same space", () => {
+    const keyFor = (prefix: string) =>
+      resolveBusabaseCmsCacheKeyPrefix(
+        {
+          config: { baseUrl: "https://example.busabase.com", spaceId: "space-a" },
+          baseSlugs: {
+            posts: `${prefix}-blog-posts`,
+            pages: `${prefix}-landing-pages`,
+            categories: `${prefix}-categories`,
+            tags: `${prefix}-tags`,
+          },
+        },
+        {},
+      );
+
+    expect(keyFor("productready")).not.toEqual(keyFor("sandock"));
+    expect(keyFor("productready")).toEqual([
+      "busabase-cms",
+      "https://example.busabase.com",
+      "space-a",
+      "no-folder",
+      "standard",
+      "productready-blog-posts",
+      "productready-landing-pages",
+      "productready-categories",
+      "productready-tags",
+    ]);
+  });
+
+  it("isolates folder-less instances by schema profile", () => {
+    const keyFor = (schemaProfile?: string) =>
+      resolveBusabaseCmsCacheKeyPrefix(
+        {
+          schemaProfile,
+          config: { baseUrl: "https://example.busabase.com", spaceId: "space-a" },
+        },
+        {},
+      );
+
+    expect(keyFor("productready")).not.toEqual(keyFor());
+    expect(keyFor("productready")[4]).toBe("productready");
+  });
+
+  it("keeps an explicit keyPrefix as the override, ignoring the derived key entirely", () => {
+    expect(
+      resolveBusabaseCmsCacheKeyPrefix(
+        {
+          config: { baseUrl: "https://example.busabase.com", spaceId: "space-a" },
+          baseSlugs: {
+            posts: "p",
+            pages: "g",
+            categories: "c",
+            tags: "t",
+          },
+        },
+        { keyPrefix: ["busabase-cms", "productready", "space-a"] },
+      ),
+    ).toEqual(["busabase-cms", "productready", "space-a"]);
   });
 
   it("isolates Folder-managed CMS instances by Folder ID", () => {
