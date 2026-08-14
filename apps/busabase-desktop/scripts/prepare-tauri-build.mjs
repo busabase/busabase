@@ -3,15 +3,16 @@
 // Packages apps/busabase's Next.js `output: "standalone"` build into a
 // self-contained sidecar resource for Busabase Desktop.
 //
-// The resulting tree (src-tauri/resources/busabase-server/) contains:
+// The resulting staging tree (src-tauri/r/) contains:
 //   - the entire `.next/standalone` output (server.js + traced node_modules)
 //   - `.next/static` and `public` copied next to the app's server.js
 //   - a bundled `node` runtime
+//   - a Windows `.cmd` launcher that resolves runtime paths via `%~dp0`
 //   - entry.json describing where server.js and node live (relative paths)
 //
-// At runtime the Rust layer reads entry.json, then launches
-// `node <server.js>` on port 15419 as the Busabase sidecar. The desktop SPA
-// renders that sidecar's /dashboard.
+// At runtime the Rust layer reads entry.json, then launches the Windows wrapper
+// or `node <server.js>` directly on other platforms. The desktop SPA renders
+// that sidecar's /dashboard.
 
 import { execFile } from "node:child_process";
 import { createWriteStream, constants as fsConstants } from "node:fs";
@@ -32,11 +33,15 @@ const standaloneDir = join(busabaseDir, ".next", "standalone");
 const staticDir = join(busabaseDir, ".next", "static");
 const publicDir = join(busabaseDir, "public");
 const migrationsDir = join(busabaseDir, "src", "db", "migrations");
-const resourceDir = join(desktopDir, "src-tauri", "resources", "busabase-server");
+// Keep the staging path short so NSIS can read deeply nested Next.js dependencies
+// without exceeding the legacy Win32 MAX_PATH limit. Tauri still installs this
+// directory as `busabase-server/`; only the build-time source path is shortened.
+const resourceDir = join(desktopDir, "src-tauri", "r");
 const macOSEntitlementsPath = join(desktopDir, "src-tauri", "Entitlements.plist");
 const buildTimePath = join(desktopDir, "src-tauri", ".build-time");
 
 const platformNodeName = process.platform === "win32" ? "node.exe" : "node";
+const windowsLauncherName = "busabase-sidecar.cmd";
 const macOSNativeBinaryExtensions = new Set([".dylib", ".node"]);
 
 const isBuildTime = (value) => /^\d{12}$/.test(value);
@@ -268,6 +273,25 @@ const findServerEntry = async () => {
   throw new Error("Could not find apps/busabase/server.js in the standalone build output.");
 };
 
+const writeWindowsLauncher = async (appRel) => {
+  if (process.platform !== "win32") return undefined;
+
+  const windowsAppRel = appRel.split("/").join("\\");
+  await writeFile(
+    join(resourceDir, windowsLauncherName),
+    [
+      "@echo off",
+      "setlocal",
+      "set DIR=%~dp0",
+      `cd /d "%DIR%${windowsAppRel}"`,
+      `"%DIR%${platformNodeName}" "server.js" %*`,
+      "",
+    ].join("\r\n"),
+    "utf8",
+  );
+  return windowsLauncherName;
+};
+
 const main = async () => {
   const buildTime = resolveBuildTime();
   await writeFile(buildTimePath, `${buildTime}\n`, "utf8");
@@ -344,9 +368,10 @@ const main = async () => {
     nodeSource = `process.execPath (${process.execPath})`;
   }
 
+  const launcher = await writeWindowsLauncher(appRel);
   await writeFile(
     join(resourceDir, "entry.json"),
-    `${JSON.stringify({ server: serverRel, node: platformNodeName }, null, 2)}\n`,
+    `${JSON.stringify({ server: serverRel, node: platformNodeName, launcher }, null, 2)}\n`,
     "utf8",
   );
 
@@ -357,6 +382,7 @@ const main = async () => {
       `  build:  ${buildTime}\n` +
       `  server: ${serverRel}\n` +
       `  node:   ${platformNodeName} (${Math.round(nodeStats.size / 1024 / 1024)} MB) via ${nodeSource}\n` +
+      `  launch: ${launcher ?? "direct"}\n` +
       `  pglite: ${relative(repoDir, migrationsDir)} -> ${appRel}/src/db/migrations\n` +
       `  signed: ${signedBinaryCount} macOS native binaries\n` +
       `  appDir: ${relative(repoDir, appDir)}`,

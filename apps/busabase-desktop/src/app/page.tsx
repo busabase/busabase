@@ -6,6 +6,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { AutostartToggle } from "../components/autostart-toggle";
 import { DesktopTitlebar } from "../components/desktop-titlebar";
 import { CLOUD_CONNECT_RETURNED, parseCloudConnectReturn } from "../lib/deep-link";
+import { useDesktopMenuActions } from "../lib/desktop-menu-actions";
 
 interface BusabaseSidecarStatus {
   running: boolean;
@@ -39,6 +40,7 @@ const DOWNLOAD_INSTALL_TIMEOUT_MS = 15 * 60 * 1000;
 type BusabaseUpdateStatus =
   | "idle"
   | "checking"
+  | "up-to-date"
   | "available"
   | "downloading"
   | "installed"
@@ -77,6 +79,7 @@ export default function Page() {
   } | null>(null);
   const [updateStatus, setUpdateStatus] = useState<BusabaseUpdateStatus>("idle");
   const [updateMessage, setUpdateMessage] = useState<string | null>(null);
+  const [showManualCheckFeedback, setShowManualCheckFeedback] = useState(false);
   const startedRef = useRef(false);
   const frameRef = useRef<HTMLIFrameElement | null>(null);
   const updateFoundRef = useRef(false);
@@ -107,7 +110,12 @@ export default function Page() {
         reveal(status);
         return;
       }
-      setMessage(status.error ?? "Local Busabase is starting…");
+      if (status.error) {
+        setFailed(true);
+        setMessage(status.error);
+        return;
+      }
+      setMessage("Local Busabase is starting…");
     } catch (error) {
       setFailed(true);
       setMessage(error instanceof Error ? error.message : String(error));
@@ -135,6 +143,7 @@ export default function Page() {
             window.clearInterval(timer);
             reveal(status);
           } else if (status.error) {
+            setFailed(true);
             setMessage(status.error);
           }
         })
@@ -236,11 +245,13 @@ export default function Page() {
   }, [appUrl, canUseTauriCommands]);
 
   const checkForUpdate = useCallback(
-    async (options?: { showError?: boolean }) => {
+    async (options?: { manual?: boolean }) => {
       if (!canUseTauriCommands || (updateFoundRef.current && updateStatusRef.current !== "error")) {
         return;
       }
 
+      const isManual = options?.manual === true;
+      setShowManualCheckFeedback(isManual);
       setUpdateStatus("checking");
       setUpdateMessage(null);
       try {
@@ -249,7 +260,8 @@ export default function Page() {
         if (!available) {
           updateFoundRef.current = false;
           setUpdate(null);
-          setUpdateStatus("idle");
+          setUpdateStatus(isManual ? "up-to-date" : "idle");
+          setUpdateMessage(isManual ? "Busabase Desktop is up to date." : null);
           return;
         }
 
@@ -263,16 +275,28 @@ export default function Page() {
         console.error("[busabase-desktop] Update check failed", error);
         updateFoundRef.current = false;
         setUpdate(null);
-        setUpdateStatus(options?.showError ? "error" : "idle");
+        setUpdateStatus(isManual ? "error" : "idle");
         setUpdateMessage(
-          options?.showError
-            ? "Update check failed. Try again after reopening Busabase Desktop."
-            : null,
+          isManual ? "Update check failed. Try again after reopening Busabase Desktop." : null,
         );
       }
     },
     [canUseTauriCommands],
   );
+
+  useEffect(() => {
+    if (updateStatus !== "up-to-date" && updateStatus !== "error") {
+      return;
+    }
+
+    const timeout = window.setTimeout(() => {
+      setUpdateStatus("idle");
+      setUpdateMessage(null);
+      setShowManualCheckFeedback(false);
+    }, 5000);
+
+    return () => window.clearTimeout(timeout);
+  }, [updateStatus]);
 
   useEffect(() => {
     if (!canUseTauriCommands) {
@@ -297,7 +321,7 @@ export default function Page() {
 
   const installUpdate = useCallback(async () => {
     if (!update) {
-      await checkForUpdate({ showError: true });
+      await checkForUpdate({ manual: true });
       return;
     }
 
@@ -355,20 +379,36 @@ export default function Page() {
     }
   }, [checkForUpdate, update]);
 
+  const checkForUpdatesFromMenu = useCallback(() => {
+    if (updateStatusRef.current === "available") {
+      void installUpdate();
+      return;
+    }
+
+    void checkForUpdate({ manual: true });
+  }, [checkForUpdate, installUpdate]);
+
+  useDesktopMenuActions({ onCheckForUpdates: checkForUpdatesFromMenu });
+
   const showUpdateControl =
+    (showManualCheckFeedback && (updateStatus === "checking" || updateStatus === "up-to-date")) ||
     updateStatus === "available" ||
     updateStatus === "downloading" ||
     updateStatus === "installed" ||
     updateStatus === "error";
 
   const updateTitle =
-    updateStatus === "available"
-      ? "New version available"
-      : updateStatus === "downloading"
-        ? "Installing update"
-        : updateStatus === "installed"
-          ? "Restarting Busabase Desktop"
-          : "Update failed";
+    updateStatus === "checking"
+      ? "Checking for updates"
+      : updateStatus === "up-to-date"
+        ? "Busabase Desktop is up to date"
+        : updateStatus === "available"
+          ? "New version available"
+          : updateStatus === "downloading"
+            ? "Installing update"
+            : updateStatus === "installed"
+              ? "Restarting Busabase Desktop"
+              : "Update failed";
   const updateMeta =
     updateStatus === "available"
       ? update?.version
@@ -389,7 +429,9 @@ export default function Page() {
       >
         {updateStatus === "available" ? (
           <Download aria-hidden="true" />
-        ) : updateStatus === "installed" || updateStatus === "error" ? (
+        ) : updateStatus === "up-to-date" ||
+          updateStatus === "installed" ||
+          updateStatus === "error" ? (
           <RotateCcw aria-hidden="true" />
         ) : (
           <RefreshCw className="desktop-update-button-spin" aria-hidden="true" />
