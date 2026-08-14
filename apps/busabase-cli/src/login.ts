@@ -71,10 +71,18 @@ const say = (message: string): void => {
 };
 
 /** True for a loopback host — typically an open-source local server, which has no login. */
-const isLocalHost = (baseUrl: string): boolean => {
+export const isLocalHost = (baseUrl: string): boolean => {
   try {
     const { hostname } = new URL(baseUrl);
-    return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1";
+    // `new URL("http://[::1]:port").hostname` keeps the brackets, so both forms must be listed
+    // or a self-hosted server on IPv6 loopback wrongly takes the device-code login path instead
+    // of connecting straight through as an open local server.
+    return (
+      hostname === "localhost" ||
+      hostname === "127.0.0.1" ||
+      hostname === "::1" ||
+      hostname === "[::1]"
+    );
   } catch {
     return false;
   }

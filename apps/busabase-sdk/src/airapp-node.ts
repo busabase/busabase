@@ -5,12 +5,15 @@ import {
   createBusabaseOAuthRequest,
   exchangeBusabaseOAuthCode,
   parseBusabaseOAuthCallback,
+  registerBusabaseAirAppOAuthClient,
 } from "./oauth.js";
 import {
   type BusabaseAirAppCredentialStoreOptions,
   getBusabaseAirAppAccessToken,
+  loadBusabaseAirAppDynamicClientId,
   loadBusabaseAirAppOAuthCredential,
   revokeBusabaseAirAppOAuthCredential,
+  storeBusabaseAirAppDynamicClientId,
   storeBusabaseAirAppOAuthCredential,
   storeBusabaseAirAppSelectedSpace,
 } from "./oauth-node.js";
@@ -103,6 +106,10 @@ const jsonError = (status: number, reason: GatewayReason, message: string, data?
     { status },
   );
 
+// `new URL("http://[::1]:3000").hostname` keeps the brackets, so both spellings must be listed or
+// an IPv6 dev server needlessly registers a dynamic client instead of using the shared one.
+const LOOPBACK_HOSTNAMES = ["localhost", "127.0.0.1", "::1", "[::1]"];
+
 const normalizeOrigin = (raw: string, fallback = DEFAULT_CLOUD_BASE_URL) => {
   const withoutApi = String(raw || fallback)
     .trim()
@@ -123,7 +130,7 @@ const normalizeOrigin = (raw: string, fallback = DEFAULT_CLOUD_BASE_URL) => {
   ) {
     throw new BusabaseOAuthError("invalid_base_url", "Busabase base URL must be an origin");
   }
-  const loopback = ["localhost", "127.0.0.1", "::1"].includes(url.hostname);
+  const loopback = LOOPBACK_HOSTNAMES.includes(url.hostname);
   if (url.protocol !== "https:" && !(url.protocol === "http:" && loopback)) {
     throw new BusabaseOAuthError(
       "invalid_base_url",
@@ -134,6 +141,11 @@ const normalizeOrigin = (raw: string, fallback = DEFAULT_CLOUD_BASE_URL) => {
 };
 
 const requestOrigin = (request: Request) => new URL(request.url).origin;
+
+const isLoopbackOrigin = (origin: string) => {
+  const url = new URL(origin);
+  return url.protocol === "http:" && LOOPBACK_HOSTNAMES.includes(url.hostname);
+};
 
 const assertSameOrigin = (request: Request) => {
   const origin = request.headers.get("origin");
@@ -169,9 +181,11 @@ export class BusabaseAirAppLocalGateway {
   > &
     BusabaseAirAppLocalGatewayOptions;
   readonly #pendingOAuth = new Map<string, PendingOAuth>();
+  readonly #usesDefaultClient: boolean;
   #environmentSelectedSpace: AuthSpace | undefined;
 
   constructor(options: BusabaseAirAppLocalGatewayOptions) {
+    this.#usesDefaultClient = !options.clientId;
     this.#options = {
       ...options,
       appId: options.appId,
@@ -340,22 +354,57 @@ export class BusabaseAirAppLocalGateway {
 
   statusResponse = async () => Response.json(await this.status());
 
+  /** Resolve the client for this callback, then probe the authorize endpoint with it. */
+  async #startAuthorization(
+    target: { appId: string; baseUrl: string; redirectUri: string },
+    needsDynamicClient: boolean,
+    forceRegistration: boolean,
+  ) {
+    let clientId = this.#options.clientId;
+    let reusedStoredClient = false;
+    if (needsDynamicClient) {
+      const stored = forceRegistration
+        ? null
+        : loadBusabaseAirAppDynamicClientId(target, this.#options.credentialStore);
+      if (stored) {
+        clientId = stored;
+        reusedStoredClient = true;
+      } else {
+        const registration = await registerBusabaseAirAppOAuthClient(target, this.#fetch());
+        clientId = registration.clientId;
+        storeBusabaseAirAppDynamicClientId({ ...target, clientId }, this.#options.credentialStore);
+      }
+    }
+    const oauthRequest = await createBusabaseOAuthRequest({
+      baseUrl: target.baseUrl,
+      redirectUri: target.redirectUri,
+      clientId,
+    });
+    const probe = await this.#fetch()(oauthRequest.authorizeUrl, {
+      headers: { accept: "text/html" },
+      redirect: "manual",
+      signal: AbortSignal.timeout(this.#options.requestTimeoutMs),
+    });
+    return { oauthRequest, probe, reusedStoredClient };
+  }
+
   start = async (request: Request): Promise<Response> => {
     try {
       assertSameOrigin(request);
       const body = await readInput(request);
       const baseUrl = normalizeOrigin(String(body.base_url || ""), this.cloudBaseUrl);
       const redirectUri = new URL("/auth/callback", requestOrigin(request)).toString();
-      const oauthRequest = await createBusabaseOAuthRequest({
-        baseUrl,
-        redirectUri,
-        clientId: this.#options.clientId,
-      });
-      const probe = await this.#fetch()(oauthRequest.authorizeUrl, {
-        headers: { accept: "text/html" },
-        redirect: "manual",
-        signal: AbortSignal.timeout(this.#options.requestTimeoutMs),
-      });
+      const needsDynamicClient =
+        this.#usesDefaultClient && !isLoopbackOrigin(requestOrigin(request));
+      const target = { appId: this.#options.appId, baseUrl, redirectUri };
+
+      let attempt = await this.#startAuthorization(target, needsDynamicClient, false);
+      // A stored client id can expire or be revoked server-side. Re-register once so the AirApp
+      // heals itself instead of failing every connect from that point on.
+      if (attempt.probe.status >= 400 && attempt.reusedStoredClient) {
+        attempt = await this.#startAuthorization(target, needsDynamicClient, true);
+      }
+      const { oauthRequest, probe } = attempt;
       if (probe.status >= 400) {
         throw new BusabaseOAuthError(
           "oauth_unavailable",
@@ -393,7 +442,7 @@ export class BusabaseAirAppLocalGateway {
         {
           appId: this.#options.appId,
           baseUrl: pending.baseUrl,
-          clientId: this.#options.clientId,
+          clientId: pending.clientId,
           tokenSet,
         },
         this.#options.credentialStore,

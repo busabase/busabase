@@ -3,6 +3,9 @@ import { normalizeBaseUrl } from "./url.js";
 
 export { BUSABASE_AIRAPP_CLIENT_ID };
 
+/** The only scope an AirApp ever requests; bound to the `/api/v1` resource. */
+export const AIRAPP_OAUTH_SCOPE = "api";
+
 export interface BusabaseOAuthRequest {
   authorizeUrl: string;
   baseUrl: string;
@@ -34,6 +37,12 @@ export interface BusabaseOAuthTokenSet {
     email: string;
     image: string | null;
   };
+}
+
+export interface RegisterBusabaseAirAppOAuthClientInput {
+  appId: string;
+  baseUrl: string;
+  redirectUri: string;
 }
 
 export class BusabaseOAuthError extends Error {
@@ -90,6 +99,61 @@ const digestBase64Url = async (value: string) => {
   return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 };
 
+/** Register an exact HTTPS callback for a public AirApp OAuth client. */
+export async function registerBusabaseAirAppOAuthClient(
+  input: RegisterBusabaseAirAppOAuthClientInput,
+  fetchImpl: typeof fetch = fetch,
+) {
+  const baseUrl = oauthBaseUrl(input.baseUrl);
+  const redirectUri = new URL(input.redirectUri).toString();
+  const response = await fetchImpl(new URL("/api/oauth/register", baseUrl), {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      client_name: input.appId,
+      client_kind: "airapp",
+      scope: AIRAPP_OAUTH_SCOPE,
+      redirect_uris: [redirectUri],
+      grant_types: ["authorization_code", "refresh_token"],
+      response_types: ["code"],
+      token_endpoint_auth_method: "none",
+    }),
+  });
+  const body = (await response.json().catch(() => null)) as Record<string, unknown> | null;
+  if (!response.ok) {
+    throw new BusabaseOAuthError(
+      typeof body?.error === "string" ? body.error : "client_registration_failed",
+      typeof body?.error_description === "string"
+        ? body.error_description
+        : `Busabase OAuth client registration failed (${response.status})`,
+      response.status,
+    );
+  }
+  if (
+    typeof body?.client_id !== "string" ||
+    !Array.isArray(body.redirect_uris) ||
+    body.redirect_uris.length !== 1 ||
+    body.redirect_uris[0] !== redirectUri
+  ) {
+    throw new BusabaseOAuthError(
+      "invalid_client_registration",
+      "Busabase returned an invalid OAuth client registration",
+    );
+  }
+  // A server that predates AirApp registration silently issues an `mcp` client instead, which
+  // then fails at /api/oauth/authorize with an opaque 400. Detect the skew here where the
+  // message can name the real cause.
+  const grantedScopes =
+    typeof body.scope === "string" ? body.scope.split(/\s+/).filter(Boolean) : null;
+  if (!grantedScopes?.includes(AIRAPP_OAUTH_SCOPE)) {
+    throw new BusabaseOAuthError(
+      "unsupported_airapp_registration",
+      `This Busabase server did not grant the "${AIRAPP_OAUTH_SCOPE}" scope to a dynamically registered AirApp. Upgrade Busabase, or run the AirApp on a loopback address to use the shared AirApp client.`,
+    );
+  }
+  return { clientId: body.client_id, redirectUri };
+}
+
 /** Build a public-client OAuth 2.1 authorization request with PKCE S256. */
 export async function createBusabaseOAuthRequest(
   input: CreateBusabaseOAuthRequestInput,
@@ -105,7 +169,7 @@ export async function createBusabaseOAuthRequest(
     response_type: "code",
     client_id: clientId,
     resource,
-    scope: "api",
+    scope: AIRAPP_OAUTH_SCOPE,
     code_challenge: await digestBase64Url(codeVerifier),
     code_challenge_method: "S256",
     redirect_uri: redirectUri,

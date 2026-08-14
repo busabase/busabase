@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createBusabaseAirAppLocalGateway } from "./airapp-node.js";
 import {
+  loadBusabaseAirAppDynamicClientId,
   loadBusabaseAirAppOAuthCredential,
   storeBusabaseAirAppOAuthCredential,
 } from "./oauth-node.js";
@@ -166,6 +167,220 @@ describe("local AirApp gateway readiness", () => {
       id: "spc_2",
       name: "Globex",
     });
+  });
+});
+
+describe("local AirApp gateway OAuth", () => {
+  it("keeps the shared client for loopback callbacks", async () => {
+    const requests: Request[] = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const upstream = input instanceof Request ? input : new Request(input, init);
+      requests.push(upstream);
+      return new Response(null, { status: 302 });
+    });
+    const gateway = createBusabaseAirAppLocalGateway({
+      appId: APP_ID,
+      credentialStore: { rootDir },
+      fetch: fetchMock as unknown as typeof fetch,
+    });
+    const response = await gateway.start(
+      request("/auth/start", {
+        method: "POST",
+        headers: { origin: "http://127.0.0.1:3111" },
+      }),
+    );
+    expect(response.status).toBe(303);
+    const authorize = new URL(requests[0]?.url || "");
+    expect(authorize.pathname).toBe("/api/oauth/authorize");
+    expect(authorize.searchParams.get("client_id")).toBe("busabase-airapp");
+    expect(requests).toHaveLength(1);
+  });
+
+  it("registers and uses an exact client for an HTTPS callback", async () => {
+    const requests: Request[] = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const upstream = input instanceof Request ? input : new Request(input, init);
+      requests.push(upstream);
+      const url = new URL(upstream.url);
+      if (url.pathname === "/api/oauth/register") {
+        const body = (await upstream.json()) as { client_kind: string; redirect_uris: string[] };
+        expect(body.client_kind).toBe("airapp");
+        expect(body.redirect_uris).toEqual(["https://preview.example/auth/callback"]);
+        return Response.json(
+          { client_id: "airapp_client_dynamic", redirect_uris: body.redirect_uris, scope: "api" },
+          { status: 201 },
+        );
+      }
+      if (url.pathname === "/api/oauth/token") {
+        const body = new URLSearchParams(await upstream.text());
+        expect(body.get("client_id")).toBe("airapp_client_dynamic");
+        expect(body.get("redirect_uri")).toBe("https://preview.example/auth/callback");
+        return Response.json({
+          access_token: "dynamic_access",
+          refresh_token: "dynamic_refresh",
+          expires_in: 3600,
+          scope: "api",
+          token_type: "Bearer",
+        });
+      }
+      return new Response(null, { status: 302 });
+    });
+    const gateway = createBusabaseAirAppLocalGateway({
+      appId: APP_ID,
+      credentialStore: { rootDir },
+      fetch: fetchMock as unknown as typeof fetch,
+    });
+    const response = await gateway.start(
+      new Request("https://preview.example/auth/start", {
+        method: "POST",
+        headers: { origin: "https://preview.example" },
+      }),
+    );
+    expect(response.status).toBe(303);
+    const authorize = new URL(requests[1]?.url || "");
+    expect(authorize.pathname).toBe("/api/oauth/authorize");
+    expect(authorize.searchParams.get("client_id")).toBe("airapp_client_dynamic");
+    expect(authorize.searchParams.get("redirect_uri")).toBe(
+      "https://preview.example/auth/callback",
+    );
+    const callback = await gateway.callback(
+      new Request(
+        `https://preview.example/auth/callback?code=code_1&state=${authorize.searchParams.get("state")}&iss=${encodeURIComponent("https://busabase.com")}`,
+      ),
+    );
+    expect(callback.status).toBe(303);
+    expect(loadBusabaseAirAppOAuthCredential(APP_ID, { rootDir })).toMatchObject({
+      clientId: "airapp_client_dynamic",
+      accessToken: "dynamic_access",
+      refreshToken: "dynamic_refresh",
+    });
+  });
+
+  it("keeps the shared client for an IPv6 loopback callback", async () => {
+    const requests: Request[] = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      requests.push(input instanceof Request ? input : new Request(input, init));
+      return new Response(null, { status: 302 });
+    });
+    const gateway = createBusabaseAirAppLocalGateway({
+      appId: APP_ID,
+      credentialStore: { rootDir },
+      fetch: fetchMock as unknown as typeof fetch,
+    });
+    const response = await gateway.start(
+      new Request("http://[::1]:3111/auth/start", {
+        method: "POST",
+        headers: { origin: "http://[::1]:3111" },
+      }),
+    );
+    expect(response.status).toBe(303);
+    const authorize = new URL(requests[0]?.url || "");
+    expect(authorize.pathname).toBe("/api/oauth/authorize");
+    expect(authorize.searchParams.get("client_id")).toBe("busabase-airapp");
+    expect(requests).toHaveLength(1);
+  });
+
+  it("reuses the persisted dynamic client instead of re-registering after a restart", async () => {
+    let registrations = 0;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const upstream = input instanceof Request ? input : new Request(input, init);
+      if (new URL(upstream.url).pathname === "/api/oauth/register") {
+        registrations += 1;
+        const body = (await upstream.json()) as { redirect_uris: string[] };
+        return Response.json(
+          {
+            client_id: `airapp_client_${registrations}`,
+            redirect_uris: body.redirect_uris,
+            scope: "api",
+          },
+          { status: 201 },
+        );
+      }
+      return new Response(null, { status: 302 });
+    });
+    const startOnce = async () => {
+      // A fresh gateway each time stands in for a restarted AirApp process.
+      const gateway = createBusabaseAirAppLocalGateway({
+        appId: APP_ID,
+        credentialStore: { rootDir },
+        fetch: fetchMock as unknown as typeof fetch,
+      });
+      const response = await gateway.start(
+        new Request("https://preview.example/auth/start", {
+          method: "POST",
+          headers: { origin: "https://preview.example" },
+        }),
+      );
+      expect(response.status).toBe(303);
+    };
+
+    await startOnce();
+    await startOnce();
+    await startOnce();
+
+    expect(registrations).toBe(1);
+    expect(
+      loadBusabaseAirAppDynamicClientId(
+        {
+          appId: APP_ID,
+          baseUrl: "https://busabase.com",
+          redirectUri: "https://preview.example/auth/callback",
+        },
+        { rootDir },
+      ),
+    ).toBe("airapp_client_1");
+  });
+
+  it("re-registers when the stored dynamic client is no longer accepted", async () => {
+    let registrations = 0;
+    let firstClientExpired = false;
+    const authorizedClientIds: string[] = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const upstream = input instanceof Request ? input : new Request(input, init);
+      const url = new URL(upstream.url);
+      if (url.pathname === "/api/oauth/register") {
+        registrations += 1;
+        const body = (await upstream.json()) as { redirect_uris: string[] };
+        return Response.json(
+          {
+            client_id: `airapp_client_${registrations}`,
+            redirect_uris: body.redirect_uris,
+            scope: "api",
+          },
+          { status: 201 },
+        );
+      }
+      const clientId = url.searchParams.get("client_id") || "";
+      authorizedClientIds.push(clientId);
+      const expired = clientId === "airapp_client_1" && firstClientExpired;
+      return new Response(null, { status: expired ? 400 : 302 });
+    });
+    const startOnce = async () => {
+      const gateway = createBusabaseAirAppLocalGateway({
+        appId: APP_ID,
+        credentialStore: { rootDir },
+        fetch: fetchMock as unknown as typeof fetch,
+      });
+      return gateway.start(
+        new Request("https://preview.example/auth/start", {
+          method: "POST",
+          headers: { origin: "https://preview.example" },
+        }),
+      );
+    };
+
+    // First connect registers `airapp_client_1` while it is still valid.
+    expect((await startOnce()).status).toBe(303);
+    expect(authorizedClientIds).toEqual(["airapp_client_1"]);
+
+    // It later expires server-side; the next connect reuses the stored id, is rejected,
+    // re-registers, and recovers without user action.
+    firstClientExpired = true;
+    const recovered = await startOnce();
+    expect(recovered.status).toBe(303);
+    expect(recovered.headers.get("location")).toContain("client_id=airapp_client_2");
+    expect(registrations).toBe(2);
+    expect(authorizedClientIds).toEqual(["airapp_client_1", "airapp_client_1", "airapp_client_2"]);
   });
 });
 
