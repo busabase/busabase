@@ -2,6 +2,7 @@ import { ORPCError } from "@orpc/server";
 import { RPCHandler } from "@orpc/server/fetch";
 import { BatchHandlerPlugin } from "@orpc/server/plugins";
 import { runWithBusabaseContext, runWithLocalContext } from "busabase-core/context";
+import { checkAgentsRequestOrigin } from "busabase-core/domains/agents/logic/agent-origin-guard";
 import { busabaseRouter } from "busabase-core/router";
 import { busabaseDemoRouter } from "busabase-core/router-demo";
 import { addCorsHeaders, createCorsHeaders } from "openlib/cors";
@@ -17,6 +18,19 @@ const BUSABASE_RPC_METHODS = "GET, POST, OPTIONS";
 
 async function handle(request: Request) {
   const url = new URL(request.url);
+
+  // `agents.*` can start processes on this machine, and this endpoint is
+  // unauthenticated with a wildcard CORS policy. Reject calls a browser made
+  // from another site before anything else runs. See
+  // `busabase-core/src/domains/agents/logic/agent-origin-guard.ts`.
+  const originVerdict = checkAgentsRequestOrigin(request);
+  if (!originVerdict.allowed) {
+    return addCorsHeaders(
+      Response.json({ error: originVerdict.reason, code: "FORBIDDEN" }, { status: 403 }),
+      BUSABASE_RPC_METHODS,
+    );
+  }
+
   const { useCase: demoUseCase, locale: demoLocale } = resolveDemoMode(
     url.searchParams,
     request.headers,
