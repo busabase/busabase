@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
+import type { CoreLocale } from "../../../i18n";
+import { dashboardJa } from "../../../i18n/ja";
+import type { CoreI18nMessages } from "../../../i18n/messages";
 import { coreMessagesEn } from "../../../i18n/messages";
+import { dashboardZhCN } from "../../../i18n/zh-CN";
+import { dashboardZhTW } from "../../../i18n/zh-TW";
 import { buildNodeAgentPrompts, type NodePromptContext } from "./node-agent-prompts";
 
 /**
@@ -94,7 +99,7 @@ describe("buildNodeAgentPrompts scoping", () => {
     expect(capabilities.map((prompt) => prompt.key)).toEqual(["record_update"]);
   });
 
-  it("every scope still carries the approval-first footer", () => {
+  it("keeps approval-first guidance on mutating scenarios and every capability", () => {
     for (const scope of [
       undefined,
       { kind: "field", ...FIELD } as const,
@@ -102,9 +107,111 @@ describe("buildNodeAgentPrompts scoping", () => {
       { kind: "cell", ...RECORD, ...FIELD } as const,
     ]) {
       const { scenarios, capabilities } = build(scope);
-      for (const prompt of [...scenarios, ...capabilities]) {
+      expect(scenarios[0]?.body).toContain("never merge it without my approval");
+      for (const prompt of capabilities) {
         expect(prompt.body).toContain("never merge it without my approval");
       }
     }
   });
+});
+
+const DOC_CONTEXT: NodePromptContext = {
+  nodeId: "nod_doc_launch",
+  nodeName: "Launch brief",
+  nodeType: "doc",
+  spaceId: "spc_acme",
+  spaceName: "Acme",
+};
+
+const LOCALE_EXPECTATIONS: Record<
+  CoreLocale,
+  {
+    messages: CoreI18nMessages;
+    label: string;
+    readInFull: string;
+    readOnly: string;
+    ready: string;
+    replyLanguage: string;
+    approvalInstruction: string;
+    contentGroup: string;
+  }
+> = {
+  en: {
+    messages: coreMessagesEn,
+    label: "Read doc",
+    readInFull: "Read this document's current content in full",
+    readOnly: "do not modify the document, create a ChangeRequest, or merge anything",
+    ready: "briefly confirm that you are ready",
+    replyLanguage: "Reply to me in English",
+    approvalInstruction: "Submit the change as a ChangeRequest",
+    contentGroup: "Content",
+  },
+  "zh-CN": {
+    messages: dashboardZhCN,
+    label: "读取文档",
+    readInFull: "完整读取这篇文档的当前内容",
+    readOnly: "不要修改文档，不要创建 ChangeRequest，也不要合并任何内容",
+    ready: "简短确认你已经准备好",
+    replyLanguage: "请用简体中文回复我",
+    approvalInstruction: "以 ChangeRequest 提交改动",
+    contentGroup: "内容",
+  },
+  "zh-TW": {
+    messages: dashboardZhTW,
+    label: "讀取文件",
+    readInFull: "完整讀取這篇文件的目前內容",
+    readOnly: "不要修改文件，不要建立 ChangeRequest，也不要合併任何內容",
+    ready: "簡短確認你已經準備好",
+    replyLanguage: "請用繁體中文回覆我",
+    approvalInstruction: "以 ChangeRequest 提交變更",
+    contentGroup: "內容",
+  },
+  ja: {
+    messages: dashboardJa,
+    label: "文書を読む",
+    readInFull: "この文書の現在の内容をすべて読み",
+    readOnly: "文書を変更したり、ChangeRequest を作成したり、何かをマージしたりしないでください",
+    ready: "準備ができたことを簡潔に確認してください",
+    replyLanguage: "日本語で返信してください",
+    approvalInstruction: "変更は ChangeRequest として提出し",
+    contentGroup: "コンテンツ",
+  },
+};
+
+describe("Doc read prompt", () => {
+  it("is a Content capability rather than a scenario and keeps mutating Doc prompts approval-first", () => {
+    const { scenarios, capabilities } = buildNodeAgentPrompts(DOC_CONTEXT, "en", coreMessagesEn);
+
+    expect(scenarios.map((prompt) => prompt.key)).toEqual(["doc-draft", "doc-review"]);
+    expect(scenarios.map((prompt) => prompt.key)).not.toContain("doc-read");
+    const contentPrompts = capabilities.filter((prompt) => prompt.group === "Content");
+    expect(contentPrompts[0]?.key).toBe("doc-read");
+    expect(contentPrompts[0]?.tier).toBe("capability");
+    expect(contentPrompts[0]?.body).not.toContain("Submit the change as a ChangeRequest");
+    expect(scenarios.find((prompt) => prompt.key === "doc-draft")?.body).toContain(
+      "Submit the change as a ChangeRequest and never merge it without my approval",
+    );
+  });
+
+  it.each(Object.entries(LOCALE_EXPECTATIONS))(
+    "builds a complete, read-only %s prompt with target IDs and reply guidance",
+    (locale, expected) => {
+      const { capabilities } = buildNodeAgentPrompts(
+        DOC_CONTEXT,
+        locale as CoreLocale,
+        expected.messages,
+      );
+      const prompt = capabilities.find((candidate) => candidate.key === "doc-read");
+
+      expect(prompt?.label).toBe(expected.label);
+      expect(prompt?.group).toBe(expected.contentGroup);
+      expect(prompt?.body).toContain("nodeId: nod_doc_launch");
+      expect(prompt?.body).toContain("spaceId: spc_acme");
+      expect(prompt?.body).toContain(expected.readInFull);
+      expect(prompt?.body).toContain(expected.readOnly);
+      expect(prompt?.body).toContain(expected.ready);
+      expect(prompt?.body).toContain(expected.replyLanguage);
+      expect(prompt?.body).not.toContain(expected.approvalInstruction);
+    },
+  );
 });

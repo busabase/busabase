@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import type { NodePrompt } from "../helpers/node-agent-prompts";
+import { coreMessagesEn } from "../../../i18n/messages";
+import { buildNodeAgentPrompts, type NodePrompt } from "../helpers/node-agent-prompts";
 import { buildPromptSections, resolveActivePrompt } from "./node-agent-prompts-dialog";
 
 const prompt = (key: string, tier: NodePrompt["tier"], group: string): NodePrompt => ({
@@ -39,5 +40,24 @@ describe("Agent prompt sidebar sections", () => {
 
     expect(resolveActivePrompt(sections, capability.key)).toBe(capability);
     expect(resolveActivePrompt(sections, "missing")).toBe(scenario);
+  });
+
+  it("places the Doc read prompt under Content instead of Scenarios", () => {
+    const { scenarios, capabilities } = buildNodeAgentPrompts(
+      {
+        nodeId: "nod_doc_launch",
+        nodeName: "Launch brief",
+        nodeType: "doc",
+        spaceId: "spc_acme",
+      },
+      "en",
+      coreMessagesEn,
+    );
+    const sections = buildPromptSections(scenarios, capabilities, "Scenarios");
+
+    expect(
+      sections.find((section) => section.name === "Scenarios")?.items.map(({ key }) => key),
+    ).toEqual(["doc-draft", "doc-review"]);
+    expect(sections.find((section) => section.name === "Content")?.items[0]?.key).toBe("doc-read");
   });
 });

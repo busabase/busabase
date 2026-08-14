@@ -13,6 +13,9 @@ export function useDashboardRoutes() {
   const [isArchivedRoute] = useRoute("/archived");
   const [isGraphRoute] = useRoute("/graph");
   const [isAssetDetailRoute] = useRoute("/assets/:assetId");
+  // `/agents/new` is checked as an exact string before this in the dispatcher,
+  // so its match here (agentSlug === "new") is never rendered as a detail page.
+  const [isAgentDetailRoute, agentDetailParams] = useRoute("/agents/:agentSlug");
   const [isOperationRoute, operationParams] = useRoute("/inbox/:changeRequestId/:operationId");
   const [isChangeRequestRoute, changeRequestParams] = useRoute("/inbox/:changeRequestId");
   const [isBaseDesignRoute, baseDesignParams] = useRoute("/base/:slug/design");
@@ -63,6 +66,8 @@ export function useDashboardRoutes() {
     isArchivedRoute,
     isGraphRoute,
     isAssetDetailRoute,
+    isAgentDetailRoute,
+    agentDetailParams,
     isOperationRoute,
     operationParams,
     isChangeRequestRoute,

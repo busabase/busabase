@@ -38,6 +38,9 @@ import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } fro
 import { toast } from "sonner";
 import { useLocation, useSearch } from "wouter";
 import { CoreI18nProvider, fmt, useCoreI18n } from "../../i18n";
+import { AgentDetailView } from "../agents/components/agent-detail-view";
+import { AgentsAddView } from "../agents/components/agents-add-view";
+import { AgentsListView } from "../agents/components/agents-list-view";
 import { AirAppKeepAliveHost } from "../airapp/components/AirAppKeepAliveHost";
 import { getPrimaryField } from "../base/utils/primary-field";
 import { ArchivedBasesView } from "./components/archived-bases";
@@ -63,6 +66,7 @@ import { SidePanel, SidePanelToggle } from "./components/side-panel";
 import { BaseTableSkeleton } from "./components/skeletons";
 import { SubmitPermissionProvider } from "./components/split-submit-button";
 import { BusabaseTopbarBreadcrumb, TopbarNodeActionsSlot } from "./components/topbar";
+import { getNodeDetailBreadcrumbItems } from "./helpers/breadcrumbs";
 import { getRelationRecordIds } from "./helpers/field";
 import { getLocationPath, readInboxView } from "./helpers/inbox";
 import { createKnownNodeCache, type KnownNode, nodeRoutePath } from "./helpers/known-node-cache";
@@ -366,6 +370,8 @@ function BusabaseDashboardContent({
     isArchivedRoute,
     isGraphRoute,
     isAssetDetailRoute,
+    isAgentDetailRoute,
+    agentDetailParams,
     isOperationRoute,
     operationParams,
     isChangeRequestRoute,
@@ -920,12 +926,12 @@ function BusabaseDashboardContent({
       return [{ href: "/assets", label: messages.nav.assets }, { label: messages.nav.assets }];
     }
 
-    if (nodeDetailRoute?.type === "form") {
-      return [
-        { label: messages.nav.workspace },
-        { label: activeDetailNode?.name ?? messages.form.tabForm },
-      ];
-    }
+    const nodeDetailBreadcrumbItems = getNodeDetailBreadcrumbItems(
+      nodeDetailRoute,
+      activeDetailNode,
+      messages,
+    );
+    if (nodeDetailBreadcrumbItems) return nodeDetailBreadcrumbItems;
 
     if (isBaseSetupRoute) {
       return [
@@ -1942,6 +1948,36 @@ function BusabaseDashboardContent({
       return <ActivityView orpc={orpc} emptyGuide={emptyGuide} />;
     }
 
+    if (locationPath === "/agents") {
+      return (
+        <AgentsListView
+          orpc={orpc}
+          onSelectAgent={(slug) => setLocation(`/agents/${slug}`)}
+          onAddAgent={() => setLocation("/agents/new")}
+        />
+      );
+    }
+
+    if (locationPath === "/agents/new") {
+      return (
+        <AgentsAddView
+          orpc={orpc}
+          onBack={() => setLocation("/agents")}
+          onConnected={(slug) => setLocation(`/agents/${slug}`)}
+        />
+      );
+    }
+
+    if (isAgentDetailRoute) {
+      return (
+        <AgentDetailView
+          orpc={orpc}
+          agentSlug={agentDetailParams?.agentSlug ?? ""}
+          onBack={() => setLocation("/agents")}
+        />
+      );
+    }
+
     if (locationPath === "/assets" || locationPath.startsWith("/assets/")) {
       const assetId = locationPath.startsWith("/assets/")
         ? locationPath.slice("/assets/".length)
@@ -2102,6 +2138,7 @@ function BusabaseDashboardContent({
   }, [
     activeBase,
     activeRecord,
+    agentDetailParams,
     approveChangeRequest,
     closeChangeRequest,
     auditEvents,
@@ -2109,6 +2146,7 @@ function BusabaseDashboardContent({
     basesQuery.isLoading,
     client,
     emptyGuide,
+    isAgentDetailRoute,
     isChangeRequestRoute,
     isEditRecordRoute,
     isGraphRoute,

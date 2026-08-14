@@ -2,6 +2,7 @@ import { enhanceRouter, implement, ORPCError, os } from "@orpc/server";
 import { busabaseContract } from "busabase-contract/contract/busabase";
 import { getContextSpaceId, isAnonymousVisitor, resolveActorId } from "./context";
 import { getDb } from "./db";
+import { agentsRouter } from "./domains/agents/router";
 import { airappRouter } from "./domains/airapp/router";
 import { assetsRouter } from "./domains/assets/router";
 import { baseRouter, recordRouter, viewRouter } from "./domains/base/router";
@@ -218,6 +219,7 @@ const busabaseRouterImpl = busabase.router({
   forms: formRouter,
   assets: assetsRouter,
   vault: vaultRouter,
+  agents: agentsRouter,
   webhooks: webhookRouter,
   dump: dumpRouter,
   install: installRouter,

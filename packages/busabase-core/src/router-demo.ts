@@ -373,6 +373,55 @@ export const busabaseDemoRouter = os.router({
       throw demoUnsupported("Clear Vault");
     }),
   },
+  agents: {
+    // Demo mode cannot spawn a process or hold a socket, so the catalog renders
+    // with everything explicitly unavailable rather than pretending otherwise.
+    catalog: os.agents.catalog.handler(() => [
+      {
+        slug: "claude-acp",
+        name: "Claude Code",
+        description: "Anthropic's Claude, wrapped for ACP. Runs on this machine.",
+        transport: "local-subprocess" as const,
+        version: null,
+        available: false,
+        unavailableReason: "Connecting to agents is disabled in the demo.",
+      },
+      {
+        slug: "codex-acp",
+        name: "Codex CLI",
+        description: "OpenAI's Codex CLI, wrapped for ACP. Runs on this machine.",
+        transport: "local-subprocess" as const,
+        version: null,
+        available: false,
+        unavailableReason: "Connecting to agents is disabled in the demo.",
+      },
+      {
+        slug: "buda",
+        name: "Buda AI Agent",
+        description: "A hosted Buda agent. Runs in Buda's cloud — nothing is installed locally.",
+        transport: "remote-websocket" as const,
+        version: null,
+        available: false,
+        unavailableReason: "Connecting to agents is disabled in the demo.",
+      },
+    ]),
+    sessions: {
+      list: os.agents.sessions.list.handler(() => []),
+      create: os.agents.sessions.create.handler(() => {
+        throw demoUnsupported("Connect to an agent");
+      }),
+      prompt: os.agents.sessions.prompt.handler(() => {
+        throw demoUnsupported("Message an agent");
+      }),
+      cancel: os.agents.sessions.cancel.handler(() => ({ ok: true })),
+      respondToPermission: os.agents.sessions.respondToPermission.handler(() => ({ ok: true })),
+      close: os.agents.sessions.close.handler(() => ({ ok: true })),
+      // Demo mode can never have a live session, because `create` refuses. So
+      // this closes immediately instead of hanging a subscriber forever — the
+      // UI's empty state is what the demo user should see, not a spinner.
+      subscribe: os.agents.sessions.subscribe.handler(async function* () {}),
+    },
+  },
   webhooks: {
     list: os.webhooks.list.handler(() => []),
     get: os.webhooks.get.handler(() => {

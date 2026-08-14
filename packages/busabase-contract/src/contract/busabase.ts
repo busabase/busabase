@@ -1,5 +1,6 @@
 import { eventIterator, oc } from "@orpc/contract";
 import { z } from "zod";
+import { agentsContract } from "../domains/agents/contract";
 import { airappRuntimeContract } from "../domains/airapp/contract";
 import { assetsContract } from "../domains/assets/contract";
 import {
@@ -446,6 +447,7 @@ export const busabaseContractRoutes = {
   forms: formContract,
   assets: assetsContract,
   vault: vaultContract,
+  agents: agentsContract,
   webhooks: webhookContract,
   dump: dumpContract,
   install: installContract,

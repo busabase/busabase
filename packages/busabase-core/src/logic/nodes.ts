@@ -907,6 +907,31 @@ export const updateNodeMetadata = async (
     throw new ORPCError("NOT_FOUND", { message: `Node not found: ${parsed.nodeId}` });
   }
 
+  // `visibility` looks like ordinary metadata but it IS access control, and it
+  // is not writable here — on any node type. `nodes.updateVisibility` does three
+  // things this endpoint does not: it requires `manage` (this one only requires
+  // `write`), it refuses to make the workspace root private, and it re-runs
+  // `recomputeSpaceNodeAcl` to materialize the `effectiveVisibility` COLUMN,
+  // which is what the ACL actually enforces (`buildNodeVisibilityCondition`).
+  //
+  // Letting the key through wrote the declared value and none of the rest —
+  // verified live: `metadata.visibility` flipped to "private" while
+  // `effectiveVisibility` stayed null, so the node was NOT private, the caller
+  // got a 200 saying it was, and it would silently BECOME private later at the
+  // next unrelated ACL recompute (a grant change, a node move). A delayed,
+  // invisible permission flip is worse than an outright failure.
+  //
+  // Only this patch path is affected: node creation carries `metadata.visibility`
+  // correctly, because `initializeNodeAcl` materializes `effectiveVisibility`
+  // from the new node's metadata at merge time.
+  if ("visibility" in parsed.metadata) {
+    throw new ORPCError("BAD_REQUEST", {
+      message:
+        `visibility is not writable through node metadata. Use POST /nodes/${parsed.nodeId}/visibility, ` +
+        `which enforces the manage permission and re-materializes the subtree's effective visibility.`,
+    });
+  }
+
   assertValidNodeMetadata(node.type, parsed.metadata, `node ${parsed.nodeId}`);
 
   await assertNodePermission(node.id, "write", actorId);

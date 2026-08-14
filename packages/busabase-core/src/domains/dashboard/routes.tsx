@@ -84,6 +84,26 @@ export const getBusabaseDashboardRoutes = (
       title: messages?.routes.graph ?? "Graph",
     },
     {
+      path: "/agents",
+      component: dashboard,
+      breadcrumb: "Agents",
+      title: "Agents",
+    },
+    {
+      // Specific-before-generic (see the trailing `/agents/:agentSlug` entry) —
+      // route lookups use `Array.find`, first match wins.
+      path: "/agents/new",
+      component: dashboard,
+      breadcrumb: "Add agent",
+      title: "Add agent",
+    },
+    {
+      path: "/agents/:agentSlug",
+      component: dashboard,
+      breadcrumb: "Agent",
+      title: "Agent",
+    },
+    {
       path: "/assets",
       component: dashboard,
       breadcrumb: messages?.routes.assets ?? "Assets",
