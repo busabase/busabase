@@ -528,3 +528,39 @@ describe("additive field migration", () => {
     expect(spies.bases.fieldChangeRequest).not.toHaveBeenCalled();
   });
 });
+
+describe("AirAppFieldDeclaration accepts a hand-authored plain-JS declaration", () => {
+  // Real callers write `appConfig` as a literal object in a plain .js config
+  // file — no `as const`, no cast. This helper reproduces that: its return
+  // type's `type` property is exactly `string`, the same widened inference
+  // TypeScript gives a `.js` file's exported object literal. If
+  // AirAppFieldDeclaration ever narrows `type` back to the contract's field-type
+  // enum, this file stops compiling — `tsc --noEmit` catches it even though
+  // vitest itself does not type-check.
+  const declareField = (slug: string, name: string, type: string, required: boolean) => ({
+    slug,
+    name,
+    type,
+    required,
+  });
+
+  it("type-checks and resolves without a cast", () => {
+    const declaredConfig: AirAppResourceConfig = {
+      appId: "kelly-plain",
+      appName: "Kelly Plain",
+      schemaVersion: 1,
+      folder: { slug: "kelly-plain", name: "Kelly Plain", description: "" },
+      bases: [
+        {
+          key: "contacts",
+          slug: "kelly-plain-contacts-v1",
+          name: "Contacts",
+          description: "",
+          fields: [declareField("name", "Name", "text", true)],
+        },
+      ],
+    };
+    const result = resolveProvisionedFolder(null, declaredConfig);
+    expect(result.missing).toHaveLength(1);
+  });
+});

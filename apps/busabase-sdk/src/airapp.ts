@@ -45,12 +45,28 @@ import type { BusabaseClient } from "./client.js";
 type NodeChangeRequestInput = Parameters<BusabaseClient["nodes"]["createChangeRequest"]>[0];
 type NodeOperationInput = NodeChangeRequestInput["operations"][number];
 type CreateNodeOperationInput = Extract<NodeOperationInput, { kind: "create" }>;
+type FieldChangeRequestInput = Parameters<BusabaseClient["bases"]["fieldChangeRequest"]>[0];
+type CreateFieldChangeRequestInput = Extract<FieldChangeRequestInput, { operation: "create" }>;
 
 /**
- * A Base field, typed straight off the contract so a declaration can never drift
- * from what `nodes.createChangeRequest` actually accepts.
+ * A Base field, as an app declares it.
+ *
+ * `type` is a plain `string`, not the contract's narrow field-type union — an
+ * app's declaration is ordinarily a hand-authored object literal (`type:
+ * "text"`), and TypeScript infers a plain-JS object literal's string
+ * properties as `string`, not as that literal. Deriving this type straight
+ * from the contract made every such declaration a type error. The contract's
+ * narrow union still applies where it actually matters — the server validates
+ * every field type on the wire — this type only relaxes the *declaration*
+ * surface to match how declarations are actually written.
  */
-export type AirAppFieldDeclaration = NonNullable<CreateNodeOperationInput["fields"]>[number];
+export interface AirAppFieldDeclaration {
+  slug: string;
+  name: string;
+  type: string;
+  required?: boolean;
+  options?: Record<string, unknown>;
+}
 
 /** The client surface provisioning needs. Both `BusabaseClient` and `Busabase` satisfy it. */
 export type AirAppProvisioningClient = Pick<BusabaseClient, "nodes" | "bases">;
@@ -437,7 +453,9 @@ export function buildProvisionOperations(
       name: base.name,
       description: base.description ?? "",
       metadata: resourceMetadata(config, base.key),
-      fields: base.fields,
+      // The declaration's `type` is a plain `string` (see AirAppFieldDeclaration);
+      // the server validates the real field-type enum on the wire.
+      fields: base.fields as CreateNodeOperationInput["fields"],
     });
   }
   return operations;
@@ -648,7 +666,9 @@ async function repairResourceOwnership(
         baseId: migration.repair.baseId as string,
         slug: field.slug,
         name: field.name,
-        type: field.type,
+        // The declaration's `type` is a plain `string` (see AirAppFieldDeclaration);
+        // the server validates the real field-type enum on the wire.
+        type: field.type as CreateFieldChangeRequestInput["type"],
         required: field.required,
         message: `Upgrade ${config.appName}: add ${field.slug}`,
         submittedBy: config.appId,
