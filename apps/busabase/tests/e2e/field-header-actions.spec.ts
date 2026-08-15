@@ -40,12 +40,14 @@ test("field header actions require a saved view and support keyboard quick sorti
   await page.keyboard.press("Enter");
   const savedViewPrompt = page.getByText(/Create or open a saved view to sort, filter/);
   await expect(savedViewPrompt).toBeVisible();
-  await savedViewPrompt
-    .locator("xpath=..")
-    .getByRole("button", { name: "New view", exact: true })
-    .click();
-  await expect(page.getByRole("dialog").getByRole("heading", { name: "New View" })).toBeVisible();
-  await page.getByRole("dialog").getByRole("button", { name: "Cancel" }).click();
+  // With no saved view open, the panel offers "Edit field" (-> the Design tab)
+  // rather than a "New view" action that opens a creation dialog inline —
+  // creating a view is Design's job now, matching the "Edit field" link this
+  // same panel already shows once a view exists (asserted below).
+  await expect(
+    savedViewPrompt.locator("xpath=..").getByRole("link", { name: "Edit field" }),
+  ).toHaveAttribute("href", "/dashboard/local/base/blog/design");
+  await page.keyboard.press("Escape");
 
   await page.goto(`/dashboard/local/base/blog/${merged.view.slug}`);
   const titleHeader = page.locator('[role="columnheader"][data-field-slug="title"]');
