@@ -41,6 +41,9 @@ const installFakeStorage = () => {
 const installFakeServiceWorker = (registrations: FakeRegistration[]) => {
   const register = vi.fn(async (url: string) => makeRegistration(`https://app.test${url}`));
   const container = {
+    controller: {},
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
     getRegistrations: vi.fn(async () => registrations),
     getRegistration: vi.fn(async () => registrations[0]),
     register,
@@ -145,7 +148,7 @@ describe("ensureRegistered", () => {
     expect(sw.register).not.toHaveBeenCalled();
   });
 
-  it("never throws or blocks a boot when the SW API misbehaves", async () => {
+  it("surfaces a useful error when the SW API rejects registration", async () => {
     vi.stubGlobal("navigator", {
       serviceWorker: {
         getRegistration: async () => {
@@ -153,12 +156,29 @@ describe("ensureRegistered", () => {
         },
       },
     });
-    await expect(ensureRegistered()).resolves.toBeUndefined();
+    await expect(ensureRegistered()).rejects.toThrow(
+      "AirApp preview requires HTTPS and Service Worker support",
+    );
   });
 
-  it("is a no-op where service workers do not exist at all", async () => {
+  it("stops the run where service workers do not exist at all", async () => {
     vi.stubGlobal("navigator", {});
-    await expect(ensureRegistered()).resolves.toBeUndefined();
+    await expect(ensureRegistered()).rejects.toThrow(
+      "AirApp preview requires HTTPS and Service Worker support",
+    );
     await expect(releaseOnHostPage("/zh-CN/home")).resolves.toBe(false);
+  });
+
+  it("waits until a newly activated worker controls the current page", async () => {
+    const sw = installFakeServiceWorker([]);
+    sw.getRegistration = vi.fn(async () => undefined);
+    sw.controller = null as unknown as object;
+    sw.addEventListener.mockImplementation((_event, listener) => {
+      sw.controller = {};
+      (listener as () => void)();
+    });
+
+    await expect(ensureRegistered()).resolves.toBeUndefined();
+    expect(sw.addEventListener).toHaveBeenCalledWith("controllerchange", expect.any(Function));
   });
 });
