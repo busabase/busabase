@@ -12,6 +12,7 @@ import { ConnectionGuard } from "~/components/busabase/ConnectionGuard";
 import { NativeEmptyState, NativeErrorState, NativeLoadingState } from "~/components/native-screen";
 import { Button } from "~/components/ui/Button";
 import { useConnection } from "~/connection/connection-store";
+import { buildAirAppEmbedUrl } from "~/lib/airapp-embed-url";
 import { asNodeDetail } from "~/lib/node-detail";
 import { mobile, radius, typography } from "~/theme/tokens";
 import { useTokens } from "~/theme/use-tokens";
@@ -33,20 +34,6 @@ import { useTokens } from "~/theme/use-tokens";
  *   bridge route that validates the bearer, mints a cookie session for the
  *   same user, and 302s to the target with that session attached.
  */
-function buildAirAppEmbedUrl(
-  serverUrl: string,
-  mode: "self-hosted" | "demo" | "cloud",
-  bearerToken: string | null,
-  nodeId: string,
-): string | null {
-  const target = `/dashboard/airapp/${encodeURIComponent(nodeId)}?chromeless=1`;
-  const base = serverUrl.replace(/\/+$/, "");
-  if (mode !== "cloud") {
-    return `${base}${target}`;
-  }
-  if (!bearerToken) return null;
-  return `${base}/api/auth/mobile-embed-token?token=${encodeURIComponent(bearerToken)}&target=${encodeURIComponent(target)}`;
-}
 
 function AirAppDetailContent() {
   const params = useLocalSearchParams<{ nodeId?: string }>();
@@ -59,6 +46,7 @@ function AirAppDetailContent() {
   const buda = useBusabaseOrpc();
   const { state } = useConnection();
   const connection = state.status === "connected" ? state.connection : null;
+  const selectedSpaceId = connection?.selectedSpace?.id ?? null;
   const webviewRef = useRef<WebView>(null);
   const [webviewError, setWebviewError] = useState<string | null>(null);
   const [reloadToken, setReloadToken] = useState(0);
@@ -81,15 +69,34 @@ function AirAppDetailContent() {
   const notAnAirApp = !airappQuery.isLoading && (Boolean(airappQuery.error) || !airapp);
 
   const embedUrlQuery = useQuery({
-    queryKey: ["airapp-embed-url", connection?.serverUrl, connection?.mode, nodeId, reloadToken],
+    queryKey: [
+      "airapp-embed-url",
+      connection?.serverUrl,
+      connection?.mode,
+      selectedSpaceId,
+      nodeId,
+      reloadToken,
+    ],
     queryFn: async () => {
       if (!connection || !nodeId) return null;
       if (connection.mode !== "cloud") {
-        return buildAirAppEmbedUrl(connection.serverUrl, connection.mode, null, nodeId);
+        return buildAirAppEmbedUrl({
+          serverUrl: connection.serverUrl,
+          mode: connection.mode,
+          bearerToken: null,
+          spaceId: selectedSpaceId,
+          nodeId,
+        });
       }
       const session = await getValidBusabaseCloudSession();
       const token = getCloudSessionToken(session);
-      return buildAirAppEmbedUrl(connection.serverUrl, connection.mode, token, nodeId);
+      return buildAirAppEmbedUrl({
+        serverUrl: connection.serverUrl,
+        mode: connection.mode,
+        bearerToken: token,
+        spaceId: selectedSpaceId,
+        nodeId,
+      });
     },
     enabled: Boolean(connection && nodeId),
   });
@@ -104,7 +111,10 @@ function AirAppDetailContent() {
 
   const embedUrl = embedUrlQuery.data ?? null;
   const preparingUrl = embedUrlQuery.isLoading || embedUrlQuery.isRefetching;
-  const noSession = !preparingUrl && !embedUrl && connection?.mode === "cloud";
+  const noCloudSpace =
+    !preparingUrl && !embedUrl && connection?.mode === "cloud" && !selectedSpaceId;
+  const noSession =
+    !preparingUrl && !embedUrl && connection?.mode === "cloud" && Boolean(selectedSpaceId);
 
   return (
     <SafeAreaView edges={["top"]} style={[styles.safe, { backgroundColor: tokens.background }]}>
@@ -135,6 +145,11 @@ function AirAppDetailContent() {
           <NativeEmptyState description="This AirApp is not available." title="AirApp not found" />
         ) : webviewError ? (
           <NativeErrorState message={webviewError} onRetry={retry} />
+        ) : noCloudSpace ? (
+          <NativeErrorState
+            message="Select a Busabase Cloud workspace, then try opening this AirApp again."
+            onRetry={retry}
+          />
         ) : noSession ? (
           <NativeErrorState
             message="Your Busabase Cloud session has expired. Reconnect and try again."
@@ -155,6 +170,9 @@ function AirAppDetailContent() {
             ref={webviewRef}
             key={reloadToken}
             source={{ uri: embedUrl }}
+            limitsNavigationsToAppBoundDomains={
+              Platform.OS === "ios" && (connection?.mode === "cloud" || connection?.mode === "demo")
+            }
             style={styles.webview}
             startInLoadingState
             renderLoading={() => <NativeLoadingState label="Loading AirApp" />}
