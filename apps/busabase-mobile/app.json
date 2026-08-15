@@ -3,7 +3,7 @@
     "name": "Busabase",
     "slug": "busabase-mobile",
     "scheme": "busabase",
-    "version": "0.16.0",
+    "version": "0.16.1",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "automatic",
@@ -17,6 +17,7 @@
       "supportsTablet": true,
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
+        "WKAppBoundDomains": ["busabase.com", "demo.busabase.com"],
         "NSAppTransportSecurity": {
           "NSAllowsLocalNetworking": true
         }
