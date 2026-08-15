@@ -33,6 +33,16 @@ const POD_HEARTBEAT_INTERVAL_MS = 5_000;
 /** Upper bound on waiting for a re-registered worker to activate. */
 const SW_READY_TIMEOUT_MS = 5_000;
 
+const NODEPOD_SW_ERROR_MESSAGE =
+  "AirApp preview requires HTTPS and Service Worker support. Open this workspace in Safari or Chrome, or use the desktop app.";
+
+export class NodepodServiceWorkerError extends Error {
+  constructor(options?: ErrorOptions) {
+    super(NODEPOD_SW_ERROR_MESSAGE, options);
+    this.name = "NodepodServiceWorkerError";
+  }
+}
+
 /**
  * Route prefixes that legitimately run pods and must keep the SW.
  * `/embed/*` is the public AirApp Embed host; `/dashboard*` is the Run panel.
@@ -41,6 +51,24 @@ const POD_HOST_PATH_PREFIXES = ["/dashboard", "/embed", "/__virtual__", "/__prev
 
 const hasServiceWorker = (): boolean =>
   typeof navigator !== "undefined" && "serviceWorker" in navigator;
+
+const waitForController = async (): Promise<void> => {
+  if (navigator.serviceWorker.controller) return;
+
+  await new Promise<void>((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      navigator.serviceWorker.removeEventListener("controllerchange", onControllerChange);
+      reject(new Error("Service Worker did not take control of this page"));
+    }, SW_READY_TIMEOUT_MS);
+    const onControllerChange = () => {
+      if (!navigator.serviceWorker.controller) return;
+      clearTimeout(timeout);
+      navigator.serviceWorker.removeEventListener("controllerchange", onControllerChange);
+      resolve();
+    };
+    navigator.serviceWorker.addEventListener("controllerchange", onControllerChange);
+  });
+};
 
 const readStorage = (key: string): string | null => {
   try {
@@ -99,20 +127,30 @@ export const beginPodHeartbeat = (): (() => void) => {
  * `controllerchange` makes Nodepod redo its init handshake.
  */
 export const ensureRegistered = async (): Promise<void> => {
-  if (!hasServiceWorker()) return;
+  if (typeof window !== "undefined" && !window.isSecureContext) {
+    throw new NodepodServiceWorkerError();
+  }
+  if (!hasServiceWorker()) {
+    throw new NodepodServiceWorkerError();
+  }
   try {
     const existing = await navigator.serviceWorker.getRegistration("/");
-    if (existing) return;
-    await navigator.serviceWorker.register(SW_PATH, { scope: "/", updateViaCache: "none" });
-    // Bounded: `ready` is a convenience, not a requirement — Nodepod's own
-    // `initServiceWorker` awaits activation with its own timeout right after
-    // this. Never let a wait here be what stops a run from starting.
+    if (!existing) {
+      await navigator.serviceWorker.register(SW_PATH, { scope: "/", updateViaCache: "none" });
+    }
     await Promise.race([
       navigator.serviceWorker.ready,
-      new Promise((resolve) => setTimeout(resolve, SW_READY_TIMEOUT_MS)),
+      new Promise((_, reject) =>
+        setTimeout(
+          () => reject(new Error("Service Worker activation timed out")),
+          SW_READY_TIMEOUT_MS,
+        ),
+      ),
     ]);
-  } catch {
-    // Nodepod's own boot-time registration still runs and surfaces the error.
+    await waitForController();
+  } catch (cause) {
+    if (cause instanceof NodepodServiceWorkerError) throw cause;
+    throw new NodepodServiceWorkerError({ cause });
   }
 };
 
