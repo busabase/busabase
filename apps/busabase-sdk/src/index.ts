@@ -238,7 +238,7 @@ export class Busabase {
   /**
    * Unified grep — one regex/literal pattern scanned across every in-scope
    * source (Drive/Skill files, Doc bodies, and Base records — records read
-   * the canonical `headCommit.fields`, never the truncated search
+   * the canonical `headCommit.payload`, never the truncated search
    * projection), with a shared `maxMatches`/deadline budget and per-source
    * honest coverage. `bb.assets.grep` remains available as a files-only SDK
    * convenience and delegates here with `sources: ["files"]`.
