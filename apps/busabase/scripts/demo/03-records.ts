@@ -24,7 +24,7 @@ interface RecordVO {
   id: string;
   baseId: string;
   status: string;
-  headCommit: { fields: Record<string, unknown> };
+  headCommit: { payload: Record<string, unknown> };
 }
 
 interface ChangeRequestVO {
@@ -48,7 +48,7 @@ async function ensureRecord(
     `/records/search?baseId=${baseId}&fieldSlug=${rec.identity}&valueText=${encodeURIComponent(rec.identityValue)}`,
   );
   const found = existing.find(
-    (r) => (r.headCommit?.fields as Record<string, unknown>)?.[rec.identity] === rec.identityValue,
+    (r) => (r.headCommit?.payload as Record<string, unknown>)?.[rec.identity] === rec.identityValue,
   );
   if (found) return found.id; // already seeded by a prior run
   const cr = await api<ChangeRequestVO>("POST", `/bases/${baseId}/change-requests`, {
@@ -148,7 +148,7 @@ export async function run() {
 
     await step("GET /records/get — verify update applied", async () => {
       const rec = await api<RecordVO>("GET", `/records/get?recordId=${recordId}`);
-      assert(String(rec.headCommit.fields.title).includes("(updated)"), "title not updated");
+      assert(String(rec.headCommit.payload.title).includes("(updated)"), "title not updated");
     });
 
     await step("POST /records/{id}/change-requests — delete (archive)", async () => {

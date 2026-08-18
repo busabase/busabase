@@ -1,0 +1,2 @@
+DROP INDEX "busabase_nodes_parent_slug_uniq";--> statement-breakpoint
+CREATE UNIQUE INDEX "busabase_nodes_space_type_slug_uniq" ON "busabase_nodes" USING btree ("space_id","type","slug") WHERE "busabase_nodes"."archived_at" IS NULL;

@@ -217,9 +217,9 @@ describe("busabase-cli golden path (skill commands, in-process)", () => {
 
     // The new value is canonical immediately — no review/merge call in between.
     const after = (await cli("records", "get", "--record-id", recordId)) as {
-      headCommit: { fields: Record<string, unknown> };
+      headCommit: { payload: Record<string, unknown> };
     };
-    expect(after.headCommit.fields.status).toBe("published");
+    expect(after.headCommit.payload.status).toBe("published");
 
     // The opposite flag must still be reachable: a CLI boolean is presence-only,
     // so `--auto-merge` alone could never express "force review".

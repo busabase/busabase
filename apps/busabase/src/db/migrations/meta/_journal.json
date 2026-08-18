@@ -106,6 +106,41 @@
       "when": 1786509577576,
       "tag": "0014_windy_madame_web",
       "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "7",
+      "when": 1786723268156,
+      "tag": "0015_fluffy_rick_jones",
+      "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1786806252344,
+      "tag": "0016_brown_tyrannus",
+      "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1786939332002,
+      "tag": "0017_fair_maestro",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1786986776227,
+      "tag": "0018_stale_stephen_strange",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1787024192423,
+      "tag": "0019_faithful_stingray",
+      "breakpoints": true
     }
   ]
 }

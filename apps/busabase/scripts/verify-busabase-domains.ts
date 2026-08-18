@@ -31,12 +31,8 @@ import {
   listRecordsPaged,
   listViews,
 } from "busabase-core/domains/base/handlers";
-import {
-  createDoc,
-  createDocChangeRequest,
-  getDoc,
-  updateDocBody,
-} from "busabase-core/domains/doc/handlers";
+import { createDoc, getDoc } from "busabase-core/domains/doc/handlers";
+import { updateNodeContent } from "busabase-core/domains/rich-node/handlers";
 import {
   createSkill,
   createSkillChangeRequest,
@@ -104,7 +100,7 @@ async function main() {
   await approveAndMerge(updateCr.id);
   const updated = await getRecord(recordId as string);
   assert.equal(
-    (updated?.headCommit.fields as { title?: string })?.title,
+    (updated?.headCommit.payload as { title?: string })?.title,
     "Harness Record (edited)",
     "record_update applied new field value",
   );
@@ -253,13 +249,19 @@ async function main() {
   assert.equal(doc.node.type, "doc", "doc node has type doc");
   ok("doc created");
 
-  const updatedDoc = await updateDocBody(doc.node.id, { body: "# Hello\n\nEdited.\n" });
+  const updatedDocCr = await updateNodeContent({
+    nodeId: doc.node.id,
+    content: { kind: "doc", body: "# Hello\n\nEdited.\n" },
+  });
+  assert.equal(updatedDocCr.status, "merged", "doc content update merged");
+  const updatedDoc = await getDoc(doc.node.id);
   assert.match(updatedDoc.body, /Edited/, "doc body updated");
   ok("doc body updated");
 
   // doc_update via a change request (approval-first edit), then merge applies it.
-  const docCr = await createDocChangeRequest(doc.node.id, {
-    body: "# Hello\n\nVia change request.\n",
+  const docCr = await updateNodeContent({
+    nodeId: doc.node.id,
+    content: { kind: "doc", body: "# Hello\n\nVia change request.\n" },
     message: "verify doc CR",
     submittedBy: "local-editor",
     // `autoMerge` is permission-aware when omitted, and this harness runs with
