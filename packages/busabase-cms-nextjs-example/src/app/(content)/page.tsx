@@ -25,7 +25,7 @@ export default async function HomePage() {
     getCmsFolderDashboardUrl(),
   ]);
   const hasContent = posts.length > 0 || pages.length > 0;
-  const busabaseBaseUrl = process.env.BUSABASE_BASE_URL?.replace(/\/+$/, "");
+  const busabaseBaseUrl = process.env.BUSABASE_CMS_BASE_URL?.replace(/\/+$/, "");
   const recentRecords = [...posts, ...pages]
     .map((item) => ({ ...item, href: canonicalContentPath(item.path) }))
     .filter((item): item is typeof item & { href: string } => Boolean(item.href))

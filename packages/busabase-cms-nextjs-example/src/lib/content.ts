@@ -27,11 +27,18 @@ export const cmsPathOptions = {
 const cmsPathHelpers = createCmsPathHelpers(cmsPathOptions);
 
 // A self-hosted Busabase server can be read without an API key or space header.
-const isConfigured = Boolean(process.env.BUSABASE_BASE_URL && process.env.BUSABASE_CMS_FOLDER_ID);
+//
+// These use the same `BUSABASE_CMS_*` names as the rest of this file and as
+// `busabase-cms`'s own `readCmsEnvConfig` gate. The SDK additionally falls back
+// to unprefixed `BUSABASE_*` vars, but a CMS app reading half its config under
+// one prefix and half under another is how you lose an afternoon.
+const isConfigured = Boolean(
+  process.env.BUSABASE_CMS_BASE_URL && process.env.BUSABASE_CMS_FOLDER_ID,
+);
 const busabaseConfig = {
-  baseUrl: process.env.BUSABASE_BASE_URL,
-  apiKey: process.env.BUSABASE_API_KEY,
-  spaceId: process.env.BUSABASE_SPACE_ID,
+  baseUrl: process.env.BUSABASE_CMS_BASE_URL,
+  apiKey: process.env.BUSABASE_CMS_API_KEY,
+  spaceId: process.env.BUSABASE_CMS_SPACE_ID,
 };
 
 const cms = isConfigured
@@ -62,7 +69,7 @@ const cms = isConfigured
 export const hasBusabaseConfig = isConfigured;
 
 export const getCmsFolderDashboardUrl = async () => {
-  const baseUrl = process.env.BUSABASE_BASE_URL?.replace(/\/+$/, "");
+  const baseUrl = process.env.BUSABASE_CMS_BASE_URL?.replace(/\/+$/, "");
   const folderId = process.env.BUSABASE_CMS_FOLDER_ID;
   if (!baseUrl || !folderId) return null;
 
@@ -71,7 +78,7 @@ export const getCmsFolderDashboardUrl = async () => {
     const folder = await source.getNode?.(folderId);
     if (!folder || folder.type !== "folder") return null;
 
-    const dashboardSpace = process.env.BUSABASE_SPACE_ID ?? "local";
+    const dashboardSpace = process.env.BUSABASE_CMS_SPACE_ID ?? "local";
     return `${baseUrl}/dashboard/${encodeURIComponent(dashboardSpace)}/folder/${encodeURIComponent(folder.slug)}`;
   } catch (error) {
     console.error("[busabase-cms] Unable to resolve the CMS Folder dashboard URL", error);

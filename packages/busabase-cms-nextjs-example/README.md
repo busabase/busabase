@@ -9,7 +9,7 @@ This is a pure Busabase CMS example. It does not read local MDX or WordPress con
 provide a fallback content source. When Busabase is not configured or cannot be reached, the app
 shows an empty/setup state.
 
-The example keeps `BUSABASE_API_KEY` on the server. Browser components never import the SDK or
+The example keeps `BUSABASE_CMS_API_KEY` on the server. Browser components never import the SDK or
 receive credentials.
 
 ## Run locally
@@ -19,7 +19,7 @@ Prerequisites: Node.js 24.18 or newer and pnpm.
 ```bash
 cp packages/busabase-cms-nextjs-example/.env.example \
   packages/busabase-cms-nextjs-example/.env.local
-# Set BUSABASE_BASE_URL and BUSABASE_CMS_FOLDER_ID. Cloud also needs a write-capable API key and,
+# Set BUSABASE_CMS_BASE_URL and BUSABASE_CMS_FOLDER_ID. Cloud also needs a write-capable API key and,
 # when applicable, a space id.
 pnpm --filter busabase-cms-nextjs-example dev
 ```
@@ -31,9 +31,9 @@ guidance instead of failing.
 
 | Variable | Required | Purpose |
 | --- | --- | --- |
-| `BUSABASE_BASE_URL` | Yes | Busabase Cloud or self-hosted server root. |
-| `BUSABASE_API_KEY` | Yes on Cloud; no for an open local server | Server-only bearer token. |
-| `BUSABASE_SPACE_ID` | Yes when the key has multiple spaces | Target space for every read. |
+| `BUSABASE_CMS_BASE_URL` | Yes | Busabase Cloud or self-hosted server root. May be a Cloud address fronting a local instance over a tunnel. |
+| `BUSABASE_CMS_API_KEY` | Yes on Cloud; no for an open local server | Server-only bearer token. |
+| `BUSABASE_CMS_SPACE_ID` | Yes when the key has multiple spaces | Target space for every read. A `tnl_…` id reads a tunnelled local instance through Cloud. |
 | `BUSABASE_CMS_FOLDER_ID` | Yes | Folder that owns and remembers the four CMS Base IDs. |
 | `BUSABASE_CMS_DEFAULT_LOCALE` | No | Unprefixed locale, default `en`. |
 | `BUSABASE_CMS_LOCALES` | No | Comma-separated accepted locales, default `en,zh-CN`. |
