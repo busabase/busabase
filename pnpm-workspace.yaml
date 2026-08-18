@@ -17,4 +17,4 @@ onlyBuiltDependencies:
 
 patchedDependencies:
   '@react-native-cookies/cookies@6.2.1': patches/@react-native-cookies__cookies@6.2.1.patch
-  '@scelar/nodepod@1.9.9': patches/@scelar__nodepod@1.9.9.patch
+  '@scelar/nodepod@1.9.20': patches/@scelar__nodepod@1.9.20.patch

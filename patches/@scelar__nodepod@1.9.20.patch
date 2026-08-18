@@ -1,0 +1,137 @@
+diff --git a/dist/__sw__.js b/dist/__sw__.js
+index 307376c0cbb4940d59529d698c101dd06be062bb..3bcacbcdcccf30760a31ecf35ef7061f0e87f35b 100644
+--- a/dist/__sw__.js
++++ b/dist/__sw__.js
+@@ -708,6 +708,84 @@ self.addEventListener("fetch", (event) => {
+     return;
+   }
+ 
++  // 1.5. [busabase patch] `/api/airapp-embed-bridge/*` is the AirApp Embed
++  //      runtime's own capability-scoped relay (see airapp-embed-runtime.tsx —
++  //      both its postMessage bridge and its `_status` heartbeat fetch it,
++  //      always from the trusted PARENT/host page, never from inside a pod).
++  //      It is a real host route, so let it reach the network untouched; the
++  //      point of catching it here is that a pod's broad path claim (especially
++  //      "/") must never be able to capture it further down the dispatch.
++  //      A plain `return` also preserves the caller's own `credentials: "omit"`,
++  //      so no cookie is sent at all — the route re-authorizes from the
++  //      capability header instead.
++  if (url.pathname.startsWith("/api/airapp-embed-bridge/")) return;
++
++  // 1.6. [busabase patch] `/api/v1/*` is Busabase's own public REST surface — a
++  //      real host route, never something a pod serves. Pass it through to the
++  //      network instead of answering it from the sandboxed virtual server, so
++  //      an AirApp reaches Busabase with the exact same code whether it runs
++  //      here, under the Local Node engine, or on a plain `pnpm dev` server.
++  //      (This replaces a former reserved-prefix bridge, which forced every
++  //      AirApp author to hand-write a platform-specific path that then only
++  //      worked inside Busabase.) A plain `return` is
++  //      enough: the browser performs its own same-origin fetch, so the user's
++  //      (possibly httpOnly) session cookie rides along automatically.
++  //
++  //      Session safety is unchanged and still fails closed. A pod booted WITH
++  //      a preview script (currently only the public AirApp Embed runtime) must
++  //      never reach the real backend as the viewer: its injected fetch
++  //      override already rewrites these calls onto the capability-scoped embed
++  //      relay above, and this guard is what stops a request that bypasses the
++  //      override (e.g. raw XMLHttpRequest). When an embed pod is alive and the
++  //      request cannot be positively attributed to a non-embed client, we
++  //      refuse rather than risk handing out the session — a visible 403 beats
++  //      a silent leak.
++  if (url.pathname === "/api/v1" || url.pathname.startsWith("/api/v1/")) {
++    const podFromReferrer = () => {
++      if (!request.referrer) return null;
++      let refPath;
++      try {
++        const ref = new URL(request.referrer);
++        if (ref.origin !== self.location.origin) return null;
++        refPath = ref.pathname;
++      } catch {
++        return null;
++      }
++      const hit =
++        matchPreviewOrVirtualPath(refPath, "preview") ||
++        matchPreviewOrVirtualPath(refPath, "virtual");
++      if (hit) return { instanceId: hit.instanceId, serverPort: hit.port };
++      return lookupPodForClaimedPath(stripPreviewPrefix(refPath));
++    };
++    const pod = (clientId ? previewClients.get(clientId) : null) || podFromReferrer();
++    const isEmbedPod = pod ? previewScripts.has(pod.instanceId) : previewScripts.size > 0;
++    if (isEmbedPod) {
++      event.respondWith(new Response(null, { status: 403 }));
++      return;
++    }
++    return;
++  }
++
++  // 1.75. [busabase patch] A frame navigation initiated by a document on a
++  //      different origin targets the real host, not a Nodepod preview. A pod
++  //      can legitimately claim "/" while it is running; without this guard,
++  //      reassigning that outer iframe to a host route such as /embed/* lets
++  //      the stale root claim capture the navigation and proxy it to a pod
++  //      that is already being torn down. Explicit /__virtual__/ and
++  //      /__preview__/ URLs were handled above and remain routable.
++  const isFrameNavigation =
++    request.mode === "navigate" &&
++    (request.destination === "iframe" || request.destination === "frame");
++  const hasCrossOriginReferrer = (() => {
++    if (!request.referrer) return false;
++    try {
++      return new URL(request.referrer).origin !== self.location.origin;
++    } catch {
++      return false;
++    }
++  })();
++  if (isFrameNavigation && hasCrossOriginReferrer) return;
++
+   // 2. only same-origin (and localhost-alias) URLs can belong to a pod;
+   //    cross-origin (fonts, CDNs) always passes through
+   const sameOrigin =
+@@ -739,6 +817,13 @@ self.addEventListener("fetch", (event) => {
+     return;
+   }
+ 
++  // 3.5. [busabase patch] `/embed/*` is a real host route. Known preview
++  //      clients were handled above, so an unattributed frame navigation here
++  //      must not be recovered through a pod's broad path claim (especially
++  //      "/"). This also covers the same-origin redirect that follows the
++  //      initial cross-origin `/embed/{id}` request.
++  if (isFrameNavigation && url.pathname.startsWith("/embed/")) return;
++
+   const refUrl = (() => {
+     if (!request.referrer) return null;
+     try {
+@@ -766,6 +851,17 @@ self.addEventListener("fetch", (event) => {
+     }
+   }
+ 
++  // 4.5. [busabase patch] A subresource whose referrer is the /embed/* HOST
++  //      document belongs to the host, never to a pod. Without this, a pod's
++  //      broad "/" path claim (claimed on every preview load) captures the
++  //      embed page's own _next chunks/fonts after a reload via the walk-up in
++  //      lookupPodForClaimedPath — the dead pod's virtual server answers 503,
++  //      the page never hydrates, and adoptPreviewClient() below would also
++  //      mis-register the host document as a preview client, which then gets
++  //      its NEXT top-level navigation hijacked by branch 3. Sibling of the
++  //      3.5 guard, which only covers frame navigations.
++  if (refUrl && (refUrl.pathname === "/embed" || refUrl.pathname.startsWith("/embed/"))) return;
++
+   const isNavigation = request.mode === "navigate";
+ 
+   // 5. subresource whose referer (or client URL) resolves via pathClaims.
+@@ -791,6 +887,15 @@ self.addEventListener("fetch", (event) => {
+           if (!pod && client && client.url) {
+             try {
+               const clientPath = stripPreviewPrefix(new URL(client.url).pathname);
++              // [busabase patch, part of 4.5] The embed page ships
++              // referrer-policy: no-referrer, so its subresources arrive with
++              // no refUrl and fall into THIS client-URL recovery. A client
++              // whose document lives on the /embed/* HOST route is the host
++              // page itself — its chunks/fonts must go to the network, not be
++              // walked up into a pod's broad "/" claim.
++              if (clientPath === "/embed" || clientPath.startsWith("/embed/")) {
++                return fetch(request);
++              }
+               pod = lookupPodForClaimedPath(clientPath);
+             } catch {
+               pod = null;

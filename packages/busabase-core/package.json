@@ -1,7 +1,7 @@
 {
   "name": "busabase-core",
   "description": "Shared Busabase open-core protocol, local store, API helpers, and dashboard components.",
-  "version": "0.16.1",
+  "version": "0.16.2",
   "private": true,
   "type": "module",
   "exports": {
@@ -248,6 +248,10 @@
     "./domains/agents/logic/agent-origin-guard": {
       "types": "./src/domains/agents/logic/agent-origin-guard.ts",
       "default": "./src/domains/agents/logic/agent-origin-guard.ts"
+    },
+    "./domains/agents/logic/agent-session-store": {
+      "types": "./src/domains/agents/logic/agent-session-store.ts",
+      "default": "./src/domains/agents/logic/agent-session-store.ts"
     }
   },
   "dependencies": {
@@ -264,7 +268,7 @@
     "@orpc/server": "^1.14.6",
     "@orpc/tanstack-query": "1.14.6",
     "@orpc/zod": "^1.14.6",
-    "@scelar/nodepod": "^1.9.9",
+    "@scelar/nodepod": "^1.9.20",
     "@tanstack/react-query": "^5.101.0",
     "@tanstack/react-virtual": "^3.13.12",
     "@xyflow/react": "^12.10.0",

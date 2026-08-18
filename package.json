@@ -1,7 +1,7 @@
 {
   "name": "busabase-repo",
   "private": true,
-  "version": "0.16.1",
+  "version": "0.16.2",
   "packageManager": "pnpm@10.15.1",
   "workspaces": [
     "apps/*",
@@ -27,7 +27,7 @@
   "pnpm": {
     "patchedDependencies": {
       "@react-native-cookies/cookies@6.2.1": "patches/@react-native-cookies__cookies@6.2.1.patch",
-      "@scelar/nodepod@1.9.9": "patches/@scelar__nodepod@1.9.9.patch"
+      "@scelar/nodepod@1.9.20": "patches/@scelar__nodepod@1.9.20.patch"
     }
   }
 }
