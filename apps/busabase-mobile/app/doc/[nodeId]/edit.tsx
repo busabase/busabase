@@ -4,8 +4,6 @@ import { ArrowLeft, GitPullRequest, Save } from "lucide-react-native";
 import { useEffect, useState } from "react";
 import { Platform, Pressable, StyleSheet, View } from "react-native";
 import { useBusabaseOrpc } from "~/api/use-busabase-orpc";
-import { ConnectionGuard } from "~/components/busabase/ConnectionGuard";
-import { DrawerScaffold } from "~/components/busabase/DrawerScaffold";
 import {
   NativeActionBar,
   NativeBottomSheet,
@@ -17,8 +15,10 @@ import {
 } from "~/components/native-screen";
 import { Button } from "~/components/ui/Button";
 import { TextInput } from "~/components/ui/TextInput";
+import { asNodeDetail } from "~/domains/knowledge/utils/node-detail";
+import { ConnectionGuard } from "~/domains/workspace/components/ConnectionGuard";
+import { DrawerScaffold } from "~/domains/workspace/components/DrawerScaffold";
 import { useI18n } from "~/i18n";
-import { asNodeDetail } from "~/lib/node-detail";
 import { mobile, radius, spacing } from "~/theme/tokens";
 import { useTokens } from "~/theme/use-tokens";
 
@@ -91,9 +91,9 @@ function DocEditContent() {
   const createChangeRequestMutation = useMutation({
     mutationFn: async () => {
       if (!buda) throw new Error("Not connected");
-      return buda.client.docs.createChangeRequest({
+      return buda.client.nodes.updateContent({
         nodeId,
-        body,
+        content: { kind: "doc", body },
         message: changeMessage.trim() || defaultChangeMessage,
         submittedBy: SUBMITTED_BY,
         // This is the "Save as change request" button, sitting next to a separate
@@ -110,7 +110,7 @@ function DocEditContent() {
   const directSaveMutation = useMutation({
     mutationFn: async () => {
       if (!buda) throw new Error("Not connected");
-      return buda.client.docs.updateBody({ nodeId, body });
+      return buda.client.nodes.updateContent({ nodeId, content: { kind: "doc", body } });
     },
     onSuccess: () =>
       router.replace({

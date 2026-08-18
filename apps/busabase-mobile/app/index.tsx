@@ -13,10 +13,10 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import Svg, { Rect } from "react-native-svg";
 import { signInWithBusabaseCloud } from "~/auth/oauth";
-import { RotatingHeroHeadline } from "~/components/busabase/RotatingHeroHeadline";
 import { NativeInlineError } from "~/components/native-screen";
 import { Button } from "~/components/ui/Button";
 import { useConnection } from "~/connection/connection-store";
+import { RotatingHeroHeadline } from "~/domains/account/components/RotatingHeroHeadline";
 import { spacing, typography } from "~/theme/tokens";
 import { useTokens } from "~/theme/use-tokens";
 import { useMobileUpdate } from "~/updates/mobile-update-provider";

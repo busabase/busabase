@@ -4,9 +4,6 @@ import { useRouter } from "expo-router";
 import { useMemo, useState } from "react";
 import { StyleSheet, View } from "react-native";
 import { useBusabaseOrpc } from "~/api/use-busabase-orpc";
-import { ConnectionGuard } from "~/components/busabase/ConnectionGuard";
-import { DrawerScaffold } from "~/components/busabase/DrawerScaffold";
-import { RecordCard } from "~/components/busabase/RecordCard";
 import {
   NativeActionBar,
   NativeEmptyState,
@@ -16,7 +13,10 @@ import {
 } from "~/components/native-screen";
 import { Button } from "~/components/ui/Button";
 import { TextInput } from "~/components/ui/TextInput";
-import { normalizeRecordsPage, RECORDS_PAGE_SIZE } from "~/lib/record-pagination";
+import { RecordCard } from "~/domains/base/components/RecordCard";
+import { normalizeRecordsPage, RECORDS_PAGE_SIZE } from "~/domains/base/utils/record-pagination";
+import { ConnectionGuard } from "~/domains/workspace/components/ConnectionGuard";
+import { DrawerScaffold } from "~/domains/workspace/components/DrawerScaffold";
 import { spacing } from "~/theme/tokens";
 
 function RecordsContent() {

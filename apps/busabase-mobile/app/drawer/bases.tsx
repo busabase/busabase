@@ -3,9 +3,6 @@ import { useRouter } from "expo-router";
 import { useMemo, useState } from "react";
 import { StyleSheet, View } from "react-native";
 import { useBusabaseOrpc } from "~/api/use-busabase-orpc";
-import { BaseCard } from "~/components/busabase/BaseCard";
-import { ConnectionGuard } from "~/components/busabase/ConnectionGuard";
-import { DrawerScaffold } from "~/components/busabase/DrawerScaffold";
 import {
   NativeActionBar,
   NativeEmptyState,
@@ -15,6 +12,9 @@ import {
 } from "~/components/native-screen";
 import { Button } from "~/components/ui/Button";
 import { TextInput } from "~/components/ui/TextInput";
+import { BaseCard } from "~/domains/base/components/BaseCard";
+import { ConnectionGuard } from "~/domains/workspace/components/ConnectionGuard";
+import { DrawerScaffold } from "~/domains/workspace/components/DrawerScaffold";
 import { spacing } from "~/theme/tokens";
 
 const BASE_BATCH_SIZE = 30;

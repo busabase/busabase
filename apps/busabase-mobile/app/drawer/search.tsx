@@ -6,8 +6,6 @@ import { AppWindow, File, FileText, GitPullRequest, Search, Table2 } from "lucid
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useBusabaseOrpc } from "~/api/use-busabase-orpc";
-import { ConnectionGuard } from "~/components/busabase/ConnectionGuard";
-import { DrawerScaffold } from "~/components/busabase/DrawerScaffold";
 import {
   NativeActionBar,
   NativeInlineError,
@@ -16,15 +14,17 @@ import {
 } from "~/components/native-screen";
 import { Button } from "~/components/ui/Button";
 import { TextInput } from "~/components/ui/TextInput";
+import { ConnectionGuard } from "~/domains/workspace/components/ConnectionGuard";
+import { DrawerScaffold } from "~/domains/workspace/components/DrawerScaffold";
+import { nodeIconForType } from "~/domains/workspace/components/node-icons";
+import { useKnownNodeCache } from "~/domains/workspace/hooks/use-known-node-cache";
 import {
   findKnownNodeByTypeAndSlug,
   type KnownNode,
   type KnownNodeCache,
   nodeSearchResultToKnownNode,
-} from "~/search/known-node-cache";
-import { nodeIconForType } from "~/search/node-icons";
-import { getMobileNodeDestination } from "~/search/node-navigation";
-import { useKnownNodeCache } from "~/search/use-known-node-cache";
+} from "~/domains/workspace/utils/known-node-cache";
+import { getMobileNodeDestination } from "~/domains/workspace/utils/node-navigation";
 import { mobile, radius, spacing, typography } from "~/theme/tokens";
 import { useTokens } from "~/theme/use-tokens";
 

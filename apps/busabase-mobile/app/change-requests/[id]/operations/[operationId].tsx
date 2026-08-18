@@ -6,11 +6,6 @@ import { ArrowLeft, GitCommitHorizontal } from "lucide-react-native";
 import { useEffect, useState } from "react";
 import { Pressable, ScrollView, StyleSheet } from "react-native";
 import { useBusabaseOrpc } from "~/api/use-busabase-orpc";
-import { CommentsSection } from "~/components/busabase/CommentsSection";
-import { ConnectionGuard } from "~/components/busabase/ConnectionGuard";
-import { DrawerScaffold } from "~/components/busabase/DrawerScaffold";
-import { FieldList } from "~/components/busabase/FieldList";
-import { RecordForm } from "~/components/busabase/RecordForm";
 import {
   NativeActionBar,
   NativeBottomSheet,
@@ -21,14 +16,19 @@ import {
   NativeSection,
 } from "~/components/native-screen";
 import { Button } from "~/components/ui/Button";
-import { getOperationStatusLabel, operationLabels } from "~/lib/busabase-display";
-import { shortId } from "~/lib/format";
+import { FieldList } from "~/domains/base/components/FieldList";
+import { RecordForm } from "~/domains/base/components/RecordForm";
 import {
   buildInitialFormValues,
   getChangedFieldValues,
   normalizeFormValues,
   type RecordFormValue,
-} from "~/lib/record-form";
+} from "~/domains/base/utils/record-form";
+import { CommentsSection } from "~/domains/review/components/CommentsSection";
+import { getOperationStatusLabel, operationLabels } from "~/domains/review/utils/busabase-display";
+import { ConnectionGuard } from "~/domains/workspace/components/ConnectionGuard";
+import { DrawerScaffold } from "~/domains/workspace/components/DrawerScaffold";
+import { shortId } from "~/lib/format";
 import { mobile, radius } from "~/theme/tokens";
 import { useTokens } from "~/theme/use-tokens";
 
@@ -72,7 +72,7 @@ function OperationDetailContent() {
   useEffect(() => {
     if (operation && changeRequest) {
       setValues(
-        buildInitialFormValues(changeRequest.base?.fields ?? [], operation.headCommit.fields),
+        buildInitialFormValues(changeRequest.base?.fields ?? [], operation.headCommit.payload),
       );
     }
   }, [operation, changeRequest]);
@@ -135,7 +135,7 @@ function OperationDetailContent() {
   }
 
   const label = operationLabels[operation.operation] ?? operation.operation;
-  const changedFields = getChangedFieldValues(operation.baseFields, operation.headCommit.fields);
+  const changedFields = getChangedFieldValues(operation.baseFields, operation.headCommit.payload);
   const footer =
     changeRequest.status === "in_review" ? (
       <NativeActionBar>

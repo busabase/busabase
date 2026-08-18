@@ -14,9 +14,6 @@ import { iStringParse } from "openlib/i18n/i-string";
 import { useMemo, useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useBusabaseOrpc } from "~/api/use-busabase-orpc";
-import { ConnectionGuard } from "~/components/busabase/ConnectionGuard";
-import { DrawerScaffold } from "~/components/busabase/DrawerScaffold";
-import { FieldValue } from "~/components/busabase/FieldValue";
 import {
   NativeActionBar,
   NativeBottomSheet,
@@ -28,14 +25,17 @@ import {
   NativeSegmentedControl,
 } from "~/components/native-screen";
 import { Button } from "~/components/ui/Button";
-import { getPreview } from "~/lib/busabase-display";
-import { formatListTime } from "~/lib/format";
+import { FieldValue } from "~/domains/base/components/FieldValue";
 import {
   normalizeRecordsPage,
   RECORDS_PAGE_SIZE,
   scopeRecordsPageToBase,
-} from "~/lib/record-pagination";
-import { applyViewConfig } from "~/lib/view-config";
+} from "~/domains/base/utils/record-pagination";
+import { applyViewConfig } from "~/domains/base/utils/view-config";
+import { getPreview } from "~/domains/review/utils/busabase-display";
+import { ConnectionGuard } from "~/domains/workspace/components/ConnectionGuard";
+import { DrawerScaffold } from "~/domains/workspace/components/DrawerScaffold";
+import { formatListTime } from "~/lib/format";
 import { mobile, radius, spacing, typography } from "~/theme/tokens";
 import { useTokens } from "~/theme/use-tokens";
 
@@ -214,7 +214,7 @@ function BaseDetailContent() {
             <NativeSection title="Records" caption={`${records.length}`}>
               {records.map((record, index) => {
                 const title = getRecordTitle(record);
-                const preview = getPreview(record.headCommit.fields);
+                const preview = getPreview(record.headCommit.payload);
                 // Sparse (often single-field) records can make the preview
                 // echo the title verbatim — drop it rather than show the
                 // same text twice (see RecordCard.tsx for the same fix).
@@ -286,7 +286,7 @@ function BaseDetailContent() {
                         <View key={field.id} style={styles.cell}>
                           <FieldValue
                             field={field}
-                            value={record.headCommit.fields[field.slug]}
+                            value={record.headCommit.payload[field.slug]}
                             interactive={false}
                           />
                         </View>

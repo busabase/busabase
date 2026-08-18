@@ -4,9 +4,6 @@ import { useRouter } from "expo-router";
 import { useEffect, useMemo, useState } from "react";
 import { AppState, StyleSheet, View } from "react-native";
 import { useBusabaseOrpc } from "~/api/use-busabase-orpc";
-import { ChangeRequestCard } from "~/components/busabase/ChangeRequestCard";
-import { ConnectionGuard } from "~/components/busabase/ConnectionGuard";
-import { DrawerScaffold } from "~/components/busabase/DrawerScaffold";
 import {
   NativeEmptyState,
   NativeErrorState,
@@ -14,6 +11,9 @@ import {
   NativeSection,
   NativeSegmentedControl,
 } from "~/components/native-screen";
+import { ChangeRequestCard } from "~/domains/review/components/ChangeRequestCard";
+import { ConnectionGuard } from "~/domains/workspace/components/ConnectionGuard";
+import { DrawerScaffold } from "~/domains/workspace/components/DrawerScaffold";
 
 // Match both the web/local editor and change requests created from this mobile app.
 const LOCAL_AUTHORS = new Set(["local-editor", "mobile-editor"]);

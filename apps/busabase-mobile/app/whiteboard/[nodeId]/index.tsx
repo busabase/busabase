@@ -1,4 +1,4 @@
-import { RichNodeDetailScreen } from "~/components/busabase/RichNodeDetailScreen";
+import { RichNodeDetailScreen } from "~/domains/knowledge/components/RichNodeDetailScreen";
 
 export default function WhiteboardDetailScreen() {
   return <RichNodeDetailScreen type="whiteboard" />;

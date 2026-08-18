@@ -1,4 +1,5 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { createBusabaseORPCClient } from "busabase-contract/api-client/react-query";
 import type { ChangeRequestVO } from "busabase-contract/types";
 import {
   getChangeRequestScopeName,
@@ -6,7 +7,7 @@ import {
 } from "busabase-core/dashboard/change-request";
 import * as Notifications from "expo-notifications";
 import { Platform } from "react-native";
-import { getPrimaryTitle } from "~/lib/busabase-display";
+import { getPrimaryTitle } from "~/domains/review/utils/busabase-display";
 
 const SEEN_KEY_PREFIX = "busabase-mobile.seen-change-requests.v1:";
 const MAX_SEEN_IDS = 500;
@@ -14,22 +15,14 @@ const MAX_SEEN_IDS = 500;
 /** expo-notifications native methods are unavailable on web; guard every call. */
 export const NOTIFICATIONS_SUPPORTED = Platform.OS !== "web";
 
-/**
- * Fetches change requests over the plain REST endpoint so the watcher also
- * works inside background tasks where the oRPC client setup is unnecessary.
- */
 export async function fetchChangeRequests(
   serverUrl: string,
   headers: Record<string, string> = {},
 ): Promise<ChangeRequestVO[]> {
   const base = serverUrl.replace(/\/+$/, "");
-  const response = await fetch(`${base}/api/v1/change-requests?limit=100`, {
-    headers: { Accept: "application/json", ...headers },
-  });
-  if (!response.ok) {
-    throw new Error(`Server responded ${response.status}`);
-  }
-  return (await response.json()) as ChangeRequestVO[];
+  const client = createBusabaseORPCClient(`${base}/api/rpc`, { headers });
+  const page = await client.changeRequests.list({ limit: 100 });
+  return page.changeRequests;
 }
 
 const scopeKey = (serverUrl: string, spaceId?: string | null) =>
@@ -119,7 +112,7 @@ export async function checkForNewChangeRequests(
   if (NOTIFICATIONS_SUPPORTED) {
     for (const changeRequest of fresh) {
       const title = getPrimaryTitle(
-        changeRequest.primaryOperation?.headCommit.fields ?? {},
+        changeRequest.primaryOperation?.headCommit.payload ?? {},
         `Change Request ${changeRequest.id.slice(0, 8)}`,
       );
       await Notifications.scheduleNotificationAsync({

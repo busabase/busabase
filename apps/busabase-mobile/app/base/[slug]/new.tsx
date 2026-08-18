@@ -5,9 +5,6 @@ import { ArrowLeft } from "lucide-react-native";
 import { useEffect, useMemo, useState } from "react";
 import { Pressable, StyleSheet } from "react-native";
 import { useBusabaseOrpc } from "~/api/use-busabase-orpc";
-import { ConnectionGuard } from "~/components/busabase/ConnectionGuard";
-import { DrawerScaffold } from "~/components/busabase/DrawerScaffold";
-import { RecordForm } from "~/components/busabase/RecordForm";
 import {
   NativeActionBar,
   NativeBottomSheet,
@@ -17,13 +14,16 @@ import {
   NativeSection,
 } from "~/components/native-screen";
 import { Button } from "~/components/ui/Button";
+import { RecordForm } from "~/domains/base/components/RecordForm";
 import {
   buildInitialFormValues,
   isEditableField,
   normalizeFormValues,
   type RecordFormValue,
   recordFormValuesEqual,
-} from "~/lib/record-form";
+} from "~/domains/base/utils/record-form";
+import { ConnectionGuard } from "~/domains/workspace/components/ConnectionGuard";
+import { DrawerScaffold } from "~/domains/workspace/components/DrawerScaffold";
 import { mobile, radius } from "~/theme/tokens";
 import { useTokens } from "~/theme/use-tokens";
 
