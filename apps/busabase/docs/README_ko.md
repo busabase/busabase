@@ -275,7 +275,7 @@ echo "Review: http://localhost:15419/dashboard/local/inbox/$CHANGE_REQUEST_ID"
 curl -s -X POST "http://localhost:15419/api/v1/change-requests/merge" \
   -H 'content-type: application/json' \
   --data "{\"changeRequestIds\":[\"$CHANGE_REQUEST_ID\"]}" \
-  | jq '.results[0].record.id, .results[0].record.headCommit.fields.title'
+  | jq '.results[0].record.id, .results[0].record.headCommit.payload.title'
 ```
 
 기계 판독 가능한 엔드포인트 문서를 보려면 아래 주소를 여세요:

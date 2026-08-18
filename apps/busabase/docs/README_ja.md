@@ -281,7 +281,7 @@ echo "Review: http://localhost:15419/dashboard/local/inbox/$CHANGE_REQUEST_ID"
 curl -s -X POST "http://localhost:15419/api/v1/change-requests/merge" \
   -H 'content-type: application/json' \
   --data "{\"changeRequestIds\":[\"$CHANGE_REQUEST_ID\"]}" \
-  | jq '.results[0].record.id, .results[0].record.headCommit.fields.title'
+  | jq '.results[0].record.id, .results[0].record.headCommit.payload.title'
 ```
 
 機械可読なエンドポイントドキュメントは以下で確認できます:
