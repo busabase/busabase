@@ -24,7 +24,7 @@ interface ChangeRequestVO {
 interface RecordVO {
   id: string;
   base: { slug: string };
-  headCommit: { fields: Record<string, unknown> };
+  headCommit: { payload: Record<string, unknown> };
 }
 
 const getBlogBase = async (request: APIRequestContext) => {

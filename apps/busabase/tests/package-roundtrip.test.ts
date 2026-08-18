@@ -535,28 +535,15 @@ describe("busabase-cli export → install round trip (real demo seed, two databa
     expect(unexpected).toEqual([]);
   });
 
-  it("re-installing the same package into a second folder of an already-populated target creates genuinely new nodes, not silent no-ops", async () => {
-    // Regression for a real bug: `createFileTreeNode`'s idempotency check used
-    // to match an "already exists?" node by (spaceId, type, slug) alone, ignoring
-    // the parent folder — plan.ts's own docstring above documents node slugs as
-    // unique per PARENT, not per space, and its collision detector is scoped to
-    // the target folder accordingly. So installing this same package again under
-    // a DIFFERENT --into-folder in the SAME (now populated) target database is a
-    // legitimate, collision-free install by that rule — but before the fix, any
-    // node whose slug already existed under the first install's folder (e.g. the
-    // "ai-research-editor" skill) silently resolved to that unrelated existing
-    // node instead of being created under the new folder, while still reporting
-    // success. Caught by exporting to a real GitHub repo and installing twice by
-    // hand; this pins it down as an automated test.
+  it("re-installing with --rename creates space-unique copies inside the second folder", async () => {
+    // Every node type now owns its slug across the whole space. Installing the
+    // same package under a different folder therefore still collides, and
+    // --rename must suffix every repeated same-type slug before materializing a
+    // genuinely new node in the requested second folder.
     const client = await routerClient();
     const before = await client.nodes.list({});
 
-    // --rename is needed because base slugs collide SPACE-WIDE by design (see
-    // plan.ts's docstring) — every base in this package already exists from the
-    // first install. That is unrelated to the bug under test: node types like
-    // `skill` collide only per-PARENT, and "second-copy" is a different parent
-    // from the first install's folder, so they were never a real collision —
-    // `--rename` only touches the (expected, by-design) base collisions.
+    // --rename applies to every colliding node type, not only Bases.
     const secondReport = (await cli(
       "install",
       REPO_URL,
@@ -598,9 +585,10 @@ describe("busabase-cli export → install round trip (real demo seed, two databa
     };
 
     const firstCopySkill = findUnderFolder(before, "skills", "ai-research-editor", "skill");
-    const secondCopySkill = findUnderFolder(after, "second-copy", "ai-research-editor", "skill");
+    const secondCopySkill = findUnderFolder(after, "second-copy", "ai-research-editor-2", "skill");
     expect(firstCopySkill?.id).toBeTruthy();
     expect(secondCopySkill?.id).toBeTruthy();
+    expect(findUnderFolder(after, "second-copy", "ai-research-editor", "skill")).toBeUndefined();
     // The whole point: a genuinely new node, not the first install's node reused.
     expect(secondCopySkill?.id).not.toBe(firstCopySkill?.id);
   });

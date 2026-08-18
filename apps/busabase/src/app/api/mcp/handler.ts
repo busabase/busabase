@@ -1,7 +1,12 @@
+import { BUSABASE_RELAY_PERMISSION_LEVEL_HEADER } from "busabase-contract/access-control/api-key-level";
 import { createBusabaseOpenApiClient } from "busabase-contract/api-client";
 import { busabaseContract } from "busabase-contract/contract/busabase";
 import { AGENT_EXCLUDED_MCP_TOOLS, TASK_SUPERSEDED_MCP_TOOLS } from "busabase-contract/tasks";
-import { runWithLocalContext } from "busabase-core/context";
+import {
+  getContextPermissionLevel,
+  getContextPermissionLevelIsCeiling,
+  runWithLocalContext,
+} from "busabase-core/context";
 import {
   BUSABASE_MCP_AIRAPP_URI,
   BUSABASE_MCP_SKILL_URI,
@@ -13,6 +18,7 @@ import {
 import { createOpenApiMcpHandler } from "openlib/mcp";
 import { readBuiltinVaultRuntimeEnv } from "~/domains/vault/logic/vault";
 import { getLocalUserName } from "~/lib/local-user";
+import { resolveRelayPermissionContext } from "~/lib/relay-permission";
 import { busabaseLocalMcpTaskTools } from "./task-tools";
 
 const withheldFromMcp = new Set<string>([
@@ -33,10 +39,21 @@ const openApiMcpHandler = createOpenApiMcpHandler({
     ...busabaseLocalMcpTaskTools(),
   ],
   contract: busabaseContract,
-  createClient: () =>
-    createBusabaseOpenApiClient({
+  // Tool calls reach the workspace over loopback HTTP to this same server's
+  // `/api/v1`, which builds its own request context — so a ceiling carried on
+  // the *incoming* MCP request does not propagate on its own. `createClient` is
+  // invoked per tool call inside `mcpHandler`'s context scope, so it re-reads
+  // the ceiling there and re-sends it on the outgoing call, where
+  // `resolveRelayPermissionContext` picks it up and `node-acl.ts` enforces it.
+  // Absent a ceiling (any ordinary local caller) this sends no header and the
+  // permissive local default stands.
+  createClient: () => {
+    const ceiling = getContextPermissionLevelIsCeiling() ? getContextPermissionLevel() : undefined;
+    return createBusabaseOpenApiClient({
       baseUrl: process.env.NEXT_PUBLIC_APP_URL || "http://localhost:15419",
-    }),
+      headers: ceiling ? { [BUSABASE_RELAY_PERMISSION_LEVEL_HEADER]: ceiling } : {},
+    });
+  },
   // Endpoint tools a task now covers. Without this the catalog would carry both
   // spellings, and the endpoint one is the worse of the two (creating a Skill
   // through it silently omits the default scaffold).
@@ -74,7 +91,16 @@ const openApiMcpHandler = createOpenApiMcpHandler({
 
 export const mcpHandler = async (request: Request) => {
   const vaultRuntimeEnv = await readBuiltinVaultRuntimeEnv();
-  return runWithLocalContext({ vaultRuntimeEnv, localUserName: getLocalUserName() }, async () =>
-    openApiMcpHandler(request),
+  return runWithLocalContext(
+    {
+      vaultRuntimeEnv,
+      localUserName: getLocalUserName(),
+      // Honour a caller-supplied credential ceiling on this MCP session — the
+      // same header the tunnel forwards for a Cloud API key, and what a
+      // Busabase-spawned agent now sends to cap itself at proposing rather
+      // than writing. It can only lower access, never raise it.
+      aclOverride: resolveRelayPermissionContext(request.headers),
+    },
+    async () => openApiMcpHandler(request),
   );
 };

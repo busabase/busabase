@@ -46,7 +46,7 @@ interface BaseVO {
 interface RecordVO {
   id: string;
   baseId: string;
-  headCommit: { fields: Record<string, unknown> };
+  headCommit: { payload: Record<string, unknown> };
 }
 
 interface DesiredField {
@@ -178,7 +178,7 @@ const convergeRecords = async (
   );
   const standardSlugs = new Set(desired.fields.map((field) => field.slug));
   for (const record of currentRecords) {
-    const title = String(record.headCommit.fields.title ?? "");
+    const title = String(record.headCommit.payload.title ?? "");
     const target = desiredByTitle.get(title);
     assert(target !== undefined, `no desired ${base.slug} record matches title "${title}"`);
     const fields = Object.fromEntries(
@@ -187,7 +187,7 @@ const convergeRecords = async (
       ),
     );
     const changed = Object.entries(fields).some(
-      ([slug, value]) => !sameValue(record.headCommit.fields[slug], value),
+      ([slug, value]) => !sameValue(record.headCommit.payload[slug], value),
     );
     if (changed) await updateRecord(record, fields, title);
   }
@@ -259,7 +259,7 @@ const prepare = async () => {
     const titles = new Set(desiredRecords(desired.id).map((record) => String(record.fields.title)));
     assert(records.length === titles.size, `${base.slug} record count does not match the scenario`);
     for (const record of records) {
-      assert(titles.has(String(record.headCommit.fields.title)), `unknown ${base.slug} title`);
+      assert(titles.has(String(record.headCommit.payload.title)), `unknown ${base.slug} title`);
     }
   }
 

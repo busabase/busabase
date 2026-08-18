@@ -123,7 +123,7 @@ describe("busabase pglite integration flow", () => {
     expect(seededRecords.some((record) => record.base.slug === "social-content")).toBe(true);
     const seededNewsletter = seededRecords.find((record) => record.base.slug === "newsletter");
     expect(seededNewsletter?.base.fields.find((field) => field.slug === "body")?.type).toBe("html");
-    expect(String(seededNewsletter?.headCommit.fields.body)).toContain("<article>");
+    expect(String(seededNewsletter?.headCommit.payload.body)).toContain("<article>");
 
     const { changeRequests: seededChangeRequests } = await store.listChangeRequestsPaged({
       limit: 100,
@@ -225,7 +225,7 @@ describe("busabase pglite integration flow", () => {
     expect(revisedOperation.id).toBe(firstOperation.id);
     expect(revisedOperation.headCommitId).not.toBe(firstCommitId);
     expect(revisedOperation.headCommit.parentCommitId).toBe(firstCommitId);
-    expect(revisedOperation.headCommit.fields.title).toBe(
+    expect(revisedOperation.headCommit.payload.title).toBe(
       "Busabase PGlite integration test revised",
     );
 
@@ -242,7 +242,7 @@ describe("busabase pglite integration flow", () => {
     }
     expect(mergedRecord.headCommitId).toBe(revisedOperation.headCommitId);
     expect(mergedRecord.headCommit.parentCommitId).toBe(firstCommitId);
-    expect(mergedRecord.headCommit.fields.title).toBe("Busabase PGlite integration test revised");
+    expect(mergedRecord.headCommit.payload.title).toBe("Busabase PGlite integration test revised");
 
     const { records } = await base.listRecordsPaged({ baseId: blogBase.id, limit: 100 });
     expect(records.some((record) => record.id === mergedRecord.id)).toBe(true);
@@ -250,20 +250,20 @@ describe("busabase pglite integration flow", () => {
     if (!seededBlogRecord) {
       throw new Error("Expected seeded blog record");
     }
-    expect(seededBlogRecord.headCommit.fields.priority).toBe(1);
-    expect(seededBlogRecord.headCommit.fields.publish_date).toBe("2026-06-10");
-    expect(seededBlogRecord.headCommit.fields.ready).toBe(true);
-    expect(seededBlogRecord.headCommit.fields.status).toBe("published");
-    expect(seededBlogRecord.headCommit.fields.legacy_tags).toEqual(["agents", "policy"]);
-    expect(seededBlogRecord.headCommit.fields.tags).toEqual([
+    expect(seededBlogRecord.headCommit.payload.priority).toBe(1);
+    expect(seededBlogRecord.headCommit.payload.publish_date).toBe("2026-06-10");
+    expect(seededBlogRecord.headCommit.payload.ready).toBe(true);
+    expect(seededBlogRecord.headCommit.payload.status).toBe("published");
+    expect(seededBlogRecord.headCommit.payload.legacy_tags).toEqual(["agents", "policy"]);
+    expect(seededBlogRecord.headCommit.payload.tags).toEqual([
       "recmrufvh5a0jmw5xy",
       "recmrufvi8y96279us",
     ]);
-    expect(seededBlogRecord.headCommit.fields.source_url).toContain("ai-agent-workflows");
-    expect(seededBlogRecord.headCommit.fields.contact_email).toBe("editor@busabase.local");
-    expect(seededBlogRecord.headCommit.fields.contact_phone).toBe("+1-555-0101");
-    expect(seededBlogRecord.headCommit.fields.ai_summary).toContain("operator workflows");
-    expect(seededBlogRecord.headCommit.fields.ai_tags).toEqual(["agents", "workflow", "trust"]);
+    expect(seededBlogRecord.headCommit.payload.source_url).toContain("ai-agent-workflows");
+    expect(seededBlogRecord.headCommit.payload.contact_email).toBe("editor@busabase.local");
+    expect(seededBlogRecord.headCommit.payload.contact_phone).toBe("+1-555-0101");
+    expect(seededBlogRecord.headCommit.payload.ai_summary).toContain("operator workflows");
+    expect(seededBlogRecord.headCommit.payload.ai_tags).toEqual(["agents", "workflow", "trust"]);
     const seededLinks = await base.listRecordLinks(seededBlogRecord.id);
     expect(seededLinks.some((link) => link.fieldSlug === "related_social")).toBe(true);
 

@@ -1,0 +1,1 @@
+ALTER TABLE "busabase_commits" RENAME COLUMN "fields" TO "payload";

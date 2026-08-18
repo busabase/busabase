@@ -19,7 +19,7 @@ interface ChangeRequestVO {
 interface RecordVO {
   id: string;
   base: { slug: string };
-  headCommit: { fields: Record<string, unknown> };
+  headCommit: { payload: Record<string, unknown> };
 }
 
 interface NodeSummaryVO {
@@ -94,14 +94,14 @@ test("GET /api/v1/records/search filters canonical records by field text", async
   const { records } = page;
   expect(records.length).toBeGreaterThan(0);
   const sample = records.find((record) =>
-    Object.values(record.headCommit.fields).some(
+    Object.values(record.headCommit.payload).some(
       (value) => typeof value === "string" && value.trim().length > 0,
     ),
   );
   if (!sample) {
     throw new Error("No demo blog record with a non-empty text field");
   }
-  const [fieldSlug, rawValue] = Object.entries(sample.headCommit.fields).find(
+  const [fieldSlug, rawValue] = Object.entries(sample.headCommit.payload).find(
     ([, value]) => typeof value === "string" && value.trim().length > 0,
   ) as [string, string];
 

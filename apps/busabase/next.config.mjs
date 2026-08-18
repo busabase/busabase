@@ -45,13 +45,22 @@ export const resolveAirAppEmbedOrigins = ({
   return [...new Set((configured?.length ? configured : defaults).map(normalizeEmbedOrigin))];
 };
 
+// Nodepod (the in-browser Node runtime behind the AirApp Run panel) lazy-loads
+// WASM tools it doesn't bundle — esbuild-wasm from esm.sh, wa-sqlite and
+// brotli-wasm from jsdelivr — the moment a Vite/SQLite AirApp actually runs.
+// Without these two origins in script-src, esbuild's WASM init throws
+// (`Cannot destructure property 'createServer'`) before the dev server binds
+// a port; verified against a real vite@7.3.1 AirApp both failing with these
+// origins absent and succeeding once they're allowed.
+const NODEPOD_TOOL_CDN_ORIGINS = ["https://esm.sh", "https://cdn.jsdelivr.net"];
+
 export const createAirAppContentSecurityPolicy = (embedOrigins) =>
   [
     "default-src 'self'",
     "base-uri 'none'",
     "object-src 'none'",
     "form-action 'self'",
-    "script-src 'self' 'unsafe-inline' 'unsafe-eval' blob:",
+    `script-src 'self' 'unsafe-inline' 'unsafe-eval' blob: ${NODEPOD_TOOL_CDN_ORIGINS.join(" ")}`,
     "style-src 'self' 'unsafe-inline'",
     "img-src 'self' data: blob: http: https:",
     "font-src 'self' data: blob: http: https:",
@@ -69,6 +78,19 @@ const airAppSecurityHeaders = [
   {
     key: "Referrer-Policy",
     value: "no-referrer",
+  },
+  // Cross-origin isolation for Nodepod's SharedArrayBuffer path (threaded WASI
+  // modules, lean worker snapshots, sync child-process APIs). `credentialless`
+  // per Nodepod's own docs recommendation — it's what Nodepod's own preview
+  // responses use, and unlike `require-corp` it doesn't need the esm.sh/
+  // jsdelivr CDN responses above to send their own CORP header.
+  {
+    key: "Cross-Origin-Opener-Policy",
+    value: "same-origin",
+  },
+  {
+    key: "Cross-Origin-Embedder-Policy",
+    value: "credentialless",
   },
   {
     key: "Content-Security-Policy",
