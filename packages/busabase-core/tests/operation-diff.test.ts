@@ -46,7 +46,7 @@ const makeOperation = (fieldIds: string[]): OperationVO => ({
     nodeId: null,
     operationId: "opr_reorder",
     parentCommitId: null,
-    fields: { fieldIds },
+    payload: { fieldIds },
     operation: "base_reorder_fields",
     message: "Reorder fields",
     author: "tester",

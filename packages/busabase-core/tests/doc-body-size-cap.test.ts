@@ -1,6 +1,6 @@
 /**
  * Doc body size cap — a Doc's body is written unbounded today, and every
- * edit's full body is ALSO duplicated forever into `busabase_commits.fields`
+ * edit's full body is ALSO duplicated forever into `busabase_commits.payload`
  * (no pruning). This doesn't solve unbounded history growth over many edits,
  * only the pathological single-huge-Doc case: a hard byte cap on any one
  * write, checked in real UTF-8 byte length (not JS string `.length`, which
@@ -28,7 +28,7 @@ describe("Doc body size cap (byte-length, UTF-8-aware)", () => {
     ).rejects.toMatchObject({ code: "PAYLOAD_TOO_LARGE" });
   });
 
-  it("rejects an oversized body on updateDocBody with PAYLOAD_TOO_LARGE", async () => {
+  it("rejects an oversized body on nodes.updateContent (immediate-merge path) with PAYLOAD_TOO_LARGE", async () => {
     await seedScenario("doc-body-cap-update");
     const raw: RawClient = createRouterClient(busabaseRouter);
 
@@ -36,11 +36,14 @@ describe("Doc body size cap (byte-length, UTF-8-aware)", () => {
     if ("status" in doc) throw new Error("Expected materialized DocVO");
 
     await expect(
-      raw.docs.updateBody({ nodeId: doc.node.id, body: oversizedCjkBody }),
+      raw.nodes.updateContent({
+        nodeId: doc.node.id,
+        content: { kind: "doc", body: oversizedCjkBody },
+      }),
     ).rejects.toMatchObject({ code: "PAYLOAD_TOO_LARGE" });
   });
 
-  it("rejects an oversized body on createDocChangeRequest (review-first path) before creating any CR", async () => {
+  it("rejects an oversized body on nodes.updateContent (review-first path) before creating any CR", async () => {
     await seedScenario("doc-body-cap-cr");
     const raw: RawClient = createRouterClient(busabaseRouter);
 
@@ -48,7 +51,11 @@ describe("Doc body size cap (byte-length, UTF-8-aware)", () => {
     if ("status" in doc) throw new Error("Expected materialized DocVO");
 
     await expect(
-      raw.docs.createChangeRequest({ nodeId: doc.node.id, body: oversizedCjkBody }),
+      raw.nodes.updateContent({
+        nodeId: doc.node.id,
+        content: { kind: "doc", body: oversizedCjkBody },
+        autoMerge: false,
+      }),
     ).rejects.toMatchObject({ code: "PAYLOAD_TOO_LARGE" });
 
     // Rejected before any CR was ever created — no pending review left behind.
@@ -71,12 +78,18 @@ describe("Doc body size cap (byte-length, UTF-8-aware)", () => {
     if ("status" in doc) throw new Error("Expected materialized DocVO");
     expect(doc.body).toBe(normalBody);
 
-    const updated = await raw.docs.updateBody({ nodeId: doc.node.id, body: `${normalBody}more\n` });
-    expect(updated.body).toBe(`${normalBody}more\n`);
-
-    const cr = await raw.docs.createChangeRequest({
+    const updateCr = await raw.nodes.updateContent({
       nodeId: doc.node.id,
-      body: normalBody,
+      content: { kind: "doc", body: `${normalBody}more\n` },
+    });
+    expect(updateCr.status).toBe("merged");
+    expect((await raw.nodes.get({ nodeId: doc.node.id, type: "doc" })).body).toBe(
+      `${normalBody}more\n`,
+    );
+
+    const cr = await raw.nodes.updateContent({
+      nodeId: doc.node.id,
+      content: { kind: "doc", body: normalBody },
       // review-first: this assertion is about the CR path accepting the body,
       // not about whether it merges.
       autoMerge: false,

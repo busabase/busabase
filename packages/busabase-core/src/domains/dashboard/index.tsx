@@ -332,6 +332,12 @@ function BusabaseDashboardContent({
       recordsCount: orpc.records.count.key() as QueryKey,
       bases: orpc.bases.list.queryOptions({ input: {} }).queryKey as QueryKey,
       nodes: orpc.nodes.list.queryOptions({}).queryKey as QueryKey,
+      // Partial key so a single invalidation covers `nodes.get` for every
+      // nodeId — the rich-node editors (whiteboard/workflow/html) fetch their
+      // document via `nodes.get` instead of the tree, so live-sync has to
+      // invalidate this alongside `nodes` or their content goes stale across
+      // tabs/agents (see `use-live-sync.ts`).
+      nodeDetail: orpc.nodes.get.key() as QueryKey,
       auditEvents: orpc.auditEvents.list.queryOptions({ input: {} }).queryKey as QueryKey,
       assets: orpc.assets.list.queryOptions({}).queryKey as QueryKey,
     }),
@@ -393,20 +399,27 @@ function BusabaseDashboardContent({
   const activeDetailNode = useMemo(() => {
     if (!nodeDetailRoute) return null;
     const treeNode = flattenNodesForCache(nodeTree).find(
-      (node) => node.type === nodeDetailRoute.type && node.slug === nodeDetailRoute.slug,
+      (node) =>
+        node.type === nodeDetailRoute.type &&
+        (node.id === nodeDetailRoute.slug || node.slug === nodeDetailRoute.slug),
     );
     if (treeNode) return treeNode;
     const loadedNode = loadedDetailNode?.node;
     return loadedDetailNode?.scopeKey === cacheSpaceKey &&
       loadedNode?.type === nodeDetailRoute.type &&
-      loadedNode.slug === nodeDetailRoute.slug
+      (loadedNode.id === nodeDetailRoute.slug || loadedNode.slug === nodeDetailRoute.slug)
       ? loadedNode
       : null;
   }, [cacheSpaceKey, loadedDetailNode, nodeDetailRoute, nodeTree]);
   const activeBase = useMemo(
     () =>
       selectedBaseSlug
-        ? (bases.find((base) => base.slug === selectedBaseSlug) ?? null)
+        ? (bases.find(
+            (base) =>
+              base.id === selectedBaseSlug ||
+              base.nodeId === selectedBaseSlug ||
+              base.slug === selectedBaseSlug,
+          ) ?? null)
         : (bases[0] ?? null),
     [selectedBaseSlug, bases],
   );
@@ -740,7 +753,7 @@ function BusabaseDashboardContent({
         records.flatMap((record) =>
           record.base.fields
             .filter((field) => field.type === "relation")
-            .flatMap((field) => getRelationRecordIds(record.headCommit.fields[field.slug])),
+            .flatMap((field) => getRelationRecordIds(record.headCommit.payload[field.slug])),
         ),
       ),
     ].filter((recordId) => !existingRecordIds.has(recordId));
@@ -1271,7 +1284,7 @@ function BusabaseDashboardContent({
       const changeRequest = await client.createUpdateChangeRequest(record.id, {
         author: "local-editor",
         autoMerge: false,
-        fields: { ...record.headCommit.fields, [fieldSlug]: value },
+        fields: { ...record.headCommit.payload, [fieldSlug]: value },
         message: fmt(messages.createNode.updateRecordMessage, {
           record: getRecordTitle(record, messages),
         }),
@@ -1832,7 +1845,12 @@ function BusabaseDashboardContent({
   // Bases render from the already-resolved bases query rather than the generic
   // node-detail registry, so report their successful route resolution here.
   useEffect(() => {
-    if (locationPath.startsWith("/base/") && activeBase?.slug === selectedBaseSlug) {
+    if (
+      locationPath.startsWith("/base/") &&
+      (activeBase?.id === selectedBaseSlug ||
+        activeBase?.nodeId === selectedBaseSlug ||
+        activeBase?.slug === selectedBaseSlug)
+    ) {
       recordLoadedNode({
         id: activeBase.nodeId,
         type: "base",
@@ -2068,7 +2086,12 @@ function BusabaseDashboardContent({
 
     if (locationPath.startsWith("/base/")) {
       const archivedMatch = selectedBaseSlug
-        ? archivedBases.find((b) => b.slug === selectedBaseSlug)
+        ? archivedBases.find(
+            (b) =>
+              b.id === selectedBaseSlug ||
+              b.nodeId === selectedBaseSlug ||
+              b.slug === selectedBaseSlug,
+          )
         : null;
       if (archivedMatch) {
         return (

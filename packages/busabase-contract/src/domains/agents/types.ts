@@ -5,8 +5,7 @@
  * pulled into the browser bundle and the mobile client is generated from them.
  *
  * Vocabulary note: an "agent" here is a *backend we connect out to* (Claude Code,
- * Codex, a remote Buda agent), NOT one of Busabase's own nodes. See
- * `apps/busabase-cloud/content/spec/agent-integrations.md`.
+ * Codex, a remote Buda agent), NOT one of Busabase's own nodes.
  */
 import { z } from "zod";
 

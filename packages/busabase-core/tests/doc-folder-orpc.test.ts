@@ -86,12 +86,22 @@ describe("Doc & Folder domains — oRPC integration", () => {
   });
 
   it("runs the approval-first doc edit: change request → review → merge writes the body", async () => {
-    await client.docs.create({ autoMerge: true, slug: "guide", name: "Guide", body: "draft\n" });
+    const created = await client.docs.create({
+      autoMerge: true,
+      slug: "guide",
+      name: "Guide",
+      body: "draft\n",
+    });
+    if (!("node" in created)) throw new Error("Expected a materialized DocVO (autoMerge: true)");
 
-    const cr = await client.docs.createChangeRequest({
+    // `nodes.updateContent`, unlike the retired Doc-only `docs.*` routes, takes
+    // a real node id — same convention as every other node-mutation procedure
+    // (`nodes.updateMetadata`, `nodes.move`, …); only the `nodes.get` READ
+    // accepts a slug.
+    const cr = await client.nodes.updateContent({
       autoMerge: false, // review-first: this test drives approve + merge itself
-      nodeId: "guide",
-      body: "# Guide\n\nApproved content.\n",
+      nodeId: created.node.id,
+      content: { kind: "doc", body: "# Guide\n\nApproved content.\n" },
       message: "Publish the guide",
       submittedBy: "vitest-agent",
     });

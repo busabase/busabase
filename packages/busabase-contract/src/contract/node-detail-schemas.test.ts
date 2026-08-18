@@ -62,8 +62,21 @@ describe("NodeDetailVO", () => {
   });
 
   it("gives the not-yet-typed node types the plain node row", () => {
-    for (const type of ["base", "form", "whiteboard", "workflow", "html"] as const) {
+    for (const type of ["base", "form"] as const) {
       expect(Object.keys(NODE_DETAIL_VARIANTS[type].shape).sort()).toEqual(["node", "type"]);
+    }
+  });
+
+  it("gives whiteboard/workflow/html their storage-backed document", () => {
+    // Content moved out of `node.metadata` into object storage (spec D2), so
+    // the detail response carries it explicitly instead of leaving it to a
+    // bare `{ node }` the client has no way to read.
+    for (const type of ["whiteboard", "workflow", "html"] as const) {
+      expect(Object.keys(NODE_DETAIL_VARIANTS[type].shape).sort()).toEqual([
+        "document",
+        "node",
+        "type",
+      ]);
     }
   });
 
@@ -126,8 +139,17 @@ describe("retired node list/get routes", () => {
   it("keeps the type-specific operations that are NOT node-narrowing", () => {
     // Consolidation removed the type-discovery step, not the domain surface.
     expect(routes.docs?.readLines).toBeDefined();
-    expect(routes.docs?.updateBody).toBeDefined();
     expect(routes.fileTrees?.listFiles).toBeDefined();
     expect(routes.fileTrees?.readFile).toBeDefined();
+  });
+
+  it("moved Doc's write routes (and whiteboard/workflow/html's, for the first time) into one unified content write", () => {
+    // `updateBody` / `createChangeRequest` are gone from `docs`; both write
+    // paths — plus whiteboard/workflow/html, which never had a reviewed write
+    // at all — now go through `nodes.updateContent`.
+    const nodesRoutes = routes.nodes as unknown as Record<string, unknown>;
+    expect(routes.docs?.updateBody).toBeUndefined();
+    expect(routes.docs?.createChangeRequest).toBeUndefined();
+    expect(nodesRoutes?.updateContent).toBeDefined();
   });
 });

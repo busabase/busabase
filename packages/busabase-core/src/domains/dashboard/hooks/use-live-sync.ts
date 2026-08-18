@@ -39,6 +39,11 @@ interface UseBusabaseLiveSyncOptions {
     changeRequestsPaged: QueryKey;
     changeRequestCounts: QueryKey;
     nodes: QueryKey;
+    // Partial key matching every `nodes.get` call regardless of nodeId — the
+    // whiteboard/workflow/html detail views fetch their document through this
+    // query (not the tree), so it needs its own invalidation everywhere
+    // `nodes` is invalidated below, or another tab's edit never shows up.
+    nodeDetail: QueryKey;
     records: QueryKey;
     recordsPage: QueryKey;
     recordsCount: QueryKey;
@@ -130,6 +135,7 @@ export function useBusabaseLiveSync({
       listKeys.changeRequestsPaged,
       listKeys.changeRequestCounts,
       listKeys.nodes,
+      listKeys.nodeDetail,
       listKeys.records,
       listKeys.recordsPage,
       listKeys.recordsCount,
@@ -169,6 +175,7 @@ export function useBusabaseLiveSync({
 
     const invalidateWorkspace = () => {
       void queryClient.invalidateQueries({ queryKey: stableListKeys.nodes });
+      void queryClient.invalidateQueries({ queryKey: stableListKeys.nodeDetail });
       void queryClient.invalidateQueries({ queryKey: stableListKeys.archivedNodes });
       void queryClient.invalidateQueries({ queryKey: stableListKeys.bases });
       void queryClient.invalidateQueries({ queryKey: stableListKeys.archivedBases });
@@ -199,6 +206,7 @@ export function useBusabaseLiveSync({
 
       if (event.nodeIds.length > 0) {
         void queryClient.invalidateQueries({ queryKey: stableListKeys.nodes });
+        void queryClient.invalidateQueries({ queryKey: stableListKeys.nodeDetail });
         void queryClient.invalidateQueries({ queryKey: stableListKeys.archivedNodes });
         void queryClient.invalidateQueries({ queryKey: stableListKeys.bases });
         void queryClient.invalidateQueries({ queryKey: stableListKeys.archivedBases });

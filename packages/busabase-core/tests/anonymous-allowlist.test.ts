@@ -55,7 +55,7 @@ const MUST_STAY_DENIED = [
   "nodes.move",
   "nodes.purge",
   "nodes.updateVisibility",
-  "docs.updateBody",
+  "nodes.updateContent",
   // The four retired typed gets. They no longer exist as procedures at all —
   // asserting they are denied keeps a re-added alias from quietly inheriting
   // anonymous access from this file's history.

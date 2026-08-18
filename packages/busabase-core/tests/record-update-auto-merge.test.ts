@@ -76,7 +76,7 @@ describe("record update permission-aware auto-merge", () => {
 
     expect(result.materialized).toBe(true);
     if (!result.materialized) throw new Error("Expected a materialized record update");
-    expect(result.headCommit.fields.title).toBe("Manage default updated");
+    expect(result.headCommit.payload.title).toBe("Manage default updated");
   });
 
   it("preserves explicit autoMerge false as review-first for manage access", async () => {

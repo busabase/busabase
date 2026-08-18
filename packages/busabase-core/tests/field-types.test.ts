@@ -160,7 +160,7 @@ describe("Base field types — end-to-end", () => {
 
   const readFields = async (recordId: string): Promise<Record<string, unknown>> => {
     const record = await client.records.get({ recordId });
-    return record.headCommit.fields;
+    return record.headCommit.payload;
   };
 
   const validValues = (): Record<string, unknown> => ({
@@ -372,7 +372,7 @@ describe("Base field types — end-to-end", () => {
     const recordId = await createRecord({ f_text: marker });
     const hits = await client.records.search({ baseId, fieldSlug: "f_text", valueText: marker });
     expect(hits.some((r) => r.id === recordId)).toBe(true);
-    expect(hits.every((r) => r.headCommit.fields.f_text === marker)).toBe(true);
+    expect(hits.every((r) => r.headCommit.payload.f_text === marker)).toBe(true);
   });
 
   it("accepts a relation given as a single id string, not just an array", async () => {

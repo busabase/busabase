@@ -112,9 +112,9 @@ describe("Assets + attachment dedup — oRPC integration", () => {
   /** Create a Doc, then MERGE a body embedding `assetId` (the merge is what syncs usages). */
   const embedInDoc = async (slug: string, name: string, assetId: string) => {
     const doc = await client.docs.create({ autoMerge: true, slug, name, body: "# start" });
-    const cr = await client.docs.createChangeRequest({
+    const cr = await client.nodes.updateContent({
       nodeId: doc.node.id,
-      body: `# ${name}\n\n![](${buildAssetContentUrl(assetId)})\n`,
+      content: { kind: "doc", body: `# ${name}\n\n![](${buildAssetContentUrl(assetId)})\n` },
     });
     await client.changeRequests.review({ changeRequestIds: [cr.id], verdict: "approved" });
     await client.changeRequests.merge({ changeRequestIds: [cr.id] });
@@ -306,6 +306,47 @@ describe("Assets + attachment dedup — oRPC integration", () => {
   });
 
   describe("asset library (ensureAsset on confirm)", () => {
+    it("resolves a directly-created file node's Asset from its usage row, not node metadata", async () => {
+      // The `autoMerge` (direct-write) half of file-node creation. The
+      // reviewed half is covered by the next test; this path had no coverage at
+      // all, so nothing would have caught a node created unable to find its own
+      // bytes.
+      //
+      // `node.metadata` must stay EMPTY: the backing Asset lives in the
+      // `busabase_asset_usages` row that `getFileNodeAssetId` reads. Keeping a
+      // second copy in the free-form metadata bag gave two sources of truth for
+      // one fact — see spec node-content-storage.md (D1).
+      await runWithBusabaseContext(
+        { spaceId: LOCAL_SPACE_ID, actorId: "direct-writer", isSpaceManager: true },
+        async () => {
+          const upload = await client.assets.createUploadUrl({
+            fileName: "direct.txt",
+            mimeType: "text/plain",
+            sizeBytes: 6,
+          });
+          const confirmed = await client.assets.confirm({
+            storageKey: upload.storageKey,
+            fileName: "direct.txt",
+            mimeType: "text/plain",
+            sizeBytes: 6,
+          });
+
+          const created = await client.files.create({
+            slug: "direct-file",
+            name: "Direct File",
+            assetId: confirmed.assetId,
+            autoMerge: true,
+          });
+          if (!created.materialized) throw new Error("expected an immediate materialization");
+
+          const detail = await client.nodes.get({ nodeId: "direct-file", type: "file" });
+          if (detail.type !== "file") throw new Error("expected a file detail");
+          expect(detail.asset.id).toBe(confirmed.assetId);
+          expect(detail.node.metadata.assetId).toBeUndefined();
+        },
+      );
+    });
+
     it("lets an uploader propose an unmounted asset and a different reviewer materialize it", async () => {
       const confirmed = await runWithBusabaseContext(
         {
@@ -388,6 +429,22 @@ describe("Assets + attachment dedup — oRPC integration", () => {
           });
           const merged = await client.changeRequests.merge({ changeRequestIds: [pending.id] });
           expect(merged.results[0]).toMatchObject({ ok: true, status: "merged" });
+
+          // Read the merged file node back and prove it still resolves its
+          // backing Asset. The create→read round trip was previously untested:
+          // the test stopped at "merged", so nothing would have noticed if the
+          // node came out unable to find its own bytes.
+          //
+          // This is the assertion that pins where that link lives.
+          // `getFileNodeAssetId` reads the `busabase_asset_usages` row, NOT
+          // `node.metadata.assetId` — the metadata copy is gone (spec D1: no
+          // product-enforced field in the free-form bag). If someone restores
+          // the metadata read, this still passes; if someone drops the usage
+          // row that IS the reference, this fails.
+          const detail = await client.nodes.get({ nodeId: "review-me", type: "file" });
+          if (detail.type !== "file") throw new Error("expected a file detail");
+          expect(detail.asset.id).toBe(confirmed.assetId);
+          expect(detail.node.metadata.assetId).toBeUndefined();
         },
       );
     });
@@ -580,9 +637,9 @@ describe("Assets + attachment dedup — oRPC integration", () => {
         name: "WU Doc",
         body: "# start",
       });
-      const cr = await client.docs.createChangeRequest({
+      const cr = await client.nodes.updateContent({
         nodeId: doc.node.id,
-        body: `# Spec\n\n![diagram](${asset.url})\n`,
+        content: { kind: "doc", body: `# Spec\n\n![diagram](${asset.url})\n` },
       });
       await client.changeRequests.review({ changeRequestIds: [cr.id], verdict: "approved" });
       await client.changeRequests.merge({ changeRequestIds: [cr.id] });
@@ -597,9 +654,9 @@ describe("Assets + attachment dedup — oRPC integration", () => {
 
       // Removing the embed from the body and re-merging clears the usage —
       // syncDocAssetUsages replaces (not just adds to) the doc's whole-node rows.
-      const removeCr = await client.docs.createChangeRequest({
+      const removeCr = await client.nodes.updateContent({
         nodeId: doc.node.id,
-        body: "# Spec\n\nNo more diagram here.\n",
+        content: { kind: "doc", body: "# Spec\n\nNo more diagram here.\n" },
       });
       await client.changeRequests.review({ changeRequestIds: [removeCr.id], verdict: "approved" });
       await client.changeRequests.merge({ changeRequestIds: [removeCr.id] });
@@ -617,12 +674,15 @@ describe("Assets + attachment dedup — oRPC integration", () => {
         body: "# start",
       });
 
-      const cr = await client.docs.createChangeRequest({
+      const cr = await client.nodes.updateContent({
         nodeId: doc.node.id,
-        // Exactly what `useDocImageUpload` -> Crepe serializes: no storageKey
-        // anywhere in the body, so the legacy `includes(storageKey)` branch
-        // cannot be what finds this.
-        body: `# Spec\n\n![1.00](${buildAssetContentUrl(asset.id)})\n`,
+        content: {
+          kind: "doc",
+          // Exactly what `useDocImageUpload` -> Crepe serializes: no storageKey
+          // anywhere in the body, so the legacy `includes(storageKey)` branch
+          // cannot be what finds this.
+          body: `# Spec\n\n![1.00](${buildAssetContentUrl(asset.id)})\n`,
+        },
       });
       expect(cr.id).toBeTruthy();
       await client.changeRequests.review({ changeRequestIds: [cr.id], verdict: "approved" });
@@ -636,9 +696,9 @@ describe("Assets + attachment dedup — oRPC integration", () => {
       expect(usage?.fieldSlug).toBeNull();
 
       // Same replace semantics as the legacy branch: drop the embed, lose the usage.
-      const removeCr = await client.docs.createChangeRequest({
+      const removeCr = await client.nodes.updateContent({
         nodeId: doc.node.id,
-        body: "# Spec\n\nNo more diagram here.\n",
+        content: { kind: "doc", body: "# Spec\n\nNo more diagram here.\n" },
       });
       await client.changeRequests.review({ changeRequestIds: [removeCr.id], verdict: "approved" });
       await client.changeRequests.merge({ changeRequestIds: [removeCr.id] });
@@ -656,13 +716,16 @@ describe("Assets + attachment dedup — oRPC integration", () => {
         body: "# start",
       });
 
-      const cr = await client.docs.createChangeRequest({
+      const cr = await client.nodes.updateContent({
         nodeId: doc.node.id,
-        body:
-          `![old](${legacy.url})\n\n![new](${buildAssetContentUrl(stable.id)})\n\n` +
-          // A hand-written / stale id must not mint a usage row: the parse is
-          // followed by an existence check scoped to this space.
-          "![ghost](/api/assets/astdoesnotexist/raw)\n",
+        content: {
+          kind: "doc",
+          body:
+            `![old](${legacy.url})\n\n![new](${buildAssetContentUrl(stable.id)})\n\n` +
+            // A hand-written / stale id must not mint a usage row: the parse is
+            // followed by an existence check scoped to this space.
+            "![ghost](/api/assets/astdoesnotexist/raw)\n",
+        },
       });
       await client.changeRequests.review({ changeRequestIds: [cr.id], verdict: "approved" });
       await client.changeRequests.merge({ changeRequestIds: [cr.id] });

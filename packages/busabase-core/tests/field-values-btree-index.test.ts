@@ -108,9 +108,9 @@ describe("busabase_field_values btree index survives long field values", () => {
     expect(mergeResult.changeRequest.status).toBe("merged");
 
     const record = await client.records.get({ recordId: mergeResult.record.id });
-    expect(record?.headCommit.fields.lifebeeKey).toBe(lifebeeKey);
-    expect(record?.headCommit.fields.body).toBe(body);
-    expect(record?.headCommit.fields.html).toBe(html);
+    expect(record?.headCommit.payload.lifebeeKey).toBe(lifebeeKey);
+    expect(record?.headCommit.payload.body).toBe(body);
+    expect(record?.headCommit.payload.html).toBe(html);
   });
 
   it("exact-match search by field value (lifebee_key-style de-dup check) still works", async () => {
@@ -130,7 +130,7 @@ describe("busabase_field_values btree index survives long field values", () => {
       valueText: lifebeeKey,
     });
     expect(hits).toHaveLength(1);
-    expect(hits[0]?.headCommit.fields.lifebeeKey).toBe(lifebeeKey);
+    expect(hits[0]?.headCommit.payload.lifebeeKey).toBe(lifebeeKey);
 
     const misses = await client.records.search({
       baseId,

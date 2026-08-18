@@ -147,10 +147,10 @@ describe("Change-request collaboration — oRPC", () => {
         fields: { title: "polished", body: "clean", channel: "blog" },
       });
       expect(revised.status).toBe("in_review");
-      expect(revised.primaryOperation?.headCommit.fields.title).toBe("polished");
+      expect(revised.primaryOperation?.headCommit.payload.title).toBe("polished");
 
       const merged = await approveAndMerge(cr.id);
-      expect(merged.record?.headCommit.fields.title).toBe("polished");
+      expect(merged.record?.headCommit.payload.title).toBe("polished");
     });
 
     it("rejects revising an unknown operation", async () => {

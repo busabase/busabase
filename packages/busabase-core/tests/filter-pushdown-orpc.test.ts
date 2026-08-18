@@ -76,7 +76,7 @@ describe("Filter push-down parity — oRPC integration", () => {
   };
   const namesFor = async (filters: TestFilter[]): Promise<string[]> => {
     const page = await client.records.list({ baseId, limit: 100, filters });
-    return page.records.map((record) => String(record.headCommit.fields.name)).sort();
+    return page.records.map((record) => String(record.headCommit.payload.name)).sort();
   };
 
   it("text contains is case-insensitive and exact (no false negatives, no over-match)", async () => {

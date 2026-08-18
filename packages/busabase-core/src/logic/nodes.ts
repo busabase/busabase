@@ -2,17 +2,11 @@ import "server-only";
 
 import { ORPCError } from "@orpc/server";
 import {
-  NODE_COMMON_METADATA_KEYS,
   searchNodesByNameInputSchema,
   updateNodeMetadataInputSchema,
 } from "busabase-contract/contract/schemas";
 import { CREATABLE_NODE_TYPES } from "busabase-contract/domains";
 import { fieldNameSchema } from "busabase-contract/domains/base/contract/base-schemas";
-import {
-  HtmlDocumentSchema,
-  WhiteboardDocumentSchema,
-  WorkflowDocumentSchema,
-} from "busabase-contract/domains/rich-node/types";
 import type { NodeSearchResultVO, NodeVO } from "busabase-contract/types";
 import { and, asc, desc, eq, ilike, inArray, isNotNull, isNull, ne, or, sql } from "drizzle-orm";
 import { storage } from "openlib/storage";
@@ -29,6 +23,7 @@ import {
 } from "../db/schema";
 import { docBodyKey } from "../domains/doc/handlers";
 import { insertAuditEvent } from "./audit";
+import { insertCommit } from "./commits";
 import { id, now, rootNodeIdForSpace } from "./kernel";
 import { publishChangeRequestPendingReview, publishNodeMetadataUpdated } from "./live-events";
 import {
@@ -37,6 +32,7 @@ import {
   buildNodeVisibilityCondition,
   hasNodePermission,
 } from "./node-acl";
+import { assertNodeSlugAvailable, nodeSlugConflict } from "./node-slug";
 import { buildNodeTree, ensureReady } from "./seed";
 import { toNodeSearchResultVO, toNodeVO } from "./vo";
 
@@ -546,7 +542,7 @@ const collectSubtreeIds = async (
  * deletes that object (`node_delete`'s soft-archive path must NOT touch it —
  * restore needs the body back), so purge — the one point genuinely never
  * reachable again — is where it's safe to free it: the full body already
- * survives forever in `busabase_commits.fields.body` history, so deleting the
+ * survives forever in `busabase_commits.payload.body` history, so deleting the
  * live object here is not a loss of the "kept forever" audit guarantee above,
  * just the removal of a copy nothing will ever read again.
  */
@@ -634,14 +630,14 @@ export const createNodeChangeRequest = async (
   const parsed = createNodeChangeRequestInputSchema.parse(input);
   assertValidNodeRefs(parsed.operations);
   // Same metadata rules as the direct PATCH path, applied at submission time so
-  // a bad document/key never reaches a change request someone then has to
-  // review and merge. Creating a whiteboard used to skip validation entirely:
-  // a malformed `whiteboardDocument` merged fine and then read back as an empty
-  // canvas, and a misspelled key was accepted and never rendered.
+  // a rich-node content key never reaches a change request someone then has to
+  // review and merge. Creating a whiteboard/workflow/html node with an initial
+  // document used to work by writing `metadata.whiteboardDocument` etc.; that
+  // content now goes through `PUT /nodes/{nodeId}/content` AFTER creation
+  // instead (node_create no longer accepts initial content for these types).
   for (const operation of parsed.operations) {
     if (operation.kind !== "create") continue;
     assertValidNodeMetadata(
-      operation.nodeType,
       operation.metadata,
       `new ${operation.nodeType} node "${operation.slug}"`,
     );
@@ -683,6 +679,45 @@ export const createNodeChangeRequest = async (
     await assertNodePermission(nodeId, requiredLevel, submittedBy);
   }
 
+  // Fail before persisting a Change Request when its intended slug is already
+  // occupied. Merge repeats this check transactionally to close the race with
+  // another proposal; this early pass exists for immediate, actionable UX.
+  const proposedCreates = new Set<string>();
+  for (const operation of parsed.operations) {
+    if (operation.kind === "create") {
+      const identity = `${operation.nodeType}\u0000${operation.slug}`;
+      if (proposedCreates.has(identity)) {
+        throw nodeSlugConflict(operation.nodeType, operation.slug);
+      }
+      proposedCreates.add(identity);
+      await assertNodeSlugAvailable(db, {
+        nodeType: operation.nodeType,
+        slug: operation.slug,
+      });
+      continue;
+    }
+    if (operation.kind === "rename" && operation.slug) {
+      const [node] = await db
+        .select({ id: busabaseNodes.id, type: busabaseNodes.type })
+        .from(busabaseNodes)
+        .where(
+          and(
+            eq(busabaseNodes.id, operation.nodeId),
+            eq(busabaseNodes.spaceId, getContextSpaceId()),
+            isNull(busabaseNodes.archivedAt),
+          ),
+        )
+        .limit(1);
+      if (node) {
+        await assertNodeSlugAvailable(db, {
+          nodeType: node.type,
+          slug: operation.slug,
+          excludeNodeId: node.id,
+        });
+      }
+    }
+  }
+
   const changeRequestId = id("crq");
   const timestamp = now();
 
@@ -718,14 +753,14 @@ export const createNodeChangeRequest = async (
               : "node_move";
     const nodeId = operation.kind === "create" ? null : operation.nodeId;
 
-    await db.insert(busabaseCommits).values({
+    await insertCommit(db, {
       id: commitId,
       baseId: null,
       targetType: "node",
       nodeId,
       operationId: null,
       parentCommitId: null,
-      fields: operation,
+      payload: operation,
       operation: operationKind,
       message: parsed.message,
       author: submittedBy,
@@ -816,67 +851,45 @@ export const moveNode = async (input: z.input<typeof moveNodeInputSchema>) => {
   });
 };
 
-// Rich-node document keys carry structured graphs/canvases, not free-form
-// fields — an invalid write here isn't just cosmetic, it silently resets the
-// whole document to empty the next time `parseXxxDocument` reads it back.
-// Reject bad writes up front instead of persisting them.
-const RICH_NODE_DOCUMENT_SCHEMAS: Partial<Record<string, { key: string; schema: z.ZodTypeAny }>> = {
-  whiteboard: { key: "whiteboardDocument", schema: WhiteboardDocumentSchema },
-  workflow: { key: "workflowDocument", schema: WorkflowDocumentSchema },
-  html: { key: "htmlDocument", schema: HtmlDocumentSchema },
-};
+// Whiteboard/workflow/html content moved OUT of `metadata` into object storage
+// (spec D2/D3, `PUT /nodes/{nodeId}/content`) — these three keys are no longer
+// writable through node metadata AT ALL, on ANY node type. Unconditional, not
+// per-node-type: writing `workflowDocument` onto a whiteboard node is refused
+// too, same as writing it onto a folder — none of the three names a
+// legitimate metadata key anywhere anymore.
+const NODE_CONTENT_METADATA_KEYS = [
+  "whiteboardDocument",
+  "workflowDocument",
+  "htmlDocument",
+] as const;
 
 /**
- * Validate a metadata patch/seed against the node type it is being written to.
- * Shared by BOTH write paths — `updateNodeMetadata` (direct PATCH) and
- * `createNodeChangeRequest`'s create operations — so "the API rejects it" never
- * depends on which door you came through.
+ * Refuse a metadata patch/seed that tries to smuggle node CONTENT through the
+ * free-form metadata bag. Shared by BOTH write paths — `updateNodeMetadata`
+ * (direct PATCH) and `createNodeChangeRequest`'s create operations — so "the
+ * API rejects it" never depends on which door you came through. Mirrors the
+ * `visibility` block below: both are real product state that used to be
+ * reachable through `metadata` only because the generic PATCH endpoint didn't
+ * know any better.
  *
- * Two rules, and only for the three node types that own a structured document:
- *
- *  1. The document key's VALUE must parse. An invalid document isn't merely
- *     cosmetic: `parseXxxDocument` falls back to an EMPTY document on failure,
- *     so a bad write silently blanks the whiteboard/workflow/HTML the next time
- *     anyone opens it.
- *  2. Every other key must be one the node type actually reads. Metadata is
- *     free-form by design across the product (busabase-cms stores its Base-id
- *     mapping under `busabaseCms` on a FOLDER node, and that must keep working),
- *     so this deliberately applies to typed rich nodes ONLY. On those, an
- *     unrecognized key is a mistake with no upside: `metadata.scene` or
- *     `metadata.elements` used to return 200, write a key nobody ever reads, and
- *     leave the canvas unchanged — indistinguishable from "the API is broken".
- *     The error names the key the caller almost certainly meant.
- *
- * Non-rich node types (folder/doc/skill/airapp/file/base/form/…) are untouched:
- * they keep accepting any metadata key, exactly as before.
+ * This used to also validate the document's shape and reject any OTHER
+ * unrecognized key on a rich node type (an allowlist keyed off a
+ * per-type document schema). Both are gone now that the document itself is
+ * refused outright: there is no shape left to validate, and a rich node's
+ * metadata is ordinary free-form extension data — same as every other node
+ * type — once its one product-enforced field is no longer in it (spec D1).
  */
 const assertValidNodeMetadata = (
-  nodeType: string,
   metadata: Record<string, unknown>,
   nodeLabel: string,
+  nodeId?: string,
 ): void => {
-  const richNodeDocument = RICH_NODE_DOCUMENT_SCHEMAS[nodeType];
-  if (!richNodeDocument) return;
-
-  if (richNodeDocument.key in metadata) {
-    const result = richNodeDocument.schema.safeParse(metadata[richNodeDocument.key]);
-    if (!result.success) {
-      throw new ORPCError("BAD_REQUEST", {
-        message: `Invalid ${richNodeDocument.key} for ${nodeLabel}: ${result.error.message}`,
-      });
-    }
-  }
-
-  const allowedKeys = new Set<string>([richNodeDocument.key, ...NODE_COMMON_METADATA_KEYS]);
-  const unknownKeys = Object.keys(metadata)
-    .filter((key) => !allowedKeys.has(key))
-    .sort();
-  if (unknownKeys.length > 0) {
+  const blockedKey = NODE_CONTENT_METADATA_KEYS.find((key) => key in metadata);
+  if (blockedKey) {
     throw new ORPCError("BAD_REQUEST", {
       message:
-        `Unknown metadata key${unknownKeys.length > 1 ? "s" : ""} for ${nodeLabel}: ` +
-        `${unknownKeys.join(", ")}. A ${nodeType} node stores its content under ` +
-        `"${richNodeDocument.key}"; allowed keys are ${[...allowedKeys].sort().join(", ")}.`,
+        `${blockedKey} is not writable through node metadata for ${nodeLabel}. ` +
+        `Use PUT /nodes/${nodeId ?? "{nodeId}"}/content instead.`,
     });
   }
 };
@@ -932,7 +945,32 @@ export const updateNodeMetadata = async (
     });
   }
 
-  assertValidNodeMetadata(node.type, parsed.metadata, `node ${parsed.nodeId}`);
+  // `version` is the same shape of problem, one notch less severe. A file-tree
+  // node's version is changed through its own metadata ChangeRequest
+  // (`fileTrees.createChangeRequest` with a `metadata` scope), which a human
+  // reviews. This endpoint requires only `write` and creates no ChangeRequest,
+  // so leaving the key open meant the review step could be skipped entirely by
+  // going through the generic door instead — the approval-flow equivalent of
+  // the `visibility` permission bypass above.
+  //
+  // The value itself stays in `metadata` on purpose: a version here is a label
+  // the USER writes and the product never interprets (there is no semver
+  // comparison, no upgrade check, no staleness detection anywhere in the repo —
+  // `install` merely copies the manifest's string through for display). That
+  // makes it exactly what the free-form bag is for. What is refused is the
+  // door, not the field.
+  //
+  // Only this patch path is affected: node creation legitimately carries
+  // `metadata.version`, which `materializeFileTreeNode` reads at merge time.
+  if ("version" in parsed.metadata) {
+    throw new ORPCError("BAD_REQUEST", {
+      message:
+        `version is not writable through node metadata. Use the file-tree metadata change request ` +
+        `(POST /file-trees/{nodeId}/change-requests with a metadata scope), which is reviewed.`,
+    });
+  }
+
+  assertValidNodeMetadata(parsed.metadata, `node ${parsed.nodeId}`, parsed.nodeId);
 
   await assertNodePermission(node.id, "write", actorId);
   const timestamp = now();

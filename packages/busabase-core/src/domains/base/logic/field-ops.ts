@@ -23,6 +23,7 @@ import {
   busabaseOperations,
 } from "../../../db/schema";
 import { insertAuditEvent } from "../../../logic/audit";
+import { insertCommit } from "../../../logic/commits";
 import {
   closeChangeRequest,
   finalizeChangeRequest,
@@ -294,12 +295,12 @@ export const createFieldChangeRequest = async (
     options,
   };
 
-  await db.insert(busabaseCommits).values({
+  await insertCommit(db, {
     id: commitId,
     baseId: base.id,
     operationId: null,
     parentCommitId: null,
-    fields,
+    payload: fields,
     operation: "base_add_field",
     message: parsed.message,
     author: parsed.submittedBy,
@@ -402,12 +403,12 @@ export const createDeleteFieldChangeRequest = async (
     options: field.options,
   };
 
-  await db.insert(busabaseCommits).values({
+  await insertCommit(db, {
     id: commitId,
     baseId: base.id,
     operationId: null,
     parentCommitId: null,
-    fields,
+    payload: fields,
     operation: "base_delete_field",
     message: message ?? "Delete field",
     author: submittedBy,
@@ -514,12 +515,12 @@ export const createUpdateFieldChangeRequest = async (
     options,
   };
 
-  await db.insert(busabaseCommits).values({
+  await insertCommit(db, {
     id: commitId,
     baseId: base.id,
     operationId: null,
     parentCommitId: null,
-    fields,
+    payload: fields,
     operation: "base_update_field",
     message: message ?? "Update field",
     author: submittedBy,
@@ -777,12 +778,12 @@ export const createConvertFieldChangeRequest = async (
     choices: field.options?.choices ?? [],
   };
 
-  await db.insert(busabaseCommits).values({
+  await insertCommit(db, {
     id: commitId,
     baseId: base.id,
     operationId: null,
     parentCommitId: null,
-    fields,
+    payload: fields,
     operation: "base_convert_field",
     message: message ?? `Convert field ${field.slug} from ${field.type} to ${newType}`,
     author: submittedBy,
@@ -878,12 +879,12 @@ export const createReorderFieldsChangeRequest = async (
   const timestamp = now();
   const fields = { fieldIds };
 
-  await db.insert(busabaseCommits).values({
+  await insertCommit(db, {
     id: commitId,
     baseId: base.id,
     operationId: null,
     parentCommitId: null,
-    fields,
+    payload: fields,
     operation: "base_reorder_fields",
     message: message ?? "Reorder fields",
     author: submittedBy,
@@ -981,12 +982,12 @@ export const createRestoreFieldChangeRequest = async (
     options: field.options,
   };
 
-  await db.insert(busabaseCommits).values({
+  await insertCommit(db, {
     id: commitId,
     baseId: base.id,
     operationId: null,
     parentCommitId: null,
-    fields,
+    payload: fields,
     operation: "base_restore_field",
     message: message ?? "Restore field",
     author: submittedBy,

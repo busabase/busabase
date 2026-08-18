@@ -154,7 +154,7 @@ describe("merge projection fixes", () => {
     // The authoritative record value (commit.fields) now holds the CHOICE ID,
     // not the raw "Apple" label — i.e. display == index.
     const record = await client.records.get({ recordId });
-    expect(record?.headCommit.fields.category).toBe(appleId);
+    expect(record?.headCommit.payload.category).toBe(appleId);
 
     // And the index agrees: searchable by the choice id, not the old label.
     const byLabel = await client.records.search({

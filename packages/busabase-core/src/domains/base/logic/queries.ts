@@ -95,7 +95,9 @@ export const getBase = async (baseId: string) => {
   // and a new active base can share a slug, and navigating to /base/<slug>
   // must land on the live one. (The id fallback below stays unfiltered on
   // archivedAt so an archived-but-not-purged base is still reachable by id for
-  // the restore / notice flows — but a permanently deleted one is excluded:
+  // the restore / notice flows. Both the Base id and its owning Node id are
+  // accepted so `/base/:ref` follows the same ID-or-slug rule as other node
+  // routes. A permanently deleted Base is excluded:
   // once purged there is no restore flow left, so it must resolve to "not
   // found" like everything else that's been purged.)
   // Node ACL: a base whose node the actor can't see resolves to null here —
@@ -120,7 +122,7 @@ export const getBase = async (baseId: string) => {
         .from(busabaseBases)
         .where(
           and(
-            eq(busabaseBases.id, baseId),
+            or(eq(busabaseBases.id, baseId), eq(busabaseBases.nodeId, baseId)),
             eq(busabaseBases.spaceId, spaceId),
             isNull(busabaseBases.deletedAt),
             visible,
@@ -523,7 +525,7 @@ export const listRecordsPage = async (input: z.input<typeof listRecordsPageInput
       .select({
         id: busabaseRecords.id,
         updatedAt: busabaseRecords.updatedAt,
-        fields: busabaseCommits.fields,
+        fields: busabaseCommits.payload,
       })
       .from(busabaseRecords)
       .innerJoin(busabaseCommits, eq(busabaseCommits.id, busabaseRecords.headCommitId))
@@ -627,7 +629,7 @@ const isScalarFilterValue = (value: unknown): value is string | number | boolean
 // `contains`/`equals` compare against `valueText`, which `normalizeFieldValue`
 // (logic/vo.ts) truncates at `VALUE_TEXT_INDEX_LIMIT` chars — but the
 // authoritative client match (`recordMatchesViewFilter` → `getViewFieldPreviewText`
-// → `fieldValueToString`) reads the FULL value from `commits.fields`. So a
+// → `fieldValueToString`) reads the FULL value from `commits.payload`. So a
 // `longtext`/`markdown` field with any value at/over the limit can silently
 // under-count on `contains`/`equals` (a match that only exists past the cutoff
 // is invisible to SQL). `not_empty`/`is_empty` (presence) and the checkbox
@@ -921,7 +923,7 @@ export const countRecords = async (input?: z.input<typeof countRecordsInputSchem
       .select({
         id: busabaseRecords.id,
         updatedAt: busabaseRecords.updatedAt,
-        fields: busabaseCommits.fields,
+        fields: busabaseCommits.payload,
       })
       .from(busabaseRecords)
       .innerJoin(busabaseCommits, eq(busabaseCommits.id, busabaseRecords.headCommitId))

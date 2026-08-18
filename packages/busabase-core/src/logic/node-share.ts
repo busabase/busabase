@@ -3,7 +3,7 @@ import "server-only";
 import { randomBytes, scrypt, timingSafeEqual } from "node:crypto";
 import { promisify } from "node:util";
 import { ORPCError } from "@orpc/server";
-import { and, eq, inArray, isNotNull, isNull, or } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, isNull } from "drizzle-orm";
 import { getContextSpaceId, resolveActorId } from "../context";
 import { getDb } from "../db";
 import { busabaseNodeShares, busabaseNodes } from "../db/schema";
@@ -200,7 +200,7 @@ export interface PubliclySharedNode {
 }
 
 /**
- * Find a publicly shared node by its `{type}/{slug}` URL pair.
+ * Find a publicly shared node by its `{type}/{id-or-slug}` URL pair.
  *
  * Why this exists instead of walking `listNodes()`: the node tree is assembled
  * top-down and `buildNodeTree` only keeps rows whose WHOLE ancestor chain came
@@ -219,28 +219,42 @@ export interface PubliclySharedNode {
  */
 export async function findPubliclySharedNode(
   type: string,
-  slug: string,
+  nodeRef: string,
 ): Promise<PubliclySharedNode | null> {
   const db = await getDb();
-  const [row] = await db
-    .select({
-      id: busabaseNodes.id,
-      slug: busabaseNodes.slug,
-      type: busabaseNodes.type,
-      name: busabaseNodes.name,
-      requiresPassword: busabaseNodes.effectivePublicRequiresPassword,
-    })
+  const columns = {
+    id: busabaseNodes.id,
+    slug: busabaseNodes.slug,
+    type: busabaseNodes.type,
+    name: busabaseNodes.name,
+    requiresPassword: busabaseNodes.effectivePublicRequiresPassword,
+  };
+  const activePublicConditions = [
+    eq(busabaseNodes.spaceId, getContextSpaceId()),
+    eq(busabaseNodes.type, type),
+    isNull(busabaseNodes.archivedAt),
+    isNotNull(busabaseNodes.effectivePublicScope),
+  ] as const;
+  // A node id is itself a legal slug (both match `^[a-z0-9-]+$`), so one node's
+  // slug can equal another SAME-TYPE node's id. Resolving that with a single
+  // `or(id, slug)` + `limit(1)` picks a row non-deterministically, which would
+  // let the page a visitor sees and the share whose password gates it be two
+  // different nodes. Resolve by id first, then fall back to slug only when that
+  // slug is unambiguous — identical to `unlockPublicShare` below, so both ends
+  // of the public-share path always land on the same node.
+  const [byId] = await db
+    .select(columns)
     .from(busabaseNodes)
-    .where(
-      and(
-        eq(busabaseNodes.spaceId, getContextSpaceId()),
-        eq(busabaseNodes.type, type),
-        eq(busabaseNodes.slug, slug),
-        isNull(busabaseNodes.archivedAt),
-        isNotNull(busabaseNodes.effectivePublicScope),
-      ),
-    )
+    .where(and(...activePublicConditions, eq(busabaseNodes.id, nodeRef)))
     .limit(1);
+  const slugMatches = byId
+    ? []
+    : await db
+        .select(columns)
+        .from(busabaseNodes)
+        .where(and(...activePublicConditions, eq(busabaseNodes.slug, nodeRef)))
+        .limit(2);
+  const row = byId ?? (slugMatches.length === 1 ? slugMatches[0] : null);
   return row
     ? {
         id: row.id,
@@ -304,22 +318,41 @@ const resolveGatingShare = async (nodeId: string) => {
 export async function unlockPublicShare(
   nodeIdOrSlug: string,
   password: string,
+  nodeType?: string,
 ): Promise<{ nodeId: string } | null> {
   const db = await getDb();
   const spaceId = getContextSpaceId();
-  const [node] = await db
+  const activePublicConditions = [
+    eq(busabaseNodes.spaceId, spaceId),
+    isNull(busabaseNodes.archivedAt),
+    isNull(busabaseNodes.deletedAt),
+    isNotNull(busabaseNodes.effectivePublicScope),
+  ] as const;
+  const [byId] = await db
     .select({ id: busabaseNodes.id })
     .from(busabaseNodes)
     .where(
       and(
-        eq(busabaseNodes.spaceId, spaceId),
-        or(eq(busabaseNodes.id, nodeIdOrSlug), eq(busabaseNodes.slug, nodeIdOrSlug)),
-        isNull(busabaseNodes.archivedAt),
-        isNull(busabaseNodes.deletedAt),
-        isNotNull(busabaseNodes.effectivePublicScope),
+        ...activePublicConditions,
+        eq(busabaseNodes.id, nodeIdOrSlug),
+        ...(nodeType ? [eq(busabaseNodes.type, nodeType)] : []),
       ),
     )
     .limit(1);
+  const slugMatches = byId
+    ? []
+    : await db
+        .select({ id: busabaseNodes.id })
+        .from(busabaseNodes)
+        .where(
+          and(
+            ...activePublicConditions,
+            eq(busabaseNodes.slug, nodeIdOrSlug),
+            ...(nodeType ? [eq(busabaseNodes.type, nodeType)] : []),
+          ),
+        )
+        .limit(2);
+  const node = byId ?? (slugMatches.length === 1 ? slugMatches[0] : null);
   if (!node) return null;
 
   const share = await resolveGatingShare(node.id);

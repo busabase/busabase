@@ -2,6 +2,7 @@
 
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";
+import type { NodeContentInput } from "busabase-contract/contract/node-content-schemas";
 import type { NodeVO } from "busabase-contract/types";
 import { Button } from "kui/button";
 import type { LucideIcon } from "lucide-react";
@@ -15,24 +16,14 @@ import { stableStringify } from "../utils/stable-json";
 
 export type SaveStatus = "saved" | "dirty" | "saving" | "error";
 
-export const findNode = (nodes: NodeVO[], type: string, slug: string | null): NodeVO | null => {
-  if (!slug) return null;
-  for (const node of nodes) {
-    if (node.type === type && (node.slug === slug || node.id === slug)) return node;
-    const child = findNode(node.children, type, slug);
-    if (child) return child;
-  }
-  return null;
-};
-
-export function useNodeMetadataSave(
+export function useNodeContentSave(
   orpc: BusabaseQueryUtils,
   node: NodeVO | null,
-  metadataKey: string,
+  kind: "whiteboard" | "workflow" | "html",
 ) {
   const messages = useCoreI18n();
   const queryClient = useQueryClient();
-  const mutation = useMutation(orpc.nodes.updateMetadata.mutationOptions());
+  const mutation = useMutation(orpc.nodes.updateContent.mutationOptions());
   const [status, setStatus] = useState<SaveStatus>("saved");
   const [error, setError] = useState<string | null>(null);
 
@@ -47,7 +38,15 @@ export function useNodeMetadataSave(
       setStatus("saving");
       setError(null);
       try {
-        await mutation.mutateAsync({ nodeId: node.id, metadata: { [metadataKey]: document } });
+        // `kind` is one of three literals here (not narrowed to a single one,
+        // since this hook is shared by all three rich-node editors), so `{
+        // kind, document }` doesn't line up with `content`'s discriminated
+        // union on its own — the caller is what guarantees `document` actually
+        // matches `kind`'s shape (each editor only ever calls its own `save`).
+        await mutation.mutateAsync({
+          nodeId: node.id,
+          content: { kind, document } as NodeContentInput,
+        });
         await queryClient.invalidateQueries({
           queryKey: orpc.nodes.list.queryOptions({}).queryKey,
         });
@@ -59,7 +58,7 @@ export function useNodeMetadataSave(
         return false;
       }
     },
-    [messages.richNodes.saveFailed, metadataKey, mutation, node, orpc, queryClient],
+    [messages.richNodes.saveFailed, kind, mutation, node, orpc, queryClient],
   );
 
   return { error, markDirty, save, status };

@@ -29,10 +29,28 @@ export interface OriginGuardVerdict {
  * Same-origin (or non-browser) requests pass; a request a *browser* made from a
  * different site does not.
  *
- * `Sec-Fetch-Site` is the reliable signal here because a browser sets it and a
- * page cannot forge it. Non-browser callers (curl, the tunnel relay, our own
- * server-side code) send neither header and are allowed through — they are not
- * the threat this addresses, and blocking them would break the tunnel path.
+ * **`Sec-Fetch-Site` is the entire guard, deliberately — `Origin` is not
+ * checked.** A browser always sends `Sec-Fetch-Site` and page JavaScript cannot
+ * forge it (it is a forbidden header name), so against the threat this exists
+ * for — a page the user happens to visit POSTing to `http://localhost:<port>` —
+ * it is both necessary and sufficient. Adding an `Origin` comparison on top
+ * catches nothing further: any caller able to forge `Origin` is not a browser
+ * page, and is therefore already outside what this can or should stop.
+ *
+ * What that extra check *did* do was break the feature's headline capability.
+ * A Cloud user driving their laptop's agent sends a same-origin request to
+ * Cloud, and `buildRelayHeaders` forwards every header verbatim down the
+ * tunnel — so the request arriving at OSS carries `Origin:
+ * https://<cloud-host>` against an OSS host of `localhost:<port>`, and was
+ * rejected with a 403. An earlier version of this comment asserted the relay
+ * "sends neither header"; measured against a real tunnel (2026-08-17), it
+ * forwards both, and the whole Cloud → tunnel → agents path was dead. The
+ * forwarded `Sec-Fetch-Site: same-origin` is exactly the right verdict to
+ * honour here: a real browser did make this request, from the site it belongs
+ * to.
+ *
+ * Non-browser callers (curl, our own server-side code) send no
+ * `Sec-Fetch-Site` and pass — unchanged, and not the threat model.
  */
 export function checkAgentsRequestOrigin(request: Request): OriginGuardVerdict {
   const url = new URL(request.url);
@@ -45,21 +63,6 @@ export function checkAgentsRequestOrigin(request: Request): OriginGuardVerdict {
       reason:
         "Agent procedures cannot be called from another site. Open Busabase directly and try again.",
     };
-  }
-
-  const origin = request.headers.get("origin");
-  if (origin) {
-    try {
-      if (new URL(origin).host !== url.host) {
-        return {
-          allowed: false,
-          reason:
-            "Agent procedures cannot be called from another site. Open Busabase directly and try again.",
-        };
-      }
-    } catch {
-      return { allowed: false, reason: "Malformed Origin header." };
-    }
   }
 
   return { allowed: true };

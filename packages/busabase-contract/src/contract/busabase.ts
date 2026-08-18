@@ -20,6 +20,7 @@ import { vaultContract } from "../domains/vault/contract";
 import { webhookContract } from "../domains/webhook/contract";
 import { listActivityPagedInputSchema, listActivityResponseSchema } from "./activity-schemas";
 import { UnifiedGrepInputSchema, UnifiedGrepResultVOSchema } from "./grep-schemas";
+import { updateNodeContentInputSchema } from "./node-content-schemas";
 import { getNodeInputSchema, NodeDetailVOSchema } from "./node-detail-schemas";
 import {
   agentTaskSchema,
@@ -128,7 +129,7 @@ export const busabaseContractRoutes = {
       tags: ["Search"],
       summary: "Search files, Docs, and Base records with one pattern (unified grep)",
       successDescription:
-        "Streaming regex/literal matches across every in-scope source — Drive/Skill files, Doc bodies, and Base records (canonical headCommit.fields, never the truncated search projection) — with one shared pattern, one shared maxMatches/deadline budget (files scanned first, then docs, then whatever budget remains goes to records), and a per-source honest coverage report (files keeps its existing missing/stale/unsearchable/errored/notReached; docs and records report scanned/errored/notReached). truncated is set when any source truncated or has notReached > 0.",
+        "Streaming regex/literal matches across every in-scope source — Drive/Skill files, Doc bodies, and Base records (canonical headCommit.payload, never the truncated search projection) — with one shared pattern, one shared maxMatches/deadline budget (files scanned first, then docs, then whatever budget remains goes to records), and a per-source honest coverage report (files keeps its existing missing/stale/unsearchable/errored/notReached; docs and records report scanned/errored/notReached). truncated is set when any source truncated or has notReached > 0.",
     })
     .input(UnifiedGrepInputSchema)
     .output(UnifiedGrepResultVOSchema),
@@ -194,10 +195,21 @@ export const busabaseContractRoutes = {
         tags: ["Nodes"],
         summary: "Update node metadata",
         successDescription:
-          "Shallow-merged the supplied top-level keys into the active node's existing metadata. Requires write access on the node.",
+          "Shallow-merged the supplied top-level keys into the active node's existing metadata. Requires write access on the node. Node CONTENT (a Doc body, or a whiteboard/workflow/html document) does not go through here — use PUT /nodes/{nodeId}/content instead.",
       })
       .input(updateNodeMetadataInputSchema)
       .output(nodeSchema),
+    updateContent: oc
+      .route({
+        method: "PUT",
+        path: "/nodes/{nodeId}/content",
+        tags: ["Nodes", "Change Requests"],
+        summary: "Update node content",
+        successDescription:
+          "ChangeRequest carrying the proposed content. Merged immediately when the actor holds write access on the node and `autoMerge` was not explicitly `false`; otherwise left `in_review` for a human. Accepts doc, whiteboard, workflow, and html nodes — the types that own exactly one document.",
+      })
+      .input(updateNodeContentInputSchema)
+      .output(changeRequestSchema),
     purge: oc
       .route({
         method: "DELETE",

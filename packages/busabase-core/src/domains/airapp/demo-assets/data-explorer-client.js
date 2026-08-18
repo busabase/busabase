@@ -64,13 +64,13 @@ const renderRecords = async (node) => {
     renderDetail(`<h2>${escapeHtml(node.name)}</h2><p class="loading">No records yet.</p>`);
     return;
   }
-  const columns = [...new Set(records.flatMap((r) => Object.keys(r.headCommit?.fields ?? {})))];
+  const columns = [...new Set(records.flatMap((r) => Object.keys(r.headCommit?.payload ?? {})))];
   const head = columns.map((c) => `<th>${escapeHtml(c)}</th>`).join("");
   const body = records
     .map(
       (record) =>
         `<tr>${columns
-          .map((column) => `<td>${escapeHtml(record.headCommit?.fields?.[column])}</td>`)
+          .map((column) => `<td>${escapeHtml(record.headCommit?.payload?.[column])}</td>`)
           .join("")}</tr>`,
     )
     .join("");

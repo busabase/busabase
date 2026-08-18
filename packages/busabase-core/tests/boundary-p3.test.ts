@@ -330,7 +330,7 @@ describe("Boundary P3 — oRPC", () => {
 
     const seqOf = async (recordId: string): Promise<number | null> => {
       const rec = await client.records.get({ recordId });
-      const raw = (rec.headCommit.fields as Record<string, unknown>).seq;
+      const raw = (rec.headCommit.payload as Record<string, unknown>).seq;
       return typeof raw === "number" ? raw : raw == null ? null : Number(raw);
     };
 

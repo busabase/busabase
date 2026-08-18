@@ -109,6 +109,15 @@ describe("Base-domain DB lifecycle — oRPC", () => {
 
       const all = await client.bases.list({});
       expect(all.some((b) => b.slug === "lc-projects")).toBe(true);
+
+      const [bySlug, byBaseId, byNodeId] = await Promise.all([
+        client.bases.get({ baseId: created.slug }),
+        client.bases.get({ baseId: created.id }),
+        client.bases.get({ baseId: created.nodeId }),
+      ]);
+      expect(bySlug.id).toBe(created.id);
+      expect(byBaseId.id).toBe(created.id);
+      expect(byNodeId.id).toBe(created.id);
     });
 
     it("is idempotent on a duplicate slug + matching name (returns the existing Base)", async () => {
@@ -480,13 +489,13 @@ describe("Base-domain DB lifecycle — oRPC", () => {
       const moveCr = await client.records.changeRequest({
         operation: "update",
         recordId,
-        fields: { ...before.headCommit.fields, channel: "social" },
+        fields: { ...before.headCommit.payload, channel: "social" },
         message: "Move",
         autoMerge: false,
       });
       await approveAndMerge(moveCr.id);
       const after = await client.records.get({ recordId });
-      expect(after.headCommit.fields.channel).toBe("social");
+      expect(after.headCommit.payload.channel).toBe("social");
     });
 
     it("refuses to delete an already-archived record", async () => {

@@ -26,6 +26,7 @@ import {
   getPublicScopeOf,
   hasNodePermission,
 } from "../../../logic/node-acl";
+import { registerNodeRuntime } from "../../../logic/node-runtime";
 import { ensureReady } from "../../../logic/seed";
 import { createFormSubmissionChangeRequest } from "../../base/logic/record-ops";
 import type { FormPO } from "../schema";
@@ -343,10 +344,9 @@ export const submitForm = async (
 
   // Authoritative read/submit capability check, on the node this submission
   // actually resolved to. The router's anonymous guard runs first, but it only
-  // has the caller's ref — which for a public link is a node SLUG, and slugs
-  // are unique per parent, not per space. Re-checking the resolved id here is
-  // what makes that approximation safe: a read-only share cannot borrow a
-  // same-slug sibling's `submit` capability.
+  // has the caller's id-or-slug ref. Typed slugs are space-unique, but checking
+  // the resolved id here still keeps this write bound to the exact node that
+  // `getFormByNodeId` returned.
   //
   // Keyed on the CONTEXT (`isAnonymousVisitor`), not on the `caller` hint: a
   // public-link visitor is a property of the request the host pinned, so a
@@ -411,3 +411,8 @@ export const submitForm = async (
 
   return { changeRequestId: changeRequest.id, status: "pending_review" };
 };
+
+// A Form's typed detail is just the node row — its bindings/page/share live on
+// `busabase_forms` and are read through the Form endpoints. Explicit opt-in, not
+// a silent fallback; see `NodeRuntime.genericDetail`.
+registerNodeRuntime("form", { genericDetail: true });

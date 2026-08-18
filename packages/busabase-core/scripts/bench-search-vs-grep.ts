@@ -8,7 +8,7 @@
  * (tsvector + pg_trgm GIN) projection of record field values
  * (`busabase_field_values.valueText`, capped at `VALUE_TEXT_INDEX_LIMIT`
  * chars), while `grep`'s records adapter reads canonical
- * `busabase_commits.fields` directly with a full in-process regex scan —
+ * `busabase_commits.payload` directly with a full in-process regex scan —
  * no index, no cap. The architectural expectation is: search should win on
  * records as record count grows (index lookup vs. full scan), the two
  * should be roughly comparable on files (both stream-scan storage since the

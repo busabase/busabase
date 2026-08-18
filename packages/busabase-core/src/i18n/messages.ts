@@ -180,6 +180,8 @@ export const coreMessagesEn = {
     roleManage: "Manage",
     roleApprovalHint:
       "\u201cCan write\u201d and \u201cManage\u201d also let someone approve and merge change requests on this node \u2014 no space admin needed.",
+    readGrantNoopHint:
+      "Everyone in this space can already see this node, and members can already propose changes to it. Granting \u201cRead\u201d here adds nothing and will NOT restrict anyone \u2014 access here is only ever added, never taken away. To limit who can reach this node, use \u201cRestrict access\u201d above.",
     requiresReadOnNode: "Requires read access on this node",
     requiresChangeRequestOnNode: "Requires changeRequest access on this node",
     requiresWriteOnNode: "Requires write access on this node",
@@ -463,6 +465,9 @@ export const coreMessagesEn = {
     nodeRestore: "Restore node",
     nodeMove: "Move node",
     docUpdate: "Update doc",
+    whiteboardDocumentUpdate: "Update whiteboard",
+    workflowDocumentUpdate: "Update workflow",
+    htmlDocumentUpdate: "Update HTML",
     skillFileCreate: "Create skill file",
     skillFileUpdate: "Update skill file",
     skillFileDelete: "Delete skill file",

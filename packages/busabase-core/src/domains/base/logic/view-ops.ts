@@ -12,6 +12,7 @@ import {
   busabaseViews,
 } from "../../../db/schema";
 import { insertAuditEvent } from "../../../logic/audit";
+import { insertCommit } from "../../../logic/commits";
 import {
   getChangeRequest,
   mergeChangeRequest,
@@ -131,12 +132,12 @@ export const createViewChangeRequest = async (
     type: parsed.type,
   };
 
-  await db.insert(busabaseCommits).values({
+  await insertCommit(db, {
     id: commitId,
     baseId: base.id,
     operationId: null,
     parentCommitId: null,
-    fields,
+    payload: fields,
     operation: "view_create",
     message: parsed.message,
     author: parsed.submittedBy,
@@ -229,12 +230,12 @@ export const createUpdateViewChangeRequest = async (
     type: parsed.type ?? view.type,
   };
 
-  await db.insert(busabaseCommits).values({
+  await insertCommit(db, {
     id: commitId,
     baseId: view.baseId,
     operationId: null,
     parentCommitId: null,
-    fields,
+    payload: fields,
     operation: "view_update",
     message: parsed.message,
     author: parsed.submittedBy,
@@ -325,12 +326,12 @@ export const createDeleteViewChangeRequest = async (
     slug: view.slug,
   };
 
-  await db.insert(busabaseCommits).values({
+  await insertCommit(db, {
     id: commitId,
     baseId: view.baseId,
     operationId: null,
     parentCommitId: null,
-    fields,
+    payload: fields,
     operation: "view_delete",
     message: parsed.message,
     author: parsed.submittedBy,
@@ -424,12 +425,12 @@ export const createRestoreViewChangeRequest = async (
     slug: view.slug,
   };
 
-  await db.insert(busabaseCommits).values({
+  await insertCommit(db, {
     id: commitId,
     baseId: view.baseId,
     operationId: null,
     parentCommitId: null,
-    fields,
+    payload: fields,
     operation: "view_restore",
     message: parsed.message,
     author: parsed.submittedBy,

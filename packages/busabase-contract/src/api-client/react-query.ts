@@ -9,6 +9,8 @@ import { resolveApiUrl } from "./index";
 export type BusabaseORPCClient = ContractRouterClient<BusabaseContract>;
 
 export interface BusabaseClientOptions {
+  /** Disable RPC batching for clients that must support pre-batch servers. */
+  batch?: boolean;
   /**
    * Connect in demo mode: append `?demo=1` to every request so the server serves
    * the seeded demo dataset. The `?demo` query param is the reliable signal — a
@@ -87,7 +89,7 @@ export const createBusabaseORPCClient = (
       : opts.fetch
         ? { fetch: opts.fetch }
         : {}),
-    plugins: [batchPlugin()],
+    plugins: opts.batch === false ? [] : [batchPlugin()],
   });
   return createORPCClient<BusabaseORPCClient>(link);
 };

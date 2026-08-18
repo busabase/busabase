@@ -73,7 +73,7 @@ describe("mergeBaseConvertField — batched commit rewrite keeps values per-reco
 
     const page = await client.records.list({ baseId, limit: 50 });
     for (const record of page.records) {
-      const label = record.headCommit.fields.category;
+      const label = record.headCommit.payload.category;
       if (typeof label === "string") recordIdByLabel.set(label, record.id);
     }
   });
@@ -112,7 +112,7 @@ describe("mergeBaseConvertField — batched commit rewrite keeps values per-reco
       expect(recordId).toBeDefined();
       if (!recordId) continue;
       const record = await client.records.get({ recordId });
-      expect(record?.headCommit.fields.category).toBe(choiceIdByName.get(label));
+      expect(record?.headCommit.payload.category).toBe(choiceIdByName.get(label));
     }
   });
 });

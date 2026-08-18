@@ -109,38 +109,30 @@ const buildShareUnlockedCondition = (): SQL => {
  * slug.
  *
  * Why this exists next to `getPublicScopeOf`: the public surface passes
- * user-visible refs around. A shared link is `/<nodeType>/<node slug>` and the
- * detail route hands that slug straight through as the procedure's `nodeId`
- * (which is why `getFormByNodeId` resolves either form) — so the slug, not the
- * id, is what every real visitor sends. An id-only capability lookup fails
- * closed on all of them: a public page that renders and then refuses to accept
- * anything. Not a leak, but dead all the same.
+ * user-visible refs around. A shared link is `/<nodeType>/<node ref>` and that
+ * ref may be either the stable id or the human-readable slug. An id-only
+ * capability lookup would therefore fail closed for canonical slug links.
  *
- * Slug matching is deliberately APPROXIMATE. Node slugs are unique per PARENT
- * (`busabase_nodes_parent_slug_uniq`), not per space, so one ref can name
- * several nodes; this returns the widest capability among the publicly shared
- * candidates. That makes it a *reachability* answer and nothing more — the
- * authoritative check belongs on the resolved node id inside the handler (see
- * `submitForm`), which is the node the write will actually touch.
+ * A typed slug is unambiguous because active nodes are unique by
+ * `(spaceId, nodeType, slug)`. Callers that have the route type must pass it;
+ * the resolved node-id check inside the handler remains authoritative.
  */
 export async function getPublicScopeOfNodeRef(
   nodeIdOrSlug: string,
+  nodeType: string,
 ): Promise<"read" | "submit" | null> {
-  // An id match is unambiguous, so it wins.
-  const byId = await getPublicScopeOf(nodeIdOrSlug);
-  if (byId) return byId;
-
   const db = await getDb();
-  const rows = await db
+  const [row] = await db
     .select({ scope: busabaseNodes.effectivePublicScope })
     .from(busabaseNodes)
     .where(
       and(
-        eq(busabaseNodes.slug, nodeIdOrSlug),
         eq(busabaseNodes.spaceId, getContextSpaceId()),
+        eq(busabaseNodes.type, nodeType),
+        or(eq(busabaseNodes.id, nodeIdOrSlug), eq(busabaseNodes.slug, nodeIdOrSlug)),
         isNotNull(busabaseNodes.effectivePublicScope),
         // A password-protected candidate contributes nothing until this request
-        // has proven it — same rule as the id branch above, so a slug can never
+        // has proven it — same rule as exact-id reads, so a slug can never
         // be the cheaper way past a password.
         buildShareUnlockedCondition(),
         // The slug uniqueness index only covers live rows; archived/deleted
@@ -148,9 +140,9 @@ export async function getPublicScopeOfNodeRef(
         isNull(busabaseNodes.archivedAt),
         isNull(busabaseNodes.deletedAt),
       ),
-    );
-  if (rows.some((row) => row.scope === "submit")) return "submit";
-  return rows.some((row) => row.scope === "read") ? "read" : null;
+    )
+    .limit(1);
+  return row?.scope ?? null;
 }
 
 /** The stricter of two explicit visibilities; null = "no explicit constraint". */
@@ -165,8 +157,22 @@ const strictest = (
 
 const KNOWN_VISIBILITIES = new Set<string>(["private", "workspace", "public"]);
 
-const explicitVisibilityOf = (metadata: unknown): NodeVisibility | null => {
-  const value = (metadata as { visibility?: unknown } | null | undefined)?.visibility;
+/**
+ * A node's OWN declared visibility, read from the `explicit_visibility` column.
+ *
+ * The single read point for the ACL's only explicit input — everything that
+ * needs "what did this node itself declare?" comes through here, which is why
+ * moving it off `metadata.visibility` was a one-line change on the read side.
+ *
+ * Still tolerant of an unrecognised string: the column is plain `text`, not a
+ * pg enum, so a bad value degrades to "declares nothing / inherit" rather than
+ * throwing inside an ACL recompute. Failing closed on a malformed value would
+ * be worse — it would hide nodes nobody asked to hide.
+ */
+const explicitVisibilityOf = (node: {
+  explicitVisibility?: string | null;
+}): NodeVisibility | null => {
+  const value = node.explicitVisibility;
   return typeof value === "string" && KNOWN_VISIBILITIES.has(value)
     ? (value as NodeVisibility)
     : null;
@@ -484,7 +490,7 @@ export async function recomputeSpaceNodeAcl(
     .select({
       id: busabaseNodes.id,
       parentId: busabaseNodes.parentId,
-      metadata: busabaseNodes.metadata,
+      explicitVisibility: busabaseNodes.explicitVisibility,
       effectiveVisibility: busabaseNodes.effectiveVisibility,
     })
     .from(busabaseNodes)
@@ -511,7 +517,7 @@ export async function recomputeSpaceNodeAcl(
   while (queue.length > 0) {
     const { nodeId, parentEffective } = queue.shift()!;
     const node = byId.get(nodeId)!;
-    const effective = strictest(parentEffective, explicitVisibilityOf(node.metadata));
+    const effective = strictest(parentEffective, explicitVisibilityOf(node));
     computedVisibility.set(nodeId, effective);
     for (const childId of childrenOf.get(nodeId) ?? []) {
       queue.push({ nodeId: childId, parentEffective: effective });
@@ -701,7 +707,7 @@ export async function listNodePrincipals(nodeId: string, actorId: string) {
 }
 
 /**
- * Set a node's own explicit visibility (stored in metadata.visibility), then
+ * Set a node's own explicit visibility (the `explicit_visibility` column), then
  * re-materialize the space. The space root cannot be made private — that
  * would blank the whole workspace for every non-manager.
  */
@@ -720,25 +726,18 @@ export async function updateNodeVisibility(
     });
   }
 
-  const [node] = await db
-    .select({ metadata: busabaseNodes.metadata })
-    .from(busabaseNodes)
+  // A plain column write, where this used to read the whole metadata jsonb back,
+  // spread it, delete-or-set one key, and write it all again — a read-modify-write
+  // over unrelated data just to change one access-control value. `null` clears
+  // the declaration (inherit from ancestors) rather than storing a sentinel.
+  const [updated] = await db
+    .update(busabaseNodes)
+    .set({ explicitVisibility: visibility, updatedAt: now() })
     .where(and(eq(busabaseNodes.id, nodeId), eq(busabaseNodes.spaceId, spaceId)))
-    .limit(1);
-  if (!node) {
+    .returning();
+  if (!updated) {
     throw new ORPCError("NOT_FOUND", { message: `Node not found: ${nodeId}` });
   }
-
-  const metadata = { ...(node.metadata ?? {}) } as Record<string, unknown>;
-  if (visibility === null) {
-    delete metadata.visibility;
-  } else {
-    metadata.visibility = visibility;
-  }
-  await db
-    .update(busabaseNodes)
-    .set({ metadata: metadata as typeof node.metadata, updatedAt: now() })
-    .where(eq(busabaseNodes.id, nodeId));
 
   await recomputeSpaceNodeAcl(db, spaceId);
 }
@@ -794,11 +793,45 @@ export async function initializeNodeAcl(
   creatorId: string,
 ): Promise<void> {
   const [self] = await db
-    .select({ metadata: busabaseNodes.metadata })
+    .select({
+      explicitVisibility: busabaseNodes.explicitVisibility,
+      metadata: busabaseNodes.metadata,
+    })
     .from(busabaseNodes)
     .where(eq(busabaseNodes.id, nodeId))
     .limit(1);
   if (!self) return;
+
+  // Promote a create-time `metadata.visibility` into the column, in ONE place.
+  //
+  // Every create path — five of them, across doc/file/filetree/base/the generic
+  // node_create materializer — inserts its node row and then calls this
+  // function. Making each insert set the column instead would work right up
+  // until someone adds a sixth path and forgets, and the failure mode there is
+  // silent and security-relevant: a node the caller asked to be private comes
+  // out visible to the whole space. Promoting here cannot be missed.
+  //
+  // The key is stripped from `metadata` as it moves, so the bag never keeps a
+  // stale second copy of an access-control value that nothing reads. (The
+  // generic PATCH endpoint already refuses the key outright — see
+  // `updateNodeMetadata` — so this is the only door it still comes through.)
+  const declared = explicitVisibilityOf({
+    explicitVisibility: (self.metadata as { visibility?: unknown } | null)?.visibility as
+      | string
+      | undefined,
+  });
+  let explicitVisibility = self.explicitVisibility;
+  if (declared !== null && self.explicitVisibility == null) {
+    const { visibility: _promoted, ...rest } = (self.metadata ?? {}) as Record<string, unknown>;
+    await db
+      .update(busabaseNodes)
+      .set({
+        explicitVisibility: declared,
+        metadata: rest as typeof busabaseNodes.$inferSelect.metadata,
+      })
+      .where(eq(busabaseNodes.id, nodeId));
+    explicitVisibility = declared;
+  }
 
   let parentEffective: NodeVisibility | null = null;
   if (parentId) {
@@ -809,7 +842,7 @@ export async function initializeNodeAcl(
       .limit(1);
     parentEffective = parent?.effectiveVisibility ?? null;
   }
-  const effective = strictest(parentEffective, explicitVisibilityOf(self.metadata));
+  const effective = strictest(parentEffective, explicitVisibilityOf({ explicitVisibility }));
   if (effective !== null) {
     await db
       .update(busabaseNodes)

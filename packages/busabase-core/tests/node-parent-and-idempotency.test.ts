@@ -34,14 +34,10 @@ import { busabaseRouter } from "../src/router";
  *    both now accept an optional `idempotencyKey` so a retry (e.g. after that
  *    kind of false failure, or a timeout) returns the original ChangeRequest
  *    instead of creating a content-identical duplicate.
- * 4. `createFileTreeNode`'s idempotency ("does this slug already exist") used to
- *    match by (spaceId, type, slug) only, ignoring the target parent. Installing
- *    a skill/airapp/etc. whose slug already existed *anywhere else* in the space
- *    (e.g. from `busabase-cli install` re-installing an existing package under a
- *    new folder) silently returned the unrelated existing node instead of
- *    creating a new one â€” reporting fake success while creating nothing. The
- *    check is now scoped to (spaceId, parentNodeId, type, slug) in
- *    `src/domains/filetree/handlers.ts`.
+ * 4. Active node identity is `(spaceId, nodeType, slug)`. A direct file-tree
+ *    retry only returns an existing node when its parent also matches; finding
+ *    the same typed slug under a different parent is a conflict, not fake
+ *    idempotent success.
  */
 
 type Client = ReturnType<typeof createRouterClient<typeof busabaseRouter, Record<never, never>>>;
@@ -425,8 +421,8 @@ describe("Node-parent validation, materialized flag, and ChangeRequest safety â€
     });
   });
 
-  describe("Fix 4 â€” idempotency is scoped to (parent, slug, type), not slug alone", () => {
-    it("creating the same airapp slug under two different folders creates two distinct nodes", async () => {
+  describe("node slug identity is scoped to (space, type, slug)", () => {
+    it("rejects the same airapp slug under a different folder", async () => {
       const folderACr = await client.nodes.createChangeRequest({
         operations: [{ kind: "create", nodeType: "folder", slug: "folder-a", name: "Folder A" }],
       });
@@ -458,21 +454,20 @@ describe("Node-parent validation, materialized flag, and ChangeRequest safety â€
         name: "Shared Slug AirApp (A)",
         parentNodeId: folderA?.id,
       });
-      const inFolderB = await client.fileTrees.create({
-        type: "airapp",
-        autoMerge: true,
-        slug: "shared-slug-airapp",
-        name: "Shared Slug AirApp (B)",
-        parentNodeId: folderB?.id,
-      });
+      await expect(
+        client.fileTrees.create({
+          type: "airapp",
+          autoMerge: true,
+          slug: "shared-slug-airapp",
+          name: "Shared Slug AirApp (B)",
+          parentNodeId: folderB?.id,
+        }),
+      ).rejects.toMatchObject({ code: "CONFLICT" });
 
       expect(inFolderA.materialized).toBe(true);
-      expect(inFolderB.materialized).toBe(true);
-      expect(inFolderA.node.id).not.toBe(inFolderB.node.id);
       expect(inFolderA.node.parentId).toBe(folderA?.id);
-      expect(inFolderB.node.parentId).toBe(folderB?.id);
 
-      // Same slug, same parent again: still idempotent (returns the existing node).
+      // Same slug, same type and parent remains an idempotent retry.
       const repeatInFolderA = await client.fileTrees.create({
         type: "airapp",
         autoMerge: true,

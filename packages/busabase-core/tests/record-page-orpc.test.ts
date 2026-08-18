@@ -110,8 +110,11 @@ describe("records.listPage - oRPC integration", () => {
 
     expect(result.total).toBe(6);
     expect(result.totalPages).toBe(3);
-    expect(result.records.map((item) => item.headCommit.fields.name)).toEqual(["Item 8", "Item 6"]);
-    expect(result.records.every((item) => item.headCommit.fields.status === "needs-review")).toBe(
+    expect(result.records.map((item) => item.headCommit.payload.name)).toEqual([
+      "Item 8",
+      "Item 6",
+    ]);
+    expect(result.records.every((item) => item.headCommit.payload.status === "needs-review")).toBe(
       true,
     );
   });

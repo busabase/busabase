@@ -91,8 +91,11 @@ import "../domains/skill/handlers";
 import { resolveLookupValues } from "../domains/base/logic/lookup-values";
 import { mergeDocUpdate } from "../domains/doc/handlers";
 import { mergeFileTreeFile, mergeFileTreeMetadata } from "../domains/filetree/handlers";
+import { mergeRichNodeDocumentUpdate } from "../domains/rich-node/handlers";
 import { dispatchWebhookEvent, hasWebhookRuleFor } from "../domains/webhook/logic/dispatch";
 import { insertAuditEvent } from "./audit";
+import { parseCommitPayload } from "./commit-payload-schemas";
+import { insertCommit } from "./commits";
 import { projectCommitFields, refreshRecordQueryStatistics } from "./field-values";
 import { CURRENT_USER_ID, id, listInputSchema, now, rootNodeIdForSpace } from "./kernel";
 import { publishBusabaseLiveEvent, publishChangeRequestPendingReview } from "./live-events";
@@ -107,6 +110,12 @@ import {
   shouldAutoMerge,
 } from "./node-acl";
 import { assertContainerParent } from "./node-parent";
+import {
+  assertNodeSlugAvailable,
+  isNodeSlugConflictError,
+  isNodeSlugUniqueViolation,
+  nodeSlugConflict,
+} from "./node-slug";
 import { loadNodesByIds } from "./nodes";
 import { ensureReady, loadBasesByIds } from "./seed";
 import {
@@ -372,7 +381,7 @@ const resolveParentNodeId = (
 
 const mergeNodeCreate = async (ctx: MergeCtx, item: OperationPO, headCommit: CommitPO) => {
   const { db, timestamp } = ctx;
-  const fields = headCommit.fields as NodeCreateFields;
+  const fields = parseCommitPayload("node_create", headCommit.payload);
   const parentNodeId = resolveParentNodeId(ctx, fields, item.id);
   const [parentNodeRow] = await db
     .select()
@@ -387,30 +396,22 @@ const mergeNodeCreate = async (ctx: MergeCtx, item: OperationPO, headCommit: Com
   if (!fields.nodeType || !fields.slug || !fields.name) {
     throw new Error(`Node create commit missing required fields: ${item.id}`);
   }
-  // TOCTOU guard: propose-time slug checks (if any) only see siblings that
-  // existed at proposal time. Two ChangeRequests proposed before either
-  // merges can both pass, then race to merge — without this check the
-  // second hits the DB's unique(parentId, slug) index and 500s instead of
-  // returning a clean conflict. Covers every creatable node type because they
-  // all flow through this one dispatcher.
-  const [existingSibling] = await db
-    .select({ id: busabaseNodes.id, name: busabaseNodes.name })
-    .from(busabaseNodes)
-    .where(
-      and(
-        eq(busabaseNodes.parentId, parentNode.id),
-        eq(busabaseNodes.slug, fields.slug),
-        isNull(busabaseNodes.archivedAt),
-      ),
-    )
-    .limit(1);
-  if (existingSibling) {
-    throw new ORPCError("CONFLICT", {
-      message: `A ${fields.nodeType} with slug "${fields.slug}" already exists in this location ("${existingSibling.name}"). Choose a different slug.`,
-    });
-  }
+  // Proposal-time validation is repeated inside the merge transaction to close
+  // the TOCTOU window between two concurrent Change Requests.
+  await assertNodeSlugAvailable(db, {
+    nodeType: fields.nodeType,
+    slug: fields.slug,
+  });
   const materialize = getMaterializer(fields.nodeType) ?? materializeGenericNode;
-  const nodeId = await materialize(ctx, { parentNode, fields });
+  let nodeId: string;
+  try {
+    nodeId = await materialize(ctx, { parentNode, fields });
+  } catch (error) {
+    if (isNodeSlugUniqueViolation(error)) {
+      throw nodeSlugConflict(fields.nodeType, fields.slug);
+    }
+    throw error;
+  }
   // Materialize this node's ACL state: inherited effectiveVisibility +
   // inherited principal rows + creator (= CR submitter, ctx.actorId) grant.
   await initializeNodeAcl(db, getContextSpaceId(), nodeId, parentNode.id, ctx.actorId);
@@ -436,20 +437,31 @@ const mergeNodeRename = async (
       message: "Cannot rename an archived node. Restore it first.",
     });
   }
-  const fields = headCommit.fields as {
-    slug?: string;
-    name?: string;
-    description?: string;
-  };
-  await ctx.db
-    .update(busabaseNodes)
-    .set({
-      slug: fields.slug ?? node.slug,
-      name: fields.name ?? node.name,
-      description: fields.description ?? node.description,
-      updatedAt: ctx.timestamp,
-    })
-    .where(eq(busabaseNodes.id, node.id));
+  const fields = parseCommitPayload("node_rename", headCommit.payload);
+  const nextSlug = fields.slug ?? node.slug;
+  if (nextSlug !== node.slug) {
+    await assertNodeSlugAvailable(ctx.db, {
+      nodeType: node.type,
+      slug: nextSlug,
+      excludeNodeId: node.id,
+    });
+  }
+  try {
+    await ctx.db
+      .update(busabaseNodes)
+      .set({
+        slug: nextSlug,
+        name: fields.name ?? node.name,
+        description: fields.description ?? node.description,
+        updatedAt: ctx.timestamp,
+      })
+      .where(eq(busabaseNodes.id, node.id));
+  } catch (error) {
+    if (isNodeSlugUniqueViolation(error)) {
+      throw nodeSlugConflict(node.type, nextSlug);
+    }
+    throw error;
+  }
   if (node.type === "base") {
     await ctx.db
       .update(busabaseBases)
@@ -473,11 +485,7 @@ const mergeNodeMove = async (
       message: "Cannot move an archived node. Restore it first.",
     });
   }
-  const fields = headCommit.fields as {
-    parentNodeId?: string;
-    parentNodeRef?: string;
-    position?: number;
-  };
+  const fields = parseCommitPayload("node_move", headCommit.payload);
   // Neither given means "reorder in place" — keep the node's current parent
   // rather than falling back to the space root (resolveParentNodeId's default
   // for create, where an implicit root parent is the right behavior).
@@ -711,34 +719,40 @@ const mergeNodeRestore = async (ctx: MergeCtx, _item: OperationPO, node: NodePO)
       message: "Cannot restore: this item was permanently deleted.",
     });
   }
-  // Guard slug reuse: if an active sibling took this slug while archived, restoring
-  // would collide on the partial unique index — fail with a clear message.
-  const [slugTaken] = await db
-    .select({ id: busabaseNodes.id })
-    .from(busabaseNodes)
-    .where(
-      and(
-        node.parentId ? eq(busabaseNodes.parentId, node.parentId) : isNull(busabaseNodes.parentId),
-        eq(busabaseNodes.slug, node.slug),
-        isNull(busabaseNodes.archivedAt),
-      ),
-    )
-    .limit(1);
-  if (slugTaken) {
-    throw new ORPCError("CONFLICT", {
-      message: `Cannot restore: the slug "${node.slug}" is now used by a sibling. Rename it first.`,
-    });
-  }
   // Restore exactly the subtree this node's delete removed — its archived
   // descendants sharing the same archive timestamp. Scoping to the subtree (not
   // the space-wide `archivedAt` batch) means a change request that deleted several
   // unrelated nodes — which all share one merge timestamp — restores only the one
   // being un-deleted, instead of resurrecting the others too.
   const batchIds = await collectArchivedSubtreeIds(db, node.id, node.archivedAt);
-  await db
-    .update(busabaseNodes)
-    .set({ archivedAt: null, updatedAt: timestamp })
+  const restoringNodes = await db
+    .select({ id: busabaseNodes.id, type: busabaseNodes.type, slug: busabaseNodes.slug })
+    .from(busabaseNodes)
     .where(inArray(busabaseNodes.id, batchIds));
+  const restoringIdentities = new Set<string>();
+  for (const restoringNode of restoringNodes) {
+    const identity = `${restoringNode.type}\u0000${restoringNode.slug}`;
+    if (restoringIdentities.has(identity)) {
+      throw nodeSlugConflict(restoringNode.type, restoringNode.slug);
+    }
+    restoringIdentities.add(identity);
+    await assertNodeSlugAvailable(db, {
+      nodeType: restoringNode.type,
+      slug: restoringNode.slug,
+      excludeNodeId: restoringNode.id,
+    });
+  }
+  try {
+    await db
+      .update(busabaseNodes)
+      .set({ archivedAt: null, updatedAt: timestamp })
+      .where(inArray(busabaseNodes.id, batchIds));
+  } catch (error) {
+    if (isNodeSlugUniqueViolation(error)) {
+      throw nodeSlugConflict(node.type, node.slug);
+    }
+    throw error;
+  }
   // Un-archive any Base nodes in the restored batch (their base row + records),
   // mirroring the archive in mergeNodeDelete. Covers both a base restored
   // directly and a base brought back as part of a folder subtree. Records are
@@ -955,7 +969,7 @@ export const hydrateChangeRequests = async (
   const resolveBaseFields = (item: OperationPO): Record<string, unknown> | null => {
     if (item.operation === "record_update" || item.operation === "record_delete") {
       const baseCommit = item.baseCommitId ? commitsById.get(item.baseCommitId) : undefined;
-      return baseCommit ? baseCommit.fields : null;
+      return baseCommit ? baseCommit.payload : null;
     }
     if (
       item.operation === "view_update" ||
@@ -1005,10 +1019,10 @@ export const hydrateChangeRequests = async (
         }
         const operationVO = toOperationVO(item, commit, resolveBaseFields(item), users);
         if (maxOps === undefined) return operationVO;
-        const fields = capFieldValues(operationVO.headCommit.fields);
-        return fields === operationVO.headCommit.fields
+        const payload = capFieldValues(operationVO.headCommit.payload);
+        return payload === operationVO.headCommit.payload
           ? operationVO
-          : { ...operationVO, headCommit: { ...operationVO.headCommit, fields } };
+          : { ...operationVO, headCommit: { ...operationVO.headCommit, payload } };
       },
     );
     const base = changeRequest.baseId ? (baseMap.get(changeRequest.baseId) ?? null) : null;
@@ -1129,7 +1143,9 @@ export const hydrateRecords = async (records: RecordPO[]): Promise<RecordVO[]> =
       createdAt: record.createdAt.toISOString(),
       updatedAt: record.updatedAt.toISOString(),
       base,
-      headCommit: lookups ? { ...commitVO, fields: { ...commitVO.fields, ...lookups } } : commitVO,
+      headCommit: lookups
+        ? { ...commitVO, payload: { ...commitVO.payload, ...lookups } }
+        : commitVO,
     };
   });
 };
@@ -1565,14 +1581,14 @@ export const reviseOperation = async (
 
   const commitId = id("cmt");
   const timestamp = now();
-  await db.insert(busabaseCommits).values({
+  await insertCommit(db, {
     id: commitId,
     baseId: operation.baseId,
     targetType: operation.targetType,
     nodeId: operation.nodeId,
     operationId: operation.id,
     parentCommitId: operation.headCommitId,
-    fields: parsed.fields,
+    payload: parsed.fields,
     operation: operation.operation,
     message: parsed.message,
     author: parsed.author,
@@ -1680,7 +1696,7 @@ const resolveChangeRequestScopeNodeIds = async (
     .select({
       nodeId: busabaseOperations.nodeId,
       baseId: busabaseOperations.baseId,
-      fields: busabaseCommits.fields,
+      fields: busabaseCommits.payload,
       operation: busabaseOperations.operation,
       position: busabaseOperations.position,
     })
@@ -1707,6 +1723,12 @@ const resolveChangeRequestScopeNodeIds = async (
       baseIds.add(row.baseId);
       continue;
     }
+    // Deliberately NOT `parseCommitPayload`. This query is kind-agnostic — it
+    // walks every operation of a change request, including ones already merged
+    // and ones written long before payload validation existed — purely to work
+    // out node-visibility scope. A strict per-kind parse here would turn a
+    // legacy-shaped row into a 500 on a *listing* page. Same reasoning as the
+    // loose `CommitVO.payload`; the `typeof` guards below are the safety.
     const fields = row.fields as {
       parentNodeId?: unknown;
       parentNodeRef?: unknown;
@@ -1762,7 +1784,7 @@ export const filterVisibleChangeRequestRows = async <T extends { id: string }>(
       changeRequestId: busabaseOperations.changeRequestId,
       nodeId: busabaseOperations.nodeId,
       baseId: busabaseOperations.baseId,
-      fields: busabaseCommits.fields,
+      fields: busabaseCommits.payload,
       operation: busabaseOperations.operation,
       position: busabaseOperations.position,
     })
@@ -1794,6 +1816,12 @@ export const filterVisibleChangeRequestRows = async <T extends { id: string }>(
   for (const operation of operations) {
     const scope = scopes.get(operation.changeRequestId) ?? new Set<string>();
     const refs = refsByChangeRequest.get(operation.changeRequestId) ?? new Set<string>();
+    // Deliberately NOT `parseCommitPayload`. This query is kind-agnostic — it
+    // walks every operation of a change request, including ones already merged
+    // and ones written long before payload validation existed — purely to work
+    // out node-visibility scope. A strict per-kind parse here would turn a
+    // legacy-shaped row into a 500 on a *listing* page. Same reasoning as the
+    // loose `CommitVO.payload`; the `typeof` guards below are the safety.
     const fields = operation.fields as {
       parentNodeId?: unknown;
       parentNodeRef?: unknown;
@@ -2226,14 +2254,14 @@ export const recordMergedOperation = async (args: {
     createdAt: timestamp,
     updatedAt: timestamp,
   });
-  await db.insert(busabaseCommits).values({
+  await insertCommit(db, {
     id: commitId,
     baseId,
     targetType: args.targetType,
     nodeId,
     operationId,
     parentCommitId: null,
-    fields: args.fields,
+    payload: args.fields,
     operation: args.operation,
     message: args.message,
     author: args.submittedBy,
@@ -2358,7 +2386,7 @@ export const recordMergedNodeCreate = async (args: {
  * Returns the pending ChangeRequestVO (its `node`/`base` are null until merged).
  */
 export const recordPendingNodeCreate = async (args: {
-  nodeType: string;
+  nodeType: BusabaseNodeType;
   slug: string;
   name: string;
   description?: string;
@@ -2380,6 +2408,10 @@ export const recordPendingNodeCreate = async (args: {
   // ChangeRequest-submission gate (node ACL): proposing a create inside a
   // parent requires `changeRequest` level on that parent.
   await assertNodePermission(args.parentNodeId, "changeRequest", submittedBy);
+  await assertNodeSlugAvailable(db, {
+    nodeType: args.nodeType,
+    slug: args.slug,
+  });
   const changeRequestId = id("crq");
   const operationId = id("opr");
   const commitId = id("cmt");
@@ -2415,14 +2447,14 @@ export const recordPendingNodeCreate = async (args: {
     createdAt: timestamp,
     updatedAt: timestamp,
   });
-  await db.insert(busabaseCommits).values({
+  await insertCommit(db, {
     id: commitId,
     baseId: null,
     targetType: "node",
     nodeId: null,
     operationId: null,
     parentCommitId: null,
-    fields,
+    payload: fields,
     operation: "node_create",
     message: args.message,
     author: submittedBy,
@@ -2586,7 +2618,35 @@ export const mergeChangeRequest = async (changeRequestId: string) => {
   try {
     return await _mergeChangeRequest(changeRequestId);
   } catch (err) {
-    if (
+    if (isNodeSlugConflictError(err)) {
+      try {
+        const db = await getDb();
+        const timestamp = now();
+        const conflictData =
+          err instanceof ORPCError && err.data && typeof err.data === "object" ? err.data : {};
+        await db
+          .update(busabaseChangeRequests)
+          .set({
+            status: "conflict",
+            mergeSummary: {
+              conflict: {
+                reason: "node_slug_conflict",
+                detectedAt: timestamp.toISOString(),
+                ...conflictData,
+              },
+            },
+            updatedAt: timestamp,
+          })
+          .where(
+            and(
+              eq(busabaseChangeRequests.id, changeRequestId),
+              eq(busabaseChangeRequests.spaceId, getContextSpaceId()),
+            ),
+          );
+      } catch {
+        // Preserve the original conflict when the best-effort status update fails.
+      }
+    } else if (
       err instanceof ORPCError &&
       err.code === "CONFLICT" &&
       (err as unknown as MergeConflictTag)[isRecordMergeFieldConflict]
@@ -2747,6 +2807,12 @@ const _mergeChangeRequest = async (changeRequestId: string) => {
           await mergeFileTreeFile(ctx, item, node, headCommit);
         } else if (/^[a-z0-9-]+_metadata_update$/.test(item.operation)) {
           await mergeFileTreeMetadata(ctx, item, node, headCommit);
+        } else if (/^[a-z0-9-]+_document_update$/.test(item.operation)) {
+          // whiteboard_document_update / workflow_document_update / html_document_update
+          // — the unified `PUT /nodes/{nodeId}/content` write for the three rich-node
+          // types (spec D2/D3). `doc_update` below is unaffected — Doc keeps its own
+          // merge handler.
+          await mergeRichNodeDocumentUpdate(ctx, item, node, headCommit);
         } else if (item.operation === "doc_update") {
           await mergeDocUpdate(ctx, item, node, headCommit);
         } else {
@@ -2943,9 +3009,9 @@ const _mergeChangeRequest = async (changeRequestId: string) => {
         .where(eq(busabaseCommits.id, targetRecord.headCommitId))
         .limit(1);
       const { merged, conflicts } = threeWayMergeFields(
-        baseCommit?.fields ?? {},
-        oursCommit?.fields ?? {},
-        proposed.fields,
+        baseCommit?.payload ?? {},
+        oursCommit?.payload ?? {},
+        proposed.payload,
       );
       if (conflicts.length > 0) {
         throw recordMergeFieldConflict(
@@ -3050,7 +3116,17 @@ const _mergeChangeRequest = async (changeRequestId: string) => {
           await mergeRecordRestore(ctx, item, headCommit);
           break;
         default:
-          break;
+          // Was `break`, i.e. a silent no-op: an operation kind with no case
+          // here got marked `merged` having done nothing at all, so the
+          // ChangeRequest reported success and the change never happened. The
+          // node-targeted branch above has always thrown for its unknown kinds;
+          // this side is now consistent with it.
+          //
+          // Reachable only by a base-targeted operation kind that was added to
+          // the enum without a case — which `COMMIT_PAYLOAD_SCHEMAS`'s
+          // exhaustiveness gate makes hard, but "hard to reach" is not a reason
+          // to silently succeed on the path that applies approved changes.
+          throw new Error(`Unsupported base operation: ${item.operation} (${item.id})`);
       }
 
       // Every `base_*` operation can change the Base's field set, so drop the
@@ -3159,7 +3235,7 @@ const _mergeChangeRequest = async (changeRequestId: string) => {
                 recordId: recordVO.id,
                 baseId: changeRequest.baseId,
                 changeRequestId: changeRequest.id,
-                fields: recordVO.headCommit.fields,
+                fields: recordVO.headCommit.payload,
               },
             });
           }

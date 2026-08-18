@@ -32,6 +32,48 @@ describe("assertAirAppRunnable", () => {
     }
   });
 
+  it("allows the one bundler pin verified to actually boot", () => {
+    // vite@7.3.1 is not a theoretical exception — it's the exact pin
+    // Nodepod's own examples/issue-44-react-dev-server "known good" button
+    // real-boots against the current published @scelar/nodepod: onServerReady
+    // fires and the dev server answers 200 through the SW proxy. Verified in
+    // both devDependencies and dependencies since a caller could reasonably
+    // put it in either.
+    expect(() =>
+      assertAirAppRunnable("airapp", [
+        pkg({ dev: "vite" }, { devDependencies: { vite: "7.3.1" } }),
+      ]),
+    ).not.toThrow();
+    expect(() =>
+      assertAirAppRunnable("airapp", [pkg({ dev: "vite" }, { dependencies: { vite: "7.3.1" } })]),
+    ).not.toThrow();
+  });
+
+  it("still rejects every other vite pin, including plausible-looking ones", () => {
+    // Adjacent versions are not close enough: 5.x/6.x throw on esbuild's WASM
+    // init, and 8.x's default rolldown bundler ships a native binding this
+    // runtime can't resolve — both reproduced live, not assumed. A caret
+    // range that *could* resolve to 7.3.1 is still rejected: the exemption is
+    // for the exact pin that was actually verified, not for "probably fine."
+    for (const version of ["8.0.10", "5.4.11", "^7.3.1", "7.3.0", ""]) {
+      expect(() =>
+        assertAirAppRunnable("airapp", [
+          pkg({ dev: "vite" }, { devDependencies: { vite: version } }),
+        ]),
+      ).toThrow(/cannot boot in the AirApp runtime/);
+    }
+  });
+
+  it("still rejects other bundlers even though vite has a verified pin", () => {
+    // The allowlist is per-bundler-name; vite's exemption must not leak into
+    // webpack/next/etc, which have no verified-runnable pin at all.
+    expect(() =>
+      assertAirAppRunnable("airapp", [
+        pkg({ dev: "webpack serve" }, { devDependencies: { webpack: "7.3.1" } }),
+      ]),
+    ).toThrow(/cannot boot in the AirApp runtime/);
+  });
+
   it("sees through a path-qualified or npx-wrapped bundler", () => {
     for (const command of [
       "./node_modules/.bin/vite",

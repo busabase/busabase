@@ -7,22 +7,23 @@ import type {
   ExcalidrawImperativeAPI,
   ExcalidrawInitialDataState,
 } from "@excalidraw/excalidraw/types";
+import { useQuery } from "@tanstack/react-query";
 import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";
 import {
-  parseWhiteboardDocument,
+  EMPTY_WHITEBOARD_DOCUMENT,
   type WhiteboardDocument,
 } from "busabase-contract/domains/rich-node/types";
-import type { NodeVO } from "busabase-contract/types";
 import { PenTool } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useCoreI18n, useCoreLocale } from "../../../i18n";
+import { NodeDetailSkeleton } from "../../dashboard/components/skeletons";
+import { asNodeDetail } from "../../dashboard/helpers/node-detail";
 import { useReportLoadedNode } from "../../dashboard/hooks/use-report-loaded-node";
 import type { NodeDetailProps } from "../../dashboard/node-detail-registry";
 import {
-  findNode,
   RichNodeNotFound,
   RichNodeShell,
-  useNodeMetadataSave,
+  useNodeContentSave,
   useServerDocumentSync,
 } from "./rich-node-shell";
 
@@ -38,26 +39,22 @@ const persistentAppState = (appState: AppState): Record<string, unknown> => ({
 });
 
 interface WhiteboardDetailViewProps {
-  nodes?: NodeVO[];
   orpc: BusabaseQueryUtils;
   slug: string | null;
   onNodeLoaded?: NodeDetailProps["onNodeLoaded"];
 }
 
-export function WhiteboardDetailView({
-  nodes,
-  orpc,
-  slug,
-  onNodeLoaded,
-}: WhiteboardDetailViewProps) {
+export function WhiteboardDetailView({ orpc, slug, onNodeLoaded }: WhiteboardDetailViewProps) {
   const messages = useCoreI18n();
   const locale = useCoreLocale();
-  const node = useMemo(() => findNode(nodes ?? [], "whiteboard", slug), [nodes, slug]);
-  useReportLoadedNode(node, onNodeLoaded);
-  const initialScene = useMemo(
-    () => parseWhiteboardDocument(node?.metadata.whiteboardDocument),
-    [node?.metadata.whiteboardDocument],
-  );
+  const detailQuery = useQuery({
+    ...orpc.nodes.get.queryOptions({ input: { nodeId: slug ?? "", type: "whiteboard" } }),
+    enabled: Boolean(slug),
+  });
+  const detail = asNodeDetail(detailQuery.data, "whiteboard");
+  useReportLoadedNode(detail?.node, onNodeLoaded);
+  const node = detail?.node ?? null;
+  const initialScene = detail?.document ?? EMPTY_WHITEBOARD_DOCUMENT;
   const sceneRef = useRef<WhiteboardDocument>(initialScene);
   const savedSceneRef = useRef(JSON.stringify(initialScene));
   const sceneInitializedRef = useRef(false);
@@ -67,7 +64,7 @@ export function WhiteboardDetailView({
   const Editor = excalidraw?.Excalidraw ?? null;
   const [editorApi, setEditorApi] = useState<ExcalidrawImperativeAPI | null>(null);
   const [editorError, setEditorError] = useState<string | null>(null);
-  const { error, markDirty, save, status } = useNodeMetadataSave(orpc, node, "whiteboardDocument");
+  const { error, markDirty, save, status } = useNodeContentSave(orpc, node, "whiteboard");
 
   useEffect(() => {
     let active = true;
@@ -146,7 +143,9 @@ export function WhiteboardDetailView({
     return () => cancelAnimationFrame(frame);
   }, [editorApi, initialScene.elements.length]);
 
-  if (!node) return <RichNodeNotFound type="Whiteboard" />;
+  if (!detail) {
+    return detailQuery.isLoading ? <NodeDetailSkeleton /> : <RichNodeNotFound type="Whiteboard" />;
+  }
 
   const saveScene = async () => {
     if (await save(sceneRef.current)) savedSceneRef.current = JSON.stringify(sceneRef.current);
@@ -156,7 +155,7 @@ export function WhiteboardDetailView({
     <RichNodeShell
       error={error ?? editorError}
       icon={PenTool}
-      node={node}
+      node={detail.node}
       nodeType="whiteboard"
       onSave={saveScene}
       orpc={orpc}
@@ -177,9 +176,9 @@ export function WhiteboardDetailView({
               appState: initialScene.appState as ExcalidrawInitialDataState["appState"],
               scrollToContent: true,
             }}
-            key={node.id}
+            key={detail.node.id}
             langCode={locale}
-            name={node.name}
+            name={detail.node.name}
             onChange={(elements, appState) => {
               const nextScene: WhiteboardDocument = {
                 version: 1,

@@ -65,7 +65,7 @@ export function BusaBaseCalendar({
   // Bucket records by day.
   const recordsByDay = new Map<string, RecordVO[]>();
   for (const record of records) {
-    const key = recordDayKey(record.headCommit.fields[dateField.slug]);
+    const key = recordDayKey(record.headCommit.payload[dateField.slug]);
     if (!key) {
       continue;
     }

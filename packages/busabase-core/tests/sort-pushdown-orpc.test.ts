@@ -71,8 +71,8 @@ describe("Sort push-down keyset — oRPC integration", () => {
     }
   });
 
-  const scoreOf = (record: { headCommit: { fields: Record<string, unknown> } }): number | null => {
-    const value = record.headCommit.fields.score;
+  const scoreOf = (record: { headCommit: { payload: Record<string, unknown> } }): number | null => {
+    const value = record.headCommit.payload.score;
     return value === undefined || value === null ? null : Number(value);
   };
 

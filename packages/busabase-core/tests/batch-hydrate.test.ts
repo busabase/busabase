@@ -117,7 +117,7 @@ describe("Batch hydrate — per-item relation isolation", () => {
 
     const page = await client.records.list({ baseId: baseAId, limit: 50 });
     expect(page.records).toHaveLength(3);
-    const names = page.records.map((record) => record.headCommit.fields.name).sort();
+    const names = page.records.map((record) => record.headCommit.payload.name).sort();
     expect(names).toEqual(["a1", "a2", "a3"]);
     // Every record resolves to base A (not base B) in the shared batch.
     for (const record of page.records) {

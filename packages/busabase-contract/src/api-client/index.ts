@@ -10,6 +10,7 @@ import type {
 } from "open-domains/attachments/types";
 import type { iString } from "openlib/i18n/i-string";
 import { type BusabaseContract, busabaseContract } from "../contract/busabase";
+import type { NodeContentInput } from "../contract/node-content-schemas";
 import type { NodeDetailVO } from "../contract/node-detail-schemas";
 import type {
   InstallFromGithubDTO,
@@ -175,6 +176,18 @@ export interface BusabaseDashboardApiClient {
   }) => Promise<ChangeRequestVO>;
   /** Shallow-merge top-level metadata keys on an active node. */
   updateNodeMetadata: (nodeId: string, metadata: Record<string, unknown>) => Promise<NodeVO>;
+  /**
+   * Propose (or, with `write` access and `autoMerge` not explicitly `false`,
+   * immediately apply) new content for a doc/whiteboard/workflow/html node —
+   * the one write endpoint for every node type that owns exactly one document.
+   * Replaces the old Doc-only `docs.updateBody` / `docs.createChangeRequest`
+   * pair; whiteboard/workflow/html never had a reviewed write before this.
+   */
+  updateNodeContent: (
+    nodeId: string,
+    content: NodeContentInput,
+    opts?: { message?: string; submittedBy?: string; autoMerge?: boolean },
+  ) => Promise<ChangeRequestVO>;
   /**
    * Toggle the current actor's favorite on a node — a true upsert-or-delete
    * against the `(nodeId, actorId)` unique pair server-side. `favorited`
@@ -480,6 +493,8 @@ export const createBusabaseRestApiClient = (
     purgeNode: (nodeId) => client.nodes.purge({ nodeId }),
     moveNode: (payload) => client.nodes.move(payload),
     updateNodeMetadata: (nodeId, metadata) => client.nodes.updateMetadata({ nodeId, metadata }),
+    updateNodeContent: (nodeId, content, opts) =>
+      client.nodes.updateContent({ nodeId, content, ...opts }),
     toggleNodeFavorite: (nodeId) => client.nodes.toggleFavorite({ nodeId }),
     listFavoriteNodes: () => client.nodes.listFavorites(),
     // Reads through the unified Node detail route (`fileTrees.get` is retired).

@@ -146,7 +146,10 @@ describe("Boundary P12 — Trash permanent delete (purge)", () => {
 
     const doc = await raw.docs.create({ slug: "leaky", name: "Leaky", autoMerge: true });
     if ("status" in doc) throw new Error("Expected materialized DocVO");
-    await raw.docs.updateBody({ nodeId: doc.node.id, body: "some real content" });
+    await raw.nodes.updateContent({
+      nodeId: doc.node.id,
+      content: { kind: "doc", body: "some real content" },
+    });
     expect(await storage.objectExists(docBodyKey(doc.node.id))).toBe(true);
 
     await deleteNode(raw, doc.node.id);

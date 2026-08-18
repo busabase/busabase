@@ -774,7 +774,7 @@ export function DocDetailView({
     setError(null);
   }, [slug]);
 
-  const createCr = useMutation(orpc.docs.createChangeRequest.mutationOptions());
+  const createCr = useMutation(orpc.nodes.updateContent.mutationOptions());
   const reviewCr = useMutation(orpc.changeRequests.review.mutationOptions());
   const mergeCr = useMutation(orpc.changeRequests.merge.mutationOptions());
   const uploadImage = useDocImageUpload(orpc);
@@ -801,7 +801,7 @@ export function DocDetailView({
     try {
       const changeRequest = await createCr.mutateAsync({
         nodeId: doc.node.id,
-        body: draft,
+        content: { kind: "doc", body: draft },
       });
       await reviewCr.mutateAsync({
         changeRequestIds: [changeRequest.id],
@@ -824,7 +824,7 @@ export function DocDetailView({
     try {
       const changeRequest = await createCr.mutateAsync({
         nodeId: doc.node.id,
-        body: draft,
+        content: { kind: "doc", body: draft },
       });
       setLocation(`/inbox/${changeRequest.id}`);
     } catch (caught) {

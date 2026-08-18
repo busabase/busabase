@@ -77,8 +77,8 @@ describe("unified Node surface — oRPC integration", () => {
       autoMerge: true,
     });
 
-    // Slug uniqueness is enforced per PARENT, not per space — so the same slug
-    // really can mean two different node types in one workspace. That is what
+    // Slug uniqueness is enforced per node TYPE in a space, so the same slug
+    // can intentionally mean two different node types. That is what
     // makes the ambiguity check below a real user scenario rather than a
     // defensive branch nobody can reach.
     const nested = await client.nodes.createChangeRequest({

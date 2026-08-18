@@ -7,15 +7,14 @@ import { and, asc, eq, isNull } from "drizzle-orm";
 import { getContextSpaceId, isAnonymousVisitor } from "../context";
 import { getDb } from "../db";
 import { busabaseNodes, type NodePO } from "../db/schema";
-import { getDoc } from "../domains/doc/handlers";
-import { getFileNodeDetail } from "../domains/file-node/handlers";
-import { getFileTreeKind, getFileTreeNode } from "../domains/filetree/handlers";
-// Registers skill/drive/airapp so `getFileTreeKind` below resolves regardless of
-// whether the file-tree router module was loaded first.
-import "../domains/filetree/kinds";
-import { getFolder } from "../domains/folder/handlers";
 import { denyAnonymousNodeType, isAnonymousReadableNodeType } from "./anonymous-allowlist";
+// Side-effect import: guarantees every builtin node type has registered its
+// server-side behaviour before the dispatch below reads the registry. Importing
+// the one barrel (rather than hand-listing domains here) is deliberate — see
+// that module for the silent-fallback bug hand-listing caused.
+import "./builtin-node-runtimes";
 import { buildNodeVisibilityCondition } from "./node-acl";
+import { getNodeRuntime } from "./node-runtime";
 import { ensureReady } from "./seed";
 import { loadNodesByIds, toNodeVO } from "./store";
 
@@ -105,59 +104,19 @@ const resolveVisibleNode = async (nodeIdOrSlug: string, typeHint?: NodeType): Pr
 };
 
 /**
- * A node type with no richer typed detail of its own yet (`base`, `form`,
- * `whiteboard`, `workflow`, `html`). Returns the plain node row — strictly
- * additive, since none of these were reachable through a typed get at all.
- * `loadNodesByIds` (rather than a bare `toNodeVO`) so a Base node still
- * resolves its `baseId`.
+ * The plain node row, for a type whose detail is just that (`base`, `form`).
+ * `loadNodesByIds` rather than a bare `toNodeVO` so a Base node still resolves
+ * its `baseId`.
+ *
+ * Reached only through an explicit `genericDetail: true` registration, never as
+ * a fallback — see `NodeRuntime.genericDetail`.
  */
-const buildGenericDetail = async <T extends NodeType>(
-  type: T,
-  node: NodePO,
-): Promise<{ type: T; node: ReturnType<typeof toNodeVO> }> => {
+const buildGenericDetail = async (node: NodePO): Promise<NodeDetailVO> => {
   const nodeMap = await loadNodesByIds([node.id]);
-  return { type, node: nodeMap.get(node.id) ?? toNodeVO(node, null) };
-};
-
-const buildFileTreeDetail = async <T extends "skill" | "drive" | "airapp">(
-  type: T,
-  node: NodePO,
-): Promise<NodeDetailVO> => {
-  const detail = await getFileTreeNode(getFileTreeKind(type), node.id);
   return {
-    type,
-    ...detail,
-    // `skippedGitignorePaths` only ever carries anything on a CREATE response;
-    // on a read it is empty. The contract's schema defaults it, so normalize
-    // here too rather than letting a read and its schema disagree.
-    skippedGitignorePaths: detail.skippedGitignorePaths ?? [],
-  };
-};
-
-/**
- * Type -> hydration. Keyed by string (not `NodeType`) because
- * `registerNodeType()` accepts late runtime registration: a build-time plugin
- * can put a type into the runtime registry that this map has never heard of.
- * The lookup below therefore FAILS CLOSED — it throws rather than returning a
- * partial or mis-discriminated VO that a client would have to guess at.
- */
-const NODE_DETAIL_BUILDERS: Record<string, (node: NodePO) => Promise<NodeDetailVO>> = {
-  // Each domain getter is re-invoked with the RESOLVED node id, not the caller's
-  // raw input: the slug/ambiguity/ACL decision has already been made here, and
-  // the domain's own visibility check then runs a second time on a plain id
-  // lookup. Belt and braces, and it keeps each domain's getter usable on its own
-  // (busabase-cloud's embed-links logic calls several of them directly).
-  folder: async (node) => ({ type: "folder", ...(await getFolder(node.id)) }),
-  doc: async (node) => ({ type: "doc", ...(await getDoc(node.id)) }),
-  file: async (node) => ({ type: "file", ...(await getFileNodeDetail(node.id)) }),
-  skill: (node) => buildFileTreeDetail("skill", node),
-  drive: (node) => buildFileTreeDetail("drive", node),
-  airapp: (node) => buildFileTreeDetail("airapp", node),
-  base: (node) => buildGenericDetail("base", node),
-  form: (node) => buildGenericDetail("form", node),
-  whiteboard: (node) => buildGenericDetail("whiteboard", node),
-  workflow: (node) => buildGenericDetail("workflow", node),
-  html: (node) => buildGenericDetail("html", node),
+    type: node.type,
+    node: nodeMap.get(node.id) ?? toNodeVO(node, null),
+  } as NodeDetailVO;
 };
 
 export const getNodeDetail = async (
@@ -179,12 +138,25 @@ export const getNodeDetail = async (
     denyAnonymousNodeType(node.type);
   }
 
-  // 3. Type-specific hydration.
-  const build = NODE_DETAIL_BUILDERS[node.type];
-  if (!build) {
-    throw new ORPCError("NOT_IMPLEMENTED", {
-      message: `No detail is available for node type "${node.type}"`,
-    });
-  }
-  return build(node);
+  // 3. Type-specific hydration, resolved from the node-runtime registry rather
+  //    than a table this file owns — that table was one of the ten kernel files
+  //    a new node type had to edit (spec: node-type-plugin-architecture.md).
+  //
+  //    Each domain's hydrator is invoked with the RESOLVED node, not the
+  //    caller's raw input: the slug/ambiguity/ACL decision has already been made
+  //    above, and the domain's own visibility check then runs a second time on a
+  //    plain id lookup. Belt and braces, and it keeps each domain's getter
+  //    usable on its own (busabase-cloud's embed-links logic calls several
+  //    directly).
+  //
+  //    FAILS CLOSED, exactly as the table it replaced did: a type that has
+  //    registered no detail behaviour throws rather than returning a partial or
+  //    mis-discriminated VO a client would have to guess at. `genericDetail` is
+  //    an explicit opt-in precisely so this stays true.
+  const runtime = getNodeRuntime(node.type);
+  if (runtime?.hydrateDetail) return runtime.hydrateDetail(node);
+  if (runtime?.genericDetail) return buildGenericDetail(node);
+  throw new ORPCError("NOT_IMPLEMENTED", {
+    message: `No detail is available for node type "${node.type}"`,
+  });
 };

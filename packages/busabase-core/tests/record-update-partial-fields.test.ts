@@ -102,7 +102,7 @@ describe("record_update — partial-field submissions preserve untouched fields"
   const getFields = async (recordId: string) => {
     const record = await client.records.get({ recordId });
     if (!record) throw new Error("expected record to exist");
-    return record.headCommit.fields;
+    return record.headCommit.payload;
   };
 
   // ── Scenario 1: basic partial update preserves the untouched field ─────────
@@ -242,7 +242,7 @@ describe("record_update — partial-field submissions preserve untouched fields"
     const mergedB = await client.changeRequests.merge({ changeRequestIds: [crB.id] });
     const mergeResult = mergedB.results[0];
     if (!mergeResult?.ok) throw new Error(mergeResult?.error ?? "Merge returned no result");
-    expect(mergeResult.record?.headCommit.fields).toMatchObject({
+    expect(mergeResult.record?.headCommit.payload).toMatchObject({
       title: "D-new",
       score: 99,
       note: "orig-note",

@@ -101,7 +101,7 @@ describe("Base field types — OpenAPI (/api/v1) route round-trip", () => {
 
   const readFields = async (recordId: string): Promise<Record<string, unknown>> => {
     const record = await ok("GET", `/records/get?recordId=${recordId}`);
-    return record.headCommit.fields;
+    return record.headCommit.payload;
   };
 
   const validValues = (): Record<string, unknown> => ({

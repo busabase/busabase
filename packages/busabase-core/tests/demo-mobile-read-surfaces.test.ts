@@ -34,7 +34,7 @@ describe("demo mobile read surfaces", () => {
     const views = await client.bases.listViews({ baseId: "bse_local_blog" });
     const view = views.find((item) => item.id === "viw_seed_blog_drafts");
     const expectedStatus = view?.config.filters[0]?.value;
-    const statuses = page.records.map((record) => record.headCommit.fields.status);
+    const statuses = page.records.map((record) => record.headCommit.payload.status);
     expect(statuses).toEqual(statuses.filter((status) => status === expectedStatus));
   });
 
@@ -48,7 +48,7 @@ describe("demo mobile read surfaces", () => {
     const view = views.find((item) => item.id === "viw_seed_blog_drafts");
     const expectedStatus = view?.config.filters[0]?.value;
     const expectedCount = all.records.filter(
-      (record) => record.headCommit.fields.status === expectedStatus,
+      (record) => record.headCommit.payload.status === expectedStatus,
     ).length;
 
     const viaView = await client.records.count({

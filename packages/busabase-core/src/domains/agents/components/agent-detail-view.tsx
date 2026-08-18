@@ -11,6 +11,13 @@ import { buildAgentTimeline } from "../utils/session-updates";
 import { PermissionCard } from "./permission-card";
 import { TransportBadge } from "./transport-badge";
 
+/**
+ * A session whose process is gone cannot take another message. Persisted
+ * sessions made this reachable: before they survived a restart, an `ended`
+ * session simply disappeared and the input was never shown for one.
+ */
+const isFinished = (status: AgentSessionVO["status"]) => status === "ended" || status === "failed";
+
 const STATUS_LABEL: Record<AgentSessionVO["status"], string> = {
   connecting: "connecting…",
   idle: "idle",
@@ -205,13 +212,20 @@ export function AgentDetailView({ orpc, agentSlug, onBack }: AgentDetailViewProp
               <textarea
                 className="min-h-10 flex-1 resize-none rounded-md border bg-background px-3 py-2 text-sm"
                 placeholder={
-                  active.status === "waiting_permission"
-                    ? "Respond to the request above to continue…"
-                    : `Message ${agentName}…`
+                  isFinished(active.status)
+                    ? "This session has ended — start a new one to keep going."
+                    : active.status === "waiting_permission"
+                      ? "Respond to the request above to continue…"
+                      : `Message ${agentName}…`
                 }
                 value={draft}
                 rows={1}
-                disabled={active.status === "busy" || active.status === "waiting_permission"}
+                disabled={
+                  active.status === "busy" ||
+                  isFinished(active.status) ||
+                  active.status === "waiting_permission" ||
+                  isFinished(active.status)
+                }
                 onChange={(event) => setDraft(event.target.value)}
                 onKeyDown={(event) => {
                   if (event.key === "Enter" && !event.shiftKey) {
@@ -225,6 +239,7 @@ export function AgentDetailView({ orpc, agentSlug, onBack }: AgentDetailViewProp
                 disabled={
                   !draft.trim() ||
                   active.status === "busy" ||
+                  isFinished(active.status) ||
                   active.status === "waiting_permission"
                 }
                 size="sm"

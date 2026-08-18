@@ -102,7 +102,9 @@ describe("Boundary P9 — node soft-delete + restore", () => {
     expect(second.node.id).not.toBe(first.node.id);
 
     // Restoring the original now collides with the active sibling → CONFLICT.
-    await expect(restoreNode(raw, first.node.id)).rejects.toThrow(/slug .* is now used|Rename it/i);
+    await expect(restoreNode(raw, first.node.id)).rejects.toThrow(
+      /slug .* (?:is now used|is already used)|Rename it/i,
+    );
   });
 });
 

@@ -19,7 +19,6 @@ import { getContextActorId } from "../../../context";
  * `assertSameOriginForAgents` (see `logic/agent-origin-guard.ts`) is the second
  * layer; neither is sufficient alone.
  *
- * See `apps/busabase-cloud/content/spec/agent-integrations.md` §8.0.
  */
 interface CatalogSpec {
   slug: string;
@@ -36,11 +35,27 @@ interface CatalogSpec {
 /**
  * Pinned mirror of the official ACP registry entries we support, plus Buda.
  *
- * The versions match `https://cdn.agentclientprotocol.com/registry/v1/latest/registry.json`
- * as of 2026-08-12. Syncing this table from that endpoint at runtime is planned
- * (spec §6.5b) but deliberately not done yet: a network fetch that decides what
- * we are willing to execute is a bigger trust decision than a checked-in table,
- * and it should land together with signature/pinning rules rather than before.
+ * This table stays the sole authority on *what gets spawned* — `npxPackage`
+ * below is never replaced by anything a network fetch returns. A live
+ * response that decides which program executes is a bigger trust decision
+ * than a checked-in table, and that decision hasn't been made (spec §8.0
+ * already treats "registry-only spawning" as the safer posture *because* the
+ * command line is ours, not the network's).
+ *
+ * What `listCatalog()` below *does* sync live is display metadata only —
+ * `description`/`version` shown to the user — fetched directly from the
+ * official registry endpoint. This table is *this file's own* fallback: no
+ * separate pinned JSON snapshot is needed the way `@acprouter/core`'s
+ * `registry-sync.ts` keeps one, because these hardcoded strings already
+ * serve exactly that role. If the fetch fails or a slug isn't in the
+ * response, these are what's shown — so they still have to be kept
+ * reasonably current, they're just no longer the only source.
+ *
+ * Deliberately **not** a dependency on `@acprouter/core` (which has the same
+ * fetch-with-timeout logic). Busabase packages must remain independently
+ * installable, and a workspace-only dependency would make standalone installs
+ * fail when that package is unavailable. Keeping the small metadata fetch here
+ * preserves that boundary.
  */
 const CATALOG: CatalogSpec[] = [
   {
@@ -122,8 +137,50 @@ function budaConfig(): { url?: string; token?: string; agentId?: string } {
   };
 }
 
-export function listCatalog(): AgentCatalogEntryVO[] {
+const OFFICIAL_REGISTRY_URL =
+  "https://cdn.agentclientprotocol.com/registry/v1/latest/registry.json";
+const REGISTRY_FETCH_TIMEOUT_MS = 3000;
+
+interface OfficialRegistryEntry {
+  id: string;
+  description: string;
+  version: string;
+}
+
+/**
+ * Live-fetches the official ACP registry for display metadata only —
+ * never throws, and never blocks `listCatalog` for longer than the timeout.
+ * Any failure (network down, CDN outage, malformed response, timeout)
+ * degrades to an empty map, and `listCatalog`'s own hardcoded `CATALOG`
+ * strings are what gets shown — the same fallback shape
+ * `@acprouter/core`'s `registry-sync.ts` uses, reimplemented here in ~15
+ * lines specifically so this file needs no dependency on that package (see
+ * the doc comment on `CATALOG` above for why that matters for busabase).
+ */
+async function fetchRegistryDisplayInfo(): Promise<
+  Map<string, { description: string; version: string }>
+> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), REGISTRY_FETCH_TIMEOUT_MS);
+  try {
+    const response = await fetch(OFFICIAL_REGISTRY_URL, { signal: controller.signal });
+    if (!response.ok) throw new Error(`registry responded ${response.status}`);
+    const data = (await response.json()) as { agents?: OfficialRegistryEntry[] };
+    if (!Array.isArray(data.agents)) throw new Error("malformed registry response");
+    return new Map(
+      data.agents.map((a) => [a.id, { description: a.description, version: a.version }]),
+    );
+  } catch {
+    return new Map();
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+export async function listCatalog(): Promise<AgentCatalogEntryVO[]> {
   const cloudHost = isCloudHost();
+  const registryInfo = await fetchRegistryDisplayInfo();
+
   return CATALOG.map((spec) => {
     let available = false;
     let unavailableReason: string | null = null;
@@ -149,12 +206,18 @@ export function listCatalog(): AgentCatalogEntryVO[] {
       }
     }
 
+    // Registry-sourced display info only, never the spawn command — see the
+    // doc comment on CATALOG above. `buda` is never in the official registry
+    // (spec: no URL-based distribution exists for it), so it always falls
+    // through to its own hardcoded description below.
+    const synced = registryInfo.get(spec.slug);
+
     return {
       slug: spec.slug,
       name: spec.name,
-      description: spec.description,
+      description: synced?.description || spec.description,
       transport: spec.transport,
-      version: spec.npxPackage?.split("@").pop() ?? null,
+      version: synced?.version ?? spec.npxPackage?.split("@").pop() ?? null,
       available,
       unavailableReason,
     };

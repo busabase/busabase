@@ -102,12 +102,21 @@ export interface NodeVO {
   slug: string;
   name: string;
   description: string;
+  /**
+   * Free-form extension data — the caller's bag. The product reads nothing here
+   * except `version`, a label the user writes and the product never interprets.
+   * Kept in sync with `NodeOutput` in `contract/schemas.ts`, which is the shape
+   * the wire schema actually validates.
+   */
   metadata: Record<string, unknown> & {
-    entryFile?: string;
-    visibility?: "private" | "workspace" | "public";
     version?: string;
-    assetId?: string;
   };
+  /**
+   * This node's OWN declared visibility, or null when it inherits from its
+   * ancestors. A real column rather than a metadata key, because it is the node
+   * ACL's only explicit input — see `content/spec/node-content-storage.md` (D1).
+   */
+  explicitVisibility: "private" | "workspace" | "public" | null;
   position: number;
   createdAt: string;
   updatedAt: string;
@@ -171,7 +180,13 @@ export interface CommitVO {
   nodeId: string | null;
   operationId: string | null;
   parentCommitId: string | null;
-  fields: Record<string, unknown>;
+  /**
+   * Polymorphic change payload; its shape is determined by `operation`.
+   * Intentionally loose here — see the comment on `commitSchema.payload` in
+   * `contract/schemas.ts`. Historical commits predate payload validation, and this
+   * VO is what history/approval screens read, so it must stay permissive.
+   */
+  payload: Record<string, unknown>;
   operation: OperationKind;
   message: string;
   author: string;

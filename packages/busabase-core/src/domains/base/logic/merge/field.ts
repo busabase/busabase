@@ -1,10 +1,11 @@
 import "server-only";
 
 import { and, asc, eq, gt, inArray, isNull, ne } from "drizzle-orm";
-import { type iString, iStringToText } from "openlib/i18n/i-string";
+import { iStringToText } from "openlib/i18n/i-string";
 import { getContextSpaceId } from "../../../../context";
 import type { BaseFieldPO, CommitPO, OperationPO } from "../../../../db/schema";
 import { busabaseBaseFields, busabaseBases, busabaseOperations } from "../../../../db/schema";
+import { parseCommitPayload } from "../../../../logic/commit-payload-schemas";
 import type { MergeCtx } from "../../../../logic/cr-lifecycle";
 import { id, requireBaseId } from "../../../../logic/kernel";
 import { PRIMARY_FIELD_DELETE_MESSAGE } from "../../utils/primary-field";
@@ -13,16 +14,7 @@ import { getPrimaryFieldIdFromDb } from "../queries";
 export const mergeBaseAddField = async (ctx: MergeCtx, item: OperationPO, headCommit: CommitPO) => {
   const { db, timestamp } = ctx;
   const baseId = requireBaseId(item.baseId, item.operation);
-  const fieldData = headCommit.fields as {
-    name?: iString;
-    slug?: string;
-    type?: import("busabase-contract/types").FieldType;
-    required?: boolean;
-    options?: Record<string, unknown>;
-  };
-  if (!fieldData.name || !fieldData.slug) {
-    throw new Error(`base_add_field commit missing name or slug: ${item.id}`);
-  }
+  const fieldData = parseCommitPayload("base_add_field", headCommit.payload);
   const fieldCount = await db
     .select()
     .from(busabaseBaseFields)
@@ -58,13 +50,7 @@ export const mergeBaseDeleteField = async (
   headCommit: CommitPO,
 ) => {
   const { db, timestamp } = ctx;
-  const fieldData = headCommit.fields as {
-    fieldId?: string;
-    slug?: string;
-  };
-  if (!fieldData.fieldId) {
-    throw new Error(`base_delete_field commit missing fieldId: ${item.id}`);
-  }
+  const fieldData = parseCommitPayload("base_delete_field", headCommit.payload);
   const baseId = requireBaseId(item.baseId, item.operation);
   const primaryFieldId = await getPrimaryFieldIdFromDb(db, baseId);
   if (primaryFieldId === fieldData.fieldId) {
@@ -137,15 +123,7 @@ export const mergeBaseUpdateField = async (
   headCommit: CommitPO,
 ) => {
   const { db, timestamp } = ctx;
-  const fieldData = headCommit.fields as {
-    fieldId?: string;
-    name?: iString;
-    required?: boolean;
-    options?: Record<string, unknown>;
-  };
-  if (!fieldData.fieldId) {
-    throw new Error(`base_update_field commit missing fieldId: ${item.id}`);
-  }
+  const fieldData = parseCommitPayload("base_update_field", headCommit.payload);
 
   // When a field is being promoted to required, every active record must already
   // carry a non-empty value — otherwise the new constraint would be retroactively
@@ -317,17 +295,7 @@ export const mergeBaseConvertField = async (
   headCommit: CommitPO,
 ) => {
   const { db, timestamp } = ctx;
-  const fieldData = headCommit.fields as {
-    fieldId?: string;
-    slug?: string;
-    fromType?: import("busabase-contract/types").FieldType;
-    newType?: import("busabase-contract/types").FieldType;
-    selectChoiceMode?: "auto_create" | "null_on_missing";
-    choices?: Array<{ id: string; name: string; color?: string }>;
-  };
-  if (!fieldData.fieldId || !fieldData.newType || !fieldData.fromType) {
-    throw new Error(`base_convert_field commit missing required fields: ${item.id}`);
-  }
+  const fieldData = parseCommitPayload("base_convert_field", headCommit.payload);
 
   const { busabaseFieldValues, busabaseCommits, busabaseRecords } = await import(
     "../../../../db/schema"
@@ -418,7 +386,7 @@ export const mergeBaseConvertField = async (
     const commitRows =
       headCommitIds.length > 0
         ? await db
-            .select({ id: busabaseCommits.id, fields: busabaseCommits.fields })
+            .select({ id: busabaseCommits.id, fields: busabaseCommits.payload })
             .from(busabaseCommits)
             .where(inArray(busabaseCommits.id, headCommitIds))
         : [];
@@ -430,7 +398,7 @@ export const mergeBaseConvertField = async (
       if (!fields) continue;
       await db
         .update(busabaseCommits)
-        .set({ fields: { ...fields, [fieldSlug]: converted } })
+        .set({ payload: { ...fields, [fieldSlug]: converted } })
         .where(eq(busabaseCommits.id, headCommitId));
     }
   };
@@ -490,7 +458,7 @@ export const mergeBaseReorderFields = async (
 ) => {
   const { db, timestamp } = ctx;
   const baseId = requireBaseId(item.baseId, item.operation);
-  const fieldData = headCommit.fields as { fieldIds?: string[] };
+  const fieldData = parseCommitPayload("base_reorder_fields", headCommit.payload);
   if (!fieldData.fieldIds || fieldData.fieldIds.length === 0) {
     throw new Error(`base_reorder_fields commit missing fieldIds: ${item.id}`);
   }
@@ -526,10 +494,7 @@ export const mergeBaseRestoreField = async (
   headCommit: CommitPO,
 ) => {
   const { db, timestamp } = ctx;
-  const fieldData = headCommit.fields as { fieldId?: string };
-  if (!fieldData.fieldId) {
-    throw new Error(`base_restore_field commit missing fieldId: ${item.id}`);
-  }
+  const fieldData = parseCommitPayload("base_restore_field", headCommit.payload);
 
   // Guard slug reuse: a field's slug is freed once it is deleted, so a new active
   // field can take it. Restoring the old field would then leave two active fields

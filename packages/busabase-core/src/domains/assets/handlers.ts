@@ -820,7 +820,7 @@ export const removeRecordAssetUsages = async (
  *     cross-space id can never mint a usage row.
  *
  *  2. **Legacy storage URLs** (`body.includes(storageKey)`) — bodies written
- *     before the switch, and every immutable `busabase_commits.fields.body`
+ *     before the switch, and every immutable `busabase_commits.payload.body`
  *     ever recorded, still carry the resolved storage path. Dropping this
  *     branch would silently orphan those assets (usage count → 0, so the
  *     library would happily offer to delete bytes a published Doc still shows).

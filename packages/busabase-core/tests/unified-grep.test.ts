@@ -593,7 +593,7 @@ describe("Unified Grep — POST /grep (files + docs + records)", () => {
       expect(result.coverage.records.scanned).toBe(0);
     });
 
-    it("excludes a soft-deleted field's stale value still sitting in headCommit.fields (deletedAt correctness regression)", async () => {
+    it("excludes a soft-deleted field's stale value still sitting in headCommit.payload (deletedAt correctness regression)", async () => {
       const marker = "DELETEDFIELDMARKER4471";
       const base = await seedBase({
         slug: "grep-records-deleted-field",
@@ -608,7 +608,7 @@ describe("Unified Grep — POST /grep (files + docs + records)", () => {
       await createBaseRecord(base.id, { keep: "keep value", gone: marker });
 
       // Soft-delete the "gone" field AFTER the record was written — its
-      // stale value (the marker) is still sitting in headCommit.fields.gone,
+      // stale value (the marker) is still sitting in headCommit.payload.gone,
       // but loadRecordBatchData's field query filters isNull(deletedAt), so
       // it must never resurface.
       await deleteField(base.id, goneField.id);

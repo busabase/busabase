@@ -83,7 +83,7 @@ describe("Boundary P7 — conflict-CR escape hatch", () => {
     expect(merged?.status).toBe("merged");
 
     const fresh = await raw.records.get({ recordId: record.id });
-    expect(fresh.headCommit.fields.score).toBe(30);
+    expect(fresh.headCommit.payload.score).toBe(30);
   });
 
   it("Fix 3: a conflict CR can be closed (abandoned)", async () => {

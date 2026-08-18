@@ -73,7 +73,7 @@ export const getOperationFieldChanges = (
   messages?: CoreI18nMessages,
 ): OperationFieldChange[] => {
   const before = operation.baseFields;
-  return Object.entries(operation.headCommit.fields)
+  return Object.entries(operation.headCommit.payload)
     .filter(([, value]) => value !== undefined)
     .map(([slug, afterValue]): OperationFieldChange => {
       const hasBefore = before != null && slug in before && before[slug] !== undefined;

@@ -67,7 +67,7 @@ export const searchInputSchema = z.object({
 
 export const recordPrimaryText = (record: RecordVO): string => {
   const primarySlug = getPrimaryField(record.base)?.slug;
-  return (primarySlug ? String(record.headCommit.fields[primarySlug] ?? "") : "") || record.id;
+  return (primarySlug ? String(record.headCommit.payload[primarySlug] ?? "") : "") || record.id;
 };
 
 const toSearchText = (fields: Record<string, unknown>) =>
@@ -89,7 +89,7 @@ const toRecordSearchResult = (record: RecordVO): SearchResultVO => ({
   id: record.id,
   kind: "record",
   title: recordPrimaryText(record),
-  body: String(record.headCommit.fields.body ?? record.headCommit.fields.description ?? ""),
+  body: String(record.headCommit.payload.body ?? record.headCommit.payload.description ?? ""),
   eyebrow: `${record.base.name} · canonical record`,
   href: `/base/${record.base.slug}/${record.id}`,
   updatedAt: record.updatedAt,
@@ -102,12 +102,12 @@ const toChangeRequestSearchResult = (changeRequest: ChangeRequestVO): SearchResu
     changeRequest.operationCount > 1
       ? `${changeRequest.operationCount} operation changeRequest`
       : searchTitleText(
-          changeRequest.primaryOperation?.headCommit.fields.title ??
-            changeRequest.primaryOperation?.headCommit.fields.name ??
+          changeRequest.primaryOperation?.headCommit.payload.title ??
+            changeRequest.primaryOperation?.headCommit.payload.name ??
             changeRequest.id,
         ),
   body: changeRequest.operations
-    .map((operation) => toSearchText(operation.headCommit.fields))
+    .map((operation) => toSearchText(operation.headCommit.payload))
     .join(" "),
   eyebrow: `${changeRequest.base?.name ?? changeRequest.node?.name ?? "Node tree"} · ${changeRequest.status}`,
   href: `/inbox/${changeRequest.id}`,

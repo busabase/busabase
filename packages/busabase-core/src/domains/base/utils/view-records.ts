@@ -163,7 +163,7 @@ export interface ViewEvaluableRecord {
 export const toViewEvaluableRecord = (record: RecordVO): ViewEvaluableRecord => ({
   id: record.id,
   updatedAt: record.updatedAt,
-  fields: record.headCommit.fields,
+  fields: record.headCommit.payload,
 });
 
 const recordMatchesViewFilter = (

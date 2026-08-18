@@ -80,7 +80,7 @@ function KanbanCard({
         {title}
       </Link>
       {bodyFields.slice(0, 3).map((field) => {
-        const preview = getFieldPreviewText(field, record.headCommit.fields[field.slug], messages);
+        const preview = getFieldPreviewText(field, record.headCommit.payload[field.slug], messages);
         if (!preview || preview === "-") {
           return null;
         }
@@ -141,7 +141,7 @@ export function BusaBaseKanban({
     recordsByColumn.set(column.id, []);
   }
   for (const record of records) {
-    const raw = record.headCommit.fields[stackField.slug];
+    const raw = record.headCommit.payload[stackField.slug];
     const key = typeof raw === "string" && recordsByColumn.has(raw) ? raw : UNCATEGORIZED;
     recordsByColumn.get(key)?.push(record);
   }
@@ -154,7 +154,7 @@ export function BusaBaseKanban({
     if (!record || !onMoveRecord) {
       return;
     }
-    const current = record.headCommit.fields[stackField.slug];
+    const current = record.headCommit.payload[stackField.slug];
     const nextValue = columnId === UNCATEGORIZED ? null : columnId;
     if (current === nextValue || (current == null && nextValue === null)) {
       return;

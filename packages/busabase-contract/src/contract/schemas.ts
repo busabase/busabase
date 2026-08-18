@@ -22,12 +22,25 @@ export interface NodeOutput {
   slug: string;
   name: string;
   description: string;
+  /**
+   * Free-form extension data. The product reads NOTHING here — it is the
+   * caller's bag (busabase-cms keeps its Base-id mapping in it), plus `version`,
+   * a label the user writes and the product never interprets.
+   *
+   * `visibility` moved up to a first-class field below; `entryFile` is read off
+   * the node type; `assetId` is read from the asset-usage row. See
+   * `content/spec/node-content-storage.md` (D1).
+   */
   metadata: Record<string, unknown> & {
-    entryFile?: string;
-    visibility?: "private" | "workspace" | "public";
     version?: string;
-    assetId?: string;
   };
+  /**
+   * This node's OWN declared visibility, or null when it simply inherits from
+   * its ancestors. Access control, so it is a real column rather than a
+   * metadata key — only `POST /nodes/{nodeId}/visibility` (which requires
+   * `manage`) can change it.
+   */
+  explicitVisibility: "private" | "workspace" | "public" | null;
   position: number;
   createdAt: string;
   updatedAt: string;
@@ -46,25 +59,6 @@ export interface NodeOutput {
   hasChildren?: boolean;
 }
 
-/**
- * Node metadata keys that mean the same thing on EVERY node type — the ones
- * `nodeSchema.metadata` declares explicitly below. Everything else in a node's
- * metadata is free-form and type-specific (a whiteboard's `whiteboardDocument`,
- * busabase-cms's `busabaseCms` mapping on a folder, …).
- *
- * Exported because `updateNodeMetadata` needs exactly this set to decide which
- * keys are always acceptable on a typed node; keeping one list means the
- * allowlist can't drift away from what the schema actually documents.
- *
- * Being on this list means "a node of any type may CARRY this key", not "any
- * endpoint may write it". `visibility` in particular is readable here but is
- * refused by the metadata PATCH endpoint — it is access control, and only
- * `nodes.updateVisibility` re-materializes the `effectiveVisibility` column the
- * ACL actually enforces. Node CREATION does carry it correctly (see
- * `initializeNodeAcl`), which is why it stays on the list.
- */
-export const NODE_COMMON_METADATA_KEYS = ["entryFile", "visibility", "version", "assetId"] as const;
-
 const nodeSchema: z.ZodType<NodeOutput> = z.lazy(() =>
   z.object({
     id: z.string(),
@@ -73,15 +67,8 @@ const nodeSchema: z.ZodType<NodeOutput> = z.lazy(() =>
     slug: z.string(),
     name: z.string(),
     description: z.string(),
-    metadata: z
-      .object({
-        entryFile: z.string().optional(),
-        visibility: z.enum(["private", "workspace", "public"]).optional(),
-        version: z.string().optional(),
-        assetId: z.string().optional(),
-      })
-      .catchall(z.unknown())
-      .default({}),
+    metadata: z.object({ version: z.string().optional() }).catchall(z.unknown()).default({}),
+    explicitVisibility: z.enum(["private", "workspace", "public"]).nullable().default(null),
     position: z.number(),
     createdAt: z.string(),
     updatedAt: z.string(),
@@ -242,7 +229,17 @@ const commitSchema = z.object({
   nodeId: z.string().nullable(),
   operationId: z.string().nullable(),
   parentCommitId: z.string().nullable(),
-  fields: z.record(z.string(), z.unknown()),
+  // Deliberately loose (`z.record`), NOT a discriminated union keyed on `operation`.
+  //
+  // Do not "tighten" this. Commits already in the database were written before
+  // per-operation payload validation existed, so their shapes carry no guarantee.
+  // The write path (`insertCommit`) and the merge path (`parseCommitPayload`) are
+  // strict precisely because they only ever touch freshly-written payloads; this VO
+  // is also used to render *history* and approval detail pages, which read arbitrarily
+  // old commits. Making it strict would turn any legacy-shaped row into a 500 on a
+  // read-only screen. This is not a compatibility shim — it is the requirement not to
+  // break reading data that already exists.
+  payload: z.record(z.string(), z.unknown()),
   operation: z.enum(OPERATION_KINDS),
   message: z.string(),
   author: z.string(),

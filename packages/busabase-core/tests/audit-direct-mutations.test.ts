@@ -84,7 +84,7 @@ describe("audit trail for direct mutations", () => {
       autoMerge: true,
     });
     if ("status" in doc) throw new Error("Expected materialized DocVO");
-    await client.docs.updateBody({ nodeId: doc.node.id, body: "v2" });
+    await client.nodes.updateContent({ nodeId: doc.node.id, content: { kind: "doc", body: "v2" } });
     expect(await hasMergedCR("node_create", (cr) => cr.node?.slug === "audit-doc")).toBe(true);
     expect(await hasMergedCR("doc_update", (cr) => cr.nodeId === doc.node.id)).toBe(true);
   });
