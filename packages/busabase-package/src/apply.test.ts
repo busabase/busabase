@@ -200,8 +200,39 @@ const planFor = (nodes: PackageTree["nodes"], assets?: PackageTree["assets"]) =>
       nodes,
       assets,
     },
-    { targetFolder: undefined, existingBaseSlugs: new Set() },
+    { targetFolder: undefined, existingNodeSlugsByType: new Map() },
   );
+
+describe("target folder", () => {
+  it("reuses an existing workspace root instead of creating a second root folder", async () => {
+    const { calls, client } = createFakeServer();
+    const plan = buildInstallPlan(
+      {
+        manifest: { format: PACKAGE_FORMAT, name: "root", description: "", tags: [] },
+        nodes: [
+          { type: "doc", slug: "guide", name: "Guide", description: "", position: 0, body: "" },
+        ],
+      },
+      {
+        targetFolder: {
+          id: "nod_root",
+          slug: "root",
+          type: "folder",
+          children: [],
+        },
+        existingNodeSlugsByType: new Map([["folder", new Set(["root"])]]),
+      },
+    );
+
+    const result = await applyInstall(client, plan, { autoMerge: true });
+
+    expect(result.targetFolderNodeId).toBe("nod_root");
+    expect(result.created.folders).toBe(0);
+    expect(calls.some((call) => call.method === "nodes.createChangeRequest")).toBe(false);
+    const docCreate = calls.find((call) => call.method === "docs.create");
+    expect((docCreate?.input as { parentNodeId: string }).parentNodeId).toBe("nod_root");
+  });
+});
 
 describe("package-only option keys never reach the API", () => {
   it("strips inverseFieldSlug and ai.sourceFieldSlugs from every payload", async () => {

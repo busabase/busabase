@@ -398,7 +398,7 @@ const collectRecords = async (
     for (const record of page.records) {
       if (record.status !== "active") continue;
       const values: Record<string, unknown> = {};
-      for (const [slug, value] of Object.entries(record.headCommit.fields ?? {})) {
+      for (const [slug, value] of Object.entries(record.headCommit.payload ?? {})) {
         const type = typeBySlug.get(slug);
         if (!type) continue;
         if (PACKAGE_COMPUTED_FIELD_TYPES.includes(type)) continue;

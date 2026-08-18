@@ -2,16 +2,10 @@
  * Install planning: package tree + the target space's current state → a plan, a
  * collision report, and the `--dry-run` rendering. Creates nothing.
  *
- * Two distinct uniqueness rules apply, and conflating them is a bug:
- *   • node slugs are unique per PARENT   (`busabase_nodes_parent_slug_uniq` on
- *     (parentId, slug)) — so a folder/doc/skill only collides inside the target folder
- *   • base slugs are unique per SPACE    (`busabase_bases_space_slug_uniq` on
- *     (spaceId, slug)) — so a base collides against EVERY active base in the space,
- *     no matter which folder it sits in
- *
- * That space-wide rule is also why `options.targetBaseSlug` resolves unambiguously
- * server-side — and why renaming a base slug MUST rewrite every `targetBaseSlug`
- * that points at it (see `applyRenames`).
+ * Active node slugs are unique by `(spaceId, nodeType, slug)`. Every package
+ * node therefore collides against same-type nodes anywhere in the target space,
+ * while different types may intentionally reuse the same slug. Renaming a base
+ * must also rewrite every relation `targetBaseSlug` that points at it.
  */
 import { PACKAGE_MAX_FILE_COUNT } from "busabase-contract/domains/package/types";
 import type { PackageClient } from "./client";
@@ -33,42 +27,52 @@ export interface ExistingNode {
 }
 
 export interface TargetState {
-  /** The target folder, when it already exists. Its children are the collision scope. */
+  /** The target folder, when it already exists anywhere in the space. */
   targetFolder: ExistingNode | undefined;
-  /** Every ACTIVE base slug in the space — base slugs are space-unique. */
-  existingBaseSlugs: ReadonlySet<string>;
+  /** Every active node slug in the space, grouped by node type. */
+  existingNodeSlugsByType: ReadonlyMap<string, ReadonlySet<string>>;
 }
 
+const flattenExistingNodes = (nodes: readonly ExistingNode[]): ExistingNode[] => {
+  const result: ExistingNode[] = [];
+  const visit = (node: ExistingNode): void => {
+    result.push(node);
+    for (const child of node.children ?? []) visit(child);
+  };
+  for (const node of nodes) visit(node);
+  return result;
+};
+
 /**
- * The target folder is addressed by slug at the space root.
- *
- * Shared rather than duplicated per caller because of the quirk it encodes:
- * `nodes.list()` returns the space root as a single wrapper element, so the
- * folder being addressed is one level deeper than it looks. A caller that got
- * this wrong would silently find no target folder, report zero collisions, and
- * then fail at apply time on a raw unique violation.
+ * The target folder is addressed by slug. Folder slugs are space-unique, so its
+ * tree depth is irrelevant and the match is unambiguous.
  */
 export const findTargetFolder = (
   nodes: readonly ExistingNode[],
   slug: string,
 ): ExistingNode | undefined => {
-  const roots = nodes.length === 1 && nodes[0].children ? nodes[0].children : nodes;
-  return roots.find((node) => node.slug === slug && node.type === "folder");
+  return flattenExistingNodes(nodes).find((node) => node.slug === slug && node.type === "folder");
 };
 
 /**
- * Read the target space's current state — the two list calls every install needs
- * before it can plan. Kept next to {@link buildInstallPlan} so the CLI and the
+ * Read the target space's current node identity state before planning. Kept
+ * next to {@link buildInstallPlan} so the CLI and the
  * server-side install domain resolve collisions from identical inputs.
  */
 export const resolveTargetState = async (
   client: PackageClient,
   targetFolderSlug: string,
 ): Promise<TargetState> => {
-  const [nodes, bases] = await Promise.all([client.nodes.list({}), client.bases.list({})]);
+  const listedNodes = (await client.nodes.list({})) as unknown as ExistingNode[];
+  const slugsByType = new Map<string, Set<string>>();
+  for (const node of flattenExistingNodes(listedNodes)) {
+    const slugs = slugsByType.get(node.type) ?? new Set<string>();
+    slugs.add(node.slug);
+    slugsByType.set(node.type, slugs);
+  }
   return {
-    targetFolder: findTargetFolder(nodes as unknown as ExistingNode[], targetFolderSlug),
-    existingBaseSlugs: new Set(bases.map((base) => base.slug)),
+    targetFolder: findTargetFolder(listedNodes, targetFolderSlug),
+    existingNodeSlugsByType: slugsByType,
   };
 };
 
@@ -76,6 +80,7 @@ export type CollisionKind = "node" | "base";
 
 export interface PlanCollision {
   kind: CollisionKind;
+  nodeType: string;
   slug: string;
   /** Human-readable location, e.g. `my-package/product-catalog`. */
   path: string;
@@ -96,6 +101,8 @@ export interface PlanCounts {
 
 export interface InstallPlan {
   targetFolderSlug: string;
+  /** Existing target folder to reuse, including the workspace root itself. */
+  existingTargetFolderNodeId?: string;
   /** The tree to apply — already rewritten when `--rename` resolved collisions. */
   tree: PackageTree;
   collisions: PlanCollision[];
@@ -124,14 +131,12 @@ export const buildInstallPlan = (
   const targetFolderSlug = options.intoFolder ?? suggestSlug(tree.manifest.name);
   const warnings: string[] = [];
 
-  const existingChildSlugs = new Set(
-    (target.targetFolder?.children ?? []).map((child) => child.slug),
-  );
-  const collisions = findCollisions(tree, targetFolderSlug, existingChildSlugs, target);
+  assertPackageNodeIdentitiesUnique(tree);
+  const collisions = findCollisions(tree, targetFolderSlug, target);
 
   let planned = tree;
   if (options.rename && collisions.length > 0) {
-    planned = applyRenames(tree, collisions, existingChildSlugs, target.existingBaseSlugs);
+    planned = applyRenames(tree, collisions, target.existingNodeSlugsByType);
   }
 
   collectWarnings(planned, warnings);
@@ -144,6 +149,7 @@ export const buildInstallPlan = (
 
   return {
     targetFolderSlug,
+    existingTargetFolderNodeId: target.targetFolder?.id,
     tree: planned,
     collisions,
     warnings,
@@ -181,27 +187,36 @@ export const hasUnlinkableRelationValues = (node: PackageBaseNode): boolean => {
 const findCollisions = (
   tree: PackageTree,
   targetFolderSlug: string,
-  existingChildSlugs: ReadonlySet<string>,
   target: TargetState,
 ): PlanCollision[] => {
   const collisions: PlanCollision[] = [];
-  // Only the package's TOP-LEVEL nodes land beside existing children of the target
-  // folder; everything deeper lands under a directory this install creates.
-  for (const node of tree.nodes) {
-    if (existingChildSlugs.has(node.slug)) {
-      collisions.push({ kind: "node", slug: node.slug, path: `${targetFolderSlug}/${node.slug}` });
-    }
-  }
-  for (const baseNode of collectBaseNodes(tree.nodes)) {
-    if (target.existingBaseSlugs.has(baseNode.slug)) {
+  for (const node of walkNodes(tree.nodes)) {
+    if (target.existingNodeSlugsByType.get(node.type)?.has(node.slug)) {
       collisions.push({
-        kind: "base",
-        slug: baseNode.slug,
-        path: `${targetFolderSlug}/… /${baseNode.slug} (base slugs are unique per space)`,
+        kind: node.type === "base" ? "base" : "node",
+        nodeType: node.type,
+        slug: node.slug,
+        path: `${targetFolderSlug}/…/${node.slug} (${node.type} slugs are unique per space)`,
       });
     }
   }
   return collisions;
+};
+
+const nodeIdentityKey = (node: Pick<PackageNode, "type" | "slug">): string =>
+  `${node.type}\0${node.slug}`;
+
+const assertPackageNodeIdentitiesUnique = (tree: PackageTree): void => {
+  const seen = new Set<string>();
+  for (const node of walkNodes(tree.nodes)) {
+    const key = nodeIdentityKey(node);
+    if (seen.has(key)) {
+      throw new Error(
+        `Package contains duplicate ${node.type} slug "${node.slug}". Node slugs must be unique by type within a space.`,
+      );
+    }
+    seen.add(key);
+  }
 };
 
 /** `products` → `products-2`, `products-3`, … skipping anything already taken. */
@@ -225,47 +240,46 @@ const nextFreeSlug = (slug: string, taken: ReadonlySet<string>): string => {
 const applyRenames = (
   tree: PackageTree,
   collisions: PlanCollision[],
-  existingChildSlugs: ReadonlySet<string>,
-  existingBaseSlugs: ReadonlySet<string>,
+  existingNodeSlugsByType: ReadonlyMap<string, ReadonlySet<string>>,
 ): PackageTree => {
-  const packageBaseSlugs = new Set(collectBaseNodes(tree.nodes).map((node) => node.slug));
-  const takenNodeSlugs = new Set([...existingChildSlugs, ...tree.nodes.map((node) => node.slug)]);
-  const takenBaseSlugs = new Set([...existingBaseSlugs, ...packageBaseSlugs]);
+  const takenByType = new Map<string, Set<string>>();
+  for (const [type, slugs] of existingNodeSlugsByType) {
+    takenByType.set(type, new Set(slugs));
+  }
+  for (const node of walkNodes(tree.nodes)) {
+    const taken = takenByType.get(node.type) ?? new Set<string>();
+    taken.add(node.slug);
+    takenByType.set(node.type, taken);
+  }
 
   const nodeRenames = new Map<string, string>();
   const baseRenames = new Map<string, string>();
 
   for (const collision of collisions) {
-    if (collision.kind === "node") {
-      const renamed = nextFreeSlug(collision.slug, takenNodeSlugs);
-      takenNodeSlugs.add(renamed);
-      nodeRenames.set(collision.slug, renamed);
-      collision.renamedTo = renamed;
-    } else {
-      const renamed = nextFreeSlug(collision.slug, takenBaseSlugs);
-      takenBaseSlugs.add(renamed);
-      baseRenames.set(collision.slug, renamed);
-      collision.renamedTo = renamed;
-    }
+    const node = [...walkNodes(tree.nodes)].find(
+      (candidate) => candidate.type === collision.nodeType && candidate.slug === collision.slug,
+    );
+    if (!node) continue;
+    const taken = takenByType.get(node.type) ?? new Set<string>();
+    const renamed = nextFreeSlug(collision.slug, taken);
+    taken.add(renamed);
+    takenByType.set(node.type, taken);
+    nodeRenames.set(nodeIdentityKey(node), renamed);
+    if (node.type === "base") baseRenames.set(node.slug, renamed);
+    collision.renamedTo = renamed;
   }
 
-  const rewriteNode = (node: PackageNode, isTopLevel: boolean): PackageNode => {
-    // A base node's slug is BOTH its node slug (unique per parent) and its base slug
-    // (unique per space) — `bases.create` takes one `slug` for both, so they can only
-    // ever be renamed together.
+  const rewriteNode = (node: PackageNode): PackageNode => {
+    const slug = nodeRenames.get(nodeIdentityKey(node)) ?? node.slug;
     if (node.type === "base") {
-      const renamed =
-        baseRenames.get(node.slug) ?? (isTopLevel ? nodeRenames.get(node.slug) : undefined);
-      const slug = renamed ?? node.slug;
       return {
         ...node,
         slug,
         base: { ...node.base, fields: node.base.fields.map(rewriteFieldTarget) },
       };
     }
-    const slug = (isTopLevel ? nodeRenames.get(node.slug) : undefined) ?? node.slug;
     if (node.type === "folder") {
-      return { ...node, slug, children: node.children.map((child) => rewriteNode(child, false)) };
+      return { ...node, slug, children: node.children.map(rewriteNode) };
     }
     return { ...node, slug };
   };
@@ -278,7 +292,7 @@ const applyRenames = (
     return { ...field, options: { ...field.options, targetBaseSlug: renamed } };
   };
 
-  return { ...tree, nodes: tree.nodes.map((node) => rewriteNode(node, true)) };
+  return { ...tree, nodes: tree.nodes.map(rewriteNode) };
 };
 
 const collectWarnings = (tree: PackageTree, warnings: string[]): void => {

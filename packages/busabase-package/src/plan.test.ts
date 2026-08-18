@@ -22,7 +22,14 @@ const tree = (nodes: PackageTree["nodes"]): PackageTree => ({
   nodes,
 });
 
-const noTarget = { targetFolder: undefined, existingBaseSlugs: new Set<string>() };
+const targetState = (existingByType: Record<string, string[]> = {}) => ({
+  targetFolder: undefined,
+  existingNodeSlugsByType: new Map(
+    Object.entries(existingByType).map(([type, slugs]) => [type, new Set(slugs)]),
+  ),
+});
+
+const noTarget = targetState();
 
 const relationField = (slug: string, targetBaseSlug: string) => ({
   slug,
@@ -52,18 +59,26 @@ describe("collision detection", () => {
           children: [],
         },
       ]),
-      { targetFolder, existingBaseSlugs: new Set() },
+      {
+        targetFolder,
+        existingNodeSlugsByType: new Map([["folder", new Set(["guides"])]]),
+      },
     );
-    expect(plan.collisions).toEqual([{ kind: "node", slug: "guides", path: "my-package/guides" }]);
+    expect(plan.collisions).toEqual([
+      {
+        kind: "node",
+        nodeType: "folder",
+        slug: "guides",
+        path: "my-package/…/guides (folder slugs are unique per space)",
+      },
+    ]);
   });
 
   it("reports a base slug colliding ANYWHERE in the space, not just the target folder", () => {
-    // Base slugs are unique per SPACE (busabase_bases_space_slug_uniq on
-    // (spaceId, slug)), unlike node slugs which are unique per parent. A base in some
-    // unrelated folder still collides.
+    // Every node type is unique by slug per space. A base in an unrelated
+    // folder therefore still collides.
     const plan = buildInstallPlan(tree([baseNode("products")]), {
-      targetFolder: undefined,
-      existingBaseSlugs: new Set(["products"]),
+      ...targetState({ base: ["products"] }),
     });
     expect(plan.collisions).toMatchObject([{ kind: "base", slug: "products" }]);
   });
@@ -80,7 +95,7 @@ describe("collision detection", () => {
           children: [baseNode("products")],
         },
       ]),
-      { targetFolder: undefined, existingBaseSlugs: new Set(["products"]) },
+      targetState({ base: ["products"] }),
     );
     expect(plan.collisions).toMatchObject([{ kind: "base", slug: "products" }]);
   });
@@ -89,10 +104,35 @@ describe("collision detection", () => {
     expect(buildInstallPlan(tree([baseNode("products")]), noTarget).collisions).toEqual([]);
   });
 
+  it("does not collide with the same slug on a different node type", () => {
+    expect(
+      buildInstallPlan(tree([baseNode("products")]), targetState({ form: ["products"] }))
+        .collisions,
+    ).toEqual([]);
+  });
+
+  it("rejects duplicate same-type slugs inside the package, including nested nodes", () => {
+    expect(() =>
+      buildInstallPlan(
+        tree([
+          baseNode("products"),
+          {
+            type: "folder",
+            slug: "data",
+            name: "Data",
+            description: "",
+            position: 0,
+            children: [baseNode("products")],
+          },
+        ]),
+        noTarget,
+      ),
+    ).toThrow(/duplicate base slug "products"/i);
+  });
+
   it("fails with every collision listed, and points at --rename", () => {
     const plan = buildInstallPlan(tree([baseNode("products")]), {
-      targetFolder: undefined,
-      existingBaseSlugs: new Set(["products"]),
+      ...targetState({ base: ["products"] }),
     });
     expect(() => assertPlanIsApplicable(plan, true)).toThrow(/--rename/);
     expect(() => assertPlanIsApplicable(plan, true)).toThrow(/products/);
@@ -100,10 +140,34 @@ describe("collision detection", () => {
 });
 
 describe("--rename", () => {
+  it("renames a colliding non-base node to keep its type + slug unique in the space", () => {
+    const plan = buildInstallPlan(
+      tree([
+        {
+          type: "skill",
+          slug: "editor",
+          name: "Editor",
+          description: "",
+          position: 0,
+          files: [],
+        },
+      ]),
+      targetState({ skill: ["editor"] }),
+      { rename: true },
+    );
+
+    expect(plan.collisions[0]).toMatchObject({
+      nodeType: "skill",
+      slug: "editor",
+      renamedTo: "editor-2",
+    });
+    expect(plan.tree.nodes[0].slug).toBe("editor-2");
+  });
+
   it("renames a colliding base to a free suffixed slug", () => {
     const plan = buildInstallPlan(
       tree([baseNode("products")]),
-      { targetFolder: undefined, existingBaseSlugs: new Set(["products"]) },
+      targetState({ base: ["products"] }),
       { rename: true },
     );
     expect(plan.collisions[0].renamedTo).toBe("products-2");
@@ -114,10 +178,7 @@ describe("--rename", () => {
   it("skips suffixes that are themselves taken", () => {
     const plan = buildInstallPlan(
       tree([baseNode("products")]),
-      {
-        targetFolder: undefined,
-        existingBaseSlugs: new Set(["products", "products-2", "products-3"]),
-      },
+      targetState({ base: ["products", "products-2", "products-3"] }),
       { rename: true },
     );
     expect(plan.collisions[0].renamedTo).toBe("products-4");
@@ -131,7 +192,7 @@ describe("--rename", () => {
     // target, and no error anywhere.
     const plan = buildInstallPlan(
       tree([baseNode("vendors", [relationField("products", "products")]), baseNode("products")]),
-      { targetFolder: undefined, existingBaseSlugs: new Set(["products"]) },
+      targetState({ base: ["products"] }),
       { rename: true },
     );
 
@@ -145,7 +206,7 @@ describe("--rename", () => {
   it("leaves a targetBaseSlug alone when its target was not renamed", () => {
     const plan = buildInstallPlan(
       tree([baseNode("vendors", [relationField("products", "products")]), baseNode("products")]),
-      { targetFolder: undefined, existingBaseSlugs: new Set(["vendors"]) },
+      targetState({ base: ["vendors"] }),
       { rename: true },
     );
     const vendors = plan.tree.nodes[0];
@@ -167,7 +228,7 @@ describe("--rename", () => {
         },
         baseNode("products"),
       ]),
-      { targetFolder: undefined, existingBaseSlugs: new Set(["products"]) },
+      targetState({ base: ["products"] }),
       { rename: true },
     );
     const folder = plan.tree.nodes[0];
@@ -255,6 +316,21 @@ describe("--auto-merge requirement (§12)", () => {
 describe("plan reporting", () => {
   it("defaults the target folder to the manifest name (§12)", () => {
     expect(buildInstallPlan(tree([]), noTarget).targetFolderSlug).toBe("my-package");
+  });
+
+  it("carries an existing target folder id into the apply plan", () => {
+    const targetFolder: ExistingNode = {
+      id: "nod_existing_target",
+      slug: "my-package",
+      type: "folder",
+      children: [],
+    };
+    const plan = buildInstallPlan(tree([]), {
+      targetFolder,
+      existingNodeSlugsByType: new Map([["folder", new Set(["my-package"])]]),
+    });
+
+    expect(plan.existingTargetFolderNodeId).toBe("nod_existing_target");
   });
 
   it("honors --into-folder", () => {

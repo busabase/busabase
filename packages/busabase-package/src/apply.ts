@@ -126,14 +126,18 @@ export const applyInstall = async (
     options.serverUrl,
   );
   progress("Pass 1/5: creating the node tree…");
-  state.targetFolderNodeId = await createFolderNode(client, {
-    parentNodeId: undefined,
-    slug: plan.targetFolderSlug,
-    name: plan.tree.manifest.name,
-    description: plan.tree.manifest.description,
-    submittedBy: options.submittedBy,
-  });
-  state.created.folders++;
+  if (plan.existingTargetFolderNodeId) {
+    state.targetFolderNodeId = plan.existingTargetFolderNodeId;
+  } else {
+    state.targetFolderNodeId = await createFolderNode(client, {
+      parentNodeId: undefined,
+      slug: plan.targetFolderSlug,
+      name: plan.tree.manifest.name,
+      description: plan.tree.manifest.description,
+      submittedBy: options.submittedBy,
+    });
+    state.created.folders++;
+  }
   await createStructure(
     client,
     plan.tree.nodes,
