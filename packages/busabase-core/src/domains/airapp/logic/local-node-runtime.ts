@@ -127,12 +127,30 @@ export function resolveWorkdir(nodeId: string): string {
   return path.join(baseWorkdir, "airapp-runtime", nodeId, randomUUID());
 }
 
-export async function writeFiles(workdir: string, files: Record<string, string>): Promise<void> {
+/**
+ * Materialize the caller's file set into `workdir`.
+ *
+ * `binaryFiles` arrives base64-encoded (the oRPC input is JSON, which has no
+ * byte type) and is decoded back to raw bytes here. Writing those through the
+ * text path instead would silently corrupt every image/font: `fs.writeFile`
+ * with `"utf-8"` re-encodes lone bytes ≥ 0x80 as U+FFFD, so the file lands on
+ * disk the right *name* and the wrong *contents*.
+ */
+export async function writeFiles(
+  workdir: string,
+  files: Record<string, string>,
+  binaryFiles: Record<string, string> = {},
+): Promise<void> {
   await fs.mkdir(workdir, { recursive: true });
   for (const [filePath, content] of Object.entries(files)) {
     const target = path.join(workdir, filePath);
     await fs.mkdir(path.dirname(target), { recursive: true });
     await fs.writeFile(target, content, "utf-8");
+  }
+  for (const [filePath, base64] of Object.entries(binaryFiles)) {
+    const target = path.join(workdir, filePath);
+    await fs.mkdir(path.dirname(target), { recursive: true });
+    await fs.writeFile(target, Buffer.from(base64, "base64"));
   }
 }
 
@@ -267,7 +285,12 @@ async function* runSandboxedCommand(
  * kills the `npm run dev` child process — there is no separate dispose call.
  */
 export async function* runAirAppLocalNode(
-  input: { nodeId: string; files: Record<string, string>; engine: "local-node" | "srt" },
+  input: {
+    nodeId: string;
+    files: Record<string, string>;
+    binaryFiles?: Record<string, string>;
+    engine: "local-node" | "srt";
+  },
   signal?: AbortSignal,
 ): AsyncGenerator<AirAppRuntimeEvent> {
   await assertNodePermission(input.nodeId, "write");
@@ -298,7 +321,7 @@ export async function* runAirAppLocalNode(
   const release = sandboxed ? await acquireSandboxLock() : null;
 
   try {
-    await writeFiles(workdir, input.files);
+    await writeFiles(workdir, input.files, input.binaryFiles);
 
     if (sandboxed) {
       const depCheck = SandboxManager.checkDependencies();

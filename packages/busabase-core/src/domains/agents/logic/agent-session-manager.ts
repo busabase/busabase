@@ -29,10 +29,11 @@ import { buildAgentWorkspaceGuide, resolveBusabaseMcpUrl } from "./agent-workspa
 /**
  * Live ACP sessions.
  *
- * State is in-memory and `globalThis`-scoped because Next's dev-mode lazy
- * per-route compilation can re-evaluate this module independently per importer,
- * which would otherwise mint a second, empty session map. The subscribe route
- * would then never see the session the create route made.
+ * State is in-memory and `globalThis`-scoped, for the same reason the Cloud
+ * edition's tunnel relay does it: Next's dev-mode lazy per-route compilation
+ * can re-evaluate this module independently per importer, which would
+ * otherwise mint a second, empty session map — the subscribe route would
+ * then never see the session the create route made.
  *
  * This map holds only what is *running*. Sessions and their transcripts are
  * persisted alongside it (`agent-session-store.ts`), so a session survives a

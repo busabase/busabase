@@ -21,9 +21,23 @@ export type { AirAppRunnerKind } from "busabase-contract/domains/airapp/contract
  * to inject into a cross-origin WebContainer sandbox until a scoped-key
  * system exists).
  */
+/**
+ * One mounted file's contents: a UTF-8 string for text, or raw bytes for a
+ * binary (asset-backed) file such as an image, font, or sample dataset.
+ *
+ * Binary was skipped entirely in V1, which made an AirApp that shipped its own
+ * images fail in the worst possible way: the file stored fine, the pod booted
+ * fine, and the `<img>` just 404'd against the dev server with nothing logged.
+ * Nodepod itself never had this limit — its public `boot({ files })` option is
+ * typed `Record<string, string | Uint8Array>` and `NodepodFS.writeFile` takes
+ * `string | Uint8Array` — so this is busabase catching up to the runtime, not
+ * working around it.
+ */
+export type AirAppMountedFile = string | Uint8Array;
+
 export interface AirAppRunner {
   /** Write the initial file set into the runner's virtual filesystem. */
-  mount(files: Record<string, string>): Promise<void>;
+  mount(files: Record<string, AirAppMountedFile>): Promise<void>;
   /** Install the project's declared dependencies (e.g. `npm install`). */
   install(): Promise<void>;
   /** Start the dev server (e.g. `npm run dev`). Resolves once the process has

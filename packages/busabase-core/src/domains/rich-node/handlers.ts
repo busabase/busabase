@@ -1,6 +1,7 @@
 import "server-only";
 
 import { ORPCError } from "@orpc/server";
+import type { NodeContentType } from "busabase-contract/contract/node-content-schemas";
 import { updateNodeContentInputSchema } from "busabase-contract/contract/node-content-schemas";
 import {
   DEFAULT_HTML_DOCUMENT,
@@ -205,6 +206,37 @@ const nodeNotFound = (nodeId: string) =>
   new ORPCError("NOT_FOUND", { message: `Node not found: ${nodeId}` });
 
 /**
+ * Bounds the size of any one whiteboard/workflow/html snapshot — same
+ * rationale and same caveat as `DOC_BODY_MAX_BYTES`: every edit is also
+ * duplicated into `commits.payload` forever (no pruning), so this only bounds
+ * the pathological single-huge-document case, not unbounded history growth.
+ *
+ * Measured on the full JSON-serialized `document`, not one field: a
+ * whiteboard's size lives in `elements`/`appState`, a workflow's in
+ * `nodes`/`edges` — there is no single string to check like Doc's `body`.
+ * `html`'s `source` already has a schema-level `.max(500_000)` (characters,
+ * not bytes) in `HtmlDocumentSchema`; this is the outer, byte-accurate bound
+ * that also covers whiteboard/workflow, which have no schema-level cap at all.
+ * Checked in bytes (`Buffer.byteLength`, not JS string `.length`) for the same
+ * multi-byte-undercounting reason as `DOC_BODY_MAX_BYTES`.
+ */
+const RICH_NODE_DOCUMENT_MAX_BYTES = 1_000_000;
+
+const assertRichNodeDocumentSize = (
+  kind: Exclude<NodeContentType, "doc">,
+  document: unknown,
+): void => {
+  const byteLength = Buffer.byteLength(JSON.stringify(document), "utf8");
+  if (byteLength > RICH_NODE_DOCUMENT_MAX_BYTES) {
+    throw new ORPCError("PAYLOAD_TOO_LARGE", {
+      message:
+        `${kind} document is ${byteLength} bytes, exceeding the ` +
+        `${RICH_NODE_DOCUMENT_MAX_BYTES}-byte limit.`,
+    });
+  }
+};
+
+/**
  * `PUT /nodes/{nodeId}/content` handler. Takes over what Doc's
  * `updateDocBody` (direct write, `write`-gated) and `createDocChangeRequest`
  * (review-first, `changeRequest`-gated) used to do as two separate paths —
@@ -262,10 +294,7 @@ export const updateNodeContent = async (
     assertDocBodySize(parsed.content.body);
     fields = { body: parsed.content.body };
   } else {
-    // No size cap yet for whiteboard/workflow/html documents — tracked as a
-    // deliberate follow-up in the spec (same rationale as `DOC_BODY_MAX_BYTES`:
-    // every edit is also duplicated into `commits.payload` forever), not part
-    // of this change.
+    assertRichNodeDocumentSize(parsed.content.kind, parsed.content.document);
     fields = { document: parsed.content.document };
   }
   const operation = CONTENT_OPERATION_BY_KIND[parsed.content.kind];

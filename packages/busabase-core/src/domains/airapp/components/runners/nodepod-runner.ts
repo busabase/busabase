@@ -1,7 +1,7 @@
 import type { Nodepod as NodepodInstance, NodepodProcess, RequestProxy } from "@scelar/nodepod";
 import { type AirAppHostedRuntime, airAppRuntimeEnv } from "../../utils/airapp-runtime-env";
 import { beginPodHeartbeat, ensureRegistered } from "../../utils/nodepod-service-worker";
-import type { AirAppRunner } from "./types";
+import type { AirAppMountedFile, AirAppRunner } from "./types";
 
 /**
  * `AirAppRunner` implementation backed by the `@scelar/nodepod` in-browser
@@ -61,7 +61,10 @@ export class NodepodRunner implements AirAppRunner {
     }
   }
 
-  async mount(files: Record<string, string>): Promise<void> {
+  // `Nodepod.boot({ files })` is typed `Record<string, string | Uint8Array>`
+  // upstream, so binary entries need no encoding hop here — they go straight
+  // into the pod's virtual filesystem as bytes.
+  async mount(files: Record<string, AirAppMountedFile>): Promise<void> {
     const { Nodepod } = await import("@scelar/nodepod");
     // Nodepod's own SW registration lives behind a page-lifetime `swReady`
     // flag on its RequestProxy singleton, so it is skipped entirely if the

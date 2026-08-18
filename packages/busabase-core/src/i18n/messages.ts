@@ -287,6 +287,7 @@ export const coreMessagesEn = {
     activity: "Activity",
     archive: "Archive",
     assets: "Assets",
+    agents: "Agents",
     graph: "Graph View",
     // The sidebar section holding the whole node tree — every node type, not
     // just Bases. Named for the scope it covers ("everything in this space"),
