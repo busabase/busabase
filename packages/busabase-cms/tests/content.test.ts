@@ -74,7 +74,7 @@ const record = (
   id,
   status,
   updatedAt: "2026-07-20T00:00:00.000Z",
-  headCommit: { fields },
+  headCommit: { payload: fields },
 });
 
 const source = (

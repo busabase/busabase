@@ -176,12 +176,12 @@ const normalizeRelationIds = (raw: string | string[] | undefined): string[] => {
 };
 
 const isPublishedRecord = (record: BusabaseCmsRecord): boolean =>
-  record.status === "active" && record.headCommit.fields.status === "published";
+  record.status === "active" && record.headCommit.payload.status === "published";
 
 export const mapPublishedPostRecord = (record: BusabaseCmsRecord): PostVO | null => {
   if (!isPublishedRecord(record)) return null;
 
-  const parsed = postFieldsDTOSchema.safeParse(record.headCommit.fields);
+  const parsed = postFieldsDTOSchema.safeParse(record.headCommit.payload);
   if (!parsed.success) {
     throw new BusabaseCmsError(`Published Busabase Post record ${record.id} is invalid`, {
       cause: parsed.error,
@@ -210,14 +210,14 @@ export const mapPublishedPostRecord = (record: BusabaseCmsRecord): PostVO | null
     seoDescription: optional(fields["seo-description"]),
     schemaVersion: fields["schema-version"],
     updatedAt: fields["updated-at"] ?? record.updatedAt,
-    rawFields: record.headCommit.fields,
+    rawFields: record.headCommit.payload,
   });
 };
 
 export const mapPublishedPageRecord = (record: BusabaseCmsRecord): PageVO | null => {
   if (!isPublishedRecord(record)) return null;
 
-  const parsed = pageFieldsDTOSchema.safeParse(record.headCommit.fields);
+  const parsed = pageFieldsDTOSchema.safeParse(record.headCommit.payload);
   if (!parsed.success) {
     throw new BusabaseCmsError(`Published Busabase Page record ${record.id} is invalid`, {
       cause: parsed.error,
@@ -243,7 +243,7 @@ export const mapPublishedPageRecord = (record: BusabaseCmsRecord): PageVO | null
     seoDescription: optional(fields["seo-description"]),
     schemaVersion: fields["schema-version"],
     updatedAt: fields["updated-at"] ?? record.updatedAt,
-    rawFields: record.headCommit.fields,
+    rawFields: record.headCommit.payload,
   });
 };
 
@@ -253,7 +253,7 @@ const mapTaxonomyRecord = (
 ): CategoryVO | TagVO | null => {
   if (record.status !== "active") return null;
   const schema = kind === "Category" ? categoryFieldsDTOSchema : tagFieldsDTOSchema;
-  const parsed = schema.safeParse(record.headCommit.fields);
+  const parsed = schema.safeParse(record.headCommit.payload);
   if (!parsed.success) {
     throw new BusabaseCmsError(`Active Busabase ${kind} record ${record.id} is invalid`, {
       cause: parsed.error,
@@ -267,7 +267,7 @@ const mapTaxonomyRecord = (
     locale: fields.locale,
     description: optional(fields.description),
     updatedAt: fields["updated-at"] ?? record.updatedAt,
-    rawFields: record.headCommit.fields,
+    rawFields: record.headCommit.payload,
   };
   return kind === "Category" ? categoryVOSchema.parse(value) : tagVOSchema.parse(value);
 };

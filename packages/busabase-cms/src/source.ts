@@ -93,7 +93,8 @@ export interface BusabaseCmsRecord {
   status: "active" | "archived";
   updatedAt: string;
   headCommit: {
-    fields: Record<string, unknown>;
+    /** Polymorphic commit payload; for a record commit this is its field values. */
+    payload: Record<string, unknown>;
   };
 }
 
