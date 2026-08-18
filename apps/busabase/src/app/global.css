@@ -88,6 +88,44 @@
   --color-fd-muted: oklch(0.933 0.005 195);
 }
 
+/* Dark counterpart of the cool-cement ground above. Same hue family, chroma
+   kept just as low — this is still black-white-grey, not a tinted dark theme.
+   Card/sidebar sit *above* background in lightness (elevation by lightness,
+   same rule as light mode's `card` lifting off `background`), border sits
+   further above that as a hairline, not a filled panel.
+
+   Contrast checked against this exact palette (WCAG relative-luminance
+   formula): foreground/background 15.4, foreground/card 14.6,
+   muted-foreground/background 5.9 (AA), sidebar-foreground/sidebar 14.0.
+   The `-soft` Cha tokens (merged/review/rejected) were already solved for
+   dark text-on-tint use and need no change here.
+
+   Keep in sync with the Cloud edition's palette — same rule as the
+   light block above. */
+.dark {
+  --background: #101212;
+  --foreground: #e7e9e9;
+  --card: #161818;
+  --card-foreground: #e7e9e9;
+  --popover: #161818;
+  --popover-foreground: #e7e9e9;
+  --primary: #e7e9e9;
+  --primary-foreground: #101212;
+  --secondary: #1e2121;
+  --secondary-foreground: #e7e9e9;
+  --muted: #1e2121;
+  --muted-foreground: #8b9292;
+  --accent: #1e2121;
+  --accent-foreground: #e7e9e9;
+  --border: #2a2f2f;
+  --input: #2a2f2f;
+  --ring: #e7e9e9;
+
+  --color-fd-card: oklch(0.09 0.004 195);
+  --color-fd-border: oklch(0.22 0.005 195);
+  --color-fd-muted: oklch(0.15 0.005 195);
+}
+
 /* Radius is theme-independent, so it stays on plain `:root`.
    Controls read at rounded-md = 2px, containers at rounded-lg = 4px.
    Both kui and openlib derive the scale from this single value:
@@ -112,6 +150,18 @@
   --sidebar-accent-foreground: 177 2.7% 9%;
   --sidebar-border: 177 4.4% 84.7%; /* #D6DADA */
   --sidebar-ring: 177 2.7% 9%; /* was a saturated blue */
+}
+
+/* Dark sidebar — same bare-HSL-triplet requirement as above. */
+.dark {
+  --sidebar: 180 5% 7.8%; /* #131515 */
+  --sidebar-foreground: 180 3.2% 87.8%; /* #DFE1E1 */
+  --sidebar-primary: 180 4.3% 91%; /* #E7E9E9 */
+  --sidebar-primary-foreground: 180 5.9% 6.7%; /* #101212 */
+  --sidebar-accent: 180 4.8% 12.4%; /* #1E2121 */
+  --sidebar-accent-foreground: 180 4.3% 91%;
+  --sidebar-border: 180 5.6% 17.5%; /* #2A2F2F */
+  --sidebar-ring: 180 4.3% 91%;
 }
 
 @layer base {

@@ -171,7 +171,7 @@ export function BusabaseDashboardShell({
           className={currentPath.startsWith("/agents") ? "bg-accent" : undefined}
         >
           <Bot />
-          <span>Agents</span>
+          <span>{coreMessages.nav.agents}</span>
         </DropdownMenuItem>
         {onInstallClick ? (
           <DropdownMenuItem onSelect={onInstallClick}>
