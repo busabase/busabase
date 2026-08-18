@@ -1,39 +1,44 @@
 "use client";
 
+import { useQuery } from "@tanstack/react-query";
 import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";
-import { type HtmlDocument, parseHtmlDocument } from "busabase-contract/domains/rich-node/types";
-import type { NodeVO } from "busabase-contract/types";
+import {
+  DEFAULT_HTML_DOCUMENT,
+  type HtmlDocument,
+} from "busabase-contract/domains/rich-node/types";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "kui/tabs";
 import { CodeXml, Eye, FileCode2 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { useCoreI18n } from "../../../i18n";
+import { NodeDetailSkeleton } from "../../dashboard/components/skeletons";
+import { asNodeDetail } from "../../dashboard/helpers/node-detail";
 import { useReportLoadedNode } from "../../dashboard/hooks/use-report-loaded-node";
 import type { NodeDetailProps } from "../../dashboard/node-detail-registry";
 import {
-  findNode,
   RichNodeNotFound,
   RichNodeShell,
-  useNodeMetadataSave,
+  useNodeContentSave,
   useServerDocumentSync,
 } from "./rich-node-shell";
 
 interface HtmlDetailViewProps {
-  nodes?: NodeVO[];
   orpc: BusabaseQueryUtils;
   slug: string | null;
   onNodeLoaded?: NodeDetailProps["onNodeLoaded"];
 }
 
-export function HtmlDetailView({ nodes, orpc, slug, onNodeLoaded }: HtmlDetailViewProps) {
+export function HtmlDetailView({ orpc, slug, onNodeLoaded }: HtmlDetailViewProps) {
   const messages = useCoreI18n();
-  const node = useMemo(() => findNode(nodes ?? [], "html", slug), [nodes, slug]);
-  useReportLoadedNode(node, onNodeLoaded);
-  const initialDocument = useMemo(
-    () => parseHtmlDocument(node?.metadata.htmlDocument),
-    [node?.metadata.htmlDocument],
-  );
+  const detailQuery = useQuery({
+    ...orpc.nodes.get.queryOptions({ input: { nodeId: slug ?? "", type: "html" } }),
+    enabled: Boolean(slug),
+  });
+  const detail = asNodeDetail(detailQuery.data, "html");
+  useReportLoadedNode(detail?.node, onNodeLoaded);
+  const node = detail?.node ?? null;
+  const initialDocument = detail?.document ?? DEFAULT_HTML_DOCUMENT;
   const [source, setSource] = useState(initialDocument.source);
-  const { error, markDirty, save, status } = useNodeMetadataSave(orpc, node, "htmlDocument");
+  const { error, markDirty, save, status } = useNodeContentSave(orpc, node, "html");
   // `source` is seeded from the server exactly once (the `useState` initializer
   // above), so an edit made elsewhere — another tab, an agent's OpenAPI write —
   // stayed invisible in this textarea until a full page reload.
@@ -45,13 +50,15 @@ export function HtmlDetailView({ nodes, orpc, slug, onNodeLoaded }: HtmlDetailVi
     status,
   });
 
-  if (!node) return <RichNodeNotFound type="HTML" />;
+  if (!detail) {
+    return detailQuery.isLoading ? <NodeDetailSkeleton /> : <RichNodeNotFound type="HTML" />;
+  }
 
   return (
     <RichNodeShell
       error={error}
       icon={CodeXml}
-      node={node}
+      node={detail.node}
       nodeType="html"
       onSave={() => save({ version: 1, source })}
       orpc={orpc}
@@ -87,7 +94,7 @@ export function HtmlDetailView({ nodes, orpc, slug, onNodeLoaded }: HtmlDetailVi
             className="h-full w-full border border-border bg-card"
             sandbox="allow-forms allow-modals allow-scripts"
             srcDoc={source}
-            title={`${node.name} preview`}
+            title={`${detail.node.name} preview`}
           />
         </TabsContent>
       </Tabs>

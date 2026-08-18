@@ -22,7 +22,7 @@ const makeRecord = (id: string, slug: string): RecordVO =>
     createdAt: "2026-01-01T00:00:00.000Z",
     updatedAt: "2026-01-01T00:00:00.000Z",
     base: { slug, name: "My Base", fields: [{ slug: "name", type: "text" }] },
-    headCommit: { fields: { name: `title-${id}` } },
+    headCommit: { payload: { name: `title-${id}` } },
   }) as unknown as RecordVO;
 
 const auditItem = (

@@ -1094,8 +1094,8 @@ async function loadDeals() {
   const { records } = await recordsRes.json();
 
   for (const stage of STAGES) {
-    const items = records.filter((r) => r.headCommit?.fields?.stage === stage.id);
-    const total = items.reduce((sum, r) => sum + (Number(r.headCommit?.fields?.amount) || 0), 0);
+    const items = records.filter((r) => r.headCommit?.payload?.stage === stage.id);
+    const total = items.reduce((sum, r) => sum + (Number(r.headCommit?.payload?.amount) || 0), 0);
 
     const column = document.createElement("div");
     column.className = "column";
@@ -1103,7 +1103,7 @@ async function loadDeals() {
       '<h2>' + stage.label + ' <span class="total">' + money(total) + "</span></h2>";
 
     for (const record of items) {
-      const fields = record.headCommit?.fields ?? {};
+      const fields = record.headCommit?.payload ?? {};
       const item = document.createElement("div");
       item.className = "item";
       item.innerHTML =
@@ -1210,8 +1210,8 @@ async function loadChecklist() {
   const { records } = await recordsRes.json();
 
   for (const status of STATUSES) {
-    const items = records.filter((r) => r.headCommit?.fields?.status === status.id);
-    const overdueCount = items.filter((r) => isOverdue(r.headCommit?.fields ?? {})).length;
+    const items = records.filter((r) => r.headCommit?.payload?.status === status.id);
+    const overdueCount = items.filter((r) => isOverdue(r.headCommit?.payload ?? {})).length;
 
     const column = document.createElement("div");
     column.className = "column";
@@ -1223,7 +1223,7 @@ async function loadChecklist() {
       "</span></h2>";
 
     for (const record of items) {
-      const fields = record.headCommit?.fields ?? {};
+      const fields = record.headCommit?.payload ?? {};
       const item = document.createElement("div");
       item.className = "item" + (isOverdue(fields) ? " overdue" : "");
       item.innerHTML = '<div class="name"></div><div class="meta"></div>';

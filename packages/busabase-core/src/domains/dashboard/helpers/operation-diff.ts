@@ -11,8 +11,8 @@ export interface FieldOrderDiffModel {
 }
 
 export const fieldOrderIds = (operation: OperationVO): string[] =>
-  Array.isArray(operation.headCommit.fields.fieldIds)
-    ? operation.headCommit.fields.fieldIds.filter(
+  Array.isArray(operation.headCommit.payload.fieldIds)
+    ? operation.headCommit.payload.fieldIds.filter(
         (value): value is string => typeof value === "string",
       )
     : [];

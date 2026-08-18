@@ -96,6 +96,14 @@ export class NodepodRunner implements AirAppRunner {
     // is scoped to this instance's id, so events from other AirApp nodes
     // running on the same page resolve to null and are ignored.
     this.proxy = this.nodepod.proxy;
+    // Explicit re-assertion, redundant with the `watermark: false` boot option
+    // above. On @scelar/nodepod 1.9.20 that option alone stopped reliably
+    // suppressing the SW-injected branding badge (confirmed via
+    // tests/e2e/airapp.spec.ts's watermark regression check) — this calls the
+    // same public RequestProxy API nodepod's own boot() should already be
+    // calling, as a defensive backstop against whatever timing changed
+    // upstream. Safe no-op if boot() already got it right.
+    this.proxy.setWatermark(false);
     this.proxyListener = (port: number) => {
       const url = this.nodepod?.port(port);
       if (url) {

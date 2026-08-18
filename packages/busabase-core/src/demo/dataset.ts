@@ -3275,6 +3275,7 @@ export const buildDemoDataset = (
       position: folder.position,
       createdAt: rootCreatedAt,
       updatedAt: rootCreatedAt,
+      explicitVisibility: null,
       baseId: null,
       children: [
         ...bases
@@ -3290,6 +3291,7 @@ export const buildDemoDataset = (
             position: index,
             createdAt: rootCreatedAt,
             updatedAt: rootCreatedAt,
+            explicitVisibility: null,
             baseId: base.id,
             children: [],
           })),
@@ -3304,6 +3306,7 @@ export const buildDemoDataset = (
           position: richNode.position,
           createdAt: rootCreatedAt,
           updatedAt: rootCreatedAt,
+          explicitVisibility: null,
           baseId: null,
           children: [],
         })),
@@ -3318,6 +3321,7 @@ export const buildDemoDataset = (
           position: form.position,
           createdAt: rootCreatedAt,
           updatedAt: rootCreatedAt,
+          explicitVisibility: null,
           baseId: null,
           children: [],
         })),
@@ -3341,6 +3345,7 @@ export const buildDemoDataset = (
     position: doc.position ?? index,
     createdAt: rootCreatedAt,
     updatedAt: rootCreatedAt,
+    explicitVisibility: null,
     baseId: null,
     children: [],
   }));
@@ -3356,6 +3361,7 @@ export const buildDemoDataset = (
       position: 21,
       createdAt: rootCreatedAt,
       updatedAt: rootCreatedAt,
+      explicitVisibility: null,
       baseId: null,
       children: docNodes,
     });
@@ -3372,6 +3378,7 @@ export const buildDemoDataset = (
     position: file.position ?? index,
     createdAt: rootCreatedAt,
     updatedAt: rootCreatedAt,
+    explicitVisibility: null,
     baseId: null,
     children: [],
   }));
@@ -3387,6 +3394,7 @@ export const buildDemoDataset = (
       position: 22,
       createdAt: rootCreatedAt,
       updatedAt: rootCreatedAt,
+      explicitVisibility: null,
       baseId: null,
       children: fileNodes,
     });
@@ -3443,6 +3451,7 @@ export const buildDemoDataset = (
         position: def.position,
         createdAt: rootCreatedAt,
         updatedAt: rootCreatedAt,
+        explicitVisibility: null,
         baseId: null,
         children: [],
       }));
@@ -3458,6 +3467,7 @@ export const buildDemoDataset = (
         position: config.position,
         createdAt: rootCreatedAt,
         updatedAt: rootCreatedAt,
+        explicitVisibility: null,
         baseId: null,
         children,
       });
@@ -3475,6 +3485,7 @@ export const buildDemoDataset = (
     position: 0,
     createdAt: rootCreatedAt,
     updatedAt: rootCreatedAt,
+    explicitVisibility: null,
     baseId: null,
     children: folderNodes,
   });
@@ -3486,7 +3497,7 @@ export const buildDemoDataset = (
     nodeId: null,
     operationId: null,
     parentCommitId: null,
-    fields: buildRecordSeedFields(record, iso(anchor, record.minutesAgo)),
+    payload: buildRecordSeedFields(record, iso(anchor, record.minutesAgo)),
     operation: "record_create",
     message: record.message,
     author: record.author,
@@ -3560,7 +3571,7 @@ export const buildDemoDataset = (
           nodeId: null,
           operationId: op.id,
           parentCommitId: op.baseCommitId ?? op.sourceCommitId ?? null,
-          fields: op.fields,
+          payload: op.fields,
           operation: op.operation,
           message: op.message,
           author: op.author,
@@ -3646,7 +3657,7 @@ export const buildDemoDataset = (
         nodeId: doc.nodeId,
         operationId: cr.operationId,
         parentCommitId: null,
-        fields: { body: cr.nextBody },
+        payload: { body: cr.nextBody },
         operation: "doc_update",
         message: cr.message,
         author: cr.submittedBy,
@@ -3657,6 +3668,7 @@ export const buildDemoDataset = (
     return [
       {
         id: cr.id,
+        explicitVisibility: null,
         baseId: null,
         targetType: "node" as const,
         nodeId: doc.nodeId,

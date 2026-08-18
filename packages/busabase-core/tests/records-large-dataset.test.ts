@@ -186,7 +186,7 @@ describe("records — large dataset read paths", () => {
     expect(page.total).toBe(APPROVED_COUNT);
     expect(page.records).toHaveLength(50);
     for (const record of page.records) {
-      expect(record.headCommit.fields.status).toBe("approved");
+      expect(record.headCommit.payload.status).toBe("approved");
     }
   });
 
@@ -201,7 +201,7 @@ describe("records — large dataset read paths", () => {
         pageSize: 50,
       });
       for (const record of result.records) {
-        expect(record.headCommit.fields.status).toBe("approved");
+        expect(record.headCommit.payload.status).toBe("approved");
         expect(seen.has(record.id)).toBe(false);
         seen.add(record.id);
       }
@@ -217,7 +217,7 @@ describe("records — large dataset read paths", () => {
       pageSize: 50,
     });
     expect(first.total).toBe(RECORD_COUNT);
-    const scores = first.records.map((record) => Number(record.headCommit.fields.score));
+    const scores = first.records.map((record) => Number(record.headCommit.payload.score));
     expect(scores).toEqual([...scores].sort((a, b) => a - b));
     // Ascending by score means the page-1 rows are the globally smallest, which
     // is only true if the sort ran over the whole Base before the page was cut.
@@ -229,7 +229,7 @@ describe("records — large dataset read paths", () => {
       page: 2,
       pageSize: 50,
     });
-    const secondScores = second.records.map((record) => Number(record.headCommit.fields.score));
+    const secondScores = second.records.map((record) => Number(record.headCommit.payload.score));
     expect(Math.min(...secondScores)).toBeGreaterThan(Math.max(...scores));
   });
 
@@ -242,7 +242,7 @@ describe("records — large dataset read paths", () => {
     });
     expect(page.total).toBe(20);
     const revenues = page.records.map((record) =>
-      Number(record.headCommit.fields.company_revenue ?? 0),
+      Number(record.headCommit.payload.company_revenue ?? 0),
     );
     expect(revenues).toEqual([...revenues].sort((a, b) => b - a));
     expect(revenues[0]).toBeGreaterThan(revenues[revenues.length - 1]);
@@ -254,7 +254,7 @@ describe("records — large dataset read paths", () => {
       limit: 50,
       sort: { fieldSlug: "score", fieldType: "number", direction: "asc" },
     } as never);
-    const scores = page.records.map((record) => Number(record.headCommit.fields.score));
+    const scores = page.records.map((record) => Number(record.headCommit.payload.score));
     expect(scores).toHaveLength(50);
     expect(scores).toEqual([...scores].sort((a, b) => a - b));
     expect(Math.max(...scores)).toBeLessThanOrEqual(50);

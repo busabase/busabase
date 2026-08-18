@@ -112,6 +112,11 @@ describe("Busabase OpenAPI record get route", () => {
     // listing stays, since "keep scrolling" and "jump to page 30 of 45" are
     // different jobs and the inbox needs both.
     // Anonymous form submit endpoint added (+1 -> 97).
-    expect(operationCount).toBe(97);
+    // Unified node content write: `PUT /docs/{nodeId}/body` and
+    // `POST /docs/{nodeId}/change-requests` retired, replaced by ONE
+    // `PUT /nodes/{nodeId}/content` that also gives whiteboard/workflow/html
+    // their first reviewed write (-2 +1 -> 96). See
+    // apps/busabase/content/spec/node-content-storage.md (D3).
+    expect(operationCount).toBe(96);
   });
 });

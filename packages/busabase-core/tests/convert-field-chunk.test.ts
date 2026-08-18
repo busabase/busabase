@@ -65,7 +65,7 @@ describe("mergeBaseConvertField — text → select auto_create at scale", () =>
     // Capture each record's ORIGINAL tag label before the conversion.
     const page = await client.records.list({ baseId, limit: 100 });
     for (const record of page.records) {
-      const tag = record.headCommit.fields.tag;
+      const tag = record.headCommit.payload.tag;
       if (typeof tag === "string" && tag) labelByRecordId.set(record.id, tag);
     }
   });
@@ -111,10 +111,10 @@ describe("mergeBaseConvertField — text → select auto_create at scale", () =>
     for (const record of page.records) {
       const originalLabel = labelByRecordId.get(record.id);
       if (originalLabel) {
-        expect(record.headCommit.fields.tag).toBe(choiceIdByName.get(originalLabel));
+        expect(record.headCommit.payload.tag).toBe(choiceIdByName.get(originalLabel));
         checkedLabelled++;
       } else {
-        expect(record.headCommit.fields.tag ?? null).toBeNull();
+        expect(record.headCommit.payload.tag ?? null).toBeNull();
         checkedNull++;
       }
     }

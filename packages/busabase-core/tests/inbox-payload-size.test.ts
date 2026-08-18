@@ -89,7 +89,7 @@ describe("inbox list payload size", () => {
     const page = await client.changeRequests.list({ limit: ROWS } as never);
     const row = page.changeRequests.find((cr) => cr.baseId === baseId);
     if (!row) throw new Error("seeded row not found");
-    const fields = row.operations[0]?.headCommit.fields ?? {};
+    const fields = row.operations[0]?.headCommit.payload ?? {};
 
     // The small field is untouched — list rows render this.
     expect(String(fields.name)).toMatch(/^Row \d+$/);
@@ -106,7 +106,7 @@ describe("inbox list payload size", () => {
     if (!row) throw new Error("seeded row not found");
 
     const detail = await client.changeRequests.get({ changeRequestId: row.id } as never);
-    const body = detail?.operations[0]?.headCommit.fields.body;
+    const body = detail?.operations[0]?.headCommit.payload.body;
     expect(String(body)).toHaveLength(HUGE_FIELD.length);
   }, 120_000);
 });

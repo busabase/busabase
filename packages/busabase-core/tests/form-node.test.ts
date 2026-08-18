@@ -160,7 +160,7 @@ describe("Form-as-Node — submission + access gates", () => {
     const { records: merged } = await client.records.list({});
     expect(merged.length).toBe(before.length + 1);
     expect(
-      merged.some((r) => (r.headCommit.fields as Record<string, unknown>).title === "Hello"),
+      merged.some((r) => (r.headCommit.payload as Record<string, unknown>).title === "Hello"),
     ).toBe(true);
   });
 

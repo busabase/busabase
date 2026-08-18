@@ -33,27 +33,6 @@ export const createDocInputSchema = z.object({
   autoMerge: z.boolean().optional(),
 });
 
-export const updateDocInputSchema = z.object({
-  body: z.string(),
-});
-
-export const createDocChangeRequestInputSchema = z.object({
-  body: z.string(),
-  message: z
-    .string()
-    .optional()
-    .default("Update doc")
-    .describe(
-      'Explanation shown to the human reviewer. Write a conventional-commit style subject — imperative verb + what + why, e.g. "Add rollback steps to the deploy runbook".',
-    ),
-  submittedBy: z.string().optional().default("local-producer"),
-  // A Doc body update is the Doc-domain twin of a record `update`, which has taken
-  // the permission-aware default since #5712 — and this node type already has a
-  // direct-write bypass (`PUT /docs/{nodeId}/body`), so review-first here was never
-  // an actual guarantee, just a slower path to the same place.
-  autoMerge: z.boolean().optional(),
-});
-
 // Doc domain oRPC routes; composed into the root contract in contract/busabase.ts.
 //
 // `list` and `get` are deliberately absent: `GET /docs` and `GET /docs/{nodeId}`
@@ -61,6 +40,11 @@ export const createDocChangeRequestInputSchema = z.object({
 // `GET /nodes?types=doc` (lightweight summaries — the old list downloaded every
 // Doc body) and read one with `GET /nodes/{nodeId}`, which returns the same
 // `docSchema` payload under `type: "doc"`.
+//
+// `updateBody` and `createChangeRequest` are gone too: both write paths were
+// unified into `PUT /nodes/{nodeId}/content` (`contract/node-content-schemas.ts`)
+// with a server-decided `autoMerge`, alongside whiteboard/workflow/html — see
+// `apps/busabase/content/spec/node-content-storage.md` (D3).
 export const docContract = {
   create: oc
     .route({
@@ -89,24 +73,4 @@ export const docContract = {
     })
     .input(ReadDocLinesInputSchema)
     .output(ReadLinesVOSchema),
-  updateBody: oc
-    .route({
-      method: "PUT",
-      path: "/docs/{nodeId}/body",
-      tags: ["Docs"],
-      summary: "Update Doc body",
-      successDescription: "Updated the Doc body.",
-    })
-    .input(updateDocInputSchema.extend({ nodeId: z.string() }))
-    .output(docSchema),
-  createChangeRequest: oc
-    .route({
-      method: "POST",
-      path: "/docs/{nodeId}/change-requests",
-      tags: ["Docs", "Change Requests"],
-      summary: "Create Doc change request",
-      successDescription: "Created a change request that proposes a new Doc body.",
-    })
-    .input(createDocChangeRequestInputSchema.extend({ nodeId: z.string() }))
-    .output(changeRequestSchema),
 };

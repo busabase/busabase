@@ -399,7 +399,7 @@ same full \`missing\`/\`stale\`/\`unsearchable\` coverage. Same pattern language
 against catastrophic backtracking),
 same \`maxMatches\`/\`contextLines\` semantics — files are scanned first, then Docs, then whatever
 budget remains goes to records, so a low \`maxMatches\` always drops the records tail first, never
-files/Docs. Records are read from the CANONICAL record commit (\`headCommit.fields\`), never the
+files/Docs. Records are read from the CANONICAL record commit (\`headCommit.payload\`), never the
 8000-char-truncated \`search\` projection, so a match can come from deep inside a long
 \`longtext\`/\`markdown\` field that \`search\` would silently miss:
 

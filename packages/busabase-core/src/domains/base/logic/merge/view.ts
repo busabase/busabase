@@ -1,11 +1,12 @@
 import "server-only";
 
 import { ORPCError } from "@orpc/server";
-import type { ViewConfigVO, ViewType } from "busabase-contract/types";
+import type { ViewConfigVO } from "busabase-contract/types";
 import { and, eq, isNull } from "drizzle-orm";
 import { getContextSpaceId, resolveActorId } from "../../../../context";
 import type { CommitPO, OperationPO } from "../../../../db/schema";
 import { busabaseBaseFields, busabaseOperations, busabaseViews } from "../../../../db/schema";
+import { parseCommitPayload } from "../../../../logic/commit-payload-schemas";
 import type { MergeCtx } from "../../../../logic/cr-lifecycle";
 import { CURRENT_USER_ID, id, requireBaseId } from "../../../../logic/kernel";
 import { normalizeViewConfig } from "../../../../logic/vo";
@@ -45,16 +46,7 @@ export const mergeViewCreate = async (ctx: MergeCtx, item: OperationPO, headComm
   const { db, timestamp } = ctx;
   const baseId = requireBaseId(item.baseId, item.operation);
   const viewId = id("viw");
-  const viewFields = headCommit.fields as {
-    config?: ViewConfigVO;
-    description?: string;
-    name?: string;
-    slug?: string;
-    type?: ViewType;
-  };
-  if (!viewFields.name || !viewFields.slug) {
-    throw new Error(`View create commit missing name or slug: ${item.id}`);
-  }
+  const viewFields = parseCommitPayload("view_create", headCommit.payload);
   // TOCTOU guard: createViewChangeRequest's propose-time slug check only sees
   // views that existed at proposal time. Two CRs proposed before either merges
   // can both pass, then race to merge — without this check the second hits the
@@ -103,12 +95,7 @@ export const mergeViewUpdate = async (ctx: MergeCtx, item: OperationPO, headComm
   if (!targetView) {
     throw targetViewNotFound(item.targetViewId);
   }
-  const viewFields = headCommit.fields as {
-    config?: ViewConfigVO;
-    description?: string;
-    name?: string;
-    type?: ViewType;
-  };
+  const viewFields = parseCommitPayload("view_update", headCommit.payload);
   await db
     .update(busabaseViews)
     .set({

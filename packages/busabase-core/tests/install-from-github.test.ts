@@ -270,12 +270,12 @@ describe("install.fromGithub — server-side install (real PGLite + synthetic zi
       client.records.list({ baseId: articles?.id ?? "" }),
     );
     const titles = records
-      .map((record) => record.headCommit?.fields?.title)
+      .map((record) => record.headCommit?.payload?.title)
       .filter(Boolean)
       .sort();
     expect(titles).toEqual(["First post", "Second post"]);
     // Select values survive the round trip through the package format.
-    expect(records.map((record) => record.headCommit?.fields?.status).sort()).toEqual([
+    expect(records.map((record) => record.headCommit?.payload?.status).sort()).toEqual([
       "Draft",
       "Live",
     ]);

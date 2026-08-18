@@ -35,7 +35,7 @@ const makeOperation = (overrides: Partial<OperationVO>): OperationVO => ({
     nodeId: null,
     operationId: "opr_1",
     parentCommitId: null,
-    fields: {},
+    payload: {},
     operation: "node_create",
     message: "Create folder",
     author: "tester",
@@ -73,7 +73,7 @@ describe("change request dashboard helpers", () => {
     const first = makeOperation({
       headCommit: {
         ...makeOperation({}).headCommit,
-        fields: { kind: "create", nodeType: "folder", slug: "crm", name: "CRM" },
+        payload: { kind: "create", nodeType: "folder", slug: "crm", name: "CRM" },
       },
     });
     const second = makeOperation({
@@ -84,7 +84,7 @@ describe("change request dashboard helpers", () => {
         ...makeOperation({}).headCommit,
         id: "cmt_2",
         operationId: "opr_2",
-        fields: { kind: "create", nodeType: "folder", slug: "products", name: "Products" },
+        payload: { kind: "create", nodeType: "folder", slug: "products", name: "Products" },
       },
     });
 

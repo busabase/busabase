@@ -1,48 +1,37 @@
 import "server-only";
 
 import { ORPCError } from "@orpc/server";
-import {
-  createDocChangeRequestInputSchema,
-  createDocInputSchema,
-  updateDocInputSchema,
-} from "busabase-contract/domains/doc/contract";
+import { createDocInputSchema } from "busabase-contract/domains/doc/contract";
 import type { ChangeRequestVO, NodeVO } from "busabase-contract/types";
-import { and, asc, eq, isNull } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { storage } from "openlib/storage";
 import type { z } from "zod";
-import { getContextSpaceId, resolveActorId, withContextSourceMeta } from "../../context";
+import { getContextSpaceId, resolveActorId } from "../../context";
 import { getDb } from "../../db";
-import {
-  busabaseChangeRequests,
-  busabaseCommits,
-  busabaseNodes,
-  busabaseOperations,
-  type CommitPO,
-  type NodePO,
-  type OperationPO,
-} from "../../db/schema";
+import { busabaseNodes, type CommitPO, type NodePO, type OperationPO } from "../../db/schema";
 // Doc handlers consume the kernel substrate one-way (no cycle). Doc is storage-backed,
 // so it owns no DB tables — its body lives in object storage.
+import { parseCommitPayload } from "../../logic/commit-payload-schemas";
 import { CURRENT_USER_ID, id, now, rootNodeIdForSpace } from "../../logic/kernel";
-import { publishChangeRequestPendingReview } from "../../logic/live-events";
 import { type MaterializeArgs, registerMaterializer } from "../../logic/materialize";
 import {
-  assertNodePermission,
   buildNodeVisibilityCondition,
   hasNodePermission,
   initializeNodeAcl,
   shouldAutoMerge,
 } from "../../logic/node-acl";
 import { assertContainerParent } from "../../logic/node-parent";
+import { registerNodeRuntime } from "../../logic/node-runtime";
+import {
+  findActiveNodeByTypeAndSlug,
+  isNodeSlugUniqueViolation,
+  nodeSlugConflict,
+} from "../../logic/node-slug";
 import { ensureReady } from "../../logic/seed";
 import {
-  finalizeChangeRequest,
-  getChangeRequest,
-  insertAuditEvent,
   loadNodesByIds,
   type MergeCtx,
   recordMergedNodeCreate,
-  recordMergedOperation,
   recordPendingNodeCreate,
   toNodeVO,
 } from "../../logic/store";
@@ -76,7 +65,7 @@ export const writeDocBody = async (nodeId: string, body: string) => {
 
 /**
  * A Doc body is written unbounded today, and every edit's full body is also
- * duplicated into `busabase_commits.fields.body` forever (no pruning) — this
+ * duplicated into `busabase_commits.payload.body` forever (no pruning) — this
  * cap only bounds the SIZE of any one snapshot, not the count of them; it
  * doesn't solve unbounded history growth over many edits, only the
  * pathological single-huge-Doc case. ~300,000 bytes comfortably covers
@@ -91,7 +80,10 @@ const DOC_BODY_MAX_BYTES = 300_000;
 const docNotFound = (nodeIdOrSlug: string) =>
   new ORPCError("NOT_FOUND", { message: `Doc not found: ${nodeIdOrSlug}` });
 
-const assertDocBodySize = (body: string): void => {
+// Exported so `domains/rich-node/handlers.ts`'s unified `updateNodeContent`
+// (`PUT /nodes/{nodeId}/content`) can reuse the same cap for the `doc` kind,
+// rather than redefining it — one limit, one comment explaining it.
+export const assertDocBodySize = (body: string): void => {
   const byteLength = Buffer.byteLength(body, "utf8");
   if (byteLength > DOC_BODY_MAX_BYTES) {
     throw new ORPCError("PAYLOAD_TOO_LARGE", {
@@ -273,12 +265,13 @@ export const createDoc = async (
   const db = await getDb();
   const parsed = createDocInputSchema.parse(input);
   assertDocBodySize(parsed.body);
+  const parentNodeId = parsed.parentNodeId ?? rootNodeIdForSpace(getContextSpaceId());
   const existing = await getDocNode(parsed.slug);
   if (existing) {
+    if (existing.parentId !== parentNodeId) throw nodeSlugConflict("doc", parsed.slug);
     return { ...(await toDocVO(existing)), materialized: true as const };
   }
 
-  const parentNodeId = parsed.parentNodeId ?? rootNodeIdForSpace(getContextSpaceId());
   const [parentNodeRow] = await db
     .select()
     .from(busabaseNodes)
@@ -310,17 +303,31 @@ export const createDoc = async (
 
   const nodeId = id("nod");
   const createdAt = now();
-  await db.insert(busabaseNodes).values({
-    id: nodeId,
-    parentId: parentNode.id,
-    type: "doc",
-    slug: parsed.slug,
-    name: parsed.name,
-    description: parsed.description,
-    position: 0,
-    createdAt,
-    updatedAt: createdAt,
-  });
+  try {
+    await db.insert(busabaseNodes).values({
+      id: nodeId,
+      parentId: parentNode.id,
+      type: "doc",
+      slug: parsed.slug,
+      name: parsed.name,
+      description: parsed.description,
+      position: 0,
+      createdAt,
+      updatedAt: createdAt,
+    });
+  } catch (error) {
+    if (isNodeSlugUniqueViolation(error)) {
+      const concurrent = await findActiveNodeByTypeAndSlug(db, {
+        nodeType: "doc",
+        slug: parsed.slug,
+      });
+      if (concurrent?.parentId === parentNode.id) {
+        return { ...(await toDocVO(concurrent)), materialized: true as const };
+      }
+      throw nodeSlugConflict("doc", parsed.slug);
+    }
+    throw error;
+  }
   // No synthesized `# {name}` heading here — the detail page already renders
   // the doc's name as its own page-level <h1>; duplicating it into the body
   // put two identically-named headings on one page (a11y/strict-mode bug).
@@ -394,40 +401,13 @@ export const readDocLines = async (
 // storage to answer "which Docs exist" — the N+1 the unified summary list
 // (`logic/nodes.ts`'s `listNodeSummaries`) exists to remove. `getDoc` below is
 // still the one place a Doc body is hydrated, one Doc at a time.
-
-export const updateDocBody = async (
-  nodeIdOrSlug: string,
-  input: z.input<typeof updateDocInputSchema>,
-): Promise<DocVO> => {
-  await ensureReady();
-  const node = await getDocNode(nodeIdOrSlug);
-  if (!node) {
-    throw docNotFound(nodeIdOrSlug);
-  }
-  await assertNodePermission(node.id, "write");
-  const parsed = updateDocInputSchema.parse(input);
-  assertDocBodySize(parsed.body);
-  await writeDocBody(node.id, parsed.body);
-  // Same reason as `materializeDocNode` / `mergeDocUpdate`: an embedded image's
-  // asset ACL is usage-backed (`assertAssetPermission`), so a body saved through
-  // THIS direct-write path — not just the reviewed change-request path — must
-  // register its usages here too, or an image pasted through this endpoint would
-  // be unreadable the moment anyone but its uploader opened the Doc.
-  await syncDocAssetUsages(node.id, parsed.body);
-  // Record the body edit as an auto-merged doc_update ChangeRequest (audit +
-  // history + rollback), replacing the old bespoke `doc.updated` audit action —
-  // the same doc_update op shape the reviewed `createDocChangeRequest` path uses.
-  await recordMergedOperation({
-    operation: "doc_update",
-    targetType: "node",
-    nodeId: node.id,
-    fields: { body: parsed.body },
-    message: `Update doc ${node.name}`,
-    submittedBy: resolveActorId(CURRENT_USER_ID),
-    sourceMeta: withContextSourceMeta({ subject: "doc", nodeId: node.id }),
-  });
-  return toDocVO(node);
-};
+//
+// `updateDocBody` and `createDocChangeRequest` are gone: both write paths were
+// unified into `domains/rich-node/handlers.ts`'s `updateNodeContent`
+// (`PUT /nodes/{nodeId}/content`), which handles `{ kind: "doc" }` the same
+// way alongside whiteboard/workflow/html — see that file and
+// `apps/busabase/content/spec/node-content-storage.md` (D3). `mergeDocUpdate`
+// below is unaffected: the merge dispatcher still routes `doc_update` there.
 
 // node_create materialization for a Doc node: the node + a seeded body file.
 // `fields.body` carries a review-first `createDoc` call's initial body through
@@ -469,99 +449,9 @@ export const materializeDocNode = async (ctx: MergeCtx, args: MaterializeArgs): 
 };
 
 registerMaterializer("doc", materializeDocNode);
-
-// Doc edits are approval-first like everything in Busabase: a change request carrying a
-// doc_update op whose commit holds the proposed body; merge writes it to storage.
-export const createDocChangeRequest = async (
-  nodeIdOrSlug: string,
-  input: z.input<typeof createDocChangeRequestInputSchema>,
-) => {
-  await ensureReady();
-  const db = await getDb();
-  const node = await getDocNode(nodeIdOrSlug);
-  if (!node) {
-    throw docNotFound(nodeIdOrSlug);
-  }
-  // ChangeRequest-submission gate (node ACL): visibility alone isn't enough
-  // to propose an edit — requires `changeRequest` level on this doc.
-  await assertNodePermission(node.id, "changeRequest");
-  const parsed = createDocChangeRequestInputSchema.parse(input);
-  assertDocBodySize(parsed.body);
-  const changeRequestId = id("crq");
-  const operationId = id("opr");
-  const commitId = id("cmt");
-  const timestamp = now();
-
-  await db.insert(busabaseChangeRequests).values({
-    id: changeRequestId,
-    baseId: null,
-    targetType: "node",
-    nodeId: node.id,
-    status: "in_review",
-    submittedBy: parsed.submittedBy,
-    sourceMeta: withContextSourceMeta({ subject: "doc", nodeId: node.id }),
-    reviewPolicySnapshot: { kind: "single", requiredApprovals: 1 },
-    mergeSummary: {},
-    rejectedReason: null,
-    reviewedAt: null,
-    mergedAt: null,
-    createdAt: timestamp,
-    updatedAt: timestamp,
-  });
-  await db.insert(busabaseCommits).values({
-    id: commitId,
-    baseId: null,
-    targetType: "node",
-    nodeId: node.id,
-    operationId: null,
-    parentCommitId: null,
-    fields: { body: parsed.body },
-    operation: "doc_update",
-    message: parsed.message,
-    author: parsed.submittedBy,
-    createdAt: timestamp,
-  });
-  await db.insert(busabaseOperations).values({
-    id: operationId,
-    changeRequestId,
-    baseId: null,
-    targetType: "node",
-    nodeId: node.id,
-    operation: "doc_update",
-    status: "pending",
-    targetRecordId: null,
-    targetViewId: null,
-    filePath: null,
-    sourceRecordId: null,
-    sourceCommitId: null,
-    baseCommitId: null,
-    headCommitId: commitId,
-    deleteMode: "archive",
-    mergedRecordId: null,
-    mergedViewId: null,
-    position: 0,
-    createdAt: timestamp,
-    updatedAt: timestamp,
-  });
-  await db.update(busabaseCommits).set({ operationId }).where(eq(busabaseCommits.id, commitId));
-
-  await insertAuditEvent(db, {
-    action: "change_request.created",
-    actorId: parsed.submittedBy,
-    baseId: null,
-    changeRequestId,
-    metadata: { operation: "doc_update", nodeId: node.id },
-  });
-  return finalizeChangeRequest({
-    changeRequestId,
-    nodeId: node.id,
-    requestedAutoMerge: parsed.autoMerge,
-    submittedBy: parsed.submittedBy,
-    baseId: null,
-    label: "doc",
-    kind: "structural",
-  });
-};
+registerNodeRuntime("doc", {
+  hydrateDetail: async (node) => ({ type: "doc", ...(await getDoc(node.id)) }),
+});
 
 // node-targeted merge handler for doc_update: write the proposed body to storage.
 export const mergeDocUpdate = async (
@@ -573,7 +463,7 @@ export const mergeDocUpdate = async (
   if (node.type !== "doc") {
     throw new Error(`Invalid doc operation target: ${item.id}`);
   }
-  const fields = headCommit.fields as { body?: string };
+  const fields = parseCommitPayload("doc_update", headCommit.payload);
   const body = fields.body ?? "";
   await writeDocBody(node.id, body);
   // Pass the merge executor so the asset-usage sync runs on the SAME transaction

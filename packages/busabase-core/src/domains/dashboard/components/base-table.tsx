@@ -2111,7 +2111,7 @@ function RecordTableCellContent({
 }: RecordTableCellProps) {
   const messages = useCoreI18n();
   const currentSearch = useSearch();
-  const rawValue = record.headCommit.fields[field.slug];
+  const rawValue = record.headCommit.payload[field.slug];
   const chips = getFieldChipEntries(field, rawValue);
   const kind = fieldDisplayKind(field.type);
 

@@ -17,6 +17,7 @@ import {
   busabaseRecords,
 } from "../../../db/schema";
 import { insertAuditEvent } from "../../../logic/audit";
+import { insertCommit } from "../../../logic/commits";
 import {
   finalizeChangeRequest,
   getChangeRequest,
@@ -36,6 +37,7 @@ import {
   shouldAutoMerge,
 } from "../../../logic/node-acl";
 import { assertContainerParent } from "../../../logic/node-parent";
+import { isNodeSlugUniqueViolation, nodeSlugConflict } from "../../../logic/node-slug";
 import { ensureReady } from "../../../logic/seed";
 import {
   createBaseInputSchema,
@@ -198,12 +200,15 @@ export const createBase = async (input: z.input<typeof createBaseInputSchema>) =
       ),
     })),
   );
-  // Idempotent create only matches an ACTIVE base with this slug. An archived
-  // base no longer owns the slug (both the base and node unique indexes are
-  // partial on archivedAt), so the slug is free for a brand-new base.
+  const parentNodeId = parsed.parentNodeId ?? rootNodeIdForSpace(getContextSpaceId());
+
+  // Idempotent create only applies to the exact same parent/type/slug target.
+  // The slug identity itself is space-wide by type, so finding it under a
+  // different parent is a conflict rather than a retry of that existing Base.
   const [existingActive] = await db
-    .select({ id: busabaseBases.id })
+    .select({ id: busabaseBases.id, parentId: busabaseNodes.parentId })
     .from(busabaseBases)
+    .innerJoin(busabaseNodes, eq(busabaseBases.nodeId, busabaseNodes.id))
     .where(
       and(
         eq(busabaseBases.slug, parsed.slug),
@@ -223,16 +228,13 @@ export const createBase = async (input: z.input<typeof createBaseInputSchema>) =
       // A slug collision with a genuinely different name is a real conflict:
       // silently returning the existing base would discard the caller's
       // submitted name/fields with no signal at all.
-      if (existing.name !== parsed.name) {
-        throw new ORPCError("CONFLICT", {
-          message: `Base slug "${parsed.slug}" is already in use by a different Base ("${existing.name}"). Choose a different slug, or omit "name" differences if you intended to reuse it.`,
-        });
+      if (existingActive.parentId !== parentNodeId || existing.name !== parsed.name) {
+        throw nodeSlugConflict("base", parsed.slug);
       }
       return { ...existing, materialized: true as const };
     }
   }
 
-  const parentNodeId = parsed.parentNodeId ?? rootNodeIdForSpace(getContextSpaceId());
   const [parentNodeRow] = await db
     .select()
     .from(busabaseNodes)
@@ -266,18 +268,25 @@ export const createBase = async (input: z.input<typeof createBaseInputSchema>) =
   const nodeId = id("nod");
   const createdAt = now();
   const spaceId = getContextSpaceId();
-  await db.insert(busabaseNodes).values({
-    id: nodeId,
-    spaceId,
-    parentId: parentNode.id,
-    type: "base",
-    slug: parsed.slug,
-    name: parsed.name,
-    description: parsed.description,
-    position: 0,
-    createdAt,
-    updatedAt: createdAt,
-  });
+  try {
+    await db.insert(busabaseNodes).values({
+      id: nodeId,
+      spaceId,
+      parentId: parentNode.id,
+      type: "base",
+      slug: parsed.slug,
+      name: parsed.name,
+      description: parsed.description,
+      position: 0,
+      createdAt,
+      updatedAt: createdAt,
+    });
+  } catch (error) {
+    if (isNodeSlugUniqueViolation(error)) {
+      throw nodeSlugConflict("base", parsed.slug);
+    }
+    throw error;
+  }
 
   await db.insert(busabaseBases).values({
     id: baseId,
@@ -485,12 +494,12 @@ const createChangeRequestInternal = async (
     throw error;
   }
 
-  await db.insert(busabaseCommits).values({
+  await insertCommit(db, {
     id: commitId,
     baseId: base.id,
     operationId: null,
     parentCommitId: null,
-    fields: parsed.fields,
+    payload: parsed.fields,
     operation: "record_create",
     message: parsed.message,
     author: "producer",
@@ -688,12 +697,12 @@ export const createBulkChangeRequest = async (
   for (const [position, fields] of parsed.records.entries()) {
     const operationId = id("opr");
     const commitId = id("cmt");
-    await db.insert(busabaseCommits).values({
+    await insertCommit(db, {
       id: commitId,
       baseId: base.id,
       operationId: null,
       parentCommitId: null,
-      fields,
+      payload: fields,
       operation: "record_create",
       message: parsed.message,
       author: "producer",
@@ -790,12 +799,12 @@ export const createDeleteChangeRequest = async (
   const operationId = id("opr");
   const commitId = id("cmt");
   const timestamp = now();
-  await db.insert(busabaseCommits).values({
+  await insertCommit(db, {
     id: commitId,
     baseId: record.baseId,
     operationId: null,
     parentCommitId: record.headCommitId,
-    fields: headCommit.fields,
+    payload: headCommit.payload,
     operation: "record_delete",
     message: parsed.message,
     author: "producer",
@@ -843,7 +852,7 @@ export const createDeleteChangeRequest = async (
     commitId,
     changeRequestId,
     operationId,
-    fields: headCommit.fields,
+    fields: headCommit.payload,
   });
   await insertAuditEvent(db, {
     action: "change_request.deleted",
@@ -905,7 +914,7 @@ export const createUpdateChangeRequest = async (
   // stored as the commit's delta (parsed.fields) is untouched by this — only
   // the requiredness CHECK sees the merged fields.
   const [currentCommit] = await db
-    .select({ fields: busabaseCommits.fields })
+    .select({ fields: busabaseCommits.payload })
     .from(busabaseCommits)
     .where(eq(busabaseCommits.id, record.headCommitId))
     .limit(1);
@@ -921,12 +930,12 @@ export const createUpdateChangeRequest = async (
   const commitId = id("cmt");
   const timestamp = now();
 
-  await db.insert(busabaseCommits).values({
+  await insertCommit(db, {
     id: commitId,
     baseId: record.baseId,
     operationId: null,
     parentCommitId: record.headCommitId,
-    fields: parsed.fields,
+    payload: parsed.fields,
     operation: "record_update",
     message: parsed.message,
     author: parsed.author,
@@ -1054,12 +1063,12 @@ export const createRestoreChangeRequest = async (
   const commitId = id("cmt");
   const timestamp = now();
 
-  await db.insert(busabaseCommits).values({
+  await insertCommit(db, {
     id: commitId,
     baseId: record.baseId,
     operationId: null,
     parentCommitId: record.headCommitId,
-    fields: headCommit.fields,
+    payload: headCommit.payload,
     operation: "record_restore",
     message: message ?? "Restore record",
     author: "producer",
@@ -1144,12 +1153,12 @@ export const createArchiveBaseChangeRequest = async (
   const timestamp = now();
   const fields = { baseId: base.id, slug: base.slug };
 
-  await db.insert(busabaseCommits).values({
+  await insertCommit(db, {
     id: commitId,
     baseId: base.id,
     operationId: null,
     parentCommitId: null,
-    fields,
+    payload: fields,
     operation: "base_archive",
     message: message ?? "Archive base",
     author: submittedBy,
@@ -1265,12 +1274,12 @@ export const createRestoreBaseChangeRequest = async (
   const timestamp = now();
   const fields = { baseId: baseRow.id, slug: baseRow.slug };
 
-  await db.insert(busabaseCommits).values({
+  await insertCommit(db, {
     id: commitId,
     baseId: baseRow.id,
     operationId: null,
     parentCommitId: null,
-    fields,
+    payload: fields,
     operation: "base_restore",
     message: message ?? "Restore base",
     author: submittedBy,

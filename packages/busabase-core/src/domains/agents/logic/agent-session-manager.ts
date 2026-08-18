@@ -5,25 +5,39 @@ import { join } from "node:path";
 import { Readable, Writable } from "node:stream";
 import * as acp from "@agentclientprotocol/sdk";
 import { createWebSocketStream } from "@agentclientprotocol/sdk/experimental/ws-client";
+import {
+  type ApiKeyPermissionLevel,
+  BUSABASE_RELAY_PERMISSION_LEVEL_HEADER,
+} from "busabase-contract/access-control/api-key-level";
 import type {
   AgentSessionEventVO,
   AgentSessionStatus,
   AgentSessionVO,
 } from "busabase-contract/domains/agents/types";
 import WebSocket from "ws";
+import { collapseForPersistence } from "../utils/session-updates";
 import { type ResolvedLaunch, resolveLaunch } from "./agent-catalog";
+import {
+  loadSessionEvents,
+  loadSessions,
+  persistSessionCreated,
+  persistSessionEvents,
+  persistSessionState,
+} from "./agent-session-store";
+import { buildAgentWorkspaceGuide, resolveBusabaseMcpUrl } from "./agent-workspace-guide";
 
 /**
  * Live ACP sessions.
  *
- * State is in-memory and `globalThis`-scoped, for the same reason
- * `apps/busabase-cloud/src/domains/tunnel/logic/tunnel-relay.ts` does it: Next's
- * dev-mode lazy per-route compilation can re-evaluate this module independently
- * per importer, which would otherwise mint a second, empty session map — the
- * subscribe route would then never see the session the create route made.
+ * State is in-memory and `globalThis`-scoped because Next's dev-mode lazy
+ * per-route compilation can re-evaluate this module independently per importer,
+ * which would otherwise mint a second, empty session map. The subscribe route
+ * would then never see the session the create route made.
  *
- * Sessions deliberately do not survive a restart yet; persistence
- * (`agent_sessions` / `agent_session_events`) is a later phase.
+ * This map holds only what is *running*. Sessions and their transcripts are
+ * persisted alongside it (`agent-session-store.ts`), so a session survives a
+ * restart as history — but never as a live agent, because the child process
+ * does not. Reads merge the two, with the live copy winning where both exist.
  */
 
 const MAX_BUFFERED_EVENTS = 500;
@@ -46,6 +60,8 @@ interface LiveSession {
   cancel: () => Promise<void>;
   close: () => void;
   seq: number;
+  /** Highest `seq` already written to the database; everything above is pending. */
+  persistedSeq: number;
   buffer: AgentSessionEventVO[];
   listeners: Set<(event: AgentSessionEventVO) => void>;
   /**
@@ -94,6 +110,26 @@ function setStatus(session: LiveSession, status: AgentSessionStatus, message?: s
   session.status = status;
   if (status === "failed") session.error = message ?? session.error;
   emit(session, { kind: "status", status, message });
+  void persistSessionState(toVO(session), session.acpSessionId);
+  // A turn ending is the coalescing boundary: chunks that streamed at token
+  // granularity are now a settled message, so this is the moment to write them
+  // (schema note on `agent_session_events`). Persisting per `emit()` instead
+  // would be one INSERT per token.
+  if (status !== "busy") void flushPendingEvents(session);
+}
+
+/**
+ * Write everything buffered since the last flush, once, as a single insert.
+ *
+ * Collapsing happens here rather than at read time so the stored transcript is
+ * the same shape the UI renders — a reader of this table should not have to
+ * know that a sentence arrived as forty rows.
+ */
+async function flushPendingEvents(session: LiveSession): Promise<void> {
+  const pending = session.buffer.filter((event) => event.seq > session.persistedSeq);
+  if (pending.length === 0) return;
+  session.persistedSeq = pending[pending.length - 1]?.seq ?? session.persistedSeq;
+  await persistSessionEvents(collapseForPersistence(pending));
 }
 
 /**
@@ -144,11 +180,16 @@ async function seedClaudeSettings(dir: string): Promise<void> {
  * filesystem workspace, so we allocate a stable per-space scratch directory —
  * stable because a per-connect temp dir would silently break agent-side resume.
  * See spec §6.5.
+ *
+ * Rewritten on every connect rather than written once: the guide's wording is
+ * ours and changes with the product, so a workspace created by an older build
+ * must not keep serving stale orientation to a newer agent.
  */
 async function ensureWorkspace(spaceId: string): Promise<string> {
   const dir = join(homedir(), ".busabase", "agent-workspaces", spaceId || "default");
   await mkdir(dir, { recursive: true });
   await seedClaudeSettings(dir);
+  await writeFile(join(dir, "CLAUDE.md"), buildAgentWorkspaceGuide(spaceId || "default"));
   return dir;
 }
 
@@ -180,6 +221,7 @@ export async function createAgentSession({
     cancel: async () => {},
     close: () => {},
     seq: 0,
+    persistedSeq: 0,
     buffer: [],
     listeners: new Set(),
     pendingPermission: null,
@@ -264,17 +306,76 @@ export async function createAgentSession({
 
     const connectPromise = app
       .connectWith(stream, async (ctx) => {
-        await ctx.request(acp.methods.agent.initialize, {
+        const initialized = await ctx.request(acp.methods.agent.initialize, {
           protocolVersion: acp.PROTOCOL_VERSION,
           // We serve no filesystem: agents use their own disk, and v2 removes
           // this surface entirely. Declaring false keeps them from asking.
           clientCapabilities: {},
         });
 
+        // Busabase's own MCP endpoint is what makes the agent useful at all —
+        // without it the agent sits in an empty scratch directory (§6.5) with no
+        // route to the user's data, which is the state Phase 1 shipped in.
+        //
+        // Negotiated, not assumed: `mcpCapabilities.http` is optional in ACP and
+        // agents genuinely differ. Sending an HTTP MCP server to an agent that
+        // only speaks stdio-MCP is not harmlessly ignored — it is a malformed
+        // session for that agent — so an agent that does not advertise `http`
+        // gets no server and the user gets a visible note explaining why its
+        // Busabase tools are missing, rather than an agent that silently cannot
+        // see their data.
+        const supportsHttpMcp = initialized.agentCapabilities?.mcpCapabilities?.http === true;
+        const mcpServers: acp.McpServer[] = supportsHttpMcp
+          ? [
+              {
+                type: "http",
+                name: "busabase",
+                url: resolveBusabaseMcpUrl(),
+                headers: [
+                  {
+                    // Cap the agent at proposing, not writing. Without this the
+                    // agent inherits the local host's owner rights and its
+                    // writes materialise straight into canonical data — which
+                    // is the opposite of the product's whole premise, and was
+                    // the state the MCP injection first shipped in.
+                    //
+                    // This is the *same* ceiling header the Local↔Cloud Tunnel
+                    // already forwards for a Cloud-issued API key
+                    // (`resolveRelayPermissionContext`), reused rather than
+                    // reinvented: `/api/v1` reads it, `node-acl.ts` enforces
+                    // it. It can only ever lower access — sending `manage`
+                    // would gain nothing an unauthenticated local caller does
+                    // not already have — so it needs no token to be minted or
+                    // verified.
+                    //
+                    // It is a guard rail, NOT a security boundary: the agent is
+                    // a child process on the user's own machine and can reach
+                    // the same loopback API directly. It stops an over-eager
+                    // agent (the threat `api-key-level.ts` was written for),
+                    // not a hostile one — that distinction is real and is why
+                    // this is worth doing anyway.
+                    name: BUSABASE_RELAY_PERMISSION_LEVEL_HEADER,
+                    value: "changeRequest" satisfies ApiKeyPermissionLevel,
+                  },
+                ],
+              },
+            ]
+          : [];
+
         const created = await ctx.request(acp.methods.agent.session.new, {
           cwd: workspace,
-          mcpServers: [],
+          mcpServers,
         });
+
+        if (!supportsHttpMcp) {
+          emit(session, {
+            kind: "acpUpdate",
+            acpUpdate: {
+              sessionUpdate: "note",
+              text: `${launch.name} does not support HTTP MCP servers, so it has no access to this workspace's data. It can still answer general questions.`,
+            },
+          });
+        }
         session.acpSessionId = created.sessionId;
         setStatus(session, "idle");
 
@@ -316,6 +417,7 @@ export async function createAgentSession({
     setStatus(session, "failed", error instanceof Error ? error.message : String(error));
   });
 
+  await persistSessionCreated(toVO(session));
   return toVO(session);
 }
 
@@ -338,8 +440,26 @@ function requireSession(sessionId: string): LiveSession {
   return s;
 }
 
-export const listAgentSessions = (): AgentSessionVO[] =>
-  [...sessions().values()].map(toVO).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+/**
+ * Every session for this space, live or historical.
+ *
+ * Persisted rows are the base list — that is what makes a session survive a
+ * restart — but a live session's in-memory state wins where both exist: status
+ * changes several times a turn and the row is written asynchronously, so the
+ * database can legitimately be a moment behind the process actually running
+ * the agent.
+ */
+export async function listAgentSessions(): Promise<AgentSessionVO[]> {
+  const stored = await loadSessions();
+  const live = new Map([...sessions().values()].map((s) => [s.id, toVO(s)]));
+  const merged = stored.map((row) => live.get(row.id) ?? row);
+  // A session created before its INSERT landed (or when there is no db at all)
+  // exists only in memory; it must still appear.
+  for (const [id, vo] of live) {
+    if (!merged.some((s) => s.id === id)) merged.push(vo);
+  }
+  return merged.sort((a, b) => b.lastActivityAt.localeCompare(a.lastActivityAt));
+}
 
 export async function promptAgentSession(sessionId: string, text: string): Promise<void> {
   const s = requireSession(sessionId);
@@ -401,7 +521,17 @@ export async function* subscribeAgentSession(
   afterSeq: number,
   signal?: AbortSignal,
 ): AsyncGenerator<AgentSessionEventVO> {
-  const s = requireSession(sessionId);
+  const s = sessions().get(sessionId);
+  if (!s) {
+    // No live process — either this session ended before a restart, or another
+    // process owns it. Replay the stored transcript and stop, rather than
+    // failing the way an unknown id used to: a session the user can still see
+    // in the list must be readable, not an error.
+    for (const event of await loadSessionEvents(sessionId, afterSeq)) {
+      yield event;
+    }
+    return;
+  }
   const queue: AgentSessionEventVO[] = s.buffer.filter((e) => e.seq > afterSeq);
   let notify: (() => void) | undefined;
   const listener = (event: AgentSessionEventVO) => {

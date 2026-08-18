@@ -17,11 +17,20 @@
  * Deliberately narrow. Two conditions are rejected, and both are absolute rather than stylistic:
  *
  *   1. No `dev` script — the runner has nothing to invoke.
- *   2. A `dev` script that starts a bundler dev server — Vite cannot boot under Nodepod at all
- *      (`Cannot destructure property 'createServer' of '(intermediate value)'`, reproducible
- *      even with cross-origin isolation enabled; recorded in `domains/airapp/handlers.ts`). So
- *      renaming a Vite scaffold's script to `dev` is NOT a fix, and accepting it would only
- *      move the failure one step later.
+ *   2. A `dev` script that starts a bundler dev server that cannot boot in this runtime. Most
+ *      bundler versions genuinely cannot: unpinned/old Vite (5.x/6.x) throws
+ *      `Cannot destructure property 'createServer' of '(intermediate value)'` out of its
+ *      esbuild WASM init, and Vite 8's default rolldown bundler ships a native `.node`-class
+ *      WASM binding Nodepod's browser-emulated npm cannot resolve
+ *      (`Cannot find native binding`) — reproduced live against Nodepod 1.9.20 via its own
+ *      `examples/vite-dev-exit-1` and `examples/issue-44-react-dev-server` regression pages,
+ *      both with and without cross-origin isolation. So renaming a Vite scaffold's script to
+ *      `dev` is NOT a fix for those versions, and accepting them would only move the failure
+ *      one step later. `vite@7.3.1` is the one pin that is NOT theoretical: the same
+ *      `issue-44-react-dev-server` page's "known good" button, run against the current
+ *      published `@scelar/nodepod`, real-boots it — `onServerReady` fires and the dev server
+ *      answers 200 through the SW proxy — so that exact pin (see
+ *      `KNOWN_RUNNABLE_BUNDLER_VERSIONS` below) is let through instead of blocked on faith.
  *
  * Native-binary dependencies (esbuild, `@swc/core`, sharp, sqlite3) also cannot load in this
  * runtime, but they are NOT rejected here: any package may ship a binary transitively, so a
@@ -55,6 +64,19 @@ const BUNDLER_COMMANDS = [
   "astro",
   "remix",
 ] as const;
+
+/**
+ * Exact bundler `devDependencies`/`dependencies` pins verified to actually boot a reachable dev
+ * server inside Nodepod — real `onServerReady` + a real 200 through the SW proxy, not just a
+ * clean process exit (an earlier check here on the process exit code alone was a false
+ * positive: the process can exit 0 after an *unhandled rejection* crashed the dev server before
+ * it ever bound a port). Only `vite@7.3.1` is verified today. Extend this only after reproducing
+ * the same real-boot evidence for the new pin — a version number added on faith defeats the
+ * point of this allowlist.
+ */
+const KNOWN_RUNNABLE_BUNDLER_VERSIONS: Readonly<Record<string, readonly string[]>> = {
+  vite: ["7.3.1"],
+};
 
 /** Normalises `./node_modules/.bin/vite`, `npx vite`, `vite build && vite` to bare tokens. */
 const commandTokens = (script: string): string[] =>
@@ -112,9 +134,13 @@ export const assertAirAppRunnable = (
   const entry = entries.find((candidate) => candidate.path === PACKAGE_JSON);
   if (!entry || typeof entry.content !== "string") return;
 
-  let parsed: { scripts?: Record<string, unknown> };
+  let parsed: {
+    scripts?: Record<string, unknown>;
+    dependencies?: Record<string, unknown>;
+    devDependencies?: Record<string, unknown>;
+  };
   try {
-    parsed = JSON.parse(entry.content) as { scripts?: Record<string, unknown> };
+    parsed = JSON.parse(entry.content) as typeof parsed;
   } catch {
     reject("its `package.json` is not valid JSON.", "Fix the JSON syntax, then retry.");
     return;
@@ -131,9 +157,23 @@ export const assertAirAppRunnable = (
 
   const bundler = detectBundler(dev);
   if (bundler) {
+    const runnablePins = KNOWN_RUNNABLE_BUNDLER_VERSIONS[bundler];
+    const pinnedVersion = parsed.devDependencies?.[bundler] ?? parsed.dependencies?.[bundler];
+    if (runnablePins && typeof pinnedVersion === "string" && runnablePins.includes(pinnedVersion)) {
+      return;
+    }
     reject(
-      `its \`dev\` script starts \`${bundler}\`, a bundler dev server that cannot boot in the AirApp runtime.`,
-      'Serve the app from a plain Node server instead — `"dev": "node server.js"` with Hono or `node:http`, and browser files that need no build step.',
+      `its \`dev\` script starts \`${bundler}\`, a bundler dev server that cannot boot in the AirApp runtime` +
+        (runnablePins
+          ? ` unless pinned to exactly ${runnablePins.map((v) => `${bundler}@${v}`).join(" or ")} (found ${
+              typeof pinnedVersion === "string"
+                ? `${bundler}@${pinnedVersion}`
+                : "no pinned version"
+            }).`
+          : "."),
+      runnablePins
+        ? `Pin \`"${bundler}": "${runnablePins[0]}"\` in devDependencies, or serve the app from a plain Node server instead — \`"dev": "node server.js"\` with Hono or \`node:http\`.`
+        : 'Serve the app from a plain Node server instead — `"dev": "node server.js"` with Hono or `node:http`, and browser files that need no build step.',
     );
   }
 };

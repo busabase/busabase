@@ -23,19 +23,50 @@ import { FileNodeVOSchema } from "../domains/file-node/types";
 import { fileTreeNodeSchema } from "../domains/filetree/contract";
 import { folderSchema } from "../domains/folder/contract";
 import { NODE_TYPES, type NodeType } from "../domains/registry";
+import {
+  HtmlDocumentSchema,
+  WhiteboardDocumentSchema,
+  WorkflowDocumentSchema,
+} from "../domains/rich-node/types";
 import { nodeSchema } from "./schemas";
 
 /**
  * The fallback shape for a registered node type that has no richer typed detail
- * of its own yet (`base`, `form`, `whiteboard`, `workflow`, `html`). Returning
- * the plain node row is strictly additive — none of these had a typed get
- * before — and keeps the union exhaustive so the server can never be asked for
- * a type it cannot answer.
+ * of its own yet (`base`, `form`). Returning the plain node row is strictly
+ * additive — neither had a typed get before — and keeps the union exhaustive
+ * so the server can never be asked for a type it cannot answer.
  */
 const genericNodeDetailSchema = <T extends NodeType>(type: T) =>
   z.object({
     type: z.literal(type),
     node: nodeSchema,
+  });
+
+/**
+ * whiteboard/workflow/html now carry their document explicitly: it moved out
+ * of `node.metadata` into object storage (spec D2's `busabase/nodes/{id}/...`
+ * paths), so a bare `{ node }` detail would leave the client with no way to
+ * read the content at all. Each variant's `document` field is the SAME zod
+ * schema `PUT /nodes/{nodeId}/content` accepts for that kind
+ * (`contract/node-content-schemas.ts`) — read and write agree on shape.
+ *
+ * `documentSchema` is typed `z.ZodType<TDocument>` (a generic, not the untyped
+ * `z.ZodTypeAny`) so the inferred `document` field carries the CALLER's
+ * specific schema output (`WhiteboardDocument`/`WorkflowDocument`/
+ * `HtmlDocument`), not `unknown`. `ZodTypeAny` looks equivalent but is not —
+ * it is deliberately unconstrained so it can accept z.object/z.string/etc as a
+ * PARAMETER type, at the cost of erasing the caller's specific output type in
+ * the RETURN type. A client reading `detail.document` needs that output type
+ * back, so every caller of this file must narrow with `TDocument`.
+ */
+const richNodeDetailSchema = <T extends "whiteboard" | "workflow" | "html", TDocument>(
+  type: T,
+  documentSchema: z.ZodType<TDocument>,
+) =>
+  z.object({
+    type: z.literal(type),
+    node: nodeSchema,
+    document: documentSchema,
   });
 
 /**
@@ -60,9 +91,9 @@ export const NODE_DETAIL_VARIANTS = {
   airapp: fileTreeNodeSchema.extend({ type: z.literal("airapp") }),
   base: genericNodeDetailSchema("base"),
   form: genericNodeDetailSchema("form"),
-  whiteboard: genericNodeDetailSchema("whiteboard"),
-  workflow: genericNodeDetailSchema("workflow"),
-  html: genericNodeDetailSchema("html"),
+  whiteboard: richNodeDetailSchema("whiteboard", WhiteboardDocumentSchema),
+  workflow: richNodeDetailSchema("workflow", WorkflowDocumentSchema),
+  html: richNodeDetailSchema("html", HtmlDocumentSchema),
 } satisfies Record<NodeType, unknown>;
 
 export const NodeDetailVOSchema = z.discriminatedUnion("type", [

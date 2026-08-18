@@ -162,10 +162,10 @@ export const resolveLookupValues = async (
     headCommitIds.length === 0
       ? []
       : await db
-          .select({ id: busabaseCommits.id, fields: busabaseCommits.fields })
+          .select({ id: busabaseCommits.id, payload: busabaseCommits.payload })
           .from(busabaseCommits)
           .where(inArray(busabaseCommits.id, headCommitIds));
-  const fieldsByCommitId = new Map(commits.map((commit) => [commit.id, commit.fields]));
+  const fieldsByCommitId = new Map(commits.map((commit) => [commit.id, commit.payload]));
   const fieldsByRecordId = new Map(
     targetRecords.map((record) => [record.id, fieldsByCommitId.get(record.headCommitId) ?? {}]),
   );

@@ -107,8 +107,8 @@ describe("Staleness-aware 3-way merge — oRPC", () => {
     // A is now stale, but it only touched `body` → clean auto-merge.
     const merged = await approveAndMerge(bodyCr.id);
 
-    expect(merged.record?.headCommit.fields.title).toBe("new title from C");
-    expect(merged.record?.headCommit.fields.body).toBe("new body from A");
+    expect(merged.record?.headCommit.payload.title).toBe("new title from C");
+    expect(merged.record?.headCommit.payload.body).toBe("new body from A");
   });
 
   it("blocks the merge when the same field changed on both sides", async () => {
@@ -165,7 +165,7 @@ describe("Staleness-aware 3-way merge — oRPC", () => {
     await approveAndMerge(deleteHeroCr.id);
 
     const merged = await approveAndMerge(recordCr.id);
-    expect(merged.record?.headCommit.fields).toEqual({
+    expect(merged.record?.headCommit.payload).toEqual({
       title: "Created before the schema changed",
     });
   });

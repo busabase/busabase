@@ -27,7 +27,7 @@ import { busabaseRouter } from "../src/router";
  *  2. A lookup hops through a `relation` field on the same Base, and relations
  *     are deferred to install pass 2. A lookup created in pass 1 fails server
  *     validation because its hop doesn't exist yet.
- *  3. Lookup VALUES are read-time-derived and ride along in `headCommit.fields`,
+ *  3. Lookup VALUES are read-time-derived and ride along in `headCommit.payload`,
  *     so an exporter that doesn't know they're computed exports derived data
  *     as if a human had authored it.
  *

@@ -62,7 +62,7 @@ describe("Busabase contract error semantics", () => {
     expect(response.body).toMatchObject({ code: "NOT_FOUND" });
   });
 
-  it("returns CONFLICT / 409 when direct file-tree creates reuse a sibling slug across types", async () => {
+  it("allows direct file-tree creates to reuse a slug across different node types", async () => {
     const drive = await call("POST", "/file-trees", {
       type: "drive",
       slug: "shared-node-slug",
@@ -71,14 +71,14 @@ describe("Busabase contract error semantics", () => {
     });
     expect(drive.status).toBe(200);
 
-    const conflict = await call("POST", "/file-trees", {
+    const skill = await call("POST", "/file-trees", {
       type: "skill",
       slug: "shared-node-slug",
-      name: "Conflicting Skill",
+      name: "Shared Skill",
       autoMerge: true,
     });
-    expect(conflict.status).toBe(409);
-    expect(conflict.body).toMatchObject({ code: "CONFLICT" });
+    expect(skill.status).toBe(200);
+    expect(skill.body).toMatchObject({ node: { type: "skill", slug: "shared-node-slug" } });
   });
 
   it("returns CONFLICT / 409 when restoring an active field or record", async () => {

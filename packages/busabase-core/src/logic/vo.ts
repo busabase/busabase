@@ -53,7 +53,7 @@ const userRef = (users: UserRefMap | undefined, userId: string): UserRefVO | nul
  * possible." 8,000 chars (~a few paragraphs) covers the vast majority of
  * real long-field content while keeping the GIN indexes reasonably sized.
  * `grep`'s records adapter (Unified Grep P2b, `logic/grep.ts`) reads
- * `headCommit.fields` directly — genuinely untruncated, no ceiling at all —
+ * `headCommit.payload` directly — genuinely untruncated, no ceiling at all —
  * for exactly the cases this projection still can't reach. That split — a
  * bounded, indexed projection for ranked `search` and an unbounded, unindexed
  * scan for `grep` — is the deliberate search-vs-grep fidelity tradeoff.
@@ -220,6 +220,7 @@ export const toNodeVO = (
   name: node.name,
   description: node.description,
   metadata: node.metadata ?? {},
+  explicitVisibility: node.explicitVisibility ?? null,
   position: node.position,
   createdAt: node.createdAt.toISOString(),
   updatedAt: node.updatedAt.toISOString(),
@@ -267,7 +268,7 @@ export const toCommitVO = (commit: CommitPO, users?: UserRefMap): CommitVO => ({
   nodeId: commit.nodeId,
   operationId: commit.operationId,
   parentCommitId: commit.parentCommitId,
-  fields: commit.fields,
+  payload: commit.payload,
   operation: commit.operation as OperationKind,
   message: commit.message,
   author: commit.author,

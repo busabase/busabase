@@ -18,13 +18,13 @@ import {
   useNodesState,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
+import { useQuery } from "@tanstack/react-query";
 import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";
-import {
-  parseWorkflowDocument,
-  type WorkflowDocument,
-  type WorkflowEdge,
-  type WorkflowNode,
-  type WorkflowSettings,
+import type {
+  WorkflowDocument,
+  WorkflowEdge,
+  WorkflowNode,
+  WorkflowSettings,
 } from "busabase-contract/domains/rich-node/types";
 import type { NodeVO } from "busabase-contract/types";
 import { Button } from "kui/button";
@@ -45,13 +45,14 @@ import {
 } from "lucide-react";
 import { useCallback, useMemo, useState } from "react";
 import { useCoreI18n } from "../../../i18n";
+import { NodeDetailSkeleton } from "../../dashboard/components/skeletons";
+import { asNodeDetail } from "../../dashboard/helpers/node-detail";
 import { useReportLoadedNode } from "../../dashboard/hooks/use-report-loaded-node";
 import type { NodeDetailProps } from "../../dashboard/node-detail-registry";
 import {
-  findNode,
   RichNodeNotFound,
   RichNodeShell,
-  useNodeMetadataSave,
+  useNodeContentSave,
   useServerDocumentSync,
 } from "./rich-node-shell";
 
@@ -228,16 +229,13 @@ const persistedWorkflowNode = (entry: WorkflowFlowNode): WorkflowNode => {
 };
 
 interface GraphEditorProps {
+  document: WorkflowDocument;
   node: NodeVO;
   orpc: BusabaseQueryUtils;
 }
 
-function GraphEditor({ node, orpc }: GraphEditorProps) {
+function GraphEditor({ document: workflowDocument, node, orpc }: GraphEditorProps) {
   const messages = useCoreI18n();
-  const workflowDocument = useMemo(
-    () => parseWorkflowDocument(node.metadata.workflowDocument),
-    [node.metadata.workflowDocument],
-  );
   const initialNodes = useMemo<WorkflowFlowNode[]>(
     () =>
       workflowDocument.nodes.map((workflowNode) => ({
@@ -259,7 +257,7 @@ function GraphEditor({ node, orpc }: GraphEditorProps) {
   const [workflowSettings, setWorkflowSettings] = useState<WorkflowSettings>(
     workflowDocument.settings,
   );
-  const { error, markDirty, save, status } = useNodeMetadataSave(orpc, node, "workflowDocument");
+  const { error, markDirty, save, status } = useNodeContentSave(orpc, node, "workflow");
   // React Flow's `useNodesState`/`useEdgesState` (and `workflowSettings`) are
   // seeded from the server document only at mount, so a workflow edited
   // elsewhere — another tab, an agent's OpenAPI write — used to stay stale on
@@ -825,19 +823,24 @@ function GraphEditor({ node, orpc }: GraphEditorProps) {
 }
 
 interface GraphDetailViewProps {
-  nodes?: NodeVO[];
   orpc: BusabaseQueryUtils;
   slug: string | null;
   onNodeLoaded?: NodeDetailProps["onNodeLoaded"];
 }
 
-export function WorkflowDetailView({ nodes, orpc, slug, onNodeLoaded }: GraphDetailViewProps) {
-  const node = useMemo(() => findNode(nodes ?? [], "workflow", slug), [nodes, slug]);
-  useReportLoadedNode(node, onNodeLoaded);
-  if (!node) return <RichNodeNotFound type="Workflow" />;
+export function WorkflowDetailView({ orpc, slug, onNodeLoaded }: GraphDetailViewProps) {
+  const detailQuery = useQuery({
+    ...orpc.nodes.get.queryOptions({ input: { nodeId: slug ?? "", type: "workflow" } }),
+    enabled: Boolean(slug),
+  });
+  const detail = asNodeDetail(detailQuery.data, "workflow");
+  useReportLoadedNode(detail?.node, onNodeLoaded);
+  if (!detail) {
+    return detailQuery.isLoading ? <NodeDetailSkeleton /> : <RichNodeNotFound type="Workflow" />;
+  }
   return (
     <ReactFlowProvider>
-      <GraphEditor key={node.id} node={node} orpc={orpc} />
+      <GraphEditor document={detail.document} key={detail.node.id} node={detail.node} orpc={orpc} />
     </ReactFlowProvider>
   );
 }

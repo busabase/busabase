@@ -50,7 +50,7 @@ const firstImageUrl = (record: RecordVO, coverField: BaseFieldVO | null): string
   if (!coverField) {
     return null;
   }
-  const attachments = getAttachmentRefs(record.headCommit.fields[coverField.slug]);
+  const attachments = getAttachmentRefs(record.headCommit.payload[coverField.slug]);
   for (const attachment of attachments) {
     if (attachment.mimeType?.startsWith("image/")) {
       const url = getSafeAttachmentUrl(attachment);
@@ -137,7 +137,7 @@ function GalleryCard({
         {bodyFields.map((field) => {
           const preview = getFieldPreviewText(
             field,
-            record.headCommit.fields[field.slug],
+            record.headCommit.payload[field.slug],
             messages,
           );
           if (!preview || preview === "-") {

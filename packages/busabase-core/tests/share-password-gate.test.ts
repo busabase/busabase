@@ -176,7 +176,67 @@ describe("share password gate", () => {
     expect(resolved?.id).toBe(lockedNodeId);
     expect(resolved?.requiresPassword).toBe(true);
 
+    const resolvedById = await asVisitor(() => findPubliclySharedNode("base", lockedNodeId));
+    expect(resolvedById?.slug).toBe(lockedSlug);
+    expect(resolvedById?.requiresPassword).toBe(true);
+
     const openResolved = await asVisitor(() => findPubliclySharedNode("base", openSlug));
     expect(openResolved?.requiresPassword).toBe(false);
+  });
+
+  it("refuses an untyped ambiguous slug and unlocks it when the node type is supplied", async () => {
+    const doc = await client.docs.create({
+      autoMerge: true,
+      slug: lockedSlug,
+      name: "Same-slug public doc",
+      body: "public",
+    });
+    if ("status" in doc) throw new Error("expected a materialized doc");
+    await client.nodes.share.set({
+      nodeId: doc.node.id,
+      scope: "public",
+      password: "different-password",
+    } as never);
+
+    expect(await asVisitor(() => unlockPublicShare(lockedSlug, PASSWORD))).toBeNull();
+    expect(await asVisitor(() => unlockPublicShare(lockedSlug, PASSWORD, "base"))).toEqual({
+      nodeId: lockedNodeId,
+    });
+  });
+
+  // A node id is itself a legal slug, so a same-type node can carry another
+  // node's id as its slug. `findPubliclySharedNode` used to resolve that with
+  // one `or(id, slug)` + `limit(1)` — no ORDER BY, so which of the two rows came
+  // back was up to the query plan, while `unlockPublicShare` resolved id-first
+  // and deterministically. The page a visitor saw and the share whose password
+  // gated it could therefore be two different nodes.
+  it("resolves an id that doubles as another node's slug to the node owning the id", async () => {
+    const decoy = await client.bases.create({
+      slug: openNodeId,
+      name: "Decoy base whose slug is another node's id",
+      fields: [{ slug: "name", name: "Name", type: "text", required: true, options: {} }],
+      autoMerge: true,
+    } as never);
+    await client.nodes.share.set({
+      nodeId: decoy.nodeId,
+      scope: "public",
+      password: "decoy-password",
+    } as never);
+
+    // Ambiguous ref: `openNodeId` is the open base's id AND the decoy's slug.
+    const resolved = await asVisitor(() => findPubliclySharedNode("base", openNodeId));
+    expect(resolved?.id).toBe(openNodeId);
+    expect(resolved?.requiresPassword).toBe(false);
+
+    // The gate must land on the same node the page resolved — the id's owner,
+    // never the decoy that merely borrowed the id as its slug.
+    expect(await asVisitor(() => unlockPublicShare(openNodeId, "decoy-password", "base"))).toEqual({
+      nodeId: openNodeId,
+    });
+
+    // The decoy is still reachable by its own id.
+    const decoyResolved = await asVisitor(() => findPubliclySharedNode("base", decoy.nodeId));
+    expect(decoyResolved?.id).toBe(decoy.nodeId);
+    expect(decoyResolved?.requiresPassword).toBe(true);
   });
 });

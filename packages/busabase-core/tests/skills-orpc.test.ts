@@ -587,7 +587,7 @@ describe("Agent Skills API — oRPC integration", () => {
         } as OperationPO,
         { type: "skill" } as NodePO,
         {
-          fields: {
+          payload: {
             encoding: "base64",
             nextContentBase64: "AA==",
             mimeType: "application/wasm",

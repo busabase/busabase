@@ -89,7 +89,7 @@ export const PACKAGE_COMPUTED_FIELD_TYPES: readonly string[] = [
   "auto_number",
   "formula",
   // `lookup` is derived from OTHER records and resolved at read time, so it
-  // shows up in `headCommit.fields` like any other value — but exporting it
+  // shows up in `headCommit.payload` like any other value — but exporting it
   // would ship derived data as if it were authored, and install would strip it
   // server-side anyway.
   "lookup",

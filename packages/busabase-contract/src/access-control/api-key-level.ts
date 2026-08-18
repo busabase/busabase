@@ -138,7 +138,12 @@ export const PROCEDURE_PERMISSION_POLICY: Record<string, ProcedurePermissionPoli
   "bases.lifecycleChangeRequest": node("changeRequest"),
   "records.changeRequest": node("changeRequest"),
   "views.changeRequest": node("changeRequest"),
-  "docs.createChangeRequest": node("changeRequest"),
+  // Unified content write for doc/whiteboard/workflow/html — replaces
+  // `docs.createChangeRequest` (and `docs.updateBody`, below the write tier)
+  // with one endpoint whose `autoMerge` is server-decided from the actor's
+  // write permission (spec D3). Floor is `changeRequest`, same as every other
+  // proposal-creating procedure in this family.
+  "nodes.updateContent": node("changeRequest"),
   "fileTrees.createChangeRequest": node("changeRequest"),
   "assets.createUploadUrl": workspace("changeRequest"),
   "assets.confirm": workspace("changeRequest"),
@@ -153,7 +158,6 @@ export const PROCEDURE_PERMISSION_POLICY: Record<string, ProcedurePermissionPoli
   "bases.create": node("write"),
   "bases.createField": node("write"),
   "docs.create": node("write"),
-  "docs.updateBody": node("write"),
   "fileTrees.create": node("write"),
   "files.create": node("write"),
   "nodes.move": node("write"),

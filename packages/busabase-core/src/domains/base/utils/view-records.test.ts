@@ -48,7 +48,7 @@ const record = (id: string, name: string, status?: string): RecordVO =>
     createdAt: "2026-01-01T00:00:00.000Z",
     updatedAt: "2026-01-01T00:00:00.000Z",
     base,
-    headCommit: { fields: { name, status } },
+    headCommit: { payload: { name, status } },
   }) as unknown as RecordVO;
 
 describe("applyViewConfigToRecords", () => {
@@ -88,8 +88,8 @@ describe("applyViewConfigToRecords", () => {
       base: checkboxBase,
       headCommit: {
         ...item.headCommit,
-        fields: {
-          ...item.headCommit.fields,
+        payload: {
+          ...item.headCommit.payload,
           ...(index === 0 ? { ready: false } : index === 1 ? { ready: null } : {}),
         },
       },
@@ -126,7 +126,7 @@ describe("applyViewConfigToRecords", () => {
       base: actorBase,
       headCommit: {
         ...item.headCommit,
-        fields: { ...item.headCommit.fields, created_by: "local-editor" },
+        payload: { ...item.headCommit.payload, created_by: "local-editor" },
       },
     };
 

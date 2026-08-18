@@ -172,6 +172,8 @@ export const dashboardJa: CoreI18nMessages = {
     roleManage: "管理",
     roleApprovalHint:
       "「書き込み可能」と「管理」では、このノードの変更リクエストの承認とマージも行えます（スペース管理者は不要）。",
+    readGrantNoopHint:
+      "このスペースのメンバーはすでにこのノードを閲覧でき、変更の提案も可能です。ここで「閲覧のみ」を付与しても効果はなく、誰かを制限することもありません（ここでの権限は追加のみで、削減はされません）。アクセスできる人を限定するには、上部の「アクセスを制限」をご利用ください。",
     requiresReadOnNode: "このノードには閲覧権限が必要です",
     requiresChangeRequestOnNode: "このノードには変更提案権限が必要です",
     requiresWriteOnNode: "このノードには書き込み権限が必要です",
@@ -450,6 +452,9 @@ export const dashboardJa: CoreI18nMessages = {
     nodeRestore: "ノードを復元",
     nodeMove: "ノードを移動",
     docUpdate: "ドキュメントを更新",
+    whiteboardDocumentUpdate: "ホワイトボードを更新",
+    workflowDocumentUpdate: "ワークフローを更新",
+    htmlDocumentUpdate: "HTML を更新",
     skillFileCreate: "スキルファイルを作成",
     skillFileUpdate: "スキルファイルを更新",
     skillFileDelete: "スキルファイルを削除",

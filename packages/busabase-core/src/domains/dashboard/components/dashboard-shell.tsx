@@ -653,6 +653,15 @@ export function BusabaseDashboardShell({
     }
   };
 
+  // `locale` only fed `messages`/`nav` above (this shell's own labels) — every
+  // dialog below (Permissions, Rename, Move, Share, Delete, Agent prompts)
+  // reads `useCoreI18n()` instead, and without re-establishing the provider
+  // here they'd silently read the default English context. `<BusabaseDashboard>`
+  // (index.tsx) sets up its OWN `CoreI18nProvider`, but this shell is the
+  // sibling chrome that wraps its `children` (see `dashboard-view.tsx`'s
+  // "sits outside the CoreI18nProvider that lives inside it" note for the same
+  // shape of bug on `InstallFromGithubModal`) — a nested provider here is
+  // harmless since a descendant `<BusabaseDashboard>` overrides it anyway.
   return (
     <CoreI18nProvider locale={locale}>
       <div data-busabase-dashboard-layout className="h-full min-h-0">
@@ -734,10 +743,10 @@ export function BusabaseDashboardShell({
           <NodeDeleteDialog
             childCount={deleteTarget.childCount}
             /* Only bounce to the workbench root when the node being deleted is
-               the one currently open — otherwise the route you're on is about to
-               404. Deleting some OTHER node from the sidebar must leave you
-               exactly where you were; a detail page's own "•••" menu always
-               qualifies for the redirect and keeps the default. */
+             the one currently open — otherwise the route you're on is about to
+             404. Deleting some OTHER node from the sidebar must leave you
+             exactly where you were; a detail page's own "•••" menu always
+             qualifies for the redirect and keeps the default. */
             navigateHome={Boolean(
               deleteTarget.href &&
                 (location === deleteTarget.href || location.startsWith(`${deleteTarget.href}/`)),

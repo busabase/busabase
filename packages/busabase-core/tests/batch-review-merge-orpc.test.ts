@@ -76,7 +76,7 @@ describe("Batch review & merge — oRPC integration", () => {
     expect(results.map((r) => r.ok)).toEqual([true, true]);
 
     const { records } = await client.records.list({ baseId, limit: 100 });
-    const titles = records.map((r) => r.headCommit.fields.title);
+    const titles = records.map((r) => r.headCommit.payload.title);
     expect(titles).toEqual(expect.arrayContaining(["D", "E"]));
   });
 

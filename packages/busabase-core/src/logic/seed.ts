@@ -48,6 +48,7 @@ import type {
 } from "../demo/seed-types";
 import { writeDocBody } from "../domains/doc/handlers";
 import { writeFileTreeTextFile } from "../domains/filetree/handlers";
+import { insertCommit } from "./commits";
 import { projectCommitFields, refreshRecordQueryStatistics } from "./field-values";
 import {
   CURRENT_USER_ID,
@@ -190,7 +191,7 @@ const seedRecordIfMissing = async (input: SeedRecordInput) => {
     const commitId = existingRecord.headCommitId;
     await db
       .update(busabaseCommits)
-      .set({ fields: input.fields })
+      .set({ payload: input.fields })
       .where(eq(busabaseCommits.id, commitId));
     await projectCommitFields({
       baseId: input.baseId,
@@ -201,12 +202,12 @@ const seedRecordIfMissing = async (input: SeedRecordInput) => {
     return;
   }
 
-  await db.insert(busabaseCommits).values({
+  await insertCommit(db, {
     id: input.commitId,
     baseId: input.baseId,
     operationId: null,
     parentCommitId: null,
-    fields: input.fields,
+    payload: input.fields,
     operation: "record_create",
     message: input.message,
     author: input.author,
@@ -257,7 +258,7 @@ const resolveSeedRecordIdentity = async (input: {
     .select({
       recordId: busabaseRecords.id,
       commitId: busabaseRecords.headCommitId,
-      fields: busabaseCommits.fields,
+      fields: busabaseCommits.payload,
     })
     .from(busabaseRecords)
     .innerJoin(busabaseCommits, eq(busabaseCommits.id, busabaseRecords.headCommitId))
@@ -301,7 +302,7 @@ const seedChangeRequestIfMissing = async (input: SeedChangeRequestInput) => {
       input.operations.map(async (operation) => {
         await db
           .update(busabaseCommits)
-          .set({ fields: operation.fields })
+          .set({ payload: operation.fields })
           .where(eq(busabaseCommits.id, operation.commitId));
         await projectCommitFields({
           baseId: input.baseId,
@@ -332,12 +333,12 @@ const seedChangeRequestIfMissing = async (input: SeedChangeRequestInput) => {
 
   const operationHeadById = new Map<string, string>();
   for (const [position, operation] of input.operations.entries()) {
-    await db.insert(busabaseCommits).values({
+    await insertCommit(db, {
       id: operation.commitId,
       baseId: input.baseId,
       operationId: null,
       parentCommitId: operation.baseCommitId ?? operation.sourceCommitId ?? null,
-      fields: operation.fields,
+      payload: operation.fields,
       operation: operation.operation,
       message: operation.message,
       author: operation.author,
@@ -401,7 +402,7 @@ const seedNodeChangeRequestIfMissing = async (input: SeedNodeChangeRequestInput)
   if (existingChangeRequest) {
     await db
       .update(busabaseCommits)
-      .set({ fields: input.operation.fields })
+      .set({ payload: input.operation.fields })
       .where(eq(busabaseCommits.id, input.operation.commitId));
     return;
   }
@@ -423,14 +424,14 @@ const seedNodeChangeRequestIfMissing = async (input: SeedNodeChangeRequestInput)
     updatedAt: input.createdAt,
   });
 
-  await db.insert(busabaseCommits).values({
+  await insertCommit(db, {
     id: input.operation.commitId,
     baseId: null,
     targetType: "node",
     nodeId: input.nodeId,
     operationId: null,
     parentCommitId: null,
-    fields: input.operation.fields,
+    payload: input.operation.fields,
     operation: input.operation.operation,
     message: input.operation.message,
     author: input.operation.author,
@@ -484,7 +485,11 @@ interface FileTreeFolderConfig {
   name: string;
   description: string;
   position: number;
-  /** Default `metadata.entryFile` for nodes of this kind (e.g. "SKILL.md", "package.json"). */
+  /**
+   * The entry file for nodes of this kind (e.g. "SKILL.md", "package.json").
+   * It belongs to the KIND, not to any one node — it is read straight off this
+   * config, never off a node's `metadata`.
+   */
   entryFile: string;
 }
 
@@ -1713,10 +1718,10 @@ const applySeedScenario = async (scenario: SeedScenario) => {
     headCommitIds.length > 0
       ? (
           await db
-            .select({ id: busabaseCommits.id, fields: busabaseCommits.fields })
+            .select({ id: busabaseCommits.id, payload: busabaseCommits.payload })
             .from(busabaseCommits)
             .where(inArray(busabaseCommits.id, headCommitIds))
-        ).map((commit) => [commit.id, commit.fields])
+        ).map((commit) => [commit.id, commit.payload])
       : [],
   );
   for (const record of seededRecords) {

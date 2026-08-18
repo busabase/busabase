@@ -16,6 +16,7 @@ import {
 import type { MergeCtx } from "../../../../logic/cr-lifecycle";
 import { id } from "../../../../logic/kernel";
 import { type MaterializeArgs, registerMaterializer } from "../../../../logic/materialize";
+import { registerNodeRuntime } from "../../../../logic/node-runtime";
 import { resolveRelationFieldOptions } from "../relation-options";
 
 export const materializeBaseNode = async (
@@ -85,6 +86,10 @@ export const materializeBaseNode = async (
 };
 
 registerMaterializer("base", materializeBaseNode);
+// A Base's typed detail is just the node row (its tables/fields/records are
+// their own endpoints), so it opts into the generic shape explicitly — see
+// `NodeRuntime.genericDetail` for why this is not the silent default.
+registerNodeRuntime("base", { genericDetail: true });
 
 export const mergeBaseArchive = async (ctx: MergeCtx, item: OperationPO, _headCommit: CommitPO) => {
   const { db, timestamp } = ctx;

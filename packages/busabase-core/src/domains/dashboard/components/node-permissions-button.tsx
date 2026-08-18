@@ -2,6 +2,7 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";
+import type { NodeVO } from "busabase-contract/types";
 import { Button } from "kui/button";
 import {
   Dialog,
@@ -70,25 +71,23 @@ interface FlatNode {
   name: string;
   visibility?: NodeVisibility;
 }
-interface TreeNode {
-  id: string;
-  parentId?: string | null;
-  name?: string;
-  metadata?: { visibility?: NodeVisibility };
-  children?: TreeNode[];
-}
-
+// Typed as the real `NodeVO` on purpose, with no cast at the call site. A
+// hand-rolled local shape plus an `as` is how this kept reading the long-gone
+// `metadata.visibility` after the value moved to the `explicit_visibility`
+// column: nothing tied the two together, so the compiler had nothing to check
+// and every private node quietly read back as unrestricted. Naming the VO makes
+// the next rename a build error at this line.
 const buildFlatIndex = (
-  nodes: TreeNode[] | undefined,
+  nodes: NodeVO[] | undefined,
   map: Map<string, FlatNode> = new Map(),
 ): Map<string, FlatNode> => {
   if (!nodes) return map;
   for (const node of nodes) {
     map.set(node.id, {
       id: node.id,
-      parentId: node.parentId ?? null,
-      name: node.name ?? "",
-      visibility: node.metadata?.visibility,
+      parentId: node.parentId,
+      name: node.name,
+      visibility: node.explicitVisibility ?? undefined,
     });
     buildFlatIndex(node.children, map);
   }
@@ -139,10 +138,7 @@ export function NodePermissionsDialog({
   // Reuse the already-cached sidebar tree to read this node's own explicit
   // visibility and to walk its ancestors for inherited privacy.
   const nodesQuery = useQuery(orpc.nodes.list.queryOptions({}));
-  const flatIndex = useMemo(
-    () => buildFlatIndex(nodesQuery.data as TreeNode[] | undefined),
-    [nodesQuery.data],
-  );
+  const flatIndex = useMemo(() => buildFlatIndex(nodesQuery.data), [nodesQuery.data]);
   const storedVisibility = flatIndex.get(nodeId)?.visibility;
   // Nearest ancestor (excluding self) explicitly set to private — that node
   // structurally hides this one no matter what this node is set to.
@@ -173,6 +169,22 @@ export function NodePermissionsDialog({
   const isInherited = !isPrivate && !!inheritedPrivateFrom;
   // Whether access is actually limited (so granting people is meaningful).
   const isLimited = isPrivate || isInherited || spaceMode === "restricted";
+
+  // `getEffectiveNodeLevel` resolves to the MAX of the actor's space-role
+  // baseline and any node grants — a grant can only ever RAISE access, never
+  // cap it. A plain member's baseline is already `changeRequest`, so on a node
+  // they can ALREADY see, adding a `read` grant changes precisely nothing. That
+  // reads as "I just locked this down to read-only", which is the opposite of
+  // what happens, so say so instead of silently ignoring the grant.
+  // Deliberately conservative: only flagged when this node's OWN state proves
+  // default visibility, never inferred through the ancestor chain (the dialog
+  // has each node's own visibility, not the materialized effective one).
+  const membersAlreadySeeThisNode =
+    !isPrivate &&
+    !inheritedPrivateFrom &&
+    (spaceMode !== "restricted" ||
+      explicitVisibility === "workspace" ||
+      explicitVisibility === "public");
 
   const [newPrincipalId, setNewPrincipalId] = useState("");
   const [newPrincipalIsSpace, setNewPrincipalIsSpace] = useState(false);
@@ -476,6 +488,12 @@ export function NodePermissionsDialog({
               <p className="text-muted-foreground text-xs" data-testid="grant-role-hint">
                 {t.roleApprovalHint}
               </p>
+
+              {newRole === "read" && membersAlreadySeeThisNode && (
+                <p className="text-review-strong text-xs" data-testid="grant-read-noop-hint">
+                  {t.readGrantNoopHint}
+                </p>
+              )}
             </div>
           )}
 

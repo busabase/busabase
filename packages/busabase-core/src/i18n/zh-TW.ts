@@ -326,6 +326,8 @@ export const dashboardZhTW: CoreI18nMessages = {
     roleManage: "可管理",
     roleApprovalHint:
       "「可寫入」和「可管理」還可以審核並合併此節點上的變更請求，不需要空間管理員。",
+    readGrantNoopHint:
+      "本空間成員目前已能看到此節點，成員也已能對它提交變更。在這裡授予「唯讀」不會有任何效果，更不會限制任何人——此處的權限只做加法，不會削減。若要限制誰能存取此節點，請使用上方的「限制存取」。",
     requiresReadOnNode: "需要對此節點擁有唯讀權限",
     requiresChangeRequestOnNode: "需要對此節點擁有提交變更權限",
     requiresWriteOnNode: "需要對此節點擁有寫入權限",

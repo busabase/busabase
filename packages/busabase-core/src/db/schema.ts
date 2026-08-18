@@ -49,6 +49,18 @@ export const busabaseOperationKindEnum = pgEnum("busabase_operation_kind", [
   "airapp_file_delete",
   "airapp_metadata_update",
   "doc_update",
+  // One operation kind per rich-node document type (whiteboard/workflow/html),
+  // mirroring the `skill_file_*`/`drive_file_*`/`airapp_file_*` and
+  // `*_metadata_update` families above rather than a single generic
+  // `document_update` — the merge dispatcher in `cr-lifecycle.ts` matches
+  // these by regex (`/^[a-z0-9-]+_document_update$/`), the same shape it
+  // already uses for `_file_*` and `_metadata_update`, and a per-type kind is
+  // what lets the ChangeRequest/audit history and node-type operation labels
+  // (`domains/*/definition.ts`) say "Update whiteboard" instead of a type-less
+  // "Update document".
+  "whiteboard_document_update",
+  "workflow_document_update",
+  "html_document_update",
   "base_add_field",
   "base_delete_field",
   "base_update_field",
@@ -108,12 +120,25 @@ export const busabaseNodes = pgTable(
       .notNull()
       .default({}),
     position: integer("position").notNull().default(0),
-    // Materialized access-control visibility: the STRICTEST explicitly-set
-    // `metadata.visibility` along this node's ancestor chain (self included),
+    // This node's OWN declared visibility — the node ACL's only explicit input,
+    // and the thing `effectiveVisibility` below is computed FROM.
+    //
+    // NULL = this node declares nothing and simply inherits its ancestors'.
+    //
+    // Lived in `metadata.visibility` until 2026-08. It is access control, which
+    // is the opposite of what a free-form extension bag is for, and keeping it
+    // there had a concrete cost: `PATCH /nodes/{id}/metadata` needs only
+    // `write` while `POST /nodes/{id}/visibility` needs `manage`, so the bag
+    // handed a `write`-level actor a door into an ACL input. That door is shut
+    // (see `updateNodeMetadata`), but a guard that has to remember to refuse a
+    // key is weaker than a column the generic endpoint cannot address at all.
+    explicitVisibility: text("explicit_visibility").$type<"private" | "workspace" | "public">(),
+    // Materialized access-control visibility: the STRICTEST `explicitVisibility`
+    // along this node's ancestor chain (self included),
     // private > workspace > public. NULL = nothing explicit anywhere in the
     // chain = "follow the space default" (open mode: visible to members;
     // restricted mode: hidden like private). Recomputed on create / move /
-    // visibility change by `recomputeEffectiveVisibility` (logic/node-acl.ts)
+    // visibility change by `recomputeSpaceNodeAcl` (logic/node-acl.ts)
     // — read paths only ever check this column, never walk the tree. Kept as a
     // real column (not in the metadata jsonb) so the visibility index below is
     // a plain btree, not a jsonb expression index.
@@ -154,8 +179,8 @@ export const busabaseNodes = pgTable(
     updatedAt: timestamp("updated_at", { mode: "date" }).defaultNow().notNull(),
   },
   (base) => [
-    uniqueIndex("busabase_nodes_parent_slug_uniq")
-      .on(base.parentId, base.slug)
+    uniqueIndex("busabase_nodes_space_type_slug_uniq")
+      .on(base.spaceId, base.type, base.slug)
       .where(sql`${base.archivedAt} IS NULL`),
     index("busabase_nodes_parent_position_idx").on(base.parentId, base.position),
     index("busabase_nodes_effective_visibility_idx").on(base.spaceId, base.effectiveVisibility),
@@ -311,7 +336,10 @@ export const busabaseCommits = pgTable(
     nodeId: text("node_id").references(() => busabaseNodes.id, { onDelete: "cascade" }),
     operationId: text("operation_id"),
     parentCommitId: text("parent_commit_id"),
-    fields: jsonb("fields").$type<Record<string, unknown>>().notNull(),
+    // The full payload of this change. Its shape is polymorphic and determined by
+    // the sibling `operation` column — see `logic/commit-payload-schemas.ts` for the
+    // per-operation Zod schemas that validate it on write and parse it on merge.
+    payload: jsonb("payload").$type<Record<string, unknown>>().notNull(),
     operation: busabaseOperationKindEnum("operation").notNull().default("record_create"),
     message: text("message").notNull().default(""),
     author: text("author").notNull(),
@@ -513,6 +541,11 @@ export type AuditEventPO = typeof busabaseAuditEvents.$inferSelect;
 // Attachments table — shared, auth-agnostic (lives in open-domains; consumed by
 // both apps/busabase and Busabase Cloud).
 export * from "open-domains/attachments/schema";
+// External ACP agent sessions (Claude Code / Codex / remote Buda) and their
+// transcript. Local-subprocess rows are the only durable record of a session;
+// remote ones index state the agent itself still holds.
+export * from "../domains/agents/schema/agent-session-events";
+export * from "../domains/agents/schema/agent-sessions";
 // Assets domain: Drive Grep Retrieval text slot (0..1 row per Asset).
 export * from "../domains/assets/schema/asset-texts";
 // Assets domain: the deduped Asset library + its where-used reverse index.

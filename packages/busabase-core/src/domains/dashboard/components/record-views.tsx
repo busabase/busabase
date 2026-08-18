@@ -431,7 +431,7 @@ export function RecordEditorView({
       (base?.fields ?? record?.base.fields ?? []).map((field) => [
         field.slug,
         mode === "edit" && record
-          ? getEditorFieldValue(field, record.headCommit.fields[field.slug])
+          ? getEditorFieldValue(field, record.headCommit.payload[field.slug])
           : defaultNewFieldValue(field.type),
       ]),
     ),
@@ -445,7 +445,7 @@ export function RecordEditorView({
         (editorBase?.fields ?? []).map((field) => [
           field.slug,
           mode === "edit" && record
-            ? getEditorFieldValue(field, record.headCommit.fields[field.slug])
+            ? getEditorFieldValue(field, record.headCommit.payload[field.slug])
             : defaultNewFieldValue(field.type),
         ]),
       ),
@@ -1294,7 +1294,7 @@ function RecordFieldPanel({ record, records }: { record: RecordVO; records: Reco
   const resolveIString = useIString();
   const fieldEntries = record.base.fields.slice(1).map((field) => ({
     field,
-    value: record.headCommit.fields[field.slug],
+    value: record.headCommit.payload[field.slug],
   }));
 
   return (

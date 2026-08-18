@@ -89,9 +89,9 @@ describe("Formula chaining + dependency-graph cycle detection (real PGLite)", ()
     });
     expect(record.materialized).toBe(true);
     if (!record.materialized) throw new Error("expected materialized record");
-    expect(record.headCommit.fields.price_with_markup).toBe(120);
+    expect(record.headCommit.payload.price_with_markup).toBe(120);
     // 120 * 1.08 = 129.6
-    expect(record.headCommit.fields.price_with_tax).toBe(129.6);
+    expect(record.headCommit.payload.price_with_tax).toBe(129.6);
   });
 
   it("recomputes the whole chain correctly on update, not just the directly-edited field", async () => {
@@ -101,8 +101,8 @@ describe("Formula chaining + dependency-graph cycle detection (real PGLite)", ()
       autoMerge: true,
     });
     if (!created.materialized) throw new Error("expected materialized record");
-    expect(created.headCommit.fields.price_with_markup).toBe(55);
-    expect(created.headCommit.fields.price_with_tax).toBe(59.4);
+    expect(created.headCommit.payload.price_with_markup).toBe(55);
+    expect(created.headCommit.payload.price_with_tax).toBe(59.4);
 
     const updateCr = await client.records.changeRequest({
       operation: "update",
@@ -112,8 +112,8 @@ describe("Formula chaining + dependency-graph cycle detection (real PGLite)", ()
     });
     await approveAndMerge(updateCr.id);
     const updated = await client.records.get({ recordId: created.id });
-    expect(updated.headCommit.fields.price_with_markup).toBe(220);
-    expect(updated.headCommit.fields.price_with_tax).toBe(237.6);
+    expect(updated.headCommit.payload.price_with_markup).toBe(220);
+    expect(updated.headCommit.payload.price_with_tax).toBe(237.6);
   });
 
   it("rejects a field edit that would introduce a formula dependency cycle", async () => {

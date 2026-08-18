@@ -73,7 +73,7 @@ describe("lookup values resolved at read time", () => {
 
   const readFields = async (recordId: string) => {
     const record = await client.records.get({ recordId });
-    return record.headCommit.fields as Record<string, unknown>;
+    return record.headCommit.payload as Record<string, unknown>;
   };
 
   it("truncates to the first linked record when limit is `first`", async () => {

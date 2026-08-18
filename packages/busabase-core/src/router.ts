@@ -12,6 +12,7 @@ import { fileRouter } from "./domains/file-node/router";
 import { fileTreeRouter } from "./domains/filetree/router";
 import { formRouter } from "./domains/form/router";
 import { installRouter } from "./domains/install/router";
+import { updateNodeContent } from "./domains/rich-node/handlers";
 import { vaultRouter } from "./domains/vault/router";
 import { webhookRouter } from "./domains/webhook/router";
 import { listActivityPaged } from "./logic/activity";
@@ -120,6 +121,9 @@ const busabaseRouterImpl = busabase.router({
     move: busabase.nodes.move.handler(async ({ input }) => moveNode(input)),
     updateMetadata: busabase.nodes.updateMetadata.handler(async ({ input }) =>
       updateNodeMetadata(input),
+    ),
+    updateContent: busabase.nodes.updateContent.handler(async ({ input }) =>
+      updateNodeContent(input),
     ),
     purge: busabase.nodes.purge.handler(async ({ input }) => purgeNode(input.nodeId)),
     updateVisibility: busabase.nodes.updateVisibility.handler(async ({ input }) => {
@@ -303,7 +307,7 @@ const anonymousSurfaceGuard = os.middleware(async ({ next, path }, input) => {
     // approximate by nature — the handler re-checks the capability on the node
     // it actually resolved. See `getPublicScopeOfNodeRef`.
     const nodeRef = readNodeId(input);
-    if (!nodeRef || (await getPublicScopeOfNodeRef(nodeRef)) !== "submit") {
+    if (!nodeRef || (await getPublicScopeOfNodeRef(nodeRef, "form")) !== "submit") {
       denyAnonymousProcedure(path);
     }
   }

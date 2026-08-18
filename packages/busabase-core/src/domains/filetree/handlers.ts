@@ -26,21 +26,31 @@ import {
   type OperationPO,
 } from "../../db/schema";
 import { assertAirAppRunnable } from "../../logic/airapp-runnable";
+import {
+  type FileTreeFileOperationKind,
+  type FileTreeMetadataOperationKind,
+  parseCommitPayload,
+} from "../../logic/commit-payload-schemas";
+import { insertCommit } from "../../logic/commits";
 import { CURRENT_USER_ID, hashBuffer, id, now, rootNodeIdForSpace } from "../../logic/kernel";
-import { publishChangeRequestPendingReview } from "../../logic/live-events";
 import type { MaterializeArgs } from "../../logic/materialize";
 import {
   assertNodePermission,
   buildNodeVisibilityCondition,
   hasNodePermission,
   initializeNodeAcl,
+  recomputeSpaceNodeAcl,
   shouldAutoMerge,
 } from "../../logic/node-acl";
 import { assertContainerParent } from "../../logic/node-parent";
+import {
+  findActiveNodeByTypeAndSlug,
+  isNodeSlugUniqueViolation,
+  nodeSlugConflict,
+} from "../../logic/node-slug";
 import { ensureReady } from "../../logic/seed";
 import {
   finalizeChangeRequest,
-  getChangeRequest,
   insertAuditEvent,
   loadNodesByIds,
   type MergeCtx,
@@ -109,12 +119,6 @@ const fileTreeFileNotFound = (config: FileTreeKindConfig, path: string) =>
   new ORPCError("NOT_FOUND", { message: `${config.label} file not found: ${path}` });
 
 const labelForType = (type: string) => `${type.slice(0, 1).toUpperCase()}${type.slice(1)}`;
-
-const isUniqueViolation = (error: unknown): boolean => {
-  const directCode = (error as { code?: unknown } | null | undefined)?.code;
-  if (directCode === "23505") return true;
-  return (error as { cause?: { code?: unknown } } | null | undefined)?.cause?.code === "23505";
-};
 
 const operationKindForInput = (
   type: string,
@@ -520,30 +524,16 @@ export const createFileTreeNode = async (
     .limit(1);
   const parentNode = assertContainerParent(parentNodeRow, config.type, parentNodeId);
 
-  // Idempotency is scoped to (parentNode, slug) — NOT slug alone. A
-  // slug can legitimately repeat under different parents (e.g. the same
-  // skill installed into two folders); matching on slug globally caused
-  // installs to silently no-op onto an unrelated same-slug node elsewhere
-  // in the space instead of creating a new one under the requested parent.
-  // Within one parent the DB uniqueness rule spans every node type, so a
-  // different-type sibling is a conflict rather than an idempotent retry.
-  const [existing] = await db
-    .select()
-    .from(busabaseNodes)
-    .where(
-      and(
-        eq(busabaseNodes.spaceId, getContextSpaceId()),
-        eq(busabaseNodes.parentId, parentNode.id),
-        eq(busabaseNodes.slug, parsed.slug),
-        isNull(busabaseNodes.archivedAt),
-      ),
-    )
-    .limit(1);
+  // The public create surface keeps its historical same-location retry
+  // behavior, but slug ownership itself is workspace + type scoped. Repeating
+  // the request under another folder is a conflict, never a silent move/reuse.
+  const existing = await findActiveNodeByTypeAndSlug(db, {
+    nodeType: config.type,
+    slug: parsed.slug,
+  });
   if (existing) {
-    if (existing.type !== config.type) {
-      throw new ORPCError("CONFLICT", {
-        message: `Cannot create ${labelLower(config)} "${parsed.slug}": an active ${existing.type} with that slug already exists in this location.`,
-      });
+    if (existing.parentId !== parentNode.id) {
+      throw nodeSlugConflict(config.type, parsed.slug);
     }
     return { ...(await getFileTreeNode(config, existing.id)), materialized: true as const };
   }
@@ -600,8 +590,10 @@ export const createFileTreeNode = async (
       slug: parsed.slug,
       name: parsed.name,
       description: parsed.description,
+      // No `entryFile` here: it is a property of the node TYPE, read straight
+      // off `config` by `getFileTreeNode`. Copying it onto every node row put a
+      // product-enforced field in the free-form metadata bag for no gain.
       metadata: {
-        entryFile: config.entryFile,
         visibility: parsed.visibility,
         version: parsed.version,
       },
@@ -610,30 +602,18 @@ export const createFileTreeNode = async (
       updatedAt: createdAt,
     });
   } catch (error) {
-    if (isUniqueViolation(error)) {
-      const [concurrentSibling] = await db
-        .select()
-        .from(busabaseNodes)
-        .where(
-          and(
-            eq(busabaseNodes.spaceId, getContextSpaceId()),
-            eq(busabaseNodes.parentId, parentNode.id),
-            eq(busabaseNodes.slug, parsed.slug),
-            isNull(busabaseNodes.archivedAt),
-          ),
-        )
-        .limit(1);
-      if (concurrentSibling?.type === config.type) {
+    if (isNodeSlugUniqueViolation(error)) {
+      const concurrentNode = await findActiveNodeByTypeAndSlug(db, {
+        nodeType: config.type,
+        slug: parsed.slug,
+      });
+      if (concurrentNode?.parentId === parentNode.id) {
         return {
-          ...(await getFileTreeNode(config, concurrentSibling.id)),
+          ...(await getFileTreeNode(config, concurrentNode.id)),
           materialized: true as const,
         };
       }
-      if (concurrentSibling) {
-        throw new ORPCError("CONFLICT", {
-          message: `Cannot create ${labelLower(config)} "${parsed.slug}": an active ${concurrentSibling.type} with that slug already exists in this location.`,
-        });
-      }
+      throw nodeSlugConflict(config.type, parsed.slug);
     }
     throw error;
   }
@@ -763,8 +743,22 @@ export const getFileTreeNode = async (
   const files = await listAssetUsageFiles(node);
   return {
     node: nodeVO,
-    entryFile: node.metadata.entryFile || config.entryFile,
-    visibility: node.metadata.visibility || "private",
+    // Read straight off the node-type config, never from `metadata`. The
+    // per-node `metadata.entryFile` override this used to prefer was never
+    // exercised: every write site — `createFileTreeNode`, the materializer, and
+    // the demo dataset — writes `config.entryFile` verbatim, so the override
+    // only ever shadowed the value with an identical copy. It is a
+    // product-enforced field living in the free-form metadata bag, which is
+    // exactly what `content/spec/node-content-storage.md` (D1) says must not
+    // happen: the type owns its entry file, not the node row.
+    entryFile: config.entryFile,
+    // The `explicit_visibility` COLUMN, not `metadata.visibility`: this is the
+    // node ACL's declared input and it moved out of the free-form bag (spec D1).
+    // `initializeNodeAcl` strips the key from metadata as it promotes it, so
+    // reading the bag here returned undefined and silently reported every node
+    // as "private" — caught by the Skills round-trip test, which creates one
+    // with `visibility: "workspace"` and reads it back.
+    visibility: node.explicitVisibility || "private",
     version: node.metadata.version || "0.1.0",
     files,
   };
@@ -963,14 +957,14 @@ export const createFileTreeChangeRequest = async (
       };
     }
 
-    await db.insert(busabaseCommits).values({
+    await insertCommit(db, {
       id: commitId,
       baseId: null,
       targetType: "node",
       nodeId: node.id,
       operationId: null,
       parentCommitId: null,
-      fields,
+      payload: fields,
       operation: operationKind,
       message: parsed.message,
       author: parsed.submittedBy,
@@ -1074,16 +1068,10 @@ export const mergeFileTreeFile = async (
   if (node.type !== type || scope !== "file" || !item.filePath) {
     throw new Error(`Invalid file-tree file operation target: ${item.id}`);
   }
-  const fields = headCommit.fields as {
-    filePath?: string;
-    baseContentHash?: string | null;
-    nextContent?: string | null;
-    nextContentBase64?: string | null;
-    encoding?: "utf8" | "asset" | "base64" | null;
-    mimeType?: string | null;
-    assetId?: string | null;
-    displayName?: string | null;
-  };
+  const fields = parseCommitPayload(
+    item.operation as FileTreeFileOperationKind,
+    headCommit.payload,
+  );
   if (fields.baseContentHash) {
     const currentHash = await readCurrentContentHash(node, item.filePath, _ctx.db);
     if (currentHash !== fields.baseContentHash) {
@@ -1133,16 +1121,37 @@ export const mergeFileTreeMetadata = async (
   if (node.type !== type || scope !== "metadata" || action !== "update") {
     throw new Error(`Invalid file-tree metadata operation target: ${item.id}`);
   }
-  const fields = headCommit.fields as {
-    metadata?: Partial<NonNullable<NodePO["metadata"]>>;
-  };
+  const fields = parseCommitPayload(
+    item.operation as FileTreeMetadataOperationKind,
+    headCommit.payload,
+  );
+  // `visibility` is split out of the metadata spread rather than merged with it.
+  // It is the node ACL's declared input and lives in its own column now (spec
+  // D1); folding it back into the bag here would write a value nothing reads and
+  // silently leave the node at its previous visibility — which is exactly what
+  // the Skills `metadata_update` test caught.
+  //
+  // Changing it also has to re-materialize `effectiveVisibility`, the column the
+  // ACL actually enforces. A declared value that never propagates is the same
+  // delayed-permission-flip failure PR #5976 fixed.
+  const { visibility, ...restMetadata } = (fields.metadata ?? {}) as Record<string, unknown>;
+  const declaredVisibility =
+    visibility === "private" || visibility === "workspace" || visibility === "public"
+      ? visibility
+      : undefined;
+
   await ctx.db
     .update(busabaseNodes)
     .set({
-      metadata: { ...node.metadata, ...(fields.metadata ?? {}) },
+      metadata: { ...node.metadata, ...restMetadata },
+      ...(declaredVisibility ? { explicitVisibility: declaredVisibility } : {}),
       updatedAt: ctx.timestamp,
     })
     .where(eq(busabaseNodes.id, node.id));
+
+  if (declaredVisibility) {
+    await recomputeSpaceNodeAcl(ctx.db, getContextSpaceId());
+  }
 };
 
 export const makeMaterializer =
@@ -1171,8 +1180,8 @@ export const makeMaterializer =
       slug,
       name,
       description,
+      // `entryFile` deliberately absent — see the note in `createFileTreeNode`.
       metadata: {
-        entryFile: config.entryFile,
         visibility: "private" as const,
         version,
         ...metadata,

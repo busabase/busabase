@@ -12,6 +12,7 @@ import {
   busabaseRecordLinks,
   busabaseRecords,
 } from "../../../../db/schema";
+import { insertCommit } from "../../../../logic/commits";
 import type { MergeCtx } from "../../../../logic/cr-lifecycle";
 import { projectCommitFields } from "../../../../logic/field-values";
 import { CURRENT_USER_ID, id, requireBaseId } from "../../../../logic/kernel";
@@ -151,7 +152,7 @@ export const mergeRecordCreate = async (ctx: MergeCtx, item: OperationPO, headCo
   const fields = await applyComputedRecordFields(ctx, {
     baseId,
     mode: "create",
-    fields: headCommit.fields,
+    fields: headCommit.payload,
     recordId,
     recordCreatedAtIso: timestamp.toISOString(),
   });
@@ -171,7 +172,10 @@ export const mergeRecordCreate = async (ctx: MergeCtx, item: OperationPO, headCo
     createdAt: timestamp,
     updatedAt: timestamp,
   });
-  await db.update(busabaseCommits).set({ fields }).where(eq(busabaseCommits.id, item.headCommitId));
+  await db
+    .update(busabaseCommits)
+    .set({ payload: fields })
+    .where(eq(busabaseCommits.id, item.headCommitId));
   await projectCommitFields({
     baseId,
     commitId: item.headCommitId,
@@ -181,7 +185,7 @@ export const mergeRecordCreate = async (ctx: MergeCtx, item: OperationPO, headCo
     fieldDefs: await loadBaseFieldDefsCached(ctx, baseId),
     isNewRecord: true,
   });
-  await syncRecordAssetUsages(baseId, recordId, headCommit.fields, db);
+  await syncRecordAssetUsages(baseId, recordId, headCommit.payload, db);
   await db
     .update(busabaseOperations)
     .set({ status: "merged", mergedRecordId: recordId, updatedAt: timestamp })
@@ -202,13 +206,13 @@ export const mergeRecordUpdate = async (ctx: MergeCtx, item: OperationPO, headCo
   const resolvedFields = ctx.resolvedRecordFields.get(item.id);
 
   const [currentCommit] = await db
-    .select({ fields: busabaseCommits.fields })
+    .select({ fields: busabaseCommits.payload })
     .from(busabaseCommits)
     .where(eq(busabaseCommits.id, targetRecord.headCommitId))
     .limit(1);
   // When no concurrent edit was detected, `resolvedFields` is unset — the 3-way
   // merge branch in cr-lifecycle.ts only runs when the record moved since this
-  // operation's base commit. But `headCommit.fields` here is just THIS
+  // operation's base commit. But `headCommit.payload` here is just THIS
   // operation's submitted delta: createUpdateChangeRequest / reviseOperation
   // store only whatever fields the caller actually sent, so an omitted key
   // means "leave it alone", not "clear it" (an explicit `null` still clears —
@@ -221,7 +225,7 @@ export const mergeRecordUpdate = async (ctx: MergeCtx, item: OperationPO, headCo
   const fields = await applyComputedRecordFields(ctx, {
     baseId,
     mode: "update",
-    fields: resolvedFields ?? { ...(currentCommit?.fields ?? {}), ...headCommit.fields },
+    fields: resolvedFields ?? { ...(currentCommit?.fields ?? {}), ...headCommit.payload },
     existing: currentCommit?.fields ?? undefined,
     recordId: targetRecord.id,
     recordCreatedAtIso: targetRecord.createdAt.toISOString(),
@@ -231,21 +235,24 @@ export const mergeRecordUpdate = async (ctx: MergeCtx, item: OperationPO, headCo
   let headCommitId = item.headCommitId;
   if (resolvedFields) {
     headCommitId = id("cmt");
-    await db.insert(busabaseCommits).values({
+    await insertCommit(db, {
       id: headCommitId,
       baseId,
       targetType: "base",
       nodeId: null,
       operationId: item.id,
       parentCommitId: targetRecord.headCommitId,
-      fields,
+      payload: fields,
       operation: "record_update",
       message: `${headCommit.message} (auto-merged)`,
       author: headCommit.author,
       createdAt: timestamp,
     });
   } else {
-    await db.update(busabaseCommits).set({ fields }).where(eq(busabaseCommits.id, headCommitId));
+    await db
+      .update(busabaseCommits)
+      .set({ payload: fields })
+      .where(eq(busabaseCommits.id, headCommitId));
   }
 
   await db

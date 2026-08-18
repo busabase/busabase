@@ -24,7 +24,7 @@ import {
 
 /**
  * Sources Unified Grep can scan. `"records"` (P2b) scans canonical Base
- * record commits (`headCommit.fields`) — never the truncated
+ * record commits (`headCommit.payload`) — never the truncated
  * `busabase_field_values` search projection, per the spec's decision record
  * on why that projection can't back grep.
  */

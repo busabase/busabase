@@ -6,19 +6,23 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { busabaseRouter } from "../src/router";
 
 /**
- * Rich-node metadata is only useful if the API refuses to accept metadata the
- * node type will never read. A whiteboard's drawing lives under
- * `whiteboardDocument`; writing it to `metadata.scene` used to return 200,
- * store a key nobody reads, and leave the canvas untouched — the caller had no
- * way to tell that apart from a broken renderer.
+ * Rich-node CONTENT (a whiteboard's `whiteboardDocument`, a workflow's
+ * `workflowDocument`, an HTML page's `htmlDocument`) no longer lives in
+ * `node.metadata` at all — it moved to object storage behind
+ * `PUT /nodes/{nodeId}/content` (spec D2/D3, PR that follows #6291). The three
+ * document keys are refused OUTRIGHT through node metadata now, on any node
+ * type — not validated-then-allowed, the way they briefly were.
  *
  * Both write paths are covered, since they are separate entry points:
  *   - `nodes.updateMetadata` — the direct PATCH agents/the SDK use
- *   - `nodes.createChangeRequest` — the create path, which validated nothing
+ *   - `nodes.createChangeRequest` — the create path
  *
  * The negative case matters just as much: metadata is free-form by design on
- * every other node type (busabase-cms keeps its Base-id mapping under
- * `busabaseCms` on a folder), so folders must still accept arbitrary keys.
+ * every node type (busabase-cms keeps its Base-id mapping under `busabaseCms`
+ * on a folder), and — now that the document itself is refused outright —
+ * that includes rich node types too. There is no more "unknown key on a rich
+ * node type" allowlist to police; `metadata.scene` on a whiteboard is just
+ * inert extension data now, same as any other key on any other type.
  */
 
 const MIGRATIONS_CWD = path.resolve(__dirname, "../../../apps/busabase");
@@ -68,9 +72,10 @@ describe("Node metadata validation", () => {
     rootNodeId = nodes[0]?.id ?? "";
     expect(rootNodeId).not.toBe("");
 
-    await createNode("whiteboard", "meta-test-board", {
-      whiteboardDocument: VALID_WHITEBOARD_DOCUMENT,
-    });
+    // No document key here: node_create no longer accepts initial content for
+    // whiteboard/workflow/html — content is added afterward through
+    // `PUT /nodes/{nodeId}/content`.
+    await createNode("whiteboard", "meta-test-board", {});
     await createNode("folder", "meta-test-folder", {});
     const tree = await client.nodes.list({});
     const flatten = (entries: typeof tree): typeof tree =>
@@ -91,45 +96,72 @@ describe("Node metadata validation", () => {
   });
 
   describe("nodes.updateMetadata", () => {
-    it("accepts the node type's own document key", async () => {
-      const updated = await client.nodes.updateMetadata({
-        nodeId: whiteboardNodeId,
-        metadata: { whiteboardDocument: VALID_WHITEBOARD_DOCUMENT },
-      });
-      expect(updated.metadata.whiteboardDocument).toBeDefined();
-    });
-
-    it("rejects a misspelled document key instead of silently storing it", async () => {
-      // The original bug report: `metadata.scene` returned 200 and rendered nothing.
+    it("rejects the node type's own document key, pointing at the content endpoint", async () => {
       await expect(
         client.nodes.updateMetadata({
           nodeId: whiteboardNodeId,
-          metadata: { scene: VALID_WHITEBOARD_DOCUMENT },
+          metadata: { whiteboardDocument: VALID_WHITEBOARD_DOCUMENT },
         }),
-      ).rejects.toThrow(/Unknown metadata key for new|Unknown metadata key for node/);
+      ).rejects.toThrow(/whiteboardDocument is not writable through node metadata/);
     });
 
-    it("names the key the caller should have used", async () => {
-      await expect(
-        client.nodes.updateMetadata({ nodeId: whiteboardNodeId, metadata: { elements: [] } }),
-      ).rejects.toThrow(/whiteboardDocument/);
-    });
-
-    it("rejects another rich node type's document key", async () => {
+    it("rejects another rich node type's document key too — the block is unconditional", async () => {
       await expect(
         client.nodes.updateMetadata({
           nodeId: whiteboardNodeId,
           metadata: { workflowDocument: { version: 2, nodes: [], edges: [] } },
         }),
-      ).rejects.toThrow(/Unknown metadata key/);
+      ).rejects.toThrow(/workflowDocument is not writable through node metadata/);
     });
 
-    it("still accepts the common keys every node type shares", async () => {
+    it("names the endpoint the caller should use instead", async () => {
+      await expect(
+        client.nodes.updateMetadata({
+          nodeId: whiteboardNodeId,
+          metadata: { htmlDocument: { version: 1, source: "<p>hi</p>" } },
+        }),
+      ).rejects.toThrow(new RegExp(`/nodes/${whiteboardNodeId}/content`));
+    });
+
+    it("no longer polices other keys on a rich node type — same as any other type", async () => {
+      // Previously an allowlist rejected an unrecognized key like `scene` on a
+      // whiteboard node. That allowlist is gone along with the document key it
+      // was built to protect: a rich node's metadata is ordinary free-form
+      // extension data now, exactly like a folder's.
       const updated = await client.nodes.updateMetadata({
         nodeId: whiteboardNodeId,
-        metadata: { version: "2", assetId: "ast_x" },
+        metadata: { scene: { junk: true }, elements: [] },
       });
-      expect(updated.metadata.version).toBe("2");
+      expect(updated.metadata.scene).toBeDefined();
+    });
+
+    it("still accepts genuinely free-form extension keys", async () => {
+      // The bag is for the caller's own data — busabase-cms keeps its Base-id
+      // mapping here, and anything else a third party wants to hang off a node.
+      // Refusing product-enforced keys must not turn this into an allowlist.
+      const updated = await client.nodes.updateMetadata({
+        nodeId: whiteboardNodeId,
+        metadata: { busabaseCms: { baseId: "bas_x" }, myPluginState: "anything" },
+      });
+      expect(updated.metadata.busabaseCms).toEqual({ baseId: "bas_x" });
+      expect(updated.metadata.myPluginState).toBe("anything");
+    });
+
+    it("refuses `version`, which is changed through a reviewed file-tree change request", async () => {
+      // Not a permission bypass like `visibility` — a REVIEW bypass. A file
+      // tree's version is edited through `fileTrees.createChangeRequest`, which
+      // a human approves; this endpoint needs only `write` and creates no
+      // ChangeRequest, so an open key here let the review be skipped by using
+      // the generic door.
+      //
+      // The value still lives in `metadata` — it is a label the user writes and
+      // the product never interprets. Only the door is closed.
+      await expect(
+        client.nodes.updateMetadata({
+          nodeId: whiteboardNodeId,
+          metadata: { version: "2" },
+        }),
+      ).rejects.toThrow(/version is not writable through node metadata/);
     });
 
     it("refuses `visibility`, which is access control rather than metadata", async () => {
@@ -186,43 +218,32 @@ describe("Node metadata validation", () => {
       expect(updated.metadata.busabaseCms).toBeDefined();
     });
 
-    it("still rejects an invalid document value", async () => {
+    it("rejects the whole patch when it carries a blocked document key alongside a legit one", async () => {
       await expect(
         client.nodes.updateMetadata({
           nodeId: whiteboardNodeId,
-          // No `version: 1` — parseWhiteboardDocument would blank the canvas.
-          metadata: { whiteboardDocument: { elements: [] } },
+          metadata: {
+            whiteboardDocument: VALID_WHITEBOARD_DOCUMENT,
+            assetId: "ast_should_not_land",
+          },
         }),
-      ).rejects.toThrow(/Invalid whiteboardDocument/);
-    });
-
-    it("rejects the whole patch when only one key is unknown", async () => {
-      await expect(
-        client.nodes.updateMetadata({
-          nodeId: whiteboardNodeId,
-          metadata: { whiteboardDocument: VALID_WHITEBOARD_DOCUMENT, scene: { junk: true } },
-        }),
-      ).rejects.toThrow(/Unknown metadata key/);
-      // …and nothing from that patch landed.
+      ).rejects.toThrow(/whiteboardDocument is not writable through node metadata/);
+      // …and nothing from that patch landed, including the legitimate key.
       const nodes = await client.nodes.list({});
       const flatten = (entries: typeof nodes): typeof nodes =>
         entries.flatMap((entry) => [entry, ...flatten(entry.children)]);
       const board = flatten(nodes).find((node) => node.id === whiteboardNodeId);
-      expect(board?.metadata.scene).toBeUndefined();
+      expect(board?.metadata.assetId).not.toBe("ast_should_not_land");
     });
   });
 
   describe("nodes.createChangeRequest (create path)", () => {
-    it("rejects an unknown metadata key at submission time", async () => {
+    it("rejects a document key at node-creation time too", async () => {
       await expect(
-        createNode("whiteboard", "meta-test-bad-key", { scene: VALID_WHITEBOARD_DOCUMENT }),
-      ).rejects.toThrow(/Unknown metadata key/);
-    });
-
-    it("rejects an invalid document instead of merging a canvas that reads back empty", async () => {
-      await expect(
-        createNode("whiteboard", "meta-test-bad-doc", { whiteboardDocument: { elements: [] } }),
-      ).rejects.toThrow(/Invalid whiteboardDocument/);
+        createNode("whiteboard", "meta-test-bad-doc", {
+          whiteboardDocument: VALID_WHITEBOARD_DOCUMENT,
+        }),
+      ).rejects.toThrow(/whiteboardDocument is not writable through node metadata/);
     });
 
     it("creates no node when the metadata is refused", async () => {
@@ -230,8 +251,13 @@ describe("Node metadata validation", () => {
       const flatten = (entries: typeof nodes): typeof nodes =>
         entries.flatMap((entry) => [entry, ...flatten(entry.children)]);
       const slugs = flatten(nodes).map((node) => node.slug);
-      expect(slugs).not.toContain("meta-test-bad-key");
       expect(slugs).not.toContain("meta-test-bad-doc");
+    });
+
+    it("still creates a whiteboard node carrying an unrelated metadata key", async () => {
+      await expect(
+        createNode("whiteboard", "meta-test-scene-key", { scene: { junk: true } }),
+      ).resolves.toBeDefined();
     });
 
     it("still creates a folder carrying app-defined metadata", async () => {

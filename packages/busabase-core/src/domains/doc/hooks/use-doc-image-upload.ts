@@ -22,7 +22,7 @@ import { buildAssetContentUrl } from "../../assets/utils/asset-content-url";
  * `/api/assets/{assetId}/raw` names the ASSET and lets the server resolve the
  * location on every read. See `assets/utils/asset-content-url.ts`.
  *
- * Old bodies are NOT migrated: `busabase_commits.fields.body` is append-only,
+ * Old bodies are NOT migrated: `busabase_commits.payload.body` is append-only,
  * and `syncDocAssetUsages` still indexes the legacy storage-URL form, so
  * existing Docs keep behaving exactly as they did.
  */

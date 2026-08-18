@@ -111,8 +111,8 @@ export function BusaBaseGantt({
 
   const rows: Row[] = [];
   for (const record of records) {
-    const start = parseDay(record.headCommit.fields[startField.slug]);
-    const end = parseDay(record.headCommit.fields[endField.slug]);
+    const start = parseDay(record.headCommit.payload[startField.slug]);
+    const end = parseDay(record.headCommit.payload[endField.slug]);
     if (start && end && end.getTime() >= start.getTime()) {
       rows.push({ record, start, end });
     }
@@ -178,7 +178,7 @@ export function BusaBaseGantt({
       patch[endField.slug] = toYMD(end);
     }
     if (Object.keys(patch).length > 0) {
-      void onPatchRecord(row.record, { ...row.record.headCommit.fields, ...patch });
+      void onPatchRecord(row.record, { ...row.record.headCommit.payload, ...patch });
     }
   };
 

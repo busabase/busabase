@@ -93,7 +93,7 @@ describe("inbox list with bulk change requests", () => {
     const bulk = page.changeRequests.filter((cr) => cr.operationCount >= BULK_SIZE);
     for (const cr of bulk) {
       // Seeded in ascending `seq`, so the preview must start at 0 and stay in order.
-      const seqs = cr.operations.map((op) => Number(op.headCommit?.fields?.seq));
+      const seqs = cr.operations.map((op) => Number(op.headCommit?.payload?.seq));
       expect(seqs).toEqual([...seqs].sort((a, b) => a - b));
       expect(seqs[0]).toBe(0);
       // Every previewed operation must belong to ITS OWN change request — the

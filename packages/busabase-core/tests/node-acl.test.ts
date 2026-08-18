@@ -354,9 +354,16 @@ describe("node ACL", () => {
       });
       if (!("status" in blockedDoc)) throw new Error("expected a pending ChangeRequest");
       expect(blockedDoc.status).toBe("in_review");
-      await expect(
-        raw.docs.updateBody({ nodeId: docNodeId, body: "member direct update" }),
-      ).rejects.toThrow(/write access/);
+      // Unlike the old Doc-only `docs.updateBody` (a `write`-gated direct write
+      // that threw for a `changeRequest`-level member), the unified
+      // `nodes.updateContent` sits at the `changeRequest` floor — bob CAN call
+      // it, he just doesn't get an immediate merge: `finalizeChangeRequest`
+      // downgrades to a pending CR instead of throwing (spec D3).
+      const memberContentCr = await raw.nodes.updateContent({
+        nodeId: docNodeId,
+        content: { kind: "doc", body: "member direct update" },
+      });
+      expect(memberContentCr.status).toBe("in_review");
       await expect(
         raw.bases.createField({
           baseId,

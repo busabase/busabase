@@ -17,14 +17,14 @@ import "server-only";
  * - Records adapter (P2b): pages through canonical, active records
  *   (`busabase_records.status = "active"`, most-recently-updated first) and
  *   flattens each in-scope Base field's value from the record's HEAD commit
- *   (`busabase_commits.fields` jsonb) — never the truncated
+ *   (`busabase_commits.payload` jsonb) — never the truncated
  *   `busabase_field_values.valueText` search projection (see the spec's
  *   "records scan canonical commits, not the search projection" decision
  *   record). Deliberately does NOT reuse `loadBasesByIds`/`hydrateRecords`
  *   (`logic/seed.ts` / `logic/cr-lifecycle.ts`): those load EVERY base field
  *   row regardless of `deletedAt`, and `BaseFieldVO` doesn't even expose
  *   `deletedAt`, so a caller has no way to exclude a soft-deleted field's
- *   stale value that may still be sitting in `headCommit.fields`. This
+ *   stale value that may still be sitting in `headCommit.payload`. This
  *   adapter's own batch loader filters `isNull(busabaseBaseFields.deletedAt)`
  *   explicitly, mirroring `domains/base/logic/queries.ts`'s `getBase`.
  */
@@ -199,7 +199,7 @@ interface RecordBatchData {
  * the module doc for why `loadBasesByIds`/`hydrateRecords` are NOT used
  * here): the field query explicitly filters `isNull(busabaseBaseFields.deletedAt)`,
  * so a field soft-deleted after a record was written never resurfaces a
- * stale value still sitting under its old slug in `headCommit.fields`.
+ * stale value still sitting under its old slug in `headCommit.payload`.
  */
 const loadRecordBatchData = async (
   db: Db,
@@ -215,7 +215,7 @@ const loadRecordBatchData = async (
   const baseIds = [...new Set(candidates.map((c) => c.baseId))];
 
   const commitRows = await db
-    .select({ id: busabaseCommits.id, fields: busabaseCommits.fields })
+    .select({ id: busabaseCommits.id, fields: busabaseCommits.payload })
     .from(busabaseCommits)
     .where(inArray(busabaseCommits.id, headCommitIds));
   for (const row of commitRows) {
@@ -442,7 +442,7 @@ export const grepUnified = async (input: UnifiedGrepInput): Promise<UnifiedGrepR
         // Read/flatten/scan failure for this record — it was NOT actually
         // searched. Should not normally happen (all data is already in
         // memory from the batch load above), but guard anyway, e.g. a
-        // malformed `headCommit.fields` value that throws during
+        // malformed `headCommit.payload` value that throws during
         // flattening. Same honesty `grepAssets`/docs apply per-candidate.
         errored.push(candidate.recordId);
       }

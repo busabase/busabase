@@ -13,8 +13,6 @@ import {
   demoGetAuthInfo,
   demoGetBase,
   demoGetChangeRequest,
-  demoGetDoc,
-  demoGetFileNode,
   demoGetFileTree,
   demoGetForm,
   demoGetNodeDetail,
@@ -139,6 +137,9 @@ export const busabaseDemoRouter = os.router({
     }),
     updateMetadata: os.nodes.updateMetadata.handler(() => {
       throw demoUnsupported("Update node metadata");
+    }),
+    updateContent: os.nodes.updateContent.handler(() => {
+      throw demoUnsupported("Update node content");
     }),
     purge: os.nodes.purge.handler(() => {
       throw demoUnsupported("Permanently delete node");
@@ -294,12 +295,9 @@ export const busabaseDemoRouter = os.router({
     readLines: os.docs.readLines.handler(({ input }) =>
       demoReadDocLines(input.nodeId, input.startLine, input.endLine),
     ),
-    updateBody: os.docs.updateBody.handler(() => {
-      throw demoUnsupported("Update Doc");
-    }),
-    createChangeRequest: os.docs.createChangeRequest.handler(() => {
-      throw demoUnsupported("Doc change request");
-    }),
+    // `updateBody` / `createChangeRequest` are gone: both write paths (Doc's,
+    // and now whiteboard/workflow/html's too) unified into `nodes.updateContent`
+    // above.
   },
   forms: {
     // A seeded demo Form renders its agent-authored page (read from the demo

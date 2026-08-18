@@ -9,7 +9,7 @@ import { busabaseRouter } from "../src/router";
  * Regression: `valueText` (what `contains`/`equals` match against in SQL) is
  * truncated at `VALUE_TEXT_INDEX_LIMIT` (8,000 chars, see logic/vo.ts), but
  * the authoritative client match (`recordMatchesViewFilter` → the full value
- * in `commits.fields`) is never truncated. Without a truncation guard, a
+ * in `commits.payload`) is never truncated. Without a truncation guard, a
  * `longtext`/`markdown` field with a match term past the cutoff would
  * silently under-count — exactly the "confidently wrong authoritative number"
  * failure `records.count` exists to avoid. `countRecords`'s

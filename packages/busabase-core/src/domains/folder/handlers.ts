@@ -9,6 +9,7 @@ import { busabaseNodes, type NodePO } from "../../db/schema";
 import { id } from "../../logic/kernel";
 import { type MaterializeArgs, registerMaterializer } from "../../logic/materialize";
 import { buildNodeVisibilityCondition } from "../../logic/node-acl";
+import { registerNodeRuntime } from "../../logic/node-runtime";
 import { ensureReady } from "../../logic/seed";
 import { loadNodesByIds, type MergeCtx, toNodeVO } from "../../logic/store";
 
@@ -108,3 +109,6 @@ export const materializeFolderNode = async (
 };
 
 registerMaterializer("folder", materializeFolderNode);
+registerNodeRuntime("folder", {
+  hydrateDetail: async (node) => ({ type: "folder", ...(await getFolder(node.id)) }),
+});

@@ -9,6 +9,11 @@ import type {
   FileTreeNodeVO,
   FileTreeReadFileVO,
 } from "busabase-contract/domains/filetree/types";
+import {
+  parseHtmlDocument,
+  parseWhiteboardDocument,
+  parseWorkflowDocument,
+} from "busabase-contract/domains/rich-node/types";
 import type {
   AgentTaskVO,
   AuditEventVO,
@@ -244,7 +249,7 @@ export const demoListRecordsByFieldText = (input: {
     if (input.baseId && record.baseId !== input.baseId) {
       return false;
     }
-    const value = record.headCommit.fields[input.fieldSlug];
+    const value = record.headCommit.payload[input.fieldSlug];
     return typeof value === "string" && value.toLowerCase().includes(needle);
   });
 };
@@ -256,7 +261,7 @@ export const demoGetRecordByField = (input: {
 }): RecordVO | null => {
   const record = dataset().records.find((item) => {
     if (item.baseId !== input.baseId) return false;
-    const value = item.headCommit.fields[input.fieldSlug];
+    const value = item.headCommit.payload[input.fieldSlug];
     return value === input.valueText;
   });
   return record ?? null;
@@ -498,10 +503,30 @@ export const demoGetNodeDetail = (nodeIdOrSlug: string, type?: string): NodeDeta
     }
     case "base":
     case "form":
-    case "whiteboard":
-    case "workflow":
-    case "html":
       return { type: node.type, node };
+    // The demo dataset's seed scenarios still carry these three under
+    // `metadata.whiteboardDocument`/`workflowDocument`/`htmlDocument`
+    // (`demo/scenarios/node-types.*.ts` — untouched by the move to object
+    // storage, since the demo dataset is a stateless, in-memory mock with no
+    // real storage backend to move them into). The REAL store's equivalent
+    // detail now carries an explicit `document` field
+    // (`domains/rich-node/handlers.ts`), so the demo must too, or it becomes
+    // the one place a client sees a whiteboard/workflow/html detail with no
+    // document at all.
+    case "whiteboard":
+      return {
+        type: "whiteboard",
+        node,
+        document: parseWhiteboardDocument(node.metadata.whiteboardDocument),
+      };
+    case "workflow":
+      return {
+        type: "workflow",
+        node,
+        document: parseWorkflowDocument(node.metadata.workflowDocument),
+      };
+    case "html":
+      return { type: "html", node, document: parseHtmlDocument(node.metadata.htmlDocument) };
   }
   // Unreachable for a registered built-in type (the switch above is exhaustive
   // over `NodeType`), but a late `registerNodeType()` plugin can reach it — and
@@ -600,7 +625,7 @@ const buildDemoAssetIndex = (): {
       .filter((field) => field.type === "attachment")
       .map((field) => field.slug);
     for (const slug of attachmentSlugs) {
-      for (const ref of extractDemoRefs(record.headCommit.fields[slug])) {
+      for (const ref of extractDemoRefs(record.headCommit.payload[slug])) {
         if (!assets.has(ref.attachmentId)) {
           assets.set(ref.attachmentId, {
             id: ref.attachmentId,
@@ -685,15 +710,17 @@ export const demoSearch = (input: {
   const recordResults: SearchResultVO[] = !wantsRecords
     ? []
     : data.records
-        .filter((record) => match(`${toSearchText(record.headCommit.fields)}`))
+        .filter((record) => match(`${toSearchText(record.headCommit.payload)}`))
         .map((record) => ({
           id: record.id,
           kind: "record",
           // Title = the Base's lowest-position field value, matching the canonical store.
           title:
-            String(record.headCommit.fields[getPrimaryField(record.base)?.slug ?? ""] ?? "") ||
+            String(record.headCommit.payload[getPrimaryField(record.base)?.slug ?? ""] ?? "") ||
             record.id,
-          body: String(record.headCommit.fields.body ?? record.headCommit.fields.description ?? ""),
+          body: String(
+            record.headCommit.payload.body ?? record.headCommit.payload.description ?? "",
+          ),
           eyebrow: `${record.base.name} · canonical record`,
           href: `/base/${record.base.slug}/${record.id}`,
           updatedAt: record.updatedAt,
@@ -705,7 +732,7 @@ export const demoSearch = (input: {
         .filter((changeRequest) =>
           match(
             changeRequest.operations
-              .map((operation) => toSearchText(operation.headCommit.fields))
+              .map((operation) => toSearchText(operation.headCommit.payload))
               .join(" "),
           ),
         )
@@ -716,12 +743,12 @@ export const demoSearch = (input: {
             changeRequest.operationCount > 1
               ? `${changeRequest.operationCount} operation changeRequest`
               : String(
-                  changeRequest.primaryOperation?.headCommit.fields.title ??
-                    changeRequest.primaryOperation?.headCommit.fields.name ??
+                  changeRequest.primaryOperation?.headCommit.payload.title ??
+                    changeRequest.primaryOperation?.headCommit.payload.name ??
                     changeRequest.id,
                 ),
           body: changeRequest.operations
-            .map((operation) => toSearchText(operation.headCommit.fields))
+            .map((operation) => toSearchText(operation.headCommit.payload))
             .join(" "),
           eyebrow: `${changeRequest.base?.name ?? "Node tree"} · ${changeRequest.status}`,
           href: `/inbox/${changeRequest.id}`,
@@ -762,7 +789,7 @@ const synthOperation = (
   changeRequestId: string,
   baseId: string,
   operation: OperationKind,
-  fields: Record<string, unknown>,
+  payload: Record<string, unknown>,
   options: Partial<OperationVO> = {},
 ): OperationVO => {
   const createdAt = nowIso();
@@ -795,7 +822,7 @@ const synthOperation = (
       nodeId: null,
       operationId: null,
       parentCommitId: null,
-      fields,
+      payload,
       operation,
       message: "Demo change",
       author: DEMO_ACTOR_ID,
@@ -929,9 +956,9 @@ export const demoCreateChangeRequest = (
 export const demoCreateDeleteChangeRequest = (recordId: string): ChangeRequestVO => {
   const record = demoGetRecord(recordId);
   return synthChangeRequest(record.baseId, "in_review", [
-    synthOperation(demoId("qdf"), record.baseId, "record_delete", record.headCommit.fields, {
+    synthOperation(demoId("qdf"), record.baseId, "record_delete", record.headCommit.payload, {
       targetRecordId: recordId,
-      baseFields: record.headCommit.fields,
+      baseFields: record.headCommit.payload,
     }),
   ]);
 };
@@ -944,7 +971,7 @@ export const demoCreateUpdateChangeRequest = (
   return synthChangeRequest(record.baseId, "in_review", [
     synthOperation(demoId("qdf"), record.baseId, "record_update", payload.fields, {
       targetRecordId: recordId,
-      baseFields: record.headCommit.fields,
+      baseFields: record.headCommit.payload,
     }),
   ]);
 };

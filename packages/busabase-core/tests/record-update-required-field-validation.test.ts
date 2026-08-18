@@ -115,7 +115,7 @@ describe("record_update — required-field validation sees the MERGED view, not 
   const getFields = async (recordId: string) => {
     const record = await client.records.get({ recordId });
     if (!record) throw new Error("expected record to exist");
-    return record.headCommit.fields;
+    return record.headCommit.payload;
   };
 
   it("a partial update that omits an already-set required field succeeds, and the required field's value survives", async () => {

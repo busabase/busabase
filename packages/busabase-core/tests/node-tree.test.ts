@@ -87,11 +87,14 @@ describe("Node tree + Doc lifecycle — oRPC", () => {
         true,
       );
 
-      const updated = await client.docs.updateBody({
+      const updated = await client.nodes.updateContent({
         nodeId: created.node.id,
-        body: "# Updated\n",
+        content: { kind: "doc", body: "# Updated\n" },
       });
-      expect(updated.body).toBe("# Updated\n");
+      expect(updated.status).toBe("merged");
+      expect((await client.nodes.get({ nodeId: created.node.id, type: "doc" })).body).toBe(
+        "# Updated\n",
+      );
     });
 
     it("is idempotent on a duplicate slug", async () => {
@@ -131,9 +134,9 @@ describe("Node tree + Doc lifecycle — oRPC", () => {
         name: "CR Doc",
         body: "v1",
       });
-      const cr = await client.docs.createChangeRequest({
+      const cr = await client.nodes.updateContent({
         nodeId: doc.node.id,
-        body: "v2 via change request",
+        content: { kind: "doc", body: "v2 via change request" },
       });
       await approveAndMerge(cr.id);
       expect((await client.nodes.get({ nodeId: doc.node.id, type: "doc" })).body).toBe(
@@ -213,6 +216,49 @@ describe("Node tree + Doc lifecycle — oRPC", () => {
       expect(bases.some((b) => b.slug === "lc-node-base")).toBe(true);
     });
 
+    it("rejects the same Base slug in a different folder before creating a ChangeRequest", async () => {
+      await client.nodes.createChangeRequest({
+        autoMerge: true,
+        operations: [
+          { kind: "create", nodeType: "folder", slug: "base-home-a", name: "Base Home A" },
+          { kind: "create", nodeType: "folder", slug: "base-home-b", name: "Base Home B" },
+        ],
+      });
+      const folderAId = (await folderSlug("base-home-a"))?.id ?? "";
+      const folderBId = (await folderSlug("base-home-b"))?.id ?? "";
+
+      await client.nodes.createChangeRequest({
+        autoMerge: true,
+        operations: [
+          {
+            kind: "create",
+            nodeType: "base",
+            parentNodeId: folderAId,
+            slug: "shared-base-identity",
+            name: "Shared Base Identity",
+          },
+        ],
+      });
+
+      await expect(
+        client.nodes.createChangeRequest({
+          autoMerge: false,
+          operations: [
+            {
+              kind: "create",
+              nodeType: "base",
+              parentNodeId: folderBId,
+              slug: "shared-base-identity",
+              name: "Duplicate Base Identity",
+            },
+          ],
+        }),
+      ).rejects.toMatchObject({
+        code: "CONFLICT",
+        data: { reason: "NODE_SLUG_CONFLICT", nodeType: "base", slug: "shared-base-identity" },
+      });
+    });
+
     it("creates a folder and moves a node into it in ONE CR via temp-id", async () => {
       // A movable folder at the root.
       const movableCr = await client.nodes.createChangeRequest({
@@ -274,6 +320,8 @@ describe("Node tree + Doc lifecycle — oRPC", () => {
 
       await approveAndMerge(crA.id);
       await expect(approveAndMerge(crB.id)).rejects.toMatchObject({ code: "CONFLICT" });
+      const conflicted = await client.changeRequests.get({ changeRequestId: crB.id });
+      expect(conflicted?.status).toBe("conflict");
 
       // The successful first merge is unaffected by the second's failed merge —
       // exactly one folder with this slug exists, and it's Race A.
@@ -304,6 +352,8 @@ describe("Node tree + Doc lifecycle — oRPC", () => {
 
       await approveAndMerge(crA.id);
       await expect(approveAndMerge(crB.id)).rejects.toMatchObject({ code: "CONFLICT" });
+      const conflicted = await client.changeRequests.get({ changeRequestId: crB.id });
+      expect(conflicted?.status).toBe("conflict");
 
       const bases = await client.bases.list({});
       const matches = bases.filter((b) => b.slug === "lc-race-base");

@@ -81,7 +81,7 @@ describe("Bulk record Change Request — oRPC integration", () => {
 
     const { records: after } = await client.records.list({ baseId, limit: 100 });
     expect(after.length).toBe(3);
-    const names = after.map((r) => r.headCommit.fields.name).sort();
+    const names = after.map((r) => r.headCommit.payload.name).sort();
     expect(names).toEqual(["Acme Corp", "Globex", "Initech"]);
   });
 

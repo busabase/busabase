@@ -137,6 +137,9 @@ export const operationLabelKeys: Record<OperationKind, keyof CoreI18nMessages["o
   base_restore_field: "baseRestoreField",
   base_update_field: "baseUpdateField",
   doc_update: "docUpdate",
+  whiteboard_document_update: "whiteboardDocumentUpdate",
+  workflow_document_update: "workflowDocumentUpdate",
+  html_document_update: "htmlDocumentUpdate",
   record_create: "recordCreate",
   record_delete: "recordDelete",
   record_restore: "recordRestore",
@@ -170,7 +173,7 @@ export const getNodeOperationTypeLabel = (operation: OperationVO | null | undefi
     return "";
   }
 
-  const fields = operation.headCommit.fields;
+  const fields = operation.headCommit.payload;
   const nodeType = getFieldString(fields, "nodeType");
   return nodeType ? (getNodeType(nodeType)?.label ?? nodeType) : "";
 };
@@ -268,7 +271,7 @@ export const getOperationSubject = (
     if (primaryField) {
       const subject =
         fieldPreviewText(
-          operation.headCommit.fields[primaryField.slug],
+          operation.headCommit.payload[primaryField.slug],
           primaryField.type,
           messages,
         ) ||
@@ -282,9 +285,9 @@ export const getOperationSubject = (
   }
 
   const guessed =
-    fieldValueToString(operation.headCommit.fields.title) ||
-    nameToString(operation.headCommit.fields.name) ||
-    fieldValueToString(operation.headCommit.fields.subject);
+    fieldValueToString(operation.headCommit.payload.title) ||
+    nameToString(operation.headCommit.payload.name) ||
+    fieldValueToString(operation.headCommit.payload.subject);
   if (guessed) {
     return guessed;
   }
@@ -361,7 +364,7 @@ export const getRecordTitle = (
   // or anything else displays correctly, and relation chips show that value.
   const primaryField = getPrimaryField(record.base);
   const primary = primaryField
-    ? fieldPreviewText(record.headCommit.fields[primaryField.slug], primaryField.type, messages)
+    ? fieldPreviewText(record.headCommit.payload[primaryField.slug], primaryField.type, messages)
     : "";
   return primary || shortIdentifier(record.id);
 };
@@ -472,7 +475,7 @@ export const getChangeRequestRiskHints = (
       hints.add(messages?.operation.destructive ?? "destructive");
     }
     if (operation.operation.startsWith("record_")) {
-      const fields = operation.headCommit.fields;
+      const fields = operation.headCommit.payload;
       for (const [slug, value] of Object.entries(fields)) {
         const field = changeRequest.base?.fields.find((item) => item.slug === slug);
         if (field?.type === "html") {
