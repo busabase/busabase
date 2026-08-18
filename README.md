@@ -416,9 +416,9 @@ echo "Review: http://localhost:15419/dashboard/local/inbox/$CHANGE_REQUEST_ID"
 
 # 4. Optional automation after a human approves: merge and read canonical records.
 curl -s -X POST "http://localhost:15419/api/v1/change-requests/$CHANGE_REQUEST_ID/merge" \
-  | jq '.record.id, .record.headCommit.fields.title'
+  | jq '.record.id, .record.headCommit.payload.title'
 curl -s "http://localhost:15419/api/v1/records?baseId=$BLOG_BASE_ID" \
-  | jq '.[].headCommit.fields.title'
+  | jq '.[].headCommit.payload.title'
 ```
 
 For machine-readable endpoint docs, open:

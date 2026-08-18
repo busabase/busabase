@@ -313,9 +313,9 @@ echo "Review: http://localhost:15419/dashboard/local/inbox/$CHANGE_REQUEST_ID"
 curl -s -X POST "http://localhost:15419/api/v1/change-requests/merge" \
   -H 'content-type: application/json' \
   --data "{\"changeRequestIds\":[\"$CHANGE_REQUEST_ID\"]}" \
-  | jq '.results[0].record.id, .results[0].record.headCommit.fields.title'
+  | jq '.results[0].record.id, .results[0].record.headCommit.payload.title'
 curl -s "http://localhost:15419/api/v1/records?baseId=$BLOG_BASE_ID" \
-  | jq '.[].headCommit.fields.title'
+  | jq '.[].headCommit.payload.title'
 ```
 
 如需机器可读的端点文档，请打开：
