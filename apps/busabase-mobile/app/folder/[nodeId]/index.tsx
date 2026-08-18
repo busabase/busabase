@@ -4,8 +4,6 @@ import type { NodeVO } from "busabase-contract/types";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { Bot, FileText, Folder, HardDrive, Sparkles, Table2 } from "lucide-react-native";
 import { useBusabaseOrpc } from "~/api/use-busabase-orpc";
-import { ConnectionGuard } from "~/components/busabase/ConnectionGuard";
-import { DrawerScaffold } from "~/components/busabase/DrawerScaffold";
 import {
   NativeEmptyState,
   NativeErrorState,
@@ -13,8 +11,10 @@ import {
   NativeRow,
   NativeSection,
 } from "~/components/native-screen";
-import { asNodeDetail } from "~/lib/node-detail";
-import { getMobileNodeDestination } from "~/search/node-navigation";
+import { asNodeDetail } from "~/domains/knowledge/utils/node-detail";
+import { ConnectionGuard } from "~/domains/workspace/components/ConnectionGuard";
+import { DrawerScaffold } from "~/domains/workspace/components/DrawerScaffold";
+import { getMobileNodeDestination } from "~/domains/workspace/utils/node-navigation";
 import { useTokens } from "~/theme/use-tokens";
 
 type FolderChild = NodeVO;

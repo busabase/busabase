@@ -5,8 +5,6 @@ import { useRouter } from "expo-router";
 import { ArchiveRestore, Trash2 } from "lucide-react-native";
 import { useState } from "react";
 import { useBusabaseOrpc } from "~/api/use-busabase-orpc";
-import { ConnectionGuard } from "~/components/busabase/ConnectionGuard";
-import { DrawerScaffold } from "~/components/busabase/DrawerScaffold";
 import {
   NativeActionBar,
   NativeBottomSheet,
@@ -18,6 +16,8 @@ import {
   NativeSection,
 } from "~/components/native-screen";
 import { Button } from "~/components/ui/Button";
+import { ConnectionGuard } from "~/domains/workspace/components/ConnectionGuard";
+import { DrawerScaffold } from "~/domains/workspace/components/DrawerScaffold";
 import { fmt, useI18n } from "~/i18n";
 import { useTokens } from "~/theme/use-tokens";
 

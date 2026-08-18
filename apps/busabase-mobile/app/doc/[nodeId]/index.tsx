@@ -4,8 +4,6 @@ import { ChevronDown, ChevronUp, Pencil } from "lucide-react-native";
 import { useState } from "react";
 import { StyleSheet, Text, View } from "react-native";
 import { useBusabaseOrpc } from "~/api/use-busabase-orpc";
-import { ConnectionGuard } from "~/components/busabase/ConnectionGuard";
-import { DrawerScaffold } from "~/components/busabase/DrawerScaffold";
 import {
   NativeActionBar,
   NativeEmptyState,
@@ -15,9 +13,11 @@ import {
   NativeSection,
 } from "~/components/native-screen";
 import { Button } from "~/components/ui/Button";
+import { asNodeDetail } from "~/domains/knowledge/utils/node-detail";
+import { ConnectionGuard } from "~/domains/workspace/components/ConnectionGuard";
+import { DrawerScaffold } from "~/domains/workspace/components/DrawerScaffold";
 import { useI18n } from "~/i18n";
 import { formatDate } from "~/lib/format";
-import { asNodeDetail } from "~/lib/node-detail";
 import { typography } from "~/theme/tokens";
 import { useTokens } from "~/theme/use-tokens";
 

@@ -8,12 +8,12 @@ import { WebView } from "react-native-webview";
 import { useBusabaseOrpc } from "~/api/use-busabase-orpc";
 import { getValidBusabaseCloudSession } from "~/auth/oauth";
 import { getCloudSessionToken } from "~/auth/session-store";
-import { ConnectionGuard } from "~/components/busabase/ConnectionGuard";
 import { NativeEmptyState, NativeErrorState, NativeLoadingState } from "~/components/native-screen";
 import { Button } from "~/components/ui/Button";
 import { useConnection } from "~/connection/connection-store";
-import { buildAirAppEmbedUrl } from "~/lib/airapp-embed-url";
-import { asNodeDetail } from "~/lib/node-detail";
+import { buildAirAppEmbedUrl } from "~/domains/knowledge/utils/airapp-embed-url";
+import { asNodeDetail } from "~/domains/knowledge/utils/node-detail";
+import { ConnectionGuard } from "~/domains/workspace/components/ConnectionGuard";
 import { mobile, radius, typography } from "~/theme/tokens";
 import { useTokens } from "~/theme/use-tokens";
 

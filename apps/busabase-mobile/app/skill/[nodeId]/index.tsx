@@ -1,9 +1,9 @@
 import { skipToken, useQuery } from "@tanstack/react-query";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useBusabaseOrpc } from "~/api/use-busabase-orpc";
-import { ConnectionGuard } from "~/components/busabase/ConnectionGuard";
-import { FileTreeScreen } from "~/components/busabase/FileTreeScreen";
-import { asNodeDetail } from "~/lib/node-detail";
+import { FileTreeScreen } from "~/domains/knowledge/components/FileTreeScreen";
+import { asNodeDetail } from "~/domains/knowledge/utils/node-detail";
+import { ConnectionGuard } from "~/domains/workspace/components/ConnectionGuard";
 
 function SkillDetailContent() {
   const params = useLocalSearchParams<{ nodeId?: string }>();

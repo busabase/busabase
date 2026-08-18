@@ -14,10 +14,6 @@ import {
 import { useState } from "react";
 import { Pressable, StyleSheet } from "react-native";
 import { useBusabaseOrpc } from "~/api/use-busabase-orpc";
-import { CommentsSection } from "~/components/busabase/CommentsSection";
-import { ConnectionGuard } from "~/components/busabase/ConnectionGuard";
-import { DrawerScaffold } from "~/components/busabase/DrawerScaffold";
-import { FieldList } from "~/components/busabase/FieldList";
 import {
   NativeActionBar,
   NativeBottomSheet,
@@ -29,7 +25,11 @@ import {
   NativeSection,
 } from "~/components/native-screen";
 import { Button } from "~/components/ui/Button";
-import { getStatusLabel, StatusBadge } from "~/components/ui/StatusBadge";
+import { FieldList } from "~/domains/base/components/FieldList";
+import { CommentsSection } from "~/domains/review/components/CommentsSection";
+import { getStatusLabel, StatusBadge } from "~/domains/review/components/StatusBadge";
+import { ConnectionGuard } from "~/domains/workspace/components/ConnectionGuard";
+import { DrawerScaffold } from "~/domains/workspace/components/DrawerScaffold";
 import { formatDate, shortId } from "~/lib/format";
 import { mobile, radius } from "~/theme/tokens";
 import { useTokens } from "~/theme/use-tokens";
@@ -118,7 +118,7 @@ function RecordDetailContent() {
 
   const primaryFieldSlug = record.base.fields[0]?.slug;
   const detailFields = Object.fromEntries(
-    Object.entries(record.headCommit.fields).filter(([slug]) => slug !== primaryFieldSlug),
+    Object.entries(record.headCommit.payload).filter(([slug]) => slug !== primaryFieldSlug),
   );
   const detailDefinitions = record.base.fields.slice(1);
   const initialDefinitions = detailDefinitions.filter(

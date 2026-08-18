@@ -5,8 +5,6 @@ import { FileText } from "lucide-react-native";
 import { useState } from "react";
 import { Image, StyleSheet, View } from "react-native";
 import { useBusabaseOrpc } from "~/api/use-busabase-orpc";
-import { ConnectionGuard } from "~/components/busabase/ConnectionGuard";
-import { DrawerScaffold } from "~/components/busabase/DrawerScaffold";
 import {
   NativeActionBar,
   NativeEmptyState,
@@ -17,6 +15,8 @@ import {
 } from "~/components/native-screen";
 import { Button } from "~/components/ui/Button";
 import { useConnection } from "~/connection/connection-store";
+import { ConnectionGuard } from "~/domains/workspace/components/ConnectionGuard";
+import { DrawerScaffold } from "~/domains/workspace/components/DrawerScaffold";
 import { fmt, useI18n } from "~/i18n";
 import { getAttachmentKindLabel, isImageRef, resolveAttachmentUrl } from "~/lib/attachment";
 import { formatBytes } from "~/lib/format";

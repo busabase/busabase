@@ -3,8 +3,6 @@ import { useLocalSearchParams } from "expo-router";
 import { FileText } from "lucide-react-native";
 import { Image, Linking, Pressable, StyleSheet, Text, View } from "react-native";
 import { useBusabaseOrpc } from "~/api/use-busabase-orpc";
-import { ConnectionGuard } from "~/components/busabase/ConnectionGuard";
-import { DrawerScaffold } from "~/components/busabase/DrawerScaffold";
 import {
   NativeEmptyState,
   NativeErrorState,
@@ -12,9 +10,11 @@ import {
   NativeSection,
 } from "~/components/native-screen";
 import { useConnection } from "~/connection/connection-store";
+import { asNodeDetail } from "~/domains/knowledge/utils/node-detail";
+import { ConnectionGuard } from "~/domains/workspace/components/ConnectionGuard";
+import { DrawerScaffold } from "~/domains/workspace/components/DrawerScaffold";
 import { getAttachmentKindLabel, isImageRef, resolveAttachmentUrl } from "~/lib/attachment";
 import { formatBytes } from "~/lib/format";
-import { asNodeDetail } from "~/lib/node-detail";
 import { typography } from "~/theme/tokens";
 import { useTokens } from "~/theme/use-tokens";
 

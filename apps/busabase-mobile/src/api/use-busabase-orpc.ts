@@ -4,6 +4,7 @@ import {
 } from "busabase-contract/api-client/react-query";
 import { useMemo } from "react";
 import { useConnection } from "~/connection/connection-store";
+import { createMobileCompatibilityFetch } from "./mobile-api-compat";
 
 export function useBusabaseOrpc() {
   const { getCloudAuthorizationHeaders, state } = useConnection();
@@ -16,17 +17,36 @@ export function useBusabaseOrpc() {
   const headers = connection?.mode === "cloud" ? getCloudAuthorizationHeaders : undefined;
   const spaceScope =
     connection?.mode === "cloud" ? (selectedSpaceId ?? "default") : connection?.mode;
+  const compatibilityFetch = useMemo(() => createMobileCompatibilityFetch(globalThis.fetch), []);
 
   return useMemo(() => {
     if (!serverUrl) return null;
     const rpcPath = connection?.mode === "cloud" ? "/api/rpc/core" : "/api/rpc";
     const rpcUrl = `${serverUrl.replace(/\/+$/, "")}${rpcPath}`;
     return {
-      client: createBusabaseORPCClient(rpcUrl, { demo, headers }),
-      orpc: createBusabaseQueryUtils(rpcUrl, { demo, headers }),
+      client: createBusabaseORPCClient(rpcUrl, {
+        batch: false,
+        demo,
+        headers,
+        fetch: compatibilityFetch,
+      }),
+      orpc: createBusabaseQueryUtils(rpcUrl, {
+        batch: false,
+        demo,
+        headers,
+        fetch: compatibilityFetch,
+      }),
       serverUrl,
       spaceScope,
       userId: connection?.cloudUser?.id ?? null,
     };
-  }, [serverUrl, connection?.mode, connection?.cloudUser?.id, demo, headers, spaceScope]);
+  }, [
+    serverUrl,
+    connection?.mode,
+    connection?.cloudUser?.id,
+    demo,
+    headers,
+    spaceScope,
+    compatibilityFetch,
+  ]);
 }

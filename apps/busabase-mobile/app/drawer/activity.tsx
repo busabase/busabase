@@ -8,8 +8,6 @@ import {
   ShieldCheck,
 } from "lucide-react-native";
 import { useMemo } from "react";
-import { ConnectionGuard } from "~/components/busabase/ConnectionGuard";
-import { DrawerScaffold } from "~/components/busabase/DrawerScaffold";
 import {
   NativeActionBar,
   NativeEmptyState,
@@ -19,9 +17,11 @@ import {
   NativeSection,
 } from "~/components/native-screen";
 import { Button } from "~/components/ui/Button";
-import type { ActivityEvent, ActivityTone } from "~/lib/activity-events";
+import { useInfiniteActivityFeed } from "~/domains/review/hooks/use-activity-feed";
+import type { ActivityEvent, ActivityTone } from "~/domains/review/types/activity-events";
+import { ConnectionGuard } from "~/domains/workspace/components/ConnectionGuard";
+import { DrawerScaffold } from "~/domains/workspace/components/DrawerScaffold";
 import { formatListTime } from "~/lib/format";
-import { useInfiniteActivityFeed } from "~/lib/use-activity-feed";
 import { useTokens } from "~/theme/use-tokens";
 
 const ACTIVITY_PAGE_SIZE = 25;

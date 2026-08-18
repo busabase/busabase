@@ -5,9 +5,6 @@ import { Database } from "lucide-react-native";
 import { useCallback, useMemo } from "react";
 import { StyleSheet, useWindowDimensions, View } from "react-native";
 import { useBusabaseOrpc } from "~/api/use-busabase-orpc";
-import { BaseGraph } from "~/components/busabase/BaseGraph";
-import { ConnectionGuard } from "~/components/busabase/ConnectionGuard";
-import { DrawerScaffold } from "~/components/busabase/DrawerScaffold";
 import {
   NativeEmptyState,
   NativeErrorState,
@@ -15,8 +12,14 @@ import {
   NativeRow,
   NativeSection,
 } from "~/components/native-screen";
-import { getBaseGraphGrid, summarizeBaseGraphRelations } from "~/lib/base-graph-layout";
-import { getAppNavigationLayout } from "~/lib/responsive-layout";
+import { BaseGraph } from "~/domains/base/components/BaseGraph";
+import {
+  getBaseGraphGrid,
+  summarizeBaseGraphRelations,
+} from "~/domains/base/utils/base-graph-layout";
+import { ConnectionGuard } from "~/domains/workspace/components/ConnectionGuard";
+import { DrawerScaffold } from "~/domains/workspace/components/DrawerScaffold";
+import { getAppNavigationLayout } from "~/domains/workspace/utils/responsive-layout";
 import { mobile, spacing } from "~/theme/tokens";
 import { useTokens } from "~/theme/use-tokens";
 
