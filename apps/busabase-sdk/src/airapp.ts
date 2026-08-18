@@ -47,6 +47,13 @@ type NodeOperationInput = NodeChangeRequestInput["operations"][number];
 type CreateNodeOperationInput = Extract<NodeOperationInput, { kind: "create" }>;
 type FieldChangeRequestInput = Parameters<BusabaseClient["bases"]["fieldChangeRequest"]>[0];
 type CreateFieldChangeRequestInput = Extract<FieldChangeRequestInput, { operation: "create" }>;
+type FileTreeCreateInput = Parameters<BusabaseClient["fileTrees"]["create"]>[0];
+type FileTreeChangeRequestInput = Parameters<BusabaseClient["fileTrees"]["createChangeRequest"]>[0];
+type FileTreeOperationInput = FileTreeChangeRequestInput["operations"][number];
+type FileTreeCreateOrUpdateOperation = Extract<
+  FileTreeOperationInput,
+  { kind: "create" | "update" }
+>;
 
 /**
  * A Base field, as an app declares it.
@@ -98,15 +105,20 @@ export interface AirAppFolderDeclaration {
 /**
  * The app's own AirApp node, when it ships one inside its Folder.
  *
- * It is provisioned by publishing the AirApp, not by this module — so it is
- * never created here, only recognized and stamped. Declaring it matters for a
- * second reason: without it, an unstamped Folder holding the app's own AirApp
- * would look like it holds an unattributable stranger, and the legacy claim
- * would be refused.
+ * `inspectProvisionedResources`/`provisionDeclaredResources` never create it —
+ * an app's Folder and Bases are plain data-schema resources, safe to bring
+ * into existence unattended, but an AirApp is a bundle of code the viewer's
+ * browser will execute, so bringing it into existence always goes through
+ * `publishAirApp`'s separate, always-review-first ChangeRequest instead of
+ * riding along on the same `autoMerge: true` request as the data layer.
+ * Declaring it here matters for a second reason regardless: without it, an
+ * unstamped Folder holding the app's own AirApp would look like it holds an
+ * unattributable stranger, and the legacy claim would be refused.
  */
 export interface AirAppNodeDeclaration {
   slug: string;
   name: string;
+  description?: string;
   /** Ownership key written into the node's metadata, e.g. `"airapp"`. */
   resourceKey: string;
 }
@@ -161,6 +173,15 @@ export interface AirAppResources {
   missing: AirAppBaseDeclaration[];
   /** Owned nodes whose ownership stamp is missing or stale. */
   repairs: AirAppOwnershipRepair[];
+  /**
+   * The app's own AirApp node (see `AirAppNodeDeclaration`), when `config.airApp`
+   * is declared and a matching node exists under the Folder — owned or legacy,
+   * stamped or not; a pending stamp repair is reported separately via `repairs`.
+   * `null` when not declared, or declared but not found — the latter is what
+   * `publishAirApp` treats as "create", not a `missing`-array entry, because
+   * unlike a Base it is never auto-created just by finding it absent.
+   */
+  airApp: { nodeId: string } | null;
   /**
    * Set when the server is too old for `nodes.updateMetadata`, so ownership was
    * established by full structural fingerprint instead of a stamp.
@@ -255,6 +276,16 @@ const hasEmptyMetadata = (node: ReadNode | undefined) =>
   Object.keys(node?.metadata ?? {}).length === 0;
 
 /**
+ * Nobody has stamped ownership on this node — weaker than `hasEmptyMetadata`,
+ * and deliberately so: a file-tree node (Skill/Drive/AirApp) always carries a
+ * server-written `metadata.version`, even freshly created and never stamped
+ * by any app. Requiring literally-empty metadata there would mean a node
+ * `publishAirApp` itself just created is never recognized as ours on the very
+ * next read — confirmed against a live server, not assumed.
+ */
+const isUnclaimed = (node: ReadNode | undefined) => node?.metadata?.appId === undefined;
+
+/**
  * The legacy-claim test. An unstamped node is adopted only when its every
  * visible attribute still matches the declaration — a weaker test would let an
  * app claim a same-slug Folder a human repurposed.
@@ -270,11 +301,11 @@ const matchesDeclaration = (
   node?.description === (declaration.description ?? "");
 
 /**
- * The AirApp equivalent of the legacy claim: an unstamped `airapp` node counts
+ * The AirApp equivalent of the legacy claim: an unclaimed `airapp` node counts
  * as ours only when its slug and name still match what we declare.
  */
 const matchesLegacyAirApp = (node: ReadNode | undefined, config: AirAppResourceConfig) =>
-  hasEmptyMetadata(node) &&
+  isUnclaimed(node) &&
   node?.type === "airapp" &&
   node?.slug === config.airApp?.slug &&
   node?.name === config.airApp?.name;
@@ -300,7 +331,7 @@ export function resolveProvisionedFolder(
   config: AirAppResourceConfig,
 ): AirAppResources {
   if (!folder) {
-    return { folder: null, bases: [], missing: [...config.bases], repairs: [] };
+    return { folder: null, bases: [], missing: [...config.bases], repairs: [], airApp: null };
   }
   if (folder.node?.type !== "folder" || folder.node?.slug !== config.folder.slug) {
     throw setupError(
@@ -372,8 +403,10 @@ export function resolveProvisionedFolder(
     bases.push({ ...base, nodeId: node.id, baseId: node.baseId });
   }
 
-  // The app's own AirApp node, if it declares one. Never created here — an
-  // AirApp is published, not provisioned — only recognized and stamped.
+  // The app's own AirApp node, if it declares one. Never created by
+  // resolveProvisionedFolder — an AirApp is published via `publishAirApp`'s
+  // own always-review-first ChangeRequest, not alongside the data layer's
+  // `autoMerge: true` structure request — only recognized and stamped here.
   const airAppNode = config.airApp
     ? (folder.children ?? []).find(
         (node) =>
@@ -417,6 +450,7 @@ export function resolveProvisionedFolder(
     bases,
     missing,
     repairs,
+    airApp: airAppNode ? { nodeId: airAppNode.id } : null,
   };
 }
 
@@ -816,4 +850,124 @@ export function provisionDeclaredResources(
     });
   }
   return state.inFlight;
+}
+
+/** The client surface `publishAirApp` needs, on top of provisioning. */
+export type AirAppPublishClient = AirAppProvisioningClient & Pick<BusabaseClient, "fileTrees">;
+
+/** One file of the app's built AirApp bundle, as `publishAirApp` receives it. */
+export interface AirAppFileInput {
+  path: string;
+  content: string;
+  mimeType?: string;
+}
+
+export type AirAppPublishResult =
+  | { status: "created"; changeRequestId: string }
+  | { status: "updated"; changeRequestId: string };
+
+/**
+ * The create-vs-update operation list for one AirApp publish. Pure — no I/O —
+ * so the decision is directly testable: a local path already present on the
+ * deployed node updates it, anything else is a new file. Never deletes a
+ * remote-only path — a file this bundle stopped shipping is left alone rather
+ * than assumed stale, the same conservative choice the rest of this module
+ * makes for a Base's fields (`additiveFieldsFor` only ever appends).
+ */
+export function buildAirAppFileOperations(
+  localFiles: AirAppFileInput[],
+  deployedPaths: Iterable<string>,
+): FileTreeCreateOrUpdateOperation[] {
+  const deployed = new Set(deployedPaths);
+  return localFiles.map(
+    (file) =>
+      ({
+        kind: deployed.has(file.path) ? "update" : "create",
+        path: file.path,
+        content: file.content,
+        ...(file.mimeType ? { mimeType: file.mimeType } : {}),
+      }) as FileTreeCreateOrUpdateOperation,
+  );
+}
+
+/**
+ * Publish the app's own AirApp bundle: create it under the Folder when this
+ * Space has never had it, or propose the local files as an update when it
+ * already exists. Always a separate, always-review-first ChangeRequest from
+ * the data layer's `provisionDeclaredResources` — see the note on
+ * `AirAppNodeDeclaration` for why the two must never share a request.
+ *
+ * Call after `provisionDeclaredResources` has confirmed the Folder exists.
+ * Every call proposes the full local file list, even when nothing actually
+ * changed — this module has no access to the deployed content hashes
+ * (`fileTrees.listFiles` reports paths, not hashes; only a per-file
+ * `readFile` does, and fetching one per file to skip a no-op publish is not
+ * worth the round trips a normal publish cadence would spend on it). A
+ * reviewer sees an empty diff and merges or ignores it; this is a cost in
+ * review noise, not correctness.
+ *
+ * @throws {AirAppSetupError} `SETUP_CONFLICT` when `config` declares no
+ * `airApp`; `SETUP_REQUIRED` when the Folder does not exist yet.
+ */
+export async function publishAirApp(
+  client: AirAppPublishClient,
+  config: AirAppResourceConfig,
+  files: AirAppFileInput[],
+): Promise<AirAppPublishResult> {
+  const airApp = config.airApp;
+  if (!airApp) {
+    throw setupError("SETUP_CONFLICT", "This app does not declare an airApp to publish");
+  }
+  const current = await inspectProvisionedResources(client, config);
+  if (!current.folder) {
+    throw setupError(
+      "SETUP_REQUIRED",
+      "Provision the Folder and Bases with provisionDeclaredResources before publishing the AirApp",
+    );
+  }
+
+  if (!current.airApp) {
+    const changeRequest = await client.fileTrees.create({
+      type: "airapp",
+      parentNodeId: current.folder.nodeId,
+      slug: airApp.slug,
+      name: airApp.name,
+      description: airApp.description ?? "",
+      files: files as FileTreeCreateInput["files"],
+      mergeMode: "replace",
+      // Explicit even though this app's write-permission credential would
+      // otherwise auto-merge it: executable AirApp code always gets human
+      // review before it runs in a viewer's browser, no exceptions.
+      autoMerge: false,
+    });
+    // `autoMerge: false` always takes the pending-ChangeRequest branch of the
+    // output union at runtime; this narrows the static type to match, rather
+    // than widening `changeRequestId` to `string | undefined` for a branch
+    // that cannot happen.
+    if (changeRequest.materialized) {
+      throw setupError(
+        "SCHEMA_INCOMPLETE",
+        "AirApp create unexpectedly materialized despite autoMerge: false",
+      );
+    }
+    return { status: "created", changeRequestId: changeRequest.id };
+  }
+
+  const deployedFiles = await client.fileTrees.listFiles({
+    nodeId: current.airApp.nodeId,
+    type: "airapp",
+  });
+  const operations = buildAirAppFileOperations(
+    files,
+    deployedFiles.map((file) => file.path),
+  );
+  const changeRequest = await client.fileTrees.createChangeRequest({
+    nodeId: current.airApp.nodeId,
+    type: "airapp",
+    operations,
+    message: `Publish ${config.appName} AirApp`,
+    submittedBy: config.appId,
+    autoMerge: false,
+  });
+  return { status: "updated", changeRequestId: changeRequest.id };
 }

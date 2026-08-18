@@ -3,9 +3,11 @@ import {
   type AirAppProvisioningClient,
   type AirAppResourceConfig,
   AirAppSetupError,
+  buildAirAppFileOperations,
   buildProvisionOperations,
   inspectProvisionedResources,
   provisionDeclaredResources,
+  publishAirApp,
   resolveProvisionedFolder,
 } from "./airapp.js";
 
@@ -396,6 +398,7 @@ describe("declared AirApp node", () => {
     );
     expect(result.repairs.map((repair) => repair.resourceKey)).toContain("airapp");
     expect(result.folder?.nodeId).toBe("node-1");
+    expect(result.airApp).toEqual({ nodeId: "node-airapp" });
   });
 
   it("leaves an already-stamped AirApp alone", () => {
@@ -407,6 +410,7 @@ describe("declared AirApp node", () => {
       airAppConfig(),
     );
     expect(result.repairs).toHaveLength(0);
+    expect(result.airApp).toEqual({ nodeId: "node-airapp" });
   });
 
   it("still refuses a legacy Folder holding somebody else's AirApp", () => {
@@ -424,6 +428,178 @@ describe("declared AirApp node", () => {
     expect(() =>
       resolveProvisionedFolder(asFolder(node(), [baseChild(), airAppChild()]), config()),
     ).toThrow(/SETUP_CONFLICT.*kelly-crm-app/);
+  });
+
+  it("reports no AirApp when the Folder holds one but this app declares none", () => {
+    const result = resolveProvisionedFolder(
+      asFolder(node({ metadata: owned("app-root") }), []),
+      config(),
+    );
+    expect(result.airApp).toBeNull();
+  });
+
+  it("reports no AirApp when declared but not found under the Folder", () => {
+    const result = resolveProvisionedFolder(
+      asFolder(node({ metadata: owned("app-root") }), [baseChild({ metadata: owned("contacts") })]),
+      airAppConfig(),
+    );
+    expect(result.airApp).toBeNull();
+  });
+
+  it("reports null airApp (not `missing`) when the Folder itself does not exist yet", () => {
+    const result = resolveProvisionedFolder(null, airAppConfig());
+    expect(result.airApp).toBeNull();
+  });
+
+  it("recognizes a just-published AirApp even though fileTrees.create stamps its own metadata.version", () => {
+    // Regression: confirmed against a live busabase server — `fileTrees.create`
+    // always writes `{ version: "0.1.0" }` into a fresh Skill/Drive/AirApp
+    // node's metadata, even before any app ownership stamp. The old
+    // `hasEmptyMetadata` legacy-claim test required *literally* empty
+    // metadata, so a node `publishAirApp` had just created was invisible to
+    // the very next `inspectProvisionedResources` call — `airApp` came back
+    // `null` and a second publish would have proposed a duplicate AirApp
+    // instead of an update to the one that already existed.
+    const result = resolveProvisionedFolder(
+      asFolder(node({ metadata: owned("app-root") }), [
+        baseChild({ metadata: owned("contacts") }),
+        airAppChild({ metadata: { version: "0.1.0" } }),
+      ]),
+      airAppConfig(),
+    );
+    expect(result.airApp).toEqual({ nodeId: "node-airapp" });
+    expect(result.repairs.map((repair) => repair.resourceKey)).toContain("airapp");
+  });
+});
+
+describe("buildAirAppFileOperations", () => {
+  it("creates a path the deployed node does not have yet", () => {
+    const ops = buildAirAppFileOperations([{ path: "app/new.js", content: "x" }], []);
+    expect(ops).toEqual([{ kind: "create", path: "app/new.js", content: "x" }]);
+  });
+
+  it("updates a path the deployed node already has", () => {
+    const ops = buildAirAppFileOperations(
+      [{ path: "server.js", content: "updated" }],
+      ["server.js", "package.json"],
+    );
+    expect(ops).toEqual([{ kind: "update", path: "server.js", content: "updated" }]);
+  });
+
+  it("never proposes deleting a remote-only path — package.json is simply absent from the ops", () => {
+    const ops = buildAirAppFileOperations(
+      [{ path: "server.js", content: "x" }],
+      ["server.js", "package.json"],
+    );
+    expect(ops.some((op) => op.path === "package.json")).toBe(false);
+  });
+
+  it("carries mimeType through only when the local file declares one", () => {
+    const ops = buildAirAppFileOperations(
+      [
+        { path: "app/icon.svg", content: "<svg/>", mimeType: "image/svg+xml" },
+        { path: "app/index.html", content: "<html/>" },
+      ],
+      [],
+    );
+    expect(ops[0]).toMatchObject({ mimeType: "image/svg+xml" });
+    expect(ops[1]).not.toHaveProperty("mimeType");
+  });
+});
+
+describe("publishAirApp", () => {
+  const files = [{ path: "server.js", content: "console.log(1)" }];
+
+  it("throws SETUP_CONFLICT when the app declares no airApp", async () => {
+    const client = { nodes: {}, bases: {}, fileTrees: {} } as unknown as Parameters<
+      typeof publishAirApp
+    >[0];
+    await expect(publishAirApp(client, config(), files)).rejects.toThrow(
+      /SETUP_CONFLICT.*does not declare an airApp/,
+    );
+  });
+
+  it("throws SETUP_REQUIRED when the Folder does not exist yet", async () => {
+    const client = {
+      nodes: {
+        get: vi.fn().mockRejectedValue({ status: 404 }),
+        list: vi.fn().mockResolvedValue([]),
+      },
+      bases: {},
+      fileTrees: {},
+    } as unknown as Parameters<typeof publishAirApp>[0];
+    await expect(publishAirApp(client, airAppConfig(), files)).rejects.toThrow(/SETUP_REQUIRED/);
+  });
+
+  it("creates the AirApp, review-first, when the Folder exists but has none yet", async () => {
+    const folderNode = node({ metadata: owned("app-root") });
+    const create = vi
+      .fn()
+      .mockResolvedValue({ id: "cr-create", status: "in_review", materialized: false });
+    const client = {
+      nodes: {
+        get: vi
+          .fn()
+          .mockResolvedValue(asFolder(folderNode, [baseChild({ metadata: owned("contacts") })])),
+      },
+      bases: {},
+      fileTrees: { create },
+    } as unknown as Parameters<typeof publishAirApp>[0];
+
+    const result = await publishAirApp(
+      client,
+      airAppConfig({ folder: { ...config().folder, nodeId: "node-1" } }),
+      files,
+    );
+
+    expect(result).toEqual({ status: "created", changeRequestId: "cr-create" });
+    expect(create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "airapp",
+        parentNodeId: "node-1",
+        slug: "kelly-crm-app",
+        mergeMode: "replace",
+        autoMerge: false,
+        files,
+      }),
+    );
+  });
+
+  it("proposes an update, review-first, when the AirApp already exists", async () => {
+    const folderNode = node({ metadata: owned("app-root") });
+    const listFiles = vi.fn().mockResolvedValue([{ path: "server.js" }, { path: "package.json" }]);
+    const createChangeRequest = vi.fn().mockResolvedValue({ id: "cr-update", status: "in_review" });
+    const client = {
+      nodes: {
+        get: vi
+          .fn()
+          .mockResolvedValue(
+            asFolder(folderNode, [
+              baseChild({ metadata: owned("contacts") }),
+              airAppChild({ metadata: owned("airapp") }),
+            ]),
+          ),
+      },
+      bases: {},
+      fileTrees: { listFiles, createChangeRequest },
+    } as unknown as Parameters<typeof publishAirApp>[0];
+
+    const result = await publishAirApp(
+      client,
+      airAppConfig({ folder: { ...config().folder, nodeId: "node-1" } }),
+      files,
+    );
+
+    expect(result).toEqual({ status: "updated", changeRequestId: "cr-update" });
+    expect(listFiles).toHaveBeenCalledWith({ nodeId: "node-airapp", type: "airapp" });
+    expect(createChangeRequest).toHaveBeenCalledWith(
+      expect.objectContaining({
+        nodeId: "node-airapp",
+        type: "airapp",
+        autoMerge: false,
+        operations: [{ kind: "update", path: "server.js", content: "console.log(1)" }],
+      }),
+    );
   });
 });
 
