@@ -195,4 +195,30 @@ describe("nodes.updateContent — whiteboard (real oRPC + PGLite + storage)", ()
       ),
     ).rejects.toThrow(/whiteboardDocument is not writable through node metadata/);
   });
+
+  it("refuses a whiteboard document over the 1MB cap before writing anything", async () => {
+    // Whiteboard has no schema-level size limit (unlike Doc's body or HTML's
+    // `.max(500_000)` source), so the cap lives in the handler — this proves
+    // it actually fires rather than just existing as dead code.
+    const oversized: WhiteboardDocument = {
+      version: 1,
+      elements: [{ id: "huge", type: "text", text: "x".repeat(1_100_000) }],
+      appState: {},
+    };
+
+    await expect(
+      asManager("alice", () =>
+        raw.nodes.updateContent({
+          nodeId: whiteboardNodeId,
+          content: { kind: "whiteboard", document: oversized },
+        }),
+      ),
+    ).rejects.toMatchObject({ code: "PAYLOAD_TOO_LARGE" });
+
+    // Rejected before any ChangeRequest existed: the last real write (from
+    // the "write-level actor" test above) is still what's on disk.
+    const storageKey = `busabase/nodes/${whiteboardNodeId}/whiteboard/scene.json`;
+    const bytes = await storage.getObject(storageKey);
+    expect(JSON.parse(bytes.toString("utf8"))).toEqual(A_WHITEBOARD_DOCUMENT);
+  });
 });

@@ -275,6 +275,7 @@ export const dashboardZhCN: CoreI18nMessages = {
     activity: "动态",
     archive: "归档",
     assets: "资产",
+    agents: "Agents",
     graph: "图谱视图",
     workspace: "工作区",
     base: "数据库",

@@ -3,7 +3,25 @@
 import { consumeEventIterator } from "@orpc/client";
 import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";
 import type { AirAppRuntimeEvent } from "busabase-contract/domains/airapp/contract";
-import type { AirAppRunner } from "./types";
+import type { AirAppMountedFile, AirAppRunner } from "./types";
+
+/**
+ * base64 for the oRPC hop, which is JSON and cannot carry bytes.
+ *
+ * Chunked rather than `String.fromCharCode(...bytes)` in one spread: a
+ * megabyte-scale image would blow the argument limit and throw
+ * `RangeError: Maximum call stack size exceeded` — on a 250 KB PNG it happens
+ * to survive, so the naive version passes a small fixture and fails on real
+ * launch assets.
+ */
+export function toBase64(bytes: Uint8Array): string {
+  let binary = "";
+  const CHUNK = 0x8000;
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
+  }
+  return btoa(binary);
+}
 
 /**
  * `AirAppRunner` implementation backed by a real server-side
@@ -30,6 +48,7 @@ export class LocalNodeRunner implements AirAppRunner {
   private readonly nodeId: string;
   private readonly engine: "local-node" | "srt";
   private files: Record<string, string> = {};
+  private binaryFiles: Record<string, string> = {};
   private controller: AbortController | null = null;
   private logCallbacks: Array<(line: string) => void> = [];
   private readyCallbacks: Array<(previewPath: string) => void> = [];
@@ -86,8 +105,16 @@ export class LocalNodeRunner implements AirAppRunner {
     }
   }
 
-  async mount(files: Record<string, string>): Promise<void> {
-    this.files = files;
+  async mount(files: Record<string, AirAppMountedFile>): Promise<void> {
+    this.files = {};
+    this.binaryFiles = {};
+    for (const [filePath, content] of Object.entries(files)) {
+      if (typeof content === "string") {
+        this.files[filePath] = content;
+      } else {
+        this.binaryFiles[filePath] = toBase64(content);
+      }
+    }
   }
 
   async install(): Promise<void> {
@@ -98,7 +125,12 @@ export class LocalNodeRunner implements AirAppRunner {
       this.installDeferred = { resolve, reject };
       consumeEventIterator(
         this.orpc.airapps.runLocalNode.call(
-          { nodeId: this.nodeId, files: this.files, engine: this.engine },
+          {
+            nodeId: this.nodeId,
+            files: this.files,
+            binaryFiles: this.binaryFiles,
+            engine: this.engine,
+          },
           { signal: controller.signal },
         ),
         {

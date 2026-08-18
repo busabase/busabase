@@ -34,6 +34,14 @@ export const airAppRunLocalNodeInputSchema = z.object({
   /** Text files to mount into the sandbox workdir before installing, keyed by
    *  path (same shape `RunPanel` already assembles for `NodepodRunner.mount`). */
   files: z.record(z.string(), z.string()),
+  /** Binary (asset-backed) files — images, fonts, sample data — keyed by the
+   *  same path, base64-encoded because this input crosses a JSON boundary that
+   *  `Uint8Array` cannot. Separate from `files` rather than a tagged union so
+   *  an older client that sends only `files` keeps working unchanged.
+   *
+   *  The in-browser Nodepod engine never uses this field: it hands raw bytes to
+   *  `Nodepod.boot({ files })` directly and skips the base64 round trip. */
+  binaryFiles: z.record(z.string(), z.string()).optional().default({}),
   /** Server-side execution mode. `"local-node"` spawns a bare host Node.js
    *  process (previewable, data bridge via reverse proxy, NOT OS-isolated);
    *  `"srt"` wraps the same commands in the OS sandbox (isolated execution,

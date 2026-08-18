@@ -279,6 +279,7 @@ export const dashboardJa: CoreI18nMessages = {
     activity: "アクティビティ",
     archive: "アーカイブ",
     assets: "アセット",
+    agents: "エージェント",
     graph: "グラフビュー",
     workspace: "ワークスペース",
     base: "ベース",

@@ -18,7 +18,6 @@ import { getContextActorId } from "../../../context";
  * So a caller may only name a `slug` from this table. The command line is ours.
  * `assertSameOriginForAgents` (see `logic/agent-origin-guard.ts`) is the second
  * layer; neither is sufficient alone.
- *
  */
 interface CatalogSpec {
   slug: string;
@@ -51,11 +50,15 @@ interface CatalogSpec {
  * response, these are what's shown — so they still have to be kept
  * reasonably current, they're just no longer the only source.
  *
- * Deliberately **not** a dependency on `@acprouter/core` (which has the same
- * fetch-with-timeout logic). Busabase packages must remain independently
- * installable, and a workspace-only dependency would make standalone installs
- * fail when that package is unavailable. Keeping the small metadata fetch here
- * preserves that boundary.
+ * Deliberately **not** a dependency on `@acprouter/core` (which has this
+ * same fetch-with-timeout logic already, and was tried first) — `busabase`,
+ * `busabase-contract`, and `busabase-core` ship as this repo's own public,
+ * self-contained workspace, and `acprouter-core` is not part of it. A
+ * `workspace:*` dependency on it would type-check fine here and then break
+ * every downstream install the moment it tried to resolve a package that
+ * isn't there. Every package on this surface must declare its OWN type deps
+ * for the same reason — none of them may rely on hoisting from a dependency
+ * outside this workspace. Caught before merge, not after a public build broke.
  */
 const CATALOG: CatalogSpec[] = [
   {

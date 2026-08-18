@@ -23,7 +23,7 @@ import {
 import { isAirAppFullscreenSearch, updateAirAppFullscreenSearch } from "../utils/fullscreen-query";
 import { AIRAPP_PREVIEW_IFRAME_SANDBOX } from "../utils/preview-sandbox";
 import { createAirAppRunner } from "./runners/runner-factory";
-import type { AirAppRunnerKind } from "./runners/types";
+import type { AirAppMountedFile, AirAppRunnerKind } from "./runners/types";
 
 /**
  * Owns the Nodepod runner lifecycle (mount/install/start, log streaming,
@@ -85,10 +85,15 @@ export function useAirAppRunner({
     );
 
     try {
-      // Mount every text (utf8) file into the runner's virtual filesystem;
-      // asset-backed binary files (`encoding: "url"`, e.g. images) are skipped
-      // for V1 — Nodepod's virtual fs takes `Uint8Array` too, so binary mounting
-      // is a straightforward follow-up, not a hard limitation.
+      // Mount every file into the runner's virtual filesystem — text (utf8)
+      // inline, and asset-backed binary (`encoding: "url"`, e.g. images, fonts,
+      // sample data) by fetching its bytes from the asset URL the read returns.
+      //
+      // Binary used to be dropped here, which failed in the worst possible way:
+      // the file stored fine and the pod booted fine, so an AirApp shipping its
+      // own images just rendered broken `<img>`s with nothing logged anywhere.
+      // A file that cannot be mounted must now say so (below) rather than
+      // vanish.
       const entries = await Promise.all(
         airapp.files.map(async (file) => {
           // Runner boot is an imperative lifecycle that can outlive this view.
@@ -100,10 +105,22 @@ export function useAirAppRunner({
             filePath: file.path,
             type: "airapp",
           });
-          return detail.encoding === "utf8" ? ([file.path, detail.content] as const) : null;
+          if (detail.encoding === "utf8") {
+            return [file.path, detail.content] as const;
+          }
+          if (!detail.assetUrl) return null;
+          // Same-origin in every hosted row, so no credentials/CORS dance —
+          // this is the storage URL busabase itself just handed back.
+          const response = await fetch(detail.assetUrl);
+          if (!response.ok) {
+            throw new Error(
+              `Failed to load "${file.path}" (HTTP ${response.status}) — the AirApp cannot start without it.`,
+            );
+          }
+          return [file.path, new Uint8Array(await response.arrayBuffer())] as const;
         }),
       );
-      const files: Record<string, string> = {};
+      const files: Record<string, AirAppMountedFile> = {};
       for (const fileEntry of entries) {
         if (fileEntry) {
           files[fileEntry[0]] = fileEntry[1];
