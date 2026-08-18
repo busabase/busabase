@@ -15,3 +15,8 @@ export interface WebhookFormState {
 }
 
 export type WebhookFormPicker = "event" | "base" | null;
+
+export interface WebhookBaseOption {
+  value: string;
+  label: string;
+}

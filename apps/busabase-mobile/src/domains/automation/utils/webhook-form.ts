@@ -1,6 +1,7 @@
 import type {
   WebhookActionKind,
   WebhookDeliveryStatus,
+  WebhookDeliveryVO,
   WebhookEventType,
   WebhookHttpConfig,
   WebhookRuleInput,
@@ -97,3 +98,13 @@ export const getWebhookRuleMeta = (rule: WebhookRuleVO): string =>
   rule.lastTriggeredAt
     ? `${getWebhookDeliveryStatusLabel(rule.lastStatus)} · ${formatListTime(rule.lastTriggeredAt)}`
     : "Never run";
+
+export const getWebhookTestFireMessage = (
+  delivery: Pick<WebhookDeliveryVO, "status" | "detail">,
+): string => {
+  if (delivery.status === "success") return "Test delivery succeeded.";
+  if (delivery.status === "failed") {
+    return `Test delivery failed${delivery.detail ? `: ${delivery.detail}` : ""}.`;
+  }
+  return "Test delivery skipped.";
+};
