@@ -140,7 +140,23 @@ const normalizeOrigin = (raw: string, fallback = DEFAULT_CLOUD_BASE_URL) => {
   return url.origin;
 };
 
-const requestOrigin = (request: Request) => new URL(request.url).origin;
+const requestOrigin = (request: Request) => {
+  const directOrigin = new URL(request.url).origin;
+  const forwardedHost = request.headers.get("x-forwarded-host")?.split(",")[0]?.trim();
+  const forwardedProto = request.headers.get("x-forwarded-proto")?.split(",")[0]?.trim();
+  if (!forwardedHost || !forwardedProto || !["http", "https"].includes(forwardedProto))
+    return directOrigin;
+
+  try {
+    const forwardedOrigin = new URL(`${forwardedProto}://${forwardedHost}`).origin;
+    const browserOrigin = request.headers.get("origin");
+    // A browser request must corroborate the proxy headers. OAuth callbacks have no Origin,
+    // and remain bound to the pending PKCE request by their one-time state value.
+    return browserOrigin && browserOrigin !== forwardedOrigin ? directOrigin : forwardedOrigin;
+  } catch {
+    return directOrigin;
+  }
+};
 
 const isLoopbackOrigin = (origin: string) => {
   const url = new URL(origin);

@@ -256,6 +256,87 @@ describe("local AirApp gateway OAuth", () => {
     });
   });
 
+  it("uses a corroborated forwarded origin for dynamic OAuth behind a preview proxy", async () => {
+    const publicOrigin = "https://3111-preview.dev.budaapps.com";
+    const requests: Request[] = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const upstream = input instanceof Request ? input : new Request(input, init);
+      requests.push(upstream);
+      const url = new URL(upstream.url);
+      if (url.pathname === "/api/oauth/register") {
+        const body = (await upstream.json()) as { redirect_uris: string[] };
+        expect(body.redirect_uris).toEqual([`${publicOrigin}/auth/callback`]);
+        return Response.json(
+          { client_id: "airapp_client_proxy", redirect_uris: body.redirect_uris, scope: "api" },
+          { status: 201 },
+        );
+      }
+      if (url.pathname === "/api/oauth/token") {
+        const body = new URLSearchParams(await upstream.text());
+        expect(body.get("redirect_uri")).toBe(`${publicOrigin}/auth/callback`);
+        return Response.json({
+          access_token: "proxy_access",
+          refresh_token: "proxy_refresh",
+          expires_in: 3600,
+          scope: "api",
+          token_type: "Bearer",
+        });
+      }
+      return new Response(null, { status: 302 });
+    });
+    const gateway = createBusabaseAirAppLocalGateway({
+      appId: APP_ID,
+      credentialStore: { rootDir },
+      fetch: fetchMock as unknown as typeof fetch,
+    });
+    const forwardedHeaders = {
+      "x-forwarded-host": new URL(publicOrigin).host,
+      "x-forwarded-proto": "https",
+    };
+    const response = await gateway.start(
+      request("/auth/start", {
+        method: "POST",
+        headers: { ...forwardedHeaders, origin: publicOrigin },
+      }),
+    );
+    expect(response.status).toBe(303);
+    const authorize = new URL(requests[1]?.url || "");
+    expect(authorize.searchParams.get("redirect_uri")).toBe(`${publicOrigin}/auth/callback`);
+
+    const callback = await gateway.callback(
+      request(
+        `/auth/callback?code=code_1&state=${authorize.searchParams.get("state")}&iss=${encodeURIComponent("https://busabase.com")}`,
+        { headers: forwardedHeaders },
+      ),
+    );
+    expect(callback.status).toBe(303);
+    expect(callback.headers.get("location")).toBe(`${publicOrigin}/`);
+    expect(loadBusabaseAirAppOAuthCredential(APP_ID, { rootDir })).toMatchObject({
+      clientId: "airapp_client_proxy",
+      accessToken: "proxy_access",
+    });
+  });
+
+  it("rejects a browser Origin that disagrees with forwarded proxy headers", async () => {
+    const gateway = createBusabaseAirAppLocalGateway({
+      appId: APP_ID,
+      credentialStore: { rootDir },
+      environment: {},
+    });
+    const response = await gateway.start(
+      request("/auth/start", {
+        method: "POST",
+        headers: {
+          origin: "https://attacker.example",
+          "x-forwarded-host": "preview.example",
+          "x-forwarded-proto": "https",
+        },
+      }),
+    );
+    expect(response.status).toBe(303);
+    expect(response.headers.get("location")).toContain("oauth_error=Request+origin+did+not+match");
+  });
+
   it("keeps the shared client for an IPv6 loopback callback", async () => {
     const requests: Request[] = [];
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
