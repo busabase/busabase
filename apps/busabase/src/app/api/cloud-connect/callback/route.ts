@@ -1,3 +1,7 @@
+import {
+  buildDesktopCloudConnectReturnUrl,
+  type DesktopCloudConnectReturnStatus,
+} from "busabase-core/domains/settings/desktop-shell";
 import type { NextRequest } from "next/server";
 import { getDb } from "~/db";
 import {
@@ -9,10 +13,6 @@ import {
   saveCloudConnectCredential,
 } from "~/domains/settings/logic/cloud-connect-store";
 import { startCloudTunnel } from "~/domains/settings/logic/cloud-tunnel-client";
-import {
-  buildDesktopCloudConnectReturnUrl,
-  type DesktopCloudConnectReturnStatus,
-} from "~/domains/settings/utils/desktop-shell";
 
 /**
  * OAuth redirect target for the Cloud Connect flow. This route IS the

@@ -1,5 +1,9 @@
 "use client";
 
+import {
+  isDesktopCloudConnectReturn,
+  openExternalViaDesktopShell,
+} from "busabase-core/domains/settings/desktop-shell";
 import { Alert, AlertDescription, AlertTitle } from "kui/alert";
 import { Badge } from "kui/badge";
 import { Button } from "kui/button";
@@ -8,7 +12,6 @@ import { Label } from "kui/label";
 import { CloudOff, Loader2, RefreshCw, ShieldCheck } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { TranslationFunctions } from "~/i18n/i18n-types";
-import { isDesktopCloudConnectReturn, openExternalViaDesktopShell } from "../utils/desktop-shell";
 
 export type CloudConnectSettingsLabels = TranslationFunctions["cloudConnect"];
 

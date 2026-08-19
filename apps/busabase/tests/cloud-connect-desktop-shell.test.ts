@@ -1,9 +1,9 @@
-import { describe, expect, it } from "vitest";
 import {
   DESKTOP_OPEN_EXTERNAL_REQUEST,
   DESKTOP_OPEN_EXTERNAL_RESULT,
   openExternalViaDesktopShell,
-} from "~/domains/settings/utils/desktop-shell";
+} from "busabase-core/domains/settings/desktop-shell";
+import { describe, expect, it } from "vitest";
 
 /**
  * The desktop shell (`apps/busabase-desktop`) embeds this app in an iframe inside a

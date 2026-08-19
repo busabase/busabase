@@ -1,13 +1,13 @@
+import {
+  buildDesktopCloudConnectReturnUrl,
+  DESKTOP_CLOUD_CONNECT_RETURNED,
+  isDesktopCloudConnectReturn,
+} from "busabase-core/domains/settings/desktop-shell";
 import { describe, expect, it } from "vitest";
 import {
   beginCloudConnectAuthorize,
   isDesktopCloudConnectFlow,
 } from "../src/domains/settings/logic/cloud-connect-oauth";
-import {
-  buildDesktopCloudConnectReturnUrl,
-  DESKTOP_CLOUD_CONNECT_RETURNED,
-  isDesktopCloudConnectReturn,
-} from "../src/domains/settings/utils/desktop-shell";
 
 const flowInput = {
   cloudUrl: "https://busabase.com",
@@ -19,10 +19,8 @@ const stateOf = (authorizeUrl: string) => new URL(authorizeUrl).searchParams.get
 
 describe("buildDesktopCloudConnectReturnUrl", () => {
   it("emits exactly the URLs apps/busabase-desktop parses", () => {
-    // These two strings are the contract between this app's OAuth callback page
-    // and `apps/busabase-desktop/src/lib/deep-link.ts`. If either side changes
-    // shape, sign-in silently stops handing the user back to the desktop window,
-    // so pin the literal here rather than rebuilding it from the same helper.
+    // Pin the externally registered protocol literals rather than rebuilding
+    // the expectations from the shared helper.
     expect(buildDesktopCloudConnectReturnUrl("ok")).toBe(
       "busabase://desktop/cloud-connect?status=ok",
     );
