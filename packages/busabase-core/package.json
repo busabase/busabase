@@ -1,7 +1,7 @@
 {
   "name": "busabase-core",
   "description": "Shared Busabase open-core protocol, local store, API helpers, and dashboard components.",
-  "version": "0.17.0",
+  "version": "0.17.1",
   "private": true,
   "type": "module",
   "exports": {
@@ -140,6 +140,10 @@
     "./domains/webhook/types": {
       "types": "./src/domains/webhook/types/webhook.ts",
       "default": "./src/domains/webhook/types/webhook.ts"
+    },
+    "./domains/settings/desktop-shell": {
+      "types": "./src/domains/settings/utils/desktop-shell.ts",
+      "default": "./src/domains/settings/utils/desktop-shell.ts"
     },
     "./dashboard": {
       "types": "./src/domains/dashboard/index.tsx",
