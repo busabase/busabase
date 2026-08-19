@@ -148,17 +148,28 @@ describe("ensureRegistered", () => {
     expect(sw.register).not.toHaveBeenCalled();
   });
 
-  it("surfaces a useful error when the SW API rejects registration", async () => {
-    vi.stubGlobal("navigator", {
-      serviceWorker: {
-        getRegistration: async () => {
-          throw new Error("SecurityError");
-        },
-      },
+  it("surfaces a useful error only after a retry also fails", async () => {
+    const getRegistration = vi.fn(async () => {
+      throw new Error("SecurityError");
     });
+    vi.stubGlobal("navigator", { serviceWorker: { getRegistration } });
     await expect(ensureRegistered()).rejects.toThrow(
       "AirApp preview requires HTTPS and Service Worker support",
     );
+    expect(getRegistration).toHaveBeenCalledTimes(2);
+  });
+
+  it("recovers on retry when only the first attempt fails transiently", async () => {
+    const sw = installFakeServiceWorker([]);
+    let calls = 0;
+    sw.getRegistration = vi.fn(async () => {
+      calls += 1;
+      if (calls === 1) throw new Error("Service Worker activation timed out");
+      return undefined;
+    });
+    await expect(ensureRegistered()).resolves.toBeUndefined();
+    expect(sw.getRegistration).toHaveBeenCalledTimes(2);
+    expect(sw.register).toHaveBeenCalledOnce();
   });
 
   it("stops the run where service workers do not exist at all", async () => {

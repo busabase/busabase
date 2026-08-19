@@ -341,11 +341,28 @@ export function capApiKeyLevel(
  * ladder used by API keys and node ACLs. Unknown/missing roles fail closed to
  * read-only; single-user and remote-tunnel hosts should pass `manage`
  * explicitly because they do not have a cloud membership row.
+ *
+ * `member` is `write`, not `changeRequest`. The narrower baseline made a member
+ * a proposer who could never approve anything — not even the change request
+ * they had just opened themselves, and not even a folder at the workspace root
+ * that nobody else had any claim on. The UI offered the approve/request-changes
+ * panel anyway and the click came back `Requires write workspace access or
+ * write access on every target node`, so the role read as broken rather than
+ * as deliberate. A member is a colleague inside the workspace: they write, and
+ * they review each other. `manage` (webhooks, vault, node visibility,
+ * principals, public shares, purge) stays with owner/admin, which is where the
+ * decisions that affect the whole space belong.
+ *
+ * This baseline only ever applies to nodes a member can already SEE by default
+ * — `getEffectiveNodeLevel` starts from `null`, not from the baseline, for a
+ * private subtree or (in Restricted mode) an unmarked one. Delegated access to
+ * a closed folder is still exactly what its explicit grants say, so raising the
+ * baseline does not reach into anything an admin has deliberately closed off.
  */
 export function permissionLevelForSpaceRole(
   role: string | null | undefined,
 ): ApiKeyPermissionLevel {
   if (role === "owner" || role === "admin") return "manage";
-  if (role === "member") return "changeRequest";
+  if (role === "member") return "write";
   return "read";
 }

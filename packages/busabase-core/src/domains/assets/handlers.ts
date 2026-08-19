@@ -331,8 +331,10 @@ export const listAssets = async (): Promise<AssetVO[]> => {
     ).length;
     if (
       visibleUsageCount > 0 ||
+      // Unmounted (no usages): visible to a manager, or to whoever staged it.
+      // `manage` rather than `write` — a `member` baseline is `write` now.
       (assetUsages.length === 0 &&
-        (hasWorkspacePermission("write") || row.createdBy === resolveActorId("local-producer")))
+        (hasWorkspacePermission("manage") || row.createdBy === resolveActorId("local-producer")))
     ) {
       visibleRows.push(toAssetVO(row, visibleUsageCount));
     }

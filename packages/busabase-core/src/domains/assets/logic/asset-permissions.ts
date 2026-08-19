@@ -48,7 +48,11 @@ export const assertAssetPermission = async (
       hasApiKeyLevel("changeRequest", required) &&
       hasApiKeyLevel(getContextCredentialPermissionCeiling(), required);
     if (creatorMayStageForChangeRequest) return new Set();
-    if (!hasWorkspacePermission("write")) throw assetNotFound(assetId);
+    // An unmounted asset has no node to derive authority from, so somebody
+    // else's staging upload is manager-only. `manage`, not `write`: a `member`
+    // now carries a `write` workspace baseline, and it must not double as
+    // "manager" here (same reasoning as `assertCanApproveChangeRequest`).
+    if (!hasWorkspacePermission("manage")) throw assetNotFound(assetId);
     return new Set();
   }
 

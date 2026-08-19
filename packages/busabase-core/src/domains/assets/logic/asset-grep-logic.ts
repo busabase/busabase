@@ -155,13 +155,15 @@ const resolveCandidateAssets = async (
         ),
       );
     conditions.push(
-      (hasWorkspacePermission("write")
+      (hasWorkspacePermission("manage")
         ? or(notExists(anyNodeUsage), exists(visibleNodeUsage))
         : or(exists(visibleNodeUsage), and(notExists(anyNodeUsage), stagedByActor))) as SQL,
     );
-  } else if (!hasWorkspacePermission("write")) {
+  } else if (!hasWorkspacePermission("manage")) {
     // A manager retains visibility of every mounted node. A scoped read key
     // may additionally inspect only the manager's own unmounted staging assets.
+    // `manage` is what "manager" means here: a `member`'s workspace baseline is
+    // `write`, which must not open other people's unmounted staging uploads.
     conditions.push(or(exists(anyNodeUsage), and(notExists(anyNodeUsage), stagedByActor)) as SQL);
   }
   const rows = await db

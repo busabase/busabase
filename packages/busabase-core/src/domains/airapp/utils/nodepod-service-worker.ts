@@ -116,6 +116,32 @@ export const beginPodHeartbeat = (): (() => void) => {
   };
 };
 
+const registerAndActivate = async (): Promise<void> => {
+  const existing = await navigator.serviceWorker.getRegistration("/");
+  if (!existing) {
+    await navigator.serviceWorker.register(SW_PATH, { scope: "/", updateViaCache: "none" });
+  }
+  await Promise.race([
+    navigator.serviceWorker.ready,
+    new Promise((_, reject) =>
+      setTimeout(
+        () => reject(new Error("Service Worker activation timed out")),
+        SW_READY_TIMEOUT_MS,
+      ),
+    ),
+  ]);
+  await waitForController();
+};
+
+/**
+ * One retry (two attempts total). Registration can lose a one-off race against
+ * something slow on the page's origin (e.g. a dev-server recompile mid-handshake)
+ * with no relation to actual browser support — a bare refresh already "fixes" that
+ * class of failure because the SW has usually finished activating by the second
+ * try, so do that ourselves before reporting a hard, misleading "unsupported" error.
+ */
+const REGISTRATION_ATTEMPTS = 2;
+
 /**
  * Make sure `/__sw__.js` is registered before a pod boots.
  *
@@ -133,25 +159,16 @@ export const ensureRegistered = async (): Promise<void> => {
   if (!hasServiceWorker()) {
     throw new NodepodServiceWorkerError();
   }
-  try {
-    const existing = await navigator.serviceWorker.getRegistration("/");
-    if (!existing) {
-      await navigator.serviceWorker.register(SW_PATH, { scope: "/", updateViaCache: "none" });
+  let lastCause: unknown;
+  for (let attempt = 0; attempt < REGISTRATION_ATTEMPTS; attempt++) {
+    try {
+      await registerAndActivate();
+      return;
+    } catch (cause) {
+      lastCause = cause;
     }
-    await Promise.race([
-      navigator.serviceWorker.ready,
-      new Promise((_, reject) =>
-        setTimeout(
-          () => reject(new Error("Service Worker activation timed out")),
-          SW_READY_TIMEOUT_MS,
-        ),
-      ),
-    ]);
-    await waitForController();
-  } catch (cause) {
-    if (cause instanceof NodepodServiceWorkerError) throw cause;
-    throw new NodepodServiceWorkerError({ cause });
   }
+  throw new NodepodServiceWorkerError({ cause: lastCause });
 };
 
 /** A path that can never host a pod, so it never needs the SW. */

@@ -46,7 +46,11 @@ import { getPrimaryField } from "../base/utils/primary-field";
 import { ArchivedBasesView } from "./components/archived-bases";
 import { AssetsView } from "./components/assets";
 import { BaseDetailView, BaseSetupView, BaseTopbarActions } from "./components/base-views";
-import { ChangeRequestDetailPage, ReviewConflictPanel } from "./components/change-request-review";
+import {
+  ChangeRequestDetailPage,
+  type ReviewAction,
+  ReviewConflictPanel,
+} from "./components/change-request-review";
 import {
   getChangeRequestReviewMessage,
   getChangeRequestTitle,
@@ -1108,7 +1112,9 @@ function BusabaseDashboardContent({
     },
     onSettled: () => refresh(),
   });
-  const isPending = reviewMutation.isPending;
+  const pendingReviewAction: ReviewAction | null = reviewMutation.isPending
+    ? (reviewMutation.variables?.action ?? null)
+    : null;
 
   const approveChangeRequest = useCallback(
     (changeRequestId: string, reason?: string) =>
@@ -1953,7 +1959,7 @@ function BusabaseDashboardContent({
           changeRequest={selectedChangeRequest}
           client={client}
           focusOperationId={isOperationRoute ? (operationParams?.operationId ?? null) : null}
-          isPending={isPending}
+          pendingAction={pendingReviewAction}
           onApprove={approveChangeRequest}
           onClose={closeChangeRequest}
           onMerge={mergeChangeRequest}
@@ -2181,7 +2187,7 @@ function BusabaseDashboardContent({
     nodeDetailRoute,
     selectedBaseView,
     isNewRecordRoute,
-    isPending,
+    pendingReviewAction,
     isBatchPending,
     runBatchReview,
     locationPath,
