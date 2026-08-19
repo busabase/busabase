@@ -1,8 +1,11 @@
 "use client";
 
+import {
+  DESKTOP_CLOUD_CONNECT_RETURNED,
+  parseDesktopCloudConnectReturnUrl,
+} from "busabase-core/domains/settings/desktop-shell";
 import type { RefObject } from "react";
 import { useEffect } from "react";
-import { CLOUD_CONNECT_RETURNED, parseCloudConnectReturn } from "../lib/deep-link";
 import { getExternalHttpUrl, OPEN_EXTERNAL_REQUEST, OPEN_EXTERNAL_RESULT } from "../lib/sidecar";
 
 interface SidecarBridgeOptions {
@@ -63,10 +66,10 @@ function useCloudConnectReturn(
     let cancelled = false;
 
     const handle = (rawUrl: string) => {
-      const status = parseCloudConnectReturn(rawUrl);
+      const status = parseDesktopCloudConnectReturnUrl(rawUrl);
       if (!status) return;
       frameRef.current?.contentWindow?.postMessage(
-        { type: CLOUD_CONNECT_RETURNED, status },
+        { type: DESKTOP_CLOUD_CONNECT_RETURNED, status },
         sidecarOrigin,
       );
     };
