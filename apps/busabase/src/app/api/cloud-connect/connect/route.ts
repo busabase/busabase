@@ -44,7 +44,7 @@ export async function POST(request: NextRequest) {
     redirectUri,
     // The caller could not open an in-app popup, which inside the Busabase
     // Desktop shell means the OS browser will run the sign-in — so the callback
-    // page has to deep link the user back. See `../../../domains/settings/utils/desktop-shell`.
+    // page has to deep link the user back. See the shared Busabase desktop-shell protocol.
     returnToDesktop: body.returnToDesktop === true,
   });
 
