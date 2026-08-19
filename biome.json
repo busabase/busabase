@@ -1,6 +1,11 @@
 {
   "$schema": "https://biomejs.dev/schemas/2.2.3/schema.json",
-  "formatter": { "enabled": true, "indentStyle": "space", "indentWidth": 2, "lineWidth": 100 },
+  "formatter": {
+    "enabled": true,
+    "indentStyle": "space",
+    "indentWidth": 2,
+    "lineWidth": 100
+  },
   "linter": {
     "enabled": true,
     "rules": {
@@ -32,12 +37,6 @@
   "files": {
     "includes": [
       "**",
-      "!boilerplates",
-      "!videos",
-      "!**/playwright-report",
-      "!apps/costory/**/*.js",
-      "!**/scripts/cookbook-pdf/book",
-      "!**/.react-email",
       "!**/.source",
       "!**/dist",
       "!**/.data",
