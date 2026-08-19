@@ -853,7 +853,8 @@ export function provisionDeclaredResources(
 }
 
 /** The client surface `publishAirApp` needs, on top of provisioning. */
-export type AirAppPublishClient = AirAppProvisioningClient & Pick<BusabaseClient, "fileTrees">;
+export type AirAppPublishClient = AirAppProvisioningClient &
+  Pick<BusabaseClient, "fileTrees" | "changeRequests">;
 
 /** One file of the app's built AirApp bundle, as `publishAirApp` receives it. */
 export interface AirAppFileInput {
@@ -864,7 +865,8 @@ export interface AirAppFileInput {
 
 export type AirAppPublishResult =
   | { status: "created"; changeRequestId: string }
-  | { status: "updated"; changeRequestId: string };
+  | { status: "updated"; changeRequestId: string }
+  | { status: "pending"; changeRequestId: string };
 
 /**
  * The create-vs-update operation list for one AirApp publish. Pure — no I/O —
@@ -888,6 +890,44 @@ export function buildAirAppFileOperations(
         ...(file.mimeType ? { mimeType: file.mimeType } : {}),
       }) as FileTreeCreateOrUpdateOperation,
   );
+}
+
+/**
+ * Find a still-pending ChangeRequest that already proposes creating this
+ * declared AirApp, so a second `publishAirApp` call before the first is
+ * reviewed does not propose a second, duplicate create for the same slug.
+ *
+ * Scoped to the first 500 in-review ChangeRequests (10 pages of 50) — a
+ * Space with more open reviews than that has bigger problems than this
+ * scan not reaching the one it is looking for, and a missed match only
+ * costs an extra (harmless, reviewer-visible) duplicate proposal, never a
+ * wrong merge.
+ */
+async function findPendingAirAppCreate(
+  client: AirAppPublishClient,
+  slug: string,
+): Promise<string | null> {
+  let cursor: string | undefined;
+  for (let page = 0; page < 10; page += 1) {
+    const result = await client.changeRequests.list({
+      status: ["in_review"],
+      ...(cursor ? { cursor } : {}),
+    });
+    for (const changeRequest of result.changeRequests) {
+      const matches = (changeRequest.operations ?? []).some((operation) => {
+        const payload = operation.headCommit?.payload as
+          | { kind?: string; nodeType?: string; slug?: string }
+          | undefined;
+        return (
+          payload?.kind === "create" && payload?.nodeType === "airapp" && payload?.slug === slug
+        );
+      });
+      if (matches) return changeRequest.id;
+    }
+    if (!result.nextCursor) return null;
+    cursor = result.nextCursor;
+  }
+  return null;
 }
 
 /**
@@ -927,6 +967,15 @@ export async function publishAirApp(
   }
 
   if (!current.airApp) {
+    // The node does not exist yet, but a previous call may already have
+    // proposed creating it and be awaiting review — `inspectProvisionedResources`
+    // only ever sees materialized nodes, so without this check every call
+    // before that review lands would propose another identical create.
+    const pendingChangeRequestId = await findPendingAirAppCreate(client, airApp.slug);
+    if (pendingChangeRequestId) {
+      return { status: "pending", changeRequestId: pendingChangeRequestId };
+    }
+
     const changeRequest = await client.fileTrees.create({
       type: "airapp",
       parentNodeId: current.folder.nodeId,
