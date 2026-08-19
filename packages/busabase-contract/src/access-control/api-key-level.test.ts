@@ -65,7 +65,7 @@ describe("permissionLevelForSpaceRole", () => {
   it.each([
     ["owner", "manage"],
     ["admin", "manage"],
-    ["member", "changeRequest"],
+    ["member", "write"],
     ["viewer", "read"],
     [undefined, "read"],
   ] as const)("maps %s to %s", (role, expected) => {

@@ -1476,6 +1476,38 @@ export const getChangeRequest = async (changeRequestId: string) => {
   return hydrateChangeRequest(changeRequest);
 };
 
+/**
+ * The post-merge reload, WITHOUT the visibility gate `getChangeRequest` applies.
+ *
+ * Merging is the one moment where "can you still see it?" is the wrong question:
+ * the actor was already authorized to merge this exact change request (that is
+ * what `assertCanApproveChangeRequest` just proved), and merging can move the
+ * answer out from under them. Approving a `node_create` at the workspace root in
+ * a Restricted space is the concrete case — the node it produces has no explicit
+ * visibility, so the freshly merged change request becomes invisible to its own
+ * approver, and the visibility-gated reload returned null. The merge had already
+ * committed by then, so the caller got `Failed to load merged node changeRequest`
+ * for an operation that in fact succeeded: a scary error and no result, on a
+ * write that went through.
+ *
+ * Space-scoped like every other read here, and only ever reached after the
+ * approval gate, so this widens nothing.
+ */
+const loadMergedChangeRequest = async (changeRequestId: string) => {
+  const db = await getDb();
+  const [changeRequest] = await db
+    .select()
+    .from(busabaseChangeRequests)
+    .where(
+      and(
+        eq(busabaseChangeRequests.id, changeRequestId),
+        eq(busabaseChangeRequests.spaceId, getContextSpaceId()),
+      ),
+    )
+    .limit(1);
+  return changeRequest ? hydrateChangeRequest(changeRequest) : null;
+};
+
 export const listRecordChangeRequests = async (recordId: string) => {
   await ensureReady();
   const db = await getDb();
@@ -1911,19 +1943,30 @@ export const assertChangeRequestPermission = async (
 /**
  * Approval gate for a whole ChangeRequest — review, merge and close.
  *
- * Workspace `write` (owner/admin) passes exactly as before. Otherwise the actor
- * must hold `write` on EVERY node the CR touches. That is what makes delegation
- * possible: give someone `manage` on the Finance folder and they can approve
- * proposals against Finance, without having to be a workspace admin — which
- * previously was the only way, so "you own this folder" could not include "you
- * approve changes to it".
+ * Workspace `manage` (owner/admin) passes without a per-node walk. Everyone
+ * else must hold `write` on EVERY node the CR touches. That is what makes
+ * delegation possible: give someone `manage` on the Finance folder and they can
+ * approve proposals against Finance, without having to be a workspace admin —
+ * which previously was the only way, so "you own this folder" could not include
+ * "you approve changes to it".
+ *
+ * The shortcut is deliberately `manage` and NOT `write`, even though `write` is
+ * what the per-node walk asks for. A `member`'s workspace baseline IS `write`
+ * (`permissionLevelForSpaceRole`), so a `write` shortcut here would hand every
+ * member a pass on the node walk entirely — including for change requests
+ * against a private folder they were granted `read` on, or one they cannot see
+ * at all. Reading the baseline instead of the node is only safe at the tier no
+ * node grant can reach, and that tier is `manage`. The member's `write` still
+ * gets them through the walk below wherever it genuinely applies (every node
+ * they can see by default, the workspace root included) — it just has to go
+ * through the node ACL to get there.
  *
  * All-or-nothing on purpose. A CR that reaches outside the actor's scope is
  * refused whole; it is never partially merged, because a half-applied CR is not
  * a state the review model has any way to express.
  */
 const assertCanApproveChangeRequest = async (changeRequestId: string): Promise<void> => {
-  if (hasWorkspacePermission("write")) return;
+  if (hasWorkspacePermission("manage")) return;
   await assertChangeRequestPermission(changeRequestId, "write");
 };
 
@@ -1961,7 +2004,7 @@ export const reviewChangeRequest = async (
         "Cannot reject: this ChangeRequest has already been merged and cannot be reversed via review. Use a delete/restore ChangeRequest to undo merged changes instead.",
       );
     }
-    const already = await getChangeRequest(changeRequest.id);
+    const already = await loadMergedChangeRequest(changeRequest.id);
     if (!already) {
       throw new Error("Failed to load merged changeRequest");
     }
@@ -2710,7 +2753,7 @@ const _mergeChangeRequest = async (changeRequestId: string) => {
   // Idempotent for already-merged CRs (structural CRs auto-merge on create): a
   // caller re-merging via the old flow gets the merged CR back, not an error.
   if (changeRequest.status === "merged") {
-    const already = await getChangeRequest(changeRequest.id);
+    const already = await loadMergedChangeRequest(changeRequest.id);
     if (!already) {
       throw new Error("Failed to load merged changeRequest");
     }
@@ -2862,7 +2905,7 @@ const _mergeChangeRequest = async (changeRequestId: string) => {
       viewIds: [],
       operationCount: operationKinds.length,
     });
-    const updated = await getChangeRequest(changeRequest.id);
+    const updated = await loadMergedChangeRequest(changeRequest.id);
     if (!updated) {
       throw new Error("Failed to load merged node changeRequest");
     }
@@ -3246,7 +3289,7 @@ const _mergeChangeRequest = async (changeRequestId: string) => {
     }
   }
 
-  const updatedChangeRequest = await getChangeRequest(changeRequest.id);
+  const updatedChangeRequest = await loadMergedChangeRequest(changeRequest.id);
   const spaceId = getContextSpaceId();
   const [record] =
     mergedRecordIds.length > 0

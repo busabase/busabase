@@ -27,13 +27,16 @@ type SpaceVisibilityMode = "open" | "restricted";
 type PrincipalType = "user" | "team" | "space";
 type MutatingPrincipalType = "user" | "space";
 
+const SPACE_PRINCIPAL_TARGET = "space:space";
+const CUSTOM_USER_PRINCIPAL_TARGET = "user:";
+
 /**
  * Optional space-member list for the grant picker, injected by a multi-tenant
  * host (busabase-cloud, which has a `members.list` query) — the shared
- * component can't reach a cloud-only query itself. When empty (the
- * open-source single-user host), the picker falls back to a free-text
- * principal-id input. Same "host injects, core consumes" pattern as the ACL
- * context booleans.
+ * component can't reach a cloud-only query itself. When empty (the open-source
+ * single-user host), the picker offers a User ID target that reveals a
+ * free-text principal-id input. Same "host injects, core consumes" pattern as
+ * the ACL context booleans.
  */
 export interface SpaceMemberOption {
   id: string;
@@ -186,8 +189,8 @@ export function NodePermissionsDialog({
       explicitVisibility === "workspace" ||
       explicitVisibility === "public");
 
-  const [newPrincipalId, setNewPrincipalId] = useState("");
-  const [newPrincipalIsSpace, setNewPrincipalIsSpace] = useState(false);
+  const [newPrincipalTarget, setNewPrincipalTarget] = useState("");
+  const [customPrincipalId, setCustomPrincipalId] = useState("");
   const [newRole, setNewRole] = useState<PermissionLevel>("read");
   const [roleOverrides, setRoleOverrides] = useState<Record<string, PermissionLevel>>({});
   const [pendingPrincipalKey, setPendingPrincipalKey] = useState<string | null>(null);
@@ -218,17 +221,23 @@ export function NodePermissionsDialog({
   };
 
   const handleAdd = async () => {
-    const principalId = newPrincipalIsSpace ? "space" : newPrincipalId.trim();
-    if (!principalId) return;
+    const isSpaceTarget = newPrincipalTarget === SPACE_PRINCIPAL_TARGET;
+    const isUserTarget = newPrincipalTarget.startsWith("user:");
+    const principalId = isSpaceTarget
+      ? "space"
+      : newPrincipalTarget === CUSTOM_USER_PRINCIPAL_TARGET
+        ? customPrincipalId.trim()
+        : newPrincipalTarget.slice("user:".length);
+    if ((!isSpaceTarget && !isUserTarget) || !principalId) return;
     try {
       await addPrincipal.mutateAsync({
         nodeId,
-        principalType: newPrincipalIsSpace ? "space" : "user",
+        principalType: isSpaceTarget ? "space" : "user",
         principalId,
         role: newRole,
       });
-      setNewPrincipalId("");
-      setNewPrincipalIsSpace(false);
+      setNewPrincipalTarget("");
+      setCustomPrincipalId("");
       setNewRole("read");
       await invalidate();
       toast.success(t.granted);
@@ -311,7 +320,7 @@ export function NodePermissionsDialog({
 
   return (
     <Dialog onOpenChange={onOpenChange} open={open}>
-      <DialogContent className="max-w-lg" data-testid="node-permissions-dialog">
+      <DialogContent className="max-w-lg bg-card" data-testid="node-permissions-dialog">
         <DialogHeader>
           <DialogTitle>{t.dialogTitle}</DialogTitle>
           <DialogDescription>{nodeName}</DialogDescription>
@@ -361,7 +370,8 @@ export function NodePermissionsDialog({
 
                   return (
                     <div
-                      className="flex items-center justify-between gap-3 rounded-md border border-border/60 px-3 py-2 text-sm"
+                      className="flex flex-col items-stretch gap-2 rounded-md border border-border/60 px-3 py-2 text-sm sm:flex-row sm:items-center sm:justify-between"
+                      data-testid={`principal-row-${principal.principalType}-${principal.principalId}`}
                       key={principal.id}
                     >
                       <span className="flex min-w-0 items-center gap-2">
@@ -376,7 +386,7 @@ export function NodePermissionsDialog({
                             : memberName(principal.principalId)}
                         </span>
                       </span>
-                      <div className="flex shrink-0 items-center gap-2">
+                      <div className="flex items-center gap-2 sm:shrink-0">
                         <Select
                           onValueChange={(value) =>
                             handleRoleChange(
@@ -388,7 +398,7 @@ export function NodePermissionsDialog({
                           value={roleValue}
                         >
                           <SelectTrigger
-                            className="h-8 w-40"
+                            className="h-8 min-w-0 flex-1 sm:w-40 sm:flex-none"
                             data-testid={`principal-role-select-${principal.id}`}
                             disabled={isPending}
                           >
@@ -418,42 +428,47 @@ export function NodePermissionsDialog({
               </div>
 
               {/* Add grant */}
-              <div className="flex items-center gap-2">
-                <label className="flex items-center gap-1 text-muted-foreground text-xs">
-                  <input
-                    checked={newPrincipalIsSpace}
-                    onChange={(e) => setNewPrincipalIsSpace(e.target.checked)}
-                    type="checkbox"
-                  />
-                  {t.everyone}
-                </label>
-                {!newPrincipalIsSpace &&
-                  (spaceMembers.length > 0 ? (
-                    <Select onValueChange={setNewPrincipalId} value={newPrincipalId}>
-                      <SelectTrigger className="h-8 flex-1" data-testid="grant-member-select">
-                        <SelectValue placeholder={t.selectMember} />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {spaceMembers.map((member) => (
-                          <SelectItem key={member.id} value={member.id}>
+              <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_10rem_auto] sm:items-end">
+                <div className="grid min-w-0 gap-2">
+                  <Select
+                    disabled={addPrincipal.isPending}
+                    onValueChange={setNewPrincipalTarget}
+                    value={newPrincipalTarget}
+                  >
+                    <SelectTrigger className="h-8 w-full" data-testid="grant-member-select">
+                      <SelectValue placeholder={t.selectMember} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value={SPACE_PRINCIPAL_TARGET}>{t.everyone}</SelectItem>
+                      {spaceMembers.length > 0 ? (
+                        spaceMembers.map((member) => (
+                          <SelectItem key={member.id} value={`user:${member.id}`}>
                             {member.name}
                           </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  ) : (
+                        ))
+                      ) : (
+                        <SelectItem value={CUSTOM_USER_PRINCIPAL_TARGET}>
+                          {t.userIdPlaceholder}
+                        </SelectItem>
+                      )}
+                    </SelectContent>
+                  </Select>
+                  {newPrincipalTarget === CUSTOM_USER_PRINCIPAL_TARGET && (
                     <Input
-                      className="h-8 flex-1"
-                      onChange={(e) => setNewPrincipalId(e.target.value)}
+                      className="h-8 w-full"
+                      disabled={addPrincipal.isPending}
+                      onChange={(e) => setCustomPrincipalId(e.target.value)}
                       placeholder={t.userIdPlaceholder}
-                      value={newPrincipalId}
+                      value={customPrincipalId}
                     />
-                  ))}
+                  )}
+                </div>
                 <Select
+                  disabled={addPrincipal.isPending}
                   onValueChange={(value) => setNewRole(value as PermissionLevel)}
                   value={newRole}
                 >
-                  <SelectTrigger className="h-8 w-40" data-testid="grant-role-select">
+                  <SelectTrigger className="h-8 w-full" data-testid="grant-role-select">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -465,8 +480,12 @@ export function NodePermissionsDialog({
                 </Select>
                 <Button
                   disabled={
-                    addPrincipal.isPending || (!newPrincipalIsSpace && !newPrincipalId.trim())
+                    addPrincipal.isPending ||
+                    !newPrincipalTarget ||
+                    (newPrincipalTarget === CUSTOM_USER_PRINCIPAL_TARGET &&
+                      !customPrincipalId.trim())
                   }
+                  className="w-full sm:w-auto"
                   data-testid="grant-add-button"
                   onClick={handleAdd}
                   size="sm"

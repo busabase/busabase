@@ -1,6 +1,6 @@
 import type { BusabaseDashboardApiClient } from "busabase-contract/api-client";
 import type { AuditEventVO, ChangeRequestVO, OperationVO, ReviewVO } from "busabase-contract/types";
-import { Check, ChevronRight, GitMerge, Sparkles, X } from "lucide-react";
+import { Check, ChevronRight, GitMerge, Loader2, Sparkles, X } from "lucide-react";
 import { SPALink as Link } from "openlib/ui/dashboard";
 import { Fragment, useEffect, useMemo, useState } from "react";
 import { fmt, useCoreI18n, useCoreLocale } from "../../../i18n";
@@ -372,16 +372,18 @@ export function ChangeRequestDiscussion({
   );
 }
 
+export type ReviewAction = "approve" | "reject" | "merge" | "close";
+
 export function FinishReviewComposer({
   changeRequest,
-  isPending,
+  pendingAction,
   onApprove,
   onClose,
   onMerge,
   onReject,
 }: {
   changeRequest: ChangeRequestVO;
-  isPending: boolean;
+  pendingAction: ReviewAction | null;
   onApprove: (changeRequestId: string, reason?: string) => void;
   onClose: (changeRequestId: string, reason?: string) => void;
   onMerge: (changeRequestId: string) => void;
@@ -392,6 +394,7 @@ export function FinishReviewComposer({
     changeRequest.status === "changes_requested" ? null : "approve",
   );
   const [summary, setSummary] = useState("");
+  const isPending = pendingAction !== null;
 
   useEffect(() => {
     setVerdict(changeRequest.status === "changes_requested" ? null : "approve");
@@ -402,12 +405,17 @@ export function FinishReviewComposer({
     return (
       <div className="flex flex-col gap-2">
         <button
+          aria-busy={pendingAction === "merge"}
           className="flex w-full items-center justify-center gap-2 rounded-lg bg-primary px-3 py-2.5 font-semibold text-primary-foreground text-sm disabled:opacity-60"
           disabled={isPending}
           onClick={() => onMerge(changeRequest.id)}
           type="button"
         >
-          <GitMerge size={16} />
+          {pendingAction === "merge" ? (
+            <Loader2 className="animate-spin" size={16} />
+          ) : (
+            <GitMerge size={16} />
+          )}
           {messages.review.mergeIntoBase}
         </button>
         <button
@@ -481,6 +489,7 @@ export function FinishReviewComposer({
         <label className="flex cursor-pointer items-center gap-2">
           <input
             checked={verdict === "approve"}
+            disabled={isPending}
             name="cr-verdict"
             onChange={() => setVerdict("approve")}
             type="radio"
@@ -491,6 +500,7 @@ export function FinishReviewComposer({
         <label className="flex cursor-pointer items-center gap-2">
           <input
             checked={verdict === "reject"}
+            disabled={isPending}
             name="cr-verdict"
             onChange={() => setVerdict("reject")}
             type="radio"
@@ -501,7 +511,8 @@ export function FinishReviewComposer({
       </div>
       <textarea
         aria-label={messages.review.reviewSummary}
-        className="min-h-20 w-full resize-y rounded-md border border-border/70 bg-card px-2.5 py-2 text-sm leading-6 outline-none transition-colors focus:border-primary"
+        className="min-h-20 w-full resize-y rounded-md border border-border/70 bg-card px-2.5 py-2 text-sm leading-6 outline-none transition-colors focus:border-primary disabled:cursor-not-allowed disabled:opacity-60"
+        disabled={isPending}
         onChange={(event) => setSummary(event.target.value)}
         placeholder={
           verdict === "reject"
@@ -511,11 +522,15 @@ export function FinishReviewComposer({
         value={summary}
       />
       <button
+        aria-busy={pendingAction === "approve" || pendingAction === "reject"}
         className="flex w-full items-center justify-center gap-2 rounded-lg bg-primary px-3 py-2.5 font-semibold text-primary-foreground text-sm disabled:cursor-not-allowed disabled:opacity-60"
         disabled={isPending || rejectNeedsReason || verdictRequired}
         onClick={submit}
         type="button"
       >
+        {pendingAction === "approve" || pendingAction === "reject" ? (
+          <Loader2 className="animate-spin" size={16} />
+        ) : null}
         {verdict === "reject" ? messages.review.requestChanges : messages.review.approve}
       </button>
       <button
@@ -535,7 +550,7 @@ export function ChangeRequestDetailPage({
   changeRequest,
   client,
   focusOperationId,
-  isPending,
+  pendingAction,
   onApprove,
   onClose,
   onMerge,
@@ -545,7 +560,7 @@ export function ChangeRequestDetailPage({
   changeRequest: ChangeRequestVO | null;
   client: BusabaseDashboardApiClient;
   focusOperationId: string | null;
-  isPending: boolean;
+  pendingAction: ReviewAction | null;
   onApprove: (changeRequestId: string, reason?: string) => void;
   onClose: (changeRequestId: string, reason?: string) => void;
   onMerge: (changeRequestId: string) => void;
@@ -572,7 +587,7 @@ export function ChangeRequestDetailPage({
           changeRequest={changeRequest}
           client={client}
           focusOperationId={focusOperationId}
-          isPending={isPending}
+          pendingAction={pendingAction}
           onApprove={onApprove}
           onClose={onClose}
           onMerge={onMerge}
@@ -588,7 +603,7 @@ export function ChangeRequestReviewLayout({
   changeRequest,
   client,
   focusOperationId,
-  isPending,
+  pendingAction,
   onApprove,
   onClose,
   onMerge,
@@ -598,7 +613,7 @@ export function ChangeRequestReviewLayout({
   changeRequest: ChangeRequestVO;
   client: BusabaseDashboardApiClient;
   focusOperationId: string | null;
-  isPending: boolean;
+  pendingAction: ReviewAction | null;
   onApprove: (changeRequestId: string, reason?: string) => void;
   onClose: (changeRequestId: string, reason?: string) => void;
   onMerge: (changeRequestId: string) => void;
@@ -709,7 +724,7 @@ export function ChangeRequestReviewLayout({
           <SidebarPanel title={messages.review.finishReview}>
             <FinishReviewComposer
               changeRequest={changeRequest}
-              isPending={isPending}
+              pendingAction={pendingAction}
               onApprove={onApprove}
               onClose={onClose}
               onMerge={onMerge}
