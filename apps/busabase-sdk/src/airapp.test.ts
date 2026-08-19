@@ -536,6 +536,7 @@ describe("publishAirApp", () => {
     const create = vi
       .fn()
       .mockResolvedValue({ id: "cr-create", status: "in_review", materialized: false });
+    const list = vi.fn().mockResolvedValue({ changeRequests: [], nextCursor: null });
     const client = {
       nodes: {
         get: vi
@@ -544,6 +545,7 @@ describe("publishAirApp", () => {
       },
       bases: {},
       fileTrees: { create },
+      changeRequests: { list },
     } as unknown as Parameters<typeof publishAirApp>[0];
 
     const result = await publishAirApp(
@@ -553,6 +555,7 @@ describe("publishAirApp", () => {
     );
 
     expect(result).toEqual({ status: "created", changeRequestId: "cr-create" });
+    expect(list).toHaveBeenCalledWith({ status: ["in_review"] });
     expect(create).toHaveBeenCalledWith(
       expect.objectContaining({
         type: "airapp",
@@ -563,6 +566,104 @@ describe("publishAirApp", () => {
         files,
       }),
     );
+  });
+
+  it("reuses a still-pending create CR instead of proposing a duplicate", async () => {
+    // Regression: calling publishAirApp a second time before the first create
+    // CR is reviewed used to always propose another identical create for the
+    // same slug — inspectProvisionedResources only ever sees materialized
+    // nodes, so it had no way to know one was already pending.
+    const folderNode = node({ metadata: owned("app-root") });
+    const create = vi.fn();
+    const list = vi.fn().mockResolvedValue({
+      changeRequests: [
+        {
+          id: "cr-already-pending",
+          operations: [
+            {
+              headCommit: {
+                payload: { kind: "create", nodeType: "airapp", slug: "kelly-crm-app" },
+              },
+            },
+          ],
+        },
+        {
+          id: "cr-unrelated",
+          operations: [
+            {
+              headCommit: {
+                payload: { kind: "create", nodeType: "base", slug: "kelly-crm-contacts-v2" },
+              },
+            },
+          ],
+        },
+      ],
+      nextCursor: null,
+    });
+    const client = {
+      nodes: {
+        get: vi
+          .fn()
+          .mockResolvedValue(asFolder(folderNode, [baseChild({ metadata: owned("contacts") })])),
+      },
+      bases: {},
+      fileTrees: { create },
+      changeRequests: { list },
+    } as unknown as Parameters<typeof publishAirApp>[0];
+
+    const result = await publishAirApp(
+      client,
+      airAppConfig({ folder: { ...config().folder, nodeId: "node-1" } }),
+      files,
+    );
+
+    expect(result).toEqual({ status: "pending", changeRequestId: "cr-already-pending" });
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it("walks every page of in-review ChangeRequests looking for a pending create", async () => {
+    const folderNode = node({ metadata: owned("app-root") });
+    const create = vi.fn();
+    const list = vi
+      .fn()
+      .mockResolvedValueOnce({
+        changeRequests: [{ id: "cr-page-1", operations: [] }],
+        nextCursor: "page-2",
+      })
+      .mockResolvedValueOnce({
+        changeRequests: [
+          {
+            id: "cr-page-2",
+            operations: [
+              {
+                headCommit: {
+                  payload: { kind: "create", nodeType: "airapp", slug: "kelly-crm-app" },
+                },
+              },
+            ],
+          },
+        ],
+        nextCursor: null,
+      });
+    const client = {
+      nodes: {
+        get: vi
+          .fn()
+          .mockResolvedValue(asFolder(folderNode, [baseChild({ metadata: owned("contacts") })])),
+      },
+      bases: {},
+      fileTrees: { create },
+      changeRequests: { list },
+    } as unknown as Parameters<typeof publishAirApp>[0];
+
+    const result = await publishAirApp(
+      client,
+      airAppConfig({ folder: { ...config().folder, nodeId: "node-1" } }),
+      files,
+    );
+
+    expect(result).toEqual({ status: "pending", changeRequestId: "cr-page-2" });
+    expect(list).toHaveBeenNthCalledWith(2, { status: ["in_review"], cursor: "page-2" });
   });
 
   it("proposes an update, review-first, when the AirApp already exists", async () => {
