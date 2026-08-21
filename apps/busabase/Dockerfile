@@ -17,6 +17,8 @@ COPY packages/busabase-package/package.json packages/busabase-package/
 COPY packages/open-domains/package.json packages/open-domains/
 COPY packages/openlib/package.json packages/openlib/
 COPY packages/kui/package.json packages/kui/
+COPY packages/@acp-ui/core/package.json packages/@acp-ui/core/
+COPY packages/@acp-ui/web/package.json packages/@acp-ui/web/
 COPY packages/relaylib/package.json packages/relaylib/
 RUN pnpm install --offline --frozen-lockfile --ignore-scripts
 
@@ -27,6 +29,7 @@ COPY packages/busabase-package packages/busabase-package
 COPY packages/open-domains packages/open-domains
 COPY packages/openlib packages/openlib
 COPY packages/kui packages/kui
+COPY packages/@acp-ui packages/@acp-ui
 COPY packages/relaylib packages/relaylib
 
 FROM deps AS build
