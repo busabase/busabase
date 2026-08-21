@@ -1,0 +1,46 @@
+{
+  "name": "@acp-ui/web",
+  "description": "Web binding layer for @acp-ui/core. Renders the ACP conversation view model with kui + kui/ai-elements components, and lets every block renderer be swapped out. Brings markdown rendering to ACP chat for the first time.",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "lint": "biome format . --write && biome check . --write",
+    "lint:err": "biome format . --write && biome check . --write --diagnostic-level=error"
+  },
+  "exports": {
+    "./transcript": {
+      "types": "./src/transcript/index.ts",
+      "default": "./src/transcript/index.ts"
+    },
+    "./composer": {
+      "types": "./src/composer/index.ts",
+      "default": "./src/composer/index.ts"
+    },
+    "./session-meta": {
+      "types": "./src/session-meta/index.ts",
+      "default": "./src/session-meta/index.ts"
+    }
+  },
+  "dependencies": {
+    "@acp-ui/core": "workspace:*",
+    "lucide-react": "^0.556.0"
+  },
+  "peerDependencies": {
+    "kui": "workspace:*",
+    "react": "*"
+  },
+  "devDependencies": {
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.0",
+    "@testing-library/user-event": "^14.6.1",
+    "@types/react": "19.2.17",
+    "jsdom": "^25.0.1",
+    "kui": "workspace:*",
+    "react": "^19.2.7",
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.4"
+  }
+}

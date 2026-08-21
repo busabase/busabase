@@ -1,7 +1,7 @@
 {
   "name": "busabase-core",
   "description": "Shared Busabase open-core protocol, local store, API helpers, and dashboard components.",
-  "version": "0.17.2",
+  "version": "0.17.3",
   "private": true,
   "type": "module",
   "exports": {
@@ -256,9 +256,15 @@
     "./domains/agents/logic/agent-session-store": {
       "types": "./src/domains/agents/logic/agent-session-store.ts",
       "default": "./src/domains/agents/logic/agent-session-store.ts"
+    },
+    "./domains/agents/logic/buda-connection": {
+      "types": "./src/domains/agents/logic/buda-connection.ts",
+      "default": "./src/domains/agents/logic/buda-connection.ts"
     }
   },
   "dependencies": {
+    "@acp-ui/core": "workspace:*",
+    "@acp-ui/web": "workspace:*",
     "@agentclientprotocol/sdk": "1.3.0",
     "@anthropic-ai/sandbox-runtime": "0.0.65",
     "@electric-sql/pglite": "^0.3.15",
