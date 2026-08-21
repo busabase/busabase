@@ -12,6 +12,7 @@ import { NativeEmptyState, NativeErrorState, NativeLoadingState } from "~/compon
 import { Button } from "~/components/ui/Button";
 import { useConnection } from "~/connection/connection-store";
 import { buildAirAppEmbedUrl } from "~/domains/knowledge/utils/airapp-embed-url";
+import { canEmbedAirAppInWebView } from "~/domains/knowledge/utils/airapp-webview";
 import { asNodeDetail } from "~/domains/knowledge/utils/node-detail";
 import { ConnectionGuard } from "~/domains/workspace/components/ConnectionGuard";
 import { mobile, radius, typography } from "~/theme/tokens";
@@ -115,6 +116,9 @@ function AirAppDetailContent() {
     !preparingUrl && !embedUrl && connection?.mode === "cloud" && !selectedSpaceId;
   const noSession =
     !preparingUrl && !embedUrl && connection?.mode === "cloud" && Boolean(selectedSpaceId);
+  const canEmbed =
+    connection &&
+    canEmbedAirAppInWebView({ platform: Platform.OS, serverUrl: connection.serverUrl });
 
   return (
     <SafeAreaView edges={["top"]} style={[styles.safe, { backgroundColor: tokens.background }]}>
@@ -157,7 +161,7 @@ function AirAppDetailContent() {
           />
         ) : preparingUrl || !embedUrl ? (
           <NativeLoadingState label="Loading AirApp" />
-        ) : Platform.OS === "web" ? (
+        ) : Platform.OS === "web" || !canEmbed ? (
           <View style={styles.webLaunch}>
             <Button
               label="Open AirApp"
@@ -170,14 +174,25 @@ function AirAppDetailContent() {
             ref={webviewRef}
             key={reloadToken}
             source={{ uri: embedUrl }}
-            limitsNavigationsToAppBoundDomains={
-              Platform.OS === "ios" && (connection?.mode === "cloud" || connection?.mode === "demo")
-            }
+            limitsNavigationsToAppBoundDomains={Platform.OS === "ios" && Boolean(canEmbed)}
             style={styles.webview}
+            sharedCookiesEnabled
+            thirdPartyCookiesEnabled={Platform.OS === "android"}
+            domStorageEnabled
+            javaScriptEnabled
+            cacheEnabled
+            setSupportMultipleWindows={false}
+            allowsBackForwardNavigationGestures={false}
+            originWhitelist={["https://*", "http://*"]}
             startInLoadingState
             renderLoading={() => <NativeLoadingState label="Loading AirApp" />}
             onError={(syntheticEvent) => {
-              setWebviewError(syntheticEvent.nativeEvent.description || "Could not load AirApp.");
+              const { code, description, domain, url } = syntheticEvent.nativeEvent;
+              const reason = description || "Could not load AirApp.";
+              const nativeCode = [domain, code].filter((value) => value !== undefined).join(" ");
+              setWebviewError(
+                `${reason}${nativeCode ? ` (${nativeCode})` : ""}${url ? `\n${url}` : ""}`,
+              );
             }}
             onHttpError={(syntheticEvent) => {
               const { statusCode } = syntheticEvent.nativeEvent;
