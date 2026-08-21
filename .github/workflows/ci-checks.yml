@@ -116,6 +116,17 @@ jobs:
       - name: Commit updated badge (release pull requests only)
         if: github.event_name == 'pull_request' && startsWith(github.head_ref, 'release/')
         run: |
+          # Coverage % is not perfectly deterministic run-to-run (observed
+          # oscillating between adjacent tenths of a percent on an unchanged
+          # tree), so relying only on "badge unchanged" to end the loop can
+          # retrigger this job forever. Once the previous commit already IS a
+          # badge update, stop unconditionally -- one bot commit per release
+          # is the deal this workflow already made in the comment above; a
+          # second one buys nothing.
+          if [ "$(git log -1 --pretty=%s)" = "chore: update coverage badge" ]; then
+            echo "Previous commit already updated the badge; not committing again."
+            exit 0
+          fi
           if git diff --quiet -- apps/busabase/public/assets/readme/coverage.svg; then
             echo "Badge unchanged, nothing to commit."
             exit 0
@@ -126,8 +137,9 @@ jobs:
           # No [skip ci]: this commit becomes the PR's HEAD, and branch
           # protection evaluates required checks against HEAD. Skipping CI here
           # would leave every required check "expected but never reported" and
-          # auto-merge would wait forever. The re-run is bounded -- the badge is
-          # unchanged the second time, so the guard above exits early.
+          # auto-merge would wait forever. The re-run is bounded to at most one
+          # extra cycle by the guard above, which stops a second bot commit
+          # even if coverage still differs.
           git commit -m "chore: update coverage badge"
           git push
 
