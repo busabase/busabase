@@ -13,6 +13,7 @@ const DOCS = "https://busabase.com/docs/troubleshooting";
 
 const config = (over: Record<string, unknown> = {}) => ({
   baseUrl: "https://busabase.com",
+  webUrl: "https://busabase.com",
   output: "table" as const,
   ...over,
 });

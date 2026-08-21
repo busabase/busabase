@@ -49,6 +49,19 @@ export interface BusabaseConfig {
    */
   spaceId?: string;
   /**
+   * Origin the *web app* is served from, for building human-openable links (see
+   * {@link Busabase.nodeUrl}). Falls back to `BUSABASE_WEB_URL`, then to
+   * `baseUrl`.
+   *
+   * That fallback is why this field exists rather than being assumed: on Cloud
+   * and on a local OSS server the API and the dashboard happen to be
+   * same-origin, so `baseUrl` is right almost always — but "almost always" was
+   * silently baked into every caller that hand-built a link. Behind a gateway
+   * that mounts the API on its own host, or on a workspace subdomain, they
+   * diverge and only the caller knows.
+   */
+  webUrl?: string;
+  /**
    * Extra headers merged into every request (after auth/space headers, so these
    * win on conflict). Static object or a (possibly async) factory.
    */
@@ -62,6 +75,7 @@ export interface BusabaseConfig {
 /** A {@link BusabaseConfig} with every field resolved from env / defaults. */
 export interface ResolvedConfig {
   baseUrl: string;
+  webUrl: string;
   apiKey?: string;
   spaceId?: string;
   headers?: BusabaseConfig["headers"];
@@ -79,8 +93,12 @@ const env = (key: string): string | undefined => {
 
 /** Fill in missing config fields from environment variables and defaults. */
 export function resolveConfig(config: BusabaseConfig = {}): ResolvedConfig {
+  const baseUrl = normalizeBaseUrl(config.baseUrl ?? env("BUSABASE_BASE_URL") ?? DEFAULT_BASE_URL);
   return {
-    baseUrl: normalizeBaseUrl(config.baseUrl ?? env("BUSABASE_BASE_URL") ?? DEFAULT_BASE_URL),
+    baseUrl,
+    // Same-origin is the overwhelmingly common case (Cloud, and a local OSS
+    // server), so default to it rather than forcing every caller to repeat it.
+    webUrl: normalizeBaseUrl(config.webUrl ?? env("BUSABASE_WEB_URL") ?? baseUrl),
     apiKey: config.apiKey ?? env("BUSABASE_API_KEY"),
     spaceId: config.spaceId ?? env("BUSABASE_SPACE_ID"),
     headers: config.headers,

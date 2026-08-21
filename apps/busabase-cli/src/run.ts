@@ -89,12 +89,16 @@ function resolveConfig(opts: OptionValues): ResolvedConfig {
     }),
   );
   const file = loadDotEnvFile();
+  const baseUrl =
+    (opts.baseUrl as string | undefined) ??
+    process.env.BUSABASE_BASE_URL ??
+    file.BUSABASE_BASE_URL ??
+    DEFAULT_BASE_URL;
   return {
-    baseUrl:
-      (opts.baseUrl as string | undefined) ??
-      process.env.BUSABASE_BASE_URL ??
-      file.BUSABASE_BASE_URL ??
-      DEFAULT_BASE_URL,
+    baseUrl,
+    // The CLI has no --web-url flag yet; same-origin is the overwhelmingly common
+    // case, matching busabase-sdk's own resolveConfig default.
+    webUrl: process.env.BUSABASE_WEB_URL ?? file.BUSABASE_WEB_URL ?? baseUrl,
     apiKey:
       (opts.apiKey as string | undefined) ?? process.env.BUSABASE_API_KEY ?? file.BUSABASE_API_KEY,
     spaceId:

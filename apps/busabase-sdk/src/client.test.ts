@@ -31,7 +31,12 @@ describe("normalizeBaseUrl", () => {
 });
 
 describe("resolveConfig", () => {
-  const ENV_KEYS = ["BUSABASE_BASE_URL", "BUSABASE_API_KEY", "BUSABASE_SPACE_ID"] as const;
+  const ENV_KEYS = [
+    "BUSABASE_BASE_URL",
+    "BUSABASE_WEB_URL",
+    "BUSABASE_API_KEY",
+    "BUSABASE_SPACE_ID",
+  ] as const;
   let saved: Record<string, string | undefined>;
 
   beforeEach(() => {
@@ -70,6 +75,36 @@ describe("resolveConfig", () => {
     const resolved = resolveConfig({ apiKey: "sk_explicit", baseUrl: "http://explicit-host" });
     expect(resolved.apiKey).toBe("sk_explicit");
     expect(resolved.baseUrl).toBe("http://explicit-host");
+  });
+
+  it("defaults webUrl to baseUrl, since API and dashboard are same-origin almost always", () => {
+    const resolved = resolveConfig({ baseUrl: "http://localhost:15419" });
+    expect(resolved.webUrl).toBe("http://localhost:15419");
+  });
+
+  it("lets webUrl diverge from baseUrl, which is the whole point of the field", () => {
+    // A gateway that mounts the API on its own host: only the caller knows.
+    const resolved = resolveConfig({
+      baseUrl: "https://api.internal.example.com",
+      webUrl: "https://busabase.example.com",
+    });
+    expect(resolved.baseUrl).toBe("https://api.internal.example.com");
+    expect(resolved.webUrl).toBe("https://busabase.example.com");
+  });
+
+  it("reads BUSABASE_WEB_URL, and an explicit field still wins", () => {
+    process.env.BUSABASE_BASE_URL = "https://api.example.com";
+    process.env.BUSABASE_WEB_URL = "https://web-from-env.example.com";
+    expect(resolveConfig().webUrl).toBe("https://web-from-env.example.com");
+    expect(resolveConfig({ webUrl: "https://explicit.example.com" }).webUrl).toBe(
+      "https://explicit.example.com",
+    );
+  });
+
+  it("normalizes webUrl the same way as baseUrl", () => {
+    expect(resolveConfig({ webUrl: "https://busabase.com/api/v1/" }).webUrl).toBe(
+      "https://busabase.com",
+    );
   });
 
   it("treats an empty-string env var as unset", () => {
