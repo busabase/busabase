@@ -71,6 +71,7 @@ import { BaseTableSkeleton } from "./components/skeletons";
 import { SubmitPermissionProvider } from "./components/split-submit-button";
 import { BusabaseTopbarBreadcrumb, TopbarNodeActionsSlot } from "./components/topbar";
 import { getNodeDetailBreadcrumbItems } from "./helpers/breadcrumbs";
+import { createChangeRequestQueryKeys } from "./helpers/change-request-query-keys";
 import { getRelationRecordIds } from "./helpers/field";
 import { getLocationPath, readInboxView } from "./helpers/inbox";
 import { createKnownNodeCache, type KnownNode, nodeRoutePath } from "./helpers/known-node-cache";
@@ -325,12 +326,8 @@ function BusabaseDashboardContent({
         .queryKey as QueryKey,
       archivedNodes: orpc.nodes.list.queryOptions({ input: { status: "archived" } })
         .queryKey as QueryKey,
-      // Partial keys (no input) so invalidation matches every paged/counted
-      // query regardless of base, tab, or cursor.
-      changeRequests: orpc.changeRequests.list.queryOptions({ input: {} }).queryKey as QueryKey,
-      changeRequestsPaged: orpc.changeRequests.list.key() as QueryKey,
-      changeRequestCounts: orpc.changeRequests.counts.key() as QueryKey,
-      changeRequestDetail: orpc.changeRequests.get.key() as QueryKey,
+      // Procedure-level page/count/detail keys match every active inbox filter.
+      ...createChangeRequestQueryKeys(orpc),
       records: orpc.records.list.key() as QueryKey,
       recordsPage: orpc.records.listPage.key() as QueryKey,
       recordsCount: orpc.records.count.key() as QueryKey,
@@ -1988,6 +1985,7 @@ function BusabaseDashboardContent({
           orpc={orpc}
           onBack={() => setLocation("/agents")}
           onConnected={(slug) => setLocation(`/agents/${slug}`)}
+          spaceId={cacheSpaceKey}
         />
       );
     }
@@ -2099,16 +2097,16 @@ function BusabaseDashboardContent({
               b.slug === selectedBaseSlug,
           )
         : null;
-      if (archivedMatch) {
+      // Cold cache / direct link: the base hasn't resolved yet and either list is
+      // still loading — wait before falling back to an archived match so an
+      // archived response that arrives first cannot flash Trash over a live Base.
+      if (!activeBase && (basesQuery.isLoading || archivedBasesQuery.isLoading)) {
+        return <BaseTableSkeleton />;
+      }
+      if (!activeBase && archivedMatch) {
         return (
           <ArchivedBasesView archivedBases={[archivedMatch]} onRestoreBase={submitRestoreBase} />
         );
-      }
-      // Cold cache / direct link: the base hasn't resolved yet and the list is
-      // still loading — show a table-shaped skeleton instead of flashing an empty
-      // "not found" state.
-      if (!activeBase && basesQuery.isLoading) {
-        return <BaseTableSkeleton />;
       }
       return (
         <BaseDetailView
@@ -2171,6 +2169,7 @@ function BusabaseDashboardContent({
     approveChangeRequest,
     closeChangeRequest,
     auditEvents,
+    archivedBasesQuery.isLoading,
     bases,
     basesQuery.isLoading,
     client,
@@ -2236,6 +2235,7 @@ function BusabaseDashboardContent({
     submitDeleteRecords,
     allChangeRequests,
     nodeCache,
+    cacheSpaceKey,
   ]);
 
   const dashboardActiveView = (

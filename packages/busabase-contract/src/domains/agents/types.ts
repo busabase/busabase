@@ -31,6 +31,8 @@ export const AgentCatalogEntryVOSchema = z.object({
   available: z.boolean().default(false),
   /** Human-readable reason when `available` is false — never a bare "failed". */
   unavailableReason: z.string().nullable().default(null),
+  connectionRequired: z.boolean().default(false),
+  connectedAgentName: z.string().nullable().default(null),
 });
 export type AgentCatalogEntryVO = z.infer<typeof AgentCatalogEntryVOSchema>;
 
@@ -119,10 +121,25 @@ export const CreateAgentSessionInputSchema = z.object({
 });
 export type CreateAgentSessionInput = z.infer<typeof CreateAgentSessionInputSchema>;
 
-export const PromptAgentSessionInputSchema = z.object({
-  sessionId: z.string().min(1),
-  text: z.string().min(1),
+/** Base64 image/audio the browser attached — ACP's `ImageContent`/`AudioContent` shape verbatim. */
+export const PromptAttachmentInputSchema = z.object({
+  kind: z.enum(["image", "audio"]),
+  data: z.string().min(1),
+  mimeType: z.string().min(1),
 });
+export type PromptAttachmentInput = z.infer<typeof PromptAttachmentInputSchema>;
+
+export const PromptAgentSessionInputSchema = z
+  .object({
+    sessionId: z.string().min(1),
+    // No longer `.min(1)`: an attachment with no caption is a valid prompt.
+    // The refine below is what actually requires SOMETHING to send.
+    text: z.string(),
+    attachments: z.array(PromptAttachmentInputSchema).optional(),
+  })
+  .refine((value) => value.text.trim().length > 0 || (value.attachments?.length ?? 0) > 0, {
+    message: "A prompt needs text, an attachment, or both.",
+  });
 export type PromptAgentSessionInput = z.infer<typeof PromptAgentSessionInputSchema>;
 
 export const AgentSessionIdInputSchema = z.object({ sessionId: z.string().min(1) });

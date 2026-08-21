@@ -164,7 +164,13 @@ export const PROCEDURE_PERMISSION_POLICY: Record<string, ProcedurePermissionPoli
   "nodes.updateMetadata": node("write"),
   "nodes.toggleFavorite": node("write"),
   "comments.create": node("write"),
-  "auditEvents.create": workspace("write"),
+  // Manage, not write: audit entries are records of what the SYSTEM did, and
+  // the only external callers are administrative/agent tooling. At `write` the
+  // member baseline would let any member inject enum-valid lifecycle events
+  // (e.g. a `change_request.merged` that never happened) into the activity
+  // feed. Actor identity is still context-resolved either way — this gates
+  // pollution, impersonation was never possible.
+  "auditEvents.create": workspace("manage"),
   "assets.updateMetadata": node("write"),
   "assets.delete": node("write"),
   "assets.editContent": node("write"),

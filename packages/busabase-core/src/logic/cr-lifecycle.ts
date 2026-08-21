@@ -32,6 +32,7 @@ import { z } from "zod";
 import {
   getContextIsSpaceManager,
   getContextSpaceId,
+  isAnonymousVisitor,
   resolveActorId,
   resolveUserRefs,
   withContextSourceMeta,
@@ -1897,6 +1898,19 @@ export const filterVisibleChangeRequestRows = async <T extends { id: string }>(
           ).map((node) => node.id),
         )
       : new Set<string>();
+  // The workspace root is always visible to a member, but only
+  // `getEffectiveNodeLevel` carries that special case — the SQL visibility
+  // condition above filters the root out in Restricted mode (its
+  // `effective_visibility` is NULL). Without this line a root-scoped change
+  // request (create-at-top-level) vanishes from every member's inbox LIST —
+  // including its own author's — while the detail page, review and merge all
+  // work by direct link, because those run through `getEffectiveNodeLevel`.
+  // Members are the intended approvers of root proposals now, so the listing
+  // has to agree with the gate. Anonymous visitors keep their share-only
+  // view — the root special case has never applied to them.
+  if (!isAnonymousVisitor()) {
+    visibleNodeIds.add(rootNodeIdForSpace(getContextSpaceId()));
+  }
   return rows.filter((row) => {
     const scope = scopes.get(row.id);
     return (

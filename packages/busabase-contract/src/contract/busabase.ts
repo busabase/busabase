@@ -333,7 +333,7 @@ export const busabaseContractRoutes = {
           tags: ["Nodes", "Sharing"],
           summary: "Read a node's public link-sharing settings",
           successDescription:
-            "The node's public-share settings, or null when the node was never shared. The stored password is never returned — only a `hasPassword` flag.",
+            "The node's public-share settings, or null when the node was never shared. The stored password is never returned — only a `hasPassword` flag. No URL is returned: the shared node keeps its own canonical address, and only the caller knows which origin its reader should use (see `nodeWebUrl` in busabase-sdk).",
         })
         .input(z.object({ nodeId: z.string() }))
         .output(nodeShareSchema.nullable()),
@@ -363,7 +363,7 @@ export const busabaseContractRoutes = {
           tags: ["Nodes", "Sharing"],
           summary: "Revoke a node's public link sharing",
           successDescription:
-            "Flipped the share scope to none in place (the link is kept so re-enabling produces the same URL). Requires `manage` level on the node.",
+            "Flipped the share scope to none in place, keeping the row, so re-enabling reopens the node's same canonical address rather than minting a new one. Requires `manage` level on the node.",
         })
         .input(z.object({ nodeId: z.string() }))
         .output(nodeShareSchema.nullable()),

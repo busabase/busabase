@@ -1,6 +1,7 @@
 import { spawnSync } from "node:child_process";
 import type { AgentCatalogEntryVO, AgentTransport } from "busabase-contract/domains/agents/types";
 import { getContextActorId } from "../../../context";
+import { getBudaAcpUrl, getBudaConnection } from "./buda-connection";
 
 /**
  * What Busabase is willing to launch, and how.
@@ -121,6 +122,10 @@ function isCloudHost(): boolean {
 const CLOUD_LOCAL_AGENT_REASON =
   "Local agents run on your own machine, not on Busabase Cloud. Install the Busabase desktop app, or connect your machine via Local↔Cloud Tunnel, to use this agent.";
 
+function localBudaConfig(): { token?: string; agentId?: string } {
+  return { token: process.env.BUDA_API_KEY, agentId: process.env.BUDA_AGENT_ID };
+}
+
 /** `npx --version` rather than `which`, so this works the same on Windows. */
 function binaryAvailable(bin: string): boolean {
   try {
@@ -129,15 +134,6 @@ function binaryAvailable(bin: string): boolean {
   } catch {
     return false;
   }
-}
-
-/** Buda's endpoint is configured by env, exactly like every other outbound credential. */
-function budaConfig(): { url?: string; token?: string; agentId?: string } {
-  return {
-    url: process.env.BUDA_ACP_URL || "wss://buda.im/api/acp",
-    token: process.env.BUDA_API_KEY,
-    agentId: process.env.BUDA_AGENT_ID,
-  };
 }
 
 const OFFICIAL_REGISTRY_URL =
@@ -183,6 +179,7 @@ async function fetchRegistryDisplayInfo(): Promise<
 export async function listCatalog(): Promise<AgentCatalogEntryVO[]> {
   const cloudHost = isCloudHost();
   const registryInfo = await fetchRegistryDisplayInfo();
+  const budaConnection = await getBudaConnection();
 
   return CATALOG.map((spec) => {
     let available = false;
@@ -200,12 +197,13 @@ export async function listCatalog(): Promise<AgentCatalogEntryVO[]> {
         unavailableReason = `\`${spec.probeBinary ?? "npx"}\` was not found on this machine. Install Node.js to use ${spec.name}.`;
       }
     } else {
-      const { token, agentId } = budaConfig();
-      if (token && agentId) {
+      const localConfig = localBudaConfig();
+      if (budaConnection || (!cloudHost && localConfig.token && localConfig.agentId)) {
         available = true;
+      } else if (!cloudHost) {
+        unavailableReason = "Set BUDA_API_KEY and BUDA_AGENT_ID to connect to Buda.";
       } else {
-        const missing = [!token && "BUDA_API_KEY", !agentId && "BUDA_AGENT_ID"].filter(Boolean);
-        unavailableReason = `Set ${missing.join(" and ")} to connect to ${spec.name}.`;
+        unavailableReason = "Sign in to Buda and choose an agent to connect.";
       }
     }
 
@@ -223,6 +221,8 @@ export async function listCatalog(): Promise<AgentCatalogEntryVO[]> {
       version: synced?.version ?? spec.npxPackage?.split("@").pop() ?? null,
       available,
       unavailableReason,
+      connectionRequired: spec.slug === "buda" && cloudHost && !budaConnection,
+      connectedAgentName: spec.slug === "buda" ? (budaConnection?.agentName ?? null) : null,
     };
   });
 }
@@ -231,7 +231,7 @@ export async function listCatalog(): Promise<AgentCatalogEntryVO[]> {
  * Resolve a slug to something launchable. Throws for anything not in the table —
  * this is the choke point the whole allowlist argument above depends on.
  */
-export function resolveLaunch(slug: string): ResolvedLaunch {
+export async function resolveLaunch(slug: string): Promise<ResolvedLaunch> {
   const spec = findSpec(slug);
   if (!spec) {
     throw new Error(`Unknown agent "${slug}". Only agents in Busabase's catalog can be launched.`);
@@ -257,18 +257,21 @@ export function resolveLaunch(slug: string): ResolvedLaunch {
     };
   }
 
-  const { url, token, agentId } = budaConfig();
-  if (!token || !agentId) {
+  const connection = await getBudaConnection();
+  const localConfig = localBudaConfig();
+  if (!connection && (!localConfig.token || !localConfig.agentId)) {
     throw new Error(
-      `${spec.name} is not configured. Set BUDA_API_KEY and BUDA_AGENT_ID, then try again.`,
+      isCloudHost()
+        ? `${spec.name} is not connected. Sign in to Buda first.`
+        : `${spec.name} is not configured. Set BUDA_API_KEY and BUDA_AGENT_ID, then try again.`,
     );
   }
-  const full = `${url}${url?.includes("?") ? "&" : "?"}agentId=${encodeURIComponent(agentId)}`;
+  const agentId = connection?.agentId ?? (localConfig.agentId as string);
   return {
     slug: spec.slug,
-    name: spec.name,
+    name: connection?.agentName ?? spec.name,
     transport: spec.transport,
-    url: full,
-    authHeader: `Bearer ${token}`,
+    url: getBudaAcpUrl(agentId),
+    authHeader: `Bearer ${connection?.accessToken ?? localConfig.token}`,
   };
 }

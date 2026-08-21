@@ -36,7 +36,7 @@ export const agentsRouter = {
 
     prompt: os.agents.sessions.prompt.handler(async ({ input }) => {
       try {
-        await promptAgentSession(input.sessionId, input.text);
+        await promptAgentSession(input.sessionId, input.text, input.attachments);
         return { accepted: true, sessionId: input.sessionId };
       } catch (error) {
         return fail(error);
