@@ -20,6 +20,7 @@ export default defineConfig({
       "src/domains/assets/utils/**/*.test.ts",
       "src/domains/base/utils/**/*.test.ts",
       "src/domains/dashboard/helpers/**/*.test.ts",
+      "src/domains/dashboard/utils/**/*.test.ts",
       "src/domains/dashboard/components/**/*.test.tsx",
       "src/domains/rich-node/utils/**/*.test.ts",
       "src/logic/**/*.test.ts",

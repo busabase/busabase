@@ -97,6 +97,14 @@ const nodePrincipalSchema = z.object({
 // principals: it decides whether an ANONYMOUS visitor may reach the node over
 // its own canonical URL, and what they may do there. SECURITY: this VO must
 // NEVER carry the stored password hash — only the derived `hasPassword` flag.
+//
+// Deliberately carries no `url`. Sharing is a property of the *node*; the
+// origin a reader should use is a property of the *request*, which this layer
+// cannot see — busabase-core takes no headers, and the one host that could
+// guess (a desktop server reached through the Local↔Cloud tunnel, which strips
+// `host`) would confidently emit `http://localhost:15419/...` to someone
+// sitting on busabase.com. A link that looks right and isn't is worse than no
+// link, so the caller builds it: `nodeWebUrl()` / `Busabase.nodeUrl()`.
 const nodeShareSchema = z.object({
   nodeId: z.string(),
   scope: z.enum(["none", "public"]),

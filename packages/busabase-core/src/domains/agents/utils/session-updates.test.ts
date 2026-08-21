@@ -1,6 +1,6 @@
 import type { AgentSessionEventVO } from "busabase-contract/domains/agents/types";
 import { describe, expect, it } from "vitest";
-import { buildAgentTimeline, collapseForPersistence } from "./session-updates";
+import { collapseForPersistence } from "./session-updates";
 
 const at = "2026-08-14T00:00:00.000Z";
 let seq = 0;
@@ -10,86 +10,6 @@ const update = (acpUpdate: unknown): AgentSessionEventVO => ({
   kind: "acpUpdate",
   acpUpdate,
   at,
-});
-
-describe("buildAgentTimeline", () => {
-  it("collapses the repeated tool_call/tool_call_update rows one call produces", () => {
-    // What a single MCP tool call actually looks like on the wire: one
-    // `tool_call` followed by an update per status change, every one carrying
-    // the same title.
-    const items = buildAgentTimeline([
-      update({ sessionUpdate: "tool_call", title: "mcp__busabase__node_create" }),
-      update({ sessionUpdate: "tool_call_update", title: "mcp__busabase__node_create" }),
-      update({ sessionUpdate: "tool_call_update", title: "mcp__busabase__node_create" }),
-    ]);
-
-    expect(items).toEqual([
-      { kind: "message", role: "note", text: "Tool: mcp__busabase__node_create" },
-    ]);
-  });
-
-  it("keeps two different tool calls apart, and does not merge across a reply", () => {
-    const items = buildAgentTimeline([
-      update({ sessionUpdate: "tool_call", title: "mcp__busabase__auth_verify" }),
-      update({ sessionUpdate: "tool_call", title: "mcp__busabase__nodes_list" }),
-      update({ sessionUpdate: "agent_message_chunk", content: { text: "Done." } }),
-      // The same tool again after the reply is a genuinely new call, not a
-      // repeat of the one above it.
-      update({ sessionUpdate: "tool_call", title: "mcp__busabase__nodes_list" }),
-    ]);
-
-    expect(items.map((i) => (i.kind === "message" ? i.text : "?"))).toEqual([
-      "Tool: mcp__busabase__auth_verify",
-      "Tool: mcp__busabase__nodes_list",
-      "Done.",
-      "Tool: mcp__busabase__nodes_list",
-    ]);
-  });
-
-  it("still merges streamed agent chunks into one bubble", () => {
-    const items = buildAgentTimeline([
-      update({ sessionUpdate: "agent_message_chunk", content: { text: "CODE" } }),
-      update({ sessionUpdate: "agent_message_chunk", content: { text: "X" } }),
-      update({ sessionUpdate: "agent_message_chunk", content: { text: "OK" } }),
-    ]);
-
-    expect(items).toEqual([{ kind: "message", role: "agent", text: "CODEXOK" }]);
-  });
-
-  it("renders Busabase's own session note (e.g. an agent that cannot take HTTP MCP)", () => {
-    const items = buildAgentTimeline([
-      update({ sessionUpdate: "note", text: "Codex CLI does not support HTTP MCP servers." }),
-    ]);
-
-    expect(items).toEqual([
-      { kind: "message", role: "note", text: "Codex CLI does not support HTTP MCP servers." },
-    ]);
-  });
-
-  it("places a permission card in order and carries its resolution", () => {
-    const request = {
-      requestId: "perm_1",
-      title: "mcp__busabase__node_create",
-      options: [
-        { optionId: "allow", name: "Allow Once" },
-        { optionId: "reject", name: "Deny" },
-      ],
-    };
-    const items = buildAgentTimeline([
-      update({ sessionUpdate: "agent_message_chunk", content: { text: "Proposing…" } }),
-      { sessionId: "s1", seq: ++seq, kind: "permissionRequest", permissionRequest: request, at },
-      {
-        sessionId: "s1",
-        seq: ++seq,
-        kind: "permissionResolved",
-        permissionRequestId: "perm_1",
-        permissionOptionId: "allow",
-        at,
-      },
-    ]);
-
-    expect(items[1]).toEqual({ kind: "permission", request, resolvedOptionId: "allow" });
-  });
 });
 
 describe("collapseForPersistence", () => {

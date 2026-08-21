@@ -2,6 +2,7 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";
+import { nodeWebUrl } from "busabase-contract/node-web-url";
 import { Button } from "kui/button";
 import {
   Dialog,
@@ -109,7 +110,15 @@ export function NodeShareDialog({
     if (typeof window === "undefined") return null;
     const resolvedSpaceId = resolveSpaceId(spaceId);
     if (!resolvedSpaceId) return null;
-    return `${window.location.origin}/dashboard/${resolvedSpaceId}/${nodeType}/${nodeSlug}`;
+    // Shared with the SDK/CLI/server via busabase-contract — this used to be an
+    // inline template literal here, which is why no headless caller could ever
+    // produce the same link. See node-web-url.ts.
+    return nodeWebUrl({
+      webOrigin: window.location.origin,
+      spaceId: resolvedSpaceId,
+      nodeType,
+      nodeSlug,
+    });
   }, [spaceId, nodeType, nodeSlug]);
 
   const invalidate = () =>

@@ -4,19 +4,31 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";
 import type { AgentCatalogEntryVO, AgentSessionVO } from "busabase-contract/domains/agents/types";
 import { Button } from "kui/button";
-import { ArrowLeft, Bot } from "lucide-react";
+import { ArrowLeft, Bot, X } from "lucide-react";
+import { useEffect, useState } from "react";
 import { TransportBadge } from "./transport-badge";
 
 interface AgentsAddViewProps {
   orpc: BusabaseQueryUtils;
   onBack: () => void;
   onConnected: (slug: string) => void;
+  spaceId?: string;
 }
 
 /** Browse the catalog and connect one. This is the only place the catalog is shown. */
-export function AgentsAddView({ orpc, onBack, onConnected }: AgentsAddViewProps) {
+export function AgentsAddView({ orpc, onBack, onConnected, spaceId }: AgentsAddViewProps) {
   const queryClient = useQueryClient();
   const catalog = useQuery(orpc.agents.catalog.queryOptions());
+  const [showBudaConnect, setShowBudaConnect] = useState(false);
+  const [budaError, setBudaError] = useState<string | null>(null);
+
+  const openBudaConnect = () => {
+    setBudaError(null);
+    setShowBudaConnect(true);
+    const path = `/api/agents/buda/oauth/start${spaceId ? `?spaceId=${encodeURIComponent(spaceId)}` : ""}`;
+    const popup = window.open(path, "busabase-buda-oauth", "popup,width=560,height=760");
+    if (!popup) setBudaError("Allow popups for Busabase, then try again.");
+  };
 
   const createSession = useMutation({
     ...orpc.agents.sessions.create.mutationOptions(),
@@ -25,6 +37,22 @@ export function AgentsAddView({ orpc, onBack, onConnected }: AgentsAddViewProps)
       onConnected(session.slug);
     },
   });
+
+  useEffect(() => {
+    const onMessage = (event: MessageEvent) => {
+      if (event.origin !== window.location.origin) return;
+      if (event.data?.type === "busabase:buda-error") {
+        setBudaError(event.data.message || "Buda connection failed.");
+      } else if (event.data?.type === "busabase:buda-connected") {
+        setShowBudaConnect(false);
+        setBudaError(null);
+        void queryClient.invalidateQueries({ queryKey: orpc.agents.catalog.queryKey() });
+        createSession.mutate({ slug: "buda" });
+      }
+    };
+    window.addEventListener("message", onMessage);
+    return () => window.removeEventListener("message", onMessage);
+  }, [createSession, orpc.agents.catalog, queryClient]);
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -48,6 +76,11 @@ export function AgentsAddView({ orpc, onBack, onConnected }: AgentsAddViewProps)
                 <TransportBadge transport={entry.transport} />
               </div>
               <p className="text-muted-foreground text-xs">{entry.description}</p>
+              {entry.connectedAgentName && (
+                <p className="text-muted-foreground text-xs">
+                  Connected to {entry.connectedAgentName}
+                </p>
+              )}
               {entry.available ? (
                 <Button
                   size="sm"
@@ -58,6 +91,10 @@ export function AgentsAddView({ orpc, onBack, onConnected }: AgentsAddViewProps)
                     ? "Connecting…"
                     : "Connect"}
                 </Button>
+              ) : entry.connectionRequired ? (
+                <Button size="sm" onClick={openBudaConnect}>
+                  Sign in to Buda
+                </Button>
               ) : (
                 <p className="text-destructive text-xs">{entry.unavailableReason}</p>
               )}
@@ -65,6 +102,31 @@ export function AgentsAddView({ orpc, onBack, onConnected }: AgentsAddViewProps)
           ))}
         </div>
       </div>
+      {showBudaConnect && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 p-4 backdrop-blur-sm">
+          <div className="flex w-[min(440px,95vw)] flex-col overflow-hidden rounded-lg border bg-background shadow-lg">
+            <div className="flex items-center justify-between border-b px-4 py-3">
+              <div>
+                <p className="font-medium text-sm">Connect Buda</p>
+                <p className="text-muted-foreground text-xs">
+                  Sign in and choose the agent Busabase may chat with.
+                </p>
+              </div>
+              <Button variant="ghost" size="icon" onClick={() => setShowBudaConnect(false)}>
+                <X className="size-4" />
+              </Button>
+            </div>
+            <div className="space-y-3 p-4 text-sm">
+              <p className="text-muted-foreground">
+                Buda opens in its own secure window so your Buda login cookie stays first-party.
+                After you choose an agent, this dialog closes automatically and starts the ACP chat.
+              </p>
+              <Button onClick={openBudaConnect}>Open Buda</Button>
+              {budaError && <p className="text-destructive text-xs">{budaError}</p>}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

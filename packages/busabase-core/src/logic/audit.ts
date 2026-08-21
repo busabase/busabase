@@ -253,7 +253,11 @@ export const assertAuditSubjectPermission = async (
       }
       return;
     }
-    assertWorkspacePermission(required);
+    // A subject-less event has no node to derive authority from, so writing one
+    // is a workspace-wide act — manager-only. `manage`, not `required`: a
+    // `member`'s workspace baseline is `write`, and it must not double as
+    // "manager" here (same reasoning as `assertCanApproveChangeRequest`).
+    assertWorkspacePermission("manage");
     return;
   }
   if (subject.changeRequestId) {

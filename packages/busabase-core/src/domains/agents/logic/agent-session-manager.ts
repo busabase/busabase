@@ -1,7 +1,4 @@
 import { type ChildProcess, spawn } from "node:child_process";
-import { mkdir, writeFile } from "node:fs/promises";
-import { homedir } from "node:os";
-import { join } from "node:path";
 import { Readable, Writable } from "node:stream";
 import * as acp from "@agentclientprotocol/sdk";
 import { createWebSocketStream } from "@agentclientprotocol/sdk/experimental/ws-client";
@@ -13,6 +10,7 @@ import type {
   AgentSessionEventVO,
   AgentSessionStatus,
   AgentSessionVO,
+  PromptAttachmentInput,
 } from "busabase-contract/domains/agents/types";
 import WebSocket from "ws";
 import { collapseForPersistence } from "../utils/session-updates";
@@ -24,7 +22,8 @@ import {
   persistSessionEvents,
   persistSessionState,
 } from "./agent-session-store";
-import { buildAgentWorkspaceGuide, resolveBusabaseMcpUrl } from "./agent-workspace-guide";
+import { prepareAgentWorkspace } from "./agent-workspace";
+import { resolveBusabaseMcpUrl } from "./agent-workspace-guide";
 
 /**
  * Live ACP sessions.
@@ -57,7 +56,7 @@ interface LiveSession {
   child: ChildProcess | null;
   /** Resolves once initialize + session/new have completed. */
   ready: Promise<void>;
-  prompt: (text: string) => Promise<void>;
+  prompt: (text: string, attachments?: PromptAttachmentInput[]) => Promise<void>;
   cancel: () => Promise<void>;
   close: () => void;
   seq: number;
@@ -150,50 +149,6 @@ function spawnAgentProcess(launch: ResolvedLaunch, cwd: string): ChildProcess {
   return spawn(shell, ["-l", "-c", line], { cwd, stdio: ["pipe", "pipe", "pipe"] });
 }
 
-/**
- * Force a conservative default permission mode for Claude Code sessions,
- * regardless of the user's own global `~/.claude/settings.json`.
- *
- * Verified empirically (2026-08-13), not assumed: on a machine whose global
- * Claude Code config had no explicit `permissions.defaultMode`, the ACP
- * adapter still let a Bash `echo` run without asking (its own allow-rules
- * treat some commands as safe) — expected. But without this file, a machine
- * whose global config sets a permissive mode (`acceptEdits`/`bypassPermissions`,
- * common for a developer's own daily-driver terminal use) would carry that
- * straight into every Busabase-spawned session, silently defeating the
- * permission cards this domain exists to show. Writing an explicit
- * project-level override is what makes "every request blocks and asks" a
- * guarantee Busabase controls, not something borrowed from whatever the host
- * machine happens to have configured for unrelated work.
- */
-async function seedClaudeSettings(dir: string): Promise<void> {
-  const claudeDir = join(dir, ".claude");
-  await mkdir(claudeDir, { recursive: true });
-  await writeFile(
-    join(claudeDir, "settings.json"),
-    `${JSON.stringify({ permissions: { defaultMode: "default" } }, null, 2)}\n`,
-  );
-}
-
-/**
- * ACP requires a real, existing absolute `cwd` and agents enforce it (Claude's
- * adapter `stat`s it and keys its session history by it). Busabase has no
- * filesystem workspace, so we allocate a stable per-space scratch directory —
- * stable because a per-connect temp dir would silently break agent-side resume.
- * See spec §6.5.
- *
- * Rewritten on every connect rather than written once: the guide's wording is
- * ours and changes with the product, so a workspace created by an older build
- * must not keep serving stale orientation to a newer agent.
- */
-async function ensureWorkspace(spaceId: string): Promise<string> {
-  const dir = join(homedir(), ".busabase", "agent-workspaces", spaceId || "default");
-  await mkdir(dir, { recursive: true });
-  await seedClaudeSettings(dir);
-  await writeFile(join(dir, "CLAUDE.md"), buildAgentWorkspaceGuide(spaceId || "default"));
-  return dir;
-}
-
 export interface CreateSessionArgs {
   slug: string;
   spaceId: string;
@@ -203,7 +158,7 @@ export async function createAgentSession({
   slug,
   spaceId,
 }: CreateSessionArgs): Promise<AgentSessionVO> {
-  const launch = resolveLaunch(slug);
+  const launch = await resolveLaunch(slug);
   const id = `ags_${Math.random().toString(36).slice(2, 12)}${Date.now().toString(36)}`;
 
   const session: LiveSession = {
@@ -231,7 +186,7 @@ export async function createAgentSession({
   sessions().set(id, session);
 
   session.ready = (async () => {
-    const workspace = await ensureWorkspace(spaceId);
+    const workspace = await prepareAgentWorkspace(launch.transport, spaceId);
 
     let stream: acp.Stream;
     if (launch.transport === "local-subprocess") {
@@ -380,7 +335,7 @@ export async function createAgentSession({
         session.acpSessionId = created.sessionId;
         setStatus(session, "idle");
 
-        session.prompt = async (text: string) => {
+        session.prompt = async (text: string, attachments?: PromptAttachmentInput[]) => {
           if (session.status === "busy" || session.status === "waiting_permission") {
             throw new Error("This agent is still replying. Wait for the current turn to finish.");
           }
@@ -388,7 +343,7 @@ export async function createAgentSession({
           try {
             await ctx.request(acp.methods.agent.session.prompt, {
               sessionId: created.sessionId,
-              prompt: [{ type: "text", text }],
+              prompt: buildPromptContent(text, attachments),
             });
             setStatus(session, "idle");
           } catch (error) {
@@ -462,13 +417,50 @@ export async function listAgentSessions(): Promise<AgentSessionVO[]> {
   return merged.sort((a, b) => b.lastActivityAt.localeCompare(a.lastActivityAt));
 }
 
-export async function promptAgentSession(sessionId: string, text: string): Promise<void> {
+/**
+ * ACP's `PromptRequest.prompt` is a `ContentBlock[]`, not a bare string — a
+ * text block first (possibly empty, when the user sent only attachments;
+ * the contract's refine already guarantees at least one of text/attachments
+ * is real), then one image/audio block per attachment, in the order the
+ * browser attached them.
+ */
+function buildPromptContent(
+  text: string,
+  attachments: PromptAttachmentInput[] | undefined,
+): acp.ContentBlock[] {
+  return [
+    { type: "text", text },
+    ...(attachments ?? []).map(
+      (attachment): acp.ContentBlock => ({
+        type: attachment.kind,
+        data: attachment.data,
+        mimeType: attachment.mimeType,
+      }),
+    ),
+  ];
+}
+
+export async function promptAgentSession(
+  sessionId: string,
+  text: string,
+  attachments?: PromptAttachmentInput[],
+): Promise<void> {
   const s = requireSession(sessionId);
   await s.ready;
   if (s.status === "failed") throw new Error(s.error ?? "This session has failed.");
-  // Echo the user's own message so a late subscriber can render the whole turn.
-  emit(s, { kind: "acpUpdate", acpUpdate: { sessionUpdate: "user_message", text } });
-  await s.prompt(text);
+  // Echo the user's own message so a late subscriber can render the whole
+  // turn. `attachments` rides along on this same synthetic (non-ACP) event —
+  // the frontend's `translate()` adapter (use-agent-session.ts) knows to
+  // unpack it into image/audio content-block chunks alongside the text one.
+  emit(s, {
+    kind: "acpUpdate",
+    acpUpdate: {
+      sessionUpdate: "user_message",
+      text,
+      ...(attachments && attachments.length > 0 ? { attachments } : {}),
+    },
+  });
+  await s.prompt(text, attachments);
 }
 
 export async function cancelAgentSession(sessionId: string): Promise<void> {

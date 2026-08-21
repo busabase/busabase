@@ -1,14 +1,16 @@
 "use client";
 
+import type { AcpAttachment } from "@acp-ui/core/reduce";
+import { AcpComposer } from "@acp-ui/web/composer";
+import { AcpSessionMeta } from "@acp-ui/web/session-meta";
+import { AcpConversation } from "@acp-ui/web/transcript";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";
 import type { AgentSessionVO } from "busabase-contract/domains/agents/types";
 import { Button } from "kui/button";
-import { ArrowLeft, Bot, MessageSquarePlus, Send } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useAgentSessionStream } from "../hooks/use-agent-session-stream";
-import { buildAgentTimeline } from "../utils/session-updates";
-import { PermissionCard } from "./permission-card";
+import { ArrowLeft, Bot, MessageSquarePlus } from "lucide-react";
+import { useCallback, useMemo, useState } from "react";
+import { useAgentSession } from "../hooks/use-agent-session";
 import { TransportBadge } from "./transport-badge";
 
 /**
@@ -43,7 +45,6 @@ interface AgentDetailViewProps {
 export function AgentDetailView({ orpc, agentSlug, onBack }: AgentDetailViewProps) {
   const queryClient = useQueryClient();
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
-  const [draft, setDraft] = useState("");
 
   const sessions = useQuery({
     ...orpc.agents.sessions.list.queryOptions(),
@@ -79,31 +80,20 @@ export function AgentDetailView({ orpc, agentSlug, onBack }: AgentDetailViewProp
     },
   });
 
-  const sendPrompt = useMutation({
-    ...orpc.agents.sessions.prompt.mutationOptions(),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: orpc.agents.sessions.list.queryKey() });
+  // Transcript, prompting and permission answering are all `@acp-ui/core`, the
+  // same interaction core acprouter drives — only the transport below it is
+  // busabase's own.
+  const chat = useAgentSession(orpc, activeSessionId);
+
+  const send = useCallback(
+    (text: string, attachments?: AcpAttachment[]) => {
+      if (!activeSessionId) return;
+      void chat.sendPrompt(text, attachments).then(() => {
+        void queryClient.invalidateQueries({ queryKey: orpc.agents.sessions.list.queryKey() });
+      });
     },
-  });
-
-  const events = useAgentSessionStream(orpc, activeSessionId);
-  const timeline = useMemo(() => buildAgentTimeline(events), [events]);
-
-  const respondToPermission = useMutation(
-    orpc.agents.sessions.respondToPermission.mutationOptions(),
+    [activeSessionId, chat, queryClient, orpc],
   );
-
-  const bottomRef = useRef<HTMLDivElement | null>(null);
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, []);
-
-  const send = useCallback(() => {
-    const text = draft.trim();
-    if (!text || !activeSessionId) return;
-    setDraft("");
-    sendPrompt.mutate({ sessionId: activeSessionId, text });
-  }, [draft, activeSessionId, sendPrompt]);
 
   const agentName = active?.agentName ?? agentSessions[0]?.agentName ?? agentSlug;
   const transport = active?.transport ?? agentSessions[0]?.transport ?? "local-subprocess";
@@ -156,8 +146,15 @@ export function AgentDetailView({ orpc, agentSlug, onBack }: AgentDetailViewProp
         {active ? (
           <>
             <header className="flex items-center gap-2 border-b px-4 py-3">
-              <span className="font-medium text-sm">{agentName}</span>
-              <span className="ml-auto text-muted-foreground text-xs">
+              <div className="min-w-0">
+                <span className="font-medium text-sm">{agentName}</span>
+                <AcpSessionMeta
+                  className="truncate text-muted-foreground text-xs"
+                  title={chat.title}
+                  usage={chat.usage}
+                />
+              </div>
+              <span className="ml-auto shrink-0 text-muted-foreground text-xs">
                 {STATUS_LABEL[active.status]}
               </span>
             </header>
@@ -168,85 +165,32 @@ export function AgentDetailView({ orpc, agentSlug, onBack }: AgentDetailViewProp
               </p>
             ) : null}
 
-            <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-4">
-              {timeline.length === 0 ? (
-                <p className="text-muted-foreground text-sm">Connected. Send a message to start.</p>
-              ) : (
-                timeline.map((item, index) =>
-                  item.kind === "permission" ? (
-                    <PermissionCard
-                      // Index is stable here: the timeline only ever appends.
-                      key={`permission-${item.request.requestId}`}
-                      request={item.request}
-                      resolvedOptionId={item.resolvedOptionId}
-                      isResponding={respondToPermission.isPending}
-                      onRespond={(optionId) => {
-                        if (!activeSessionId) return;
-                        respondToPermission.mutate({
-                          sessionId: activeSessionId,
-                          requestId: item.request.requestId,
-                          optionId,
-                        });
-                      }}
-                    />
-                  ) : (
-                    <div
-                      key={`${item.role}-${index}`}
-                      className={
-                        item.role === "user"
-                          ? "self-end rounded-lg bg-primary px-3 py-2 text-primary-foreground text-sm"
-                          : item.role === "note"
-                            ? "self-start rounded border border-dashed px-3 py-1.5 text-muted-foreground text-xs"
-                            : "self-start whitespace-pre-wrap rounded-lg bg-muted px-3 py-2 text-sm"
-                      }
-                    >
-                      {item.text}
-                    </div>
-                  ),
-                )
-              )}
-              <div ref={bottomRef} />
-            </div>
+            <AcpConversation
+              blocks={chat.blocks}
+              streaming={active.status === "busy"}
+              onAnswerPermission={chat.answerPermission}
+              emptyTitle="Connected."
+              emptyDescription="Send a message to start."
+            />
 
-            <div className="flex items-end gap-2 border-t p-3">
-              <textarea
-                className="min-h-10 flex-1 resize-none rounded-md border bg-background px-3 py-2 text-sm"
-                placeholder={
-                  isFinished(active.status)
-                    ? "This session has ended — start a new one to keep going."
-                    : active.status === "waiting_permission"
-                      ? "Respond to the request above to continue…"
-                      : `Message ${agentName}…`
-                }
-                value={draft}
-                rows={1}
-                disabled={
-                  active.status === "busy" ||
-                  isFinished(active.status) ||
-                  active.status === "waiting_permission" ||
-                  isFinished(active.status)
-                }
-                onChange={(event) => setDraft(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter" && !event.shiftKey) {
-                    event.preventDefault();
-                    send();
-                  }
-                }}
-              />
-              <Button
-                onClick={send}
-                disabled={
-                  !draft.trim() ||
-                  active.status === "busy" ||
-                  isFinished(active.status) ||
-                  active.status === "waiting_permission"
-                }
-                size="sm"
-              >
-                <Send className="size-4" />
-              </Button>
-            </div>
+            <AcpComposer
+              className="border-0 border-t p-3"
+              disabled={
+                active.status === "busy" ||
+                active.status === "waiting_permission" ||
+                isFinished(active.status)
+              }
+              onSend={send}
+              placeholder={
+                isFinished(active.status)
+                  ? "This session has ended — start a new one to keep going."
+                  : active.status === "waiting_permission"
+                    ? "Respond to the request above to continue…"
+                    : `Message ${agentName}…`
+              }
+              onStop={chat.cancel}
+              sending={active.status === "busy"}
+            />
           </>
         ) : (
           <div className="flex flex-1 items-center justify-center p-8 text-center">

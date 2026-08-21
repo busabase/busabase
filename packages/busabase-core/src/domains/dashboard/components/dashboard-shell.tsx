@@ -32,6 +32,7 @@ import { useLocation } from "wouter";
 import { CoreI18nProvider, coreMessagesByLocale } from "../../../i18n";
 import { nodeIconForType } from "../helpers/node-icons";
 import type { MoveNodePayload } from "../hooks/use-move-node";
+import { getSidebarTopLevelNodes } from "../utils/sidebar-node-tree";
 import { NodeDeleteDialog } from "./file-tree-browser";
 import { NodeAgentPromptsDialog } from "./node-agent-prompts-dialog";
 import { NodeMoveDialog } from "./node-move-dialog";
@@ -1017,16 +1018,11 @@ function buildNavChildren(node: NodeVO, ctx: NavItemContext): NavItem[] {
 /**
  * Build the Bases nav from the node tree, preserving structure. Container types
  * become collapsible parents (detail-bearing descendants nested underneath, at
- * any depth); other detail types are clickable rows. A single root container
- * is unwrapped.
+ * any depth); other detail types are clickable rows. The system workspace root
+ * is unwrapped without dropping ACL-promoted nodes that may sit beside it.
  */
 function buildKnowledgeBaseItems(nodes: NodeVO[], ctx: NavItemContext): NavItem[] {
-  const top =
-    nodes.length === 1 && hasCapability(nodes[0].type, "container") && !nodes[0].baseId
-      ? nodes[0].children
-      : nodes;
-
-  return top.flatMap((node) => buildNavItem(node, ctx));
+  return getSidebarTopLevelNodes(nodes).flatMap((node) => buildNavItem(node, ctx));
 }
 
 // A favorited node's own NavItem stripped of every container-only field
