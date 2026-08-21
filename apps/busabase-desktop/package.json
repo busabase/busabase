@@ -1,7 +1,7 @@
 {
   "name": "@busabase/desktop",
   "private": true,
-  "version": "0.17.2",
+  "version": "0.17.3",
   "type": "module",
   "scripts": {
     "dev": "next dev --port 3064",

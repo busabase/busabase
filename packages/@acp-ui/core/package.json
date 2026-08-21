@@ -1,0 +1,45 @@
+{
+  "name": "@acp-ui/core",
+  "description": "Headless, renderer-free interaction core for ACP (Agent Client Protocol) agent chat. Reduces ACP session updates into a view model both live streaming and persisted-event replay can share. Renders nothing \u2014 see docs/acp-ui-convergence-roadmap.md.",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "exports": {
+    "./reduce": {
+      "types": "./src/reduce/index.ts",
+      "default": "./src/reduce/index.ts"
+    },
+    "./session": {
+      "types": "./src/session/index.ts",
+      "default": "./src/session/index.ts"
+    },
+    "./group": {
+      "types": "./src/group/index.ts",
+      "default": "./src/group/index.ts"
+    }
+  },
+  "dependencies": {
+    "@agentclientprotocol/sdk": "1.3.0"
+  },
+  "peerDependencies": {
+    "react": "*"
+  },
+  "peerDependenciesMeta": {
+    "react": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@testing-library/react": "^16.3.0",
+    "@types/react": "19.2.17",
+    "jsdom": "^25.0.1",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7",
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.4"
+  }
+}
