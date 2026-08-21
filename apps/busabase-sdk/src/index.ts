@@ -1,3 +1,4 @@
+import { nodeWebUrl } from "busabase-contract/node-web-url";
 import type { ChangeRequestVO, RecordVO, ViewVO } from "busabase-contract/types";
 import { type BusabaseAssetsClient, grepAssets } from "./asset-grep.js";
 import {
@@ -39,6 +40,8 @@ const batchItemError = (result: { error?: string; code?: string; data?: unknown 
 export { type CloudContract, cloudContract } from "busabase-contract/contract/cloud";
 export type { CreatableNodeType } from "busabase-contract/domains";
 export { CREATABLE_NODE_TYPES } from "busabase-contract/domains";
+// The link formula itself, for callers who hold a node but not a client.
+export { type NodeWebUrlInput, nodeWebUrl } from "busabase-contract/node-web-url";
 // Re-export the full VO / DTO type surface so consumers can type their own code
 // against Busabase objects (BaseVO, RecordVO, ChangeRequestVO, …) without
 // depending on the internal workspace `busabase-contract` package.
@@ -228,6 +231,42 @@ export class Busabase {
   }
   get embedLinks(): BusabaseClient["embedLinks"] {
     return this.client.embedLinks;
+  }
+
+  /**
+   * The canonical dashboard URL a human opens for a node — the link you hand
+   * back after a write.
+   *
+   * Uses `config.webUrl` (which defaults to `baseUrl`) and `config.spaceId`.
+   * Pass `spaceId: null` for a workspace-subdomain host, where the route drops
+   * the space segment.
+   *
+   * This is the *authenticated*, durable link: it never expires, but the reader
+   * needs a session unless the node has public sharing enabled. For a no-login
+   * link, mint a Cloud embed link instead —
+   * `bb.embedLinks.create({ nodeId })` returns `{ url, iframeUrl }`.
+   *
+   * @example
+   * ```ts
+   * const doc = await bb.docs.create({ ... });
+   * bb.nodeUrl({ nodeType: "doc", nodeSlug: doc.slug });
+   * // → https://busabase.com/dashboard/org_123/doc/q3-pricing
+   * ```
+   */
+  nodeUrl(input: {
+    nodeType: string;
+    nodeSlug: string;
+    spaceId?: string | null;
+    extraSegments?: readonly string[];
+  }): string {
+    const spaceId = input.spaceId === undefined ? (this.config.spaceId ?? null) : input.spaceId;
+    return nodeWebUrl({
+      webOrigin: this.config.webUrl,
+      spaceId,
+      nodeType: input.nodeType,
+      nodeSlug: input.nodeSlug,
+      ...(input.extraSegments ? { extraSegments: input.extraSegments } : {}),
+    });
   }
 
   /** Full-text search across records, change requests, and Bases. */

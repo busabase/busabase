@@ -680,3 +680,53 @@ describe("Busabase shortcuts route to the right procedure", () => {
     expect(url.pathname).toContain("search");
   });
 });
+
+describe("Busabase.nodeUrl", () => {
+  it("builds a link from the resolved config, no request needed", () => {
+    const bb = new Busabase({ baseUrl: "https://busabase.com", spaceId: "org_123" });
+    expect(bb.nodeUrl({ nodeType: "doc", nodeSlug: "q3-pricing" })).toBe(
+      "https://busabase.com/dashboard/org_123/doc/q3-pricing",
+    );
+  });
+
+  it("uses webUrl when the dashboard is not same-origin with the API", () => {
+    const bb = new Busabase({
+      baseUrl: "https://api.internal.example.com",
+      webUrl: "https://busabase.example.com",
+      spaceId: "org_1",
+    });
+    expect(bb.nodeUrl({ nodeType: "base", nodeSlug: "customers" })).toBe(
+      "https://busabase.example.com/dashboard/org_1/base/customers",
+    );
+  });
+
+  it("takes extra segments, e.g. a record under a Base", () => {
+    const bb = new Busabase({ baseUrl: "https://busabase.com", spaceId: "org_1" });
+    expect(bb.nodeUrl({ nodeType: "base", nodeSlug: "customers", extraSegments: ["rec_9"] })).toBe(
+      "https://busabase.com/dashboard/org_1/base/customers/rec_9",
+    );
+  });
+
+  it("lets an explicit spaceId override the configured one", () => {
+    const bb = new Busabase({ baseUrl: "https://busabase.com", spaceId: "org_1" });
+    expect(bb.nodeUrl({ nodeType: "doc", nodeSlug: "a", spaceId: "org_other" })).toBe(
+      "https://busabase.com/dashboard/org_other/doc/a",
+    );
+  });
+
+  it("drops the space segment when spaceId is explicitly null (workspace subdomain)", () => {
+    // `undefined` means "fall back to config"; `null` means "this host has no
+    // space segment" — they must not collapse into the same thing.
+    const bb = new Busabase({ baseUrl: "https://acme.busabase.com", spaceId: "org_1" });
+    expect(bb.nodeUrl({ nodeType: "doc", nodeSlug: "a", spaceId: null })).toBe(
+      "https://acme.busabase.com/dashboard/doc/a",
+    );
+  });
+
+  it("omits the space segment when none is configured at all", () => {
+    const bb = new Busabase({ baseUrl: "https://busabase.com" });
+    expect(bb.nodeUrl({ nodeType: "doc", nodeSlug: "a" })).toBe(
+      "https://busabase.com/dashboard/doc/a",
+    );
+  });
+});
