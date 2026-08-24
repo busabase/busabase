@@ -295,6 +295,7 @@ export const dashboardZhCN: CoreI18nMessages = {
     review: "评审",
     new: "新建",
     favorites: "收藏",
+    templates: "模板",
     installFromGithub: "从 GitHub 安装…",
   },
   shell: {

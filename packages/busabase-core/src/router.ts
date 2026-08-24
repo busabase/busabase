@@ -17,6 +17,7 @@ import { fileTreeRouter } from "./domains/filetree/router";
 import { formRouter } from "./domains/form/router";
 import { installRouter } from "./domains/install/router";
 import { updateNodeContent } from "./domains/rich-node/handlers";
+import { templatesRouter } from "./domains/templates/router";
 import { vaultRouter } from "./domains/vault/router";
 import { webhookRouter } from "./domains/webhook/router";
 import { listActivityPaged } from "./logic/activity";
@@ -250,6 +251,7 @@ const busabaseRouterImpl = busabase.router({
   webhooks: webhookRouter,
   dump: dumpRouter,
   install: installRouter,
+  templates: templatesRouter,
   changeRequests: {
     list: busabase.changeRequests.list.handler(async ({ input }) => listChangeRequestsPaged(input)),
     listPage: busabase.changeRequests.listPage.handler(async ({ input }) =>

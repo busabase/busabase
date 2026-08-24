@@ -136,6 +136,14 @@ export const installFromGithub = async (input: InstallFromGithubDTO): Promise<In
   const result = await applyInstall(client, plan, {
     autoMerge,
     submittedBy: `install ${source.owner}/${source.repo} (${plan.tree.manifest.name})`,
+    // Recorded on an app's root Folder so the space remembers where it came
+    // from. Without it an installed app carries no memory of its origin, and
+    // "a newer version of this is available" becomes unanswerable.
+    source: {
+      repo: `${source.owner}/${source.repo}`,
+      ref: source.ref,
+      ...(source.subdir ? { subdir: source.subdir } : {}),
+    },
     // `applyInstall` needs an origin to resolve a root-relative upload url
     // against (the shape a local-disk `STORAGE_URL` hands out — see its
     // `serverUrl` doc). `createInProcessClient()` above skips HTTP entirely for

@@ -107,7 +107,7 @@ describe.skipIf(!LIVE_URL)("runAirAppSandock — against a live Sandock", () => 
     const failure = events.find(
       (event): event is { type: "error"; message: string } => event.type === "error",
     );
-    expect(failure?.message).toBe("Not Found");
+    expect(failure?.message).toBe("Failed to get signed preview URL: Not Found");
     expect(registered, "no preview target is registered without a preview URL").toHaveLength(0);
   }, 180_000);
 });

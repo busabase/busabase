@@ -22,46 +22,51 @@ let shellResults: Array<{ stdout?: string; stderr?: string; exitCode?: number }>
 
 const envelope = <T>(data: T) => ({ success: true, code: 0, message: "ok", data });
 
+/** Shaped after the published `sandock` SDK's `SandockClient` namespaces. */
 const api = {
-  create: vi.fn(async (args: Record<string, unknown>) => {
-    calls.push({ op: "create", args });
-    return envelope({ id: "sbx_1" });
-  }),
-  start: vi.fn(async (args: Record<string, unknown>) => {
-    calls.push({ op: "start", args });
-    return envelope({ id: "sbx_1", started: true });
-  }),
-  stop: vi.fn(async (args: Record<string, unknown>) => {
-    calls.push({ op: "stop", args });
-    return envelope({ id: "sbx_1", stopped: true });
-  }),
-  delete: vi.fn(async (args: Record<string, unknown>) => {
-    calls.push({ op: "delete", args });
-    return envelope({ id: "sbx_1", deleted: true });
-  }),
-  writeFile: vi.fn(async (args: Record<string, unknown>) => {
-    calls.push({ op: "writeFile", args });
-    return envelope(true);
-  }),
-  shell: vi.fn(async (args: Record<string, unknown>) => {
-    calls.push({ op: "shell", args });
-    const next = shellResults.shift() ?? {};
-    return envelope({
-      stdout: next.stdout ?? "",
-      stderr: next.stderr ?? "",
-      exitCode: next.exitCode ?? 0,
-      timedOut: false,
-      durationMs: 1,
-    });
-  }),
-  signedPreviewUrl: vi.fn(async (args: Record<string, unknown>) => {
-    calls.push({ op: "signedPreviewUrl", args });
-    return envelope({ url: "https://3000-tok.sandock.ai" });
-  }),
+  sandbox: {
+    create: vi.fn(async (options: Record<string, unknown>) => {
+      calls.push({ op: "create", args: options });
+      return envelope({ id: "sbx_1" });
+    }),
+    start: vi.fn(async (id: string) => {
+      calls.push({ op: "start", args: { id } });
+      return envelope({ id, started: true });
+    }),
+    stop: vi.fn(async (id: string) => {
+      calls.push({ op: "stop", args: { id } });
+      return envelope({ id, stopped: true });
+    }),
+    delete: vi.fn(async (id: string) => {
+      calls.push({ op: "delete", args: { id } });
+      return envelope({ id, deleted: true });
+    }),
+    shell: vi.fn(async (id: string, options: Record<string, unknown>) => {
+      calls.push({ op: "shell", args: { id, ...options } });
+      const next = shellResults.shift() ?? {};
+      return envelope({
+        stdout: next.stdout ?? "",
+        stderr: next.stderr ?? "",
+        exitCode: next.exitCode ?? 0,
+        timedOut: false,
+        durationMs: 1,
+      });
+    }),
+    getSignedPreviewUrl: vi.fn(async (id: string, options: Record<string, unknown>) => {
+      calls.push({ op: "signedPreviewUrl", args: { id, ...options } });
+      return envelope({ url: "https://3000-tok.sandock.ai" });
+    }),
+  },
+  fs: {
+    write: vi.fn(async (id: string, path: string, content: string) => {
+      calls.push({ op: "writeFile", args: { id, path, content } });
+      return envelope(true);
+    }),
+  },
 };
 
-vi.mock("sandock-contract/api-client", () => ({
-  createSandboxOpenApiClient: vi.fn(() => api),
+vi.mock("sandock", () => ({
+  createSandockClient: vi.fn(() => api),
 }));
 
 const registered: Array<[string, string, string]> = [];

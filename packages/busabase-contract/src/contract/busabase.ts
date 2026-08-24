@@ -18,6 +18,7 @@ import { fileContract } from "../domains/file-node/contract";
 import { fileTreeContract } from "../domains/filetree/contract";
 import { formContract } from "../domains/form/contract";
 import { installContract } from "../domains/install/contract";
+import { templatesContract } from "../domains/templates/contract";
 import { vaultContract } from "../domains/vault/contract";
 import { webhookContract } from "../domains/webhook/contract";
 import {
@@ -537,6 +538,7 @@ export const busabaseContractRoutes = {
   webhooks: webhookContract,
   dump: dumpContract,
   install: installContract,
+  templates: templatesContract,
   changeRequests: {
     // Always keyset-paginated — the unpaginated twin returned a bare array that
     // silently truncated at `limit` with no way to ask for the next page.

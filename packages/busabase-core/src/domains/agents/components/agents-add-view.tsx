@@ -3,6 +3,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";
 import type { AgentCatalogEntryVO, AgentSessionVO } from "busabase-contract/domains/agents/types";
+import { Badge } from "kui/badge";
 import { Button } from "kui/button";
 import { ArrowLeft, Bot, X } from "lucide-react";
 import { useEffect, useState } from "react";
@@ -77,7 +78,10 @@ export function AgentsAddView({ orpc, onBack, onConnected, spaceId }: AgentsAddV
                   <Bot className="size-4" />
                   {entry.name}
                 </span>
-                <TransportBadge transport={entry.transport} />
+                <span className="flex items-center gap-1">
+                  <TransportBadge transport={entry.transport} />
+                  {entry.comingSoon && <Badge variant="secondary">Coming soon</Badge>}
+                </span>
               </div>
               <p className="text-muted-foreground text-xs">{entry.description}</p>
               {entry.connectedAgentName && entry.slug !== "buda" && (
@@ -85,7 +89,9 @@ export function AgentsAddView({ orpc, onBack, onConnected, spaceId }: AgentsAddV
                   Connected to {entry.connectedAgentName}
                 </p>
               )}
-              {entry.slug === "buda" && entry.connectionRequired ? (
+              {entry.comingSoon ? (
+                <p className="text-muted-foreground text-xs">This integration is coming soon.</p>
+              ) : entry.slug === "buda" && entry.connectionRequired ? (
                 <>
                   {entry.connectedAgents.map((agent) => (
                     <div

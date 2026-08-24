@@ -300,6 +300,7 @@ export const dashboardJa: CoreI18nMessages = {
     review: "レビュー",
     new: "新規",
     favorites: "お気に入り",
+    templates: "テンプレート",
     installFromGithub: "GitHub からインストール…",
   },
   shell: {
