@@ -1,0 +1,1 @@
+ALTER TABLE "busabase_nodes" ADD COLUMN "icon" jsonb;

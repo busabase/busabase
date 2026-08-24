@@ -10,7 +10,7 @@ import {
 import type { MoveNodePayload } from "busabase-core/dashboard/use-move-node";
 import { useCoreI18n } from "busabase-core/i18n";
 import { DropdownMenuItem, DropdownMenuSeparator } from "kui/dropdown-menu";
-import { Activity, Archive, Bot, Github, Images, Inbox, Network } from "lucide-react";
+import { Activity, Archive, Bot, Github, Images, Inbox, LayoutGrid, Network } from "lucide-react";
 import { useAddDemoParam } from "openlib/ui/dashboard";
 import type { ReactNode } from "react";
 import { useMemo, useState } from "react";
@@ -172,6 +172,13 @@ export function BusabaseDashboardShell({
         >
           <Bot />
           <span>{coreMessages.nav.agents}</span>
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          onSelect={() => navigate(addDemoParam("/apps"))}
+          className={currentPath.startsWith("/apps") ? "bg-accent" : undefined}
+        >
+          <LayoutGrid />
+          <span>{coreMessages.nav.apps}</span>
         </DropdownMenuItem>
         {onInstallClick ? (
           <DropdownMenuItem onSelect={onInstallClick}>

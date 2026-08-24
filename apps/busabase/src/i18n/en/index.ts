@@ -1,6 +1,7 @@
-import type { BaseTranslation } from "../i18n-types";
+// Base locale. `as const` keeps every leaf a string literal so ts7-i18n can infer
+// each accessor's `{param}` set from the template-literal type.
 
-const en: BaseTranslation = {
+const en = {
   common: {
     appName: "Busabase",
   },
@@ -299,6 +300,8 @@ const en: BaseTranslation = {
     includeBody:
       "For faster troubleshooting, include your Busabase version, operating system, whether you are using Desktop, Mobile, Cloud, or self-hosted mode, and the exact action that failed.",
   },
-};
+} as const;
+
+export type BaseTranslation = typeof en;
 
 export default en;

@@ -1,7 +1,7 @@
 import { notFound } from "next/navigation";
 import type React from "react";
-import { normalizeKitLocale } from "~/lib/influencer-kit";
 import { LangLayoutClient } from "./layout-client";
+import { normalizeLangLocale } from "./locale";
 
 export const dynamic = "force-static";
 
@@ -17,7 +17,7 @@ export default async function LangLayout({
   children: React.ReactNode;
 }) {
   const { lang } = await params;
-  const normalizedLang = normalizeKitLocale(lang);
+  const normalizedLang = normalizeLangLocale(lang);
   if (!normalizedLang) notFound();
 
   return <LangLayoutClient lang={normalizedLang}>{children}</LangLayoutClient>;

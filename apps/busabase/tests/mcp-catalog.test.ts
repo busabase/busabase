@@ -54,7 +54,7 @@ describe("self-hosted MCP catalog", () => {
         "bases_get",
         "records_get",
         "change_requests_get",
-        "docs_read_lines",
+        "nodes_read_lines",
       ]),
     );
     expect(publishedToolNames()).not.toContain("assets_grep");

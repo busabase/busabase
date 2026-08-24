@@ -1,7 +1,8 @@
-import type { Translation } from "../i18n-types";
+import type { Translatable } from "ts7-i18n";
+import type { BaseTranslation } from "../en";
 import zhCN from "../zh-CN";
 
-const ja: Translation = {
+const ja = {
   common: {
     appName: "Busabase",
   },
@@ -303,6 +304,6 @@ const ja: Translation = {
     aboutDescription:
       "サインインするとポップアップ（デスクトップ版ではブラウザ）で Busabase Cloud が開き、このトンネルにのみ有効な認証情報が発行されます — クラウドアカウントの完全なセッションではありません。接続を解除するとその認証情報は失効します。",
   },
-};
+} satisfies Translatable<BaseTranslation>;
 
 export default ja;
