@@ -1,7 +1,7 @@
 {
   "name": "busabase-package",
   "description": "The `busabase-package@1` format: GitHub source, layout read/write, install planning, and the five-pass apply. Shared by busabase-cli (`install` / `export`) and busabase-core's server-side install domain. Node-only APIs are fine here — it is never browser-bundled.",
-  "version": "0.18.0",
+  "version": "0.19.0",
   "private": false,
   "license": "MIT",
   "homepage": "https://github.com/busabase/busabase/tree/main/packages/busabase-package",
@@ -27,6 +27,10 @@
         "types": "./dist/collect.d.ts",
         "default": "./dist/collect.js"
       },
+      "./discover": {
+        "types": "./dist/discover.d.ts",
+        "default": "./dist/discover.js"
+      },
       "./frontmatter": {
         "types": "./dist/frontmatter.d.ts",
         "default": "./dist/frontmatter.js"
@@ -34,6 +38,10 @@
       "./github": {
         "types": "./dist/github.d.ts",
         "default": "./dist/github.js"
+      },
+      "./index-build": {
+        "types": "./dist/index-build.d.ts",
+        "default": "./dist/index-build.js"
       },
       "./layout-read": {
         "types": "./dist/layout-read.d.ts",
@@ -46,6 +54,10 @@
       "./plan": {
         "types": "./dist/plan.d.ts",
         "default": "./dist/plan.js"
+      },
+      "./template": {
+        "types": "./dist/template.d.ts",
+        "default": "./dist/template.js"
       },
       "./tree": {
         "types": "./dist/tree.d.ts",
@@ -69,6 +81,10 @@
       "types": "./src/collect.ts",
       "default": "./src/collect.ts"
     },
+    "./discover": {
+      "types": "./src/discover.ts",
+      "default": "./src/discover.ts"
+    },
     "./frontmatter": {
       "types": "./src/frontmatter.ts",
       "default": "./src/frontmatter.ts"
@@ -76,6 +92,10 @@
     "./github": {
       "types": "./src/github.ts",
       "default": "./src/github.ts"
+    },
+    "./index-build": {
+      "types": "./src/index-build.ts",
+      "default": "./src/index-build.ts"
     },
     "./layout-read": {
       "types": "./src/layout-read.ts",
@@ -88,6 +108,10 @@
     "./plan": {
       "types": "./src/plan.ts",
       "default": "./src/plan.ts"
+    },
+    "./template": {
+      "types": "./src/template.ts",
+      "default": "./src/template.ts"
     },
     "./tree": {
       "types": "./src/tree.ts",

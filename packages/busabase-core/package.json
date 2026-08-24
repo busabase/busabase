@@ -1,7 +1,7 @@
 {
   "name": "busabase-core",
   "description": "Shared Busabase open-core protocol, local store, API helpers, and dashboard components.",
-  "version": "0.18.0",
+  "version": "0.19.0",
   "private": true,
   "type": "module",
   "exports": {
@@ -325,7 +325,7 @@
     "quickjs-emscripten": "^0.32.0",
     "react": "^19.2.7",
     "react-easy-crop": "^5.5.6",
-    "sandock-contract": "workspace:*",
+    "sandock": "^2.2.7",
     "server-only": "^0.0.1",
     "streamdown": "^2.3.0",
     "wouter": "^3.9.0",
