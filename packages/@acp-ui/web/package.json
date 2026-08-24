@@ -2,7 +2,19 @@
   "name": "@acp-ui/web",
   "description": "Web binding layer for @acp-ui/core. Renders the ACP conversation view model with kui + kui/ai-elements components, and lets every block renderer be swapped out. Brings markdown rendering to ACP chat for the first time.",
   "version": "0.0.1",
-  "private": true,
+  "license": "MIT",
+  "private": false,
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/mr-kelly/acp-ui.git",
+    "directory": "packages/@acp-ui/web"
+  },
+  "bugs": {
+    "url": "https://github.com/mr-kelly/acp-ui/issues"
+  },
   "type": "module",
   "scripts": {
     "typecheck": "tsc --noEmit",
@@ -36,11 +48,12 @@
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.0",
     "@testing-library/user-event": "^14.6.1",
+    "@types/node": "^24.13.2",
     "@types/react": "19.2.17",
     "jsdom": "^25.0.1",
     "kui": "workspace:*",
     "react": "^19.2.7",
-    "typescript": "^5.9.3",
+    "typescript": "^7.0.2",
     "vitest": "^3.2.4"
   }
 }

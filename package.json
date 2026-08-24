@@ -1,7 +1,7 @@
 {
   "name": "busabase-repo",
   "private": true,
-  "version": "0.17.3",
+  "version": "0.18.0",
   "packageManager": "pnpm@10.15.1",
   "workspaces": [
     "apps/*",
@@ -22,6 +22,7 @@
   },
   "devDependencies": {
     "@biomejs/biome": "2.2.3",
+    "@typescript/native-preview": "7.0.0-dev.20260707.2",
     "tsx": "^4.20.5"
   },
   "pnpm": {

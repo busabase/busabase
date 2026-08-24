@@ -1,7 +1,7 @@
 {
   "name": "busabase-core",
   "description": "Shared Busabase open-core protocol, local store, API helpers, and dashboard components.",
-  "version": "0.17.3",
+  "version": "0.18.0",
   "private": true,
   "type": "module",
   "exports": {
@@ -68,6 +68,10 @@
     "./domains/airapp/demo-content": {
       "types": "./src/domains/airapp/demo-content.ts",
       "default": "./src/domains/airapp/demo-content.ts"
+    },
+    "./domains/airapp/logic/engine-availability": {
+      "types": "./src/domains/airapp/logic/engine-availability.ts",
+      "default": "./src/domains/airapp/logic/engine-availability.ts"
     },
     "./domains/airapp/nodepod-runner": {
       "types": "./src/domains/airapp/components/runners/nodepod-runner.ts",
@@ -161,9 +165,9 @@
       "types": "./src/domains/dashboard/components/dashboard-shell.tsx",
       "default": "./src/domains/dashboard/components/dashboard-shell.tsx"
     },
-    "./dashboard/node-permissions": {
-      "types": "./src/domains/dashboard/components/node-permissions-button.tsx",
-      "default": "./src/domains/dashboard/components/node-permissions-button.tsx"
+    "./dashboard/node-settings-permissions-slot": {
+      "types": "./src/domains/dashboard/components/node-settings-permissions-slot.tsx",
+      "default": "./src/domains/dashboard/components/node-settings-permissions-slot.tsx"
     },
     "./dashboard/empty-agent-guide": {
       "types": "./src/domains/dashboard/components/empty-agent-guide.tsx",
@@ -200,6 +204,22 @@
     "./dashboard/activity-events": {
       "types": "./src/domains/dashboard/helpers/activity-events.ts",
       "default": "./src/domains/dashboard/helpers/activity-events.ts"
+    },
+    "./dashboard/attachment-upload": {
+      "types": "./src/domains/dashboard/helpers/attachment-upload.ts",
+      "default": "./src/domains/dashboard/helpers/attachment-upload.ts"
+    },
+    "./dashboard/node-agent-prompts": {
+      "types": "./src/domains/dashboard/helpers/node-agent-prompts.ts",
+      "default": "./src/domains/dashboard/helpers/node-agent-prompts.ts"
+    },
+    "./dashboard/node-detail": {
+      "types": "./src/domains/dashboard/helpers/node-detail.ts",
+      "default": "./src/domains/dashboard/helpers/node-detail.ts"
+    },
+    "./dashboard/node-move-targets": {
+      "types": "./src/domains/dashboard/helpers/node-move-targets.ts",
+      "default": "./src/domains/dashboard/helpers/node-move-targets.ts"
     },
     "./dashboard/routes": {
       "types": "./src/domains/dashboard/routes.tsx",
@@ -249,6 +269,14 @@
       "types": "./src/i18n/index.tsx",
       "default": "./src/i18n/index.tsx"
     },
+    "./i18n/messages": {
+      "types": "./src/i18n/messages.ts",
+      "default": "./src/i18n/messages.ts"
+    },
+    "./i18n/zh-cn": {
+      "types": "./src/i18n/zh-CN.ts",
+      "default": "./src/i18n/zh-CN.ts"
+    },
     "./domains/agents/logic/agent-origin-guard": {
       "types": "./src/domains/agents/logic/agent-origin-guard.ts",
       "default": "./src/domains/agents/logic/agent-origin-guard.ts"
@@ -270,6 +298,7 @@
     "@electric-sql/pglite": "^0.3.15",
     "@excalidraw/excalidraw": "^0.18.1",
     "@milkdown/crepe": "^7.21.3",
+    "@milkdown/kit": "^7.21.3",
     "@milkdown/react": "^7.21.3",
     "@orpc/client": "^1.14.6",
     "@orpc/contract": "^1.14.6",
@@ -295,6 +324,8 @@
     "postgres": "^3.4.6",
     "quickjs-emscripten": "^0.32.0",
     "react": "^19.2.7",
+    "react-easy-crop": "^5.5.6",
+    "sandock-contract": "workspace:*",
     "server-only": "^0.0.1",
     "streamdown": "^2.3.0",
     "wouter": "^3.9.0",
@@ -308,7 +339,7 @@
     "@types/react": "19.2.17",
     "@types/ws": "^8.18.1",
     "@vitest/coverage-v8": "^2.1.8",
-    "typescript": "^5.9.3",
+    "typescript": "^7.0.2",
     "vitest": "^2.1.8"
   },
   "scripts": {
@@ -321,6 +352,7 @@
     "bench:records": "NODE_OPTIONS='--conditions=react-server --expose-gc --max-old-space-size=4096' tsx scripts/bench-records.ts",
     "bench:explain": "NODE_OPTIONS='--conditions=react-server' tsx scripts/bench-explain.ts",
     "bench:records:pg": "BENCH_ENGINE=postgres NODE_OPTIONS='--conditions=react-server --expose-gc --max-old-space-size=4096' tsx scripts/bench-records.ts",
-    "bench:inbox": "NODE_OPTIONS='--conditions=react-server --expose-gc --max-old-space-size=4096' tsx scripts/bench-inbox.ts"
+    "bench:inbox": "NODE_OPTIONS='--conditions=react-server --expose-gc --max-old-space-size=4096' tsx scripts/bench-inbox.ts",
+    "bench:node-grep": "NODE_OPTIONS=--conditions=react-server tsx scripts/bench-node-grep.ts"
   }
 }
