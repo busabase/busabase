@@ -1,4 +1,4 @@
-import { createMarkdownRenderer, type MarkdownProps } from "fumadocs-core/content";
+import { createMarkdownRenderer, type MarkdownProps } from "fumadocs-core/content/md";
 import { getTableOfContents } from "fumadocs-core/content/toc";
 import { remarkHeading } from "fumadocs-core/mdx-plugins/remark-heading";
 import type { TOCItemType } from "fumadocs-core/toc";
