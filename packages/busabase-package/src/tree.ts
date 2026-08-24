@@ -90,10 +90,34 @@ export interface PackageDocAsset {
   bytes: Buffer;
 }
 
+/**
+ * The package root's `SKILL.md` and its sidecar directories, lifted out of the
+ * repo root — the piece that makes a package also an Agent Skill.
+ *
+ * It is deliberately NOT one of `nodes`: everything under `content/` maps to a
+ * node the author laid out, whereas this is assembled from files that live
+ * beside `content/` and lands as a Skill node the installer creates. Keeping it
+ * separate is also what stops the round trip from duplicating it — export lifts
+ * this node back to the root instead of writing it under `content/`.
+ */
+export interface PackageRootSkill {
+  /** Node slug for the installed Skill node; taken from the manifest name. */
+  slug: string;
+  name: string;
+  description: string;
+  /** `SKILL.md` plus anything under `references/`, `agents/`, `scripts/`. */
+  files: PackageFileEntry[];
+}
+
 export interface PackageTree {
   manifest: PackageManifest;
   /** Top-level nodes under `content/`. */
   nodes: PackageNode[];
+  /**
+   * Present when the package root carries a `SKILL.md` (§5.1). Absent for a
+   * plain package — which is the majority and stays byte-identical.
+   */
+  rootSkill?: PackageRootSkill;
   /**
    * Bytes for the images the `content/` Docs embed, deduped by source asset id.
    * Optional because a package with no Doc images carries none — an absent
@@ -227,6 +251,18 @@ export const humanizeSlug = (slug: string): string =>
 
 // ── MIME ─────────────────────────────────────────────────────────────────────
 
+/**
+ * Extension → mime type, which decides one thing that matters: a text file goes
+ * INLINE into a file-tree create, and anything else has to be uploaded as an
+ * asset first (see `isTextMimeType`). Getting it wrong on a source file means
+ * the app's own code takes the binary path — it needs an upload endpoint to
+ * install at all, and it lands as an opaque blob rather than something a
+ * reviewer or an agent can read.
+ *
+ * The module-flavoured JavaScript and TypeScript extensions are here because
+ * real projects use them: `scripts/setup.mjs` is the ordinary name for a Node
+ * script, and installing kelly-email surfaced exactly that gap.
+ */
 const MIME_BY_EXT: Record<string, string> = {
   ".css": "text/css",
   ".csv": "text/csv",
@@ -235,7 +271,12 @@ const MIME_BY_EXT: Record<string, string> = {
   ".html": "text/html",
   ".jpeg": "image/jpeg",
   ".jpg": "image/jpeg",
+  ".cjs": "text/javascript",
+  ".cts": "text/typescript",
   ".js": "text/javascript",
+  ".jsx": "text/javascript",
+  ".mjs": "text/javascript",
+  ".mts": "text/typescript",
   ".json": "application/json",
   ".md": "text/markdown",
   ".pdf": "application/pdf",
@@ -243,6 +284,7 @@ const MIME_BY_EXT: Record<string, string> = {
   ".py": "text/x-python",
   ".svg": "image/svg+xml",
   ".ts": "text/typescript",
+  ".tsx": "text/typescript",
   ".txt": "text/plain",
   ".webp": "image/webp",
   ".yaml": "text/yaml",

@@ -2,7 +2,7 @@ import { PACKAGE_FORMAT } from "busabase-contract/domains/package/types";
 import { describe, expect, it } from "vitest";
 import { type PackageFiles, readPackageTree } from "./layout-read";
 import { renderPackageTree } from "./layout-write";
-import type { PackageTree } from "./tree";
+import { guessMimeType, isTextMimeType, type PackageTree } from "./tree";
 
 const text = (value: string): Buffer => Buffer.from(value, "utf8");
 
@@ -477,5 +477,30 @@ describe("validation", () => {
   it("rejects an unclosed frontmatter block", () => {
     const files = withContent({ "content/faq.md": "---\nname: FAQ\nbody" });
     expect(() => readPackageTree(files)).toThrow(/never closes it/i);
+  });
+});
+
+describe("guessMimeType — source files must not take the binary path", () => {
+  it("treats every JavaScript and TypeScript flavour as text", () => {
+    // A source file classed as binary needs an upload endpoint to install at
+    // all, and lands as an opaque blob instead of something a reviewer or an
+    // agent can read. `scripts/setup.mjs` — the ordinary name for a Node script
+    // — took that path until installing a real skill surfaced it.
+    for (const path of [
+      "scripts/setup.mjs",
+      "scripts/legacy.cjs",
+      "src/app.jsx",
+      "src/app.tsx",
+      "src/config.mts",
+      "src/config.cts",
+    ]) {
+      expect(isTextMimeType(guessMimeType(path)), path).toBe(true);
+    }
+  });
+
+  it("still treats real binaries as binary", () => {
+    for (const path of ["assets/shot.webp", "docs/report.pdf", "icon.png"]) {
+      expect(isTextMimeType(guessMimeType(path)), path).toBe(false);
+    }
   });
 });

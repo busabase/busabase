@@ -9,6 +9,7 @@
  */
 import { PACKAGE_MAX_FILE_COUNT } from "busabase-contract/domains/package/types";
 import type { PackageClient } from "./client";
+import { validateTemplate } from "./template";
 import {
   collectBaseNodes,
   type PackageBaseNode,
@@ -110,12 +111,62 @@ export interface InstallPlan {
   counts: PlanCounts;
   /** True only when a record carries a relation value — see {@link hasUnlinkableRelationValues}. */
   requiresAutoMerge: boolean;
+  /**
+   * Installed node slug → the slug the package declared, for every node whose
+   * slug this plan rewrote (folder-prefixing, `--rename`, or both).
+   *
+   * The ownership stamp has to carry the ORIGINAL: an app looks its own Base up
+   * by a stable internal handle (`contacts`), and if the stamp recorded the
+   * installed slug instead, the same app installed into two folders would
+   * appear to be two different apps to its own code.
+   */
+  resourceKeysBySlug: Record<string, string>;
+  /**
+   * Whether this package installs AS an app (Skill node, ownership stamps,
+   * sample-record merge).
+   *
+   * Decided HERE, against the package as the author wrote it, and carried
+   * forward — not re-derived later. The plan rewrites slugs (folder-prefixing,
+   * `--rename`), and the validator cross-checks the manual's declared resources
+   * against those slugs; asking it again after the rewrite makes a perfectly
+   * valid template fail its own resource check and silently install as a plain
+   * package, stamping nothing. One evaluation, one answer.
+   */
+  isTemplate: boolean;
 }
 
 export interface BuildPlanOptions {
   /** Defaults to the manifest name (§12). */
   intoFolder?: string;
   rename?: boolean;
+  /**
+   * Prefix each Base's slug with the target folder's, so `reviews` installs as
+   * `kelly-email-reviews`.
+   *
+   * Base slugs are unique per SPACE, not per folder, and templates converge on
+   * the same generic names — `settings`, `contacts`, `tasks`. Without a prefix
+   * the second template a user installs collides on names the author never
+   * chose to share, and the best outcome available is a `-2` suffix nobody can
+   * predict. Prefixing makes the collision not happen in the first place.
+   *
+   * Defaults to on for templates (which is where the convergence problem is)
+   * and off otherwise, so existing packages keep the slugs their authors wrote.
+   * Nothing depends on the resulting slug: the ownership stamp records each
+   * node's ORIGINAL package slug as its `resourceKey`, which is the handle an
+   * app's own code looks it up by.
+   */
+  prefixBaseSlugs?: boolean;
+  /**
+   * Whether a template's sample records will be merged on install (apply's
+   * default is yes).
+   *
+   * Only affects `requiresAutoMerge`, and only for templates — but it matters:
+   * that flag makes the dashboard demand "install without review", which merges
+   * the AirApp CODE too. A template whose records merge anyway has no reason to
+   * demand it, and demanding it would push the user into auto-merging exactly
+   * the part that must stay review-first.
+   */
+  installSampleRecords?: boolean;
 }
 
 export const buildInstallPlan = (
@@ -132,11 +183,30 @@ export const buildInstallPlan = (
   const warnings: string[] = [];
 
   assertPackageNodeIdentitiesUnique(tree);
-  const collisions = findCollisions(tree, targetFolderSlug, target);
 
-  let planned = tree;
+  // Prefixing happens BEFORE collision detection, because the prefixed slug is
+  // the one that will actually be created — detecting collisions on the
+  // package's own slugs would report clashes that prefixing already avoided and
+  // miss any the prefix introduces.
+  const isTemplate = validateTemplate(tree).ok;
+  const shouldPrefix = options.prefixBaseSlugs ?? isTemplate;
+  const prefixed = shouldPrefix ? prefixBaseSlugs(tree, targetFolderSlug) : tree;
+  const resourceKeysBySlug: Record<string, string> = {};
+  for (const [installedSlug, originalSlug] of collectSlugRewrites(tree, prefixed)) {
+    resourceKeysBySlug[installedSlug] = originalSlug;
+  }
+
+  const collisions = findCollisions(prefixed, targetFolderSlug, target);
+
+  let planned = prefixed;
   if (options.rename && collisions.length > 0) {
-    planned = applyRenames(tree, collisions, target.existingNodeSlugsByType);
+    planned = applyRenames(prefixed, collisions, target.existingNodeSlugsByType);
+    // A rename layers on top of a prefix, so re-derive against the ORIGINAL
+    // tree — otherwise a doubly-rewritten node would record its prefixed slug
+    // as the app's handle instead of the one the package declared.
+    for (const [installedSlug, originalSlug] of collectSlugRewrites(tree, planned)) {
+      resourceKeysBySlug[installedSlug] = originalSlug;
+    }
   }
 
   collectWarnings(planned, warnings);
@@ -154,8 +224,79 @@ export const buildInstallPlan = (
     collisions,
     warnings,
     counts,
-    requiresAutoMerge: collectBaseNodes(planned.nodes).some(hasUnlinkableRelationValues),
+    requiresAutoMerge:
+      collectBaseNodes(planned.nodes).some(hasUnlinkableRelationValues) &&
+      // A template merges its own sample records (apply's `installSampleRecords`),
+      // so pass 5 does have record ids to link and the user need not be pushed
+      // into a full auto-merge install.
+      !(isTemplate && (options.installSampleRecords ?? true)),
+    resourceKeysBySlug,
+    isTemplate,
   };
+};
+
+/**
+ * Rewrite every Base slug to `<folder>-<slug>`, following relation targets.
+ *
+ * A Base already carrying the prefix is left alone, so re-planning an installed
+ * package (an upgrade, a retry) does not stack `kelly-email-kelly-email-…`.
+ * Only Bases are prefixed: every other node type is scoped to its parent
+ * folder, so only Bases can collide across folders in the first place.
+ */
+const prefixBaseSlugs = (tree: PackageTree, folderSlug: string): PackageTree => {
+  const renames = new Map<string, string>();
+  for (const node of walkNodes(tree.nodes)) {
+    if (node.type !== "base") continue;
+    if (node.slug === folderSlug || node.slug.startsWith(`${folderSlug}-`)) continue;
+    renames.set(node.slug, `${folderSlug}-${node.slug}`);
+  }
+  if (renames.size === 0) return tree;
+
+  const rewriteField = <T extends { options: { targetBaseSlug?: string } }>(field: T): T => {
+    const target = field.options.targetBaseSlug;
+    if (!target) return field;
+    const renamed = renames.get(target);
+    return renamed ? { ...field, options: { ...field.options, targetBaseSlug: renamed } } : field;
+  };
+
+  const rewrite = (node: PackageNode): PackageNode => {
+    if (node.type === "folder") return { ...node, children: node.children.map(rewrite) };
+    if (node.type !== "base") return node;
+    return {
+      ...node,
+      slug: renames.get(node.slug) ?? node.slug,
+      base: { ...node.base, fields: node.base.fields.map(rewriteField) },
+    };
+  };
+
+  return { ...tree, nodes: tree.nodes.map(rewrite) };
+};
+
+/**
+ * Pair up two trees that differ only in slugs, walking them in lockstep.
+ *
+ * Position-based rather than slug-based on purpose: after a rewrite the slugs
+ * are exactly what no longer match, so they cannot be the join key. Both trees
+ * come from the same source and every rewrite preserves order, so position is
+ * stable.
+ */
+const collectSlugRewrites = (
+  original: PackageTree,
+  rewritten: PackageTree,
+): Array<[installedSlug: string, originalSlug: string]> => {
+  const pairs: Array<[string, string]> = [];
+  const walk = (before: readonly PackageNode[], after: readonly PackageNode[]): void => {
+    for (const [index, beforeNode] of before.entries()) {
+      const afterNode = after[index];
+      if (!afterNode) continue;
+      pairs.push([afterNode.slug, beforeNode.slug]);
+      if (beforeNode.type === "folder" && afterNode.type === "folder") {
+        walk(beforeNode.children, afterNode.children);
+      }
+    }
+  };
+  walk(original.nodes, rewritten.nodes);
+  return pairs;
 };
 
 /**

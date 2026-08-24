@@ -1,9 +1,16 @@
 "use client";
 
-import type { DragEndEvent, DragMoveEvent } from "@dnd-kit/core";
-import { closestCenter, DndContext, PointerSensor, useSensor, useSensors } from "@dnd-kit/core";
-import { SortableContext, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
-import { CSS } from "@dnd-kit/utilities";
+import type { CollisionDetection, DragEndEvent, DragStartEvent } from "@dnd-kit/core";
+import {
+  DndContext,
+  DragOverlay,
+  MeasuringStrategy,
+  PointerSensor,
+  useDraggable,
+  useDroppable,
+  useSensor,
+  useSensors,
+} from "@dnd-kit/core";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "kui/collapsible";
 import {
   DropdownMenu,
@@ -38,6 +45,7 @@ import {
   Fragment,
   memo,
   type ReactNode,
+  useCallback,
   useMemo,
   useRef,
   useState,
@@ -45,10 +53,12 @@ import {
 import { useLocation, useSearch } from "wouter";
 import { SidebarTaskList } from "./SidebarTaskList";
 import { mergeSearchIntoHref, SPALink } from "./SPALink";
+import { resolveTreeDrop, type TreeDropRow, type TreeDropTarget } from "./tree-drop";
 import type { NavGroup, NavItem, NavItemAction } from "./types";
 
-/** Drop position relative to the row the dragged item was released over. */
-export type NavDropPosition = "before" | "after" | "inside";
+export type { NavDropPosition } from "./tree-drop";
+
+import type { NavDropPosition } from "./tree-drop";
 
 export interface NavNodeDropParams {
   /** The `id` of the dragged NavItem/sub-item. */
@@ -59,35 +69,62 @@ export interface NavNodeDropParams {
 }
 
 /**
- * Wraps a sidebar row to make it draggable + a drop target via dnd-kit's
- * `useSortable`. Rendered as its own component (rather than calling the hook
- * inline inside a `.map()`) so the hook is called with a stable identity per
- * row, matching the rules of hooks.
+ * Wraps a sidebar row to make it BOTH a drag source and a drop target.
+ *
+ * Deliberately `useDraggable` + `useDroppable`, NOT `useSortable`: a sortable
+ * row belongs to a one-dimensional `SortableContext` whose strategy translates
+ * every row mid-drag to preview a flat-list reorder. On a tree that preview is
+ * meaningless (rows jump around) and actively harmful — the shifted rects fed
+ * the drop-position maths, so reordering two children inside a folder resolved
+ * against the folder's own header and moved the node out to the root. See
+ * `tree-drop.ts` for the measurements. Plain draggable/droppable rows never
+ * move, so their rects stay in the same coordinate space as the pointer.
+ *
+ * Rendered as its own component (rather than calling the hooks inline inside a
+ * `.map()`) so they are called with a stable identity per row, matching the
+ * rules of hooks.
  */
-type SortableHandle = ReturnType<typeof useSortable>;
-
 export interface NavRowDragProps {
-  setNodeRef: SortableHandle["setNodeRef"];
-  attributes: SortableHandle["attributes"];
-  listeners: SortableHandle["listeners"];
+  setNodeRef: (element: HTMLElement | null) => void;
+  attributes: ReturnType<typeof useDraggable>["attributes"];
+  listeners: ReturnType<typeof useDraggable>["listeners"];
   style: CSSProperties;
 }
 
-function DraggableRow({ id, render }: { id: string; render: (p: NavRowDragProps) => ReactNode }) {
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
-    id,
-  });
+function DraggableRow({
+  id,
+  depth,
+  isContainer,
+  render,
+}: {
+  id: string;
+  depth: number;
+  isContainer: boolean;
+  render: (p: NavRowDragProps) => ReactNode;
+}) {
+  const { attributes, listeners, setNodeRef: setDragRef, isDragging } = useDraggable({ id });
+  // `depth`/`isContainer` ride along on the droppable so collision detection can
+  // read them straight off the container it is already iterating, instead of
+  // closing over a separate lookup table that could drift out of sync.
+  const { setNodeRef: setDropRef } = useDroppable({ id, data: { depth, isContainer } });
+  // One DOM node, two dnd-kit registrations — the row is its own drop target.
+  const setNodeRef = useCallback(
+    (element: HTMLElement | null) => {
+      setDragRef(element);
+      setDropRef(element);
+    },
+    [setDragRef, setDropRef],
+  );
   return (
     <>
       {render({
         setNodeRef,
         attributes,
         listeners,
-        style: {
-          transform: CSS.Transform.toString(transform),
-          transition,
-          opacity: isDragging ? 0.4 : 1,
-        },
+        // No transform/transition: the row stays exactly where it is for the
+        // whole drag. The only feedback is this dimming plus the drop indicator
+        // drawn on the target row (and the DragOverlay following the cursor).
+        style: { opacity: isDragging ? 0.4 : 1 },
       })}
     </>
   );
@@ -179,33 +216,26 @@ function NavMainComponent({
   // active route is always expanded; this only adds extra opens for other folders.
   const [openOverrides, setOpenOverrides] = useState<Record<string, boolean>>({});
 
-  // Drag-and-drop: dnd-kit needs a flat registry of every id that can act as a
-  // drag source or drop target (every row at every depth), plus whether each
-  // is a "folder" row (has `items`) so onDragOver can offer an "inside" drop
-  // band only for rows that can actually contain children. Walks the WHOLE
-  // recursive tree — a folder nested at any depth is a valid drag source and
-  // drop target, not just top-level folders.
   const dragEnabled = Boolean(onNodeDrop);
-  const { sortableIds, folderIds } = useMemo(() => {
-    const ids: string[] = [];
-    const folders = new Set<string>();
+  // Titles of every draggable row, for the `DragOverlay` chip that follows the
+  // cursor. Only groups that opted into drag are walked — see `NavGroup.draggable`
+  // for why a group must opt in rather than every non-dynamic group being swept
+  // in: Favorites renders the SAME node ids as the tree, and two DOM rows
+  // registering one dnd-kit id made the drop indicator light up on both at once.
+  const dragRowTitles = useMemo(() => {
+    const titles = new Map<string, string>();
+    if (!dragEnabled) return titles;
     const visit = (list: NavItem[]) => {
       for (const item of list) {
-        if (item.id) ids.push(item.id);
-        // A `hasChildren`-only folder (not yet expanded/loaded) is still a
-        // valid "inside" drop target, same as one with `items` already loaded.
-        if (item.items || item.hasChildren) {
-          if (item.id) folders.add(item.id);
-          if (item.items) visit(item.items);
-        }
+        if (item.id) titles.set(item.id, item.title);
+        if (item.items) visit(item.items);
       }
     };
-    if (!dragEnabled) return { sortableIds: ids, folderIds: folders };
     for (const group of items) {
-      if (group.isDynamic) continue;
+      if (group.isDynamic || !group.draggable) continue;
       visit(group.items);
     }
-    return { sortableIds: ids, folderIds: folders };
+    return titles;
   }, [items, dragEnabled]);
 
   type DragState = {
@@ -215,81 +245,120 @@ function NavMainComponent({
     disallowed: boolean;
   } | null;
   const [dragState, setDragState] = useState<DragState>(null);
-  // Mirrors `dragState` synchronously (no re-render lag). `onDragMove` and
-  // `onDragEnd` can both fire from the same native pointer-up sequence before
-  // React commits the last `setDragState` from `onDragMove` — reading the
-  // `dragState` closure in `onDragEnd` in that case returns a STALE value
-  // (e.g. the previous tick's "before/after" instead of the "inside" the
-  // pointer had actually just reached), silently dropping into the wrong
-  // parent right when the user releases over a folder. The ref is always
-  // current the instant `onDragMove` runs, regardless of render timing.
+  // Mirrors `dragState` synchronously (no re-render lag). `onDragEnd` can fire
+  // from the same native pointer-up sequence before React commits the last
+  // `setDragState`, so reading the `dragState` closure there can return a STALE
+  // value. The ref is always current.
   const dragStateRef = useRef<DragState>(null);
   const setDrag = (next: DragState) => {
     dragStateRef.current = next;
     setDragState(next);
   };
+  // The drop resolved by `collisionDetection` below on the most recent pointer
+  // tick. Both the visual indicator and the committed move read THIS — which is
+  // what makes it structurally impossible for the two to disagree. They used to
+  // be computed separately (indicator from our own before/after maths, commit
+  // from dnd-kit's `over`), and mid-drag they genuinely diverged: the indicator
+  // line drew on the sibling row while the request that fired named the parent
+  // folder.
+  const resolvedDropRef = useRef<TreeDropTarget | null>(null);
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
 
-  // `onDragMove`, not `onDragOver` — dnd-kit only fires onDragOver when the
-  // collided droppable id CHANGES, so a before/after read taken there goes
-  // stale the instant the pointer keeps moving inside the same target's rect
-  // (exactly the common case: dragging slowly toward the top vs. bottom half
-  // of a row). onDragMove fires on every pointer tick with a fresh `over` too.
-  const handleDragMove = (event: DragMoveEvent) => {
-    const { active, over } = event;
-    if (!over) {
-      setDrag(
-        dragStateRef.current ? { ...dragStateRef.current, overId: null, position: null } : null,
+  /**
+   * Collision detection AND drop-position resolution in one pass, delegated to
+   * the pure `resolveTreeDrop` (see `tree-drop.ts`).
+   *
+   * Not `closestCenter`: nearest-center snaps the drop onto whatever row happens
+   * to be closest even when the pointer is nowhere near it, which on a tree
+   * means a parent folder header repeatedly winning over the sibling row the
+   * user is pointing at. This is strictly "the row the pointer is actually
+   * inside, deepest first" — outside every row resolves to no target at all.
+   */
+  const collisionDetection: CollisionDetection = useCallback(
+    ({ active, droppableContainers, droppableRects, pointerCoordinates }) => {
+      if (!pointerCoordinates) {
+        resolvedDropRef.current = null;
+        return [];
+      }
+      const activeId = String(active.id);
+      const rows: TreeDropRow[] = [];
+      for (const container of droppableContainers) {
+        const id = String(container.id);
+        // A row is never its own drop target.
+        if (id === activeId) continue;
+        const rect = droppableRects.get(container.id);
+        if (!rect) continue;
+        const data = container.data.current as
+          | { depth?: number; isContainer?: boolean }
+          | undefined;
+        rows.push({
+          id,
+          top: rect.top,
+          height: rect.height,
+          isContainer: Boolean(data?.isContainer),
+          depth: data?.depth ?? 0,
+        });
+      }
+      const resolved = resolveTreeDrop(rows, pointerCoordinates.y);
+      resolvedDropRef.current = resolved;
+      if (!resolved) return [];
+      const winner = droppableContainers.find(
+        (container) => String(container.id) === resolved.targetId,
       );
+      return winner ? [{ id: winner.id }] : [];
+    },
+    [],
+  );
+
+  // Fires on every pointer tick. It only mirrors what `collisionDetection`
+  // already resolved into React state so the indicator can render — all the
+  // geometry lives in the pure function, none of it here.
+  const handleDragMove = () => {
+    const previous = dragStateRef.current;
+    if (!previous) return;
+    const resolved = resolvedDropRef.current;
+    if (!resolved) {
+      if (previous.overId === null) return;
+      setDrag({ ...previous, overId: null, position: null, disallowed: false });
       return;
     }
-    const activeId = String(active.id);
-    const overId = String(over.id);
-    if (activeId === overId) {
-      setDrag({ activeId, overId: null, position: null, disallowed: false });
+    const disallowed = isDropAllowed
+      ? !isDropAllowed(previous.activeId, resolved.targetId, resolved.position)
+      : false;
+    if (
+      previous.overId === resolved.targetId &&
+      previous.position === resolved.position &&
+      previous.disallowed === disallowed
+    ) {
       return;
     }
-    const overRect = over.rect;
-    // NOT `active.rect.current.translated` — `verticalListSortingStrategy` already
-    // animates the dragged item's translated rect into a "swap preview" position as
-    // soon as `over` changes, which corrupts a before/after read taken from it (it
-    // reports a rect that has already visually jumped near/past the target, not
-    // where the pointer actually is). The `initial` rect + the event's own
-    // pointer delta gives the untransformed position, immune to that choreography.
-    const initialRect = active.rect.current.initial;
-    if (!overRect || !initialRect) {
-      setDrag({ activeId, overId, position: "after", disallowed: false });
-      return;
-    }
-    const activeCenterY = initialRect.top + initialRect.height / 2 + event.delta.y;
-    const relativeY = (activeCenterY - overRect.top) / overRect.height;
-    const overIsFolder = folderIds.has(overId);
-    let position: NavDropPosition;
-    if (overIsFolder && relativeY > 0.25 && relativeY < 0.75) {
-      position = "inside";
-    } else if (relativeY <= 0.5) {
-      position = "before";
-    } else {
-      position = "after";
-    }
-    const disallowed = isDropAllowed ? !isDropAllowed(activeId, overId, position) : false;
-    setDrag({ activeId, overId, position, disallowed });
+    setDrag({
+      activeId: previous.activeId,
+      overId: resolved.targetId,
+      position: resolved.position,
+      disallowed,
+    });
+  };
+
+  const handleDragStart = (event: DragStartEvent) => {
+    resolvedDropRef.current = null;
+    setDrag({ activeId: String(event.active.id), overId: null, position: null, disallowed: false });
   };
 
   const handleDragEnd = (event: DragEndEvent) => {
-    const { active, over } = event;
-    // Read the ref, NOT the `dragState` closure — see the comment on
-    // `dragStateRef` above for why the closure can be stale here.
-    const finalState = dragStateRef.current;
+    const resolved = resolvedDropRef.current;
+    resolvedDropRef.current = null;
     setDrag(null);
-    if (!over || !onNodeDrop) return;
-    const activeId = String(active.id);
-    const overId = String(over.id);
-    if (activeId === overId) return;
-    const position = finalState?.position ?? "after";
-    if (isDropAllowed && !isDropAllowed(activeId, overId, position)) return;
-    onNodeDrop({ draggedId: activeId, targetId: overId, position });
+    if (!onNodeDrop || !resolved) return;
+    const activeId = String(event.active.id);
+    if (activeId === resolved.targetId) return;
+    if (isDropAllowed && !isDropAllowed(activeId, resolved.targetId, resolved.position)) return;
+    onNodeDrop({
+      draggedId: activeId,
+      targetId: resolved.targetId,
+      position: resolved.position,
+    });
   };
 
   // Visual cue for the row currently under the drag pointer: an accent ring
@@ -378,7 +447,14 @@ function NavMainComponent({
     keyPrefix: string,
     depth: number,
     isSiblingActiveMatch = false,
+    /**
+     * Whether the GROUP this row belongs to opted into drag-and-drop
+     * (`NavGroup.draggable`). Threaded down the recursion rather than read from
+     * a closure so a nested row can never disagree with its own group.
+     */
+    groupDraggable = false,
   ): ReactNode => {
+    const rowDragEnabled = dragEnabled && groupDraggable;
     const Icon = item.icon;
     const itemKey = getNavItemKey(item, index, keyPrefix);
     // Label for the per-row "•••" action menu — shared by the folder row and
@@ -403,7 +479,7 @@ function NavMainComponent({
       // `renderFolderRow` below — TS doesn't carry a property narrow
       // (`item.items`) across a nested closure boundary.
       const folderItems = item.items ?? [];
-      const canDrag = dragEnabled && Boolean(item.id);
+      const canDrag = rowDragEnabled && Boolean(item.id);
       const hoverActionCount =
         (item.onAddChild ? 1 : 0) + (item.actions?.length ? 1 : 0) + (canDrag ? 1 : 0);
       const hasHoverActions = hoverActionCount > 0;
@@ -596,6 +672,9 @@ function NavMainComponent({
                       `${itemKey}:sub`,
                       depth + 1,
                       !!subItem.url && subItem.url === activeSubUrl,
+                      // Children inherit the group's opt-in — a draggable group
+                      // is draggable all the way down, at every depth.
+                      groupDraggable,
                     ),
                   );
                 })()}
@@ -616,8 +695,14 @@ function NavMainComponent({
           </ItemWrapper>
         </Collapsible>
       );
-      return dragEnabled && item.id ? (
-        <DraggableRow key={itemKey} id={item.id} render={renderFolderRow} />
+      return rowDragEnabled && item.id ? (
+        <DraggableRow
+          key={itemKey}
+          id={item.id}
+          depth={depth}
+          isContainer
+          render={renderFolderRow}
+        />
       ) : (
         renderFolderRow()
       );
@@ -691,7 +776,7 @@ function NavMainComponent({
                   }}
                   title={moreActionsTitle}
                   className={`group-data-[collapsible=icon]:hidden data-[state=open]:bg-sidebar-accent data-[state=open]:opacity-100 ${
-                    dragEnabled && item.id ? "right-7" : ""
+                    rowDragEnabled && item.id ? "right-7" : ""
                   }`}
                 >
                   <MoreHorizontal />
@@ -715,13 +800,13 @@ function NavMainComponent({
               }}
               title="Delete"
               className={`group-data-[collapsible=icon]:hidden ${
-                dragEnabled && item.id ? "right-7" : ""
+                rowDragEnabled && item.id ? "right-7" : ""
               }`}
             >
               <Trash2 />
             </SidebarMenuAction>
           )}
-          {dragEnabled && item.id && (
+          {rowDragEnabled && item.id && (
             // See the folder-row comment above: the handle, not the row/link,
             // must own the drag listeners.
             <SidebarMenuAction
@@ -738,8 +823,14 @@ function NavMainComponent({
           )}
         </SidebarMenuItem>
       );
-      return dragEnabled && item.id ? (
-        <DraggableRow key={itemKey} id={item.id} render={renderLeafRow} />
+      return rowDragEnabled && item.id ? (
+        <DraggableRow
+          key={itemKey}
+          id={item.id}
+          depth={depth}
+          isContainer={false}
+          render={renderLeafRow}
+        />
       ) : (
         renderLeafRow()
       );
@@ -761,9 +852,9 @@ function NavMainComponent({
           className={
             // Reserve trailing room for whichever hover controls exist: one
             // slot (pr-7) for drag OR the actions menu, two (pr-14) for both.
-            hasSubActions && dragEnabled && item.id
+            hasSubActions && rowDragEnabled && item.id
               ? "pr-14"
-              : hasSubActions || (dragEnabled && item.id)
+              : hasSubActions || (rowDragEnabled && item.id)
                 ? "pr-7"
                 : undefined
           }
@@ -791,7 +882,7 @@ function NavMainComponent({
             <DropdownMenuTrigger asChild>
               <button
                 className={`absolute top-1/2 hidden size-5 -translate-y-1/2 items-center justify-center rounded-md p-0 text-sidebar-foreground/60 outline-none ring-sidebar-ring transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground focus-visible:ring-2 group-hover/subitem:flex data-[state=open]:flex data-[state=open]:bg-sidebar-accent ${
-                  dragEnabled && item.id ? "right-7" : "right-1"
+                  rowDragEnabled && item.id ? "right-7" : "right-1"
                 }`}
                 onClick={(e) => {
                   e.preventDefault();
@@ -809,7 +900,7 @@ function NavMainComponent({
             </DropdownMenuContent>
           </DropdownMenu>
         )}
-        {dragEnabled && item.id && (
+        {rowDragEnabled && item.id && (
           // See the folder-row comment above: the handle, not the row/link,
           // must own the drag listeners.
           <button
@@ -826,8 +917,14 @@ function NavMainComponent({
         )}
       </SidebarMenuSubItem>
     );
-    return dragEnabled && item.id ? (
-      <DraggableRow key={itemKey} id={item.id} render={renderSubItemRow} />
+    return rowDragEnabled && item.id ? (
+      <DraggableRow
+        key={itemKey}
+        id={item.id}
+        depth={depth}
+        isContainer={false}
+        render={renderSubItemRow}
+      />
     ) : (
       renderSubItemRow()
     );
@@ -911,7 +1008,9 @@ function NavMainComponent({
               )
             ) : (
               <SidebarMenu>
-                {group.items.map((item, itemIndex) => renderNavRow(item, itemIndex, "item", 0))}
+                {group.items.map((item, itemIndex) =>
+                  renderNavRow(item, itemIndex, "item", 0, false, group.draggable ?? false),
+                )}
               </SidebarMenu>
             )}
           </SidebarGroup>
@@ -922,17 +1021,36 @@ function NavMainComponent({
 
   if (!dragEnabled) return content;
 
+  const activeDragTitle = dragState ? dragRowTitles.get(dragState.activeId) : undefined;
+
   return (
     <DndContext
       sensors={sensors}
-      collisionDetection={closestCenter}
+      collisionDetection={collisionDetection}
+      // `Always`, not the default "measure once before dragging": the sidebar is
+      // a scroll container and folders stay interactive mid-drag, so a rect
+      // captured at drag start goes stale the moment the list scrolls. Stale
+      // rects are exactly what this rewrite exists to eliminate.
+      measuring={{ droppable: { strategy: MeasuringStrategy.Always } }}
+      onDragStart={handleDragStart}
       onDragMove={handleDragMove}
       onDragEnd={handleDragEnd}
-      onDragCancel={() => setDrag(null)}
+      onDragCancel={() => {
+        resolvedDropRef.current = null;
+        setDrag(null);
+      }}
     >
-      <SortableContext items={sortableIds} strategy={verticalListSortingStrategy}>
-        {content}
-      </SortableContext>
+      {content}
+      {/* Now that rows no longer translate, nothing would follow the cursor
+          without this — the drag would read as "the row just faded". */}
+      <DragOverlay dropAnimation={null}>
+        {activeDragTitle ? (
+          <div className="pointer-events-none flex h-8 max-w-56 items-center gap-2 truncate rounded-md border border-sidebar-border bg-sidebar px-2 text-sm text-sidebar-foreground shadow-lg">
+            <GripVertical className="size-3.5 shrink-0 text-sidebar-foreground/50" />
+            <span className="truncate">{activeDragTitle}</span>
+          </div>
+        ) : null}
+      </DragOverlay>
     </DndContext>
   );
 }

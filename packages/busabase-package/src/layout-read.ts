@@ -11,7 +11,19 @@
  *
  * Outside `content/`, the optional `assets/` directory carries the bytes for the
  * images the Docs embed — see {@link readDocAssets}. Nothing in there is a node.
+ *
+ * Rule 0 sits ahead of all of them but reads a different place: a `SKILL.md` at
+ * the package ROOT (beside the manifest, not under `content/`) makes this
+ * package a *template*, and is lifted into `tree.rootSkill` — see
+ * {@link readRootSkill}. `content/` itself is untouched by that rule, which is
+ * what keeps a template byte-identical to a plain package below the root.
  */
+
+import {
+  PACKAGE_AIRAPP_IGNORE,
+  PACKAGE_SKILL_ENTRY,
+  PACKAGE_SKILL_SIDECAR_DIRS,
+} from "busabase-contract/domains/package/template";
 import {
   PACKAGE_ASSET_META_SUFFIX,
   PACKAGE_ASSETS_DIRNAME,
@@ -35,6 +47,7 @@ import {
 } from "busabase-contract/domains/package/types";
 import type { z } from "zod";
 import { parseFrontmatter } from "./frontmatter";
+import { IGNORE_NOTHING, type IgnoreMatcher, parseIgnoreFile } from "./ignore";
 import {
   assertNoReservedNames,
   assertNoSiblingCaseCollisions,
@@ -45,6 +58,7 @@ import {
   type PackageDocNode,
   type PackageFileEntry,
   type PackageNode,
+  type PackageRootSkill,
   type PackageTree,
   sortNodes,
 } from "./tree";
@@ -139,7 +153,77 @@ export const readPackageTree = (
 
   const contentDir = `${root}${PACKAGE_CONTENT_DIRNAME}/`;
   const nodes = readNodes(files, contentDir);
-  return { manifest, nodes, assets: readDocAssets(files, root) };
+  const rootSkill = readRootSkill(files, root, manifest.name, manifest.description);
+  return {
+    manifest,
+    nodes,
+    ...(rootSkill ? { rootSkill } : {}),
+    assets: readDocAssets(files, root),
+  };
+};
+
+/**
+ * Rule 0 — the package root's `SKILL.md` plus its sidecar directories.
+ *
+ * Absent → a plain package, and every downstream consumer behaves exactly as it
+ * did before. Present → the manual travels with the resources: the installer
+ * turns this into a Skill node inside the target folder, which is what lets the
+ * agent that a user talks to after installing actually know what the app is for.
+ *
+ * The node's slug comes from the MANIFEST name rather than the skill
+ * frontmatter's, because the manifest name is already the default target folder
+ * name and is validated as a slug elsewhere; the validator separately requires
+ * the two names to agree, so this is not a silent tie-break.
+ */
+const readRootSkill = (
+  files: PackageFiles,
+  root: string,
+  manifestName: string,
+  manifestDescription: string,
+): PackageRootSkill | undefined => {
+  const entryPath = `${root}${PACKAGE_SKILL_ENTRY}`;
+  const entryBytes = files.get(entryPath);
+  if (!entryBytes) return undefined;
+
+  const entries: PackageFileEntry[] = [{ path: PACKAGE_SKILL_ENTRY, bytes: entryBytes }];
+  for (const dirName of PACKAGE_SKILL_SIDECAR_DIRS) {
+    const dir = `${root}${dirName}/`;
+    for (const entry of collectSubtree(files, dir)) {
+      entries.push({ path: `${dirName}/${entry.path}`, bytes: entry.bytes });
+    }
+  }
+  assertNoReservedNames(
+    entries.map((entry) => entry.path),
+    `root skill "${manifestName}"`,
+  );
+
+  // The skill's own frontmatter is the better display name/description when it
+  // has one — it is what a human wrote for agents to read — but it is optional
+  // here: a malformed frontmatter is the validator's error to report with
+  // context, not a reason for the reader to refuse the whole package.
+  const parsed = parseSkillFrontmatterSafely(decodeText(entryBytes, entryPath), entryPath);
+  return {
+    slug: manifestName,
+    name: parsed?.name ?? manifestName,
+    description: parsed?.description ?? manifestDescription,
+    files: entries.sort((a, b) => a.path.localeCompare(b.path, "en")),
+  };
+};
+
+const parseSkillFrontmatterSafely = (
+  text: string,
+  filePath: string,
+): { name?: string; description?: string } | undefined => {
+  try {
+    const { data } = parseFrontmatter(text, filePath);
+    const record = data as Record<string, unknown>;
+    return {
+      name: typeof record.name === "string" ? record.name : undefined,
+      description: typeof record.description === "string" ? record.description : undefined,
+    };
+  } catch {
+    return undefined;
+  }
 };
 
 /**
@@ -224,13 +308,29 @@ const readDirNode = (files: PackageFiles, dir: string, slug: string): PackageNod
   if (files.has(`${dir}${PACKAGE_NODE_META_FILENAME}`)) {
     const metaPath = `${dir}${PACKAGE_NODE_META_FILENAME}`;
     const meta = zodParse(PackageFileTreeNodeMetaSchema, parseJsonFile(files, metaPath), metaPath);
+    const ignore = readIgnoreFile(files, dir);
     const entries = collectSubtree(files, dir).filter(
-      (entry) => entry.path !== PACKAGE_NODE_META_FILENAME,
+      (entry) =>
+        entry.path !== PACKAGE_NODE_META_FILENAME &&
+        entry.path !== PACKAGE_AIRAPP_IGNORE &&
+        !ignore.ignores(entry.path),
     );
     assertNoReservedNames(
       entries.map((entry) => entry.path),
       `${meta.type} "${slug}"`,
     );
+    // An AirApp that installs cleanly and then refuses to boot is the hardest
+    // failure to attribute, so the one thing an ignore file may never remove is
+    // the manifest nodepod runs `npm run dev` from.
+    if (meta.type === "airapp" && !entries.some((entry) => entry.path === "package.json")) {
+      throw new Error(
+        `AirApp "${slug}" has no package.json to install${
+          ignore.isEmpty
+            ? ""
+            : ` — check ${dir}${PACKAGE_AIRAPP_IGNORE}, which must never exclude it`
+        }. Nothing was installed.`,
+      );
+    }
     return {
       type: meta.type,
       slug,
@@ -270,6 +370,20 @@ const readDirNode = (files: PackageFiles, dir: string, slug: string): PackageNod
     position: meta.position,
     children: readNodes(files, dir),
   };
+};
+
+/**
+ * `.busabaseignore` inside a file-tree node directory.
+ *
+ * Read here rather than at the package level because the exclusions are a
+ * property of one project (an AirApp's `test/` is noise; a Drive's files are
+ * the point), and a package-wide ignore list would make it possible to
+ * accidentally strip another node's content from a distance.
+ */
+const readIgnoreFile = (files: PackageFiles, dir: string): IgnoreMatcher => {
+  const bytes = files.get(`${dir}${PACKAGE_AIRAPP_IGNORE}`);
+  if (!bytes) return IGNORE_NOTHING;
+  return parseIgnoreFile(decodeText(bytes, `${dir}${PACKAGE_AIRAPP_IGNORE}`));
 };
 
 const readRecords = (

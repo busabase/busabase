@@ -31,6 +31,12 @@
 
 import { createHash } from "node:crypto";
 import {
+  APP_ROOT_RESOURCE_KEY,
+  type AppResourceOwnership,
+  type AppRootOwnership,
+  TEMPLATE_SKILL_METADATA_KEY,
+} from "busabase-contract/domains/package/template";
+import {
   PACKAGE_COMPUTED_FIELD_TYPES,
   PACKAGE_DEFERRED_FIELD_TYPES,
   type PackageBaseField,
@@ -47,6 +53,7 @@ import {
   type PackageDocAsset,
   type PackageFileTreeNode,
   type PackageNode,
+  type PackageTree,
 } from "./tree";
 
 /** §7.4 — records are proposed in batches of this size. */
@@ -70,6 +77,28 @@ export interface ApplyOptions {
    * default self-hosted target silently installs every package minus its bytes.
    */
   serverUrl?: string;
+  /**
+   * Where this package came from, recorded on the app's root Folder.
+   *
+   * Not decoration: without it there is no way to later ask "is there a newer
+   * version of this?", because the installed folder would carry no memory of
+   * the repo it came from.
+   */
+  source?: { repo?: string; ref?: string; subdir?: string };
+  /**
+   * Merge a template's sample records instead of proposing them (default true
+   * for templates, ignored otherwise).
+   *
+   * A template's whole promise is that the app WORKS when you open it, and an
+   * app whose tables are empty until you visit the inbox and approve twelve
+   * change requests has not delivered that. This is the one deliberate
+   * exception to "content goes to review" — see the spec's §13.6 — and it is
+   * scoped to sample rows the template author shipped, never to the AirApp code
+   * or the Skill, which stay review-first.
+   */
+  installSampleRecords?: boolean;
+  /** Fixed timestamp for the root stamp; defaults to now. Injectable for tests. */
+  now?: () => string;
 }
 
 export interface ApplyResult {
@@ -111,6 +140,10 @@ export const applyInstall = async (
   const fieldIds: FieldIdIndex = new Map();
   const bases: BaseContext[] = [];
   const progress = options.onProgress ?? (() => {});
+  // Read off the plan rather than re-derived: the plan already decided this
+  // against the package as written, before it rewrote any slugs. See
+  // `InstallPlan.isTemplate` for why asking twice is actively wrong.
+  const app = resolveAppContext(plan, options);
 
   // ── Pass 1: structure ──────────────────────────────────────────────────────
   // Doc images first, before a single Doc is created. A Doc body references its
@@ -135,6 +168,11 @@ export const applyInstall = async (
       name: plan.tree.manifest.name,
       description: plan.tree.manifest.description,
       submittedBy: options.submittedBy,
+      // Only a folder we just created is stamped. Installing into a folder the
+      // user already had — or into the space root — must not claim it for this
+      // app; that is someone else's container and re-stamping it would make
+      // their own tooling think this app owns it.
+      metadata: app?.rootMetadata,
     });
     state.created.folders++;
   }
@@ -147,7 +185,30 @@ export const applyInstall = async (
     bases,
     fieldIds,
     docAssetIds,
+    app,
   );
+
+  // The manual, last in pass 1 — after the resources it describes exist, so a
+  // reviewer reading the change request sees it in the folder it belongs to.
+  if (app?.rootSkill) {
+    progress("Pass 1/5: installing the app skill…");
+    await createFileTreeNode(
+      client,
+      {
+        type: "skill",
+        slug: app.rootSkill.slug,
+        name: app.rootSkill.name,
+        description: app.rootSkill.description,
+        position: undefined,
+        files: app.rootSkill.files,
+      },
+      state.targetFolderNodeId,
+      options,
+      state,
+      app,
+      { [TEMPLATE_SKILL_METADATA_KEY]: true },
+    );
+  }
 
   // ── Pass 2: relation + AI fields ───────────────────────────────────────────
   const deferred = bases.filter((base) => base.node.base.fields.some(isDeferredField));
@@ -213,7 +274,7 @@ export const applyInstall = async (
   if (withRecords.length > 0) {
     progress("Pass 4/5: creating records…");
     for (const base of withRecords) {
-      await createRecords(client, base, plan, options, state, recordIdsByKey);
+      await createRecords(client, base, plan, options, state, recordIdsByKey, app);
     }
   }
 
@@ -235,6 +296,90 @@ export const applyInstall = async (
   }
 
   return state;
+};
+
+/**
+ * Everything install needs to know about "this package is an app", resolved once.
+ *
+ * `undefined` for a plain package, and every stamping/skill/sample-merge branch
+ * below is then a no-op — which is what keeps an existing package's install
+ * byte-for-byte the behaviour it had before templates existed.
+ */
+interface AppContext {
+  appId: string;
+  schemaVersion: number;
+  rootMetadata: Record<string, unknown>;
+  rootSkill: PackageTree["rootSkill"];
+  /** Installed slug → the package's own slug, used as the stamp's resourceKey. */
+  resourceKeysBySlug: Record<string, string>;
+  mergeSampleRecords: boolean;
+}
+
+const resolveAppContext = (plan: InstallPlan, options: ApplyOptions): AppContext | undefined => {
+  if (!plan.isTemplate) return undefined;
+  const manifest = plan.tree.manifest;
+  const schemaVersion = manifest.template?.schemaVersion ?? 1;
+  const now = options.now ?? (() => new Date().toISOString());
+  const rootStamp: AppRootOwnership = {
+    appId: manifest.name,
+    resourceKey: APP_ROOT_RESOURCE_KEY,
+    schemaVersion,
+    ...(manifest.version ? { version: manifest.version } : {}),
+    ...(options.source ? { source: options.source } : {}),
+    installedAt: now(),
+  };
+  return {
+    appId: manifest.name,
+    schemaVersion,
+    rootMetadata: rootStamp,
+    rootSkill: plan.tree.rootSkill,
+    resourceKeysBySlug: plan.resourceKeysBySlug,
+    mergeSampleRecords: options.installSampleRecords ?? true,
+  };
+};
+
+/**
+ * Stamp a node the installer just created.
+ *
+ * Separate from creation because `bases.create` and `fileTrees.create` take no
+ * metadata — only `nodes.createChangeRequest` does, which is why the Folder can
+ * be stamped inline and these cannot. A stamp that fails is a warning, never a
+ * failed install: the resources are already there and useful, and the only loss
+ * is that the skill's own `setup.mjs` will later offer to re-claim them, which
+ * it is built to do (that is its "repair" path).
+ */
+const resourceStamp = (
+  app: AppContext,
+  installedSlug: string,
+  extra: Record<string, unknown> = {},
+): Record<string, unknown> => {
+  const stamp: AppResourceOwnership = {
+    appId: app.appId,
+    // The slug the PACKAGE declared, not the one it installed under: an app
+    // looks its own tables up by a stable internal handle.
+    resourceKey: app.resourceKeysBySlug[installedSlug] ?? installedSlug,
+    schemaVersion: app.schemaVersion,
+  };
+  return { ...stamp, ...extra };
+};
+
+const stampResource = async (
+  client: PackageClient,
+  app: AppContext | undefined,
+  nodeId: string,
+  installedSlug: string,
+  state: ApplyResult,
+  extra: Record<string, unknown> = {},
+): Promise<void> => {
+  if (!app) return;
+  const stamp = resourceStamp(app, installedSlug, extra);
+  try {
+    await client.nodes.updateMetadata({ nodeId, metadata: stamp });
+  } catch (error) {
+    state.warnings.push(
+      `Could not record app ownership on "${installedSlug}": ${(error as Error).message}. The node installed fine; running the app's own setup will claim it.`,
+    );
+  }
 };
 
 // ── Pass 1 helpers ───────────────────────────────────────────────────────────
@@ -291,6 +436,7 @@ const createStructure = async (
   bases: BaseContext[],
   fieldIds: FieldIdIndex,
   docAssetIds: ReadonlyMap<string, string>,
+  app: AppContext | undefined,
 ): Promise<void> => {
   for (const node of nodes) {
     switch (node.type) {
@@ -312,6 +458,7 @@ const createStructure = async (
           bases,
           fieldIds,
           docAssetIds,
+          app,
         );
         break;
       }
@@ -344,13 +491,13 @@ const createStructure = async (
         break;
       }
       case "base": {
-        await createBase(client, node, parentNodeId, options, state, bases, fieldIds);
+        await createBase(client, node, parentNodeId, options, state, bases, fieldIds, app);
         break;
       }
       case "skill":
       case "airapp":
       case "drive": {
-        await createFileTreeNode(client, node, parentNodeId, options, state);
+        await createFileTreeNode(client, node, parentNodeId, options, state, app);
         break;
       }
       case "file": {
@@ -399,6 +546,8 @@ const createFolderNode = async (
     name: string;
     description: string;
     submittedBy: string | undefined;
+    /** Ownership stamp, when this folder is an app's root. */
+    metadata?: Record<string, unknown>;
   },
 ): Promise<string> => {
   const changeRequest = await client.nodes.createChangeRequest({
@@ -413,6 +562,7 @@ const createFolderNode = async (
         name: input.name,
         description: input.description,
         parentNodeId: input.parentNodeId,
+        ...(input.metadata ? { metadata: input.metadata } : {}),
       },
     ],
   });
@@ -433,6 +583,7 @@ const createBase = async (
   state: ApplyResult,
   bases: BaseContext[],
   fieldIds: FieldIdIndex,
+  app: AppContext | undefined,
 ): Promise<void> => {
   // Pass 1 creates PLAIN fields only. Relation/AI fields are deferred to pass 2.
   const immediateFields = node.base.fields
@@ -471,6 +622,7 @@ const createBase = async (
   state.created.bases++;
   bases.push({ node, baseId: result.id });
   indexFields(fieldIds, node.slug, result.fields);
+  await stampResource(client, app, result.nodeId, node.slug, state);
 
   for (const view of node.base.views) {
     const created = await client.views.changeRequest({
@@ -502,6 +654,8 @@ const createFileTreeNode = async (
   parentNodeId: string,
   options: ApplyOptions,
   state: ApplyResult,
+  app: AppContext | undefined,
+  extraMetadata: Record<string, unknown> = {},
 ): Promise<void> => {
   const uploaded = await Promise.all(
     node.files.map(async (entry) => {
@@ -535,6 +689,12 @@ const createFileTreeNode = async (
     name: node.name,
     description: node.description,
     files,
+    // Inline, so it rides along the change request on the review-first path.
+    // Stamping after the fact only works when the node was created outright —
+    // and review-first is the DEFAULT, so a post-hoc stamp meant the ordinary
+    // install produced a Skill and an AirApp that the app could never
+    // recognise as its own, and whose manual an agent could never find.
+    ...(app ? { metadata: resourceStamp(app, node.slug, extraMetadata) } : {}),
     // The package hands over a complete, self-contained node; "merge" would layer the
     // default scaffold underneath and leave stray unrelated files behind.
     mergeMode: "replace",
@@ -544,6 +704,7 @@ const createFileTreeNode = async (
     state.created.fileTreeNodes++;
     state.created.files += node.files.length;
   } else {
+    // The stamp went with the proposal, so it lands when a human merges.
     state.pendingChangeRequests++;
   }
 };
@@ -764,7 +925,16 @@ const createRecords = async (
   options: ApplyOptions,
   state: ApplyResult,
   recordIdsByKey: Map<string, string>,
+  app: AppContext | undefined,
 ): Promise<void> => {
+  // The one deliberate exception to "content goes to review" (spec §13.6). A
+  // template promises an app that works the moment you open it, and an app whose
+  // tables stay empty until the user finds the inbox and approves a dozen change
+  // requests has not delivered that. Scoped tightly: only rows the template
+  // author shipped, only when the package validates AS a template, and never the
+  // AirApp code or the Skill — those stay review-first, because they are the
+  // parts that execute.
+  const mergeRecords = options.autoMerge || (app?.mergeSampleRecords ?? false);
   const records = [...base.node.records].sort((a, b) => a.key.localeCompare(b.key, "en"));
   for (let offset = 0; offset < records.length; offset += RECORD_BATCH_SIZE) {
     const batch = records.slice(offset, offset + RECORD_BATCH_SIZE);
@@ -774,12 +944,12 @@ const createRecords = async (
       message: `Install ${batch.length} record(s) into ${base.node.slug}`,
       submittedBy: options.submittedBy,
       idempotencyKey: batchIdempotencyKey(plan.tree.manifest.name, batch[0].key),
-      // Forwarded explicitly, load-bearing: `--auto-merge` is the ONLY thing that
-      // decides whether an install's records go live, and that promise is what the
-      // review-first install is. Leaving this to the endpoint's permission-aware
-      // default would silently merge a review-first install's records for any
-      // write-capable installer.
-      autoMerge: options.autoMerge,
+      // Forwarded explicitly, load-bearing: for a plain package `--auto-merge` is
+      // the ONLY thing that decides whether an install's records go live, and that
+      // promise is what the review-first install is. Leaving this to the
+      // endpoint's permission-aware default would silently merge a review-first
+      // install's records for any write-capable installer.
+      autoMerge: mergeRecords,
     });
 
     // Records are CONTENT — the thing a reviewer actually wants to see — so without
@@ -787,7 +957,7 @@ const createRecords = async (
     // record ids, which is exactly why a package whose Bases carry relation fields
     // refuses to install without `--auto-merge` (`plan.requiresAutoMerge`): pass 5
     // has nothing to link. Non-relation packages install fine review-first.
-    if (!options.autoMerge) {
+    if (!mergeRecords) {
       state.pendingChangeRequests++;
       continue;
     }
