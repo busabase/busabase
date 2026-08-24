@@ -134,6 +134,16 @@ export interface NavGroup {
    * Default visible count before expansion
    */
   defaultVisibleCount?: number;
+  /**
+   * Whether this group's rows participate in drag-and-drop (requires NavMain's
+   * `onNodeDrop`). Opt-in per group, NOT "every non-dynamic group", because a
+   * group may legitimately render rows for ids that ANOTHER group already
+   * renders — busabase's Favorites shows the same nodes as the Workspace tree.
+   * Registering one dnd-kit id from two DOM rows made the drop indicator light
+   * up on both rows at once and left it ambiguous which one a drop referred to.
+   * Only the group that owns the canonical tree should set this.
+   */
+  draggable?: boolean;
 }
 
 export interface Space {

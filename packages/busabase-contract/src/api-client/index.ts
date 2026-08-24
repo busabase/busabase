@@ -19,6 +19,7 @@ import type {
   InstallResultVO,
 } from "../domains/install/types";
 import type { CreatableNodeType } from "../domains/registry";
+import type { ListTemplatesDTO, TemplateCatalogVO } from "../domains/templates/types";
 import type {
   AgentTaskVO,
   AssetDetailVO,
@@ -379,6 +380,12 @@ export interface BusabaseDashboardApiClient {
   planInstallFromGithub: (input: InstallPlanFromGithubDTO) => Promise<InstallPlanVO>;
   /** Performs the install planned by `planInstallFromGithub`. Same admin gate. */
   installFromGithub: (input: InstallFromGithubDTO) => Promise<InstallResultVO>;
+  /**
+   * The Template Center catalog. Unguarded — it lists public repositories and
+   * says nothing about this workspace, so a member who cannot install can still
+   * browse. The gate stays on the two install calls above.
+   */
+  listTemplates: (input?: ListTemplatesDTO) => Promise<TemplateCatalogVO>;
 }
 
 function getBaseUrl() {
@@ -653,5 +660,6 @@ export const createBusabaseRestApiClient = (
     },
     planInstallFromGithub: (input) => client.install.planFromGithub(input),
     installFromGithub: (input) => client.install.fromGithub(input),
+    listTemplates: (input) => client.templates.list(input ?? {}),
   };
 };

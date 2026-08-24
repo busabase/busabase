@@ -29,6 +29,8 @@ export const AgentCatalogEntryVOSchema = z.object({
   version: z.string().nullable().default(null),
   /** Whether this entry can be launched right now (binary present / URL configured). */
   available: z.boolean().default(false),
+  /** Whether this integration is listed for discovery but not available yet. */
+  comingSoon: z.boolean().default(false),
   /** Human-readable reason when `available` is false — never a bare "failed". */
   unavailableReason: z.string().nullable().default(null),
   connectionRequired: z.boolean().default(false),

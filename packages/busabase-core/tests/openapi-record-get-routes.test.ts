@@ -93,7 +93,7 @@ describe("Busabase OpenAPI record get route", () => {
     expect(spec.paths?.["/api/v1/bases/{baseId}/restore/change-requests"]).toBeUndefined();
   });
 
-  it("keeps the compressed public API at 96 operations", async () => {
+  it("keeps the compressed public API at 99 operations", async () => {
     const spec = await getBusabaseOpenApiSpec();
     const operationCount = Object.values(spec.paths ?? {}).reduce(
       (count, pathItem) =>
@@ -120,9 +120,13 @@ describe("Busabase OpenAPI record get route", () => {
     // Node/record-scoped Activity history pages added `GET /activity/node`
     // and `GET /activity/record` (+2 -> 98) — same public-surface treatment
     // as the existing `GET /activity/paged`.
-    // Node-avatar upload pair added: `POST /nodes/icon/upload-urls` and
-    // `POST /nodes/icon/confirmations` (+2 -> 100) — same public-surface
-    // treatment as the existing `assets.createUploadUrl`/`assets.confirm`.
-    expect(operationCount).toBe(100);
+    // The Template Center catalog added `GET /templates` (+1). It reads a
+    // public repository's index and returns nothing about the workspace, so it
+    // belongs on the public surface for the same reason it is a `read` in the
+    // permission policy; installing from it remains `install.fromGithub`.
+    // The node-avatar upload pair added `POST /nodes/icon/upload-urls` and
+    // `POST /nodes/icon/confirmations` (+2) — same public-surface treatment as
+    // the existing `assets.createUploadUrl`/`assets.confirm`. 98 + 1 + 2 = 101.
+    expect(operationCount).toBe(101);
   });
 });

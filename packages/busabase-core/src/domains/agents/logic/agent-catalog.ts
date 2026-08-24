@@ -30,6 +30,8 @@ interface CatalogSpec {
   args?: string[];
   /** Which binary must exist on PATH for a local agent to be usable at all. */
   probeBinary?: string;
+  /** Listed for discovery, but intentionally blocked until the integration ships. */
+  comingSoon?: boolean;
 }
 
 /**
@@ -69,6 +71,7 @@ const CATALOG: CatalogSpec[] = [
     transport: "local-subprocess",
     npxPackage: "@agentclientprotocol/claude-agent-acp@0.66.0",
     probeBinary: "npx",
+    comingSoon: true,
   },
   {
     slug: "codex-acp",
@@ -77,6 +80,7 @@ const CATALOG: CatalogSpec[] = [
     transport: "local-subprocess",
     npxPackage: "@agentclientprotocol/codex-acp@1.1.14",
     probeBinary: "npx",
+    comingSoon: true,
   },
   {
     slug: "buda",
@@ -187,7 +191,9 @@ export async function listCatalog(): Promise<AgentCatalogEntryVO[]> {
     let available = false;
     let unavailableReason: string | null = null;
 
-    if (spec.transport === "local-subprocess") {
+    if (spec.comingSoon) {
+      unavailableReason = "Coming soon.";
+    } else if (spec.transport === "local-subprocess") {
       if (cloudHost) {
         // Don't even probe the binary on Cloud's own server — that would be
         // checking whether *Cloud's* PATH has npx, which is irrelevant to
@@ -222,6 +228,7 @@ export async function listCatalog(): Promise<AgentCatalogEntryVO[]> {
       transport: spec.transport,
       version: synced?.version ?? spec.npxPackage?.split("@").pop() ?? null,
       available,
+      comingSoon: spec.comingSoon ?? false,
       unavailableReason,
       connectionRequired: spec.slug === "buda" && cloudHost,
       connectedAgentName: spec.slug === "buda" ? (budaConnections[0]?.agentName ?? null) : null,
@@ -244,6 +251,9 @@ export async function resolveLaunch(slug: string): Promise<ResolvedLaunch> {
   const spec = findSpec(slug);
   if (!spec) {
     throw new Error(`Unknown agent "${slug}". Only agents in Busabase's catalog can be launched.`);
+  }
+  if (spec.comingSoon) {
+    throw new Error(`${spec.name} is coming soon.`);
   }
 
   if (spec.transport === "local-subprocess") {
@@ -277,7 +287,7 @@ export async function resolveLaunch(slug: string): Promise<ResolvedLaunch> {
   }
   const agentId = connection?.agentId ?? (localConfig.agentId as string);
   return {
-    slug: spec.slug,
+    slug: connection?.slug ?? spec.slug,
     name: connection?.agentName ?? spec.name,
     transport: spec.transport,
     url: getBudaAcpUrl(agentId),

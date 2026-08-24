@@ -242,6 +242,12 @@ export const PROCEDURE_PERMISSION_POLICY: Record<string, ProcedurePermissionPoli
 
   "install.planFromGithub": workspace("read"),
   "install.fromGithub": workspace("manage"),
+  // The Template Center's catalog. Sits at the floor rather than beside
+  // `install.fromGithub` because it reads a public repository's index and
+  // returns nothing about this workspace — a key that may read anything at all
+  // is not told less by being shown what exists to install. Installing is the
+  // privileged act, and it is classified as such one line above.
+  "templates.list": workspace("read"),
 
   // ---- agents: spawning/driving an external ACP agent (Claude Code, Codex,
   // …) is arbitrary local code execution, not scoped to any one node — every

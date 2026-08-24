@@ -1,6 +1,7 @@
 import { implement, ORPCError } from "@orpc/server";
 import { busabaseContract } from "busabase-contract/contract/busabase";
 import { applyViewConfigToRecords } from "./domains/base/utils/view-records";
+import { listTemplates } from "./domains/templates/logic/catalog";
 import { buildActivityItemsFromVOs } from "./logic/activity";
 import {
   demoCloseChangeRequest,
@@ -442,7 +443,8 @@ export const busabaseDemoRouter = os.router({
         transport: "local-subprocess" as const,
         version: null,
         available: false,
-        unavailableReason: "Connecting to agents is disabled in the demo.",
+        comingSoon: true,
+        unavailableReason: "Coming soon.",
       },
       {
         slug: "codex-acp",
@@ -451,7 +453,8 @@ export const busabaseDemoRouter = os.router({
         transport: "local-subprocess" as const,
         version: null,
         available: false,
-        unavailableReason: "Connecting to agents is disabled in the demo.",
+        comingSoon: true,
+        unavailableReason: "Coming soon.",
       },
       {
         slug: "buda",
@@ -534,6 +537,13 @@ export const busabaseDemoRouter = os.router({
     fromGithub: os.install.fromGithub.handler(() => {
       throw demoUnsupported("Install from GitHub");
     }),
+  },
+  // The catalog IS servable in demo mode, and deliberately is: it lists public
+  // repositories and says nothing about a workspace, so the demo can show the
+  // Template Center for real instead of an error card. Installing still is not
+  // — that would need somewhere to install into.
+  templates: {
+    list: os.templates.list.handler(async ({ input }) => listTemplates(input)),
   },
   changeRequests: {
     list: os.changeRequests.list.handler(async ({ input }) => {

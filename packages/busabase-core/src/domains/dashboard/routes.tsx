@@ -101,6 +101,15 @@ export const getBusabaseDashboardRoutes = (
       title: "Agents",
     },
     {
+      path: "/templates",
+      component: dashboard,
+      breadcrumb: "Templates",
+      title: "Templates",
+    },
+    {
+      // Specific-before-generic: `/templates/:templateId` would otherwise
+      // swallow nothing here, but the id carries slashes (`owner/repo/subdir`),
+      // so the gallery keeps its selection in state rather than in the path.
       path: "/apps",
       component: dashboard,
       breadcrumb: "Apps",

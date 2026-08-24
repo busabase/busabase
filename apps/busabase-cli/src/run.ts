@@ -45,7 +45,7 @@ import {
   runLogout,
   runRefresh,
 } from "./login.js";
-import { runExport, runInstall } from "./package/commands.js";
+import { runExport, runIndex, runInstall } from "./package/commands.js";
 import { registerTaskCommands } from "./task-command.js";
 
 /**
@@ -484,6 +484,26 @@ function runArgAction(state: CliState, handler: ArgHandler) {
     assertCredentialNotExpired(config.apiKey);
     const client = createBusabaseClient(config);
     const result = await handler(arg, client, opts, config);
+    console.log(render(result, config.output));
+  };
+}
+
+/**
+ * A command that touches only the local filesystem.
+ *
+ * `runArgAction` resolves credentials and builds a client before it calls the
+ * handler, which is right for everything that talks to a workspace — and wrong
+ * for `index`, whose whole job is to read a checkout. A CI runner building the
+ * catalog has no Busabase server and no key, and demanding one would make the
+ * catalog impossible to build in exactly the place it is meant to be built.
+ */
+function runLocalArgAction(
+  handler: (arg: string, opts: OptionValues, config: ResolvedConfig) => Promise<unknown>,
+) {
+  return async (arg: string, _opts: OptionValues, cmd: Command): Promise<void> => {
+    const opts = cmd.optsWithGlobals();
+    const config = resolveConfig(opts);
+    const result = await handler(arg, opts, config);
     console.log(render(result, config.output));
   };
 }
@@ -1490,6 +1510,14 @@ Examples:
       "--rename",
       "install colliding items under suffixed slugs (-2, -3, …) instead of failing",
     )
+    .option(
+      "--skill <name>",
+      "which package to install when the URL is a repository holding several (e.g. busabase/skills)",
+    )
+    .option(
+      "--no-sample-records",
+      "propose a template's sample rows for review instead of merging them (default: merged, so the app is not empty on first open)",
+    )
     .addHelpText(
       "after",
       `
@@ -1506,6 +1534,16 @@ Folders, Bases, their fields and their views are structure and are always create
 immediately. Records are content: by default they land as change requests for you
 to review, and --auto-merge merges them on the spot instead.
 
+A TEMPLATE (a package that also carries a SKILL.md) installs as an app: its
+manual lands as a Skill node, its nodes are stamped as belonging to that app, its
+Base slugs are prefixed with the target folder so two templates cannot collide on
+a name like "settings", and its sample rows are merged so the app is not empty
+when you open it (--no-sample-records opts out). Its AirApp code and its Skill
+still wait for your review.
+
+If the URL is a repository that holds several packages rather than being one,
+install lists them and you pick with --skill <name>.
+
 A package whose records carry relation values requires --auto-merge — a relation
 stores the ids of the records it points at, and those exist only once the records
 are merged, so review-first would install every relation empty. Defining a relation
@@ -1518,9 +1556,44 @@ field with nothing linked yet does not trigger this.`,
           dryRun: Boolean(opts.dryRun),
           autoMerge: Boolean(opts.autoMerge),
           rename: Boolean(opts.rename),
+          skill: opts.skill as string | undefined,
+          // commander maps `--no-sample-records` to `sampleRecords: false`.
+          noSampleRecords: opts.sampleRecords === false,
           json: config.output === "json",
           githubToken: process.env.GITHUB_TOKEN,
           serverUrl: config.baseUrl,
+        }),
+      ),
+    );
+
+  addGlobalFlags(program.command("index"))
+    .description("Build the Template Center catalog from a directory of skills")
+    .argument("<dir>", "directory to scan (a checkout of the skills repository)")
+    .requiredOption("--repo <owner/repo>", "repository the entries' subdirs are relative to")
+    .option("--ref <ref>", "git ref the entries are read at", "main")
+    .option("-o, --out <file>", "write the catalog here (default: print it)")
+    .option("--check", "exit non-zero if the file on disk is not what would be written")
+    .addHelpText(
+      "after",
+      `
+Whether a skill is listed is decided by the same rules that decide how it
+installs, so a card can never promise something its install does not do. A skill
+that declared itself a template and did not qualify is reported with the reason
+rather than silently left out.
+
+Examples:
+  busabase-cli index . --repo busabase/skills -o templates.json
+  busabase-cli index . --repo busabase/skills -o templates.json --check`,
+    )
+    .action(
+      runLocalArgAction((dir, opts, config) =>
+        runIndex({
+          dir,
+          repo: opts.repo as string,
+          ref: (opts.ref as string) || "main",
+          out: opts.out as string | undefined,
+          check: Boolean(opts.check),
+          json: config.output === "json",
         }),
       ),
     );
@@ -1531,6 +1604,10 @@ field with nothing linked yet does not trigger this.`,
     .requiredOption("-o, --out-dir <dir>", "output directory for the package")
     .option("--name <name>", "package name (default: reuse busabase.json, else the node slug)")
     .option("--dry-run", "list the files that would be written and write nothing")
+    .option(
+      "--template",
+      "export as a template (an installable app): check it against the template rules and write a SKILL.md draft if the folder has no Skill node yet",
+    )
     .addHelpText(
       "after",
       `
@@ -1539,7 +1616,14 @@ byte-identical files, so a GitHub diff shows exactly what changed.
 
 Examples:
   busabase-cli export support-kb -o ./support-kb-template
-  busabase-cli export support-kb -o ./support-kb-template --name "Support KB" --dry-run`,
+  busabase-cli export support-kb -o ./support-kb-template --name "Support KB" --dry-run
+  busabase-cli export kelly-email -o ./kelly-email --template
+
+--template makes the result installable as an APP rather than as a pile of
+tables: the folder's Skill node is lifted to the package root as SKILL.md (or a
+draft is written from the folder's structure for you to fill in), and anything
+still missing is reported. The same directory then works both as an Agent Skill
+and as something \`busabase-cli install\` can install.`,
     )
     .action(
       runArgAction(state, (nodeSlugOrId, client, opts, config) =>
@@ -1547,6 +1631,7 @@ Examples:
           outDir: opts.outDir as string,
           name: opts.name as string | undefined,
           dryRun: Boolean(opts.dryRun),
+          template: Boolean(opts.template),
           json: config.output === "json",
           baseUrl: config.baseUrl,
         }),

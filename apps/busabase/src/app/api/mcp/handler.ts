@@ -9,6 +9,7 @@ import {
 } from "busabase-core/context";
 import {
   BUSABASE_MCP_AIRAPP_URI,
+  BUSABASE_MCP_APPS_TOPIC,
   BUSABASE_MCP_SKILL_URI,
   BUSABASE_SELF_HOSTED_MCP_INSTRUCTIONS,
   buildBusabaseMcpAirAppSkill,
@@ -35,7 +36,13 @@ const openApiMcpHandler = createOpenApiMcpHandler({
   // The two walkthroughs stay Cloud-only: they are guided onboarding written around choosing a
   // space, which is not a step that exists here.
   additionalTools: [
-    busabaseMcpGuideTool(["workspace", "airapp"], { spaceTargeting: false }),
+    // `apps` is dynamic and workspace-local: it lists the app manuals installed
+    // HERE, which is the whole point of a template. It must be published
+    // wherever the instructions advertise it, or an agent is told to call a
+    // topic the tool refuses.
+    busabaseMcpGuideTool(["workspace", "airapp", BUSABASE_MCP_APPS_TOPIC], {
+      spaceTargeting: false,
+    }),
     ...busabaseLocalMcpTaskTools(),
   ],
   contract: busabaseContract,

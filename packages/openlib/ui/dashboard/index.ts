@@ -9,4 +9,5 @@ export * from "./SidebarTaskList";
 export * from "./SPABreadcrumb";
 export * from "./SPALink";
 export * from "./SpaceSelector";
+export * from "./tree-drop";
 export * from "./types";

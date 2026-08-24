@@ -1,7 +1,7 @@
 import "server-only";
 
 import type { AirAppRuntimeEvent } from "busabase-contract/domains/airapp/contract";
-import { createSandboxOpenApiClient } from "sandock-contract/api-client";
+import { createSandockClient } from "sandock";
 import { type RunPlan, resolveRunPlan, substitutePort } from "../utils/airapp-runtime-descriptor";
 import { airAppRuntimeEnv } from "../utils/airapp-runtime-env";
 import { registerLocalPreview, unregisterLocalPreview } from "./local-preview-registry";
@@ -73,14 +73,19 @@ export function resolveSandockConfig(env: NodeJS.ProcessEnv = process.env): Sand
 }
 
 /**
- * The base URL is the server's origin, with **no** `/api/v1` appended: the
- * contract already carries that prefix (`oc.prefix("/api/v1")`), so adding it
- * here produced `/api/v1/api/v1/sandbox` and a flat `Not Found` that named
- * nothing. Found by running against a real Sandock — the recording stand-in in
- * the unit tests never sees a URL, so it could not have caught this.
+ * The base URL is the server's origin, with **no** `/api/v1` appended: the SDK
+ * itself hardcodes that prefix onto every request path, so adding it here
+ * produced `/api/v1/api/v1/sandbox` and a flat `Not Found` that named nothing.
+ * Found by running against a real Sandock — the recording stand-in in the unit
+ * tests never sees a URL, so it could not have caught this.
+ *
+ * This is the same published `sandock` SDK `apps/buda` already depends on —
+ * not `sandock-contract`, which is an internal oRPC contract package meant for
+ * Sandock's own three apps (`sandock-core`, `apps/sandock`, `apps/sandock-cloud`)
+ * and reaches into `@orpc/*` types that never belonged in a published surface.
  */
 const client = (config: SandockConfig) =>
-  createSandboxOpenApiClient({
+  createSandockClient({
     baseUrl: config.baseUrl.replace(/\/+$/, ""),
     headers: { authorization: `Bearer ${config.apiKey}` },
   });
@@ -104,13 +109,12 @@ const writeFile = async (
   binary: boolean,
 ): Promise<void> => {
   if (!binary) {
-    await api.writeFile({ id, path: `${APP_DIR}/${path}`, content });
+    await api.fs.write(id, `${APP_DIR}/${path}`, content);
     return;
   }
   const staging = `${APP_DIR}/${path}.b64`;
-  await api.writeFile({ id, path: staging, content });
-  await api.shell({
-    id,
+  await api.fs.write(id, staging, content);
+  await api.sandbox.shell(id, {
     cmd: `mkdir -p ${shellQuote(`${APP_DIR}/${path}`)}/.. && base64 -d ${shellQuote(staging)} > ${shellQuote(`${APP_DIR}/${path}`)} && rm ${shellQuote(staging)}`,
     timeoutMs: 60_000,
   });
@@ -154,9 +158,16 @@ export async function* runAirAppSandock(
     yield { type: "log", line: `[busabase] ${plan.explanation}\n` };
     yield { type: "log", line: "[busabase] provisioning a sandbox…\n" };
 
-    const created = await api.create({
+    // `SandboxCreateOptions.image` is typed as required, but the wire schema
+    // (and the server, which falls back to its own configured default image)
+    // treat it as optional. `config.image` really can be `undefined` here —
+    // this cast changes nothing at the wire level, since the request body is
+    // JSON-serialized and `JSON.stringify` drops `undefined` properties, so an
+    // unconfigured `SANDOCK_IMAGE` still reaches the server with no `image`
+    // field at all, exactly as before.
+    const created = await api.sandbox.create({
       title: `AirApp ${input.nodeId}`,
-      ...(config.image ? { image: config.image } : {}),
+      image: config.image as string,
       // A container that stays up while we exec into it — the same shape buda
       // uses. Without this the sandbox would exit as soon as its entrypoint did.
       command: ["/bin/sh", "-c", "sleep infinity"],
@@ -164,10 +175,13 @@ export async function* runAirAppSandock(
       activeDeadlineSeconds: SANDBOX_DEADLINE_SECONDS,
     });
     sandboxId = created.data.id;
-    await api.start({ id: sandboxId });
+    await api.sandbox.start(sandboxId);
     if (signal?.aborted) return;
 
-    await api.shell({ id: sandboxId, cmd: `mkdir -p ${shellQuote(APP_DIR)}`, timeoutMs: 30_000 });
+    await api.sandbox.shell(sandboxId, {
+      cmd: `mkdir -p ${shellQuote(APP_DIR)}`,
+      timeoutMs: 30_000,
+    });
     for (const [path, content] of Object.entries(input.files)) {
       await writeFile(api, sandboxId, path, content, false);
     }
@@ -177,8 +191,7 @@ export async function* runAirAppSandock(
     if (signal?.aborted) return;
 
     yield { type: "log", line: `$ ${installCommand}\n` };
-    const install = await api.shell({
-      id: sandboxId,
+    const install = await api.sandbox.shell(sandboxId, {
       cmd: installCommand,
       workdir: APP_DIR,
       timeoutMs: INSTALL_TIMEOUT_MS,
@@ -199,15 +212,13 @@ export async function* runAirAppSandock(
     // Detached, because `shell` waits for the command to exit and a dev server
     // does not. `setsid` makes it a session leader so it survives this exec
     // returning, and everything it prints goes to a file we tail below.
-    await api.shell({
-      id: sandboxId,
+    await api.sandbox.shell(sandboxId, {
       cmd: `cd ${shellQuote(APP_DIR)} && rm -f ${shellQuote(APP_LOG)} && setsid sh -c ${shellQuote(`${startCommand} > ${APP_LOG} 2>&1`)} < /dev/null > /dev/null 2>&1 &`,
       workdir: APP_DIR,
       timeoutMs: 60_000,
     });
 
-    const preview = await api.signedPreviewUrl({
-      id: sandboxId,
+    const preview = await api.sandbox.getSignedPreviewUrl(sandboxId, {
       port,
       expiresIn: PREVIEW_URL_TTL_SECONDS,
     });
@@ -225,9 +236,8 @@ export async function* runAirAppSandock(
     while (!signal?.aborted) {
       await new Promise((resolve) => setTimeout(resolve, LOG_POLL_MS));
       if (signal?.aborted) break;
-      const tail = await api
-        .shell({
-          id: sandboxId,
+      const tail = await api.sandbox
+        .shell(sandboxId, {
           cmd: `tail -c +${offset + 1} ${shellQuote(APP_LOG)} 2>/dev/null || true`,
           timeoutMs: 30_000,
         })
@@ -248,8 +258,8 @@ export async function* runAirAppSandock(
       // Best-effort, and deliberately not awaited into the caller's error path:
       // a sandbox we failed to delete is still on Sandock's own deadline, so the
       // worst case is bounded rather than permanent.
-      await api.stop({ id: sandboxId }).catch(() => undefined);
-      await api.delete({ id: sandboxId }).catch(() => undefined);
+      await api.sandbox.stop(sandboxId).catch(() => undefined);
+      await api.sandbox.delete(sandboxId).catch(() => undefined);
     }
   }
 }

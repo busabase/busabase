@@ -115,6 +115,15 @@ interface InstallFromGithubModalProps {
    * anything is pending. Omit to render the pending count without a link.
    */
   onReviewChangeRequests?: () => void;
+  /**
+   * Pre-fill the URL and target folder, and go straight to the preview.
+   *
+   * Set by the Template Center: the user already chose a template from a card,
+   * so making them look at an empty URL field — for a URL they never typed and
+   * would have to be told — turns one decision into two.
+   */
+  initialRepoUrl?: string;
+  initialIntoFolder?: string;
 }
 
 export function InstallFromGithubModal({
@@ -123,12 +132,14 @@ export function InstallFromGithubModal({
   onOpenChange,
   onInstalled,
   onReviewChangeRequests,
+  initialRepoUrl,
+  initialIntoFolder,
 }: InstallFromGithubModalProps) {
   const messages = useCoreI18n();
-  const [repoUrl, setRepoUrl] = useState("");
+  const [repoUrl, setRepoUrl] = useState(initialRepoUrl ?? "");
   const [plan, setPlan] = useState<InstallPlanVO | null>(null);
   const [planning, setPlanning] = useState(false);
-  const [intoFolder, setIntoFolder] = useState("");
+  const [intoFolder, setIntoFolder] = useState(initialIntoFolder ?? "");
   const [rename, setRename] = useState(false);
   const [autoMerge, setAutoMerge] = useState(false);
   const [installing, setInstalling] = useState(false);
@@ -136,10 +147,10 @@ export function InstallFromGithubModal({
   const [error, setError] = useState<string | null>(null);
 
   const reset = () => {
-    setRepoUrl("");
+    setRepoUrl(initialRepoUrl ?? "");
     setPlan(null);
     setPlanning(false);
-    setIntoFolder("");
+    setIntoFolder(initialIntoFolder ?? "");
     setRename(false);
     setAutoMerge(false);
     setInstalling(false);

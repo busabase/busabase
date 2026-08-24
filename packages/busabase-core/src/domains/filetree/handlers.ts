@@ -570,7 +570,10 @@ export const createFileTreeNode = async (
       name: parsed.name,
       description: parsed.description,
       parentNodeId: parentNode.id,
-      metadata: { visibility: parsed.visibility, version: parsed.version },
+      // Caller metadata first: the server-owned keys must win, and a proposal
+      // that carries the stamp is the only way a review-first create ever gets
+      // one — the node does not exist until someone merges it.
+      metadata: { ...parsed.metadata, visibility: parsed.visibility, version: parsed.version },
       initialFiles: files,
       mergeMode: parsed.mergeMode,
       sourceMeta: { skippedGitignorePaths: gitignoreResult.skipped },
@@ -594,6 +597,7 @@ export const createFileTreeNode = async (
       // off `config` by `getFileTreeNode`. Copying it onto every node row put a
       // product-enforced field in the free-form metadata bag for no gain.
       metadata: {
+        ...parsed.metadata,
         visibility: parsed.visibility,
         version: parsed.version,
       },

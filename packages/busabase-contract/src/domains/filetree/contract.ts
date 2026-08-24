@@ -102,6 +102,17 @@ export const createFileTreeInputSchema = z.object({
   description: z.string().optional().default(""),
   visibility: z.enum(["private", "workspace", "public"]).optional().default("private"),
   version: z.string().optional().default("0.1.0"),
+  /**
+   * Extra node metadata, stored alongside the server-owned keys.
+   *
+   * Rides along the change request on the review-first path, so it lands when a
+   * human merges. That is the whole point: an ownership stamp applied only
+   * after an immediate create would silently never be applied to a node that
+   * was proposed instead — leaving the app unable to recognise its own
+   * resources on the DEFAULT install path. Server-owned keys (`visibility`,
+   * `version`) always win, so a caller cannot use this to rewrite them.
+   */
+  metadata: z.record(z.string(), z.unknown()).optional(),
   files: z
     .array(z.union([assetFileInputSchema, textFileInputSchema]))
     .optional()

@@ -9,6 +9,10 @@
  */
 
 import {
+  APP_ROOT_RESOURCE_KEY,
+  TEMPLATE_SKILL_METADATA_KEY,
+} from "busabase-contract/domains/package/template";
+import {
   PACKAGE_COMPUTED_FIELD_TYPES,
   PACKAGE_FORMAT,
   type PackageBaseField,
@@ -21,16 +25,19 @@ import type { PackageClient } from "./client";
 import { collectDocAssetIds, reportUnresolvableDocAssets } from "./doc-asset-refs";
 import {
   guessMimeType,
+  NODE_SLUG_PATTERN,
   type PackageDocAsset,
   type PackageFileEntry,
+  type PackageFileTreeNode,
   type PackageNode,
+  type PackageRootSkill,
   type PackageTree,
   sortNodes,
   walkNodes,
 } from "./tree";
 
 /** The subset of `nodes.list`'s output export walks. */
-interface SourceNode {
+export interface SourceNode {
   id: string;
   slug: string;
   name: string;
@@ -38,7 +45,7 @@ interface SourceNode {
   type: string;
   position: number;
   baseId?: string | null;
-  metadata?: { assetId?: string } | null;
+  metadata?: { assetId?: string; [key: string]: unknown } | null;
   children?: SourceNode[];
 }
 
@@ -76,14 +83,122 @@ export const collectPackageTree = async (
   options: CollectOptions,
 ): Promise<PackageTree> => {
   const children = root.children ?? [];
-  const nodes = await collectNodes(client, children, options);
+  const { skillSource, rest } = partitionTemplateSkill(children);
+  const nodes = await collectNodes(client, rest, options);
   const tree: PackageTree = {
     manifest: { ...options.manifest, format: PACKAGE_FORMAT },
-    nodes,
+    nodes: restorePackageSlugs(nodes, children),
+    ...(skillSource ? { rootSkill: await collectRootSkill(client, skillSource, options) } : {}),
     assets: await collectDocAssets(client, nodes, options),
   };
   assertSelfContained(tree, options);
   return tree;
+};
+
+/**
+ * Undo the slugs INSTALL chose, restoring the ones the package declared.
+ *
+ * Install prefixes a template's Base slugs with the target folder (`contacts` →
+ * `kelly-crm-contacts`) and records the original as the node's `resourceKey`.
+ * Exporting the installed slug would make the package say something its author
+ * never wrote — and re-installing it would prefix the prefix, or collide
+ * outright. Reading the stamp back makes export→install→export a fixed point,
+ * which is the property that lets a user install a template, adjust it, and
+ * publish the result without the names drifting a little further each time.
+ *
+ * The root folder's own stamp is skipped: its `resourceKey` is the reserved
+ * `app-root` marker, not a slug anything should be named after.
+ */
+const restorePackageSlugs = (
+  nodes: readonly PackageNode[],
+  sources: readonly SourceNode[],
+): PackageNode[] => {
+  const renames = new Map<string, string>();
+  const index = (list: readonly SourceNode[]): void => {
+    for (const source of list) {
+      const key = source.metadata?.resourceKey;
+      if (
+        typeof key === "string" &&
+        key !== APP_ROOT_RESOURCE_KEY &&
+        key !== source.slug &&
+        NODE_SLUG_PATTERN.test(key)
+      ) {
+        renames.set(source.slug, key);
+      }
+      if (source.children) index(source.children);
+    }
+  };
+  index(sources);
+  if (renames.size === 0) return [...nodes];
+
+  const rewriteField = <T extends { options: { targetBaseSlug?: string } }>(field: T): T => {
+    const target = field.options.targetBaseSlug;
+    if (!target) return field;
+    const renamed = renames.get(target);
+    return renamed ? { ...field, options: { ...field.options, targetBaseSlug: renamed } } : field;
+  };
+
+  const rewrite = (node: PackageNode): PackageNode => {
+    const slug = renames.get(node.slug) ?? node.slug;
+    if (node.type === "folder") return { ...node, slug, children: node.children.map(rewrite) };
+    if (node.type === "base") {
+      return { ...node, slug, base: { ...node.base, fields: node.base.fields.map(rewriteField) } };
+    }
+    return { ...node, slug };
+  };
+
+  return nodes.map(rewrite);
+};
+
+/**
+ * Separate the app's manual from its resources.
+ *
+ * The Skill node stamped `isTemplateSkill` is the one an install lifted out of a
+ * package root, so export has to put it back there rather than under `content/`.
+ * Writing it as a normal node would make every export→install cycle add another
+ * copy of the manual beside the previous one.
+ *
+ * Only the FIRST such node is lifted: two of them in one folder is a state no
+ * install can produce, and silently merging them would be a guess. The extra one
+ * is exported as an ordinary Skill node, which is visible and fixable, rather
+ * than dropped.
+ */
+const partitionTemplateSkill = (
+  children: readonly SourceNode[],
+): { skillSource?: SourceNode; rest: SourceNode[] } => {
+  const index = children.findIndex(
+    (node) => node.type === "skill" && node.metadata?.[TEMPLATE_SKILL_METADATA_KEY] === true,
+  );
+  if (index === -1) return { rest: [...children] };
+  return {
+    skillSource: children[index],
+    rest: children.filter((_, position) => position !== index),
+  };
+};
+
+const collectRootSkill = async (
+  client: PackageClient,
+  source: SourceNode,
+  options: CollectOptions,
+): Promise<PackageRootSkill> => {
+  const node = await collectFileTree(
+    client,
+    source,
+    "skill",
+    {
+      slug: source.slug,
+      name: source.name,
+      description: source.description ?? "",
+      position: source.position,
+    },
+    options,
+  );
+  return {
+    slug: source.slug,
+    name: source.name,
+    description: source.description ?? "",
+    files: node.files,
+  };
 };
 
 /**
@@ -430,7 +545,9 @@ const collectFileTree = async (
   type: "skill" | "drive" | "airapp",
   common: NodeCommon,
   options: CollectOptions,
-): Promise<PackageNode> => {
+  // Narrower than `PackageNode` so the root-skill path can reach `.files`
+  // without a cast; this function only ever returns a file-tree node.
+): Promise<PackageFileTreeNode> => {
   const listed = await client.fileTrees.listFiles({ nodeId: source.id, type });
   const files: PackageFileEntry[] = [];
   for (const file of listed) {

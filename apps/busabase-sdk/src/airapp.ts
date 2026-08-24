@@ -40,6 +40,11 @@
  * ```
  */
 
+import {
+  APP_ROOT_RESOURCE_KEY,
+  type AppResourceOwnership,
+  type AppRootOwnership,
+} from "busabase-contract/domains/package/template";
 import type { BusabaseClient } from "./client.js";
 
 type NodeChangeRequestInput = Parameters<BusabaseClient["nodes"]["createChangeRequest"]>[0];
@@ -141,6 +146,15 @@ export interface AirAppResourceConfig {
 /**
  * The ownership stamp written into `node.metadata`.
  *
+ * Structurally identical to (and kept in lockstep with) the contract package's
+ * `AppResourceOwnership`, which `busabase-package`'s installer writes for the
+ * SAME resources when a user installs the app from the Template Center instead
+ * of running its `setup.mjs`. The two writers only recognise each other's work
+ * by this shape — drift means a user who installed through the UI and then ran
+ * the skill in their shell hits `SETUP_CONFLICT` on their own data. The
+ * assertion below is what makes that drift a compile error rather than a
+ * support ticket.
+ *
  * A type alias rather than an `interface` on purpose: `nodes.updateMetadata`
  * and the create operations take `Record<string, unknown>`, and an interface —
  * being open to declaration merging — is not assignable to an index signature.
@@ -150,6 +164,29 @@ export type AirAppResourceOwnership = {
   resourceKey: string;
   schemaVersion: number;
 };
+
+// Compile-time lockstep with the contract definition, in both directions.
+type _OwnershipMatchesContract = AirAppResourceOwnership extends AppResourceOwnership
+  ? AppResourceOwnership extends AirAppResourceOwnership
+    ? true
+    : never
+  : never;
+const _ownershipMatchesContract: _OwnershipMatchesContract = true;
+void _ownershipMatchesContract;
+
+/**
+ * The Folder stamp is checked by `ownsAppRoot` through the SAME triple as any
+ * other resource, so whatever the installer writes onto an app's root Folder
+ * must still satisfy this shape. Asserting only the resource stamp missed that
+ * once already: an installer-side root stamp of `{appId, version, source}`
+ * type-checked fine and would have made every `setup.mjs` run after a UI
+ * install fail with SETUP_CONFLICT on the user's own workspace.
+ */
+type _RootOwnershipSatisfiesResourceStamp = AppRootOwnership extends AirAppResourceOwnership
+  ? true
+  : never;
+const _rootOwnershipSatisfiesResourceStamp: _RootOwnershipSatisfiesResourceStamp = true;
+void _rootOwnershipSatisfiesResourceStamp;
 
 /** A node this app owns but whose ownership stamp needs (re)writing. */
 export interface AirAppOwnershipRepair {
@@ -270,7 +307,8 @@ const hasResourceIdentity = (node: ReadNode | undefined, appId: string, resource
   node?.metadata?.appId === appId && node?.metadata?.resourceKey === resourceKey;
 
 const ownsAppRoot = (node: ReadNode | undefined, appId: string, schemaVersion: number) =>
-  hasResourceIdentity(node, appId, "app-root") && node?.metadata?.schemaVersion === schemaVersion;
+  hasResourceIdentity(node, appId, APP_ROOT_RESOURCE_KEY) &&
+  node?.metadata?.schemaVersion === schemaVersion;
 
 const hasEmptyMetadata = (node: ReadNode | undefined) =>
   Object.keys(node?.metadata ?? {}).length === 0;
@@ -340,7 +378,7 @@ export function resolveProvisionedFolder(
     );
   }
 
-  const rootOwned = hasResourceIdentity(folder.node, config.appId, "app-root");
+  const rootOwned = hasResourceIdentity(folder.node, config.appId, APP_ROOT_RESOURCE_KEY);
   const legacyRoot =
     hasEmptyMetadata(folder.node) && matchesDeclaration(folder.node, config.folder, "folder");
   if (!rootOwned && !legacyRoot) {
@@ -356,8 +394,8 @@ export function resolveProvisionedFolder(
   if (!ownsAppRoot(folder.node, config.appId, config.schemaVersion)) {
     repairs.push({
       nodeId: folder.node.id,
-      resourceKey: "app-root",
-      metadata: resourceMetadata(config, "app-root"),
+      resourceKey: APP_ROOT_RESOURCE_KEY,
+      metadata: resourceMetadata(config, APP_ROOT_RESOURCE_KEY),
     });
   }
 
@@ -475,7 +513,7 @@ export function buildProvisionOperations(
       slug: config.folder.slug,
       name: config.folder.name,
       description: config.folder.description ?? "",
-      metadata: resourceMetadata(config, "app-root"),
+      metadata: resourceMetadata(config, APP_ROOT_RESOURCE_KEY),
     });
   }
   for (const base of missingBases) {

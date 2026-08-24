@@ -14,6 +14,10 @@
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import {
+  PACKAGE_SKILL_ENTRY,
+  PACKAGE_SKILL_SIDECAR_DIRS,
+} from "busabase-contract/domains/package/template";
+import {
   PACKAGE_ASSET_META_SUFFIX,
   PACKAGE_ASSETS_DIRNAME,
   PACKAGE_BASE_FILENAME,
@@ -81,6 +85,9 @@ const serializeManifest = (manifest: PackageManifest): Buffer =>
       license: manifest.license,
       homepage: manifest.homepage,
       tags: manifest.tags.length > 0 ? manifest.tags : undefined,
+      // Written last so a plain package's manifest is byte-identical to what
+      // it was before templates existed — the key simply never appears.
+      template: manifest.template,
     }),
   );
 
@@ -145,9 +152,26 @@ const serializeRecords = (records: readonly PackageRecordLine[]): Buffer => {
 export const renderPackageTree = (tree: PackageTree): PackageFiles => {
   const files: PackageFiles = new Map();
   files.set(PACKAGE_MANIFEST_FILENAME, serializeManifest(tree.manifest));
+  renderRootSkill(tree.rootSkill, files);
   renderNodes(tree.nodes, `${PACKAGE_CONTENT_DIRNAME}/`, files);
   renderDocAssets(tree.assets ?? [], files);
   return files;
+};
+
+/**
+ * The root skill's files, back at the package root — NOT under `content/`.
+ *
+ * This asymmetry with every other node is the whole point: writing it as
+ * `content/<slug>/` would produce a package whose next install created a second
+ * Skill node beside the first, and each export→install cycle would add another.
+ * Round-tripping through the root is what keeps exactly one copy in existence.
+ */
+const renderRootSkill = (rootSkill: PackageTree["rootSkill"], files: PackageFiles): void => {
+  if (!rootSkill) return;
+  for (const entry of rootSkill.files) {
+    assertSafeFilePath(entry.path, `root skill "${rootSkill.slug}"`);
+    files.set(entry.path, entry.bytes);
+  }
 };
 
 /**
@@ -317,6 +341,13 @@ export const writePackageFiles = async (
     await rm(join(outDir, PACKAGE_CONTENT_DIRNAME), { recursive: true, force: true });
     await rm(join(outDir, PACKAGE_ASSETS_DIRNAME), { recursive: true, force: true });
     await rm(join(outDir, PACKAGE_MANIFEST_FILENAME), { force: true });
+    // The root skill is subject to the same rule as `content/`: a reference doc
+    // deleted from the Skill node must stop being shipped. Left behind, it would
+    // reappear on the next install as guidance the author had already removed.
+    await rm(join(outDir, PACKAGE_SKILL_ENTRY), { force: true });
+    for (const dirName of PACKAGE_SKILL_SIDECAR_DIRS) {
+      await rm(join(outDir, dirName), { recursive: true, force: true });
+    }
   }
   for (const [filePath, bytes] of [...files].sort(([a], [b]) => a.localeCompare(b, "en"))) {
     const target = join(outDir, filePath);

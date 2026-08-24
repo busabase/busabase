@@ -19,6 +19,7 @@ import {
 } from "../base/contract/base-schemas";
 import { viewFilterOperatorSchema } from "../base/contract/view-schemas";
 import { VIEW_FIELD_MAX_WIDTH, VIEW_FIELD_MIN_WIDTH } from "../base/types";
+import { TemplateManifestSchema } from "./template";
 
 export const PACKAGE_FORMAT = "busabase-package@1";
 
@@ -144,6 +145,14 @@ export const PackageManifestSchema = z.object({
   license: z.string().optional(),
   homepage: z.string().url().optional(),
   tags: z.array(z.string()).default([]),
+  /**
+   * Present ⇢ this package is also an Agent Skill (a "template"): see
+   * `./template.ts`. Optional and additive — a package without it behaves
+   * exactly as before, and a reader that ignores it still installs correctly.
+   * The flag alone is not enough to be treated as a template; the root
+   * `SKILL.md` must opt in too (`validateTemplate`).
+   */
+  template: TemplateManifestSchema.optional(),
 });
 export type PackageManifest = z.infer<typeof PackageManifestSchema>;
 

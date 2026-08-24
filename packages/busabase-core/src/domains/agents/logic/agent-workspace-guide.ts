@@ -59,6 +59,18 @@ user's workspace: listing nodes, reading records, searching, and proposing
 changes. That server also sends its own instructions and a full reference guide
 (the \`busabase://skill\` resource) — read them before your first write.
 
+## Some folders here are apps, and they came with a manual
+
+A folder in this workspace may be an **app** installed from a template: its
+tables, its interface, and a Skill node holding the manual its author wrote for
+you — which names the tables, what each field means, and what the app must never
+do.
+
+Ask the \`busabase\` MCP server's guide tool for topic \`apps\` to see which apps
+this workspace has, then \`skill:<slug>\` to read one. Do that **before** acting
+on an app's data: guessing a schema the app already documents is how records end
+up in the wrong table.
+
 ## Writes are proposals, not edits
 
 Busabase is approval-first. A write does not change canonical data directly; it

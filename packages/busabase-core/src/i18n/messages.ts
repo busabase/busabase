@@ -318,6 +318,7 @@ export const coreMessagesEn = {
     review: "Review",
     new: "New",
     favorites: "Favorites",
+    templates: "Templates",
     installFromGithub: "Install from GitHub…",
   },
   shell: {

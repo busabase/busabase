@@ -45,6 +45,7 @@ import { AgentsListView } from "../agents/components/agents-list-view";
 import { AirAppKeepAliveHost } from "../airapp/components/AirAppKeepAliveHost";
 import { AppsListView } from "../airapp/components/apps-list-view";
 import { getPrimaryField } from "../base/utils/primary-field";
+import { TemplateCenter } from "../templates/components/template-center";
 import { ArchivedBasesView } from "./components/archived-bases";
 import { AssetsView } from "./components/assets";
 import { BaseDetailView, BaseSetupView, BaseTopbarActions } from "./components/base-views";
@@ -1981,6 +1982,21 @@ function BusabaseDashboardContent({
       return <AppsListView orpc={orpc} />;
     }
 
+    if (locationPath === "/templates") {
+      return (
+        <TemplateCenter
+          orpc={orpc}
+          apiClient={apiClient}
+          onReviewChangeRequests={() => setLocation("/inbox")}
+          onInstalled={() => {
+            // Structure is created immediately, so the tree on screen is
+            // already out of date by the time this fires.
+            void queryClient.invalidateQueries();
+          }}
+        />
+      );
+    }
+
     if (locationPath === "/agents/new") {
       return (
         <AgentsAddView
@@ -2283,6 +2299,8 @@ function BusabaseDashboardContent({
     nodeCache,
     openSearch,
     cacheSpaceKey,
+    apiClient,
+    queryClient,
   ]);
 
   const dashboardActiveView = (

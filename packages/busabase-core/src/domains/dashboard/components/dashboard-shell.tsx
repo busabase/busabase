@@ -691,6 +691,11 @@ export function BusabaseDashboardShell({
       headerAction: Plus,
       headerActionTitle: nav.new,
       className: "group-data-[collapsible=icon]:hidden",
+      // The canonical node tree, and the ONLY group whose rows may be dragged.
+      // Favorites above renders the very same node ids (see `buildFavoriteItems`);
+      // letting it register them too gave one dnd-kit id two DOM rows, which lit
+      // the drop indicator on both at once.
+      draggable: true,
     },
   ];
 

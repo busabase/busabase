@@ -73,6 +73,10 @@
       "types": "./ui/dashboard/types.ts",
       "default": "./ui/dashboard/types.ts"
     },
+    "./ui/dashboard/tree-drop": {
+      "types": "./ui/dashboard/tree-drop.ts",
+      "default": "./ui/dashboard/tree-drop.ts"
+    },
     "./ui/nprogress": {
       "types": "./ui/nprogress/index.ts",
       "default": "./ui/nprogress/index.ts"
