@@ -1,11 +1,16 @@
 /**
  * Write-time check that an AirApp can actually start.
  *
- * Busabase runs an AirApp by mounting its files, running `npm install`, then running
- * literally `npm run dev` — both engines, `domains/airapp/components/runners/nodepod-runner.ts`
- * (`spawn("npm", ["run", "dev"])`) and `domains/airapp/logic/local-node-runtime.ts`
- * (`runSandboxedCommand("npm run dev", …)`). There is no configuration under which something
- * else is started.
+ * Busabase runs an AirApp by mounting its files and executing a `RunPlan` — an install command
+ * then a start command, resolved from the app's own files by
+ * `domains/airapp/utils/airapp-runtime-descriptor.ts`. For a Node app with no `airapp.json`
+ * that plan is still exactly `npm install` then `npm run dev`, which is why this check exists
+ * and why it still applies to the overwhelming majority of AirApps.
+ *
+ * What changed: there IS now a configuration under which something else is started — an
+ * `airapp.json` declaring a non-Node runtime or its own `start` command, or a payload carrying
+ * a non-Node marker file such as `requirements.txt`. Those are exempted below rather than
+ * rejected. Everything else is held to the original rule.
  *
  * An agent writing an AirApp from scratch reaches for the default modern scaffold, which
  * produces `"start": "vite --host 0.0.0.0"` and no `dev` script at all. That app installs 50
@@ -39,6 +44,12 @@
  */
 
 import { ORPCError } from "@orpc/server";
+import {
+  AIRAPP_MANIFEST_PATH,
+  AirAppManifestError,
+  parseAirAppManifest,
+  RUNTIMES,
+} from "../domains/airapp/utils/airapp-runtime-descriptor";
 
 /** Same minimal shape `upload-safety.ts` checks, so both call sites pass what they already have. */
 export interface AirAppFileEntry {
@@ -47,6 +58,20 @@ export interface AirAppFileEntry {
 }
 
 const PACKAGE_JSON = "package.json";
+
+/**
+ * Marker files that make this payload evidently not a Node project.
+ *
+ * The check only ever sees the files in ONE request, so it cannot ask the node
+ * what runtime it is. Treating these as evidence keeps the common Python case
+ * working — an app that ships `requirements.txt` is not required to also
+ * satisfy a Node-only rule — while a payload carrying neither a manifest nor a
+ * marker is still held to the historic rule, which is exactly the population
+ * that rule was written for.
+ */
+const NON_NODE_MARKERS = RUNTIMES.filter((runtime) => runtime.kind !== "node").flatMap(
+  (runtime) => runtime.markerFiles,
+);
 
 /**
  * Bundler dev servers. Matched against the `dev` script's command line, not the dependency
@@ -123,6 +148,32 @@ export const assertAirAppRunnable = (
 ): void => {
   // Skills and Drives are documents, not programs — nothing here applies to them.
   if (nodeType !== "airapp") return;
+
+  // A malformed manifest is rejected on its own merits: it is the one file
+  // whose typo silently changes what gets executed.
+  const manifestEntry = entries.find((candidate) => candidate.path === AIRAPP_MANIFEST_PATH);
+  let declaredNonNode = false;
+  if (manifestEntry && typeof manifestEntry.content === "string") {
+    try {
+      const manifest = parseAirAppManifest(manifestEntry.content);
+      // Either an explicit non-Node runtime, or an explicit start command,
+      // means the `npm run dev` rule below is simply not what runs this app.
+      declaredNonNode =
+        (manifest.runtime !== undefined && manifest.runtime !== "node") ||
+        manifest.start !== undefined;
+    } catch (error) {
+      reject(
+        error instanceof AirAppManifestError
+          ? `${error.message}.`
+          : "its `airapp.json` could not be read.",
+        'Fix `airapp.json` — for example `{"runtime": "python"}`, or remove it to use the Node defaults.',
+      );
+    }
+  }
+
+  const looksNonNode =
+    declaredNonNode || entries.some((candidate) => NON_NODE_MARKERS.includes(candidate.path));
+  if (looksNonNode) return;
 
   if (options.deletedPaths?.some((path) => path === PACKAGE_JSON)) {
     reject(

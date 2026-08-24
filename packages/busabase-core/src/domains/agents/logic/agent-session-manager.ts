@@ -1,5 +1,6 @@
 import { type ChildProcess, spawn } from "node:child_process";
 import { Readable, Writable } from "node:stream";
+import { buildPromptContent } from "@acp-ui/core/prompt";
 import * as acp from "@agentclientprotocol/sdk";
 import { createWebSocketStream } from "@agentclientprotocol/sdk/experimental/ws-client";
 import {
@@ -14,6 +15,12 @@ import type {
 } from "busabase-contract/domains/agents/types";
 import WebSocket from "ws";
 import { collapseForPersistence } from "../utils/session-updates";
+import {
+  ACP_CONNECTION_ID_HEADER,
+  createAcpConnectionId,
+  describeAcpEndpoint,
+  describeAcpError,
+} from "./acp-connection-diagnostics";
 import { type ResolvedLaunch, resolveLaunch } from "./agent-catalog";
 import {
   loadSessionEvents,
@@ -85,6 +92,16 @@ function sessions(): Map<string, LiveSession> {
 }
 
 const nowIso = () => new Date().toISOString();
+
+type AcpConnectionLogLevel = "info" | "warn";
+
+const logAcpConnection = (
+  level: AcpConnectionLogLevel,
+  event: string,
+  fields: Record<string, unknown>,
+) => {
+  console[level]("[agents:acp]", { event, ...fields });
+};
 
 function emit(session: LiveSession, event: Omit<AgentSessionEventVO, "sessionId" | "seq" | "at">) {
   session.seq += 1;
@@ -160,6 +177,17 @@ export async function createAgentSession({
 }: CreateSessionArgs): Promise<AgentSessionVO> {
   const launch = await resolveLaunch(slug);
   const id = `ags_${Math.random().toString(36).slice(2, 12)}${Date.now().toString(36)}`;
+  const connectionId = createAcpConnectionId();
+  const endpointDiagnostics =
+    launch.transport === "remote-websocket" ? describeAcpEndpoint(launch.url) : {};
+
+  logAcpConnection("info", "launch_resolved", {
+    connectionId,
+    sessionId: id,
+    slug: launch.slug,
+    transport: launch.transport,
+    ...endpointDiagnostics,
+  });
 
   const session: LiveSession = {
     id,
@@ -207,8 +235,18 @@ export async function createAgentSession({
         Readable.toWeb(child.stdout) as ReadableStream<Uint8Array>,
       );
     } else {
+      logAcpConnection("info", "websocket_connecting", {
+        connectionId,
+        sessionId: id,
+        slug: launch.slug,
+        transport: launch.transport,
+        ...endpointDiagnostics,
+      });
       stream = createWebSocketStream(launch.url as string, {
-        headers: launch.authHeader ? { Authorization: launch.authHeader } : {},
+        headers: {
+          [ACP_CONNECTION_ID_HEADER]: connectionId,
+          ...(launch.authHeader ? { Authorization: launch.authHeader } : {}),
+        },
         WebSocket: WebSocket as unknown as never,
       });
     }
@@ -262,11 +300,32 @@ export async function createAgentSession({
 
     const connectPromise = app
       .connectWith(stream, async (ctx) => {
+        logAcpConnection("info", "connection_opened", {
+          connectionId,
+          sessionId: id,
+          slug: launch.slug,
+          transport: launch.transport,
+          ...endpointDiagnostics,
+        });
+        logAcpConnection("info", "initialize_started", {
+          connectionId,
+          sessionId: id,
+          slug: launch.slug,
+          transport: launch.transport,
+          ...endpointDiagnostics,
+        });
         const initialized = await ctx.request(acp.methods.agent.initialize, {
           protocolVersion: acp.PROTOCOL_VERSION,
           // We serve no filesystem: agents use their own disk, and v2 removes
           // this surface entirely. Declaring false keeps them from asking.
           clientCapabilities: {},
+        });
+        logAcpConnection("info", "initialize_succeeded", {
+          connectionId,
+          sessionId: id,
+          slug: launch.slug,
+          transport: launch.transport,
+          ...endpointDiagnostics,
         });
 
         // Busabase's own MCP endpoint is what makes the agent useful at all —
@@ -318,9 +377,24 @@ export async function createAgentSession({
             ]
           : [];
 
+        logAcpConnection("info", "session_new_started", {
+          connectionId,
+          sessionId: id,
+          slug: launch.slug,
+          transport: launch.transport,
+          ...endpointDiagnostics,
+        });
         const created = await ctx.request(acp.methods.agent.session.new, {
           cwd: workspace,
           mcpServers,
+        });
+        logAcpConnection("info", "session_new_succeeded", {
+          connectionId,
+          sessionId: id,
+          acpSessionId: created.sessionId,
+          slug: launch.slug,
+          transport: launch.transport,
+          ...endpointDiagnostics,
         });
 
         if (!supportsHttpMcp) {
@@ -347,7 +421,17 @@ export async function createAgentSession({
             });
             setStatus(session, "idle");
           } catch (error) {
-            setStatus(session, "failed", error instanceof Error ? error.message : String(error));
+            const diagnostics = describeAcpError(error);
+            logAcpConnection("warn", "prompt_failed", {
+              connectionId,
+              sessionId: id,
+              acpSessionId: created.sessionId,
+              slug: launch.slug,
+              transport: launch.transport,
+              ...endpointDiagnostics,
+              ...diagnostics,
+            });
+            setStatus(session, "failed", diagnostics.message);
             throw error;
           }
         };
@@ -360,17 +444,44 @@ export async function createAgentSession({
         await connectionClosed;
       })
       .catch((error: unknown) => {
-        setStatus(session, "failed", error instanceof Error ? error.message : String(error));
+        const diagnostics = describeAcpError(error);
+        logAcpConnection("warn", "connection_failed", {
+          connectionId,
+          sessionId: id,
+          acpSessionId: session.acpSessionId,
+          slug: launch.slug,
+          transport: launch.transport,
+          ...endpointDiagnostics,
+          ...diagnostics,
+        });
+        setStatus(session, "failed", diagnostics.message);
       });
 
     session.close = () => {
+      logAcpConnection("info", "connection_closing", {
+        connectionId,
+        sessionId: id,
+        acpSessionId: session.acpSessionId,
+        slug: launch.slug,
+        transport: launch.transport,
+        ...endpointDiagnostics,
+      });
       releaseConnection?.();
       session.child?.kill();
       if (session.status !== "failed") setStatus(session, "ended");
       void connectPromise;
     };
   })().catch((error: unknown) => {
-    setStatus(session, "failed", error instanceof Error ? error.message : String(error));
+    const diagnostics = describeAcpError(error);
+    logAcpConnection("warn", "setup_failed", {
+      connectionId,
+      sessionId: id,
+      slug: launch.slug,
+      transport: launch.transport,
+      ...endpointDiagnostics,
+      ...diagnostics,
+    });
+    setStatus(session, "failed", diagnostics.message);
   });
 
   await persistSessionCreated(toVO(session));
@@ -424,22 +535,6 @@ export async function listAgentSessions(): Promise<AgentSessionVO[]> {
  * is real), then one image/audio block per attachment, in the order the
  * browser attached them.
  */
-function buildPromptContent(
-  text: string,
-  attachments: PromptAttachmentInput[] | undefined,
-): acp.ContentBlock[] {
-  return [
-    { type: "text", text },
-    ...(attachments ?? []).map(
-      (attachment): acp.ContentBlock => ({
-        type: attachment.kind,
-        data: attachment.data,
-        mimeType: attachment.mimeType,
-      }),
-    ),
-  ];
-}
-
 export async function promptAgentSession(
   sessionId: string,
   text: string,
@@ -503,6 +598,18 @@ export function closeAgentSession(sessionId: string): void {
   const s = requireSession(sessionId);
   s.close();
   sessions().delete(sessionId);
+}
+
+export async function closeAgentSessions(sessionIds: string[]): Promise<void> {
+  await Promise.all(
+    sessionIds.map(async (sessionId) => {
+      const session = sessions().get(sessionId);
+      if (!session) return;
+      await session.ready.catch(() => undefined);
+      session.close();
+      sessions().delete(sessionId);
+    }),
+  );
 }
 
 /**

@@ -17,6 +17,9 @@ import type { ChangeRequestVO } from "busabase-contract/types";
 export const HOME_PENDING_PREVIEW_COUNT = 4;
 export const HOME_RECENT_PREVIEW_COUNT = 8;
 export const HOME_ACTIVITY_PREVIEW_COUNT = 6;
+/** Preview cap for the "Recently used Apps" gallery — smaller than the plain
+ * recent-nodes list since each tile is a large icon card, not a text row. */
+export const HOME_RECENT_APPS_PREVIEW_COUNT = 6;
 
 /**
  * The change requests Home counts as "waiting for you".

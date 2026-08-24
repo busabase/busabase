@@ -3,7 +3,7 @@
  * picker (see `AirAppDetailView`'s toolbar) and persisted per-node in
  * `airapp-runner-store.ts` so switching tabs/nodes remembers the user's last
  * choice. Re-exported from `busabase-contract` (the type is shared with the
- * server-side `runLocalNode` oRPC contract) — kept here too as the
+ * server-side `runLocal` oRPC contract) — kept here too as the
  * UI-facing name callers of this file already import from.
  */
 export type { AirAppRunnerKind } from "busabase-contract/domains/airapp/contract";
@@ -12,8 +12,8 @@ export type { AirAppRunnerKind } from "busabase-contract/domains/airapp/contract
  * Engine-agnostic contract for "run this AirApp's files and show me a
  * preview". Two implementations ship: `nodepod-runner.ts` (in-browser,
  * backed by the `@scelar/nodepod` Web Worker runtime) and
- * `local-node-runner.ts` (server-side, a real `npm install` + `npm run dev`
- * OS process via the `airapps.runLocalNode` oRPC endpoint). This interface
+ * `local-runner.ts` (server-side, a real `npm install` + `npm run dev`
+ * OS process via the `airapps.runLocal` oRPC endpoint). This interface
  * is kept intentionally narrow and transport-agnostic so a third engine
  * (e.g. a future WebContainer-based one) can implement it later without
  * touching `RunPanel` — see the airapp changelog's Follow-up Tasks for why
@@ -50,6 +50,20 @@ export interface AirAppRunner {
    *  preview URL/path suitable for an `<iframe src>`. May fire more than once
    *  (e.g. a restart) — the caller should just re-point the iframe each time. */
   onReady(cb: (previewPath: string) => void): void;
-  /** Tear down the runner (kill processes, release the virtual filesystem). */
+  /** Subscribe to "the app's process ended".
+   *
+   *  Distinct from `dispose()`: this fires when the *app* stopped on its own,
+   *  which the UI must show. Without it, a dev server that crashed after
+   *  install emitted one log line and nothing else, so the panel went on
+   *  reporting success over a preview that had been dead for minutes. */
+  onExit(cb: (code: number | null) => void): void;
+  /** End the run for real: kill the process / destroy the sandbox.
+   *
+   *  Separate from `dispose()` because a run now outlives the view that
+   *  started it. Disposing means "this surface is going away"; stopping means
+   *  "the app should not be running any more", and only the second one is the
+   *  user's decision. */
+  stop(): Promise<void>;
+  /** Tear down this client-side handle. Does NOT stop a server-side run. */
   dispose(): void;
 }

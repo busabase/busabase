@@ -2,21 +2,21 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { CodeBlock } from "kui/ai-elements/code-block";
-import { FileTree } from "kui/ai-elements/file-tree";
 import { Button } from "kui/button";
-import { Popover, PopoverContent, PopoverTrigger } from "kui/popover";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "kui/tabs";
 import { AppWindow, Files, Info, MonitorPlay, Terminal } from "lucide-react";
-import { type ComponentProps, useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { fmt, useCoreI18n } from "../../../i18n";
 import {
   buildFileTree,
   collectFolderPaths,
+  DriveFileTree,
   guessFileTreeLanguage,
   renderFileTree,
 } from "../../dashboard/components/file-tree-browser";
 import { NodeActionsMenu } from "../../dashboard/components/node-actions-menu";
 import { NodeAgentPromptsButton } from "../../dashboard/components/node-agent-prompts-button";
+import { NodeSettingsDialog } from "../../dashboard/components/node-settings-dialog";
 import { EmptyState } from "../../dashboard/components/primitives";
 import { FileContentSkeleton, NodeDetailSkeleton } from "../../dashboard/components/skeletons";
 import { asNodeDetail } from "../../dashboard/helpers/node-detail";
@@ -58,6 +58,7 @@ export function AirAppDetailView({ orpc, slug, onNodeLoaded }: NodeDetailProps) 
   const isKeepAliveActive = useAirAppKeepAliveActive();
   const [openPath, setOpenPath] = useState<string | null>(null);
   const [selectedTab, setSelectedTab] = useState("app");
+  const [infoOpen, setInfoOpen] = useState(false);
   const fullscreenState = useAirAppFullscreen({ syncWithUrl: isKeepAliveActive });
 
   const airappQuery = useQuery({
@@ -162,21 +163,15 @@ export function AirAppDetailView({ orpc, slug, onNodeLoaded }: NodeDetailProps) 
   }
 
   const fileCount = airapp.files.length;
-  const propertyItems = [
-    { label: messages.nodeDetail.files, value: String(fileCount) },
-    { label: messages.nodeDetail.visibility, value: airapp.visibility },
-    airapp.version ? { label: messages.nodeDetail.version, value: `v${airapp.version}` } : null,
-    airapp.entryFile ? { label: messages.nodeDetail.entryFile, value: airapp.entryFile } : null,
-  ].filter((value): value is { label: string; value: string } => Boolean(value));
 
   return (
     <div className="flex h-full min-h-0 w-full flex-col bg-background">
       {/* The Tabs root wraps the header so the TabsList can live inside the
-          single compact toolbar row — one ~48px bar (identity + info popover,
+          single compact toolbar row — one ~48px bar (identity + info trigger,
           tab switcher, run controls, delete) replaces the old stacked
           title-block / properties / tab-row chrome, giving the app preview
-          maximum vertical space. Name/description/properties moved into the
-          Info popover. */}
+          maximum vertical space. Name/description/properties moved into
+          `NodeSettingsDialog`'s Info tab. */}
       {/* Controlled so entering fullscreen can force the "App" panel active:
           inactive panels are CSS-hidden, and the preview iframe we grow to
           fill the viewport lives inside that panel. */}
@@ -189,40 +184,29 @@ export function AirAppDetailView({ orpc, slug, onNodeLoaded }: NodeDetailProps) 
           <div className="flex min-w-0 items-center gap-2">
             <AppWindow className="size-4 shrink-0 text-muted-foreground" />
             <h1 className="truncate font-medium text-foreground text-sm">{airapp.node.name}</h1>
-            <Popover>
-              <PopoverTrigger asChild>
-                <Button
-                  aria-label={messages.airapp.details}
-                  className="shrink-0 text-muted-foreground"
-                  size="icon-sm"
-                  title={messages.airapp.details}
-                  type="button"
-                  variant="ghost"
-                >
-                  <Info className="size-3.5" />
-                </Button>
-              </PopoverTrigger>
-              <PopoverContent align="start" className="w-80">
-                {airapp.node.description ? (
-                  <p className="mb-3 text-muted-foreground text-sm leading-6">
-                    {airapp.node.description}
-                  </p>
-                ) : null}
-                <dl className="flex flex-col gap-2 text-xs">
-                  {propertyItems.map((item) => (
-                    <div
-                      className="flex min-w-0 items-center justify-between gap-3"
-                      key={item.label}
-                    >
-                      <dt className="shrink-0 text-muted-foreground">{item.label}</dt>
-                      <dd className="min-w-0 truncate font-mono text-foreground/80">
-                        {item.value}
-                      </dd>
-                    </div>
-                  ))}
-                </dl>
-              </PopoverContent>
-            </Popover>
+            <Button
+              aria-label={messages.airapp.details}
+              className="shrink-0 text-muted-foreground"
+              onClick={() => setInfoOpen(true)}
+              size="icon-sm"
+              title={messages.airapp.details}
+              type="button"
+              variant="ghost"
+            >
+              <Info className="size-3.5" />
+            </Button>
+            {infoOpen && (
+              <NodeSettingsDialog
+                initialTab="info"
+                nodeId={airapp.node.id}
+                nodeName={airapp.node.name}
+                nodeSlug={airapp.node.slug}
+                nodeType="airapp"
+                onOpenChange={setInfoOpen}
+                open={infoOpen}
+                orpc={orpc}
+              />
+            )}
           </div>
 
           <TabsList className="h-8 shrink-0">
@@ -268,19 +252,15 @@ export function AirAppDetailView({ orpc, slug, onNodeLoaded }: NodeDetailProps) 
                       {messages.nodeDetail.noFilesYet}
                     </div>
                   ) : (
-                    <FileTree
+                    <DriveFileTree
                       className="rounded-none border-0 bg-transparent font-sans text-[13px]"
                       defaultExpanded={expandedFolders}
                       key={airapp.node.id}
-                      // FileTreeProps.onSelect collides with HTMLAttributes.onSelect; it is
-                      // invoked with the node path string at runtime.
-                      onSelect={
-                        selectFile as unknown as ComponentProps<typeof FileTree>["onSelect"]
-                      }
+                      onSelect={selectFile}
                       selectedPath={openPath ?? undefined}
                     >
                       {renderFileTree(tree)}
-                    </FileTree>
+                    </DriveFileTree>
                   )}
                 </div>
               </div>

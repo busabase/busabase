@@ -140,7 +140,7 @@ export function NodeDetailSkeleton({
 
   // folder
   return (
-    <div className="mx-auto w-full max-w-3xl px-6 py-8" aria-hidden>
+    <div className="mx-auto w-full max-w-5xl px-6 py-8" aria-hidden>
       <div className="mb-8 flex items-start justify-between gap-4">
         <div className="min-w-0 flex-1">
           <Skeleton className="h-7 w-52" />

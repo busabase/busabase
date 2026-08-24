@@ -5,8 +5,8 @@ import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 /**
- * Unit coverage for `packages/busabase-core/src/domains/airapp/logic/local-node-runtime.ts`
- * — the sandboxed npm install/dev execution engine backing the `"local-node"`
+ * Unit coverage for `packages/busabase-core/src/domains/airapp/logic/local-runtime.ts`
+ * — the sandboxed npm install/dev execution engine backing the `"local"`
  * AirApp runner. This file previously had zero test coverage. Real sandboxed
  * process spawning is never exercised here (that's covered separately by
  * live/manual verification); instead `@anthropic-ai/sandbox-runtime` and
@@ -19,43 +19,43 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 describe("detectPort", () => {
   it("matches 'listening on port 4123'", async () => {
-    const { detectPort } = await import("../src/domains/airapp/logic/local-node-runtime");
+    const { detectPort } = await import("../src/domains/airapp/logic/local-runtime");
     expect(detectPort("Server listening on port 4123")).toBe(4123);
   });
 
   it("matches 'localhost:3000'", async () => {
-    const { detectPort } = await import("../src/domains/airapp/logic/local-node-runtime");
+    const { detectPort } = await import("../src/domains/airapp/logic/local-runtime");
     expect(detectPort("ready - started server on http://localhost:3000")).toBe(3000);
   });
 
   it("matches '0.0.0.0:8080'", async () => {
-    const { detectPort } = await import("../src/domains/airapp/logic/local-node-runtime");
+    const { detectPort } = await import("../src/domains/airapp/logic/local-runtime");
     expect(detectPort("Listening on 0.0.0.0:8080")).toBe(8080);
   });
 
   it("matches 'listening on: 5000' (colon variant)", async () => {
-    const { detectPort } = await import("../src/domains/airapp/logic/local-node-runtime");
+    const { detectPort } = await import("../src/domains/airapp/logic/local-runtime");
     expect(detectPort("App listening on: 5000")).toBe(5000);
   });
 
   it("does not match a line with no port info", async () => {
-    const { detectPort } = await import("../src/domains/airapp/logic/local-node-runtime");
+    const { detectPort } = await import("../src/domains/airapp/logic/local-runtime");
     expect(detectPort("Compiling...")).toBeNull();
   });
 
   it("does not match a nonsense out-of-range number", async () => {
-    const { detectPort } = await import("../src/domains/airapp/logic/local-node-runtime");
+    const { detectPort } = await import("../src/domains/airapp/logic/local-runtime");
     expect(detectPort("build id 99999999")).toBeNull();
   });
 
   it("returns null for garbage input", async () => {
-    const { detectPort } = await import("../src/domains/airapp/logic/local-node-runtime");
+    const { detectPort } = await import("../src/domains/airapp/logic/local-runtime");
     expect(detectPort("")).toBeNull();
     expect(detectPort("asdkjfh 987 !!! %%")).toBeNull();
   });
 
   it("matches Vite's real-world 'Local: http://localhost:5173/' format", async () => {
-    const { detectPort } = await import("../src/domains/airapp/logic/local-node-runtime");
+    const { detectPort } = await import("../src/domains/airapp/logic/local-runtime");
     expect(detectPort("  ➜  Local:   http://localhost:5173/")).toBe(5173);
   });
 });
@@ -73,7 +73,7 @@ describe("resolveWorkdir", () => {
 
   it("returns a path rooted under SANDAGENT_WORKDIR/airapp-runtime/{nodeId}/{uuid}", async () => {
     process.env.SANDAGENT_WORKDIR = ".tmp-test-workdir";
-    const { resolveWorkdir } = await import("../src/domains/airapp/logic/local-node-runtime");
+    const { resolveWorkdir } = await import("../src/domains/airapp/logic/local-runtime");
     const workdir = resolveWorkdir("node-123");
     const expectedBase = path.resolve(
       process.cwd(),
@@ -86,14 +86,14 @@ describe("resolveWorkdir", () => {
 
   it("falls back to '.tmp' when SANDAGENT_WORKDIR is unset", async () => {
     delete process.env.SANDAGENT_WORKDIR;
-    const { resolveWorkdir } = await import("../src/domains/airapp/logic/local-node-runtime");
+    const { resolveWorkdir } = await import("../src/domains/airapp/logic/local-runtime");
     const workdir = resolveWorkdir("node-123");
     const expectedBase = path.resolve(process.cwd(), ".tmp", "airapp-runtime", "node-123");
     expect(workdir.startsWith(expectedBase + path.sep)).toBe(true);
   });
 
   it("returns a DIFFERENT path on each call for the same nodeId (Run again must not reuse a stale workdir)", async () => {
-    const { resolveWorkdir } = await import("../src/domains/airapp/logic/local-node-runtime");
+    const { resolveWorkdir } = await import("../src/domains/airapp/logic/local-runtime");
     const first = resolveWorkdir("same-node");
     const second = resolveWorkdir("same-node");
     expect(first).not.toBe(second);
@@ -111,7 +111,7 @@ describe("writeFiles", () => {
   });
 
   it("creates nested parent directories for a deep file path", async () => {
-    const { writeFiles } = await import("../src/domains/airapp/logic/local-node-runtime");
+    const { writeFiles } = await import("../src/domains/airapp/logic/local-runtime");
     tmpDir = await mkdtemp(path.join(os.tmpdir(), "airapp-writefiles-"));
     await writeFiles(tmpDir, { "src/components/App.tsx": "export const App = () => null;" });
     const content = await readFile(path.join(tmpDir, "src/components/App.tsx"), "utf-8");
@@ -119,7 +119,7 @@ describe("writeFiles", () => {
   });
 
   it("writes multiple files at different depths with correct content", async () => {
-    const { writeFiles } = await import("../src/domains/airapp/logic/local-node-runtime");
+    const { writeFiles } = await import("../src/domains/airapp/logic/local-runtime");
     tmpDir = await mkdtemp(path.join(os.tmpdir(), "airapp-writefiles-"));
     const files = {
       "package.json": '{"name":"demo"}',
@@ -134,7 +134,7 @@ describe("writeFiles", () => {
   });
 
   it("does not throw and leaves no stray state for an empty files object", async () => {
-    const { writeFiles } = await import("../src/domains/airapp/logic/local-node-runtime");
+    const { writeFiles } = await import("../src/domains/airapp/logic/local-runtime");
     tmpDir = await mkdtemp(path.join(os.tmpdir(), "airapp-writefiles-"));
     await expect(writeFiles(tmpDir, {})).resolves.toBeUndefined();
     const entries = await import("node:fs/promises").then((fs) => fs.readdir(tmpDir));
@@ -144,7 +144,7 @@ describe("writeFiles", () => {
 
 describe("buildSandboxConfig", () => {
   it("scopes allowWrite to exactly the workdir, denies sensitive read paths, and allow-lists npm registry with no denied domains", async () => {
-    const { buildSandboxConfig } = await import("../src/domains/airapp/logic/local-node-runtime");
+    const { buildSandboxConfig } = await import("../src/domains/airapp/logic/local-runtime");
     const workdir = "/tmp/some-airapp-workdir";
     const config = buildSandboxConfig(workdir);
 
@@ -158,7 +158,7 @@ describe("buildSandboxConfig", () => {
 
 describe("acquireSandboxLock", () => {
   it("serializes concurrent acquisitions: the second caller does not resolve until the first releases", async () => {
-    const { acquireSandboxLock } = await import("../src/domains/airapp/logic/local-node-runtime");
+    const { acquireSandboxLock } = await import("../src/domains/airapp/logic/local-runtime");
 
     const release1 = await acquireSandboxLock();
 
@@ -181,9 +181,9 @@ describe("acquireSandboxLock", () => {
 });
 
 // The dependency-check fail-open warning is specific to the `"srt"` engine
-// (the bare `"local-node"` engine spawns directly and never touches
+// (the bare `"local"` engine spawns directly and never touches
 // SandboxManager), so this path is exercised with `engine: "srt"`.
-describe("runAirAppLocalNode — srt fail-open sandboxing-unsupported warning path", () => {
+describe("runAirAppLocal — srt fail-open sandboxing-unsupported warning path", () => {
   afterEach(() => {
     vi.resetModules();
     vi.doUnmock("@anthropic-ai/sandbox-runtime");
@@ -227,10 +227,10 @@ describe("runAirAppLocalNode — srt fail-open sandboxing-unsupported warning pa
       assertNodePermission: vi.fn(async () => undefined),
     }));
 
-    const { runAirAppLocalNode } = await import("../src/domains/airapp/logic/local-node-runtime");
+    const { runAirAppLocal } = await import("../src/domains/airapp/logic/local-runtime");
 
     const events: Array<{ type: string; [key: string]: unknown }> = [];
-    for await (const event of runAirAppLocalNode({
+    for await (const event of runAirAppLocal({
       nodeId: "test-node",
       files: {},
       engine: "srt",

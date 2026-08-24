@@ -1,6 +1,6 @@
 import "server-only";
 
-import { getLocalPreviewPort } from "./local-preview-registry";
+import { getLocalPreviewTarget } from "./local-preview-registry";
 
 /**
  * Server-side reverse proxy for a running Local Node.js AirApp preview.
@@ -24,14 +24,26 @@ export async function proxyLocalPreview(
   req: Request,
   nodeId: string,
   path: string,
+  /**
+   * Who is asking. Resolved by the calling app, because only the app knows how
+   * its own requests authenticate: the cloud host reads its session, the
+   * open-source single-user host has one owner and passes the shared constant.
+   * A run is only visible to the owner that started it — starting one requires
+   * `write` on the node, and before this parameter existed, *viewing* one
+   * required nothing but knowing the nodeId.
+   */
+  owner: string,
 ): Promise<Response> {
-  const port = getLocalPreviewPort(nodeId);
-  if (port === undefined) {
+  const target = getLocalPreviewTarget(nodeId, owner);
+  if (target === undefined) {
+    // Deliberately the same 404 as "no run at all": distinguishing
+    // "running, but not yours" would confirm to a stranger that a given node
+    // is being previewed right now.
     return new Response("AirApp preview not running", { status: 404 });
   }
 
   const search = new URL(req.url).search;
-  const target = `http://127.0.0.1:${port}/${path}${search}`;
+  const upstreamUrl = `${target}/${path}${search}`;
 
   // Forward the incoming headers, stripping hop-by-hop / origin-specific ones
   // that must not be replayed against the upstream localhost server.
@@ -43,7 +55,7 @@ export async function proxyLocalPreview(
 
   let upstream: Response;
   try {
-    upstream = await fetch(target, {
+    upstream = await fetch(upstreamUrl, {
       method: req.method,
       headers,
       body: hasBody ? await req.arrayBuffer() : undefined,
@@ -61,6 +73,22 @@ export async function proxyLocalPreview(
   }
 
   const responseHeaders = new Headers();
+
+  // The dashboard page that frames this preview is served cross-origin-isolated
+  // (`Cross-Origin-Opener-Policy: same-origin` + `Cross-Origin-Embedder-Policy:
+  // credentialless`) so Nodepod can use SharedArrayBuffer. COEP is *inherited
+  // by nested documents*: an iframe whose response does not itself assert a
+  // COEP is refused, and being same-origin does not exempt it. Without these
+  // two headers the browser fails the frame navigation with
+  // `ERR_BLOCKED_BY_RESPONSE` — the server logs a clean 200, the proxy is
+  // demonstrably returning correct HTML, and the preview is simply blank.
+  //
+  // `credentialless` rather than `require-corp` to match the embedder, and so
+  // an AirApp loading a cross-origin CDN asset doesn't need that CDN to send
+  // its own CORP header.
+  responseHeaders.set("Cross-Origin-Embedder-Policy", "credentialless");
+  responseHeaders.set("Cross-Origin-Resource-Policy", "same-origin");
+
   const contentType = upstream.headers.get("content-type");
   if (contentType) {
     responseHeaders.set("content-type", contentType);

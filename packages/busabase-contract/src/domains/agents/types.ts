@@ -33,6 +33,14 @@ export const AgentCatalogEntryVOSchema = z.object({
   unavailableReason: z.string().nullable().default(null),
   connectionRequired: z.boolean().default(false),
   connectedAgentName: z.string().nullable().default(null),
+  connectedAgents: z
+    .array(
+      z.object({
+        slug: z.string(),
+        name: z.string(),
+      }),
+    )
+    .default([]),
 });
 export type AgentCatalogEntryVO = z.infer<typeof AgentCatalogEntryVOSchema>;
 
@@ -120,6 +128,12 @@ export const CreateAgentSessionInputSchema = z.object({
   slug: z.string().min(1),
 });
 export type CreateAgentSessionInput = z.infer<typeof CreateAgentSessionInputSchema>;
+
+export const DisconnectAgentInputSchema = z.object({
+  /** The exact connected-agent slug shown by the sessions/catalog surfaces. */
+  slug: z.string().min(1),
+});
+export type DisconnectAgentInput = z.infer<typeof DisconnectAgentInputSchema>;
 
 /** Base64 image/audio the browser attached — ACP's `ImageContent`/`AudioContent` shape verbatim. */
 export const PromptAttachmentInputSchema = z.object({

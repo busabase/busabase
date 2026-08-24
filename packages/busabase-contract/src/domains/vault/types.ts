@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-const VaultItemKeySchema = z
+export const VaultItemKeySchema = z
   .string()
   .trim()
   .min(1)

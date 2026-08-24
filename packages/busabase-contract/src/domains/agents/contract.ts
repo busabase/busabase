@@ -6,6 +6,7 @@ import {
   AgentSessionIdInputSchema,
   AgentSessionVOSchema,
   CreateAgentSessionInputSchema,
+  DisconnectAgentInputSchema,
   PromptAgentSessionInputSchema,
   RespondToAgentPermissionInputSchema,
 } from "./types";
@@ -21,6 +22,13 @@ import {
 export const agentsContract = {
   /** Connectable backends. Availability is resolved per request, not cached in the client. */
   catalog: oc.output(AgentCatalogEntryVOSchema.array()),
+
+  disconnect: oc.input(DisconnectAgentInputSchema).output(
+    z.object({
+      ok: z.boolean(),
+      deletedSessionCount: z.number().int().nonnegative(),
+    }),
+  ),
 
   sessions: {
     list: oc.output(AgentSessionVOSchema.array()),

@@ -2,6 +2,7 @@ import { implement, ORPCError } from "@orpc/server";
 import { busabaseContract } from "busabase-contract/contract/busabase";
 import { getContextSpaceId } from "../../context";
 import { listCatalog } from "./logic/agent-catalog";
+import { disconnectAgentConnection } from "./logic/agent-connection";
 import {
   cancelAgentSession,
   closeAgentSession,
@@ -22,6 +23,14 @@ function fail(error: unknown): never {
 
 export const agentsRouter = {
   catalog: os.agents.catalog.handler(() => listCatalog()),
+
+  disconnect: os.agents.disconnect.handler(async ({ input }) => {
+    try {
+      return await disconnectAgentConnection(input.slug);
+    } catch (error) {
+      return fail(error);
+    }
+  }),
 
   sessions: {
     list: os.agents.sessions.list.handler(() => listAgentSessions()),

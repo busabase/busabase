@@ -8,6 +8,7 @@ import {
 import { CREATABLE_NODE_TYPES } from "busabase-contract/domains";
 import { fieldNameSchema } from "busabase-contract/domains/base/contract/base-schemas";
 import type { NodeSearchResultVO, NodeVO } from "busabase-contract/types";
+import { NodeIconSchema } from "busabase-contract/types";
 import { and, asc, desc, eq, ilike, inArray, isNotNull, isNull, ne, or, sql } from "drizzle-orm";
 import { storage } from "openlib/storage";
 import { z } from "zod";
@@ -80,6 +81,10 @@ const nodeOperationInputSchema = z.discriminatedUnion("kind", [
       .optional(),
     name: z.string().min(1).optional(),
     description: z.string().optional(),
+    // Mirrors the contract's `nodeOperationInputSchema` (see
+    // `busabase-contract/contract/schemas.ts` for the "why reuse rename"
+    // rationale). `undefined` leaves the icon untouched; `null` clears it.
+    icon: NodeIconSchema.nullable().optional(),
   }),
   z.object({
     kind: z.literal("delete"),

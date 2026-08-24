@@ -221,6 +221,7 @@ export const toNodeVO = (
   description: node.description,
   metadata: node.metadata ?? {},
   explicitVisibility: node.explicitVisibility ?? null,
+  icon: node.icon ?? null,
   position: node.position,
   createdAt: node.createdAt.toISOString(),
   updatedAt: node.updatedAt.toISOString(),

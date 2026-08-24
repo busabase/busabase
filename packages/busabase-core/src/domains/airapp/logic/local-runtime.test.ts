@@ -2,8 +2,8 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { toBase64 } from "../components/runners/local-node-runner";
-import { writeFiles } from "./local-node-runtime";
+import { toBase64 } from "../components/runners/local-runner";
+import { writeFiles } from "./local-runtime";
 
 describe("writeFiles", () => {
   let workdir: string;

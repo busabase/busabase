@@ -152,3 +152,84 @@ describe("assertAirAppRunnable", () => {
     }
   });
 });
+
+describe("assertAirAppRunnable — non-Node runtimes", () => {
+  const manifest = (value: unknown) => ({
+    path: "airapp.json",
+    content: JSON.stringify(value),
+  });
+
+  it("accepts a Python app that has no package.json at all", () => {
+    expect(() =>
+      assertAirAppRunnable("airapp", [
+        manifest({ runtime: "python" }),
+        { path: "main.py", content: "app = ..." },
+      ]),
+    ).not.toThrow();
+  });
+
+  it("accepts a Python app inferred from requirements.txt, with no manifest", () => {
+    // The rule used to reject this outright — the agent wrote a perfectly good
+    // app and the platform refused to store it.
+    expect(() =>
+      assertAirAppRunnable("airapp", [
+        { path: "requirements.txt", content: "fastapi\nuvicorn\n" },
+        { path: "main.py", content: "" },
+      ]),
+    ).not.toThrow();
+  });
+
+  it("stops applying the Node dev-script rule once a runtime says otherwise", () => {
+    // A Python project may legitimately carry a package.json for front-end
+    // assets, with no `dev` script anywhere.
+    expect(() =>
+      assertAirAppRunnable("airapp", [
+        manifest({ runtime: "python" }),
+        { path: "package.json", content: JSON.stringify({ scripts: { build: "esbuild" } }) },
+      ]),
+    ).not.toThrow();
+  });
+
+  it("exempts an app that declares its own start command, whatever the runtime", () => {
+    expect(() =>
+      assertAirAppRunnable("airapp", [
+        manifest({ start: "node custom-entry.js" }),
+        { path: "package.json", content: JSON.stringify({ scripts: {} }) },
+      ]),
+    ).not.toThrow();
+  });
+
+  it("lets a Python app delete package.json", () => {
+    expect(() =>
+      assertAirAppRunnable("airapp", [manifest({ runtime: "python" })], {
+        deletedPaths: ["package.json"],
+      }),
+    ).not.toThrow();
+  });
+
+  it("still holds a plain Node payload to the original rule", () => {
+    expect(() =>
+      assertAirAppRunnable("airapp", [
+        { path: "package.json", content: JSON.stringify({ scripts: { start: "vite" } }) },
+      ]),
+    ).toThrow(/no `dev` script/);
+  });
+
+  it("rejects a malformed manifest instead of ignoring it", () => {
+    expect(() =>
+      assertAirAppRunnable("airapp", [{ path: "airapp.json", content: "{ nope" }]),
+    ).toThrow(/not valid JSON/);
+    expect(() => assertAirAppRunnable("airapp", [manifest({ runtime: "cobol" })])).toThrow(
+      /unknown runtime/,
+    );
+  });
+
+  it("rejects a malformed manifest as a 422, like every other authoring error", () => {
+    try {
+      assertAirAppRunnable("airapp", [manifest({ port: -1 })]);
+      throw new Error("expected a rejection");
+    } catch (error) {
+      expect((error as { status?: number }).status).toBe(422);
+    }
+  });
+});

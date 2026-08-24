@@ -90,6 +90,41 @@ describe("Unified Grep — POST /grep (files + docs + records)", () => {
     return doc.node.id;
   };
 
+  /**
+   * Create a rich node (html/whiteboard/workflow) and write its content
+   * through the SAME public `PUT /nodes/{nodeId}/content` route a real caller
+   * uses — never by writing the storage object directly, so these tests prove
+   * the real write→store→grep path rather than a shape this test invented.
+   */
+  const seedRichNode = async (opts: {
+    nodeType: "html" | "whiteboard" | "workflow";
+    slug: string;
+    name: string;
+    content: Parameters<Client["nodes"]["updateContent"]>[0]["content"];
+  }) => {
+    const rootId = (await client.nodes.list({}))[0]?.id ?? "";
+    expect(rootId).not.toBe("");
+    await client.nodes.createChangeRequest({
+      autoMerge: true,
+      operations: [
+        {
+          kind: "create",
+          parentNodeId: rootId,
+          nodeType: opts.nodeType,
+          slug: opts.slug,
+          name: opts.name,
+        },
+      ],
+    });
+    const tree = await client.nodes.list({});
+    const flatten = (entries: typeof tree): typeof tree =>
+      entries.flatMap((entry) => [entry, ...flatten(entry.children)]);
+    const nodeId = flatten(tree).find((node) => node.slug === opts.slug)?.id ?? "";
+    expect(nodeId).not.toBe("");
+    await client.nodes.updateContent({ nodeId, content: opts.content, autoMerge: true });
+    return nodeId;
+  };
+
   const archiveNode = async (nodeId: string) => {
     const cr = await client.nodes.createChangeRequest({
       operations: [{ kind: "delete", nodeId }],
@@ -115,16 +150,16 @@ describe("Unified Grep — POST /grep (files + docs + records)", () => {
 
     expect(result.matches).toHaveLength(2);
     expect(result.matches[0]?.source).toBe("files");
-    expect(result.matches[1]?.source).toBe("docs");
+    expect(result.matches[1]?.source).toBe("nodes");
     const fileMatch = result.matches[0];
     const docMatch = result.matches[1];
     if (fileMatch?.source === "files") expect(fileMatch.assetId).toBe(assetId);
-    if (docMatch?.source === "docs") expect(docMatch.nodeId).toBe(nodeId);
+    if (docMatch?.source === "nodes") expect(docMatch.nodeId).toBe(nodeId);
     expect(result.coverage.files.scanned).toBeGreaterThanOrEqual(1);
-    expect(result.coverage.docs.scanned).toBeGreaterThanOrEqual(1);
+    expect(result.coverage.nodes.scanned).toBeGreaterThanOrEqual(1);
   });
 
-  it("scopes to sources: ['docs'] — files coverage stays empty, no file match even though the marker is also in a file", async () => {
+  it("scopes to sources: ['nodes'] — files coverage stays empty, no file match even though the marker is also in a file", async () => {
     await seedFile({
       fileName: "docs-only-scope.log",
       hashByte: "2",
@@ -136,11 +171,11 @@ describe("Unified Grep — POST /grep (files + docs + records)", () => {
       body: "DOCSONLYMARKER lives in a doc\n",
     });
 
-    const result = await client.grep({ pattern: "DOCSONLYMARKER", sources: ["docs"] });
+    const result = await client.grep({ pattern: "DOCSONLYMARKER", sources: ["nodes"] });
 
     expect(result.matches).toHaveLength(1);
-    expect(result.matches[0]?.source).toBe("docs");
-    if (result.matches[0]?.source === "docs") expect(result.matches[0].nodeId).toBe(nodeId);
+    expect(result.matches[0]?.source).toBe("nodes");
+    if (result.matches[0]?.source === "nodes") expect(result.matches[0].nodeId).toBe(nodeId);
     expect(result.coverage.files).toEqual({
       scanned: 0,
       missing: [],
@@ -157,13 +192,13 @@ describe("Unified Grep — POST /grep (files + docs + records)", () => {
 
     const result = await client.grep({
       pattern: "LINEMARKER",
-      sources: ["docs"],
+      sources: ["nodes"],
       contextLines: 1,
     });
 
     expect(result.matches).toHaveLength(1);
     const match = expectDefined(result.matches[0]);
-    if (match.source !== "docs") throw new Error("expected a docs match");
+    if (match.source !== "nodes") throw new Error("expected a docs match");
     expect(match.nodeId).toBe(nodeId);
     expect(match.line).toBe(3);
     expect(match.column).toBe(1);
@@ -182,18 +217,18 @@ describe("Unified Grep — POST /grep (files + docs + records)", () => {
 
     const result = await client.grep({
       pattern: "ARCHIVEDMARKER",
-      sources: ["docs"],
+      sources: ["nodes"],
       // Scope to just this node — the DB is shared across this file's tests,
       // so other tests' (non-archived) docs would otherwise also be counted
       // as "scanned" and mask the assertion this test cares about.
-      scope: { docs: { nodeIds: [nodeId] } },
+      scope: { nodes: { nodeIds: [nodeId] } },
     });
 
     expect(result.matches).toHaveLength(0);
-    expect(result.coverage.docs.scanned).toBe(0);
+    expect(result.coverage.nodes.scanned).toBe(0);
   });
 
-  it("reports a doc body read failure in coverage.docs.errored, not as an unremarked absence", async () => {
+  it("reports a doc body read failure in coverage.nodes.errored, not as an unremarked absence", async () => {
     const nodeId = await seedDoc({
       slug: "errored-doc",
       name: "Errored Doc",
@@ -207,14 +242,14 @@ describe("Unified Grep — POST /grep (files + docs + records)", () => {
 
     const result = await client.grep({
       pattern: "ERROREDMARKER",
-      sources: ["docs"],
+      sources: ["nodes"],
       // Scope to just this node — see the archived-doc test above for why.
-      scope: { docs: { nodeIds: [nodeId] } },
+      scope: { nodes: { nodeIds: [nodeId] } },
     });
 
     expect(result.matches).toHaveLength(0);
-    expect(result.coverage.docs.scanned).toBe(0);
-    expect(result.coverage.docs.errored).toContain(nodeId);
+    expect(result.coverage.nodes.scanned).toBe(0);
+    expect(result.coverage.nodes.errored).toContain(nodeId);
   });
 
   it("honors the maxMatches budget across docs: truncated, accurate notReached, never over budget", async () => {
@@ -230,16 +265,16 @@ describe("Unified Grep — POST /grep (files + docs + records)", () => {
 
     const result = await client.grep({
       pattern: "BUDGETNEEDLE-\\d",
-      sources: ["docs"],
+      sources: ["nodes"],
       maxMatches: 2,
       // Scope to just these 5 nodes — see the archived-doc test above for why.
-      scope: { docs: { nodeIds } },
+      scope: { nodes: { nodeIds } },
     });
 
     expect(result.truncated).toBe(true);
     expect(result.matches.length).toBeLessThanOrEqual(2);
-    expect(result.coverage.docs.notReached).toBeGreaterThan(0);
-    expect(result.coverage.docs.scanned + result.coverage.docs.notReached).toBe(nodeIds.length);
+    expect(result.coverage.nodes.notReached).toBeGreaterThan(0);
+    expect(result.coverage.nodes.scanned + result.coverage.nodes.notReached).toBe(nodeIds.length);
   });
 
   it("files-only grep exposes file matches and the complete honest files coverage block", async () => {
@@ -265,7 +300,7 @@ describe("Unified Grep — POST /grep (files + docs + records)", () => {
       errored: [],
       notReached: 0,
     });
-    expect(result.coverage.docs).toEqual({ scanned: 0, errored: [], notReached: 0 });
+    expect(result.coverage.nodes).toEqual({ scanned: 0, errored: [], notReached: 0 });
     expect(result.coverage.records).toEqual({ scanned: 0, errored: [], notReached: 0 });
     expect(result.truncated).toBe(false);
   });
@@ -675,12 +710,12 @@ describe("Unified Grep — POST /grep (files + docs + records)", () => {
       const result = await client.grep({ pattern: marker });
 
       expect(result.matches).toHaveLength(3);
-      expect(result.matches.map((m) => m.source)).toEqual(["files", "docs", "records"]);
+      expect(result.matches.map((m) => m.source)).toEqual(["files", "nodes", "records"]);
       const fileMatch = result.matches[0];
       const docMatch = result.matches[1];
       const recordMatch = result.matches[2];
       if (fileMatch?.source === "files") expect(fileMatch.assetId).toBe(assetId);
-      if (docMatch?.source === "docs") expect(docMatch.nodeId).toBe(nodeId);
+      if (docMatch?.source === "nodes") expect(docMatch.nodeId).toBe(nodeId);
       if (recordMatch?.source === "records") expect(recordMatch.recordId).toBe(recordId);
     });
 
@@ -693,10 +728,171 @@ describe("Unified Grep — POST /grep (files + docs + records)", () => {
       });
       await createBaseRecord(base.id, { notes: marker });
 
-      const result = await client.grep({ pattern: marker, sources: ["files", "docs"] });
+      const result = await client.grep({ pattern: marker, sources: ["files", "nodes"] });
 
       expect(result.matches).toHaveLength(0);
       expect(result.coverage.records).toEqual({ scanned: 0, errored: [], notReached: 0 });
     });
+  });
+
+  // ── Node types beyond `doc` ───────────────────────────────────────────────
+  // These four types all store their content as one object in storage, but
+  // only `doc` was ever wired into the candidate query, so html/whiteboard/
+  // workflow content was silently unsearchable. Each test below fails on the
+  // pre-change code by finding nothing at all.
+
+  it("finds a match inside an html node's real source (a type that was previously unsearchable)", async () => {
+    const nodeId = await seedRichNode({
+      nodeType: "html",
+      slug: "pricing-page",
+      name: "Pricing Page",
+      content: {
+        kind: "html",
+        document: {
+          version: 1,
+          source: "<html>\n  <body>\n    <h1>HTMLNEEDLE pricing</h1>\n  </body>\n</html>\n",
+        },
+      },
+    });
+
+    const result = await client.grep({
+      pattern: "HTMLNEEDLE",
+      scope: { nodes: { nodeIds: [nodeId] } },
+    });
+
+    const match = expectDefined(result.matches[0]);
+    if (match.source !== "nodes") throw new Error("Expected a nodes match");
+    expect(match.type).toBe("html");
+    expect(match.nodeId).toBe(nodeId);
+    // html is stored as raw source, so the line number is a REAL source line.
+    expect(match.line).toBe(3);
+    expect(match.text).toContain("<h1>HTMLNEEDLE pricing</h1>");
+  });
+
+  it("finds text a user wrote on a whiteboard, without matching Excalidraw's JSON keys", async () => {
+    const nodeId = await seedRichNode({
+      nodeType: "whiteboard",
+      slug: "launch-board",
+      name: "Launch Board",
+      content: {
+        kind: "whiteboard",
+        document: {
+          version: 1,
+          elements: [
+            {
+              id: "t1",
+              type: "text",
+              x: 80,
+              y: 50,
+              width: 330,
+              height: 38,
+              strokeColor: "#0f172a",
+              isDeleted: false,
+              text: "WHITEBOARDNEEDLE launch plan",
+              originalText: "WHITEBOARDNEEDLE launch plan",
+            },
+          ],
+          appState: {},
+        },
+      },
+    });
+
+    const hit = await client.grep({
+      pattern: "WHITEBOARDNEEDLE",
+      scope: { nodes: { nodeIds: [nodeId] } },
+    });
+    const match = expectDefined(hit.matches[0]);
+    if (match.source !== "nodes") throw new Error("Expected a nodes match");
+    expect(match.type).toBe("whiteboard");
+    expect(match.text).toBe("WHITEBOARDNEEDLE launch plan");
+
+    // The extraction's whole purpose: a structural JSON key that IS present in
+    // the stored object must NOT be findable.
+    const noise = await client.grep({
+      pattern: "strokeColor",
+      scope: { nodes: { nodeIds: [nodeId] } },
+    });
+    expect(noise.matches).toHaveLength(0);
+    expect(noise.coverage.nodes.scanned).toBe(1); // genuinely scanned, genuinely no match
+  });
+
+  it("finds a workflow node's label and drops its numeric settings", async () => {
+    const nodeId = await seedRichNode({
+      nodeType: "workflow",
+      slug: "billing-flow",
+      name: "Billing Flow",
+      content: {
+        kind: "workflow",
+        document: {
+          version: 2,
+          nodes: [
+            {
+              id: "trigger",
+              kind: "trigger",
+              position: { x: 0, y: 0 },
+              label: "WORKFLOWNEEDLE approval",
+              description: "",
+              eventName: "manual",
+            },
+          ],
+          edges: [],
+          settings: {
+            executionMode: "manual",
+            concurrency: 1,
+            timeoutMs: 30_000,
+            errorPolicy: "stop",
+          },
+        },
+      },
+    });
+
+    const hit = await client.grep({
+      pattern: "WORKFLOWNEEDLE",
+      scope: { nodes: { nodeIds: [nodeId] } },
+    });
+    const match = expectDefined(hit.matches[0]);
+    if (match.source !== "nodes") throw new Error("Expected a nodes match");
+    expect(match.type).toBe("workflow");
+
+    const noise = await client.grep({
+      pattern: "timeoutMs",
+      scope: { nodes: { nodeIds: [nodeId] } },
+    });
+    expect(noise.matches).toHaveLength(0);
+  });
+
+  it("scope.nodes.types restores the old doc-only behaviour explicitly", async () => {
+    const docId = await seedDoc({
+      slug: "types-filter-doc",
+      name: "Types Filter Doc",
+      body: "TYPESFILTERNEEDLE in a doc\n",
+    });
+    const htmlId = await seedRichNode({
+      nodeType: "html",
+      slug: "types-filter-html",
+      name: "Types Filter Html",
+      content: {
+        kind: "html",
+        document: { version: 1, source: "<p>TYPESFILTERNEEDLE in html</p>\n" },
+      },
+    });
+
+    const all = await client.grep({
+      pattern: "TYPESFILTERNEEDLE",
+      scope: { nodes: { nodeIds: [docId, htmlId] } },
+    });
+    expect(all.matches).toHaveLength(2);
+
+    const docsOnly = await client.grep({
+      pattern: "TYPESFILTERNEEDLE",
+      scope: { nodes: { nodeIds: [docId, htmlId], types: ["doc"] } },
+    });
+    expect(docsOnly.matches).toHaveLength(1);
+    const only = expectDefined(docsOnly.matches[0]);
+    if (only.source !== "nodes") throw new Error("Expected a nodes match");
+    expect(only.type).toBe("doc");
+    expect(only.nodeId).toBe(docId);
+    // Coverage must reflect the narrowed candidate set, not the wider one.
+    expect(docsOnly.coverage.nodes.scanned).toBe(1);
   });
 });

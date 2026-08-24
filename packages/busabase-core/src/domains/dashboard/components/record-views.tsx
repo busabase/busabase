@@ -17,6 +17,7 @@ import {
   Check,
   Eye,
   GitMerge,
+  History,
   Maximize2,
   MoreHorizontal,
   Paperclip,
@@ -26,7 +27,7 @@ import {
 } from "lucide-react";
 import { SPALink as Link } from "openlib/ui/dashboard";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useSearch } from "wouter";
+import { useLocation, useSearch } from "wouter";
 import { fmt, useCoreI18n, useCoreLocale, useIString } from "../../../i18n";
 import { localizeCoreErrorMessage } from "../../../i18n/localize-error";
 import { validateRecordFields } from "../../base/field-rules";
@@ -144,11 +145,16 @@ export function RecordTopbarActions({
 }
 
 export function RecordDetailView({
+  baseSlug,
   client,
   onDeleteChangeRequest,
   records,
   record,
 }: {
+  /** The owning Base's route slug (or nodeId/id fallback) — needed to build
+   *  the `/base/:slug/:recordId/activity` link for the "•••" menu's Activity
+   *  item, mirroring how `NodeActionsMenu` builds its own activity href. */
+  baseSlug: string;
   client: BusabaseDashboardApiClient;
   onDeleteChangeRequest: (record: RecordVO, options?: RecordSubmitOptions) => Promise<void>;
   records: RecordVO[];
@@ -157,6 +163,7 @@ export function RecordDetailView({
   const messages = useCoreI18n();
   const locale = useCoreLocale();
   const currentSearch = useSearch();
+  const [, setLocation] = useLocation();
   const [panelOpen, setPanelOpen] = useState(true);
   const [deleteAction, setDeleteAction] = useState<"change_request" | "merge" | null>(null);
   const [confirmDeleteAction, setConfirmDeleteAction] = useState<"change_request" | "merge" | null>(
@@ -203,6 +210,17 @@ export function RecordDetailView({
             <MoreHorizontal size={16} />
           </summary>
           <div className="absolute right-0 z-50 mt-1 w-48 rounded-md border border-border/70 bg-card p-1 shadow-md">
+            <button
+              className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left font-medium text-foreground text-sm transition-colors hover:bg-accent"
+              onClick={(event) => {
+                setLocation(`/base/${baseSlug}/${record.id}/activity`);
+                event.currentTarget.closest("details")?.removeAttribute("open");
+              }}
+              type="button"
+            >
+              <History size={13} />
+              {messages.nodeDetail.activity}
+            </button>
             <button
               className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left font-medium text-rejected-strong text-sm transition-colors hover:bg-rejected/17 disabled:cursor-not-allowed disabled:opacity-60"
               disabled={deleteAction !== null}

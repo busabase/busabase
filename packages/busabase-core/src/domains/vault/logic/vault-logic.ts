@@ -7,6 +7,7 @@ import {
   VaultAccessPolicySchema,
   type VaultItemInput,
   VaultItemInputSchema,
+  VaultItemKeySchema,
   type VaultItemVO,
   type VaultRuntimeEnv,
   VaultRuntimeEnvSchema,
@@ -154,7 +155,7 @@ export async function getVaultRuntimeEnv(
   return VaultRuntimeEnvSchema.parse(
     Object.fromEntries(
       settings.items
-        .filter((item) => item.access.runtime)
+        .filter((item) => item.access.runtime && VaultItemKeySchema.safeParse(item.key).success)
         .map((item) => [item.key, item.value] as const),
     ),
   );

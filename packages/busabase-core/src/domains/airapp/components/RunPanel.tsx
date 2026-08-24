@@ -5,7 +5,7 @@ import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-quer
 import type { AirAppVO } from "busabase-contract/types";
 import { Button } from "kui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "kui/select";
-import { Loader2, Maximize, Minimize, Pin, Play, RotateCcw } from "lucide-react";
+import { Loader2, Maximize, Minimize, Pin, Play, RotateCcw, Square } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useLocation, useSearch } from "wouter";
 import { fmt, useCoreI18n } from "../../../i18n";
@@ -20,10 +20,29 @@ import {
   IDLE_ENTRY,
   useAirAppRunnerStore,
 } from "../store/airapp-runner-store";
+import {
+  AIRAPP_MANIFEST_PATH,
+  resolveEngine,
+  resolveRunPlan,
+} from "../utils/airapp-runtime-descriptor";
 import { isAirAppFullscreenSearch, updateAirAppFullscreenSearch } from "../utils/fullscreen-query";
 import { AIRAPP_PREVIEW_IFRAME_SANDBOX } from "../utils/preview-sandbox";
+import { useAirAppEngineAvailability } from "./engine-availability-context";
 import { createAirAppRunner } from "./runners/runner-factory";
 import type { AirAppMountedFile, AirAppRunnerKind } from "./runners/types";
+
+/**
+ * How long a node must stay open before a run that costs something is started.
+ *
+ * Opening an AirApp runs it, which is the right feel for a document and the
+ * wrong one for a bill: clicking down a folder of AirApps would otherwise
+ * provision a sandbox for each node passed through. Nodepod is exempt — its run
+ * is free and instant, so debouncing it would only make the good case slower.
+ */
+const REMOTE_AUTO_RUN_DWELL_MS = 1200;
+
+/** Engines whose runs are free and instant, so opening a node may start them at once. */
+const FREE_ENGINES: AirAppRunnerKind[] = ["nodepod"];
 
 /**
  * Owns the Nodepod runner lifecycle (mount/install/start, log streaming,
@@ -58,6 +77,7 @@ export function useAirAppRunner({
   const selectedRunnerKind = useAirAppRunnerStore((state) =>
     nodeId ? (state.selectedKinds[nodeId] ?? "nodepod") : "nodepod",
   );
+  const availableEngines = useAirAppEngineAvailability();
   const setRunnerKind = useCallback(
     (kind: AirAppRunnerKind) => {
       if (nodeId) {
@@ -73,15 +93,94 @@ export function useAirAppRunner({
     }
     const currentNodeId = airapp.node.id;
     const store = useAirAppRunnerStore.getState();
-    const runnerKind = store.getSelectedRunnerKind(currentNodeId);
+    const wantedKind = store.getSelectedRunnerKind(currentNodeId);
+
+    // Which engine can actually run this app has to be settled BEFORE the
+    // runner is constructed — and the answer lives in the app's own files. The
+    // alternative (construct the stored default, then discover the mismatch
+    // during install) is what would make opening a Python AirApp auto-start it
+    // on Nodepod, a browser JavaScript runtime, and fail every single time.
+    //
+    // Only the manifest needs to be fetched: runtime inference keys off which
+    // marker files exist, which the listing already tells us.
+    let runnerKind = wantedKind;
+    let engineNote: string | null = null;
+    try {
+      const probeFiles: Record<string, string> = {};
+      for (const file of airapp.files) probeFiles[file.path] = "";
+      if (airapp.files.some((file) => file.path === AIRAPP_MANIFEST_PATH)) {
+        const manifest = await orpc.fileTrees.readFile.call({
+          nodeId: currentNodeId,
+          filePath: AIRAPP_MANIFEST_PATH,
+          type: "airapp",
+        });
+        if (manifest.encoding === "utf8") probeFiles[AIRAPP_MANIFEST_PATH] = manifest.content;
+      }
+      const plan = resolveRunPlan(probeFiles);
+      // The app's own preference outranks a stale per-tab selection, but only
+      // as a preference: an app pinning an engine this deployment lacks still
+      // runs on whatever else is eligible instead of becoming unrunnable.
+      // An app's own preference is honoured only if this deployment actually
+      // has that engine. A pin the host cannot satisfy must not make the app
+      // unrunnable — it falls back to whatever else is eligible.
+      const preferred = plan.preferredEngine ?? wantedKind;
+      const resolved = resolveEngine(plan.runtime, preferred, availableEngines);
+      if (!resolved) {
+        useAirAppRunnerStore
+          .getState()
+          .failBeforeRun(
+            currentNodeId,
+            wantedKind,
+            fmt(messages.airapp.noEligibleEngine, { runtime: plan.runtime }),
+          );
+        return;
+      }
+      if (resolved !== wantedKind) {
+        engineNote = `[busabase] engine "${resolved}" selected for runtime "${plan.runtime}"\n`;
+        // Write the derived engine back to the selection, so the picker names
+        // the engine that is actually running. Leaving it alone showed
+        // "Nodepod (Browser)" beside a Python app running on Local Node — the
+        // toolbar contradicting the logs, with the logs being right.
+        store.selectRunnerKind(currentNodeId, resolved);
+      }
+      runnerKind = resolved;
+    } catch (caught) {
+      // A malformed `airapp.json` is named here rather than swallowed: falling
+      // back to defaults would run something the author did not ask for.
+      useAirAppRunnerStore
+        .getState()
+        .failBeforeRun(
+          currentNodeId,
+          wantedKind,
+          caught instanceof Error ? caught.message : messages.airapp.runFailed,
+        );
+      return;
+    }
 
     const runner = createAirAppRunner(runnerKind, { orpc, nodeId: currentNodeId });
     store.beginRun(currentNodeId, runner, runnerKind);
+    if (engineNote) {
+      useAirAppRunnerStore.getState().appendLog(currentNodeId, runner, engineNote);
+    }
     runner.onLog((chunk) =>
       useAirAppRunnerStore.getState().appendLog(currentNodeId, runner, chunk),
     );
     runner.onReady((url) =>
       useAirAppRunnerStore.getState().setPreviewUrl(currentNodeId, runner, url),
+    );
+    // An app that dies after it started is the case the panel used to miss
+    // entirely: one log line, status frozen on "ready", and a preview that had
+    // stopped answering. Surface it as the failure it is.
+    runner.onExit((code) =>
+      useAirAppRunnerStore
+        .getState()
+        .setError(
+          currentNodeId,
+          runner,
+          code === null || code === 0
+            ? messages.airapp.appStopped
+            : fmt(messages.airapp.appExited, { code: String(code) }),
+        ),
     );
 
     try {
@@ -147,7 +246,7 @@ export function useAirAppRunner({
           caught instanceof Error ? caught.message : messages.airapp.runFailed,
         );
     }
-  }, [messages, airapp, orpc]);
+  }, [messages, airapp, orpc, availableEngines]);
 
   // Auto-run: opening an AirApp starts it immediately — the header button is
   // then only a restart. Reads the store directly (not the rendered `status`)
@@ -161,12 +260,41 @@ export function useAirAppRunner({
       return;
     }
     const current = useAirAppRunnerStore.getState().entries[nodeId];
-    if (!current || current.status === "idle") {
-      void run();
+    if (current && current.status !== "idle") {
+      return;
     }
+    // Only the free engine starts on sight. For anything that provisions — a
+    // host process, a remote sandbox — the node has to still be open a moment
+    // later, so clicking through a list costs nothing.
+    const selected = useAirAppRunnerStore.getState().getSelectedRunnerKind(nodeId);
+    if (FREE_ENGINES.includes(selected)) {
+      void run();
+      return;
+    }
+    const timer = setTimeout(() => {
+      const latest = useAirAppRunnerStore.getState().entries[nodeId];
+      if (!latest || latest.status === "idle") void run();
+    }, REMOTE_AUTO_RUN_DWELL_MS);
+    return () => clearTimeout(timer);
   }, [nodeId, airapp, run]);
 
+  const stop = useCallback(async () => {
+    if (!nodeId) return;
+    const entry = useAirAppRunnerStore.getState().entries[nodeId];
+    const activeRunner = entry?.runner;
+    if (!activeRunner) return;
+    try {
+      await activeRunner.stop();
+    } finally {
+      // Back to idle rather than error: the user asked for this, so it is not a
+      // failure to report at them. Auto-run only fires for a never-run node, so
+      // this does not immediately start it again.
+      useAirAppRunnerStore.getState().disposeEntry(nodeId);
+    }
+  }, [nodeId]);
+
   const isBusy = status === "loading-files" || status === "installing" || status === "starting";
+  const isLive = isBusy || status === "ready";
 
   return {
     status,
@@ -174,7 +302,9 @@ export function useAirAppRunner({
     previewUrl,
     error,
     run,
+    stop,
     isBusy,
+    isLive,
     runnerKind: selectedRunnerKind,
     setRunnerKind,
   };
@@ -266,7 +396,8 @@ export function AirAppRunControls({
   fullscreenState,
 }: AirAppRunControlsProps) {
   const messages = useCoreI18n();
-  const { status, previewUrl, run, isBusy, runnerKind, setRunnerKind } = runner;
+  const availableEngines = useAirAppEngineAvailability();
+  const { status, previewUrl, run, stop, isBusy, isLive, runnerKind, setRunnerKind } = runner;
   const { fullscreen, setFullscreen } = fullscreenState;
 
   const statusLabel: Record<AirAppRunStatus, string> = {
@@ -278,10 +409,18 @@ export function AirAppRunControls({
     error: messages.airapp.statusError,
   };
 
+  const engineLabel: Record<AirAppRunnerKind, string> = {
+    nodepod: messages.airapp.engineNodepod,
+    local: messages.airapp.engineLocal,
+    srt: messages.airapp.engineSrt,
+    sandock: messages.airapp.engineSandock,
+  };
+
   const engineHint: Record<AirAppRunnerKind, string> = {
     nodepod: messages.airapp.engineNodepodHint,
-    "local-node": messages.airapp.engineLocalNodeHint,
+    local: messages.airapp.engineLocalHint,
     srt: messages.airapp.engineSrtHint,
+    sandock: messages.airapp.engineSandockHint,
   };
 
   const pinToSidePanel = () => {
@@ -308,7 +447,7 @@ export function AirAppRunControls({
       {/* Engine picker is a dev-only affordance: in a production build this
        *  compiles out entirely, so end users never see it and always get the
        *  default engine ("nodepod"). */}
-      {process.env.NODE_ENV === "development" ? (
+      {availableEngines.length > 1 ? (
         <>
           <Select
             disabled={isBusy}
@@ -322,9 +461,11 @@ export function AirAppRunControls({
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="nodepod">{messages.airapp.engineNodepod}</SelectItem>
-              <SelectItem value="local-node">{messages.airapp.engineLocalNode}</SelectItem>
-              <SelectItem value="srt">{messages.airapp.engineSrt}</SelectItem>
+              {availableEngines.map((engine) => (
+                <SelectItem key={engine} value={engine}>
+                  {engineLabel[engine]}
+                </SelectItem>
+              ))}
             </SelectContent>
           </Select>
           <span className="hidden text-muted-foreground/70 text-xs 2xl:inline">
@@ -354,6 +495,18 @@ export function AirAppRunControls({
           variant="outline"
         >
           <Maximize className="size-3.5" />
+        </Button>
+      ) : null}
+      {isLive ? (
+        <Button
+          aria-label={messages.airapp.stop}
+          onClick={() => void stop()}
+          size="icon-sm"
+          title={messages.airapp.stopHint}
+          type="button"
+          variant="outline"
+        >
+          <Square className="size-3.5" />
         </Button>
       ) : null}
       <Button

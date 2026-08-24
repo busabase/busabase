@@ -2,9 +2,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";
 import type { FormVO, NodeVO } from "busabase-contract/types";
 import { CodeBlock } from "kui/ai-elements/code-block";
-import { FileTree } from "kui/ai-elements/file-tree";
 import { Button } from "kui/button";
-import { Popover, PopoverContent, PopoverTrigger } from "kui/popover";
+import { cn } from "kui/utils";
 import {
   AppWindow,
   File,
@@ -18,7 +17,7 @@ import {
   Table2,
 } from "lucide-react";
 import { SPALink as Link } from "openlib/ui/dashboard";
-import { type ComponentProps, useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { useLocation, useSearch } from "wouter";
 import { fmt, useCoreI18n } from "../../../i18n";
@@ -34,10 +33,11 @@ import { useReportLoadedNode } from "../hooks/use-report-loaded-node";
 import { type NodeDetailProps, registerNodeDetail } from "../node-detail-registry";
 import { registerSidePanelTab, type SidePanelTabProps } from "../side-panel-registry";
 import { useIsAnonymousVisitor } from "../visitor-context";
-import { AssetMetadataBlock, assetKindIcon, formatAssetSize } from "./assets";
+import { assetKindIcon } from "./assets";
 import {
   buildFileTree,
   collectFolderPaths,
+  DriveFileTree,
   FILE_TREE_LANGUAGE_BY_EXTENSION,
   guessFileTreeLanguage,
   renderFileTree,
@@ -46,6 +46,7 @@ import {
 import { NodeActionsMenu } from "./node-actions-menu";
 import { NodeAgentPromptsButton } from "./node-agent-prompts-button";
 import { NodePinButton, nodeSidePanelTabId } from "./node-pin-button";
+import { NodeSettingsDialog } from "./node-settings-dialog";
 import { NodeShareDialog } from "./node-share-button";
 import { EmptyState } from "./primitives";
 import { FileContentSkeleton, NodeDetailSkeleton } from "./skeletons";
@@ -102,6 +103,7 @@ export function FileTreeDetailView({
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState<null | "save" | "changeRequest">(null);
   const [fileActionError, setFileActionError] = useState<string | null>(null);
+  const [infoOpen, setInfoOpen] = useState(false);
 
   const fileTreeQuery = useQuery({
     ...orpc.nodes.get.queryOptions({ input: { nodeId: slug ?? "", type: nodeType } }),
@@ -266,54 +268,42 @@ export function FileTreeDetailView({
   const NodeIcon = nodeType === "drive" ? HardDrive : Sparkles;
   const nodeTypeLabel =
     nodeType === "drive" ? messages.nodeDetail.drive : messages.nodeDetail.skill;
-  const propertyItems = [
-    { label: messages.nodeDetail.files, value: String(fileCount) },
-    { label: messages.nodeDetail.visibility, value: fileTree.visibility },
-    fileTree.version ? { label: messages.nodeDetail.version, value: `v${fileTree.version}` } : null,
-    fileTree.entryFile ? { label: messages.nodeDetail.entryFile, value: fileTree.entryFile } : null,
-  ].filter((value): value is { label: string; value: string } => Boolean(value));
 
   return (
     <div className="flex h-full min-h-0 w-full flex-col bg-background">
-      {/* Single compact toolbar (identity + info popover, actions) replaces the
+      {/* Single compact toolbar (identity + info trigger, actions) replaces the
           old stacked title-block / properties chrome, giving the file browser
           maximum vertical space — mirrors AirAppDetailView's header pattern.
-          Description/properties moved into the Info popover. */}
+          Description/properties moved into `NodeSettingsDialog`'s Info tab. */}
       <header className="flex h-12 shrink-0 items-center gap-2 border-border/60 border-b px-3 md:px-4">
         <div className="flex min-w-0 items-center gap-2">
           <span title={nodeTypeLabel}>
             <NodeIcon className="size-4 shrink-0 text-muted-foreground" />
           </span>
           <h1 className="truncate font-medium text-foreground text-sm">{fileTree.node.name}</h1>
-          <Popover>
-            <PopoverTrigger asChild>
-              <Button
-                aria-label={messages.nodeDetail.details}
-                className="shrink-0 text-muted-foreground"
-                size="icon-sm"
-                title={messages.nodeDetail.details}
-                type="button"
-                variant="ghost"
-              >
-                <Info className="size-3.5" />
-              </Button>
-            </PopoverTrigger>
-            <PopoverContent align="start" className="w-80">
-              {fileTree.node.description ? (
-                <p className="mb-3 text-muted-foreground text-sm leading-6">
-                  {fileTree.node.description}
-                </p>
-              ) : null}
-              <dl className="flex flex-col gap-2 text-xs">
-                {propertyItems.map((item) => (
-                  <div className="flex min-w-0 items-center justify-between gap-3" key={item.label}>
-                    <dt className="shrink-0 text-muted-foreground">{item.label}</dt>
-                    <dd className="min-w-0 truncate font-mono text-foreground/80">{item.value}</dd>
-                  </div>
-                ))}
-              </dl>
-            </PopoverContent>
-          </Popover>
+          <Button
+            aria-label={messages.nodeDetail.details}
+            className="shrink-0 text-muted-foreground"
+            onClick={() => setInfoOpen(true)}
+            size="icon-sm"
+            title={messages.nodeDetail.details}
+            type="button"
+            variant="ghost"
+          >
+            <Info className="size-3.5" />
+          </Button>
+          {infoOpen && (
+            <NodeSettingsDialog
+              initialTab="info"
+              nodeId={fileTree.node.id}
+              nodeName={fileTree.node.name}
+              nodeSlug={fileTree.node.slug}
+              nodeType={nodeType}
+              onOpenChange={setInfoOpen}
+              open={infoOpen}
+              orpc={orpc}
+            />
+          )}
         </div>
       </header>
 
@@ -334,17 +324,15 @@ export function FileTreeDetailView({
                   {messages.nodeDetail.noFilesYet}
                 </div>
               ) : (
-                <FileTree
+                <DriveFileTree
                   className="rounded-none border-0 bg-transparent font-sans text-[13px]"
                   defaultExpanded={expandedFolders}
                   key={fileTree.node.id}
-                  // FileTreeProps.onSelect collides with HTMLAttributes.onSelect; it is
-                  // invoked with the node path string at runtime.
-                  onSelect={selectFile as unknown as ComponentProps<typeof FileTree>["onSelect"]}
+                  onSelect={selectFile}
                   selectedPath={openPath ?? undefined}
                 >
                   {renderFileTree(tree)}
-                </FileTree>
+                </DriveFileTree>
               )}
             </div>
           </div>
@@ -560,6 +548,7 @@ export function FileNodeDetailView({
   hideActions,
 }: NodeDetailProps & { hideActions?: boolean }) {
   const messages = useCoreI18n();
+  const [infoOpen, setInfoOpen] = useState(false);
   const fileQuery = useQuery({
     ...orpc.nodes.get.queryOptions({ input: { nodeId: slug ?? "", type: "file" } }),
     enabled: Boolean(slug),
@@ -610,70 +599,41 @@ export function FileNodeDetailView({
   const { node, asset } = detail;
   const Icon = assetKindIcon(asset.mimeType);
   const isImage = asset.mimeType.startsWith("image/");
-  const metaRows = [
-    { label: messages.nodeDetail.fileName, value: asset.fileName },
-    { label: messages.nodeDetail.mediaType, value: asset.mimeType },
-    { label: messages.nodeDetail.fileSize, value: formatAssetSize(asset.size) },
-    { label: messages.nodeDetail.assetId, value: asset.id },
-    asset.contentHash ? { label: messages.nodeDetail.contentHash, value: asset.contentHash } : null,
-  ].filter((row): row is { label: string; value: string } => Boolean(row));
 
   return (
     <div className="flex h-full min-h-0 w-full flex-col bg-background">
-      {/* Single compact toolbar (identity + info popover, actions) replaces the
+      {/* Single compact toolbar (identity + info trigger, actions) replaces the
           old stacked title-block / metadata-sidebar chrome, giving the asset
           preview maximum space — mirrors AirAppDetailView's header pattern.
-          Description/backing-asset metadata moved into the Info popover. */}
+          Description/backing-asset metadata moved into `NodeSettingsDialog`'s
+          Info tab. */}
       <header className="flex h-12 shrink-0 items-center gap-2 border-border/60 border-b px-3 md:px-4">
         <div className="flex min-w-0 items-center gap-2">
           <File className="size-4 shrink-0 text-muted-foreground" />
           <h1 className="truncate font-medium text-foreground text-sm">{node.name}</h1>
-          <Popover>
-            <PopoverTrigger asChild>
-              <Button
-                aria-label={messages.nodeDetail.details}
-                className="shrink-0 text-muted-foreground"
-                size="icon-sm"
-                title={messages.nodeDetail.details}
-                type="button"
-                variant="ghost"
-              >
-                <Info className="size-3.5" />
-              </Button>
-            </PopoverTrigger>
-            <PopoverContent align="start" className="w-80">
-              {node.description ? (
-                <p className="mb-3 text-muted-foreground text-sm leading-6">{node.description}</p>
-              ) : null}
-              <h2 className="mb-2 font-medium text-xs uppercase text-muted-foreground">
-                {messages.nodeDetail.backingAsset}
-              </h2>
-              <dl className="flex flex-col gap-2 text-xs">
-                {metaRows.map((row) => (
-                  <div className="flex min-w-0 items-center justify-between gap-3" key={row.label}>
-                    <dt className="shrink-0 text-muted-foreground">{row.label}</dt>
-                    <dd className="min-w-0 truncate font-mono text-foreground/80" title={row.value}>
-                      {row.value}
-                    </dd>
-                  </div>
-                ))}
-                <div className="flex min-w-0 items-center justify-between gap-3">
-                  <dt className="shrink-0 text-muted-foreground">{messages.nodeDetail.assetUrl}</dt>
-                  <dd className="min-w-0 truncate">
-                    <a
-                      className="text-primary underline-offset-2 hover:underline"
-                      href={asset.url}
-                      rel="noreferrer"
-                      target="_blank"
-                    >
-                      {asset.url}
-                    </a>
-                  </dd>
-                </div>
-              </dl>
-              <AssetMetadataBlock compact metadata={asset.metadata} />
-            </PopoverContent>
-          </Popover>
+          <Button
+            aria-label={messages.nodeDetail.details}
+            className="shrink-0 text-muted-foreground"
+            onClick={() => setInfoOpen(true)}
+            size="icon-sm"
+            title={messages.nodeDetail.details}
+            type="button"
+            variant="ghost"
+          >
+            <Info className="size-3.5" />
+          </Button>
+          {infoOpen && (
+            <NodeSettingsDialog
+              initialTab="info"
+              nodeId={node.id}
+              nodeName={node.name}
+              nodeSlug={node.slug}
+              nodeType="file"
+              onOpenChange={setInfoOpen}
+              open={infoOpen}
+              orpc={orpc}
+            />
+          )}
         </div>
       </header>
 
@@ -918,6 +878,7 @@ export function FolderDetailView({
 }: NodeDetailProps & { hideActions?: boolean }) {
   const messages = useCoreI18n();
   const currentSearch = useSearch();
+  const [location] = useLocation();
   const folderQuery = useQuery({
     ...orpc.nodes.get.queryOptions({ input: { nodeId: slug ?? "", type: "folder" } }),
     enabled: Boolean(slug),
@@ -990,18 +951,34 @@ export function FolderDetailView({
             {folder.children.length}{" "}
             {folder.children.length === 1 ? messages.nodeDetail.item : messages.nodeDetail.items}
           </p>
-          <div className="-mx-2 flex flex-col">
+          <div className="-mx-2 flex flex-col gap-1">
             {folder.children.map((child) => {
               const Icon = FOLDER_CHILD_ICONS[child.type] ?? FileText;
+              const isActive = location === `/${child.type}/${child.slug}`;
               return (
                 <Link
                   key={child.id}
-                  className="group flex items-center gap-3 rounded-md px-2 py-2 transition-colors hover:bg-muted/50"
+                  className={cn(
+                    "group flex items-center gap-3 rounded-md px-2 py-2 transition-colors hover:bg-muted/50",
+                    isActive && "bg-muted hover:bg-muted",
+                  )}
                   href={mergeSearchIntoHref(`/${child.type}/${child.slug}`, currentSearch)}
                 >
-                  <Icon className="size-4 shrink-0 text-muted-foreground" />
-                  <span className="flex-1 truncate text-sm">{child.name}</span>
-                  <span className="text-[11px] text-muted-foreground/50">{child.type}</span>
+                  <Icon
+                    className={cn(
+                      "size-4 shrink-0 text-muted-foreground",
+                      isActive && "text-foreground",
+                    )}
+                  />
+                  <span
+                    className={cn(
+                      "flex-1 truncate text-sm",
+                      isActive && "font-medium text-foreground",
+                    )}
+                  >
+                    {child.name}
+                  </span>
+                  <span className="text-[11px] text-muted-foreground/70">{child.type}</span>
                 </Link>
               );
             })}

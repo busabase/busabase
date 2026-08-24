@@ -5,7 +5,8 @@ import { getDb } from "../../../db";
 import { decodeVaultValue, encodeVaultValue } from "../../vault/logic/vault-crypto";
 import { busabaseVaultItems } from "../../vault/schema/vault-items";
 
-const CONNECTION_KEY = "BUDA_ACP_CONNECTION";
+const LEGACY_CONNECTION_KEY = "BUDA_ACP_CONNECTION";
+const CONNECTION_KEY_PREFIX = `${LEGACY_CONNECTION_KEY}:`;
 const DEFAULT_BUDA_ORIGIN = "https://dev.buda.im";
 const CLIENT_ID = "busabase-cloud";
 
@@ -22,28 +23,60 @@ export interface StoredBudaConnection {
 }
 
 export interface BudaConnection {
+  slug: string;
   agentId: string;
   agentName: string;
   accessToken: string;
 }
 
+export interface BudaConnectionSummary {
+  slug: string;
+  agentId: string;
+  agentName: string;
+}
+
 const ownerId = () => getContextActorId() ?? "local-user";
 
-async function readRow() {
+const connectionKey = (agentId: string) => `${CONNECTION_KEY_PREFIX}${agentId}`;
+
+export const getBudaSessionSlug = (agentId: string) => `buda:${encodeURIComponent(agentId)}`;
+
+const getAgentIdFromBudaSessionSlug = (slug: string): string | null => {
+  if (!slug.startsWith("buda:")) return null;
+  try {
+    return decodeURIComponent(slug.slice("buda:".length));
+  } catch {
+    return null;
+  }
+};
+
+async function readRows() {
   const database = await getDb();
-  const [row] = await database
+  const rows = await database
     .select()
     .from(busabaseVaultItems)
     .where(
       and(
         eq(busabaseVaultItems.userId, ownerId()),
-        eq(busabaseVaultItems.key, CONNECTION_KEY),
         eq(busabaseVaultItems.scopeType, "workspace"),
         eq(busabaseVaultItems.scopeId, getContextSpaceId()),
       ),
-    )
-    .limit(1);
-  return row;
+    );
+  return rows.filter(
+    (row) => row.key === LEGACY_CONNECTION_KEY || row.key.startsWith(CONNECTION_KEY_PREFIX),
+  );
+}
+
+async function readRow(slug: string) {
+  const rows = await readRows();
+  if (slug === "buda") {
+    return (
+      rows.find((row) => row.key === LEGACY_CONNECTION_KEY) ??
+      (rows.length === 1 ? rows[0] : undefined)
+    );
+  }
+  const agentId = getAgentIdFromBudaSessionSlug(slug);
+  return agentId ? rows.find((row) => row.key === connectionKey(agentId)) : undefined;
 }
 
 function parseStored(value: string): StoredBudaConnection {
@@ -60,13 +93,18 @@ function parseStored(value: string): StoredBudaConnection {
   return parsed as StoredBudaConnection;
 }
 
-export async function saveBudaConnection(connection: StoredBudaConnection): Promise<void> {
+export async function saveBudaConnection(connection: StoredBudaConnection): Promise<string> {
   const database = await getDb();
-  const existing = await readRow();
+  const rows = await readRows();
+  const existing = rows.find((row) => row.key === connectionKey(connection.agentId));
+  const legacy = rows.find((row) => row.key === LEGACY_CONNECTION_KEY);
+  const legacyConnection = legacy ? parseStored(decodeVaultValue(legacy.valuePayload)) : null;
+  const target =
+    existing ?? (legacyConnection?.agentId === connection.agentId ? legacy : undefined);
   const valuePayload = encodeVaultValue(JSON.stringify(connection), {
     requireEncryption: getContextActorId() !== undefined,
   });
-  if (existing) {
+  if (target) {
     await database
       .update(busabaseVaultItems)
       .set({
@@ -74,24 +112,28 @@ export async function saveBudaConnection(connection: StoredBudaConnection): Prom
         description: `Buda ACP: ${connection.agentName}`,
         updatedAt: new Date(),
       })
-      .where(eq(busabaseVaultItems.id, existing.id));
-    return;
+      .where(eq(busabaseVaultItems.id, target.id));
+    return target.key === LEGACY_CONNECTION_KEY ? "buda" : getBudaSessionSlug(connection.agentId);
   }
   await database.insert(busabaseVaultItems).values({
     id: generateNanoID("vlt_", 21),
     userId: ownerId(),
     kind: "secret",
-    key: CONNECTION_KEY,
+    key: connectionKey(connection.agentId),
     valuePayload,
     scopeType: "workspace",
     scopeId: getContextSpaceId(),
     environment: "production",
     description: `Buda ACP: ${connection.agentName}`,
-    access: { runtime: true, reveal: false, edit: false, share: false },
+    access: { runtime: false, reveal: false, edit: false, share: false },
   });
+  return getBudaSessionSlug(connection.agentId);
 }
 
-async function refresh(connection: StoredBudaConnection): Promise<StoredBudaConnection> {
+async function refresh(
+  rowId: string,
+  connection: StoredBudaConnection,
+): Promise<StoredBudaConnection> {
   const budaOrigin = getBudaOAuthOrigin();
   const response = await fetch(new URL("/api/oauth/token", budaOrigin), {
     method: "POST",
@@ -121,28 +163,73 @@ async function refresh(connection: StoredBudaConnection): Promise<StoredBudaConn
     agentId: body.agent_id || connection.agentId,
     agentName: body.agent_name || connection.agentName,
   };
-  await saveBudaConnection(next);
+  const database = await getDb();
+  await database
+    .update(busabaseVaultItems)
+    .set({
+      valuePayload: encodeVaultValue(JSON.stringify(next), {
+        requireEncryption: getContextActorId() !== undefined,
+      }),
+      description: `Buda ACP: ${next.agentName}`,
+      updatedAt: new Date(),
+    })
+    .where(eq(busabaseVaultItems.id, rowId));
   return next;
 }
 
-export async function getBudaConnection(): Promise<BudaConnection | null> {
-  const row = await readRow();
+export async function listBudaConnections(): Promise<BudaConnectionSummary[]> {
+  const rows = await readRows();
+  const byAgentId = new Map<string, BudaConnectionSummary>();
+  for (const row of rows) {
+    const connection = parseStored(decodeVaultValue(row.valuePayload));
+    const summary = {
+      slug: row.key === LEGACY_CONNECTION_KEY ? "buda" : getBudaSessionSlug(connection.agentId),
+      agentId: connection.agentId,
+      agentName: connection.agentName,
+    };
+    const current = byAgentId.get(connection.agentId);
+    if (!current || summary.slug === "buda") byAgentId.set(connection.agentId, summary);
+  }
+  return [...byAgentId.values()];
+}
+
+export async function getBudaConnection(slug = "buda"): Promise<BudaConnection | null> {
+  const row = await readRow(slug);
   if (!row) return null;
   let connection = parseStored(decodeVaultValue(row.valuePayload));
   if (new Date(connection.expiresAt).getTime() <= Date.now() + 60_000) {
-    connection = await refresh(connection);
+    connection = await refresh(row.id, connection);
   }
   return {
+    slug: row.key === LEGACY_CONNECTION_KEY ? "buda" : getBudaSessionSlug(connection.agentId),
     accessToken: connection.accessToken,
     agentId: connection.agentId,
     agentName: connection.agentName,
   };
 }
 
-export async function disconnectBuda(): Promise<void> {
+export async function disconnectBuda(slug = "buda"): Promise<boolean> {
   const database = await getDb();
-  const row = await readRow();
-  if (row) await database.delete(busabaseVaultItems).where(eq(busabaseVaultItems.id, row.id));
+  const row = await readRow(slug);
+  if (!row) return false;
+
+  const connection = parseStored(decodeVaultValue(row.valuePayload));
+  const response = await fetch(new URL("/api/oauth/revoke", getBudaOAuthOrigin()), {
+    method: "POST",
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      token: connection.refreshToken,
+      token_type_hint: "refresh_token",
+      client_id: CLIENT_ID,
+    }),
+    signal: AbortSignal.timeout(5_000),
+  });
+  if (!response.ok) {
+    throw new Error("Buda could not revoke this connection. Try again.");
+  }
+
+  await database.delete(busabaseVaultItems).where(eq(busabaseVaultItems.id, row.id));
+  return true;
 }
 
 export function getBudaAcpUrl(agentId: string): string {

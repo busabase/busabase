@@ -18,6 +18,10 @@
 import "server-only";
 
 import { ORPCError } from "@orpc/server";
+import type {
+  NodeIconConfirmInput,
+  NodeIconUploadUrlInput,
+} from "busabase-contract/contract/node-icon-upload-schemas";
 import { and, eq } from "drizzle-orm";
 import {
   confirmUpload,
@@ -25,6 +29,7 @@ import {
   requestUploadUrl,
 } from "open-domains/attachments/logic";
 import { attachments } from "open-domains/attachments/schema";
+import type { ConfirmUploadVO, RequestUploadUrlVO } from "open-domains/attachments/types";
 import { storage } from "openlib/storage";
 import type { BusabaseDatabase } from "../../../context";
 import { hashBuffer } from "../../../logic/kernel";
@@ -236,6 +241,126 @@ export const deleteBrandingLogoByUrl = async (
       and(
         eq(attachments.context, BRANDING_ATTACHMENT_CONTEXT),
         eq(attachments.userId, BRANDING_USER_ID),
+      ),
+    );
+
+  const owned = candidates.filter(
+    (row: { storageKey: string }) => storage.getPublicUrl(row.storageKey) === url,
+  );
+
+  let deletedRows = 0;
+  let deletedObjects = 0;
+  for (const row of owned) {
+    const result = await deleteAttachmentSafely(row.id, db, attachments);
+    if (result.deletedRow) deletedRows += 1;
+    if (result.deletedObject) deletedObjects += 1;
+  }
+  return { deletedRows, deletedObjects };
+};
+
+/**
+ * Node-avatar (icon) uploads — a THIRD, separate attachment scope alongside
+ * the Asset library and the branding logo above. Like a branding logo, a node
+ * icon has no "where-used" concept and isn't a curated library entry, so it is
+ * stored as a plain `attachments` row rather than going through
+ * `confirmAssetUpload` (see the file-level doc comment).
+ *
+ * Unlike branding (one singleton logo, one shared dedup scope), a node icon is
+ * a MULTI-instance reference — every node has its own — so the owner-id scope
+ * is parameterized BY NODE (`nodeIconOwnerId(nodeId)`) rather than a single
+ * shared constant:
+ *
+ * 1. It still must never collide with the Asset scope (`resolveActorId("local")`),
+ *    for the same reason `BRANDING_USER_ID` exists — an icon dedup-matching an
+ *    Asset's attachment row would let deleting that Asset take the icon's
+ *    bytes with it (`deleteAttachmentSafely` is refcounted, but only correctly
+ *    scoped if this scope is disjoint from Assets' in the first place).
+ * 2. It ALSO must not collide across different nodes' icons: `requestUploadUrl`
+ *    /`confirmUpload`'s dedup lookup ignores `userId` entirely once a
+ *    `spaceId` is supplied (see `findByContentHash`), so passing a shared
+ *    space-scoped owner id would dedupe two unrelated nodes' byte-identical
+ *    icons onto the SAME row — and `deleteNodeIconByUrl` deleting one node's
+ *    icon would then also break the other node's. Node icons are therefore
+ *    uploaded space-less (`spaceId` omitted, mirroring branding), so dedup
+ *    scope is `eq(userId, nodeIconOwnerId(nodeId))` alone — global across
+ *    spaces for a GIVEN node, but never shared between two different nodes.
+ */
+export const NODE_ICON_ATTACHMENT_CONTEXT = "node-icon";
+export const NODE_ICON_TYPE = "node-icon";
+
+/** Same 2MB ceiling as a branding logo — a node icon renders at similarly small sizes. */
+export const NODE_ICON_MAX_BYTES = BRANDING_LOGO_MAX_BYTES;
+export const NODE_ICON_MIME_TYPES = BRANDING_LOGO_MIME_TYPES;
+
+/** Disjoint per-node dedup/ownership scope — see the doc comment above. */
+export const nodeIconOwnerId = (nodeId: string): string => `local-node-icon:${nodeId}`;
+
+/**
+ * Step 1 of the client-driven upload flow (the browser PUTs bytes directly to
+ * the returned URL between this call and `confirmNodeIconUpload`) — unlike
+ * `uploadBrandingLogo` above, which uploads server-side because its caller
+ * (the branding API route) already holds the bytes in hand.
+ */
+export const requestNodeIconUploadUrl = async (
+  db: BusabaseDatabase,
+  input: NodeIconUploadUrlInput,
+): Promise<RequestUploadUrlVO> => {
+  if (!NODE_ICON_MIME_TYPES.includes(input.mimeType)) {
+    throw new ORPCError("BAD_REQUEST", {
+      message: `A node icon must be one of: ${NODE_ICON_MIME_TYPES.join(", ")}.`,
+    });
+  }
+  const result = await requestUploadUrl(
+    { ...input, spaceId: undefined, context: NODE_ICON_ATTACHMENT_CONTEXT },
+    nodeIconOwnerId(input.nodeId),
+    db,
+    attachments,
+    { maxFileSize: NODE_ICON_MAX_BYTES, allowedMimeTypes: NODE_ICON_MIME_TYPES },
+  );
+  return result;
+};
+
+/** Step 2 — registers the object the client already PUT to the presigned URL. */
+export const confirmNodeIconUpload = async (
+  db: BusabaseDatabase,
+  input: NodeIconConfirmInput,
+): Promise<ConfirmUploadVO> => {
+  const result = await confirmUpload(
+    {
+      ...input,
+      spaceId: undefined,
+      context: NODE_ICON_ATTACHMENT_CONTEXT,
+      metadata: { type: NODE_ICON_TYPE },
+    },
+    nodeIconOwnerId(input.nodeId),
+    db,
+    attachments,
+  );
+  return result;
+};
+
+/**
+ * Drop an attachment behind a node icon URL that is no longer referenced —
+ * called (best-effort) after a node's `icon` is replaced or cleared. Same
+ * forwards-URL-matching + refcounted-delete shape as
+ * `deleteBrandingLogoByUrl`, scoped to this one node's own owner id so it can
+ * never reach another node's (or an Asset's) attachment row.
+ */
+export const deleteNodeIconByUrl = async (
+  db: BusabaseDatabase,
+  nodeId: string,
+  iconUrl: string,
+): Promise<DeleteBrandingLogoResult> => {
+  const url = iconUrl.trim();
+  if (!url) return { deletedRows: 0, deletedObjects: 0 };
+
+  const candidates = await db
+    .select({ id: attachments.id, storageKey: attachments.storageKey })
+    .from(attachments)
+    .where(
+      and(
+        eq(attachments.context, NODE_ICON_ATTACHMENT_CONTEXT),
+        eq(attachments.userId, nodeIconOwnerId(nodeId)),
       ),
     );
 

@@ -138,7 +138,7 @@ describe("retired node list/get routes", () => {
 
   it("keeps the type-specific operations that are NOT node-narrowing", () => {
     // Consolidation removed the type-discovery step, not the domain surface.
-    expect(routes.docs?.readLines).toBeDefined();
+    expect(routes.nodes?.readLines).toBeDefined();
     expect(routes.fileTrees?.listFiles).toBeDefined();
     expect(routes.fileTrees?.readFile).toBeDefined();
   });

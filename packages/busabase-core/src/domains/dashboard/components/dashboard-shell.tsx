@@ -15,9 +15,11 @@ import {
   House,
   Images,
   Inbox,
+  LayoutGrid,
   Pencil,
   Plus,
   Search,
+  Settings,
   Shield,
   Sparkles,
   Star,
@@ -26,18 +28,18 @@ import {
 import type { NavDropPosition, NavItemAction, NavNodeDropParams } from "openlib/ui/dashboard";
 import { DashboardLayout, type NavGroup, type NavItem, NavMain } from "openlib/ui/dashboard";
 import type { ComponentProps, ReactNode } from "react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { useLocation } from "wouter";
 import { CoreI18nProvider, coreMessagesByLocale } from "../../../i18n";
-import { nodeIconForType } from "../helpers/node-icons";
+import { nodeIconGlyph, resolveNodeIcon } from "../helpers/node-icons";
 import type { MoveNodePayload } from "../hooks/use-move-node";
 import { getSidebarTopLevelNodes } from "../utils/sidebar-node-tree";
 import { NodeDeleteDialog } from "./file-tree-browser";
 import { NodeAgentPromptsDialog } from "./node-agent-prompts-dialog";
 import { NodeMoveDialog } from "./node-move-dialog";
-import { NodePermissionsDialog } from "./node-permissions-button";
-import { NodeRenameDialog } from "./node-rename-dialog";
+import { NodeSettingsDialog, type NodeSettingsTab } from "./node-settings-dialog";
+import { NodeSettingsPermissionsSlotContext } from "./node-settings-permissions-slot";
 import { NodeShareDialog } from "./node-share-button";
 
 /** Stable, always-disabled query used in place of `orpc.nodes.listFavorites.queryOptions({})`
@@ -62,7 +64,7 @@ const isCoreLocale = (locale: string | undefined): locale is keyof typeof coreMe
  * in" — so the round trip "review an inbox item → go check a Base → back to
  * Inbox" costs one click instead of another trip through the menu.
  */
-type ContextualNavKey = "inbox" | "activity" | "archived" | "assets" | "agents";
+type ContextualNavKey = "inbox" | "activity" | "archived" | "assets" | "agents" | "apps";
 
 /** Maps a wouter location onto its contextual destination, or null for everything else. */
 const contextualNavKeyForPath = (location: string): ContextualNavKey | null => {
@@ -72,6 +74,7 @@ const contextualNavKeyForPath = (location: string): ContextualNavKey | null => {
   if (path === "/archived") return "archived";
   if (path === "/assets" || path.startsWith("/assets/")) return "assets";
   if (path === "/agents" || path.startsWith("/agents/")) return "agents";
+  if (path === "/apps" || path.startsWith("/apps/")) return "apps";
   return null;
 };
 
@@ -91,7 +94,8 @@ const isContextualNavKey = (value: string | null): value is ContextualNavKey =>
   value === "activity" ||
   value === "archived" ||
   value === "assets" ||
-  value === "agents";
+  value === "agents" ||
+  value === "apps";
 
 const readStoredContextualNavKey = (): ContextualNavKey | null => {
   try {
@@ -135,10 +139,11 @@ interface BusabaseDashboardShellProps {
   /** Identity + presentation forwarded to the shared `DashboardLayout`. */
   chrome: BusabaseDashboardChrome;
   /**
-   * oRPC query utils, needed only to power the sidebar "•••" → Permissions
-   * entry (opens the shared `NodePermissionsDialog`). Omit to leave the sidebar
-   * without a Permissions action — the node-detail topbars reach the same
-   * dialog through their own `NodeActionsMenu` regardless.
+   * oRPC query utils, needed to power the sidebar "•••" → Settings/Rename/
+   * Permissions entries (all open the shared `NodeSettingsDialog`, differing
+   * only in tab and focused field). Omit to leave the sidebar
+   * without those actions — the node-detail topbars reach the same dialog
+   * through their own `NodeActionsMenu` regardless.
    */
   orpc?: BusabaseQueryUtils;
   /** Active UI locale for the sidebar nav labels (defaults to English). */
@@ -209,22 +214,30 @@ export function BusabaseDashboardShell({
   onExpandNode,
   checkIsDescendant,
 }: BusabaseDashboardShellProps) {
-  // The node targeted by the sidebar "•••" → Permissions action; drives the
-  // one shared `NodePermissionsDialog` rendered below (only when a host wired
-  // `orpc`). Same single-dialog-per-shell pattern as the node-detail toolbars.
+  // The node targeted by the sidebar "•••" → Settings/Rename/Permissions
+  // actions; drives the one shared `NodeSettingsDialog` rendered below (only
+  // when a host wired `orpc`). Rename and Permissions used to be two separate
+  // dialogs (`NodeRenameDialog`/`NodePermissionsDialog`) with their own
+  // target state each — now they're tabs of the same dialog, so one target
+  // (carrying which tab to land on, and whether to focus the name field)
+  // replaces all three. Neither Settings nor Rename is ever set for a Base
+  // node — `buildNavItem` omits both actions for those.
   const [location] = useLocation();
-  const [permissionsTarget, setPermissionsTarget] = useState<{ id: string; name: string } | null>(
-    null,
-  );
-  // The node targeted by the sidebar "•••" → Rename action; drives the one
-  // shared `NodeRenameDialog` rendered below (only when a host wired `orpc`).
-  // Same single-dialog-per-shell pattern as `permissionsTarget` above. Never
-  // set for a Base node — `buildNavItem` omits the Rename action for those.
-  const [renameTarget, setRenameTarget] = useState<{
+  const [settingsTarget, setSettingsTarget] = useState<{
     id: string;
     name: string;
     slug: string;
+    type: string;
+    tab: NodeSettingsTab;
+    /** Carried explicitly rather than derived from `tab`: the Settings and
+     *  Rename actions open the SAME General tab and differ only here — Rename
+     *  lands with the name selected, Settings lands neutral. See
+     *  `node-actions-menu.tsx`'s header for the full "why both exist". */
+    focusField?: "name";
   } | null>(null);
+  // Permissions is a cloud-only surface — see `node-settings-permissions-slot.tsx`.
+  // The sidebar Permissions action is only offered when a host injected a panel.
+  const hasPermissionsPanel = useContext(NodeSettingsPermissionsSlotContext) !== null;
   // The node targeted by the sidebar "•••" → "Move to…" action; drives the
   // `NodeMoveDialog` rendered below (only when a host wired `onMoveNode`).
   const [moveTarget, setMoveTarget] = useState<{ id: string; name: string } | null>(null);
@@ -464,6 +477,7 @@ export function BusabaseDashboardShell({
         newLabel: nav.new,
         openLabel: messages.common.open,
         permissionsLabel: messages.permissions.title,
+        settingsLabel: messages.nodeSettings.menuLabel,
         renameLabel: messages.rename.title,
         favoriteAddLabel: messages.favorites.add,
         favoriteRemoveLabel: messages.favorites.remove,
@@ -473,18 +487,50 @@ export function BusabaseDashboardShell({
         deleteLabel: messages.nodeDetail.delete,
       },
       loadingNodeIds,
-      // Only offer the sidebar Permissions action when a host wired orpc — the
-      // dialog can't do anything without it.
-      onOpenPermissions: orpc
-        ? (node) => setPermissionsTarget({ id: node.id, name: node.name })
-        : undefined,
+      // Only offer the sidebar Permissions action when a host wired orpc AND
+      // injected a permissions panel (cloud-only) — the dialog can't do
+      // anything without either.
+      onOpenPermissions:
+        orpc && hasPermissionsPanel
+          ? (node) =>
+              setSettingsTarget({
+                id: node.id,
+                name: node.name,
+                slug: node.slug,
+                type: node.type,
+                tab: "permissions",
+              })
+          : undefined,
       // Same orpc gate for the Favorites toggle action — no persistence layer
       // to call without it.
       favoriteContext: orpc ? { favoriteNodeIds, onToggle: handleToggleFavorite } : undefined,
-      // Same orpc gate for the Rename action — `buildNavItem` further
-      // excludes Base nodes regardless (they keep their own rename path).
+      // Same orpc gate for the Settings action — `buildNavItem` further
+      // excludes Base nodes regardless (they reach this dialog through the
+      // Design tab's "Base Info" → Edit button instead).
+      onOpenSettings: orpc
+        ? (node) =>
+            setSettingsTarget({
+              id: node.id,
+              name: node.name,
+              slug: node.slug,
+              type: node.type,
+              tab: "general",
+            })
+        : undefined,
+      // Rename is the same dialog and the same tab as Settings above — the
+      // only difference is `focusField`, which lands the caret in the name
+      // field. Kept as its own entry because renaming is the high-frequency
+      // action and shouldn't cost an extra click into a settings surface.
       onOpenRename: orpc
-        ? (node) => setRenameTarget({ id: node.id, name: node.name, slug: node.slug })
+        ? (node) =>
+            setSettingsTarget({
+              id: node.id,
+              name: node.name,
+              slug: node.slug,
+              type: node.type,
+              tab: "general",
+              focusField: "name",
+            })
         : undefined,
       // Only offer "Move to…" when a host wired `onMoveNode` — the dialog
       // can't do anything without a mutation to call.
@@ -516,6 +562,7 @@ export function BusabaseDashboardShell({
       nav.new,
       messages.common.open,
       messages.permissions.title,
+      messages.nodeSettings.menuLabel,
       messages.rename.title,
       messages.favorites.add,
       messages.favorites.remove,
@@ -525,6 +572,7 @@ export function BusabaseDashboardShell({
       messages.nodeDetail.delete,
       loadingNodeIds,
       orpc,
+      hasPermissionsPanel,
       favoriteNodeIds,
       handleToggleFavorite,
       onMoveNode,
@@ -572,6 +620,8 @@ export function BusabaseDashboardShell({
         return { title: assetsLabel, url: "/assets", icon: Images };
       case "agents":
         return { title: "Agents", url: "/agents", icon: Bot };
+      case "apps":
+        return { title: nav.apps, url: "/apps", icon: LayoutGrid };
       default:
         return null;
     }
@@ -580,6 +630,7 @@ export function BusabaseDashboardShell({
     nav.inbox,
     nav.activity,
     nav.archive,
+    nav.apps,
     assetsLabel,
     activeChangeRequestCount,
   ]);
@@ -693,24 +744,16 @@ export function BusabaseDashboardShell({
         >
           {children}
         </DashboardLayout>
-        {orpc && permissionsTarget && (
-          <NodePermissionsDialog
-            nodeId={permissionsTarget.id}
-            nodeName={permissionsTarget.name}
+        {orpc && settingsTarget && (
+          <NodeSettingsDialog
+            focusField={settingsTarget.focusField}
+            initialTab={settingsTarget.tab}
+            nodeId={settingsTarget.id}
+            nodeName={settingsTarget.name}
+            nodeSlug={settingsTarget.slug}
+            nodeType={settingsTarget.type}
             onOpenChange={(next) => {
-              if (!next) setPermissionsTarget(null);
-            }}
-            open
-            orpc={orpc}
-          />
-        )}
-        {orpc && renameTarget && (
-          <NodeRenameDialog
-            nodeId={renameTarget.id}
-            nodeName={renameTarget.name}
-            nodeSlug={renameTarget.slug}
-            onOpenChange={(next) => {
-              if (!next) setRenameTarget(null);
+              if (!next) setSettingsTarget(null);
             }}
             open
             orpc={orpc}
@@ -791,6 +834,7 @@ interface NavItemLabels {
   newLabel: string;
   openLabel: string;
   permissionsLabel: string;
+  settingsLabel: string;
   renameLabel: string;
   favoriteAddLabel: string;
   favoriteRemoveLabel: string;
@@ -832,6 +876,7 @@ interface NavItemContext {
   loadingNodeIds?: Set<string>;
   onOpenPermissions?: (node: NodeVO) => void;
   favoriteContext?: FavoriteActionContext;
+  onOpenSettings?: (node: NodeVO) => void;
   onOpenRename?: (node: NodeVO) => void;
   onOpenMove?: (node: NodeVO) => void;
   onOpenAgentPrompts?: (node: NodeVO) => void;
@@ -864,6 +909,7 @@ function buildNavItem(node: NodeVO, ctx: NavItemContext): NavItem[] {
     loadingNodeIds,
     onOpenPermissions,
     favoriteContext,
+    onOpenSettings,
     onOpenRename,
     onOpenMove,
     onOpenAgentPrompts,
@@ -871,7 +917,7 @@ function buildNavItem(node: NodeVO, ctx: NavItemContext): NavItem[] {
     onOpenDelete,
   } = ctx;
   if (hasCapability(node.type, "hidden")) return [];
-  const icon = nodeIconForType(node.type);
+  const icon = nodeIconGlyph(resolveNodeIcon(node));
   // The "•••" Permissions action, shared by container and leaf rows so every
   // node type surfaced in the sidebar can be managed in place (matches buda's
   // per-agent Permissions menu entry). Only present when the host wired orpc.
@@ -882,7 +928,20 @@ function buildNavItem(node: NodeVO, ctx: NavItemContext): NavItem[] {
         onSelect: () => onOpenPermissions(node),
       }
     : null;
-  // The "•••" Rename action — same shared mechanism as Permissions/Favorite.
+  // The "•••" Settings action — opens `NodeSettingsDialog` on its General
+  // tab (icon / name / description), with Info and Permissions one click away
+  // in the same dialog. Same Base exception as Rename below: a Base reaches
+  // this dialog from its Design tab's "Base Info" → Edit button instead.
+  const settingsAction: NavItemAction | null =
+    onOpenSettings && node.type !== "base"
+      ? {
+          title: labels.settingsLabel,
+          icon: Settings,
+          onSelect: () => onOpenSettings(node),
+        }
+      : null;
+  // The "•••" Rename action — same shared mechanism as Permissions/Favorite,
+  // and the same dialog as Settings above, only with the name field focused.
   // Base nodes keep their own independent rename path (Design Tab), so the
   // host never wires `onOpenRename` for them (see `submitRenameBase`); guard
   // here too so a future host mistake can't double up on the "base" type.
@@ -969,6 +1028,7 @@ function buildNavItem(node: NodeVO, ctx: NavItemContext): NavItem[] {
         addChildTitle: labels.newLabel,
         actions: [
           ...(url ? [{ title: labels.openLabel, url, icon: FolderOpen }] : []),
+          ...(settingsAction ? [settingsAction] : []),
           ...(renameAction ? [renameAction] : []),
           ...(permissionsAction ? [permissionsAction] : []),
           ...(favoriteAction ? [favoriteAction] : []),
@@ -982,6 +1042,7 @@ function buildNavItem(node: NodeVO, ctx: NavItemContext): NavItem[] {
   }
   const url = nodeHref(node);
   const leafActions = [
+    ...(settingsAction ? [settingsAction] : []),
     ...(renameAction ? [renameAction] : []),
     ...(permissionsAction ? [permissionsAction] : []),
     ...(favoriteAction ? [favoriteAction] : []),

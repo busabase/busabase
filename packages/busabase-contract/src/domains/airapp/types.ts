@@ -9,7 +9,7 @@ export type {
  *
  * - `"nodepod"` boots the `@scelar/nodepod` in-browser Web Worker runtime (V1,
  *   unchanged) — a virtual, browser-side filesystem + process.
- * - `"local-node"` runs a real `npm install` + `npm run dev` as a **bare**
+ * - `"local"` runs a real `npm install` + `npm run dev` as a **bare**
  *   server-side OS process (NOT OS-isolated — trust model is the local host).
  *   Its listening port IS reachable from the host, so the same-origin reverse
  *   proxy preview (`/api/airapp-preview/{nodeId}/`) and the
@@ -21,10 +21,10 @@ export type {
  *   network-isolates the process, so its app port is not reachable from the
  *   host reverse proxy.
  *
- * All three stream back to the browser over the `airapps.runLocalNode` oRPC
+ * All three stream back to the browser over the `airapps.runLocal` oRPC
  * event iterator — see
- * `busabase-core/domains/airapp/components/runners/local-node-runner.ts`
- * (which backs both `local-node` and `srt`, differing only in the server-side
+ * `busabase-core/domains/airapp/components/runners/local-runner.ts`
+ * (which backs both `local` and `srt`, differing only in the server-side
  * execution mode).
  */
-export type AirAppRunnerKind = "nodepod" | "local-node" | "srt";
+export type AirAppRunnerKind = "nodepod" | "local" | "srt" | "sandock";

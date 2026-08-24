@@ -1,14 +1,14 @@
 "use client";
 
 import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";
-import { LocalNodeRunner } from "./local-node-runner";
+import { LocalRunner } from "./local-runner";
 import { NodepodRunner } from "./nodepod-runner";
 import type { AirAppRunner, AirAppRunnerKind } from "./types";
 
 /**
  * Picks/instantiates an `AirAppRunner` for the given engine kind — the single
  * call site `RunPanel.tsx`'s `useAirAppRunner()` should use instead of
- * constructing `NodepodRunner`/`LocalNodeRunner` directly — the same
+ * constructing `NodepodRunner`/`LocalRunner` directly — the same
  * "pick an adapter by kind" factory shape Buda's agent runtime uses.
  */
 export function createAirAppRunner(
@@ -18,10 +18,14 @@ export function createAirAppRunner(
   switch (kind) {
     case "nodepod":
       return new NodepodRunner();
-    case "local-node":
-      return new LocalNodeRunner({ ...context, engine: "local-node" });
+    case "local":
+      return new LocalRunner({ ...context, engine: "local" });
     case "srt":
-      return new LocalNodeRunner({ ...context, engine: "srt" });
+      return new LocalRunner({ ...context, engine: "srt" });
+    // Same client, same stream: the engine is decided server-side, and a remote
+    // sandbox reaches the browser through the identical event sequence.
+    case "sandock":
+      return new LocalRunner({ ...context, engine: "sandock" });
     default: {
       const exhaustive: never = kind;
       throw new Error(`Unknown AirApp runner kind: ${exhaustive}`);

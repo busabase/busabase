@@ -7,17 +7,23 @@ import net from "node:net";
 import path from "node:path";
 import { SandboxManager, type SandboxRuntimeConfig } from "@anthropic-ai/sandbox-runtime";
 import type { AirAppRuntimeEvent } from "busabase-contract/domains/airapp/contract";
-import { assertNodePermission } from "../../../logic/node-acl";
+import {
+  getRuntimeDescriptor,
+  type RunPlan,
+  resolveRunPlan,
+  substitutePort,
+  tokenizeCommand,
+} from "../utils/airapp-runtime-descriptor";
 import { airAppRuntimeEnv } from "../utils/airapp-runtime-env";
 import { registerLocalPreview, unregisterLocalPreview } from "./local-preview-registry";
 
 /**
- * Server-side execution engine backing BOTH the `"local-node"` and `"srt"`
+ * Server-side execution engine backing BOTH the `"local"` and `"srt"`
  * `AirAppRunnerKind`s: a real `npm install` + `npm run dev` OS process. The
  * ONLY difference between the two engines is whether the commands are wrapped
  * by `@anthropic-ai/sandbox-runtime`'s `SandboxManager`:
  *
- * - `"local-node"` (bare): commands are spawned directly on the host running
+ * - `"local"` (bare): commands are spawned directly on the host running
  *   the Next.js server (no srt). This is NOT OS-isolated — the trust model is
  *   the local host. Because a bare process's listening port IS host-reachable,
  *   the same-origin reverse-proxy preview (`/api/airapp-preview/{nodeId}/`) and
@@ -39,22 +45,22 @@ import { registerLocalPreview, unregisterLocalPreview } from "./local-preview-re
  * process on the host running the Next.js server.
  *
  * Exposed as a single long-lived async generator (consumed by the
- * `airapps.runLocalNode` oRPC event iterator) instead of separate
+ * `airapps.runLocal` oRPC event iterator) instead of separate
  * mount/install/start RPCs: install and start are naturally one continuous
  * operation from the server's point of view; the browser-side
- * `LocalNodeRunner` fans this single stream back out into the `AirAppRunner`
+ * `LocalRunner` fans this single stream back out into the `AirAppRunner`
  * interface's mount/install/start + onLog/onReady callback shape.
  *
  * IMPORTANT — concurrency (srt only): `SandboxManager` is a process-wide
  * singleton (its own doc comment: "Global sandbox manager that handles both
  * network and filesystem restrictions for this session"). Since busabase-cloud
- * is a single Next.js server process that can field concurrent `runLocalNode`
+ * is a single Next.js server process that can field concurrent `runLocal`
  * calls from different users/spaces, two concurrent srt runs initializing the
  * singleton with different `workdir`/`allowWrite` configs would race and
  * corrupt each other's sandbox boundaries. The sandbox mutex below serializes
  * the whole initialize -> run -> reset sequence so only one srt run's sandbox
  * is active on the server at a time; other concurrent requests wait their
- * turn. Bare `local-node` runs don't touch the singleton, so they don't
+ * turn. Bare `local` runs don't touch the singleton, so they don't
  * acquire the lock. This is an accepted trade-off (throughput for
  * correctness/safety) — see the accompanying changelog.
  */
@@ -77,16 +83,18 @@ export async function acquireSandboxLock(): Promise<() => void> {
   return release;
 }
 
-const READY_PORT_PATTERNS = [
-  /listening on port\s*:?\s*(\d{2,5})/i,
-  /localhost:(\d{2,5})/i,
-  /0\.0\.0\.0:(\d{2,5})/i,
-  /listening on\s*:?\s*(\d{2,5})/i,
-];
+/**
+ * Default patterns for sniffing "the server is listening on N" out of a log
+ * line. Sourced from the node runtime descriptor rather than duplicated, so the
+ * two can't drift; a run uses its own `RunPlan.readyPatterns` instead, which is
+ * how a Python app's uvicorn/flask banner gets recognised without this module
+ * knowing Python exists.
+ */
+const READY_PORT_PATTERNS = getRuntimeDescriptor("node").readyPatterns;
 
 /**
  * Asks the OS for a free TCP port by binding to port 0, reading the assigned
- * port, then releasing it. Used to give every BARE (`local-node`) run its own
+ * port, then releasing it. Used to give every BARE (`local`) run its own
  * `PORT` so concurrent bare runs don't fight over the host's port 3000
  * (EADDRINUSE). There is a small TOCTOU window between close() and the child
  * re-binding, which is acceptable for this dev-only feature.
@@ -103,8 +111,35 @@ async function findFreePort(): Promise<number> {
   });
 }
 
-export function detectPort(line: string): number | null {
-  for (const pattern of READY_PORT_PATTERNS) {
+/**
+ * Resolves once something is accepting TCP connections on `port`.
+ *
+ * Log sniffing alone is not enough once apps aren't all Node: a framework is
+ * free to print its banner in any shape, or nothing at all, and then the
+ * preview never loads even though the server is up and serving. When the author
+ * declared a port we can simply ask the OS instead of guessing from prose. Runs
+ * *alongside* sniffing rather than replacing it — whichever notices first wins.
+ */
+async function waitForPortOpen(port: number, signal?: AbortSignal): Promise<void> {
+  const deadline = Date.now() + 120_000;
+  while (!signal?.aborted && Date.now() < deadline) {
+    const open = await new Promise<boolean>((resolve) => {
+      const socket = net.connect({ port, host: "127.0.0.1" });
+      const settle = (result: boolean) => {
+        socket.destroy();
+        resolve(result);
+      };
+      socket.once("connect", () => settle(true));
+      socket.once("error", () => settle(false));
+      socket.setTimeout(1_000, () => settle(false));
+    });
+    if (open) return;
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+}
+
+export function detectPort(line: string, patterns: RegExp[] = READY_PORT_PATTERNS): number | null {
+  for (const pattern of patterns) {
     const match = pattern.exec(line);
     if (match) {
       const port = Number(match[1]);
@@ -154,14 +189,20 @@ export async function writeFiles(
   }
 }
 
-export function buildSandboxConfig(workdir: string): SandboxRuntimeConfig {
+export function buildSandboxConfig(
+  workdir: string,
+  /** From the run's `RunPlan` — PyPI for a Python app, npm for a Node one. A
+   *  hardcoded npm-only list made `pip install` fail with an opaque network
+   *  error under srt. Defaults to npm so existing callers/tests are unchanged. */
+  allowedDomains: string[] = getRuntimeDescriptor("node").networkAllowlist,
+): SandboxRuntimeConfig {
   return {
     network: {
       // Allow-only pattern (verified in the package README): all network
       // access is denied by default, so an empty `deniedDomains` combined
       // with a populated `allowedDomains` already yields default-deny for
       // every other domain — no need for a `deniedDomains: ["*"]` entry.
-      allowedDomains: ["registry.npmjs.org", "*.npmjs.org", "registry.npmmirror.com"],
+      allowedDomains,
       deniedDomains: [],
     },
     filesystem: {
@@ -192,7 +233,7 @@ async function* runSandboxedCommand(
   extraEnv?: Record<string, string>,
 ): AsyncGenerator<string, number | null> {
   // `sandboxed` selects the engine: `true` = "srt" (wrap in the OS sandbox),
-  // `false` = "local-node" (spawn bare on the host, so the listening port is
+  // `false` = "local" (spawn bare on the host, so the listening port is
   // reachable from the reverse proxy — srt network-isolates the process, which
   // makes its port unreachable and breaks the live preview).
   let argv: string[];
@@ -206,15 +247,42 @@ async function* runSandboxedCommand(
       workdir,
     ));
   } else {
-    argv = command.split(" ");
+    // Quote-aware, not `command.split(" ")`: that was correct only for the two
+    // commands this file used to hardcode. An author-supplied start command
+    // such as `python -c "import app; app.run()"` became five broken argv
+    // entries and failed with an error naming none of the real cause.
+    argv = tokenizeCommand(command);
     env = process.env;
   }
 
+  // `detached: true` makes the child a process-group leader so the whole tree
+  // can be signalled at once. This matters because the thing that actually
+  // serves the app is a *grandchild*: `npm run dev` spawns `node server.js`,
+  // and npm does not forward signals to it. Killing only the direct child —
+  // which is all the `signal` spawn option does — left that grandchild running
+  // on every tab close and every dev-server restart.
+  //
+  // A comment here used to claim `detached: true` was already being passed. It
+  // was not; the option list was cwd/env/signal. That is why this is a fix and
+  // not a refactor.
   const child: ChildProcess = spawn(argv[0], argv.slice(1), {
     cwd: workdir,
     env: { ...env, npm_config_cache: path.join(workdir, ".npm-cache"), ...extraEnv },
-    signal,
+    detached: true,
   });
+
+  // Negative pid = "the whole process group". Guarded because the group is
+  // gone the moment the leader exits, and racing that is normal, not an error.
+  const killProcessGroup = () => {
+    if (child.pid === undefined) return;
+    try {
+      process.kill(-child.pid, "SIGKILL");
+    } catch {
+      // Already gone.
+    }
+  };
+  const onAbort = () => killProcessGroup();
+  signal?.addEventListener("abort", onAbort, { once: true });
 
   const queue: string[] = [];
   let waiter: (() => void) | null = null;
@@ -260,13 +328,12 @@ async function* runSandboxedCommand(
       });
     }
   } finally {
-    // Aborting the run's signal (browser close / dispose) kills the direct
-    // child via the spawn `signal` above. NOTE: `npm run dev`'s grandchild
-    // (`node server.js`) can outlive an abort because npm doesn't forward the
-    // signal — a known resource leak (dev-only feature; the leaked process
-    // holds its OWN unique port, so it never blocks a new run, and all such
-    // processes die when the dev server restarts). A robust process-group reap
-    // is a documented follow-up.
+    // Reap the group unconditionally, not just on abort: a generator consumer
+    // that stops iterating (an early `break`, or a thrown error upstream) runs
+    // this `finally` without the signal ever aborting, and the dev server would
+    // otherwise be left running with nobody holding a reference to it.
+    signal?.removeEventListener("abort", onAbort);
+    killProcessGroup();
     if (sandboxed) {
       SandboxManager.cleanupAfterCommand();
     }
@@ -284,20 +351,46 @@ async function* runSandboxedCommand(
  * it (the browser tab closing, or the caller disposing the runner) is what
  * kills the `npm run dev` child process — there is no separate dispose call.
  */
-export async function* runAirAppLocalNode(
+export async function* runAirAppLocal(
   input: {
     nodeId: string;
     files: Record<string, string>;
     binaryFiles?: Record<string, string>;
-    engine: "local-node" | "srt";
+    engine: "local" | "srt";
+    /**
+     * Who the run belongs to — scopes the preview registration so only this
+     * person's proxy requests can find it.
+     *
+     * **Passed in, deliberately, rather than read from ambient context.** This
+     * generator is driven by a run *session*, which outlives the request that
+     * started it, so by the time most of it executes there is no request
+     * context left to read. For the same reason the node-permission check is
+     * NOT here: it lives in `run-session.ts`, where the caller's context still
+     * exists. Anything calling this directly is therefore bypassing
+     * authorization — don't; go through `runOrAttachSession`.
+     */
+    owner: string;
   },
   signal?: AbortSignal,
 ): AsyncGenerator<AirAppRuntimeEvent> {
-  await assertNodePermission(input.nodeId, "write");
+  const owner = input.owner;
   const workdir = resolveWorkdir(input.nodeId);
   const sandboxed = input.engine === "srt";
 
-  // BARE (`local-node`) runs share the HOST's network, so every concurrent run
+  // What to run is decided once, here, from the app's own files — the engines
+  // below execute a plan and never ask what language they are executing.
+  let plan: RunPlan;
+  try {
+    plan = resolveRunPlan(input.files);
+  } catch (error) {
+    // A malformed `airapp.json` is an authoring mistake worth naming. Falling
+    // back to defaults would run something the author did not ask for and hide
+    // the typo behind whatever that produced.
+    yield { type: "error", message: error instanceof Error ? error.message : String(error) };
+    return;
+  }
+
+  // BARE (`local`) runs share the HOST's network, so every concurrent run
   // would otherwise bind the same hardcoded :3000 (EADDRINUSE on the 2nd run).
   // Allocate a unique free port and inject it as `PORT`; the demos honor
   // `process.env.PORT` and log the actual port, so `detectPort` picks it up for
@@ -308,17 +401,44 @@ export async function* runAirAppLocalNode(
   // Busabase-hosted rather than standalone, and under this engine the app is
   // reverse-proxied onto a sub-path of busabase's origin — an environment no
   // hostname test can classify correctly. See `utils/airapp-runtime-env.ts`.
+  // An author-declared port wins: the app presumably binds it unconditionally,
+  // so handing it a different one would just guarantee a preview pointed at
+  // nothing. Otherwise bare runs get a fresh free port (srt keeps its historic
+  // no-PORT behaviour — it network-namespaces each run, so :3000 can't collide).
+  const port = plan.port ?? (sandboxed ? 3000 : await findFreePort());
+  // A runtime may need its own tool directory ahead of the system one — a
+  // Python run installs into a per-run virtualenv, and the start command must
+  // find that interpreter without either command naming the path. Resolved
+  // against this run's workdir here; the descriptor deliberately doesn't know
+  // where runs land on disk.
+  const pathPrefix = plan.pathPrepend.map((entry) => path.join(workdir, entry));
   const extraEnv: Record<string, string> = {
     ...airAppRuntimeEnv(input.engine),
-    ...(sandboxed ? {} : { PORT: String(await findFreePort()) }),
+    ...(sandboxed && plan.port === undefined ? {} : { PORT: String(port) }),
+    ...(pathPrefix.length > 0
+      ? { PATH: [...pathPrefix, process.env.PATH ?? ""].filter(Boolean).join(path.delimiter) }
+      : {}),
   };
+  // `PORT` in the environment is the Node convention and covers Node apps.
+  // Everything else needs the number in the command line itself — uvicorn reads
+  // `--port`, not the environment, and silently binds 8000 otherwise.
+  const installCommand = substitutePort(plan.install, port);
+  const startCommand = substitutePort(plan.start, port);
 
   // See the file-level doc comment: SandboxManager is a process-wide
   // singleton, so for the srt engine the whole initialize -> run -> reset
   // sequence must be serialized against any other concurrent srt run on this
-  // server. Bare local-node runs don't touch the singleton, so they skip the
+  // server. Bare local runs don't touch the singleton, so they skip the
   // lock (and the initialize/reset/dep-check) entirely.
   const release = sandboxed ? await acquireSandboxLock() : null;
+
+  // The command generator currently running, so the `finally` below can close
+  // it. Abandoning an async generator does NOT run its `finally`: when the
+  // consumer of THIS generator stops iterating (a `break` on `ready`, an
+  // upstream throw), our own `finally` runs but the inner one stays suspended
+  // forever — and with it the process-group reap it owns. Every such run leaked
+  // the whole `sh -> python3` tree.
+  let activeCommand: AsyncGenerator<string, number | null> | null = null;
 
   try {
     await writeFiles(workdir, input.files, input.binaryFiles);
@@ -339,11 +459,17 @@ export async function* runAirAppLocalNode(
         };
       }
 
-      await SandboxManager.initialize(buildSandboxConfig(workdir));
+      await SandboxManager.initialize(buildSandboxConfig(workdir, plan.networkAllowlist));
     }
 
-    yield { type: "log", line: "$ npm install\n" };
-    const installGen = runSandboxedCommand("npm install", workdir, sandboxed, signal, extraEnv);
+    // Say how the runtime was decided, before anything runs. Inference that
+    // nobody can see is indistinguishable from a bug when it guesses wrong, and
+    // the reviewer reading these logs did not write the app.
+    yield { type: "log", line: `[busabase] ${plan.explanation}\n` };
+
+    yield { type: "log", line: `$ ${installCommand}\n` };
+    const installGen = runSandboxedCommand(installCommand, workdir, sandboxed, signal, extraEnv);
+    activeCommand = installGen;
     let installResult = await installGen.next();
     while (!installResult.done) {
       yield { type: "log", line: installResult.value };
@@ -354,19 +480,69 @@ export async function* runAirAppLocalNode(
     }
     yield { type: "installed" };
 
-    yield { type: "log", line: "$ npm run dev\n" };
+    yield { type: "log", line: `$ ${startCommand}\n` };
     let sawReady = false;
-    // `detached: true` (last arg) makes the dev server a process-group leader
-    // so its `node server.js` grandchild is reaped on abort/teardown (both
-    // engines — leaking grandchildren is bad regardless of sandboxing).
-    const devGen = runSandboxedCommand("npm run dev", workdir, sandboxed, signal, extraEnv);
-    let devResult = await devGen.next();
-    while (!devResult.done) {
+    // NOTE: the abort path kills the direct child only; `npm run dev`'s
+    // `node server.js` grandchild survives it. An earlier comment here claimed
+    // `detached: true` made the process group reapable — it did not: the
+    // `spawn` call in `runSandboxedCommand` passes only cwd/env/signal. The
+    // real process-group reap lands with the Stop/lifecycle work (see
+    // `content/spec/airapp-runtime-engines.md`, defect D3); this comment states
+    // what the code does today so the next reader isn't told it's already fixed.
+    const devGen = runSandboxedCommand(startCommand, workdir, sandboxed, signal, extraEnv);
+    activeCommand = devGen;
+
+    // Two independent ways to learn the server is up: its log banner (any
+    // shape, any language) and — when the author declared the port — an actual
+    // TCP probe. Racing them means an app that logs nothing recognisable still
+    // previews, instead of running invisibly behind a spinner.
+    let portProbe: Promise<void> | null =
+      plan.port === undefined ? null : waitForPortOpen(port, signal);
+    let pendingNext: Promise<IteratorResult<string, number | null>> | null = null;
+
+    const markReady = (readyPort: number) => {
+      // A URL, not a port: the proxy forwards to whatever origin an engine
+      // registers, so a remote engine can reuse the same-origin preview path.
+      registerLocalPreview(input.nodeId, owner, `http://127.0.0.1:${readyPort}`);
+    };
+
+    let exitCode: number | null = null;
+    while (true) {
+      if (!pendingNext) pendingNext = devGen.next();
+      let devResult: IteratorResult<string, number | null>;
+
+      if (portProbe && !sawReady) {
+        const winner = await Promise.race([
+          pendingNext.then((value) => ({ kind: "gen" as const, value })),
+          portProbe.then(() => ({ kind: "port" as const })),
+        ]);
+        if (winner.kind === "port") {
+          portProbe = null;
+          if (!sawReady && !signal?.aborted) {
+            sawReady = true;
+            markReady(port);
+            yield { type: "ready", previewUrl: `/api/airapp-preview/${input.nodeId}/` };
+          }
+          // `pendingNext` is deliberately still outstanding — the next loop
+          // iteration awaits the same promise rather than requesting a second
+          // value from the generator.
+          continue;
+        }
+        devResult = winner.value;
+      } else {
+        devResult = await pendingNext;
+      }
+      pendingNext = null;
+      if (devResult.done) {
+        exitCode = devResult.value;
+        break;
+      }
+
       const text = devResult.value;
       yield { type: "log", line: text };
       if (!sawReady) {
-        const port = detectPort(text);
-        if (port) {
+        const detected = detectPort(text, plan.readyPatterns);
+        if (detected) {
           sawReady = true;
           // Register the port so the same-origin reverse proxy
           // (`/api/airapp-preview/{nodeId}/…`) can forward to this real
@@ -379,21 +555,23 @@ export async function* runAirAppLocalNode(
           // links resolve under this sub-path regardless of trailing-slash
           // normalization. Same-origin is what lets the running app use the
           // same-origin `/api/v1` data access.
-          registerLocalPreview(input.nodeId, port);
+          markReady(detected);
           yield { type: "ready", previewUrl: `/api/airapp-preview/${input.nodeId}/` };
         }
       }
-      devResult = await devGen.next();
     }
     if (!signal?.aborted) {
-      yield { type: "exit", code: devResult.value };
+      yield { type: "exit", code: exitCode };
     }
   } catch (error) {
     if (!signal?.aborted) {
       yield { type: "error", message: error instanceof Error ? error.message : String(error) };
     }
   } finally {
-    unregisterLocalPreview(input.nodeId);
+    // Closing the inner generator is what actually kills the app: it runs the
+    // `finally` in `runSandboxedCommand`, which reaps the process group.
+    await activeCommand?.return(null).catch(() => undefined);
+    unregisterLocalPreview(input.nodeId, owner);
     if (sandboxed) {
       await SandboxManager.reset().catch(() => undefined);
     }

@@ -65,9 +65,19 @@ export const coreMessagesEn = {
     html: "HTML",
     files: "Files",
     visibility: "Visibility",
+    // Shown on the Info tab when a node has no explicit visibility override.
+    // Deliberately non-committal about WHO can see it — busabase-core has no
+    // concept of a space-wide visibility mode (that's cloud-only, computed by
+    // `NodePermissionsPanel` from `spaces.getCurrent`), so asserting "Everyone
+    // in this space can see this" here would be flatly wrong whenever the
+    // space is in Restricted mode: the Permissions tab of this SAME dialog
+    // would say "Restricted" for the same node a moment later.
+    visibilityDefault: "Default (follows space setting)",
     version: "Version",
     entryFile: "Entry file",
     details: "Details",
+    activity: "Activity",
+    activityEmptyBody: "Changes made to this item will show up here.",
     loadingSkill: "Loading skill…",
     loadingDrive: "Loading drive…",
     loadingDoc: "Loading doc…",
@@ -224,6 +234,11 @@ export const coreMessagesEn = {
     runPanelTitle: "Run",
     run: "Run",
     runAgain: "Restart",
+    stop: "Stop",
+    stopHint:
+      "Stop this app. It keeps running when you navigate away, so it has to be ended on purpose.",
+    appStopped: "The app stopped running.",
+    appExited: "The app stopped running (exit code {code}).",
     statusIdle: "Not run yet",
     statusLoadingFiles: "Loading files…",
     statusInstalling: "Installing dependencies…",
@@ -243,10 +258,14 @@ export const coreMessagesEn = {
     engineLabel: "Engine",
     engineNodepod: "Nodepod (Browser)",
     engineNodepodHint: "Browser sandbox · reads workspace data",
-    engineLocalNode: "Local Node.js",
-    engineLocalNodeHint: "Real Node.js · workspace data via proxy",
+    engineLocal: "Local machine",
+    engineLocalHint: "Real OS process, any language · workspace data via proxy",
     engineSrt: "Sandboxed (srt)",
     engineSrtHint: "OS-sandboxed · isolated, no live preview",
+    engineSandock: "Sandock (remote)",
+    engineSandockHint: "Remote container, any language · nothing runs on this host",
+    noEligibleEngine:
+      "No engine on this deployment can run a {runtime} AirApp. Ask an operator to enable a local or remote runtime.",
   },
   form: {
     alreadyExists:
@@ -288,6 +307,7 @@ export const coreMessagesEn = {
     archive: "Archive",
     assets: "Assets",
     agents: "Agents",
+    apps: "Apps",
     graph: "Graph View",
     // The sidebar section holding the whole node tree — every node type, not
     // just Bases. Named for the scope it covers ("everything in this space"),
@@ -345,6 +365,9 @@ export const coreMessagesEn = {
     pendingViewAll: "Review all",
     recentTitle: "Recently visited",
     recentEmptyBody: "Bases and documents you open will show up here.",
+    recentViewAll: "View all",
+    recentAppsTitle: "Recently used Apps",
+    recentAppsViewAll: "View all apps",
     activityTitle: "Recent activity",
     activityViewAll: "View all activity",
     activityEmptyBody: "Changes made across this workspace will show up here.",
@@ -561,6 +584,39 @@ export const coreMessagesEn = {
     renamed: "Renamed",
     renameRequestSubmitted: "Rename request submitted",
     failed: "Failed to rename",
+  },
+  nodeSettings: {
+    dialogTitle: "Settings",
+    /** The "•••" menu entry that opens this dialog — distinct from
+     *  `dialogTitle` so the menu wording can drift from the dialog header. */
+    menuLabel: "Settings",
+    /** The General tab writes name + description + icon in ONE operation, so its
+     *  submit copy is "save", not "rename" — the `rename` block's strings stay put
+     *  for the surfaces that really are just a rename (the mobile
+     *  `NodeRenameSheet`, the Base Design tab). */
+    namePlaceholder: "Enter a name",
+    saveNow: "Save",
+    saving: "Saving…",
+    saved: "Saved",
+    requestReview: "Request review",
+    changeRequestSubmitted: "Change request submitted",
+    saveFailed: "Failed to save",
+    /** `common.requestReviewHint` names the immediate action as "Now", which is
+     *  right for every OTHER SplitSubmitButton in this domain (they all read
+     *  "… now"). This tab's reads "Save", so it needs its own hint. */
+    requestReviewHint: "Request goes to your inbox for review. Save writes directly.",
+    tabGeneral: "General",
+    tabInfo: "Info",
+    tabPermissions: "Permissions",
+    changeIcon: "Change icon",
+    iconUploadLabel: "Upload image",
+    iconUploadFormatHint: "PNG, JPG, GIF, or WebP, up to 2MB",
+    cropDialogTitle: "Edit icon",
+    confirmCrop: "Apply",
+    iconFileMustBeImage: "Please select an image file",
+    iconFileTooLarge: "Image must be under 2MB",
+    iconUpdated: "Icon updated",
+    iconUploadFailed: "Failed to upload icon",
   },
   base: {
     all: "All",

@@ -27,20 +27,20 @@ describe("airAppRuntimeEnv", () => {
 
   it("produces a spreadable single-key fragment per hosted runtime", () => {
     expect(airAppRuntimeEnv("nodepod")).toEqual({ BUSABASE_AIRAPP_RUNTIME: "nodepod" });
-    expect(airAppRuntimeEnv("local-node")).toEqual({ BUSABASE_AIRAPP_RUNTIME: "local-node" });
+    expect(airAppRuntimeEnv("local")).toEqual({ BUSABASE_AIRAPP_RUNTIME: "local" });
     expect(airAppRuntimeEnv("srt")).toEqual({ BUSABASE_AIRAPP_RUNTIME: "srt" });
     expect(airAppRuntimeEnv("embed")).toEqual({ BUSABASE_AIRAPP_RUNTIME: "embed" });
   });
 });
 
-describe("runAirAppLocalNode — runtime env injection", () => {
+describe("runAirAppLocal — runtime env injection", () => {
   afterEach(() => {
     vi.resetModules();
     vi.doUnmock("node:child_process");
     vi.doUnmock("../src/logic/node-acl");
   });
 
-  const collectSpawns = async (engine: "local-node" | "srt") => {
+  const collectSpawns = async (engine: "local" | "srt") => {
     vi.resetModules();
 
     const spawn = vi.fn(() => {
@@ -68,8 +68,8 @@ describe("runAirAppLocalNode — runtime env injection", () => {
       },
     }));
 
-    const { runAirAppLocalNode } = await import("../src/domains/airapp/logic/local-node-runtime");
-    for await (const _event of runAirAppLocalNode({ nodeId: "env-node", files: {}, engine })) {
+    const { runAirAppLocal } = await import("../src/domains/airapp/logic/local-runtime");
+    for await (const _event of runAirAppLocal({ nodeId: "env-node", files: {}, engine })) {
       // drain
     }
     return spawn.mock.calls.map(
@@ -77,11 +77,11 @@ describe("runAirAppLocalNode — runtime env injection", () => {
     );
   };
 
-  it("tells a bare local-node app what it is, alongside the injected PORT", async () => {
-    const envs = await collectSpawns("local-node");
+  it("tells a bare local app what it is, alongside the injected PORT", async () => {
+    const envs = await collectSpawns("local");
     expect(envs.length).toBeGreaterThan(0);
     for (const env of envs) {
-      expect(env.BUSABASE_AIRAPP_RUNTIME).toBe("local-node");
+      expect(env.BUSABASE_AIRAPP_RUNTIME).toBe("local");
       // The app is reverse-proxied onto a sub-path of busabase's origin; PORT is
       // how the proxy finds it, and both must survive together.
       expect(Number.parseInt(env.PORT ?? "", 10)).toBeGreaterThan(0);

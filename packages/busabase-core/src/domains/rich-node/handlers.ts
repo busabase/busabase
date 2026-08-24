@@ -68,7 +68,7 @@ import { assertDocBodySize } from "../doc/handlers";
 // whiteboard/workflow/html are handled here.
 
 const RICH_NODE_TYPES = ["whiteboard", "workflow", "html"] as const;
-type RichNodeType = (typeof RICH_NODE_TYPES)[number];
+export type RichNodeType = (typeof RICH_NODE_TYPES)[number];
 type RichNodeDocument = WhiteboardDocument | WorkflowDocument | HtmlDocument;
 
 const richNodeStoragePrefix = (nodeId: string, type: RichNodeType) =>
@@ -78,7 +78,10 @@ const richNodeStoragePrefix = (nodeId: string, type: RichNodeType) =>
 // grep matches real HTML rather than JSON-escaped HTML — the same reasoning
 // that keeps a Doc body as plain markdown text rather than `{ body: "..." }`.
 // Re-added on read via `parseHtmlDocument({ version: 1, source })` below.
-const richNodeDocumentKey = (nodeId: string, type: RichNodeType): string => {
+// Exported so `logic/node-content.ts`'s registry can address the exact same
+// storage object grep reads, for the same reason `docBodyKey` is exported —
+// one key function per node type, never a second copy that can drift.
+export const richNodeDocumentKey = (nodeId: string, type: RichNodeType): string => {
   const prefix = richNodeStoragePrefix(nodeId, type);
   if (type === "html") return `${prefix}index.html`;
   return `${prefix}${type === "whiteboard" ? "scene" : "graph"}.json`;

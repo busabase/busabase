@@ -52,7 +52,7 @@ const docStoragePrefix = (nodeId: string) => `busabase/nodes/${nodeId}/doc/`;
 // the exact same storage object `readDocBody` reads, without depending on
 // this module's swallow-to-empty error handling below (see `readDocBody`'s
 // comment) — grep's honest-coverage contract needs a genuine storage failure
-// to surface as `coverage.docs.errored`, not silently read as an empty body.
+// to surface as `coverage.nodes.errored`, not silently read as an empty body.
 export const docBodyKey = (nodeId: string) => `${docStoragePrefix(nodeId)}doc.md`;
 
 export const writeDocBody = async (nodeId: string, body: string) => {
@@ -94,23 +94,11 @@ export const assertDocBodySize = (body: string): void => {
 
 // Swallows a missing/failed read to an empty body — the right default for
 // this module's own callers (a Doc node can legitimately have no body object
-// yet). `logic/grep.ts`'s Docs adapter and `readDocLines` below deliberately
-// do NOT reuse this swallow (see `readDocBodyForGrep`), since a storage error
+// yet). Grep and `nodes.readLines` (`logic/node-content.ts`) deliberately do
+// NOT reuse this swallow, since a storage error
 // there must surface as a real error, not a clean "scanned, empty, no match".
 const readDocBody = async (nodeId: string) =>
   (await storage.getObject(docBodyKey(nodeId)).catch(() => Buffer.from(""))).toString("utf8");
-
-/**
- * Read a Doc body WITHOUT `readDocBody`'s empty-on-failure swallow — a
- * genuine storage failure must surface as a real error to the caller, not a
- * silent empty read. Relocated here from `logic/grep.ts` (Unified Grep P2a),
- * which originally defined this for its own Docs adapter; it now has a
- * second caller (`readDocLines` below), and both are Doc-domain concerns, so
- * this is a more natural home than the grep module. `logic/grep.ts` imports
- * it from here — exactly one implementation.
- */
-export const readDocBodyForGrep = async (nodeId: string): Promise<string> =>
-  (await storage.getObject(docBodyKey(nodeId))).toString("utf8");
 
 /**
  * Split a text blob into lines with the same convention the assets grep
@@ -118,8 +106,8 @@ export const readDocBodyForGrep = async (nodeId: string): Promise<string> =>
  * does not create a phantom empty final line, `\r\n` is normalized to `\n`,
  * and an empty body is zero lines (not one empty line) — so a Doc's reported
  * line numbers match what `docs.get` + a text editor would show. Relocated
- * here from `logic/grep.ts` for the same reason as `readDocBodyForGrep`
- * above — shared by the Docs grep adapter AND `readDocLines`.
+ * here from `logic/grep.ts`. Now the one line-splitting convention shared by
+ * the grep scanner, `nodes.readLines`, and the demo store.
  */
 export const splitDocLines = (body: string): string[] => {
   if (body.length === 0) return [];
@@ -145,9 +133,9 @@ export interface DocLinesResult {
  *
  * Pure and synchronous, unlike `readAssetTextLines` — Docs are KB-scale and
  * read/split in full up front (no checkpoints / byte-range storage reads;
- * see `readDocLines` below), so this is a plain in-memory array slice. That
- * also lets it be shared by BOTH the real storage-backed `readDocLines` below
- * AND the stateless demo router's `demoReadDocLines` (`logic/demo-store.ts`,
+ * see `readNodeLines` in `logic/node-content.ts`), so this is a plain
+ * in-memory array slice. That also lets it be shared by BOTH the real
+ * storage-backed `readNodeLines` AND the stateless demo router (`logic/demo-store.ts`,
  * whose seed Doc body is already fully in memory) — one clamp/cap/truncated
  * implementation, not two.
  *
@@ -375,27 +363,12 @@ export const getDoc = async (nodeIdOrSlug: string): Promise<DocVO> => {
   return toDocVO(node);
 };
 
-// The Doc-domain equivalent of `assets.readTextLines` — an agent's follow-up
-// after a Unified Grep match lands inside a Doc (`source: "docs"`), so it can
-// read just the lines around the match instead of `getDoc`'s entire body.
-// Unlike `readAssetTextLines`, there are no checkpoints / byte-range storage
-// reads: a Doc body is read in full (same as `readDocBodyForGrep` /
-// `docs.get()` already do — Docs are KB-scale, this is an explicit,
-// already-made architecture decision), split into all its lines, then sliced
-// in memory via `sliceDocLinesRange`.
-export const readDocLines = async (
-  nodeIdOrSlug: string,
-  startLine: number,
-  endLine: number,
-): Promise<DocLinesResult> => {
-  await ensureReady();
-  const node = await getDocNode(nodeIdOrSlug);
-  if (!node) {
-    throw docNotFound(nodeIdOrSlug);
-  }
-  const body = await readDocBodyForGrep(node.id);
-  return sliceDocLinesRange(splitDocLines(body), startLine, endLine);
-};
+// `readDocLines` is gone with `GET /docs/{nodeId}/lines`. It resolved
+// `type: "doc"` only, so once grep began reporting html/whiteboard/workflow
+// matches it was pointing agents at lines they could not then read. Replaced
+// by the type-agnostic `readNodeLines` (`logic/node-content.ts`), which reads
+// through the same node-content registry grep scans, so the two can never
+// disagree about what "line 3" is.
 
 // `listDocs` is gone with `GET /docs`. It read EVERY Doc's body out of object
 // storage to answer "which Docs exist" — the N+1 the unified summary list

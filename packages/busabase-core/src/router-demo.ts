@@ -32,8 +32,8 @@ import {
   demoListRecordsByFieldText,
   demoListViews,
   demoMergeChangeRequest,
-  demoReadDocLines,
   demoReadFileTreeFile,
+  demoReadNodeLines,
   demoReviewChangeRequest,
   demoReviseOperation,
   demoSearch,
@@ -141,6 +141,9 @@ export const busabaseDemoRouter = os.router({
     updateContent: os.nodes.updateContent.handler(() => {
       throw demoUnsupported("Update node content");
     }),
+    readLines: os.nodes.readLines.handler(({ input }) =>
+      demoReadNodeLines(input.nodeId, input.startLine, input.endLine),
+    ),
     purge: os.nodes.purge.handler(() => {
       throw demoUnsupported("Permanently delete node");
     }),
@@ -176,6 +179,17 @@ export const busabaseDemoRouter = os.router({
         throw demoUnsupported("Node sharing");
       }),
     },
+    icon: {
+      // The demo dataset is stateless — no db to write an attachment
+      // registry row against, so uploads are refused like the other demo
+      // writes above.
+      createUploadUrl: os.nodes.icon.createUploadUrl.handler(() => {
+        throw demoUnsupported("Node icon upload");
+      }),
+      confirm: os.nodes.icon.confirm.handler(() => {
+        throw demoUnsupported("Node icon upload");
+      }),
+    },
   },
   auditEvents: {
     list: os.auditEvents.list.handler(() => demoListAuditEvents()),
@@ -197,6 +211,52 @@ export const busabaseDemoRouter = os.router({
         items,
         nextCursor: nextOffset < all.length ? `${DEMO_ACTIVITY_CURSOR_PREFIX}${nextOffset}` : null,
       };
+    }),
+    // Raw, unpaginated per-node stream — same demo dataset, filtered to items
+    // whose owning change request (direct or via `operation`'s CR) or audit
+    // event targets this node's Base, mirroring the real `listNodeActivity`.
+    listForNode: os.activity.listForNode.handler(async ({ input }) => {
+      const [changeRequests, records, auditEvents] = await Promise.all([
+        demoListChangeRequests(),
+        demoListRecords(),
+        demoListAuditEvents(),
+      ]);
+      const base = demoListBases().find((candidate) => candidate.nodeId === input.nodeId);
+      const all = buildActivityItemsFromVOs(changeRequests, records, auditEvents).filter((item) => {
+        if (item.kind === "change_request" || item.kind === "operation") {
+          return item.changeRequest.nodeId === input.nodeId;
+        }
+        if (item.kind === "audit") {
+          return Boolean(base) && item.auditEvent.baseId === base?.id;
+        }
+        return false;
+      });
+      return all.slice(0, input.limit ?? 50);
+    }),
+    // Record-scoped mirror of `listForNode` above, using the same demo
+    // dataset — filtered to operations whose target/source/merged record is
+    // this recordId, or audit events whose own `recordId` matches.
+    listForRecord: os.activity.listForRecord.handler(async ({ input }) => {
+      const [changeRequests, records, auditEvents] = await Promise.all([
+        demoListChangeRequests(),
+        demoListRecords(),
+        demoListAuditEvents(),
+      ]);
+      const all = buildActivityItemsFromVOs(changeRequests, records, auditEvents).filter((item) => {
+        if (item.kind === "operation") {
+          const operation = item.changeRequest.operations.find((op) => op.id === item.operationId);
+          return (
+            operation?.targetRecordId === input.recordId ||
+            operation?.sourceRecordId === input.recordId ||
+            operation?.mergedRecordId === input.recordId
+          );
+        }
+        if (item.kind === "audit") {
+          return item.auditEvent.recordId === input.recordId;
+        }
+        return false;
+      });
+      return all.slice(0, input.limit ?? 50);
     }),
   },
   comments: {
@@ -275,8 +335,11 @@ export const busabaseDemoRouter = os.router({
   airapps: {
     // Server-side process execution has no meaningful demo equivalent (no
     // filesystem/process to spawn against in the stateless demo dataset).
-    runLocalNode: os.airapps.runLocalNode.handler(() => {
-      throw demoUnsupported("Local Node.js execution");
+    runLocal: os.airapps.runLocal.handler(() => {
+      throw demoUnsupported("Local execution");
+    }),
+    stopLocal: os.airapps.stopLocal.handler(() => {
+      throw demoUnsupported("Local execution");
     }),
   },
   files: {
@@ -292,9 +355,6 @@ export const busabaseDemoRouter = os.router({
     // `nodes.get` relies on), so — unlike `assets.readTextLines` below, which
     // needs real per-asset storage the demo dataset doesn't have —
     // `readLines` gets a real, working demo implementation.
-    readLines: os.docs.readLines.handler(({ input }) =>
-      demoReadDocLines(input.nodeId, input.startLine, input.endLine),
-    ),
     // `updateBody` / `createChangeRequest` are gone: both write paths (Doc's,
     // and now whiteboard/workflow/html's too) unified into `nodes.updateContent`
     // above.
@@ -403,6 +463,9 @@ export const busabaseDemoRouter = os.router({
         unavailableReason: "Connecting to agents is disabled in the demo.",
       },
     ]),
+    disconnect: os.agents.disconnect.handler(() => {
+      throw demoUnsupported("Delete an agent connection");
+    }),
     sessions: {
       list: os.agents.sessions.list.handler(() => []),
       create: os.agents.sessions.create.handler(() => {

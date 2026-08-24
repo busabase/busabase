@@ -7,6 +7,7 @@ import { ChevronRight } from "lucide-react";
 import { SPALink as Link } from "openlib/ui/dashboard";
 import { type ReactNode, useMemo, useSyncExternalStore } from "react";
 import { fmt, useCoreI18n, useCoreLocale } from "../../../i18n";
+import { AppGalleryGrid } from "../../airapp/components/app-gallery-card";
 import { type ActivityEvent, buildActivityEventFromItem } from "../helpers/activity-events";
 import {
   getChangeRequestScopeName,
@@ -17,6 +18,7 @@ import { formatListTime } from "../helpers/format";
 import {
   HOME_ACTIVITY_PREVIEW_COUNT,
   HOME_PENDING_PREVIEW_COUNT,
+  HOME_RECENT_APPS_PREVIEW_COUNT,
   HOME_RECENT_PREVIEW_COUNT,
   isHomeDigestEmpty,
   selectPendingChangeRequests,
@@ -72,6 +74,22 @@ function HomeSectionLink({ href, label }: { href: string; label: string }) {
       {label}
       <ChevronRight aria-hidden="true" size={13} />
     </Link>
+  );
+}
+
+/** Button-flavored sibling of `HomeSectionLink` for "view all" actions that
+ * open UI state rather than navigate — e.g. the Recent section's escape
+ * hatch is the Search dialog's own Recent tab, not a route. */
+function HomeSectionButton({ label, onClick }: { label: string; onClick: () => void }) {
+  return (
+    <button
+      className="inline-flex shrink-0 items-center gap-0.5 rounded-md px-1.5 py-0.5 font-medium text-muted-foreground text-xs transition-colors hover:bg-accent/40 hover:text-foreground"
+      onClick={onClick}
+      type="button"
+    >
+      {label}
+      <ChevronRight aria-hidden="true" size={13} />
+    </button>
   );
 }
 
@@ -141,6 +159,7 @@ export function HomeView({
   changeRequests,
   emptyGuide,
   nodeCache,
+  onOpenSearch,
   orpc,
 }: {
   /** Already-loaded change requests from the dashboard — no extra request needed. */
@@ -149,6 +168,10 @@ export function HomeView({
   emptyGuide?: ReactNode;
   /** Scoped known-node cache; its `visited` list IS the recently-visited feed. */
   nodeCache: KnownNodeCache;
+  /** Opens the Search dialog (defaults to its Recent tab) — used by the
+   * "Recently visited" section's "view all" action, since that list has no
+   * dedicated route of its own. */
+  onOpenSearch: () => void;
   orpc: BusabaseQueryUtils;
 }) {
   const messages = useCoreI18n();
@@ -167,6 +190,13 @@ export function HomeView({
     nodeCache.getSnapshot,
   );
   const recentNodes = nodeCacheSnapshot.visited.slice(0, HOME_RECENT_PREVIEW_COUNT);
+  const recentAppNodes = useMemo(
+    () =>
+      nodeCacheSnapshot.visited
+        .filter((node) => node.type === "airapp")
+        .slice(0, HOME_RECENT_APPS_PREVIEW_COUNT),
+    [nodeCacheSnapshot.visited],
+  );
 
   const activityQuery = useQuery(
     orpc.activity.listPaged.queryOptions({ input: { limit: HOME_ACTIVITY_PREVIEW_COUNT } }),
@@ -221,7 +251,15 @@ export function HomeView({
               </HomeSection>
             ) : null}
 
-            <HomeSection name="recent" title={home.recentTitle}>
+            <HomeSection
+              action={
+                recentNodes.length > 0 ? (
+                  <HomeSectionButton label={home.recentViewAll} onClick={onOpenSearch} />
+                ) : undefined
+              }
+              name="recent"
+              title={home.recentTitle}
+            >
               {recentNodes.length > 0 ? (
                 <div className="grid gap-2 sm:grid-cols-2">
                   {recentNodes.map((node) => (
@@ -232,6 +270,16 @@ export function HomeView({
                 <HomeSectionHint>{home.recentEmptyBody}</HomeSectionHint>
               )}
             </HomeSection>
+
+            {recentAppNodes.length > 0 ? (
+              <HomeSection
+                action={<HomeSectionLink href="/apps" label={home.recentAppsViewAll} />}
+                name="recentApps"
+                title={home.recentAppsTitle}
+              >
+                <AppGalleryGrid nodes={recentAppNodes} />
+              </HomeSection>
+            ) : null}
 
             <HomeSection
               action={<HomeSectionLink href="/activity" label={home.activityViewAll} />}

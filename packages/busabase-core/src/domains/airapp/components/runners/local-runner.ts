@@ -25,14 +25,14 @@ export function toBase64(bytes: Uint8Array): string {
 
 /**
  * `AirAppRunner` implementation backed by a real server-side
- * `npm install` + `npm run dev` OS process. Backs BOTH the `"local-node"`
+ * `npm install` + `npm run dev` OS process. Backs BOTH the `"local"`
  * (bare host Node.js — previewable, data bridge via reverse proxy) and
  * `"srt"` (OS-sandboxed via `@anthropic-ai/sandbox-runtime`'s `SandboxManager`
  * — isolated, but no live preview) engines; the two differ ONLY in the
  * server-side execution mode, selected by the `engine` option passed straight
- * through to the `runLocalNode` RPC (see `logic/local-node-runtime.ts`).
+ * through to the `runLocal` RPC (see `logic/local-runtime.ts`).
  * Driven over the single
- * `airapps.runLocalNode` oRPC event iterator rather than separate RPCs per
+ * `airapps.runLocal` oRPC event iterator rather than separate RPCs per
  * `AirAppRunner` method — the server naturally runs install straight into
  * start on one stream (there's no separate "check exit code" call), so this
  * class fans that one subscription back out into the
@@ -43,22 +43,23 @@ export function toBase64(bytes: Uint8Array): string {
  * is already running by the time `install()` resolves, and `onReady`/onLog
  * keep firing from that same subscription.
  */
-export class LocalNodeRunner implements AirAppRunner {
+export class LocalRunner implements AirAppRunner {
   private readonly orpc: BusabaseQueryUtils;
   private readonly nodeId: string;
-  private readonly engine: "local-node" | "srt";
+  private readonly engine: "local" | "srt" | "sandock";
   private files: Record<string, string> = {};
   private binaryFiles: Record<string, string> = {};
   private controller: AbortController | null = null;
   private logCallbacks: Array<(line: string) => void> = [];
   private readyCallbacks: Array<(previewPath: string) => void> = [];
+  private exitCallbacks: Array<(code: number | null) => void> = [];
   private lastReadyUrl: string | null = null;
   private installDeferred: { resolve: () => void; reject: (error: unknown) => void } | null = null;
 
   constructor(options: {
     orpc: BusabaseQueryUtils;
     nodeId: string;
-    engine: "local-node" | "srt";
+    engine: "local" | "srt" | "sandock";
   }) {
     this.orpc = options.orpc;
     this.nodeId = options.nodeId;
@@ -94,6 +95,7 @@ export class LocalNodeRunner implements AirAppRunner {
         this.emitLog(
           `\n[dev server exited${event.code === null ? "" : ` with code ${event.code}`}]\n`,
         );
+        for (const cb of this.exitCallbacks) cb(event.code);
         break;
       case "error":
         this.emitLog(`\n[error] ${event.message}\n`);
@@ -124,7 +126,7 @@ export class LocalNodeRunner implements AirAppRunner {
     await new Promise<void>((resolve, reject) => {
       this.installDeferred = { resolve, reject };
       consumeEventIterator(
-        this.orpc.airapps.runLocalNode.call(
+        this.orpc.airapps.runLocal.call(
           {
             nodeId: this.nodeId,
             files: this.files,
@@ -157,7 +159,7 @@ export class LocalNodeRunner implements AirAppRunner {
 
   async start(): Promise<void> {
     if (!this.controller) {
-      throw new Error("LocalNodeRunner: install() must be called before start()");
+      throw new Error("LocalRunner: install() must be called before start()");
     }
     // No-op by design — see class doc comment: the server already continued
     // straight from install into `npm run dev` on the same stream that
@@ -175,10 +177,25 @@ export class LocalNodeRunner implements AirAppRunner {
     }
   }
 
+  onExit(cb: (code: number | null) => void): void {
+    this.exitCallbacks.push(cb);
+  }
+
+  async stop(): Promise<void> {
+    // Aborting the stream only detaches — the server keeps the app running on
+    // purpose. Ending it is its own call.
+    await this.orpc.airapps.stopLocal.call({ nodeId: this.nodeId });
+    this.controller?.abort();
+    this.controller = null;
+  }
+
   dispose(): void {
+    // Detach only. The run is a server-side session now, and closing a view is
+    // not a decision to stop somebody's app.
     this.controller?.abort();
     this.controller = null;
     this.logCallbacks = [];
     this.readyCallbacks = [];
+    this.exitCallbacks = [];
   }
 }

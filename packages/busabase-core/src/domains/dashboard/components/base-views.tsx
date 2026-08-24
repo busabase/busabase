@@ -37,6 +37,7 @@ import { IStringNameInput } from "./i-string-input";
 import { NodeActionsMenu } from "./node-actions-menu";
 import { NodeAgentPromptsButton } from "./node-agent-prompts-button";
 import { NodePinButton, nodeSidePanelTabId } from "./node-pin-button";
+import { NodeSettingsDialog } from "./node-settings-dialog";
 import { EmptyState, PropertyRow, SidebarPanel } from "./primitives";
 import { RecordTitleBadge } from "./record-title-badge";
 import { NodeDetailSkeleton } from "./skeletons";
@@ -151,7 +152,6 @@ export function BaseSetupView({
   deletedFields = [],
   orpc,
   onCreateField,
-  onRenameBase,
   onRestoreField,
   onSetPrimaryField,
   onUpdateFieldName,
@@ -159,16 +159,12 @@ export function BaseSetupView({
   base: BaseVO | null;
   bases: BaseVO[];
   deletedFields?: BaseFieldVO[];
-  /** Wired through to the header's "•••" menu (NodeActionsMenu). */
+  /** Wired through to the header's "•••" menu (NodeActionsMenu) AND the
+   *  read-only "Base Info" card's "Edit" button (opens `NodeSettingsDialog`). */
   orpc: BusabaseQueryUtils;
   onCreateField: (
     base: BaseVO,
     payload: CreateBaseFieldPayload,
-    options?: { mergeImmediately?: boolean },
-  ) => Promise<void>;
-  onRenameBase: (
-    base: BaseVO,
-    payload: { name: string; description: string },
     options?: { mergeImmediately?: boolean },
   ) => Promise<void>;
   onRestoreField?: (base: BaseVO, fieldId: string) => Promise<void>;
@@ -187,10 +183,13 @@ export function BaseSetupView({
   const messages = useCoreI18n();
   const locale = useCoreLocale();
   const resolveIString = useIString();
-  const [baseName, setBaseName] = useState(base?.name ?? "");
-  const [baseDescription, setBaseDescription] = useState(base?.description ?? "");
-  const [isRenameSaving, setIsRenameSaving] = useState(false);
-  const [renameError, setRenameError] = useState<string | null>(null);
+  // Base Info is now read-only here — editing (name/description/icon) opens
+  // the unified `NodeSettingsDialog` General tab, same as every other node
+  // type. Base used to keep its own inline rename form + `submitRenameBase`
+  // (`dashboard/index.tsx`) because `NodeRenameDialog` explicitly never
+  // handled Base nodes; that carve-out is gone now that one dialog covers
+  // every node type.
+  const [isBaseSettingsOpen, setIsBaseSettingsOpen] = useState(false);
   const [fieldName, setFieldName] = useState<iString>("");
   const [fieldSlug, setFieldSlug] = useState("");
   const [fieldType, setFieldType] = useState<FieldType>("text");
@@ -257,23 +256,6 @@ export function BaseSetupView({
       </div>
     );
   }
-
-  const submitRename = async (options?: { mergeImmediately?: boolean }) => {
-    const name = baseName.trim();
-    if (!name) {
-      setRenameError(messages.base.baseNameRequired);
-      return;
-    }
-    setIsRenameSaving(true);
-    setRenameError(null);
-    try {
-      await onRenameBase(base, { name, description: baseDescription.trim() }, options);
-    } catch (error) {
-      setRenameError(error instanceof Error ? error.message : messages.base.failedRenameBase);
-    } finally {
-      setIsRenameSaving(false);
-    }
-  };
 
   const resetAddFieldForm = () => {
     setFieldName("");
@@ -427,49 +409,43 @@ export function BaseSetupView({
         <div className="grid gap-6 px-6 py-4 xl:grid-cols-[minmax(0,1fr)_280px]">
           <div className="min-w-0 space-y-6">
             <div>
-              <div className="font-semibold text-sm">{messages.base.baseInfo}</div>
+              <div className="flex items-center justify-between gap-3">
+                <div className="font-semibold text-sm">{messages.base.baseInfo}</div>
+                <button
+                  className="inline-flex h-7 items-center gap-1.5 rounded-md border border-border/70 bg-card px-2.5 font-medium text-xs transition-colors hover:bg-accent"
+                  onClick={() => setIsBaseSettingsOpen(true)}
+                  type="button"
+                >
+                  <Pencil aria-hidden="true" className="size-3" />
+                  {messages.common.edit}
+                </button>
+              </div>
               <div className="mt-3 grid gap-3">
-                <label className="block">
+                <div>
                   <span className="text-muted-foreground text-xs">{messages.common.name}</span>
-                  <input
-                    className="mt-1 h-8 w-full rounded-md border border-border/70 bg-card px-2.5 text-sm outline-none transition-colors focus:border-primary"
-                    onChange={(event) => setBaseName(event.target.value)}
-                    value={baseName}
-                  />
-                </label>
-                <label className="block">
+                  <div className="mt-1 text-sm">{base.name}</div>
+                </div>
+                <div>
                   <span className="text-muted-foreground text-xs">
                     {messages.common.description}
                   </span>
-                  <textarea
-                    className="mt-1 w-full rounded-md border border-border/70 bg-card px-2.5 py-1.5 text-sm outline-none transition-colors focus:border-primary resize-none"
-                    onChange={(event) => setBaseDescription(event.target.value)}
-                    rows={2}
-                    value={baseDescription}
-                  />
-                </label>
+                  <div className="mt-1 whitespace-pre-wrap text-muted-foreground text-sm">
+                    {base.description || messages.common.none}
+                  </div>
+                </div>
               </div>
-              <div className="mt-3 flex justify-end border-border/50 border-t pt-3">
-                <SplitSubmitButton
-                  changeRequestAction={{
-                    label: messages.base.requestRename,
-                    loadingLabel: messages.common.submitting,
-                    onSubmit: () => submitRename(),
-                    isLoading: isRenameSaving,
-                  }}
-                  disabled={isRenameSaving}
-                  hint={messages.common.requestReviewHint}
-                  immediateAction={{
-                    label: messages.base.renameNow,
-                    loadingLabel: messages.base.renaming,
-                    onSubmit: () => submitRename({ mergeImmediately: true }),
-                    isLoading: isRenameSaving,
-                  }}
+              {isBaseSettingsOpen && (
+                <NodeSettingsDialog
+                  initialTab="general"
+                  nodeId={base.nodeId}
+                  nodeName={base.name}
+                  nodeSlug={base.slug}
+                  nodeType="base"
+                  onOpenChange={setIsBaseSettingsOpen}
+                  open={isBaseSettingsOpen}
+                  orpc={orpc}
                 />
-              </div>
-              {renameError ? (
-                <div className="mt-2 text-rejected-strong text-sm">{renameError}</div>
-              ) : null}
+              )}
             </div>
 
             <div data-base-fields>

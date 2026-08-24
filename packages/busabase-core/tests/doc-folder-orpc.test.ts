@@ -154,7 +154,7 @@ describe("Doc & Folder domains — oRPC integration", () => {
         body: lines.join("\n"),
       });
 
-      const result = await client.docs.readLines({
+      const result = await client.nodes.readLines({
         nodeId: "read-lines-mid",
         startLine: 10,
         endLine: 15,
@@ -181,7 +181,7 @@ describe("Doc & Folder domains — oRPC integration", () => {
         body: "a\nb\nc",
       });
 
-      const result = await client.docs.readLines({
+      const result = await client.nodes.readLines({
         nodeId: "read-lines-short",
         startLine: 1,
         endLine: 10,
@@ -199,7 +199,7 @@ describe("Doc & Folder domains — oRPC integration", () => {
         body: lines.join("\n"),
       });
 
-      const result = await client.docs.readLines({
+      const result = await client.nodes.readLines({
         nodeId: "read-lines-exact-eof",
         startLine: 1,
         endLine: 12,
@@ -218,7 +218,7 @@ describe("Doc & Folder domains — oRPC integration", () => {
         body: lines.join("\n"),
       });
 
-      const result = await client.docs.readLines({
+      const result = await client.nodes.readLines({
         nodeId: "read-lines-cap",
         startLine: 1,
         endLine: 3000,
@@ -246,14 +246,14 @@ describe("Doc & Folder domains — oRPC integration", () => {
 
       const grep = await client.grep({
         pattern: "NEEDLE-HERE",
-        sources: ["docs"],
-        scope: { docs: { nodeIds: [doc.node.id] } },
+        sources: ["nodes"],
+        scope: { nodes: { nodeIds: [doc.node.id] } },
       });
       const match = grep.matches[0];
       expect(match).toBeDefined();
-      if (!match || match.source !== "docs") throw new Error("Expected a docs match");
+      if (!match || match.source !== "nodes") throw new Error("Expected a nodes match");
 
-      const read = await client.docs.readLines({
+      const read = await client.nodes.readLines({
         nodeId: doc.node.id,
         startLine: match.line,
         endLine: match.line,
@@ -261,9 +261,123 @@ describe("Doc & Folder domains — oRPC integration", () => {
       expect(read.lines[0]).toBe("NEEDLE-HERE");
     });
 
+    // The gap that motivated replacing `docs.readLines`: grep began reporting
+    // html/whiteboard/workflow matches, but the follow-up read resolved doc
+    // nodes only, so it answered "Doc not found" for a node it had just
+    // pointed the caller at. On the pre-change code this test fails at the
+    // readLines call, not at the grep.
+    it("grep → readLines loop works for an html node, not just a Doc", async () => {
+      const rootId = (await client.nodes.list({}))[0]?.id ?? "";
+      await client.nodes.createChangeRequest({
+        autoMerge: true,
+        operations: [
+          {
+            kind: "create",
+            parentNodeId: rootId,
+            nodeType: "html",
+            slug: "read-lines-html",
+            name: "Read Lines Html",
+          },
+        ],
+      });
+      const flatten = (entries: Awaited<ReturnType<typeof client.nodes.list>>): typeof entries =>
+        entries.flatMap((entry) => [entry, ...flatten(entry.children)]);
+      const nodeId =
+        flatten(await client.nodes.list({})).find((n) => n.slug === "read-lines-html")?.id ?? "";
+      expect(nodeId).not.toBe("");
+      await client.nodes.updateContent({
+        nodeId,
+        autoMerge: true,
+        content: {
+          kind: "html",
+          document: {
+            version: 1,
+            source: "<html>\n<body>\n<h1>HTMLNEEDLE</h1>\n</body>\n</html>\n",
+          },
+        },
+      });
+
+      const grep = await client.grep({
+        pattern: "HTMLNEEDLE",
+        scope: { nodes: { nodeIds: [nodeId] } },
+      });
+      const match = grep.matches[0];
+      if (!match || match.source !== "nodes") throw new Error("Expected a nodes match");
+      expect(match.type).toBe("html");
+
+      const read = await client.nodes.readLines({
+        nodeId,
+        startLine: match.line,
+        endLine: match.line,
+      });
+      // Same line number grep reported, read back verbatim — the two agree
+      // because both resolve content through the one node-content registry.
+      expect(read.lines[0]).toBe("<h1>HTMLNEEDLE</h1>");
+      expect(read.totalLines).toBe(5);
+    });
+
+    it("reads a whiteboard's extracted text at the line grep reported", async () => {
+      const rootId = (await client.nodes.list({}))[0]?.id ?? "";
+      await client.nodes.createChangeRequest({
+        autoMerge: true,
+        operations: [
+          {
+            kind: "create",
+            parentNodeId: rootId,
+            nodeType: "whiteboard",
+            slug: "read-lines-board",
+            name: "Read Lines Board",
+          },
+        ],
+      });
+      const flatten = (entries: Awaited<ReturnType<typeof client.nodes.list>>): typeof entries =>
+        entries.flatMap((entry) => [entry, ...flatten(entry.children)]);
+      const nodeId =
+        flatten(await client.nodes.list({})).find((n) => n.slug === "read-lines-board")?.id ?? "";
+      await client.nodes.updateContent({
+        nodeId,
+        autoMerge: true,
+        content: {
+          kind: "whiteboard",
+          document: {
+            version: 1,
+            elements: [
+              { id: "a", type: "text", isDeleted: false, originalText: "first sticky" },
+              { id: "b", type: "text", isDeleted: false, originalText: "BOARDNEEDLE second" },
+            ],
+            appState: {},
+          },
+        },
+      });
+
+      const grep = await client.grep({
+        pattern: "BOARDNEEDLE",
+        scope: { nodes: { nodeIds: [nodeId] } },
+      });
+      const match = grep.matches[0];
+      if (!match || match.source !== "nodes") throw new Error("Expected a nodes match");
+
+      const read = await client.nodes.readLines({
+        nodeId,
+        startLine: match.line,
+        endLine: match.line,
+      });
+      // Synthetic line numbers, but grep and readLines agree on them — which is
+      // the only property that makes them useful at all.
+      expect(read.lines[0]).toBe("BOARDNEEDLE second");
+      expect(read.totalLines).toBe(2); // two text elements, no JSON structure
+    });
+
+    it("refuses a node type that stores no content", async () => {
+      const rootId = (await client.nodes.list({}))[0]?.id ?? "";
+      await expect(
+        client.nodes.readLines({ nodeId: rootId, startLine: 1, endLine: 5 }),
+      ).rejects.toMatchObject({ code: "NOT_FOUND" });
+    });
+
     it("rejects a non-existent nodeId with NOT_FOUND", async () => {
       await expect(
-        client.docs.readLines({ nodeId: "read-lines-does-not-exist", startLine: 1, endLine: 5 }),
+        client.nodes.readLines({ nodeId: "read-lines-does-not-exist", startLine: 1, endLine: 5 }),
       ).rejects.toMatchObject({ code: "NOT_FOUND" });
     });
   });
@@ -280,7 +394,7 @@ describe("Doc domain — readLines (demo mode)", () => {
   const demoClient = createRouterClient(busabaseDemoRouter);
 
   it("reads a range from the seeded demo Doc's in-memory body", async () => {
-    const result = await demoClient.docs.readLines({
+    const result = await demoClient.nodes.readLines({
       nodeId: "agent-operating-guide",
       startLine: 1,
       endLine: 2,
@@ -292,7 +406,7 @@ describe("Doc domain — readLines (demo mode)", () => {
 
   it("rejects a non-existent nodeId with NOT_FOUND", async () => {
     await expect(
-      demoClient.docs.readLines({ nodeId: "does-not-exist", startLine: 1, endLine: 5 }),
+      demoClient.nodes.readLines({ nodeId: "does-not-exist", startLine: 1, endLine: 5 }),
     ).rejects.toMatchObject({ code: "NOT_FOUND" });
   });
 });
