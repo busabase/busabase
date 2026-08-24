@@ -13,6 +13,7 @@ import {
   type NodeType,
   OPERATION_KINDS,
 } from "../domains/registry";
+import { type NodeIcon, NodeIconSchema } from "../types/node-icon";
 import { autoMergeNotAccepted } from "./auto-merge";
 
 export interface NodeOutput {
@@ -41,6 +42,12 @@ export interface NodeOutput {
    * `manage`) can change it.
    */
   explicitVisibility: "private" | "workspace" | "public" | null;
+  /**
+   * This node's custom avatar (emoji or cropped/uploaded image), or `null`
+   * when it has none and every host falls back to its type icon. See
+   * `NodeIconSchema` (`../types/node-icon`) for the two variants.
+   */
+  icon?: NodeIcon | null;
   position: number;
   createdAt: string;
   updatedAt: string;
@@ -69,6 +76,7 @@ const nodeSchema: z.ZodType<NodeOutput> = z.lazy(() =>
     description: z.string(),
     metadata: z.object({ version: z.string().optional() }).catchall(z.unknown()).default({}),
     explicitVisibility: z.enum(["private", "workspace", "public"]).nullable().default(null),
+    icon: NodeIconSchema.nullable().default(null),
     position: z.number(),
     createdAt: z.string(),
     updatedAt: z.string(),
@@ -512,6 +520,17 @@ const nodeOperationInputSchema = z.discriminatedUnion("kind", [
       .optional(),
     name: z.string().min(1).optional(),
     description: z.string().optional(),
+    /**
+     * Reuses the "rename" kind rather than adding a dedicated operation kind:
+     * `rename` is already a generic "update this node's basic properties"
+     * operation (every field above is optional, so a caller can send just one),
+     * and the node-settings General tab already submits name+description
+     * together — adding the icon here is the smallest change that keeps a
+     * single-operation "save General tab" change request. `undefined` leaves
+     * the node's current icon untouched; `null` explicitly clears it back to
+     * the type default.
+     */
+    icon: NodeIconSchema.nullable().optional(),
   }),
   z.object({
     kind: z.literal("delete"),

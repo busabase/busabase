@@ -48,7 +48,7 @@ export function NodeAgentPromptsSheet({
   onBack,
 }: NodeAgentPromptsSheetProps) {
   const tokens = useTokens();
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const [selected, setSelected] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [copyFailed, setCopyFailed] = useState(false);
@@ -60,12 +60,12 @@ export function NodeAgentPromptsSheet({
           nodeType: node.type,
           nodeName: node.name,
           nodeId: node.id,
-          spaceId,
-          spaceName,
+          spaceId: spaceId ?? undefined,
+          spaceName: spaceName ?? undefined,
         },
-        t,
+        locale,
       ),
-    [node.type, node.name, node.id, spaceId, spaceName, t],
+    [node.type, node.name, node.id, spaceId, spaceName, locale],
   );
 
   // Open on Scenarios when the type has any, else straight to Capabilities.

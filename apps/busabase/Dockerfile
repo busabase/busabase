@@ -16,6 +16,7 @@ COPY packages/busabase-core/package.json packages/busabase-core/
 COPY packages/busabase-package/package.json packages/busabase-package/
 COPY packages/open-domains/package.json packages/open-domains/
 COPY packages/openlib/package.json packages/openlib/
+COPY packages/ts7-i18n/package.json packages/ts7-i18n/
 COPY packages/kui/package.json packages/kui/
 COPY packages/@acp-ui/core/package.json packages/@acp-ui/core/
 COPY packages/@acp-ui/web/package.json packages/@acp-ui/web/
@@ -28,6 +29,7 @@ COPY packages/busabase-core packages/busabase-core
 COPY packages/busabase-package packages/busabase-package
 COPY packages/open-domains packages/open-domains
 COPY packages/openlib packages/openlib
+COPY packages/ts7-i18n packages/ts7-i18n
 COPY packages/kui packages/kui
 COPY packages/@acp-ui packages/@acp-ui
 COPY packages/relaylib packages/relaylib

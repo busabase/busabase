@@ -60,6 +60,7 @@ import {
   busabaseReviews,
   busabaseViews,
 } from "../db/schema";
+import { deleteNodeIconByUrl } from "../domains/attachments/logic/attachments-logic";
 import {
   mergeBaseAddField,
   mergeBaseArchive,
@@ -454,6 +455,10 @@ const mergeNodeRename = async (
         slug: nextSlug,
         name: fields.name ?? node.name,
         description: fields.description ?? node.description,
+        // `icon` key absent (`undefined`) → leave the stored icon untouched;
+        // present (including explicit `null`) → write it as-is (`null` clears
+        // it back to the type-default icon).
+        icon: fields.icon !== undefined ? fields.icon : node.icon,
         updatedAt: ctx.timestamp,
       })
       .where(eq(busabaseNodes.id, node.id));
@@ -462,6 +467,27 @@ const mergeNodeRename = async (
       throw nodeSlugConflict(node.type, nextSlug);
     }
     throw error;
+  }
+  // Best-effort cleanup of the outgoing icon's attachment row(s) — an
+  // "attachment" icon can carry both a cropped `url` and an uncropped
+  // `originalUrl`, each its own row (see `NodeIconSchema`). Only rows no
+  // longer referenced by the NEW icon are dropped, so re-saving the same
+  // icon (or only tweaking the crop against the same original) leaks
+  // nothing. Never blocks the rename itself — same "best-effort" contract
+  // `deleteBrandingLogoByUrl` documents; a failed cleanup just leaks a
+  // registry row, same as if this call didn't exist at all.
+  if (fields.icon !== undefined && node.icon?.type === "attachment") {
+    const keepUrls = new Set(
+      fields.icon?.type === "attachment"
+        ? [fields.icon.url, fields.icon.originalUrl].filter((url): url is string => !!url)
+        : [],
+    );
+    const staleUrls = [node.icon.url, node.icon.originalUrl].filter(
+      (url): url is string => !!url && !keepUrls.has(url),
+    );
+    await Promise.all(
+      staleUrls.map((url) => deleteNodeIconByUrl(ctx.db, node.id, url).catch(() => {})),
+    );
   }
   if (node.type === "base") {
     await ctx.db

@@ -22,6 +22,64 @@ const DEFAULT_CLOUD_BASE_URL = "https://busabase.com";
 const DEFAULT_PENDING_TTL_MS = 5 * 60_000;
 const DEFAULT_TIMEOUT_MS = 8_000;
 
+/**
+ * The env var Busabase injects into every AirApp process it spawns. Nobody else
+ * sets it, which is what makes its **absence** the positive fact "standalone".
+ */
+export const BUSABASE_AIRAPP_RUNTIME_ENV = "BUSABASE_AIRAPP_RUNTIME";
+
+/**
+ * Every runtime Busabase hosts an AirApp in, as known to *this* SDK version.
+ *
+ * **Informational. Not what decides whether an app is hosted.** That separation
+ * is the whole point of this constant existing here rather than being pasted
+ * into each app, and getting it backwards is a bug we have already shipped once:
+ * every generated AirApp used to carry its own hardcoded copy of this list and
+ * answer `hosted` from membership in it. When the `local-node` engine was
+ * renamed to `local`, all of them started answering "standalone" *inside a
+ * hosted preview* — showing their own connection gate, calling `/api/v1` with no
+ * credential, and leaving the operator with nothing to act on.
+ *
+ * Moving the list into the SDK does not by itself fix that. An app pins an SDK
+ * version, so a list that gates behaviour would simply rot on a slower clock:
+ * add an engine, and every app on an older SDK is wrong again until it upgrades.
+ *
+ * So the list names runtimes; {@link isBusabaseAirAppHosted} decides hosting,
+ * from presence alone, and needs no upgrade to stay correct.
+ */
+export const BUSABASE_AIRAPP_RUNTIMES = ["nodepod", "local", "srt", "sandock", "embed"] as const;
+
+export type BusabaseAirAppRuntime = (typeof BUSABASE_AIRAPP_RUNTIMES)[number];
+
+/** Read the injected runtime, normalised. `""` means nobody hosted this process. */
+export const readBusabaseAirAppRuntime = (
+  env: Record<string, string | undefined> = process.env,
+): string => (env[BUSABASE_AIRAPP_RUNTIME_ENV] || "").trim();
+
+/**
+ * Whether Busabase is hosting this process.
+ *
+ * Presence, never membership — see {@link BUSABASE_AIRAPP_RUNTIMES}. An engine
+ * this SDK has never heard of still means "Busabase spawned me", because only
+ * Busabase sets the variable at all.
+ */
+export const isBusabaseAirAppHosted = (runtime: string = readBusabaseAirAppRuntime()): boolean =>
+  runtime.trim() !== "";
+
+/**
+ * Narrow a runtime string to one this SDK knows, or `null`.
+ *
+ * For code that wants to *branch* on a specific engine — an app that renders
+ * differently under a public embed, say. Deliberately returns `null` rather than
+ * throwing on an unknown value: a newer Busabase naming an engine this SDK
+ * predates is normal, not an error, and the caller should fall back to generic
+ * behaviour rather than break.
+ */
+export const asKnownBusabaseAirAppRuntime = (runtime: string): BusabaseAirAppRuntime | null =>
+  (BUSABASE_AIRAPP_RUNTIMES as readonly string[]).includes(runtime)
+    ? (runtime as BusabaseAirAppRuntime)
+    : null;
+
 export const BUSABASE_AIRAPP_GATEWAY_REASONS = {
   authRequired: "AUTH_REQUIRED",
   authUnavailable: "AUTH_UNAVAILABLE",

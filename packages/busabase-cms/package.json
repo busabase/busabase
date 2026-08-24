@@ -41,7 +41,7 @@
   ],
   "sideEffects": false,
   "scripts": {
-    "build": "tsup src/index.ts src/next.ts src/fumadocs.ts src/integration/index.ts --format esm --dts --clean",
+    "build": "tsdown",
     "prepack": "pnpm run build",
     "prepublishOnly": "pnpm run typecheck && pnpm run test && pnpm run lint:err && pnpm run build",
     "typecheck": "tsc --noEmit",
@@ -51,7 +51,7 @@
   },
   "dependencies": {
     "busabase-sdk": "workspace:*",
-    "fumadocs-core": "16.7.7",
+    "fumadocs-core": "16.14.5",
     "rehype-sanitize": "^6.0.0",
     "remark-gfm": "^4.0.1",
     "sanitize-html": "^2.17.6",
@@ -76,8 +76,8 @@
     "@types/sanitize-html": "^2.16.1",
     "next": "16.2.6",
     "react": "^19.2.7",
-    "tsup": "^8.5.0",
-    "typescript": "^5.9.3",
+    "tsdown": "^0.22.14",
+    "typescript": "^7.0.2",
     "vitest": "^2.1.8"
   },
   "engines": {

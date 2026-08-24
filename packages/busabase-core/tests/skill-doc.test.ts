@@ -126,7 +126,9 @@ describe("generated Cloud onboarding", () => {
       cloudWithoutPreselectedSpace
         .split("\n")
         .find((line) => line.startsWith("npx --yes busabase-cli@latest login ")),
-    ).toBe("npx --yes busabase-cli@latest login --device-code --base-url https://busabase.com");
+    ).toBe(
+      "npx --yes busabase-cli@latest login --device-code --base-url https://busabase.com --no-browser",
+    );
     expect(cloudWithoutPreselectedSpace).toContain("Login never asks which Space to use");
     expect(cloudWithoutPreselectedSpace).toContain(
       "it takes the server default (the Space the user was most\nrecently active in)",
@@ -135,11 +137,20 @@ describe("generated Cloud onboarding", () => {
     expect(localBootstrap).not.toContain("--use-default-space");
     expect(cloudWithoutPreselectedSpace).not.toContain("--use-default-space");
     expect(cloudWithoutPreselectedSpace).not.toContain("--non-interactive");
-    expect(cloudBootstrap).toContain("selects an\nexisting API key or creates a new one");
-    expect(cloudBootstrap).toContain("The browser never receives the\nkey secret");
     expect(cloudBootstrap).not.toContain("cat ~/.busabase/.env");
     expect(cloudBootstrap).not.toContain("<paste the new key>");
     expect(cloudBootstrap).not.toContain('export BUSABASE_API_KEY="sk_');
+  });
+
+  it("instructs the agent to hand off device approval without blocking", () => {
+    expect(cloudBootstrap).toContain("managed background process or persistent terminal session");
+    expect(cloudBootstrap).toContain("capture both `stdout` and `stderr`");
+    expect(cloudBootstrap).toContain("Do not wait for the command to exit before replying");
+    expect(cloudBootstrap).toContain("After the user approves, resume or poll it until it exits");
+    expect(cloudBootstrap).toContain("start a\nsecond login while the first is running");
+    expect(localBootstrap).not.toContain(
+      "managed background process or persistent terminal session",
+    );
   });
 
   it("requires the agent to surface the selected Space to the user, not just switch silently", () => {
@@ -194,7 +205,7 @@ describe("generated Cloud onboarding", () => {
       .filter((line) => line.startsWith("npx --yes busabase-cli@latest "));
 
     expect(cloudCliLines).toEqual([
-      "npx --yes busabase-cli@latest login --device-code --base-url https://busabase.com --space-id spc_x",
+      "npx --yes busabase-cli@latest login --device-code --base-url https://busabase.com --space-id spc_x --no-browser",
     ]);
     expect(desktopCliLines).toEqual([
       'npx --yes busabase-cli@latest login --base-url "http://localhost:15419"',

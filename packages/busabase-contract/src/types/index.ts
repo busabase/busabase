@@ -34,6 +34,15 @@ export type LookupRollup = "values" | "count" | "sum" | "average" | "min" | "max
 // OperationKind + NodeType are owned by the node-type registry (single source of truth).
 import type { NodeType, OperationKind } from "../domains/registry";
 export type { NodeType, OperationKind };
+
+// The node custom-avatar shape (emoji or cropped/uploaded image) — single
+// source of truth is `NodeIconSchema`; re-exported here so `NodeVO` below (and
+// every importer of `busabase-contract/types`) can reference the inferred type
+// without reaching into `./node-icon` directly.
+import type { NodeIcon } from "./node-icon";
+
+export type { NodeIcon } from "./node-icon";
+export { NodeIconSchema } from "./node-icon";
 export type ChangeRequestStatus =
   | "in_review"
   | "changes_requested"
@@ -117,6 +126,12 @@ export interface NodeVO {
    * ACL's only explicit input — see `content/spec/node-content-storage.md` (D1).
    */
   explicitVisibility: "private" | "workspace" | "public" | null;
+  /**
+   * This node's custom avatar (emoji or cropped/uploaded image), or `null`
+   * when the node has none and every host falls back to its type icon
+   * (`nodeIconForType`). See `NodeIconSchema` for the two variants.
+   */
+  icon?: NodeIcon | null;
   position: number;
   createdAt: string;
   updatedAt: string;

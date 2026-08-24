@@ -1,0 +1,20 @@
+{
+  // Declaration-emit project for packages/busabase-package's tsdown build.
+  // Same shape and same reason as tsconfig.busabase-sdk-dts.json (see the
+  // comment there): the tsgo generator's rootDir is this file's directory, and
+  // the `noExternal` bundled sources must all sit under it.
+  "extends": "./packages/busabase-package/tsconfig.json",
+  "include": [
+    "packages/busabase-package/src/**/*.ts",
+    "packages/busabase-contract/src/**/*.ts",
+    "packages/open-domains/**/*.ts",
+    "packages/openlib/**/*.ts"
+  ],
+  "exclude": [
+    "packages/busabase-contract/src/**/*.test.ts",
+    "packages/open-domains/**/*.test.ts",
+    "packages/openlib/**/*.test.ts",
+    "packages/openlib/**/*.test.tsx",
+    "packages/openlib/ui/**"
+  ]
+}

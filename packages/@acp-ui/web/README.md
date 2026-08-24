@@ -2,7 +2,6 @@
 
 The web binding layer for [`@acp-ui/core`](../core). The core decides *what* an ACP conversation
 contains; this package decides what it looks like, using `kui` and `kui/ai-elements`.
-Full rationale: [`docs/acp-ui-convergence-roadmap.md`](../../../docs/acp-ui-convergence-roadmap.md).
 
 ## Usage
 
@@ -99,7 +98,7 @@ site, so a rename in `kui` breaks the build rather than silently mislabelling a 
 
 ## Status
 
-Wired into `apps/acprouter` and `apps/busabase` — both drive their transcript, composer, and
-tool-run grouping through this package, verified against real ACP agents on both. Not yet
-covered: attachments (ACP's `ContentBlock` supports images/resources; `@acp-ui/core`'s view
-model is currently text-only) and a cancel/stop affordance mid-stream.
+Wired into `acprouter` and `busabase` — both drive their transcript, composer, tool-run
+grouping, image/audio attachments (both directions — agent-sent and user-sent), cancel/stop
+mid-stream, and session-level usage/title through this package, verified against real ACP
+agents on both.

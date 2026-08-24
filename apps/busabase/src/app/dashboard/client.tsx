@@ -3,6 +3,7 @@
 import { QueryClient, QueryClientProvider, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createBusabaseRestApiClient } from "busabase-contract/api-client";
 import { createBusabaseQueryUtils } from "busabase-contract/api-client/react-query";
+import type { AirAppRunnerKind } from "busabase-contract/domains/airapp/contract";
 import { BusabaseDashboard } from "busabase-core/dashboard";
 import { CreateNodeModal } from "busabase-core/dashboard/create-node-modal";
 import { EmptyAgentGuide } from "busabase-core/dashboard/empty-agent-guide";
@@ -27,6 +28,8 @@ import { buildDashboardUrl, getDashboardBasePath } from "~/lib/dashboard-routes"
 import { getBusabaseAppLL, getBusabaseMessages, normalizeBusabaseAppLocale } from "~/lib/i18n";
 
 interface DashboardClientProps {
+  /** Server-resolved; see `dashboard-page.tsx`. */
+  availableAirAppEngines?: AirAppRunnerKind[];
   initialPath?: string;
   localUserName?: string | null;
 }
@@ -93,20 +96,32 @@ function DashboardShellSkeleton({ chromeless = false }: { chromeless?: boolean }
   );
 }
 
-export function DashboardClient({ initialPath = "/home", localUserName }: DashboardClientProps) {
+export function DashboardClient({
+  initialPath = "/home",
+  localUserName,
+  availableAirAppEngines,
+}: DashboardClientProps) {
   const [queryClient] = useState(() => new QueryClient());
 
   return (
     <QueryClientProvider client={queryClient}>
       {/* useSearchParams (for ?chromeless=1) requires a Suspense boundary. */}
       <Suspense fallback={<DashboardShellSkeleton />}>
-        <DashboardClientContent initialPath={initialPath} localUserName={localUserName} />
+        <DashboardClientContent
+          availableAirAppEngines={availableAirAppEngines}
+          initialPath={initialPath}
+          localUserName={localUserName}
+        />
       </Suspense>
     </QueryClientProvider>
   );
 }
 
-function DashboardClientContent({ initialPath = "/home", localUserName }: DashboardClientProps) {
+function DashboardClientContent({
+  initialPath = "/home",
+  localUserName,
+  availableAirAppEngines,
+}: DashboardClientProps) {
   const router = useRouter();
   const queryClient = useQueryClient();
   // `?chromeless=1` renders just the current node's detail pane with no
@@ -218,6 +233,7 @@ function DashboardClientContent({ initialPath = "/home", localUserName }: Dashbo
     () => (
       <BusabaseDashboard
         apiClient={apiClient}
+        availableAirAppEngines={availableAirAppEngines}
         apiBasePath="/api/rpc"
         auditEvents={auditEvents}
         cacheSpaceKey={CACHE_SPACE_KEY}
@@ -244,6 +260,7 @@ function DashboardClientContent({ initialPath = "/home", localUserName }: Dashbo
       isSearchOpen,
       locale,
       chromeless,
+      availableAirAppEngines,
     ],
   );
   const routes = useMemo(

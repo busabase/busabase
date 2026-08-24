@@ -1,0 +1,96 @@
+{
+  "name": "ts7-i18n",
+  "description": "Typed i18n for TypeScript 7 — zero codegen, zero TypeScript-compiler-API usage, param types inferred from template-literal string types. A drop-in-shaped replacement for typesafe-i18n's LL accessor pattern.",
+  "keywords": [
+    "i18n",
+    "internationalization",
+    "typescript",
+    "typescript-7",
+    "tsgo",
+    "type-safe",
+    "template-literal-types",
+    "react",
+    "nextjs",
+    "no-codegen"
+  ],
+  "version": "0.1.0",
+  "private": false,
+  "license": "MIT",
+  "homepage": "https://github.com/mr-kelly/ts7-i18n",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mr-kelly/ts7-i18n.git"
+  },
+  "bugs": "https://github.com/mr-kelly/ts7-i18n/issues",
+  "type": "module",
+  "publishConfig": {
+    "access": "public",
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "./registry": {
+        "types": "./dist/registry.d.ts",
+        "default": "./dist/registry.js"
+      },
+      "./react": {
+        "types": "./dist/react.d.ts",
+        "default": "./dist/react.js"
+      }
+    }
+  },
+  "files": [
+    "dist",
+    "tsconfig-recommended.json",
+    "README.md",
+    "LICENSE"
+  ],
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    },
+    "./registry": {
+      "types": "./src/registry.ts",
+      "default": "./src/registry.ts"
+    },
+    "./react": {
+      "types": "./src/react.tsx",
+      "default": "./src/react.tsx"
+    },
+    "./tsconfig-recommended.json": "./tsconfig-recommended.json"
+  },
+  "scripts": {
+    "build": "tsdown",
+    "prepack": "pnpm run build",
+    "prepublishOnly": "pnpm run typecheck && pnpm run test && pnpm run lint:err && pnpm run build",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "lint": "biome format . --write && biome check .",
+    "lint:err": "biome format . --write && biome check . --write --diagnostic-level=error"
+  },
+  "peerDependencies": {
+    "react": "^18.0.0 || ^19.0.0"
+  },
+  "peerDependenciesMeta": {
+    "react": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@testing-library/react": "^16.3.0",
+    "@types/node": "^24.13.2",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "jsdom": "^27.0.0",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7",
+    "tsdown": "^0.22.14",
+    "typescript": "^7.0.2",
+    "vitest": "^2.1.8"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

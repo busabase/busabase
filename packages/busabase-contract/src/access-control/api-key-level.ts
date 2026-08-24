@@ -147,6 +147,12 @@ export const PROCEDURE_PERMISSION_POLICY: Record<string, ProcedurePermissionPoli
   "fileTrees.createChangeRequest": node("changeRequest"),
   "assets.createUploadUrl": workspace("changeRequest"),
   "assets.confirm": workspace("changeRequest"),
+  // Same "upload for a not-yet-merged proposal" reasoning as the asset pair
+  // above, but node-scoped rather than workspace-wide: a node icon belongs to
+  // one node (see `attachments-logic.ts`'s `nodeIconOwnerId`), and the actual
+  // node mutation only lands via `nodes.createChangeRequest`'s `rename` op.
+  "nodes.icon.createUploadUrl": node("changeRequest"),
+  "nodes.icon.confirm": node("changeRequest"),
   "assets.putText": node("write"),
   "assets.createTextUploadUrl": node("write"),
 
@@ -204,6 +210,8 @@ export const PROCEDURE_PERMISSION_POLICY: Record<string, ProcedurePermissionPoli
   "nodes.listFavorites": node("read"),
   "auditEvents.list": node("read"),
   "activity.listPaged": node("read"),
+  "activity.listForNode": node("read"),
+  "activity.listForRecord": node("read"),
   "comments.list": node("read"),
   "agent.listTasks": node("read"),
   // The SSE payload is space-wide and not yet per-event node filtered.
@@ -217,8 +225,9 @@ export const PROCEDURE_PERMISSION_POLICY: Record<string, ProcedurePermissionPoli
 
   "fileTrees.listFiles": node("read"),
   "fileTrees.readFile": node("read"),
-  "airapps.runLocalNode": node("write"),
-  "docs.readLines": node("read"),
+  "airapps.runLocal": node("write"),
+  "airapps.stopLocal": node("write"),
+  "nodes.readLines": node("read"),
 
   "forms.list": node("read"),
   "forms.getByNode": node("read"),
@@ -238,6 +247,7 @@ export const PROCEDURE_PERMISSION_POLICY: Record<string, ProcedurePermissionPoli
   // …) is arbitrary local code execution, not scoped to any one node — every
   // procedure in this family sits at the ceiling, same tier as vault/webhooks.
   "agents.catalog": workspace("manage"),
+  "agents.disconnect": workspace("manage"),
   "agents.sessions.list": workspace("manage"),
   "agents.sessions.create": workspace("manage"),
   "agents.sessions.prompt": workspace("manage"),

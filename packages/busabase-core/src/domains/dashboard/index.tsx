@@ -19,6 +19,7 @@ import {
   type BusabaseClientOptions,
   createBusabaseQueryUtils,
 } from "busabase-contract/api-client/react-query";
+import type { AirAppRunnerKind } from "busabase-contract/domains/airapp/contract";
 import type {
   AuditEventVO,
   BaseVO,
@@ -42,6 +43,7 @@ import { AgentDetailView } from "../agents/components/agent-detail-view";
 import { AgentsAddView } from "../agents/components/agents-add-view";
 import { AgentsListView } from "../agents/components/agents-list-view";
 import { AirAppKeepAliveHost } from "../airapp/components/AirAppKeepAliveHost";
+import { AppsListView } from "../airapp/components/apps-list-view";
 import { getPrimaryField } from "../base/utils/primary-field";
 import { ArchivedBasesView } from "./components/archived-bases";
 import { AssetsView } from "./components/assets";
@@ -61,6 +63,8 @@ import {
 import "./components/node-detail-views";
 // Side-effect import: registers Whiteboard, Workflow, and HTML renderers.
 import "../rich-node/components/register";
+import { AirAppEngineAvailabilityProvider } from "../airapp/components/engine-availability-context";
+import { NodeActivityView, RecordActivityView } from "./components/activity";
 import { BaseGraphView } from "./components/graph-view";
 import { HomeView } from "./components/home";
 import { ActivityView, InboxView } from "./components/inbox";
@@ -154,6 +158,13 @@ interface BusabaseDashboardProps {
    * every existing browser consumer is unaffected.
    */
   chromeless?: boolean;
+  /**
+   * Which AirApp engines this deployment can offer, resolved server-side by
+   * `domains/airapp/logic/engine-availability.ts`. Omitted, the dashboard
+   * assumes only the in-browser engine — a safe floor, since Nodepod needs
+   * nothing configured, rather than an optimistic guess the user pays for.
+   */
+  availableAirAppEngines?: AirAppRunnerKind[];
   onSearchOpenChange?: (open: boolean) => void;
   /**
    * Leave enabled for standalone consumers. Hosts that already mount an app-wide
@@ -205,7 +216,9 @@ export function BusabaseDashboard({
             permission affordances a session-less visitor can neither use nor be
             shown honestly. */}
         <DashboardVisitorProvider visitorKind={visitorKind}>
-          <BusabaseDashboardContent {...props} visitorKind={visitorKind} />
+          <AirAppEngineAvailabilityProvider engines={props.availableAirAppEngines}>
+            <BusabaseDashboardContent {...props} visitorKind={visitorKind} />
+          </AirAppEngineAvailabilityProvider>
         </DashboardVisitorProvider>
       </CoreI18nProvider>
     </SubmitPermissionProvider>
@@ -387,14 +400,18 @@ function BusabaseDashboardContent({
     isNewRecordRoute,
     isEditRecordRoute,
     editRecordParams,
+    isRecordActivityRoute,
+    recordActivityParams,
     baseParams,
     isBaseChildRoute,
     baseChildParams,
     isAirappRoute,
     isBaseSetupRoute,
+    isBaseActivityRoute,
     selectedBaseSlug,
     selectedAirappSlug,
     nodeDetailRoute,
+    nodeActivityRoute,
     selectedChangeRequestId,
   } = useDashboardRoutes();
   const activeDetailNode = useMemo(() => {
@@ -412,6 +429,22 @@ function BusabaseDashboardContent({
       ? loadedNode
       : null;
   }, [cacheSpaceKey, loadedDetailNode, nodeDetailRoute, nodeTree]);
+  // Same resolution as `activeDetailNode` above, but for `/{type}/:slug/activity`.
+  const activeActivityNode = useMemo(() => {
+    if (!nodeActivityRoute) return null;
+    const treeNode = flattenNodesForCache(nodeTree).find(
+      (node) =>
+        node.type === nodeActivityRoute.type &&
+        (node.id === nodeActivityRoute.slug || node.slug === nodeActivityRoute.slug),
+    );
+    if (treeNode) return treeNode;
+    const loadedNode = loadedDetailNode?.node;
+    return loadedDetailNode?.scopeKey === cacheSpaceKey &&
+      loadedNode?.type === nodeActivityRoute.type &&
+      (loadedNode.id === nodeActivityRoute.slug || loadedNode.slug === nodeActivityRoute.slug)
+      ? loadedNode
+      : null;
+  }, [cacheSpaceKey, loadedDetailNode, nodeActivityRoute, nodeTree]);
   const activeBase = useMemo(
     () =>
       selectedBaseSlug
@@ -706,7 +739,9 @@ function BusabaseDashboardContent({
     setRecordPaginationUrl,
     usesPagePagination,
   ]);
-  const isRecordRoute = Boolean(isBaseChildRoute && !selectedBaseView && !isBaseSetupRoute);
+  const isRecordRoute = Boolean(
+    isBaseChildRoute && !selectedBaseView && !isBaseSetupRoute && !isBaseActivityRoute,
+  );
   const selectedRecordId =
     isEditRecordRoute && editRecordParams?.recordId
       ? editRecordParams.recordId
@@ -1513,44 +1548,6 @@ function BusabaseDashboardContent({
     ],
   );
 
-  const submitRenameBase = useCallback(
-    async (
-      base: BaseVO,
-      payload: { name: string; description: string },
-      options?: { mergeImmediately?: boolean },
-    ) => {
-      setError(null);
-      const changeRequest = await client.createNodeChangeRequest({
-        operations: [
-          {
-            kind: "rename",
-            nodeId: base.nodeId,
-            name: payload.name,
-            description: payload.description,
-          },
-        ],
-      });
-      if (options?.mergeImmediately) {
-        await approveAndMergeChangeRequest(changeRequest.id);
-        await refresh();
-        toast.success(messages.base.baseRenamed);
-        setLocation(`/base/${base.slug}`);
-        return;
-      }
-      await refresh();
-      toast.success(messages.base.renameRequestSubmitted);
-      setLocation(`/inbox/${changeRequest.id}`);
-    },
-    [
-      approveAndMergeChangeRequest,
-      client,
-      messages.base.baseRenamed,
-      messages.base.renameRequestSubmitted,
-      refresh,
-      setLocation,
-    ],
-  );
-
   const submitRestoreBase = useCallback(
     async (base: BaseVO) => {
       setError(null);
@@ -1930,6 +1927,7 @@ function BusabaseDashboardContent({
           changeRequests={allChangeRequests}
           emptyGuide={emptyGuide}
           nodeCache={nodeCache}
+          onOpenSearch={openSearch}
           orpc={orpc}
         />
       );
@@ -1977,6 +1975,10 @@ function BusabaseDashboardContent({
           onAddAgent={() => setLocation("/agents/new")}
         />
       );
+    }
+
+    if (locationPath === "/apps") {
+      return <AppsListView orpc={orpc} />;
     }
 
     if (locationPath === "/agents/new") {
@@ -2041,10 +2043,38 @@ function BusabaseDashboardContent({
           deletedFields={deletedFields}
           orpc={orpc}
           onCreateField={submitCreateBaseField}
-          onRenameBase={submitRenameBase}
           onRestoreField={submitRestoreField}
           onSetPrimaryField={submitSetPrimaryField}
           onUpdateFieldName={submitUpdateFieldName}
+        />
+      );
+    }
+
+    if (isBaseActivityRoute) {
+      // Must be checked BEFORE isNewRecordRoute/isEditRecordRoute/isRecordRoute
+      // below — those all derive from the same `/base/:slug/:childId` match
+      // (`isBaseChildRoute`) that "activity" also satisfies, and would
+      // otherwise treat "activity" as a nonexistent record id.
+      return (
+        <NodeActivityView
+          breadcrumb={activeBase?.name ?? messages.nav.base}
+          nodeId={activeBase?.nodeId ?? ""}
+          orpc={orpc}
+        />
+      );
+    }
+
+    if (isRecordActivityRoute) {
+      // Unlike `isBaseActivityRoute` above, this is a 4-segment path
+      // (`/base/:slug/:recordId/activity`) that can't be shadowed by the
+      // single-segment `isBaseChildRoute` match `isRecordRoute` derives
+      // from, so — unlike that one — its position in this chain isn't
+      // load-bearing. Kept next to the Base-level branch for readability.
+      return (
+        <RecordActivityView
+          breadcrumb={activeBase?.name ?? messages.nav.base}
+          orpc={orpc}
+          recordId={recordActivityParams?.recordId ?? ""}
         />
       );
     }
@@ -2080,6 +2110,7 @@ function BusabaseDashboardContent({
     if (isRecordRoute) {
       return (
         <RecordDetailView
+          baseSlug={activeBase?.slug ?? activeBase?.nodeId ?? activeBase?.id ?? ""}
           client={client}
           onDeleteChangeRequest={submitDeleteRecord}
           records={records}
@@ -2128,6 +2159,16 @@ function BusabaseDashboardContent({
           onPatchRecord={submitPatchRecord}
           onUpdateView={submitUpdateView}
           views={views}
+        />
+      );
+    }
+
+    if (nodeActivityRoute) {
+      return (
+        <NodeActivityView
+          breadcrumb={activeActivityNode?.name ?? nodeActivityRoute.type}
+          nodeId={activeActivityNode?.id ?? ""}
+          orpc={orpc}
         />
       );
     }
@@ -2181,9 +2222,15 @@ function BusabaseDashboardContent({
     isOperationRoute,
     isRecordRoute,
     keepAirAppsMounted,
+    messages,
     nodeTree,
     orpc,
     nodeDetailRoute,
+    nodeActivityRoute,
+    activeActivityNode,
+    isBaseActivityRoute,
+    isRecordActivityRoute,
+    recordActivityParams,
     selectedBaseView,
     isNewRecordRoute,
     pendingReviewAction,
@@ -2199,7 +2246,6 @@ function BusabaseDashboardContent({
     operationParams,
     submitCreateRecord,
     submitCreateBaseField,
-    submitRenameBase,
     submitCreateView,
     submitDeleteRecord,
     submitDeleteView,
@@ -2235,6 +2281,7 @@ function BusabaseDashboardContent({
     submitDeleteRecords,
     allChangeRequests,
     nodeCache,
+    openSearch,
     cacheSpaceKey,
   ]);
 

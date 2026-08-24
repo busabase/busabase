@@ -1,7 +1,7 @@
 import { spawnSync } from "node:child_process";
 import type { AgentCatalogEntryVO, AgentTransport } from "busabase-contract/domains/agents/types";
 import { getContextActorId } from "../../../context";
-import { getBudaAcpUrl, getBudaConnection } from "./buda-connection";
+import { getBudaAcpUrl, getBudaConnection, listBudaConnections } from "./buda-connection";
 
 /**
  * What Busabase is willing to launch, and how.
@@ -98,7 +98,9 @@ export interface ResolvedLaunch {
   authHeader?: string;
 }
 
-const findSpec = (slug: string): CatalogSpec | undefined => CATALOG.find((e) => e.slug === slug);
+const findSpec = (slug: string): CatalogSpec | undefined =>
+  CATALOG.find((entry) => entry.slug === slug) ??
+  (slug.startsWith("buda:") ? CATALOG.find((entry) => entry.slug === "buda") : undefined);
 
 /**
  * Local-subprocess spawning is only safe on the single-user OSS/desktop host,
@@ -179,7 +181,7 @@ async function fetchRegistryDisplayInfo(): Promise<
 export async function listCatalog(): Promise<AgentCatalogEntryVO[]> {
   const cloudHost = isCloudHost();
   const registryInfo = await fetchRegistryDisplayInfo();
-  const budaConnection = await getBudaConnection();
+  const budaConnections = await listBudaConnections();
 
   return CATALOG.map((spec) => {
     let available = false;
@@ -198,7 +200,7 @@ export async function listCatalog(): Promise<AgentCatalogEntryVO[]> {
       }
     } else {
       const localConfig = localBudaConfig();
-      if (budaConnection || (!cloudHost && localConfig.token && localConfig.agentId)) {
+      if (budaConnections.length > 0 || (!cloudHost && localConfig.token && localConfig.agentId)) {
         available = true;
       } else if (!cloudHost) {
         unavailableReason = "Set BUDA_API_KEY and BUDA_AGENT_ID to connect to Buda.";
@@ -221,8 +223,15 @@ export async function listCatalog(): Promise<AgentCatalogEntryVO[]> {
       version: synced?.version ?? spec.npxPackage?.split("@").pop() ?? null,
       available,
       unavailableReason,
-      connectionRequired: spec.slug === "buda" && cloudHost && !budaConnection,
-      connectedAgentName: spec.slug === "buda" ? (budaConnection?.agentName ?? null) : null,
+      connectionRequired: spec.slug === "buda" && cloudHost,
+      connectedAgentName: spec.slug === "buda" ? (budaConnections[0]?.agentName ?? null) : null,
+      connectedAgents:
+        spec.slug === "buda"
+          ? budaConnections.map((connection) => ({
+              slug: connection.slug,
+              name: connection.agentName,
+            }))
+          : [],
     };
   });
 }
@@ -257,7 +266,7 @@ export async function resolveLaunch(slug: string): Promise<ResolvedLaunch> {
     };
   }
 
-  const connection = await getBudaConnection();
+  const connection = await getBudaConnection(slug);
   const localConfig = localBudaConfig();
   if (!connection && (!localConfig.token || !localConfig.agentId)) {
     throw new Error(

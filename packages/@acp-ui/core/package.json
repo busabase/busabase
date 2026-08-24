@@ -1,8 +1,20 @@
 {
   "name": "@acp-ui/core",
-  "description": "Headless, renderer-free interaction core for ACP (Agent Client Protocol) agent chat. Reduces ACP session updates into a view model both live streaming and persisted-event replay can share. Renders nothing \u2014 see docs/acp-ui-convergence-roadmap.md.",
+  "description": "Headless, renderer-free interaction core for ACP (Agent Client Protocol) agent chat. Reduces ACP session updates into a view model both live streaming and persisted-event replay can share. Renders nothing.",
   "version": "0.0.1",
-  "private": true,
+  "license": "MIT",
+  "private": false,
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/mr-kelly/acp-ui.git",
+    "directory": "packages/@acp-ui/core"
+  },
+  "bugs": {
+    "url": "https://github.com/mr-kelly/acp-ui/issues"
+  },
   "type": "module",
   "scripts": {
     "typecheck": "tsc --noEmit",
@@ -20,6 +32,10 @@
     "./group": {
       "types": "./src/group/index.ts",
       "default": "./src/group/index.ts"
+    },
+    "./prompt": {
+      "types": "./src/prompt/index.ts",
+      "default": "./src/prompt/index.ts"
     }
   },
   "dependencies": {
@@ -35,11 +51,12 @@
   },
   "devDependencies": {
     "@testing-library/react": "^16.3.0",
+    "@types/node": "^24.13.2",
     "@types/react": "19.2.17",
     "jsdom": "^25.0.1",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
-    "typescript": "^5.9.3",
+    "typescript": "^7.0.2",
     "vitest": "^3.2.4"
   }
 }

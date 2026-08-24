@@ -1,4 +1,10 @@
 import type { Nodepod as NodepodInstance, NodepodProcess, RequestProxy } from "@scelar/nodepod";
+import {
+  type RunPlan,
+  resolveRunPlan,
+  substitutePort,
+  tokenizeCommand,
+} from "../../utils/airapp-runtime-descriptor";
 import { type AirAppHostedRuntime, airAppRuntimeEnv } from "../../utils/airapp-runtime-env";
 import { beginPodHeartbeat, ensureRegistered } from "../../utils/nodepod-service-worker";
 import type { AirAppMountedFile, AirAppRunner } from "./types";
@@ -30,11 +36,19 @@ export class NodepodRunner implements AirAppRunner {
   private devProcess: NodepodProcess | null = null;
   private logCallbacks: Array<(line: string) => void> = [];
   private readyCallbacks: Array<(previewPath: string) => void> = [];
+  private exitCallbacks: Array<(code: number | null) => void> = [];
   private lastReadyUrl: string | null = null;
   private proxy: RequestProxy | null = null;
   private proxyListener: ((port: number, url: string) => void) | null = null;
   private readyTimer: ReturnType<typeof setTimeout> | null = null;
   private stopHeartbeat: (() => void) | null = null;
+  /**
+   * Resolved in `mount()` from the app's own files, by the same isomorphic
+   * resolver the server-side engines use. Nodepod runs entirely in the browser,
+   * so there is no round trip to ask what to execute — which is precisely why
+   * that resolver may not import anything server-side.
+   */
+  private plan: RunPlan | null = null;
 
   /**
    * `runtimeKind` is what the running app sees in `BUSABASE_AIRAPP_RUNTIME` —
@@ -47,6 +61,13 @@ export class NodepodRunner implements AirAppRunner {
     private readonly previewScript?: string,
     private readonly runtimeKind: AirAppHostedRuntime = "nodepod",
   ) {}
+
+  private requirePlan(): RunPlan {
+    if (!this.plan) {
+      throw new Error("NodepodRunner: mount() must be called before install()/start()");
+    }
+    return this.plan;
+  }
 
   private emitLog(line: string): void {
     for (const cb of this.logCallbacks) {
@@ -65,6 +86,17 @@ export class NodepodRunner implements AirAppRunner {
   // upstream, so binary entries need no encoding hop here — they go straight
   // into the pod's virtual filesystem as bytes.
   async mount(files: Record<string, AirAppMountedFile>): Promise<void> {
+    // Only text files can carry a manifest; binary entries are passed through
+    // untouched. Nodepod is a browser-side JavaScript runtime, so a plan it
+    // cannot execute is caught by engine eligibility before a run ever starts
+    // (see `resolveEngine` in the descriptor module) — this resolve is about
+    // *which commands*, not which language.
+    const textFiles: Record<string, string> = {};
+    for (const [filePath, content] of Object.entries(files)) {
+      if (typeof content === "string") textFiles[filePath] = content;
+    }
+    this.plan = resolveRunPlan(textFiles);
+
     const { Nodepod } = await import("@scelar/nodepod");
     // Nodepod's own SW registration lives behind a page-lifetime `swReady`
     // flag on its RequestProxy singleton, so it is skipped entirely if the
@@ -126,14 +158,17 @@ export class NodepodRunner implements AirAppRunner {
     if (!nodepod) {
       throw new Error("NodepodRunner: mount() must be called before install()");
     }
-    this.emitLog("$ npm install\n");
-    const proc = await nodepod.spawn("npm", ["install"]);
+    const plan = this.requirePlan();
+    this.emitLog(`[busabase] ${plan.explanation}\n`);
+    const argv = tokenizeCommand(plan.install);
+    this.emitLog(`$ ${plan.install}\n`);
+    const proc = await nodepod.spawn(argv[0], argv.slice(1));
     this.installProcess = proc;
     proc.on("output", (chunk: string) => this.emitLog(chunk));
     proc.on("error", (chunk: string) => this.emitLog(chunk));
     const { exitCode } = await proc.completion;
     if (exitCode !== 0) {
-      throw new Error(`npm install exited with code ${exitCode}`);
+      throw new Error(`${plan.install} exited with code ${exitCode}`);
     }
   }
 
@@ -142,20 +177,38 @@ export class NodepodRunner implements AirAppRunner {
     if (!nodepod) {
       throw new Error("NodepodRunner: mount() must be called before start()");
     }
-    this.emitLog("$ npm run dev\n");
+    const plan = this.requirePlan();
+    // Nodepod serves the pod's own port through its Service Worker, so there is
+    // no host port to allocate; the app's declared port (or Node's habitual
+    // 3000) is the only number a `$PORT` placeholder could mean here.
+    const startCommand = substitutePort(plan.start, plan.port ?? 3000);
+    const startArgv = tokenizeCommand(startCommand);
+    this.emitLog(`$ ${startCommand}\n`);
     // This env is the app's only trustworthy answer to "am I Busabase-hosted?"
     // — see `utils/airapp-runtime-env.ts` for why hostname sniffing can't be.
-    const proc = await nodepod.spawn("npm", ["run", "dev"], {
+    const proc = await nodepod.spawn(startArgv[0], startArgv.slice(1), {
       env: airAppRuntimeEnv(this.runtimeKind),
     });
     this.devProcess = proc;
     proc.on("output", (chunk: string) => this.emitLog(chunk));
     proc.on("error", (chunk: string) => this.emitLog(chunk));
-    proc.on("exit", (code: number) => this.emitLog(`\n[dev server exited with code ${code}]\n`));
+    proc.on("exit", (code: number) => {
+      this.emitLog(`\n[dev server exited with code ${code}]\n`);
+      for (const cb of this.exitCallbacks) cb(code);
+    });
   }
 
   onLog(cb: (line: string) => void): void {
     this.logCallbacks.push(cb);
+  }
+
+  onExit(cb: (code: number | null) => void): void {
+    this.exitCallbacks.push(cb);
+  }
+
+  /** In-browser, so stopping and disposing are the same teardown. */
+  async stop(): Promise<void> {
+    this.dispose();
   }
 
   onReady(cb: (previewPath: string) => void): void {

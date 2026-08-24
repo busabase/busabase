@@ -17,6 +17,7 @@ export default defineConfig({
       "src/domains/agents/logic/**/*.test.ts",
       "src/domains/agents/utils/**/*.test.ts",
       "src/domains/airapp/logic/**/*.test.ts",
+      "src/domains/airapp/utils/**/*.test.ts",
       "src/domains/assets/utils/**/*.test.ts",
       "src/domains/base/utils/**/*.test.ts",
       "src/domains/dashboard/helpers/**/*.test.ts",

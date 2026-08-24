@@ -28,6 +28,8 @@
 !packages/open-domains/**
 !packages/openlib/
 !packages/openlib/**
+!packages/ts7-i18n/
+!packages/ts7-i18n/**
 !packages/share-domains/
 !packages/share-domains/**
 

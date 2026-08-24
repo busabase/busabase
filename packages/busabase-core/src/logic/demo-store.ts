@@ -45,6 +45,7 @@ import {
 import { zhCnScenario } from "../demo/scenarios/zh-cn";
 import { getPrimaryField } from "../domains/base/utils/primary-field";
 import { type DocLinesResult, sliceDocLinesRange, splitDocLines } from "../domains/doc/handlers";
+import { isSearchableNodeType, NODE_CONTENT_ADAPTERS } from "./node-content";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Stateless demo read/write layer. Every function reads the shared seed
@@ -311,19 +312,44 @@ export const demoGetDoc = (nodeIdOrSlug: string): DemoDocVO => {
 };
 
 // Unlike `assets.readTextLines`/top-level `grep` (demoUnsupported below — no
-// real per-asset object storage backs the stateless demo dataset), a Doc's `body`
-// is already a full in-memory string on `DemoDocVO` (same as `demoGetDoc`
-// already relies on) — no checkpoints/storage needed, so this is a real,
-// working demo implementation, not `demoUnsupported`. Reuses the exact same
-// clamp/cap/truncated logic (`sliceDocLinesRange`) the real storage-backed
-// `readDocLines` uses, so demo and production report identically.
-export const demoReadDocLines = (
+// real per-asset object storage backs the stateless demo dataset), node content
+// is already fully in memory here: a Doc's `body` on `DemoDocVO`, and the three
+// rich types' documents under `metadata.*Document`. So this is a real, working
+// demo implementation, not `demoUnsupported`.
+//
+// Reuses the exact same pieces the storage-backed `readNodeLines`
+// (`logic/node-content.ts`) uses — `sliceDocLinesRange` for clamp/cap/truncated
+// and the registry's own extractors for the JSON-backed types — so demo and
+// production report identical line numbers for the same content. Extracting
+// from a re-serialized document (rather than a second, demo-only extractor) is
+// what keeps that guarantee: one extraction implementation, not two.
+export const demoReadNodeLines = (
   nodeIdOrSlug: string,
   startLine: number,
   endLine: number,
 ): DocLinesResult => {
-  const doc = demoGetDoc(nodeIdOrSlug);
-  return sliceDocLinesRange(splitDocLines(doc.body), startLine, endLine);
+  // `dataset().nodes` is a TREE, so flatten it — the same `flattenNodes`
+  // every other demo node lookup (`demoGetNodeDetail`, the summary list) uses.
+  const node = flattenNodes(dataset().nodes).find(
+    (item) => item.id === nodeIdOrSlug || item.slug === nodeIdOrSlug,
+  );
+  if (!node || !isSearchableNodeType(node.type)) {
+    throw notFound("Node", nodeIdOrSlug);
+  }
+  if (node.type === "doc") {
+    return sliceDocLinesRange(splitDocLines(demoGetDoc(node.id).body), startLine, endLine);
+  }
+  if (node.type === "html") {
+    const source = parseHtmlDocument(node.metadata.htmlDocument).source;
+    return sliceDocLinesRange(splitDocLines(source), startLine, endLine);
+  }
+  const raw = JSON.stringify(
+    node.type === "whiteboard"
+      ? parseWhiteboardDocument(node.metadata.whiteboardDocument)
+      : parseWorkflowDocument(node.metadata.workflowDocument),
+  );
+  const extract = NODE_CONTENT_ADAPTERS[node.type].toSearchableText;
+  return sliceDocLinesRange(splitDocLines(extract(raw)), startLine, endLine);
 };
 
 // `demoListFileNodes` is gone with `GET /files`; File nodes are listed through

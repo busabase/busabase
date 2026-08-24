@@ -1,7 +1,7 @@
 import "server-only";
 
 /**
- * Unified Grep (P2a files+docs, P2b records) — the top-level composition
+ * Unified Grep (files + node content + records) — the top-level composition
  * entry point for `POST /grep`.
  * Mirrors `logic/search.ts`'s shape: a top-level, cross-domain `logic/` file
  * (NOT owned by `domains/assets/`, `domains/doc/`, or `domains/base/`) that
@@ -10,10 +10,13 @@ import "server-only";
  *
  * - Files adapter: delegates to the existing `grepAssets` engine, preserving
  *   concurrency, optional `rg` acceleration, cache, self-heal, and coverage.
- * - Docs adapter: lists non-archived Doc nodes, reads each body, and scans
- *   it through the same source-neutral `scanLines` core the files adapter's
- *   `scanLinesForMatches` wraps — "one pattern language everywhere" (spec's
- *   Interaction-First Principle #1).
+ - Nodes adapter: lists every non-archived node whose type stores a content
+ *   object (registry-driven — see `logic/node-content.ts`; `doc`, `html`,
+ *   `whiteboard`, `workflow`), reads each through the shared grep text cache
+ *   with a files-style concurrency pool, and scans it through the same
+ *   source-neutral `scanLines` core the files adapter's `scanLinesForMatches`
+ *   wraps — "one pattern language everywhere" (spec's Interaction-First
+ *   Principle #1). Text-native types stream; JSON types are extracted first.
  * - Records adapter (P2b): pages through canonical, active records
  *   (`busabase_records.status = "active"`, most-recently-updated first) and
  *   flattens each in-scope Base field's value from the record's HEAD commit
@@ -40,8 +43,14 @@ import { getDb } from "../db";
 import { busabaseCommits, busabaseNodes } from "../db/schema";
 import { grepAssets, grepTimeoutMs } from "../domains/assets/logic/asset-grep-logic";
 import { busabaseBaseFields, busabaseBases, busabaseRecords } from "../domains/base/schema";
-import { readDocBodyForGrep, splitDocLines } from "../domains/doc/handlers";
 import { buildNodeVisibilityCondition, buildNodeVisibilityExists } from "./node-acl";
+import {
+  isSearchableNodeType,
+  linesFromText,
+  openNodeContentLines,
+  SEARCHABLE_NODE_TYPES,
+  type SearchableNodeType,
+} from "./node-content";
 import { ensureReady } from "./seed";
 import { compileGrepPattern, scanLines } from "./text-scan-core";
 
@@ -56,7 +65,7 @@ const EMPTY_FILES_COVERAGE = {
   notReached: 0,
 };
 
-const EMPTY_DOCS_COVERAGE = {
+const EMPTY_NODES_COVERAGE = {
   scanned: 0,
   errored: [] as string[],
   notReached: 0,
@@ -68,65 +77,84 @@ const EMPTY_RECORDS_COVERAGE = {
   notReached: 0,
 };
 
-// ── Docs candidate resolution ────────────────────────────────────────────────
+// ── Node-content candidate resolution ───────────────────────────────────────
 
-interface DocCandidate {
+/**
+ * Which node types this call should scan: the caller's `scope.nodes.types`
+ * narrowed to types that actually have content, else every searchable type.
+ * A caller wanting the pre-0.18 doc-only behaviour passes `types: ["doc"]`.
+ */
+const requestedNodeTypes = (
+  scope: UnifiedGrepInput["scope"],
+): [SearchableNodeType, ...SearchableNodeType[]] => {
+  const requested = scope?.nodes?.types?.filter(isSearchableNodeType) ?? [];
+  return requested.length > 0
+    ? (requested as [SearchableNodeType, ...SearchableNodeType[]])
+    : SEARCHABLE_NODE_TYPES;
+};
+
+/**
+ * How many node bodies are read+scanned in parallel. Mirrors the files
+ * adapter's `BUSABASE_GREP_CONCURRENCY` pool (and reads the same env var, so
+ * one knob tunes both): each candidate costs a storage round trip, so a
+ * sequential loop made total latency the SUM of every node's fetch instead of
+ * roughly the slowest in each batch.
+ */
+const nodeScanConcurrency = (): number => {
+  const raw = process.env.BUSABASE_GREP_CONCURRENCY;
+  const parsed = raw ? Number(raw) : Number.NaN;
+  return Number.isInteger(parsed) && parsed >= 1 ? parsed : 4;
+};
+
+interface NodeCandidate {
   nodeId: string;
   slug: string;
   name: string;
+  type: string;
 }
 
 /**
- * Lightweight candidate listing for the docs adapter — id/slug/name only,
- * same WHERE clause `doc/handlers.ts`'s `listDocs()` uses (non-archived,
- * `type: "doc"`), but WITHOUT `listDocs()`'s eager `toDocVO()` body read for
+ * Lightweight candidate listing for the nodes adapter — id/slug/name/type
+ * only, same non-archived + ACL WHERE clause `doc/handlers.ts`'s `listDocs()`
+ * uses, but WITHOUT `listDocs()`'s eager `toDocVO()` body read for
  * every node. That eagerness would defeat budget-respecting scanning: the
- * docs adapter must check the deadline/maxMatches budget BEFORE reading each
+ * nodes adapter must check the deadline/maxMatches budget BEFORE reading each
  * doc's body (mirroring `grepAssets`'s pre-dispatch budget check), not read
  * every body up front regardless of budget.
  */
-const resolveCandidateDocs = async (
+const resolveCandidateNodes = async (
   db: Db,
   spaceId: string,
   scope: UnifiedGrepInput["scope"],
-): Promise<DocCandidate[]> => {
+): Promise<NodeCandidate[]> => {
   const conditions = [
     eq(busabaseNodes.spaceId, spaceId),
-    eq(busabaseNodes.type, "doc"),
+    // Registry-driven, NOT a hardcoded "doc": every node type that stores a
+    // content object is searchable. See `logic/node-content.ts`.
+    inArray(busabaseNodes.type, requestedNodeTypes(scope)),
     isNull(busabaseNodes.archivedAt),
   ];
   // Node ACL in the candidate SQL (never post-filtered): the scanned/truncated
   // coverage stats are computed from this candidate set, so a post-filter
-  // would both skew those numbers and reveal that hidden docs exist.
+  // would both skew those numbers and reveal that hidden nodes exist.
   const visible = buildNodeVisibilityCondition(db);
   if (visible) {
     conditions.push(visible);
   }
-  if (scope?.docs?.nodeIds?.length) {
-    conditions.push(inArray(busabaseNodes.id, scope.docs.nodeIds));
+  if (scope?.nodes?.nodeIds?.length) {
+    conditions.push(inArray(busabaseNodes.id, scope.nodes.nodeIds));
   }
   return db
-    .select({ nodeId: busabaseNodes.id, slug: busabaseNodes.slug, name: busabaseNodes.name })
+    .select({
+      nodeId: busabaseNodes.id,
+      slug: busabaseNodes.slug,
+      name: busabaseNodes.name,
+      type: busabaseNodes.type,
+    })
     .from(busabaseNodes)
     .where(and(...conditions))
     .orderBy(asc(busabaseNodes.position), asc(busabaseNodes.createdAt));
 };
-
-/**
- * `readDocBodyForGrep` and `splitDocLines` (grep's honest-coverage Doc body
- * read + the shared line-splitting convention) now live in
- * `domains/doc/handlers.ts` — a more natural home, since they're Doc-domain
- * concerns, not grep-specific, and `readDocLines` (the Doc-domain equivalent
- * of `assets.readTextLines`) is a second caller. Imported above; this file
- * keeps only the thin async-generator adapter that feeds `scanLines`, shared
- * by BOTH the docs adapter (a Doc body) and the records adapter (one field's
- * flattened value) below.
- */
-async function* linesFromBody(body: string): AsyncGenerator<string> {
-  for (const line of splitDocLines(body)) {
-    yield line;
-  }
-}
 
 // ── Records candidate resolution + batch loading ────────────────────────────
 
@@ -157,7 +185,7 @@ const resolveCandidateRecords = async (
     isNull(busabaseBases.archivedAt),
     isNull(busabaseBases.deletedAt),
   ];
-  // Node ACL in the candidate SQL — same reasoning as resolveCandidateDocs.
+  // Node ACL in the candidate SQL — same reasoning as resolveCandidateNodes.
   const recordsVisible = buildNodeVisibilityExists(db, busabaseBases.nodeId);
   if (recordsVisible) {
     conditions.push(recordsVisible);
@@ -284,9 +312,9 @@ export const grepUnified = async (input: UnifiedGrepInput): Promise<UnifiedGrepR
   // Compiled once — both adapters scan through the identical compiled regex
   // ("one pattern language everywhere", spec's Interaction-First Principle #1).
   const regex = compileGrepPattern(input.pattern, input.flags);
-  const sources = input.sources ?? ["files", "docs", "records"];
+  const sources = input.sources ?? ["files", "nodes", "records"];
 
-  // One shared wall-clock deadline for the docs + records phases, from the
+  // One shared wall-clock deadline for the nodes + records phases, from the
   // SAME budget constant/env var `grepAssets` uses (`grepTimeoutMs`) — not a
   // second timeout knob. `grepAssets` itself computes its own deadline
   // internally (its signature takes no deadline param, and it is
@@ -298,13 +326,13 @@ export const grepUnified = async (input: UnifiedGrepInput): Promise<UnifiedGrepR
   const deadline = Date.now() + grepTimeoutMs();
   const matches: UnifiedGrepMatchVO[] = [];
   let filesCoverage = EMPTY_FILES_COVERAGE;
-  let docsCoverage = EMPTY_DOCS_COVERAGE;
+  let nodesCoverage = EMPTY_NODES_COVERAGE;
   let recordsCoverage = EMPTY_RECORDS_COVERAGE;
   let truncated = false;
 
-  // Files first (deterministic order: files, then docs — matches the spec's
+  // Files first (deterministic order: files, then nodes — matches the spec's
   // API surface). Files gets its FULL requested maxMatches budget, not a
-  // pre-split share — it runs to completion before docs even starts.
+  // pre-split share — it runs to completion before nodes even starts.
   if (sources.includes("files")) {
     const filesResult = await grepAssets({
       pattern: input.pattern,
@@ -327,58 +355,91 @@ export const grepUnified = async (input: UnifiedGrepInput): Promise<UnifiedGrepR
     if (filesResult.truncated) truncated = true;
   }
 
-  // Docs second — whatever budget files already consumed (`matches.length`)
+  // Nodes second — whatever budget files already consumed (`matches.length`)
   // is what's left; this is the "files' matches count against the SAME
-  // budget docs then sees" sharing the spec calls for.
-  if (sources.includes("docs")) {
-    const candidates = await resolveCandidateDocs(db, spaceId, input.scope);
+  // budget nodes then sees" sharing the spec calls for.
+  if (sources.includes("nodes")) {
+    const candidates = await resolveCandidateNodes(db, spaceId, input.scope);
     let scanned = 0;
     const errored: string[] = [];
     let notReached = 0;
+    const concurrency = Math.max(1, nodeScanConcurrency());
 
-    for (let i = 0; i < candidates.length; i++) {
-      // Budget check BEFORE dispatching the next doc — mirrors `grepAssets`'s
-      // pre-dispatch check exactly: `notReached` counts docs never even
-      // started, not docs that were scanned but had no match.
+    for (let i = 0; i < candidates.length; ) {
+      // Budget check BEFORE dispatching the next batch — same gate the
+      // sequential loop applied per candidate, and the same one the files
+      // adapter applies per batch. An already-dispatched batch always runs to
+      // completion; this only stops a NEW one from starting.
       if (Date.now() >= deadline || matches.length >= input.maxMatches) {
         notReached = candidates.length - i;
         truncated = true;
         break;
       }
-      const candidate = candidates[i];
-      try {
-        const body = await readDocBodyForGrep(candidate.nodeId);
-        const { hits, truncated: docTruncated } = await scanLines(linesFromBody(body), {
-          regex,
-          contextLines: input.contextLines,
-          maxMatches: input.maxMatches - matches.length,
-          deadline,
-        });
-        scanned++;
-        matches.push(
-          ...hits.map(
-            (hit): UnifiedGrepMatchVO => ({
-              source: "docs",
-              nodeId: candidate.nodeId,
-              slug: candidate.slug,
-              name: candidate.name,
-              ...hit,
-            }),
-          ),
-        );
-        if (docTruncated) truncated = true;
-      } catch {
-        // Body read/scan failure for this doc — it was NOT actually
-        // searched. Same honesty `grepAssets` applies per-candidate: this
-        // must never be counted as a clean "scanned, no match".
-        errored.push(candidate.nodeId);
+
+      const batch = candidates.slice(i, i + concurrency);
+      // Every node in the batch gets the SAME remaining-match budget, computed
+      // once per batch — exactly what the sequential loop passed per candidate.
+      const batchMaxMatches = input.maxMatches - matches.length;
+
+      const settled = await Promise.allSettled(
+        batch.map(async (candidate) => {
+          const type = candidate.type as SearchableNodeType;
+          const lines = await openNodeContentLines(type, candidate.nodeId);
+          return scanLines(lines, {
+            regex,
+            contextLines: input.contextLines,
+            maxMatches: batchMaxMatches,
+            deadline,
+          });
+        }),
+      );
+
+      // Fold outcomes in the batch's ORIGINAL candidate order (not completion
+      // order), so `matches` stays deterministic regardless of which node's
+      // storage read happened to finish first.
+      for (let j = 0; j < batch.length; j++) {
+        const outcome = settled[j];
+        const candidate = batch[j];
+        if (outcome.status === "fulfilled") {
+          scanned++;
+          matches.push(
+            ...outcome.value.hits.map(
+              (hit): UnifiedGrepMatchVO => ({
+                source: "nodes",
+                type: candidate.type as SearchableNodeType,
+                nodeId: candidate.nodeId,
+                slug: candidate.slug,
+                name: candidate.name,
+                ...hit,
+              }),
+            ),
+          );
+          if (outcome.value.truncated) truncated = true;
+        } else {
+          // Content read/scan failure for this node — it was NOT actually
+          // searched. Same honesty the files adapter applies per candidate:
+          // never counted as a clean "scanned, no match".
+          errored.push(candidate.nodeId);
+        }
       }
+
+      // A dispatched batch runs every node to completion even if an earlier one
+      // already hit `maxMatches`, so `matches` can overshoot by up to
+      // `concurrency - 1` nodes' worth — bounded, never unbounded. Cap it here
+      // so the response never exceeds `maxMatches` and the next iteration's
+      // pre-dispatch check sees the true state.
+      if (matches.length > input.maxMatches) {
+        matches.length = input.maxMatches; // truncate in place — `matches` is const
+        truncated = true;
+      }
+
+      i += batch.length;
     }
-    docsCoverage = { scanned, errored, notReached };
+    nodesCoverage = { scanned, errored, notReached };
   }
 
-  // Records third — whatever budget files+docs already consumed is what's
-  // left, same sharing rule as docs' comment above.
+  // Records third — whatever budget files+nodes already consumed is what's
+  // left, same sharing rule as nodes' comment above.
   if (sources.includes("records")) {
     const candidates = await resolveCandidateRecords(db, spaceId, input.scope);
     const { commitFieldsById, fieldsByBaseId } = await loadRecordBatchData(db, candidates);
@@ -411,7 +472,7 @@ export const grepUnified = async (input: UnifiedGrepInput): Promise<UnifiedGrepR
           if (matches.length >= input.maxMatches) break;
           const flattened = flattenFieldValue(field.type, commitFields[field.slug]);
           if (flattened === undefined) continue;
-          const { hits, truncated: fieldTruncated } = await scanLines(linesFromBody(flattened), {
+          const { hits, truncated: fieldTruncated } = await scanLines(linesFromText(flattened), {
             regex,
             contextLines: input.contextLines,
             maxMatches: input.maxMatches - matches.length,
@@ -454,7 +515,7 @@ export const grepUnified = async (input: UnifiedGrepInput): Promise<UnifiedGrepR
 
   return {
     matches: matches.slice(0, input.maxMatches),
-    coverage: { files: filesCoverage, docs: docsCoverage, records: recordsCoverage },
+    coverage: { files: filesCoverage, nodes: nodesCoverage, records: recordsCoverage },
     truncated,
   };
 };

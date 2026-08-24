@@ -26,7 +26,7 @@
  */
 
 /** Every runtime in which Busabase itself is hosting the AirApp process. */
-export type AirAppHostedRuntime = "nodepod" | "local-node" | "srt" | "embed";
+export type AirAppHostedRuntime = "nodepod" | "local" | "srt" | "sandock" | "embed";
 
 /** Env var name — kept here so the two engines and the docs can't drift apart. */
 export const AIRAPP_RUNTIME_ENV_VAR = "BUSABASE_AIRAPP_RUNTIME";

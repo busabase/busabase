@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { getBudaAcpUrl, getBudaOAuthOrigin } from "./buda-connection";
+import { getBudaAcpUrl, getBudaOAuthOrigin, getBudaSessionSlug } from "./buda-connection";
 
 const originalOAuthOrigin = process.env.BUDA_OAUTH_ORIGIN;
 const originalAcpUrl = process.env.BUDA_ACP_URL;
@@ -12,6 +12,10 @@ afterEach(() => {
 });
 
 describe("Buda connection endpoints", () => {
+  it("creates an agent-specific session slug", () => {
+    expect(getBudaSessionSlug("agent/123")).toBe("buda:agent%2F123");
+  });
+
   it("uses development Buda for OAuth and ACP by default", () => {
     delete process.env.BUDA_OAUTH_ORIGIN;
     delete process.env.BUDA_ACP_URL;

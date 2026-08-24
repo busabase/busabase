@@ -12,6 +12,7 @@ import "@milkdown/crepe/theme/frame.css";
 import { Milkdown, MilkdownProvider, useEditor } from "@milkdown/react";
 import { useEffect, useRef } from "react";
 import { useCoreI18n } from "../../../i18n";
+import { docVideoLinkPlugin, docVideoPlugin } from "./doc-video";
 import "./doc-editor.css";
 
 export interface DocEditorCrepeProps {
@@ -43,16 +44,16 @@ function DocEditorInner({
     const crepe = new Crepe({
       root,
       defaultValue: content,
-      // Placeholder's decoration computation throws ("Cannot read properties
-      // of undefined (reading 'localsInner')") when the doc briefly becomes
-      // empty (e.g. select-all + delete while editing) — and that crash was
-      // observed to silently break the markdownUpdated listener for the rest
-      // of the session, so further typing never reached `onChange` and got
-      // lost on save. Disabling the feature removes the crash (and the data
-      // loss with it); re-enable once fixed upstream in @milkdown/crepe.
-      features: {
-        [Crepe.Feature.Placeholder]: false,
-      },
+      // Placeholder used to be disabled here: it threw "Cannot read properties
+      // of undefined (reading 'localsInner')" as soon as the doc briefly went
+      // empty (select-all + delete while editing), and that crash killed the
+      // markdownUpdated listener for the rest of the session — everything typed
+      // afterwards never reached `onChange` and was silently dropped on save.
+      // The cause was not Placeholder: the workspace carried two copies of
+      // prosemirror-view, and ProseMirror's DecorationGroup does
+      // `instanceof DecorationSet` against its own class, so the first plugin
+      // to make Placeholder a *second* decoration source blew up. Deduped in
+      // #6619, and re-verified with the original repro (see the changelog).
       featureConfigs: {
         [Crepe.Feature.Placeholder]: {
           text: messages.docEditor.placeholder,
@@ -109,6 +110,10 @@ function DocEditorInner({
         },
       },
     });
+    // Registered after construction on purpose: docVideoPlugin wraps whichever
+    // image node views Crepe's own features already installed, so it has to be
+    // the last one to touch nodeViewCtx (see doc-video.ts).
+    crepe.editor.use(docVideoPlugin).use(docVideoLinkPlugin);
     crepe.setReadonly(!editable);
     crepe.on((listener) => {
       listener.markdownUpdated((_ctx, markdown) => onChangeRef.current(markdown));

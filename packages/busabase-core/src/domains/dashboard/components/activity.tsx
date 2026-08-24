@@ -1,3 +1,5 @@
+import { useQuery } from "@tanstack/react-query";
+import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";
 import {
   CheckCircle2,
   ChevronRight,
@@ -8,9 +10,15 @@ import {
   PencilLine,
 } from "lucide-react";
 import { SPALink as Link } from "openlib/ui/dashboard";
-import { useCoreLocale } from "../../../i18n";
-import type { ActivityEvent, ActivityEventTone } from "../helpers/activity-events";
+import { useMemo } from "react";
+import { useCoreI18n, useCoreLocale } from "../../../i18n";
+import {
+  type ActivityEvent,
+  type ActivityEventTone,
+  buildActivityEventFromItem,
+} from "../helpers/activity-events";
 import { formatDetailTime, formatListTime } from "../helpers/format";
+import { InboxListSkeleton } from "./skeletons";
 
 export type { ActivityEvent, ActivityEventTone } from "../helpers/activity-events";
 
@@ -143,5 +151,162 @@ export function ActivityRow({ event }: { event: ActivityEvent }) {
         </div>
       </div>
     </Link>
+  );
+}
+
+/**
+ * A single node's raw activity stream (no version-number aggregation), reusing
+ * `ActivityRow` so it looks identical to the global feed on `/activity` and
+ * on `home.tsx`. Backed by `activity.listForNode` — a flat, newest-first list,
+ * not the global feed's keyset pagination.
+ */
+export function NodeActivityPanel({ nodeId, orpc }: { nodeId: string; orpc: BusabaseQueryUtils }) {
+  const messages = useCoreI18n();
+  const activityQuery = useQuery(
+    orpc.activity.listForNode.queryOptions({ input: { nodeId, limit: 50 } }),
+  );
+  const activityEvents = useMemo(
+    () =>
+      (activityQuery.data ?? [])
+        .map((item) => buildActivityEventFromItem(item, messages))
+        .filter((event): event is ActivityEvent => event !== null),
+    [activityQuery.data, messages],
+  );
+
+  if (activityQuery.isPending) {
+    return <InboxListSkeleton />;
+  }
+
+  if (activityEvents.length === 0) {
+    return (
+      <p className="px-2 py-3 text-muted-foreground text-sm">
+        {messages.nodeDetail.activityEmptyBody}
+      </p>
+    );
+  }
+
+  return (
+    <div className="rounded-lg border border-border/60 px-1 py-1">
+      {activityEvents.map((event) => (
+        <ActivityRow event={event} key={event.id} />
+      ))}
+    </div>
+  );
+}
+
+/**
+ * Full-page wrapper around `NodeActivityPanel`, for the routed
+ * `/{type}/:slug/activity` (and `/base/:slug/activity`) sub-page — the
+ * "•••" menu's Activity item navigates here instead of opening a popover.
+ * Same header/scroll-container shape as `ActivityView` (the global
+ * `/activity` feed) in `inbox.tsx`, just scoped to one node.
+ */
+export function NodeActivityView({
+  nodeId,
+  orpc,
+  breadcrumb,
+}: {
+  nodeId: string;
+  orpc: BusabaseQueryUtils;
+  breadcrumb?: string;
+}) {
+  const messages = useCoreI18n();
+
+  return (
+    <section className="flex h-full min-h-0 w-full min-w-0 flex-1 flex-col overflow-hidden">
+      <div className="flex items-center justify-between gap-4 border-b px-5 py-2.5">
+        <div className="font-medium text-sm">
+          {breadcrumb
+            ? `${breadcrumb} · ${messages.nodeDetail.activity}`
+            : messages.nodeDetail.activity}
+        </div>
+      </div>
+      <div
+        className="min-h-0 flex-1 overflow-auto px-4 py-4 sm:px-5"
+        data-dashboard-scroll="activity"
+      >
+        <NodeActivityPanel nodeId={nodeId} orpc={orpc} />
+      </div>
+    </section>
+  );
+}
+
+/**
+ * Record-scoped mirror of `NodeActivityPanel` — backed by
+ * `activity.listForRecord` instead of `activity.listForNode`. Same reuse of
+ * `ActivityRow`/`buildActivityEventFromItem`, just a different query.
+ */
+export function RecordActivityPanel({
+  recordId,
+  orpc,
+}: {
+  recordId: string;
+  orpc: BusabaseQueryUtils;
+}) {
+  const messages = useCoreI18n();
+  const activityQuery = useQuery(
+    orpc.activity.listForRecord.queryOptions({ input: { recordId, limit: 50 } }),
+  );
+  const activityEvents = useMemo(
+    () =>
+      (activityQuery.data ?? [])
+        .map((item) => buildActivityEventFromItem(item, messages))
+        .filter((event): event is ActivityEvent => event !== null),
+    [activityQuery.data, messages],
+  );
+
+  if (activityQuery.isPending) {
+    return <InboxListSkeleton />;
+  }
+
+  if (activityEvents.length === 0) {
+    return (
+      <p className="px-2 py-3 text-muted-foreground text-sm">
+        {messages.nodeDetail.activityEmptyBody}
+      </p>
+    );
+  }
+
+  return (
+    <div className="rounded-lg border border-border/60 px-1 py-1">
+      {activityEvents.map((event) => (
+        <ActivityRow event={event} key={event.id} />
+      ))}
+    </div>
+  );
+}
+
+/**
+ * Full-page wrapper around `RecordActivityPanel`, for the routed
+ * `/base/:slug/:recordId/activity` sub-page — reached from the Record
+ * detail view's "•••" menu, same pattern as `NodeActivityView`.
+ */
+export function RecordActivityView({
+  recordId,
+  orpc,
+  breadcrumb,
+}: {
+  recordId: string;
+  orpc: BusabaseQueryUtils;
+  breadcrumb?: string;
+}) {
+  const messages = useCoreI18n();
+
+  return (
+    <section className="flex h-full min-h-0 w-full min-w-0 flex-1 flex-col overflow-hidden">
+      <div className="flex items-center justify-between gap-4 border-b px-5 py-2.5">
+        <div className="font-medium text-sm">
+          {breadcrumb
+            ? `${breadcrumb} · ${messages.nodeDetail.activity}`
+            : messages.nodeDetail.activity}
+        </div>
+      </div>
+      <div
+        className="min-h-0 flex-1 overflow-auto px-4 py-4 sm:px-5"
+        data-dashboard-scroll="activity"
+      >
+        <RecordActivityPanel orpc={orpc} recordId={recordId} />
+      </div>
+    </section>
   );
 }

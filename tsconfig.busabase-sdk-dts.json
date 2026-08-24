@@ -1,0 +1,27 @@
+{
+  // Declaration-emit project for apps/busabase-sdk's tsdown build — NOT used for
+  // typechecking (the package's own tsconfig.json does that; the dts run passes
+  // --noCheck).
+  //
+  // Why this file lives at the REPO ROOT: the SDK bundles busabase-contract /
+  // open-domains / openlib sources into its .d.ts via tsdown's `noExternal`,
+  // and rolldown-plugin-dts's tsgo generator passes `--rootDir <directory of
+  // this tsconfig>` on the CLI (overriding any rootDir set in here). Files
+  // outside rootDir fail declaration emit with TS6059, so the file must sit in
+  // a directory that contains ALL bundled sources — the workspace root. Moving
+  // it into apps/busabase-sdk/ breaks the build.
+  "extends": "./apps/busabase-sdk/tsconfig.json",
+  "include": [
+    "apps/busabase-sdk/src/**/*.ts",
+    "packages/busabase-contract/src/**/*.ts",
+    "packages/open-domains/**/*.ts",
+    "packages/openlib/**/*.ts"
+  ],
+  "exclude": [
+    "packages/busabase-contract/src/**/*.test.ts",
+    "packages/open-domains/**/*.test.ts",
+    "packages/openlib/**/*.test.ts",
+    "packages/openlib/**/*.test.tsx",
+    "packages/openlib/ui/**"
+  ]
+}

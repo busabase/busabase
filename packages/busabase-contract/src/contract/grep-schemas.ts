@@ -1,10 +1,10 @@
 /**
- * Unified Grep (P2a files+docs, P2b records) — top-level, domain-agnostic
+ * Unified Grep (files + node content + records) — top-level, domain-agnostic
  * schemas for `POST /grep`.
  *
  * Mirrors how `search`'s schemas live top-level in `contract/schemas.ts`
  * rather than inside a single domain's contract: `grep` composes multiple
- * domains (files, Docs, Base records), so its schemas belong at the same
+ * domains (files, node content, Base records), so its schemas belong at the same
  * level as `search`'s, not inside `domains/assets/` or `domains/base/`.
  * The internal files scanner and SDK compatibility adapter keep files-only
  * schemas in `domains/assets/types.ts`. This file intentionally reuses only
@@ -28,7 +28,15 @@ import {
  * `busabase_field_values` search projection, per the spec's decision record
  * on why that projection can't back grep.
  */
-export const GrepSourceSchema = z.enum(["files", "docs", "records"]);
+/**
+ * BREAKING (renamed from "docs" in 0.18.0): this source scans the content of
+ * EVERY node type that stores a content object — `doc`, `html`, `whiteboard`
+ * and `workflow` — not just Docs. The old name described the only type that
+ * had been implemented, not the category, and kept the other three silently
+ * unsearchable. Narrow with `scope.nodes.types` to get the old doc-only
+ * behaviour back explicitly.
+ */
+export const GrepSourceSchema = z.enum(["files", "nodes", "records"]);
 export type GrepSource = z.infer<typeof GrepSourceSchema>;
 
 /** Files scope — identical shape to the internal files scanner's `GrepScopeSchema`. */
@@ -40,11 +48,16 @@ export const UnifiedGrepFilesScopeSchema = z.object({
 });
 export type UnifiedGrepFilesScope = z.infer<typeof UnifiedGrepFilesScopeSchema>;
 
-/** Docs scope — narrow to specific Doc node ids; omitted scans every non-archived Doc in the Space. */
-export const UnifiedGrepDocsScopeSchema = z.object({
+/** Node-content scope — narrow by node id and/or node type; omitted scans every non-archived node that has content. */
+export const SearchableNodeTypeSchema = z.enum(["doc", "html", "whiteboard", "workflow"]);
+export type SearchableNodeType = z.infer<typeof SearchableNodeTypeSchema>;
+
+export const UnifiedGrepNodesScopeSchema = z.object({
   nodeIds: z.array(z.string()).optional(),
+  /** Narrow to specific node types. Omitted = every type that has content. */
+  types: z.array(SearchableNodeTypeSchema).optional(),
 });
-export type UnifiedGrepDocsScope = z.infer<typeof UnifiedGrepDocsScopeSchema>;
+export type UnifiedGrepNodesScope = z.infer<typeof UnifiedGrepNodesScopeSchema>;
 
 /**
  * Records scope — narrow to specific Bases by id and/or slug (union
@@ -60,7 +73,7 @@ export type UnifiedGrepRecordsScope = z.infer<typeof UnifiedGrepRecordsScopeSche
 
 export const UnifiedGrepScopeSchema = z.object({
   files: UnifiedGrepFilesScopeSchema.optional(),
-  docs: UnifiedGrepDocsScopeSchema.optional(),
+  nodes: UnifiedGrepNodesScopeSchema.optional(),
   records: UnifiedGrepRecordsScopeSchema.optional(),
 });
 export type UnifiedGrepScope = z.infer<typeof UnifiedGrepScopeSchema>;
@@ -69,10 +82,10 @@ export const UnifiedGrepInputSchema = z.object({
   pattern: z.string().min(1),
   /** JS RegExp flags, e.g. `"i"` for case-insensitive. */
   flags: z.string().optional().default(""),
-  /** Which sources to scan. Omitted = all three (`files`, `docs`, `records`). */
+  /** Which sources to scan. Omitted = all three (`files`, `nodes`, `records`). */
   sources: z.array(GrepSourceSchema).optional(),
   scope: UnifiedGrepScopeSchema.optional(),
-  /** Shared across every scanned source — files run to completion first, then docs, then whatever remains goes to records. */
+  /** Shared across every scanned source — files run to completion first, then nodes, then whatever remains goes to records. */
   maxMatches: z.coerce
     .number()
     .int()
@@ -114,14 +127,21 @@ export const UnifiedGrepFileMatchVOSchema = z.object({
 });
 export type UnifiedGrepFileMatchVO = z.infer<typeof UnifiedGrepFileMatchVOSchema>;
 
-export const UnifiedGrepDocMatchVOSchema = z.object({
-  source: z.literal("docs"),
+export const UnifiedGrepNodeMatchVOSchema = z.object({
+  source: z.literal("nodes"),
+  /**
+   * Which node type matched. Also tells you how to read `line`: for `doc` and
+   * `html` it is a real source line; for `whiteboard` and `workflow` the stored
+   * object is JSON, so it indexes the EXTRACTED text (one line per authored
+   * string, document order) and is not a position to open the file at.
+   */
+  type: SearchableNodeTypeSchema,
   nodeId: z.string(),
   slug: z.string(),
   name: z.string(),
   ...grepHitFields,
 });
-export type UnifiedGrepDocMatchVO = z.infer<typeof UnifiedGrepDocMatchVOSchema>;
+export type UnifiedGrepNodeMatchVO = z.infer<typeof UnifiedGrepNodeMatchVOSchema>;
 
 export const UnifiedGrepRecordMatchVOSchema = z.object({
   source: z.literal("records"),
@@ -135,7 +155,7 @@ export type UnifiedGrepRecordMatchVO = z.infer<typeof UnifiedGrepRecordMatchVOSc
 
 export const UnifiedGrepMatchVOSchema = z.discriminatedUnion("source", [
   UnifiedGrepFileMatchVOSchema,
-  UnifiedGrepDocMatchVOSchema,
+  UnifiedGrepNodeMatchVOSchema,
   UnifiedGrepRecordMatchVOSchema,
 ]);
 export type UnifiedGrepMatchVO = z.infer<typeof UnifiedGrepMatchVOSchema>;
@@ -151,17 +171,17 @@ export const UnifiedGrepFilesCoverageSchema = z.object({
 });
 export type UnifiedGrepFilesCoverage = z.infer<typeof UnifiedGrepFilesCoverageSchema>;
 
-/** Docs coverage — simpler than files' (no missing/stale/unsearchable concept for a storage-native Doc body). */
-export const UnifiedGrepDocsCoverageSchema = z.object({
+/** Node-content coverage — simpler than files' (no missing/stale/unsearchable concept for a storage-native node body). */
+export const UnifiedGrepNodesCoverageSchema = z.object({
   scanned: z.number().int().nonnegative(),
-  /** Doc node ids whose body read/scan was attempted but failed — NOT a clean "scanned, no match". */
+  /** Node ids whose content read/scan was attempted but failed — NOT a clean "scanned, no match". */
   errored: z.array(z.string()),
-  /** Count of in-scope docs the scan never reached because the deadline/maxMatches budget ran out first. */
+  /** Count of in-scope nodes the scan never reached because the deadline/maxMatches budget ran out first. */
   notReached: z.number().int().nonnegative(),
 });
-export type UnifiedGrepDocsCoverage = z.infer<typeof UnifiedGrepDocsCoverageSchema>;
+export type UnifiedGrepNodesCoverage = z.infer<typeof UnifiedGrepNodesCoverageSchema>;
 
-/** Records coverage — same simple shape as docs' (no missing/stale/unsearchable concept for canonical commit data). */
+/** Records coverage — same simple shape as nodes' (no missing/stale/unsearchable concept for canonical commit data). */
 export const UnifiedGrepRecordsCoverageSchema = z.object({
   scanned: z.number().int().nonnegative(),
   /** Record ids whose commit-fields read/flatten/scan was attempted but failed — NOT a clean "scanned, no match". */
@@ -173,13 +193,13 @@ export type UnifiedGrepRecordsCoverage = z.infer<typeof UnifiedGrepRecordsCovera
 
 export const UnifiedGrepCoverageSchema = z.object({
   files: UnifiedGrepFilesCoverageSchema,
-  docs: UnifiedGrepDocsCoverageSchema,
+  nodes: UnifiedGrepNodesCoverageSchema,
   records: UnifiedGrepRecordsCoverageSchema,
 });
 export type UnifiedGrepCoverage = z.infer<typeof UnifiedGrepCoverageSchema>;
 
 export const UnifiedGrepResultVOSchema = z.object({
-  /** Deterministic order: every `files` match, then every `docs` match, then every `records` match. */
+  /** Deterministic order: every `files` match, then every `nodes` match, then every `records` match. */
   matches: z.array(UnifiedGrepMatchVOSchema),
   coverage: UnifiedGrepCoverageSchema,
   /** True when any source truncated, or any source has `notReached > 0`. */

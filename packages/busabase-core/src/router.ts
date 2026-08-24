@@ -5,6 +5,10 @@ import { getDb } from "./db";
 import { agentsRouter } from "./domains/agents/router";
 import { airappRouter } from "./domains/airapp/router";
 import { assetsRouter } from "./domains/assets/router";
+import {
+  confirmNodeIconUpload,
+  requestNodeIconUploadUrl,
+} from "./domains/attachments/logic/attachments-logic";
 import { baseRouter, recordRouter, viewRouter } from "./domains/base/router";
 import { docRouter } from "./domains/doc/router";
 import { dumpRouter } from "./domains/dump/router";
@@ -26,6 +30,8 @@ import {
   revokeNodePrincipal,
   updateNodeVisibility,
 } from "./logic/node-acl";
+import { listNodeActivity, listRecordActivity } from "./logic/node-activity";
+import { readNodeLines } from "./logic/node-content";
 import { getNodeDetail } from "./logic/node-detail";
 import { disableNodeShare, getNodeShare, setNodeShare } from "./logic/node-share";
 import {
@@ -125,6 +131,9 @@ const busabaseRouterImpl = busabase.router({
     updateContent: busabase.nodes.updateContent.handler(async ({ input }) =>
       updateNodeContent(input),
     ),
+    readLines: busabase.nodes.readLines.handler(async ({ input }) =>
+      readNodeLines(input.nodeId, input.startLine, input.endLine),
+    ),
     purge: busabase.nodes.purge.handler(async ({ input }) => purgeNode(input.nodeId)),
     updateVisibility: busabase.nodes.updateVisibility.handler(async ({ input }) => {
       await updateNodeVisibility(input.nodeId, input.visibility, resolveActorId("local-user"));
@@ -195,6 +204,14 @@ const busabaseRouterImpl = busabase.router({
         toNodeShareVO(await disableNodeShare(input.nodeId)),
       ),
     },
+    icon: {
+      createUploadUrl: busabase.nodes.icon.createUploadUrl.handler(async ({ input }) =>
+        requestNodeIconUploadUrl(await getDb(), input),
+      ),
+      confirm: busabase.nodes.icon.confirm.handler(async ({ input }) =>
+        confirmNodeIconUpload(await getDb(), input),
+      ),
+    },
   },
   auditEvents: {
     list: busabase.auditEvents.list.handler(async ({ input }) => listAuditEvents(input)),
@@ -202,6 +219,12 @@ const busabaseRouterImpl = busabase.router({
   },
   activity: {
     listPaged: busabase.activity.listPaged.handler(async ({ input }) => listActivityPaged(input)),
+    listForNode: busabase.activity.listForNode.handler(async ({ input }) =>
+      listNodeActivity(input.nodeId, { limit: input.limit }),
+    ),
+    listForRecord: busabase.activity.listForRecord.handler(async ({ input }) =>
+      listRecordActivity(input.recordId, { limit: input.limit }),
+    ),
   },
   comments: {
     list: busabase.comments.list.handler(async ({ input }) => listComments(input)),

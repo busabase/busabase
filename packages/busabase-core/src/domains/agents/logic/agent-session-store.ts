@@ -151,6 +151,25 @@ export async function loadSessions(): Promise<AgentSessionVO[]> {
   }
 }
 
+/** Delete every persisted session (and cascaded transcript event) for one connected agent. */
+export async function deleteSessionsBySlug(slug: string): Promise<number> {
+  const database = await db();
+  const actorId = getContextActorId();
+  const deleted = await database
+    .delete(busabaseAgentSessions)
+    .where(
+      and(
+        eq(busabaseAgentSessions.spaceId, getContextSpaceId()),
+        eq(busabaseAgentSessions.slug, slug),
+        actorId
+          ? or(eq(busabaseAgentSessions.actorId, actorId), isNull(busabaseAgentSessions.actorId))
+          : undefined,
+      ),
+    )
+    .returning();
+  return deleted.length;
+}
+
 /** Replay a persisted transcript — what a client sees for a session that outlived its process. */
 export async function loadSessionEvents(
   sessionId: string,

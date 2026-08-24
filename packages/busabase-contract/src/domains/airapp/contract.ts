@@ -20,16 +20,16 @@ export const createAirAppInputSchema = createFileTreeInputSchema;
 export const airappFileOperationInputSchema = fileTreeFileOperationInputSchema;
 export const createAirAppChangeRequestInputSchema = createFileTreeChangeRequestInputSchema;
 
-// --- local-node runtime (server-side execution engine) -----------------------
+// --- local runtime (server-side execution engine) -----------------------
 // Mirrors the AirAppRunner interface's mount/install/start + onLog/onReady
 // semantics as a single streamed operation instead of separate RPCs: the
 // server owns the whole `npm install` -> `npm run dev` lifecycle for one
-// LocalSandbox process, and the browser-side `LocalNodeRunner` (see
-// `busabase-core/domains/airapp/components/runners/local-node-runner.ts`)
+// LocalSandbox process, and the browser-side `LocalRunner` (see
+// `busabase-core/domains/airapp/components/runners/local-runner.ts`)
 // replays each event into the matching AirAppRunner callback. RPC-only by
 // design (no `.route(...)`), same as `live.subscribe` — this is a long-lived
 // Event Iterator, not a REST-shaped call.
-export const airAppRunLocalNodeInputSchema = z.object({
+export const airAppRunLocalInputSchema = z.object({
   nodeId: z.string(),
   /** Text files to mount into the sandbox workdir before installing, keyed by
    *  path (same shape `RunPanel` already assembles for `NodepodRunner.mount`). */
@@ -42,12 +42,12 @@ export const airAppRunLocalNodeInputSchema = z.object({
    *  The in-browser Nodepod engine never uses this field: it hands raw bytes to
    *  `Nodepod.boot({ files })` directly and skips the base64 round trip. */
   binaryFiles: z.record(z.string(), z.string()).optional().default({}),
-  /** Server-side execution mode. `"local-node"` spawns a bare host Node.js
+  /** Server-side execution mode. `"local"` spawns a bare host Node.js
    *  process (previewable, data bridge via reverse proxy, NOT OS-isolated);
    *  `"srt"` wraps the same commands in the OS sandbox (isolated execution,
    *  but live preview is unreachable). `"nodepod"` never calls this endpoint —
    *  it runs entirely in-browser. */
-  engine: z.enum(["local-node", "srt"]).default("local-node"),
+  engine: z.enum(["local", "srt", "sandock"]).default("local"),
 });
 
 export const airAppRuntimeEventSchema = z.discriminatedUnion("type", [
@@ -59,8 +59,19 @@ export const airAppRuntimeEventSchema = z.discriminatedUnion("type", [
 ]);
 export type AirAppRuntimeEvent = z.infer<typeof airAppRuntimeEventSchema>;
 
+/**
+ * Ending a run is a separate call, because a run outlives the stream that
+ * started it. Closing the stream means "this viewer stopped watching", which
+ * must not stop anybody's app — so there has to be a way to say the other thing.
+ */
+export const airAppStopLocalInputSchema = z.object({ nodeId: z.string() });
+
+export const airAppStopLocalOutputSchema = z.object({
+  /** `false` when nothing was running — stopping twice is not an error. */
+  stopped: z.boolean(),
+});
+
 export const airappRuntimeContract = {
-  runLocalNode: oc
-    .input(airAppRunLocalNodeInputSchema)
-    .output(eventIterator(airAppRuntimeEventSchema)),
+  runLocal: oc.input(airAppRunLocalInputSchema).output(eventIterator(airAppRuntimeEventSchema)),
+  stopLocal: oc.input(airAppStopLocalInputSchema).output(airAppStopLocalOutputSchema),
 };

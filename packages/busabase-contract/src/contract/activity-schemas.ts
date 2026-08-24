@@ -55,4 +55,16 @@ export const listActivityResponseSchema = z.object({
   nextCursor: z.string().nullable(),
 });
 
+/** Node-scoped raw activity stream request — offset/limit only, no cursor. */
+export const listNodeActivityInputSchema = z.object({
+  nodeId: z.string().min(1),
+  limit: z.coerce.number().int().min(1).max(100).optional().default(50),
+});
+
+/** Record-scoped raw activity stream request — same shape as node, keyed on recordId. */
+export const listRecordActivityInputSchema = z.object({
+  recordId: z.string().min(1),
+  limit: z.coerce.number().int().min(1).max(100).optional().default(50),
+});
+
 export type ActivityItemVO = z.infer<typeof activityItemSchema>;

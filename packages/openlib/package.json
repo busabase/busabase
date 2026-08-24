@@ -21,6 +21,14 @@
       "types": "./i18n/i-string.ts",
       "default": "./i18n/i-string.ts"
     },
+    "./i18n/lang-layout-client": {
+      "types": "./i18n/lang-layout-client.tsx",
+      "default": "./i18n/lang-layout-client.tsx"
+    },
+    "./mcp": {
+      "types": "./mcp/index.ts",
+      "default": "./mcp/index.ts"
+    },
     "./nanoid": {
       "types": "./nanoid/index.ts",
       "default": "./nanoid/index.ts"
@@ -33,21 +41,13 @@
       "types": "./storage/index.ts",
       "default": "./storage/index.ts"
     },
-    "./mcp": {
-      "types": "./mcp/index.ts",
-      "default": "./mcp/index.ts"
+    "./storage/dev-routes": {
+      "types": "./storage/dev-routes.ts",
+      "default": "./storage/dev-routes.ts"
     },
-    "./ui/dashboard": {
-      "types": "./ui/dashboard/index.ts",
-      "default": "./ui/dashboard/index.ts"
-    },
-    "./ui/dashboard/types": {
-      "types": "./ui/dashboard/types.ts",
-      "default": "./ui/dashboard/types.ts"
-    },
-    "./ui/dashboard/demo": {
-      "types": "./ui/dashboard/demo.ts",
-      "default": "./ui/dashboard/demo.ts"
+    "./storage/types": {
+      "types": "./storage/types.ts",
+      "default": "./storage/types.ts"
     },
     "./ui/LanguageSwitcher": {
       "types": "./ui/LanguageSwitcher.tsx",
@@ -61,17 +61,25 @@
       "types": "./ui/avatar-upload.tsx",
       "default": "./ui/avatar-upload.tsx"
     },
+    "./ui/dashboard": {
+      "types": "./ui/dashboard/index.ts",
+      "default": "./ui/dashboard/index.ts"
+    },
+    "./ui/dashboard/demo": {
+      "types": "./ui/dashboard/demo.ts",
+      "default": "./ui/dashboard/demo.ts"
+    },
+    "./ui/dashboard/types": {
+      "types": "./ui/dashboard/types.ts",
+      "default": "./ui/dashboard/types.ts"
+    },
+    "./ui/nprogress": {
+      "types": "./ui/nprogress/index.ts",
+      "default": "./ui/nprogress/index.ts"
+    },
     "./utils/time": {
       "types": "./utils/time.ts",
       "default": "./utils/time.ts"
-    },
-    "./storage/types": {
-      "types": "./storage/types.ts",
-      "default": "./storage/types.ts"
-    },
-    "./storage/dev-routes": {
-      "types": "./storage/dev-routes.ts",
-      "default": "./storage/dev-routes.ts"
     }
   },
   "sideEffects": [
@@ -97,6 +105,8 @@
     "@orpc/zod": "^1.14.6",
     "dayjs": "1.11.10",
     "drizzle-orm": "^0.45.1",
+    "fumadocs-core": "16.14.5",
+    "fumadocs-ui": "16.14.5",
     "kui": "workspace:*",
     "mime-types": "^2.1.35",
     "nanoid": "^5.1.5",
@@ -115,6 +125,7 @@
     "wouter": "^3.9.0"
   },
   "devDependencies": {
-    "@types/negotiator": "^0.6.4"
+    "@types/negotiator": "^0.6.4",
+    "@types/nprogress": "^0.2.3"
   }
 }

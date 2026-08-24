@@ -1,14 +1,15 @@
 import { implement } from "@orpc/server";
 import { busabaseContract } from "busabase-contract/contract/busabase";
-import { runAirAppLocalNode } from "./logic/local-node-runtime";
+import { runOrAttachSession, stopRunSession } from "./logic/run-session";
 
 // AirApp domain oRPC handler slice; aggregated into the kernel router (router.ts).
 // The CRUD/file surface lives on the shared `/file-trees` router — only the
-// local-node runtime is AirApp-specific.
+// local runtime is AirApp-specific.
 const os = implement(busabaseContract);
 
 export const airappRouter = {
-  runLocalNode: os.airapps.runLocalNode.handler(({ input, signal }) =>
-    runAirAppLocalNode(input, signal),
-  ),
+  // Start-or-attach, not start: a second viewer of a running app joins it
+  // instead of racing a second `npm install` against the first.
+  runLocal: os.airapps.runLocal.handler(({ input, signal }) => runOrAttachSession(input, signal)),
+  stopLocal: os.airapps.stopLocal.handler(({ input }) => stopRunSession(input.nodeId)),
 };

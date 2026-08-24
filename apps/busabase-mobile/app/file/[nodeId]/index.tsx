@@ -1,4 +1,5 @@
 import { skipToken, useQuery } from "@tanstack/react-query";
+import { asNodeDetail } from "busabase-core/dashboard/node-detail";
 import { useLocalSearchParams } from "expo-router";
 import { FileText } from "lucide-react-native";
 import { Image, Linking, Pressable, StyleSheet, Text, View } from "react-native";
@@ -10,7 +11,6 @@ import {
   NativeSection,
 } from "~/components/native-screen";
 import { useConnection } from "~/connection/connection-store";
-import { asNodeDetail } from "~/domains/knowledge/utils/node-detail";
 import { ConnectionGuard } from "~/domains/workspace/components/ConnectionGuard";
 import { DrawerScaffold } from "~/domains/workspace/components/DrawerScaffold";
 import { getAttachmentKindLabel, isImageRef, resolveAttachmentUrl } from "~/lib/attachment";

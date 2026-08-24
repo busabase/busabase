@@ -14,6 +14,7 @@ export {
   VaultAccessPolicySchema,
   VaultEnvironmentSchema,
   VaultItemInputSchema,
+  VaultItemKeySchema,
   VaultItemKindSchema,
   VaultItemVOSchema,
   VaultRuntimeEnvSchema,

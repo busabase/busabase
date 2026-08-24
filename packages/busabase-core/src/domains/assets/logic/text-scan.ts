@@ -40,6 +40,23 @@ export const CHECKPOINT_BYTE_INTERVAL = 4 * 1024 * 1024;
 const NEWLINE = 0x0a;
 
 /**
+ * Count Unicode code points in `str` — a surrogate-pair-aware scan, same
+ * result as `[...str].length` but without allocating an intermediate array.
+ * Runs on every chunk of every `putText` call, so the allocation isn't free.
+ */
+const countCodePoints = (str: string): number => {
+  let count = 0;
+  for (let i = 0; i < str.length; i++, count++) {
+    const code = str.charCodeAt(i);
+    if (code >= 0xd800 && code <= 0xdbff && i + 1 < str.length) {
+      const next = str.charCodeAt(i + 1);
+      if (next >= 0xdc00 && next <= 0xdfff) i++; // consume the low surrogate as part of this code point
+    }
+  }
+  return count;
+};
+
+/**
  * Streaming scanner. Checkpoints are only ever recorded at a `\n` boundary —
  * so every `byteOffset` is provably the exact first byte of `line` — never
  * mid-line. The tradeoff: one pathologically long single line (no `\n` for
@@ -69,9 +86,10 @@ export class TextStreamScanner {
     this.hash.update(chunk);
     this.utf8.push(chunk);
     // Incremental decode via StringDecoder correctly buffers a multi-byte
-    // sequence split across chunk boundaries; codepoint count via spread
-    // (handles surrogate pairs for astral characters correctly).
-    this.charCount += [...this.decoder.write(chunk)].length;
+    // sequence split across chunk boundaries; codepoint count via a manual
+    // surrogate-pair-aware scan (handles astral characters correctly, same
+    // as spreading the string into an array, without allocating one).
+    this.charCount += countCodePoints(this.decoder.write(chunk));
 
     for (let i = 0; i < chunk.length; i++) {
       this.byteCount++;
@@ -98,7 +116,7 @@ export class TextStreamScanner {
 
   /** Call once after the last chunk. */
   finish(): TextScanResult {
-    this.charCount += [...this.decoder.end()].length;
+    this.charCount += countCodePoints(this.decoder.end());
     const trailingPartialLine = this.bytesSinceNewline > 0;
     return {
       valid: this.utf8.finish(),

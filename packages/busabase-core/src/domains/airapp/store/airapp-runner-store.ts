@@ -60,6 +60,14 @@ interface AirAppRunnerStoreState {
   appendLog: (nodeId: string, runner: AirAppRunner, chunk: string) => void;
   setPreviewUrl: (nodeId: string, runner: AirAppRunner, url: string) => void;
   setError: (nodeId: string, runner: AirAppRunner, message: string) => void;
+  /** Records a failure that happened BEFORE a runner could be constructed —
+   *  e.g. a malformed `airapp.json`, or no engine on this deployment able to
+   *  run the app's runtime. Distinct from `setError` because that one
+   *  deliberately ignores writes from a runner that is no longer the current
+   *  one, and here there is no runner to identify. Leaves the entry in
+   *  `"error"`, which is also what stops auto-run from retrying it on every
+   *  render. */
+  failBeforeRun: (nodeId: string, runnerKind: AirAppRunnerKind, message: string) => void;
   /** Explicit teardown: disposes the runner (if any) and removes the entry
    *  entirely. Used e.g. when the backing node is deleted. */
   disposeEntry: (nodeId: string) => void;
@@ -150,6 +158,23 @@ export const useAirAppRunnerStore = create<AirAppRunnerStoreState>((set, get) =>
         },
       };
     }),
+
+  failBeforeRun: (nodeId, runnerKind, message) => {
+    get().entries[nodeId]?.runner?.dispose();
+    set((state) => ({
+      entries: {
+        ...state.entries,
+        [nodeId]: {
+          status: "error",
+          logLines: [],
+          previewUrl: null,
+          error: message,
+          runner: null,
+          runnerKind,
+        },
+      },
+    }));
+  },
 
   disposeEntry: (nodeId) => {
     get().entries[nodeId]?.runner?.dispose();

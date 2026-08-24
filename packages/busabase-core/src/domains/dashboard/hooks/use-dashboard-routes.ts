@@ -22,6 +22,12 @@ export function useDashboardRoutes() {
   const [isLegacyBaseSetupRoute, legacyBaseSetupParams] = useRoute("/base/:slug/setup");
   const [isNewRecordRoute, newRecordParams] = useRoute("/base/:slug/new");
   const [isEditRecordRoute, editRecordParams] = useRoute("/base/:slug/:recordId/edit");
+  // A 4-segment path — can't be shadowed by (and doesn't need to be checked
+  // before) the 3-segment `/base/:slug/:childId` match below.
+  const [isRecordActivityRoute, recordActivityParams] = useRoute("/base/:slug/:recordId/activity");
+  // Must be checked/used BEFORE `isBaseChildRoute` (`/base/:slug/:childId`)
+  // below, so "activity" isn't misparsed as a viewId.
+  const [isBaseActivityRoute, baseActivityParams] = useRoute("/base/:slug/activity");
   const [, baseParams] = useRoute("/base/:slug");
   const [isBaseChildRoute, baseChildParams] = useRoute("/base/:slug/:childId");
   const [isSkillRoute, skillParams] = useRoute("/skill/:slug");
@@ -37,6 +43,8 @@ export function useDashboardRoutes() {
     legacyBaseSetupParams?.slug ??
     newRecordParams?.slug ??
     editRecordParams?.slug ??
+    recordActivityParams?.slug ??
+    baseActivityParams?.slug ??
     baseParams?.slug ??
     baseChildParams?.slug ??
     null;
@@ -49,6 +57,21 @@ export function useDashboardRoutes() {
   const nodeDetailRoute = useMemo(() => {
     const pathname = location.split("?", 1)[0] ?? "";
     const match = pathname.match(/^\/([^/]+)\/([^/]+)$/);
+    if (!match) return null;
+    const [, type, encodedSlug] = match;
+    const definition = getNodeType(type);
+    if (!definition?.capabilities.hasDetail || type === "base") return null;
+    try {
+      return { type, slug: decodeURIComponent(encodedSlug) };
+    } catch {
+      return { type, slug: encodedSlug };
+    }
+  }, [location]);
+  // Same shape as `nodeDetailRoute` above, but for `/{type}/:slug/activity`.
+  // `base` is excluded here too — it's already covered by `isBaseActivityRoute`.
+  const nodeActivityRoute = useMemo(() => {
+    const pathname = location.split("?", 1)[0] ?? "";
+    const match = pathname.match(/^\/([^/]+)\/([^/]+)\/activity$/);
     if (!match) return null;
     const [, type, encodedSlug] = match;
     const definition = getNodeType(type);
@@ -78,6 +101,10 @@ export function useDashboardRoutes() {
     newRecordParams,
     isEditRecordRoute,
     editRecordParams,
+    isRecordActivityRoute,
+    recordActivityParams,
+    isBaseActivityRoute,
+    baseActivityParams,
     baseParams,
     isBaseChildRoute,
     baseChildParams,
@@ -96,6 +123,7 @@ export function useDashboardRoutes() {
     selectedDocSlug,
     selectedFolderSlug,
     nodeDetailRoute,
+    nodeActivityRoute,
     selectedChangeRequestId,
   };
 }

@@ -20,6 +20,7 @@ import { spaceIdColumn } from "./space-column";
 export type { NodeType as BusabaseNodeType } from "busabase-contract/domains";
 
 import type { NodeType as BusabaseNodeType } from "busabase-contract/domains";
+import type { NodeIcon } from "busabase-contract/types";
 export type BusabaseChangeRequestTargetType = "base" | "node";
 
 export const busabaseOperationKindEnum = pgEnum("busabase_operation_kind", [
@@ -119,6 +120,16 @@ export const busabaseNodes = pgTable(
       >()
       .notNull()
       .default({}),
+    // This node's custom avatar (emoji or cropped/uploaded image), or NULL
+    // when it has none — every host falls back to the type-default icon
+    // (`nodeIconForType`) in that case. A real (nullable, no-default) column
+    // rather than a `metadata` key: unlike `metadata` it needs no merge
+    // semantics (a rename operation either sets the whole thing or leaves it
+    // untouched — see the `rename` change-request operation's `icon` field),
+    // and keeping it separate from `metadata` avoids the same
+    // write-permission-leak class of bug `explicitVisibility` was split out
+    // to fix (`PATCH /nodes/{id}/metadata` vs. the stricter rename/CR path).
+    icon: jsonb("icon").$type<NodeIcon>(),
     position: integer("position").notNull().default(0),
     // This node's OWN declared visibility — the node ACL's only explicit input,
     // and the thing `effectiveVisibility` below is computed FROM.

@@ -25,12 +25,23 @@ export const getBusabaseDashboardRoutes = (
   // owns the bespoke sub-routes (design / new / view / record) below.
   const detailTypeRoutes: BusabaseRouteConfig[] = listNodeTypes()
     .filter((nodeType) => nodeType.capabilities.hasDetail && nodeType.type !== "base")
-    .map((nodeType) => ({
-      path: `/${nodeType.type}/:slug`,
-      component: dashboard,
-      breadcrumb: nodeType.label,
-      title: nodeType.label,
-    }));
+    .flatMap((nodeType) => [
+      // Specific-before-generic: `/{type}/:slug/activity` must be listed before
+      // `/{type}/:slug` below, since route lookups use `Array.find` (first match
+      // wins) and the generic route would otherwise swallow "activity" as :slug.
+      {
+        path: `/${nodeType.type}/:slug/activity`,
+        component: dashboard,
+        breadcrumb: messages?.nodeDetail.activity ?? "Activity",
+        title: messages?.nodeDetail.activity ?? "Activity",
+      },
+      {
+        path: `/${nodeType.type}/:slug`,
+        component: dashboard,
+        breadcrumb: nodeType.label,
+        title: nodeType.label,
+      },
+    ]);
 
   return [
     // `/` and `/home` are the same landing digest — Inbox is no longer the
@@ -90,6 +101,12 @@ export const getBusabaseDashboardRoutes = (
       title: "Agents",
     },
     {
+      path: "/apps",
+      component: dashboard,
+      breadcrumb: "Apps",
+      title: "Apps",
+    },
+    {
       // Specific-before-generic (see the trailing `/agents/:agentSlug` entry) —
       // route lookups use `Array.find`, first match wins.
       path: "/agents/new",
@@ -141,6 +158,15 @@ export const getBusabaseDashboardRoutes = (
       title: messages?.routes.newRecord ?? "New Record",
     },
     {
+      // Specific-before-generic (see the trailing `/base/:slug/:viewId` entry
+      // below) — route lookups use `Array.find`, first match wins, so
+      // "activity" must not fall through to being parsed as a view id.
+      path: "/base/:slug/activity",
+      component: dashboard,
+      breadcrumb: messages?.nodeDetail.activity ?? "Activity",
+      title: messages?.nodeDetail.activity ?? "Activity",
+    },
+    {
       path: "/base/:slug/:viewId",
       component: dashboard,
       breadcrumb: messages?.routes.view ?? "View",
@@ -151,6 +177,15 @@ export const getBusabaseDashboardRoutes = (
       component: dashboard,
       breadcrumb: messages?.routes.editRecord ?? "Edit Record",
       title: messages?.routes.editRecord ?? "Edit Record",
+    },
+    {
+      // A 4-segment path (unlike `/base/:slug/activity` above) — it can't be
+      // shadowed by the 3-segment `/base/:slug/:recordId` entry below, so no
+      // specific-before-generic ordering is needed here.
+      path: "/base/:slug/:recordId/activity",
+      component: dashboard,
+      breadcrumb: messages?.nodeDetail.activity ?? "Activity",
+      title: messages?.nodeDetail.activity ?? "Activity",
     },
     {
       path: "/base/:slug/:recordId",

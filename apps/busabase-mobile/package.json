@@ -1,6 +1,6 @@
 {
   "name": "busabase-mobile",
-  "version": "0.17.3",
+  "version": "0.18.0",
   "main": "expo-router/entry",
   "private": true,
   "scripts": {
@@ -16,6 +16,7 @@
     "build:all": "eas build --platform all",
     "submit:ios": "eas submit --platform ios",
     "submit:android": "eas submit --platform android",
+    "check:ddd": "node scripts/check-client-ddd.mjs",
     "test": "vitest run && node --test ../../scripts/publish-busabase-mobile-cdn-downloads.test.cjs",
     "typecheck": "tsc --noEmit",
     "lint": "biome format . --write && biome check ."
@@ -68,7 +69,7 @@
   "devDependencies": {
     "@babel/core": "^7.25.2",
     "@types/react": "^19.2.17",
-    "typescript": "^6.0.3"
+    "typescript": "^7.0.2"
   },
   "expo": {
     "autolinking": {

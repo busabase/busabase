@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 
 /**
  * Two properties define this package, and both are checked mechanically here
- * rather than merely asserted in prose — see docs/acp-ui-convergence-roadmap.md.
+ * rather than merely asserted in prose.
  *
  * 1. **It renders no host element and depends on no platform.** Same discipline
  *    as `@kaiui/core`: no `.tsx`, no `react-dom`/`react-native`/Taro/`kui`.

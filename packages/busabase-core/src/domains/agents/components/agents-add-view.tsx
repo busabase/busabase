@@ -44,10 +44,14 @@ export function AgentsAddView({ orpc, onBack, onConnected, spaceId }: AgentsAddV
       if (event.data?.type === "busabase:buda-error") {
         setBudaError(event.data.message || "Buda connection failed.");
       } else if (event.data?.type === "busabase:buda-connected") {
+        if (typeof event.data.slug !== "string" || !event.data.slug) {
+          setBudaError("Buda connected without an agent identity. Try again.");
+          return;
+        }
         setShowBudaConnect(false);
         setBudaError(null);
         void queryClient.invalidateQueries({ queryKey: orpc.agents.catalog.queryKey() });
-        createSession.mutate({ slug: "buda" });
+        createSession.mutate({ slug: event.data.slug });
       }
     };
     window.addEventListener("message", onMessage);
@@ -76,12 +80,38 @@ export function AgentsAddView({ orpc, onBack, onConnected, spaceId }: AgentsAddV
                 <TransportBadge transport={entry.transport} />
               </div>
               <p className="text-muted-foreground text-xs">{entry.description}</p>
-              {entry.connectedAgentName && (
+              {entry.connectedAgentName && entry.slug !== "buda" && (
                 <p className="text-muted-foreground text-xs">
                   Connected to {entry.connectedAgentName}
                 </p>
               )}
-              {entry.available ? (
+              {entry.slug === "buda" && entry.connectionRequired ? (
+                <>
+                  {entry.connectedAgents.map((agent) => (
+                    <div
+                      key={agent.slug}
+                      className="flex items-center justify-between gap-2 rounded-md border px-3 py-2"
+                    >
+                      <span className="truncate text-sm">{agent.name}</span>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={createSession.isPending}
+                        onClick={() => createSession.mutate({ slug: agent.slug })}
+                      >
+                        {createSession.isPending && createSession.variables?.slug === agent.slug
+                          ? "Starting…"
+                          : "Start session"}
+                      </Button>
+                    </div>
+                  ))}
+                  <Button size="sm" onClick={openBudaConnect}>
+                    {entry.connectedAgents.length > 0
+                      ? "Connect another Buda agent"
+                      : "Sign in to Buda"}
+                  </Button>
+                </>
+              ) : entry.available ? (
                 <Button
                   size="sm"
                   disabled={createSession.isPending}

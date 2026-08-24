@@ -1,7 +1,6 @@
 # @acp-ui/core
 
 Headless interaction core for **ACP** (Agent Client Protocol) agent chat. Renders nothing.
-Full rationale: [`docs/acp-ui-convergence-roadmap.md`](../../../docs/acp-ui-convergence-roadmap.md).
 
 ## What it is
 
@@ -58,9 +57,15 @@ back to (role, variant) adjacency, which is what both prior implementations used
 waits indefinitely and *deliberately never auto-approves* — that's a security property, not
 an oversight. The model expresses both rather than hard-coding either.
 
-**Unhandled ACP kinds are ignored, not leaked.** The eight kinds above produce no block, and
-a test pins that — so adding a renderer later is a deliberate decision, and raw JSON never
-reaches the user in the meantime.
+**Unhandled ACP kinds are ignored, not leaked.** Six of the eight — `plan`, `plan_update`,
+`plan_removed`, `available_commands_update`, `current_mode_update`, `config_option_update` —
+produce no block, and a test pins that: raw JSON never reaches the user, and adding a renderer
+later is a deliberate decision, not a gap discovered by accident. The other two,
+`usage_update` and `session_info_update`, ARE handled — as session-level state
+(`reduce/session-info.ts`'s `usageOf`/`sessionTitleOf`/`foldUsage`/`foldSessionTitle`), not as
+a transcript block, because real agents sent `usage_update` three times in one turn; folding it
+into the message list would flood the transcript with a fact that belongs at the session level,
+next to `sending`/`ended`.
 
 ## `group/` — tool-run grouping
 

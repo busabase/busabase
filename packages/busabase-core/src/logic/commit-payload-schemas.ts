@@ -42,6 +42,7 @@
  * Where the two disagreed, the write side won — see the per-kind notes.
  */
 import { fieldTypeSchema } from "busabase-contract/domains/base/contract/base-schemas";
+import { NodeIconSchema } from "busabase-contract/types";
 import { iStringSchema } from "openlib/i18n/i-string";
 import { z } from "zod";
 import type { busabaseOperationKindEnum } from "../db/schema";
@@ -234,6 +235,10 @@ export const COMMIT_PAYLOAD_SCHEMAS = {
     slug: z.string().optional(),
     name: z.string().optional(),
     description: z.string().optional(),
+    // `undefined` (key absent) leaves the node's stored icon untouched;
+    // `null` explicitly clears it. See `mergeNodeRename` for how the
+    // distinction is read.
+    icon: NodeIconSchema.nullable().optional(),
   }),
   node_delete: z.looseObject({
     kind: z.literal("delete").optional(),

@@ -1,6 +1,7 @@
-import type { Translation } from "../i18n-types";
+import type { Translatable } from "ts7-i18n";
+import type { BaseTranslation } from "../en";
 
-const zhCN: Translation = {
+const zhCN = {
   common: {
     appName: "Busabase",
   },
@@ -284,6 +285,6 @@ const zhCN: Translation = {
     includeBody:
       "为了更快排查问题，请包含 Busabase 版本、操作系统、你使用的是 Desktop、Mobile、Cloud 还是自托管模式，以及失败的具体操作。",
   },
-};
+} satisfies Translatable<BaseTranslation>;
 
 export default zhCN;

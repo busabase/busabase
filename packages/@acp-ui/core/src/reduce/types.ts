@@ -5,8 +5,7 @@ import type { SessionUpdate, ToolCallStatus, ToolKind } from "@agentclientprotoc
  *
  * Deliberately *not* the AI SDK's `UIMessage`. ACP's permission requests carry a
  * list of options that a boolean `approved` cannot express, and 8 of ACP's 13
- * `sessionUpdate` kinds have no native `UIMessage` part — see
- * docs/acp-ui-convergence-roadmap.md for the full argument.
+ * `sessionUpdate` kinds have no native `UIMessage` part.
  *
  * Fidelity is set by the higher-fidelity of the two implementations this
  * replaces (acprouter's): thoughts stay distinguishable from replies, and tool

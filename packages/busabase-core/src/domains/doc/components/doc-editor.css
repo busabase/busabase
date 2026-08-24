@@ -132,3 +132,30 @@
 .milkdown .ProseMirror-focused {
   --prosemirror-virtual-cursor-color: var(--foreground);
 }
+
+/* Video playback (see doc-video.ts). A `.mp4` reaches a Doc as an image node
+ * or a raw `<video>` tag, and either way we swap in a real player; without a
+ * width cap it renders at the file's intrinsic resolution and overflows the
+ * editor column. `height: auto` keeps the aspect ratio; the radius matches
+ * what Crepe's own image block uses so a video and an image sit together. */
+.milkdown .ProseMirror video.milkdown-video-block {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin: 0.5rem 0;
+  border-radius: 0.375rem;
+  background-color: var(--crepe-color-surface-variant, #000);
+}
+
+/* The YouTube embed (see doc-video.ts). An iframe has no intrinsic size, so
+ * unlike the <video> above it needs an explicit box; 16/9 is what YouTube
+ * serves for everything except Shorts, which letterbox themselves inside it. */
+.milkdown .ProseMirror iframe.milkdown-video-embed {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  margin: 0.5rem 0;
+  border: 0;
+  border-radius: 0.375rem;
+  background-color: var(--crepe-color-surface-variant, #000);
+}

@@ -1,6 +1,5 @@
 "use client";
 
-import { hasCapability } from "busabase-contract/domains";
 import type { NodeVO } from "busabase-contract/types";
 import { Button } from "kui/button";
 import {
@@ -16,53 +15,8 @@ import { Folder, FolderTree } from "lucide-react";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import { useCoreI18n } from "../../../i18n";
+import { flattenMoveTargets } from "../helpers/node-move-targets";
 import type { MoveNodePayload } from "../hooks/use-move-node";
-
-// A single row in the flattened, indented folder picker.
-interface MoveTargetRow {
-  id: string;
-  name: string;
-  depth: number;
-}
-
-// Flatten the tree into an ordered, depth-indented list of every node
-// eligible to become the new parent (container-capable types only), pre-order
-// so a folder always appears directly above its own nested folders — the same
-// visual grouping a real folder tree implies. Excludes `excludeId` (the node
-// being moved) and any of its descendants: re-parenting a folder under its
-// own descendant would orphan the subtree in a cycle, exactly the guard
-// `dashboard-shell`'s drag-and-drop `isValidParentId` already applies to
-// drops — mirrored here since the dialog doesn't share that closure.
-function flattenMoveTargets(nodes: NodeVO[], excludeId: string): MoveTargetRow[] {
-  const excludedIds = new Set<string>();
-  const collectDescendants = (node: NodeVO) => {
-    excludedIds.add(node.id);
-    for (const child of node.children) collectDescendants(child);
-  };
-  const findExcluded = (list: NodeVO[]): NodeVO | undefined => {
-    for (const node of list) {
-      if (node.id === excludeId) return node;
-      const found = findExcluded(node.children);
-      if (found) return found;
-    }
-    return undefined;
-  };
-  const excludedNode = findExcluded(nodes);
-  if (excludedNode) collectDescendants(excludedNode);
-
-  const rows: MoveTargetRow[] = [];
-  const visit = (list: NodeVO[], depth: number) => {
-    for (const node of list) {
-      if (excludedIds.has(node.id)) continue;
-      if (hasCapability(node.type, "container")) {
-        rows.push({ id: node.id, name: node.name, depth });
-        visit(node.children, depth + 1);
-      }
-    }
-  };
-  visit(nodes, 0);
-  return rows;
-}
 
 /**
  * Sidebar "•••" → "Move to…" dialog: an indented folder picker built from the

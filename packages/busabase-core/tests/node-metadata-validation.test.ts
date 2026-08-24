@@ -209,6 +209,51 @@ describe("Node metadata validation", () => {
       await client.nodes.updateVisibility({ nodeId: folderNodeId, visibility: null });
     });
 
+    it("refuses `visibility`, which is access control rather than metadata", async () => {
+      // Writing it here set the declared value but never re-materialized
+      // `effectiveVisibility` (the column the ACL enforces), so the caller got a
+      // 200 for a node that had NOT actually changed visibility — and would flip
+      // silently at the next unrelated ACL recompute.
+      await expect(
+        client.nodes.updateMetadata({
+          nodeId: whiteboardNodeId,
+          metadata: { visibility: "private" },
+        }),
+      ).rejects.toThrow(/visibility is not writable through node metadata/);
+      await expect(
+        client.nodes.updateMetadata({ nodeId: folderNodeId, metadata: { visibility: "private" } }),
+      ).rejects.toThrow(/visibility is not writable through node metadata/);
+    });
+
+    it("points the caller at the endpoint that does the job properly", async () => {
+      await expect(
+        client.nodes.updateMetadata({
+          nodeId: folderNodeId,
+          metadata: { visibility: "workspace" },
+        }),
+      ).rejects.toThrow(/\/visibility/);
+    });
+
+    it("leaves the node untouched when `visibility` is refused", async () => {
+      const before = await client.nodes.get({ nodeId: folderNodeId });
+      await expect(
+        client.nodes.updateMetadata({
+          nodeId: folderNodeId,
+          // A legitimate key alongside the refused one: the whole patch is rejected.
+          metadata: { visibility: "private", busabaseCms: { bases: {} } },
+        }),
+      ).rejects.toThrow(/visibility is not writable/);
+      const after = await client.nodes.get({ nodeId: folderNodeId });
+      expect(after.metadata).toEqual(before.metadata);
+    });
+
+    it("the dedicated visibility endpoint still works", async () => {
+      await expect(
+        client.nodes.updateVisibility({ nodeId: folderNodeId, visibility: "private" }),
+      ).resolves.toEqual({ updated: true });
+      await client.nodes.updateVisibility({ nodeId: folderNodeId, visibility: null });
+    });
+
     it("leaves free-form metadata on non-rich node types alone", async () => {
       // busabase-cms depends on exactly this: an app-defined key on a folder.
       const updated = await client.nodes.updateMetadata({

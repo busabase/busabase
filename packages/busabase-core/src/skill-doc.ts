@@ -406,7 +406,7 @@ files/Docs. Records are read from the CANONICAL record commit (\`headCommit.payl
 \`\`\`bash
 curl -X POST ${base}/api/v1/grep \\
 ${authLine}  -H 'content-type: application/json' \\
-  --data '{"pattern": "Termination", "sources": ["files", "docs", "records"], "contextLines": 2}'
+  --data '{"pattern": "Termination", "sources": ["files", "nodes", "records"], "contextLines": 2}'
 # → { matches: [{ source: "files", assetId, fileName, drivePath, line, column, text, before, after }
 #              | { source: "docs", nodeId, slug, name, line, column, text, before, after }
 #              | { source: "records", baseId, baseSlug, recordId, fieldSlug, line, column, text, before, after },
@@ -714,20 +714,20 @@ afterwards.`
 ### 0a. Sign in`
 }
 
-Busabase Cloud is hosted — nothing to install. Device authorization works on a local machine, over
-SSH, and in a container because the browser can be on any computer or phone. Run this once; it never
-blocks on a terminal prompt:
+Run this command in a managed background process or persistent terminal session. Keep its
+process/session handle and capture both \`stdout\` and \`stderr\`:
 
 \`\`\`bash
-${BUSABASE_CLI} login --device-code --base-url ${site}${preselectedSpaceId ? ` --space-id ${preselectedSpaceId}` : ""}
+${BUSABASE_CLI} login --device-code --base-url ${site}${preselectedSpaceId ? ` --space-id ${preselectedSpaceId}` : ""} --no-browser
 \`\`\`
 
-The terminal shows a short code and a verification URL, then waits. The user signs in, selects an
-existing API key or creates a new one, and approves in any browser. The browser never receives the
-key secret; the waiting CLI receives and saves it through a one-time exchange. Never ask the user to
-paste a secret in chat, and never print or display \`~/.busabase/.env\` — on success the CLI prints a
-safe summary containing the selected Space, \`availableSpaces\`, \`createdSpace\` and
-\`bootstrapRequired\`; it never prints the credential.
+As soon as the verification URL and code appear, show both to the user and ask them to approve in
+any browser. Do not wait for the command to exit before replying.
+
+Keep the same process running. After the user approves, resume or poll it until it exits, then
+continue from its safe summary: selected Space, \`availableSpaces\`, \`createdSpace\` and
+\`bootstrapRequired\`. Never ask the user to paste a secret, print \`~/.busabase/.env\`, or start a
+second login while the first is running.
 
 If the code expires or authorization fails, explain what happened; if the user still wants to
 continue, rerun the same login command above once.

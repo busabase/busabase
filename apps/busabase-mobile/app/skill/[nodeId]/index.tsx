@@ -1,8 +1,8 @@
 import { skipToken, useQuery } from "@tanstack/react-query";
+import { asNodeDetail } from "busabase-core/dashboard/node-detail";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useBusabaseOrpc } from "~/api/use-busabase-orpc";
 import { FileTreeScreen } from "~/domains/knowledge/components/FileTreeScreen";
-import { asNodeDetail } from "~/domains/knowledge/utils/node-detail";
 import { ConnectionGuard } from "~/domains/workspace/components/ConnectionGuard";
 
 function SkillDetailContent() {

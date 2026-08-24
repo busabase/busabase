@@ -236,10 +236,10 @@ to pass — every tool already acts on it. \`auth_verify\` confirms the current 
 | Structure: folders, Bases, Docs, Skills | \`nodes_list\` |
 | Tables in this workspace | \`bases_list\`, \`bases_get\` |
 | Records in one Base | \`record_query\` (pass \`baseId\`; \`limit\` <= 100, page with the cursor; \`countOnly\` for just a total) |
-| Find anything by pattern | \`grep\` (all sources, or pass \`sources: ["files"]\` for files-only with full files coverage) |
+| Find anything by pattern | \`grep\` (all sources, or pass \`sources: ["files"]\` / \`["nodes"]\` / \`["records"]\`; narrow node types with \`scope.nodes.types\`) |
 | Find anything by relevance | \`search\` |
 | Look up records by an exact field value | \`record_find_by_field\` (one named field, not a search) |
-| Read exact lines instead of whole documents | \`docs_read_lines\`, \`assets_read_text_lines\` |
+| Read exact lines instead of whole documents | \`nodes_read_lines\`, \`assets_read_text_lines\` |
 | Skill / Drive / AirApp nodes and their files | \`node_list_files_trees\`, \`node_get_file_tree\`, \`node_files_list\`, \`node_file_read\` — all take \`kind\` (\`skill\`/\`drive\`/\`airapp\`) |
 | Change files inside a Skill / Drive / AirApp | \`node_files_change_request\` (pass \`baseContentHash\` from \`node_file_read\` so a concurrent edit is caught) |
 | The review queue | \`change_request_query\` (\`countsOnly\` for per-tab totals), \`change_requests_get\` |
@@ -443,14 +443,14 @@ propose, I approve, it merges — and ask what I'd like to do first.
  * line that enforces it so this document can be checked rather than trusted:
  *
  * - `npm install` then `npm run dev`: `airapp/components/runners/nodepod-runner.ts` (`spawn("npm",
- *   ["run", "dev"])`) and `airapp/logic/local-node-runtime.ts` (`runSandboxedCommand("npm run
+ *   ["run", "dev"])`) and `airapp/logic/local-runtime.ts` (`runSandboxedCommand("npm run
  *   dev", …)`). BOTH engines, so there is no configuration under which `start` is enough.
  * - No bundler dev server: `airapp/handlers.ts`'s seed comment records that Vite fails to boot
  *   under Nodepod with `Cannot destructure property 'createServer'`, reproducible even with
  *   cross-origin isolation enabled.
  * - No native binaries: `demo-content-data-explorer.ts` records esbuild and `@swc/core` failing
  *   to load inside Nodepod. This is why an MCP agent bundles nothing and vendors nothing.
- * - `listening on port <n>`: `local-node-runtime.ts`'s `READY_PORT_PATTERNS`. The Local Node
+ * - `listening on port <n>`: `local-runtime.ts`'s `READY_PORT_PATTERNS`. The Local Node
  *   engine finds the port to reverse-proxy by matching that log line, so the wording is API.
  * - `/api/v1` on the app's own origin: the shipped Deal Pipeline demo in `demo-content.ts`.
  */

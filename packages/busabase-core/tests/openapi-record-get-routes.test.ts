@@ -117,6 +117,12 @@ describe("Busabase OpenAPI record get route", () => {
     // `PUT /nodes/{nodeId}/content` that also gives whiteboard/workflow/html
     // their first reviewed write (-2 +1 -> 96). See
     // apps/busabase/content/spec/node-content-storage.md (D3).
-    expect(operationCount).toBe(96);
+    // Node/record-scoped Activity history pages added `GET /activity/node`
+    // and `GET /activity/record` (+2 -> 98) — same public-surface treatment
+    // as the existing `GET /activity/paged`.
+    // Node-avatar upload pair added: `POST /nodes/icon/upload-urls` and
+    // `POST /nodes/icon/confirmations` (+2 -> 100) — same public-surface
+    // treatment as the existing `assets.createUploadUrl`/`assets.confirm`.
+    expect(operationCount).toBe(100);
   });
 });

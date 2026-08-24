@@ -3,6 +3,7 @@ import { z } from "zod";
 import { agentsContract } from "../domains/agents/contract";
 import { airappRuntimeContract } from "../domains/airapp/contract";
 import { assetsContract } from "../domains/assets/contract";
+import { ReadLinesVOSchema } from "../domains/assets/types";
 import {
   baseContract,
   recordContract,
@@ -11,6 +12,7 @@ import {
   viewSchema,
 } from "../domains/base/contract";
 import { docContract } from "../domains/doc/contract";
+import { ReadNodeLinesInputSchema } from "../domains/doc/types";
 import { dumpContract } from "../domains/dump/contract";
 import { fileContract } from "../domains/file-node/contract";
 import { fileTreeContract } from "../domains/filetree/contract";
@@ -18,10 +20,22 @@ import { formContract } from "../domains/form/contract";
 import { installContract } from "../domains/install/contract";
 import { vaultContract } from "../domains/vault/contract";
 import { webhookContract } from "../domains/webhook/contract";
-import { listActivityPagedInputSchema, listActivityResponseSchema } from "./activity-schemas";
+import {
+  activityItemSchema,
+  listActivityPagedInputSchema,
+  listActivityResponseSchema,
+  listNodeActivityInputSchema,
+  listRecordActivityInputSchema,
+} from "./activity-schemas";
 import { UnifiedGrepInputSchema, UnifiedGrepResultVOSchema } from "./grep-schemas";
 import { updateNodeContentInputSchema } from "./node-content-schemas";
 import { getNodeInputSchema, NodeDetailVOSchema } from "./node-detail-schemas";
+import {
+  NodeIconConfirmInputSchema,
+  NodeIconConfirmVOSchema,
+  NodeIconUploadUrlInputSchema,
+  NodeIconUploadUrlVOSchema,
+} from "./node-icon-upload-schemas";
 import {
   agentTaskSchema,
   auditEventSchema,
@@ -210,6 +224,17 @@ export const busabaseContractRoutes = {
       })
       .input(updateNodeContentInputSchema)
       .output(changeRequestSchema),
+    readLines: oc
+      .route({
+        method: "GET",
+        path: "/nodes/{nodeId}/lines",
+        tags: ["Nodes"],
+        summary: "Read an exact line range from a node's content",
+        successDescription:
+          'Lines [startLine, endLine] (range capped at 2000 lines / ~2MB response) from any node type that stores content — doc, html, whiteboard, workflow. The follow-up to a Unified Grep match with `source: "nodes"`, so an agent can read just the lines around a match instead of `nodes.get`\'s entire document. Line numbers mean whatever they mean for that node type: real source lines for doc/html, positions within the extracted text for the JSON-backed types. Replaces `GET /docs/{nodeId}/lines`, which resolved doc nodes only.',
+      })
+      .input(ReadNodeLinesInputSchema)
+      .output(ReadLinesVOSchema),
     purge: oc
       .route({
         method: "DELETE",
@@ -368,6 +393,33 @@ export const busabaseContractRoutes = {
         .input(z.object({ nodeId: z.string() }))
         .output(nodeShareSchema.nullable()),
     },
+    // The node-avatar upload pair — deliberately separate from
+    // `assets.createUploadUrl`/`assets.confirm` (see
+    // `node-icon-upload-schemas.ts`): a node icon is a single-instance
+    // reference stored on the node row, not a Drive Asset library entry.
+    icon: {
+      createUploadUrl: oc
+        .route({
+          method: "POST",
+          path: "/nodes/icon/upload-urls",
+          tags: ["Nodes"],
+          summary: "Request a node-icon upload URL",
+          successDescription:
+            "Presigned (or dev) upload URL plus the public URL, scoped to this node's own dedup namespace so it can never resolve onto (or be deleted alongside) a Drive Asset's attachment row.",
+        })
+        .input(NodeIconUploadUrlInputSchema)
+        .output(NodeIconUploadUrlVOSchema),
+      confirm: oc
+        .route({
+          method: "POST",
+          path: "/nodes/icon/confirmations",
+          tags: ["Nodes"],
+          summary: "Confirm a node-icon upload",
+          successDescription: "Recorded the uploaded file as an attachment for this node's icon.",
+        })
+        .input(NodeIconConfirmInputSchema)
+        .output(NodeIconConfirmVOSchema),
+    },
   },
   auditEvents: {
     list: oc
@@ -403,6 +455,28 @@ export const busabaseContractRoutes = {
       })
       .input(listActivityPagedInputSchema)
       .output(listActivityResponseSchema),
+    listForNode: oc
+      .route({
+        method: "GET",
+        path: "/activity/node",
+        tags: ["Activity"],
+        summary: "List a single node's raw activity stream",
+        successDescription:
+          "A flat, newest-first list of the node's own change requests, operations and (Base only) audit events — no version-number aggregation.",
+      })
+      .input(listNodeActivityInputSchema)
+      .output(z.array(activityItemSchema)),
+    listForRecord: oc
+      .route({
+        method: "GET",
+        path: "/activity/record",
+        tags: ["Activity"],
+        summary: "List a single record's raw activity stream",
+        successDescription:
+          "A flat, newest-first list of the record's own operations and audit events — no version-number aggregation.",
+      })
+      .input(listRecordActivityInputSchema)
+      .output(z.array(activityItemSchema)),
   },
   comments: {
     list: oc
@@ -616,15 +690,15 @@ export {
 export {
   GrepSourceSchema,
   UnifiedGrepCoverageSchema,
-  UnifiedGrepDocMatchVOSchema,
-  UnifiedGrepDocsCoverageSchema,
-  UnifiedGrepDocsScopeSchema,
   UnifiedGrepFileMatchVOSchema,
   UnifiedGrepFilesCoverageSchema,
   UnifiedGrepFilesScopeSchema,
   type UnifiedGrepInputDTO,
   UnifiedGrepInputSchema,
   UnifiedGrepMatchVOSchema,
+  UnifiedGrepNodeMatchVOSchema,
+  UnifiedGrepNodesCoverageSchema,
+  UnifiedGrepNodesScopeSchema,
   UnifiedGrepRecordMatchVOSchema,
   UnifiedGrepRecordsCoverageSchema,
   UnifiedGrepRecordsScopeSchema,
