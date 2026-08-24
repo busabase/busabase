@@ -1,5 +1,6 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import type { NodeVO } from "busabase-contract/types";
+import { flattenMoveTargets } from "busabase-core/dashboard/node-move-targets";
 import { Check, Folder, FolderTree } from "lucide-react-native";
 import { useMemo, useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text } from "react-native";
@@ -9,7 +10,6 @@ import { Button } from "~/components/ui/Button";
 import { fmt, useI18n } from "~/i18n";
 import { radius, typography } from "~/theme/tokens";
 import { useTokens } from "~/theme/use-tokens";
-import { flattenMoveTargets } from "../utils/node-move-targets";
 
 interface NodeMoveSheetProps {
   visible: boolean;

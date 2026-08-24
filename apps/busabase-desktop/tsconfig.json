@@ -13,7 +13,6 @@
     "jsx": "react-jsx",
     "strict": true,
     "noFallthroughCasesInSwitch": true,
-    "baseUrl": ".",
     "allowJs": true,
     "incremental": true,
     "esModuleInterop": true,

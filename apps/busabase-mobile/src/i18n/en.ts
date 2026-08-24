@@ -233,9 +233,7 @@ export const en = {
     moved: "{type} moved to Trash",
     failed: "Failed to delete {type}",
   },
-  // "Agent prompts" — the per-node copy-paste cheatsheet. Mirrors busabase-core's
-  // `agentPrompts` block plus a mobile port of the prompt bodies from
-  // `helpers/node-agent-prompts.ts`; keep both in sync.
+  // Native sheet controls only. Prompt labels and bodies come from busabase-core.
   agentPrompts: {
     title: "Agent prompts",
     intro:
@@ -246,55 +244,6 @@ export const en = {
     copy: "Copy prompt",
     copied: "Copied",
     copyUnavailable: "Copying isn't available here — select the prompt text above instead.",
-    // Capability-list group headings.
-    groupRecord: "Records",
-    groupField: "Fields",
-    groupView: "Views",
-    groupContent: "Content",
-    groupGeneral: "General",
-    groupOther: "Other",
-    // Shared framing: the target line (with and without a resolved space), the
-    // approval-first footer appended to every prompt, and the capability body.
-    target: 'Target: the Busabase {type} "{name}" (nodeId: {nodeId}).',
-    targetWithSpace:
-      'Target: the Busabase {type} "{name}" (nodeId: {nodeId}), in space "{spaceName}" (spaceId: {spaceId}).',
-    footer:
-      "Submit the change as a ChangeRequest and never merge it without my approval. Reply to me in English.",
-    capabilityBody:
-      "{target}\n\nPerform this operation: {operation}.\nInspect the node's current state first, then ask me for anything you still need.",
-    baseBulkImportLabel: "Bulk-add records",
-    baseBulkImportBody:
-      "{target}\n\nI want to bulk-add records. Read the field schema first, then map what I give you onto those fields. Flag anything that looks like a duplicate of an existing record and ask me before writing it.",
-    baseDesignSchemaLabel: "Design the schema for me",
-    baseDesignSchemaBody:
-      "{target}\n\nI'll describe what I need to track. Propose a field schema for it — field names, types, and why each one — and show me the proposal before creating or changing any field.",
-    baseDedupeLabel: "Find and clean duplicates",
-    baseDedupeBody:
-      "{target}\n\nScan the records for duplicates and near-duplicates. List what you found and how you'd merge or remove each group — don't change anything until I pick.",
-    baseSummarizeLabel: "Summarize and report",
-    baseSummarizeBody:
-      "{target}\n\nRead the records and give me a summary: the key numbers, notable patterns, and anything that looks off. This is read-only — don't modify the data.",
-    docDraftLabel: "Draft / expand this doc",
-    docDraftBody:
-      "{target}\n\nRead the current content, then draft or expand it based on what I tell you next. Keep the existing structure and tone unless I ask otherwise.",
-    docReviewLabel: "Review and suggest edits",
-    docReviewBody:
-      "{target}\n\nReview this doc for clarity, gaps, and anything factually shaky. Give me the suggested edits as a list first — don't rewrite it until I say which ones to apply.",
-    driveOrganizeLabel: "Organize these files",
-    driveOrganizeBody:
-      "{target}\n\nList what's in here, then propose a cleaner structure — naming and grouping. Show me the plan before moving or renaming anything.",
-    driveSummarizeLabel: "Summarize the contents",
-    driveSummarizeBody:
-      "{target}\n\nRead through the files and tell me what's in here — what each one is for, and anything outdated or redundant. Read-only.",
-    skillImproveLabel: "Improve this skill",
-    skillImproveBody:
-      "{target}\n\nRead this skill's files and tell me where the instructions are ambiguous, missing, or likely to be misread by an agent. Propose concrete edits before changing anything.",
-    airappAddFeatureLabel: "Add a feature",
-    airappAddFeatureBody:
-      "{target}\n\nRead the app's current source, then add the feature I describe next. Tell me which files you'll touch before you start.",
-    airappDebugLabel: "Debug a problem",
-    airappDebugBody:
-      "{target}\n\nI'll describe what's going wrong. Read the source, find the actual cause, and explain it to me before you fix anything.",
   },
   // Mirrors busabase-core's `rename` block; keep the wording in sync.
   rename: {

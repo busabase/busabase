@@ -1,4 +1,5 @@
 import { skipToken, useQuery } from "@tanstack/react-query";
+import { asNodeDetail } from "busabase-core/dashboard/node-detail";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { ArrowLeft, ExternalLink } from "lucide-react-native";
 import { useRef, useState } from "react";
@@ -13,7 +14,6 @@ import { Button } from "~/components/ui/Button";
 import { useConnection } from "~/connection/connection-store";
 import { buildAirAppEmbedUrl } from "~/domains/knowledge/utils/airapp-embed-url";
 import { canEmbedAirAppInWebView } from "~/domains/knowledge/utils/airapp-webview";
-import { asNodeDetail } from "~/domains/knowledge/utils/node-detail";
 import { ConnectionGuard } from "~/domains/workspace/components/ConnectionGuard";
 import { mobile, radius, typography } from "~/theme/tokens";
 import { useTokens } from "~/theme/use-tokens";

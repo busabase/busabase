@@ -6,10 +6,11 @@ import type {
   WorkflowNode,
 } from "busabase-contract/domains/rich-node/types";
 import type { NodeVO } from "busabase-contract/types";
+import { asNodeDetail } from "busabase-core/dashboard/node-detail";
 import { useLocalSearchParams } from "expo-router";
 import { CircleCheck, CodeXml, Eye, GitBranch, Play, Timer, Workflow } from "lucide-react-native";
 import { useState } from "react";
-import { Platform, StyleSheet, Text, View } from "react-native";
+import { Platform, StyleSheet, Text, useWindowDimensions, View } from "react-native";
 import { WebView } from "react-native-webview";
 import { useBusabaseOrpc } from "~/api/use-busabase-orpc";
 import {
@@ -22,63 +23,15 @@ import {
 } from "~/components/native-screen";
 import { ConnectionGuard } from "~/domains/workspace/components/ConnectionGuard";
 import { DrawerScaffold } from "~/domains/workspace/components/DrawerScaffold";
-import { radius, spacing, typography } from "~/theme/tokens";
+import { getAppNavigationLayout } from "~/domains/workspace/utils/responsive-layout";
+import { mobile, radius, spacing } from "~/theme/tokens";
 import { useTokens } from "~/theme/use-tokens";
-import { asNodeDetail } from "../utils/node-detail";
+import { WhiteboardCanvasPreview, WorkflowCanvasPreview } from "./RichNodeCanvasPreviews";
 
 type RichNodeType = "whiteboard" | "workflow" | "html";
 
 interface RichNodeDetailScreenProps {
   type: RichNodeType;
-}
-
-const whiteboardText = (element: unknown): { id: string; text: string } | null => {
-  if (!element || typeof element !== "object") return null;
-  const candidate = element as Record<string, unknown>;
-  if (candidate.type !== "text" || candidate.isDeleted === true) return null;
-  const text = typeof candidate.text === "string" ? candidate.text.trim() : "";
-  if (!text) return null;
-  const id = typeof candidate.id === "string" ? candidate.id : text;
-  return { id, text };
-};
-
-function WhiteboardPreview({ document }: { document: WhiteboardDocument }) {
-  const tokens = useTokens();
-  const labels = document.elements
-    .map(whiteboardText)
-    .filter((label): label is { id: string; text: string } => !!label);
-  const [boardTitle, ...notes] = labels;
-
-  return (
-    <NativeSection title="Canvas" caption={`${document.elements.length} elements`}>
-      {labels.length > 0 ? (
-        <View style={styles.canvasGrid}>
-          {boardTitle ? (
-            <Text selectable style={[typography.h3, { color: tokens.foreground }]}>
-              {boardTitle.text}
-            </Text>
-          ) : null}
-          <View style={styles.canvasNotes}>
-            {notes.map((label) => (
-              <View
-                key={label.id}
-                style={[
-                  styles.canvasNote,
-                  { backgroundColor: tokens.surface, borderColor: tokens.border },
-                ]}
-              >
-                <Text selectable style={[typography.bodyEm, { color: tokens.foreground }]}>
-                  {label.text}
-                </Text>
-              </View>
-            ))}
-          </View>
-        </View>
-      ) : (
-        <NativeEmptyState title="Empty whiteboard" />
-      )}
-    </NativeSection>
-  );
 }
 
 const workflowNodeMeta = (node: WorkflowNode): string => {
@@ -110,7 +63,7 @@ const workflowIcon = (kind: WorkflowNode["kind"]) => {
   return Workflow;
 };
 
-function WorkflowPreview({ document }: { document: WorkflowDocument }) {
+function WorkflowListPreview({ document }: { document: WorkflowDocument }) {
   const tokens = useTokens();
 
   return (
@@ -141,10 +94,15 @@ function WorkflowPreview({ document }: { document: WorkflowDocument }) {
 
 function HtmlPreview({ node, document }: { node: NodeVO; document: HtmlDocument }) {
   const tokens = useTokens();
+  const { height } = useWindowDimensions();
   const [tab, setTab] = useState<"preview" | "source">("preview");
+  const workspaceHeight = Math.max(
+    420,
+    height - (mobile.headerHeight ?? 52) - spacing[10] - spacing[6],
+  );
 
   return (
-    <>
+    <View style={styles.htmlWorkspace}>
       <View style={styles.segmentWrap}>
         <NativeSegmentedControl
           value={tab}
@@ -155,39 +113,39 @@ function HtmlPreview({ node, document }: { node: NodeVO; document: HtmlDocument 
           ]}
         />
       </View>
-      <NativeSection title={tab === "preview" ? "Page" : "HTML"} style={styles.htmlSection}>
-        {tab === "preview" ? (
-          <View style={[styles.webviewWrap, { borderColor: tokens.border }]}>
-            {Platform.OS === "web" ? (
-              <iframe
-                sandbox="allow-forms allow-modals allow-scripts"
-                srcDoc={document.source}
-                style={{
-                  width: "100%",
-                  height: "100%",
-                  border: 0,
-                  backgroundColor: tokens.surface,
-                }}
-                title={`${node.name} preview`}
-              />
-            ) : (
-              <WebView
-                javaScriptEnabled
-                originWhitelist={["*"]}
-                source={{ html: document.source }}
-                style={{ backgroundColor: tokens.surface }}
-              />
-            )}
-          </View>
-        ) : (
-          <View style={[styles.sourceWrap, { backgroundColor: tokens.muted }]}>
-            <Text selectable style={[styles.source, { color: tokens.foreground }]}>
-              {document.source}
-            </Text>
-          </View>
-        )}
-      </NativeSection>
-    </>
+      {tab === "preview" ? (
+        <View style={[styles.webviewWrap, { height: workspaceHeight, borderColor: tokens.border }]}>
+          {Platform.OS === "web" ? (
+            <iframe
+              sandbox="allow-forms allow-modals allow-scripts"
+              srcDoc={document.source}
+              style={{
+                width: "100%",
+                height: "100%",
+                border: 0,
+                backgroundColor: tokens.surface,
+              }}
+              title={`${node.name} preview`}
+            />
+          ) : (
+            <WebView
+              javaScriptEnabled
+              originWhitelist={["*"]}
+              source={{ html: document.source }}
+              style={{ backgroundColor: tokens.surface }}
+            />
+          )}
+        </View>
+      ) : (
+        <View
+          style={[styles.sourceWrap, { minHeight: workspaceHeight, backgroundColor: tokens.muted }]}
+        >
+          <Text selectable style={[styles.source, { color: tokens.foreground }]}>
+            {document.source}
+          </Text>
+        </View>
+      )}
+    </View>
   );
 }
 
@@ -199,6 +157,7 @@ const TYPE_LABELS: Record<RichNodeType, string> = {
 
 function RichNodeDetailContent({ type }: RichNodeDetailScreenProps) {
   const params = useLocalSearchParams<{ nodeId?: string }>();
+  const { width, height } = useWindowDimensions();
   const nodeId = typeof params.nodeId === "string" ? params.nodeId : "";
   const buda = useBusabaseOrpc();
   const detailQuery = useQuery(
@@ -210,13 +169,16 @@ function RichNodeDetailContent({ type }: RichNodeDetailScreenProps) {
   // A non-matching result (a slug shared with another type) must NOT render a
   // preview seeded with the wrong document shape.
   const detail = asNodeDetail(detailQuery.data, type);
+  const navigationLayout = getAppNavigationLayout(width, height);
 
   return (
     <DrawerScaffold
       title={detail?.node.name ?? TYPE_LABELS[type]}
       titleNumberOfLines={2}
       subtitle={detail?.node.description || undefined}
-      contentContainerStyle={type === "html" ? styles.htmlScreen : undefined}
+      contentContainerStyle={
+        type === "workflow" && !navigationLayout.persistentSidebar ? undefined : styles.canvasScreen
+      }
       refreshing={detailQuery.isRefetching}
       onRefresh={() => void detailQuery.refetch()}
     >
@@ -238,10 +200,14 @@ function RichNodeDetailContent({ type }: RichNodeDetailScreenProps) {
           cast narrows to the member the surrounding `type === "…"` check already
           guarantees at runtime. */}
       {detail && type === "whiteboard" ? (
-        <WhiteboardPreview document={detail.document as WhiteboardDocument} />
+        <WhiteboardCanvasPreview document={detail.document as WhiteboardDocument} />
       ) : null}
       {detail && type === "workflow" ? (
-        <WorkflowPreview document={detail.document as WorkflowDocument} />
+        navigationLayout.persistentSidebar ? (
+          <WorkflowCanvasPreview document={detail.document as WorkflowDocument} />
+        ) : (
+          <WorkflowListPreview document={detail.document as WorkflowDocument} />
+        )
       ) : null}
       {detail && type === "html" ? (
         <HtmlPreview document={detail.document as HtmlDocument} node={detail.node} />
@@ -259,19 +225,7 @@ export function RichNodeDetailScreen(props: RichNodeDetailScreenProps) {
 }
 
 const styles = StyleSheet.create({
-  canvasGrid: { paddingVertical: spacing[4], gap: spacing[3] },
-  canvasNotes: { flexDirection: "row", flexWrap: "wrap", gap: spacing[3] },
-  canvasNote: {
-    minWidth: 132,
-    minHeight: 92,
-    flexBasis: "46%",
-    flexGrow: 1,
-    justifyContent: "center",
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: radius.md,
-    paddingHorizontal: spacing[4],
-    paddingVertical: spacing[3],
-  },
+  canvasScreen: { flexGrow: 1, paddingBottom: 0 },
   workflowMarker: {
     width: 28,
     height: 28,
@@ -279,22 +233,15 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  htmlScreen: { flexGrow: 1 },
-  htmlSection: { flex: 1 },
-  segmentWrap: { paddingTop: spacing[4] },
+  htmlWorkspace: { flex: 1 },
+  segmentWrap: { paddingHorizontal: spacing[5], paddingVertical: spacing[3] },
   webviewWrap: {
-    flex: 1,
-    minHeight: 420,
-    marginVertical: spacing[4],
+    marginHorizontal: spacing[5],
     borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: radius.md,
     overflow: "hidden",
   },
   sourceWrap: {
-    flex: 1,
-    minHeight: 420,
-    marginVertical: spacing[4],
-    borderRadius: radius.md,
+    marginHorizontal: spacing[5],
     padding: spacing[4],
   },
   source: { fontFamily: "monospace", fontSize: 12, lineHeight: 18 },

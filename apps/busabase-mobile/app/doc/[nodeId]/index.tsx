@@ -1,4 +1,5 @@
 import { skipToken, useQuery } from "@tanstack/react-query";
+import { asNodeDetail } from "busabase-core/dashboard/node-detail";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { ChevronDown, ChevronUp, Pencil } from "lucide-react-native";
 import { useState } from "react";
@@ -13,7 +14,6 @@ import {
   NativeSection,
 } from "~/components/native-screen";
 import { Button } from "~/components/ui/Button";
-import { asNodeDetail } from "~/domains/knowledge/utils/node-detail";
 import { ConnectionGuard } from "~/domains/workspace/components/ConnectionGuard";
 import { DrawerScaffold } from "~/domains/workspace/components/DrawerScaffold";
 import { useI18n } from "~/i18n";

@@ -211,51 +211,6 @@ export const zhCN: CoreMessages = {
     copy: "复制提示词",
     copied: "已复制",
     copyUnavailable: "此处无法复制，请直接选中上方的提示词文本。",
-    groupRecord: "记录",
-    groupField: "字段",
-    groupView: "视图",
-    groupContent: "内容",
-    groupGeneral: "通用",
-    groupOther: "其他",
-    target: "目标：Busabase 的 {type}「{name}」（nodeId: {nodeId}）。",
-    targetWithSpace:
-      "目标：Busabase 的 {type}「{name}」（nodeId: {nodeId}），位于空间「{spaceName}」（spaceId: {spaceId}）。",
-    footer: "以 ChangeRequest 提交改动，未经我批准绝不要合并。请用简体中文回复我。",
-    capabilityBody:
-      "{target}\n\n请执行操作：{operation}。\n先查看该节点的当前状态，还缺什么信息就直接问我。",
-    baseBulkImportLabel: "批量录入数据",
-    baseBulkImportBody:
-      "{target}\n\n我要批量录入数据。请先读取字段结构，再把我给你的内容按字段对应填好。遇到疑似和已有记录重复的，先问我再写入。",
-    baseDesignSchemaLabel: "帮我设计表结构",
-    baseDesignSchemaBody:
-      "{target}\n\n我会描述我要记录什么。请据此设计字段结构——字段名、类型、以及每个字段的理由——先把方案给我看，我确认后再新建或修改字段。",
-    baseDedupeLabel: "清理重复记录",
-    baseDedupeBody:
-      "{target}\n\n请扫描记录里的重复项和近似重复项。列出你找到的分组，以及每组你打算怎么合并或删除——在我挑选之前不要动任何数据。",
-    baseSummarizeLabel: "汇总分析并出报告",
-    baseSummarizeBody:
-      "{target}\n\n请阅读记录并给我一份总结：关键数字、值得注意的规律、以及看起来不对劲的地方。这是只读任务——不要修改数据。",
-    docDraftLabel: "起草或扩写这篇文档",
-    docDraftBody:
-      "{target}\n\n请先读当前内容，再根据我接下来的要求起草或扩写。除非我另有要求，保持现有的结构和语气。",
-    docReviewLabel: "审阅并提出修改建议",
-    docReviewBody:
-      "{target}\n\n请从清晰度、缺漏、以及事实站不住脚的地方审阅这篇文档。先以列表形式给我修改建议——在我指定采纳哪些之前不要直接改写。",
-    driveOrganizeLabel: "整理这些文件",
-    driveOrganizeBody:
-      "{target}\n\n请列出里面有什么，然后提出更清晰的组织方式——命名和分组。在移动或重命名任何东西之前，先把方案给我看。",
-    driveSummarizeLabel: "总结文件内容",
-    driveSummarizeBody:
-      "{target}\n\n请通读这些文件，告诉我里面都有什么——每个文件是做什么的，以及哪些已经过时或冗余。只读，不要改动。",
-    skillImproveLabel: "改进这个 Skill",
-    skillImproveBody:
-      "{target}\n\n请读这个 skill 的文件，告诉我哪些指令含糊、缺失、或容易被 agent 误读。先提出具体修改建议，再动手改。",
-    airappAddFeatureLabel: "加一个功能",
-    airappAddFeatureBody:
-      "{target}\n\n请先读这个应用的现有代码，再实现我接下来描述的功能。动手前先告诉我你打算改哪些文件。",
-    airappDebugLabel: "排查一个问题",
-    airappDebugBody:
-      "{target}\n\n我会描述出了什么问题。请读代码找出真正的原因，先讲清楚给我听，再动手修。",
   },
   rename: {
     title: "重命名",

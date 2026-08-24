@@ -1,6 +1,7 @@
 import { skipToken, useQuery } from "@tanstack/react-query";
 import { getNodeType } from "busabase-contract/domains";
 import type { NodeVO } from "busabase-contract/types";
+import { asNodeDetail } from "busabase-core/dashboard/node-detail";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { Bot, FileText, Folder, HardDrive, Sparkles, Table2 } from "lucide-react-native";
 import { useBusabaseOrpc } from "~/api/use-busabase-orpc";
@@ -11,7 +12,6 @@ import {
   NativeRow,
   NativeSection,
 } from "~/components/native-screen";
-import { asNodeDetail } from "~/domains/knowledge/utils/node-detail";
 import { ConnectionGuard } from "~/domains/workspace/components/ConnectionGuard";
 import { DrawerScaffold } from "~/domains/workspace/components/DrawerScaffold";
 import { getMobileNodeDestination } from "~/domains/workspace/utils/node-navigation";
