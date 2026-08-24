@@ -1342,12 +1342,16 @@ Examples:
     .option("--flags <flags>", 'RegExp flags, e.g. "i" for case-insensitive')
     .option(
       "--sources <sources...>",
-      'sources to scan: "files", "docs", and/or "records" (default: all three)',
+      'sources to scan: "files", "nodes", and/or "records" (default: all three)',
     )
     .option("--asset-ids <ids...>", "files scope: specific asset ids")
     .option("--drive-path <path>", "files scope: Drive/Skill mounted path prefix")
     .option("--mime-types <types...>", "files scope: MIME types")
-    .option("--node-ids <ids...>", "docs scope: specific Doc node ids")
+    .option("--node-ids <ids...>", "nodes scope: specific node ids")
+    .option(
+      "--node-types <types...>",
+      'nodes scope: narrow to "doc", "html", "whiteboard" and/or "workflow"',
+    )
     .option("--base-ids <ids...>", "records scope: specific Base ids")
     .option("--base-slugs <slugs...>", "records scope: specific Base slugs")
     .option(
@@ -1366,7 +1370,13 @@ Examples:
                 mimeTypes: opts.mimeTypes as string[] | undefined,
               }
             : undefined;
-        const docsScope = opts.nodeIds ? { nodeIds: opts.nodeIds as string[] } : undefined;
+        const nodesScope =
+          opts.nodeIds || opts.nodeTypes
+            ? {
+                nodeIds: opts.nodeIds as string[] | undefined,
+                types: opts.nodeTypes as ("doc" | "html" | "whiteboard" | "workflow")[] | undefined,
+              }
+            : undefined;
         const recordsScope =
           opts.baseIds || opts.baseSlugs
             ? {
@@ -1377,10 +1387,10 @@ Examples:
         return client.grep({
           pattern: opts.pattern as string,
           flags: opts.flags as string | undefined,
-          sources: opts.sources as ("files" | "docs" | "records")[] | undefined,
+          sources: opts.sources as ("files" | "nodes" | "records")[] | undefined,
           scope:
-            filesScope || docsScope || recordsScope
-              ? { files: filesScope, docs: docsScope, records: recordsScope }
+            filesScope || nodesScope || recordsScope
+              ? { files: filesScope, nodes: nodesScope, records: recordsScope }
               : undefined,
           maxMatches: opts.maxMatches as number | undefined,
           contextLines: opts.contextLines as number | undefined,

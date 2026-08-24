@@ -459,11 +459,11 @@ describe("Busabase.grep() (Unified Grep) routes through the typed client", () =>
     const { fetchImpl, requests } = okFetch();
     const bb = new Busabase({ baseUrl: "http://localhost:15419", fetch: fetchImpl });
 
-    await bb.grep({ pattern: "TODO", sources: ["docs"] });
+    await bb.grep({ pattern: "TODO", sources: ["nodes"] });
 
     expect(requests[0]?.method).toBe("POST");
     expect(new URL(requests[0]?.url ?? "").pathname).toBe("/api/v1/grep");
-    expect(await requests[0]?.clone().json()).toEqual({ pattern: "TODO", sources: ["docs"] });
+    expect(await requests[0]?.clone().json()).toEqual({ pattern: "TODO", sources: ["nodes"] });
   });
 });
 
@@ -565,18 +565,20 @@ describe("Busabase.assets.grep / readTextLines convenience", () => {
   });
 });
 
-describe("Busabase.docs.readLines routes through the typed client with zero wrapper code", () => {
-  // The Doc-domain equivalent of `assets.readTextLines` above — no SDK wrapper
-  // exists for it either, reached directly via `bb.docs.readLines`.
-  it("docs.readLines() gets /docs/{nodeId}/lines with the range as query params", async () => {
+describe("Busabase.nodes.readLines routes through the typed client with zero wrapper code", () => {
+  // The node-content equivalent of `assets.readTextLines` above — no SDK
+  // wrapper exists for it either, reached directly via `bb.nodes.readLines`.
+  // Was `bb.docs.readLines` (`/docs/{nodeId}/lines`), which served doc nodes
+  // only and so could not follow up a grep hit on html/whiteboard/workflow.
+  it("nodes.readLines() gets /nodes/{nodeId}/lines with the range as query params", async () => {
     const { fetchImpl, requests } = okFetch();
     const bb = new Busabase({ baseUrl: "http://localhost:15419", fetch: fetchImpl });
 
-    await bb.docs.readLines({ nodeId: "nod_1", startLine: 10, endLine: 20 });
+    await bb.nodes.readLines({ nodeId: "nod_1", startLine: 10, endLine: 20 });
 
     expect(requests[0]?.method).toBe("GET");
     const url = new URL(requests[0]?.url ?? "");
-    expect(url.pathname).toBe("/api/v1/docs/nod_1/lines");
+    expect(url.pathname).toBe("/api/v1/nodes/nod_1/lines");
     expect(url.searchParams.get("startLine")).toBe("10");
     expect(url.searchParams.get("endLine")).toBe("20");
   });

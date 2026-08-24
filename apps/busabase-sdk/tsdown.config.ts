@@ -1,6 +1,5 @@
 import { copyFile, mkdir } from "node:fs/promises";
-import { resolve } from "node:path";
-import { defineConfig } from "tsup";
+import { defineConfig } from "tsdown";
 
 // busabase-contract / open-domains / openlib ship TypeScript source (their package
 // exports point at `./src/*.ts`), so they cannot be runtime dependencies of a
@@ -25,11 +24,19 @@ export default defineConfig({
   platform: "neutral",
   outDir: "dist",
   clean: true,
-  // `resolve` inlines the workspace types into dist/index.d.ts — without it the
-  // declarations keep external `import … from "busabase-contract/*"` re-exports,
-  // which consumers can't resolve (busabase-contract is private, never published).
-  // zod / @orpc/* are NOT listed here, so they stay external (real runtime deps).
-  dts: { resolve: true },
+  // Rolldown's dts plugin bundles types for whatever's in `noExternal` as part of
+  // its normal module graph (unlike tsup/rollup-plugin-dts, which needed an
+  // explicit `resolve: true` to inline workspace types into dist/index.d.ts).
+  // Force the `tsgo` generator with a REPO-ROOT dts tsconfig. Under TypeScript 7
+  // the `tsc` generator is unusable — it does `require("typescript")` and needs
+  // `typescript/lib/typescript.js` (the Compiler API), which the native Go
+  // compiler no longer ships. `tsgo` works, with one catch: the plugin passes
+  // `--rootDir <directory of the dts tsconfig>` on the CLI, and the `noExternal`
+  // sources live outside this package — so the tsconfig must sit at the
+  // workspace root (see the comment inside it). `oxc` also works but demands
+  // isolatedDeclarations-style explicit annotations on every export of every
+  // bundled package (~1500 in busabase-contract alone); tsgo infers them.
+  dts: { generator: "tsgo", tsconfig: "../../tsconfig.busabase-sdk-dts.json" },
   treeshake: true,
   noExternal: [/^busabase-contract/, /^open-domains/, /^openlib/],
   // The gate's default stylesheet is plain CSS with no build step of its own —
@@ -38,15 +45,5 @@ export default defineConfig({
   async onSuccess() {
     await mkdir("dist", { recursive: true });
     await copyFile("src/airapp-gate.css", "dist/airapp-gate.css");
-  },
-  esbuildOptions(options) {
-    // Bundled workspace packages import each other through package export paths.
-    // Resolve bare imports from known workspace symlink locations so esbuild can
-    // find them even before a fresh install recreates every link.
-    options.nodePaths = [
-      resolve(process.cwd(), "node_modules"),
-      resolve(process.cwd(), "../../packages/busabase-contract/node_modules"),
-      resolve(process.cwd(), "../../packages/open-domains/node_modules"),
-    ];
   },
 });

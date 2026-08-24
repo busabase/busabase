@@ -1930,7 +1930,7 @@ describe("busabase-cli commands", () => {
         "--pattern",
         "foo",
         "--sources",
-        "docs",
+        "nodes",
         "--node-ids",
         "nod_1",
         "nod_2",
@@ -1943,8 +1943,8 @@ describe("busabase-cli commands", () => {
           url: "http://localhost:15419/api/v1/grep",
           body: {
             pattern: "foo",
-            sources: ["docs"],
-            scope: { docs: { nodeIds: ["nod_1", "nod_2"] } },
+            sources: ["nodes"],
+            scope: { nodes: { nodeIds: ["nod_1", "nod_2"], types: undefined } },
           },
         }),
       ]);
@@ -2123,12 +2123,11 @@ describe("busabase-cli commands", () => {
 
   // The Doc-domain equivalent of `assets read-lines` above — an agent's
   // follow-up after a Unified Grep match lands inside a Doc (`source:
-  // "docs"`). Unlike `assets`, the `docs` command group has no curated
-  // commands at all — every `docs *` command (including this one) is
+  // "nodes"`). Every `nodes *` command (including this one) is
   // auto-generated straight from the OpenAPI contract (see
   // `registerGeneratedCommands`), so this test is the routing regression
   // guard: a contract/router typo here would have nothing else to catch it.
-  describe("docs read-lines (generated command)", () => {
+  describe("nodes read-lines (generated command)", () => {
     it("reads an exact line range via read-lines, as GET query params", async () => {
       const calls: Array<{ method: string; url: string }> = [];
       global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -2148,7 +2147,7 @@ describe("busabase-cli commands", () => {
         "http://localhost:15419",
         "--output",
         "json",
-        "docs",
+        "nodes",
         "read-lines",
         "--node-id",
         "nod_1",
@@ -2162,7 +2161,7 @@ describe("busabase-cli commands", () => {
       expect(calls).toEqual([
         {
           method: "GET",
-          url: "http://localhost:15419/api/v1/docs/nod_1/lines?startLine=10&endLine=20",
+          url: "http://localhost:15419/api/v1/nodes/nod_1/lines?startLine=10&endLine=20",
         },
       ]);
     });
