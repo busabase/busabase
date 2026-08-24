@@ -1,5 +1,4 @@
-import { resolve } from "node:path";
-import { defineConfig } from "tsup";
+import { defineConfig } from "tsdown";
 
 // busabase-contract is private source-only workspace code. Bundle the package
 // format schemas into every public entry so npm consumers never need that
@@ -21,13 +20,19 @@ export default defineConfig({
   platform: "node",
   outDir: "dist",
   clean: true,
+  // package.json's `exports` map points at `./dist/*.js` / `./dist/*.d.ts` (matching
+  // the previous tsup output) — force those extensions explicitly since tsdown's
+  // default for this package resolved to `.mjs`/`.d.mts`.
+  outExtensions: () => ({ js: ".js", dts: ".d.ts" }),
+  // `tsgo` generator + repo-root dts tsconfig — same setup and same reasons as
+  // apps/busabase-sdk/tsdown.config.ts (see the comment there).
   dts: {
-    resolve: true,
+    generator: "tsgo",
+    tsconfig: "../../tsconfig.busabase-package-dts.json",
     // rollup's package resolver does not follow TypeScript-only subpath exports.
     // Point declaration generation at the workspace source so those public
     // schemas are rolled into dist instead of leaking a private package import.
     compilerOptions: {
-      baseUrl: ".",
       paths: {
         "busabase-contract/*": ["../busabase-contract/src/*"],
       },
@@ -35,11 +40,4 @@ export default defineConfig({
   },
   treeshake: true,
   noExternal: [/^busabase-contract/, /^open-domains/, /^openlib/],
-  esbuildOptions(options) {
-    options.nodePaths = [
-      resolve(process.cwd(), "node_modules"),
-      resolve(process.cwd(), "../busabase-contract/node_modules"),
-      resolve(process.cwd(), "../open-domains/node_modules"),
-    ];
-  },
 });

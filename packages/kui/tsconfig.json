@@ -16,7 +16,6 @@
     "jsxImportSource": "react",
     "plugins": [{ "name": "next" }],
 
-    "baseUrl": ".",
     "paths": {
       "@/*": ["./src/*"]
     },

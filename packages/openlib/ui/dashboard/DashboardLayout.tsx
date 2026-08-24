@@ -1,8 +1,11 @@
+"use client";
+
 import { Separator } from "kui/separator";
 import { SidebarInset, SidebarProvider, SidebarTrigger } from "kui/sidebar";
 import { cn } from "kui/utils";
-import type * as React from "react";
+import * as React from "react";
 import { AppSidebar } from "./AppSidebar";
+import { SidebarResizeHandle, useRestoreSidebarWidth } from "./SidebarResizeHandle";
 import type { AppBranding, NavGroup, NavUserLabels, Space, UserData, UserMenuItem } from "./types";
 
 interface DashboardLayoutProps {
@@ -141,8 +144,12 @@ export function DashboardLayout({
   onTaskListExpandToggle,
   onSpaceSelectorFocusMode,
 }: DashboardLayoutProps) {
+  const sidebarWrapperRef = React.useRef<HTMLDivElement>(null);
+  useRestoreSidebarWidth(sidebarWrapperRef);
+
   return (
     <SidebarProvider
+      ref={sidebarWrapperRef}
       defaultOpen={defaultOpen}
       className={cn(
         // Override min-h-svh to h-full so the layout respects parent container height
@@ -183,6 +190,7 @@ export function DashboardLayout({
         onTaskListExpandToggle={onTaskListExpandToggle}
         onSpaceSelectorFocusMode={onSpaceSelectorFocusMode}
       />
+      <SidebarResizeHandle wrapperRef={sidebarWrapperRef} />
       <SidebarInset className="!min-h-0 flex flex-col overflow-hidden">
         <header
           className={cn(
