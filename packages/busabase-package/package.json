@@ -1,7 +1,7 @@
 {
   "name": "busabase-package",
   "description": "The `busabase-package@1` format: GitHub source, layout read/write, install planning, and the five-pass apply. Shared by busabase-cli (`install` / `export`) and busabase-core's server-side install domain. Node-only APIs are fine here — it is never browser-bundled.",
-  "version": "0.19.0",
+  "version": "0.19.1",
   "private": false,
   "license": "MIT",
   "homepage": "https://github.com/busabase/busabase/tree/main/packages/busabase-package",
@@ -138,7 +138,7 @@
     "busabase-contract": "workspace:*",
     "tsdown": "^0.22.14",
     "typescript": "^7.0.2",
-    "vitest": "^2.1.8"
+    "vitest": "^4.1.11"
   },
   "engines": {
     "node": ">=24.18.0"
