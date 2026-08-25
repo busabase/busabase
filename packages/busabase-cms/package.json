@@ -78,7 +78,7 @@
     "react": "^19.2.7",
     "tsdown": "^0.22.14",
     "typescript": "^7.0.2",
-    "vitest": "^2.1.8"
+    "vitest": "^4.1.11"
   },
   "engines": {
     "node": ">=24.18.0"
