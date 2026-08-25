@@ -35,6 +35,7 @@ concurrency:
 jobs:
   ci-ok:
     name: ci-ok
+    if: "${{ github.event.head_commit.message == 'chore: update coverage badge' }}"
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -44,11 +45,12 @@ jobs:
       - name: Confirm nothing but the coverage badge changed
         # Defence in depth: `paths` already scoped this workflow to pushes
         # that touch the badge, but that filter looks at the whole push (all
-        # commits it contains). Diffing against the push's previous head
-        # (`github.event.before`) makes sure no code slipped through
-        # disguised as a badge-labelled push.
+        # commits it contains). The job-level guard restricts this path to the
+        # bot's one badge commit; comparing that commit with its parent avoids
+        # relying on `github.event.before`, which may be unreachable after a
+        # release branch is force-updated.
         run: |
-          changed=$(git diff --name-only '${{ github.event.before }}' HEAD)
+          changed=$(git diff --name-only HEAD^ HEAD)
           echo "$changed"
           unexpected=$(echo "$changed" | grep -v '^apps/busabase/public/assets/readme/coverage.svg$' || true)
           if [ -n "$unexpected" ]; then
