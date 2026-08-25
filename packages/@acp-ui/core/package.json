@@ -5,8 +5,29 @@
   "license": "MIT",
   "private": false,
   "publishConfig": {
-    "access": "public"
+    "access": "public",
+    "exports": {
+      "./reduce": {
+        "types": "./dist/reduce/index.d.ts",
+        "default": "./dist/reduce/index.js"
+      },
+      "./session": {
+        "types": "./dist/session/index.d.ts",
+        "default": "./dist/session/index.js"
+      },
+      "./group": {
+        "types": "./dist/group/index.d.ts",
+        "default": "./dist/group/index.js"
+      },
+      "./prompt": {
+        "types": "./dist/prompt/index.d.ts",
+        "default": "./dist/prompt/index.js"
+      }
+    }
   },
+  "files": [
+    "dist"
+  ],
   "repository": {
     "type": "git",
     "url": "https://github.com/mr-kelly/acp-ui.git",
@@ -17,6 +38,9 @@
   },
   "type": "module",
   "scripts": {
+    "build": "tsdown",
+    "prepack": "pnpm run build",
+    "prepublishOnly": "pnpm run typecheck && pnpm run test && pnpm run build && node scripts/assert-pnpm-publish.mjs",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },
@@ -56,7 +80,8 @@
     "jsdom": "^25.0.1",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
+    "tsdown": "^0.22.14",
     "typescript": "^7.0.2",
-    "vitest": "^3.2.4"
+    "vitest": "^4.1.11"
   }
 }

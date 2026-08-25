@@ -192,7 +192,7 @@ describe("sending an attachment", () => {
     await userEvent.type(screen.getByRole("textbox"), "check this out");
     await userEvent.click(submitButton());
 
-    expect(onSend).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1));
     const [text, attachments] = onSend.mock.calls[0];
     expect(text).toBe("check this out");
     expect(attachments).toHaveLength(1);
@@ -222,7 +222,7 @@ describe("sending an attachment", () => {
     const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement;
     await userEvent.upload(fileInput, fakeFile("photo.png", "image/png"));
     await userEvent.click(submitButton());
-    expect(onSend).toHaveBeenCalledWith("", expect.any(Array));
+    await waitFor(() => expect(onSend).toHaveBeenCalledWith("", expect.any(Array)));
   });
 });
 
