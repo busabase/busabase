@@ -107,9 +107,16 @@ export const getBusabaseDashboardRoutes = (
       title: "Templates",
     },
     {
-      // Specific-before-generic: `/templates/:templateId` would otherwise
-      // swallow nothing here, but the id carries slashes (`owner/repo/subdir`),
-      // so the gallery keeps its selection in state rather than in the path.
+      // One template, addressed by its NAME rather than its catalog id: the id
+      // is `<owner>/<repo>/<subdir>` and carries slashes, which a single path
+      // segment cannot hold. A name is already slug-shaped and unique within a
+      // catalog, so it round-trips cleanly and the URL stays readable.
+      path: "/templates/:templateName",
+      component: dashboard,
+      breadcrumb: "Template",
+      title: "Template",
+    },
+    {
       path: "/apps",
       component: dashboard,
       breadcrumb: "Apps",

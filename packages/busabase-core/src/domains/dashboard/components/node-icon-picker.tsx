@@ -2,12 +2,10 @@
 
 // Self-contained node-avatar picker: a round trigger button showing the
 // node's current icon (custom or type-default), which opens a Popover with an
-// emoji grid + an "upload image" row — mirrors buda's
-// `AgentIconPickerContent` + its `Popover` call site
-// (`apps/buda/src/domains/agent-controller/components/agent-icon-picker.tsx`
-// and `agent-settings-dialog.tsx`), combined into one component since
-// `NodeSettingsDialog`'s General tab is this component's only caller (no
-// second host needs the trigger and the popover content split apart).
+// emoji grid + an "upload image" row. It follows the established agent-avatar
+// picker pattern, combined into one component since `NodeSettingsDialog`'s
+// General tab is this component's only caller (no second host needs the trigger
+// and the popover content split apart).
 
 import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";
 import type { NodeIcon } from "busabase-contract/types";

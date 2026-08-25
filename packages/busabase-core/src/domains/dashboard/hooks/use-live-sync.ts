@@ -6,6 +6,10 @@ import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-quer
 import type { liveEventSchema } from "busabase-contract/contract/busabase";
 import { useEffect, useMemo } from "react";
 import type { z } from "zod";
+import {
+  createLiveInvalidationBatcher,
+  type LiveInvalidationTarget,
+} from "../helpers/live-invalidation";
 import { createWorkspaceRevalidationGate } from "../helpers/workspace-revalidation";
 
 type BusabaseLiveEvent = z.infer<typeof liveEventSchema>;
@@ -173,7 +177,46 @@ export function useBusabaseLiveSync({
       });
     };
 
+    const keyForTarget = (target: LiveInvalidationTarget): QueryKey => {
+      switch (target) {
+        case "archivedBases":
+          return stableListKeys.archivedBases;
+        case "archivedNodes":
+          return stableListKeys.archivedNodes;
+        case "auditEvents":
+          return stableListKeys.auditEvents;
+        case "bases":
+          return stableListKeys.bases;
+        case "changeRequestCounts":
+          return stableListKeys.changeRequestCounts;
+        case "changeRequests":
+          return stableListKeys.changeRequests;
+        case "changeRequestsPaged":
+          return stableListKeys.changeRequestsPaged;
+        case "nodeDetail":
+          return stableListKeys.nodeDetail;
+        case "nodes":
+          return stableListKeys.nodes;
+        case "records":
+          return stableListKeys.records;
+        case "recordsCount":
+          return stableListKeys.recordsCount;
+        case "recordsPage":
+          return stableListKeys.recordsPage;
+      }
+    };
+
+    const invalidationBatcher = createLiveInvalidationBatcher((batch) => {
+      for (const target of batch.targets) {
+        void queryClient.invalidateQueries({ queryKey: keyForTarget(target) });
+      }
+      for (const baseId of batch.baseIds) invalidateBaseScope(baseId);
+    });
+
     const invalidateWorkspace = () => {
+      // A reconnect/focus reconciliation is a superset of any queued event
+      // batch. Cancel it so the timer cannot repeat the expensive refresh.
+      invalidationBatcher.cancel();
       void queryClient.invalidateQueries({ queryKey: stableListKeys.nodes });
       void queryClient.invalidateQueries({ queryKey: stableListKeys.nodeDetail });
       void queryClient.invalidateQueries({ queryKey: stableListKeys.archivedNodes });
@@ -192,36 +235,13 @@ export function useBusabaseLiveSync({
     };
 
     const handleEvent = (event: BusabaseLiveEvent) => {
-      void queryClient.invalidateQueries({ queryKey: stableListKeys.changeRequests });
-      void queryClient.invalidateQueries({ queryKey: stableListKeys.changeRequestsPaged });
-      void queryClient.invalidateQueries({ queryKey: stableListKeys.changeRequestCounts });
-      void queryClient.invalidateQueries({ queryKey: stableListKeys.auditEvents });
-
       // Ephemeral, not persisted: a page refresh loses this signal entirely —
       // that's intentional (see live-events.ts's `publishChangeRequestPendingReview`).
       // Skip the submitter's own tab so nobody gets notified of their own work.
       if (event.kind === "change_request.pending_review" && event.actorId !== currentUserId) {
         notifyPendingReview(notificationTitle, notificationBody);
       }
-
-      if (event.nodeIds.length > 0) {
-        void queryClient.invalidateQueries({ queryKey: stableListKeys.nodes });
-        void queryClient.invalidateQueries({ queryKey: stableListKeys.nodeDetail });
-        void queryClient.invalidateQueries({ queryKey: stableListKeys.archivedNodes });
-        void queryClient.invalidateQueries({ queryKey: stableListKeys.bases });
-        void queryClient.invalidateQueries({ queryKey: stableListKeys.archivedBases });
-      }
-
-      if (event.recordIds.length > 0 || event.viewIds.length > 0 || event.baseId) {
-        void queryClient.invalidateQueries({ queryKey: stableListKeys.records });
-        void queryClient.invalidateQueries({ queryKey: stableListKeys.recordsPage });
-        void queryClient.invalidateQueries({ queryKey: stableListKeys.recordsCount });
-        void queryClient.invalidateQueries({ queryKey: stableListKeys.bases });
-        void queryClient.invalidateQueries({ queryKey: stableListKeys.archivedBases });
-        if (event.baseId) {
-          invalidateBaseScope(event.baseId);
-        }
-      }
+      invalidationBatcher.push(event);
     };
 
     const connect = () => {
@@ -290,6 +310,7 @@ export function useBusabaseLiveSync({
       if (retryTimer) {
         clearTimeout(retryTimer);
       }
+      invalidationBatcher.cancel();
       abortController?.abort();
       void unsubscribe?.().catch(() => undefined);
       document.removeEventListener("visibilitychange", handleVisibilityRefresh);

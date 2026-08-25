@@ -1,19 +1,17 @@
 "use client";
 
 // Encapsulates the "pick image → crop → upload" pipeline for a node's custom
-// avatar — mirrors buda's `useLogoCropUpload`
-// (`apps/buda/src/domains/agent-controller/components/use-logo-crop-upload.tsx`)
-// almost line-for-line, with the upload target swapped from buda's
-// `useAvatarUpload` (its own S3 route) to the `nodes.icon.createUploadUrl` /
-// `nodes.icon.confirm` oRPC pair (see `attachments-logic.ts`'s
+// avatar. It follows the shared logo-cropping pattern, with the upload target
+// implemented by the `nodes.icon.createUploadUrl` / `nodes.icon.confirm` oRPC
+// pair (see `attachments-logic.ts`'s
 // `requestNodeIconUploadUrl`/`confirmNodeIconUpload`), which is what actually
 // keeps a node icon out of the Assets library and disjoint from any other
 // node's icon (see that file's doc comment for the dedup-scope reasoning).
 //
-// Storage model: same as buda — a fresh upload persists BOTH the original
-// (uncropped) and the cropped display version, plus the crop UI state, into
-// the `NodeIcon` jsonb, so re-opening the crop dialog can non-destructively
-// re-crop against the untouched source image.
+// Storage model: a fresh upload persists BOTH the original (uncropped) and the
+// cropped display version, plus the crop UI state, into the `NodeIcon` jsonb,
+// so re-opening the crop dialog can non-destructively re-crop against the
+// untouched source image.
 
 import { useMutation } from "@tanstack/react-query";
 import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";

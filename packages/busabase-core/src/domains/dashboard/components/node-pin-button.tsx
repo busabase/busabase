@@ -1,5 +1,6 @@
 "use client";
 
+import { Button } from "kui/button";
 import { Pin } from "lucide-react";
 import { useCoreI18n } from "../../../i18n";
 import { useSidePanelStore } from "../store/side-panel-store";
@@ -31,16 +32,18 @@ export function NodePinButton({
 }) {
   const messages = useCoreI18n();
   return (
-    <button
+    <Button
       aria-label={messages.nodeDetail.pinToSidePanel}
-      className="inline-flex shrink-0 items-center justify-center rounded-md border border-border/60 bg-card p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+      className="size-8 text-muted-foreground shadow-none hover:bg-muted/70 hover:text-foreground"
       onClick={() =>
         useSidePanelStore.getState().openTab({ id: tabId, type: tabType, title, payload })
       }
+      size="icon"
       title={messages.nodeDetail.pinToSidePanel}
       type="button"
+      variant="ghost"
     >
       <Pin className="size-3.5" />
-    </button>
+    </Button>
   );
 }

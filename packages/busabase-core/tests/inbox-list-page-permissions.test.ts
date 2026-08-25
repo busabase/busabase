@@ -28,6 +28,7 @@ const MIGRATIONS_CWD = path.resolve(__dirname, "../../../apps/busabase");
 const MEMBER = "local-editor";
 const VISIBLE_PENDING = 7;
 const HIDDEN_PENDING = 19;
+const OVERSIZED_BODY = "x".repeat(400_000);
 
 /** Everything a plain space member (explicitly NOT a manager) would see. */
 const asMember = <T>(fn: () => Promise<T>): Promise<T> =>
@@ -46,6 +47,7 @@ describe("inbox listPage permissions", () => {
   let storageDir = "";
   let originalCwd = "";
   let client: Client;
+  let oversizedVisibleCrId = "";
 
   beforeAll(async () => {
     originalCwd = process.cwd();
@@ -56,29 +58,34 @@ describe("inbox listPage permissions", () => {
     process.env.STORAGE_URL = `local:${storageDir}?base_url=/api/test/storage`;
     client = createRouterClient(busabaseRouter);
 
-    const field = { slug: "name", name: "Name", type: "text", required: true, options: {} };
+    const fields = [
+      { slug: "name", name: "Name", type: "text", required: true, options: {} },
+      { slug: "body", name: "Body", type: "longtext", options: {} },
+    ];
     const visible = await client.bases.create({
       slug: "listpage-visible",
       name: "Visible",
-      fields: [field],
+      fields,
       autoMerge: true,
     } as never);
     const hidden = await client.bases.create({
       slug: "listpage-hidden",
       name: "Hidden",
-      fields: [field],
+      fields,
       autoMerge: true,
     } as never);
 
-    const propose = async (baseId: string, name: string) => {
-      await client.bases.createChangeRequest({
+    const propose = async (baseId: string, name: string, body?: string) =>
+      client.bases.createChangeRequest({
         baseId,
-        fields: { name },
+        fields: { name, ...(body ? { body } : {}) },
         submittedBy: "local-producer",
         autoMerge: false,
       });
-    };
-    for (let i = 0; i < VISIBLE_PENDING; i++) await propose(visible.id, `visible-${i}`);
+
+    const oversized = await propose(visible.id, "visible-oversized", OVERSIZED_BODY);
+    oversizedVisibleCrId = oversized.id;
+    for (let i = 1; i < VISIBLE_PENDING; i++) await propose(visible.id, `visible-${i}`);
     for (let i = 0; i < HIDDEN_PENDING; i++) await propose(hidden.id, `hidden-${i}`);
 
     // Done last so the proposals above are authored while the base is still
@@ -174,5 +181,25 @@ describe("inbox listPage permissions", () => {
     });
 
     expect(viaPage).toEqual(viaCursor);
+  });
+
+  it("keeps ACL semantics and list memory bounded for an oversized commit", async () => {
+    const { detail, listRow } = await asMember(async () => {
+      const page = await client.changeRequests.listPage({
+        status: ["in_review"],
+        page: 1,
+        pageSize: 100,
+      } as never);
+      return {
+        listRow: page.changeRequests.find((row) => row.id === oversizedVisibleCrId),
+        detail: await client.changeRequests.get({ changeRequestId: oversizedVisibleCrId } as never),
+      };
+    });
+
+    expect(listRow).toBeDefined();
+    expect(String(listRow?.operations[0]?.headCommit.payload.body)).toContain("omitted");
+    expect(String(detail?.operations[0]?.headCommit.payload.body)).toHaveLength(
+      OVERSIZED_BODY.length,
+    );
   });
 });

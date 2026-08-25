@@ -1296,5 +1296,25 @@ export const dashboardZhCN: CoreI18nMessages = {
     reviewNow: "现在去评审",
     noPending: "全部已合并——软件包已在你的空间中生效。",
     done: "完成",
+    resultDescription: "这是刚刚进入你空间的东西。",
+    alsoInstallToAgent: "顺便把这个 App 的手册给你的 Agent",
+    chooseHow: "这里有两种装法，选一种符合你工作方式的。",
+    tabAgent: "Agent 安装",
+    tabUi: "界面安装",
+    agentIntro:
+      "把「{name}」的操作手册交给你已经在用的 Agent（Claude Code、Codex、Cursor）。它会学会这个 App 怎么用；这个空间里不会创建或改动任何东西。",
+    agentPromptLabel: "把这段粘贴给你的 Agent",
+    agentPromptBody:
+      "安装 Busabase 应用技能「{name}」，以便你之后可以操作它：\n\n{command}\n\n只安装技能——先不要在我的 Busabase 空间里创建、修改或删除任何东西。装好之后，用几句话告诉我这个 App 是做什么的，以及如果我让你去搭建它，会创建些什么。",
+    agentRefHint: "安装的是仓库默认分支。这条目录读取自 {ref}。",
+    agentConnectTitle: "还要让 Agent 能访问这个空间",
+    agentConnectBody:
+      "技能告诉 Agent 这个 App 怎么用；连接 Busabase 才让它真的能读写你的数据。只需设置一次。",
+    agentConnectAction: "连接你的 Agent",
+    agentNoSkillTitle: "这个包不带 Agent 手册",
+    agentNoSkillBody:
+      "这里没有 SKILL.md，Agent 无从安装，只能靠猜你的表结构。请改用界面安装；装完仍可以在节点的「•••」菜单里把该节点的提示词交给 Agent。",
+    uiIntro:
+      "在这个空间里创建文件夹、数据表和 App。这样装 Agent 学不到任何东西——你随时可以从「Agent 安装」标签页把手册给它。",
   },
 };

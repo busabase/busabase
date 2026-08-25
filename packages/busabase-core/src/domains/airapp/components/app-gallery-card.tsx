@@ -12,7 +12,7 @@ import { resolveNodeIcon } from "../../dashboard/helpers/node-icons";
  * need one size (no per-view configuration like a Base gallery), so this is a
  * plain constant rather than a lookup table.
  */
-const APP_CARD_MIN_WIDTH = "160px";
+const APP_CARD_MIN_WIDTH = "120px";
 
 export interface AppGalleryNode {
   id: string;
@@ -41,22 +41,29 @@ export function AppGalleryCard({ node }: { node: AppGalleryNode | NodeVO }) {
       data-node-id={node.id}
       href={href}
     >
-      <div className="flex aspect-square w-full items-center justify-center overflow-hidden bg-muted/50">
+      <div className="flex aspect-[3/2] w-full items-center justify-center overflow-hidden bg-muted/50">
         {resolvedIcon.kind === "image" ? (
           <img alt="" className="size-full object-cover" src={resolvedIcon.url} />
         ) : resolvedIcon.kind === "emoji" ? (
-          <span aria-hidden="true" className="text-4xl leading-none">
+          <span aria-hidden="true" className="text-3xl leading-none">
             {resolvedIcon.value}
           </span>
         ) : (
           <resolvedIcon.Icon
             aria-hidden="true"
-            className="size-9 text-muted-foreground transition-colors group-hover:text-foreground"
+            className="size-7 text-muted-foreground transition-colors group-hover:text-foreground"
           />
         )}
       </div>
       <div className="min-w-0 px-3 py-2.5">
-        <span className="block truncate font-medium text-foreground text-sm" title={node.name}>
+        {/* Two lines, not `truncate`: at this card width a single line collapses
+            sibling AirApps to the same prefix (three "Vite + React …" tiles read
+            identically). `min-h` reserves both lines so one- and two-line names
+            still produce tiles of equal height. */}
+        <span
+          className="line-clamp-2 min-h-10 font-medium text-foreground text-sm"
+          title={node.name}
+        >
           {node.name}
         </span>
       </div>

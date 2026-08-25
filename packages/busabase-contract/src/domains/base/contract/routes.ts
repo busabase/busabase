@@ -15,6 +15,7 @@ import {
   countRecordsInputSchema,
   countRecordsResponseSchema,
   createBulkChangeRequestInputSchema,
+  createBulkUpdateChangeRequestInputSchema,
   createChangeRequestInputSchema,
   listRecordsInputSchema,
   listRecordsPageInputSchema,
@@ -114,6 +115,16 @@ export const baseContract = {
       successDescription: "Created one change request proposing many record creates.",
     })
     .input(createBulkChangeRequestInputSchema.extend({ baseId: z.string() }))
+    .output(changeRequestSchema),
+  createBulkUpdateChangeRequest: oc
+    .route({
+      method: "POST",
+      path: "/bases/{baseId}/records/bulk-update-change-request",
+      tags: ["Bases", "Change Requests"],
+      summary: "Create bulk record update Change Request in Base",
+      successDescription: "Created one change request proposing many record updates.",
+    })
+    .input(createBulkUpdateChangeRequestInputSchema.extend({ baseId: z.string() }))
     .output(changeRequestSchema),
   createField: oc
     .route({

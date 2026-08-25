@@ -174,6 +174,7 @@ Quick reference — every path is relative to the base URL above; worked example
 | List ChangeRequests | \`GET /api/v1/change-requests\` | the review queue |
 | Create record CR | \`POST /api/v1/bases/:baseId/change-requests\` | propose one record change |
 | Bulk create records CR | \`POST /api/v1/bases/:baseId/records/bulk-change-request\` | propose many records (≤1000) as ONE CR |
+| Bulk update records CR | \`POST /api/v1/bases/:baseId/records/bulk-update-change-request\` | partially update many existing records (≤1000) as ONE atomic CR |
 | Create node CR | \`POST /api/v1/nodes/change-requests\` | propose folder / Skill structure changes (supports in-CR \`ref\`/\`parentNodeRef\`) |
 | Read Skill files | \`GET /api/v1/file-trees/:nodeId/files/:filePath\` | read a Skill file (same route for Drives and AirApps) |
 | Create Skill file CR | \`POST /api/v1/file-trees/:nodeId/change-requests\` | propose a Skill file edit |
@@ -234,6 +235,24 @@ ${authLine}  -H 'content-type: application/json' \\
     ],
     "message": "Import 3 launch-week leads",
     "submittedBy": "agent"
+  }'
+\`\`\`
+
+Bulk-update existing records as ONE ChangeRequest. Each \`fields\` object is a partial
+patch: omitted keys remain unchanged and explicit \`null\` clears a field. Supply a
+per-record \`baseCommitId\` when pinning the version you read matters:
+
+\`\`\`bash
+curl -X POST ${base}/api/v1/bases/:baseId/records/bulk-update-change-request \\
+${authLine}  -H 'content-type: application/json' \\
+  --data '{
+    "updates": [
+      { "recordId": "rec_1", "fields": { "status": "published" } },
+      { "recordId": "rec_2", "fields": { "note": null }, "baseCommitId": "cmt_2" }
+    ],
+    "message": "Apply August content review decisions",
+    "submittedBy": "agent",
+    "autoMerge": false
   }'
 \`\`\`
 

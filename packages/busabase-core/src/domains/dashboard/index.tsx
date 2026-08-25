@@ -46,6 +46,7 @@ import { AirAppKeepAliveHost } from "../airapp/components/AirAppKeepAliveHost";
 import { AppsListView } from "../airapp/components/apps-list-view";
 import { getPrimaryField } from "../base/utils/primary-field";
 import { TemplateCenter } from "../templates/components/template-center";
+import type { AgentIntegrationTarget } from "./components/agent-install-panel";
 import { ArchivedBasesView } from "./components/archived-bases";
 import { AssetsView } from "./components/assets";
 import { BaseDetailView, BaseSetupView, BaseTopbarActions } from "./components/base-views";
@@ -76,6 +77,7 @@ import { BaseTableSkeleton } from "./components/skeletons";
 import { SubmitPermissionProvider } from "./components/split-submit-button";
 import { BusabaseTopbarBreadcrumb, TopbarNodeActionsSlot } from "./components/topbar";
 import { getNodeDetailBreadcrumbItems } from "./helpers/breadcrumbs";
+import { shouldQueryGlobalChangeRequests } from "./helpers/change-request-data-source";
 import { createChangeRequestQueryKeys } from "./helpers/change-request-query-keys";
 import { getRelationRecordIds } from "./helpers/field";
 import { getLocationPath, readInboxView } from "./helpers/inbox";
@@ -146,6 +148,14 @@ interface BusabaseDashboardProps {
    */
   apiClientOptions?: BusabaseClientOptions;
   apiClient?: BusabaseDashboardApiClient;
+  /**
+   * Host guidance for the Agent install tab of the Template Center's install
+   * dialog — which edition's connection instructions to show and which space to
+   * pin them to. Same shape the host already passes to its sidebar
+   * `BusabaseAgentSkillButton`; omit and the dialog falls back to Desktop's
+   * local guidance.
+   */
+  agentIntegration?: AgentIntegrationTarget;
   embedded?: boolean;
   /**
    * Full-screen, chrome-free rendering: skips the topbar (SidebarTrigger,
@@ -159,6 +169,8 @@ interface BusabaseDashboardProps {
    * every existing browser consumer is unaffected.
    */
   chromeless?: boolean;
+  /** Reuses the Change Request detail surface without exposing mutation controls. */
+  readOnlyChangeRequestPreview?: boolean;
   /**
    * Which AirApp engines this deployment can offer, resolved server-side by
    * `domains/airapp/logic/engine-availability.ts`. Omitted, the dashboard
@@ -236,6 +248,7 @@ function BusabaseDashboardContent({
   cacheSpaceKey = "local",
   apiClientOptions,
   apiClient,
+  agentIntegration,
   auditEvents: initialAuditEvents = [],
   changeRequests: initialChangeRequests,
   currentUserId = null,
@@ -248,6 +261,7 @@ function BusabaseDashboardContent({
   views: initialViews = [],
   embedded = false,
   chromeless = false,
+  readOnlyChangeRequestPreview = false,
   onSearchOpenChange,
   searchOpen,
   visitorKind = "member",
@@ -270,6 +284,9 @@ function BusabaseDashboardContent({
     () => apiClient ?? createBusabaseRestApiClient(apiBasePath, apiClientOptions),
     [apiBasePath, apiClient, apiClientOptions],
   );
+  const [location, rawSetLocation] = useLocation();
+  const search = useSearch();
+  const locationPath = getLocationPath(location);
   const nodeCache = useMemo(
     () => createKnownNodeCache(`${cacheSpaceKey}:${currentUserId ?? "anonymous"}`),
     [cacheSpaceKey, currentUserId],
@@ -310,7 +327,7 @@ function BusabaseDashboardContent({
       changeRequests: typeof initialChangeRequests;
       nextCursor: string | null;
     } & Awaited<ReturnType<typeof changeRequestsList.queryFn>>,
-    enabled: !isAnon,
+    enabled: !isAnon && shouldQueryGlobalChangeRequests(locationPath),
   });
   // For an anonymous visitor `bases.list` is off; `activeBase` resolves from the
   // seeded `initialBases` prop (the one shared base the public host fetched via
@@ -368,8 +385,6 @@ function BusabaseDashboardContent({
     [listKeys.assets, queryClient, uploadAttachmentBase],
   );
   const [error, setError] = useState<string | null>(null);
-  const [location, rawSetLocation] = useLocation();
-  const search = useSearch();
   // Wrap every programmatic navigation so it keeps `?demo` in demo mode
   // (applied once at the source instead of per call
   // site) AND carries forward the rest of the current query string — e.g.
@@ -382,7 +397,6 @@ function BusabaseDashboardContent({
       rawSetLocation(addDemoParam(mergeSearchIntoHref(to, search)), options),
     [rawSetLocation, addDemoParam, search],
   );
-  const locationPath = getLocationPath(location);
   const inboxView = readInboxView(search);
   const [uncontrolledSearchOpen, setUncontrolledSearchOpen] = useState(false);
   const isSearchOpen = searchOpen ?? uncontrolledSearchOpen;
@@ -393,6 +407,8 @@ function BusabaseDashboardContent({
     isAssetDetailRoute,
     isAgentDetailRoute,
     agentDetailParams,
+    isTemplateDetailRoute,
+    templateDetailParams,
     isOperationRoute,
     operationParams,
     isChangeRequestRoute,
@@ -954,8 +970,8 @@ function BusabaseDashboardContent({
       ];
     }
 
-    // Home before the catch-all below, which still falls through to Inbox for
-    // every unlabelled route.
+    // Home before the catch-all below, which falls through to Home for every
+    // unlabelled route.
     if (locationPath === "/" || locationPath === "/home") {
       return [{ label: messages.nav.home }];
     }
@@ -966,6 +982,37 @@ function BusabaseDashboardContent({
 
     if (locationPath === "/activity") {
       return [{ label: messages.nav.activity }];
+    }
+
+    if (locationPath === "/agents") {
+      return [{ label: messages.nav.agents }];
+    }
+
+    if (locationPath === "/agents/new") {
+      return [{ href: "/agents", label: messages.nav.agents }, { label: "Add agent" }];
+    }
+
+    if (isAgentDetailRoute) {
+      return [
+        { href: "/agents", label: messages.nav.agents },
+        { label: agentDetailParams?.agentSlug ?? messages.nav.agents },
+      ];
+    }
+
+    if (locationPath === "/apps") {
+      return [{ label: messages.nav.apps }];
+    }
+
+    if (locationPath === "/templates") {
+      return [{ label: messages.nav.templates }];
+    }
+
+    if (isArchivedRoute) {
+      return [{ label: messages.trash.title }];
+    }
+
+    if (isGraphRoute) {
+      return [{ label: messages.nav.graph }];
     }
 
     if (locationPath === "/assets") {
@@ -1060,10 +1107,14 @@ function BusabaseDashboardContent({
     activeBase,
     activeDetailNode,
     activeRecord,
+    agentDetailParams,
+    isAgentDetailRoute,
+    isArchivedRoute,
     isBaseSetupRoute,
     isChangeRequestRoute,
     isEditRecordRoute,
     isAssetDetailRoute,
+    isGraphRoute,
     isNewRecordRoute,
     isOperationRoute,
     isBaseViewRoute,
@@ -1960,6 +2011,7 @@ function BusabaseDashboardContent({
           onClose={closeChangeRequest}
           onMerge={mergeChangeRequest}
           onReject={rejectChangeRequest}
+          readOnly={readOnlyChangeRequestPreview}
         />
       );
     }
@@ -1982,11 +2034,15 @@ function BusabaseDashboardContent({
       return <AppsListView orpc={orpc} />;
     }
 
-    if (locationPath === "/templates") {
+    if (locationPath === "/templates" || isTemplateDetailRoute) {
       return (
         <TemplateCenter
           orpc={orpc}
           apiClient={apiClient}
+          agentIntegration={agentIntegration}
+          selectedName={isTemplateDetailRoute ? (templateDetailParams?.templateName ?? null) : null}
+          onSelect={(template) => setLocation(`/templates/${template.name}`)}
+          onBack={() => setLocation("/templates")}
           onReviewChangeRequests={() => setLocation("/inbox")}
           onInstalled={() => {
             // Structure is created immediately, so the tree on screen is
@@ -2256,6 +2312,7 @@ function BusabaseDashboardContent({
     inboxView,
     mergeChangeRequest,
     records,
+    readOnlyChangeRequestPreview,
     rejectChangeRequest,
     isBaseSetupRoute,
     selectedChangeRequest,
@@ -2300,7 +2357,10 @@ function BusabaseDashboardContent({
     openSearch,
     cacheSpaceKey,
     apiClient,
+    agentIntegration,
     queryClient,
+    isTemplateDetailRoute,
+    templateDetailParams,
   ]);
 
   const dashboardActiveView = (
@@ -2340,7 +2400,10 @@ function BusabaseDashboardContent({
   const content = (
     <div className="flex h-full min-h-0 bg-background">
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-        <div className="flex h-10 shrink-0 items-center gap-2 border-b bg-background/80 px-4 py-1.5 backdrop-blur-sm md:h-12">
+        <div
+          className="flex h-10 shrink-0 items-center gap-2 border-b bg-background/80 px-4 py-1.5 backdrop-blur-sm md:h-12"
+          data-dashboard-topbar
+        >
           <SidebarTrigger className="h-8 w-8 shrink-0" />
           <BusabaseTopbarBreadcrumb items={breadcrumbItems} />
           {titlebar.badge ? <div className="ml-1 shrink-0">{titlebar.badge}</div> : null}

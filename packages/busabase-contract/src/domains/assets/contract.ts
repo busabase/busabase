@@ -16,6 +16,7 @@ import {
   CreateTextUploadUrlInputSchema,
   CreateTextUploadUrlVOSchema,
   EditAssetContentInputSchema,
+  ListAssetsInputSchema,
   PutTextInputSchema,
   ReadLinesVOSchema,
   ReadTextLinesInputSchema,
@@ -58,8 +59,10 @@ export const assetsContract = {
       path: "/assets",
       tags: ["Assets"],
       summary: "List assets",
-      successDescription: "Every asset in the space, with file metadata and usage counts.",
+      successDescription:
+        "Assets in the space, newest first, with file metadata and usage counts. Every asset when `limit` is omitted; otherwise one page, where `cursor` is the previous page's last asset id and a short page means the end.",
     })
+    .input(ListAssetsInputSchema)
     .output(z.array(AssetVOSchema)),
   get: oc
     .route({

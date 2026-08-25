@@ -100,7 +100,7 @@ export function CommentItem({
   onQuoteReply,
 }: {
   comment: CommentVO;
-  onQuoteReply: (comment: CommentVO) => void;
+  onQuoteReply?: (comment: CommentVO) => void;
 }) {
   const messages = useCoreI18n();
   const locale = useCoreLocale();
@@ -124,14 +124,16 @@ export function CommentItem({
           <span className="text-muted-foreground text-xs">
             {formatFullTime(comment.createdAt, locale)}
           </span>
-          <button
-            className="ml-auto inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] text-muted-foreground opacity-0 transition-opacity hover:bg-muted/60 hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100"
-            onClick={() => onQuoteReply(comment)}
-            type="button"
-          >
-            <Reply size={12} />
-            {messages.comments.quoteReply}
-          </button>
+          {onQuoteReply ? (
+            <button
+              className="ml-auto inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] text-muted-foreground opacity-0 transition-opacity hover:bg-muted/60 hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100"
+              onClick={() => onQuoteReply(comment)}
+              type="button"
+            >
+              <Reply size={12} />
+              {messages.comments.quoteReply}
+            </button>
+          ) : null}
         </div>
         <CommentBody body={comment.body} />
       </div>
@@ -143,12 +145,14 @@ export function SubjectCommentThread({
   client,
   emptyLabel,
   placeholder,
+  readOnly = false,
   subjectId,
   subjectType,
 }: {
   client: BusabaseDashboardApiClient;
   emptyLabel?: string;
   placeholder?: string;
+  readOnly?: boolean;
   subjectId: string;
   subjectType: CommentSubjectType;
 }) {
@@ -207,55 +211,61 @@ export function SubjectCommentThread({
   return (
     <div>
       {comments.length > 0 ? (
-        <div className="border-border/50 border-t">
+        <div>
           {comments.map((comment) => (
-            <CommentItem comment={comment} key={comment.id} onQuoteReply={quoteReply} />
+            <CommentItem
+              comment={comment}
+              key={comment.id}
+              onQuoteReply={readOnly ? undefined : quoteReply}
+            />
           ))}
         </div>
       ) : (
-        <div className="border-border/50 border-t px-1 py-4 text-muted-foreground text-sm">
+        <div className="rounded-md bg-muted/25 px-3 py-3 text-muted-foreground text-sm">
           {commentsQuery.isLoading
             ? messages.comments.loading
             : (emptyLabel ?? messages.comments.noComments)}
         </div>
       )}
 
-      {error ? (
+      {!readOnly && error ? (
         <div className="mt-2 rounded-md border border-rejected/35 bg-rejected/17 px-3 py-2 text-rejected-strong text-sm">
           {error}
         </div>
       ) : null}
 
-      <div className="mt-2 rounded-md border border-border/70 bg-background/55 p-2.5">
-        <textarea
-          aria-label={messages.comments.addComment}
-          className="min-h-16 w-full resize-y rounded-md border border-border/70 bg-card px-2.5 py-2 text-sm leading-6 outline-none transition-colors focus:border-primary"
-          onChange={(event) => setBody(event.target.value)}
-          placeholder={placeholder ?? messages.comments.placeholder}
-          ref={composerRef}
-          value={body}
-        />
-        <div className="mt-2 flex items-center justify-between gap-2">
-          {mentionsAi ? (
-            <span className="inline-flex items-center gap-1 text-[11px] text-ai-strong dark:text-ai-soft">
-              <Sparkles size={11} />
-              {messages.comments.agentWillRevise}
-            </span>
-          ) : (
-            <span className="text-[11px] text-muted-foreground">
-              {messages.comments.mentionHint}
-            </span>
-          )}
-          <button
-            className="rounded-md bg-foreground px-3 py-1.5 font-medium text-background text-xs transition-colors hover:bg-foreground/85 disabled:cursor-not-allowed disabled:opacity-60"
-            disabled={createMutation.isPending || body.trim().length === 0}
-            onClick={() => createMutation.mutate(body.trim())}
-            type="button"
-          >
-            {createMutation.isPending ? messages.comments.posting : messages.comments.comment}
-          </button>
+      {readOnly ? null : (
+        <div className="mt-2">
+          <textarea
+            aria-label={messages.comments.addComment}
+            className="min-h-16 w-full resize-y rounded-md border border-border/70 bg-card px-2.5 py-2 text-sm leading-6 outline-none transition-colors focus:border-primary"
+            onChange={(event) => setBody(event.target.value)}
+            placeholder={placeholder ?? messages.comments.placeholder}
+            ref={composerRef}
+            value={body}
+          />
+          <div className="mt-2 flex items-center justify-between gap-2">
+            {mentionsAi ? (
+              <span className="inline-flex items-center gap-1 text-[11px] text-ai-strong dark:text-ai-soft">
+                <Sparkles size={11} />
+                {messages.comments.agentWillRevise}
+              </span>
+            ) : (
+              <span className="text-[11px] text-muted-foreground">
+                {messages.comments.mentionHint}
+              </span>
+            )}
+            <button
+              className="rounded-md bg-foreground px-3 py-1.5 font-medium text-background text-xs transition-colors hover:bg-foreground/85 disabled:cursor-not-allowed disabled:opacity-60"
+              disabled={createMutation.isPending || body.trim().length === 0}
+              onClick={() => createMutation.mutate(body.trim())}
+              type="button"
+            >
+              {createMutation.isPending ? messages.comments.posting : messages.comments.comment}
+            </button>
+          </div>
         </div>
-      </div>
+      )}
     </div>
   );
 }

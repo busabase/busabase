@@ -395,6 +395,14 @@ export const busabaseChangeRequests = pgTable(
     updatedAt: timestamp("updated_at", { mode: "date" }).defaultNow().notNull(),
   },
   (base) => [
+    // Covers tenant-scoped first-page, keyset, and numbered-page scans ordered
+    // by createdAt/id. PostgreSQL can scan this ascending btree backwards for
+    // the all-DESC order used by both list procedures.
+    index("busabase_change_requests_space_created_id_idx").on(
+      base.spaceId,
+      base.createdAt,
+      base.id,
+    ),
     index("busabase_change_requests_base_created_idx").on(base.baseId, base.createdAt),
     index("busabase_change_requests_node_created_idx").on(base.nodeId, base.createdAt),
     index("busabase_change_requests_status_created_idx").on(base.status, base.createdAt),

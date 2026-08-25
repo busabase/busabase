@@ -3,7 +3,12 @@ import "server-only";
 import { ORPCError } from "@orpc/server";
 import type { NodeDetailVO } from "busabase-contract/contract/node-detail-schemas";
 import type { AuthInfo } from "busabase-contract/contract/schemas";
-import type { AssetDetailVO, AssetUsageVO, AssetVO } from "busabase-contract/domains/assets/types";
+import type {
+  AssetDetailVO,
+  AssetUsageVO,
+  AssetVO,
+  ListAssetsDTO,
+} from "busabase-contract/domains/assets/types";
 import type {
   FileTreeFileVO,
   FileTreeNodeVO,
@@ -693,7 +698,25 @@ const buildDemoAssetIndex = (): {
   return { assets, usages };
 };
 
-export const demoListAssets = (): AssetVO[] => [...buildDemoAssetIndex().assets.values()];
+export const demoListAssets = (input?: ListAssetsDTO): AssetVO[] => {
+  const all = [...buildDemoAssetIndex().assets.values()];
+  if (input?.limit === undefined) return all;
+  // Mirror the real handler's contract so a demo-mode caller exercises the same
+  // paging loop it will run against a live workspace: `cursor` is the previous
+  // page's last asset id, and an unknown one is an error rather than a silent
+  // restart from the top.
+  let start = 0;
+  if (input.cursor) {
+    const at = all.findIndex((asset) => asset.id === input.cursor);
+    if (at < 0) {
+      throw new ORPCError("BAD_REQUEST", {
+        message: `Unknown assets cursor: ${input.cursor}. Pass the \`id\` of the last asset from the previous page.`,
+      });
+    }
+    start = at + 1;
+  }
+  return all.slice(start, start + input.limit);
+};
 
 export const demoGetAsset = (assetId: string): AssetDetailVO => {
   const { assets, usages } = buildDemoAssetIndex();

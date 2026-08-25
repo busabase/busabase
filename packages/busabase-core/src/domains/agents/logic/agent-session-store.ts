@@ -3,7 +3,7 @@ import type {
   AgentSessionStatus,
   AgentSessionVO,
 } from "busabase-contract/domains/agents/types";
-import { and, asc, desc, eq, gt, inArray, isNull, lt, or } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, isNull, lt } from "drizzle-orm";
 import { getContextActorId, getContextSpaceId } from "../../../context";
 import { getDb } from "../../../db";
 import { busabaseAgentSessionEvents } from "../schema/agent-session-events";
@@ -139,8 +139,8 @@ export async function loadSessions(): Promise<AgentSessionVO[]> {
         and(
           eq(busabaseAgentSessions.spaceId, getContextSpaceId()),
           actorId
-            ? or(eq(busabaseAgentSessions.actorId, actorId), isNull(busabaseAgentSessions.actorId))
-            : undefined,
+            ? eq(busabaseAgentSessions.actorId, actorId)
+            : isNull(busabaseAgentSessions.actorId),
         ),
       )
       .orderBy(desc(busabaseAgentSessions.lastActivityAt));
@@ -162,8 +162,8 @@ export async function deleteSessionsBySlug(slug: string): Promise<number> {
         eq(busabaseAgentSessions.spaceId, getContextSpaceId()),
         eq(busabaseAgentSessions.slug, slug),
         actorId
-          ? or(eq(busabaseAgentSessions.actorId, actorId), isNull(busabaseAgentSessions.actorId))
-          : undefined,
+          ? eq(busabaseAgentSessions.actorId, actorId)
+          : isNull(busabaseAgentSessions.actorId),
       ),
     )
     .returning();

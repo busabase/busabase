@@ -91,6 +91,10 @@ import "../domains/file-node/handlers";
 import "../domains/folder/handlers";
 import "../domains/skill/handlers";
 import { resolveLookupValues } from "../domains/base/logic/lookup-values";
+import {
+  LIST_OMITTED_FIELD_VALUE,
+  LIST_OMITTED_LONG_TEXT_VALUE,
+} from "../domains/dashboard/utils/list-payload-preview";
 import { mergeDocUpdate } from "../domains/doc/handlers";
 import { mergeFileTreeFile, mergeFileTreeMetadata } from "../domains/filetree/handlers";
 import { mergeRichNodeDocumentUpdate } from "../domains/rich-node/handlers";
@@ -834,31 +838,36 @@ export const notifyAgentOfChangeRequest = (changeRequestId: string, trigger: Age
  * ~350ms the server spent producing it.
  *
  * A list row never renders these values: it reads `title` / `name` / `subject` /
- * `nodeType` and the Base's primary field, and its risk-hint scan looks at field
- * KEYS only. So the key is kept (callers can still see the field exists) and the
- * value is replaced with a self-describing marker. The single-change-request
- * detail view omits `maxOperationsPerChangeRequest` and is untouched.
+ * `nodeType` and the Base's primary field. The key is kept (callers can still
+ * see the field exists) and the value is replaced with a self-describing marker
+ * that the risk-hint helper also recognizes as long text. This projection
+ * happens in PostgreSQL so Node never decodes or stringifies detail-sized JSON
+ * merely to render a list. The single-change-request detail view is untouched.
  */
 export const LIST_MAX_FIELD_VALUE_BYTES = 4_096;
 
-/** Replace values too large to belong in a list row; leaves small ones as-is. */
-const capFieldValues = (fields: Record<string, unknown>): Record<string, unknown> => {
-  let capped: Record<string, unknown> | null = null;
-  for (const [key, value] of Object.entries(fields)) {
-    // Numbers, booleans, null and short strings can never be the problem, and
-    // skipping them avoids serialising every field of every row just to measure.
-    if (value === null || value === undefined) continue;
-    if (typeof value !== "object" && typeof value !== "string") continue;
-    if (typeof value === "string" && value.length <= LIST_MAX_FIELD_VALUE_BYTES) continue;
-
-    const size = JSON.stringify(value)?.length ?? 0;
-    if (size <= LIST_MAX_FIELD_VALUE_BYTES) continue;
-    capped ??= { ...fields };
-    capped[key] = `[${size} bytes omitted from the list view — open the change request to view]`;
-  }
-  // Same object back when nothing was oversized, so the common case allocates nothing.
-  return capped ?? fields;
-};
+/** Build a compact payload before PostgreSQL sends the jsonb column to Node. */
+const listCommitPayloadExpression = () =>
+  sql<Record<string, unknown>>`coalesce(
+    (
+      select jsonb_object_agg(
+        payload_entry.key,
+        case
+          when octet_length(payload_entry.value::text) > ${LIST_MAX_FIELD_VALUE_BYTES}
+            then to_jsonb(
+              case
+                when jsonb_typeof(payload_entry.value) = 'string'
+                  then ${LIST_OMITTED_LONG_TEXT_VALUE}::text
+                else ${LIST_OMITTED_FIELD_VALUE}::text
+              end
+            )
+          else payload_entry.value
+        end
+      )
+      from jsonb_each(${busabaseCommits.payload}) as payload_entry(key, value)
+    ),
+    '{}'::jsonb
+  )`.as("payload");
 
 export const hydrateChangeRequests = async (
   changeRequests: ChangeRequestPO[],
@@ -970,7 +979,15 @@ export const hydrateChangeRequests = async (
   ];
   const commitRows =
     allCommitIds.length > 0
-      ? await db.select().from(busabaseCommits).where(inArray(busabaseCommits.id, allCommitIds))
+      ? maxOps === undefined
+        ? await db.select().from(busabaseCommits).where(inArray(busabaseCommits.id, allCommitIds))
+        : ((await db
+            .select({
+              ...getTableColumns(busabaseCommits),
+              payload: listCommitPayloadExpression(),
+            })
+            .from(busabaseCommits)
+            .where(inArray(busabaseCommits.id, allCommitIds))) as CommitPO[])
       : [];
   const commitsById = new Map(commitRows.map((commit) => [commit.id, commit]));
 
@@ -1044,12 +1061,7 @@ export const hydrateChangeRequests = async (
         if (!commit) {
           throw new Error(`Invalid operation graph for ${item.id}`);
         }
-        const operationVO = toOperationVO(item, commit, resolveBaseFields(item), users);
-        if (maxOps === undefined) return operationVO;
-        const payload = capFieldValues(operationVO.headCommit.payload);
-        return payload === operationVO.headCommit.payload
-          ? operationVO
-          : { ...operationVO, headCommit: { ...operationVO.headCommit, payload } };
+        return toOperationVO(item, commit, resolveBaseFields(item), users);
       },
     );
     const base = changeRequest.baseId ? (baseMap.get(changeRequest.baseId) ?? null) : null;
@@ -1843,7 +1855,23 @@ export const filterVisibleChangeRequestRows = async <T extends { id: string }>(
       changeRequestId: busabaseOperations.changeRequestId,
       nodeId: busabaseOperations.nodeId,
       baseId: busabaseOperations.baseId,
-      fields: busabaseCommits.payload,
+      // Visibility needs only these three scalar scope hints. Selecting the
+      // complete payload made one ACL pass decode every AirApp source tree.
+      // Keep the previous `typeof value === "string"` semantics. Bare `->>`
+      // would stringify malformed numeric/object values and could accidentally
+      // turn them into permission-scope identifiers.
+      parentNodeId: sql<string | null>`case
+        when jsonb_typeof(${busabaseCommits.payload}->'parentNodeId') = 'string'
+          then ${busabaseCommits.payload}->>'parentNodeId'
+        end`,
+      parentNodeRef: sql<string | null>`case
+        when jsonb_typeof(${busabaseCommits.payload}->'parentNodeRef') = 'string'
+          then ${busabaseCommits.payload}->>'parentNodeRef'
+        end`,
+      ref: sql<string | null>`case
+        when jsonb_typeof(${busabaseCommits.payload}->'ref') = 'string'
+          then ${busabaseCommits.payload}->>'ref'
+        end`,
       operation: busabaseOperations.operation,
       position: busabaseOperations.position,
     })
@@ -1875,34 +1903,23 @@ export const filterVisibleChangeRequestRows = async <T extends { id: string }>(
   for (const operation of operations) {
     const scope = scopes.get(operation.changeRequestId) ?? new Set<string>();
     const refs = refsByChangeRequest.get(operation.changeRequestId) ?? new Set<string>();
-    // Deliberately NOT `parseCommitPayload`. This query is kind-agnostic — it
-    // walks every operation of a change request, including ones already merged
-    // and ones written long before payload validation existed — purely to work
-    // out node-visibility scope. A strict per-kind parse here would turn a
-    // legacy-shaped row into a 500 on a *listing* page. Same reasoning as the
-    // loose `CommitVO.payload`; the `typeof` guards below are the safety.
-    const fields = operation.fields as {
-      parentNodeId?: unknown;
-      parentNodeRef?: unknown;
-      ref?: unknown;
-    } | null;
-    const parentNodeId = fields?.parentNodeId;
     const nodeId =
       operation.nodeId ??
       (operation.baseId ? baseNodeById.get(operation.baseId) : undefined) ??
-      (typeof parentNodeId === "string" ? parentNodeId : undefined);
+      operation.parentNodeId ??
+      undefined;
     if (nodeId) scope.add(nodeId);
-    else if (typeof fields?.parentNodeRef === "string" && refs.has(fields.parentNodeRef)) {
+    else if (operation.parentNodeRef && refs.has(operation.parentNodeRef)) {
       // The earlier declaration's existing parent already anchors this new subtree.
     } else if (
       operation.operation === "node_create" &&
       !operation.nodeId &&
       !operation.baseId &&
-      !fields?.parentNodeRef
+      !operation.parentNodeRef
     ) {
       scope.add(rootNodeIdForSpace(getContextSpaceId()));
     } else unresolved.add(operation.changeRequestId);
-    if (typeof fields?.ref === "string" && fields.ref) refs.add(fields.ref);
+    if (operation.ref) refs.add(operation.ref);
     scopes.set(operation.changeRequestId, scope);
     refsByChangeRequest.set(operation.changeRequestId, refs);
   }

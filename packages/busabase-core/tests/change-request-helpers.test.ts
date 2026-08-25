@@ -2,10 +2,15 @@ import type { ChangeRequestVO, OperationVO } from "busabase-contract/types";
 import { describe, expect, it } from "vitest";
 import {
   getChangeRequestBrief,
+  getChangeRequestRiskHints,
   getChangeRequestSummary,
   getOperationImpact,
   getOperationLabel,
 } from "../src/domains/dashboard/helpers/change-request";
+import {
+  LIST_OMITTED_FIELD_VALUE,
+  LIST_OMITTED_LONG_TEXT_VALUE,
+} from "../src/domains/dashboard/utils/list-payload-preview";
 
 const makeOperation = (overrides: Partial<OperationVO>): OperationVO => ({
   id: "opr_1",
@@ -94,5 +99,31 @@ describe("change request dashboard helpers", () => {
     expect(getChangeRequestBrief(makeChangeRequest([first, second]))).toBe(
       "2 operations in Node tree: 2 create folder.",
     );
+  });
+
+  it("keeps the long-text risk hint when a list preview omits the value", () => {
+    const operation = makeOperation({
+      operation: "record_update",
+      headCommit: {
+        ...makeOperation({}).headCommit,
+        operation: "record_update",
+        payload: { body: LIST_OMITTED_LONG_TEXT_VALUE },
+      },
+    });
+
+    expect(getChangeRequestRiskHints(makeChangeRequest([operation]))).toContain("long text");
+  });
+
+  it("does not label an omitted object as long text", () => {
+    const operation = makeOperation({
+      operation: "record_update",
+      headCommit: {
+        ...makeOperation({}).headCommit,
+        operation: "record_update",
+        payload: { config: LIST_OMITTED_FIELD_VALUE },
+      },
+    });
+
+    expect(getChangeRequestRiskHints(makeChangeRequest([operation]))).not.toContain("long text");
   });
 });

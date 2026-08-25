@@ -26,6 +26,7 @@ import { listArchivedTask } from "./list-archived";
 import { nodePermissionTask, nodeShareTask } from "./node-access";
 import { nodeArchiveTask } from "./node-archive";
 import { nodeCreateTask } from "./node-create";
+import { recordBulkUpdateTask } from "./record-bulk-update";
 import { recordChangeTask } from "./record-change";
 import { recordFindByFieldTask } from "./record-find-by-field";
 import { recordQueryTask } from "./record-query";
@@ -49,6 +50,7 @@ export { listArchivedTask } from "./list-archived";
 export { nodePermissionTask, nodeShareTask } from "./node-access";
 export { nodeArchiveTask } from "./node-archive";
 export { nodeCreateTask } from "./node-create";
+export { recordBulkUpdateTask } from "./record-bulk-update";
 export { recordChangeTask } from "./record-change";
 export { recordFindByFieldTask } from "./record-find-by-field";
 export { recordQueryTask } from "./record-query";
@@ -74,6 +76,7 @@ export const BUSABASE_TASKS: readonly TaskDefinition<any>[] = [
   changeRequestMergeTask,
   baseFieldChangeTask,
   recordChangeTask,
+  recordBulkUpdateTask,
   viewChangeTask,
   nodePermissionTask,
   nodeShareTask,
@@ -137,6 +140,8 @@ export const TASK_SUPERSEDED_MCP_TOOLS: readonly string[] = [
   "bases_field_change_request",
   // -> record_change_request
   "records_change_request",
+  // -> record_bulk_update_change_request
+  "bases_create_bulk_update_change_request",
   // -> view_change_request
   "views_change_request",
   // -> node_permission

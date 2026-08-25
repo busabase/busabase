@@ -1,6 +1,7 @@
 import { implement, ORPCError } from "@orpc/server";
 import { busabaseContract } from "busabase-contract/contract/busabase";
 import { applyViewConfigToRecords } from "./domains/base/utils/view-records";
+import { guidesRouter } from "./domains/guides/router";
 import { listTemplates } from "./domains/templates/logic/catalog";
 import { buildActivityItemsFromVOs } from "./logic/activity";
 import {
@@ -302,6 +303,9 @@ export const busabaseDemoRouter = os.router({
     createBulkChangeRequest: os.bases.createBulkChangeRequest.handler(() => {
       throw demoUnsupported("Bulk record change request");
     }),
+    createBulkUpdateChangeRequest: os.bases.createBulkUpdateChangeRequest.handler(() => {
+      throw demoUnsupported("Bulk record update change request");
+    }),
     createField: os.bases.createField.handler(() => {
       throw demoUnsupported("Create Base field");
     }),
@@ -390,7 +394,7 @@ export const busabaseDemoRouter = os.router({
     confirm: os.assets.confirm.handler(() => {
       throw demoUnsupported("Upload asset");
     }),
-    list: os.assets.list.handler(() => demoListAssets()),
+    list: os.assets.list.handler(({ input }) => demoListAssets(input)),
     get: os.assets.get.handler(({ input }) => demoGetAsset(input.assetId)),
     updateMetadata: os.assets.updateMetadata.handler(() => {
       throw demoUnsupported("Update asset metadata");
@@ -466,6 +470,9 @@ export const busabaseDemoRouter = os.router({
         unavailableReason: "Connecting to agents is disabled in the demo.",
       },
     ]),
+    connections: {
+      list: os.agents.connections.list.handler(() => []),
+    },
     disconnect: os.agents.disconnect.handler(() => {
       throw demoUnsupported("Delete an agent connection");
     }),
@@ -545,6 +552,10 @@ export const busabaseDemoRouter = os.router({
   templates: {
     list: os.templates.list.handler(async ({ input }) => listTemplates(input)),
   },
+  // The manual is static text about how Busabase works, not workspace data, so
+  // demo mode serves the real thing rather than a stub — an agent exploring a
+  // demo should be reading the same rules it will be held to on a real space.
+  guides: guidesRouter,
   changeRequests: {
     list: os.changeRequests.list.handler(async ({ input }) => {
       const all = await demoListChangeRequests();

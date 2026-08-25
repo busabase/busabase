@@ -42,6 +42,7 @@ import { ensureReady } from "../../../logic/seed";
 import {
   createBaseInputSchema,
   createBulkChangeRequestInputSchema,
+  createBulkUpdateChangeRequestInputSchema,
   createChangeRequestInputSchema,
   createDeleteChangeRequestInputSchema,
   updateRecordChangeRequestInputSchema,
@@ -58,6 +59,7 @@ import { resolveRelationFieldOptions } from "./relation-options";
 export {
   createBaseInputSchema,
   createBulkChangeRequestInputSchema,
+  createBulkUpdateChangeRequestInputSchema,
   createChangeRequestInputSchema,
   createDeleteChangeRequestInputSchema,
   updateRecordChangeRequestInputSchema,
@@ -86,19 +88,21 @@ const assertValidRecordFields = (
  * Reject record writes whose relation fields point at an archived target base —
  * linking into a base that has been archived would create dangling references.
  */
-const assertRelationTargetsLive = async (
-  fields: Record<string, unknown>,
+const assertRelationTargetsLiveBatch = async (
+  fieldSets: ReadonlyArray<Record<string, unknown>>,
   defs: ReadonlyArray<FieldDef>,
 ) => {
   const targetBaseIds = new Set<string>();
-  for (const def of defs) {
-    if (def.type !== "relation") continue;
-    const value = fields[def.slug];
-    if (value === undefined || value === null) continue;
-    const hasValue = Array.isArray(value) ? value.length > 0 : true;
-    if (!hasValue) continue;
-    const targetBaseId = (def.options as { targetBaseId?: string } | undefined)?.targetBaseId;
-    if (targetBaseId) targetBaseIds.add(targetBaseId);
+  for (const fields of fieldSets) {
+    for (const def of defs) {
+      if (def.type !== "relation") continue;
+      const value = fields[def.slug];
+      if (value === undefined || value === null) continue;
+      const hasValue = Array.isArray(value) ? value.length > 0 : true;
+      if (!hasValue) continue;
+      const targetBaseId = (def.options as { targetBaseId?: string } | undefined)?.targetBaseId;
+      if (targetBaseId) targetBaseIds.add(targetBaseId);
+    }
   }
   if (targetBaseIds.size === 0) return;
 
@@ -117,6 +121,11 @@ const assertRelationTargetsLive = async (
     });
   }
 };
+
+const assertRelationTargetsLive = async (
+  fields: Record<string, unknown>,
+  defs: ReadonlyArray<FieldDef>,
+) => assertRelationTargetsLiveBatch([fields], defs);
 
 /** Postgres `unique_violation` — both the postgres-js driver and PGLite (a real
  *  Postgres engine) surface the raw driver error's `.code === "23505"`. Drizzle
@@ -757,6 +766,286 @@ export const createBulkChangeRequest = async (
     baseId: base.id,
     label: "bulk record",
     // record_create operations — must not take the structural fast path.
+    kind: "content",
+  });
+};
+
+/**
+ * Propose partial updates to many existing records as one atomic ChangeRequest.
+ * Validation happens before the transaction; the transaction then creates the
+ * CR, commits, operations, and field projections as one unit.
+ */
+export const createBulkUpdateChangeRequest = async (
+  baseId: string,
+  input: z.input<typeof createBulkUpdateChangeRequestInputSchema>,
+) => {
+  await ensureReady();
+  const db = await getDb();
+  const base = await getBase(baseId);
+  if (!base) throw baseNotFound(baseId);
+
+  const parsed = createBulkUpdateChangeRequestInputSchema.parse(input);
+  const submittedBy = resolveActorId(parsed.submittedBy);
+  await assertBaseChangeRequestPermission(base.id, submittedBy);
+
+  if (parsed.idempotencyKey) {
+    const existingId = await findChangeRequestByIdempotencyKey(
+      db,
+      base.id,
+      submittedBy,
+      parsed.idempotencyKey,
+    );
+    if (existingId) {
+      const existing = await getChangeRequest(existingId);
+      if (existing) return existing;
+    }
+  }
+
+  const recordIds = parsed.updates.map((update) => update.recordId);
+  const recordRows = await db
+    .select()
+    .from(busabaseRecords)
+    .where(
+      and(inArray(busabaseRecords.id, recordIds), eq(busabaseRecords.spaceId, getContextSpaceId())),
+    );
+  const recordsById = new Map(recordRows.map((record) => [record.id, record]));
+  const getValidatedRecord = (recordId: string) => {
+    const record = recordsById.get(recordId);
+    if (!record) throw recordNotFound(recordId);
+    return record;
+  };
+
+  for (const update of parsed.updates) {
+    const record = getValidatedRecord(update.recordId);
+    if (record.baseId !== base.id) {
+      throw new ORPCError("BAD_REQUEST", {
+        message: `Record ${record.id} does not belong to base ${base.id}`,
+      });
+    }
+    if (record.status === "archived") {
+      throw new ORPCError("CONFLICT", {
+        message: `Record is already archived: ${record.id}`,
+      });
+    }
+  }
+
+  // One bounded query supplies every current payload and caller-pinned base
+  // commit. Ownership comes from the commit's merged operation, avoiding an
+  // unbounded scan of a long-lived Base's entire commit history.
+  const requestedCommitIds = [
+    ...recordRows.map((record) => record.headCommitId),
+    ...parsed.updates.flatMap((update) => (update.baseCommitId ? [update.baseCommitId] : [])),
+  ];
+  const commitRows = await db
+    .select({
+      id: busabaseCommits.id,
+      parentCommitId: busabaseCommits.parentCommitId,
+      payload: busabaseCommits.payload,
+    })
+    .from(busabaseCommits)
+    .where(
+      and(
+        eq(busabaseCommits.baseId, base.id),
+        inArray(busabaseCommits.id, [...new Set(requestedCommitIds)]),
+      ),
+    );
+  const commitsById = new Map(commitRows.map((commit) => [commit.id, commit]));
+  const unresolvedBaseCommits = new Map<
+    string,
+    { candidateId: string; cursorId: string; visited: Set<string> }
+  >();
+  for (const update of parsed.updates) {
+    const record = getValidatedRecord(update.recordId);
+    const currentCommit = commitsById.get(record.headCommitId);
+    if (!currentCommit) {
+      throw new ORPCError("CONFLICT", {
+        message: `Current commit is missing for record ${record.id}`,
+      });
+    }
+    if (update.baseCommitId && update.baseCommitId !== record.headCommitId) {
+      if (!commitsById.has(update.baseCommitId)) {
+        throw new ORPCError("BAD_REQUEST", {
+          message: `baseCommitId ${update.baseCommitId} is not in record ${record.id}'s history`,
+        });
+      }
+      unresolvedBaseCommits.set(record.id, {
+        candidateId: update.baseCommitId,
+        cursorId: record.headCommitId,
+        visited: new Set([record.headCommitId]),
+      });
+    }
+    assertValidRecordFields(
+      { ...(currentCommit.payload as Record<string, unknown>), ...update.fields },
+      base.fields,
+    );
+  }
+
+  // Walk only the histories involved in this request. The walk advances every
+  // unresolved record one parent at a time and batch-loads each frontier, so a
+  // legacy/seed commit with no operationId remains a valid optimistic-lock base
+  // without scanning every commit ever written to the Base.
+  while (unresolvedBaseCommits.size > 0) {
+    const nextCommitIds = new Set<string>();
+    for (const [recordId, state] of unresolvedBaseCommits) {
+      const parentCommitId = commitsById.get(state.cursorId)?.parentCommitId ?? null;
+      if (parentCommitId === state.candidateId) {
+        unresolvedBaseCommits.delete(recordId);
+        continue;
+      }
+      if (!parentCommitId || state.visited.has(parentCommitId)) {
+        throw new ORPCError("BAD_REQUEST", {
+          message: `baseCommitId ${state.candidateId} is not in record ${recordId}'s history`,
+        });
+      }
+      state.cursorId = parentCommitId;
+      state.visited.add(parentCommitId);
+      if (!commitsById.has(parentCommitId)) nextCommitIds.add(parentCommitId);
+    }
+    if (nextCommitIds.size === 0) continue;
+
+    const parentCommits = await db
+      .select({
+        id: busabaseCommits.id,
+        parentCommitId: busabaseCommits.parentCommitId,
+        payload: busabaseCommits.payload,
+      })
+      .from(busabaseCommits)
+      .where(
+        and(eq(busabaseCommits.baseId, base.id), inArray(busabaseCommits.id, [...nextCommitIds])),
+      );
+    for (const commit of parentCommits) commitsById.set(commit.id, commit);
+    const missingCommitId = [...nextCommitIds].find((commitId) => !commitsById.has(commitId));
+    if (missingCommitId) {
+      throw new ORPCError("BAD_REQUEST", {
+        message: `Commit ${missingCommitId} is missing from record history`,
+      });
+    }
+  }
+  await assertRelationTargetsLiveBatch(
+    parsed.updates.map((update) => update.fields),
+    base.fields,
+  );
+  const fieldDefs = await db
+    .select()
+    .from(busabaseBaseFields)
+    .where(and(eq(busabaseBaseFields.baseId, base.id), isNull(busabaseBaseFields.deletedAt)));
+
+  const changeRequestId = id("crq");
+  const timestamp = now();
+
+  try {
+    await db.transaction(async (tx) => {
+      // Drizzle's postgres-js and PGLite transaction types are structurally
+      // compatible with the shared writers, but their HKT union is not.
+      const writer = tx as unknown as Awaited<ReturnType<typeof getDb>>;
+      await writer.insert(busabaseChangeRequests).values({
+        id: changeRequestId,
+        baseId: base.id,
+        status: "in_review",
+        submittedBy,
+        idempotencyKey: parsed.idempotencyKey ?? null,
+        sourceMeta: withContextSourceMeta({
+          bulk: true,
+          operation: "record_update",
+          recordCount: parsed.updates.length,
+        }),
+        reviewPolicySnapshot: base.reviewPolicy,
+        mergeSummary: {},
+        rejectedReason: null,
+        reviewedAt: null,
+        mergedAt: null,
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      });
+
+      for (const [position, update] of parsed.updates.entries()) {
+        const record = getValidatedRecord(update.recordId);
+        const operationId = id("opr");
+        const commitId = id("cmt");
+        await insertCommit(writer, {
+          id: commitId,
+          baseId: base.id,
+          operationId: null,
+          parentCommitId: record.headCommitId,
+          payload: update.fields,
+          operation: "record_update",
+          message: update.message ?? parsed.message,
+          author: submittedBy,
+          createdAt: timestamp,
+        });
+        await writer.insert(busabaseOperations).values({
+          id: operationId,
+          changeRequestId,
+          baseId: base.id,
+          operation: "record_update",
+          status: "pending",
+          targetRecordId: record.id,
+          targetViewId: null,
+          sourceRecordId: null,
+          sourceCommitId: null,
+          baseCommitId: update.baseCommitId ?? record.headCommitId,
+          headCommitId: commitId,
+          deleteMode: "archive",
+          mergedRecordId: null,
+          mergedViewId: null,
+          position,
+          createdAt: timestamp,
+          updatedAt: timestamp,
+        });
+        await writer
+          .update(busabaseCommits)
+          .set({ operationId })
+          .where(eq(busabaseCommits.id, commitId));
+        await projectCommitFields({
+          baseId: base.id,
+          commitId,
+          changeRequestId,
+          operationId,
+          fields: update.fields,
+          tx: writer,
+          fieldDefs,
+        });
+      }
+    });
+  } catch (error) {
+    if (parsed.idempotencyKey && isUniqueViolation(error)) {
+      const existingId = await findChangeRequestByIdempotencyKey(
+        db,
+        base.id,
+        submittedBy,
+        parsed.idempotencyKey,
+      );
+      if (existingId) {
+        const existing = await getChangeRequest(existingId);
+        if (existing) return existing;
+      }
+    }
+    throw error;
+  }
+
+  try {
+    await insertAuditEvent(db, {
+      action: "change_request.updated",
+      actorId: submittedBy,
+      baseId: base.id,
+      changeRequestId,
+      metadata: {
+        operation: "record_update",
+        bulk: true,
+        recordCount: parsed.updates.length,
+      },
+    });
+  } catch {
+    // The proposal ledger is authoritative; audit delivery is best-effort.
+  }
+
+  return finalizeChangeRequest({
+    changeRequestId,
+    nodeId: base.nodeId,
+    requestedAutoMerge: parsed.autoMerge,
+    submittedBy,
+    baseId: base.id,
+    label: "bulk record update",
     kind: "content",
   });
 };

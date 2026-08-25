@@ -7,12 +7,11 @@
 // open-source, single-user `apps/busabase`, and packaging that UI there would
 // put member/space-membership concepts into a build that has no such thing.
 //
-// A multi-tenant host (busabase-cloud) renders its own
-// `NodePermissionsPanel` (`apps/busabase-cloud/.../node-permissions-panel.tsx`)
-// through this provider; the open-source host renders nothing, so
-// `useContext` resolves to the default `null` and `NodeSettingsDialog` simply
-// omits the Permissions tab from its tab list — not a disabled/empty tab, an
-// ABSENT one, so a single-user install never sees a control it can't use.
+// A multi-tenant host renders its own `NodePermissionsPanel` through this
+// provider; the open-source host renders nothing, so `useContext` resolves to
+// the default `null` and `NodeSettingsDialog` simply omits the Permissions tab
+// from its tab list — not a disabled/empty tab, an ABSENT one, so a single-user
+// install never sees a control it can't use.
 //
 // Same "host injects, core consumes" pattern the old `NodePermissionsDialog`
 // used for `SpaceMembersProvider`/`SpaceVisibilityModeProvider`

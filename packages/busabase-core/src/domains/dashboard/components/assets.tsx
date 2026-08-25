@@ -44,6 +44,58 @@ export function assetKindIcon(mimeType: string) {
   return FileText;
 }
 
+/** Mime kinds every evergreen browser renders natively, no plugin needed. */
+export function isPreviewableAssetMime(mimeType: string) {
+  return (
+    mimeType.startsWith("image/") ||
+    mimeType.startsWith("video/") ||
+    mimeType.startsWith("audio/") ||
+    mimeType === "application/pdf"
+  );
+}
+
+interface AssetMediaPreviewProps {
+  mimeType: string;
+  url: string;
+  name: string;
+  mediaClassName: string;
+}
+
+/** Renders the asset inline for mime kinds browsers support natively;
+ *  everything else falls back to an "open file" link, same as before. */
+export function AssetMediaPreview({ mimeType, url, name, mediaClassName }: AssetMediaPreviewProps) {
+  const messages = useCoreI18n();
+  if (mimeType.startsWith("image/")) {
+    return <img alt={name} className={mediaClassName} src={url} />;
+  }
+  if (mimeType.startsWith("video/")) {
+    return (
+      <video className={mediaClassName} controls src={url}>
+        <track kind="captions" />
+      </video>
+    );
+  }
+  if (mimeType.startsWith("audio/")) {
+    // biome-ignore lint/a11y/useMediaCaption: user-uploaded assets have no caption track to attach
+    return <audio className="w-full px-4" controls src={url} />;
+  }
+  if (mimeType === "application/pdf") {
+    return <iframe className="h-[70vh] w-full border-0" src={url} title={name} />;
+  }
+  const Icon = assetKindIcon(mimeType);
+  return (
+    <a
+      className="flex flex-col items-center gap-2 p-8 text-muted-foreground text-sm hover:text-foreground"
+      href={url}
+      rel="noreferrer"
+      target="_blank"
+    >
+      <Icon className="size-12" />
+      {messages.assets.openFile}
+    </a>
+  );
+}
+
 export function hasAssetMetadata(metadata: Record<string, unknown> | null | undefined) {
   return Object.keys(metadata ?? {}).length > 0;
 }
@@ -865,7 +917,6 @@ export function AssetDetailView({
   }
 
   const { asset, usages } = detail;
-  const isImage = asset.mimeType.startsWith("image/");
   const metaChips = [
     asset.mimeType,
     formatAssetSize(asset.size),
@@ -884,19 +935,12 @@ export function AssetDetailView({
 
       <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_340px] xl:grid-cols-[minmax(0,1fr)_380px]">
         <div className="grid min-h-[240px] place-items-center overflow-hidden rounded-xl border bg-muted">
-          {isImage ? (
-            <img alt={asset.name} className="max-h-[60vh] w-full object-contain" src={asset.url} />
-          ) : (
-            <a
-              className="flex flex-col items-center gap-2 p-8 text-muted-foreground text-sm hover:text-foreground"
-              href={asset.url}
-              rel="noreferrer"
-              target="_blank"
-            >
-              <FileText className="size-12" />
-              {messages.assets.openFile}
-            </a>
-          )}
+          <AssetMediaPreview
+            mediaClassName="max-h-[60vh] w-full object-contain"
+            mimeType={asset.mimeType}
+            name={asset.name}
+            url={asset.url}
+          />
         </div>
 
         <div className="flex flex-col gap-4">

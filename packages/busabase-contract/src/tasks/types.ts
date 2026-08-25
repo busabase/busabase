@@ -55,7 +55,12 @@ export type BusabaseTaskClient = {
   readonly docs: Pick<FullBusabaseClient["docs"], "create">;
   readonly bases: Pick<
     FullBusabaseClient["bases"],
-    "create" | "fieldChangeRequest" | "list" | "listDeletedFields" | "listViews"
+    | "create"
+    | "createBulkUpdateChangeRequest"
+    | "fieldChangeRequest"
+    | "list"
+    | "listDeletedFields"
+    | "listViews"
   >;
   readonly files: Pick<FullBusabaseClient["files"], "create">;
   readonly records: Pick<

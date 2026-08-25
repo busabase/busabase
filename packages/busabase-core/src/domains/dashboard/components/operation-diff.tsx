@@ -270,13 +270,13 @@ export function ChangeStatusBadge({
 }) {
   if (status === "added") {
     return (
-      <span className="inline-flex w-fit rounded-md border border-merged/35 bg-merged/17 px-2 py-0.5 font-medium text-[11px] text-merged-strong dark:text-merged-soft">
+      <span className="inline-flex w-fit rounded-md bg-merged/17 px-2 py-0.5 font-medium text-[11px] text-merged-strong dark:text-merged-soft">
         {messages.operationDiff.added}
       </span>
     );
   }
   return (
-    <span className="inline-flex w-fit rounded-md border border-review/35 bg-review/17 px-2 py-0.5 font-medium text-[11px] text-review-strong dark:text-review-soft">
+    <span className="inline-flex w-fit rounded-md bg-review/17 px-2 py-0.5 font-medium text-[11px] text-review-strong dark:text-review-soft">
       {messages.operationDiff.changed}
     </span>
   );
@@ -343,7 +343,7 @@ export function OperationFieldChangeRow({
   const baseField = changeRequest.base?.fields.find((field) => field.slug === change.slug);
 
   return (
-    <div className="grid gap-3 px-4 py-3 md:grid-cols-[150px_minmax(0,1fr)]">
+    <div className="grid gap-3 px-1 py-3 md:grid-cols-[150px_minmax(0,1fr)]">
       <div className="flex flex-col gap-1.5">
         <span className="font-medium text-sm">{change.label}</span>
         <ChangeStatusBadge messages={messages} status={change.status} />
@@ -516,13 +516,13 @@ export function OperationFieldChanges({
   const changes = getOperationFieldChanges(changeRequest, operation, messages);
   if (changes.length === 0) {
     return (
-      <div className="mt-3 rounded-lg border bg-background/40 px-4 py-5 text-muted-foreground text-sm">
+      <div className="mt-3 bg-muted/20 px-3 py-4 text-muted-foreground text-sm">
         {messages.review.noFieldChanges}
       </div>
     );
   }
   return (
-    <div className="mt-3 divide-y overflow-hidden rounded-lg border bg-background/40">
+    <div className="mt-3 divide-y divide-border/50">
       {changes.map((change) => (
         <OperationFieldChangeRow
           change={change}

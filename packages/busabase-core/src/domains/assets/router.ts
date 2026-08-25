@@ -21,7 +21,7 @@ export const assetsRouter = {
     requestAssetUploadUrl(input),
   ),
   confirm: os.assets.confirm.handler(async ({ input }) => confirmAssetUpload(input)),
-  list: os.assets.list.handler(async () => listAssets()),
+  list: os.assets.list.handler(async ({ input }) => listAssets(input)),
   get: os.assets.get.handler(async ({ input }) => getAsset(input.assetId)),
   updateMetadata: os.assets.updateMetadata.handler(async ({ input }) => updateAssetMetadata(input)),
   delete: os.assets.delete.handler(async ({ input }) => deleteAsset(input.assetId)),

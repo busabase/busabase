@@ -1,6 +1,7 @@
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";
 import type { ChangeRequestStatus, ChangeRequestVO } from "busabase-contract/types";
+import { ChevronDown, Loader2 } from "lucide-react";
 import { SPALink as Link } from "openlib/ui/dashboard";
 import { type ReactNode, useEffect, useMemo, useState } from "react";
 import { fmt, useCoreI18n, useCoreLocale } from "../../../i18n";
@@ -534,9 +535,6 @@ export function ActivityView({
 
   return (
     <section className="flex h-full min-h-0 w-full min-w-0 flex-1 flex-col overflow-hidden">
-      <div className="flex items-center justify-between gap-4 border-b px-5 py-2.5">
-        <div className="font-medium text-sm">{messages.activity.workspaceActivity}</div>
-      </div>
       <div
         className="min-h-0 flex-1 overflow-auto px-4 py-4 sm:px-5"
         data-dashboard-scroll="activity"
@@ -579,14 +577,22 @@ export function ActivityView({
           </div>
         )}
         {!listQuery.isPending && !listQuery.isError && listQuery.hasNextPage ? (
-          <div className="flex items-center justify-center pt-4">
+          <div className="flex items-center justify-center py-4">
             <button
-              className="inline-flex h-8 items-center rounded-md border border-border/70 px-3 font-medium text-muted-foreground text-xs transition-colors hover:bg-accent hover:text-foreground disabled:opacity-60"
+              className="inline-flex h-8 items-center gap-1.5 rounded-md px-2.5 font-medium text-muted-foreground text-xs transition-colors hover:bg-muted/70 hover:text-foreground disabled:pointer-events-none disabled:opacity-60"
               disabled={listQuery.isFetchingNextPage}
               onClick={() => listQuery.fetchNextPage()}
               type="button"
             >
-              {listQuery.isFetchingNextPage ? messages.common.loading : messages.search.loadMore}
+              {listQuery.isFetchingNextPage ? (
+                <Loader2 aria-hidden="true" className="size-3.5 animate-spin" />
+              ) : null}
+              <span>
+                {listQuery.isFetchingNextPage ? messages.common.loading : messages.search.loadMore}
+              </span>
+              {!listQuery.isFetchingNextPage ? (
+                <ChevronDown aria-hidden="true" className="size-3.5" />
+              ) : null}
             </button>
           </div>
         ) : null}

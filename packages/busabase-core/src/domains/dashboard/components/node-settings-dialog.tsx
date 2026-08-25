@@ -4,15 +4,13 @@
 // / Info (read-only properties) / Permissions (access control, cloud-only).
 // Replaces three previously-separate surfaces: `NodeRenameDialog`, the inline
 // "Info" `Popover` that used to live in `node-detail-views.tsx`, and
-// `NodePermissionsDialog` (now split out — its UI moved to
-// `apps/busabase-cloud/.../node-permissions-panel.tsx`, this dialog only
-// renders whatever the host injects via `NodeSettingsPermissionsSlotProvider`).
+// `NodePermissionsDialog` (now split out so this dialog renders whatever the
+// host injects via `NodeSettingsPermissionsSlotProvider`).
 //
 // Follows the SAME plain "left tab rail + right content pane" shape as
 // `apps/busabase/src/domains/settings/components/settings-dialog.tsx` — an
 // inline `tabs` array + `activeTab === "x" ? <Content/> : null` — rather than
-// buda's heavier `settings-dialog-shell.tsx` (accordion/sections/headerNode),
-// which this dialog has no use for.
+// a heavier accordion/sections settings shell, which this dialog has no use for.
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";

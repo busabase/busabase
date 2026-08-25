@@ -311,6 +311,43 @@ export const createBulkChangeRequestInputSchema = z.object({
   autoMerge: z.boolean().optional(),
 });
 
+export const createBulkUpdateChangeRequestInputSchema = z
+  .object({
+    updates: z
+      .array(
+        z.object({
+          recordId: z.string().min(1),
+          fields: z
+            .record(z.string(), z.unknown())
+            .refine(
+              (fields) => Object.keys(fields).length > 0,
+              "fields must contain at least one field",
+            ),
+          baseCommitId: z.string().min(1).optional(),
+          message: z.string().min(1).optional(),
+        }),
+      )
+      .min(1)
+      .max(1000),
+    message: z.string().optional().default("Bulk update records"),
+    submittedBy: z.string().optional().default("local-producer"),
+    idempotencyKey: z.string().optional(),
+    autoMerge: z.boolean().optional(),
+  })
+  .superRefine(({ updates }, ctx) => {
+    const seen = new Set<string>();
+    for (const [index, update] of updates.entries()) {
+      if (seen.has(update.recordId)) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["updates", index, "recordId"],
+          message: `Duplicate recordId in batch: ${update.recordId}`,
+        });
+      }
+      seen.add(update.recordId);
+    }
+  });
+
 export const createDeleteChangeRequestInputSchema = z.object({
   message: z.string().optional().default("Delete record"),
   submittedBy: z.string().optional().default("local-producer"),

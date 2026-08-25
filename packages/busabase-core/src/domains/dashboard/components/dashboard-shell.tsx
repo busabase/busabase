@@ -41,6 +41,7 @@ import { NodeMoveDialog } from "./node-move-dialog";
 import { NodeSettingsDialog, type NodeSettingsTab } from "./node-settings-dialog";
 import { NodeSettingsPermissionsSlotContext } from "./node-settings-permissions-slot";
 import { NodeShareDialog } from "./node-share-button";
+import "./busabase-sidebar-nav.css";
 
 /** Stable, always-disabled query used in place of `orpc.nodes.listFavorites.queryOptions({})`
  * when a host omitted `orpc` — keeps the `useQuery` call unconditional (rules of
@@ -729,7 +730,10 @@ export function BusabaseDashboardShell({
           defaultOpen
           navMain={pinnedNav}
           sidebarExtra={
-            <div className="flex min-h-0 flex-1 flex-col overflow-y-auto overflow-x-hidden group-data-[collapsible=icon]:overflow-hidden">
+            <div
+              className="flex min-h-0 flex-1 flex-col overflow-y-auto overflow-x-hidden group-data-[collapsible=icon]:overflow-hidden"
+              data-busabase-sidebar-nav
+            >
               <NavMain
                 items={scrollNav}
                 onHeaderActionClick={handleHeaderActionClick}

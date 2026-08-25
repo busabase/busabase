@@ -36,6 +36,13 @@ describe("Busabase OpenAPI record get route", () => {
     expect(spec.paths?.["/api/v1/records/page"]?.get).toBeDefined();
   });
 
+  it("publishes one-CR bulk record updates", async () => {
+    const spec = await getBusabaseOpenApiSpec();
+    expect(
+      spec.paths?.["/api/v1/bases/{baseId}/records/bulk-update-change-request"]?.post,
+    ).toBeDefined();
+  });
+
   it("publishes only the two canonical change-request action paths", async () => {
     const spec = await getBusabaseOpenApiSpec();
     expect(spec.paths?.["/api/v1/change-requests/reviews"]?.post).toBeDefined();
@@ -93,7 +100,7 @@ describe("Busabase OpenAPI record get route", () => {
     expect(spec.paths?.["/api/v1/bases/{baseId}/restore/change-requests"]).toBeUndefined();
   });
 
-  it("keeps the compressed public API at 99 operations", async () => {
+  it("keeps the compressed public API at 102 operations", async () => {
     const spec = await getBusabaseOpenApiSpec();
     const operationCount = Object.values(spec.paths ?? {}).reduce(
       (count, pathItem) =>
@@ -127,6 +134,13 @@ describe("Busabase OpenAPI record get route", () => {
     // The node-avatar upload pair added `POST /nodes/icon/upload-urls` and
     // `POST /nodes/icon/confirmations` (+2) — same public-surface treatment as
     // the existing `assets.createUploadUrl`/`assets.confirm`. 98 + 1 + 2 = 101.
-    expect(operationCount).toBe(101);
+    // Bulk record update adds one review-first operation while preserving the
+    // compressed single-record change surface (+1 -> 102).
+    // The guide catalog added `GET /guides` and `GET /guides/{topic}` (+2).
+    // Public for the same reason `GET /templates` is: they return static
+    // documents about how Busabase works and nothing about this workspace, and
+    // a `read` key that cannot read the rules it is expected to follow is the
+    // situation these routes exist to end. 101 + 1 + 2 = 104.
+    expect(operationCount).toBe(104);
   });
 });

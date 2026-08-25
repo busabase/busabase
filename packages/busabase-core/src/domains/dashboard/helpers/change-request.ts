@@ -11,6 +11,7 @@ import { iStringParse, iStringSchema } from "openlib/i18n/i-string";
 import { fmt } from "../../../i18n/fmt";
 import type { CoreI18nMessages } from "../../../i18n/messages";
 import { getPrimaryField } from "../../base/utils/primary-field";
+import { isListPayloadLongTextOmitted } from "../utils/list-payload-preview";
 import { fieldPreviewText } from "./field";
 import { fieldValueToString, shortIdentifier } from "./format";
 
@@ -496,7 +497,10 @@ export const getChangeRequestRiskHints = (
         if (field?.type === "relation") {
           hints.add(messages?.operation.relation ?? "relation");
         }
-        if (typeof value === "string" && value.length > 500) {
+        if (
+          isListPayloadLongTextOmitted(value) ||
+          (typeof value === "string" && value.length > 500)
+        ) {
           hints.add(messages?.operation.longText ?? "long text");
         }
       }

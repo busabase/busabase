@@ -5,7 +5,7 @@ import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-quer
 import type { AirAppVO } from "busabase-contract/types";
 import { Button } from "kui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "kui/select";
-import { Loader2, Maximize, Minimize, Pin, Play, RotateCcw, Square } from "lucide-react";
+import { CircleStop, Loader2, Maximize, Minimize, Pin, Play, RotateCcw } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useLocation, useSearch } from "wouter";
 import { fmt, useCoreI18n } from "../../../i18n";
@@ -506,7 +506,7 @@ export function AirAppRunControls({
           type="button"
           variant="outline"
         >
-          <Square className="size-3.5" />
+          <CircleStop className="size-3.5" />
         </Button>
       ) : null}
       <Button

@@ -84,6 +84,9 @@ describe("resolveRequiredLevel", () => {
     expect(resolveRequiredLevel(["workbench", "records", "changeRequest"], "POST")).toBe(
       "changeRequest",
     );
+    expect(
+      resolveRequiredLevel(["workbench", "bases", "createBulkUpdateChangeRequest"], "POST"),
+    ).toBe("changeRequest");
     expect(resolveRequiredLevel(["workbench", "views", "changeRequest"], "POST")).toBe(
       "changeRequest",
     );

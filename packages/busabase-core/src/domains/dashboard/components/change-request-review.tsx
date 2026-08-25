@@ -132,11 +132,13 @@ export function OperationReviewSection({
   client,
   defaultOpen,
   operation,
+  readOnly = false,
 }: {
   changeRequest: ChangeRequestVO;
   client: BusabaseDashboardApiClient;
   defaultOpen: boolean;
   operation: OperationVO;
+  readOnly?: boolean;
 }) {
   const messages = useCoreI18n();
   const [open, setOpen] = useState(defaultOpen);
@@ -191,7 +193,7 @@ export function OperationReviewSection({
           ) : null}
           <OperationFieldChanges changeRequest={changeRequest} operation={operation} />
           <div className="mt-4">
-            <div className="font-medium text-muted-foreground text-xs">
+            <div className="font-medium text-foreground text-xs">
               {messages.review.commentsOnThisChange}
             </div>
             <div className="mt-2">
@@ -199,6 +201,7 @@ export function OperationReviewSection({
                 client={client}
                 emptyLabel={messages.comments.noCommentsOperation}
                 placeholder={messages.comments.placeholderOperation}
+                readOnly={readOnly}
                 subjectId={operation.id}
                 subjectType="operation"
               />
@@ -214,10 +217,12 @@ export function OperationReviewList({
   changeRequest,
   client,
   focusOperationId,
+  readOnly = false,
 }: {
   changeRequest: ChangeRequestVO;
   client: BusabaseDashboardApiClient;
   focusOperationId: string | null;
+  readOnly?: boolean;
 }) {
   const operations = changeRequest.operations
     .slice()
@@ -234,6 +239,7 @@ export function OperationReviewList({
           }
           key={operation.id}
           operation={operation}
+          readOnly={readOnly}
         />
       ))}
     </div>
@@ -320,10 +326,12 @@ export function ChangeRequestDiscussion({
   auditEvents,
   changeRequest,
   client,
+  readOnly = false,
 }: {
   auditEvents: AuditEventVO[];
   changeRequest: ChangeRequestVO;
   client: BusabaseDashboardApiClient;
+  readOnly?: boolean;
 }) {
   const messages = useCoreI18n();
   const timeline = useMemo<DiscussionTimelineItem[]>(() => {
@@ -364,6 +372,7 @@ export function ChangeRequestDiscussion({
           client={client}
           emptyLabel={messages.comments.noCommentsDiscussion}
           placeholder={messages.comments.placeholderDiscussion}
+          readOnly={readOnly}
           subjectId={changeRequest.id}
           subjectType="change_request"
         />
@@ -555,6 +564,7 @@ export function ChangeRequestDetailPage({
   onClose,
   onMerge,
   onReject,
+  readOnly = false,
 }: {
   auditEvents: AuditEventVO[];
   changeRequest: ChangeRequestVO | null;
@@ -565,6 +575,7 @@ export function ChangeRequestDetailPage({
   onClose: (changeRequestId: string, reason?: string) => void;
   onMerge: (changeRequestId: string) => void;
   onReject: (changeRequestId: string, reason?: string) => void;
+  readOnly?: boolean;
 }) {
   const messages = useCoreI18n();
 
@@ -592,6 +603,7 @@ export function ChangeRequestDetailPage({
           onClose={onClose}
           onMerge={onMerge}
           onReject={onReject}
+          readOnly={readOnly}
         />
       </section>
     </div>
@@ -608,6 +620,7 @@ export function ChangeRequestReviewLayout({
   onClose,
   onMerge,
   onReject,
+  readOnly = false,
 }: {
   auditEvents: AuditEventVO[];
   changeRequest: ChangeRequestVO;
@@ -618,6 +631,7 @@ export function ChangeRequestReviewLayout({
   onClose: (changeRequestId: string, reason?: string) => void;
   onMerge: (changeRequestId: string) => void;
   onReject: (changeRequestId: string, reason?: string) => void;
+  readOnly?: boolean;
 }) {
   const messages = useCoreI18n();
   const locale = useCoreLocale();
@@ -646,7 +660,10 @@ export function ChangeRequestReviewLayout({
   }, [focusOperationId]);
 
   return (
-    <div className="mx-auto max-w-6xl px-6 py-5">
+    <div
+      className="mx-auto max-w-6xl px-6 py-5"
+      data-change-request-read-only={readOnly ? "true" : undefined}
+    >
       <div className="mb-2 flex items-center justify-end">
         <RailToggleButton onToggle={() => setPanelOpen((current) => !current)} open={panelOpen} />
       </div>
@@ -710,6 +727,7 @@ export function ChangeRequestReviewLayout({
               changeRequest={changeRequest}
               client={client}
               focusOperationId={focusOperationId}
+              readOnly={readOnly}
             />
           </section>
 
@@ -717,20 +735,23 @@ export function ChangeRequestReviewLayout({
             auditEvents={auditEvents}
             changeRequest={changeRequest}
             client={client}
+            readOnly={readOnly}
           />
         </main>
 
         <BusabaseSidePanel open={panelOpen}>
-          <SidebarPanel title={messages.review.finishReview}>
-            <FinishReviewComposer
-              changeRequest={changeRequest}
-              pendingAction={pendingAction}
-              onApprove={onApprove}
-              onClose={onClose}
-              onMerge={onMerge}
-              onReject={onReject}
-            />
-          </SidebarPanel>
+          {readOnly ? null : (
+            <SidebarPanel title={messages.review.finishReview}>
+              <FinishReviewComposer
+                changeRequest={changeRequest}
+                pendingAction={pendingAction}
+                onApprove={onApprove}
+                onClose={onClose}
+                onMerge={onMerge}
+                onReject={onReject}
+              />
+            </SidebarPanel>
+          )}
 
           <SidebarPanel quiet title={messages.common.description}>
             <div className="mb-3 text-sm">

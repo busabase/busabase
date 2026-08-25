@@ -1331,5 +1331,26 @@ export const dashboardJa: CoreI18nMessages = {
     reviewNow: "今すぐレビューする",
     noPending: "すべてマージされました。パッケージはスペースで有効になっています。",
     done: "完了",
+    resultDescription: "スペースに入ったものです。",
+    alsoInstallToAgent: "このアプリのマニュアルをエージェントにも渡す",
+    chooseHow: "導入方法は 2 つあります。作業環境に合う方を選んでください。",
+    tabAgent: "エージェントに導入",
+    tabUi: "UI に導入",
+    agentIntro:
+      "すでに使っているエージェント（Claude Code、Codex、Cursor）に「{name}」のマニュアルを渡します。このアプリの使い方を覚えますが、このスペースには何も作成・変更されません。",
+    agentPromptLabel: "これをエージェントに貼り付けてください",
+    agentPromptBody:
+      "Busabase アプリスキル「{name}」を導入して、後で操作できるようにしてください：\n\n{command}\n\nスキルの導入だけを行い、私の Busabase スペースにはまだ何も作成・変更・削除しないでください。導入できたら、このアプリが何をするものか、セットアップを頒んだら何が作られるかを数行で教えてください。",
+    agentRefHint:
+      "リポジトリの既定ブランチを導入します。このカタログ項目は {ref} から読み取られました。",
+    agentConnectTitle: "エージェントにはこのスペースへのアクセスも必要です",
+    agentConnectBody:
+      "スキルは使い方を伝えるもので、実際にデータを読み書きするには Busabase への接続が必要です。設定は一度だけです。",
+    agentConnectAction: "エージェントを接続",
+    agentNoSkillTitle: "このパッケージにはエージェント向けマニュアルがありません",
+    agentNoSkillBody:
+      "SKILL.md がないためエージェントに導入するものがなく、テーブル構造を推測するしかありません。UI に導入し、後からノードの「•••」メニューからプロンプトを渡してください。",
+    uiIntro:
+      "このスペースにフォルダ・テーブル・アプリを作成します。この方法ではエージェントは何も覚えません——マニュアルはいつでも「エージェントに導入」タブから渡せます。",
   },
 };

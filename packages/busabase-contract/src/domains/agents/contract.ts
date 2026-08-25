@@ -2,6 +2,7 @@ import { eventIterator, oc } from "@orpc/contract";
 import { z } from "zod";
 import {
   AgentCatalogEntryVOSchema,
+  AgentConnectionVOSchema,
   AgentSessionEventVOSchema,
   AgentSessionIdInputSchema,
   AgentSessionVOSchema,
@@ -29,6 +30,11 @@ export const agentsContract = {
       deletedSessionCount: z.number().int().nonnegative(),
     }),
   ),
+
+  connections: {
+    /** Connected backends, scoped to the current space and authenticated user. */
+    list: oc.output(AgentConnectionVOSchema.array()),
+  },
 
   sessions: {
     list: oc.output(AgentSessionVOSchema.array()),
