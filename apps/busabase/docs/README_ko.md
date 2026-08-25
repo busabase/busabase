@@ -7,8 +7,8 @@
 
 <h1>Busabase</h1>
 
-<p><b>AI 생성 콘텐츠, 비즈니스 데이터, 데이터셋, 멀티모달 지식을 위한 로컬 우선 검토 데이터베이스.</b><br/>
-AI는 끝없이 데이터를 생성합니다 —— Busabase는 신뢰할 수 있는 것만 <b>검토·승인·병합</b>하는 곳입니다.</p>
+<p><b>AI 에이전트를 위한 데이터베이스 &amp; 워크스페이스</b><br/>
+Claude Code, Codex, Cursor, OpenClaw와 자체 에이전트가 구조화된 데이터, 지속 가능한 지식, 재사용 가능한 Skill, 실행 가능한 앱, 사람의 검토를 한곳에서 사용하게 합니다.</p>
 
 <p>
 <a href="../README.md">English</a> &nbsp;·&nbsp; <a href="./README_zh-CN.md">中文</a> &nbsp;·&nbsp; <a href="./README_ja.md">日本語</a> &nbsp;·&nbsp; <b>한국어</b>
@@ -16,32 +16,55 @@ AI는 끝없이 데이터를 생성합니다 —— Busabase는 신뢰할 수 �
 
 <p>
 <a href="https://www.npmjs.com/package/busabase"><img src="https://img.shields.io/npm/v/busabase?logo=npm&label=busabase&color=3fb950" alt="npm busabase" /></a>
-<a href="https://www.npmjs.com/package/busabase-cli"><img src="https://img.shields.io/npm/v/busabase-cli?logo=npm&label=busabase-cli&color=3fb950" alt="npm busabase-cli" /></a>
 <a href="https://hub.docker.com/r/busabase/busabase"><img src="https://img.shields.io/docker/image-size/busabase/busabase/latest?logo=docker&label=docker" alt="Docker image" /></a>
-<a href="https://busabase.com/download"><img src="https://img.shields.io/badge/Desktop-Download-1f6feb?logo=tauri&logoColor=white" alt="Download Busabase Desktop" /></a>
-<a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License MIT" /></a>
+<a href="https://busabase.com/download"><img src="https://img.shields.io/badge/Desktop-Download-1f6feb?logo=tauri&logoColor=white" alt="Busabase Desktop" /></a>
+<a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT License" /></a>
 <a href="https://github.com/busabase/busabase/stargazers"><img src="https://img.shields.io/github/stars/busabase/busabase?style=social" alt="GitHub stars" /></a>
 </p>
 
 <br/>
 
-<img src="../public/assets/readme/busabase-hero.webp" alt="Busabase" width="100%" />
+<img src="../public/assets/readme/busabase-hero.webp" alt="Busabase에서 데이터, 지식, Skill, 앱을 사용하는 AI 에이전트" width="100%" />
 
 </div>
 
-Busabase는 단 하나의 문제를 해결하기 위한 오픈소스 앱입니다.
+AI 에이전트는 코드를 작성하고 결과물을 만들 수 있지만, 유용한 작업은 채팅, 파일, 데이터베이스, SaaS 도구에 흩어지기 쉽습니다. 다음 실행에서는 맥락을 다시 찾아야 하고, 에이전트가 무엇을 왜 바꿨는지 사람에게 잘 보이지 않습니다.
 
-**AI는 끝없이 콘텐츠와 데이터를 생성할 수 있지만, 그것이 신뢰할 수 있는지 결정하는 것은 여전히 사람의 몫입니다.**
+**Busabase는 또 하나의 채팅 창이 아니라 에이전트가 실제로 일하는 워크스페이스입니다.**
 
-Busabase는 그 승인 프로세스를 위한 공간입니다. 내장된 변경 요청, 작업, 댓글, 감사 추적, 그리고 앱과 AI 에이전트를 위한 간단한 API를 갖춘 프라이빗 CMS, 지식 베이스, 프로젝트 데이터베이스이자 구조화된 신뢰 소스입니다.
+- **에이전트를 위한 데이터베이스**: Base, 필드, 레코드, 관계, 뷰, 폼, 에셋.
+- **에이전트를 위한 지식 베이스**: Doc, File, Drive, 검색, 이력, 출처 추적.
+- **에이전트를 위한 워크스페이스**: Skill, AirApp, Whiteboard, Workflow, Agents, 공유 활동.
+- **에이전트 작업의 신뢰 계층**: Change Request, 필드 단위 diff, 댓글, 승인, commit, 감사 로그.
 
-![Busabase 작동 방식: 제안 → 검토 → 승인 → 병합 → 신뢰할 수 있는 데이터베이스 & 지식베이스](../public/assets/readme/how-it-works.webp)
+에이전트는 사람이 보는 동일한 워크스페이스를 읽고, 지식과 Skill을 사용하며, 데이터 위에 앱을 만들고, 개선안을 다시 제안할 수 있습니다. 중요한 쓰기는 Change Request로 도착하여 사람이 확인한 뒤에만 공식 데이터가 됩니다.
 
-**로컬 우선. 검토 우선. 에이전트 준비 완료.**
+**무료 오픈소스. 로컬 우선. 에이전트 네이티브. 모든 중요한 변경을 검토 가능.**
 
 ## 빠른 시작
 
-Busabase를 로컬에서 실행하세요:
+```bash
+npx busabase server
+```
+
+**http://localhost:15419/dashboard/local** 을 여세요. 외부 데이터베이스, 계정, 추가 설정이 필요하지 않습니다. 내장 PGlite, 로컬 파일 저장소, 데모 워크스페이스로 시작합니다.
+
+```bash
+npm i -g busabase
+npx busabase-cli --help
+```
+
+### Docker
+
+```bash
+docker run --rm -p 15419:15419 -v ~/.busabase/data:/data busabase/busabase
+```
+
+### 데스크톱 앱
+
+macOS, Windows, Linux 앱은 **[busabase.com/download](https://busabase.com/download)** 에서 받을 수 있습니다. Personal Desktop은 로컬에서 실행되고 오프라인으로도 사용할 수 있습니다.
+
+### 소스에서 실행
 
 ```bash
 pnpm install
@@ -49,285 +72,127 @@ cp apps/busabase/.env.example apps/busabase/.env
 pnpm --filter busabase dev
 ```
 
-대시보드를 열어보세요:
+CLI server와 Desktop은 기본적으로 같은 로컬 데이터 루트를 공유합니다.
 
-```txt
-http://localhost:15419/dashboard/local/inbox
+```text
+~/.busabase/data/
+├── pgdata/   # 내장 PGlite 데이터베이스
+└── storage/  # 파일과 첨부
 ```
 
-Busabase는 개발 서버가 시작되기 전에 로컬 시작 검사를 실행합니다. 의존성, `PG_DATABASE_URL`, 또는 `STORAGE_URL`이 없으면 빈 대시보드를 열지 않고 설정 메시지와 함께 명령이 실패합니다. 기본 `.env.example`은 `.data/busabase` 하위에 PGlite를, `.data/busabase-storage` 하위에 로컬 파일 스토리지를 사용합니다.
+## 하나의 워크스페이스, 다양한 구성 요소
 
-Busabase는 첫 요청 시 예시 베이스, 레코드, 변경 요청을 시드하므로 검토 워크플로를 즉시 확인할 수 있습니다.
+Busabase는 "AI 버튼이 붙은 데이터베이스"가 아닙니다. 모든 구성 요소가 같은 워크스페이스의 일급 노드이며, 사람, 에이전트, MCP, OpenAPI가 같은 대상을 다룹니다.
 
-실행 후 제공되는 것들:
+| 구성 요소 | 에이전트가 얻는 것 | 사람이 얻는 것 |
+| --- | --- | --- |
+| **Base** | 구조화 레코드, schema, 관계, 필터, 뷰 | 채팅 기억이 아닌 실제 운영 데이터베이스 |
+| **Doc** | 지속 가능한 Markdown 지식과 운영 지침 | 편집, 버전 관리, 추적이 가능한 지식 |
+| **File / Drive** | 파일, 첨부, 프로젝트 트리 | 에이전트 작업의 근거를 한곳에 보관 |
+| **Skill** | 지침, 참고 자료, 예제, 스크립트 | 워크스페이스 맥락과 함께 재사용되는 능력 |
+| **AirApp** | 워크스페이스 데이터와 API 기반 앱 | 새 데이터 사일로를 만들지 않는 전용 UI |
+| **Whiteboard / Workflow** | 시각적 맥락과 실행 가능한 프로세스 | 에이전트도 이해하고 개선하는 공유 계획 |
+| **Inbox / Activity** | 제안된 변경과 워크스페이스 이벤트 | 사람의 통제, 복구 경로, 완전한 감사 기록 |
 
-- 변경 요청 검토를 위한 받은 편지함
-- 예시 베이스와 레코드
-- 레코드 수준의 히스토리 및 감사 추적
-- `.data/busabase` 하위의 로컬 PGlite 영구 저장소
-- 앱, 워크플로, AI 에이전트를 위한 REST API 엔드포인트
+현재 노드 유형은 Folder, Base, Doc, File, Drive, Skill, AirApp, Form, HTML, Whiteboard, Workflow입니다. 자세한 내용은 **[Node Types](./node-types.md)** 를 참고하세요.
 
-Docker:
+## 워크스페이스 화면
 
-```bash
-docker build -f apps/busabase/Dockerfile -t busabase:local .
-docker run --rm -p 15419:15419 busabase:local
-```
-
-컨테이너 접속:
-
-```txt
-http://localhost:15419/dashboard/local/inbox
-```
-
-## 스크린샷
+<img src="../public/assets/readme/busabase-workspace-home.webp" alt="검토 큐, 최근 지식, 에이전트 활동이 보이는 Busabase 홈" width="100%" />
 
 |  |  |
 | :---: | :---: |
-| ![Inbox review list](../public/assets/readme/busabase-inbox-review.webp) | ![Agent-proposed diff](../public/assets/readme/busabase-agent-output-preview.webp) |
-| 대기 중인 변경 요청, 검토자 상태, 승인 액션이 있는 받은 편지함 | 병합 전 에이전트 제안 변경사항(필드 차이 및 검토자 액션 포함) |
-| ![Record detail lineage](../public/assets/readme/busabase-record-detail-audit.webp) | ![Base table](../public/assets/readme/busabase-base-table.webp) |
-| 필드, 댓글, 검토 기록, 계보가 있는 레코드 상세 페이지 | 구조화된 레코드와 풍부한 필드를 보여주는 베이스 테이블 |
-| ![Base records table](../public/assets/readme/busabase-base-records.webp) | ![Graph view with seed data](../public/assets/readme/busabase-graph-view.webp) |
-| 베이스 내 레코드 — 타입이 지정된 필드, 풍부한 값, 한눈에 보이는 승인 상태 | 베이스 간 시드 레코드 관계를 보여주는 그래프 뷰 |
-| ![Doc detail](../public/assets/readme/busabase-doc-detail.webp) | ![File detail](../public/assets/readme/busabase-file-detail.webp) |
-| 리뷰를 통해 버전 관리되는 장문 Markdown Doc | Asset 라이브러리가 뒷받침하는 퍼스트클래스 File 노드 |
+| ![에이전트를 위한 구조화 Base](../public/assets/readme/busabase-base-table.webp) | ![에이전트의 지속 가능한 Doc](../public/assets/readme/busabase-doc-detail.webp) |
+| **Database**: 타입, 관계, 검색을 갖춘 레코드 | **Knowledge base**: 버전 이력이 있는 지속 가능한 Doc |
+| ![재사용 가능한 Agent Skill](../public/assets/readme/busabase-skill-detail.webp) | ![워크스페이스의 AirApp](../public/assets/readme/busabase-apps-gallery.webp) |
+| **Skills**: 재사용 가능한 지침과 관련 파일 | **Apps**: 동일한 데이터 위에 만든 전용 인터페이스 |
+| ![제품 출시 Whiteboard](../public/assets/readme/busabase-whiteboard.webp) | ![리드 접수 Workflow](../public/assets/readme/busabase-workflow.webp) |
+| **Whiteboards**: 사람과 에이전트의 시각적 맥락 | **Workflows**: 데이터와 지식 옆에 보관되는 프로세스 |
+| ![에이전트 제안의 필드 diff](../public/assets/readme/busabase-agent-output-preview.webp) | ![레코드 이력과 감사 로그](../public/assets/readme/busabase-record-detail-audit.webp) |
+| **Review**: merge 전에 변경 내용을 확인 | **Provenance**: 출처, reviewer, commit, 이력을 보존 |
 
-## 왜 만들었나요
+## 에이전트 연결
 
-대부분의 데이터베이스는 데이터 저장을 잘합니다. 대부분의 CMS 도구는 콘텐츠 퍼블리싱을 잘합니다. 대부분의 코드 플랫폼은 파일 검토를 잘합니다.
+Busabase는 모델을 내장하지 않습니다. Claude Code, Codex, Cursor, Gemini CLI, OpenClaw, Hermes, Buda AI, n8n 또는 자체 에이전트를 연결하세요.
 
-Busabase는 AI 중심 팀에게 필요한 중간 레이어를 위해 만들어졌습니다:
+<details>
+<summary><b>로컬 연결 프롬프트 복사</b></summary>
 
-| 필요 상황 | Busabase가 제공하는 것 |
-| --- | --- |
-| AI가 블로그 포스트를 초안 작성 | 공개 CMS 레코드가 되기 전에 검토 |
-| 사람이 QA 데이터를 정리 | 훈련 또는 평가 전에 고품질 예시를 승인 |
-| 에이전트가 동영상에 레이블 지정 | 데이터셋에 들어가기 전에 멀티모달 메타데이터를 확인 |
-| 에이전트가 프로젝트 또는 ERP 데이터를 업데이트 | 시스템이 변경되기 전에 사람 검토자가 변경 사항을 승인 |
-| 로컬 AI 도구에 메모리가 필요 | 승인된 지식에 대한 프라이빗하고 감사 가능한 API를 노출 |
-| 데이터 변경이 작업을 트리거해야 할 때 | 승인된 병합 후 웹훅, 자동화, 또는 외부 에이전트를 실행 |
-| 누군가 레코드를 변경했을 때 | 누가 제안하고, 검토하고, 병합하고, 조회하거나 삭제했는지 추적 |
+```text
+Busabase Agent Skill을 읽고 유일한 운영 규칙으로 따르세요:
+http://localhost:15419/SETUP_SKILL.md
 
-기본적으로 승인 우선, 설계적으로 에이전트 친화적이며, 로컬에서 실행할 수 있을 만큼 여전히 가볍습니다.
-
-## 개념
-
-핵심 개념:
-
-| 개념 | 의미 |
-| --- | --- |
-| 베이스 | 레코드의 테이블 형태 컬렉션 |
-| 필드 | 베이스의 타입이 지정된 속성 |
-| 레코드 | 승인된 데이터 행 |
-| 변경 요청 | 데이터 변경을 위한 검토 가능한 제안 |
-| 작업 | 변경 요청 내의 생성, 수정, 삭제, 또는 변형 액션 |
-| 커밋 | 작업 뒤에 있는 불변 데이터 스냅샷 |
-| 댓글 | 레코드, 변경 요청, 작업, 또는 커밋에 첨부된 토론 |
-| 감사 이벤트 | 중요한 읽기, 쓰기, 검토, 병합, 삭제에 대한 추적 기록 |
-
-## 사용 사례
-
-에이전트가 쓸 수 있는 모든 베이스 —— 모두 먼저 검토합니다. 사람들이 Busabase로 만드는 예시:
-
-| 사용 사례 | 검토 대상 |
-| --- | --- |
-| **Next.js용 블로그 CMS** | Busabase를 블로그 또는 편집 워크플로를 위한 로컬 CMS로 사용하세요. |
-| **SEO 랜딩 페이지** | AI가 생성한 HTML 랜딩 페이지를 게시하기 전에 Busabase에서 관리하고 검토하세요. |
-| **설정 관리** | Busabase를 사용해 서비스 설정을 YAML 및 JSON으로 저장하고 버전 관리하세요. AI 에이전트가  |
-| **재무 및 인보이스 검토** | 자동화가 도움이 되지만 신뢰가 여전히 중요한 재무 워크플로에 Busabase를 활용하세요. |
-| **데이터 스튜어드십과 CRM 정합성 관리** | 비즈니스 데이터를 깨끗하게 유지하기 위한 검토 큐로 Busabase를 사용하세요. |
-| **컴플라이언스 및 감사 체크리스트** | 증거가 필요한 반복적인 확인 작업에 Busabase를 사용하세요. |
-| **고품질 QA 및 훈련 데이터셋** | 모델 훈련, 평가, RAG, 벤치마크 작업을 위한 데이터셋을 Busabase로 구축하세요. |
-| **멀티모달 콘텐츠 검토** | Busabase는 텍스트 그 이상을 위해 설계되었습니다. |
-| **시장 인텔리전스 및 리서치 모니터링** | 사람이 검토한 리서치 피드로 Busabase를 활용하세요. |
-| **콘텐츠 팩토리 파이프라인** | 아이디어에서 게시된 에셋까지 콘텐츠 제작을 조율하는 데 Busabase를 활용하세요. |
-| **데이터셋 레이블링 파이프라인** | 에이전트 우선 레이블링과 사람의 검토를 결합하는 데 Busabase를 활용하세요. |
-| **승인 기반 프로젝트 관리 및 ERP** | 운영 데이터를 위한 경량 승인 레이어로 Busabase를 활용하세요. |
-| **공식 시스템 오브 레코드** | Busabase를 **시스템 오브 레코드**로 활용하세요 — 각 레코드의 공식적이고 승인된 버전을 보관하는  |
-| **로컬 개인 지식 베이스** | 자신과 AI 도구를 위한 프라이빗 데이터베이스로 본인 머신에서 Busabase를 실행하세요. |
-| **검증된 루틴 업무** | 완료, 검토, 기록이 필요한 일일 또는 주간 업무에 Busabase를 활용하세요. |
-| **필드 타입 실험실** | 하나의 로컬 시나리오에서 지원되는 모든 필드 타입과 검토 작업을 확인하는 데 Busabase를 활용하세요. |
-
-**[→ 전체 16개 사용 사례 보기(스크린샷 포함)](./use-cases_ko.md)**
-
-## 자동화 및 ACP 에이전트
-
-Busabase는 데이터 워크플로의 이벤트 소스가 될 수 있습니다.
-
-병합 후, 승인된 데이터가 다운스트림 자동화를 트리거할 수 있습니다:
-
-- 웹훅 전송
-- 외부 시스템 업데이트
-- 검토자 또는 채널 알림
-- Next.js 사이트 새로고침
-- ETL 또는 데이터셋 내보내기 시작
-- 워크플로를 계속하기 위한 외부 ACP 에이전트 호출
-
-## 로컬 에이전트가 지식 베이스를 운영합니다
-
-Busabase는 본인 컴퓨터에서 이미 실행 중인 에이전트가 구동할 수 있도록 설계되었습니다.
-
-```txt
-로컬 에이전트가 승인된 지식을 읽음 ->
-변경 요청을 제안 ->
-본인 머신에서 검토 ->
-승인 -> 로컬 신뢰 소스로 병합
+onboarding 절차에 따라 이 워크스페이스에 연결하세요. 중요한 변경은 ChangeRequest로 제안하고, 내 승인 없이 merge하지 마세요. 한국어로 답하세요.
 ```
 
-> OpenClaw가 로컬 컴퓨터의 **에이전트**를 위한 혁명이라면, BusaBase는 로컬 컴퓨터의 **데이터베이스와 지식 베이스**를 위한 혁명입니다.
+</details>
 
-## Busabase가 중요하게 생각하는 것
+**[Claude Code 가이드](./claude-code.md)** 와 **[Bring Your Own Agent](./bring-your-agent.md)** 에 자세한 연결 절차가 있습니다.
 
-Busabase는 단순히 "이 행의 최신 값은 무엇인가?"를 묻지 않습니다.
+| 연결 방식 | 적합한 용도 |
+| --- | --- |
+| **Agent Skill** | 워크스페이스 지침을 읽는 coding agent와 로컬 CLI |
+| **MCP** | 타입이 있는 워크스페이스 도구가 필요한 agent와 IDE |
+| **OpenAPI / CLI** | 앱, 스크립트, 자동화, 자체 agent |
+| **Agents view (ACP)** | 도구 단계와 권한 요청이 표시되는 대화 세션 |
 
-다음도 함께 묻습니다:
+## 신뢰할 수 있는 결과가 되는 과정
 
-- 누가 이 데이터를 제안했나요?
-- 왜 변경되어야 하나요?
-- 어떤 필드가 변경되었나요?
-- 이것은 생성, 수정, 삭제, 또는 변형 작업인가요?
-- 수락되기 전에 AI 에이전트가 무엇을 생성했나요?
-- 누가 에이전트 출력을 검토했나요?
-- 사람이 에이전트에게 수정을 요청했나요?
-- 제안이 병합되었나요, 거부되었나요?
-- 병합 후 어떤 자동화가 실행되었나요?
-- 나중에 결정을 추적할 수 있나요?
-
-## Busabase 비교
-
-Busabase는 익숙한 도구들과 겹치는 부분이 있지만, 최적화한 목적이 다릅니다: **AI 에이전트가 데이터를 쓰고, 그것이 신뢰되는 데이터가 되기 전에 사람이 승인하는 것.**
-
-| 도구 | 강점 | Busabase가 더하는 것 |
-| --- | --- | --- |
-| [Airtable](https://www.airtable.com/) | 인간 팀을 위한 유연한 클라우드 테이블 | 로컬 우선 소유권 + 승인 게이트: 에이전트가 제안하고, 사람이 차이 미리보기·이력·감사 추적과 함께 승인 |
-| [APITable](https://github.com/apitable/apitable) | 오픈소스, API 우선 Airtable 대안 | API 우선**에 더해**, 제안과 신뢰된 레코드 사이에 검토 레이어를 추가 |
-| [NocoDB](https://nocodb.com/) | 기존 SQL 데이터베이스 위의 스프레드시트 UI | 모든 쓰기가 직접적인 행 편집이 아니라 검토 가능한 변경 요청이 됨 |
-| [Baserow](https://baserow.io/) | 셀프 호스팅 가능한 노코드 데이터베이스 | 변경 요청, 감사 추적, 에이전트 훅 |
-| [Notion](https://www.notion.com/) | 클라우드 문서, 데이터베이스, 팀 지식 | 검토 흐름이 내장된 순수하고 로컬한 구조화 지식 베이스 — 벤더 클라우드 불필요 |
-| [Confluence](https://www.atlassian.com/software/confluence) / [Lark](https://www.larksuite.com/en_sg/) | 벤더가 호스팅하는 팀 위키 | 먼저 본인 머신에서 실행; 데이터가 로컬을 떠날 필요가 없음 |
-| [Obsidian](https://obsidian.md/) | 개인을 위한 로컬 우선 Markdown 노트 | 이쪽도 로컬 — 그러나 에이전트를 위한 구조화 데이터베이스: 자유 형식 노트가 아닌 변경 요청·승인·감사 |
-| [PostgreSQL](https://www.postgresql.org/) | 신뢰할 수 있는 저장과 쿼리 | 모든 변경을 둘러싼, 사람이 읽을 수 있는 변경 요청·검토·코멘트·자동화 |
-| [GitHub Pull Requests](https://docs.github.com/en/pull-requests) | 파일 차이에 대한 코드 검토 | 콘텐츠, 데이터셋, CRM 행, 작업, 멀티모달 데이터에 대한 레코드 기반 검토 |
-
-이들 대부분은 쓰는 주체가 신뢰된 사람(또는 본인이 작성한 스크립트)이라고 가정합니다. Busabase는 쓰는 주체가 종종 **AI 에이전트**이며, 모든 에이전트의 쓰기를 자동으로 신뢰해서는 안 된다고 가정합니다. 그래서 에이전트 중심 데이터베이스에 필요한 것들을 추가합니다:
-
-- **제안 레이어**——에이전트가 행을 직접 편집하는 대신 변경 요청을 제출합니다.
-- **병합 전 미리보기**——에이전트가 생성한 내용을 필드 단위로 정확히 확인합니다.
-- **수정 루프**——수락되기 전에 에이전트에게 제안을 수정하도록 요청합니다.
-- **감사 추적**——모든 읽기, 쓰기, 검토, 병합, 삭제를 추적할 수 있습니다.
-- **로컬의 신뢰된 API**——단순한 인간 스프레드시트 사용자가 아닌, 본인 머신의 에이전트를 위해 설계되었습니다.
-
-```txt
-Airtable / APITable: 사람이 편집하는 데이터베이스.
-Busabase: 에이전트가 제안하고 사람이 승인하는 데이터베이스.
+```text
+Agent가 워크스페이스 맥락을 읽음
+        ↓
+데이터, Doc, Skill, App 변경을 제안
+        ↓
+Change Request가 정확한 diff, 출처, 영향을 표시
+        ↓
+사람이 승인, 수정 요청, 거부
+        ↓
+merge된 결과가 공식 워크스페이스 지식이 됨
 ```
 
-**클라우드 우선이 아니라 로컬 우선.** 기본적으로 데이터는 본인 머신이나 사설 네트워크에 머뭅니다. 원격 또는 에이전트 접근이 필요하신가요? 모든 것을 중앙 클라우드 데이터베이스로 복사하는 대신, **터널**을 열어 선택한 엔드포인트만 노출합니다. 셀프 호스팅 가능, 무료, 오픈소스.
+Change Request는 Busabase의 제품 범주가 아니라, 에이전트 워크스페이스를 신뢰할 수 있게 만드는 메커니즘입니다.
 
-## 기능
+## Personal Desktop과 Cloud
 
-- 로컬 우선 오픈소스 앱
-- 내장 검토 워크플로
-- 다중 작업을 포함한 변경 요청
-- 생성, 수정, 삭제, 변형 작업
-- 레코드 변경에 대한 커밋 히스토리
-- 레코드 및 검토 객체에 대한 댓글
-- 읽기 및 쓰기에 대한 감사 이벤트
-- Markdown, HTML, 링크, 파일, 관계 필드 및 풍부한 필드 타입
-- 검색에 최적화된 인덱싱된 필드 값
-- 앱, 워크플로, AI 에이전트를 위한 REST API
-- 에이전트 제안 변경에 대한 사람 참여(Human-in-the-loop) 협업
-- 병합 전 AI 에이전트 출력 미리보기
-- 승인된 운영 레코드를 위한 단일 신뢰 소스
-- 승인된 데이터 변경 후 자동화 트리거
-- 검토 중 및 병합 후 ACP 에이전트 훅
-- PGlite 로컬 영구 저장소
-- Docker 친화적 배포
+| Personal Desktop / 로컬 | Busabase Cloud |
+| --- | --- |
+| 무료 오픈소스 | 호스팅된 다중 사용자 워크스페이스 |
+| 로컬 PGlite와 파일 | 관리형 Postgres와 객체 저장소 |
+| 로그인 불필요 | 인증, Space, 역할, 권한 |
+| 오프라인 지원 | 협업, 호스팅 API, 거버넌스 |
+| 데이터가 기기에 유지 | Web과 모바일에서 접근 |
 
-## API 인터페이스
+**Cloud Connect** 는 인증된 tunnel로 로컬 워크스페이스를 [Busabase Cloud](https://busabase.com)에 연결합니다. 데이터와 로컬 에이전트는 기기에 남고, Cloud와 모바일은 통제된 원격 화면이 됩니다.
 
-Busabase는 대시보드 클라이언트, 앱, AI 에이전트를 위한 간단한 로컬 REST API를 제공합니다.
+## API와 아키텍처
 
-### 에이전트 제안 예시
+Busabase는 **MCP**, **OpenAPI**, `busabase-cli` 를 통해 전체 워크스페이스를 제공합니다.
 
-```bash
-# 1. Blog Posts 베이스를 찾습니다.
-BLOG_BASE_ID=$(curl -s http://localhost:15419/api/v1/bases \
-  | jq -r '.[] | select(.slug == "blog") | .id')
-
-# 2. 에이전트가 새 레코드를 제안합니다.
-CHANGE_REQUEST_ID=$(curl -s -X POST \
-  "http://localhost:15419/api/v1/bases/$BLOG_BASE_ID/change-requests" \
-  -H 'content-type: application/json' \
-  -d '{
-    "fields": {
-      "title": "Agent market note",
-      "body": "Drafted by an agent, waiting for human review.",
-      "channel": "blog"
-    },
-    "message": "Agent proposed a market note",
-    "submittedBy": "local-agent"
-  }' | jq -r '.id')
-
-echo "Review: http://localhost:15419/dashboard/local/inbox/$CHANGE_REQUEST_ID"
-
-curl -s -X POST "http://localhost:15419/api/v1/change-requests/merge" \
-  -H 'content-type: application/json' \
-  --data "{\"changeRequestIds\":[\"$CHANGE_REQUEST_ID\"]}" \
-  | jq '.results[0].record.id, .results[0].record.headCommit.payload.title'
-```
-
-기계 판독 가능한 엔드포인트 문서를 보려면 아래 주소를 여세요:
-
-```txt
+```text
 http://localhost:15419/api/v1/doc
 ```
 
-## Busabase를 언제 사용하나요
+<div align="center">
+  <img src="../public/architecture-diagram.svg" alt="Busabase 아키텍처" width="100%">
+</div>
 
-다음과 같은 경우에 Busabase를 사용하세요:
+`apps/busabase`는 로컬 단일 워크스페이스 Next.js shell입니다. 공유 엔진은 `packages/busabase-core`에 있으며, [Busabase Cloud](https://busabase.com)도 같은 core에 인증, 권한, 호스팅 저장소, 협업을 더해 사용합니다.
 
-- AI가 콘텐츠를 생성하지만 신뢰할 수 있는 것을 결정하는 것은 사람인 경우.
-- AI 에이전트가 업데이트를 제안하지만 최종 권한은 사람이 갖는 경우.
-- 승인 기반 프로젝트 관리, CRM, ERP, 또는 운영 데이터베이스가 필요한 경우.
-- 완료, 검토, 기록이 필요한 루틴 운영 업무가 있는 경우.
-- 팀이 검토 기록이 있는 고품질 데이터셋이 필요한 경우.
-- AI 에이전트 출력이 신뢰된 레코드가 되기 전에 사람이 미리볼 필요가 있는 경우.
-- 콘텐츠를 구조화된 레코드로 취급하는 CMS가 필요한 경우.
-- AI가 안전하게 읽을 수 있는 프라이빗 로컬 데이터베이스가 필요한 경우.
-- 승인된 비즈니스 데이터를 위한 단일 신뢰 소스가 필요한 경우.
-- 누가 데이터를 조회하고, 변경하고, 검토하고, 병합하거나, 삭제했는지 추적하고 싶은 경우.
+## 보안
 
-Busabase를 기본 코드 검토 시스템으로 사용하지 마세요. 코드에는 GitHub 풀 리퀘스트를 사용하세요.
+오픈소스 server는 신뢰할 수 있는 로컬 환경이나 사설 네트워크용입니다. 인증과 reverse proxy 없이 쓰기 endpoint를 공개 인터넷에 직접 노출하지 마세요.
 
-## 로드맵
+## 기여하기
 
-### 로컬 Busabase
+```bash
+pnpm install
+pnpm --filter busabase dev
+pnpm --filter busabase typecheck
+pnpm --filter busabase lint:err
+```
 
-오픈소스 버전은 로컬에서 실행되며 데이터를 본인이 통제하는 위치에 저장합니다.
+[Issues](https://github.com/busabase/busabase/issues)와 [Discussions](https://github.com/busabase/busabase/discussions)에서 버그, 아이디어, PR을 환영합니다.
 
-### Busabase Cloud
+## License
 
-향후 클라우드 호스팅 버전은 관리형 협업, 호스팅 스토리지, 팀 접근 제어, 더 쉬운 배포를 제공할 수 있습니다.
-
-### Busabase Tunnel
-
-향후 터널 모드는 모든 데이터를 중앙 클라우드 데이터베이스로 이전하지 않고 로컬 Busabase 인스턴스를 공개 인터넷 또는 통제된 네트워크에 노출할 수 있습니다.
-
-## 오픈소스 구성
-
-로컬 오픈소스 버전은 의도적으로 작게 유지됩니다:
-
-- 기본적으로 로그인 없음
-- 하나의 로컬 워크스페이스
-- 앱 로컬 Drizzle 스키마
-- `.data/busabase` 하위의 PGlite 영구 저장소
-- `/dashboard/local/inbox`의 대시보드
-- 로컬 앱과 신뢰된 에이전트를 위한 REST API
-
-## 보안 참고 사항
-
-Busabase는 신뢰된 로컬 또는 프라이빗 네트워크 배포를 위해 설계되었습니다.
-
-리버스 프록시, 토큰 레이어, 또는 다른 접근 제어 레이어 없이 쓰기 엔드포인트를 공개 인터넷에 노출하지 마세요.
+[MIT](../../../LICENSE) © Busabase
