@@ -32,6 +32,7 @@ const jobs = [
 
 // Optional title shown centered in the window bar, keyed by filename.
 const titles = {
+  "busabase-workspace-home.png": "Workspace — Home",
   "busabase-inbox-review.png": "Inbox — Change Requests",
   "busabase-agent-output-preview.png": "Change Request — Review",
   "busabase-record-detail-audit.png": "Record — History & Audit",
@@ -40,6 +41,10 @@ const titles = {
   "busabase-graph-view.png": "Graph",
   "busabase-doc-detail.png": "Doc — Agent Operating Guide",
   "busabase-file-detail.png": "File — Product Brief",
+  "busabase-skill-detail.png": "Skill — AI Research Editor",
+  "busabase-apps-gallery.png": "Apps",
+  "busabase-whiteboard.png": "Whiteboard — Product Launch",
+  "busabase-workflow.png": "Workflow — Lead Intake",
 };
 
 // macOS chrome tokens (warm neutrals to match the cream/ink palette)

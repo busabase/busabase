@@ -98,6 +98,26 @@ const airAppSecurityHeaders = [
   },
 ];
 
+// The Change Request preview embed is loaded cross-origin inside Busabase's
+// review UI (any origin, since reviewers can be on any Buda tenant domain).
+// It must stay out of the CSP/search index and never be cached, but — unlike
+// the AirApp routes above — it deliberately omits X-Frame-Options so the
+// wildcard frame-ancestors CSP directive is the only framing control in play.
+export const changeRequestPreviewHeaders = [
+  {
+    key: "Content-Security-Policy",
+    value: "frame-ancestors *",
+  },
+  {
+    key: "Cache-Control",
+    value: "private, no-store, max-age=0",
+  },
+  {
+    key: "X-Robots-Tag",
+    value: "noindex, nofollow",
+  },
+];
+
 /** @type {import('next').NextConfig} */
 const config = {
   reactStrictMode: true,
@@ -137,6 +157,10 @@ const config = {
       {
         source: "/dashboard/airapp/:path*",
         headers: airAppSecurityHeaders,
+      },
+      {
+        source: "/embed/change-request/:path*",
+        headers: changeRequestPreviewHeaders,
       },
     ];
   },

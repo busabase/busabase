@@ -10,8 +10,7 @@ import { EmptyAgentGuide } from "busabase-core/dashboard/empty-agent-guide";
 import { InstallFromGithubModal } from "busabase-core/dashboard/install-from-github-modal";
 import { BusabaseDashboardRouteRenderer } from "busabase-core/dashboard/route-renderer";
 import { getBusabaseDashboardRoutes as getDashboardRoutes } from "busabase-core/dashboard/routes";
-import { useLazyNodeChildren } from "busabase-core/dashboard/use-lazy-node-children";
-import { useMoveNode } from "busabase-core/dashboard/use-move-node";
+import { useNodeTree } from "busabase-core/dashboard/use-node-tree";
 import { CoreI18nProvider } from "busabase-core/i18n";
 import { Skeleton } from "kui/skeleton";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -32,6 +31,8 @@ interface DashboardClientProps {
   availableAirAppEngines?: AirAppRunnerKind[];
   initialPath?: string;
   localUserName?: string | null;
+  chromeless?: boolean;
+  readOnlyChangeRequestPreview?: boolean;
 }
 
 /**
@@ -41,6 +42,16 @@ interface DashboardClientProps {
  * — but both halves must derive from THIS constant, not each rely on a default.
  */
 const CACHE_SPACE_KEY = "local";
+
+/**
+ * Desktop/open-source connection guidance: one local server, no OAuth, and a
+ * single space — so there is no space id to pin the copied setup prompt to.
+ * Mirrors the `BusabaseAgentSkillButton` props in the sidebar footer.
+ */
+const AGENT_INTEGRATION = {
+  edition: "desktop",
+  defaultOrigin: "http://localhost:15419",
+} as const;
 
 const DASHBOARD_SKELETON_NAV_ITEMS = [
   { id: "shell-nav-1", width: "70%" },
@@ -100,17 +111,21 @@ export function DashboardClient({
   initialPath = "/home",
   localUserName,
   availableAirAppEngines,
+  chromeless,
+  readOnlyChangeRequestPreview,
 }: DashboardClientProps) {
   const [queryClient] = useState(() => new QueryClient());
 
   return (
     <QueryClientProvider client={queryClient}>
       {/* useSearchParams (for ?chromeless=1) requires a Suspense boundary. */}
-      <Suspense fallback={<DashboardShellSkeleton />}>
+      <Suspense fallback={<DashboardShellSkeleton chromeless={chromeless} />}>
         <DashboardClientContent
           availableAirAppEngines={availableAirAppEngines}
           initialPath={initialPath}
           localUserName={localUserName}
+          chromeless={chromeless}
+          readOnlyChangeRequestPreview={readOnlyChangeRequestPreview}
         />
       </Suspense>
     </QueryClientProvider>
@@ -121,6 +136,8 @@ function DashboardClientContent({
   initialPath = "/home",
   localUserName,
   availableAirAppEngines,
+  chromeless: chromelessOverride,
+  readOnlyChangeRequestPreview = false,
 }: DashboardClientProps) {
   const router = useRouter();
   const queryClient = useQueryClient();
@@ -128,7 +145,7 @@ function DashboardClientContent({
   // sidebar/topbar — used by busabase-mobile's WebView embed of a single
   // AirApp's Run/Files/Logs UI (see BusabaseDashboard's `chromeless` prop).
   const searchParams = useSearchParams();
-  const chromeless = searchParams.get("chromeless") === "1";
+  const chromeless = chromelessOverride ?? searchParams.get("chromeless") === "1";
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [isInstallOpen, setIsInstallOpen] = useState(false);
@@ -145,55 +162,13 @@ function DashboardClientContent({
   // and every node-detail view read from. busabase-cloud always passed its
   // space id to both; only this app had the halves out of step.
   const orpc = useMemo(() => createBusabaseQueryUtils("/api/rpc", {}, CACHE_SPACE_KEY), []);
-  // Depth-bounded eager prefetch: root + 2 levels beneath it, matching the
-  // server's own default (see DEFAULT_NODE_LIST_DEPTH in
-  // packages/busabase-core/src/logic/nodes.ts). Anything deeper is loaded
-  // lazily per-folder via `useLazyNodeChildren` below, on first expand.
-  const nodesListInput = useMemo(() => ({ parentId: null as string | null, depth: 2 }), []);
-  const nodesQuery = useQuery(orpc.nodes.list.queryOptions({ input: nodesListInput }));
-  // EXACT key of the root query above — required for useMoveNode's
-  // optimistic get/setQueryData (which need an exact cache-entry match, not
-  // a partial one). `nodesInvalidateQueryKey` below is deliberately the
-  // BROADER `{}` (no input) key instead, so a move invalidates every
-  // `nodes.list` variant — the root tree AND every lazily-fetched folder —
-  // in one call; see the comment on `useMoveNode`'s `invalidateQueryKey`.
-  const nodesQueryKey = orpc.nodes.list.queryOptions({ input: nodesListInput }).queryKey;
-  const nodesInvalidateQueryKey = orpc.nodes.list.queryOptions({}).queryKey;
-  const baseNodes = nodesQuery.data ?? [];
-  const { nodes, loadingNodeIds, onExpandNode } = useLazyNodeChildren({ orpc, baseNodes });
-  const checkIsDescendant = useCallback(
-    async (params: { nodeId: string; potentialAncestorId: string }) => {
-      const result = await orpc.nodes.isDescendant.call(params);
-      return result.isDescendant;
-    },
-    [orpc],
-  );
-  const basesQuery = useQuery(orpc.bases.list.queryOptions({ input: {} }));
-  // Paginated endpoint; this shell hands the first page's rows to the core dashboard.
-  const changeRequestsQuery = useQuery(
-    orpc.changeRequests.list.queryOptions({
-      input: {},
-      select: (page) => page.changeRequests,
-    }),
-  );
-  const auditEventsQuery = useQuery(orpc.auditEvents.list.queryOptions({ input: {} }));
-  const bases = basesQuery.data ?? [];
-  const changeRequests = changeRequestsQuery.data ?? [];
-  // The core dashboard loads records itself via records.list and ignores
-  // this prop, so we don't fetch the whole records table just to hand it over.
-  const records = useMemo<never[]>(() => [], []);
-  const auditEvents = auditEventsQuery.data ?? [];
-  const loadError =
-    nodesQuery.error ?? basesQuery.error ?? changeRequestsQuery.error ?? auditEventsQuery.error;
-  const isLoadingDashboardData =
-    nodesQuery.isPending ||
-    basesQuery.isPending ||
-    changeRequestsQuery.isPending ||
-    auditEventsQuery.isPending;
   // Local single-tenant app: persist the chosen UI language preference in
   // localStorage. The default is "auto" — follow the browser language, the same
   // way Busabase Cloud does via `detectBrowserLocale`. A concrete choice
   // (e.g. "zh-CN") overrides it. The cloud app injects its `[lang]` locale instead.
+  // Hoisted above the node-tree wiring below (rather than its original spot
+  // further down) only because `useNodeTree`'s `onMoveError` needs `LL` —
+  // this block is otherwise self-contained and unrelated to `orpc`/nodes.
   const [languagePref, setLanguagePref] = useState("auto");
   const [detectedLocale, setDetectedLocale] = useState<string>("en");
   const appLocaleCodes = useMemo(() => [...SUPPORTED_LOCALES] as Locale[], []);
@@ -212,13 +187,33 @@ function DashboardClientContent({
   const locale =
     languagePref === "auto" ? detectedLocale : (normalizeBusabaseAppLocale(languagePref) ?? "en");
   const LL = useMemo(() => getBusabaseAppLL(locale), [locale]);
-  const moveNodeMutation = useMoveNode({
-    apiClient,
-    queryClient,
-    nodesQueryKey,
-    invalidateQueryKey: nodesInvalidateQueryKey,
-    onMoveError: LL.shell.nodeMoveFailed(),
-  });
+  // The node tree — depth-bounded prefetch, per-folder lazy expansion, the
+  // move/"Move to…" mutation, and the cycle-rejection check — is the SAME
+  // wiring every hosted Busabase surface needs, so it lives in ONE shared hook
+  // rather than being duplicated per host. No `initialData`: this app has no
+  // SSR seed.
+  const { nodes, loadingNodeIds, onExpandNode, checkIsDescendant, onMoveNode, nodesQuery } =
+    useNodeTree({
+      orpc,
+      apiClient,
+      queryClient,
+      onMoveError: LL.shell.nodeMoveFailed(),
+    });
+  const basesQuery = useQuery(orpc.bases.list.queryOptions({ input: {} }));
+  // ChangeRequest rows are route-owned inside BusabaseDashboard: Home uses
+  // the cursor list, Inbox uses listPage, and detail uses get. The shell needs
+  // only the whole-space review count for its badge.
+  const changeRequestCountsQuery = useQuery(orpc.changeRequests.counts.queryOptions({}));
+  const auditEventsQuery = useQuery(orpc.auditEvents.list.queryOptions({ input: {} }));
+  const bases = basesQuery.data ?? [];
+  const changeRequests = useMemo<never[]>(() => [], []);
+  // The core dashboard loads records itself via records.list and ignores
+  // this prop, so we don't fetch the whole records table just to hand it over.
+  const records = useMemo<never[]>(() => [], []);
+  const auditEvents = auditEventsQuery.data ?? [];
+  const loadError = nodesQuery.error ?? basesQuery.error ?? auditEventsQuery.error;
+  const isLoadingDashboardData =
+    nodesQuery.isPending || basesQuery.isPending || auditEventsQuery.isPending;
   const coreMessages = useMemo(() => getBusabaseMessages(locale), [locale]);
   const loadErrorMessage = loadError
     ? loadError instanceof Error
@@ -233,6 +228,9 @@ function DashboardClientContent({
     () => (
       <BusabaseDashboard
         apiClient={apiClient}
+        // Same guidance the sidebar's Agent Skills button gives, reused by the
+        // install dialog's Agent install tab so both name one local endpoint.
+        agentIntegration={AGENT_INTEGRATION}
         availableAirAppEngines={availableAirAppEngines}
         apiBasePath="/api/rpc"
         auditEvents={auditEvents}
@@ -245,6 +243,7 @@ function DashboardClientContent({
         nodes={nodes}
         provideQueryClient={false}
         records={records}
+        readOnlyChangeRequestPreview={readOnlyChangeRequestPreview}
         bases={bases}
         onSearchOpenChange={setIsSearchOpen}
         searchOpen={isSearchOpen}
@@ -260,6 +259,7 @@ function DashboardClientContent({
       isSearchOpen,
       locale,
       chromeless,
+      readOnlyChangeRequestPreview,
       availableAirAppEngines,
     ],
   );
@@ -312,6 +312,7 @@ function DashboardClientContent({
         },
       }}
       initialPath={initialPath}
+      lockInitialPath={readOnlyChangeRequestPreview}
     >
       <CoreI18nProvider locale={locale}>
         {chromeless ? (
@@ -322,9 +323,7 @@ function DashboardClientContent({
           </div>
         ) : (
           <BusabaseDashboardShell
-            activeChangeRequestCount={
-              changeRequests.filter((changeRequest) => changeRequest.status === "in_review").length
-            }
+            activeChangeRequestCount={changeRequestCountsQuery.data?.review ?? 0}
             nodes={nodes}
             orpc={orpc}
             onSearchClick={() => setIsSearchOpen(true)}
@@ -337,7 +336,7 @@ function DashboardClientContent({
             // when a host leaves it unset — so the entry point is always offered
             // here. The cloud host is where the role gate actually bites.
             onInstallClick={() => setIsInstallOpen(true)}
-            onMoveNode={(payload, options) => moveNodeMutation.mutate(payload, options)}
+            onMoveNode={onMoveNode}
             locale={locale}
             languagePref={languagePref}
             onLocaleChange={changeLocale}
@@ -362,6 +361,7 @@ function DashboardClientContent({
             queryClient.invalidateQueries({ queryKey: orpc.nodes.list.key() });
             queryClient.invalidateQueries({ queryKey: orpc.bases.list.key() });
             queryClient.invalidateQueries({ queryKey: orpc.changeRequests.list.key() });
+            queryClient.invalidateQueries({ queryKey: orpc.changeRequests.counts.key() });
             router.refresh();
             if (mode === "merged") {
               router.push(addDemoParam(buildDashboardUrl("/")));
@@ -371,6 +371,7 @@ function DashboardClientContent({
           }}
         />
         <InstallFromGithubModal
+          agentIntegration={AGENT_INTEGRATION}
           apiClient={apiClient}
           open={isInstallOpen}
           onOpenChange={setIsInstallOpen}

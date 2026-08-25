@@ -78,7 +78,7 @@ test("dashboard routes render the review-first seeded experience", async ({ page
   await expect(page.getByRole("button", { name: /^Agent Integrations/ })).toBeVisible();
 
   await page.goto("/dashboard/local/activity");
-  await expect(page.getByText("Workspace activity")).toBeVisible();
+  await expect(page.locator('[data-dashboard-scroll="activity"]')).toBeVisible();
   // The activity feed no longer renders a "N change requests · M operations ·
   // K records" summary line (messages.activity.activityStats is defined in
   // i18n but unused by the component — dead copy from a past redesign); the
