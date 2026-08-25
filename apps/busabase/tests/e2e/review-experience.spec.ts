@@ -67,7 +67,7 @@ test("review -> merge -> refresh keeps user-visible lineage", async ({ page, req
   await expect(page.getByText("Review history")).toBeVisible();
   await expect(page.getByLabel("Technical IDs")).not.toHaveAttribute("open", "");
   await expect(page.getByRole("heading", { name: title })).toBeVisible();
-  await page.getByRole("link", { exact: true, name: "Source" }).click();
+  await page.getByRole("complementary").getByRole("link", { exact: true, name: "View" }).click();
   await expect(page).toHaveURL(new RegExp(`/dashboard/local/inbox/${created.id}$`));
   await page.goBack();
 

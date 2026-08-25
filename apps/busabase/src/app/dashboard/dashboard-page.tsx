@@ -3,7 +3,15 @@ import { resolveAvailableAirAppEngines } from "busabase-core/domains/airapp/logi
 import { getLocalUserName } from "~/lib/local-user";
 import { DashboardClient } from "./client";
 
-export const renderDashboardPage = async (initialPath = "/home") => {
+interface DashboardPageOptions {
+  chromeless?: boolean;
+  readOnlyChangeRequestPreview?: boolean;
+}
+
+export const renderDashboardPage = async (
+  initialPath = "/home",
+  options: DashboardPageOptions = {},
+) => {
   // Resolved here because only the server can see whether a Sandock is
   // configured, and the browser must not guess: a picker that offers an engine
   // this deployment does not have is a failure the user discovers by clicking
@@ -17,6 +25,8 @@ export const renderDashboardPage = async (initialPath = "/home") => {
       availableAirAppEngines={availableAirAppEngines}
       initialPath={initialPath}
       localUserName={getLocalUserName()}
+      chromeless={options.chromeless}
+      readOnlyChangeRequestPreview={options.readOnlyChangeRequestPreview}
     />
   );
 };

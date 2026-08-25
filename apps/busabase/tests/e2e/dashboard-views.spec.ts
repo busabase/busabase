@@ -18,6 +18,11 @@ test.setTimeout(90_000);
 
 test("graph view renders the relation summary badge", async ({ page }) => {
   await page.goto("/dashboard/local/graph?demo=1", { waitUntil: "commit" });
+  await expect(
+    page.locator("[data-dashboard-topbar]").getByText("Graph View", { exact: true }),
+  ).toBeVisible({
+    timeout: RENDER_TIMEOUT,
+  });
   // The badge ("Graph") + summary ("{n} bases · {m} relations") render before the
   // React Flow layout settles, so they are a stable render signal for this route.
   await expect(page.getByText(/\d+ bases · \d+ relations/)).toBeVisible({
@@ -27,6 +32,11 @@ test("graph view renders the relation summary badge", async ({ page }) => {
 
 test("archived (trash) view renders with its empty state", async ({ page }) => {
   await page.goto("/dashboard/local/archived?demo=1", { waitUntil: "commit" });
+  await expect(
+    page.locator("[data-dashboard-topbar]").getByText("Trash", { exact: true }),
+  ).toBeVisible({
+    timeout: RENDER_TIMEOUT,
+  });
   await expect(page.getByRole("heading", { name: "Trash" })).toBeVisible({
     timeout: RENDER_TIMEOUT,
   });
@@ -45,7 +55,9 @@ test("assets library route renders the seeded media", async ({ page }) => {
 
 test("activity entries link through to a working detail page", async ({ page }) => {
   await page.goto("/dashboard/local/activity?demo=1", { waitUntil: "commit" });
-  await expect(page.getByText("Workspace activity")).toBeVisible({ timeout: RENDER_TIMEOUT });
+  await expect(page.locator('[data-dashboard-scroll="activity"]')).toBeVisible({
+    timeout: RENDER_TIMEOUT,
+  });
 
   // Activity rows link to a change request detail at /dashboard/local/inbox/{id} (the
   // sidebar "Inbox" nav is /dashboard/local/inbox with no trailing id, so this href
@@ -58,3 +70,16 @@ test("activity entries link through to a working detail page", async ({ page }) 
   await expect(page).toHaveURL(/\/dashboard\/local\/inbox\/.+/, { timeout: RENDER_TIMEOUT });
   await expect(page.getByText(/not found/i)).toHaveCount(0);
 });
+
+for (const view of [
+  { label: "Agents", path: "/agents" },
+  { label: "Apps", path: "/apps" },
+  { label: "Templates", path: "/templates" },
+]) {
+  test(`${view.label} route shows the correct topbar label`, async ({ page }) => {
+    await page.goto(`/dashboard/local${view.path}?demo=1`, { waitUntil: "commit" });
+    await expect(
+      page.locator("[data-dashboard-topbar]").getByText(view.label, { exact: true }),
+    ).toBeVisible({ timeout: RENDER_TIMEOUT });
+  });
+}

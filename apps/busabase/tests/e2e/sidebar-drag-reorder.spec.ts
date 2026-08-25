@@ -89,19 +89,49 @@ const parentIdOf = async (
 };
 
 /**
+ * Shape of a drag gesture, in terms an automated pointer can actually control:
+ * how many stops it makes en route (`waypoints`), how many sub-samples each
+ * hop between stops gets (`subSteps`), and how much real wall-clock time it
+ * spends paused after a stop (`pauseMs` after every stop, `settleMs` as EXTRA
+ * time after only the last one, before release).
+ *
+ * These four knobs cover the realistic space of "how a pointer travels" —
+ * a single coarse jump, a normal continuous move, and a hesitant multi-stop
+ * drag with real pauses — without claiming to isolate the pre-fix bug's exact
+ * mechanism. It turned out NOT to reduce to "fewer samples = worse" or "more
+ * wall-clock time = safer": see `DRAG_SPEEDS`'s comment for what was actually
+ * observed when every shape below was run against the pre-fix code.
+ */
+interface DragSpeed {
+  /** How many intermediate stops the pointer makes between source and target. */
+  waypoints: number;
+  /** Playwright `steps` used for the move INTO each waypoint. */
+  subSteps: number;
+  /** Real-time pause after every waypoint, including the last. */
+  pauseMs?: number;
+  /** EXTRA real-time pause after only the last waypoint, before `mouse.up()`. */
+  settleMs?: number;
+}
+
+/**
  * Drag `source` onto a band of `target`, driving real pointer events through the
  * row's grip handle (the row body is deliberately not draggable — dnd-kit's
  * pointer capture on a row wrapping an `<a>` fires a spurious navigation click
  * right after the drop).
  *
  * `band` picks where inside the target row to release: `"top"`/`"bottom"` are the
- * reorder bands, `"middle"` is a folder's reparent band.
+ * reorder bands, `"middle"` is a folder's reparent band. `speed` defaults to a
+ * single normal-paced travel move (see `DEFAULT_DRAG_SPEED`); pass one of
+ * `DRAG_SPEEDS` to drive the same gesture with a different waypoint/sample shape.
  */
+const DEFAULT_DRAG_SPEED: DragSpeed = { waypoints: 1, subSteps: 16 };
+
 const dragRowOnto = async (
   page: Page,
   source: ReturnType<Page["locator"]>,
   target: ReturnType<Page["locator"]>,
   band: "top" | "middle" | "bottom",
+  speed: DragSpeed = DEFAULT_DRAG_SPEED,
 ) => {
   await source.hover();
   const handle = source.locator('[title="Drag to reorder"]').first();
@@ -120,12 +150,74 @@ const dragRowOnto = async (
   await page.mouse.move(handleBox.x + handleBox.width / 2, handleBox.y + handleBox.height / 2);
   await page.mouse.down();
   // Clear the PointerSensor's 5px activation distance before travelling, so the
-  // drag is genuinely active for the whole move.
+  // drag is genuinely active for the whole move — always at the default pace,
+  // regardless of `speed`: this is setup, not the gesture under test.
   await page.mouse.move(handleBox.x + handleBox.width / 2, handleBox.y + handleBox.height / 2 - 8, {
     steps: 4,
   });
-  await page.mouse.move(targetBox.x + targetBox.width / 2, releaseY, { steps: 16 });
+  const startX = handleBox.x + handleBox.width / 2;
+  const startY = handleBox.y + handleBox.height / 2 - 8;
+  const targetX = targetBox.x + targetBox.width / 2;
+  for (let i = 1; i <= speed.waypoints; i++) {
+    const t = i / speed.waypoints;
+    await page.mouse.move(startX + (targetX - startX) * t, startY + (releaseY - startY) * t, {
+      steps: speed.subSteps,
+    });
+    if (speed.pauseMs) await page.waitForTimeout(speed.pauseMs);
+  }
+  if (speed.settleMs) await page.waitForTimeout(speed.settleMs);
   await page.mouse.up();
+};
+
+/**
+ * The pre-fix bug's dependence on gesture shape, as actually measured against
+ * this harness — not assumed. See `tree-drop.ts`'s header comment for the
+ * mechanism (rows physically translating mid-drag via a CSS transition the old
+ * `SortableContext` code raced against).
+ *
+ * It is NOT a clean "fast fails, slow succeeds" rule. Every entry below is
+ * unhurried by ordinary standards (the fastest, "a single coarse jump", is
+ * still the exact fast gesture that broke the pre-fix code in the first
+ * investigation of this bug), and on the pre-fix code every one of them
+ * failed at least once across repeated runs, including the two explicitly
+ * built to be slow and deliberate (`"paused mid-drag…"`, 3/3 failed;
+ * `"…pauses on the target before releasing"`, 1/1 failed) and a 14-waypoint,
+ * well-paused, 600ms-settled shape modelled on an EARLIER ad hoc manual repro
+ * that appeared to succeed reliably outside this harness — through THIS
+ * harness it failed 4/4. Only `"a normal drag"` was observed to pass, and
+ * inconsistently: it failed the first time this exact profile was run in this
+ * investigation and passed the next. That inconsistency is itself the
+ * finding: across a controlled, repeatable test harness, no gesture shape
+ * tried here was a reliable way to avoid the bug. A user (or an unhurried
+ * manual QA pass) has no lever to pull that reliably keeps them safe — which
+ * is why it read as "works, until it doesn't" rather than as a predictable
+ * "works if you go slow".
+ *
+ * The fix removes the CSS transition entirely (rows are `useDraggable` +
+ * `useDroppable`, never translated) and resolves the drop from live,
+ * untransformed rects on every pointer sample, so none of this should matter
+ * anymore — every entry below now needs to pass, reliably, every run.
+ */
+const DRAG_SPEEDS: Record<string, DragSpeed> = {
+  "a single coarse jump": { waypoints: 1, subSteps: 1 },
+  "a fast flick": { waypoints: 1, subSteps: 3 },
+  "a normal drag": { waypoints: 1, subSteps: 16 },
+  "a paused-mid-drag gesture that releases the instant it arrives": {
+    waypoints: 20,
+    subSteps: 1,
+    pauseMs: 40,
+  },
+  "a drag that pauses on the target before releasing": {
+    waypoints: 1,
+    subSteps: 16,
+    settleMs: 500,
+  },
+  "a slow, many-waypoint drag with a long pause before release": {
+    waypoints: 14,
+    subSteps: 3,
+    pauseMs: 70,
+    settleMs: 600,
+  },
 };
 
 const workspaceRow = (page: Page, name: string) =>
@@ -191,6 +283,68 @@ test("reordering children inside a folder keeps them inside that folder", async 
     .poll(async () => (await childIdsOf(request, folder.id))[0], { timeout: RENDER_TIMEOUT })
     .toBe(last.id);
   expect(await parentIdOf(request, last.id)).toBe(folder.id);
+});
+
+/**
+ * The pre-fix bug wasn't reliably reproducible — the SAME gesture landed
+ * correctly when driven slowly and moved the node to the root when driven
+ * fast (see `tree-drop.ts`'s header comment for the mechanism: the old
+ * `SortableContext` translation hadn't "settled" when few pointer samples
+ * landed). That is precisely why manual QA calling it "sometimes works" was
+ * consistent with the bug being there the whole time — an unhurried manual
+ * check sits at the slow end of this spectrum, which is the end that passed.
+ *
+ * The fix removes rows' CSS transform/transition entirely and resolves the
+ * drop from live, untransformed rects on every pointer sample (`tree-drop.ts`
+ * + `NavMain.tsx`'s `collisionDetection`), so there is no longer a
+ * theoretical reason speed should matter. This block is what turns that
+ * "shouldn't" into a tested "doesn't", across the sample-density spectrum
+ * from a single coarse jump (fewer samples than the fast gesture that broke
+ * the pre-fix code) through a slow, paused drag.
+ */
+test.describe("reordering inside a folder at every drag speed", () => {
+  for (const [speedLabel, speed] of Object.entries(DRAG_SPEEDS)) {
+    test(`lands correctly at ${speedLabel}`, async ({ page, request }) => {
+      const suffix = uniqueSuffix();
+      const folder = await createNode(request, {
+        nodeType: "folder",
+        name: `Speed Folder ${suffix}`,
+        slug: `speed-folder-${suffix}`,
+      });
+      const children: CreatedNode[] = [];
+      for (const index of [1, 2, 3, 4]) {
+        children.push(
+          await createNode(request, {
+            nodeType: "doc",
+            name: `Speed Child ${index} ${suffix}`,
+            slug: `speed-child-${index}-${suffix}`,
+            parentNodeId: folder.id,
+          }),
+        );
+      }
+      const first = children[0];
+      const last = children[children.length - 1];
+
+      await page.goto("/dashboard/local/home");
+      await expandFolder(page, folder.name);
+
+      const firstRow = workspaceRow(page, first.name);
+      const lastRow = workspaceRow(page, last.name);
+      await expect(firstRow).toBeVisible({ timeout: RENDER_TIMEOUT });
+      await expect(lastRow).toBeVisible();
+
+      await dragRowOnto(page, lastRow, firstRow, "top", speed);
+
+      // Same dual assertion as the baseline test above: the reorder must have
+      // actually happened, AND the node must still be inside the folder — not
+      // promoted to the root, which is what the pre-fix code did at the fast
+      // end of this spectrum.
+      await expect
+        .poll(async () => (await childIdsOf(request, folder.id))[0], { timeout: RENDER_TIMEOUT })
+        .toBe(last.id);
+      expect(await parentIdOf(request, last.id)).toBe(folder.id);
+    });
+  }
 });
 
 test("dropping onto the middle of a folder row reparents into that folder", async ({

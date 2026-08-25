@@ -93,7 +93,7 @@ test("a new user tours the approval-first knowledge base", async ({ page }) => {
 
   await test.step("checks the workspace activity feed", async () => {
     await page.goto("/dashboard/local/activity");
-    await expect(page.getByText("Workspace activity")).toBeVisible();
+    await expect(page.locator('[data-dashboard-scroll="activity"]')).toBeVisible();
     // No "N change requests · M operations · K records" summary line is
     // rendered anymore (messages.activity.activityStats is defined in i18n
     // but unused by the component — dead copy from a past redesign); assert

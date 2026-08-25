@@ -65,7 +65,7 @@ const scenarioShots = [
       {
         kind: "base",
         label: "Canonical records",
-        waitFor: "text=Blog Posts",
+        waitFor: "text=Markdown posts published",
       },
       {
         kind: "inbox",
@@ -94,7 +94,7 @@ const scenarioShots = [
       {
         kind: "base",
         label: "Blog base",
-        waitFor: "text=Blog Posts",
+        waitFor: "text=Markdown posts published",
       },
       {
         kind: "inbox",
@@ -511,6 +511,13 @@ const routeForScenarioShot = (scenario, kind) => {
 // Top-level shots are English-only; the homepage uses scenarios/<lang>/ for i18n.
 const shots = [
   {
+    // The workspace itself: review queue, recently visited knowledge, and the
+    // shared activity stream agents and humans leave behind.
+    file: "busabase-workspace-home.png",
+    url: `${BASE}/dashboard/local?demo=1`,
+    waitFor: "text=Recently visited",
+  },
+  {
     file: "busabase-inbox-review.png",
     url: `${BASE}/dashboard/local/inbox?demo=1`,
     waitFor: "text=For review",
@@ -528,7 +535,7 @@ const shots = [
   {
     file: "busabase-base-table.png",
     url: `${BASE}/dashboard/local/base/blog?demo=1`,
-    waitFor: "text=Blog Posts",
+    waitFor: "text=Markdown posts published",
   },
   {
     // Rich base with image thumbnails — labeling queue shows asset column
@@ -551,7 +558,31 @@ const shots = [
     // First-class File node — backed by the Asset library
     file: "busabase-file-detail.png",
     url: `${BASE}/dashboard/local/file/product-brief?demo=1`,
-    waitFor: "text=Backing asset",
+    waitFor: "text=Open file",
+  },
+  {
+    // A reusable agent capability stored alongside the data and docs it uses.
+    file: "busabase-skill-detail.png",
+    url: `${BASE}/dashboard/local/skill/ai-research-editor?demo=1`,
+    waitFor: "text=AI Research Editor",
+  },
+  {
+    // Workspace-native apps built on the same Bases, files, and review flow.
+    file: "busabase-apps-gallery.png",
+    url: `${BASE}/dashboard/local/apps?demo=1`,
+    waitFor: "text=AirApps in this space",
+  },
+  {
+    // Free-form visual context that agents can read and update as a node.
+    file: "busabase-whiteboard.png",
+    url: `${BASE}/dashboard/local/whiteboard/product-launch-whiteboard?demo=1`,
+    waitFor: "text=Product Launch Whiteboard",
+  },
+  {
+    // An executable workflow stored next to its data, docs, and review history.
+    file: "busabase-workflow.png",
+    url: `${BASE}/dashboard/local/workflow/lead-intake-workflow?demo=1`,
+    waitFor: "text=Lead Intake Workflow",
   },
   {
     // Deduped global asset library (DAM) — illustrates Attachments & Assets
@@ -633,7 +664,9 @@ if (LANG === "en") {
   await page.waitForTimeout(800);
   // Open the dialog from the sidebar footer button (before it opens, the only
   // "Agent Skills" text is the sidebar button — not yet the in-dialog tab).
-  await page.getByText("Agent Skills", { exact: true }).first().click();
+  const agentSkillsButton = page.getByRole("button", { name: "Agent Skills", exact: true });
+  await agentSkillsButton.waitFor({ state: "visible", timeout: 15000 });
+  await agentSkillsButton.click();
   try {
     await page.waitForSelector("text=Agent Integration", { timeout: 5000 });
   } catch {

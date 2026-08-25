@@ -1,7 +1,8 @@
 "use client";
 
-import type { ReactNode } from "react";
+import { type ReactNode, useMemo } from "react";
 import { Router } from "wouter";
+import { memoryLocation } from "wouter/memory-location";
 import { getDashboardBasePath } from "~/lib/dashboard-routes";
 import { SPAContext, type SPAContextType } from "./spa-context";
 
@@ -10,6 +11,7 @@ interface SPAWrapperProps {
   basePath?: string;
   initialPath?: string;
   context?: Partial<SPAContextType>;
+  lockInitialPath?: boolean;
 }
 
 const localSpace = {
@@ -30,6 +32,7 @@ export function SPAWrapper({
   children,
   context,
   initialPath = "/home",
+  lockInitialPath = false,
 }: SPAWrapperProps) {
   const [ssrPath = "/home", ssrSearch = ""] = initialPath.split("?");
   const localSpaceForLocale = {
@@ -55,12 +58,27 @@ export function SPAWrapper({
   };
 
   const ssrPathWithSpace = `${basePath}${ssrPath}`;
+  const lockedLocation = useMemo(
+    () =>
+      memoryLocation({
+        path: ssrPathWithSpace,
+        searchPath: ssrSearch,
+        static: true,
+      }),
+    [ssrPathWithSpace, ssrSearch],
+  );
 
   return (
     <SPAContext.Provider value={value}>
       <div className="flex h-screen flex-col overflow-hidden">
         <div className="min-h-0 flex-1">
-          <Router base={basePath} ssrPath={ssrPathWithSpace} ssrSearch={ssrSearch}>
+          <Router
+            base={basePath}
+            hook={lockInitialPath ? lockedLocation.hook : undefined}
+            searchHook={lockInitialPath ? lockedLocation.searchHook : undefined}
+            ssrPath={ssrPathWithSpace}
+            ssrSearch={ssrSearch}
+          >
             {children}
           </Router>
         </div>

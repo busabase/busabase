@@ -68,30 +68,22 @@ const initialize = async (request: APIRequestContext) => {
 };
 
 test("initialize returns the Busabase MCP server info", async ({ request }) => {
-  const { rpc } = await initialize(request);
+  const { rpc, sessionId } = await initialize(request);
   expect(rpc.error).toBeUndefined();
+  expect(sessionId).toBeUndefined();
   const serverInfo = rpc.result?.serverInfo as { name?: string } | undefined;
   expect(serverInfo?.name).toBe("Busabase MCP");
 });
 
 test("tools/list exposes the contract as MCP tools", async ({ request }) => {
-  const { sessionId } = await initialize(request);
-  expect(sessionId, "initialize must return an Mcp-Session-Id").toBeTruthy();
+  const { rpc: initializeRpc } = await initialize(request);
+  expect(initializeRpc.error).toBeUndefined();
 
   const headers: Record<string, string> = {
     Accept: MCP_ACCEPT,
     "Content-Type": "application/json",
     "MCP-Protocol-Version": PROTOCOL_VERSION,
   };
-  if (sessionId) {
-    headers["Mcp-Session-Id"] = sessionId;
-  }
-
-  // The client is expected to announce it finished initializing before calling.
-  await request.post("/api/mcp", {
-    headers,
-    data: { jsonrpc: "2.0", method: "notifications/initialized" },
-  });
 
   const response = await request.post("/api/mcp", {
     headers,

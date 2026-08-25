@@ -1,0 +1,1 @@
+CREATE INDEX "busabase_change_requests_space_created_id_idx" ON "busabase_change_requests" USING btree ("space_id","created_at","id");

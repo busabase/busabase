@@ -15,6 +15,7 @@ import {
   buildBusabaseMcpAirAppSkill,
   buildBusabaseMcpSkill,
   busabaseMcpGuideTool,
+  GUIDE_SUPERSEDED_MCP_TOOLS,
 } from "busabase-core/mcp-skill";
 import { createOpenApiMcpHandler } from "openlib/mcp";
 import { readBuiltinVaultRuntimeEnv } from "~/domains/vault/logic/vault";
@@ -25,6 +26,7 @@ import { busabaseLocalMcpTaskTools } from "./task-tools";
 const withheldFromMcp = new Set<string>([
   ...TASK_SUPERSEDED_MCP_TOOLS,
   ...AGENT_EXCLUDED_MCP_TOOLS,
+  ...GUIDE_SUPERSEDED_MCP_TOOLS,
 ]);
 
 const openApiMcpHandler = createOpenApiMcpHandler({
