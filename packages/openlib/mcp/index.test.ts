@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import {
   asMcpError,
+  createOpenApiMcpHandler,
   getMcpProtectedResourceMetadataUrl,
   registerOpenApiMcpTools,
   withMcpOAuthChallenge,
@@ -101,6 +102,56 @@ const testContract = {
     },
   },
 };
+
+const jsonRpcRequest = (
+  method: string,
+  id: number,
+  params?: Record<string, unknown>,
+  sessionId?: string,
+) =>
+  new Request("http://localhost/api/mcp", {
+    method: "POST",
+    headers: {
+      accept: "application/json, text/event-stream",
+      "content-type": "application/json",
+      ...(sessionId ? { "mcp-session-id": sessionId } : {}),
+    },
+    body: JSON.stringify({ jsonrpc: "2.0", id, method, ...(params ? { params } : {}) }),
+  });
+
+describe("createOpenApiMcpHandler", () => {
+  it("accepts requests after restart even when the client sends a stale session id", async () => {
+    const handler = createOpenApiMcpHandler({
+      contract: testContract,
+      createClient: () => ({
+        things: {
+          get: vi.fn(),
+          ping: vi.fn(),
+        },
+      }),
+    });
+
+    const initializeResponse = await handler(
+      jsonRpcRequest("initialize", 1, {
+        protocolVersion: "2025-11-25",
+        capabilities: {},
+        clientInfo: { name: "test-client", version: "1.0.0" },
+      }),
+    );
+    expect(initializeResponse.status).toBe(200);
+    expect(initializeResponse.headers.get("mcp-session-id")).toBeNull();
+
+    const listResponse = await handler(
+      jsonRpcRequest("tools/list", 2, undefined, "session-from-previous-server"),
+    );
+    expect(listResponse.status).toBe(200);
+    await expect(listResponse.json()).resolves.toEqual(
+      expect.objectContaining({
+        result: expect.objectContaining({ tools: expect.any(Array) }),
+      }),
+    );
+  });
+});
 
 describe("registerOpenApiMcpTools", () => {
   it("publishes converter-produced JSON schemas and empty schemas for zero-argument tools", async () => {

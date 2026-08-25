@@ -24,7 +24,6 @@ import {
   SidebarGroupAction,
   SidebarGroupLabel,
   SidebarMenu,
-  SidebarMenuAction,
   SidebarMenuBadge,
   SidebarMenuButton,
   SidebarMenuItem,
@@ -143,6 +142,39 @@ const getNavItemKey = (item: NavKeyItem, index: number, prefix = "item") =>
     .join(":");
 
 const isExternalUrl = (url: string) => url.startsWith("http://") || url.startsWith("https://");
+
+/**
+ * The ONE button footprint for every hover-revealed row control, at every depth.
+ *
+ * `size-5` + a `size-4` icon deliberately matches kui's own `SidebarMenuAction`
+ * (`w-5`, `[&>svg]:size-4`) rather than inventing a fourth size: leaf rows across
+ * every app already render at those metrics, so folder rows converge onto the
+ * existing design-system standard instead of everything converging onto a new one.
+ */
+const NAV_ROW_ACTION_BUTTON =
+  "flex size-5 shrink-0 items-center justify-center rounded-md p-0 outline-none ring-sidebar-ring transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 [&>svg]:size-4 [&>svg]:shrink-0";
+
+/**
+ * Keeps the cluster visible while its "•••" dropdown is open — without this the
+ * menu closes the moment the pointer leaves the row to travel to the menu.
+ */
+const NAV_ROW_ACTIONS_OPEN_CLASS = "has-[[data-state=open]]:opacity-100";
+
+/**
+ * Trailing room a row's title must leave for its hover cluster, indexed by how
+ * many controls that row renders.
+ *
+ * Derived rather than guessed: the cluster sits at `right-1` (4px) and packs N
+ * `size-5` (20px) buttons with `gap-0.5` (2px), so it occupies 4 + 20N + 2(N−1)
+ * px — 24, 46, 68, 90 for N = 1..4. Each entry is the next Tailwind spacing step
+ * at or above that. Folder rows previously reserved a flat 96px for what is
+ * really 68px of controls, which is why long names ("Personal Knowledge")
+ * truncated on a 255px sidebar while ~28px of the row sat empty.
+ */
+const NAV_ROW_TRAILING_PADDING = ["pr-2", "pr-7", "pr-12", "pr-[4.5rem]", "pr-24"] as const;
+
+const navRowTrailingPadding = (actionCount: number) =>
+  NAV_ROW_TRAILING_PADDING[Math.min(actionCount, NAV_ROW_TRAILING_PADDING.length - 1)];
 
 interface NavMainProps {
   items: NavGroup[];
@@ -424,6 +456,118 @@ function NavMainComponent({
       </Fragment>
     ));
 
+  /**
+   * Every hover-revealed row control — drag grip, "+", delete, "•••" — at every
+   * depth, in one place.
+   *
+   * These used to be three independent implementations (folder header, top-level
+   * leaf, nested leaf) that had drifted apart on every axis at once. Measured on
+   * a 255px sidebar: the "•••" button was 28px on a folder row and 20px on a
+   * Base row, its icon 14px vs 12px, its right edge landed at x=243 vs x=206,
+   * and the grip sat LEFTMOST on folder rows but RIGHTMOST on leaf rows — so the
+   * same two controls swapped places depending which row you hovered. The old
+   * `right-7`/`right-1` offsets also meant every new control needed another
+   * hand-computed offset in three files' worth of places.
+   *
+   * One flex cluster, one button size, one order (grip → add → delete → more,
+   * "more" always last), anchored `right-1` for every row type. Flex handles the
+   * spacing, so adding a control never needs another magic offset again.
+   */
+  const renderRowActions = ({
+    itemKey,
+    item,
+    canDrag,
+    dragProps,
+    moreActionsTitle,
+  }: {
+    itemKey: string;
+    item: NavItem;
+    canDrag: boolean;
+    dragProps?: NavRowDragProps;
+    moreActionsTitle: string;
+  }) => (
+    <div
+      className={`absolute right-1 top-1/2 flex -translate-y-1/2 items-center gap-0.5 opacity-0 transition-opacity group-focus-within/nav-row:opacity-100 group-hover/nav-row:opacity-100 group-data-[collapsible=icon]:hidden ${NAV_ROW_ACTIONS_OPEN_CLASS}`}
+    >
+      {canDrag && (
+        // A dedicated, non-navigational handle carries the drag listeners —
+        // NOT the row's <a>/SPALink. dnd-kit's PointerSensor calls
+        // setPointerCapture on the actual event.target, so if the listeners
+        // were spread onto a row wrapping a link, the browser fires a spurious
+        // click (navigation) on that link right after the drop.
+        <button
+          className={`${NAV_ROW_ACTION_BUTTON} cursor-grab text-sidebar-foreground/50 active:cursor-grabbing`}
+          onClick={(e) => e.stopPropagation()}
+          title="Drag to reorder"
+          type="button"
+          {...(dragProps?.attributes ?? {})}
+          {...(dragProps?.listeners ?? {})}
+        >
+          <GripVertical />
+          <span className="sr-only">Drag to reorder</span>
+        </button>
+      )}
+      {item.onAddChild && (
+        <button
+          className={`${NAV_ROW_ACTION_BUTTON} text-sidebar-foreground/70`}
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            item.onAddChild?.();
+          }}
+          title={item.addChildTitle ?? "New"}
+          type="button"
+        >
+          <Plus />
+          <span className="sr-only">{item.addChildTitle ?? "New"}</span>
+        </button>
+      )}
+      {item.onDelete && item.id && (
+        <button
+          className={`${NAV_ROW_ACTION_BUTTON} text-sidebar-foreground/70`}
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            if (item.id) item.onDelete?.(item.id);
+          }}
+          title="Delete"
+          type="button"
+        >
+          <Trash2 />
+          <span className="sr-only">Delete</span>
+        </button>
+      )}
+      {item.actions && item.actions.length > 0 && (
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button
+              className={`${NAV_ROW_ACTION_BUTTON} text-sidebar-foreground/70 data-[state=open]:bg-sidebar-accent`}
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+              }}
+              title={moreActionsTitle}
+              type="button"
+            >
+              <MoreHorizontal />
+              <span className="sr-only">{moreActionsTitle}</span>
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            {renderActionItems(item.actions, itemKey)}
+          </DropdownMenuContent>
+        </DropdownMenu>
+      )}
+    </div>
+  );
+
+  /** How many hover controls a row will render — drives its trailing padding. */
+  const countRowActions = (item: NavItem, canDrag: boolean) =>
+    (canDrag ? 1 : 0) +
+    (item.onAddChild ? 1 : 0) +
+    (item.onDelete && item.id ? 1 : 0) +
+    (item.actions?.length ? 1 : 0);
+
   // A subtree is "active" if the item itself, or ANY descendant at any depth,
   // matches the current route — used to auto-open every ancestor folder along
   // the path to the active row, regardless of nesting depth.
@@ -480,18 +624,9 @@ function NavMainComponent({
       // (`item.items`) across a nested closure boundary.
       const folderItems = item.items ?? [];
       const canDrag = rowDragEnabled && Boolean(item.id);
-      const hoverActionCount =
-        (item.onAddChild ? 1 : 0) + (item.actions?.length ? 1 : 0) + (canDrag ? 1 : 0);
+      const hoverActionCount = countRowActions(item, canDrag);
       const hasHoverActions = hoverActionCount > 0;
-      const trailingPadding =
-        hoverActionCount === 0
-          ? "pr-2"
-          : hoverActionCount === 1
-            ? "pr-[2.5rem]"
-            : hoverActionCount === 2
-              ? "pr-[4.25rem]"
-              : "pr-[6rem]";
-      const addChildTitle = item.addChildTitle ?? "New";
+      const trailingPadding = navRowTrailingPadding(hoverActionCount);
       const ItemWrapper = depth === 0 ? SidebarMenuItem : SidebarMenuSubItem;
       const renderFolderRow = (dragProps?: NavRowDragProps) => (
         <Collapsible
@@ -521,7 +656,7 @@ function NavMainComponent({
               // expanded children) can out-compete its own children as the
               // "closest" drop target, making it nearly impossible to drop
               // between two rows inside an open folder.
-              className={`group/nav-tree-item relative flex h-8 min-w-0 items-center rounded-md transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground ${
+              className={`group/nav-row relative flex h-8 min-w-0 items-center rounded-md transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground ${
                 isPathActive(item.url) ? "bg-sidebar-accent text-sidebar-accent-foreground" : ""
               } ${dropIndicatorClass(item.id)}`}
             >
@@ -586,65 +721,8 @@ function NavMainComponent({
                   </button>
                 </CollapsibleTrigger>
               )}
-              {hasHoverActions && (
-                <div className="absolute right-1 flex items-center gap-0.5 opacity-0 transition-opacity group-focus-within/nav-tree-item:opacity-100 group-hover/nav-tree-item:opacity-100 group-data-[collapsible=icon]:hidden">
-                  {canDrag && (
-                    // A dedicated, non-navigational handle carries the drag
-                    // listeners — NOT the row's <a>/SPALink. dnd-kit's
-                    // PointerSensor calls setPointerCapture on the actual
-                    // event.target, so if the listeners were spread onto a
-                    // row wrapping a link, the browser fires a spurious click
-                    // (navigation) on that link right after the drop.
-                    <button
-                      className="flex size-7 cursor-grab items-center justify-center rounded-md p-0 text-sidebar-foreground/50 outline-none ring-sidebar-ring transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground focus-visible:ring-2 active:cursor-grabbing"
-                      onClick={(e) => e.stopPropagation()}
-                      title="Drag to reorder"
-                      type="button"
-                      {...(dragProps?.attributes ?? {})}
-                      {...(dragProps?.listeners ?? {})}
-                    >
-                      <GripVertical className="size-3.5 shrink-0" />
-                      <span className="sr-only">Drag to reorder</span>
-                    </button>
-                  )}
-                  {item.onAddChild && (
-                    <button
-                      className="flex size-7 items-center justify-center rounded-md p-0 text-sidebar-foreground/70 outline-none ring-sidebar-ring transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2"
-                      onClick={(e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        item.onAddChild?.();
-                      }}
-                      title={addChildTitle}
-                      type="button"
-                    >
-                      <Plus className="size-3.5 shrink-0" />
-                      <span className="sr-only">{addChildTitle}</span>
-                    </button>
-                  )}
-                  {item.actions && item.actions.length > 0 && (
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <button
-                          className="flex size-7 items-center justify-center rounded-md p-0 text-sidebar-foreground/70 outline-none ring-sidebar-ring transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 data-[state=open]:bg-sidebar-accent data-[state=open]:opacity-100"
-                          onClick={(e) => {
-                            e.preventDefault();
-                            e.stopPropagation();
-                          }}
-                          title={moreActionsTitle}
-                          type="button"
-                        >
-                          <MoreHorizontal className="size-3.5 shrink-0" />
-                          <span className="sr-only">{moreActionsTitle}</span>
-                        </button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end">
-                        {renderActionItems(item.actions, itemKey)}
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                  )}
-                </div>
-              )}
+              {hasHoverActions &&
+                renderRowActions({ itemKey, item, canDrag, dragProps, moreActionsTitle })}
             </div>
             <CollapsibleContent>
               {/* Tighter indentation than kui's default (mx-3.5/px-2.5) — this
@@ -652,8 +730,16 @@ function NavMainComponent({
                   a folder nested 3-4 levels deep can eat most of the sidebar's
                   width before any title text renders, truncating even short
                   names ("Purchase Orders" -> "Pu..."). Still keeps the
-                  border-l hierarchy cue, just narrower. */}
-              <SidebarMenuSub className="mx-2 px-1.5">
+                  border-l hierarchy cue, just narrower.
+
+                  LEFT-only (`ml`/`pl`, not `mx`/`px`): the indent is a
+                  hierarchy cue and belongs on the leading edge. Applying it
+                  symmetrically also pulled every child's RIGHT edge 13px in
+                  from its parent folder's (measured: folder row ended at
+                  x=247, its children at x=234 on a 255px sidebar), so the
+                  hover controls of a folder and of its own children never
+                  lined up in the same column. */}
+              <SidebarMenuSub className="ml-2 mr-0 translate-x-0 pl-1.5 pr-0">
                 {(() => {
                   // The active sub-item is the longest url that the location
                   // matches exactly or as a descendant route (e.g. a
@@ -713,12 +799,14 @@ function NavMainComponent({
     // keeps the more compact SidebarMenuSubButton row — same as before this
     // became recursive, just now available at every depth, not only depth 1.
     if (depth === 0) {
+      const leafCanDrag = rowDragEnabled && Boolean(item.id);
+      const leafActionCount = countRowActions(item, leafCanDrag);
       const renderLeafRow = (dragProps?: NavRowDragProps) => (
         <SidebarMenuItem
           key={itemKey}
           ref={dragProps?.setNodeRef}
           style={dragProps?.style}
-          className={dropIndicatorClass(item.id)}
+          className={`group/nav-row ${dropIndicatorClass(item.id)}`}
         >
           {item.onClick ? (
             // Items with onClick trigger a callback instead of navigation
@@ -760,67 +848,14 @@ function NavMainComponent({
               {item.badge}
             </SidebarMenuBadge>
           )}
-          {/* Generic per-row action menu (e.g. Permissions) — additive: only
-              renders when a caller supplies `actions`, so existing leaf rows
-              are unchanged. Sits left of the drag handle. A leaf using both
-              `onDelete` and `actions` alongside drag isn't a current pattern;
-              revisit the right-offsets if that combination ever appears. */}
-          {item.actions && item.actions.length > 0 && (
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <SidebarMenuAction
-                  showOnHover
-                  onClick={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                  }}
-                  title={moreActionsTitle}
-                  className={`group-data-[collapsible=icon]:hidden data-[state=open]:bg-sidebar-accent data-[state=open]:opacity-100 ${
-                    rowDragEnabled && item.id ? "right-7" : ""
-                  }`}
-                >
-                  <MoreHorizontal />
-                  <span className="sr-only">{moreActionsTitle}</span>
-                </SidebarMenuAction>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                {renderActionItems(item.actions, itemKey)}
-              </DropdownMenuContent>
-            </DropdownMenu>
-          )}
-          {item.onDelete && item.id && (
-            <SidebarMenuAction
-              showOnHover
-              onClick={(e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                if (item.id) {
-                  item.onDelete?.(item.id);
-                }
-              }}
-              title="Delete"
-              className={`group-data-[collapsible=icon]:hidden ${
-                rowDragEnabled && item.id ? "right-7" : ""
-              }`}
-            >
-              <Trash2 />
-            </SidebarMenuAction>
-          )}
-          {rowDragEnabled && item.id && (
-            // See the folder-row comment above: the handle, not the row/link,
-            // must own the drag listeners.
-            <SidebarMenuAction
-              showOnHover
-              onClick={(e) => e.stopPropagation()}
-              title="Drag to reorder"
-              type="button"
-              className="cursor-grab active:cursor-grabbing group-data-[collapsible=icon]:hidden"
-              {...(dragProps?.attributes ?? {})}
-              {...(dragProps?.listeners ?? {})}
-            >
-              <GripVertical />
-            </SidebarMenuAction>
-          )}
+          {leafActionCount > 0 &&
+            renderRowActions({
+              itemKey,
+              item,
+              canDrag: leafCanDrag,
+              dragProps,
+              moreActionsTitle,
+            })}
         </SidebarMenuItem>
       );
       return rowDragEnabled && item.id ? (
@@ -838,26 +873,19 @@ function NavMainComponent({
 
     const isSubItemActive = isSiblingActiveMatch;
     const SubIcon = item.icon;
-    const hasSubActions = !!(item.actions && item.actions.length > 0);
+    const subCanDrag = rowDragEnabled && Boolean(item.id);
+    const subActionCount = countRowActions(item, subCanDrag);
     const renderSubItemRow = (dragProps?: NavRowDragProps) => (
       <SidebarMenuSubItem
         key={itemKey}
         ref={dragProps?.setNodeRef}
         style={dragProps?.style}
-        className={`group/subitem relative ${dropIndicatorClass(item.id)}`}
+        className={`group/nav-row relative ${dropIndicatorClass(item.id)}`}
       >
         <SidebarMenuSubButton
           asChild
           isActive={isSubItemActive}
-          className={
-            // Reserve trailing room for whichever hover controls exist: one
-            // slot (pr-7) for drag OR the actions menu, two (pr-14) for both.
-            hasSubActions && rowDragEnabled && item.id
-              ? "pr-14"
-              : hasSubActions || (rowDragEnabled && item.id)
-                ? "pr-7"
-                : undefined
-          }
+          className={navRowTrailingPadding(subActionCount)}
         >
           {isExternalUrl(item.url) ? (
             // External link - use regular anchor tag
@@ -874,47 +902,14 @@ function NavMainComponent({
             </SPALink>
           )}
         </SidebarMenuSubButton>
-        {/* Generic per-row action menu (e.g. Permissions) for a nested leaf.
-            Additive: only when a caller supplies `actions`. Sits left of the
-            drag handle when both are present. */}
-        {hasSubActions && (
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <button
-                className={`absolute top-1/2 hidden size-5 -translate-y-1/2 items-center justify-center rounded-md p-0 text-sidebar-foreground/60 outline-none ring-sidebar-ring transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground focus-visible:ring-2 group-hover/subitem:flex data-[state=open]:flex data-[state=open]:bg-sidebar-accent ${
-                  rowDragEnabled && item.id ? "right-7" : "right-1"
-                }`}
-                onClick={(e) => {
-                  e.preventDefault();
-                  e.stopPropagation();
-                }}
-                title={moreActionsTitle}
-                type="button"
-              >
-                <MoreHorizontal className="size-3 shrink-0" />
-                <span className="sr-only">{moreActionsTitle}</span>
-              </button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              {renderActionItems(item.actions ?? [], itemKey)}
-            </DropdownMenuContent>
-          </DropdownMenu>
-        )}
-        {rowDragEnabled && item.id && (
-          // See the folder-row comment above: the handle, not the row/link,
-          // must own the drag listeners.
-          <button
-            className="absolute right-1 top-1/2 hidden size-5 -translate-y-1/2 cursor-grab items-center justify-center rounded-md p-0 text-sidebar-foreground/50 outline-none ring-sidebar-ring transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground focus-visible:ring-2 active:cursor-grabbing group-hover/subitem:flex"
-            onClick={(e) => e.stopPropagation()}
-            title="Drag to reorder"
-            type="button"
-            {...(dragProps?.attributes ?? {})}
-            {...(dragProps?.listeners ?? {})}
-          >
-            <GripVertical className="size-3 shrink-0" />
-            <span className="sr-only">Drag to reorder</span>
-          </button>
-        )}
+        {subActionCount > 0 &&
+          renderRowActions({
+            itemKey,
+            item,
+            canDrag: subCanDrag,
+            dragProps,
+            moreActionsTitle,
+          })}
       </SidebarMenuSubItem>
     );
     return rowDragEnabled && item.id ? (

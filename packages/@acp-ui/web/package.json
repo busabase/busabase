@@ -5,8 +5,25 @@
   "license": "MIT",
   "private": false,
   "publishConfig": {
-    "access": "public"
+    "access": "public",
+    "exports": {
+      "./transcript": {
+        "types": "./dist/transcript/index.d.ts",
+        "default": "./dist/transcript/index.js"
+      },
+      "./composer": {
+        "types": "./dist/composer/index.d.ts",
+        "default": "./dist/composer/index.js"
+      },
+      "./session-meta": {
+        "types": "./dist/session-meta/index.d.ts",
+        "default": "./dist/session-meta/index.js"
+      }
+    }
   },
+  "files": [
+    "dist"
+  ],
   "repository": {
     "type": "git",
     "url": "https://github.com/mr-kelly/acp-ui.git",
@@ -17,6 +34,9 @@
   },
   "type": "module",
   "scripts": {
+    "build": "tsdown",
+    "prepack": "pnpm run build",
+    "prepublishOnly": "pnpm run typecheck && pnpm run test && pnpm run lint:err && pnpm run build && node scripts/assert-pnpm-publish.mjs",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "lint": "biome format . --write && biome check . --write",
@@ -53,7 +73,8 @@
     "jsdom": "^25.0.1",
     "kui": "workspace:*",
     "react": "^19.2.7",
+    "tsdown": "^0.22.14",
     "typescript": "^7.0.2",
-    "vitest": "^3.2.4"
+    "vitest": "^4.1.11"
   }
 }

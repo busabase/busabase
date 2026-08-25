@@ -175,3 +175,115 @@ describe("createTranslationRegistry", () => {
     expect(registry.getTranslations("zh-CN").common.greet({ name: "凯利" })).toBe("你好 凯利");
   });
 });
+
+// Templates are parsed once and cached by string identity, and accessors close
+// over the parsed result. These pin the behaviour that caching must not change.
+describe("compiled-template caching", () => {
+  it("renders the same accessor differently per call — parsed parts are not stateful", () => {
+    interface T {
+      msg: "{count} file{{s}}";
+    }
+    const registry = createTranslationRegistry<"en", T>({
+      en: { msg: "{count} file{{s}}" },
+    });
+    const LL = registry.getTranslations("en");
+    // Same closure, different args — a cached parse must not leak the previous call's values.
+    expect(LL.msg({ count: 1 })).toBe("1 file");
+    expect(LL.msg({ count: 3 })).toBe("3 files");
+    expect(LL.msg({ count: 1 })).toBe("1 file");
+  });
+
+  it("keeps locales independent when two of them share an identical template string", () => {
+    interface T {
+      msg: "{n} {{файл|файла|файлов}}";
+    }
+    // Byte-identical template in both locales: the cache is keyed by the string,
+    // so this is exactly the case where a locale-blind cache would be wrong —
+    // `ru` and `en` disagree about which plural form 3 selects.
+    const shared = "{n} {{файл|файла|файлов}}" as const;
+    const registry = createTranslationRegistry<"en" | "ru", T>({
+      en: { msg: shared },
+      ru: { msg: shared },
+    });
+    expect(registry.getTranslations("ru").msg({ n: 3 })).toBe("3 файлов");
+    expect(registry.getTranslations("en").msg({ n: 3 })).toBe("3 файлов");
+    // 1 differs between the two locales' rules — proves locale is applied at
+    // render time, not baked into the shared cached parse.
+    expect(registry.getTranslations("ru").msg({ n: 1 })).toBe("1 файла");
+    expect(registry.getTranslations("en").msg({ n: 1 })).toBe("1 файла");
+  });
+
+  it("gives interpolate() and the LL accessor identical output for the same template", () => {
+    interface T {
+      msg: "Hi {name}, {count} new message{{s}}";
+    }
+    const template = "Hi {name}, {count} new message{{s}}" as const;
+    const registry = createTranslationRegistry<"en", T>({ en: { msg: template } });
+    const viaAccessor = registry.getTranslations("en").msg({ name: "Kelly", count: 2 });
+    const viaDirect = interpolate(template, { name: "Kelly", count: 2 });
+    expect(viaAccessor).toBe(viaDirect);
+    expect(viaAccessor).toBe("Hi Kelly, 2 new messages");
+  });
+
+  it("returns plain static strings verbatim, including ones that look regex-ish", () => {
+    interface T {
+      plain: "Save";
+      punctuation: "100% — done!";
+      braces: "a } b { c";
+    }
+    const registry = createTranslationRegistry<"en", T>({
+      en: { plain: "Save", punctuation: "100% — done!", braces: "a } b { c" },
+    });
+    const LL = registry.getTranslations("en");
+    expect(LL.plain()).toBe("Save");
+    expect(LL.punctuation()).toBe("100% — done!");
+    // Unbalanced/stray braces are not placeholders and must survive untouched.
+    expect(LL.braces()).toBe("a } b { c");
+  });
+
+  it("ignores arguments passed to a static string's accessor", () => {
+    interface T {
+      plain: "Save";
+    }
+    const registry = createTranslationRegistry<"en", T>({ en: { plain: "Save" } });
+    const LL = registry.getTranslations("en");
+    // The static fast path hands back a zero-arg closure; a caller passing
+    // params anyway (e.g. from a loop over mixed keys) must not throw.
+    expect((LL.plain as (p?: unknown) => string)({ unused: 1 })).toBe("Save");
+  });
+
+  it("keeps the regex in sync between the static fast path and the full scan", () => {
+    // `PART_PATTERN` is /g, so probing it with `.test()` would advance
+    // `lastIndex` and desynchronise the scans that follow. These interleave a
+    // static and a placeholder string through the same shared regex to catch
+    // that class of bug.
+    interface T {
+      a: "static one";
+      b: "hi {name}";
+      c: "static two";
+      d: "{n} file{{s}}";
+    }
+    const registry = createTranslationRegistry<"en", T>({
+      en: { a: "static one", b: "hi {name}", c: "static two", d: "{n} file{{s}}" },
+    });
+    const LL = registry.getTranslations("en");
+    expect(LL.a()).toBe("static one");
+    expect(LL.b({ name: "Kelly" })).toBe("hi Kelly");
+    expect(LL.c()).toBe("static two");
+    expect(LL.d({ n: 2 })).toBe("2 files");
+    // …and again in the other order, since compile order affects lastIndex.
+    expect(LL.d({ n: 1 })).toBe("1 file");
+    expect(LL.a()).toBe("static one");
+  });
+
+  it("still leaves an unmatched placeholder as literal text after caching", () => {
+    interface T {
+      msg: "hi {name}";
+    }
+    const registry = createTranslationRegistry<"en", T>({ en: { msg: "hi {name}" } });
+    const LL = registry.getTranslations("en");
+    expect(LL.msg({} as never)).toBe("hi {name}");
+    // …and a later call that does supply it still substitutes.
+    expect(LL.msg({ name: "Kelly" })).toBe("hi Kelly");
+  });
+});

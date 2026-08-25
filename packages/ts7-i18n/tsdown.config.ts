@@ -8,6 +8,7 @@ export default defineConfig({
   clean: true,
   dts: true,
   treeshake: true,
+  minify: true,
   // package.json's `exports` map points at `./dist/index.js` / `./dist/index.d.ts` —
   // tsdown's default resolves to `.mjs`/`.d.mts` instead (established gotcha, PR #6548).
   outExtensions: () => ({ js: ".js", dts: ".d.ts" }),

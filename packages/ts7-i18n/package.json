@@ -13,7 +13,7 @@
     "nextjs",
     "no-codegen"
   ],
-  "version": "0.1.0",
+  "version": "1.1.1",
   "private": false,
   "license": "MIT",
   "homepage": "https://github.com/mr-kelly/ts7-i18n",
@@ -64,7 +64,8 @@
   "scripts": {
     "build": "tsdown",
     "prepack": "pnpm run build",
-    "prepublishOnly": "pnpm run typecheck && pnpm run test && pnpm run lint:err && pnpm run build",
+    "prepublishOnly": "pnpm run typecheck && pnpm run test && pnpm run lint:err && pnpm run build && pnpm run assert-pnpm-publish",
+    "assert-pnpm-publish": "node scripts/assert-pnpm-publish.mjs",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "lint": "biome format . --write && biome check .",
@@ -88,7 +89,7 @@
     "react-dom": "^19.2.7",
     "tsdown": "^0.22.14",
     "typescript": "^7.0.2",
-    "vitest": "^2.1.8"
+    "vitest": "^4.1.11"
   },
   "engines": {
     "node": ">=20"

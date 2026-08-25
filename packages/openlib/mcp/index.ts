@@ -250,15 +250,6 @@ export interface CreateOpenApiMcpHandlerOptions<TClient>
   };
 }
 
-type McpSession = {
-  server: Server;
-  transport: WebStandardStreamableHTTPServerTransport;
-};
-
-type PendingMcpSession = McpSession & {
-  getSessionId: () => string;
-};
-
 const quoteAuthParam = (value: string) => `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
 
 export const getMcpProtectedResourceMetadataUrl = (resourceUrl: string) => {
@@ -638,9 +629,7 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 export const createOpenApiMcpHandler = <TClient>(
   options: CreateOpenApiMcpHandlerOptions<TClient>,
 ): McpRouteHandler => {
-  const sessions = new Map<string, McpSession>();
-
-  const createSession = async () => {
+  const createRequestHandler = async () => {
     const server = new Server(options.serverInfo ?? { name: "OpenAPI MCP", version: "0.1.0" }, {
       capabilities: {
         tools: {},
@@ -669,24 +658,21 @@ export const createOpenApiMcpHandler = <TClient>(
       securitySchemes: options.securitySchemes,
     });
 
-    let sessionId = "";
     const transport = new WebStandardStreamableHTTPServerTransport({
       enableJsonResponse: true,
-      sessionIdGenerator: () => crypto.randomUUID(),
-      onsessioninitialized: (id) => {
-        sessionId = id;
-        sessions.set(id, { server, transport });
-      },
-      onsessionclosed: (id) => {
-        sessions.delete(id);
-      },
+      // This handler only returns complete JSON responses and does not expose a
+      // long-lived GET/SSE channel, so keeping protocol sessions in process
+      // adds no capability. Stateless mode also lets clients survive dev HMR,
+      // process restarts, and serverless requests even when they keep sending
+      // an old Mcp-Session-Id header from a previous server instance.
+      sessionIdGenerator: undefined,
     });
     transport.onerror = (error) => {
       console.error("[mcp] Transport error:", error);
     };
 
     await server.connect(transport);
-    return { server, transport, getSessionId: () => sessionId };
+    return transport;
   };
 
   return async (request) => {
@@ -701,30 +687,16 @@ export const createOpenApiMcpHandler = <TClient>(
       );
     }
 
-    const sessionId = request.headers.get("mcp-session-id");
-    const session = sessionId ? sessions.get(sessionId) : undefined;
-    const activeSession = session ?? (await createSession());
+    const transport = await createRequestHandler();
     const requestWithAuth = request as Request & {
       auth?: McpToolExtra["authInfo"];
       authInfo?: McpToolExtra["authInfo"];
     };
-    const response = await activeSession.transport.handleRequest(request, {
+    return transport.handleRequest(request, {
       authInfo: requestWithAuth.authInfo ?? requestWithAuth.auth,
     });
-
-    const initializedSessionId = isPendingSession(activeSession)
-      ? activeSession.getSessionId()
-      : undefined;
-    if (initializedSessionId && !response.headers.has("mcp-session-id")) {
-      response.headers.set("mcp-session-id", initializedSessionId);
-    }
-
-    return response;
   };
 };
-
-const isPendingSession = (session: McpSession | PendingMcpSession): session is PendingMcpSession =>
-  "getSessionId" in session;
 
 const discoverOpenApiTools = (
   contract: unknown,
