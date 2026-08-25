@@ -49,9 +49,16 @@ const required = [
   "nodes create --type <folder|base|skill|drive|airapp|file|doc|form|whiteboard|workflow|html>",
   "bases create-change-request --base-id <id>",
   "records change-requests --record-id <id>",
-  "change-requests list [--limit <value>]",
+  // `change-requests list` is the endpoint spelling `change-requests query`
+  // supersedes, so it is hidden from the index (see TASK_SUPERSEDED_MCP_TOOLS in
+  // busabase-contract). Hidden is not gone — `requiredInHelpAll` below pins that
+  // it still exists and still runs.
+  "change-requests query",
   "change-requests close --change-request-id <id>",
 ];
+
+/** Commands that must still EXIST, whether or not the curated index lists them. */
+const requiredInHelpAll = ["change-requests list", "records list"];
 
 const forbidden = [
   "publish -o, --out-dir <dir>",
@@ -67,6 +74,21 @@ const forbidden = [
 ];
 
 const combinedHelp = `${help}\n${binHelp}`;
+const helpAll = execFileSync(process.execPath, [cliPath, "--help-all"], {
+  cwd: root,
+  encoding: "utf8",
+});
+const missingFromHelpAll = requiredInHelpAll.filter((text) => !helpAll.includes(text));
+if (missingFromHelpAll.length) {
+  throw new Error(
+    `busabase-cli --help-all no longer lists commands that must remain runnable:\n${missingFromHelpAll
+      .map((text) => `  - ${text}`)
+      .join("\n")}`,
+  );
+}
+if (helpAll.length <= combinedHelp.length / 2) {
+  throw new Error("busabase-cli --help-all should be a superset of --help, but is not larger.");
+}
 const missing = required.filter((text) => !combinedHelp.includes(text));
 const stale = forbidden.filter((text) => combinedHelp.includes(text));
 

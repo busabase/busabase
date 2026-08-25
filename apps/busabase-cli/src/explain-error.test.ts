@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { EXIT_CODES } from "./errors";
 import { explainError, runCli } from "./run";
 
 /**
@@ -78,7 +79,7 @@ describe("runCli surfaces explained errors", () => {
     vi.restoreAllMocks();
   });
 
-  it("exits 1 and prints the connection guidance when the transport throws", async () => {
+  it("exits NETWORK (9) and prints the connection guidance when the transport throws", async () => {
     const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
     global.fetch = vi.fn(async () => {
       throw new TypeError("fetch failed");
@@ -86,7 +87,7 @@ describe("runCli surfaces explained errors", () => {
 
     const exitCode = await runCli(["--base-url", "http://localhost:15419", "records", "list"]);
 
-    expect(exitCode).toBe(1);
+    expect(exitCode).toBe(EXIT_CODES.NETWORK);
     const printed = error.mock.calls.join("\n");
     expect(printed).toContain("Could not reach http://localhost:15419");
     expect(printed).toContain("npx busabase server");
@@ -101,9 +102,72 @@ describe("runCli surfaces explained errors", () => {
 
     const exitCode = await runCli(["--base-url", "https://busabase.com", "records", "list"]);
 
-    expect(exitCode).toBe(1);
+    expect(exitCode).toBe(EXIT_CODES.UNAUTHORIZED);
     const printed = error.mock.calls.join("\n");
     expect(printed).toContain("Unauthorized (401) from https://busabase.com");
     expect(printed).toContain("busabase-cli login");
+  });
+});
+
+describe("machine-readable failures", () => {
+  const originalFetch = global.fetch;
+  afterEach(() => {
+    global.fetch = originalFetch;
+    vi.restoreAllMocks();
+  });
+
+  const failWith = async (status: number, body: string, argv: string[]) => {
+    const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    global.fetch = vi.fn(async () => new Response(body, { status })) as typeof fetch;
+    const exitCode = await runCli(argv);
+    return { exitCode, stdout: log.mock.calls.map((call) => call.join(" ")).join("\n"), error };
+  };
+
+  it("writes the envelope to stdout under --output json, keeping the prose on stderr", async () => {
+    const { exitCode, stdout, error } = await failWith(404, '{"error":"Node not found"}', [
+      "--base-url",
+      "https://busabase.com",
+      "--output",
+      "json",
+      "records",
+      "list",
+    ]);
+
+    expect(exitCode).toBe(EXIT_CODES.NOT_FOUND);
+    expect(JSON.parse(stdout)).toMatchObject({
+      ok: false,
+      code: "NOT_FOUND",
+      status: 404,
+      retryable: false,
+    });
+    expect(error.mock.calls.join("\n")).toContain(DOCS);
+  });
+
+  it("stays silent on stdout for a human run, so nothing changes for a terminal", async () => {
+    const { exitCode, stdout } = await failWith(404, '{"error":"Node not found"}', [
+      "--base-url",
+      "https://busabase.com",
+      "records",
+      "list",
+    ]);
+
+    expect(exitCode).toBe(EXIT_CODES.NOT_FOUND);
+    expect(stdout).toBe("");
+  });
+
+  it("classifies a usage error before any config is resolved", async () => {
+    const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    global.fetch = vi.fn() as typeof fetch;
+
+    const exitCode = await runCli(["--output", "json", "records", "count", "--filters", "[]"]);
+
+    expect(exitCode).toBe(EXIT_CODES.USAGE);
+    expect(JSON.parse(log.mock.calls.map((call) => call.join(" ")).join("\n"))).toMatchObject({
+      ok: false,
+      code: "USAGE",
+    });
+    expect(global.fetch).not.toHaveBeenCalled();
   });
 });

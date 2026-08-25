@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { basename, extname } from "node:path";
-import { BUSABASE_TASKS } from "busabase-contract/tasks";
+import { BUSABASE_TASKS, TASK_SUPERSEDED_MCP_TOOLS } from "busabase-contract/tasks";
 import {
   type BusabaseClient,
   type ResolvedConfig as BusabaseConfig,
@@ -37,7 +37,8 @@ import {
   resolveCredentialTarget,
   setActiveCredentialTarget,
 } from "./config-file.js";
-import { type OutputFormat, render } from "./format.js";
+import { CliOutcomeError, classifyError, EXIT_CODES, errorEnvelope, toIssues } from "./errors.js";
+import { type OutputFormat, render, slim } from "./format.js";
 import {
   assertCredentialNotExpired,
   maybeAutoRefresh,
@@ -46,7 +47,10 @@ import {
   runRefresh,
 } from "./login.js";
 import { runExport, runIndex, runInstall } from "./package/commands.js";
+import { paginateAll } from "./paginate.js";
+import { withRetry } from "./retry.js";
 import { registerTaskCommands } from "./task-command.js";
+import { findChangeRequestId, waitForChangeRequest } from "./wait.js";
 
 /**
  * CLI config = the SDK's resolved client config plus the terminal-only `output`
@@ -106,8 +110,15 @@ function resolveConfig(opts: OptionValues): ResolvedConfig {
       process.env.BUSABASE_SPACE_ID ??
       file.BUSABASE_SPACE_ID,
     output: (opts.output as OutputFormat | undefined) ?? configuredOutput() ?? "text",
+    // One wrapper serves the typed client (`createBusabaseClient` takes a
+    // `fetch`) and `rawFetch`, so health / openapi / `api` retry the same way
+    // every contract call does.
+    fetch: withRetry(fetch, { retries: (opts.retries as number | undefined) ?? DEFAULT_RETRIES }),
   };
 }
+
+/** Enough to ride out a rate limiter or a proxy blip; not enough to hide a real outage. */
+const DEFAULT_RETRIES = 2;
 
 /**
  * Config flags accepted anywhere on the line (`busabase-cli --output json bases list` and
@@ -122,6 +133,12 @@ const GLOBAL_LONG_FLAGS = new Set([
   "--output",
   "--profile",
   "--config",
+  "--slim",
+  "--retries",
+  "--all",
+  "--max-items",
+  "--wait",
+  "--wait-timeout",
 ]);
 
 function addGlobalFlags(cmd: Command): Command {
@@ -140,7 +157,23 @@ function addGlobalFlags(cmd: Command): Command {
         "table",
         "json",
       ]),
-    );
+    )
+    .option(
+      "--slim",
+      "drop hydrated parents (a record's full `base`, `createdByUser`, `headCommit`) and keep their ids",
+    )
+    .option(
+      "--retries <n>",
+      "extra attempts on 429 / 5xx / dropped connections (default 2, 0 disables)",
+      parseNonNegativeInt,
+    )
+    .option("--all", "follow the cursor to the end and stream every row as NDJSON")
+    .option("--max-items <n>", "stop --all after this many rows", parsePositiveInt)
+    .option(
+      "--wait",
+      "after submitting a Change Request, block until a reviewer merges or rejects it",
+    )
+    .option("--wait-timeout <seconds>", "budget for --wait (default 300)", parsePositiveInt);
 }
 
 const parseNum = (value: string): number => {
@@ -153,6 +186,14 @@ const parsePositiveInt = (value: string): number => {
   const parsed = parseNum(value);
   if (!Number.isInteger(parsed) || parsed < 1) {
     throw new InvalidArgumentError("expected a positive integer");
+  }
+  return parsed;
+};
+
+const parseNonNegativeInt = (value: string): number => {
+  const parsed = parseNum(value);
+  if (!Number.isInteger(parsed) || parsed < 0) {
+    throw new InvalidArgumentError("expected a non-negative integer");
   }
   return parsed;
 };
@@ -267,15 +308,9 @@ function parseJsonValue(raw: string, flagName: string): unknown {
  * better off than when the field was silently dropped.
  */
 function formatIssues(issues: unknown): string | undefined {
-  if (!Array.isArray(issues) || issues.length === 0) return undefined;
-  return issues
-    .map((issue) => {
-      if (!issue || typeof issue !== "object") return String(issue);
-      const { path, message } = issue as { path?: unknown; message?: unknown };
-      const pathLabel = Array.isArray(path) && path.length > 0 ? path.join(".") : undefined;
-      return pathLabel ? `${pathLabel}: ${message}` : String(message ?? issue);
-    })
-    .join("; ");
+  const parsed = toIssues(issues);
+  if (!parsed) return undefined;
+  return parsed.map(({ path, message }) => (path ? `${path}: ${message}` : message)).join("; ");
 }
 
 function formatRawErrorBody(status: number, statusText: string, text: string): string {
@@ -300,7 +335,7 @@ async function rawFetch(
   body?: unknown,
 ): Promise<unknown> {
   const url = `${normalizeBaseUrl(config.baseUrl)}${path}`;
-  const res = await fetch(url, {
+  const res = await (config.fetch ?? fetch)(url, {
     method: method.toUpperCase(),
     headers: {
       ...(body !== undefined ? { "content-type": "application/json" } : {}),
@@ -458,9 +493,89 @@ function runAction(state: CliState, handler: Handler) {
     state.config = config;
     assertCredentialNotExpired(config.apiKey);
     const client = createBusabaseClient(config);
+    if (opts.all) {
+      await streamAllPages(client, opts, config, handler);
+      return;
+    }
     const result = await handler(client, opts, config);
-    console.log(render(result, config.output));
+    console.log(render(opts.slim ? slim(result) : result, config.output));
+    if (opts.wait) await awaitReview(client, opts, config, result);
   };
+}
+
+/** Default `--wait` budget: long enough for a reviewer who is at their desk. */
+const DEFAULT_WAIT_SECONDS = 300;
+
+/**
+ * Block until the Change Request this command just filed is decided.
+ *
+ * The result is printed first, so a caller that times out still has the id it
+ * needs to come back to. Exit codes carry the outcome (see `errors.ts`): merged
+ * is success, rejected is a decision the caller must branch on, and a timeout is
+ * neither — nothing was decided, so the write must NOT be retried.
+ */
+async function awaitReview(
+  client: BusabaseClient,
+  opts: OptionValues,
+  config: ResolvedConfig,
+  result: unknown,
+): Promise<void> {
+  const changeRequestId = findChangeRequestId(result);
+  if (!changeRequestId) {
+    console.error(
+      "[busabase-cli] --wait: this command filed no Change Request; nothing to wait for.",
+    );
+    return;
+  }
+  const outcome = await waitForChangeRequest({
+    changeRequestId,
+    read: (id) => client.changeRequests.get({ changeRequestId: id }),
+    timeoutMs: ((opts.waitTimeout as number | undefined) ?? DEFAULT_WAIT_SECONDS) * 1000,
+    notify: (message) => console.error(message),
+  });
+  console.log(
+    render(opts.slim ? slim(outcome.changeRequest) : outcome.changeRequest, config.output),
+  );
+  if (outcome.kind === "timeout") {
+    throw new CliOutcomeError(
+      "TIMEOUT",
+      `--wait timed out: ${changeRequestId} is still ${outcome.status}. Nothing was decided — do NOT resubmit; poll it with \`busabase-cli change-requests get --change-request-id ${changeRequestId}\`.`,
+    );
+  }
+  if (outcome.status !== "merged") {
+    throw new CliOutcomeError(
+      "REVIEW_REJECTED",
+      `${changeRequestId} was ${outcome.status}, not merged.`,
+    );
+  }
+}
+
+/**
+ * `--all` re-runs the same handler with a moving cursor. The handler reads its
+ * input off `opts`, so advancing the page is a matter of setting `opts.cursor`
+ * before each call rather than teaching every command a second code path.
+ */
+async function streamAllPages(
+  client: BusabaseClient,
+  opts: OptionValues,
+  config: ResolvedConfig,
+  handler: Handler,
+): Promise<void> {
+  // Whether this command can page at all is decided by what the first call
+  // returns (see `readPage`), not by inspecting its flags: a command with no
+  // cursor simply yields one page and stops.
+  const rows = await paginateAll({
+    fetchPage: async (cursor) => {
+      opts.cursor = cursor;
+      const result = await handler(client, opts, config);
+      return opts.slim ? slim(result) : result;
+    },
+    limit: typeof opts.limit === "number" ? opts.limit : undefined,
+    maxItems: typeof opts.maxItems === "number" ? opts.maxItems : undefined,
+    write: (line) => console.log(line),
+    notify: (message) => console.error(message),
+  });
+  if (rows === 0) console.error("[busabase-cli] no rows.");
 }
 
 type ArgHandler = (
@@ -484,7 +599,7 @@ function runArgAction(state: CliState, handler: ArgHandler) {
     assertCredentialNotExpired(config.apiKey);
     const client = createBusabaseClient(config);
     const result = await handler(arg, client, opts, config);
-    console.log(render(result, config.output));
+    console.log(render(opts.slim ? slim(result) : result, config.output));
   };
 }
 
@@ -504,7 +619,7 @@ function runLocalArgAction(
     const opts = cmd.optsWithGlobals();
     const config = resolveConfig(opts);
     const result = await handler(arg, opts, config);
-    console.log(render(result, config.output));
+    console.log(render(opts.slim ? slim(result) : result, config.output));
   };
 }
 
@@ -678,11 +793,45 @@ function unionVariants(inputSchema: unknown, discriminator = "operation"): GenVa
 }
 
 /**
+ * Words of an identifier, however it was spelled: `changeRequests` + `reviewMany`
+ * and `change_requests_review_many` both reduce to
+ * `change requests review many`. Lets the CLI compare its own generated command
+ * paths against the MCP tool names in {@link TASK_SUPERSEDED_MCP_TOOLS} without
+ * either side having to know how the other spells things.
+ */
+const identifierWords = (parts: readonly string[]): string =>
+  parts
+    .flatMap((part) => part.split(/[_\-\s]+/))
+    .flatMap((part) => part.replace(/([a-z0-9])([A-Z])/g, "$1 $2").split(" "))
+    .filter(Boolean)
+    .map((word) => word.toLowerCase())
+    .join(" ");
+
+/**
+ * Endpoint commands a curated task command already covers.
+ *
+ * The MCP adapter has always dropped these so "a catalog carries one way to do
+ * each job rather than two" — and then the CLI published BOTH spellings, which
+ * is a third of a 30 KB help screen an agent reads to orient itself. Same list,
+ * same reason, one more consumer.
+ *
+ * Hidden, never removed: every one of them still runs, so no existing script
+ * breaks, and `--help-all` prints them.
+ */
+const SUPERSEDED_COMMAND_PATHS = new Set(
+  TASK_SUPERSEDED_MCP_TOOLS.map((tool) => identifierWords([tool])),
+);
+
+/**
  * Procedures a curated command already exposes under a DIFFERENT name (so the
  * name-collision guard wouldn't catch them). Keyed `group.procKey`.
  */
 const GENERATED_SKIP = new Set<string>([
   "search", // top-level `search`
+  // Both served by the top-level `guide [topic]`, which prints the markdown as
+  // markdown instead of as one escaped table cell.
+  "guides.list",
+  "guides.read",
   "auth.verify", // `whoami`
   "records.search", // `records by-field-text`
   "records.listChangeRequests", // `records change-requests`
@@ -759,8 +908,9 @@ function registerGeneratedCommands(program: Command, state: CliState): void {
     // keeps the old spelling as an alias, and commander throws outright if the
     // generated fallback then tries to register that same name.
     if (parent.commands.some((c) => c.name() === name || c.aliases().includes(name))) return;
+    const superseded = SUPERSEDED_COMMAND_PATHS.has(identifierWords([parent.name(), name]));
     const leaf = parent
-      .command(name)
+      .command(name, superseded ? { hidden: true } : undefined)
       .description(description ?? route.summary ?? `${route.method} ${route.path}`);
     for (const f of fields) {
       // Pinned by the command name (the union discriminator) — no flag for it.
@@ -857,15 +1007,30 @@ function flagSignature(cmd: Command): string {
   return parts.join(" ");
 }
 
-const isHelpHidden = (cmd: Command): boolean => Boolean((cmd as { _noHelp?: boolean })._noHelp);
+/**
+ * Commander records `command(name, { hidden })` and `{ noHelp }` on `_hidden`;
+ * this read `_noHelp`, which commander never sets, so it always answered false
+ * and nothing was ever actually hidden from the root help.
+ */
+const isHelpHidden = (cmd: Command): boolean =>
+  Boolean((cmd as { _hidden?: boolean; _noHelp?: boolean })._hidden) ||
+  Boolean((cmd as { _noHelp?: boolean })._noHelp);
+
+/**
+ * Set for the duration of a `--help-all` render. A module-level flag rather than
+ * a parameter because commander calls the help hook itself, with no way to
+ * thread an argument through.
+ */
+let showAllCommands = false;
 
 /**
  * Root help "Commands:" section: every leaf with its full flag signature (the flat
  * commander listing would only show group names). Generated from the command tree,
  * never hand-written.
  */
-function commandsSection(program: Command): string {
+function commandsSection(program: Command, showAll = false): string {
   const lines: string[] = ["Commands:"];
+  const skip = (cmd: Command) => cmd.name() === "help" || (!showAll && isHelpHidden(cmd));
   const entry = (prefix: string, cmd: Command) => {
     const sig = [prefix, flagSignature(cmd)].filter(Boolean).join(" ");
     const desc = cmd.description();
@@ -874,12 +1039,14 @@ function commandsSection(program: Command): string {
     return `  ${sig}\n${" ".repeat(44)}${desc}`;
   };
   for (const cmd of program.commands) {
-    if (cmd.name() === "help" || isHelpHidden(cmd)) continue;
-    const leaves = cmd.commands.filter((leaf) => leaf.name() !== "help" && !isHelpHidden(leaf));
+    if (skip(cmd)) continue;
+    const leaves = cmd.commands.filter((leaf) => !skip(leaf));
     if (leaves.length > 0) {
       lines.push("");
       for (const leaf of leaves) lines.push(entry(`${cmd.name()} ${leaf.name()}`, leaf));
-    } else {
+    } else if (cmd.commands.length === 0) {
+      // A group whose every leaf is hidden is not itself runnable — printing it
+      // as a leaf would advertise a command that does nothing.
       lines.push(entry(cmd.name(), cmd));
     }
   }
@@ -894,9 +1061,14 @@ Several accounts: \`login --profile <name>\` adds one, \`auth status\` lists the
 \`auth switch\` changes which is active. Several spaces on one account (the norm on
 Cloud): \`space list\` / \`space use\`.
 
+New here? \`busabase-cli guide\` is the operating manual — read \`workspace\` before
+proposing changes. Endpoint commands a task command already covers are hidden;
+\`--help-all\` prints them (they all still run).
+
 Docs: https://busabase.com/docs · Troubleshooting: ${DOCS_TROUBLESHOOTING}`;
 
-function buildProgram(state: CliState = {}): Command {
+/** Exported for the help-example test, which walks the command tree in-process. */
+export function buildProgram(state: CliState = {}): Command {
   const program = new Command("busabase-cli");
   program
     .description("Client for the Busabase OpenAPI REST API — talks to `busabase server` or Cloud.")
@@ -920,6 +1092,41 @@ function buildProgram(state: CliState = {}): Command {
   addGlobalFlags(program.command("whoami"))
     .description("Active space, user, and membership")
     .action(runAction(state, (client) => client.auth.verify()));
+
+  addGlobalFlags(program.command("guide"))
+    .argument("[topic]", "which guide to read; omit to list the topics this server serves")
+    .description("Read the Busabase operating manual (approval-first rules, AirApp contract)")
+    .addHelpText(
+      "after",
+      `
+Read this BEFORE unfamiliar work. It carries the conventions this workspace
+expects, which no flag or schema can express on its own.
+
+Examples:
+  busabase-cli guide                 # what is available here
+  busabase-cli guide workspace       # the approval-first workflow
+  busabase-cli guide airapp          # REQUIRED before writing any AirApp file`,
+    )
+    .action(async (topic: string | undefined, _opts: OptionValues, cmd: Command) => {
+      const opts = cmd.optsWithGlobals();
+      const config = resolveConfig(opts);
+      state.config = config;
+      const client = createBusabaseClient(config);
+      if (!topic) {
+        console.log(render(await client.guides.list(), config.output));
+        return;
+      }
+      const guide = await client.guides.read({ topic });
+      // The document is markdown meant to be READ. Rendering it through the
+      // table/record formatter would print it as one escaped cell, so text mode
+      // prints the body itself and only `--output json` wraps it.
+      if (config.output === "json") {
+        console.log(render(guide, config.output));
+        return;
+      }
+      console.log(guide.content);
+      console.error(`\n[busabase-cli] other topics: ${guide.otherTopics.join(", ") || "(none)"}`);
+    });
 
   addGlobalFlags(program.command("login"))
     .description("Connect the CLI to Busabase — Personal/local, Cloud, or self-hosted")
@@ -1817,7 +2024,10 @@ To add content to a space that is already in use, use \`busabase-cli install\` i
       leaf.usage(`${sig ? `${sig} ` : ""}[global flags]`);
     }
   }
-  program.addHelpText("after", () => `\n${commandsSection(program)}\n${HELP_FOOTER}`);
+  program.addHelpText(
+    "after",
+    () => `\n${commandsSection(program, showAllCommands)}\n${HELP_FOOTER}`,
+  );
   program.configureHelp({ visibleCommands: () => [] });
   return program;
 }
@@ -1833,21 +2043,57 @@ export async function runCli(argv: string[]): Promise<number> {
     program.outputHelp();
     return 0;
   }
+  if (argv.includes("--help-all")) {
+    console.log(renderedHelp({ showAll: true }));
+    return 0;
+  }
   try {
     await program.parseAsync(argv, { from: "user" });
     return 0;
   } catch (error) {
+    const json = errorOutputIsJson(state, argv);
     if (error instanceof CommanderError) {
       // commander already wrote the help text or usage error to the right stream.
-      return error.exitCode === 0 ? 0 : 1;
+      if (error.exitCode === 0) return 0;
+      if (json) {
+        console.log(
+          JSON.stringify(
+            { ok: false, code: "USAGE", message: error.message, retryable: false },
+            null,
+            2,
+          ),
+        );
+      }
+      return EXIT_CODES.USAGE;
     }
+    const classified = classifyError(error);
+    // The envelope goes to stdout because that is where a caller parsing
+    // `--output json` already reads from; the prose still goes to stderr, so a
+    // human sees exactly what they saw before and a pipeline sees neither twice.
+    if (json) console.log(JSON.stringify(errorEnvelope(classified), null, 2));
     console.error(explainError(error, state.config ?? resolveConfig({})));
-    return 1;
+    return classified.exitCode;
   }
 }
 
-function renderedHelp(): string {
+/**
+ * Whether a failed run should print the machine-readable envelope.
+ *
+ * `state.config` is set by the first command that resolves one, but a failure
+ * can happen before that (an unknown option, a bad `--config` path), so the raw
+ * argv is the fallback. Both spellings commander accepts are checked.
+ */
+function errorOutputIsJson(state: CliState, argv: string[]): boolean {
+  if (state.config) return state.config.output === "json";
+  const flag = argv.indexOf("--output");
+  if (flag !== -1 && argv[flag + 1] === "json") return true;
+  if (argv.includes("--output=json")) return true;
+  return configuredOutput() === "json";
+}
+
+function renderedHelp({ showAll = false }: { showAll?: boolean } = {}): string {
   let out = "";
+  showAllCommands = showAll;
   const program = buildProgram();
   program.configureOutput({
     writeOut: (str) => {
@@ -1856,11 +2102,19 @@ function renderedHelp(): string {
     writeErr: () => {},
   });
   program.outputHelp();
+  showAllCommands = false;
   return out;
 }
 
 /** Full root help text (what `busabase-cli --help` prints). Generated from the command tree. */
 export const HELP = renderedHelp();
+
+/**
+ * Root help INCLUDING the endpoint commands a task command supersedes — what
+ * `--help-all` prints. Hidden means hidden from the index, not gone: they all
+ * still run, which is what this lets the surface-coverage tests assert.
+ */
+export const HELP_ALL = renderedHelp({ showAll: true });
 
 /**
  * Turn a low-level transport/HTTP error into an actionable message: which host was tried, the
@@ -1875,7 +2129,13 @@ export function explainError(error: unknown, config: ResolvedConfig): string {
   // reaches the user as the bare envelope ("Input validation failed") and the
   // reason it went to the trouble of explaining is dropped on the floor.
   const issueDetail = formatIssues((error as { data?: { issues?: unknown } }).data?.issues);
-  const msg = issueDetail ? `${rawMessage} — ${issueDetail}` : rawMessage;
+  // The server already folds the issue detail into `message` for a schema refusal
+  // ("Input validation failed — limit: Too big…"), so appending unconditionally
+  // printed the same sentence twice.
+  const msg =
+    issueDetail && !rawMessage.includes(issueDetail)
+      ? `${rawMessage} — ${issueDetail}`
+      : rawMessage;
   const status = (error as { status?: number }).status;
   const lower = msg.toLowerCase();
 
