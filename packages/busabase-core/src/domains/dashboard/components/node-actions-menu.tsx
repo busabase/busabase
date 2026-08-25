@@ -150,11 +150,11 @@ export function NodeActionsMenu({
         <DropdownMenuTrigger asChild>
           <Button
             aria-label={messages.common.moreActions}
-            className="size-8"
+            className="size-8 text-muted-foreground shadow-none hover:bg-muted/70 hover:text-foreground data-[state=open]:bg-muted data-[state=open]:text-foreground"
             size="icon"
             title={messages.common.moreActions}
             type="button"
-            variant="outline"
+            variant="ghost"
           >
             <MoreHorizontal className="size-3.5" />
           </Button>

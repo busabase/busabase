@@ -134,6 +134,7 @@ export const PROCEDURE_PERMISSION_POLICY: Record<string, ProcedurePermissionPoli
   "operations.revise": node("changeRequest"),
   "bases.createChangeRequest": node("changeRequest"),
   "bases.createBulkChangeRequest": node("changeRequest"),
+  "bases.createBulkUpdateChangeRequest": node("changeRequest"),
   "bases.fieldChangeRequest": node("changeRequest"),
   "bases.lifecycleChangeRequest": node("changeRequest"),
   "records.changeRequest": node("changeRequest"),
@@ -249,10 +250,19 @@ export const PROCEDURE_PERMISSION_POLICY: Record<string, ProcedurePermissionPoli
   // privileged act, and it is classified as such one line above.
   "templates.list": workspace("read"),
 
+  // The operating manual. Static documents about how Busabase works, carrying
+  // nothing about this workspace and no way to change it — the floor, for the
+  // same reason `templates.list` sits there. Anything stricter would be
+  // self-defeating: a `read` key that cannot read the rules it is expected to
+  // follow is exactly the situation these routes exist to end.
+  "guides.list": workspace("read"),
+  "guides.read": workspace("read"),
+
   // ---- agents: spawning/driving an external ACP agent (Claude Code, Codex,
   // …) is arbitrary local code execution, not scoped to any one node — every
   // procedure in this family sits at the ceiling, same tier as vault/webhooks.
   "agents.catalog": workspace("manage"),
+  "agents.connections.list": workspace("manage"),
   "agents.disconnect": workspace("manage"),
   "agents.sessions.list": workspace("manage"),
   "agents.sessions.create": workspace("manage"),

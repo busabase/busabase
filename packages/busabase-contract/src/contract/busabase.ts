@@ -17,6 +17,7 @@ import { dumpContract } from "../domains/dump/contract";
 import { fileContract } from "../domains/file-node/contract";
 import { fileTreeContract } from "../domains/filetree/contract";
 import { formContract } from "../domains/form/contract";
+import { guidesContract } from "../domains/guides/contract";
 import { installContract } from "../domains/install/contract";
 import { templatesContract } from "../domains/templates/contract";
 import { vaultContract } from "../domains/vault/contract";
@@ -539,6 +540,7 @@ export const busabaseContractRoutes = {
   dump: dumpContract,
   install: installContract,
   templates: templatesContract,
+  guides: guidesContract,
   changeRequests: {
     // Always keyset-paginated — the unpaginated twin returned a bare array that
     // silently truncated at `limit` with no way to ask for the next page.

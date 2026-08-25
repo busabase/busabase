@@ -61,7 +61,7 @@ function ActivityAvatar({ event }: { event: ActivityEvent }) {
   const Icon = activityIcons[event.tone];
 
   return (
-    <div className="relative mt-0.5 size-10 shrink-0">
+    <div className="relative z-10 mt-0.5 size-10 shrink-0 rounded-full bg-card">
       <div
         className={`flex size-10 items-center justify-center overflow-hidden rounded-full border text-xs font-semibold ${activityAvatarTone[event.tone]}`}
       >
@@ -113,7 +113,7 @@ export function ActivityRow({ event }: { event: ActivityEvent }) {
           />
           <ActivityAvatar event={event} />
         </div>
-        <div className="min-w-0 flex-1 border-border/50 border-b py-3.5 pr-2 transition-colors group-hover:border-transparent">
+        <div className="min-w-0 flex-1 border-border/50 border-b py-3.5 pr-2 transition-colors group-hover:border-transparent group-last:border-b-0">
           <div className="flex min-w-0 items-start gap-2">
             <div className="min-w-0 flex-1">
               <div className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1">

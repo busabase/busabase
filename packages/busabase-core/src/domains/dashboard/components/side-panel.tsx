@@ -47,7 +47,7 @@ export function SidePanelToggle() {
     <button
       aria-label={messages.sidePanel.open}
       aria-pressed={isOpen}
-      className="inline-flex shrink-0 items-center justify-center rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
+      className="inline-flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted/70 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
       disabled={tabCount === 0}
       onClick={() => setOpen(!isOpen)}
       title={messages.sidePanel.open}

@@ -8,6 +8,7 @@ export * from "./auth";
 export {
   createBaseInputSchema,
   createBulkChangeRequestInputSchema,
+  createBulkUpdateChangeRequestInputSchema,
   createChangeRequestInputSchema,
   createDeleteChangeRequestInputSchema,
   createViewInputSchema,

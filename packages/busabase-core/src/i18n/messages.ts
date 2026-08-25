@@ -1353,6 +1353,29 @@ export const coreMessagesEn = {
     reviewNow: "Review them now",
     noPending: "Everything was merged — the package is live in your space.",
     done: "Done",
+    // ── The two ways to install, and the copy that keeps them apart ──────────
+    // Named for what the user ends up with, not for the mechanism: one puts the
+    // resources in this space, the other puts the manual in an agent.
+    resultDescription: "What just landed in your space.",
+    alsoInstallToAgent: "Also give this app's manual to your agent",
+    chooseHow: "Two ways to install this. Pick the one that matches where you work.",
+    tabAgent: "Agent install",
+    tabUi: "UI install",
+    agentIntro:
+      "Hand the manual for “{name}” to an agent you already use — Claude Code, Codex, Cursor. It learns how this app works; nothing in this space is created or changed.",
+    agentPromptLabel: "Paste this to your agent",
+    agentPromptBody:
+      'Install the Busabase app skill "{name}" so you can operate it later:\n\n{command}\n\nInstall the skill only — do not create, change or delete anything in my Busabase space yet. Once it is installed, tell me in a few lines what this app does and what it would create if I asked you to set it up.',
+    agentRefHint: "Installs the repository's default branch. This entry was read from {ref}.",
+    agentConnectTitle: "Your agent still needs access to this space",
+    agentConnectBody:
+      "The skill tells an agent how this app works; connecting Busabase is what lets it actually read and write your data. It is a one-time setup.",
+    agentConnectAction: "Connect your agent",
+    agentNoSkillTitle: "This package carries no agent manual",
+    agentNoSkillBody:
+      "There is no SKILL.md here, so an agent has nothing to install — it would have to infer your tables. Install it into the UI instead; you can still hand an agent that node's own prompts afterwards.",
+    uiIntro:
+      "Create the folder, tables and app in this space. Your agent learns nothing this way — you can give it the manual from the Agent install tab at any time.",
   },
 };
 

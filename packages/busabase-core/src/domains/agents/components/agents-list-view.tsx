@@ -2,7 +2,7 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";
-import type { AgentSessionVO } from "busabase-contract/domains/agents/types";
+import type { AgentConnectionVO } from "busabase-contract/domains/agents/types";
 import { Button } from "kui/button";
 import {
   DropdownMenu,
@@ -11,18 +11,10 @@ import {
   DropdownMenuTrigger,
 } from "kui/dropdown-menu";
 import { Bot, MoreHorizontal, Plus, Trash2 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { toast } from "sonner";
 import { ConfirmActionDialog } from "../../dashboard/components/primitives";
 import { TransportBadge } from "./transport-badge";
-
-interface AgentGroup {
-  slug: string;
-  agentName: string;
-  transport: AgentSessionVO["transport"];
-  sessionCount: number;
-  latest: AgentSessionVO;
-}
 
 interface AgentsListViewProps {
   orpc: BusabaseQueryUtils;
@@ -38,34 +30,17 @@ interface AgentsListViewProps {
  */
 export function AgentsListView({ orpc, onSelectAgent, onAddAgent }: AgentsListViewProps) {
   const queryClient = useQueryClient();
-  const [disconnecting, setDisconnecting] = useState<AgentGroup | null>(null);
-  const sessions = useQuery({
-    ...orpc.agents.sessions.list.queryOptions(),
+  const [disconnecting, setDisconnecting] = useState<AgentConnectionVO | null>(null);
+  const connections = useQuery({
+    ...orpc.agents.connections.list.queryOptions(),
     refetchInterval: 4000,
   });
-
-  const groups = useMemo<AgentGroup[]>(() => {
-    const bySlug = new Map<string, AgentSessionVO[]>();
-    for (const session of sessions.data ?? []) {
-      const list = bySlug.get(session.slug) ?? [];
-      list.push(session);
-      bySlug.set(session.slug, list);
-    }
-    return [...bySlug.entries()]
-      .map(([slug, list]) => ({
-        slug,
-        agentName: list[0].agentName,
-        transport: list[0].transport,
-        sessionCount: list.length,
-        latest: list.reduce((a, b) => (a.lastActivityAt > b.lastActivityAt ? a : b)),
-      }))
-      .sort((a, b) => b.latest.lastActivityAt.localeCompare(a.latest.lastActivityAt));
-  }, [sessions.data]);
 
   const disconnect = useMutation({
     ...orpc.agents.disconnect.mutationOptions(),
     onSuccess: async () => {
       await Promise.all([
+        queryClient.invalidateQueries({ queryKey: orpc.agents.connections.list.queryKey() }),
         queryClient.invalidateQueries({ queryKey: orpc.agents.sessions.list.queryKey() }),
         queryClient.invalidateQueries({ queryKey: orpc.agents.catalog.queryKey() }),
       ]);
@@ -93,7 +68,7 @@ export function AgentsListView({ orpc, onSelectAgent, onAddAgent }: AgentsListVi
       </header>
 
       <div className="min-h-0 flex-1 overflow-y-auto p-6">
-        {groups.length === 0 ? (
+        {(connections.data ?? []).length === 0 ? (
           <div className="flex flex-col items-center justify-center gap-3 py-16 text-center">
             <Bot className="size-8 text-muted-foreground" />
             <div>
@@ -109,7 +84,7 @@ export function AgentsListView({ orpc, onSelectAgent, onAddAgent }: AgentsListVi
           </div>
         ) : (
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {groups.map((group) => (
+            {(connections.data ?? []).map((group) => (
               <div key={group.slug} className="relative rounded-lg border hover:bg-accent">
                 <button
                   type="button"
@@ -125,7 +100,7 @@ export function AgentsListView({ orpc, onSelectAgent, onAddAgent }: AgentsListVi
                   </div>
                   <p className="text-muted-foreground text-xs">
                     {group.sessionCount} {group.sessionCount === 1 ? "session" : "sessions"} ·{" "}
-                    {group.latest.status}
+                    {group.latest?.status ?? "not started"}
                   </p>
                 </button>
                 <DropdownMenu>

@@ -66,6 +66,11 @@ export async function getBusabaseOpenApiSpec() {
         name: "Records",
         description: "Canonical records after approved changeRequests are merged.",
       },
+      {
+        name: "Guides",
+        description:
+          "The operating manual, in the same words the MCP server publishes. Read `workspace` before proposing changes and `airapp` before writing any AirApp file — the conventions this workspace expects are not expressible in a schema.",
+      },
     ],
     servers: [
       {

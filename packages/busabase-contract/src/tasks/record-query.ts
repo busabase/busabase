@@ -67,7 +67,7 @@ export const recordQueryTask: TaskDefinition<RecordQueryInput> = {
   examples: [
     "busabase-cli records query --base-id bas_123 --limit 100",
     "busabase-cli records count --base-id bas_123",
-    'busabase-cli records count --base-id bas_123 --filters \'[{"fieldSlug":"branch","fieldType":"text","operator":"equals","value":"main"}]\'',
+    'busabase-cli records count --base-id bas_123 --filters-json \'[{"fieldSlug":"branch","fieldType":"text","operator":"equals","value":"main"}]\'',
     "busabase-cli records count --base-id bas_123 --view-id viw_456",
   ],
   execute: async (client: BusabaseTaskClient, input: RecordQueryInput) => {

@@ -6,8 +6,9 @@ import type {
   AssetDownloadVO,
   AssetUsageVO,
   AssetVO,
+  ListAssetsDTO,
 } from "busabase-contract/domains/assets/types";
-import { and, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, lt, or, sql } from "drizzle-orm";
 import {
   confirmUpload,
   deleteAttachmentSafely,
@@ -281,35 +282,33 @@ export const confirmAssetUpload = async (input: ConfirmUploadDTO) => {
   }
 };
 
-export const listAssets = async (): Promise<AssetVO[]> => {
-  await ensureReady();
-  const db = await getDb();
-  const spaceId = getContextSpaceId();
-
-  const rows: AssetRow[] = await db
-    .select(assetRowColumns)
-    .from(busabaseAssets)
-    .innerJoin(attachments, eq(busabaseAssets.attachmentId, attachments.id))
-    .leftJoin(busabaseAssetTexts, withAssetTextJoin)
-    .where(eq(busabaseAssets.spaceId, spaceId))
-    .orderBy(desc(busabaseAssets.createdAt));
-
+/**
+ * Assets the caller may actually see, in input order.
+ *
+ * Split out of {@link listAssets} so a paginated call can run it per batch. It
+ * is why a SQL `LIMIT` alone is not enough here: visibility is decided in JS
+ * after the query, so `limit` rows in can be fewer than `limit` rows out, and a
+ * page that stopped there would look like the end of the list when it wasn't.
+ */
+const filterVisibleAssets = async (
+  db: Awaited<ReturnType<typeof getDb>>,
+  spaceId: string,
+  rows: AssetRow[],
+): Promise<AssetVO[]> => {
+  if (rows.length === 0) return [];
   const visibleRows: AssetVO[] = [];
-  const usages =
-    rows.length > 0
-      ? await db
-          .select({ assetId: busabaseAssetUsages.assetId, nodeId: busabaseAssetUsages.nodeId })
-          .from(busabaseAssetUsages)
-          .where(
-            and(
-              eq(busabaseAssetUsages.spaceId, spaceId),
-              inArray(
-                busabaseAssetUsages.assetId,
-                rows.map((row) => row.id),
-              ),
-            ),
-          )
-      : [];
+  const usages = await db
+    .select({ assetId: busabaseAssetUsages.assetId, nodeId: busabaseAssetUsages.nodeId })
+    .from(busabaseAssetUsages)
+    .where(
+      and(
+        eq(busabaseAssetUsages.spaceId, spaceId),
+        inArray(
+          busabaseAssetUsages.assetId,
+          rows.map((row) => row.id),
+        ),
+      ),
+    );
   const visibleNodeEntries = await Promise.all(
     [...new Set(usages.map((usage) => usage.nodeId))].map(
       async (nodeId) => [nodeId, await hasNodePermission(nodeId, "read", undefined, db)] as const,
@@ -340,6 +339,79 @@ export const listAssets = async (): Promise<AssetVO[]> => {
     }
   }
   return visibleRows;
+};
+
+/** How many rows to pull per batch while filling one visible page. */
+const ASSET_SCAN_BATCH = 200;
+/** Stops a space full of invisible assets from scanning the whole table for one page. */
+const ASSET_SCAN_MAX_BATCHES = 20;
+
+export const listAssets = async (input?: ListAssetsDTO): Promise<AssetVO[]> => {
+  await ensureReady();
+  const db = await getDb();
+  const spaceId = getContextSpaceId();
+  const limit = input?.limit;
+
+  const selectRows = (after: { createdAt: Date; id: string } | null, take?: number) => {
+    const query = db
+      .select(assetRowColumns)
+      .from(busabaseAssets)
+      .innerJoin(attachments, eq(busabaseAssets.attachmentId, attachments.id))
+      .leftJoin(busabaseAssetTexts, withAssetTextJoin)
+      .where(
+        after
+          ? and(
+              eq(busabaseAssets.spaceId, spaceId),
+              or(
+                lt(busabaseAssets.createdAt, after.createdAt),
+                and(eq(busabaseAssets.createdAt, after.createdAt), lt(busabaseAssets.id, after.id)),
+              ),
+            )
+          : eq(busabaseAssets.spaceId, spaceId),
+      )
+      .orderBy(desc(busabaseAssets.createdAt), desc(busabaseAssets.id));
+    return take === undefined ? query : query.limit(take);
+  };
+
+  // No `limit` — the historical call. Every asset, one query, same as before.
+  if (limit === undefined) {
+    return filterVisibleAssets(db, spaceId, await selectRows(null));
+  }
+
+  let after = input?.cursor ? await resolveAssetCursor(db, spaceId, input.cursor) : null;
+  const page: AssetVO[] = [];
+  for (let batch = 0; batch < ASSET_SCAN_MAX_BATCHES && page.length < limit; batch += 1) {
+    const rows = await selectRows(after, Math.max(limit - page.length, ASSET_SCAN_BATCH));
+    if (rows.length === 0) break;
+    page.push(...(await filterVisibleAssets(db, spaceId, rows)));
+    const last = rows[rows.length - 1];
+    after = { createdAt: last.createdAt, id: last.id };
+  }
+  return page.slice(0, limit);
+};
+
+/**
+ * Turn the caller's cursor — the id of the last asset they received — into the
+ * keyset position to resume from. An unknown id is a caller error, not an empty
+ * page: silently returning the first page again would make a paging loop repeat
+ * forever without ever saying why.
+ */
+const resolveAssetCursor = async (
+  db: Awaited<ReturnType<typeof getDb>>,
+  spaceId: string,
+  cursor: string,
+): Promise<{ createdAt: Date; id: string }> => {
+  const [row] = await db
+    .select({ id: busabaseAssets.id, createdAt: busabaseAssets.createdAt })
+    .from(busabaseAssets)
+    .where(and(eq(busabaseAssets.spaceId, spaceId), eq(busabaseAssets.id, cursor)))
+    .limit(1);
+  if (!row) {
+    throw new ORPCError("BAD_REQUEST", {
+      message: `Unknown assets cursor: ${cursor}. Pass the \`id\` of the last asset from the previous page.`,
+    });
+  }
+  return { createdAt: row.createdAt, id: row.id };
 };
 
 export const getAsset = async (assetId: string): Promise<AssetDetailVO> => {
@@ -813,21 +885,27 @@ export const removeRecordAssetUsages = async (
  * re-merging the Doc refreshes its usages, and removing an embed drops the
  * usage. Called from the Doc merge.
  *
- * Two reference forms are recognized, and BOTH must stay:
+ * Only **stable content URLs** (`/api/assets/{assetId}/raw`) are indexed — what
+ * the editor has written ever since assets replaced resolved storage URLs. The
+ * id is right there in the body, so this is one indexed `IN (…)` lookup with no
+ * scanning. The lookup is not a formality: it also proves the id names a real
+ * asset *in this space*, so a hand-typed or cross-space id can never mint a
+ * usage row.
  *
- *  1. **Stable content URLs** (`/api/assets/{assetId}/raw`) — what the editor
- *     writes today. The id is right there in the body, so this is one indexed
- *     `IN (…)` lookup with no scanning. The lookup is not a formality: it also
- *     proves the id names a real asset *in this space*, so a hand-typed or
- *     cross-space id can never mint a usage row.
+ * **Legacy storage URLs are deliberately NOT indexed.** A body written before
+ * the switch embeds the resolved storage path, which carries no asset id, so
+ * the only way to match one was to pull every attachment in the space and
+ * `body.includes(storageKey)` each — an O(space attachments) scan run on every
+ * Doc merge, whether or not the edit touched an image, purely to keep the
+ * reference count in `deleteAsset` accurate for pre-switch bodies.
  *
- *  2. **Legacy storage URLs** (`body.includes(storageKey)`) — bodies written
- *     before the switch, and every immutable `busabase_commits.payload.body`
- *     ever recorded, still carry the resolved storage path. Dropping this
- *     branch would silently orphan those assets (usage count → 0, so the
- *     library would happily offer to delete bytes a published Doc still shows).
- *     History is append-only and is never migrated, so this branch is
- *     permanent, not a deprecation window.
+ * What that trade costs is narrow, and it is not broken images: a resolved
+ * storage URL is served straight from storage and never passes through the
+ * asset ACL, so those embeds render exactly as before. A pre-switch body loses
+ * only the `deleteAsset` guard — nothing warns "still referenced by N places"
+ * if someone deletes that image from the library — and only from the next time
+ * that Doc is merged, since usages are recomputed on merge alone. There is no
+ * automatic sweep of unreferenced assets, so nothing acts on this on its own.
  */
 export const syncDocAssetUsages = async (
   nodeId: string,
@@ -837,6 +915,23 @@ export const syncDocAssetUsages = async (
   const db = tx ?? (await getDb());
   const spaceId = getContextSpaceId();
 
+  // Asset ids parsed straight out of the body, then existence-checked. Nothing
+  // downstream has to dedupe: `extractAssetContentIds` already returns unique
+  // ids and the lookup matches them by primary key, so one body reference can
+  // never yield two rows for the same asset.
+  const referencedAssetIds = extractAssetContentIds(body);
+  const known =
+    referencedAssetIds.length > 0
+      ? await db
+          .select({ id: busabaseAssets.id })
+          .from(busabaseAssets)
+          .where(
+            and(
+              eq(busabaseAssets.spaceId, spaceId),
+              inArray(busabaseAssets.id, referencedAssetIds),
+            ),
+          )
+      : [];
   const rows: {
     id: string;
     assetId: string;
@@ -844,50 +939,14 @@ export const syncDocAssetUsages = async (
     nodeId: string;
     recordId: string;
     fieldSlug: string;
-    blockId?: string;
-    path?: string;
-    metadata?: Record<string, unknown>;
-  }[] = [];
-  // A body may reference the same asset in both forms (an old embed plus a
-  // re-uploaded one); the unique index would reject the second row anyway, but
-  // dedupe here so the insert stays clean.
-  const seen = new Set<string>();
-  const addUsage = (assetId: string) => {
-    if (seen.has(assetId)) return;
-    seen.add(assetId);
-    rows.push({ id: id("aus"), assetId, ownerType: "doc", nodeId, recordId: "", fieldSlug: "" });
-  };
-
-  // Form 1 — asset ids parsed straight out of the body, then existence-checked.
-  const referencedAssetIds = extractAssetContentIds(body);
-  if (referencedAssetIds.length > 0) {
-    const known = await db
-      .select({ id: busabaseAssets.id })
-      .from(busabaseAssets)
-      .where(
-        and(eq(busabaseAssets.spaceId, spaceId), inArray(busabaseAssets.id, referencedAssetIds)),
-      );
-    for (const asset of known) addUsage(asset.id);
-  }
-
-  // Form 2 — legacy: robust-but-O(space attachments) scan, `body.includes`.
-  // Doc merges are infrequent so this is fine for now; if a space grows to many
-  // thousands of attachments, switch to extracting candidate storageKeys from the
-  // body (e.g. /attachments\/[^\s")']+/) and querying only those.
-  const candidates: { id: string; storageKey: string; fileName: string }[] = await db
-    .select({
-      id: attachments.id,
-      storageKey: attachments.storageKey,
-      fileName: attachments.fileName,
-    })
-    .from(attachments)
-    .where(eq(attachments.spaceId, spaceId));
-
-  for (const att of candidates) {
-    if (att.storageKey && body.includes(att.storageKey)) {
-      addUsage(await ensureAsset(att.id, att.fileName, tx));
-    }
-  }
+  }[] = known.map((asset) => ({
+    id: id("aus"),
+    assetId: asset.id,
+    ownerType: "doc",
+    nodeId,
+    recordId: "",
+    fieldSlug: "",
+  }));
 
   // Replace the Doc's whole-node usages (recordId/fieldSlug both "").
   await db

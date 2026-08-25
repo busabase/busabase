@@ -1,0 +1,48 @@
+/* Busabase-only title reflow for the shared NavMain tree. */
+@media (min-width: 48rem) and (hover: hover) and (pointer: fine) {
+  [data-busabase-sidebar-nav] {
+    --busabase-sidebar-title-inset: calc(var(--spacing) * 2);
+    --busabase-sidebar-two-actions-inset: calc(var(--spacing) * 14);
+  }
+
+  /* NavMain groups custom row actions in an absolute wrapper. */
+  [data-busabase-sidebar-nav]
+    [data-sidebar="menu-item"]:is(:hover, :focus-within):has(> div.absolute > button + button)
+    > [data-sidebar="menu-button"] {
+    padding-right: var(--busabase-sidebar-two-actions-inset);
+  }
+
+  /* Hidden folder actions should not reserve title width until hover or focus. */
+  [data-busabase-sidebar-nav]
+    [class~="group/nav-tree-item"]:not(:hover):not(:focus-within)
+    > :is(a, button:not([title="Toggle"])) {
+    padding-right: var(--busabase-sidebar-title-inset);
+  }
+
+  /* Apply the same rule to nested leaves with absolutely positioned actions. */
+  [data-busabase-sidebar-nav]
+    [class~="group/subitem"]:not(:hover):not(:focus-within)
+    > [data-sidebar="menu-sub-button"],
+  [data-busabase-sidebar-nav]
+    [data-sidebar="menu-item"]:not(:hover):not(:focus-within):has(> [data-sidebar="menu-action"])
+    > [data-sidebar="menu-button"] {
+    padding-right: var(--busabase-sidebar-title-inset);
+  }
+
+  /* Two visible top-level actions need two complete slots, not KUI's default one. */
+  [data-busabase-sidebar-nav]
+    [data-sidebar="menu-item"]:is(:hover, :focus-within):has(
+      > [data-sidebar="menu-action"] + [data-sidebar="menu-action"]
+    )
+    > [data-sidebar="menu-button"] {
+    padding-right: var(--busabase-sidebar-two-actions-inset);
+  }
+
+  [data-busabase-sidebar-nav] [data-sidebar="menu-button"] > span,
+  [data-busabase-sidebar-nav] [data-sidebar="menu-sub-button"] > span {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}

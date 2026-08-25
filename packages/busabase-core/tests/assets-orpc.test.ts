@@ -612,7 +612,7 @@ describe("Assets + attachment dedup — oRPC integration", () => {
   });
 
   describe("Where-Used (Doc body embeds)", () => {
-    it("records a whole-node usage when a Doc body embeds an attachment's storageKey, and clears it when the image is removed", async () => {
+    it("does not record a usage when a Doc body embeds a resolved storage URL", async () => {
       const hashD = `sha256:${"d".repeat(64)}`;
       const req = await client.assets.createUploadUrl({
         fileName: "diagram.png",
@@ -637,6 +637,15 @@ describe("Assets + attachment dedup — oRPC integration", () => {
         name: "WU Doc",
         body: "# start",
       });
+      // `asset.url` is `storage.getPublicUrl(storageKey)` — the pre-asset embed
+      // form. Matching it carried no asset id, so the only way to find it was to
+      // pull every attachment in the space and `body.includes(storageKey)` each,
+      // on every Doc merge. That scan is gone on purpose (see
+      // `syncDocAssetUsages`), so this body yields no usage row.
+      //
+      // The embed itself still renders — a resolved storage URL is served
+      // straight from storage and never passes through the asset ACL. What a
+      // pre-switch body gives up is the `deleteAsset` reference guard.
       const cr = await client.nodes.updateContent({
         nodeId: doc.node.id,
         content: { kind: "doc", body: `# Spec\n\n![diagram](${asset.url})\n` },
@@ -645,24 +654,7 @@ describe("Assets + attachment dedup — oRPC integration", () => {
       await client.changeRequests.merge({ changeRequestIds: [cr.id] });
 
       const detail = await client.assets.get({ assetId: asset.id });
-      const usage = detail.usages.find((u) => u.nodeType === "doc");
-      expect(usage).toBeDefined();
-      expect(usage?.nodeSlug).toBe("wu-doc");
-      // Whole-node usage: no record / field.
-      expect(usage?.recordId).toBeNull();
-      expect(usage?.fieldSlug).toBeNull();
-
-      // Removing the embed from the body and re-merging clears the usage —
-      // syncDocAssetUsages replaces (not just adds to) the doc's whole-node rows.
-      const removeCr = await client.nodes.updateContent({
-        nodeId: doc.node.id,
-        content: { kind: "doc", body: "# Spec\n\nNo more diagram here.\n" },
-      });
-      await client.changeRequests.review({ changeRequestIds: [removeCr.id], verdict: "approved" });
-      await client.changeRequests.merge({ changeRequestIds: [removeCr.id] });
-
-      const after = await client.assets.get({ assetId: asset.id });
-      expect(after.usages.find((u) => u.nodeType === "doc")).toBeUndefined();
+      expect(detail.usages.find((u) => u.nodeType === "doc")).toBeUndefined();
     });
 
     it("records a usage for the stable /api/assets/{id}/raw form the editor writes today", async () => {
@@ -678,9 +670,8 @@ describe("Assets + attachment dedup — oRPC integration", () => {
         nodeId: doc.node.id,
         content: {
           kind: "doc",
-          // Exactly what `useDocImageUpload` -> Crepe serializes: no storageKey
-          // anywhere in the body, so the legacy `includes(storageKey)` branch
-          // cannot be what finds this.
+          // Exactly what `useDocImageUpload` -> Crepe serializes: the asset id
+          // is in the body, so one indexed lookup resolves it.
           body: `# Spec\n\n![1.00](${buildAssetContentUrl(asset.id)})\n`,
         },
       });
@@ -695,7 +686,7 @@ describe("Assets + attachment dedup — oRPC integration", () => {
       expect(usage?.recordId).toBeNull();
       expect(usage?.fieldSlug).toBeNull();
 
-      // Same replace semantics as the legacy branch: drop the embed, lose the usage.
+      // Replace semantics: drop the embed, lose the usage.
       const removeCr = await client.nodes.updateContent({
         nodeId: doc.node.id,
         content: { kind: "doc", body: "# Spec\n\nNo more diagram here.\n" },
@@ -706,7 +697,7 @@ describe("Assets + attachment dedup — oRPC integration", () => {
       expect(after.usages.find((u) => u.nodeSlug === "wu-doc-stable")).toBeUndefined();
     });
 
-    it("indexes BOTH forms in one body, and ignores an id that names no asset", async () => {
+    it("indexes only the stable form in a mixed body, and ignores an id that names no asset", async () => {
       const legacy = await uploadAsset("mixed-legacy.png", `sha256:${"0d".repeat(32)}`);
       const stable = await uploadAsset("mixed-stable.png", `sha256:${"0e".repeat(32)}`);
       const doc = await client.docs.create({
@@ -730,10 +721,15 @@ describe("Assets + attachment dedup — oRPC integration", () => {
       await client.changeRequests.review({ changeRequestIds: [cr.id], verdict: "approved" });
       await client.changeRequests.merge({ changeRequestIds: [cr.id] });
 
-      for (const asset of [legacy, stable]) {
-        const detail = await client.assets.get({ assetId: asset.id });
-        expect(detail.usages.some((u) => u.nodeSlug === "wu-doc-mixed")).toBe(true);
-      }
+      // The realistic shape of a pre-switch Doc that later gains a new image:
+      // the stable embed is indexed, the resolved storage URL beside it is not
+      // (that match cost a full scan of the space's attachments — see
+      // `syncDocAssetUsages`), and both keep rendering regardless.
+      const stableDetail = await client.assets.get({ assetId: stable.id });
+      expect(stableDetail.usages.some((u) => u.nodeSlug === "wu-doc-mixed")).toBe(true);
+      const legacyDetail = await client.assets.get({ assetId: legacy.id });
+      expect(legacyDetail.usages.some((u) => u.nodeSlug === "wu-doc-mixed")).toBe(false);
+
       await expect(client.assets.get({ assetId: "astdoesnotexist" })).rejects.toMatchObject({
         code: "NOT_FOUND",
       });

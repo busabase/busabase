@@ -6,8 +6,7 @@ import { z } from "zod";
  * when a node carries no `icon`, every host falls back to the type icon, same
  * as before this field existed.
  *
- * The `attachment` variant mirrors buda's `NodeLogo` shape (see
- * `apps/buda/src/domains/agent-controller/components/use-logo-crop-upload.tsx`):
+ * The `attachment` variant follows the shared avatar-cropping model:
  * `url`/`attachmentId` are the CROPPED display image actually rendered, while
  * `originalUrl`/`originalAttachmentId` + `crop` are kept so the crop dialog can
  * re-open non-destructively against the untouched source image instead of

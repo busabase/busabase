@@ -176,6 +176,28 @@ describe("install.fromGithub — a template", () => {
     return { result, folder, children: folder?.children ?? [] };
   };
 
+  // ── The preview a user reads BEFORE any of the above ──────────────────────
+  describe("planFromGithub — the preview", () => {
+    it("shows the manual as a node it will create, and counts it", async () => {
+      // The root SKILL.md lands as a Skill node on install, but the package tree
+      // carries it beside `nodes` rather than in it — so the preview used to
+      // report `skills: 0` and list no manual for a package that plainly has
+      // one. The install dialog reads exactly this to decide whether an agent
+      // has anything to install, so a silent zero is not cosmetic.
+      const plan = await inSpace("space_tpl_plan", () =>
+        client.install.planFromGithub({
+          repoUrl: "https://github.com/busabase/skills/tree/v1.2.0",
+        }),
+      );
+
+      expect(plan.counts.skills).toBe(1);
+      const skillRows = plan.nodes.filter((node) => node.type === "skill");
+      expect(skillRows).toHaveLength(1);
+      expect(skillRows[0]?.slug).toBe("kelly-email");
+      expect(skillRows[0]?.fileCount ?? 0).toBeGreaterThan(0);
+    });
+  });
+
   // ── The review-first install: the DEFAULT path a user takes ────────────────
   describe("review-first (the default)", () => {
     const SPACE = "space_tpl_review_first";

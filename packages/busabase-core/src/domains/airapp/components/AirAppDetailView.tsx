@@ -7,6 +7,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "kui/tabs";
 import { AppWindow, Files, Info, MonitorPlay, Terminal } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { fmt, useCoreI18n } from "../../../i18n";
+import { AssetMediaPreview, isPreviewableAssetMime } from "../../dashboard/components/assets";
 import {
   buildFileTree,
   collectFolderPaths,
@@ -209,16 +210,25 @@ export function AirAppDetailView({ orpc, slug, onNodeLoaded }: NodeDetailProps) 
             )}
           </div>
 
-          <TabsList className="h-8 shrink-0">
-            <TabsTrigger className="gap-1.5" value="app">
+          <TabsList className="h-8 shrink-0 gap-1 bg-transparent p-0">
+            <TabsTrigger
+              className="h-7 gap-1.5 rounded-lg bg-transparent px-2.5 text-muted-foreground shadow-none transition-colors hover:bg-muted/40 hover:text-foreground data-[state=active]:bg-muted data-[state=active]:text-foreground data-[state=active]:shadow-none"
+              value="app"
+            >
               <MonitorPlay className="size-3.5" />
               {messages.airapp.tabPreview}
             </TabsTrigger>
-            <TabsTrigger className="gap-1.5" value="files">
+            <TabsTrigger
+              className="h-7 gap-1.5 rounded-lg bg-transparent px-2.5 text-muted-foreground shadow-none transition-colors hover:bg-muted/40 hover:text-foreground data-[state=active]:bg-muted data-[state=active]:text-foreground data-[state=active]:shadow-none"
+              value="files"
+            >
               <Files className="size-3.5" />
               {messages.airapp.tabFiles}
             </TabsTrigger>
-            <TabsTrigger className="gap-1.5" value="logs">
+            <TabsTrigger
+              className="h-7 gap-1.5 rounded-lg bg-transparent px-2.5 text-muted-foreground shadow-none transition-colors hover:bg-muted/40 hover:text-foreground data-[state=active]:bg-muted data-[state=active]:text-foreground data-[state=active]:shadow-none"
+              value="logs"
+            >
               <Terminal className="size-3.5" />
               {messages.airapp.tabLogs}
             </TabsTrigger>
@@ -284,6 +294,18 @@ export function AirAppDetailView({ orpc, slug, onNodeLoaded }: NodeDetailProps) 
                     {fileQuery.error instanceof Error
                       ? fileQuery.error.message
                       : messages.nodeDetail.couldNotReadFile}
+                  </div>
+                ) : fileQuery.data &&
+                  fileQuery.data.encoding !== "utf8" &&
+                  fileQuery.data.assetUrl &&
+                  isPreviewableAssetMime(fileQuery.data.mimeType) ? (
+                  <div className="grid h-full min-h-[320px] place-items-center overflow-hidden p-4">
+                    <AssetMediaPreview
+                      mediaClassName="max-h-[65vh] w-full object-contain"
+                      mimeType={fileQuery.data.mimeType}
+                      name={fileQuery.data.displayName ?? openPath}
+                      url={fileQuery.data.assetUrl}
+                    />
                   </div>
                 ) : fileQuery.data && fileQuery.data.encoding !== "utf8" ? (
                   <div className="p-5 text-muted-foreground text-sm">

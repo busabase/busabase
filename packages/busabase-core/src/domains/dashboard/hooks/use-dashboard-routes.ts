@@ -16,6 +16,9 @@ export function useDashboardRoutes() {
   // `/agents/new` is checked as an exact string before this in the dispatcher,
   // so its match here (agentSlug === "new") is never rendered as a detail page.
   const [isAgentDetailRoute, agentDetailParams] = useRoute("/agents/:agentSlug");
+  // Addressed by name, not by catalog id: an id is `<owner>/<repo>/<subdir>`
+  // and its slashes cannot live in one path segment.
+  const [isTemplateDetailRoute, templateDetailParams] = useRoute("/templates/:templateName");
   const [isOperationRoute, operationParams] = useRoute("/inbox/:changeRequestId/:operationId");
   const [isChangeRequestRoute, changeRequestParams] = useRoute("/inbox/:changeRequestId");
   const [isBaseDesignRoute, baseDesignParams] = useRoute("/base/:slug/design");
@@ -91,6 +94,8 @@ export function useDashboardRoutes() {
     isAssetDetailRoute,
     isAgentDetailRoute,
     agentDetailParams,
+    isTemplateDetailRoute,
+    templateDetailParams,
     isOperationRoute,
     operationParams,
     isChangeRequestRoute,

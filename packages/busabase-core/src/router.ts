@@ -15,6 +15,7 @@ import { dumpRouter } from "./domains/dump/router";
 import { fileRouter } from "./domains/file-node/router";
 import { fileTreeRouter } from "./domains/filetree/router";
 import { formRouter } from "./domains/form/router";
+import { guidesRouter } from "./domains/guides/router";
 import { installRouter } from "./domains/install/router";
 import { updateNodeContent } from "./domains/rich-node/handlers";
 import { templatesRouter } from "./domains/templates/router";
@@ -246,6 +247,7 @@ const busabaseRouterImpl = busabase.router({
   docs: docRouter,
   forms: formRouter,
   assets: assetsRouter,
+  guides: guidesRouter,
   vault: vaultRouter,
   agents: agentsRouter,
   webhooks: webhookRouter,

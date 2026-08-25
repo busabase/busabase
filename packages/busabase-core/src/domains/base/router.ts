@@ -8,6 +8,7 @@ import {
   createBase,
   createBaseField,
   createBulkChangeRequest,
+  createBulkUpdateChangeRequest,
   createChangeRequest,
   createConvertFieldChangeRequest,
   createDeleteChangeRequest,
@@ -62,6 +63,12 @@ export const baseRouter = {
     const { baseId, ...rest } = input;
     return createBulkChangeRequest(baseId, rest);
   }),
+  createBulkUpdateChangeRequest: os.bases.createBulkUpdateChangeRequest.handler(
+    async ({ input }) => {
+      const { baseId, ...rest } = input;
+      return createBulkUpdateChangeRequest(baseId, rest);
+    },
+  ),
   createField: os.bases.createField.handler(async ({ input }) => {
     const { baseId, ...rest } = input;
     return createBaseField(baseId, rest);

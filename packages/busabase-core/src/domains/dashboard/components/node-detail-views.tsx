@@ -33,7 +33,7 @@ import { useReportLoadedNode } from "../hooks/use-report-loaded-node";
 import { type NodeDetailProps, registerNodeDetail } from "../node-detail-registry";
 import { registerSidePanelTab, type SidePanelTabProps } from "../side-panel-registry";
 import { useIsAnonymousVisitor } from "../visitor-context";
-import { assetKindIcon } from "./assets";
+import { AssetMediaPreview, isPreviewableAssetMime } from "./assets";
 import {
   buildFileTree,
   collectFolderPaths,
@@ -406,6 +406,16 @@ export function FileTreeDetailView({
               </div>
             ) : fileQuery.data && fileQuery.data.encoding !== "utf8" ? (
               <div className="p-5 text-muted-foreground text-sm">
+                {fileQuery.data.assetUrl && isPreviewableAssetMime(fileQuery.data.mimeType) ? (
+                  <div className="mb-4 grid max-h-[55vh] place-items-center overflow-hidden rounded-md border bg-muted">
+                    <AssetMediaPreview
+                      mediaClassName="max-h-[55vh] w-full object-contain"
+                      mimeType={fileQuery.data.mimeType}
+                      name={fileQuery.data.displayName ?? openPath}
+                      url={fileQuery.data.assetUrl}
+                    />
+                  </div>
+                ) : null}
                 <p className="font-medium text-foreground">
                   {messages.nodeDetail.assetFilePreview}
                 </p>
@@ -597,8 +607,6 @@ export function FileNodeDetailView({
   }
 
   const { node, asset } = detail;
-  const Icon = assetKindIcon(asset.mimeType);
-  const isImage = asset.mimeType.startsWith("image/");
 
   return (
     <div className="flex h-full min-h-0 w-full flex-col bg-background">
@@ -639,19 +647,12 @@ export function FileNodeDetailView({
 
       <div className="min-h-0 flex-1 overflow-auto p-4 md:p-6">
         <div className="mx-auto grid h-full min-h-[320px] max-w-5xl place-items-center overflow-hidden rounded-md border bg-muted">
-          {isImage ? (
-            <img alt={asset.name} className="max-h-[65vh] w-full object-contain" src={asset.url} />
-          ) : (
-            <a
-              className="flex flex-col items-center gap-2 p-8 text-muted-foreground text-sm hover:text-foreground"
-              href={asset.url}
-              rel="noreferrer"
-              target="_blank"
-            >
-              <Icon className="size-12" />
-              {messages.assets.openFile}
-            </a>
-          )}
+          <AssetMediaPreview
+            mediaClassName="max-h-[65vh] w-full object-contain"
+            mimeType={asset.mimeType}
+            name={asset.name}
+            url={asset.url}
+          />
         </div>
       </div>
     </div>

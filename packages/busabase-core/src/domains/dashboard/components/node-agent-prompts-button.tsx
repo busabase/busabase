@@ -16,6 +16,7 @@
 // a button in, and it opens the same dialog (see `dashboard-shell.tsx`'s
 // `onOpenAgentPrompts`).
 
+import { Button } from "kui/button";
 import { Sparkles } from "lucide-react";
 import { useState } from "react";
 import { useCoreI18n } from "../../../i18n";
@@ -51,16 +52,20 @@ export function NodeAgentPromptsButton({
 
   return (
     <>
-      <button
+      <Button
         aria-label={messages.agentPrompts.title}
-        className="inline-flex shrink-0 items-center justify-center rounded-md border border-border/60 bg-card p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+        aria-expanded={open}
+        className="size-8 text-ai-strong shadow-none hover:bg-ai/17 hover:text-ai-strong data-[state=open]:bg-ai/17 dark:text-ai-soft dark:hover:text-ai-soft"
         data-testid="node-agent-prompts-button"
+        data-state={open ? "open" : "closed"}
         onClick={() => setOpen(true)}
+        size="icon"
         title={messages.agentPrompts.title}
         type="button"
+        variant="ghost"
       >
         <Sparkles className="size-3.5" />
-      </button>
+      </Button>
       {open && (
         <NodeAgentPromptsDialog
           nodeId={nodeId}

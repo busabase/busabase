@@ -15,6 +15,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "kui/dialog";
 import {
   Box,
   Check,
+  ChevronRight,
   Eye,
   GitMerge,
   History,
@@ -266,10 +267,11 @@ export function RecordDetailView({
             action={
               historyChangeRequests[0] ? (
                 <Link
-                  className="text-muted-foreground text-sm transition-colors hover:text-foreground"
+                  className="inline-flex items-center gap-0.5 rounded-md px-1.5 py-1 text-muted-foreground text-xs transition-colors hover:bg-muted/60 hover:text-foreground"
                   href={mergeSearchIntoHref(`/inbox/${historyChangeRequests[0].id}`, currentSearch)}
                 >
-                  {messages.recordView.source}
+                  {messages.recordView.view}
+                  <ChevronRight aria-hidden="true" size={13} />
                 </Link>
               ) : undefined
             }
@@ -327,10 +329,11 @@ export function RecordDetailView({
             title={messages.recordView.audit}
             action={
               <Link
-                className="text-muted-foreground text-sm transition-colors hover:text-foreground"
+                className="inline-flex items-center gap-0.5 rounded-md px-1.5 py-1 text-muted-foreground text-xs transition-colors hover:bg-muted/60 hover:text-foreground"
                 href={mergeSearchIntoHref("/activity", currentSearch)}
               >
                 {messages.recordView.seeAll}
+                <ChevronRight aria-hidden="true" size={13} />
               </Link>
             }
           >

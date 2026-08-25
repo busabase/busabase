@@ -286,6 +286,26 @@ export const dashboardZhTW: CoreI18nMessages = {
     reviewNow: "現在去審查",
     noPending: "全部已合併——套件已在你的空間中生效。",
     done: "完成",
+    resultDescription: "這是剛剛進入你空間的東西。",
+    alsoInstallToAgent: "順便把這個 App 的手冊給你的 Agent",
+    chooseHow: "這裡有兩種裝法，選一種符合你工作方式的。",
+    tabAgent: "Agent 安裝",
+    tabUi: "介面安裝",
+    agentIntro:
+      "把「{name}」的操作手冊交給你已經在用的 Agent（Claude Code、Codex、Cursor）。它會學會這個 App 怎麼用；這個空間裡不會建立或更動任何東西。",
+    agentPromptLabel: "把這段貼上給你的 Agent",
+    agentPromptBody:
+      "安裝 Busabase 應用技能「{name}」，以便你之後可以操作它：\n\n{command}\n\n只安裝技能——先不要在我的 Busabase 空間裡建立、修改或刪除任何東西。裝好之後，用幾句話告訴我這個 App 是做什麼的，以及如果我讓你去建置它，會建立些什麼。",
+    agentRefHint: "安裝的是倉庫預設分支。這條目錄讀取自 {ref}。",
+    agentConnectTitle: "還要讓 Agent 能存取這個空間",
+    agentConnectBody:
+      "技能告訴 Agent 這個 App 怎麼用；連接 Busabase 才讓它真的能讀寫你的資料。只需設定一次。",
+    agentConnectAction: "連接你的 Agent",
+    agentNoSkillTitle: "這個套件不帶 Agent 手冊",
+    agentNoSkillBody:
+      "這裡沒有 SKILL.md，Agent 無從安裝，只能靠猜你的表結構。請改用介面安裝；裝完仍可以在節點的「•••」選單裡把該節點的提示詞交給 Agent。",
+    uiIntro:
+      "在這個空間裡建立資料夾、資料表和 App。這樣裝 Agent 學不到任何東西——你隨時可以從「Agent 安裝」分頁把手冊給它。",
   },
   agentPrompts: {
     title: "Agent 提示詞",

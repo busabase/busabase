@@ -1,4 +1,12 @@
-import { ArrowLeft, Check, ChevronRight, PenLine, X } from "lucide-react";
+import {
+  ArrowLeft,
+  Check,
+  ChevronRight,
+  PanelRightClose,
+  PanelRightOpen,
+  PenLine,
+  X,
+} from "lucide-react";
 import { SPALink as Link } from "openlib/ui/dashboard";
 import type { ReactNode } from "react";
 import { useCoreI18n } from "../../../i18n";
@@ -48,7 +56,7 @@ export function BusabaseSidePanel({ children, open }: { children: ReactNode; ope
 // Shared rail collapse/expand toggle, placed in the detail header (xl only).
 export function RailToggleButton({ onToggle, open }: { onToggle: () => void; open: boolean }) {
   const messages = useCoreI18n();
-  const label = open ? messages.common.close : messages.common.open;
+  const label = open ? messages.sidePanel.collapse : messages.sidePanel.open;
 
   return (
     <button
@@ -58,7 +66,7 @@ export function RailToggleButton({ onToggle, open }: { onToggle: () => void; ope
       title={label}
       type="button"
     >
-      <ChevronRight className={open ? "" : "rotate-180"} size={15} />
+      {open ? <PanelRightClose size={15} /> : <PanelRightOpen size={15} />}
     </button>
   );
 }

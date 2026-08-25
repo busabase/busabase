@@ -35,6 +35,36 @@ export const AssetVOSchema = z.object({
 });
 export type AssetVO = z.infer<typeof AssetVOSchema>;
 
+/**
+ * Optional bounds on `GET /assets`.
+ *
+ * The route took no input at all, so it always returned EVERY asset in the
+ * space — 6.16 MB for 10,025 assets on a real workspace, which is more than an
+ * agent's whole context and more than a mobile client should ever download.
+ *
+ * Both fields are optional and the response shape is unchanged, so an existing
+ * caller that passes nothing still gets the full array it always got. Pass
+ * `limit` to page: assets come back newest-first, and `cursor` is the `id` of
+ * the last asset from the previous page. A page shorter than `limit` (including
+ * an empty one) means there are no more.
+ */
+export const ListAssetsInputSchema = z
+  .object({
+    limit: z.coerce
+      .number()
+      .int()
+      .min(1)
+      .max(200)
+      .optional()
+      .describe("Page size, 1-200. Omit to return every asset (the historical behaviour)."),
+    cursor: z
+      .string()
+      .optional()
+      .describe("Asset id of the last row of the previous page. Requires `limit`."),
+  })
+  .optional();
+export type ListAssetsDTO = z.infer<typeof ListAssetsInputSchema>;
+
 /** One place an asset is referenced — the row behind "Where Used". */
 export const AssetUsageVOSchema = z.object({
   ownerType: z.enum(["drive", "skill", "airapp", "base", "doc", "file_node"]),

@@ -2,7 +2,14 @@ import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { createRouterClient } from "@orpc/server";
+import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { getDb } from "../src/db";
+import { busabaseCommits } from "../src/db/schema";
+import {
+  LIST_OMITTED_FIELD_VALUE,
+  LIST_OMITTED_LONG_TEXT_VALUE,
+} from "../src/domains/dashboard/utils/list-payload-preview";
 import { busabaseRouter } from "../src/router";
 
 /**
@@ -15,8 +22,9 @@ import { busabaseRouter } from "../src/router";
  * inbox page of 41 such rows was 5.2 MB — 1.1s of download against ~350ms of
  * server time.
  *
- * These tests pin that a list row stays small no matter how large the underlying
- * content is, while the detail view still returns everything.
+ * These PGlite integration tests pin that PostgreSQL returns a compact list
+ * preview no matter how large the underlying content is, while the detail
+ * query still returns everything.
  */
 
 type Client = ReturnType<typeof createRouterClient<typeof busabaseRouter, Record<never, never>>>;
@@ -53,12 +61,18 @@ describe("inbox list payload size", () => {
     });
     baseId = base.id;
     for (let i = 0; i < ROWS; i++) {
-      await client.bases.createChangeRequest({
+      const changeRequest = await client.bases.createChangeRequest({
         baseId,
         fields: { name: `Row ${i}`, body: HUGE_FIELD },
         submittedBy: "local-producer",
         autoMerge: false,
       });
+      const commitId = changeRequest.operations[0]?.headCommit.id;
+      if (!commitId) throw new Error("seeded commit not found");
+      await (await getDb())
+        .update(busabaseCommits)
+        .set({ payload: { name: `Row ${i}`, body: HUGE_FIELD, config: { files: [HUGE_FIELD] } } })
+        .where(eq(busabaseCommits.id, commitId));
     }
   }, 300_000);
 
@@ -95,9 +109,12 @@ describe("inbox list payload size", () => {
     expect(String(fields.name)).toMatch(/^Row \d+$/);
     // The key survives (a caller can still see the field exists)...
     expect(fields).toHaveProperty("body");
+    expect(fields).toHaveProperty("config");
     // ...but the value is a short, self-describing marker, not the content.
     expect(bytesOf(fields.body)).toBeLessThan(200);
-    expect(String(fields.body)).toContain("omitted");
+    expect(fields.body).toBe(LIST_OMITTED_LONG_TEXT_VALUE);
+    expect(bytesOf(fields.config)).toBeLessThan(200);
+    expect(fields.config).toBe(LIST_OMITTED_FIELD_VALUE);
   }, 120_000);
 
   it("the detail view still returns the full content", async () => {
@@ -107,6 +124,10 @@ describe("inbox list payload size", () => {
 
     const detail = await client.changeRequests.get({ changeRequestId: row.id } as never);
     const body = detail?.operations[0]?.headCommit.payload.body;
+    const config = detail?.operations[0]?.headCommit.payload.config as
+      | { files?: unknown[] }
+      | undefined;
     expect(String(body)).toHaveLength(HUGE_FIELD.length);
+    expect(String(config?.files?.[0])).toHaveLength(HUGE_FIELD.length);
   }, 120_000);
 });

@@ -93,6 +93,16 @@ export const AgentSessionVOSchema = z.object({
 });
 export type AgentSessionVO = z.infer<typeof AgentSessionVOSchema>;
 
+/** One connected agent backend in the current space and authenticated user's scope. */
+export const AgentConnectionVOSchema = z.object({
+  slug: z.string(),
+  agentName: z.string(),
+  transport: AgentTransportSchema,
+  sessionCount: z.number().int().nonnegative(),
+  latest: AgentSessionVOSchema.nullable(),
+});
+export type AgentConnectionVO = z.infer<typeof AgentConnectionVOSchema>;
+
 /**
  * One streamed event from a session.
  *

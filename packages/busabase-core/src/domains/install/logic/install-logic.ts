@@ -196,6 +196,30 @@ const toPlanVO = (
   }
 
   const manifest = plan.tree.manifest;
+
+  // The root `SKILL.md` becomes a real Skill node on install (`apply.ts`), but
+  // the package tree keeps it BESIDE `nodes` rather than inside it — so a
+  // preview built from `nodes` alone silently omits the one node that decides
+  // whether an agent can use what was just installed, and reports `skills: 0`
+  // for a package that plainly carries a manual. Fold it in here, where the
+  // outline is built for a human to read, rather than in `countTree` (whose
+  // counts also police the file-count cap on the bytes actually walked).
+  const rootSkill = plan.tree.rootSkill;
+  const nodes = flattenNodes(plan.tree.nodes, "", 0);
+  const counts = { ...plan.counts };
+  if (rootSkill) {
+    nodes.unshift({
+      path: rootSkill.slug,
+      slug: rootSkill.slug,
+      name: rootSkill.name,
+      type: "skill",
+      depth: 0,
+      fileCount: rootSkill.files.length,
+    });
+    counts.skills += 1;
+    counts.files += rootSkill.files.length;
+  }
+
   return {
     package: {
       name: manifest.name,
@@ -213,8 +237,8 @@ const toPlanVO = (
       subdir: source.subdir,
     },
     targetFolderSlug: plan.targetFolderSlug,
-    nodes: flattenNodes(plan.tree.nodes, "", 0),
-    counts: plan.counts,
+    nodes,
+    counts,
     collisions: plan.collisions.map((collision) => ({
       kind: collision.kind,
       slug: collision.slug,

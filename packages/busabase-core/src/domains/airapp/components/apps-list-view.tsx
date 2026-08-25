@@ -38,7 +38,7 @@ export function AppsListView({ orpc }: { orpc: BusabaseQueryUtils }) {
               <div
                 // biome-ignore lint/suspicious/noArrayIndexKey: fixed-length skeleton placeholder list
                 key={index}
-                className="aspect-square animate-pulse rounded-lg border border-border/60 bg-muted/40"
+                className="aspect-[3/2] animate-pulse rounded-lg border border-border/60 bg-muted/40"
               />
             ))}
           </div>
