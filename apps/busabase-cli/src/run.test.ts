@@ -2,7 +2,8 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
-import { HELP, runCli } from "./run";
+import { EXIT_CODES } from "./errors";
+import { HELP, HELP_ALL, runCli } from "./run";
 
 const originalFetch = global.fetch;
 
@@ -64,6 +65,26 @@ describe("busabase-cli commands", () => {
     expect(HELP).not.toContain(["--dra", "ft-id"].join(""));
     expect(HELP).not.toContain("--attachment-id <id>");
     expect(HELP).not.toContain("--content-hash <hash>");
+    expect(HELP).toContain(
+      "records bulk-update-change-request --base-id <value> --updates-json <json|@file>",
+    );
+  });
+
+  it("requires the bulk-update JSON before dispatching a request", async () => {
+    global.fetch = vi.fn() as typeof fetch;
+
+    const exitCode = await runCli([
+      "--base-url",
+      "http://localhost:15419",
+      "records",
+      "bulk-update-change-request",
+      "--base-id",
+      "bas_1",
+    ]);
+
+    // A missing required flag is a usage error, which now has its own exit code.
+    expect(exitCode).toBe(EXIT_CODES.USAGE);
+    expect(global.fetch).not.toHaveBeenCalled();
   });
 
   it("documents the default-space login policy for agents", async () => {
@@ -80,6 +101,10 @@ describe("busabase-cli commands", () => {
   });
 
   it("generates commands for the full OpenAPI surface (previously uncovered domains)", () => {
+    // Asserted against HELP_ALL: some of these are superseded by a task command
+    // and so are hidden from the index. Hidden is not gone — they still run, and
+    // the point here is that the generator EMITS them.
+    const HELP = HELP_ALL;
     // Record write/delete — the biggest gap the generator fills.
     expect(HELP).toContain("records update-change-request");
     expect(HELP).toContain("records delete-change-request");
@@ -1181,7 +1206,7 @@ describe("busabase-cli commands", () => {
       "101",
     ]);
 
-    expect(exitCode).toBe(1);
+    expect(exitCode).toBe(EXIT_CODES.USAGE);
     expect(global.fetch).not.toHaveBeenCalled();
   });
 
@@ -1261,7 +1286,7 @@ describe("busabase-cli commands", () => {
     global.fetch = vi.fn() as unknown as typeof fetch;
     const exitCode = await runCli(["attachments", "upload", "--file", "cover.svg"]);
 
-    expect(exitCode).toBe(1);
+    expect(exitCode).toBe(EXIT_CODES.USAGE);
     expect(global.fetch).not.toHaveBeenCalled();
   });
 
@@ -1442,7 +1467,7 @@ describe("busabase-cli commands", () => {
       "/records",
     ]);
 
-    expect(exitCode).toBe(1);
+    expect(exitCode).toBe(EXIT_CODES.SERVER_ERROR);
     // `api` goes through rawFetch (outside the typed contract) — its
     // `formatRawErrorBody` extracts the server's `error` field instead of
     // dumping the raw `{"error":"..."}` JSON verbatim.

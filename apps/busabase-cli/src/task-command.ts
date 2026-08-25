@@ -89,7 +89,9 @@ const applyParam = (cmd: Command, param: TaskParam): void => {
       cmd.option(`${flag} <value>`, `${description} (repeatable)`, collect);
       return;
     case "json": {
-      cmd.option(`${jsonFlagFor(param)} <json|@file>`, description);
+      const jsonOption = `${jsonFlagFor(param)} <json|@file>`;
+      if (param.required) cmd.requiredOption(jsonOption, description);
+      else cmd.option(jsonOption, description);
       if (param.cliShorthand) {
         cmd.option(
           `${param.cliShorthand.flag} ${param.cliShorthand.placeholder}`,
@@ -204,6 +206,15 @@ const registerOne = (
     applyParam(cmd, param);
   }
 
+  // `guidance` is the paragraph that tells a caller how to USE the command —
+  // that `nextCursor` non-null means keep paging rather than raise `limit`, that
+  // finding a record by field value is a different task. The MCP adapter has
+  // always delivered it; the CLI rendered params and examples and dropped it, so
+  // an agent driving the CLI was told strictly less than the same agent over MCP.
+  if (task.guidance) {
+    cmd.addHelpText("after", `\n${wrapGuidance(rewriteTaskNames(task.guidance))}`);
+  }
+
   if (task.examples && task.examples.length > 0 && Object.keys(preset).length === 0) {
     cmd.addHelpText("after", `\nExamples:\n  ${task.examples.join("\n  ")}`);
   }
@@ -224,9 +235,43 @@ export const registerTaskCommands = (
   deps: TaskCommandDeps,
 ): void => {
   for (const task of tasks) {
+    cliPathByTaskName.set(task.name, `busabase-cli ${task.cliPath.join(" ")}`);
+  }
+  for (const task of tasks) {
     registerOne(program, task, deps, task.cliPath);
     for (const variant of task.cliVariants ?? []) {
       registerOne(program, task, deps, variant.path, variant.preset, variant.summary);
     }
   }
+};
+
+/**
+ * Guidance is written once and read by two surfaces, so it names sibling tasks
+ * by their MCP tool name (`record_find_by_field`). That is not something a CLI
+ * caller can type — the command is `records by-field-text` — so the shared text
+ * is rewritten to this surface's vocabulary rather than forked.
+ */
+const rewriteTaskNames = (text: string): string =>
+  text.replace(/`([a-z][a-z0-9_]*)`/g, (match, name: string) => {
+    const path = cliPathByTaskName.get(name);
+    return path ? `\`${path}\`` : match;
+  });
+
+/** Filled by {@link registerTaskCommands}; empty until the surface is built. */
+const cliPathByTaskName = new Map<string, string>();
+
+/** Reflow guidance to the width commander uses for the rest of the help screen. */
+const wrapGuidance = (text: string, width = 78): string => {
+  const lines: string[] = [];
+  let line = "";
+  for (const word of text.split(/\s+/).filter(Boolean)) {
+    if (line && `${line} ${word}`.length > width) {
+      lines.push(line);
+      line = word;
+    } else {
+      line = line ? `${line} ${word}` : word;
+    }
+  }
+  if (line) lines.push(line);
+  return lines.join("\n");
 };
