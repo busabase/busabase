@@ -1,8 +1,25 @@
 diff --git a/dist/__sw__.js b/dist/__sw__.js
-index 307376c0cbb4940d59529d698c101dd06be062bb..3bcacbcdcccf30760a31ecf35ef7061f0e87f35b 100644
+index 307376c0cbb4940d59529d698c101dd06be062bb..1b00146dbc2263d28422aae40340da0ee10f7db9 100644
 --- a/dist/__sw__.js
 +++ b/dist/__sw__.js
-@@ -708,6 +708,84 @@ self.addEventListener("fetch", (event) => {
+@@ -508,6 +508,16 @@ self.addEventListener("message", (event) => {
+   const data = event.data;
+   if (!data) return;
+ 
++  // [busabase patch] The dashboard host can have an active registration while
++  // its current document is still uncontrolled (notably on the first AirApp
++  // visit or after a reload that bypassed the worker). Let the trusted host ask
++  // this already-active worker to claim the page before Nodepod boots. This is
++  // deliberately separate from `init`: it creates no MessagePort or pod state.
++  if (data.type === "busabase-host-claim") {
++    event.waitUntil(self.clients.claim());
++    return;
++  }
++
+   // register a new tab's MessagePort. if the same tab reinits (same token,
+   // new channel from controllerchange) drop the old port first so stale
+   // entries don't accumulate. RequestProxy resends claim-instance after.
+@@ -708,6 +718,84 @@ self.addEventListener("fetch", (event) => {
      return;
    }
  
@@ -87,7 +104,7 @@ index 307376c0cbb4940d59529d698c101dd06be062bb..3bcacbcdcccf30760a31ecf35ef7061f
    // 2. only same-origin (and localhost-alias) URLs can belong to a pod;
    //    cross-origin (fonts, CDNs) always passes through
    const sameOrigin =
-@@ -739,6 +817,13 @@ self.addEventListener("fetch", (event) => {
+@@ -739,6 +827,13 @@ self.addEventListener("fetch", (event) => {
      return;
    }
  
@@ -101,7 +118,7 @@ index 307376c0cbb4940d59529d698c101dd06be062bb..3bcacbcdcccf30760a31ecf35ef7061f
    const refUrl = (() => {
      if (!request.referrer) return null;
      try {
-@@ -766,6 +851,17 @@ self.addEventListener("fetch", (event) => {
+@@ -766,6 +861,17 @@ self.addEventListener("fetch", (event) => {
      }
    }
  
@@ -119,7 +136,7 @@ index 307376c0cbb4940d59529d698c101dd06be062bb..3bcacbcdcccf30760a31ecf35ef7061f
    const isNavigation = request.mode === "navigate";
  
    // 5. subresource whose referer (or client URL) resolves via pathClaims.
-@@ -791,6 +887,15 @@ self.addEventListener("fetch", (event) => {
+@@ -791,6 +897,15 @@ self.addEventListener("fetch", (event) => {
            if (!pod && client && client.url) {
              try {
                const clientPath = stripPreviewPrefix(new URL(client.url).pathname);
