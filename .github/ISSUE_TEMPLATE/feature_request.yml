@@ -1,0 +1,46 @@
+name: Feature request
+description: Propose an improvement to the Busabase agent workspace.
+title: "[Feature]: "
+labels:
+  - enhancement
+body:
+  - type: checkboxes
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched existing issues and Discussions for this idea.
+          required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What user or agent workflow is difficult today?
+    validations:
+      required: true
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Desired outcome
+      description: Describe the behavior and user value, not only an implementation.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: How do you handle this workflow today?
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Relevant surface
+      options:
+        - Bases and records
+        - Docs, files, and drives
+        - Skills and agents
+        - AirApps and rich nodes
+        - Change Requests and review
+        - CLI, SDK, MCP, or OpenAPI
+        - Desktop or mobile
+        - Other
+    validations:
+      required: true

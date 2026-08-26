@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Questions and setup help
+    url: https://github.com/busabase/busabase/discussions/categories/q-a
+    about: Ask the community before opening a bug report.
+  - name: Product ideas and discussion
+    url: https://github.com/busabase/busabase/discussions/categories/ideas
+    about: Discuss an idea before turning it into a scoped feature request.
+  - name: Security vulnerability
+    url: https://github.com/busabase/busabase/security/advisories/new
+    about: Report security issues privately. Do not open a public issue.
