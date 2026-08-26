@@ -161,6 +161,20 @@ export function NodeDetailSkeleton({
   );
 }
 
+/** Canvas-shaped placeholder used while the heavy Excalidraw module is loading. */
+export function WhiteboardContentSkeleton() {
+  return (
+    <div className="flex h-full min-h-72 w-full gap-3 p-4" aria-hidden>
+      <div className="flex w-10 shrink-0 flex-col gap-2 rounded-md border border-border/50 bg-card p-2">
+        <Skeleton className="size-5 rounded" />
+        <Skeleton className="size-5 rounded" />
+        <Skeleton className="size-5 rounded" />
+      </div>
+      <Skeleton className="h-full min-h-64 flex-1 rounded-md" />
+    </div>
+  );
+}
+
 const FILE_CONTENT_LINES = [
   { id: "file-line-1", width: "92%" },
   { id: "file-line-2", width: "76%" },

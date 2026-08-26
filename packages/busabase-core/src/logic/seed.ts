@@ -37,6 +37,7 @@ import {
   COVER_IMAGE_FIXTURE_ATTACHMENT_ID,
   DEMO_BLOG_BASE_NODE_ID,
 } from "../demo/dataset";
+import { DEMO_GREP_FILE_NODE_ICON, DEMO_ROOT_NODE_ICON, seedNodeIcon } from "../demo/node-icons";
 import type {
   SeedCommentDef,
   SeedDocDef,
@@ -554,10 +555,19 @@ const seedFileTreeNodesIfMissing = async (createdAt: Date, defs: SeedFileTreeDef
         slug: folderConfig.slug,
         name: folderConfig.name,
         description: folderConfig.description,
+        icon: seedNodeIcon({ ...folderConfig, nodeType: "folder" }),
         position: folderConfig.position,
         createdAt,
         updatedAt: createdAt,
       });
+    } else {
+      await db
+        .update(busabaseNodes)
+        .set({
+          icon: seedNodeIcon({ ...folderConfig, nodeType: "folder" }),
+          updatedAt: createdAt,
+        })
+        .where(eq(busabaseNodes.id, folderConfig.folderNodeId));
     }
   }
 
@@ -582,6 +592,7 @@ const seedFileTreeNodesIfMissing = async (createdAt: Date, defs: SeedFileTreeDef
           slug: def.slug,
           name: def.name,
           description: def.description,
+          icon: seedNodeIcon({ ...def, nodeType: def.nodeType }),
           metadata,
           updatedAt: createdAt,
         })
@@ -594,6 +605,7 @@ const seedFileTreeNodesIfMissing = async (createdAt: Date, defs: SeedFileTreeDef
         slug: def.slug,
         name: def.name,
         description: def.description,
+        icon: seedNodeIcon({ ...def, nodeType: def.nodeType }),
         metadata,
         position: def.position,
         createdAt,
@@ -660,6 +672,7 @@ const seedRichNodesIfMissing = async (createdAt: Date, defs: SeedRichNodeDef[]) 
       slug: def.slug,
       name: def.name,
       description: def.description,
+      icon: seedNodeIcon({ ...def, nodeType: def.nodeType }),
       metadata: def.metadata,
       position: def.position,
       updatedAt: createdAt,
@@ -693,6 +706,7 @@ const seedFormNodesIfMissing = async (createdAt: Date, defs: SeedFormDef[]) => {
       slug: def.slug,
       name: def.name,
       description: def.description,
+      icon: seedNodeIcon({ ...def, nodeType: "form" }),
       position: def.position,
       updatedAt: createdAt,
     };
@@ -755,10 +769,19 @@ const seedDocNodesIfMissing = async (createdAt: Date, docs: SeedDocDef[]) => {
       slug: "docs",
       name: "Docs",
       description: "Long-form Markdown documents edited through review.",
+      icon: seedNodeIcon({ name: "Docs", nodeType: "folder", slug: "docs" }),
       position: 3,
       createdAt,
       updatedAt: createdAt,
     });
+  } else {
+    await db
+      .update(busabaseNodes)
+      .set({
+        icon: seedNodeIcon({ name: "Docs", nodeType: "folder", slug: "docs" }),
+        updatedAt: createdAt,
+      })
+      .where(eq(busabaseNodes.id, DOCS_FOLDER_NODE_ID));
   }
 
   for (const doc of docs) {
@@ -773,6 +796,7 @@ const seedDocNodesIfMissing = async (createdAt: Date, docs: SeedDocDef[]) => {
       slug: doc.slug,
       name: doc.name,
       description: doc.description,
+      icon: seedNodeIcon({ ...doc, nodeType: "doc" }),
     };
     if (existingDoc) {
       await db
@@ -842,11 +866,20 @@ const ensureFilesFolder = async (createdAt: Date) => {
         slug: "files",
         name: "Files",
         description: "First-class uploaded files backed by the Asset library.",
+        icon: seedNodeIcon({ name: "Files", nodeType: "folder", slug: "files" }),
         position: 4,
         createdAt,
         updatedAt: createdAt,
       })
       .onConflictDoNothing();
+  } else {
+    await db
+      .update(busabaseNodes)
+      .set({
+        icon: seedNodeIcon({ name: "Files", nodeType: "folder", slug: "files" }),
+        updatedAt: createdAt,
+      })
+      .where(eq(busabaseNodes.id, FILES_FOLDER_NODE_ID));
   }
 };
 
@@ -866,6 +899,10 @@ const seedFileNodesIfMissing = async (createdAt: Date, files: SeedFileDef[]) => 
       .where(eq(busabaseNodes.id, file.nodeId))
       .limit(1);
     if (existingFile) {
+      await db
+        .update(busabaseNodes)
+        .set({ icon: seedNodeIcon({ ...file, nodeType: "file" }), updatedAt: createdAt })
+        .where(eq(busabaseNodes.id, file.nodeId));
       continue;
     }
 
@@ -922,6 +959,7 @@ const seedFileNodesIfMissing = async (createdAt: Date, files: SeedFileDef[]) => 
       slug: file.slug,
       name: file.name,
       description: file.description,
+      icon: seedNodeIcon({ ...file, nodeType: "file" }),
       metadata: { assetId: file.assetId },
       position: file.position,
       createdAt,
@@ -978,6 +1016,10 @@ const seedGrepDemoFixture = async (createdAt: Date) => {
     .where(eq(busabaseNodes.id, GREP_DEMO_NODE_ID))
     .limit(1);
   if (existing) {
+    await db
+      .update(busabaseNodes)
+      .set({ icon: DEMO_GREP_FILE_NODE_ICON, updatedAt: createdAt })
+      .where(eq(busabaseNodes.id, GREP_DEMO_NODE_ID));
     return;
   }
   // Independent of `seedFileNodesIfMissing` — this fixture seeds unconditionally
@@ -1030,6 +1072,7 @@ const seedGrepDemoFixture = async (createdAt: Date) => {
     slug: "globex-cloud-invoice-2026-06-demo",
     name: "Globex Cloud Invoice (grep demo)",
     description: "Drive Grep Retrieval demo fixture — a binary PDF with agent-supplied text.",
+    icon: DEMO_GREP_FILE_NODE_ICON,
     metadata: { assetId: GREP_DEMO_ASSET_ID },
     position: 100,
     createdAt,
@@ -1458,6 +1501,11 @@ const applySeedScenario = async (scenario: SeedScenario) => {
   const db = await getDb();
   const createdAt = now();
 
+  await db
+    .update(busabaseNodes)
+    .set({ icon: DEMO_ROOT_NODE_ICON, updatedAt: createdAt })
+    .where(eq(busabaseNodes.id, ROOT_NODE_ID));
+
   const existingNodes = await db.select().from(busabaseNodes);
   const existingNodeById = new Map(existingNodes.map((node) => [node.id, node]));
   const existingNodeByParentSlug = new Map(
@@ -1476,6 +1524,7 @@ const applySeedScenario = async (scenario: SeedScenario) => {
         .set({
           name: folder.name,
           description: folder.description,
+          icon: seedNodeIcon({ ...folder, nodeType: "folder" }),
           position: folder.position,
           updatedAt: createdAt,
         })
@@ -1490,6 +1539,7 @@ const applySeedScenario = async (scenario: SeedScenario) => {
         slug: folder.slug,
         name: folder.name,
         description: folder.description,
+        icon: seedNodeIcon({ ...folder, nodeType: "folder" }),
         metadata: {},
         position: folder.position,
         createdAt,
@@ -1522,6 +1572,7 @@ const applySeedScenario = async (scenario: SeedScenario) => {
           slug: base.slug,
           name: base.name,
           description: base.description,
+          icon: seedNodeIcon({ ...base, nodeType: "base" }),
           position: baseIndex,
           updatedAt: createdAt,
         })
@@ -1534,6 +1585,7 @@ const applySeedScenario = async (scenario: SeedScenario) => {
         slug: base.slug,
         name: base.name,
         description: base.description,
+        icon: seedNodeIcon({ ...base, nodeType: "base" }),
         position: baseIndex,
         createdAt,
         updatedAt: createdAt,

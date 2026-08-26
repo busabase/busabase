@@ -14,6 +14,7 @@ import { Bot, MoreHorizontal, Plus, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { ConfirmActionDialog } from "../../dashboard/components/primitives";
+import { AgentLoadingState, AgentQueryErrorState } from "./agent-query-state";
 import { TransportBadge } from "./transport-badge";
 
 interface AgentsListViewProps {
@@ -51,6 +52,20 @@ export function AgentsListView({ orpc, onSelectAgent, onAddAgent }: AgentsListVi
       toast.error(error instanceof Error ? error.message : "Could not delete agent connection.");
     },
   });
+
+  if (connections.isPending) {
+    return <AgentLoadingState />;
+  }
+
+  if (connections.isError) {
+    return (
+      <AgentQueryErrorState
+        error={connections.error}
+        onRetry={() => void connections.refetch()}
+        title="Couldn't load connected agents"
+      />
+    );
+  }
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">

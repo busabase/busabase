@@ -23,6 +23,7 @@ import type {
   ViewVO,
 } from "busabase-contract/types";
 import type { DemoUseCase } from "../context";
+import { DEMO_ROOT_NODE_ICON, seedNodeIcon, withSeedNodeIcons } from "./node-icons";
 import {
   AGENT_INTEGRATIONS_BASES,
   AGENT_INTEGRATIONS_RECORDS,
@@ -3271,6 +3272,7 @@ export const buildDemoDataset = (
       slug: folder.slug,
       name: folder.name,
       description: folder.description,
+      icon: seedNodeIcon({ ...folder, nodeType: "folder" }),
       metadata: folder.metadata ?? {},
       position: folder.position,
       createdAt: rootCreatedAt,
@@ -3287,6 +3289,7 @@ export const buildDemoDataset = (
             slug: base.slug,
             name: base.name,
             description: base.description,
+            icon: seedNodeIcon({ ...base, nodeType: "base" }),
             metadata: {},
             position: index,
             createdAt: rootCreatedAt,
@@ -3302,6 +3305,7 @@ export const buildDemoDataset = (
           slug: richNode.slug,
           name: richNode.name,
           description: richNode.description,
+          icon: seedNodeIcon({ ...richNode, nodeType: richNode.nodeType }),
           metadata: richNode.metadata,
           position: richNode.position,
           createdAt: rootCreatedAt,
@@ -3317,6 +3321,7 @@ export const buildDemoDataset = (
           slug: form.slug,
           name: form.name,
           description: form.description,
+          icon: seedNodeIcon({ ...form, nodeType: "form" }),
           metadata: {},
           position: form.position,
           createdAt: rootCreatedAt,
@@ -3341,6 +3346,7 @@ export const buildDemoDataset = (
     slug: doc.slug,
     name: doc.name,
     description: doc.description,
+    icon: seedNodeIcon({ ...doc, nodeType: "doc" }),
     metadata: {},
     position: doc.position ?? index,
     createdAt: rootCreatedAt,
@@ -3357,6 +3363,7 @@ export const buildDemoDataset = (
       slug: "docs",
       name: "Docs",
       description: "Long-form Markdown documents edited through review.",
+      icon: seedNodeIcon({ name: "Docs", nodeType: "folder", slug: "docs" }),
       metadata: {},
       position: 21,
       createdAt: rootCreatedAt,
@@ -3374,6 +3381,7 @@ export const buildDemoDataset = (
     slug: file.slug,
     name: file.name,
     description: file.description,
+    icon: seedNodeIcon({ ...file, nodeType: "file" }),
     metadata: { assetId: file.assetId },
     position: file.position ?? index,
     createdAt: rootCreatedAt,
@@ -3390,6 +3398,7 @@ export const buildDemoDataset = (
       slug: "files",
       name: "Files",
       description: "First-class uploaded files backed by the Asset library.",
+      icon: seedNodeIcon({ name: "Files", nodeType: "folder", slug: "files" }),
       metadata: {},
       position: 22,
       createdAt: rootCreatedAt,
@@ -3447,6 +3456,7 @@ export const buildDemoDataset = (
         slug: def.slug,
         name: def.name,
         description: def.description,
+        icon: seedNodeIcon({ ...def, nodeType: type }),
         metadata: { entryFile: config.entryFile, visibility: "workspace", version: "0.1.0" },
         position: def.position,
         createdAt: rootCreatedAt,
@@ -3463,6 +3473,7 @@ export const buildDemoDataset = (
         slug: config.slug,
         name: config.name,
         description: config.description,
+        icon: seedNodeIcon({ ...config, nodeType: "folder" }),
         metadata: {},
         position: config.position,
         createdAt: rootCreatedAt,
@@ -3481,6 +3492,7 @@ export const buildDemoDataset = (
     slug: "root",
     name: "Local workspace",
     description: "The root of this self-hosted Busabase workspace.",
+    icon: DEMO_ROOT_NODE_ICON,
     metadata: {},
     position: 0,
     createdAt: rootCreatedAt,
@@ -3804,35 +3816,36 @@ export const buildDemoDataset = (
 };
 
 /** English default seed — used by ensureReady() to populate a fresh local workspace. */
-export const englishScenario: SeedScenario = withCmsDemoStandard({
-  folders: [...DEMO_FOLDERS, ...(enNodeTypesScenario.folders ?? [])],
-  bases: DEMO_BASES,
-  records: DEMO_RECORDS,
-  views: DEMO_VIEWS,
-  changeRequests: DEMO_CHANGE_REQUESTS,
-  docs: enNodeTypesScenario.docs,
-  files: enNodeTypesScenario.files,
-  fileTreeNodes: enNodeTypesScenario.fileTreeNodes,
-  richNodes: enNodeTypesScenario.richNodes,
-  comments: enNodeTypesScenario.comments,
-  forms: [
-    {
-      nodeId: "nod_form_guest_post",
-      folderNodeId: DEMO_CMS_FOLDER_NODE_ID,
-      slug: "guest-post-form",
-      name: "Submit a Guest Post",
-      description:
-        "An agent-authored public form. Submissions land in the Blog Posts base as a pending ChangeRequest for the editors to review — nothing is published directly.",
-      position: 9,
-      formId: "frm_guest_post",
-      targetBaseId: DEMO_BLOG_BASE_ID,
-      bindings: [
-        { inputName: "title", fieldSlug: "title", required: true, label: "Post title" },
-        { inputName: "body", fieldSlug: "body", required: true, label: "Draft" },
-      ],
-      page: {
-        theme: { brandColor: "#6d28d9" },
-        code: `<!doctype html>
+export const englishScenario: SeedScenario = withSeedNodeIcons(
+  withCmsDemoStandard({
+    folders: [...DEMO_FOLDERS, ...(enNodeTypesScenario.folders ?? [])],
+    bases: DEMO_BASES,
+    records: DEMO_RECORDS,
+    views: DEMO_VIEWS,
+    changeRequests: DEMO_CHANGE_REQUESTS,
+    docs: enNodeTypesScenario.docs,
+    files: enNodeTypesScenario.files,
+    fileTreeNodes: enNodeTypesScenario.fileTreeNodes,
+    richNodes: enNodeTypesScenario.richNodes,
+    comments: enNodeTypesScenario.comments,
+    forms: [
+      {
+        nodeId: "nod_form_guest_post",
+        folderNodeId: DEMO_CMS_FOLDER_NODE_ID,
+        slug: "guest-post-form",
+        name: "Submit a Guest Post",
+        description:
+          "An agent-authored public form. Submissions land in the Blog Posts base as a pending ChangeRequest for the editors to review — nothing is published directly.",
+        position: 9,
+        formId: "frm_guest_post",
+        targetBaseId: DEMO_BLOG_BASE_ID,
+        bindings: [
+          { inputName: "title", fieldSlug: "title", required: true, label: "Post title" },
+          { inputName: "body", fieldSlug: "body", required: true, label: "Draft" },
+        ],
+        page: {
+          theme: { brandColor: "#6d28d9" },
+          code: `<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8" />
@@ -3885,7 +3898,8 @@ export const englishScenario: SeedScenario = withCmsDemoStandard({
   </script>
 </body>
 </html>`,
+        },
       },
-    },
-  ],
-});
+    ],
+  }),
+);

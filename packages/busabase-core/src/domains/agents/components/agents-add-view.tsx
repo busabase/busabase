@@ -7,6 +7,7 @@ import { Badge } from "kui/badge";
 import { Button } from "kui/button";
 import { ArrowLeft, Bot, X } from "lucide-react";
 import { useEffect, useState } from "react";
+import { AgentLoadingState, AgentQueryErrorState } from "./agent-query-state";
 import { TransportBadge } from "./transport-badge";
 
 interface AgentsAddViewProps {
@@ -61,6 +62,20 @@ export function AgentsAddView({ orpc, onBack, onConnected, spaceId }: AgentsAddV
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);
   }, [createSession, orpc.agents.catalog, queryClient]);
+
+  if (catalog.isPending) {
+    return <AgentLoadingState />;
+  }
+
+  if (catalog.isError) {
+    return (
+      <AgentQueryErrorState
+        error={catalog.error}
+        onRetry={() => void catalog.refetch()}
+        title="Couldn't load the agent catalog"
+      />
+    );
+  }
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">

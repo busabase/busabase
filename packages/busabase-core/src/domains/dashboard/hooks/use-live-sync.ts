@@ -41,6 +41,7 @@ interface UseBusabaseLiveSyncOptions {
     bases: QueryKey;
     changeRequests: QueryKey;
     changeRequestsPaged: QueryKey;
+    inboxSnapshot: QueryKey;
     changeRequestCounts: QueryKey;
     nodes: QueryKey;
     // Partial key matching every `nodes.get` call regardless of nodeId — the
@@ -137,6 +138,7 @@ export function useBusabaseLiveSync({
       listKeys.bases,
       listKeys.changeRequests,
       listKeys.changeRequestsPaged,
+      listKeys.inboxSnapshot,
       listKeys.changeRequestCounts,
       listKeys.nodes,
       listKeys.nodeDetail,
@@ -193,6 +195,8 @@ export function useBusabaseLiveSync({
           return stableListKeys.changeRequests;
         case "changeRequestsPaged":
           return stableListKeys.changeRequestsPaged;
+        case "inboxSnapshot":
+          return stableListKeys.inboxSnapshot;
         case "nodeDetail":
           return stableListKeys.nodeDetail;
         case "nodes":
@@ -227,6 +231,7 @@ export function useBusabaseLiveSync({
       void queryClient.invalidateQueries({ queryKey: stableListKeys.recordsCount });
       void queryClient.invalidateQueries({ queryKey: stableListKeys.changeRequests });
       void queryClient.invalidateQueries({ queryKey: stableListKeys.changeRequestsPaged });
+      void queryClient.invalidateQueries({ queryKey: stableListKeys.inboxSnapshot });
       void queryClient.invalidateQueries({ queryKey: stableListKeys.changeRequestCounts });
       void queryClient.invalidateQueries({ queryKey: stableListKeys.auditEvents });
       if (activeBaseId) {

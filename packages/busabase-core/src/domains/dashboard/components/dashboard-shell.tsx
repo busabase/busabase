@@ -134,7 +134,7 @@ export type BusabaseDashboardChrome = Omit<
 interface BusabaseDashboardShellProps {
   children: ReactNode;
   nodes: NodeVO[];
-  activeChangeRequestCount: number;
+  activeChangeRequestCount?: number;
   onSearchClick: () => void;
   onCreateClick: (parent?: { id: string; name: string }) => void;
   /** Identity + presentation forwarded to the shared `DashboardLayout`. */

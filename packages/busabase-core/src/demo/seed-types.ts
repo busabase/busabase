@@ -1,6 +1,7 @@
 import type {
   BaseFieldVO,
   ChangeRequestStatus,
+  NodeIcon,
   OperationKind,
   ViewConfigVO,
   ViewType,
@@ -14,6 +15,8 @@ export interface SeedFolderDef {
   slug: string;
   name: string;
   description: string;
+  /** Validated custom icon materialized by `withSeedNodeIcons`. */
+  icon?: NodeIcon;
   /** Optional top-level node metadata merged into an existing seeded folder. */
   metadata?: Record<string, unknown>;
   position: number;
@@ -25,6 +28,8 @@ export interface SeedBaseDef {
   slug: string;
   name: string;
   description: string;
+  /** Validated custom icon materialized by `withSeedNodeIcons`. */
+  icon?: NodeIcon;
   /** Sidebar folder this base lives under (a `DEMO_FOLDERS` node id). */
   folderNodeId: string;
   useCases: DemoUseCase[];
@@ -99,6 +104,8 @@ export interface SeedDocDef {
   slug: string;
   name: string;
   description: string;
+  /** Validated custom icon materialized by `withSeedNodeIcons`. */
+  icon?: NodeIcon;
   /** Markdown body written to storage. */
   body: string;
   position: number;
@@ -120,6 +127,8 @@ export interface SeedFileDef {
   slug: string;
   name: string;
   description: string;
+  /** Validated custom icon materialized by `withSeedNodeIcons`. */
+  icon?: NodeIcon;
   fileName: string;
   mimeType: string;
   /** File bytes (text content) written to storage. */
@@ -163,6 +172,8 @@ export interface SeedFileTreeDef {
   slug: string;
   name: string;
   description: string;
+  /** Validated custom icon materialized by `withSeedNodeIcons`. */
+  icon?: NodeIcon;
   files: { path: string; content: string }[];
   position: number;
   /** Optional in-review file-update change request, to demo the node's review flow. */
@@ -181,6 +192,8 @@ export interface SeedRichNodeDef {
   slug: string;
   name: string;
   description: string;
+  /** Validated custom icon materialized by `withSeedNodeIcons`. */
+  icon?: NodeIcon;
   metadata: Record<string, unknown>;
   position: number;
 }
@@ -197,6 +210,8 @@ export interface SeedFormDef {
   slug: string;
   name: string;
   description: string;
+  /** Validated custom icon materialized by `withSeedNodeIcons`. */
+  icon?: NodeIcon;
   position: number;
   /** `busabase_forms` row id. */
   formId: string;

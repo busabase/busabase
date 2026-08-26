@@ -1,8 +1,12 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { createRouterClient } from "@orpc/server";
+import { createRouterClient, ORPCError } from "@orpc/server";
 import { BlobReader, BlobWriter, ZipWriter } from "@zip.js/zip.js";
+import {
+  InstallFailureVOSchema,
+  installFailureTouchedWorkspace,
+} from "busabase-contract/domains/install/types";
 import {
   APP_ROOT_RESOURCE_KEY,
   TEMPLATE_SKILL_METADATA_KEY,
@@ -10,6 +14,7 @@ import {
 import { PACKAGE_FORMAT } from "busabase-contract/domains/package/types";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { runWithBusabaseContext } from "../src/context";
+import { toInstallOrpcError } from "../src/domains/install/logic/install-logic";
 import { BUSABASE_MCP_APPS_TOPIC, busabaseMcpGuideTool } from "../src/mcp-skill";
 import { busabaseRouter } from "../src/router";
 
@@ -114,12 +119,173 @@ Triage the inbox, draft replies, and wait for approval before sending.
     ["content/kelly-email-app/test/desk.test.mjs", "// never deployed\n"],
   ]);
 
+const requiredRelationTemplateFiles = (): Map<string, string> =>
+  new Map<string, string>([
+    [
+      "SKILL.md",
+      `---
+name: required-crm
+description: Required relation install fixture.
+metadata:
+  busabase:
+    template: true
+    resources:
+      - companies
+      - contacts
+      - activities
+---
+
+# Required CRM
+`,
+    ],
+    [
+      "busabase.json",
+      JSON.stringify({
+        format: PACKAGE_FORMAT,
+        name: "required-crm",
+        description: "Required relation install fixture",
+        version: "1.0.0",
+        template: { category: "crm", schemaVersion: 1, airapp: "required-crm-app" },
+      }),
+    ],
+    [
+      "content/companies/base.json",
+      JSON.stringify({
+        name: "Companies",
+        fields: [
+          { slug: "name", name: "Name", type: "text", required: true, position: 0, options: {} },
+        ],
+        views: [],
+      }),
+    ],
+    [
+      "content/companies/records.ndjson",
+      `${JSON.stringify({ key: "company-1", fields: { name: "Northstar" } })}\n`,
+    ],
+    [
+      "content/contacts/base.json",
+      JSON.stringify({
+        name: "Contacts",
+        fields: [
+          { slug: "name", name: "Name", type: "text", required: true, position: 0, options: {} },
+          {
+            slug: "company",
+            name: "Company",
+            type: "relation",
+            required: true,
+            position: 1,
+            options: { multiple: false, targetBaseSlug: "companies" },
+          },
+        ],
+        views: [],
+      }),
+    ],
+    [
+      "content/contacts/records.ndjson",
+      `${JSON.stringify({ key: "contact-1", fields: { name: "Maya", company: "company-1" } })}\n`,
+    ],
+    [
+      "content/activities/base.json",
+      JSON.stringify({
+        name: "Activities",
+        fields: [
+          {
+            slug: "subject",
+            name: "Subject",
+            type: "text",
+            required: true,
+            position: 0,
+            options: {},
+          },
+          {
+            slug: "company",
+            name: "Company",
+            type: "relation",
+            required: true,
+            position: 1,
+            options: { multiple: false, targetBaseSlug: "companies" },
+          },
+          {
+            slug: "contact",
+            name: "Contact",
+            type: "relation",
+            required: true,
+            position: 2,
+            options: { multiple: false, targetBaseSlug: "contacts" },
+          },
+        ],
+        views: [],
+      }),
+    ],
+    [
+      "content/activities/records.ndjson",
+      `${JSON.stringify({
+        key: "activity-1",
+        fields: { subject: "Discovery call", company: "company-1", contact: "contact-1" },
+      })}\n`,
+    ],
+    [
+      "content/required-crm-app/_node.json",
+      JSON.stringify({ type: "airapp", name: "Required CRM", description: "Fixture app" }),
+    ],
+    [
+      "content/required-crm-app/package.json",
+      JSON.stringify({ name: "required-crm-app", scripts: { dev: "node server.js" } }),
+    ],
+    ["content/required-crm-app/server.js", "// fixture\n"],
+  ]);
+
+const requiredRelationCycleFiles = (): Map<string, string> => {
+  const files = requiredRelationTemplateFiles();
+  files.set(
+    "content/companies/base.json",
+    JSON.stringify({
+      name: "Companies",
+      fields: [
+        { slug: "name", name: "Name", type: "text", required: true, position: 0, options: {} },
+        {
+          slug: "contact",
+          name: "Contact",
+          type: "relation",
+          required: true,
+          position: 1,
+          options: { multiple: false, targetBaseSlug: "contacts" },
+        },
+      ],
+      views: [],
+    }),
+  );
+  files.set(
+    "content/companies/records.ndjson",
+    `${JSON.stringify({ key: "company-1", fields: { name: "Northstar", contact: "contact-1" } })}\n`,
+  );
+  return files;
+};
+
+/**
+ * A failure the planner CANNOT preflight: a required TEXT value the sample row
+ * omits, which only the Base rejects, and only in pass 4 — after the folder, the
+ * three Bases and the AirApp/Skill change requests already exist.
+ */
+const runtimeFailureFiles = (): Map<string, string> => {
+  const files = requiredRelationTemplateFiles();
+  files.set(
+    "content/activities/records.ndjson",
+    `${JSON.stringify({
+      key: "activity-1",
+      fields: { company: "company-1", contact: "contact-1" },
+    })}\n`,
+  );
+  return files;
+};
+
 describe("install.fromGithub — a template", () => {
   let client: Client;
   let dataDir: string | undefined;
   let storageDir: string | undefined;
   let originalCwd: string | undefined;
   const originalFetch = global.fetch;
+  let zipball: Buffer;
 
   const inSpace = <T>(spaceId: string, fn: () => Promise<T>): Promise<T> =>
     runWithBusabaseContext({ spaceId }, fn);
@@ -138,7 +304,7 @@ describe("install.fromGithub — a template", () => {
     // the middle of database startup.
     await runWithBusabaseContext({ spaceId: "space_tpl_warmup" }, () => client.nodes.list());
 
-    const zipball = await zipFiles(templateFiles(), "busabase-skills-main");
+    zipball = await zipFiles(templateFiles(), "busabase-skills-main");
     global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
       const rawUrl =
         typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
@@ -336,5 +502,173 @@ describe("install.fromGithub — a template", () => {
         schemaVersion: 3,
       });
     });
+  });
+
+  describe("required sample relations", () => {
+    it("installs dependent sample rows in canonical relation order", async () => {
+      zipball = await zipFiles(requiredRelationTemplateFiles(), "required-crm-main");
+      const spaceId = "space_tpl_required_relations";
+
+      const result = await inSpace(spaceId, () =>
+        client.install.fromGithub({
+          repoUrl: "https://github.com/acme/required-crm",
+          autoMerge: false,
+        }),
+      );
+      const nodes = await inSpace(spaceId, () => client.nodes.list());
+      const roots = nodes.length === 1 && nodes[0].children ? nodes[0].children : nodes;
+      const folder = roots.find((node) => node.slug === "required-crm");
+      const companies = folder?.children.find((node) => node.metadata?.resourceKey === "companies");
+      const contacts = folder?.children.find((node) => node.metadata?.resourceKey === "contacts");
+      const activities = folder?.children.find(
+        (node) => node.metadata?.resourceKey === "activities",
+      );
+
+      const companyRows = await inSpace(spaceId, () =>
+        client.records.list({ baseId: companies?.baseId ?? "" }),
+      );
+      const contactRows = await inSpace(spaceId, () =>
+        client.records.list({ baseId: contacts?.baseId ?? "" }),
+      );
+      const activityRows = await inSpace(spaceId, () =>
+        client.records.list({ baseId: activities?.baseId ?? "" }),
+      );
+      expect([
+        companyRows.records.length,
+        contactRows.records.length,
+        activityRows.records.length,
+      ]).toEqual([1, 1, 1]);
+
+      const companyId = companyRows.records[0]?.id ?? "";
+      const contactId = contactRows.records[0]?.id ?? "";
+      const contactLinks = await inSpace(spaceId, () =>
+        client.records.listLinks({ recordId: contactId }),
+      );
+      const activityLinks = await inSpace(spaceId, () =>
+        client.records.listLinks({ recordId: activityRows.records[0]?.id ?? "" }),
+      );
+      expect(contactLinks.map((link) => link.targetRecordId)).toEqual([companyId]);
+      expect(activityLinks.map((link) => [link.fieldSlug, link.targetRecordId]).sort()).toEqual([
+        ["company", companyId],
+        ["contact", contactId],
+      ]);
+      expect(result.created.records).toBe(3);
+      expect(result.pendingChangeRequests).toBe(2);
+    });
+
+    it("rejects a required relation cycle during preview without creating nodes", async () => {
+      zipball = await zipFiles(requiredRelationCycleFiles(), "required-crm-cycle-main");
+      const spaceId = "space_tpl_required_cycle";
+
+      await expect(
+        inSpace(spaceId, () =>
+          client.install.planFromGithub({ repoUrl: "https://github.com/acme/required-crm" }),
+        ),
+      ).rejects.toThrow("Required sample relations contain a cycle");
+
+      const nodes = await inSpace(spaceId, () => client.nodes.list());
+      const roots = nodes.length === 1 && nodes[0].children ? nodes[0].children : nodes;
+      expect(roots).toHaveLength(0);
+    });
+
+    it("reports a partial install as an ORPCError carrying the diagnostics", async () => {
+      zipball = await zipFiles(runtimeFailureFiles(), "required-crm-runtime-main");
+      const spaceId = "space_tpl_partial_install";
+
+      const caught = await inSpace(spaceId, () =>
+        client.install
+          .fromGithub({ repoUrl: "https://github.com/acme/required-crm", autoMerge: false })
+          .then(
+            () => undefined,
+            (error: unknown) => error,
+          ),
+      );
+
+      // Must be an ORPCError. oRPC replaces anything else with a bare
+      // "Internal server error" on the way to the browser, and the message below
+      // is the only thing telling the user their space now holds half an install
+      // — `createRouterClient` here does not serialize, so nothing but this
+      // assertion catches a regression to a plain `Error`.
+      expect(caught).toBeInstanceOf(ORPCError);
+      const error = caught as ORPCError<string, unknown>;
+      expect(error.message).toContain("Install stopped during Pass 4/5 (sample records)");
+      expect(error.message).toContain("Subject is required");
+
+      const failure = InstallFailureVOSchema.safeParse(error.data);
+      expect(failure.success).toBe(true);
+      if (!failure.success) return;
+      expect(failure.data.targetFolderSlug).toBe("required-crm");
+      expect(failure.data.created.bases).toBe(3);
+      expect(installFailureTouchedWorkspace(failure.data)).toBe(true);
+
+      // And the resources it names really are there — which is why the client has
+      // to refresh its tree on this path rather than treat it as a no-op.
+      const nodes = await inSpace(spaceId, () => client.nodes.list());
+      const roots = nodes.length === 1 && nodes[0].children ? nodes[0].children : nodes;
+      expect(roots.find((node) => node.slug === "required-crm")).toBeDefined();
+    });
+  });
+});
+
+/**
+ * The failure mapping on its own. The end-to-end test above covers the branch a
+ * real install actually took; these cover the two it did not, and both are worse
+ * if they regress — a plain `Error` loses its MESSAGE at the boundary, and an
+ * error carrying a `code` loses the difference between "not allowed" and "broken".
+ */
+describe("toInstallOrpcError", () => {
+  const details = {
+    phase: "Pass 4/5 (sample records)",
+    targetFolderSlug: "b2b-crm",
+    created: { folders: 1, docs: 0, bases: 3, views: 3, records: 1, fileTreeNodes: 0, files: 0 },
+    pendingChangeRequests: 2,
+  };
+  const withDetails = <T extends Error>(error: T): T => {
+    Object.defineProperty(error, "busabaseInstallFailure", {
+      value: details,
+      enumerable: false,
+    });
+    return error;
+  };
+
+  it("keeps a plain Error's message, which oRPC would otherwise replace", () => {
+    const mapped = toInstallOrpcError(withDetails(new Error("Install stopped during Pass 4/5.")));
+    expect(mapped).toBeInstanceOf(ORPCError);
+    expect(mapped.code).toBe("INTERNAL_SERVER_ERROR");
+    expect(mapped.message).toBe("Install stopped during Pass 4/5.");
+    expect(InstallFailureVOSchema.parse(mapped.data)).toEqual(details);
+  });
+
+  it("keeps a code carried as a property, rather than flattening it to a 500", () => {
+    const refused = Object.assign(new Error("You may not merge this change request."), {
+      code: "FORBIDDEN",
+    });
+    const mapped = toInstallOrpcError(withDetails(refused));
+    expect(mapped.code).toBe("FORBIDDEN");
+    expect(mapped.status).toBe(403);
+    expect(InstallFailureVOSchema.parse(mapped.data)).toEqual(details);
+  });
+
+  it("keeps an ORPCError's code, status and existing data", () => {
+    const original = new ORPCError("CONFLICT", {
+      message: "Slug already taken.",
+      data: { slug: "contacts" },
+    });
+    const mapped = toInstallOrpcError(withDetails(original));
+    expect([mapped.code, mapped.status, mapped.message]).toEqual([
+      "CONFLICT",
+      409,
+      "Slug already taken.",
+    ]);
+    expect(mapped.data).toMatchObject({ slug: "contacts", targetFolderSlug: "b2b-crm" });
+  });
+
+  it("passes an unrelated failure through without inventing diagnostics", () => {
+    const mapped = toInstallOrpcError(new Error("boom"));
+    expect([mapped.code, mapped.message, mapped.data]).toEqual([
+      "INTERNAL_SERVER_ERROR",
+      "boom",
+      undefined,
+    ]);
   });
 });

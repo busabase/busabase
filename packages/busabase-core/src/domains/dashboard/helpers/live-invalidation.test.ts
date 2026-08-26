@@ -80,6 +80,7 @@ describe("live invalidation batching", () => {
       "changeRequestCounts",
       "changeRequests",
       "changeRequestsPaged",
+      "inboxSnapshot",
     ]);
   });
 
@@ -102,6 +103,7 @@ describe("live invalidation batching", () => {
       "changeRequestCounts",
       "changeRequests",
       "changeRequestsPaged",
+      "inboxSnapshot",
     ]);
   });
 

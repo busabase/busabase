@@ -1,9 +1,11 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";
 import type { FormFieldBindingVO } from "busabase-contract/types";
+import { Button } from "kui/button";
 import { CheckCircle2, Code2, Eye, Globe, Lock } from "lucide-react";
 import { useCallback, useState } from "react";
 import { useCoreI18n, useIString } from "../../../i18n";
+import { NodeDetailSkeleton } from "../../dashboard/components/skeletons";
 import { FormSandboxFrame } from "./form-sandbox-frame";
 import { GeneratedFormField } from "./generated-form-field";
 
@@ -38,6 +40,31 @@ export function FormDetailView({ orpc, slug }: { orpc: BusabaseQueryUtils; slug:
     },
     [slug, submit],
   );
+
+  if (formQuery.isPending) {
+    return <NodeDetailSkeleton variant="doc" />;
+  }
+
+  if (formQuery.isError) {
+    return (
+      <div className="mx-auto max-w-2xl px-6 py-16 text-center">
+        <div className="font-semibold text-base">{messages.inbox.loadFailedTitle}</div>
+        <p className="mt-2 text-muted-foreground text-sm">
+          {formQuery.error instanceof Error
+            ? formQuery.error.message
+            : messages.inbox.loadFailedBody}
+        </p>
+        <Button
+          className="mt-4"
+          onClick={() => void formQuery.refetch()}
+          type="button"
+          variant="outline"
+        >
+          {messages.inbox.retry}
+        </Button>
+      </div>
+    );
+  }
 
   if (!form) {
     return (

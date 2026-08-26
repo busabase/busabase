@@ -247,7 +247,7 @@ export const coreMessagesEn = {
     statusError: "Failed",
     previewTitle: "AirApp preview",
     previewEmpty: "This AirApp starts automatically — the live preview appears here.",
-    previewPending: "Preparing preview…",
+    previewPending: "The live preview will appear here shortly.",
     previewFailed: "The AirApp failed to start. Check the logs below.",
     logsEmpty: "Install and start output streams here while the AirApp runs.",
     noRunnableFiles: "This AirApp has no text files to run.",
@@ -266,6 +266,21 @@ export const coreMessagesEn = {
     engineSandockHint: "Remote container, any language · nothing runs on this host",
     noEligibleEngine:
       "No engine on this deployment can run a {runtime} AirApp. Ask an operator to enable a local or remote runtime.",
+    // Keyed by `NodepodServiceWorkerErrorCode`. Each one names the phase that
+    // actually failed instead of blaming the browser: only the first two are
+    // real capability gaps, the rest are recoverable and say so.
+    swError: {
+      INSECURE_CONTEXT:
+        "AirApp preview requires HTTPS. Open this workspace over HTTPS or use the desktop app.",
+      SERVICE_WORKER_UNAVAILABLE:
+        "AirApp preview requires Service Worker support. Open this workspace in Safari or Chrome, or use the desktop app.",
+      SW_REGISTRATION_FAILED:
+        "AirApp preview could not register its Service Worker. Check the browser console and try again.",
+      SW_ACTIVATION_TIMEOUT:
+        "AirApp preview's Service Worker did not activate in time. Try running the AirApp again.",
+      SW_CONTROL_TIMEOUT:
+        "AirApp preview's Service Worker could not take control of this page. Try running the AirApp again.",
+    },
   },
   form: {
     alreadyExists:

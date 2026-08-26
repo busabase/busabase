@@ -154,6 +154,29 @@ export const InstallResultVOSchema = z.object({
 });
 export type InstallResultVO = z.infer<typeof InstallResultVOSchema>;
 
+/**
+ * What a FAILED install reports, carried as the error's `data`.
+ *
+ * Structure is created immediately (a pending Base has no id, so there would be
+ * nowhere to attach a view or a record), which means a failure partway through
+ * leaves real resources behind. Without this the client cannot tell that case
+ * apart from "nothing happened" — so it neither refreshes the tree that just
+ * changed nor tells the user which folder to look in. The message says the same
+ * thing in prose for a human; this is the machine-readable copy.
+ */
+export const InstallFailureVOSchema = z.object({
+  /** Which of the five passes stopped, e.g. `Pass 4/5 (sample records)`. */
+  phase: z.string(),
+  targetFolderSlug: z.string(),
+  created: InstallCreatedCountsVOSchema,
+  pendingChangeRequests: z.number().int().min(0),
+});
+export type InstallFailureVO = z.infer<typeof InstallFailureVOSchema>;
+
+/** True when a failed install left resources in the space. */
+export const installFailureTouchedWorkspace = (failure: InstallFailureVO): boolean =>
+  Object.values(failure.created).some((count) => count > 0) || failure.pendingChangeRequests > 0;
+
 const repoUrlField = z
   .string()
   .min(1)

@@ -11,6 +11,7 @@ import { Button } from "kui/button";
 import { ArrowLeft, Bot, MessageSquarePlus } from "lucide-react";
 import { useCallback, useMemo, useState } from "react";
 import { useAgentSession } from "../hooks/use-agent-session";
+import { AgentLoadingState, AgentQueryErrorState } from "./agent-query-state";
 import { TransportBadge } from "./transport-badge";
 
 /**
@@ -97,6 +98,20 @@ export function AgentDetailView({ orpc, agentSlug, onBack }: AgentDetailViewProp
 
   const agentName = active?.agentName ?? agentSessions[0]?.agentName ?? agentSlug;
   const transport = active?.transport ?? agentSessions[0]?.transport ?? "local-subprocess";
+
+  if (sessions.isPending) {
+    return <AgentLoadingState />;
+  }
+
+  if (sessions.isError) {
+    return (
+      <AgentQueryErrorState
+        error={sessions.error}
+        onRetry={() => void sessions.refetch()}
+        title="Couldn't load agent sessions"
+      />
+    );
+  }
 
   return (
     <div className="flex min-h-0 flex-1">

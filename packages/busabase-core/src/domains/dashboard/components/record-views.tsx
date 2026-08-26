@@ -85,6 +85,8 @@ import {
   SidebarRow,
   StatusBadge,
 } from "./primitives";
+import { ShimmerSkeleton as Skeleton } from "./shimmer-skeleton";
+import { WhiteboardContentSkeleton } from "./skeletons";
 import { SplitSubmitButton } from "./split-submit-button";
 
 // Record view/edit mode switch — lives in the titlebar (far right), mirroring the
@@ -367,11 +369,15 @@ export function RecordDetailView({
                   />
                 ))}
               </div>
+            ) : isHistoryLoading ? (
+              <div className="space-y-2 py-2" aria-hidden>
+                <Skeleton className="h-3 w-4/5" />
+                <Skeleton className="h-3 w-2/3" />
+                <Skeleton className="h-3 w-3/4" />
+              </div>
             ) : (
               <div className="py-2 text-muted-foreground text-xs">
-                {isHistoryLoading
-                  ? messages.common.loading
-                  : messages.recordView.noChangeRequestsYet}
+                {messages.recordView.noChangeRequestsYet}
               </div>
             )}
           </SidebarPanel>
@@ -1005,15 +1011,13 @@ function WhiteboardFieldEditor({
       })
       .catch((caught: unknown) => {
         if (active) {
-          setEditorError(
-            caught instanceof Error ? caught.message : messages.richNodes.whiteboardLoading,
-          );
+          setEditorError(caught instanceof Error ? caught.message : messages.inbox.loadFailedTitle);
         }
       });
     return () => {
       active = false;
     };
-  }, [messages.richNodes.whiteboardLoading]);
+  }, [messages.inbox.loadFailedTitle]);
 
   useEffect(
     () => () => {
@@ -1027,7 +1031,11 @@ function WhiteboardFieldEditor({
   return (
     <div className="min-w-0">
       <div className="h-[420px] w-full overflow-hidden rounded-md border border-border/70 bg-muted/20">
-        {Editor ? (
+        {editorError ? (
+          <div className="flex h-full items-center justify-center text-rejected-strong text-sm">
+            {editorError}
+          </div>
+        ) : Editor ? (
           <Editor
             UIOptions={{
               canvasActions: { loadScene: false, saveToActiveFile: false },
@@ -1040,9 +1048,7 @@ function WhiteboardFieldEditor({
             onChange={handleExcalidrawChange}
           />
         ) : (
-          <div className="flex h-full items-center justify-center text-muted-foreground text-sm">
-            {editorError ?? messages.richNodes.whiteboardLoading}
-          </div>
+          <WhiteboardContentSkeleton />
         )}
       </div>
     </div>
@@ -1612,9 +1618,13 @@ function RecordCommentsPanel({
     <section className="mt-6">
       <div className="flex items-center justify-between gap-3">
         <div className="font-semibold text-sm">{messages.comments.comments}</div>
-        <span className="rounded-md bg-muted/55 px-2.5 py-1 text-muted-foreground text-xs">
-          {isLoading ? messages.common.loadingPlain : `${comments.length}`}
-        </span>
+        {isLoading ? (
+          <Skeleton className="h-6 w-9" aria-hidden />
+        ) : (
+          <span className="rounded-md bg-muted/55 px-2.5 py-1 text-muted-foreground text-xs">
+            {comments.length}
+          </span>
+        )}
       </div>
 
       {error ? (
@@ -1646,9 +1656,15 @@ function RecordCommentsPanel({
               </div>
             </div>
           ))
+        ) : isLoading ? (
+          <div className="space-y-3 px-2 py-5" aria-hidden>
+            <Skeleton className="h-3 w-1/4" />
+            <Skeleton className="h-4 w-5/6" />
+            <Skeleton className="h-4 w-2/3" />
+          </div>
         ) : (
           <div className="px-2 py-5 text-muted-foreground text-sm">
-            {isLoading ? messages.comments.loading : messages.comments.noComments}
+            {messages.comments.noComments}
           </div>
         )}
       </div>

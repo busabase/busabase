@@ -71,6 +71,16 @@ export interface BusabaseSourceProvenance {
   channel?: BusabaseSourceChannel | string | null;
 }
 
+export interface BusabasePerformanceMetric {
+  name: "change_requests.inbox_snapshot";
+  durationMs: number;
+  responseBytes: number;
+  candidateRows: number;
+  visibleRows: number;
+  pageRows: number;
+  managerPath: boolean;
+}
+
 export interface BusabaseContext {
   db?: BusabaseDatabase;
   actorId?: string;
@@ -119,6 +129,8 @@ export interface BusabaseContext {
     changeRequestId: string;
     submittedBy: string;
   }) => void | Promise<void>;
+  /** Host-owned, best-effort performance sink. Values contain no tenant ids or payload data. */
+  onPerformanceMetric?: (metric: BusabasePerformanceMetric) => void | Promise<void>;
   /**
    * Host-computed "the current actor is a space owner/admin" signal. Managers
    * short-circuit every node-ACL check to full (`manage`) access. Left unset
@@ -533,6 +545,17 @@ export function getContextDemoLocale(): DemoLocale {
 /** The host's registered "CR entered review" notification hook, if any (cloud-only). */
 export function getContextChangeRequestPendingReviewHook() {
   return storage.getStore()?.onChangeRequestPendingReview;
+}
+
+/** Emit a host-owned performance metric without allowing observability failure to break a read. */
+export function emitContextPerformanceMetric(createMetric: () => BusabasePerformanceMetric): void {
+  const hook = storage.getStore()?.onPerformanceMetric;
+  if (!hook) return;
+  try {
+    void Promise.resolve(hook(createMetric())).catch(() => undefined);
+  } catch {
+    // Metrics are diagnostic only; never make the Inbox unavailable.
+  }
 }
 
 /** True when this request arrived without a signed-in user (a public link). */

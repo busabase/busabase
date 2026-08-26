@@ -229,7 +229,7 @@ export const dashboardZhCN: CoreI18nMessages = {
     statusError: "运行失败",
     previewTitle: "AirApp 预览",
     previewEmpty: "AirApp 会自动启动，实时预览将显示在这里。",
-    previewPending: "正在准备预览…",
+    previewPending: "实时预览即将显示在这里。",
     previewFailed: "此 AirApp 启动失败，请查看下方日志。",
     logsEmpty: "AirApp 运行时，安装与启动输出会实时显示在这里。",
     noRunnableFiles: "此 AirApp 没有可运行的文本文件。",
@@ -248,6 +248,15 @@ export const dashboardZhCN: CoreI18nMessages = {
     engineSandockHint: "远程容器，任意语言 · 不在本机跑任何东西",
     noEligibleEngine:
       "本部署没有引擎能运行 {runtime} 类型的 AirApp。请让运维启用本机或远程运行时。",
+    swError: {
+      INSECURE_CONTEXT: "AirApp 预览需要 HTTPS。请用 HTTPS 打开此工作区，或使用桌面端。",
+      SERVICE_WORKER_UNAVAILABLE:
+        "AirApp 预览需要浏览器支持 Service Worker。请用 Safari 或 Chrome 打开此工作区，或使用桌面端。",
+      SW_REGISTRATION_FAILED: "AirApp 预览未能注册 Service Worker。请查看浏览器控制台，然后重试。",
+      SW_ACTIVATION_TIMEOUT:
+        "AirApp 预览的 Service Worker 未在预期时间内激活。请重新运行此 AirApp。",
+      SW_CONTROL_TIMEOUT: "AirApp 预览的 Service Worker 未能接管当前页面。请重新运行此 AirApp。",
+    },
   },
   form: {
     alreadyExists: "这个节点已经存在表单，请更新现有表单，不要重复创建。",

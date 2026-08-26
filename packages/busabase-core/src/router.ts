@@ -44,6 +44,7 @@ import {
   createNodeChangeRequest,
   getAuthInfo,
   getChangeRequest,
+  getInboxSnapshot,
   isDescendantOf,
   listAgentTasks,
   listArchivedNodes,
@@ -258,6 +259,9 @@ const busabaseRouterImpl = busabase.router({
     list: busabase.changeRequests.list.handler(async ({ input }) => listChangeRequestsPaged(input)),
     listPage: busabase.changeRequests.listPage.handler(async ({ input }) =>
       listChangeRequestsPage(input),
+    ),
+    inboxSnapshot: busabase.changeRequests.inboxSnapshot.handler(async ({ input }) =>
+      getInboxSnapshot(input),
     ),
     counts: busabase.changeRequests.counts.handler(async () => countChangeRequests()),
     get: busabase.changeRequests.get.handler(async ({ input }) => {

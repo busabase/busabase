@@ -3,11 +3,21 @@
 import { useQuery } from "@tanstack/react-query";
 import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";
 import type { TemplateCardVO } from "busabase-contract/domains/templates/types";
-import { Badge } from "kui/badge";
 import { Button } from "kui/button";
 import { Input } from "kui/input";
-import { AppWindow, ExternalLink, RefreshCw, Sparkles, Table2 } from "lucide-react";
+import { ExternalLink, RefreshCw } from "lucide-react";
 import { useMemo, useState } from "react";
+import { ShimmerSkeleton as Skeleton } from "../../dashboard/components/shimmer-skeleton";
+import { TemplateCardSummary } from "./template-card-summary";
+
+const TEMPLATE_SKELETON_IDS = [
+  "template-skeleton-1",
+  "template-skeleton-2",
+  "template-skeleton-3",
+  "template-skeleton-4",
+  "template-skeleton-5",
+  "template-skeleton-6",
+];
 
 interface TemplatesListViewProps {
   orpc: BusabaseQueryUtils;
@@ -20,58 +30,14 @@ interface TemplatesListViewProps {
   canInstall: boolean;
 }
 
-/** "3 tables · 1 app · 7 sample rows" — what installing this actually creates. */
-function StatLine({ stats }: { stats: TemplateCardVO["stats"] }) {
-  const parts: string[] = [];
-  if (stats.bases > 0) parts.push(`${stats.bases} table${stats.bases === 1 ? "" : "s"}`);
-  if (stats.airapps > 0) parts.push(`${stats.airapps} app${stats.airapps === 1 ? "" : "s"}`);
-  if (stats.docs > 0) parts.push(`${stats.docs} doc${stats.docs === 1 ? "" : "s"}`);
-  if (stats.records > 0) parts.push(`${stats.records} sample rows`);
-  return <span className="text-muted-foreground text-xs">{parts.join(" · ")}</span>;
-}
-
 function TemplateCard({ template, onOpen }: { template: TemplateCardVO; onOpen: () => void }) {
-  const [shot] = template.screenshots;
   return (
     <button
       type="button"
       onClick={onOpen}
       className="group flex flex-col overflow-hidden rounded-lg border border-border bg-card text-left transition-colors hover:border-primary/50"
     >
-      <div className="flex aspect-[16/10] items-center justify-center overflow-hidden bg-muted">
-        {shot ? (
-          // Screenshots live in the source repository, so a missing or renamed
-          // file must degrade to the placeholder rather than a broken-image
-          // icon — the card is still useful without it.
-          <img
-            src={shot}
-            alt=""
-            loading="lazy"
-            className="h-full w-full object-cover object-top"
-            onError={(event) => {
-              event.currentTarget.style.display = "none";
-            }}
-          />
-        ) : (
-          <Sparkles className="size-8 text-muted-foreground/40" />
-        )}
-      </div>
-      <div className="flex flex-1 flex-col gap-2 p-4">
-        <div className="flex items-start justify-between gap-2">
-          <span className="font-medium text-sm">{template.name}</span>
-          <Badge variant="secondary" className="shrink-0 text-[10px]">
-            {template.category}
-          </Badge>
-        </div>
-        <p className="line-clamp-2 flex-1 text-muted-foreground text-xs">{template.description}</p>
-        <div className="flex items-center gap-2">
-          {template.stats.bases > 0 ? <Table2 className="size-3 text-muted-foreground" /> : null}
-          {template.stats.airapps > 0 ? (
-            <AppWindow className="size-3 text-muted-foreground" />
-          ) : null}
-          <StatLine stats={template.stats} />
-        </div>
-      </div>
+      <TemplateCardSummary template={template} screenshotAlt="" />
     </button>
   );
 }
@@ -170,7 +136,21 @@ export function TemplatesListView({ orpc, onOpenTemplate, canInstall }: Template
           ) : null}
 
           {catalog.isPending ? (
-            <p className="text-muted-foreground text-sm">Loading the catalog…</p>
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3" aria-hidden>
+              {TEMPLATE_SKELETON_IDS.map((id) => (
+                <div className="overflow-hidden rounded-lg border border-border bg-card" key={id}>
+                  <Skeleton className="aspect-[16/10] w-full rounded-none" />
+                  <div className="space-y-3 p-4">
+                    <div className="flex items-center justify-between gap-3">
+                      <Skeleton className="h-4 w-2/3" />
+                      <Skeleton className="h-5 w-16" />
+                    </div>
+                    <Skeleton className="h-3 w-full" />
+                    <Skeleton className="h-3 w-4/5" />
+                  </div>
+                </div>
+              ))}
+            </div>
           ) : null}
 
           {/* An unreachable catalog and an empty one look identical to a user, and
@@ -187,15 +167,17 @@ export function TemplatesListView({ orpc, onOpenTemplate, canInstall }: Template
             </p>
           ) : null}
 
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {filtered.map((template) => (
-              <TemplateCard
-                key={template.id}
-                template={template}
-                onOpen={() => onOpenTemplate(template)}
-              />
-            ))}
-          </div>
+          {!catalog.isPending ? (
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              {filtered.map((template) => (
+                <TemplateCard
+                  key={template.id}
+                  template={template}
+                  onOpen={() => onOpenTemplate(template)}
+                />
+              ))}
+            </div>
+          ) : null}
         </div>
       </div>
     </div>

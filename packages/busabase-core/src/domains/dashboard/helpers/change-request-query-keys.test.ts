@@ -10,5 +10,6 @@ describe("createChangeRequestQueryKeys", () => {
 
     expect(keys.changeRequestsPaged).toEqual(orpc.changeRequests.listPage.key());
     expect(keys.changeRequestsPaged).not.toEqual(orpc.changeRequests.list.key());
+    expect(keys.inboxSnapshot).toEqual(orpc.changeRequests.inboxSnapshot.key());
   });
 });

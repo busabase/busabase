@@ -1,23 +1,13 @@
 /**
- * Inbox / review-page benchmark.
+ * Real Inbox snapshot benchmark: router + database + ACL + hydration.
  *
- * Reproduces the reported symptom: switching between the review tabs
- * (待评审 / 已请求修改 / 已创建 / 已批准 / 已合并 / 已关闭) is slow on a space that
- * has accumulated thousands of change requests. The reported space:
- * merged 2719, in_review 448, created(mine) 123, approved 3, closed 125.
- *
- * Every tab switch re-runs BOTH `changeRequests.counts` (the badge row) and
- * `changeRequests.list` (the rows), so both are measured separately — a tab
- * switch costs their sum.
- *
- * Like bench-records.ts this drives the real oRPC router over a real database,
- * and supports both engines, because the local-first (PGLite) and hosted
- * (Postgres) deployments do not degrade the same way.
+ * Defaults are a laptop/CI smoke fixture. Set BENCH_SCALE=1 for the production
+ * shape (3,295 CRs per fixture), and BENCH_DATA_DIR to reuse a PGLite fixture.
  *
  * Usage:
  *   pnpm --filter busabase-core bench:inbox
- *   BENCH_ENGINE=postgres pnpm --filter busabase-core bench:inbox
- *   BENCH_SCALE=0.25 pnpm --filter busabase-core bench:inbox   # quarter-size, faster iteration
+ *   BENCH_SCALE=1 BENCH_WARM_RUNS=5 pnpm --filter busabase-core bench:inbox
+ *   BENCH_ENGINE=postgres BENCH_PG_URL=postgres://... pnpm --filter busabase-core bench:inbox
  */
 import { execFileSync } from "node:child_process";
 import { mkdtemp, rm } from "node:fs/promises";
@@ -28,91 +18,95 @@ import { createRouterClient } from "@orpc/server";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const MIGRATIONS_CWD = path.resolve(__dirname, "../../../apps/busabase");
-
 const ENGINE = (process.env.BENCH_ENGINE ?? "pglite") as "pglite" | "postgres";
-const SCALE = Number(process.env.BENCH_SCALE ?? 1);
-const WARM_RUNS = Number(process.env.BENCH_WARM_RUNS ?? 3);
+const SCALE = Number(process.env.BENCH_SCALE ?? 0.02);
+const WARM_RUNS = Number(process.env.BENCH_WARM_RUNS ?? 2);
+const LARGE_PAYLOAD_BYTES = Number(process.env.BENCH_LARGE_PAYLOAD_BYTES ?? 400_000);
 const PG_URL =
   process.env.BENCH_PG_URL ?? "postgres://bika:bikabika@localhost:5432/busabase_bench_inbox";
 const REUSE_DIR = process.env.BENCH_DATA_DIR ?? "";
 const SKIP_SEED = process.env.BENCH_SKIP_SEED === "1";
 
-/** The reported production space, scaled by BENCH_SCALE. */
-const scaled = (n: number) => Math.max(1, Math.round(n * SCALE));
+const scaled = (value: number) => Math.max(1, Math.round(value * SCALE));
 const TARGET = {
   merged: scaled(2719),
-  in_review: scaled(448),
+  inReview: scaled(448),
   approved: scaled(3),
   closed: scaled(125),
-  /** Of the above, how many are submitted by the acting user ("已创建" tab). */
   mine: scaled(123),
 };
 
-const heapMb = () => process.memoryUsage().heapUsed / 1024 / 1024;
+interface Fixture {
+  name: "small" | "large";
+  spaceId: string;
+  body: string;
+}
 
 interface Timing {
   scenario: string;
   coldMs: number;
   avgWarmMs: number;
-  peakHeapMb: number;
-  note: string;
+  peakHeapDeltaMb: number;
+  responseBytes: number;
+  rows: number;
 }
 
-async function measure<T>(fn: () => Promise<T>) {
+const heapMb = () => process.memoryUsage().heapUsed / 1024 / 1024;
+
+const measure = async <T>(fn: () => Promise<T>) => {
   global.gc?.();
-  let peak = heapMb();
+  const baseline = heapMb();
+  let peak = baseline;
   const sampler = setInterval(() => {
-    const now = heapMb();
-    if (now > peak) peak = now;
+    peak = Math.max(peak, heapMb());
   }, 5);
-  const t0 = performance.now();
+  const startedAt = performance.now();
   try {
     const out = await fn();
-    return { ms: performance.now() - t0, peakMb: Math.max(peak, heapMb()), out };
+    return {
+      ms: performance.now() - startedAt,
+      heapDeltaMb: Math.max(0, Math.max(peak, heapMb()) - baseline),
+      responseBytes: Buffer.byteLength(JSON.stringify(out)),
+      out,
+    };
   } finally {
     clearInterval(sampler);
   }
-}
+};
 
-async function benchmark<T>(
+const benchmark = async <T extends { changeRequests: unknown[] }>(
   scenario: string,
   fn: () => Promise<T>,
-  describe: (out: T) => string = () => "",
-): Promise<Timing> {
+): Promise<Timing> => {
   const cold = await measure(fn);
-  let peakHeapMb = cold.peakMb;
-  const warm: number[] = [];
-  let last = cold.out;
-  for (let i = 0; i < WARM_RUNS; i++) {
-    const r = await measure(fn);
-    warm.push(r.ms);
-    peakHeapMb = Math.max(peakHeapMb, r.peakMb);
-    last = r.out;
-  }
-  const avgWarmMs = warm.reduce((a, b) => a + b, 0) / (warm.length || 1);
-  const t: Timing = {
+  const warm = [];
+  for (let index = 0; index < WARM_RUNS; index++) warm.push(await measure(fn));
+  const samples = [cold, ...warm];
+  const timing = {
     scenario,
     coldMs: Math.round(cold.ms),
-    avgWarmMs: Math.round(avgWarmMs),
-    peakHeapMb: Math.round(peakHeapMb),
-    note: describe(last),
+    avgWarmMs: Math.round(
+      warm.reduce((sum, sample) => sum + sample.ms, 0) / Math.max(1, warm.length),
+    ),
+    peakHeapDeltaMb: Number(Math.max(...samples.map((sample) => sample.heapDeltaMb)).toFixed(1)),
+    responseBytes: samples.at(-1)?.responseBytes ?? 0,
+    rows: samples.at(-1)?.out.changeRequests.length ?? 0,
   };
   console.log(
-    `  ${scenario.padEnd(44)} cold=${String(t.coldMs).padStart(7)}ms  warm=${String(t.avgWarmMs).padStart(7)}ms  heap=${String(t.peakHeapMb).padStart(4)}MB  ${t.note}`,
+    `  ${scenario.padEnd(42)} cold=${String(timing.coldMs).padStart(6)}ms warm=${String(timing.avgWarmMs).padStart(6)}ms heap+=${String(timing.peakHeapDeltaMb).padStart(6)}MB bytes=${String(timing.responseBytes).padStart(9)} rows=${timing.rows}`,
   );
-  return t;
-}
+  return timing;
+};
 
-function resetPostgres() {
+const resetPostgres = () => {
   const url = new URL(PG_URL);
   const dbName = url.pathname.replace(/^\//, "");
   const adminUrl = new URL(PG_URL);
   adminUrl.pathname = "/postgres";
-  const psql = (sql: string) =>
-    execFileSync("psql", [adminUrl.toString(), "-v", "ON_ERROR_STOP=1", "-c", sql], {
+  const psql = (statement: string) =>
+    execFileSync("psql", [adminUrl.toString(), "-v", "ON_ERROR_STOP=1", "-c", statement], {
       stdio: ["ignore", "pipe", "pipe"],
     });
-  console.log(`Resetting Postgres database "${dbName}"...`);
   psql(`DROP DATABASE IF EXISTS "${dbName}" WITH (FORCE)`);
   psql(`CREATE DATABASE "${dbName}"`);
   execFileSync("pnpm", ["exec", "drizzle-kit", "migrate"], {
@@ -120,20 +114,18 @@ function resetPostgres() {
     env: { ...process.env, PG_DATABASE_URL: PG_URL },
     stdio: ["ignore", "pipe", "pipe"],
   });
-}
+};
 
-async function main() {
+const main = async () => {
   const originalCwd = process.cwd();
   process.chdir(MIGRATIONS_CWD);
   const storageDir = await mkdtemp(path.join(os.tmpdir(), "busabase-bench-inbox-storage-"));
-  let dataDir = "";
   let ephemeral = "";
   if (ENGINE === "pglite") {
-    if (REUSE_DIR) dataDir = path.resolve(REUSE_DIR);
-    else {
-      dataDir = await mkdtemp(path.join(os.tmpdir(), "busabase-bench-inbox-db-"));
-      ephemeral = dataDir;
-    }
+    const dataDir = REUSE_DIR
+      ? path.resolve(REUSE_DIR)
+      : await mkdtemp(path.join(os.tmpdir(), "busabase-bench-inbox-db-"));
+    if (!REUSE_DIR) ephemeral = dataDir;
     process.env.PG_DATABASE_URL = `pglite://${dataDir}`;
   } else {
     if (!SKIP_SEED) resetPostgres();
@@ -141,135 +133,111 @@ async function main() {
   }
   process.env.STORAGE_URL = `local:${storageDir}?base_url=/api/bench/storage`;
 
-  const { busabaseRouter } = await import("../src/router");
+  const [{ busabaseRouter }, { runWithBusabaseContext }] = await Promise.all([
+    import("../src/router"),
+    import("../src/context"),
+  ]);
   type Client = ReturnType<typeof createRouterClient<typeof busabaseRouter, Record<never, never>>>;
   const client: Client = createRouterClient(busabaseRouter);
-  const results: Timing[] = [];
-
-  try {
-    const total = TARGET.merged + TARGET.in_review + TARGET.approved + TARGET.closed;
-    console.log(
-      `\n=== Busabase inbox benchmark — engine=${ENGINE}, ~${total} change requests ` +
-        `(merged=${TARGET.merged} in_review=${TARGET.in_review} approved=${TARGET.approved} closed=${TARGET.closed} mine=${TARGET.mine}) ===\n`,
+  const fixtures: Fixture[] = [
+    { name: "small", spaceId: "bench-inbox-small", body: "small payload" },
+    { name: "large", spaceId: "bench-inbox-large", body: "x".repeat(LARGE_PAYLOAD_BYTES) },
+  ];
+  const runIn = <T>(fixture: Fixture, managerPath: boolean, fn: () => Promise<T>) =>
+    runWithBusabaseContext(
+      {
+        spaceId: fixture.spaceId,
+        actorId: "bench-reviewer",
+        isSpaceManager: managerPath,
+        permissionLevel: managerPath ? "manage" : "read",
+      },
+      fn,
     );
 
-    const base = SKIP_SEED
-      ? (await client.bases.list({} as never)).find((b) => b.slug === "inbox-bench")
-      : await client.bases.create({
-          slug: "inbox-bench",
-          name: "Inbox Bench",
-          fields: [
-            { slug: "name", name: "Name", type: "text", required: true, options: {} },
-            { slug: "note", name: "Note", type: "longtext", options: {} },
-          ],
-          autoMerge: true,
-        });
-    if (!base) throw new Error("inbox-bench base not found — seed it first");
-
-    if (!SKIP_SEED) {
-      console.log("[seed] building change requests (this is the slow part)...");
-      const t0 = performance.now();
-      let done = 0;
-      const tick = () => {
-        done++;
-        if (done % 100 === 0) process.stdout.write(`\r  ${done}/${total}   `);
-      };
-
-      // Merged CRs carry a real mergeSummary (recordIds array) — the jsonb column
-      // that a `SELECT *` counting loop has to read and throw away.
-      for (let i = 0; i < TARGET.merged; i++) {
-        const cr = await client.bases.createChangeRequest({
-          baseId: base.id,
-          fields: { name: `Merged ${i}`, note: `merged body ${i}` },
-          submittedBy: i < TARGET.mine ? "local-editor" : "local-producer",
-          autoMerge: false,
-        });
+  const seed = (fixture: Fixture) =>
+    runIn(fixture, true, async () => {
+      const existing = (await client.bases.list({} as never)).find(
+        (base) => base.slug === `inbox-bench-${fixture.name}`,
+      );
+      if (SKIP_SEED && existing) return;
+      const base = await client.bases.create({
+        slug: `inbox-bench-${fixture.name}`,
+        name: `Inbox Bench ${fixture.name}`,
+        fields: [
+          { slug: "name", name: "Name", type: "text", required: true, options: {} },
+          { slug: "note", name: "Note", type: "longtext", options: {} },
+        ],
+        autoMerge: true,
+      });
+      // The request context is authoritative for authorship; merely passing a
+      // different `submittedBy` value is intentionally ignored by production
+      // logic. Seed each proposal under its real actor so the `mine` benchmark
+      // measures the intended minority slice instead of every fixture row.
+      const propose = (label: string, submittedBy = "bench-producer") =>
+        runWithBusabaseContext(
+          {
+            spaceId: fixture.spaceId,
+            actorId: submittedBy,
+            isSpaceManager: true,
+            permissionLevel: "manage",
+          },
+          () =>
+            client.bases.createChangeRequest({
+              baseId: base.id,
+              fields: { name: label, note: fixture.body },
+              submittedBy,
+              autoMerge: false,
+            }),
+        );
+      for (let index = 0; index < TARGET.merged; index++) {
+        const cr = await propose(
+          `Merged ${index}`,
+          index < TARGET.mine ? "bench-reviewer" : "bench-producer",
+        );
         await client.changeRequests.review({ changeRequestIds: [cr.id], verdict: "approved" });
         await client.changeRequests.merge({ changeRequestIds: [cr.id] });
-        tick();
       }
-      // Left in_review — the default "待评审" tab.
-      for (let i = 0; i < TARGET.in_review; i++) {
-        await client.bases.createChangeRequest({
-          baseId: base.id,
-          fields: { name: `Pending ${i}`, note: `pending body ${i}` },
-          submittedBy: "local-producer",
-          autoMerge: false,
-        });
-        tick();
-      }
-      // Approved but not merged.
-      for (let i = 0; i < TARGET.approved; i++) {
-        const cr = await client.bases.createChangeRequest({
-          baseId: base.id,
-          fields: { name: `Approved ${i}`, note: `approved body ${i}` },
-          submittedBy: "local-producer",
-          autoMerge: false,
-        });
+      for (let index = 0; index < TARGET.inReview; index++) await propose(`Pending ${index}`);
+      for (let index = 0; index < TARGET.approved; index++) {
+        const cr = await propose(`Approved ${index}`);
         await client.changeRequests.review({ changeRequestIds: [cr.id], verdict: "approved" });
-        tick();
       }
-      // Closed.
-      for (let i = 0; i < TARGET.closed; i++) {
-        const cr = await client.bases.createChangeRequest({
-          baseId: base.id,
-          fields: { name: `Closed ${i}`, note: `closed body ${i}` },
-          submittedBy: "local-producer",
-          autoMerge: false,
-        });
+      for (let index = 0; index < TARGET.closed; index++) {
+        const cr = await propose(`Closed ${index}`);
         await client.changeRequests.close({ changeRequestId: cr.id } as never);
-        tick();
       }
-      console.log(`\n[seed] done in ${((performance.now() - t0) / 1000).toFixed(1)}s\n`);
-    }
+    });
 
-    console.log("[read] one tab switch = counts + list");
-    results.push(
-      await benchmark(
-        "changeRequests.counts (每次切 tab 都重跑)",
-        () => client.changeRequests.counts({} as never),
-        (out) => JSON.stringify(out),
-      ),
-    );
-
-    const TABS: { label: string; status?: string[]; mine?: boolean }[] = [
-      { label: "待评审", status: ["in_review"] },
-      { label: "已请求修改", status: ["changes_requested"] },
-      { label: "已创建 (mine)", mine: true },
-      { label: "已批准", status: ["approved"] },
-      { label: "已合并", status: ["merged"] },
-      { label: "已关闭", status: ["rejected", "abandoned"] },
-    ];
-    for (const tab of TABS) {
-      results.push(
-        await benchmark(
-          `changeRequests.list — ${tab.label}`,
-          () =>
-            client.changeRequests.list({
-              limit: 20,
-              ...(tab.status ? { status: tab.status } : {}),
-              ...(tab.mine ? { mine: true } : {}),
-            } as never),
-          (out) => `rows=${(out as { changeRequests: unknown[] }).changeRequests.length}`,
-        ),
-      );
-    }
-
-    console.log(`\n=== SUMMARY (engine=${ENGINE}, ~${total} change requests) ===`);
-    console.table(
-      results.map((r) => ({
-        scenario: r.scenario,
-        "cold ms": r.coldMs,
-        "avg warm ms": r.avgWarmMs,
-        "peak heap MB": r.peakHeapMb,
-        result: r.note.slice(0, 60),
-      })),
-    );
-    const counts = results[0];
-    const worstList = results.slice(1).reduce((a, b) => (a.avgWarmMs > b.avgWarmMs ? a : b));
+  try {
     console.log(
-      `\n一次切 tab ≈ counts(${counts.avgWarmMs}ms) + list(最慢 ${worstList.avgWarmMs}ms) = ${counts.avgWarmMs + worstList.avgWarmMs}ms`,
+      `\n=== Inbox snapshot benchmark engine=${ENGINE} scale=${SCALE} large=${LARGE_PAYLOAD_BYTES}B ===`,
     );
+    if (!SKIP_SEED) {
+      for (const fixture of fixtures) {
+        console.log(`[seed] ${fixture.name}`);
+        await seed(fixture);
+      }
+    }
+    const results: Timing[] = [];
+    for (const fixture of fixtures) {
+      for (const managerPath of [true, false]) {
+        const actor = managerPath ? "manager" : "member";
+        for (const input of [
+          { label: "review", status: ["in_review"] },
+          { label: "created", mine: true },
+          { label: "merged", status: ["merged"] },
+        ]) {
+          results.push(
+            await benchmark(`${fixture.name}/${actor}/${input.label}`, () =>
+              runIn(fixture, managerPath, () =>
+                client.changeRequests.inboxSnapshot({ ...input, page: 1, pageSize: 50 } as never),
+              ),
+            ),
+          );
+        }
+      }
+    }
+    console.table(results);
   } finally {
     delete process.env.PG_DATABASE_URL;
     delete process.env.STORAGE_URL;
@@ -277,11 +245,11 @@ async function main() {
     await rm(storageDir, { recursive: true, force: true });
     if (ephemeral) await rm(ephemeral, { recursive: true, force: true });
   }
-}
+};
 
 main()
   .then(() => process.exit(0))
-  .catch((err) => {
-    console.error(err);
+  .catch((error) => {
+    console.error(error);
     process.exit(1);
   });
