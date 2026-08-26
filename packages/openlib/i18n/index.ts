@@ -5,6 +5,7 @@ export * from "./detect-server-locale";
 export * from "./i-string";
 export * from "./i18n";
 export * from "./i18n-string";
+export * from "./lang-layout-client";
 // Legacy i18n modules (from develop branch)
 // Re-export specific items to avoid conflicts with ./i18n exports
 export {

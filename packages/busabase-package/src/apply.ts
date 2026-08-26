@@ -9,9 +9,10 @@
  *                            base ordering can satisfy them at create time.
  *   3. Field-id patches      `inverseFieldId` / `ai.sourceFieldIds` are raw field ids
  *                            with no slug alias; their targets exist only after pass 2.
- *   4. Records (no relations)
- *   5. Relation values       relation targets that don't exist yet are SILENTLY DROPPED
- *                            server-side, so values written in pass 4 would vanish.
+ *   4. Records               required relations follow a preflighted dependency order;
+ *                            optional relations remain deferred.
+ *   5. Relation values       the optional links pass 4 could not carry, once every
+ *                            sample row has an id.
  *
  * Pass 1 opens with one preparatory step that is not a pass of its own: the Doc
  * images the package carries are uploaded first, because every one of them comes
@@ -46,6 +47,12 @@ import type { PackageClient } from "./client";
 import { reportUnresolvableDocAssets, rewriteDocAssetIds } from "./doc-asset-refs";
 import type { InstallPlan } from "./plan";
 import {
+  buildRecordCreateLayers,
+  type PlannedRecordCreate,
+  recordIdentity,
+  toRecordKeyArray,
+} from "./record-dependencies";
+import {
   collectBaseNodes,
   guessMimeType,
   isTextMimeType,
@@ -53,6 +60,7 @@ import {
   type PackageDocAsset,
   type PackageFileTreeNode,
   type PackageNode,
+  type PackageRecordLine,
   type PackageTree,
 } from "./tree";
 
@@ -131,6 +139,9 @@ export const applyInstall = async (
   plan: InstallPlan,
   options: ApplyOptions,
 ): Promise<ApplyResult> => {
+  // Repeat the planner's pure validation for tests/internal callers that build
+  // an InstallPlan directly. This runs before uploads or any workspace write.
+  const recordCreateLayers = buildRecordCreateLayers(plan.tree.nodes);
   const state: ApplyResult = {
     targetFolderNodeId: "",
     created: { folders: 0, docs: 0, bases: 0, views: 0, records: 0, fileTreeNodes: 0, files: 0 },
@@ -144,158 +155,261 @@ export const applyInstall = async (
   // against the package as written, before it rewrote any slugs. See
   // `InstallPlan.isTemplate` for why asking twice is actively wrong.
   const app = resolveAppContext(plan, options);
+  let phase = "Pass 1/5 (structure)";
 
-  // ── Pass 1: structure ──────────────────────────────────────────────────────
-  // Doc images first, before a single Doc is created. A Doc body references its
-  // images by asset id, this host is about to mint NEW ids for those bytes, and
-  // a Doc cannot be created twice — so the id map has to be complete before the
-  // tree walk starts, not discovered during it. Uploading here (rather than
-  // lazily, per doc) also carries an image shared by three Docs exactly once.
-  const docAssetIds = await uploadDocAssets(
-    client,
-    plan.tree.assets ?? [],
-    state,
-    progress,
-    options.serverUrl,
-  );
-  progress("Pass 1/5: creating the node tree…");
-  if (plan.existingTargetFolderNodeId) {
-    state.targetFolderNodeId = plan.existingTargetFolderNodeId;
-  } else {
-    state.targetFolderNodeId = await createFolderNode(client, {
-      parentNodeId: undefined,
-      slug: plan.targetFolderSlug,
-      name: plan.tree.manifest.name,
-      description: plan.tree.manifest.description,
-      submittedBy: options.submittedBy,
-      // Only a folder we just created is stamped. Installing into a folder the
-      // user already had — or into the space root — must not claim it for this
-      // app; that is someone else's container and re-stamping it would make
-      // their own tooling think this app owns it.
-      metadata: app?.rootMetadata,
-    });
-    state.created.folders++;
-  }
-  await createStructure(
-    client,
-    plan.tree.nodes,
-    state.targetFolderNodeId,
-    options,
-    state,
-    bases,
-    fieldIds,
-    docAssetIds,
-    app,
-  );
-
-  // The manual, last in pass 1 — after the resources it describes exist, so a
-  // reviewer reading the change request sees it in the folder it belongs to.
-  if (app?.rootSkill) {
-    progress("Pass 1/5: installing the app skill…");
-    await createFileTreeNode(
+  try {
+    // ── Pass 1: structure ──────────────────────────────────────────────────────
+    // Doc images first, before a single Doc is created. A Doc body references its
+    // images by asset id, this host is about to mint NEW ids for those bytes, and
+    // a Doc cannot be created twice — so the id map has to be complete before the
+    // tree walk starts, not discovered during it. Uploading here (rather than
+    // lazily, per doc) also carries an image shared by three Docs exactly once.
+    const docAssetIds = await uploadDocAssets(
       client,
-      {
-        type: "skill",
-        slug: app.rootSkill.slug,
-        name: app.rootSkill.name,
-        description: app.rootSkill.description,
-        position: undefined,
-        files: app.rootSkill.files,
-      },
+      plan.tree.assets ?? [],
+      state,
+      progress,
+      options.serverUrl,
+    );
+    progress("Pass 1/5: creating the node tree…");
+    if (plan.existingTargetFolderNodeId) {
+      state.targetFolderNodeId = plan.existingTargetFolderNodeId;
+    } else {
+      state.targetFolderNodeId = await createFolderNode(client, {
+        parentNodeId: undefined,
+        slug: plan.targetFolderSlug,
+        name: plan.tree.manifest.name,
+        description: plan.tree.manifest.description,
+        submittedBy: options.submittedBy,
+        // Only a folder we just created is stamped. Installing into a folder the
+        // user already had — or into the space root — must not claim it for this
+        // app; that is someone else's container and re-stamping it would make
+        // their own tooling think this app owns it.
+        metadata: app?.rootMetadata,
+      });
+      state.created.folders++;
+    }
+    await createStructure(
+      client,
+      plan.tree.nodes,
       state.targetFolderNodeId,
       options,
       state,
+      bases,
+      fieldIds,
+      docAssetIds,
       app,
-      { [TEMPLATE_SKILL_METADATA_KEY]: true },
     );
-  }
 
-  // ── Pass 2: relation + AI fields ───────────────────────────────────────────
-  const deferred = bases.filter((base) => base.node.base.fields.some(isDeferredField));
-  if (deferred.length > 0) {
-    progress("Pass 2/5: adding relation and AI fields…");
-    for (const base of deferred) {
-      for (const field of base.node.base.fields.filter(isDeferredField)) {
-        // Immediate, never a change request — `bases.createField` has no autoMerge and
-        // returns the whole base, so the new field's id is read back by slug.
-        const updated = await client.bases.createField({
+    // The manual, last in pass 1 — after the resources it describes exist, so a
+    // reviewer reading the change request sees it in the folder it belongs to.
+    if (app?.rootSkill) {
+      progress("Pass 1/5: installing the app skill…");
+      await createFileTreeNode(
+        client,
+        {
+          type: "skill",
+          slug: app.rootSkill.slug,
+          name: app.rootSkill.name,
+          description: app.rootSkill.description,
+          position: undefined,
+          files: app.rootSkill.files,
+        },
+        state.targetFolderNodeId,
+        options,
+        state,
+        app,
+        { [TEMPLATE_SKILL_METADATA_KEY]: true },
+      );
+    }
+
+    // ── Pass 2: relation + AI fields ───────────────────────────────────────────
+    phase = "Pass 2/5 (relation and AI fields)";
+    const deferred = bases.filter((base) => base.node.base.fields.some(isDeferredField));
+    if (deferred.length > 0) {
+      progress("Pass 2/5: adding relation and AI fields…");
+      for (const base of deferred) {
+        for (const field of base.node.base.fields.filter(isDeferredField)) {
+          // Immediate, never a change request — `bases.createField` has no autoMerge and
+          // returns the whole base, so the new field's id is read back by slug.
+          const updated = await client.bases.createField({
+            baseId: base.baseId,
+            slug: field.slug,
+            name: field.name,
+            type: field.type,
+            required: field.required,
+            options: toApiFieldOptions(field.options),
+          });
+          indexFields(fieldIds, base.node.slug, updated.fields);
+        }
+      }
+    }
+
+    // ── Pass 3: field-id patches ───────────────────────────────────────────────
+    phase = "Pass 3/5 (field reference wiring)";
+    const patchable = bases.flatMap((base) =>
+      base.node.base.fields.filter(needsFieldIdPatch).map((field) => ({ base, field })),
+    );
+    if (patchable.length > 0) {
+      progress("Pass 3/5: resolving inverse and AI source field references…");
+      for (const { base, field } of patchable) {
+        const fieldId = fieldIds.get(fieldKey(base.node.slug, field.slug));
+        if (!fieldId) {
+          throw new Error(
+            `Internal error: no field id for ${base.node.slug}.${field.slug} in pass 3.`,
+          );
+        }
+        const patched = resolveFieldIdOptions(field, base.node.slug, fieldIds, state.warnings);
+        if (!patched) continue;
+        const changeRequest = await client.bases.fieldChangeRequest({
+          operation: "update",
           baseId: base.baseId,
-          slug: field.slug,
-          name: field.name,
-          type: field.type,
-          required: field.required,
-          options: toApiFieldOptions(field.options),
+          fieldId,
+          patch: { options: patched },
+          message: `Wire up ${base.node.slug}.${field.slug} references`,
+          submittedBy: options.submittedBy,
+          // Field wiring is STRUCTURE, like the Base and its views above — ask for it
+          // outright rather than proposing it and immediately approving our own
+          // proposal, which is what this used to do only because the endpoint had no
+          // `autoMerge`.
+          autoMerge: true,
         });
-        indexFields(fieldIds, base.node.slug, updated.fields);
+        if (changeRequest.status !== "merged") {
+          throw new Error(
+            `Field reference wiring for ${base.node.slug}.${field.slug} was requested immediately but came back "${changeRequest.status}"; install cannot leave a Base's relation fields unwired.`,
+          );
+        }
       }
     }
-  }
 
-  // ── Pass 3: field-id patches ───────────────────────────────────────────────
-  const patchable = bases.flatMap((base) =>
-    base.node.base.fields.filter(needsFieldIdPatch).map((field) => ({ base, field })),
-  );
-  if (patchable.length > 0) {
-    progress("Pass 3/5: resolving inverse and AI source field references…");
-    for (const { base, field } of patchable) {
-      const fieldId = fieldIds.get(fieldKey(base.node.slug, field.slug));
-      if (!fieldId) {
-        throw new Error(
-          `Internal error: no field id for ${base.node.slug}.${field.slug} in pass 3.`,
-        );
-      }
-      const patched = resolveFieldIdOptions(field, base.node.slug, fieldIds, state.warnings);
-      if (!patched) continue;
-      const changeRequest = await client.bases.fieldChangeRequest({
-        operation: "update",
-        baseId: base.baseId,
-        fieldId,
-        patch: { options: patched },
-        message: `Wire up ${base.node.slug}.${field.slug} references`,
-        submittedBy: options.submittedBy,
-        // Field wiring is STRUCTURE, like the Base and its views above — ask for it
-        // outright rather than proposing it and immediately approving our own
-        // proposal, which is what this used to do only because the endpoint had no
-        // `autoMerge`.
-        autoMerge: true,
-      });
-      if (changeRequest.status !== "merged") {
-        throw new Error(
-          `Field reference wiring for ${base.node.slug}.${field.slug} was requested immediately but came back "${changeRequest.status}"; install cannot leave a Base's relation fields unwired.`,
-        );
+    // ── Pass 4: records in required-relation dependency order ──────────────────
+    phase = "Pass 4/5 (sample records)";
+    // `(base slug, package record key)` → newly minted canonical record id.
+    const recordIdsByKey = new Map<string, string>();
+    if (recordCreateLayers.length > 0) {
+      progress("Pass 4/5: creating records…");
+      const basesBySlug = new Map(bases.map((base) => [base.node.slug, base]));
+      for (const layer of recordCreateLayers) {
+        const byBase = new Map<string, PlannedRecordCreate[]>();
+        for (const planned of layer) {
+          const group = byBase.get(planned.base.slug) ?? [];
+          group.push(planned);
+          byBase.set(planned.base.slug, group);
+        }
+        for (const [baseSlug, planned] of [...byBase].sort(([a], [b]) =>
+          a.localeCompare(b, "en"),
+        )) {
+          const base = basesBySlug.get(baseSlug);
+          if (!base)
+            throw new Error(`Internal error: no materialized Base for ${baseSlug} in pass 4.`);
+          await createRecords(
+            client,
+            base,
+            planned.map((item) => item.record),
+            plan,
+            options,
+            state,
+            recordIdsByKey,
+            app,
+          );
+        }
       }
     }
-  }
 
-  // ── Pass 4: records, relation values omitted ───────────────────────────────
-  // `key` → the newly minted record id, the map pass 5 resolves relations through.
-  const recordIdsByKey = new Map<string, string>();
-  const withRecords = bases.filter((base) => base.node.records.length > 0);
-  if (withRecords.length > 0) {
-    progress("Pass 4/5: creating records…");
-    for (const base of withRecords) {
-      await createRecords(client, base, plan, options, state, recordIdsByKey, app);
-    }
-  }
-
-  // ── Pass 5: relation values ────────────────────────────────────────────────
-  const relationFieldSlugs = new Map<string, string[]>();
-  for (const base of bases) {
-    const slugs = base.node.base.fields
-      .filter((field) => field.type === "relation")
-      .map((field) => field.slug);
-    if (slugs.length > 0) relationFieldSlugs.set(base.node.slug, slugs);
-  }
-  if (relationFieldSlugs.size > 0) {
-    progress("Pass 5/5: linking relations…");
+    // ── Pass 5: relation values ────────────────────────────────────────────────
+    phase = "Pass 5/5 (relation links)";
+    const relationFields = new Map<string, PackageBaseField[]>();
     for (const base of bases) {
-      const slugs = relationFieldSlugs.get(base.node.slug);
-      if (!slugs) continue;
-      await linkRelations(client, base, slugs, recordIdsByKey, options, state);
+      const fields = base.node.base.fields.filter((field) => field.type === "relation");
+      if (fields.length > 0) relationFields.set(base.node.slug, fields);
     }
-  }
+    if (relationFields.size > 0) {
+      progress("Pass 5/5: linking relations…");
+      for (const base of bases) {
+        const fields = relationFields.get(base.node.slug);
+        if (!fields) continue;
+        await linkRelations(client, base, fields, recordIdsByKey, options, state);
+      }
+    }
 
-  return state;
+    return state;
+  } catch (error) {
+    const created = Object.entries(state.created)
+      .filter(([, count]) => count > 0)
+      .map(([kind, count]) => `${count} ${kind}`)
+      .join(", ");
+    const partial = created
+      ? `Created before failure: ${created}. Target folder: ${plan.targetFolderSlug}.`
+      : "No package resources were created.";
+    const pending = state.pendingChangeRequests
+      ? ` ${state.pendingChangeRequests} ChangeRequest(s) may still be pending.`
+      : "";
+    const reason = error instanceof Error ? error.message : String(error);
+    const message = `Install stopped during ${phase}. ${partial}${pending} Cause: ${reason}`;
+    const details: InstallFailureDetails = {
+      phase,
+      targetFolderSlug: plan.targetFolderSlug,
+      created: { ...state.created },
+      pendingChangeRequests: state.pendingChangeRequests,
+    };
+    if (error instanceof Error) {
+      // Preserve ORPCError/SDK error prototypes and their code/status/data.
+      // Re-wrapping as Error would turn actionable permission/conflict errors
+      // into an opaque 500 at the Dashboard boundary.
+      error.message = message;
+      throw attachInstallFailureDetails(error, details);
+    }
+    throw attachInstallFailureDetails(new Error(message), details);
+  }
+};
+
+/**
+ * The partial-install facts, attached to the error `applyInstall` rethrows.
+ *
+ * The message above states the same thing in prose — which is all the CLI needs,
+ * since it runs the apply in its own process and prints the message verbatim. A
+ * host that answers over RPC cannot rely on prose: it has to decide whether the
+ * workspace changed (refresh the tree) and where to point the user, and parsing
+ * an English sentence to find out is not a contract.
+ */
+export interface InstallFailureDetails {
+  /** Which of the five passes stopped, e.g. `Pass 4/5 (sample records)`. */
+  phase: string;
+  targetFolderSlug: string;
+  created: ApplyResult["created"];
+  pendingChangeRequests: number;
+}
+
+/**
+ * A property rather than a subclass: the whole point of the rethrow above is to
+ * keep the original error's prototype (an `ORPCError`'s `code`/`status`/`data`
+ * are what make a permission or quota failure actionable), so the diagnostics
+ * have to ride along on it instead of replacing it.
+ */
+const INSTALL_FAILURE_DETAILS_KEY = "busabaseInstallFailure";
+
+const attachInstallFailureDetails = <T extends Error>(
+  error: T,
+  details: InstallFailureDetails,
+): T => {
+  try {
+    Object.defineProperty(error, INSTALL_FAILURE_DETAILS_KEY, {
+      value: details,
+      enumerable: false,
+      configurable: true,
+      writable: true,
+    });
+  } catch {
+    // A frozen or sealed error must not turn a real failure into a TypeError
+    // that hides it. The message still carries the same facts.
+  }
+  return error;
+};
+
+export const getInstallFailureDetails = (error: unknown): InstallFailureDetails | undefined => {
+  if (typeof error !== "object" || error === null) return undefined;
+  const details = (error as Record<string, unknown>)[INSTALL_FAILURE_DETAILS_KEY];
+  return details === undefined ? undefined : (details as InstallFailureDetails);
 };
 
 /**
@@ -900,19 +1014,45 @@ const indexFields = (
 
 // ── Records ──────────────────────────────────────────────────────────────────
 
-/** Values the server computes, and relation values (pass 5), are never sent in pass 4. */
+/**
+ * Values the server computes and optional relations are omitted in pass 4.
+ * Required relations are resolved to canonical ids once their dependency layer exists.
+ */
 const toCreatableFields = (
   node: PackageBaseNode,
   fields: Record<string, unknown>,
+  recordIdsByKey: ReadonlyMap<string, string>,
 ): Record<string, unknown> => {
-  const typeBySlug = new Map(node.base.fields.map((field) => [field.slug, field.type]));
+  const fieldBySlug = new Map(node.base.fields.map((field) => [field.slug, field]));
   const result: Record<string, unknown> = {};
   for (const [slug, value] of Object.entries(fields)) {
-    const type = typeBySlug.get(slug);
-    if (!type) continue;
-    if (type === "relation") continue;
-    if (PACKAGE_COMPUTED_FIELD_TYPES.includes(type)) continue;
-    if (type === "attachment") continue; // §6.4: attachment values are not exported in v1.
+    const field = fieldBySlug.get(slug);
+    if (!field) continue;
+    if (field.type === "relation") {
+      if (!field.required) continue;
+      const targetBaseSlug = field.options.targetBaseSlug;
+      const keys = toRecordKeyArray(value);
+      const targetIds = keys
+        .map((key) =>
+          targetBaseSlug ? recordIdsByKey.get(recordIdentity(targetBaseSlug, key)) : undefined,
+        )
+        .filter((id): id is string => Boolean(id));
+      if (targetIds.length !== keys.length) {
+        throw new Error(
+          `Internal error: required relation ${node.slug}.${slug} was scheduled before its targets existed.`,
+        );
+      }
+      // Always the array form, even for `multiple: false`. A relation is STORED
+      // as an array of record ids (`isEmptyFieldValue`, the formula bridge and
+      // the lookup reader all read it that way), and while a bare string is
+      // accepted on the way in, leaving one behind would make the value
+      // invisible to formulas and lookups on a Base whose sample rows are the
+      // only thing a reviewer can try the app against.
+      result[slug] = targetIds;
+      continue;
+    }
+    if (PACKAGE_COMPUTED_FIELD_TYPES.includes(field.type)) continue;
+    if (field.type === "attachment") continue; // §6.4: attachment values are not exported in v1.
     result[slug] = value;
   }
   return result;
@@ -921,6 +1061,7 @@ const toCreatableFields = (
 const createRecords = async (
   client: PackageClient,
   base: BaseContext,
+  recordsToCreate: readonly PackageRecordLine[],
   plan: InstallPlan,
   options: ApplyOptions,
   state: ApplyResult,
@@ -935,12 +1076,12 @@ const createRecords = async (
   // AirApp code or the Skill — those stay review-first, because they are the
   // parts that execute.
   const mergeRecords = options.autoMerge || (app?.mergeSampleRecords ?? false);
-  const records = [...base.node.records].sort((a, b) => a.key.localeCompare(b.key, "en"));
+  const records = [...recordsToCreate].sort((a, b) => a.key.localeCompare(b.key, "en"));
   for (let offset = 0; offset < records.length; offset += RECORD_BATCH_SIZE) {
     const batch = records.slice(offset, offset + RECORD_BATCH_SIZE);
     const changeRequest = await client.bases.createBulkChangeRequest({
       baseId: base.baseId,
-      records: batch.map((record) => toCreatableFields(base.node, record.fields)),
+      records: batch.map((record) => toCreatableFields(base.node, record.fields, recordIdsByKey)),
       message: `Install ${batch.length} record(s) into ${base.node.slug}`,
       submittedBy: options.submittedBy,
       idempotencyKey: batchIdempotencyKey(plan.tree.manifest.name, batch[0].key),
@@ -972,7 +1113,7 @@ const createRecords = async (
       .sort((a, b) => a.position - b.position);
     for (const [index, record] of batch.entries()) {
       const recordId = created[index]?.mergedRecordId;
-      if (recordId) recordIdsByKey.set(record.key, recordId);
+      if (recordId) recordIdsByKey.set(recordIdentity(base.node.slug, record.key), recordId);
     }
     state.created.records += batch.length;
   }
@@ -993,35 +1134,48 @@ export const batchIdempotencyKey = (packageName: string, firstRecordKey: string)
 const linkRelations = async (
   client: PackageClient,
   base: BaseContext,
-  relationFieldSlugs: readonly string[],
+  relationFields: readonly PackageBaseField[],
   recordIdsByKey: Map<string, string>,
   options: ApplyOptions,
   state: ApplyResult,
 ): Promise<void> => {
   for (const record of base.node.records) {
     const relationValues: Record<string, unknown> = {};
-    let hasRelation = false;
-    for (const slug of relationFieldSlugs) {
-      const value = record.fields[slug];
-      const keys = toKeyArray(value);
+    // Only an OPTIONAL relation needs this pass. A required one was written with
+    // its canonical ids in pass 4 (it had to be — the Base rejects the create
+    // otherwise), so re-sending it here would cost a change request, a review, a
+    // merge and a revise commit per row to store the value that is already
+    // there. On a template whose rows all hang off required relations that is
+    // every row, and the extra commits are noise in the history a reviewer reads.
+    let needsUpdate = false;
+    for (const field of relationFields) {
+      const value = record.fields[field.slug];
+      const keys = toRecordKeyArray(value);
       if (keys.length === 0) continue;
+      const targetBaseSlug = field.options.targetBaseSlug;
       const targetIds = keys
-        .map((key) => recordIdsByKey.get(key))
+        .map((key) =>
+          targetBaseSlug ? recordIdsByKey.get(recordIdentity(targetBaseSlug, key)) : undefined,
+        )
         .filter((id): id is string => Boolean(id));
-      const unresolved = keys.filter((key) => !recordIdsByKey.has(key));
+      const unresolved = keys.filter(
+        (key) => !targetBaseSlug || !recordIdsByKey.has(recordIdentity(targetBaseSlug, key)),
+      );
       if (unresolved.length > 0) {
         state.warnings.push(
-          `Record "${record.key}" in base "${base.node.slug}" links field "${slug}" to ${unresolved.length} record(s) that are not in this package — those links were skipped.`,
+          `Record "${record.key}" in base "${base.node.slug}" links field "${field.slug}" to ${unresolved.length} record(s) that are not in target Base "${targetBaseSlug || "(unset)"}" — those links were skipped.`,
         );
       }
       if (targetIds.length > 0) {
-        relationValues[slug] = targetIds;
-        hasRelation = true;
+        // Carried even for a required field: a record update REPLACES the whole
+        // field map, so once this pass runs at all it has to resend everything.
+        relationValues[field.slug] = targetIds;
+        if (!field.required) needsUpdate = true;
       }
     }
-    if (!hasRelation) continue;
+    if (!needsUpdate) continue;
 
-    const recordId = recordIdsByKey.get(record.key);
+    const recordId = recordIdsByKey.get(recordIdentity(base.node.slug, record.key));
     if (!recordId) continue;
 
     // A record update REPLACES the whole field map (the revise commit stores exactly
@@ -1030,7 +1184,10 @@ const linkRelations = async (
     const changeRequest = await client.records.changeRequest({
       operation: "update",
       recordId,
-      fields: { ...toCreatableFields(base.node, record.fields), ...relationValues },
+      fields: {
+        ...toCreatableFields(base.node, record.fields, recordIdsByKey),
+        ...relationValues,
+      },
       message: `Link relations for ${base.node.slug}`,
       author: options.submittedBy,
       autoMerge: false,
@@ -1040,13 +1197,6 @@ const linkRelations = async (
     }
     await approveAndMerge(client, changeRequest.id);
   }
-};
-
-const toKeyArray = (value: unknown): string[] => {
-  if (Array.isArray(value))
-    return value.filter((item): item is string => typeof item === "string" && item.length > 0);
-  if (typeof value === "string" && value.length > 0) return [value];
-  return [];
 };
 
 // ── Change requests ──────────────────────────────────────────────────────────
