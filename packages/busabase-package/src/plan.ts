@@ -9,6 +9,7 @@
  */
 import { PACKAGE_MAX_FILE_COUNT } from "busabase-contract/domains/package/types";
 import type { PackageClient } from "./client";
+import { buildRecordCreateLayers } from "./record-dependencies";
 import { validateTemplate } from "./template";
 import {
   collectBaseNodes,
@@ -208,6 +209,11 @@ export const buildInstallPlan = (
       resourceKeysBySlug[installedSlug] = originalSlug;
     }
   }
+
+  // Validate required sample-relation dependencies before the install creates
+  // a Folder, Base, or executable-content ChangeRequest. applyInstall repeats
+  // this pure check for callers that construct an InstallPlan themselves.
+  buildRecordCreateLayers(planned.nodes);
 
   collectWarnings(planned, warnings);
   const counts = countTree(planned);

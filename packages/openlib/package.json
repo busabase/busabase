@@ -102,7 +102,7 @@
     "@dnd-kit/utilities": "^3.2.2",
     "@formatjs/intl-localematcher": "0.6.2",
     "@modelcontextprotocol/sdk": "1.26.0",
-    "@next/third-parties": "^16.2.6",
+    "@next/third-parties": "^16.3.2",
     "@orpc/contract": "^1.14.6",
     "@orpc/openapi": "^1.14.6",
     "@orpc/server": "^1.14.6",

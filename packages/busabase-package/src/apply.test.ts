@@ -1,6 +1,12 @@
 import { PACKAGE_FORMAT } from "busabase-contract/domains/package/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { applyInstall, batchIdempotencyKey, RECORD_BATCH_SIZE, toApiFieldOptions } from "./apply";
+import {
+  applyInstall,
+  batchIdempotencyKey,
+  getInstallFailureDetails,
+  RECORD_BATCH_SIZE,
+  toApiFieldOptions,
+} from "./apply";
 import type { PackageClient } from "./client";
 import { buildInstallPlan } from "./plan";
 import type { PackageBaseNode, PackageTree } from "./tree";
@@ -193,6 +199,34 @@ const relationBase = (
   records: [],
 });
 
+const plainBase = (slug: string): PackageBaseNode => ({
+  type: "base",
+  slug,
+  name: slug,
+  description: "",
+  position: 0,
+  base: {
+    name: slug,
+    description: "",
+    position: 0,
+    fields: [
+      { slug: "title", name: "Title", type: "text", required: true, position: 0, options: {} },
+    ],
+    views: [],
+  },
+  records: [],
+});
+
+const requiredRelationBase = (slug: string, targetBaseSlug: string): PackageBaseNode => {
+  const base = relationBase(slug, targetBaseSlug, "inverse");
+  const relation = base.base.fields.find((field) => field.slug === "link");
+  if (relation) {
+    relation.required = true;
+    relation.options = { multiple: false, targetBaseSlug };
+  }
+  return base;
+};
+
 const planFor = (nodes: PackageTree["nodes"], assets?: PackageTree["assets"]) =>
   buildInstallPlan(
     {
@@ -231,6 +265,59 @@ describe("target folder", () => {
     expect(calls.some((call) => call.method === "nodes.createChangeRequest")).toBe(false);
     const docCreate = calls.find((call) => call.method === "docs.create");
     expect((docCreate?.input as { parentNodeId: string }).parentNodeId).toBe("nod_root");
+  });
+});
+
+describe("partial install diagnostics", () => {
+  it("names the failed pass and the resources created before a runtime error", async () => {
+    const { client } = createFakeServer();
+    const failure = Object.assign(new Error("simulated field failure"), {
+      code: "FORBIDDEN",
+      status: 403,
+    });
+    client.bases.createField = async () => {
+      throw failure;
+    };
+
+    const caught = await applyInstall(
+      client,
+      planFor([relationBase("contacts", "companies", "inverse")]),
+      {
+        autoMerge: true,
+      },
+    ).catch((error: unknown) => error);
+    expect(caught).toMatchObject({ code: "FORBIDDEN", status: 403 });
+    expect((caught as Error).message).toMatch(
+      /Install stopped during Pass 2\/5.*1 folders, 1 bases.*Target folder: my-package.*simulated field failure/s,
+    );
+  });
+
+  it("attaches the same facts structurally, for a host that reports over RPC", async () => {
+    const { client } = createFakeServer();
+    client.bases.createField = async () => {
+      throw new Error("simulated field failure");
+    };
+
+    const caught = await applyInstall(
+      client,
+      planFor([relationBase("contacts", "companies", "inverse")]),
+      { autoMerge: true },
+    ).catch((error: unknown) => error);
+
+    // Prose is enough for the CLI, which prints the message in its own process.
+    // A host answering over RPC has to decide whether the workspace changed
+    // without parsing an English sentence to find out.
+    expect(getInstallFailureDetails(caught)).toEqual({
+      phase: "Pass 2/5 (relation and AI fields)",
+      targetFolderSlug: "my-package",
+      created: { folders: 1, docs: 0, bases: 1, views: 0, records: 0, fileTreeNodes: 0, files: 0 },
+      pendingChangeRequests: 0,
+    });
+  });
+
+  it("reports no diagnostics for an error that is not an install failure", () => {
+    expect(getInstallFailureDetails(new Error("unrelated"))).toBeUndefined();
+    expect(getInstallFailureDetails(undefined)).toBeUndefined();
   });
 });
 
@@ -361,6 +448,108 @@ describe("the five passes", () => {
     const fields = (updates[0].input as { fields: Record<string, unknown> }).fields;
     expect(fields.link).toEqual(["rec_new_2"]);
     expect(fields.link).not.toContain("k2");
+  });
+
+  it("creates required-relation targets first and sends their canonical ids in pass 4", async () => {
+    const { calls, client } = createFakeServer();
+    const contacts = requiredRelationBase("contacts", "companies");
+    contacts.records = [{ key: "contact-1", fields: { title: "Maya", link: "company-1" } }];
+    const companies = plainBase("companies");
+    companies.records = [{ key: "company-1", fields: { title: "Northstar" } }];
+
+    // Deliberately put the dependent Base first: package order must not decide
+    // whether required relations can be installed.
+    await applyInstall(client, planFor([contacts, companies]), { autoMerge: true });
+
+    const bulk = calls.filter((call) => call.method === "bases.createBulkChangeRequest");
+    expect(bulk).toHaveLength(2);
+    expect((bulk[0].input as { records: Record<string, unknown>[] }).records[0]).toEqual({
+      title: "Northstar",
+    });
+    expect((bulk[1].input as { records: Record<string, unknown>[] }).records[0]).toEqual({
+      title: "Maya",
+      link: ["rec_new_1"],
+    });
+  });
+
+  it("does not re-send a required relation in pass 5", async () => {
+    const { calls, client } = createFakeServer();
+    const contacts = requiredRelationBase("contacts", "companies");
+    contacts.records = [{ key: "contact-1", fields: { title: "Maya", link: "company-1" } }];
+    const companies = plainBase("companies");
+    companies.records = [{ key: "company-1", fields: { title: "Northstar" } }];
+
+    await applyInstall(client, planFor([contacts, companies]), { autoMerge: true });
+
+    // Pass 4 already wrote the canonical id, so pass 5 has nothing to add — and a
+    // no-op revise per row would be a change request, a review, a merge and a
+    // commit in the history a reviewer reads.
+    expect(calls.filter((call) => call.method === "records.changeRequest:update")).toHaveLength(0);
+  });
+
+  it("still runs pass 5 for an optional relation beside a required one", async () => {
+    const { calls, client } = createFakeServer();
+    const contacts = requiredRelationBase("contacts", "companies");
+    contacts.base.fields.push({
+      slug: "referrer",
+      name: "Referrer",
+      type: "relation",
+      required: false,
+      position: 2,
+      options: { multiple: false, targetBaseSlug: "companies" },
+    });
+    contacts.records = [
+      { key: "contact-1", fields: { title: "Maya", link: "company-1", referrer: "company-1" } },
+    ];
+    const companies = plainBase("companies");
+    companies.records = [{ key: "company-1", fields: { title: "Northstar" } }];
+
+    await applyInstall(client, planFor([contacts, companies]), { autoMerge: true });
+
+    const updates = calls.filter((call) => call.method === "records.changeRequest:update");
+    expect(updates).toHaveLength(1);
+    // A record update REPLACES the field map, so the required link has to be
+    // resent alongside the optional one it came here for.
+    expect((updates[0].input as { fields: Record<string, unknown> }).fields).toEqual({
+      title: "Maya",
+      link: ["rec_new_1"],
+      referrer: ["rec_new_1"],
+    });
+  });
+
+  it("scopes relation keys to their target Base", async () => {
+    const { calls, client } = createFakeServer();
+    const contacts = requiredRelationBase("contacts", "companies");
+    contacts.records = [{ key: "shared", fields: { title: "Maya", link: "shared" } }];
+    const companies = plainBase("companies");
+    companies.records = [{ key: "shared", fields: { title: "Northstar" } }];
+
+    await applyInstall(client, planFor([contacts, companies]), { autoMerge: true });
+
+    const bulk = calls.filter((call) => call.method === "bases.createBulkChangeRequest");
+    expect((bulk[1].input as { records: Record<string, unknown>[] }).records[0]).toMatchObject({
+      link: ["rec_new_1"],
+    });
+  });
+
+  it("rejects a missing required relation target during planning", () => {
+    const contacts = requiredRelationBase("contacts", "companies");
+    contacts.records = [{ key: "contact-1", fields: { title: "Maya", link: "missing" } }];
+
+    expect(() => planFor([contacts, plainBase("companies")])).toThrow(
+      'requires "companies/missing"',
+    );
+  });
+
+  it("rejects required relation cycles during planning", () => {
+    const companies = requiredRelationBase("companies", "contacts");
+    companies.records = [{ key: "company-1", fields: { title: "Northstar", link: "contact-1" } }];
+    const contacts = requiredRelationBase("contacts", "companies");
+    contacts.records = [{ key: "contact-1", fields: { title: "Maya", link: "company-1" } }];
+
+    expect(() => planFor([companies, contacts])).toThrow(
+      "Required sample relations contain a cycle",
+    );
   });
 
   it("resends non-relation values in pass 5, because a revise REPLACES the field map", async () => {
