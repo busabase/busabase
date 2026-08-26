@@ -35,7 +35,7 @@ const BUSABASE_LOGO = "/icon.svg";
 
 interface BusabaseDashboardShellProps {
   children: ReactNode;
-  activeChangeRequestCount: number;
+  activeChangeRequestCount?: number;
   nodes: NodeVO[];
   onSearchClick: () => void;
   onCreateClick: (parent?: { id: string; name: string }) => void;

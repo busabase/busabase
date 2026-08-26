@@ -102,18 +102,38 @@ test("AirApp run panel: auto-run, restart, watermark, nav persistence, fullscree
 
   let appASrc = "";
 
-  await test.step("shared fullscreen URL auto-runs and opens the preview without a click", async () => {
-    await page.goto(`/dashboard/local/airapp/${appA.slug}?fullscreen=1`);
+  await test.step("first client-side visit claims the page and auto-runs without a refresh", async () => {
+    await page.goto("/dashboard/local");
+    await expect(sidebarLink(page, appA.name)).toBeVisible();
+    expect(await page.evaluate(() => navigator.serviceWorker.controller)).toBeNull();
+
+    // This is intentionally a sidebar click rather than page.goto(): the
+    // dashboard document starts uncontrolled, then the AirApp's auto-run must
+    // register/activate the worker and explicitly claim this existing page.
+    await sidebarLink(page, appA.name).click();
     await expect(page.getByRole("heading", { name: appA.name })).toBeVisible();
 
     // No Run click — opening the detail view starts the app by itself.
     await expectRunning(page, appA.nodeId);
     await expect(page.getByRole("button", { name: "Restart" })).toBeVisible();
+    expect(await page.evaluate(() => navigator.serviceWorker.controller)).not.toBeNull();
+
+    const iframe = mainPreview(page);
+    await expect(iframe).toBeVisible();
+    await expect(visiblePreviewIframes(page)).toHaveCount(1);
+    await expect(page).toHaveURL(new RegExp(`/dashboard/local/airapp/${appA.slug}$`));
+    appASrc = (await iframe.getAttribute("src")) ?? "";
+    expect(appASrc.length).toBeGreaterThan(0);
+  });
+
+  await test.step("shared fullscreen URL still auto-runs and reuses one preview iframe", async () => {
+    await page.goto(`/dashboard/local/airapp/${appA.slug}?fullscreen=1`);
+    await expect(page.getByRole("heading", { name: appA.name })).toBeVisible();
+    await expectRunning(page, appA.nodeId);
 
     const fullscreen = fullscreenPreview(page);
     await expect(fullscreen).toBeVisible();
     await expect(fullscreen.locator('iframe[title="AirApp preview"]')).toBeVisible();
-    // One iframe, ever — the fullscreen surface reuses the running preview.
     await expect(visiblePreviewIframes(page)).toHaveCount(1);
     await expect(page).toHaveURL(
       new RegExp(`/dashboard/local/airapp/${appA.slug}\\?fullscreen=1$`),
@@ -122,10 +142,7 @@ test("AirApp run panel: auto-run, restart, watermark, nav persistence, fullscree
     await fullscreen.getByRole("button", { name: "Exit fullscreen" }).click();
     await expect(fullscreen).toHaveCount(0);
     await expect(page).toHaveURL(new RegExp(`/dashboard/local/airapp/${appA.slug}$`));
-
-    const iframe = mainPreview(page);
-    await expect(iframe).toBeVisible();
-    appASrc = (await iframe.getAttribute("src")) ?? "";
+    appASrc = (await mainPreview(page).getAttribute("src")) ?? "";
     expect(appASrc.length).toBeGreaterThan(0);
   });
 

@@ -1,5 +1,7 @@
 import { defineConfig, devices } from "@playwright/test";
 
+const port = Number(process.env.PLAYWRIGHT_PORT ?? 15419);
+
 export default defineConfig({
   testDir: "./tests/e2e",
   // The dashboard is a client SPA that streams its RSC response, so each full-page
@@ -16,7 +18,7 @@ export default defineConfig({
   workers: process.env.CI ? 1 : undefined,
   reporter: [["html", { outputFolder: "playwright-report" }], ["list"]],
   use: {
-    baseURL: process.env.PLAYWRIGHT_BASE_URL || "http://localhost:15419",
+    baseURL: process.env.PLAYWRIGHT_BASE_URL || `http://localhost:${port}`,
     trace: "on-first-retry",
     screenshot: "only-on-failure",
   },
@@ -27,8 +29,8 @@ export default defineConfig({
     },
   ],
   webServer: {
-    command: "pnpm dev",
-    url: "http://localhost:15419",
+    command: port === 15419 ? "pnpm dev" : `pnpm exec next dev -p ${port}`,
+    url: `http://localhost:${port}`,
     reuseExistingServer: !process.env.CI,
     // 120s wasn't enough on a real (cold, 2-core) GitHub Actions runner: the
     // first Turbopack dev compile + first PGLite migration, with no warm
