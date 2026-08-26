@@ -9,6 +9,7 @@ import { Badge } from "kui/badge";
 import { Button } from "kui/button";
 import { Input } from "kui/input";
 import { Label } from "kui/label";
+import { Skeleton } from "kui/skeleton";
 import { CloudOff, Loader2, RefreshCw, ShieldCheck } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { TranslationFunctions } from "~/i18n/i18n-types";
@@ -47,6 +48,8 @@ async function fetchStatus(errorMessage: string): Promise<CloudConnectStatusResp
 
 export function CloudConnectSettingsTab({ labels, active }: Props) {
   const [snapshot, setSnapshot] = useState<CloudConnectStatusResponse | null>(null);
+  const [isInitialLoading, setIsInitialLoading] = useState(true);
+  const [statusLoadError, setStatusLoadError] = useState<string | null>(null);
   const [cloudUrlInput, setCloudUrlInput] = useState("");
   const [actionError, setActionError] = useState<string | null>(null);
   /** Desktop shell path: sign-in continues in the OS browser, not in an in-app popup. */
@@ -55,6 +58,7 @@ export function CloudConnectSettingsTab({ labels, active }: Props) {
   const [isDisconnecting, setIsDisconnecting] = useState(false);
   const hasEditedCloudUrl = useRef(false);
   const connectFailedMessage = labels.connectFailed();
+  const statusRefreshFailedMessage = labels.statusRefreshFailed();
 
   useEffect(() => {
     if (!active) return;
@@ -65,9 +69,12 @@ export function CloudConnectSettingsTab({ labels, active }: Props) {
         const next = await fetchStatus(connectFailedMessage);
         if (cancelled) return;
         setSnapshot(next);
+        setStatusLoadError(null);
         if (!hasEditedCloudUrl.current) setCloudUrlInput(next.cloudUrl);
       } catch {
-        // Transient — the next poll tick will retry.
+        if (!cancelled) setStatusLoadError(statusRefreshFailedMessage);
+      } finally {
+        if (!cancelled) setIsInitialLoading(false);
       }
     };
 
@@ -77,7 +84,7 @@ export function CloudConnectSettingsTab({ labels, active }: Props) {
       cancelled = true;
       clearInterval(interval);
     };
-  }, [active, connectFailedMessage]);
+  }, [active, connectFailedMessage, statusRefreshFailedMessage]);
 
   // Desktop shell path: the OS browser finished sign-in and deep linked back
   // into `apps/busabase-desktop`, which raised its window and forwarded the
@@ -205,6 +212,42 @@ export function CloudConnectSettingsTab({ labels, active }: Props) {
         );
     }
   };
+
+  if (isInitialLoading) {
+    return (
+      <div className="flex min-h-0 flex-col gap-4" aria-busy="true">
+        <Alert>
+          <ShieldCheck className="h-4 w-4" />
+          <AlertTitle>{labels.title()}</AlertTitle>
+          <AlertDescription>{labels.description()}</AlertDescription>
+        </Alert>
+        <div className="space-y-4" aria-hidden>
+          <div className="flex items-center justify-between gap-2">
+            <Skeleton className="h-4 w-20" />
+            <Skeleton className="h-6 w-24 rounded-md" />
+          </div>
+          <Skeleton className="h-4 w-28" />
+          <Skeleton className="h-9 w-full rounded-md" />
+          <Skeleton className="h-9 w-28 rounded-md" />
+        </div>
+      </div>
+    );
+  }
+
+  if (statusLoadError && !snapshot) {
+    return (
+      <div className="flex min-h-0 flex-col gap-4">
+        <Alert>
+          <ShieldCheck className="h-4 w-4" />
+          <AlertTitle>{labels.title()}</AlertTitle>
+          <AlertDescription>{labels.description()}</AlertDescription>
+        </Alert>
+        <Alert variant="destructive">
+          <AlertDescription>{statusLoadError}</AlertDescription>
+        </Alert>
+      </div>
+    );
+  }
 
   return (
     <div className="flex min-h-0 flex-col gap-4">

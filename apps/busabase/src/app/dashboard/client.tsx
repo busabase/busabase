@@ -17,6 +17,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { detectBrowserLocale, type Locale } from "openlib/i18n";
 import { addDemoParam } from "openlib/ui/dashboard";
 import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
+import { useLocation } from "wouter";
 import { BusabaseDashboardShell } from "~/components/dashboard/busabase-dashboard-shell";
 import { DashboardNotFound } from "~/components/spa/not-found";
 
@@ -67,6 +68,24 @@ const DASHBOARD_SKELETON_CONTENT_ROWS = [
   "shell-content-row-3",
   "shell-content-row-4",
 ];
+
+const isInboxLocation = (location: string): boolean =>
+  /^\/inbox(?:\/|$)/.test(location.split("?")[0] ?? "");
+
+function DashboardRouteObserver({
+  onInboxRouteChange,
+}: {
+  onInboxRouteChange: (isInboxRoute: boolean) => void;
+}) {
+  const [location] = useLocation();
+  const isInboxRoute = isInboxLocation(location);
+
+  useEffect(() => {
+    onInboxRouteChange(isInboxRoute);
+  }, [isInboxRoute, onInboxRouteChange]);
+
+  return null;
+}
 
 /**
  * Placeholder shown while the four parallel queries that seed the whole
@@ -141,6 +160,10 @@ function DashboardClientContent({
 }: DashboardClientProps) {
   const router = useRouter();
   const queryClient = useQueryClient();
+  // `initialPath` is available during SSR, so a direct Inbox load never mounts
+  // the redundant counts request. DashboardRouteObserver runs inside Wouter's
+  // SPAWrapper below and keeps this gate current for later client navigation.
+  const [isInboxRoute, setIsInboxRoute] = useState(() => isInboxLocation(initialPath));
   // `?chromeless=1` renders just the current node's detail pane with no
   // sidebar/topbar — used by busabase-mobile's WebView embed of a single
   // AirApp's Run/Files/Logs UI (see BusabaseDashboard's `chromeless` prop).
@@ -203,7 +226,10 @@ function DashboardClientContent({
   // ChangeRequest rows are route-owned inside BusabaseDashboard: Home uses
   // the cursor list, Inbox uses listPage, and detail uses get. The shell needs
   // only the whole-space review count for its badge.
-  const changeRequestCountsQuery = useQuery(orpc.changeRequests.counts.queryOptions({}));
+  const changeRequestCountsQuery = useQuery({
+    ...orpc.changeRequests.counts.queryOptions({}),
+    enabled: !isInboxRoute,
+  });
   const auditEventsQuery = useQuery(orpc.auditEvents.list.queryOptions({ input: {} }));
   const bases = basesQuery.data ?? [];
   const changeRequests = useMemo<never[]>(() => [], []);
@@ -314,6 +340,7 @@ function DashboardClientContent({
       initialPath={initialPath}
       lockInitialPath={readOnlyChangeRequestPreview}
     >
+      <DashboardRouteObserver onInboxRouteChange={setIsInboxRoute} />
       <CoreI18nProvider locale={locale}>
         {chromeless ? (
           // No sidebar, no topbar, no navigation — just the current node's
@@ -323,7 +350,11 @@ function DashboardClientContent({
           </div>
         ) : (
           <BusabaseDashboardShell
-            activeChangeRequestCount={changeRequestCountsQuery.data?.review ?? 0}
+            activeChangeRequestCount={
+              changeRequestCountsQuery.isPending
+                ? undefined
+                : (changeRequestCountsQuery.data?.review ?? 0)
+            }
             nodes={nodes}
             orpc={orpc}
             onSearchClick={() => setIsSearchOpen(true)}

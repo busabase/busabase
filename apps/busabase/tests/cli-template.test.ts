@@ -77,6 +77,56 @@ const singleTemplate = (): Map<string, string> =>
     ],
   ]);
 
+const requiredRelationTemplate = (): Map<string, string> =>
+  new Map([
+    ["SKILL.md", skillMd("required-crm", "companies")],
+    [
+      "busabase.json",
+      JSON.stringify({
+        format: PACKAGE_FORMAT,
+        name: "required-crm",
+        description: "Required relation fixture",
+        template: { category: "crm", schemaVersion: 1 },
+      }),
+    ],
+    [
+      "content/companies/base.json",
+      JSON.stringify({
+        name: "Companies",
+        fields: [
+          { slug: "name", name: "Name", type: "text", required: true, position: 0, options: {} },
+        ],
+        views: [],
+      }),
+    ],
+    [
+      "content/companies/records.ndjson",
+      `${JSON.stringify({ key: "company-1", fields: { name: "Northstar" } })}\n`,
+    ],
+    [
+      "content/contacts/base.json",
+      JSON.stringify({
+        name: "Contacts",
+        fields: [
+          { slug: "name", name: "Name", type: "text", required: true, position: 0, options: {} },
+          {
+            slug: "company",
+            name: "Company",
+            type: "relation",
+            required: true,
+            position: 1,
+            options: { multiple: false, targetBaseSlug: "companies" },
+          },
+        ],
+        views: [],
+      }),
+    ],
+    [
+      "content/contacts/records.ndjson",
+      `${JSON.stringify({ key: "contact-1", fields: { name: "Maya", company: "company-1" } })}\n`,
+    ],
+  ]);
+
 /** A `busabase/skills`-shaped repo: nothing at the root, two templates below. */
 const skillsRepo = (): Map<string, string> =>
   new Map([
@@ -191,6 +241,39 @@ describe("busabase-cli — templates (real command line, in-process server)", ()
     // The sample row is live: a template's promise is an app that works when
     // opened, and this is the flag-free default.
     expect(result.created.records).toBe(1);
+  });
+
+  it("installs required sample relations through the real CLI command", async () => {
+    zipball = await zipFiles(requiredRelationTemplate(), "acme-required-crm-main");
+    const result = (await cli(
+      "install",
+      "https://github.com/acme/required-crm",
+      "--into-folder",
+      "required-crm-cli",
+    )) as {
+      installed: boolean;
+      created: { records: number; bases: number };
+      pendingChangeRequests: number;
+    };
+    expect(result.installed).toBe(true);
+    expect(result.created).toMatchObject({ bases: 2, records: 2 });
+
+    const bases = (await cli("bases", "list")) as Array<{ id: string; slug: string }>;
+    const companies = bases.find((base) => base.slug === "required-crm-cli-companies");
+    const contacts = bases.find((base) => base.slug === "required-crm-cli-contacts");
+    const companyRows = (await cli("records", "list", "--base-id", companies?.id ?? "")) as {
+      records: Array<{ id: string }>;
+    };
+    const contactRows = (await cli("records", "list", "--base-id", contacts?.id ?? "")) as {
+      records: Array<{ id: string }>;
+    };
+    const links = (await cli(
+      "records",
+      "list-links",
+      "--record-id",
+      contactRows.records[0]?.id ?? "",
+    )) as Array<{ targetRecordId: string }>;
+    expect(links.map((link) => link.targetRecordId)).toEqual([companyRows.records[0]?.id]);
   });
 
   it("honours --no-sample-records, proposing the rows instead", async () => {
