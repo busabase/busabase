@@ -6,6 +6,7 @@ import { Fragment, useRef, useState } from "react";
 import { fmt, useCoreI18n, useCoreLocale } from "../../../i18n";
 import { formatFullTime, formatUserRefLabel } from "../helpers/format";
 import { UserAvatar, UserRefButton } from "./identity";
+import { ShimmerSkeleton as Skeleton } from "./shimmer-skeleton";
 
 export const parseMentionsAi = (text: string) => /(^|\s)@ai\b/i.test(text);
 
@@ -220,11 +221,15 @@ export function SubjectCommentThread({
             />
           ))}
         </div>
+      ) : commentsQuery.isLoading ? (
+        <div className="space-y-2 rounded-md bg-muted/25 px-3 py-3" aria-hidden>
+          <Skeleton className="h-3 w-1/3" />
+          <Skeleton className="h-4 w-5/6" />
+          <Skeleton className="h-4 w-2/3" />
+        </div>
       ) : (
         <div className="rounded-md bg-muted/25 px-3 py-3 text-muted-foreground text-sm">
-          {commentsQuery.isLoading
-            ? messages.comments.loading
-            : (emptyLabel ?? messages.comments.noComments)}
+          {emptyLabel ?? messages.comments.noComments}
         </div>
       )}
 

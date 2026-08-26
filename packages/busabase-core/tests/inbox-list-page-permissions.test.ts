@@ -113,19 +113,53 @@ describe("inbox listPage permissions", () => {
   });
 
   // The load-bearing one: the number under the list must be the number on the tab.
-  it("the paginator total matches the tab badge for a non-manager", async () => {
-    const { counts, page } = await asMember(async () => ({
-      counts: await client.changeRequests.counts({} as never),
-      page: await client.changeRequests.listPage({
+  it("returns matching badges and page from one non-manager snapshot", async () => {
+    const snapshot = await asMember(() =>
+      client.changeRequests.inboxSnapshot({
         status: ["in_review"],
         page: 1,
         pageSize: 5,
       } as never),
-    }));
+    );
 
-    expect(counts.review).toBe(VISIBLE_PENDING);
-    expect(page.total).toBe(counts.review);
-    expect(page.totalPages).toBe(Math.ceil(VISIBLE_PENDING / 5));
+    expect(snapshot.counts.review).toBe(VISIBLE_PENDING);
+    expect(snapshot.total).toBe(snapshot.counts.review);
+    expect(snapshot.totalPages).toBe(Math.ceil(VISIBLE_PENDING / 5));
+    expect(snapshot.changeRequests).toHaveLength(5);
+  });
+
+  it("emits payload-free scan metrics once for one snapshot", async () => {
+    const metrics: Array<{
+      candidateRows: number;
+      visibleRows: number;
+      pageRows: number;
+      responseBytes: number;
+    }> = [];
+    await runWithBusabaseContext(
+      {
+        spaceId: LOCAL_SPACE_ID,
+        actorId: MEMBER,
+        isSpaceManager: false,
+        permissionLevel: "manage",
+        onPerformanceMetric: (metric) => metrics.push(metric),
+      },
+      () =>
+        client.changeRequests.inboxSnapshot({
+          status: ["in_review"],
+          page: 1,
+          pageSize: 5,
+        } as never),
+    );
+
+    expect(metrics).toHaveLength(1);
+    expect(metrics[0]).toMatchObject({
+      candidateRows: expect.any(Number),
+      visibleRows: expect.any(Number),
+      pageRows: 5,
+      responseBytes: expect.any(Number),
+    });
+    expect(metrics[0]?.candidateRows).toBeGreaterThan(metrics[0]?.visibleRows ?? 0);
+    expect(metrics[0]?.visibleRows).toBeGreaterThanOrEqual(VISIBLE_PENDING);
   });
 
   it("every page a non-manager can reach is full, and holds only visible rows", async () => {

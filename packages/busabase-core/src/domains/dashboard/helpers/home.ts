@@ -43,11 +43,18 @@ export const selectPendingChangeRequests = (
 export const isHomeDigestEmpty = ({
   activityCount,
   isActivityLoaded,
+  isChangeRequestsLoaded = true,
   pendingCount,
   recentCount,
 }: {
   activityCount: number;
   isActivityLoaded: boolean;
+  isChangeRequestsLoaded?: boolean;
   pendingCount: number;
   recentCount: number;
-}): boolean => isActivityLoaded && pendingCount === 0 && recentCount === 0 && activityCount === 0;
+}): boolean =>
+  isActivityLoaded &&
+  isChangeRequestsLoaded &&
+  pendingCount === 0 &&
+  recentCount === 0 &&
+  activityCount === 0;

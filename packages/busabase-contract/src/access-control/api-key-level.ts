@@ -277,6 +277,9 @@ export const PROCEDURE_PERMISSION_POLICY: Record<string, ProcedurePermissionPoli
   // sit at the same level. A read-level gap here would let a numbered page
   // return change requests the cursor listing would have refused.
   "changeRequests.listPage": node("read"),
+  // RPC-only dashboard composition of listPage + counts. It exposes no data
+  // beyond those two node-scoped reads, so it keeps the same permission floor.
+  "changeRequests.inboxSnapshot": node("read"),
   "changeRequests.counts": node("read"),
   "changeRequests.get": node("read"),
 

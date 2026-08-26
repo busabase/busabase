@@ -73,7 +73,7 @@ import { ActivityView, InboxView } from "./components/inbox";
 import { RecordDetailView, RecordEditorView, RecordTopbarActions } from "./components/record-views";
 import { SearchDialog } from "./components/search-dialog";
 import { SidePanel, SidePanelToggle } from "./components/side-panel";
-import { BaseTableSkeleton } from "./components/skeletons";
+import { BaseTableSkeleton, NodeDetailSkeleton } from "./components/skeletons";
 import { SubmitPermissionProvider } from "./components/split-submit-button";
 import { BusabaseTopbarBreadcrumb, TopbarNodeActionsSlot } from "./components/topbar";
 import { getNodeDetailBreadcrumbItems } from "./helpers/breadcrumbs";
@@ -83,6 +83,7 @@ import { getRelationRecordIds } from "./helpers/field";
 import { getLocationPath, readInboxView } from "./helpers/inbox";
 import { createKnownNodeCache, type KnownNode, nodeRoutePath } from "./helpers/known-node-cache";
 import { mergeSearchIntoHref } from "./helpers/link-search";
+import { shouldShowInitialLoadingState } from "./helpers/query-state";
 import { readRecordPagination, writeRecordPagination } from "./helpers/record-pagination-url";
 import { isConflictErrorMessage } from "./helpers/search";
 import type {
@@ -341,6 +342,8 @@ function BusabaseDashboardContent({
     enabled: !isAnon,
   });
   const allChangeRequests = changeRequestsQuery.data?.changeRequests ?? [];
+  const isChangeRequestsLoaded =
+    changeRequestsQuery.isFetchedAfterMount || !changeRequestsQuery.isFetching;
   // Anonymous mode reads the seeded prop directly, NOT the disabled query's
   // cache: `basesQuery` freezes `initialData` at first mount, but the public
   // host resolves the shared base asynchronously (`bases.get`) and passes it in
@@ -1131,6 +1134,7 @@ function BusabaseDashboardContent({
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: listKeys.changeRequests }),
       queryClient.invalidateQueries({ queryKey: listKeys.changeRequestsPaged }),
+      queryClient.invalidateQueries({ queryKey: listKeys.inboxSnapshot }),
       queryClient.invalidateQueries({ queryKey: listKeys.changeRequestCounts }),
       queryClient.invalidateQueries({ queryKey: listKeys.changeRequestDetail }),
       queryClient.invalidateQueries({ queryKey: listKeys.records }),
@@ -1978,6 +1982,7 @@ function BusabaseDashboardContent({
         <HomeView
           changeRequests={allChangeRequests}
           emptyGuide={emptyGuide}
+          isChangeRequestsLoaded={isChangeRequestsLoaded}
           nodeCache={nodeCache}
           onOpenSearch={openSearch}
           orpc={orpc}
@@ -1998,6 +2003,11 @@ function BusabaseDashboardContent({
     }
 
     if (isOperationRoute || isChangeRequestRoute) {
+      if (
+        shouldShowInitialLoadingState(selectedChangeRequest, fallbackChangeRequestQuery.isLoading)
+      ) {
+        return <NodeDetailSkeleton variant="doc" />;
+      }
       // A change request is the single review surface; an operation route just
       // deep-links / focuses one of its sections within the same page.
       return (
@@ -2090,7 +2100,17 @@ function BusabaseDashboardContent({
       );
     }
 
+    if (
+      locationPath.startsWith("/base/") &&
+      shouldShowInitialLoadingState(activeBase, basesQuery.isFetching)
+    ) {
+      return <BaseTableSkeleton />;
+    }
+
     if (isArchivedRoute) {
+      if (archivedBasesQuery.isPending || archivedNodesQuery.isPending) {
+        return <NodeDetailSkeleton variant="folder" />;
+      }
       return (
         <ArchivedBasesView
           archivedBases={archivedBases}
@@ -2166,6 +2186,9 @@ function BusabaseDashboardContent({
     }
 
     if (isEditRecordRoute) {
+      if (shouldShowInitialLoadingState(activeRecord, fallbackRecordQuery.isLoading)) {
+        return <NodeDetailSkeleton variant="doc" />;
+      }
       return (
         <RecordEditorView
           base={activeBase}
@@ -2180,6 +2203,9 @@ function BusabaseDashboardContent({
     }
 
     if (isRecordRoute) {
+      if (shouldShowInitialLoadingState(activeRecord, fallbackRecordQuery.isLoading)) {
+        return <NodeDetailSkeleton variant="doc" />;
+      }
       return (
         <RecordDetailView
           baseSlug={activeBase?.slug ?? activeBase?.nodeId ?? activeBase?.id ?? ""}
@@ -2203,7 +2229,7 @@ function BusabaseDashboardContent({
       // Cold cache / direct link: the base hasn't resolved yet and either list is
       // still loading — wait before falling back to an archived match so an
       // archived response that arrives first cannot flash Trash over a live Base.
-      if (!activeBase && (basesQuery.isLoading || archivedBasesQuery.isLoading)) {
+      if (!activeBase && archivedBasesQuery.isFetching) {
         return <BaseTableSkeleton />;
       }
       if (!activeBase && archivedMatch) {
@@ -2282,9 +2308,11 @@ function BusabaseDashboardContent({
     approveChangeRequest,
     closeChangeRequest,
     auditEvents,
-    archivedBasesQuery.isLoading,
+    archivedBasesQuery.isFetching,
+    archivedBasesQuery.isPending,
+    archivedNodesQuery.isPending,
     bases,
-    basesQuery.isLoading,
+    basesQuery.isFetching,
     client,
     emptyGuide,
     isAgentDetailRoute,
@@ -2307,6 +2335,7 @@ function BusabaseDashboardContent({
     isNewRecordRoute,
     pendingReviewAction,
     isBatchPending,
+    isChangeRequestsLoaded,
     runBatchReview,
     locationPath,
     inboxView,
@@ -2316,6 +2345,8 @@ function BusabaseDashboardContent({
     rejectChangeRequest,
     isBaseSetupRoute,
     selectedChangeRequest,
+    fallbackChangeRequestQuery.isLoading,
+    fallbackRecordQuery.isLoading,
     operationParams,
     submitCreateRecord,
     submitCreateBaseField,

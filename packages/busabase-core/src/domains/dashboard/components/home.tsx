@@ -158,6 +158,7 @@ function RecentNodeCard({ node }: { node: KnownNode }) {
 export function HomeView({
   changeRequests,
   emptyGuide,
+  isChangeRequestsLoaded = true,
   nodeCache,
   onOpenSearch,
   orpc,
@@ -166,6 +167,8 @@ export function HomeView({
   changeRequests: ChangeRequestVO[];
   /** Onboarding guide shown when the workspace has nothing to show at all. */
   emptyGuide?: ReactNode;
+  /** False while an empty SSR seed is still being replaced by the first real CR response. */
+  isChangeRequestsLoaded?: boolean;
   /** Scoped known-node cache; its `visited` list IS the recently-visited feed. */
   nodeCache: KnownNodeCache;
   /** Opens the Search dialog (defaults to its Recent tab) — used by the
@@ -213,6 +216,7 @@ export function HomeView({
   const isEverythingEmpty = isHomeDigestEmpty({
     activityCount: activityEvents.length,
     isActivityLoaded: !activityQuery.isPending,
+    isChangeRequestsLoaded,
     pendingCount: pendingChangeRequests.length,
     recentCount: recentNodes.length,
   });

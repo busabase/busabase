@@ -30,6 +30,7 @@ import {
 } from "drizzle-orm";
 import { z } from "zod";
 import {
+  emitContextPerformanceMetric,
   getContextIsSpaceManager,
   getContextSpaceId,
   isAnonymousVisitor,
@@ -1422,6 +1423,165 @@ const toInboxCounts = (statusCount: Map<string, number>, created: number) => ({
   merged: statusCount.get("merged") ?? 0,
   rejected: (statusCount.get("rejected") ?? 0) + (statusCount.get("abandoned") ?? 0),
 });
+
+type InboxCandidateRow = {
+  id: string;
+  status: ChangeRequestPO["status"];
+  submittedBy: string;
+};
+
+const matchesInboxFilter = (
+  row: InboxCandidateRow,
+  input: z.output<typeof listChangeRequestsPageInputSchema>,
+) => {
+  if (input.status && input.status.length > 0 && !input.status.includes(row.status)) return false;
+  return !input.mine || row.submittedBy === mineActorId();
+};
+
+const countInboxCandidateRows = (rows: InboxCandidateRow[]) => {
+  const statusCount = new Map<string, number>();
+  let created = 0;
+  const actorId = mineActorId();
+  for (const row of rows) {
+    statusCount.set(row.status, (statusCount.get(row.status) ?? 0) + 1);
+    if (row.submittedBy === actorId) created += 1;
+  }
+  return toInboxCounts(statusCount, created);
+};
+
+/**
+ * Inbox-specific read boundary. Non-managers pay for the node-ACL walk once:
+ * one light `{id,status,submittedBy}` scan feeds both the six badges and the
+ * active tab page. Managers retain SQL aggregate + page queries.
+ */
+export const getInboxSnapshot = async (
+  input?: z.input<typeof listChangeRequestsPageInputSchema>,
+) => {
+  const startedAt = performance.now();
+  await ensureReady();
+  const db = await getDb();
+  const parsed = listChangeRequestsPageInputSchema.parse(input);
+  const spaceId = getContextSpaceId();
+  const managerPath = getContextIsSpaceManager();
+  let candidateRows = 0;
+  let visibleRows = 0;
+  let counts: ReturnType<typeof toInboxCounts>;
+  let matchingIds: string[] | null = null;
+
+  if (managerPath) {
+    const statusRows = await db
+      .select({
+        status: busabaseChangeRequests.status,
+        count: sql<number>`count(*)::int`,
+      })
+      .from(busabaseChangeRequests)
+      .where(eq(busabaseChangeRequests.spaceId, spaceId))
+      .groupBy(busabaseChangeRequests.status);
+    const [mineRow] = await db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(busabaseChangeRequests)
+      .where(
+        and(
+          eq(busabaseChangeRequests.spaceId, spaceId),
+          eq(busabaseChangeRequests.submittedBy, mineActorId()),
+        ),
+      );
+    candidateRows = statusRows.reduce((sum, row) => sum + row.count, 0);
+    visibleRows = candidateRows;
+    counts = toInboxCounts(
+      new Map(statusRows.map((row) => [row.status, row.count])),
+      mineRow?.count ?? 0,
+    );
+  } else {
+    const allRows: InboxCandidateRow[] = [];
+    const batchSize = 200;
+    let offset = 0;
+    for (;;) {
+      const rows = await db
+        .select({
+          id: busabaseChangeRequests.id,
+          status: busabaseChangeRequests.status,
+          submittedBy: busabaseChangeRequests.submittedBy,
+        })
+        .from(busabaseChangeRequests)
+        .where(eq(busabaseChangeRequests.spaceId, spaceId))
+        .orderBy(desc(busabaseChangeRequests.createdAt), desc(busabaseChangeRequests.id))
+        .limit(batchSize)
+        .offset(offset);
+      candidateRows += rows.length;
+      allRows.push(...(await filterVisibleChangeRequestRows(rows)));
+      if (rows.length < batchSize) break;
+      offset += rows.length;
+    }
+    visibleRows = allRows.length;
+    counts = countInboxCandidateRows(allRows);
+    matchingIds = allRows.filter((row) => matchesInboxFilter(row, parsed)).map((row) => row.id);
+  }
+
+  const filters: SQL[] = [eq(busabaseChangeRequests.spaceId, spaceId)];
+  if (parsed.status && parsed.status.length > 0) {
+    filters.push(inArray(busabaseChangeRequests.status, parsed.status));
+  }
+  if (parsed.mine) filters.push(eq(busabaseChangeRequests.submittedBy, mineActorId()));
+
+  const [countRow] = matchingIds
+    ? [{ value: matchingIds.length }]
+    : await db
+        .select({ value: sql<number>`count(*)::int` })
+        .from(busabaseChangeRequests)
+        .where(and(...filters));
+  const total = countRow?.value ?? 0;
+  const totalPages = Math.ceil(total / parsed.pageSize);
+  const page = totalPages === 0 ? 1 : Math.min(parsed.page, totalPages);
+  const offset = (page - 1) * parsed.pageSize;
+  let pageRows: ChangeRequestPO[];
+  if (matchingIds) {
+    const pageIds = matchingIds.slice(offset, offset + parsed.pageSize);
+    const unordered =
+      pageIds.length > 0
+        ? await db
+            .select()
+            .from(busabaseChangeRequests)
+            .where(and(...filters, inArray(busabaseChangeRequests.id, pageIds)))
+        : [];
+    const byId = new Map(unordered.map((row) => [row.id, row]));
+    pageRows = pageIds.flatMap((id) => {
+      const row = byId.get(id);
+      return row ? [row] : [];
+    });
+  } else {
+    pageRows = await db
+      .select()
+      .from(busabaseChangeRequests)
+      .where(and(...filters))
+      .orderBy(desc(busabaseChangeRequests.createdAt), desc(busabaseChangeRequests.id))
+      .limit(parsed.pageSize)
+      .offset(offset);
+  }
+
+  const result = {
+    counts,
+    changeRequests: await hydrateChangeRequests(pageRows, {
+      maxOperationsPerChangeRequest: LIST_MAX_OPERATIONS_PER_CHANGE_REQUEST,
+    }),
+    total,
+    totalPages,
+    page,
+    pageSize: parsed.pageSize,
+  };
+  // Lazy: OSS/local and tests install no sink, so they do not pay for an extra
+  // serialization of the response merely to estimate its wire size.
+  emitContextPerformanceMetric(() => ({
+    name: "change_requests.inbox_snapshot",
+    durationMs: Number((performance.now() - startedAt).toFixed(2)),
+    responseBytes: Buffer.byteLength(JSON.stringify(result)),
+    candidateRows,
+    visibleRows,
+    pageRows: result.changeRequests.length,
+    managerPath,
+  }));
+  return result;
+};
 
 /**
  * Whole-space inbox tab counts. One grouped query by status plus a scoped count

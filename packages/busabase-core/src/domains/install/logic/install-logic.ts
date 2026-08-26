@@ -2,13 +2,14 @@ import "server-only";
 
 import { createRouterClient, ORPCError } from "@orpc/server";
 import type {
+  InstallFailureVO,
   InstallFromGithubDTO,
   InstallPlanFromGithubDTO,
   InstallPlanNodeVO,
   InstallPlanVO,
   InstallResultVO,
 } from "busabase-contract/domains/install/types";
-import { applyInstall } from "busabase-package/apply";
+import { applyInstall, getInstallFailureDetails } from "busabase-package/apply";
 import type { PackageClient } from "busabase-package/client";
 import type { ParsedGithubUrl } from "busabase-package/github";
 import { readPackageTree } from "busabase-package/layout-read";
@@ -98,7 +99,13 @@ const prepareInstall = async (
       rename: input.rename,
     });
   } catch (error) {
-    // The only throw here is a limit breach on the parsed tree.
+    // Everything this throws is "fix the package or the request": a limit breach
+    // on the parsed tree, a duplicate node identity, or a sample-record
+    // dependency the installer refuses to guess at (a missing required relation,
+    // a target key that is not in the declared target Base, a required-relation
+    // cycle). All of them are checked before anything is created, and all of
+    // them name the offending record — so the message is the useful part and has
+    // to reach the caller rather than becoming a 500.
     throw new ORPCError("BAD_REQUEST", {
       message: error instanceof Error ? error.message : "Could not plan the install.",
     });
@@ -133,7 +140,7 @@ export const installFromGithub = async (input: InstallFromGithubDTO): Promise<In
     });
   }
 
-  const result = await applyInstall(client, plan, {
+  const result = await runApply(client, plan, {
     autoMerge,
     submittedBy: `install ${source.owner}/${source.repo} (${plan.tree.manifest.name})`,
     // Recorded on an app's root Folder so the space remembers where it came
@@ -170,6 +177,87 @@ export const installFromGithub = async (input: InstallFromGithubDTO): Promise<In
     warnings: result.warnings,
   };
 };
+
+/**
+ * Run the five-pass apply and make sure its failure survives the RPC boundary.
+ *
+ * oRPC replaces any thrown error that is not an `ORPCError` with a generic
+ * `INTERNAL_SERVER_ERROR` whose message is the literal string "Internal server
+ * error" (`toORPCError`). `applyInstall` throws through whatever the underlying
+ * call threw — and the interesting ones are plain `Error`s (a rejected change
+ * request review carries its reason as a message, not as an `ORPCError`). Left
+ * unwrapped, the dialog shows "Internal server error" for exactly the failure
+ * the user most needs to read: structure was created, content was not, and the
+ * space now holds half an install.
+ *
+ * Note that an in-process caller (`createRouterClient`, which is how the
+ * integration tests drive this) never serializes and so never sees that
+ * substitution — this wrapper is the only thing standing between the browser and
+ * an opaque 500, and only a real round trip proves it.
+ */
+const runApply = async (
+  client: PackageClient,
+  plan: InstallPlan,
+  options: Parameters<typeof applyInstall>[2],
+): Promise<Awaited<ReturnType<typeof applyInstall>>> => {
+  try {
+    return await applyInstall(client, plan, options);
+  } catch (error) {
+    throw toInstallOrpcError(error);
+  }
+};
+
+/**
+ * An apply failure → the `ORPCError` the client sees, keeping three things the
+ * default conversion throws away: the message, the original code/status, and the
+ * partial-install facts.
+ *
+ * The code matters as much as the message. `approveAndMerge` reports a refused
+ * review as a plain `Error` that carries the refusal's `code` as a property, so
+ * "you may not merge this" and "the server broke" arrive in the same shape —
+ * flattening both to a 500 is how a permission or quota problem starts looking
+ * like a bug in the installer.
+ *
+ * Exported for its own tests: every branch here is a failure path that is
+ * awkward to provoke end-to-end, and an untested error mapping is how the
+ * message gets lost again.
+ */
+export const toInstallOrpcError = (error: unknown): ORPCError<string, unknown> => {
+  const failure = getInstallFailureDetails(error);
+  const diagnostics: InstallFailureVO | undefined = failure
+    ? {
+        phase: failure.phase,
+        targetFolderSlug: failure.targetFolderSlug,
+        created: failure.created,
+        pendingChangeRequests: failure.pendingChangeRequests,
+      }
+    : undefined;
+
+  if (error instanceof ORPCError) {
+    return new ORPCError(error.code, {
+      status: error.status,
+      message: error.message,
+      data: diagnostics ? { ...toDataObject(error.data), ...diagnostics } : error.data,
+      cause: error,
+    });
+  }
+
+  const carried = error as { code?: unknown; status?: unknown; data?: unknown } | null;
+  const code = typeof carried?.code === "string" && carried.code ? carried.code : undefined;
+  const status = typeof carried?.status === "number" ? carried.status : undefined;
+  return new ORPCError(code ?? "INTERNAL_SERVER_ERROR", {
+    ...(status ? { status } : {}),
+    message: error instanceof Error ? error.message : "The install failed.",
+    data: diagnostics ? { ...toDataObject(carried?.data), ...diagnostics } : carried?.data,
+    cause: error,
+  });
+};
+
+/** Only an object-shaped `data` can be merged into; anything else is dropped. */
+const toDataObject = (data: unknown): Record<string, unknown> =>
+  typeof data === "object" && data !== null && !Array.isArray(data)
+    ? (data as Record<string, unknown>)
+    : {};
 
 // ── PO/plan → VO ─────────────────────────────────────────────────────────────
 

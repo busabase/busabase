@@ -251,6 +251,18 @@ export const dashboardJa: CoreI18nMessages = {
     engineSandockHint: "リモートコンテナ、任意の言語 · このホストでは何も実行しない",
     noEligibleEngine:
       "このデプロイには {runtime} の AirApp を実行できるエンジンがありません。ローカルまたはリモートのランタイムの有効化を運用者に依頼してください。",
+    swError: {
+      INSECURE_CONTEXT:
+        "AirApp プレビューには HTTPS が必要です。このワークスペースを HTTPS で開くか、デスクトップアプリをご利用ください。",
+      SERVICE_WORKER_UNAVAILABLE:
+        "AirApp プレビューには Service Worker のサポートが必要です。このワークスペースを Safari または Chrome で開くか、デスクトップアプリをご利用ください。",
+      SW_REGISTRATION_FAILED:
+        "AirApp プレビューが Service Worker を登録できませんでした。ブラウザのコンソールを確認して、もう一度お試しください。",
+      SW_ACTIVATION_TIMEOUT:
+        "AirApp プレビューの Service Worker が時間内に有効化されませんでした。この AirApp をもう一度実行してください。",
+      SW_CONTROL_TIMEOUT:
+        "AirApp プレビューの Service Worker がこのページを制御できませんでした。この AirApp をもう一度実行してください。",
+    },
   },
   form: {
     alreadyExists:

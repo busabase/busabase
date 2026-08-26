@@ -703,6 +703,13 @@ const changeRequestCountsSchema = z.object({
   rejected: z.number().int().nonnegative(),
 });
 
+// One Inbox read returns both the active numbered page and every tab badge.
+// Keeping this as a composition of the public page/count schemas guarantees
+// the combined endpoint cannot drift from the two standalone read surfaces.
+const inboxSnapshotResponseSchema = listChangeRequestsPageResponseSchema.extend({
+  counts: changeRequestCountsSchema,
+});
+
 const SEARCH_SOURCES = ["records", "files", "names"] as const;
 
 const searchInputSchema = z.object({
@@ -807,6 +814,7 @@ export {
   changeRequestStatusSchema,
   changeRequestSchema,
   changeRequestCountsSchema,
+  inboxSnapshotResponseSchema,
   agentTaskSchema,
   searchResultSchema,
   searchResponseSchema,

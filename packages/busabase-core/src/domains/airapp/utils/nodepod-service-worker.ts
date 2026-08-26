@@ -30,15 +30,33 @@ const POD_ACTIVE_TTL_MS = 20_000;
 /** How often a live runner refreshes the heartbeat. */
 const POD_HEARTBEAT_INTERVAL_MS = 5_000;
 
-/** Upper bound on waiting for a re-registered worker to activate. */
-const SW_READY_TIMEOUT_MS = 5_000;
+/** Upper bounds for the two observable Service Worker lifecycle phases. */
+const SW_ACTIVATION_TIMEOUT_MS = 15_000;
+const SW_CONTROL_TIMEOUT_MS = 10_000;
 
-const NODEPOD_SW_ERROR_MESSAGE =
-  "AirApp preview requires HTTPS and Service Worker support. Open this workspace in Safari or Chrome, or use the desktop app.";
+export const NODEPOD_HOST_CLAIM_MESSAGE = "busabase-host-claim";
 
+export type NodepodServiceWorkerErrorCode =
+  | "INSECURE_CONTEXT"
+  | "SERVICE_WORKER_UNAVAILABLE"
+  | "SW_REGISTRATION_FAILED"
+  | "SW_ACTIVATION_TIMEOUT"
+  | "SW_CONTROL_TIMEOUT";
+
+/**
+ * The user-visible copy for each code lives in the i18n catalog
+ * (`messages.airapp.swError[code]`) and is resolved by `RunPanel` — this is a
+ * runtime error on a localized surface, so it must not carry English text of
+ * its own. `message` is therefore the log identifier: stable, English, and
+ * greppable in AirApp Logs and in the log aggregator. `cause` keeps the
+ * underlying browser error next to it.
+ */
 export class NodepodServiceWorkerError extends Error {
-  constructor(options?: ErrorOptions) {
-    super(NODEPOD_SW_ERROR_MESSAGE, options);
+  readonly code: NodepodServiceWorkerErrorCode;
+
+  constructor(code: NodepodServiceWorkerErrorCode, options?: ErrorOptions) {
+    super(`Nodepod Service Worker: ${code}`, options);
+    this.code = code;
     this.name = "NodepodServiceWorkerError";
   }
 }
@@ -58,8 +76,12 @@ const waitForController = async (): Promise<void> => {
   await new Promise<void>((resolve, reject) => {
     const timeout = setTimeout(() => {
       navigator.serviceWorker.removeEventListener("controllerchange", onControllerChange);
-      reject(new Error("Service Worker did not take control of this page"));
-    }, SW_READY_TIMEOUT_MS);
+      reject(
+        new NodepodServiceWorkerError("SW_CONTROL_TIMEOUT", {
+          cause: new Error("Service Worker did not take control of this page"),
+        }),
+      );
+    }, SW_CONTROL_TIMEOUT_MS);
     const onControllerChange = () => {
       if (!navigator.serviceWorker.controller) return;
       clearTimeout(timeout);
@@ -116,31 +138,154 @@ export const beginPodHeartbeat = (): (() => void) => {
   };
 };
 
-const registerAndActivate = async (): Promise<void> => {
-  const existing = await navigator.serviceWorker.getRegistration("/");
-  if (!existing) {
-    await navigator.serviceWorker.register(SW_PATH, { scope: "/", updateViaCache: "none" });
+const waitForActivation = async (
+  registration: ServiceWorkerRegistration,
+): Promise<ServiceWorkerRegistration> => {
+  if (registration.active) return registration;
+  let timeout: ReturnType<typeof setTimeout> | null = null;
+  try {
+    const ready = await Promise.race([
+      navigator.serviceWorker.ready,
+      new Promise<never>((_, reject) => {
+        timeout = setTimeout(
+          () =>
+            reject(
+              new NodepodServiceWorkerError("SW_ACTIVATION_TIMEOUT", {
+                cause: new Error("Service Worker activation timed out"),
+              }),
+            ),
+          SW_ACTIVATION_TIMEOUT_MS,
+        );
+      }),
+    ]);
+    // `ready` is specified to settle only once a registration has an active
+    // worker, but a browser that disables Service Workers while keeping the API
+    // (enterprise policy, embedded webview, a test runner blocking them) can
+    // resolve it with nothing. Say which phase failed instead of letting a
+    // `TypeError` reach the panel.
+    if (!ready?.active) {
+      throw new NodepodServiceWorkerError("SW_ACTIVATION_TIMEOUT", {
+        cause: new Error("Service Worker became ready without an active worker"),
+      });
+    }
+    return ready;
+  } catch (cause) {
+    if (cause instanceof NodepodServiceWorkerError) throw cause;
+    throw new NodepodServiceWorkerError("SW_ACTIVATION_TIMEOUT", { cause });
+  } finally {
+    if (timeout) clearTimeout(timeout);
   }
-  await Promise.race([
-    navigator.serviceWorker.ready,
-    new Promise((_, reject) =>
-      setTimeout(
-        () => reject(new Error("Service Worker activation timed out")),
-        SW_READY_TIMEOUT_MS,
-      ),
-    ),
-  ]);
-  await waitForController();
+};
+
+const waitForWorkerActivation = async (worker: ServiceWorker): Promise<void> => {
+  if (worker.state === "activated") return;
+  await new Promise<void>((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      worker.removeEventListener("statechange", onStateChange);
+      reject(
+        new NodepodServiceWorkerError("SW_ACTIVATION_TIMEOUT", {
+          cause: new Error("Updated Service Worker did not activate in time"),
+        }),
+      );
+    }, SW_ACTIVATION_TIMEOUT_MS);
+    const onStateChange = () => {
+      if (worker.state === "activated") {
+        clearTimeout(timeout);
+        worker.removeEventListener("statechange", onStateChange);
+        resolve();
+      } else if (worker.state === "redundant") {
+        clearTimeout(timeout);
+        worker.removeEventListener("statechange", onStateChange);
+        reject(
+          new NodepodServiceWorkerError("SW_ACTIVATION_TIMEOUT", {
+            cause: new Error("Updated Service Worker became redundant before activation"),
+          }),
+        );
+      }
+    };
+    worker.addEventListener("statechange", onStateChange);
+  });
+};
+
+const getOrRegister = async (): Promise<ServiceWorkerRegistration> => {
+  try {
+    const existing = await navigator.serviceWorker.getRegistration("/");
+    if (existing) {
+      // During a rolling deployment an uncontrolled page may still see the
+      // previous worker. Ask the browser to fetch the current script before we
+      // use the Busabase-specific host-claim message. A failed update is not a
+      // reason to discard an otherwise active worker; the claim phase below
+      // will report the actionable failure if it cannot take control.
+      if (!navigator.serviceWorker.controller) {
+        try {
+          await existing.update();
+        } catch {
+          // Continue with the active worker.
+        }
+        const updatedWorker = existing.installing ?? existing.waiting;
+        if (updatedWorker) await waitForWorkerActivation(updatedWorker);
+      }
+      return existing;
+    }
+    const registered = await navigator.serviceWorker.register(SW_PATH, {
+      scope: "/",
+      updateViaCache: "none",
+    });
+    // Same reason as the `ready` guard below: a blocked-but-present Service
+    // Worker API can resolve `register()` with nothing rather than rejecting.
+    if (!registered) throw new Error("register() resolved without a registration");
+    return registered;
+  } catch (cause) {
+    if (cause instanceof NodepodServiceWorkerError) throw cause;
+    throw new NodepodServiceWorkerError("SW_REGISTRATION_FAILED", { cause });
+  }
 };
 
 /**
- * One retry (two attempts total). Registration can lose a one-off race against
- * something slow on the page's origin (e.g. a dev-server recompile mid-handshake)
- * with no relation to actual browser support — a bare refresh already "fixes" that
- * class of failure because the SW has usually finished activating by the second
- * try, so do that ourselves before reporting a hard, misleading "unsupported" error.
+ * One retry, registration only.
+ *
+ * `register()` can lose a one-off race against something slow serving
+ * `/__sw__.js` — a dev-server recompile mid-handshake is the case actually
+ * observed — with no relation to browser support. That matters more than it
+ * looks: auto-run does not re-run a failed node (`error` stays on screen for
+ * the user to read), so a transient registration failure costs the user a
+ * manual Restart for something a second call resolves.
+ *
+ * Deliberately narrow. Activation and control already have their own budgets
+ * (15s / 10s) and retrying those would only double the wait before the user
+ * sees anything, while the two capability checks in `ensureRegistered` are not
+ * reached from here at all. A second failure is reported as-is, with its own
+ * code — never collapsed back into a generic "unsupported browser".
  */
-const REGISTRATION_ATTEMPTS = 2;
+const getOrRegisterWithRetry = async (): Promise<ServiceWorkerRegistration> => {
+  try {
+    return await getOrRegister();
+  } catch (caught) {
+    const transient =
+      caught instanceof NodepodServiceWorkerError && caught.code === "SW_REGISTRATION_FAILED";
+    if (!transient) throw caught;
+    return await getOrRegister();
+  }
+};
+
+const registerActivateAndClaim = async (): Promise<void> => {
+  const registration = await waitForActivation(await getOrRegisterWithRetry());
+  if (navigator.serviceWorker.controller) return;
+  const activeWorker = registration.active;
+  if (!activeWorker) {
+    throw new NodepodServiceWorkerError("SW_ACTIVATION_TIMEOUT", {
+      cause: new Error("Service Worker registration has no active worker"),
+    });
+  }
+  try {
+    activeWorker.postMessage({ type: NODEPOD_HOST_CLAIM_MESSAGE });
+  } catch (cause) {
+    throw new NodepodServiceWorkerError("SW_CONTROL_TIMEOUT", { cause });
+  }
+  await waitForController();
+};
+
+let registrationFlight: Promise<void> | null = null;
 
 /**
  * Make sure `/__sw__.js` is registered before a pod boots.
@@ -154,21 +299,17 @@ const REGISTRATION_ATTEMPTS = 2;
  */
 export const ensureRegistered = async (): Promise<void> => {
   if (typeof window !== "undefined" && !window.isSecureContext) {
-    throw new NodepodServiceWorkerError();
+    throw new NodepodServiceWorkerError("INSECURE_CONTEXT");
   }
   if (!hasServiceWorker()) {
-    throw new NodepodServiceWorkerError();
+    throw new NodepodServiceWorkerError("SERVICE_WORKER_UNAVAILABLE");
   }
-  let lastCause: unknown;
-  for (let attempt = 0; attempt < REGISTRATION_ATTEMPTS; attempt++) {
-    try {
-      await registerAndActivate();
-      return;
-    } catch (cause) {
-      lastCause = cause;
-    }
-  }
-  throw new NodepodServiceWorkerError({ cause: lastCause });
+  if (registrationFlight) return registrationFlight;
+  const flight = registerActivateAndClaim().finally(() => {
+    if (registrationFlight === flight) registrationFlight = null;
+  });
+  registrationFlight = flight;
+  return flight;
 };
 
 /** A path that can never host a pod, so it never needs the SW. */

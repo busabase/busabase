@@ -49,6 +49,7 @@ import {
   createAuditEventInputSchema,
   createCommentInputSchema,
   createNodeChangeRequestInputSchema,
+  inboxSnapshotResponseSchema,
   isDescendantInputSchema,
   isDescendantOutputSchema,
   listChangeRequestsPagedInputSchema,
@@ -569,6 +570,9 @@ export const busabaseContractRoutes = {
       })
       .input(listChangeRequestsPageInputSchema)
       .output(listChangeRequestsPageResponseSchema),
+    // Dashboard-only composition. The standalone listPage/counts REST routes
+    // remain the stable public API; this transport optimization stays RPC-only.
+    inboxSnapshot: oc.input(listChangeRequestsPageInputSchema).output(inboxSnapshotResponseSchema),
     counts: oc
       .route({
         method: "GET",

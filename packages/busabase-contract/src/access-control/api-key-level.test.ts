@@ -178,6 +178,16 @@ describe("procedure permission policy", () => {
     });
   });
 
+  it("classifies the RPC-only Inbox snapshot like its list and count reads", () => {
+    expect(resolveProcedurePermissionPolicy(["changeRequests", "inboxSnapshot"])).toEqual({
+      level: "read",
+      scope: "node",
+    });
+    expect(resolveRequiredLevel(["workbench", "changeRequests", "inboxSnapshot"], undefined)).toBe(
+      "read",
+    );
+  });
+
   it("rejects nodeScope on creation while preserving legacy read parsing", () => {
     const legacy = { level: "read" as const, nodeScope: ["nod_private"] };
     expect(apiKeyPermissionsSchema.safeParse(legacy).success).toBe(true);

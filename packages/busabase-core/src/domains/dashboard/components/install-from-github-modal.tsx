@@ -1,11 +1,13 @@
 "use client";
 
 import type { BusabaseDashboardApiClient } from "busabase-contract/api-client";
-import type {
-  InstallCollisionVO,
-  InstallPlanNodeVO,
-  InstallPlanVO,
-  InstallResultVO,
+import {
+  type InstallCollisionVO,
+  InstallFailureVOSchema,
+  type InstallPlanNodeVO,
+  type InstallPlanVO,
+  type InstallResultVO,
+  installFailureTouchedWorkspace,
 } from "busabase-contract/domains/install/types";
 import { Alert, AlertDescription, AlertTitle } from "kui/alert";
 import { Button } from "kui/button";
@@ -123,8 +125,13 @@ interface InstallFromGithubModalProps {
    * Fired once the user dismisses the result step — the host refreshes its data
    * (structure is created immediately, so the tree changed even when every
    * record is still pending review).
+   *
+   * `null` means the install FAILED after it had already created something. The
+   * tree is just as stale in that case, and the host that skips the refresh is
+   * the reason a half-installed folder appears out of nowhere on the next
+   * navigation.
    */
-  onInstalled: (result: InstallResultVO) => void;
+  onInstalled: (result: InstallResultVO | null) => void;
   /**
    * Host navigation to the change-requests inbox, offered on the result step when
    * anything is pending. Omit to render the pending count without a link.
@@ -168,6 +175,14 @@ export function InstallFromGithubModal({
   const [result, setResult] = useState<InstallResultVO | null>(null);
   const [error, setError] = useState<string | null>(null);
   /**
+   * Set when an install failed AFTER creating something. Structure is created
+   * immediately, so a failure partway through leaves a real folder and real
+   * Bases behind — the tree on screen is stale in exactly the way a successful
+   * install makes it stale, and treating the failure as "nothing happened" is
+   * what makes the leftovers look like they appeared on their own.
+   */
+  const [workspaceTouchedByFailure, setWorkspaceTouchedByFailure] = useState(false);
+  /**
    * Which install the user is choosing. Agent-first on purpose: handing an agent
    * the manual is the cheaper, reversible half — it writes nothing to the space —
    * and it is the one a user would not think to ask for.
@@ -193,6 +208,7 @@ export function InstallFromGithubModal({
     setInstalling(false);
     setResult(null);
     setError(null);
+    setWorkspaceTouchedByFailure(false);
     setTab("agent");
     setAgentAfterInstall(false);
     planSeen.current = false;
@@ -273,6 +289,7 @@ export function InstallFromGithubModal({
     const trimmedFolder = intoFolder.trim();
     setInstalling(true);
     setError(null);
+    setWorkspaceTouchedByFailure(false);
     try {
       const installed = await apiClient.installFromGithub({
         repoUrl: repoUrl.trim(),
@@ -283,6 +300,16 @@ export function InstallFromGithubModal({
       setResult(installed);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : messages.install.installFailed);
+      // The server reports a PARTIAL install as structured `data` beside the
+      // message (`InstallFailureVOSchema`). Parsed rather than trusted: this
+      // crossed the network, and a collision or a validation refusal — which
+      // creates nothing — carries no such payload at all.
+      const failure = InstallFailureVOSchema.safeParse(
+        (caught as { data?: unknown } | null)?.data ?? undefined,
+      );
+      if (failure.success && installFailureTouchedWorkspace(failure.data)) {
+        setWorkspaceTouchedByFailure(true);
+      }
     } finally {
       setInstalling(false);
     }
@@ -290,10 +317,13 @@ export function InstallFromGithubModal({
 
   const close = () => {
     const finished = result;
+    const touched = workspaceTouchedByFailure;
     reset();
     onOpenChange(false);
     if (finished) {
       onInstalled(finished);
+    } else if (touched) {
+      onInstalled(null);
     }
   };
 
@@ -593,10 +623,11 @@ export function InstallFromGithubModal({
             <>
               <Button
                 disabled={installing}
-                onClick={() => {
-                  reset();
-                  onOpenChange(false);
-                }}
+                // `close`, not a bare `reset` + dismiss: after a failed install
+                // this is the button the user actually reaches for (there is no
+                // "Done" without a result), and it is the one that has to tell
+                // the host its tree is stale.
+                onClick={close}
                 variant="outline"
               >
                 {plan && tab === "agent" ? messages.common.close : messages.common.cancel}

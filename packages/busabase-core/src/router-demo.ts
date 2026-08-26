@@ -598,6 +598,40 @@ export const busabaseDemoRouter = os.router({
         pageSize,
       };
     }),
+    inboxSnapshot: os.changeRequests.inboxSnapshot.handler(async ({ input }) => {
+      const all = await demoListChangeRequests();
+      const countBy = (predicate: (changeRequest: (typeof all)[number]) => boolean) =>
+        all.filter(predicate).length;
+      const status = input?.status ?? [];
+      const mine = input?.mine ?? false;
+      const matching = all.filter((changeRequest) => {
+        if (status.length > 0 && !status.includes(changeRequest.status)) return false;
+        return !mine || changeRequest.submittedBy === "local-editor";
+      });
+      const pageSize = input?.pageSize ?? 50;
+      const total = matching.length;
+      const totalPages = Math.ceil(total / pageSize);
+      const page = totalPages === 0 ? 1 : Math.min(input?.page ?? 1, totalPages);
+      const offset = (page - 1) * pageSize;
+      return {
+        counts: {
+          review: countBy((changeRequest) => changeRequest.status === "in_review"),
+          changes: countBy((changeRequest) => changeRequest.status === "changes_requested"),
+          created: countBy((changeRequest) => changeRequest.submittedBy === "local-editor"),
+          approved: countBy((changeRequest) => changeRequest.status === "approved"),
+          merged: countBy((changeRequest) => changeRequest.status === "merged"),
+          rejected: countBy(
+            (changeRequest) =>
+              changeRequest.status === "rejected" || changeRequest.status === "abandoned",
+          ),
+        },
+        changeRequests: matching.slice(offset, offset + pageSize),
+        total,
+        totalPages,
+        page,
+        pageSize,
+      };
+    }),
     counts: os.changeRequests.counts.handler(async () => {
       const all = await demoListChangeRequests();
       const countBy = (predicate: (changeRequest: (typeof all)[number]) => boolean) =>

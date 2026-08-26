@@ -29,6 +29,7 @@ import { AssetMetadataBlock } from "./assets";
 import { NodeIconPicker } from "./node-icon-picker";
 import { NodeSettingsPermissionsSlotContext } from "./node-settings-permissions-slot";
 import { EmptyState } from "./primitives";
+import { ShimmerSkeleton as Skeleton } from "./shimmer-skeleton";
 import { SplitSubmitButton } from "./split-submit-button";
 
 export type NodeSettingsTab = "general" | "info" | "permissions";
@@ -362,7 +363,12 @@ function InfoTabContent({
 
   if (!detail) {
     return isLoading ? (
-      <div className="animate-pulse text-muted-foreground text-sm">{messages.common.loading}</div>
+      <div className="space-y-3" aria-hidden>
+        <Skeleton className="h-4 w-4/5" />
+        <Skeleton className="h-4 w-3/5" />
+        <Skeleton className="h-4 w-2/3" />
+        <Skeleton className="h-4 w-1/2" />
+      </div>
     ) : (
       <EmptyState body="" title={messages.common.none} />
     );

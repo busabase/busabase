@@ -26,6 +26,7 @@ import {
   resolveRunPlan,
 } from "../utils/airapp-runtime-descriptor";
 import { isAirAppFullscreenSearch, updateAirAppFullscreenSearch } from "../utils/fullscreen-query";
+import { NodepodServiceWorkerError } from "../utils/nodepod-service-worker";
 import { AIRAPP_PREVIEW_IFRAME_SANDBOX } from "../utils/preview-sandbox";
 import { useAirAppEngineAvailability } from "./engine-availability-context";
 import { createAirAppRunner } from "./runners/runner-factory";
@@ -238,12 +239,27 @@ export function useAirAppRunner({
       // actually reports listening — starting a process isn't the same as it
       // being reachable yet.
     } catch (caught) {
+      // A Service Worker failure is the one runtime error with a code: log the
+      // code plus the underlying browser error for support, and show the
+      // localized, phase-specific copy rather than `caught.message` (which is
+      // the English log identifier).
+      const swError = caught instanceof NodepodServiceWorkerError ? caught : null;
+      if (swError) {
+        const cause = swError.cause instanceof Error ? `: ${swError.cause.message}` : "";
+        useAirAppRunnerStore
+          .getState()
+          .appendLog(currentNodeId, runner, `[busabase] ${swError.code}${cause}\n`);
+      }
       useAirAppRunnerStore
         .getState()
         .setError(
           currentNodeId,
           runner,
-          caught instanceof Error ? caught.message : messages.airapp.runFailed,
+          swError
+            ? messages.airapp.swError[swError.code]
+            : caught instanceof Error
+              ? caught.message
+              : messages.airapp.runFailed,
         );
     }
   }, [messages, airapp, orpc, availableEngines]);
@@ -545,6 +561,45 @@ interface AirAppRunPreviewProps {
   fullscreenState?: AirAppFullscreenState;
 }
 
+/** The preview has no reliable shape until an AirApp boots, so use an honest
+ *  indeterminate state and name the runner phase instead of faking a skeleton. */
+export function AirAppPreviewPending({ status }: { status: AirAppRunStatus }) {
+  const messages = useCoreI18n();
+  const phaseLabel: Partial<Record<AirAppRunStatus, string>> = {
+    "loading-files": messages.airapp.statusLoadingFiles,
+    installing: messages.airapp.statusInstalling,
+    starting: messages.airapp.statusStarting,
+  };
+
+  return (
+    <div className="grid h-full min-h-[160px] place-items-center p-6">
+      <div
+        aria-atomic="true"
+        aria-live="polite"
+        className="flex max-w-xs flex-col items-center gap-3 text-center"
+        data-airapp-preview-status={status}
+        role="status"
+      >
+        <div className="relative grid size-12 place-items-center">
+          <span
+            aria-hidden="true"
+            className="absolute inset-0 rounded-full bg-primary/10 motion-safe:animate-pulse"
+          />
+          <span className="relative grid size-9 place-items-center rounded-full border border-primary/20 bg-background shadow-sm">
+            <Loader2 aria-hidden="true" className="size-4 text-primary motion-safe:animate-spin" />
+          </span>
+        </div>
+        <div className="space-y-1">
+          <p className="font-medium text-foreground text-sm">
+            {phaseLabel[status] ?? messages.airapp.previewPending}
+          </p>
+          <p className="text-muted-foreground text-xs">{messages.airapp.previewPending}</p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /** "App" tab content: the live preview iframe, optionally topped by a local
  *  run toolbar (see `showToolbar`).
  *
@@ -615,14 +670,12 @@ export function AirAppRunPreview({
             src={previewUrl}
             title={messages.airapp.previewTitle}
           />
-        ) : (
+        ) : status === "idle" || status === "error" ? (
           <div className="grid h-full min-h-[160px] place-items-center p-6 text-center text-muted-foreground text-sm">
-            {status === "idle"
-              ? messages.airapp.previewEmpty
-              : status === "error"
-                ? messages.airapp.previewFailed
-                : messages.airapp.previewPending}
+            {status === "idle" ? messages.airapp.previewEmpty : messages.airapp.previewFailed}
           </div>
+        ) : (
+          <AirAppPreviewPending status={status} />
         )}
       </div>
     </section>

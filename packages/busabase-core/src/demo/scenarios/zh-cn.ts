@@ -1,3 +1,4 @@
+import { withSeedNodeIcons } from "../node-icons";
 import type { SeedScenario } from "../seed-types";
 import { agentIntegrationsZhCnScenario } from "./agent-integrations.zh-cn";
 import { datasetZhCnScenario } from "./dataset.zh-cn";
@@ -22,14 +23,16 @@ const mergeScenarios = (...scenarios: SeedScenario[]): SeedScenario => ({
   comments: scenarios.flatMap((s) => s.comments ?? []),
 });
 
-export const zhCnScenario: SeedScenario = mergeScenarios(
-  datasetZhCnScenario,
-  financeInvoiceZhCnScenario,
-  readmeScenariosZhCnScenario,
-  expandZhCnScenario,
-  directoryListingZhCnScenario,
-  agentIntegrationsZhCnScenario,
-  agentGalleryZhCnScenario,
-  roadmapZhCnScenario,
-  zhCnNodeTypesScenario,
+export const zhCnScenario: SeedScenario = withSeedNodeIcons(
+  mergeScenarios(
+    datasetZhCnScenario,
+    financeInvoiceZhCnScenario,
+    readmeScenariosZhCnScenario,
+    expandZhCnScenario,
+    directoryListingZhCnScenario,
+    agentIntegrationsZhCnScenario,
+    agentGalleryZhCnScenario,
+    roadmapZhCnScenario,
+    zhCnNodeTypesScenario,
+  ),
 );

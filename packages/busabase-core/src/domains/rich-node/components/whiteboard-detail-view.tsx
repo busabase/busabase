@@ -16,7 +16,10 @@ import {
 import { PenTool } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useCoreI18n, useCoreLocale } from "../../../i18n";
-import { NodeDetailSkeleton } from "../../dashboard/components/skeletons";
+import {
+  NodeDetailSkeleton,
+  WhiteboardContentSkeleton,
+} from "../../dashboard/components/skeletons";
 import { asNodeDetail } from "../../dashboard/helpers/node-detail";
 import { useReportLoadedNode } from "../../dashboard/hooks/use-report-loaded-node";
 import type { NodeDetailProps } from "../../dashboard/node-detail-registry";
@@ -74,15 +77,13 @@ export function WhiteboardDetailView({ orpc, slug, onNodeLoaded }: WhiteboardDet
       })
       .catch((caught: unknown) => {
         if (active) {
-          setEditorError(
-            caught instanceof Error ? caught.message : messages.richNodes.whiteboardLoading,
-          );
+          setEditorError(caught instanceof Error ? caught.message : messages.inbox.loadFailedTitle);
         }
       });
     return () => {
       active = false;
     };
-  }, [messages.richNodes.whiteboardLoading]);
+  }, [messages.inbox.loadFailedTitle]);
 
   // Excalidraw is uncontrolled — `initialData` below is read once, at mount —
   // so a scene that changed on the server (another tab, an agent's OpenAPI
@@ -162,7 +163,11 @@ export function WhiteboardDetailView({ orpc, slug, onNodeLoaded }: WhiteboardDet
       status={status}
     >
       <div className="h-full w-full bg-muted/20">
-        {Editor ? (
+        {editorError ? (
+          <div className="flex h-full items-center justify-center text-rejected-strong text-sm">
+            {editorError}
+          </div>
+        ) : Editor ? (
           <Editor
             UIOptions={{
               canvasActions: { loadScene: false, saveToActiveFile: false },
@@ -195,9 +200,7 @@ export function WhiteboardDetailView({ orpc, slug, onNodeLoaded }: WhiteboardDet
             }}
           />
         ) : (
-          <div className="flex h-full items-center justify-center text-muted-foreground text-sm">
-            {editorError ?? messages.richNodes.whiteboardLoading}
-          </div>
+          <WhiteboardContentSkeleton />
         )}
       </div>
     </RichNodeShell>

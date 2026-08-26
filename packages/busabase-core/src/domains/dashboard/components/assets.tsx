@@ -284,9 +284,10 @@ export function AssetTextPreviewPanel({
           ) : null}
 
           {isBusy ? (
-            <p className="mt-2 text-muted-foreground text-xs">
-              {messages.assets.textPreviewLoading}
-            </p>
+            <div className="mt-2 space-y-2" aria-hidden>
+              <Skeleton className="h-3 w-full" />
+              <Skeleton className="h-3 w-3/4" />
+            </div>
           ) : null}
 
           <div className="mt-2 flex items-center gap-2">

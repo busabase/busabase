@@ -13,6 +13,7 @@ export type LiveInvalidationTarget =
   | "changeRequestCounts"
   | "changeRequests"
   | "changeRequestsPaged"
+  | "inboxSnapshot"
   | "nodeDetail"
   | "nodes"
   | "records"
@@ -46,6 +47,7 @@ export const classifyLiveInvalidation = (event: BusabaseLiveEvent): LiveInvalida
 
   targets.add("changeRequests");
   targets.add("changeRequestsPaged");
+  targets.add("inboxSnapshot");
   targets.add("changeRequestCounts");
   targets.add("auditEvents");
 
@@ -94,6 +96,7 @@ export const createLiveInvalidationBatcher = (
     if (pendingReviewFallback && !pendingTargets.has("changeRequests")) {
       pendingTargets.add("changeRequests");
       pendingTargets.add("changeRequestsPaged");
+      pendingTargets.add("inboxSnapshot");
       pendingTargets.add("changeRequestCounts");
     }
     pendingReviewFallback = false;

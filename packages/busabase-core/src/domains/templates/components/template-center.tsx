@@ -8,6 +8,7 @@ import type { TemplateCardVO } from "busabase-contract/domains/templates/types";
 import { useState } from "react";
 import type { AgentIntegrationTarget } from "../../dashboard/components/agent-install-panel";
 import { InstallFromGithubModal } from "../../dashboard/components/install-from-github-modal";
+import { NodeDetailSkeleton } from "../../dashboard/components/skeletons";
 import { TemplateDetailView } from "./template-detail-view";
 import { TemplatesListView } from "./templates-list-view";
 
@@ -26,7 +27,7 @@ interface TemplateCenterProps {
   selectedName: string | null;
   onSelect: (template: TemplateCardVO) => void;
   onBack: () => void;
-  onInstalled: (result: InstallResultVO) => void;
+  onInstalled: (result: InstallResultVO | null) => void;
   onReviewChangeRequests: () => void;
   /** Passed through to the install dialog's Agent install tab. */
   agentIntegration?: AgentIntegrationTarget;
@@ -76,25 +77,23 @@ export function TemplateCenter({
             onBack={onBack}
             onInstall={() => setInstalling(selected)}
           />
+        ) : // A named template that the catalog does not have is either still
+        // loading or genuinely gone — a link to one that was unpublished, or
+        // a typo. Say which, rather than showing an empty page.
+        catalog.isPending ? (
+          <NodeDetailSkeleton variant="doc" />
         ) : (
-          // A named template that the catalog does not have is either still
-          // loading or genuinely gone — a link to one that was unpublished, or
-          // a typo. Say which, rather than showing an empty page.
           <div className="mx-auto flex w-full max-w-4xl flex-col gap-3 p-6">
             <p className="text-muted-foreground text-sm">
-              {catalog.isPending
-                ? "Loading the catalog…"
-                : `No template named “${selectedName}” in this catalog.`}
+              {`No template named “${selectedName}” in this catalog.`}
             </p>
-            {!catalog.isPending ? (
-              <button
-                type="button"
-                onClick={onBack}
-                className="w-fit text-sm underline underline-offset-4"
-              >
-                Back to Templates
-              </button>
-            ) : null}
+            <button
+              type="button"
+              onClick={onBack}
+              className="w-fit text-sm underline underline-offset-4"
+            >
+              Back to Templates
+            </button>
           </div>
         )
       ) : (

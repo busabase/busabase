@@ -1,4 +1,4 @@
-import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
+import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";
 import type { ChangeRequestStatus, ChangeRequestVO } from "busabase-contract/types";
 import { ChevronDown, Loader2 } from "lucide-react";
@@ -167,19 +167,8 @@ function InboxList({
   isBatchPending: boolean;
 }) {
   const messages = useCoreI18n();
+  const queryClient = useQueryClient();
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-
-  // Whole-space tab counts (not derived from a capped page).
-  const countsQuery = useQuery(orpc.changeRequests.counts.queryOptions({}));
-  const counts = countsQuery.data;
-  const inboxCounts: Record<InboxViewKey, number> = {
-    approved: counts?.approved ?? 0,
-    changes: counts?.changes ?? 0,
-    created: counts?.created ?? 0,
-    merged: counts?.merged ?? 0,
-    rejected: counts?.rejected ?? 0,
-    review: counts?.review ?? 0,
-  };
 
   // Numbered paging, sharing the Base table's paginator. "Load more" was fine
   // for a handful of pending items, but a reviewer working a tab that holds
@@ -195,14 +184,34 @@ function InboxList({
     setSelectedIds(new Set());
   }, [activeView]);
 
-  const listQuery = useQuery(
-    orpc.changeRequests.listPage.queryOptions({
+  const snapshotQuery = useQuery(
+    orpc.changeRequests.inboxSnapshot.queryOptions({
       input: { ...tabFilter(activeView), page, pageSize },
     }),
   );
+  // Hosts use the standalone counts key for the global Inbox badge. Seeding it
+  // from the combined response lets that badge reuse this request while the
+  // Inbox route is active; Home and other routes still fetch counts directly.
+  useEffect(() => {
+    if (snapshotQuery.data?.counts) {
+      queryClient.setQueryData(
+        orpc.changeRequests.counts.queryOptions({}).queryKey,
+        snapshotQuery.data.counts,
+      );
+    }
+  }, [orpc, queryClient, snapshotQuery.data?.counts]);
+  const counts = snapshotQuery.data?.counts;
+  const inboxCounts: Record<InboxViewKey, number> = {
+    approved: counts?.approved ?? 0,
+    changes: counts?.changes ?? 0,
+    created: counts?.created ?? 0,
+    merged: counts?.merged ?? 0,
+    rejected: counts?.rejected ?? 0,
+    review: counts?.review ?? 0,
+  };
   const activeChangeRequests = useMemo(
-    () => listQuery.data?.changeRequests ?? [],
-    [listQuery.data],
+    () => snapshotQuery.data?.changeRequests ?? [],
+    [snapshotQuery.data],
   );
 
   // Selection + batch actions are offered on the review queue (the import
@@ -277,27 +286,27 @@ function InboxList({
       groups={groups}
       pagination={
         <RecordsPaginationBar
-          isFetching={listQuery.isFetching}
-          isLoading={listQuery.isLoading}
+          isFetching={snapshotQuery.isFetching}
+          isLoading={snapshotQuery.isLoading}
           onPageChange={setPage}
           onPageSizeChange={(next) => {
             setPageSize(next);
             setPage(1);
           }}
           onRetry={() => {
-            void listQuery.refetch();
+            void snapshotQuery.refetch();
           }}
-          page={listQuery.data?.page ?? page}
+          page={snapshotQuery.data?.page ?? page}
           pageSize={pageSize}
-          total={listQuery.data?.total ?? 0}
-          totalPages={listQuery.data?.totalPages ?? 0}
+          total={snapshotQuery.data?.total ?? 0}
+          totalPages={snapshotQuery.data?.totalPages ?? 0}
         />
       }
-      isLoading={listQuery.isLoading}
-      isError={listQuery.isError}
-      errorBody={listQuery.error instanceof Error ? listQuery.error.message : undefined}
+      isLoading={snapshotQuery.isLoading}
+      isError={snapshotQuery.isError}
+      errorBody={snapshotQuery.error instanceof Error ? snapshotQuery.error.message : undefined}
       onRetry={() => {
-        void listQuery.refetch();
+        void snapshotQuery.refetch();
       }}
       toolbar={
         <>
