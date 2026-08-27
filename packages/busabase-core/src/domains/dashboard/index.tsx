@@ -73,6 +73,7 @@ import { ActivityView, InboxView } from "./components/inbox";
 import { RecordDetailView, RecordEditorView, RecordTopbarActions } from "./components/record-views";
 import { SearchDialog } from "./components/search-dialog";
 import { SidePanel, SidePanelToggle } from "./components/side-panel";
+import { isPinnableNode, pinNodeToSidePanel } from "./components/side-panel-sources";
 import { BaseTableSkeleton, NodeDetailSkeleton } from "./components/skeletons";
 import { SubmitPermissionProvider } from "./components/split-submit-button";
 import { BusabaseTopbarBreadcrumb, TopbarNodeActionsSlot } from "./components/topbar";
@@ -172,6 +173,8 @@ interface BusabaseDashboardProps {
   chromeless?: boolean;
   /** Reuses the Change Request detail surface without exposing mutation controls. */
   readOnlyChangeRequestPreview?: boolean;
+  /** Reuses the Record detail surface from server-seeded data without broader Base reads. */
+  readOnlyRecordPreview?: boolean;
   /**
    * Which AirApp engines this deployment can offer, resolved server-side by
    * `domains/airapp/logic/engine-availability.ts`. Omitted, the dashboard
@@ -254,15 +257,16 @@ function BusabaseDashboardContent({
   changeRequests: initialChangeRequests,
   currentUserId = null,
   emptyGuide,
-  // `records` (SSR seed) is intentionally not consumed: the table now loads per
-  // base via keyset pagination so rows reflect exactly what was fetched. The
-  // prop stays for host compatibility.
   bases: initialBases,
   nodes: nodeTree,
   views: initialViews = [],
   embedded = false,
   chromeless = false,
   readOnlyChangeRequestPreview = false,
+  readOnlyRecordPreview = false,
+  // Normal Base views still load records per page. A read-only record embed is
+  // the narrow exception: its one server-authorized record is seeded here.
+  records: initialRecords,
   onSearchOpenChange,
   searchOpen,
   visitorKind = "member",
@@ -645,7 +649,7 @@ function BusabaseDashboardContent({
       initialPageParam: undefined as string | undefined,
       getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
     }),
-    enabled: Boolean(activeBase?.id) && !usesPagePagination,
+    enabled: Boolean(activeBase?.id) && !usesPagePagination && !readOnlyRecordPreview,
   });
   const recordsPageQuery = useQuery({
     ...orpc.records.listPage.queryOptions({
@@ -656,7 +660,7 @@ function BusabaseDashboardContent({
         pageSize: recordPaginationUrl.pageSize,
       },
     }),
-    enabled: Boolean(activeBase?.id) && usesPagePagination,
+    enabled: Boolean(activeBase?.id) && usesPagePagination && !readOnlyRecordPreview,
     placeholderData: (previousData, previousQuery) => {
       const previousInput = (
         previousQuery?.queryKey[1] as { input?: { baseId?: string; viewId?: string } } | undefined
@@ -775,11 +779,15 @@ function BusabaseDashboardContent({
   // relations resolve as newly-merged records reference further ids.
   const fallbackRecordQuery = useQuery({
     ...orpc.records.get.queryOptions({ input: { recordId: selectedRecordId ?? "" } }),
-    enabled: Boolean(selectedRecordId) && !baseRecords.some((item) => item.id === selectedRecordId),
+    initialData: initialRecords.find((record) => record.id === selectedRecordId),
+    enabled:
+      !readOnlyRecordPreview &&
+      Boolean(selectedRecordId) &&
+      !baseRecords.some((item) => item.id === selectedRecordId),
   });
   const [relationRecordIds, setRelationRecordIds] = useState<string[]>([]);
   const relationRecordQueries = useQueries({
-    queries: relationRecordIds.map((recordId) => ({
+    queries: (readOnlyRecordPreview ? [] : relationRecordIds).map((recordId) => ({
       ...orpc.records.get.queryOptions({ input: { recordId } }),
     })),
   });
@@ -832,7 +840,9 @@ function BusabaseDashboardContent({
     ...orpc.changeRequests.get.queryOptions({
       input: { changeRequestId: selectedChangeRequestId ?? "" },
     }),
-    enabled: Boolean(selectedChangeRequestId) && isChangeRequestDetailRoute,
+    // Public embed hosts seed the one permitted Change Request server-side;
+    // never fall back to a space-scoped read from an anonymous iframe.
+    enabled: Boolean(selectedChangeRequestId) && isChangeRequestDetailRoute && !isAnon,
   });
   const selectedChangeRequest = useMemo(
     () =>
@@ -1843,7 +1853,7 @@ function BusabaseDashboardContent({
 
   const viewedRecordIds = useRef(new Set<string>());
   useEffect(() => {
-    if (!isRecordRoute || isEditRecordRoute || !activeRecord) {
+    if (readOnlyRecordPreview || !isRecordRoute || isEditRecordRoute || !activeRecord) {
       return;
     }
     if (viewedRecordIds.current.has(activeRecord.id)) {
@@ -1876,6 +1886,7 @@ function BusabaseDashboardContent({
     listKeys.auditEvents,
     messages,
     queryClient,
+    readOnlyRecordPreview,
   ]);
 
   const setSearchOpen = useCallback(
@@ -1923,6 +1934,47 @@ function BusabaseDashboardContent({
   // shortcuts are declared (e.g. the GM-panel toggle's `["meta.shift.m",
   // "ctrl.alt.m"]` pair in apps/*/keyboard-shortcuts-provider.tsx).
   const openSearch = useCallback(() => setSearchOpen(true), [setSearchOpen]);
+
+  /**
+   * Whether the next search selection pins instead of navigating.
+   *
+   * The dialog is a singleton shared with Cmd-K, so "pin mode" has to be state
+   * here rather than a second mounted instance — and it has to be cleared on
+   * close, or a Cmd-K right after using the panel's "Search…" would still pin.
+   */
+  const [searchPinsResult, setSearchPinsResult] = useState(false);
+  const openSearchToPin = useCallback(() => {
+    setSearchPinsResult(true);
+    setSearchOpen(true);
+  }, [setSearchOpen]);
+  const closeSearchAndClearMode = useCallback(() => {
+    setSearchPinsResult(false);
+    closeSearch();
+  }, [closeSearch]);
+
+  /**
+   * The node the side panel's "+" offers to pin, or null when the current page
+   * isn't a node at all (`/home`, `/agents`, settings…).
+   *
+   * Bases need their own branch for two reasons: `nodeDetailRoute` excludes
+   * `base` on purpose, and `activeBase` falls back to `bases[0]` when no base
+   * is selected — so it is non-null on pages that have nothing to do with a
+   * base. Gating on `selectedBaseSlug` is what keeps this honest. A base is
+   * also pinned by its `nodeId`, not its `id`.
+   */
+  const sidePanelCurrentNode = useMemo(() => {
+    if (activeDetailNode) {
+      return {
+        id: activeDetailNode.id,
+        type: activeDetailNode.type,
+        name: activeDetailNode.name,
+      };
+    }
+    if (selectedBaseSlug && activeBase) {
+      return { id: activeBase.nodeId, type: "base", name: activeBase.name };
+    }
+    return null;
+  }, [activeBase, activeDetailNode, selectedBaseSlug]);
   useKeyboardShortcut({ keys: "cmd+k", handler: openSearch });
   useKeyboardShortcut({ keys: "ctrl+k", handler: openSearch });
 
@@ -2456,8 +2508,37 @@ function BusabaseDashboardContent({
           {dashboardActiveView}
         </div>
       </div>
-      <SidePanel orpc={orpc} />
-      <SearchDialog nodeCache={nodeCache} orpc={orpc} onClose={closeSearch} open={isSearchOpen} />
+      <SidePanel
+        currentNode={sidePanelCurrentNode}
+        nodeCache={nodeCache}
+        onNavigate={setLocation}
+        onOpenSearch={openSearchToPin}
+        orpc={orpc}
+      />
+      <SearchDialog
+        nodeCache={nodeCache}
+        onClose={closeSearchAndClearMode}
+        onSelect={
+          searchPinsResult
+            ? (result) => {
+                // Content results (records, files, change requests) live inside
+                // a node and carry no node type, so there is nothing to pin —
+                // fall back to navigating rather than doing nothing.
+                if (result.nodeType && isPinnableNode(result.nodeType)) {
+                  pinNodeToSidePanel({
+                    id: result.id,
+                    type: result.nodeType,
+                    name: result.title,
+                  });
+                  return;
+                }
+                setLocation(result.href);
+              }
+            : undefined
+        }
+        open={isSearchOpen}
+        orpc={orpc}
+      />
     </div>
   );
 

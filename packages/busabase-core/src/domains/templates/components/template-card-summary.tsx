@@ -26,6 +26,7 @@ interface TemplateCardSummaryProps {
   headingLevel?: "h2" | "h3";
   categoryLabel?: string;
   statLabels?: TemplateStatLabels;
+  headingHref?: string;
   children?: ReactNode;
 }
 
@@ -43,6 +44,7 @@ export function TemplateCardSummary({
   headingLevel = "h3",
   categoryLabel,
   statLabels = defaultStatLabels,
+  headingHref,
   children,
 }: TemplateCardSummaryProps) {
   const [screenshot] = template.screenshots;
@@ -77,7 +79,13 @@ export function TemplateCardSummary({
             <Heading
               className={comfortable ? "font-serif text-xl font-semibold" : "text-sm font-medium"}
             >
-              {template.name}
+              {headingHref ? (
+                <a href={headingHref} className="hover:text-primary hover:underline">
+                  {template.name}
+                </a>
+              ) : (
+                template.name
+              )}
             </Heading>
             {comfortable ? (
               <p className="mt-1 text-xs text-muted-foreground">

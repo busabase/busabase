@@ -6,6 +6,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import { Router } from "wouter";
 import { CoreI18nProvider } from "../../../i18n";
+import { type DashboardVisitorKind, DashboardVisitorProvider } from "../visitor-context";
 import { ChangeRequestReviewLayout } from "./change-request-review";
 
 Object.assign(globalThis, { React });
@@ -94,23 +95,25 @@ const useStaticLocation = (): [string, (path: string) => void] => [
 ];
 const useStaticSearch = () => "";
 
-const renderReview = (readOnly: boolean) =>
+const renderReview = (readOnly: boolean, visitorKind: DashboardVisitorKind = "member") =>
   renderToStaticMarkup(
     <QueryClientProvider client={new QueryClient()}>
       <Router hook={useStaticLocation} searchHook={useStaticSearch}>
         <CoreI18nProvider locale="en">
-          <ChangeRequestReviewLayout
-            auditEvents={[]}
-            changeRequest={changeRequest}
-            client={client}
-            focusOperationId={null}
-            onApprove={() => undefined}
-            onClose={() => undefined}
-            onMerge={() => undefined}
-            onReject={() => undefined}
-            pendingAction={null}
-            readOnly={readOnly}
-          />
+          <DashboardVisitorProvider visitorKind={visitorKind}>
+            <ChangeRequestReviewLayout
+              auditEvents={[]}
+              changeRequest={changeRequest}
+              client={client}
+              focusOperationId={null}
+              onApprove={() => undefined}
+              onClose={() => undefined}
+              onMerge={() => undefined}
+              onReject={() => undefined}
+              pendingAction={null}
+              readOnly={readOnly}
+            />
+          </DashboardVisitorProvider>
         </CoreI18nProvider>
       </Router>
     </QueryClientProvider>,
@@ -134,5 +137,14 @@ describe("Change Request read-only preview", () => {
 
     expect(markup).toContain("Finish review");
     expect(markup).toContain('aria-label="Add comment"');
+  });
+
+  it("hides comment threads for anonymous embed visitors", () => {
+    const markup = renderReview(true, "anonymous");
+
+    expect(markup).toContain("Before &amp; Co");
+    expect(markup).toContain("Discussion");
+    expect(markup).not.toContain("Comments on this change");
+    expect(markup).not.toContain("No comments yet. Start the discussion below.");
   });
 });

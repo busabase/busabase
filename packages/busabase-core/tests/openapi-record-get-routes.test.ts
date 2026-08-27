@@ -100,7 +100,7 @@ describe("Busabase OpenAPI record get route", () => {
     expect(spec.paths?.["/api/v1/bases/{baseId}/restore/change-requests"]).toBeUndefined();
   });
 
-  it("keeps the compressed public API at 102 operations", async () => {
+  it("keeps the compressed public API at 107 operations", async () => {
     const spec = await getBusabaseOpenApiSpec();
     const operationCount = Object.values(spec.paths ?? {}).reduce(
       (count, pathItem) =>
@@ -141,6 +141,9 @@ describe("Busabase OpenAPI record get route", () => {
     // documents about how Busabase works and nothing about this workspace, and
     // a `read` key that cannot read the rules it is expected to follow is the
     // situation these routes exist to end. 101 + 1 + 2 = 104.
-    expect(operationCount).toBe(104);
+    // Embed-link create/list/revoke now belong to this shared contract so
+    // Desktop can execute them directly and Cloud can forward the same paths
+    // to a remote tunnel (+3 -> 107).
+    expect(operationCount).toBe(107);
   });
 });

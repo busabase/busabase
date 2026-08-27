@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { busabaseContractRoutes } from "./busabase";
 import {
   CreateEmbedLinkInputSchema,
   EmbedFramePolicyVOSchema,
@@ -6,20 +7,53 @@ import {
 } from "./embed-link-schemas";
 
 describe("embed frame policy input", () => {
+  it("publishes embed-link CRUD on the shared Desktop and tunnel contract", () => {
+    expect(busabaseContractRoutes.embedLinks.create["~orpc"].route).toMatchObject({
+      method: "POST",
+      path: "/embed-links",
+    });
+    expect(busabaseContractRoutes.embedLinks.list["~orpc"].route).toMatchObject({
+      method: "GET",
+      path: "/embed-links",
+    });
+    expect(busabaseContractRoutes.embedLinks.revoke["~orpc"].route).toMatchObject({
+      method: "DELETE",
+      path: "/embed-links/{id}",
+    });
+  });
+
   it("accepts AirApps as embeddable nodes", () => {
     expect(EmbedNodeTypeSchema.parse("airapp")).toBe("airapp");
   });
   it("defaults to embedding anywhere", () => {
-    expect(CreateEmbedLinkInputSchema.parse({ nodeId: "node_1" }).framePolicy).toEqual({
+    expect(
+      CreateEmbedLinkInputSchema.parse({ type: "node", typeId: "node_1" }).framePolicy,
+    ).toEqual({
       mode: "anywhere",
       allowedOrigins: [],
     });
   });
 
+  it.each(["node", "change-request", "record-detail"] as const)(
+    "accepts the %s embed target",
+    (type) => {
+      expect(CreateEmbedLinkInputSchema.parse({ type, typeId: "target_1" })).toMatchObject({
+        type,
+        typeId: "target_1",
+      });
+    },
+  );
+
+  it("requires both parts of the polymorphic target", () => {
+    expect(CreateEmbedLinkInputSchema.safeParse({ type: "node" }).success).toBe(false);
+    expect(CreateEmbedLinkInputSchema.safeParse({ typeId: "node_1" }).success).toBe(false);
+  });
+
   it("normalizes exact origins and removes duplicates", () => {
     expect(
       CreateEmbedLinkInputSchema.parse({
-        nodeId: "node_1",
+        type: "node",
+        typeId: "node_1",
         framePolicy: {
           mode: "origins",
           allowedOrigins: ["https://AGENT.example:443/", "https://agent.example"],
@@ -37,7 +71,8 @@ describe("embed frame policy input", () => {
   ])("rejects a non-origin value: %s", (origin) => {
     expect(
       CreateEmbedLinkInputSchema.safeParse({
-        nodeId: "node_1",
+        type: "node",
+        typeId: "node_1",
         framePolicy: { mode: "origins", allowedOrigins: [origin] },
       }).success,
     ).toBe(false);
@@ -46,7 +81,8 @@ describe("embed frame policy input", () => {
   it("allows loopback HTTP only for local cross-origin tests", () => {
     expect(
       CreateEmbedLinkInputSchema.parse({
-        nodeId: "node_1",
+        type: "node",
+        typeId: "node_1",
         framePolicy: {
           mode: "origins",
           allowedOrigins: ["http://127.0.0.1:4173/", "http://localhost:4174"],
@@ -58,13 +94,15 @@ describe("embed frame policy input", () => {
   it("requires origins only for origins mode", () => {
     expect(
       CreateEmbedLinkInputSchema.safeParse({
-        nodeId: "node_1",
+        type: "node",
+        typeId: "node_1",
         framePolicy: { mode: "origins", allowedOrigins: [] },
       }).success,
     ).toBe(false);
     expect(
       CreateEmbedLinkInputSchema.safeParse({
-        nodeId: "node_1",
+        type: "node",
+        typeId: "node_1",
         framePolicy: { mode: "top-level-only", allowedOrigins: ["https://agent.example"] },
       }).success,
     ).toBe(false);

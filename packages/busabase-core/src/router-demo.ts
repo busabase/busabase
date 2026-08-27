@@ -85,6 +85,20 @@ const shouldEmitDemoLiveEvent = () => false;
 const DEMO_ACTIVITY_CURSOR_PREFIX = "demo-activity:";
 const DEMO_RECORD_CURSOR_PREFIX = "demo-record:";
 
+const demoChangeRequestAffectsNode = (
+  changeRequest: ReturnType<typeof demoListChangeRequests>[number],
+  nodeId?: string,
+) =>
+  !nodeId ||
+  changeRequest.nodeId === nodeId ||
+  changeRequest.base?.nodeId === nodeId ||
+  changeRequest.operations.some(
+    (operation) =>
+      operation.nodeId === nodeId ||
+      (operation.operation === "node_create" &&
+        operation.headCommit.payload.parentNodeId === nodeId),
+  );
+
 const getDemoActivityOffset = (cursor?: string) => {
   if (!cursor?.startsWith(DEMO_ACTIVITY_CURSOR_PREFIX)) return 0;
   const offset = Number.parseInt(cursor.slice(DEMO_ACTIVITY_CURSOR_PREFIX.length), 10);
@@ -113,6 +127,15 @@ export const busabaseDemoRouter = os.router({
   grep: os.grep.handler(() => {
     throw demoUnsupported("Unified grep");
   }),
+  embedLinks: {
+    create: os.embedLinks.create.handler(() => {
+      throw demoUnsupported("Create embed link");
+    }),
+    list: os.embedLinks.list.handler(() => []),
+    revoke: os.embedLinks.revoke.handler(() => {
+      throw demoUnsupported("Revoke embed link");
+    }),
+  },
   nodes: {
     // Demo mode ignores `parentId`/`depth` — the seeded tree is always fully
     // in memory already, so there's nothing to lazily bound (see
@@ -447,8 +470,8 @@ export const busabaseDemoRouter = os.router({
         transport: "local-subprocess" as const,
         version: null,
         available: false,
-        comingSoon: true,
-        unavailableReason: "Coming soon.",
+        comingSoon: false,
+        unavailableReason: "Connecting to agents is disabled in the demo.",
       },
       {
         slug: "codex-acp",
@@ -457,8 +480,8 @@ export const busabaseDemoRouter = os.router({
         transport: "local-subprocess" as const,
         version: null,
         available: false,
-        comingSoon: true,
-        unavailableReason: "Coming soon.",
+        comingSoon: false,
+        unavailableReason: "Connecting to agents is disabled in the demo.",
       },
       {
         slug: "buda",
@@ -568,7 +591,7 @@ export const busabaseDemoRouter = os.router({
         if (mine && changeRequest.submittedBy !== "local-editor") {
           return false;
         }
-        return true;
+        return demoChangeRequestAffectsNode(changeRequest, input?.affectsNodeId);
       });
       return { changeRequests, nextCursor: null };
     }),
@@ -583,7 +606,7 @@ export const busabaseDemoRouter = os.router({
         if (mine && changeRequest.submittedBy !== "local-editor") {
           return false;
         }
-        return true;
+        return demoChangeRequestAffectsNode(changeRequest, input?.affectsNodeId);
       });
       const pageSize = input?.pageSize ?? 50;
       const total = matching.length;
@@ -606,6 +629,8 @@ export const busabaseDemoRouter = os.router({
       const mine = input?.mine ?? false;
       const matching = all.filter((changeRequest) => {
         if (status.length > 0 && !status.includes(changeRequest.status)) return false;
+        // No node scoping here: the badges below are whole-space, so the page
+        // must be too (see `inboxSnapshotInputSchema` in busabase-contract).
         return !mine || changeRequest.submittedBy === "local-editor";
       });
       const pageSize = input?.pageSize ?? 50;

@@ -1,4 +1,9 @@
-import type { ActivityItemVO, AuditEventVO, UserRefVO } from "busabase-contract/types";
+import type {
+  ActivityItemVO,
+  AuditEventVO,
+  SourceAttributionVO,
+  UserRefVO,
+} from "busabase-contract/types";
 import { fmt } from "../../../i18n/fmt";
 import type { CoreI18nMessages } from "../../../i18n/messages";
 import {
@@ -11,6 +16,7 @@ import {
   getRecordTitle,
 } from "./change-request";
 import { formatOpaqueUserId, formatUserRefLabel, shortIdentifier } from "./format";
+import { resolveSubmissionIdentity } from "./source-attribution";
 
 export type ActivityEventTone = "audit" | "change_request" | "operation" | "commit" | "record";
 
@@ -31,26 +37,11 @@ export interface ActivityEvent {
 export interface ActivityProvenance {
   byline: string;
   channelLabel?: string;
+  credentialLabel?: string;
   ownerLabel?: string;
 }
 
 const UPPERCASE_ACTOR_TOKENS = new Set(["ai", "api", "cms", "crm", "seo", "ui", "ux"]);
-
-const KNOWN_CHANNELS = [
-  "web_ui",
-  "browser",
-  "openapi",
-  "sdk",
-  "cli",
-  "mcp",
-  "skill",
-  "webhook",
-  "automation",
-  "import",
-] as const;
-type ActivityChannel = (typeof KNOWN_CHANNELS)[number];
-
-type MetadataRecord = Record<string, unknown>;
 
 const titleCaseActorToken = (value: string) => {
   const lower = value.toLowerCase();
@@ -89,114 +80,25 @@ const getActor = (
     : (humanizeActivityActorId(fallbackId) ?? formatOpaqueUserId(fallbackId, messages)),
 });
 
-const isMetadataRecord = (value: unknown): value is MetadataRecord =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
-
-const stringFrom = (value: unknown) => (typeof value === "string" && value.trim() ? value : null);
-
-const firstString = (record: MetadataRecord | null | undefined, keys: string[]) => {
-  if (!record) return null;
-  for (const key of keys) {
-    const value = stringFrom(record[key]);
-    if (value) return value;
-  }
-  return null;
-};
-
-const recordFrom = (record: MetadataRecord | null | undefined, keys: string[]) => {
-  if (!record) return null;
-  for (const key of keys) {
-    const value = record[key];
-    if (isMetadataRecord(value)) return value;
-  }
-  return null;
-};
-
-const normalizeChannel = (value: string | null): ActivityChannel | null => {
-  if (!value) return null;
-  const normalized = value.toLowerCase().replace(/[-\s]+/g, "_");
-  if (normalized === "web" || normalized === "ui") return "web_ui";
-  if (normalized === "api") return "openapi";
-  return KNOWN_CHANNELS.includes(normalized as ActivityChannel)
-    ? (normalized as ActivityChannel)
-    : null;
-};
-
-const getChannelLabels = (messages?: CoreI18nMessages): Record<ActivityChannel, string> => ({
-  automation: messages?.activity.channelAutomation ?? "Automation",
-  browser: messages?.activity.channelBrowser ?? "Browser",
-  cli: messages?.activity.channelCli ?? "CLI",
-  import: messages?.activity.channelImport ?? "Import",
-  mcp: messages?.activity.channelMcp ?? "MCP",
-  openapi: messages?.activity.channelOpenApi ?? "OpenAPI",
-  sdk: messages?.activity.channelSdk ?? "SDK",
-  skill: messages?.activity.channelSkill ?? "Skill",
-  web_ui: messages?.activity.channelWebUi ?? "Web UI",
-  webhook: messages?.activity.channelWebhook ?? "Webhook",
-});
-
-const sameDisplayName = (left: string | null | undefined, right: string | null | undefined) =>
-  Boolean(left && right && left.trim().toLowerCase() === right.trim().toLowerCase());
-
 const buildActivityIdentity = (
   user: UserRefVO | null | undefined,
   fallbackId: string | null | undefined,
-  sourceMeta: MetadataRecord | null | undefined,
+  sourceAttribution: SourceAttributionVO | null | undefined,
   messages?: CoreI18nMessages,
 ) => {
   const actor = getActor(user, fallbackId, messages);
-  if (!sourceMeta) {
-    return { image: actor.image, name: actor.name, provenance: undefined };
-  }
-  const nestedProvenance = recordFrom(sourceMeta, ["provenance"]);
-  const hasFlatProvenance = Boolean(
-    recordFrom(sourceMeta, ["apiKey", "key", "credential", "keyProfile", "owner", "ownerUser"]) ??
-      firstString(sourceMeta, [
-        "apiKeyName",
-        "channel",
-        "credentialName",
-        "keyName",
-        "ownerName",
-        "ownerUserName",
-        "sourceChannel",
-        "via",
-      ]),
-  );
-  if (!nestedProvenance && !hasFlatProvenance) {
-    return { image: actor.image, name: actor.name, provenance: undefined };
-  }
-  const provenance = nestedProvenance ?? sourceMeta;
-  const owner = recordFrom(provenance, ["owner", "ownerUser", "user"]);
-  const apiKey = recordFrom(provenance, ["apiKey", "key", "credential", "keyProfile"]);
-  const ownerName =
-    firstString(owner, ["name", "displayName", "label"]) ??
-    firstString(provenance, ["ownerName", "ownerUserName", "userName"]) ??
-    actor.name;
-  const apiKeyName =
-    firstString(apiKey, ["name", "displayName", "label"]) ??
-    firstString(provenance, ["apiKeyName", "credentialName", "keyName", "profileName"]);
-  const actorName = apiKeyName ?? ownerName;
-  const actorImage = apiKeyName
-    ? (firstString(apiKey, ["image", "avatar", "avatarUrl"]) ?? null)
-    : (firstString(owner, ["image", "avatar", "avatarUrl"]) ?? actor.image);
-  const channel = normalizeChannel(
-    firstString(provenance, ["channel", "sourceChannel", "via"]) ??
-      firstString(apiKey, ["channel"]),
-  );
-  const channelLabel = channel ? getChannelLabels(messages)[channel] : null;
-  const formattedChannelLabel = channelLabel
-    ? fmt(messages?.activity.viaChannel ?? "via {channel}", { channel: channelLabel })
-    : null;
-  const ownerLabel = !sameDisplayName(ownerName, actorName)
-    ? fmt(messages?.activity.ownedBy ?? "owned by {name}", { name: ownerName })
-    : null;
-  const byline = [formattedChannelLabel, ownerLabel].filter(Boolean).join(" · ");
-  const provenanceLabel: ActivityProvenance = {
-    byline,
-    channelLabel: formattedChannelLabel ?? undefined,
-    ownerLabel: ownerLabel ?? undefined,
+  const identity = resolveSubmissionIdentity(user, fallbackId, sourceAttribution, messages);
+  return {
+    image: actor.image,
+    name: identity.ownerLabel,
+    provenance: identity.activityByline
+      ? {
+          byline: identity.activityByline,
+          channelLabel: identity.channelLabel ?? undefined,
+          credentialLabel: identity.credentialLabel ?? undefined,
+        }
+      : undefined,
   };
-  return { image: actorImage, name: actorName, provenance: byline ? provenanceLabel : undefined };
 };
 
 const getChangeRequestActionLabel = (
@@ -283,7 +185,7 @@ export const buildActivityEventFromItem = (
     const actor = buildActivityIdentity(
       changeRequest.submittedByUser,
       changeRequest.submittedBy,
-      changeRequest.sourceMeta,
+      changeRequest.sourceAttribution,
       messages,
     );
     const scopeName = getChangeRequestScopeName(changeRequest, messages);
@@ -314,7 +216,7 @@ export const buildActivityEventFromItem = (
     const identity = buildActivityIdentity(
       operation.headCommit.authorUser ?? item.changeRequest.submittedByUser,
       operation.headCommit.author ?? item.changeRequest.submittedBy,
-      item.changeRequest.sourceMeta,
+      item.changeRequest.sourceAttribution,
       messages,
     );
     const sourceLabel = fmt(messages?.activity.commitRef ?? "commit {id}", {
@@ -367,10 +269,12 @@ export const buildActivityEventFromItem = (
   }
 
   const event = item.auditEvent;
-  const eventMetadata = isMetadataRecord(event.metadata) ? event.metadata : null;
-  const auditSourceMeta =
-    recordFrom(eventMetadata, ["sourceMeta"]) ?? recordFrom(eventMetadata, ["provenance"]);
-  const actor = buildActivityIdentity(event.actor, event.actorId, auditSourceMeta, messages);
+  const actor = buildActivityIdentity(
+    event.actor,
+    event.actorId,
+    event.sourceAttribution,
+    messages,
+  );
   return {
     actionLabel: getAuditActionLabel(event, messages),
     actorImage: actor.image,

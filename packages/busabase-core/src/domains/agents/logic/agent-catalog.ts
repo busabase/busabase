@@ -30,7 +30,17 @@ interface CatalogSpec {
   args?: string[];
   /** Which binary must exist on PATH for a local agent to be usable at all. */
   probeBinary?: string;
-  /** Listed for discovery, but intentionally blocked until the integration ships. */
+  /**
+   * Listed for discovery, but intentionally blocked until the integration ships.
+   *
+   * **Not the way to say "Cloud can't do this."** This flag is unconditional —
+   * it is checked before the host branch in both `listCatalog` and
+   * `resolveLaunch`, so setting it also blocks OSS and desktop, where a local
+   * agent runs on the user's own machine and is exactly the point. Local
+   * agents already have a host gate (`isCloudHost()`); that is what expresses
+   * "Cloud only". Reserve this flag for an integration that genuinely does not
+   * work anywhere yet.
+   */
   comingSoon?: boolean;
 }
 
@@ -71,7 +81,6 @@ const CATALOG: CatalogSpec[] = [
     transport: "local-subprocess",
     npxPackage: "@agentclientprotocol/claude-agent-acp@0.66.0",
     probeBinary: "npx",
-    comingSoon: true,
   },
   {
     slug: "codex-acp",
@@ -80,7 +89,6 @@ const CATALOG: CatalogSpec[] = [
     transport: "local-subprocess",
     npxPackage: "@agentclientprotocol/codex-acp@1.1.14",
     probeBinary: "npx",
-    comingSoon: true,
   },
   {
     slug: "buda",

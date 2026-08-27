@@ -2,6 +2,7 @@ import "server-only";
 
 import { ORPCError } from "@orpc/server";
 import {
+  inboxSnapshotInputSchema,
   listChangeRequestsPagedInputSchema,
   listChangeRequestsPageInputSchema,
 } from "busabase-contract/contract/schemas";
@@ -18,6 +19,7 @@ import {
   asc,
   desc,
   eq,
+  exists,
   getTableColumns,
   inArray,
   isNull,
@@ -125,6 +127,7 @@ import {
 } from "./node-slug";
 import { loadNodesByIds } from "./nodes";
 import { ensureReady, loadBasesByIds } from "./seed";
+import { toPublicSourceMetadata } from "./source-attribution";
 import {
   normalizeViewConfig,
   toCommentVO,
@@ -1056,6 +1059,7 @@ export const hydrateChangeRequests = async (
   ]);
 
   return changeRequests.map((changeRequest) => {
+    const publicSource = toPublicSourceMetadata(changeRequest.sourceMeta);
     const operations: OperationVO[] = (hydratedOperationsByCr.get(changeRequest.id) ?? []).map(
       (item) => {
         const commit = commitsById.get(item.headCommitId);
@@ -1082,7 +1086,8 @@ export const hydrateChangeRequests = async (
       status: changeRequest.status,
       submittedBy: changeRequest.submittedBy,
       submittedByUser: users.get(changeRequest.submittedBy) ?? null,
-      sourceMeta: changeRequest.sourceMeta,
+      sourceAttribution: publicSource.sourceAttribution,
+      sourceMeta: publicSource.sourceMeta,
       reviewPolicySnapshot: changeRequest.reviewPolicySnapshot,
       mergeSummary:
         maxOps === undefined
@@ -1246,6 +1251,77 @@ const decodeChangeRequestCursor = (cursor: string): { createdAt: Date; id: strin
 // editor — matching how `submittedBy` is stored on creation (record-ops.ts).
 const mineActorId = () => resolveActorId("local-editor");
 
+type ChangeRequestListFilters = {
+  status?: ChangeRequestPO["status"][];
+  mine?: boolean;
+  affectsNodeId?: string;
+};
+
+/**
+ * Shared SQL filters for every Change Request listing. `affectsNodeId` is a
+ * resource-scope query, not merely an equality check on the CR row: Base CRs
+ * carry `baseId`, while batch node-tree CRs may carry their target only on an
+ * operation. Parent-targeted node creates are included through the operation's
+ * commit payload so the filter agrees with the ACL scope resolver below.
+ */
+const buildChangeRequestListFilters = (
+  db: Awaited<ReturnType<typeof getDb>>,
+  input: ChangeRequestListFilters,
+): SQL[] => {
+  const spaceId = getContextSpaceId();
+  const filters: SQL[] = [eq(busabaseChangeRequests.spaceId, spaceId)];
+  if (input.status && input.status.length > 0) {
+    filters.push(inArray(busabaseChangeRequests.status, input.status));
+  }
+  if (input.mine) filters.push(eq(busabaseChangeRequests.submittedBy, mineActorId()));
+  if (!input.affectsNodeId) return filters;
+
+  const nodeId = input.affectsNodeId;
+  const mainBaseMatches = db
+    .select({ one: sql`1` })
+    .from(busabaseBases)
+    .where(
+      and(
+        eq(busabaseBases.spaceId, spaceId),
+        eq(busabaseBases.id, busabaseChangeRequests.baseId),
+        eq(busabaseBases.nodeId, nodeId),
+      ),
+    );
+  const operationMatches = db
+    .select({ one: sql`1` })
+    .from(busabaseOperations)
+    .leftJoin(busabaseBases, eq(busabaseBases.id, busabaseOperations.baseId))
+    .leftJoin(busabaseCommits, eq(busabaseCommits.id, busabaseOperations.headCommitId))
+    .where(
+      and(
+        eq(busabaseOperations.spaceId, spaceId),
+        eq(busabaseOperations.changeRequestId, busabaseChangeRequests.id),
+        or(
+          eq(busabaseOperations.nodeId, nodeId),
+          and(eq(busabaseBases.spaceId, spaceId), eq(busabaseBases.nodeId, nodeId)),
+          // Node creates carry their target only as the parent in the commit
+          // payload (the CR row and the operation both have a null nodeId until
+          // the merge materializes one). Gated on the operation kind because a
+          // record commit's payload IS the caller's field map — an unfiltered
+          // `->>'parentNodeId'` would match a Base whose own field happens to be
+          // slugged `parentNodeId` and hold this node's id.
+          and(
+            eq(busabaseOperations.operation, "node_create"),
+            sql<boolean>`${busabaseCommits.payload}->>'parentNodeId' = ${nodeId}`,
+          ),
+        ),
+      ),
+    );
+  filters.push(
+    or(
+      eq(busabaseChangeRequests.nodeId, nodeId),
+      exists(mainBaseMatches),
+      exists(operationMatches),
+    ) as SQL,
+  );
+  return filters;
+};
+
 // Inbox rows only ever need a representative sample of a CR's operations (the
 // title/summary/risk-hint helpers already special-case operationCount > 1).
 // Capping here keeps a page's payload bounded even when a bulk-change-request
@@ -1265,14 +1341,9 @@ export const listChangeRequestsPaged = async (
   input?: z.input<typeof listChangeRequestsPagedInputSchema>,
 ) => {
   await ensureReady();
+  const db = await getDb();
   const parsed = listChangeRequestsPagedInputSchema.parse(input);
-  const filters: SQL[] = [eq(busabaseChangeRequests.spaceId, getContextSpaceId())];
-  if (parsed.status && parsed.status.length > 0) {
-    filters.push(inArray(busabaseChangeRequests.status, parsed.status));
-  }
-  if (parsed.mine) {
-    filters.push(eq(busabaseChangeRequests.submittedBy, mineActorId()));
-  }
+  const filters = buildChangeRequestListFilters(db, parsed);
   if (parsed.cursor) {
     const decoded = decodeChangeRequestCursor(parsed.cursor);
     if (decoded) {
@@ -1354,13 +1425,7 @@ export const listChangeRequestsPage = async (
   await ensureReady();
   const db = await getDb();
   const parsed = listChangeRequestsPageInputSchema.parse(input);
-  const filters: SQL[] = [eq(busabaseChangeRequests.spaceId, getContextSpaceId())];
-  if (parsed.status && parsed.status.length > 0) {
-    filters.push(inArray(busabaseChangeRequests.status, parsed.status));
-  }
-  if (parsed.mine) {
-    filters.push(eq(busabaseChangeRequests.submittedBy, mineActorId()));
-  }
+  const filters = buildChangeRequestListFilters(db, parsed);
 
   const isManager = getContextIsSpaceManager();
   const visibleIds = isManager ? null : await listVisibleChangeRequestIds(filters);
@@ -1432,7 +1497,7 @@ type InboxCandidateRow = {
 
 const matchesInboxFilter = (
   row: InboxCandidateRow,
-  input: z.output<typeof listChangeRequestsPageInputSchema>,
+  input: z.output<typeof inboxSnapshotInputSchema>,
 ) => {
   if (input.status && input.status.length > 0 && !input.status.includes(row.status)) return false;
   return !input.mine || row.submittedBy === mineActorId();
@@ -1454,14 +1519,13 @@ const countInboxCandidateRows = (rows: InboxCandidateRow[]) => {
  * one light `{id,status,submittedBy}` scan feeds both the six badges and the
  * active tab page. Managers retain SQL aggregate + page queries.
  */
-export const getInboxSnapshot = async (
-  input?: z.input<typeof listChangeRequestsPageInputSchema>,
-) => {
+export const getInboxSnapshot = async (input?: z.input<typeof inboxSnapshotInputSchema>) => {
   const startedAt = performance.now();
   await ensureReady();
   const db = await getDb();
-  const parsed = listChangeRequestsPageInputSchema.parse(input);
+  const parsed = inboxSnapshotInputSchema.parse(input);
   const spaceId = getContextSpaceId();
+  const filters = buildChangeRequestListFilters(db, parsed);
   const managerPath = getContextIsSpaceManager();
   let candidateRows = 0;
   let visibleRows = 0;
@@ -1517,12 +1581,6 @@ export const getInboxSnapshot = async (
     counts = countInboxCandidateRows(allRows);
     matchingIds = allRows.filter((row) => matchesInboxFilter(row, parsed)).map((row) => row.id);
   }
-
-  const filters: SQL[] = [eq(busabaseChangeRequests.spaceId, spaceId)];
-  if (parsed.status && parsed.status.length > 0) {
-    filters.push(inArray(busabaseChangeRequests.status, parsed.status));
-  }
-  if (parsed.mine) filters.push(eq(busabaseChangeRequests.submittedBy, mineActorId()));
 
   const [countRow] = matchingIds
     ? [{ value: matchingIds.length }]

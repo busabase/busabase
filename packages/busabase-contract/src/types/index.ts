@@ -53,6 +53,17 @@ export type ChangeRequestStatus =
   | "conflict";
 export type OperationStatus = "pending" | "merged" | "archived" | "failed";
 export type ChangeRequestTargetType = "base" | "node";
+export type BusabaseSourceChannel =
+  | "web_ui"
+  | "browser"
+  | "openapi"
+  | "sdk"
+  | "cli"
+  | "mcp"
+  | "skill"
+  | "webhook"
+  | "automation"
+  | "import";
 export type ReviewVerdict = "approved" | "rejected";
 export type SearchResultKind = "record" | "change_request" | "base" | "file";
 export type CommentSubjectType = "record" | "change_request" | "operation" | "commit";
@@ -86,6 +97,13 @@ export interface UserRefVO {
   email: string | null;
   image: string | null;
   role?: string | null;
+}
+
+/** Public, privacy-safe attribution derived from internal source provenance. */
+export interface SourceAttributionVO {
+  displayName: string | null;
+  ownerName: string | null;
+  channel: BusabaseSourceChannel | null;
 }
 
 /**
@@ -244,6 +262,7 @@ export interface ChangeRequestVO {
   status: ChangeRequestStatus;
   submittedBy: string;
   submittedByUser?: UserRefVO | null;
+  sourceAttribution?: SourceAttributionVO | null;
   sourceMeta: Record<string, unknown>;
   reviewPolicySnapshot: Record<string, unknown>;
   mergeSummary: Record<string, unknown>;
@@ -392,6 +411,7 @@ export interface AuditEventVO {
   action: AuditAction;
   actorId: string;
   actor?: UserRefVO | null;
+  sourceAttribution?: SourceAttributionVO | null;
   baseId: string | null;
   recordId: string | null;
   changeRequestId: string | null;

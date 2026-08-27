@@ -238,6 +238,25 @@ const userRefSchema = z.object({
   role: z.string().nullable().optional(),
 });
 
+const sourceChannelSchema = z.enum([
+  "web_ui",
+  "browser",
+  "openapi",
+  "sdk",
+  "cli",
+  "mcp",
+  "skill",
+  "webhook",
+  "automation",
+  "import",
+]);
+
+const sourceAttributionSchema = z.object({
+  displayName: z.string().nullable(),
+  ownerName: z.string().nullable(),
+  channel: sourceChannelSchema.nullable(),
+});
+
 const commitSchema = z.object({
   id: z.string(),
   baseId: z.string().nullable(),
@@ -340,6 +359,7 @@ const changeRequestSchema = z.object({
   status: changeRequestStatusSchema,
   submittedBy: z.string(),
   submittedByUser: userRefSchema.nullable().optional().default(null),
+  sourceAttribution: sourceAttributionSchema.nullable().optional(),
   sourceMeta: z.record(z.string(), z.unknown()),
   reviewPolicySnapshot: z.record(z.string(), z.unknown()),
   mergeSummary: z.record(z.string(), z.unknown()),
@@ -448,6 +468,7 @@ const auditEventSchema = z.object({
   action: auditActionSchema,
   actorId: z.string(),
   actor: userRefSchema.nullable().optional().default(null),
+  sourceAttribution: sourceAttributionSchema.nullable().optional(),
   baseId: z.string().nullable(),
   recordId: z.string().nullable(),
   changeRequestId: z.string().nullable(),
@@ -652,7 +673,8 @@ const listByStatusInputSchema = z.object({
 // Keyset-paginated change request listing. `status` narrows to specific
 // statuses (e.g. the inbox "rejected" tab passes ["rejected","abandoned"]);
 // `mine` narrows to change requests submitted by the acting user (the
-// "created" tab). Both are resolved server-side against the request context.
+// "created" tab). `affectsNodeId` scopes the result to CRs whose main target or
+// any operation affects that workspace node, including Base-backed nodes.
 const listChangeRequestsPagedInputSchema = z
   .object({
     limit: z.coerce.number().int().min(1).max(100).optional().default(50),
@@ -660,6 +682,7 @@ const listChangeRequestsPagedInputSchema = z
     cursor: z.string().optional(),
     status: z.array(changeRequestStatusSchema).optional(),
     mine: z.boolean().optional(),
+    affectsNodeId: z.string().min(1).optional(),
   })
   .optional()
   .default({ limit: 50 });
@@ -673,13 +696,28 @@ const listChangeRequestsResponseSchema = z.object({
 // The inbox uses this so a reviewer can jump to a page of a 2,000-change-request
 // tab instead of clicking "load more" until they get there; the same filters as
 // the keyset listing apply.
+const changeRequestPageInputShape = {
+  page: z.coerce.number().int().min(1).optional().default(1),
+  pageSize: z.coerce.number().int().min(1).max(100).optional().default(50),
+  status: z.array(changeRequestStatusSchema).optional(),
+  mine: z.boolean().optional(),
+};
+
 const listChangeRequestsPageInputSchema = z
   .object({
-    page: z.coerce.number().int().min(1).optional().default(1),
-    pageSize: z.coerce.number().int().min(1).max(100).optional().default(50),
-    status: z.array(changeRequestStatusSchema).optional(),
-    mine: z.boolean().optional(),
+    ...changeRequestPageInputShape,
+    affectsNodeId: z.string().min(1).optional(),
   })
+  .optional()
+  .default({ page: 1, pageSize: 50 });
+
+// Deliberately NOT `listChangeRequestsPageInputSchema`: the inbox snapshot
+// returns whole-space tab badges alongside the active page, and the number under
+// the list has to equal the number on the tab. A resource-scope filter would
+// narrow the page but not the badges, so `affectsNodeId` is unavailable here —
+// a node-scoped query belongs on `list` / `listPage`, which return no badges.
+const inboxSnapshotInputSchema = z
+  .object(changeRequestPageInputShape)
   .optional()
   .default({ page: 1, pageSize: 50 });
 
@@ -797,6 +835,8 @@ export {
   authMemberSchema,
   authInfoSchema,
   userRefSchema,
+  sourceChannelSchema,
+  sourceAttributionSchema,
   nodeSchema,
   nodePrincipalSchema,
   nodeShareSchema,
@@ -836,5 +876,6 @@ export {
   listChangeRequestsResponseSchema,
   listChangeRequestsPageInputSchema,
   listChangeRequestsPageResponseSchema,
+  inboxSnapshotInputSchema,
   searchInputSchema,
 };

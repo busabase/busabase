@@ -17,14 +17,16 @@ import {
   statusAccent,
   statusTone,
 } from "../helpers/change-request";
-import { formatListTime, formatUserRefLabel } from "../helpers/format";
+import { formatListTime } from "../helpers/format";
 import { type InboxViewKey, inboxTabLabel } from "../helpers/inbox";
 import { useHrefWithCurrentSearch } from "../helpers/link-search";
+import { resolveSubmissionIdentity } from "../helpers/source-attribution";
 import type { BusabaseListGroup } from "../helpers/view-types";
 import { ActivityRow } from "./activity";
 import { EmptyState } from "./primitives";
 import { type RecordPageSize, RecordsPaginationBar } from "./records-pagination-bar";
 import { InboxListSkeleton } from "./skeletons";
+import { SourceAttributionInline } from "./source-attribution";
 
 function BusabaseList({
   empty,
@@ -431,9 +433,10 @@ function ReviewChangeRequestRow({ changeRequest }: { changeRequest: ChangeReques
   const riskHints = getChangeRequestRiskHints(changeRequest, messages);
   const statusLabel = changeRequestStatusLabel(changeRequest.status, messages);
   const message = getChangeRequestMessage(changeRequest);
-  const submitterLabel = formatUserRefLabel(
+  const submissionIdentity = resolveSubmissionIdentity(
     changeRequest.submittedByUser,
     changeRequest.submittedBy,
+    changeRequest.sourceAttribution,
     messages,
   );
   const href = useHrefWithCurrentSearch(`/inbox/${changeRequest.id}`);
@@ -474,11 +477,13 @@ function ReviewChangeRequestRow({ changeRequest }: { changeRequest: ChangeReques
           <span>·</span>
           <span>{getChangeRequestOperationLabel(changeRequest, messages)}</span>
           <span>·</span>
-          <span className="min-w-0 truncate">
-            {messages.review.submittedBy} {submitterLabel}
-          </span>
-          <span>·</span>
-          <span>{statusLabel}</span>
+          <SourceAttributionInline
+            channelLabel={submissionIdentity.channelLabel}
+            className="min-w-0 truncate"
+            credentialLabel={submissionIdentity.credentialLabel}
+            owner={submissionIdentity.ownerLabel}
+            showChannel={false}
+          />
         </div>
       </div>
       <div className="flex min-w-0 items-center justify-between gap-3 text-muted-foreground text-xs md:justify-end">

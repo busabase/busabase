@@ -27,6 +27,7 @@ import type {
   BaseVO,
   ChangeRequestMergeBatchResultVO,
   ChangeRequestReviewBatchResultVO,
+  ChangeRequestStatus,
   ChangeRequestVO,
   CommentSubjectType,
   CommentVO,
@@ -44,6 +45,12 @@ import type {
 
 export interface BusabaseListOptions {
   limit?: number;
+}
+
+export interface BusabaseChangeRequestListOptions extends BusabaseListOptions {
+  affectsNodeId?: string;
+  mine?: boolean;
+  status?: ChangeRequestStatus[];
 }
 
 export interface BusabaseRecordFieldTextFilter extends BusabaseListOptions {
@@ -108,7 +115,7 @@ export interface BusabaseDashboardApiClient {
   readSkillFile: (nodeId: string, filePath: string) => Promise<SkillReadFileVO>;
   getDrive: (nodeIdOrSlug: string) => Promise<DriveVO>;
   readDriveFile: (nodeId: string, filePath: string) => Promise<DriveReadFileVO>;
-  listChangeRequests: (options?: BusabaseListOptions) => Promise<ChangeRequestVO[]>;
+  listChangeRequests: (options?: BusabaseChangeRequestListOptions) => Promise<ChangeRequestVO[]>;
   getChangeRequest: (changeRequestId: string) => Promise<ChangeRequestVO>;
   listRecords: (options?: BusabaseListOptions) => Promise<RecordVO[]>;
   getRecord: (recordId: string) => Promise<RecordVO>;

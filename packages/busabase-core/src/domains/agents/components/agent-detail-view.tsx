@@ -8,8 +8,21 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";
 import type { AgentSessionVO } from "busabase-contract/domains/agents/types";
 import { Button } from "kui/button";
-import { ArrowLeft, Bot, MessageSquarePlus } from "lucide-react";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "kui/dropdown-menu";
+import { ArrowLeft, Bot, ChevronDown, MessageSquarePlus } from "lucide-react";
 import { useCallback, useMemo, useState } from "react";
+import {
+  AGENT_CHAT_TAB_TYPE,
+  type AgentChatTabPayload,
+} from "../../dashboard/components/side-panel-sources";
+import { registerSidePanelTab, type SidePanelTabProps } from "../../dashboard/side-panel-registry";
+import { useSidePanelStore } from "../../dashboard/store/side-panel-store";
 import { useAgentSession } from "../hooks/use-agent-session";
 import { AgentLoadingState, AgentQueryErrorState } from "./agent-query-state";
 import { TransportBadge } from "./transport-badge";
@@ -114,8 +127,14 @@ export function AgentDetailView({ orpc, agentSlug, onBack }: AgentDetailViewProp
   }
 
   return (
-    <div className="flex min-h-0 flex-1">
-      <aside className="flex w-64 shrink-0 flex-col gap-1 overflow-y-auto border-r p-3">
+    // A container, not a media query: this view is rendered both full-page and
+    // inside the side panel, whose width the user drags between 320 and 760px.
+    // The viewport says nothing useful about either.
+    <div className="@container/agent flex min-h-0 flex-1">
+      {/* The 256px session rail costs more than it earns once the container is
+          narrow — at a 420px panel it would leave 164px for the conversation.
+          Below @2xl it collapses into the header dropdown instead. */}
+      <aside className="hidden w-64 shrink-0 flex-col gap-1 overflow-y-auto border-r p-3 @2xl/agent:flex">
         <Button variant="ghost" size="sm" className="mb-2 justify-start" onClick={onBack}>
           <ArrowLeft className="size-4" />
           Agents
@@ -161,6 +180,60 @@ export function AgentDetailView({ orpc, agentSlug, onBack }: AgentDetailViewProp
         {active ? (
           <>
             <header className="flex items-center gap-2 border-b px-4 py-3">
+              {/* Everything the hidden rail offers, folded into one control.
+                  Only mounted while the rail is gone, so the two can never
+                  present the same actions twice. */}
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    // Icon-only, so it needs a name of its own — without one
+                    // this is an unlabelled button to a screen reader, and the
+                    // only route to sessions / New session / back at this width.
+                    aria-label="Agent menu"
+                    className="-ml-2 h-auto shrink-0 gap-1 px-2 py-1 @2xl/agent:hidden"
+                    size="sm"
+                    title="Agent menu"
+                    variant="ghost"
+                  >
+                    <Bot className="size-4" />
+                    <ChevronDown className="size-3 opacity-60" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start" className="w-60">
+                  <DropdownMenuItem onSelect={onBack}>
+                    <ArrowLeft className="size-4" />
+                    Agents
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    disabled={createSession.isPending}
+                    onSelect={() => createSession.mutate({ slug: agentSlug })}
+                  >
+                    <MessageSquarePlus className="size-4" />
+                    New session
+                  </DropdownMenuItem>
+                  {agentSessions.length > 0 ? (
+                    <>
+                      <DropdownMenuSeparator />
+                      <div className="max-h-64 overflow-y-auto">
+                        {agentSessions.map((session) => (
+                          <DropdownMenuItem
+                            key={session.id}
+                            onSelect={() => setSelectedSessionId(session.id)}
+                          >
+                            <span className="flex-1 truncate">
+                              {new Date(session.createdAt).toLocaleTimeString()}
+                            </span>
+                            <span className="shrink-0 text-muted-foreground text-xs">
+                              {STATUS_LABEL[session.status]}
+                            </span>
+                          </DropdownMenuItem>
+                        ))}
+                      </div>
+                    </>
+                  ) : null}
+                </DropdownMenuContent>
+              </DropdownMenu>
+
               <div className="min-w-0">
                 <span className="font-medium text-sm">{agentName}</span>
                 <AcpSessionMeta
@@ -230,3 +303,23 @@ export function AgentDetailView({ orpc, agentSlug, onBack }: AgentDetailViewProp
     </div>
   );
 }
+
+/**
+ * The same view, rendered inside the side panel.
+ *
+ * Deliberately not a second implementation: `AgentDetailView` adapts to its
+ * container, so a 420px panel gets the header dropdown and a full page gets
+ * the session rail, from one component. "Back" closes the tab rather than
+ * navigating — inside a panel, backing out of an agent is dismissing it.
+ */
+function AgentChatSidePanelTab({ orpc, payload }: SidePanelTabProps) {
+  const { agentSlug } = payload as AgentChatTabPayload;
+  return (
+    <AgentDetailView
+      agentSlug={agentSlug}
+      onBack={() => useSidePanelStore.getState().closeTab(`agent-${agentSlug}`)}
+      orpc={orpc}
+    />
+  );
+}
+registerSidePanelTab(AGENT_CHAT_TAB_TYPE, AgentChatSidePanelTab);

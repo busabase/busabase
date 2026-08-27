@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";
+import type { NodeType } from "busabase-contract/domains";
 import type { NodeSearchResultVO, SearchResultKind, SearchResultVO } from "busabase-contract/types";
 import { Kbd } from "kui/kbd";
 import { Tabs, TabsList, TabsTrigger } from "kui/tabs";
@@ -60,6 +61,13 @@ interface DisplayResult {
   body?: string;
   eyebrow?: string;
   icon: ReactNode;
+  /**
+   * Set only for results that are nodes — i.e. the Recent tab. Content results
+   * (records, files, change requests) are things *inside* nodes and have no
+   * node type of their own, which is exactly why a caller wanting to pin
+   * something has to check this rather than assume every result is pinnable.
+   */
+  nodeType?: NodeType;
 }
 
 const searchResultToDisplay = (result: SearchResultVO): DisplayResult => ({
@@ -81,6 +89,7 @@ const knownNodeToDisplay = (node: KnownNode): DisplayResult => {
     title: node.name,
     eyebrow: node.slug,
     icon: <Icon className="size-4" />,
+    nodeType: node.type,
   };
 };
 
@@ -97,11 +106,20 @@ export function SearchDialog({
   orpc,
   onClose,
   open,
+  onSelect,
 }: {
   nodeCache: KnownNodeCache;
   orpc: BusabaseQueryUtils;
   onClose: () => void;
   open: boolean;
+  /**
+   * Replaces navigation for this opening of the dialog. The side panel uses it
+   * to pin the chosen result instead of going to it. Because the dialog is a
+   * singleton, this is a *mode* the opener sets — whoever passes it is
+   * responsible for clearing it when the dialog closes, or the next Cmd-K
+   * would silently keep pinning.
+   */
+  onSelect?: (result: DisplayResult) => void;
 }) {
   const messages = useCoreI18n();
   const inputRef = useRef<HTMLInputElement | null>(null);
@@ -305,9 +323,16 @@ export function SearchDialog({
   const select = useCallback(
     (result: DisplayResult) => {
       onClose();
+      // Both the Enter key and the mouse funnel through here, so overriding
+      // this one function is enough to redirect every selection path — that
+      // parity is deliberate and worth preserving.
+      if (onSelect) {
+        onSelect(result);
+        return;
+      }
       setLocation(addDemoParam(mergeSearchIntoHref(result.href, currentSearch)));
     },
-    [onClose, setLocation, addDemoParam, currentSearch],
+    [onClose, onSelect, setLocation, addDemoParam, currentSearch],
   );
 
   const handleKeyDown = useCallback(

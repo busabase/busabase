@@ -7,7 +7,7 @@ import { useCoreI18n } from "../../../i18n";
 import { AppGalleryGrid } from "./app-gallery-card";
 
 /**
- * Gallery grid of every AirApp in the current space — the "Apps" tab reached
+ * Gallery grid of every AirApp in the current space — the "App Library" reached
  * from the Space Selector menu, analogous to `AgentsListView` for connected
  * agents. Unlike Agents, there is no "Add app" affordance here: creating an
  * AirApp goes through the regular "New" node-creation flow, not this view.
@@ -22,9 +22,7 @@ export function AppsListView({ orpc }: { orpc: BusabaseQueryUtils }) {
       <header className="flex items-center justify-between border-b px-6 py-4">
         <div>
           <h1 className="font-medium text-lg">{messages.nav.apps}</h1>
-          <p className="text-muted-foreground text-sm">
-            AirApps in this space — mini apps built on Busabase data and workflows.
-          </p>
+          <p className="text-muted-foreground text-sm">{messages.airapp.librarySubtitle}</p>
         </div>
       </header>
 
@@ -46,9 +44,9 @@ export function AppsListView({ orpc }: { orpc: BusabaseQueryUtils }) {
           <div className="flex flex-col items-center justify-center gap-3 py-16 text-center">
             <LayoutGrid className="size-8 text-muted-foreground" />
             <div>
-              <h2 className="font-medium">No apps yet</h2>
+              <h2 className="font-medium">{messages.airapp.libraryEmptyTitle}</h2>
               <p className="mt-1 text-muted-foreground text-sm">
-                AirApps you create in this space will show up here.
+                {messages.airapp.libraryEmptyBody}
               </p>
             </div>
           </div>

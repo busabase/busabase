@@ -26,6 +26,9 @@ export const EmbedNodeTypeSchema = z.enum([
 ]);
 export type EmbedNodeType = z.infer<typeof EmbedNodeTypeSchema>;
 
+export const EmbedTargetTypeSchema = z.enum(["node", "change-request", "record-detail"]);
+export type EmbedTargetType = z.infer<typeof EmbedTargetTypeSchema>;
+
 export const EmbedFrameModeSchema = z.enum(["anywhere", "origins", "top-level-only"]);
 export type EmbedFrameMode = z.infer<typeof EmbedFrameModeSchema>;
 
@@ -96,7 +99,8 @@ export const EmbedFramePolicyVOSchema = z
 export type EmbedFramePolicyVO = z.infer<typeof EmbedFramePolicyVOSchema>;
 
 export const CreateEmbedLinkInputSchema = z.object({
-  nodeId: z.string().min(1),
+  type: EmbedTargetTypeSchema,
+  typeId: z.string().min(1),
   expiresInMinutes: z
     .number()
     .int()
@@ -112,7 +116,7 @@ export const CreateEmbedLinkInputSchema = z.object({
 export type CreateEmbedLinkDTO = z.infer<typeof CreateEmbedLinkInputSchema>;
 
 export const ListEmbedLinksInputSchema = z
-  .object({ nodeId: z.string().min(1).optional() })
+  .object({ type: EmbedTargetTypeSchema.optional(), typeId: z.string().min(1).optional() })
   .optional()
   .default({});
 export type ListEmbedLinksDTO = z.infer<typeof ListEmbedLinksInputSchema>;
@@ -122,9 +126,10 @@ export type RevokeEmbedLinkDTO = z.infer<typeof RevokeEmbedLinkInputSchema>;
 
 export const EmbedLinkVOSchema = z.object({
   id: z.string(),
-  nodeId: z.string(),
-  nodeName: z.string(),
-  nodeType: EmbedNodeTypeSchema,
+  type: EmbedTargetTypeSchema,
+  typeId: z.string(),
+  targetName: z.string(),
+  nodeType: EmbedNodeTypeSchema.nullable(),
   createdAt: z.string().datetime(),
   expiresAt: z.string().datetime(),
   revokedAt: z.string().datetime().nullable(),

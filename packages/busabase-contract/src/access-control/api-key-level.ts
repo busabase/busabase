@@ -207,6 +207,9 @@ export const PROCEDURE_PERMISSION_POLICY: Record<string, ProcedurePermissionPoli
   "nodes.share.get": node("manage"),
   "nodes.share.set": node("manage"),
   "nodes.share.disable": node("manage"),
+  "embedLinks.create": workspace("manage"),
+  "embedLinks.list": workspace("manage"),
+  "embedLinks.revoke": workspace("manage"),
 
   "nodes.listFavorites": node("read"),
   "auditEvents.list": node("read"),

@@ -19,6 +19,7 @@ import {
 } from "../helpers/activity-events";
 import { formatDetailTime, formatListTime } from "../helpers/format";
 import { InboxListSkeleton } from "./skeletons";
+import { SourceAttributionInline } from "./source-attribution";
 
 export type { ActivityEvent, ActivityEventTone } from "../helpers/activity-events";
 
@@ -91,9 +92,12 @@ function ActivityProvenanceByline({ event }: { event: ActivityEvent }) {
   }
 
   return (
-    <div className="mt-1 min-w-0 truncate text-muted-foreground text-xs leading-5">
-      {event.provenance.byline}
-    </div>
+    <SourceAttributionInline
+      channelLabel={event.provenance.channelLabel}
+      className="mt-1 text-muted-foreground text-xs leading-5"
+      credentialLabel={event.provenance.credentialLabel}
+      leadingVia
+    />
   );
 }
 
@@ -117,9 +121,10 @@ export function ActivityRow({ event }: { event: ActivityEvent }) {
           <div className="flex min-w-0 items-start gap-2">
             <div className="min-w-0 flex-1">
               <div className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1">
-                <span className="min-w-0 max-w-full truncate font-semibold text-foreground">
-                  {event.actorName}
-                </span>
+                <SourceAttributionInline
+                  className="max-w-full font-semibold text-foreground"
+                  owner={event.actorName}
+                />
                 <span className="text-muted-foreground">{event.actionLabel}</span>
               </div>
             </div>

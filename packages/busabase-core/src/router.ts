@@ -1,6 +1,6 @@
 import { enhanceRouter, implement, ORPCError, os } from "@orpc/server";
 import { busabaseContract } from "busabase-contract/contract/busabase";
-import { getContextSpaceId, isAnonymousVisitor, resolveActorId } from "./context";
+import { getContextSpaceId, isEmbedVisitor, isPublicVisitor, resolveActorId } from "./context";
 import { getDb } from "./db";
 import { agentsRouter } from "./domains/agents/router";
 import { airappRouter } from "./domains/airapp/router";
@@ -12,6 +12,7 @@ import {
 import { baseRouter, recordRouter, viewRouter } from "./domains/base/router";
 import { docRouter } from "./domains/doc/router";
 import { dumpRouter } from "./domains/dump/router";
+import { embedLinksRouter } from "./domains/embed-links/router";
 import { fileRouter } from "./domains/file-node/router";
 import { fileTreeRouter } from "./domains/filetree/router";
 import { formRouter } from "./domains/form/router";
@@ -22,7 +23,11 @@ import { templatesRouter } from "./domains/templates/router";
 import { vaultRouter } from "./domains/vault/router";
 import { webhookRouter } from "./domains/webhook/router";
 import { listActivityPaged } from "./logic/activity";
-import { anonymousAccessKindFor, denyAnonymousProcedure } from "./logic/anonymous-allowlist";
+import {
+  anonymousAccessKindFor,
+  denyPublicProcedure,
+  isEmbedProcedureAllowed,
+} from "./logic/anonymous-allowlist";
 import { grepUnified } from "./logic/grep";
 import { subscribeBusabaseLiveEvents } from "./logic/live-events";
 import {
@@ -102,6 +107,7 @@ const busabaseRouterImpl = busabase.router({
   },
   search: busabase.search.handler(async ({ input }) => searchBusabase(input)),
   grep: busabase.grep.handler(async ({ input }) => grepUnified(input)),
+  embedLinks: embedLinksRouter,
   nodes: {
     list: busabase.nodes.list.handler(async ({ input }) => {
       // `types` opts into the flat summary projection that replaced the four
@@ -302,7 +308,8 @@ const readNodeId = (input: unknown): string | null => {
 };
 
 /**
- * Per-procedure default-deny gate for anonymous (public-link) visitors.
+ * Per-procedure default-deny gate for LINK-authorized visitors — both the
+ * guest arriving through a public node share and the holder of an Embed Link.
  *
  * It is attached to EVERY procedure rather than checked once at the HTTP
  * boundary because the oRPC batch endpoint (`/api/rpc/__batch__`) collapses
@@ -310,14 +317,25 @@ const readNodeId = (input: unknown): string | null => {
  * be bypassed by simply batching the call. Middleware is the only layer every
  * individual call provably passes through.
  *
- * It is a strict no-op for member requests (`isAnonymousVisitor()` is false),
- * so member-facing behaviour is unchanged; the anonymous branch can only ever
+ * It is a strict no-op for member requests (`isPublicVisitor()` is false), so
+ * member-facing behaviour is unchanged; both public branches can only ever
  * remove access, never grant it.
  */
-const anonymousSurfaceGuard = os.middleware(async ({ next, path }, input) => {
+const publicSurfaceGuard = os.middleware(async ({ next, path }, input) => {
   // Members (and the open-source single-user host, which sets no visitorKind)
   // keep exactly the behaviour they had before this gate existed.
-  if (!isAnonymousVisitor()) {
+  if (!isPublicVisitor()) {
+    return next();
+  }
+
+  // An Embed Link holder is not a guest: it reads through the link creator's
+  // own grants, so it gets its own positive list rather than the share-scoped
+  // one. Same default-deny shape, same reason — most of this router is
+  // space-scoped with no node ACL behind it.
+  if (isEmbedVisitor()) {
+    if (!isEmbedProcedureAllowed(path)) {
+      denyPublicProcedure(path);
+    }
     return next();
   }
 
@@ -326,7 +344,7 @@ const anonymousSurfaceGuard = os.middleware(async ({ next, path }, input) => {
   // procedure added to the router after this file was last touched — fails
   // closed rather than inheriting anonymous access by accident.
   if (kind === null) {
-    denyAnonymousProcedure(path);
+    denyPublicProcedure(path);
   }
 
   if (kind === "submit") {
@@ -339,7 +357,7 @@ const anonymousSurfaceGuard = os.middleware(async ({ next, path }, input) => {
     // it actually resolved. See `getPublicScopeOfNodeRef`.
     const nodeRef = readNodeId(input);
     if (!nodeRef || (await getPublicScopeOfNodeRef(nodeRef, "form")) !== "submit") {
-      denyAnonymousProcedure(path);
+      denyPublicProcedure(path);
     }
   }
 
@@ -355,6 +373,6 @@ const anonymousSurfaceGuard = os.middleware(async ({ next, path }, input) => {
  */
 export const busabaseRouter = enhanceRouter(busabaseRouterImpl, {
   errorMap: {},
-  middlewares: [anonymousSurfaceGuard],
+  middlewares: [publicSurfaceGuard],
   dedupeLeadingMiddlewares: false,
 });

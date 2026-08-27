@@ -51,6 +51,7 @@ import { zhCnScenario } from "../demo/scenarios/zh-cn";
 import { getPrimaryField } from "../domains/base/utils/primary-field";
 import { type DocLinesResult, sliceDocLinesRange, splitDocLines } from "../domains/doc/handlers";
 import { isSearchableNodeType, NODE_CONTENT_ADAPTERS } from "./node-content";
+import { toPublicAuditMetadata, toPublicSourceMetadata } from "./source-attribution";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Stateless demo read/write layer. Every function reads the shared seed
@@ -273,27 +274,41 @@ export const demoGetRecordByField = (input: {
   return record ?? null;
 };
 
-export const demoListChangeRequests = (): ChangeRequestVO[] => dataset().changeRequests;
+const toPublicDemoChangeRequest = (changeRequest: ChangeRequestVO): ChangeRequestVO => {
+  const source = toPublicSourceMetadata(changeRequest.sourceMeta);
+  return { ...changeRequest, ...source };
+};
+
+const toPublicDemoAuditEvent = (event: AuditEventVO): AuditEventVO => {
+  const source = toPublicAuditMetadata(event.metadata);
+  return { ...event, ...source };
+};
+
+export const demoListChangeRequests = (): ChangeRequestVO[] =>
+  dataset().changeRequests.map(toPublicDemoChangeRequest);
 
 export const demoGetChangeRequest = (changeRequestId: string): ChangeRequestVO => {
   const changeRequest = dataset().changeRequests.find((item) => item.id === changeRequestId);
   if (!changeRequest) {
     throw notFound("ChangeRequest", changeRequestId);
   }
-  return changeRequest;
+  return toPublicDemoChangeRequest(changeRequest);
 };
 
 export const demoListRecordChangeRequests = (recordId: string): ChangeRequestVO[] =>
-  dataset().changeRequests.filter((changeRequest) =>
-    changeRequest.operations.some(
-      (operation) =>
-        operation.targetRecordId === recordId ||
-        operation.sourceRecordId === recordId ||
-        operation.mergedRecordId === recordId,
-    ),
-  );
+  dataset()
+    .changeRequests.filter((changeRequest) =>
+      changeRequest.operations.some(
+        (operation) =>
+          operation.targetRecordId === recordId ||
+          operation.sourceRecordId === recordId ||
+          operation.mergedRecordId === recordId,
+      ),
+    )
+    .map(toPublicDemoChangeRequest);
 
-export const demoListAuditEvents = (): AuditEventVO[] => dataset().auditEvents;
+export const demoListAuditEvents = (): AuditEventVO[] =>
+  dataset().auditEvents.map(toPublicDemoAuditEvent);
 
 export const demoListComments = (input: {
   subjectType: CommentSubjectType;
@@ -574,7 +589,7 @@ export const demoListAgentTasks = (): AgentTaskVO[] =>
   dataset()
     .changeRequests.filter((changeRequest) => changeRequest.status === "changes_requested")
     .map((changeRequest) => ({
-      changeRequest,
+      changeRequest: toPublicDemoChangeRequest(changeRequest),
       trigger: "changes_requested" as const,
       reviewReason: null,
       aiComments: [],
@@ -890,7 +905,7 @@ const synthChangeRequest = (
 ): ChangeRequestVO => {
   const createdAt = nowIso();
   const base = dataset().bases.find((item) => item.id === baseId) ?? null;
-  return {
+  return toPublicDemoChangeRequest({
     id: demoId("qdf"),
     baseId,
     targetType: "base",
@@ -911,7 +926,7 @@ const synthChangeRequest = (
     primaryOperation: operations[0] ?? null,
     operationCount: operations.length,
     reviews: [],
-  };
+  });
 };
 
 export const demoReviewChangeRequest = (
@@ -1032,7 +1047,11 @@ export const demoReviseOperation = (operationId: string): ChangeRequestVO => {
   if (!changeRequest) {
     throw notFound("Operation", operationId);
   }
-  return { ...changeRequest, status: "in_review", updatedAt: nowIso() };
+  return toPublicDemoChangeRequest({
+    ...changeRequest,
+    status: "in_review",
+    updatedAt: nowIso(),
+  });
 };
 
 export const demoCreateAuditEvent = (input: {
@@ -1044,18 +1063,19 @@ export const demoCreateAuditEvent = (input: {
   operationId?: string | null;
   commitId?: string | null;
   metadata?: Record<string, unknown>;
-}): AuditEventVO => ({
-  id: demoId("qae"),
-  action: input.action,
-  actorId: input.actorId ?? "local-viewer",
-  baseId: input.baseId ?? null,
-  recordId: input.recordId ?? null,
-  changeRequestId: input.changeRequestId ?? null,
-  operationId: input.operationId ?? null,
-  commitId: input.commitId ?? null,
-  metadata: input.metadata ?? {},
-  createdAt: nowIso(),
-});
+}): AuditEventVO =>
+  toPublicDemoAuditEvent({
+    id: demoId("qae"),
+    action: input.action,
+    actorId: input.actorId ?? "local-viewer",
+    baseId: input.baseId ?? null,
+    recordId: input.recordId ?? null,
+    changeRequestId: input.changeRequestId ?? null,
+    operationId: input.operationId ?? null,
+    commitId: input.commitId ?? null,
+    metadata: input.metadata ?? {},
+    createdAt: nowIso(),
+  });
 
 export const demoCreateComment = (input: {
   subjectType: CommentVO["subjectType"];
