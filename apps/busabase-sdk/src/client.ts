@@ -2,6 +2,7 @@ import { createORPCClient, ORPCError } from "@orpc/client";
 import type { ContractRouterClient } from "@orpc/contract";
 import { OpenAPILink } from "@orpc/openapi-client/fetch";
 import { type CloudContract, cloudContract } from "busabase-contract/contract/cloud";
+import type { BusabaseSourceChannel } from "busabase-contract/types";
 import { normalizeBaseUrl } from "./url.js";
 
 export { normalizeBaseUrl };
@@ -48,6 +49,8 @@ export interface BusabaseConfig {
    * accepts that only when the token has a single unambiguous space.
    */
   spaceId?: string;
+  /** Source channel recorded in Change Request and audit provenance. Defaults to `sdk`. */
+  sourceChannel?: BusabaseSourceChannel;
   /**
    * Origin the *web app* is served from, for building human-openable links (see
    * {@link Busabase.nodeUrl}). Falls back to `BUSABASE_WEB_URL`, then to
@@ -78,6 +81,7 @@ export interface ResolvedConfig {
   webUrl: string;
   apiKey?: string;
   spaceId?: string;
+  sourceChannel?: BusabaseSourceChannel;
   headers?: BusabaseConfig["headers"];
   fetch?: typeof fetch;
 }
@@ -101,6 +105,7 @@ export function resolveConfig(config: BusabaseConfig = {}): ResolvedConfig {
     webUrl: normalizeBaseUrl(config.webUrl ?? env("BUSABASE_WEB_URL") ?? baseUrl),
     apiKey: config.apiKey ?? env("BUSABASE_API_KEY"),
     spaceId: config.spaceId ?? env("BUSABASE_SPACE_ID"),
+    sourceChannel: config.sourceChannel ?? "sdk",
     headers: config.headers,
     fetch: config.fetch,
   };
@@ -186,6 +191,7 @@ export function createBusabaseClient(config: BusabaseConfig = {}): BusabaseClien
       return {
         ...(resolved.apiKey ? { authorization: `Bearer ${resolved.apiKey}` } : {}),
         ...(resolved.spaceId ? { "x-busabase-space": resolved.spaceId } : {}),
+        "x-busabase-channel": resolved.sourceChannel ?? "sdk",
         ...extra,
       };
     },

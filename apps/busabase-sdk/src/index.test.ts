@@ -85,6 +85,19 @@ describe("Busabase namespaces", () => {
     expect(new URL(requests[0]?.url ?? "").search).toContain("doc");
   });
 
+  it.each(["node", "change-request", "record-detail"] as const)(
+    "creates a polymorphic %s embed target",
+    async (type) => {
+      const { fetchImpl, requests } = okFetch();
+      const bb = new Busabase({ baseUrl: "http://localhost:15419", fetch: fetchImpl });
+
+      await bb.embedLinks.create({ type, typeId: "target_1" });
+
+      expect(new URL(requests[0]?.url ?? "").pathname).toBe("/api/v1/embed-links");
+      expect(await requests[0]?.clone().json()).toMatchObject({ type, typeId: "target_1" });
+    },
+  );
+
   it("routes asset upload helpers through /assets, not /attachments", async () => {
     const requests: Request[] = [];
     const fetchImpl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {

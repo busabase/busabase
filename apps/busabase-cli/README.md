@@ -169,6 +169,7 @@ busabase-cli records get-by-field --base-id bse_123 --field-slug slug --value-te
 busabase-cli records by-field-text --field-slug status --value-text open
 busabase-cli assets upload --file ./cover.png --context record-field --output json
 busabase-cli change-requests list
+busabase-cli change-requests list --affects-node-id nod_123 --status-json '["in_review","approved","conflict"]' --limit 1
 busabase-cli change-requests review --change-request-id cr_123 --verdict approved --reason "LGTM"
 busabase-cli change-requests review --change-request-id cr_124 --verdict rejected --reason "Needs revision" # request changes
 busabase-cli change-requests close --change-request-id cr_125 --reason "Wrong proposal"                  # terminal close

@@ -109,6 +109,7 @@ function resolveConfig(opts: OptionValues): ResolvedConfig {
       (opts.spaceId as string | undefined) ??
       process.env.BUSABASE_SPACE_ID ??
       file.BUSABASE_SPACE_ID,
+    sourceChannel: "cli",
     output: (opts.output as OutputFormat | undefined) ?? configuredOutput() ?? "text",
     // One wrapper serves the typed client (`createBusabaseClient` takes a
     // `fetch`) and `rawFetch`, so health / openapi / `api` retry the same way
@@ -341,6 +342,7 @@ async function rawFetch(
       ...(body !== undefined ? { "content-type": "application/json" } : {}),
       ...(config.apiKey ? { authorization: `Bearer ${config.apiKey}` } : {}),
       ...(config.spaceId ? { "x-busabase-space": config.spaceId } : {}),
+      "x-busabase-channel": "cli",
     },
     body: body !== undefined ? JSON.stringify(body) : undefined,
   });

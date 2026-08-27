@@ -154,6 +154,18 @@ describe("createBusabaseClient request assembly", () => {
     await client.bases.list({});
     expect(requests[0]?.headers.get("authorization")).toBe("Bearer sk_secret");
     expect(requests[0]?.headers.get("x-busabase-space")).toBe("spc_42");
+    expect(requests[0]?.headers.get("x-busabase-channel")).toBe("sdk");
+  });
+
+  it("lets callers override the default SDK source channel", async () => {
+    const { fetchImpl, requests } = captureFetch();
+    const client = createBusabaseClient({
+      baseUrl: "https://busabase.com",
+      fetch: fetchImpl,
+      sourceChannel: "automation",
+    });
+    await client.bases.list({});
+    expect(requests[0]?.headers.get("x-busabase-channel")).toBe("automation");
   });
 
   it("sends no auth header for an open local server", async () => {
@@ -169,12 +181,17 @@ describe("createBusabaseClient request assembly", () => {
     const client = createBusabaseClient({
       baseUrl: "https://busabase.com",
       apiKey: "sk_secret",
-      headers: { "x-trace-id": "abc", authorization: "Bearer override" },
+      headers: {
+        "x-trace-id": "abc",
+        authorization: "Bearer override",
+        "x-busabase-channel": "webhook",
+      },
       fetch: fetchImpl,
     });
     await client.bases.list({});
     expect(requests[0]?.headers.get("x-trace-id")).toBe("abc");
     expect(requests[0]?.headers.get("authorization")).toBe("Bearer override");
+    expect(requests[0]?.headers.get("x-busabase-channel")).toBe("webhook");
   });
 
   it("supports an async header factory", async () => {

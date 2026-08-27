@@ -244,7 +244,7 @@ export class Busabase {
    * This is the *authenticated*, durable link: it never expires, but the reader
    * needs a session unless the node has public sharing enabled. For a no-login
    * link, mint a Cloud embed link instead —
-   * `bb.embedLinks.create({ nodeId })` returns `{ url, iframeUrl }`.
+   * `bb.embedLinks.create({ type: "node", typeId: nodeId })` returns `{ url, iframeUrl }`.
    *
    * @example
    * ```ts
