@@ -1,7 +1,7 @@
 {
   "name": "busabase-core",
   "description": "Shared Busabase open-core protocol, local store, API helpers, and dashboard components.",
-  "version": "0.19.2",
+  "version": "0.20.0",
   "private": true,
   "type": "module",
   "exports": {
@@ -32,6 +32,10 @@
     "./logic/node-acl": {
       "types": "./src/logic/node-acl.ts",
       "default": "./src/logic/node-acl.ts"
+    },
+    "./logic/cr-lifecycle": {
+      "types": "./src/logic/cr-lifecycle.ts",
+      "default": "./src/logic/cr-lifecycle.ts"
     },
     "./logic/demo-store": {
       "types": "./src/logic/demo-store.ts",
@@ -113,6 +117,50 @@
       "types": "./src/domains/doc/components/index.ts",
       "default": "./src/domains/doc/components/index.ts"
     },
+    "./domains/embed-links/logic": {
+      "types": "./src/domains/embed-links/logic.ts",
+      "default": "./src/domains/embed-links/logic.ts"
+    },
+    "./domains/embed-links/bridge": {
+      "types": "./src/domains/embed-links/bridge.ts",
+      "default": "./src/domains/embed-links/bridge.ts"
+    },
+    "./domains/embed-links/rpc-capability": {
+      "types": "./src/domains/embed-links/rpc-capability.ts",
+      "default": "./src/domains/embed-links/rpc-capability.ts"
+    },
+    "./domains/embed-links/route": {
+      "types": "./src/domains/embed-links/route.ts",
+      "default": "./src/domains/embed-links/route.ts"
+    },
+    "./domains/embed-links/detail-page": {
+      "types": "./src/domains/embed-links/detail-page.ts",
+      "default": "./src/domains/embed-links/detail-page.ts"
+    },
+    "./domains/embed-links/capability": {
+      "types": "./src/domains/embed-links/capability.ts",
+      "default": "./src/domains/embed-links/capability.ts"
+    },
+    "./domains/embed-links/types": {
+      "types": "./src/domains/embed-links/types.ts",
+      "default": "./src/domains/embed-links/types.ts"
+    },
+    "./domains/embed-links/embed-document": {
+      "types": "./src/domains/embed-links/embed-document.ts",
+      "default": "./src/domains/embed-links/embed-document.ts"
+    },
+    "./domains/embed-links/runtime-router": {
+      "types": "./src/domains/embed-links/runtime-router.ts",
+      "default": "./src/domains/embed-links/runtime-router.ts"
+    },
+    "./domains/embed-links/airapp-runtime": {
+      "types": "./src/domains/embed-links/components/airapp-embed-runtime.tsx",
+      "default": "./src/domains/embed-links/components/airapp-embed-runtime.tsx"
+    },
+    "./domains/embed-links/public-detail-view": {
+      "types": "./src/domains/embed-links/components/public-embed-detail-view.tsx",
+      "default": "./src/domains/embed-links/components/public-embed-detail-view.tsx"
+    },
     "./domains/attachments/logic": {
       "types": "./src/domains/attachments/logic/attachments-logic.ts",
       "default": "./src/domains/attachments/logic/attachments-logic.ts"
@@ -124,6 +172,10 @@
     "./domains/templates/components/template-card-summary": {
       "types": "./src/domains/templates/components/template-card-summary.tsx",
       "default": "./src/domains/templates/components/template-card-summary.tsx"
+    },
+    "./domains/templates/components/template-detail-content": {
+      "types": "./src/domains/templates/components/template-detail-content.tsx",
+      "default": "./src/domains/templates/components/template-detail-content.tsx"
     },
     "./domains/file-node/handlers": {
       "types": "./src/domains/file-node/handlers.ts",
@@ -335,6 +387,7 @@
     "ignore": "^7.0.5",
     "kui": "workspace:*",
     "lucide-react": "^0.556.0",
+    "micromark": "^4.0.2",
     "open-domains": "workspace:*",
     "openlib": "workspace:*",
     "postgres": "^3.4.6",
