@@ -8,8 +8,11 @@ import { useEffect, useMemo } from "react";
 import type { z } from "zod";
 import {
   createLiveInvalidationBatcher,
+  type LiveInvalidationBatch,
   type LiveInvalidationTarget,
+  NODE_METADATA_INVALIDATION_WINDOW_MS,
 } from "../helpers/live-invalidation";
+import { createSingleFlightQueryInvalidator } from "../helpers/single-flight-query-invalidation";
 import { createWorkspaceRevalidationGate } from "../helpers/workspace-revalidation";
 
 type BusabaseLiveEvent = z.infer<typeof liveEventSchema>;
@@ -210,17 +213,32 @@ export function useBusabaseLiveSync({
       }
     };
 
-    const invalidationBatcher = createLiveInvalidationBatcher((batch) => {
+    const inboxSnapshotInvalidator = createSingleFlightQueryInvalidator(
+      queryClient,
+      stableListKeys.inboxSnapshot,
+    );
+
+    const flushInvalidations = (batch: LiveInvalidationBatch) => {
       for (const target of batch.targets) {
+        if (target === "inboxSnapshot") {
+          inboxSnapshotInvalidator.request();
+          continue;
+        }
         void queryClient.invalidateQueries({ queryKey: keyForTarget(target) });
       }
       for (const baseId of batch.baseIds) invalidateBaseScope(baseId);
-    });
+    };
+    const invalidationBatcher = createLiveInvalidationBatcher(flushInvalidations);
+    const metadataInvalidationBatcher = createLiveInvalidationBatcher(
+      flushInvalidations,
+      NODE_METADATA_INVALIDATION_WINDOW_MS,
+    );
 
     const invalidateWorkspace = () => {
       // A reconnect/focus reconciliation is a superset of any queued event
       // batch. Cancel it so the timer cannot repeat the expensive refresh.
       invalidationBatcher.cancel();
+      metadataInvalidationBatcher.cancel();
       void queryClient.invalidateQueries({ queryKey: stableListKeys.nodes });
       void queryClient.invalidateQueries({ queryKey: stableListKeys.nodeDetail });
       void queryClient.invalidateQueries({ queryKey: stableListKeys.archivedNodes });
@@ -231,7 +249,7 @@ export function useBusabaseLiveSync({
       void queryClient.invalidateQueries({ queryKey: stableListKeys.recordsCount });
       void queryClient.invalidateQueries({ queryKey: stableListKeys.changeRequests });
       void queryClient.invalidateQueries({ queryKey: stableListKeys.changeRequestsPaged });
-      void queryClient.invalidateQueries({ queryKey: stableListKeys.inboxSnapshot });
+      inboxSnapshotInvalidator.request();
       void queryClient.invalidateQueries({ queryKey: stableListKeys.changeRequestCounts });
       void queryClient.invalidateQueries({ queryKey: stableListKeys.auditEvents });
       if (activeBaseId) {
@@ -246,7 +264,11 @@ export function useBusabaseLiveSync({
       if (event.kind === "change_request.pending_review" && event.actorId !== currentUserId) {
         notifyPendingReview(notificationTitle, notificationBody);
       }
-      invalidationBatcher.push(event);
+      if (event.kind === "node.metadata_updated") {
+        metadataInvalidationBatcher.push(event);
+      } else {
+        invalidationBatcher.push(event);
+      }
     };
 
     const connect = () => {
@@ -316,6 +338,8 @@ export function useBusabaseLiveSync({
         clearTimeout(retryTimer);
       }
       invalidationBatcher.cancel();
+      metadataInvalidationBatcher.cancel();
+      inboxSnapshotInvalidator.cancel();
       abortController?.abort();
       void unsubscribe?.().catch(() => undefined);
       document.removeEventListener("visibilitychange", handleVisibilityRefresh);

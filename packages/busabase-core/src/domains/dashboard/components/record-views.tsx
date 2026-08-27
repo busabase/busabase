@@ -166,6 +166,7 @@ export function RecordDetailView({
   const messages = useCoreI18n();
   const locale = useCoreLocale();
   const currentSearch = useSearch();
+  const isAnon = useIsAnonymousVisitor();
   const [, setLocation] = useLocation();
   const [panelOpen, setPanelOpen] = useState(true);
   const [deleteAction, setDeleteAction] = useState<"change_request" | "merge" | null>(null);
@@ -177,7 +178,7 @@ export function RecordDetailView({
   // Query instead of a useEffect + setState fetch — it caches and refetches on
   // its own and exposes data/error/loading directly.
   const historyQuery = useQuery({
-    enabled: Boolean(record),
+    enabled: Boolean(record) && !isAnon,
     queryFn: () => client.listRecordChangeRequests(record?.id ?? ""),
     queryKey: ["busabase", "record-change-requests", record?.id],
   });
@@ -207,181 +208,199 @@ export function RecordDetailView({
       className="h-full min-h-0 w-full min-w-0 flex-1 overflow-auto overflow-x-hidden"
       data-record-detail-scroll
     >
-      <div className="flex items-center justify-end gap-2 px-6 pt-4">
-        <details className="relative">
-          <summary className="flex size-8 cursor-pointer list-none items-center justify-center rounded-md border border-border/70 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground [&::-webkit-details-marker]:hidden">
-            <MoreHorizontal size={16} />
-          </summary>
-          <div className="absolute right-0 z-50 mt-1 w-48 rounded-md border border-border/70 bg-card p-1 shadow-md">
-            <button
-              className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left font-medium text-foreground text-sm transition-colors hover:bg-accent"
-              onClick={(event) => {
-                setLocation(`/base/${baseSlug}/${record.id}/activity`);
-                event.currentTarget.closest("details")?.removeAttribute("open");
-              }}
-              type="button"
-            >
-              <History size={13} />
-              {messages.nodeDetail.activity}
-            </button>
-            <button
-              className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left font-medium text-rejected-strong text-sm transition-colors hover:bg-rejected/17 disabled:cursor-not-allowed disabled:opacity-60"
-              disabled={deleteAction !== null}
-              onClick={(event) => {
-                setConfirmDeleteAction("change_request");
-                event.currentTarget.closest("details")?.removeAttribute("open");
-              }}
-              type="button"
-            >
-              <Trash2 size={13} />
-              {deleteAction === "change_request"
-                ? messages.recordView.creating
-                : messages.recordView.deleteChangeRequest}
-            </button>
-            <button
-              className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left font-medium text-rejected-strong text-sm transition-colors hover:bg-rejected/17 disabled:cursor-not-allowed disabled:opacity-60"
-              disabled={deleteAction !== null}
-              onClick={(event) => {
-                setConfirmDeleteAction("merge");
-                event.currentTarget.closest("details")?.removeAttribute("open");
-              }}
-              type="button"
-            >
-              <GitMerge size={13} />
-              {deleteAction === "merge"
-                ? messages.recordView.merging
-                : messages.recordView.deleteAndMerge}
-            </button>
-          </div>
-        </details>
-        <RailToggleButton onToggle={() => setPanelOpen((current) => !current)} open={panelOpen} />
-      </div>
-      <section className="grid w-full min-w-0 gap-6 px-6 pt-2 pb-4 lg:grid-cols-[minmax(0,1fr)_auto]">
-        <main className="min-w-0 max-w-[860px] justify-self-center lg:w-full">
+      {!isAnon ? (
+        <div className="flex items-center justify-end gap-2 px-6 pt-4">
+          <details className="relative">
+            <summary className="flex size-8 cursor-pointer list-none items-center justify-center rounded-md border border-border/70 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground [&::-webkit-details-marker]:hidden">
+              <MoreHorizontal size={16} />
+            </summary>
+            <div className="absolute right-0 z-50 mt-1 w-48 rounded-md border border-border/70 bg-card p-1 shadow-md">
+              <button
+                className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left font-medium text-foreground text-sm transition-colors hover:bg-accent"
+                onClick={(event) => {
+                  setLocation(`/base/${baseSlug}/${record.id}/activity`);
+                  event.currentTarget.closest("details")?.removeAttribute("open");
+                }}
+                type="button"
+              >
+                <History size={13} />
+                {messages.nodeDetail.activity}
+              </button>
+              <button
+                className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left font-medium text-rejected-strong text-sm transition-colors hover:bg-rejected/17 disabled:cursor-not-allowed disabled:opacity-60"
+                disabled={deleteAction !== null}
+                onClick={(event) => {
+                  setConfirmDeleteAction("change_request");
+                  event.currentTarget.closest("details")?.removeAttribute("open");
+                }}
+                type="button"
+              >
+                <Trash2 size={13} />
+                {deleteAction === "change_request"
+                  ? messages.recordView.creating
+                  : messages.recordView.deleteChangeRequest}
+              </button>
+              <button
+                className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left font-medium text-rejected-strong text-sm transition-colors hover:bg-rejected/17 disabled:cursor-not-allowed disabled:opacity-60"
+                disabled={deleteAction !== null}
+                onClick={(event) => {
+                  setConfirmDeleteAction("merge");
+                  event.currentTarget.closest("details")?.removeAttribute("open");
+                }}
+                type="button"
+              >
+                <GitMerge size={13} />
+                {deleteAction === "merge"
+                  ? messages.recordView.merging
+                  : messages.recordView.deleteAndMerge}
+              </button>
+            </div>
+          </details>
+          <RailToggleButton onToggle={() => setPanelOpen((current) => !current)} open={panelOpen} />
+        </div>
+      ) : null}
+      <section
+        className={`grid w-full min-w-0 gap-6 px-6 pt-2 pb-4 ${
+          isAnon ? "" : "lg:grid-cols-[minmax(0,1fr)_auto]"
+        }`}
+      >
+        <main
+          className={
+            isAnon ? "min-w-0 w-full" : "min-w-0 max-w-[860px] justify-self-center lg:w-full"
+          }
+        >
           <RecordHero record={record} />
           <RecordFieldPanel record={record} records={records} />
-          <RecordCommentsPanel client={client} record={record} />
+          {!isAnon ? <RecordCommentsPanel client={client} record={record} /> : null}
         </main>
-        <BusabaseSidePanel open={panelOpen}>
-          <SidebarPanel
-            quiet
-            title={messages.recordView.lineage}
-            action={
-              historyChangeRequests[0] ? (
+        {!isAnon ? (
+          <BusabaseSidePanel open={panelOpen}>
+            <SidebarPanel
+              quiet
+              title={messages.recordView.lineage}
+              action={
+                historyChangeRequests[0] ? (
+                  <Link
+                    className="inline-flex items-center gap-0.5 rounded-md px-1.5 py-1 text-muted-foreground text-xs transition-colors hover:bg-muted/60 hover:text-foreground"
+                    href={mergeSearchIntoHref(
+                      `/inbox/${historyChangeRequests[0].id}`,
+                      currentSearch,
+                    )}
+                  >
+                    {messages.recordView.view}
+                    <ChevronRight aria-hidden="true" size={13} />
+                  </Link>
+                ) : undefined
+              }
+            >
+              <SidebarRow
+                label={messages.recordView.proposedBy}
+                value={
+                  <UserRefButton
+                    fallbackId={record.createdBy}
+                    labelClassName="font-medium"
+                    title={messages.identity.recordCreator}
+                    user={record.createdByUser}
+                  />
+                }
+              />
+              <SidebarRow
+                label={messages.recordView.commitAuthor}
+                value={
+                  <UserRefButton
+                    fallbackId={record.headCommit.author}
+                    labelClassName="font-medium"
+                    title={messages.identity.commitAuthor}
+                    user={record.headCommit.authorUser}
+                  />
+                }
+              />
+              <SidebarRow
+                label={messages.common.updated}
+                value={formatDetailTime(record.updatedAt, locale)}
+              />
+              <details
+                aria-label={messages.recordView.technicalIds}
+                className="mt-3 rounded-md border border-border/70 px-2.5 py-2 text-xs"
+              >
+                <summary className="cursor-pointer text-muted-foreground transition-colors hover:text-foreground">
+                  {messages.recordView.technicalIds}
+                </summary>
+                <div className="mt-2 space-y-1.5">
+                  <SidebarRow label={messages.common.record} value={record.id} />
+                  <SidebarRow label={messages.recordView.creatorId} value={record.createdBy} />
+                  <SidebarRow
+                    label={messages.recordView.authorId}
+                    value={record.headCommit.author}
+                  />
+                  <SidebarRow
+                    label={messages.recordView.head}
+                    value={shortIdentifier(record.headCommitId)}
+                  />
+                  <SidebarRow
+                    label={messages.recordView.parent}
+                    value={shortIdentifier(record.headCommit.parentCommitId)}
+                  />
+                </div>
+              </details>
+            </SidebarPanel>
+            <SidebarPanel
+              quiet
+              title={messages.recordView.audit}
+              action={
                 <Link
                   className="inline-flex items-center gap-0.5 rounded-md px-1.5 py-1 text-muted-foreground text-xs transition-colors hover:bg-muted/60 hover:text-foreground"
-                  href={mergeSearchIntoHref(`/inbox/${historyChangeRequests[0].id}`, currentSearch)}
+                  href={mergeSearchIntoHref("/activity", currentSearch)}
                 >
-                  {messages.recordView.view}
+                  {messages.recordView.seeAll}
                   <ChevronRight aria-hidden="true" size={13} />
                 </Link>
-              ) : undefined
-            }
-          >
-            <SidebarRow
-              label={messages.recordView.proposedBy}
-              value={
-                <UserRefButton
-                  fallbackId={record.createdBy}
-                  labelClassName="font-medium"
-                  title={messages.identity.recordCreator}
-                  user={record.createdByUser}
-                />
               }
-            />
-            <SidebarRow
-              label={messages.recordView.commitAuthor}
-              value={
-                <UserRefButton
-                  fallbackId={record.headCommit.author}
-                  labelClassName="font-medium"
-                  title={messages.identity.commitAuthor}
-                  user={record.headCommit.authorUser}
-                />
-              }
-            />
-            <SidebarRow
-              label={messages.common.updated}
-              value={formatDetailTime(record.updatedAt, locale)}
-            />
-            <details
-              aria-label={messages.recordView.technicalIds}
-              className="mt-3 rounded-md border border-border/70 px-2.5 py-2 text-xs"
             >
-              <summary className="cursor-pointer text-muted-foreground transition-colors hover:text-foreground">
-                {messages.recordView.technicalIds}
-              </summary>
-              <div className="mt-2 space-y-1.5">
-                <SidebarRow label={messages.common.record} value={record.id} />
-                <SidebarRow label={messages.recordView.creatorId} value={record.createdBy} />
-                <SidebarRow label={messages.recordView.authorId} value={record.headCommit.author} />
-                <SidebarRow
-                  label={messages.recordView.head}
-                  value={shortIdentifier(record.headCommitId)}
-                />
-                <SidebarRow
-                  label={messages.recordView.parent}
-                  value={shortIdentifier(record.headCommit.parentCommitId)}
-                />
+              <div className="flex items-center gap-2 text-muted-foreground text-sm">
+                <Box size={16} />
+                <span className="truncate">
+                  {fmt(messages.recordView.canonicalRecord, { status: record.status })}
+                </span>
               </div>
-            </details>
-          </SidebarPanel>
-          <SidebarPanel
-            quiet
-            title={messages.recordView.audit}
-            action={
-              <Link
-                className="inline-flex items-center gap-0.5 rounded-md px-1.5 py-1 text-muted-foreground text-xs transition-colors hover:bg-muted/60 hover:text-foreground"
-                href={mergeSearchIntoHref("/activity", currentSearch)}
-              >
-                {messages.recordView.seeAll}
-                <ChevronRight aria-hidden="true" size={13} />
-              </Link>
-            }
-          >
-            <div className="flex items-center gap-2 text-muted-foreground text-sm">
-              <Box size={16} />
-              <span className="truncate">
-                {fmt(messages.recordView.canonicalRecord, { status: record.status })}
-              </span>
-            </div>
-          </SidebarPanel>
-          <SidebarPanel
-            quiet
-            title={messages.recordView.reviewHistory}
-            action={
-              <span className="rounded-md bg-muted/55 px-2 py-0.5 text-muted-foreground text-xs">
-                {isHistoryLoading ? "…" : historyChangeRequests.length}
-              </span>
-            }
-          >
-            {historyError ? (
-              <div className="rounded-md border border-rejected/35 bg-rejected/17 px-2.5 py-2 text-rejected-strong text-xs">
-                {historyError}
-              </div>
-            ) : historyChangeRequests.length > 0 ? (
-              <div className="-mx-3 divide-y divide-border/40">
-                {historyChangeRequests.map((changeRequest) => (
-                  <RecordChangeRequestHistoryRow
-                    changeRequest={changeRequest}
-                    key={changeRequest.id}
-                    recordId={record.id}
-                  />
-                ))}
-              </div>
-            ) : isHistoryLoading ? (
-              <div className="space-y-2 py-2" aria-hidden>
-                <Skeleton className="h-3 w-4/5" />
-                <Skeleton className="h-3 w-2/3" />
-                <Skeleton className="h-3 w-3/4" />
-              </div>
-            ) : (
-              <div className="py-2 text-muted-foreground text-xs">
-                {messages.recordView.noChangeRequestsYet}
-              </div>
-            )}
-          </SidebarPanel>
-        </BusabaseSidePanel>
+            </SidebarPanel>
+            <SidebarPanel
+              quiet
+              title={messages.recordView.reviewHistory}
+              action={
+                <span className="rounded-md bg-muted/55 px-2 py-0.5 text-muted-foreground text-xs">
+                  {isHistoryLoading ? "…" : historyChangeRequests.length}
+                </span>
+              }
+            >
+              {historyError ? (
+                <div className="rounded-md border border-rejected/35 bg-rejected/17 px-2.5 py-2 text-rejected-strong text-xs">
+                  {historyError}
+                </div>
+              ) : historyChangeRequests.length > 0 ? (
+                <div className="-mx-3 divide-y divide-border/40">
+                  {historyChangeRequests.map((changeRequest) => (
+                    <RecordChangeRequestHistoryRow
+                      changeRequest={changeRequest}
+                      key={changeRequest.id}
+                      recordId={record.id}
+                    />
+                  ))}
+                </div>
+              ) : isHistoryLoading ? (
+                <div className="space-y-2 py-2" aria-hidden>
+                  <Skeleton className="h-3 w-4/5" />
+                  <Skeleton className="h-3 w-2/3" />
+                  <Skeleton className="h-3 w-3/4" />
+                </div>
+              ) : (
+                <div className="py-2 text-muted-foreground text-xs">
+                  {messages.recordView.noChangeRequestsYet}
+                </div>
+              )}
+            </SidebarPanel>
+          </BusabaseSidePanel>
+        ) : null}
       </section>
       <ConfirmActionDialog
         body={

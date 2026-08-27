@@ -573,6 +573,8 @@ export * from "../domains/assets/schema/assets";
 // here so the db barrel stays the one import surface. Kernel CR tables FK into
 // these via lazy refs (the import cycle resolves at runtime).
 export * from "../domains/base/schema";
+// Short-lived, revocable capability links shared by Cloud and Desktop.
+export * from "../domains/embed-links/schema";
 // Form-as-Node: a node bound to a Base; submissions become record-create CRs.
 export * from "../domains/form/schema";
 // Vault-managed secrets and variables used by agents, MCP, and API tools.

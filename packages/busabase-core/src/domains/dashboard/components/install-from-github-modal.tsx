@@ -22,7 +22,7 @@ import {
 } from "kui/dialog";
 import { Input } from "kui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "kui/tabs";
-import { CircleCheck, Github, LoaderCircle, TriangleAlert } from "lucide-react";
+import { CircleCheck, Github, LoaderCircle, Sparkles, TriangleAlert } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { fmt, useCoreI18n } from "../../../i18n";
 import { nodeIconForType } from "../helpers/node-icons";
@@ -146,6 +146,8 @@ interface InstallFromGithubModalProps {
    */
   initialRepoUrl?: string;
   initialIntoFolder?: string;
+  /** Package name already known by catalog entry points, used in the dialog title. */
+  initialPackageName?: string;
   /**
    * Host configuration for the "Connect your agent" dialog offered on the Agent
    * install tab — which edition's guidance to show, and which space to pin the
@@ -162,6 +164,7 @@ export function InstallFromGithubModal({
   onReviewChangeRequests,
   initialRepoUrl,
   initialIntoFolder,
+  initialPackageName,
   agentIntegration,
 }: InstallFromGithubModalProps) {
   const messages = useCoreI18n();
@@ -382,8 +385,10 @@ export function InstallFromGithubModal({
       <DialogContent className="sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <Github className="size-4" />
-            {messages.install.title}
+            {initialPackageName ? <Sparkles className="size-4" /> : <Github className="size-4" />}
+            {initialPackageName
+              ? fmt(messages.install.packageTitle, { name: initialPackageName })
+              : messages.install.title}
           </DialogTitle>
           {/* The framing has to follow the step: "paste a link" is wrong copy to
               be reading once the package is already fetched and the question on
@@ -606,9 +611,14 @@ export function InstallFromGithubModal({
               ) : null}
 
               {error ? <p className="text-destructive text-sm">{error}</p> : null}
-              {installing ? (
-                <p className="flex items-center gap-2 text-muted-foreground text-sm">
-                  <LoaderCircle className="size-4 animate-spin" />
+              {plan && tab === "ui" ? (
+                <p
+                  aria-hidden={!installing}
+                  className={`flex min-h-10 items-center gap-2 text-muted-foreground text-sm sm:min-h-5 ${
+                    installing ? "visible" : "invisible"
+                  }`}
+                >
+                  <LoaderCircle className={installing ? "size-4 animate-spin" : "size-4"} />
                   {messages.install.installingHint}
                 </p>
               ) : null}
@@ -616,37 +626,44 @@ export function InstallFromGithubModal({
           )}
         </div>
 
-        <DialogFooter className="flex-col gap-2 sm:flex-row">
-          {result ? (
-            <Button onClick={close}>{messages.install.done}</Button>
-          ) : (
-            <>
-              <Button
-                disabled={installing}
-                // `close`, not a bare `reset` + dismiss: after a failed install
-                // this is the button the user actually reaches for (there is no
-                // "Done" without a result), and it is the one that has to tell
-                // the host its tree is stale.
-                onClick={close}
-                variant="outline"
-              >
-                {plan && tab === "agent" ? messages.common.close : messages.common.cancel}
-              </Button>
-              {plan && tab === "ui" ? (
-                <Button disabled={!canInstall} onClick={() => void submitInstall()}>
-                  {installing ? messages.install.installing : messages.install.install}
-                </Button>
-              ) : plan ? null : (
+        {result || !plan || tab === "ui" ? (
+          <DialogFooter className="flex-col gap-2 sm:flex-row">
+            {result ? (
+              <Button onClick={close}>{messages.install.done}</Button>
+            ) : (
+              <>
                 <Button
-                  disabled={planning || repoUrl.trim().length === 0}
-                  onClick={() => void runPlan()}
+                  disabled={installing}
+                  // `close`, not a bare `reset` + dismiss: after a failed install
+                  // this is the button the user actually reaches for (there is no
+                  // "Done" without a result), and it is the one that has to tell
+                  // the host its tree is stale.
+                  onClick={close}
+                  variant="outline"
                 >
-                  {planning ? messages.install.previewing : messages.install.preview}
+                  {messages.common.cancel}
                 </Button>
-              )}
-            </>
-          )}
-        </DialogFooter>
+                {plan ? (
+                  <Button
+                    className="min-w-28"
+                    disabled={!canInstall}
+                    onClick={() => void submitInstall()}
+                  >
+                    {installing ? messages.install.installing : messages.install.install}
+                  </Button>
+                ) : (
+                  <Button
+                    className="min-w-28"
+                    disabled={planning || repoUrl.trim().length === 0}
+                    onClick={() => void runPlan()}
+                  >
+                    {planning ? messages.install.previewing : messages.install.preview}
+                  </Button>
+                )}
+              </>
+            )}
+          </DialogFooter>
+        ) : null}
       </DialogContent>
     </Dialog>
   );

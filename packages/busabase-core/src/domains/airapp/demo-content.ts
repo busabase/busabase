@@ -278,7 +278,7 @@ const contentTypes = {
   ".js": "text/javascript; charset=utf-8",
 };
 
-createServer((req, res) => {
+const server = createServer((req, res) => {
   const path = req.url === "/" ? "/index.html" : req.url;
   try {
     const body = readFileSync(\`.\${path}\`);
@@ -290,8 +290,13 @@ createServer((req, res) => {
     res.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
     res.end("Not found");
   }
-}).listen(Number(process.env.PORT) || 3000, function () {
-  console.log(\`Pure HTML Demo listening on port \${this.address().port}\`);
+});
+// Nodepod's in-browser Node does not bind \`this\` to the server in the
+// listen callback, so \`this.address()\` throws and the dev server exits
+// before it ever listens. Close over the port instead.
+const port = Number(process.env.PORT) || 3000;
+server.listen(port, () => {
+  console.log(\`Pure HTML Demo listening on port \${port}\`);
 });
 `;
 
@@ -942,7 +947,7 @@ const contentTypes = {
   ".js": "text/javascript; charset=utf-8",
 };
 
-createServer((req, res) => {
+const server = createServer((req, res) => {
   const path = req.url === "/" ? "/index.html" : req.url;
   try {
     const body = readFileSync(\`.\${path}\`);
@@ -954,8 +959,13 @@ createServer((req, res) => {
     res.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
     res.end("Not found");
   }
-}).listen(Number(process.env.PORT) || 3000, function () {
-  console.log(\`Deal Pipeline Board listening on port \${this.address().port}\`);
+});
+// Nodepod's in-browser Node does not bind \`this\` to the server in the
+// listen callback, so \`this.address()\` throws and the dev server exits
+// before it ever listens. Close over the port instead.
+const port = Number(process.env.PORT) || 3000;
+server.listen(port, () => {
+  console.log(\`Deal Pipeline Board listening on port \${port}\`);
 });
 `;
 

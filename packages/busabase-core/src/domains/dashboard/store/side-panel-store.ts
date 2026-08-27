@@ -69,6 +69,12 @@ export const clampSidePanelWidth = (width: number) =>
  * `activeTabId`. Those reference live pinned content (e.g. a running AirApp
  * preview); resurrecting them from a stale localStorage snapshot after a
  * reload would point at content that no longer exists or has moved on.
+ *
+ * That split used to produce a broken post-reload state: `isOpen: true` with
+ * `tabs: []` rendered nothing at all, behind a toggle that was simultaneously
+ * `aria-pressed` and disabled. Now that zero tabs is a real state with its own
+ * launcher UI, restoring "open with nothing in it" is simply the empty state —
+ * the panel reopens where you left it and offers to fill itself.
  */
 export const useSidePanelStore = create<SidePanelStoreState>()(
   persist(
@@ -103,11 +109,15 @@ export const useSidePanelStore = create<SidePanelStoreState>()(
         }
         // Activate the tab that was immediately before the closed one; if the
         // closed tab was first, fall back to the tab that slides into its slot.
+        //
+        // Closing the last tab leaves the panel *open* on its empty state.
+        // Auto-collapsing was right when zero tabs meant a blank panel, but the
+        // empty state is now the panel's launcher — collapsing would yank away
+        // the "+" the moment you got there.
         const previous = nextTabs[index > 0 ? index - 1 : 0] ?? null;
         set({
           tabs: nextTabs,
           activeTabId: previous?.id ?? null,
-          isOpen: previous ? get().isOpen : false,
           layout: previous ? get().layout : "split",
         });
       },
@@ -121,7 +131,9 @@ export const useSidePanelStore = create<SidePanelStoreState>()(
         set({ tabs: [keep], activeTabId: keep.id });
       },
 
-      closeAllTabs: () => set({ tabs: [], activeTabId: null, isOpen: false, layout: "split" }),
+      // Same reasoning as `closeTab`: emptying the panel is not the same as
+      // dismissing it. The panel stays open on its empty state.
+      closeAllTabs: () => set({ tabs: [], activeTabId: null, layout: "split" }),
 
       reorderTabs: (draggedId, targetId) => {
         if (draggedId === targetId) {

@@ -5,6 +5,10 @@ const en = {
   common: {
     appName: "Busabase",
   },
+  embedRuntime: {
+    loading: "Loading app…",
+    unavailable: "Content unavailable",
+  },
   seo: {
     title: "Busabase",
     description:

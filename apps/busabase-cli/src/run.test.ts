@@ -298,11 +298,12 @@ describe("busabase-cli commands", () => {
   });
 
   it("routes a generated mutation with a path param and JSON body", async () => {
-    const calls: Array<{ body: unknown; method: string; url: string }> = [];
+    const calls: Array<{ body: unknown; channel: string | null; method: string; url: string }> = [];
     global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const request = input instanceof Request ? input : new Request(input, init);
       calls.push({
         body: request.body ? await request.json() : null,
+        channel: request.headers.get("x-busabase-channel"),
         method: request.method,
         url: request.url,
       });
@@ -326,6 +327,7 @@ describe("busabase-cli commands", () => {
     expect(calls).toEqual([
       expect.objectContaining({
         method: "POST",
+        channel: "cli",
         url: "http://localhost:15419/api/v1/records/rec_1/change-requests",
         body: { operation: "update", fields: { title: "Updated" } },
       }),
@@ -1152,6 +1154,43 @@ describe("busabase-cli commands", () => {
     ]);
   });
 
+  it("pushes the affected-node filter through the generated Change Request list command", async () => {
+    const calls: Request[] = [];
+    vi.spyOn(console, "log").mockImplementation(() => undefined);
+    global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      calls.push(request);
+      return jsonResponse({ changeRequests: [], nextCursor: null });
+    }) as typeof fetch;
+
+    const exitCode = await runCli([
+      "--base-url",
+      "http://localhost:15419",
+      "--output",
+      "json",
+      "change-requests",
+      "list",
+      "--affects-node-id",
+      "nod_target",
+      "--status-json",
+      '["in_review","approved","conflict"]',
+      "--limit",
+      "1",
+    ]);
+
+    expect(exitCode).toBe(0);
+    expect(calls).toHaveLength(1);
+    const url = new URL(calls[0]?.url ?? "");
+    expect(url.pathname).toBe("/api/v1/change-requests");
+    expect(url.searchParams.get("affectsNodeId")).toBe("nod_target");
+    expect(url.searchParams.get("limit")).toBe("1");
+    expect(
+      [...url.searchParams.entries()]
+        .filter(([key]) => key.startsWith("status["))
+        .map(([, value]) => value),
+    ).toEqual(["in_review", "approved", "conflict"]);
+  });
+
   it("lists records with base and cursor filters (one always-paginated endpoint)", async () => {
     const calls: Array<{ body: unknown; method: string; url: string }> = [];
     const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
@@ -1214,12 +1253,18 @@ describe("busabase-cli commands", () => {
     const dir = await mkdtemp(join(tmpdir(), "busabase-cli-"));
     const file = join(dir, "cover.svg");
     await writeFile(file, '<svg xmlns="http://www.w3.org/2000/svg"/>');
-    const calls: Array<{ body: unknown; method: string; url: string }> = [];
+    const calls: Array<{
+      body: unknown;
+      channel: string | null;
+      method: string;
+      url: string;
+    }> = [];
     const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
     global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const request = input instanceof Request ? input : new Request(input, init);
       calls.push({
         body: request.body ? await requestBody(request) : null,
+        channel: request.headers.get("x-busabase-channel"),
         method: request.method,
         url: request.url,
       });
@@ -1260,6 +1305,7 @@ describe("busabase-cli commands", () => {
         ["PUT", "https://upload.example/cover.svg"],
         ["POST", "http://localhost:15419/api/v1/assets/confirmations"],
       ]);
+      expect(calls.map((call) => call.channel)).toEqual(["cli", null, "cli"]);
       expect(calls[0]?.body).toEqual(
         expect.objectContaining({
           context: "record-field",

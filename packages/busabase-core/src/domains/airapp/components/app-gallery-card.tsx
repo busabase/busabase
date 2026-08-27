@@ -72,8 +72,8 @@ export function AppGalleryCard({ node }: { node: AppGalleryNode | NodeVO }) {
 }
 
 /**
- * Responsive icon-grid wall for AirApp nodes — shared by the "Apps" tab
- * (`AppsListView`) and Home's "Recently used Apps" section, so both surfaces
+ * Responsive icon-grid wall for AirApp nodes — shared by the App Library
+ * (`AppsListView`) and Home's recently used AirApps section, so both surfaces
  * present AirApps the same way instead of drifting into two markups.
  */
 export function AppGalleryGrid({ nodes }: { nodes: Array<AppGalleryNode | NodeVO> }) {

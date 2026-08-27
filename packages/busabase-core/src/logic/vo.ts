@@ -37,6 +37,7 @@ import type {
   ReviewPO,
   ViewPO,
 } from "../db/schema";
+import { toPublicAuditMetadata } from "./source-attribution";
 
 export const toIso = (date: Date | null) => (date ? date.toISOString() : null);
 
@@ -304,19 +305,23 @@ export const toCommentVO = (comment: CommentPO, users?: UserRefMap): CommentVO =
   updatedAt: comment.updatedAt.toISOString(),
 });
 
-export const toAuditEventVO = (event: AuditEventPO, users?: UserRefMap): AuditEventVO => ({
-  id: event.id,
-  action: event.action as AuditAction,
-  actorId: event.actorId,
-  actor: userRef(users, event.actorId),
-  baseId: event.baseId,
-  recordId: event.recordId,
-  changeRequestId: event.changeRequestId,
-  operationId: event.operationId,
-  commitId: event.commitId,
-  metadata: event.metadata,
-  createdAt: event.createdAt.toISOString(),
-});
+export const toAuditEventVO = (event: AuditEventPO, users?: UserRefMap): AuditEventVO => {
+  const publicSource = toPublicAuditMetadata(event.metadata);
+  return {
+    id: event.id,
+    action: event.action as AuditAction,
+    actorId: event.actorId,
+    actor: userRef(users, event.actorId),
+    sourceAttribution: publicSource.sourceAttribution,
+    baseId: event.baseId,
+    recordId: event.recordId,
+    changeRequestId: event.changeRequestId,
+    operationId: event.operationId,
+    commitId: event.commitId,
+    metadata: publicSource.metadata,
+    createdAt: event.createdAt.toISOString(),
+  };
+};
 
 export const toOperationVO = (
   item: OperationPO,

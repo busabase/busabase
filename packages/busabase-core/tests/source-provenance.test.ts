@@ -34,4 +34,35 @@ describe("Busabase source provenance", () => {
       },
     );
   });
+
+  it("keeps authenticated host identity authoritative over caller metadata", async () => {
+    await runWithBusabaseContext(
+      {
+        sourceProvenance: {
+          owner: { id: "usr_real", name: "Leon" },
+          apiKey: { id: "apk_real", name: "Codex" },
+          channel: "mcp",
+        },
+      },
+      async () => {
+        expect(
+          withContextSourceMeta({
+            provenance: {
+              owner: { id: "usr_fake", name: "Imposter" },
+              apiKey: { id: "apk_fake", name: "Fake key" },
+              channel: "sdk",
+              traceId: "trace_1",
+            },
+          }),
+        ).toEqual({
+          provenance: {
+            owner: { id: "usr_real", name: "Leon" },
+            apiKey: { id: "apk_real", name: "Codex" },
+            channel: "mcp",
+            traceId: "trace_1",
+          },
+        });
+      },
+    );
+  });
 });

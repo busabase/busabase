@@ -45,27 +45,36 @@ describe("agent catalog availability", () => {
     );
   });
 
-  it("lists Claude Code and Codex as coming soon and unavailable", async () => {
+  // `getContextActorId` is mocked to `undefined` above — that is the OSS /
+  // desktop host, where a local agent runs on the user's own machine.
+  it("offers Claude Code and Codex on a local host, once their binary is present", async () => {
     const catalog = await listCatalog();
     const claude = catalog.find((entry) => entry.slug === "claude-acp");
     const codex = catalog.find((entry) => entry.slug === "codex-acp");
 
-    expect(claude).toMatchObject({
-      comingSoon: true,
-      available: false,
-      unavailableReason: "Coming soon.",
-    });
-    expect(codex).toMatchObject({
-      comingSoon: true,
-      available: false,
-      unavailableReason: "Coming soon.",
-    });
-    expect(mocks.spawnSync).not.toHaveBeenCalled();
+    expect(claude).toMatchObject({ comingSoon: false, available: true, unavailableReason: null });
+    expect(codex).toMatchObject({ comingSoon: false, available: true, unavailableReason: null });
+    // Availability is decided by probing this machine, not by a static flag.
+    expect(mocks.spawnSync).toHaveBeenCalled();
   });
 
-  it("rejects direct launch attempts for coming-soon agents", async () => {
-    await expect(resolveLaunch("claude-acp")).rejects.toThrow("Claude Code is coming soon.");
-    await expect(resolveLaunch("codex-acp")).rejects.toThrow("Codex CLI is coming soon.");
+  it("says so when the local host is missing the binary, rather than claiming coming-soon", async () => {
+    mocks.spawnSync.mockReturnValueOnce({ status: 1 }).mockReturnValueOnce({ status: 1 });
+    const catalog = await listCatalog();
+
+    expect(catalog.find((entry) => entry.slug === "claude-acp")).toMatchObject({
+      available: false,
+      unavailableReason: expect.stringContaining("was not found on this machine"),
+    });
+  });
+
+  it("launches a local agent on a local host", async () => {
+    await expect(resolveLaunch("codex-acp")).resolves.toMatchObject({
+      slug: "codex-acp",
+      transport: "local-subprocess",
+      command: "npx",
+      args: ["--yes", "@agentclientprotocol/codex-acp@1.1.14"],
+    });
   });
 
   it("preserves each selected Buda connection identity", async () => {

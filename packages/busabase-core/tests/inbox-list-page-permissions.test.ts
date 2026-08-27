@@ -48,6 +48,8 @@ describe("inbox listPage permissions", () => {
   let originalCwd = "";
   let client: Client;
   let oversizedVisibleCrId = "";
+  let visibleNodeId = "";
+  let hiddenNodeId = "";
 
   beforeAll(async () => {
     originalCwd = process.cwd();
@@ -74,6 +76,8 @@ describe("inbox listPage permissions", () => {
       fields,
       autoMerge: true,
     } as never);
+    visibleNodeId = visible.nodeId;
+    hiddenNodeId = hidden.nodeId;
 
     const propose = async (baseId: string, name: string, body?: string) =>
       client.bases.createChangeRequest({
@@ -110,6 +114,26 @@ describe("inbox listPage permissions", () => {
     } as never);
     expect(page.total).toBe(VISIBLE_PENDING + HIDDEN_PENDING);
     expect(page.changeRequests).toHaveLength(VISIBLE_PENDING + HIDDEN_PENDING);
+  });
+
+  it("does not turn affectsNodeId into a hidden-node existence oracle", async () => {
+    const [visible, hidden] = await asMember(() =>
+      Promise.all([
+        client.changeRequests.list({
+          affectsNodeId: visibleNodeId,
+          status: ["in_review"],
+          limit: 100,
+        }),
+        client.changeRequests.list({
+          affectsNodeId: hiddenNodeId,
+          status: ["in_review"],
+          limit: 100,
+        }),
+      ]),
+    );
+    expect(visible.changeRequests).toHaveLength(VISIBLE_PENDING);
+    expect(hidden.changeRequests).toEqual([]);
+    expect(hidden.nextCursor).toBeNull();
   });
 
   // The load-bearing one: the number under the list must be the number on the tab.

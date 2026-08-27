@@ -42,7 +42,10 @@ ENV BUILD_NUMBER=${BUILD_NUMBER}
 ENV BUILD_SHA=${BUILD_SHA}
 ENV BUILD_TIME=${BUILD_TIME}
 WORKDIR /app/apps/busabase
-RUN NODE_OPTIONS=--max-old-space-size=3072 pnpm build
+# --max-heap-size, not --max-old-space-size: Next deletes the latter from its build
+# workers' env (build/index.js createStaticWorker isolatedMemory: true -> lib/worker.js),
+# so that flag only ever reached the parent process.
+RUN NODE_OPTIONS=--max-heap-size=3072 pnpm build
 RUN pnpm db:seed:build
 
 # ---- drizzle minimal stage (for migrations only) ----

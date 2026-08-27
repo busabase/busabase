@@ -6,6 +6,10 @@ const ja = {
   common: {
     appName: "Busabase",
   },
+  embedRuntime: {
+    loading: "アプリを読み込み中…",
+    unavailable: "コンテンツを利用できません",
+  },
   seo: {
     title: "Busabase",
     description:

@@ -25,6 +25,7 @@ export const dashboardZhTW: CoreI18nMessages = {
     search: "搜尋",
     activity: "動態",
     archive: "封存",
+    apps: "應用庫",
     workspace: "工作區",
     new: "新增",
     templates: "範本",
@@ -69,9 +70,17 @@ export const dashboardZhTW: CoreI18nMessages = {
     pendingViewAll: "全部評審",
     recentTitle: "最近造訪",
     recentEmptyBody: "你開啟過的資料庫與文件會顯示在這裡。",
+    recentAppsTitle: "最近使用的 AirApps",
+    recentAppsViewAll: "查看應用庫",
     activityTitle: "最近動態",
     activityViewAll: "查看全部動態",
     activityEmptyBody: "這個工作區裡發生的變更會顯示在這裡。",
+  },
+  airapp: {
+    ...dashboardZhCN.airapp,
+    librarySubtitle: "此空間中的 AirApps —— 以 Busabase 資料與工作流程建置的迷你應用程式。",
+    libraryEmptyTitle: "暫無 AirApps",
+    libraryEmptyBody: "你在此空間建立的 AirApps 會顯示在這裡。",
   },
   inbox: {
     ...dashboardZhCN.inbox,
@@ -236,6 +245,7 @@ export const dashboardZhTW: CoreI18nMessages = {
   install: {
     ...dashboardZhCN.install,
     title: "從 GitHub 安裝",
+    packageTitle: "安裝 {name}",
     description: "貼上存放 Busabase 套件的儲存庫連結。安裝之前，你會先看到它到底會建立哪些內容。",
     repoUrl: "儲存庫網址",
     repoUrlPlaceholder: "https://github.com/owner/repo",

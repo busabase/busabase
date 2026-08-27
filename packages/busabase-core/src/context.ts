@@ -5,7 +5,7 @@
 
 import { AsyncLocalStorage } from "node:async_hooks";
 import type { ApiKeyPermissionLevel } from "busabase-contract/access-control/api-key-level";
-import type { UserRefVO } from "busabase-contract/types";
+import type { BusabaseSourceChannel, UserRefVO } from "busabase-contract/types";
 import type { PgDatabase } from "drizzle-orm/pg-core";
 import { type DemoUseCase, normalizeDemoUseCase } from "./demo/use-case";
 
@@ -45,17 +45,7 @@ export type { DemoUseCase };
 /** Locale of the demo dataset the stateless demo serves. */
 export type DemoLocale = "en" | "zh-CN";
 
-export type BusabaseSourceChannel =
-  | "web_ui"
-  | "browser"
-  | "openapi"
-  | "sdk"
-  | "cli"
-  | "mcp"
-  | "skill"
-  | "webhook"
-  | "automation"
-  | "import";
+export type { BusabaseSourceChannel } from "busabase-contract/types";
 
 export interface BusabaseSourceProvenance {
   owner?: {
@@ -69,6 +59,12 @@ export interface BusabaseSourceProvenance {
     name?: string | null;
   };
   channel?: BusabaseSourceChannel | string | null;
+}
+
+export interface BusabaseEmbedActorState {
+  active: boolean;
+  isSpaceManager: boolean;
+  restrictedVisibility: boolean;
 }
 
 export interface BusabasePerformanceMetric {
@@ -100,6 +96,27 @@ export interface BusabaseContext {
    */
   vaultRuntimeEnv?: Record<string, string>;
   resolveUsers?: (userIds: string[]) => Promise<Map<string, UserRefVO>>;
+  /**
+   * Host-owned validation for the creator credential behind a public Embed
+   * Link. Cloud checks account, membership, API-key, and workspace ACL state;
+   * local mode leaves this unset and keeps its single-user defaults.
+   */
+  resolveEmbedActorState?: (input: {
+    actorId: string;
+    spaceId: string;
+    apiKeyId: string;
+  }) => Promise<BusabaseEmbedActorState>;
+  /**
+   * Origin the host wants baked into the capability URLs it hands out
+   * (`https://<workspace host>` on Cloud, the loopback dev server on Desktop).
+   *
+   * Injected rather than read from `NEXT_PUBLIC_APP_URL` inside the shared
+   * logic: each host already owns a resolved app URL, and the two disagree on
+   * what an absent env var should mean. A shared default would silently be one
+   * host's — which is exactly how Cloud links could come out pointing at
+   * Desktop's loopback port.
+   */
+  embedOrigin?: string;
   /**
    * Display name injected by the single-user open-source host. Cloud must not
    * set this; it resolves registered users through `resolveUsers`.
@@ -184,7 +201,7 @@ export interface BusabaseContext {
    *
    * Set it via `runWithAnonymousContext`, never by hand.
    */
-  visitorKind?: "member" | "anonymous";
+  visitorKind?: "member" | "anonymous" | "embed";
   /**
    * Node ids this anonymous request has proven the SHARE PASSWORD for.
    *
@@ -351,9 +368,26 @@ export function runWithMemberContext<T>(
  * Both are needed: the ceiling alone still leaves the manager bypass in the
  * visibility SQL, and `isSpaceManager: false` alone still lets an explicit
  * `manage` grant through.
+ *
+ * - `visitorKind: "embed"` — pinned for the same reason the other two are, and
+ *   it is deliberately its OWN kind rather than `"anonymous"`.
+ *
+ *   `"anonymous"` is the guest kind, and `buildNodeVisibilityCondition` /
+ *   `getEffectiveNodeLevel` answer it with "only nodes carrying a live public
+ *   share." An Embed Link's target usually carries none — its authority is the
+ *   link — so labelling an embed request anonymous silently 404s the very node
+ *   the link points at. What an embed DOES need from a public kind is the
+ *   default-deny procedure surface (`comments.*`, `dump.*`, `vault.*` and the
+ *   other space-scoped-only procedures consult no node ACL at all), which
+ *   `publicSurfaceGuard` gives it through `EMBED_READ_ALLOWLIST`.
+ *
+ *   Leaving the kind to the caller meant an embed request's authority depended
+ *   on which transport built the context: the RPC capability route passed
+ *   `"anonymous"` (taking the guest visibility branch with it), while the
+ *   server-rendered `resolveEmbedLink` path passed nothing at all.
  */
 export function runWithEmbedContext<T>(
-  ctx: Omit<BusabaseContext, "isSpaceManager" | "credentialPermissionCeiling">,
+  ctx: Omit<BusabaseContext, "isSpaceManager" | "credentialPermissionCeiling" | "visitorKind">,
   fn: () => Promise<T>,
 ): Promise<T> {
   return storage.run(
@@ -361,6 +395,7 @@ export function runWithEmbedContext<T>(
       ...ctx,
       isSpaceManager: false,
       credentialPermissionCeiling: "read",
+      visitorKind: "embed",
     },
     fn,
   );
@@ -431,14 +466,6 @@ export function getContextSourceProvenance(): BusabaseSourceProvenance | undefin
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
-const mergeRecord = (
-  contextValue: Record<string, unknown> | undefined,
-  explicitValue: unknown,
-): Record<string, unknown> | undefined => {
-  if (!isRecord(explicitValue)) return contextValue;
-  return { ...(contextValue ?? {}), ...explicitValue };
-};
-
 export function withContextSourceMeta(
   sourceMeta: Record<string, unknown> = {},
 ): Record<string, unknown> {
@@ -447,17 +474,19 @@ export function withContextSourceMeta(
 
   const explicitProvenance = isRecord(sourceMeta.provenance) ? sourceMeta.provenance : {};
   const contextProvenance = provenance as Record<string, unknown>;
-  const owner = mergeRecord(
-    isRecord(contextProvenance.owner) ? contextProvenance.owner : undefined,
-    explicitProvenance.owner,
-  );
-  const apiKey = mergeRecord(
-    isRecord(contextProvenance.apiKey) ? contextProvenance.apiKey : undefined,
-    explicitProvenance.apiKey,
-  );
+  const owner = isRecord(contextProvenance.owner)
+    ? contextProvenance.owner
+    : isRecord(explicitProvenance.owner)
+      ? explicitProvenance.owner
+      : undefined;
+  const apiKey = isRecord(contextProvenance.apiKey)
+    ? contextProvenance.apiKey
+    : isRecord(explicitProvenance.apiKey)
+      ? explicitProvenance.apiKey
+      : undefined;
   const mergedProvenance = {
-    ...contextProvenance,
     ...explicitProvenance,
+    ...contextProvenance,
   };
   if (owner) mergedProvenance.owner = owner;
   else delete mergedProvenance.owner;
@@ -524,6 +553,30 @@ export async function resolveUserRefs(userIds: Iterable<string | null | undefine
   );
 }
 
+export async function resolveEmbedActorState(input: {
+  actorId: string;
+  spaceId: string;
+  apiKeyId: string;
+}): Promise<BusabaseEmbedActorState> {
+  const resolver = storage.getStore()?.resolveEmbedActorState;
+  if (resolver) return resolver(input);
+  // No host resolver: the single-user local host, where the link is live and
+  // there is no other member to hide anything from. `isSpaceManager` is still
+  // `false` — a host that forgets to inject the resolver must not be handed the
+  // manager bypass by default. That hard-coded `true` is the bug
+  // `runWithEmbedContext` exists to prevent (PR #5948), and this is the one
+  // place it could come back in through.
+  return { active: true, isSpaceManager: false, restrictedVisibility: false };
+}
+
+/**
+ * Origin for capability URLs, or `undefined` when the host injected none —
+ * the caller decides its own fallback rather than inheriting another host's.
+ */
+export function getContextEmbedOrigin(): string | undefined {
+  return storage.getStore()?.embedOrigin;
+}
+
 /** True when the current request is served by the stateless demo router. */
 export function getContextIsDemo(): boolean {
   return storage.getStore()?.isDemo ?? false;
@@ -558,9 +611,30 @@ export function emitContextPerformanceMetric(createMetric: () => BusabasePerform
   }
 }
 
-/** True when this request arrived without a signed-in user (a public link). */
+/**
+ * True for a GUEST — a logged-out visitor arriving through a node's public
+ * share. Deliberately false for an embed visitor: the node-ACL branches keyed
+ * off this answer "only publicly shared nodes," which is the guest's authority,
+ * not the link holder's. Use `isPublicVisitor()` for the checks that should
+ * cover both.
+ */
 export function isAnonymousVisitor(): boolean {
   return storage.getStore()?.visitorKind === "anonymous";
+}
+
+/** True for a holder of an Embed Link (see `runWithEmbedContext`). */
+export function isEmbedVisitor(): boolean {
+  return storage.getStore()?.visitorKind === "embed";
+}
+
+/**
+ * True for any visitor whose authority comes from a link rather than a seat —
+ * guest or embed. The right check for "never a manager", "never sees
+ * default-visibility nodes", and "must pass a default-deny procedure surface."
+ */
+export function isPublicVisitor(): boolean {
+  const kind = storage.getStore()?.visitorKind;
+  return kind === "anonymous" || kind === "embed";
 }
 
 /**
@@ -587,7 +661,7 @@ export function getContextUnlockedShareNodeIds(): readonly string[] {
  * transport to remember to inject `isSpaceManager: false`.
  */
 export function getContextIsSpaceManager(): boolean {
-  if (isAnonymousVisitor()) {
+  if (isPublicVisitor()) {
     return false;
   }
   return storage.getStore()?.isSpaceManager ?? true;
@@ -617,5 +691,8 @@ export function getContextRestrictedVisibility(): boolean {
   if (isAnonymousVisitor()) {
     return true;
   }
+  // An embed carries the creator's own visibility, resolved by the host
+  // (`resolveEmbedActorState`) — not the guest's blanket restriction, which
+  // would hide the link target itself whenever it has default visibility.
   return storage.getStore()?.restrictedVisibility ?? false;
 }

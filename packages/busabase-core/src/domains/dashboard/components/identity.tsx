@@ -122,31 +122,34 @@ export function UserDetailDialog({
 
 export function UserRefButton({
   fallbackId,
+  label,
   labelClassName = "font-medium",
   title,
   user,
 }: {
   fallbackId?: string | null;
+  label?: string;
   labelClassName?: string;
   title?: string;
   user?: UserRefVO | null;
 }) {
   const messages = useCoreI18n();
   const [open, setOpen] = useState(false);
-  const label = useMemo(
+  const resolvedLabel = useMemo(
     () => formatUserRefLabel(user, fallbackId, messages),
     [fallbackId, messages, user],
   );
+  const displayLabel = label ?? resolvedLabel;
 
   return (
     <>
       <button
         className={`min-w-0 truncate text-left transition-colors hover:text-foreground hover:underline ${labelClassName}`}
         onClick={() => setOpen(true)}
-        title={label}
+        title={displayLabel}
         type="button"
       >
-        {label}
+        {displayLabel}
       </button>
       <UserDetailDialog
         fallbackId={fallbackId}

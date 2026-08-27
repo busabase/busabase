@@ -23,6 +23,8 @@ import {
   statusTone,
 } from "../helpers/change-request";
 import { formatDetailTime } from "../helpers/format";
+import { resolveSubmissionIdentity } from "../helpers/source-attribution";
+import { useIsAnonymousVisitor } from "../visitor-context";
 import { SubjectCommentThread } from "./comments";
 import { UserRefButton } from "./identity";
 import { OperationFieldChanges } from "./operation-diff";
@@ -34,6 +36,7 @@ import {
   SidebarPanel,
   SidebarRow,
 } from "./primitives";
+import { SourceAttributionInline } from "./source-attribution";
 
 export function ReviewConflictPanel({ message }: { message: string }) {
   const messages = useCoreI18n();
@@ -141,6 +144,7 @@ export function OperationReviewSection({
   readOnly?: boolean;
 }) {
   const messages = useCoreI18n();
+  const isAnonymous = useIsAnonymousVisitor();
   const [open, setOpen] = useState(defaultOpen);
   const meta = operationMeta[operation.operation];
   const changedSinceReview = operationChangedSinceReview(changeRequest, operation);
@@ -192,21 +196,23 @@ export function OperationReviewSection({
             </p>
           ) : null}
           <OperationFieldChanges changeRequest={changeRequest} operation={operation} />
-          <div className="mt-4">
-            <div className="font-medium text-foreground text-xs">
-              {messages.review.commentsOnThisChange}
+          {!isAnonymous ? (
+            <div className="mt-4">
+              <div className="font-medium text-foreground text-xs">
+                {messages.review.commentsOnThisChange}
+              </div>
+              <div className="mt-2">
+                <SubjectCommentThread
+                  client={client}
+                  emptyLabel={messages.comments.noCommentsOperation}
+                  placeholder={messages.comments.placeholderOperation}
+                  readOnly={readOnly}
+                  subjectId={operation.id}
+                  subjectType="operation"
+                />
+              </div>
             </div>
-            <div className="mt-2">
-              <SubjectCommentThread
-                client={client}
-                emptyLabel={messages.comments.noCommentsOperation}
-                placeholder={messages.comments.placeholderOperation}
-                readOnly={readOnly}
-                subjectId={operation.id}
-                subjectType="operation"
-              />
-            </div>
-          </div>
+          ) : null}
         </div>
       ) : null}
     </div>
@@ -334,6 +340,7 @@ export function ChangeRequestDiscussion({
   readOnly?: boolean;
 }) {
   const messages = useCoreI18n();
+  const isAnonymous = useIsAnonymousVisitor();
   const timeline = useMemo<DiscussionTimelineItem[]>(() => {
     const reviewItems = changeRequest.reviews.map((review) => ({
       review,
@@ -367,16 +374,18 @@ export function ChangeRequestDiscussion({
           ))}
         </div>
       ) : null}
-      <div className="mt-3">
-        <SubjectCommentThread
-          client={client}
-          emptyLabel={messages.comments.noCommentsDiscussion}
-          placeholder={messages.comments.placeholderDiscussion}
-          readOnly={readOnly}
-          subjectId={changeRequest.id}
-          subjectType="change_request"
-        />
-      </div>
+      {!isAnonymous ? (
+        <div className="mt-3">
+          <SubjectCommentThread
+            client={client}
+            emptyLabel={messages.comments.noCommentsDiscussion}
+            placeholder={messages.comments.placeholderDiscussion}
+            readOnly={readOnly}
+            subjectId={changeRequest.id}
+            subjectType="change_request"
+          />
+        </div>
+      ) : null}
     </section>
   );
 }
@@ -650,6 +659,12 @@ export function ChangeRequestReviewLayout({
     [auditEvents, changeRequest.id],
   );
   const [panelOpen, setPanelOpen] = useState(true);
+  const submissionIdentity = resolveSubmissionIdentity(
+    changeRequest.submittedByUser,
+    changeRequest.submittedBy,
+    changeRequest.sourceAttribution,
+    messages,
+  );
 
   useEffect(() => {
     if (!focusOperationId) {
@@ -673,12 +688,29 @@ export function ChangeRequestReviewLayout({
             {getChangeRequestTitle(changeRequest, messages)}
           </h1>
           <div className="mt-2.5 flex flex-wrap gap-2 text-muted-foreground text-xs">
-            <UserRefButton
-              fallbackId={changeRequest.submittedBy}
-              labelClassName="font-medium text-muted-foreground"
-              title={messages.identity.submitterDetail}
-              user={changeRequest.submittedByUser}
+            <SourceAttributionInline
+              channelLabel={submissionIdentity.channelLabel}
+              credentialLabel={submissionIdentity.credentialLabel}
+              owner={
+                changeRequest.submittedByUser ? (
+                  <UserRefButton
+                    fallbackId={changeRequest.submittedBy}
+                    label={submissionIdentity.ownerLabel}
+                    labelClassName="font-medium text-muted-foreground"
+                    title={messages.identity.submitterDetail}
+                    user={changeRequest.submittedByUser}
+                  />
+                ) : (
+                  <span className="font-medium">{submissionIdentity.ownerLabel}</span>
+                )
+              }
             />
+            {submissionIdentity.identityUnavailable ? (
+              <>
+                <span>·</span>
+                <span>{messages.identity.sourceUnavailable}</span>
+              </>
+            ) : null}
             <span>·</span>
             {getChangeRequestScopeHref(changeRequest) ? (
               <Link

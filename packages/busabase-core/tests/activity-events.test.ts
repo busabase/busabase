@@ -89,12 +89,8 @@ describe("buildActivityEventFromItem", () => {
         status: "in_review",
         submittedBy: "usr_1",
         submittedByUser: { id: "usr_1", name: "Kelly", email: null, image: null, role: "owner" },
-        sourceMeta: {
-          provenance: {
-            owner: { id: "usr_1", name: "Kelly" },
-            channel: "web_ui",
-          },
-        },
+        sourceAttribution: { displayName: null, ownerName: "Kelly", channel: "web_ui" },
+        sourceMeta: {},
         operations: [],
         updatedAt: "2026-01-01T00:00:00.000Z",
         createdAt: "2026-01-01T00:00:00.000Z",
@@ -104,7 +100,7 @@ describe("buildActivityEventFromItem", () => {
     const event = buildActivityEventFromItem(item);
     expect(event?.actorName).toBe("Kelly");
     expect(event?.provenance?.byline).toBe("via Web UI");
-    expect(event?.provenance?.channelLabel).toBe("via Web UI");
+    expect(event?.provenance?.channelLabel).toBe("Web UI");
     expect(event?.provenance?.ownerLabel).toBeUndefined();
   });
 
@@ -123,12 +119,8 @@ describe("buildActivityEventFromItem", () => {
           image: null,
           role: "owner",
         },
-        sourceMeta: {
-          provenance: {
-            owner: { id: "usr_1", name: "Kelly" },
-            channel: "cli",
-          },
-        },
+        sourceAttribution: { displayName: null, ownerName: "Kelly", channel: "cli" },
+        sourceMeta: {},
         operations: [],
         updatedAt: "2026-01-01T00:00:00.000Z",
         createdAt: "2026-01-01T00:00:00.000Z",
@@ -141,7 +133,7 @@ describe("buildActivityEventFromItem", () => {
     expect(event?.provenance?.ownerLabel).toBeUndefined();
   });
 
-  it("uses API key name as the actor and keeps provenance in a quiet byline", () => {
+  it("uses the owner as actor and keeps credential plus channel in a quiet byline", () => {
     const item = {
       kind: "change_request",
       timestamp: "2026-01-01T00:00:00.000Z",
@@ -150,16 +142,12 @@ describe("buildActivityEventFromItem", () => {
         status: "in_review",
         submittedBy: "usr_1",
         submittedByUser: { id: "usr_1", name: "Kelly", email: null, image: null, role: "owner" },
-        sourceMeta: {
-          provenance: {
-            owner: { id: "usr_1", name: "Kelly" },
-            apiKey: {
-              id: "apk_1",
-              name: "Writer integration",
-            },
-            channel: "sdk",
-          },
+        sourceAttribution: {
+          displayName: "Writer integration",
+          ownerName: "Kelly",
+          channel: "sdk",
         },
+        sourceMeta: {},
         operations: [],
         updatedAt: "2026-01-01T00:00:00.000Z",
         createdAt: "2026-01-01T00:00:00.000Z",
@@ -167,10 +155,11 @@ describe("buildActivityEventFromItem", () => {
     } as unknown as ActivityItemVO;
 
     const event = buildActivityEventFromItem(item);
-    expect(event?.actorName).toBe("Writer integration");
-    expect(event?.provenance?.byline).toBe("via SDK · owned by Kelly");
-    expect(event?.provenance?.channelLabel).toBe("via SDK");
-    expect(event?.provenance?.ownerLabel).toBe("owned by Kelly");
+    expect(event?.actorName).toBe("Kelly");
+    expect(event?.provenance?.byline).toBe("via Writer integration · SDK");
+    expect(event?.provenance?.channelLabel).toBe("SDK");
+    expect(event?.provenance?.credentialLabel).toBe("Writer integration");
+    expect(event?.provenance?.ownerLabel).toBeUndefined();
     expect(event?.provenance?.byline).not.toContain("Human");
     expect(event?.provenance?.byline).not.toContain("AI Agent");
     expect(event?.provenance?.byline).not.toContain("API Key:");

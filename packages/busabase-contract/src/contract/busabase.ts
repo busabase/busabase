@@ -29,6 +29,14 @@ import {
   listNodeActivityInputSchema,
   listRecordActivityInputSchema,
 } from "./activity-schemas";
+import {
+  CreatedEmbedLinkVOSchema,
+  CreateEmbedLinkInputSchema,
+  EmbedLinkVOSchema,
+  ListEmbedLinksInputSchema,
+  RevokeEmbedLinkInputSchema,
+  RevokeEmbedLinkVOSchema,
+} from "./embed-link-schemas";
 import { UnifiedGrepInputSchema, UnifiedGrepResultVOSchema } from "./grep-schemas";
 import { updateNodeContentInputSchema } from "./node-content-schemas";
 import { getNodeInputSchema, NodeDetailVOSchema } from "./node-detail-schemas";
@@ -49,6 +57,7 @@ import {
   createAuditEventInputSchema,
   createCommentInputSchema,
   createNodeChangeRequestInputSchema,
+  inboxSnapshotInputSchema,
   inboxSnapshotResponseSchema,
   isDescendantInputSchema,
   isDescendantOutputSchema,
@@ -79,6 +88,14 @@ const changeRequestBatchFailureSchema = z.object({
   code: z.string().optional(),
   data: z.unknown().optional(),
 });
+
+const embedLinkErrorResponseSchema = z.object({ error: z.string() });
+const embedLinkErrors = {
+  BAD_REQUEST: { status: 400, message: "Bad Request", data: embedLinkErrorResponseSchema },
+  UNAUTHORIZED: { status: 401, message: "Unauthorized", data: embedLinkErrorResponseSchema },
+  FORBIDDEN: { status: 403, message: "Forbidden", data: embedLinkErrorResponseSchema },
+  NOT_FOUND: { status: 404, message: "Not Found", data: embedLinkErrorResponseSchema },
+};
 
 // Per-item outcomes carry the full successful value so higher-level clients can
 // preserve their ergonomic single-item methods while the raw API stays batched.
@@ -150,6 +167,41 @@ export const busabaseContractRoutes = {
     })
     .input(UnifiedGrepInputSchema)
     .output(UnifiedGrepResultVOSchema),
+  embedLinks: {
+    create: oc
+      .route({
+        method: "POST",
+        path: "/embed-links",
+        tags: ["Embed Links"],
+        summary: "Create a polymorphic read-only embed link",
+        successDescription: "The capability URL is returned once; only its secret hash is stored.",
+      })
+      .errors(embedLinkErrors)
+      .input(CreateEmbedLinkInputSchema)
+      .output(CreatedEmbedLinkVOSchema),
+    list: oc
+      .route({
+        method: "GET",
+        path: "/embed-links",
+        tags: ["Embed Links"],
+        summary: "List embed links the caller can manage",
+        successDescription: "Embed link metadata without capability secrets.",
+      })
+      .errors(embedLinkErrors)
+      .input(ListEmbedLinksInputSchema)
+      .output(z.array(EmbedLinkVOSchema)),
+    revoke: oc
+      .route({
+        method: "DELETE",
+        path: "/embed-links/{id}",
+        tags: ["Embed Links"],
+        summary: "Revoke an embed link",
+        successDescription: "The capability stops resolving immediately.",
+      })
+      .errors(embedLinkErrors)
+      .input(RevokeEmbedLinkInputSchema)
+      .output(RevokeEmbedLinkVOSchema),
+  },
   nodes: {
     list: oc
       .route({
@@ -552,7 +604,7 @@ export const busabaseContractRoutes = {
         tags: ["Change Requests"],
         summary: "List change requests",
         successDescription:
-          "A page of change requests plus an opaque nextCursor (null at the end). Filter with `status` and/or `mine`.",
+          "A page of change requests plus an opaque nextCursor (null at the end). Filter with `status`, `mine`, and/or `affectsNodeId`.",
       })
       .input(listChangeRequestsPagedInputSchema)
       .output(listChangeRequestsResponseSchema),
@@ -566,13 +618,14 @@ export const busabaseContractRoutes = {
         tags: ["Change Requests"],
         summary: "List a numbered change request page",
         successDescription:
-          "A random-access page of change requests plus the total across the whole filter. Same `status` / `mine` filters as the cursor listing.",
+          "A random-access page of change requests plus the total across the whole filter. Same `status`, `mine`, and `affectsNodeId` filters as the cursor listing.",
       })
       .input(listChangeRequestsPageInputSchema)
       .output(listChangeRequestsPageResponseSchema),
     // Dashboard-only composition. The standalone listPage/counts REST routes
     // remain the stable public API; this transport optimization stays RPC-only.
-    inboxSnapshot: oc.input(listChangeRequestsPageInputSchema).output(inboxSnapshotResponseSchema),
+    // No `affectsNodeId` here on purpose — see `inboxSnapshotInputSchema`.
+    inboxSnapshot: oc.input(inboxSnapshotInputSchema).output(inboxSnapshotResponseSchema),
     counts: oc
       .route({
         method: "GET",

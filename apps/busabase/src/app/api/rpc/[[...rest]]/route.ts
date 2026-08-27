@@ -1,8 +1,13 @@
 import { ORPCError } from "@orpc/server";
 import { RPCHandler } from "@orpc/server/fetch";
 import { BatchHandlerPlugin } from "@orpc/server/plugins";
-import { runWithBusabaseContext, runWithLocalContext } from "busabase-core/context";
+import {
+  runWithBusabaseContext,
+  runWithEmbedContext,
+  runWithLocalContext,
+} from "busabase-core/context";
 import { checkAgentsRequestOrigin } from "busabase-core/domains/agents/logic/agent-origin-guard";
+import { readEmbedCapabilityRequest } from "busabase-core/domains/embed-links/rpc-capability";
 import { busabaseRouter } from "busabase-core/router";
 import { busabaseDemoRouter } from "busabase-core/router-demo";
 import { addCorsHeaders, createCorsHeaders } from "openlib/cors";
@@ -49,6 +54,20 @@ async function handle(request: Request) {
   try {
     if (demoUseCase) {
       return await runWithBusabaseContext({ isDemo: true, demoUseCase, demoLocale }, run);
+    }
+
+    // An embedded Dashboard calls in with its link capability instead of a
+    // session. No host context to pass: the single-user local host has no
+    // account/membership state for the shared resolver to check.
+    const embed = await readEmbedCapabilityRequest(request);
+    if (embed.kind === "rejected") {
+      return addCorsHeaders(
+        Response.json({ error: "Embed not found", code: "NOT_FOUND" }, { status: 404 }),
+        BUSABASE_RPC_METHODS,
+      );
+    }
+    if (embed.kind === "embed") {
+      return await runWithEmbedContext(embed.context, run);
     }
 
     const vaultRuntimeEnv = await readBuiltinVaultRuntimeEnv();

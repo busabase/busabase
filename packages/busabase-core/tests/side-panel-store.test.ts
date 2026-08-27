@@ -53,11 +53,50 @@ describe("side panel display modes", () => {
     useSidePanelStore.getState().setLayout("maximized");
     useSidePanelStore.getState().closeTab(airAppTab.id);
     expect(useSidePanelStore.getState()).toMatchObject({
-      isOpen: false,
       layout: "split",
       activeTabId: null,
       tabs: [],
     });
+  });
+
+  /**
+   * Emptying the panel is not dismissing it. Closing the last tab used to set
+   * `isOpen: false`, which made sense while zero tabs rendered nothing — the
+   * panel now has an empty state that is how you put the next thing in it, so
+   * collapsing would take away the "+" at the moment you reached for it.
+   */
+  it("stays open on its empty state when the last tab closes", () => {
+    useSidePanelStore.getState().openTab(airAppTab);
+    expect(useSidePanelStore.getState().isOpen).toBe(true);
+
+    useSidePanelStore.getState().closeTab(airAppTab.id);
+    expect(useSidePanelStore.getState()).toMatchObject({ isOpen: true, tabs: [] });
+  });
+
+  it("stays open when every tab is closed at once", () => {
+    useSidePanelStore.getState().openTab(airAppTab);
+    useSidePanelStore.getState().openTab({ ...airAppTab, id: "doc-2", type: "doc-preview" });
+
+    useSidePanelStore.getState().closeAllTabs();
+    expect(useSidePanelStore.getState()).toMatchObject({
+      isOpen: true,
+      tabs: [],
+      activeTabId: null,
+      layout: "split",
+    });
+  });
+
+  /**
+   * Collapsing is still the way to dismiss the panel, and it must survive the
+   * panel being empty — otherwise the two changes above would leave no way to
+   * get rid of an empty panel at all.
+   */
+  it("still collapses on an explicit close, empty or not", () => {
+    useSidePanelStore.getState().openTab(airAppTab);
+    useSidePanelStore.getState().closeTab(airAppTab.id);
+    useSidePanelStore.getState().setOpen(false);
+
+    expect(useSidePanelStore.getState()).toMatchObject({ isOpen: false, tabs: [] });
   });
 
   it("clamps resized widths to the supported split-panel range", () => {

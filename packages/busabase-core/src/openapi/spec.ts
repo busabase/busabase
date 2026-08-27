@@ -1,4 +1,4 @@
-import { OpenAPIGenerator } from "@orpc/openapi";
+import { type OpenAPI, OpenAPIGenerator } from "@orpc/openapi";
 import { ZodToJsonSchemaConverter } from "@orpc/zod/zod4";
 import { busabaseContract } from "busabase-contract/contract/busabase";
 
@@ -16,7 +16,7 @@ const openApiGenerator = new OpenAPIGenerator({
 const isRpcOnly = (contract: unknown) =>
   !(contract as { "~orpc"?: { route?: { path?: string } } })?.["~orpc"]?.route?.path;
 
-export async function getBusabaseOpenApiSpec() {
+export async function getBusabaseOpenApiSpec(): Promise<OpenAPI.Document> {
   const spec = await openApiGenerator.generate(busabaseContract, {
     exclude: (contract) => isRpcOnly(contract),
     info: {

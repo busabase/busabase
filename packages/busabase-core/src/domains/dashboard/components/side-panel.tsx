@@ -12,6 +12,7 @@ import { GripVertical, Maximize2, Minimize2, PanelRight, X } from "lucide-react"
 import type { CSSProperties } from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useCoreI18n } from "../../../i18n";
+import type { KnownNodeCache } from "../helpers/known-node-cache";
 import { useSidePanelViewport } from "../hooks/use-side-panel-viewport";
 import { getSidePanelTab } from "../side-panel-registry";
 import {
@@ -20,13 +21,19 @@ import {
   SIDE_PANEL_RESIZE_CLOSE_THRESHOLD,
   useSidePanelStore,
 } from "../store/side-panel-store";
+import { SidePanelAddTab } from "./side-panel-add-tab";
+import { SidePanelEmptyState } from "./side-panel-empty-state";
+import type { PinnableNode } from "./side-panel-sources";
 
 /**
  * Topbar toggle for the side panel — lives in the dashboard topbar (see
- * `dashboard/index.tsx`) so it's reachable on every page regardless of
- * whether anything is pinned yet. Disabled (not hidden) when nothing is
- * pinned: there's nothing to open, but the icon stays put as a visual anchor
- * and lights up the moment something gets pinned.
+ * `dashboard/index.tsx`) so it's reachable on every page.
+ *
+ * It opens the panel unconditionally, including when nothing is pinned. It
+ * used to be disabled in that case, on the reasoning that there was nothing to
+ * show; the panel now has an empty state that is itself the way you put
+ * something in it, so "nothing pinned yet" is the state you most need to be
+ * able to reach, not the one to lock out.
  *
  * Once the panel is actually open, this button unmounts entirely — `SidePanel`
  * renders its own equivalent "Collapse" control in its header, and showing
@@ -36,10 +43,9 @@ import {
 export function SidePanelToggle() {
   const messages = useCoreI18n();
   const isOpen = useSidePanelStore((state) => state.isOpen);
-  const tabCount = useSidePanelStore((state) => state.tabs.length);
   const setOpen = useSidePanelStore((state) => state.setOpen);
 
-  if (isOpen && tabCount > 0) {
+  if (isOpen) {
     return null;
   }
 
@@ -47,9 +53,8 @@ export function SidePanelToggle() {
     <button
       aria-label={messages.sidePanel.open}
       aria-pressed={isOpen}
-      className="inline-flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted/70 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
-      disabled={tabCount === 0}
-      onClick={() => setOpen(!isOpen)}
+      className="inline-flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted/70 hover:text-foreground"
+      onClick={() => setOpen(true)}
       title={messages.sidePanel.open}
       type="button"
     >
@@ -61,14 +66,41 @@ export function SidePanelToggle() {
 /**
  * Right-hand panel for content the user has explicitly "pinned" so it stays
  * reachable while navigating the main canvas elsewhere (e.g. an AirApp live
- * preview — see `AirAppRunPreview`'s pin button). Renders `null` when no
- * tabs are open, or when collapsed (see `SidePanelToggle`, which owns the
- * open/collapse entry point from the topbar). Every open tab's content stays
- * mounted simultaneously (CSS-hidden when inactive) — same `forceMount`-style
- * technique `AirAppDetailView` uses for its own tabs — so switching the
- * active tab never tears down a running AirApp preview.
+ * preview — see `AirAppRunPreview`'s pin button).
+ *
+ * With no tabs it shows its empty state rather than rendering nothing: that
+ * state is the panel's launcher, and the reason the topbar toggle no longer
+ * has to be disabled. Collapsing (see `SidePanelToggle`, which owns the
+ * open/collapse entry point from the topbar) hides it via CSS, never by
+ * unmounting.
+ *
+ * Every open tab's content stays mounted simultaneously (CSS-hidden when
+ * inactive) — same `forceMount`-style technique `AirAppDetailView` uses for
+ * its own tabs — so switching the active tab never tears down a running
+ * AirApp preview.
  */
-export function SidePanel({ orpc }: { orpc: BusabaseQueryUtils }) {
+export interface SidePanelProps {
+  orpc: BusabaseQueryUtils;
+  /**
+   * The node the user is currently looking at, or null off a node page.
+   * Resolved by the dashboard, which is the only place that knows how to
+   * reconcile the route with the loaded node (and the Base special case).
+   */
+  currentNode: PinnableNode | null;
+  /** Scoped per space+user by the dashboard — never the module default. */
+  nodeCache: KnownNodeCache;
+  /** Opens the command palette so a search result can be pinned. */
+  onOpenSearch: () => void;
+  onNavigate: (path: string) => void;
+}
+
+export function SidePanel({
+  orpc,
+  currentNode,
+  nodeCache,
+  onOpenSearch,
+  onNavigate,
+}: SidePanelProps) {
   const messages = useCoreI18n();
   const isOpen = useSidePanelStore((state) => state.isOpen);
   const layout = useSidePanelStore((state) => state.layout);
@@ -120,10 +152,6 @@ export function SidePanel({ orpc }: { orpc: BusabaseQueryUtils }) {
     [],
   );
 
-  if (tabs.length === 0) {
-    return null;
-  }
-
   const isMaximized = layout === "maximized";
   // On narrow viewports the panel always behaves as a full-screen overlay,
   // regardless of the persisted `layout` — there's no useful "docked at a
@@ -143,7 +171,9 @@ export function SidePanel({ orpc }: { orpc: BusabaseQueryUtils }) {
   // for every tab's Renderer) and toggle CSS visibility instead — a branch
   // that swaps in a differently-shaped tree when collapsed would make React
   // unmount/remount every Renderer across the toggle, defeating the point.
-  // `tabs.length === 0` above is the only real "nothing to preserve" unmount case.
+  // This component now never returns early, so there is no unmount path at all
+  // — an empty panel swaps its *body* for the empty state while the surrounding
+  // tree, and every pinned tab's ancestor shape, stays put.
   return (
     <div
       aria-hidden={!isOpen}
@@ -319,6 +349,13 @@ export function SidePanel({ orpc }: { orpc: BusabaseQueryUtils }) {
           ))}
         </div>
         <div className="flex shrink-0 items-center gap-1">
+          <SidePanelAddTab
+            currentNode={currentNode}
+            nodeCache={nodeCache}
+            onNavigate={onNavigate}
+            onOpenSearch={onOpenSearch}
+            orpc={orpc}
+          />
           <button
             aria-label={isMaximized ? messages.sidePanel.restore : messages.sidePanel.maximize}
             aria-pressed={isMaximized}
@@ -346,17 +383,26 @@ export function SidePanel({ orpc }: { orpc: BusabaseQueryUtils }) {
         </div>
       </div>
       <div className="min-h-0 flex-1 overflow-hidden">
-        {tabs.map((tab) => {
-          const Renderer = getSidePanelTab(tab.type);
-          if (!Renderer) {
-            console.warn(`SidePanel: no renderer registered for tab type "${tab.type}"`);
-          }
-          return (
-            <div className={tab.id === activeTabId ? "block h-full" : "hidden"} key={tab.id}>
-              {Renderer ? <Renderer orpc={orpc} payload={tab.payload} /> : null}
-            </div>
-          );
-        })}
+        {tabs.length === 0 ? (
+          <SidePanelEmptyState
+            currentNode={currentNode}
+            nodeCache={nodeCache}
+            onOpenAgents={() => onNavigate("/agents")}
+            onOpenSearch={onOpenSearch}
+          />
+        ) : (
+          tabs.map((tab) => {
+            const Renderer = getSidePanelTab(tab.type);
+            if (!Renderer) {
+              console.warn(`SidePanel: no renderer registered for tab type "${tab.type}"`);
+            }
+            return (
+              <div className={tab.id === activeTabId ? "block h-full" : "hidden"} key={tab.id}>
+                {Renderer ? <Renderer orpc={orpc} payload={tab.payload} /> : null}
+              </div>
+            );
+          })
+        )}
       </div>
     </div>
   );

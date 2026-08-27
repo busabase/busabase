@@ -24,6 +24,7 @@ export default defineConfig({
       "src/domains/dashboard/helpers/**/*.test.ts",
       "src/domains/dashboard/utils/**/*.test.ts",
       "src/domains/dashboard/components/**/*.test.tsx",
+      "src/domains/embed-links/**/*.test.ts",
       "src/domains/rich-node/utils/**/*.test.ts",
       "src/logic/**/*.test.ts",
     ],
