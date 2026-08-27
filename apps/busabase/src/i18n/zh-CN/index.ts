@@ -5,6 +5,10 @@ const zhCN = {
   common: {
     appName: "Busabase",
   },
+  embedRuntime: {
+    loading: "应用加载中…",
+    unavailable: "内容不可用",
+  },
   seo: {
     title: "Busabase 布沙知识仓 - 本地 AI 知识库与智能数据库",
     description:

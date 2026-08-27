@@ -63,6 +63,10 @@ const openApiMcpHandler = createOpenApiMcpHandler({
       headers: ceiling ? { [BUSABASE_RELAY_PERMISSION_LEVEL_HEADER]: ceiling } : {},
     });
   },
+  description: (tool, defaultDescription) =>
+    tool.keyPath[0] === "embedLinks"
+      ? `${defaultDescription}\n\nCreate an embed link only when the user explicitly asks to share or preview that target. The returned URL is a bearer capability: reveal or open it only when the user requests that action.`
+      : defaultDescription,
   // Endpoint tools a task now covers. Without this the catalog would carry both
   // spellings, and the endpoint one is the worse of the two (creating a Skill
   // through it silently omits the default scaffold).

@@ -55,6 +55,9 @@ describe("self-hosted MCP catalog", () => {
         "records_get",
         "change_requests_get",
         "nodes_read_lines",
+        "embed_links_create",
+        "embed_links_list",
+        "embed_links_revoke",
       ]),
     );
     expect(publishedToolNames()).not.toContain("assets_grep");

@@ -71,9 +71,13 @@ test("activity entries link through to a working detail page", async ({ page }) 
   await expect(page.getByText(/not found/i)).toHaveCount(0);
 });
 
+// `label` is the user-visible nav string the topbar renders (`nav.*` in
+// packages/busabase-core/src/i18n/messages.ts), not the route segment — the two
+// deliberately differ for the App Library, whose path stayed `/apps`. Renaming a
+// nav label means updating it here too.
 for (const view of [
   { label: "Agents", path: "/agents" },
-  { label: "Apps", path: "/apps" },
+  { label: "App Library", path: "/apps" },
   { label: "Templates", path: "/templates" },
 ]) {
   test(`${view.label} route shows the correct topbar label`, async ({ page }) => {
