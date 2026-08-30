@@ -2,6 +2,7 @@ import "server-only";
 
 import { ORPCError } from "@orpc/server";
 import type {
+  ImportBeginInput,
   ImportCommitVO,
   ImportTablesInput,
   ImportTablesVO,
@@ -40,6 +41,14 @@ import { DUMP_IMPORT_ORDER, DUMP_TABLE_REGISTRY } from "./table-registry";
 interface ImportSession {
   id: string;
   spaceId: string;
+  /**
+   * The archive's ORIGINAL space id (`manifest.spaceId`) — needed to compute
+   * the source's root-node id deterministically (`rootNodeIdForSpace`) when
+   * remapping `nodes` rows, instead of scanning each batch for "the row with
+   * a null `parentId`". See the matching comment on `ImportBeginInputSchema`
+   * for why that scan is unsound once a space has more nodes than one page.
+   */
+  sourceSpaceId: string;
   createdAt: number;
   insertedIds: Map<string, Set<string>>;
 }
@@ -65,7 +74,9 @@ const requireSession = (sessionId: string): ImportSession => {
   return session;
 };
 
-export const beginImportSession = async (): Promise<{ sessionId: string }> => {
+export const beginImportSession = async (
+  input: ImportBeginInput,
+): Promise<{ sessionId: string }> => {
   requireSpaceManagerForDump();
   sweepExpiredSessions();
   // A target space reached only through the dump routes (never touched by any
@@ -102,6 +113,7 @@ export const beginImportSession = async (): Promise<{ sessionId: string }> => {
   sessions.set(sessionId, {
     id: sessionId,
     spaceId,
+    sourceSpaceId: input.sourceSpaceId,
     createdAt: Date.now(),
     insertedIds: new Map(),
   });
@@ -209,19 +221,26 @@ export const importTableRows = async (input: ImportTablesInput): Promise<ImportT
     // an unrelated pre-existing row sharing that literal id (ids are a global
     // PK, not scoped per space) or, once genuinely fresh, leave every
     // top-level child's `parentId` dangling (still pointing at the never
-    // re-inserted source root id), which fails the `parentId` FK. Detect the
-    // root row structurally instead (the one node with `parentId === null` —
-    // true for exactly one row per space by construction), drop it
+    // re-inserted source root id), which fails the `parentId` FK. Drop it
     // unconditionally, and remap any child that pointed at it to the
     // target's own (already-existing) root id.
+    //
+    // The source root id is computed DETERMINISTICALLY from
+    // `session.sourceSpaceId` (`rootNodeIdForSpace`), not by scanning THIS
+    // batch's rows for "the one with a null `parentId`" — `dump.exportTables`
+    // pages are id-ordered, not tree-ordered, so for any space with more
+    // nodes than one page, the root row and its direct children can land in
+    // DIFFERENT `importTables` calls. A per-batch scan only finds the root
+    // when it happens to share a batch with the children pointing at it;
+    // every other batch's top-level children silently kept their stale
+    // source-root parentId and failed the FK constraint on insert — a real
+    // crash reproduced restoring a 225-node production space (2 pages) into
+    // an empty one. A deterministic id has no such luck-of-the-cursor gap.
     const rootId = rootNodeIdForSpace(spaceId);
-    const sourceRoot = rows.find((row) => row.parentId == null);
-    const sourceRootId = sourceRoot?.id as string | undefined;
+    const sourceRootId = rootNodeIdForSpace(session.sourceSpaceId);
     rows = rows
       .filter((row) => row.id !== sourceRootId && row.id !== rootId)
-      .map((row) =>
-        sourceRootId && row.parentId === sourceRootId ? { ...row, parentId: rootId } : row,
-      );
+      .map((row) => (row.parentId === sourceRootId ? { ...row, parentId: rootId } : row));
   }
   if (input.table === "nodePrincipals") {
     // A `principalType: "space"` grant means "everyone in this space", and
@@ -241,13 +260,62 @@ export const importTableRows = async (input: ImportTablesInput): Promise<ImportT
   );
   if (stampedRows.length === 0) return { inserted: 0 };
 
-  await db.insert(table as never).values(stampedRows as never[]);
+  try {
+    await db.insert(table as never).values(stampedRows as never[]);
+  } catch (error) {
+    const pgCode = (error as { cause?: { code?: string } } | undefined)?.cause?.code;
+    if (pgCode === "23505") {
+      // Every dump table's `id` is a bare, database-wide primary key (not
+      // scoped per space — see table-registry.ts). A restore replays the
+      // archive's original ids verbatim, so it can only ever succeed against
+      // ids that have never been used before anywhere in this database. That
+      // holds for disaster recovery (the source space is gone) or a truly
+      // fresh database, but NOT for cloning a still-live space into a second
+      // one on the same server — the source's own rows still hold those ids.
+      // Postgres's raw "duplicate key" 500 gave no hint of this; spell it out.
+      throw new ORPCError("CONFLICT", {
+        message:
+          `Restore failed: table "${input.table}" has rows whose id already exists somewhere in ` +
+          "this database. A full-fidelity restore replays the archive's original ids, so the target " +
+          "database must never have used those ids before — this works for disaster recovery (restoring " +
+          "into a fresh database, or back into the space it came from after that space's data was " +
+          "removed) but NOT for cloning a space that is still live elsewhere in the same database. To " +
+          "copy this space's current content into another space, use `busabase-cli export` (writes a " +
+          "readable package) followed by `busabase-cli install` (installs it as reviewable Change " +
+          "Requests) instead.",
+      });
+    }
+    throw error;
+  }
 
   const seen = session.insertedIds.get(input.table) ?? new Set<string>();
   for (const row of stampedRows) seen.add((row as Record<string, unknown>).id as string);
   session.insertedIds.set(input.table, seen);
 
   return { inserted: stampedRows.length };
+};
+
+/**
+ * `inArray(column, ids)` with `ids` in the hundreds of thousands blows the
+ * SQL query builder's own call stack (`RangeError: Maximum call stack size
+ * exceeded`, reproduced live committing a real production restore with
+ * 1,080,685 `fieldValues` rows — every check below queries by exactly the
+ * full set of ids a session just inserted). Chunk the id list and run one
+ * query per chunk instead of one query for everything; a bounded loop, not
+ * a query builder that has to be stack-safe for arbitrary input.
+ */
+const ORPHAN_CHECK_CHUNK_SIZE = 2000;
+
+// Exported for `dump-logic.test.ts` only.
+export const queryInChunks = async <Row>(
+  ids: string[],
+  runQuery: (idsChunk: string[]) => Promise<Row[]>,
+): Promise<Row[]> => {
+  const rows: Row[] = [];
+  for (let i = 0; i < ids.length; i += ORPHAN_CHECK_CHUNK_SIZE) {
+    rows.push(...(await runQuery(ids.slice(i, i + ORPHAN_CHECK_CHUNK_SIZE))));
+  }
+  return rows;
 };
 
 /**
@@ -286,15 +354,14 @@ const checkFieldValueOrphans = async (
   fieldValueIds: Set<string>,
 ): Promise<string[]> => {
   if (fieldValueIds.size === 0) return [];
-  const rows = await db
-    .select({ id: busabaseFieldValues.id, fieldId: busabaseFieldValues.fieldId })
-    .from(busabaseFieldValues)
-    .where(
-      and(
-        eq(busabaseFieldValues.spaceId, spaceId),
-        inArray(busabaseFieldValues.id, [...fieldValueIds]),
+  const rows = await queryInChunks([...fieldValueIds], (idsChunk) =>
+    db
+      .select({ id: busabaseFieldValues.id, fieldId: busabaseFieldValues.fieldId })
+      .from(busabaseFieldValues)
+      .where(
+        and(eq(busabaseFieldValues.spaceId, spaceId), inArray(busabaseFieldValues.id, idsChunk)),
       ),
-    );
+  );
   const orphanCount = rows.filter((row) => !row.fieldId).length;
   return orphanCount > 0
     ? [
@@ -309,26 +376,30 @@ const checkRecordLinkOrphans = async (
   linkIds: Set<string>,
 ): Promise<string[]> => {
   if (linkIds.size === 0) return [];
-  const links = await db
-    .select({
-      id: busabaseRecordLinks.id,
-      sourceRecordId: busabaseRecordLinks.sourceRecordId,
-      targetRecordId: busabaseRecordLinks.targetRecordId,
-    })
-    .from(busabaseRecordLinks)
-    .where(
-      and(eq(busabaseRecordLinks.spaceId, spaceId), inArray(busabaseRecordLinks.id, [...linkIds])),
-    );
+  const links = await queryInChunks([...linkIds], (idsChunk) =>
+    db
+      .select({
+        id: busabaseRecordLinks.id,
+        sourceRecordId: busabaseRecordLinks.sourceRecordId,
+        targetRecordId: busabaseRecordLinks.targetRecordId,
+      })
+      .from(busabaseRecordLinks)
+      .where(
+        and(eq(busabaseRecordLinks.spaceId, spaceId), inArray(busabaseRecordLinks.id, idsChunk)),
+      ),
+  );
   if (links.length === 0) return [];
   const recordIds = new Set<string>();
   for (const link of links) {
     recordIds.add(link.sourceRecordId);
     recordIds.add(link.targetRecordId);
   }
-  const existing = await db
-    .select({ id: busabaseRecords.id })
-    .from(busabaseRecords)
-    .where(and(eq(busabaseRecords.spaceId, spaceId), inArray(busabaseRecords.id, [...recordIds])));
+  const existing = await queryInChunks([...recordIds], (idsChunk) =>
+    db
+      .select({ id: busabaseRecords.id })
+      .from(busabaseRecords)
+      .where(and(eq(busabaseRecords.spaceId, spaceId), inArray(busabaseRecords.id, idsChunk))),
+  );
   const existingIds = new Set(existing.map((row) => row.id));
   const orphanCount = links.filter(
     (link) => !existingIds.has(link.sourceRecordId) || !existingIds.has(link.targetRecordId),
@@ -344,16 +415,17 @@ const checkAssetAttachmentOrphans = async (
   assetIds: Set<string>,
 ): Promise<string[]> => {
   if (assetIds.size === 0) return [];
-  const assets = await db
-    .select({ id: busabaseAssets.id, attachmentId: busabaseAssets.attachmentId })
-    .from(busabaseAssets)
-    .where(and(eq(busabaseAssets.spaceId, spaceId), inArray(busabaseAssets.id, [...assetIds])));
+  const assets = await queryInChunks([...assetIds], (idsChunk) =>
+    db
+      .select({ id: busabaseAssets.id, attachmentId: busabaseAssets.attachmentId })
+      .from(busabaseAssets)
+      .where(and(eq(busabaseAssets.spaceId, spaceId), inArray(busabaseAssets.id, idsChunk))),
+  );
   if (assets.length === 0) return [];
   const attachmentIds = [...new Set(assets.map((asset) => asset.attachmentId))];
-  const existing = await db
-    .select({ id: attachments.id })
-    .from(attachments)
-    .where(inArray(attachments.id, attachmentIds));
+  const existing = await queryInChunks(attachmentIds, (idsChunk) =>
+    db.select({ id: attachments.id }).from(attachments).where(inArray(attachments.id, idsChunk)),
+  );
   const existingIds = new Set(existing.map((row) => row.id));
   const orphanCount = assets.filter((asset) => !existingIds.has(asset.attachmentId)).length;
   return orphanCount > 0
@@ -366,10 +438,12 @@ const checkBlobCompleteness = async (
   attachmentIds: Set<string>,
 ): Promise<string[]> => {
   if (attachmentIds.size === 0) return [];
-  const rows = await db
-    .select({ id: attachments.id, storageKey: attachments.storageKey })
-    .from(attachments)
-    .where(inArray(attachments.id, [...attachmentIds]));
+  const rows = await queryInChunks([...attachmentIds], (idsChunk) =>
+    db
+      .select({ id: attachments.id, storageKey: attachments.storageKey })
+      .from(attachments)
+      .where(inArray(attachments.id, idsChunk)),
+  );
   const missing: string[] = [];
   for (const row of rows) {
     const exists = await storage.objectExists(row.storageKey);
@@ -394,19 +468,18 @@ const checkAssetTextBlobCompleteness = async (
   assetTextIds: Set<string>,
 ): Promise<string[]> => {
   if (assetTextIds.size === 0) return [];
-  const rows = await db
-    .select({
-      id: busabaseAssetTexts.id,
-      status: busabaseAssetTexts.status,
-      textStorageKey: busabaseAssetTexts.textStorageKey,
-    })
-    .from(busabaseAssetTexts)
-    .where(
-      and(
-        eq(busabaseAssetTexts.spaceId, spaceId),
-        inArray(busabaseAssetTexts.id, [...assetTextIds]),
+  const rows = await queryInChunks([...assetTextIds], (idsChunk) =>
+    db
+      .select({
+        id: busabaseAssetTexts.id,
+        status: busabaseAssetTexts.status,
+        textStorageKey: busabaseAssetTexts.textStorageKey,
+      })
+      .from(busabaseAssetTexts)
+      .where(
+        and(eq(busabaseAssetTexts.spaceId, spaceId), inArray(busabaseAssetTexts.id, idsChunk)),
       ),
-    );
+  );
   const missing: string[] = [];
   for (const row of rows) {
     if (row.status === "none" || row.textStorageKey === "") continue;

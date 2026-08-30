@@ -26,6 +26,7 @@ export default defineConfig({
       "src/domains/dashboard/components/**/*.test.tsx",
       "src/domains/embed-links/**/*.test.ts",
       "src/domains/rich-node/utils/**/*.test.ts",
+      "src/domains/templates/components/**/*.test.tsx",
       "src/logic/**/*.test.ts",
     ],
     // DB-heavy oRPC/PGLite integration tests exceed vitest's 5s default on cold

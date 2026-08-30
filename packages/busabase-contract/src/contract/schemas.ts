@@ -388,7 +388,13 @@ const agentTaskSchema = z.object({
 
 const searchResultSchema = z.object({
   id: z.string(),
-  kind: z.enum(["record", "change_request", "base", "file"]),
+  /**
+   * `node` covers the CONTENT of a content-bearing node (doc / html /
+   * whiteboard / workflow). Purely additive — callers that do not know it can
+   * ignore the kind, and callers that never asked for it (an explicit
+   * `sources` list without `nodes`) never receive it.
+   */
+  kind: z.enum(["record", "change_request", "base", "file", "node"]),
   title: z.string(),
   body: z.string(),
   eyebrow: z.string(),
@@ -402,6 +408,16 @@ const searchResponseSchema = z.object({
   offset: z.number(),
   hasMore: z.boolean(),
   results: z.array(searchResultSchema),
+  /**
+   * True when at least one in-scope node's content was indexed only up to the
+   * projection cap, so this search could not see all of it.
+   *
+   * Exists so an empty result can be reported honestly: without it, "no
+   * results" is ambiguous between "the workspace does not contain this" and
+   * "we did not look at all of it". Clients should surface it — and point at
+   * `grep`, which has no such cap — rather than implying absence.
+   */
+  contentTruncated: z.boolean().default(false),
 });
 
 const liveEventSchema = z.object({
@@ -748,7 +764,9 @@ const inboxSnapshotResponseSchema = listChangeRequestsPageResponseSchema.extend(
   counts: changeRequestCountsSchema,
 });
 
-const SEARCH_SOURCES = ["records", "files", "names"] as const;
+// `nodes` searches node CONTENT and is named to match grep's `nodes` source,
+// so both surfaces describe the same content with the same word.
+const SEARCH_SOURCES = ["records", "files", "names", "nodes"] as const;
 
 const searchInputSchema = z.object({
   query: z.string().default(""),

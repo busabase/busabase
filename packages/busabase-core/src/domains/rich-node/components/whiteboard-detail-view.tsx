@@ -23,6 +23,7 @@ import {
 import { asNodeDetail } from "../../dashboard/helpers/node-detail";
 import { useReportLoadedNode } from "../../dashboard/hooks/use-report-loaded-node";
 import type { NodeDetailProps } from "../../dashboard/node-detail-registry";
+import { useIsAnonymousVisitor } from "../../dashboard/visitor-context";
 import {
   RichNodeNotFound,
   RichNodeShell,
@@ -50,6 +51,7 @@ interface WhiteboardDetailViewProps {
 export function WhiteboardDetailView({ orpc, slug, onNodeLoaded }: WhiteboardDetailViewProps) {
   const messages = useCoreI18n();
   const locale = useCoreLocale();
+  const isAnonymous = useIsAnonymousVisitor();
   const detailQuery = useQuery({
     ...orpc.nodes.get.queryOptions({ input: { nodeId: slug ?? "", type: "whiteboard" } }),
     enabled: Boolean(slug),
@@ -184,6 +186,7 @@ export function WhiteboardDetailView({ orpc, slug, onNodeLoaded }: WhiteboardDet
             key={detail.node.id}
             langCode={locale}
             name={detail.node.name}
+            viewModeEnabled={isAnonymous}
             onChange={(elements, appState) => {
               const nextScene: WhiteboardDocument = {
                 version: 1,

@@ -8,6 +8,7 @@ import {
   AgentSessionVOSchema,
   CreateAgentSessionInputSchema,
   DisconnectAgentInputSchema,
+  ListAgentConnectionsInputSchema,
   PromptAgentSessionInputSchema,
   RespondToAgentPermissionInputSchema,
 } from "./types";
@@ -32,8 +33,8 @@ export const agentsContract = {
   ),
 
   connections: {
-    /** Connected backends, scoped to the current space and authenticated user. */
-    list: oc.output(AgentConnectionVOSchema.array()),
+    /** Connected backends in the current user's personal or active-space scope. */
+    list: oc.input(ListAgentConnectionsInputSchema).output(AgentConnectionVOSchema.array()),
   },
 
   sessions: {

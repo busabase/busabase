@@ -20,7 +20,8 @@ interface TemplateDetailViewProps {
  * what an agent will be able to do with it, then — last — how many tables it
  * has. The prompts are not decoration; they are the shortest honest answer to
  * "what would I even ask it", which is the question that decides whether an
- * installed app gets used or sits there.
+ * installed app gets used or sits there. The final summary uses Busabase's
+ * Base terminology rather than generic table vocabulary.
  */
 export function TemplateDetailView({
   template,

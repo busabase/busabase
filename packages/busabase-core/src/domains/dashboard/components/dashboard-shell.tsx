@@ -2,7 +2,7 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";
-import { hasCapability } from "busabase-contract/domains";
+import { hasCapability, publicAccessOf } from "busabase-contract/domains";
 import type { NodeVO } from "busabase-contract/types";
 import { Toaster } from "kui/sonner";
 import {
@@ -34,6 +34,7 @@ import { useLocation } from "wouter";
 import { CoreI18nProvider, coreMessagesByLocale } from "../../../i18n";
 import { nodeIconGlyph, resolveNodeIcon } from "../helpers/node-icons";
 import type { MoveNodePayload } from "../hooks/use-move-node";
+import { parseNodeDetailRoute } from "../utils/node-route";
 import { getSidebarTopLevelNodes } from "../utils/sidebar-node-tree";
 import { NodeDeleteDialog } from "./file-tree-browser";
 import { NodeAgentPromptsDialog } from "./node-agent-prompts-dialog";
@@ -49,6 +50,13 @@ import "./busabase-sidebar-nav.css";
 const DISABLED_FAVORITES_QUERY = {
   queryKey: ["busabase-dashboard-shell", "favorites-disabled"],
   queryFn: async () => [] as NodeVO[],
+  enabled: false,
+};
+
+/** Same always-disabled stand-in, for `orpc.nodes.ancestors` (see above). */
+const DISABLED_ANCESTORS_QUERY = {
+  queryKey: ["busabase-dashboard-shell", "ancestors-disabled"],
+  queryFn: async () => ({ ancestorIds: [] as string[] }),
   enabled: false,
 };
 
@@ -412,6 +420,35 @@ export function BusabaseDashboardShell({
   // in which case `DISABLED_FAVORITES_QUERY` keeps the `useQuery` call itself
   // unconditional (rules of hooks) while never firing a request.
   const queryClient = useQueryClient();
+  // The node the current route points at — the sidebar's own reading of the
+  // location, independent of whichever detail view is rendered.
+  const activeNodeRef = useMemo(() => parseNodeDetailRoute(location), [location]);
+
+  // Which folders sit on the path to that node. The sidebar cannot work this
+  // out from its own tree: the tree is depth-bounded and lazily expanded, so
+  // on a cold load (refresh / bookmark / shared link / "recently visited"
+  // jump) none of the ancestors have been fetched, and an ancestor that has
+  // not been fetched cannot be recognised as one. Asking the server once
+  // breaks that deadlock — NavMain opens each id it gets back, each expansion
+  // loads the next level, and the chain unrolls down to the active row.
+  const ancestorsQuery = useQuery(
+    orpc && activeNodeRef
+      ? {
+          ...orpc.nodes.ancestors.queryOptions({
+            input: { nodeId: activeNodeRef.slug, type: activeNodeRef.type },
+          }),
+          // A node's ancestry only changes when the node is MOVED, which
+          // invalidates the whole `nodes` family anyway — so this never needs
+          // a time-based refetch of its own.
+          staleTime: Number.POSITIVE_INFINITY,
+        }
+      : DISABLED_ANCESTORS_QUERY,
+  );
+  const activeAncestorIds = useMemo(
+    () => new Set(ancestorsQuery.data?.ancestorIds ?? []),
+    [ancestorsQuery.data],
+  );
+
   const favoritesQuery = useQuery(
     orpc ? orpc.nodes.listFavorites.queryOptions({}) : DISABLED_FAVORITES_QUERY,
   );
@@ -741,6 +778,7 @@ export function BusabaseDashboardShell({
                 onNodeDrop={onMoveNode ? handleNodeDrop : undefined}
                 isDropAllowed={onMoveNode ? isDropAllowed : undefined}
                 onExpand={onExpandNode ? (item) => item.id && onExpandNode(item.id) : undefined}
+                activeAncestorIds={activeAncestorIds}
               />
             </div>
           }
@@ -999,11 +1037,10 @@ function buildNavItem(node: NodeVO, ctx: NavItemContext): NavItem[] {
         onSelect: () => onOpenAgentPrompts(node),
       }
     : null;
-  // The "•••" Share action — opens the same public-link dialog the node-detail
-  // topbars use. Gated on `node.slug` because `NodeShareDialog` builds the
-  // public URL from it; a node without one has no link to hand out.
+  // The "•••" Share action — only types whose registry definition opts into a
+  // working anonymous detail route may produce a public link.
   const shareAction: NavItemAction | null =
-    onOpenShare && node.slug
+    onOpenShare && node.slug && publicAccessOf(node.type) !== "no"
       ? {
           title: labels.shareLabel,
           icon: Globe,

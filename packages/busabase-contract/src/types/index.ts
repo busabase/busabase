@@ -65,7 +65,7 @@ export type BusabaseSourceChannel =
   | "automation"
   | "import";
 export type ReviewVerdict = "approved" | "rejected";
-export type SearchResultKind = "record" | "change_request" | "base" | "file";
+export type SearchResultKind = "record" | "change_request" | "base" | "file" | "node";
 export type CommentSubjectType = "record" | "change_request" | "operation" | "commit";
 export type AuditAction =
   | "record.viewed"
@@ -404,6 +404,12 @@ export interface SearchResponseVO {
   offset: number;
   hasMore: boolean;
   results: SearchResultVO[];
+  /**
+   * True when some in-scope node content was indexed only up to the projection
+   * cap, so this search could not see all of it. Lets a client report an empty
+   * result honestly instead of implying the workspace lacks the phrase.
+   */
+  contentTruncated: boolean;
 }
 
 export interface AuditEventVO {

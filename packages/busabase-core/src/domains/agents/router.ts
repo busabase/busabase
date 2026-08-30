@@ -26,7 +26,7 @@ export const agentsRouter = {
   catalog: os.agents.catalog.handler(() => listCatalog()),
 
   connections: {
-    list: os.agents.connections.list.handler(() => listAgentConnections()),
+    list: os.agents.connections.list.handler(({ input }) => listAgentConnections(input.scope)),
   },
 
   disconnect: os.agents.disconnect.handler(async ({ input }) => {

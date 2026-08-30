@@ -31,6 +31,7 @@ const singleItemError = (result: { error?: string; code?: string; data?: unknown
 export interface ChangeRequestQueryInput {
   status?: string;
   mine?: boolean;
+  affectsNodeId?: string;
   limit?: number;
   cursor?: string;
   countsOnly?: boolean;
@@ -49,7 +50,8 @@ export const changeRequestQueryTask: TaskDefinition<ChangeRequestQueryInput> = {
   summary: "List change requests, or count them per inbox tab",
   guidance:
     "Keyset-paginated: page with the returned `cursor` rather than raising `limit`. " +
-    "Pass countsOnly for just the per-tab totals (review / changes / created / approved / merged / rejected) without fetching rows.",
+    "Pass countsOnly for just the per-tab totals (review / changes / created / approved / merged / rejected) without fetching rows. " +
+    "To check whether a specific resource already has an unfinished change request, pass affectsNodeId with limit 1 instead of paging the whole space: an empty result is conclusive.",
   annotations: { readOnly: true, destructive: false },
   params: [
     {
@@ -58,6 +60,12 @@ export const changeRequestQueryTask: TaskDefinition<ChangeRequestQueryInput> = {
       description: "Filter by status, e.g. `in_review`, `approved`, `merged`.",
     },
     { name: "mine", kind: "boolean", description: "Only change requests you submitted." },
+    {
+      name: "affectsNodeId",
+      kind: "string",
+      description:
+        "Only change requests affecting this node — matching the node directly, its Base, or any of the change request's operations. Not available on the counts variant, whose totals are always space-wide.",
+    },
     { name: "limit", kind: "number", min: 1, max: 100, description: "Page size; 100 max." },
     { name: "cursor", kind: "string", description: "Opaque cursor from the previous page." },
     {
@@ -68,6 +76,7 @@ export const changeRequestQueryTask: TaskDefinition<ChangeRequestQueryInput> = {
   ],
   examples: [
     "busabase-cli change-requests query --status in_review",
+    "busabase-cli change-requests query --affects-node-id nod_123 --status in_review --limit 1",
     "busabase-cli change-requests counts",
   ],
   execute: async (client: BusabaseTaskClient, input: ChangeRequestQueryInput) => {
@@ -75,6 +84,7 @@ export const changeRequestQueryTask: TaskDefinition<ChangeRequestQueryInput> = {
     return client.changeRequests.list({
       ...(input.status ? { status: input.status } : {}),
       ...(input.mine !== undefined ? { mine: input.mine } : {}),
+      ...(input.affectsNodeId ? { affectsNodeId: input.affectsNodeId } : {}),
       ...(input.limit !== undefined ? { limit: input.limit } : {}),
       ...(input.cursor ? { cursor: input.cursor } : {}),
     } as Parameters<BusabaseTaskClient["changeRequests"]["list"]>[0]);

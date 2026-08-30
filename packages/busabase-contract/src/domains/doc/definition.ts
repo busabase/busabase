@@ -9,7 +9,7 @@ export const docNodeType = {
   type: "doc",
   label: "Doc",
   icon: "file-text",
-  capabilities: { hasDetail: true, creatable: true },
+  capabilities: { hasDetail: true, creatable: true, publicAccess: "detail" },
   operations: [
     {
       kind: "doc_update",

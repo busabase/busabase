@@ -2,12 +2,21 @@ import type { AgentSessionVO } from "busabase-contract/domains/agents/types";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
-  budaConnections: [] as Array<{ slug: string; agentId: string; agentName: string }>,
+  budaConnections: [] as Array<{
+    slug: string;
+    agentId: string;
+    agentName: string;
+    ownedByCurrentUser: boolean;
+  }>,
+  requestedScopes: [] as string[],
   sessions: [] as AgentSessionVO[],
 }));
 
 vi.mock("./buda-connection", () => ({
-  listBudaConnections: async () => mocks.budaConnections,
+  listBudaConnections: async (scope: string) => {
+    mocks.requestedScopes.push(scope);
+    return mocks.budaConnections;
+  },
 }));
 vi.mock("./agent-session-manager", () => ({
   listAgentSessions: async () => mocks.sessions,
@@ -30,22 +39,34 @@ const session = (over: Partial<AgentSessionVO> & { slug: string }): AgentSession
 describe("listAgentConnections", () => {
   beforeEach(() => {
     mocks.budaConnections.length = 0;
+    mocks.requestedScopes.length = 0;
     mocks.sessions.length = 0;
   });
 
   it("maps saved Buda connection rows to agent connections", async () => {
     mocks.budaConnections.push(
-      { slug: "buda:agent-2", agentId: "agent-2", agentName: "Ada" },
-      { slug: "buda:agent-1", agentId: "agent-1", agentName: "Rex" },
+      {
+        slug: "buda:agent-2",
+        agentId: "agent-2",
+        agentName: "Ada",
+        ownedByCurrentUser: false,
+      },
+      {
+        slug: "buda:agent-1",
+        agentId: "agent-1",
+        agentName: "Rex",
+        ownedByCurrentUser: true,
+      },
     );
 
-    await expect(listAgentConnections()).resolves.toEqual([
+    await expect(listAgentConnections("space")).resolves.toEqual([
       {
         slug: "buda:agent-2",
         agentName: "Ada",
         transport: "remote-websocket",
         sessionCount: 0,
         latest: null,
+        ownedByCurrentUser: false,
       },
       {
         slug: "buda:agent-1",
@@ -53,12 +74,15 @@ describe("listAgentConnections", () => {
         transport: "remote-websocket",
         sessionCount: 0,
         latest: null,
+        ownedByCurrentUser: true,
       },
     ]);
+    expect(mocks.requestedScopes).toEqual(["space"]);
   });
 
   it("returns no connections when nothing is connected", async () => {
     await expect(listAgentConnections()).resolves.toEqual([]);
+    expect(mocks.requestedScopes).toEqual(["mine"]);
   });
 
   /**
@@ -76,6 +100,7 @@ describe("listAgentConnections", () => {
         transport: "local-subprocess",
         sessionCount: 1,
         latest: mocks.sessions[0],
+        ownedByCurrentUser: true,
       },
     ]);
   });
@@ -99,7 +124,12 @@ describe("listAgentConnections", () => {
    * a Buda session must never produce a second entry beside it.
    */
   it("does not let a Buda session duplicate its own saved connection", async () => {
-    mocks.budaConnections.push({ slug: "buda:agent-1", agentId: "agent-1", agentName: "Rex" });
+    mocks.budaConnections.push({
+      slug: "buda:agent-1",
+      agentId: "agent-1",
+      agentName: "Rex",
+      ownedByCurrentUser: true,
+    });
     mocks.sessions.push(
       session({ slug: "buda:agent-1", agentName: "Rex", transport: "remote-websocket" }),
     );
@@ -110,7 +140,12 @@ describe("listAgentConnections", () => {
   });
 
   it("lists both transports together, sorted by name", async () => {
-    mocks.budaConnections.push({ slug: "buda:agent-1", agentId: "agent-1", agentName: "Rex" });
+    mocks.budaConnections.push({
+      slug: "buda:agent-1",
+      agentId: "agent-1",
+      agentName: "Rex",
+      ownedByCurrentUser: true,
+    });
     mocks.sessions.push(session({ slug: "codex-acp", agentName: "Codex CLI" }));
 
     const connections = await listAgentConnections();

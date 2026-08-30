@@ -214,7 +214,7 @@ describe("dump domain — full demo-seed backup round trip", () => {
     const targetClient = createRouterClient(busabaseRouter);
 
     // ── Import: begin → blobs → tables (FK order) → doc bodies → commit ──────
-    const { sessionId } = await targetClient.dump.importBegin();
+    const { sessionId } = await targetClient.dump.importBegin({ sourceSpaceId: LOCAL_SPACE_ID });
 
     const blobRows = [...sourceBlobs.entries()].map(([storageKey, blob]) => ({
       storageKey,

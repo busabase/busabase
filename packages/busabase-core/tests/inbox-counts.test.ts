@@ -2,8 +2,11 @@ import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { createRouterClient } from "@orpc/server";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { LOCAL_SPACE_ID, runWithBusabaseContext } from "../src/context";
+import { getDb } from "../src/db";
+import { busabaseChangeRequests, busabaseCommits, busabaseOperations } from "../src/db/schema";
+import { filterVisibleChangeRequestRows } from "../src/logic/cr-lifecycle";
 import { busabaseRouter } from "../src/router";
 
 /**
@@ -22,6 +25,9 @@ type Client = ReturnType<typeof createRouterClient<typeof busabaseRouter, Record
 const MIGRATIONS_CWD = path.resolve(__dirname, "../../../apps/busabase");
 const MINE = "local-editor";
 const OTHER = "local-producer";
+const EXTRA_PENDING = 80;
+const ACL_BATCH_BOUNDARY_TOTAL = 5_001;
+const FIXTURE_INSERT_BATCH_SIZE = 1_000;
 
 describe("inbox counts", () => {
   let dataDir = "";
@@ -29,6 +35,54 @@ describe("inbox counts", () => {
   let originalCwd = "";
   let client: Client;
   let baseId = "";
+  let extraPendingIds: string[] = [];
+
+  const insertPendingRows = async (count: number, prefix: string) => {
+    const db = await getDb();
+    const rows = Array.from({ length: count }, (_, index) => {
+      const suffix = `${prefix}-${index}`;
+      return {
+        changeRequestId: `cr-${suffix}`,
+        commitId: `cmt-${suffix}`,
+        operationId: `op-${suffix}`,
+      };
+    });
+    for (let offset = 0; offset < rows.length; offset += FIXTURE_INSERT_BATCH_SIZE) {
+      const batch = rows.slice(offset, offset + FIXTURE_INSERT_BATCH_SIZE);
+      await db.insert(busabaseChangeRequests).values(
+        batch.map(({ changeRequestId }) => ({
+          id: changeRequestId,
+          spaceId: LOCAL_SPACE_ID,
+          baseId,
+          status: "in_review" as const,
+          submittedBy: OTHER,
+        })),
+      );
+      await db.insert(busabaseCommits).values(
+        batch.map(({ commitId, operationId }) => ({
+          id: commitId,
+          spaceId: LOCAL_SPACE_ID,
+          baseId,
+          operationId,
+          payload: {},
+          operation: "record_create" as const,
+          author: OTHER,
+        })),
+      );
+      await db.insert(busabaseOperations).values(
+        batch.map(({ changeRequestId, commitId, operationId }) => ({
+          id: operationId,
+          spaceId: LOCAL_SPACE_ID,
+          changeRequestId,
+          baseId,
+          operation: "record_create" as const,
+          headCommitId: commitId,
+          position: 0,
+        })),
+      );
+    }
+    return rows.map((row) => row.changeRequestId);
+  };
 
   beforeAll(async () => {
     originalCwd = process.cwd();
@@ -81,6 +135,10 @@ describe("inbox counts", () => {
       const id = await propose(`closed-${i}`, OTHER);
       await client.changeRequests.close({ changeRequestId: id } as never);
     }
+
+    // Cross the former 100-row count batch boundary without paying for 80
+    // complete review-first write cycles in this read-path integration test.
+    extraPendingIds = await insertPendingRows(EXTRA_PENDING, "inbox-counts-extra");
   }, 300_000);
 
   afterAll(async () => {
@@ -95,7 +153,7 @@ describe("inbox counts", () => {
   it("counts every status across the whole space, not just one page", async () => {
     const counts = await client.changeRequests.counts({} as never);
     expect(counts).toEqual({
-      review: 10, // 7 + 3 still in_review
+      review: 10 + EXTRA_PENDING, // 7 + 3 seeded through the API, plus the bulk fixture
       changes: 0,
       created: 5, // 3 pending-mine + 2 merged-mine
       approved: 5,
@@ -143,5 +201,107 @@ describe("inbox counts", () => {
       () => client.changeRequests.counts({} as never),
     );
     expect(asMember).toEqual(asManager);
+  });
+
+  it("scans candidates and operation scopes once beyond the old batch boundary", async () => {
+    const db = await getDb();
+    const selectSpy = vi.spyOn(db, "select");
+    try {
+      const counts = await runWithBusabaseContext(
+        {
+          spaceId: LOCAL_SPACE_ID,
+          actorId: MINE,
+          isSpaceManager: false,
+          permissionLevel: "manage",
+        },
+        () => client.changeRequests.counts({} as never),
+      );
+
+      const selectionKeys = selectSpy.mock.calls.map(([selection]) =>
+        Object.keys(selection ?? {})
+          .sort()
+          .join(","),
+      );
+      expect(selectionKeys.filter((keys) => keys === "id,status,submittedBy")).toHaveLength(1);
+      expect(
+        selectionKeys.filter(
+          (keys) => keys === "baseId,changeRequestId,headCommitId,nodeId,operation,position",
+        ),
+      ).toHaveLength(1);
+      expect(counts.review).toBe(10 + EXTRA_PENDING);
+    } finally {
+      selectSpy.mockRestore();
+    }
+  });
+
+  it("does not read commit scope hints for base-backed operations", async () => {
+    const db = await getDb();
+    const selectSpy = vi.spyOn(db, "select");
+    try {
+      const visibleRows = await runWithBusabaseContext(
+        {
+          spaceId: LOCAL_SPACE_ID,
+          actorId: MINE,
+          isSpaceManager: false,
+          permissionLevel: "manage",
+        },
+        () => filterVisibleChangeRequestRows(extraPendingIds.map((id) => ({ id }))),
+      );
+
+      const selectionKeys = selectSpy.mock.calls.map(([selection]) =>
+        Object.keys(selection ?? {})
+          .sort()
+          .join(","),
+      );
+      expect(
+        selectionKeys.filter(
+          (keys) => keys === "baseId,changeRequestId,headCommitId,nodeId,operation,position",
+        ),
+      ).toHaveLength(1);
+      expect(
+        selectionKeys.filter((keys) => keys === "id,parentNodeId,parentNodeRef,ref"),
+      ).toHaveLength(0);
+      expect(visibleRows).toHaveLength(EXTRA_PENDING);
+    } finally {
+      selectSpy.mockRestore();
+    }
+  });
+
+  it("caps each operation scope query at 5,000 change requests", async () => {
+    const db = await getDb();
+    const existingRows = await db
+      .select({ id: busabaseChangeRequests.id })
+      .from(busabaseChangeRequests);
+    const overflowRows = ACL_BATCH_BOUNDARY_TOTAL - existingRows.length;
+    expect(overflowRows).toBeGreaterThan(0);
+    await insertPendingRows(overflowRows, "inbox-counts-overflow");
+
+    const selectSpy = vi.spyOn(db, "select");
+    try {
+      const counts = await runWithBusabaseContext(
+        {
+          spaceId: LOCAL_SPACE_ID,
+          actorId: MINE,
+          isSpaceManager: false,
+          permissionLevel: "manage",
+        },
+        () => client.changeRequests.counts({} as never),
+      );
+
+      const selectionKeys = selectSpy.mock.calls.map(([selection]) =>
+        Object.keys(selection ?? {})
+          .sort()
+          .join(","),
+      );
+      expect(selectionKeys.filter((keys) => keys === "id,status,submittedBy")).toHaveLength(1);
+      expect(
+        selectionKeys.filter(
+          (keys) => keys === "baseId,changeRequestId,headCommitId,nodeId,operation,position",
+        ),
+      ).toHaveLength(2);
+      expect(counts.review).toBe(10 + EXTRA_PENDING + overflowRows);
+    } finally {
+      selectSpy.mockRestore();
+    }
   });
 });

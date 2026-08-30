@@ -36,7 +36,12 @@ export function AgentsAddView({ orpc, onBack, onConnected, spaceId }: AgentsAddV
     ...orpc.agents.sessions.create.mutationOptions(),
     onSuccess: (session: AgentSessionVO) => {
       void Promise.all([
-        queryClient.invalidateQueries({ queryKey: orpc.agents.connections.list.queryKey() }),
+        queryClient.invalidateQueries({
+          queryKey: orpc.agents.connections.list.queryKey({ input: { scope: "mine" } }),
+        }),
+        queryClient.invalidateQueries({
+          queryKey: orpc.agents.connections.list.queryKey({ input: { scope: "space" } }),
+        }),
         queryClient.invalidateQueries({ queryKey: orpc.agents.sessions.list.queryKey() }),
       ]);
       onConnected(session.slug);

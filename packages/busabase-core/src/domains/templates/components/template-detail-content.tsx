@@ -9,7 +9,7 @@ export interface TemplateDetailLabels {
   promptsDescription: string;
   contentsTitle: string;
   contentsDescription: string;
-  tables: string;
+  bases: string;
   apps: string;
   documents: string;
   sampleRows: string;
@@ -22,17 +22,23 @@ export interface TemplateDetailLabels {
   tags: string;
   previousScreenshot: string;
   nextScreenshot: string;
+  closePreview: string;
+  zoomOut: string;
+  zoomIn: string;
+  resetView: string;
+  rotateClockwise: string;
+  downloadImage: string;
   screenshot: (index: number) => string;
 }
 
 const defaultLabels: TemplateDetailLabels = {
   promptsTitle: "What you can ask an agent, once it is installed",
   promptsDescription:
-    "The agent can answer these because the template installs its author's manual alongside its tables. It does not have to guess your schema.",
+    "The agent can answer these because the template installs its author's manual alongside its Bases. It does not have to guess your schema.",
   contentsTitle: "What installing this creates",
   contentsDescription:
-    "Tables, fields, and sample rows are created straight away. App code and the agent manual are proposed as change requests for you to review first.",
-  tables: "Tables",
+    "Bases, fields, and sample rows are created straight away. App code and the agent manual are proposed as change requests for you to review first.",
+  bases: "Bases",
   apps: "Apps",
   documents: "Documents",
   sampleRows: "Sample rows",
@@ -45,6 +51,12 @@ const defaultLabels: TemplateDetailLabels = {
   tags: "Tags",
   previousScreenshot: "Previous screenshot",
   nextScreenshot: "Next screenshot",
+  closePreview: "Close preview",
+  zoomOut: "Zoom out",
+  zoomIn: "Zoom in",
+  resetView: "Reset view",
+  rotateClockwise: "Rotate clockwise",
+  downloadImage: "Download image",
   screenshot: (index) => (index === 0 ? "Template screenshots" : `Template screenshot ${index}`),
 };
 
@@ -65,7 +77,7 @@ export function TemplateDetailContent({
 }: TemplateDetailContentProps) {
   const { stats } = template;
   const contents = [
-    [labels.tables, stats.bases],
+    [labels.bases, stats.bases],
     [labels.apps, stats.airapps],
     [labels.documents, stats.docs],
     [labels.sampleRows, stats.records],
@@ -78,7 +90,7 @@ export function TemplateDetailContent({
   }));
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-12">
       <header className="flex flex-wrap items-start justify-between gap-4">
         <div className="flex max-w-2xl flex-col gap-2">
           <div className="flex flex-wrap items-center gap-2">
@@ -114,13 +126,19 @@ export function TemplateDetailContent({
           label={labels.screenshot(0)}
           previousLabel={labels.previousScreenshot}
           nextLabel={labels.nextScreenshot}
+          closeLabel={labels.closePreview}
+          zoomOutLabel={labels.zoomOut}
+          zoomInLabel={labels.zoomIn}
+          resetLabel={labels.resetView}
+          rotateLabel={labels.rotateClockwise}
+          downloadLabel={labels.downloadImage}
         />
       ) : null}
 
       {template.agentPrompts.length > 0 ? (
         <section className="flex flex-col gap-2">
-          <h2 className="flex items-center gap-2 text-sm font-medium">
-            <MessageSquare className="size-4" aria-hidden="true" />
+          <h2 className="flex items-center gap-2 text-lg font-medium">
+            <MessageSquare className="size-[1em]" aria-hidden="true" />
             {labels.promptsTitle}
           </h2>
           <ul className="flex flex-col gap-2">
@@ -138,8 +156,8 @@ export function TemplateDetailContent({
       ) : null}
 
       <section className="flex flex-col gap-2">
-        <h2 className="flex items-center gap-2 text-sm font-medium">
-          <PackageOpen className="size-4" aria-hidden="true" />
+        <h2 className="flex items-center gap-2 text-lg font-medium">
+          <PackageOpen className="size-[1em]" aria-hidden="true" />
           {labels.contentsTitle}
         </h2>
         <dl className="grid gap-x-6 gap-y-1 text-sm sm:grid-cols-2">

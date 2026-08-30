@@ -118,6 +118,17 @@ export type NodeDetailVO = z.infer<typeof NodeDetailVOSchema>;
  * hint. An ambiguous slug with no `type` is refused rather than silently
  * resolved to whichever row sorts first.
  */
+/**
+ * `nodes.ancestors` output — the node's ancestor ids, ROOT-FIRST, excluding
+ * the node itself. Ids only, deliberately: the sidebar already has (or can
+ * lazily fetch) each ancestor's own row, and it only needs to know WHICH
+ * folders to expand. Returning full nodes here would duplicate `nodes.list`
+ * and make a cheap navigational lookup expensive.
+ */
+export const nodeAncestorsVOSchema = z.object({
+  ancestorIds: z.array(z.string()),
+});
+
 export const getNodeInputSchema = z.object({
   nodeId: z.string().describe("Node id, or a slug that is unique within its type."),
   type: z

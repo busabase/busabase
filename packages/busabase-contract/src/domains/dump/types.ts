@@ -98,6 +98,22 @@ export const ExportAssetTextVOSchema = z.object({
 });
 export type ExportAssetTextVO = z.infer<typeof ExportAssetTextVOSchema>;
 
+export const ImportBeginInputSchema = z.object({
+  /**
+   * The space id the archive was ORIGINALLY exported from (`manifest.spaceId`
+   * in the `.bbdump`, already integrity-verified before this is called).
+   * `importTableRows`'s "nodes" handling needs this to recognize the
+   * archive's own root-node row deterministically (`rootNodeIdForSpace`) —
+   * scanning each batch's rows for "the one with a null `parentId`" only
+   * works when that row happens to land in the SAME batch as its children,
+   * which cursor pagination (id-ordered, not tree-ordered) does not
+   * guarantee once a space has more nodes than one page. See the matching
+   * comment in `import-logic.ts`.
+   */
+  sourceSpaceId: z.string(),
+});
+export type ImportBeginInput = z.infer<typeof ImportBeginInputSchema>;
+
 export const ImportBeginVOSchema = z.object({
   sessionId: z.string(),
 });

@@ -4,7 +4,34 @@ import path from "node:path";
 import { createRouterClient } from "@orpc/server";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { runWithBusabaseContext } from "../src/context";
+import { queryInChunks } from "../src/domains/dump/logic/import-logic";
+import { rootNodeIdForSpace } from "../src/logic/kernel";
 import { busabaseRouter } from "../src/router";
+
+describe("queryInChunks", () => {
+  it("batches a large id list instead of passing it to one query — the actual bug reproduced live: committing a real production restore with 1,080,685 fieldValues rows blew the SQL query builder's call stack building one inArray(...) with all of them", async () => {
+    const ids = Array.from({ length: 12_345 }, (_, i) => `id_${i}`);
+    const seenChunkSizes: number[] = [];
+    const rows = await queryInChunks(ids, async (idsChunk) => {
+      seenChunkSizes.push(idsChunk.length);
+      return idsChunk.map((id) => ({ id }));
+    });
+
+    expect(rows).toEqual(ids.map((id) => ({ id })));
+    expect(seenChunkSizes.every((size) => size <= 2000)).toBe(true);
+    expect(seenChunkSizes.length).toBeGreaterThan(1); // the batching path genuinely ran more than once
+  });
+
+  it("makes zero queries for an empty id list", async () => {
+    let calls = 0;
+    const rows = await queryInChunks([], async () => {
+      calls += 1;
+      return [];
+    });
+    expect(rows).toEqual([]);
+    expect(calls).toBe(0);
+  });
+});
 
 /**
  * Integration tests for the `dump` domain's business logic layer
@@ -54,12 +81,16 @@ describe("dump domain logic — oRPC integration", () => {
     await inSpace(spaceId, () =>
       client.docs.create({ autoMerge: true, slug: "seed-doc", name: "Seed Doc", body: "hi\n" }),
     );
-    await expect(inSpace(spaceId, () => client.dump.importBegin())).rejects.toThrow(/empty/i);
+    await expect(
+      inSpace(spaceId, () => client.dump.importBegin({ sourceSpaceId: spaceId })),
+    ).rejects.toThrow(/empty/i);
   });
 
   // ── importBegin succeeds on a truly empty space (only the auto-seeded root) ─
   it("importBegin succeeds on a fresh space and returns a sessionId", async () => {
-    const { sessionId } = await inSpace("space_dump_empty_begin", () => client.dump.importBegin());
+    const { sessionId } = await inSpace("space_dump_empty_begin", () =>
+      client.dump.importBegin({ sourceSpaceId: "space_dump_empty_begin" }),
+    );
     expect(sessionId).toBeTruthy();
     await inSpace("space_dump_empty_begin", () => client.dump.importAbort({ sessionId }));
   });
@@ -82,7 +113,13 @@ describe("dump domain logic — oRPC integration", () => {
     const sourceSpace = "space_dump_source_a";
     const targetSpace = "space_dump_target_a";
     const nodeId = "nod_fabricated_doc_for_import_test";
-    const fabricatedSourceRootId = "nod_root_space_dump_source_a_fabricated";
+    // A real archive's root row always has this exact deterministic id (the
+    // server now computes it from `sourceSpaceId` rather than scanning rows
+    // for "the one with a null parentId" — see the matching comment in
+    // import-logic.ts) — fabricate the same id a real export would produce,
+    // not an arbitrary one, or this test would exercise a shape no real
+    // archive can ever have.
+    const fabricatedSourceRootId = rootNodeIdForSpace(sourceSpace);
 
     // Node ids are a single GLOBAL primary key across every space in one DB
     // (not scoped per-space) — a real cross-spaceId restore only ever targets
@@ -127,7 +164,9 @@ describe("dump domain logic — oRPC integration", () => {
       },
     ];
 
-    const { sessionId } = await inSpace(targetSpace, () => client.dump.importBegin());
+    const { sessionId } = await inSpace(targetSpace, () =>
+      client.dump.importBegin({ sourceSpaceId: sourceSpace }),
+    );
 
     // nodes: exercises coerceDateColumns (createdAt/updatedAt as ISO strings on
     // the wire, coerced back to real Date before the drizzle insert), the
@@ -217,7 +256,9 @@ describe("dump domain logic — oRPC integration", () => {
   // ── importCommit integrity checks catch a deliberately-orphaned asset ──
   it("importCommit warns when an imported asset references a never-imported attachmentId", async () => {
     const targetSpace = "space_dump_orphan_asset";
-    const { sessionId } = await inSpace(targetSpace, () => client.dump.importBegin());
+    const { sessionId } = await inSpace(targetSpace, () =>
+      client.dump.importBegin({ sourceSpaceId: targetSpace }),
+    );
 
     // Import a bare `assets` row whose attachmentId was never (and will never
     // be) imported — a deliberately orphaned FK-less reference.
@@ -250,10 +291,14 @@ describe("dump domain logic — oRPC integration", () => {
   it("importTables remaps a principalType:'space' grant's principalId to the target space", async () => {
     const sourceSpace = "space_dump_np_source";
     const targetSpace = "space_dump_np_target";
-    const sourceRootId = "nod_root_np_source_fabricated";
+    // Must be the real deterministic root id a genuine export would produce —
+    // see the matching note on the earlier fabricated-root test above.
+    const sourceRootId = rootNodeIdForSpace(sourceSpace);
     const folderId = "nod_np_folder_child";
 
-    const { sessionId } = await inSpace(targetSpace, () => client.dump.importBegin());
+    const { sessionId } = await inSpace(targetSpace, () =>
+      client.dump.importBegin({ sourceSpaceId: sourceSpace }),
+    );
 
     // A source root + one child folder, exactly as they'd arrive over the wire.
     // The importer drops the source root and remaps the child onto the target's
@@ -372,7 +417,9 @@ describe("dump domain logic — oRPC integration", () => {
 
     it("a non-manager is FORBIDDEN from starting an import", async () => {
       await expect(
-        asRole("space_dump_guard", false, () => client.dump.importBegin()),
+        asRole("space_dump_guard", false, () =>
+          client.dump.importBegin({ sourceSpaceId: "space_dump_guard" }),
+        ),
       ).rejects.toThrow(/owner\/admin|access|forbidden/i);
     });
 

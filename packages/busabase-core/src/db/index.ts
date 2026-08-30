@@ -12,7 +12,7 @@ import * as schema from "./schema";
 
 type PgDb = ReturnType<typeof drizzlePg<typeof schema>>;
 type PgliteDb = ReturnType<typeof drizzlePglite<typeof schema>>;
-type DbInstance = PgDb | PgliteDb;
+export type DbInstance = PgDb | PgliteDb;
 
 type DbState = {
   db: DbInstance | null;

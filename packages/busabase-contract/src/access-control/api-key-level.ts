@@ -127,6 +127,11 @@ export const PROCEDURE_PERMISSION_POLICY: Record<string, ProcedurePermissionPoli
   "nodes.get": node("read"),
   "nodes.searchByName": node("read"),
   "nodes.isDescendant": node("read"),
+  // The ancestor chain of one node. A `read` for the same reason
+  // `nodes.isDescendant` is: it returns ids from the tree the caller can
+  // already list, resolved through the same per-node ACL, and reveals nothing
+  // a `nodes.list` would not.
+  "nodes.ancestors": node("read"),
   // ---- changeRequest: the full proposal-lifecycle family (never touches live
   // data), plus amending a still-pending proposal, plus uploading/writing an
   // asset for use inside a not-yet-merged proposal (deliberate inclusion). ----

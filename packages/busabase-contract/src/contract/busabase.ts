@@ -39,7 +39,11 @@ import {
 } from "./embed-link-schemas";
 import { UnifiedGrepInputSchema, UnifiedGrepResultVOSchema } from "./grep-schemas";
 import { updateNodeContentInputSchema } from "./node-content-schemas";
-import { getNodeInputSchema, NodeDetailVOSchema } from "./node-detail-schemas";
+import {
+  getNodeInputSchema,
+  NodeDetailVOSchema,
+  nodeAncestorsVOSchema,
+} from "./node-detail-schemas";
 import {
   NodeIconConfirmInputSchema,
   NodeIconConfirmVOSchema,
@@ -221,7 +225,7 @@ export const busabaseContractRoutes = {
         tags: ["Nodes", "Search"],
         summary: "Search nodes by name/slug (cheap, name-only quick-jump)",
         successDescription:
-          "Plain ilike match on name/slug across every registered node type, scoped by the same node-visibility ACL as `nodes.list`. No content scan and no full-text ranking — ordered exact-slug-match first, then by name. Backs the dashboard search dialog's 'Recent' tab cache-miss path; the heavier `search` endpoint remains the dedicated full-text content search.",
+          "Plain ilike match on name/slug across every registered node type, scoped by the same node-visibility ACL as `nodes.list`. No content scan and no full-text ranking — ordered exact-slug-match first, then by name. Backs the dashboard search dialog's 'Recent' tab cache-miss path. To search what is written INSIDE nodes, use `search` with the `nodes` source (indexed, paginated) or `grep` (exhaustive, no index).",
       })
       .input(searchNodesByNameInputSchema)
       .output(z.array(nodeSearchResultSchema)),
@@ -236,6 +240,17 @@ export const busabaseContractRoutes = {
       })
       .input(isDescendantInputSchema)
       .output(isDescendantOutputSchema),
+    ancestors: oc
+      .route({
+        method: "GET",
+        path: "/nodes/{nodeId}/ancestors",
+        tags: ["Nodes"],
+        summary: "List a node's ancestor ids",
+        successDescription:
+          "The node's ancestor ids, root-first, excluding the node itself (`[]` directly under the workspace root). `nodeId` accepts an id or a slug, same as `nodes.get`; pass `type` when a slug exists under more than one type. Lets a depth-bounded, lazily-expanded tree open straight to a deep node on a cold load (a refresh, a bookmark, a shared link) without one round trip per level.",
+      })
+      .input(getNodeInputSchema)
+      .output(nodeAncestorsVOSchema),
     createChangeRequest: oc
       .route({
         method: "POST",

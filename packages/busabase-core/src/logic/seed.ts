@@ -43,6 +43,7 @@ import type {
   SeedDocDef,
   SeedFileDef,
   SeedFileTreeDef,
+  SeedFolderDef,
   SeedFormDef,
   SeedRichNodeDef,
   SeedScenario,
@@ -538,19 +539,28 @@ const seedFileTreeNodesIfMissing = async (createdAt: Date, defs: SeedFileTreeDef
   }
   ensureDefaultStorageUrl();
   const db = await getDb();
+  const spaceId = getContextSpaceId();
 
   const neededFolderTypes = new Set(defs.map((def) => def.nodeType));
+  const actualFolderIdByNodeType = new Map<SeedFileTreeDef["nodeType"], string>();
   for (const nodeType of neededFolderTypes) {
     const folderConfig = FILE_TREE_FOLDER_CONFIG[nodeType];
     const [existingFolder] = await db
-      .select()
+      .select({ id: busabaseNodes.id })
       .from(busabaseNodes)
-      .where(eq(busabaseNodes.id, folderConfig.folderNodeId))
+      .where(
+        and(
+          eq(busabaseNodes.spaceId, spaceId),
+          eq(busabaseNodes.type, "folder"),
+          eq(busabaseNodes.slug, folderConfig.slug),
+          isNull(busabaseNodes.archivedAt),
+        ),
+      )
       .limit(1);
     if (!existingFolder) {
       await db.insert(busabaseNodes).values({
         id: folderConfig.folderNodeId,
-        parentId: ROOT_NODE_ID,
+        parentId: rootNodeIdForSpace(spaceId),
         type: "folder",
         slug: folderConfig.slug,
         name: folderConfig.name,
@@ -567,12 +577,14 @@ const seedFileTreeNodesIfMissing = async (createdAt: Date, defs: SeedFileTreeDef
           icon: seedNodeIcon({ ...folderConfig, nodeType: "folder" }),
           updatedAt: createdAt,
         })
-        .where(eq(busabaseNodes.id, folderConfig.folderNodeId));
+        .where(and(eq(busabaseNodes.spaceId, spaceId), eq(busabaseNodes.id, existingFolder.id)));
     }
+    actualFolderIdByNodeType.set(nodeType, existingFolder?.id ?? folderConfig.folderNodeId);
   }
 
   for (const def of defs) {
     const folderConfig = FILE_TREE_FOLDER_CONFIG[def.nodeType];
+    const folderNodeId = actualFolderIdByNodeType.get(def.nodeType) ?? folderConfig.folderNodeId;
     const metadata = {
       entryFile: folderConfig.entryFile,
       visibility: "workspace" as const,
@@ -581,13 +593,13 @@ const seedFileTreeNodesIfMissing = async (createdAt: Date, defs: SeedFileTreeDef
     const [existingNode] = await db
       .select()
       .from(busabaseNodes)
-      .where(eq(busabaseNodes.id, def.nodeId))
+      .where(and(eq(busabaseNodes.spaceId, spaceId), eq(busabaseNodes.id, def.nodeId)))
       .limit(1);
     if (existingNode) {
       await db
         .update(busabaseNodes)
         .set({
-          parentId: folderConfig.folderNodeId,
+          parentId: folderNodeId,
           type: def.nodeType,
           slug: def.slug,
           name: def.name,
@@ -596,11 +608,11 @@ const seedFileTreeNodesIfMissing = async (createdAt: Date, defs: SeedFileTreeDef
           metadata,
           updatedAt: createdAt,
         })
-        .where(eq(busabaseNodes.id, def.nodeId));
+        .where(and(eq(busabaseNodes.spaceId, spaceId), eq(busabaseNodes.id, def.nodeId)));
     } else {
       await db.insert(busabaseNodes).values({
         id: def.nodeId,
-        parentId: folderConfig.folderNodeId,
+        parentId: folderNodeId,
         type: def.nodeType,
         slug: def.slug,
         name: def.name,
@@ -616,7 +628,7 @@ const seedFileTreeNodesIfMissing = async (createdAt: Date, defs: SeedFileTreeDef
     const [node] = await db
       .select()
       .from(busabaseNodes)
-      .where(eq(busabaseNodes.id, def.nodeId))
+      .where(and(eq(busabaseNodes.spaceId, spaceId), eq(busabaseNodes.id, def.nodeId)))
       .limit(1);
     if (!node) {
       throw new Error(`Failed to seed ${def.nodeType} node: ${def.nodeId}`);
@@ -1497,6 +1509,42 @@ export const ensureReady = async () => {
   return ready;
 };
 
+/**
+ * Seeded folders sorted so a parent is always processed before any child that
+ * declares it via `parentNodeId` — the insert below needs the parent's
+ * resolved (possibly adopted) node id to exist in `actualFolderIdBySeedId`
+ * already. Depth-first from the roots, preserving the scenario's own order
+ * within each level; any folder left over (a `parentNodeId` pointing outside
+ * this scenario, or a cycle someone hand-wrote) is appended unchanged rather
+ * than silently dropped — it then falls back to its literal `parentNodeId`,
+ * which is exactly what happened before nesting existed.
+ */
+const orderFoldersParentsFirst = (folders: SeedFolderDef[]): SeedFolderDef[] => {
+  const childrenByParent = new Map<string, SeedFolderDef[]>();
+  const seedIds = new Set(folders.map((folder) => folder.nodeId));
+  const roots: SeedFolderDef[] = [];
+  for (const folder of folders) {
+    if (folder.parentNodeId && seedIds.has(folder.parentNodeId)) {
+      const siblings = childrenByParent.get(folder.parentNodeId) ?? [];
+      siblings.push(folder);
+      childrenByParent.set(folder.parentNodeId, siblings);
+    } else {
+      roots.push(folder);
+    }
+  }
+  const ordered: SeedFolderDef[] = [];
+  const visited = new Set<string>();
+  const visit = (folder: SeedFolderDef) => {
+    if (visited.has(folder.nodeId)) return;
+    visited.add(folder.nodeId);
+    ordered.push(folder);
+    for (const child of childrenByParent.get(folder.nodeId) ?? []) visit(child);
+  };
+  roots.forEach(visit);
+  for (const folder of folders) if (!visited.has(folder.nodeId)) ordered.push(folder);
+  return ordered;
+};
+
 const applySeedScenario = async (scenario: SeedScenario) => {
   const db = await getDb();
   const createdAt = now();
@@ -1514,11 +1562,24 @@ const applySeedScenario = async (scenario: SeedScenario) => {
   const actualFolderIdBySeedId = new Map<string, string>();
   const existingFolderMetadataBySeedId = new Map<string, Record<string, unknown>>();
 
-  for (const folder of scenario.folders ?? []) {
+  for (const folder of orderFoldersParentsFirst(scenario.folders ?? [])) {
+    // A folder nests under another seeded folder when it declares
+    // `parentNodeId`; everything else sits directly under the workspace root.
+    // `actualFolderIdBySeedId` is consulted because an adopted legacy folder
+    // may live under a different id than the scenario's — `orderFoldersParentsFirst`
+    // is what guarantees the parent has already been through this loop.
+    const parentNodeId = folder.parentNodeId
+      ? (actualFolderIdBySeedId.get(folder.parentNodeId) ?? folder.parentNodeId)
+      : ROOT_NODE_ID;
     const existingFolder =
       existingNodeById.get(folder.nodeId) ??
-      existingNodeByParentSlug.get(`${ROOT_NODE_ID}:${folder.slug}`);
+      existingNodeByParentSlug.get(`${parentNodeId}:${folder.slug}`);
     if (existingFolder) {
+      // `parentId` is deliberately NOT re-applied on an existing folder:
+      // re-seeding an already-populated workspace would otherwise yank a
+      // folder the user has since moved back to where the scenario put it.
+      // Nesting therefore takes effect on the insert path (a fresh workspace,
+      // or a folder this scenario is adding for the first time).
       await db
         .update(busabaseNodes)
         .set({
@@ -1534,7 +1595,7 @@ const applySeedScenario = async (scenario: SeedScenario) => {
     } else {
       await db.insert(busabaseNodes).values({
         id: folder.nodeId,
-        parentId: ROOT_NODE_ID,
+        parentId: parentNodeId,
         type: "folder",
         slug: folder.slug,
         name: folder.name,

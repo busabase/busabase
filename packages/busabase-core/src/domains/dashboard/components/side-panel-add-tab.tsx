@@ -64,7 +64,9 @@ export function SidePanelAddTab({
 
   // Connected agent backends, not the catalog of connectable ones — the menu
   // offers conversations, and you can only converse with something connected.
-  const connections = useQuery(orpc.agents.connections.list.queryOptions());
+  const connections = useQuery(
+    orpc.agents.connections.list.queryOptions({ input: { scope: "space" } }),
+  );
   const agents = connections.data ?? [];
 
   // A node page can be open on a type the panel has no renderer for, in which

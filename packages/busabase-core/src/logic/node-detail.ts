@@ -7,6 +7,7 @@ import { and, asc, eq, isNull } from "drizzle-orm";
 import { getContextSpaceId, isAnonymousVisitor } from "../context";
 import { getDb } from "../db";
 import { busabaseNodes, type NodePO } from "../db/schema";
+import { collectAncestorIds } from "./ancestor-chain";
 import { denyAnonymousNodeType, isAnonymousReadableNodeType } from "./anonymous-allowlist";
 // Side-effect import: guarantees every builtin node type has registered its
 // server-side behaviour before the dispatch below reads the registry. Importing
@@ -117,6 +118,46 @@ const buildGenericDetail = async (node: NodePO): Promise<NodeDetailVO> => {
     type: node.type,
     node: nodeMap.get(node.id) ?? toNodeVO(node, null),
   } as NodeDetailVO;
+};
+
+/**
+ * The ancestor chain of `nodeIdOrSlug`, ROOT-FIRST and excluding the node
+ * itself (`[]` for a node sitting directly under the workspace root).
+ *
+ * Exists because the sidebar cannot work this out on its own. Its tree is
+ * fetched depth-bounded and expanded lazily, so on a cold load — a refresh, a
+ * bookmark, a shared link, a "recently visited" jump — the ancestors of a
+ * deep node have simply never been fetched. Walking `parentId` client-side
+ * would be one round trip per level and still could not see past the first
+ * unloaded ancestor. This walks the same `parentId` chain `isDescendantOf`
+ * does, server-side, in one call, so the sidebar can expand straight to the
+ * active node.
+ *
+ * Resolution and ACL go through `resolveVisibleNode`, exactly as
+ * `getNodeDetail` does, so a slug in the URL works and an invisible node is a
+ * 404 rather than a leaked chain of ancestor ids.
+ */
+export const listNodeAncestorIds = async (
+  nodeIdOrSlug: string,
+  typeHint?: NodeType,
+): Promise<{ ancestorIds: string[] }> => {
+  await ensureReady();
+  const node = await resolveVisibleNode(nodeIdOrSlug, typeHint);
+  const db = await getDb();
+  const spaceId = getContextSpaceId();
+
+  const ancestorIds = await collectAncestorIds(node.id, async (id) => {
+    // The starting node is already resolved — reuse it instead of paying a
+    // second lookup for a row we are holding.
+    if (id === node.id) return node.parentId;
+    const [row] = await db
+      .select({ parentId: busabaseNodes.parentId })
+      .from(busabaseNodes)
+      .where(and(eq(busabaseNodes.id, id), eq(busabaseNodes.spaceId, spaceId)))
+      .limit(1);
+    return row?.parentId;
+  });
+  return { ancestorIds };
 };
 
 export const getNodeDetail = async (

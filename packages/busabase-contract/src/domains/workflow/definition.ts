@@ -11,7 +11,7 @@ export const workflowNodeType = {
   type: "workflow",
   label: "Workflow",
   icon: "workflow",
-  capabilities: { hasDetail: true, creatable: true },
+  capabilities: { hasDetail: true, creatable: true, publicAccess: "detail" },
   operations: [
     {
       kind: "workflow_document_update",

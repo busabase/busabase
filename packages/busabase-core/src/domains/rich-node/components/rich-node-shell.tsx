@@ -12,6 +12,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { fmt, useCoreI18n } from "../../../i18n";
 import { NodeActionsMenu } from "../../dashboard/components/node-actions-menu";
 import { NodeAgentPromptsButton } from "../../dashboard/components/node-agent-prompts-button";
+import { useIsAnonymousVisitor } from "../../dashboard/visitor-context";
 import { stableStringify } from "../utils/stable-json";
 
 export type SaveStatus = "saved" | "dirty" | "saving" | "error";
@@ -158,6 +159,7 @@ export function RichNodeShell({
   actions,
 }: RichNodeShellProps) {
   const messages = useCoreI18n();
+  const isAnonymous = useIsAnonymousVisitor();
   const statusLabel =
     status === "saving"
       ? messages.richNodes.saving
@@ -170,18 +172,22 @@ export function RichNodeShell({
       <header className="flex h-12 shrink-0 items-center gap-2 border-border/60 border-b px-3 md:px-4">
         <Icon className="size-4 shrink-0 text-muted-foreground" />
         <h1 className="min-w-0 flex-1 truncate font-medium text-foreground text-sm">{node.name}</h1>
-        <span
-          className={
-            status === "error"
-              ? "hidden max-w-48 truncate text-destructive text-xs sm:block"
-              : "hidden text-muted-foreground text-xs sm:block"
-          }
-          title={error ?? statusLabel}
-        >
-          {error ?? statusLabel}
-        </span>
-        {actions}
-        <NodeAgentPromptsButton nodeId={node.id} nodeName={node.name} nodeType={nodeType} />
+        {!isAnonymous && (
+          <span
+            className={
+              status === "error"
+                ? "hidden max-w-48 truncate text-destructive text-xs sm:block"
+                : "hidden text-muted-foreground text-xs sm:block"
+            }
+            title={error ?? statusLabel}
+          >
+            {error ?? statusLabel}
+          </span>
+        )}
+        {!isAnonymous && actions}
+        {!isAnonymous && (
+          <NodeAgentPromptsButton nodeId={node.id} nodeName={node.name} nodeType={nodeType} />
+        )}
         {/* One "•••" menu instead of the Permissions + Delete button pair this
             header used to render — same set of actions (plus Rename/Share,
             which this header never offered at all), same dialogs, and it
@@ -189,24 +195,28 @@ export function RichNodeShell({
             responsive split the Permissions button needed is gone with it: the
             trigger is a fixed-size icon at every breakpoint. Agent prompts sits
             outside as its own button (see `NodeAgentPromptsButton`). */}
-        <NodeActionsMenu
-          nodeId={node.id}
-          nodeName={node.name}
-          nodeSlug={node.slug}
-          nodeType={nodeType}
-          orpc={orpc}
-        />
-        <Button
-          aria-label={messages.richNodes.save}
-          disabled={status === "saving" || status === "saved"}
-          onClick={onSave}
-          size="icon-sm"
-          title={messages.richNodes.save}
-          type="button"
-          variant="default"
-        >
-          <Save className="size-3.5" />
-        </Button>
+        {!isAnonymous && (
+          <>
+            <NodeActionsMenu
+              nodeId={node.id}
+              nodeName={node.name}
+              nodeSlug={node.slug}
+              nodeType={nodeType}
+              orpc={orpc}
+            />
+            <Button
+              aria-label={messages.richNodes.save}
+              disabled={status === "saving" || status === "saved"}
+              onClick={onSave}
+              size="icon-sm"
+              title={messages.richNodes.save}
+              type="button"
+              variant="default"
+            >
+              <Save className="size-3.5" />
+            </Button>
+          </>
+        )}
       </header>
       <div className="min-h-0 flex-1">{children}</div>
     </div>

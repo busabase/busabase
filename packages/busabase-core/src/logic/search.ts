@@ -6,11 +6,11 @@ import type {
   SearchResponseVO,
   SearchResultVO,
 } from "busabase-contract/types";
-import { and, desc, eq, ilike, inArray, isNotNull, isNull, or, sql } from "drizzle-orm";
+import { and, desc, eq, ilike, inArray, isNotNull, isNull, notExists, or, sql } from "drizzle-orm";
 import { iStringConcat, iStringParse, iStringSchema } from "openlib/i18n/i-string";
 import { z } from "zod";
 import { getContextSpaceId } from "../context";
-import { getDb } from "../db";
+import { type DbInstance, getDb } from "../db";
 import {
   attachments,
   busabaseAssets,
@@ -19,6 +19,7 @@ import {
   busabaseBases,
   busabaseChangeRequests,
   busabaseFieldValues,
+  busabaseNodeContentSearch,
   busabaseNodes,
   busabaseRecords,
 } from "../db/schema";
@@ -34,10 +35,13 @@ import {
   buildNodeVisibilityCondition,
   buildNodeVisibilityExists,
 } from "./node-acl";
+import { isSearchableNodeType, reindexNodeContent, SEARCHABLE_NODE_TYPES } from "./node-content";
 import { ensureReady } from "./seed";
 import { toBaseVO } from "./vo";
 
-export const SEARCH_SOURCES = ["records", "files", "names"] as const;
+// Mirrors `contract/schemas.ts`s SEARCH_SOURCES; `nodes` searches node CONTENT
+// and is named to match grep's `nodes` source.
+export const SEARCH_SOURCES = ["records", "files", "names", "nodes"] as const;
 export type SearchSource = (typeof SEARCH_SOURCES)[number];
 
 // Schema defined locally to avoid circular deps with store.ts
@@ -132,6 +136,155 @@ const fileResultHref = (nodeType: string, nodeSlug: string) => {
   if (nodeType === "doc") return `/doc/${nodeSlug}`;
   if (nodeType === "base") return `/base/${nodeSlug}`;
   return `/${nodeType}/${nodeSlug}`;
+};
+
+/**
+ * Node CONTENT search — the human counterpart to grep's `nodes` source.
+ *
+ * Reads the `busabase_node_content_search` projection, which holds exactly the
+ * text grep scans (same `NODE_CONTENT_ADAPTERS` extraction), truncated to
+ * `VALUE_TEXT_INDEX_LIMIT`. See `content/spec/node-content-search.md`.
+ */
+const NODE_SNIPPET_RADIUS = 60;
+/**
+ * How many unindexed nodes one search request will index before querying.
+ *
+ * Bounded on purpose: a workspace upgraded from before this feature has no
+ * projection rows, and indexing them all in the first search would make that
+ * one request arbitrarily slow — worst on the largest workspaces, which are
+ * exactly the ones that need search most. A small batch per request lets the
+ * index fill in across a few searches instead (spec D3: gradually, never a
+ * stalled request).
+ */
+const NODE_SELF_HEAL_BATCH = 25;
+
+/** A snippet centred on the match, so the user can tell near-identical docs apart (spec S1). */
+const buildNodeSnippet = (content: string, query: string): string => {
+  const at = content.toLowerCase().indexOf(query.toLowerCase());
+  if (at < 0)
+    return content
+      .slice(0, NODE_SNIPPET_RADIUS * 2)
+      .replace(/\s+/g, " ")
+      .trim();
+  const start = Math.max(0, at - NODE_SNIPPET_RADIUS);
+  const end = Math.min(content.length, at + query.length + NODE_SNIPPET_RADIUS);
+  const core = content.slice(start, end).replace(/\s+/g, " ").trim();
+  return `${start > 0 ? "…" : ""}${core}${end < content.length ? "…" : ""}`;
+};
+
+const NODE_KIND_LABEL: Record<string, string> = {
+  doc: "Doc",
+  html: "Page",
+  whiteboard: "Whiteboard",
+  workflow: "Workflow",
+};
+
+/**
+ * Index up to `NODE_SELF_HEAL_BATCH` content-bearing nodes that have no
+ * projection row yet — the lazy backfill for workspaces that predate this
+ * feature (spec D3). Fail-soft per node: a missing content object leaves that
+ * node unindexed and retried next time rather than failing the search.
+ */
+const selfHealNodeProjections = async (db: DbInstance, spaceId: string): Promise<void> => {
+  const stale = await db
+    .select({ id: busabaseNodes.id, type: busabaseNodes.type })
+    .from(busabaseNodes)
+    .where(
+      and(
+        eq(busabaseNodes.spaceId, spaceId),
+        isNull(busabaseNodes.archivedAt),
+        inArray(busabaseNodes.type, SEARCHABLE_NODE_TYPES),
+        notExists(
+          db
+            .select({ one: sql`1` })
+            .from(busabaseNodeContentSearch)
+            .where(eq(busabaseNodeContentSearch.nodeId, busabaseNodes.id)),
+        ),
+      ),
+    )
+    .limit(NODE_SELF_HEAL_BATCH);
+  for (const node of stale) {
+    if (!isSearchableNodeType(node.type)) continue;
+    await reindexNodeContent(db, { nodeId: node.id, spaceId, nodeType: node.type });
+  }
+};
+
+/**
+ * Search node content. Node ACL is applied INSIDE this query, never after —
+ * post-filtering would both over-count `hasMore` and let a caller infer that
+ * hidden nodes exist (spec D4).
+ */
+const searchNodeContent = async (
+  db: DbInstance,
+  spaceId: string,
+  query: string,
+  limit: number,
+): Promise<{ results: SearchResultVO[]; truncated: boolean }> => {
+  await selfHealNodeProjections(db, spaceId);
+  const pattern = `%${query}%`;
+  const rows = await db
+    .select({
+      nodeId: busabaseNodeContentSearch.nodeId,
+      nodeType: busabaseNodeContentSearch.nodeType,
+      contentText: busabaseNodeContentSearch.contentText,
+      truncated: busabaseNodeContentSearch.truncated,
+      name: busabaseNodes.name,
+      slug: busabaseNodes.slug,
+      updatedAt: busabaseNodes.updatedAt,
+    })
+    .from(busabaseNodeContentSearch)
+    .innerJoin(busabaseNodes, eq(busabaseNodeContentSearch.nodeId, busabaseNodes.id))
+    .where(
+      and(
+        eq(busabaseNodeContentSearch.spaceId, spaceId),
+        isNull(busabaseNodes.archivedAt),
+        buildNodeVisibilityCondition(db),
+        or(
+          // Whole-lexeme match. Contributes nothing for CJK — Postgres has no
+          // segmenter there, so a Chinese run becomes one oversized lexeme that
+          // is dropped from the index entirely (spec D2a). Kept because it IS
+          // the good branch for English/mixed content.
+          sql`to_tsvector('simple', coalesce(${busabaseNodeContentSearch.contentText}, '')) @@ plainto_tsquery('simple', ${query})`,
+          // Substring match, trigram-indexed. This is the branch that carries
+          // CJK search entirely — never drop its index to save space.
+          ilike(busabaseNodeContentSearch.contentText, pattern),
+        ),
+      ),
+    )
+    .orderBy(desc(busabaseNodes.updatedAt))
+    .limit(limit);
+
+  // Whether the ANSWER may be incomplete — deliberately NOT derived from the
+  // matched rows. The case this exists for is precisely the one with zero
+  // matches: a phrase living past the cap of some in-scope document produces no
+  // hits at all, so asking the hits whether anything was truncated always says
+  // "no" exactly when the user most needs to be told otherwise.
+  const [truncatedInScope] = await db
+    .select({ nodeId: busabaseNodeContentSearch.nodeId })
+    .from(busabaseNodeContentSearch)
+    .innerJoin(busabaseNodes, eq(busabaseNodeContentSearch.nodeId, busabaseNodes.id))
+    .where(
+      and(
+        eq(busabaseNodeContentSearch.spaceId, spaceId),
+        eq(busabaseNodeContentSearch.truncated, true),
+        isNull(busabaseNodes.archivedAt),
+        buildNodeVisibilityCondition(db),
+      ),
+    )
+    .limit(1);
+
+  return {
+    results: rows.map((row) => ({
+      id: row.nodeId,
+      kind: "node" as const,
+      title: row.name,
+      body: buildNodeSnippet(row.contentText ?? "", query),
+      eyebrow: NODE_KIND_LABEL[row.nodeType] ?? row.nodeType,
+      href: fileResultHref(row.nodeType, row.slug),
+      updatedAt: row.updatedAt?.toISOString() ?? null,
+    })),
+    truncated: truncatedInScope !== undefined,
+  };
 };
 
 const fileMatchesQuery = (query: string, ...values: (string | null | undefined)[]) => {
@@ -320,6 +473,7 @@ export const searchBusabase = async (
   const query = parsed.query.trim();
   if (!query) {
     return {
+      contentTruncated: false,
       hasMore: false,
       limit: parsed.limit,
       offset: parsed.offset,
@@ -339,6 +493,7 @@ export const searchBusabase = async (
   const wantsRecords = wantsSource("records");
   const wantsFiles = wantsSource("files");
   const wantsNames = wantsSource("names");
+  const wantsNodes = wantsSource("nodes");
 
   const projectionRows = wantsRecords
     ? await db
@@ -472,6 +627,14 @@ export const searchBusabase = async (
     wantsFiles ? searchAssetBackedFiles(query, parsed.limit) : Promise.resolve([]),
   ]);
 
+  // Node CONTENT. Only on the first page: like `names`, these are not part of
+  // the `projectionRows` pagination cursor, so emitting them again on every
+  // page would duplicate them.
+  const nodeContent =
+    wantsNodes && parsed.offset === 0
+      ? await searchNodeContent(db, spaceId, query, parsed.limit)
+      : { results: [] as SearchResultVO[], truncated: false };
+
   const baseResults = [...baseRowsById.values()].map((base) =>
     toBaseSearchResult(
       toBaseVO(
@@ -482,12 +645,21 @@ export const searchBusabase = async (
   );
 
   const dedupedResults = new Map<string, SearchResultVO>();
-  for (const result of [...projectionResults, ...baseResults, ...fileResults]) {
+  for (const result of [
+    ...projectionResults,
+    ...baseResults,
+    ...fileResults,
+    ...nodeContent.results,
+  ]) {
     dedupedResults.set(`${result.kind}:${result.id}`, result);
   }
   const results = [...dedupedResults.values()].slice(0, parsed.limit);
 
   return {
+    // Reported even when this page has hits: it says the ANSWER may be
+    // incomplete, which is exactly what a caller needs in order to describe an
+    // empty or thin result honestly (spec D2b).
+    contentTruncated: nodeContent.truncated,
     hasMore: projectionRows.length > parsed.limit,
     limit: parsed.limit,
     offset: parsed.offset,

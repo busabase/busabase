@@ -53,6 +53,7 @@ import {
   FORMULA_LAB_RECORDS,
   FORMULA_LAB_VIEWS,
 } from "./scenarios/formula-functions-lab";
+import { nestedFoldersScenario } from "./scenarios/nested-folders";
 import { enNodeTypesScenario } from "./scenarios/node-types.en";
 import {
   AGENT_GALLERY_BASES,
@@ -3263,76 +3264,118 @@ export const buildDemoDataset = (
     formsByFolder.set(form.folderNodeId, siblings);
   }
   // Group the (use-case-filtered) bases under their sidebar folder; only emit a
-  // folder that actually has bases.
-  const folderNodes: NodeVO[] = (scenario.folders ?? [])
-    .map((folder) => ({
-      id: folder.nodeId,
-      parentId: DEMO_ROOT_NODE_ID,
-      type: "folder" as const,
-      slug: folder.slug,
-      name: folder.name,
-      description: folder.description,
-      icon: seedNodeIcon({ ...folder, nodeType: "folder" }),
-      metadata: folder.metadata ?? {},
-      position: folder.position,
-      createdAt: rootCreatedAt,
-      updatedAt: rootCreatedAt,
-      explicitVisibility: null,
-      baseId: null,
-      children: [
-        ...bases
-          .filter((base) => base.folderNodeId === folder.nodeId)
-          .map((base, index) => ({
-            id: base.nodeId,
-            parentId: folder.nodeId,
-            type: "base" as const,
-            slug: base.slug,
-            name: base.name,
-            description: base.description,
-            icon: seedNodeIcon({ ...base, nodeType: "base" }),
-            metadata: {},
-            position: index,
-            createdAt: rootCreatedAt,
-            updatedAt: rootCreatedAt,
-            explicitVisibility: null,
-            baseId: base.id,
-            children: [],
-          })),
-        ...(richNodesByFolder.get(folder.nodeId) ?? []).map((richNode) => ({
-          id: richNode.nodeId,
+  // folder that actually has content (see `pruneEmptyFolders` below — for a
+  // folder with subfolders that means content anywhere in its subtree).
+  const flatFolderNodes: NodeVO[] = (scenario.folders ?? []).map((folder) => ({
+    id: folder.nodeId,
+    parentId: folder.parentNodeId ?? DEMO_ROOT_NODE_ID,
+    type: "folder" as const,
+    slug: folder.slug,
+    name: folder.name,
+    description: folder.description,
+    icon: seedNodeIcon({ ...folder, nodeType: "folder" }),
+    metadata: folder.metadata ?? {},
+    position: folder.position,
+    createdAt: rootCreatedAt,
+    updatedAt: rootCreatedAt,
+    explicitVisibility: null,
+    baseId: null,
+    children: [
+      ...bases
+        .filter((base) => base.folderNodeId === folder.nodeId)
+        .map((base, index) => ({
+          id: base.nodeId,
           parentId: folder.nodeId,
-          type: richNode.nodeType,
-          slug: richNode.slug,
-          name: richNode.name,
-          description: richNode.description,
-          icon: seedNodeIcon({ ...richNode, nodeType: richNode.nodeType }),
-          metadata: richNode.metadata,
-          position: richNode.position,
-          createdAt: rootCreatedAt,
-          updatedAt: rootCreatedAt,
-          explicitVisibility: null,
-          baseId: null,
-          children: [],
-        })),
-        ...(formsByFolder.get(folder.nodeId) ?? []).map((form) => ({
-          id: form.nodeId,
-          parentId: folder.nodeId,
-          type: "form" as const,
-          slug: form.slug,
-          name: form.name,
-          description: form.description,
-          icon: seedNodeIcon({ ...form, nodeType: "form" }),
+          type: "base" as const,
+          slug: base.slug,
+          name: base.name,
+          description: base.description,
+          icon: seedNodeIcon({ ...base, nodeType: "base" }),
           metadata: {},
-          position: form.position,
+          position: index,
           createdAt: rootCreatedAt,
           updatedAt: rootCreatedAt,
           explicitVisibility: null,
-          baseId: null,
+          baseId: base.id,
           children: [],
         })),
-      ],
-    }))
-    .filter((folder) => folder.children.length > 0);
+      ...(richNodesByFolder.get(folder.nodeId) ?? []).map((richNode) => ({
+        id: richNode.nodeId,
+        parentId: folder.nodeId,
+        type: richNode.nodeType,
+        slug: richNode.slug,
+        name: richNode.name,
+        description: richNode.description,
+        icon: seedNodeIcon({ ...richNode, nodeType: richNode.nodeType }),
+        metadata: richNode.metadata,
+        position: richNode.position,
+        createdAt: rootCreatedAt,
+        updatedAt: rootCreatedAt,
+        explicitVisibility: null,
+        baseId: null,
+        children: [],
+      })),
+      ...(formsByFolder.get(folder.nodeId) ?? []).map((form) => ({
+        id: form.nodeId,
+        parentId: folder.nodeId,
+        type: "form" as const,
+        slug: form.slug,
+        name: form.name,
+        description: form.description,
+        icon: seedNodeIcon({ ...form, nodeType: "form" }),
+        metadata: {},
+        position: form.position,
+        createdAt: rootCreatedAt,
+        updatedAt: rootCreatedAt,
+        explicitVisibility: null,
+        baseId: null,
+        children: [],
+      })),
+    ],
+  }));
+
+  // Nest subfolders (`SeedFolderDef.parentNodeId`) into their parent's
+  // `children`, leaving only root-level folders behind. Subfolders
+  // go FIRST, ahead of the parent's own bases/rich nodes/forms, so a folder
+  // reads like a file explorer (containers, then leaves) — and so that every
+  // existing, subfolder-less folder keeps byte-identical children.
+  const flatFolderNodeById = new Map(flatFolderNodes.map((folder) => [folder.id, folder]));
+  // Keyed by the parent NODE, not its id, so attaching below needs no second
+  // lookup and has no "parent vanished" branch that could never actually run.
+  const subfoldersByParent = new Map<NodeVO, NodeVO[]>();
+  const rootFolderNodes: NodeVO[] = [];
+  for (const folderNode of flatFolderNodes) {
+    // A `parentNodeId` pointing at something that isn't another seeded folder
+    // (e.g. a scenario referencing a folder it doesn't ship) degrades to
+    // root-level rather than vanishing from the sidebar.
+    const parent =
+      folderNode.parentId === null ? undefined : flatFolderNodeById.get(folderNode.parentId);
+    if (!parent) {
+      folderNode.parentId = DEMO_ROOT_NODE_ID;
+      rootFolderNodes.push(folderNode);
+      continue;
+    }
+    const siblings = subfoldersByParent.get(parent) ?? [];
+    siblings.push(folderNode);
+    subfoldersByParent.set(parent, siblings);
+  }
+  for (const [parent, subfolders] of subfoldersByParent) {
+    subfolders.sort((a, b) => a.position - b.position);
+    parent.children = [...subfolders, ...parent.children];
+  }
+  // Drop folders whose whole subtree is empty — the same "don't show an empty
+  // folder" rule as before, just applied bottom-up now that a folder can be
+  // non-empty purely because a descendant is.
+  const pruneEmptyFolders = (nodes: NodeVO[]): NodeVO[] =>
+    nodes.flatMap((node) => {
+      if (node.type !== "folder") return [node];
+      const children = pruneEmptyFolders(node.children);
+      if (children.length === 0) return [];
+      node.children = children;
+      return [node];
+    });
+  // The Docs/Files/Skill/Drive/AirApp folders below push onto this same array.
+  const folderNodes: NodeVO[] = pruneEmptyFolders(rootFolderNodes);
 
   // Docs/Files are workspace-structural content (like Skill/Drive), not use-case
   // tagged Bases — always include them regardless of `useCase`, matching the real
@@ -3818,7 +3861,11 @@ export const buildDemoDataset = (
 /** English default seed — used by ensureReady() to populate a fresh local workspace. */
 export const englishScenario: SeedScenario = withSeedNodeIcons(
   withCmsDemoStandard({
-    folders: [...DEMO_FOLDERS, ...(enNodeTypesScenario.folders ?? [])],
+    folders: [
+      ...DEMO_FOLDERS,
+      ...(enNodeTypesScenario.folders ?? []),
+      ...(nestedFoldersScenario.folders ?? []),
+    ],
     bases: DEMO_BASES,
     records: DEMO_RECORDS,
     views: DEMO_VIEWS,
@@ -3826,7 +3873,10 @@ export const englishScenario: SeedScenario = withSeedNodeIcons(
     docs: enNodeTypesScenario.docs,
     files: enNodeTypesScenario.files,
     fileTreeNodes: enNodeTypesScenario.fileTreeNodes,
-    richNodes: enNodeTypesScenario.richNodes,
+    richNodes: [
+      ...(enNodeTypesScenario.richNodes ?? []),
+      ...(nestedFoldersScenario.richNodes ?? []),
+    ],
     comments: enNodeTypesScenario.comments,
     forms: [
       {

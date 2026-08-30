@@ -3,12 +3,12 @@
 import type { InstallPlanVO } from "busabase-contract/domains/install/types";
 import { Alert, AlertDescription, AlertTitle } from "kui/alert";
 import { Button } from "kui/button";
-import { Check, Copy, Sparkles, TriangleAlert } from "lucide-react";
-import { useMemo, useRef, useState } from "react";
-import { fmt, useCoreI18n, useCoreLocale } from "../../../i18n";
+import { Check, Copy, TriangleAlert } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { fmt, useCoreI18n } from "../../../i18n";
 import { buildAgentInstallPrompt, skillNameForSource } from "../helpers/agent-install-prompt";
 import type { McpGuideEdition } from "./agent-mcp-guides";
-import { AgentIntegrationDialog } from "./agent-skill-button";
+import { createSetupSkillUrl } from "./agent-skill-button";
 
 /**
  * "Agent install" — the tab that installs nothing here.
@@ -24,11 +24,11 @@ import { AgentIntegrationDialog } from "./agent-skill-button";
  * panel says so and points at the other tab.
  */
 
-/** What `AgentIntegrationDialog` needs to give the right connection guidance. */
+/** What the copied prompt needs to give the right connection guidance. */
 export interface AgentIntegrationTarget {
   /** Cloud OAuth guidance vs Desktop's local no-auth guidance. */
   edition?: McpGuideEdition;
-  /** SSR fallback origin, before the dialog reads `window.location.origin`. */
+  /** SSR fallback origin, before the panel reads `window.location.origin`. */
   defaultOrigin?: string;
   /** Cloud only: pins the copied setup prompt to the space being installed into. */
   targetSpaceId?: string;
@@ -42,29 +42,38 @@ export function AgentInstallPanel({
   agentIntegration?: AgentIntegrationTarget;
 }) {
   const messages = useCoreI18n();
-  const locale = useCoreLocale();
   const [copied, setCopied] = useState(false);
-  const [connectOpen, setConnectOpen] = useState(false);
+  const [origin, setOrigin] = useState(agentIntegration?.defaultOrigin ?? "http://localhost:15419");
   const promptRef = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(() => {
+    setOrigin(window.location.origin);
+  }, []);
 
   // A package with no skill node carries no manual — `counts.skills` is the
   // plan's own answer, so this stays true for packages the catalog never saw.
   const hasSkill = plan.counts.skills > 0;
   const appName = skillNameForSource(plan.source) ?? plan.package.name;
-  const prompt = useMemo(
-    () =>
-      buildAgentInstallPrompt({
-        source: plan.source,
-        packageName: plan.package.name,
-        template: messages.install.agentPromptBody,
-        fmt,
-      }),
-    [messages.install.agentPromptBody, plan.package.name, plan.source],
-  );
+  const edition = agentIntegration?.edition ?? "desktop";
+  // A stray targetSpaceId from a host must never leak into Desktop guidance.
+  const targetSpaceId = edition === "cloud" ? agentIntegration?.targetSpaceId : undefined;
+  const buildPromptForOrigin = (promptOrigin: string) =>
+    buildAgentInstallPrompt({
+      source: plan.source,
+      packageName: plan.package.name,
+      setupUrl: createSetupSkillUrl(promptOrigin, edition, true, targetSpaceId),
+      targetSpaceId,
+      template: messages.install.agentPromptBody,
+      fmt,
+    });
+  const prompt = buildPromptForOrigin(origin);
 
   const copy = async () => {
     try {
-      await navigator.clipboard.writeText(prompt);
+      // The textarea has an SSR-safe fallback URL. At the moment of copying,
+      // always rebuild from the browser origin so a host's placeholder dev URL
+      // can never reach the user's agent.
+      await navigator.clipboard.writeText(buildPromptForOrigin(window.location.origin));
       setCopied(true);
       window.setTimeout(() => setCopied(false), 1800);
     } catch {
@@ -110,42 +119,12 @@ export function AgentInstallPanel({
           ) : (
             <span />
           )}
-          <Button className="shrink-0" onClick={() => void copy()} variant="outline">
+          <Button className="shrink-0" onClick={() => void copy()}>
             {copied ? <Check className="size-4" /> : <Copy className="size-4" />}
             {copied ? messages.agentPrompts.copied : messages.agentPrompts.copy}
           </Button>
         </div>
       </div>
-
-      {/* The skill explains the app; it does not grant access to it. Someone who
-          pastes the prompt and stops here gets an agent that knows the manual and
-          cannot reach a single record — so the connection step is offered right
-          where that gap appears, not left to be discovered. */}
-      <div className="flex flex-col gap-2 rounded-md border border-border p-3">
-        <span className="font-medium text-foreground text-sm">
-          {messages.install.agentConnectTitle}
-        </span>
-        <span className="text-muted-foreground text-xs">{messages.install.agentConnectBody}</span>
-        <Button
-          className="w-fit"
-          onClick={() => setConnectOpen(true)}
-          type="button"
-          variant="outline"
-        >
-          <Sparkles className="size-4" />
-          {messages.install.agentConnectAction}
-        </Button>
-      </div>
-
-      <AgentIntegrationDialog
-        defaultOrigin={agentIntegration?.defaultOrigin}
-        edition={agentIntegration?.edition}
-        editionConfirmed
-        lang={locale}
-        onOpenChange={setConnectOpen}
-        open={connectOpen}
-        targetSpaceId={agentIntegration?.targetSpaceId}
-      />
     </div>
   );
 }

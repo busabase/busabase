@@ -13,6 +13,6 @@ export const formNodeType = {
   type: "form",
   label: "Form",
   icon: "form",
-  capabilities: { hasDetail: true, creatable: true },
+  capabilities: { hasDetail: true, creatable: true, publicAccess: "submit" },
   operations: [],
 } as const satisfies NodeTypeDefinition;

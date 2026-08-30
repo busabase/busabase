@@ -14,6 +14,7 @@ import { NodeDetailSkeleton } from "../../dashboard/components/skeletons";
 import { asNodeDetail } from "../../dashboard/helpers/node-detail";
 import { useReportLoadedNode } from "../../dashboard/hooks/use-report-loaded-node";
 import type { NodeDetailProps } from "../../dashboard/node-detail-registry";
+import { useIsAnonymousVisitor } from "../../dashboard/visitor-context";
 import {
   RichNodeNotFound,
   RichNodeShell,
@@ -29,6 +30,7 @@ interface HtmlDetailViewProps {
 
 export function HtmlDetailView({ orpc, slug, onNodeLoaded }: HtmlDetailViewProps) {
   const messages = useCoreI18n();
+  const isAnonymous = useIsAnonymousVisitor();
   const detailQuery = useQuery({
     ...orpc.nodes.get.queryOptions({ input: { nodeId: slug ?? "", type: "html" } }),
     enabled: Boolean(slug),
@@ -64,7 +66,10 @@ export function HtmlDetailView({ orpc, slug, onNodeLoaded }: HtmlDetailViewProps
       orpc={orpc}
       status={status}
     >
-      <Tabs className="flex h-full min-h-0 flex-col" defaultValue="source">
+      <Tabs
+        className="flex h-full min-h-0 flex-col"
+        defaultValue={isAnonymous ? "preview" : "source"}
+      >
         <div className="flex h-10 shrink-0 items-center border-border/60 border-b px-3">
           <TabsList className="h-8">
             <TabsTrigger className="gap-1.5 px-2.5 text-xs" value="source">
@@ -86,6 +91,7 @@ export function HtmlDetailView({ orpc, slug, onNodeLoaded }: HtmlDetailViewProps
               markDirty();
             }}
             spellCheck={false}
+            readOnly={isAnonymous}
             value={source}
           />
         </TabsContent>

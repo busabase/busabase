@@ -181,6 +181,11 @@ export const AGENT_EXCLUDED_MCP_TOOLS: readonly string[] = [
   "dump_import_abort",
   // Internal tree predicate used by the UI to validate a drag target.
   "nodes_is_descendant",
+  // The same category: the sidebar asks for a node's ancestor chain purely to
+  // know which folders to expand when it renders. An agent holding a node id
+  // already gets its `parentId` from `nodes_get` and the whole shape from
+  // `nodes_list`; this adds no reach, only UI plumbing.
+  "nodes_ancestors",
   // Installing a package writes a whole subtree of nodes into the workspace from
   // a third-party GitHub repo. That is a human's decision about what to trust,
   // not a step an agent should take on its own. `busabase-cli install` keeps it.

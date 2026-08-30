@@ -39,7 +39,7 @@ import {
 } from "./logic/node-acl";
 import { listNodeActivity, listRecordActivity } from "./logic/node-activity";
 import { readNodeLines } from "./logic/node-content";
-import { getNodeDetail } from "./logic/node-detail";
+import { getNodeDetail, listNodeAncestorIds } from "./logic/node-detail";
 import { disableNodeShare, getNodeShare, setNodeShare } from "./logic/node-share";
 import {
   closeChangeRequest,
@@ -130,6 +130,9 @@ const busabaseRouterImpl = busabase.router({
         input.potentialAncestorId,
       ),
     })),
+    ancestors: busabase.nodes.ancestors.handler(async ({ input }) =>
+      listNodeAncestorIds(input.nodeId, input.type),
+    ),
     createChangeRequest: busabase.nodes.createChangeRequest.handler(async ({ input }) =>
       createNodeChangeRequest(input),
     ),

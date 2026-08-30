@@ -1,4 +1,4 @@
-import type { NodeTypeDefinition, OperationDefinition } from "../types";
+import type { NodePublicAccess, NodeTypeDefinition, OperationDefinition } from "../types";
 
 export interface FileTreeKindDefinitionConfig {
   type: string;
@@ -7,6 +7,7 @@ export interface FileTreeKindDefinitionConfig {
   routeBase: string;
   tag: string;
   entryFile: string;
+  publicAccess: NodePublicAccess;
 }
 
 export const fileTreeOperations = <TType extends string>(type: TType) =>
@@ -40,6 +41,6 @@ export const makeFileTreeNodeType = <TConfig extends FileTreeKindDefinitionConfi
     type: config.type,
     label: config.label,
     icon: config.icon,
-    capabilities: { hasDetail: true, creatable: true },
+    capabilities: { hasDetail: true, creatable: true, publicAccess: config.publicAccess },
     operations: fileTreeOperations(config.type),
   }) as const satisfies NodeTypeDefinition;

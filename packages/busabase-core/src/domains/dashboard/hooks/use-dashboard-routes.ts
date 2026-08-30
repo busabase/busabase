@@ -1,6 +1,6 @@
-import { getNodeType } from "busabase-contract/domains";
 import { useMemo } from "react";
 import { useLocation, useRoute } from "wouter";
+import { parseNodeActivityRoute, parseNodeDetailRoute } from "../utils/node-route";
 
 /**
  * Parse the wouter route table for the dashboard SPA into a flat set of route
@@ -57,34 +57,9 @@ export function useDashboardRoutes() {
   const selectedFileSlug = isFileRoute ? (fileParams?.slug ?? null) : null;
   const selectedDocSlug = isDocRoute ? (docParams?.slug ?? null) : null;
   const selectedFolderSlug = isFolderRoute ? (folderParams?.slug ?? null) : null;
-  const nodeDetailRoute = useMemo(() => {
-    const pathname = location.split("?", 1)[0] ?? "";
-    const match = pathname.match(/^\/([^/]+)\/([^/]+)$/);
-    if (!match) return null;
-    const [, type, encodedSlug] = match;
-    const definition = getNodeType(type);
-    if (!definition?.capabilities.hasDetail || type === "base") return null;
-    try {
-      return { type, slug: decodeURIComponent(encodedSlug) };
-    } catch {
-      return { type, slug: encodedSlug };
-    }
-  }, [location]);
-  // Same shape as `nodeDetailRoute` above, but for `/{type}/:slug/activity`.
-  // `base` is excluded here too — it's already covered by `isBaseActivityRoute`.
-  const nodeActivityRoute = useMemo(() => {
-    const pathname = location.split("?", 1)[0] ?? "";
-    const match = pathname.match(/^\/([^/]+)\/([^/]+)\/activity$/);
-    if (!match) return null;
-    const [, type, encodedSlug] = match;
-    const definition = getNodeType(type);
-    if (!definition?.capabilities.hasDetail || type === "base") return null;
-    try {
-      return { type, slug: decodeURIComponent(encodedSlug) };
-    } catch {
-      return { type, slug: encodedSlug };
-    }
-  }, [location]);
+  const nodeDetailRoute = useMemo(() => parseNodeDetailRoute(location), [location]);
+  // Same shape, for `/{type}/:slug/activity`.
+  const nodeActivityRoute = useMemo(() => parseNodeActivityRoute(location), [location]);
   const selectedChangeRequestId =
     operationParams?.changeRequestId ?? changeRequestParams?.changeRequestId ?? null;
 

@@ -27,6 +27,7 @@ import { htmlNodeType } from "./html/definition";
 import { skillNodeType } from "./skill/definition";
 import type {
   NodeCapabilities,
+  NodePublicAccess,
   NodeTypeDefinition,
   OperationDefinition,
   OperationMeta,
@@ -36,6 +37,7 @@ import { workflowNodeType } from "./workflow/definition";
 
 export type {
   NodeCapabilities,
+  NodePublicAccess,
   NodeTypeDefinition,
   OperationDefinition,
   OperationMeta,
@@ -147,3 +149,13 @@ export const getNodeType = (type: string): NodeTypeDefinition | undefined => reg
 
 export const hasCapability = (type: string, capability: keyof NodeCapabilities): boolean =>
   Boolean(getNodeType(type)?.capabilities[capability]);
+
+/** Public-link behavior for a node type. Unknown and undeclared types fail closed. */
+export const publicAccessOf = (type: string): NodePublicAccess =>
+  getNodeType(type)?.capabilities.publicAccess ?? "no";
+
+/** Whether anonymous `nodes.get` may hydrate this type's detail document. */
+export const isPubliclyReadableNodeType = (type: string): boolean => {
+  const access = publicAccessOf(type);
+  return access === "detail" || access === "submit";
+};

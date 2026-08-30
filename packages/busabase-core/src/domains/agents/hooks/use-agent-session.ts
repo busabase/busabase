@@ -1,5 +1,6 @@
 "use client";
 
+import { attachmentToContentBlock } from "@acp-ui/core/prompt";
 import type { AcpUiEvent } from "@acp-ui/core/reduce";
 import type { AcpSessionPort } from "@acp-ui/core/session";
 import { useAcpSession } from "@acp-ui/core/session";
@@ -85,17 +86,19 @@ function translate(event: AgentSessionEventVO): AcpUiEvent[] {
           content: { type: "text", text: update.text },
         } as never,
       },
+      // Built through the same helper the send path uses, rather than
+      // hand-rolling `{ type: attachment.kind }`: that shape is only a valid
+      // ACP content block for `image`/`audio`, so a `file` attachment would
+      // produce `{ type: "file" }`, be rejected by the reducer, and silently
+      // vanish from a replayed transcript — the very failure the comment
+      // above warns about, one kind later.
       ...attachments.map(
         (attachment): AcpUiEvent => ({
           type: "session_update",
           update: {
             sessionUpdate: "user_message_chunk",
-            content: {
-              type: attachment.kind,
-              data: attachment.data,
-              mimeType: attachment.mimeType,
-            },
-          } as never,
+            content: attachmentToContentBlock(attachment),
+          },
         }),
       ),
     ];
