@@ -2,7 +2,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createBusabaseAirAppLocalGateway } from "./airapp-node.js";
+import { createBusabaseAirAppLocalGateway, describeBusabaseAirAppRuntime } from "./airapp-node.js";
 import {
   loadBusabaseAirAppDynamicClientId,
   loadBusabaseAirAppOAuthCredential,
@@ -535,5 +535,47 @@ describe("local AirApp gateway proxy", () => {
     );
     expect(response.status).toBe(200);
     expect(loadBusabaseAirAppOAuthCredential(APP_ID, { rootDir })).toBeNull();
+  });
+});
+
+describe("describeBusabaseAirAppRuntime", () => {
+  it("reports standalone when nothing injected the variable", () => {
+    expect(describeBusabaseAirAppRuntime({})).toEqual({
+      runtime: "standalone",
+      knownRuntime: null,
+      hosted: false,
+      devProxy: false,
+    });
+  });
+
+  it("reports a known engine both verbatim and narrowed", () => {
+    expect(describeBusabaseAirAppRuntime({ BUSABASE_AIRAPP_RUNTIME: "nodepod" })).toMatchObject({
+      runtime: "nodepod",
+      knownRuntime: "nodepod",
+      hosted: true,
+    });
+  });
+
+  /**
+   * The whole reason `hosted` is presence and not membership. An engine this SDK
+   * predates still means Busabase spawned the process — only Busabase sets the
+   * variable at all. A list-based check answered "standalone" here, and that is
+   * what broke 66 shipped apps when `local-node` became `local`.
+   */
+  it("treats an engine it has never heard of as hosted, with knownRuntime null", () => {
+    expect(
+      describeBusabaseAirAppRuntime({ BUSABASE_AIRAPP_RUNTIME: "an-engine-from-2027" }),
+    ).toMatchObject({ runtime: "an-engine-from-2027", knownRuntime: null, hosted: true });
+  });
+
+  it("gets the renamed and newer engines right, which the old list did not", () => {
+    expect(describeBusabaseAirAppRuntime({ BUSABASE_AIRAPP_RUNTIME: "local" }).hosted).toBe(true);
+    expect(describeBusabaseAirAppRuntime({ BUSABASE_AIRAPP_RUNTIME: "sandock" }).hosted).toBe(true);
+  });
+
+  it("keeps devProxy as a separate axis from hosting", () => {
+    const report = describeBusabaseAirAppRuntime({ BUSABASE_BASE_URL: "http://localhost:15419" });
+    expect(report.hosted).toBe(false);
+    expect(report.devProxy).toBe(true);
   });
 });

@@ -1,15 +1,72 @@
 import { createHash } from "node:crypto";
+import { Readable } from "node:stream";
 import { type DumpTable, DumpTableSchema } from "busabase-contract/domains/dump/types";
 import type { BusabaseClient } from "busabase-sdk";
 import { ArchiveWriter } from "../format/archive-writer.js";
 import { FORMAT_VERSION, type Manifest } from "../format/manifest.js";
+import { IMPORT_ORDER } from "../import/full-importer.js";
+
+/**
+ * The CLI's shared `withRetry` (retry.ts) wraps `fetch` and only inspects the
+ * HTTP status — a response that comes back `200` but whose body was
+ * truncated or corrupted in transit (observed live against a real,
+ * large production space: a many-thousand-page `dump.exportTables` pull threw
+ * `Cannot parse response body` partway through, at a different table on each
+ * attempt) already looks "successful" to that wrapper and is never retried.
+ * A single flaky page must not fail an entire multi-hour backup, so retry
+ * the one page here, close to the failure, rather than widening the shared
+ * fetch-level wrapper (which would change retry behavior for every command).
+ */
+const PAGE_FETCH_RETRIES = 3;
+const PAGE_FETCH_RETRY_DELAY_MS = 1000;
+
+const fetchPageWithRetry = async <T>(
+  fetchPage: () => Promise<T>,
+  onRetry?: (attempt: number, error: unknown) => void,
+): Promise<T> => {
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      return await fetchPage();
+    } catch (error) {
+      if (attempt >= PAGE_FETCH_RETRIES) throw error;
+      onRetry?.(attempt + 1, error);
+      await new Promise((resolve) =>
+        setTimeout(resolve, PAGE_FETCH_RETRY_DELAY_MS * (attempt + 1)),
+      );
+    }
+  }
+};
+
+/**
+ * Write an NDJSON archive entry from already-collected rows without ever
+ * concatenating them into a single JS string first. A real production table
+ * (e.g. `fieldValues` holding long CMS/article-body content) can produce an
+ * NDJSON blob well past V8's max string length — `"".join("\n")` on such a
+ * table throws `RangeError: Invalid string length` and aborts the whole
+ * backup. Building one `Buffer` per line and streaming them through
+ * `ArchiveWriter.addStream` (already built for exactly this — see its own
+ * doc comment) avoids ever holding one oversized string/buffer.
+ */
+const writeNdjsonEntry = async (
+  writer: ArchiveWriter,
+  path: string,
+  rows: Array<Record<string, unknown>>,
+): Promise<void> => {
+  const lineBuffers = rows.map((row) => Buffer.from(`${JSON.stringify(row)}\n`, "utf8"));
+  const totalSize = lineBuffers.reduce((sum, buf) => sum + buf.length, 0);
+  await writer.addStream(path, totalSize, Readable.from(lineBuffers));
+};
 
 // Every dump-eligible table, taken straight from the contract enum (the single
-// source of truth). Export order is irrelevant — each table is drained
-// independently, and the post-loop doc-body / attachment-blob passes read from
-// the already-collected `tableRows`. Deriving this instead of hand-maintaining
-// a parallel copy is what stops a newly-registered table (e.g. the
-// `nodePrincipals` permissions table) from being silently skipped on backup.
+// source of truth). FETCH order here is irrelevant — each table is drained
+// independently into `tableRows`, and the doc-body / attachment-blob passes
+// below read from that already-collected map. Deriving this instead of
+// hand-maintaining a parallel copy is what stops a newly-registered table
+// (e.g. the `nodePrincipals` permissions table) from being silently skipped
+// on backup.
+//
+// WRITE order (which archive entries actually land in, below) is a separate
+// concern and does matter — see the write-phase comment.
 const EXPORT_TABLES: DumpTable[] = [...DumpTableSchema.options];
 
 const HISTORY_TABLES: DumpTable[] = [
@@ -64,15 +121,19 @@ export async function exportFull(options: FullExportOptions): Promise<Manifest> 
     const rows: Array<Record<string, unknown>> = [];
     let cursor: string | undefined;
     do {
-      const page = await client.dump.exportTables({ table, cursor, limit: pageLimit });
+      const page = await fetchPageWithRetry(
+        () => client.dump.exportTables({ table, cursor, limit: pageLimit }),
+        (attempt, error) => {
+          const message = error instanceof Error ? error.message : String(error);
+          log(`  retrying ${table} page (attempt ${attempt}/${PAGE_FETCH_RETRIES}): ${message}`);
+        },
+      );
       rows.push(...(page.rows as Array<Record<string, unknown>>));
       cursor = page.nextCursor ?? undefined;
     } while (cursor);
 
     tableRows[table] = rows;
     tableCounts[table] = rows.length;
-    const ndjson = `${rows.map((row) => JSON.stringify(row)).join("\n")}${rows.length ? "\n" : ""}`;
-    await writer.addBuffer(`tree/${table}.ndjson`, ndjson);
     log(`exported ${table}: ${rows.length} rows`);
   }
 
@@ -84,19 +145,35 @@ export async function exportFull(options: FullExportOptions): Promise<Manifest> 
   // needs every body — there is no list endpoint that returns them in bulk, and
   // pretending otherwise would silently drop content from the archive.
   const docNodes = (tableRows.nodes ?? []).filter((n) => n.type === "doc");
-  let docBodyCount = 0;
+  const docBodyEntries: Array<{ nodeId: string; body: string }> = [];
+  const skippedDocBodies: string[] = [];
   for (const node of docNodes) {
     const nodeId = node.id as string;
-    const detail = await client.nodes.get({ nodeId, type: "doc" });
-    if (detail.type !== "doc") {
-      // The server resolves `type: "doc"`, so this can only fire if the contract
-      // and the server drift. Fail loudly rather than archiving an empty body.
-      throw new Error(`Expected a doc node for ${nodeId}, got "${detail.type}"`);
+    try {
+      // `nodes.get` deliberately 404s on an archived node (Trash is read
+      // through a different, metadata-only endpoint — see node-detail.ts) —
+      // but the raw `nodes` table dump above still includes archived rows, by
+      // design, so a full-fidelity backup genuinely needs. A space with even
+      // one archived-but-not-purged Doc previously crashed the ENTIRE backup
+      // here with an uncaught `NOT_FOUND`. Same treatment as the attachment
+      // and asset-text loops below: skip that one body with a warning rather
+      // than losing everything else in the archive over it.
+      const detail = await client.nodes.get({ nodeId, type: "doc" });
+      if (detail.type !== "doc") {
+        // The server resolves `type: "doc"`, so this can only fire if the
+        // contract and the server drift. Fail loudly rather than archiving an
+        // empty body.
+        throw new Error(`Expected a doc node for ${nodeId}, got "${detail.type}"`);
+      }
+      // Written later, in the write phase below — see that comment for why.
+      docBodyEntries.push({ nodeId, body: detail.body ?? "" });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      skippedDocBodies.push(nodeId);
+      log(`  WARNING: could not read doc body for node ${nodeId}, skipping it (${message})`);
     }
-    await writer.addBuffer(`docs/${nodeId}.md`, detail.body ?? "");
-    docBodyCount += 1;
   }
-  log(`exported ${docBodyCount} doc bodies`);
+  log(`fetched ${docBodyEntries.length} doc bodies, skipped ${skippedDocBodies.length}`);
 
   // Attachment blobs — download every exported Asset's bytes and archive them
   // keyed by the OWNING `busabase_attachments` row's own `storageKey` (written
@@ -145,12 +222,8 @@ export async function exportFull(options: FullExportOptions): Promise<Manifest> 
       log(`  WARNING: could not download asset ${assetId}, skipping its blob (${message})`);
     }
   }
-  const blobNdjson = `${attachmentBlobRows.map((row) => JSON.stringify(row)).join("\n")}${
-    attachmentBlobRows.length ? "\n" : ""
-  }`;
-  await writer.addBuffer("tree/attachmentBlobs.ndjson", blobNdjson);
   log(
-    `exported ${blobCount} attachment blobs (${blobBytes} bytes), skipped ${skippedAssets.length}`,
+    `fetched ${blobCount} attachment blobs (${blobBytes} bytes), skipped ${skippedAssets.length}`,
   );
 
   // Asset-text blobs — the extracted-text objects `busabase_asset_texts` rows
@@ -213,12 +286,33 @@ export async function exportFull(options: FullExportOptions): Promise<Manifest> 
       );
     }
   }
-  const textBlobNdjson = `${textBlobRows.map((row) => JSON.stringify(row)).join("\n")}${
-    textBlobRows.length ? "\n" : ""
-  }`;
-  await writer.addBuffer("tree/assetTextBlobs.ndjson", textBlobNdjson);
   log(
-    `exported ${textBlobCount} asset-text blobs (${textBlobBytes} bytes), skipped ${skippedAssetTexts.length}`,
+    `fetched ${textBlobCount} asset-text blobs (${textBlobBytes} bytes), skipped ${skippedAssetTexts.length}`,
+  );
+
+  // Write phase — everything above only FETCHED data into memory; nothing has
+  // touched the archive file yet. Entries are written here in the exact
+  // order `full-importer.ts` needs to encounter them while streaming the
+  // file back in a single pass (blobs before the table rows that reference
+  // them, tables in FK-safe `IMPORT_ORDER`, doc bodies last): `streamArchive`
+  // processes entries strictly in tar-physical order, so THIS order is what
+  // makes a true single-pass streaming restore possible without re-reading
+  // the file per table. See the matching comment on `IMPORT_ORDER`.
+  await writeNdjsonEntry(writer, "tree/attachmentBlobs.ndjson", attachmentBlobRows);
+  await writeNdjsonEntry(writer, "tree/assetTextBlobs.ndjson", textBlobRows);
+  for (const table of IMPORT_ORDER) {
+    // `--no-history` never fetched these tables at all (see `tables` above)
+    // — omit the entry entirely rather than writing an empty one, matching
+    // the archive's previous shape for a `--no-history` backup.
+    if (!tables.includes(table)) continue;
+    await writeNdjsonEntry(writer, `tree/${table}.ndjson`, tableRows[table] ?? []);
+  }
+  for (const doc of docBodyEntries) {
+    await writer.addBuffer(`docs/${doc.nodeId}.md`, doc.body);
+  }
+  log(
+    `wrote archive entries: ${blobCount} attachment blobs, ${textBlobCount} asset-text blobs, ` +
+      `${IMPORT_ORDER.length} tables, ${docBodyEntries.length} doc bodies`,
   );
 
   const manifestWithoutChecksum: Omit<Manifest, "checksum"> = {

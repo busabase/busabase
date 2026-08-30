@@ -46,6 +46,7 @@ import {
   runLogout,
   runRefresh,
 } from "./login.js";
+import { type CheckLayer, runCheck } from "./package/check.js";
 import { runExport, runIndex, runInstall } from "./package/commands.js";
 import { paginateAll } from "./paginate.js";
 import { withRetry } from "./retry.js";
@@ -1707,8 +1708,13 @@ Examples:
     );
 
   addGlobalFlags(program.command("install"))
-    .description("Install a Busabase package from a GitHub repo into this space")
-    .argument("<github-url>", "GitHub repo URL, optionally /tree/<ref>[/<subdir>]")
+    .description(
+      "Install a Busabase package from a GitHub repo or a local directory into this space",
+    )
+    .argument(
+      "<source>",
+      "GitHub repo URL (optionally /tree/<ref>[/<subdir>]), or a local directory / file:// URL written by `busabase-cli export`",
+    )
     .option("--into-folder <name>", "target folder slug (default: the package's manifest name)")
     .option("--dry-run", "print the plan (tree, record counts, collisions) and create nothing")
     .option(
@@ -1733,11 +1739,17 @@ Examples:
 The URL's git ref is the version pin — a tag installs that tag's content forever,
 even after the branch moves on. GITHUB_TOKEN is honored for private repos.
 
+A local directory or a \`file://\` URL installs straight from disk instead of
+GitHub — the same package \`busabase-cli export\` just wrote, useful for
+authoring/testing a package before it has anywhere to be pushed. Anything that
+is not an http(s):// URL is read as a local path.
+
 Examples:
   busabase-cli install https://github.com/acme/support-kb-template
   busabase-cli install https://github.com/acme/packages/tree/v1.2.0/skills/pdf-summarizer
   busabase-cli install https://github.com/acme/support-kb-template --dry-run
   busabase-cli install https://github.com/acme/support-kb-template --into-folder support --auto-merge
+  busabase-cli install ./support-kb-template --dry-run
 
 Folders, Bases, their fields and their views are structure and are always created
 immediately. Records are content: by default they land as change requests for you
@@ -1771,6 +1783,42 @@ field with nothing linked yet does not trigger this.`,
           json: config.output === "json",
           githubToken: process.env.GITHUB_TOKEN,
           serverUrl: config.baseUrl,
+        }),
+      ),
+    );
+
+  addGlobalFlags(program.command("check"))
+    .description("Check a package / Skill / template / AirApp directory against its contract")
+    .argument("[dir]", "directory to check, or a repo with a templates/ subdirectory", ".")
+    .option("--strict", "warnings fail too")
+    .option("--as <layer>", "judge it as this layer even if it has not declared itself one")
+    .option("--only <layer>", "report only this layer (package | skill | template | airapp)")
+    .addHelpText(
+      "after",
+      `
+Four things can be true of one directory and they are not four rungs of a ladder:
+a package installs resources, an Agent Skill is a manual an agent reads, a template
+is a directory that is both plus an explicit opt-in, and an AirApp is a node type
+that ships inside a package. Each applicable layer is reported separately.
+
+A layer that does not apply reports "-", never a tick: "not applicable" and "passed"
+must not look the same.
+
+This checks one directory. Whether a repository's catalog file is current is a
+different question, answered by \`busabase-cli index --check\`.
+
+Examples:
+  busabase-cli check .
+  busabase-cli check . --strict
+  busabase-cli check ./templates/busa-email --only airapp`,
+    )
+    .action(
+      runLocalArgAction((dir, opts, config) =>
+        runCheck(dir, {
+          strict: Boolean(opts.strict),
+          as: opts.as as CheckLayer | undefined,
+          only: opts.only as CheckLayer | undefined,
+          json: config.output === "json",
         }),
       ),
     );
@@ -1894,13 +1942,20 @@ which writes a readable, diffable package directory you can push to GitHub.`,
       `
 The archive's checksum is verified before a single row is written, and the target
 space must be EMPTY — a restore replays original ids, so it cannot merge into a
-space that already holds content.
+space that already holds content. Those ids are also unique across the whole
+database, not just the target space: restore only into a database where the
+archive's ids have never been used before (disaster recovery into a fresh
+database, or back into the space it came from after that space's own data was
+removed). Restoring into a different space while the SOURCE space is still live
+in the same database will fail — its rows already hold those ids.
 
 Examples:
   busabase-cli restore ./space.bbdump
   busabase-cli restore ./backups/acme-2026-07-19.bbdump --space-id spc_123
 
-To add content to a space that is already in use, use \`busabase-cli install\` instead.`,
+To add content to a space that is already in use, use \`busabase-cli install\` instead.
+To copy a still-live space's current content into another space, use
+\`busabase-cli export\` + \`busabase-cli install\` instead of backup/restore.`,
     )
     .action(
       runArgAction(state, (file, client, opts, config) =>
@@ -2051,7 +2106,11 @@ export async function runCli(argv: string[]): Promise<number> {
   }
   try {
     await program.parseAsync(argv, { from: "user" });
-    return 0;
+    // A command that ran fine but reached a failing verdict says so through
+    // `process.exitCode` rather than by throwing. `check` reporting findings is not an
+    // error — throwing would route it through the error envelope and, under `--json`,
+    // put a second JSON document on stdout after the findings CI came for.
+    return typeof process.exitCode === "number" ? process.exitCode : 0;
   } catch (error) {
     const json = errorOutputIsJson(state, argv);
     if (error instanceof CommanderError) {

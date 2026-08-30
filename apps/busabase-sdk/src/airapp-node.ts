@@ -80,6 +80,51 @@ export const asKnownBusabaseAirAppRuntime = (runtime: string): BusabaseAirAppRun
     ? (runtime as BusabaseAirAppRuntime)
     : null;
 
+/** The body every AirApp serves at `__airapp/runtime`. */
+export interface BusabaseAirAppRuntimeReport {
+  /**
+   * The engine name verbatim, or `"standalone"` when nothing hosted this process.
+   *
+   * Deliberately a plain string and not the enum: a newer Busabase naming an engine
+   * this SDK predates must still round-trip, and narrowing here would erase it.
+   */
+  runtime: string;
+  /**
+   * The same value narrowed to what this SDK knows, or `null` for an engine it has
+   * never heard of. This is the field to branch on when behaviour genuinely differs
+   * per engine — and `null` is a normal answer, not an error.
+   */
+  knownRuntime: BusabaseAirAppRuntime | null;
+  /** Presence of the injected variable. Never membership of {@link BUSABASE_AIRAPP_RUNTIMES}. */
+  hosted: boolean;
+  /** Whether a standalone run is proxying to a Busabase base URL. A separate axis. */
+  devProxy: boolean;
+}
+
+/**
+ * Build the `__airapp/runtime` body.
+ *
+ * This exists because the one line it replaces — `hosted: …` — has now regressed
+ * twice. Both times a correct app was copied from an older source and came back
+ * deciding hosting from a hardcoded list of engine names, and both times every test
+ * stayed green, because nothing asserted the shape of that decision.
+ *
+ * An app that calls this cannot get it wrong: `hosted` is presence by construction,
+ * and the engine name is reported both verbatim (so an unknown one survives) and
+ * narrowed (so code that wants to branch on a specific engine has a type).
+ */
+export const describeBusabaseAirAppRuntime = (
+  env: Record<string, string | undefined> = process.env,
+): BusabaseAirAppRuntimeReport => {
+  const runtime = readBusabaseAirAppRuntime(env);
+  return {
+    runtime: runtime || "standalone",
+    knownRuntime: asKnownBusabaseAirAppRuntime(runtime),
+    hosted: isBusabaseAirAppHosted(runtime),
+    devProxy: (env.BUSABASE_BASE_URL || "").trim() !== "",
+  };
+};
+
 export const BUSABASE_AIRAPP_GATEWAY_REASONS = {
   authRequired: "AUTH_REQUIRED",
   authUnavailable: "AUTH_UNAVAILABLE",

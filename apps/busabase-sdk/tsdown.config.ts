@@ -16,6 +16,7 @@ export default defineConfig({
     oauth: "src/oauth.ts",
     "oauth-node": "src/oauth-node.ts",
     "airapp-node": "src/airapp-node.ts",
+    "airapp-check": "src/airapp-check.ts",
     airapp: "src/airapp.ts",
     "airapp-gate": "src/airapp-gate.ts",
   },
