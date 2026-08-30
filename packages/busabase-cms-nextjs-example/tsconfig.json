@@ -23,6 +23,7 @@
       "busabase-cms": ["../busabase-cms/src/index.ts"],
       "busabase-cms/*": ["../busabase-cms/src/*.ts"],
       "busabase-sdk": ["../../apps/busabase-sdk/src/index.ts"],
+      "busabase-sdk/*": ["../../apps/busabase-sdk/src/*.ts"],
       "busabase-contract/contract/cloud": ["../busabase-contract/src/contract/cloud.ts"],
       "busabase-contract/domains": ["../busabase-contract/src/domains/registry.ts"],
       "busabase-contract/types": ["../busabase-contract/src/types/index.ts"],

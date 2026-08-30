@@ -13,6 +13,7 @@
     "types": ["node"],
     "paths": {
       "busabase-sdk": ["../../apps/busabase-sdk/src/index.ts"],
+      "busabase-sdk/*": ["../../apps/busabase-sdk/src/*.ts"],
       "busabase-contract": ["../busabase-contract/src/index.ts"],
       "busabase-contract/domains": ["../busabase-contract/src/domains/registry.ts"],
       "busabase-contract/*": ["../busabase-contract/src/*"],
