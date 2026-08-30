@@ -5,6 +5,7 @@ export * from "./demo-client";
 export * from "./hooks";
 export * from "./NavMain";
 export * from "./NavUser";
+export * from "./SettingsDialogShell";
 export * from "./SidebarTaskList";
 export * from "./SPABreadcrumb";
 export * from "./SPALink";

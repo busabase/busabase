@@ -172,9 +172,15 @@ export const assertSafeFilePath = (filePath: string, context: string): void => {
         `Invalid file path "${filePath}" (${context}): the segment "${segment}" contains a character that is illegal in a file name on Windows or macOS (/ \\ : * ? " < > |). Rename the file.`,
       );
     }
-    if (/^[. ]|[. ]$/.test(segment)) {
+    // Windows silently strips a TRAILING dot or space when a file is created,
+    // so an archived "foo." would come back as "foo" on checkout there — a
+    // real cross-OS hazard. A LEADING dot has no such problem: it is the
+    // ordinary hidden-file convention (.gitignore, .env, .eslintrc, …) and
+    // checks out identically everywhere, so it must not be rejected here —
+    // real AirApp source trees are full of them.
+    if (/[. ]$/.test(segment)) {
       throw new Error(
-        `Invalid file path "${filePath}" (${context}): the segment "${segment}" starts or ends with a dot or space, which does not survive a checkout on every OS. Rename the file.`,
+        `Invalid file path "${filePath}" (${context}): the segment "${segment}" ends with a dot or space, which does not survive a checkout on every OS. Rename the file.`,
       );
     }
   }

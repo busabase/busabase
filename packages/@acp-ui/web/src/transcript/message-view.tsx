@@ -1,7 +1,12 @@
 "use client";
 
 import type { AcpAttachment } from "@acp-ui/core/reduce";
-import { Attachment, AttachmentPreview, Attachments } from "kui/ai-elements/attachments";
+import {
+  Attachment,
+  AttachmentInfo,
+  AttachmentPreview,
+  Attachments,
+} from "kui/ai-elements/attachments";
 import { Message, MessageContent } from "kui/ai-elements/message";
 import { Reasoning, ReasoningContent, ReasoningTrigger } from "kui/ai-elements/reasoning";
 import type { AcpMessageViewProps } from "./slots";
@@ -10,9 +15,16 @@ import type { AcpMessageViewProps } from "./slots";
  * Renders through `kui`'s `Attachments`/`Attachment`, which are typed against
  * the AI SDK's `FileUIPart` — a structural shape, not an `ai` import of our
  * own (`src/__tests__/boundary.test.ts` enforces that distinction, same as
- * `tool-status.ts`'s seam onto `ToolUIPart["state"]`). ACP's `data`/`mimeType`
- * become a `data:` URL, since ACP sends the payload inline, base64, with no
- * separate URL of its own.
+ * `tool-status.ts`'s seam onto `ToolUIPart["state"]`).
+ *
+ * Images become a `data:` URL, since ACP sends the payload inline, base64,
+ * with no separate URL of its own, and grid thumbnails identify them on their
+ * own. Everything else — a PDF, a spreadsheet, an attached source file —
+ * renders through the `inline` variant instead, because kui's `grid` variant
+ * deliberately drops `AttachmentInfo` and a document without its name is an
+ * anonymous file icon. Those also skip the `data:` URL entirely: nothing
+ * displays it, and materialising one would double a multi-megabyte payload in
+ * memory for no visible gain.
  */
 function AcpAttachmentsView({
   messageId,
@@ -21,23 +33,43 @@ function AcpAttachmentsView({
   messageId: string;
   attachments: AcpAttachment[];
 }) {
+  const toData = (attachment: AcpAttachment, index: number) => {
+    const isImage = attachment.mimeType.startsWith("image/");
+    return {
+      id: `${messageId}-attachment-${index}`,
+      type: "file" as const,
+      mediaType: attachment.mimeType,
+      url: isImage ? `data:${attachment.mimeType};base64,${attachment.data}` : "",
+      ...(attachment.filename ? { filename: attachment.filename } : {}),
+    };
+  };
+
+  const indexed = attachments.map((attachment, index) => ({ attachment, index }));
+  const images = indexed.filter(({ attachment }) => attachment.mimeType.startsWith("image/"));
+  const rest = indexed.filter(({ attachment }) => !attachment.mimeType.startsWith("image/"));
+
   return (
-    <Attachments className="mt-2" variant="grid">
-      {attachments.map((attachment, index) => (
-        <Attachment
-          data={{
-            id: `${messageId}-attachment-${index}`,
-            type: "file",
-            mediaType: attachment.mimeType,
-            url: `data:${attachment.mimeType};base64,${attachment.data}`,
-          }}
-          // biome-ignore lint/suspicious/noArrayIndexKey: the reducer only ever appends to a message's attachments array, never reorders or removes — index is a stable identity here, and attachments carry no id of their own to key on instead.
-          key={`${messageId}-attachment-${index}`}
-        >
-          <AttachmentPreview />
-        </Attachment>
-      ))}
-    </Attachments>
+    <div className="mt-2 space-y-2">
+      {images.length > 0 ? (
+        <Attachments variant="grid">
+          {images.map(({ attachment, index }) => (
+            <Attachment data={toData(attachment, index)} key={`${messageId}-attachment-${index}`}>
+              <AttachmentPreview />
+            </Attachment>
+          ))}
+        </Attachments>
+      ) : null}
+      {rest.length > 0 ? (
+        <Attachments variant="inline">
+          {rest.map(({ attachment, index }) => (
+            <Attachment data={toData(attachment, index)} key={`${messageId}-attachment-${index}`}>
+              <AttachmentPreview />
+              <AttachmentInfo className="max-w-40" />
+            </Attachment>
+          ))}
+        </Attachments>
+      ) : null}
+    </div>
   );
 }
 

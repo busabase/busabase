@@ -14,23 +14,39 @@ import type { SessionUpdate, ToolCallStatus, ToolKind } from "@agentclientprotoc
 export type AcpBlock = AcpMessageBlock | AcpToolCallBlock | AcpPermissionBlock | AcpNoteBlock;
 
 /**
- * An image or audio clip attached to a message — either the agent sent one
- * (an ACP `image`/`audio` content block arrived mid-message) or the user
- * attached one when sending (see `AcpOutgoingAttachment`, which this is a
- * superset shape of).
+ * Something attached to a message — either the agent sent one (an ACP
+ * `image`/`audio`/`resource` content block arrived mid-message) or the user
+ * attached one when sending.
  *
- * Scoped to the two content kinds a file picker or paste realistically
- * produces. ACP's `resource_link`/`resource` content blocks are a different
- * UX (referencing something the agent already knows about, like a repo path —
- * closer to an `@mention` picker than an attach button) and are explicitly
- * out of scope here, same as the other unhandled `sessionUpdate` kinds: not
- * silently dropped forever, just not this round.
+ * `file` covers everything a file picker produces that isn't an image or an
+ * audio clip: a PDF, a spreadsheet, a Markdown note, a source file. It maps to
+ * ACP's embedded `resource` content block, which the protocol calls the
+ * "preferred" way to include context precisely because the agent has no other
+ * route to a file the user picked in a browser. (ACP's *other* resource block,
+ * `resource_link`, is a different UX — it names a path the agent can already
+ * read, closer to an `@mention` picker than an attach button — and remains out
+ * of scope.)
+ *
+ * `data` is ALWAYS base64, for every kind, so the browser never has to guess
+ * an encoding and binary payloads can't be corrupted in transit. Whether a
+ * `file` reaches the agent as ACP text or as an ACP blob is decided at send
+ * time from the payload itself — see `prompt/attachment-media.ts`.
  */
 export interface AcpAttachment {
-  kind: "image" | "audio";
-  /** Base64-encoded payload, verbatim from ACP's `ImageContent`/`AudioContent`. */
+  kind: "image" | "audio" | "file";
+  /**
+   * Base64-encoded payload. Verbatim from ACP's `ImageContent`/`AudioContent`
+   * for those kinds; for `file`, base64 of the raw bytes regardless of whether
+   * the file is textual.
+   */
   data: string;
   mimeType: string;
+  /**
+   * The original filename. Only carried for `kind: "file"`, where it is what
+   * the user recognises the attachment by — two PDFs are otherwise
+   * indistinguishable in the composer — and what becomes the resource's `uri`.
+   */
+  filename?: string;
 }
 
 export interface AcpMessageBlock {

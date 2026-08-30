@@ -82,7 +82,12 @@ export const collectPackageTree = async (
   root: SourceNode,
   options: CollectOptions,
 ): Promise<PackageTree> => {
-  const children = root.children ?? [];
+  // A folder's own content lives in `children`. Any other node type (a bare
+  // Base, Doc, Drive, …) has no `children` at all — it IS the content — so
+  // treating `root.children ?? []` as the source list here would silently
+  // walk zero nodes and export nothing but an empty manifest. Fall back to
+  // `[root]` so exporting a non-folder node directly still collects it.
+  const children = root.type === "folder" ? (root.children ?? []) : [root];
   const { skillSource, rest } = partitionTemplateSkill(children);
   const nodes = await collectNodes(client, rest, options);
   const tree: PackageTree = {
@@ -638,7 +643,7 @@ const downloadBytes = async (
  * So the rule the format actually enforces is: never ship a reference that would
  * resolve to the WRONG thing; do warn about one that resolves to nothing.
  */
-const assertSelfContained = (tree: PackageTree, options: CollectOptions): void => {
+export const assertSelfContained = (tree: PackageTree, options: CollectOptions): void => {
   const carriedAssetIds = new Set((tree.assets ?? []).map((asset) => asset.assetId));
   for (const node of walkNodes(tree.nodes)) {
     if (node.type !== "doc") continue;
@@ -671,9 +676,14 @@ const assertSelfContained = (tree: PackageTree, options: CollectOptions): void =
         if (field.type !== "relation") continue;
         const value = record.fields[field.slug];
         const keys = Array.isArray(value) ? value : typeof value === "string" ? [value] : [];
-        for (const key of keys) {
-          if (typeof key === "string" && !packagedRecordKeys.has(key)) dangling++;
-        }
+        if (keys.length === 0) continue;
+        const kept = keys.filter((key) => typeof key !== "string" || packagedRecordKeys.has(key));
+        dangling += keys.length - kept.length;
+        // The warning below claims these are dropped — actually drop them, or a
+        // package that says "self-contained" still ships a reference `apply`'s
+        // pass 5 cannot resolve, and `install` fails outright on a record that
+        // export already told the user was cleaned up.
+        if (kept.length !== keys.length) record.fields[field.slug] = kept;
       }
     }
     if (dangling > 0) {

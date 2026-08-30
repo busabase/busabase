@@ -163,6 +163,69 @@ describe("attachments", () => {
       { kind: "audio", data: "clip", mimeType: "audio/wav" },
     ]);
   });
+
+  // An embedded `resource` is what the user's own file attachments echo back
+  // as, and what an agent forwarding MCP tool output can send. Both arms of
+  // `EmbeddedResourceResource` normalise to the same base64 `data` shape so
+  // the renderers never branch on which one arrived.
+  const resourceChunk = (resource: unknown): AcpUiEvent => ({
+    type: "session_update",
+    update: {
+      sessionUpdate: "agent_message_chunk",
+      content: { type: "resource", resource },
+    } as never,
+  });
+
+  it("normalises a text resource to base64, recovering the filename from its uri", () => {
+    const blocks = fold([
+      resourceChunk({
+        uri: "attachment:///my%20notes.md",
+        mimeType: "text/markdown",
+        text: "# hi",
+      }),
+    ]);
+    expect((blocks[0] as AcpMessageBlock).attachments).toEqual([
+      {
+        kind: "file",
+        data: Buffer.from("# hi", "utf8").toString("base64"),
+        mimeType: "text/markdown",
+        filename: "my notes.md",
+      },
+    ]);
+  });
+
+  it("passes a blob resource through untouched", () => {
+    const blocks = fold([
+      resourceChunk({
+        uri: "file:///tmp/report.pdf",
+        mimeType: "application/pdf",
+        blob: "JVBERi0=",
+      }),
+    ]);
+    expect((blocks[0] as AcpMessageBlock).attachments).toEqual([
+      { kind: "file", data: "JVBERi0=", mimeType: "application/pdf", filename: "report.pdf" },
+    ]);
+  });
+
+  it("defaults a resource with no declared mime type rather than dropping it", () => {
+    const blocks = fold([resourceChunk({ uri: "attachment:///x", text: "plain" })]);
+    expect((blocks[0] as AcpMessageBlock).attachments?.[0]?.mimeType).toBe(
+      "application/octet-stream",
+    );
+  });
+
+  it("still ignores resource_link, which names a file rather than carrying one", () => {
+    const blocks = fold([
+      {
+        type: "session_update",
+        update: {
+          sessionUpdate: "agent_message_chunk",
+          content: { type: "resource_link", uri: "file:///a.ts", name: "a.ts" },
+        } as never,
+      },
+    ]);
+    expect(blocks).toEqual([]);
+  });
 });
 
 describe("tool calls", () => {
