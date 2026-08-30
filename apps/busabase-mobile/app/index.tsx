@@ -127,7 +127,7 @@ export default function ConnectionScreen() {
             <RotatingHeroHeadline compact={isCompact} short={isShortLandscape} />
             {isShortLandscape ? null : (
               <Text style={[typography.body, styles.subtitle, { color: tokens.mutedForeground }]}>
-                Turn agent chaos into one database you can actually use.
+                Turn agent output into one database you can actually use.
               </Text>
             )}
           </View>
